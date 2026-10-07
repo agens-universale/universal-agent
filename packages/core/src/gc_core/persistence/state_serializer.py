@@ -5,9 +5,17 @@ from __future__ import annotations
 from typing import Any, Dict, Mapping
 
 from gc_core.intent_log.serialize import deserialize_list, serialize_for_meta
-from gc_core.persistence.schema import STATE_SCHEMA_VERSION, normalize_session_todo, normalize_working_memory, serialize_shared_block, validate_state_snapshot_for_load
+from gc_core.persistence.schema import (
+    STATE_SCHEMA_VERSION,
+    normalize_session_todo,
+    normalize_working_memory,
+    serialize_shared_block,
+    validate_state_snapshot_for_load,
+)
 from gc_core.states import SharedStateData, State
-from gc_core.tools.session.stored_outputs.tool_call_outputs_store import ToolCallOutputsStore
+from gc_core.tools.session.stored_outputs.tool_call_outputs_store import (
+    ToolCallOutputsStore,
+)
 from gc_core.usage.account import UsageAccount
 
 
@@ -32,16 +40,27 @@ def load_state_from_snapshot(payload: Mapping[str, Any]) -> State:
     snapshot.setdefault("logger", None)
     snapshot.setdefault("loop_detector_window", [])
     snapshot.setdefault("loop_detector_pending", [])
+    snapshot.setdefault("pending_tool_attachments", [])
+    snapshot.setdefault("vision_audience", None)
+    snapshot.setdefault("vision_live_ids", frozenset())
+    snapshot.setdefault("vision_request_limit", None)
+    snapshot["vision_probe_turn"] = None
+    snapshot["vision_routes"] = {}
+    snapshot["vision_probe_notices"] = set()
     state.__dict__ = snapshot
 
     shared_raw = state.__dict__.get("shared")
     if isinstance(shared_raw, dict):
         # Persist key ``working_memory`` (not ``session_memory``) — see SharedStateData.
         state.shared = SharedStateData(
-            working_memory=normalize_working_memory(shared_raw.get("working_memory")),
+            working_memory=normalize_working_memory(
+                shared_raw.get("working_memory")
+            ),
             notes_md=str(shared_raw.get("notes_md") or ""),
             fetch_url_cache=dict(shared_raw.get("fetch_url_cache") or {}),
-            session_todo=normalize_session_todo(shared_raw.get("session_todo")),
+            session_todo=normalize_session_todo(
+                shared_raw.get("session_todo")
+            ),
         )
     elif not isinstance(shared_raw, SharedStateData):
         state.shared = SharedStateData()
@@ -53,13 +72,17 @@ def load_state_from_snapshot(payload: Mapping[str, Any]) -> State:
 
     store_raw = state.__dict__.get("tool_call_outputs_store")
     if isinstance(store_raw, dict):
-        state.tool_call_outputs_store = ToolCallOutputsStore.from_dict(store_raw)
+        state.tool_call_outputs_store = ToolCallOutputsStore.from_dict(
+            store_raw
+        )
     elif not isinstance(store_raw, ToolCallOutputsStore):
         state.tool_call_outputs_store = ToolCallOutputsStore()
 
     usage_raw = state.__dict__.get("usage")
     if not isinstance(usage_raw, UsageAccount):
-        state.usage = UsageAccount.from_meta(usage_raw if isinstance(usage_raw, dict) else None)
+        state.usage = UsageAccount.from_meta(
+            usage_raw if isinstance(usage_raw, dict) else None
+        )
 
     last_run_raw = state.__dict__.get("last_run_usage")
     if isinstance(last_run_raw, dict):
@@ -67,12 +90,19 @@ def load_state_from_snapshot(payload: Mapping[str, Any]) -> State:
     elif not isinstance(last_run_raw, UsageAccount):
         state.last_run_usage = None
 
-    state.user_intent_log = deserialize_list(state.__dict__.get("user_intent_log"))
+    state.__dict__.setdefault("last_main_prompt_tokens", None)
+    state.__dict__.setdefault("last_main_prompt_message_count", None)
+
+    state.user_intent_log = deserialize_list(
+        state.__dict__.get("user_intent_log")
+    )
     state.current_user_intent = deserialize_list(
         state.__dict__.get("current_user_intent")
     )
     try:
-        state.user_turn_seq = max(0, int(state.__dict__.get("user_turn_seq", 0) or 0))
+        state.user_turn_seq = max(
+            0, int(state.__dict__.get("user_turn_seq", 0) or 0)
+        )
     except (TypeError, ValueError):
         state.user_turn_seq = 0
 
@@ -99,6 +129,14 @@ class StateSerializer:
         # Loop detector window is per-run in-memory; do not persist.
         raw.pop("loop_detector_window", None)
         raw.pop("loop_detector_pending", None)
+        # «Кто смотрит» считается заново на каждый запрос и держит ResolvedModel —
+        # это не данные треда (спека §9.1).
+        raw.pop("vision_audience", None)
+        raw.pop("vision_live_ids", None)
+        raw.pop("vision_request_limit", None)
+        raw.pop("vision_probe_turn", None)
+        raw.pop("vision_routes", None)
+        raw.pop("vision_probe_notices", None)
 
         shared = raw.get("shared")
         if isinstance(shared, SharedStateData) or (
@@ -109,7 +147,9 @@ class StateSerializer:
             raw["shared"] = serialize_shared_block(shared)
 
         store = raw.get("tool_call_outputs_store")
-        raw["tool_call_outputs_store"] = _serialize_tool_call_outputs_store(store)
+        raw["tool_call_outputs_store"] = _serialize_tool_call_outputs_store(
+            store
+        )
 
         usage = raw.get("usage")
         if isinstance(usage, UsageAccount):
@@ -119,7 +159,9 @@ class StateSerializer:
         if isinstance(last_run, UsageAccount):
             raw["last_run_usage"] = last_run.to_meta()
 
-        raw["user_intent_log"] = serialize_for_meta(raw.get("user_intent_log") or [])
+        raw["user_intent_log"] = serialize_for_meta(
+            raw.get("user_intent_log") or []
+        )
         raw["current_user_intent"] = serialize_for_meta(
             raw.get("current_user_intent") or []
         )

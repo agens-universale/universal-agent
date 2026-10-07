@@ -1,13 +1,21 @@
 import unittest
 from types import SimpleNamespace
 
-from gc_core.message_format import dialog_history
-from gc_core.config_modules.quality_gate import DEFAULT_QUALITY_GATE_MAX_DIALOGUE_CHARS, DEFAULT_QUALITY_GATE_MAX_MESSAGE_CHARS, QualityGateConfig, digest_limits_from_params, normalize_quality_gate_config
+from gc_core.config_modules.quality_gate import (
+    DEFAULT_QUALITY_GATE_MAX_DIALOGUE_CHARS,
+    DEFAULT_QUALITY_GATE_MAX_MESSAGE_CHARS,
+    QualityGateConfig,
+    digest_limits_from_params,
+    normalize_quality_gate_config,
+)
 from gc_core.config_modules.root import AppConfig, resolve_paths
 from gc_core.intent_guard.trace_digest import build_finish_gate_trace_digest
+from gc_core.message_format import dialog_history
 
 
-def _ask_human_scenario_messages(*, include_pending_submit: bool = True) -> list[dict]:
+def _ask_human_scenario_messages(
+    *, include_pending_submit: bool = True
+) -> list[dict]:
     """Сценарий §1.2: «спроси меня» → turn_ask_human → ответ → fs_write → turn_finish."""
     messages: list[dict] = [
         {"role": "user", "content": "предыдущий запрос в треде"},
@@ -38,7 +46,11 @@ def _ask_human_scenario_messages(*, include_pending_submit: bool = True) -> list
         {
             "type": "function_call_output",
             "call_id": "wf1",
-            "output": {"tool": "fs_write_file", "ok": True, "path": "posture_plan.md"},
+            "output": {
+                "tool": "fs_write_file",
+                "ok": True,
+                "path": "posture_plan.md",
+            },
         },
     ]
     if include_pending_submit:
@@ -61,23 +73,42 @@ class FinishGateTraceDigestTest(unittest.TestCase):
     def test_normalize_quality_gate_config_clamps_invalid_values(self) -> None:
         qg = QualityGateConfig(max_dialogue_chars=0, max_message_chars=-1)
         normalize_quality_gate_config(qg)
-        self.assertEqual(qg.max_dialogue_chars, DEFAULT_QUALITY_GATE_MAX_DIALOGUE_CHARS)
-        self.assertEqual(qg.max_message_chars, DEFAULT_QUALITY_GATE_MAX_MESSAGE_CHARS)
+        self.assertEqual(
+            qg.max_dialogue_chars, DEFAULT_QUALITY_GATE_MAX_DIALOGUE_CHARS
+        )
+        self.assertEqual(
+            qg.max_message_chars, DEFAULT_QUALITY_GATE_MAX_MESSAGE_CHARS
+        )
         limits = digest_limits_from_params(qg.model_dump())
-        self.assertEqual(limits["max_dialogue_chars"], DEFAULT_QUALITY_GATE_MAX_DIALOGUE_CHARS)
-        self.assertEqual(limits["max_message_chars"], DEFAULT_QUALITY_GATE_MAX_MESSAGE_CHARS)
+        self.assertEqual(
+            limits["max_dialogue_chars"],
+            DEFAULT_QUALITY_GATE_MAX_DIALOGUE_CHARS,
+        )
+        self.assertEqual(
+            limits["max_message_chars"], DEFAULT_QUALITY_GATE_MAX_MESSAGE_CHARS
+        )
 
-    def test_resolve_paths_normalizes_quality_gate_in_config_dict(self) -> None:
+    def test_resolve_paths_normalizes_quality_gate_in_config_dict(
+        self,
+    ) -> None:
         import tempfile
 
         with tempfile.TemporaryDirectory() as tmp:
             cfg = AppConfig(
-                quality_gate=QualityGateConfig(max_dialogue_chars=0, max_message_chars=-1)
+                quality_gate=QualityGateConfig(
+                    max_dialogue_chars=0, max_message_chars=-1
+                )
             )
             resolve_paths(cfg, tmp)
             limits = digest_limits_from_params(cfg.quality_gate.model_dump())
-            self.assertEqual(limits["max_dialogue_chars"], DEFAULT_QUALITY_GATE_MAX_DIALOGUE_CHARS)
-            self.assertEqual(limits["max_message_chars"], DEFAULT_QUALITY_GATE_MAX_MESSAGE_CHARS)
+            self.assertEqual(
+                limits["max_dialogue_chars"],
+                DEFAULT_QUALITY_GATE_MAX_DIALOGUE_CHARS,
+            )
+            self.assertEqual(
+                limits["max_message_chars"],
+                DEFAULT_QUALITY_GATE_MAX_MESSAGE_CHARS,
+            )
 
     def test_trace_digest_contains_ask_human_and_response(self) -> None:
         state = SimpleNamespace(messages=_ask_human_scenario_messages())
@@ -87,7 +118,9 @@ class FinishGateTraceDigestTest(unittest.TestCase):
         self.assertIn("как осанку исправить", text)
         self.assertIn("спроси меня что нибудь", text)
 
-    def test_trace_digest_includes_messages_before_current_cli_request(self) -> None:
+    def test_trace_digest_includes_messages_before_current_cli_request(
+        self,
+    ) -> None:
         state = SimpleNamespace(messages=_ask_human_scenario_messages())
         digest = build_finish_gate_trace_digest(state=state)
         self.assertIn("предыдущий запрос в треде", digest.trace_digest_text)
@@ -127,14 +160,20 @@ class FinishGateTraceDigestTest(unittest.TestCase):
                     "type": "function_call",
                     "call_id": "ss_old",
                     "name": "turn_finish",
-                    "arguments": {"solution_type": "direct_answer", "task_report": "old"},
+                    "arguments": {
+                        "solution_type": "direct_answer",
+                        "task_report": "old",
+                    },
                 },
                 {"role": "user", "content": "technical feedback after reject"},
                 {
                     "type": "function_call",
                     "call_id": "ss_new",
                     "name": "turn_finish",
-                    "arguments": {"solution_type": "full_solution", "task_report": "new"},
+                    "arguments": {
+                        "solution_type": "full_solution",
+                        "task_report": "new",
+                    },
                 },
             ]
         )
@@ -149,8 +188,17 @@ class FinishGateTraceDigestTest(unittest.TestCase):
     def test_build_history_text_matches_summarizer_pipeline(self) -> None:
         messages = [
             {"role": "user", "content": "hello"},
-            {"type": "function_call", "call_id": "c1", "name": "fs_read_file", "arguments": {"path": "/tmp/a.txt"}},
-            {"type": "function_call_output", "call_id": "c1", "output": {"ok": True}},
+            {
+                "type": "function_call",
+                "call_id": "c1",
+                "name": "fs_read_file",
+                "arguments": {"path": "/tmp/a.txt"},
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "c1",
+                "output": {"ok": True},
+            },
             {"role": "assistant", "content": "done"},
         ]
         limits = digest_limits_from_params({})

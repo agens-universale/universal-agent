@@ -4,8 +4,8 @@ import sys
 from pathlib import Path
 from typing import Any, Dict
 
-from gc_core.config_modules import env_vars
 from gc_core.bundled_assets import bundled_root
+from gc_core.config_modules import env_vars
 
 # Корень bundled-ассетов. Раньше брался из rest_api.server_config — это была
 # единственная зависимость swarm → server, причём там PROJECT_ROOT объявлен как
@@ -20,7 +20,9 @@ _PACKAGE_DIR = str(Path(__file__).resolve().parent)
 logger = logging.getLogger(__name__)
 
 
-def _resolve_asset_path(maybe_path: Any, default_rel: str, *, base: str | None = None) -> str:
+def _resolve_asset_path(
+    maybe_path: Any, default_rel: str, *, base: str | None = None
+) -> str:
     """
     Путь к файлу, который ЕДЕТ В КОЛЕСЕ вместе с дистрибутивом.
 
@@ -82,14 +84,18 @@ def _resolve_wrapper_path(maybe_path: Any, config_dir: str) -> str:
         return packaged
 
     logger.warning(
-        "swarm.wrapper_path=%r не найден (искал %s и %s) — беру обёртку из "
-        "пакета: %s",
-        maybe_path, local, packaged, default,
+        "swarm.wrapper_path=%r не найден (искал %s и %s) — беру обёртку из пакета: %s",
+        maybe_path,
+        local,
+        packaged,
+        default,
     )
     return default
 
 
-def _resolve_user_path(maybe_path: Any, default: str, *, config_dir: str) -> str:
+def _resolve_user_path(
+    maybe_path: Any, default: str, *, config_dir: str
+) -> str:
     """
     Путь, который человек написал в своём config_server.yml.
 
@@ -202,7 +208,9 @@ def build_swarm_config(
     # поэтому дефолт работает и в установленном профиле. Раньше она жила в
     # scripts/ репозитория, который не попадал ни в одно колесо: дефолтного
     # пути там быть не могло в принципе.
-    wrapper_path = _resolve_wrapper_path(raw_swarm.get("wrapper_path"), base_dir)
+    wrapper_path = _resolve_wrapper_path(
+        raw_swarm.get("wrapper_path"), base_dir
+    )
     sandbox_tool = str(raw_swarm.get("sandbox_tool", "bubblewrap"))
     agentmd_path = _resolve_asset_path(
         raw_swarm.get("agentmd_path"), "prompts/server_agent.md"
@@ -224,7 +232,9 @@ def build_swarm_config(
     # дефолт означает просто «swarm-скиллы не заводили», и кричать об этом на
     # КАЖДОМ запуске нельзя. Дефолт непустой всегда, поэтому по самому значению
     # эти два случая уже неразличимы.
-    skills_dir_configured = bool(str(raw_swarm.get("skills_dir") or "").strip())
+    skills_dir_configured = bool(
+        str(raw_swarm.get("skills_dir") or "").strip()
+    )
 
     # Шаг 1.11 (AR-6, AR-7): bind-mount пути для wrapper.sh.
     # cli_venv_root и agent_dep_dir принимают только абсолютные пути.
@@ -264,8 +274,7 @@ def build_swarm_config(
     ):
         cli_venv_root = sys.prefix
         logger.info(
-            "swarm: cli_venv_root не задан — беру venv сервера %s "
-            "(он же уйдёт --ro-bind внутрь песочницы)",
+            "swarm: cli_venv_root не задан — беру venv сервера %s (он же уйдёт --ro-bind внутрь песочницы)",
             cli_venv_root,
         )
     agent_dep_dir = _abs_or_empty(raw_swarm.get("agent_dep_dir"))
@@ -273,7 +282,8 @@ def build_swarm_config(
     if not isinstance(extra_mounts_raw, list):
         extra_mounts_raw = []
     extra_mounts = [
-        str(p).strip() for p in extra_mounts_raw
+        str(p).strip()
+        for p in extra_mounts_raw
         if isinstance(p, str) and p.strip()
     ]
 
@@ -283,7 +293,9 @@ def build_swarm_config(
     # на flat-dict) и для swarm'а (deep_merge в raw YAML).
     agent_overrides_raw = server_cfg.get("agent_overrides") or {}
     agent_overrides = (
-        dict(agent_overrides_raw) if isinstance(agent_overrides_raw, dict) else {}
+        dict(agent_overrides_raw)
+        if isinstance(agent_overrides_raw, dict)
+        else {}
     )
 
     return {
@@ -320,4 +332,3 @@ def _abs_or_empty(value: Any) -> str:
 
 
 __all__ = ["build_swarm_config"]
-

@@ -3,8 +3,25 @@
 строка-галка «без авторизации» (Space — переключить) вместо радио-выбора. Секрет
 НЕ предзаполняется в поле токена — текущий показан маской в placeholder. Пресеты
 адреса (спека умных форм §3.1) — общий контроллер списка (`preset_list`)."""
+
 from __future__ import annotations
 
+from gc_core import onboarding
+from gc_core.onboarding_fields import (
+    NO_AUTH_FROZEN_PLACEHOLDER as _NO_AUTH_FROZEN_PLACEHOLDER,
+)
+from gc_core.onboarding_fields import (
+    NO_AUTH_LABEL as _NO_AUTH_LABEL,
+)
+from gc_core.onboarding_fields import (
+    NO_AUTH_TOGGLE_HINT as _NO_AUTH_TOGGLE_HINT,
+)
+from gc_core.onboarding_fields import (
+    URL_EMPTY as _URL_EMPTY,
+)
+from gc_core.onboarding_fields import (
+    URL_ERROR as _URL_ERROR,
+)
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.containers import Vertical
@@ -12,28 +29,26 @@ from textual.css.query import NoMatches
 from textual.message import Message
 from textual.widgets import Input, Static
 
-from gc_core import onboarding
-from gc_core.onboarding_fields import (
-    NO_AUTH_FROZEN_PLACEHOLDER as _NO_AUTH_FROZEN_PLACEHOLDER,
-    NO_AUTH_LABEL as _NO_AUTH_LABEL,
-    NO_AUTH_TOGGLE_HINT as _NO_AUTH_TOGGLE_HINT,
-    URL_EMPTY as _URL_EMPTY,
-    URL_ERROR as _URL_ERROR,
-)
-from gc_tui.editors.field_list import write_field
-from gc_tui.editors.preset_list import PRESET_HINT as _PRESET_HINT, preset_list_controller
+from gc_tui.editors.field_list import LIST_CLOSED_HINT, write_field
+from gc_tui.editors.preset_list import PRESET_HINT as _PRESET_HINT
+from gc_tui.editors.preset_list import preset_list_controller
 from gc_tui.palette import DEEP_DIM
+from gc_tui.services.settings_probe import accepted_literal_auth
 from gc_tui.widgets.paste_input import PasteInput
+
+# Константы вместо повторяющихся литералов (Sonar S1192).
+_SEL_CONN_TOKEN = "#conn-token"
+
 
 _TOKEN_EMPTY = "введите токен"
 _TOKEN_PH_CREATE = "если не указать — запрос пойдёт без токена (подходит, если сервер его не требует)"
 _TOKEN_PH_CLEARED = "токен очищен · будет удалён при сохранении"
 _TOKEN_CLEAR_HINT = "Ctrl+U — очистить токен"
-_PRESET_HINT_EMPTY = "выберите провайдера или впишите свой адрес · Enter — подставить"
-# Набранного нет в каталоге: список свёрнут (предлагать нечего), но молчать об этом —
-# значит оставить человека гадать, сработал ли фильтр. Клавиша названа та же, что и в
-# обычном свёрнутом состоянии: у `Enter` здесь ровно его всегдашний смысл — сохранить.
-PRESET_NO_MATCH_CLOSED = "в списке такого нет · Alt+↓ — показать список"
+_PRESET_HINT_EMPTY = (
+    "выберите провайдера или впишите свой адрес · Enter — подставить"
+)
+
+PRESET_NO_MATCH_CLOSED = f"в списке такого нет · {LIST_CLOSED_HINT}"
 
 
 def _auth_active(header: str | None) -> int | None:
@@ -59,20 +74,31 @@ class ConnectionEditor(Vertical):
         Сообщением, а не звонком в экран: редактор живёт на двух экранах и в голом
         харнесе тестов, где хозяина нет вовсе."""
 
-    def __init__(self, *, url_current: str, auth_header: str | None,
-                 proxy_current: str = "",
-                 presets: list | None = None, create_mode: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        url_current: str,
+        auth_header: str | None,
+        proxy_current: str = "",
+        presets: list | None = None,
+        create_mode: bool = False,
+        closed_hint: str = LIST_CLOSED_HINT,
+    ) -> None:
         super().__init__(classes="onb-dyn")
         self._url_current = url_current or ""
         self._auth_header = auth_header
         self._proxy_current = proxy_current or ""
         self._presets = list(presets) if presets is not None else []
         self.create_mode = create_mode
+        self._closed_hint = closed_hint
         self._no_auth = False if create_mode else (auth_header == "")
         # Позиции курсора: url/token/proxy всегда; галка — только вне create_mode
         # (None-элемент = «не Input», как в _POSITIONS ModelEntryForm).
-        self._positions = (("conn-url", "conn-token", "conn-proxy") if create_mode
-                           else ("conn-url", "conn-token", None, "conn-proxy"))
+        self._positions = (
+            ("conn-url", "conn-token", "conn-proxy")
+            if create_mode
+            else ("conn-url", "conn-token", None, "conn-proxy")
+        )
         self._idx = 0
         self._initial_url = self._url_current
         self._initial_proxy = self._proxy_current
@@ -96,7 +122,7 @@ class ConnectionEditor(Vertical):
     def _token_is_mask(self) -> bool:
         """placeholder токена сейчас — маска сохранённого значения, а не подсказка."""
         if self._token_cleared:
-            return False        # маска сохранённого лгала бы: его уже стёрли
+            return False  # маска сохранённого лгала бы: его уже стёрли
         return _auth_active(self._auth_header) == 0 and bool(self._auth_header)
 
     def on_token_field_with_saved(self) -> bool:
@@ -104,7 +130,10 @@ class ConnectionEditor(Vertical):
         футер секции обещает Ctrl+U — ровно как Alt+↓ обещается по `on_url_field`:
         клавиша, названная там, где она молчит, — та же ложь, что умолчание о
         работающей."""
-        return self._positions[self._idx] == "conn-token" and self._token_is_mask()
+        return (
+            self._positions[self._idx] == "conn-token"
+            and self._token_is_mask()
+        )
 
     def clear_token(self) -> bool:
         """Ctrl+U на поле токена: стереть СОХРАНЁННЫЙ токен. True — обработали.
@@ -119,9 +148,9 @@ class ConnectionEditor(Vertical):
         очистить строку адреса. Гейт внутри — чтобы его не пришлось помнить каждой
         копии обработчика (мастер и /settings)."""
         if self._no_auth or not self.on_token_field_with_saved():
-            return False        # не то поле или стирать нечего — клавиша не наша
+            return False  # не то поле или стирать нечего — клавиша не наша
         self._token_cleared = True
-        inp = self.query_one("#conn-token", Input)
+        inp = self.query_one(_SEL_CONN_TOKEN, Input)
         inp.value = ""
         inp.placeholder = self._token_placeholder()
         inp.set_class(False, "has-saved")
@@ -158,7 +187,9 @@ class ConnectionEditor(Vertical):
         футер секции уже на пределе ширины (см. _FOOTER_BY_VIEW в settings), а
         главное — подсказка нужна там, куда смотрят, как «Space — переключить»
         у галки. Обещаем только когда есть что стирать."""
-        return "Токен   Ctrl+U — очистить" if self._token_is_mask() else "Токен"
+        return (
+            "Токен   Ctrl+U — очистить" if self._token_is_mask() else "Токен"
+        )
 
     def _proxy_placeholder(self) -> str:
         """placeholder для поля прокси: действующее значение маской, пусто — подсказка."""
@@ -193,30 +224,51 @@ class ConnectionEditor(Vertical):
         # смонтированное со значением, оно постит на себя `Input.Changed`, а пресет-лист
         # к этому моменту уже раскрыт (пустое поле) — хозяин принимал бы событие за печать
         # и сужал список до одной строки (живой смок 2026-08-04, см. on_mount).
-        self._url_input = PasteInput(value="",
-                                     placeholder="напр. https://host/v1/chat/completions",
-                                     id="conn-url", classes="onb-dyn group-field")
+        self._url_input = PasteInput(
+            value="",
+            placeholder="напр. https://host/v1/chat/completions",
+            id="conn-url",
+            classes="onb-dyn group-field",
+        )
         with Vertical(classes="field-group onb-dyn", id="conn-url-group"):
             # Без set-framed: рамку рисует группа, а класс поля перебил бы её по
             # специфичности (#conn-url.set-framed — id+класс) и дал бы вторую
             # рамку внутри первой.
             yield self._url_input
-        yield Static(self._token_label(), classes="onb-hint onb-dyn set-group-gap",
-                     id="conn-token-label")
+        yield Static(
+            self._token_label(),
+            classes="onb-hint onb-dyn set-group-gap",
+            id="conn-token-label",
+        )
         # has-saved: placeholder говорит одно из двух (маска сохранённого /
         # подсказка-объяснение), и различать их надо не вчитываясь — маркер красит
         # маску цветом значения (спека §3.4).
         tcls = icls + (" has-saved" if self._token_is_mask() else "")
-        yield PasteInput(value="", placeholder=self._token_placeholder(), password=True,
-                         id="conn-token", classes=tcls)
+        yield PasteInput(
+            value="",
+            placeholder=self._token_placeholder(),
+            password=True,
+            id="conn-token",
+            classes=tcls,
+        )
         if not self.create_mode:
-            yield Static(self._noauth_text(), id="conn-noauth", classes=self._noauth_cls())
-        yield Static("Прокси (необязательно)", classes="onb-hint onb-dyn set-group-gap")
+            yield Static(
+                self._noauth_text(),
+                id="conn-noauth",
+                classes=self._noauth_cls(),
+            )
+        yield Static(
+            "Прокси (необязательно)", classes="onb-hint onb-dyn set-group-gap"
+        )
         # Без has-saved: прокси префиллится значением, и его маска видна ровно в один
         # момент — когда поле стёрли, чтобы прокси СНЯТЬ. Ярко сказать там «сохранённое
         # есть» значило бы спорить с намерением.
-        yield PasteInput(value=self._proxy_current, placeholder=self._proxy_placeholder(),
-                         id="conn-proxy", classes=icls)
+        yield PasteInput(
+            value=self._proxy_current,
+            placeholder=self._proxy_placeholder(),
+            id="conn-proxy",
+            classes=icls,
+        )
 
     def on_mount(self) -> None:
         self._sync_token_visibility()
@@ -228,10 +280,19 @@ class ConnectionEditor(Vertical):
         self._url_input.focus()
         # Онбординг (create_mode, поле ещё пустое) — первичный хинт зовёт выбрать
         # провайдера явно (спека §2.1); settings/edit — канонный хинт «провайдеры · …».
-        hint = _PRESET_HINT_EMPTY if self.create_mode and not self._url_current else _PRESET_HINT
+        hint = (
+            _PRESET_HINT_EMPTY
+            if self.create_mode and not self._url_current
+            else _PRESET_HINT
+        )
         self._presets_ctrl = preset_list_controller(
-            self, presets=self._presets, row_class="conn-preset-row",
-            input_id="conn-url", hint=hint, on_pick=self._apply_preset,
+            self,
+            presets=self._presets,
+            row_class="conn-preset-row",
+            input_id="conn-url",
+            hint=hint,
+            on_pick=self._apply_preset,
+            closed_hint=self._closed_hint,
         )
         # Канон 2026-08-17: раскрываем, только если поле пусто (решает `can_open`).
         # При заданном адресе список остаётся свёрнутым, стрелки — у формы, а способ
@@ -245,7 +306,7 @@ class ConnectionEditor(Vertical):
         пустое, placeholder «не используется» (смок 2026-07-30 — вместо
         плашки-заглушки). ○ — поле оживает с прежним placeholder (маска
         действующего/хинт)."""
-        inp = self.query_one("#conn-token", Input)
+        inp = self.query_one(_SEL_CONN_TOKEN, Input)
         inp.disabled = self._no_auth
         if self._no_auth:
             inp.value = ""
@@ -285,7 +346,7 @@ class ConnectionEditor(Vertical):
         оживляет. Событие не глушится — выделение текста живёт как жило."""
         wid = getattr(getattr(event, "control", None), "id", None)
         if wid == "conn-noauth":
-            wid = None          # позиция галки в _positions — None (ревью N7, н.3)
+            wid = None  # позиция галки в _positions — None (ревью N7, н.3)
         elif wid is None or wid not in self._positions:
             return
         pos = self._positions.index(wid)
@@ -342,15 +403,21 @@ class ConnectionEditor(Vertical):
         (VoiceEndpointEditor._apply_url_preset) пишет пресет так же."""
         write_field(self.query_one("#conn-url", Input), preset.url)
 
-    def enter_presets(self) -> bool:
-        """Список раскрыт (канон 2026-08-17: раскрывается на пустом поле либо по
-        Alt+↓) — Enter подставляет выделенный пресет и сворачивает список
-        (True, обработано — хост НЕ сабмитит форму); список свёрнут — Enter здесь
-        обычный submit секции (False). Сам собой список второй раз не открывается:
-        значение уже задано, и вернуть его можно только явным Alt+↓."""
-        if not self._presets_ctrl.is_open:
+    def enter_presets(self, *, open_closed: bool = True) -> bool:
+        """Обработать Enter для списка адресных пресетов.
+
+        Открытый список всегда отдаёт выбранное значение. В настройках закрытый
+        список открывается Enter; мастер передаёт ``open_closed=False``, чтобы его
+        Enter сохранял подключение и переводил к следующему шагу.
+        """
+        # Enter belongs to the focused field. A token/proxy field must never
+        # open the address catalogue just because the section routes the key to
+        # its editor.
+        if not self.on_url_field:
             return False
-        self._presets_ctrl.pick()            # подстановку делает `_apply_preset`
+        if not self._presets_ctrl.is_open:
+            return self._presets_ctrl.reload() if open_closed else False
+        self._presets_ctrl.pick()  # подстановку делает `_apply_preset`
         return True
 
     def escape_presets(self) -> bool:
@@ -382,10 +449,11 @@ class ConnectionEditor(Vertical):
                 # Набрано то, чего в каталоге нет. Список свёрнут — но молчать нельзя:
                 # строка под полем говорит, что совпадений не нашлось, и чем список
                 # вернуть. Раньше он оставался раскрытым пустым с обещанием «Enter —
-                # оставить свой адрес» — выдуманное значение клавиши, которая везде
-                # сохраняет форму; заодно первое нажатие уходило на сворачивание,
+                # оставить свой адрес»; заодно первое нажатие уходило на сворачивание,
                 # а не на переход дальше.
-                self._presets_ctrl.close(closed_hint=PRESET_NO_MATCH_CLOSED)
+                self._presets_ctrl.close(
+                    closed_hint=f"в списке такого нет · {self._closed_hint}"
+                )
                 return
             if self._presets_ctrl.is_open:
                 self._presets_ctrl.apply_filter(value)
@@ -434,7 +502,10 @@ class ConnectionEditor(Vertical):
         `False` — курсор не на адресе либо список уже раскрыт: у статических пресетов
         перечитывать нечего, и клавиша просто ничего не делает (падать ей больше
         некуда — `Ctrl+Space` про список у этой клавиши больше не спрашивает)."""
-        if self._presets_ctrl is None or self._positions[self._idx] != "conn-url":
+        if (
+            self._presets_ctrl is None
+            or self._positions[self._idx] != "conn-url"
+        ):
             return False
         return self._presets_ctrl.reload()
 
@@ -449,13 +520,15 @@ class ConnectionEditor(Vertical):
         обязаны читать именно этот признак (находка финального ревью 2026-08-06, A:
         раньше оба смотрели на «список не пуст» и в этом состоянии врали — обещали
         «подставить», хотя `pick()` вернул бы None)."""
-        return self._presets_ctrl is not None and self._presets_ctrl.has_selection
+        return (
+            self._presets_ctrl is not None and self._presets_ctrl.has_selection
+        )
 
     def peek(self) -> tuple[str, int, str, str]:
         """(url_field, auth_idx, token_raw, proxy) — без сайд-эффектов, для probe и dirty.
         auth_idx — производное от галки «без авторизации» (1=●, 0=○)."""
         url = self.query_one("#conn-url", Input).value.strip()
-        token = self.query_one("#conn-token", Input).value.strip()
+        token = self.query_one(_SEL_CONN_TOKEN, Input).value.strip()
         proxy = self.query_one("#conn-proxy", Input).value.strip()
         auth_idx = 1 if self._no_auth else 0
         return url, auth_idx, token, proxy
@@ -470,17 +543,32 @@ class ConnectionEditor(Vertical):
         if proxy != self._initial_proxy:
             return True
         if self._token_cleared:
-            return True                      # Ctrl+U: сохранённый токен помечен к удалению
+            return True  # Ctrl+U: сохранённый токен помечен к удалению
         active = _auth_active(self._auth_header)
         if self._no_auth != (active == 1):
-            return True                      # галка отличается от действующего варианта
-        if not self._no_auth and token:
-            return True                      # галка ○ (Bearer) и введён новый токен
-        return False
+            return True  # галка отличается от действующего варианта
+        # галка ○ (Bearer) и введён новый токен
+        return bool(not self._no_auth and token)
+
+    def apply_accepted_auth(self, accepted: str | None) -> bool:
+        """Запомнить принятую форму литерала в поле до явного сохранения формы."""
+        if self._no_auth:
+            return False
+        field = self.query_one(_SEL_CONN_TOKEN, Input)
+        source = field.value.strip() or (None if self._token_cleared else self._auth_header)
+        value = accepted_literal_auth(source, accepted)
+        if value is None:
+            return False
+        write_field(field, value)
+        self._token_cleared = False
+        return True
 
     def submit(self) -> tuple[str | None, str | None, str | None, str | None]:
         """(url|None, header|None, error|None, proxy|None). None-значение = не менять.
-        proxy возвращается даже при ошибке (settings screen пишет его отдельно)."""
+        proxy возвращается даже при ошибке (settings screen пишет его отдельно).
+
+        Токен из поля уходит в Authorization as-is; подбор формы делает транспорт.
+        """
         url, _auth_idx, token, proxy = self.peek()
         # адрес
         out_url: str | None = None
@@ -490,19 +578,19 @@ class ConnectionEditor(Vertical):
             if not onboarding.valid_endpoint_url(url):
                 return None, None, _URL_ERROR, proxy
             out_url = url
-        elif not url:                        # был пуст и остался пуст, но адрес обязателен
+        elif not url:  # был пуст и остался пуст, но адрес обязателен
             return None, None, _URL_EMPTY, proxy
         # авторизация — по галке «без авторизации»
         sel = 1 if self._no_auth else 0
         active = _auth_active(self._auth_header)
         header: str | None = None
-        if sel == 1:                         # «без авторизации»
+        if sel == 1:  # «без авторизации»
             if active != 1:
-                header = ""                  # снять действующую авторизацию
+                header = ""  # снять действующую авторизацию
         elif token:
-            header = onboarding.authorization_header(token)
+            header = token
         elif self._token_cleared:
-            header = ""                      # Ctrl+U: стереть сохранённый токен
+            header = ""  # Ctrl+U: стереть сохранённый токен
         elif active == 1 and not self.create_mode:
             # действовала «без авторизации», галку сняли (выбран Bearer), токена
             # нет ни в поле, ни действующего — честная ошибка (пользователь явно

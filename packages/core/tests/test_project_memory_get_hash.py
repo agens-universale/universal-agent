@@ -1,4 +1,3 @@
-from pathlib import Path
 from types import SimpleNamespace
 
 from gc_core.project_memory import get_hash, resolve_project_memory_path

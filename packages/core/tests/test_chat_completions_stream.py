@@ -1,4 +1,7 @@
-from gc_core.utils.chat_completions_stream import iter_sse_data_lines, assemble_streamed_completion
+from gc_core.utils.chat_completions_stream import (
+    assemble_streamed_completion,
+    iter_sse_data_lines,
+)
 
 # Realistic OpenAI-compatible stream: reasoning_content, content, a fragmented
 # tool call, finish_reason, and usage in the final chunk.
@@ -10,15 +13,15 @@ _LINES = [
     'data: {"id":"c1","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"t1","type":"function","function":{"name":"ping","arguments":"{\\"a\\":"}}]}}]}',
     'data: {"id":"c1","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"1}"}}]}}]}',
     'data: {"id":"c1","model":"m","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}],"usage":{"completion_tokens":42}}',
-    'data: [DONE]',
-    '',
+    "data: [DONE]",
+    "",
 ]
 
 
 def test_iter_sse_data_lines_skips_done_and_blanks():
     payloads = list(iter_sse_data_lines(_LINES))
     assert payloads[0].startswith('{"id":"c1"')
-    assert all(p != "[DONE]" and p != "" for p in payloads)
+    assert all(p not in {"[DONE]", ""} for p in payloads)
     assert len(payloads) == 7
 
 
@@ -33,8 +36,11 @@ def test_assemble_reassembles_message_content_and_tool_calls():
     assert msg["content"] == "Это проект."
     assert msg["reasoning_content"] == "анализирую"
     assert msg["tool_calls"] == [
-        {"id": "t1", "type": "function",
-         "function": {"name": "ping", "arguments": '{"a":1}'}}
+        {
+            "id": "t1",
+            "type": "function",
+            "function": {"name": "ping", "arguments": '{"a":1}'},
+        }
     ]
     assert result["choices"][0]["finish_reason"] == "tool_calls"
     assert result["usage"] == {"completion_tokens": 42}
@@ -45,11 +51,13 @@ def test_assemble_reassembles_message_content_and_tool_calls():
 
 def test_assemble_without_on_delta():
     """assemble_streamed_completion works when on_delta is omitted (default None)."""
-    payloads = iter_sse_data_lines([
-        'data: {"id":"x","model":"m","choices":[{"index":0,"delta":{"role":"assistant","content":"hello"}}]}',
-        'data: {"id":"x","model":"m","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}',
-        'data: [DONE]',
-    ])
+    payloads = iter_sse_data_lines(
+        [
+            'data: {"id":"x","model":"m","choices":[{"index":0,"delta":{"role":"assistant","content":"hello"}}]}',
+            'data: {"id":"x","model":"m","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}',
+            "data: [DONE]",
+        ]
+    )
     result = assemble_streamed_completion(payloads)
     assert result["choices"][0]["message"]["content"] == "hello"
     assert result["choices"][0]["finish_reason"] == "stop"
@@ -66,7 +74,7 @@ _TOOL_ONLY_LINES = [
     'data: {"id":"c2","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"t9","type":"function","function":{"name":"turn_finish","arguments":"{\\"task_report\\":\\""}}]}}]}',
     'data: {"id":"c2","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"готово\\"}"}}]}}]}',
     'data: {"id":"c2","model":"m","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}],"usage":{"completion_tokens":952}}',
-    'data: [DONE]',
+    "data: [DONE]",
 ]
 
 
@@ -78,7 +86,9 @@ def test_tool_only_stream_still_emits_progress_deltas():
         on_delta=lambda kind, text: deltas.append((kind, text)),
     )
     tool_deltas = [t for k, t in deltas if k == "tool"]
-    assert tool_deltas, "на шаге с вызовом инструмента не пришло ни одной дельты"
+    assert tool_deltas, (
+        "на шаге с вызовом инструмента не пришло ни одной дельты"
+    )
     assert "".join(tool_deltas) == '{"task_report":"готово"}'
 
     # Вид отдельный, а не "answer": иначе сырой JSON уехал бы в блок потока на экран.
@@ -86,7 +96,10 @@ def test_tool_only_stream_still_emits_progress_deltas():
 
     # Сборка ответа при этом не изменилась.
     msg = result["choices"][0]["message"]
-    assert msg["tool_calls"][0]["function"]["arguments"] == '{"task_report":"готово"}'
+    assert (
+        msg["tool_calls"][0]["function"]["arguments"]
+        == '{"task_report":"готово"}'
+    )
     assert result["usage"] == {"completion_tokens": 952}
 
 
@@ -98,10 +111,12 @@ def test_reasoning_alias_is_read_and_not_double_counted():
     """
     deltas = []
     result = assemble_streamed_completion(
-        iter_sse_data_lines([
-            'data: {"choices":[{"index":0,"delta":{"role":"assistant","reasoning":"думаю"}}]}',
-            'data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}',
-        ]),
+        iter_sse_data_lines(
+            [
+                'data: {"choices":[{"index":0,"delta":{"role":"assistant","reasoning":"думаю"}}]}',
+                'data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}',
+            ]
+        ),
         on_delta=lambda kind, text: deltas.append((kind, text)),
     )
     assert result["choices"][0]["message"]["reasoning_content"] == "думаю"
@@ -109,10 +124,14 @@ def test_reasoning_alias_is_read_and_not_double_counted():
 
     both = []
     assemble_streamed_completion(
-        iter_sse_data_lines([
-            'data: {"choices":[{"index":0,"delta":{"reasoning_content":"канон","reasoning":"дубль"}}]}',
-            'data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}',
-        ]),
+        iter_sse_data_lines(
+            [
+                'data: {"choices":[{"index":0,"delta":{"reasoning_content":"канон","reasoning":"дубль"}}]}',
+                'data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}',
+            ]
+        ),
         on_delta=lambda kind, text: both.append((kind, text)),
     )
-    assert [t for k, t in both if k == "think"] == ["канон"], "оба поля сложились"
+    assert [t for k, t in both if k == "think"] == ["канон"], (
+        "оба поля сложились"
+    )

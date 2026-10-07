@@ -1,4 +1,5 @@
 """TraceRow — двух-колоночный layout (prefix + content) для hanging indent."""
+
 import pytest
 
 
@@ -6,13 +7,15 @@ import pytest
 async def test_trace_row_composes_horizontal_with_two_statics():
     """DOM: TraceRow содержит Horizontal с двумя Static (.trace-prefix + .trace-content)."""
     pytest.importorskip("textual")
+    from gc_tui.widgets.trace_row import TraceRow
     from textual.app import App, ComposeResult
     from textual.widgets import Static
-    from gc_tui.widgets.trace_row import TraceRow
 
     class _App(App):
         def compose(self) -> ComposeResult:
-            yield TraceRow(prefix="● ", content="hello world", kind_class="line-agent")
+            yield TraceRow(
+                prefix="● ", content="hello world", kind_class="line-agent"
+            )
 
     async with _App().run_test() as pilot:
         row = pilot.app.query_one(TraceRow)
@@ -32,12 +35,14 @@ async def test_trace_row_kind_class_lands_on_widget():
     на верхней строке, content уезжал вниз → визуальный разрыв между ● и текстом.
     """
     pytest.importorskip("textual")
-    from textual.app import App, ComposeResult
     from gc_tui.widgets.trace_row import TraceRow
+    from textual.app import App, ComposeResult
 
     class _App(App):
         def compose(self) -> ComposeResult:
-            yield TraceRow(prefix="[policy] ", content="test", kind_class="line-meta")
+            yield TraceRow(
+                prefix="[policy] ", content="test", kind_class="line-meta"
+            )
 
     async with _App().run_test() as pilot:
         row = pilot.app.query_one(TraceRow)
@@ -50,16 +55,18 @@ async def test_trace_row_kind_class_lands_on_widget():
 async def test_trace_row_ctrl_click_emits_open_event_request():
     """Ctrl+клик → OpenEventRequest (общая клик-модель, см. ClickModelMixin)."""
     pytest.importorskip("textual")
-    from textual.app import App, ComposeResult
-    from textual import events
-    from gc_tui.widgets.trace_row import TraceRow
     from gc_tui.messages import OpenEventRequest
+    from gc_tui.widgets.trace_row import TraceRow
+    from textual import events
+    from textual.app import App, ComposeResult
 
     received: list[int] = []
 
     class _App(App):
         def compose(self) -> ComposeResult:
-            yield TraceRow(prefix="● ", content="x", kind_class="line-agent", event_no=42)
+            yield TraceRow(
+                prefix="● ", content="x", kind_class="line-agent", event_no=42
+            )
 
         def on_open_event_request(self, message: OpenEventRequest) -> None:
             received.append(message.event_no)
@@ -70,9 +77,19 @@ async def test_trace_row_ctrl_click_emits_open_event_request():
         # auto-forwards bubbled Click через screen._forward_event и обработчик
         # срабатывает дважды (артефакт тестового pattern, не production).
         click = events.Click(
-            widget=row, x=0, y=0, delta_x=0, delta_y=0,
-            button=1, shift=False, meta=False, ctrl=True, chain=1,
-            screen_x=0, screen_y=0, style=None,
+            widget=row,
+            x=0,
+            y=0,
+            delta_x=0,
+            delta_y=0,
+            button=1,
+            shift=False,
+            meta=False,
+            ctrl=True,
+            chain=1,
+            screen_x=0,
+            screen_y=0,
+            style=None,
         )
         row.on_click(click)
         await pilot.pause()
@@ -83,16 +100,21 @@ async def test_trace_row_ctrl_click_emits_open_event_request():
 async def test_trace_row_event_no_zero_does_not_emit():
     """event_no=0 → клик не открывает payload (нет события)."""
     pytest.importorskip("textual")
-    from textual.app import App, ComposeResult
-    from textual import events
-    from gc_tui.widgets.trace_row import TraceRow
     from gc_tui.messages import OpenEventRequest
+    from gc_tui.widgets.trace_row import TraceRow
+    from textual import events
+    from textual.app import App, ComposeResult
 
     received: list[int] = []
 
     class _App(App):
         def compose(self) -> ComposeResult:
-            yield TraceRow(prefix="[stopped]", content="", kind_class="line-meta", event_no=0)
+            yield TraceRow(
+                prefix="[stopped]",
+                content="",
+                kind_class="line-meta",
+                event_no=0,
+            )
 
         def on_open_event_request(self, message: OpenEventRequest) -> None:
             received.append(message.event_no)
@@ -100,9 +122,19 @@ async def test_trace_row_event_no_zero_does_not_emit():
     async with _App().run_test() as pilot:
         row = pilot.app.query_one(TraceRow)
         click = events.Click(
-            widget=row, x=0, y=0, delta_x=0, delta_y=0,
-            button=1, shift=False, meta=False, ctrl=False, chain=2,
-            screen_x=0, screen_y=0, style=None,
+            widget=row,
+            x=0,
+            y=0,
+            delta_x=0,
+            delta_y=0,
+            button=1,
+            shift=False,
+            meta=False,
+            ctrl=False,
+            chain=2,
+            screen_x=0,
+            screen_y=0,
+            style=None,
         )
         row.on_click(click)
         await pilot.pause()
@@ -114,13 +146,17 @@ async def test_trace_row_focusable_default_true():
     """Без явного focusable — TraceRow.can_focus == True (дефолт-поведение для
     самостоятельных одно-строчных событий: framework `[meta]`, `? think`, ...)."""
     pytest.importorskip("textual")
-    from textual.app import App, ComposeResult
     from gc_tui.widgets.trace_row import TraceRow
+    from textual.app import App, ComposeResult
 
     class _App(App):
         def compose(self) -> ComposeResult:
-            yield TraceRow(prefix="[skill] ", content="x",
-                           kind_class="line-meta", event_no=1)
+            yield TraceRow(
+                prefix="[skill] ",
+                content="x",
+                kind_class="line-meta",
+                event_no=1,
+            )
 
     async with _App().run_test() as pilot:
         row = pilot.app.query_one(TraceRow)
@@ -131,17 +167,19 @@ async def test_trace_row_focusable_default_true():
 async def test_trace_row_focusable_false_opts_out():
     """focusable=False → can_focus == False (для continuation prose, `* note:`)."""
     pytest.importorskip("textual")
-    from textual.app import App, ComposeResult
     from gc_tui.widgets.trace_row import TraceRow
+    from textual.app import App, ComposeResult
 
     class _App(App):
         def compose(self) -> ComposeResult:
-            yield TraceRow(prefix="  ", content="continuation prose",
-                           kind_class="line-agent line-agent-cont",
-                           event_no=1, focusable=False)
+            yield TraceRow(
+                prefix="  ",
+                content="continuation prose",
+                kind_class="line-agent line-agent-cont",
+                event_no=1,
+                focusable=False,
+            )
 
     async with _App().run_test() as pilot:
         row = pilot.app.query_one(TraceRow)
         assert row.can_focus is False
-
-

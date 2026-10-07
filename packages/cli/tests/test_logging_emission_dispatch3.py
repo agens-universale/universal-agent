@@ -11,11 +11,12 @@ Each test drives real code with a jsonl-mode per-run logger from
 ``create_run_logger`` and asserts the event line + expected keys appear as a
 top-level "event" field (not embedded in "msg").
 """
+
 import json
 import sys
 import tempfile
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 # `import cli` (below, inside the final_answer test) parses sys.argv at
 # import time (--query is required); pin a valid argv up front so this file
@@ -23,6 +24,7 @@ from unittest.mock import patch
 sys.argv = ["gc-cli", "-q", "x"]
 
 from gc_core.utils.logging_module import create_run_logger
+from gc_testkit import run_coro
 
 
 def _make_logger(tmp_path, level="info"):
@@ -77,7 +79,12 @@ def test_build_run_usage_dict_empty_account_returns_none():
     from gc_core.usage.account import UsageAccount
     from gc_core.usage.report import build_run_usage_dict
 
-    assert build_run_usage_dict(UsageAccount(), pricing=None, model_name="CodeChat") is None
+    assert (
+        build_run_usage_dict(
+            UsageAccount(), pricing=None, model_name="CodeChat"
+        )
+        is None
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -87,7 +94,7 @@ def test_build_run_usage_dict_empty_account_returns_none():
 
 
 class _SkillsRegistryStub:
-    def list_skills(self):
+    async def list_skills(self):
         return []
 
 
@@ -130,12 +137,20 @@ def test_run_usage_event_emitted_at_end_of_run(tmp_path):
 
         def _fake_run_agent(messages, state, ctx_arg, **kwargs):
             # Simulate the LLM call(s) that would normally accrue usage.
-            state.usage.add("main", input_tokens=123, output_tokens=45, cached_tokens=0)
+            state.usage.add(
+                "main", input_tokens=123, output_tokens=45, cached_tokens=0
+            )
             return "ok"
 
-        with patch.object(agent_executor_module, "run_agent", side_effect=_fake_run_agent):
+        with patch.object(
+            agent_executor_module, "arun_agent", side_effect=_fake_run_agent
+        ):
             executor = agent_executor_module.AgentExecutor(ctx)
-            result = executor.run(["hello"], thread_id="thr2", system="cli", verbose=False)
+            result = run_coro(
+                executor.arun(
+                    ["hello"], thread_id="thr2", system="cli", verbose=False
+                )
+            )
             assert result == "ok"
 
     _flush(logger)
@@ -166,9 +181,15 @@ def test_run_usage_event_not_emitted_when_no_usage(tmp_path):
     with tempfile.TemporaryDirectory() as thread_dir:
         ctx = _base_ctx(logger, logging_path, thread_dir)
 
-        with patch.object(agent_executor_module, "run_agent", return_value="ok"):
+        with patch.object(
+            agent_executor_module, "arun_agent", return_value="ok"
+        ):
             executor = agent_executor_module.AgentExecutor(ctx)
-            result = executor.run(["hello"], thread_id="thr3", system="cli", verbose=False)
+            result = run_coro(
+                executor.arun(
+                    ["hello"], thread_id="thr3", system="cli", verbose=False
+                )
+            )
             assert result == "ok"
 
     _flush(logger)
@@ -192,36 +213,53 @@ def test_final_answer_event_is_top_level_event_field(tmp_path):
 
     fake_config_dict = {"console_trace": True}
 
-    with patch.object(cli_module, "_ensure_project_gc_dir"), \
-        patch.object(cli_module, "_ensure_user_skills_dir"), \
-        patch.object(cli_module.arg_parser, "run_args", SimpleNamespace(
-            init_config=False,
-            init=False,
-            config=None,
-            write_guard=False,
-            no_write_guard=False,
-            command_moderation=None,
-            read_guard=None,
-            no_read_guard=False,
-            read_guard_mode=None,
-            query="hi",
-            wrap_technical=False,
-            skill=None,
-            verbose=False,
-            thread_id=None,
-            new=False,
-            auto_mcp=False,
-        )), \
-        patch.object(cli_module, "load_config", return_value=fake_config_dict), \
-        patch.object(cli_module, "apply_cli_overrides"), \
-        patch.object(cli_module, "onboarding", SimpleNamespace(
-            is_unconfigured=lambda cfg: False,
-        )), \
-        patch.object(cli_module, "_resolve_forced_skill", return_value=None), \
-        patch.object(cli_module, "build_auth_connector", return_value=None), \
-        patch.object(cli_module, "create_run_context", return_value=ctx), \
-        patch.object(cli_module, "AgentExecutor") as mock_executor_cls:
-        mock_executor_cls.return_value.run.return_value = "the final answer text"
+    with (
+        patch.object(cli_module, "_ensure_project_gc_dir"),
+        patch.object(cli_module, "_ensure_user_skills_dir"),
+        patch.object(
+            cli_module.arg_parser,
+            "run_args",
+            SimpleNamespace(
+                init_config=False,
+                init=False,
+                config=None,
+                write_guard=False,
+                no_write_guard=False,
+                command_moderation=None,
+                read_guard=None,
+                no_read_guard=False,
+                read_guard_mode=None,
+                query="hi",
+                wrap_technical=False,
+                skill=None,
+                verbose=False,
+                thread_id=None,
+                new=False,
+                auto_mcp=False,
+            ),
+        ),
+        patch.object(cli_module, "load_config", return_value=fake_config_dict),
+        patch.object(cli_module, "apply_cli_overrides"),
+        patch.object(
+            cli_module,
+            "onboarding",
+            SimpleNamespace(
+                is_unconfigured=lambda cfg: False,
+            ),
+        ),
+        patch.object(cli_module, "_resolve_forced_skill", return_value=None),
+        patch.object(cli_module, "build_auth_connector", return_value=None),
+        patch.object(
+            cli_module, "acreate_run_context", new=AsyncMock(return_value=ctx)
+        ),
+        patch.object(cli_module, "AgentExecutor") as mock_executor_cls,
+    ):
+        # Точка входа CLI асинхронная (Задача 23 async-переезда): прогон идёт
+        # через arun, и заглушка обязана быть корутинной.
+        async def _arun(*_a, **_kw):
+            return "the final answer text"
+
+        mock_executor_cls.return_value.arun = _arun
 
         rc = cli_module.main()
         assert rc == 0

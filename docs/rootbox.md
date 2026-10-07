@@ -12,6 +12,8 @@
 
 Слои независимы: `read_guard` блокирует чтение в любом `command_moderation.mode` (даже `allow`); `url_policy` не зависит от `mode`; `write_guard` независим от `read_guard`. **Secure-by-default: все пять слоёв включены по умолчанию.** `enabled: true` стоит и в pydantic-дефолтах (`config_modules/security.py`), и в поставляемом `config.default.yml`. Чтобы слой выключить, нужен явный `enabled: false` — обратное утверждение («safe-by-default-OFF») в старых редакциях этого документа было неверным.
 
+`os_backend: sandbox` — не шестой слой `security:`, а другая граница (YAML — [os_backends.md](os_backends.md)): файловые тулы по-прежнему держат `write_guard`/`read_guard`/`protected_paths`, а shell-команды модели (`execute_command`, `run_python_code`, фон) выполняются в bwrap / sandbox-exec с записью только в `launch_root` (плюс временные каталоги — иначе не работает `tempfile`). Это закрывает то, что `command_moderation` ловит лишь эвристикой: произвольная команда не запишет за корень даже при `mode: allow`. Граница именно на запись: чтение (включая `$HOME`) и сеть (`sandbox.network`, по умолчанию включена) у команды такие же, как при `os_backend: local`; окружение процесса агента в команду не попадает — только allowlist (`PATH`, `HOME`, локаль, прокси, CA-сертификаты), как у `run_python_code`. Жёсткие ссылки наружу bwrap режет сам (`EXDEV`: корень и остальное — разные bind-монтирования). MCP с `execute_on: os_backend` при `sandbox` идёт той же обёрткой (carrier `python3` и stdio-сервер под bwrap / sandbox-exec); `download_file` остаётся — файлы и так хостовые.
+
 ## `security.protected_paths` — floor-защита `.gc` (ON по умолчанию)
 
 «Пол» безопасности: работает поверх всех остальных слоёв и не отключается вместе с `write_guard`/`read_guard`/`command_moderation`.
@@ -25,13 +27,24 @@ security:
 
 ### Что защищает
 
-Три класса путей с разным решением:
+Четыре класса путей с разным решением:
 
 | Класс | Примеры | Решение |
 |---|---|---|
 | `instructions` | `AGENTS.md`, `CLAUDE.md`, инструктивные файлы | `ask` — запрос подтверждения у пользователя |
-| `operational` | весь `.gc/` проекта, `~/.local/state/gc/` (config/state/cache) | `deny` — блок без возможности подтвердить |
+| `media` | копии вложенных изображений `<threads_data_path>/images/`, свой карман процесса `…/images/_staging/<pid>/`, картинки из ответов MCP-тулов `<gc_cache>/mcp-media/` | чтение — без вопроса; запись тулами — `deny`; команда — `ask` |
+| `operational` | весь `.gc/` проекта, `~/.local/state/gc/` (config/state/cache), карманы других процессов `…/images/_staging/<другой pid>/` | `deny` — блок без возможности подтвердить |
 | `skills` | `.gc/skills/`, `~/.local/share/gc/skills/` | `allow` — запись разрешена (скиллы можно редактировать) |
+
+`media` проверяется раньше `operational`: по умолчанию его корни лежат внутри `<gc_state>` и
+`<gc_cache>`. Карманы других процессов (`_staging/<другой pid>`) — вставки чужих сессий до
+отправки — в `media` не входят и считаются `operational`, где бы ни лежал корень хранилища
+(в том числе свой `threads_data_path` вне `<gc_state>` и временный корень SDK): чтение
+закрыто полом, запись и команды — `deny`; разрешение корня хранилища в периметре
+`read_guard` на них не распространяется. Класс считается по пути как написан: `..`
+нормализуется, симлинки — нет (периметр `read_guard` их разворачивает и видит путь вне
+проекта). Корни считает `security/media_roots.py` по конфигу запуска; вызывающие без конфига
+(судья команд, diff-TUI) класса не видят — для них эти пути остаются `operational`.
 
 ### Детерминированный command-guard (tripwire)
 
@@ -108,6 +121,10 @@ security:
       - "~/Downloads/agent-out"        # ~ резолвится
 ```
 
+`extra_paths` расширяет право ЗАПИСИ, но не отслеживание правок: файл вне
+`launch_root` показывает дифф в ленте и не попадает на экран изменений,
+где бы он ни лежал.
+
 ## `read_guard` — read-периметр
 
 Симметричен `write_guard`, но для чтения.
@@ -162,6 +179,7 @@ security:
 - Плейсхолдеры `~`, `%USERPROFILE%`, `<launch_root>` резолвятся в путях `denied_*` / `allowed_*`.
 - Symlink защита: путь нормализуется через `realpath` до проверки.
 - Скиллы (`<launch_root>/.gc/skills/`, `~/.local/share/gc/skills/`) — через `allowed_read_paths`; bundled system skills — через `_resolve_skills_root` в `extra_allowed_paths`.
+- `fs_view_image` читает пути класса `media` (хранилище картинок тредов, каталог MCP-медиа) **с хоста** агента, а не через среду исполнения: в Harbor остальные пути он читает из контейнера, как `fs_read_file`, а картинки хранилища и скриншоты MCP лежат у агента. Каталог вывода Playwright MCP (`<gc_cache>/playwright-mcp`) в `media` не входит — скриншот смотрят по пути из блока картинки результата MCP.
 
 ## `url_policy` — schema + SSRF-blacklist
 

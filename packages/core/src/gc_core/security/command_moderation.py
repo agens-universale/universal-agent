@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import functools
 import inspect
 import json
 import os
@@ -9,16 +8,27 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
-from gc_core.config_modules.security import validate_command_moderation_mode
-from gc_core.constants.tool_names import EXEC_PYTHON_NAME
-from gc_core.security.confirm_port import confirm_available, request_confirm
-from gc_core.security.path_policy import ToolSecurityContext, _extract_config_dict, audit_policy_decision, resolve_tool_context
-from gc_core.security.protected_paths import protected_paths
-from gc_core.config_modules.strip_tags_projection import projection_tags_from_config
-from gc_core.message_projection import project_text_for_model
-from gc_core.summarize.llm import auxiliary_llm_completion_kwargs, auxiliary_llm_judge_max_tokens, request_auxiliary_completion_text
-from gc_core.utils.project_data import os_label
 from gc_core.bundled_assets import bundled_root
+from gc_core.config_modules.security import validate_command_moderation_mode
+from gc_core.config_modules.strip_tags_projection import (
+    projection_tags_from_config,
+)
+from gc_core.constants.tool_names import EXEC_PYTHON_NAME
+from gc_core.message_projection import project_text_for_model
+from gc_core.security.confirm_port import confirm_available, request_confirm
+from gc_core.security.dual_wrapper import AwaitOnCaller, OffLoop, dual_wrap
+from gc_core.security.path_policy import (
+    ToolSecurityContext,
+    _extract_config_dict,
+    audit_policy_decision,
+    resolve_tool_context,
+)
+from gc_core.security.protected_paths import protected_paths
+from gc_core.summarize.llm import (
+    arequest_auxiliary_completion_text,
+    auxiliary_llm_judge_max_tokens,
+)
+from gc_core.utils.project_data import os_label
 
 SAFE_VERDICT = "safe"
 DANGEROUS_VERDICT = "potentially_dangerous"
@@ -52,6 +62,8 @@ _VERDICT_DANGEROUS_RE = re.compile(
 # bundled_root() — единый резолвер ассетов (editable → repo, wheel → site-packages).
 _PROJECT_ROOT = bundled_root()
 
+_CONFIDENCE_NOT_NUMERIC = "judge result confidence must be numeric"
+
 
 def effective_command_cwd(
     tool_name: str,
@@ -72,8 +84,12 @@ def effective_command_cwd(
 
 
 _SECURITY_PROMPTS_DIR = _PROJECT_ROOT / "prompts" / "security"
-_COMMAND_JUDGE_SYSTEM_PROMPT_PATH = _SECURITY_PROMPTS_DIR / "command_judge_system.md"
-_COMMAND_JUDGE_USER_PROMPT_PATH = _SECURITY_PROMPTS_DIR / "command_judge_user.md"
+_COMMAND_JUDGE_SYSTEM_PROMPT_PATH = (
+    _SECURITY_PROMPTS_DIR / "command_judge_system.md"
+)
+_COMMAND_JUDGE_USER_PROMPT_PATH = (
+    _SECURITY_PROMPTS_DIR / "command_judge_user.md"
+)
 
 
 @dataclass(frozen=True)
@@ -88,7 +104,9 @@ class ModerationContext:
     has_venv: bool = False
     allowed_command_examples: list[str] = field(default_factory=list)
     denied_command_examples: list[str] = field(default_factory=list)
-    insession_examples: dict[str, list[str]] = field(default_factory=lambda: {"allowed": [], "denied": []})
+    insession_examples: dict[str, list[str]] = field(
+        default_factory=lambda: {"allowed": [], "denied": []}
+    )
 
 
 @dataclass(frozen=True)
@@ -125,9 +143,7 @@ def build_judge_payload(
 ) -> dict[str, Any]:
     try:
         ps = _get_protected_paths(context.cwd)
-        never_touch = sorted(
-            str(p) for p in ps.instructions | ps.operational
-        )
+        never_touch = sorted(str(p) for p in ps.instructions | ps.operational)
     except Exception:
         never_touch = []
     return {
@@ -151,10 +167,14 @@ def build_judge_payload(
     }
 
 
-def run_command_judge(judge_client: Any, judge_payload: dict[str, Any]) -> JudgeResult:
+def run_command_judge(
+    judge_client: Any, judge_payload: dict[str, Any]
+) -> JudgeResult:
     if judge_client is None:
         raise JudgeUnavailable("judge client is not configured")
-    raw_result = judge_client(judge_payload) if callable(judge_client) else judge_client
+    raw_result = (
+        judge_client(judge_payload) if callable(judge_client) else judge_client
+    )
     if isinstance(raw_result, JudgeResult):
         return raw_result
     return validate_judge_result(raw_result)
@@ -177,25 +197,128 @@ def run_command_judge_with_retry(
     raise last_exc
 
 
+def judge_with_retry_flow(
+    judge_client: Any, judge_payload: dict[str, Any], *, retries: int = 1
+):
+    """То же правило ретраев, но вызов судьи отдан ДРАЙВЕРУ гварда.
+
+    Тело гварда делегирует сюда через `yield from`: `AwaitOnCaller` уводит
+    корутину судьи на loop вызывающего (соединение и пул общие с агентом),
+    `OffLoop` — синхронного судью в поток. Отказ прилетает обратно в точку
+    `yield` через `throw`, поэтому `try/except` здесь работает ровно так же,
+    как вокруг прямого вызова в синхронном близнеце.
+    """
+    if judge_client is None:
+        raise JudgeUnavailable("judge client is not configured")
+    request = (
+        AwaitOnCaller if inspect.iscoroutinefunction(judge_client) else OffLoop
+    )
+    last_exc: Exception | None = None
+    for _ in range(retries + 1):
+        try:
+            if request is AwaitOnCaller:
+                raw = yield AwaitOnCaller(lambda: judge_client(judge_payload))
+            else:
+                raw = yield OffLoop(judge_client, judge_payload)
+            if isinstance(raw, JudgeResult):
+                return raw
+            return validate_judge_result(raw)
+        except Exception as exc:
+            last_exc = exc
+    assert last_exc is not None
+    raise last_exc
+
+
 def validate_judge_result(raw: dict[str, Any]) -> JudgeResult:
     if not isinstance(raw, dict):
         raise ValueError("judge result must be an object")
     # Нормализуем ФОРМАТ (пробел/дефис/регистр): слабая модель часто пишет
     # «potentially dangerous» через пробел/в другом регистре. Синонимы НЕ маппим —
     # неузнанный вердикт по-прежнему отвергается (security не ослаблен).
-    verdict = re.sub(r"[\s\-]+", "_", str(raw.get("verdict", "")).strip().lower())
+    verdict = re.sub(
+        r"[\s\-]+", "_", str(raw.get("verdict", "")).strip().lower()
+    )
     if verdict not in ALLOWED_VERDICTS:
-        raise ValueError("judge result verdict must be 'safe' or 'potentially_dangerous'")
+        raise ValueError(
+            "judge result verdict must be 'safe' or 'potentially_dangerous'"
+        )
     reasons = _string_list(raw.get("reasons"), field_name="reasons")
     risk_flags = _string_list(raw.get("risk_flags"), field_name="risk_flags")
     if verdict == DANGEROUS_VERDICT and not risk_flags:
-        raise ValueError("potentially_dangerous verdict requires at least one risk flag")
+        raise ValueError(
+            "potentially_dangerous verdict requires at least one risk flag"
+        )
     confidence_float = _parse_judge_confidence(raw.get("confidence", 0.0))
     return JudgeResult(
         verdict=verdict,
         reasons=reasons,
         risk_flags=risk_flags,
         confidence=confidence_float,
+    )
+
+
+#: Промежуточное решение режима deny при недоступном судье: нужен ответ
+#: ЧЕЛОВЕКА. Отдельный код — чтобы драйвер не подставил вместо человека
+#: экстрактор подтверждения из аргументов вызова, то есть от модели.
+JUDGE_UNAVAILABLE_CONFIRM_REQUIRED = "judge_unavailable_confirm_required"
+
+
+def _decide_without_judge(
+    normalized_mode: str, user_confirmation: bool | None, ctx: Any
+) -> ExecutionDecision:
+    if normalized_mode == "ask":
+        if user_confirmation is True:
+            return ExecutionDecision(
+                allowed=True,
+                decision="executed",
+                reason_code="user_confirmation",
+                reason="User confirmed execution after judge was unavailable.",
+            )
+        if user_confirmation is False:
+            return ExecutionDecision(
+                allowed=False,
+                decision="cancelled",
+                reason_code="user_confirmation",
+                reason="User declined the command.",
+                error_type="unsafe_command_cancelled_by_user",
+            )
+        return ExecutionDecision(
+            allowed=False,
+            decision="asked",
+            reason_code="judge_unavailable",
+            reason="Judge is unavailable; user confirmation is required.",
+            requires_confirmation=True,
+        )
+    # C1 Часть 2: при недоступности судьи в deny — спросить через confirm-порт.
+    #
+    # Сама функция человека НЕ спрашивает: решение здесь чистое, а ожидание
+    # человека — дело драйвера гарда (`yield OffLoop(...)` в теле ниже).
+    # Раньше `request_confirm` звался прямо отсюда, а функцию тело гарда
+    # зовёт инлайн — в асинхронном пути ожидание человека (в TUI до 600 с)
+    # шло прямо на event loop агента. Протокол теперь двухшаговый, как у
+    # режима ask: сначала «нужно подтверждение», потом решение по ответу.
+    if user_confirmation is True:
+        return ExecutionDecision(
+            allowed=True,
+            decision="executed",
+            reason_code="judge_unavailable_user_confirmed",
+            reason="User confirmed execution after judge was unavailable.",
+        )
+    if user_confirmation is None and confirm_available(ctx):
+        return ExecutionDecision(
+            allowed=False,
+            decision="asked",
+            reason_code=JUDGE_UNAVAILABLE_CONFIRM_REQUIRED,
+            reason="Judge is unavailable; user confirmation is required.",
+            requires_confirmation=True,
+        )
+    # Fail-closed: confirm недоступен или пользователь отказал — блокируем.
+    return ExecutionDecision(
+        allowed=False,
+        decision="blocked",
+        reason_code="judge_unavailable",
+        reason="Judge is unavailable; fail-closed policy blocks execution.",
+        error_type="unsafe_command_blocked",
     )
 
 
@@ -216,58 +339,15 @@ def decide_command_execution(
             reason="command_moderation.mode=allow",
         )
     if not judge_available or judge_result is None:
-        if normalized_mode == "ask":
-            if user_confirmation is True:
-                return ExecutionDecision(
-                    allowed=True,
-                    decision="executed",
-                    reason_code="user_confirmation",
-                    reason="User confirmed execution after judge was unavailable.",
-                )
-            if user_confirmation is False:
-                return ExecutionDecision(
-                    allowed=False,
-                    decision="cancelled",
-                    reason_code="user_confirmation",
-                    reason="User declined the command.",
-                    error_type="unsafe_command_cancelled_by_user",
-                )
-            return ExecutionDecision(
-                allowed=False,
-                decision="asked",
-                reason_code="judge_unavailable",
-                reason="Judge is unavailable; user confirmation is required.",
-                requires_confirmation=True,
-            )
-        # C1 Часть 2: при недоступности судьи в deny — пробуем confirm-порт.
-        if confirm_available(ctx):
-            confirmed = request_confirm(
-                title="Проверка команды",
-                question="Судья недоступен. Выполнить команду?",
-                fields=[("mode", normalized_mode)],
-                ctx=ctx,
-            )
-            if confirmed:
-                return ExecutionDecision(
-                    allowed=True,
-                    decision="executed",
-                    reason_code="judge_unavailable_user_confirmed",
-                    reason="User confirmed execution after judge was unavailable.",
-                )
-        # Fail-closed: confirm недоступен или пользователь отказал — блокируем.
-        return ExecutionDecision(
-            allowed=False,
-            decision="blocked",
-            reason_code="judge_unavailable",
-            reason="Judge is unavailable; fail-closed policy blocks execution.",
-            error_type="unsafe_command_blocked",
-        )
+        return _decide_without_judge(normalized_mode, user_confirmation, ctx)
     if judge_result.verdict == SAFE_VERDICT:
         return ExecutionDecision(
             allowed=True,
             decision="executed",
             reason_code="judge_verdict",
-            reason=_join_reasons(judge_result.reasons, default="Judge marked payload as safe."),
+            reason=_join_reasons(
+                judge_result.reasons, default="Judge marked payload as safe."
+            ),
             risk_flags=judge_result.risk_flags,
         )
     if normalized_mode == "deny":
@@ -275,7 +355,10 @@ def decide_command_execution(
             allowed=False,
             decision="blocked",
             reason_code="judge_verdict",
-            reason=_join_reasons(judge_result.reasons, default="Judge marked payload as dangerous."),
+            reason=_join_reasons(
+                judge_result.reasons,
+                default="Judge marked payload as dangerous.",
+            ),
             risk_flags=judge_result.risk_flags,
             error_type="unsafe_command_blocked",
         )
@@ -300,7 +383,9 @@ def decide_command_execution(
         allowed=False,
         decision="asked",
         reason_code="judge_verdict",
-        reason=_join_reasons(judge_result.reasons, default="User confirmation is required."),
+        reason=_join_reasons(
+            judge_result.reasons, default="User confirmation is required."
+        ),
         risk_flags=judge_result.risk_flags,
         requires_confirmation=True,
     )
@@ -340,8 +425,17 @@ def moderate_command_execution(
     blocked_result_factory: Callable[[dict[str, Any]], str] | None = None,
 ) -> Callable[[Callable[..., str]], Callable[..., str]]:
     def decorator(func: Callable[..., str]) -> Callable[..., str]:
-        @functools.wraps(func)
-        def wrapper(*args: Any, **kwargs: Any) -> str:
+        # Тело — ГЕНЕРАТОР: `dual_wrap` строит по нему обе обёртки. Обычный
+        # декоратор на `async def acall` ломался молча — в ветке отказа отдавал
+        # строку вместо корутины. `return (yield)` — точка вызова самого тула.
+        #
+        # Тело идёт ИНЛАЙН: блокирующего в нём самом не осталось. Судью оно
+        # просит у драйвера через `AwaitOnCaller` (корутина ждётся на loop
+        # вызывающего, на общем пуле соединений), ожидание человека — через
+        # `OffLoop` (свой поток). Раньше в поток уезжало тело ЦЕЛИКОМ, и
+        # судья звался оттуда через `run_coro_blocking`: свой `asyncio.run`,
+        # свой пул httpx и новое TLS-рукопожатие на каждый `exec_command`.
+        def _flow(*args: Any, **kwargs: Any):
             context = resolve_tool_context(*args, **kwargs)
             # Если в config_dict отсутствует блок command_moderation вообще —
             # модерация не сконфигурирована, пропускаем (legacy / unit-test поведение,
@@ -353,18 +447,22 @@ def moderate_command_execution(
             )
             cm_cfg = _cfg.get("command_moderation")
             if not isinstance(cm_cfg, dict):
-                return func(*args, **kwargs)
+                return (yield)
             # Runtime-fallback при отсутствии enabled — OFF (судья не вызывается).
             # На нормальном пути load_config кладёт command_moderation из pydantic
             # (secure-by-default enabled=True), поэтому fallback достижим лишь в
             # обход load_config (bespoke/тест-конфиги), а не в проде.
             if not bool(cm_cfg.get("enabled", False)):
-                return func(*args, **kwargs)
+                return (yield)
             try:
-                payload = _extract_payload(func, args, kwargs, payload_arg, payload_extractor)
+                payload = _extract_payload(
+                    func, args, kwargs, payload_arg, payload_extractor
+                )
             except ValueError:
-                return func(*args, **kwargs)
-            moderation_context = _build_context(tool_name or func.__name__, context, kwargs)
+                return (yield)
+            moderation_context = _build_context(
+                tool_name or func.__name__, context, kwargs
+            )
             if moderation_context.mode == "allow":
                 audit_policy_decision(
                     context,
@@ -372,7 +470,7 @@ def moderate_command_execution(
                     decision="executed",
                     reason_code="policy_allow",
                 )
-                return func(*args, **kwargs)
+                return (yield)
 
             judge_result = None
             judge_available = True
@@ -382,9 +480,13 @@ def moderate_command_execution(
                     if judge_client_extractor is not None
                     else _default_judge_client(args, kwargs)
                 )
-                judge_result = run_command_judge_with_retry(
+                judge_result = yield from judge_with_retry_flow(
                     judge_client,
-                    build_judge_payload(moderation_context.tool_name, payload, moderation_context),
+                    build_judge_payload(
+                        moderation_context.tool_name,
+                        payload,
+                        moderation_context,
+                    ),
                     retries=1,
                 )
             except Exception as exc:
@@ -412,10 +514,14 @@ def moderate_command_execution(
                     risk_flags=decision.risk_flags,
                     error_type=decision.error_type,
                 )
-                user_confirmation = (
-                    user_confirmation_extractor(*args, **kwargs)
-                    if user_confirmation_extractor is not None
-                    else _ask_user_confirmation(payload, moderation_context, decision, ctx=tool_ctx)
+                user_confirmation = yield from _obtain_user_confirmation(
+                    user_confirmation_extractor,
+                    payload,
+                    moderation_context,
+                    decision,
+                    tool_ctx,
+                    args,
+                    kwargs,
                 )
                 decision = decide_command_execution(
                     moderation_context.mode,
@@ -433,7 +539,7 @@ def moderate_command_execution(
                     risk_flags=decision.risk_flags,
                     error_type=decision.error_type,
                 )
-                return func(*args, **kwargs)
+                return (yield)
             error = make_block_error(decision, moderation_context.mode)
             audit_policy_decision(
                 context,
@@ -457,9 +563,41 @@ def moderate_command_execution(
                 ensure_ascii=False,
             )
 
-        return wrapper
+        return dual_wrap(func, _flow)
 
     return decorator
+
+
+def _obtain_user_confirmation(
+    user_confirmation_extractor: Callable[..., bool | None] | None,
+    payload: str,
+    moderation_context: ModerationContext,
+    decision: ExecutionDecision,
+    tool_ctx: Any,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+):
+    """Ответ на «нужно подтверждение» — генератор, звать через `yield from`."""
+    # Экстрактор — только для режима ask. В deny подтверждение даёт
+    # человек через порт: иначе подтверждение из аргументов вызова
+    # (то есть от модели) разрешало бы команду при недоступном судье.
+    if (
+        user_confirmation_extractor is not None
+        and decision.reason_code != JUDGE_UNAVAILABLE_CONFIRM_REQUIRED
+    ):
+        return user_confirmation_extractor(*args, **kwargs)
+    # Единственное, что остаётся блокирующим по существу:
+    # человек думает, и асинхронной формы у этого нет.
+    return (
+        yield OffLoop(
+            _ask_user_confirmation,
+            payload,
+            moderation_context,
+            decision,
+            tool_ctx,
+            on_interrupt=False,
+        )
+    )
 
 
 def _build_context(
@@ -538,13 +676,13 @@ def _parse_judge_confidence(raw: Any) -> float:
     elif isinstance(raw, str):
         stripped = raw.strip()
         if not stripped:
-            raise ValueError("judge result confidence must be numeric")
+            raise ValueError(_CONFIDENCE_NOT_NUMERIC)
         try:
             confidence_float = float(stripped)
         except ValueError as exc:
-            raise ValueError("judge result confidence must be numeric") from exc
+            raise ValueError(_CONFIDENCE_NOT_NUMERIC) from exc
     else:
-        raise ValueError("judge result confidence must be numeric")
+        raise ValueError(_CONFIDENCE_NOT_NUMERIC)
     if confidence_float < 0.0 or confidence_float > 1.0:
         raise ValueError("judge result confidence must be between 0.0 and 1.0")
     return confidence_float
@@ -553,8 +691,12 @@ def _parse_judge_confidence(raw: Any) -> float:
 def _string_list(raw: Any, *, field_name: str) -> list[str]:
     if raw is None:
         return []
-    if not isinstance(raw, list) or not all(isinstance(item, str) for item in raw):
-        raise ValueError(f"judge result {field_name} must be a list of strings")
+    if not isinstance(raw, list) or not all(
+        isinstance(item, str) for item in raw
+    ):
+        raise ValueError(
+            f"judge result {field_name} must be a list of strings"
+        )
     return raw
 
 
@@ -562,24 +704,37 @@ def _join_reasons(reasons: list[str], *, default: str) -> str:
     return "; ".join(reason for reason in reasons if reason) or default
 
 
-def _default_judge_client(args: tuple[Any, ...], kwargs: dict[str, Any]) -> Callable[[dict[str, Any]], dict[str, Any]]:
+def _default_judge_client(
+    args: tuple[Any, ...], kwargs: dict[str, Any]
+) -> Callable[[dict[str, Any]], Any]:
+    """Судья модерации: корутина, которую ждёт loop ВЫЗЫВАЮЩЕГО.
+
+    Прежняя редакция была синхронной и поднимала `asyncio.run` на каждый
+    вызов — свежий пул httpx и новое TLS-рукопожатие к LLM на КАЖДЫЙ
+    модерируемый `exec_command`, при том что соединение агента простаивало
+    рядом. Шов остался один и под тем же именем: `judge_with_retry_flow`
+    сама смотрит, корутинный ей отдали судью или обычный, поэтому подмена
+    синхронной заглушкой в тестах работает по-прежнему.
+    """
     self_obj = args[0] if args else None
     ctx = kwargs.get("ctx") or getattr(self_obj, "_ctx", None)
     state = kwargs.get("state") or getattr(self_obj, "_state", None)
-    cfg = getattr(ctx, "config_dict", None) or getattr(self_obj, "_config_dict", None) or {}
+    cfg = (
+        getattr(ctx, "config_dict", None)
+        or getattr(self_obj, "_config_dict", None)
+        or {}
+    )
     if ctx is None or state is None or not cfg.get("completions_url"):
         raise JudgeUnavailable("chat/completions context is not configured")
 
-    def judge(judge_payload: dict[str, Any]) -> dict[str, Any]:
-        messages = _build_judge_messages(judge_payload)
-        raw_text = request_auxiliary_completion_text(
+    async def ajudge(judge_payload: dict[str, Any]) -> dict[str, Any]:
+        raw_text = await arequest_auxiliary_completion_text(
             ctx=ctx,
             state=state,
-            messages=messages,
+            messages=_build_judge_messages(judge_payload),
             max_tokens=auxiliary_llm_judge_max_tokens(ctx),
             request_label="command_moderation_judge",
             consumer="command_judge",
-            payload_overrides=auxiliary_llm_completion_kwargs(ctx),
         )
         tags = projection_tags_from_config(cfg)
         return _parse_judge_json(
@@ -589,13 +744,17 @@ def _default_judge_client(args: tuple[Any, ...], kwargs: dict[str, Any]) -> Call
             tags=tags,
         )
 
-    return judge
+    return ajudge
 
 
-def _build_judge_messages(judge_payload: dict[str, Any]) -> list[dict[str, str]]:
+def _build_judge_messages(
+    judge_payload: dict[str, Any],
+) -> list[dict[str, str]]:
     system_prompt = load_command_judge_prompt("system")
     user_prompt = load_command_judge_prompt("user").format(
-        judge_payload_json=json.dumps(judge_payload, ensure_ascii=False, indent=2)
+        judge_payload_json=json.dumps(
+            judge_payload, ensure_ascii=False, indent=2
+        )
     )
     return [
         {"role": "system", "content": system_prompt},
@@ -619,7 +778,9 @@ def _load_prompt_file(path: Path) -> str:
     try:
         text = path.read_text(encoding="utf-8").strip()
     except (OSError, UnicodeDecodeError) as exc:
-        raise JudgeUnavailable(f"Command judge prompt file is unavailable: {path}") from exc
+        raise JudgeUnavailable(
+            f"Command judge prompt file is unavailable: {path}"
+        ) from exc
     if not text:
         raise JudgeUnavailable(f"Command judge prompt file is empty: {path}")
     return text
@@ -632,7 +793,9 @@ def _strip_judge_response_text(
 ) -> str:
     # Aux-парсер: ``<think>`` всегда, extra-теги из конфига; fence/JSON поверх.
     text = project_text_for_model(raw_text, tags=tags, strip_think=True)
-    fence_match = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", text, flags=re.DOTALL | re.IGNORECASE)
+    fence_match = re.search(
+        r"```(?:json)?\s*\n?(.*?)\n?```", text, flags=re.DOTALL | re.IGNORECASE
+    )
     if fence_match:
         return fence_match.group(1).strip()
     if text.startswith("```"):
@@ -648,7 +811,7 @@ def _extract_json_candidate(text: str) -> str:
     start = text.find("{")
     end = text.rfind("}")
     if start != -1 and end != -1 and end > start:
-        return text[start:end + 1]
+        return text[start : end + 1]
     return text
 
 
@@ -727,6 +890,7 @@ def _ask_user_confirmation(
     decision: ExecutionDecision,
     ctx: Any = None,
 ) -> bool:
+    """Ожидание человека. Зовётся драйвером гварда в отдельном потоке."""
     primary_label = _primary_payload_label(context.tool_name)
     # Full payload as-is: TUI banner scrolls body + docks Y/O/N/T.
     return request_confirm(

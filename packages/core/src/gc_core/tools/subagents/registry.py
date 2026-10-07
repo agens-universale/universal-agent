@@ -2,16 +2,20 @@ import logging
 from typing import Any, Dict, List, Optional, Type
 
 from gc_core.tools.subagents.abstract_subagent import AbstractSubagent
-from gc_core.tools.subagents.worker import Worker
-from gc_core.tools.subagents.coder import CodeGenerator
 from gc_core.tools.subagents.code_planner import CodePlanner
-from gc_core.tools.subagents.planner import Planner
-from gc_core.tools.subagents.critic import Critic
 from gc_core.tools.subagents.code_reviewer import CodeReviewer
-from gc_core.tools.subagents.special_agent import SpecialAgent
-from gc_core.tools.subagents.custom.file_definitions import SubagentDefinition, discover_subagent_definitions, resolve_max_count
-from gc_core.tools.subagents.selection import subagents_allowlist_ordered
+from gc_core.tools.subagents.coder import CodeGenerator
+from gc_core.tools.subagents.critic import Critic
+from gc_core.tools.subagents.custom.file_definitions import (
+    SubagentDefinition,
+    discover_subagent_definitions,
+    resolve_max_count,
+)
 from gc_core.tools.subagents.custom.file_subagent import FileDefinedSubagent
+from gc_core.tools.subagents.planner import Planner
+from gc_core.tools.subagents.selection import subagents_allowlist_ordered
+from gc_core.tools.subagents.special_agent import SpecialAgent
+from gc_core.tools.subagents.worker import Worker
 
 SUBAGENT_CLASSES: List[Type[AbstractSubagent]] = [
     Worker,
@@ -24,7 +28,8 @@ SUBAGENT_CLASSES: List[Type[AbstractSubagent]] = [
 ]
 
 _SUBAGENT_MAP: Dict[str, Type[AbstractSubagent]] = {
-    cls.agent_name: cls for cls in SUBAGENT_CLASSES  # type: ignore[attr-defined]
+    cls.agent_name: cls
+    for cls in SUBAGENT_CLASSES  # type: ignore[attr-defined]
 }
 
 # Разобранные определения кэшируются в самом config_dict: реестр дёргается на
@@ -43,6 +48,65 @@ _log = logging.getLogger(__name__)
 def builtin_subagent_names() -> set:
     """Имена встроенных сабагентов — они выигрывают коллизию у кастомных."""
     return set(_SUBAGENT_MAP.keys())
+
+
+def _warn_unknown_allowlist(
+    log: Any,
+    ordered: List[str],
+    by_name: Dict[str, Any],
+    builtin_names: set,
+    diagnostics,
+) -> None:
+    unknown = [
+        n for n in ordered if n not in by_name and n not in builtin_names
+    ]
+    if not unknown:
+        return
+    available = sorted(set(by_name) | set(builtin_names))
+    log.warning(
+        "use_local_subagents_unknown names=%s available=%s",
+        ", ".join(unknown),
+        ", ".join(available),
+        extra={
+            "event": "use_local_subagents_unknown",
+            "names": unknown,
+            "available": available,
+        },
+    )
+    if diagnostics is not None:
+        diagnostics.append(
+            {"code": "use_local_subagents_unknown", "names": unknown}
+        )
+
+
+def _limit_definitions(
+    definitions: List[SubagentDefinition],
+    max_count: int,
+    log: Any,
+    diagnostics,
+) -> List[SubagentDefinition]:
+    if len(definitions) <= max_count:
+        return definitions
+    dropped = [d.name for d in definitions[max_count:]]
+    log.warning(
+        "subagents_max_count_exceeded limit=%s dropped=%s",
+        max_count,
+        ", ".join(dropped),
+        extra={
+            "event": "subagents_max_count_exceeded",
+            "limit": max_count,
+            "dropped": dropped,
+        },
+    )
+    if diagnostics is not None:
+        diagnostics.append(
+            {
+                "code": "subagents_max_count_exceeded",
+                "limit": max_count,
+                "dropped": dropped,
+            }
+        )
+    return definitions[:max_count]
 
 
 def _apply_allowlist_and_limit(
@@ -64,49 +128,20 @@ def _apply_allowlist_and_limit(
     порядке приоритета.
     """
     log = logger or _log
-    ordered = subagents_allowlist_ordered(config_dict.get("use_local_subagents", False))
+    ordered = subagents_allowlist_ordered(
+        config_dict.get("use_local_subagents", False)
+    )
 
     if ordered is not None:
         by_name = {d.name: d for d in definitions}
-        unknown = [n for n in ordered if n not in by_name and n not in builtin_names]
-        if unknown:
-            log.warning(
-                "use_local_subagents_unknown names=%s available=%s",
-                ", ".join(unknown),
-                ", ".join(sorted(set(by_name) | set(builtin_names))),
-                extra={
-                    "event": "use_local_subagents_unknown",
-                    "names": unknown,
-                    "available": sorted(set(by_name) | set(builtin_names)),
-                },
-            )
-            if diagnostics is not None:
-                diagnostics.append(
-                    {"code": "use_local_subagents_unknown", "names": unknown}
-                )
+        _warn_unknown_allowlist(
+            log, ordered, by_name, builtin_names, diagnostics
+        )
         definitions = [by_name[n] for n in ordered if n in by_name]
 
-    max_count = resolve_max_count(config_dict)
-    if len(definitions) > max_count:
-        dropped = [d.name for d in definitions[max_count:]]
-        # Молчаливое усечение читалось бы как «все агенты подхватились».
-        log.warning(
-            "subagents_max_count_exceeded limit=%s dropped=%s",
-            max_count, ", ".join(dropped),
-            extra={
-                "event": "subagents_max_count_exceeded",
-                "limit": max_count,
-                "dropped": dropped,
-            },
-        )
-        if diagnostics is not None:
-            diagnostics.append({
-                "code": "subagents_max_count_exceeded",
-                "limit": max_count,
-                "dropped": dropped,
-            })
-        definitions = definitions[:max_count]
-    return definitions
+    return _limit_definitions(
+        definitions, resolve_max_count(config_dict), log, diagnostics
+    )
 
 
 def resolve_subagent_definitions(
@@ -129,10 +164,16 @@ def resolve_subagent_definitions(
     builtin = builtin_subagent_names()
     diagnostics: List[Dict[str, Any]] = []
     definitions = discover_subagent_definitions(
-        config_dict, builtin_names=builtin, logger=logger, diagnostics=diagnostics
+        config_dict,
+        builtin_names=builtin,
+        logger=logger,
+        diagnostics=diagnostics,
     )
     definitions = _apply_allowlist_and_limit(
-        definitions, config_dict, builtin_names=builtin, logger=logger,
+        definitions,
+        config_dict,
+        builtin_names=builtin,
+        logger=logger,
         diagnostics=diagnostics,
     )
     config_dict[SUBAGENT_DIAGNOSTICS_KEY] = diagnostics
@@ -141,15 +182,18 @@ def resolve_subagent_definitions(
         if banned:
             # Запрет не исполняется — служебное ядро выдаётся всегда. Но указание
             # оператора явное, поэтому о его игнорировании сообщаем.
-            diagnostics.append({
-                "code": "subagent_required_tools_kept",
-                "path": definition.source_path,
-                "names": banned,
-            })
+            diagnostics.append(
+                {
+                    "code": "subagent_required_tools_kept",
+                    "path": definition.source_path,
+                    "names": banned,
+                }
+            )
             (logger or _log).warning(
                 "subagent_required_tools_kept path=%s names=%s "
                 "(служебные инструменты выдаются всегда, stop_tools их не отбирает)",
-                definition.source_path, ", ".join(banned),
+                definition.source_path,
+                ", ".join(banned),
                 extra={
                     "event": "subagent_required_tools_kept",
                     "path": definition.source_path,
@@ -169,7 +213,11 @@ def get_subagent_class(
     if builtin is not None:
         return builtin
     definition = resolve_subagent_definitions(config_dict).get(tool_name)
-    return FileDefinedSubagent.bound(definition) if definition is not None else None
+    return (
+        FileDefinedSubagent.bound(definition)
+        if definition is not None
+        else None
+    )
 
 
 def is_subagent_tool(

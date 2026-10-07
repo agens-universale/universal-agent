@@ -117,8 +117,12 @@ CODE GENERATOR HANDOFF ADDENDUM
 - In `evidence`, include at least one item for functional correctness and one for integration compatibility when context allows.
 - If tests were not run, state the reason in `evidence` / `blockers`.
 """
-        assignment = self.build_assignment_message({"task": self.task, "reason": self.reason})
-        return self.with_handoff_contract(self.agent_role, coder_notes), assignment
+        assignment = self.build_assignment_message(
+            {"task": self.task, "reason": self.reason}
+        )
+        return self.with_handoff_contract(
+            self.agent_role, coder_notes
+        ), assignment
 
     def get_agent_name(self):
         return self.agent_name
@@ -126,4 +130,3 @@ CODE GENERATOR HANDOFF ADDENDUM
     @classmethod
     def get_agent_specification(cls):
         return cls.tool_specification
-

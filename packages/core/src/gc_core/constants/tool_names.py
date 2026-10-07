@@ -24,8 +24,11 @@ PROJECT_MEMORY_TOOL_NAME = "project_memory"
 FS_READ_FILE_NAME = "fs_read_file"
 FS_WRITE_FILE_NAME = "fs_write_file"
 FS_APPEND_FILE_NAME = "fs_append_file"
+# Просмотр изображения (спека §9.2). Имя нужно раньше самого тула: набор тулов
+# запроса фильтруется по «кто смотрит» (message_policy.attachments_outbound).
+FS_VIEW_IMAGE_NAME = "fs_view_image"
 
-# Exec (representative)
+# Exec (representative)  # noqa: ERA001  # описание формата, не выключенный код
 EXEC_COMMAND_NAME = "exec_command"
 EXEC_PYTHON_NAME = "exec_python"
 EXEC_FETCH_URL_NAME = "exec_fetch_url"

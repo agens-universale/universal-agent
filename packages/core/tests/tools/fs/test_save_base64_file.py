@@ -3,9 +3,8 @@ import json
 
 from gc_core.tools.fs.save_base64_file import SaveBase64File
 from gc_core.utils.file_text import sha256_hex_of_bytes
-
-
 from gc_testkit.helpers.tool_ctx import with_local_ctx
+
 
 def test_save_base64_writes_file(tmp_path):
     raw = b"\x00\xffhello"
@@ -34,3 +33,9 @@ def test_save_base64_parent_is_file_returns_parent_not_found(tmp_path):
     res = json.loads(with_local_ctx(SaveBase64File)(path=path, data=data))
     assert res["ok"] is False
     assert res["error"]["type"] == "parent_not_found"
+
+
+def test_description_points_to_view_image():
+    """Сохранённый скриншот смотрят тулом fs_view_image, а не читают как текст."""
+    assert "fs_view_image" in SaveBase64File.tool_description()["description"]
+    assert "fs_view_image" in SaveBase64File.prompt_description()

@@ -4,6 +4,7 @@
 использует его (source_label / truncate_path_left / build_skill_viewer),
 не дублируя форматирование.
 """
+
 from __future__ import annotations
 
 SOURCE_LABELS = {
@@ -25,7 +26,7 @@ def truncate_path_left(path: str, maxlen: int) -> str:
     """
     if len(path) <= maxlen:
         return path
-    return "…" + path[-(maxlen - 1):]
+    return "…" + path[-(maxlen - 1) :]
 
 
 def build_skill_viewer(detail: dict) -> tuple[str, str]:
@@ -35,17 +36,16 @@ def build_skill_viewer(detail: dict) -> tuple[str, str]:
     body: markdown — заголовок, описание, разделитель, инструкции.
     """
     sid = detail.get("id") or "?"
-    title = (
-        f"skill · {sid} · {source_label(detail.get('source', ''))}"
-        f" · {detail.get('root_path', '')}"
+    title = f"skill · {sid} · {source_label(detail.get('source', ''))} · {detail.get('root_path', '')}"
+    body = "\n".join(
+        [
+            f"# {detail.get('name') or sid} ({sid})",
+            "",
+            detail.get("description", "") or "(без описания)",
+            "",
+            "---",
+            "",
+            detail.get("instructions", "") or "(нет инструкций)",
+        ]
     )
-    body = "\n".join([
-        f"# {detail.get('name') or sid} ({sid})",
-        "",
-        detail.get("description", "") or "(без описания)",
-        "",
-        "---",
-        "",
-        detail.get("instructions", "") or "(нет инструкций)",
-    ])
     return title, body

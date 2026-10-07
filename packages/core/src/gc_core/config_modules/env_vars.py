@@ -11,6 +11,7 @@ Singleton `env = EnvVars()` читает os.environ при импорте мод
 - `XDG_*_HOME` читаются на каждый вызов `gc_paths()` через `_xdg_or` →
   тесты могут использовать `monkeypatch.setenv` напрямую.
 """
+
 from __future__ import annotations
 
 import os
@@ -37,7 +38,15 @@ class EnvVars(BaseSettings):
     gc_data_dir: Path | None = None
 
     @field_validator(
-        "gc_home", "gc_state_dir", "gc_config_dir", "gc_cache_dir", "gc_data_dir",
+        "gc_home",
+        "gc_state_dir",
+        "gc_config_dir",
+        "gc_cache_dir",
+        "gc_data_dir",
+        "server_config_path",
+        "swarm_agentmd_path",
+        "swarm_threads_dir",
+        "swarm_skills_dir",
         mode="before",
     )
     @classmethod
@@ -47,7 +56,11 @@ class EnvVars(BaseSettings):
         return v
 
     @field_validator(
-        "gc_home", "gc_state_dir", "gc_config_dir", "gc_cache_dir", "gc_data_dir",
+        "gc_home",
+        "gc_state_dir",
+        "gc_config_dir",
+        "gc_cache_dir",
+        "gc_data_dir",
         mode="after",
     )
     @classmethod
@@ -74,19 +87,6 @@ class EnvVars(BaseSettings):
     swarm_agentmd_path: Path | None = None
     swarm_threads_dir: Path | None = None
     swarm_skills_dir: Path | None = None
-
-    @field_validator(
-        "server_config_path",
-        "swarm_agentmd_path",
-        "swarm_threads_dir",
-        "swarm_skills_dir",
-        mode="before",
-    )
-    @classmethod
-    def _optional_path_empty_means_none(cls, v):
-        if isinstance(v, str) and not v.strip():
-            return None
-        return v
 
 
 try:
@@ -135,7 +135,7 @@ def _config_dir_usable(p: Path) -> bool:
     """
     probe = p
     while not probe.exists():
-        if probe.parent == probe:   # дошли до корня — дальше некуда
+        if probe.parent == probe:  # дошли до корня — дальше некуда
             return False
         probe = probe.parent
     return os.access(probe, os.W_OK)
@@ -163,7 +163,8 @@ def gc_paths() -> dict[str, Path]:
         }
     elif is_unix:
         defaults = {
-            "state": _xdg_or("XDG_STATE_HOME", home / ".local" / "state") / "gc",
+            "state": _xdg_or("XDG_STATE_HOME", home / ".local" / "state")
+            / "gc",
             "config": _xdg_or("XDG_CONFIG_HOME", home / ".config") / "gc",
             "cache": _xdg_or("XDG_CACHE_HOME", home / ".cache") / "gc",
             "data": _xdg_or("XDG_DATA_HOME", home / ".local" / "share") / "gc",
@@ -194,7 +195,11 @@ def effective_config_dir() -> Path:
     MCP-wiring → оба согласованно уезжают в ~/.gc при залоченном ~/.config.
     """
     config_dir = gc_paths()["config"]
-    if env.gc_config_dir is None and env.gc_home is None and not _config_dir_usable(config_dir):
+    if (
+        env.gc_config_dir is None
+        and env.gc_home is None
+        and not _config_dir_usable(config_dir)
+    ):
         return Path.home() / ".gc"
     return config_dir
 
@@ -218,7 +223,7 @@ def ensure_project_gc_dir(cwd: str | None = None) -> None:
     project skills, long memory)."""
     try:
         os.makedirs(project_gc_dir(cwd), exist_ok=True)
-    except (PermissionError, OSError):
+    except OSError:
         pass
 
 
@@ -236,6 +241,18 @@ def managed_config_path() -> Path:
     return effective_config_dir() / "config.local.yml"
 
 
+def mcp_media_dir() -> Path:
+    """Куда MCP-клиент сохраняет картинки и аудио из ответов тулов:
+    ``<gc_cache>/mcp-media``.
+
+    Живёт здесь, а не в ``tools.connect_mcp``, хотя пишет туда именно MCP: путь
+    читают двое — сохраняющий (``connect_mcp.api``) и охрана
+    (``security.media_roots``, класс ``media``), а охрана не импортирует
+    ``tools`` на загрузке модуля. Одна функция на двоих — каталоги не разойдутся.
+    """
+    return gc_paths()["cache"] / "mcp-media"
+
+
 def project_local_config_path() -> Optional[str]:
     """Абсолютный путь к `<cwd>/.gc/config.yml`, если файл есть, иначе None.
 
@@ -244,4 +261,3 @@ def project_local_config_path() -> Optional[str]:
     и потребители снаружи спрашивают отсюда."""
     candidate = str((project_gc_dir() / "config.yml").resolve())
     return candidate if os.path.isfile(candidate) else None
-

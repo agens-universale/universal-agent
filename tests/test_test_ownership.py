@@ -20,7 +20,6 @@ from __future__ import annotations
 import ast
 
 import pytest
-
 from gc_testkit.paths import REPO
 
 #: Что каждому набору разрешено импортировать помимо gc_testkit и сторонних.
@@ -54,7 +53,11 @@ def _dotted_imports(path) -> set[str]:
         if isinstance(node, ast.Import):
             for alias in node.names:
                 found.add(alias.name)
-        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+        elif (
+            isinstance(node, ast.ImportFrom)
+            and node.level == 0
+            and node.module
+        ):
             found.add(node.module)
     return found
 
@@ -89,7 +92,7 @@ def _testkit_pulls(dotted: str, _seen=None) -> set[str]:
     """
     if _seen is None:
         _seen = set()
-    if dotted in _seen:          # циклы между модулями тест-кита
+    if dotted in _seen:  # циклы между модулями тест-кита
         return set()
     _seen.add(dotted)
 
@@ -140,8 +143,7 @@ def test_suite_does_not_import_packages_above_it(dist):
     # проверяет уже ничего. У соседей (`module_literals`, пины рецептов MCP,
     # снапшот-гейт) такой счётчик есть, здесь его забыли.
     assert scanned, (
-        f"в {suite.relative_to(REPO)} не просмотрено ни одного файла — "
-        "сетка ничего не проверяет"
+        f"в {suite.relative_to(REPO)} не просмотрено ни одного файла — сетка ничего не проверяет"
     )
 
     assert not offenders, (

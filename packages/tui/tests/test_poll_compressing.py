@@ -1,11 +1,17 @@
 """При meta.runtime.summarizing=True индикатор переходит в compressing."""
+
 import pytest
 
 
 class _RunningRunner:
-    def is_running(self): return True
-    def stop_run(self): pass
-    def add_message(self, m): pass
+    def is_running(self):
+        return True
+
+    def stop_run(self):
+        pass
+
+    def add_message(self, m):
+        pass
 
 
 class _FakeStore:
@@ -16,7 +22,11 @@ class _FakeStore:
         pass
 
     def tail_events(self, task_id, cursor):
-        return type("T", (), {"stream_reset": False, "new_records": [], "next_cursor": cursor})()
+        return type(
+            "T",
+            (),
+            {"stream_reset": False, "new_records": [], "next_cursor": cursor},
+        )()
 
 
 @pytest.mark.asyncio
@@ -24,7 +34,10 @@ async def test_poll_switches_to_compressing(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
     from gc_tui.widgets.thinking_indicator import ThinkingIndicator
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         screen = pilot.app.screen
         screen._active_task_id = "t1"

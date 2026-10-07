@@ -4,52 +4,44 @@ build-backend = "hatchling.build"
 
 [project]
 name = "gc-tui"
-version = "0.3.1"
+version = "0.4.0"
 description = "GigaCode Universal Agent — Textual-фронтенд (gc-ua)"
 requires-python = ">=3.11"
 dependencies = [
-    # Точный пин: версии всех манифестов обязаны совпадать, иначе можно собрать
-    # установку из разных коммитов.
-    "gc-core==0.3.1",
-    "gc-mcp==0.3.1",
+
+    "gc-core==0.4.0",
+    "gc-mcp==0.4.0",
     "textual>=0.55",
     "rich>=13",
     "pygments>=2.13",
-    # Голосовой ввод: код (gc_tui.voice, gc_tui.voice_runtime) и его зависимости
-    # живут в одном дистрибутиве. До 27.08.2026 код лежал в ядре, а зависимости
-    # здесь — шов остался от вливания develop и снят вместе с переездом. Ядру голос
-    # не нужен ни строкой: уведомления о нём собирает gc_tui.services.voice_notices
-    # и передаёт в collect_startup_notices параметром. Поэтому headless-профиль
-    # gc-server не тянет за собой PortAudio и веса моделей.
+
     "sounddevice>=0.4",
     "truststore>=0.9",
     "huggingface_hub>=0.30",
+
+    "httpx>=0.27",
+    # PIL.ImageGrab — картинка из буфера обмена Windows (os_ops, импорт ленивый).
+    # Пакет импортирует его своим именем — объявлен здесь: транзит из gc-core не гарантия.
+    "pillow>=10.3",
 ]
 
-# Команды объявляет КАЖДЫЙ профиль-приложение: uv tool install экспортирует в
-# PATH скрипты только запрошенного дистрибутива. Команда целится прямо в свой
-# пакет: шимы-охранники в ядре сняты 27.08.2026 — после разведения имён команд
-# «команда есть, а пакета нет» в здоровой установке не бывает.
 [project.scripts]
-# Только СВОЯ команда. Раньше профиль объявлял ещё gc-mcp/gc-mcp-install —
-# и два профиля не ставились рядом: uv не перезаписывает чужой симлинк, а
-# отказывает («Executables already exist»), а `uv tool uninstall` одного
-# профиля уносил gc-mcp у другого. Команды MCP объявляет их владелец —
-# дистрибутив gc-mcp, от которого этот профиль зависит жёстко.
-gc-ua = "gc_tui:main"
-# Голосовая батарейка — команда профиля TUI: единственного, где голос включён.
-gc-voice = "gc_tui.voice_runtime.cli:main"
 
+gc-ua = "gc_tui:main"
+
+gc-voice = "gc_tui.voice_runtime.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/gc_tui"]
 
 [tool.pytest.ini_options]
-# Набор пакета гоняется отдельно: `cd packages/tui && pytest`. Зелёный
-# автономный прогон изоляции НЕ доказывает: плагин тест-кита кладёт на
-# sys.path все шесть packages/*/src при любом нашем rootdir, поэтому чужой
-# импорт спокойно резолвится. Изоляцию доказывает статический сторож
-# tests/test_test_ownership.py — он смотрит на текст импортов.
-# Общая инфраструктура приезжает из gc-testkit.
+
 testpaths = ["tests"]
 asyncio_mode = "auto"
+
+filterwarnings = [
+    "error::pytest.PytestUnraisableExceptionWarning",
+    "error::RuntimeWarning",
+
+    "default:coroutine 'App.call_from_thread.<locals>.run_callback' was never awaited:RuntimeWarning",
+]

@@ -4,6 +4,7 @@
 Экспортируемая функция:
 - get_skills_tools_data() -> Dict[str, Dict[str, Any]]
 """
+
 from __future__ import annotations
 
 import json
@@ -12,12 +13,21 @@ import shlex
 import sys
 from typing import Any, Dict, Optional
 
+from gc_core.backends.async_protocol import aexec_port
 from gc_core.config_modules.agent import (
     exec_output_preview_edge_chars_from_config_dict,
     exec_timeout_from_config_dict,
 )
-from gc_core.loop_detector.constants import LOOP_WARN_KEY, READ_PROFILE, copy_loop_warn, loop_warn_on_repeat
-from gc_core.tools.exec.exec_envelope import as_captured_stream, exec_channels_json
+from gc_core.loop_detector.constants import (
+    LOOP_WARN_KEY,
+    READ_PROFILE,
+    copy_loop_warn,
+    loop_warn_on_repeat,
+)
+from gc_core.tools.exec.exec_envelope import (
+    as_captured_stream,
+    exec_channels_json,
+)
 from gc_core.tools.schema_optional import coalesce_optional_string
 from gc_core.tools.skills.registry import AmbiguousSkillId, SkillsRegistry
 from gc_core.utils.arg_decorators import parse_json_object_argument
@@ -32,14 +42,11 @@ def _json_sanitize(value: Any) -> Any:
     if isinstance(value, (bytes, bytearray)):
         return "binary data"
     if isinstance(value, dict):
-        out: Dict[str, Any] = {}
-        for k, v in value.items():
-            key = k if isinstance(k, str) else str(k)
-            out[key] = _json_sanitize(v)
-        return out
-    if isinstance(value, list):
-        return [_json_sanitize(v) for v in value]
-    if isinstance(value, tuple):
+        return {
+            (k if isinstance(k, str) else str(k)): _json_sanitize(v)
+            for k, v in value.items()
+        }
+    if isinstance(value, (list, tuple)):
         return [_json_sanitize(v) for v in value]
     if isinstance(value, (str, int, float, bool)):
         return value
@@ -66,32 +73,41 @@ def _wrap(
 
 @loop_warn_on_repeat(**READ_PROFILE)
 class SkillsListTool:
-    def __init__(self, registry: SkillsRegistry, *args: Any, **kwargs: Any) -> None:
+    def __init__(
+        self, registry: SkillsRegistry, *args: Any, **kwargs: Any
+    ) -> None:
         self._registry = registry
 
-    def __call__(self, pack: Optional[str] = None, **kwargs: Any) -> Dict[str, Any]:
+    async def acall(self, pack: Optional[str] = None, **kwargs: Any) -> str:
         pack = coalesce_optional_string(pack)
         try:
-            skills = self._registry.list_skills(pack=pack)
-            return _wrap(tool="skills_list", ok=True, result={"skills": skills})
-        except Exception as exc:  # noqa: BLE001
+            skills = await self._registry.list_skills(pack=pack)
+            return _wrap(
+                tool="skills_list", ok=True, result={"skills": skills}
+            )
+        except Exception as exc:
             logger.error("skills_list failed: %s", exc, exc_info=True)
             return _wrap(
                 tool="skills_list",
                 ok=False,
                 result=None,
-                error={"code": "INTERNAL_ERROR", "message": f"skills_list failed: {exc}"},
+                error={
+                    "code": "INTERNAL_ERROR",
+                    "message": f"skills_list failed: {exc}",
+                },
             )
 
 
 @loop_warn_on_repeat(**READ_PROFILE)
 class LoadSkillTool:
-    def __init__(self, registry: SkillsRegistry, *args: Any, **kwargs: Any) -> None:
+    def __init__(
+        self, registry: SkillsRegistry, *args: Any, **kwargs: Any
+    ) -> None:
         self._registry = registry
 
-    def __call__(self, skill_id: str, **kwargs: Any) -> Dict[str, Any]:
+    async def acall(self, skill_id: str, **kwargs: Any) -> str:
         try:
-            detail = self._registry.load_skill_detail(skill_id)
+            detail = await self._registry.load_skill_detail(skill_id)
             return _wrap(
                 tool="skills_load",
                 ok=True,
@@ -118,19 +134,24 @@ class LoadSkillTool:
                 result=None,
                 error={"code": "SKILL_NOT_FOUND", "message": str(exc)},
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.error("skills_load failed: %s", exc, exc_info=True)
             return _wrap(
                 tool="skills_load",
                 ok=False,
                 skill_id=skill_id,
                 result=None,
-                error={"code": "INTERNAL_ERROR", "message": f"skills_load failed: {exc}"},
+                error={
+                    "code": "INTERNAL_ERROR",
+                    "message": f"skills_load failed: {exc}",
+                },
             )
 
 
 class RunSkillScriptTool:
-    def __init__(self, registry: SkillsRegistry, *args: Any, **kwargs: Any) -> None:
+    def __init__(
+        self, registry: SkillsRegistry, *args: Any, **kwargs: Any
+    ) -> None:
         self._registry = registry
         self._ctx = kwargs.get("ctx")
         self._config_dict = kwargs.get("config_dict") or {}
@@ -140,7 +161,7 @@ class RunSkillScriptTool:
         target_arg="args_data",
         error_handler_method="_json_arg_error",
     )
-    def __call__(
+    async def acall(
         self,
         skill_id: str,
         script_name: str | None = None,
@@ -148,13 +169,15 @@ class RunSkillScriptTool:
         args: str | None = None,
         args_data: Dict[str, Any] | None = None,
         **kwargs: Any,
-    ) -> Dict[str, Any]:
+    ) -> str:
         try:
-            resolved = self._registry.resolve_script(
+            resolved = await self._registry.resolve_script(
                 skill_id=skill_id, script_name=script_name or ""
             )
             if self._ctx is None or not hasattr(self._ctx, "os_backend"):
-                raise RuntimeError("skills_run_script requires a run context with os_backend")
+                raise RuntimeError(
+                    "skills_run_script requires a run context with os_backend"
+                )
             backend = self._ctx.os_backend
             python = "python3" if backend.is_sandbox else sys.executable
             run_argv = [python, resolved["path"]]
@@ -163,7 +186,12 @@ class RunSkillScriptTool:
                 run_argv += shlex.split(argv)
             elif args_data is not None:
                 stdin = json.dumps(args_data, ensure_ascii=False)
-            exec_result = backend.exec_argv(
+            # Нативно: asyncio.create_subprocess_exec внутри aexec_argv, без
+            # потока. Синхронный exec_argv — сам шим над этой же корутиной
+            # (backends/local.py), так что реализация та же, а с пути уходят
+            # поток из пула и лишний event loop. Чужой бэкенд без aexec_argv
+            # aexec_port завернёт в SyncExecAdapter — совместимость цела.
+            exec_result = await aexec_port(backend).aexec_argv(
                 run_argv,
                 stdin=stdin,
                 timeout=exec_timeout_from_config_dict(self._config_dict),
@@ -186,10 +214,14 @@ class RunSkillScriptTool:
                 exec_channels_json(
                     stdout,
                     stderr,
-                    exec_output_preview_edge_chars_from_config_dict(self._config_dict),
+                    exec_output_preview_edge_chars_from_config_dict(
+                        self._config_dict
+                    ),
                 )
             )
-            script_ok = not exec_result.timed_out and exec_result.return_code == 0
+            script_ok = (
+                not exec_result.timed_out and exec_result.return_code == 0
+            )
             return _wrap(
                 tool="skills_run_script",
                 ok=True,
@@ -226,7 +258,7 @@ class RunSkillScriptTool:
                 result=None,
                 error={"code": "SCRIPT_NOT_FOUND", "message": str(exc)},
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.error("skills_run_script failed: %s", exc, exc_info=True)
             return _wrap(
                 tool="skills_run_script",
@@ -242,7 +274,9 @@ class RunSkillScriptTool:
                 },
             )
 
-    def _json_arg_error(self, exc: JsonArgParseError, call_kwargs: Dict[str, Any]) -> str:
+    def _json_arg_error(
+        self, exc: JsonArgParseError, call_kwargs: Dict[str, Any]
+    ) -> str:
         return _wrap(
             tool="skills_run_script",
             ok=False,
@@ -251,18 +285,26 @@ class RunSkillScriptTool:
             argv=call_kwargs.get("argv"),
             args=call_kwargs.get("args"),
             result=None,
-            error={"code": "INVALID_ARGUMENT", "field": exc.field, "message": exc.message},
+            error={
+                "code": "INVALID_ARGUMENT",
+                "field": exc.field,
+                "message": exc.message,
+            },
         )
 
 
 @loop_warn_on_repeat(**READ_PROFILE)
 class LoadReferenceTool:
-    def __init__(self, registry: SkillsRegistry, *args: Any, **kwargs: Any) -> None:
+    def __init__(
+        self, registry: SkillsRegistry, *args: Any, **kwargs: Any
+    ) -> None:
         self._registry = registry
 
-    def __call__(self, skill_id: str, slug: str, **kwargs: Any) -> Dict[str, Any]:
+    async def acall(self, skill_id: str, slug: str, **kwargs: Any) -> str:
         try:
-            res = self._registry.load_reference(skill_id=skill_id, slug=slug)
+            res = await self._registry.load_reference(
+                skill_id=skill_id, slug=slug
+            )
             return _wrap(
                 tool="skills_read_reference",
                 ok=True,
@@ -292,26 +334,33 @@ class LoadReferenceTool:
                 result=None,
                 error={"code": "RESOURCE_NOT_FOUND", "message": str(exc)},
             )
-        except Exception as exc:  # noqa: BLE001
-            logger.error("skills_read_reference failed: %s", exc, exc_info=True)
+        except Exception as exc:
+            logger.error(
+                "skills_read_reference failed: %s", exc, exc_info=True
+            )
             return _wrap(
                 tool="skills_read_reference",
                 ok=False,
                 skill_id=skill_id,
                 slug=slug,
                 result=None,
-                error={"code": "INTERNAL_ERROR", "message": f"skills_read_reference failed: {exc}"},
+                error={
+                    "code": "INTERNAL_ERROR",
+                    "message": f"skills_read_reference failed: {exc}",
+                },
             )
 
 
 @loop_warn_on_repeat(**READ_PROFILE)
 class LoadAssetTool:
-    def __init__(self, registry: SkillsRegistry, *args: Any, **kwargs: Any) -> None:
+    def __init__(
+        self, registry: SkillsRegistry, *args: Any, **kwargs: Any
+    ) -> None:
         self._registry = registry
 
-    def __call__(self, skill_id: str, slug: str, **kwargs: Any) -> Dict[str, Any]:
+    async def acall(self, skill_id: str, slug: str, **kwargs: Any) -> str:
         try:
-            res = self._registry.load_asset(skill_id=skill_id, slug=slug)
+            res = await self._registry.load_asset(skill_id=skill_id, slug=slug)
             return _wrap(
                 tool="skills_read_asset",
                 ok=True,
@@ -341,7 +390,7 @@ class LoadAssetTool:
                 result=None,
                 error={"code": "RESOURCE_NOT_FOUND", "message": str(exc)},
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.error("skills_read_asset failed: %s", exc, exc_info=True)
             return _wrap(
                 tool="skills_read_asset",
@@ -349,21 +398,29 @@ class LoadAssetTool:
                 skill_id=skill_id,
                 slug=slug,
                 result=None,
-                error={"code": "INTERNAL_ERROR", "message": f"skills_read_asset failed: {exc}"},
+                error={
+                    "code": "INTERNAL_ERROR",
+                    "message": f"skills_read_asset failed: {exc}",
+                },
             )
 
 
-def get_skills_tools_data(skills_registry: SkillsRegistry) -> Dict[str, Dict[str, Any]]:
+def get_skills_tools_data(
+    skills_registry: SkillsRegistry,
+) -> Dict[str, Dict[str, Any]]:
     """
     Собрать словарь инструментов работы со скиллами в формате tools_data.
     """
+
     def _make_fabric(tool_cls: type):
         def fabric(**kwargs: Any):
             return tool_cls(skills_registry, **kwargs)
 
         return fabric
 
-    def _with_loop_warn(entry: Dict[str, Any], tool_cls: type) -> Dict[str, Any]:
+    def _with_loop_warn(
+        entry: Dict[str, Any], tool_cls: type
+    ) -> Dict[str, Any]:
         warn = copy_loop_warn(tool_cls)
         if warn is not None:
             entry[LOOP_WARN_KEY] = warn
@@ -438,8 +495,8 @@ def get_skills_tools_data(skills_registry: SkillsRegistry) -> Dict[str, Dict[str
             "description": (
                 "Tool name: skills_load\n"
                 "Tool description: Loads a skill's instructions and metadata by id.\n"
-                "Input schema: {\"type\": \"object\", \"properties\": {\"skill_id\": {\"type\": \"string\"}}, "
-                "\"required\": [\"skill_id\"], \"additionalProperties\": false}\n"
+                'Input schema: {"type": "object", "properties": {"skill_id": {"type": "string"}}, '
+                '"required": ["skill_id"], "additionalProperties": false}\n'
                 "\n"
                 "Usage:\n"
                 "- This is the FIRST tool to call for a skill — before any skills_read_reference or skills_read_asset.\n"
@@ -490,7 +547,7 @@ def get_skills_tools_data(skills_registry: SkillsRegistry) -> Dict[str, Dict[str
                                 "(this field is string-typed, not a nested object). "
                                 "The script receives the parsed object on stdin and must read it explicitly "
                                 "(keys are not converted to CLI flags or positionals). "
-                                "Example: '{\"input\":\"hello\",\"limit\":3}'."
+                                'Example: \'{"input":"hello","limit":3}\'.'
                             ),
                         },
                     },
@@ -502,17 +559,17 @@ def get_skills_tools_data(skills_registry: SkillsRegistry) -> Dict[str, Dict[str
             "description": (
                 "Tool name: skills_run_script\n"
                 "Tool description: Runs an explicitly selected Python script of a specific skill.\n"
-                "Input schema: {\"type\": \"object\", \"properties\": {\"skill_id\": {\"type\": \"string\"}, "
-                "\"script_name\": {\"type\": \"string\"}, \"argv\": {\"type\": \"string\"}, "
-                "\"args\": {\"type\": \"string\"}}, \"required\": [\"skill_id\", \"script_name\"], "
-                "\"additionalProperties\": false}\n"
+                'Input schema: {"type": "object", "properties": {"skill_id": {"type": "string"}, '
+                '"script_name": {"type": "string"}, "argv": {"type": "string"}, '
+                '"args": {"type": "string"}}, "required": ["skill_id", "script_name"], '
+                '"additionalProperties": false}\n'
                 "\n"
                 "Usage:\n"
                 "- Use this tool when a skill defines executable logic in its scripts/ directory.\n"
                 "- Obtain the exact required script_name from skills_load; there is no default script.\n"
                 "- Prefer argv for argparse-style flags and positional arguments.\n"
                 "- args must decode to a JSON object; pass it as a string, not a nested object "
-                "(e.g. '{\"input\":\"hello\"}').\n"
+                '(e.g. \'{"input":"hello"}\').\n'
                 "- args is legacy stdin JSON and is used only when argv is absent.\n"
                 "- The result includes stdout, stderr, exit_code, and script_ok (false when exit_code != 0)."
             ),
@@ -554,9 +611,9 @@ def get_skills_tools_data(skills_registry: SkillsRegistry) -> Dict[str, Dict[str
             "description": (
                 "Tool name: skills_read_reference\n"
                 "Tool description: Loads a reference document for a skill by slug.\n"
-                "Input schema: {\"type\": \"object\", \"properties\": {\"skill_id\": {\"type\": \"string\"}, "
-                "\"slug\": {\"type\": \"string\"}}, \"required\": [\"skill_id\", \"slug\"], "
-                "\"additionalProperties\": false}\n"
+                'Input schema: {"type": "object", "properties": {"skill_id": {"type": "string"}, '
+                '"slug": {"type": "string"}}, "required": ["skill_id", "slug"], '
+                '"additionalProperties": false}\n'
                 "\n"
                 "Usage:\n"
                 "- Prerequisite: call skills_load(skill_id) FIRST. This tool does NOT load the skill; "
@@ -604,9 +661,9 @@ def get_skills_tools_data(skills_registry: SkillsRegistry) -> Dict[str, Dict[str
             "description": (
                 "Tool name: skills_read_asset\n"
                 "Tool description: Loads an asset file for a skill by slug.\n"
-                "Input schema: {\"type\": \"object\", \"properties\": {\"skill_id\": {\"type\": \"string\"}, "
-                "\"slug\": {\"type\": \"string\"}}, \"required\": [\"skill_id\", \"slug\"], "
-                "\"additionalProperties\": false}\n"
+                'Input schema: {"type": "object", "properties": {"skill_id": {"type": "string"}, '
+                '"slug": {"type": "string"}}, "required": ["skill_id", "slug"], '
+                '"additionalProperties": false}\n'
                 "\n"
                 "Usage:\n"
                 "- Prerequisite: call skills_load(skill_id) FIRST. This tool does NOT load the skill; "
@@ -634,4 +691,3 @@ def get_skills_tools_data(skills_registry: SkillsRegistry) -> Dict[str, Dict[str
 __all__ = [
     "get_skills_tools_data",
 ]
-

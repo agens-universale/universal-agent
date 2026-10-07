@@ -2,8 +2,9 @@
 
 from types import SimpleNamespace
 
+import pytest
 from gc_core.intent_log.user_turn import init_subagent_open_turn
-from gc_core.states import State, SharedStateData
+from gc_core.states import SharedStateData, State
 from gc_core.tools.subagents.runner import SubagentRunner
 
 
@@ -56,12 +57,13 @@ def _user_msg(content: str) -> dict:
 
 
 class TestBuildInitialMessages:
-    def test_with_system_prompt_has_system_and_user(self):
+    @pytest.mark.asyncio
+    async def test_with_system_prompt_has_system_and_user(self):
         prompt = "You are a helpful assistant.\n<specific_role>default</specific_role>"
         orch = _make_orchestrator_state(system_prompt=prompt)
         cfg = _make_config()
         runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
-        child = runner._build_child_state("Expert planner")
+        child = await runner._build_child_state("Expert planner")
         messages = runner._build_initial_messages(
             child, "Expert planner", _user_msg("Do the task")
         )
@@ -70,24 +72,26 @@ class TestBuildInitialMessages:
         assert messages[0]["role"] == "system"
         assert messages[1]["role"] == "user"
 
-    def test_system_prompt_contains_agent_role(self):
+    @pytest.mark.asyncio
+    async def test_system_prompt_contains_agent_role(self):
         prompt = "You are a helpful assistant.\n<specific_role>default</specific_role>"
         orch = _make_orchestrator_state(system_prompt=prompt)
         cfg = _make_config()
         runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
-        child = runner._build_child_state("Expert planner")
+        child = await runner._build_child_state("Expert planner")
         messages = runner._build_initial_messages(
             child, "Expert planner", _user_msg("Do the task")
         )
 
         assert "Expert planner" in messages[0]["content"]
 
-    def test_user_message_contains_task(self):
+    @pytest.mark.asyncio
+    async def test_user_message_contains_task(self):
         prompt = "System prompt\n<specific_role>x</specific_role>"
         orch = _make_orchestrator_state(system_prompt=prompt)
         cfg = _make_config()
         runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
-        child = runner._build_child_state("role")
+        child = await runner._build_child_state("role")
         messages = runner._build_initial_messages(
             child, "role", _user_msg("Implement feature X")
         )
@@ -96,12 +100,15 @@ class TestBuildInitialMessages:
         assert len(user_msg) == 1
         assert user_msg[0]["content"] == "Implement feature X"
 
-    def test_without_system_prompt_starts_with_user(self):
+    @pytest.mark.asyncio
+    async def test_without_system_prompt_starts_with_user(self):
         orch = _make_orchestrator_state(system_prompt=None)
         cfg = _make_config()
         runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
-        child = runner._build_child_state("role")
-        messages = runner._build_initial_messages(child, "role", _user_msg("Do the task"))
+        child = await runner._build_child_state("role")
+        messages = runner._build_initial_messages(
+            child, "role", _user_msg("Do the task")
+        )
 
         # При отсутствии промпта в State подставляется дефолтный файл субагента.
         assert len(messages) == 2
@@ -109,46 +116,60 @@ class TestBuildInitialMessages:
         assert messages[1]["role"] == "user"
         assert messages[1]["content"] == "Do the task"
 
-    def test_empty_system_prompt_starts_with_user(self):
+    @pytest.mark.asyncio
+    async def test_empty_system_prompt_starts_with_user(self):
         orch = _make_orchestrator_state(system_prompt="   ")
         cfg = _make_config()
         runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
-        child = runner._build_child_state("role")
-        messages = runner._build_initial_messages(child, "role", _user_msg("task text"))
+        child = await runner._build_child_state("role")
+        messages = runner._build_initial_messages(
+            child, "role", _user_msg("task text")
+        )
 
         assert len(messages) == 2
         assert messages[0]["role"] == "system"
         assert messages[1]["role"] == "user"
 
-    def test_messages_have_id_field(self):
+    @pytest.mark.asyncio
+    async def test_messages_have_id_field(self):
         prompt = "System\n<specific_role>x</specific_role>"
         orch = _make_orchestrator_state(system_prompt=prompt)
         cfg = _make_config()
         runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
-        child = runner._build_child_state("role")
-        messages = runner._build_initial_messages(child, "role", _user_msg("task"))
+        child = await runner._build_child_state("role")
+        messages = runner._build_initial_messages(
+            child, "role", _user_msg("task")
+        )
 
         for msg in messages:
-            assert "id" in msg and isinstance(msg["id"], str) and len(msg["id"]) > 0
+            assert (
+                "id" in msg
+                and isinstance(msg["id"], str)
+                and len(msg["id"]) > 0
+            )
 
-    def test_child_state_messages_updated_with_system(self):
+    @pytest.mark.asyncio
+    async def test_child_state_messages_updated_with_system(self):
         prompt = "System prompt\n<specific_role>x</specific_role>"
         orch = _make_orchestrator_state(system_prompt=prompt)
         cfg = _make_config()
         runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
-        child = runner._build_child_state("role")
-        messages = runner._build_initial_messages(child, "role", _user_msg("task"))
+        child = await runner._build_child_state("role")
+        messages = runner._build_initial_messages(
+            child, "role", _user_msg("task")
+        )
 
         assert len(child.messages) >= 1
         assert child.messages[0]["role"] == "system"
 
-    def test_run_seeds_assignment_into_current_user_intent(self):
+    @pytest.mark.asyncio
+    async def test_run_seeds_assignment_into_current_user_intent(self):
         """Как в SubagentRunner.run: transcript и finish-gate scope раздельно."""
         prompt = "System prompt\n<specific_role>x</specific_role>"
         orch = _make_orchestrator_state(system_prompt=prompt)
         cfg = _make_config()
         runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
-        child = runner._build_child_state("role")
+        child = await runner._build_child_state("role")
         user_message = _user_msg("Implement feature X")
         runner._build_initial_messages(child, "role", user_message)
         init_subagent_open_turn(child, "Implement feature X")

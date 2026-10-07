@@ -8,6 +8,7 @@
 Статус ссылки определяется по os.environ, а НЕ по резолвнутому значению: пустой
 резолв («переменной нет») неотличим от «значение не задано».
 """
+
 from __future__ import annotations
 
 import os
@@ -70,8 +71,9 @@ def env_refs(value: Any) -> List[str]:
     return _ENV_MARKER.findall(value)
 
 
-def env_refs_overwritten(new_values: Dict[str, Any],
-                         old_values: Dict[str, Any]) -> tuple[List[str], List[str]]:
+def env_refs_overwritten(
+    new_values: Dict[str, Any], old_values: Dict[str, Any]
+) -> tuple[List[str], List[str]]:
     """Переменные окружения, чьи ссылки затрёт запись `new_values` поверх
     `old_values` (сырые значения тех же ключей), разложенные по тому, ЧТО с ними
     произойдёт: (перезапись литералом, удаление пустым значением). Оба списка
@@ -86,6 +88,19 @@ def env_refs_overwritten(new_values: Dict[str, Any],
     written: List[str] = []
     erased: List[str] = []
     for key, value in new_values.items():
+        old = old_values.get(key)
+        if isinstance(old, dict):
+            # Значение ключа заменяется целиком: пропавшие вложенные ключи
+            # тоже стирают ссылки, в отличие от отсутствующего верхнего ключа.
+            replacement = value if isinstance(value, dict) else {}
+            nested_values = {name: None for name in old}
+            nested_values.update(replacement)
+            nested_written, nested_erased = env_refs_overwritten(
+                nested_values, old
+            )
+            written.extend(nested_written)
+            erased.extend(nested_erased)
+            continue
         if env_refs(value):
             continue
         refs = env_refs(old_values.get(key))

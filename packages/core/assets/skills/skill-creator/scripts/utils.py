@@ -3,6 +3,31 @@
 from pathlib import Path
 
 
+def _frontmatter_end(lines: list[str]) -> int | None:
+    for i, line in enumerate(lines[1:], start=1):
+        if line.strip() == "---":
+            return i
+    return None
+
+
+def _parse_description(
+    frontmatter_lines: list[str], i: int
+) -> tuple[str, int]:
+    """Значение description (в т.ч. YAML-многострочное) и индекс следующей строки для разбора."""
+    value = frontmatter_lines[i][len("description:") :].strip()
+    # Handle YAML multiline indicators (>, |, >-, |-)
+    if value not in (">", "|", ">-", "|-"):
+        return value.strip('"').strip("'"), i + 1
+    continuation_lines: list[str] = []
+    i += 1
+    while i < len(frontmatter_lines) and (
+        frontmatter_lines[i].startswith("  ")
+        or frontmatter_lines[i].startswith("\t")
+    ):
+        continuation_lines.append(frontmatter_lines[i].strip())
+        i += 1
+    return " ".join(continuation_lines), i
+
 
 def parse_skill_md(skill_path: Path) -> tuple[str, str, str]:
     """Parse a SKILL.md file, returning (name, description, full_content)."""
@@ -12,12 +37,7 @@ def parse_skill_md(skill_path: Path) -> tuple[str, str, str]:
     if lines[0].strip() != "---":
         raise ValueError("SKILL.md missing frontmatter (no opening ---)")
 
-    end_idx = None
-    for i, line in enumerate(lines[1:], start=1):
-        if line.strip() == "---":
-            end_idx = i
-            break
-
+    end_idx = _frontmatter_end(lines)
     if end_idx is None:
         raise ValueError("SKILL.md missing frontmatter (no closing ---)")
 
@@ -28,20 +48,9 @@ def parse_skill_md(skill_path: Path) -> tuple[str, str, str]:
     while i < len(frontmatter_lines):
         line = frontmatter_lines[i]
         if line.startswith("name:"):
-            name = line[len("name:"):].strip().strip('"').strip("'")
+            name = line[len("name:") :].strip().strip('"').strip("'")
         elif line.startswith("description:"):
-            value = line[len("description:"):].strip()
-            # Handle YAML multiline indicators (>, |, >-, |-)
-            if value in (">", "|", ">-", "|-"):
-                continuation_lines: list[str] = []
-                i += 1
-                while i < len(frontmatter_lines) and (frontmatter_lines[i].startswith("  ") or frontmatter_lines[i].startswith("\t")):
-                    continuation_lines.append(frontmatter_lines[i].strip())
-                    i += 1
-                description = " ".join(continuation_lines)
-                continue
-            else:
-                description = value.strip('"').strip("'")
+            description, i = _parse_description(frontmatter_lines, i)
+            continue
         i += 1
-
     return name, description, content

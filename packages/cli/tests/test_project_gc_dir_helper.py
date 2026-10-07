@@ -1,4 +1,3 @@
-import os
 from pathlib import Path
 
 from gc_core.config_modules.env_vars import project_gc_dir
@@ -30,6 +29,7 @@ def test_project_gc_dir_lazy_cwd_resolution(monkeypatch, tmp_path):
 def test_cli_ensure_project_gc_dir_uses_helper(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     from gc_cli.cli import _ensure_project_gc_dir
+
     _ensure_project_gc_dir()
     assert (tmp_path / ".gc").is_dir()
 
@@ -37,10 +37,13 @@ def test_cli_ensure_project_gc_dir_uses_helper(monkeypatch, tmp_path):
 def test_local_project_overlay_uses_helper(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     from gc_core.config_modules.env_vars import project_local_config_path
+
     # No file → returns None
     assert project_local_config_path() is None
     (tmp_path / ".gc").mkdir()
-    (tmp_path / ".gc" / "config.yml").write_text("foo: bar\n", encoding="utf-8")
+    (tmp_path / ".gc" / "config.yml").write_text(
+        "foo: bar\n", encoding="utf-8"
+    )
     overlay = project_local_config_path()
     assert overlay == str((tmp_path / ".gc" / "config.yml").resolve())
 
@@ -48,4 +51,5 @@ def test_local_project_overlay_uses_helper(monkeypatch, tmp_path):
 def test_project_skills_dir_uses_helper(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     from gc_core.tools.skills.registry import _project_skills_root
+
     assert _project_skills_root() == str(tmp_path / ".gc" / "skills")

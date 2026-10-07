@@ -1,6 +1,11 @@
 import unittest
 
-from gc_core.intent_guard.feedback import QUESTION_CONTINUE_HINT, TEXT_ANSWER_REJECT_TOOL_HINT, build_finish_gate_feedback, build_text_answer_reject_feedback
+from gc_core.intent_guard.feedback import (
+    QUESTION_CONTINUE_HINT,
+    TEXT_ANSWER_REJECT_TOOL_HINT,
+    build_finish_gate_feedback,
+    build_text_answer_reject_feedback,
+)
 from gc_core.intent_guard.validation_result import ValidationResult
 
 
@@ -88,7 +93,9 @@ class FinishGateFeedbackTest(unittest.TestCase):
         self.assertIn("Do not repeat", text)
         self.assertIn("Close trace gaps first", text)
 
-    def test_fix_report_and_continue_is_question_uses_question_hint(self) -> None:
+    def test_fix_report_and_continue_is_question_uses_question_hint(
+        self,
+    ) -> None:
         text = build_finish_gate_feedback(
             _v(
                 ok=False,

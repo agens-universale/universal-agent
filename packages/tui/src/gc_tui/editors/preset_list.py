@@ -4,11 +4,12 @@
 одна, подсказка снаружи). Данные локальные (объекты с .name/.url, напр.
 EndpointPreset) — без воркеров/fetch. Хозяева — ConnectionEditor и VoiceEndpointEditor
 (поле «URL» голосовой панели, спека 2026-08-05 §3)."""
+
 from __future__ import annotations
 
 from rich.text import Text
 
-from gc_tui.editors.field_list import FieldListController
+from gc_tui.editors.field_list import FieldListController, LIST_CLOSED_HINT
 from gc_tui.palette import ACCENT, DEEP_DIM
 
 # Канон-хинт пресет-листа адреса (спека §2.1, дословно).
@@ -21,12 +22,22 @@ PRESET_HINT = "провайдеры · печать — фильтр/свой а
 # (`connection.PRESET_NO_MATCH_CLOSED`) — канон в редакции 2026-08-18.
 # Глагол — тот же, что в футере шага (`onboarding._FOOTER_PRESET_LIST_NO_MATCH`): обе
 # строки видны одновременно, и звать одну клавишу двумя словами нельзя.
-PRESET_HINT_NO_MATCH = "в списке такого нет · Enter — оставить свой адрес · Esc — свернуть"
+PRESET_HINT_NO_MATCH = (
+    "в списке такого нет · Enter — оставить свой адрес · Esc — свернуть"
+)
 
 
-def preset_list_controller(host, *, presets: list, row_class: str, input_id: str,
-                           hint: str, on_pick=None,
-                           no_match_hint: str = PRESET_HINT_NO_MATCH) -> FieldListController:
+def preset_list_controller(
+    host,
+    *,
+    presets: list,
+    row_class: str,
+    input_id: str,
+    hint: str,
+    on_pick=None,
+    no_match_hint: str = PRESET_HINT_NO_MATCH,
+    closed_hint: str = LIST_CLOSED_HINT,
+) -> FieldListController:
     """Контроллер пресет-листа адреса под полем `#{input_id}`.
 
     Параметры-различия против соседних списков формы:
@@ -89,15 +100,28 @@ def preset_list_controller(host, *, presets: list, row_class: str, input_id: str
         владельца по смоку)."""
         if not value:
             return 0
-        return next((i for i, p in enumerate(items)
-                     if p.url == value and not getattr(p, "inherit", False)), None)
+        return next(
+            (
+                i
+                for i, p in enumerate(items)
+                if p.url == value and not getattr(p, "inherit", False)
+            ),
+            None,
+        )
 
     return FieldListController(
-        host, input_id=input_id, row_class=row_class,
-        hint_class=f"{input_id}-preset-hint", scroll_class=f"{input_id}-preset-scroll",
-        rows_source=tuple(presets), render_row=render,
+        host,
+        input_id=input_id,
+        row_class=row_class,
+        hint_class=f"{input_id}-preset-hint",
+        scroll_class=f"{input_id}-preset-scroll",
+        rows_source=tuple(presets),
+        render_row=render,
         matches=lambda p, q: q in p.name.lower() or q in p.url.lower(),
-        initial_index=initial_index, can_open=can_open,
+        initial_index=initial_index,
+        can_open=can_open,
         hint=lambda ok: hint if ok else no_match_hint,
-        on_pick=on_pick, restore_on_close=False,
+        on_pick=on_pick,
+        restore_on_close=False,
+        closed_hint=closed_hint,
     )

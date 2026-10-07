@@ -1,10 +1,10 @@
-"""run_native_grep без потолка совпадений: отдаёт всё, что разобрал.
+"""arun_native_grep без потолка совпадений: отдаёт всё, что разобрал.
 
 Порядок по релевантности и обрезка по лимиту — дело инструмента (тот же ключ,
 что у Python-пути); транспорт не должен резать вывод grep до сортировки.
 """
 
-from gc_core.utils.native_fs_search import run_native_grep
+from gc_core.utils.native_fs_search import arun_native_grep
 from gc_core.utils.pattern_native_gate import NativeGrepPlan
 
 PLAN = NativeGrepPlan(fixed=True, pattern="needle", case_insensitive=False)
@@ -39,8 +39,8 @@ class _Backend:
 OUT = "/work/zzz.py:1:needle\n/work/needle.py:1:needle\n/work/needle.py:2:needle again\n"
 
 
-def _run(stdout, *, max_matches, capped=False):
-    return run_native_grep(
+async def _run(stdout, *, max_matches, capped=False):
+    return await arun_native_grep(
         _Backend(stdout, capped=capped),
         "/work",
         PLAN,
@@ -53,8 +53,8 @@ def _run(stdout, *, max_matches, capped=False):
     )
 
 
-def test_without_a_cap_every_parsed_match_is_returned():
-    res = _run(OUT, max_matches=None)
+async def test_without_a_cap_every_parsed_match_is_returned():
+    res = await _run(OUT, max_matches=None)
     assert [(m["file"], m["line"]) for m in res.matches] == [
         ("/work/zzz.py", 1),
         ("/work/needle.py", 1),
@@ -63,14 +63,16 @@ def test_without_a_cap_every_parsed_match_is_returned():
     assert res.truncated is False
 
 
-def test_without_a_cap_only_the_transport_ceiling_marks_truncation():
-    res = _run(OUT, max_matches=None, capped=True)
+async def test_without_a_cap_only_the_transport_ceiling_marks_truncation():
+    res = await _run(OUT, max_matches=None, capped=True)
     assert len(res.matches) == 3
     assert res.truncated is True
     assert res.hit_capture_cap is True
 
 
-def test_with_a_cap_the_old_contract_still_holds():
-    res = _run(OUT, max_matches=1)
-    assert [(m["file"], m["line"]) for m in res.matches] == [("/work/zzz.py", 1)]
+async def test_with_a_cap_the_old_contract_still_holds():
+    res = await _run(OUT, max_matches=1)
+    assert [(m["file"], m["line"]) for m in res.matches] == [
+        ("/work/zzz.py", 1)
+    ]
     assert res.truncated is True

@@ -1,10 +1,10 @@
 """
 Утилиты для извлечения SSL/TLS параметров из конфига MCP-сервера.
 """
+
 import logging
 import os
 from typing import Any, Dict, Optional, Tuple, Union
-
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +66,9 @@ def get_client_cert(server_cfg: Dict[str, Any]) -> Optional[Tuple[str, str]]:
     return None
 
 
-def get_backend_client_cert(config_dict: Dict[str, Any]) -> Optional[Tuple[str, str]]:
+def get_backend_client_cert(
+    config_dict: Dict[str, Any],
+) -> Optional[Tuple[str, str]]:
     """Клиентский сертификат модели-бэкенда из config_dict (cert_path/key_path).
 
     Оба заданы → (cert, key) с раскрытыми путями; только один → warning + None;

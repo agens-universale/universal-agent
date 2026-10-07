@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+)
 
 from gc_core.config_modules.backend import parse_chat_completions_max_tokens
 
@@ -22,9 +28,10 @@ DEFAULT_SUBAGENT_ROLE_MAX_TOKENS = 24576
 class ChatCompletionsLlmConfig(BaseModel):
     """LLM-профиль вспомогательных chat/completions-вызовов (summary, finish gate, intent scope, judges).
 
-    ``completion_kwargs`` — overlay поверх agent ``chat_completion_kwargs``.
-    Schema default ``{}`` (без vendor-ключей); thinking/anti-thinking задаются
-    в YAML/бенч-профиле, не в коде.
+    ``completion_kwargs`` — глобальный словарь служебного вызова, когда у алиаса
+    нет своей секции ``auxiliary`` (и в легаси-режиме без реестра). Явный
+    ``models.<alias>.auxiliary: {}`` его не подмешивает. ``max_tokens`` /
+    ``judge_max_tokens`` по-прежнему здесь.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -122,13 +129,17 @@ def auxiliary_llm_from_config_dict(
 
     cc_params = cfg.get("chat_completions_params")
     if isinstance(cc_params, dict):
-        nested = _auxiliary_llm_dump_if_non_default(cc_params.get("auxiliary_llm"))
+        nested = _auxiliary_llm_dump_if_non_default(
+            cc_params.get("auxiliary_llm")
+        )
         if nested is None:
             nested = _auxiliary_llm_dump_if_non_default(cc_params.get("llm"))
         if nested is not None:
             return ChatCompletionsLlmConfig.model_validate(nested)
 
-    legacy = _auxiliary_llm_dump_if_non_default(cfg.get("chat_completions_llm"))
+    legacy = _auxiliary_llm_dump_if_non_default(
+        cfg.get("chat_completions_llm")
+    )
     if legacy is not None:
         return ChatCompletionsLlmConfig.model_validate(legacy)
 

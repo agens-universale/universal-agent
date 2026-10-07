@@ -61,13 +61,15 @@ def base_config_raw() -> dict:
     оба TUI-входа подавали в проверку пустой словарь — предупреждение «перекрою ваш
     voice.url» там не показывалось никогда."""
     import yaml
-
     from gc_core.config import resolve_config_path
     from gc_core.utils.user_text import read_user_text_or_none
 
     # Зовётся ПЕРЕД установкой голоса из трёх входов (CLI, мастер, /settings):
     # непрочитанный конфиг значит «конфликта не видно», а не «установка упала».
-    return yaml.safe_load(read_user_text_or_none(resolve_config_path(None)) or "") or {}
+    return (
+        yaml.safe_load(read_user_text_or_none(resolve_config_path(None)) or "")
+        or {}
+    )
 
 
 def user_voice_conflict(base_raw: dict, port: int) -> Optional[str]:

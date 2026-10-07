@@ -1,7 +1,10 @@
 import unittest
 from unittest.mock import MagicMock
 
-from gc_core.utils.convertations import output_chat_completion_to_response, get_output_list
+from gc_core.utils.convertations import (
+    get_output_list,
+    output_chat_completion_to_response,
+)
 
 
 def _base_payload():
@@ -21,6 +24,17 @@ def _base_payload():
             }
         ],
     }
+
+
+def test_identical_answers_from_different_responses_have_distinct_ids():
+    first = _base_payload()
+    second = _base_payload()
+    second["id"] = "chatcmpl-second"
+    a = output_chat_completion_to_response(first)["output"][0]
+    b = output_chat_completion_to_response(second)["output"][0]
+    assert a["content"] == b["content"]
+    assert a["id"] != b["id"]
+    assert output_chat_completion_to_response(first)["output"][0]["id"] == a["id"]
 
 
 class ConvertationsTest(unittest.TestCase):
@@ -45,7 +59,9 @@ class ConvertationsTest(unittest.TestCase):
         self.assertNotIn("created", res)
         self.assertEqual(res["output"][0]["type"], "message")
 
-    def test_output_chat_completion_raises_meaningful_error_for_choice_error(self):
+    def test_output_chat_completion_raises_meaningful_error_for_choice_error(
+        self,
+    ):
         payload = _base_payload()
         payload["choices"][0]["finish_reason"] = None
         payload["choices"][0]["message"]["content"] = None
@@ -58,7 +74,9 @@ class ConvertationsTest(unittest.TestCase):
         with self.assertRaises(ValueError) as ctx:
             output_chat_completion_to_response(payload)
 
-        self.assertIn("provider returned choice error", str(ctx.exception).lower())
+        self.assertIn(
+            "provider returned choice error", str(ctx.exception).lower()
+        )
         self.assertIn("provider_unavailable", str(ctx.exception))
 
     def test_output_chat_completion_accepts_finish_reason_length(self):
@@ -83,7 +101,11 @@ def _dct(finish_reason, content="ответ", tool_calls=None):
     msg = {"role": "assistant", "content": content}
     if tool_calls is not None:
         msg["tool_calls"] = tool_calls
-    return {"choices": [{"index": 0, "message": msg, "finish_reason": finish_reason}]}
+    return {
+        "choices": [
+            {"index": 0, "message": msg, "finish_reason": finish_reason}
+        ]
+    }
 
 
 def test_get_output_list_accepts_blocked_finish_with_content():
@@ -97,6 +119,7 @@ def test_get_output_list_accepts_unknown_finish_with_content():
     out = get_output_list(_dct("eos", content="текст"))
     assert any(o["type"] == "message" for o in out)
 
+
 def test_get_output_list_empty_unknown_finish_is_empty_batch():
     # Случай C: пустой choice — не ValueError транспорта, цикл bounce сам.
     assert get_output_list(_dct(None, content="")) == []
@@ -106,7 +129,12 @@ def test_get_output_list_empty_unknown_finish_is_empty_batch():
 
 def test_get_output_list_null_message_with_known_finish_is_empty_batch():
     # message: None / нет ключа — не KeyError/AttributeError на dct_choice['message'].
-    assert get_output_list({"choices": [{"finish_reason": "stop", "message": None}]}) == []
+    assert (
+        get_output_list(
+            {"choices": [{"finish_reason": "stop", "message": None}]}
+        )
+        == []
+    )
     assert get_output_list({"choices": [{"finish_reason": "stop"}]}) == []
 
 
@@ -120,7 +148,9 @@ def test_get_output_list_whitespace_content_alone_is_empty_batch():
 def test_get_output_list_whitespace_content_with_reasoning_salvages():
     # Qwen3/vLLM при length: content="\n\n" + reasoning → salvage, не два \\n в истории.
     payload = _dct("length", content="\n\n")
-    payload["choices"][0]["message"]["reasoning_content"] = "search the leaderboard"
+    payload["choices"][0]["message"]["reasoning_content"] = (
+        "search the leaderboard"
+    )
     out = get_output_list(payload)
     msg, text = _message_text(out)
     assert text == "<think>search the leaderboard</think>"
@@ -145,7 +175,9 @@ def test_get_output_list_empty_unknown_finish_logs_error():
 
 def test_get_output_list_blocked_finish_with_content_no_unknown_warning():
     log = MagicMock()
-    out = get_output_list(_dct("content_filter", content="текст"), logger_override=log)
+    out = get_output_list(
+        _dct("content_filter", content="текст"), logger_override=log
+    )
     assert any(o["type"] == "message" for o in out)
     log.warning.assert_not_called()
     log.error.assert_not_called()
@@ -165,7 +197,9 @@ def test_get_output_list_unknown_finish_with_content_logs_warning():
 def test_get_output_list_unknown_finish_reasoning_only_logs_warning_not_error():
     log = MagicMock()
     payload = _dct(None, content=None)
-    payload["choices"][0]["message"]["reasoning_content"] = "try another approach"
+    payload["choices"][0]["message"]["reasoning_content"] = (
+        "try another approach"
+    )
     out = get_output_list(payload, logger_override=log)
     _, text = _message_text(out)
     assert text == "<think>try another approach</think>"
@@ -199,14 +233,18 @@ def test_get_output_list_default_drops_reasoning_content():
 
 
 def test_get_output_list_persist_copies_reasoning_content():
-    out = get_output_list(_dct_with_reasoning(), persist_reasoning_content=True)
+    out = get_output_list(
+        _dct_with_reasoning(), persist_reasoning_content=True
+    )
     msg = next(o for o in out if o["type"] == "message")
     assert msg["reasoning_content"] == "secret"
     assert msg["content"][0]["text"] == "<think>t</think>ok"
 
 
 def test_get_output_list_persist_omits_missing_reasoning():
-    out = get_output_list(_dct("stop", content="ok"), persist_reasoning_content=True)
+    out = get_output_list(
+        _dct("stop", content="ok"), persist_reasoning_content=True
+    )
     msg = next(o for o in out if o["type"] == "message")
     assert "reasoning_content" not in msg
 
@@ -252,7 +290,9 @@ def _message_text(out):
 
 def test_get_output_list_salvages_reasoning_only_into_think_tags():
     payload = _dct("stop", content=None)
-    payload["choices"][0]["message"]["reasoning_content"] = "search the leaderboard"
+    payload["choices"][0]["message"]["reasoning_content"] = (
+        "search the leaderboard"
+    )
     out = get_output_list(payload)
     msg, text = _message_text(out)
     assert text == "<think>search the leaderboard</think>"
@@ -294,7 +334,9 @@ def test_get_output_list_reasoning_alias_does_not_double_count():
 
 def test_get_output_list_salvages_reasoning_only_unknown_finish():
     payload = _dct(None, content=None)
-    payload["choices"][0]["message"]["reasoning_content"] = "try another approach"
+    payload["choices"][0]["message"]["reasoning_content"] = (
+        "try another approach"
+    )
     out = get_output_list(payload)
     _, text = _message_text(out)
     assert text == "<think>try another approach</think>"
@@ -369,7 +411,9 @@ def test_get_output_list_visible_prose_not_salvaged():
 
 def test_get_output_list_mixed_think_prose_in_content_keeps_only_prose():
     """strip_think: think в канон не кладётся, если есть видимая проза."""
-    out = get_output_list(_dct("stop", content="<think>огромная мысль</think>короткая проза"))
+    out = get_output_list(
+        _dct("stop", content="<think>огромная мысль</think>короткая проза")
+    )
     _, text = _message_text(out)
     assert text == "короткая проза"
 
@@ -409,18 +453,28 @@ def test_get_output_list_persist_copies_openrouter_reasoning_alias():
     assert msg["reasoning_content"] == "secret"
 
 
-def test_salvaged_think_is_not_text_answer_even_in_allow():
-    from gc_core.intent_guard.text_answer_judge import should_return_text_answer
-    from gc_core.message_policy.no_tool_call_bounce import extract_last_assistant_text
-    from gc_core.utils.format_messages import format_message_chat_completions_to_send_backend
+async def test_salvaged_think_is_not_text_answer_even_in_allow():
+    from gc_core.intent_guard.text_answer_judge import (
+        ashould_return_text_answer,
+    )
+    from gc_core.message_policy.no_tool_call_bounce import (
+        extract_last_assistant_text,
+    )
+    from gc_core.utils.format_messages import (
+        format_message_chat_completions_to_send_backend,
+    )
 
     payload = _dct("stop", content=None)
-    payload["choices"][0]["message"]["reasoning_content"] = "search the leaderboard"
+    payload["choices"][0]["message"]["reasoning_content"] = (
+        "search the leaderboard"
+    )
     out = get_output_list(payload)
     projected = extract_last_assistant_text(out)
     assert projected == ""
     ctx = type("C", (), {"config_dict": {"text_answer_mode": "allow"}})()
-    assert should_return_text_answer(ctx, object(), projected).accept is False
+    assert (
+        await ashould_return_text_answer(ctx, object(), projected)
+    ).accept is False
 
     outbound = format_message_chat_completions_to_send_backend(out[0])
     assert outbound["content"] == "<think>search the leaderboard</think>"

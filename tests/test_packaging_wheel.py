@@ -10,7 +10,9 @@ tui/styles.tcss. Потом tui, cli, server и менеджер MCP уехал�
 манифест, разошедшийся по версии, обязан красить набор (см.
 test_versions_are_pinned_together).
 """
+
 import itertools
+import os
 import re
 import shutil
 import subprocess
@@ -28,30 +30,43 @@ REPO = Path(__file__).resolve().parents[1]
 CORE_REQUIRED = [
     "gc_core/assets/prompts/chat_completions_system_prompt.md",
     "gc_core/assets/prompts/chat_completions_tui_special_instructions.md",
+    "gc_core/assets/prompts/chat_completions_responses_special_instructions.md",
+    "gc_core/assets/prompts/chat_completions_completions_special_instructions.md",
     "gc_core/assets/config.default.yml",
     "gc_core/config.py",
 ]
 
 # Ядро не должно содержать код фронтендов — ради этого всё и затевалось.
-CORE_FORBIDDEN = ["gc_tui/", "gc_cli/", "gc_server/"]
+CORE_FORBIDDEN = ["gc_tui/", "gc_cli/", "gc_server/", "gc_acp/"]
 
-MANIFESTS = {"gc_ua": ".", "gc_core": "packages/core", "gc_cli": "packages/cli",
-             "gc_tui": "packages/tui", "gc_server": "packages/server",
-             "gc_mcp": "packages/mcp"}
+MANIFESTS = {
+    "gc_ua": ".",
+    "gc_core": "packages/core",
+    "gc_cli": "packages/cli",
+    "gc_tui": "packages/tui",
+    "gc_server": "packages/server",
+    "gc_mcp": "packages/mcp",
+    "gc_acp": "packages/acp",
+    "gc_chat": "packages/chat",
+}
 
 
 def _build_all(out: Path) -> dict:
     for sub in MANIFESTS.values():
         r = subprocess.run(
             ["uv", "build", "--wheel", "-o", str(out), sub],
-            cwd=str(REPO), capture_output=True, text=True,
+            cwd=str(REPO),
+            capture_output=True,
+            text=True,
         )
         assert r.returncode == 0, r.stderr
     wheels = {}
     for w in out.glob("*.whl"):
         key = w.name.split("-")[0]
         names = set(zipfile.ZipFile(w).namelist())
-        wheels[key] = {n for n in names if not n.split("/")[0].endswith(".dist-info")}
+        wheels[key] = {
+            n for n in names if not n.split("/")[0].endswith(".dist-info")
+        }
     return wheels
 
 
@@ -91,14 +106,20 @@ def test_wheels_are_pairwise_disjoint(wheels):
     """Главный инвариант разделения: ни одного общего пути между колёсами."""
     for a, b in itertools.combinations(sorted(wheels), 2):
         overlap = wheels[a] & wheels[b]
-        assert not overlap, f"{a} и {b} заявляют общие пути: {sorted(overlap)[:10]}"
+        assert not overlap, (
+            f"{a} и {b} заявляют общие пути: {sorted(overlap)[:10]}"
+        )
 
 
 def test_core_wheel_bundles_assets(wheels):
     names = wheels["gc_core"]
     for needed in CORE_REQUIRED:
-        assert needed in names, f"{needed} нет в колесе ядра; образец {sorted(names)[:10]}"
-    assert any(n.startswith("gc_core/assets/skills/") for n in names), "skills/ отсутствует"
+        assert needed in names, (
+            f"{needed} нет в колесе ядра; образец {sorted(names)[:10]}"
+        )
+    assert any(n.startswith("gc_core/assets/skills/") for n in names), (
+        "skills/ отсутствует"
+    )
 
 
 def test_mcp_wheel_bundles_recipes_and_sources(wheels):
@@ -109,13 +130,18 @@ def test_mcp_wheel_bundles_recipes_and_sources(wheels):
     """
     names = wheels["gc_mcp"]
     assert "recommended_mcp/config.yml" in names
-    assert any(n.startswith("recommended_mcp/") and n.endswith(".py") for n in names)
+    assert any(
+        n.startswith("recommended_mcp/") and n.endswith(".py") for n in names
+    )
     # Внутри пакета, а не рядом: наверху `external` занимал бы родовое имя —
     # см. test_core_wheel_does_not_squat_generic_names.
-    assert "recommended_mcp/external/vendor/ddgs-mcp/pyproject.toml" in names, (
-        "ddgs-mcp не поставляется"
+    assert (
+        "recommended_mcp/external/vendor/ddgs-mcp/pyproject.toml" in names
+    ), "ddgs-mcp не поставляется"
+    assert (
+        "recommended_mcp/external/vendor/ddgs-mcp/src/ddgs_mcp/server.py"
+        in names
     )
-    assert "recommended_mcp/external/vendor/ddgs-mcp/src/ddgs_mcp/server.py" in names
 
     core = wheels["gc_core"]
     assert not any(n.startswith("recommended_mcp/") for n in core), (
@@ -145,14 +171,21 @@ def test_core_wheel_does_not_squat_generic_names(wheels):
     оговорка «mcp_daemon_autostart тянет recommended_mcp.autostart» неверна.
     """
     squatted = {
-        "prompts", "skills", "config.default.yml", "assets", "tests", "src",
+        "prompts",
+        "skills",
+        "config.default.yml",
+        "assets",
+        "tests",
+        "src",
         # external — вендоры MCP: с 03.09.2026 внутри recommended_mcp/.
         "external",
     }
     for dist, names in wheels.items():
         tops = {n.split("/")[0] for n in names}
         hit = tops & squatted
-        assert not hit, f"{dist} занимает родовые имена верхнего уровня: {sorted(hit)}"
+        assert not hit, (
+            f"{dist} занимает родовые имена верхнего уровня: {sorted(hit)}"
+        )
 
 
 def test_testkit_never_ships(wheels):
@@ -163,7 +196,9 @@ def test_testkit_never_ships(wheels):
     """
     for dist, names in wheels.items():
         leaked = [n for n in names if n.split("/")[0] == "gc_testkit"]
-        assert not leaked, f"{dist} тащит тестовую инфраструктуру: {leaked[:5]}"
+        assert not leaked, (
+            f"{dist} тащит тестовую инфраструктуру: {leaked[:5]}"
+        )
 
 
 def test_core_wheel_excludes_frontends(wheels):
@@ -178,15 +213,40 @@ def test_core_wheel_excludes_frontends(wheels):
 def test_tui_wheel_contents(wheels):
     names = wheels["gc_tui"]
     assert {n.split("/")[0] for n in names} == {"gc_tui"}, sorted(names)[:10]
-    assert "gc_tui/styles.tcss" in names, "стили TUI обязаны ехать вместе с пакетом"
-    assert "gc_tui/diff_tui/tracking.py" in names, "diff_tui — часть TUI-профиля"
+    assert "gc_tui/styles.tcss" in names, (
+        "стили TUI обязаны ехать вместе с пакетом"
+    )
+    assert "gc_tui/services/edits_view.py" in names, (
+        "показ журнала правок — часть TUI-профиля"
+    )
+
+
+def test_core_wheel_ships_the_edits_journal(wheels):
+    """Запись правок едет с ЯДРОМ, а не с фронтендом.
+
+    Раньше подсистема жила в `gc_tui/diff_tui` и проверялась в колесе TUI.
+    После переработки её зовут файловые инструменты ядра, поэтому и место её —
+    в `gc_core`: headless-установка обязана уметь вести журнал.
+    """
+    names = wheels["gc_core"]
+    for m in (
+        "gc_core/agent_edits/tracking.py",
+        "gc_core/agent_edits/recorder.py",
+        "gc_core/agent_edits/journal.py",
+    ):
+        assert m in names, f"{m} не доехал в колесо ядра"
 
 
 def test_server_wheel_contents(wheels):
     names = wheels["gc_server"]
-    assert {n.split("/")[0] for n in names} == {"gc_server"}, sorted(names)[:10]
-    for m in ("gc_server/server.py", "gc_server/rest_api/__init__.py",
-              "gc_server/swarm/runner.py"):
+    assert {n.split("/")[0] for n in names} == {"gc_server"}, sorted(names)[
+        :10
+    ]
+    for m in (
+        "gc_server/server.py",
+        "gc_server/rest_api/__init__.py",
+        "gc_server/swarm/runner.py",
+    ):
         assert m in names, m
 
 
@@ -204,14 +264,18 @@ def test_vendored_ddgs_ships_without_build_junk(wheels):
     на копии, где ddgs-mcp собирали.
     """
     shipped = {
-        n for n in wheels["gc_mcp"]
+        n
+        for n in wheels["gc_mcp"]
         if n.startswith("recommended_mcp/external/")
     }
     assert shipped, "исходники ddgs-mcp вообще не попали в колесо"
 
     junk = {
-        n for n in shipped
-        if "/build/" in n or ".egg-info" in n or n.endswith(("uv.lock", ".pyc"))
+        n
+        for n in shipped
+        if "/build/" in n
+        or ".egg-info" in n
+        or n.endswith(("uv.lock", ".pyc"))
     }
     assert not junk, f"в колесо уехали артефакты сборки: {sorted(junk)}"
 
@@ -221,7 +285,9 @@ def test_vendored_ddgs_ships_without_build_junk(wheels):
         "recommended_mcp/external/vendor/ddgs-mcp/pyproject.toml",
         "recommended_mcp/external/vendor/ddgs-mcp/src/ddgs_mcp/__init__.py",
     ):
-        assert needed in shipped, f"{needed} нет в колесе; есть {sorted(shipped)}"
+        assert needed in shipped, (
+            f"{needed} нет в колесе; есть {sorted(shipped)}"
+        )
 
 
 def test_server_wheel_ships_the_sandbox_wrapper(wheels, wheel_infos):
@@ -239,14 +305,17 @@ def test_server_wheel_ships_the_sandbox_wrapper(wheels, wheel_infos):
     """
     wrapper = "gc_server/swarm/run-cli-in-sandbox.sh"
     assert wrapper in wheels["gc_server"], (
-        f"{wrapper} не попал в колесо — swarm в установленном профиле не "
-        "поднимется: runner зовёт этот файл через Popen"
+        f"{wrapper} не попал в колесо — swarm в установленном профиле не поднимется: runner зовёт этот файл через Popen"
     )
 
+    if os.name == "nt":
+        # Бит +x hatchling берёт с диска, а у файлов на Windows его нет: колесо,
+        # собранное здесь, едет без него. Swarm на Windows не работает вовсе, а
+        # пользователь на Linux собирает колесо у себя, из своего клона.
+        pytest.skip("бит +x на Windows не хранится — проверка только на POSIX")
     mode = wheel_infos["gc_server"][wrapper].external_attr >> 16
     assert mode & 0o111, (
-        f"{wrapper} едет без исполняемого бита (режим {oct(mode)}) — "
-        "Popen даст PermissionError"
+        f"{wrapper} едет без исполняемого бита (режим {oct(mode)}) — Popen даст PermissionError"
     )
 
 
@@ -263,6 +332,8 @@ OWN_COMMANDS = {
     "gc_tui": {"gc-ua", "gc-voice"},
     "gc_server": {"gc-serve"},
     "gc_mcp": {"gc-mcp", "gc-mcp-install"},
+    "gc_acp": {"gc-acp"},
+    "gc_chat": {"gc-chat"},
 }
 
 
@@ -295,7 +366,9 @@ def test_each_distribution_declares_only_its_own_commands():
     71abf728, мета стала чисто метаданными.
     """
     for name, sub in MANIFESTS.items():
-        man = tomllib.loads((REPO / sub / "pyproject.toml").read_text(encoding="utf-8"))
+        man = tomllib.loads(
+            (REPO / sub / "pyproject.toml").read_text(encoding="utf-8")
+        )
         got = set(man["project"].get("scripts", {}))
 
         if name == "gc_core":
@@ -314,16 +387,14 @@ def test_command_names_do_not_collide_between_leaf_distributions():
     for name, sub in MANIFESTS.items():
         if name in ("gc_core", "gc_ua"):
             continue
-        man = tomllib.loads((REPO / sub / "pyproject.toml").read_text(encoding="utf-8"))
+        man = tomllib.loads(
+            (REPO / sub / "pyproject.toml").read_text(encoding="utf-8")
+        )
         for cmd in man["project"].get("scripts", {}):
             assert cmd not in seen, (
-                f"команду {cmd!r} объявляют и {seen[cmd]}, и {sub} — "
-                f"uv откажется ставить второй дистрибутив"
+                f"команду {cmd!r} объявляют и {seen[cmd]}, и {sub} — uv откажется ставить второй дистрибутив"
             )
             seen[cmd] = sub
-
-
-
 
 
 def test_meta_pulls_every_profile():
@@ -340,8 +411,13 @@ def test_meta_pulls_every_profile():
     ver = root["project"]["version"]
     assert root["project"]["name"] == "gc-ua"
     assert set(root["project"]["dependencies"]) == {
-        f"gc-core=={ver}", f"gc-cli=={ver}", f"gc-tui=={ver}", f"gc-server=={ver}",
+        f"gc-core=={ver}",
+        f"gc-cli=={ver}",
+        f"gc-tui=={ver}",
+        f"gc-server=={ver}",
         f"gc-mcp=={ver}",
+        f"gc-acp=={ver}",
+        f"gc-chat=={ver}",
     }
 
 
@@ -362,19 +438,39 @@ def test_versions_are_pinned_together():
     """
     root = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))
     ver = root["project"]["version"]
-    for sub in ("packages/core", "packages/cli", "packages/tui", "packages/server",
-                "packages/mcp"):
-        leaf = tomllib.loads((REPO / sub / "pyproject.toml").read_text(encoding="utf-8"))
+    for sub in (
+        "packages/core",
+        "packages/cli",
+        "packages/tui",
+        "packages/server",
+        "packages/mcp",
+        "packages/acp",
+        "packages/chat",
+    ):
+        leaf = tomllib.loads(
+            (REPO / sub / "pyproject.toml").read_text(encoding="utf-8")
+        )
         assert leaf["project"]["version"] == ver, f"{sub} разошёлся по версии"
-    for sub in ("packages/cli", "packages/tui", "packages/server", "packages/mcp"):
-        leaf = tomllib.loads((REPO / sub / "pyproject.toml").read_text(encoding="utf-8"))
+    for sub in (
+        "packages/cli",
+        "packages/tui",
+        "packages/server",
+        "packages/mcp",
+        "packages/acp",
+        "packages/chat",
+    ):
+        leaf = tomllib.loads(
+            (REPO / sub / "pyproject.toml").read_text(encoding="utf-8")
+        )
         assert f"gc-core=={ver}" in leaf["project"]["dependencies"], sub
     # Менеджер MCP — жёсткая зависимость профилей-приложений: команды gc-mcp/
     # gc-mcp-install объявляет он один (fba7c20b), и без точного пина профиль
     # соберётся с менеджером из другого коммита. Ядро на него не зависит —
     # зависимость обратная, gc-mcp тянет gc-core.
     for sub in ("packages/cli", "packages/tui", "packages/server"):
-        leaf = tomllib.loads((REPO / sub / "pyproject.toml").read_text(encoding="utf-8"))
+        leaf = tomllib.loads(
+            (REPO / sub / "pyproject.toml").read_text(encoding="utf-8")
+        )
         assert f"gc-mcp=={ver}" in leaf["project"]["dependencies"], sub
     # gc-cli — зависимость СЕРВЕРА, а не гигиена списка: sworm запускает внутри
     # песочницы именно `gc-cli` (swarm/run-cli-in-sandbox.sh). Пока дистрибутив
@@ -389,8 +485,7 @@ def test_versions_are_pinned_together():
         (REPO / "packages/server/pyproject.toml").read_text(encoding="utf-8")
     )
     assert f"gc-cli=={ver}" in server["project"]["dependencies"], (
-        "gc-server обязан пинить gc-cli точно — иначе sworm остаётся без CLI "
-        "или получает его из чужого коммита"
+        "gc-server обязан пинить gc-cli точно — иначе sworm остаётся без CLI или получает его из чужого коммита"
     )
 
 
@@ -405,16 +500,22 @@ def test_profile_subdirs_match_layout():
     сторожа.
     """
     from gc_core import app_version
+
     assert app_version.PROFILE_SUBDIRS == {
         "gc-core": "packages/core",
         "gc-cli": "packages/cli",
         "gc-tui": "packages/tui",
         "gc-server": "packages/server",
         "gc-mcp": "packages/mcp",
+        "gc-acp": "packages/acp",
     }
-    assert set(app_version.PROFILE_DISTS) - set(app_version.PROFILE_SUBDIRS) == {"gc-ua"}
+    assert set(app_version.PROFILE_DISTS) - set(
+        app_version.PROFILE_SUBDIRS
+    ) == {"gc-ua"}
     for name, sub in app_version.PROFILE_SUBDIRS.items():
-        man = tomllib.loads((REPO / sub / "pyproject.toml").read_text(encoding="utf-8"))
+        man = tomllib.loads(
+            (REPO / sub / "pyproject.toml").read_text(encoding="utf-8")
+        )
         assert man["project"]["name"] == name
 
 
@@ -435,19 +536,25 @@ def test_force_include_keys_stay_inside_project_root():
     Подмена, которую ловит тест: вернуть любому ключу префикс `../`.
     """
     offenders = []
-    for name, sub in MANIFESTS.items():
-        man = tomllib.loads((REPO / sub / "pyproject.toml").read_text(encoding="utf-8"))
+    for _name, sub in MANIFESTS.items():
+        man = tomllib.loads(
+            (REPO / sub / "pyproject.toml").read_text(encoding="utf-8")
+        )
         targets = (
-            man.get("tool", {}).get("hatch", {}).get("build", {})
-            .get("targets", {}).get("wheel", {}).get("force-include", {})
+            man.get("tool", {})
+            .get("hatch", {})
+            .get("build", {})
+            .get("targets", {})
+            .get("wheel", {})
+            .get("force-include", {})
         )
         for key in targets:
             if key.startswith("..") or Path(key).is_absolute():
                 offenders.append(f"{sub}/pyproject.toml: {key}")
 
     assert not offenders, (
-        "force-include ведёт за пределы каталога пакета — колесо из sdist не "
-        "соберётся:\n  " + "\n  ".join(offenders)
+        "force-include ведёт за пределы каталога пакета — колесо из sdist не соберётся:\n  "
+        + "\n  ".join(offenders)
     )
 
 
@@ -468,8 +575,7 @@ def test_vendored_sources_live_inside_their_package():
 
     stale = REPO / "external" / "vendor"
     assert not stale.exists(), (
-        f"{stale} существует — переезд сделан наполовину, и два места будут "
-        "расходиться"
+        f"{stale} существует — переезд сделан наполовину, и два места будут расходиться"
     )
 
 
@@ -494,11 +600,25 @@ def test_docs_never_offer_bare_pip_for_our_distributions():
     который по ней ставит сервер, упирается в ошибку резолва и не понимает,
     он что-то сделал не так или инструкция врёт.
     """
+    # Только файлы под гитом: документация — то, что в репозитории. Черновики в
+    # рабочей копии (неотслеживаемые заметки) красили тест у их владельца.
+    tracked = (
+        subprocess.run(
+            ["git", "ls-files", "-z", "--", "docs/*.md", "readme.md"],
+            cwd=REPO,
+            capture_output=True,
+            check=True,
+        )
+        .stdout.decode("utf-8")
+        .split("\0")
+    )
     offenders = []
-    for doc in sorted((REPO / "docs").rglob("*.md")) + [REPO / "readme.md"]:
+    for doc in (REPO / rel for rel in sorted(filter(None, tracked))):
         if not doc.is_file():
             continue
-        for num, line in enumerate(doc.read_text(encoding="utf-8").splitlines(), 1):
+        for num, line in enumerate(
+            doc.read_text(encoding="utf-8").splitlines(), 1
+        ):
             stripped = line.strip()
             # Только предлагаемые КОМАНДЫ. Строки, которые про pip рассказывают
             # («pip install -e . падает»), обязаны остаться: они и объясняют,
@@ -507,10 +627,13 @@ def test_docs_never_offer_bare_pip_for_our_distributions():
                 continue
             if "pip install" not in stripped or "uv pip install" in stripped:
                 continue
-            if re.search(r"\bgc-(core|cli|tui|server|mcp|ua|testkit)\b", stripped):
+            if re.search(
+                r"\bgc-(core|cli|tui|server|mcp|ua|testkit)\b", stripped
+            ):
                 offenders.append(f"{doc.relative_to(REPO)}:{num}: {stripped}")
 
     assert not offenders, (
         "в документации предлагается ставить наш дистрибутив обычным pip — "
-        "он не резолвит листья workspace и упадёт:\n  " + "\n  ".join(offenders)
+        "он не резолвит листья workspace и упадёт:\n  "
+        + "\n  ".join(offenders)
     )

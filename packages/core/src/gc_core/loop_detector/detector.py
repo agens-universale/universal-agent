@@ -126,7 +126,7 @@ def _parse_stripped_args(
     else:
         try:
             parsed = json.loads(raw_arguments or "{}")
-        except (TypeError, ValueError, json.JSONDecodeError):
+        except (TypeError, ValueError):
             return None
     if not isinstance(parsed, dict):
         return None
@@ -173,7 +173,9 @@ def observe(
     if not is_enabled(config_dict):
         return
     tools_data = getattr(ctx, "tools_data", None)
-    args = _parse_stripped_args(tool_name, raw_arguments, tools_data, config_dict)
+    args = _parse_stripped_args(
+        tool_name, raw_arguments, tools_data, config_dict
+    )
     fp = fingerprint(tool_name, args if args is not None else _UNPARSED_ARGS)
     _ensure_lists(state)
     state.loop_detector_window.append(fp)
@@ -186,13 +188,19 @@ def observe(
     consecutive_limit, in_window_limit = thresholds
     count_consecutive = _count_consecutive(state.loop_detector_window, fp)
     count_in_window = state.loop_detector_window.count(fp)
-    if count_consecutive >= consecutive_limit or count_in_window >= in_window_limit:
+    if (
+        count_consecutive >= consecutive_limit
+        or count_in_window >= in_window_limit
+    ):
         already = any(
-            fingerprint(str(hit.get("tool") or ""), hit.get("args") or {}) == fp
+            fingerprint(str(hit.get("tool") or ""), hit.get("args") or {})
+            == fp
             for hit in state.loop_detector_pending
         )
         if not already:
-            state.loop_detector_pending.append({"tool": tool_name, "args": args})
+            state.loop_detector_pending.append(
+                {"tool": tool_name, "args": args}
+            )
 
 
 def flush(state: Any) -> str | None:

@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
 from gc_core import run_summary_coordinator as rsc
 from gc_core.run_summary_coordinator import RunSummaryCoordinator
+from gc_testkit import run_coro
 
 
 def _minimal_state(*, messages: list):
@@ -29,9 +29,10 @@ def ctx_stub():
 
 
 def _patch_save_thread_meta(monkeypatch) -> None:
-    """pre_backend_compaction_hook вызывает _summarizing_flag → patch_runtime_flag;
-    в unit-тестах с MagicMock thread_session это не цель проверки."""
-    monkeypatch.setattr(rsc, "patch_runtime_flag", lambda *_a, **_k: None)
+    """Флаг «идёт суммаризация» координатор ставит через ``ts.store``, а тот в
+    этих тестах MagicMock — подменять в модуле нечего, вызов и так уходит
+    в заглушку."""
+    return
 
 
 def _thread_session_mock() -> MagicMock:
@@ -40,10 +41,17 @@ def _thread_session_mock() -> MagicMock:
     thread.threads_dir = "/tmp/x"
     thread.system_id = "cli"
     thread.thread_id = "t1"
+    # Ядро ходит в хранилище через асинхронный порт: флаги, персист и архив
+    # ждутся нативно, поэтому двойники обязаны быть корутинными.
+    thread.port = AsyncMock()
+    thread.apersist_batch = AsyncMock()
+    thread.aarchive_and_compact_summary_payload = AsyncMock(return_value={})
     return thread
 
 
-def test_pre_backend_passes_full_history_including_suffix(monkeypatch, ctx_stub):
+def test_pre_backend_passes_full_history_including_suffix(
+    monkeypatch, ctx_stub
+):
     """Компакция читает весь несистемный хвост из state, включая preserved_batch (суффикс)."""
     sys_m = {"role": "system", "content": "s"}
     u1 = {"role": "user", "content": "a", "id": "1"}
@@ -51,15 +59,18 @@ def test_pre_backend_passes_full_history_including_suffix(monkeypatch, ctx_stub)
     state = _minimal_state(messages=[sys_m, u1, u2])
     captured: dict = {}
 
-    def capture(**kwargs):
+    async def capture(**kwargs):
         from gc_core.summarize.compaction import without_system_messages
 
         st = kwargs["state"]
         captured["non_system"] = without_system_messages(list(st.messages))
-        st.messages = [sys_m, {"role": "user", "content": "<summary/>", "id": "sum"}]
+        st.messages = [
+            sys_m,
+            {"role": "user", "content": "<summary/>", "id": "sum"},
+        ]
 
-    monkeypatch.setattr(rsc, "run_summary_compaction", capture)
-    monkeypatch.setattr(rsc, "history_exceeds_summary_trigger", lambda **_k: True)
+    monkeypatch.setattr(rsc, "arun_summary_compaction", capture)
+    monkeypatch.setattr(rsc, "exceeded_summary_triggers", lambda **_k: True)
 
     coord = RunSummaryCoordinator(
         ctx=ctx_stub,
@@ -70,21 +81,27 @@ def test_pre_backend_passes_full_history_including_suffix(monkeypatch, ctx_stub)
         pre_backend_trigger_reason="pre_backend",
     )
     current = [u1, u2]
-    coord.pre_backend_compaction_hook(current, "user_ask")
+    run_coro(coord.apre_backend_compaction_hook(current, "user_ask"))
 
     assert captured.get("non_system") == [u1, u2]
 
 
-def test_suffix_mismatch_returns_without_changing_state(monkeypatch, ctx_stub):
+def test_pre_backend_tells_compaction_which_messages_come_back(
+    monkeypatch, ctx_stub
+):
+    """Сжатие узнаёт, что вернётся в историю как есть, — картинки этих сообщений
+    не попадают в сводку как «вне контекста»."""
     sys_m = {"role": "system", "content": "s"}
-    stale = {"role": "user", "content": "stale", "id": "u0"}
-    msgs = [sys_m, stale]
-    state = _minimal_state(messages=list(msgs))
+    u1 = {"role": "user", "content": "a", "id": "1"}
+    state = _minimal_state(messages=[sys_m, u1])
+    captured: dict = {}
 
-    def boom(**_kwargs):
-        raise AssertionError("compaction must not run")
+    async def capture(**kwargs):
+        captured["kept"] = kwargs.get("kept_messages")
+        kwargs["state"].messages = [sys_m]
 
-    monkeypatch.setattr(rsc, "run_summary_compaction", boom)
+    monkeypatch.setattr(rsc, "arun_summary_compaction", capture)
+    monkeypatch.setattr(rsc, "exceeded_summary_triggers", lambda **_k: True)
 
     coord = RunSummaryCoordinator(
         ctx=ctx_stub,
@@ -94,25 +111,51 @@ def test_suffix_mismatch_returns_without_changing_state(monkeypatch, ctx_stub):
         is_cli_mode=False,
         pre_backend_trigger_reason="pre_backend",
     )
-    monkeypatch.setattr(rsc, "history_exceeds_summary_trigger", lambda **_k: True)
+    run_coro(coord.apre_backend_compaction_hook([u1], "user_ask"))
+
+    assert captured["kept"] == [u1]
+
+
+def test_suffix_mismatch_returns_without_changing_state(monkeypatch, ctx_stub):
+    sys_m = {"role": "system", "content": "s"}
+    stale = {"role": "user", "content": "stale", "id": "u0"}
+    msgs = [sys_m, stale]
+    state = _minimal_state(messages=list(msgs))
+
+    async def boom(**_kwargs):
+        raise AssertionError("compaction must not run")
+
+    monkeypatch.setattr(rsc, "arun_summary_compaction", boom)
+
+    coord = RunSummaryCoordinator(
+        ctx=ctx_stub,
+        state=state,
+        thread_session=None,
+        summary_trigger_chars=10,
+        is_cli_mode=False,
+        pre_backend_trigger_reason="pre_backend",
+    )
+    monkeypatch.setattr(rsc, "exceeded_summary_triggers", lambda **_k: True)
 
     current = [{"role": "user", "content": "other", "id": "diff"}]
-    coord.pre_backend_compaction_hook(current, "user_ask")
+    run_coro(coord.apre_backend_compaction_hook(current, "user_ask"))
 
     assert state.messages == [sys_m, stale]
 
 
-def test_suffix_match_runs_and_restores_even_if_compaction_raises(monkeypatch, ctx_stub):
+def test_suffix_match_runs_and_restores_even_if_compaction_raises(
+    monkeypatch, ctx_stub
+):
     sys_m = {"role": "system", "content": "s"}
     u1 = {"role": "user", "content": "a", "id": "1"}
     u2 = {"role": "user", "content": "b", "id": "2"}
     state = _minimal_state(messages=[sys_m, u1, u2])
 
-    def fail(**_kwargs):
+    async def fail(**_kwargs):
         raise RuntimeError("compaction simulated failure")
 
-    monkeypatch.setattr(rsc, "run_summary_compaction", fail)
-    monkeypatch.setattr(rsc, "history_exceeds_summary_trigger", lambda **_k: True)
+    monkeypatch.setattr(rsc, "arun_summary_compaction", fail)
+    monkeypatch.setattr(rsc, "exceeded_summary_triggers", lambda **_k: True)
 
     coord = RunSummaryCoordinator(
         ctx=ctx_stub,
@@ -125,7 +168,7 @@ def test_suffix_match_runs_and_restores_even_if_compaction_raises(monkeypatch, c
 
     current = [u1, u2]
     with pytest.raises(RuntimeError, match="simulated"):
-        coord.pre_backend_compaction_hook(current, "user_ask")
+        run_coro(coord.apre_backend_compaction_hook(current, "user_ask"))
 
     assert state.messages == [sys_m, u1, u2]
 
@@ -135,12 +178,15 @@ def test_current_messages_inplace_replaced_after_hook(monkeypatch, ctx_stub):
     u1 = {"role": "user", "content": "a", "id": "1"}
     state = _minimal_state(messages=[sys_m, u1])
 
-    def mock_compact(**kwargs):
+    async def mock_compact(**kwargs):
         st = kwargs["state"]
-        st.messages = [sys_m, {"role": "user", "content": "<summary/>", "id": "sum"}]
+        st.messages = [
+            sys_m,
+            {"role": "user", "content": "<summary/>", "id": "sum"},
+        ]
 
-    monkeypatch.setattr(rsc, "run_summary_compaction", mock_compact)
-    monkeypatch.setattr(rsc, "history_exceeds_summary_trigger", lambda **_k: True)
+    monkeypatch.setattr(rsc, "arun_summary_compaction", mock_compact)
+    monkeypatch.setattr(rsc, "exceeded_summary_triggers", lambda **_k: True)
 
     coord = RunSummaryCoordinator(
         ctx=ctx_stub,
@@ -151,25 +197,46 @@ def test_current_messages_inplace_replaced_after_hook(monkeypatch, ctx_stub):
         pre_backend_trigger_reason="pre_backend",
     )
     current = [u1]
-    coord.pre_backend_compaction_hook(current, "user_ask")
+    run_coro(coord.apre_backend_compaction_hook(current, "user_ask"))
     assert current == [u1]
 
 
-def test_no_orphan_outputs_in_current_after_function_call_output(monkeypatch, ctx_stub):
+def test_no_orphan_outputs_in_current_after_function_call_output(
+    monkeypatch, ctx_stub
+):
     sys_m = {"role": "system", "content": "s"}
-    call = {"type": "function_call", "call_id": "ok", "name": "x", "arguments": "{}", "id": "c"}
-    out_ok = {"type": "function_call_output", "call_id": "ok", "output": "{}", "id": "o1"}
-    out_bad = {"type": "function_call_output", "call_id": "orphan", "output": "{}", "id": "o2"}
+    call = {
+        "type": "function_call",
+        "call_id": "ok",
+        "name": "x",
+        "arguments": "{}",
+        "id": "c",
+    }
+    out_ok = {
+        "type": "function_call_output",
+        "call_id": "ok",
+        "output": "{}",
+        "id": "o1",
+    }
+    out_bad = {
+        "type": "function_call_output",
+        "call_id": "orphan",
+        "output": "{}",
+        "id": "o2",
+    }
 
     batch = [out_bad, call, out_ok]
     state = _minimal_state(messages=[sys_m, *batch])
 
-    def mock_compact(**kwargs):
+    async def mock_compact(**kwargs):
         st = kwargs["state"]
-        st.messages = [sys_m, {"role": "user", "content": "<summary/>", "id": "sum"}]
+        st.messages = [
+            sys_m,
+            {"role": "user", "content": "<summary/>", "id": "sum"},
+        ]
 
-    monkeypatch.setattr(rsc, "run_summary_compaction", mock_compact)
-    monkeypatch.setattr(rsc, "history_exceeds_summary_trigger", lambda **_k: True)
+    monkeypatch.setattr(rsc, "arun_summary_compaction", mock_compact)
+    monkeypatch.setattr(rsc, "exceeded_summary_triggers", lambda **_k: True)
 
     coord = RunSummaryCoordinator(
         ctx=ctx_stub,
@@ -179,12 +246,17 @@ def test_no_orphan_outputs_in_current_after_function_call_output(monkeypatch, ct
         is_cli_mode=False,
         pre_backend_trigger_reason="pre_backend",
     )
-    coord.pre_backend_compaction_hook(batch, "function_call_output")
+    run_coro(coord.apre_backend_compaction_hook(batch, "function_call_output"))
 
-    out_ids = [m.get("call_id") for m in batch if m.get("type") == "function_call_output"]
+    out_ids = [
+        m.get("call_id")
+        for m in batch
+        if m.get("type") == "function_call_output"
+    ]
     assert out_ids == ["ok"]
     assert all(
-        batch[i].get("type") == "function_call" for i in range(0, len(batch), 2)
+        batch[i].get("type") == "function_call"
+        for i in range(0, len(batch), 2)
     )
 
 
@@ -193,12 +265,15 @@ def test_persist_batch_only_when_nonempty(monkeypatch, ctx_stub):
     u1 = {"role": "user", "content": "a", "id": "1"}
     state = _minimal_state(messages=[sys_m, u1])
 
-    def mock_compact(**kwargs):
+    async def mock_compact(**kwargs):
         st = kwargs["state"]
-        st.messages = [sys_m, {"role": "user", "content": "<summary/>", "id": "sum"}]
+        st.messages = [
+            sys_m,
+            {"role": "user", "content": "<summary/>", "id": "sum"},
+        ]
 
-    monkeypatch.setattr(rsc, "run_summary_compaction", mock_compact)
-    monkeypatch.setattr(rsc, "history_exceeds_summary_trigger", lambda **_k: True)
+    monkeypatch.setattr(rsc, "arun_summary_compaction", mock_compact)
+    monkeypatch.setattr(rsc, "exceeded_summary_triggers", lambda **_k: True)
     _patch_save_thread_meta(monkeypatch)
 
     thread = _thread_session_mock()
@@ -211,15 +286,18 @@ def test_persist_batch_only_when_nonempty(monkeypatch, ctx_stub):
         pre_backend_trigger_reason="pre_backend",
     )
     current = [u1]
-    coord.pre_backend_compaction_hook(current, "user_ask")
+    run_coro(coord.apre_backend_compaction_hook(current, "user_ask"))
 
-    thread.persist_batch.assert_called_once()
-    assert thread.persist_batch.call_args[0][0]
+    thread.apersist_batch.assert_awaited_once()
+    assert thread.apersist_batch.await_args[0][0]
 
 
 def test_persist_skipped_when_preserved_batch_empty(monkeypatch, ctx_stub):
-    monkeypatch.setattr(rsc, "run_summary_compaction", lambda **_k: None)
-    monkeypatch.setattr(rsc, "history_exceeds_summary_trigger", lambda **_k: True)
+    async def _noop_compact(**_k):
+        return None
+
+    monkeypatch.setattr(rsc, "arun_summary_compaction", _noop_compact)
+    monkeypatch.setattr(rsc, "exceeded_summary_triggers", lambda **_k: True)
     _patch_save_thread_meta(monkeypatch)
 
     state = _minimal_state(messages=[{"role": "system", "content": "x"}])
@@ -232,24 +310,41 @@ def test_persist_skipped_when_preserved_batch_empty(monkeypatch, ctx_stub):
         is_cli_mode=False,
         pre_backend_trigger_reason="pre_backend",
     )
-    orphan = {"type": "function_call_output", "call_id": "nope", "output": "", "id": "o"}
+    orphan = {
+        "type": "function_call_output",
+        "call_id": "nope",
+        "output": "",
+        "id": "o",
+    }
 
-    coord.pre_backend_compaction_hook([orphan], "function_call_output")
+    run_coro(
+        coord.apre_backend_compaction_hook([orphan], "function_call_output")
+    )
 
-    thread.persist_batch.assert_not_called()
+    thread.apersist_batch.assert_not_awaited()
 
 
-def test_function_call_output_clears_current_when_preservation_empty(monkeypatch, ctx_stub):
+def test_function_call_output_clears_current_when_preservation_empty(
+    monkeypatch, ctx_stub
+):
     sys_m = {"role": "system", "content": "s"}
-    orphan = {"type": "function_call_output", "call_id": "solo", "output": "", "id": "o"}
+    orphan = {
+        "type": "function_call_output",
+        "call_id": "solo",
+        "output": "",
+        "id": "o",
+    }
     state = _minimal_state(messages=[sys_m, orphan])
 
-    def mock_compact(**kwargs):
+    async def mock_compact(**kwargs):
         st = kwargs["state"]
-        st.messages = [sys_m, {"role": "user", "content": "<summary/>", "id": "sum"}]
+        st.messages = [
+            sys_m,
+            {"role": "user", "content": "<summary/>", "id": "sum"},
+        ]
 
-    monkeypatch.setattr(rsc, "run_summary_compaction", mock_compact)
-    monkeypatch.setattr(rsc, "history_exceeds_summary_trigger", lambda **_k: True)
+    monkeypatch.setattr(rsc, "arun_summary_compaction", mock_compact)
+    monkeypatch.setattr(rsc, "exceeded_summary_triggers", lambda **_k: True)
 
     coord = RunSummaryCoordinator(
         ctx=ctx_stub,
@@ -260,6 +355,59 @@ def test_function_call_output_clears_current_when_preservation_empty(monkeypatch
         pre_backend_trigger_reason="pre_backend",
     )
     current = [orphan]
-    coord.pre_backend_compaction_hook(current, "function_call_output")
+    run_coro(
+        coord.apre_backend_compaction_hook(current, "function_call_output")
+    )
 
     assert current == []
+
+
+def test_function_call_output_keeps_technical_tail_after_compaction(
+    monkeypatch, ctx_stub
+):
+    """Pre-backend компакция на шаге «ответы + напоминание»: хвост батча
+    возвращается в state и в следующий шаг вслед за парами (спека изображений §7.3)."""
+    sys_m = {"role": "system", "content": "s"}
+    call = {
+        "type": "function_call",
+        "call_id": "c1",
+        "name": "fs_read_file",
+        "arguments": '{"path": "a.py"}',
+        "id": "fc_c1",
+    }
+    out = {
+        "type": "function_call_output",
+        "call_id": "c1",
+        "output": '{"ok": true}',
+        "id": "fco_c1",
+    }
+    notice = {
+        "role": "user",
+        "content": '<technical type="technical">Loop detector: you called fs_read_file '
+        "with the same arguments again.</technical>",
+        "id": "m_notice",
+    }
+    summary = {"role": "user", "content": "<summary/>", "id": "sum"}
+    state = _minimal_state(messages=[sys_m, call, out, notice])
+
+    async def mock_compact(**kwargs):
+        kwargs["state"].messages = [sys_m, summary]
+
+    monkeypatch.setattr(rsc, "arun_summary_compaction", mock_compact)
+    monkeypatch.setattr(rsc, "exceeded_summary_triggers", lambda **_k: True)
+
+    coord = RunSummaryCoordinator(
+        ctx=ctx_stub,
+        state=state,
+        thread_session=None,
+        summary_trigger_chars=10,
+        is_cli_mode=False,
+        pre_backend_trigger_reason="pre_backend",
+    )
+    current = [out, notice]
+    run_coro(
+        coord.apre_backend_compaction_hook(current, "function_call_output")
+    )
+
+    assert current == [call, out, notice]
+    assert state.messages == [sys_m, summary, call, out, notice]

@@ -1,8 +1,11 @@
 """Классификация ошибок бэкенда для восстановления в цикле агента."""
+
 from __future__ import annotations
 
-import requests
+import re
 from typing import NamedTuple
+
+import httpx
 
 from gc_core.model_router import AliasCircuitOpenError
 from gc_core.utils.chat_completions_stream import BackendStreamError
@@ -21,6 +24,7 @@ _CONTEXT_OVERFLOW_MARKERS = (
     "context window",
     "reduce the number of tokens",
     "please reduce the length",
+    "maximum model length",  # vLLM: «The decoder prompt (length N) is longer than the maximum model length of M»
 )
 
 
@@ -39,11 +43,45 @@ class EmbeddedChoiceError(Exception):
     (finish_reason='error' с пустым выбором: транзиентный сбой → ретраить).
     Оба дают status_code=None, но раскладываются по-разному."""
 
-    def __init__(self, message, *, status_code=None, metadata=None, raw_code=None):
+    def __init__(
+        self, message, *, status_code=None, metadata=None, raw_code=None
+    ):
         super().__init__(message)
         self.status_code = status_code
         self.metadata = metadata
         self.raw_code = raw_code
+
+
+#: Исключение «HTTP-статус не тот». Кортеж, а не один класс: форма пережила
+#: время, когда транспортов было два (requests у тулов и MCP, httpx у модели),
+#: и вызывающие полагаются на isinstance с кортежем.
+HTTP_STATUS_ERRORS = (httpx.HTTPStatusError,)
+
+#: Сетевые сбои, которые имеет смысл ПОВТОРЯТЬ: таймаут, обрыв, DNS, прокси.
+#:
+#: Раньше здесь стоял голый ``httpx.TransportError``, а он покрывает и то,
+#: что повторять бессмысленно: ``UnsupportedProtocol`` (URL без схемы) и
+#: ``LocalProtocolError`` (например не-latin1 в заголовке). То есть на
+#: ОШИБКЕ КОНФИГУРАЦИИ предохранитель ставил алиас модели в «недоступна» на
+#: всю сессию и перед этим честно ретраил 10/20/40/80 секунд. Докстрока
+#: предохранителя при этом требовала обратного — «конфигурационные ошибки
+#: наверх сразу».
+#:
+#: ``TimeoutException`` оставлен явно: он подкласс ``TransportError``, но
+#: читается в списке.
+HTTP_TRANSPORT_ERRORS = (
+    httpx.TimeoutException,
+    httpx.NetworkError,
+    httpx.ProxyError,
+    httpx.RemoteProtocolError,
+)
+
+
+def http_status_code(exc: BaseException) -> int | None:
+    """Код HTTP-ошибки независимо от транспорта; None — это не HTTP-ошибка."""
+    if isinstance(exc, HTTP_STATUS_ERRORS):
+        return getattr(getattr(exc, "response", None), "status_code", None)
+    return None
 
 
 def is_auth_error(exc: BaseException) -> bool:
@@ -51,8 +89,8 @@ def is_auth_error(exc: BaseException) -> bool:
     токена (`auth_connector.get_token(force=True)`) + повтор запроса один раз
     (см. `_request_backend_canonical`). 403 сюда НЕ входит: forbidden рефрешем не
     чинится. Провайдер-агностично: HTTPError (non-stream) и BackendStreamError (stream)."""
-    if isinstance(exc, requests.exceptions.HTTPError):
-        status_code = getattr(getattr(exc, "response", None), "status_code", None)
+    if isinstance(exc, HTTP_STATUS_ERRORS):
+        status_code = http_status_code(exc)
     elif isinstance(exc, BackendStreamError):
         status_code = exc.status_code
     elif isinstance(exc, EmbeddedChoiceError):
@@ -71,8 +109,8 @@ def is_retriable_backend_error(exc: BaseException) -> bool:
     Паритет stream ↔ non-stream: HTTP 4xx/5xx (кроме auth 401/403/404) ИЛИ
     стрим-ошибка (SSE error в 200-стриме) с таким же кодом. Нечисловой код
     (content_filter) → False."""
-    if isinstance(exc, requests.exceptions.HTTPError):
-        status_code = getattr(getattr(exc, "response", None), "status_code", None)
+    if isinstance(exc, HTTP_STATUS_ERRORS):
+        status_code = http_status_code(exc)
     elif isinstance(exc, BackendStreamError):
         status_code = exc.status_code
     elif isinstance(exc, EmbeddedChoiceError):
@@ -166,9 +204,11 @@ _KNOWN_FINISH_KINDS = {
 
 
 class FinishDecision(NamedTuple):
-    accept: bool   # принять payload в историю (не крашиться/не ретраить транспорт)
+    accept: (
+        bool  # принять payload в историю (не крашиться/не ретраить транспорт)
+    )
     unknown: bool  # finish_reason незнакомый → залогировать warning
-    kind: str      # stop | tool_calls | length | blocked | unknown
+    kind: str  # stop | tool_calls | length | blocked | unknown
 
 
 def _finish_reason_key(finish_reason) -> str | None:
@@ -198,7 +238,7 @@ def finish_prevents_text_final(finish_reason) -> bool:
     решение text_response в run_agent (даже при text_answer_mode=allow).
     """
     kind = classify_finish_kind(finish_reason)
-    return kind == FINISH_KIND_BLOCKED or kind == FINISH_KIND_LENGTH
+    return kind in (FINISH_KIND_BLOCKED, FINISH_KIND_LENGTH)
 
 
 def normalize_finish_reason(
@@ -226,7 +266,9 @@ def normalize_finish_reason(
             accept=True, unknown=False, kind=_KNOWN_FINISH_KINDS[key]
         )
     if has_content or has_tool_calls or has_reasoning:
-        return FinishDecision(accept=True, unknown=True, kind=FINISH_KIND_UNKNOWN)
+        return FinishDecision(
+            accept=True, unknown=True, kind=FINISH_KIND_UNKNOWN
+        )
     return FinishDecision(accept=False, unknown=True, kind=FINISH_KIND_UNKNOWN)
 
 
@@ -248,8 +290,17 @@ def is_model_unavailable_error(exc: BaseException) -> bool:
         return True
     if is_context_overflow_error(exc):
         return False
-    if isinstance(exc, requests.exceptions.HTTPError):
-        status_code = getattr(getattr(exc, "response", None), "status_code", None)
+    if is_image_request_error(exc):
+        # Слепая модель или предел картинок — факт о модели, а не недоступность.
+        # OpenRouter отвечает на картинку 404-м, и без этой проверки предохранитель
+        # гасил бы алиас на всю сессию, а служебный вызов уходил бы в откат на
+        # активную модель.
+        return False
+    # Транспорт здесь httpx, а не requests: предикат приехал с develop, где
+    # ветка была синхронной. Спрашиваем общие кортежи модуля — они и заведены
+    # ради того, чтобы правило не зависело от транспорта.
+    if isinstance(exc, HTTP_STATUS_ERRORS):
+        status_code = http_status_code(exc)
     elif isinstance(exc, BackendStreamError):
         status_code = exc.status_code
     elif isinstance(exc, EmbeddedChoiceError):
@@ -260,13 +311,11 @@ def is_model_unavailable_error(exc: BaseException) -> bool:
         # отсутствует вовсе) уходит на общий путь ниже и даёт False: гасить алиас
         # на всю сессию по неизвестной причине нельзя.
         status_code = exc.status_code
-    elif isinstance(
-        exc,
-        (
-            requests.exceptions.Timeout,
-            requests.exceptions.ConnectionError,
-        ),
-    ):
+    elif isinstance(exc, HTTP_TRANSPORT_ERRORS):  # noqa: SIM103  # ветка с обоснованием в цепочке elif
+        # Только транспортные сбои (таймаут, обрыв, DNS), а не любой сбой
+        # клиента: от битого url или лишних редиректов предохранитель гасил бы
+        # алиас на всю сессию, хотя модель жива. У httpx это ровно
+        # TransportError/TimeoutException — см. кортеж выше.
         return True
     else:
         return False
@@ -288,3 +337,117 @@ def is_context_overflow_error(exc: BaseException) -> bool:
     (stream → BackendStreamError, non-stream → HTTPError/ValueError)."""
     text = str(exc).lower()
     return any(marker in text for marker in _CONTEXT_OVERFLOW_MARKERS)
+
+
+# Отказ модели принять изображение (спека изображений §10): модель слепая или
+# сервер поднят без зрения. Это факт о модели, а не сбой: повтор его не лечит, и
+# недоступностью модели он не является. Маркеры — дословные фразы провайдеров в
+# нижнем регистре. Размер тела (413, «too large») и форма запроса («Image URLs
+# are only allowed for messages with role 'user'» — картинка не в user-сообщении,
+# это наш баг) под маркеры не попадают: о зрении модели они ничего не говорят.
+_IMAGE_REJECTION_MARKERS = (
+    "at most 0 image(s) may be provided",  # vLLM: зрячая модель с --language-model-only
+    "is not a multimodal model",  # vLLM: текстовая модель
+    "image_url is only supported by certain models",  # OpenAI
+    "no endpoints found that support image input",  # OpenRouter, HTTP 404
+    "does not support image",  # общая форма: «…images» / «…image input»
+    "unknown variant `image_url`",  # шлюзы на serde: части image_url не знают
+    "only supports text input",  # litellm-прокси: «Model only supports text input»
+)
+
+
+def _rejection_text(exc: BaseException) -> str:
+    """Текст отказа бэкенда: тело HTTP-ответа или сообщение исключения.
+
+    Тело HTTP-отказа транспорт дочитывает до raise и в стрим-пути
+    (`connect_backend.arequest_backend_chat_completions`, `_aread_error_text`):
+    причина слепоты лежит только там, в статусе её нет. Тело не дочитано
+    (обрыв на чтении) — текста нет."""
+    if isinstance(exc, HTTP_STATUS_ERRORS):
+        try:
+            return exc.response.text
+        except httpx.ResponseNotRead:
+            return ""
+    if isinstance(exc, (BackendStreamError, EmbeddedChoiceError)):
+        return str(exc)
+    return ""
+
+
+def is_image_rejection_error(exc: BaseException) -> bool:
+    """True — бэкенд отказал, потому что модель не принимает изображения.
+
+    Классифицирует только формы отказа бэкенда: HTTP-статус с телом, SSE-ошибку
+    внутри 200-стрима, ошибку, зашитую прокси в HTTP-200. Проверяется во всех
+    трёх слоях повторов — транспорт (`connect_backend`), адаптивная политика
+    (`request_backend_policy`), предохранитель (`is_model_unavailable_error`):
+    отказ не повторяется, не даёт «Ошибка LLM» и не гасит алиас на сессию.
+    Что с ним делать (пометка модели, повтор без картинок) — решает контроллер."""
+    text = _rejection_text(exc).lower()
+    return any(marker in text for marker in _IMAGE_REJECTION_MARKERS)
+
+
+# Бэкенд принимает не все картинки запроса: предел числа картинок на запрос (vLLM
+# `--limit-mm-per-prompt`: «At most N image(s) may be provided in one prompt»; у
+# облачных провайдеров — свои тексты) или тело запроса больше предела прокси (413,
+# у nginx по умолчанию 1 МБ — меньше одного крупного скриншота в base64). Лечится
+# меньшим числом картинок; сколько слать, решает контроллер
+# (`vision.rejects.next_image_cap`). Предел должен говорить о самих картинках — слово о
+# пределе рядом со словом «image(s)»: переполнение контекста у мультимодальной модели
+# («…maximum model length… the number of image tokens depends on the number of
+# images») с ним не совпадает, как и имя тула `fs_view_image` и картинка не в той роли.
+_STATED_IMAGE_LIMIT = re.compile(
+    r"\b(?:at most|no more than|up to|maximum of|max(?:imum)?)\s+(\d+)\s+images?\b"
+)
+_IMAGE_LIMIT_PHRASES = (
+    _STATED_IMAGE_LIMIT,
+    re.compile(r"\btoo many images?\b"),
+    re.compile(r"\bimages?\b[^.]{0,40}?\b(?:limit|exceed(?:s|ed)?)\b"),
+)
+_IMAGE_LIMIT_STATUSES = frozenset({400, 422})
+_PAYLOAD_TOO_LARGE = 413
+
+
+def _error_status(exc: BaseException) -> int | None:
+    """HTTP-код отказа бэкенда в любой его форме: HTTP-статус, SSE-ошибка в 200-стриме,
+    ошибка, зашитая прокси в HTTP-200. Нечисловой код — None."""
+    if isinstance(exc, HTTP_STATUS_ERRORS):
+        return http_status_code(exc)
+    if isinstance(exc, (BackendStreamError, EmbeddedChoiceError)):
+        try:
+            return int(exc.status_code)
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def _is_image_limit_error(exc: BaseException) -> bool:
+    status = _error_status(exc)
+    if status == _PAYLOAD_TOO_LARGE:
+        return True
+    if status not in _IMAGE_LIMIT_STATUSES:
+        return False
+    text = _rejection_text(exc).lower()
+    if any(marker in text for marker in _CONTEXT_OVERFLOW_MARKERS):
+        return (
+            False  # переполнение контекста — путь сжатия истории, не картинок
+        )
+    return any(phrase.search(text) for phrase in _IMAGE_LIMIT_PHRASES)
+
+
+def is_image_request_error(exc: BaseException) -> bool:
+    """True — ошибка лечится меньшим числом картинок в запросе: модель не принимает их
+    вовсе (`is_image_rejection_error`) или принимает не все (предел числа, размер тела).
+
+    Проверяется во всех трёх слоях повторов — транспорт (`connect_backend`),
+    адаптивная политика (`request_backend_policy`), предохранитель
+    (`is_model_unavailable_error`): такая ошибка не повторяется тем же запросом, не
+    даёт «Ошибка LLM» и не гасит алиас. Ни о чём не говорит без картинок в запросе —
+    это проверяет контроллер (`request_carries_images`)."""
+    return is_image_rejection_error(exc) or _is_image_limit_error(exc)
+
+
+def image_limit_from_error(exc: BaseException) -> int | None:
+    """Предел числа картинок на запрос, названный в тексте ошибки (vLLM: «At most N
+    image(s)»), или None, если числа нет."""
+    match = _STATED_IMAGE_LIMIT.search(_rejection_text(exc).lower())
+    return int(match.group(1)) if match else None

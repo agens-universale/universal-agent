@@ -35,7 +35,10 @@ def test_thread_continuation_does_not_double_count_for_summary_trigger():
     assert to_append == [new_user]
     assert len(state.messages) == 1 + len(history) + 1
 
-    assert history_exceeds_summary_trigger(
-        state=state,
-        summary_trigger_chars=200_000,
-    ) is False
+    assert (
+        history_exceeds_summary_trigger(
+            state=state,
+            summary_trigger_chars=200_000,
+        )
+        is False
+    )

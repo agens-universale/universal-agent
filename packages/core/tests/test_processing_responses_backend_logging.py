@@ -2,8 +2,9 @@ import importlib
 import logging
 import sys
 import types
-from pathlib import Path
 from types import SimpleNamespace
+
+from gc_testkit import as_coro, run_coro
 from gc_testkit.paths import module_dir
 
 
@@ -14,7 +15,7 @@ def teardown_module(_module) -> None:
     real_tools = importlib.import_module("gc_core.tools")
     proc = sys.modules.get("gc_core.processing_responses")
     if proc is not None:
-        proc.apply_tool = real_tools.apply_tool
+        proc.aapply_tool = real_tools.aapply_tool
         proc.WrongFunctionArgumentsException = (
             real_tools.WrongFunctionArgumentsException
         )
@@ -31,12 +32,20 @@ def _stub_tools_modules() -> None:
         def to_llm_feedback(self):
             return str(self)
 
-    def _apply_tool(*_args, **_kwargs):
+    async def _apply_tool(*_args, **_kwargs):
         raise AssertionError("apply_tool should not be called in this test")
 
-    tools_pkg.apply_tool = _apply_tool
-    tools_pkg.WrongFunctionArgumentsException = _WrongFunctionArgumentsException
+    tools_pkg.aapply_tool = _apply_tool
+    tools_pkg.WrongFunctionArgumentsException = (
+        _WrongFunctionArgumentsException
+    )
     tools_dir = module_dir("tools")
+    # `processing_responses` импортирует эти имена на уровне модуля. Без них
+    # подмена пакета даёт ImportError, и файл падает целиком — но только
+    # когда реальные модули не подтянул сосед по прогону. При случайном
+    # порядке (pytest-randomly) это молчащая мина, а не свойство файла.
+    tools_pkg.is_internal_tool_error_output = lambda *_a, **_kw: False
+    tools_pkg.is_unknown_tool_output = lambda *_a, **_kw: False
     tools_pkg.__path__ = [str(tools_dir)]
     sys.modules["gc_core.tools"] = tools_pkg
 
@@ -52,33 +61,47 @@ def setup_module(_module) -> None:
     from gc_core.states import State as St
 
     processing_module = proc
-    proc.apply_tool = sys.modules["gc_core.tools"].apply_tool
+    proc.aapply_tool = sys.modules["gc_core.tools"].aapply_tool
     State = St
 
 
-def test_chat_completions_logs_raw_backend_payload_on_conversion_error(caplog, monkeypatch):
+def test_chat_completions_logs_raw_backend_payload_on_conversion_error(
+    caplog, monkeypatch
+):
     def _fake_create_call_headers(_state, _ctx, resolved=None):
         return {"Authorization": "Bearer fake"}
 
     def _fake_create_call_data(_messages, _state, **_kwargs):
-        return {"model": "CodeChat", "messages": [{"role": "user", "content": "ping"}], "tools": []}
+        return {
+            "model": "CodeChat",
+            "messages": [{"role": "user", "content": "ping"}],
+            "tools": [],
+        }
 
-    def _fake_request_policy(*_args, **_kwargs):
+    async def _fake_request_policy(*_args, **_kwargs):
         # Нет поля choices -> внутри конвертации будет KeyError('choices').
         return (
             {"id": "chat_1", "object": "chat.completion", "model": "CodeChat"},
-            {"model": "CodeChat", "messages": [{"role": "user", "content": "ping"}], "tools": []},
+            {
+                "model": "CodeChat",
+                "messages": [{"role": "user", "content": "ping"}],
+                "tools": [],
+            },
         )
 
     monkeypatch.setattr(
-        processing_module, "create_call_headers", _fake_create_call_headers
-    )
-    monkeypatch.setattr(
-        processing_module, "create_call_data_completions", _fake_create_call_data
+        processing_module,
+        "acreate_call_headers",
+        as_coro(_fake_create_call_headers),
     )
     monkeypatch.setattr(
         processing_module,
-        "request_chat_completions_with_policy",
+        "create_call_data_completions",
+        _fake_create_call_data,
+    )
+    monkeypatch.setattr(
+        processing_module,
+        "arequest_chat_completions_with_policy",
         _fake_request_policy,
     )
 
@@ -106,10 +129,12 @@ def test_chat_completions_logs_raw_backend_payload_on_conversion_error(caplog, m
 
     with caplog.at_level(logging.ERROR):
         try:
-            processing_module._request_backend_canonical(
-                [{"role": "user", "content": "hello", "id": "m_1"}],
-                state,
-                ctx,
+            run_coro(
+                processing_module._arequest_backend_canonical(
+                    [{"role": "user", "content": "hello", "id": "m_1"}],
+                    state,
+                    ctx,
+                )
             )
             assert False, "Expected KeyError('choices')"
         except KeyError as exc:

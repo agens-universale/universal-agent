@@ -1,12 +1,15 @@
-from typing import Any, Dict, Optional, TYPE_CHECKING
 import json
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Dict, Optional
+
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 from gc_core.utils.arg_decorators import parse_json_object_argument
-from gc_core.utils.json_arg_parser import JsonArgParseError, parse_json_object_arg
 
 if TYPE_CHECKING:
     from gc_core.intent_guard.guard import FinishGateDecision
 
+
+_VALIDATION_FAILED = "Validation failed."
 
 SOLUTION_TYPES = (
     "full_solution",
@@ -19,8 +22,49 @@ SOLUTION_TYPES = (
 
 TASK_REPORT_MAX_CHARS = 10000
 
-class SubmitSolution(AbstractSimpleTool):
+_FINISH_KEYS = ("solution_type", "task", "task_report", "handoff")
 
+
+@dataclass(frozen=True)
+class TurnFinishView:
+    """Отчёт и заметка ``turn_finish`` для ленты.
+
+    ``solution_type``, ``task``, ``handoff`` и вердикт судьи сюда не входят.
+    """
+
+    report: str
+    comment: str
+
+    def render(self) -> str:
+        if self.comment == "":
+            return self.report
+        return f"{self.report}\n\n* заметка: {self.comment}"
+
+
+def _json_object(value: Any) -> dict | None:
+    if isinstance(value, dict):
+        return value
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text.startswith("{"):
+        return None
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    if isinstance(parsed, dict):
+        return parsed
+    return None
+
+
+def _is_finish_payload(data: dict) -> bool:
+    if any(key not in data for key in _FINISH_KEYS):
+        return False
+    return data.get("solution_type") in SOLUTION_TYPES
+
+
+class SubmitSolution(AbstractSimpleTool):
     @staticmethod
     def _result(
         *,
@@ -57,21 +101,6 @@ class SubmitSolution(AbstractSimpleTool):
         out["task_report"] = task_report
         return json.dumps(out, ensure_ascii=False)
 
-    @classmethod
-    def _parse_handoff_from_arguments(cls, payload: Dict[str, Any]) -> Dict[str, Any] | None:
-        handoff_data = payload.get("handoff_data")
-        if isinstance(handoff_data, dict):
-            return handoff_data
-        if "handoff" not in payload:
-            return None
-        raw = payload.get("handoff")
-        if isinstance(raw, dict):
-            return raw
-        try:
-            return parse_json_object_arg(raw, field="handoff")
-        except JsonArgParseError:
-            return None
-
     @staticmethod
     def _finish_gate_block_from_validation(validation: Any) -> Dict[str, Any]:
         return {
@@ -105,13 +134,15 @@ class SubmitSolution(AbstractSimpleTool):
 
         if decision.outcome == "reject" and decision.validation is not None:
             validation = decision.validation
-            feedback = (decision.feedback_text or "").strip() or build_finish_gate_feedback(
-                validation
-            )
+            feedback = (
+                decision.feedback_text or ""
+            ).strip() or build_finish_gate_feedback(validation)
             payload["ok"] = False
             payload["status"] = "rejected_by_finish_gate"
             payload["message"] = feedback
-            payload["finish_gate"] = cls._finish_gate_block_from_validation(validation)
+            payload["finish_gate"] = cls._finish_gate_block_from_validation(
+                validation
+            )
         elif decision.validation is not None:
             payload["finish_gate"] = cls._finish_gate_block_from_validation(
                 decision.validation
@@ -123,13 +154,19 @@ class SubmitSolution(AbstractSimpleTool):
                 payload["finish_gate"]["runtime_outcome"] = "fail_open_limit"
             elif decision.outcome == "fail_open_error":
                 payload["finish_gate"]["runtime_outcome"] = "fail_open_error"
-        elif decision.outcome in ("fail_open_limit", "fail_open_error", "skipped"):
+        elif decision.outcome in (
+            "fail_open_limit",
+            "fail_open_error",
+            "skipped",
+        ):
             payload["finish_gate"] = {"runtime_outcome": decision.outcome}
 
         return json.dumps(payload, ensure_ascii=False)
 
     @classmethod
-    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def tool_description(
+        cls, config_dict: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
         return {
             "type": "function",
             "name": "turn_finish",
@@ -179,20 +216,28 @@ class SubmitSolution(AbstractSimpleTool):
                         "description": (
                             "Must decode to a JSON object (dictionary), not an array, scalar, or null. "
                             "Pass the object as one JSON string (this field is string-typed, not a nested object). "
-                            "Machine-readable payload for downstream workflows; use \"{}\" when nothing extra is needed. "
-                            "Example: '{\"artifacts\":[\"report.md\"]}'."
+                            'Machine-readable payload for downstream workflows; use "{}" when nothing extra is needed. '
+                            'Example: \'{"artifacts":["report.md"]}\'.'
                         ),
                     },
                 },
-                "required": ["solution_type", "task", "task_report", "handoff"],
+                "required": [
+                    "solution_type",
+                    "task",
+                    "task_report",
+                    "handoff",
+                ],
                 "additionalProperties": False,
             },
             "strict": True,
         }
 
     @classmethod
-    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> str:
-        return '''Tool name: turn_finish
+    def prompt_description(
+        cls, config_dict: Optional[Dict[str, Any]] = None
+    ) -> str:
+        return (
+            """Tool name: turn_finish
 Tool description: Finalizes turn: yes. Signals that the CURRENT USER TURN is finished and the outcome is ready to hand back to the user.
 IMPORTANT: This marks end of the current turn, NOT end of the whole thread/session.
 Use solution_type to classify the turn outcome; task for what the user asked this turn; task_report for what was done in this turn; comment for caveats or next steps.
@@ -201,7 +246,9 @@ Input schema:
 {
   "solution_type": "full_solution" | "partial_solution" | "direct_answer" | "couldnt_solve" | "need_additional_info" | "abandoned",
   "task": "string (required)",
-  "task_report": "string (required, max ''' + str(TASK_REPORT_MAX_CHARS) + ''' chars)",
+  "task_report": "string (required, max """
+            + str(TASK_REPORT_MAX_CHARS)
+            + """ chars)",
   "comment": "string (optional)",
   "handoff": "{}" (required; JSON object encoded as a string)
 }
@@ -238,15 +285,50 @@ Choosing solution_type (for current turn):
 - abandoned: stopped by explicit choice/instruction.
 
 - task: What the user asked this turn, in 1–2 phrases, in the user's terms. Not what was done — that is task_report.
-- task_report: What was done in this turn (steps, result, assumptions/evidence). Plain text, brief. Max ''' + str(TASK_REPORT_MAX_CHARS) + ''' characters.
+- task_report: What was done in this turn (steps, result, assumptions/evidence). Plain text, brief. Max """
+            + str(TASK_REPORT_MAX_CHARS)
+            + """ characters.
 - comment: Optional caveats, risks, unresolved items, or next steps.
 - handoff: Required JSON object string (see Handoff format). Minimal valid value: "{}".
 
 Success return format (compact JSON ack): {"tool":"turn_finish","ok":true,"status":"submitted"}
 Validation failure return format: {"tool":"turn_finish","ok":false,"status":"rejected","message":"...","error":{...},"task_report":""}
-'''
+"""
+        )
 
-    def __call__(
+    @classmethod
+    def finish_view(cls, arguments: Any) -> TurnFinishView | None:
+        """Аргументы финализатора. Не финализатор — ``None``."""
+        data = _json_object(arguments)
+        if data is None or not _is_finish_payload(data):
+            return None
+        report = data.get("task_report")
+        comment = data.get("comment")
+        return TurnFinishView(
+            report.strip() if isinstance(report, str) else "",
+            comment.strip() if isinstance(comment, str) else "",
+        )
+
+    @classmethod
+    def present_result(cls, result: Any, *, shown: str = "") -> Any:
+        """Текст хода для фасада.
+
+        Аргументы ``turn_finish`` становятся отчётом и строкой заметки.
+        Проза и прочие значения возвращаются как есть. Если тот же отчёт
+        уже есть в ``shown``, возвращается ``shown``: заметка повторно
+        не дописывается. Пустой отчёт — пустая строка, сырой JSON и
+        вердикт судьи наружу не идут.
+        """
+        view = cls.finish_view(result)
+        if view is None:
+            return result
+        if view.report == "":
+            return ""
+        if shown.strip() == view.report:
+            return shown
+        return view.render()
+
+    async def acall(
         self,
         solution_type: str,
         task_report: str,
@@ -266,7 +348,9 @@ Validation failure return format: {"tool":"turn_finish","ok":false,"status":"rej
             **kwargs,
         )
 
-    @parse_json_object_argument(source_arg="handoff", target_arg="handoff_data")
+    @parse_json_object_argument(
+        source_arg="handoff", target_arg="handoff_data"
+    )
     def _submit(
         self,
         solution_type: str,
@@ -280,7 +364,7 @@ Validation failure return format: {"tool":"turn_finish","ok":false,"status":"rej
             return self._result(
                 ok=False,
                 status="rejected",
-                message="Validation failed.",
+                message=_VALIDATION_FAILED,
                 task=None,
                 task_report="",
                 error={
@@ -293,7 +377,7 @@ Validation failure return format: {"tool":"turn_finish","ok":false,"status":"rej
             return self._result(
                 ok=False,
                 status="rejected",
-                message="Validation failed.",
+                message=_VALIDATION_FAILED,
                 task=None,
                 task_report="",
                 error={
@@ -308,7 +392,7 @@ Validation failure return format: {"tool":"turn_finish","ok":false,"status":"rej
             return self._result(
                 ok=False,
                 status="rejected",
-                message="Validation failed.",
+                message=_VALIDATION_FAILED,
                 task=None,
                 task_report="",
                 error={
@@ -321,7 +405,7 @@ Validation failure return format: {"tool":"turn_finish","ok":false,"status":"rej
             return self._result(
                 ok=False,
                 status="rejected",
-                message="Validation failed.",
+                message=_VALIDATION_FAILED,
                 task=None,
                 task_report="",
                 error={
@@ -335,7 +419,7 @@ Validation failure return format: {"tool":"turn_finish","ok":false,"status":"rej
             return self._result(
                 ok=False,
                 status="rejected",
-                message="Validation failed.",
+                message=_VALIDATION_FAILED,
                 task=None,
                 task_report="",
                 error={
@@ -352,15 +436,14 @@ Validation failure return format: {"tool":"turn_finish","ok":false,"status":"rej
             return self._result(
                 ok=False,
                 status="rejected",
-                message="Validation failed.",
+                message=_VALIDATION_FAILED,
                 task=None,
                 task_report="",
                 error={
                     "type": "invalid_argument",
                     "field": "handoff",
                     "message": (
-                        "handoff is required. Must decode to a JSON object; "
-                        "pass it as a JSON string (e.g. \"{}\")."
+                        'handoff is required. Must decode to a JSON object; pass it as a JSON string (e.g. "{}").'
                     ),
                 },
             )
@@ -371,7 +454,7 @@ Validation failure return format: {"tool":"turn_finish","ok":false,"status":"rej
                 return self._result(
                     ok=False,
                     status="rejected",
-                    message="Validation failed.",
+                    message=_VALIDATION_FAILED,
                     task=None,
                     task_report="",
                     error={
@@ -384,7 +467,7 @@ Validation failure return format: {"tool":"turn_finish","ok":false,"status":"rej
                 return self._result(
                     ok=False,
                     status="rejected",
-                    message="Validation failed.",
+                    message=_VALIDATION_FAILED,
                     task=None,
                     task_report="",
                     error={

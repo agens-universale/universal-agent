@@ -2,9 +2,9 @@
 
 import json
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
-from gc_core.states import State, SharedStateData
+from gc_core.states import SharedStateData, State
 from gc_core.tools.subagents import runner as runner_module
 from gc_core.tools.subagents.runner import SubagentRunner
 
@@ -54,7 +54,7 @@ def _make_ctx(cfg=None):
 
 
 class TestCreateInstanceError:
-    def test_network_error_returns_error_string(self):
+    async def test_network_error_returns_error_string(self):
         """ConnectionError in create_instance should not crash the orchestrator."""
         orch = _make_orchestrator_state()
         cfg = _make_config()
@@ -62,16 +62,20 @@ class TestCreateInstanceError:
 
         with patch.object(runner_module, "get_subagent_class") as mock_cls:
             cls = MagicMock()
-            cls.create_instance = AsyncMock(side_effect=ConnectionError("LLM unreachable"))
+            cls.create_instance = AsyncMock(
+                side_effect=ConnectionError("LLM unreachable")
+            )
             mock_cls.return_value = cls
 
-            result = runner.run("subagent_worker", {"task": "test"}, MagicMock())
+            result = await runner.arun(
+                "subagent_worker", {"task": "test"}, MagicMock()
+            )
 
         payload = json.loads(result)
         assert payload["ok"] is False
         assert payload["error"]["code"] == "subagent_create_failed"
 
-    def test_generic_exception_returns_error_string(self):
+    async def test_generic_exception_returns_error_string(self):
         """Any exception in create_instance is caught and returns error string."""
         orch = _make_orchestrator_state()
         cfg = _make_config()
@@ -82,13 +86,15 @@ class TestCreateInstanceError:
             cls.create_instance = AsyncMock(side_effect=ValueError("bad args"))
             mock_cls.return_value = cls
 
-            result = runner.run("subagent_worker", {"task": "test"}, MagicMock())
+            result = await runner.arun(
+                "subagent_worker", {"task": "test"}, MagicMock()
+            )
 
         payload = json.loads(result)
         assert payload["ok"] is False
         assert payload["error"]["code"] == "subagent_create_failed"
 
-    def test_orchestrator_not_crashed(self):
+    async def test_orchestrator_not_crashed(self):
         """Orchestrator state remains intact after create_instance failure."""
         orch = _make_orchestrator_state()
         cfg = _make_config()
@@ -99,22 +105,26 @@ class TestCreateInstanceError:
             cls.create_instance = AsyncMock(side_effect=RuntimeError("boom"))
             mock_cls.return_value = cls
 
-            runner.run("subagent_worker", {"task": "test"}, MagicMock())
+            await runner.arun("subagent_worker", {"task": "test"}, MagicMock())
 
         assert orch.shared.working_memory["state"] == "before"
         assert orch.stop_requested is False
 
 
 class TestBuildChildCtxError:
-    def test_ctx_build_failure_returns_error_string(self):
+    async def test_ctx_build_failure_returns_error_string(self):
         """Error in _build_child_ctx should not crash the orchestrator."""
         orch = _make_orchestrator_state()
         cfg = _make_config()
         runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
 
-        with patch.object(runner, "_build_child_ctx", side_effect=ImportError("no module")):
-            result = runner.run(
-                "subagent_worker", {"task": "test"}, MagicMock(),
+        with patch.object(
+            runner, "_build_child_ctx", side_effect=ImportError("no module")
+        ):
+            result = await runner.arun(
+                "subagent_worker",
+                {"task": "test"},
+                MagicMock(),
             )
 
         payload = json.loads(result)
@@ -123,29 +133,39 @@ class TestBuildChildCtxError:
 
 
 class TestRunAgentError:
-    def test_run_agent_exception_returns_error_string(self):
+    async def test_run_agent_exception_returns_error_string(self):
         """Exception in run_agent_func should return error, not crash."""
         orch = _make_orchestrator_state()
         cfg = _make_config()
         runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
-        run_agent_func = MagicMock(side_effect=RuntimeError("LLM backend down"))
+        run_agent_func = MagicMock(
+            side_effect=RuntimeError("LLM backend down")
+        )
 
-        with patch.object(runner, "_build_child_ctx", return_value=SimpleNamespace()):
-            result = runner.run("subagent_worker", {"task": "test"}, run_agent_func)
+        with patch.object(
+            runner, "_build_child_ctx", return_value=SimpleNamespace()
+        ):
+            result = await runner.arun(
+                "subagent_worker", {"task": "test"}, run_agent_func
+            )
 
         payload = json.loads(result)
         assert payload["ok"] is False
         assert payload["error"]["code"] == "subagent_run_failed"
 
-    def test_error_message_contains_tool_name(self):
+    async def test_error_message_contains_tool_name(self):
         """Error string should mention which subagent failed."""
         orch = _make_orchestrator_state()
         cfg = _make_config()
         runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
         run_agent_func = MagicMock(side_effect=Exception("fail"))
 
-        with patch.object(runner, "_build_child_ctx", return_value=SimpleNamespace()):
-            result = runner.run("subagent_worker", {"task": "test"}, run_agent_func)
+        with patch.object(
+            runner, "_build_child_ctx", return_value=SimpleNamespace()
+        ):
+            result = await runner.arun(
+                "subagent_worker", {"task": "test"}, run_agent_func
+            )
 
         payload = json.loads(result)
         assert payload["meta"]["tool_name"] == "subagent_worker"

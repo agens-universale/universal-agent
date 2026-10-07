@@ -1,14 +1,16 @@
 import pytest
+from gc_tui.widgets.trace_row import TraceRow
 from textual.app import App
 from textual.widgets import Static
-from gc_tui.widgets.trace_row import TraceRow
 
 
 @pytest.mark.asyncio
 async def test_set_content_updates_content_static():
     class _App(App):
         def compose(self):
-            yield TraceRow(prefix="● ", content="старый", kind_class="line-agent")
+            yield TraceRow(
+                prefix="● ", content="старый", kind_class="line-agent"
+            )
 
     app = _App()
     async with app.run_test():

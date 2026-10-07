@@ -10,6 +10,7 @@ Textual wrap'ит его внутри этой колонки. Wrapped-стро�
 - fenced code-block panel (BlockPanel)
 - tool-вызовов (ToolCallRow — собственный compose, тоже Horizontal-based)
 """
+
 from __future__ import annotations
 
 from typing import Optional
@@ -94,31 +95,35 @@ class TraceRow(ClickModelMixin, Widget):
         except Exception:
             pass
 
-    def set_content(self, content) -> None:
-        """Обновить content-колонку после монтирования (пер-тик апдейт стрим-прозы)."""
+    def set_content(self, content, *, layout: bool = True) -> None:
+        """Обновить content-колонку после монтирования (пер-тик апдейт стрим-прозы).
+        `layout=False` — размер не меняется (перекраска), ленту не перекомпоновывать."""
         self._content = content
         try:
-            self.query_one(".trace-content", Static).update(content)
+            self.query_one(".trace-content", Static).update(
+                content, layout=layout
+            )
         except Exception:
             pass
 
     def compose(self) -> ComposeResult:
         with Horizontal():
-            yield Static(
-                self._prefix,
-                classes="trace-prefix",
-                markup=False,
-            )
-            yield Static(
-                self._content,
-                classes="trace-content",
-                markup=False,
-            )
+            yield self._make_prefix()
+            yield self._make_content()
+
+    def _make_prefix(self) -> Widget:
+        """Виджет prefix-колонки (класс `trace-prefix`); подкласс может заменить."""
+        return Static(self._prefix, classes="trace-prefix", markup=False)
+
+    def _make_content(self) -> Widget:
+        """Виджет content-колонки (класс `trace-content`); подкласс может заменить."""
+        return Static(self._content, classes="trace-content", markup=False)
 
     def _open_request(self) -> Optional[Message]:
         if not self._event_no:
             return None
         from gc_tui.messages import OpenEventRequest
+
         return OpenEventRequest(self._event_no)
 
 
@@ -134,6 +139,7 @@ class SummaryMarker(TraceRow):
             return
         event.stop()
         from gc_tui.messages import SummaryToggleRequest
+
         self.post_message(SummaryToggleRequest(self._event_no))
 
     def on_key(self, event: events.Key) -> None:
@@ -144,4 +150,5 @@ class SummaryMarker(TraceRow):
                 return
             event.stop()
             from gc_tui.messages import SummaryToggleRequest
+
             self.post_message(SummaryToggleRequest(self._event_no))

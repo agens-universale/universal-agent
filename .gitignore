@@ -37,6 +37,8 @@ dmypy.json
 .pyre/
 .pytype/
 .ruff_cache/
+# кэш complexipy: пересобирается на каждом прогоне, в гит не едет
+.complexipy_cache/
 
 # Testing
 .pytest_cache/
@@ -136,3 +138,8 @@ docs/2026-06-23-corp-mirror-config-overlay.md
 docs/CHANGES-vs-master.md
 snapshot_report.html
 
+
+# аварийные дампы Windows-утилит из Git Bash
+*.stackdump
+# отчёты синхронизации — рабочие записи, не часть поставки
+docs/sync/

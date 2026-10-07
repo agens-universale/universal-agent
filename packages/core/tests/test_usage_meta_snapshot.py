@@ -3,6 +3,7 @@
 Читает под замком ``state.usage`` / ``state.last_run_usage`` и отдаёт их to_meta()-
 снимки для TUI-футера. Без state → None.
 """
+
 from types import SimpleNamespace
 
 from gc_core.agent_executor import AgentExecutor
@@ -47,32 +48,47 @@ def test_session_and_last_run():
 def test_live_delta_while_run_active():
     """Ход идёт (last_run_usage ещё None): «запрос» = усия − baseline старта хода."""
     session = UsageAccount()
-    session.add(CATEGORY_MAIN, 100, 20)          # кумулятив на текущий момент
+    session.add(CATEGORY_MAIN, 100, 20)  # кумулятив на текущий момент
     baseline = UsageAccount()
-    baseline.add(CATEGORY_MAIN, 60, 10)          # снимок на старте хода (прошлые ходы)
+    baseline.add(CATEGORY_MAIN, 60, 10)  # снимок на старте хода (прошлые ходы)
     ex = AgentExecutor(SimpleNamespace())
     ex._state = SimpleNamespace(
-        usage=session, last_run_usage=None,
+        usage=session,
+        last_run_usage=None,
         run_start_usage_meta=baseline.to_meta(),
     )
 
     session_meta, request_meta = ex.usage_meta_snapshot()
     req = UsageAccount.from_meta(request_meta)
-    assert req.by_category[CATEGORY_MAIN]["input"] == 40   # 100 − 60, вживую
+    assert req.by_category[CATEGORY_MAIN]["input"] == 40  # 100 − 60, вживую
     assert req.by_category[CATEGORY_MAIN]["output"] == 10  # 20 − 10
     assert UsageAccount.from_meta(session_meta).totals()["input"] == 100
 
 
 def test_last_run_takes_precedence_when_set():
     """Ход завершён (last_run_usage выставлен) — показываем его, не live-дельту."""
-    session = UsageAccount(); session.add(CATEGORY_MAIN, 100, 20)
-    last_run = UsageAccount(); last_run.add(CATEGORY_MAIN, 40, 5)
-    baseline = UsageAccount(); baseline.add(CATEGORY_MAIN, 60, 10)
+    session = UsageAccount()
+    session.add(CATEGORY_MAIN, 100, 20)
+    last_run = UsageAccount()
+    last_run.add(CATEGORY_MAIN, 40, 5)
+    baseline = UsageAccount()
+    baseline.add(CATEGORY_MAIN, 60, 10)
     ex = AgentExecutor(SimpleNamespace())
     ex._state = SimpleNamespace(
-        usage=session, last_run_usage=last_run,
+        usage=session,
+        last_run_usage=last_run,
         run_start_usage_meta=baseline.to_meta(),
     )
     _, request_meta = ex.usage_meta_snapshot()
-    assert UsageAccount.from_meta(request_meta).by_category[CATEGORY_MAIN]["input"] == 40
-    assert UsageAccount.from_meta(request_meta).by_category[CATEGORY_MAIN]["output"] == 5
+    assert (
+        UsageAccount.from_meta(request_meta).by_category[CATEGORY_MAIN][
+            "input"
+        ]
+        == 40
+    )
+    assert (
+        UsageAccount.from_meta(request_meta).by_category[CATEGORY_MAIN][
+            "output"
+        ]
+        == 5
+    )

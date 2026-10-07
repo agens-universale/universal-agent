@@ -10,6 +10,7 @@
 Модуль без зависимостей от остального проекта: его читают и сборка тулов, и
 диспетчер, и ``agent_executor``, и ``manual_compaction``.
 """
+
 from __future__ import annotations
 
 import logging
@@ -97,7 +98,9 @@ def filter_subagents_by_allowlist(
     if unknown:
         (logger or _log).warning(
             "%s_unknown names=%s available=%s",
-            source, ", ".join(unknown), ", ".join(sorted(available)),
+            source,
+            ", ".join(unknown),
+            ", ".join(sorted(available)),
             extra={
                 "event": f"{source}_unknown",
                 "names": unknown,
@@ -109,7 +112,7 @@ def filter_subagents_by_allowlist(
 
 __all__ = [
     "filter_subagents_by_allowlist",
-    "subagents_allowlist_ordered",
     "subagents_allowlist",
+    "subagents_allowlist_ordered",
     "subagents_enabled",
 ]

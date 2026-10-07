@@ -4,18 +4,20 @@
 (popitem(last=False)), продление жизни при cache-hit (move_to_end), round-trip
 через serialize_shared_block (Order сохраняется в JSON).
 """
+
 from __future__ import annotations
 
 import json
 from collections import OrderedDict
 
-from gc_core.states import SharedStateData
 from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
+from gc_core.states import SharedStateData
 from gc_core.tools.exec.fetch_url import FetchUrl
 from gc_core.tools.exec.simple_fetch_url import SimpleFetchUrl
-
+from gc_testkit.helpers.tool_ctx import CallableTool
 
 # ── Стаб shared/state для _get_cache ──────────────────────────────────────────
+
 
 class _Shared:
     def __init__(self) -> None:
@@ -28,14 +30,15 @@ class _State:
 
 
 def _make_fetch() -> FetchUrl:
-    return FetchUrl(state=_State())
+    return CallableTool(FetchUrl(state=_State()))
 
 
 def _make_simple_fetch() -> SimpleFetchUrl:
-    return SimpleFetchUrl(state=_State())
+    return CallableTool(SimpleFetchUrl(state=_State()))
 
 
 # ── Нормализация dict→OrderedDict ─────────────────────────────────────────────
+
 
 def test_get_cache_normalizes_plain_dict_to_ordereddict():
     f = _make_fetch()
@@ -56,17 +59,22 @@ def test_get_cache_creates_empty_ordereddict_when_missing():
 
 
 def test_get_cache_returns_none_when_no_shared():
-    f = FetchUrl(state=None)
+    f = CallableTool(FetchUrl(state=None))
     assert f._get_cache() is None
 
 
 # ── Эвикция: лимит 10, popitem(last=False) ────────────────────────────────────
 
+
 def _fill_cache(f: FetchUrl, n: int) -> None:
     """Записывает n URL через публичный метод записи кэша."""
     for i in range(n):
         url = f"https://example.com/{i}"
-        f._put_to_cache(url, f"page-{i}", {"title": None, "description": None, "lang": None})
+        f._put_to_cache(
+            url,
+            f"page-{i}",
+            {"title": None, "description": None, "lang": None},
+        )
 
 
 def test_cache_evicts_oldest_when_limit_exceeded():
@@ -87,6 +95,7 @@ def test_cache_keeps_exactly_limit_at_boundary():
 
 
 # ── LRU: move_to_end на cache-hit ────────────────────────────────────────────
+
 
 def test_cache_hit_moves_to_end():
     f = _make_fetch()
@@ -123,11 +132,14 @@ def test_repeatedly_read_url_survives_eviction():
 
 # ── Round-trip через meta: OrderedDict → JSON → SharedStateData ───────────────
 
+
 def test_cache_order_survives_serialize_roundtrip():
     """Порядок ключей (LRU-возраст) сохраняется при персистентности в meta."""
     shared = SharedStateData()
     for i in range(10):
-        shared.fetch_url_cache[f"https://example.com/{i}"] = {"content": f"p{i}"}
+        shared.fetch_url_cache[f"https://example.com/{i}"] = {
+            "content": f"p{i}"
+        }
     # merge_shared_into_meta ставит state_schema_version, иначе shared_from_meta упадёт.
     meta = ThreadMetaMapper.merge_shared_into_meta({}, shared)
     raw_json = json.dumps(meta, ensure_ascii=False)
@@ -156,12 +168,16 @@ def test_max_size_constant_is_ten():
     assert FetchUrl.fetch_url_cache_max_size == 10
 
 
-
 # ── Прямые тесты методов _get_from_cache / _put_to_cache ──────────────────────
+
 
 def test_get_from_cache_returns_content_and_meta():
     f = _make_fetch()
-    f._put_to_cache("https://x.com", "body text", {"title": "T", "description": None, "lang": "en"})
+    f._put_to_cache(
+        "https://x.com",
+        "body text",
+        {"title": "T", "description": None, "lang": "en"},
+    )
     result = f._get_from_cache("https://x.com")
     assert result is not None
     content, meta = result
@@ -171,19 +187,27 @@ def test_get_from_cache_returns_content_and_meta():
 
 def test_get_from_cache_returns_none_for_missing_url():
     f = _make_fetch()
-    f._put_to_cache("https://x.com", "body", {"title": None, "description": None, "lang": None})
+    f._put_to_cache(
+        "https://x.com",
+        "body",
+        {"title": None, "description": None, "lang": None},
+    )
     assert f._get_from_cache("https://y.com") is None
 
 
 def test_get_from_cache_returns_none_when_no_state():
-    f = FetchUrl(state=None)
+    f = CallableTool(FetchUrl(state=None))
     assert f._get_from_cache("https://x.com") is None
 
 
 def test_put_to_cache_noop_when_no_state():
-    f = FetchUrl(state=None)
+    f = CallableTool(FetchUrl(state=None))
     # Не должен падать — просто no-op.
-    f._put_to_cache("https://x.com", "body", {"title": None, "description": None, "lang": None})
+    f._put_to_cache(
+        "https://x.com",
+        "body",
+        {"title": None, "description": None, "lang": None},
+    )
 
 
 def test_put_to_cache_evicts_on_overflow():
@@ -211,8 +235,13 @@ def test_get_from_cache_updates_lru_order():
 
 # ── SimpleFetchUrl: тот же LRU API (общий shared.fetch_url_cache) ─────────────
 
+
 def test_simple_fetch_max_size_matches_fetch_url():
-    assert SimpleFetchUrl.fetch_url_cache_max_size == FetchUrl.fetch_url_cache_max_size == 10
+    assert (
+        SimpleFetchUrl.fetch_url_cache_max_size
+        == FetchUrl.fetch_url_cache_max_size
+        == 10
+    )
 
 
 def test_simple_fetch_get_cache_normalizes_plain_dict_to_ordereddict():
@@ -255,8 +284,8 @@ def test_simple_and_full_fetch_share_lru_cache():
     shared = _Shared()
     state = _State()
     state.shared = shared
-    full = FetchUrl(state=state)
-    simple = SimpleFetchUrl(state=state)
+    full = CallableTool(FetchUrl(state=state))
+    simple = CallableTool(SimpleFetchUrl(state=state))
     for i in range(8):
         full._put_to_cache(
             f"https://example.com/{i}",

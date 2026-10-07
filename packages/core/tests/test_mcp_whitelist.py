@@ -1,7 +1,6 @@
 import pytest
-from pydantic import ValidationError
-
 from gc_core.config_modules.mcp import McpServerConfig
+from pydantic import ValidationError
 
 
 def _srv(**extra):
@@ -66,7 +65,6 @@ import logging
 
 from gc_core.tools.connect_mcp import registry as reg
 
-
 _RAW = [
     {"name": "search", "description": "s"},
     {"name": "create", "description": "c"},
@@ -75,7 +73,9 @@ _RAW = [
 
 
 def test_filter_passthrough_without_block():
-    assert reg._apply_tools_whitelist("srv", {"transport": "stdio"}, _RAW) == _RAW
+    assert (
+        reg._apply_tools_whitelist("srv", {"transport": "stdio"}, _RAW) == _RAW
+    )
 
 
 def test_filter_passthrough_when_disabled():
@@ -104,24 +104,31 @@ def test_filter_warns_on_unknown_names(caplog):
     assert "srv" in warns[0].getMessage()
 
 
-def test_discover_one_applies_whitelist(monkeypatch):
-    # Transport dispatch lives in client_port now; registry only resolves and
-    # normalises. conftest swaps sys.modules["tools"], so neither a string target
-    # nor a fresh import reliably names the module object the resolver returns a
-    # client from — walk the live chain registry itself uses.
-    resolve = reg._discover_one.__globals__["resolve_mcp_client"]
-    client = resolve("srv", {"transport": "stream_stdio", "command": "x"})
+async def test_discover_one_applies_whitelist(monkeypatch):
+    """Предмет теста — ФИЛЬТР, а не транспорт.
+
+    Берём корутинный путь: SDK-транспорты после шага A1 ходят нативно, а
+    синхронный вход для них теперь громко отказывает.
+    """
+
+    # Дискавери ходит через КЛИЕНТА, поэтому подменяем его: фильтр стоит
+    # сразу после `alist_tools`. Форм дискавери больше не три, а одна, и
+    # отдельного шва «забор тулов у SDK-ветки» в ней нет.
+    class _Client:
+        async def alist_tools(self, *, timeout):
+            return list(_RAW)
+
     monkeypatch.setitem(
-        type(client).list_tools.__globals__,
-        "list_tools_stream_stdio",
-        lambda **kw: list(_RAW),
+        reg._adiscover_one.__globals__,
+        "resolve_mcp_client",
+        lambda *a, **kw: _Client(),
     )
     server_cfg = {
         "transport": "stream_stdio",
         "command": "x",
         "whitelist": {"enabled": True, "tools": ["create"]},
     }
-    tools, status = reg._discover_one("srv", server_cfg, timeout=5)
+    tools, status = await reg._adiscover_one("srv", server_cfg, timeout=5)
     assert [t["name"] for t in tools] == ["create"]
     assert status["status"] == "connected"
     assert status["tool_count"] == 1
@@ -154,11 +161,14 @@ def test_apply_tool_blocks_tool_outside_tools_data(monkeypatch):
     """Enforcement: вызов не-whitelisted имени не доходит до MCP-транспорта."""
     from gc_core import tools as tools_pkg
     from gc_core.tools.connect_mcp import api as mcp_api
+    from gc_testkit import run_coro
 
     calls = []
     monkeypatch.setattr(
-        mcp_api, "call_mcp_tool", lambda *a, **kw: calls.append(a) or "never"
+        mcp_api, "acall_mcp_tool", lambda *a, **kw: calls.append(a) or "never"
     )
-    out = tools_pkg.apply_tool("mcp_srv_delete", "{}", tools_data_={})
+    out = run_coro(
+        tools_pkg.aapply_tool("mcp_srv_delete", "{}", tools_data_={})
+    )
     assert "mcp_srv_delete" in out
     assert calls == []

@@ -4,12 +4,16 @@ Pure-helper гварды (без Textual) + интеграция через App.
 sink → poll-тик → смонтирован StreamBlock с ожидаемым текстом;
 каноничная assistant-строка → блока нет, sink сброшен.
 """
+
 import json
 from pathlib import Path
 
 import pytest
-
-from gc_tui.services.stream_sink import StreamSink, format_stream_block, format_reasoning_line
+from gc_tui.services.stream_sink import (
+    StreamSink,
+    format_reasoning_line,
+    format_stream_block,
+)
 
 
 def test_block_text_from_sink_answer_wins():
@@ -45,10 +49,15 @@ def test_sink_reset_clears_block():
 
 
 def _write_task(tmp_path, tid):
-    meta = {"thread_id": tid, "status": "running",
-            "updated_at": "2026-06-15T12:00:00+00:00", "messages_count": 0}
+    meta = {
+        "thread_id": tid,
+        "status": "running",
+        "updated_at": "2026-06-15T12:00:00+00:00",
+        "messages_count": 0,
+    }
     (Path(tmp_path) / f"meta_cli_{tid}.json").write_text(
-        json.dumps(meta), encoding="utf-8",
+        json.dumps(meta),
+        encoding="utf-8",
     )
     (Path(tmp_path) / f"data_cli_{tid}.jsonl").write_text("", encoding="utf-8")
 
@@ -59,14 +68,23 @@ async def test_stream_block_mounts_then_clears_on_canonical_row(tmp_path):
     from gc_tui.app import TuiApp
 
     class _FakeRunner:
-        def is_running(self) -> bool: return True
-        def stop(self) -> None: pass
+        def is_running(self) -> bool:
+            return True
+
+        def stop(self) -> None:
+            pass
 
     tid = "stream1"
     _write_task(tmp_path, tid)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli",
-                 config={"model": "M", "backend_api_mode": "chat_completions",
-                         "tui_stream_display": "answer"})
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        config={
+            "model": "M",
+            "backend_api_mode": "chat_completions",
+            "tui_stream_display": "answer",
+        },
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)
@@ -80,15 +98,23 @@ async def test_stream_block_mounts_then_clears_on_canonical_row(tmp_path):
 
         assert scr._stream_answer_row is not None
         from textual.widgets import Static
+
         content = scr._stream_answer_row.query_one(".trace-content", Static)
         assert "Это проект." in str(content.render())
 
         # Каноничная assistant-строка пришла из thread store — блок снимается,
         # sink сбрасывается. Рендерим запись напрямую (live-путь _render_record).
-        scr._render_record({
-            "type": "message",
-            "payload": {"id": "a1", "role": "assistant", "content": "Это проект."},
-        }, live=True)
+        scr._render_record(
+            {
+                "type": "message",
+                "payload": {
+                    "id": "a1",
+                    "role": "assistant",
+                    "content": "Это проект.",
+                },
+            },
+            live=True,
+        )
         await pilot.pause()
 
         assert scr._stream_answer_row is None
@@ -102,14 +128,23 @@ async def test_reset_render_state_clears_stream_block_and_sink(tmp_path):
     from gc_tui.app import TuiApp
 
     class _FakeRunner:
-        def is_running(self) -> bool: return True
-        def stop(self) -> None: pass
+        def is_running(self) -> bool:
+            return True
+
+        def stop(self) -> None:
+            pass
 
     tid = "stream3"
     _write_task(tmp_path, tid)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli",
-                 config={"model": "M", "backend_api_mode": "chat_completions",
-                         "tui_stream_display": "answer"})
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        config={
+            "model": "M",
+            "backend_api_mode": "chat_completions",
+            "tui_stream_display": "answer",
+        },
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)
@@ -135,14 +170,24 @@ async def test_stream_block_cleared_when_run_not_running(tmp_path):
     class _FakeRunner:
         def __init__(self) -> None:
             self._running = True
-        def is_running(self) -> bool: return self._running
-        def stop(self) -> None: self._running = False
+
+        def is_running(self) -> bool:
+            return self._running
+
+        def stop(self) -> None:
+            self._running = False
 
     tid = "stream2"
     _write_task(tmp_path, tid)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli",
-                 config={"model": "M", "backend_api_mode": "chat_completions",
-                         "tui_stream_display": "answer"})
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        config={
+            "model": "M",
+            "backend_api_mode": "chat_completions",
+            "tui_stream_display": "answer",
+        },
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)
@@ -164,34 +209,45 @@ async def test_reasoning_line_below_committed_rows(tmp_path):
     """StreamBlock (эфемерная reasoning-строка) монтируется НИЖЕ уже
     зафиксированных canonical-виджетов, а не поверх них."""
     pytest.importorskip("textual")
-    from textual.containers import VerticalScroll
     from gc_tui.app import TuiApp
     from gc_tui.widgets.stream_block import StreamBlock
     from gc_tui.widgets.thinking_indicator import ThinkingIndicator
+    from textual.containers import VerticalScroll
 
     class _FakeRunner:
-        def is_running(self) -> bool: return True
-        def stop(self) -> None: pass
+        def is_running(self) -> bool:
+            return True
+
+        def stop(self) -> None:
+            pass
 
     tid = "stream4"
     _write_task(tmp_path, tid)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli",
-                 config={"model": "M", "backend_api_mode": "chat_completions",
-                         "tui_stream_display": "answer_reasoning"})
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        config={
+            "model": "M",
+            "backend_api_mode": "chat_completions",
+            "tui_stream_display": "answer_reasoning",
+        },
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)
         pilot.app.active_runner = _FakeRunner()
 
         # Зафиксировать canonical tool-call строку (ToolCallRow) в #trace.
-        scr._render_record({
-            "payload": {
-                "type": "function_call",
-                "name": "read_file",
-                "arguments": "{}",
-                "call_id": "c1",
+        scr._render_record(
+            {
+                "payload": {
+                    "type": "function_call",
+                    "name": "read_file",
+                    "arguments": "{}",
+                    "call_id": "c1",
+                }
             }
-        })
+        )
         await pilot.pause()
 
         # Подать reasoning-дельту — poll-тик смонтирует StreamBlock ниже.
@@ -202,21 +258,23 @@ async def test_reasoning_line_below_committed_rows(tmp_path):
         kids = list(trace.children)
 
         # Должен быть ровно один StreamBlock.
-        sb_indices = [i for i, w in enumerate(kids) if isinstance(w, StreamBlock)]
+        sb_indices = [
+            i for i, w in enumerate(kids) if isinstance(w, StreamBlock)
+        ]
         assert sb_indices, "StreamBlock not mounted"
         sb_idx = sb_indices[0]
 
         # Зафиксированные строки — всё кроме StreamBlock и ThinkingIndicator.
         committed_indices = [
-            i for i, w in enumerate(kids)
+            i
+            for i, w in enumerate(kids)
             if not isinstance(w, (StreamBlock, ThinkingIndicator))
         ]
         assert committed_indices, "no committed row found in #trace"
 
         # Reasoning-строка должна быть ниже последней canonical-строки.
         assert sb_idx > max(committed_indices), (
-            "StreamBlock must be below committed rows, "
-            f"but sb_idx={sb_idx} <= last committed={max(committed_indices)}"
+            f"StreamBlock must be below committed rows, but sb_idx={sb_idx} <= last committed={max(committed_indices)}"
         )
 
 
@@ -229,14 +287,23 @@ async def test_reasoning_block_cleared_when_tool_row_renders(tmp_path):
     from gc_tui.widgets.stream_block import StreamBlock
 
     class _FakeRunner:
-        def is_running(self) -> bool: return True
-        def stop(self) -> None: pass
+        def is_running(self) -> bool:
+            return True
+
+        def stop(self) -> None:
+            pass
 
     tid = "stream5"
     _write_task(tmp_path, tid)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli",
-                 config={"model": "M", "backend_api_mode": "chat_completions",
-                         "tui_stream_display": "answer_reasoning"})
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        config={
+            "model": "M",
+            "backend_api_mode": "chat_completions",
+            "tui_stream_display": "answer_reasoning",
+        },
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)
@@ -245,17 +312,21 @@ async def test_reasoning_block_cleared_when_tool_row_renders(tmp_path):
         # Подаём reasoning — poll-тик монтирует StreamBlock.
         pilot.app._stream_sink.push("think", "анализирую")
         await pilot.pause(0.7)
-        assert pilot.app.query(StreamBlock), "StreamBlock должен быть смонтирован"
+        assert pilot.app.query(StreamBlock), (
+            "StreamBlock должен быть смонтирован"
+        )
 
         # Canonical tool-call строка рендерится → StreamBlock должен быть снят.
-        scr._render_record({
-            "payload": {
-                "type": "function_call",
-                "name": "fs_read_file",
-                "call_id": "c1",
-                "arguments": "{}",
+        scr._render_record(
+            {
+                "payload": {
+                    "type": "function_call",
+                    "name": "fs_read_file",
+                    "call_id": "c1",
+                    "arguments": "{}",
+                }
             }
-        })
+        )
         await pilot.pause()
         assert not pilot.app.query(StreamBlock), (
             "StreamBlock должен быть снят при рендере canonical tool-call строки"
@@ -271,13 +342,19 @@ async def test_no_reasoning_block_in_validating_phase(tmp_path):
     from gc_tui.widgets.stream_block import StreamBlock
 
     class _FakeRunner:
-        def is_running(self) -> bool: return True
-        def stop(self) -> None: pass
+        def is_running(self) -> bool:
+            return True
+
+        def stop(self) -> None:
+            pass
 
     tid = "stream6"
     _write_task(tmp_path, tid)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli",
-                 config={"model": "M", "backend_api_mode": "chat_completions"})
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        config={"model": "M", "backend_api_mode": "chat_completions"},
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)
@@ -302,15 +379,22 @@ async def test_stream_answer_preview_false_hides_answer_block(tmp_path):
     from gc_tui.app import TuiApp
 
     class _FakeRunner:
-        def is_running(self) -> bool: return True
-        def stop(self) -> None: pass
+        def is_running(self) -> bool:
+            return True
+
+        def stop(self) -> None:
+            pass
 
     tid = "stream7"
     _write_task(tmp_path, tid)
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli",
-        config={"model": "M", "backend_api_mode": "chat_completions",
-                "tui_stream_display": "minimal"},
+        threads_dir=str(tmp_path),
+        system="cli",
+        config={
+            "model": "M",
+            "backend_api_mode": "chat_completions",
+            "tui_stream_display": "minimal",
+        },
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -339,15 +423,22 @@ async def test_stream_answer_preview_false_shows_reasoning_line(tmp_path):
     from gc_tui.widgets.stream_block import StreamBlock
 
     class _FakeRunner:
-        def is_running(self) -> bool: return True
-        def stop(self) -> None: pass
+        def is_running(self) -> bool:
+            return True
+
+        def stop(self) -> None:
+            pass
 
     tid = "stream8"
     _write_task(tmp_path, tid)
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli",
-        config={"model": "M", "backend_api_mode": "chat_completions",
-                "tui_stream_display": "answer_reasoning"},
+        threads_dir=str(tmp_path),
+        system="cli",
+        config={
+            "model": "M",
+            "backend_api_mode": "chat_completions",
+            "tui_stream_display": "answer_reasoning",
+        },
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -374,15 +465,22 @@ async def test_show_reasoning_line_false_hides_reasoning_block(tmp_path):
     from gc_tui.widgets.stream_block import StreamBlock
 
     class _FakeRunner:
-        def is_running(self) -> bool: return True
-        def stop(self) -> None: pass
+        def is_running(self) -> bool:
+            return True
+
+        def stop(self) -> None:
+            pass
 
     tid = "stream9"
     _write_task(tmp_path, tid)
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli",
-        config={"model": "M", "backend_api_mode": "chat_completions",
-                "tui_stream_display": "answer"},
+        threads_dir=str(tmp_path),
+        system="cli",
+        config={
+            "model": "M",
+            "backend_api_mode": "chat_completions",
+            "tui_stream_display": "answer",
+        },
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen

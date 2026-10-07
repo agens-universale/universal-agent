@@ -8,10 +8,13 @@ import time
 from typing import Any
 from urllib.parse import urlparse
 
-from recommended_mcp.runtime.manifest_resolve import recipe_root, resolve_agent_manifest_path
 from recommended_mcp.manifest import load_manifest
 from recommended_mcp.process_supervisor import RunSupervisor, SupervisorError
 from recommended_mcp.run import run_entry
+from recommended_mcp.runtime.manifest_resolve import (
+    recipe_root,
+    resolve_agent_manifest_path,
+)
 
 # Транспорты, при которых агент ходит к уже запущенному серверу (не stdio-spawn).
 _DAEMON_TRANSPORTS = frozenset({"http", "sse", "stream_http", "stream_sse"})
@@ -73,13 +76,27 @@ def _warn(text: str, *, code: str, highlights: tuple[str, ...] = ()) -> None:
         from gc_core.startup_notices import Notice
 
         push_runtime_notice(Notice("warning", code, text, highlights))
-    except Exception:  # noqa: BLE001 — канал уведомлений не обязателен
+    except Exception:  # канал уведомлений не обязателен
         pass
 
 
 #: Что советовать, если фронтенд не назвал своего способа выключить автозапуск.
 #: Нейтрально по формулировке: имени флага тут знать неоткуда.
 _DEFAULT_DISABLE_HINT = "отключить автозапуск MCP — см. справку вашей команды"
+
+
+def _report_daemon_ready(name: str, server_cfg: dict[str, Any]) -> None:
+    url = server_cfg.get("url")
+    if not url:
+        return
+    print(f"[wait] {name}: {url}")
+    if wait_daemon_url_ready(str(url)):
+        print(f"[ready] {name}: {url}")
+    else:
+        print(
+            f"[warn] {name}: daemon not accepting connections at {url} "
+            f"after {_DEFAULT_READY_TIMEOUT_SEC:.0f}s"
+        )
 
 
 def ensure_daemons_for_agent(
@@ -142,16 +159,6 @@ def ensure_daemons_for_agent(
             continue
         if not started:
             continue
-        url = server_cfg.get("url")
-        if not url:
-            continue
-        print(f"[wait] {entry.name}: {url}")
-        if wait_daemon_url_ready(str(url)):
-            print(f"[ready] {entry.name}: {url}")
-        else:
-            print(
-                f"[warn] {entry.name}: daemon not accepting connections at {url} "
-                f"after {_DEFAULT_READY_TIMEOUT_SEC:.0f}s"
-            )
+        _report_daemon_ready(entry.name, server_cfg)
 
     return supervisor

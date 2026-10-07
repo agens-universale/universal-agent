@@ -1,4 +1,5 @@
 """Парсинг /команд + inline-ошибка с closest-match (§4)."""
+
 import pytest
 
 
@@ -27,7 +28,7 @@ async def test_notices_command_opens_screen():
     from gc_tui.screens.notices import NoticesScreen
 
     async with TuiApp().run_test() as pilot:
-        pilot.app.screen._handle_command("notices")
+        await pilot.app.screen._handle_command("notices")
         await pilot.pause()
         assert isinstance(pilot.app.screen, NoticesScreen)
 

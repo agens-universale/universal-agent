@@ -51,13 +51,19 @@ universal-agent/
     src/gc_cli/                  # cli.py, arg_parser.py, onboarding_wizard.py
   packages/tui/
     pyproject.toml               # gc-tui   → gc-core, gc-mcp
-    src/gc_tui/                  # экраны, редакторы, diff_tui, голос
+    src/gc_tui/                  # экраны, редакторы, голос
   packages/server/
     pyproject.toml               # gc-server → gc-core, gc-mcp
     src/gc_server/               # server.py, rest_api/, swarm/
   packages/mcp/
     pyproject.toml               # gc-mcp   → gc-core
     src/recommended_mcp/         # рецепты MCP + runtime: cli, установка, автозапуск
+  packages/acp/
+    pyproject.toml               # gc-acp   → gc-core
+    src/gc_acp/                  # ACP JSON-RPC фасад для IDE
+  packages/chat/
+    pyproject.toml               # gc-chat  → gc-core, FastAPI, uvicorn
+    src/gc_chat/                 # HTTP Responses + Chat Completions
   packages/testkit/
     pyproject.toml               # gc-testkit — только dev, в колёса не попадает
     src/gc_testkit/              # раскладка, фикстуры, pytest-плагин
@@ -81,11 +87,13 @@ universal-agent/
 | `gc-tui` | `gc_tui` | `gc-core`, `gc-mcp` | `gc-ua`, `gc-voice` |
 | `gc-server` | `gc_server` | `gc-core`, `gc-mcp` | `gc-serve` |
 | `gc-mcp` | `recommended_mcp` | `gc-core` | `gc-mcp`, `gc-mcp-install` |
-| `gc-ua` (мета) | — | все пять | все шесть |
+| `gc-acp` | `gc_acp` | `gc-core` | `gc-acp` |
+| `gc-chat` | `gc_chat` | `gc-core`, FastAPI, uvicorn | `gc-chat` |
+| `gc-ua` (мета) | — | все листовые | все листовые команды |
 
 Каждый профиль объявляет ТОЛЬКО свою команду: имя команды принадлежит одному
 дистрибутиву, иначе два профиля не ставятся рядом. Подробности и цена ошибки —
-`docs/packaging.md`.
+`docs/packaging.md`. Гайды фасадов: [acp.md](acp.md), [chat.md](chat.md).
 
 `gc-core` — библиотека, поэтому **не объявляет точек входа** и ставится иначе:
 
@@ -101,11 +109,58 @@ uv tool install "gc-cli @ git+URL#subdirectory=packages/cli"    # как инс�
 
 | Пакет | Модулей | Что внутри |
 |---|---|---|
-| `gc_core` | 287 | 45 имён верхнего уровня: конфиг, тулы, память, безопасность, MCP-клиент |
+| `gc_core` | 287 | 45 имён верхнего уровня: конфиг, тулы, память, безопасность, MCP-клиент, журнал правок (`agent_edits`, переехал из `gc_tui/diff_tui`) |
 | `gc_cli` | 4 | `cli`, `arg_parser`, `onboarding_wizard` |
-| `gc_tui` | 137 | экраны, редакторы, `diff_tui`, `voice`, `voice_runtime` |
+| `gc_tui` | 137 | экраны, редакторы, `voice`, `voice_runtime` |
 | `gc_server` | 15 | `server`, `server_cleanup_threads`, `rest_api`, `swarm` |
 | `recommended_mcp` | 14 | рецепты и `runtime/`: cli, установка, автозапуск daemon'ов |
+
+### Изображения: `gc_core.attachments`
+
+Картинки-вложения к сообщениям — отдельный доменный подпакет ядра. Вложение — ссылка
+на нормализованный файл (хеш, размеры, путь); байты в историю не пишутся.
+
+| Модуль | Что внутри |
+|---|---|
+| `model` | `Attachment`, лимиты картинок, подписи и плашки `[Изображение #N]` (`chip_of`, `label_number`) |
+| `texts` | все тексты про картинки, которые видит модель |
+| `numbering` | номера плашек: сквозной счётчик треда `meta.runtime.image_seq` |
+| `normalize` | разбор и ужатие картинки: одна форма на выходе (Pillow) |
+| `store` | файлы картинок: карман процесса до отправки и файлы тредов; корень — одно правило `ImageStore.for_config`, копия в тред прогона — `commit_to_run_thread` |
+
+Пакет пустой, как и сам `gc_core`: реэкспортов нет. При загрузке модули пакета не
+тянут `persistence`, `security`, `thread_store` и `tools` — пакет импортируют тулы и
+`security`, и обратный импорт на уровне модуля замкнул бы цикл. Идентификаторы и
+каталог тредов `store` берёт из лёгкого `gc_core.thread_paths` (только стандартная
+библиотека; `thread_store` отдаёт те же имена). Единственный импорт внутри функции —
+`persistence.meta_ownership.runtime_section` в `numbering`: пакет `persistence` при
+загрузке тянет states. Сторож — `packages/core/tests/attachments/test_attachments_import_light.py`.
+
+**Pillow импортируется лениво** — только внутри функций `normalize`. Он жёсткая
+зависимость `gc-core` (C-расширение), но старт ядра за него не платит: тот же сторож
+импортирует входы ядра (`agent_executor`, SDK) и проверяет, что Pillow не загружен.
+
+### Зрение: `gc_core.vision`
+
+Кто смотрит картинки запроса и что делать, если никто. Доменный подпакет: от
+контроллера не зависит — контроллер (`processing_responses`) и тул `fs_view_image`
+зовут его сами. Пакет пустой, модули берутся по полному имени.
+
+| Модуль | Что внутри |
+|---|---|
+| `probe` | отдельная проверка зрения служебной PNG, без пользовательских изображений и истории |
+| `registry` | общий для процесса кэш результата проверки и единственная проба для одновременно ожидающих запросов |
+| `route` | ключ эффективного маршрута: адрес и модель, fingerprint доступа, сетевых и payload-настроек |
+| `service` | допуск пользовательских пикселей только после успешной проверки маршрута |
+| `rejects` | числовые пределы изображений по отказам бэкенда; `mark_blind` снимает подтверждение в реестре проверок |
+| `audience` | решение «кто смотрит» на один запрос (`compute_audience`: модель запроса или «глаза») и видимость тула просмотра (`tools_for_request`) |
+| `notes` | строка «изображение не просмотрено» (`note_blind`) и её канал — хук `on_trace_note` или журнал прогона |
+| `eyes` | «глаза»: описание картинки моделью для зрения через служебную воронку |
+| `errors` | типы и причины ошибок зрения в ответе `fs_view_image` (`error.type`, `error.reason`); без импортов ядра — фронт рисует по ним сводку, не загружая тул |
+
+Пометки живут вне `State`: это знание процесса о бэкенде, общее для субагентов, а не
+состояние запуска. Решение «кто смотрит» контроллер считает на каждый запрос и кладёт
+в `state.vision_audience` — оттуда его читает тул.
 
 ### Осознанный долг: оболочка приложения в SDK
 

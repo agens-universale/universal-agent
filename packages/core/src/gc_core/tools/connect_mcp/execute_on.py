@@ -3,10 +3,14 @@
 The single place that knows the mapping. Neither client implementation is aware
 of the other, and no transport helper is aware of the locus.
 """
+
 import logging
 from typing import Any, Dict, Optional
 
-from gc_core.tools.connect_mcp.client_port import AgentRuntimeClient, McpClientPort
+from gc_core.tools.connect_mcp.client_port import (
+    AgentRuntimeClient,
+    McpClientPort,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +26,41 @@ class McpExecuteOnError(ValueError):
     """Configuration cannot be honoured at the requested locus."""
 
 
+def runs_in_agent_runtime(
+    server_cfg: Dict[str, Any],
+    *,
+    os_backend: Optional[Any] = None,
+) -> bool:
+    """True, если сервер исполняется В НАШЕМ процессе, а не внутри песочницы.
+
+    То же правило, по которому ``resolve_mcp_client`` выбирает реализацию, —
+    выделено предикатом, чтобы дискавери могла спросить «говорим ли мы с
+    хоста?», не повторяя разбор. Два места, знающие одно правило, разъезжаются
+    молча: ровно так и получилось у дискавери, где вместо этого вопроса стояло
+    ``os_backend is None``. Условие грубее правила: объект бэкенда есть
+    ВСЕГДА (его ставит ``acreate_run_context``), поэтому нативная ветка не
+    исполнялась никогда, и обход серверов уходил в поток даже для
+    ``execute_on: agent``.
+    """
+    cfg = server_cfg if isinstance(server_cfg, dict) else {}
+    if str(cfg.get("execute_on") or "agent") == "agent":
+        return True
+    # execute_on: os_backend, но изоляции нет — сервер всё равно поднимется
+    # в нашем процессе (см. ветку с тем же условием в `resolve_mcp_client`).
+    return not exec_is_isolated(os_backend)
+
+
+def exec_is_isolated(os_backend: Optional[Any]) -> bool:
+    """Команды бэкенда исполняются не в нашем процессе: контейнер/ssh
+    (`is_sandbox`) или OS-обёртка над хостом (`isolates_exec`, kind=sandbox)."""
+    if os_backend is None:
+        return False
+    return bool(
+        getattr(os_backend, "is_sandbox", False)
+        or getattr(os_backend, "isolates_exec", False)
+    )
+
+
 def resolve_mcp_client(
     server_name: str,
     server_cfg: Dict[str, Any],
@@ -32,21 +71,19 @@ def resolve_mcp_client(
     locus = str(cfg.get("execute_on") or "agent")
     if locus not in _LOCI:
         raise McpExecuteOnError(
-            f"MCP server '{server_name}': unknown execute_on {locus!r} "
-            f"(expected one of {', '.join(_LOCI)})"
+            f"MCP server '{server_name}': unknown execute_on {locus!r} (expected one of {', '.join(_LOCI)})"
         )
 
     if locus == "agent":
         return AgentRuntimeClient(server_name, cfg)
 
     # Locus is os_backend from here on.
-    if os_backend is None or not getattr(os_backend, "is_sandbox", False):
+    if not exec_is_isolated(os_backend):
         # Same filesystem, same network, same PATH as the agent — routing through
         # exec would buy nothing and only add a shell round-trip. Not an error:
         # one config is meant to work in both modes.
         logger.debug(
-            "MCP server '%s': execute_on=os_backend on a non-sandbox backend, "
-            "running in the agent runtime",
+            "MCP server '%s': execute_on=os_backend on a non-sandbox backend, running in the agent runtime",
             server_name,
         )
         return AgentRuntimeClient(server_name, cfg)
@@ -73,9 +110,17 @@ def resolve_mcp_client(
             f"execute_on: agent."
         )
 
-    from gc_core.tools.connect_mcp.os_backend_client import OsBackendStatelessClient
+    from gc_core.tools.connect_mcp.os_backend_client import (
+        OsBackendStatelessClient,
+    )
 
     return OsBackendStatelessClient(server_name, cfg, os_backend=os_backend)
 
 
-__all__ = ["McpExecuteOnError", "OS_BACKEND_TRANSPORTS", "resolve_mcp_client"]
+__all__ = [
+    "OS_BACKEND_TRANSPORTS",
+    "McpExecuteOnError",
+    "exec_is_isolated",
+    "resolve_mcp_client",
+    "runs_in_agent_runtime",
+]

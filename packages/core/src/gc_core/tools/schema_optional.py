@@ -1,8 +1,10 @@
 """Optional tool parameters: omit vs empty string (strict OpenAI schemas).
 
 Authors: keep optional *string* property descriptions semantic only (what the field does).
-Do not write \"If omitted\" / \"pass empty string\" in tool_description — build_tools_data
-appends OPTIONAL_OMIT_HINT or OPTIONAL_EMPTY_AS_OMIT_HINT via augment_optional_property_descriptions.
+Do not write \"If omitted\" / \"pass empty string\" in tool_description — the send-time
+projection appends OPTIONAL_OMIT_HINT or OPTIONAL_EMPTY_AS_OMIT_HINT via
+augment_optional_property_descriptions. The canonical spec in state.tools stays without
+that hint.
 """
 
 from __future__ import annotations
@@ -11,12 +13,8 @@ import copy
 from typing import Any
 
 # LLM-facing hints for semantically optional string fields (must match JSON required).
-OPTIONAL_OMIT_HINT = (
-    "When unused, omit this field. Empty string \"\" is also accepted and treated as unused."
-)
-OPTIONAL_EMPTY_AS_OMIT_HINT = (
-    "When unused, pass empty string \"\" (field omit is unavailable under strict OpenAI tool schema)."
-)
+OPTIONAL_OMIT_HINT = 'When unused, omit this field. Empty string "" is also accepted and treated as unused.'
+OPTIONAL_EMPTY_AS_OMIT_HINT = 'When unused, pass empty string "" (field omit is unavailable under strict OpenAI tool schema).'
 
 _OPTIONAL_HINTS = (OPTIONAL_OMIT_HINT, OPTIONAL_EMPTY_AS_OMIT_HINT)
 
@@ -42,7 +40,9 @@ def optional_property_description(base: str, *, openai_strict: bool) -> str:
 
 
 def _property_preserves_empty_string(prop_schema: Any) -> bool:
-    return isinstance(prop_schema, dict) and bool(prop_schema.get(X_PRESERVE_EMPTY_STRING))
+    return isinstance(prop_schema, dict) and bool(
+        prop_schema.get(X_PRESERVE_EMPTY_STRING)
+    )
 
 
 def resolve_optional_property_keys(params_schema: dict[str, Any]) -> list[str]:
@@ -64,7 +64,11 @@ def resolve_optional_property_keys(params_schema: dict[str, Any]) -> list[str]:
 
     explicit = params_schema.get("x-optional-keys")
     if isinstance(explicit, list):
-        return [k for k in explicit if isinstance(k, str) and k in props and _eligible(k)]
+        return [
+            k
+            for k in explicit
+            if isinstance(k, str) and k in props and _eligible(k)
+        ]
 
     required = params_schema.get("required")
     if not isinstance(required, list):
@@ -104,7 +108,7 @@ def _accepts_empty_string(prop_schema: Any) -> bool:
         from jsonschema import Draft7Validator
 
         return Draft7Validator(prop_schema).is_valid("")
-    except Exception:  # noqa: BLE001
+    except Exception:
         # Схему не удалось разобрать — не отнимаем подсказку, поведение
         # остаётся прежним.
         return True
@@ -131,7 +135,8 @@ def seed_optional_keys(schema: dict[str, Any]) -> list[str]:
     seeded = [
         k
         for k in props
-        if k not in required_before and not _property_preserves_empty_string(props[k])
+        if k not in required_before
+        and not _property_preserves_empty_string(props[k])
     ]
     schema["x-optional-keys"] = seeded
     return seeded
@@ -174,14 +179,39 @@ def apply_openai_strict_parameters(params: dict[str, Any]) -> None:
     apply_openai_strict_object(params)
 
 
+def apply_openai_strict_schema_tree(schema: Any) -> None:
+    """OpenAI strict на корне и на каждом вложенном object.
+
+    Корень и вложенные узлы: все properties в ``required``,
+    ``additionalProperties: false``. Повтор на том же узле идемпотентен.
+    """
+    seen: set[int] = set()
+
+    def _walk(node: Any) -> None:
+        if not isinstance(node, dict):
+            return
+        marker = id(node)
+        if marker in seen:
+            return
+        seen.add(marker)
+        apply_openai_strict_object(node)
+        for sub in _nested_schemas(node):
+            _walk(sub)
+
+    _walk(schema)
+
+
 def _rewrite_semantic_required(schema: Any) -> None:
     """In-place: on strict/optional-marked objects, set required to semantic keys only."""
     if not isinstance(schema, dict):
         return
 
-    is_object = schema.get("type") == "object" or isinstance(schema.get("properties"), dict)
+    is_object = schema.get("type") == "object" or isinstance(
+        schema.get("properties"), dict
+    )
     if is_object and (
-        isinstance(schema.get("x-optional-keys"), list) or schema.get("x-openai-strict")
+        isinstance(schema.get("x-optional-keys"), list)
+        or schema.get("x-openai-strict")
     ):
         props = schema.get("properties")
         if isinstance(props, dict):
@@ -190,62 +220,44 @@ def _rewrite_semantic_required(schema: Any) -> None:
         else:
             schema["required"] = []
 
-    props = schema.get("properties")
-    if isinstance(props, dict):
-        for sub in props.values():
-            _rewrite_semantic_required(sub)
-
-    items = schema.get("items")
-    if isinstance(items, dict):
-        _rewrite_semantic_required(items)
-    elif isinstance(items, list):
-        for item in items:
-            _rewrite_semantic_required(item)
-
-    for key in ("anyOf", "oneOf", "allOf"):
-        branches = schema.get(key)
-        if isinstance(branches, list):
-            for branch in branches:
-                _rewrite_semantic_required(branch)
-
-    for defs_key in ("$defs", "definitions"):
-        defs = schema.get(defs_key)
-        if isinstance(defs, dict):
-            for def_schema in defs.values():
-                _rewrite_semantic_required(def_schema)
+    for sub in _nested_schemas(schema):
+        _rewrite_semantic_required(sub)
 
 
 def _has_optional_markers(schema: Any) -> bool:
     """True if the schema (or any nested subschema) carries strict/optional markers."""
     if not isinstance(schema, dict):
         return False
-    if schema.get("x-openai-strict") or isinstance(schema.get("x-optional-keys"), list):
+    if schema.get("x-openai-strict") or isinstance(
+        schema.get("x-optional-keys"), list
+    ):
         return True
+    return any(_has_optional_markers(sub) for sub in _nested_schemas(schema))
 
+
+def _nested_schemas(schema: dict):
+    """Direct subschemas: properties, items, anyOf/oneOf/allOf branches, $defs/definitions."""
     props = schema.get("properties")
-    if isinstance(props, dict) and any(_has_optional_markers(sub) for sub in props.values()):
-        return True
-
+    if isinstance(props, dict):
+        yield from props.values()
     items = schema.get("items")
-    if isinstance(items, dict) and _has_optional_markers(items):
-        return True
-    if isinstance(items, list) and any(_has_optional_markers(item) for item in items):
-        return True
-
+    if isinstance(items, dict):
+        yield items
+    elif isinstance(items, list):
+        yield from items
     for key in ("anyOf", "oneOf", "allOf"):
         branches = schema.get(key)
-        if isinstance(branches, list) and any(_has_optional_markers(b) for b in branches):
-            return True
-
+        if isinstance(branches, list):
+            yield from branches
     for defs_key in ("$defs", "definitions"):
         defs = schema.get(defs_key)
-        if isinstance(defs, dict) and any(_has_optional_markers(d) for d in defs.values()):
-            return True
-
-    return False
+        if isinstance(defs, dict):
+            yield from defs.values()
 
 
-def parameters_schema_for_local_validation(params: dict[str, Any]) -> dict[str, Any]:
+def parameters_schema_for_local_validation(
+    params: dict[str, Any],
+) -> dict[str, Any]:
     """
     Schema for local Draft7 validation under OpenAI strict tools mode.
 
@@ -326,16 +338,17 @@ def normalize_optional_empty_as_omit(
 
 
 __all__ = [
+    "OPTIONAL_EMPTY_AS_OMIT_HINT",
+    "OPTIONAL_OMIT_HINT",
     "X_PRESERVE_EMPTY_STRING",
     "X_SUPPRESS_OPTIONAL_HINT",
-    "OPTIONAL_OMIT_HINT",
-    "OPTIONAL_EMPTY_AS_OMIT_HINT",
-    "optional_property_description",
-    "resolve_optional_property_keys",
     "apply_openai_strict_object",
     "apply_openai_strict_parameters",
-    "parameters_schema_for_local_validation",
+    "apply_openai_strict_schema_tree",
     "augment_optional_property_descriptions",
     "coalesce_optional_string",
     "normalize_optional_empty_as_omit",
+    "optional_property_description",
+    "parameters_schema_for_local_validation",
+    "resolve_optional_property_keys",
 ]

@@ -4,9 +4,11 @@ from gc_tui.services.model_list_cache import clear_cache, make_cached_fetch
 def test_second_call_same_key_hits_cache():
     clear_cache()
     calls = []
+
     def fetch(url, auth, verify=True, config_proxy=None):
         calls.append(url)
         return [{"id": "m1"}]
+
     cached = make_cached_fetch(fetch)
     assert cached("http://a", "tok") == [{"id": "m1"}]
     assert cached("http://a", "tok") == [{"id": "m1"}]
@@ -16,11 +18,14 @@ def test_second_call_same_key_hits_cache():
 def test_key_includes_url_auth_proxy():
     clear_cache()
     calls = []
+
     def fetch(url, auth, verify=True, config_proxy=None):
         calls.append((url, auth, config_proxy))
         return [1]
+
     cached = make_cached_fetch(fetch)
-    cached("http://a", "t1"); cached("http://a", "t2")
+    cached("http://a", "t1")
+    cached("http://a", "t2")
     cached("http://a", "t1", config_proxy="socks5h://p")
     assert len(calls) == 3
 
@@ -28,10 +33,12 @@ def test_key_includes_url_auth_proxy():
 def test_error_not_cached():
     clear_cache()
     state = {"fail": True}
+
     def fetch(url, auth, verify=True, config_proxy=None):
         if state["fail"]:
             raise OSError("down")
         return [1]
+
     cached = make_cached_fetch(fetch)
     try:
         cached("http://a", None)
@@ -44,8 +51,10 @@ def test_error_not_cached():
 def test_none_result_not_cached():
     clear_cache()
     results = [None, [1]]
+
     def fetch(url, auth, verify=True, config_proxy=None):
         return results.pop(0)
+
     cached = make_cached_fetch(fetch)
     assert cached("http://a", None) is None
     assert cached("http://a", None) == [1]
@@ -63,15 +72,21 @@ def test_refresh_bypasses_the_cache_and_rewrites_the_key():
     clear_cache()
     results = [[1], [1, 2]]
     calls = []
+
     def fetch(url, auth, verify=True, config_proxy=None):
         calls.append(url)
         return results.pop(0)
+
     cached = make_cached_fetch(fetch)
     assert cached("http://a", None) == [1]
-    assert cached("http://a", None) == [1] and len(calls) == 1   # обычный вызов — кэш
+    assert (
+        cached("http://a", None) == [1] and len(calls) == 1
+    )  # обычный вызов — кэш
     assert cached("http://a", None, refresh=True) == [1, 2]
     assert len(calls) == 2, "refresh обязан сходить на сервер"
-    assert cached("http://a", None) == [1, 2], "свежий ответ должен лечь в ключ"
+    assert cached("http://a", None) == [1, 2], (
+        "свежий ответ должен лечь в ключ"
+    )
 
 
 def test_failed_refresh_keeps_the_cached_list():
@@ -79,9 +94,11 @@ def test_failed_refresh_keeps_the_cached_list():
     нормальный список, и следующий вход в поле пошёл бы в сеть за тем же самым."""
     clear_cache()
     results = [[1], None]
+
     def fetch(url, auth, verify=True, config_proxy=None):
         return results.pop(0)
+
     cached = make_cached_fetch(fetch)
     assert cached("http://a", None) == [1]
-    assert cached("http://a", None, refresh=True) is None      # сервер не ответил
+    assert cached("http://a", None, refresh=True) is None  # сервер не ответил
     assert cached("http://a", None) == [1], "кэш затёрт неудачей"

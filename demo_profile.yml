@@ -35,21 +35,69 @@ models:
     # (уже с префиксом — не дублируется).
     token: "${ENV:OPENROUTER_API_KEY}"       # env-интерполяция работает и внутри профиля
     pricing: {input: 12, output: 48}         # тариф модели (формат ModelTariff); главнее pricing.models[<id>]
-    backend:                                 # частичный BackendConfig поверх эффективного backend
+    backend:                                 # транспорт поверх эффективного backend (ssl, timeout, headers)
       use_max_tokens_param: false
-      chat_completion_kwargs: {temperature: 0.2}
+      # Схема тулов этого алиаса в chat_completions. Нет ключа — глобальный backend.
+      openai_strict_tools_schema: false
+      send_tool_strict: true
+    main:
+      temperature: 1.0
+      top_p: 1.0
+      tool_choice: auto
+      separate_reasoning: true
+      chat_template_kwargs:
+        enable_thinking: true
+    auxiliary:
+      temperature: 1.0
+      top_p: 1.0
+      separate_reasoning: false
+      chat_template_kwargs:
+        enable_thinking: false
 
   # --- Локальный сервер: свой адрес, ключа не требует ---
   glm-local:
     url: http://127.0.0.1:8014/v1/chat/completions
     token: ""    # «без авторизации»: адрес и токен задаются вместе (правило пары)
     # model нет → провайдерский id = "glm-local" (сахар для простых локальных сетапов)
+    main:
+      temperature: 1.0
+      top_p: 1.0
+      tool_choice: auto
+      chat_template_kwargs:
+        thinking: true
+        reasoning_effort: high
+    auxiliary:
+      temperature: 1.0
+      top_p: 1.0
+      chat_template_kwargs:
+        thinking: false
+        reasoning_effort: none
 
   # --- Ещё один пример полной формы, со своим токеном (без наследования) ---
   deepseek-max:
     model: deepseek/deepseek-chat-v3-0324
     url: https://api.provider.example/v1/chat/completions
     token: "${ENV:DEEPSEEK_API_KEY}"
+    strip_think: false                   # как дефолт кода: копировать мысль; true — вырезать
+    main:
+      temperature: 1.0
+      top_p: 1.0
+      tool_choice: auto
+      chat_template_kwargs:
+        thinking: true
+        reasoning_effort: high
+    auxiliary:
+      temperature: 1.0
+      top_p: 1.0
+      chat_template_kwargs:
+        thinking: false
+        reasoning_effort: none
+
+  # --- Модель со зрением — для «глаз» (assign.vision ниже) ---
+  qwen-vl:
+    model: qwen/qwen2.5-vl-72b-instruct
+    url: https://openrouter.ai/api/v1/chat/completions
+    token: "${ENV:OPENROUTER_API_KEY}"
 
 # -----------------------------------------------------------------------------
 # slots: уровни — УКАЗАТЕЛИ в models (не копии). Одна модель может стоять в
@@ -97,6 +145,8 @@ assign:
   summary: light                # суммаризация: батчи треда, сжатие/починка, working-memory patch, /compact
   intent_scope: light          # intent-scope выжимки (per-tool и final_answer)
   memory_compaction: light     # компакция проектной памяти (long memory)
+  vision: qwen-vl              # «глаза»: описывают изображение, если модель хода его не видит
+                               # (тул fs_view_image); нужна модель со зрением — пин алиасом
 
   # auto_judge: классификатор уровня для режима auto (волна C). Ключ легален
   # уже с волны A, но пока ИНЕРТЕН — потребитель не вызывается, пока auto не
@@ -129,3 +179,7 @@ security:
 
 summary:
   chat_completions_summary_trigger_chars: 150000
+  # 0 — токенный порог выключен. Иначе input последнего главного запроса плюс хвост // 2.
+  chat_completions_summary_trigger_tokens: 0
+  # 0 — токенный turn-end выключен. Нет ключа — 60% от токенного mid-turn.
+  chat_completions_summary_turn_end_trigger_tokens: 0

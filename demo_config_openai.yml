@@ -29,6 +29,7 @@ chat_completions:
   auxiliary_llm:
     max_tokens: 24576
     judge_max_tokens: 24576
+    # Когда у алиаса нет своей auxiliary (и без реестра). Явный auxiliary: {} не подмешивает.
     completion_kwargs:
       reasoning_effort: none
 
@@ -90,7 +91,11 @@ project_memory:
 
 summary:
   chat_completions_summary_trigger_chars: 200000
+  # 0 — токенный порог выключен. Иначе input последнего главного запроса плюс хвост // 2.
+  chat_completions_summary_trigger_tokens: 0
   chat_completions_summary_turn_end_trigger_chars: 120000
+  # 0 — токенный turn-end выключен. Нет ключа — 60% от токенного mid-turn.
+  chat_completions_summary_turn_end_trigger_tokens: 0
   incremental_batch_chars: 280000
   max_message_chars: 30000
   max_dialogue_chars: 1000000
@@ -99,16 +104,11 @@ summary:
   last_dialog_step_message_max_chars: 6000
 
 # tags — какие ещё теги вырезать из саммари, intent, digest и т.п. (не из истории).
-# strip_think: true (дефолт) — скрытое поле мысли бэкенда в историю не копировать.
-#   Salvage <think> — только если кроме ризонинга ничего нет (нет прозы и нет тулов):
-#   тогда мысль кладём в историю как <think>…</think> и в следующем запросе модель её видит.
-#   Смешанный ход (think + проза) — в историю только проза.
-#   Из саммари, intent, судей и памяти <think> вырезается всегда.
-# strip_think: false — копировать скрытое поле мысли в историю как есть
-#   и отдать в следующем запросе. DeepSeek / часть strict-бэкендов → 400.
-# В бэкенд уходит то, что лежит в истории. Остальной state — без мыслей всегда.
+# strip_think: false (дефолт) — копировать скрытое поле мысли в историю.
+# strip_think: true — не копировать. Включают, когда следующий запрос с мыслью
+#   бэкенд не принимает. Из саммари, intent, судей и памяти <think> вырезается всегда.
 strip_tags_projection:
-  strip_think: true
+  strip_think: false
   tags: []
 
 # Лимиты FS-тулов, которые поднимают файл целиком в память.

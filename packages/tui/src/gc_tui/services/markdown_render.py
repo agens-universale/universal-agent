@@ -9,14 +9,22 @@ API:
 - `# heading`       → accent bold (без `#`)
 - inline `` `code` `` → slate code (без бэктиков)
 - списки `- item`   → ink, маркер `• `
-- fenced ``` блок ``` → code-block (мягкий серый)
+- fenced ``` блок ``` → code-block (мягкий серый); закрывает блок только голая
+  ограда (без info-строки), не короче открывающей (CommonMark) — вложенная
+  ограда с языком (например ```` ```bash ```` внутри ```` ```markdown ````)
+  остаётся содержимым; незакрытый блок тянется до конца текста
 """
+
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from rich.text import Text
+
+if TYPE_CHECKING:
+    from rich.table import Table
 
 from gc_tui.palette import ACCENT as _ACC
 from gc_tui.palette import CODE as _CODE
@@ -30,6 +38,7 @@ class Block:
 
     `lang` — только для kind="code-block". `headers`/`rows`/`aligns` — только для kind="table".
     """
+
     kind: str  # 'prose' | 'code-block' | 'table'
     content: str = ""
     lang: str | None = None
@@ -63,8 +72,28 @@ def _parse_table_aligns(sep_line: str, ncols: int) -> list[str]:
     aligns: list[str] = []
     for c in _split_table_row(sep_line):
         left, right = c.startswith(":"), c.endswith(":")
-        aligns.append("center" if left and right else "right" if right else "left")
+        if left and right:
+            aligns.append("center")
+        else:
+            aligns.append("right" if right else "left")
     return (aligns + ["left"] * ncols)[:ncols]
+
+
+_FENCE_RE = re.compile(r"^(`{3,})(.*)$")
+
+
+def _fence_open(line: str) -> tuple[int, str | None] | None:
+    """Открывающая ограда: (длина, метка языка или None); иначе None."""
+    m = _FENCE_RE.match(line)
+    if not m:
+        return None
+    return len(m.group(1)), (m.group(2).strip() or None)
+
+
+def _fence_closes(line: str, opened: int) -> bool:
+    """Закрывающая ограда — одни кавычки, не короче открывающей (CommonMark)."""
+    m = _FENCE_RE.match(line)
+    return bool(m) and len(m.group(1)) >= opened and not m.group(2).strip()
 
 
 def segment_answer(text: str) -> list[Block]:
@@ -87,18 +116,27 @@ def segment_answer(text: str) -> list[Block]:
 
     while i < len(lines):
         ln = lines[i]
-        if ln.startswith("```"):
+        opened = _fence_open(ln)
+        if opened is not None:
             _flush()
-            lang_tag = ln[3:].strip() or None
+            fence_len, lang_tag = opened
             j = i + 1
             chunk: list[str] = []
-            while j < len(lines) and not lines[j].startswith("```"):
+            while j < len(lines) and not _fence_closes(lines[j], fence_len):
                 chunk.append(lines[j])
                 j += 1
-            segs.append(Block("code-block", "\n".join(chunk), lang_tag))
+            content = "\n".join(chunk)
+            # Пустой блок панелью не становится (Е2): ни кнопки копирования, ни рамки
+            # вокруг пустоты — обе половины ленты (финал и живой путь) читают сегменты.
+            if content.strip():
+                segs.append(Block("code-block", content, lang_tag))
             i = j + 1
             continue
-        if "|" in ln and i + 1 < len(lines) and _is_table_separator(lines[i + 1]):
+        if (
+            "|" in ln
+            and i + 1 < len(lines)
+            and _is_table_separator(lines[i + 1])
+        ):
             _flush()
             headers = _split_table_row(ln)
             ncols = len(headers)
@@ -106,9 +144,13 @@ def segment_answer(text: str) -> list[Block]:
             rows: list[list[str]] = []
             j = i + 2
             while j < len(lines) and "|" in lines[j] and lines[j].strip():
-                rows.append((_split_table_row(lines[j]) + [""] * ncols)[:ncols])
+                rows.append(
+                    (_split_table_row(lines[j]) + [""] * ncols)[:ncols]
+                )
                 j += 1
-            segs.append(Block("table", headers=headers, rows=rows, aligns=aligns))
+            segs.append(
+                Block("table", headers=headers, rows=rows, aligns=aligns)
+            )
             i = j
             continue
         prose.append(ln)
@@ -160,15 +202,18 @@ def render_prose(text: str) -> Text:
     heading/bullet; fenced-блоки и таблицы — plain (рамки/сетка только на финале).
     Возвращает rich.Text в нормальном цвете (INK)."""
     out = Text()
-    in_fence = False
+    in_fence = 0  # 0 — вне блока, иначе длина открывающей ограды
     for i, line in enumerate(text.split("\n")):
         if i:
             out.append("\n")
-        if line.startswith("```"):
-            in_fence = not in_fence
+        if in_fence:
+            if _fence_closes(line, in_fence):
+                in_fence = 0
             out.append(line, style=_INK)
             continue
-        if in_fence:
+        opened = _fence_open(line)
+        if opened is not None:
+            in_fence = opened[0]
             out.append(line, style=_INK)
             continue
         m = _PROSE_HEADING_RE.match(line)
@@ -183,9 +228,9 @@ def render_prose(text: str) -> Text:
     return out
 
 
-
-def build_markdown_table(headers: list[str], rows: list[list[str]],
-                         aligns: list[str]) -> "Table":
+def build_markdown_table(
+    headers: list[str], rows: list[list[str]], aligns: list[str]
+) -> Table:
     """Структура таблицы → rich.Table (полная сетка box.SQUARE, рамка dim,
     заголовок accent-bold, в ячейках — inline-разметка). Ширину не фиксируем
     здесь: её задаёт вызывающий `table_render.table_to_text(..., width=)`,
@@ -194,8 +239,13 @@ def build_markdown_table(headers: list[str], rows: list[list[str]],
     from rich.table import Table
     from rich.text import Text as _Text
 
-    table = Table(box=_box.SQUARE, border_style=_DEEP_DIM,
-                  show_header=True, expand=False, pad_edge=True)
+    table = Table(
+        box=_box.SQUARE,
+        border_style=_DEEP_DIM,
+        show_header=True,
+        expand=False,
+        pad_edge=True,
+    )
     for h, a in zip(headers, aligns):
         table.add_column(h, justify=a, header_style=f"{_ACC} bold")
     for row in rows:
@@ -208,26 +258,27 @@ def build_markdown_table(headers: list[str], rows: list[list[str]],
     return table
 
 
-def table_block_to_markdown(headers: list[str], rows: list[list[str]],
-                            aligns: list[str]) -> str:
+def table_block_to_markdown(
+    headers: list[str], rows: list[list[str]], aligns: list[str]
+) -> str:
     """Реконструировать валидный markdown таблицы из Block (для clipboard).
 
     left → ``---`` (GFM-дефолт). ``|`` в ячейке → ``\\|`` для вставки в редактор.
     Round-trip через текущий segment_answer для ячеек с ``|`` НЕ обещаем:
     парсер режет по сырому ``|`` без escape.
     """
+
     def esc(cell: str) -> str:
         return cell.replace("|", r"\|")
 
     lines = ["| " + " | ".join(esc(h) for h in headers) + " |"]
     sep: list[str] = []
     for a in aligns:
-        sep.append(":---:" if a == "center"
-                   else "---:" if a == "right"
-                   else "---")
+        if a == "center":
+            sep.append(":---:")
+        else:
+            sep.append("---:" if a == "right" else "---")
     lines.append("| " + " | ".join(sep) + " |")
     for row in rows:
         lines.append("| " + " | ".join(esc(c) for c in row) + " |")
     return "\n".join(lines)
-
-

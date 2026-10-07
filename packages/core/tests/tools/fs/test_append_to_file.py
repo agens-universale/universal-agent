@@ -2,13 +2,14 @@ import copy
 import json
 
 import pytest
-
-from gc_core.tools.arguments_validation import WrongFunctionArgumentsException, parse_and_validate_tool_arguments
+from gc_core.tools.arguments_validation import (
+    WrongFunctionArgumentsException,
+    parse_and_validate_tool_arguments,
+)
 from gc_core.tools.fs.append_to_file import AppendToFile
 from gc_core.tools.schema_optional import apply_openai_strict_parameters
-
-
 from gc_testkit.helpers.tool_ctx import with_local_ctx
+
 
 def test_append_success_existing_file(tmp_path):
     p = tmp_path / "note.txt"
@@ -23,7 +24,13 @@ def test_append_success_existing_file(tmp_path):
 def test_append_create_missing_with_dirs(tmp_path):
     p = tmp_path / "a" / "b" / "c.txt"
     res = json.loads(
-        with_local_ctx(AppendToFile)(path=str(p), content="hello", create_if_missing=True, make_dirs=True, separator="")
+        with_local_ctx(AppendToFile)(
+            path=str(p),
+            content="hello",
+            create_if_missing=True,
+            make_dirs=True,
+            separator="",
+        )
     )
     assert res["ok"] is True
     assert res["created"] is True
@@ -94,7 +101,9 @@ def test_append_errors(tmp_path):
     assert rel["ok"] is False and rel["error"]["field"] == "path"
     miss = json.loads(tool(path=str(tmp_path / "missing.txt"), content="x"))
     assert miss["ok"] is False and miss["error"]["type"] == "not_found"
-    bad_sep = json.loads(tool(path=str(tmp_path / "x.txt"), content="x", separator=123))
+    bad_sep = json.loads(
+        tool(path=str(tmp_path / "x.txt"), content="x", separator=123)
+    )
     assert bad_sep["ok"] is False and bad_sep["error"]["field"] == "separator"
 
 
@@ -196,7 +205,7 @@ def test_append_head_truncated_utf8_still_ok(tmp_path):
     # Fill so that a 2-byte Cyrillic char sits across the sample boundary.
     prefix = b"a" * (APPEND_HEAD_SAMPLE_BYTES - 1)
     # "я" is D1 8F in utf-8 — first byte at last head slot, second beyond sample.
-    rest = "я".encode("utf-8") + b" more text\n"
+    rest = "я".encode() + b" more text\n"
     p = tmp_path / "cut.txt"
     p.write_bytes(prefix + rest)
     res = json.loads(
@@ -216,8 +225,8 @@ def test_append_utf16_no_mid_bom(tmp_path, encoding):
     BOM in the middle of an existing utf-16 file, corrupting it with
     ZERO WIDTH NO-BREAK SPACE (U+FEFF) between the existing tail and the new chunk.
     """
-    from gc_core.utils.file_text import decode_text_bytes
     from gc_core.tools.fs.write_to_file_tool import WriteToFile
+    from gc_core.utils.file_text import decode_text_bytes
 
     p = tmp_path / "u16.txt"
     wres = json.loads(
@@ -242,7 +251,9 @@ def test_append_utf16_no_mid_bom(tmp_path, encoding):
 
     raw = p.read_bytes()
     # The leading BOM (written by fs_write_file) must still be present at offset 0.
-    expected_bom = b"\xff\xfe" if encoding in ("utf-16", "utf-16-le") else b"\xfe\xff"
+    expected_bom = (
+        b"\xff\xfe" if encoding in ("utf-16", "utf-16-le") else b"\xfe\xff"
+    )
     assert raw[:2] == expected_bom, f"{encoding}: start BOM lost: {raw[:2]!r}"
 
     # Decoded text must NOT contain U+FEFF anywhere — decode_text_bytes strips the
@@ -276,8 +287,12 @@ def test_append_utf16_create_missing_has_bom(tmp_path, encoding):
     )
     assert res["ok"] and res["created"], res
     raw = p.read_bytes()
-    expected_bom = b"\xff\xfe" if encoding in ("utf-16", "utf-16-le") else b"\xfe\xff"
-    assert raw[:2] == expected_bom, f"{encoding}: start BOM missing: {raw[:2]!r}"
+    expected_bom = (
+        b"\xff\xfe" if encoding in ("utf-16", "utf-16-le") else b"\xfe\xff"
+    )
+    assert raw[:2] == expected_bom, (
+        f"{encoding}: start BOM missing: {raw[:2]!r}"
+    )
     decoded = decode_text_bytes(raw, encoding=encoding)
     assert decoded.ok and decoded.text == "Hello"
 
@@ -289,21 +304,26 @@ def test_append_utf8_sig_no_mid_bom(tmp_path):
     ``text.encode(\"utf-8-sig\")`` always prepends EF BB BF, so the append path must
     encode as plain utf-8 (BOM lives only at file offset 0).
     """
-    from gc_core.utils.file_text import decode_text_bytes
     from gc_core.tools.fs.write_to_file_tool import WriteToFile
+    from gc_core.utils.file_text import decode_text_bytes
 
     p = tmp_path / "sig.txt"
     wres = json.loads(
         with_local_ctx(WriteToFile)(
-            path=str(p), content="first line\nsecond line",
-            mode="overwrite", encoding="utf-8-sig",
+            path=str(p),
+            content="first line\nsecond line",
+            mode="overwrite",
+            encoding="utf-8-sig",
         )
     )
     assert wres["ok"], wres
 
     res = json.loads(
         with_local_ctx(AppendToFile)(
-            path=str(p), content="third line", separator="", encoding="utf-8-sig",
+            path=str(p),
+            content="third line",
+            separator="",
+            encoding="utf-8-sig",
         )
     )
     assert res["ok"], res
@@ -312,7 +332,9 @@ def test_append_utf8_sig_no_mid_bom(tmp_path):
     # Start BOM preserved by fs_write_file.
     assert raw[:3] == b"\xef\xbb\xbf", f"start BOM lost: {raw[:3]!r}"
     # No second BOM in the middle of the byte stream.
-    assert b"\xef\xbb\xbf" not in raw[3:], f"spurious mid-file utf-8-sig BOM: {raw!r}"
+    assert b"\xef\xbb\xbf" not in raw[3:], (
+        f"spurious mid-file utf-8-sig BOM: {raw!r}"
+    )
     decoded = decode_text_bytes(raw, encoding="utf-8-sig")
     assert decoded.ok and "\ufeff" not in decoded.text
     assert decoded.text == "first line\nsecond linethird line"
@@ -327,8 +349,12 @@ def test_append_utf8_sig_create_missing_has_bom(tmp_path):
     p = tmp_path / "created_sig.txt"
     res = json.loads(
         with_local_ctx(AppendToFile)(
-            path=str(p), content="Hello", separator="",
-            encoding="utf-8-sig", create_if_missing=True, make_dirs=True,
+            path=str(p),
+            content="Hello",
+            separator="",
+            encoding="utf-8-sig",
+            create_if_missing=True,
+            make_dirs=True,
         )
     )
     assert res["ok"] and res["created"], res
@@ -338,13 +364,21 @@ def test_append_utf8_sig_create_missing_has_bom(tmp_path):
     assert decoded.ok and decoded.text == "Hello"
 
 
-@pytest.mark.parametrize("encoding", ["utf-16", "utf-16-le", "utf-16-be", "utf-8-sig"])
+@pytest.mark.parametrize(
+    "encoding", ["utf-16", "utf-16-le", "utf-16-be", "utf-8-sig"]
+)
 def test_append_to_empty_existing_file_writes_bom(tmp_path, encoding):
-    """An existing but empty (size==0) file must be treated like create: BOM emitted.
+    """An existing but empty (size==0) file takes the create PATH: BOM emitted.
 
     Without this, appending utf-16/utf-8-sig to a zero-byte file would produce a
     BOM-less file that later decodes incorrectly. size==0 → create-path (write_bytes
     with BOM) rather than append-path (no BOM).
+
+    Путь записи — ещё не история пути: файл СУЩЕСТВОВАЛ, и ``created`` о нём
+    врать не должен. Тот же смысл, что у соседа по неймспейсу
+    (``write_to_file`` отдаёт ``created=not exists``), и та же величина, по
+    которой журнал решает породу записи: назвав пустой файл созданным, откат
+    получал право УДАЛИТЬ файл, который у пользователя уже был.
     """
     from gc_core.utils.file_text import decode_text_bytes
 
@@ -354,24 +388,29 @@ def test_append_to_empty_existing_file_writes_bom(tmp_path, encoding):
 
     res = json.loads(
         with_local_ctx(AppendToFile)(
-            path=str(p), content="Hello", separator="", encoding=encoding,
+            path=str(p),
+            content="Hello",
+            separator="",
+            encoding=encoding,
         )
     )
     assert res["ok"], res
-    # created flag set because size==0 is treated as create.
-    assert res["created"] is True, res
+    assert res["created"] is False, res  # файл существовал — не создание
     raw = p.read_bytes()
     if encoding in ("utf-16", "utf-16-le"):
         assert raw[:2] == b"\xff\xfe", f"{encoding}: BOM missing: {raw[:2]!r}"
     elif encoding == "utf-16-be":
         assert raw[:2] == b"\xfe\xff", f"{encoding}: BOM missing: {raw[:2]!r}"
     else:  # utf-8-sig
-        assert raw[:3] == b"\xef\xbb\xbf", f"{encoding}: BOM missing: {raw[:3]!r}"
+        assert raw[:3] == b"\xef\xbb\xbf", (
+            f"{encoding}: BOM missing: {raw[:3]!r}"
+        )
     decoded = decode_text_bytes(raw, encoding=encoding)
     assert decoded.ok and decoded.text == "Hello"
 
 
 # --- CRLF preservation (fix #2) ---
+
 
 def test_append_to_crlf_file_preserves_crlf(tmp_path):
     """Appending \\n-delimited text to a CRLF file must not mix line endings.
@@ -385,7 +424,9 @@ def test_append_to_crlf_file_preserves_crlf(tmp_path):
     p.write_bytes(b"line1\r\nline2\r\n")
     res = json.loads(
         with_local_ctx(AppendToFile)(
-            path=str(p), content="added line3\nmore text", separator="\n\n",
+            path=str(p),
+            content="added line3\nmore text",
+            separator="\n\n",
         )
     )
     assert res["ok"], res
@@ -397,13 +438,40 @@ def test_append_to_crlf_file_preserves_crlf(tmp_path):
     assert raw == b"line1\r\nline2\r\n\r\n\r\nadded line3\r\nmore text"
 
 
+def test_append_to_crlf_file_reports_normalized_bytes(tmp_path):
+    """bytes_appended must count what actually landed on disk.
+
+    When the chunk is normalized from LF to CRLF (see test above), the byte
+    count written is larger than the raw UTF-8 payload before normalization.
+    The tool's report must match the real delta, not the pre-normalization
+    payload length.
+    """
+    p = tmp_path / "crlf_report.txt"
+    p.write_bytes(b"line1\r\nline2\r\n")
+    size_before = p.stat().st_size
+    res = json.loads(
+        with_local_ctx(AppendToFile)(
+            path=str(p),
+            content="added line3\nmore text",
+            separator="\n\n",
+        )
+    )
+    assert res["ok"], res
+    size_after = p.stat().st_size
+    assert res["bytes_appended"] == size_after - size_before, res[
+        "bytes_appended"
+    ]
+
+
 def test_append_to_lf_file_keeps_lf(tmp_path):
     """Appending to an LF file must NOT introduce CRLF endings."""
     p = tmp_path / "lf.txt"
     p.write_bytes(b"line1\nline2\n")
     res = json.loads(
         with_local_ctx(AppendToFile)(
-            path=str(p), content="added line3\nmore text", separator="\n\n",
+            path=str(p),
+            content="added line3\nmore text",
+            separator="\n\n",
         )
     )
     assert res["ok"], res
@@ -421,7 +489,9 @@ def test_append_crlf_empty_separator(tmp_path):
     p.write_bytes(b"a\r\nb\r\n")
     res = json.loads(
         with_local_ctx(AppendToFile)(
-            path=str(p), content="c\nd", separator="",
+            path=str(p),
+            content="c\nd",
+            separator="",
         )
     )
     assert res["ok"], res

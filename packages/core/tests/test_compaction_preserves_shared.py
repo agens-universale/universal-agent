@@ -13,8 +13,9 @@ import types
 import unittest
 from unittest.mock import patch
 
-from gc_core.summarize.compaction import run_summary_compaction
+from gc_core.summarize.compaction import arun_summary_compaction
 from gc_core.summarize.working_memory_gateway import WorkingMemoryDeltas
+from gc_testkit import run_coro
 
 
 def _state_with_full_shared():
@@ -27,7 +28,12 @@ def _state_with_full_shared():
         dialog_steps_offset=0,
         previous_response_id=None,
         shared=types.SimpleNamespace(
-            working_memory={"goal": "цель", "constraints": "", "state": "", "knowledge": ""},
+            working_memory={
+                "goal": "цель",
+                "constraints": "",
+                "state": "",
+                "knowledge": "",
+            },
             notes_md="заметки",
             fetch_url_cache={"https://example.test": "cached body"},
             confirm_rules={"exec_command:git status": True},
@@ -35,7 +41,7 @@ def _state_with_full_shared():
     )
 
 
-def _fake_summarize(**_kwargs):
+async def _fake_summarize(**_kwargs):
     return {
         "raw_summary": "<summary>ok</summary>",
         "num_batches": 1,
@@ -55,27 +61,39 @@ class CompactionPreservesSharedTest(unittest.TestCase):
     @patch("gc_core.summarize.compaction.log_compaction_started")
     def test_summary_payload_carries_whole_shared_block(self, *_logs) -> None:
         state = _state_with_full_shared()
-        ctx = types.SimpleNamespace(config_dict={"summary_params": {}}, logger=None)
+        ctx = types.SimpleNamespace(
+            config_dict={"summary_params": {}}, logger=None
+        )
         captured: dict = {}
 
-        with patch(
-            "gc_core.summarize.compaction.summarize_dialog_via_chat_completions", _fake_summarize
-        ), patch(
-            "gc_core.summarize.compaction.apply_summary_state_patch",
-            lambda **_kw: "dialog-body",
+        with (
+            patch(
+                "gc_core.summarize.compaction.asummarize_dialog_via_chat_completions",
+                _fake_summarize,
+            ),
+            patch(
+                "gc_core.summarize.compaction.apply_summary_state_patch",
+                lambda **_kw: "dialog-body",
+            ),
         ):
-            run_summary_compaction(
-                ctx=ctx,
-                state=state,
-                trigger_reason="test",
-                is_cli_mode=False,
-                on_summary_applied=lambda event: captured.update(event),
+            run_coro(
+                arun_summary_compaction(
+                    ctx=ctx,
+                    state=state,
+                    trigger_reason="test",
+                    is_cli_mode=False,
+                    on_summary_applied=lambda event: captured.update(event),
+                )
             )
 
         shared = captured["summary_payload"]["shared"]
         # Поля, которые молча терялись: они есть в SharedStateData и должны доехать.
-        self.assertEqual(shared["confirm_rules"], {"exec_command:git status": True})
-        self.assertEqual(shared["fetch_url_cache"], {"https://example.test": "cached body"})
+        self.assertEqual(
+            shared["confirm_rules"], {"exec_command:git status": True}
+        )
+        self.assertEqual(
+            shared["fetch_url_cache"], {"https://example.test": "cached body"}
+        )
         # И прежнее поведение не сломано.
         self.assertEqual(shared["working_memory"]["goal"], "цель")
         self.assertEqual(shared["notes_md"], "заметки")

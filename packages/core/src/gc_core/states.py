@@ -1,20 +1,32 @@
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from uuid import uuid4
-from typing import Any, Dict, List, Optional
-from gc_core.project_memory import attach_status_to_prompt_vars
-from gc_core.execution_workspace import ExecutionWorkspace, build_execution_workspace
-from gc_core.utils.project_data import get_project_data
-from gc_core.tools.session.stored_outputs.tool_call_outputs_store import ToolCallOutputsStore
-from gc_core.message_policy.tool_usage_notice.state import hydrate_tool_usage_notice_state
-from gc_core.tools.skills.skills_policy import render_skills_catalog
-from gc_core.intent_log import IntentRecord, deserialize_list, flush
-from gc_core.usage.account import UsageAccount
+
+from gc_core.execution_workspace import (
+    ExecutionWorkspace,
+    build_execution_workspace,
+)
 from gc_core.instructions.loader import build_instructions
+from gc_core.intent_log import IntentRecord, deserialize_list, flush
+from gc_core.message_policy.tool_usage_notice.state import (
+    hydrate_tool_usage_notice_state,
+)
+from gc_core.project_memory import attach_status_to_prompt_vars
+from gc_core.tools.session.stored_outputs.tool_call_outputs_store import (
+    ToolCallOutputsStore,
+)
+from gc_core.tools.skills.skills_policy import render_skills_catalog
+from gc_core.usage.account import UsageAccount
+
+if TYPE_CHECKING:
+    from gc_core.vision.audience import Audience
+    from gc_core.vision.rejects import ImageRequestLimit
 
 
 @dataclass
 class SharedStateData:
     """Данные, разделяемые между оркестратором и его субагентами."""
+
     # In-process + persist key ``working_memory`` (goal/constraints/state/knowledge).
     # Agent tool API: ``session_memory``; summary wire: ``<session_memory>`` inside
     # ``<persistent_state>``. Intentionally not renamed in JSON/yaml (thread compat).
@@ -30,7 +42,7 @@ class SharedStateData:
 
 
 class State:
-    def __init__(
+    def __init__(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING.md
         self,
         verbose: bool,
         model: str,
@@ -55,6 +67,7 @@ class State:
         agentsmd_override: bool = False,
         workspace: Optional[ExecutionWorkspace] = None,
         os_backend: Optional[Any] = None,
+        initial_project_data: Optional[Dict[str, Any]] = None,
     ):
         self.logger = logger
         self.parent_state_id = parent_state_id
@@ -66,9 +79,14 @@ class State:
         if workspace is None and os_backend is not None:
             workspace = build_execution_workspace(os_backend, workspace_config)
         self.workspace = workspace
-        self.initial_project_data = get_project_data(
-            workspace_config, workspace=workspace, backend=os_backend
-        )
+        # Данные о проекте ПРИХОДЯТ готовыми, а не собираются здесь.
+        #
+        # Сбор — это файловый ввод-вывод (``.git``, листинг каталога), а у
+        # файлового порта одна форма, корутинная. Конструктор ждать не умеет,
+        # и «синхронная форма ради конструктора» — ровно та пара, которую
+        # снимала эта ветка. Кому данные нужны, тот строит состояние через
+        # ``acreate`` — он их и соберёт.
+        self.initial_project_data = dict(initial_project_data or {})
         if limit_project_metadata:
             # В серверном режиме не передаём чувствительные данные о файловой системе.
             # Оставляем только дату, остальные поля будут добавлены в set_call_metadata.
@@ -89,7 +107,11 @@ class State:
         self.is_tui = is_tui
         self.agentsmd_override = agentsmd_override
         self.thread_id = thread_id
-        self.shared: SharedStateData = shared if isinstance(shared, SharedStateData) else SharedStateData()
+        self.shared: SharedStateData = (
+            shared
+            if isinstance(shared, SharedStateData)
+            else SharedStateData()
+        )
         self.instruction_warnings: list[str] = []
         self.call_metadata = self.set_call_metadata()
         self.messages = []
@@ -109,18 +131,24 @@ class State:
         self.steps = 0
         self.tool_calls = 0
         self.stop_requested = False
-        self.discard_writes_after_stop = False  # TUI ставит True; пропускает persist
+        self.discard_writes_after_stop = (
+            False  # TUI ставит True; пропускает persist
+        )
         self.user_intent_log: list[IntentRecord] = []
         self.current_user_intent: list[IntentRecord] = []
         self.user_turn_seq: int = 0
         self.finish_gate_rejection_count: int = 0
-        self.turn_tool_calls: int = 0   # вызовов инструментов за текущий ход (smart-гейт, спека §3)
+        self.turn_tool_calls: int = (
+            0  # вызовов инструментов за текущий ход (smart-гейт, спека §3)
+        )
         # Уровень моделей, зафиксированный на текущий ход (`turn_boundary.begin_turn`).
         # None — ход ещё не начинали; транспорт тогда резолвит живой уровень. Объявлено
         # здесь, а не заводится на лету: читатели берут поле через getattr, и без
         # объявления «не начинали» было бы неотличимо от «поля нет».
         self.turn_level: Optional[str] = None
-        self.terminal_outcome: Optional[str] = None  # None | "step_limit" | "tool_errors"
+        self.terminal_outcome: Optional[str] = (
+            None  # None | "step_limit" | "tool_errors"
+        )
         self.last_unknown_tool_name: Optional[str] = None
         self.unknown_tool_repeat_count: int = 0
         self.last_batch_unknown_tool_count: int = 0
@@ -147,12 +175,64 @@ class State:
         # None, пока прогон не завершился. Оба доступны in-memory через get_state().
         self.usage = UsageAccount()
         self.last_run_usage: Optional[UsageAccount] = None
+        # Input-токены последнего главного chat_completions этого State и
+        # сколько сообщений истории в тот prompt уже вошло. None — числа ещё нет.
+        # После сжатия оба снова None. В meta треда — те же ключи (null = нет числа).
+        self.last_main_prompt_tokens: Optional[int] = None
+        self.last_main_prompt_message_count: Optional[int] = None
         # Снимок кумулятива на старте текущего прогона (meta-dict, JSON-safe).
         # По нему футер считает live-«запрос» текущего хода (usage − baseline),
         # пока last_run_usage ещё не выставлен. Транзиентный (per-run), не биллится.
         self.run_start_usage_meta: Optional[dict] = None
         # Чек-лист субагента: собственный, эфемерный (см. property session_todo).
         self.subagent_todo: List[Dict[str, str]] = []
+        # Картинки тулов текущего батча (спека §7.1): словари `Attachment`, уходят
+        # одним техническим сообщением после батча. Сериализуемы и попадают в
+        # снимок, как `session_compact_applied`.
+        self.pending_tool_attachments: List[Dict[str, Any]] = []
+        # «Кто смотрит» на картинки последнего запроса (`vision.audience`, спека
+        # §9.1): считает контроллер на каждый запрос, читает тул `fs_view_image`.
+        # Транзиентно: `StateSerializer` его не пишет (как `workspace`).
+        self.vision_audience: Optional[Audience] = None
+        # Id картинок, ушедших модели запроса целиком (base64) в последнем запросе:
+        # тул `fs_view_image` не прикладывает такую картинку второй раз. Тот же
+        # жизненный цикл, что у `vision_audience`: считает контроллер, транзиентно.
+        self.vision_live_ids: frozenset[str] = frozenset()
+        # Успешный потолок повторов с картинками для текущего хода и контекста;
+        # это не способность модели видеть. После смены области не применяется.
+        self.vision_request_limit: Optional[ImageRequestLimit] = None
+        self.vision_probe_turn: str | None = None
+        self.vision_routes: dict = {}
+        self.vision_probe_notices: set = set()
+
+    @classmethod
+    async def acreate(
+        cls,
+        *,
+        workspace_config=None,
+        workspace=None,
+        os_backend=None,
+        **kwargs,
+    ) -> "State":
+        """Собрать данные о проекте и построить состояние.
+
+        Единственный вход для прода: файловый ввод-вывод происходит ЗДЕСЬ, до
+        конструктора. Тесты, которым метаданные проекта безразличны, строят
+        ``State(...)`` напрямую и получают пустой словарь — без похода в
+        файловую систему за спиной.
+        """
+        from gc_core.utils.project_data import get_project_data
+
+        data = await get_project_data(
+            workspace_config, workspace=workspace, backend=os_backend
+        )
+        return cls(
+            workspace_config=workspace_config,
+            workspace=workspace,
+            os_backend=os_backend,
+            initial_project_data=data,
+            **kwargs,
+        )
 
     @property
     def session_todo(self) -> List[Dict[str, str]]:
@@ -184,8 +264,8 @@ class State:
             config_dict=getattr(self, "workspace_config", None),
         )
         if self.skills_list:
-            metadata["promptVariables"]["available_skills"] = render_skills_catalog(
-                self.skills_list
+            metadata["promptVariables"]["available_skills"] = (
+                render_skills_catalog(self.skills_list)
             )
         agent_md_path = getattr(self, "agent_md_path", None)
         loaded = build_instructions(
@@ -212,17 +292,15 @@ class State:
         return metadata
 
     def set_resp_headers_metadata(self, headers):
-        x_target = headers.get('x-target')
+        x_target = headers.get("x-target")
         if x_target and self.x_target is None:
             self.x_target = x_target
 
     def add_message(self, message):
         self.messages.append(message)
 
-
     def set_previous_response_id(self, previous_response_id):
-        self.previous_response_id =previous_response_id
-
+        self.previous_response_id = previous_response_id
 
     def init_user_intent_log(self, entries: Any) -> None:
         """Initialize closed user turns from persisted thread meta."""
@@ -245,12 +323,20 @@ class State:
             return
         if not self.user_intent_log:
             return
-        turns = [int(r.turn) for r in self.user_intent_log if isinstance(r.turn, int)]
+        turns = [
+            int(r.turn)
+            for r in self.user_intent_log
+            if isinstance(r.turn, int)
+        ]
         self.user_turn_seq = max(turns) if turns else 1
 
-    def init_tool_usage_notice_from_meta(self, meta: Optional[Dict[str, Any]]) -> None:
+    def init_tool_usage_notice_from_meta(
+        self, meta: Optional[Dict[str, Any]]
+    ) -> None:
         """Восстановить tool_usage_notice / project_memory поля из thread_session.meta или child_meta."""
-        hydrate_tool_usage_notice_state(self, meta if isinstance(meta, dict) else None)
+        hydrate_tool_usage_notice_state(
+            self, meta if isinstance(meta, dict) else None
+        )
 
     def init_subagent_tool_usage_notice(self) -> None:
         """Субагент: изолированный meta/state; wiki общая через shared (D34)."""
@@ -264,10 +350,11 @@ class State:
         Граница хода: сбрасываем ``turn_tool_calls`` — следующий ход считает вызовы
         заново (smart-гейт судьи, спека §3). Компакция границей хода не является и
         сюда не заходит, поэтому счётчик её переживает."""
-        self.current_user_intent, self.user_intent_log, self.user_turn_seq = flush(
-            self.current_user_intent,
-            self.user_intent_log,
-            self.user_turn_seq,
+        self.current_user_intent, self.user_intent_log, self.user_turn_seq = (
+            flush(
+                self.current_user_intent,
+                self.user_intent_log,
+                self.user_turn_seq,
+            )
         )
         self.turn_tool_calls = 0
-

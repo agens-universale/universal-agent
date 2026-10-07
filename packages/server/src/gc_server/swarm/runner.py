@@ -3,17 +3,17 @@ import logging
 import os
 import shutil
 import subprocess
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any, Dict, Optional, Tuple
 
 import yaml
-
-from gc_server.swarm import storage as storage
 from gc_core.config import resolve_base_config_path
 from gc_core.config_modules import env_vars
-from gc_core.config_modules.merge import deep_merge
+from gc_core.config_modules.compat import apply_compat
+from gc_core.config_modules.merge import merge_config_layers
 from gc_core.utils.user_text import read_user_text_or_none
 
+from gc_server.swarm import storage as storage
 
 logger = logging.getLogger(__name__)
 
@@ -21,14 +21,32 @@ logger = logging.getLogger(__name__)
 # Известные top-level секции в config.yml. Если agent_overrides содержит хотя бы
 # одну из них на верхнем уровне — считаем его raw-структурой; иначе — flat
 # (legacy формат для webhook'а) и оборачиваем в {"agent": ...}.
-_KNOWN_RAW_SECTIONS = frozenset({
-    "backend", "agent", "agent_auth", "logging", "paths", "mcp",
-    "security", "summary", "chat_completions", "working_memory",
-    "quality_gate", "tool_usage_notice", "project_memory", "intent_scope",
-})
+_KNOWN_RAW_SECTIONS = frozenset(
+    {
+        "models",
+        "slots",
+        "assign",
+        "backend",
+        "agent",
+        "agent_auth",
+        "logging",
+        "paths",
+        "mcp",
+        "security",
+        "summary",
+        "chat_completions",
+        "working_memory",
+        "quality_gate",
+        "tool_usage_notice",
+        "project_memory",
+        "intent_scope",
+    }
+)
 
 
-def _normalize_agent_overrides_to_raw(overrides: Dict[str, Any]) -> Dict[str, Any]:
+def _normalize_agent_overrides_to_raw(
+    overrides: Dict[str, Any],
+) -> Dict[str, Any]:
     """Привести agent_overrides к raw-структуре YAML.
 
     - Если на верхнем уровне есть хотя бы одна известная секция — считаем raw,
@@ -64,120 +82,35 @@ def _apply_swarm_env_to_raw(raw: Dict[str, Any], config_dir: str) -> None:
         return os.path.join(config_dir, value)
 
     if env_vars.env.swarm_agentmd_path is not None:
-        paths_section["agent_md_path"] = _resolve(str(env_vars.env.swarm_agentmd_path))
+        paths_section["agent_md_path"] = _resolve(
+            str(env_vars.env.swarm_agentmd_path)
+        )
     if env_vars.env.swarm_threads_dir is not None:
-        paths_section["threads_data_path"] = _resolve(str(env_vars.env.swarm_threads_dir))
+        paths_section["threads_data_path"] = _resolve(
+            str(env_vars.env.swarm_threads_dir)
+        )
     if env_vars.env.swarm_skills_dir is not None:
-        paths_section["skills_data_path"] = _resolve(str(env_vars.env.swarm_skills_dir))
+        paths_section["skills_data_path"] = _resolve(
+            str(env_vars.env.swarm_skills_dir)
+        )
 
 
 def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _compute_deadline_iso(timeout_seconds: int) -> str:
     """Вернуть ISO-timestamp когда sworm должен быть принудительно убит по таймауту."""
     return (
-        datetime.now(timezone.utc) + timedelta(seconds=int(timeout_seconds))
+        datetime.now(UTC) + timedelta(seconds=int(timeout_seconds))
     ).isoformat()
 
 
-def _materialize_runtime_config(
-    host_config_path: str,
+def _copy_swarm_assets(
     sandbox_path: str,
     swarm_cfg: Dict[str, Any],
-) -> str:
-    """Сгенерировать ${sandbox_path}/.gc/config.yml для CLI внутри bwrap.
-
-    Реализует AR-1 (см. swarm_spec.md §10). Слои merge'а в порядке применения
-    (каждый последующий перезаписывает предыдущий через deep_merge):
-
-      1. Base file — raw YAML из host_config_path (XDG / package default
-         через resolve_base_config_path, либо явный swarm.host_config_path).
-      2. Project overlay — <cwd>/.gc/config.yml относительно CWD сервера,
-         если файл существует и отличается от base. Симметрично с тем, как
-         load_config делает layered loading для обычного CLI'я.
-      3. SWARM_* env vars — paths.{agent_md_path, threads_data_path,
-         skills_data_path}. Параллель с config_modules.common.apply_swarm_env_overrides
-         для raw YAML.
-      4. agent_overrides — переопределения из config_server.yml::agent_overrides.
-         Flat-формат (legacy для webhook'а, типа `stop_tools: [...]`) авто-
-         оборачивается в {"agent": ...}. Raw-формат (с секциями `agent:`,
-         `paths:` и т.п.) применяется как есть.
-      5. Swarm-specific overrides — ВСЕГДА применяются последними и
-         перезаписывают предыдущие слои для критичных sandbox-полей:
-           paths.threads_data_path = "/work/.gc/threads"
-           paths.logs_dump_dir     = "/work/.gc/logs"
-           agent.use_server_subagents = False
-         (Опц.) paths.agent_md_path / paths.skills_data_path — на внутренние
-         пути после копирования файлов из swarm_cfg.
-
-    Возвращает путь к материализованному файлу на хосте (для логирования/тестов).
-    """
-    # === Слой 1: base ===
-    # «Нет файла» и «файл на месте, но не читается» здесь один исход — пустая база
-    # с варнингом. Прежде второй класс уходил наружу: конфиг человека, сохранённый
-    # в UTF-16, валил материализацию трейсбеком (`UnicodeDecodeError` — подкласс
-    # `ValueError`, а не `OSError`, и мимо `FileNotFoundError` уходил тем более).
-    base_text = read_user_text_or_none(host_config_path)
-    if base_text is None:
-        logger.warning(
-            "runtime config materialization: base config %s not found or unreadable, "
-            "using empty base",
-            host_config_path,
-        )
-        base = {}
-        config_dir = os.getcwd()
-    else:
-        base = yaml.safe_load(base_text) or {}
-        config_dir = os.path.dirname(os.path.abspath(host_config_path))
-
-    raw: Dict[str, Any] = base
-
-    # === Слой 2: project overlay <cwd>/.gc/config.yml ===
-    # Симметрично с load_config()'s layered loading. CWD — серверский, тот же,
-    # что увидит load_config() при старте webhook'а. Защитный check
-    # `project_path != host_config_path` обходит самомерж когда base file
-    # лежит в <cwd>/.gc/ (это бывает, если сервер запущен из проектной директории).
-    try:
-        project_path = env_vars.project_local_config_path()
-    except Exception:  # noqa: BLE001
-        project_path = None
-
-    if (
-        project_path is not None
-        and os.path.abspath(project_path) != os.path.abspath(host_config_path)
-    ):
-        project_text = read_user_text_or_none(project_path)
-        if project_text is None:
-            logger.warning(
-                "runtime config materialization: failed to read project overlay %s",
-                project_path,
-            )
-        else:
-            raw = deep_merge(raw, yaml.safe_load(project_text) or {})
-
-    # === Слой 3: SWARM_* env vars (raw paths.*) ===
-    _apply_swarm_env_to_raw(raw, config_dir)
-
-    # === Слой 4: agent_overrides из config_server.yml ===
-    agent_overrides = swarm_cfg.get("agent_overrides") or {}
-    if agent_overrides:
-        wrapped = _normalize_agent_overrides_to_raw(agent_overrides)
-        raw = deep_merge(raw, wrapped)
-
-    # === Слой 5: swarm-specific overrides (всегда последний, всегда побеждает) ===
-    swarm_overrides: Dict[str, Any] = {
-        "paths": {
-            "threads_data_path": "/work/.gc/threads",
-            "logs_dump_dir": "/work/.gc/logs",
-        },
-        "agent": {
-            # Внутри sandbox нет связи с REST-сервером для server-side subagent calls.
-            "use_server_subagents": False,
-        },
-    }
-
+    swarm_overrides: Dict[str, Any],
+) -> None:
     # Опционально: swarm-specific prompt (agentmd_path) копируется в sandbox.
     swarm_agentmd_path = swarm_cfg.get("agentmd_path") or ""
     if swarm_agentmd_path and os.path.isfile(swarm_agentmd_path):
@@ -211,7 +144,108 @@ def _materialize_runtime_config(
             swarm_skills_dir,
         )
 
-    merged = deep_merge(raw, swarm_overrides)
+
+def _materialize_runtime_config(
+    host_config_path: str,
+    sandbox_path: str,
+    swarm_cfg: Dict[str, Any],
+) -> str:
+    """Сгенерировать ${sandbox_path}/.gc/config.yml для CLI внутри bwrap.
+
+    Реализует AR-1 (см. swarm_spec.md §10). Слои merge'а в порядке применения
+    (каждый последующий перезаписывает предыдущий через merge_config_layers):
+
+      1. Base file — raw YAML из host_config_path (XDG / package default
+         через resolve_base_config_path, либо явный swarm.host_config_path).
+      2. Project overlay — <cwd>/.gc/config.yml относительно CWD сервера,
+         если файл существует и отличается от base. Симметрично с тем, как
+         load_config делает layered loading для обычного CLI'я.
+      3. SWARM_* env vars — paths.{agent_md_path, threads_data_path,
+         skills_data_path}. Параллель с config_modules.common.apply_swarm_env_overrides
+         для raw YAML.
+      4. agent_overrides — переопределения из config_server.yml::agent_overrides.
+         Flat-формат (legacy для webhook'а, типа `stop_tools: [...]`) авто-
+         оборачивается в {"agent": ...}. Raw-формат (с секциями `agent:`,
+         `paths:` и т.п.) применяется как есть.
+      5. Swarm-specific overrides — ВСЕГДА применяются последними и
+         перезаписывают предыдущие слои для критичных sandbox-полей:
+           paths.threads_data_path = "/work/.gc/threads"
+           paths.logs_dump_dir     = "/work/.gc/logs"
+           agent.use_server_subagents = False
+         (Опц.) paths.agent_md_path / paths.skills_data_path — на внутренние
+         пути после копирования файлов из swarm_cfg.
+
+    Возвращает путь к материализованному файлу на хосте (для логирования/тестов).
+    """
+    # === Слой 1: base ===
+    # «Нет файла» и «файл на месте, но не читается» здесь один исход — пустая база
+    # с варнингом. Прежде второй класс уходил наружу: конфиг человека, сохранённый
+    # в UTF-16, валил материализацию трейсбеком (`UnicodeDecodeError` — подкласс
+    # `ValueError`, а не `OSError`, и мимо `FileNotFoundError` уходил тем более).
+    base_text = read_user_text_or_none(host_config_path)
+    if base_text is None:
+        logger.warning(
+            "runtime config materialization: base config %s not found or unreadable, using empty base",
+            host_config_path,
+        )
+        base = {}
+        config_dir = os.getcwd()
+    else:
+        base = yaml.safe_load(base_text) or {}
+        config_dir = os.path.dirname(os.path.abspath(host_config_path))
+
+    apply_compat(base)
+    raw: Dict[str, Any] = base
+
+    # === Слой 2: project overlay <cwd>/.gc/config.yml ===
+    # Симметрично с load_config()'s layered loading. CWD — серверский, тот же,
+    # что увидит load_config() при старте webhook'а. Защитный check
+    # `project_path != host_config_path` обходит самомерж когда base file
+    # лежит в <cwd>/.gc/ (это бывает, если сервер запущен из проектной директории).
+    try:
+        project_path = env_vars.project_local_config_path()
+    except Exception:
+        project_path = None
+
+    if project_path is not None and os.path.abspath(
+        project_path
+    ) != os.path.abspath(host_config_path):
+        project_text = read_user_text_or_none(project_path)
+        if project_text is None:
+            logger.warning(
+                "runtime config materialization: failed to read project overlay %s",
+                project_path,
+            )
+        else:
+            project = yaml.safe_load(project_text) or {}
+            apply_compat(project)
+            raw = merge_config_layers(raw, project)
+
+    # === Слой 3: SWARM_* env vars (raw paths.*) ===
+    _apply_swarm_env_to_raw(raw, config_dir)
+
+    # === Слой 4: agent_overrides из config_server.yml ===
+    agent_overrides = swarm_cfg.get("agent_overrides") or {}
+    if agent_overrides:
+        wrapped = _normalize_agent_overrides_to_raw(agent_overrides)
+        apply_compat(wrapped)
+        raw = merge_config_layers(raw, wrapped)
+
+    # === Слой 5: swarm-specific overrides (всегда последний, всегда побеждает) ===
+    swarm_overrides: Dict[str, Any] = {
+        "paths": {
+            "threads_data_path": "/work/.gc/threads",
+            "logs_dump_dir": "/work/.gc/logs",
+        },
+        "agent": {
+            # Внутри sandbox нет связи с REST-сервером для server-side subagent calls.
+            "use_server_subagents": False,
+        },
+    }
+
+    _copy_swarm_assets(sandbox_path, swarm_cfg, swarm_overrides)
+
+    merged = merge_config_layers(raw, swarm_overrides)
 
     gc_dir = os.path.join(sandbox_path, ".gc")
     os.makedirs(gc_dir, exist_ok=True)
@@ -233,7 +267,7 @@ def _resolve_host_config_path(swarm_cfg: Dict[str, Any]) -> Optional[str]:
         return explicit.strip()
     try:
         return resolve_base_config_path()
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.warning("could not resolve host config path", exc_info=True)
         return None
 
@@ -244,6 +278,22 @@ def _make_swarm_id(system: str, task_id: str) -> str:
     system_norm = str(system or "").strip().lower()
     task_norm = str(task_id or "").strip()
     return f"swarm_{system_norm}_{task_norm}"
+
+
+def _try_materialize_runtime_config(
+    swarm_cfg: Dict[str, Any], sandbox_dir: str, swarm_id: str
+) -> None:
+    host_config_path = _resolve_host_config_path(swarm_cfg)
+    if host_config_path:
+        try:
+            _materialize_runtime_config(
+                host_config_path, sandbox_dir, swarm_cfg
+            )
+        except Exception:
+            logger.exception(
+                "swarm %s: runtime config materialization failed (proceeding without it)",
+                swarm_id,
+            )
 
 
 def start_swarm_process(
@@ -300,8 +350,7 @@ def start_swarm_process(
         )
     if not os.access(wrapper_path, os.X_OK):
         raise PermissionError(
-            f"swarm wrapper не исполняем: {wrapper_path!r} — нужен бит +x "
-            "(в колесе обёртка едет как package data)"
+            f"swarm wrapper не исполняем: {wrapper_path!r} — нужен бит +x (в колесе обёртка едет как package data)"
         )
 
     # Директория песочницы для этого сворма.
@@ -322,15 +371,7 @@ def start_swarm_process(
         # Шаг 1.10 (AR-1): материализуем runtime config.yml для CLI.
         # CLI внутри bwrap не сможет резолвить дефолтные пути config'а — нужно
         # положить его в /work/.gc/config.yml явно. Wrapper передаст --config.
-        host_config_path = _resolve_host_config_path(swarm_cfg)
-        if host_config_path:
-            try:
-                _materialize_runtime_config(host_config_path, sandbox_dir, swarm_cfg)
-            except Exception:  # noqa: BLE001
-                logger.exception(
-                    "swarm %s: runtime config materialization failed (proceeding without it)",
-                    swarm_id,
-                )
+        _try_materialize_runtime_config(swarm_cfg, sandbox_dir, swarm_id)
 
         # Базовая метадата (совместимая с обычным meta.json) + swarm_meta.
         base_meta: Dict[str, Any] = {
@@ -357,7 +398,9 @@ def start_swarm_process(
         agent_dep_dir: str = swarm_cfg.get("agent_dep_dir", "") or ""
         extra_mounts: list = swarm_cfg.get("extra_mounts", []) or []
         # В env передаём как newline-separated строку — wrapper читает построчно.
-        extra_mounts_env = "\n".join(str(p) for p in extra_mounts if str(p).strip())
+        extra_mounts_env = "\n".join(
+            str(p) for p in extra_mounts if str(p).strip()
+        )
 
         # Передаём базовый контекст через переменные окружения.
         env = os.environ.copy()
@@ -374,7 +417,9 @@ def start_swarm_process(
                 "SWARM_LIMIT_MEMORY_MB": str(limits.get("memory_mb", "")),
                 "SWARM_LIMIT_DISK_MB": str(limits.get("disk_mb", "")),
                 "SWARM_LIMIT_CPU_PERCENT": str(limits.get("cpu_percent", "")),
-                "SWARM_LIMIT_TIMEOUT_SECONDS": str(limits.get("timeout_seconds", "")),
+                "SWARM_LIMIT_TIMEOUT_SECONDS": str(
+                    limits.get("timeout_seconds", "")
+                ),
                 # Полный payload запроса можем передать в окружение как JSON-строку.
                 "SWARM_PAYLOAD_JSON": json.dumps(payload, ensure_ascii=False),
                 # Внешний трейс. Пусто = не задан: обёртка тогда не добавляет флаг,
@@ -408,7 +453,7 @@ def start_swarm_process(
         )
         meta_written = True
 
-        proc = subprocess.Popen(  # noqa: S603
+        proc = subprocess.Popen(
             [wrapper_path],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -451,4 +496,3 @@ def start_swarm_process(
 
 
 __all__ = ["start_swarm_process"]
-

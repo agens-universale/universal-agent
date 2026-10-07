@@ -1,7 +1,14 @@
 from types import SimpleNamespace
 
-from gc_core.message_policy.project_memory_notice.policy import collect_project_memory_hints, project_memory_hints_enabled, on_persist_steps, touch_project_memory_baseline
-from gc_core.message_policy.tool_usage_notice.state import get_project_memory_check_cnt
+from gc_core.message_policy.project_memory_notice.policy import (
+    collect_project_memory_hints,
+    on_persist_steps,
+    project_memory_hints_enabled,
+    touch_project_memory_baseline,
+)
+from gc_core.message_policy.tool_usage_notice.state import (
+    get_project_memory_check_cnt,
+)
 from gc_core.states import State
 
 
@@ -87,7 +94,9 @@ def test_collect_changed_hint_when_baseline_differs():
 def test_touch_project_memory_baseline_updates_state():
     state = _state()
     ctx = SimpleNamespace()
-    touch_project_memory_baseline(state, ctx, get_hash_fn=lambda _c: "baseline_x")
+    touch_project_memory_baseline(
+        state, ctx, get_hash_fn=lambda _c: "baseline_x"
+    )
     assert state.project_memory_content_hash == "baseline_x"
 
 

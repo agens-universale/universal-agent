@@ -1,4 +1,5 @@
 """I1/A: GC pending на stream_reset, wire-match fallback на meta, set_tui_* не воскрешает."""
+
 from __future__ import annotations
 
 import json
@@ -42,10 +43,14 @@ def test_wire_match_falls_back_to_meta_wire_content():
     assert scr._pending_wire_match("c1", "wire-hello")
 
 
-def test_set_tui_finalizing_does_not_resurrect_cleared_pending(tmp_path):
+async def test_set_tui_finalizing_does_not_resurrect_cleared_pending(tmp_path):
     """TUI снял pending с диска → set_tui_* их не возвращает (I1)."""
-    from gc_core.run_summary_coordinator import set_tui_finalizing
-    from gc_core.thread_store import ThreadSession, save_thread_meta, update_tui_meta
+    from gc_core.run_summary_coordinator import aset_tui_finalizing
+    from gc_core.thread_store import (
+        ThreadSession,
+        save_thread_meta,
+        update_tui_meta,
+    )
 
     tid = "t1"
     ts = ThreadSession(
@@ -68,16 +73,22 @@ def test_set_tui_finalizing_does_not_resurrect_cleared_pending(tmp_path):
     save_thread_meta(str(tmp_path), "cli", tid, ts.meta)
     update_tui_meta(str(tmp_path), "cli", tid, {"pending_user_messages": []})
 
-    set_tui_finalizing(ts, True)
+    await aset_tui_finalizing(ts, True)
 
-    meta = json.loads((tmp_path / f"meta_cli_{tid}.json").read_text(encoding="utf-8"))
+    meta = json.loads(
+        (tmp_path / f"meta_cli_{tid}.json").read_text(encoding="utf-8")
+    )
     assert (meta.get("runtime") or {}).get("finalizing") is True
     assert (meta.get("tui") or {}).get("pending_user_messages") == []
 
 
 def test_patch_runtime_flag_preserves_disk_tui(tmp_path):
     """Канон I1: runtime flag не воскрешает tui.pending."""
-    from gc_core.thread_store import patch_runtime_flag, save_thread_meta, update_tui_meta
+    from gc_core.thread_store import (
+        patch_runtime_flag,
+        save_thread_meta,
+        update_tui_meta,
+    )
 
     tid = "t2"
     session_meta = {
@@ -95,7 +106,9 @@ def test_patch_runtime_flag_preserves_disk_tui(tmp_path):
         session_meta=session_meta,
     )
 
-    meta = json.loads((tmp_path / f"meta_cli_{tid}.json").read_text(encoding="utf-8"))
+    meta = json.loads(
+        (tmp_path / f"meta_cli_{tid}.json").read_text(encoding="utf-8")
+    )
     assert (meta.get("runtime") or {}).get("summarizing") is True
     assert (meta.get("tui") or {}).get("pending_user_messages") == []
     assert (session_meta.get("runtime") or {}).get("summarizing") is True
@@ -118,7 +131,11 @@ async def test_stream_reset_gcs_delivered_pending_from_user_ask(tmp_path):
                     "system": "cli",
                     "seq": 1,
                     "ts": "2026-06-11T10:00:00+00:00",
-                    "payload": {"id": "u1", "role": "user", "content": "доставленное"},
+                    "payload": {
+                        "id": "u1",
+                        "role": "user",
+                        "content": "доставленное",
+                    },
                 },
                 ensure_ascii=False,
             )
@@ -147,7 +164,9 @@ async def test_stream_reset_gcs_delivered_pending_from_user_ask(tmp_path):
         encoding="utf-8",
     )
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     app._executor_factory = lambda: None
     async with app.run_test() as pilot:
         screen = pilot.app.screen
@@ -165,7 +184,9 @@ async def test_stream_reset_gcs_delivered_pending_from_user_ask(tmp_path):
                 "ts_utc_iso": "2026-06-11T09:59:00+00:00",
             }
         ]
-        meta_path.write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+        meta_path.write_text(
+            json.dumps(meta, ensure_ascii=False), encoding="utf-8"
+        )
         assert len(_read_pending(tmp_path, tid)) == 1
 
         # Компакция → stream_reset
@@ -196,14 +217,19 @@ async def test_stream_reset_gcs_delivered_pending_from_user_ask(tmp_path):
                 "last_summary_archive_suffix": "2026-06-11T11-00-00",
             }
         )
-        meta_path.write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+        meta_path.write_text(
+            json.dumps(meta, ensure_ascii=False), encoding="utf-8"
+        )
 
         def trace_text():
             trace = pilot.app.query_one("#trace")
             return "\n".join(str(c.render()) for c in trace.walk_children())
 
         for _ in range(200):
-            if "после-сжатия" in trace_text() and _read_pending(tmp_path, tid) == []:
+            if (
+                "после-сжатия" in trace_text()
+                and _read_pending(tmp_path, tid) == []
+            ):
                 break
             await pilot.pause(0.05)
         else:

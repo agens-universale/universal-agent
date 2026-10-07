@@ -1,7 +1,6 @@
 """TDD: strip_tags_projection normalize + load_config → snapshot for callers."""
 
 import yaml
-
 from gc_core.config import load_config
 from gc_core.config_modules.strip_tags_projection import (
     StripTagsProjectionConfig,
@@ -35,20 +34,26 @@ def test_normalize_warn_drop_invalid(caplog):
     assert cfg.tags == ["ok_tag", "think"]
 
 
-def test_normalize_strip_think_default_true():
+def test_normalize_strip_think_default_false():
     cfg = StripTagsProjectionConfig()
-    assert cfg.strip_think is True
+    assert cfg.strip_think is False
 
 
-def test_persist_reasoning_content_default_false():
-    assert persist_reasoning_content_from_config({}) is False
-    assert persist_reasoning_content_from_config(None) is False
-    assert persist_reasoning_content_from_config(
-        {"strip_tags_projection": {"strip_think": True}}
-    ) is False
-    assert persist_reasoning_content_from_config(
-        {"strip_tags_projection": {"strip_think": False}}
-    ) is True
+def test_persist_reasoning_content_default_true():
+    assert persist_reasoning_content_from_config({}) is True
+    assert persist_reasoning_content_from_config(None) is True
+    assert (
+        persist_reasoning_content_from_config(
+            {"strip_tags_projection": {"strip_think": True}}
+        )
+        is False
+    )
+    assert (
+        persist_reasoning_content_from_config(
+            {"strip_tags_projection": {"strip_think": False}}
+        )
+        is True
+    )
 
 
 def test_normalize_keeps_think_in_tags():
@@ -82,22 +87,21 @@ def test_load_config_exposes_strip_tags_for_callers(tmp_path):
     loaded = load_config(str(cfg_path))
     assert loaded["strip_tags_projection"]["tags"] == ["redacted_thinking"]
     tags = projection_tags_from_config(loaded)
-    assert persist_reasoning_content_from_config(loaded) is False
+    assert persist_reasoning_content_from_config(loaded) is True
     assert project_text_for_model(_SAMPLE, tags=tags, strip_think=True) == "ok"
 
 
 def test_load_config_empty_tags_strips_only_think(tmp_path):
     cfg_path = tmp_path / "config.yml"
     cfg_path.write_text(
-        "backend:\n  api_mode: chat_completions\n"
-        "strip_tags_projection:\n  tags: []\n",
+        "backend:\n  api_mode: chat_completions\nstrip_tags_projection:\n  tags: []\n",
         encoding="utf-8",
     )
 
     loaded = load_config(str(cfg_path))
-    assert loaded["strip_tags_projection"]["strip_think"] is True
+    assert loaded["strip_tags_projection"]["strip_think"] is False
     tags = projection_tags_from_config(loaded)
-    assert persist_reasoning_content_from_config(loaded) is False
+    assert persist_reasoning_content_from_config(loaded) is True
     assert project_text_for_model(_SAMPLE, tags=tags, strip_think=True) == (
         "<redacted_thinking>r</redacted_thinking>ok"
     )

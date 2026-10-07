@@ -25,19 +25,26 @@ uv tool install -e .                 # полный агент
 Профиль — отдельный дистрибутив со своим пакетом (`packages/<профиль>/src/gc_*`). Код чужих
 профилей физически не попадает на диск.
 
-| Команда | Ядро | TUI | server |
-|---|---|---|---|
-| `gc-ua` | да | да | да |
-| `gc-cli` | да | — | — |
-| `gc-tui` | да | да | — |
-| `gc-server` | да | — | да |
+| Команда | Ядро | TUI | server | acp | chat |
+|---|---|---|---|---|---|
+| `gc-ua` | да | да | да | да | да |
+| `gc-cli` | да | — | — | — | — |
+| `gc-tui` | да | да | — | — | — |
+| `gc-server` | да | — | да | — | — |
+| `gc-acp` | да | — | — | да | — |
+| `gc-chat` | да | — | — | — | да |
 
 ```bash
 uv tool install "gc-ua @ git+https://gitverse.ru/gigacode-ai/universal-agent"
 uv tool install "gc-cli @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/cli" --with-executables-from gc-mcp
 uv tool install "gc-tui @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/tui" --with-executables-from gc-mcp
 uv tool install "gc-server @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/server" --with-executables-from gc-mcp
+uv tool install "gc-acp @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/acp"
+uv tool install "gc-chat @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/chat"
 ```
+
+`gc-acp` — IDE по Agent Client Protocol: [acp.md](acp.md). `gc-chat` — HTTP-фасады
+Responses и Chat Completions: [chat.md](chat.md).
 
 Хвост `#subdirectory=` обязателен у всех, кроме `gc-ua`: uv читает из git только
 корневой `pyproject.toml`, а корень — это полный профиль. Устройство раскладки
@@ -55,9 +62,10 @@ exist`. Мета уже содержит всё, что даёт лист, та�
 тем же дистрибутивом.
 
 Каждый дистрибутив кладёт в PATH только свою команду: `gc-cli` → `gc-cli`,
-`gc-tui` → `gc-ua`, `gc-server` → `gc-serve`, полный `gc-ua` — все пять.
-Менеджер MCP — отдельный дистрибутив. `uv tool` не экспортирует команды
-зависимостей, поэтому у узкого профиля стоит штатный флаг:
+`gc-tui` → `gc-ua`/`gc-voice`, `gc-server` → `gc-serve`, `gc-acp` → `gc-acp`,
+`gc-chat` → `gc-chat`; полный `gc-ua` — все листовые. Менеджер MCP — отдельный
+дистрибутив. `uv tool` не экспортирует команды зависимостей, поэтому у узкого
+профиля стоит штатный флаг:
 
 ```bash
 uv tool install "gc-cli @ ...#subdirectory=packages/cli" --with-executables-from gc-mcp
@@ -140,6 +148,50 @@ gc-cli -q "создай подпапку test_project. В ней напиши н
 умноженное на 3."
 ```
 
+## VS Code (ACP)
+
+Редактор поднимает агента процессом `gc-acp` по Agent Client Protocol.
+Установка, `settings.json`, секция `acp` и профиль — [acp.md](acp.md).
+
+В VS Code своего клиента нет: поставьте расширение
+[ACP Client](https://marketplace.visualstudio.com/items?itemName=formulahendry.acp-client)
+(`formulahendry.acp-client`) — Extensions, поиск `ACP Client`, либо
+`code --install-extension formulahendry.acp-client`.
+
+Команда приезжает вместе с полным агентом (`uv tool install -e .` или
+установка `gc-ua` из раздела выше) и лежит в `PATH` рядом с `gc-ua`. Путь
+для настройки: `which gc-acp` (обычно `~/.local/bin/gc-acp`). В клоне для
+разработки после `uv sync` это `<корень>/.venv/bin/gc-acp`. Узкий профиль
+`gc-cli` эту команду наружу не кладёт: `uv tool` экспортирует только скрипты
+запрошенного дистрибутива. Тогда отдельно
+`uv tool install -e packages/acp`.
+
+В `settings.json` аргументы оставьте пустыми. Конфиг ищется так же, как у
+`gc-cli`, без `--config`. Канал ACP по умолчанию: проза без tool-call разрешена
+(`acp.text_answer_mode: allow`), finish-gate выключен (`off`), todo-reminder выключен,
+плюс hint «discussion ≠ implementation». TUI-шный `tui.text_answer_mode: judge`
+на этот канал не действует. Явный профиль-оверлей —
+`packages/acp/profiles/acp.yml` (скопируйте в `~/.config/gc/profiles/acp.yml`
+и при желании укажите `"args": ["--profile", "acp"]`). Помимо `--config` /
+`--profile` любые `--ключ value` перекрывают runtime-конфиг так же, как у
+`gc-cli` (уровень `--level`, модель `--model`, `max_steps` и т.д.; см.
+[переопределение из CLI](configuration.md#переопределение-настроек-из-cli)):
+
+```json
+{
+  "acp.agents": {
+    "gc-acp": {
+      "command": "/абсолютный/путь/gc-acp",
+      "args": ["--profile", "work", "--level", "max"]
+    }
+  }
+}
+```
+
+Панель ACP на боковой панели, агент `gc-acp`, Connect. В конфиге нужен
+`os_backend: local`. Между кусками ответа клиент показывает, какой тул
+вызван и короткое превью аргументов.
+
 ## Ключи запуска gc-cli
 
 **Ключи запуска gc-cli** (см. `packages/cli/src/gc_cli/arg_parser.py`):
@@ -150,6 +202,7 @@ gc-cli -q "создай подпапку test_project. В ней напиши н
 | `-v`, `--verbose` | Подробный вывод о ходе запроса. |
 | `-T`, `--technical` | Обернуть запрос в теги `<technical type="technical">…</technical>`. чтобы при суммаризации это сообщение не считалось как интент пользователя. нужно например, чтобы продолжить прерванную сессию |
 | `-s`, `--skill` *SKILL_NAME* | Решать задачу через указанный skill. Резолвится детерминированно **до старта агента**: точный canonical / `<pack-id>` → bootstrap пакета (напр. `supercoder` → `supercoder:using-supercoder`) / краткое имя / единственное близкое при опечатке. Неоднозначность / промах / сбой каталога → `warning:` в stderr и **мягкий фолбэк**: имя передаётся агенту как есть, агент стартует (`-s` — подсказка-намерение, не жёсткий контракт). Пустой `-s` — no-op. |
+| `--image` *PATH* | Приложить изображение к запросу `-q`; ключ повторяется (`--image a.png --image b.png`), не больше `images.max_per_message` (10). Файл проверяется и ужимается **до старта агента**: нет файла, не изображение, слишком большое или картинок больше лимита — сообщение в stderr и код 1. В начало текста запроса встают плашки `[Изображение #N]` — так их видит и консольная трасса. С `-t` номера продолжают нумерацию треда, а копия картинки хранится вместе с тредом; без `-t` картинка живёт до конца запуска. Флаг появился вместе с поддержкой изображений: `gc-cli` без неё принимает `--image PATH` за переопределение конфига и молча работает без картинки. |
 | `--config` *путь* | Путь к файлу `config.yml` вместо дефолтного. |
 | `-t`, `--thread-id` *id* | Продолжить диалог в существующем треде. |
 | `-n`, `--new` | Начать тред с тем же `thread-id` заново (удалить старые `data_*`/`meta_*`). Разрешён **только вместе** с `-t` / `--thread-id`. |
@@ -162,6 +215,7 @@ gc-cli -q "создай подпапку test_project. В ней напиши н
 | `--agentsmd-override` | Только TUI: оставить лишь корневой `AGENTS.md` (L3), отбросив shipped, глобальный `~/.gc/AGENTS.md` и `.gc/AGENTS.md`. Вне TUI слои не грузятся вовсе — агент говорит об этом на старте. |
 | `--profile` | Активировать профиль `<имя>` поверх указателя `profile:` из `config.yml` (`<проект>/.gc/profiles/` или `profiles/` рядом с базовым `config.yml` — Windows `~/.gc/profiles/`, Linux/macOS `~/.config/gc/profiles/`; при `--config` — каталог указанного файла). |
 | `--level` | Активный уровень модели на этот запуск: `light` / `default` / `max` (перекрывает `config.yml` и профиль). |
+| `--structured-output-format` *путь* | После итога хода переложить его в форму из файла одним служебным запросом и отдать этот текст наружу. Запрос идёт моделью компакции: потребитель `summary`, привязка `assign.summary`. Итог — принятая проза судьи либо аргументы `turn_finish` целиком, без проверки полей. Файл — описание формы (пример JSON, список полей, шаблон markdown), не JSON Schema; читается до старта агента. Относительный путь считается от текущей папки запуска, абсолютный берётся как есть. Значение берётся буквально. Язык результата — тот, что назван в файле, иначе язык итога хода. Нет файла, пустой файл, ненастроенный конфиг, ход без итога (лимит, ошибки тулов, пустой результат), сбой, пустой, оборванный (`finish_reason=length`) или отклонённый провайдером (`content_filter`, `refusal`, `safety`) ответ запроса — код 1, в stdout форма не пишется. Подсказка по настройке при ненастроенном конфиге остаётся в stderr. Успешный перефраз всегда попадает в stdout. Если stdout уже поток jsonl (`logging_format: jsonl` и `console_trace`), это событие `final_answer`: сырая строка рядом сломала бы разбор. Иначе печатается сам текст. Трейс хода по-прежнему зависит только от `console_trace`. Без флага ответ печатается как раньше. |
 | `-a`, `--auto-mcp` | Поднять HTTP/SSE MCP-демоны из `recommended_mcp/` перед запуском (если каталог есть в cwd); по завершении гасятся только процессы этого вызова. |
 | `--reset-config` | Сбросить `config.yml` к пакетному умолчанию (подтверждение `y/N`, старый файл — в бэкап; профили и сессионные оверрайды не трогает) и выйти. |
 | `--init-config` | Мастер настройки `~/.gc/config.yml`. В `gc-cli` — настроить и выйти; в `gc-ua` — по завершении запускается TUI. |

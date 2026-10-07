@@ -6,10 +6,14 @@ from typing import Any
 
 from gc_core.constants.tool_names import ASK_HUMAN_TOOL_NAME
 
-CONFIRM_ALLOW_REMEMBER = "allow_remember"   # Y — exec + session True + few-shot allowed
-CONFIRM_ALLOW_ONCE = "allow_once"       # O — exec + run only
-CONFIRM_DENY_REMEMBER = "deny_remember"  # N — block + session False + few-shot denied
-CONFIRM_DENY_ONCE = "deny_once"        # T — block + run only
+CONFIRM_ALLOW_REMEMBER = (
+    "allow_remember"  # Y — exec + session True + few-shot allowed
+)
+CONFIRM_ALLOW_ONCE = "allow_once"  # O — exec + run only
+CONFIRM_DENY_REMEMBER = (
+    "deny_remember"  # N — block + session False + few-shot denied
+)
+CONFIRM_DENY_ONCE = "deny_once"  # T — block + run only
 _VALID_CHOICES = {
     CONFIRM_ALLOW_REMEMBER,
     CONFIRM_ALLOW_ONCE,
@@ -25,10 +29,7 @@ CONFIRM_KEY_N = frozenset({"n", "N", "т", "Т"})  # deny_remember
 CONFIRM_KEY_T = frozenset({"t", "T", "е", "Е"})  # deny_once
 
 # Human-facing one-liner (CLI prompt / docs); mirrors banner Y/O/N/T labels.
-CONFIRM_CHOICE_HINT = (
-    "[Y/Н] и подобные в сессии  [O/Щ] разово  "
-    "[N/Т] запрет+ в сессии  [T/Е] запрет разово"
-)
+CONFIRM_CHOICE_HINT = "[Y/Н] и подобные в сессии  [O/Щ] разово  [N/Т] запрет+ в сессии  [T/Е] запрет разово"
 
 # Backward-compat aliases (optional one release): old tui_confirm returns
 # once|session|deny — маппим в новые 4-choice ids. CLI input() aliases removed.
@@ -106,9 +107,9 @@ def _ask_choice(ctx: Any, *, title: str, question: str, fields: list) -> str:
         return CONFIRM_DENY_ONCE
 
     # Lazy: security → tools на module load ломает import graph (paths/diff_tui).
-    from gc_core.tools.subagents.progress import emit_progress
     # Nested: path_policy → confirm_port cycle if imported at module top.
     from gc_core.security.path_policy import prompt_user_confirmation_choice
+    from gc_core.tools.subagents.progress import emit_progress
 
     via = _via_name(ctx)
     # confirm-порт не знает steps child — для progress достаточно нулей
@@ -129,10 +130,15 @@ def _ask_choice(ctx: Any, *, title: str, question: str, fields: list) -> str:
                 return CONFIRM_DENY_ONCE
             try:
                 choice = tui_confirm(
-                    title=title, question=question, fields=fields, via=via,
+                    title=title,
+                    question=question,
+                    fields=fields,
+                    via=via,
                 )
             except TypeError:
-                choice = tui_confirm(title=title, question=question, fields=fields)
+                choice = tui_confirm(
+                    title=title, question=question, fields=fields
+                )
             result = coerce_confirm_choice(choice)
         else:
             # Non-TUI fallback (headless CLI / scripts). Product path is TUI;
@@ -140,7 +146,9 @@ def _ask_choice(ctx: Any, *, title: str, question: str, fields: list) -> str:
             # but if confirm is reached, key matrix matches TUI.
             result = coerce_confirm_choice(
                 prompt_user_confirmation_choice(
-                    title=title, fields=fields, question=question,
+                    title=title,
+                    fields=fields,
+                    question=question,
                 )
             )
     finally:
@@ -155,15 +163,29 @@ def _ask_choice(ctx: Any, *, title: str, question: str, fields: list) -> str:
 
 
 def request_confirm(
-    *, title: str, question: str, fields: list[tuple[str, object]], ctx: Any,
+    *,
+    title: str,
+    question: str,
+    fields: list[tuple[str, object]],
+    ctx: Any,
     decision_key: str | None = None,
 ) -> bool:
+    # Lazy: security → tools на module load ломает import graph.
+    from gc_core.tools.connect_mcp.abandonable import current_call_abandoned
+
     store = getattr(ctx, "permission_store", None)
     if store is not None and decision_key is not None:
         cached = store.decision_for(decision_key)
         if cached is not None:
             return cached
+    if current_call_abandoned():
+        return False
     choice = _ask_choice(ctx, title=title, question=question, fields=fields)
+    if current_call_abandoned():
+        # Вопрос бросили (Ctrl+C), пока человек думал: ответ, если он и пришёл,
+        # набран уже для ДРУГОГО вопроса. Записать его — значит выдать
+        # разрешение на путь, в котором человек только что отказал.
+        return False
     allow = choice in (CONFIRM_ALLOW_REMEMBER, CONFIRM_ALLOW_ONCE)
     if store is not None and decision_key is not None:
         # 2×2 record matrix: (allow, session) per choice.

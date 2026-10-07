@@ -1,19 +1,69 @@
-from gc_core.tools.simple_tool_base import AbstractSimpleTool
-import json
+import re
 from typing import Any, Dict, Optional
 
-from gc_core.config_modules.agent import DEFAULT_EXEC_TIMEOUT_SEC, exec_timeout_from_config_dict
-from gc_core.config_modules.agent import exec_output_preview_edge_chars_from_config_dict
+from gc_core.backends.async_protocol import aexec_port
+from gc_core.config_modules.agent import (
+    DEFAULT_EXEC_TIMEOUT_SEC,
+    exec_output_preview_edge_chars_from_config_dict,
+    exec_timeout_from_config_dict,
+)
 from gc_core.constants.tool_names import EXEC_COMMAND_NAME
 from gc_core.security.command_guard import enforce_command_guard
 from gc_core.security.command_moderation import moderate_command_execution
-from gc_core.tools.exec.exec_envelope import as_captured_stream, build_exec_envelope
+from gc_core.tools.exec.exec_envelope import (
+    as_captured_stream,
+    build_exec_envelope,
+)
+from gc_core.tools.simple_tool_base import AbstractSimpleTool
+
+_ENV_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+def _parse_env_vars(env_vars) -> "tuple[dict[str, str], dict | None]":
+    """Список {'name','value'} → dict; (пусто, error) при первой невалидной записи."""
+    if env_vars is None:
+        return {}, None
+    if not isinstance(env_vars, list):
+        return {}, {
+            "type": "invalid_argument",
+            "field": "env_vars",
+            "message": "env_vars must be a list of key/value pairs: [{'name': 'KEY', 'value': 'VALUE'}]",
+        }
+    env_from_pairs: dict[str, str] = {}
+    for idx, item in enumerate(env_vars):
+        if not isinstance(item, dict):
+            return {}, {
+                "type": "invalid_argument",
+                "field": f"env_vars[{idx}]",
+                "message": "Each env_vars item must be an object: {'name': 'KEY', 'value': 'VALUE'}",
+            }
+        name = item.get("name")
+        # Только идентификатор: у remote-бэкендов имя попадает в `export K=V`
+        # той стороны, и `X=1; rm -rf /; Y` в имени — команда мимо модерации.
+        if not isinstance(name, str) or not _ENV_NAME_RE.fullmatch(
+            name.strip()
+        ):
+            return {}, {
+                "type": "invalid_argument",
+                "field": f"env_vars[{idx}].name",
+                "message": "env_vars name must be a shell identifier: [A-Za-z_][A-Za-z0-9_]*",
+            }
+        value = item.get("value")
+        if not isinstance(value, str):
+            return {}, {
+                "type": "invalid_argument",
+                "field": f"env_vars[{idx}].value",
+                "message": "env_vars value must be a string",
+            }
+        env_from_pairs[name.strip()] = value
+    return env_from_pairs, None
 
 
 class ExecuteCommand(AbstractSimpleTool):
     """
     Tool to execute a CLI command on the system and return its output.
     """
+
     # Fallback when config_dict has no exec_timeout_sec (tests / partial wiring).
     timeout = DEFAULT_EXEC_TIMEOUT_SEC
 
@@ -31,13 +81,12 @@ class ExecuteCommand(AbstractSimpleTool):
                 "properties": {
                     "command": {
                         "type": "string",
-                        "description": "The command-line command to execute. Must be valid for the operating system and properly quoted, especially when paths contain spaces. Avoid interactive or destructive commands unless absolutely necessary."
+                        "description": "The command-line command to execute. Must be valid for the operating system and properly quoted, especially when paths contain spaces. Avoid interactive or destructive commands unless absolutely necessary.",
                     },
                     "timeout": {
                         "type": "integer",
                         "description": (
-                            f"Execution timeout in seconds. Default is {timeout_default} "
-                            "(agent.exec_timeout_sec)."
+                            f"Execution timeout in seconds. Default is {timeout_default} (agent.exec_timeout_sec)."
                         ),
                         "default": timeout_default,
                         "minimum": 1,
@@ -66,20 +115,41 @@ class ExecuteCommand(AbstractSimpleTool):
                             "additionalProperties": False,
                         },
                     },
+                    "run_in_background": {
+                        "type": "boolean",
+                        "description": (
+                            "Start the command detached and return immediately, without waiting "
+                            "for it to finish. Use this for anything long-lived: dev servers, "
+                            "watchers, `npm run dev`, `uvicorn`. The command keeps running after "
+                            "the agent exits. Its output is NOT captured — the reply carries only "
+                            "the pid. Check that it works by probing it (e.g. request its port). "
+                            "If it does not come up, find out why with a short diagnostic run "
+                            "in the foreground (small `timeout`): a failing start prints its "
+                            "error and exits, one that keeps running is stopped at the timeout. "
+                            "That run is only for reading the error — the service itself is "
+                            "still started with this flag. A command started WITHOUT this flag "
+                            "does not outlive the call — appending `&` to it is not enough: "
+                            "it is killed with its process group on timeout or cancel, it dies "
+                            "with the agent, and nothing of its output is reported back."
+                        ),
+                    },
                 },
                 "required": ["command"],
-                "additionalProperties": False
+                "additionalProperties": False,
             },
-            "strict": True
+            "strict": True,
         }
         return description
 
     @classmethod
     def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None):
         timeout_default = exec_timeout_from_config_dict(config_dict)
-        description = ('''Tool name: exec_command
+        description = (
+            """Tool name: exec_command
 Tool description: Run a shell command synchronously; returns JSON with exit_code, stdout, stderr.
-Input schema: {"type": "object", "properties": {"command": {"type": "string", "description": "The CLI command to execute."}, "timeout": {"type": "integer", "description": "Execution timeout in seconds.", "default": ''' + str(timeout_default) + '''}, "cwd": {"type": "string", "description": "Optional working directory (absolute or relative)."}, "env_vars": {"type":"array","description":"Optional env overrides as [{name,value}]","items":{"type":"object","properties":{"name":{"type":"string"},"value":{"type":"string"}},"required":["name","value"],"additionalProperties":false}}}, "required": ["command"], "additionalProperties": false}
+Input schema: {"type": "object", "properties": {"command": {"type": "string", "description": "The CLI command to execute."}, "timeout": {"type": "integer", "description": "Execution timeout in seconds.", "default": """
+            + str(timeout_default)
+            + """}, "cwd": {"type": "string", "description": "Optional working directory (absolute or relative)."}, "env_vars": {"type":"array","description":"Optional env overrides as [{name,value}]","items":{"type":"object","properties":{"name":{"type":"string"},"value":{"type":"string"}},"required":["name","value"],"additionalProperties":false}}, "run_in_background": {"type": "boolean", "description": "Start detached and return the pid at once; for long-lived commands. Output is not captured."}}, "required": ["command"], "additionalProperties": false}
 
 Usage:
 - Use this tool to run shell commands such as listing directories (`ls`, `dir`), checking versions (`python --version`), or running scripts.
@@ -87,6 +157,18 @@ Usage:
 - The command is executed in the current working directory.
 - Always returns both stdout and stderr; check ok / exit_code for success or failure.
 - Be cautious with destructive commands (e.g., `rm`, `del`, `rmdir`).
+- Long-lived commands (dev servers, watchers, `npm run dev`, `uvicorn`) MUST be started
+  with `run_in_background: true`. They then keep running after this call returns and
+  after the agent itself exits. Their output is NOT captured: check that such a command
+  works by probing it (e.g. request its port). If it does not come up, find out why with
+  a short diagnostic run in the foreground (small `timeout`): a failing start prints its
+  error and exits, one that keeps running is stopped at the timeout. That run is only for
+  reading the error — the service itself is still started in the background.
+  Appending `&` to a normal foreground command is NOT enough: such a command is killed
+  with its process group on timeout or cancel, it dies with the agent, and nothing of
+  its output is reported back.
+- On timeout the command is stopped and its work is lost. If it simply needs longer,
+  re-run it with a bigger `timeout`, or start it with `run_in_background: true`.
 - Don't remove or create any files or folders outside of project directory!
 - Avoid interactive commands (e.g., `vim`, `python` without args) — they will time out or fail.
 - This tool is essential for inspecting system state, verifying installations, or automating workflows.
@@ -94,7 +176,7 @@ Usage:
 
 Important Usage Rules:
 1. Directory Verification:
-   - If the command will create new directories or files, be shure the parent directory exists and is the correct location. 
+   - If the command will create new directories or files, be shure the parent directory exists and is the correct location.
    - For example, before running "mkdir foo/bar", first use tool `list_files` to check that "foo" exists and is the intended parent directory.
 2. Command Execution:
    - Always quote file paths that contain spaces with double quotes (e.g., cd "path with spaces/file.txt")
@@ -114,7 +196,8 @@ Important Usage Rules:
     <bad-example>
     cd /foo/bar && pytest tests
     </bad-example>
-''')
+"""
+        )
         return description
 
     def _result(
@@ -137,7 +220,9 @@ Important Usage Rules:
             timed_out=timed_out,
             stdout=as_captured_stream(stdout),
             stderr=as_captured_stream(stderr),
-            preview_edge_chars=exec_output_preview_edge_chars_from_config_dict(self._config_dict),
+            preview_edge_chars=exec_output_preview_edge_chars_from_config_dict(
+                self._config_dict
+            ),
             error=error,
             head_fields={"command": command, "cwd": cwd},
         )
@@ -162,163 +247,243 @@ Important Usage Rules:
             error=error,
         )
 
-    @enforce_command_guard(payload_arg="command", tool_name=EXEC_COMMAND_NAME)
-    @moderate_command_execution(payload_arg="command", tool_name=EXEC_COMMAND_NAME)
-    def __call__(
+    async def _cwd_error(self, cwd_used) -> "dict | None":
+        if cwd_used is None:
+            return None
+        if not isinstance(cwd_used, str) or not cwd_used.strip():
+            return {"type": "invalid_argument", "field": "cwd"}
+        if not await self._backend.is_dir(cwd_used):
+            return {
+                "type": "invalid_argument",
+                "field": "cwd",
+                "message": "Not a directory",
+            }
+        return None
+
+    async def _plan(
         self,
         command: str,
-        timeout: int | None = None,
-        cwd: str | None = None,
-        env_vars: list[dict] | None = None,
-        **kwargs,
-    ) -> str:
+        timeout: int | None,
+        cwd: str | None,
+        env_vars: list[dict] | None,
+    ) -> "tuple[str | None, dict]":
+        """Разобрать и проверить аргументы. Общее для обоих входов.
+
+        Возвращает ``(ранний_ответ, план)``: ранний ответ — готовый JSON отказа
+        по невалидному аргументу, план — то, с чем идти в бэкенд. Вынесено
+        затем, чтобы синхронный и асинхронный входы не могли разойтись в
+        проверках: у них различается ТОЛЬКО строка запуска.
+        """
         cwd_used = cwd if cwd is not None else self._backend.default_cwd()
+
+        def reject(
+            error: dict, *, cmd: str = command, cwd_val: "str | None" = None
+        ) -> "tuple[str, dict]":
+            return self._result(
+                ok=False,
+                command=cmd,
+                cwd=(cwd_used or "") if cwd_val is None else cwd_val,
+                exit_code=None,
+                timed_out=False,
+                stdout="",
+                stderr="",
+                error=error,
+            ), {}
 
         # Input validation
         if not isinstance(command, str):
-            return self._result(
-                ok=False,
-                command=str(command),
-                cwd=cwd_used or "",
-                exit_code=None,
-                timed_out=False,
-                stdout="",
-                stderr="",
-                error={"type": "invalid_argument", "field": "command"},
+            return reject(
+                {"type": "invalid_argument", "field": "command"},
+                cmd=str(command),
             )
-
         if not command.strip():
-            return self._result(
-                ok=False,
-                command=command,
-                cwd=cwd_used or "",
-                exit_code=None,
-                timed_out=False,
-                stdout="",
-                stderr="",
-                error={"type": "invalid_argument", "field": "command", "message": "Empty command"},
+            return reject(
+                {
+                    "type": "invalid_argument",
+                    "field": "command",
+                    "message": "Empty command",
+                }
             )
 
         if timeout is None:
             timeout = exec_timeout_from_config_dict(self._config_dict)
         if not isinstance(timeout, int) or timeout <= 0:
+            return reject({"type": "invalid_argument", "field": "timeout"})
+
+        cwd_error = await self._cwd_error(cwd_used)
+        if cwd_error is not None:
+            return reject(cwd_error, cwd_val=str(cwd_used))
+
+        env_sanitized, env_error = _parse_env_vars(env_vars)
+        if env_error is not None:
+            return reject(env_error)
+
+        return None, {
+            "command": command,
+            "cwd": cwd_used,
+            "timeout": timeout,
+            "env": env_sanitized or None,
+        }
+
+    @enforce_command_guard(payload_arg="command", tool_name=EXEC_COMMAND_NAME)
+    @moderate_command_execution(
+        payload_arg="command", tool_name=EXEC_COMMAND_NAME
+    )
+    async def acall(
+        self,
+        command: str,
+        timeout: int | None = None,
+        cwd: str | None = None,
+        env_vars: list[dict] | None = None,
+        run_in_background: bool = False,
+        **kwargs,
+    ) -> str:
+        """Нативный вход: процесс через ``asyncio.create_subprocess_shell``.
+
+        Прежде тул целиком уезжал в ``asyncio.to_thread``, и слот общего пула
+        держался ВЕСЬ таймаут — по умолчанию 120 с. На одиночном вызове это
+        почти незаметно, на параллельных — нет: 20 команд шли 4.09 с через пул
+        против 2.10 с нативно.
+
+        Гварды навешены и здесь — иначе асинхронный путь обошёл бы политику
+        безопасности.
+
+        ``aexec_port`` вместо прямого ``backend.aexec``: у бэкендов без
+        нативного ``aexec`` адаптер завернёт вызов по-старому — совместимость
+        цела.
+
+        Разбор аргументов общий с синхронным входом: он весь выше по функции
+        ``call``, поэтому здесь мы её и зовём — но в потоке, а не на loop, и
+        только ради разбора. Сам запуск ждётся через ``await``.
+        """
+        early, plan = await self._plan(command, timeout, cwd, env_vars)
+        if early is not None:
+            return early
+        if run_in_background:
+            return await self._abackground(plan)
+        try:
+            res = await aexec_port(self._backend).aexec(
+                plan["command"],
+                cwd=plan["cwd"],
+                timeout=plan["timeout"],
+                env=plan["env"],
+            )
+        except Exception as exc:
+            return self._exec_failed(plan, exc)
+        return self._finish(res, plan)
+
+    async def _abackground(self, plan: dict) -> str:
+        """Запустить и НЕ ждать: отдать pid.
+
+        Два случая разведены намеренно. Команда переднего плана живёт секунды,
+        её вывод нужен сейчас, и переживать вызов она не должна. Долгоживущая —
+        наоборот: ждать её нельзя, и никакой связи с нами у неё быть не должно.
+        Труба такой связью была: пропадал читатель — и сервис, поднятый агентом,
+        погибал вместе с ним. Поэтому вывод фона уходит в нулевое устройство, и
+        процесс переживает и конец хода, и выход самого агента.
+
+        Лога нет намеренно. Прежде вывод шёл в файл, и оба варианта упирались в
+        гарды: `log_path` называла модель — тул становился примитивом записи, и
+        путь гнали через гард записи с вопросами и откатами; свой лог лежал в
+        `.gc/tmp`, а весь `.gc` закрыт на чтение — модель не могла прочитать то,
+        что ей велели читать. Поэтому ответ прямо говорит, что вывода не будет.
+        """
+        cwd_used = plan["cwd"]
+
+        # Отказ ДО запуска: если бэкенд не умеет фон, процесса не будет.
+        # Раньше метода на порту не было, и вызов через обёртку TUI падал
+        # `AttributeError` — в единственном месте, где фоновый режим и нужен.
+        if not getattr(self._backend, "supports_background", False):
             return self._result(
                 ok=False,
-                command=command,
+                command=plan["command"],
                 cwd=cwd_used or "",
                 exit_code=None,
                 timed_out=False,
                 stdout="",
                 stderr="",
-                error={"type": "invalid_argument", "field": "timeout"},
+                error={
+                    "type": "background_not_supported",
+                    "message": (
+                        "This backend cannot start background commands. Run the command in the foreground instead."
+                    ),
+                },
             )
-
-
-        if cwd_used is not None:
-            if not isinstance(cwd_used, str) or not cwd_used.strip():
-                return self._result(
-                    ok=False,
-                    command=command,
-                    cwd=str(cwd_used),
-                    exit_code=None,
-                    timed_out=False,
-                    stdout="",
-                    stderr="",
-                    error={"type": "invalid_argument", "field": "cwd"},
-                )
-            if not self._backend.is_dir(cwd_used):
-                return self._result(
-                    ok=False,
-                    command=command,
-                    cwd=cwd_used,
-                    exit_code=None,
-                    timed_out=False,
-                    stdout="",
-                    stderr="",
-                    error={"type": "invalid_argument", "field": "cwd", "message": "Not a directory"},
-                )
-
-        env_sanitized: dict[str, str] = {}
-        if env_vars is not None:
-            if not isinstance(env_vars, list):
-                return self._result(
-                    ok=False,
-                    command=command,
-                    cwd=cwd_used or "",
-                    exit_code=None,
-                    timed_out=False,
-                    stdout="",
-                    stderr="",
-                    error={
-                        "type": "invalid_argument",
-                        "field": "env_vars",
-                        "message": "env_vars must be a list of key/value pairs: [{'name': 'KEY', 'value': 'VALUE'}]",
-                    },
-                )
-            env_from_pairs: dict[str, str] = {}
-            for idx, item in enumerate(env_vars):
-                if not isinstance(item, dict):
-                    return self._result(
-                        ok=False,
-                        command=command,
-                        cwd=cwd_used or "",
-                        exit_code=None,
-                        timed_out=False,
-                        stdout="",
-                        stderr="",
-                        error={
-                            "type": "invalid_argument",
-                            "field": f"env_vars[{idx}]",
-                            "message": "Each env_vars item must be an object: {'name': 'KEY', 'value': 'VALUE'}",
-                        },
-                    )
-                name = item.get("name")
-                if not isinstance(name, str) or not name.strip():
-                    return self._result(
-                        ok=False,
-                        command=command,
-                        cwd=cwd_used or "",
-                        exit_code=None,
-                        timed_out=False,
-                        stdout="",
-                        stderr="",
-                        error={"type": "invalid_argument", "field": f"env_vars[{idx}].name"},
-                    )
-                value = item.get("value")
-                if not isinstance(value, str):
-                    return self._result(
-                        ok=False,
-                        command=command,
-                        cwd=cwd_used or "",
-                        exit_code=None,
-                        timed_out=False,
-                        stdout="",
-                        stderr="",
-                        error={
-                            "type": "invalid_argument",
-                            "field": f"env_vars[{idx}].value",
-                            "message": "env_vars value must be a string",
-                        },
-                    )
-                env_from_pairs[name.strip()] = value
-            env_sanitized = env_from_pairs
 
         try:
-            res = self._backend.exec(
-                command, cwd=cwd_used, timeout=timeout, env=env_sanitized or None
+            started = await self._backend.aspawn_background(
+                plan["command"],
+                cwd=cwd_used,
+                env=plan["env"],
             )
-        except Exception as e:
-            err = str(e).replace("\n", " ").strip()
+        except Exception as exc:
+            return self._exec_failed(plan, exc)
+
+        # Команда могла не прожить и мгновения (бэкенд, который это проверяет,
+        # отдаёт её код). Упавшая — не «запущена»: иначе опечатка выглядела бы
+        # сервисом, и модель шла бы проверять его порт.
+        exit_code = started.get("exit_code")
+        if exit_code not in (None, 0):
             return self._result(
                 ok=False,
-                command=command,
+                command=plan["command"],
                 cwd=cwd_used or "",
-                exit_code=-1,
+                exit_code=exit_code,
                 timed_out=False,
                 stdout="",
                 stderr="",
-                error={"type": "execution_failed", "message": err},
+                error={
+                    "type": "background_exited",
+                    "message": (
+                        f"The command exited right after start with exit code {exit_code}: "
+                        "nothing is running in the background. Its output is not captured — "
+                        "run it in the foreground with a short `timeout` to see the error."
+                    ),
+                },
             )
+        background = {"pid": started.get("pid"), "output": "not captured"}
+        if exit_code == 0:
+            background["note"] = (
+                "The command exited with code 0 right after start. Unless it detached "
+                "a process of its own (a daemon), nothing of it is running now."
+            )
+        return build_exec_envelope(
+            tool=ExecuteCommand.registered_tool_name(),
+            ok=True,
+            exit_code=exit_code,
+            timed_out=False,
+            stdout=as_captured_stream(""),
+            stderr=as_captured_stream(""),
+            preview_edge_chars=exec_output_preview_edge_chars_from_config_dict(
+                self._config_dict
+            ),
+            error=None,
+            head_fields={
+                "command": plan["command"],
+                "cwd": cwd_used or "",
+                "background": background,
+            },
+        )
+
+    def _exec_failed(self, plan: dict, exc: Exception) -> str:
+        """Отказ запуска — общий для обоих входов."""
+        err = str(exc).replace("\n", " ").strip()
+        return self._result(
+            ok=False,
+            command=plan["command"],
+            cwd=plan["cwd"] or "",
+            exit_code=-1,
+            timed_out=False,
+            stdout="",
+            stderr="",
+            error={"type": "execution_failed", "message": err},
+        )
+
+    def _finish(self, res: "Any", plan: dict) -> str:
+        """Разобрать результат запуска. Общий для обоих входов."""
+        command = plan["command"]
+        cwd_used = plan["cwd"]
+        timeout = plan["timeout"]
 
         # getattr, а не атрибут: backend вправе вернуть свой результат-подобный
         # объект без структуры потока — тогда падаем обратно на плоский текст,
@@ -339,12 +504,22 @@ Important Usage Rules:
                 timed_out=True,
                 stdout=stdout_stream,
                 stderr=stderr_stream,
-                error={"type": "timeout", "message": f"Command timed out after {timeout} seconds"},
+                error={
+                    "type": "timeout",
+                    "message": f"Command timed out after {timeout} seconds",
+                },
             )
 
         exit_code = res.return_code
         ok = exit_code == 0
-        error = None if ok else {"type": "non_zero_exit", "message": f"Command exited with status {exit_code}"}
+        error = (
+            None
+            if ok
+            else {
+                "type": "non_zero_exit",
+                "message": f"Command exited with status {exit_code}",
+            }
+        )
         return self._result(
             ok=ok,
             command=command,

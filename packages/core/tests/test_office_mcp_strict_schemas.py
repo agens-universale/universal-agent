@@ -1,4 +1,5 @@
 """All office-mcp tool schemas must survive OpenAI strict normalization."""
+
 from __future__ import annotations
 
 import pytest
@@ -8,23 +9,28 @@ import pytest
 # роняем сбор всего сьюта.
 pytest.importorskip("office_mcp")
 
-from mcp.server.fastmcp.utilities.func_metadata import func_metadata
-
-from office_mcp.server import ServerConfig, build_server
 from gc_core.tools.connect_mcp.agent_tools import normalize_tool_spec_for_agent
+from mcp.server.fastmcp.utilities.func_metadata import func_metadata
+from office_mcp.server import ServerConfig, build_server
 
 
-def _ref_with_sibling_errors(node: object, path: tuple[str, ...] = ()) -> list[str]:
+def _ref_with_sibling_errors(
+    node: object, path: tuple[str, ...] = ()
+) -> list[str]:
     errors: list[str] = []
     if isinstance(node, dict):
         if "$ref" in node and len(node) > 1:
-            errors.append(f"{path}: $ref has sibling keys {sorted(k for k in node if k != '$ref')}")
+            errors.append(
+                f"{path}: $ref has sibling keys {sorted(k for k in node if k != '$ref')}"
+            )
         for key, value in node.items():
             if key != "$defs":
                 errors.extend(_ref_with_sibling_errors(value, path + (key,)))
     elif isinstance(node, list):
         for idx, value in enumerate(node):
-            errors.extend(_ref_with_sibling_errors(value, path + (f"[{idx}]",)))
+            errors.extend(
+                _ref_with_sibling_errors(value, path + (f"[{idx}]",))
+            )
     return errors
 
 
@@ -45,11 +51,15 @@ def _dangling_ref_errors(
                 errors.extend(_dangling_ref_errors(value, defs, path + (key,)))
     elif isinstance(node, list):
         for idx, value in enumerate(node):
-            errors.extend(_dangling_ref_errors(value, defs, path + (f"[{idx}]",)))
+            errors.extend(
+                _dangling_ref_errors(value, defs, path + (f"[{idx}]",))
+            )
     return errors
 
 
-def _strict_schema_errors(node: object, path: tuple[str, ...] = ()) -> list[str]:
+def _strict_schema_errors(
+    node: object, path: tuple[str, ...] = ()
+) -> list[str]:
     errors: list[str] = []
     if isinstance(node, dict):
         if node.get("type") == "object":
@@ -98,7 +108,9 @@ def test_all_office_mcp_tools_normalize_for_openai_strict() -> None:
         params = normalized["parameters"]
         errors.extend(_strict_schema_errors(params, (name,)))
         errors.extend(
-            _dangling_ref_errors(params, params.get("$defs"), (name, "parameters"))
+            _dangling_ref_errors(
+                params, params.get("$defs"), (name, "parameters")
+            )
         )
         errors.extend(_ref_with_sibling_errors(params, (name, "parameters")))
     assert not errors, ";\n".join(errors)

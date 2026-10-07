@@ -1,4 +1,5 @@
 """Integration-тесты layout трассы: TraceRow прокинут везде где должен быть."""
+
 import pytest
 
 
@@ -13,9 +14,13 @@ async def test_think_not_rendered_via_trace_row():
     async with TuiApp().run_test() as pilot:
         scr = pilot.app.screen
         ev = TraceEvent(
-            no=1, event_ts_utc_iso="2026-05-28T00:00:00Z",
-            kind="system", title="think",
-            summary="рассуждаю", tool_name=None, call_id=None,
+            no=1,
+            event_ts_utc_iso="2026-05-28T00:00:00Z",
+            kind="system",
+            title="think",
+            summary="рассуждаю",
+            tool_name=None,
+            call_id=None,
             full_payload=None,
         )
         scr._render_event(ev)
@@ -36,17 +41,19 @@ async def test_submit_solution_note_renders_via_trace_row():
     async with TuiApp().run_test() as pilot:
         scr = pilot.app.screen
         ev = TraceEvent(
-            no=1, event_ts_utc_iso="2026-05-28T00:00:00Z",
-            kind="agent", title=None,
+            no=1,
+            event_ts_utc_iso="2026-05-28T00:00:00Z",
+            kind="agent",
+            title=None,
             summary="готов",
-            tool_name="submit_solution", call_id="c1",
+            tool_name="submit_solution",
+            call_id="c1",
             full_payload={"_submit_comment": "проверь корнер-кейсы"},
         )
         scr._render_event(ev)
         await pilot.pause()
         note_rows = [
-            r for r in scr.query(TraceRow)
-            if r.has_class("line-note")
+            r for r in scr.query(TraceRow) if r.has_class("line-note")
         ]
         assert len(note_rows) == 1
         assert note_rows[0]._prefix == "* "
@@ -68,10 +75,14 @@ async def test_agent_prose_first_block_has_bullet_prefix():
     async with TuiApp().run_test() as pilot:
         scr = pilot.app.screen
         ev = TraceEvent(
-            no=1, event_ts_utc_iso="2026-05-28T00:00:00Z",
-            kind="agent", title=None,
+            no=1,
+            event_ts_utc_iso="2026-05-28T00:00:00Z",
+            kind="agent",
+            title=None,
             summary="первая строка\n\nвторая строка",
-            tool_name=None, call_id=None, full_payload=None,
+            tool_name=None,
+            call_id=None,
+            full_payload=None,
         )
         scr._render_event(ev)
         await pilot.pause()
@@ -81,29 +92,34 @@ async def test_agent_prose_first_block_has_bullet_prefix():
         # блоком (пустые строки сохранены внутри) — сплит только на code/table (0ff36ad8).
         assert len(agent_rows) == 1
         assert agent_rows[0]._prefix == "● "
-        assert not agent_rows[0].has_class("line-agent-cont")   # cont — только за code/table
+        assert not agent_rows[0].has_class(
+            "line-agent-cont"
+        )  # cont — только за code/table
 
 
 @pytest.mark.asyncio
 async def test_tool_call_row_has_two_column_layout():
     """ToolCallRow содержит Horizontal с prefix (отступ-индент + статус-глиф, без '|-') и content."""
     pytest.importorskip("textual")
-    from textual.app import App, ComposeResult
     from gc_tui.widgets.tool_call_row import ToolCallRow
+    from textual.app import App, ComposeResult
 
     class _App(App):
         def compose(self) -> ComposeResult:
-            yield ToolCallRow(call_id="c1", tool_name="read_file",
-                              args_summary="path='x'")
+            yield ToolCallRow(
+                call_id="c1", tool_name="read_file", args_summary="path='x'"
+            )
 
     async with _App().run_test() as pilot:
         row = pilot.app.query_one(ToolCallRow)
         prefix = row.query_one(".trace-prefix")
         content = row.query_one(".trace-content")
-        assert "|-" not in str(prefix.render())     # лесенки больше нет
-        assert "▸" in str(prefix.render())           # статус-глиф running в prefix
+        assert "|-" not in str(prefix.render())  # лесенки больше нет
+        assert "▸" in str(prefix.render())  # статус-глиф running в prefix
         assert "read_file" in str(content.render())
-        assert "|- " not in str(content.render())  # prefix НЕ дублируется в content
+        assert "|- " not in str(
+            content.render()
+        )  # prefix НЕ дублируется в content
 
 
 @pytest.mark.asyncio
@@ -113,15 +129,18 @@ async def test_long_tool_args_wrap_inside_content_column():
     Проверяем структурно: prefix-Static и content-Static — отдельные виджеты,
     значит wrap content не выходит за границы своей колонки (rendering Textual'а)."""
     pytest.importorskip("textual")
-    from textual.app import App, ComposeResult
     from gc_tui.widgets.tool_call_row import ToolCallRow
+    from textual.app import App, ComposeResult
 
     long_args = "command='" + ("very_long_path/" * 20) + "x.py'"
 
     class _App(App):
         def compose(self) -> ComposeResult:
-            yield ToolCallRow(call_id="c1", tool_name="execute_command",
-                              args_summary=long_args)
+            yield ToolCallRow(
+                call_id="c1",
+                tool_name="execute_command",
+                args_summary=long_args,
+            )
 
     async with _App().run_test(size=(80, 24)) as pilot:
         row = pilot.app.query_one(ToolCallRow)
@@ -139,6 +158,34 @@ async def test_long_tool_args_wrap_inside_content_column():
 
 
 @pytest.mark.asyncio
+async def test_call_row_shows_wire_tool_name_not_canonical_id():
+    """Д11/R3: живая строка тула в ленте показывает wire-имя (как в реестре),
+    не канонический id маппера — fs_append_file, не append_to_file."""
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+    from gc_tui.models import TraceEvent
+    from gc_tui.widgets.tool_call_row import ToolCallRow
+
+    async with TuiApp().run_test() as pilot:
+        scr = pilot.app.screen
+        ev = TraceEvent(
+            no=1,
+            event_ts_utc_iso="2026-05-28T00:00:00Z",
+            kind="call",
+            title="append_to_file",
+            summary="append_to_file(path='x.py')",
+            tool_name="append_to_file",
+            wire_name="fs_append_file",
+            call_id="c1",
+            full_payload={},
+        )
+        scr._render_event(ev)
+        await pilot.pause()
+        row = scr.query_one(ToolCallRow)
+        assert row._tool_name == "fs_append_file"
+
+
+@pytest.mark.asyncio
 async def test_meta_lines_have_top_margin_class():
     """Все framework-события имеют CSS-класс .line-meta (margin-top: 1 из styles.tcss)."""
     pytest.importorskip("textual")
@@ -148,11 +195,12 @@ async def test_meta_lines_have_top_margin_class():
     async with TuiApp().run_test() as pilot:
         scr = pilot.app.screen
         # Триггерим экспорт-сообщение через прямой вызов фабрики
-        scr._mount_trace_row(prefix="[exported] ", content="/tmp/x.md", kind_class="line-meta")
+        scr._mount_trace_row(
+            prefix="[exported] ", content="/tmp/x.md", kind_class="line-meta"
+        )
         await pilot.pause()
         meta_rows = [
-            r for r in scr.query(TraceRow)
-            if r.has_class("line-meta")
+            r for r in scr.query(TraceRow) if r.has_class("line-meta")
         ]
         assert len(meta_rows) >= 1
 
@@ -163,21 +211,31 @@ async def test_todo_row_has_air_above_and_no_double_gap():
     разделение через margin-top следующего элемента), и ровно одной — не двумя."""
     pytest.importorskip("textual")
     import json
+
     from gc_tui.app import TuiApp
     from gc_tui.models import TraceEvent
-    from gc_tui.widgets.trace_row import TraceRow
 
     def call_ev(no, name, args):
         return TraceEvent(
-            no=no, event_ts_utc_iso="2026-07-30T00:00:00Z", kind="call",
-            title=name, summary=f"{name}(...)", tool_name=name,
-            call_id=f"c{no}", full_payload={"arguments": json.dumps(args)},
+            no=no,
+            event_ts_utc_iso="2026-07-30T00:00:00Z",
+            kind="call",
+            title=name,
+            summary=f"{name}(...)",
+            tool_name=name,
+            call_id=f"c{no}",
+            full_payload={"arguments": json.dumps(args)},
         )
 
     todo_ev = TraceEvent(
-        no=2, event_ts_utc_iso="2026-07-30T00:00:00Z", kind="todo",
-        title="session_todo", summary="чек-лист 1/2\n  ✓ Шаг 1\n  → Шаг 2",
-        tool_name="session_todo", call_id="c2", full_payload=None,
+        no=2,
+        event_ts_utc_iso="2026-07-30T00:00:00Z",
+        kind="todo",
+        title="session_todo",
+        summary="чек-лист 1/2\n  ✓ Шаг 1\n  → Шаг 2",
+        tool_name="session_todo",
+        call_id="c2",
+        full_payload=None,
     )
 
     async with TuiApp().run_test() as pilot:
@@ -189,6 +247,7 @@ async def test_todo_row_has_air_above_and_no_double_gap():
 
         # v5: воздух живёт на блоке-контейнере, а не на строке заголовка.
         from gc_tui.widgets.todo_block import TodoBlock
+
         blocks = list(scr.query(TodoBlock))
         assert len(blocks) == 1
         todo = blocks[0]

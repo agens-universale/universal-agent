@@ -1,13 +1,42 @@
 """raw message dict → TraceEvent (§3 спеки)."""
+
 from __future__ import annotations
 
 import json
 import re
-from typing import Any, Optional
+from dataclasses import dataclass, field
+from typing import Any, Iterable, Mapping, Optional
+
+from gc_core.attachments.model import ORIGIN_USER, Attachment, attachments_of
+from gc_core.vision.errors import (
+    ERR_NO_IMAGE_STORE,
+    ERR_NO_VISION_MODEL,
+    ERR_TOO_MANY_IMAGES,
+    ERR_VISION_FAILED,
+    REASON_EMPTY_RESPONSE,
+    REASON_HTTP,
+)
 
 from gc_tui.models import TraceEvent
+from gc_tui.services.image_chips import images_mentioned
+from gc_tui.services.path_display import truncate_path
 from gc_tui.services.tool_identity import tool_id
 
+#: Сводки строки fs_view_image в ленте (визуальный контракт картинок §4): модель
+#: получает английский текст ошибки, человек — русский по типу ошибки.
+ROW_NO_VISION = "нет модели для просмотра изображений"
+ROW_VISION_FAILED = "модель для зрения не ответила ({reason})"
+ROW_TOO_MANY_IMAGES = "не прикреплено: за шаг не больше {n} изображений"
+ROW_NO_IMAGE_STORE = "не просмотрено: нет хранилища изображений"
+# Причина сбоя «глаз» (`error.reason`: код HTTP, имя исключения, пустой ответ) — частые
+# по-русски; прочие показываются как есть.
+_REASON_TIMEOUT = "таймаут"
+_REASON_NO_CONNECTION = "нет связи"
+_REASON_EMPTY = "пустой ответ"
+_REASON_SERVER_ERROR = "ошибка сервера {status}"
+_HTTP_REASON_RE = re.compile(
+    re.escape(REASON_HTTP).replace(re.escape("{status}"), r"(\d{3})")
+)
 
 _TECHNICAL_TAG_RE = re.compile(r"<technical[^>]*>(.*?)</technical>", re.DOTALL)
 # Greedy: strips first <think> → LAST </think> (one span). Robust к тому, что
@@ -17,7 +46,9 @@ _TECHNICAL_TAG_RE = re.compile(r"<technical[^>]*>(.*?)</technical>", re.DOTALL)
 # Вторая ветка (<think>.*) — если </think> нет вовсе (модель не закрыла тег),
 # режем до конца строки (зеркалит stream_sink._THINK_RE), иначе сырое рассуждение
 # течёт в трейс. Порядок важен: закрытый спан матчим первым.
-_THINK_BLOCK_RE = re.compile(r"<think>.*</think>|<think>.*", re.DOTALL | re.IGNORECASE)
+_THINK_BLOCK_RE = re.compile(
+    r"<think>.*</think>|<think>.*", re.DOTALL | re.IGNORECASE
+)
 _SUMMARY_TAG_RE = re.compile(r"<summary[^>]*>(.*?)</summary>", re.DOTALL)
 _SUMMARIZED_PREFIX_RE = re.compile(
     r"^Summarized context from previous dialogue\.\s*", re.IGNORECASE
@@ -114,14 +145,68 @@ def collect_skipped_call_ids(messages) -> set:
     return ids
 
 
+def collect_image_index(messages) -> dict[str, Attachment]:
+    """Пользовательские картинки батча по подписи (`Изображение #N`).
+
+    Вызывающие делают pre-pass по записям (как collect_skipped_call_ids) и передают
+    индекс в map_message: ответ на turn_ask_human несёт в тексте только плашки, а сами
+    вложения лежат в следующем техническом сообщении (дизайн картинок §20.3). Номер
+    сквозной по треду — подпись уникальна; снимки агента (origin=tool) делят одну
+    подпись и в индекс не идут."""
+    index: dict[str, Attachment] = {}
+    for m in messages:
+        if not isinstance(m, dict):
+            continue
+        for att in attachments_of(m):
+            if att.origin == ORIGIN_USER:
+                index[att.label] = att
+    return index
+
+
+@dataclass(frozen=True)
+class RenderContext:
+    """Сведения о батче записей, которые map_message не видит в одном сообщении.
+
+    ``skipped_call_ids`` — call_id штатно пропущенных финализаторов (см.
+    collect_skipped_call_ids): их `function_call` не рендерим (парный skip-output
+    подавляется отдельно по маркеру `skipped: true`).
+    ``image_index`` — пользовательские картинки батча по подписи (см.
+    collect_image_index): ответ на turn_ask_human берёт из него свои картинки."""
+
+    skipped_call_ids: frozenset = frozenset()
+    image_index: Mapping[str, Attachment] = field(default_factory=dict)
+
+
+def collect_render_context(messages: Iterable) -> RenderContext:
+    """Pre-pass по payload'ам батча — один на всех вызывающих (лента, превью, сегменты
+    сжатого треда)."""
+    payloads = list(messages)
+    return RenderContext(
+        skipped_call_ids=frozenset(collect_skipped_call_ids(payloads)),
+        image_index=collect_image_index(payloads),
+    )
+
+
+# Лимит текста технической врезки (Ж1 батча 4) — см. комментарий у среза ниже.
+# Величина — со смоука 5 (З3): при 120 весь бюджет уходил вступлению отказа
+# схемы («Wrong arguments for `X`: Arguments for tool 'X' do not match its
+# schema. Details:»), и причина отказа на экран не попадала вовсе. Строка ленты
+# переносится по ширине, поэтому бюджет здесь — страховка от патологии, а не
+# ширина строки: тот же вывод, что и у пути с текстом ошибки инструмента.
+_TECH_TEXT_LIMIT = 240
+
+
 def map_message(
-    msg: dict, *, no: int, ts: str, skipped_call_ids: Optional[set] = None
+    msg: dict,
+    *,
+    no: int,
+    ts: str,
+    context: Optional[RenderContext] = None,
 ) -> Optional[TraceEvent]:
     """Превращает payload-сообщение thread_store в TraceEvent.
 
-    ``skipped_call_ids`` — набор call_id штатно пропущенных финализаторов (см.
-    collect_skipped_call_ids). Их `function_call` не рендерим (парный skip-output
-    подавляется отдельно по маркеру `skipped: true`)."""
+    ``context`` — сведения о батче (collect_render_context); без него — пустые."""
+    context = context or RenderContext()
     if not isinstance(msg, dict):
         return None
     role = msg.get("role")
@@ -136,10 +221,16 @@ def map_message(
         if "display_content" in msg:
             disp = (msg.get("display_content") or "").strip()
             if not disp:
-                return None                      # mid-run доставка → реплику не рисуем
+                return None  # mid-run доставка → реплику не рисуем
             return TraceEvent(
-                no=no, event_ts_utc_iso=ts, kind="user",
-                title="", summary=disp, full_payload=msg, message_id=mid,
+                no=no,
+                event_ts_utc_iso=ts,
+                kind="user",
+                title="",
+                summary=disp,
+                full_payload=msg,
+                message_id=mid,
+                attachments=tuple(attachments_of(msg)),
             )
         content = msg.get("content")
         if isinstance(content, str) and content.strip():
@@ -148,9 +239,23 @@ def map_message(
             # error_message — показываем (бэкенд-ошибки нужны пользователю).
             # Остальные (bounce, summary, context) — hidden=True: kind=system
             # учитывается polling-логикой (thinking_indicator), но в трейс не рендерится.
-            if stripped.startswith("<technical") and "</technical>" in stripped:
+            if (
+                stripped.startswith("<technical")
+                and "</technical>" in stripped
+            ):
                 m = _TECHNICAL_TAG_RE.search(stripped)
-                inner_text = (m.group(1).strip() if m else stripped)[:120]
+                # Текст врезки режется по границе слова (Ж1 батча 4): жёсткий
+                # срез рвал сообщение посреди слова («path='<roo») — тот же
+                # дефект, что батч 2 закрыл в сводке результата инструмента,
+                # только эта ветка мимо той правки прошла. Переводы строк
+                # схлопываем в пробелы — как в plain-ветке `_summarize_output`:
+                # врезка занимает одну строку ленты, а «\n» границей слова
+                # не считается, и обрез откатывался к концу вступления, выбрасывая
+                # причину отказа (смоук 5, З3).
+                inner_text = _truncate_word_boundary(
+                    (m.group(1).strip() if m else stripped).replace("\n", " "),
+                    _TECH_TEXT_LIMIT,
+                )
                 tech_type = ""
                 if m:
                     tag_m = re.search(r'type="([^"]+)"', stripped)
@@ -159,43 +264,65 @@ def map_message(
                     # Ошибки бэкенда — заметная красная строка (см. _render_event).
                     cid = msg.get("call_id")
                     return TraceEvent(
-                        no=no, event_ts_utc_iso=ts, kind="error_msg",
-                        title="!", summary=inner_text,
-                        full_payload=msg, message_id=mid,
+                        no=no,
+                        event_ts_utc_iso=ts,
+                        kind="error_msg",
+                        title="!",
+                        summary=inner_text,
+                        full_payload=msg,
+                        message_id=mid,
                         call_id=cid if isinstance(cid, str) else None,
                     )
                 if tech_type == "dialog_summary":
                     # Суммаризация — видимый маркер + блок очищенной сводки.
-                    # Берём ПОЛНЫЙ inner (не обрезанный [:120]).
+                    # Берём ПОЛНЫЙ inner (не обрезанный по _TECH_TEXT_LIMIT).
                     full_inner = m.group(1) if m else stripped
                     return TraceEvent(
-                        no=no, event_ts_utc_iso=ts, kind="summary",
-                        title="summary", summary="контекст сжат",
+                        no=no,
+                        event_ts_utc_iso=ts,
+                        kind="summary",
+                        title="summary",
+                        summary="контекст сжат",
                         summary_content=_clean_summary(full_inner),
-                        full_payload=msg, message_id=mid, hidden=False,
+                        full_payload=msg,
+                        message_id=mid,
+                        hidden=False,
                     )
                 # bounce / current_context — служебное, скрываем.
                 return TraceEvent(
-                    no=no, event_ts_utc_iso=ts, kind="system",
-                    title="policy", summary=f"[policy] {inner_text}",
-                    full_payload=msg, message_id=mid,
+                    no=no,
+                    event_ts_utc_iso=ts,
+                    kind="system",
+                    title="policy",
+                    summary=f"[policy] {inner_text}",
+                    full_payload=msg,
+                    message_id=mid,
                     hidden=True,
                 )
             return TraceEvent(
-                no=no, event_ts_utc_iso=ts, kind="user",
-                title="", summary=stripped,
-                full_payload=msg, message_id=mid,
+                no=no,
+                event_ts_utc_iso=ts,
+                kind="user",
+                title="",
+                summary=stripped,
+                full_payload=msg,
+                message_id=mid,
+                attachments=tuple(attachments_of(msg)),
             )
         return None
 
-    # AGENT (text)
+    # AGENT (text)  # noqa: ERA001  # описание формата, не выключенный код
     if role == "assistant":
         text = _extract_assistant_text(msg.get("content"))
         if text:
             return TraceEvent(
-                no=no, event_ts_utc_iso=ts, kind="agent",
-                title="", summary=text,
-                full_payload=msg, message_id=mid,
+                no=no,
+                event_ts_utc_iso=ts,
+                kind="agent",
+                title="",
+                summary=text,
+                full_payload=msg,
+                message_id=mid,
             )
         return None
 
@@ -208,15 +335,19 @@ def map_message(
     # Special tool-event handling (must precede generic function_call mapping).
     name = msg.get("name") if isinstance(msg.get("name"), str) else None
     name = tool_id(name)
-    call_id = msg.get("call_id") if isinstance(msg.get("call_id"), str) else None
+    call_id = (
+        msg.get("call_id") if isinstance(msg.get("call_id"), str) else None
+    )
 
     # SKIPPED turn_finish (processing_responses.partition_work_then_finish): лишний
     # finish после первого или все finish после ask_human. Ни synthetic
     # skip-output (`skipped: true`), ни парный `function_call` не рендерим —
     # служебный статус, не ошибка. В data_*.jsonl и raw-payload всё остаётся.
-    if typ == "function_call_output" and _output_marked_skipped(msg.get("output")):
+    if typ == "function_call_output" and _output_marked_skipped(
+        msg.get("output")
+    ):
         return None
-    if typ == "function_call" and skipped_call_ids and call_id in skipped_call_ids:
+    if typ == "function_call" and call_id in context.skipped_call_ids:
         return None
 
     # ASK_HUMAN — kind=ask_human, summary=question (TraceScreen mounts banner).
@@ -225,10 +356,15 @@ def map_message(
         question = args.get("question", "")
         if isinstance(question, str) and question.strip():
             return TraceEvent(
-                no=no, event_ts_utc_iso=ts, kind="ask_human",
-                title="ask_human", summary=question.strip(),
-                full_payload=msg, message_id=mid,
-                call_id=call_id, tool_name=name,
+                no=no,
+                event_ts_utc_iso=ts,
+                kind="ask_human",
+                title="ask_human",
+                summary=question.strip(),
+                full_payload=msg,
+                message_id=mid,
+                call_id=call_id,
+                tool_name=name,
             )
         return None
 
@@ -243,10 +379,15 @@ def map_message(
             if isinstance(comment, str) and comment.strip():
                 payload["_submit_comment"] = comment.strip()
             return TraceEvent(
-                no=no, event_ts_utc_iso=ts, kind="agent",
-                title="", summary=report.strip(),
-                full_payload=payload, message_id=mid,
-                call_id=call_id, tool_name=name,
+                no=no,
+                event_ts_utc_iso=ts,
+                kind="agent",
+                title="",
+                summary=report.strip(),
+                full_payload=payload,
+                message_id=mid,
+                call_id=call_id,
+                tool_name=name,
             )
         return None
 
@@ -257,10 +398,15 @@ def map_message(
         answer = args.get("answer") or ""
         if isinstance(answer, str) and answer.strip():
             return TraceEvent(
-                no=no, event_ts_utc_iso=ts, kind="agent",
-                title="", summary=answer.strip(),
-                full_payload=msg, message_id=mid,
-                call_id=call_id, tool_name="intermediate_reply",
+                no=no,
+                event_ts_utc_iso=ts,
+                kind="agent",
+                title="",
+                summary=answer.strip(),
+                full_payload=msg,
+                message_id=mid,
+                call_id=call_id,
+                tool_name="intermediate_reply",
             )
         return None
 
@@ -269,13 +415,19 @@ def map_message(
     # call-строку, статус сбоя виден механикой (не врём «чек-лист очищен»).
     if typ == "function_call" and name == "session_todo":
         from gc_core.tools.subagents.progress import todo_items_from_arguments
+
         _todo_items = todo_items_from_arguments(msg.get("arguments"))
         if _todo_items is not None:
             return TraceEvent(
-                no=no, event_ts_utc_iso=ts, kind="todo",
-                title="session_todo", summary=_todo_checklist_summary(_todo_items),
-                full_payload=msg, message_id=mid,
-                call_id=call_id, tool_name=name,
+                no=no,
+                event_ts_utc_iso=ts,
+                kind="todo",
+                title="session_todo",
+                summary=_todo_checklist_summary(_todo_items),
+                full_payload=msg,
+                message_id=mid,
+                call_id=call_id,
+                tool_name=name,
             )
 
     # INTERMEDIATE_REPLY output — глушим (машинный статус не нужен). Как и у
@@ -290,7 +442,10 @@ def map_message(
                 _ir_data = json.loads(_ir_out)
             except json.JSONDecodeError:
                 _ir_data = None
-            if isinstance(_ir_data, dict) and tool_id(_ir_data.get("tool")) == "intermediate_reply":
+            if (
+                isinstance(_ir_data, dict)
+                and tool_id(_ir_data.get("tool")) == "intermediate_reply"
+            ):
                 return None
 
     # SESSION_TODO output — успешный глушим (машинный статус не нужен; чек-лист
@@ -305,7 +460,8 @@ def map_message(
             except json.JSONDecodeError:
                 _st_data = None
         _st_is_todo = name == "session_todo" or (
-            isinstance(_st_data, dict) and tool_id(_st_data.get("tool")) == "session_todo"
+            isinstance(_st_data, dict)
+            and tool_id(_st_data.get("tool")) == "session_todo"
         )
         if _st_is_todo and not (
             isinstance(_st_data, dict) and _st_data.get("ok") is False
@@ -329,7 +485,10 @@ def map_message(
                 _data = json.loads(_out)
             except json.JSONDecodeError:
                 _data = None
-            if isinstance(_data, dict) and tool_id(_data.get("tool")) == "submit_solution":
+            if (
+                isinstance(_data, dict)
+                and tool_id(_data.get("tool")) == "submit_solution"
+            ):
                 return None
 
     # ASK_HUMAN output — Фикс A. Идентификация в двух режимах (как в
@@ -349,22 +508,41 @@ def map_message(
                     _data = json.loads(_out)
                 except json.JSONDecodeError:
                     _data = None
-                if isinstance(_data, dict) and tool_id(_data.get("tool")) == "ask_human":
+                if (
+                    isinstance(_data, dict)
+                    and tool_id(_data.get("tool")) == "ask_human"
+                ):
                     is_ask_human = True
         if is_ask_human:
             response_text = _extract_ask_human_response(msg.get("output"))
             if response_text:
+                # Картинки ответа лежат в следующем техническом сообщении, а не на
+                # output (иначе проекция отправила бы их дважды) — сцепка по плашкам
+                # в тексте ответа (дизайн картинок §20.3).
                 return TraceEvent(
-                    no=no, event_ts_utc_iso=ts, kind="user",
-                    title="", summary=response_text,
-                    full_payload=msg, message_id=mid,
-                    call_id=call_id, tool_name="ask_human",
+                    no=no,
+                    event_ts_utc_iso=ts,
+                    kind="user",
+                    title="",
+                    summary=response_text,
+                    full_payload=msg,
+                    message_id=mid,
+                    call_id=call_id,
+                    tool_name="ask_human",
+                    attachments=images_mentioned(
+                        response_text, context.image_index
+                    ),
                 )
             return TraceEvent(
-                no=no, event_ts_utc_iso=ts, kind="system",
-                title="ask_human", summary="Агент спрашивал (без ответа)",
-                full_payload=msg, message_id=mid,
-                call_id=call_id, tool_name="ask_human",
+                no=no,
+                event_ts_utc_iso=ts,
+                kind="system",
+                title="ask_human",
+                summary="Агент спрашивал (без ответа)",
+                full_payload=msg,
+                message_id=mid,
+                call_id=call_id,
+                tool_name="ask_human",
             )
 
     # function_call / function_call_output — Task 2.6
@@ -411,6 +589,37 @@ def _extract_ask_human_response(output: Any) -> Optional[str]:
     if not stripped or stripped == "(empty response)":
         return None
     return stripped
+
+
+# Аргумент с таким именем — путь (Е6 батча 3): показывается всегда; свёртка
+# `<N chars>` — только для содержимого.
+_PATH_KEYS = frozenset(
+    {"path", "file", "file_path", "dir", "directory", "cwd", "src", "dst"}
+)
+
+# Путь показывается ЦЕЛИКОМ (Ж2 батча 4): строка ленты переносится по ширине,
+# как это уже происходит с длинным текстом ошибки, и фиксированный бюджет
+# прятал каталог и начало имени там, где на экране хватало места. Потолок —
+# страховка от патологии (глубокое дерево, генерированные имена), не бюджет.
+# Величина — со смоука 5: обрезка сегментная и имя файла держит при любом
+# потолке, платят за него только промежуточные каталоги. 100 оставляет корень,
+# первый каталог и имя, укладывая строку вызова в две строки ленты; 160 отдавал
+# третью строку за один каталог сверху.
+_PATH_LIMIT = 100
+
+
+def _path_preview(value: str) -> str:
+    """Путь под потолком — целиком, за потолком — со схлопнутой серединой.
+
+    Режем именно `truncate_path`, а НЕ прозаическим `_truncate_word_boundary`:
+    пробел в пути — не граница слова, а часть имени каталога (`C:\\Program
+    Files`, `C:\\Users\\Имя Фамилия`, `OneDrive - Company`). Прозаическое
+    правило на таком пути отрезало бы всё после первого же пробела, и от
+    длинного пути осталось бы `'C:\\Program…'` — без каталога и без имени файла.
+    `truncate_path` схлопывает середину и всегда сохраняет имя файла — ровно то,
+    ради чего путь и показывают в строке вызова.
+    """
+    return repr(truncate_path(value, _PATH_LIMIT))
 
 
 def _scalar_preview(v: Any) -> str:
@@ -470,15 +679,31 @@ def _arg_summary(name: str, args: dict) -> str:
         return ", ".join(pairs)
     if name in ("read_file", "list_files"):
         p = args.get("path")
-        return f"path={p!r}" if isinstance(p, str) else ""
+        return f"path={_path_preview(p)}" if isinstance(p, str) else ""
     if name in ("write_to_file", "append_to_file"):
-        p = args.get("path"); c = args.get("content", "")
+        p = args.get("path")
+        c = args.get("content", "")
         clen = len(c) if isinstance(c, str) else 0
-        return f"path={p!r}, content=<{clen} chars>" if isinstance(p, str) else ""
+        return (
+            f"path={_path_preview(p)}, content=<{clen} chars>"
+            if isinstance(p, str)
+            else ""
+        )
     if name == "search_and_replace":
-        p = args.get("path"); o = args.get("old", ""); n = args.get("new", "")
-        return (f"path={p!r}, old=<{len(o) if isinstance(o, str) else 0} chars>, "
-                f"new=<{len(n) if isinstance(n, str) else 0} chars>")
+        # Имена — как в схеме тула (`search`/`replace`), а не `old`/`new`:
+        # схема запрещает лишние ключи, поэтому по старым именам подпись
+        # ВСЕГДА показывала `<0 chars>` — при любом вызове.
+        p = args.get("path")
+        o = args.get("search", "")
+        n = args.get("replace", "")
+        path_shown = (
+            _path_preview(p) if isinstance(p, str) else _scalar_preview(p)
+        )
+        return (
+            f"path={path_shown}, "
+            f"search=<{len(o) if isinstance(o, str) else 0} chars>, "
+            f"replace=<{len(n) if isinstance(n, str) else 0} chars>"
+        )
     if name == "search_files":
         q = args.get("query") or args.get("pattern")
         return f"query={q!r}" if isinstance(q, str) else ""
@@ -498,7 +723,12 @@ def _arg_summary(name: str, args: dict) -> str:
     # default: name + 1-3 short scalars
     pairs = []
     for k, v in list(args.items())[:3]:
-        pairs.append(f"{k}={_scalar_preview(v)}")
+        shown = (
+            _path_preview(v)
+            if (k in _PATH_KEYS and isinstance(v, str))
+            else _scalar_preview(v)
+        )
+        pairs.append(f"{k}={shown}")
     return ", ".join(pairs)
 
 
@@ -516,16 +746,74 @@ def _looks_like_error(output: Any) -> bool:
     return bool(data.get("error"))
 
 
+def _vision_error_row(err: dict) -> str:
+    """Русская сводка ошибки fs_view_image по её типу; "" — ошибка не про зрение."""
+    kind = err.get("type")
+    if kind == ERR_NO_VISION_MODEL:
+        return ROW_NO_VISION
+    if kind == ERR_TOO_MANY_IMAGES:
+        return ROW_TOO_MANY_IMAGES.format(n=err.get("limit"))
+    if kind == ERR_NO_IMAGE_STORE:
+        return ROW_NO_IMAGE_STORE
+    if kind != ERR_VISION_FAILED:
+        return ""
+    return ROW_VISION_FAILED.format(
+        reason=_vision_reason_text(str(err.get("reason") or ""))
+    )
+
+
+def _vision_reason_text(reason: str) -> str:
+    """Причина сбоя «глаз» для человека: таймаут, 5xx, пустой ответ и обрыв связи —
+    по-русски (имена исключений httpx/openai: `ReadTimeout`, `APIConnectionError`…),
+    остальное — как есть."""
+    if "Timeout" in reason:
+        return _REASON_TIMEOUT
+    if "Connect" in reason:
+        return _REASON_NO_CONNECTION
+    if reason == REASON_EMPTY_RESPONSE:
+        return _REASON_EMPTY
+    http = _HTTP_REASON_RE.fullmatch(reason)
+    if http and http.group(1).startswith("5"):
+        return _REASON_SERVER_ERROR.format(status=http.group(1))
+    return reason
+
+
+def _truncate_word_boundary(text: str, limit: int) -> str:
+    """Обрезать ПРОЗУ до `limit` символов, не разрывая слово посередине.
+
+    Режем по последнему пробелу в пределах лимита и добавляем «…» — иначе
+    длинный вывод/ошибка обрывались бы буквально на полуслове (живой баг:
+    `path='<roo` вместо честного `path='<root>…`). Если пробела в пределах
+    лимита нет вовсе (одно длинное «слово») — режем по limit как есть, но «…»
+    всё равно добавляем: обрыв должен быть явным, а не выглядеть завершённым
+    текстом.
+
+    Правило «резать по пробелу» верно ТОЛЬКО для прозы — сводки результата,
+    текста ошибки, технической врезки. Структурированную строку, где пробел не
+    граница слова, оно калечит: у пути после раннего пробела (`C:\\Program
+    Files\\…`) отрезается всё, включая имя файла. Путь режет `_path_preview`
+    через `path_display.truncate_path`; третьему вызывающему со структурой, а не
+    прозой, сюда тоже нельзя."""
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    boundary = cut.rfind(" ")
+    if boundary > 0:
+        cut = cut[:boundary]
+    return cut.rstrip() + "…"
+
+
 def _summarize_output(output: Any, *, error: bool) -> str:
     if not isinstance(output, str):
         return ""
     # Единый unwrap: голый dict, double-encoded, list-обёртка, stored_tool_output
     # envelope (с partial-parser для truncated). Та же логика что у preview.
     from gc_tui.services.tool_preview import unwrap_tool_output_dict
+
     data = unwrap_tool_output_dict(output)
     if data is None:
         # output вообще не JSON — просто короткий plain fallback.
-        return output.replace("\n", " ")[:80]
+        return _truncate_word_boundary(output.replace("\n", " "), 80)
     if not isinstance(data, dict):
         return str(data)[:80]
 
@@ -546,12 +834,19 @@ def _summarize_output(output: Any, *, error: bool) -> str:
         err = data.get("error") or data.get("message") or ""
         # error может быть dict {type, message, ...} — извлекаем message/type.
         if isinstance(err, dict):
-            err = err.get("message") or err.get("type") or json.dumps(err, ensure_ascii=False)
+            vision_row = _vision_error_row(err)
+            if vision_row:
+                return vision_row
+            err = (
+                err.get("message")
+                or err.get("type")
+                or json.dumps(err, ensure_ascii=False)
+            )
         elif isinstance(err, str) and data.get("message"):
             # Плоский код ошибки (напр. internal_tool_error) сам по себе ничего
             # не сообщает, а человекочитаемый текст лежит рядом в "message".
             err = data["message"]
-        return str(err)[:160]
+        return _truncate_word_boundary(str(err), 160)
 
     bits: list[str] = []
     # Порядок важен — сначала более конкретные ключи.
@@ -592,18 +887,26 @@ def _map_function_event(
     msg: dict, *, no: int, ts: str, mid: Optional[str]
 ) -> Optional[TraceEvent]:
     typ = msg.get("type")
-    name = msg.get("name") if isinstance(msg.get("name"), str) else None
-    name = tool_id(name)
-    call_id = msg.get("call_id") if isinstance(msg.get("call_id"), str) else None
+    wire_name = msg.get("name") if isinstance(msg.get("name"), str) else None
+    name = tool_id(wire_name)
+    call_id = (
+        msg.get("call_id") if isinstance(msg.get("call_id"), str) else None
+    )
 
     if typ == "function_call":
         args = coerce_args(msg.get("arguments"))
         summary = f"{name or '<tool>'}({_arg_summary(name or '', args)})"
         return TraceEvent(
-            no=no, event_ts_utc_iso=ts, kind="call",
-            title=name or "", summary=summary,
-            full_payload=msg, message_id=mid,
-            call_id=call_id, tool_name=name,
+            no=no,
+            event_ts_utc_iso=ts,
+            kind="call",
+            title=name or "",
+            summary=summary,
+            full_payload=msg,
+            message_id=mid,
+            call_id=call_id,
+            tool_name=name,
+            wire_name=wire_name,
         )
 
     if typ == "function_call_output":
@@ -612,10 +915,15 @@ def _map_function_event(
         kind = "error" if is_err else "result"
         summary = _summarize_output(output, error=is_err)
         return TraceEvent(
-            no=no, event_ts_utc_iso=ts, kind=kind,
-            title="", summary=summary,
-            full_payload=msg, message_id=mid,
-            call_id=call_id, tool_name=name,
+            no=no,
+            event_ts_utc_iso=ts,
+            kind=kind,
+            title="",
+            summary=summary,
+            full_payload=msg,
+            message_id=mid,
+            call_id=call_id,
+            tool_name=name,
         )
 
     return None

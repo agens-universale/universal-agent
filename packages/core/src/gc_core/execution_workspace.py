@@ -2,13 +2,69 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import os
 import sys
+import weakref
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
 if TYPE_CHECKING:
     from gc_core.backends.protocol import FsBackend
+
+
+#: Потолок на ОДНУ попытку узнать рабочий каталог. У Harbor есть свой
+#: внутренний (20 с), но он есть не у всякого бэкенда, а сборка контекста не
+#: имеет права висеть на молчащем окружении неограниченно.
+_CWD_PRIME_CEILING_SEC = 25.0
+
+
+class WorkspaceRootUnknownError(RuntimeError):
+    """Корень рабочей области не удалось узнать ни одним способом.
+
+    Раньше на этом месте был молчаливый откат к ``/``: модель работала от
+    корня файловой системы песочницы, и понять это можно было только по
+    странным путям в ответах. Отказ громкий намеренно — корень рабочей области
+    выбирается один раз и определяет ВСЁ остальное.
+    """
+
+
+#: Каталог, узнанный общим запасным путём. Слабые ключи обязательны: бэкенд
+#: живёт один прогон, а обычный словарь держал бы его вечно — ровно та утечка,
+#: что уже была на кэшах с ключом по объекту.
+_PRIMED_CWD: weakref.WeakKeyDictionary[Any, str] = weakref.WeakKeyDictionary()
+
+
+def _remember_primed_cwd(backend: Any, cwd: str) -> None:
+    try:
+        _PRIMED_CWD[backend] = cwd
+    except TypeError:
+        # Бэкенд без поддержки weakref (слоты, прокси) — кладём на него самого.
+        try:
+            backend._gc_primed_cwd = cwd
+        except Exception:  # кэш не обязателен для корректности
+            pass
+
+
+def _primed_cwd(backend: Any) -> Optional[str]:
+    try:
+        cached = _PRIMED_CWD.get(backend)
+    except TypeError:
+        cached = None
+    return cached or getattr(backend, "_gc_primed_cwd", None)
+
+
+def _cwd_from_pwd(res: Any) -> Optional[str]:
+    """Разобрать ответ ``pwd``: абсолютный путь при нулевом коде возврата."""
+    lines = (getattr(res, "stdout", "") or "").strip().splitlines()
+    if (
+        getattr(res, "return_code", 1) == 0
+        and lines
+        and lines[0].startswith("/")
+    ):
+        return lines[0]
+    return None
 
 
 @dataclass(frozen=True)
@@ -39,17 +95,154 @@ def discover_backend_cwd(backend: FsBackend) -> str:
     declared = default_cwd() if callable(default_cwd) else None
     if declared:
         return declared
+    # То, что узнал общий запасной путь: у async-only бэкенда своего места для
+    # ответа нет, а синхронные сборщики рабочей области спрашивают отсюда.
+    primed = _primed_cwd(backend)
+    if primed:
+        return primed
     exec_fn = getattr(backend, "exec", None)
     if not callable(exec_fn):
         return "/"
     try:
         res = exec_fn("pwd")
-    except Exception:  # noqa: BLE001 — env may be down; callers still need a root
+    except Exception:  # env may be down; callers still need a root
         return "/"
     lines = (getattr(res, "stdout", "") or "").strip().splitlines()
-    if getattr(res, "return_code", 1) == 0 and lines and lines[0].startswith("/"):
+    if (
+        getattr(res, "return_code", 1) == 0
+        and lines
+        and lines[0].startswith("/")
+    ):
         return lines[0]
     return "/"
+
+
+async def aprime_backend_cwd(
+    backend: Any, config: Optional[Dict[str, Any]] = None
+) -> None:
+    """Узнать рабочий каталог окружения до сборки рабочей области.
+
+    Песочнице рабочий каталог надо спросить у самого окружения, а это сеть —
+    корутина. Сборка рабочей области синхронная, поэтому ответ получаем
+    заранее: дальше его отдаёт ``default_cwd()`` или кэш ``_PRIMED_CWD``.
+
+    Цепочка, по порядку убывания надёжности:
+
+    1. бэкенд уже знает каталог (``default_cwd()`` или прошлый прогрев);
+    2. свой прогрев бэкенда (``aprime_default_cwd``) под общим потолком;
+    3. корень задан конфигом (``launch_root``/``project_root``) — спрашивать
+       окружение незачем, отказа нет;
+    4. НЕ песочница — корень возьмётся из ``os.getcwd()``, до ``/`` дело не
+       доходит;
+    5. общий ``pwd`` через корутинный exec-порт — он есть у любого бэкенда,
+       в том числе у async-only, у которого синхронного ``exec`` нет вовсе;
+    6. ничего не вышло — ``WorkspaceRootUnknownError``.
+
+    Шестой пункт заменяет прежний молчаливый откат к ``/``. Цена ошибки
+    несимметрична: лишний отказ сборки виден сразу, а корень ``/`` уводит весь
+    прогон работать не там, и замечают это по странным путям в ответах.
+    """
+    default_cwd = getattr(backend, "default_cwd", None)
+    if callable(default_cwd) and default_cwd():
+        return
+    if _primed_cwd(backend):
+        return
+
+    reasons: list[str] = []
+    prime = getattr(backend, "aprime_default_cwd", None)
+    if callable(prime):
+        try:
+            if await asyncio.wait_for(prime(), _CWD_PRIME_CEILING_SEC):
+                return
+            reasons.append("aprime_default_cwd вернул None")
+        except Exception as exc:  # окружение может быть недоступно
+            reasons.append(f"aprime_default_cwd: {type(exc).__name__}")
+
+    if _config_root_raw(config):
+        # Корень назван явно — он и победит в `resolve_execution_root`.
+        return
+
+    if not getattr(backend, "is_sandbox", False):
+        # Локальный бэкенд корень берёт из `os.getcwd()`; `discover_backend_cwd`
+        # для него не зовётся вовсе, так что отказ прогрева ничем не грозит —
+        # но и растворяться он не должен.
+        if reasons:
+            logging.getLogger(__name__).warning(
+                "backend_cwd_prime_failed: рабочий каталог окружения не узнан (%s; бэкенд: %s)",
+                "; ".join(reasons),
+                type(backend).__name__,
+                extra={"event": "backend_cwd_prime_failed"},
+            )
+        return
+
+    from gc_core.backends.async_protocol import arun_backend_exec_raw
+
+    try:
+        res = await asyncio.wait_for(
+            arun_backend_exec_raw(
+                backend, "pwd", timeout=_CWD_PRIME_CEILING_SEC
+            ),
+            _CWD_PRIME_CEILING_SEC,
+        )
+        cwd = _cwd_from_pwd(res)
+        if cwd:
+            _remember_primed_cwd(backend, cwd)
+            return
+        reasons.append("pwd: пустой ответ или ненулевой код возврата")
+    except Exception as exc:  # окружение может быть недоступно
+        reasons.append(f"pwd: {type(exc).__name__}")
+
+    logging.getLogger(__name__).warning(
+        "backend_cwd_prime_failed: рабочий каталог окружения не узнан (%s; бэкенд: %s)",
+        "; ".join(reasons),
+        type(backend).__name__,
+        extra={"event": "backend_cwd_prime_failed"},
+    )
+    raise WorkspaceRootUnknownError(
+        "не удалось узнать рабочий каталог окружения ("
+        + "; ".join(reasons)
+        + "). Задайте корень явно: launch_root (project_root) в конфиге"
+    )
+
+
+async def areconcile_remote_root(
+    backend: Any, config: Optional[Dict[str, Any]] = None
+) -> None:
+    """Хостовый ``launch_root`` у удалённого бэкенда → cwd той стороны.
+
+    TUI/ACP кладут ``launch_root = cwd`` хоста до сборки контекста. У docker/ssh
+    такого каталога нет, а ``resolve_execution_root`` корень из конфига берёт
+    первым — env-блок промпта и guards смотрели бы на путь хоста. Явно заданный
+    путь, который на той стороне существует (``/testbed``), остаётся.
+    Звать после ``aprime_backend_cwd``: cwd той стороны к этому моменту известен.
+    """
+    if not getattr(backend, "is_sandbox", False) or not isinstance(
+        config, dict
+    ):
+        return
+    raw = _config_root_raw(config)
+    if raw is None:
+        return
+    try:
+        if await backend.is_dir(raw):
+            return
+    except Exception:  # окружение недоступно — корень не трогаем
+        return
+    default_cwd = getattr(backend, "default_cwd", None)
+    remote = (default_cwd() if callable(default_cwd) else None) or _primed_cwd(
+        backend
+    )
+    if not remote:
+        return
+    logging.getLogger(__name__).info(
+        "launch_root %s нет на стороне бэкенда %s — корень рабочей области: %s",
+        raw,
+        type(backend).__name__,
+        remote,
+    )
+    config["launch_root"] = remote
+    if config.get("project_root"):
+        config["project_root"] = remote
 
 
 def _config_root_raw(config: Optional[Dict[str, Any]]) -> Optional[str]:
@@ -60,6 +253,30 @@ def _config_root_raw(config: Optional[Dict[str, Any]]) -> Optional[str]:
         return None
     text = str(raw).strip()
     return text or None
+
+
+def launch_root_from_config(config: Optional[Dict[str, Any]]) -> str:
+    """Корень проекта НА ХОСТЕ по одному конфигу, без бэкенда.
+
+    Для вызывающих, которым корень нужен ДО сборки контекста запуска —
+    например сбросу треда (``agent_edits.snapshots.purge_thread_snapshots``),
+    который чистит снимки в ``<корень>/.gc``. Цепочка та же, что у невиртуального
+    ветвления ``resolve_execution_root``: ключ конфига, затем текущий каталог.
+
+    Песочный бэкенд отдаёт корень в координатах КОНТЕЙНЕРА, и здесь его знать
+    неоткуда: у вызывающих до контекста бэкенда ещё нет. На хосте такой путь
+    всё равно не существует, так что уборка по нему ничего не найдёт и
+    ничего не сломает.
+
+    Нормализация — та же, что у невиртуального ветвления: снимки пишет корень,
+    прошедший ``expanduser`` и ``abspath``, и уборка обязана искать их там же.
+    Сырой ``~`` из конфига вёл её в каталог с именем «~» — снимки переживали
+    сброс.
+    """
+    raw = _config_root_raw(config)
+    if not raw:
+        return os.getcwd()
+    return os.path.abspath(os.path.expanduser(os.path.normpath(raw)))
 
 
 def resolve_execution_root(
@@ -114,7 +331,9 @@ def resolve_root_writable(backend: FsBackend, root: str) -> bool:
     """Whether ``root`` is writable in the execution environment."""
     if getattr(backend, "is_sandbox", False):
         return True
-    from gc_core.utils.directory_write_access import directory_allows_probe_write
+    from gc_core.utils.directory_write_access import (
+        directory_allows_probe_write,
+    )
 
     return directory_allows_probe_write(root)
 
@@ -136,9 +355,12 @@ def build_execution_workspace(
 
 __all__ = [
     "ExecutionWorkspace",
+    "WorkspaceRootUnknownError",
+    "aprime_backend_cwd",
     "build_execution_workspace",
     "discover_backend_cwd",
     "host_os_label",
+    "launch_root_from_config",
     "resolve_execution_os",
     "resolve_execution_root",
     "resolve_execution_shell",

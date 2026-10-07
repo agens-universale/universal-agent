@@ -1,10 +1,11 @@
 import json
 
 from gc_core.tools.turn.intermediate_reply import IntermediateReply
+from gc_testkit.helpers.tool_ctx import CallableTool
 
 
 def test_intermediate_reply_success(capsys):
-    out = json.loads(IntermediateReply()(answer="hello"))
+    out = json.loads(CallableTool(IntermediateReply())(answer="hello"))
     assert out["ok"] is True
     assert out["answer"] == "hello"
     assert out["tool"] == "turn_intermediate_reply"
@@ -14,7 +15,7 @@ def test_intermediate_reply_success(capsys):
 
 
 def test_intermediate_reply_errors():
-    tool = IntermediateReply()
+    tool = CallableTool(IntermediateReply())
     bad_type = json.loads(tool(answer=1))  # type: ignore[arg-type]
     assert bad_type["ok"] is False
     assert bad_type["error"]["field"] == "answer"
@@ -27,7 +28,9 @@ def test_intermediate_reply_errors():
 
 
 def test_intermediate_reply_empty_artifact_path_treated_as_omitted():
-    out = json.loads(IntermediateReply()(answer="ok", artifact_path=""))
+    out = json.loads(
+        CallableTool(IntermediateReply())(answer="ok", artifact_path="")
+    )
     assert out["ok"] is True
     assert out["answer"] == "ok"
     assert "artifact_path" not in out
@@ -35,7 +38,10 @@ def test_intermediate_reply_empty_artifact_path_treated_as_omitted():
 
 def test_intermediate_reply_with_artifact_path(capsys):
     out = json.loads(
-        IntermediateReply()(answer="Короткий ответ. Подробности в артефакте.", artifact_path="report.md")
+        CallableTool(IntermediateReply())(
+            answer="Короткий ответ. Подробности в артефакте.",
+            artifact_path="report.md",
+        )
     )
     assert out["ok"] is True
     assert out["artifact_path"] == "report.md"

@@ -1,54 +1,85 @@
+import asyncio
 import json
 import os
-import time
 from typing import Any, Dict, Optional
-from urllib.parse import urljoin
 
-import requests
+import httpx
 
 from gc_core.constants.tool_names import DOWNLOAD_FILE_NAME
-from gc_core.security.path_policy import WriteGuardViolation, audit_policy_decision, check_write_path_allowed, normalize_path_for_policy, resolve_tool_context
-from gc_core.security.url_policy import UrlPolicyDecision, enforce_url_policy, validate_url_policy
+from gc_core.security.path_policy import (
+    WriteGuardViolation,
+    audit_policy_decision,
+    check_write_path_allowed,
+    normalize_path_for_policy,
+    resolve_tool_context,
+)
+from gc_core.security.url_policy import enforce_url_policy
+from gc_core.tools.exec.redirect_policy import (
+    DEFAULT_MAX_REDIRECTS,
+    stream_validating_redirects,
+)
+from gc_core.tools.exec.redirect_policy import (
+    RedirectBlocked as _SharedRedirectBlocked,
+)
+from gc_core.tools.exec.redirect_policy import (
+    TooManyRedirects as _TooManyRedirects,
+)
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
-from gc_core.utils.tool_report_paths import tool_report_abspath
+from gc_core.utils.async_http import get_async_client
 from gc_core.utils.atomic_io import atomic_replace
+from gc_core.utils.http_proxy import resolve_proxies
+from gc_core.utils.tool_report_paths import tool_report_abspath
+
+_HTML_EXT = ".html"
 
 
-class _RedirectBlocked(Exception):
-    def __init__(self, decision: UrlPolicyDecision) -> None:
-        super().__init__(decision.reason or "redirect blocked")
-        self.decision = decision
+#: Псевдоним общего исключения — см. ``tools/exec/redirect_policy``.
+_RedirectBlocked = _SharedRedirectBlocked
 
 
 class DownloadFile(AbstractSimpleTool):
     timeout_seconds = 20
     max_retries = 2
     retry_backoff_seconds = 1.0
-    default_user_agent = (
-        "Mozilla/5.0 (X11; Linux x86_64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/124.0.0.0 Safari/537.36"
+    default_user_agent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    ALLOWED_EXTENSIONS = frozenset(
+        {
+            ".pdf",
+            ".docx",
+            ".xls",
+            ".xlsx",
+            ".pptx",
+            ".csv",
+            ".html",
+            ".msg",
+            ".txt",
+            ".md",
+            ".json",
+        }
     )
-    ALLOWED_EXTENSIONS = frozenset({
-        ".pdf", ".docx", ".xls", ".xlsx", ".pptx", ".csv", ".html", ".msg",
-        ".txt", ".md", ".json",
-    })
-    _MAX_REDIRECTS = 10
     _BOM_PREFIXES = (
         b"\xef\xbb\xbf",
         b"\xff\xfe",
         b"\xfe\xff",
     )
 
-    def __init__(self, ctx: Any = None, state: Any = None, **kwargs: Any) -> None:
+    def __init__(
+        self, ctx: Any = None, state: Any = None, **kwargs: Any
+    ) -> None:
         super().__init__(**kwargs)
-        if ctx is not None:  # keep the base-class LocalFsBackend fallback when ctx is absent
+        if (
+            ctx is not None
+        ):  # keep the base-class LocalFsBackend fallback when ctx is absent
             self._ctx = ctx
         self._state = state
 
     @classmethod
-    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        extensions = ", ".join(sorted(ext.lstrip(".") for ext in cls.ALLOWED_EXTENSIONS))
+    def tool_description(
+        cls, config_dict: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        extensions = ", ".join(
+            sorted(ext.lstrip(".") for ext in cls.ALLOWED_EXTENSIONS)
+        )
         return {
             "type": "function",
             "name": DOWNLOAD_FILE_NAME,
@@ -77,7 +108,9 @@ class DownloadFile(AbstractSimpleTool):
         }
 
     @classmethod
-    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> str:
+    def prompt_description(
+        cls, config_dict: Optional[Dict[str, Any]] = None
+    ) -> str:
         return (
             "Tool name: download_file\n"
             "Tool description: Downloads a document or plain-text file from a URL into the configured download directory.\n\n"
@@ -89,7 +122,8 @@ class DownloadFile(AbstractSimpleTool):
             "- filename must include a supported extension (.pdf, .docx, .xlsx, .txt, .md, .json, ...).\n"
         )
 
-    def _result(self, 
+    def _result(
+        self,
         *,
         ok: bool = False,
         path: str = "",
@@ -101,7 +135,9 @@ class DownloadFile(AbstractSimpleTool):
             {
                 "tool": DownloadFile.registered_tool_name(),
                 "ok": ok,
-                "path": tool_report_abspath(path, workspace=self._workspace) if path else "",
+                "path": tool_report_abspath(path, workspace=self._workspace)
+                if path
+                else "",
                 "filename": filename,
                 "bytes_written": bytes_written,
                 "error": error,
@@ -118,34 +154,63 @@ class DownloadFile(AbstractSimpleTool):
             return ctx_config
         return {}
 
-    def _resolve_download_settings(self, launch_root: str) -> tuple[str, int] | Dict[str, Any]:
+    def _resolve_download_settings(
+        self, launch_root: str
+    ) -> tuple[str, int] | Dict[str, Any]:
         cfg = self._get_config_dict().get("download") or {}
-        raw = os.path.expanduser(os.path.expandvars(str(cfg.get("download_dir") or "downloads").strip()))
+        raw = os.path.expanduser(
+            os.path.expandvars(
+                str(cfg.get("download_dir") or "downloads").strip()
+            )
+        )
         if not raw:
-            return {"type": "invalid_download_dir", "message": "download_dir must not be empty."}
+            return {
+                "type": "invalid_download_dir",
+                "message": "download_dir must not be empty.",
+            }
         try:
             download_root = str(normalize_path_for_policy(raw, launch_root))
         except ValueError:
-            return {"type": "invalid_download_dir", "message": "download_dir resolved to an empty path."}
+            return {
+                "type": "invalid_download_dir",
+                "message": "download_dir resolved to an empty path.",
+            }
         max_bytes = int(cfg.get("max_bytes") or 52_428_800)
         return download_root, max_bytes
 
     @classmethod
-    def _validate_filename(cls, filename: Any) -> tuple[str, str] | Dict[str, Any]:
+    def _validate_filename(
+        cls, filename: Any
+    ) -> tuple[str, str] | Dict[str, Any]:
         if not filename or not isinstance(filename, str):
             return {"type": "invalid_argument", "field": "filename"}
         name = filename.strip()
         if not name or name in (".", ".."):
-            return {"type": "invalid_filename", "message": "filename must be a non-empty basename."}
+            return {
+                "type": "invalid_filename",
+                "message": "filename must be a non-empty basename.",
+            }
         if os.path.basename(name) != name or "/" in name or "\\" in name:
-            return {"type": "invalid_filename", "message": "filename must be a basename without path separators."}
+            return {
+                "type": "invalid_filename",
+                "message": "filename must be a basename without path separators.",
+            }
         if "\x00" in name or "\r" in name or "\n" in name:
-            return {"type": "invalid_filename", "message": "filename contains unsupported characters (null byte or newline)."}
+            return {
+                "type": "invalid_filename",
+                "message": "filename contains unsupported characters (null byte or newline).",
+            }
         if len(name) > 255:
-            return {"type": "invalid_filename", "message": "filename is too long."}
+            return {
+                "type": "invalid_filename",
+                "message": "filename is too long.",
+            }
         ext = os.path.splitext(name)[1].lower()
         if ext not in cls.ALLOWED_EXTENSIONS:
-            return {"type": "format_blocked", "reason": "extension not allowed"}
+            return {
+                "type": "format_blocked",
+                "reason": "extension not allowed",
+            }
         return name, ext
 
     @classmethod
@@ -157,26 +222,34 @@ class DownloadFile(AbstractSimpleTool):
         if ext in {".docx", ".xlsx", ".pptx"}:
             return body.startswith(b"PK\x03\x04")
         if ext in {".xls", ".msg"}:
-            return body.startswith(b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1")
-        if ext in {".csv", ".txt", ".md", ".html", ".json"}:
+            return body.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1")
+        if ext in {".csv", ".txt", ".md", _HTML_EXT, ".json"}:
             if b"\x00" in body[:4096]:
                 return False
-            if ext != ".html":
-                return True
-            payload = body
-            for bom in cls._BOM_PREFIXES:
-                if payload.startswith(bom):
-                    payload = payload[len(bom):]
-                    break
-            for byte in payload:
-                if byte in (9, 10, 13, 32):
-                    continue
-                return byte == ord("<")
-            return False
+            return ext != _HTML_EXT or cls._looks_like_html(body)
+        return False
+
+    @classmethod
+    def _looks_like_html(cls, body: bytes) -> bool:
+        """Первый значащий байт после BOM/пробелов — '<'."""
+        payload = body
+        for bom in cls._BOM_PREFIXES:
+            if payload.startswith(bom):
+                payload = payload[len(bom) :]
+                break
+        for byte in payload:
+            if byte in (9, 10, 13, 32):
+                continue
+            return byte == ord("<")
         return False
 
     def _check_write_guard(self, dest: str) -> Optional[Dict[str, Any]]:
-        context = resolve_tool_context(self, ctx=self._ctx, state=self._state, config_dict=self._get_config_dict())
+        context = resolve_tool_context(
+            self,
+            ctx=self._ctx,
+            state=self._state,
+            config_dict=self._get_config_dict(),
+        )
         if not context.write_guard.enabled:
             return None
         try:
@@ -200,6 +273,7 @@ class DownloadFile(AbstractSimpleTool):
                 return None
             if wg_mode == "ask":
                 from gc_core.security.confirm_port import request_confirm
+
                 confirmed = request_confirm(
                     title="Защита записи",
                     question=f"Разрешить запись вне периметра проекта в {dest}?",
@@ -207,7 +281,10 @@ class DownloadFile(AbstractSimpleTool):
                         ("Tool", self.registered_tool_name()),
                         ("Operation", "write"),
                         ("Path", dest),
-                        ("Allowed roots", exc.error.get("allowed_write_roots") or []),
+                        (
+                            "Allowed roots",
+                            exc.error.get("allowed_write_roots") or [],
+                        ),
                     ],
                     ctx=context.ctx,
                     decision_key=f"write:{dest}",
@@ -231,7 +308,9 @@ class DownloadFile(AbstractSimpleTool):
                 context,
                 tool_name=self.registered_tool_name(),
                 decision="blocked",
-                reason_code="policy_deny" if wg_mode == "deny" else "policy_ask_cancelled",
+                reason_code="policy_deny"
+                if wg_mode == "deny"
+                else "policy_ask_cancelled",
                 error_type=exc.error.get("type"),
             )
             return exc.error
@@ -243,41 +322,68 @@ class DownloadFile(AbstractSimpleTool):
         )
         return None
 
-    def _fetch_with_redirect_validation(
+    def _stream_with_redirect_validation(
         self,
-        session: requests.Session,
+        session: "httpx.AsyncClient",
         start_url: str,
         headers: Dict[str, str],
         timeout: int,
         *,
         allowed_schemes: list[str],
         url_blacklist: list[str],
-    ) -> requests.Response:
-        current = start_url
-        for _ in range(self._MAX_REDIRECTS + 1):
-            response = session.get(current, headers=headers, timeout=timeout, allow_redirects=False)
-            status = getattr(response, "status_code", 0) or 0
-            if not (300 <= status < 400):
-                return response
-            next_url = getattr(response, "headers", {}).get("Location") if hasattr(response, "headers") else None
-            if not next_url:
-                return response
-            next_abs = urljoin(current, next_url)
-            decision = validate_url_policy(next_abs, allowed_schemes, url_blacklist)
-            if not decision.allowed:
-                raise _RedirectBlocked(decision)
-            current = next_abs
-        raise _RedirectBlocked(
-            UrlPolicyDecision(
-                allowed=False,
-                url=current,
-                error_type="too_many_redirects",
-                reason=f"Exceeded {self._MAX_REDIRECTS} redirects.",
-            )
+    ):
+        """Общая потоковая петля из ``redirect_policy``.
+
+        Тело НЕ читается: файл может быть гигабайтным, и решение «слишком
+        большой» надо принимать до того, как он приедет в память.
+        """
+        return stream_validating_redirects(
+            session,
+            start_url,
+            headers,
+            timeout,
+            allowed_schemes=allowed_schemes,
+            url_blacklist=url_blacklist,
+            max_redirects=DEFAULT_MAX_REDIRECTS,
         )
 
-    def _http_get_bytes(self, url: str, max_bytes: int) -> tuple[bytes, Optional[Dict[str, Any]]]:
-        context = resolve_tool_context(self, ctx=self._ctx, state=self._state, config_dict=self._get_config_dict())
+    async def _read_bounded(
+        self, response: "httpx.Response", max_bytes: int
+    ) -> tuple[bytes, Optional[Dict[str, Any]]]:
+        """Прочитать тело, оборвав его на ``max_bytes``.
+
+        Сначала — заявленный ``Content-Length``: если сервер честно сказал, что
+        файл больше лимита, качать нечего вовсе. Он не обязателен и может
+        врать, поэтому дальше считаем фактически прочитанное и обрываем.
+        """
+        declared = response.headers.get("Content-Length")
+        if declared and declared.isdigit() and int(declared) > max_bytes:
+            return b"", {
+                "type": "file_too_large",
+                "message": f"Response body exceeds max_bytes ({max_bytes}).",
+                "declared_bytes": int(declared),
+            }
+        chunks: list = []
+        total = 0
+        async for chunk in response.aiter_bytes():
+            total += len(chunk)
+            if total > max_bytes:
+                return b"", {
+                    "type": "file_too_large",
+                    "message": f"Response body exceeds max_bytes ({max_bytes}).",
+                }
+            chunks.append(chunk)
+        return b"".join(chunks), None
+
+    async def _http_get_bytes(
+        self, url: str, max_bytes: int
+    ) -> tuple[bytes, Optional[Dict[str, Any]]]:
+        context = resolve_tool_context(
+            self,
+            ctx=self._ctx,
+            state=self._state,
+            config_dict=self._get_config_dict(),
+        )
         headers = {
             "User-Agent": self.default_user_agent,
             "Accept": "*/*",
@@ -289,49 +395,64 @@ class DownloadFile(AbstractSimpleTool):
         }
         response = None
         attempts = 1 + self.max_retries
-        with requests.Session() as session:
-            for attempt in range(1, attempts + 1):
-                try:
-                    response = self._fetch_with_redirect_validation(
-                        session,
-                        url,
-                        headers,
-                        self.timeout_seconds,
-                        allowed_schemes=context.url_allowed_schemes,
-                        url_blacklist=context.url_blacklist,
-                    )
+        # Клиент общий и переиспользуемый — закрывать его здесь нельзя.
+        session = get_async_client(
+            proxies=resolve_proxies(None, os.environ, url)
+        )
+        for attempt in range(1, attempts + 1):
+            try:
+                async with self._stream_with_redirect_validation(
+                    session,
+                    url,
+                    headers,
+                    self.timeout_seconds,
+                    allowed_schemes=context.url_allowed_schemes,
+                    url_blacklist=context.url_blacklist,
+                ) as response:
+                    if response.status_code >= 400:
+                        # Тело ошибки читаем: без него у `raise_for_status`
+                        # на стриминговом ответе нет текста.
+                        await response.aread()
                     response.raise_for_status()
-                    break
-                except _RedirectBlocked as redirect_exc:
-                    decision = redirect_exc.decision
+                    return await self._read_bounded(response, max_bytes)
+            except _TooManyRedirects as loop_exc:
+                # Петля редиректов — сетевая проблема, а не запрет политики.
+                return b"", {
+                    "type": "too_many_redirects",
+                    "reason": str(loop_exc),
+                    "limit": loop_exc.limit,
+                }
+            except _RedirectBlocked as redirect_exc:
+                decision = redirect_exc.decision
+                return b"", {
+                    "type": decision.error_type or "url_blocked_by_policy",
+                    "reason": decision.reason,
+                    "matched_rule": decision.matched_rule,
+                    "blocked_on_redirect": True,
+                }
+            except httpx.HTTPError as exc:
+                status = getattr(
+                    getattr(exc, "response", None), "status_code", None
+                )
+                retryable = status is None or status in (429,) or status >= 500
+                if (not retryable) or attempt == attempts:
                     return b"", {
-                        "type": decision.error_type or "url_blocked_by_policy",
-                        "reason": decision.reason,
-                        "matched_rule": decision.matched_rule,
-                        "blocked_on_redirect": True,
+                        "type": "request_failed",
+                        "message": str(exc),
+                        "attempt": attempt,
+                        "attempts_total": attempts,
+                        "retryable": retryable,
                     }
-                except requests.RequestException as exc:
-                    status = getattr(getattr(exc, "response", None), "status_code", None)
-                    retryable = status is None or status in (429,) or status >= 500
-                    if (not retryable) or attempt == attempts:
-                        return b"", {
-                            "type": "request_failed",
-                            "message": str(exc),
-                            "attempt": attempt,
-                            "attempts_total": attempts,
-                            "retryable": retryable,
-                        }
-                    time.sleep(self.retry_backoff_seconds * attempt)
+                await asyncio.sleep(self.retry_backoff_seconds * attempt)
 
-        if response is None:
-            return b"", {"type": "request_failed", "message": "Unknown request failure."}
+        return b"", {
+            "type": "request_failed",
+            "message": "Unknown request failure.",
+        }
 
-        body = getattr(response, "content", b"") or b""
-        if len(body) > max_bytes:
-            return b"", {"type": "file_too_large", "message": f"Response body exceeds max_bytes ({max_bytes})."}
-        return body, None
-
-    def _atomic_write(self, dest: str, body: bytes) -> Optional[Dict[str, Any]]:
+    def _atomic_write(
+        self, dest: str, body: bytes
+    ) -> Optional[Dict[str, Any]]:
         tmp_path = f"{dest}.tmp"
         try:
             with open(tmp_path, "wb") as fd:
@@ -352,15 +473,27 @@ class DownloadFile(AbstractSimpleTool):
         return None
 
     @enforce_url_policy(url_arg="url")
-    def __call__(self, url: str, filename: str, **kwargs: Any) -> str:
+    async def acall(self, url: str, filename: str, **kwargs: Any) -> str:
         if not isinstance(url, str):
-            return self._result(error={"type": "invalid_argument", "field": "url"})
+            return self._result(
+                error={"type": "invalid_argument", "field": "url"}
+            )
         normalized_url = url.strip()
         if not normalized_url:
-            return self._result(error={"type": "invalid_argument", "field": "url", "message": "URL cannot be empty."})
+            return self._result(
+                error={
+                    "type": "invalid_argument",
+                    "field": "url",
+                    "message": "URL cannot be empty.",
+                }
+            )
         if not normalized_url.startswith(("http://", "https://")):
             return self._result(
-                error={"type": "invalid_argument", "field": "url", "message": "URL must start with http:// or https://."},
+                error={
+                    "type": "invalid_argument",
+                    "field": "url",
+                    "message": "URL must start with http:// or https://.",
+                },
             )
 
         filename_result = self._validate_filename(filename)
@@ -368,34 +501,64 @@ class DownloadFile(AbstractSimpleTool):
             return self._result(error=filename_result)
         validated_filename, ext = filename_result
 
-        context = resolve_tool_context(self, ctx=self._ctx, state=self._state, config_dict=self._get_config_dict())
-        download_settings = self._resolve_download_settings(context.launch_root)
+        context = resolve_tool_context(
+            self,
+            ctx=self._ctx,
+            state=self._state,
+            config_dict=self._get_config_dict(),
+        )
+        download_settings = self._resolve_download_settings(
+            context.launch_root
+        )
         if isinstance(download_settings, dict):
             return self._result(error=download_settings)
         download_root, max_bytes = download_settings
 
         dest = os.path.join(download_root, validated_filename)
 
-        write_guard_error = self._check_write_guard(dest)
+        # Гард записи в режиме `ask` ждёт человека, а `_check_write_guard`
+        # синхронный: прямой вызов отсюда держал бы event loop вызывающего всё
+        # время ожидания. Уезжаем ТЕМ ЖЕ маршрутом, что гарды-декораторы
+        # (`OffLoop` → `run_abandonable_in`), а не через `asyncio.to_thread`:
+        # только он ставит вызову метку «брошен». Без метки подтверждение,
+        # оставшееся от снятого по Ctrl+C вызова, дожидается следующей строки и
+        # записывает по ней разрешение на запись вне периметра — ровно тот вред,
+        # который закрывали R4.2 и R5.1. Заодно поток берётся из слотов гвардов,
+        # а не из общего пула, который держит выход процесса.
+        from gc_core.security.dual_wrapper import off_loop
+
+        write_guard_error = await off_loop(self._check_write_guard, dest)
         if write_guard_error is not None:
-            return self._result(path=dest, filename=validated_filename, error=write_guard_error)
+            return self._result(
+                path=dest, filename=validated_filename, error=write_guard_error
+            )
 
         if os.path.exists(dest):
             return self._result(
                 path=dest,
                 filename=validated_filename,
-                error={"type": "file_exists", "message": "Destination file already exists."},
+                error={
+                    "type": "file_exists",
+                    "message": "Destination file already exists.",
+                },
             )
 
-        body, request_error = self._http_get_bytes(normalized_url, max_bytes)
+        body, request_error = await self._http_get_bytes(
+            normalized_url, max_bytes
+        )
         if request_error is not None:
-            return self._result(path=dest, filename=validated_filename, error=request_error)
+            return self._result(
+                path=dest, filename=validated_filename, error=request_error
+            )
 
         if not self._validate_magic(body, ext):
             return self._result(
                 path=dest,
                 filename=validated_filename,
-                error={"type": "format_blocked", "reason": "content does not match expected format"},
+                error={
+                    "type": "format_blocked",
+                    "reason": "content does not match expected format",
+                },
             )
 
         try:
@@ -407,9 +570,35 @@ class DownloadFile(AbstractSimpleTool):
                 error={"type": "write_failed", "message": str(exc)},
             )
 
+        # Инлайн: нативной асинхронной записи в Python нет (все «async file»
+        # обёрнуты вокруг того же пула), а поток здесь не окупается — замерено
+        # 6.1 мс лага loop против 2.7 мс на записи 32 МиБ при бюджете приёмки
+        # 150 мс. Сеть выше остаётся асинхронной, поток убран только с записи.
         write_error = self._atomic_write(dest, body)
         if write_error is not None:
-            return self._result(path=dest, filename=validated_filename, error=write_error)
+            return self._result(
+                path=dest, filename=validated_filename, error=write_error
+            )
+
+        # Журнал правок: скачанный файл — правка агента в проекте, и без записи
+        # его не было бы ни на экране изменений, ни в сводке хода, ни в откате
+        # (пятый раунд ревью, находка 7). Импорт вложенный — цикл с thread_store,
+        # как у остальных тулов.
+        #
+        # Вид правки всегда `create`: существующий путь тул отверг выше
+        # (`file_exists`), перезаписи тут не бывает по построению. Поэтому и
+        # `old_bytes=None` — «до» у пути не было, снимать нечего, а откату
+        # созданного хватает собственного существования.
+        from gc_core.agent_edits.recorder import record_edit
+
+        await record_edit(
+            self._ctx,
+            abs_path=dest,
+            old_bytes=None,
+            new_bytes=body,
+            op="create",
+            call_id=self._call_id,
+        )
 
         return self._result(
             ok=True,

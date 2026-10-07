@@ -15,11 +15,13 @@ Usage:
         --agent-import-path adapters.gc_cli_external:GcCliExternal \\
         --model openai/MiniMaxAI/MiniMax-M2.7
 """
+
 import asyncio
 import json
 import os
 import re
 import shlex
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -67,10 +69,12 @@ DEFAULT_CONTAINER_SKILLS_ROOT = "/harbor/skills"
 # (see harbor/Dockerfile) and live at repo-root in editable/local runs. Resolve them
 # from __file__ so they work in both layouts, bypassing the source-checkout-only
 # default path helpers (which break in the non-editable image install).
-_ADAPTER_DIR = Path(__file__).resolve().parent          # .../adapters
-_PROMPTS_DIR = _ADAPTER_DIR.parent / "prompts"          # image: /opt/gc-harbor-adapters/prompts
+_ADAPTER_DIR = Path(__file__).resolve().parent  # .../adapters
+_PROMPTS_DIR = (
+    _ADAPTER_DIR.parent / "prompts"
+)  # image: /opt/gc-harbor-adapters/prompts
 _SKILLS_DIR = _ADAPTER_DIR.parent / "skills"
-if not _PROMPTS_DIR.is_dir():                            # editable/local: fall back to repo
+if not _PROMPTS_DIR.is_dir():  # editable/local: fall back to repo
     # Корень репозитория ищем ПО МАРКЕРУ, а не фиксированной глубиной: адаптер
     # уже переезжал (harbor/ → integrations/harbor/), и счётчик .parent молча
     # уводил на уровень выше нужного — промпты переставали находиться.
@@ -82,7 +86,7 @@ if not _PROMPTS_DIR.is_dir():                            # editable/local: fall 
     from gc_core.bundled_assets import repo_root_from as _find_repo_root
 
     _repo_root = _find_repo_root(_ADAPTER_DIR)
-    if _repo_root is None:                               # не рабочая копия — оставляем как есть
+    if _repo_root is None:  # не рабочая копия — оставляем как есть
         _repo_root = _ADAPTER_DIR.parent.parent
     # Ассеты принадлежат дистрибутиву gc-core и лежат рядом с его исходниками;
     # в корне репозитория их больше нет.
@@ -107,6 +111,75 @@ def _stringify_content(content: Any) -> str:
                 parts.append(str(p))
         return "\n".join(x for x in parts if x)
     return str(content)
+
+
+def _classify_message(m: dict, attach_observation) -> "tuple[str, str] | None":
+    """Во что превращается одно сообщение: (source, text) либо None.
+
+    None — текст уже приложен к `observation` последнего шага агента и своего
+    шага не заводит.
+    """
+    role = m.get("role")
+    mtype = m.get("type")
+    # Tool result → observation on the last agent step.
+    if mtype == "function_call_output" or role == "tool":
+        text = _stringify_content(
+            m.get("output") if "output" in m else m.get("content")
+        )
+        if attach_observation(text):
+            return None
+        return "user", text or "(tool result)"  # orphan → user step
+    # Tool call → agent step describing the action.
+    if mtype == "function_call":
+        name, args = m.get("name") or "tool", m.get("arguments")
+        return "agent", f"{name}({args})" if args else f"{name}()"
+    return _ROLE_TO_SOURCE.get(role, "user"), _stringify_content(
+        m.get("content")
+    )
+
+
+def _harbor_server_entry(
+    server, *, os_backend_transports, logger=None
+) -> "tuple[str, dict] | None":
+    """Один MCP-сервер задачи → (ключ, запись `mcp-servers`) либо None, если его
+    транспорт нам неизвестен."""
+    name = getattr(server, "name", None)
+    transport = getattr(server, "transport", None)
+    if not name or not transport:
+        return None
+    gc_transport = _HARBOR_TRANSPORT_MAP.get(str(transport))
+    if gc_transport is None:
+        if logger is not None:
+            logger.warning(
+                "MCP server %r: unsupported harbor transport %r, skipped",
+                name,
+                transport,
+            )
+        return None
+    # `sse` needs a live session, which a stateless exec cannot hold, so
+    # tagging it os_backend would build a config the resolver is guaranteed to
+    # reject. It stays on the agent locus: unreachable from there is an honest
+    # connection error, not a self-inflicted config one.
+    locus = "os_backend" if gc_transport in os_backend_transports else "agent"
+    if locus == "agent" and logger is not None:
+        logger.warning(
+            "MCP server %r uses transport %r, which needs a live session "
+            "and cannot run inside the task environment; it will be tried "
+            "from the agent runtime instead",
+            name,
+            transport,
+        )
+    entry: dict = {
+        "transport": gc_transport,
+        "server-name": str(name),
+        "execute_on": locus,
+    }
+    if gc_transport == "stdio":
+        entry["command"] = str(getattr(server, "command", "") or "")
+        entry["args"] = [str(a) for a in (getattr(server, "args", None) or [])]
+    else:
+        entry["url"] = str(getattr(server, "url", "") or "")
+    return re.sub(r"[^A-Za-z0-9_]", "_", str(name)), entry
 
 
 def _messages_to_steps(messages: list) -> list:
@@ -139,29 +212,49 @@ def _messages_to_steps(messages: list) -> list:
     for m in messages:
         if not isinstance(m, dict):
             continue
-        role = m.get("role")
-        mtype = m.get("type")
-
-        # Tool result → observation on the last agent step.
-        if mtype == "function_call_output" or role == "tool":
-            text = _stringify_content(m.get("output") if "output" in m else m.get("content"))
-            if _attach_observation(text):
-                continue
-            source, text = "user", text or "(tool result)"  # orphan → user step
-        # Tool call → agent step describing the action.
-        elif mtype == "function_call":
-            name, args = m.get("name") or "tool", m.get("arguments")
-            source = "agent"
-            text = f"{name}({args})" if args else f"{name}()"
-        else:
-            source = _ROLE_TO_SOURCE.get(role, "user")
-            text = _stringify_content(m.get("content"))
-
-        step = Step(step_id=len(steps) + 1, source=source, message=text)
+        classified = _classify_message(m, _attach_observation)
+        if classified is None:
+            continue
+        source, text = classified
+        step = Step(
+            step_id=len(steps) + 1,
+            source=source,
+            message=text,
+            reasoning_content=(
+                m.get("reasoning_content") if source == "agent" else None
+            ),
+        )
         steps.append(step)
         if source == "agent":
             last_agent = step
     return steps
+
+
+def _skill_source(
+    entry: dict[str, Any], root: Any, sources: dict[str, str]
+) -> str:
+    """Атрибуция profile/task для одной записи registry.
+
+    `sources` ключуется именем директории верхнего уровня, которую загрузил
+    профиль, но канонический id pack-скилла — `<pack>:<skill>`: pack id берётся
+    из pack.yaml и не обязан совпадать с именем директории. Загруженную
+    директорию однозначно определяет root_path записи (путь под корнем скиллов);
+    точное совпадение по id оставлено как fallback для flat-скиллов и минимальных
+    тестовых стабов без пути.
+    """
+    path = str(entry.get("root_path") or "")
+    root_str = str(root or "")
+    top = None
+    if path and root_str:
+        try:
+            parts = Path(path).relative_to(root_str).parts
+        except ValueError:
+            parts = ()
+        top = parts[0] if parts else None
+    value = sources.get(top) if top else None
+    if value is None:
+        value = sources.get(str(entry["id"]))
+    return "profile" if value == "profile" else "task"
 
 
 class GcCliExternal(BaseAgent):
@@ -187,6 +280,12 @@ class GcCliExternal(BaseAgent):
         self._api_base = api_base
         self._session_id = session_id
         self._overrides = dict(gc_cli_config or {})
+        # Отмену трайла могут попросить, пока идёт сборка контекста (дискавери
+        # до 120 с), — то есть ДО того, как появится executor, которому можно
+        # сказать stop_run(). Флаг закрывает это окно; лок нужен потому, что
+        # ставит его loop Harbor, а читает рабочий поток агента.
+        self._cancel_lock = threading.Lock()
+        self._cancelled = False
 
     @staticmethod
     def name() -> str:
@@ -213,7 +312,7 @@ class GcCliExternal(BaseAgent):
                 "or provide gc_cli_config.model in the agent profile."
             )
         if m.startswith("openai/"):
-            m = m[len("openai/"):]
+            m = m[len("openai/") :]
         return m
 
     @property
@@ -222,8 +321,14 @@ class GcCliExternal(BaseAgent):
         # URL; Polar gives the /v1 base, so append the path here.
         if self._api_base:
             base = self._api_base.rstrip("/")
-            return base if base.endswith("/chat/completions") else base + "/chat/completions"
-        url = os.environ.get("GC_CLI_BACKEND_URL") or self._overrides.get("completions_url")
+            return (
+                base
+                if base.endswith("/chat/completions")
+                else base + "/chat/completions"
+            )
+        url = os.environ.get("GC_CLI_BACKEND_URL") or self._overrides.get(
+            "completions_url"
+        )
         if not url:
             raise RuntimeError(
                 "No LLM backend configured: the runner passed no api_base, "
@@ -237,11 +342,15 @@ class GcCliExternal(BaseAgent):
     def _polar_session_id(self) -> str | None:
         """Session id the runner registered with Polar; ``OPENAI_API_KEY`` is a fallback
         only when api_base came too, else a local key would ship as the session id."""
-        raw = self._session_id or (self._api_base and os.environ.get("OPENAI_API_KEY"))
+        raw = self._session_id or (
+            self._api_base and os.environ.get("OPENAI_API_KEY")
+        )
         return raw.strip() or None if raw else None
 
     @staticmethod
-    def _apply_polar_session(config_dict: dict, session_id: str | None) -> None:
+    def _apply_polar_session(
+        config_dict: dict, session_id: str | None
+    ) -> None:
         """Send the Polar session id on every LLM call: the core sends a state UUID, so
         completions land in an unregistered session and the merge finds no dialog.json."""
         if not session_id:
@@ -267,33 +376,48 @@ class GcCliExternal(BaseAgent):
         return config
 
     @staticmethod
-    def _apply_injected_skills(config_dict: dict, skills_path: str | None) -> None:
+    def _apply_injected_skills(
+        config_dict: dict, skills_path: str | None
+    ) -> None:
         """Configure a single backend-visible skills root.
 
         Harbor must never retain the adapter's bundled host path: the backend
         can only see container paths. A nonexistent container sentinel produces
         an intentionally empty single-source registry.
         """
-        config_dict["skills_data_path"] = skills_path or "/harbor/.gc_no_skills"
+        config_dict["skills_data_path"] = (
+            skills_path or "/harbor/.gc_no_skills"
+        )
 
     @staticmethod
     def _resolve_profile_skill_dirs(skills_root: Path) -> list[Path]:
-        """SKILL.md-bearing directories under a runner-local skills root.
+        """Skill/pack directories under a runner-local skills root.
 
         Mirrors the rule the fleet runner applies to task skills
         (`dind_runner._resolve_task_skill_paths`): a SKILL.md directly in the root
         makes the root one skill, otherwise every immediate subdirectory holding a
         SKILL.md is one. Unrelated siblings are skipped rather than rejected —
         harbor's stricter `resolve_skills` would refuse the whole set.
+
+        pack.yaml works the same way as SKILL.md: a root-level pack.yaml makes
+        the whole root one pack (pack.yaml must reach the container, or the pack
+        namespace and its bootstrap logic are lost), and a subdirectory holding
+        pack.yaml is one pack even without a root SKILL.md.
         """
         if not skills_root.is_dir():
             return []
-        if (skills_root / "SKILL.md").is_file():
+        if (skills_root / "SKILL.md").is_file() or (
+            skills_root / "pack.yaml"
+        ).is_file():
             return [skills_root]
         return [
             child
             for child in sorted(skills_root.iterdir())
-            if child.is_dir() and (child / "SKILL.md").is_file()
+            if child.is_dir()
+            and (
+                (child / "SKILL.md").is_file()
+                or (child / "pack.yaml").is_file()
+            )
         ]
 
     async def _merge_profile_skills(
@@ -324,7 +448,8 @@ class GcCliExternal(BaseAgent):
         candidates = self._resolve_profile_skill_dirs(local_root)
         if not candidates:
             self.logger.warning(
-                "No SKILL.md found under %s — no profile skills uploaded", local_root
+                "No SKILL.md found under %s — no profile skills uploaded",
+                local_root,
             )
             return root, {}
         sources: dict[str, str] = {}
@@ -343,7 +468,9 @@ class GcCliExternal(BaseAgent):
             sources[skill_dir.name] = "profile"
         return root, sources
 
-    def _write_skills_debug(self, ctx: Any, sources: dict[str, str]) -> None:
+    async def _write_skills_debug(
+        self, ctx: Any, sources: dict[str, str]
+    ) -> None:
         """Dump the skills the registry actually loaded to ``logs_dir/skills.json``.
 
         Authoritative by construction: the listing comes from the same registry and
@@ -357,25 +484,31 @@ class GcCliExternal(BaseAgent):
             config_dict = getattr(ctx, "config_dict", {}) or {}
             root = config_dict.get("skills_data_path")
             registry = get_skills_registry(config_dict, backend=ctx.os_backend)
-            loaded = sorted(str(s["id"]) for s in registry.list_skills())
+            entries = sorted(
+                await registry.list_skills(), key=lambda e: str(e["id"])
+            )
+            # A name in `sources` mapped to "skipped" means the profile's copy was
+            # NOT uploaded because the task already provided that name — the copy
+            # the agent actually sees still comes from the task, not the profile.
+            # Only an explicit "profile" entry means the profile's copy won.
+            loaded = [
+                {"id": str(e["id"]), "source": _skill_source(e, root, sources)}
+                for e in entries
+            ]
             payload = {
                 "skills_root": root,
-                # A name in `sources` mapped to "skipped" means the profile's copy was
-                # NOT uploaded because the task already provided that name — the copy
-                # the agent actually sees still comes from the task, not the profile.
-                # Only an explicit "profile" entry means the profile's copy won.
-                "loaded": [
-                    {
-                        "id": sid,
-                        "source": "profile" if sources.get(sid) == "profile" else "task",
-                    }
-                    for sid in loaded
-                ],
-                "skipped": sorted(k for k, v in sources.items() if v == "skipped"),
+                "loaded": loaded,
+                "skipped": sorted(
+                    k for k, v in sources.items() if v == "skipped"
+                ),
                 "counts": {
                     "loaded": len(loaded),
-                    "profile": sum(1 for v in sources.values() if v == "profile"),
-                    "skipped": sum(1 for v in sources.values() if v == "skipped"),
+                    "profile": sum(
+                        1 for v in sources.values() if v == "profile"
+                    ),
+                    "skipped": sum(
+                        1 for v in sources.values() if v == "skipped"
+                    ),
                 },
             }
             path = self.logs_dir / "skills.json"
@@ -405,7 +538,9 @@ class GcCliExternal(BaseAgent):
             "`skills_load` to load the relevant one before solving."
         )
 
-    def _populate_usage(self, context: Any, state: Any) -> dict[str, Any] | None:
+    def _populate_usage(
+        self, context: Any, state: Any
+    ) -> dict[str, Any] | None:
         """Hand `state.usage` totals to Harbor, which otherwise writes nulls.
 
         Totals cover every LLM call — main loop, summariser, finish gate, subagents.
@@ -415,7 +550,9 @@ class GcCliExternal(BaseAgent):
         unwinding a timeout. Returns the totals for the caller's metadata.
         """
         try:
-            usage = getattr(state, "usage", None) if state is not None else None
+            usage = (
+                getattr(state, "usage", None) if state is not None else None
+            )
             totals = usage.totals() if usage is not None else None
             if not totals or not totals["calls"]:
                 return totals
@@ -442,7 +579,11 @@ class GcCliExternal(BaseAgent):
         """
         try:
             archived = list(getattr(self, "_evicted_messages", None) or [])
-            current = list(getattr(state, "messages", None) or []) if state is not None else []
+            current = (
+                list(getattr(state, "messages", None) or [])
+                if state is not None
+                else []
+            )
             # Full trajectory: compaction-evicted steps (via callback) + compacted tail.
             messages = archived + current
             steps = _messages_to_steps(messages)
@@ -464,7 +605,9 @@ class GcCliExternal(BaseAgent):
             self.logger.debug(f"ATIF trajectory dumped to {path}")
             return len(steps)
         except Exception:
-            self.logger.error("Failed to write ATIF trajectory.json", exc_info=True)
+            self.logger.error(
+                "Failed to write ATIF trajectory.json", exc_info=True
+            )
             return 0
 
     @staticmethod
@@ -482,49 +625,21 @@ class GcCliExternal(BaseAgent):
 
         mapped: dict = {}
         for server in servers or []:
-            name = getattr(server, "name", None)
-            transport = getattr(server, "transport", None)
-            if not name or not transport:
+            item = _harbor_server_entry(
+                server,
+                os_backend_transports=OS_BACKEND_TRANSPORTS,
+                logger=logger,
+            )
+            if item is None:
                 continue
-            gc_transport = _HARBOR_TRANSPORT_MAP.get(str(transport))
-            if gc_transport is None:
-                if logger is not None:
-                    logger.warning(
-                        "MCP server %r: unsupported harbor transport %r, skipped",
-                        name, transport,
-                    )
-                continue
-            key = re.sub(r"[^A-Za-z0-9_]", "_", str(name))
+            key, entry = item
             if key in mapped and logger is not None:
                 logger.warning(
                     "MCP server %r collides with an earlier server on key %r after "
                     "sanitising; the earlier one is dropped",
-                    name, key,
+                    getattr(server, "name", None),
+                    key,
                 )
-            # `sse` needs a live session, which a stateless exec cannot hold, so
-            # tagging it os_backend would build a config the resolver is
-            # guaranteed to reject. It stays on the agent locus: unreachable from
-            # there is an honest connection error, not a self-inflicted config one.
-            locus = (
-                "os_backend" if gc_transport in OS_BACKEND_TRANSPORTS else "agent"
-            )
-            if locus == "agent" and logger is not None:
-                logger.warning(
-                    "MCP server %r uses transport %r, which needs a live session "
-                    "and cannot run inside the task environment; it will be tried "
-                    "from the agent runtime instead",
-                    name, transport,
-                )
-            entry: dict = {
-                "transport": gc_transport,
-                "server-name": str(name),
-                "execute_on": locus,
-            }
-            if gc_transport == "stdio":
-                entry["command"] = str(getattr(server, "command", "") or "")
-                entry["args"] = [str(a) for a in (getattr(server, "args", None) or [])]
-            else:
-                entry["url"] = str(getattr(server, "url", "") or "")
             mapped[key] = entry
         return mapped
 
@@ -560,20 +675,63 @@ class GcCliExternal(BaseAgent):
         )
         config_dict["mcp-meta"] = meta
 
+    def _dump_outcome(self, state, *, executor, timings, context) -> None:
+        """Сбросить траекторию, тайминги и счётчики токенов — что бы ни случилось.
+
+        Вынесено из `run` целиком: у хвоста своя логика восстановления на
+        оборванном прогоне, и вместе с телом `run` он давал сложность выше
+        порога (Sonar S3776).
+        """
+        if state is None and executor is not None:
+            state = executor.get_state()
+        n_steps = self._write_trajectory(state)
+        # On a timeout the worker is abandoned mid-call: these are the totals
+        # reached so far, and timings.jsonl names the call still running.
+        timing_summary = timings.summary()
+        timings.close()
+        self.logger.info("timings: %s", timing_summary)
+
+        # Populate AgentContext so the run isn't a black box: token counters the
+        # same way every other Harbor agent reports them, plus metadata for triage.
+        if context is None:
+            return
+        totals = self._populate_usage(context, state)
+        if context.metadata is not None:
+            return
+        context.metadata = {
+            "agent": self.name(),
+            "session_id": self._session_id,
+            "total_steps": n_steps,
+            "timings": timing_summary,
+            # A zero token count means "no calls"; a missing one means "not
+            # counted". Record both so the difference stays visible.
+            "llm_calls": totals["calls"] if totals else None,
+            "llm_calls_without_usage": (
+                totals["missing_usage_calls"] if totals else None
+            ),
+        }
+
     async def run(
-        self, instruction: str, environment: BaseEnvironment, context: AgentContext
+        self,
+        instruction: str,
+        environment: BaseEnvironment,
+        context: AgentContext,
     ) -> None:
-        from gc_core.run_context import create_run_context
         from gc_core.agent_executor import AgentExecutor
+        from gc_core.run_context import acreate_run_context
 
         loop = asyncio.get_running_loop()
         config_dict = self._build_config()
         self._apply_mcp_servers(
-            config_dict, getattr(self, "mcp_servers", None) or [], logger=self.logger
+            config_dict,
+            getattr(self, "mcp_servers", None) or [],
+            logger=self.logger,
         )
         skills_dir = getattr(self, "skills_dir", None)
         container_skills = (
-            skills_dir if skills_dir and await environment.is_dir(skills_dir) else None
+            skills_dir
+            if skills_dir and await environment.is_dir(skills_dir)
+            else None
         )
         skill_sources: dict[str, str] = {}
         profile_skills = self._overrides.get("skills_data_path")
@@ -593,39 +751,73 @@ class GcCliExternal(BaseAgent):
             # Host-side archive for ATIF dump; core State does not retain these.
             self._evicted_messages.extend(dropped)
 
-        def _run_loop():
+        async def _agent_run():
             nonlocal executor
-            timings.attach()  # sink routing is per thread — bind inside the worker
-            ctx = create_run_context(
-                config_dict,
-                environment=environment,
-                loop=loop,
-                on_messages_evicted=_on_messages_evicted,
-            )
-            self._write_skills_debug(ctx, skill_sources)
-            executor = AgentExecutor(ctx)
-            executor.run([instruction])
-            return executor.get_state()
+            from gc_core.utils.async_http import aclose_clients
+            from gc_core.utils.logging_module import release_run_logger
 
-        # Run the synchronous gc-cli loop off the event loop so backend bridging works,
-        # then dump the final message history as ATIF trajectory.json.
+            ctx = None
+            try:
+                ctx = await acreate_run_context(
+                    config_dict,
+                    environment=environment,
+                    loop=loop,
+                    on_messages_evicted=_on_messages_evicted,
+                )
+                await self._write_skills_debug(ctx, skill_sources)
+                executor = AgentExecutor(ctx)
+                # Отмену могли попросить, пока шла дискавери (до 120 с): тогда
+                # `stop_run()` звать было НЕ НА ЧЁМ — `executor` ещё не был
+                # присвоен, — и поток спокойно уходил в `arun` уже после того,
+                # как его отменили. Флаг ставится под тем же локом, что и
+                # чтение здесь.
+                with self._cancel_lock:
+                    if self._cancelled:
+                        return executor.get_state()
+                await executor.arun([instruction])
+                return executor.get_state()
+            finally:
+                # Пул httpx этого loop закрываем ЗДЕСЬ: `asyncio.run` ниже
+                # убьёт loop, а реестр клиентов ключуется по нему. Без этого
+                # клиент трайла жил до сборщика и всплывал «Event loop is
+                # closed» в чужом месте.
+                #
+                # Логгер трайла — туда же: Harbor ведёт много трайлов в одном
+                # процессе, а `logging` держит каждый логгер до конца процесса
+                # вместе с открытым файлом.
+                release_run_logger(getattr(ctx, "logger", None))
+                await aclose_clients()
+
+        def _run_loop():
+            timings.attach()  # sink routing is per thread — bind inside the worker
+            return asyncio.run(_agent_run())
+
+        # Агент идёт СВОИМ `asyncio.run` в рабочем потоке — не через портал и не
+        # на loop Harbor.
         #
-        # asyncio.to_thread's future can't be cancelled: on a Harbor timeout,
-        # asyncio.wait_for(...) raises CancelledError here but the worker thread keeps
-        # running unattended (up to the pod's infra time limit) since nothing tells the
-        # executor to stop. Use run_in_executor instead so we hold the underlying future
-        # and, on cancellation, call executor.stop_run() (cooperative flag checked by the
-        # step loop) and give the thread a grace period to exit before re-raising.
+        # Раньше поток был обязателен: файловый API `FsBackend` был синхронным и
+        # у `HarborBackend` ждал через `run_coroutine_threadsafe(...).result()`
+        # на loop Harbor — с самого этого loop вечный дедлок. Теперь файловый и
+        # exec-порты корутинные, и `HarborBackend._aawait` сам выбирает: прямой
+        # `await` на loop Harbor или `wrap_future` с чужого loop, — дедлока нет
+        # ни там, ни там. Поток оставлен как есть: перенос агента на loop Harbor
+        # поменял бы модель отмены ниже, а на стенде она не проверена.
+        #
+        # Отменяемость не изменилась: future от `run_in_executor` по-прежнему не
+        # отменить, поэтому на таймауте зовём `stop_run()` (кооперативный флаг,
+        # который проверяет цикл) и даём потоку время выйти.
         state = None
         fut = loop.run_in_executor(None, _run_loop)
         try:
             state = await fut
         except asyncio.CancelledError:
+            with self._cancel_lock:
+                self._cancelled = True
             if executor is not None:
                 executor.stop_run()
             try:
                 state = await asyncio.wait_for(asyncio.shield(fut), timeout=30)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 self.logger.warning(
                     "gc-cli worker thread still running after stop_run(); "
                     "abandoning it and dumping best-effort partial state"
@@ -641,29 +833,6 @@ class GcCliExternal(BaseAgent):
             # ponytail: best-effort only — if stop_run() didn't unblock the thread in
             # time, the thread is still orphaned; raise the grace timeout if this needs
             # a harder kill later.
-            if state is None and executor is not None:
-                state = executor.get_state()
-            n_steps = self._write_trajectory(state)
-            # On a timeout the worker is abandoned mid-call: these are the totals
-            # reached so far, and timings.jsonl names the call still running.
-            timing_summary = timings.summary()
-            timings.close()
-            self.logger.info("timings: %s", timing_summary)
-
-            # Populate AgentContext so the run isn't a black box: token counters the
-            # same way every other Harbor agent reports them, plus metadata for triage.
-            if context is not None:
-                totals = self._populate_usage(context, state)
-                if context.metadata is None:
-                    context.metadata = {
-                        "agent": self.name(),
-                        "session_id": self._session_id,
-                        "total_steps": n_steps,
-                        "timings": timing_summary,
-                        # A zero token count means "no calls"; a missing one means "not
-                        # counted". Record both so the difference stays visible.
-                        "llm_calls": totals["calls"] if totals else None,
-                        "llm_calls_without_usage": (
-                            totals["missing_usage_calls"] if totals else None
-                        ),
-                    }
+            self._dump_outcome(
+                state, executor=executor, timings=timings, context=context
+            )

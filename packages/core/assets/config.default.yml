@@ -17,6 +17,8 @@ level: default               # light | default | max
 # Хотите уровни моделей (light/default/max) и привязки потребителей к ним —
 # раскомментируйте и заполните под свои модели (полный референс — demo_profile.yml,
 # симметричный пример как обычных секций config.yml — demo_config.yml):
+# main/auxiliary заменяют словарь целиком: {} — без kwargs, null — общий словарь.
+# Отсутствующий ключ наследуется из нижнего слоя конфигурации.
 # models:
 #   glm-local:
 #     url: http://127.0.0.1:8014/v1/chat/completions
@@ -33,24 +35,39 @@ backend:
   completions_url: "http://your-backend:PORT/v1/chat/completions"
   chat_completions_max_tokens: 8096
   use_ssl: false
+  # true -> max_tokens; false -> max_completion_tokens.
+  # Можно переопределить на алиасе: models.<alias>.backend (нет ключа — этот дефолт).
   use_max_tokens_param: true
   # true — провайдер требует OpenAI strict tools (все properties в required).
-  # false — типично для GigaCode и non-OpenAI; при true локальная валидация всё равно
-  # принимает omit semantic optional (x-optional-keys).
+  # false — типично для GigaCode и non-OpenAI. Локальная проверка читает канон
+  # (семантический required), даже если на провод ушёл полный required.
+  # Можно переопределить на алиасе: models.<alias>.backend (нет ключа — этот дефолт).
   openai_strict_tools_schema: false
   # Слать ли провайдеру поле function.strict в схемах тулов.
   # false — если сборка провайдера (vllm/sglang) отвечает на это поле 500.
+  # Можно переопределить на алиасе: models.<alias>.backend (нет ключа — этот дефолт).
   send_tool_strict: true
   # Разметка prompt cache для claude-моделей в главном цикле: не задано — авто по id
   # модели; true — включить всем; false — выключить (аварийный рычаг, если прокси
   # отвергает разметку; можно на одну модель: models.<alias>.backend).
   # claude_prompt_cache: false
+  # Модель не принимает картинки и молча их выбрасывает (прокси отвечает «не вижу»
+  # без ошибки): false — картинки ей не слать, смотрит модель для зрения
+  # (assign.vision). Не задано или true — отдельная автоматическая проба;
+  # ваши картинки отправляются только после её успеха. Обычно ставится
+  # на одну модель: models.<alias>.backend.vision: false.
+  # vision: false
   use_retry: true
   # HTTP-таймаут одного запроса к LLM (секунды). Дефолт 600 (10 минут).
   request_timeout_sec: 600
   # HTTP/SOCKS-прокси для backend-вызовов. null/пусто → из env
   # (HTTPS_PROXY/HTTP_PROXY/ALL_PROXY). Пример: "socks5h://proxy.example:1080"
   proxy: null
+  # Vendor-параметры тела запроса (сэмплинг, диалект thinking). Агент
+  # поставляется без предзаданных схем: null — секция не задана, в запрос
+  # уходят серверные дефолты модели. Не {}: на алиасе «секции нет» и «слать
+  # пусто» — разные вещи. Диалект стека собирается в профиле (demo_profile.yml).
+  chat_completion_kwargs: null
   chat_completion_headers:
     Authorization: "Bearer <ВПИШИТЕ_ТОКЕН>"
     # Можно не хранить токен в файле:
@@ -127,12 +144,32 @@ tui:
     # null / omit = авто по высоте экрана; число = фиксированный шаг PgUp/PgDn.
     # page_lines: null
 
-# Diff-TUI: visual review/approve/undo правок агента (не параметры fs return_diff).
-diff_tui:
-  cache_max_orig: 500          # LRU лимит .orig в cache-mode
-  preview_context_lines: 50    # контекст в TUI visual diff / trace-preview
-  full_file_max_lines: 300     # порог «весь файл» vs preview (adaptive)
-  max_diff_chars: 100000       # усечение больших visual diff (0 = без лимита)
+# Канал IDE через Agent Client Protocol (gc-acp). Не влияет на TUI/CLI/server:
+# канальные дефолты копируются в runtime в apply_acp_runtime_defaults.
+acp:
+  # deny | judge | allow — в IDE по умолчанию allow (обсуждение без tool-call нормально)
+  text_answer_mode: allow
+  # on | off | smart — в IDE обычно off (человек сам сверяет ответ). "off" в кавычках!
+  finish_gate_mode: "off"
+  # Каждые N шагов без session_todo — technical reminder. 0 = выкл (дефолт IDE).
+  todo_reminder_steps: 0
+
+# Правки агента: запись в журнал и показ на экране /diff (не параметры fs return_diff).
+agent_edits:
+  snapshots_max_files: 500     # лимит снимков «до правки» в .gc/agent_edits (LRU; треды с живым журналом не вытесняются)
+  max_diff_chars: 100000       # усечение больших диффов (0 = без лимита)
+  hunk_context_lines: 3        # строк контекста в хэнках журнальных диффов
+  max_diff_source_bytes: 2000000  # порог размера файла: свыше — дифф не считается, снапшот не снимается
+  shell_tracking: true         # трекинг правок, сделанных shell-командами
+  trace_inline_max_lines: 30   # ЭКРАННЫХ рядов диффа в ленте до свёртки
+  replay_expanded_turns: 20    # сколько последних ходов разворачивать при открытии треда (0 — все)
+  turn_summary_in_status: true # сводка правок в статусной строке хода
+  # Где вести журнал правок (дифф в ленте, сводка хода, экран /diff) — по режиму запуска.
+  # tui: false выключает все три; в gc-cli и на сервере журнал по умолчанию не пишется.
+  record:
+    tui: true
+    cli: false
+    server: false
 
 # Обновление агента (спека D)
 update:
@@ -145,6 +182,11 @@ logging:
   save_logs: true
   format: text                 # text — человекочитаемо; jsonl — структурный поток событий
   log_level: info              # debug | info | warning | error
+  # Всплывать ли записям рана в корневой логгер приложения.
+  # false (дефолт) — ран пишет в свой файл и не засоряет чужие хендлеры.
+  # true нужен встраивающему, который настроил logging по-своему: без него он
+  # не увидит ничего, потому что per-run логгер обрывает цепочку.
+  propagate: false
 
 paths:
   # Промпт роли запуска (agent_md). Пусто = ролевого промпта нет.
@@ -156,20 +198,34 @@ summary:
   # модели снижай; под 262k — поднимай ~2× до ~360–400k). batch (×1.4) и
   # turn-end-trigger (×0.6) выводятся отсюда.
   chat_completions_summary_trigger_chars: 200000
+  # 0 — токенный порог выключен. Положительное значение сравнивает input-токены
+  # последнего главного запроса. Ключа turn-end нет: 60% от этого порога,
+  # явный 0 это плечо выключает. Дополнение к символьному, не замена: в число
+  # входят системный промпт и схемы тулов, порог держать заметно выше них.
+  # Символьный выключен — batch выводится отсюда (×2 символа на токен, ×1.4).
+  chat_completions_summary_trigger_tokens: 0
   max_message_chars: 50000
   max_dialogue_chars: 1000000
   max_accumulated_summary_chars: 20000
   last_dialog_steps_count: 5
   last_dialog_step_message_max_chars: 1500
 
+# Вспомогательные LLM (summary, finish gate, intent scope, judges).
+chat_completions:
+  auxiliary_llm:
+    # Служебный вызов, когда у алиаса нет своей секции auxiliary.
+    # null — секция не задана: серверные дефолты модели, без vendor-ключей.
+    # Диалект (enable_thinking и соседние) — в профиле, per-алиас.
+    # Не {}: явный пустой словарь на алиасе значит «не слать этих ключей».
+    completion_kwargs: null
+
 # tags — какие ещё теги вырезать из саммари, intent, digest и т.п. (не из истории).
-# strip_think: true (дефолт) — скрытое поле мысли бэкенда в историю не копировать.
-#   Salvage <think> — только если кроме ризонинга ничего нет (нет прозы и нет тулов):
-#   тогда мысль кладём в историю как <think>…</think> и в следующем запросе модель её видит.
-#   Смешанный ход (think + проза) — в историю только проза.
-#   Из саммари, intent, судей и памяти <think> вырезается всегда.
-# strip_think: false — копировать скрытое поле мысли в историю как есть
-#   и отдать в следующем запросе. DeepSeek / часть strict-бэкендов → 400.
+# Кодовый дефолт (ключа нет) — strip_think: false: копировать скрытое поле мысли.
+# В этом шаблоне true: мысль в историю не копируется. Копирование даёт 400
+# у DeepSeek и части strict-бэкендов; кому нужно поле в следующем запросе —
+# ставят false явно. Salvage <think> при true — только если кроме ризонинга
+# ничего нет (нет прозы и нет тулов). Смешанный ход — в историю только проза.
+# Из саммари, intent, судей и памяти <think> вырезается всегда.
 # В бэкенд уходит то, что лежит в истории. Остальной state — без мыслей всегда.
 strip_tags_projection:
   strip_think: true
@@ -212,6 +268,21 @@ fs_tools:
     default_max_matches: 100          # max_matches if caller omits it
     hard_max_matches: 300             # hard ceiling: max_matches_eff = min(requested, 300)
     max_visited: 500000               # walk safety cap (not a caller argument)
+
+# os_backend:                 # где работают FS/shell-тулы
+#   kind: local               # local | docker | ssh | exec | sandbox
+#   docker: {name: my-box}    # справочник YAML: docs/os_backends.md
+#   ssh: {host: dev.example, user: me, key_path: ~/.ssh/id_ed25519}
+#   sandbox: {workdir: null, network: true}
+#   fetch_url_execute_on: agent   # os_backend → exec_fetch_url качает через python3 той стороны
+#   provision_skills: true        # docker/ssh/exec: скиллы копируются в <launch_root>/.gc/skills_runtime/
+# Изображения во вводе (TUI: Alt+V, Ctrl+V, путь к файлу; CLI: --image).
+# Пикселями картинки уходят только зрячей модели и только в chat_completions;
+# остальное модель получает текстовой запиской со ссылкой на файл.
+images:
+  max_per_message: 10     # больше — отказ при вставке / ошибка старта CLI
+  live_user_images: 10    # сколько ваших картинок уходит модели пикселями (>= max_per_message)
+  live_tool_images: 3     # сколько снимков агента уходит пикселями (только текущий ход)
 
 # Чек-лист задачи (session_todo): каждые reminder_steps шагов без вызова тула —
 # напоминание. Есть незакрытые пункты — директивное «обнови список»; активного

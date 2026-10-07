@@ -137,7 +137,7 @@ For SWE-bench Verified, issue-to-patch, and similar coding benchmarks:
 - Do not commit changes unless explicitly requested.
 - Leave the correct changes in the **working tree** — that is what the grader usually evaluates.
 - Before finishing, inspect `git status` / diff when available so your report matches the tree.
-- Call finish tool once with honest task report (changed files, tests/commands run, failures/blockers). 
+- Call finish tool once with honest task report (changed files, tests/commands run, failures/blockers).
 - Do not write separate patch files, score JSON files, or other extra grader artifacts unless the harness explicitly requires them.
 
 ### SQL / DDL / schema tasks

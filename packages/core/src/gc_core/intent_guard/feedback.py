@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from gc_core.intent_guard.validation_result import ValidationResult
 
+_TRACE_GAPS_TITLE = "Trace gaps:"
+_ADDITIONALLY_TITLE = "Additionally:"
+_CONFLICTS_TITLE = "Notes (conflicts):"
+
 
 def _bullet_block(title: str, items: list[str]) -> list[str]:
     cleaned = [str(x).strip() for x in items if str(x).strip()]
@@ -18,6 +22,22 @@ QUESTION_CONTINUE_HINT = (
     "If the question is not blocking, stop asking, decide or act yourself from the current "
     "intent, and continue the work. Ask only when the answer blocks execution."
 )
+
+
+def _trace_gap_lines(result: ValidationResult) -> list[str]:
+    lines = _bullet_block(_TRACE_GAPS_TITLE, result.trace_gaps)
+    if not result.trace_gaps:
+        lines.extend(
+            _bullet_block(_ADDITIONALLY_TITLE, result.missing_requirements)
+        )
+    return lines
+
+
+def _report_mismatch_lines(result: ValidationResult) -> list[str]:
+    lines = _bullet_block("Report mismatches:", result.report_mismatches)
+    if not result.report_mismatches:
+        lines.extend(_bullet_block(_CONFLICTS_TITLE, result.conflicts))
+    return lines
 
 
 def build_finish_gate_feedback(result: ValidationResult) -> str:
@@ -39,10 +59,13 @@ def build_finish_gate_feedback(result: ValidationResult) -> str:
             "without repeating steps that already succeeded in the trace."
         )
         lines.extend(
-            _bullet_block("Report does not match trace or intent:", result.report_mismatches)
+            _bullet_block(
+                "Report does not match trace or intent:",
+                result.report_mismatches,
+            )
         )
         if not result.report_mismatches:
-            lines.extend(_bullet_block("Notes (conflicts):", result.conflicts))
+            lines.extend(_bullet_block(_CONFLICTS_TITLE, result.conflicts))
         lines.append(
             "Align solution_type, task_report, handoff, and comment with what is visible in the trace."
         )
@@ -51,16 +74,12 @@ def build_finish_gate_feedback(result: ValidationResult) -> str:
     if action == "continue_work":
         if result.is_question:
             lines.append(QUESTION_CONTINUE_HINT)
-            lines.extend(_bullet_block("Trace gaps:", result.trace_gaps))
-            if not result.trace_gaps:
-                lines.extend(_bullet_block("Additionally:", result.missing_requirements))
+            lines.extend(_trace_gap_lines(result))
             return "\n".join(lines)
         lines.append(
             "The trace does not yet support current_user_requests; more work is required."
         )
-        lines.extend(_bullet_block("Trace gaps:", result.trace_gaps))
-        if not result.trace_gaps:
-            lines.extend(_bullet_block("Additionally:", result.missing_requirements))
+        lines.extend(_trace_gap_lines(result))
         lines.append(
             "Take the missing step (use the appropriate tool), then finish the turn again "
             "with an honest report via the finish-turn tool."
@@ -70,23 +89,17 @@ def build_finish_gate_feedback(result: ValidationResult) -> str:
     if action == "fix_report_and_continue":
         if result.is_question:
             lines.append(QUESTION_CONTINUE_HINT)
-            lines.extend(_bullet_block("Trace gaps:", result.trace_gaps))
-            if not result.trace_gaps:
-                lines.extend(_bullet_block("Additionally:", result.missing_requirements))
-            lines.extend(_bullet_block("Report mismatches:", result.report_mismatches))
-            if not result.report_mismatches:
-                lines.extend(_bullet_block("Notes (conflicts):", result.conflicts))
+            lines.extend(_trace_gap_lines(result))
+            lines.extend(_report_mismatch_lines(result))
             return "\n".join(lines)
         lines.append(
             "Close trace gaps first, then align the finish-turn report with the trace."
         )
-        lines.extend(_bullet_block("Trace gaps:", result.trace_gaps))
-        if not result.trace_gaps:
-            lines.extend(_bullet_block("Additionally:", result.missing_requirements))
-        lines.extend(_bullet_block("Report mismatches:", result.report_mismatches))
-        if not result.report_mismatches:
-            lines.extend(_bullet_block("Notes (conflicts):", result.conflicts))
-        lines.append("Do not repeat steps that already appear successful in the trace.")
+        lines.extend(_trace_gap_lines(result))
+        lines.extend(_report_mismatch_lines(result))
+        lines.append(
+            "Do not repeat steps that already appear successful in the trace."
+        )
         return "\n".join(lines)
 
     lines.append(

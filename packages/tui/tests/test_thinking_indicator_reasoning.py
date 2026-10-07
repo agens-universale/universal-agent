@@ -1,4 +1,5 @@
 """ThinkingIndicator: хвост reasoning читается из ReasoningClock, токены — из sink."""
+
 from gc_tui.widgets.thinking_indicator import ThinkingIndicator
 
 
@@ -24,8 +25,11 @@ class _StubSink:
 
 def _render(*, clock_live, clock_episode, reasoning_tag=True, units=0) -> str:
     ind = ThinkingIndicator(
-        started_at=0.0, state="thinking", clock=lambda: 0.0,
-        sink=_StubSink(units), reasoning_tag=reasoning_tag,
+        started_at=0.0,
+        state="thinking",
+        clock=lambda: 0.0,
+        sink=_StubSink(units),
+        reasoning_tag=reasoning_tag,
         reasoning_clock=_StubClock(clock_live, clock_episode),
     )
     return str(ind.render())
@@ -69,8 +73,12 @@ def test_tokens_still_from_sink():
 
 def test_no_clock_no_reasoning_tail():
     ind = ThinkingIndicator(
-        started_at=0.0, state="thinking", clock=lambda: 0.0,
-        sink=_StubSink(0), reasoning_tag=True, reasoning_clock=None,
+        started_at=0.0,
+        state="thinking",
+        clock=lambda: 0.0,
+        sink=_StubSink(0),
+        reasoning_tag=True,
+        reasoning_clock=None,
     )
     out = str(ind.render())
     assert "размышление" not in out and "обдумал" not in out

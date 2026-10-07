@@ -4,7 +4,13 @@ from __future__ import annotations
 
 import json
 
-from gc_core.intent_log import ACTION_USER_ASK, IntentRecord, append_user_ask, records_to_jsonl_lines, serialize_for_meta
+from gc_core.intent_log import (
+    ACTION_USER_ASK,
+    IntentRecord,
+    append_user_ask,
+    records_to_jsonl_lines,
+    serialize_for_meta,
+)
 
 TS = "2026-05-30T11:35:08Z"
 
@@ -71,7 +77,9 @@ def seed_state_intent(
             ts=TS,
         )
         state.flush_current_user_intent()
-    current_items = [current] if isinstance(current, str) else list(current or [])
+    current_items = (
+        [current] if isinstance(current, str) else list(current or [])
+    )
     for text in current_items:
         state.current_user_intent = append_user_ask(
             state.current_user_intent,

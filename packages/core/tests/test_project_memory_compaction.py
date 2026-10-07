@@ -2,7 +2,11 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from gc_core.project_memory import compaction
-from gc_core.project_memory.compaction import CompactionResult, SOFT_APPEND_INPUT_LIMIT_CHARS
+from gc_core.project_memory.compaction import (
+    SOFT_APPEND_INPUT_LIMIT_CHARS,
+    CompactionResult,
+)
+from gc_testkit import run_coro
 
 
 def _make_ctx(backend_mode: str = "chat_completions") -> SimpleNamespace:
@@ -20,10 +24,12 @@ def test_soft_append_input_limit_constant():
 def test_compact_text_happy_path():
     ctx = _make_ctx()
     with patch(
-        "gc_core.summarize.llm.request_chat_completion_text",
+        "gc_core.summarize.llm.arequest_chat_completion_text",
         return_value="compressed body",
     ) as mocked:
-        res = compaction.compact_text("very long original text", ctx)
+        res = run_coro(
+            compaction.acompact_text("very long original text", ctx)
+        )
     assert res == CompactionResult(
         ok=True, text="compressed body", error_type=None, error_message=None
     )
@@ -33,10 +39,10 @@ def test_compact_text_happy_path():
 def test_compact_text_strips_response():
     ctx = _make_ctx()
     with patch(
-        "gc_core.summarize.llm.request_chat_completion_text",
+        "gc_core.summarize.llm.arequest_chat_completion_text",
         return_value="  compressed  \n\n",
     ):
-        res = compaction.compact_text("text", ctx)
+        res = run_coro(compaction.acompact_text("text", ctx))
     assert res.ok is True
     assert res.text == "compressed"
 
@@ -44,10 +50,10 @@ def test_compact_text_strips_response():
 def test_compact_text_projects_think_tags():
     ctx = _make_ctx()
     with patch(
-        "gc_core.summarize.llm.request_chat_completion_text",
+        "gc_core.summarize.llm.arequest_chat_completion_text",
         return_value="<think>scratch</think>compressed",
     ):
-        res = compaction.compact_text("text", ctx)
+        res = run_coro(compaction.acompact_text("text", ctx))
     assert res.ok is True
     assert res.text == "compressed"
 
@@ -66,10 +72,10 @@ def test_compact_text_logs_dirty_response():
     ctx = _make_ctx()
     ctx.logger = _Logger()
     with patch(
-        "gc_core.summarize.llm.request_chat_completion_text",
+        "gc_core.summarize.llm.arequest_chat_completion_text",
         return_value="<think>scratch</think>compressed",
     ):
-        res = compaction.compact_text("text", ctx)
+        res = run_coro(compaction.acompact_text("text", ctx))
     assert res.ok is True
     assert res.text == "compressed"
     joined = "\n".join(logs)
@@ -80,10 +86,10 @@ def test_compact_text_logs_dirty_response():
 def test_compact_text_empty_response():
     ctx = _make_ctx()
     with patch(
-        "gc_core.summarize.llm.request_chat_completion_text",
+        "gc_core.summarize.llm.arequest_chat_completion_text",
         return_value="   \n  ",
     ):
-        res = compaction.compact_text("text", ctx)
+        res = run_coro(compaction.acompact_text("text", ctx))
     assert res.ok is False
     assert res.error_type == "empty_response"
     assert res.text == ""
@@ -92,10 +98,10 @@ def test_compact_text_empty_response():
 def test_compact_text_backend_exception_caught():
     ctx = _make_ctx()
     with patch(
-        "gc_core.project_memory.compaction.request_auxiliary_completion_text",
+        "gc_core.project_memory.compaction.arequest_auxiliary_completion_text",
         side_effect=RuntimeError("network down"),
     ):
-        res = compaction.compact_text("text", ctx)
+        res = run_coro(compaction.acompact_text("text", ctx))
     assert res.ok is False
     assert res.error_type == "backend_error"
     assert "network down" in res.error_message
@@ -105,7 +111,7 @@ def test_compact_text_backend_exception_caught():
 def test_compact_text_backend_unsupported_mode():
     """Compaction needs chat_completions; in 'responses' mode return backend_unsupported."""
     ctx = _make_ctx(backend_mode="responses")
-    res = compaction.compact_text("text", ctx)
+    res = run_coro(compaction.acompact_text("text", ctx))
     assert res.ok is False
     assert res.error_type == "backend_unsupported"
     assert res.text == ""
@@ -116,15 +122,18 @@ def test_compact_text_uses_prompt_template_as_system():
     ctx = _make_ctx()
     captured = {}
 
-    def fake_call(*, ctx, state, messages, max_tokens, request_label, **kwargs):
+    def fake_call(
+        *, ctx, state, messages, max_tokens, request_label, **kwargs
+    ):
         captured["messages"] = messages
         captured["label"] = request_label
         return "compressed"
 
     with patch(
-        "gc_core.summarize.llm.request_chat_completion_text", side_effect=fake_call
+        "gc_core.summarize.llm.arequest_chat_completion_text",
+        side_effect=fake_call,
     ):
-        compaction.compact_text("text body", ctx)
+        run_coro(compaction.acompact_text("text body", ctx))
 
     msgs = captured["messages"]
     assert msgs[0]["role"] == "system"

@@ -1,6 +1,8 @@
-from gc_core.utils.logging_module import build_run_log_paths
-from gc_core.utils.logging_module import create_run_logger
-from gc_core.utils.logging_module import generate_run_id
+from gc_core.utils.logging_module import (
+    build_run_log_paths,
+    create_run_logger,
+    generate_run_id,
+)
 
 
 def test_build_run_log_paths_include_agent_kind_and_run_id(tmp_path):
@@ -20,11 +22,14 @@ def test_create_run_logger_uses_unique_logger_name_and_files(tmp_path):
     run_id_1 = generate_run_id()
     run_id_2 = generate_run_id()
 
-    logger_1, path_1, _ = create_run_logger(cfg, run_id=run_id_1, agent_kind="main")
-    logger_2, path_2, _ = create_run_logger(cfg, run_id=run_id_2, agent_kind="main")
+    logger_1, path_1, _ = create_run_logger(
+        cfg, run_id=run_id_1, agent_kind="main"
+    )
+    logger_2, path_2, _ = create_run_logger(
+        cfg, run_id=run_id_2, agent_kind="main"
+    )
 
     assert logger_1.name != logger_2.name
     assert path_1 != path_2
     assert path_1.endswith(f"agent_main_{run_id_1}.log")
     assert path_2.endswith(f"agent_main_{run_id_2}.log")
-

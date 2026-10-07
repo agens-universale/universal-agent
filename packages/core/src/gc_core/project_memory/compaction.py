@@ -3,23 +3,25 @@
 No file I/O. Caller (the tool) decides what to do with the compressed text.
 Used only from the append-overflow path in the project_memory tool.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Optional
 
 from gc_core.bundled_assets import bundled_root
-from gc_core.summarize.llm import request_auxiliary_completion_text
-
 from gc_core.config_modules.project_memory import (
     DEFAULT_PROJECT_MEMORY_MAX_APPEND_CHARS,
     project_memory_from_config_dict,
 )
+from gc_core.summarize.llm import arequest_auxiliary_completion_text
 
 SOFT_APPEND_INPUT_LIMIT_CHARS: int = DEFAULT_PROJECT_MEMORY_MAX_APPEND_CHARS
 
 # bundled_root() — единый резолвер ассетов (editable → repo, wheel → site-packages).
-_COMPACTION_PROMPT_PATH = bundled_root() / "prompts" / "project_memory_compaction_prompt.md"
+_COMPACTION_PROMPT_PATH = (
+    bundled_root() / "prompts" / "project_memory_compaction_prompt.md"
+)
 
 
 @dataclass(frozen=True)
@@ -45,17 +47,25 @@ def _load_prompt() -> str:
     return _COMPACTION_PROMPT_PATH.read_text(encoding="utf-8")
 
 
-def compact_text(text: str, ctx: Any, state: Any = None) -> CompactionResult:
-    """Compress `text` via backend LLM using the long_memory compaction prompt.
+async def acompact_text(
+    text: str, ctx: Any, state: Any = None
+) -> CompactionResult:
+    """Сжать `text` бэкендным LLM по промпту компакции long_memory.
 
-    Returns CompactionResult — never raises. On any failure, the caller's file
-    state can stay as-is. `ok=True` means a non-empty compressed string was
-    returned by the backend; the caller still validates length against MAX_CHARS.
+    Основная и единственная реализация; синхронный ``compact_text`` — шим над ней.
+    Вызов уходит на асинхронный лист ``arequest_auxiliary_completion_text``, то
+    есть без потока из пула: компакция может тянуться десятки секунд, и держать
+    на ней воркер незачем.
 
-    Returns ok=false with error_type:
-      - "backend_unsupported" — config mode is not chat_completions.
-      - "empty_response"      — backend returned empty/whitespace.
-      - "backend_error"       — exception during backend call (caught here).
+    Возвращает CompactionResult — никогда не бросает. При любой неудаче файловое
+    состояние вызывающего может остаться как есть. ``ok=True`` означает, что
+    бэкенд вернул непустую сжатую строку; длину против MAX_CHARS вызывающий
+    проверяет сам.
+
+    Возвращает ok=false с error_type:
+      - "backend_unsupported" — режим конфига не chat_completions.
+      - "empty_response"      — бэкенд вернул пустое/пробельное.
+      - "backend_error"       — исключение на вызове бэкенда (ловится здесь).
     """
     cfg = getattr(ctx, "config_dict", None) or {}
     mode = str(cfg.get("backend_api_mode", "responses")).strip().lower()
@@ -69,7 +79,7 @@ def compact_text(text: str, ctx: Any, state: Any = None) -> CompactionResult:
     ]
     max_tokens = project_memory_from_config_dict(cfg).compaction_max_tokens
     try:
-        compressed = request_auxiliary_completion_text(
+        compressed = await arequest_auxiliary_completion_text(
             ctx=ctx,
             state=state,
             messages=messages,
@@ -77,9 +87,12 @@ def compact_text(text: str, ctx: Any, state: Any = None) -> CompactionResult:
             request_label="project_memory_compaction",
             consumer="memory_compaction",
         )
-    except Exception as exc:  # noqa: BLE001 — caller wants explicit ok=false, not exception.
+    except Exception as exc:  # caller wants explicit ok=false, not exception.
         return CompactionResult(
-            ok=False, text="", error_type="backend_error", error_message=str(exc)
+            ok=False,
+            text="",
+            error_type="backend_error",
+            error_message=str(exc),
         )
 
     if not compressed:

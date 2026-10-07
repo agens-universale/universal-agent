@@ -1,10 +1,8 @@
 """GC_CONFIG_DIR/config.yml as a base tier between --config and the package default."""
 
 import os
-from pathlib import Path
 
 import pytest
-
 from gc_core.config_modules import env_vars
 from gc_core.config_modules.env_vars import EnvVars
 
@@ -129,8 +127,14 @@ def test_no_env_override_uses_package_default(
     """
     for _k in (
         "GC_HOME",
-        "GC_STATE_DIR", "GC_CONFIG_DIR", "GC_CACHE_DIR", "GC_DATA_DIR",
-        "XDG_STATE_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME",
+        "GC_STATE_DIR",
+        "GC_CONFIG_DIR",
+        "GC_CACHE_DIR",
+        "GC_DATA_DIR",
+        "XDG_STATE_HOME",
+        "XDG_CONFIG_HOME",
+        "XDG_CACHE_HOME",
+        "XDG_DATA_HOME",
     ):
         monkeypatch.delenv(_k, raising=False)
     monkeypatch.setattr("sys.platform", "linux")
@@ -149,7 +153,9 @@ def test_project_local_merges_over_xdg_base(
     (env_with_config_dir / "config.yml").write_text(_XDG_CFG, encoding="utf-8")
     gc_dir = isolated_cwd / ".gc"
     gc_dir.mkdir()
-    (gc_dir / "config.yml").write_text("agent:\n  max_steps: 999\n", encoding="utf-8")
+    (gc_dir / "config.yml").write_text(
+        "agent:\n  max_steps: 999\n", encoding="utf-8"
+    )
     cfg = load_config()
     # project-local deep-merged on top of the XDG base (not the package).
     assert cfg["max_steps"] == 999
@@ -166,4 +172,4 @@ def test_relative_paths_resolve_from_xdg_dir(
     )
     cfg = load_config()
     # config_dir == winning base dir (the xdg dir), like --config semantics.
-    assert cfg["agent_md_path"] == str((env_with_config_dir / "foo.md"))
+    assert cfg["agent_md_path"] == str(env_with_config_dir / "foo.md")

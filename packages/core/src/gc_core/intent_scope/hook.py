@@ -4,11 +4,25 @@ import json
 import logging
 from typing import Any
 
-from gc_core.intent_scope.agent_logging import log_intent_scope_delta_appended, log_intent_scope_skipped, log_intent_scope_summary_done
-from gc_core.config_modules.intent_scope import intent_scope_active, intent_scope_tool_record, intent_scope_tool_store_flags
-from gc_core.intent_scope.append import append_tool_aggregated_to_current, append_tool_raw_to_current
+from gc_core.config_modules.intent_scope import (
+    intent_scope_active,
+    intent_scope_tool_record,
+    intent_scope_tool_store_flags,
+)
+from gc_core.intent_scope.agent_logging import (
+    log_intent_scope_delta_appended,
+    log_intent_scope_skipped,
+    log_intent_scope_summary_done,
+)
+from gc_core.intent_scope.append import (
+    append_tool_aggregated_to_current,
+    append_tool_raw_to_current,
+)
 from gc_core.intent_scope.raw_payload import truncate_raw_tool_payload
-from gc_core.intent_scope.summarizer import build_fallback_aggregated_content, summarize_tool_intent_line
+from gc_core.intent_scope.summarizer import (
+    asummarize_tool_intent_line,
+    build_fallback_aggregated_content,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -36,7 +50,7 @@ def _parse_tool_output(raw: str) -> Any | None:
         return text
 
 
-def _append_aggregated_tool_intent(
+async def _aappend_aggregated_tool_intent(
     *,
     tool_name: str,
     tool_output_raw: str,
@@ -45,8 +59,15 @@ def _append_aggregated_tool_intent(
     ctx: Any,
     log: Any,
 ) -> None:
+    """
+    Основная (и единственная) реализация ветки aggregated.
+
+    Внутри — суммаризация тула, то есть сетевой вызов на десятки секунд.
+    Держать ради него поток из пула незачем, поэтому цикл агента ждёт эту
+    корутину напрямую. Синхронное имя ниже — шим поверх неё.
+    """
     scope_cfg = getattr(ctx, "intent_scope", None)
-    summary_line = summarize_tool_intent_line(
+    summary_line = await asummarize_tool_intent_line(
         ctx=ctx,
         state=state,
         tool_name=tool_name,
@@ -55,7 +76,11 @@ def _append_aggregated_tool_intent(
         logger=log,
     )
     used_fallback = False
-    if not summary_line and scope_cfg is not None and scope_cfg.fallback_raw_on_llm_error:
+    if (
+        not summary_line
+        and scope_cfg is not None
+        and scope_cfg.fallback_raw_on_llm_error
+    ):
         summary_line = build_fallback_aggregated_content(
             ctx=ctx, tool_output_raw=tool_output_raw
         )
@@ -97,7 +122,9 @@ def _append_raw_tool_intent(
     scope_cfg = getattr(ctx, "intent_scope", None)
     max_raw = int(getattr(scope_cfg, "max_raw_record_chars", 0) or 0)
     # Tool args/outputs: as-is (think живёт в model prose до tool_call JSON, не внутри).
-    arguments = _parse_tool_arguments(tool_arguments) if store_arguments else None
+    arguments = (
+        _parse_tool_arguments(tool_arguments) if store_arguments else None
+    )
     output = _parse_tool_output(tool_output_raw) if store_output else None
     if store_arguments:
         arguments, output = truncate_raw_tool_payload(
@@ -121,7 +148,7 @@ def _append_raw_tool_intent(
         )
 
 
-def maybe_update_intent_scope_from_tool(
+async def amaybe_update_intent_scope_from_tool(
     *,
     tool_name: str,
     tool_output_raw: str,
@@ -132,36 +159,61 @@ def maybe_update_intent_scope_from_tool(
     """
     Post-tool hook: optional intent log append into ``current_user_intent`` (fail-open).
     Does not modify tool output.
+
+    Основная (и единственная) реализация. Ветка aggregated ходит в LLM, поэтому
+    хук ждётся из асинхронного цикла напрямую — без потока из пула. Синхронное
+    имя ниже — шим поверх этой корутины.
     """
     log = getattr(ctx, "logger", None) or _logger
     scope_cfg = getattr(ctx, "intent_scope", None)
     if scope_cfg is None:
-        log_intent_scope_skipped(log, tool_name=tool_name, reason="no_intent_scope_on_ctx")
+        log_intent_scope_skipped(
+            log, tool_name=tool_name, reason="no_intent_scope_on_ctx"
+        )
         return
 
     config_dict = getattr(ctx, "config_dict", {}) or {}
-    if str(config_dict.get("backend_api_mode", "responses")).strip().lower() != "chat_completions":
+    if (
+        str(config_dict.get("backend_api_mode", "responses")).strip().lower()
+        != "chat_completions"
+    ):
         log_intent_scope_skipped(
             log, tool_name=tool_name, reason="backend_not_chat_completions"
         )
         return
     if not intent_scope_active(scope_cfg):
-        log_intent_scope_skipped(log, tool_name=tool_name, reason="tools_empty")
+        log_intent_scope_skipped(
+            log, tool_name=tool_name, reason="tools_empty"
+        )
         return
 
     record_mode = intent_scope_tool_record(scope_cfg, tool_name)
     if record_mode is None:
-        log_intent_scope_skipped(log, tool_name=tool_name, reason="tool_not_listed")
+        log_intent_scope_skipped(
+            log, tool_name=tool_name, reason="tool_not_listed"
+        )
         return
-    store_arguments, store_output = intent_scope_tool_store_flags(scope_cfg, tool_name)
+    store_arguments, store_output = intent_scope_tool_store_flags(
+        scope_cfg, tool_name
+    )
     if record_mode == "raw" and not store_arguments and not store_output:
-        log_intent_scope_skipped(log, tool_name=tool_name, reason="raw_store_disabled")
+        log_intent_scope_skipped(
+            log, tool_name=tool_name, reason="raw_store_disabled"
+        )
         return
     if record_mode != "raw" and not str(tool_output_raw or "").strip():
-        log_intent_scope_skipped(log, tool_name=tool_name, reason="empty_output")
+        log_intent_scope_skipped(
+            log, tool_name=tool_name, reason="empty_output"
+        )
         return
-    if record_mode == "raw" and store_output and not str(tool_output_raw or "").strip():
-        log_intent_scope_skipped(log, tool_name=tool_name, reason="empty_output")
+    if (
+        record_mode == "raw"
+        and store_output
+        and not str(tool_output_raw or "").strip()
+    ):
+        log_intent_scope_skipped(
+            log, tool_name=tool_name, reason="empty_output"
+        )
         return
 
     if record_mode == "raw":
@@ -177,7 +229,7 @@ def maybe_update_intent_scope_from_tool(
         )
         return
 
-    _append_aggregated_tool_intent(
+    await _aappend_aggregated_tool_intent(
         tool_name=tool_name,
         tool_output_raw=tool_output_raw,
         tool_arguments=tool_arguments,

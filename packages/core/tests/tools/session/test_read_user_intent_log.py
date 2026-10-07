@@ -1,13 +1,21 @@
 import json
 from types import SimpleNamespace
 
-import pytest
-
-from gc_core.config_modules.intent_scope import DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT
-from gc_core.intent_log import ACTION_TOOL_AGGREGATED, ACTION_USER_ASK, IntentRecord, append_tool_aggregated, append_user_ask, flush, read_page, serialize
-from gc_core.tools.session.read_user_intent_log import ReadUserIntentLog
+from gc_core.config_modules.intent_scope import (
+    DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT,
+)
+from gc_core.intent_log import (
+    ACTION_USER_ASK,
+    IntentRecord,
+    append_tool_aggregated,
+    append_user_ask,
+    flush,
+    read_page,
+    serialize,
+)
 from gc_core.tools.registry import get_builtin_tools_data
-
+from gc_core.tools.session.read_user_intent_log import ReadUserIntentLog
+from gc_testkit.helpers.tool_ctx import CallableTool
 
 FIXED_TS = "2026-05-30T11:35:08Z"
 
@@ -23,7 +31,11 @@ def _seed_closed_log(state, *contents: str) -> None:
             user_turn_seq=state.user_turn_seq,
             ts=FIXED_TS,
         )
-        state.current_user_intent, state.user_intent_log, state.user_turn_seq = flush(
+        (
+            state.current_user_intent,
+            state.user_intent_log,
+            state.user_turn_seq,
+        ) = flush(
             state.current_user_intent,
             state.user_intent_log,
             state.user_turn_seq,
@@ -50,7 +62,9 @@ def _make_state(*, log=None, current=None):
 
 def _call(state, **kwargs):
     ctx = SimpleNamespace(config_dict={"backend_api_mode": "chat_completions"})
-    tool = ReadUserIntentLog(ctx=ctx, state=state, config_dict=ctx.config_dict)
+    tool = CallableTool(
+        ReadUserIntentLog(ctx=ctx, state=state, config_dict=ctx.config_dict)
+    )
     return json.loads(tool(**kwargs))
 
 
@@ -69,10 +83,17 @@ def test_info_reports_closed_log_totals():
 
 
 def test_read_pagination_matches_read_page():
-    records = [_record("alpha"), _record("beta", turn=2), _record("gamma", turn=3)]
+    records = [
+        _record("alpha"),
+        _record("beta", turn=2),
+        _record("gamma", turn=3),
+    ]
     state = _make_state(log=records)
     page = read_page(
-        records, offset=1, limit=1, default_limit=DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT
+        records,
+        offset=1,
+        limit=1,
+        default_limit=DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT,
     )
 
     res = _call(state, action="read", offset=1, limit=1)
@@ -99,7 +120,9 @@ def test_read_default_limit_from_config():
             "intent_scope_params": {"read_page_record_limit": 123},
         }
     )
-    tool = ReadUserIntentLog(ctx=ctx, state=state, config_dict=ctx.config_dict)
+    tool = CallableTool(
+        ReadUserIntentLog(ctx=ctx, state=state, config_dict=ctx.config_dict)
+    )
     res = json.loads(tool(action="read", offset=0))
 
     assert res["ok"] is True
@@ -137,17 +160,22 @@ def test_invalid_action_and_missing_state():
     assert res["ok"] is False
     assert res["error"]["type"] == "invalid_action"
 
-    tool = ReadUserIntentLog(state=None)
+    tool = CallableTool(ReadUserIntentLog(state=None))
     res = json.loads(tool(action="info"))
     assert res["ok"] is False
     assert res["error"]["type"] == "no_state"
 
 
 def test_registered_only_for_chat_completions():
-    assert "session_read_user_intent_log" not in get_builtin_tools_data({"backend_api_mode": "responses"})
+    assert "session_read_user_intent_log" not in get_builtin_tools_data(
+        {"backend_api_mode": "responses"}
+    )
     tools = get_builtin_tools_data({"backend_api_mode": "chat_completions"})
     assert "session_read_user_intent_log" in tools
-    assert tools["session_read_user_intent_log"]["tool_fabric"] is ReadUserIntentLog
+    assert (
+        tools["session_read_user_intent_log"]["tool_fabric"]
+        is ReadUserIntentLog
+    )
 
 
 def test_records_to_jsonl_lines_round_trip_for_guard_path():

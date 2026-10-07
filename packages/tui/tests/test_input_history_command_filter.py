@@ -1,4 +1,5 @@
 """InputHistory не хранит слэш-команды — ни при append, ни при load."""
+
 import json
 
 from gc_tui.services.input_history import InputHistory
@@ -7,8 +8,8 @@ from gc_tui.services.input_history import InputHistory
 def test_append_skips_commands(tmp_path):
     h = InputHistory(tmp_path)
     h.append("привет")
-    h.append("/init")          # команда — пропускается
-    h.append("/status")        # команда — пропускается
+    h.append("/init")  # команда — пропускается
+    h.append("/status")  # команда — пропускается
     h.append("что это за проект")
     assert h.size == 2
     # навигация не доходит до команд
@@ -33,7 +34,10 @@ def test_load_filters_old_command_entries(tmp_path):
         {"ts": "t", "text": "/status"},
         {"ts": "t", "text": "проанализируй проект"},
     ]
-    f.write_text("\n".join(json.dumps(x, ensure_ascii=False) for x in lines), encoding="utf-8")
+    f.write_text(
+        "\n".join(json.dumps(x, ensure_ascii=False) for x in lines),
+        encoding="utf-8",
+    )
     h = InputHistory(tmp_path)
     h.load()
-    assert h.size == 2   # команды отсеяны при загрузке
+    assert h.size == 2  # команды отсеяны при загрузке

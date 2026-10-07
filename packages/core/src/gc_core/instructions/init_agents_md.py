@@ -18,7 +18,9 @@ _BLOCK_HEADLESS = (
 
 
 def _prompt_template() -> str:
-    return (bundled_root() / "prompts" / "init_agents_md_prompt.md").read_text(encoding="utf-8")
+    return (bundled_root() / "prompts" / "init_agents_md_prompt.md").read_text(
+        encoding="utf-8"
+    )
 
 
 def build_init_prompt(*, cwd: str, can_ask: bool) -> str:

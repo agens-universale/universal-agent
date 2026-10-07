@@ -26,8 +26,8 @@ import json
 import os
 import shutil
 import sys
-from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime, timedelta
+from typing import Any, Optional, Sequence
 
 
 def _parse_iso_datetime(value: Any) -> Optional[datetime]:
@@ -38,7 +38,7 @@ def _parse_iso_datetime(value: Any) -> Optional[datetime]:
     except ValueError:
         return None
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
+        parsed = parsed.replace(tzinfo=UTC)
     return parsed
 
 
@@ -46,7 +46,7 @@ def _meta_timestamp(meta_path: str) -> Optional[datetime]:
     """Прочитать meta.json и вернуть самый поздний timestamp (updated_at >
     finished_at > created_at). None если не смогли распарсить или файл нечитаем."""
     try:
-        with open(meta_path, "r", encoding="utf-8") as f:
+        with open(meta_path, encoding="utf-8") as f:
             data = json.load(f)
     except (OSError, json.JSONDecodeError):
         return None
@@ -71,31 +71,19 @@ def _meta_timestamp(meta_path: str) -> Optional[datetime]:
     return max(candidates)
 
 
-def cleanup_threads(
-    threads_dir: str,
-    sandbox_root_dir: str,
-    ttl_hours: float,
-    *,
-    dry_run: bool = False,
-) -> dict:
-    """Удалить каталоги старше TTL. threads/<id> чистится по timestamp из meta.json,
-    sandboxes/<id> — независимо, по своему mtime (расцеплено).
+def _remove_expired_dir(path: str, dry_run: bool, stats: dict) -> bool:
+    if not dry_run:
+        try:
+            shutil.rmtree(path)
+        except OSError:
+            stats["errors"] += 1
+            return False
+    return True
 
-    Возвращает {threads_removed, sandboxes_removed, kept, errors}.
-    """
-    now = datetime.now(timezone.utc)
-    cutoff = now - timedelta(hours=ttl_hours)
 
-    stats = {
-        "threads_removed": 0,
-        "sandboxes_removed": 0,
-        "kept": 0,
-        "errors": 0,
-    }
-
-    if not os.path.isdir(threads_dir):
-        return stats
-
+def _cleanup_thread_dirs(
+    threads_dir: str, cutoff: datetime, dry_run: bool, stats: dict
+) -> None:
     for entry in sorted(os.listdir(threads_dir)):
         entry_path = os.path.join(threads_dir, entry)
         if not os.path.isdir(entry_path):
@@ -107,7 +95,8 @@ def cleanup_threads(
         if ts is None:
             try:
                 ts = datetime.fromtimestamp(
-                    os.path.getmtime(entry_path), tz=timezone.utc,
+                    os.path.getmtime(entry_path),
+                    tz=UTC,
                 )
             except OSError:
                 stats["errors"] += 1
@@ -117,19 +106,17 @@ def cleanup_threads(
             stats["kept"] += 1
             continue
 
-        # Удаляем threads/<id>/.
-        if not dry_run:
-            try:
-                shutil.rmtree(entry_path)
-            except OSError:
-                stats["errors"] += 1
-                continue
+        if not _remove_expired_dir(entry_path, dry_run, stats):
+            continue
         stats["threads_removed"] += 1
         # Sandbox НЕ удаляем здесь — он чистится независимо, по своему mtime
         # (ниже), как обычная чистка тредов по возрасту. Расцеплено намеренно:
         # threads = запись о прогоне, sandbox = рабочий /work, у каждого свой TTL.
 
-    # Sandboxes — независимо, по СОБСТВЕННОМУ mtime (а не по мете threads).
+
+def _cleanup_sandbox_dirs(
+    sandbox_root_dir: str, cutoff: datetime, dry_run: bool, stats: dict
+) -> None:
     if os.path.isdir(sandbox_root_dir):
         for entry in sorted(os.listdir(sandbox_root_dir)):
             entry_path = os.path.join(sandbox_root_dir, entry)
@@ -138,41 +125,89 @@ def cleanup_threads(
             # Чистим ВСЕ песочницы старше TTL по их mtime (не только orphan'ы).
             try:
                 mtime = datetime.fromtimestamp(
-                    os.path.getmtime(entry_path), tz=timezone.utc,
+                    os.path.getmtime(entry_path),
+                    tz=UTC,
                 )
             except OSError:
                 stats["errors"] += 1
                 continue
             if mtime >= cutoff:
                 continue  # свежая песочница — оставим
-            if not dry_run:
-                try:
-                    shutil.rmtree(entry_path)
-                except OSError:
-                    stats["errors"] += 1
-                    continue
+            if not _remove_expired_dir(entry_path, dry_run, stats):
+                continue
             stats["sandboxes_removed"] += 1
+
+
+def cleanup_threads(
+    threads_dir: str,
+    sandbox_root_dir: str,
+    ttl_hours: float,
+    *,
+    dry_run: bool = False,
+    extra_sandbox_roots: Sequence[str] = (),
+) -> dict:
+    """Удалить каталоги старше TTL. threads/<id> чистится по timestamp из meta.json,
+    sandboxes/<id> — независимо, по своему mtime (расцеплено).
+
+    ``extra_sandbox_roots`` — ещё корни песочниц тем же правилом: каталоги
+    ``os_backend=sandbox, workdir=auto`` из gc_core (``<GC_STATE_DIR>/sandboxes``).
+
+    Возвращает {threads_removed, sandboxes_removed, kept, errors}.
+    """
+    now = datetime.now(UTC)
+    cutoff = now - timedelta(hours=ttl_hours)
+
+    stats = {
+        "threads_removed": 0,
+        "sandboxes_removed": 0,
+        "kept": 0,
+        "errors": 0,
+    }
+
+    # Sandboxes — независимо, по СОБСТВЕННОМУ mtime (а не по мете threads),
+    # и до проверки threads_dir: песочницам ядра каталог тредов swarm не нужен.
+    for root in (sandbox_root_dir, *extra_sandbox_roots):
+        _cleanup_sandbox_dirs(root, cutoff, dry_run, stats)
+
+    if os.path.isdir(threads_dir):
+        _cleanup_thread_dirs(threads_dir, cutoff, dry_run, stats)
 
     return stats
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    parser.add_argument("--threads-dir", required=True, help="каталог swarm_threads/")
-    parser.add_argument("--sandbox-root-dir", required=True, help=".swarm_sandboxes/")
     parser.add_argument(
-        "--ttl-hours", type=float, default=24.0,
+        "--threads-dir", required=True, help="каталог swarm_threads/"
+    )
+    parser.add_argument(
+        "--sandbox-root-dir", required=True, help=".swarm_sandboxes/"
+    )
+    parser.add_argument(
+        "--ttl-hours",
+        type=float,
+        default=24.0,
         help="срок хранения в часах (default: 24)",
     )
     parser.add_argument(
-        "--dry-run", action="store_true",
+        "--dry-run",
+        action="store_true",
         help="только посчитать, ничего не удалять",
+    )
+    parser.add_argument(
+        "--core-sandboxes-dir",
+        action="append",
+        default=[],
+        help="<GC_STATE_DIR>/sandboxes/ (os_backend=sandbox, workdir=auto)",
     )
     args = parser.parse_args()
 
     stats = cleanup_threads(
-        args.threads_dir, args.sandbox_root_dir, args.ttl_hours,
+        args.threads_dir,
+        args.sandbox_root_dir,
+        args.ttl_hours,
         dry_run=args.dry_run,
+        extra_sandbox_roots=args.core_sandboxes_dir,
     )
 
     prefix = "[DRY RUN] " if args.dry_run else ""

@@ -1,0 +1,17 @@
+# Профиль для IDE через gc-acp (VS Code ACP Client и т.п.).
+# Активация: profile: acp  в config.yml, либо  gc-acp --profile acp
+# (в settings.json: "args": ["--profile", "acp"]).
+# Гайд: docs/acp.md
+#
+# Канальные дефолты ACP и так такие же (см. AcpConfig + apply_acp_runtime_defaults).
+# Этот файл — явный оверлей «режим IDE-чата», если нужно держать его отдельно
+# от TUI (там обычно judge + todo reminders).
+
+acp:
+  # deny | judge | allow
+  text_answer_mode: allow
+  # on | off | smart — в IDE по умолчанию off: человек сам сверяет ответ с интентом
+  # (off в YAML обязательно в кавычках: иначе YAML прочитает как false)
+  finish_gate_mode: "off"
+  # 0 = выключить technical reminder про session_todo
+  todo_reminder_steps: 0

@@ -155,6 +155,7 @@
 <span class="tok-cmd">gc-mcp</span> remove --all                <span class="tok-cmt"># удалить все</span>
 <span class="tok-cmd">gc-ua</span> -a                           <span class="tok-cmt"># запуск со всеми</span></div>
       <table>
+        <caption>Рекомендованные MCP-серверы и их возможности</caption>
         <tr><th>MCP-сервер</th><th>Что умеет</th></tr>
         <tr><td>duckduckgo_search</td><td>Поиск в интернете — веб-страницы и новости.</td></tr>
         <tr><td>office</td><td>Чтение и создание Word, Excel, PowerPoint.</td></tr>
@@ -173,9 +174,9 @@
     <li class="step">
       <div class="step-h"><span class="num">7</span><h3>Обновление и удаление <span style="color:var(--mut2);font-weight:400;font-size:14px">— когда понадобится</span></h3></div>
       <p>Агент сам проверяет новую версию при запуске и показывает уведомление.<br><b style="color:#cfd6e2">Обновить</b> — в интерфейсе: <span class="inl">/settings → Обновление</span>, или командой:</p>
-      <div class="code"><button class="cp" onclick="cp(this)">⧉</button><span class="tok-cmd">gc-ua</span> --update</div>
+      <div class="code"><button class="cp" onclick="cp(this)">⧉</button><span class="tok-cmd">gc-cli</span> --update</div>
       <div class="note warn"><span class="ic">!</span><div>В <b>корпоративной сети Сбера</b> один раз пропишите в конфиг <span class="inl">update.extra_args: ["--system-certs"]</span> — агент подставит флаг при каждом обновлении, иначе оно прервётся на сертификатах.</div></div>
-      <p class="dim">После обновления агент может попросить дописать новые настройки в ваш конфиг — <span class="inl">gc-ua --sync-config</span> (то же есть в <span class="inl">/settings → Обновление</span>).</p>
+      <p class="dim">После обновления агент может попросить дописать новые настройки в ваш конфиг — <span class="inl">gc-cli --sync-config</span> (то же есть в <span class="inl">/settings → Обновление</span>).</p>
       <p><b style="color:#cfd6e2">Удалить</b> — сначала MCP, затем сам агент (иначе <span class="inl">gc-mcp</span> исчезнет вместе с ним):</p>
       <div class="code"><button class="cp" onclick="cp(this)">⧉</button><span class="tok-cmd">gc-mcp</span> remove --all        <span class="tok-cmt"># если ставили MCP-серверы</span>
 <span class="tok-cmd">uv</span> tool uninstall gc-ua</div>

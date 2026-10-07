@@ -1,7 +1,10 @@
 import unittest
 from types import SimpleNamespace
 
-from gc_core.utils.connect_backend import create_call_headers
+from gc_core.utils.connect_backend import (
+    acreate_call_headers,
+    build_call_headers,
+)
 
 
 class _StateStub:
@@ -9,7 +12,7 @@ class _StateStub:
     x_target = None
 
 
-class ChatCompletionsHeadersTest(unittest.TestCase):
+class ChatCompletionsHeadersTest(unittest.IsolatedAsyncioTestCase):
     def test_uses_generic_chat_completion_headers(self):
         ctx = SimpleNamespace(
             config_dict={
@@ -23,7 +26,7 @@ class ChatCompletionsHeadersTest(unittest.TestCase):
             },
             auth_connector=None,
         )
-        headers = create_call_headers(_StateStub(), ctx)
+        headers = build_call_headers(_StateStub(), ctx)
         self.assertEqual(headers.get("HTTP-Referer"), "https://example.org")
         self.assertEqual(headers.get("X-OpenRouter-Title"), "mini-cli")
         self.assertEqual(headers.get("X-Custom"), "v1")
@@ -42,13 +45,13 @@ class ChatCompletionsHeadersTest(unittest.TestCase):
             },
             auth_connector=None,
         )
-        headers = create_call_headers(_StateStub(), ctx)
+        headers = build_call_headers(_StateStub(), ctx)
         self.assertEqual(headers.get("Authorization"), "Bearer sk-or-v1-token")
         self.assertEqual(headers.get("HTTP-Referer"), "https://example.org")
         self.assertEqual(headers.get("X-OpenRouter-Title"), "mini-cli")
         self.assertEqual(headers.get("X-Title"), "mini-cli")
 
-    def test_prefers_chat_completions_token_over_auth_connector(self):
+    async def test_prefers_chat_completions_token_over_auth_connector(self):
         class _AuthStub:
             def get_token(self):
                 return "auth-token"
@@ -57,11 +60,15 @@ class ChatCompletionsHeadersTest(unittest.TestCase):
             config_dict={
                 "x_cl_id": 12345,
                 "backend_api_mode": "chat_completions",
-                "chat_completion_headers": {"Authorization": "Bearer chat-token"},
+                "chat_completion_headers": {
+                    "Authorization": "Bearer chat-token"
+                },
             },
             auth_connector=_AuthStub(),
         )
-        headers = create_call_headers(_StateStub(), ctx)
+        # Коннектор задан — значит идём единственной формой операции: токен
+        # берётся вне loop, и только потом оверлей заголовков его перебивает.
+        headers = await acreate_call_headers(_StateStub(), ctx)
         self.assertEqual(headers.get("Authorization"), "Bearer chat-token")
 
     def test_chat_completion_headers_override_session_id(self):
@@ -73,16 +80,44 @@ class ChatCompletionsHeadersTest(unittest.TestCase):
             config_dict={
                 "x_cl_id": 12345,
                 "backend_api_mode": "chat_completions",
-                "chat_completion_headers": {"x-session-id": "sympy__sympy-12419"},
+                "chat_completion_headers": {
+                    "x-session-id": "sympy__sympy-12419"
+                },
             },
             auth_connector=None,
         )
-        headers = create_call_headers(_StateStub(), ctx)
+        headers = build_call_headers(_StateStub(), ctx)
         self.assertEqual(headers.get("x-session-id"), "sympy__sympy-12419")
         self.assertEqual(
-            [k for k in headers if k.lower() == "x-session-id"], ["x-session-id"]
+            [k for k in headers if k.lower() == "x-session-id"],
+            ["x-session-id"],
         )
 
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_explicit_chat_mode_uses_model_headers_in_responses():
+    from gc_core.model_router import ResolvedModel
+
+    ctx = SimpleNamespace(
+        config_dict={"backend_api_mode": "responses"}, auth_connector=None
+    )
+    resolved = ResolvedModel(
+        alias="eyes",
+        model="vision-model",
+        url="https://example.test/chat",
+        authorization="Bearer eyes-token",
+        backend_overrides={"chat_completion_headers": {"x-target": "eyes"}},
+        tariff=None,
+        source="test",
+    )
+    headers = build_call_headers(
+        _StateStub(), ctx, resolved, api_mode="chat_completions"
+    )
+    assert headers["Authorization"] == "Bearer eyes-token"
+    assert headers["x-target"] == "eyes"
+    assert "Authorization" not in build_call_headers(
+        _StateStub(), ctx, resolved
+    )

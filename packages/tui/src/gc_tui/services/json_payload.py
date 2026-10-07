@@ -8,6 +8,7 @@ Payload рекурсивно разворачивается (unfold_payload): JS
 pretty-print + rich.syntax(solarized-dark). Markdown не интерпретируем:
 отладочный экран показывает сырые данные.
 """
+
 from __future__ import annotations
 
 import json
@@ -21,7 +22,7 @@ from textual.containers import Vertical
 from textual.widget import Widget
 from textual.widgets import Static
 
-from gc_tui.palette import BAND_BG, CODE_BLOCK
+from gc_tui.palette import BLOCK_BG, CODE_BLOCK
 
 _MAX_UNFOLD_DEPTH = 5
 
@@ -37,7 +38,7 @@ class PayloadBlocks(Vertical):
 
     DEFAULT_CSS = """
     PayloadBlocks { height: auto; width: 1fr; }
-    PayloadBlocks > Static { height: auto; width: 1fr; background: $band-bg; }
+    PayloadBlocks > Static { height: auto; width: 1fr; background: $block-bg; }
     """
 
 
@@ -54,7 +55,7 @@ def unfold_payload(content: Any, max_depth: int = _MAX_UNFOLD_DEPTH) -> Any:
         if s.startswith(("{", "[")):
             try:
                 parsed = json.loads(s)
-            except (json.JSONDecodeError, ValueError):
+            except ValueError:
                 parsed = _parse_truncated_json(s)
                 if parsed is None:
                     return content
@@ -62,7 +63,9 @@ def unfold_payload(content: Any, max_depth: int = _MAX_UNFOLD_DEPTH) -> Any:
                 return unfold_payload(parsed, max_depth - 1)
         return content
     if isinstance(content, dict):
-        return {k: unfold_payload(v, max_depth - 1) for k, v in content.items()}
+        return {
+            k: unfold_payload(v, max_depth - 1) for k, v in content.items()
+        }
     if isinstance(content, list):
         return [unfold_payload(v, max_depth - 1) for v in content]
     return content
@@ -70,9 +73,11 @@ def unfold_payload(content: Any, max_depth: int = _MAX_UNFOLD_DEPTH) -> Any:
 
 # Хвостовые обрезки оборванного JSON (все три — только НЕ-скобочные символы,
 # так что стек закрывашек после стрижки не меняется).
-_BARE_TAIL = re.compile(r'[^\s,:{}\[\]"]+$')            # голый литерал: 12 / tru / nul
-_KEY_TAIL = re.compile(r'"(?:[^"\\]|\\.)*"\s*:?\s*$')   # висящий ключ: "trunca" / "count":
-_SEP_TAIL = re.compile(r'[,:]\s*$')                     # висящий разделитель
+_BARE_TAIL = re.compile(r'[^\s,:{}\[\]"]+$')  # голый литерал: 12 / tru / nul
+_KEY_TAIL = re.compile(
+    r'"(?:[^"\\]|\\.)*"\s*:?\s*$'
+)  # висящий ключ: "trunca" / "count":
+_SEP_TAIL = re.compile(r"[,:]\s*$")  # висящий разделитель
 
 
 def _parse_truncated_json(s: str) -> Optional[Any]:
@@ -100,10 +105,10 @@ def _parse_truncated_json(s: str) -> Optional[Any]:
             stack.append("}" if ch == "{" else "]")
         elif ch in "}]":
             if not stack or stack[-1] != ch:
-                return None     # дисбаланс — это не обрыв, чинить нечего
+                return None  # дисбаланс — это не обрыв, чинить нечего
             stack.pop()
     if not stack and not in_str:
-        return None             # сбалансирован, но не парсится — не наш случай
+        return None  # сбалансирован, но не парсится — не наш случай
     base = s[:-1] if esc else s  # оборванная escape-последовательность
     if in_str:
         # обрыв посреди строки: закрытая строка — валидное значение, текст до
@@ -118,7 +123,7 @@ def _parse_truncated_json(s: str) -> Optional[Any]:
     for cand in candidates:
         try:
             return json.loads(cand + closers)
-        except (json.JSONDecodeError, ValueError):
+        except ValueError:
             continue
     return None
 
@@ -219,7 +224,7 @@ def _multiline_block(value: str, indent: int) -> Text:
     prefix = " " * indent + "│ "
     text = Text()
     for line in value.replace("\r\n", "\n").split("\n"):
-        text.append(prefix + line + "\n", style=f"{CODE_BLOCK} on {BAND_BG}")
+        text.append(prefix + line + "\n", style=f"{CODE_BLOCK} on {BLOCK_BG}")
     return text
 
 
@@ -238,7 +243,7 @@ def _highlighted(pretty_json: str) -> Text:
         "",
         lexer="json",
         theme="solarized-dark",  # solarized-dark | monokai | nord
-        background_color=BAND_BG,
+        background_color=BLOCK_BG,
         word_wrap=True,
     )
     text = syntax.highlight(pretty_json)

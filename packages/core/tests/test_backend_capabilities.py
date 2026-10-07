@@ -1,20 +1,22 @@
 """Capability probes and FakeBackend overrides."""
+
 import os
 import re
 import shlex
 from fnmatch import fnmatch
 
+import pytest
 from gc_core.backends.capabilities import (
-    probe_find_xargs_grep,
-    probe_grep_exclude_dir,
-    probe_grep_include,
-    probe_has_find,
-    probe_has_grep,
+    aprobe_find_xargs_grep,
+    aprobe_grep_exclude_dir,
+    aprobe_grep_include,
+    aprobe_has_find,
+    aprobe_has_grep,
 )
 from gc_core.backends.local import LocalFsBackend
 from gc_core.backends.protocol import ExecResult
-from gc_testkit.harbor_fakes import FakeBackend
 from gc_core.utils.native_fs_search import build_grep_argv_flags
+from gc_testkit.harbor_fakes import FakeBackend
 
 
 def test_fake_backend_default_caps_false():
@@ -39,8 +41,10 @@ def test_fake_backend_override_caps():
     assert b.has_grep is True
 
 
-def test_local_has_find_grep_smoke_cache():
+async def test_local_capabilities_answer_from_cache_after_warm_up():
+    """Прогрев — обязательный шаг; после него свойства отвечают из кэша."""
     b = LocalFsBackend()
+    await b.awarm_capabilities()
     # On a typical Linux CI/dev host GNU find/grep exist.
     f1 = b.has_find
     f2 = b.has_find
@@ -53,11 +57,29 @@ def test_local_has_find_grep_smoke_cache():
     assert isinstance(g1, bool)
 
 
+def test_reading_a_capability_before_warm_up_refuses_loudly():
+    """Не прогрели — честный отказ, а не тихий синхронный exec из-под loop.
+
+    Раньше свойство само запускало пробу: до четырёх запусков процесса подряд
+    (в песочнице это сеть, до ~10 с на пробу) прямо на event loop вызывающего.
+    Молчаливая заморозка выглядела как зависший агент на первом инструменте,
+    и найти её по логам было нечем. Теперь отказ называет и причину, и
+    лекарство.
+    """
+    from gc_core.backends.protocol import CapabilitiesNotWarmedError
+
+    b = LocalFsBackend()
+    for name in ("has_find", "has_grep", "grep_exclude_dir", "grep_include"):
+        with pytest.raises(CapabilitiesNotWarmedError) as exc:
+            getattr(b, name)
+        assert "awarm_capabilities" in str(exc.value)
+
+
 # --- probe ≡ production wire -------------------------------------------------
 
 
 def _read_text(path):
-    with open(path, "r", encoding="utf-8", errors="replace") as fh:
+    with open(path, encoding="utf-8", errors="replace") as fh:
         return fh.read()
 
 
@@ -67,6 +89,12 @@ class _PosixBox(LocalFsBackend):
     Probes run with ``is_sandbox`` False, so they build their fixture with host
     ``tempfile``; the sim answers each recipe by walking that tree for real.
     The knobs model exactly the portability holes the probes exist to catch.
+
+    Подменяются КОРУТИННЫЕ ``aexec``/``aexec_argv``: пробы ходят через
+    ``aexec_port``, а тот отдаёт сам бэкенд, если у него есть корутинная
+    форма. Оставь здесь синхронные ``exec`` — и порт взял бы унаследованные от
+    ``LocalFsBackend`` корутины, то есть НАСТОЯЩИЙ подпроцесс вместо
+    симуляции, а проверки бы зеленели на живом grep хоста.
     """
 
     def __init__(
@@ -87,7 +115,15 @@ class _PosixBox(LocalFsBackend):
 
     # --- exec surface ---
 
-    def exec(self, command, *, cwd=None, timeout=None, env=None, capture_max_chars=None):
+    async def aexec(
+        self,
+        command,
+        *,
+        cwd=None,
+        timeout=None,
+        env=None,
+        capture_max_chars=None,
+    ):
         self.commands.append(command)
         if command.startswith("command -v "):
             name = shlex.split(command)[2]
@@ -96,7 +132,16 @@ class _PosixBox(LocalFsBackend):
             return self._pipeline(command)
         return ExecResult("", "", 0)
 
-    def exec_argv(self, argv, *, stdin=None, cwd=None, timeout=None, env=None, capture_max_chars=None):
+    async def aexec_argv(
+        self,
+        argv,
+        *,
+        stdin=None,
+        cwd=None,
+        timeout=None,
+        env=None,
+        capture_max_chars=None,
+    ):
         argv = [str(a) for a in argv]
         self.commands.append(" ".join(argv))
         prog = os.path.basename(argv[0])
@@ -134,7 +179,9 @@ class _PosixBox(LocalFsBackend):
                 return ExecResult("", "", 0)
             # No -r semantics: the utility still runs once, on empty stdin.
             ran = self._grep(rest, stdin="")
-            return ExecResult(ran.stdout, ran.stderr, 123 if ran.return_code else 0)
+            return ExecResult(
+                ran.stdout, ran.stderr, 123 if ran.return_code else 0
+            )
         return self._grep(rest + files)
 
     def _find(self, argv):
@@ -152,7 +199,7 @@ class _PosixBox(LocalFsBackend):
             tok = rest[i]
             if tok == "(":
                 j = rest.index(")", i)
-                group = rest[i + 1:j]
+                group = rest[i + 1 : j]
                 k = 0
                 while k < len(group):
                     if group[k] == "-name":
@@ -182,7 +229,9 @@ class _PosixBox(LocalFsBackend):
         rows = []
         for dirpath, dirnames, filenames in os.walk(root):
             dirnames[:] = [
-                d for d in dirnames if not any(fnmatch(d, p) for p in prune_names)
+                d
+                for d in dirnames
+                if not any(fnmatch(d, p) for p in prune_names)
             ]
             for d in sorted(dirnames):
                 rows.append((os.path.join(dirpath, d), True))
@@ -191,14 +240,19 @@ class _PosixBox(LocalFsBackend):
 
         if printf_fmt is not None:
             out = "".join(
-                os.path.relpath(p, root) + "\t" + ("d" if is_dir else "f") + "\n"
+                os.path.relpath(p, root)
+                + "\t"
+                + ("d" if is_dir else "f")
+                + "\n"
                 for p, is_dir in rows
             )
             return ExecResult(out, "", 0)
 
         files = [p for p, is_dir in rows if not is_dir]
         if name_pat:
-            files = [p for p in files if fnmatch(os.path.basename(p), name_pat)]
+            files = [
+                p for p in files if fnmatch(os.path.basename(p), name_pat)
+            ]
         sep = "\0" if terminator == "-print0" else "\n"
         return ExecResult("".join(p + sep for p in files), "", 0)
 
@@ -211,10 +265,12 @@ class _PosixBox(LocalFsBackend):
         while i < len(argv):
             tok = argv[i]
             if tok == "--":
-                pattern, paths = argv[i + 1], argv[i + 2:]
+                pattern, paths = argv[i + 1], argv[i + 2 :]
                 break
             if tok in self.grep_rejects:
-                return ExecResult("", "grep: unrecognized option " + tok + "\n", 2)
+                return ExecResult(
+                    "", "grep: unrecognized option " + tok + "\n", 2
+                )
             if tok in ("-R", "-r"):
                 recursive = True
             elif tok == "-H":
@@ -225,9 +281,11 @@ class _PosixBox(LocalFsBackend):
                 fixed = True
             elif tok == "-i":
                 ci = True
-            elif tok in ("-E", "--color=never", "--no-messages"):
-                pass
-            elif tok.startswith("--binary-files="):
+            elif tok in (
+                "-E",
+                "--color=never",
+                "--no-messages",
+            ) or tok.startswith("--binary-files="):
                 pass
             elif tok.startswith("--include="):
                 include = tok.split("=", 1)[1]
@@ -238,7 +296,9 @@ class _PosixBox(LocalFsBackend):
             elif tok.startswith("--devices="):
                 pass
             else:
-                return ExecResult("", "grep: unrecognized option " + tok + "\n", 2)
+                return ExecResult(
+                    "", "grep: unrecognized option " + tok + "\n", 2
+                )
             i += 1
 
         targets = []
@@ -270,13 +330,17 @@ class _PosixBox(LocalFsBackend):
             for no, line in enumerate(content.splitlines(), start=1):
                 hay = line.lower() if ci else line
                 needle = pattern.lower() if ci else pattern
-                hit = (needle in hay) if fixed else bool(re.search(needle, hay))
+                hit = (
+                    (needle in hay) if fixed else bool(re.search(needle, hay))
+                )
                 if not hit:
                     continue
                 prefix = (name + name_sep) if show_name else ""
                 prefix += (str(no) + ":") if line_number else ""
                 out.append(prefix + line)
-        return ExecResult("\n".join(out) + ("\n" if out else ""), "", 0 if out else 1)
+        return ExecResult(
+            "\n".join(out) + ("\n" if out else ""), "", 0 if out else 1
+        )
 
 
 def _always_on_grep_flags():
@@ -286,79 +350,93 @@ def _always_on_grep_flags():
     )
 
 
-def test_grep_probes_run_the_production_flags():
+async def test_grep_probes_run_the_production_flags():
     """Probe argv must carry every always-on production flag, or it proves nothing."""
     always = _always_on_grep_flags()
-    for probe in (probe_has_grep, probe_grep_exclude_dir, probe_grep_include):
+    for probe in (
+        aprobe_has_grep,
+        aprobe_grep_exclude_dir,
+        aprobe_grep_include,
+    ):
         box = _PosixBox()
-        assert probe(box) is True
+        assert await probe(box) is True
         assert box.grep_argvs
         for argv in box.grep_argvs:
             assert always <= set(argv)
 
 
-def test_grep_probe_smokes_fixed_and_case_insensitive_flags():
-    mode_flags = set(build_grep_argv_flags(fixed=True, case_insensitive=True)[1:]) - set(
-        build_grep_argv_flags()[1:]
-    )
+async def test_grep_probe_smokes_fixed_and_case_insensitive_flags():
+    mode_flags = set(
+        build_grep_argv_flags(fixed=True, case_insensitive=True)[1:]
+    ) - set(build_grep_argv_flags()[1:])
     box = _PosixBox()
 
-    assert probe_has_grep(box) is True
+    assert await aprobe_has_grep(box) is True
 
     seen = {flag for argv in box.grep_argvs for flag in argv}
     assert mode_flags <= seen
 
 
-def test_grep_rejecting_no_messages_is_not_reported_usable():
+async def test_grep_rejecting_no_messages_is_not_reported_usable():
     """BusyBox case: probe flags pass, a production-only long option does not."""
     box = _PosixBox(grep_rejects=("--no-messages",))
 
-    assert probe_has_grep(box) is False
+    assert await aprobe_has_grep(box) is False
+    # Свойства читают только кэш — его наполняет прогрев.
+    await box.awarm_capabilities()
     assert box.has_grep is False
 
 
-def test_grep_rejecting_binary_files_is_not_reported_usable():
+async def test_grep_rejecting_binary_files_is_not_reported_usable():
     box = _PosixBox(grep_rejects=("--binary-files=without-match",))
 
-    assert probe_has_grep(box) is False
+    assert await aprobe_has_grep(box) is False
 
 
-def test_backend_without_xargs_r_does_not_report_find():
+async def test_backend_without_xargs_r_does_not_report_find():
     """has_find gates the find -print0 | xargs -0 -r grep recipe — smoke it whole."""
     box = _PosixBox(xargs_flags=("-0",))
 
-    assert probe_find_xargs_grep(box) is False
-    assert probe_has_find(box) is False
+    assert await aprobe_find_xargs_grep(box) is False
+    assert await aprobe_has_find(box) is False
+    # Свойства читают только кэш — его наполняет прогрев.
+    await box.awarm_capabilities()
     assert box.has_find is False
 
 
-def test_backend_that_runs_grep_on_empty_xargs_input_does_not_report_find():
+async def test_backend_that_runs_grep_on_empty_xargs_input_does_not_report_find():
     box = _PosixBox(xargs_no_run_if_empty=False)
 
-    assert probe_find_xargs_grep(box) is False
+    assert await aprobe_find_xargs_grep(box) is False
+    # Свойства читают только кэш — его наполняет прогрев.
+    await box.awarm_capabilities()
     assert box.has_find is False
 
 
-def test_backend_without_find_print0_does_not_report_find():
+async def test_backend_without_find_print0_does_not_report_find():
     box = _PosixBox(find_rejects=("-print0",))
 
-    assert probe_find_xargs_grep(box) is False
+    assert await aprobe_find_xargs_grep(box) is False
+    # Свойства читают только кэш — его наполняет прогрев.
+    await box.awarm_capabilities()
     assert box.has_find is False
 
 
-def test_backend_without_gnu_printf_still_reports_find():
+async def test_backend_without_gnu_printf_still_reports_find():
     """has_find gates the prune pipeline, not Harbor's walk -printf listing."""
     box = _PosixBox(find_rejects=("-printf",))
 
-    assert probe_find_xargs_grep(box) is True
-    assert probe_has_find(box) is True
+    assert await aprobe_find_xargs_grep(box) is True
+    assert await aprobe_has_find(box) is True
+    # Свойства читают только кэш — его наполняет прогрев.
+    await box.awarm_capabilities()
     assert box.has_find is True
 
 
-def test_pipeline_probe_runs_the_production_wire():
+async def test_pipeline_probe_runs_the_production_wire():
     box = _PosixBox()
 
-    assert probe_find_xargs_grep(box) is True
+    assert await aprobe_find_xargs_grep(box) is True
 
     piped = [c for c in box.commands if "| xargs" in c]
     assert piped
@@ -367,22 +445,35 @@ def test_pipeline_probe_runs_the_production_wire():
         assert "| xargs -0 -r " in cmd
 
 
-def test_capable_box_reports_all_capabilities():
+async def test_capable_box_reports_all_capabilities():
     """Regression: nothing above narrowed what a fully capable box reports."""
     box = _PosixBox()
 
+    # Свойства читают только кэш — его наполняет прогрев.
+
+    await box.awarm_capabilities()
+
     assert box.has_find is True
+    # Свойства читают только кэш — его наполняет прогрев.
+    await box.awarm_capabilities()
     assert box.has_grep is True
+    # Свойства читают только кэш — его наполняет прогрев.
+    await box.awarm_capabilities()
     assert box.grep_exclude_dir is True
+    # Свойства читают только кэш — его наполняет прогрев.
+    await box.awarm_capabilities()
     assert box.grep_include is True
 
 
 # --- wire format обхода: rel, type, size --------------------------------------
 
+
 def test_parse_find_printf_entries_reads_sizes_and_tolerates_two_columns():
     from gc_core.backends.capabilities import parse_find_printf_entries
 
-    rows = parse_find_printf_entries("src\td\t4096\nsrc/a.py\tf\t12\nold.txt\tf\n")
+    rows = parse_find_printf_entries(
+        "src\td\t4096\nsrc/a.py\tf\t12\nold.txt\tf\n"
+    )
     assert [(e.rel, e.is_dir, e.size) for e in rows] == [
         ("src", True, None),
         ("src/a.py", False, 12),

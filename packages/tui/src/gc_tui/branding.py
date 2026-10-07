@@ -3,6 +3,7 @@
 Презентационный слой: константы + чистые функции рендера (без бизнес-логики).
 Все экраны импортируют строки отсюда, чтобы имя/строки не дублировались.
 """
+
 from __future__ import annotations
 
 from rich.text import Text
@@ -40,17 +41,23 @@ def _hex_to_rgb(h: str) -> tuple[int, int, int]:
 
 
 def _rgb_to_hex(c: tuple[int, int, int]) -> str:
-    return "#%02X%02X%02X" % c
+    return "#{:02X}{:02X}{:02X}".format(*c)
 
 
-def _lerp(a: tuple[int, int, int], b: tuple[int, int, int], t: float) -> tuple[int, int, int]:
+def _lerp(
+    a: tuple[int, int, int], b: tuple[int, int, int], t: float
+) -> tuple[int, int, int]:
     return tuple(round(a[i] + (b[i] - a[i]) * t) for i in range(3))  # type: ignore[return-value]
 
 
 def gradient_color(frac: float) -> str:
     """Цвет колонки на нормированной позиции frac∈[0,1]: WARM→OLIVE→TEAL."""
-    frac = 0.0 if frac < 0 else 1.0 if frac > 1 else frac
-    warm, olive, teal = _hex_to_rgb(_WARM), _hex_to_rgb(_OLIVE), _hex_to_rgb(_TEAL)
+    frac = min(1.0, max(0.0, frac))
+    warm, olive, teal = (
+        _hex_to_rgb(_WARM),
+        _hex_to_rgb(_OLIVE),
+        _hex_to_rgb(_TEAL),
+    )
     if frac <= 0.5:
         return _rgb_to_hex(_lerp(warm, olive, frac / 0.5))
     return _rgb_to_hex(_lerp(olive, teal, (frac - 0.5) / 0.5))
@@ -81,8 +88,8 @@ def tagline_display() -> str:
 # Разрядка тэглайна (как `.logo-sub` в gc-ua-install.html: airy letter-spacing,
 # заметный gap между словами). Межсловный зазор — двойной от межбуквенного.
 # Оба меняются одним числом.
-_TAGLINE_LETTER_GAP = "  "   # 2 пробела — между буквами
-_TAGLINE_WORD_GAP = "    "    # 4 пробела — между словами (двойной от letter-gap)
+_TAGLINE_LETTER_GAP = "  "  # 2 пробела — между буквами
+_TAGLINE_WORD_GAP = "    "  # 4 пробела — между словами (двойной от letter-gap)
 
 
 def version_under_logo() -> str:
@@ -91,7 +98,10 @@ def version_under_logo() -> str:
     и align центрировал бы по ней). Воздух над строкой даёт CSS (`.brand-version`).
     Из исходников показывается «dev», см. app_version.display_version."""
     from gc_core import app_version
-    text = app_version.display_version(long=True)   # в карточке есть место на пояснение
+
+    text = app_version.display_version(
+        long=True
+    )  # в карточке есть место на пояснение
     logo_w = max((len(line) for line in LOGO.splitlines()), default=0)
     return " " * max(0, (logo_w - len(text)) // 2) + text
 

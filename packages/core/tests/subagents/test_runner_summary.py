@@ -3,11 +3,9 @@
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from gc_core.states import State, SharedStateData
-from gc_core.tools.subagents import runner as runner_module
-from gc_core.tools.subagents.runner import SubagentRunner
-
 from gc_core import run_summary_coordinator as run_summary_coordinator_module
+from gc_core.states import SharedStateData, State
+from gc_core.tools.subagents.runner import SubagentRunner
 
 
 def _make_orchestrator_state():
@@ -62,7 +60,7 @@ def _make_ctx(cfg):
 
 
 class TestRunnerSummary:
-    def test_passes_summary_hook_to_run_agent(self):
+    async def test_passes_summary_hook_to_run_agent(self):
         orch = _make_orchestrator_state()
         cfg = _make_config(trigger=10)
         runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
@@ -73,15 +71,19 @@ class TestRunnerSummary:
             return "ok"
 
         with (
-            patch.object(runner, "_build_child_ctx", return_value=SimpleNamespace()),
+            patch.object(
+                runner, "_build_child_ctx", return_value=SimpleNamespace()
+            ),
         ):
-            runner.run("subagent_worker", {"task": "short task"}, fake_run_agent)
+            await runner.arun(
+                "subagent_worker", {"task": "short task"}, fake_run_agent
+            )
 
         assert callable(captured.get("persist_messages_callback"))
         assert callable(captured.get("pre_backend_compaction_hook"))
         assert "post_step_hook" not in captured
 
-    def test_runs_pre_backend_summary_check(self):
+    async def test_runs_pre_backend_summary_check(self):
         orch = _make_orchestrator_state()
         cfg = _make_config(trigger=10)
         runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
@@ -90,36 +92,41 @@ class TestRunnerSummary:
         def fake_run_summary_compaction(**kwargs):
             calls.append(kwargs.get("trigger_reason"))
 
-        def fake_run_agent(messages, child_state, child_ctx, **kwargs):
+        async def fake_run_agent(messages, child_state, child_ctx, **kwargs):
             child_state.messages = [
                 {"role": "user", "content": "old"},
                 {"role": "user", "content": "new"},
             ]
-            kwargs["pre_backend_compaction_hook"](
+            # Хук стал корутинным (см. runner.py) — зовём его как корутину.
+            await kwargs["pre_backend_compaction_hook"](
                 [{"role": "user", "content": "new"}],
                 "user_ask",
             )
             return "done"
 
         with (
-            patch.object(runner, "_build_child_ctx", return_value=SimpleNamespace()),
+            patch.object(
+                runner, "_build_child_ctx", return_value=SimpleNamespace()
+            ),
             patch.object(
                 run_summary_coordinator_module,
-                "history_exceeds_summary_trigger",
+                "exceeded_summary_triggers",
                 return_value=True,
             ),
             patch.object(
                 run_summary_coordinator_module,
-                "run_summary_compaction",
+                "arun_summary_compaction",
                 side_effect=fake_run_summary_compaction,
             ),
         ):
-            runner.run("subagent_worker", {"task": "long task"}, fake_run_agent)
+            await runner.arun(
+                "subagent_worker", {"task": "long task"}, fake_run_agent
+            )
 
         assert "subagent_pre_backend" in calls
         assert "subagent_pre_run" not in calls
 
-    def test_summary_disabled_when_trigger_zero(self):
+    async def test_summary_disabled_when_trigger_zero(self):
         orch = _make_orchestrator_state()
         cfg = _make_config(trigger=0)
         runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
@@ -129,10 +136,37 @@ class TestRunnerSummary:
             captured.update(kwargs)
             return "ok"
 
-        with patch.object(runner, "_build_child_ctx", return_value=SimpleNamespace()):
-            runner.run("subagent_worker", {"task": "task"}, fake_run_agent)
+        with patch.object(
+            runner, "_build_child_ctx", return_value=SimpleNamespace()
+        ):
+            await runner.arun(
+                "subagent_worker", {"task": "task"}, fake_run_agent
+            )
 
         assert captured.get("persist_messages_callback") is not None
         assert captured.get("pre_backend_compaction_hook") is None
         assert captured.get("session_meta") == {}
         assert "post_step_hook" not in captured
+
+    async def test_summary_enabled_when_only_token_trigger(self):
+        orch = _make_orchestrator_state()
+        cfg = _make_config(trigger=0)
+        cfg["summary_params"]["chat_completions_summary_trigger_tokens"] = 1000
+        runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
+        captured = {}
+
+        async def fake_run_agent(messages, child_state, child_ctx, **kwargs):
+            captured.update(kwargs)
+            assert child_state.last_main_prompt_tokens is None
+            assert child_state.last_main_prompt_message_count is None
+            return "ok"
+
+        with patch.object(
+            runner, "_build_child_ctx", return_value=SimpleNamespace()
+        ):
+            await runner.arun(
+                "subagent_worker", {"task": "task"}, fake_run_agent
+            )
+
+        assert captured.get("pre_backend_compaction_hook") is not None
+        assert captured.get("turn_end_compaction_hook") is None

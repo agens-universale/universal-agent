@@ -40,7 +40,9 @@ def test_default_is_the_same_dir_the_janitor_cleans():
     Подмена, которую ловит тест: вернуть `"threads"` (или любой путь от CWD) —
     дефолт разъедется с janitor'ом, и CLI начнёт чистить не тот каталог.
     """
-    expected = resolve_threads_dir(build_agent_config_for_server(load_server_config()))
+    expected = resolve_threads_dir(
+        build_agent_config_for_server(load_server_config())
+    )
 
     assert cleanup_mod._default_threads_dir() == expected
     assert os.path.isabs(expected), "janitor обязан отдавать абсолютный путь"
@@ -60,11 +62,17 @@ def test_default_does_not_look_under_cwd(monkeypatch, tmp_path):
 
     # Проверять только `!= str(decoy)` мало: относительное "threads" не равно
     # абсолютному пути приманки, и подмена прошла бы мимо сетки.
-    assert os.path.isabs(resolved), f"дефолт обязан быть абсолютным, получено {resolved!r}"
-    assert not os.path.realpath(resolved).startswith(os.path.realpath(str(tmp_path)))
+    assert os.path.isabs(resolved), (
+        f"дефолт обязан быть абсолютным, получено {resolved!r}"
+    )
+    assert not os.path.realpath(resolved).startswith(
+        os.path.realpath(str(tmp_path))
+    )
 
 
-def test_explicit_relative_dir_becomes_absolute_in_stats(monkeypatch, tmp_path, capsys):
+def test_explicit_relative_dir_becomes_absolute_in_stats(
+    monkeypatch, tmp_path, capsys
+):
     """Явный относительный путь нормализуется — иначе по выводу не понять, что чистили."""
     (tmp_path / "threads").mkdir()
     monkeypatch.chdir(tmp_path)
@@ -72,7 +80,11 @@ def test_explicit_relative_dir_becomes_absolute_in_stats(monkeypatch, tmp_path, 
     rc = _run(monkeypatch, "--threads-dir", "threads")
 
     assert rc == 0
-    assert os.path.realpath(str(tmp_path / "threads")) in capsys.readouterr().out
+    # Статистика печатается словарём, то есть repr: на Windows слеши в нём
+    # удвоены, поэтому ищем repr пути, а не сам путь.
+    assert (
+        repr(os.path.join(os.getcwd(), "threads")) in capsys.readouterr().out
+    )
 
 
 def test_explicit_dir_does_not_touch_the_config(monkeypatch, tmp_path):
@@ -83,7 +95,9 @@ def test_explicit_dir_does_not_touch_the_config(monkeypatch, tmp_path):
     (tmp_path / "threads").mkdir()
 
     def _boom() -> str:
-        raise AssertionError("конфиг не должен читаться при явном --threads-dir")
+        raise AssertionError(
+            "конфиг не должен читаться при явном --threads-dir"
+        )
 
     monkeypatch.setattr(cleanup_mod, "_default_threads_dir", _boom)
 

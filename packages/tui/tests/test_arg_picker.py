@@ -1,18 +1,22 @@
 """ArgPicker integration в TraceScreen: триггер на /export <space>, фильтр, Tab,
 Enter (выполняет export), Esc, mutex с командной палитрой."""
-import pytest
 
+import pytest
 from gc_core.thread_store import append_new_thread_messages
 from gc_tui.services.stores.file_store import FileTaskStore
 
 
 def _mk_app(tmp_path):
     from gc_tui.app import TuiApp
-    return TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+
+    return TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
 
 
 def test_export_command_has_arg_options():
     from gc_tui.commands import build_default_registry
+
     export = build_default_registry().lookup("export")
     assert export.arg_options == (
         ("txt", "Вся сессия в читаемом виде"),
@@ -26,12 +30,14 @@ def test_export_command_has_arg_options():
 async def test_picker_opens_on_export_space(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.widgets.arg_picker import ArgPicker
+
     async with _mk_app(tmp_path).run_test() as pilot:
         pilot.app.query_one("#cmdinput").text = "/export "
         await pilot.pause(0.1)
         assert len(pilot.app.query(ArgPicker)) == 1
         rows = "\n".join(
-            str(s.render()) for s in pilot.app.query_one(ArgPicker).query(".palette-row")
+            str(s.render())
+            for s in pilot.app.query_one(ArgPicker).query(".palette-row")
         )
         assert "txt" in rows and "json" in rows
 
@@ -40,11 +46,13 @@ async def test_picker_opens_on_export_space(tmp_path):
 async def test_picker_filters_by_prefix(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.widgets.arg_picker import ArgPicker
+
     async with _mk_app(tmp_path).run_test() as pilot:
         pilot.app.query_one("#cmdinput").text = "/export j"
         await pilot.pause(0.1)
         rows = "\n".join(
-            str(s.render()) for s in pilot.app.query_one(ArgPicker).query(".palette-row")
+            str(s.render())
+            for s in pilot.app.query_one(ArgPicker).query(".palette-row")
         )
         assert "json" in rows
         assert "txt" not in rows
@@ -54,6 +62,7 @@ async def test_picker_filters_by_prefix(tmp_path):
 async def test_tab_completes_value_and_closes(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.widgets.arg_picker import ArgPicker
+
     async with _mk_app(tmp_path).run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")
         inp.text = "/export j"
@@ -68,9 +77,15 @@ async def test_tab_completes_value_and_closes(tmp_path):
 async def test_enter_runs_export_with_selected_value(tmp_path, monkeypatch):
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
-    append_new_thread_messages(str(tmp_path), "cli", "tidX",
-                               [{"role": "user", "content": "q", "id": "m1"}], set())
+    append_new_thread_messages(
+        str(tmp_path),
+        "cli",
+        "tidX",
+        [{"role": "user", "content": "q", "id": "m1"}],
+        set(),
+    )
     from gc_tui.widgets.arg_picker import ArgPicker
+
     async with _mk_app(tmp_path).run_test() as pilot:
         scr = pilot.app.screen
         scr._active_task_id = "tidX"
@@ -89,6 +104,7 @@ async def test_enter_runs_export_with_selected_value(tmp_path, monkeypatch):
 async def test_esc_closes_keeps_input(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.widgets.arg_picker import ArgPicker
+
     async with _mk_app(tmp_path).run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")
         inp.text = "/export j"
@@ -104,6 +120,7 @@ async def test_mutex_with_command_palette(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.widgets.arg_picker import ArgPicker
     from gc_tui.widgets.command_palette import CommandPalette
+
     async with _mk_app(tmp_path).run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")
         inp.text = "/exp"
@@ -130,6 +147,7 @@ async def test_hint_has_keys_margin_and_honest_desired_height(tmp_path):
     класс бага palette desired_height)."""
     pytest.importorskip("textual")
     from gc_tui.widgets.arg_picker import ArgPicker
+
     async with _mk_app(tmp_path).run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")
         inp.text = "/export "
@@ -137,7 +155,9 @@ async def test_hint_has_keys_margin_and_honest_desired_height(tmp_path):
         picker = pilot.app.query_one(ArgPicker)
         hint = picker.query(".palette-keys")
         assert len(hint) == 1
-        assert picker.query_one(".palette-footer").query(".palette-keys")  # hint внутри докнутого подвала
+        assert picker.query_one(".palette-footer").query(
+            ".palette-keys"
+        )  # hint внутри докнутого подвала
         assert picker.desired_height == len(picker.children) + 3
         # рамка обнимает контент: регион hint внутри региона пикера
         assert hint[0].region.bottom <= picker.region.bottom
@@ -151,16 +171,21 @@ async def test_hint_visible_on_open_with_small_screen_no_scroll(tmp_path):
     открытии, без скролла (докнутый .palette-footer, а не последний FLOW-ребёнок)."""
     pytest.importorskip("textual")
     from gc_tui.widgets.arg_picker import ArgPicker
+
     async with _mk_app(tmp_path).run_test(size=(80, 16)) as pilot:
         inp = pilot.app.query_one("#cmdinput")
         inp.text = "/export "
         await pilot.pause(0.1)
         picker = pilot.app.query_one(ArgPicker)
-        assert picker.region.height < picker.desired_height   # клэмп реально сработал
+        assert (
+            picker.region.height < picker.desired_height
+        )  # клэмп реально сработал
         hint = picker.query(".palette-keys")
         assert len(hint) == 1
-        assert hint[0].region.bottom <= 16                     # на экране
-        assert hint[0].region.bottom <= picker.region.bottom   # внутри рамки пикера, видна без скролла
+        assert hint[0].region.bottom <= 16  # на экране
+        assert (
+            hint[0].region.bottom <= picker.region.bottom
+        )  # внутри рамки пикера, видна без скролла
 
 
 _LONG_REASON = (
@@ -173,10 +198,13 @@ async def _picker_with_hint(pilot, hint: str):
     """Пикер с ДИНАМИЧЕСКИМ хинтом, открытый настоящим экраном (настоящие стили:
     .palette-row nowrap, .palette-hint — переносится)."""
     from gc_tui.widgets.arg_picker import ArgPicker
+
     pilot.app.screen._open_arg_picker(
-        options=[("без профиля", "работать чистым конфигом", ""),
-                 ("alpha", "глобальный", ""),
-                 ("broken-enc", "глобальный", "✗ не применится")],
+        options=[
+            ("без профиля", "работать чистым конфигом", ""),
+            ("alpha", "глобальный", ""),
+            ("broken-enc", "глобальный", "✗ не применится"),
+        ],
         prefix="",
         hint_provider=lambda v: hint,
     )
@@ -199,8 +227,7 @@ async def test_desired_height_covers_a_wrapping_hint(tmp_path, width):
     async with _mk_app(tmp_path).run_test(size=(width, 40)) as pilot:
         picker = await _picker_with_hint(pilot, _LONG_REASON)
         assert picker.desired_height >= picker.outer_size.height, (
-            f"ширина {width}: заявлено {picker.desired_height}, "
-            f"нарисовано {picker.outer_size.height}"
+            f"ширина {width}: заявлено {picker.desired_height}, нарисовано {picker.outer_size.height}"
         )
 
 
@@ -212,9 +239,13 @@ async def test_wrapping_hint_keeps_the_whole_reason_on_screen(tmp_path):
     async with _mk_app(tmp_path).run_test(size=(80, 40)) as pilot:
         picker = await _picker_with_hint(pilot, _LONG_REASON)
         hint = picker.query(".palette-keys")[0]
-        assert hint.region.height > 1                     # причина правда переносится
-        assert hint.region.bottom <= picker.region.bottom  # и целиком внутри рамки
-        assert str(hint.render()).startswith("C:/Users/dmitr/.gc/profiles/broken-enc.yml")
+        assert hint.region.height > 1  # причина правда переносится
+        assert (
+            hint.region.bottom <= picker.region.bottom
+        )  # и целиком внутри рамки
+        assert str(hint.render()).startswith(
+            "C:/Users/dmitr/.gc/profiles/broken-enc.yml"
+        )
 
 
 @pytest.mark.asyncio

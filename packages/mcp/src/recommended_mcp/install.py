@@ -16,6 +16,7 @@ import zipfile
 from itertools import takewhile
 from pathlib import Path, PurePosixPath
 from typing import Optional, Tuple
+
 # Позволяет запускать файл напрямую: `python recommended_mcp/install.py`.
 # При `python -m recommended_mcp.install` и при import из тестов — no-op.
 if __package__ in (None, ""):
@@ -36,16 +37,32 @@ if __package__ in (None, ""):
     ensure_repo_on_sys_path()
     __package__ = "recommended_mcp"
 
-from recommended_mcp.runtime.manifest_resolve import recipe_root, resolve_install_manifest_path
-from recommended_mcp.runtime.repo_path import repo_root_from
 from gc_core.mcp_runtime.state import save_runtime_state
-from recommended_mcp.runtime.venv import active_pip_python, ensure_mcp_venv, pip_argv, pip_install_argv, pip_install_target, query_installed_version
+
 from recommended_mcp.manifest import (
     MCPEntry,
     load_agent_dep_dir,
     load_manifest,
     load_repo_url,
 )
+from recommended_mcp.runtime.manifest_resolve import (
+    recipe_root,
+    resolve_install_manifest_path,
+)
+from recommended_mcp.runtime.repo_path import repo_root_from
+from recommended_mcp.runtime.venv import (
+    active_pip_python,
+    ensure_mcp_venv,
+    pip_argv,
+    pip_install_argv,
+    pip_install_target,
+    query_installed_version,
+)
+
+# Константы вместо повторяющихся литералов (Sonar S1192).
+_EXT_TAR_GZ = "tar.gz"
+_MANIFEST_NAME = "pyproject.toml"
+
 
 NODE_VERSION = "18.0.0"
 _NODE_DIST_BASE = "https://nodejs.org/dist"
@@ -56,7 +73,9 @@ class InstallError(RuntimeError):
 
 
 def _platform_supported(entry: MCPEntry) -> bool:
-    return not entry.install.platforms or sys.platform in entry.install.platforms
+    return (
+        not entry.install.platforms or sys.platform in entry.install.platforms
+    )
 
 
 def _short_reason(exc: Exception) -> str:
@@ -85,7 +104,13 @@ def run_install_entries(
             if entry.install.type == "source" and editable:
                 install_source_entry(entry, root, editable=True)
             else:
-                install_entry(entry, root, agent_dep_dir, repo_url=repo_url, repo_ref=repo_ref)
+                install_entry(
+                    entry,
+                    root,
+                    agent_dep_dir,
+                    repo_url=repo_url,
+                    repo_ref=repo_ref,
+                )
             results.append((entry.name, "installed", ""))
         except (subprocess.CalledProcessError, InstallError, OSError) as exc:
             reason = _short_reason(exc)
@@ -99,6 +124,29 @@ def find_entry(manifest, name: str):
     for entry in manifest:
         if entry.name == name:
             return entry
+    return None
+
+
+def _source_distribution_name(source: Path, root: Path) -> str | None:
+    for cand in _vendor_candidates(_source_dir_name(source), root):
+        pyproject = cand / _MANIFEST_NAME
+        if not pyproject.is_file():
+            continue
+        try:
+            data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
+            # Битый pyproject у одного кандидата не повод бросать поиск:
+            # следующим идёт external/vendor рабочей копии.
+            continue
+        name = (data.get("project") or {}).get("name")
+        if name:
+            return str(name)
+        # Имени нет — кандидат не подходит, но поиск не окончен: следующим
+        # идёт external/vendor рабочей копии, где имя объявлено. Прежний
+        # `return None` обрывал перебор на первом же неполном pyproject, и
+        # `gc-mcp remove` рапортовал успех, оставив пакет установленным, —
+        # тот самый тихий пропуск, ради которого соседний except и написан.
+        continue
     return None
 
 
@@ -121,32 +169,18 @@ def _dist_name(entry: MCPEntry, root: Path = Path(".")) -> str | None:
     if itype == "pypi" and entry.install.package:
         return _pypi_distribution_name(entry.install.package)
     if itype == "source" and entry.install.source is not None:
-        for cand in _vendor_candidates(_source_dir_name(entry.install.source), root):
-            pyproject = cand / "pyproject.toml"
-            if not pyproject.is_file():
-                continue
-            try:
-                data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
-            except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
-                # Битый pyproject у одного кандидата не повод бросать поиск:
-                # следующим идёт external/vendor рабочей копии.
-                continue
-            name = (data.get("project") or {}).get("name")
-            if name:
-                return str(name)
-            # Имени нет — кандидат не подходит, но поиск не окончен: следующим
-            # идёт external/vendor рабочей копии, где имя объявлено. Прежний
-            # `return None` обрывал перебор на первом же неполном pyproject, и
-            # `gc-mcp remove` рапортовал успех, оставив пакет установленным, —
-            # тот самый тихий пропуск, ради которого соседний except и написан.
-            continue
-        return None
+        return _source_distribution_name(entry.install.source, root)
     if itype == "wheel":
         pkg_path = (root / entry.path).resolve() / "dist"
         wheels = sorted(pkg_path.glob("*.whl"))
         if wheels:
             parts = wheels[0].stem.split("-")
-            return "-".join(takewhile(lambda p: not (p and p[0].isdigit()), parts)) or None
+            return (
+                "-".join(
+                    takewhile(lambda p: not (p and p[0].isdigit()), parts)
+                )
+                or None
+            )
     return None
 
 
@@ -157,22 +191,29 @@ def uninstall_entry(entry: MCPEntry, root: Path) -> None:
     if itype in ("pypi", "source", "wheel"):
         dist = _dist_name(entry, root)
         if not dist:
-            print(f"[warn] {entry.name}: не удалось определить имя пакета — деинсталл пропущен")
+            print(
+                f"[warn] {entry.name}: не удалось определить имя пакета — деинсталл пропущен"
+            )
             return
         print(f"[uninstall] {entry.name}: pip uninstall {dist}")
         subprocess.run(pip_argv("uninstall", "-y", dist), check=False)
     elif itype == "npx":
         pkg = entry.install.npm_package
         if not pkg:
-            print(f"[warn] {entry.name}: npm_package не задан — деинсталл пропущен")
+            print(
+                f"[warn] {entry.name}: npm_package не задан — деинсталл пропущен"
+            )
             return
         from gc_core.config_modules.env_vars import gc_paths
+
         agent_dep_dir = gc_paths()["data"]
         npm = _node_install_paths(agent_dep_dir)["npm"]
         print(f"[uninstall] {entry.name}: npm uninstall -g {pkg}")
         subprocess.run([str(npm), "uninstall", "-g", pkg], check=False)
     else:
-        print(f"[warn] {entry.name}: деинсталл для type={itype!r} не поддержан (вне scope)")
+        print(
+            f"[warn] {entry.name}: деинсталл для type={itype!r} не поддержан (вне scope)"
+        )
 
 
 def install_entry(
@@ -185,8 +226,7 @@ def install_entry(
     """Установить один MCP. root — каталог, относительно которого резолвится entry.path."""
     if not _platform_supported(entry):
         print(
-            f"[skip] {entry.name}: platform {sys.platform!r} not in "
-            f"{list(entry.install.platforms)}"
+            f"[skip] {entry.name}: platform {sys.platform!r} not in {list(entry.install.platforms)}"
         )
         return
 
@@ -202,8 +242,14 @@ def install_entry(
         _install_npx(entry.name, entry.install.commands, agent_dep_dir)
 
     elif itype == "source":
-        _install_source(entry.name, entry.install.source, root, editable=False,
-                        repo_url=repo_url, repo_ref=repo_ref)
+        _install_source(
+            entry.name,
+            entry.install.source,
+            root,
+            editable=False,
+            repo_url=repo_url,
+            repo_ref=repo_ref,
+        )
     elif itype == "pypi":
         _install_pypi(entry.name, entry.install.package)
     else:
@@ -229,7 +275,9 @@ def _pypi_pinned_version(package_spec: str) -> str | None:
 
 def _install_pypi(name: str, package_spec: str | None) -> None:
     if not package_spec:
-        raise InstallError(f"mcp {name!r}: install.type=pypi requires install.package")
+        raise InstallError(
+            f"mcp {name!r}: install.type=pypi requires install.package"
+        )
     dist_name = _pypi_distribution_name(package_spec)
     expected = _pypi_pinned_version(package_spec)
     current = query_installed_version(dist_name)
@@ -247,8 +295,7 @@ def _install_wheel(name: str, pkg_path: Path) -> None:
         raise InstallError(f"mcp {name!r}: no wheel found in {dist}")
     if len(wheels) > 1:
         raise InstallError(
-            f"mcp {name!r}: multiple wheels in {dist}: {[w.name for w in wheels]}. "
-            f"Keep only one."
+            f"mcp {name!r}: multiple wheels in {dist}: {[w.name for w in wheels]}. Keep only one."
         )
     wheel = wheels[0]
     print(f"[install] {name}: pip install {wheel.name}")
@@ -258,7 +305,9 @@ def _install_wheel(name: str, pkg_path: Path) -> None:
 def _install_docker(name: str, pkg_path: Path) -> None:
     compose = pkg_path / "docker-compose.yml"
     if not compose.exists():
-        raise InstallError(f"mcp {name!r}: docker-compose.yml not found at {compose}")
+        raise InstallError(
+            f"mcp {name!r}: docker-compose.yml not found at {compose}"
+        )
     print(f"[install] {name}: docker compose build")
     subprocess.run(
         ["docker", "compose", "-f", str(compose), "build"],
@@ -404,11 +453,15 @@ def _install_source(
     repo_ref: str | None = None,
 ) -> None:
     if source is None:
-        raise InstallError(f"mcp {name!r}: install.type=source requires install.source")
+        raise InstallError(
+            f"mcp {name!r}: install.type=source requires install.source"
+        )
     name_dir = _source_dir_name(source)
     tried = _vendor_candidates(name_dir, root)
-    src_path = next((c for c in tried if (c / "pyproject.toml").exists()), tried[0])
-    if (src_path / "pyproject.toml").exists():
+    src_path = next(
+        (c for c in tried if (c / _MANIFEST_NAME).exists()), tried[0]
+    )
+    if (src_path / _MANIFEST_NAME).exists():
         # method-1: локальные исходники из клона
         cmd = [str(active_pip_python()), "-m", "pip", "install"]
         if editable:
@@ -433,7 +486,9 @@ def _install_source(
     )
 
 
-def install_source_entry(entry: MCPEntry, root: Path, *, editable: bool) -> None:
+def install_source_entry(
+    entry: MCPEntry, root: Path, *, editable: bool
+) -> None:
     """Публичная обёртка с editable-флагом.
 
     install_entry() делает editable=False; этот враппер используется из main()
@@ -441,14 +496,12 @@ def install_source_entry(entry: MCPEntry, root: Path, *, editable: bool) -> None
     """
     if entry.install.platforms and sys.platform not in entry.install.platforms:
         print(
-            f"[skip] {entry.name}: platform {sys.platform!r} not in "
-            f"{list(entry.install.platforms)}"
+            f"[skip] {entry.name}: platform {sys.platform!r} not in {list(entry.install.platforms)}"
         )
         return
     if entry.install.type != "source":
         raise InstallError(
-            f"install_source_entry called for non-source mcp {entry.name!r} "
-            f"(type={entry.install.type!r})"
+            f"install_source_entry called for non-source mcp {entry.name!r} (type={entry.install.type!r})"
         )
     _install_source(entry.name, entry.install.source, root, editable=editable)
 
@@ -466,7 +519,7 @@ def _node_archive_basename() -> Tuple[str, str]:
     ).lower()
     if sys.platform == "darwin":
         arch = "arm64" if machine in ("arm64", "aarch64") else "x64"
-        return f"node-v{NODE_VERSION}-darwin-{arch}.tar.gz", "tar.gz"
+        return f"node-v{NODE_VERSION}-darwin-{arch}.tar.gz", _EXT_TAR_GZ
     if sys.platform == "win32":
         arch = "arm64" if "arm64" in machine else "x64"
         return f"node-v{NODE_VERSION}-win-{arch}.zip", "zip"
@@ -510,7 +563,9 @@ def npm_global_has(npm_package: str, agent_dep_dir: Path) -> bool | None:
     try:
         result = subprocess.run(
             [str(npm), "ls", "-g", npm_package, "--depth=0"],
-            capture_output=True, text=True, check=False,
+            capture_output=True,
+            text=True,
+            check=False,
         )
     except OSError:
         return None
@@ -519,7 +574,11 @@ def npm_global_has(npm_package: str, agent_dep_dir: Path) -> bool | None:
 
 def _verify_existing_node(paths: dict[str, Path]) -> bool:
     """True, если все три бинаря на месте и `node --version` совпадает с NODE_VERSION."""
-    if not (paths["node"].exists() and paths["npm"].exists() and paths["npx"].exists()):
+    if not (
+        paths["node"].exists()
+        and paths["npm"].exists()
+        and paths["npx"].exists()
+    ):
         return False
     try:
         result = subprocess.run(
@@ -541,7 +600,7 @@ def _fetch_expected_sha256(archive_filename: str) -> str:
     with urllib.request.urlopen(url, timeout=60) as resp:
         body = resp.read().decode("utf-8")
     for line in body.splitlines():
-        # Формат: "<64hex>  <filename>"
+        # Формат: "<64hex>  <filename>"  # noqa: ERA001  # описание формата, не выключенный код
         parts = line.split()
         if len(parts) == 2 and parts[1] == archive_filename:
             return parts[0]
@@ -574,8 +633,8 @@ def _extract_archive(archive_path: Path, ext: str, dest_parent: Path) -> Path:
         with zipfile.ZipFile(archive_path) as zf:
             zf.extractall(dest_parent)
             top = zf.namelist()[0].split("/", 1)[0]
-    elif ext in ("tar.gz", "tar.xz"):
-        mode = "r:gz" if ext == "tar.gz" else "r:xz"
+    elif ext in (_EXT_TAR_GZ, "tar.xz"):
+        mode = "r:gz" if ext == _EXT_TAR_GZ else "r:xz"
         with tarfile.open(archive_path, mode=mode) as tf:
             tf.extractall(dest_parent)
             top = tf.getnames()[0].split("/", 1)[0]
@@ -611,10 +670,9 @@ def _ensure_cached_node(agent_dep_dir: Path) -> dict[str, Path]:
         actual_sha = _sha256_of_file(archive_path)
         if actual_sha != expected_sha:
             raise InstallError(
-                f"SHA256 mismatch for {archive_filename}: "
-                f"expected {expected_sha}, got {actual_sha}"
+                f"SHA256 mismatch for {archive_filename}: expected {expected_sha}, got {actual_sha}"
             )
-        print(f"[npx] sha256 verified")
+        print("[npx] sha256 verified")
 
         extracted_top = _extract_archive(archive_path, ext, tmp)
 
@@ -684,20 +742,59 @@ def _install_npx(
         subprocess.run(argv, check=True)
 
 
+def _install_manifest(
+    manifest, manifest_path, root, agent_dep_dir, mcp_py, *, editable: bool
+) -> None:
+    """Поставить объявленные MCP и напечатать сводку."""
+    repo_url, repo_ref = load_repo_url(manifest_path)
+    with pip_install_target(mcp_py):
+        results = run_install_entries(
+            manifest,
+            root,
+            agent_dep_dir,
+            editable=editable,
+            repo_url=repo_url,
+            repo_ref=repo_ref,
+        )
+    installed = [n for n, s, _ in results if s == "installed"]
+    skipped = [(n, d) for n, s, d in results if s == "skipped"]
+    failed = [(n, d) for n, s, d in results if s == "failed"]
+    print(f"[summary] установлено: {', '.join(installed) or '—'}")
+    for n, d in skipped:
+        print(f"[summary] пропущено ({d}): {n}")
+    for n, d in failed:
+        print(f"[summary] НЕ установлено: {n} — {d}")
+    if failed:
+        print(
+            f"[summary] {len(failed)} MCP пропущено — агент будет работать; "
+            f"поставь вручную или используй совместимый Python"
+        )
+    state = save_runtime_state(manifest_path=manifest_path)
+    print(f"[state] {state.bin_dir}")
+    paths = _node_install_paths(agent_dep_dir)
+    if paths["npx"].exists():
+        from gc_core.config_modules.env_vars import gc_paths, mcp_media_dir
+
+        cache = gc_paths()["cache"]
+        print(f"[paths] config command: {paths['npx']}")
+        print(f"[paths] playwright --output-dir: {cache / 'playwright-mcp'}")
+        print(f"[paths] MCP media (agent default): {mcp_media_dir()}")
+    print("[done] install complete")
+
+
 def main() -> int:
     import argparse
 
     parser = argparse.ArgumentParser(
         description="Install MCPs from recommended_mcp/config.yml",
     )
-    
+
     parser.add_argument(
         "--config",
         type=str,
         default=None,
         metavar="PATH",
-        help="Путь к кастомному конфигурационному файлу манифеста MCP "
-        "(по умолчанию recommended_mcp/config.yml).",
+        help="Путь к кастомному конфигурационному файлу манифеста MCP (по умолчанию recommended_mcp/config.yml).",
     )
     parser.add_argument(
         "-e",
@@ -719,33 +816,15 @@ def main() -> int:
     manifest = load_manifest(manifest_path)
     if not manifest:
         print("[info] no mcps declared in config.yml — nothing to install")
-        return 0
-    repo_url, repo_ref = load_repo_url(manifest_path)
-    with pip_install_target(mcp_py):
-        results = run_install_entries(manifest, root, agent_dep_dir, editable=args.editable,
-                                      repo_url=repo_url, repo_ref=repo_ref)
-    installed = [n for n, s, _ in results if s == "installed"]
-    skipped = [(n, d) for n, s, d in results if s == "skipped"]
-    failed = [(n, d) for n, s, d in results if s == "failed"]
-    print(f"[summary] установлено: {', '.join(installed) or '—'}")
-    for n, d in skipped:
-        print(f"[summary] пропущено ({d}): {n}")
-    for n, d in failed:
-        print(f"[summary] НЕ установлено: {n} — {d}")
-    if failed:
-        print(f"[summary] {len(failed)} MCP пропущено — агент будет работать; "
-              f"поставь вручную или используй совместимый Python")
-    state = save_runtime_state(manifest_path=manifest_path)
-    print(f"[state] {state.bin_dir}")
-    paths = _node_install_paths(agent_dep_dir)
-    if paths["npx"].exists():
-        from gc_core.config_modules.env_vars import gc_paths
-
-        cache = gc_paths()["cache"]
-        print(f"[paths] config command: {paths['npx']}")
-        print(f"[paths] playwright --output-dir: {cache / 'playwright-mcp'}")
-        print(f"[paths] MCP media (agent default): {cache / 'mcp-media'}")
-    print("[done] install complete")
+    else:
+        _install_manifest(
+            manifest,
+            manifest_path,
+            root,
+            agent_dep_dir,
+            mcp_py,
+            editable=args.editable,
+        )
     return 0
 
 

@@ -1,0 +1,133 @@
+# Первая линия качества: те же проверки, что гоняет CI (scripts/lint.sh).
+#
+# Формат понимают и pre-commit, и prek — prek быстрее и не требует Python.
+# Установка: `uv sync && uv run pre-commit install`
+# (или `uvx prek install`). Подробности — CONTRIBUTING.md.
+#
+# Все хуки `repo: local` + `language: system` и запускаются через
+# `uv run --group lint …`: версии инструментов берутся из uv.lock, а за самими
+# хуками не нужно ходить на GitHub — в корпоративной сети он бывает закрыт.
+# pre-push — для тяжёлой проверки дублирования (см. хук duplicate-code).
+default_install_hook_types: [pre-commit, pre-push]
+default_stages: [pre-commit, manual]
+# Вендорный код, лок-файл, бинарные артефакты и снапшоты TUI не трогаем.
+exclude: |
+  (?x)^(
+    external/
+    |packages/[^/]+/external/
+    |uv\.lock$
+    |.*\.raw$
+    |.*/__snapshots__/
+  )
+repos:
+  - repo: local
+    hooks:
+      - id: check-merge-conflict
+        name: маркеры конфликтов
+        entry: uv run --group lint check-merge-conflict
+        language: system
+        types: [text]
+      - id: check-added-large-files
+        name: большие файлы (> 1 МБ)
+        entry: uv run --group lint check-added-large-files --maxkb=1024
+        language: system
+      - id: check-yaml
+        name: YAML разбирается
+        entry: uv run --group lint check-yaml --allow-multiple-documents
+        language: system
+        types: [yaml]
+      - id: check-toml
+        name: TOML разбирается
+        entry: uv run --group lint check-toml
+        language: system
+        types: [toml]
+      - id: debug-statements
+        name: забытые breakpoint/pdb
+        entry: uv run --group lint debug-statement-hook
+        language: system
+        types: [python]
+      - id: detect-private-key
+        name: приватные ключи
+        entry: uv run --group lint detect-private-key
+        language: system
+        types: [text]
+        # Единственное исключение — набор про вымарывание секретов из логов:
+        # заголовок ключа там сам предмет проверки, а не утечка.
+        exclude: '^packages/core/tests/security/test_log_redaction\.py$'
+      # В фикстурах и промптах важен каждый байт: там есть файлы без финального
+      # перевода строки и tests/fixtures/gc-config/config.yml с хвостовыми
+      # пробелами — гигиена их испортит, а тесты сравнивают побайтово.
+      - id: end-of-file-fixer
+        name: перевод строки в конце файла
+        entry: uv run --group lint end-of-file-fixer
+        language: system
+        types: [text]
+        exclude: '(^|/)tests/fixtures/|^packages/core/assets/prompts/'
+      - id: trailing-whitespace
+        name: хвостовые пробелы
+        entry: uv run --group lint trailing-whitespace-fixer --markdown-linebreak-ext=md
+        language: system
+        types: [text]
+        exclude: '(^|/)tests/fixtures/|^packages/core/assets/prompts/'
+      # Порядок важен: сначала линтер с автофиксом, потом форматтер —
+      # иначе форматтер разложит строки, которые линтер тут же перепишет.
+      - id: ruff-check
+        name: ruff check
+        entry: uv run --group lint ruff check --force-exclude --fix --exit-non-zero-on-fix
+        language: system
+        types_or: [python, pyi]
+        require_serial: true
+      - id: ruff-format
+        name: ruff format
+        entry: uv run --group lint ruff format --force-exclude
+        language: system
+        types_or: [python, pyi]
+        require_serial: true
+      # TUI и testkit исключены только из проверки сложности.
+      # `--failed` печатает только нарушителей (файл, функция, сложность) и
+      # возвращает ненулевой код; `--quiet` падал молча, без имени функции.
+      - id: complexipy
+        name: cognitive complexity <= 15 (S3776)
+        entry: uv run --group lint complexipy --max-complexity-allowed 15 --failed --plain --color no
+        language: system
+        types: [python]
+        exclude: '(^|/)tests/|conftest\.py$|^packages/(tui|testkit)/'
+        require_serial: true
+      - id: sonar-like
+        name: правила Sonar (sonar_like_check)
+        entry: uv run --group lint python scripts/sonar_like_check.py
+        language: system
+        types_or: [python, html]
+        exclude: '(^|/)tests/|conftest\.py$'
+      # Мёртвый код (S1144, S1763, S1481): анализ межмодульный, поэтому по
+      # всему прод-коду сразу, а не по индексу. ~3 с — годится на каждый коммит.
+      - id: dead-code
+        name: мёртвый код (vulture, scripts/dead_code_check.py)
+        entry: uv run --group lint python scripts/dead_code_check.py
+        language: system
+        types: [python]
+        pass_filenames: false
+        require_serial: true
+      # Дублирование кода (аналог Sonar Duplications/CPD): pylint сравнивает
+      # файлы МЕЖДУ собой, поэтому тоже по всему прод-коду. ~45 с — на коммит
+      # тяжело, поэтому стадия pre-push и ручной прогон (scripts/lint.sh, CI).
+      # Настройки — [tool.pylint.*] в pyproject.toml.
+      - id: duplicate-code
+        name: дублирование кода (pylint duplicate-code)
+        entry: >-
+          uv run --group lint pylint --disable=all --enable=duplicate-code --score=n
+          packages/cli/src packages/core/src packages/mcp/src packages/server/src
+          packages/testkit/src packages/tui/src packages/core/assets/skills scripts integrations
+        language: system
+        types: [python]
+        pass_filenames: false
+        require_serial: true
+        stages: [pre-push, manual]
+      - id: uv-lock-check
+        name: uv.lock согласован с манифестами
+        entry: uv lock --check
+        language: system
+        files: '(^|/)pyproject\.toml$'
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit, pre-push, manual]

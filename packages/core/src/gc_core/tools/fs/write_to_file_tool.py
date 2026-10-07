@@ -2,14 +2,66 @@ import json
 import os
 from typing import Any, Dict, Optional
 
-from gc_core.tools.simple_tool_base import AbstractSimpleTool
-from gc_core.utils.file_text import resolve_encoding_arg, sha256_hex_of_bytes, try_encode_text_bytes
-from gc_core.utils.tool_report_paths import tool_report_abspath
 from gc_core.security.path_policy import enforce_write_guard
+from gc_core.tools.simple_tool_base import AbstractSimpleTool
+from gc_core.utils.file_text import (
+    resolve_encoding_arg,
+    sha256_hex_of_bytes,
+    try_encode_text_bytes,
+)
+from gc_core.utils.fs_size_limits import fs_mutate_max_bytes
+from gc_core.utils.tool_report_paths import tool_report_abspath
+
+
+def _validate_write_args(
+    path, content, mode, make_dirs, encoding, newline, backup
+) -> "tuple[str | None, dict | None]":
+    """(encoding_used, None) либо (None, error) на первом невалидном аргументе."""
+    if not isinstance(content, str):
+        return None, {"type": "invalid_argument", "field": "content"}
+    if not isinstance(mode, str) or mode not in (
+        "overwrite",
+        "create_only",
+        "fail_if_missing",
+    ):
+        return None, {"type": "invalid_argument", "field": "mode"}
+    if not isinstance(make_dirs, bool):
+        return None, {"type": "invalid_argument", "field": "make_dirs"}
+    if not isinstance(encoding, str) or not encoding:
+        return None, {"type": "invalid_argument", "field": "encoding"}
+    encoding_used, enc_err = resolve_encoding_arg(encoding)
+    if enc_err is not None:
+        return None, enc_err
+    if not isinstance(newline, str) or newline not in (
+        "preserve",
+        "lf",
+        "crlf",
+    ):
+        return None, {"type": "invalid_argument", "field": "newline"}
+    if not isinstance(backup, bool):
+        return None, {"type": "invalid_argument", "field": "backup"}
+    if not os.path.isabs(path):
+        return None, {
+            "type": "invalid_argument",
+            "field": "path",
+            "message": "path must be absolute",
+        }
+    return encoding_used, None
+
+
+def _normalize_newlines(content: str, newline: str) -> str:
+    if newline == "lf":
+        return content.replace("\r\n", "\n").replace("\r", "\n")
+    if newline == "crlf":
+        return (
+            content.replace("\r\n", "\n")
+            .replace("\r", "\n")
+            .replace("\n", "\r\n")
+        )
+    return content
 
 
 class WriteToFile(AbstractSimpleTool):
-
     @classmethod
     def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None):
         description = {
@@ -27,7 +79,7 @@ class WriteToFile(AbstractSimpleTool):
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "The absolute path of the file to write to. Must be an absolute path, not relative. Ensure the file location is valid and accessible."
+                        "description": "The absolute path of the file to write to. Must be an absolute path, not relative. Ensure the file location is valid and accessible.",
                     },
                     "content": {
                         "type": "string",
@@ -40,11 +92,15 @@ class WriteToFile(AbstractSimpleTool):
                     "mode": {
                         "type": "string",
                         "description": "Write mode: 'overwrite' (default), 'create_only' (fail if exists), or 'fail_if_missing' (fail if missing).",
-                        "enum": ["overwrite", "create_only", "fail_if_missing"]
+                        "enum": [
+                            "overwrite",
+                            "create_only",
+                            "fail_if_missing",
+                        ],
                     },
                     "make_dirs": {
                         "type": "boolean",
-                        "description": "If true, creates any missing parent folders before writing. Set true when the target file's parent folder does not exist yet. Default false — the write fails with 'parent_not_found' if the parent folder is missing."
+                        "description": "If true, creates any missing parent folders before writing. Set true when the target file's parent folder does not exist yet. Default false — the write fails with 'parent_not_found' if the parent folder is missing.",
                     },
                     "encoding": {
                         "type": "string",
@@ -57,23 +113,23 @@ class WriteToFile(AbstractSimpleTool):
                     "newline": {
                         "type": "string",
                         "description": "Newline normalization: 'preserve' (default), 'lf', or 'crlf'.",
-                        "enum": ["preserve", "lf", "crlf"]
+                        "enum": ["preserve", "lf", "crlf"],
                     },
                     "backup": {
                         "type": "boolean",
-                        "description": "If true and file exists, creates a backup copy at '<path>.bak' before writing. Default false."
-                    }
+                        "description": "If true and file exists, creates a backup copy at '<path>.bak' before writing. Default false.",
+                    },
                 },
                 "required": ["path", "content"],
-                "additionalProperties": False
+                "additionalProperties": False,
             },
-            "strict": True
+            "strict": True,
         }
         return description
 
     @classmethod
     def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None):
-        description = '''Tool name: fs_write_file
+        description = """Tool name: fs_write_file
 Tool description: Writes a file to the local filesystem.
 Input schema: {"type": "object", "properties": {"path": {"type": "string", "description": "The absolute path of the file to write to (must be absolute, not relative)."}, "content": {"type": "string", "description": "The complete content to write to the file."}, "make_dirs": {"type": "boolean", "description": "If true, create any missing parent folders before writing. Default false."}}, "required": ["path", "content"], "additionalProperties": false}
 
@@ -85,10 +141,11 @@ Usage:
 - ALWAYS prefer editing existing files in the codebase. NEVER write new files unless explicitly required.
 - NEVER proactively create documentation files (*.md) or README files. Only create documentation files if explicitly requested by the User.
 - Only use emojis if the user explicitly requests it. Avoid writing emojis to files unless asked.
-'''
+"""
         return description
 
-    def _result(self, 
+    def _result(
+        self,
         *,
         ok: bool,
         path: str,
@@ -110,7 +167,9 @@ Usage:
                 "bytes_written": bytes_written,
                 "sha256": sha256,
                 "encoding_used": encoding_used,
-                "backup_path": tool_report_abspath(backup_path, workspace=self._workspace),
+                "backup_path": tool_report_abspath(
+                    backup_path, workspace=self._workspace
+                ),
                 "error": error,
             },
             ensure_ascii=False,
@@ -127,8 +186,48 @@ Usage:
     ) -> str:
         return self._result(ok=False, path=path, mode=mode, error=error)
 
+    async def _ensure_parent_dir(
+        self, path: str, make_dirs: bool
+    ) -> "dict | None":
+        parent = os.path.dirname(path) or "."
+        if await self._backend.is_dir(parent):
+            return None
+        if not make_dirs:
+            return {"type": "parent_not_found"}
+        try:
+            await self._backend.makedirs(parent)
+        except Exception as e:
+            return {"type": "mkdir_failed", "message": str(e)}
+        return None
+
+    async def _journal_old_bytes(
+        self, path: str, exists: bool
+    ) -> bytes | None:
+        """Контент до перезаписи — для журнала правок.
+
+        Тул нигде больше его не читает, а без него запись о перезаписи
+        выглядит как создание файла (нет baseline-снапшота, весь файл в дифф
+        как добавленный). Читаем только когда запись правок реально ведётся и
+        файл в пределах капа мутирующих тулов — собственного гейта по размеру
+        у этого тула нет.
+        """
+        from gc_core.agent_edits.recorder import (  # nested: cycle with thread_store
+            is_recording,
+        )
+
+        if not exists or not is_recording(self._ctx):
+            return None
+        try:
+            if await self._backend.getsize(path) <= fs_mutate_max_bytes(
+                self._config_dict
+            ):
+                return await self._backend.read_bytes(path)
+        except Exception:
+            return None
+        return None
+
     @enforce_write_guard(path_arg="path", operation="write")
-    def __call__(
+    async def acall(
         self,
         path: str,
         content: str,
@@ -146,108 +245,40 @@ Usage:
                 mode=mode,
                 error={"type": "invalid_argument", "field": "path"},
             )
-
-        if not isinstance(content, str):
+        encoding_used, arg_error = _validate_write_args(
+            path, content, mode, make_dirs, encoding, newline, backup
+        )
+        if arg_error is not None:
             return self._result(
-                ok=False,
-                path=path,
-                mode=mode,
-                error={"type": "invalid_argument", "field": "content"},
+                ok=False, path=path, mode=mode, error=arg_error
             )
 
-        if not isinstance(mode, str) or mode not in ("overwrite", "create_only", "fail_if_missing"):
-            return self._result(
-                ok=False,
-                path=path,
-                mode=mode,
-                error={"type": "invalid_argument", "field": "mode"},
-            )
-        if not isinstance(make_dirs, bool):
-            return self._result(
-                ok=False,
-                path=path,
-                mode=mode,
-                error={"type": "invalid_argument", "field": "make_dirs"},
-            )
-        if not isinstance(encoding, str) or not encoding:
-            return self._result(
-                ok=False,
-                path=path,
-                mode=mode,
-                error={"type": "invalid_argument", "field": "encoding"},
-            )
-        encoding_used, enc_err = resolve_encoding_arg(encoding)
-        if enc_err is not None:
-            return self._result(ok=False, path=path, mode=mode, error=enc_err)
-        assert encoding_used is not None
-        if not isinstance(newline, str) or newline not in ("preserve", "lf", "crlf"):
-            return self._result(
-                ok=False,
-                path=path,
-                mode=mode,
-                error={"type": "invalid_argument", "field": "newline"},
-            )
-        if not isinstance(backup, bool):
-            return self._result(
-                ok=False,
-                path=path,
-                mode=mode,
-                error={"type": "invalid_argument", "field": "backup"},
-            )
-
-        if not os.path.isabs(path):
-            return self._result(
-                ok=False,
-                path=path,
-                mode=mode,
-                error={
-                    "type": "invalid_argument",
-                    "field": "path",
-                    "message": "path must be absolute",
-                },
-            )
-
-        exists = self._backend.exists(path)
+        exists = await self._backend.exists(path)
         if mode == "create_only" and exists:
             return self._result(
-                ok=False, path=path, mode=mode, error={"type": "already_exists"}
+                ok=False,
+                path=path,
+                mode=mode,
+                error={"type": "already_exists"},
             )
         if mode == "fail_if_missing" and not exists:
             return self._result(
                 ok=False, path=path, mode=mode, error={"type": "not_found"}
             )
 
-        parent = os.path.dirname(path) or "."
-        if not self._backend.is_dir(parent):
-            if make_dirs:
-                try:
-                    self._backend.makedirs(parent)
-                except Exception as e:
-                    return self._result(
-                        ok=False,
-                        path=path,
-                        mode=mode,
-                        error={"type": "mkdir_failed", "message": str(e)},
-                    )
-            else:
-                return self._result(
-                    ok=False,
-                    path=path,
-                    mode=mode,
-                    error={"type": "parent_not_found"},
-                )
+        parent_error = await self._ensure_parent_dir(path, make_dirs)
+        if parent_error is not None:
+            return self._result(
+                ok=False, path=path, mode=mode, error=parent_error
+            )
 
-        normalized = content
-        if newline == "lf":
-            normalized = normalized.replace("\r\n", "\n").replace("\r", "\n")
-        elif newline == "crlf":
-            normalized = normalized.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\r\n")
+        normalized = _normalize_newlines(content, newline)
 
         backup_path = None
         if backup and exists:
             backup_path = f"{path}.bak"
             try:
-                self._backend.copy(path, backup_path)
+                await self._backend.copy(path, backup_path)
             except Exception as e:
                 return self._result(
                     ok=False,
@@ -256,8 +287,16 @@ Usage:
                     error={"type": "backup_failed", "message": str(e)},
                 )
 
+        from gc_core.agent_edits.recorder import (  # nested: cycle with thread_store
+            record_edit,
+        )
+
+        old_bytes = await self._journal_old_bytes(path, exists)
+
         try:
-            out_bytes, encode_err = try_encode_text_bytes(normalized, encoding_used)
+            out_bytes, encode_err = try_encode_text_bytes(
+                normalized, encoding_used
+            )
             if encode_err is not None:
                 return self._result(
                     ok=False,
@@ -267,7 +306,7 @@ Usage:
                     error=encode_err,
                 )
             assert out_bytes is not None
-            self._backend.write_bytes(path, out_bytes)
+            await self._backend.write_bytes(path, out_bytes)
         except Exception as e:
             return self._result(
                 ok=False,
@@ -276,6 +315,15 @@ Usage:
                 backup_path=backup_path,
                 error={"type": "write_failed", "message": str(e)},
             )
+
+        await record_edit(
+            self._ctx,
+            abs_path=path,
+            old_bytes=old_bytes,
+            new_bytes=out_bytes,
+            op="write" if exists else "create",
+            call_id=self._call_id,
+        )
 
         return self._result(
             ok=True,
@@ -288,4 +336,3 @@ Usage:
             backup_path=backup_path,
             error=None,
         )
-

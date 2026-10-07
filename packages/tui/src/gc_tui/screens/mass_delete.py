@@ -4,10 +4,12 @@
 Enter (при count > 0) → dismiss({"keep_last": N}) | dismiss({"older_than_days": N}).
 Esc → dismiss(None). Живой счётчик — через select_for_deletion.
 Образец — RenameScreen/ConfirmScreen (инлайновый DEFAULT_CSS)."""
+
 from __future__ import annotations
 
 from typing import Optional
 
+from gc_core.utils.is_number import is_number
 from textual import events
 from textual.app import ComposeResult
 from textual.containers import Vertical
@@ -16,7 +18,6 @@ from textual.widgets import Input, Static
 
 from gc_tui.palette import ACCENT, BRIGHT, DIM, INK
 from gc_tui.services.session_delete_select import select_for_deletion
-from gc_core.utils.is_number import is_number
 
 _MODES = ("keep_last", "older_than_days")
 _MODE_LABEL = {
@@ -54,8 +55,11 @@ class MassDeleteScreen(ModalScreen[Optional[dict]]):
             yield Static(self._modes_text(), id="mass-modes", markup=False)
             yield Input(value="20", id="mass-n")
             yield Static("", id="mass-count", markup=False)
-            yield Static("[↑↓] режим · [Enter] далее · [Esc] отмена",
-                         id="mass-hint", markup=False)
+            yield Static(
+                "[↑↓] режим · [Enter] далее · [Esc] отмена",
+                id="mass-hint",
+                markup=False,
+            )
 
     def on_mount(self) -> None:
         self.query_one("#mass-dialog").border_title = "Массовое удаление"
@@ -80,12 +84,15 @@ class MassDeleteScreen(ModalScreen[Optional[dict]]):
         n = self._n()
         if n is None:
             return []
-        return select_for_deletion(self._tasks, now=self._now, **{self._mode(): n})
+        return select_for_deletion(
+            self._tasks, now=self._now, **{self._mode(): n}
+        )
 
     def _refresh(self) -> None:
         self.query_one("#mass-modes", Static).update(self._modes_text())
         self.query_one("#mass-count", Static).update(
-            f"→ под удаление: {len(self._ids())} из {len(self._tasks)}")
+            f"→ под удаление: {len(self._ids())} из {len(self._tasks)}"
+        )
 
     # ---- events ----
     def on_input_changed(self, event: Input.Changed) -> None:

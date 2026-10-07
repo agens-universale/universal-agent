@@ -7,9 +7,23 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Literal, Optional, Sequence, Tuple
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Literal,
+    Optional,
+    Sequence,
+    Tuple,
+)
 
-from gc_core.tools.subagents.progress import brief_args_summary, parse_tool_result_status
+from gc_core.attachments.model import Attachment, attachments_of
+from gc_core.tools.subagents.progress import (
+    brief_args_summary,
+    parse_tool_result_status,
+)
+
 from gc_tui.models import TraceEvent
 
 CHILD_SUMMARY_LABEL = "контекст субагента сжат"
@@ -35,6 +49,8 @@ class SidecarNestedAction:
     ok: Optional[bool] = None
     error_brief: Optional[str] = None
     todo_items: Optional[List[Dict[str, str]]] = None
+    # Картинки реплики человека ребёнку (``mount_nested_user``).
+    images: tuple[Attachment, ...] = ()
 
 
 def _seq_key(record: Dict[str, Any]) -> int:
@@ -149,6 +165,7 @@ def plan_sidecar_nested_actions(
                             kind="mount_nested_user",
                             parent_call_id=pid,
                             prose=content.strip(),
+                            images=tuple(attachments_of(payload)),
                         )
                     )
             elif kind == "child_summary":
@@ -198,6 +215,7 @@ def apply_sidecar_nested_actions(
                 mount_nested_user(
                     parent_call_id=act.parent_call_id,
                     prose=act.prose or "",
+                    images=act.images,
                 )
             else:
                 mount_nested_prose(
@@ -289,7 +307,9 @@ def trace_events_from_nested_detail(
         event_ts_utc_iso="",
         kind="call",
         title=name,
-        summary=brief_args_summary(call_payload.get("arguments"), tool_name=name or None),
+        summary=brief_args_summary(
+            call_payload.get("arguments"), tool_name=name or None
+        ),
         full_payload=call_payload,
         call_id=call_id,
         tool_name=name,

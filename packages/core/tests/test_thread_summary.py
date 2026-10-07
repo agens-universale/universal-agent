@@ -3,13 +3,24 @@ import os
 import tempfile
 import unittest
 
-from gc_core.message_format.serialization import calc_history_chars_for_trigger, calc_messages_chars_total, message_text_for_summary
-from gc_testkit.intent_fixtures import intent_user_ask_texts
 from gc_core.intent_log import deserialize_list
-from gc_core.thread_store import ThreadSession, append_new_thread_messages, load_thread_meta, save_thread_meta
+from gc_core.message_format.serialization import (
+    calc_history_chars_for_trigger,
+    calc_messages_chars_total,
+    message_text_for_summary,
+)
+from gc_core.thread_store import (
+    ThreadSession,
+    append_new_thread_messages,
+    load_thread_meta,
+    save_thread_meta,
+)
+from gc_testkit.intent_fixtures import intent_user_ask_texts
 
 
-class ThreadSummaryTest(unittest.TestCase):
+# `unittest.TestCase` НЕ запускает корутинные тесты: метод просто возвращает
+# корутину, и проверка молча не выполняется.
+class ThreadSummaryTest(unittest.IsolatedAsyncioTestCase):
     def test_calc_messages_chars_total_uses_message_text_fields(self) -> None:
         messages = [
             {"role": "user", "content": "hello"},
@@ -26,7 +37,9 @@ class ThreadSummaryTest(unittest.TestCase):
         self.assertEqual(raw, 5)
         self.assertGreater(serialized, raw)
 
-    def test_message_text_for_summary_tool_call_aliases_match_function_style(self) -> None:
+    def test_message_text_for_summary_tool_call_aliases_match_function_style(
+        self,
+    ) -> None:
         fc = {
             "type": "function_call",
             "name": "read",
@@ -46,7 +59,9 @@ class ThreadSummaryTest(unittest.TestCase):
             calc_history_chars_for_trigger([tc]),
         )
 
-    def test_archive_and_compact_summary_payload_creates_archive_and_new_trace(self) -> None:
+    async def test_archive_and_compact_summary_payload_creates_archive_and_new_trace(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             thread_id = "demo-thread"
             system_id = "cli"
@@ -73,16 +88,18 @@ class ThreadSummaryTest(unittest.TestCase):
                 },
             )
 
-            session = ThreadSession.from_config(
+            session = await ThreadSession.afrom_config(
                 config_dict={"threads_data_path": tmp_dir},
                 system_id=system_id,
                 thread_id=thread_id,
             )
-            result = session.archive_and_compact_summary_payload(
+            result = await session.aarchive_and_compact_summary_payload(
                 {
                     "summary_message_content": "compressed summary",
                     "shared": {
-                        "working_memory": {"state": "## Thread summary\n\ncompressed summary"},
+                        "working_memory": {
+                            "state": "## Thread summary\n\ncompressed summary"
+                        },
                         "notes_md": "",
                     },
                     "user_intent_log": ["req1", "req2"],
@@ -101,7 +118,7 @@ class ThreadSummaryTest(unittest.TestCase):
             self.assertTrue(os.path.exists(archived_meta))
 
             data_path = os.path.join(tmp_dir, f"data_cli_{thread_id}.jsonl")
-            with open(data_path, "r", encoding="utf-8") as fd:
+            with open(data_path, encoding="utf-8") as fd:
                 rows = [json.loads(line) for line in fd if line.strip()]
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0]["payload"]["role"], "user")
@@ -116,15 +133,21 @@ class ThreadSummaryTest(unittest.TestCase):
             self.assertEqual(meta.get("messages_count"), 1)
             self.assertEqual(meta.get("dialog_steps_offset"), 12)
             self.assertEqual(
-                intent_user_ask_texts(deserialize_list(meta.get("user_intent_log"))),
+                intent_user_ask_texts(
+                    deserialize_list(meta.get("user_intent_log"))
+                ),
                 ["req1", "req2"],
             )
             self.assertIsNone(meta.get("previous_response_id"))
-            self.assertEqual(meta.get("chat_completions_system_prompt_rendered"), "SYSTEM")
-            self.assertEqual(meta.get("created_at"), "2026-01-01T00:00:00+00:00")
+            self.assertEqual(
+                meta.get("chat_completions_system_prompt_rendered"), "SYSTEM"
+            )
+            self.assertEqual(
+                meta.get("created_at"), "2026-01-01T00:00:00+00:00"
+            )
             self.assertEqual(meta.get("custom_meta_key"), "preserve-me")
 
-    def test_archive_and_compact_preserves_created_at_from_disk_when_missing_in_memory(
+    async def test_archive_and_compact_preserves_created_at_from_disk_when_missing_in_memory(
         self,
     ) -> None:
         """Regression: save_thread_meta may mint created_at on disk while self.meta lags."""
@@ -151,14 +174,14 @@ class ThreadSummaryTest(unittest.TestCase):
                 },
             )
 
-            session = ThreadSession.from_config(
+            session = await ThreadSession.afrom_config(
                 config_dict={"threads_data_path": tmp_dir},
                 system_id=system_id,
                 thread_id=thread_id,
             )
             session.meta.pop("created_at", None)
 
-            session.archive_and_compact_summary_payload(
+            await session.aarchive_and_compact_summary_payload(
                 {
                     "summary_message_content": "compressed summary",
                     "shared": {"working_memory": {}, "notes_md": ""},
@@ -168,9 +191,13 @@ class ThreadSummaryTest(unittest.TestCase):
 
             meta = load_thread_meta(tmp_dir, system_id, thread_id)
             self.assertEqual(meta.get("created_at"), original_created_at)
-            self.assertEqual(session.meta.get("created_at"), original_created_at)
+            self.assertEqual(
+                session.meta.get("created_at"), original_created_at
+            )
 
-    def test_archive_and_compact_preserves_original_user_messages_in_dump(self) -> None:
+    async def test_archive_and_compact_preserves_original_user_messages_in_dump(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             thread_id = "demo-thread"
             system_id = "cli"
@@ -184,7 +211,7 @@ class ThreadSummaryTest(unittest.TestCase):
                 start_seq=0,
             )
 
-            session = ThreadSession.from_config(
+            session = await ThreadSession.afrom_config(
                 config_dict={"threads_data_path": tmp_dir},
                 system_id=system_id,
                 thread_id=thread_id,
@@ -199,7 +226,7 @@ class ThreadSummaryTest(unittest.TestCase):
                 "</summary>\n"
                 "</dialog_summary>"
             )
-            session.archive_and_compact_summary_payload(
+            await session.aarchive_and_compact_summary_payload(
                 {
                     "summary_message_content": summary_text,
                     "shared": {
@@ -210,7 +237,7 @@ class ThreadSummaryTest(unittest.TestCase):
             )
 
             data_path = os.path.join(tmp_dir, f"data_cli_{thread_id}.jsonl")
-            with open(data_path, "r", encoding="utf-8") as fd:
+            with open(data_path, encoding="utf-8") as fd:
                 rows = [json.loads(line) for line in fd if line.strip()]
             payload_content = rows[0]["payload"]["content"]
             self.assertIn("<original_user_messages>", payload_content)

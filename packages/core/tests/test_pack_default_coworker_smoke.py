@@ -6,7 +6,6 @@ import pytest
 import yaml
 from gc_testkit.paths import ASSETS
 
-
 PACK_DIR = ASSETS / "skills" / "default-coworker"
 
 EXPECTED_SKILL_IDS = {
@@ -59,7 +58,9 @@ def test_skill_md_present_with_valid_frontmatter(skill_id):
 
 
 def test_bootstrap_mentions_all_inner_skill_ids():
-    body = (PACK_DIR / "using-default-coworker" / "SKILL.md").read_text(encoding="utf-8")
+    body = (PACK_DIR / "using-default-coworker" / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
     missing = [
         sid for sid in INNER_SKILL_IDS if f"default-coworker:{sid}" not in body
     ]
@@ -79,7 +80,7 @@ def test_inner_skills_do_not_reference_sibling_inners(skill_id):
     )
 
 
-def test_registry_default_list_returns_only_bootstrap(tmp_path):
+async def test_registry_default_list_returns_only_bootstrap(tmp_path):
     from gc_core.tools.skills.registry import SkillsRegistry
 
     repo_skills = PACK_DIR.parent
@@ -89,7 +90,9 @@ def test_registry_default_list_returns_only_bootstrap(tmp_path):
         project_root=str(tmp_path / "p_empty"),
     )
     items = {
-        i["id"]: i for i in reg.list_skills() if i.get("pack_id") == "default-coworker"
+        i["id"]: i
+        for i in await reg.list_skills()
+        if i.get("pack_id") == "default-coworker"
     }
     assert set(items.keys()) == {"default-coworker:using-default-coworker"}
     bootstrap = items["default-coworker:using-default-coworker"]
@@ -97,7 +100,7 @@ def test_registry_default_list_returns_only_bootstrap(tmp_path):
     assert bootstrap["pack_size"] == 6
 
 
-def test_registry_pack_param_returns_all_internals(tmp_path):
+async def test_registry_pack_param_returns_all_internals(tmp_path):
     from gc_core.tools.skills.registry import SkillsRegistry
 
     repo_skills = PACK_DIR.parent
@@ -106,6 +109,6 @@ def test_registry_pack_param_returns_all_internals(tmp_path):
         user_root=str(tmp_path / "u_empty"),
         project_root=str(tmp_path / "p_empty"),
     )
-    items = reg.list_skills(pack="default-coworker")
+    items = await reg.list_skills(pack="default-coworker")
     canonical_ids = {f"default-coworker:{sid}" for sid in EXPECTED_SKILL_IDS}
     assert {i["id"] for i in items} == canonical_ids

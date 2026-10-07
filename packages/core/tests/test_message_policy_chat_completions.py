@@ -1,4 +1,14 @@
-from gc_core.message_policy.chat_completions import coalesce_consecutive_assistant_tool_calls, inject_assistant_after_orphan_tool_outputs, prepare_chat_completion_messages_for_api, repair_tool_call_pairing
+from gc_core.message_policy.chat_completions import (
+    is_bridge_echo,
+    BRIDGE_TOOL_RESULTS,
+    coalesce_consecutive_assistant_tool_calls,
+    inject_assistant_after_orphan_tool_outputs,
+    prepare_chat_completion_messages_for_api,
+    repair_tool_call_pairing,
+)
+from gc_core.message_policy.user_message_policy import (
+    wrap_technical_user_content,
+)
 
 
 def test_repair_tool_call_pairing_keeps_only_answered_calls():
@@ -93,7 +103,7 @@ def test_repair_tool_call_pairing_handles_canonical_function_call_history():
             "id": "fco_ok",
             "type": "function_call_output",
             "call_id": "call_ok",
-            "output": "{\"ok\": true}",
+            "output": '{"ok": true}',
         },
     ]
 
@@ -107,8 +117,28 @@ def test_repair_tool_call_pairing_handles_canonical_function_call_history():
 
 def test_coalesce_consecutive_assistant_tool_calls_merges_parallel_batch():
     messages = [
-        {"role": "assistant", "content": "", "tool_calls": [{"id": "a", "type": "function", "function": {"name": "x", "arguments": "{}"}}]},
-        {"role": "assistant", "content": "", "tool_calls": [{"id": "b", "type": "function", "function": {"name": "y", "arguments": "{}"}}]},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "a",
+                    "type": "function",
+                    "function": {"name": "x", "arguments": "{}"},
+                }
+            ],
+        },
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "b",
+                    "type": "function",
+                    "function": {"name": "y", "arguments": "{}"},
+                }
+            ],
+        },
         {"role": "tool", "tool_call_id": "a", "content": "1"},
         {"role": "tool", "tool_call_id": "b", "content": "2"},
     ]
@@ -122,7 +152,17 @@ def test_coalesce_consecutive_assistant_tool_calls_merges_parallel_batch():
 def test_coalesce_merges_leading_assistant_text_before_tool_calls():
     messages = [
         {"role": "assistant", "content": "planning", "tool_calls": []},
-        {"role": "assistant", "content": "", "tool_calls": [{"id": "a", "type": "function", "function": {"name": "x", "arguments": "{}"}}]},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "a",
+                    "type": "function",
+                    "function": {"name": "x", "arguments": "{}"},
+                }
+            ],
+        },
         {"role": "tool", "tool_call_id": "a", "content": "ok"},
     ]
     coalesced = coalesce_consecutive_assistant_tool_calls(messages)
@@ -187,13 +227,37 @@ def test_prepare_keeps_reasoning_content_after_coalesce():
 def test_prepare_chat_completion_messages_for_api_parallel_planner_shape():
     messages = [
         {"role": "user", "content": "task"},
-        {"role": "assistant", "content": "", "tool_calls": [{"id": "c1", "type": "function", "function": {"name": "m", "arguments": "{}"}}]},
-        {"role": "assistant", "content": "", "tool_calls": [{"id": "c2", "type": "function", "function": {"name": "s", "arguments": "{}"}}]},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "c1",
+                    "type": "function",
+                    "function": {"name": "m", "arguments": "{}"},
+                }
+            ],
+        },
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "c2",
+                    "type": "function",
+                    "function": {"name": "s", "arguments": "{}"},
+                }
+            ],
+        },
         {"role": "tool", "tool_call_id": "c1", "content": "r1"},
         {"role": "tool", "tool_call_id": "c2", "content": "r2"},
     ]
     prepared = prepare_chat_completion_messages_for_api(messages)
-    assistants = [m for m in prepared if m.get("role") == "assistant" and m.get("tool_calls")]
+    assistants = [
+        m
+        for m in prepared
+        if m.get("role") == "assistant" and m.get("tool_calls")
+    ]
     assert len(assistants) == 1
     assert len(assistants[0]["tool_calls"]) == 2
 
@@ -201,9 +265,17 @@ def test_prepare_chat_completion_messages_for_api_parallel_planner_shape():
 def test_inject_assistant_after_tool_followed_by_user_inserts_synthetic_ack():
     """Stop посреди агентского хода: tool → user без assistant между → вставка ack."""
     messages = [
-        {"role": "assistant", "content": "", "tool_calls": [
-            {"id": "c1", "type": "function", "function": {"name": "m", "arguments": "{}"}},
-        ]},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "c1",
+                    "type": "function",
+                    "function": {"name": "m", "arguments": "{}"},
+                },
+            ],
+        },
         {"role": "tool", "tool_call_id": "c1", "content": "ok"},
         {"role": "user", "content": "продолжи"},
     ]
@@ -219,10 +291,22 @@ def test_inject_assistant_after_tool_followed_by_user_inserts_synthetic_ack():
 def test_inject_assistant_handles_multiple_tool_messages_in_series():
     """Серия tool-сообщений (несколько call'ов в одном assistant) — ack один."""
     messages = [
-        {"role": "assistant", "content": "", "tool_calls": [
-            {"id": "c1", "type": "function", "function": {"name": "m", "arguments": "{}"}},
-            {"id": "c2", "type": "function", "function": {"name": "s", "arguments": "{}"}},
-        ]},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "c1",
+                    "type": "function",
+                    "function": {"name": "m", "arguments": "{}"},
+                },
+                {
+                    "id": "c2",
+                    "type": "function",
+                    "function": {"name": "s", "arguments": "{}"},
+                },
+            ],
+        },
         {"role": "tool", "tool_call_id": "c1", "content": "r1"},
         {"role": "tool", "tool_call_id": "c2", "content": "r2"},
         {"role": "user", "content": "продолжи"},
@@ -237,16 +321,29 @@ def test_inject_assistant_handles_multiple_tool_messages_in_series():
 def test_inject_assistant_inert_when_tool_followed_by_assistant():
     """Здоровый поток tool → assistant — вставки нет."""
     messages = [
-        {"role": "assistant", "content": "", "tool_calls": [
-            {"id": "c1", "type": "function", "function": {"name": "m", "arguments": "{}"}},
-        ]},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "c1",
+                    "type": "function",
+                    "function": {"name": "m", "arguments": "{}"},
+                },
+            ],
+        },
         {"role": "tool", "tool_call_id": "c1", "content": "ok"},
         {"role": "assistant", "content": "финальный ответ"},
         {"role": "user", "content": "следующий вопрос"},
     ]
     out = inject_assistant_after_orphan_tool_outputs(messages)
     assert len(out) == 4  # без вставок
-    assert [m["role"] for m in out] == ["assistant", "tool", "assistant", "user"]
+    assert [m["role"] for m in out] == [
+        "assistant",
+        "tool",
+        "assistant",
+        "user",
+    ]
 
 
 def test_inject_assistant_inert_on_empty_or_no_tool_messages():
@@ -278,9 +375,17 @@ def test_inject_assistant_inert_on_consecutive_user_messages():
 def test_inject_assistant_before_system_after_tool():
     """tool → system — тоже вставка ack ([policy] feedback message и т.п.)."""
     messages = [
-        {"role": "assistant", "content": "", "tool_calls": [
-            {"id": "c1", "type": "function", "function": {"name": "m", "arguments": "{}"}},
-        ]},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "c1",
+                    "type": "function",
+                    "function": {"name": "m", "arguments": "{}"},
+                },
+            ],
+        },
         {"role": "tool", "tool_call_id": "c1", "content": "ok"},
         {"role": "system", "content": "[policy] something"},
     ]
@@ -299,12 +404,28 @@ def test_prepare_chat_completion_messages_repairs_stop_corrupted_history():
     messages = [
         {"role": "user", "content": "расскажи о проекте"},
         {"role": "assistant", "content": "думаю..."},
-        {"role": "assistant", "content": "", "tool_calls": [
-            {"id": "c1", "type": "function", "function": {"name": "long_memory", "arguments": "{}"}},
-        ]},
-        {"role": "assistant", "content": "", "tool_calls": [
-            {"id": "c2", "type": "function", "function": {"name": "read_file", "arguments": "{}"}},
-        ]},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "c1",
+                    "type": "function",
+                    "function": {"name": "long_memory", "arguments": "{}"},
+                },
+            ],
+        },
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "c2",
+                    "type": "function",
+                    "function": {"name": "read_file", "arguments": "{}"},
+                },
+            ],
+        },
         {"role": "tool", "tool_call_id": "c1", "content": "memory data"},
         {"role": "tool", "tool_call_id": "c2", "content": "file data"},
         # STOP HERE — assistant final response не пришёл
@@ -315,4 +436,116 @@ def test_prepare_chat_completion_messages_repairs_stop_corrupted_history():
     # После tool серии должен быть assistant (ack), потом user
     assert "assistant" in roles
     user_idx = roles.index("user", 1)  # пропускаем первый user
-    assert roles[user_idx - 1] == "assistant"  # перед последним user — assistant
+    assert (
+        roles[user_idx - 1] == "assistant"
+    )  # перед последним user — assistant
+
+
+# --- мост перед техническим хвостом (спека изображений §7.5) -----------------------
+
+_IMAGE_PART = {
+    "type": "image_url",
+    "image_url": {"url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUg=="},
+}
+
+
+def _tool_series():
+    return [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "c1",
+                    "type": "function",
+                    "function": {
+                        "name": "fs_read_file",
+                        "arguments": '{"path": "a.py"}',
+                    },
+                },
+            ],
+        },
+        {"role": "tool", "tool_call_id": "c1", "content": '{"ok": true}'},
+    ]
+
+
+def test_bridge_before_technical_tail_says_tool_results_received():
+    notice = {
+        "role": "user",
+        "content": wrap_technical_user_content(
+            "Loop detector: you called fs_read_file with the same arguments again."
+        ),
+    }
+    out = inject_assistant_after_orphan_tool_outputs([*_tool_series(), notice])
+    assert out[2] == {"role": "assistant", "content": BRIDGE_TOOL_RESULTS}
+    assert out[3] == notice
+
+
+def test_bridge_before_a_mid_run_human_message_does_not_say_interrupted():
+    """Реплика посреди работы тулов дописана к их ответам (ревью 2026-10-01): ход
+    не прерывался — мост тот же, что перед техническим хвостом."""
+    human = {"role": "user", "content": "и проверь заодно логин"}
+    out = inject_assistant_after_orphan_tool_outputs([*_tool_series(), human])
+    assert out[2] == {"role": "assistant", "content": BRIDGE_TOOL_RESULTS}
+    assert out[3] == human
+
+
+def test_bridge_reads_only_text_parts_of_a_projected_technical_message():
+    """После проекции вложений content — список частей: картинка + текст."""
+    tech = {
+        "role": "user",
+        "content": [
+            _IMAGE_PART,
+            {
+                "type": "text",
+                "text": wrap_technical_user_content(
+                    "Image from fs_view_image: /work/shot.png · png 1456×819"
+                ),
+            },
+        ],
+    }
+    out = inject_assistant_after_orphan_tool_outputs([*_tool_series(), tech])
+    assert out[2] == {"role": "assistant", "content": BRIDGE_TOOL_RESULTS}
+
+
+def test_bridge_before_projected_human_message():
+    human = {
+        "role": "user",
+        "content": [
+            _IMAGE_PART,
+            {
+                "type": "text",
+                "text": "[Изображение #1] почему кнопка съехала?",
+            },
+        ],
+    }
+    out = inject_assistant_after_orphan_tool_outputs([*_tool_series(), human])
+    assert out[2] == {"role": "assistant", "content": BRIDGE_TOOL_RESULTS}
+
+
+def test_bridge_before_system():
+    system = {"role": "system", "content": "[policy] something"}
+    out = inject_assistant_after_orphan_tool_outputs([*_tool_series(), system])
+    assert out[2] == {"role": "assistant", "content": BRIDGE_TOOL_RESULTS}
+
+
+# --- модель повторила мост: не ответ (смоук 2026-10-01) ----------------------------
+
+
+def test_echo_of_the_bridge_is_recognised_in_any_spelling():
+    for text in (
+        BRIDGE_TOOL_RESULTS,
+        "tool results received",
+        "Tool results received.",
+        "  [tool results received]\n",
+        "Tool results received!",
+        "«tool-results received»",
+    ):
+        assert is_bridge_echo(text), text
+
+
+def test_a_real_answer_mentioning_the_bridge_is_not_an_echo():
+    assert not is_bridge_echo(
+        "Готово: (tool results received) больше не нужно, вот итог."
+    )
+    assert not is_bridge_echo("")

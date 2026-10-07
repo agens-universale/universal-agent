@@ -4,21 +4,35 @@
 Переиспользует ядро: onboarding (политика), onboarding_config_writer,
 model_picker, mcp_runtime.cli. Логика сбора — как в плоском onboarding_wizard,
 меняется только презентация."""
+
 from __future__ import annotations
 
+from gc_core import onboarding
+from gc_core import onboarding_fields as _of
+from rich.text import Text
 from textual import events
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Static
-from rich.text import Text
 
-from gc_core import onboarding
-from gc_core import onboarding_fields as _of
 from gc_tui import branding
+from gc_tui.form_frame import (
+    FOOTER_SCROLL,
+    body_scrollable,
+    cap_frame_height,
+    reveal,
+    reveal_focus,
+    scroll_body,
+)
 from gc_tui.palette import ACCENT, DEEP_DIM, DIM, INK, OK, WARN
-from gc_tui.form_frame import cap_frame_height, reveal
+
+# Константы вместо повторяющихся литералов (Sonar S1192).
+_SEL_ONB_SCROLL = "#onb-scroll"
+_CLS_SELECTED = " selected"
+_SEL_ONB_BODY = "#onb-body"
+
 
 # Именованные шаги мастера. Состав статичен, но шаг адресуется ИМЕНЕМ, а не
 # номером: числовые сравнения врали бы при любой правке состава.
@@ -29,7 +43,14 @@ STEP_MCP = "mcp"
 STEP_VOICE = "voice"
 STEP_CONFIRM = "confirm"
 
-_BASE_STEPS = (STEP_CONNECTION, STEP_MODEL, STEP_LEVELS, STEP_MCP, STEP_VOICE, STEP_CONFIRM)
+_BASE_STEPS = (
+    STEP_CONNECTION,
+    STEP_MODEL,
+    STEP_LEVELS,
+    STEP_MCP,
+    STEP_VOICE,
+    STEP_CONFIRM,
+)
 _STEP_TITLE = {
     STEP_CONNECTION: "Подключение",
     STEP_MODEL: "Модель",
@@ -38,14 +59,18 @@ _STEP_TITLE = {
     STEP_VOICE: "Голосовой ввод",
     STEP_CONFIRM: "Подтверждение",
 }
-_STEP_SHORT = {                    # короткие имена для степпера (финала в нём нет)
+_STEP_SHORT = {  # короткие имена для степпера (финала в нём нет)
     STEP_CONNECTION: "Подключение",
     STEP_MODEL: "Модель",
     STEP_LEVELS: "Уровни",
     STEP_MCP: "MCP",
     STEP_VOICE: "Голосовой ввод",
 }
-_MARK_STEPS = (STEP_MODEL, STEP_LEVELS, STEP_VOICE)   # шаги с отдельной от курсора пометкой ● (двухролевой Enter)
+_MARK_STEPS = (
+    STEP_MODEL,
+    STEP_LEVELS,
+    STEP_VOICE,
+)  # шаги с отдельной от курсора пометкой ● (двухролевой Enter)
 
 # Шаг уровней (спека §11: «добавить лёгкую и максимальную модели?») — две
 # независимые под-формы, каждая необязательна: пропуск не пишет ничего.
@@ -58,7 +83,11 @@ _LEVEL_ROWS = ("light", "max")
 _LEVELS_CONTINUE_LABEL = "→ продолжить"
 
 _VOICE_OPTIONS = (
-    ("local", "Локальный сервис (рекомендуется)", "распознаёт офлайн, на вашем компьютере"),
+    (
+        "local",
+        "Локальный сервис (рекомендуется)",
+        "распознаёт офлайн, на вашем компьютере",
+    ),
     ("cloud", "Свой endpoint", "любой OpenAI-совместимый STT-сервис"),
     ("skip", "Без голосового ввода", ""),
 )
@@ -66,8 +95,15 @@ _VOICE_OPTIONS = (
 # 0.9 ГБ — замер штатной установки: окружение сервиса 390 МБ + модель 486 МБ = 876 МБ.
 # Считаем десятичными (как трафик и как продают диски); в двоичных это 0.82 ГиБ, но
 # на диске с учётом кластеров выходит даже больше — округляем вверх, не вниз.
-_VOICE_LOCAL_DISK = {False: "скачает ~0.9 ГБ", True: "занимает ~0.9 ГБ на диске"}
-_VOICE_SUMMARY_LABELS = {"local": "локальный сервис", "cloud": "свой endpoint", "skip": "нет"}
+_VOICE_LOCAL_DISK = {
+    False: "скачает ~0.9 ГБ",
+    True: "занимает ~0.9 ГБ на диске",
+}
+_VOICE_SUMMARY_LABELS = {
+    "local": "локальный сервис",
+    "cloud": "свой endpoint",
+    "skip": "нет",
+}
 # Цена локального сервиса в ресурсах (замер на faster-whisper-small): модель висит в
 # памяти постоянно — так задано WHISPER__TTL=-1, иначе каждая фраза начиналась бы с
 # её загрузки. 4 потока — дефолт cpu_threads движка, а не свойство конкретной машины.
@@ -86,25 +122,21 @@ _TAB_TO_VARIANTS = "Tab — вверх к выбору"
 # Списков в мастере три: пресет-лист адреса «Подключения», пресет-лист адреса «Своего
 # endpoint» и список моделей самого endpoint'а. Когда какой раскрывается — канон
 # 2026-08-17, он описан у `_FOOTER_PRESET_LIST` ниже.
-_FOOTER_MODEL_LIST = ("↑↓ — выбор модели  ·  Enter — подставить  ·  Esc — свернуть"
-                      "  ·  PgUp — назад  ·  PgDn — далее")
+_FOOTER_MODEL_LIST = "↑↓ — выбор модели  ·  Enter — подставить  ·  Esc — свернуть  ·  PgUp — назад  ·  PgDn — далее"
 # Фильтр не оставил строк (человек печатает свой id): стрелки список съедает, никуда
 # не двигая, а `pick_in` возвращает False — подставлять нечего. Говорим теми же словами,
 # что хинт под рамкой (`_MODEL_HINT_NO_MATCH`), иначе одна клавиша на одном экране
 # зовётся двумя разными глаголами.
-_FOOTER_MODEL_LIST_NO_MATCH = ("Enter — сохранить как есть  ·  Esc — свернуть"
-                               "  ·  PgUp — назад  ·  PgDn — далее")
+_FOOTER_MODEL_LIST_NO_MATCH = "Enter — сохранить как есть  ·  Esc — свернуть  ·  PgUp — назад  ·  PgDn — далее"
 # Пресет-лист адреса «Своего endpoint» на шаге «Голосовой ввод» (спека 2026-08-05 §3) —
 # то же поле группы «поля», тот же приоритет списка над лентой, но глагол — «подставить»,
 # БЕЗ «и сохранить»: ЧУЖОЙ пресет тем же Enter'ом стирает поле «Модель» (§4.1 плана), и
 # подстановка не доводит форму до конца шага. Канон — тот же текст, что у пресет-листа
 # шага «Подключение» (`_FOOTER_PRESET_LIST` ниже), который по той же причине не обещает
 # «далее».
-_FOOTER_URL_LIST = ("↑↓ — выбор адреса  ·  Enter — подставить  ·  Esc — свернуть"
-                    "  ·  PgUp — назад  ·  PgDn — далее")
+_FOOTER_URL_LIST = "↑↓ — выбор адреса  ·  Enter — подставить  ·  Esc — свернуть  ·  PgUp — назад  ·  PgDn — далее"
 # Свой адрес выбил из списка все строки — тот же случай, что у модели чуть выше.
-_FOOTER_URL_LIST_NO_MATCH = ("Enter — оставить свой адрес  ·  Esc — свернуть"
-                             "  ·  PgUp — назад  ·  PgDn — далее")
+_FOOTER_URL_LIST_NO_MATCH = "Enter — оставить свой адрес  ·  Esc — свернуть  ·  PgUp — назад  ·  PgDn — далее"
 # Пресет-лист адреса на шаге «Подключение» раскрывается САМ, пока поле пусто (канон
 # 2026-08-17) — то есть на первом запуске человек застаёт это состояние по умолчанию,
 # а не ищет его: Enter подставляет провайдера и возвращается, Esc сворачивает список,
@@ -112,16 +144,14 @@ _FOOTER_URL_LIST_NO_MATCH = ("Enter — оставить свой адрес  ·
 # пресет), список свёрнут: стрелки водят по форме, а вызвать его можно `Alt+↓` —
 # он назван строкой под полем. Ctrl+Space до списка не относится и работает как везде
 # на шаге — проверяет связь.
-_FOOTER_PRESET_LIST = ("↑↓ — выбор провайдера  ·  Enter — подставить  ·  Esc — свернуть"
-                       "  ·  Ctrl+Space — проверить связь  ·  PgDn — далее")
+_FOOTER_PRESET_LIST = "↑↓ — выбор провайдера  ·  Enter — подставить  ·  Esc — свернуть  ·  Ctrl+Space — проверить связь  ·  PgDn — далее"
 # Список раскрыт, но подсветки нет: в редакции канона 2026-08-18 печать без совпадений
 # СВОРАЧИВАЕТ список (`connection.PRESET_NO_MATCH_CLOSED`), так что состояние достижимо
 # только форсированным `Alt+↓` поверх своего адреса. Подставлять нечего (`pick()` вернёт
 # None), Enter лишь сворачивает список, оставляя набранное, — а вот ↑↓ работают: первая
 # же стрелка подсвечивает строку. Раз работают — обязаны быть названы (тот же сегмент
 # стоит в парном футере /settings).
-_FOOTER_PRESET_LIST_NO_MATCH = ("↑↓  ·  Enter — оставить свой адрес  ·  Esc — свернуть"
-                                "  ·  Ctrl+Space — проверить связь  ·  PgDn — далее")
+_FOOTER_PRESET_LIST_NO_MATCH = "↑↓  ·  Enter — оставить свой адрес  ·  Esc — свернуть  ·  Ctrl+Space — проверить связь  ·  PgDn — далее"
 # Поля «Своего endpoint», по которым ходит курсор группы полей. Мастер спрашивает три
 # (язык — только в /settings, спека §10); тем же набором монтируется и сам редактор,
 # чтобы лента и поля не разъехались.
@@ -145,9 +175,20 @@ class OnboardingScreen(Screen):
         Binding("pagedown", "go_next", "далее", show=False, priority=True),
     ]
 
-    def __init__(self, config, config_path, *, review_all, on_commit,
-                 fetch=None, mcp=None, voice=None, probe=None,
-                 deactivate_profile=False, degraded_note=None) -> None:
+    def __init__(
+        self,
+        config,
+        config_path,
+        *,
+        review_all,
+        on_commit,
+        fetch=None,
+        mcp=None,
+        voice=None,
+        probe=None,
+        deactivate_profile=False,
+        degraded_note=None,
+    ) -> None:
         super().__init__()
         self._config = config
         self._config_path = config_path
@@ -171,15 +212,19 @@ class OnboardingScreen(Screen):
         self._review_all = review_all
         self._on_commit = on_commit
         from gc_core.model_picker import fetch_models
+
         from gc_tui.services.model_list_cache import make_cached_fetch
+
         self._fetch = make_cached_fetch(fetch or fetch_models)
         if mcp is None:
             from recommended_mcp.runtime import cli as mcp_mod
+
             self._mcp = mcp_mod
         else:
             self._mcp = mcp
         if voice is None:
             from gc_tui.services import voice_setup as voice_mod
+
             self._voice_setup = voice_mod
         else:
             self._voice_setup = voice
@@ -187,39 +232,68 @@ class OnboardingScreen(Screen):
         # у публичного /models (OpenRouter) отвечает без токена и сказала бы
         # «доступен» про маршрут, который токен как раз требует.
         from gc_tui.services.settings_probe import probe_auth as _default_probe
+
         self._probe_fn = probe or _default_probe
         self._steps = _BASE_STEPS
-        self._voice_choice = ""            # "" | "local" | "cloud" | "skip"
-        self._voice_group = _VOICE_GROUP_VARIANTS   # группа под курсором (спека §4.1)
-        self._voice_field_idx = 0          # позиция в группе полей — своя у каждой группы
-        self._voice_cloud: dict = {}       # url/token/model (выбор cloud)
+        self._voice_choice = ""  # "" | "local" | "cloud" | "skip"
+        self._voice_group = (
+            _VOICE_GROUP_VARIANTS  # группа под курсором (спека §4.1)
+        )
+        self._voice_field_idx = (
+            0  # позиция в группе полей — своя у каждой группы
+        )
+        self._voice_cloud: dict = {}  # url/token/model (выбор cloud)
         # Ctrl+U на «Токене» голосового шага: пустое поле теперь значит «стереть
         # сохранённый», а не «оставить как было» (флаг переживает пересборку полей).
         self._voice_token_cleared: bool = False
-        self._voice_prefilled = False      # status_cheap на шаге голоса — не чаще раза
+        self._voice_prefilled = (
+            False  # status_cheap на шаге голоса — не чаще раза
+        )
         self._step = 0
-        self._levels_stage = "ask"     # "ask" (две строки) | "light" | "max" (под-форма)
+        self._levels_stage = (
+            "ask"  # "ask" (две строки) | "light" | "max" (под-форма)
+        )
         self._levels_idx = 0
         self._values: dict = {}
         self._idx: dict = {}
         self._mcp_selected: set = set()
-        self._mcp_installed: set = set()   # уже подключённые (wired) — отмечаем, не предлагаем
-        self._probe_gen = 0   # generation авто-пробы шага «Подключение»: протухший результат отбрасывается
-        self._last_probed_snapshot: tuple | None = None   # ConnectionEditor.probe_snapshot() последней пробы
+        self._mcp_installed: set = (
+            set()
+        )  # уже подключённые (wired) — отмечаем, не предлагаем
+        self._probe_gen = 0  # generation авто-пробы шага «Подключение»: протухший результат отбрасывается
+        self._last_probed_snapshot: tuple | None = (
+            None  # ConnectionEditor.probe_snapshot() последней пробы
+        )
 
     def compose(self) -> ComposeResult:
         with Vertical(id="root"):
             with Horizontal(id="onb-header"):
-                yield Static(self._title_text(), id="header-left", markup=False)
-            scroll = VerticalScroll(id="onb-scroll")
-            scroll.can_focus = False
-            with scroll:
+                yield Static(
+                    self._title_text(), id="header-left", markup=False
+                )
+            # Фокус у области прокрутки не отнимаем (Р17): на нём держится
+            # клавиатурная прокрутка. Свои клавиши шаг забирает раньше — `on_key`
+            # предка отрабатывает ДО проверки биндингов, — контейнеру достаётся
+            # только незанятое (PgUp/PgDn, Home/End).
+            with VerticalScroll(id="onb-scroll"):
                 with Vertical(id="onb-frame"):
-                    yield Static(branding.logo_text(), id="onb-logo", markup=False)
-                    yield Static(branding.tagline_under_logo(), id="onb-tagline", markup=False)
-                    yield Static(self._stepper_text(), id="onb-stepper", markup=False)
-                    yield Static(self._summary_text(), id="onb-summary",
-                                 classes="onb-hint", markup=False)
+                    yield Static(
+                        branding.logo_text(), id="onb-logo", markup=False
+                    )
+                    yield Static(
+                        branding.tagline_under_logo(),
+                        id="onb-tagline",
+                        markup=False,
+                    )
+                    yield Static(
+                        self._stepper_text(), id="onb-stepper", markup=False
+                    )
+                    yield Static(
+                        self._summary_text(),
+                        id="onb-summary",
+                        classes="onb-hint",
+                        markup=False,
+                    )
                     # Обе плашки — отдельными строками одного вида, и деградация
                     # стоит первой: она объясняет СОСТОЯНИЕ («вот почему поля не
                     # такие, как в вашем файле»), а вердикт о слое — БУДУЩЕЕ записи
@@ -228,13 +302,23 @@ class OnboardingScreen(Screen):
                     # сводим: заголовков у мастера нет нигде, а склеенные в один
                     # абзац два длинных предложения читаются как одно.
                     if self._degraded_note:
-                        yield Static(self._degraded_note, id="onb-degraded-warn",
-                                     classes="onb-warn", markup=False)
+                        yield Static(
+                            self._degraded_note,
+                            id="onb-degraded-warn",
+                            classes="onb-warn",
+                            markup=False,
+                        )
                     profile_note = self._layer_note()
                     if profile_note:
-                        yield Static(profile_note, id="onb-profile-warn",
-                                     classes="onb-warn", markup=False)
-                    yield Static(self._body_placeholder(), id="onb-body", markup=False)
+                        yield Static(
+                            profile_note,
+                            id="onb-profile-warn",
+                            classes="onb-warn",
+                            markup=False,
+                        )
+                    yield Static(
+                        self._body_placeholder(), id="onb-body", markup=False
+                    )
             yield Static(self._footer_text(), id="onb-footer", markup=False)
 
     # --- плашка о перекрывающем слое ---
@@ -251,7 +335,8 @@ class OnboardingScreen(Screen):
         # Профиль, который финал деактивирует, перекрыть выбор уже не сможет — и
         # плашка о нём противоречила бы предупреждению о деактивации строкой ниже.
         note = onboarding.overriding_layer_note(
-            config, self._config_path, ignore_profile=self._deactivate_profile)
+            config, self._config_path, ignore_profile=self._deactivate_profile
+        )
         if note and config.get("profile"):
             note += self._NOTE_SETTINGS_TAIL
         return note
@@ -288,13 +373,21 @@ class OnboardingScreen(Screen):
 
     def _stepper_text(self) -> Text:
         t = Text()
-        for i, name in enumerate(_STEP_SHORT[step] for step in self._steps[:self._last_step()]):
+        for i, name in enumerate(
+            _STEP_SHORT[step] for step in self._steps[: self._last_step()]
+        ):
             if i:
                 t.append("    ")
             if i < self._step:
-                mark, style = "✓ ", OK             # пройденные — зелёные (на финале все шаги пройдены)
+                mark, style = (
+                    "✓ ",
+                    OK,
+                )  # пройденные — зелёные (на финале все шаги пройдены)
             elif i == self._step:
-                mark, style = "● ", INK            # текущий — белый (как выбранная строка)
+                mark, style = (
+                    "● ",
+                    INK,
+                )  # текущий — белый (как выбранная строка)
             else:
                 mark, style = "○ ", DEEP_DIM
             t.append(mark, style=style)
@@ -324,8 +417,9 @@ class OnboardingScreen(Screen):
         """Что показать против уровня: набранное в этом прогоне мастера, иначе —
         назначенное в конфиге. Один источник на список уровней и на его под-форму:
         разойдясь, они показали бы одному человеку два разных ответа на один вопрос."""
-        return (self._values.get(onboarding.MODEL_SLOT_KEYS[level])
-                or self._assigned_level_model(level))
+        return self._values.get(
+            onboarding.MODEL_SLOT_KEYS[level]
+        ) or self._assigned_level_model(level)
 
     def _shown_values(self) -> dict:
         """Чем витрины мастера (лента-сводка и подтверждение) заполняют то, чего
@@ -338,18 +432,23 @@ class OnboardingScreen(Screen):
         на подтверждении, «модель:» в ленте рядом с ним), и при `level: max` на одном
         экране стояли «модель default: <модель max>» и «модель max: <она же>». Слой
         профиля от этого никуда не девается — читается тот же `self._config`."""
-        return {"completions_url": self._config.get("completions_url"),
-                "model": self._model_step_current(),
-                "Authorization": (self._config.get("chat_completion_headers") or {}
-                                  ).get("Authorization")}
+        return {
+            "completions_url": self._config.get("completions_url"),
+            "model": self._model_step_current(),
+            "Authorization": (
+                self._config.get("chat_completion_headers") or {}
+            ).get("Authorization"),
+        }
 
     def _summary_text(self) -> str:
         from gc_tui.services.onboarding_summary import summary_line
+
         shown = self._shown_values()
         # Шаблонные заглушки конфига (…_SENTINEL) — это «ещё не задано», а не значение:
         # показываем прочерком, как редактор адреса трактует URL_SENTINEL пустым полем.
         url = onboarding.configured_endpoint(
-            self._values.get("completions_url") or shown.get("completions_url"))
+            self._values.get("completions_url") or shown.get("completions_url")
+        )
         model = self._values.get("model") or shown.get("model") or ""
         if model == onboarding.MODEL_SENTINEL:
             model = ""
@@ -370,7 +469,7 @@ class OnboardingScreen(Screen):
             voice=_VOICE_SUMMARY_LABELS.get(self._voice_choice, ""),
         )
 
-    def _footer_text(self) -> str:
+    def _footer_base(self) -> str:
         step = self._step_id()
         if step == STEP_CONFIRM:
             return "Enter — подтвердить и завершить настройку  ·  PgUp — назад  ·  Esc — выход"
@@ -380,30 +479,50 @@ class OnboardingScreen(Screen):
             # «поля» шага голоса, оба забирают клавиши себе) — глагол Enter у них
             # разный (см. константы), и футер обязан назвать ИМЕННО тот список.
             if self._voice_focused_field_key() == "url":
-                return (_FOOTER_URL_LIST if ctrl.has_selection
-                        else _FOOTER_URL_LIST_NO_MATCH)
-            return (_FOOTER_MODEL_LIST if ctrl.has_selection
-                    else _FOOTER_MODEL_LIST_NO_MATCH)
+                return (
+                    _FOOTER_URL_LIST
+                    if ctrl.has_selection
+                    else _FOOTER_URL_LIST_NO_MATCH
+                )
+            return (
+                _FOOTER_MODEL_LIST
+                if ctrl.has_selection
+                else _FOOTER_MODEL_LIST_NO_MATCH
+            )
         if step == STEP_CONNECTION and self._presets_open():
-            return (_FOOTER_PRESET_LIST if self._presets_have_selection()
-                    else _FOOTER_PRESET_LIST_NO_MATCH)
+            return (
+                _FOOTER_PRESET_LIST
+                if self._presets_have_selection()
+                else _FOOTER_PRESET_LIST_NO_MATCH
+            )
         # Курсор в полях меняет не только Tab: Space там печатает пробел (Input съедает
         # клавишу раньше шага) и пометки не ставит — обещать им выбор нельзя (§6.4).
-        in_fields = (self._step_id() == STEP_VOICE
-                     and self._voice_cursor_group() == _VOICE_GROUP_FIELDS)
+        in_fields = (
+            self._step_id() == STEP_VOICE
+            and self._voice_cursor_group() == _VOICE_GROUP_FIELDS
+        )
         parts = ["↑↓ навигация", "Enter — далее", "Esc — выход"]
         # Enter ведёт далее не везде: на помеченных шагах он ставит пометку под
         # курсором. «Далее» в эти моменты — PgDn.
-        enter_chooses = (step in _MARK_STEPS and not self._step_marked()
-                         # …кроме строки-действия списка уровней: там Enter и есть «далее».
-                         and not (step == STEP_LEVELS and self._levels_stage == "ask"
-                                  and self._levels_on_continue()))
+        enter_chooses = (
+            step in _MARK_STEPS
+            and not self._step_marked()
+            # …кроме строки-действия списка уровней: там Enter и есть «далее».
+            and not (
+                step == STEP_LEVELS
+                and self._levels_stage == "ask"
+                and self._levels_on_continue()
+            )
+        )
         if enter_chooses:
             # На шаге голоса ту же пометку ставит Space, и назвать его обязательно:
             # поля endpoint показаны уже под курсором, но клавиши до выбора принадлежат
             # шагу. Клавиши названы вместе — отдельным пунктом строка уходит за 100 колонок.
-            choose = ("Space/Enter — выбрать"
-                      if step == STEP_VOICE and not in_fields else "Enter — выбрать")
+            choose = (
+                "Space/Enter — выбрать"
+                if step == STEP_VOICE and not in_fields
+                else "Enter — выбрать"
+            )
             parts[1:2] = [choose, "PgDn — далее"]
         elif step == STEP_VOICE and not in_fields:
             # Выбор уже стоит: Enter ведёт дальше, а Space остаётся тем, чем переставляют
@@ -439,13 +558,30 @@ class OnboardingScreen(Screen):
             # MCP: Space — тумблер чекбоксов, своя роль, и подсказка идёт первой.
             parts.insert(0, "Space — выбрать")
         if tab := self._voice_tab_hint():
-            parts.insert(1, tab)      # клавиша курсора — рядом с ↑↓, а не в хвосте
+            parts.insert(1, tab)  # клавиша курсора — рядом с ↑↓, а не в хвосте
         return "  ·  ".join(parts)
+
+    def _footer_text(self) -> str:
+        # Клавиша прокрутки называется, только пока карточка не влезает в кадр
+        # (наша правка поверх канона develop: подсказка не врёт про то, чего нет).
+        base = self._footer_base()
+        return (
+            base + FOOTER_SCROLL
+            if body_scrollable(self, _SEL_ONB_SCROLL)
+            else base
+        )
+
+    def _sync_footer(self) -> None:
+        try:
+            self.query_one("#onb-footer", Static).update(self._footer_text())
+        except Exception:
+            pass
 
     def _connection_editor(self):
         """Редактор шага «Подключение» или None. Отдельный доступ нужен футеру: тот
         считается и из `compose`, где тела шага ещё нет вовсе."""
         from gc_tui.editors.connection import ConnectionEditor
+
         eds = self.query(ConnectionEditor)
         return eds.first() if eds else None
 
@@ -474,8 +610,11 @@ class OnboardingScreen(Screen):
         и называть её значило бы врать."""
         if self._step_id() != STEP_VOICE or len(self._voice_groups()) < 2:
             return ""
-        return (_TAB_TO_VARIANTS if self._voice_cursor_group() == _VOICE_GROUP_FIELDS
-                else _TAB_TO_FIELDS)
+        return (
+            _TAB_TO_VARIANTS
+            if self._voice_cursor_group() == _VOICE_GROUP_FIELDS
+            else _TAB_TO_FIELDS
+        )
 
     def _step_marked(self) -> bool:
         """Помечена ли ● строка под курсором текущего шага. От этого зависит роль Enter
@@ -484,6 +623,7 @@ class OnboardingScreen(Screen):
         Список уровней пометки не знает вовсе: Enter там всегда открывает под-форму
         уровня, «далее» со шага уводит PgDn."""
         from textual.css.query import NoMatches
+
         step = self._step_id()
         if step == STEP_LEVELS and self._levels_stage == "ask":
             return False
@@ -493,9 +633,10 @@ class OnboardingScreen(Screen):
         try:
             if step in (STEP_MODEL, STEP_LEVELS):
                 from gc_tui.editors.model import ModelEditor
+
                 return self.query_one(ModelEditor).is_marked
         except NoMatches:
-            return False                 # тело шага ещё не смонтировано
+            return False  # тело шага ещё не смонтировано
         return False
 
     def on_connection_editor_ready(self, event) -> None:
@@ -521,31 +662,43 @@ class OnboardingScreen(Screen):
 
     def on_mount(self) -> None:
         self._mount_step_body()
-        self.call_after_refresh(cap_frame_height, self, "#onb-scroll")
+        self.call_after_refresh(cap_frame_height, self, _SEL_ONB_SCROLL)
 
     def on_resize(self, event: events.Resize) -> None:
         # Потолок рамки зависит только от высоты окна и хрома — пересчитывается на
         # ресайз, а не на каждый кадр шага (см. form_frame).
-        cap_frame_height(self, "#onb-scroll")
+        cap_frame_height(self, _SEL_ONB_SCROLL)
+        # Влезет ли карточка, видно только ПОСЛЕ раскладки — от этого зависит,
+        # называть ли клавишу прокрутки.
+        self.call_after_refresh(self._sync_footer)
 
     def _mount_step_body(self) -> None:
         """Смонтировать виджеты текущего шага в #onb-frame (после #onb-body)."""
         # Снять фокус ДО remove: detached focused-виджет рвёт Screen._binding_chain
         # (идёт через focused.ancestors_with_self) — priority PgUp перестаёт находиться.
         self.set_focus(None)
+        # Влезет ли карточка, видно только ПОСЛЕ раскладки — а от этого
+        # зависит, называть ли клавишу прокрутки.
+        self.call_after_refresh(self._sync_footer)
         for w in self.query(".onb-dyn"):
             w.remove()
         body = self.query_one("#onb-frame", Vertical)
         step = self._step_id()
         if step == STEP_CONNECTION:
+            from gc_core.config_modules.endpoint_presets import (
+                endpoint_presets_from_config,
+            )
+
             from gc_tui.editors.connection import ConnectionEditor
-            from gc_core.config_modules.endpoint_presets import endpoint_presets_from_config
+
             # Поля показывают СЫРОЕ значение файла, не self._config (он уже резолвнут
             # ${ENV:...}/${FILE:...}) — см. _raw_conn.
             raw = self._raw_conn()
             cur = self._values.get("completions_url")
             if not cur:
-                cur = onboarding.configured_endpoint(raw.get("completions_url"))
+                cur = onboarding.configured_endpoint(
+                    raw.get("completions_url")
+                )
             auth = self._values.get("Authorization")
             if auth is None:
                 auth = raw.get("Authorization")
@@ -553,17 +706,30 @@ class OnboardingScreen(Screen):
             if proxy_cur is None:
                 proxy_cur = raw.get("proxy") or ""
             ed = ConnectionEditor(
-                url_current=cur, auth_header=auth,
+                url_current=cur,
+                auth_header=auth,
                 proxy_current=proxy_cur or "",
                 create_mode=True,
-                presets=endpoint_presets_from_config(self._config or {}))
+                closed_hint="Alt+↓ — показать список",
+                presets=endpoint_presets_from_config(self._config or {}),
+            )
             body.mount(ed)
-            body.mount(Static(Text("— не проверено", style=DEEP_DIM),
-                              classes="onb-hint onb-dyn set-group-gap onb-conn-probe"))
+            body.mount(
+                Static(
+                    Text("— не проверено", style=DEEP_DIM),
+                    classes="onb-hint onb-dyn set-group-gap onb-conn-probe",
+                )
+            )
         elif step == STEP_MODEL:
             from gc_tui.editors.model import ModelEditor
-            body.mount(Static(_of.MODEL_STEP_HINT, classes="onb-hint onb-dyn set-spaced",
-                              markup=False))
+
+            body.mount(
+                Static(
+                    _of.MODEL_STEP_HINT,
+                    classes="onb-hint onb-dyn set-spaced",
+                    markup=False,
+                )
+            )
             endpoint, auth = self._endpoint_auth()
             # Строка «сейчас» шага — правило ядра, общее с плоским мастером
             # (`onboarding.model_step_display`, M12): при незаданном default с
@@ -571,23 +737,34 @@ class OnboardingScreen(Screen):
             # редактора ведётся к ней (проход насквозь = «оставить как есть»),
             # а не к первой модели сервера; подпись об источнике — строкой-хинтом
             # (в строку списка её не вставить — слово «текущая» рисует редактор).
-            cfg_model, fallback_note = onboarding.model_step_display(self._config or {})
+            cfg_model, fallback_note = onboarding.model_step_display(
+                self._config or {}
+            )
             if fallback_note:
-                body.mount(Static(f"сейчас: {cfg_model}  {fallback_note}",
-                                  classes="onb-hint onb-dyn", markup=False))
-            ed = ModelEditor(current=self._values.get("model", ""), endpoint=endpoint,
-                             auth=auth, verify=bool(self._config.get("use_ssl", True)),
-                             fetch=self._fetch,
-                             # Список приезжает воркером: до него метить нечего, после —
-                             # курсор встаёт на помеченную. Футер обещает роль Enter — догоняем.
-                             on_loaded=self._refresh_footer,
-                             active=self._values.get("model") or cfg_model,
-                             # Набранное на шаге «Подключение» (self._values["proxy"]),
-                             # фолбэк — резолвнутый self._config (см. _effective_proxy):
-                             # без него запрос за списком в корп-сети с обязательным
-                             # прокси идёт мимо него, и «список не получен» здесь
-                             # противоречит «✓ … · N моделей» с шага «Подключение».
-                             config_proxy=self._effective_proxy() or None)
+                body.mount(
+                    Static(
+                        f"сейчас: {cfg_model}  {fallback_note}",
+                        classes="onb-hint onb-dyn",
+                        markup=False,
+                    )
+                )
+            ed = ModelEditor(
+                current=self._values.get("model", ""),
+                endpoint=endpoint,
+                auth=auth,
+                verify=self._config.get("use_ssl", True),
+                fetch=self._fetch,
+                # Список приезжает воркером: до него метить нечего, после —
+                # курсор встаёт на помеченную. Футер обещает роль Enter — догоняем.
+                on_loaded=self._refresh_footer,
+                active=self._values.get("model") or cfg_model,
+                # Набранное на шаге «Подключение» (self._values["proxy"]),
+                # фолбэк — резолвнутый self._config (см. _effective_proxy):
+                # без него запрос за списком в корп-сети с обязательным
+                # прокси идёт мимо него, и «список не получен» здесь
+                # противоречит «✓ … · N моделей» с шага «Подключение».
+                config_proxy=self._effective_proxy() or None,
+            )
             body.mount(ed)
         elif step == STEP_LEVELS:
             self._mount_levels_body(body)
@@ -605,8 +782,12 @@ class OnboardingScreen(Screen):
                 self._mcp_installed = set()
             cur = self._idx[STEP_MCP]
             for i, name in enumerate(names):
-                cls = "onb-option onb-dyn set-spaced onb-mcp-row" + (" selected" if i == cur else "")
-                body.mount(Static(self._mcp_row_text(i == cur, name), classes=cls))
+                cls = "onb-option onb-dyn set-spaced onb-mcp-row" + (
+                    _CLS_SELECTED if i == cur else ""
+                )
+                body.mount(
+                    Static(self._mcp_row_text(i == cur, name), classes=cls)
+                )
         elif step == STEP_VOICE:
             self._prefill_voice_from_config()
             self._idx.setdefault(STEP_VOICE, 0)
@@ -639,19 +820,30 @@ class OnboardingScreen(Screen):
                 # Со второй строкой воздух уходит ПОД неё, иначе она отрывается от своей
                 # опции и прилипает к следующей.
                 if owner and self._voice_highlight_variants():
-                    cls += " selected"
-                body.mount(Static(
-                    self._voice_row_text(owner, key, title, desc,
-                                         installed=installed), classes=cls))
+                    cls += _CLS_SELECTED
+                body.mount(
+                    Static(
+                        self._voice_row_text(
+                            owner, key, title, desc, installed=installed
+                        ),
+                        classes=cls,
+                    )
+                )
                 if second is not None:
                     body.mount(self._voice_second_line(second, col))
             if self._voice_cursor_is_cloud():
                 self._mount_voice_fields(body)
         elif step == STEP_CONFIRM:
             from gc_core.onboarding import mask_authorization
+
             shown = self._shown_values()
-            addr = onboarding.configured_endpoint(
-                self._values.get("completions_url") or shown.get("completions_url")) or "—"
+            addr = (
+                onboarding.configured_endpoint(
+                    self._values.get("completions_url")
+                    or shown.get("completions_url")
+                )
+                or "—"
+            )
             model = self._values.get("model") or shown.get("model") or "—"
             # Плейсхолдеры шаблона — не значения (тот же канон, что в строке-сводке
             # выше и в витринах базы): нетронутое поле в _values не попадает, а
@@ -671,8 +863,11 @@ class OnboardingScreen(Screen):
                 tok = "без авторизации"
             else:
                 tok = mask_authorization(auth)
-            mcp_val = (", ".join(sorted(self._mcp_selected)) if self._mcp_selected
-                       else "не выбраны — можно добавить позже")
+            mcp_val = (
+                ", ".join(sorted(self._mcp_selected))
+                if self._mcp_selected
+                else "не выбраны — можно добавить позже"
+            )
             # Слоты реестра — сущности одного рода, и названы одинаково: «модель» держит
             # контекст, имя слота — то же, что уедет в файл (`slots.default`) и что
             # человек увидит в секции «Модели» и в `/level`.
@@ -686,23 +881,31 @@ class OnboardingScreen(Screen):
                 rows.append((f"модель {level}:", value or _of.LEVEL_UNSET))
             rows += [("токен:", tok), ("MCP:", mcp_val)]
             if self._voice_choice == "cloud":
-                host = (self._voice_cloud.get("url", "").split("/")[2]
-                        if "://" in self._voice_cloud.get("url", "") else "—")
+                host = (
+                    self._voice_cloud.get("url", "").split("/")[2]
+                    if "://" in self._voice_cloud.get("url", "")
+                    else "—"
+                )
                 voice_val = f"endpoint {host}"
             elif self._voice_choice == "local":
                 from gc_tui.voice_runtime.state import current_model_short
+
                 voice_val = f"локальный сервис · {current_model_short()}"
             else:
                 voice_val = "нет"
             rows.append(("голосовой ввод:", voice_val))
             summary = Text()
-            label_width = max(len(label) for label, _ in rows) + 1  # колонка под самую длинную метку
+            label_width = (
+                max(len(label) for label, _ in rows) + 1
+            )  # колонка под самую длинную метку
             for n, (label, val) in enumerate(rows):
                 if n:
-                    summary.append("\n")            # воздух между строками сводки
+                    summary.append("\n")  # воздух между строками сводки
                 # Галочка — про ЗАПОЛНЕННОЕ: «✓ адрес: —» читается «готово» там, где
                 # ничего нет. Глиф гасим, а не убираем — колонка меток не съезжает.
-                summary.append("  " if val in ("—", _of.LEVEL_UNSET) else "✓ ", style=OK)
+                summary.append(
+                    "  " if val in ("—", _of.LEVEL_UNSET) else "✓ ", style=OK
+                )
                 summary.append(f"{label:{label_width}}", style=DIM)
                 summary.append(f"{val}\n", style=INK)
             if self._deactivate_profile:
@@ -712,16 +915,21 @@ class OnboardingScreen(Screen):
                 # Текст — общий с плоским мастером (`_of`), цветом предупреждения:
                 # это единственная строка финала, говорящая об отнятом.
                 summary.append("\n")
-                summary.append(_of.PROFILE_DEACTIVATION_WARNING + "\n", style=WARN)
+                summary.append(
+                    _of.PROFILE_DEACTIVATION_WARNING + "\n", style=WARN
+                )
             notice_parts = []
             if self._mcp_selected:
                 notice_parts.append(f"MCP ({mcp_val})")
             if self._voice_choice == "local" and not self._voice_installed():
                 notice_parts.append("локальный голосовой сервис (~0.9 ГБ)")
             if notice_parts:
-                summary.append("\n")                # воздух перед служебной строкой
-                summary.append("Установятся после подтверждения: " + " · ".join(notice_parts),
-                               style=DEEP_DIM)
+                summary.append("\n")  # воздух перед служебной строкой
+                summary.append(
+                    "Установятся после подтверждения: "
+                    + " · ".join(notice_parts),
+                    style=DEEP_DIM,
+                )
             body.mount(Static(summary, classes="onb-dyn"))
         # Футер — про тело, поэтому считается ПОСЛЕ него, а не вместе с остальным хромом:
         # состав тела задаёт и состав обещаний (группы для Tab, раскрытый список).
@@ -737,7 +945,7 @@ class OnboardingScreen(Screen):
         self.query_one("#header-left", Static).update(self._title_text())
         self.query_one("#onb-stepper", Static).update(self._stepper_text())
         self.query_one("#onb-summary", Static).update(self._summary_text())
-        self.query_one("#onb-body", Static).update(self._body_placeholder())
+        self.query_one(_SEL_ONB_BODY, Static).update(self._body_placeholder())
         # Футер здесь НЕ обновляем: он описывает тело, которого ещё нет. Посчитанный
         # до монтажа, он видит одну группу вместо двух и молчит про Tab ровно там, где
         # тот нужен, — «поля вижу, войти нечем». Его обновляет сам `_mount_step_body`.
@@ -759,10 +967,13 @@ class OnboardingScreen(Screen):
         submit() этого не различает и на пустом поле в create_mode всегда отдаёт header=None —
         доразличаем сами по сырому значению файла/уже собранному в _values."""
         from gc_tui.editors.connection import ConnectionEditor
+
         ed = self.query_one(ConnectionEditor)
         url, header, error, proxy = ed.submit()
         if error is not None:
-            self._probe_gen += 1   # обесценить летящую пробу — не даём ей затереть ошибку
+            self._probe_gen += (
+                1  # обесценить летящую пробу — не даём ей затереть ошибку
+            )
             self._set_conn_probe_line(Text(error, style=WARN))
             return
         _url, _auth_idx, token_raw, _proxy = ed.peek()
@@ -776,7 +987,9 @@ class OnboardingScreen(Screen):
             if active is None:
                 active = raw.get("Authorization")
             if not active or active == onboarding.TOKEN_SENTINEL:
-                self._values["Authorization"] = ""   # честное «без авторизации» (Task 8)
+                self._values["Authorization"] = (
+                    ""  # честное «без авторизации» (Task 8)
+                )
             # иначе авторизация уже действует (в т.ч. ссылка ${ENV:...}/${FILE:...}), а
             # поле не тронуто — писать нечего, ссылка/секрет остаются как в файле.
         if proxy is not None:
@@ -787,18 +1000,20 @@ class OnboardingScreen(Screen):
         """Enter на шаге модели — двухролевой: строка под курсором не помечена → Enter
         её фиксирует (● переезжает, шаг тот же); помечена (или помечать нечего) → далее."""
         from gc_tui.editors.model import ModelEditor
+
         ed = self.query_one(ModelEditor)
-        if ed.is_marked:                  # …в т.ч. «списка нет» — там метить не на чем
+        if ed.is_marked:  # …в т.ч. «списка нет» — там метить не на чем
             self._advance_model()
             return
         value = ed.mark()
         if value is None:
-            return       # ручной ввод пуст: помечать нечего — ждём ввода, шаг не прыгает
+            return  # ручной ввод пуст: помечать нечего — ждём ввода, шаг не прыгает
         self._values["model"] = value
         self._refresh_chrome()
 
     def _advance_model(self) -> None:
         from gc_tui.editors.model import ModelEditor
+
         value = self.query_one(ModelEditor).submit()
         if value is not None:
             self._values["model"] = value
@@ -814,10 +1029,14 @@ class OnboardingScreen(Screen):
         витрин шага): по ней не стучимся, а ведём себя как на чистой установке —
         адреса нет, списка нет, остаётся ручной ввод."""
         endpoint = onboarding.configured_endpoint(
-            self._values.get("completions_url") or (self._config or {}).get("completions_url"))
+            self._values.get("completions_url")
+            or (self._config or {}).get("completions_url")
+        )
         auth = self._values.get("Authorization")
         if auth is None:
-            auth = ((self._config or {}).get("chat_completion_headers") or {}).get("Authorization")
+            auth = (
+                (self._config or {}).get("chat_completion_headers") or {}
+            ).get("Authorization")
         if auth == onboarding.TOKEN_SENTINEL:
             auth = None
         return endpoint, auth
@@ -828,31 +1047,64 @@ class OnboardingScreen(Screen):
             # Воздух отделяет вопрос от строк-ответов, а сами строки идут вплотную —
             # грамматика блока настроек (`.set-hint` + `.set-row` без margin): плотный
             # список читается как один выбор, разреженный — как отдельные пункты.
-            body.mount(Static(_of.LEVELS_QUESTION, classes="onb-hint onb-dyn set-spaced",
-                              markup=False))
+            body.mount(
+                Static(
+                    _of.LEVELS_QUESTION,
+                    classes="onb-hint onb-dyn set-spaced",
+                    markup=False,
+                )
+            )
             for i, level in enumerate(_LEVEL_ROWS):
-                cls = "onb-option onb-dyn" + (" selected" if i == self._levels_idx else "")
-                body.mount(Static(self._level_row_text(i == self._levels_idx, level),
-                                  classes=cls))
+                cls = "onb-option onb-dyn" + (
+                    _CLS_SELECTED if i == self._levels_idx else ""
+                )
+                body.mount(
+                    Static(
+                        self._level_row_text(i == self._levels_idx, level),
+                        classes=cls,
+                    )
+                )
             cont = Text()
-            cont.append("▸ " if self._levels_on_continue() else "  ", style=ACCENT)
+            cont.append(
+                "▸ " if self._levels_on_continue() else "  ", style=ACCENT
+            )
             cont.append(_LEVELS_CONTINUE_LABEL, style=DIM)
-            body.mount(Static(cont, classes="onb-option onb-dyn"
-                              + (" selected" if self._levels_on_continue() else "")))
+            body.mount(
+                Static(
+                    cont,
+                    classes="onb-option onb-dyn"
+                    + (_CLS_SELECTED if self._levels_on_continue() else ""),
+                )
+            )
             return
         from gc_tui.editors.model import ModelEditor
+
         level = self._levels_stage
-        body.mount(Static(_of.LEVEL_FORM_LABEL[level], classes="onb-hint onb-dyn", markup=False))
+        body.mount(
+            Static(
+                _of.LEVEL_FORM_LABEL[level],
+                classes="onb-hint onb-dyn",
+                markup=False,
+            )
+        )
         endpoint, auth = self._endpoint_auth()
         current = self._level_value(level)
         # Тот же редактор, что на шаге «Модель», со своим id поля (иначе два поля с
         # одним id в одном дереве). url/токен не переспрашиваются — записи реестра
         # наследуют их от плоского подключения (решение 10 плана).
-        body.mount(ModelEditor(current=current, endpoint=endpoint, auth=auth,
-                               verify=bool((self._config or {}).get("use_ssl", True)),
-                               fetch=self._fetch, input_id="onb-level-model",
-                               on_loaded=self._refresh_footer, active=current,
-                               config_proxy=self._effective_proxy() or None))
+        body.mount(
+            ModelEditor(
+                current=current,
+                endpoint=endpoint,
+                auth=auth,
+                verify=(self._config or {}).get("use_ssl", True),
+                fetch=self._fetch,
+                input_id="onb-level-model",
+                on_loaded=self._refresh_footer,
+                active=current,
+                config_proxy=self._effective_proxy() or None,
+            )
+        )
 
     def _level_row_text(self, is_cursor: bool, level: str) -> Text:
         """Строка уровня — грамматика строк слотов секции «Модели»
@@ -864,6 +1116,7 @@ class OnboardingScreen(Screen):
         `/level` и слоты секции «Модели». Собирать её здесь заново значило бы
         показывать одну сущность на одном экране двумя способами."""
         from gc_tui.editors.models_section import slot_head, slot_head_text
+
         value = self._level_value(level)
         width = max(len(slot_head(name)) for name in _LEVEL_ROWS) + 2
         t = Text()
@@ -895,13 +1148,14 @@ class OnboardingScreen(Screen):
             self._render_step()
             return
         from gc_tui.editors.model import ModelEditor
+
         ed = self.query_one(ModelEditor)
-        if ed.is_marked:                  # …в т.ч. «списка нет» — там метить не на чем
+        if ed.is_marked:  # …в т.ч. «списка нет» — там метить не на чем
             self._close_level_form(take_value=True)
             return
         value = ed.mark()
         if value is None:
-            return       # ручной ввод пуст: помечать нечего — ждём ввода, форма стоит
+            return  # ручной ввод пуст: помечать нечего — ждём ввода, форма стоит
         self._values[onboarding.MODEL_SLOT_KEYS[self._levels_stage]] = value
         self._refresh_footer()
 
@@ -912,20 +1166,25 @@ class OnboardingScreen(Screen):
         оставаться отказом."""
         if take_value:
             from gc_tui.editors.model import ModelEditor
+
             value = self.query_one(ModelEditor).submit()
             if value:
-                self._values[onboarding.MODEL_SLOT_KEYS[self._levels_stage]] = value
+                self._values[
+                    onboarding.MODEL_SLOT_KEYS[self._levels_stage]
+                ] = value
         self._levels_stage = "ask"
         self._render_step()
 
-    _DESC_COL = 50   # то же значение, что McpSectionEditor._row_text в /settings (согласованность)
+    _DESC_COL = 50  # то же значение, что McpSectionEditor._row_text в /settings (согласованность)
 
     def _mcp_row_text(self, is_cursor: bool, name: str) -> Text:
         """Строка MCP: курсор ▸ + чекбокс/статус + имя + приглушённое описание (тот же
         источник, что /settings). Уже подключённые (wired в config.local.yml) — [✓] «подключён» (тускло)."""
         t = Text()
         t.append("▸ " if is_cursor else "  ", style=ACCENT)
-        desc = self._mcp_desc.get(name, "") if hasattr(self, "_mcp_desc") else ""
+        desc = (
+            self._mcp_desc.get(name, "") if hasattr(self, "_mcp_desc") else ""
+        )
         if name in self._mcp_installed:
             t.append("[✓] ", style=OK)
             t.append(name, style=DEEP_DIM)
@@ -975,7 +1234,7 @@ class OnboardingScreen(Screen):
         cur = self._idx.get(STEP_MCP, 0)
         name = names[cur]
         if name in self._mcp_installed:
-            return   # уже подключён — не переключаем
+            return  # уже подключён — не переключаем
         if name in self._mcp_selected:
             self._mcp_selected.discard(name)
         else:
@@ -988,12 +1247,14 @@ class OnboardingScreen(Screen):
     def _voice_installed(self) -> bool:
         try:
             from gc_tui.voice_runtime.state import load_state
+
             return load_state() is not None
         except Exception:
             return False
 
-    def _voice_row_left(self, is_cursor: bool, key: str, title: str, *,
-                        installed: bool) -> Text:
+    def _voice_row_left(
+        self, is_cursor: bool, key: str, title: str, *, installed: bool
+    ) -> Text:
         """Левая часть строки-опции: курсор, кружок, название и статус."""
         t = Text()
         t.append("▸ " if is_cursor else "  ", style=ACCENT)
@@ -1008,12 +1269,23 @@ class OnboardingScreen(Screen):
         """Колонка описаний шага — по самой длинной левой части, а не константой:
         статус «установлен» появляется только у локальной строки и только когда сервис
         стоит. С фиксированной колонкой описания повисали бы в пустоте, пока его нет."""
-        widest = max(self._voice_row_left(False, key, title, installed=installed).cell_len
-                     for key, title, _ in _VOICE_OPTIONS)
+        widest = max(
+            self._voice_row_left(
+                False, key, title, installed=installed
+            ).cell_len
+            for key, title, _ in _VOICE_OPTIONS
+        )
         return widest + 2
 
-    def _voice_row_text(self, is_cursor: bool, key: str, title: str, desc: str,
-                        *, installed: bool) -> Text:
+    def _voice_row_text(
+        self,
+        is_cursor: bool,
+        key: str,
+        title: str,
+        desc: str,
+        *,
+        installed: bool,
+    ) -> Text:
         """Строка опции голосового шага — тот же язык, что _mcp_row_text."""
         t = self._voice_row_left(is_cursor, key, title, installed=installed)
         if key == "local":
@@ -1037,6 +1309,7 @@ class OnboardingScreen(Screen):
     def _voice_cost_text(self) -> str:
         """Чем локальный сервис занят и какой моделью."""
         from gc_tui.voice_runtime.state import current_model_short
+
         return f"{current_model_short()} · {_VOICE_LOCAL_COST}"
 
     def _prefill_voice_from_config(self) -> None:
@@ -1061,10 +1334,10 @@ class OnboardingScreen(Screen):
         try:
             snap = self._voice_setup.status_cheap(self._config or {})
         except Exception:
-            return                      # состояние недоступно — ведём себя как раньше
+            return  # состояние недоступно — ведём себя как раньше
         mode = getattr(snap, "mode", "off")
         if mode not in ("local", "cloud"):
-            return                      # ничего не настроено — первичный сценарий, дефолт
+            return  # ничего не настроено — первичный сценарий, дефолт
         self._voice_choice = mode
         for i, (key, _title, _desc) in enumerate(_VOICE_OPTIONS):
             if key == mode:
@@ -1090,6 +1363,7 @@ class OnboardingScreen(Screen):
         if not self._config_path:
             return {}
         from gc_core import config_raw
+
         return config_raw.read_document(self._config_path).get("voice") or {}
 
     def _raw_conn(self) -> dict:
@@ -1106,13 +1380,20 @@ class OnboardingScreen(Screen):
             return {}
         from gc_core import config_raw
         from gc_core.onboarding import FIELD_ANCHOR_PATHS
-        values = config_raw.read_values(self._config_path, (FIELD_ANCHOR_PATHS[k] for k in keys))
+
+        values = config_raw.read_values(
+            self._config_path, (FIELD_ANCHOR_PATHS[k] for k in keys)
+        )
         return {k: values[FIELD_ANCHOR_PATHS[k]] for k in keys}
 
     def _voice_verify_ssl(self):
         """voice.verify_ssl ДЕЙСТВУЮЩЕГО конфига (тот же приём, что
         `SettingsScreen._voice_verify_ssl`) или True — проверять сертификат по умолчанию."""
-        voice = self._config.get("voice") if isinstance(self._config, dict) else None
+        voice = (
+            self._config.get("voice")
+            if isinstance(self._config, dict)
+            else None
+        )
         if not isinstance(voice, dict) or "verify_ssl" not in voice:
             return True
         return voice["verify_ssl"]
@@ -1138,39 +1419,53 @@ class OnboardingScreen(Screen):
         заодно и подтверждение, что связка рабочая. `url_presets` — тот же список
         пресетов СТТ-адресов (спека 2026-08-05 §3), что у /settings: поле «URL»
         получает свой раскрывающийся список ровно тем же путём, что «Модель»."""
-        from gc_tui.editors.voice_endpoint import VoiceEndpointEditor
+        from gc_core.config_modules.voice_endpoint_presets import (
+            voice_endpoint_presets_from_config,
+        )
         from gc_core.onboarding import display_secret
-        from gc_core.config_modules.voice_endpoint_presets import voice_endpoint_presets_from_config
+
+        from gc_tui.editors.voice_endpoint import VoiceEndpointEditor
+
         # Сохранённый токен не подставляем (секрет), но и молчать нельзя — маска в
         # placeholder, пустое поле значит «оставить сохранённый» (канон /settings).
         raw_token = self._voice_raw_cloud().get("token")
-        placeholders = {"token": display_secret(raw_token)} if raw_token else None
+        placeholders = (
+            {"token": display_secret(raw_token)} if raw_token else None
+        )
         # Фокуса на монтировании нет: поля — вторая ГРУППА шага (спека §4.1), и курсор
         # входит в неё только по Tab. Забрать фокус сразу значило бы вернуть рассинхрон
         # «фокус в поле, курсор в вариантах» — печать и Space доставались бы полю, а
         # стрелки при этом двигали бы строки режима.
-        body.mount(VoiceEndpointEditor(values=self._voice_cloud,
-                                       fields=_VOICE_FIELD_KEYS,
-                                       autofocus=False,
-                                       fetch=self._voice_setup.list_models,
-                                       # Пустое поле токена в списке моделей значит
-                                       # «сохранённый» (тот же канон, что при коммите) —
-                                       # без него запрос на рабочем облаке 401-ит.
-                                       saved_token=str(raw_token or ""),
-                                       placeholders=placeholders,
-                                       # TLS/прокси запроса за списком — тот же канон,
-                                       # что /settings (`SettingsScreen._mount_voice_section`):
-                                       # без них список уходит с verify=True мимо
-                                       # backend.proxy, и в корп-сети (self-signed TLS,
-                                       # обязательный прокси) рабочий endpoint выглядит
-                                       # как «не удалось получить список».
-                                       verify_ssl=self._voice_verify_ssl(),
-                                       config_proxy=self._effective_proxy() or None,
-                                       # Пресеты СТТ-адресов (спека 2026-08-05 §3) — тот же
-                                       # источник, что у /settings: дефолты (OpenAI/Groq/
-                                       # Mistral) или кастомизация из config.yml.
-                                       url_presets=voice_endpoint_presets_from_config(
-                                           self._config or {})))
+        body.mount(
+            VoiceEndpointEditor(
+                values=self._voice_cloud,
+                fields=_VOICE_FIELD_KEYS,
+                autofocus=False,
+                fetch=self._voice_setup.list_models,
+                # Пустое поле токена в списке моделей значит
+                # «сохранённый» (тот же канон, что при коммите) —
+                # без него запрос на рабочем облаке 401-ит.
+                saved_token=str(raw_token or ""),
+                placeholders=placeholders,
+                # TLS/прокси запроса за списком — тот же канон,
+                # что /settings (`SettingsScreen._mount_voice_section`):
+                # без них список уходит с verify=True мимо
+                # backend.proxy, и в корп-сети (self-signed TLS,
+                # обязательный прокси) рабочий endpoint выглядит
+                # как «не удалось получить список».
+                verify_ssl=self._voice_verify_ssl(),
+                config_proxy=self._effective_proxy() or None,
+                # Пресеты СТТ-адресов (спека 2026-08-05 §3) — тот же
+                # источник, что у /settings: дефолты (OpenAI/Groq/
+                # Mistral) или кастомизация из config.yml.
+                url_presets=voice_endpoint_presets_from_config(
+                    self._config or {}
+                ),
+                save_hint=False,
+                closed_list_hint="Alt+↓ — показать список",
+                closed_model_hint="Alt+↓ — перечитать список",
+            )
+        )
 
     def _voice_endpoint_editor(self):
         """Редактор полей «Своего endpoint» или None (не тот шаг / поля свёрнуты).
@@ -1183,6 +1478,7 @@ class OnboardingScreen(Screen):
         if self._step_id() != STEP_VOICE:
             return None
         from gc_tui.editors.voice_endpoint import VoiceEndpointEditor
+
         eds = list(self.query(VoiceEndpointEditor))
         return eds[-1] if eds else None
 
@@ -1210,6 +1506,7 @@ class OnboardingScreen(Screen):
         до одного поля и молчала бы про второе. `_key_of_input` — тот же приём, что
         внутри `VoiceEndpointEditor.on_input_changed`."""
         from gc_tui.editors.voice_endpoint import _key_of_input
+
         return _key_of_input(getattr(self.focused, "id", None))
 
     def _voice_focused_list(self):
@@ -1218,7 +1515,11 @@ class OnboardingScreen(Screen):
         (Esc/стрелки/Enter раскрытого списка — Ctrl+Space он больше не забирает,
         спека 2026-08-06 §2.2) и футера — оба обязаны видеть один и тот же список."""
         ed = self._voice_endpoint_editor()
-        return ed.list_for(self._voice_focused_field_key()) if ed is not None else None
+        return (
+            ed.list_for(self._voice_focused_field_key())
+            if ed is not None
+            else None
+        )
 
     def on_descendant_focus(self, event) -> None:
         """Клик мышью по полю — это тоже перемещение курсора (спека §4.3, канон
@@ -1228,28 +1529,36 @@ class OnboardingScreen(Screen):
         Он же раскрывает список поля: фокус приходит и от `focus_field` ленты, и от
         мыши, и правило у обоих одно — список раскрыт там, где стоит курсор."""
         from gc_tui.editors.voice_endpoint import _FIELDS
+
         keys = self._voice_field_keys()
         wid = getattr(event.widget, "id", None)
         key = next((k for k in keys if _FIELDS[k][1] == wid), None)
         if key is None:
-            return                         # фокус не в полях шага — нам нечего сводить
+            return  # фокус не в полях шага — нам нечего сводить
         self._voice_group = _VOICE_GROUP_FIELDS
         self._voice_field_idx = keys.index(key)
-        self._voice_refresh_rows()         # курсор в полях — подсветка строки гаснет
+        self._voice_refresh_rows()  # курсор в полях — подсветка строки гаснет
         self._sync_voice_field_lists()
-        self._refresh_footer()             # мышь сменила группу — клавиши места с ней
+        self._refresh_footer()  # мышь сменила группу — клавиши места с ней
 
     # --- группы курсора шага голоса (спека §4) ---
     def _voice_groups(self) -> tuple:
         """Группы шага: строки режима — всегда, поля «Своего endpoint» — пока они
         показаны (живут под своей опцией, см. `_voice_cursor_is_cloud`)."""
-        if self._voice_cursor_is_cloud() and self._voice_endpoint_editor() is not None:
+        if (
+            self._voice_cursor_is_cloud()
+            and self._voice_endpoint_editor() is not None
+        ):
             return (_VOICE_GROUP_VARIANTS, _VOICE_GROUP_FIELDS)
         return (_VOICE_GROUP_VARIANTS,)
 
     def _voice_field_keys(self) -> tuple:
         """Поля, по которым ходит курсор группы полей (пусто — полей на экране нет)."""
-        return _VOICE_FIELD_KEYS if self._voice_endpoint_editor() is not None else ()
+        return (
+            _VOICE_FIELD_KEYS
+            if self._voice_endpoint_editor() is not None
+            else ()
+        )
 
     def _voice_cursor_group(self) -> str:
         """Где сейчас курсор: "variants" или "fields". Одно место правды — иначе
@@ -1257,7 +1566,11 @@ class OnboardingScreen(Screen):
         они врут при клике мышью и при пустой группе. Хранимая группа сверяется с
         наличными: поля исчезают вместе с уходом курсора со «Своего endpoint»."""
         groups = self._voice_groups()
-        return self._voice_group if self._voice_group in groups else _VOICE_GROUP_VARIANTS
+        return (
+            self._voice_group
+            if self._voice_group in groups
+            else _VOICE_GROUP_VARIANTS
+        )
 
     def _voice_field_position(self) -> int:
         """Позиция в группе полей, зажатая в её границы (спека §4.2.1): набор полей
@@ -1288,8 +1601,10 @@ class OnboardingScreen(Screen):
         cur = groups.index(self._voice_cursor_group())
         self._voice_group = groups[(cur + delta) % len(groups)]
         if self._voice_group == _VOICE_GROUP_FIELDS:
-            self._voice_field_idx = self._voice_field_position()   # запомненную — в границы
-        self._voice_refresh_rows()     # курсор сменил группу — подсветка уходит за ним
+            self._voice_field_idx = (
+                self._voice_field_position()
+            )  # запомненную — в границы
+        self._voice_refresh_rows()  # курсор сменил группу — подсветка уходит за ним
         self._sync_voice_focus()
 
     def _move_voice_field(self, delta: int) -> None:
@@ -1298,7 +1613,9 @@ class OnboardingScreen(Screen):
         keys = self._voice_field_keys()
         if not keys:
             return
-        self._voice_field_idx = (self._voice_field_position() + delta) % len(keys)
+        self._voice_field_idx = (self._voice_field_position() + delta) % len(
+            keys
+        )
         self._sync_voice_focus()
 
     def _sync_voice_field_lists(self) -> None:
@@ -1347,8 +1664,14 @@ class OnboardingScreen(Screen):
         highlight = self._voice_highlight_variants()
         for i, w in enumerate(self.query(".onb-voice-row")):
             key, title, desc = _VOICE_OPTIONS[i]
-            w.update(self._voice_row_text(i == cur, key, title, desc, installed=installed))
-            (w.add_class if i == cur and highlight else w.remove_class)("selected")
+            w.update(
+                self._voice_row_text(
+                    i == cur, key, title, desc, installed=installed
+                )
+            )
+            (w.add_class if i == cur and highlight else w.remove_class)(
+                "selected"
+            )
 
     def _voice_body_shape(self) -> tuple:
         """Что показано под строками опций: поля endpoint и/или цена локального сервиса.
@@ -1360,10 +1683,10 @@ class OnboardingScreen(Screen):
         n = len(_VOICE_OPTIONS)
         was_shape = self._voice_body_shape()
         if self._voice_cursor_is_cloud():
-            self._capture_voice_fields()   # набранное — в черновик до того, как поля уйдут
+            self._capture_voice_fields()  # набранное — в черновик до того, как поля уйдут
         self._idx[STEP_VOICE] = (self._idx.get(STEP_VOICE, 0) + delta) % n
         if was_shape != self._voice_body_shape():
-            self._render_step()            # состав тела сменился: добавка пришла/ушла
+            self._render_step()  # состав тела сменился: добавка пришла/ушла
             return
         self._voice_refresh_rows()
         self._sync_voice_focus()
@@ -1381,12 +1704,13 @@ class OnboardingScreen(Screen):
         else:
             self.set_focus(None)
         self._sync_voice_field_lists()
-        self._refresh_footer()   # группа и список меняют клавиши места — футер после них
+        self._refresh_footer()  # группа и список меняют клавиши места — футер после них
 
     def _capture_voice_fields(self) -> None:
         """Снять набранное из полей endpoint без валидации: перевыбор другой опции
         сворачивает поля, и вернувшийся на endpoint человек должен увидеть свой URL."""
         from gc_tui.editors.voice_endpoint import VoiceEndpointEditor
+
         for ed in self.query(VoiceEndpointEditor):
             self._voice_cloud = {**self._voice_cloud, **ed.values()}
             if ed.token_cleared:
@@ -1403,7 +1727,7 @@ class OnboardingScreen(Screen):
         фокус не сводит: сведение раскрыло бы список поля под курсором, и свёрнутый
         Esc'ом список возвращался бы сам."""
         if self._voice_cursor_is_cloud():
-            self._capture_voice_fields()      # черновик догоняет набранное
+            self._capture_voice_fields()  # черновик догоняет набранное
         self._voice_choice = _VOICE_OPTIONS[self._idx.get(STEP_VOICE, 0)][0]
         self._voice_refresh_rows()
         self._refresh_chrome()
@@ -1429,7 +1753,7 @@ class OnboardingScreen(Screen):
         key = self._voice_choice or _VOICE_OPTIONS[cur][0]
         if key == "cloud":
             if self._voice_choice != "cloud":
-                self._voice_mark()           # первый такт: пометить, поля уже под курсором
+                self._voice_mark()  # первый такт: пометить, поля уже под курсором
                 return
             if not self._voice_cursor_is_cloud():
                 # Выбор — cloud, но курсор сейчас на другой опции: поля endpoint не
@@ -1445,18 +1769,21 @@ class OnboardingScreen(Screen):
                 return
             editor = self._voice_endpoint_editor()
             if editor is None:
-                return                          # редактора нет — сабмитить нечего
+                return  # редактора нет — сабмитить нечего
             ok, vals = editor.submit()
             if not ok:
-                return                          # ошибка URL показана внутри редактора
+                return  # ошибка URL показана внутри редактора
             # Черновик хранит СЫРОЕ введённое (пусто — значит пусто): токен — секрет,
             # который поле намеренно не показывает (см. префилл), и подстановка
             # сохранённого не имеет права осесть здесь — иначе она материализуется в
             # поле при возврате на шаг. Фолбэк «пустое значит оставить сохранённый»
             # (канон «Подключения» — /settings._voice_cloud_save) — в _commit_config,
             # там же, где собирается запись.
-            self._voice_cloud = {"url": vals["url"], "token": vals["token"],
-                                 "model": vals["model"]}
+            self._voice_cloud = {
+                "url": vals["url"],
+                "token": vals["token"],
+                "model": vals["model"],
+            }
             self._advance()
             return
         self._voice_choice = key
@@ -1474,7 +1801,7 @@ class OnboardingScreen(Screen):
             return
         snapshot = ed.probe_snapshot()
         if not snapshot[0] or snapshot == self._last_probed_snapshot:
-            return          # адреса нет либо ровно это уже проверено (или проверяется)
+            return  # адреса нет либо ровно это уже проверено (или проверяется)
         self._auto_probe()
 
     def _auto_probe(self) -> None:
@@ -1505,52 +1832,83 @@ class OnboardingScreen(Screen):
             # Резолв даст "" — стрелять пробой в пустой адрес нечестно: под
             # визуально заполненным полем проба соврала бы «нет соединения»/
             # «пустой адрес», как будто сломан сам мастер.
-            self._probe_gen += 1   # обесценить летящую пробу
-            self._set_conn_probe_line(Text(f"⚠ {onboarding.display_value(url)}", style=WARN))
+            self._probe_gen += 1  # обесценить летящую пробу
+            self._set_conn_probe_line(
+                Text(f"⚠ {onboarding.display_value(url)}", style=WARN)
+            )
             return
         if token_raw:
-            auth = onboarding.authorization_header(token_raw)
+            auth = token_raw  # сырой — probe_connection перебирает формы
         elif ed.token_cleared:
-            auth = None                  # Ctrl+U: сохранённый стёрт ещё до записи
+            auth = None  # Ctrl+U: сохранённый стёрт ещё до записи
         else:
             auth = self._values.get("Authorization")
             if auth is None:
-                auth = (self._config.get("chat_completion_headers") or {}).get("Authorization")
+                auth = (self._config.get("chat_completion_headers") or {}).get(
+                    "Authorization"
+                )
         if auth == onboarding.TOKEN_SENTINEL:
             auth = None
-        verify = bool((self._config or {}).get("use_ssl", True))
+        verify = (self._config or {}).get("use_ssl", True)
         self._probe_gen += 1
         gen = self._probe_gen
         self._set_conn_probe_line(Text("проверяю…", style=DEEP_DIM))
 
         def _work() -> None:
-            from gc_core.config_modules.env_interpolation import resolve_env_placeholders
+            from gc_core.config_modules.env_interpolation import (
+                resolve_env_placeholders,
+            )
+
             from gc_tui.services.settings_probe import ProbeResult
+
             probe_url = resolve_env_placeholders(url)
             probe_auth = resolve_env_placeholders(auth) if auth else auth
             probe_proxy = resolve_env_placeholders(proxy) if proxy else proxy
             config_proxy = probe_proxy or None
             try:
-                result = self._run_connection_probe(probe_url, probe_auth, verify,
-                                                    config_proxy)
+                result = self._run_connection_probe(
+                    probe_url, probe_auth, verify, config_proxy
+                )
             except Exception as exc:
-                result = ProbeResult("unknown", None, None, 0, f"внутренняя ошибка проверки: {exc}")
+                result = ProbeResult(
+                    "unknown",
+                    None,
+                    None,
+                    0,
+                    f"внутренняя ошибка проверки: {exc}",
+                )
             self.app.call_from_thread(self._on_auto_probe_done, result, gen)
 
-        self.run_worker(_work, thread=True, exclusive=True, name="onboarding-conn-probe")
+        self.run_worker(
+            _work, thread=True, exclusive=True, name="onboarding-conn-probe"
+        )
 
-    def _run_connection_probe(self, url: str, auth, verify: bool, config_proxy):
+    def _run_connection_probe(
+        self, url: str, auth, verify: bool | str, config_proxy
+    ):
         """Вердикт шага «Подключение» — той же differential-пробой, что в /settings:
         иначе мастер и настройки скажут про один сервер разное. Вынесен из воркера
         отдельным методом, чтобы проверяться без потока."""
         from gc_tui.services.settings_probe import probe_connection
-        return probe_connection(url, auth, verify, "", config_proxy=config_proxy,
-                                probe_fn=self._probe_fn)
+
+        return probe_connection(
+            url,
+            auth,
+            verify,
+            "",
+            config_proxy=config_proxy,
+            probe_fn=self._probe_fn,
+        )
 
     def _on_auto_probe_done(self, result, gen: int) -> None:
         if gen != self._probe_gen or not self.is_mounted:
-            return                       # протухший результат (правка/переход обесценили)
+            return  # протухший результат (правка/переход обесценили)
         from gc_tui.services.probe_presentation import connection_line_text
+
+        if result.auth_state == "accepted":
+            ed = self._connection_editor()
+            if ed is not None and ed.apply_accepted_auth(result.accepted_auth):
+                self._last_probed_snapshot = ed.probe_snapshot()
         self._set_conn_probe_line(connection_line_text(result))
 
     def _set_conn_probe_line(self, text) -> None:
@@ -1584,29 +1942,37 @@ class OnboardingScreen(Screen):
             # /settings._voice_cloud_save), а не «стереть»: без подстановки запись
             # стёрла бы рабочий секрет. Фолбэк — только здесь, у самой записи.
             # Ctrl+U — исключение из фолбэка: там пустота осознанная, и секрет уходит.
-            values["voice.token"] = (
-                self._voice_cloud["token"]
-                or ("" if self._voice_token_cleared
-                    else str(self._voice_raw_cloud().get("token") or "")))
+            values["voice.token"] = self._voice_cloud["token"] or (
+                ""
+                if self._voice_token_cleared
+                else str(self._voice_raw_cloud().get("token") or "")
+            )
             values["voice.model"] = self._voice_cloud["model"]
         try:
             missing = onboarding.write_wizard_values(
-                self._config_path, values,
-                deactivate_profile=self._deactivate_profile)
+                self._config_path,
+                values,
+                deactivate_profile=self._deactivate_profile,
+            )
         except onboarding.PartialWriteError as exc:
             # Часть записи уже на диске — то же правило, что у ветки `missing` ниже:
             # нетронутый файл не обещаем. ЧТО именно легло, знает только писатель
             # (`written`): своя редакция состава называла реестр и там, где ушёл один
             # указатель профиля, — человек оставался уверен, что профиль активен,
             # пока следующий старт не шёл без него. Слова — общие с плоским мастером.
-            self.query_one("#onb-body", Static).update(
+            self.query_one(_SEL_ONB_BODY, Static).update(
                 f"✗ остальное не записано: {exc} — при этом уже: "
-                + ", ".join(_of.LANDED_WORDS.get(name, name) for name in exc.written))
+                + ", ".join(
+                    _of.LANDED_WORDS.get(name, name) for name in exc.written
+                )
+            )
             return False
         except (ValueError, OSError) as exc:
             # OSError — штатный отказ записи (диск, права, win-лок открытого
             # файла): мимо перехвата он ронял весь Textual (ревью L33).
-            self.query_one("#onb-body", Static).update(f"✗ конфиг не записан: {exc}")
+            self.query_one(_SEL_ONB_BODY, Static).update(
+                f"✗ конфиг не записан: {exc}"
+            )
             return False
         if missing:
             # Непустой список значит, что ПЛОСКАЯ запись не состоялась целиком
@@ -1614,10 +1980,11 @@ class OnboardingScreen(Screen):
             # ОТДЕЛЬНОЙ транзакцией и первыми, поэтому обещать «конфиг не записан»
             # нельзя: человек пошёл бы искать нетронутый файл, а там уже модели.
             # Называем ровно то, чего не хватает.
-            self.query_one("#onb-body", Static).update(
-                f"✗ не записаны поля: {', '.join(missing)} — впишите их в конфиг вручную")
+            self.query_one(_SEL_ONB_BODY, Static).update(
+                f"✗ не записаны поля: {', '.join(missing)} — впишите их в конфиг вручную"
+            )
             return False
-        self.query_one("#onb-body", Static).update("✓ конфиг записан")
+        self.query_one(_SEL_ONB_BODY, Static).update("✓ конфиг записан")
         return True
 
     def _commit(self) -> None:
@@ -1628,6 +1995,7 @@ class OnboardingScreen(Screen):
             # перекрыл бы только что записанный юзерский voice — снимаем его, как это
             # делает /settings через voice_setup.wire_cloud (тот же канон).
             from gc_tui.voice_runtime.wire import unwire_voice
+
             try:
                 unwire_voice()
             except Exception:
@@ -1654,20 +2022,24 @@ class OnboardingScreen(Screen):
 
         def _work() -> None:
             from gc_tui.voice_runtime.autostart import ensure_voice_service
+
             try:
                 ok = ensure_voice_service(cfg)
             except Exception:
                 ok = False
             try:
                 if ok:
-                    app.call_from_thread(app.notify, "голосовой ввод готов — Ctrl+T")
+                    app.call_from_thread(
+                        app.notify, "голосовой ввод готов — Ctrl+T"
+                    )
                 else:
                     app.call_from_thread(
                         app.notify,
                         "голосовой сервис не запустился — проверьте gc-voice status",
-                        severity="warning")
+                        severity="warning",
+                    )
             except Exception:
-                pass          # приложение уже закрылось — некому показывать
+                pass  # приложение уже закрылось — некому показывать
 
         app.run_worker(_work, thread=True, name="onboarding-voice-start")
 
@@ -1720,7 +2092,7 @@ class OnboardingScreen(Screen):
             return
         if self._step > 0:
             self._leave_step()
-            self._capture_voice_fields()   # черновик endpoint переживает уход назад
+            self._capture_voice_fields()  # черновик endpoint переживает уход назад
             self._step -= 1
             self._render_step()
 
@@ -1737,7 +2109,9 @@ class OnboardingScreen(Screen):
         elif step == STEP_MODEL:
             self._advance_model()
         elif self._level_form_open():
-            self._close_level_form(take_value=True)   # «далее» из под-формы — к списку уровней
+            self._close_level_form(
+                take_value=True
+            )  # «далее» из под-формы — к списку уровней
         elif step == STEP_VOICE:
             self._voice_advance()
         elif step != STEP_CONFIRM:
@@ -1752,8 +2126,11 @@ class OnboardingScreen(Screen):
                 self.app.exit()
 
         self.app.push_screen(
-            ConfirmScreen(message="Выйти из настройки? Введённые данные не сохранятся.",
-                          hint="[Y] выйти  [N] остаться", title="Выход из настройки"),
+            ConfirmScreen(
+                message="Выйти из настройки? Введённые данные не сохранятся.",
+                hint="[Y] выйти  [N] остаться",
+                title="Выход из настройки",
+            ),
             _cb,
         )
 
@@ -1767,10 +2144,22 @@ class OnboardingScreen(Screen):
         сворачивает список, как только совпадений не осталось, и раскрывает обратно,
         как только они появились), а футер шага именно от раскрытости списка и
         зависит (`_footer_text`)."""
-        if self._step_id() in _MARK_STEPS or self._step_id() == STEP_CONNECTION:
+        if self._step_id() == STEP_CONNECTION:
+            # Любая ручная правка подключения обесценивает летящую пробу и её
+            # снимок. Программная подстановка принятой формы использует
+            # `write_field`, поэтому сюда не попадает.
+            self._probe_gen += 1
+            self._last_probed_snapshot = None
+            self._refresh_footer()
+        elif self._step_id() in _MARK_STEPS:
             self._refresh_footer()
 
     def on_key(self, event: events.Key) -> None:
+        if event.key in ("up", "down"):
+            # Кадр едет за курсором шага; PgUp тут занят возвратом назад, а
+            # Home/End внутри поля принадлежат тексту — без этого вернуть кадр
+            # к логотипу и сводке было нечем.
+            reveal_focus(self)
         step = self._step_id()
         if event.key == "ctrl+u" and step == STEP_CONNECTION:
             # Очистка сохранённого токена — та же клавиша, что в /settings.
@@ -1780,6 +2169,8 @@ class OnboardingScreen(Screen):
             if ed is not None and ed.clear_token():
                 event.prevent_default()
                 event.stop()
+                self._probe_gen += 1
+                self._last_probed_snapshot = None
                 self._refresh_footer()
             return
         if event.key == "ctrl+u" and self._voice_clear_token():
@@ -1800,8 +2191,8 @@ class OnboardingScreen(Screen):
         if ctrl is not None and ctrl.is_open:
             if event.key == "escape":
                 event.stop()
-                ctrl.close()               # `close` сам скажет строкой, чем вернуть
-                self._refresh_footer()     # клавиши вернулись полю — футер тоже
+                ctrl.close()  # `close` сам скажет строкой, чем вернуть
+                self._refresh_footer()  # клавиши вернулись полю — футер тоже
                 return
             if event.key in ("up", "down"):
                 event.stop()
@@ -1811,9 +2202,9 @@ class OnboardingScreen(Screen):
                 event.stop()
                 ed = self._voice_endpoint_editor()
                 if ed is not None and key is not None:
-                    ed.pick_in(key)             # подставляет в поле и сворачивает список
-                self._capture_voice_fields()   # выбранное значение — в черновик шага
-                self._refresh_footer()         # список свернулся — футер снова про шаг
+                    ed.pick_in(key)  # подставляет в поле и сворачивает список
+                self._capture_voice_fields()  # выбранное значение — в черновик шага
+                self._refresh_footer()  # список свернулся — футер снова про шаг
                 return
         if event.key in ("alt+down", "ctrl+down"):
             # Развод клавиш (спека 2026-08-06 §2): раскрыть/перечитать список поля под
@@ -1826,13 +2217,14 @@ class OnboardingScreen(Screen):
             # выше в теле метода).
             if ctrl is not None and ctrl.reload():
                 event.stop()
-                self._refresh_footer()     # список раскрылся — клавиши теперь его
+                self._refresh_footer()  # список раскрылся — клавиши теперь его
                 return
             if step == STEP_MODEL or self._level_form_open():
                 # Поле со списком С СЕРВЕРА (§9.1 канона): свёртывания нет вовсе,
                 # клавиша всегда уходит за списком заново.
                 event.stop()
                 from gc_tui.editors.model import ModelEditor
+
                 ed = self.query(ModelEditor)
                 if ed:
                     ed.first().reload()
@@ -1843,8 +2235,11 @@ class OnboardingScreen(Screen):
                 _ed = self._connection_editor()
                 if _ed is not None and _ed.reload_presets():
                     event.stop()
-                    self._refresh_footer()   # клавиши теперь про список
-                return
+                    self._refresh_footer()  # клавиши теперь про список
+                    return
+            if event.key == "ctrl+down":
+                # Списку клавиша не понадобилась — она прокручивает тело.
+                self._scroll_body_key(event)
             return
         if event.key in ("ctrl+at", "ctrl+space", "ctrl+@"):
             # Развод §2 спеки 2026-08-06: клавиша больше не спрашивает список поля
@@ -1873,11 +2268,17 @@ class OnboardingScreen(Screen):
                 # В сам _auto_probe эта строка не идёт: для автопути (уход с поля,
                 # подстановка пресета) молчание правильно.
                 self._set_conn_probe_line(
-                    Text("сначала настройте адрес — проверка стучится на него",
-                         style=DEEP_DIM))
+                    Text(
+                        "сначала настройте адрес — проверка стучится на него",
+                        style=DEEP_DIM,
+                    )
+                )
                 return
             from gc_core import config_raw
-            if not onboarding._valid_endpoint_url(url) and not config_raw.env_refs(url):
+
+            if not onboarding._valid_endpoint_url(
+                url
+            ) and not config_raw.env_refs(url):
                 # §2.3: пока список раскрыт, в поле может лежать ФИЛЬТР, а не адрес —
                 # бить пробой по нему вслепую нечестно (то же правило, что в
                 # /settings «Подключение»).
@@ -1890,8 +2291,11 @@ class OnboardingScreen(Screen):
                 # честно ответить «переменной нет» (`env_ref_status`/`ENV_REF_MISSING`
                 # внутри неё) — не дублируем эту развилку тут.
                 self._set_conn_probe_line(
-                    Text("сначала выберите адрес — проверка стучится на него",
-                         style=DEEP_DIM))
+                    Text(
+                        "сначала выберите адрес — проверка стучится на него",
+                        style=DEEP_DIM,
+                    )
+                )
                 return
             self._auto_probe()
             return
@@ -1911,7 +2315,7 @@ class OnboardingScreen(Screen):
             ed = self._connection_editor()
             if ed is not None and ed.escape_presets():
                 event.stop()
-                self._refresh_footer()   # клавиши вернулись шагу — футер за ними
+                self._refresh_footer()  # клавиши вернулись шагу — футер за ними
                 return
         if event.key == "escape" and self._level_form_open():
             # То же правило вложенности для под-формы уровня: закрывается БЕЗ
@@ -1923,7 +2327,11 @@ class OnboardingScreen(Screen):
             event.stop()
             self._confirm_exit()
             return
-        if event.key in ("up", "down") and step == STEP_LEVELS and self._levels_stage == "ask":
+        if (
+            event.key in ("up", "down")
+            and step == STEP_LEVELS
+            and self._levels_stage == "ask"
+        ):
             event.stop()
             self._move_levels(-1 if event.key == "up" else 1)
             return
@@ -1937,13 +2345,17 @@ class OnboardingScreen(Screen):
                 return
             leaving_id = getattr(self.focused, "id", None)
             ed.move(-1 if event.key == "up" else 1)
-            if (leaving_id in ("conn-token", "conn-proxy")
-                    or (leaving_id == "conn-url" and not ed.presets_open)):
-                self._auto_probe_if_changed()   # уход с поля — авто-проба, если есть что проверять
-            self._refresh_footer()   # состав клавиш зависит от того, раскрыт ли список
+            if leaving_id in ("conn-token", "conn-proxy") or (
+                leaving_id == "conn-url" and not ed.presets_open
+            ):
+                self._auto_probe_if_changed()  # уход с поля — авто-проба, если есть что проверять
+            self._refresh_footer()  # состав клавиш зависит от того, раскрыт ли список
             return
-        if event.key in ("up", "down") and (step == STEP_MODEL or self._level_form_open()):
+        if event.key in ("up", "down") and (
+            step == STEP_MODEL or self._level_form_open()
+        ):
             from gc_tui.editors.model import ModelEditor
+
             ed = self.query(ModelEditor)
             if ed and ed.first().models_loaded and ed.first().has_models:
                 event.stop()
@@ -1978,11 +2390,11 @@ class OnboardingScreen(Screen):
             event.stop()
             if step == STEP_CONNECTION:
                 ed = self._connection_editor()
-                if ed is not None and ed.enter_presets():
+                if ed is not None and ed.enter_presets(open_closed=False):
                     # пресет-лист открыт — подставил/свернул, не сабмит; подстановка
                     # пресета — тоже триггер авто-пробы (спека §5.5).
                     self._auto_probe_if_changed()
-                    self._refresh_footer()   # список свернулся — футер снова про шаг
+                    self._refresh_footer()  # список свернулся — футер снова про шаг
                     return
                 self._submit_connection()
             elif step == STEP_MODEL:
@@ -1995,3 +2407,14 @@ class OnboardingScreen(Screen):
                 self._commit()
             else:
                 self._advance()
+            return
+        # Запасной вариант, ПОСЛЕ всех претендентов, — как в /settings: Ctrl+↓
+        # раскрывает список поля под курсором, и перехват сверху отнял бы у него
+        # клавишу; Ctrl+↓ без списка прокручивает тело там же, в ветке Alt+↓.
+        if event.key == "ctrl+up":
+            self._scroll_body_key(event)
+
+    def _scroll_body_key(self, event: events.Key) -> None:
+        """`Ctrl+↑`/`Ctrl+↓` — прокрутка тела шага страницами (обещана футером)."""
+        event.stop()
+        scroll_body(self, _SEL_ONB_SCROLL, -1 if event.key == "ctrl+up" else 1)

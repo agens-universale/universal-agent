@@ -20,17 +20,22 @@ _DEFAULT_BINARY_ALLOWED_EXTENSIONS = [
     ".jpeg",
 ]
 
+
 def validate_command_moderation_mode(raw_mode: Any) -> str:
     mode = str(raw_mode if raw_mode is not None else "deny").strip().lower()
     if mode not in ALLOWED_COMMAND_MODES:
-        raise ValueError("command_moderation.mode должен быть 'allow', 'ask' или 'deny'")
+        raise ValueError(
+            "command_moderation.mode должен быть 'allow', 'ask' или 'deny'"
+        )
     return mode
 
 
 def validate_read_guard_mode(raw_mode: Any) -> str:
     mode = str(raw_mode if raw_mode is not None else "deny").strip().lower()
     if mode not in ALLOWED_COMMAND_MODES:
-        raise ValueError("read_guard.mode должен быть 'allow', 'ask' или 'deny'")
+        raise ValueError(
+            "read_guard.mode должен быть 'allow', 'ask' или 'deny'"
+        )
     return mode
 
 
@@ -52,6 +57,7 @@ class WriteGuardConfig(BaseModel):
       ask   — нарушение → запрос подтверждения у пользователя (interactive);
       allow — нарушение → пропустить, audit log пометит `out_of_perimeter`.
     """
+
     model_config = ConfigDict(extra="forbid")
     enabled: bool = True
     mode: str = "ask"
@@ -62,7 +68,9 @@ class WriteGuardConfig(BaseModel):
     def validate_mode(cls, value: str) -> str:
         mode = str(value or "deny").strip().lower()
         if mode not in {"allow", "ask", "deny"}:
-            raise ValueError("security.write_guard.mode должен быть 'allow', 'ask' или 'deny'")
+            raise ValueError(
+                "security.write_guard.mode должен быть 'allow', 'ask' или 'deny'"
+            )
         return mode
 
 
@@ -75,10 +83,13 @@ class UrlPolicyConfig(BaseModel):
       ask   — нарушение → запрос подтверждения у пользователя (interactive);
       allow — нарушение → пропустить, audit log пометит `out_of_perimeter`.
     """
+
     model_config = ConfigDict(extra="forbid")
     enabled: bool = True
     mode: str = "ask"
-    allowed_schemes: list[str] = Field(default_factory=lambda: ["http", "https"])
+    allowed_schemes: list[str] = Field(
+        default_factory=lambda: ["http", "https"]
+    )
     url_blacklist: list[str] = Field(default_factory=list)
 
     @field_validator("mode")
@@ -86,7 +97,9 @@ class UrlPolicyConfig(BaseModel):
     def validate_mode(cls, value: str) -> str:
         mode = str(value or "deny").strip().lower()
         if mode not in {"allow", "ask", "deny"}:
-            raise ValueError("security.url_policy.mode должен быть 'allow', 'ask' или 'deny'")
+            raise ValueError(
+                "security.url_policy.mode должен быть 'allow', 'ask' или 'deny'"
+            )
         return mode
 
 
@@ -98,6 +111,7 @@ class ReadGuardConfig(BaseModel):
     Поля для бинарных файлов и size‑лимита присутствуют в схеме для
     forward‑compat, но в v1 не enforce'ятся (kept-for-future).
     """
+
     model_config = ConfigDict(extra="forbid")
     enabled: bool = True
     mode: str = "ask"
@@ -112,8 +126,12 @@ class ReadGuardConfig(BaseModel):
     # forward-compat: размер и бинарная политика (не enforce'ятся в v1).
     max_file_size_kb: int = 1024
     binary_read_policy: str = "ask"
-    binary_allowed_types: list[str] = Field(default_factory=lambda: list(_DEFAULT_BINARY_ALLOWED_TYPES))
-    binary_allowed_extensions: list[str] = Field(default_factory=lambda: list(_DEFAULT_BINARY_ALLOWED_EXTENSIONS))
+    binary_allowed_types: list[str] = Field(
+        default_factory=lambda: list(_DEFAULT_BINARY_ALLOWED_TYPES)
+    )
+    binary_allowed_extensions: list[str] = Field(
+        default_factory=lambda: list(_DEFAULT_BINARY_ALLOWED_EXTENSIONS)
+    )
 
     @field_validator("mode")
     @classmethod
@@ -133,6 +151,7 @@ class ReadGuardConfig(BaseModel):
 
 class DownloadConfig(BaseModel):
     """Настройки тула download_file: каталог загрузки и лимит размера тела ответа."""
+
     model_config = ConfigDict(extra="forbid")
     download_dir: str = "downloads"
     max_bytes: int = 52_428_800
@@ -146,6 +165,7 @@ class CommandModerationConfig(BaseModel):
     enabled=True + mode=allow — то же самое (без судьи).
     enabled=True + mode=ask/deny — судья активен.
     """
+
     model_config = ConfigDict(extra="forbid")
     enabled: bool = True
     mode: str = "ask"
@@ -168,6 +188,7 @@ class ProtectedPathsConfig(BaseModel):
     Floor-защита системных путей (enabled по умолчанию).
     extra — дополнительные пути, которые нельзя трогать.
     """
+
     model_config = ConfigDict(extra="forbid")
     enabled: bool = True
     extra: list[str] = Field(default_factory=list)
@@ -185,6 +206,7 @@ class SecurityConfig(BaseModel):
           download:           {download_dir, max_bytes}
           protected_paths:    {enabled, extra}
     """
+
     model_config = ConfigDict(extra="forbid")
     command_moderation: CommandModerationConfig = Field(
         default_factory=CommandModerationConfig
@@ -193,7 +215,9 @@ class SecurityConfig(BaseModel):
     read_guard: ReadGuardConfig = Field(default_factory=ReadGuardConfig)
     url_policy: UrlPolicyConfig = Field(default_factory=UrlPolicyConfig)
     download: DownloadConfig = Field(default_factory=DownloadConfig)
-    protected_paths: ProtectedPathsConfig = Field(default_factory=ProtectedPathsConfig)
+    protected_paths: ProtectedPathsConfig = Field(
+        default_factory=ProtectedPathsConfig
+    )
 
 
 def apply_cli_command_moderation_overrides(

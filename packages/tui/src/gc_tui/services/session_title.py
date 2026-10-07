@@ -11,6 +11,7 @@ title > task > last_actual > «Без названия».
 Пикер (SessionsScreen) и OSC (TraceScreen) читают только её — никакого
 сканирования jsonl/архивов для отображения имени.
 """
+
 from __future__ import annotations
 
 from typing import Any, Mapping, Optional
@@ -50,7 +51,9 @@ def task_title(tui_meta: Optional[Mapping]) -> str:
     return " ".join(task.split())[:LAST_ACTUAL_MAX]
 
 
-def should_update_task(tui_meta: Optional[Mapping], turn_tool_calls: int) -> bool:
+def should_update_task(
+    tui_meta: Optional[Mapping], turn_tool_calls: int
+) -> bool:
     """Политика перезаписи ``meta.tui.task`` ходом (симметрия с LAST_ACTUAL_MIN
     для last_actual): первый task сеется безусловно; дальше имя обновляет только
     ход с реальной работой (≥1 вызов тула, финализатор не считается) — «спасибо»

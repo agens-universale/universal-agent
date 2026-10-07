@@ -1,6 +1,7 @@
 """Сессионный кэш списков моделей (спека умных форм §3.2): ключ —
 (url, auth, verify, proxy), живёт процесс TUI. Ошибка/None не кэшируется —
 следующий вход в поле пробует снова."""
+
 from __future__ import annotations
 
 _CACHE: dict = {}
@@ -28,4 +29,5 @@ def make_cached_fetch(fetch):
         if models:
             _CACHE[key] = models
         return models
+
     return cached

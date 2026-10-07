@@ -1,9 +1,20 @@
 """User-stop mid-batch — A for started, B for not-started; pairing persist."""
+
 from __future__ import annotations
 
 import json
 
 from gc_core.message_policy.stop_persist import is_persist_discarded
+from gc_testkit import run_coro
+
+
+def _async_noop(fn):
+    """Заглушка корутинного хука: ядро зовёт async-двойник напрямую."""
+
+    async def _wrapped(*args, **kwargs):
+        return fn(*args, **kwargs)
+
+    return _wrapped
 
 
 def _unique_id_factory():
@@ -37,13 +48,19 @@ def _state(**kw):
 def _patch_process_tool_calls(monkeypatch, pr, *, apply=None):
     applied: list[str] = []
 
-    def _default_apply(**kw):
+    async def _default_apply(**kw):
         applied.append(kw["tool_name"])
         return '{"ok": true}'
 
-    monkeypatch.setattr(pr, "apply_tool", apply or _default_apply)
-    monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output", lambda res, **kw: res)
-    monkeypatch.setattr(pr, "maybe_update_intent_scope_from_tool", lambda **kw: None)
+    monkeypatch.setattr(pr, "aapply_tool", apply or _default_apply)
+    monkeypatch.setattr(
+        pr, "maybe_store_and_wrap_tool_output", lambda res, **kw: res
+    )
+    monkeypatch.setattr(
+        pr,
+        "amaybe_update_intent_scope_from_tool",
+        _async_noop(lambda **kw: None),
+    )
     monkeypatch.setattr(pr, "generate_message_id_func", _unique_id_factory())
     return applied
 
@@ -79,11 +96,26 @@ def test_stop_before_any_tool_emits_b_for_all(monkeypatch):
     applied = _patch_process_tool_calls(monkeypatch, pr)
     state = _state(stop_requested=True)
     messages = [
-        {"type": "function_call", "name": "fs_read_file", "call_id": "c1", "arguments": "{}"},
-        {"type": "function_call", "name": "fs_read_file", "call_id": "c2", "arguments": "{}"},
+        {
+            "type": "function_call",
+            "name": "fs_read_file",
+            "call_id": "c1",
+            "arguments": "{}",
+        },
+        {
+            "type": "function_call",
+            "name": "fs_read_file",
+            "call_id": "c2",
+            "arguments": "{}",
+        },
     ]
-    outs = pr.process_tool_calls(
-        messages, state, type("C", (), {"config_dict": {}, "logger": None})(), None
+    outs = run_coro(
+        pr.aprocess_tool_calls(
+            messages,
+            state,
+            type("C", (), {"config_dict": {}, "logger": None})(),
+            None,
+        )
     )
 
     assert applied == []
@@ -101,7 +133,7 @@ def test_stop_after_first_tool_a_then_b_for_rest(monkeypatch):
     state = _state()
     applied: list[str] = []
 
-    def apply_and_stop(**kw):
+    async def apply_and_stop(**kw):
         applied.append(kw["tool_name"])
         state.stop_requested = True
         return _cancelled_json(kw["tool_name"])
@@ -109,12 +141,32 @@ def test_stop_after_first_tool_a_then_b_for_rest(monkeypatch):
     _patch_process_tool_calls(monkeypatch, pr, apply=apply_and_stop)
 
     messages = [
-        {"type": "function_call", "name": "subagent_worker", "call_id": "c1", "arguments": "{}"},
-        {"type": "function_call", "name": "fs_read_file", "call_id": "c2", "arguments": "{}"},
-        {"type": "function_call", "name": "fs_list_files", "call_id": "c3", "arguments": "{}"},
+        {
+            "type": "function_call",
+            "name": "subagent_worker",
+            "call_id": "c1",
+            "arguments": "{}",
+        },
+        {
+            "type": "function_call",
+            "name": "fs_read_file",
+            "call_id": "c2",
+            "arguments": "{}",
+        },
+        {
+            "type": "function_call",
+            "name": "fs_list_files",
+            "call_id": "c3",
+            "arguments": "{}",
+        },
     ]
-    outs = pr.process_tool_calls(
-        messages, state, type("C", (), {"config_dict": {}, "logger": None})(), None
+    outs = run_coro(
+        pr.aprocess_tool_calls(
+            messages,
+            state,
+            type("C", (), {"config_dict": {}, "logger": None})(),
+            None,
+        )
     )
 
     assert applied == ["subagent_worker"]
@@ -133,26 +185,44 @@ def test_successful_first_then_stop_before_second_gives_ok_then_b(monkeypatch):
     state = _state()
     applied: list[str] = []
 
-    def apply_ok_then_arm_stop(**kw):
+    async def apply_ok_then_arm_stop(**kw):
         applied.append(kw["tool_name"])
         state.stop_requested = True
-        return '{"ok": true, "tool": "%s"}' % kw["tool_name"]
+        return '{{"ok": true, "tool": "{}"}}'.format(kw["tool_name"])
 
     _patch_process_tool_calls(monkeypatch, pr, apply=apply_ok_then_arm_stop)
 
     messages = [
-        {"type": "function_call", "name": "fs_read_file", "call_id": "c1", "arguments": "{}"},
-        {"type": "function_call", "name": "fs_read_file", "call_id": "c2", "arguments": "{}"},
+        {
+            "type": "function_call",
+            "name": "fs_read_file",
+            "call_id": "c1",
+            "arguments": "{}",
+        },
+        {
+            "type": "function_call",
+            "name": "fs_read_file",
+            "call_id": "c2",
+            "arguments": "{}",
+        },
     ]
-    outs = pr.process_tool_calls(
-        messages, state, type("C", (), {"config_dict": {}, "logger": None})(), None
+    outs = run_coro(
+        pr.aprocess_tool_calls(
+            messages,
+            state,
+            type("C", (), {"config_dict": {}, "logger": None})(),
+            None,
+        )
     )
 
     assert applied == ["fs_read_file"]
     first = json.loads(outs[0]["output"])
     assert first["ok"] is True
     assert first.get("status") != "cancelled_by_user"
-    assert json.loads(outs[1]["output"])["status"] == "not_started_due_to_user_stop"
+    assert (
+        json.loads(outs[1]["output"])["status"]
+        == "not_started_due_to_user_stop"
+    )
 
 
 def test_single_tool_batch_stop_only_a_no_b(monkeypatch):
@@ -161,22 +231,34 @@ def test_single_tool_batch_stop_only_a_no_b(monkeypatch):
 
     state = _state()
 
-    def apply_stop(**kw):
+    async def apply_stop(**kw):
         state.stop_requested = True
         return _cancelled_json(kw["tool_name"])
 
     _patch_process_tool_calls(monkeypatch, pr, apply=apply_stop)
     messages = [
-        {"type": "function_call", "name": "subagent_worker", "call_id": "c1", "arguments": "{}"},
+        {
+            "type": "function_call",
+            "name": "subagent_worker",
+            "call_id": "c1",
+            "arguments": "{}",
+        },
     ]
-    outs = pr.process_tool_calls(
-        messages, state, type("C", (), {"config_dict": {}, "logger": None})(), None
+    outs = run_coro(
+        pr.aprocess_tool_calls(
+            messages,
+            state,
+            type("C", (), {"config_dict": {}, "logger": None})(),
+            None,
+        )
     )
 
     assert len(outs) == 1
     assert json.loads(outs[0]["output"])["status"] == "cancelled_by_user"
     assert outs[0]["call_id"] in {
-        m["call_id"] for m in state.messages if m.get("type") == "function_call_output"
+        m["call_id"]
+        for m in state.messages
+        if m.get("type") == "function_call_output"
     }
 
 
@@ -187,20 +269,45 @@ def test_stop_does_not_apply_remaining_even_if_names_differ(monkeypatch):
     state = _state()
     applied = []
 
-    def apply_and_stop(**kw):
+    async def apply_and_stop(**kw):
         applied.append(kw["tool_name"])
         state.stop_requested = True
         return _cancelled_json(kw["tool_name"])
 
     _patch_process_tool_calls(monkeypatch, pr, apply=apply_and_stop)
     messages = [
-        {"type": "function_call", "name": "a", "call_id": "c1", "arguments": "{}"},
-        {"type": "function_call", "name": "b", "call_id": "c2", "arguments": "{}"},
-        {"type": "function_call", "name": "c", "call_id": "c3", "arguments": "{}"},
-        {"type": "function_call", "name": "d", "call_id": "c4", "arguments": "{}"},
+        {
+            "type": "function_call",
+            "name": "a",
+            "call_id": "c1",
+            "arguments": "{}",
+        },
+        {
+            "type": "function_call",
+            "name": "b",
+            "call_id": "c2",
+            "arguments": "{}",
+        },
+        {
+            "type": "function_call",
+            "name": "c",
+            "call_id": "c3",
+            "arguments": "{}",
+        },
+        {
+            "type": "function_call",
+            "name": "d",
+            "call_id": "c4",
+            "arguments": "{}",
+        },
     ]
-    outs = pr.process_tool_calls(
-        messages, state, type("C", (), {"config_dict": {}, "logger": None})(), None
+    outs = run_coro(
+        pr.aprocess_tool_calls(
+            messages,
+            state,
+            type("C", (), {"config_dict": {}, "logger": None})(),
+            None,
+        )
     )
     assert applied == ["a"]
     assert _statuses(outs) == [
@@ -218,11 +325,26 @@ def test_no_stop_runs_full_batch(monkeypatch):
     applied = _patch_process_tool_calls(monkeypatch, pr)
     state = _state()
     messages = [
-        {"type": "function_call", "name": "fs_read_file", "call_id": "c1", "arguments": "{}"},
-        {"type": "function_call", "name": "fs_read_file", "call_id": "c2", "arguments": "{}"},
+        {
+            "type": "function_call",
+            "name": "fs_read_file",
+            "call_id": "c1",
+            "arguments": "{}",
+        },
+        {
+            "type": "function_call",
+            "name": "fs_read_file",
+            "call_id": "c2",
+            "arguments": "{}",
+        },
     ]
-    outs = pr.process_tool_calls(
-        messages, state, type("C", (), {"config_dict": {}, "logger": None})(), None
+    outs = run_coro(
+        pr.aprocess_tool_calls(
+            messages,
+            state,
+            type("C", (), {"config_dict": {}, "logger": None})(),
+            None,
+        )
     )
     assert applied == ["fs_read_file", "fs_read_file"]
     assert len(outs) == 2
@@ -241,25 +363,43 @@ def test_pairing_persist_despite_discard_writes(monkeypatch):
     persisted: list = []
     state = _state(discard_writes_after_stop=True)
 
-    def fake_apply(**kw):
+    async def fake_apply(**kw):
         state.stop_requested = True
         return _cancelled_json("subagent_worker")
 
     _patch_process_tool_calls(monkeypatch, pr, apply=fake_apply)
     messages = [
-        {"type": "function_call", "name": "subagent_worker", "call_id": "c1", "arguments": "{}"},
-        {"type": "function_call", "name": "fs_read_file", "call_id": "c2", "arguments": "{}"},
+        {
+            "type": "function_call",
+            "name": "subagent_worker",
+            "call_id": "c1",
+            "arguments": "{}",
+        },
+        {
+            "type": "function_call",
+            "name": "fs_read_file",
+            "call_id": "c2",
+            "arguments": "{}",
+        },
     ]
-    outs = pr.process_tool_calls(
-        messages,
-        state,
-        type("C", (), {"config_dict": {}, "logger": None})(),
-        None,
-        persist_messages_callback=lambda msgs: persisted.append(list(msgs)),
+    outs = run_coro(
+        pr.aprocess_tool_calls(
+            messages,
+            state,
+            type("C", (), {"config_dict": {}, "logger": None})(),
+            None,
+            persist_messages_callback=lambda msgs: persisted.append(
+                list(msgs)
+            ),
+        )
     )
 
     assert len(outs) == 2
-    assert {m["call_id"] for m in state.messages if m.get("type") == "function_call_output"} == {
+    assert {
+        m["call_id"]
+        for m in state.messages
+        if m.get("type") == "function_call_output"
+    } == {
         "c1",
         "c2",
     }
@@ -274,11 +414,26 @@ def test_pairing_writes_state_even_without_persist_callback(monkeypatch):
     state = _state(discard_writes_after_stop=True, stop_requested=True)
     _patch_process_tool_calls(monkeypatch, pr)
     messages = [
-        {"type": "function_call", "name": "fs_read_file", "call_id": "c1", "arguments": "{}"},
-        {"type": "function_call", "name": "fs_read_file", "call_id": "c2", "arguments": "{}"},
+        {
+            "type": "function_call",
+            "name": "fs_read_file",
+            "call_id": "c1",
+            "arguments": "{}",
+        },
+        {
+            "type": "function_call",
+            "name": "fs_read_file",
+            "call_id": "c2",
+            "arguments": "{}",
+        },
     ]
-    pr.process_tool_calls(
-        messages, state, type("C", (), {"config_dict": {}, "logger": None})(), None
+    run_coro(
+        pr.aprocess_tool_calls(
+            messages,
+            state,
+            type("C", (), {"config_dict": {}, "logger": None})(),
+            None,
+        )
     )
     assert {m["call_id"] for m in state.messages} == {"c1", "c2"}
 
@@ -294,27 +449,36 @@ def test_pairing_persist_clears_allow_flag_after(monkeypatch):
         seen_flags.append(bool(getattr(state, "allow_pairing_persist", False)))
 
     _patch_process_tool_calls(monkeypatch, pr)
-    pr.process_tool_calls(
-        [
-            {"type": "function_call", "name": "fs_read_file", "call_id": "c1", "arguments": "{}"},
-        ],
-        state,
-        type("C", (), {"config_dict": {}, "logger": None})(),
-        None,
-        persist_messages_callback=cb,
+    run_coro(
+        pr.aprocess_tool_calls(
+            [
+                {
+                    "type": "function_call",
+                    "name": "fs_read_file",
+                    "call_id": "c1",
+                    "arguments": "{}",
+                },
+            ],
+            state,
+            type("C", (), {"config_dict": {}, "logger": None})(),
+            None,
+            persist_messages_callback=cb,
+        )
     )
     assert seen_flags == [True]
     assert state.allow_pairing_persist is False
 
 
-def test_maybe_persist_blocks_non_pairing_when_discard_stop():
+async def test_maybe_persist_blocks_non_pairing_when_discard_stop():
     from gc_core.processing_responses import _maybe_persist
 
     state = _state(discard_writes_after_stop=True, stop_requested=True)
     called = []
-    _maybe_persist(lambda m: called.append(m), [{"id": "1"}], state)
+    await _maybe_persist(lambda m: called.append(m), [{"id": "1"}], state)
     assert called == []
-    _maybe_persist(lambda m: called.append(m), [{"id": "2"}], state, pairing=True)
+    await _maybe_persist(
+        lambda m: called.append(m), [{"id": "2"}], state, pairing=True
+    )
     assert called == [[{"id": "2"}]]
     assert state.allow_pairing_persist is False
 
@@ -345,7 +509,7 @@ def test_pairing_commit_does_not_duplicate_already_in_state(monkeypatch):
     }
     state = _state(discard_writes_after_stop=True, messages=[existing])
 
-    def fake_apply(**kw):
+    async def fake_apply(**kw):
         state.stop_requested = True
         return _cancelled_json("subagent_worker")
 
@@ -357,11 +521,26 @@ def test_pairing_commit_does_not_duplicate_already_in_state(monkeypatch):
     # Сценарий: stop после apply A с новым id для c1 + B для c2; existing c1 остаётся.
     state.stop_requested = False
     messages = [
-        {"type": "function_call", "name": "subagent_worker", "call_id": "c1", "arguments": "{}"},
-        {"type": "function_call", "name": "fs_read_file", "call_id": "c2", "arguments": "{}"},
+        {
+            "type": "function_call",
+            "name": "subagent_worker",
+            "call_id": "c1",
+            "arguments": "{}",
+        },
+        {
+            "type": "function_call",
+            "name": "fs_read_file",
+            "call_id": "c2",
+            "arguments": "{}",
+        },
     ]
-    pr.process_tool_calls(
-        messages, state, type("C", (), {"config_dict": {}, "logger": None})(), None
+    run_coro(
+        pr.aprocess_tool_calls(
+            messages,
+            state,
+            type("C", (), {"config_dict": {}, "logger": None})(),
+            None,
+        )
     )
     # existing + новый A(c1) + B(c2) — два c1 допустимы только если разные id
     # (реальный make_message_key по id). Проверяем: c2 появился ровно раз.
@@ -373,7 +552,9 @@ def test_pairing_commit_does_not_duplicate_already_in_state(monkeypatch):
 
 
 def test_envelope_b_marks_not_started_and_synthetic():
-    from gc_core.message_policy.user_stop import not_started_due_to_user_stop_output
+    from gc_core.message_policy.user_stop import (
+        not_started_due_to_user_stop_output,
+    )
 
     user = json.loads(not_started_due_to_user_stop_output("fs_read_file"))
     assert user["tool"] == "fs_read_file"
@@ -394,14 +575,37 @@ def test_stop_abort_still_appends_finalizer_skip_outputs(monkeypatch):
     _patch_process_tool_calls(monkeypatch, pr)
     # Stop до apply: ask не передал ход человеку, поэтому и ask, и finish получают B.
     messages = [
-        {"type": "function_call", "name": "turn_ask_human", "call_id": "c1", "arguments": "{}"},
-        {"type": "function_call", "name": "turn_finish", "call_id": "c2", "arguments": "{}"},
+        {
+            "type": "function_call",
+            "name": "turn_ask_human",
+            "call_id": "c1",
+            "arguments": "{}",
+        },
+        {
+            "type": "function_call",
+            "name": "turn_finish",
+            "call_id": "c2",
+            "arguments": "{}",
+        },
     ]
-    outs = pr.process_tool_calls(
-        messages, state, type("C", (), {"config_dict": {}, "logger": None})(), None
+    outs = run_coro(
+        pr.aprocess_tool_calls(
+            messages,
+            state,
+            type("C", (), {"config_dict": {}, "logger": None})(),
+            None,
+        )
     )
+    # executed=[ask_human], skipped=[session_memory]
+    # stop before ask → B for ask + skip for session_memory
     assert len(outs) == 2
     assert outs[0]["call_id"] == "c1"
-    assert json.loads(outs[0]["output"])["status"] == "not_started_due_to_user_stop"
+    assert (
+        json.loads(outs[0]["output"])["status"]
+        == "not_started_due_to_user_stop"
+    )
     assert outs[1]["call_id"] == "c2"
-    assert json.loads(outs[1]["output"])["status"] == "not_started_due_to_user_stop"
+    assert (
+        json.loads(outs[1]["output"])["status"]
+        == "not_started_due_to_user_stop"
+    )

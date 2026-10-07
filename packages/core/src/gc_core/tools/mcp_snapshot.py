@@ -1,4 +1,5 @@
 """Снимок MCP «сервер → статус+тулы» из реестра tools_data (технический слой)."""
+
 from typing import Any, Dict
 
 
@@ -14,7 +15,10 @@ def build_mcp_tools_snapshot(
     for server_name, scfg in servers.items():
         prefix = f"mcp_{server_name}_"
         tools = [
-            {"name": name, "description": str(data.get("description", "") or "")}
+            {
+                "name": name,
+                "description": str(data.get("description", "") or ""),
+            }
             for name, data in tools_data.items()
             if name.startswith(prefix)
         ]

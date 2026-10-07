@@ -4,6 +4,7 @@ Pure: no I/O, no dependency on the registry or cli. Takes a SkillCatalog
 snapshot + the raw flag value, returns a Resolved (exact canonical skill id)
 or a Failed (the caller — cli.py — decides process exit).
 """
+
 from __future__ import annotations
 
 import difflib
@@ -96,8 +97,7 @@ def resolve_skill_arg(raw: str, catalog: SkillCatalog) -> ResolveResult:
     if isinstance(res, Resolved):
         return Resolved(
             res.canonical_id,
-            note=f"'{raw.strip()}' not found; resolved to "
-            f"'{res.canonical_id}' (closest match '{chosen}')",
+            note=f"'{raw.strip()}' not found; resolved to '{res.canonical_id}' (closest match '{chosen}')",
         )
     if isinstance(res, Failed):
         return res  # chosen bare maps to >1 canonical -> still ambiguous

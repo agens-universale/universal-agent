@@ -36,24 +36,37 @@
 
 Форматирование YAML целиком тут и в writer'е — UI не собирает YAML никогда.
 """
+
 from __future__ import annotations
 
 import os
 import re
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 
 import yaml
 
 from gc_core import config_raw
 from gc_core import onboarding_config_writer as ocw
-from gc_core.config_modules.layers import (prospective_registry, stack_documents,
-                                   validate_config_text_with_sections,
-                                   validate_profile_text_with_sections)
+from gc_core.config_modules.layers import (
+    prospective_registry,
+    stack_documents,
+    validate_config_text_with_sections,
+    validate_profile_text_with_sections,
+)
 from gc_core.config_modules.model_registry import LEVELS
 from gc_core.config_modules.profiles import validate_profile_text
 from gc_core.config_origin import error_origins
 from gc_core.utils.user_text import read_user_text
+
+
+class _YamlValue(Enum):
+    NULL = "null"
+
+
+# None в fields исторически удаляет ключ. Явный YAML null — отдельная команда.
+YAML_NULL = _YamlValue.NULL
 
 
 class RegistryWriteError(ValueError):
@@ -72,7 +85,7 @@ class RemovalReport:
 # Ключ, который в YAML можно писать без кавычек. Всё прочее (wildcard `*`
 # привязок субагентов) — через `quote_scalar`: literal-сравнение записей в
 # writer'е идёт по тому же виду, в каком ключ лежит в файле.
-_PLAIN_KEY_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.+\-]*$")
+_PLAIN_KEY_RE = re.compile(r"^\w[\w.+\-]*$", re.ASCII)
 
 
 def _yaml_key(key: str) -> str:
@@ -133,10 +146,14 @@ def _document(text: str) -> dict:
     for name in ("models", "slots", "assign"):
         section = raw.get(name)
         if section is not None and not isinstance(section, dict):
-            raise RegistryWriteError(f"секция {name} должна быть YAML-объектом")
+            raise RegistryWriteError(
+                f"секция {name} должна быть YAML-объектом"
+            )
     subagents = (raw.get("assign") or {}).get("subagents")
     if subagents is not None and not isinstance(subagents, dict):
-        raise RegistryWriteError("секция assign.subagents должна быть YAML-объектом")
+        raise RegistryWriteError(
+            "секция assign.subagents должна быть YAML-объектом"
+        )
     return raw
 
 
@@ -152,7 +169,9 @@ _LAYER_WORDS = {
 }
 
 
-def _name_culprits(message: str, target, text: str, is_profile: bool, stack_base) -> str:
+def _name_culprits(
+    message: str, target, text: str, is_profile: bool, stack_base
+) -> str:
     """Текст отказа валидации плюс файл(ы) стека, где лежат названные им ключи:
     «… — поправьте slots.default в профиле "work": <полный путь>».
 
@@ -170,15 +189,19 @@ def _name_culprits(message: str, target, text: str, is_profile: bool, stack_base
     выдумываем."""
     if is_profile and stack_base is None:
         return message
-    culprits = error_origins(stack_base if is_profile else target, message,
-                             candidates={target: config_raw.parse_document(text)})
+    culprits = error_origins(
+        stack_base if is_profile else target,
+        message,
+        candidates={target: config_raw.parse_document(text)},
+    )
     if not culprits:
         return message
     advice = "; ".join(
         f"{', '.join(culprit.keys)} "
         f"{_LAYER_WORDS[culprit.kind].format(name=Path(culprit.path).stem)}: "
         f"{os.path.abspath(culprit.path)}"
-        for culprit in culprits)
+        for culprit in culprits
+    )
     return f"{message} — поправьте {advice}"
 
 
@@ -194,13 +217,18 @@ def _commit(target, text: str, is_profile: bool, stack_base=None) -> None:
             # стоящего слоя, и чужая поломка стека не должна запирать именно ту
             # секцию, в которой её чинят (layers, развилка «сломан и без нас»).
             validate_profile_text_with_sections(
-                candidate, target=target, base_path=stack_base,
-                lenient_prebroken=True)
+                candidate,
+                target=target,
+                base_path=stack_base,
+                lenient_prebroken=True,
+            )
     else:
 
         def validate(candidate: str) -> None:
-            validate_config_text_with_sections(candidate, base_path=target,
-                                               lenient_prebroken=True)
+            validate_config_text_with_sections(
+                candidate, base_path=target, lenient_prebroken=True
+            )
+
     try:
         ocw.write_text(target, text, validate=validate)
     except RegistryWriteError:
@@ -210,7 +238,8 @@ def _commit(target, text: str, is_profile: bool, stack_base=None) -> None:
         # (`_apply_ops_to_text`), он доезжает без служебных имён операций: «write_slot
         # default + upsert_model …:» впереди — служебный лог в пользовательском тексте.
         raise RegistryWriteError(
-            _name_culprits(str(exc), target, text, is_profile, stack_base)) from exc
+            _name_culprits(str(exc), target, text, is_profile, stack_base)
+        ) from exc
 
 
 def _entry_block_lines(alias_key: str, entry: dict) -> list[str]:
@@ -219,7 +248,9 @@ def _entry_block_lines(alias_key: str, entry: dict) -> list[str]:
     `pricing`/`backend`, не только плоские url/token/model."""
     if not entry:
         return [f"{alias_key}: {{}}"]
-    body = yaml.safe_dump(entry, default_flow_style=False, allow_unicode=True, sort_keys=False)
+    body = yaml.safe_dump(
+        entry, default_flow_style=False, allow_unicode=True, sort_keys=False
+    )
     return [f"{alias_key}:"] + [f"  {line}" for line in body.splitlines()]
 
 
@@ -285,12 +316,15 @@ def _references(document: dict, alias: str) -> list[str]:
     return refs
 
 
-def _upsert_model_text(text: str, template: str, alias: str, fields: dict) -> str:
+def _upsert_model_text(
+    text: str, template: str, alias: str, fields: dict
+) -> str:
     """MERGE со старой записью, не замена: `fields` несёт только те ключи, о которых
     вызывающий что-то знает, а блок записи переписывается целиком — без наложения
-    поля, которых форма не знает вовсе (`pricing`/`backend`) или не трогала в этот
+    поля, которых форма не знает вовсе (`pricing`) или не трогала в этот
     раз (`token`), молча терялись бы. Правило: ключ со значением — установить,
-    ключ со значением `None` — удалить из записи, отсутствующий ключ — сохранить
+    ключ со значением `None` — удалить, `YAML_NULL` — записать YAML null,
+    отсутствующий ключ — сохранить
     как был. Старая запись читается из ТЕКУЩЕГО текста — в транзакции это уже
     результат предыдущих операций, а не состояние диска.
 
@@ -307,14 +341,16 @@ def _upsert_model_text(text: str, template: str, alias: str, fields: dict) -> st
         if value is None:
             entry.pop(key, None)
         else:
-            entry[key] = value
+            entry[key] = None if value is YAML_NULL else value
     key = _yaml_key(alias)
     text = ocw.ensure_section_anchor_text(text, "models", template)
     if ocw.entry_uses_yaml_anchors(text, "models", key):
         raise RegistryWriteError(
             f"запись «{alias}» использует YAML-якоря/merge — правьте файл руками"
         )
-    block = ocw.carry_entry_comments(text, "models", key, _entry_block_lines(key, entry))
+    block = ocw.carry_entry_comments(
+        text, "models", key, _entry_block_lines(key, entry)
+    )
     return ocw.upsert_mapping_entry(text, "models", key, block)
 
 
@@ -350,8 +386,14 @@ def _drop_entry_text(text: str, alias: str) -> str:
     return _drop_mapping_entry(text, "models", alias, f"записи «{alias}»")
 
 
-def _remove_model_text(text: str, _template: str, alias: str, force: bool = False,
-                      *, keep_references: bool = False) -> str:
+def _remove_model_text(
+    text: str,
+    _template: str,
+    alias: str,
+    force: bool = False,
+    *,
+    keep_references: bool = False,
+) -> str:
     """Удалить запись реестра вместе со ссылающимися слотами/привязками. Записи нет
     — идемпотентный no-op. Ссылки есть, а `force` не задан — ошибка с их перечнем:
     у операции внутри транзакции нет канала отчёта, каким располагает `remove_model`,
@@ -408,11 +450,14 @@ def _write_slot_text(text: str, template: str, level: str, alias) -> str:
     if alias is None:
         if level not in (_document(text).get("slots") or {}):
             return text
-        return _drop_mapping_entry(text, "slots", level, f"слота slots.{level}")
+        return _drop_mapping_entry(
+            text, "slots", level, f"слота slots.{level}"
+        )
     alias = str(alias)
     text = ocw.ensure_section_anchor_text(text, "slots", template)
     block = ocw.carry_entry_comments(
-        text, "slots", level, [f"{level}: {ocw.quote_scalar(alias)}"])
+        text, "slots", level, [f"{level}: {ocw.quote_scalar(alias)}"]
+    )
     return ocw.upsert_mapping_entry(text, "slots", level, block)
 
 
@@ -428,7 +473,9 @@ def _write_assign_text(text: str, template: str, consumer: str, value) -> str:
     if value is None:
         if not _assign_present(_document(text), consumer):
             return text
-        return _drop_mapping_entry(text, parent, key, f"привязки assign.{consumer}")
+        return _drop_mapping_entry(
+            text, parent, key, f"привязки assign.{consumer}"
+        )
     value = str(value)
     text = ocw.ensure_section_anchor_text(text, "assign", template)
     if parent != "assign":
@@ -438,10 +485,13 @@ def _write_assign_text(text: str, template: str, consumer: str, value) -> str:
         try:
             ocw.find_anchor(text, parent)
         except KeyError:
-            text = ocw.upsert_mapping_entry(text, "assign", nested, [f"{nested}: {{}}"])
+            text = ocw.upsert_mapping_entry(
+                text, "assign", nested, [f"{nested}: {{}}"]
+            )
     key_yaml = _yaml_key(key)
     block = ocw.carry_entry_comments(
-        text, parent, key_yaml, [f"{key_yaml}: {ocw.quote_scalar(value)}"])
+        text, parent, key_yaml, [f"{key_yaml}: {ocw.quote_scalar(value)}"]
+    )
     return ocw.upsert_mapping_entry(text, parent, key_yaml, block)
 
 
@@ -462,13 +512,17 @@ def _surviving_aliases(target, ops, stack_base) -> frozenset:
     """Алиасы снимаемых записей, которые переживут удаление (объявлены ещё одним
     слоем стека). Их ссылки каскад не трогает: они продолжат резолвиться."""
     return frozenset(
-        op[1] for op in ops
-        if op and op[0] == "remove_model"
+        op[1]
+        for op in ops
+        if op
+        and op[0] == "remove_model"
         and alias_survives_removal(target, op[1], stack_base=stack_base)
     )
 
 
-def _apply_ops_to_text(text: str, ops, template: str, survivors=frozenset()) -> str:
+def _apply_ops_to_text(
+    text: str, ops, template: str, survivors=frozenset()
+) -> str:
     """Наложить операции на текст последовательно. Отдельно от коммита, потому что об
     ИТОГЕ спрашивают дважды: запись его пишет, а справка `needs_default_slot` только
     смотрит, что из него получилось бы."""
@@ -476,8 +530,7 @@ def _apply_ops_to_text(text: str, ops, template: str, survivors=frozenset()) -> 
         transform = _OPERATIONS.get(op[0])
         if transform is None:
             raise RegistryWriteError(
-                f"неизвестная операция реестра: {op[0]} "
-                f"(есть: {', '.join(sorted(_OPERATIONS))})"
+                f"неизвестная операция реестра: {op[0]} (есть: {', '.join(sorted(_OPERATIONS))})"
             )
         try:
             if op[0] == "remove_model" and op[1] in survivors:
@@ -504,8 +557,9 @@ def _apply_ops_to_text(text: str, ops, template: str, survivors=frozenset()) -> 
     return text
 
 
-def apply_registry_ops(target, ops, template: str, *, is_profile: bool = False,
-                       stack_base=None) -> None:
+def apply_registry_ops(
+    target, ops, template: str, *, is_profile: bool = False, stack_base=None
+) -> None:
     """Применить группу операций ОДНОЙ транзакцией: последовательно к тексту цели,
     валидация — одна на итоговый результат, запись — одна атомарная.
 
@@ -536,20 +590,36 @@ def apply_registry_ops(target, ops, template: str, *, is_profile: bool = False,
     Ни тому, ни другому имя операции не приписывается: их тексты написаны для
     человека, и служебное имя перед ними — шум в пользовательском сообщении."""
     ops = [tuple(op) for op in ops]
-    text = _apply_ops_to_text(_read(target), ops, template,
-                              _surviving_aliases(target, ops, stack_base))
+    text = _apply_ops_to_text(
+        _read(target),
+        ops,
+        template,
+        _surviving_aliases(target, ops, stack_base),
+    )
     _commit(target, text, is_profile, stack_base=stack_base)
 
 
-def upsert_model(target, alias: str, fields: dict, template: str, *,
-                 is_profile: bool = False, stack_base=None) -> None:
+def upsert_model(
+    target,
+    alias: str,
+    fields: dict,
+    template: str,
+    *,
+    is_profile: bool = False,
+    stack_base=None,
+) -> None:
     """Создать/обновить запись `models.<alias>` в `target` (merge-контракт — см.
     `_upsert_model_text`).
 
     `template` — текст шаблона для якоря секции (`config.default.yml` у config.yml,
     пустая строка у профиля: тогда синтезируется голый `models: {}`)."""
-    apply_registry_ops(target, [("upsert_model", alias, fields)], template,
-                       is_profile=is_profile, stack_base=stack_base)
+    apply_registry_ops(
+        target,
+        [("upsert_model", alias, fields)],
+        template,
+        is_profile=is_profile,
+        stack_base=stack_base,
+    )
 
 
 def references_to(target, alias: str) -> list[str]:
@@ -583,8 +653,11 @@ def _other_stack_documents(target, stack_base) -> list:
     else:
         docs = stack_documents(stack_base, profile_override="")
     target_path = Path(target).resolve()
-    return [(path, document) for path, document in docs
-            if Path(path).resolve() != target_path]
+    return [
+        (path, document)
+        for path, document in docs
+        if Path(path).resolve() != target_path
+    ]
 
 
 def alias_survives_removal(target, alias: str, *, stack_base=None) -> bool:
@@ -602,7 +675,9 @@ def alias_survives_removal(target, alias: str, *, stack_base=None) -> bool:
     return False
 
 
-def references_broken_by_removal(target, alias: str, *, stack_base=None) -> list:
+def references_broken_by_removal(
+    target, alias: str, *, stack_base=None
+) -> list:
     """Ссылки в ЧУЖИХ файлах стека, которые повиснут, если снять запись из `target`, —
     `(имя файла, координата)`. Свой файл сюда не попадает, его отдаёт `references_to`.
 
@@ -617,16 +692,19 @@ def references_broken_by_removal(target, alias: str, *, stack_base=None) -> list
     то, чего не случится ни при каком ответе. То же действующее правило, что и для
     унаследованной записи, распространённое на другой слой."""
     if alias_survives_removal(target, alias, stack_base=stack_base):
-        return []               # алиас переживёт удаление — ничьи ссылки не повиснут
+        return []  # алиас переживёт удаление — ничьи ссылки не повиснут
     refs: list = []
     for path, document in _other_stack_documents(target, stack_base):
-        refs += [(Path(path).name, coordinate)
-                 for coordinate in _references(document, alias)]
+        refs += [
+            (Path(path).name, coordinate)
+            for coordinate in _references(document, alias)
+        ]
     return refs
 
 
-def needs_default_slot(target, ops, template: str, *, is_profile: bool = False,
-                       stack_base=None) -> bool:
+def needs_default_slot(
+    target, ops, template: str, *, is_profile: bool = False, stack_base=None
+) -> bool:
     """Оставит ли ЭТА транзакция стек без резолвимого `default` — справка для UI,
     задаваемая ДО записи, чтобы форма успела спросить «какая модель по умолчанию» и
     уйти ОДНОЙ транзакцией.
@@ -639,11 +717,18 @@ def needs_default_slot(target, ops, template: str, *, is_profile: bool = False,
     `stack_base` — как у `apply_registry_ops`. Не наложилось / реестр не собрался —
     `False`: справка не имеет права ронять форму, а невозможность записи всё равно
     поймает гейт своим отказом."""
-    from gc_core.config_modules.model_sections_validation import default_slot_required
+    from gc_core.config_modules.model_sections_validation import (
+        default_slot_required,
+    )
+
     try:
         prepared = [tuple(op) for op in ops]
-        text = _apply_ops_to_text(_read(target), prepared, template,
-                                  _surviving_aliases(target, prepared, stack_base))
+        text = _apply_ops_to_text(
+            _read(target),
+            prepared,
+            template,
+            _surviving_aliases(target, prepared, stack_base),
+        )
     except (RegistryWriteError, OSError):
         return False
     view = prospective_registry(
@@ -656,8 +741,14 @@ def needs_default_slot(target, ops, template: str, *, is_profile: bool = False,
     return default_slot_required(*view)
 
 
-def remove_model(target, alias: str, *, force: bool = False,
-                 is_profile: bool = False, stack_base=None) -> RemovalReport:
+def remove_model(
+    target,
+    alias: str,
+    *,
+    force: bool = False,
+    is_profile: bool = False,
+    stack_base=None,
+) -> RemovalReport:
     """Удалить запись `models.<alias>`.
 
     На запись ссылаются слоты/привязки — по умолчанию НИЧЕГО не пишется, вызывающий
@@ -674,37 +765,67 @@ def remove_model(target, alias: str, *, force: bool = False,
     references = _references(document, alias)
     if references and not force:
         return RemovalReport(removed=False, references=references)
-    apply_registry_ops(target, [("remove_model", alias, True)], "",
-                       is_profile=is_profile, stack_base=stack_base)
+    apply_registry_ops(
+        target,
+        [("remove_model", alias, True)],
+        "",
+        is_profile=is_profile,
+        stack_base=stack_base,
+    )
     return RemovalReport(removed=True, references=references)
 
 
-def write_slot(target, level: str, alias, template: str, *,
-               is_profile: bool = False, stack_base=None) -> None:
+def write_slot(
+    target,
+    level: str,
+    alias,
+    template: str,
+    *,
+    is_profile: bool = False,
+    stack_base=None,
+) -> None:
     """Задать `slots.<level>` алиасом реестра; `alias=None` — снять слот (строка
     удаляется, уровень возвращается к фоллбэку матрицы `LEVEL_FALLBACK`)."""
-    apply_registry_ops(target, [("write_slot", level, alias)], template,
-                       is_profile=is_profile, stack_base=stack_base)
+    apply_registry_ops(
+        target,
+        [("write_slot", level, alias)],
+        template,
+        is_profile=is_profile,
+        stack_base=stack_base,
+    )
 
 
-def write_assign(target, consumer: str, value, template: str, *,
-                 is_profile: bool = False, stack_base=None) -> None:
+def write_assign(
+    target,
+    consumer: str,
+    value,
+    template: str,
+    *,
+    is_profile: bool = False,
+    stack_base=None,
+) -> None:
     """Задать привязку потребителя (`finish_gate`, `subagents.<имя>`, wildcard `*`)
     уровнем или алиасом; `value=None` — снять привязку (потребитель возвращается
     к активному уровню)."""
-    apply_registry_ops(target, [("write_assign", consumer, value)], template,
-                       is_profile=is_profile, stack_base=stack_base)
+    apply_registry_ops(
+        target,
+        [("write_assign", consumer, value)],
+        template,
+        is_profile=is_profile,
+        stack_base=stack_base,
+    )
 
 
 __all__ = [
+    "YAML_NULL",
     "RegistryWriteError",
     "RemovalReport",
     "apply_registry_ops",
-    "references_to",
     "needs_default_slot",
     "references_broken_by_removal",
-    "upsert_model",
+    "references_to",
     "remove_model",
-    "write_slot",
+    "upsert_model",
     "write_assign",
+    "write_slot",
 ]

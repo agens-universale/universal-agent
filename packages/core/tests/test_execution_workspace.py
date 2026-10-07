@@ -1,5 +1,12 @@
-from gc_core.execution_workspace import ExecutionWorkspace, build_execution_workspace, discover_backend_cwd, resolve_execution_root
+import os
+
 from gc_core.backends.local import LocalFsBackend
+from gc_core.execution_workspace import (
+    ExecutionWorkspace,
+    build_execution_workspace,
+    discover_backend_cwd,
+    resolve_execution_root,
+)
 from gc_core.utils.project_data import get_project_data
 from gc_core.utils.tool_report_paths import tool_report_abspath
 
@@ -33,11 +40,56 @@ class SandboxBackend:
     def join(self, base: str, name: str) -> str:
         return base.rstrip("/") + "/" + name
 
-    def exists(self, path: str) -> bool:
+    async def exists(self, path: str) -> bool:
         return False
 
-    def listdir(self, path: str):
+    async def listdir(self, path: str):
         return []
+
+
+def test_launch_root_from_config_falls_back_to_cwd(tmp_path, monkeypatch):
+    """Конфиг без ключа — корнем становится текущий каталог, а не пустота.
+
+    Ключа `launch_root` в конфиге CLI нет: он появляется не всегда, и канон —
+    цепочка с падением на `os.getcwd()`. Вызывающий, взявший только первое
+    звено, получал пустоту и молча пропускал свою работу — так сброс треда
+    перестал чистить снимки, и поймал это только живой смок, а не тесты.
+    """
+    from gc_core.execution_workspace import launch_root_from_config
+
+    monkeypatch.chdir(tmp_path)
+
+    assert launch_root_from_config({}) == os.getcwd()
+    assert launch_root_from_config(None) == os.getcwd()
+    assert launch_root_from_config({"launch_root": "  "}) == os.getcwd()
+    assert launch_root_from_config({"project_root": "/p"}) == os.path.abspath(
+        "/p"
+    )
+    assert launch_root_from_config(
+        {"launch_root": "/l", "project_root": "/p"}
+    ) == os.path.abspath("/l")
+
+
+def test_launch_root_from_config_is_normalised_like_the_execution_root(
+    tmp_path, monkeypatch
+):
+    """Корень из конфига нормализуется так же, как у записи правок.
+
+    Снимки пишет корень, прошедший `expanduser` и `abspath`
+    (`resolve_execution_root`), а сброс треда брал его как есть: при
+    `project_root: '~'` уборка искала снимки в каталоге с именем «~», старые
+    переживали сброс, и новая сессия не могла снять свою базу поверх них
+    (ревью PR, находка 5)."""
+    from gc_core.execution_workspace import launch_root_from_config
+
+    monkeypatch.chdir(tmp_path)
+
+    assert launch_root_from_config(
+        {"project_root": "~"}
+    ) == os.path.expanduser("~")
+    assert launch_root_from_config({"project_root": "proj/../proj"}) == str(
+        tmp_path / "proj"
+    )
 
 
 def test_local_workspace_uses_launch_root(tmp_path):
@@ -72,10 +124,16 @@ def test_sandbox_config_root_overrides_pwd():
     assert root == "/testbed"
 
 
-def test_project_data_and_tool_paths_share_workspace_root():
+async def test_project_data_and_tool_paths_share_workspace_root():
     be = SandboxBackend(cwd=None, pwd="/testbed")
-    ws = ExecutionWorkspace(root="/testbed", backend=be, shell="sh", os_name="Linux", root_writable=True)
-    data = get_project_data(workspace=ws)
+    ws = ExecutionWorkspace(
+        root="/testbed",
+        backend=be,
+        shell="sh",
+        os_name="Linux",
+        root_writable=True,
+    )
+    data = await get_project_data(workspace=ws)
     assert data["projectDir"] == "/testbed"
     assert data["shell"] == "sh"
     assert data["OS"] == "Linux"
@@ -85,7 +143,13 @@ def test_project_data_and_tool_paths_share_workspace_root():
 def test_tool_report_does_not_fall_back_to_slash_when_workspace_has_root():
     """Regression: default_cwd() is None, but workspace.root must still win."""
     be = SandboxBackend(cwd=None, pwd="/testbed")
-    ws = ExecutionWorkspace(root="/testbed", backend=be, shell="sh", os_name="Linux", root_writable=True)
+    ws = ExecutionWorkspace(
+        root="/testbed",
+        backend=be,
+        shell="sh",
+        os_name="Linux",
+        root_writable=True,
+    )
     assert tool_report_abspath("mod.py", workspace=ws) == "/testbed/mod.py"
 
 

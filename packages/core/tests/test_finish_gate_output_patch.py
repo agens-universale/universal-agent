@@ -1,10 +1,14 @@
 import json
 
 from gc_core.intent_guard.guard import FinishGateDecision
-from gc_core.intent_guard.turn_finish_emit import apply_finish_gate_to_turn_finish_output_in_state, patch_function_call_output
+from gc_core.intent_guard.turn_finish_emit import (
+    apply_finish_gate_to_turn_finish_output_in_state,
+    patch_function_call_output,
+)
 from gc_core.intent_guard.validation_result import ValidationResult
 from gc_core.states import State
 from gc_core.tools.turn.submit_solution import SubmitSolution
+from gc_testkit import run_coro
 
 
 def _make_state() -> State:
@@ -21,10 +25,12 @@ def _make_state() -> State:
 
 
 def test_apply_finish_gate_decision_reject_marks_output_not_ok():
-    base = SubmitSolution()(
-        solution_type="full_solution",
-        task_report="done",
-        handoff="{}",
+    base = run_coro(
+        SubmitSolution().acall(
+            solution_type="full_solution",
+            task_report="done",
+            handoff="{}",
+        )
     )
     validation = ValidationResult(
         ok=False,
@@ -53,10 +59,10 @@ def test_apply_finish_gate_decision_reject_marks_output_not_ok():
     assert "Dialog turn finished" not in patched
 
 
-def test_apply_finish_gate_to_turn_finish_output_in_state_patches_message():
+async def test_apply_finish_gate_to_turn_finish_output_in_state_patches_message():
     state = _make_state()
     call_id = "call_finish"
-    raw = SubmitSolution()(
+    raw = await SubmitSolution().acall(
         solution_type="direct_answer",
         task_report="ответ",
         handoff="{}",
@@ -82,7 +88,7 @@ def test_apply_finish_gate_to_turn_finish_output_in_state_patches_message():
         feedback_for_agent="",
     )
     decision = FinishGateDecision(outcome="accept", validation=validation)
-    ok = apply_finish_gate_to_turn_finish_output_in_state(
+    ok = await apply_finish_gate_to_turn_finish_output_in_state(
         state=state,
         finish_call_id=call_id,
         decision=decision,

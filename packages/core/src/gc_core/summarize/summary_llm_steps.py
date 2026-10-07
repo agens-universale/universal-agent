@@ -3,11 +3,14 @@
 from typing import Any
 
 from gc_core.message_format import dialog_history as dialog_history
-from gc_core.summarize.llm import request_summary_text
-from gc_core.summarize.summary_spec import render_output_shape_for_prompt, render_tag_roles_for_prompt
+from gc_core.summarize.llm import arequest_summary_text
+from gc_core.summarize.summary_spec import (
+    render_output_shape_for_prompt,
+    render_tag_roles_for_prompt,
+)
 
 
-def compress_summary_text(
+async def acompress_summary_text(
     *,
     ctx: Any,
     state: Any,
@@ -15,7 +18,10 @@ def compress_summary_text(
     max_chars: int,
     max_tokens: int,
 ) -> str:
-    """Сжимает слишком длинную сводку вторым вызовом LLM с сохранением смысла."""
+    """Сжимает слишком длинную сводку вторым вызовом LLM с сохранением смысла.
+
+    Основная (и единственная) реализация шага: синхронный ``compress_summary_text``
+    """
     if not summary_text or len(summary_text) <= max_chars:
         return summary_text
     system = (
@@ -34,7 +40,7 @@ def compress_summary_text(
             ),
         },
     ]
-    text = request_summary_text(
+    text = await arequest_summary_text(
         ctx=ctx,
         state=state,
         messages=request_messages,
@@ -49,7 +55,7 @@ def compress_summary_text(
     return text
 
 
-def repair_summary_text(
+async def arepair_summary_text(
     *,
     ctx: Any,
     state: Any,
@@ -61,21 +67,22 @@ def repair_summary_text(
     previous_summary: str = "",
     max_tokens: int,
 ) -> str:
-    """Перегенерирует сводку, если первичный ответ модели не прошёл `validate_summary_text`."""
+    """Перегенерирует сводку, если первичный ответ модели не прошёл `validate_summary_text`.
+
+    Основная (и единственная) реализация шага: синхронный ``repair_summary_text``
+    """
     system = (
         "You fix an invalid <summary> XML document. Use the inputs below. "
         "Output one complete <summary> with every required child tag filled."
     )
     missing_line = ""
     if missing_tags:
-        missing_line = f"Missing child tags (must add): {', '.join(missing_tags)}.\n"
+        missing_line = (
+            f"Missing child tags (must add): {', '.join(missing_tags)}.\n"
+        )
     previous_block = ""
     if (previous_summary or "").strip():
-        previous_block = (
-            "<previous_summary>\n"
-            f"{previous_summary.strip()}\n"
-            "</previous_summary>\n\n"
-        )
+        previous_block = f"<previous_summary>\n{previous_summary.strip()}\n</previous_summary>\n\n"
     user = (
         f"Previous summary is invalid. Reason: {reason}.\n"
         f"{missing_line}\n"
@@ -95,7 +102,7 @@ def repair_summary_text(
         {"role": "system", "content": system},
         {"role": "user", "content": user},
     ]
-    return request_summary_text(
+    return await arequest_summary_text(
         ctx=ctx,
         state=state,
         messages=request_messages,

@@ -1,8 +1,15 @@
 """Tests for subagent progress TUI consumer (drain → nested rows / heartbeat)."""
+
 from __future__ import annotations
 
-from gc_core.tools.subagents.progress import QueueSubagentProgressSink, SubagentProgressEvent
-from gc_tui.services.subagent_progress import SubagentProgressConsumer, plan_progress_actions
+from gc_core.tools.subagents.progress import (
+    QueueSubagentProgressSink,
+    SubagentProgressEvent,
+)
+from gc_tui.services.subagent_progress import (
+    SubagentProgressConsumer,
+    plan_progress_actions,
+)
 
 
 def _ev(**kwargs) -> SubagentProgressEvent:
@@ -22,10 +29,19 @@ class TestPlanProgressActions:
     def test_tool_start_then_end(self):
         actions = plan_progress_actions(
             [
-                _ev(kind="tool_start", tool_name="fs_read_file", tool_call_id="tc1",
-                    args_summary="path='a.py'"),
-                _ev(kind="tool_end", tool_name="fs_read_file", tool_call_id="tc1",
-                    ok=True, elapsed_ms=12),
+                _ev(
+                    kind="tool_start",
+                    tool_name="fs_read_file",
+                    tool_call_id="tc1",
+                    args_summary="path='a.py'",
+                ),
+                _ev(
+                    kind="tool_end",
+                    tool_name="fs_read_file",
+                    tool_call_id="tc1",
+                    ok=True,
+                    elapsed_ms=12,
+                ),
             ]
         )
         kinds = [a.kind for a in actions]
@@ -41,7 +57,13 @@ class TestPlanProgressActions:
 
     def test_intermediate_reply(self):
         actions = plan_progress_actions(
-            [_ev(kind="intermediate_reply", prose="Сейчас проверю", tool_name="turn_intermediate_reply")]
+            [
+                _ev(
+                    kind="intermediate_reply",
+                    prose="Сейчас проверю",
+                    tool_name="turn_intermediate_reply",
+                )
+            ]
         )
         assert actions[0].kind == "mount_nested_prose"
         assert actions[0].prose == "Сейчас проверю"
@@ -73,7 +95,11 @@ class TestPlanProgressActions:
     def test_finished_keeps_nested_no_collapse(self):
         actions = plan_progress_actions(
             [
-                _ev(kind="tool_start", tool_name="fs_read_file", tool_call_id="tc1"),
+                _ev(
+                    kind="tool_start",
+                    tool_name="fs_read_file",
+                    tool_call_id="tc1",
+                ),
                 _ev(kind="finished", step=5),
             ]
         )
@@ -86,10 +112,22 @@ class TestPlanProgressActions:
 class TestConsumerApply:
     def test_apply_mounts_and_finishes_via_hooks(self):
         sink = QueueSubagentProgressSink()
-        sink.emit(_ev(kind="tool_start", tool_name="fs_read_file",
-                      tool_call_id="tc1", args_summary="p"))
-        sink.emit(_ev(kind="tool_end", tool_name="fs_read_file",
-                      tool_call_id="tc1", ok=True))
+        sink.emit(
+            _ev(
+                kind="tool_start",
+                tool_name="fs_read_file",
+                tool_call_id="tc1",
+                args_summary="p",
+            )
+        )
+        sink.emit(
+            _ev(
+                kind="tool_end",
+                tool_name="fs_read_file",
+                tool_call_id="tc1",
+                ok=True,
+            )
+        )
 
         mounted: list[dict] = []
         finished: list[dict] = []
@@ -108,6 +146,29 @@ class TestConsumerApply:
         assert len(finished) == 1
         assert finished[0]["ok"] is True
         assert heartbeats  # at least one after end
+
+    def test_user_message_images_reach_the_nested_row(self):
+        """Реплика ребёнку с картинкой — строка со строкой картинки, как у ответа
+        на его вопрос (смоук 2026-10-01)."""
+        from image_helpers import make_attachment
+
+        att = make_attachment("a" * 16, 1)
+        mounted: list[dict] = []
+        SubagentProgressConsumer().apply_drained(
+            [
+                _ev(
+                    kind="user_message",
+                    prose="[Изображение #1] что тут?",
+                    attachments=[att.to_dict()],
+                )
+            ],
+            mount_nested_tool=lambda **kw: None,
+            finish_nested_tool=lambda **kw: None,
+            mount_nested_prose=lambda **kw: None,
+            parent_heartbeat=lambda **kw: None,
+            mount_nested_user=lambda **kw: mounted.append(kw),
+        )
+        assert mounted[0]["images"] == (att,)
 
     def test_session_todo_tool_start_routes_to_todo_mount(self):
         consumer = SubagentProgressConsumer()
@@ -134,11 +195,15 @@ class TestConsumerApply:
         consumer = SubagentProgressConsumer()
         mounted: list[tuple[str, dict]] = []
         first = _ev(
-            kind="tool_start", tool_name="session_todo", tool_call_id="c1",
+            kind="tool_start",
+            tool_name="session_todo",
+            tool_call_id="c1",
             todo_items=[{"content": "a", "status": "pending"}],
         )
         second = _ev(
-            kind="tool_start", tool_name="session_todo", tool_call_id="c2",
+            kind="tool_start",
+            tool_name="session_todo",
+            tool_call_id="c2",
             todo_items=[{"content": "a", "status": "completed"}],
         )
         consumer.apply_drained(
@@ -155,7 +220,9 @@ class TestConsumerApply:
         consumer = SubagentProgressConsumer()
         mounted: list[tuple[str, dict]] = []
         ev = _ev(
-            kind="tool_start", tool_name="session_todo", tool_call_id="c1",
+            kind="tool_start",
+            tool_name="session_todo",
+            tool_call_id="c1",
             todo_items=[{"content": "a", "status": "pending"}],
         )
         consumer.apply_drained(

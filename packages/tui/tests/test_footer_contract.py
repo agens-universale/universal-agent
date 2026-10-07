@@ -5,6 +5,7 @@ Ctrl+D как удаление) и МОЛЧАНИЕ о работающей. В�
 Tab стал переходом между группами, а стрелка из строки режима в поля ходить перестала,
 человек, пометивший «Свой endpoint», видел поля и не имел способа узнать, чем в них
 войти."""
+
 import pytest
 
 pytest.importorskip("textual")
@@ -20,8 +21,11 @@ def footer_wrapped_lines(text: str, cols: int) -> int:
 
     from rich.console import Console
     from rich.text import Text
-    inner = cols - 2                       # `#set-footer { padding: 0 1 }`
-    return len(Text(text).wrap(Console(width=inner, file=io.StringIO()), inner))
+
+    inner = cols - 2  # `#set-footer { padding: 0 1 }`
+    return len(
+        Text(text).wrap(Console(width=inner, file=io.StringIO()), inner)
+    )
 
 
 def _all_footer_strings():
@@ -38,6 +42,7 @@ def _all_footer_strings():
     ни одной её строки."""
     from gc_tui.editors import models_section
     from gc_tui.screens import onboarding, settings
+
     out = {}
     for module in (settings, onboarding, models_section):
         for name in dir(module):
@@ -65,13 +70,24 @@ def _all_hint_strings():
     (Global Constraints волны B): `model_entry_form` называет обе клавиши своих
     списков, `models_section` — подсказки строк и своего инлайн-пикера,
     `voice_endpoint` — списки адреса, модели и языка голосовой секции."""
-    from gc_tui.editors import (field_list, model_entry_form, models_section,
-                             preset_list, voice_endpoint)
+    from gc_tui.editors import (
+        field_list,
+        model_entry_form,
+        models_section,
+        preset_list,
+        voice_endpoint,
+    )
+
     out = {}
-    for module in (field_list, model_entry_form, models_section, preset_list,
-                   voice_endpoint):
+    for module in (
+        field_list,
+        model_entry_form,
+        models_section,
+        preset_list,
+        voice_endpoint,
+    ):
         for name in dir(module):
-            if not (name.endswith("_HINT") or name.endswith("_HINT_NO_MATCH")):
+            if not (name.endswith(("_HINT", "_HINT_NO_MATCH"))):
                 continue
             value = getattr(module, name)
             if isinstance(value, str):
@@ -98,10 +114,11 @@ def _model_section_notice_strings():
     f-строкой по месту, в перебор не попадёт вовсе, и подмена клавиши в нём
     осталась бы незамеченной."""
     from gc_tui.editors import models_section
+
     out = {}
     for module in (models_section,):
         for name in dir(module):
-            if not (name.startswith("_NOTICE") or name.startswith("_CONFIRM")):
+            if not (name.startswith(("_NOTICE", "_CONFIRM"))):
                 continue
             value = getattr(module, name)
             if isinstance(value, str):
@@ -115,6 +132,7 @@ def test_notice_and_confirm_texts_are_collected_at_all():
     записи основного конфига: имя, не попавшее в перебор, оставило бы предмет
     стража за его же границей."""
     from gc_tui.editors import models_section as m
+
     collected = set(_model_section_notice_strings().values())
     assert m._NOTICE_REMOVE_REFUSED_INHERITED in collected
     assert m._NOTICE_EDIT_REFUSED_INHERITED in collected
@@ -127,10 +145,13 @@ def test_collected_refusals_follow_the_canon_grammar():
     """Канон отказов Global Constraints — «✗ не <глагол>: <причина>»: одна форма на
     все витрины, иначе отказ читается как сбой, а не как ответ."""
     import re
+
     for name, value in _model_section_notice_strings().items():
         if not value.startswith("✗"):
             continue
-        assert re.match(r"^✗ не \w+: ", value), f"{name}: отказ мимо канона — {value}"
+        assert re.match(r"^✗ не \w+: ", value), (
+            f"{name}: отказ мимо канона — {value}"
+        )
 
 
 def test_the_inherited_row_footer_promises_neither_del_nor_enter():
@@ -139,6 +160,7 @@ def test_the_inherited_row_footer_promises_neither_del_nor_enter():
     обе клавиши (канон «недоступное не обещаем») и обещать то, что там реально
     работает."""
     from gc_tui.editors import models_section as m
+
     footer = m._FOOTER_PROFILE_BASE_ENTRY
     assert "Del" not in footer and "Enter" not in footer
     assert "n — добавить" in footer
@@ -156,32 +178,44 @@ def test_the_file_viewer_key_is_promised_only_in_the_profile_sub_view():
     — но слова обещания стоят рядом с остальными футерами секции, иначе их не
     видел бы ни один сборщик."""
     from gc_tui.editors import models_section as m
+
     promised = set(m.FOOTERS_WITH_VIEW.values())
     for name, value in _all_footer_strings().items():
         if m.VIEW_KEY in value:
-            assert value in promised, f"{name}: обещает просмотр файла вне под-вида"
+            assert value in promised, (
+                f"{name}: обещает просмотр файла вне под-вида"
+            )
     for base, viewed in m.FOOTERS_WITH_VIEW.items():
         assert m.VIEW_KEY not in base
         assert viewed.count(m.VIEW_KEY) == 1
-        assert viewed.endswith(m._EXIT_TO_LIST), viewed   # выход остаётся последним
+        assert viewed.endswith(m._EXIT_TO_LIST), (
+            viewed
+        )  # выход остаётся последним
 
 
 @pytest.mark.asyncio
 async def test_main_section_empty_body_keeps_the_menu_exit_under_an_overlay(
-        tmp_path, monkeypatch):
+    tmp_path, monkeypatch
+):
     """Страж над СОСТОЯНИЕМ (а): основная секция, реестр цели пуст и перекрыт слоем
     выше — строк нет, Esc уводит в МЕНЮ хаба. Прежний футер безусловно отдавал
     профильное «Esc — к списку»: списка профилей на этом экране нет, обещание вело
     в никуда (M5 ревью MR #80). `is_profile=False` не имеет права выдавать футер с
     хвостом `_EXIT_TO_LIST` ни в одном состоянии."""
-    from test_settings_models_section import (_PROJECT_REGISTRY, _editor,
-                                                        _section_over_layers)
     from gc_tui.editors import models_section as m
-    async with _section_over_layers(tmp_path, monkeypatch, project=_PROJECT_REGISTRY) \
-            as (_pilot, scr, _cfg_file):
+    from test_settings_models_section import (
+        _PROJECT_REGISTRY,
+        _editor,
+        _section_over_layers,
+    )
+
+    async with _section_over_layers(
+        tmp_path, monkeypatch, project=_PROJECT_REGISTRY
+    ) as (_pilot, scr, _cfg_file):
         ed = _editor(scr)
-        assert ed._is_profile is False and ed._row_at_cursor() is None, \
+        assert ed._is_profile is False and ed._row_at_cursor() is None, (
             "предпосылка: основная секция без единой строки"
+        )
         footer = ed.footer_text()
         assert m._EXIT_TO_LIST not in footer, footer
         assert "n — добавить запись" in footer
@@ -190,20 +224,27 @@ async def test_main_section_empty_body_keeps_the_menu_exit_under_an_overlay(
 
 @pytest.mark.asyncio
 async def test_main_section_empty_body_keeps_the_menu_exit_with_collapsed_blocks(
-        tmp_path):
+    tmp_path,
+):
     """Страж над СОСТОЯНИЕМ (б): основная секция, все три блока свёрнуты, резервной
     строки нет (`agent.model` пуст) — `_rows()` пуст и здесь, вопреки снятому
     комментарию «строк нет только у профиля». Хвост выхода обязан остаться «Esc»
     в меню, а не профильным «Esc — к списку» (M5 ревью MR #80)."""
-    from test_settings_models_section import _REGISTRY, _editor, _section
     from gc_tui.editors import models_section as m
-    async with _section(tmp_path, _REGISTRY, model='""') as (pilot, scr, _cfg_file):
+    from test_settings_models_section import _REGISTRY, _editor, _section
+
+    async with _section(tmp_path, _REGISTRY, model='""') as (
+        pilot,
+        scr,
+        _cfg_file,
+    ):
         ed = _editor(scr)
         for kind in ("entry", "slot", "assign"):
             ed._toggle_block(kind)
         await pilot.pause()
-        assert ed._is_profile is False and ed._row_at_cursor() is None, \
+        assert ed._is_profile is False and ed._row_at_cursor() is None, (
             "предпосылка: все блоки свёрнуты, строк нет"
+        )
         footer = ed.footer_text()
         assert m._EXIT_TO_LIST not in footer, footer
         assert "n — добавить запись" in footer
@@ -212,13 +253,17 @@ async def test_main_section_empty_body_keeps_the_menu_exit_with_collapsed_blocks
 def test_no_footer_promises_tab_as_probe():
     """Tab больше не проверяет связь — ни один футер не смеет это обещать."""
     for name, value in _all_footer_strings().items():
-        assert "Tab — провер" not in value, f"{name} обещает устаревшую роль Tab"
+        assert "Tab — провер" not in value, (
+            f"{name} обещает устаревшую роль Tab"
+        )
 
 
 def test_no_footer_promises_ctrl_d_as_delete():
     """Удаление везде на Del: Ctrl+D как «удалить» в футерах не осталось."""
     for name, value in _all_footer_strings().items():
-        assert "Ctrl+D — удалить" not in value, f"{name} обещает устаревшую клавишу"
+        assert "Ctrl+D — удалить" not in value, (
+            f"{name} обещает устаревшую клавишу"
+        )
 
 
 def test_no_footer_says_bare_update():
@@ -227,19 +272,28 @@ def test_no_footer_says_bare_update():
     уточнения в футерах не остаётся."""
     for name, value in _all_footer_strings().items():
         for word in ("обновить", "обновление"):
-            assert word not in value or "обновить версию" in value, \
+            assert word not in value or "обновить версию" in value, (
                 f"{name}: «{word}» без уточнения — непонятно, что именно обновится"
+            )
 
 
 def test_settings_voice_footers_name_tab_by_the_group():
     """Глагол Tab зависит от группы под курсором: из строк режима — «в поля», из
     полей — обратно «к режиму». Там, где второй группы нет, Tab не обещан вовсе."""
     from gc_tui.screens import settings as s
+
     for footer in (s._VOICE_FOOTER_LOCAL, s._VOICE_FOOTER_CLOUD):
-        assert s._TAB_TO_FIELDS in footer, f"курсор в вариантах, а «в поля» нет: {footer}"
-    for footer in (s._VOICE_FOOTER_LOCAL_LANG, s._VOICE_FOOTER_CLOUD_FIELD,
-                   s._VOICE_FOOTER_CLOUD_LIST):
-        assert s._TAB_TO_VARIANTS in footer, f"курсор в полях, а «к режиму» нет: {footer}"
+        assert s._TAB_TO_FIELDS in footer, (
+            f"курсор в вариантах, а «в поля» нет: {footer}"
+        )
+    for footer in (
+        s._VOICE_FOOTER_LOCAL_LANG,
+        s._VOICE_FOOTER_CLOUD_FIELD,
+        s._VOICE_FOOTER_CLOUD_LIST,
+    ):
+        assert s._TAB_TO_VARIANTS in footer, (
+            f"курсор в полях, а «к режиму» нет: {footer}"
+        )
     # Сервис не поставлен — полей нет вовсе, переходить некуда (§6.1).
     assert "Tab" not in s._VOICE_FOOTER_LOCAL_FRESH
 
@@ -248,6 +302,7 @@ def test_the_wizard_and_the_settings_speak_of_tab_the_same_way():
     """Один язык форм — один словарь: разъехавшиеся формулировки Tab на двух экранах
     читались бы как две разные клавиши."""
     from gc_tui.screens import onboarding, settings
+
     assert onboarding._TAB_TO_FIELDS == settings._TAB_TO_FIELDS
     assert onboarding._TAB_TO_VARIANTS == settings._TAB_TO_VARIANTS
 
@@ -263,24 +318,29 @@ def test_all_footers_fit_the_two_line_budget():
     со 108 до 136 символов и на 64 колонках стало рваться на ТРИ строки — хвост
     «Esc — меню» срезался. Общий контейнер — общий бюджет, общая проверка."""
     from gc_tui.screens import settings as s
+
     for name, value in _all_footer_strings().items():
         lines = footer_wrapped_lines(value, s._FOOTER_MIN_COLS)
-        assert lines <= 2, (f"{name}: {lines} строки на {s._FOOTER_MIN_COLS} колонках "
-                            f"— хвост будет отрезан: {value}")
+        assert lines <= 2, (
+            f"{name}: {lines} строки на {s._FOOTER_MIN_COLS} колонках — хвост будет отрезан: {value}"
+        )
 
 
 @pytest.mark.asyncio
 async def test_wizard_footer_names_tab_by_the_group(tmp_path):
     """Мастер: на «Своём endpoint» футер зовёт в поля, из полей — обратно к режиму."""
-    from textual.widgets import Input
     from form_harness import wizard_voice_step
     from gc_tui.screens.onboarding import _TAB_TO_FIELDS, _TAB_TO_VARIANTS
+    from textual.widgets import Input
+
     async with wizard_voice_step(tmp_path, mode="cloud") as (pilot, scr):
         # У «URL» свой пресет-лист (спека 2026-08-05 §3): пустое поле раскрывает его
         # само, и футер этот момент — про клавиши списка, а не про направление Tab
         # (см. _FOOTER_URL_LIST). Задаём НЕ-пресетный адрес, чтобы список молчал —
         # этот тест про сам разворот Tab, а не про список.
-        scr.query_one("#voice-url", Input).value = "https://s.x/v1/audio/transcriptions"
+        scr.query_one(
+            "#voice-url", Input
+        ).value = "https://s.x/v1/audio/transcriptions"
         assert _TAB_TO_FIELDS in scr._footer_text()
         await pilot.press("tab")
         await pilot.pause()
@@ -289,23 +349,31 @@ async def test_wizard_footer_names_tab_by_the_group(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_wizard_footer_keeps_quiet_about_tab_without_a_second_group(tmp_path):
+async def test_wizard_footer_keeps_quiet_about_tab_without_a_second_group(
+    tmp_path,
+):
     """«Без голосового ввода» полей не показывает: переходить некуда — Tab не обещан."""
     from form_harness import wizard_voice_step
+
     async with wizard_voice_step(tmp_path, mode="skip") as (_pilot, scr):
         assert "Tab" not in scr._footer_text()
 
 
 @pytest.mark.asyncio
-async def test_wizard_footer_does_not_promise_space_from_inside_a_field(tmp_path):
+async def test_wizard_footer_does_not_promise_space_from_inside_a_field(
+    tmp_path,
+):
     """В поле Space печатает пробел (Input съедает клавишу первым), пометки он там не
     ставит — обещать им выбор значит врать (§6.4)."""
-    from textual.widgets import Input
     from form_harness import wizard_voice_step
+    from textual.widgets import Input
+
     async with wizard_voice_step(tmp_path, mode="cloud") as (pilot, scr):
         # НЕ-пресетный адрес — иначе список URL раскрывается сам (спека 2026-08-05 §3),
         # и футер на входе в поле — про клавиши списка, а не про «Enter — выбрать».
-        scr.query_one("#voice-url", Input).value = "https://s.x/v1/audio/transcriptions"
+        scr.query_one(
+            "#voice-url", Input
+        ).value = "https://s.x/v1/audio/transcriptions"
         assert "Space" in scr._footer_text()
         await pilot.press("tab")
         await pilot.pause()
@@ -325,8 +393,11 @@ async def test_wizard_footer_names_the_right_key_per_step(tmp_path):
     профилей, и номер «2» с этого момента у разных прогонов разный."""
     from form_harness import wizard_connection_step
     from gc_tui.screens.onboarding import STEP_CONNECTION, STEP_MCP, STEP_MODEL
+
     async with wizard_connection_step(tmp_path) as (pilot, scr):
-        await pilot.press("escape")   # свернуть пресет-лист, раскрытый по умолчанию
+        await pilot.press(
+            "escape"
+        )  # свернуть пресет-лист, раскрытый по умолчанию
         await pilot.pause()
         scr._step = scr._steps.index(STEP_CONNECTION)
         footer = scr._footer_text()
@@ -338,7 +409,7 @@ async def test_wizard_footer_names_the_right_key_per_step(tmp_path):
         assert "Ctrl+Space" not in footer
         scr._step = scr._steps.index(STEP_MCP)
         footer = scr._footer_text()
-        assert "Ctrl+Space" not in footer   # на шаге MCP клавиша молчит
+        assert "Ctrl+Space" not in footer  # на шаге MCP клавиша молчит
         assert "Alt+↓" not in footer
 
 
@@ -349,6 +420,7 @@ def _footer_widget(scr) -> str:
     ошибка «посчитали раньше, чем появилось тело» видна только так. Тест на
     `_footer_text()` её не ловит — он считает заново, уже по готовому дереву."""
     from textual.widgets import Static
+
     return str(scr.query_one("#onb-footer", Static).render())
 
 
@@ -360,23 +432,35 @@ async def test_wizard_footer_names_tab_after_a_bare_arrow(tmp_path):
     делалась («поля вижу, войти нечем»)."""
     from form_harness import wizard_voice_step
     from gc_tui.screens.onboarding import _TAB_TO_FIELDS
+
     async with wizard_voice_step(tmp_path, mode="local") as (pilot, scr):
-        assert _TAB_TO_FIELDS not in _footer_widget(scr)   # на «Локальном» полей нет
-        await pilot.press("down")                          # → «Свой endpoint», поля видны
+        assert _TAB_TO_FIELDS not in _footer_widget(
+            scr
+        )  # на «Локальном» полей нет
+        await pilot.press("down")  # → «Свой endpoint», поля видны
         await pilot.pause()
         assert _TAB_TO_FIELDS in _footer_widget(scr)
 
 
 @pytest.mark.asyncio
-async def test_wizard_model_list_footer_stops_promising_a_pick_without_matches(tmp_path):
+async def test_wizard_model_list_footer_stops_promising_a_pick_without_matches(
+    tmp_path,
+):
     """Фильтр не оставил строк: стрелки съедены и никуда не двигают, Enter не
     подставляет (`pick_in` отдаёт False) — обещать «выбор модели» и «подставить»
     значит врать. Ввод своего id — штатный путь, а не край."""
-    from textual.widgets import Input
     from form_harness import wizard_voice_step
-    async with wizard_voice_step(tmp_path, mode="cloud", models=["whisper-1"]) as (pilot, scr):
-        scr.query_one("#voice-url", Input).value = "https://s.x/v1/audio/transcriptions"
-        await pilot.press("tab", "down", "down")           # → поле «Модель», список раскрыт
+    from textual.widgets import Input
+
+    async with wizard_voice_step(
+        tmp_path, mode="cloud", models=["whisper-1"]
+    ) as (pilot, scr):
+        scr.query_one(
+            "#voice-url", Input
+        ).value = "https://s.x/v1/audio/transcriptions"
+        await pilot.press(
+            "tab", "down", "down"
+        )  # → поле «Модель», список раскрыт
         await pilot.pause()
         await pilot.pause()
         ed = scr._voice_endpoint_editor()
@@ -386,18 +470,24 @@ async def test_wizard_model_list_footer_stops_promising_a_pick_without_matches(t
         await pilot.pause()
         assert ed.model_list.is_open and not ed.model_list.has_matches
         footer = _footer_widget(scr)
-        assert "выбор модели" not in footer and "Enter — подставить" not in footer
+        assert (
+            "выбор модели" not in footer and "Enter — подставить" not in footer
+        )
         assert "Esc — свернуть" in footer
 
 
 @pytest.mark.asyncio
-async def test_wizard_connection_footer_yields_to_the_open_preset_list(tmp_path):
+async def test_wizard_connection_footer_yields_to_the_open_preset_list(
+    tmp_path,
+):
     """Шаг «Подключение» открывается с РАСКРЫТЫМ пресет-листом: Enter там подставляет
     адрес и возвращается, а Esc сворачивает список. Футер «Enter — далее · Esc — выход»
     врёт на первом же экране мастера."""
     from form_harness import wizard_connection_step
+
     async with wizard_connection_step(tmp_path) as (_pilot, scr):
         from gc_tui.editors.connection import ConnectionEditor
+
         assert scr.query_one(ConnectionEditor).presets_open
         footer = _footer_widget(scr)
         assert "Enter — подставить" in footer and "Esc — свернуть" in footer
@@ -412,10 +502,13 @@ async def test_wizard_connection_footer_when_no_preset_matches(tmp_path):
     Путь до состояния — живой: набрали свой адрес (список свернулся, канон в редакции
     2026-08-18), затем сами позвали список `Alt+↓`. Раньше сюда приводила одна печать,
     но раскрытый пустой список забирал ↑/↓ и обещал Enter то, чего тот не делает."""
-    from textual.widgets import Input
     from form_harness import wizard_connection_step
+    from textual.widgets import Input
+
     async with wizard_connection_step(tmp_path) as (pilot, scr):
-        scr.query_one("#conn-url", Input).value = "https://my-own-host.internal/v1"
+        scr.query_one(
+            "#conn-url", Input
+        ).value = "https://my-own-host.internal/v1"
         await pilot.pause()
         await pilot.press("alt+down")
         await pilot.pause()
@@ -436,9 +529,12 @@ async def test_no_live_wizard_footer_tells_an_outdated_story(tmp_path):
     потому что виджетов нет — их строки стережёт перебор констант и живые тесты выше.
     Здесь проверяется ровно словарь безусловных кусков сборки."""
     from form_harness import wizard_voice_step
+
     async with wizard_voice_step(tmp_path, mode="cloud") as (pilot, scr):
         seen = []
-        for step in range(len(scr._steps)):     # весь состав прогона, не «первые четыре»
+        for step in range(
+            len(scr._steps)
+        ):  # весь состав прогона, не «первые четыре»
             scr._step = step
             seen.append(scr._footer_text())
         await pilot.press("tab")
@@ -455,20 +551,23 @@ def _set_footer_widget(scr) -> str:
     `_render_view` считает футер ДО монтажа тела секции, и ошибку «посчитали раньше,
     чем редактор раскрыл свой список» видно только на виджете."""
     from textual.widgets import Static
+
     return str(scr.query_one("#set-footer", Static).render())
 
 
 @pytest.mark.asyncio
-async def test_settings_connection_footer_yields_to_the_open_preset_list(tmp_path):
+async def test_settings_connection_footer_yields_to_the_open_preset_list(
+    tmp_path,
+):
     """Секция «Подключение» с ПУСТЫМ адресом открывается с раскрытым пресет-листом
     (чистая установка). Enter там подставляет провайдера и не сохраняет, Esc
     сворачивает список — футер «Enter — сохранить · Esc — меню» врал бы.
 
     Канон 2026-08-17: заполненный адрес список больше не поднимает, поэтому состояние
     задаётся пустым полем, а не совпадением с пресетом."""
-    from gc_core.config_modules.endpoint_presets import DEFAULT_ENDPOINT_PRESETS
     from form_harness import settings_connection
     from gc_tui.editors.connection import ConnectionEditor
+
     async with settings_connection(tmp_path, url="") as (_pilot, scr):
         assert scr.query_one(ConnectionEditor).presets_open
         footer = _set_footer_widget(scr)
@@ -484,10 +583,11 @@ async def test_settings_connection_footer_when_no_preset_matches(tmp_path):
     Входим со своим адресом — на непустом поле список свёрнут (канон), — и зовём его
     сами через `Alt+↓`. Печать сюда больше не приводит: без совпадений список
     сворачивается (редакция 2026-08-18)."""
-    from gc_core.config_modules.endpoint_presets import DEFAULT_ENDPOINT_PRESETS
     from form_harness import settings_connection
-    async with settings_connection(tmp_path,
-                                   url="https://my-own-host.internal/v1") as (pilot, scr):
+
+    async with settings_connection(
+        tmp_path, url="https://my-own-host.internal/v1"
+    ) as (pilot, scr):
         await pilot.press("alt+down")
         await pilot.pause()
         footer = _set_footer_widget(scr)
@@ -496,16 +596,18 @@ async def test_settings_connection_footer_when_no_preset_matches(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_settings_connection_footer_returns_to_the_section_after_esc(tmp_path):
-    """Esc свернул список — клавиши снова про секцию: Enter сохраняет, Esc уводит
+async def test_settings_connection_footer_returns_to_the_section_after_esc(
+    tmp_path,
+):
+    """Esc свернул список — клавиши снова про секцию: Ctrl+S сохраняет, Esc уводит
     в меню. Футер, застрявший на обещаниях списка, врал бы теперь в другую сторону."""
-    from gc_core.config_modules.endpoint_presets import DEFAULT_ENDPOINT_PRESETS
     from form_harness import settings_connection
+
     async with settings_connection(tmp_path, url="") as (pilot, scr):
         await pilot.press("escape")
         await pilot.pause()
         footer = _set_footer_widget(scr)
-        assert "Enter — сохранить" in footer and "Esc — меню" in footer
+        assert "Ctrl+S — сохранить" in footer and "Esc — меню" in footer
         assert "Esc — свернуть" not in footer
 
 
@@ -513,7 +615,11 @@ def test_settings_preset_footers_stay_on_one_line_at_the_canon_width():
     """`#set-footer` — две строки, но эти два футера видны в САМОМ частом состоянии
     секции (список раскрыт на входе), и хвост, сорвавшийся на вторую строку, читается
     как обрыв. Бюджет — 120 колонок канонного кадра минус `padding: 0 1` (styles.tcss)."""
-    from gc_tui.screens.settings import _FOOTER_PRESET_LIST, _FOOTER_PRESET_LIST_NO_MATCH
+    from gc_tui.screens.settings import (
+        _FOOTER_PRESET_LIST,
+        _FOOTER_PRESET_LIST_NO_MATCH,
+    )
+
     for footer in (_FOOTER_PRESET_LIST, _FOOTER_PRESET_LIST_NO_MATCH):
         assert len(footer) <= 118, f"{len(footer)} > 118: {footer}"
 
@@ -528,6 +634,7 @@ def test_models_section_footers_split_the_probe_from_the_list():
     (`Ctrl+Space`) есть исключительно в форме записи реестра — у неё свои адрес и
     токен, которые и проверяются."""
     from gc_tui.editors import models_section as m
+
     for footer in (m._FOOTER_EMPTY, m._FOOTER_RESERVE_FORM):
         assert "Alt+↓ — перечитать список" in footer
         assert "Ctrl+Space" not in footer
@@ -550,8 +657,9 @@ def test_both_screens_call_ctrl_space_by_the_canon_words():
     for name, value in hints.items():
         if "Ctrl+Space" not in value:
             continue
-        assert any(word in value for word in allowed), \
+        assert any(word in value for word in allowed), (
             f"{name}: Ctrl+Space назван мимо канон-словаря — {value}"
+        )
 
 
 def test_both_screens_call_alt_down_by_the_canon_words():
@@ -564,8 +672,9 @@ def test_both_screens_call_alt_down_by_the_canon_words():
     for name, value in hints.items():
         if "Alt+↓" not in value:
             continue
-        assert any(word in value for word in allowed), \
+        assert any(word in value for word in allowed), (
             f"{name}: Alt+↓ назван мимо канон-словаря — {value}"
+        )
 
 
 def test_ctrl_down_is_never_named_in_texts():
@@ -575,7 +684,9 @@ def test_ctrl_down_is_never_named_in_texts():
     разом (§4.5): подмена в любом из них — та же дыра."""
     hints = {**_all_footer_strings(), **_all_hint_strings()}
     for name, value in hints.items():
-        assert "Ctrl+↓" not in value, f"{name}: Ctrl+↓ назван в тексте — синоним должен молчать"
+        assert "Ctrl+↓" not in value, (
+            f"{name}: Ctrl+↓ назван в тексте — синоним должен молчать"
+        )
 
 
 def test_model_list_hint_calls_alt_down_by_the_canon_word():
@@ -584,6 +695,7 @@ def test_model_list_hint_calls_alt_down_by_the_canon_word():
     списка моделей больше не называется, а «обновить версию» (Ctrl+U) остаётся
     отдельной ролью и со словом «список» не смешивается."""
     from gc_tui.editors.voice_endpoint import _MODEL_HINT
+
     assert "Alt+↓ — перечитать список" in _MODEL_HINT
     assert "Ctrl+Space" not in _MODEL_HINT
     assert "обновить" not in _MODEL_HINT
@@ -601,7 +713,13 @@ def test_network_list_statuses_come_from_one_dictionary():
     дыру не закрыл бы — экраны точно так же разъехались бы на следующей правке одного
     из них. `model.LIST_LOADING is field_list.LIST_LOADING` доказывает, что имя в
     `model.py` — это импорт, а не повторное объявление."""
-    from gc_tui.editors import field_list, model, model_entry_form, voice_endpoint
+    from gc_tui.editors import (
+        field_list,
+        model,
+        model_entry_form,
+        voice_endpoint,
+    )
+
     assert model.LIST_LOADING is field_list.LIST_LOADING
     assert model.LIST_FAILED is field_list.LIST_FAILED
     assert voice_endpoint.LIST_LOADING is field_list.LIST_LOADING
@@ -621,5 +739,6 @@ def test_url_error_comes_from_one_dictionary():
     дыру не закрывает."""
     from gc_core.onboarding_fields import URL_ERROR
     from gc_tui.editors import connection, model_entry_form
+
     assert connection._URL_ERROR is URL_ERROR
     assert model_entry_form._URL_ERROR is URL_ERROR

@@ -1,15 +1,17 @@
+import asyncio
 import logging
-import time
 from typing import Any, Callable, Dict, Optional, Tuple
 
 from gc_core.config_modules.backend import DEFAULT_REQUEST_TIMEOUT_SEC
 from gc_core.runtime_notices import maybe_push_llm_failure_notice
-from gc_core.utils.connect_backend import request_backend_chat_completions
 from gc_core.utils.backend_errors import (
     EmbeddedChoiceError,
     has_payload,
+    is_image_rejection_error,
+    is_image_request_error,
     is_retriable_backend_error,
 )
+from gc_core.utils.connect_backend import arequest_backend_chat_completions
 
 _CHAT_COMPLETIONS_HTTP_RETRY_DELAY_SEC = 3.0
 _CHAT_COMPLETIONS_HTTP_RETRY_FACTOR = 0.5
@@ -25,12 +27,33 @@ def _raise_embedded_from_error_dict(err: Dict[str, Any]) -> None:
     except (TypeError, ValueError):
         status = None
     raise EmbeddedChoiceError(
-        "provider returned embedded choice error: "
-        f"code={code!r} message={err.get('message')!r}",
+        f"provider returned embedded choice error: code={code!r} message={err.get('message')!r}",
         status_code=status,
         metadata=err.get("metadata"),
         raw_code=code,
     )
+
+
+def _raise_on_first_choice_error(
+    ch0: Dict[str, Any], *, salvage_reasoning: bool
+) -> None:
+    """Ошибка внутри ``choices[0]``: поле ``error`` или ``finish_reason="error"`` без payload."""
+    err = ch0.get("error")
+    if isinstance(err, dict):
+        _raise_embedded_from_error_dict(err)
+    fr = ch0.get("finish_reason")
+    if not (isinstance(fr, str) and fr.lower() == "error"):
+        return
+    msg = ch0.get("message") or {}
+    usable = (
+        has_payload(msg)
+        if salvage_reasoning
+        else bool(msg.get("content") or msg.get("tool_calls"))
+    )
+    if not usable:
+        raise EmbeddedChoiceError(
+            "provider returned finish_reason='error' with empty choice"
+        )
 
 
 def _raise_on_embedded_choice_error(
@@ -58,20 +81,9 @@ def _raise_on_embedded_choice_error(
         return
     choices = response.get("choices")
     if isinstance(choices, list) and choices and isinstance(choices[0], dict):
-        ch0 = choices[0]
-        err = ch0.get("error")
-        if isinstance(err, dict):
-            _raise_embedded_from_error_dict(err)
-        fr = ch0.get("finish_reason")
-        if isinstance(fr, str) and fr.lower() == "error":
-            msg = ch0.get("message") or {}
-            usable = has_payload(msg) if salvage_reasoning else bool(
-                msg.get("content") or msg.get("tool_calls")
-            )
-            if not usable:
-                raise EmbeddedChoiceError(
-                    "provider returned finish_reason='error' with empty choice"
-                )
+        _raise_on_first_choice_error(
+            choices[0], salvage_reasoning=salvage_reasoning
+        )
         return
     # Нет валидного choices — проверяем top-level error (вторая типовая форма).
     top_err = response.get("error")
@@ -79,12 +91,43 @@ def _raise_on_embedded_choice_error(
         _raise_embedded_from_error_dict(top_err)
 
 
-def _reduced_chat_completions_max_tokens(*, configured: int, minimum: int) -> int:
+def _reduced_chat_completions_max_tokens(
+    *, configured: int, minimum: int
+) -> int:
     reduced = int(configured * _CHAT_COMPLETIONS_HTTP_RETRY_FACTOR)
     return max(int(minimum), reduced)
 
 
-def request_chat_completions_with_policy(
+def _payload_has_images(payload: Dict[str, Any]) -> bool:
+    """В сообщениях запроса есть части ``image_url`` (так их собирает проекция)."""
+    for message in payload.get("messages") or []:
+        content = message.get("content") if isinstance(message, dict) else None
+        if isinstance(content, list) and any(
+            isinstance(part, dict) and part.get("type") == "image_url"
+            for part in content
+        ):
+            return True
+    return False
+
+
+def _raise_if_image_failure(
+    exc: BaseException, payload: Dict[str, Any]
+) -> None:
+    """Картиночную ошибку запроса — наверх как есть: понижение max_tokens её не
+    лечит, а «Ошибка LLM» была бы ложной тревогой — потолок картинок и повтор с
+    меньшим их числом делает контроллер. На повторе адаптивного цикла — так же:
+    наверх уходит сам отказ, первая ошибка ничего о причине не скажет.
+
+    Отказ от зрения говорит о картинках сам; предел (413, число картинок) — только
+    если в запросе были картинки: 413 служебного вызова без картинок идёт прежним
+    путём, с «Ошибкой LLM»."""
+    if is_image_rejection_error(exc) or (
+        is_image_request_error(exc) and _payload_has_images(payload)
+    ):
+        raise exc
+
+
+async def arequest_chat_completions_with_policy(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING.md
     *,
     payload_factory: Callable[[int], Dict[str, Any]],
     initial_max_tokens: int,
@@ -113,11 +156,15 @@ def request_chat_completions_with_policy(
     transport retries. Connection errors/timeouts are not retried here.
     """
 
-    def _send_once(
+    last_payload: Dict[str, Any] = {}
+
+    async def _send_once(
         max_tokens: int, *, transport_use_retry: bool
     ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         payload = payload_factory(max_tokens)
-        response = request_backend_chat_completions(
+        last_payload.clear()
+        last_payload.update(payload)
+        response = await arequest_backend_chat_completions(
             payload,
             headers,
             url=url,
@@ -136,8 +183,11 @@ def request_chat_completions_with_policy(
         return response, payload
 
     try:
-        return _send_once(initial_max_tokens, transport_use_retry=use_retry)
+        return await _send_once(
+            initial_max_tokens, transport_use_retry=use_retry
+        )
     except Exception as first_exc:
+        _raise_if_image_failure(first_exc, last_payload)
         if not is_retriable_backend_error(first_exc):
             maybe_push_llm_failure_notice(
                 first_exc,
@@ -156,25 +206,27 @@ def request_chat_completions_with_policy(
             )
 
             run_logger.warning(
-                "chat/completions backend error; adaptive retry %s/%s "
-                "(max_tokens %s -> %s)",
+                "chat/completions backend error; adaptive retry %s/%s (max_tokens %s -> %s)",
                 step,
                 _CHAT_COMPLETIONS_ADAPTIVE_MAX_TOKEN_STEPS,
                 current_max_tokens,
                 reduced_max_tokens,
                 exc_info=True,
             )
-            time.sleep(_CHAT_COMPLETIONS_HTTP_RETRY_DELAY_SEC)
+            # Пауза кооперативная: time.sleep заморозил бы весь loop.
+            await asyncio.sleep(_CHAT_COMPLETIONS_HTTP_RETRY_DELAY_SEC)
             try:
-                return _send_once(reduced_max_tokens, transport_use_retry=False)
+                return await _send_once(
+                    reduced_max_tokens, transport_use_retry=False
+                )
             except Exception as retry_exc:
+                _raise_if_image_failure(retry_exc, last_payload)
                 current_max_tokens = reduced_max_tokens
                 if not is_retriable_backend_error(retry_exc):
                     break
 
         run_logger.error(
-            "chat/completions adaptive max_tokens retries failed; "
-            "raising original backend error",
+            "chat/completions adaptive max_tokens retries failed; raising original backend error",
             exc_info=True,
         )
         maybe_push_llm_failure_notice(

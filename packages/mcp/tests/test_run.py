@@ -1,11 +1,11 @@
 """Тесты run.py: docker-compose up, skip для MCP без run-блока."""
+
 from __future__ import annotations
 
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-
 from recommended_mcp import run as run_mod
 from recommended_mcp.manifest import InstallSpec, MCPEntry, RunSpec
 
@@ -19,7 +19,9 @@ def _entry_with_run(run: RunSpec | None = None) -> MCPEntry:
     )
 
 
-def test_no_run_block_skips(capsys: pytest.CaptureFixture, tmp_path: Path) -> None:
+def test_no_run_block_skips(
+    capsys: pytest.CaptureFixture, tmp_path: Path
+) -> None:
     entry = _entry_with_run(run=None)
     supervisor = run_mod.RunSupervisor(pids_dir=tmp_path)
     with patch("subprocess.run") as sub:
@@ -78,8 +80,12 @@ def test_command_delegates_to_supervisor(tmp_path: Path) -> None:
         )
     )
     supervisor = run_mod.RunSupervisor(pids_dir=tmp_path)
-    with patch.object(supervisor, "start_if_needed", return_value=True) as start:
-        started = run_mod.run_entry(entry, root=tmp_path, supervisor=supervisor)
+    with patch.object(
+        supervisor, "start_if_needed", return_value=True
+    ) as start:
+        started = run_mod.run_entry(
+            entry, root=tmp_path, supervisor=supervisor
+        )
     assert started is True
     start.assert_called_once()
 
@@ -88,6 +94,8 @@ def test_no_run_block_skips_with_supervisor(tmp_path: Path) -> None:
     entry = _entry_with_run(run=None)
     supervisor = run_mod.RunSupervisor(pids_dir=tmp_path)
     with patch.object(supervisor, "start_if_needed") as start:
-        started = run_mod.run_entry(entry, root=tmp_path, supervisor=supervisor)
+        started = run_mod.run_entry(
+            entry, root=tmp_path, supervisor=supervisor
+        )
     assert started is False
     start.assert_not_called()

@@ -1,5 +1,5 @@
-from gc_core.config_modules.tui import TuiConfig
 from gc_core.config_modules.paths import PathsConfig
+from gc_core.config_modules.tui import TuiConfig
 
 
 def test_agentsmd_override_lives_in_tui_default_false():

@@ -15,7 +15,6 @@ import pytest
 import yaml
 from gc_testkit.paths import ASSETS
 
-
 PACK_DIR = ASSETS / "skills" / "supercoder"
 
 EXPECTED_SKILL_IDS = {
@@ -33,7 +32,11 @@ EXPECTED_SKILL_IDS = {
 
 EXPECTED_REFERENCES = {
     "test-driven-development": {"testing-anti-patterns"},
-    "systematic-debugging": {"root-cause-tracing", "defense-in-depth", "condition-based-waiting"},
+    "systematic-debugging": {
+        "root-cause-tracing",
+        "defense-in-depth",
+        "condition-based-waiting",
+    },
 }
 
 
@@ -80,7 +83,9 @@ def test_using_supercoder_mentions_all_other_skill_ids():
     body = skill_md.read_text(encoding="utf-8")
     other_skills = EXPECTED_SKILL_IDS - {"using-supercoder"}
     missing = [sid for sid in other_skills if f"supercoder:{sid}" not in body]
-    assert not missing, f"using-supercoder body missing references to: {missing}"
+    assert not missing, (
+        f"using-supercoder body missing references to: {missing}"
+    )
 
 
 @pytest.mark.parametrize(
@@ -98,7 +103,7 @@ def test_reference_file_present(skill_id, slug):
     assert len(body.strip()) > 100
 
 
-def test_registry_default_list_returns_only_bootstrap(tmp_path):
+async def test_registry_default_list_returns_only_bootstrap(tmp_path):
     """default list_skills() возвращает bootstrap supercoder + flat-скиллы. Internal скрыты."""
     from gc_core.tools.skills.registry import SkillsRegistry
 
@@ -108,14 +113,18 @@ def test_registry_default_list_returns_only_bootstrap(tmp_path):
         user_root=str(tmp_path / "u_empty"),
         project_root=str(tmp_path / "p_empty"),
     )
-    items = {i["id"]: i for i in reg.list_skills() if i.get("pack_id") == "supercoder"}
+    items = {
+        i["id"]: i
+        for i in await reg.list_skills()
+        if i.get("pack_id") == "supercoder"
+    }
     assert set(items.keys()) == {"supercoder:using-supercoder"}
     bootstrap = items["supercoder:using-supercoder"]
     assert bootstrap["is_pack_bootstrap"] is True
     assert bootstrap["pack_size"] == 10
 
 
-def test_registry_pack_param_returns_all_10_internals(tmp_path):
+async def test_registry_pack_param_returns_all_10_internals(tmp_path):
     """list_skills(pack='supercoder') возвращает все 10 internal."""
     from gc_core.tools.skills.registry import SkillsRegistry
 
@@ -125,6 +134,6 @@ def test_registry_pack_param_returns_all_10_internals(tmp_path):
         user_root=str(tmp_path / "u_empty"),
         project_root=str(tmp_path / "p_empty"),
     )
-    items = reg.list_skills(pack="supercoder")
+    items = await reg.list_skills(pack="supercoder")
     canonical_ids = {f"supercoder:{sid}" for sid in EXPECTED_SKILL_IDS}
     assert {i["id"] for i in items} == canonical_ids

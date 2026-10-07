@@ -4,6 +4,7 @@
 значениям. Отсутствующий источник → пустая строка + warning с именем/путём
 (никогда с содержимым).
 """
+
 from __future__ import annotations
 
 import logging
@@ -13,7 +14,7 @@ from typing import Any
 
 _logger = logging.getLogger(__name__)
 
-_ENV_MARKER = re.compile(r"\$\{ENV:([A-Za-z_][A-Za-z0-9_]*)\}")
+_ENV_MARKER = re.compile(r"\$\{ENV:([A-Za-z_]\w*)\}", re.ASCII)
 _FILE_MARKER = re.compile(r"\$\{FILE:([^}]+)\}")
 _MAX_FILE_BYTES = 65536  # креды маленькие; защита от указания на большой файл
 
@@ -68,20 +69,25 @@ def _read_secret_file(path_raw: str, cache: dict[str, str]) -> str:
     return value
 
 
-def _resolve(obj: Any, missing_env: set[str], file_cache: dict[str, str]) -> Any:
+def _resolve(
+    obj: Any, missing_env: set[str], file_cache: dict[str, str]
+) -> Any:
     if isinstance(obj, dict):
-        return {k: _resolve(v, missing_env, file_cache) for k, v in obj.items()}
+        return {
+            k: _resolve(v, missing_env, file_cache) for k, v in obj.items()
+        }
     if isinstance(obj, list):
         return [_resolve(v, missing_env, file_cache) for v in obj]
     if isinstance(obj, str):
-        def repl_env(m: "re.Match[str]") -> str:
+
+        def repl_env(m: re.Match[str]) -> str:
             var = m.group(1)
             if var in os.environ:
                 return os.environ[var]
             missing_env.add(var)
             return ""
 
-        def repl_file(m: "re.Match[str]") -> str:
+        def repl_file(m: re.Match[str]) -> str:
             return _read_secret_file(m.group(1), file_cache)
 
         return _FILE_MARKER.sub(repl_file, _ENV_MARKER.sub(repl_env, obj))

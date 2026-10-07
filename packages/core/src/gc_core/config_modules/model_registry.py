@@ -8,17 +8,74 @@
 Как это настраивается пользователем — docs/configuration.md, раздел
 «Профили и уровни моделей».
 """
+
 from __future__ import annotations
 
+import copy
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, model_validator
+import yaml
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from gc_core.config_modules.backend import BackendConfig
+from gc_core.config_modules.env_interpolation import (
+    _FILE_MARKER,
+    resolve_env_only,
+)
+from gc_core.config_modules.chat_completions import (
+    auxiliary_llm_from_config_dict,
+)
 from gc_core.config_modules.pricing import ModelTariff
 
 RESERVED_WORDS = ("light", "default", "max", "auto")
 LEVELS = ("light", "default", "max")
+
+# Транспорт одной модели поверх общего backend. Ключ в поле — переписывает
+# одноимённый дефолт; незаписанный остаётся общим. Сэмплинг сюда не входит.
+MODEL_BACKEND_OVERLAY_KEYS = (
+    "request_timeout_sec",
+    "proxy",
+    "use_ssl",
+    "cert_path",
+    "key_path",
+    "use_retry",
+    "retry_embedded_choice_errors",
+    "chat_completions_max_tokens",
+    "chat_completions_min_response_tokens",
+    "use_max_tokens_param",
+    "openai_strict_tools_schema",
+    "send_tool_strict",
+    "claude_prompt_cache",
+    "vision",
+    "chat_completion_headers",
+    "completions_url",
+)
+# Поля BackendConfig, которые рантайм читает только из общего backend.
+MODEL_BACKEND_REJECTED = {
+    "chat_completion_kwargs": (
+        "температура и thinking задаются в main и auxiliary"
+    ),
+    "api_mode": "режим API задаётся в общем backend",
+    "stream": "stream задаётся в общем backend",
+}
+
+# Рантайм ставит их сам (модель, история, тулы, лимит ответа). В main/auxiliary
+# они не пишутся: воронка их режет, форма отказывает до записи.
+PROTECTED_COMPLETION_KEYS = frozenset(
+    {
+        "model",
+        "messages",
+        "tools",
+        "max_tokens",
+        "max_completion_tokens",
+    }
+)
 
 # Матрица фоллбэков уровня (спека §4): порядок обхода слотов, если слот
 # запрошенного уровня не задан. Живёт рядом с LEVELS — потребитель (ModelRouter,
@@ -28,6 +85,135 @@ LEVEL_FALLBACK: dict[str, tuple[str, str, str]] = {
     "default": ("default", "max", "light"),
     "max": ("max", "default", "light"),
 }
+
+
+def _parse_mapping_text(text: str) -> dict[str, Any] | None:
+    """Синтаксис полей модели; ошибка без содержимого строки с возможным секретом."""
+    try:
+        loaded = yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        mark = getattr(exc, "problem_mark", None)
+        where = (
+            f" (строка {mark.line + 1}, столбец {mark.column + 1})"
+            if mark else ""
+        )
+        raise ValueError(f"неверный YAML{where}") from exc
+    if loaded is not None and not isinstance(loaded, dict):
+        raise ValueError("нужен YAML-mapping, не список и не скаляр")
+    return loaded
+
+
+def parse_completion_kwargs_text(text: str) -> dict[str, Any] | None:
+    """Текст поля ``main``/``auxiliary`` → mapping или отсутствие mapping.
+
+    Пустое поле, YAML ``null`` / ``~`` и текст из одних комментариев — ``None``:
+    способ записи отсутствия определяет редактор (снять ключ или явный null).
+    Явный пустой mapping (``{}``) — ``{}``: в запрос эти ключи не класть.
+    JSON object — валидный YAML, разбирается тем же путём. Список и скаляр —
+    ошибка. Protected-ключи — ошибка: в файл их не кладут, рантайм всё равно
+    вырежет."""
+    raw = text.strip()
+    if not raw:
+        return None
+    loaded = _parse_mapping_text(raw)
+    if loaded is None:
+        return None
+    forbidden = [
+        str(key) for key in loaded if key in PROTECTED_COMPLETION_KEYS
+    ]
+    if forbidden:
+        raise ValueError(
+            f"ключи {', '.join(forbidden)} задаёт рантайм — уберите их из поля"
+        )
+    return loaded
+
+
+def _reject_disallowed_backend_keys(loaded: dict) -> None:
+    """Ключи, которые форма принимает как YAML, но рантайм с модели не читает."""
+    rejected = [str(key) for key in loaded if key in MODEL_BACKEND_REJECTED]
+    if rejected:
+        details = "; ".join(
+            f"{key}: {MODEL_BACKEND_REJECTED[key]}" for key in rejected
+        )
+        raise ValueError(details)
+    unknown = [
+        str(key) for key in loaded if key not in MODEL_BACKEND_OVERLAY_KEYS
+    ]
+    if unknown:
+        allowed = ", ".join(MODEL_BACKEND_OVERLAY_KEYS)
+        raise ValueError(
+            f"неизвестные ключи: {', '.join(unknown)}. Допустимы: {allowed}"
+        )
+
+
+def _validated_backend_overlay(loaded: dict) -> dict[str, Any]:
+    """Проверить копию, сохранить исходные ссылки и значения.
+
+    FILE-поля проверит загрузчик при записи транзакции; редактор не читает
+    файлы на каждое изменение текста. ENV раскрывается без дискового I/O.
+    """
+    headers = loaded.get("chat_completion_headers")
+    if headers is not None and not isinstance(headers, dict):
+        raise ValueError("chat_completion_headers: нужен YAML-mapping")
+    effective = resolve_env_only(loaded)
+    immediate = {
+        key: value
+        for key, value in effective.items()
+        if not (isinstance(value, str) and _FILE_MARKER.search(value))
+    }
+    try:
+        BackendConfig.model_validate(immediate)
+    except ValidationError as exc:
+        err = exc.errors()[0]
+        loc = ".".join(str(part) for part in err.get("loc") or ())
+        msg = err.get("msg") or "неверное значение"
+        where = f"{loc}: " if loc else ""
+        raise ValueError(f"{where}{msg}") from exc
+    return copy.deepcopy(loaded)
+
+
+def parse_model_backend_text(text: str) -> dict[str, Any] | None:
+    """Текст поля ``backend`` модели → оверлей транспорта или «снять секцию».
+
+    Пустое поле — ``None``: секции нет, запрос берёт общий ``backend``.
+    Явный ``{}`` — пустой оверлей. Записанный ключ потом переписывает одноимённый
+    дефолт; сюда не входят сэмплинг и поля, которые рантайм читает только из
+    общего ``backend``.
+    """
+    raw = text.strip()
+    if not raw:
+        return None
+    loaded = _parse_mapping_text(raw)
+    if loaded is None:
+        return {}
+    _reject_disallowed_backend_keys(loaded)
+    return _validated_backend_overlay(loaded)
+
+
+def effective_completion_kwargs(
+    resolved: Any, config_dict: dict | None, *, section: str
+) -> dict[str, Any]:
+    """Kwargs секции резолвленного алиаса.
+
+    Заполненный mapping — целиком, без слияния с глобальным словарём.
+    Явный ``{}`` — пустой набор: в запрос эти ключи не кладутся, их выбирает
+    сервер модели. Секции нет (``None``) — глобальный словарь своей роли:
+    ``main`` читает ``backend.chat_completion_kwargs``, ``auxiliary`` —
+    ``chat_completions.auxiliary_llm.completion_kwargs``. Друг в друга секции
+    не подставляются. ``models.<alias>.backend.chat_completion_kwargs`` не
+    читается.
+    """
+    chosen = getattr(resolved, section, None) if resolved is not None else None
+    if isinstance(chosen, dict):
+        return copy.deepcopy(chosen)
+    cfg = config_dict if isinstance(config_dict, dict) else {}
+    if section == "main":
+        global_kw = cfg.get("chat_completion_kwargs")
+    else:
+        global_kw = auxiliary_llm_from_config_dict(cfg).completion_kwargs
+    if isinstance(global_kw, dict):
+        return copy.deepcopy(global_kw)
+    return {}
 
 
 def validate_model_alias(alias: str) -> None:
@@ -45,12 +231,19 @@ def validate_level_value(value: str) -> str:
             "level: значение 'auto' появится с функцией авто-выбора — пока недоступно"
         )
     if value not in LEVELS:
-        raise ValueError(f"level должен быть одним из {LEVELS}, получено '{value}'")
+        raise ValueError(
+            f"level должен быть одним из {LEVELS}, получено '{value}'"
+        )
     return value
 
 
 def connection_parts(
-    *, url: Any, token: Any, completions_url: Any, proxy: Any, authorization: Any
+    *,
+    url: Any,
+    token: Any,
+    completions_url: Any,
+    proxy: Any,
+    authorization: Any,
 ) -> tuple[bool, bool]:
     """§2, ЕДИНОЕ определение «адрес задан» / «токен задан» для всех точек проверки.
 
@@ -73,7 +266,9 @@ def connection_parts(
     )
 
 
-def resolve_entry_address(*, url: Any, completions_url: Any, inherited: Any = "") -> str:
+def resolve_entry_address(
+    *, url: Any, completions_url: Any, inherited: Any = ""
+) -> str:
     """ДЕЙСТВУЮЩИЙ адрес записи реестра — одна or-цепочка на всех, кто её произносит:
     свой `url` → своё второе написание `backend.completions_url` → унаследованный из
     эффективной секции `backend`. Тем же порядком резолвит рантайм
@@ -90,12 +285,14 @@ def resolve_entry_address(*, url: Any, completions_url: Any, inherited: Any = ""
     return url or completions_url or inherited or ""
 
 
-def _pair_violation(label: str, has_address: bool, has_token: bool) -> str | None:
+def _pair_violation(
+    label: str, has_address: bool, has_token: bool
+) -> str | None:
     """Текст отказа правила пары (§3) или None, если пара целая. Один на обе точки —
     иначе формулировки разъезжаются так же, как разъехались бы определения."""
     if has_address and not has_token:
         return (
-            f'{label}: задан свой адрес, но не задан токен — укажите token '
+            f"{label}: задан свой адрес, но не задан токен — укажите token "
             '(или token: "" — «сервер не требует авторизации»), либо уберите адрес, '
             "чтобы запись работала через общее подключение"
         )
@@ -113,21 +310,34 @@ def _unresolved_pair_refs(entry) -> list[str]:
     Смотрит ДОРЕЗОЛВНОЕ значение: после подстановки от `${ENV:X}` не остаётся ничего,
     кроме пустой строки, и назвать причину уже нечем."""
     from gc_core.config_raw import missing_env_refs
+
     if not isinstance(entry, dict):
         return []
-    backend = entry.get("backend") if isinstance(entry.get("backend"), dict) else {}
-    headers = (backend.get("chat_completion_headers")
-               if isinstance(backend.get("chat_completion_headers"), dict) else {})
+    backend = (
+        entry.get("backend") if isinstance(entry.get("backend"), dict) else {}
+    )
+    headers = (
+        backend.get("chat_completion_headers")
+        if isinstance(backend.get("chat_completion_headers"), dict)
+        else {}
+    )
     names: list[str] = []
-    for value in (entry.get("url"), entry.get("token"), backend.get("completions_url"),
-                  backend.get("proxy"), headers.get("Authorization")):
+    for value in (
+        entry.get("url"),
+        entry.get("token"),
+        backend.get("completions_url"),
+        backend.get("proxy"),
+        headers.get("Authorization"),
+    ):
         for name in missing_env_refs(value):
             if name not in names:
                 names.append(name)
     return names
 
 
-def validate_registry_pairs(raw: dict, source: str = "", *, raw_source=None) -> None:
+def validate_registry_pairs(
+    raw: dict, source: str = "", *, raw_source=None
+) -> None:
     """§3, точка B: проверка правила пары на СЫРОМ документе одного слоя, до слияния.
 
     Нужна отдельно от валидатора `ModelEntry`: слои сливаются `deep_merge` рекурсивно по
@@ -154,9 +364,16 @@ def validate_registry_pairs(raw: dict, source: str = "", *, raw_source=None) -> 
     for alias, entry in models.items():
         if not isinstance(entry, dict):
             continue
-        backend = entry.get("backend") if isinstance(entry.get("backend"), dict) else {}
-        headers = (backend.get("chat_completion_headers")
-                   if isinstance(backend.get("chat_completion_headers"), dict) else {})
+        backend = (
+            entry.get("backend")
+            if isinstance(entry.get("backend"), dict)
+            else {}
+        )
+        headers = (
+            backend.get("chat_completion_headers")
+            if isinstance(backend.get("chat_completion_headers"), dict)
+            else {}
+        )
         problem = _pair_violation(
             f"{prefix}models.{alias}",
             *connection_parts(
@@ -169,7 +386,8 @@ def validate_registry_pairs(raw: dict, source: str = "", *, raw_source=None) -> 
         )
         if problem:
             names = _unresolved_pair_refs(
-                ((raw_source or {}).get("models") or {}).get(alias))
+                ((raw_source or {}).get("models") or {}).get(alias)
+            )
             if names:
                 raise ValueError(
                     f"{prefix}models.{alias}: не задана переменная окружения "
@@ -178,6 +396,11 @@ def validate_registry_pairs(raw: dict, source: str = "", *, raw_source=None) -> 
                     "переменную либо впишите значение в конфиг прямо"
                 )
             raise ValueError(problem)
+
+
+def model_authorization_header(token: str | None) -> str | None:
+    """Сохранить настроенную форму token для первой транспортной попытки."""
+    return token
 
 
 class ModelEntry(BaseModel):
@@ -191,22 +414,54 @@ class ModelEntry(BaseModel):
     token: str | None = None
     pricing: ModelTariff | None = None
     backend: BackendConfig | None = None
+    # None — секция не задана: свой глобальный словарь (main —
+    # chat_completion_kwargs, auxiliary — auxiliary_llm.completion_kwargs).
+    # {} — задана и пуста: в запрос эти ключи не класть.
+    main: dict[str, Any] | None = None
+    auxiliary: dict[str, Any] | None = None
+    # None — ключа нет, ход берёт глобальный strip_tags_projection.strip_think.
+    # true — вырезать мысль из истории. false — копировать скрытое поле.
+    strip_think: bool | None = None
+
+    @field_validator("strip_think", mode="before")
+    @classmethod
+    def _strip_think_flag(cls, value: Any) -> bool | None:
+        if value is None:
+            return None
+        if isinstance(value, bool):
+            return value
+        raise ValueError(
+            "strip_think: true, false или отсутствие ключа (глобальный флаг)"
+        )
+
+    @field_validator("main", "auxiliary", mode="before")
+    @classmethod
+    def _kwargs_section(cls, value: Any) -> dict[str, Any] | None:
+        if value is None:
+            return None
+        if isinstance(value, dict):
+            return value
+        raise ValueError("секция kwargs должна быть mapping")
 
     @model_validator(mode="after")
-    def _validate_no_duplicate_settings(self) -> "ModelEntry":
+    def _validate_no_duplicate_settings(self) -> ModelEntry:
         if (
             self.token is not None
             and self.backend is not None
-            and self.backend.chat_completion_headers.get("Authorization") is not None
+            and self.backend.chat_completion_headers.get("Authorization")
+            is not None
         ):
             raise ValueError(
                 "models.<alias>: token и backend.chat_completion_headers.Authorization "
                 "заданы одновременно — оставьте что-то одно"
             )
-        if self.url is not None and self.backend is not None and self.backend.completions_url:
+        if (
+            self.url is not None
+            and self.backend is not None
+            and self.backend.completions_url
+        ):
             raise ValueError(
-                "models.<alias>: url и backend.completions_url — два написания одного "
-                "и того же — оставьте что-то одно"
+                "models.<alias>: url и backend.completions_url — два написания одного и того же — оставьте что-то одно"
             )
         return self
 
@@ -220,16 +475,19 @@ class ModelEntry(BaseModel):
         return connection_parts(
             url=self.url,
             token=self.token,
-            completions_url=backend.completions_url if backend is not None else None,
+            completions_url=backend.completions_url
+            if backend is not None
+            else None,
             proxy=backend.proxy if backend is not None else None,
             authorization=(
                 backend.chat_completion_headers.get("Authorization")
-                if backend is not None else None
+                if backend is not None
+                else None
             ),
         )
 
     @model_validator(mode="after")
-    def _validate_connection_pair(self) -> "ModelEntry":
+    def _validate_connection_pair(self) -> ModelEntry:
         """§2: своё подключение задаётся ЦЕЛИКОМ. Адрес и токен принадлежат одному
         провайдеру: половина пары либо уносит общий ключ на чужой хост (свой адрес без
         токена), либо уезжает вслед за сменой общего адреса (свой токен без адреса).
@@ -257,15 +515,17 @@ class ModelEntry(BaseModel):
         backend = self.backend
         if backend is None or any(self._connection_parts()):
             return False
-        return not backend.use_ssl or bool(backend.cert_path) or bool(backend.key_path)
+        return (
+            not backend.use_ssl
+            or bool(backend.cert_path)
+            or bool(backend.key_path)
+        )
 
     @property
     def authorization_header(self) -> str | None:
         """Bearer-нормализация token: None → наследование, "" → явно без авторизации,
         иначе — `Bearer <token>` (уже с префиксом — не дублируется)."""
-        if self.token is None or not self.token or self.token.startswith("Bearer "):
-            return self.token
-        return f"Bearer {self.token}"
+        return model_authorization_header(self.token)
 
 
 class SlotsConfig(BaseModel):
@@ -291,6 +551,7 @@ class AssignConfig(BaseModel):
     intent_scope: str | None = None
     memory_compaction: str | None = None
     auto_judge: str | None = None
+    vision: str | None = None
     subagents: dict[str, str] = {}
 
     @model_validator(mode="before")

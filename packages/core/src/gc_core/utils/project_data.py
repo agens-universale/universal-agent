@@ -2,7 +2,10 @@ import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from gc_core.execution_workspace import build_execution_workspace, host_os_label
+from gc_core.execution_workspace import (
+    build_execution_workspace,
+    host_os_label,
+)
 from gc_core.utils.directory_write_access import directory_allows_probe_write
 
 cut_first = 100
@@ -34,49 +37,90 @@ def _slice_level(
     shown = sorted_entries[:limit]
     return shown, len(shown) < total, len(shown), total
 
+
 stop_folders = {
-        '.git', '.hg', '.svn', '.osc', '.gc',
-        '__pycache__', 'venv', '.venv', '.env',
-        'node_modules', 'bower_components',
-        'dist', 'build', 'out', 'target', 'bin', 'obj',
-        '.vscode', '.idea', '.fleet',
-        '.mypy_cache', '.pytest_cache', '.coverage',
-        '.gradle', '.classpath', '.project', '.settings',
-        'packages', '.nuget', 'TestResults',
-        'coverage', '.nyc_output',
-        'logs', 'tmp', 'temp', 'dump.rdb',
-        '.dockerignore', '.env.local', '.env.*',
-        '.github', '.gitlab', '.circleci', '.travis',
-        'Thumbs.db', 'Desktop.ini', '.DS_Store',
-        '$RECYCLE.BIN', 'System Volume Information',
-        '.Trash-*', '.local/share/Trash',
-        'patchwork', '.verdaccio', '.pnp', '.pnpify',
-        'Cargo.lock', 'target', 'target_debug', 'target_release',
-        'vendor'
-    }
+    ".git",
+    ".hg",
+    ".svn",
+    ".osc",
+    ".gc",
+    "__pycache__",
+    "venv",
+    ".venv",
+    ".env",
+    "node_modules",
+    "bower_components",
+    "dist",
+    "build",
+    "out",
+    "target",
+    "bin",
+    "obj",
+    ".vscode",
+    ".idea",
+    ".fleet",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".coverage",
+    ".gradle",
+    ".classpath",
+    ".project",
+    ".settings",
+    "packages",
+    ".nuget",
+    "TestResults",
+    "coverage",
+    ".nyc_output",
+    "logs",
+    "tmp",
+    "temp",
+    "dump.rdb",
+    ".dockerignore",
+    ".env.local",
+    ".env.*",
+    ".github",
+    ".gitlab",
+    ".circleci",
+    ".travis",
+    "Thumbs.db",
+    "Desktop.ini",
+    ".DS_Store",
+    "$RECYCLE.BIN",
+    "System Volume Information",
+    ".Trash-*",
+    ".local/share/Trash",
+    "patchwork",
+    ".verdaccio",
+    ".pnp",
+    ".pnpify",
+    "Cargo.lock",
+    "target_debug",
+    "target_release",
+    "vendor",
+}
 
 
-def get_listing(dir_path: str) -> str:
-    def _listdir(p: str) -> list[tuple[str, bool]]:
+async def get_listing(dir_path: str) -> str:
+    async def _listdir(p: str) -> list[tuple[str, bool]]:
         return [(f, os.path.isdir(os.path.join(p, f))) for f in os.listdir(p)]
 
     def _join(base: str, name: str) -> str:
         return os.path.join(base, name)
 
-    return _build_listing(_listdir, _join, dir_path)
+    return await _build_listing(_listdir, _join, dir_path)
 
 
-def get_listing_from_backend(backend: Any, dir_path: str) -> str:
-    def _listdir(p: str) -> list[tuple[str, bool]]:
-        return list(backend.listdir(p))
+async def get_listing_from_backend(backend: Any, dir_path: str) -> str:
+    async def _listdir(p: str) -> list[tuple[str, bool]]:
+        return list(await backend.listdir(p))
 
     def _join(base: str, name: str) -> str:
         return backend.join(base, name)
 
-    return _build_listing(_listdir, _join, dir_path)
+    return await _build_listing(_listdir, _join, dir_path)
 
 
-def _build_listing(
+async def _build_listing(
     listdir_fn,
     join_fn,
     dir_path: str,
@@ -90,50 +134,66 @@ def _build_listing(
     - Final hint: one tool-agnostic line at end of listing,
       present ONLY when at least one level was truncated (D5).
     """
-    raw_entries = listdir_fn(dir_path)
+    raw_entries = await listdir_fn(dir_path)
 
     filtered: list[tuple[str, bool]] = [
         (n, d) for n, d in raw_entries if n not in stop_folders
     ]
 
-    shown, root_trunc, root_shown, root_total = _slice_level(filtered, cut_first)
+    shown, root_trunc, root_shown, root_total = _slice_level(
+        filtered, cut_first
+    )
     any_trunc = root_trunc
 
     res: List[tuple[str, List[str]]] = []
     for name, is_dir in shown:
-        if is_dir:
-            sub_path = join_fn(dir_path, name)
-            raw_sub = listdir_fn(sub_path)
-            filtered_sub: list[tuple[str, bool]] = [
-                (n, d) for n, d in raw_sub if n not in stop_folders
-            ]
-            shown_sub, sub_trunc, sub_shown, sub_total = _slice_level(filtered_sub, cut_second)
-            if sub_trunc:
-                any_trunc = True
-            sub_items = [n + "/" if d else n for n, d in shown_sub]
-            if sub_trunc:
-                sub_items.append(
-                    "..." + _TRUNCATE_MARKER.format(shown=sub_shown, total=sub_total)
-                )
-            res.append((name + "/", sub_items))
-        else:
+        if not is_dir:
             res.append((name, []))
+            continue
+        sub_items, sub_trunc = await _sub_level_items(
+            listdir_fn, join_fn(dir_path, name)
+        )
+        any_trunc = any_trunc or sub_trunc
+        res.append((name + "/", sub_items))
 
     if root_trunc:
-        res.append((
-            "..." + _TRUNCATE_MARKER.format(shown=root_shown, total=root_total),
-            [],
-        ))
+        res.append(
+            (
+                "..."
+                + _TRUNCATE_MARKER.format(shown=root_shown, total=root_total),
+                [],
+            )
+        )
 
+    return _render_listing(res, any_trunc)
+
+
+async def _sub_level_items(
+    listdir_fn, sub_path: str
+) -> tuple[List[str], bool]:
+    """Имена второго уровня (с маркером усечения) и флаг усечения."""
+    filtered_sub: list[tuple[str, bool]] = [
+        (n, d) for n, d in await listdir_fn(sub_path) if n not in stop_folders
+    ]
+    shown_sub, sub_trunc, sub_shown, sub_total = _slice_level(
+        filtered_sub, cut_second
+    )
+    sub_items = [n + "/" if d else n for n, d in shown_sub]
+    if sub_trunc:
+        sub_items.append(
+            "..." + _TRUNCATE_MARKER.format(shown=sub_shown, total=sub_total)
+        )
+    return sub_items, sub_trunc
+
+
+def _render_listing(res: List[tuple[str, List[str]]], any_trunc: bool) -> str:
     tpl = ""
     for name, sub_items in res:
         tpl += "\n" + name
         for sub in sub_items:
             tpl += "\n    " + sub
-
     if any_trunc:
         tpl += "\n" + _FINAL_HINT
-
     return tpl.strip()
 
 
@@ -145,12 +205,13 @@ def _dedupe_ordered_abs_paths(paths: List[str]) -> List[str]:
     seen: set[str] = set()
     out: List[str] = []
     for raw in paths:
-        candidate = os.path.abspath(os.path.expanduser(os.path.normpath(str(raw))))
+        candidate = os.path.abspath(
+            os.path.expanduser(os.path.normpath(str(raw)))
+        )
         if candidate not in seen:
             seen.add(candidate)
             out.append(candidate)
     return out
-
 
 
 def _extra_write_roots(config_dict: Optional[Dict[str, Any]]) -> List[str]:
@@ -190,7 +251,7 @@ def _coerce_workspace(
     return build_execution_workspace(LocalFsBackend(), workspace_config)
 
 
-def get_project_data(
+async def get_project_data(
     workspace_config: Optional[Dict[str, Any]] = None,
     workspace: Optional[Any] = None,
     backend: Optional[Any] = None,
@@ -222,10 +283,10 @@ def get_project_data(
     be = ws.backend
     current_date = datetime.now().strftime("%Y-%m-%d")
     is_git_project = (
-        "true" if be.exists(be.join(project_dir, ".git")) else "false"
+        "true" if await be.exists(be.join(project_dir, ".git")) else "false"
     )
     try:
-        project_dir_listing = get_listing_from_backend(be, project_dir)
+        project_dir_listing = await get_listing_from_backend(be, project_dir)
     except OSError:
         project_dir_listing = ""
     root_writable = "true" if ws.root_writable else "false"
@@ -247,10 +308,12 @@ def get_project_data(
         project_dir = os.path.abspath(os.getcwd())
         root_writable = "true" if _dir_writable_probe(project_dir) else "false"
         is_git_project = (
-            "true" if os.path.exists(os.path.join(project_dir, ".git")) else "false"
+            "true"
+            if os.path.exists(os.path.join(project_dir, ".git"))
+            else "false"
         )
         try:
-            project_dir_listing = get_listing(project_dir)
+            project_dir_listing = await get_listing(project_dir)
         except OSError:
             project_dir_listing = ""
 

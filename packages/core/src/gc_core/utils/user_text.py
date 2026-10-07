@@ -24,6 +24,7 @@ Windows в UTF-16; он подкласс `ValueError`, а НЕ `OSError`, поэ
 `tui.main`, лестница починки конфига), и заводить ради этого новый тип значит
 обойти их все. Кому нужна ТИХАЯ деградация, а не отказ, — `read_user_text_or_none`.
 """
+
 from __future__ import annotations
 
 from pathlib import Path

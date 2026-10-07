@@ -1,12 +1,28 @@
 """Тело сообщения с резюме треда: разметка секций и связанные строковые константы."""
 
 import re
-
 from typing import Any, Iterable, Mapping
 
+from gc_core.attachments.model import ORIGIN_USER, attachments_of, wh_text
+from gc_core.attachments.texts import (
+    STUB_OUT_OF_CONTEXT,
+    SUMMARY_IMAGES_CLOSE,
+    SUMMARY_IMAGES_OPEN,
+)
 from gc_core.config_modules.summary import DEFAULT_INTENT_LOG_PREVIEW_CHARS
 from gc_core.intent_log import serialize, tail_preview
 from gc_core.intent_log.record import IntentRecord
+from gc_core.message_policy.user_message_policy import (
+    is_dialog_summary_user_message_text,
+)
+
+#: Блок <images> прежней сводки — его строки переезжают в новую дословно.
+_IMAGES_BLOCK_RE = re.compile(
+    re.escape(SUMMARY_IMAGES_OPEN)
+    + r"\n(.*?)\n"
+    + re.escape(SUMMARY_IMAGES_CLOSE),
+    re.DOTALL,
+)
 
 _SESSION_TODO_HINT = (
     "The block above is the current task checklist for this thread. Continue it "
@@ -56,13 +72,74 @@ def render_current_user_intent_block(current_jsonl: str) -> str:
     return f"<current_user_intent>\n{body}\n</current_user_intent>"
 
 
-def resolve_intent_log_preview_chars(summary_params: Mapping[str, Any] | None) -> int:
+def render_summary_images_block(
+    messages: Iterable[Mapping[str, Any]],
+    *,
+    kept: Iterable[Mapping[str, Any]] = (),
+) -> str:
+    """Блок ``<images>`` для ``dialog_summary`` (спека §6): ваши картинки из
+    сворачиваемой части — по строке-записке «вне контекста» (подпись, размер, путь),
+    детерминированно, без LLM. Снимки агента (``origin="tool"``) не переносятся:
+    они живут один ход. Строки блока прежней сводки (она тоже сворачивается)
+    переезжают дословно; повторы схлопываются, порядок — по истории. ``kept`` —
+    сообщения, которые вернутся в историю как есть (текущий батч сжатия перед
+    запросом): их картинки остаются живыми, записка им противоречила бы."""
+    kept_ids = {att.id for m in kept for att in attachments_of(m)}
+    lines: list[str] = []
+    for message in messages:
+        if isinstance(message, Mapping):
+            lines.extend(
+                line
+                for line in _previous_summary_image_lines(message)
+                # id картинки — в имени её файла (`<sys>_<thread>_<id>.png`)
+                if not any(att_id in line for att_id in kept_ids)
+            )
+            lines.extend(_user_image_lines(message, skip=kept_ids))
+    unique = [line for line in dict.fromkeys(lines) if line.strip()]
+    if not unique:
+        return ""
+    return "\n".join([SUMMARY_IMAGES_OPEN, *unique, SUMMARY_IMAGES_CLOSE])
+
+
+def _previous_summary_image_lines(message: Mapping[str, Any]) -> list[str]:
+    """Строки блока ``<images>`` прежней сводки — дословно."""
+    content = message.get("content")
+    if not (
+        isinstance(content, str)
+        and is_dialog_summary_user_message_text(content)
+    ):
+        return []
+    return [
+        line
+        for block in _IMAGES_BLOCK_RE.findall(content)
+        for line in block.splitlines()
+    ]
+
+
+def _user_image_lines(
+    message: Mapping[str, Any], *, skip: set[str]
+) -> list[str]:
+    """Записки «вне контекста» о ваших картинках сообщения (кроме ``skip``)."""
+    return [
+        STUB_OUT_OF_CONTEXT.format(
+            label=att.label, wh=wh_text(att), path=att.path
+        )
+        for att in attachments_of(message)
+        if att.origin == ORIGIN_USER and att.id not in skip
+    ]
+
+
+def resolve_intent_log_preview_chars(
+    summary_params: Mapping[str, Any] | None,
+) -> int:
     """``summary_params.intent_log_preview_chars`` (closed-log tail budget in characters)."""
     if not isinstance(summary_params, Mapping):
         return DEFAULT_INTENT_LOG_PREVIEW_CHARS
     try:
         value = int(
-            summary_params.get("intent_log_preview_chars", DEFAULT_INTENT_LOG_PREVIEW_CHARS)
+            summary_params.get(
+                "intent_log_preview_chars", DEFAULT_INTENT_LOG_PREVIEW_CHARS
+            )
         )
     except (TypeError, ValueError):
         value = DEFAULT_INTENT_LOG_PREVIEW_CHARS
@@ -89,7 +166,9 @@ def build_intent_blocks_prefix(
     log_block = render_user_intent_log_block(preview)
     if log_block:
         parts.append(log_block)
-    current_block = render_current_user_intent_block(serialize(list(open_records)))
+    current_block = render_current_user_intent_block(
+        serialize(list(open_records))
+    )
     if current_block:
         parts.append(current_block)
     if not parts:
@@ -114,8 +193,12 @@ def build_dialog_summary_content(
     session_todo_block: str = "",
     user_intent_log_preview: Mapping[str, Any] | None = None,
     current_user_intent_jsonl: str = "",
+    images_block: str = "",
 ) -> str:
-    """Собирает итоговое тело сообщения-резюме треда для подстановки в историю чата."""
+    """Собирает итоговое тело сообщения-резюме треда для подстановки в историю чата.
+
+    ``images_block`` — готовый блок ``<images>`` (``render_summary_images_block``):
+    ставится перед ``<last_dialog_steps>``."""
     lines: list[str] = [format_summary_block(summary_text)]
 
     sm_block = str(session_memory_block or "").strip()
@@ -136,10 +219,17 @@ def build_dialog_summary_content(
             lines.append("")
             lines.append(log_section)
 
-    current_section = render_current_user_intent_block(current_user_intent_jsonl)
+    current_section = render_current_user_intent_block(
+        current_user_intent_jsonl
+    )
     if current_section:
         lines.append("")
         lines.append(current_section)
+
+    images_section = str(images_block or "").strip()
+    if images_section:
+        lines.append("")
+        lines.append(images_section)
 
     lines.append("")
     lines.append("<last_dialog_steps>")

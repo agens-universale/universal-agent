@@ -18,7 +18,9 @@ def _effective_bin_dir() -> os.PathLike[str] | None:
     return fallback if fallback.is_dir() else None
 
 
-def augment_process_env(env: Mapping[str, str] | None = None) -> dict[str, str]:
+def augment_process_env(
+    env: Mapping[str, str] | None = None,
+) -> dict[str, str]:
     """Prepend MCP bin в PATH дочернего процесса (не трогая env агента)."""
     merged = dict(os.environ if env is None else env)
     bin_dir = _effective_bin_dir()
@@ -31,7 +33,9 @@ def augment_process_env(env: Mapping[str, str] | None = None) -> dict[str, str]:
     return merged
 
 
-def mcp_stdio_env(server_env: Mapping[str, str] | None = None) -> dict[str, str]:
+def mcp_stdio_env(
+    server_env: Mapping[str, str] | None = None,
+) -> dict[str, str]:
     """Env для stdio MCP: mcp-env PATH + per-server overrides из config."""
     merged = augment_process_env()
     if server_env:

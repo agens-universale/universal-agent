@@ -1,24 +1,28 @@
 [Назад к README](../readme.md)
 
-# Как устроена упаковка: шесть дистрибутивов, пять пакетов
+# Как устроена упаковка: дистрибутивы и мета
 
 Код разбит на настоящие пакеты с собственным пространством имён:
-`gc_core` (SDK), `gc_cli`, `gc_tui`, `gc_server`, `recommended_mcp`. Каждый живёт
-в своём каталоге под `packages/` и собирается своим манифестом.
+`gc_core` (SDK), `gc_cli`, `gc_tui`, `gc_server`, `recommended_mcp`, `gc_acp`,
+`gc_chat`. Каждый живёт в своём каталоге под `packages/` и собирается своим
+манифестом.
 
 ## Профили
 
-| Дистрибутив | Пакет | Модулей | Команды |
-|---|---|---|---|
-| `gc-core` | `gc_core` | 287 | **нет** — это библиотека |
-| `gc-cli` | `gc_cli` | 4 | `gc-cli` |
-| `gc-tui` | `gc_tui` | 137 | `gc-ua`, `gc-voice` |
-| `gc-server` | `gc_server` | 15 | `gc-serve` |
-| `gc-mcp` | `recommended_mcp` | 14 | `gc-mcp`, `gc-mcp-install` |
-| `gc-ua` | — (только метаданные) | 0 | все шесть |
+| Дистрибутив | Пакет | Команды |
+|---|---|---|
+| `gc-core` | `gc_core` | **нет** — это библиотека |
+| `gc-cli` | `gc_cli` | `gc-cli` |
+| `gc-tui` | `gc_tui` | `gc-ua`, `gc-voice` |
+| `gc-server` | `gc_server` | `gc-serve` |
+| `gc-mcp` | `recommended_mcp` | `gc-mcp`, `gc-mcp-install` |
+| `gc-acp` | `gc_acp` | `gc-acp` |
+| `gc-chat` | `gc_chat` | `gc-chat` |
+| `gc-ua` | — (только метаданные) | все листовые команды выше |
 
 `gc-cli`, `gc-tui` и `gc-server` зависят от `gc-core` и `gc-mcp`; друг от друга —
-нет. `gc-mcp` зависит от `gc-core`. `gc-ua` тянет все пять.
+нет. `gc-mcp`, `gc-acp` и `gc-chat` зависят от `gc-core` (`gc-chat` ещё тянет
+FastAPI/uvicorn). `gc-ua` тянет все листовые дистрибутивы.
 
 Колесо меты пустое (`bypass-selection = true`): она объявляет зависимости и
 точки входа, но не несёт ни одного файла. Раньше в ней жил `meta/gc_ua_launcher.py`,
@@ -37,13 +41,15 @@ uv tool install "gc-ua @ git+https://gitverse.ru/gigacode-ai/universal-agent"
 uv tool install "gc-cli @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/cli"       --with-executables-from gc-mcp
 uv tool install "gc-tui @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/tui"       --with-executables-from gc-mcp
 uv tool install "gc-server @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/server" --with-executables-from gc-mcp
+uv tool install "gc-acp @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/acp"
+uv tool install "gc-chat @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/chat"
 ```
 
 `--with-executables-from gc-mcp` у узких профилей не украшение: `uv` выносит в
 `PATH` команды только запрошенного дистрибутива, а `gc-mcp` приезжает
 зависимостью и остаётся внутри venv инструмента. Без флага `gc-mcp` и
-`gc-mcp-install` в `PATH` не появятся. Мете он не нужен — она объявляет все шесть
-команд сама. Тот же флаг дописывает и обновление, см. `updater.runner`.
+`gc-mcp-install` в `PATH` не появятся. Мете он не нужен — она объявляет все
+листовые команды сама. Тот же флаг дописывает и обновление, см. `updater.runner`.
 
 Смена профиля — это переустановка, нужен `--force`.
 
@@ -187,7 +193,7 @@ python -c "import zipfile;print(sorted(zipfile.ZipFile('dist/gc_core-0.3.0-py3-n
 
 ## Главный инвариант: колёса не пересекаются
 
-Все шесть колёс обязаны иметь **непересекающиеся** множества путей. Если два
+Все колёса обязаны иметь **непересекающиеся** множества путей. Если два
 колеса заявят один и тот же файл, установка двух профилей затрёт его, и чья
 версия победит — решит порядок распаковки.
 
@@ -214,8 +220,12 @@ provided by dependencies of tool packages are not installed»). Поэтому �
 | `gc-tui` | `gc-ua`, `gc-voice` |
 | `gc-server` | `gc-serve` |
 | `gc-mcp` | `gc-mcp`, `gc-mcp-install` |
-| `gc-ua` (мета) | все шесть |
+| `gc-acp` | `gc-acp` |
+| `gc-chat` | `gc-chat` |
+| `gc-ua` (мета) | все листовые команды, включая `gc-acp` и `gc-chat` |
 | `gc-core` | ничего, это библиотека |
+
+Гайды: [acp.md](acp.md), [chat.md](chat.md).
 
 ### Почему имена не должны пересекаться
 

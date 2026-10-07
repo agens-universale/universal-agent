@@ -8,13 +8,14 @@
 Each test drives real code with a jsonl-mode per-run logger from
 ``create_run_logger`` and asserts the event line + expected keys appear.
 """
+
 import json
-import os
 import tempfile
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from gc_core.utils.logging_module import create_run_logger
+from gc_testkit import run_coro
 
 
 def _make_logger(tmp_path, level="debug"):
@@ -50,7 +51,7 @@ def _embedded_events(recs, event_name):
     for rec in recs:
         msg = rec.get("msg") or ""
         if msg.startswith(prefix):
-            out.append(json.loads(msg[len(prefix):]))
+            out.append(json.loads(msg[len(prefix) :]))
     return out
 
 
@@ -60,10 +61,14 @@ def _embedded_events(recs, event_name):
 
 
 def test_command_moderation_judge_regex_fallback_event(tmp_path):
-    from gc_core.security.command_moderation import _log_command_judge_regex_fallback
+    from gc_core.security.command_moderation import (
+        _log_command_judge_regex_fallback,
+    )
 
     logger, path = _make_logger(tmp_path)
-    _log_command_judge_regex_fallback(logger, tool_name="exec_command", verdict="safe")
+    _log_command_judge_regex_fallback(
+        logger, tool_name="exec_command", verdict="safe"
+    )
     _flush(logger)
     recs = _records(path)
 
@@ -79,7 +84,9 @@ def test_command_moderation_judge_failed_event(tmp_path):
 
     logger, path = _make_logger(tmp_path)
     context = ToolSecurityContext(launch_root="/tmp/launch", logger=logger)
-    _log_command_judge_failure(context, tool_name="exec_python", exc=RuntimeError("judge boom"))
+    _log_command_judge_failure(
+        context, tool_name="exec_python", exc=RuntimeError("judge boom")
+    )
     _flush(logger)
     recs = _records(path)
 
@@ -96,7 +103,10 @@ def test_command_moderation_judge_failed_event(tmp_path):
 
 
 def test_security_policy_decision_event(tmp_path):
-    from gc_core.security.path_policy import ToolSecurityContext, audit_policy_decision
+    from gc_core.security.path_policy import (
+        ToolSecurityContext,
+        audit_policy_decision,
+    )
 
     logger, path = _make_logger(tmp_path)
     context = ToolSecurityContext(launch_root="/tmp/launch", logger=logger)
@@ -134,8 +144,9 @@ def test_log_path_event_emitted_at_end_of_run(tmp_path):
     logger, logging_path = _make_logger(tmp_path)
 
     with tempfile.TemporaryDirectory() as thread_dir:
+
         class _SkillsRegistryStub:
-            def list_skills(self):
+            async def list_skills(self):
                 return []
 
         ctx = SimpleNamespace(
@@ -164,9 +175,15 @@ def test_log_path_event_emitted_at_end_of_run(tmp_path):
             skills_registry=_SkillsRegistryStub(),
         )
 
-        with patch.object(agent_executor_module, "run_agent", return_value="ok"):
+        with patch.object(
+            agent_executor_module, "arun_agent", return_value="ok"
+        ):
             executor = agent_executor_module.AgentExecutor(ctx)
-            result = executor.run(["hello"], thread_id="thr1", system="cli", verbose=False)
+            result = run_coro(
+                executor.arun(
+                    ["hello"], thread_id="thr1", system="cli", verbose=False
+                )
+            )
             assert result == "ok"
 
     _flush(logger)

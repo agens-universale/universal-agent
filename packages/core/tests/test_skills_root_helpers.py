@@ -1,7 +1,6 @@
 from pathlib import Path
 
 import pytest
-
 from gc_core.config_modules import env_vars
 from gc_core.config_modules.env_vars import EnvVars
 from gc_core.tools.skills.registry import _user_skills_root

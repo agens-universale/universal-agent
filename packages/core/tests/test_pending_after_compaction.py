@@ -1,4 +1,5 @@
 """run_agent: сообщение, пришедшее во время turn-end компакции, подхватывается новым ходом."""
+
 from __future__ import annotations
 
 import json
@@ -6,17 +7,17 @@ import logging
 from types import SimpleNamespace
 
 import pytest
-
-from gc_core.intent_guard import guard as intent_guard_guard
 from gc_core import processing_responses as pr
+from gc_core.intent_guard import guard as intent_guard_guard
 from gc_core.intent_guard.validation_result import ValidationResult
 from gc_core.states import State
+from gc_testkit import run_coro
 from helpers.turn_finish_apply import stub_turn_finish_apply
 
 
 @pytest.fixture(autouse=True)
 def _stub_apply_tool(monkeypatch):
-    monkeypatch.setattr(pr, "apply_tool", stub_turn_finish_apply)
+    monkeypatch.setattr(pr, "aapply_tool", stub_turn_finish_apply)
 
 
 def _make_state(*, max_steps: int = 5) -> State:
@@ -55,9 +56,11 @@ def _submit_solution_call():
         "type": "function_call",
         "name": "turn_finish",
         "arguments": json.dumps(
-            {"solution_type": "full_solution",
-             "task_report": "Сделано по запросу пользователя",
-             "handoff": "{}"},
+            {
+                "solution_type": "full_solution",
+                "task_report": "Сделано по запросу пользователя",
+                "handoff": "{}",
+            },
             ensure_ascii=False,
         ),
         "call_id": "call_finish",
@@ -69,28 +72,45 @@ def _expected_finish_return() -> str:
     return _submit_solution_call()["arguments"]
 
 
-def _accept_validation(**_kwargs):
+async def _accept_validation(**_kwargs):
     return ValidationResult(
-        ok=True, action="accept", trace_ok=True, report_ok=True,
-        trace_gaps=[], report_mismatches=[], missing_requirements=[],
-        conflicts=[], coverage_score=1.0, feedback_for_agent="",
+        ok=True,
+        action="accept",
+        trace_ok=True,
+        report_ok=True,
+        trace_gaps=[],
+        report_mismatches=[],
+        missing_requirements=[],
+        conflicts=[],
+        coverage_score=1.0,
+        feedback_for_agent="",
     )
 
 
 def _pending_once(compacted):
     """get_pending: возвращает новое сообщение ровно один раз — после компакции."""
+
     def _get_pending():
         if compacted["done"] and not compacted["consumed"]:
             compacted["consumed"] = True
-            return [{"role": "user", "content": "новое во время сжатия", "id": "m_new"}]
+            return [
+                {
+                    "role": "user",
+                    "content": "новое во время сжатия",
+                    "id": "m_new",
+                }
+            ]
         return []
+
     return _get_pending
 
 
 def test_pending_after_compaction_is_picked_up(monkeypatch):
     """Сообщение, пришедшее во время компакции, подхватывается → backend вызван для нового хода."""
     monkeypatch.setattr(
-        intent_guard_guard, "validate_final_report_vs_user_intent", _accept_validation
+        intent_guard_guard,
+        "avalidate_final_report_vs_user_intent",
+        _accept_validation,
     )
     compacted = {"done": False, "consumed": False}
 
@@ -99,18 +119,20 @@ def test_pending_after_compaction_is_picked_up(monkeypatch):
 
     backend_calls: list = []
 
-    def _fake_user_ask(messages, _state, _ctx):
+    async def _fake_user_ask(messages, _state, _ctx):
         backend_calls.append([m.get("content") for m in messages])
         return [_submit_solution_call()], "resp_2"
 
-    monkeypatch.setattr(pr, "process_user_ask", _fake_user_ask)
+    monkeypatch.setattr(pr, "aprocess_user_ask", _fake_user_ask)
 
-    result = pr.run_agent(
-        [_submit_solution_call()],
-        _make_state(),
-        _make_ctx(),
-        turn_end_compaction_hook=_hook,
-        get_pending_messages=_pending_once(compacted),
+    result = run_coro(
+        pr.arun_agent(
+            [_submit_solution_call()],
+            _make_state(),
+            _make_ctx(),
+            turn_end_compaction_hook=_hook,
+            get_pending_messages=_pending_once(compacted),
+        )
     )
 
     assert result == _expected_finish_return()
@@ -122,7 +144,9 @@ def test_pending_after_compaction_is_picked_up(monkeypatch):
 def test_no_pending_finishes_normally(monkeypatch):
     """Нет pending → финиш как раньше: компакция один раз, backend не зовётся (регресс инварианта)."""
     monkeypatch.setattr(
-        intent_guard_guard, "validate_final_report_vs_user_intent", _accept_validation
+        intent_guard_guard,
+        "avalidate_final_report_vs_user_intent",
+        _accept_validation,
     )
     hook_calls: list = []
 
@@ -131,18 +155,20 @@ def test_no_pending_finishes_normally(monkeypatch):
 
     ua_calls: list = []
 
-    def _fake_user_ask(_messages, _state, _ctx):
+    async def _fake_user_ask(_messages, _state, _ctx):
         ua_calls.append(1)
         return [_submit_solution_call()], "resp"
 
-    monkeypatch.setattr(pr, "process_user_ask", _fake_user_ask)
+    monkeypatch.setattr(pr, "aprocess_user_ask", _fake_user_ask)
 
-    result = pr.run_agent(
-        [_submit_solution_call()],
-        _make_state(),
-        _make_ctx(),
-        turn_end_compaction_hook=_hook,
-        get_pending_messages=lambda: [],
+    result = run_coro(
+        pr.arun_agent(
+            [_submit_solution_call()],
+            _make_state(),
+            _make_ctx(),
+            turn_end_compaction_hook=_hook,
+            get_pending_messages=list,
+        )
     )
 
     assert result == _expected_finish_return()
@@ -153,7 +179,9 @@ def test_no_pending_finishes_normally(monkeypatch):
 def test_stop_after_compaction_does_not_continue(monkeypatch):
     """stop_requested во время компакции → после continue верх цикла возвращает None, нового хода нет."""
     monkeypatch.setattr(
-        intent_guard_guard, "validate_final_report_vs_user_intent", _accept_validation
+        intent_guard_guard,
+        "avalidate_final_report_vs_user_intent",
+        _accept_validation,
     )
     compacted = {"done": False, "consumed": False}
     stopped = {"flag": False}
@@ -164,19 +192,21 @@ def test_stop_after_compaction_does_not_continue(monkeypatch):
 
     ua_calls: list = []
 
-    def _fake_user_ask(_messages, _state, _ctx):
+    async def _fake_user_ask(_messages, _state, _ctx):
         ua_calls.append(1)
         return [_submit_solution_call()], "resp"
 
-    monkeypatch.setattr(pr, "process_user_ask", _fake_user_ask)
+    monkeypatch.setattr(pr, "aprocess_user_ask", _fake_user_ask)
 
-    result = pr.run_agent(
-        [_submit_solution_call()],
-        _make_state(),
-        _make_ctx(),
-        turn_end_compaction_hook=_hook,
-        get_pending_messages=_pending_once(compacted),
-        check_stop=lambda: stopped["flag"],
+    result = run_coro(
+        pr.arun_agent(
+            [_submit_solution_call()],
+            _make_state(),
+            _make_ctx(),
+            turn_end_compaction_hook=_hook,
+            get_pending_messages=_pending_once(compacted),
+            check_stop=lambda: stopped["flag"],
+        )
     )
 
     assert result is None
@@ -191,27 +221,29 @@ def test_continued_turn_passes_through_finish_gate(monkeypatch):
     def _hook():
         compacted["done"] = True
 
-    def _fake_user_ask(_messages, _state, _ctx):
+    async def _fake_user_ask(_messages, _state, _ctx):
         return [_submit_solution_call()], "resp_2"
 
-    monkeypatch.setattr(pr, "process_user_ask", _fake_user_ask)
+    monkeypatch.setattr(pr, "aprocess_user_ask", _fake_user_ask)
 
     gate_calls: list = []
 
-    def _capture(**kwargs):
+    async def _capture(**kwargs):
         gate_calls.append(kwargs)
-        return _accept_validation()
+        return await _accept_validation()
 
     monkeypatch.setattr(
-        intent_guard_guard, "validate_final_report_vs_user_intent", _capture
+        intent_guard_guard, "avalidate_final_report_vs_user_intent", _capture
     )
 
-    result = pr.run_agent(
-        [_submit_solution_call()],
-        _make_state(),
-        _make_ctx(strict_turn_finish_validation=True),
-        turn_end_compaction_hook=_hook,
-        get_pending_messages=_pending_once(compacted),
+    result = run_coro(
+        pr.arun_agent(
+            [_submit_solution_call()],
+            _make_state(),
+            _make_ctx(strict_turn_finish_validation=True),
+            turn_end_compaction_hook=_hook,
+            get_pending_messages=_pending_once(compacted),
+        )
     )
 
     assert result == _expected_finish_return()
@@ -225,6 +257,7 @@ def test_pending_survives_failed_turn_begin(monkeypatch, caplog):
     ошибка класса 2). Уронив ход здесь, мы потеряли бы набранное пользователем
     сообщение бесследно — вернуть его в очередь некуда. Поэтому ход продолжается
     на модели прошлого хода, а отказ приходит из транспорта единым текстом."""
+
     def _boom(_state, _ctx):
         raise RuntimeError("Модель 'flash' (алиас 'flash') недоступна")
 
@@ -237,9 +270,13 @@ def test_pending_survives_failed_turn_begin(monkeypatch, caplog):
         return out
 
     with caplog.at_level(logging.WARNING):
-        picked = pr._pickup_pending_as_new_turn(_drain, _make_state(), _make_ctx())
+        picked = pr._pickup_pending_as_new_turn(
+            _drain, _make_state(), _make_ctx()
+        )
 
-    assert picked == [{"role": "user", "content": "второе сообщение", "id": "m_new"}]
+    assert picked == [
+        {"role": "user", "content": "второе сообщение", "id": "m_new"}
+    ]
     assert "недоступна" in caplog.text
 
 
@@ -247,7 +284,12 @@ def test_pending_empty_queue_does_not_begin_turn(monkeypatch):
     """Пустая очередь — ход завершается как обычно: фиксацию модели не трогаем
     (её ошибка не должна всплывать на ровном месте, когда подхватывать нечего)."""
     calls: list = []
-    monkeypatch.setattr(pr, "begin_turn_main_trace", lambda *a: calls.append(a))
+    monkeypatch.setattr(
+        pr, "begin_turn_main_trace", lambda *a: calls.append(a)
+    )
 
-    assert pr._pickup_pending_as_new_turn(lambda: [], _make_state(), _make_ctx()) is None
+    assert (
+        pr._pickup_pending_as_new_turn(list, _make_state(), _make_ctx())
+        is None
+    )
     assert calls == []

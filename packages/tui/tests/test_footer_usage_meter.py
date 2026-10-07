@@ -4,12 +4,17 @@
 последнего хода, пока во время активного хода last_run_meta=None; смена сессии
 сбрасывает кэш; без runner'а сегмента нет.
 """
-import pytest
 
+import pytest
 from gc_core.usage.account import CATEGORY_MAIN, UsageAccount
 
-_PRICING = {"enabled": True, "input": 1.0, "output": 2.0, "currency": "₽",
-            "per_tokens": 1_000_000}
+_PRICING = {
+    "enabled": True,
+    "input": 1.0,
+    "output": 2.0,
+    "currency": "₽",
+    "per_tokens": 1_000_000,
+}
 
 
 class _FakeRunner:
@@ -36,7 +41,9 @@ async def test_footer_shows_request_and_session(tmp_path):
         scr = pilot.app.screen
         app._config = {"model": "m", "pricing": _PRICING}
         scr._active_task_id = "t1"
-        app.active_runner = _FakeRunner((_meta(2_000_000, 0), _meta(1_000_000, 0)))
+        app.active_runner = _FakeRunner(
+            (_meta(2_000_000, 0), _meta(1_000_000, 0))
+        )
 
         right = scr._compose_footer_right().plain
         assert "запрос 1.0M/1.00₽" in right
@@ -57,13 +64,17 @@ async def test_request_reflects_live_snapshot(tmp_path):
         scr._active_task_id = "t1"
 
         # Ход в процессе: «запрос» = live-дельта, растёт вместе с сессией.
-        app.active_runner = _FakeRunner((_meta(3_000_000, 0), _meta(1_000_000, 0)))
+        app.active_runner = _FakeRunner(
+            (_meta(3_000_000, 0), _meta(1_000_000, 0))
+        )
         right = scr._compose_footer_right().plain
         assert "запрос 1.0M/1.00₽" in right
         assert "сессия 3.0M/3.00₽" in right
 
         # Тик позже дельта выросла — футер обновляется без кэша.
-        app.active_runner = _FakeRunner((_meta(3_500_000, 0), _meta(1_500_000, 0)))
+        app.active_runner = _FakeRunner(
+            (_meta(3_500_000, 0), _meta(1_500_000, 0))
+        )
         assert "запрос 1.5M/1.50₽" in scr._compose_footer_right().plain
 
 
@@ -79,7 +90,9 @@ async def test_request_hidden_until_first_tokens(tmp_path):
         scr = pilot.app.screen
         app._config = {"model": "m", "pricing": _PRICING}
         scr._active_task_id = "t1"
-        app.active_runner = _FakeRunner((_meta(2_000_000, 0), UsageAccount().to_meta()))
+        app.active_runner = _FakeRunner(
+            (_meta(2_000_000, 0), UsageAccount().to_meta())
+        )
         right = scr._compose_footer_right().plain
         assert "запрос" not in right
         assert "сессия 2.0M/2.00₽" in right
@@ -100,7 +113,7 @@ async def test_no_usage_segment_when_runner_lacks_method(tmp_path):
         app._config = {"model": "m", "pricing": _PRICING}
         scr._active_task_id = "t1"
         app.active_runner = _Bare()
-        right = scr._compose_footer_right().plain      # не должно кинуть
+        right = scr._compose_footer_right().plain  # не должно кинуть
         assert right == "● m"
 
 
@@ -131,10 +144,12 @@ async def test_footer_stacks_session_on_narrow_width(tmp_path):
         scr = pilot.app.screen
         app._config = {"model": "m", "pricing": _PRICING}
         scr._active_task_id = "t1"
-        app.active_runner = _FakeRunner((_meta(2_000_000, 0), _meta(1_000_000, 0)))
+        app.active_runner = _FakeRunner(
+            (_meta(2_000_000, 0), _meta(1_000_000, 0))
+        )
         plain = scr._compose_footer_right().plain
         lines = plain.split("\n")
-        assert len(lines) == 2                       # застекано
+        assert len(lines) == 2  # застекано
         assert "запрос" not in lines[0] and "сессия" not in lines[0]
         assert "запрос" in lines[1] and "сессия" in lines[1]
 
@@ -152,9 +167,11 @@ async def test_footer_never_flush_against_left(tmp_path):
         scr = pilot.app.screen
         app._config = {"model": "m", "pricing": _PRICING}
         scr._active_task_id = "t1"
-        app.active_runner = _FakeRunner((_meta(2_000_000, 0), _meta(1_000_000, 0)))
+        app.active_runner = _FakeRunner(
+            (_meta(2_000_000, 0), _meta(1_000_000, 0))
+        )
         plain = scr._compose_footer_right().plain
-        assert "\n" in plain                        # впритык → стек, не склейка
+        assert "\n" in plain  # впритык → стек, не склейка
 
 
 @pytest.mark.asyncio
@@ -167,7 +184,9 @@ async def test_footer_single_line_on_wide_width(tmp_path):
         scr = pilot.app.screen
         app._config = {"model": "m", "pricing": _PRICING}
         scr._active_task_id = "t1"
-        app.active_runner = _FakeRunner((_meta(2_000_000, 0), _meta(1_000_000, 0)))
+        app.active_runner = _FakeRunner(
+            (_meta(2_000_000, 0), _meta(1_000_000, 0))
+        )
         plain = scr._compose_footer_right().plain
         assert "\n" not in plain
         assert "запрос" in plain and "сессия" in plain
@@ -195,7 +214,10 @@ async def test_footer_fact_currency_follows_endpoint(tmp_path):
         }
         scr._active_task_id = "t1"
         app.active_runner = _FakeRunner(
-            (_billed_meta(2_000_000, 0, 20.0), _billed_meta(1_000_000, 0, 10.0))
+            (
+                _billed_meta(2_000_000, 0, 20.0),
+                _billed_meta(1_000_000, 0, 10.0),
+            )
         )
 
         right = scr._compose_footer_right().plain

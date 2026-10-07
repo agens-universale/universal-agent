@@ -39,8 +39,10 @@ def get_tool_output_inline_max_chars(config: Dict[str, Any]) -> int:
 
 def get_stored_tool_outputs_max_entries(config: Dict[str, Any]) -> int:
     _, entries = normalize_tool_output_limits(
-        config.get("tool_output_inline_max_chars", DEFAULT_TOOL_OUTPUT_INLINE_MAX_CHARS),
+        config.get(
+            "tool_output_inline_max_chars",
+            DEFAULT_TOOL_OUTPUT_INLINE_MAX_CHARS,
+        ),
         config.get("stored_tool_outputs_max_entries"),
     )
     return entries
-

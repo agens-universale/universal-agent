@@ -7,6 +7,7 @@
 оркестрация мержа и итоговая (фаза 2) ссылочная целостность — в `config.py` /
 `config_modules/model_sections_validation.py` соответственно.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -16,13 +17,18 @@ from typing import Literal, Optional
 import yaml
 from pydantic import ValidationError
 
-from gc_core.config_modules.compat import apply_compat
+from gc_core.config_modules.compat import apply_compat, manual_edit_fact
 from gc_core.config_modules.env_interpolation import resolve_env_placeholders
-from gc_core.config_modules.model_registry import RESERVED_WORDS, validate_registry_pairs
-from gc_core.config_modules.root import (AppConfig, PROFILE_SCHEMA_ERROR_PREFIX,
-                                 schema_error_details)
+from gc_core.config_modules.model_registry import (
+    RESERVED_WORDS,
+    validate_registry_pairs,
+)
+from gc_core.config_modules.root import (
+    PROFILE_SCHEMA_ERROR_PREFIX,
+    AppConfig,
+    schema_error_details,
+)
 from gc_core.utils.user_text import unreadable_reason
-
 
 # Бланк нового файла профиля (`onboarding_config_writer.create_profile_file`):
 # ТОЛЬКО шапка-инструкция, без якорей секций (ревизия владельца по смоку:
@@ -86,9 +92,24 @@ def _profile_files(root: Path) -> list[Path]:
     return [path for path in sorted(root.glob("*.yml")) if path.is_file()]
 
 
+def _register_profile(
+    result: dict, path: Path, root_kind, notices: Optional[list[str]]
+) -> None:
+    name = path.stem
+    if name in RESERVED_WORDS:
+        if notices is not None:
+            notices.append(
+                f'{path}: имя профиля "{name}" зарезервировано — файл проигнорирован'
+            )
+        return
+    if name in result:
+        return  # тёзка из менее приоритетного корня — проектный уже выиграл
+    result[name] = ProfileRef(name=name, path=path, root_kind=root_kind)
+
+
 def discover_profiles(
     roots: list[Path], *, notices: Optional[list[str]] = None
-) -> dict[str, "ProfileRef"]:
+) -> dict[str, ProfileRef]:
     """Дискавери профилей по корням (в порядке приоритета — первый найденный побеждает).
 
     Зарезервированные имена (`RESERVED_WORDS`) пропускаются + warning в `notices`,
@@ -96,27 +117,24 @@ def discover_profiles(
     """
     result: dict[str, ProfileRef] = {}
     for idx, root in enumerate(roots):
-        root_kind: Literal["project", "base"] = "project" if idx == 0 else "base"
+        root_kind: Literal["project", "base"] = (
+            "project" if idx == 0 else "base"
+        )
         root = Path(root)
         if not root.is_dir():
             continue
         for path in _profile_files(root):
-            name = path.stem
-            if name in RESERVED_WORDS:
-                if notices is not None:
-                    notices.append(
-                        f'{path}: имя профиля "{name}" зарезервировано — файл проигнорирован'
-                    )
-                continue
-            if name in result:
-                continue  # тёзка из менее приоритетного корня — проектный уже выиграл
-            result[name] = ProfileRef(name=name, path=path, root_kind=root_kind)
+            _register_profile(result, path, root_kind, notices)
     return result
 
 
 def _format_available(discovered: dict[str, ProfileRef]) -> str:
-    base_names = sorted(n for n, ref in discovered.items() if ref.root_kind == "base")
-    project_names = sorted(n for n, ref in discovered.items() if ref.root_kind == "project")
+    base_names = sorted(
+        n for n, ref in discovered.items() if ref.root_kind == "base"
+    )
+    project_names = sorted(
+        n for n, ref in discovered.items() if ref.root_kind == "project"
+    )
     segments = []
     if base_names:
         segments.append(f"{', '.join(base_names)} (глобальные)")
@@ -166,7 +184,7 @@ def _read_yaml_document(path: Path) -> dict:
     # `UnicodeDecodeError` (профиль сохранён в UTF-16) — тот же «не прочитался»,
     # только подкласс `ValueError`: без пути в сообщении объяснение винило базу.
     try:
-        with open(path, "r", encoding="utf-8") as file:
+        with open(path, encoding="utf-8") as file:
             try:
                 raw = yaml.safe_load(file) or {}
             except yaml.YAMLError as exc:
@@ -174,7 +192,9 @@ def _read_yaml_document(path: Path) -> dict:
     except (OSError, UnicodeDecodeError) as exc:
         raise ValueError(unreadable_reason(path, exc)) from exc
     if not isinstance(raw, dict):
-        raise ValueError(f"{path}: профиль должен быть YAML-документом (словарём)")
+        raise ValueError(
+            f"{path}: профиль должен быть YAML-документом (словарём)"
+        )
     return raw
 
 
@@ -194,7 +214,9 @@ def find_literal_tokens(raw: dict) -> list[str]:
     return aliases
 
 
-def _validate_profile_document(raw: dict, *, source: Optional[str] = None) -> None:
+def _validate_profile_document(
+    raw: dict, *, source: Optional[str] = None
+) -> None:
     """Общая фаза-1 валидация документа профиля: схема `AppConfig` (резерв-имена
     алиасов моделей проверяет её field_validator) + запрет ключа `profile`
     (анти-рекурсия, спека §3.2). Переиспользуется `load_profile_document`
@@ -233,7 +255,7 @@ def load_profile_document(
     if warn_literal_tokens and notices is not None:
         for alias in find_literal_tokens(raw):
             notices.append(
-                f'{path}: models.{alias}.token — литеральный токен в проектном профиле; '
+                f"{path}: models.{alias}.token — литеральный токен в проектном профиле; "
                 f"используйте ${{ENV:VAR}} или наследование из базового конфига"
             )
     raw = resolve_env_placeholders(raw)
@@ -244,7 +266,7 @@ def load_profile_document(
     # notices, с путём файла: иначе непонятно, в каком из документов ключ.
     for fact in apply_compat(raw):
         if notices is not None:
-            notices.append(f"{path}: {fact}")
+            notices.append(f"{path}: {manual_edit_fact(fact)}")
     # Пары «адрес+токен» — по СЫРОМУ документу и ДО схемы: слои сливаются позже,
     # и половина пары, наложенная на чужую полную, даёт корректный на вид итог,
     # пока токен базы уходит на адрес этого файла. Здесь же видно, чей это файл.
@@ -285,7 +307,7 @@ def mtime_or_none(path: Path) -> Optional[float]:
         return None
 
 
-def discover_all_refs(roots: list[Path]) -> dict[str, list["ProfileRef"]]:
+def discover_all_refs(roots: list[Path]) -> dict[str, list[ProfileRef]]:
     """Все найденные ссылки на профиль по имени, БЕЗ дедупликации тёзок (в отличие
     от `discover_profiles`, победившим первым идёт проектный корень) — витрине
     Settings (спека §12.3) нужен весь список тёзок, чтобы показать перекрытый файл
@@ -293,7 +315,9 @@ def discover_all_refs(roots: list[Path]) -> dict[str, list["ProfileRef"]]:
     молча (витрина — не место для повторного warning'а дискавери загрузчика)."""
     result: dict[str, list[ProfileRef]] = {}
     for idx, root in enumerate(roots):
-        root_kind: Literal["project", "base"] = "project" if idx == 0 else "base"
+        root_kind: Literal["project", "base"] = (
+            "project" if idx == 0 else "base"
+        )
         root = Path(root)
         if not root.is_dir():
             continue
@@ -302,13 +326,14 @@ def discover_all_refs(roots: list[Path]) -> dict[str, list["ProfileRef"]]:
             if name in RESERVED_WORDS:
                 continue
             result.setdefault(name, []).append(
-                ProfileRef(name=name, path=path, root_kind=root_kind))
+                ProfileRef(name=name, path=path, root_kind=root_kind)
+            )
     return result
 
 
 def find_active_ref(
     name: Optional[str], project_dir: Path, base_config_path: Path
-) -> Optional["ProfileRef"]:
+) -> Optional[ProfileRef]:
     """`ProfileRef` действующего имени профиля или `None` (нет имени / указатель
     не резолвится — санация уже случилась выше по стеку, здесь просто нечего
     показать). Общий источник для витрин `/config`, `/status`, Settings —
@@ -342,9 +367,11 @@ def profile_display_summary(path: Path) -> ProfileDisplaySummary:
     try:
         raw = _read_yaml_document(path)
     except (OSError, ValueError, yaml.YAMLError) as exc:
-        return ProfileDisplaySummary(slots={}, overlay_sections=[], error=str(exc))
+        return ProfileDisplaySummary(
+            slots={}, overlay_sections=[], error=str(exc)
+        )
     slots = raw.get("slots")
-    overlay = sorted(k for k in raw.keys() if k not in _MODEL_SECTION_KEYS)
+    overlay = sorted(k for k in raw if k not in _MODEL_SECTION_KEYS)
     return ProfileDisplaySummary(
         slots=dict(slots) if isinstance(slots, dict) else {},
         overlay_sections=overlay,
@@ -353,18 +380,18 @@ def profile_display_summary(path: Path) -> ProfileDisplaySummary:
 
 
 __all__ = [
-    "ProfileRef",
-    "ProfileMeta",
-    "ProfileDisplaySummary",
     "PROFILE_SKELETON",
-    "mtime_or_none",
-    "profile_roots",
-    "discover_profiles",
+    "ProfileDisplaySummary",
+    "ProfileMeta",
+    "ProfileRef",
     "discover_all_refs",
+    "discover_profiles",
     "find_active_ref",
-    "resolve_profile",
     "find_literal_tokens",
     "load_profile_document",
-    "validate_profile_text",
+    "mtime_or_none",
     "profile_display_summary",
+    "profile_roots",
+    "resolve_profile",
+    "validate_profile_text",
 ]

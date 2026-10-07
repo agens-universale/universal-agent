@@ -6,6 +6,7 @@ SPEC 2026-07-25 §3.1 B5/B10:
 - Повторный F7 на открытом буфере — no-op.
 - Нет активной сессии — короткое сообщение, экран не открываем.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -52,7 +53,9 @@ async def test_action_buffer_opens_screen(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.screens.copy_buffer import CopyBufferScreen
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         store = _MockStore(existing_buffer="старый")
         pilot.app.screen._store = store
@@ -68,7 +71,9 @@ async def test_action_buffer_noop_if_already_open(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.screens.copy_buffer import CopyBufferScreen
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         store = _MockStore(existing_buffer="")
         pilot.app.screen._store = store
@@ -88,7 +93,9 @@ async def test_action_buffer_no_session_notify(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.screens.copy_buffer import CopyBufferScreen
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         pilot.app.screen._active_task_id = None
         pilot.app.action_buffer()
@@ -102,54 +109,48 @@ async def test_dispatch_command_buffer(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.screens.copy_buffer import CopyBufferScreen
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         store = _MockStore(existing_buffer="")
         pilot.app.screen._store = store
         pilot.app.screen._active_task_id = "T3"
-        pilot.app.screen._dispatch_command("buffer")
+        await pilot.app.screen._dispatch_command("buffer")
         await pilot.pause()
         assert isinstance(pilot.app.screen, CopyBufferScreen)
 
 
-
-
-
 @pytest.mark.asyncio
-async def test_push_session_buffer_from_diff_screen(tmp_path):
-    """B2: Ctrl+C с выделением на DiffViewerScreen дописывает в буфер сессии.
+async def test_push_session_buffer_from_readonly_screen(tmp_path):
+    """B2: Ctrl+C с выделением на read-only экране дописывает в буфер сессии.
 
     Store/task_id берутся из базового TraceScreen (как action_buffer),
     а не из self.screen — у diff/view экранов их нет.
     """
     from gc_tui.app import TuiApp
-    from gc_tui.screens.diff import DiffViewerScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.viewer import ViewerScreen
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         store = _MockStore(existing_buffer="старый")
         pilot.app.screen._store = store
         pilot.app.screen._active_task_id = "T1"
-        # поверх TraceScreen — DiffViewerScreen (без _store/_active_task_id)
-        viewer = DiffViewerScreen(
-            title="дифф · M · src/x.py",
-            content="+hello\n",
-            path="src/x.py",
-            on_approve=lambda: None,
-            on_undo=lambda: None,
-            on_approve_all=lambda: None,
-            on_undo_all=lambda: None,
-        )
+        # поверх TraceScreen — просмотрщик (без _store/_active_task_id)
+        viewer = ViewerScreen(title="дифф · M · src/x.py", content="+hello\n")
         await pilot.app.push_screen(viewer)
         await pilot.pause()
         # сверху теперь diff-экран, у него нет _store/_active_task_id
-        assert not hasattr(pilot.app.screen, "_active_task_id") or getattr(
-            pilot.app.screen, "_active_task_id", None
-        ) is None
+        assert (
+            not hasattr(pilot.app.screen, "_active_task_id")
+            or getattr(pilot.app.screen, "_active_task_id", None) is None
+        )
         pilot.app._push_session_copy_buffer("фрагмент")
         await pilot.pause()
         assert store.writes == [("T1", {"copy_buffer": "фрагмент\n\nстарый"})]
-
 
 
 @pytest.mark.asyncio
@@ -163,7 +164,9 @@ async def test_buffer_ctrl_a_selects_all(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.screens.copy_buffer import CopyBufferScreen
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         store = _MockStore(existing_buffer="первая\nвторая\nтретья")
         pilot.app.screen._store = store
@@ -192,7 +195,9 @@ async def test_save_strips_whitespace_only_to_empty(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.screens.copy_buffer import CopyBufferScreen
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         store = _MockStore(existing_buffer="старый")
         pilot.app.screen._store = store
@@ -216,7 +221,9 @@ async def test_save_preserves_real_text_with_strip_edges(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.screens.copy_buffer import CopyBufferScreen
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         store = _MockStore(existing_buffer="")
         pilot.app.screen._store = store

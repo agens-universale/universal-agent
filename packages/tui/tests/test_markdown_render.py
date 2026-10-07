@@ -1,6 +1,10 @@
 """segment_answer: сегментация ответа на прозовые прогоны + code/table-блоки."""
+
 from gc_tui.services.markdown_render import (
-    Block, build_markdown_table, segment_answer, table_block_to_markdown,
+    Block,
+    build_markdown_table,
+    segment_answer,
+    table_block_to_markdown,
 )
 
 
@@ -9,12 +13,16 @@ def test_pure_prose_is_one_run():
 
 
 def test_blank_lines_preserved_inside_run():
-    assert segment_answer("абзац1\n\nабзац2") == [Block("prose", "абзац1\n\nабзац2")]
+    assert segment_answer("абзац1\n\nабзац2") == [
+        Block("prose", "абзац1\n\nабзац2")
+    ]
 
 
 def test_heading_and_bullet_stay_in_prose_run():
     # синтаксис НЕ срезаем — render_prose отрисует # и - построчно
-    assert segment_answer("# Title\n- item") == [Block("prose", "# Title\n- item")]
+    assert segment_answer("# Title\n- item") == [
+        Block("prose", "# Title\n- item")
+    ]
 
 
 def test_edge_blank_lines_trimmed():
@@ -23,11 +31,14 @@ def test_edge_blank_lines_trimmed():
 
 def test_fenced_with_lang_is_code_block():
     assert segment_answer("```python\nx = 1\ny = 2\n```") == [
-        Block("code-block", "x = 1\ny = 2", "python")]
+        Block("code-block", "x = 1\ny = 2", "python")
+    ]
 
 
 def test_fenced_no_lang():
-    assert segment_answer("```\nx = 1\n```") == [Block("code-block", "x = 1", None)]
+    assert segment_answer("```\nx = 1\n```") == [
+        Block("code-block", "x = 1", None)
+    ]
 
 
 def test_mixed_prose_and_code_splits_runs():
@@ -53,7 +64,9 @@ def test_table_alignment_markers():
 
 
 def test_pipe_line_without_separator_is_prose():
-    assert segment_answer("a | b | c\nплейн текст") == [Block("prose", "a | b | c\nплейн текст")]
+    assert segment_answer("a | b | c\nплейн текст") == [
+        Block("prose", "a | b | c\nплейн текст")
+    ]
 
 
 def test_table_ragged_row_padded():
@@ -68,7 +81,9 @@ def test_build_markdown_table_smoke():
 
 def test_build_markdown_table_column_count_and_justify():
     """Columns count matches headers; right-justified column has justify='right'."""
-    t = build_markdown_table(["Name", "Score"], [["Alice", "99"]], ["left", "right"])
+    t = build_markdown_table(
+        ["Name", "Score"], [["Alice", "99"]], ["left", "right"]
+    )
     assert len(t.columns) == 2
     assert t.columns[0].justify == "left"
     assert t.columns[1].justify == "right"
@@ -93,10 +108,12 @@ def test_build_markdown_table_inline_code_cell():
 
 # ---- table_block_to_markdown: обратная сборка (таблица → копируемый markdown) ----
 
+
 def test_table_block_to_markdown_basic():
     """3 колонки / 2 строки → валидный markdown с header + separator + rows."""
     md = table_block_to_markdown(
-        ["A", "B", "C"], [["1", "2", "3"], ["4", "5", "6"]],
+        ["A", "B", "C"],
+        [["1", "2", "3"], ["4", "5", "6"]],
         ["left", "left", "left"],
     )
     lines = md.split("\n")
@@ -110,7 +127,8 @@ def test_table_block_to_markdown_basic():
 def test_table_block_to_markdown_aligns():
     """left → ``---``, center → ``:---:``, right → ``---:``."""
     md = table_block_to_markdown(
-        ["L", "C", "R"], [["a", "b", "c"]],
+        ["L", "C", "R"],
+        [["a", "b", "c"]],
         ["left", "center", "right"],
     )
     sep = md.split("\n")[1]
@@ -150,3 +168,39 @@ def test_table_block_to_markdown_empty():
     assert lines[0] == "|  |"  # "| " + "" + " |"
     assert lines[1] == "|  |"
     assert len(lines) == 2
+
+
+# ---- Е2: вложенные ограды (CommonMark), пустой блок без сегмента ----
+
+
+def test_nested_fence_with_info_string_does_not_close_outer_block():
+    text = (
+        "Итог:\n```markdown\n# T\n\n```bash\npip install -e .\n```\n```\nхвост"
+    )
+    segs = segment_answer(text)
+    kinds = [s.kind for s in segs]
+    assert kinds == ["prose", "code-block", "code-block"]
+    assert segs[1].lang == "markdown"
+    # строка ```bash — содержимое, а не закрывающая ограда; закрыл блок первый голый ```
+    assert segs[1].content == "# T\n\n```bash\npip install -e ."
+    # второй голый ``` открывает блок без закрывающей ограды → тянется до конца текста
+    assert segs[2].content == "хвост"
+    assert segs[2].lang is None
+
+
+def test_four_backtick_fence_closes_only_on_four():
+    text = "````md\n```py\nx = 1\n```\n````\n"
+    segs = segment_answer(text)
+    assert [s.kind for s in segs] == ["code-block"]
+    assert segs[0].content == "```py\nx = 1\n```"
+
+
+def test_unclosed_fence_runs_to_the_end():
+    segs = segment_answer("```\nabc\ndef")
+    assert [s.kind for s in segs] == ["code-block"]
+    assert segs[0].content == "abc\ndef"
+
+
+def test_empty_fenced_block_yields_no_segment():
+    segs = segment_answer("до\n```\n\n```\nпосле")
+    assert [s.kind for s in segs] == ["prose", "prose"]

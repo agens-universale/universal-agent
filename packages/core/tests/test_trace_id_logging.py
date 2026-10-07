@@ -40,7 +40,10 @@ class TestFileNames:
 
     def test_unsafe_trace_cannot_escape_logs_dir(self, tmp_path):
         log_path, _ = build_run_log_paths(
-            config_dict={"logs_dump_dir": str(tmp_path), "trace_id": "../../etc/x"},
+            config_dict={
+                "logs_dump_dir": str(tmp_path),
+                "trace_id": "../../etc/x",
+            },
             run_id="abc",
             agent_kind="main",
         )
@@ -62,7 +65,9 @@ class TestJsonlRecords:
         )
         logger.info("hello", extra={"event": "unit_test"})
         _close(logger)
-        record = json.loads(Path(log_path).read_text(encoding="utf-8").splitlines()[0])
+        record = json.loads(
+            Path(log_path).read_text(encoding="utf-8").splitlines()[0]
+        )
         assert "trace_id" not in record
 
     def test_trace_is_stamped_on_every_record(self, tmp_path):
@@ -97,7 +102,9 @@ class TestJsonlRecords:
         )
         logger.info("x", extra={"event": "a"})
         _close(logger)
-        record = json.loads(Path(log_path).read_text(encoding="utf-8").splitlines()[0])
+        record = json.loads(
+            Path(log_path).read_text(encoding="utf-8").splitlines()[0]
+        )
         assert record["trace_id"] == "wf/123"
 
     def test_per_call_extra_wins(self, tmp_path):
@@ -114,7 +121,9 @@ class TestJsonlRecords:
         )
         logger.info("x", extra={"event": "a", "trace_id": "explicit"})
         _close(logger)
-        record = json.loads(Path(log_path).read_text(encoding="utf-8").splitlines()[0])
+        record = json.loads(
+            Path(log_path).read_text(encoding="utf-8").splitlines()[0]
+        )
         assert record["trace_id"] == "explicit"
 
 

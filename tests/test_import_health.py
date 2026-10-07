@@ -42,8 +42,8 @@ from pathlib import Path
 
 import gc_testkit
 import gc_testkit.import_health as ih
-from gc_testkit.paths import REPO
 from gc_testkit.import_health import scan
+from gc_testkit.paths import REPO
 
 
 def test_no_broken_imports():
@@ -67,8 +67,7 @@ def test_no_broken_imports():
     # в одиночном запуске он даёт hits=0 и молчит.
     files = ih._python_files()
     assert len(files) > 500, (
-        f"обход нашёл всего {len(files)} файлов — сетка смотрит не туда "
-        "(в дереве их больше тысячи)"
+        f"обход нашёл всего {len(files)} файлов — сетка смотрит не туда (в дереве их больше тысячи)"
     )
 
     findings = scan()
@@ -113,9 +112,7 @@ def test_legacy_toplevel_import_is_found(monkeypatch, tmp_path):
     # корень на время подмены — tmp_path).
     planted_file = tmp_path / "legacy_module.py"
     planted_file.write_text(
-        "from usage.account import spend\n"
-        "from tools.registry import build\n"
-        "import tui.app\n",
+        "from usage.account import spend\nfrom tools.registry import build\nimport tui.app\n",
         encoding="utf-8",
     )
     monkeypatch.setattr(ih, "REPO", tmp_path)
@@ -133,19 +130,22 @@ def test_legacy_list_covers_module_map():
     имени в константе означает дыру в классе 3.
     """
     mapping = json.loads(
-        (Path(gc_testkit.__file__).parent / "module_map.json").read_text(encoding="utf-8")
+        (Path(gc_testkit.__file__).parent / "module_map.json").read_text(
+            encoding="utf-8"
+        )
     )
     # Тот же класс вакуума: `assert not missing` верно и на ПУСТОЙ карте, а её
     # пустота означала бы, что `module_dir()` перестал находить что бы то ни
     # было. Порог грубый нарочно — точное число дразнило бы правку при каждом
     # новом модуле.
     assert len(mapping) > 40, (
-        f"module_map.json содержит всего {len(mapping)} записей — похоже, карта "
-        "пуста или прочитана не та"
+        f"module_map.json содержит всего {len(mapping)} записей — похоже, карта пуста или прочитана не та"
     )
 
     missing = sorted(set(mapping) - ih.LEGACY_TOPLEVEL)
-    assert not missing, f"есть в module_map.json, но не в LEGACY_TOPLEVEL: {missing}"
+    assert not missing, (
+        f"есть в module_map.json, но не в LEGACY_TOPLEVEL: {missing}"
+    )
 
 
 def test_alien_dependency_is_a_skip_not_a_finding(monkeypatch):
@@ -182,7 +182,9 @@ def test_alien_dependency_is_a_skip_not_a_finding(monkeypatch):
         {"gc_core"},
     )
     assert quiet == [], quiet
-    assert child in ih.skipped(), "пропуск обязан попасть в отчёт, а не исчезнуть"
+    assert child in ih.skipped(), (
+        "пропуск обязан попасть в отчёт, а не исчезнуть"
+    )
 
     # Вторая половина не даёт «починить» тест тем, что сетка вообще перестанет
     # ругаться: своё несуществующее имя обязано остаться находкой.
@@ -204,11 +206,13 @@ def test_main_reports_skipped_modules(monkeypatch, capsys):
     одном из них.
     """
     monkeypatch.setattr(
-        ih, "_SKIPPED", {"gc_core.config": "нет зависимости 'pydantic_settings'"}
+        ih,
+        "_SKIPPED",
+        {"gc_core.config": "нет зависимости 'pydantic_settings'"},
     )
     monkeypatch.setattr(sys, "argv", ["import_health"])
 
-    monkeypatch.setattr(ih, "scan", lambda: [])
+    monkeypatch.setattr(ih, "scan", list)
     assert ih.main() == 0
     clean = capsys.readouterr().out
     assert "ПРОПУЩЕНО модулей: 1" in clean, clean
@@ -293,7 +297,7 @@ def test_litellm_is_judged_like_its_neighbour():
     Подмена: убрать `"external/litellm"` из `_SCAN_ROOTS` либо дописать туда
     `"external"` целиком.
     """
-    scanned = {str(p) for p in ih._python_files()}
+    scanned = {p.as_posix() for p in ih._python_files()}
 
     assert any("external/litellm" in p for p in scanned), "litellm вне обхода"
     assert not any("external/vendor" in p for p in scanned), (

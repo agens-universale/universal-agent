@@ -7,53 +7,52 @@ A2 — полнота шаблона: каждый листовой путь с�
 
 Канон дефолтов = AppConfig(). Шаблон — бутстрап/справочник/сентинелы.
 """
+
 from pathlib import Path
 
 import yaml
-
 from gc_core.config import _default_config_path, flatten_app_config
-from gc_core.config_modules.model_sections_validation import validate_model_sections
+from gc_core.config_modules.model_sections_validation import (
+    validate_model_sections,
+)
 from gc_core.config_modules.root import AppConfig
-from gc_testkit.paths import REPO
 from gc_core.model_router import ModelRouter
+from gc_testkit.paths import REPO
 
 # dotted-пути, где шаблон НАМЕРЕННО отличается от кодового дефолта:
 # сентинелы онбординга и preset-значения шаблона. Пополнять только осознанно.
 INTENTIONAL_TEMPLATE_OVERRIDES: set = {
     # --- Сентинелы онбординга: placeholder-значения, которые пользователь обязан вписать ---
-    "backend.completions_url",                  # "http://your-backend:..." — инструкция вписать URL
+    "backend.completions_url",  # "http://your-backend:..." — инструкция вписать URL
     "backend.chat_completion_headers.Authorization",  # "Bearer <ВПИШИТЕ_ТОКЕН>" — инструкция вписать токен
-    "agent.model",                              # "<ВПИШИТЕ_МОДЕЛЬ>" — модель выбирается в мастере первого запуска
-
+    "agent.model",  # "<ВПИШИТЕ_МОДЕЛЬ>" — модель выбирается в мастере первого запуска
     # --- Preset-режим шаблона: chat_completions вместо responses (кодового дефолта) ---
-    "backend.api_mode",                         # шаблон ориентирован на chat_completions
-    "backend.chat_completions_max_tokens",      # 8096 вместо 32768 — разумный лимит для chat_completions
-    "backend.use_ssl",                          # false: шаблон нацелен на http://localhost endpoint
-    "backend.use_max_tokens_param",             # true: нужен для chat_completions-провайдеров
-    "backend.use_retry",                        # true: рекомендованная настройка для продакшн
-
+    "backend.api_mode",  # шаблон ориентирован на chat_completions
+    "backend.chat_completions_max_tokens",  # 8096 вместо 32768 — разумный лимит для chat_completions
+    "backend.use_ssl",  # false: шаблон нацелен на http://localhost endpoint
+    "backend.use_max_tokens_param",  # true: нужен для chat_completions-провайдеров
+    "backend.use_retry",  # true: рекомендованная настройка для продакшн
     # --- Preset-значения агента: рекомендованные настройки для продакшн-использования ---
-    "agent.use_local_subagents",               # true: включены subagents в шаблоне
-    "agent.subagent_max_steps",                # 500 вместо 100 — больший лимит для продакшн
-    "agent.client_name",                       # "gc_ua_agent" — имя клиента для gc-ua
-    "agent.no_tool_call_max_count",            # 3 вместо 5 — более строгий лимит прозаических ответов
-
+    "agent.use_local_subagents",  # true: включены subagents в шаблоне
+    "agent.subagent_max_steps",  # 500 вместо 100 — больший лимит для продакшн
+    "agent.client_name",  # "gc_ua_agent" — имя клиента для gc-ua
+    "agent.no_tool_call_max_count",  # 3 вместо 5 — более строгий лимит прозаических ответов
     # --- Preset TUI ---
-    "tui.stream",                              # true (явно), кодовый дефолт None (наследуется от backend.stream)
-
+    "tui.stream",  # true (явно), кодовый дефолт None (наследуется от backend.stream)
     # --- Preset суммаризации: включена в шаблоне, выключена в кодовом дефолте ---
     "summary.chat_completions_summary_trigger_chars",  # 200000 вместо 0 (выключено)
-
+    # Шаблон вырезает мысль: копирование reasoning_content даёт 400 у части бэкендов.
+    # Кодовый дефолт (ключа нет) — false, поле копируется.
+    "strip_tags_projection.strip_think",
     # --- Preset безопасности: SSRF-blacklist и файловые фильтры ---
-    "security.url_policy.url_blacklist",        # SSRF-blacklist cloud metadata/loopback/RFC1918
-    "security.read_guard.allowed_read_paths",   # whitelist путей навыков
-    "security.read_guard.denied_read_paths",    # denylist системных директорий
-    "security.read_guard.denied_file_patterns", # защита от чтения .env, id_rsa и т.п.
-    "security.read_guard.denied_extensions",    # защита от чтения .key/.pfx/.jks
-
-    "pricing.enabled",                          # true при нулевых ставках ниже
-    "pricing.input",                            # 0 — шаблон предлагает вписать реальные ставки
-    "pricing.output",                           # 0 — но включённый pricing с нулями даёт startup-notice
+    "security.url_policy.url_blacklist",  # SSRF-blacklist cloud metadata/loopback/RFC1918
+    "security.read_guard.allowed_read_paths",  # whitelist путей навыков
+    "security.read_guard.denied_read_paths",  # denylist системных директорий
+    "security.read_guard.denied_file_patterns",  # защита от чтения .env, id_rsa и т.п.
+    "security.read_guard.denied_extensions",  # защита от чтения .key/.pfx/.jks
+    "pricing.enabled",  # true при нулевых ставках ниже
+    "pricing.input",  # 0 — шаблон предлагает вписать реальные ставки
+    "pricing.output",  # 0 — но включённый pricing с нулями даёт startup-notice
 }
 
 
@@ -71,17 +70,38 @@ EXPERT_ONLY_KEYS: set = {
     "endpoint_presets",
     # Голосовой каталог — тот же класс и то же правило.
     "voice_endpoint_presets",
+    # --- os_backend: где живут файлы и команды тулов ---
+    # Дефолт `local` подходит всем; в шаблоне секция лежит закомментированной
+    # (образец docker/ssh/exec/sandbox), чтобы не впечатываться в конфиг каждому.
+    "os_backend.kind",
+    "os_backend.cwd",
+    "os_backend.env",
+    "os_backend.docker.name",
+    "os_backend.docker.user",
+    "os_backend.docker.binary",
+    "os_backend.ssh.host",
+    "os_backend.ssh.port",
+    "os_backend.ssh.user",
+    "os_backend.ssh.key_path",
+    "os_backend.ssh.options",
+    "os_backend.ssh.control_master",
+    "os_backend.exec.argv_prefix",
+    "os_backend.sandbox.workdir",
+    "os_backend.sandbox.network",
+    "os_backend.sandbox.extra_ro",
+    "os_backend.fetch_url_execute_on",
+    "os_backend.provision_skills",
     # --- agent: тюнинги finish gate / output storage ---
     # Экспертные лимиты quality-gate цикла; дефолты подходят для большинства сценариев.
     "agent.finish_gate_max_iterations",
     "agent.subagent_finish_gate_max_iterations",
-    "agent.finish_gate_use_rule_hints",       # rule-layer без LLM, вне v1
-    "agent.tool_output_inline_max_chars",     # лимит инлайн-вывода тула (байты контекста)
+    "agent.finish_gate_use_rule_hints",  # rule-layer без LLM, вне v1
+    "agent.tool_output_inline_max_chars",  # лимит инлайн-вывода тула (байты контекста)
     "agent.stored_tool_outputs_max_entries",  # размер стора больших tool-outputs
-    "agent.exec_timeout_sec",                # таймаут execute_command / run_python_code
-    "agent.walk_output_max_chars",           # потолок приватного канала обхода дерева (Harbor)
-    "agent.harbor_exec_init",                # opt-in bootstrap model-facing Harbor exec
-    "agent.limit_project_metadata",           # скрыть проектные метаданные из системного промпта
+    "agent.exec_timeout_sec",  # таймаут execute_command / run_python_code
+    "agent.walk_output_max_chars",  # потолок приватного канала обхода дерева (Harbor)
+    "agent.harbor_exec_init",  # opt-in bootstrap model-facing Harbor exec
+    "agent.limit_project_metadata",  # скрыть проектные метаданные из системного промпта
     # Per-run лимиты надёжности (по умолчанию выключены); см. docs/configuration.md.
     "agent.session_token_limit",
     "agent.max_tool_calls",
@@ -105,14 +125,10 @@ EXPERT_ONLY_KEYS: set = {
     "agent.subagents_max_count",
     # Model steering → special_instructions; строка специфичных инструкций для модели.
     "agent.model_steering",
-
     # --- agent_auth: корпоративная сертификатная авторизация ---
     # Секция целиком — корп-сценарий mTLS; wiring через runbook, не для публичного шаблона.
     "agent_auth",
-
     # --- backend: параметры chat_completions ---
-    # Vendor-specific kwargs (temperature, top_p, …); живёт в backend.chat_completion_kwargs.
-    "backend.chat_completion_kwargs",
     # Минимум токенов в ответе (провайдеро-специфичный параметр).
     "backend.chat_completions_min_response_tokens",
     # Ретрай ошибки, зашитой прокси в HTTP-200 (choices[0].error / top-level
@@ -122,24 +138,23 @@ EXPERT_ONLY_KEYS: set = {
     "backend.stream",
     # Закомментированный пример; дефолт — авто по id модели.
     "backend.claude_prompt_cache",
-
+    # Закомментированный пример; дефолт — зрение узнаётся по факту отказа.
+    "backend.vision",
     # --- chat_completions: вспомогательный LLM (summary / finish gate / intent scope) ---
     # Тюнинг вспомогательных вызовов; публичный шаблон не нацелен на chat_completions.
     "chat_completions.auxiliary_llm.max_tokens",
-    "chat_completions.auxiliary_llm.completion_kwargs",
-    "chat_completions.auxiliary_llm.judge_max_tokens",  # запас под CoT судей; секции нет в шаблоне
+    "chat_completions.auxiliary_llm.judge_max_tokens",  # запас под CoT судей; в шаблоне только completion_kwargs: null
     "chat_completions.auxiliary_llm.subagent_role_max_tokens",  # лимит генерации роли special_agent
     # --- backend mTLS: корп-сценарий, справочник — demo_config.yml ---
     "backend.cert_path",
     "backend.key_path",
     # --- тюнинги, пришедшие с master: место справочника — demo_config.yml ---
-    "agent.max_unknown_tool_repeats",         # порог повторов неизвестного тула
-    "tui.bang_shell.timeout_sec",             # таймаут !shell-команды (None = без лимита)
-    "tui.file_view.page_lines",               # шаг PgUp/PgDn в /view (None = авто по высоте)
-    "logging.redact_secrets.enabled",         # редакция секретов в per-run логах
+    "agent.max_unknown_tool_repeats",  # порог повторов неизвестного тула
+    "tui.bang_shell.timeout_sec",  # таймаут !shell-команды (None = без лимита)
+    "tui.file_view.page_lines",  # шаг PgUp/PgDn в /view (None = авто по высоте)
+    "logging.redact_secrets.enabled",  # редакция секретов в per-run логах
     "logging.redact_secrets.extra_keys",
     "logging.redact_secrets.extra_patterns",
-
     # --- intent_scope: детальный тюнинг intent-log ---
     # Секция целиком доступна только при backend.api_mode: chat_completions.
     # max_final_answer_raw_chars — в шаблоне есть; остальное — экспертный тюнинг.
@@ -153,7 +168,6 @@ EXPERT_ONLY_KEYS: set = {
     "intent_scope.intent_scope_final_answer_summary_prompt_path",
     # Конфигурация per-tool — типовой пример в demo_config.yml.
     "intent_scope.tools",
-
     # --- mcp: wiring серверов и таймауты ---
     # Серверы задаются через gc-mcp install / project-оверлей, не в публичном шаблоне.
     "mcp.servers",
@@ -163,7 +177,6 @@ EXPERT_ONLY_KEYS: set = {
     "mcp.meta.discovery_timeout_sec",
     # Путь к манифесту рекомендованных MCP; управляется gc-mcp.
     "mcp.meta.recommended_mcp_manifest",
-
     # --- voice: голосовой ввод (опциональная секция) ---
     # В шаблоне — осознанно закомментированный пример (voice выключен по умолчанию);
     # заполняется юзером вручную или целиком пишется gc-voice install в config.local.yml.
@@ -175,7 +188,6 @@ EXPERT_ONLY_KEYS: set = {
     "voice.max_seconds",
     "voice.timeout_seconds",
     "voice.verify_ssl",
-
     # --- paths: кастомные пути к промптам и runtime-данным ---
     # По умолчанию все пути берутся из XDG/GC_HOME; явное задание — только для sandbox.
     "paths.threads_data_path",
@@ -185,13 +197,11 @@ EXPERT_ONLY_KEYS: set = {
     "paths.chat_completions_system_prompt_path",
     "paths.chat_completions_intent_guard_prompt_path",
     "paths.chat_completions_special_instructions_path",
-
     # --- pricing: биллинг токенов ---
     # Базовые ключи (enabled/currency/per_tokens/input/output) шаблон несёт сам —
     # они пришли из master; здесь остаётся только тюнинг сверх него.
     "pricing.cache_read",
     "pricing.models",  # пустой dict — leaf в schema_dump
-
     # --- project_memory: long memory (проектная память) ---
     # Доступна только при наличии project-memory файла; дефолты работают без настройки.
     "project_memory.enable_project_memory_notice",
@@ -199,24 +209,20 @@ EXPERT_ONLY_KEYS: set = {
     "project_memory.max_chars",
     "project_memory.max_append_chars",
     "project_memory.compaction_max_tokens",
-
     # --- quality_gate: лимиты digest для finish gate ---
     # Экспертный тюнинг; дефолты подходят для большинства сценариев.
     "quality_gate.max_dialogue_chars",
     "quality_gate.max_message_chars",
-
     # --- security.download: настройки тула download_file ---
     # Каталог загрузки и лимит размера; обычно менять не нужно.
     "security.download.download_dir",
     "security.download.max_bytes",
-
     # --- security.read_guard: forward-compat поля бинарного чтения ---
     # В v1 не enforce'ятся (см. комментарий в security.py); тюнинг на будущее.
     "security.read_guard.binary_read_policy",
     "security.read_guard.binary_allowed_types",
     "security.read_guard.binary_allowed_extensions",
     "security.read_guard.max_file_size_kb",
-
     # --- summary: тюнинг суммаризации ---
     # Доступна только при backend.api_mode: chat_completions.
     # chat_completions_summary_trigger_chars — в шаблоне есть (preset включён).
@@ -224,13 +230,12 @@ EXPERT_ONLY_KEYS: set = {
     "summary.chat_completions_summary_prompt_path",
     "summary.chat_completions_memory_patch_replace_prompt_path",
     "summary.chat_completions_summary_turn_end_trigger_chars",
+    "summary.chat_completions_summary_turn_end_trigger_tokens",
     "summary.incremental_batch_chars",
     "summary.intent_log_preview_chars",
-
     # --- tool_usage_notice: технические reminder'ы о неиспользованных тулах ---
     # Список правил; типовой пример в demo_config.yml. Пусто = фича выключена.
     "tool_usage_notice",
-
     # --- working_memory: лимиты регистров session_memory ---
     # Тюнинг char-бюджета рабочей памяти агента; дефолты работают без настройки.
     "working_memory.max_chars_goal",
@@ -238,7 +243,6 @@ EXPERT_ONLY_KEYS: set = {
     "working_memory.max_chars_state",
     "working_memory.max_chars_knowledge",
     "working_memory.total_budget_chars",
-
     # --- Профили v2 (волна A): секции models/slots/assign ---
     # Схема готова (Task 1); полный документированный пример в шаблоне — Task 15.
     # Указатели profile/level уже в шаблоне (совпадают с кодовыми дефолтами).
@@ -253,7 +257,17 @@ EXPERT_ONLY_KEYS: set = {
     "assign.intent_scope",
     "assign.memory_compaction",
     "assign.auto_judge",
+    "assign.vision",
     "assign.subagents",
+    # --- chat_api: порт процесса gc-chat, не шаблон CLI/TUI ---
+    "chat_api.host",
+    "chat_api.port",
+    "chat_api.auth_token",
+    "chat_api.cors_origins",
+    "chat_api.launch_root",
+    "chat_api.text_answer_mode",
+    "chat_api.finish_gate_mode",
+    "chat_api.todo_reminder_steps",
 }
 
 
@@ -334,8 +348,7 @@ def test_demo_config_carries_live_profile_and_level_pointers():
     """
     raw = yaml.safe_load(DEMO_CONFIG_PATH.read_text(encoding="utf-8")) or {}
     assert raw.get("profile") == "", (
-        'demo_config.yml потерял живой указатель `profile: ""` — §13 требует '
-        "демонстрации заполнения указателей"
+        'demo_config.yml потерял живой указатель `profile: ""` — §13 требует демонстрации заполнения указателей'
     )
     assert raw.get("level") == "default", (
         "demo_config.yml потерял живой указатель `level: default`"
@@ -419,7 +432,9 @@ def _template_covered(schema_paths: set, template_paths: set) -> set:
     """Пути схемы, покрытые шаблоном напрямую или как префикс (для пустых dict-листьев)."""
     covered: set = set()
     for sp in schema_paths:
-        if sp in template_paths or any(tp.startswith(sp + ".") for tp in template_paths):
+        if sp in template_paths or any(
+            tp.startswith(sp + ".") for tp in template_paths
+        ):
             covered.add(sp)
     return covered
 
@@ -468,6 +483,60 @@ DEMO_KNOWN_GAPS: set = {
 }
 
 
+_RUNTIME_PAYLOAD_KEYS = frozenset(
+    {"model", "messages", "tools", "max_tokens", "max_completion_tokens"}
+)
+
+
+def test_shipped_template_kwargs_are_null_and_strip_think_stays_on():
+    """Поставка: оба глобальных словаря явно null (не {}), strip_think включён."""
+    raw = _template_raw()
+    assert raw["backend"]["chat_completion_kwargs"] is None
+    assert (
+        raw["chat_completions"]["auxiliary_llm"]["completion_kwargs"] is None
+    )
+    assert raw["strip_tags_projection"]["strip_think"] is True
+
+
+def test_demo_config_has_no_live_vendor_kwargs():
+    """Разобранный demo_config не несёт vendor-kwargs и непустых main/auxiliary."""
+    raw = yaml.safe_load(DEMO_CONFIG_PATH.read_text(encoding="utf-8")) or {}
+    assert raw["backend"]["chat_completion_kwargs"] is None
+    assert (
+        raw["chat_completions"]["auxiliary_llm"]["completion_kwargs"] is None
+    )
+    for alias, entry in (raw.get("models") or {}).items():
+        if not isinstance(entry, dict):
+            continue
+        for section in ("main", "auxiliary"):
+            assert not entry.get(section), (
+                f"models.{alias}.{section} в demo_config.yml непустой"
+            )
+
+
+def test_default_template_payload_has_only_runtime_keys():
+    """Старт из шаблона: в тело запроса не попадает ни один vendor-ключ."""
+    from types import SimpleNamespace
+
+    from gc_core.config_modules.model_registry import (
+        effective_completion_kwargs,
+    )
+    from gc_core.utils.connect_backend import create_call_data_completions
+
+    cfg = flatten_app_config(AppConfig.model_validate(_template_raw()))
+    assert cfg["chat_completion_kwargs"] == {}
+    state = SimpleNamespace(messages=[], tools=[], default_model="m")
+    data = create_call_data_completions(
+        [{"role": "user", "content": "hi"}],
+        state=state,
+        config_dict=cfg,
+    )
+    assert set(data) <= _RUNTIME_PAYLOAD_KEYS
+    assert "max_tokens" in data or "max_completion_tokens" in data
+    assert effective_completion_kwargs(None, cfg, section="auxiliary") == {}
+    assert effective_completion_kwargs(None, cfg, section="main") == {}
+
+
 def test_demo_config_covers_the_same_keys_as_the_template():
     """demo_config.yml объявлен полным справочником — значит и полнота та же.
 
@@ -483,7 +552,7 @@ def test_demo_config_covers_the_same_keys_as_the_template():
     # docs/configuration.md). demo_config_openai.yml — вариант под провайдера,
     # полноты с него не требуем.
     name = "demo_config.yml"
-    demo_file = REPO / name          # demo_config.yml лежит в корне репозитория
+    demo_file = REPO / name  # demo_config.yml лежит в корне репозитория
     demo_raw = yaml.safe_load(demo_file.read_text(encoding="utf-8")) or {}
     demo_covered = _template_covered(schema_paths, _leaf_paths(demo_raw))
 

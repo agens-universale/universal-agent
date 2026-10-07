@@ -1,9 +1,9 @@
 """os_ops.write_clipboard — нативная запись в системный буфер (дополняет OSC 52)."""
+
 import sys
 from types import SimpleNamespace
 
 import pytest
-
 from gc_tui.services import os_ops
 
 
@@ -12,6 +12,7 @@ def _ok_run(captured):
         captured["cmd"] = cmd
         captured["input"] = kw.get("input")
         return SimpleNamespace(returncode=0)
+
     return fake_run
 
 
@@ -21,7 +22,7 @@ def test_write_clipboard_darwin(monkeypatch):
     monkeypatch.setattr(os_ops.subprocess, "run", _ok_run(cap))
     assert os_ops.write_clipboard("привет") is True
     assert cap["cmd"] == ["pbcopy"]
-    assert cap["input"] == "привет".encode("utf-8")
+    assert cap["input"] == "привет".encode()
 
 
 def test_write_clipboard_windows_uses_winapi(monkeypatch):
@@ -60,6 +61,7 @@ def test_write_clipboard_graceful_on_missing_tool(monkeypatch):
 
 
 # --- реальный round-trip через Win32 API (прогоняется только на Windows) ---
+
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Win32 clipboard API")
 def test_win_clipboard_roundtrip_cyrillic_and_glyphs():

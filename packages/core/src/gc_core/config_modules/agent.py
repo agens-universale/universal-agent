@@ -1,6 +1,12 @@
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 from gc_core.backends.protocol import (
     DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS,
@@ -67,7 +73,9 @@ class AgentConfig(BaseModel):
     max_unknown_tool_repeats: int = 5
     strict_turn_finish_validation: bool = True
     finish_gate_max_iterations: int = DEFAULT_FINISH_GATE_MAX_ITERATIONS
-    subagent_finish_gate_max_iterations: int = DEFAULT_SUBAGENT_FINISH_GATE_MAX_ITERATIONS
+    subagent_finish_gate_max_iterations: int = (
+        DEFAULT_SUBAGENT_FINISH_GATE_MAX_ITERATIONS
+    )
     finish_gate_use_rule_hints: bool = False
     limit_project_metadata: bool = False
     tool_output_inline_max_chars: int = 20000
@@ -78,7 +86,9 @@ class AgentConfig(BaseModel):
     # L = head floor(L/2) + tail (L - floor(L/2)).
     exec_output_capture_max_chars: int = DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS
     # Размер каждого края front-loaded preview длинного потока (P). 0 — без preview.
-    exec_output_preview_edge_chars: int = DEFAULT_EXEC_OUTPUT_PREVIEW_EDGE_CHARS
+    exec_output_preview_edge_chars: int = (
+        DEFAULT_EXEC_OUTPUT_PREVIEW_EDGE_CHARS
+    )
     # Общий потолок внутренних exec-каналов бэкенда (decoded chars): обход дерева
     # (Harbor: find -printf для walk/listdir), нативный grep, MCP-carrier под os_backend.
     # Переполнение — fail-closed: walk_too_large / McpExecCarrierError, не частичный ответ.
@@ -91,7 +101,9 @@ class AgentConfig(BaseModel):
     # Steering-текст: при рендере system prompt дописывается в <special_instructions>
     # для любой активной модели (пока непустой). Пусто / omit — без инжекта.
     model_steering: str = ""
-    loop_detector: LoopDetectorConfig = Field(default_factory=LoopDetectorConfig)
+    loop_detector: LoopDetectorConfig = Field(
+        default_factory=LoopDetectorConfig
+    )
 
     @field_validator("session_token_limit", "max_tool_calls")
     @classmethod
@@ -112,8 +124,7 @@ class AgentConfig(BaseModel):
             code = ord(ch)
             if ch.isspace() or code < 0x20 or code == 0x7F or ch == ":":
                 raise ValueError(
-                    "agent.trace_id_header_name: имя заголовка без пробелов, "
-                    "управляющих символов и ':'"
+                    "agent.trace_id_header_name: имя заголовка без пробелов, управляющих символов и ':'"
                 )
         return text
 
@@ -176,7 +187,10 @@ class AgentConfig(BaseModel):
         capture-cap. Зажимаем, а не отвергаем: ту же нормализацию делает плоский
         путь, где бросок случился бы уже внутри вызова тулы.
         """
-        capture_tail = self.exec_output_capture_max_chars - self.exec_output_capture_max_chars // 2
+        capture_tail = (
+            self.exec_output_capture_max_chars
+            - self.exec_output_capture_max_chars // 2
+        )
         if self.exec_output_preview_edge_chars > capture_tail:
             self.exec_output_preview_edge_chars = capture_tail
         return self
@@ -196,7 +210,9 @@ class AgentConfig(BaseModel):
         if value is None:
             return None
         if not isinstance(value, str):
-            raise ValueError("agent.harbor_exec_init должен быть строкой или null")
+            raise ValueError(
+                "agent.harbor_exec_init должен быть строкой или null"
+            )
         text = value.strip()
         return text or None
 
@@ -211,7 +227,8 @@ def exec_output_preview_edge_chars_from_config_dict(
     здесь, а не только в схеме: иначе preview продублировал бы весь capture.
     """
     raw = (config_dict or {}).get(
-        "exec_output_preview_edge_chars", DEFAULT_EXEC_OUTPUT_PREVIEW_EDGE_CHARS
+        "exec_output_preview_edge_chars",
+        DEFAULT_EXEC_OUTPUT_PREVIEW_EDGE_CHARS,
     )
     try:
         n = int(raw)
@@ -251,7 +268,9 @@ def walk_output_max_chars_from_config_dict(
     config_dict: dict[str, Any] | None,
 ) -> int:
     """Потолок приватного канала обхода (Harbor walk/listdir) из плоского config_dict."""
-    raw = (config_dict or {}).get("walk_output_max_chars", WALK_OUTPUT_MAX_CHARS)
+    raw = (config_dict or {}).get(
+        "walk_output_max_chars", WALK_OUTPUT_MAX_CHARS
+    )
     try:
         n = int(raw)
     except (TypeError, ValueError):

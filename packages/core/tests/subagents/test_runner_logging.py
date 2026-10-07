@@ -1,10 +1,10 @@
 import json
 import logging
 
-from gc_core.states import SharedStateData
-from gc_core.states import State
-from gc_testkit.helpers.tool_ctx import local_ctx
+import pytest
+from gc_core.states import SharedStateData, State
 from gc_core.tools.subagents.runner import SubagentRunner
+from gc_testkit.helpers.tool_ctx import local_ctx
 
 
 def _make_orchestrator_state():
@@ -52,7 +52,9 @@ def _parent_ctx(tmp_path, *, is_tui: bool = False, is_cli_mode: bool = False):
     ctx.auth_connector = None
     ctx.logger = None
     ctx.logging_path = str(tmp_path / "agent_main_parent_run_1.log")
-    ctx.summary_trace_path = str(tmp_path / "summary_trace_main_parent_run_1.jsonl")
+    ctx.summary_trace_path = str(
+        tmp_path / "summary_trace_main_parent_run_1.jsonl"
+    )
     ctx.tools_data = {}
     ctx.tools_spec = []
     ctx.tools_description = []
@@ -61,52 +63,59 @@ def _parent_ctx(tmp_path, *, is_tui: bool = False, is_cli_mode: bool = False):
     return ctx, cfg
 
 
-def test_build_child_ctx_creates_dedicated_subagent_run_log(tmp_path):
+@pytest.mark.asyncio
+async def test_build_child_ctx_creates_dedicated_subagent_run_log(tmp_path):
     orch = _make_orchestrator_state()
     parent_ctx, cfg = _parent_ctx(tmp_path)
     runner = SubagentRunner(parent_ctx, orch, cfg)
 
-    child_ctx = runner._build_child_ctx(tool_name="subagent_worker")
+    child_ctx = await runner._build_child_ctx(tool_name="subagent_worker")
 
     assert child_ctx.run_id != parent_ctx.run_id
     assert f"agent_worker_{child_ctx.run_id}.log" in child_ctx.logging_path
     assert child_ctx.workspace is parent_ctx.workspace
 
 
-def test_build_child_ctx_inherits_is_tui_from_parent(tmp_path):
+@pytest.mark.asyncio
+async def test_build_child_ctx_inherits_is_tui_from_parent(tmp_path):
     orch = _make_orchestrator_state()
     parent_ctx, cfg = _parent_ctx(tmp_path, is_tui=True)
     runner = SubagentRunner(parent_ctx, orch, cfg)
 
-    child_ctx = runner._build_child_ctx(tool_name="subagent_worker")
+    child_ctx = await runner._build_child_ctx(tool_name="subagent_worker")
 
     assert child_ctx.is_tui is True
 
 
-def test_build_child_ctx_inherits_is_cli_mode_from_parent(tmp_path):
+@pytest.mark.asyncio
+async def test_build_child_ctx_inherits_is_cli_mode_from_parent(tmp_path):
     orch = _make_orchestrator_state()
     parent_ctx, cfg = _parent_ctx(tmp_path, is_cli_mode=True)
     runner = SubagentRunner(parent_ctx, orch, cfg)
 
-    child_ctx = runner._build_child_ctx(tool_name="subagent_worker")
+    child_ctx = await runner._build_child_ctx(tool_name="subagent_worker")
 
     assert child_ctx.is_cli_mode is True
     assert child_ctx.is_tui is False
 
 
-def test_build_child_ctx_cli_mode_defaults_false_when_parent_unset(tmp_path):
+@pytest.mark.asyncio
+async def test_build_child_ctx_cli_mode_defaults_false_when_parent_unset(
+    tmp_path,
+):
     orch = _make_orchestrator_state()
     parent_ctx, cfg = _parent_ctx(tmp_path)
     if hasattr(parent_ctx, "is_cli_mode"):
         delattr(parent_ctx, "is_cli_mode")
     runner = SubagentRunner(parent_ctx, orch, cfg)
 
-    child_ctx = runner._build_child_ctx(tool_name="subagent_worker")
+    child_ctx = await runner._build_child_ctx(tool_name="subagent_worker")
 
     assert child_ctx.is_cli_mode is False
 
 
-def test_lifecycle_payload_contains_parent_and_child_run_ids(tmp_path):
+@pytest.mark.asyncio
+async def test_lifecycle_payload_contains_parent_and_child_run_ids(tmp_path):
     from types import SimpleNamespace
 
     orch = _make_orchestrator_state()
@@ -124,7 +133,7 @@ def test_lifecycle_payload_contains_parent_and_child_run_ids(tmp_path):
     parent_ctx.logger = parent_log
 
     runner = SubagentRunner(parent_ctx, orch, cfg)
-    child_state = runner._build_child_state("role")
+    child_state = await runner._build_child_state("role")
     child_ctx = SimpleNamespace(run_id="child_run_2", logger=None)
 
     runner._log_lifecycle(

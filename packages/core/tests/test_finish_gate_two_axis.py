@@ -5,23 +5,20 @@ import json
 import logging
 import sys
 import types
-from pathlib import Path
 from types import SimpleNamespace
 
-import importlib
-
-from gc_core.intent_guard import guard as intent_guard_guard
 import pytest
-
+from gc_core.intent_guard import guard as intent_guard_guard
+from gc_core.intent_guard.feedback import build_finish_gate_feedback
+from gc_core.intent_guard.guard import FinishGateGuard
+from gc_core.intent_guard.validation_result import ValidationResult
+from gc_core.intent_log import append_tool_aggregated
+from gc_testkit import as_coro, run_coro
 from gc_testkit.intent_fixtures import (
     intent_user_ask_texts,
     intent_user_ask_texts_from_jsonl,
     seed_state_intent,
 )
-from gc_core.intent_log import append_tool_aggregated
-from gc_core.intent_guard.feedback import build_finish_gate_feedback
-from gc_core.intent_guard.guard import FinishGateGuard
-from gc_core.intent_guard.validation_result import ValidationResult
 from gc_testkit.paths import module_dir
 
 _trace_digest_tests = importlib.import_module("test_intent_guard_trace_digest")
@@ -29,7 +26,7 @@ _ask_human_scenario_messages = _trace_digest_tests._ask_human_scenario_messages
 
 
 processing_module = None
-run_agent = None
+arun_agent = None
 State = None
 
 
@@ -44,11 +41,15 @@ def _stub_tools_modules() -> None:
         def to_llm_feedback(self):
             return str(self)
 
-    def _apply_tool(*_args, **_kwargs):
+    # Ветка await'ит `aapply_tool`: синхронная заглушка здесь давала бы
+    # `TypeError: object str can't be used in 'await' expression`.
+    async def _apply_tool(*_args, **_kwargs):
         tool_name = _kwargs.get("tool_name")
         arguments = _kwargs.get("arguments")
         try:
-            payload = json.loads(arguments) if isinstance(arguments, str) else {}
+            payload = (
+                json.loads(arguments) if isinstance(arguments, str) else {}
+            )
         except Exception:
             payload = {}
         if tool_name == "turn_finish":
@@ -60,7 +61,12 @@ def _stub_tools_modules() -> None:
                 "error": None,
             }
             if isinstance(payload, dict):
-                for key in ("solution_type", "comment", "task_report", "handoff"):
+                for key in (
+                    "solution_type",
+                    "comment",
+                    "task_report",
+                    "handoff",
+                ):
                     if key in payload:
                         result[key] = payload[key]
             return json.dumps(result, ensure_ascii=False)
@@ -72,32 +78,76 @@ def _stub_tools_modules() -> None:
     def _build_tools_data(_config_dict):
         return {}, [], []
 
-    tools_pkg.apply_tool = _apply_tool
-    tools_pkg.build_tools_data = _build_tools_data
-    tools_pkg.WrongFunctionArgumentsException = _WrongFunctionArgumentsException
+    tools_pkg.aapply_tool = _apply_tool
+    # Имена приехали с develop: processing_responses импортирует их из
+    # пакета, и заглушка обязана их отдавать — иначе падает импорт модуля.
+    tools_pkg.is_internal_tool_error_output = lambda *_a, **_k: False
+    tools_pkg.is_unknown_tool_output = lambda *_a, **_k: False
+    tools_pkg.tool_arguments_valid = lambda *_a, **_k: True
+    tools_pkg.abuild_tools_data = _build_tools_data
+    tools_pkg.WrongFunctionArgumentsException = (
+        _WrongFunctionArgumentsException
+    )
     tools_pkg.is_internal_tool_error_output = lambda _output: False
     tools_pkg.is_unknown_tool_output = lambda _output: False
     tools_dir = module_dir("tools")
     tools_pkg.__path__ = [str(tools_dir)]
     sys.modules["gc_core.tools"] = tools_pkg
+    return tools_pkg
+
+
+def _unbind_stub(module, stub, real) -> None:
+    """Вернуть модулю настоящие объекты вместо ВСЕХ, что он взял у заглушки.
+
+    Одного ``aapply_tool`` мало. Если ``processing_responses`` впервые
+    импортируется здесь, его ``from gc_core.tools import (...)`` связывает под
+    заглушкой весь список, и ``is_unknown_tool_output`` навсегда остаётся
+    «всегда False»: у следующих тестов счётчик неизвестных тулов молча стоит на
+    нуле. Так падал ``test_loop_detector``, шедший после этого файла, — и
+    проходил в одиночку.
+
+    Ищем по тождеству с объектами заглушки, а не по списку имён: список
+    разойдётся с импортом ядра на первом же новом имени (прежние приехали с
+    develop — см. выше), а тождество видит и новые имена, и алиасы.
+    """
+    stubbed = [
+        (name, obj)
+        for name, obj in vars(stub).items()
+        if not name.startswith("__")
+    ]
+    for name, value in list(vars(module).items()):
+        for stub_name, stub_obj in stubbed:
+            if value is stub_obj:
+                setattr(module, name, getattr(real, stub_name))
 
 
 @pytest.fixture(scope="module", autouse=True)
 def _load_processing_responses():
-    global processing_module, run_agent, State
-    _stub_tools_modules()
+    global processing_module, arun_agent, State
+    stub_tools = _stub_tools_modules()
     from gc_core import processing_responses as pm
-    from gc_core.processing_responses import run_agent as ra
+    from gc_core.processing_responses import arun_agent as ra
     from gc_core.states import State as St
 
     processing_module = pm
-    run_agent = ra
+    arun_agent = ra
     State = St
-    pm.apply_tool = sys.modules["gc_core.tools"].apply_tool
+    # Заглушка ставится ПРЯМЫМ присваиванием (не monkeypatch), поэтому снимать
+    # её обязаны мы сами. Раньше teardown выбрасывал только модули из
+    # sys.modules, а `processing_responses.aapply_tool` оставался заглушкой на
+    # весь остаток прогона — и `test_parity_smoke` падал пятью тестами, проходя
+    # при этом в одиночку.
+    pm.aapply_tool = stub_tools.aapply_tool
     yield
     for name in list(sys.modules):
         if name == "gc_core.tools" or name.startswith("gc_core.tools."):
             sys.modules.pop(name, None)
+    # Сохранить «прежние» значения до yield нельзя: к этому моменту они уже
+    # заглушка — pm импортирован после подмены. Настоящие объекты берём
+    # переимпортом уже очищенного пакета.
+    import gc_core.tools as real_tools
+
+    _unbind_stub(pm, stub_tools, real_tools)
 
 
 def _make_state(*, max_steps: int = 5, parent_state_id=None):
@@ -138,7 +188,9 @@ def _submit_solution_call(
     args: dict = {
         "solution_type": solution_type,
         "task_report": "done",
-        "handoff": json.dumps(handoff if handoff is not None else {}, ensure_ascii=False),
+        "handoff": json.dumps(
+            handoff if handoff is not None else {}, ensure_ascii=False
+        ),
     }
     return {
         "type": "function_call",
@@ -181,8 +233,8 @@ def test_fix_report_feedback_does_not_repeat_ask_human():
 def test_guard_reject_uses_structured_feedback_not_raw_llm(monkeypatch):
     monkeypatch.setattr(
         intent_guard_guard,
-        "validate_final_report_vs_user_intent",
-        _scenario_12_validation,
+        "avalidate_final_report_vs_user_intent",
+        as_coro(_scenario_12_validation),
     )
     state = _make_state()
     seed_state_intent(
@@ -191,8 +243,10 @@ def test_guard_reject_uses_structured_feedback_not_raw_llm(monkeypatch):
         log="спроси меня что нибудь",
     )
     guard = FinishGateGuard(ctx=_make_ctx(), state=state)
-    decision = guard.evaluate_turn_finish(
-        finish_handoff_arguments={"solution_type": "full_solution"},
+    decision = run_coro(
+        guard.aevaluate_turn_finish(
+            finish_handoff_arguments={"solution_type": "full_solution"},
+        )
     )
     assert decision.outcome == "reject"
     lowered = decision.feedback_text.lower()
@@ -204,8 +258,8 @@ def test_guard_reject_uses_structured_feedback_not_raw_llm(monkeypatch):
 def test_run_agent_rejects_submit_with_fix_report_feedback(monkeypatch):
     monkeypatch.setattr(
         intent_guard_guard,
-        "validate_final_report_vs_user_intent",
-        _scenario_12_validation,
+        "avalidate_final_report_vs_user_intent",
+        as_coro(_scenario_12_validation),
     )
 
     def _stub_user_ask(_messages, _state, _ctx):
@@ -221,7 +275,9 @@ def test_run_agent_rejects_submit_with_fix_report_feedback(monkeypatch):
             "rid_stub",
         )
 
-    monkeypatch.setattr(processing_module, "process_user_ask", _stub_user_ask)
+    monkeypatch.setattr(
+        processing_module, "aprocess_user_ask", as_coro(_stub_user_ask)
+    )
 
     state = _make_state(max_steps=0)
     seed_state_intent(
@@ -230,16 +286,19 @@ def test_run_agent_rejects_submit_with_fix_report_feedback(monkeypatch):
         log="спроси меня что нибудь",
     )
 
-    run_agent(
-        [_submit_solution_call()],
-        state,
-        _make_ctx(),
+    run_coro(
+        arun_agent(
+            [_submit_solution_call()],
+            state,
+            _make_ctx(),
+        )
     )
 
     tool_output = next(
         m
         for m in state.messages
-        if m.get("type") == "function_call_output" and m.get("call_id") == "call_finish"
+        if m.get("type") == "function_call_output"
+        and m.get("call_id") == "call_finish"
     )
     payload = json.loads(tool_output["output"])
     assert payload["ok"] is False
@@ -267,8 +326,8 @@ def test_run_agent_accept_clears_current_user_intent_for_subagent(monkeypatch):
 
     monkeypatch.setattr(
         intent_guard_guard,
-        "validate_final_report_vs_user_intent",
-        _accept,
+        "avalidate_final_report_vs_user_intent",
+        as_coro(_accept),
     )
 
     state = _make_state(parent_state_id="orch-parent")
@@ -278,10 +337,12 @@ def test_run_agent_accept_clears_current_user_intent_for_subagent(monkeypatch):
         log="subagent task",
     )
 
-    result = run_agent(
-        [_submit_solution_call(solution_type="direct_answer")],
-        state,
-        _make_ctx(),
+    result = run_coro(
+        arun_agent(
+            [_submit_solution_call(solution_type="direct_answer")],
+            state,
+            _make_ctx(),
+        )
     )
 
     assert result is not None
@@ -310,7 +371,9 @@ def _handoff_phantom_validation(**_kwargs):
         trace_ok=True,
         report_ok=False,
         trace_gaps=[],
-        report_mismatches=["handoff.artifacts: phantom_plan.md отсутствует в trace"],
+        report_mismatches=[
+            "handoff.artifacts: phantom_plan.md отсутствует в trace"
+        ],
         missing_requirements=[],
         conflicts=[],
         coverage_score=0.5,
@@ -327,8 +390,8 @@ def test_handoff_artifacts_fix_report_lists_paths():
 def test_run_agent_continue_work_feedback_lists_trace_gaps(monkeypatch):
     monkeypatch.setattr(
         intent_guard_guard,
-        "validate_final_report_vs_user_intent",
-        _continue_work_validation,
+        "avalidate_final_report_vs_user_intent",
+        as_coro(_continue_work_validation),
     )
 
     def _stub_user_ask(_messages, _state, _ctx):
@@ -344,7 +407,9 @@ def test_run_agent_continue_work_feedback_lists_trace_gaps(monkeypatch):
             "rid_stub",
         )
 
-    monkeypatch.setattr(processing_module, "process_user_ask", _stub_user_ask)
+    monkeypatch.setattr(
+        processing_module, "aprocess_user_ask", as_coro(_stub_user_ask)
+    )
 
     state = _make_state(max_steps=0)
     seed_state_intent(
@@ -353,16 +418,19 @@ def test_run_agent_continue_work_feedback_lists_trace_gaps(monkeypatch):
         log="создай report.md",
     )
 
-    run_agent(
-        [_submit_solution_call()],
-        state,
-        _make_ctx(),
+    run_coro(
+        arun_agent(
+            [_submit_solution_call()],
+            state,
+            _make_ctx(),
+        )
     )
 
     tool_output = next(
         m
         for m in state.messages
-        if m.get("type") == "function_call_output" and m.get("call_id") == "call_finish"
+        if m.get("type") == "function_call_output"
+        and m.get("call_id") == "call_finish"
     )
     payload = json.loads(tool_output["output"])
     assert payload["ok"] is False
@@ -395,8 +463,8 @@ def test_main_accept_after_ask_human_trace(monkeypatch):
 
     monkeypatch.setattr(
         intent_guard_guard,
-        "validate_final_report_vs_user_intent",
-        _accept,
+        "avalidate_final_report_vs_user_intent",
+        as_coro(_accept),
     )
 
     state = _make_state(max_steps=0)
@@ -407,10 +475,12 @@ def test_main_accept_after_ask_human_trace(monkeypatch):
         log="предыдущий запрос в треде",
     )
 
-    result = run_agent(
-        [_submit_solution_call(solution_type="direct_answer")],
-        state,
-        _make_ctx(),
+    result = run_coro(
+        arun_agent(
+            [_submit_solution_call(solution_type="direct_answer")],
+            state,
+            _make_ctx(),
+        )
     )
 
     assert result is not None
@@ -424,8 +494,8 @@ def test_main_accept_after_ask_human_trace(monkeypatch):
 def test_run_agent_handoff_phantom_artifact_fix_report(monkeypatch):
     monkeypatch.setattr(
         intent_guard_guard,
-        "validate_final_report_vs_user_intent",
-        _handoff_phantom_validation,
+        "avalidate_final_report_vs_user_intent",
+        as_coro(_handoff_phantom_validation),
     )
 
     def _stub_user_ask(_messages, _state, _ctx):
@@ -441,7 +511,9 @@ def test_run_agent_handoff_phantom_artifact_fix_report(monkeypatch):
             "rid_stub",
         )
 
-    monkeypatch.setattr(processing_module, "process_user_ask", _stub_user_ask)
+    monkeypatch.setattr(
+        processing_module, "aprocess_user_ask", as_coro(_stub_user_ask)
+    )
 
     state = _make_state(max_steps=0)
     seed_state_intent(
@@ -450,20 +522,23 @@ def test_run_agent_handoff_phantom_artifact_fix_report(monkeypatch):
         log="спроси меня что нибудь",
     )
 
-    run_agent(
-        [
-            _submit_solution_call(
-                handoff={"artifacts": ["phantom_plan.md"]},
-            )
-        ],
-        state,
-        _make_ctx(),
+    run_coro(
+        arun_agent(
+            [
+                _submit_solution_call(
+                    handoff={"artifacts": ["phantom_plan.md"]},
+                )
+            ],
+            state,
+            _make_ctx(),
+        )
     )
 
     tool_output = next(
         m
         for m in state.messages
-        if m.get("type") == "function_call_output" and m.get("call_id") == "call_finish"
+        if m.get("type") == "function_call_output"
+        and m.get("call_id") == "call_finish"
     )
     payload = json.loads(tool_output["output"])
     assert payload["ok"] is False
@@ -491,8 +566,8 @@ def test_guard_passes_structured_intent_lines_to_validator(monkeypatch):
 
     monkeypatch.setattr(
         intent_guard_guard,
-        "validate_final_report_vs_user_intent",
-        _capture,
+        "avalidate_final_report_vs_user_intent",
+        as_coro(_capture),
     )
     state = _make_state()
     seed_state_intent(state, current="open task", log="closed task")
@@ -505,18 +580,28 @@ def test_guard_passes_structured_intent_lines_to_validator(monkeypatch):
     )
 
     guard = FinishGateGuard(ctx=_make_ctx(), state=state)
-    guard.evaluate_turn_finish(finish_handoff_arguments={"solution_type": "full_solution"})
+    run_coro(
+        guard.aevaluate_turn_finish(
+            finish_handoff_arguments={"solution_type": "full_solution"}
+        )
+    )
 
-    assert intent_user_ask_texts_from_jsonl(captured["current_user_requests"]) == [
+    assert intent_user_ask_texts_from_jsonl(
+        captured["current_user_requests"]
+    ) == [
         "open task",
     ]
     assert len(captured["current_user_requests"]) == 2
-    assert intent_user_ask_texts_from_jsonl(captured["context_user_messages"]) == [
+    assert intent_user_ask_texts_from_jsonl(
+        captured["context_user_messages"]
+    ) == [
         "closed task",
     ]
 
 
-def test_run_agent_reject_continues_from_tool_output_without_technical_user(monkeypatch):
+def test_run_agent_reject_continues_from_tool_output_without_technical_user(
+    monkeypatch,
+):
     """Reject must not return finish_arguments and must not inject a user message.
 
     The next loop step is the tool-output batch; the verdict lives in that output.
@@ -542,13 +627,13 @@ def test_run_agent_reject_continues_from_tool_output_without_technical_user(monk
 
     monkeypatch.setattr(
         intent_guard_guard,
-        "validate_final_report_vs_user_intent",
-        _validate,
+        "avalidate_final_report_vs_user_intent",
+        as_coro(_validate),
     )
     monkeypatch.setattr(
         processing_module,
-        "maybe_update_intent_scope_from_tool",
-        lambda **_kwargs: None,
+        "amaybe_update_intent_scope_from_tool",
+        as_coro(lambda **_kwargs: None),
     )
 
     output_batches: list[list] = []
@@ -560,11 +645,17 @@ def test_run_agent_reject_continues_from_tool_output_without_technical_user(monk
         retry["id"] = "fc_finish_retry"
         return [retry], "rid_retry"
 
-    monkeypatch.setattr(processing_module, "process_tool_outputs", _stub_tool_outputs)
+    monkeypatch.setattr(
+        processing_module, "aprocess_tool_outputs", as_coro(_stub_tool_outputs)
+    )
     monkeypatch.setattr(
         processing_module,
-        "process_user_ask",
-        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("gate reject must not inject a user message")),
+        "aprocess_user_ask",
+        as_coro(
+            lambda *_a, **_k: (_ for _ in ()).throw(
+                AssertionError("gate reject must not inject a user message")
+            )
+        ),
     )
 
     state = _make_state(max_steps=10)
@@ -574,7 +665,9 @@ def test_run_agent_reject_continues_from_tool_output_without_technical_user(monk
         log="предыдущий ход",
     )
 
-    result = run_agent([_submit_solution_call()], state, _make_ctx())
+    result = run_coro(
+        arun_agent([_submit_solution_call()], state, _make_ctx())
+    )
 
     assert validate_calls["n"] == 2
     assert result is not None
@@ -586,8 +679,10 @@ def test_run_agent_reject_continues_from_tool_output_without_technical_user(monk
     assert output_batches[0]
     assert all(m.get("role") != "user" for m in output_batches[0])
     finish_out = next(
-        m for m in output_batches[0]
-        if m.get("type") == "function_call_output" and m.get("call_id") == "call_finish"
+        m
+        for m in output_batches[0]
+        if m.get("type") == "function_call_output"
+        and m.get("call_id") == "call_finish"
     )
     payload = json.loads(finish_out["output"])
     assert payload["ok"] is False

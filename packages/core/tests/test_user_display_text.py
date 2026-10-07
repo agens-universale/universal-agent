@@ -1,8 +1,15 @@
-from gc_core.message_policy.user_message_policy import user_display_text, extract_real_user_message_text
+from gc_core.message_policy.user_message_policy import (
+    extract_real_user_message_text,
+    user_display_text,
+)
 
 
 def test_display_text_prefers_display_content():
-    msg = {"role": "user", "content": "<skill…>\nдавай обсудим", "display_content": "давай обсудим"}
+    msg = {
+        "role": "user",
+        "content": "<skill…>\nдавай обсудим",
+        "display_content": "давай обсудим",
+    }
     assert user_display_text(msg) == "давай обсудим"
 
 
@@ -22,7 +29,11 @@ def test_display_text_none_for_non_user():
 
 
 def test_extract_prefers_display_content():
-    msg = {"role": "user", "content": "<skill…>\nдавай", "display_content": "давай"}
+    msg = {
+        "role": "user",
+        "content": "<skill…>\nдавай",
+        "display_content": "давай",
+    }
     assert extract_real_user_message_text(msg) == "давай"
 
 
@@ -32,7 +43,10 @@ def test_extract_empty_display_is_empty():
 
 
 def test_extract_without_display_unchanged():
-    assert extract_real_user_message_text({"role": "user", "content": "запрос"}) == "запрос"
+    assert (
+        extract_real_user_message_text({"role": "user", "content": "запрос"})
+        == "запрос"
+    )
 
 
 def test_display_content_none_falls_back_to_content():

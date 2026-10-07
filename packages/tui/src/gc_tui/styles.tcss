@@ -16,10 +16,17 @@ Screen {
           padding: 0 1; border-bottom: solid $deep-dim; }
 #header-left  { width: 1fr; color: $deep-dim; }
 #header-right { width: auto; color: $deep-dim; text-align: right; padding-right: 1; }
-#footer { height: 2; background: $bg; color: $dim;
+/* Высота подвала — auto с полом в две строки: пока подсказки влезают в строку,
+   под ними остаётся привычный воздух, а на узком окне полоса растёт и переносит
+   их ЦЕЛИКОМ. Фиксированная высота молча съедала хвост — «… · Esc» пропадал с
+   экрана ровно там, где выход нужнее всего. Обрубок врёт о клавишах так же, как
+   обрубок счётчиков в шапке, поэтому решение общее для всех read-only экранов. */
+#footer { height: auto; min-height: 2; background: $bg; color: $dim;
           padding: 0 1; }
-#diff-status { height: 1; background: $bg; color: $accent;
-               content-align: left middle; padding: 0 1; }
+/* Исключение — главный экран: его подвал верстается кодом (усечение cwd,
+   адаптивный стек usage) и стоит НАД полем ввода, где рост полосы двигал бы
+   ввод под рукой. */
+TraceScreen #footer { height: 2; }
 /* padding-right: 2 — ФИЗИЧЕСКИЙ зазор между колонками футера. Правая колонка
    width:auto забирает своё по содержимому, левая (1fr) получает остаток — и без этих
    двух столбцов её текст упирался в имя модели вплотную (живая приёмка). Арифметика
@@ -114,8 +121,19 @@ TraceScreen #trace { height: auto; }
 #sessions-filter { height: 1; width: 1fr; border: none; padding: 0; background: $bg; color: $ink; }
 #sessions-filter:focus { border: none; }
 
-/* FOCUS-2px — на НЕ-ввод (трейс/список/футер), когда Tab уведёт фокус туда */
-#trace:focus, .list-row:focus, #footer:focus { outline: solid $accent; }
+/* FOCUS-2px — на НЕ-ввод (список/футер), когда Tab уведёт фокус туда.
+   #trace здесь НЕТ, и это общее решение, а не правка одного экрана: `outline`
+   в Textual места не резервирует, а рисуется ПОВЕРХ виджета — движок затирает
+   им первую и последнюю строки (_styles_cache.render_line: y == 0 / height-1),
+   а дети-строки закрашивают середину рамки собой. Живьём выходила разорванная
+   рамка на КАЖДОМ экране, где фокус садится на #trace: список изменений,
+   вьюер, подтверждение отката, /view, уведомления, превью, детали вызова и сам
+   трейс главного экрана после Tab. База гасила это по месту трижды —
+   help/mcp снимают фокус (can_focus = False), config — классом quiet-focus, —
+   и все три раза с одной причиной в комментарии. Здесь причина снята разом:
+   у прокручиваемого #trace рамки фокуса нет вовсе. Фокусируемым он остаётся —
+   на нём держится клавиатурная прокрутка (↑↓ PgUp PgDn в футерах). */
+.list-row:focus, #footer:focus { outline: solid $accent; }
 
 /* Фокус строки события — сдвиг-безопасная подсветка фона (заменила [N]-префикс:
    background не рефлоунит контент, в отличие от prefix/border). */
@@ -123,6 +141,8 @@ ToolCallRow:focus, TraceRow:focus, UserReplyContainer:focus,
 BlockPanel:focus, TodoBlock:focus {
     background: $focus-bg;
 }
+/* DiffBlock здесь НЕТ: он не фокусируется вовсе (can_focus=False) — событие
+   трейса это вызов инструмента, дифф лишь его часть, и Tab идёт по событиям. */
 
 /* TraceRow — 2-колоночный layout (prefix фиксированной ширины + content width:1fr) */
 .trace-prefix  { width: auto; height: auto; padding: 0; }
@@ -142,18 +162,38 @@ BlockPanel:focus, TodoBlock:focus {
    margin-* из разных правил — отдельное `margin-left` затирает весь box вместе
    с margin-top (эпизод 2026-08-04; такой же был с .set-gap/.set-spaced). */
 .code-block-panel {
-    background: $band-bg;
+    background: $block-bg;
     padding: 0 1;
-    margin: 1 0 0 0;
+    margin: 1 0 1 0;
 }
-.code-block-panel.code-indent { margin: 1 0 0 2; }  /* трейс/превью: вровень с текстом реплики; баннер — без отступа */
+.code-block-panel.code-indent { margin: 1 0 1 2; }  /* трейс/превью: вровень с текстом реплики; баннер — без отступа */
 
 .table-block {
-    background: $band-bg;
+    background: $block-bg;
     padding: 0 1;
     margin: 1 0 1 0;
 }
 .table-block.table-indent { margin: 1 0 1 2; }  /* трейс/превью: вровень с текстом реплики (как код-панели) */
+
+/* Инлайн-дифф правки агента (раскладка — в DiffBlock.DEFAULT_CSS, здесь тема).
+   Отступы — одним shorthand-правилом, как у панелей выше.
+   В отличие от панелей блок НЕ карточка рядом, а продолжение своей строки
+   инструмента: нулевой верхний отступ (примыкает к ней) и ветка `└` вместо
+   вертикального «поводка». Левый отступ 5 — вторая ступень лесенки: строка
+   инструмента идёт от колонки 4 (padding #trace + ToolCallRow._PREFIX), ветка —
+   на +2 от неё, тело диффа — ещё на +2 (margin в DiffBlock.DEFAULT_CSS).
+   Нижний отступ — пустая строка перед следующим инструментом. Подложки на самом
+   блоке нет: ветка со счётчиками читается на фоне ленты, тёмный фон несут только
+   тело и хвост. */
+.diff-block {
+    padding: 0;
+    margin: 0 0 1 5;
+}
+.diff-block.diff-nested { margin: 0 0 1 9; }  /* правка субагента: та же лесенка от её отступа иерархии (+4) */
+.diff-block .block-body,
+.diff-block .diff-more { background: $block-bg; }
+.diff-more { color: $dim; }
+.diff-more:hover { color: $accent; }
 
 /* Шапка блока: метка языка слева, кнопка копирования справа. */
 .block-label { color: $dim; }
@@ -349,6 +389,82 @@ CopyBufferScreen #root { height: 1fr; }
 /* Строки списков (TasksScreen, SkillsScreen) */
 .list-row      { color: $ink; padding: 0 1; }
 
+/* Рамка тела экранов изменений (Р16). Именно border, а не outline: outline в
+   Textual места не резервирует и рисуется ПОВЕРХ контента — первая и последняя
+   строки тела оказывались съедены (замер: тот же контент даёт высоту 3 с
+   outline и 5 с border). Высоту рамка занимает ВСЮ доступную (#trace и так
+   1fr), а не обнимает содержимое: при смене источника и разном числе файлов
+   рамка «по содержимому» прыгала бы, а экран обязан стоять на месте. Паддинга
+   у тела в рамке нет — воздух слева даёт padding самих строк, и подсветка
+   выбранной строки доходит до рамки, а не обрывается за колонку до неё. */
+DiffScreen #trace, DiffFileViewer #trace, RevertConfirmScreen #trace {
+    border: round $accent;
+    padding: 0;
+}
+
+/* Строка под плашку результата (Д8 второго смоука). Плашка (`#diff-flash`)
+   живёт между телом и подсказками, и без резерва она липла к полосе
+   вплотную. Строка держится ВСЕГДА — и с плашкой, и без неё: полоса под
+   рукой пользователя не имеет права дёргаться от появления акка. Отступ
+   задан ОДНИМ shorthand-правилом: `margin-*` разных правил в Textual
+   затирается целиком, а не складывается, — общий `#footer` своего margin не
+   объявляет вовсе, и это правило остаётся единственным владельцем отступа
+   полосы на экранах правок. */
+DiffScreen #footer, DiffFileViewer #footer { margin: 1 0 0 0; }
+
+/* Строка экрана изменений (/diff). Свой класс, а не .list-row: у того правила
+   .selected нет вовсе, и выбор был бы виден только глифом. Фон выбранной — тот
+   же $focus-bg, что у палитры, трейса и .set-row (§16).
+   nowrap/ellipsis — как у карточек #sessions-list и #skills-list: строку решают
+   именно эти правила (Static рендерится через Content, и overflow самого
+   rich.Text не доезжает), а перенос сломал бы и сетку колонок, и шаг страницы.
+   Подсветки при наведении нет — как у всех списков базы. */
+.diff-row          { color: $ink; padding: 0 1;
+                     text-wrap: nowrap; text-overflow: ellipsis; }
+.diff-row.selected { background: $focus-bg; color: $bright; }
+
+/* Строка группы «принято» (§4.2 волны 4) — воздух над ней отделяет её от
+   активных строк списка, как в согласованном на дизайн-гейде макете; строки
+   ВНУТРИ раскрытой группы садятся друг под другом без зазора — margin только
+   у самой строки группы, не у `.diff-row` вообще (ловушка §Global Constraints:
+   margin разных правил на одном классе затирается целиком, не суммируется). */
+.diff-group-row { margin-top: 1; }
+
+/* Блок тела вьюера изменений. Своих цветов у него нет: колонку номеров,
+   заливку и подсветку рисует движок render_hunks — тот же, что у блоков
+   правок в трейсе. CSS отвечает за одно — длинная строка кода режется, а не
+   переносится: перенос сдвинул бы номера строк и разорвал заливку. */
+/* Ширина ПО СОДЕРЖИМОМУ, а не по контейнеру: только так участок выходит за
+   правый край, и полотно получает прокрутку вбок (`LazyBody`). Рваного края у
+   участков не будет — заливка считается по всему телу файла сразу, поэтому
+   ширина у них общая и не меньше кадра. */
+.diff-hunk { width: auto; height: auto;
+             text-wrap: nowrap; text-overflow: clip; }
+
+/* Курсор по правкам во вьюере (Р18) — акцентная кромка слева, тот же приём,
+   которым база метит реплики пользователя и выбранные карточки списков.
+   Цвета самого диффа не трогаются: правка помечена рядом с телом, а не поверх
+   него. Колонку под кромку резервирует КАЖДЫЙ участок тела (кромка цвета фона
+   невидима) — иначе правка под курсором съезжала бы на колонку вправо
+   относительно соседних, как съезжали кружки ●/○ в секциях настроек. */
+.diff-part        { border-left: outer $bg; padding-left: 1; }
+.diff-part.cursor { border-left: outer $accent; }
+
+/* Тело подтверждения отката — тот же воздух слева, что и у участков вьюера.
+   Своё правило нужно потому, что паддинг `#trace` на экранах изменений снят
+   рамкой (Р16), и без него превью прилипало к рамке (`│35  line35`). Ширину
+   заливки экран считает по этой же колонке — иначе она вылезла бы под
+   скроллбар. */
+RevertConfirmScreen #trace > Static { padding-left: 2; }
+
+/* Дерево подтверждения (Е3 батча 3): имя блока и вложенные строки. Курсора нет,
+   полос нет; `.line-meta` носит margin-top — здесь он гасится shorthand'ом. */
+RevertConfirmScreen #trace > .tree-head { color: $ink;      margin: 0; padding: 0 0 0 2; }
+RevertConfirmScreen #trace > .tree-line { color: $deep-dim; margin: 0; padding: 0 0 0 4; }
+RevertConfirmScreen #trace > .tree-sub  { color: $deep-dim; margin: 0; padding: 0 0 0 6; }
+RevertConfirmScreen #trace > .tree-warn { background: $band-bg; border-left: outer $warn; color: $warn; margin: 0; padding: 0 1 0 3; }
+RevertConfirmScreen #trace > .tree-gap  { height: 1; margin: 0; padding: 0; }
+
 /* ask_human banner (§3.4) — янтарный тон (как running), сигнал «жду тебя».
  * max-height: длинный вопрос скроллится внутри (VerticalScroll), не выдавливает
  * input/footer. Точный потолок дополнительно ставит _sync_trace_max_height. */
@@ -408,7 +524,9 @@ TextArea.ask-human-mode { border: solid $run-color; }
                  border-bottom: solid $deep-dim; padding: 0 1; }
 #sessions-header-left  { width: 1fr; color: $deep-dim; }
 #sessions-header-right { width: auto; color: $deep-dim; text-align: right; padding-right: 1; }
-#sessions-footer { height: 1; padding: 0 1; }
+/* Высота — auto с полом в строку, по тому же правилу, что и `#footer`: подсказки
+   picker'а самые длинные в базе и не влезают в строку даже на 120 колонках. */
+#sessions-footer { height: auto; min-height: 1; padding: 0 1; }
 #sessions-footer-left  { width: 1fr; color: $dim; }
 #sessions-footer-right { width: auto; color: $deep-dim; text-align: right; padding-right: 1; }
 #sessions-list { height: 1fr; }
@@ -462,15 +580,26 @@ TextArea.ask-human-mode { border: solid $run-color; }
    teal-карточка (лого+тэглайн+степпер+шаг) — контент между ними, по размеру. */
 #onb-header { height: 2; background: $bg; color: $deep-dim; padding: 0 1; border-bottom: solid $deep-dim; }
 #header-left { width: 1fr; color: $deep-dim; }
-/* Рамку рисует САМ скроллящий контейнер (канон раскладки форм, см.
-   `tui/form_frame.py`): граница — часть его коробки и потому стоит на месте,
-   а внутри неё едет содержимое. Пока рамка сидела ВНУТРИ скролла, её концы уезжали
-   за вьюпорт — рамка выглядела разорванной. Потолок высоты ставится из кода
-   (`cap_frame_height`): `max-height: 100%` меряется по всему `#root` вместе с шапкой
-   и футером и выдавливал футер за нижний край экрана. */
-#onb-scroll { height: auto; width: 1fr; border: round $accent; padding: 1 2; margin: 1 1; background: $bg; }
+/* Рамка живёт на САМОЙ области прокрутки (Р19): высота `auto` с потолком из
+   кода (`form_frame.cap_frame_height` = экран минус хром) — значит все
+   четыре грани нарисованы при любом размере окна, скроллбар идёт ВНУТРИ рамки,
+   а футер стоит ровно под нижней гранью (margin-bottom 0). Рамка на карточке
+   внутри скролла росла вместе с содержимым и уезжала за нижний край: нижней
+   грани не было вовсе, а скроллбар шёл снаружи, у края экрана.
+   Потолок ставится кодом, а не `max-height: 100%`: процент меряется от высоты
+   ВСЕГО экрана, а не от остатка, и футер выдавливало за кадр (замер: y=14 при
+   высоте 12).
+   Воздух сверху/снизу у карточки — `margin`, а НЕ `padding`, и это не вкусовое:
+   `scroll_to_widget` в Textual переводит координаты через margin и border
+   предков, но их padding не учитывает (`widget.py`, цикл по предкам). С
+   паддингом вердикт проверки соединения оказывался на строку ниже кадра, и
+   `scroll_visible` его туда не довозил. Паддингом остался только боковой воздух
+   (по горизонтали прокрутки нет, и арифметику он не задевает); у самой рамки
+   паддинга нет вовсе — иначе скроллбар отъехал бы от грани внутрь. */
+#onb-scroll { height: auto; width: 1fr; border: round $accent; padding: 0;
+              margin: 1 1 0 1; background: $bg; }
 #onb-footer { height: 2; background: $bg; color: $dim; padding: 0 1; }
-#onb-frame { height: auto; width: 1fr; }
+#onb-frame { height: auto; width: 1fr; padding: 0 2; margin: 1 0; background: $bg; }
 #onb-logo { height: auto; padding: 0; }
 #onb-tagline { height: auto; color: $deep-dim; margin-top: 1; padding: 0; }
 #onb-stepper { height: auto; padding: 2 0; }
@@ -506,10 +635,11 @@ TextArea.ask-human-mode { border: solid $run-color; }
 
 /* /settings — хаб настроек (визуальный контракт §2-3; идиомы = onb-*) */
 #set-header { height: 2; background: $bg; color: $deep-dim; padding: 0 1; border-bottom: solid $deep-dim; }
-/* Рамка — на скроллящем контейнере (тот же канон, что у мастера выше). */
-#set-scroll { height: auto; width: 1fr; border: round $accent; padding: 1 2; margin: 1 1; background: $bg; }
+/* Рамка — на области прокрутки, потолок из кода (Р19; разбор у #onb-scroll). */
+#set-scroll { height: auto; width: 1fr; border: round $accent; padding: 0;
+              margin: 1 1 0 1; background: $bg; }
 #set-footer { height: 2; background: $bg; color: $dim; padding: 0 1; }
-#set-frame { height: auto; width: 1fr; }
+#set-frame { height: auto; width: 1fr; padding: 0 2; margin: 1 0; background: $bg; }
 /* Единая левая граница контента = padding 0 1 у ВСЕХ элементов секции/меню
    (frame даёт +2, элементы +1 → всё на 3 от рамки; рассинхрон отступов был
    причиной «адрес левее / авторизация поехала»). */
@@ -542,12 +672,13 @@ TextArea.ask-human-mode { border: solid $run-color; }
    перетирает (та же причина, что у `.set-spaced-gap` выше). */
 .set-voiceoverride { margin: 1 0 1 0; }
 
-/* Пост-апдейт (D4) — карточка по контенту, как #set-frame (визуальный контракт §6);
-   раньше сидел в #trace{height:1fr} и раскатывался на весь пустой экран.
-   Рамка — на скроллящем контейнере, потолок из кода: тот же канон, что у мастера
-   и /settings (см. `tui/form_frame.py`). */
-#pu-scroll { height: auto; width: 1fr; border: round $accent; padding: 1 2; margin: 1 1; background: $bg; }
-#pu-frame { height: auto; width: 1fr; }
+/* Пост-апдейт (D4) — карточка по контенту, как #set-scroll (визуальный контракт §6);
+   раньше сидел в #trace{height:1fr} и раскатывался на весь пустой экран. По
+   контенту её держит `height: auto` области прокрутки с потолком из кода
+   (Р19; разбор у #onb-scroll). */
+#pu-scroll { height: auto; width: 1fr; border: round $accent; padding: 0;
+             margin: 1 1 0 1; background: $bg; }
+#pu-frame { height: auto; width: 1fr; padding: 0 2; margin: 1 0; background: $bg; }
 
 /* Компактный режим рамки (`tui/form_frame.py::cap_frame_height`) — на тесных окнах
    собственная коробка скролла (граница `round` + вертикальный `padding: 1 2`, 4
@@ -566,6 +697,10 @@ TextArea.ask-human-mode { border: solid $run-color; }
 .set-confirm { background: $band-bg; border-left: outer $warn; padding: 0 1; margin-top: 1; }
 .set-flash-ok   { background: $band-bg; border-left: outer $ok;   padding: 0 1; margin-top: 1; color: $ok; }
 .set-flash-warn { background: $band-bg; border-left: outer $warn; padding: 0 1; margin-top: 1; color: $warn; }
+/* Спокойная плашка (Р24): «так не получится», а не «сломалось». Тот же приём,
+   что у двух соседок — фон полосы и левая кромка, — только цвет приглушённый и
+   глифа в тексте нет: ⚠ на неприменимой клавише читался как поломка. */
+.set-flash-note { background: $band-bg; border-left: outer $deep-dim; padding: 0 1; margin-top: 1; color: $dim; }
 /* Отчёт операции (`_report`): плашка-блок для чтения, но НЕ тревога — бордер
    успеха, как у флэша, а не янтарный язык подтверждений. Текст остаётся
    обычным: читают содержимое, а не цвет. */
@@ -668,3 +803,18 @@ ModelsSectionEditor, VoiceEndpointEditor { height: auto; }
    вплотную к своей строке. Шортхенд и позиция ПОСЛЕ .set-spaced в файле: правило
    побеждает порядком при равной специфичности. */
 .models-picker-anchor { margin: 0; }
+
+/* Многострочные параметры модели используют палитру полей настроек. */
+ModelEntryForm TextArea.mef-yaml {
+    border: round $run-color; background: $bg; color: $ink; padding: 0 1;
+    scrollbar-size: 1 1;
+    scrollbar-background: $bg;
+    scrollbar-background-hover: $bg;
+    scrollbar-background-active: $bg;
+    scrollbar-color: $deep-dim;
+    scrollbar-color-hover: $accent;
+    scrollbar-color-active: $accent;
+}
+ModelEntryForm TextArea.mef-yaml:focus {
+    border: round $run-color; background: $band-bg; color: $ink;
+}

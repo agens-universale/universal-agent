@@ -9,18 +9,23 @@ import json
 from typing import Any, Dict, List, Optional
 
 from gc_core.constants.tool_names import SESSION_TODO_TOOL_NAME
-from gc_core.loop_detector.constants import GENERIC_PROFILE, loop_warn_on_repeat
+from gc_core.loop_detector.constants import (
+    GENERIC_PROFILE,
+    loop_warn_on_repeat,
+)
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 
 
 def _todo_statuses():
     # Deferred to avoid circular import: persistence.__init__ → state_serializer → states → tools
     from gc_core.persistence.schema import TODO_STATUSES
+
     return TODO_STATUSES
+
 
 def _counts(items: List[Dict[str, str]]) -> Dict[str, int]:
     statuses = _todo_statuses()
-    tally = {s: 0 for s in statuses}
+    tally = dict.fromkeys(statuses, 0)
     for i in items:
         s = i["status"]
         if s in tally:
@@ -38,7 +43,9 @@ class SessionTodo(AbstractSimpleTool):
     tool_name = SESSION_TODO_TOOL_NAME
 
     @classmethod
-    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def tool_description(
+        cls, config_dict: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
         return {
             "type": "function",
             "name": SESSION_TODO_TOOL_NAME,
@@ -92,7 +99,9 @@ class SessionTodo(AbstractSimpleTool):
         }
 
     @classmethod
-    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> str:
+    def prompt_description(
+        cls, config_dict: Optional[Dict[str, Any]] = None
+    ) -> str:
         return """Tool name: session_todo
 Tool description: Structured checklist of the CURRENT task (plan + progress). Each call fully replaces the list; empty list clears it. Statuses: pending | in_progress | completed.
 
@@ -109,8 +118,14 @@ Usage:
 Input schema: {"type":"object","properties":{"todos":{"type":"array","items":{"type":"object","properties":{"content":{"type":"string"},"status":{"type":"string","enum":["pending","in_progress","completed"]}},"required":["content","status"],"additionalProperties":false}}},"required":["todos"],"additionalProperties":false}
 """
 
-    def _result(self, *, ok: bool, items: List[Dict[str, str]],
-                message: str, error: Optional[Dict[str, Any]] = None) -> str:
+    def _result(
+        self,
+        *,
+        ok: bool,
+        items: List[Dict[str, str]],
+        message: str,
+        error: Optional[Dict[str, Any]] = None,
+    ) -> str:
         payload: Dict[str, Any] = {
             "tool": SESSION_TODO_TOOL_NAME,
             "ok": ok,
@@ -133,14 +148,46 @@ Input schema: {"type":"object","properties":{"todos":{"type":"array","items":{"t
         raw = getattr(self._state, "session_todo", None)
         return raw if isinstance(raw, list) else []
 
-    def __call__(self, todos: Any = None, **kwargs: Any) -> str:
+    def _validate_item(self, index: int, item: Any) -> tuple:
+        """``(ответ_с_ошибкой, None)`` либо ``(None, нормализованный_пункт)``."""
+        if not isinstance(item, dict):
+            return self._error(
+                "invalid_item", f"todos[{index}] must be an object."
+            ), None
+        extra = set(item) - {"content", "status"}
+        if extra:
+            return self._error(
+                "invalid_item",
+                f"todos[{index}] has unexpected fields: {', '.join(sorted(extra))}.",
+            ), None
+        content = item.get("content")
+        status = item.get("status")
+        if not isinstance(content, str) or not content.strip():
+            return self._error(
+                "invalid_item",
+                f"todos[{index}].content must be a non-empty string.",
+            ), None
+        if status not in _todo_statuses():
+            return self._error(
+                "invalid_item",
+                f"todos[{index}].status must be one of: {', '.join(_todo_statuses())}.",
+            ), None
+        return None, {"content": content.strip(), "status": status}
+
+    async def acall(self, todos: Any = None, **kwargs: Any) -> str:
         if self._state is None or getattr(self._state, "shared", None) is None:
-            return json.dumps({
-                "tool": SESSION_TODO_TOOL_NAME,
-                "ok": False,
-                "error": {"type": "no_state", "message": "state is missing."},
-                "message": "Checklist NOT changed.",
-            }, ensure_ascii=False)
+            return json.dumps(
+                {
+                    "tool": SESSION_TODO_TOOL_NAME,
+                    "ok": False,
+                    "error": {
+                        "type": "no_state",
+                        "message": "state is missing.",
+                    },
+                    "message": "Checklist NOT changed.",
+                },
+                ensure_ascii=False,
+            )
         if kwargs:
             return self._error(
                 "unexpected_arguments",
@@ -149,36 +196,15 @@ Input schema: {"type":"object","properties":{"todos":{"type":"array","items":{"t
         if not isinstance(todos, list):
             return self._error(
                 "invalid_todos",
-                "todos must be an array of {content, status} objects "
-                "(empty array clears the checklist).",
+                "todos must be an array of {content, status} objects (empty array clears the checklist).",
             )
 
         normalized: List[Dict[str, str]] = []
         for index, item in enumerate(todos):
-            if not isinstance(item, dict):
-                return self._error(
-                    "invalid_item", f"todos[{index}] must be an object."
-                )
-            extra = set(item) - {"content", "status"}
-            if extra:
-                return self._error(
-                    "invalid_item",
-                    f"todos[{index}] has unexpected fields: {', '.join(sorted(extra))}.",
-                )
-            content = item.get("content")
-            status = item.get("status")
-            if not isinstance(content, str) or not content.strip():
-                return self._error(
-                    "invalid_item",
-                    f"todos[{index}].content must be a non-empty string.",
-                )
-            if status not in _todo_statuses():
-                return self._error(
-                    "invalid_item",
-                    f"todos[{index}].status must be one of: "
-                    f"{', '.join(_todo_statuses())}.",
-                )
-            normalized.append({"content": content.strip(), "status": status})
+            error, entry = self._validate_item(index, item)
+            if error is not None:
+                return error
+            normalized.append(entry)
 
         self._state.session_todo = normalized
         counts = _counts(normalized)

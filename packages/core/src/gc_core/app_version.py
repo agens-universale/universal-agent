@@ -4,6 +4,7 @@
 uv-receipt.toml сознательно НЕ используется: не содержит коммита (проверено
 живьём 2026-07-11), а direct_url.json пишет любой PEP 610-установщик.
 """
+
 from __future__ import annotations
 
 import json
@@ -19,7 +20,15 @@ from typing import Callable, NamedTuple, Optional
 # а --update переустанавливал не тот дистрибутив. Профили-приложения от вставки
 # не страдают: они перечислены выше и находятся раньше, а gc-mcp от них не
 # зависит и подменить их не может.
-PROFILE_DISTS = ("gc-ua", "gc-tui", "gc-server", "gc-cli", "gc-mcp", "gc-core")
+PROFILE_DISTS = (
+    "gc-ua",
+    "gc-tui",
+    "gc-server",
+    "gc-cli",
+    "gc-acp",
+    "gc-mcp",
+    "gc-core",
+)
 
 # Подкаталог манифеста каждого профиля в репозитории. Нужен для переустановки:
 # uv читает из git только КОРНЕВОЙ pyproject.toml, поэтому лист без
@@ -33,6 +42,7 @@ PROFILE_SUBDIRS = {
     "gc-tui": "packages/tui",
     "gc-server": "packages/server",
     "gc-mcp": "packages/mcp",
+    "gc-acp": "packages/acp",
 }
 
 # Канонический git-URL репозитория. Живёт рядом с PROFILE_SUBDIRS намеренно:
@@ -64,8 +74,14 @@ def install_hint(dist: str) -> str:
     # подсказке, получит рабочий профиль без `gc-mcp` в PATH — и следом совет
     # онбординга ставить менеджер отдельным инструментом. Тот же флаг
     # обязателен и при обновлении, см. `updater.runner.build_install_command`.
-    extra = "" if dist in ("gc-ua", "gc-mcp", "gc-core") else " --with-executables-from gc-mcp"
-    return f'uv tool install --force "{dist} @ git+{REPO_GIT_URL}{anchor}"{extra}'
+    extra = (
+        ""
+        if dist in ("gc-ua", "gc-mcp", "gc-core")
+        else " --with-executables-from gc-mcp"
+    )
+    return (
+        f'uv tool install --force "{dist} @ git+{REPO_GIT_URL}{anchor}"{extra}'
+    )
 
 
 # Совместимость: имя, под которым агент публиковался до разделения профилей.
@@ -74,11 +90,11 @@ DIST_NAME = PROFILE_DISTS[0]
 
 class InstallSource(NamedTuple):
     url: str
-    ref: Optional[str]      # requested_revision; None = дефолтная ветка источника
-    commit: Optional[str]   # зарезолвленный коммит установки
-    editable: bool          # dev-установка из исходников
-    dist: str = DIST_NAME   # имя установленного дистрибутива-профиля
-    subdirectory: Optional[str] = None   # PEP 610: подкаталог манифеста в репо
+    ref: Optional[str]  # requested_revision; None = дефолтная ветка источника
+    commit: Optional[str]  # зарезолвленный коммит установки
+    editable: bool  # dev-установка из исходников
+    dist: str = DIST_NAME  # имя установленного дистрибутива-профиля
+    subdirectory: Optional[str] = None  # PEP 610: подкаталог манифеста в репо
 
 
 def installed_dist() -> str:
@@ -94,6 +110,7 @@ def installed_dist() -> str:
     процессе: агент до перезапуска показывал бы профиль, которого уже нет.
     """
     from importlib import metadata
+
     for name in PROFILE_DISTS:
         try:
             metadata.distribution(name)
@@ -105,6 +122,7 @@ def installed_dist() -> str:
 
 def agent_version() -> str:
     from importlib import metadata
+
     try:
         return metadata.version(installed_dist())
     except metadata.PackageNotFoundError:
@@ -140,6 +158,7 @@ def display_version(*, long: bool = False) -> str:
 
 def _read_direct_url_text() -> Optional[str]:
     from importlib import metadata
+
     try:
         dist = metadata.distribution(installed_dist())
     except metadata.PackageNotFoundError:

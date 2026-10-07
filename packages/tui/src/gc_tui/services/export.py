@@ -1,26 +1,35 @@
 """Экспорт треда — json (pretty-обёртка) / txt (аннотированный лог)."""
+
 from __future__ import annotations
 
 import json
 import re
 
-from gc_core.message_policy.user_message_policy import is_technical_user_message_text, resolve_technical_user_content_type, user_content_to_text
+from gc_core.attachments.model import attachments_of, chip_of, wh_text
+from gc_core.message_policy.user_message_policy import (
+    is_technical_user_message_text,
+    resolve_technical_user_content_type,
+    user_content_to_text,
+)
 
 _THINK_RE = re.compile(r"<think>(.*?)</think>", re.DOTALL | re.IGNORECASE)
 _TECH_INNER_RE = re.compile(
-    r"<technical\s+type=\"[a-z_]+\">(.*?)</technical>", re.IGNORECASE | re.DOTALL
+    r"<technical\s+type=\"[a-z_]+\">(.*?)</technical>",
+    re.IGNORECASE | re.DOTALL,
 )
 
 
 # --- helpers --------------------------------------------------------------
+
 
 def _env_ts(rec: dict) -> str:
     v = rec.get("ts")
     return v if isinstance(v, str) else ""
 
 
-def _build_header(segments: list[dict], *, meta: dict,
-                  thread_id: str, system: str) -> dict:
+def _build_header(
+    segments: list[dict], *, meta: dict, thread_id: str, system: str
+) -> dict:
     all_recs = [r for seg in segments for r in seg["messages"]]
     n_sum = sum(1 for seg in segments if seg.get("compacted_by"))
     return {
@@ -36,20 +45,31 @@ def _build_header(segments: list[dict], *, meta: dict,
 
 # --- json -----------------------------------------------------------------
 
+
 def _render_json(segments: list[dict], header: dict) -> str:
     out_segments = []
     for seg in segments:
-        msgs = [r["payload"] for r in seg["messages"] if isinstance(r.get("payload"), dict)]
-        out_segments.append({
-            "index": seg["index"],
-            "messages": msgs,
-            "compacted_by": seg.get("compacted_by"),
-        })
-    return json.dumps({"thread": header, "segments": out_segments},
-                      ensure_ascii=False, indent=2)
+        msgs = [
+            r["payload"]
+            for r in seg["messages"]
+            if isinstance(r.get("payload"), dict)
+        ]
+        out_segments.append(
+            {
+                "index": seg["index"],
+                "messages": msgs,
+                "compacted_by": seg.get("compacted_by"),
+            }
+        )
+    return json.dumps(
+        {"thread": header, "segments": out_segments},
+        ensure_ascii=False,
+        indent=2,
+    )
 
 
 # --- txt ------------------------------------------------------------------
+
 
 def _indent(text: str) -> list[str]:
     return ["    " + ln for ln in str(text).split("\n")]
@@ -65,7 +85,10 @@ def _assistant_text(content) -> str:
     if isinstance(content, list):
         parts = []
         for item in content:
-            if isinstance(item, dict) and item.get("type") in ("output_text", "text"):
+            if isinstance(item, dict) and item.get("type") in (
+                "output_text",
+                "text",
+            ):
                 t = item.get("text")
                 if isinstance(t, str):
                     parts.append(t)
@@ -77,7 +100,7 @@ def _split_think(text: str) -> tuple[str, str]:
     m = _THINK_RE.search(text)
     if not m:
         return "", text.strip()
-    return m.group(1).strip(), (text[:m.start()] + text[m.end():]).strip()
+    return m.group(1).strip(), (text[: m.start()] + text[m.end() :]).strip()
 
 
 def _strip_technical(content: str) -> str:
@@ -120,6 +143,15 @@ def _header_line(h: dict) -> str:
     return "===== " + " · ".join(parts) + " ====="
 
 
+def _image_lines(payload: dict) -> list[str]:
+    """Картинки записи: подпись, формат и размер, путь файла. Экспорт несёт текст
+    и пути, байтов картинок в нём нет (дизайн картинок §12)."""
+    return [
+        f"    └ {chip_of(att)} · {wh_text(att)} · {att.path}"
+        for att in attachments_of(payload)
+    ]
+
+
 def _render_record(n: int, payload: dict, name_by_call: dict) -> list[str]:
     role, typ = payload.get("role"), payload.get("type")
 
@@ -132,7 +164,9 @@ def _render_record(n: int, payload: dict, name_by_call: dict) -> list[str]:
     if typ == "function_call_output":
         cid = payload.get("call_id") or ""
         name = name_by_call.get(cid, "")
-        head = f"[{n}] OUTPUT {name}".rstrip() + (f" (call_id={cid})" if cid else "")
+        head = f"[{n}] OUTPUT {name}".rstrip() + (
+            f" (call_id={cid})" if cid else ""
+        )
         return [head, *_indent(_format_json_str(payload.get("output")))]
 
     if typ in ("reasoning", "think"):
@@ -140,16 +174,21 @@ def _render_record(n: int, payload: dict, name_by_call: dict) -> list[str]:
         return [f"[{n}] THINK", *_indent(_as_text(text))]
 
     if role == "user":
+        images = _image_lines(payload)
         if "display_content" in payload:
             disp = (payload.get("display_content") or "").strip()
             if not disp:
-                return []                        # mid-run доставка — не выводим как USER
-            return [f"[{n}] USER", *_indent(disp)]
+                return []  # mid-run доставка — не выводим как USER
+            return [f"[{n}] USER", *_indent(disp), *images]
         content = user_content_to_text(payload.get("content"))
         if is_technical_user_message_text(content):
             ttype = resolve_technical_user_content_type(content)
-            return [f"[{n}] USER [technical:{ttype}]", *_indent(_strip_technical(content))]
-        return [f"[{n}] USER", *_indent(content)]
+            return [
+                f"[{n}] USER [technical:{ttype}]",
+                *_indent(_strip_technical(content)),
+                *images,
+            ]
+        return [f"[{n}] USER", *_indent(content), *images]
 
     if role == "assistant":
         think, answer = _split_think(_assistant_text(payload.get("content")))
@@ -161,8 +200,10 @@ def _render_record(n: int, payload: dict, name_by_call: dict) -> list[str]:
         body += answer.split("\n")
         return [f"[{n}] ASSISTANT", *["    " + ln for ln in body]]
 
-    return [f"[{n}] {role or typ or 'MESSAGE'}",
-            *_indent(json.dumps(payload, ensure_ascii=False, indent=2))]
+    return [
+        f"[{n}] {role or typ or 'MESSAGE'}",
+        *_indent(json.dumps(payload, ensure_ascii=False, indent=2)),
+    ]
 
 
 def _render_txt(segments: list[dict], header: dict) -> str:
@@ -182,8 +223,7 @@ def _render_txt(segments: list[dict], header: dict) -> str:
         if comp:
             idx = seg["index"] + 1
             out.append(
-                f"────────── КОНТЕКСТ СЖАТ #{idx} · "
-                f"{comp['messages_in_segment']} сообщений → сводка ──────────"
+                f"────────── КОНТЕКСТ СЖАТ #{idx} · {comp['messages_in_segment']} сообщений → сводка ──────────"
             )
             out += comp["synthesis"].split("\n")
             out.append(f"────────── /конец сводки #{idx} ──────────")
@@ -195,9 +235,13 @@ def _render_txt(segments: list[dict], header: dict) -> str:
 
 # --- public API -----------------------------------------------------------
 
-def export_thread(segments: list[dict], *, fmt: str, meta: dict,
-                  thread_id: str, system: str) -> str:
-    header = _build_header(segments, meta=meta, thread_id=thread_id, system=system)
+
+def export_thread(
+    segments: list[dict], *, fmt: str, meta: dict, thread_id: str, system: str
+) -> str:
+    header = _build_header(
+        segments, meta=meta, thread_id=thread_id, system=system
+    )
     if fmt == "json":
         return _render_json(segments, header)
     return _render_txt(segments, header)

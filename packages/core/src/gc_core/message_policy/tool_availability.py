@@ -20,6 +20,7 @@
 том, что тулов нет, и оно гейт применяет. Разница намеренная: «не смогли узнать»
 не должно молча выключать подсказки.
 """
+
 from __future__ import annotations
 
 from typing import Any, Optional, Set

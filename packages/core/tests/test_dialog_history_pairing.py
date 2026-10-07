@@ -1,5 +1,9 @@
 """Фундамент: техническое user-сообщение не отрывается от своего реального хода."""
-from gc_core.message_format.dialog_history import group_into_turns, split_turns_into_char_batches
+
+from gc_core.message_format.dialog_history import (
+    group_into_turns,
+    split_turns_into_char_batches,
+)
 
 
 def _user(text):
@@ -7,7 +11,10 @@ def _user(text):
 
 
 def _tech(text):
-    return {"role": "user", "content": f'<technical type="technical">{text}</technical>'}
+    return {
+        "role": "user",
+        "content": f'<technical type="technical">{text}</technical>',
+    }
 
 
 def _assistant(text):
@@ -23,8 +30,10 @@ def test_real_plus_technical_form_one_turn():
 
 def test_two_pairs_form_two_turns():
     msgs = [
-        _user("первый"), _tech("attached: a.py"),
-        _user("второй"), _tech("attached: b.py"),
+        _user("первый"),
+        _tech("attached: a.py"),
+        _user("второй"),
+        _tech("attached: b.py"),
     ]
     turns = group_into_turns(msgs)
     assert len(turns) == 2
@@ -54,7 +63,10 @@ def test_standalone_technical_forms_own_turn():
 def test_current_context_technical_also_binds():
     """Другой технический маркер (<current_context>) тоже примыкает к предыдущему ходу."""
     real = {"role": "user", "content": "сделай X"}
-    ctx = {"role": "user", "content": "<current_context>some ctx</current_context>"}
+    ctx = {
+        "role": "user",
+        "content": "<current_context>some ctx</current_context>",
+    }
     asst = {"role": "assistant", "type": "message", "content": "ок"}
     turns = group_into_turns([real, ctx, asst])
     assert len(turns) == 1
@@ -66,7 +78,10 @@ from gc_core.run_summary_coordinator import build_preserved_batch
 
 def test_preserved_batch_keeps_both_real_and_technical():
     real = {"role": "user", "content": "почини баг"}
-    tech = {"role": "user", "content": '<technical type="technical">attached: a.py</technical>'}
+    tech = {
+        "role": "user",
+        "content": '<technical type="technical">attached: a.py</technical>',
+    }
     current = [real, tech]
     out = build_preserved_batch(
         current_messages=current,

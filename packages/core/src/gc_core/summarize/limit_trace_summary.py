@@ -12,10 +12,12 @@ import os
 from typing import Any
 
 from gc_core.bundled_assets import bundled_root
-from gc_core.summarize.llm import request_auxiliary_completion_text
+from gc_core.summarize.llm import arequest_auxiliary_completion_text
 from gc_core.usage.account import UsageAccount
 
-_PROMPT_PATH = os.path.join(str(bundled_root()), "prompts", "limit_trace_summary.md")
+_PROMPT_PATH = os.path.join(
+    str(bundled_root()), "prompts", "limit_trace_summary.md"
+)
 
 _REASON_LABELS = {
     "step_limit": "step limit",
@@ -32,10 +34,12 @@ def _load_limit_summary_prompt() -> str:
     global _prompt_cache
     if _prompt_cache is not None:
         return _prompt_cache
-    with open(_PROMPT_PATH, "r", encoding="utf-8") as fd:
+    with open(_PROMPT_PATH, encoding="utf-8") as fd:
         text = fd.read().strip()
     if not text:
-        raise ValueError(f"Limit trace summary prompt is empty: {_PROMPT_PATH}")
+        raise ValueError(
+            f"Limit trace summary prompt is empty: {_PROMPT_PATH}"
+        )
     _prompt_cache = text
     return text
 
@@ -54,24 +58,42 @@ def _tokens_spent(state: Any) -> Any:
         return "?"
 
 
-def _build_message(state: Any, reason: str, config_dict: dict[str, Any]) -> str:
+def _build_message(
+    state: Any, reason: str, config_dict: dict[str, Any]
+) -> str:
     label = _REASON_LABELS.get(reason, reason)
     if reason == "step_limit":
-        return (
-            f"Agent stopped: {label} "
-            f"({state.steps}/{getattr(state, 'max_steps', '?')})."
-        )
+        return f"Agent stopped: {label} ({state.steps}/{getattr(state, 'max_steps', '?')})."
     if reason == "tool_call_limit":
         limit = config_dict.get("max_tool_calls")
-        return (
-            f"Agent stopped: {label} "
-            f"({state.tool_calls}/{limit})."
-        )
+        return f"Agent stopped: {label} ({state.tool_calls}/{limit})."
     if reason == "token_limit":
         limit = config_dict.get("session_token_limit")
         spent = _tokens_spent(state)
         return f"Agent stopped: {label} ({spent}/{limit})."
     return f"Agent stopped: {label}."
+
+
+def _trace_line(m: dict[str, Any]) -> str:
+    mtype = m.get("type", "")
+    # --- Tool call: {name, arguments, type:"function_call"} ---
+    if mtype == "function_call":
+        args = m.get("arguments", "")
+        text = str(args) if args is not None else ""
+        return f"[tool_call:{m.get('name', '?')}] {text}"
+    # --- Tool output: {output, type:"function_call_output"} ---
+    if mtype == "function_call_output":
+        output = m.get("output", "")
+        text = str(output) if output is not None else ""
+        return f"[tool_output] {text}"
+    # --- Text message: {role, content, type:"message"} ---
+    role = m.get("role", "?")
+    content = m.get("content", "")
+    name = m.get("name", "")
+    # Компактное представление: role + content (и name если есть).
+    tag = f"{role}/{name}" if name else role
+    text = str(content) if content is not None else ""
+    return f"[{tag}] {text}"
 
 
 def _serialize_trace(state_messages: list[dict[str, Any]]) -> str:
@@ -90,33 +112,7 @@ def _serialize_trace(state_messages: list[dict[str, Any]]) -> str:
 
     lines: list[str] = []
     for m in trace_msgs:
-        mtype = m.get("type", "")
-
-        # --- Tool call: {name, arguments, type:"function_call"} ---
-        if mtype == "function_call":
-            name = m.get("name", "?")
-            args = m.get("arguments", "")
-            text = str(args) if args is not None else ""
-            lines.append(f"[tool_call:{name}] {text}")
-            continue
-
-        # --- Tool output: {output, type:"function_call_output"} ---
-        if mtype == "function_call_output":
-            output = m.get("output", "")
-            text = str(output) if output is not None else ""
-            lines.append(f"[tool_output] {text}")
-            continue
-
-        # --- Text message: {role, content, type:"message"} ---
-        role = m.get("role", "?")
-        content = m.get("content", "")
-        name = m.get("name", "")
-        # Компактное представление: role + content (и name если есть).
-        tag = role
-        if name:
-            tag = f"{role}/{name}"
-        text = str(content) if content is not None else ""
-        lines.append(f"[{tag}] {text}")
+        lines.append(_trace_line(m))
 
     return "\n".join(lines)
 
@@ -130,8 +126,11 @@ def _should_enable(config_dict: dict[str, Any]) -> bool:
     return str(raw).strip().lower() in ("true", "1", "yes", "on")
 
 
-def build_limit_envelope(state: Any, reason: str, ctx: Any) -> str:
+async def abuild_limit_envelope(state: Any, reason: str, ctx: Any) -> str:
     """Возвращает JSON-строку envelope для limit-path.
+
+    Основная (и единственная) реализация: aux LLM-вызов уходит на тот же loop,
+    что и цикл агента, — поток из пула на время суммаризации не занимается.
 
     Args:
         state: State с .messages, .steps, .tool_calls, .max_steps.
@@ -146,19 +145,23 @@ def build_limit_envelope(state: Any, reason: str, ctx: Any) -> str:
 
     raw_summary = ""
     if _should_enable(config_dict):
-        max_tokens = getattr(getattr(ctx, "auxiliary_llm", None), "max_tokens", None)
+        max_tokens = getattr(
+            getattr(ctx, "auxiliary_llm", None), "max_tokens", None
+        )
         if not isinstance(max_tokens, int) or max_tokens < 1:
             max_tokens = 24576
 
         try:
             prompt_template = _load_limit_summary_prompt()
             trace_text = _serialize_trace(state.messages)
-            user_content = prompt_template + "\n\n---\n## Agent trace\n\n" + trace_text
+            user_content = (
+                prompt_template + "\n\n---\n## Agent trace\n\n" + trace_text
+            )
             messages = [
                 {"role": "system", "content": "You are a trace summarizer."},
                 {"role": "user", "content": user_content},
             ]
-            raw_summary = request_auxiliary_completion_text(
+            raw_summary = await arequest_auxiliary_completion_text(
                 ctx=ctx,
                 state=state,
                 messages=messages,
@@ -171,8 +174,7 @@ def build_limit_envelope(state: Any, reason: str, ctx: Any) -> str:
                 raw_summary = ""
         except Exception:
             logger.warning(
-                "limit_trace_summary LLM call failed for reason=%s; "
-                "returning envelope with empty summary",
+                "limit_trace_summary LLM call failed for reason=%s; returning envelope with empty summary",
                 reason,
                 exc_info=True,
             )

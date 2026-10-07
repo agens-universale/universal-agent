@@ -16,7 +16,9 @@ CATEGORY_FINISH_GATE = "finish_gate"
 CATEGORY_COMMAND_MODERATION = "command_moderation"
 CATEGORY_PROJECT_MEMORY = "project_memory"
 CATEGORY_INTENT_SCOPE = "intent_scope"
+CATEGORY_STRUCTURED_OUTPUT = "structured_output"
 CATEGORY_SUBAGENT = "subagent"
+CATEGORY_VISION = "vision"
 CATEGORY_UNCATEGORIZED = "uncategorized"
 
 _KNOWN_CATEGORIES = (
@@ -26,7 +28,9 @@ _KNOWN_CATEGORIES = (
     CATEGORY_COMMAND_MODERATION,
     CATEGORY_PROJECT_MEMORY,
     CATEGORY_INTENT_SCOPE,
+    CATEGORY_STRUCTURED_OUTPUT,
     CATEGORY_SUBAGENT,
+    CATEGORY_VISION,
     CATEGORY_UNCATEGORIZED,
 )
 
@@ -35,8 +39,15 @@ _KNOWN_CATEGORIES = (
 # ``billed_*`` — подмножество вызовов, для которых известна фактическая цена;
 # токены не дублируются: тарифный остаток = input − billed_input и т.д.
 _FIELDS = (
-    "input", "output", "cached", "calls", "missing_usage_calls",
-    "billed_calls", "billed_input", "billed_output", "billed_cached",
+    "input",
+    "output",
+    "cached",
+    "calls",
+    "missing_usage_calls",
+    "billed_calls",
+    "billed_input",
+    "billed_output",
+    "billed_cached",
 )
 # Деньги ведутся отдельным словарём «валюта → сумма»: складывать суммы разных
 # валют нельзя, а валюта — свойство конкретного вызова (её знает провайдер
@@ -83,17 +94,23 @@ def category_for_request_label(request_label: str | None) -> str:
         return CATEGORY_PROJECT_MEMORY
     if "intent_scope" in label:
         return CATEGORY_INTENT_SCOPE
+    if label.startswith("vision"):
+        return CATEGORY_VISION
+    if label == "structured_output":
+        return CATEGORY_STRUCTURED_OUTPUT
     return CATEGORY_MAIN
 
 
 def _empty_bucket() -> Dict[str, Any]:
-    bucket: Dict[str, Any] = {field: 0 for field in _FIELDS}
+    bucket: Dict[str, Any] = dict.fromkeys(_FIELDS, 0)
     bucket[MONEY_FIELD] = {}
     return bucket
 
 
 class UsageAccount:
-    def __init__(self, by_category: Optional[Dict[str, Dict[str, Any]]] = None) -> None:
+    def __init__(
+        self, by_category: Optional[Dict[str, Dict[str, Any]]] = None
+    ) -> None:
         self.by_category: Dict[str, Dict[str, Any]] = {}
         if by_category:
             for category, bucket in by_category.items():
@@ -102,7 +119,9 @@ class UsageAccount:
                 dst = self._bucket(str(category))
                 for field in _FIELDS:
                     raw = bucket.get(field, 0)
-                    dst[field] = int(raw) if isinstance(raw, (int, float)) else 0
+                    dst[field] = (
+                        int(raw) if isinstance(raw, (int, float)) else 0
+                    )
                 dst[MONEY_FIELD] = _money_from_raw(bucket)
 
     def _bucket(self, category: str) -> Dict[str, Any]:
@@ -148,7 +167,9 @@ class UsageAccount:
         bucket["calls"] += 1
         bucket["missing_usage_calls"] += 1
 
-    def merge(self, other: "UsageAccount", as_category: Optional[str] = None) -> None:
+    def merge(
+        self, other: UsageAccount, as_category: Optional[str] = None
+    ) -> None:
         """Влить чужой счёт. ``as_category`` — свернуть все категории other в одну
         (используется для субагентов: их вклад → категория ``subagent`` родителя)."""
         if not isinstance(other, UsageAccount):
@@ -161,20 +182,28 @@ class UsageAccount:
             for cur, amount in (bucket.get(MONEY_FIELD) or {}).items():
                 dst_money[cur] = dst_money.get(cur, 0.0) + _num(amount)
 
-    def delta_from(self, baseline: "UsageAccount") -> "UsageAccount":
+    def delta_from(self, baseline: UsageAccount) -> UsageAccount:
         """Новый аккаунт = self − baseline (по полям, не ниже 0).
 
         Используется для usage именно текущего прогона при resume треда, где
         ``self`` — кумулятив, а ``baseline`` — снимок до старта прогона.
         """
         out = UsageAccount()
-        base = baseline.by_category if isinstance(baseline, UsageAccount) else {}
+        base = (
+            baseline.by_category if isinstance(baseline, UsageAccount) else {}
+        )
         for category, bucket in self.by_category.items():
             base_bucket = base.get(category, {})
             dst = out._bucket(category)
             has_delta = False
             for field in _FIELDS:
-                value = max(0, int(_num(bucket.get(field, 0)) - _num(base_bucket.get(field, 0))))
+                value = max(
+                    0,
+                    int(
+                        _num(bucket.get(field, 0))
+                        - _num(base_bucket.get(field, 0))
+                    ),
+                )
                 dst[field] = value
                 if value:
                     has_delta = True
@@ -193,7 +222,7 @@ class UsageAccount:
         return out
 
     def totals(self) -> Dict[str, Any]:
-        out: Dict[str, Any] = {field: 0 for field in _FIELDS}
+        out: Dict[str, Any] = dict.fromkeys(_FIELDS, 0)
         money: Dict[str, float] = {}
         for bucket in self.by_category.values():
             for field in _FIELDS:
@@ -218,7 +247,7 @@ class UsageAccount:
         return {"by_category": out}
 
     @classmethod
-    def from_meta(cls, raw: Any) -> "UsageAccount":
+    def from_meta(cls, raw: Any) -> UsageAccount:
         if not isinstance(raw, dict):
             return cls()
         by_category = raw.get("by_category")

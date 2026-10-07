@@ -3,6 +3,7 @@
 Pure functions — no state, no backend I/O. Callers wrap the returned text with
 ``wrap_technical_user_content`` and inject it as a synthetic user message.
 """
+
 from __future__ import annotations
 
 from typing import Any, Dict, List, Sequence
@@ -15,10 +16,7 @@ from gc_core.utils.backend_errors import (
     finish_blocks_final,
 )
 
-NO_TOOL_CALL_BOUNCE_MESSAGE = (
-    "There is no tool call in your response. "
-    "Choose a tool call that brings you closer to solving the task."
-)
+NO_TOOL_CALL_BOUNCE_MESSAGE = "There is no tool call in your response. Choose a tool call that brings you closer to solving the task."
 
 PROVIDER_BLOCKED_BOUNCE_MESSAGE = (
     "The provider blocked this response (content_filter/refusal/safety). "

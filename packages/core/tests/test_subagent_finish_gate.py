@@ -4,8 +4,8 @@ import logging
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
 from gc_core.intent_guard import guard as intent_guard_guard
-
 from gc_core.intent_guard.guard import FinishGateGuard
 from gc_core.intent_guard.validation_result import ValidationResult
 from gc_core.intent_log.user_turn import init_subagent_open_turn
@@ -59,11 +59,12 @@ def _user_msg(content: str) -> dict:
     return {"role": "user", "content": content, "id": "m_user_sub"}
 
 
-def test_subagent_gate_validates_assignment_not_orchestrator_cli_intent():
+@pytest.mark.asyncio
+async def test_subagent_gate_validates_assignment_not_orchestrator_cli_intent():
     orch = _make_orchestrator_state()
     cfg = _make_config()
     runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
-    child = runner._build_child_state("worker")
+    child = await runner._build_child_state("worker")
     assignment = "измени foo.py"
     user_message = _user_msg(assignment)
     runner._build_initial_messages(child, "worker", user_message)
@@ -71,8 +72,10 @@ def test_subagent_gate_validates_assignment_not_orchestrator_cli_intent():
 
     captured: dict[str, object] = {}
 
-    def _continue_work(**kwargs):
-        captured["current_user_requests"] = list(kwargs.get("current_user_requests") or [])
+    async def _continue_work(**kwargs):
+        captured["current_user_requests"] = list(
+            kwargs.get("current_user_requests") or []
+        )
         return ValidationResult(
             ok=False,
             action="continue_work",
@@ -88,12 +91,17 @@ def test_subagent_gate_validates_assignment_not_orchestrator_cli_intent():
 
     with patch.object(
         intent_guard_guard,
-        "validate_final_report_vs_user_intent",
+        "avalidate_final_report_vs_user_intent",
         _continue_work,
     ):
         guard = FinishGateGuard(ctx=_make_ctx(cfg), state=child)
-        decision = guard.evaluate_turn_finish(
-            finish_handoff_arguments={"solution_type": "full_solution", "task_report": "bar"},
+        # Форма у гейта одна и корутинная: синхронного имени у него больше
+        # нет — оно ушло вместе с порталом.
+        decision = await guard.aevaluate_turn_finish(
+            finish_handoff_arguments={
+                "solution_type": "full_solution",
+                "task_report": "bar",
+            },
         )
 
     assert decision.outcome == "reject"
@@ -101,19 +109,22 @@ def test_subagent_gate_validates_assignment_not_orchestrator_cli_intent():
     assert decision.validation.action == "continue_work"
     from gc_testkit.intent_fixtures import intent_user_ask_texts_from_jsonl
 
-    requests = intent_user_ask_texts_from_jsonl(captured["current_user_requests"])
+    requests = intent_user_ask_texts_from_jsonl(
+        captured["current_user_requests"]
+    )
     assert requests == [assignment]
     assert "бухгалтерии" not in " ".join(captured["current_user_requests"])
     assert "continue_work" in decision.feedback_text.lower()
     assert "foo.py" in decision.feedback_text
 
 
-def test_subagent_seed_keeps_orchestrator_cli_scope_unchanged():
+@pytest.mark.asyncio
+async def test_subagent_seed_keeps_orchestrator_cli_scope_unchanged():
     """Как SubagentRunner.run: assignment только у child, CLI intent — у orch."""
     orch = _make_orchestrator_state()
     cfg = _make_config()
     runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
-    child = runner._build_child_state("worker")
+    child = await runner._build_child_state("worker")
     task_text = "добавь тесты в foo.py"
     user_message = _user_msg(task_text)
     runner._build_initial_messages(child, "worker", user_message)

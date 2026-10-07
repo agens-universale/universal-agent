@@ -1,11 +1,11 @@
 """Parent path edge cases after FsBackend migration (is_dir vs exists)."""
+
 import json
 
 from gc_core.tools.fs.append_to_file import AppendToFile
 from gc_core.tools.fs.write_to_file_tool import WriteToFile
-
-
 from gc_testkit.helpers.tool_ctx import with_local_ctx
+
 
 def _parent_file_tree(tmp_path):
     blocker = tmp_path / "blocker"
@@ -43,13 +43,17 @@ def test_append_parent_is_file_with_make_dirs(tmp_path):
 
 def test_write_parent_is_file_without_make_dirs(tmp_path):
     path = _parent_file_tree(tmp_path)
-    res = json.loads(with_local_ctx(WriteToFile)(path=path, content="new", make_dirs=False))
+    res = json.loads(
+        with_local_ctx(WriteToFile)(path=path, content="new", make_dirs=False)
+    )
     assert res["ok"] is False
     assert res["error"]["type"] == "parent_not_found"
 
 
 def test_write_parent_is_file_with_make_dirs(tmp_path):
     path = _parent_file_tree(tmp_path)
-    res = json.loads(with_local_ctx(WriteToFile)(path=path, content="new", make_dirs=True))
+    res = json.loads(
+        with_local_ctx(WriteToFile)(path=path, content="new", make_dirs=True)
+    )
     assert res["ok"] is False
     assert res["error"]["type"] == "mkdir_failed"

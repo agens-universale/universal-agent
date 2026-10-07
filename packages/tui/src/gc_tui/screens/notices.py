@@ -1,8 +1,11 @@
 """NoticesScreen — список уведомлений: стартовые + runtime (read-only, F4/notices)."""
+
 from __future__ import annotations
 
 from typing import List
 
+from gc_core.runtime_notices import mark_runtime_notices_seen
+from gc_core.startup_notices import Notice
 from rich.text import Text
 from textual import events
 from textual.app import ComposeResult
@@ -10,8 +13,6 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Static
 
-from gc_core.startup_notices import Notice
-from gc_core.runtime_notices import mark_runtime_notices_seen
 from gc_tui import palette
 from gc_tui.services import notices_ui
 
@@ -34,8 +35,10 @@ def _glyph(level: str) -> str:
 def _notice_text(n: Notice) -> Text:
     """Одно уведомление: цветной глиф + текст с выделенными тех. именами."""
     t = Text()
-    t.append(_glyph(n.level) + " ",
-             style=_WARN_STYLE if n.level == "warning" else _INFO_STYLE)
+    t.append(
+        _glyph(n.level) + " ",
+        style=_WARN_STYLE if n.level == "warning" else _INFO_STYLE,
+    )
     t.append(n.message)
     if n.highlights:
         t.highlight_words(n.highlights, style=_NAME_STYLE)
@@ -83,7 +86,9 @@ class NoticesScreen(Screen):
 
     def _render_notices(self) -> None:
         notices = self._load_notices()
-        self.query_one("#header-left", Static).update(self._header_text(notices))
+        self.query_one("#header-left", Static).update(
+            self._header_text(notices)
+        )
         trace = self.query_one("#trace", VerticalScroll)
         trace.remove_children()
         if not notices:

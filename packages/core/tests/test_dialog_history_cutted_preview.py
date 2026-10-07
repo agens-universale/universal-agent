@@ -56,7 +56,11 @@ def test_long_tool_call_dump_uses_cutted_preview():
     text = message_text_limited(msg, limit)
     match = _PREVIEW_RE.search(text)
     assert match is not None
-    shown, original, inner = int(match.group(1)), int(match.group(2)), match.group(3)
+    shown, original, inner = (
+        int(match.group(1)),
+        int(match.group(2)),
+        match.group(3),
+    )
     prefix = dump[:limit]
     assert shown == limit == len(prefix)
     assert original == len(dump)
@@ -91,7 +95,11 @@ def test_user_text_over_limit_uses_envelope_not_text_cutted():
     text = message_text_limited(msg, 50000)
     match = _ENVELOPE_RE.fullmatch(text)
     assert match is not None
-    shown, original, inner = int(match.group(1)), int(match.group(2)), match.group(3)
+    shown, original, inner = (
+        int(match.group(1)),
+        int(match.group(2)),
+        match.group(3),
+    )
     assert shown == 50000
     assert original == len(full)
     assert _unescape(inner) == full[:50000]
@@ -119,9 +127,14 @@ def test_format_last_dialog_steps_long_write_preview():
     msg = {
         "type": "function_call",
         "name": "fs_write_file",
-        "arguments": {"path": "/app/pystan_analysis.py", "content": "RA" + ("z" * 4000)},
+        "arguments": {
+            "path": "/app/pystan_analysis.py",
+            "content": "RA" + ("z" * 4000),
+        },
     }
-    steps = format_last_dialog_steps([msg], max_steps=5, message_max_chars=1500)
+    steps = format_last_dialog_steps(
+        [msg], max_steps=5, message_max_chars=1500
+    )
     assert "[function_call] fs_write_file" in steps
     assert "<cutted_preview " in steps
     assert "TEXT CUTTED" not in steps

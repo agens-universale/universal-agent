@@ -28,6 +28,7 @@ endpoint'а) и собственный код `ModelEditor` (модели аге
 `_begin_open`/`_reopen`/`_on_close`/`reload` и кладёт приехавшие строки сам, см.
 `voice_endpoint.ModelListController`.
 """
+
 from __future__ import annotations
 
 from rich.text import Text
@@ -46,7 +47,7 @@ from gc_tui.palette import DEEP_DIM
 # своим «перечитать список»: тот же глагол, что у него в открытом состоянии, иначе
 # одна клавиша на одном поле звалась бы двумя словами в зависимости от того, свёрнут
 # список или нет (находка финального ревью 2026-08-06, C).
-LIST_CLOSED_HINT = "Alt+↓ — показать список"
+LIST_CLOSED_HINT = "Enter — показать список"
 
 # Статусы СЕТЕВОГО списка (модели агента `model.ModelEditor`, модели STT-endpoint'а
 # `voice_endpoint.ModelListController`) — раньше каждый редактор описывал одни и те же
@@ -71,7 +72,7 @@ LIST_EMPTY = "сервер не вернул моделей"
 # (LIST_CLOSED_HINT — вариант локального источника). Дом общий по той же причине,
 # что у статусов выше: две формы задают этой клавише один вопрос, и звать её
 # разными глаголами им нечем.
-MODEL_RELOAD_HINT = "Alt+↓ — перечитать список"
+MODEL_RELOAD_HINT = "Enter — показать список"
 
 
 def write_field(field: Input, value: str) -> None:
@@ -89,12 +90,28 @@ def write_field(field: Input, value: str) -> None:
 
 
 class FieldListController:
-    def __init__(self, host, *, input_id: str, row_class: str, scroll_class: str,
-                 render_row, hint=None, hint_class: str = "", row_classes: str = "",
-                 rows_source=(), matches=None, value_of=None, initial_index=None,
-                 refilter_index=None, can_open=None, on_pick=None,
-                 restore_on_close: bool = True, closed_hint: str = LIST_CLOSED_HINT,
-                 promise_empty: bool = False) -> None:
+    def __init__(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING.md
+        self,
+        host,
+        *,
+        input_id: str,
+        row_class: str,
+        scroll_class: str,
+        render_row,
+        hint=None,
+        hint_class: str = "",
+        row_classes: str = "",
+        rows_source=(),
+        matches=None,
+        value_of=None,
+        initial_index=None,
+        refilter_index=None,
+        can_open=None,
+        on_pick=None,
+        restore_on_close: bool = True,
+        closed_hint: str = LIST_CLOSED_HINT,
+        promise_empty: bool = False,
+    ) -> None:
         # rows_source — последовательность либо функция без аргументов: её перечитывают
         # на каждом раскрытии (статический список от этого не меняется, живой — меняется).
         # render_row(item, *, selected) -> Text — колонки и метки строки.
@@ -148,9 +165,11 @@ class FieldListController:
         self._promise_empty = promise_empty
         self._items: tuple = ()
         self.is_open = False
-        self._visible: list[int] = []      # индексы _items, прошедшие фильтр
-        self._idx: int | None = None       # позиция В _visible (None — ничего не подсвечено)
-        self._value0 = ""                  # значение поля ДО фильтра (см. close)
+        self._visible: list[int] = []  # индексы _items, прошедшие фильтр
+        self._idx: int | None = (
+            None  # позиция В _visible (None — ничего не подсвечено)
+        )
+        self._value0 = ""  # значение поля ДО фильтра (см. close)
 
     # --- параметры-различия ---
     def _read_items(self) -> tuple:
@@ -175,14 +194,22 @@ class FieldListController:
         items = self._read_items()
         if not q:
             return bool(items)
-        return any(self._matches(it, q) if self._matches is not None
-                   else q in str(it).lower() for it in items)
+        return any(
+            self._matches(it, q)
+            if self._matches is not None
+            else q in str(it).lower()
+            for it in items
+        )
 
     def _hint_text(self) -> str:
         return self._hint(self.has_selection)
 
     def _value_at(self, i: int):
-        return self._value_of(self._items[i]) if self._value_of is not None else self._items[i]
+        return (
+            self._value_of(self._items[i])
+            if self._value_of is not None
+            else self._items[i]
+        )
 
     def _pick_index(self, value: str) -> int | None:
         if self._initial_index is not None:
@@ -222,7 +249,9 @@ class FieldListController:
         return self.selected_item is not None
 
     # --- хуки подкласса (асинхронный источник строк) ---
-    def _begin_open(self, field: Input, filter_text: str = "", *, forced: bool = False) -> None:
+    def _begin_open(
+        self, field: Input, filter_text: str = "", *, forced: bool = False
+    ) -> None:
         """Чем оборачивается раскрытие: у статического источника — сразу показать
         строки, у живого — сперва уйти за ними в сеть.
 
@@ -278,10 +307,17 @@ class FieldListController:
         (`remove()` у Textual отложенный, канон «последние N» /settings)."""
         if not self._items:
             return []
-        return list(self._host.query(f".{self._row_class}"))[-len(self._items):]
+        return list(self._host.query(f".{self._row_class}"))[
+            -len(self._items) :
+        ]
 
-    def open(self, *, keep_baseline: bool = False, filter_text: str = "",
-             forced: bool = False) -> None:
+    def open(
+        self,
+        *,
+        keep_baseline: bool = False,
+        filter_text: str = "",
+        forced: bool = False,
+    ) -> None:
         """Раскрыть список: значение поля становится «значением до фильтра» (см. close).
 
         `keep_baseline` — НЕ переписывать его: перечитывание уже раскрытого списка
@@ -294,14 +330,17 @@ class FieldListController:
         try:
             field = self._field()
         except NoMatches:
-            return          # поля в этом наборе нет (мастер) — раскрывать нечего
-        if (not forced and self._can_open is not None
-                and not self._can_open(field.value.strip())):
+            return  # поля в этом наборе нет (мастер) — раскрывать нечего
+        if (
+            not forced
+            and self._can_open is not None
+            and not self._can_open(field.value.strip())
+        ):
             # `can_open` защищает АВТОраскрытие (вход курсора на поле): раскрыть список
             # поверх чужого значения значит увести туда ↑/↓ и дать Enter молча затереть
             # набранное. На явную клавишу (`forced`) это правило не распространяется —
             # человек попросил список сам (смок 2026-08-04).
-            self._sync_hint()   # отказ — тоже состояние: строка обязана назвать Alt+↓
+            self._sync_hint()  # отказ — тоже состояние: строка обязана назвать Alt+↓
             return
         self.is_open = True
         if not keep_baseline:
@@ -340,7 +379,9 @@ class FieldListController:
         снесённая) подсказка этого списка, а не всегда группа: два `mount` подряд, пока
         прошлый close() ещё не снёс свои виджеты, иначе вставили бы новую ПЕРЕД старой,
         и `_hint_widget` («последняя живая») взял бы как раз обречённую."""
-        existing = [w for w in self._host.children if self._hint_class in w.classes]
+        existing = [
+            w for w in self._host.children if self._hint_class in w.classes
+        ]
         # `or field` — недостижимый хвост, а не мягкая деградация: у сгруппированного
         # поля `field` внук хоста, и mount(after=внук) упал бы MountError. Живого пути
         # сюда нет (при живом поле группа тоже находится), оставлен как явный маркер.
@@ -351,8 +392,12 @@ class FieldListController:
         существующей не считаем: она ещё в дереве, но обречена — запись в неё исчезла
         бы вместе с ней (канон `_singleton` /settings)."""
         if self._hint is None:
-            return None                  # своей строки у списка нет (см. параметр `hint`)
-        live = [w for w in self._host.query(f".{self._hint_class}") if not w._pruning]
+            return None  # своей строки у списка нет (см. параметр `hint`)
+        live = [
+            w
+            for w in self._host.query(f".{self._hint_class}")
+            if not w._pruning
+        ]
         return live[-1] if live else None
 
     def _mount_hint(self, field: Input) -> None:
@@ -364,8 +409,10 @@ class FieldListController:
         if self._hint is None:
             return
         if self._hint_widget() is None:
-            self._host.mount(Static("", classes=f"onb-hint onb-dyn {self._hint_class}"),
-                             after=self._anchor(field))
+            self._host.mount(
+                Static("", classes=f"onb-hint onb-dyn {self._hint_class}"),
+                after=self._anchor(field),
+            )
 
     def _mount_scroll(self) -> None:
         """Строки — во вложенный скролл с потолком высоты (канон `.dropdown-scroll`):
@@ -376,9 +423,13 @@ class FieldListController:
         снесённым) скроллом — «последние N» (`_rows`) иначе взял бы обречённые."""
         group = self._group()
         if group is None:
-            return          # группы уже нет — редактор пересобирают
-        scroll = VerticalScroll(classes=f"dropdown-scroll onb-dyn {self._scroll_class}")
-        scroll.can_focus = False        # фокус держит поле — список водят его клавиши
+            return  # группы уже нет — редактор пересобирают
+        scroll = VerticalScroll(
+            classes=f"dropdown-scroll onb-dyn {self._scroll_class}"
+        )
+        scroll.can_focus = (
+            False  # фокус держит поле — список водят его клавиши
+        )
         group.mount(scroll)
         if not scroll.is_attached:
             # Редактор уже сносят (пересборка полей, уход с экрана): `mount` в такой
@@ -393,7 +444,9 @@ class FieldListController:
         row_cls = f"onb-option onb-dyn {self._row_class} {self._row_classes}".rstrip()
         scroll.mount(*[Static("", classes=row_cls) for _ in self._items])
 
-    def close(self, *, restore: bool = True, closed_hint: str | None = None) -> None:
+    def close(
+        self, *, restore: bool = True, closed_hint: str | None = None
+    ) -> None:
         """Свернуть список. `restore` — вернуть в поле значение, которое было ДО фильтра:
         печать там, где она только фильтрует, не имеет права оставить в поле остаток
         набора («нем») — следующий Enter сохранил бы его (живой смок). Осознанный выбор
@@ -407,13 +460,15 @@ class FieldListController:
         self.is_open = False
         self._on_close()
         for w in self._host.query(f".{self._scroll_class}"):
-            w.remove()          # строки уходят вместе со своим контейнером
-        self._sync_hint(closed_hint)   # подсказка остаётся — меняется только её текст
+            w.remove()  # строки уходят вместе со своим контейнером
+        self._sync_hint(
+            closed_hint
+        )  # подсказка остаётся — меняется только её текст
         if restore and self._restore_on_close:
             try:
                 field = self._field()
             except NoMatches:
-                return          # поля уже нет (редактор пересобирают) — восстанавливать некуда
+                return  # поля уже нет (редактор пересобирают) — восстанавливать некуда
             write_field(field, self._value0)
 
     def _can_promise(self) -> bool:
@@ -445,7 +500,7 @@ class FieldListController:
         закрытия обязан был помнить о ремонте, и строка пропадала после Enter и после
         фильтра, сузившего список до нуля."""
         if self._hint is None:
-            return                       # своей строки у списка нет (см. параметр `hint`)
+            return  # своей строки у списка нет (см. параметр `hint`)
         if not self.is_open and not self._can_promise():
             # Показывать нечего — и обещать нечего: `closed_hint` звал бы раскрыть
             # список, которого не существует, а форсированное раскрытие дало бы
@@ -454,12 +509,15 @@ class FieldListController:
         try:
             field = self._field()
         except NoMatches:
-            return                       # поля уже нет (редактор пересобирают)
-        self._mount_hint(field)          # строка одна: существующую переиспользует
+            return  # поля уже нет (редактор пересобирают)
+        self._mount_hint(field)  # строка одна: существующую переиспользует
         w = self._hint_widget()
         if w is not None:
-            text = (self._hint_text() if self.is_open
-                    else (closed_override or self._closed_hint))
+            text = (
+                self._hint_text()
+                if self.is_open
+                else (closed_override or self._closed_hint)
+            )
             w.update(Text(text, style=DEEP_DIM))
 
     def move(self, delta: int) -> bool:
@@ -493,8 +551,12 @@ class FieldListController:
             # вернул бы в поле «ru», и следующий Enter молча затёр бы только что
             # сохранённый язык. Своего значения (value is None) это касается ровно так же —
             # его берут из поля.
-            self._value0 = value if value is not None else self._current_value()
-        self.close(restore=False)       # Enter — осознанный выбор, откату не подлежит
+            self._value0 = (
+                value if value is not None else self._current_value()
+            )
+        self.close(
+            restore=False
+        )  # Enter — осознанный выбор, откату не подлежит
         if value is not None and self._on_pick is not None:
             self._on_pick(value)
         return value
@@ -518,15 +580,19 @@ class FieldListController:
             return
         prev = self.selected_item
         q = (text or "").strip().lower()
-        self._visible = [i for i in range(len(self._items))
-                         if not q or self._match(i, q)]
+        self._visible = [
+            i for i in range(len(self._items)) if not q or self._match(i, q)
+        ]
         self._idx = self._filter_index(prev)
         self._refresh_rows()
 
     def _refresh_rows(self) -> None:
         visible_set = set(self._visible)
-        selected_i = (self._visible[self._idx]
-                      if self._visible and self._idx is not None else -1)
+        selected_i = (
+            self._visible[self._idx]
+            if self._visible and self._idx is not None
+            else -1
+        )
         selected_w = None
         for i, w in enumerate(self._rows()):
             w.display = i in visible_set
