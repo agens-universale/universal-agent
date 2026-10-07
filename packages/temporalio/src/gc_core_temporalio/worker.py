@@ -301,6 +301,16 @@ async def run_worker(config, *, client=None):
         [config.workflow_queue, config.model_queue, config.resource_queue]
     )
     log = logging.getLogger(__name__)
+    defaults = {"ua-workflow", "ua-model", "ua-resource-local"} & set(queues)
+    if defaults:
+        # Очереди по умолчанию одинаковы у всех воркеров namespace: два
+        # воркера разных рабочих каталогов с ними исполняли бы activities
+        # друг друга (в чужом cwd).
+        log.warning(
+            "Очереди по умолчанию (%s) общие для всех воркеров namespace: "
+            "задайте свои workflow_queue/model_queue/resource_queue",
+            ", ".join(sorted(defaults)),
+        )
     async with AsyncExitStack() as stack:
         for queue in queues:
             await stack.enter_async_context(

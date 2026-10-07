@@ -4,6 +4,7 @@
 
 import argparse
 import asyncio
+import contextlib
 import hashlib
 import json
 import logging
@@ -101,6 +102,27 @@ class AgentClient:
             start_workflow_operation=operation,
         )
 
+    async def submit_batch_with_start(
+        self, workflow_id, request: RunRequest, messages: list[UserMessage]
+    ):
+        """Несколько сообщений одним update (в один ход), открыв сессию при
+        необходимости, — атомарно."""
+        for message in messages:
+            message.validate()
+        operation = WithStartWorkflowOperation(
+            AgentWorkflow.run,
+            request,
+            id=workflow_id,
+            id_conflict_policy=WorkflowIDConflictPolicy.USE_EXISTING,
+            id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE,
+            task_queue=self.workflow_queue,
+        )
+        return await self.client.execute_update_with_start_workflow(
+            AgentWorkflow.submit_batch,
+            messages,
+            start_workflow_operation=operation,
+        )
+
     async def submit_message(self, workflow_id, message: UserMessage):
         message.validate()
         return await self.client.get_workflow_handle(
@@ -138,10 +160,14 @@ class MessageNotProcessed(RuntimeError):
         self.message_id = message_id
 
 
-def session_workflow_id(store_id, system_id, thread_id):
-    """ID workflow сессии треда: один тред — одна сессия, у любого клиента."""
+def session_workflow_id(agent, store_id, system_id, thread_id):
+    """ID workflow сессии: агент и тред. Один тред одного агента — одна
+    сессия у любого клиента; другой агент на том же треде — другая сессия,
+    и она упрётся во владение тредом явной ошибкой, а не молча получит
+    чужого агента (с update-with-start ``USE_EXISTING`` чужой запрос на
+    старт просто игнорировался бы)."""
     digest = hashlib.sha256(
-        json.dumps([store_id, system_id, thread_id]).encode()
+        json.dumps([agent, store_id, system_id, thread_id]).encode()
     ).hexdigest()[:32]
     return f"ua-session-{digest}"
 
@@ -173,7 +199,7 @@ class AgentSession:
         self.client = client
         self.task_queue = task_queue
         self.workflow_id = workflow_id or session_workflow_id(
-            store_id, system_id, thread_id
+            agent, store_id, system_id, thread_id
         )
         self.request = RunRequest(
             agent,
@@ -204,6 +230,18 @@ class AgentSession:
             self.client, workflow_queue=self.task_queue
         ).submit_with_start(self.workflow_id, self.request, message)
         return message.message_id
+
+    async def send_batch(self, items):
+        """Несколько сообщений ``[(текст, ID | None), …]`` одним update — в
+        один ход. Возвращает их ID."""
+        messages = [
+            UserMessage(message_id or uuid.uuid4().hex, text)
+            for text, message_id in items
+        ]
+        await AgentClient(
+            self.client, workflow_queue=self.task_queue
+        ).submit_batch_with_start(self.workflow_id, self.request, messages)
+        return [message.message_id for message in messages]
 
     async def wait(self, message_id, *, poll=0.2, max_poll=2.0):
         """Дождаться хода, обработавшего сообщение: ответ этого хода, его
@@ -391,6 +429,7 @@ class _DurableAgentRuntime:
             raise self._errors.pop(0)
         # Без thread_id у локального агента нет истории: здесь — новый тред
         # на каждый вызов.
+        ephemeral = thread_id is None
         session = self._session(thread_id or uuid.uuid4().hex, system)
         ids = list(message_ids or [])
         batch = [
@@ -400,9 +439,8 @@ class _DurableAgentRuntime:
         batch, self._deferred = [*batch, *self._deferred], []
         self._active, self._running, self._tail = session, True, []
         try:
-            last = None
-            for text, message_id in batch:
-                last = await session.send(text, message_id=message_id)
+            # Все сообщения — одним update, в один ход (как локальный run).
+            last = (await session.send_batch(batch))[-1]
             reply = await session.wait(last)
             # Хвост: присланное send() во время хода — его ходы тоже часть
             # этого run, ответ — последнего из них (как локальный run).
@@ -427,6 +465,12 @@ class _DurableAgentRuntime:
             return reply["answer"]
         finally:
             self._running, self._tail = False, []
+            if ephemeral:
+                # Без thread_id тред одноразовый (локально — без истории):
+                # закрыть сессию, а не оставить её вечно держать тред. Сбой
+                # закрытия (сессия уже упала) не подменяет исход хода.
+                with contextlib.suppress(Exception):
+                    await session.close()
 
     def send(self, message):
         text = str(message.get("content", ""))

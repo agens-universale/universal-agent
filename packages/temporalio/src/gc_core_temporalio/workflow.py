@@ -207,6 +207,26 @@ class AgentWorkflow:
     @workflow.update
     async def submit_message(self, message: UserMessage) -> dict:
         await workflow.wait_condition(lambda: self.ready)
+        return self._accept(message)
+
+    @workflow.update
+    async def submit_batch(self, messages: list[UserMessage]) -> list[dict]:
+        """Несколько сообщений одним update — в один ход, как список
+        ``AsyncAgent.run([...])`` локально (по одному update ход мог начаться
+        до прихода остальных)."""
+        await workflow.wait_condition(lambda: self.ready)
+        return [self._accept(message) for message in messages]
+
+    @submit_batch.validator
+    def _validate_submit_batch(self, messages: list[UserMessage]) -> None:
+        if not messages:
+            raise ValueError("Empty message batch")
+        for message in messages:
+            message.validate()
+
+    def _accept(self, message):
+        """Принять сообщение: дедупликация по ID, в идущий ход или в
+        очередь следующего."""
         digest = _message_digest(message.text)
         existing = self.accepted.get(message.message_id)
         if existing is not None:

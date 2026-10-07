@@ -317,3 +317,60 @@ async def test_durable_send_and_stop_follow_local_semantics(
     assert "дополнение" in contents
     assert contents.index("второй") < contents.index("между ходами")
     assert "second" in json.dumps(second, ensure_ascii=False)
+
+
+async def test_durable_run_batches_messages_and_closes_threadless_sessions(
+    tmp_path,
+    monkeypatch,
+    scripted_http,  # noqa: F811
+):
+    """Список сообщений run — один ход (как локально); run без thread_id не
+    оставляет вечную сессию, держащую тред. ID сессии зависит от агента."""
+    from gc_core_temporalio import session_workflow_id
+    from temporalio.client import WorkflowExecutionStatus
+
+    assert session_workflow_id(
+        "a", "default", "sdk", "t"
+    ) != session_workflow_id("b", "default", "sdk", "t")
+    monkeypatch.chdir(tmp_path)
+    url, requests, script = scripted_http
+    script.extend([[finish("batch")], [finish("threadless")]])
+    settings = agent_settings(url, tmp_path)
+    plugin = AgentPlugin(
+        {"shop": settings},
+        thread_store=DurableFileThreadStore(str(tmp_path / "threads")),
+    )
+    async with await WorkflowEnvironment.start_local(
+        dev_server_existing_path=temporal_cli()
+    ) as env:
+        async with Worker(env.client, task_queue="shop", plugins=[plugin]):
+            agent = await AsyncAgent.create(
+                settings,
+                durable=TemporalDurability(
+                    env.client, task_queue="shop", agent="shop"
+                ),
+            )
+            await asyncio.wait_for(
+                agent.run(["раз", "два", "три"], thread_id="t7"), 60
+            )
+            assert len(requests) == 1  # все три — в одном ходе
+            first_input = json.dumps(requests[0], ensure_ascii=False)
+            assert all(word in first_input for word in ("раз", "два", "три"))
+            await asyncio.wait_for(agent.run("без треда"), 60)
+            await agent.aclose()
+            # Закрытие асинхронное (сессия доделывает принятое и снимает
+            # владение тредом): ждать, пока одноразовая сессия завершится.
+            async with asyncio.timeout(30):
+                while True:
+                    running = [
+                        item
+                        async for item in env.client.list_workflows(
+                            "ExecutionStatus = 'Running'"
+                        )
+                    ]
+                    if len(running) <= 1:
+                        break
+                    await asyncio.sleep(0.5)
+    # Осталась только сессия t7: одноразовая закрылась.
+    assert len(running) == 1, [item.id for item in running]
+    assert running[0].status == WorkflowExecutionStatus.RUNNING
