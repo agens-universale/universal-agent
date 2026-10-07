@@ -180,16 +180,19 @@ def child_provider(tmp_path, tool_name):
 
 
 @pytest.mark.parametrize(
-    "tool_name,stop,fallback",
+    "tool_name,stop,fallback,big",
     [
-        ("subagent_worker", False, False),
-        ("subagent_worker", True, False),
-        ("subagent_custom", False, False),
-        ("subagent_worker", False, True),
+        ("subagent_worker", False, False, False),
+        ("subagent_worker", True, False, False),
+        ("subagent_custom", False, False, False),
+        ("subagent_worker", False, True, False),
+        # Тред родителя ~2,2 МБ в истории: состояние родителя целиком во
+        # входе субагента было бы больше записи (вечный сбой задачи).
+        ("subagent_worker", False, False, True),
     ],
 )
 async def test_native_child_model_tools_input_human_and_replay(
-    tmp_path, monkeypatch, child_provider, stop, tool_name, fallback
+    tmp_path, monkeypatch, child_provider, stop, tool_name, fallback, big
 ):
     binary = temporal_cli()
     monkeypatch.chdir(tmp_path)
@@ -250,6 +253,21 @@ async def test_native_child_model_tools_input_human_and_replay(
         thread_stores={"files": StoreConfig(path=str(tmp_path / "threads"))},
         profiles={"test": AgentProfile(workspace=str(tmp_path), core=core)},
     )
+    if big:
+        from gc_core.thread_store_file_durable import DurableFileThreadStore
+
+        DurableFileThreadStore(str(tmp_path / "threads")).append_messages(
+            "test",
+            "thread",
+            [
+                {
+                    "id": f"old{i}",
+                    "role": "user" if i % 2 == 0 else "assistant",
+                    "content": f"{i}:" + "ж" * 12_000,
+                }
+                for i in range(30)
+            ],
+        )
     provider, native, stores = build_runtime(config)
     try:
         async with await WorkflowEnvironment.start_local(

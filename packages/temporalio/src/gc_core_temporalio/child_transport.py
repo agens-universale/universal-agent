@@ -1,6 +1,7 @@
 """Parent-side delivery and acknowledgement of the common child runner."""
 
 import asyncio
+import dataclasses
 from copy import deepcopy
 from dataclasses import replace
 
@@ -25,6 +26,7 @@ from gc_core_temporalio.child_contracts import (
 )
 from gc_core_temporalio.operations import restore_domain_error
 from gc_core_temporalio.public_config import public_config_snapshot
+from gc_core_temporalio.sizes import ACTIVITY_INPUT_LIMIT, payload_size
 
 
 class RemoteChildInput:
@@ -68,6 +70,33 @@ class RemoteChildInput:
             for (message, _), result in zip(tasks, results)
             if isinstance(result, BaseException)
         ]
+
+
+#: Поля состояния родителя, которые субагенту не нужны и тяжелы: переписка
+#: родителя, хранилище полных выводов инструментов (до 50 записей по 1 МБ),
+#: журнал намерений. Код субагента читает из состояния родителя только
+#: usage, stop_requested, state_id, default_model и системный промпт; общие
+#: данные (память, todo) идут отдельным переносом ``shared``.
+_PARENT_STATE_HEAVY = {
+    "messages": [],
+    "user_intent_log": [],
+    "current_user_intent": [],
+}
+
+
+def _light_parent_snapshot(state):
+    """Снимок состояния родителя для входа субагента без тяжёлых полей:
+    вход child workflow и ``agent.subagent.prepare`` — записи истории."""
+    from gc_core.execution.output_store import ToolCallOutputsStore
+
+    snapshot = state.to_execution_snapshot()
+    data = snapshot["data"]
+    for name, empty in _PARENT_STATE_HEAVY.items():
+        if name in data:
+            data[name] = list(empty)
+    if "tool_call_outputs_store" in data:
+        data["tool_call_outputs_store"] = ToolCallOutputsStore().to_dict()
+    return snapshot
 
 
 class ChildTransport:
@@ -179,7 +208,7 @@ class ChildTransport:
             "circuit_breaker": router.breaker.snapshot(),
         }
         try:
-            parent_snapshot = self._state.to_execution_snapshot()
+            parent_snapshot = _light_parent_snapshot(self._state)
         except ValueError as exc:
             raise ExecutionFailure(
                 "Parent state cannot cross the child execution boundary"
@@ -198,6 +227,15 @@ class ChildTransport:
             self.store.owner_epoch,
             self.store._generation,
         )
+        size = payload_size(dataclasses.asdict(request))
+        if size > ACTIVITY_INPUT_LIMIT:
+            # Вход дочернего workflow — запись истории родителя: больше
+            # лимита — сервер отверг бы команду, и задача родителя падала бы
+            # бесконечно. Ошибка инструмента вместо вечного цикла.
+            raise ExecutionFailure(
+                f"Вход субагента {tool_name} — {size} байт в истории "
+                f"Temporal, больше лимита записи ({ACTIVITY_INPUT_LIMIT})"
+            )
         self.active_child = child_id
         self.checkpoint_failure = None
         scope = RemoteChildInput(parent_call_id)
