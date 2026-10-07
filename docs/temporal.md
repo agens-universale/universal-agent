@@ -194,8 +194,8 @@ uv run --project /path/to/universal-agent --extra temporal \
 |---|---|
 | `run(prompt, thread_id=…, system=…, message_ids=…)` | Отправить сообщения в тред и дождаться ответа хода. Без `thread_id` — новый тред на каждый вызов (как локально без истории) |
 | `stream(...)` | Потоковых дельт нет: ответ целиком — в `last_answer` |
-| `send(message)` | Сообщение в идущий ход (или в следующий) |
-| `stop()` | Кооперативная остановка идущего хода |
+| `send(message)` | Как локально: во время хода — в этот ход, и `run` дождётся хода, который его обработает (ответ — последнего); вне хода — ждёт следующего `run` и уходит вместе с ним, новый ход само не запускает. Сбой отправки поднимается следующим `run` |
+| `stop()` | Кооперативная остановка идущего хода; вне хода ничего не делает (как локально). Присланное в остановленный ход не доигрывается — в лог `run_tail_dropped` |
 | `aclose()` | Освобождает сторону приложения; сессия в Temporal живёт дальше |
 
 Вложения (`attachments`) и параметры контекста (`auth_connector`,
@@ -352,7 +352,11 @@ Worker(
 
 В коде — нативный `ActivityConfig`: `start_to_close_timeout`,
 `schedule_to_close_timeout`, `heartbeat_timeout`, `retry_policy=RetryPolicy(...)`,
-у модели ещё `task_queue`. В JSON — те же поля без суффикса `_timeout`
+у модели ещё `task_queue`. В остальных уровнях (`activity=`, `resource_activity`,
+`thread_store_activity`, `tool_activities`) `task_queue` — ошибка при создании
+плагина: ресурсы и инструменты держат живые MCP-сессии процесса и идут в
+очередь сессии. Прочие ключи `ActivityConfig` (`activity_id`, `summary`,
+`priority`…) задаёт сам workflow — тоже ошибка. В JSON — те же поля без суффикса `_timeout`
 (`start_to_close`, `schedule_to_close`, `heartbeat_timeout`, `retry`),
 длительности — ISO 8601 (`"PT10M"`) или секунды:
 

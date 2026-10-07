@@ -22,7 +22,7 @@ from gc_core_temporalio import (
     WorkerConfig,
     run_worker,
 )
-from live_support import temporal_cli
+from live_support import call, temporal_cli
 from temporalio.api.enums.v1 import EventType
 from temporalio.common import RetryPolicy
 from temporalio.testing import WorkflowEnvironment
@@ -253,3 +253,63 @@ async def test_settings_mismatch_between_app_and_worker_fails_the_turn(
             ):
                 await asyncio.wait_for(agent.run("task", thread_id="t5"), 60)
     assert not requests  # до модели дело не дошло
+
+
+async def test_durable_send_and_stop_follow_local_semantics(
+    tmp_path,
+    monkeypatch,
+    scripted_http,  # noqa: F811
+):
+    """send во время хода — хвост этого run (run ждёт его ход); send между
+    ходами — без нового хода, уходит со следующим run; stop вне хода —
+    ничего (как у локального AsyncAgent)."""
+    monkeypatch.chdir(tmp_path)
+    url, requests, script = scripted_http
+    loop = asyncio.get_running_loop()
+    holder = {}
+
+    def calc_and_send():
+        loop.call_soon_threadsafe(
+            holder["agent"].send, {"role": "user", "content": "дополнение"}
+        )
+        return [call("calc", "exec_calculator", {"expression": "2+2"})]
+
+    script.extend([calc_and_send, [finish("first")]])
+    settings = agent_settings(url, tmp_path)
+    store = DurableFileThreadStore(str(tmp_path / "threads"))
+    plugin = AgentPlugin({"shop": settings}, thread_store=store)
+    async with await WorkflowEnvironment.start_local(
+        dev_server_existing_path=temporal_cli()
+    ) as env:
+        async with Worker(env.client, task_queue="shop", plugins=[plugin]):
+            agent = await AsyncAgent.create(
+                settings,
+                durable=TemporalDurability(
+                    env.client, task_queue="shop", agent="shop"
+                ),
+            )
+            holder["agent"] = agent
+            agent.stop()  # вне хода — ничего
+            first = await asyncio.wait_for(
+                agent.run("первый", thread_id="t6"), 60
+            )
+            session = AgentSession(
+                env.client, agent="shop", thread_id="t6", task_queue="shop"
+            )
+            status = await session.status()
+            # run вернул ответ последнего хода — того, что обработал хвост.
+            assert first == status["answer"]
+            after_first = len(requests)
+            agent.send({"role": "user", "content": "между ходами"})
+            await asyncio.sleep(1.5)
+            assert len(requests) == after_first  # нового хода нет
+            script.append([finish("second")])
+            second = await asyncio.wait_for(
+                agent.run("второй", thread_id="t6"), 60
+            )
+            await agent.aclose()
+            await session.close()
+    contents = [m.get("content") for m in store.load_messages("sdk", "t6")]
+    assert "дополнение" in contents
+    assert contents.index("второй") < contents.index("между ходами")
+    assert "second" in json.dumps(second, ensure_ascii=False)

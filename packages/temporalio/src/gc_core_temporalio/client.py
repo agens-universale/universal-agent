@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import hashlib
 import json
+import logging
 import uuid
 
 from gc_core.structured_output import read_format_description
@@ -15,6 +16,8 @@ from temporalio.common import WorkflowIDConflictPolicy, WorkflowIDReusePolicy
 from gc_core_temporalio.contracts import RunRequest, UserMessage
 from gc_core_temporalio.public_config import settings_fingerprint
 from gc_core_temporalio.workflow import AgentWorkflow
+
+logger = logging.getLogger(__name__)
 
 
 class AgentClient:
@@ -306,12 +309,29 @@ class TemporalDurability:
 
 
 class _DurableAgentRuntime:
-    """Сторона ``AsyncAgent`` в durable-режиме: сессии по тредам."""
+    """Сторона ``AsyncAgent`` в durable-режиме — с той же семантикой, что
+    локальный ``AsyncAgent``:
+
+    - ``send`` вне хода откладывает сообщение до следующего ``run`` (локально
+      оно ждёт в очереди исполнителя) — новый ход само по себе не запускает;
+    - ``send`` во время хода отдаёт сообщение в идущий ход, и ``run`` ждёт
+      ход, который его обработает («хвост», как локально), и возвращает
+      ответ последнего хода;
+    - ``stop`` останавливает идущий ход; вне хода ничего не делает (локально
+      ``run`` тоже начинается со сброса остановки);
+    - сбой фоновой отправки не теряется: он поднимается следующим ``run``.
+    """
 
     def __init__(self, client, options):
         self.client, self.options = client, options
         self._active = None
+        self._running = False
+        #: Отложенные вне хода сообщения: (текст, ID) — уйдут со следующим run.
+        self._deferred = []
+        #: ID сообщений, отданных идущему ходу через send (хвост run).
+        self._tail = []
         self._background = set()
+        self._errors = []
 
     def _session(self, thread_id, system):
         return AgentSession(
@@ -321,41 +341,76 @@ class _DurableAgentRuntime:
             **self.options,
         )
 
+    def _spawn(self, coroutine):
+        task = asyncio.ensure_future(coroutine)
+        self._background.add(task)
+        task.add_done_callback(self._settled)
+        return task
+
+    def _settled(self, task):
+        self._background.discard(task)
+        if not task.cancelled() and task.exception() is not None:
+            logger.warning("durable send/stop failed: %r", task.exception())
+            self._errors.append(task.exception())
+
     async def run(
         self, messages, *, thread_id=None, system="sdk", message_ids=None
     ):
+        if self._errors:
+            raise self._errors.pop(0)
         # Без thread_id у локального агента нет истории: здесь — новый тред
         # на каждый вызов.
         session = self._session(thread_id or uuid.uuid4().hex, system)
-        self._active = session
         ids = list(message_ids or [])
-        last = None
-        for index, text in enumerate(messages):
-            last = await session.send(
-                text, message_id=ids[index] if index < len(ids) else None
-            )
-        reply = await session.wait(last)
-        return reply["answer"]
+        batch = [
+            (text, ids[index] if index < len(ids) else None)
+            for index, text in enumerate(messages)
+        ]
+        batch, self._deferred = [*batch, *self._deferred], []
+        self._active, self._running, self._tail = session, True, []
+        try:
+            last = None
+            for text, message_id in batch:
+                last = await session.send(text, message_id=message_id)
+            reply = await session.wait(last)
+            # Хвост: присланное send() во время хода — его ходы тоже часть
+            # этого run, ответ — последнего из них (как локальный run).
+            while reply["delivered"] and (self._tail or self._background):
+                if self._background:
+                    await asyncio.gather(
+                        *self._background, return_exceptions=True
+                    )
+                if self._errors:
+                    raise self._errors.pop(0)
+                if not self._tail:
+                    break
+                reply = await session.wait(self._tail.pop(0))
+            if not reply["delivered"] or self._tail:
+                # Ход остановили: хвост не доигрывается (как локально), но и
+                # не теряется молча.
+                logger.warning(
+                    "run_tail_dropped thread_id=%s count=%d",
+                    session.request.thread_id,
+                    len(self._tail) + (0 if reply["delivered"] else 1),
+                )
+            return reply["answer"]
+        finally:
+            self._running, self._tail = False, []
 
     def send(self, message):
-        session = self._active
-        if session is None:
-            raise RuntimeError("send() без идущего хода: сначала run()")
-        task = asyncio.ensure_future(
-            session.send(
-                str(message.get("content", "")),
-                message_id=message.get("message_id") or message.get("id"),
-            )
+        text = str(message.get("content", ""))
+        message_id = (
+            message.get("message_id") or message.get("id") or uuid.uuid4().hex
         )
-        self._background.add(task)
-        task.add_done_callback(self._background.discard)
+        if not self._running:
+            self._deferred.append((text, message_id))
+            return
+        self._tail.append(message_id)
+        self._spawn(self._active.send(text, message_id=message_id))
 
     def stop(self):
-        session = self._active
-        if session is not None:
-            task = asyncio.ensure_future(session.stop())
-            self._background.add(task)
-            task.add_done_callback(self._background.discard)
+        if self._running and self._active is not None:
+            self._spawn(self._active.stop())
 
     async def aclose(self):
         if self._background:
