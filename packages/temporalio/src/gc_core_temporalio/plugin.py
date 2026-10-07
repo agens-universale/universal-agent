@@ -116,7 +116,7 @@ class AgentPlugin(SimplePlugin):
                 resource=from_activity_config(resource_activity),
                 thread_store=from_activity_config(thread_store_activity),
                 tools={
-                    name: from_activity_config(value)
+                    name: from_activity_config(value, tool=True)
                     for name, value in (tool_activities or {}).items()
                 },
             ),

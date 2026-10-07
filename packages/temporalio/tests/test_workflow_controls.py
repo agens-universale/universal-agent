@@ -217,14 +217,34 @@ async def test_two_turns_continue_as_new_and_delivery_dedup(
         assert len(requests) == 2
 
 
-async def test_wait_for_message_returns_its_turn_across_continue_as_new(
+def session_of(env, workflow_id):
+    """Ожидание сообщений сессии по её workflow ID (AgentSession.wait)."""
+    from gc_core_temporalio import AgentSession
+
+    return AgentSession(
+        env.client,
+        agent="test",
+        thread_id="controls",
+        task_queue="native-controls",
+        workflow_id=workflow_id,
+    )
+
+
+async def test_wait_returns_the_answer_of_its_own_turn(
     tmp_path, monkeypatch, scripted_http
 ):
-    """«Отправить и дождаться ответа»: update ждёт конца хода, который
-    обработал сообщение; номер хода переживает Continue-As-New."""
+    """«Отправить и дождаться»: ответ — хода, обработавшего сообщение (не
+    последнего), и после Continue-As-New; неизвестный ID — отказ; много
+    ожидающих клиентов не занимают лимит update сервера (ожидание — query)."""
     monkeypatch.chdir(tmp_path)
     url, _requests, script = scripted_http
-    script.extend([[finish("first")], [finish("second")]])
+    gate = threading.Event()
+
+    def second_turn():
+        gate.wait(30)
+        return [finish("second")]
+
+    script.extend([[finish("first")], second_turn])
     async with runtime(tmp_path, url) as (env, _contexts, _):
         handle = await env.client.start_workflow(
             AgentWorkflow.run,
@@ -232,27 +252,36 @@ async def test_wait_for_message_returns_its_turn_across_continue_as_new(
             id="controls-wait",
             task_queue="native-controls",
         )
-        first = await handle.execute_update(
-            AgentWorkflow.wait_for_message, "m1"
-        )
+        session = session_of(env, "controls-wait")
+        first = await asyncio.wait_for(session.wait("m1"), 60)
         assert first["delivered"] and first["turn"] == 1
         assert "first" in str(first["answer"])
         await handle.execute_update(
             AgentWorkflow.submit_message, UserMessage("m2", "second task")
         )
-        second = await handle.execute_update(
-            AgentWorkflow.wait_for_message, "m2"
+        # Ход 2 стоит у модели; 12 ожидающих клиентов не мешают update
+        # (лимит сервера — 10 одновременных update на workflow).
+        waiters = [asyncio.create_task(session.wait("m2")) for _ in range(12)]
+        await asyncio.sleep(1)
+        await asyncio.wait_for(
+            handle.execute_update(
+                AgentWorkflow.submit_message, UserMessage("m3", "third")
+            ),
+            20,
         )
-        assert second["turn"] == 2 and "second" in str(second["answer"])
-        # Сообщение прошлого run: ответ сразу, номер хода сохранён.
-        again = await handle.execute_update(
-            AgentWorkflow.wait_for_message, "m1"
-        )
-        assert again["turn"] == 1
-        with pytest.raises(WorkflowUpdateFailedError):
-            await handle.execute_update(
-                AgentWorkflow.wait_for_message, "never-sent"
-            )
+        gate.set()
+        second = await asyncio.wait_for(waiters[0], 60)
+        await asyncio.gather(*waiters)
+        # m3 пришло во время хода 2 — этот же ход его и обработал; ответ
+        # хода 2 — его итог после m3.
+        third = await session.wait("m3")
+        assert second["turn"] == third["turn"] == 2
+        assert second["answer"] == third["answer"]
+        # Старое сообщение — ответ своего хода, а не последнего.
+        again = await session.wait("m1")
+        assert again["turn"] == 1 and "first" in str(again["answer"])
+        with pytest.raises(ValueError, match="Unknown message"):
+            await session.wait("never-sent")
         await handle.signal(AgentWorkflow.close_session)
         await asyncio.wait_for(handle.result(), 30)
 
@@ -558,13 +587,12 @@ async def test_two_big_cyrillic_messages_keep_records_below_the_limit(
             id="controls-big",
             task_queue="native-controls",
         )
-        await handle.execute_update(AgentWorkflow.wait_for_message, "m1")
+        session = session_of(env, "controls-big")
+        await asyncio.wait_for(session.wait("m1"), 120)
         await handle.execute_update(
             AgentWorkflow.submit_message, UserMessage("m2", "Ж" + big[1:])
         )
-        second = await handle.execute_update(
-            AgentWorkflow.wait_for_message, "m2"
-        )
+        second = await asyncio.wait_for(session.wait("m2"), 120)
         assert second["turn"] == 2
         largest = 0
         async for run in env.client.list_workflows(

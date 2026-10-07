@@ -209,9 +209,13 @@ async def test_json_worker_config_runs_the_same_plugin(
                 UserMessage("m1", "task"),
             )
             reply = await asyncio.wait_for(
-                env.client.get_workflow_handle("json-session").execute_update(
-                    "wait_for_message", "m1"
-                ),
+                AgentSession(
+                    env.client,
+                    agent="p",
+                    thread_id="t3",
+                    task_queue="json-q",
+                    workflow_id="json-session",
+                ).wait("m1"),
                 60,
             )
             await client.close_session("json-session")

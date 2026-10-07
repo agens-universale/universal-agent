@@ -6,7 +6,6 @@ import ssl
 import httpx
 import pytest
 from gc_core.execution.contracts import ModelFailure
-from gc_core_temporalio.model_error_encoding import encode_model_failure
 from gc_core_temporalio.activities import is_transient_provider_failure
 from gc_core_temporalio.activity_config import (
     NON_RETRYABLE_ERROR_TYPES,
@@ -14,6 +13,7 @@ from gc_core_temporalio.activity_config import (
     activity_options,
     resolve_activity_settings,
 )
+from gc_core_temporalio.model_error_encoding import encode_model_failure
 from gc_core_temporalio.provider import WorkerConfig
 from pydantic import ValidationError
 
@@ -172,3 +172,74 @@ def test_stream_and_embedded_errors_without_code_are_retried_like_core():
         "quota", status_code=None, raw_code="insufficient_quota"
     )
     assert not is_transient_provider_failure(encode_model_failure(quota))
+
+
+def test_native_retry_policy_never_makes_a_tool_effect_retry_forever(
+    tmp_path, monkeypatch
+):
+    """RetryPolicy() по умолчанию — maximum_attempts=0 («без ограничения»).
+    У инструмента это не бесконечный повтор эффекта: настроили паузу — эффект
+    остаётся одной попыткой; повторы — только явным числом."""
+    from datetime import timedelta
+
+    from gc_core.thread_store_file_durable import DurableFileThreadStore
+    from gc_core_temporalio import AgentPlugin
+    from gc_core_temporalio.activity_config import (
+        activity_options,
+        resolve_activity_settings,
+    )
+    from temporalio.common import RetryPolicy
+    from temporalio.workflow import ActivityConfig
+
+    monkeypatch.chdir(tmp_path)
+    plugin = AgentPlugin(
+        {"a": {}},
+        thread_store=DurableFileThreadStore(str(tmp_path / "t")),
+        tool_activities={
+            "exec_command": ActivityConfig(
+                retry_policy=RetryPolicy(maximum_interval=timedelta(seconds=5))
+            ),
+            "fs_write_file": ActivityConfig(
+                retry_policy=RetryPolicy(maximum_attempts=3)
+            ),
+        },
+    )
+    tools = resolve_activity_settings(plugin.config.activities)["tools"]
+    once = activity_options(tools["exec_command"], effect=True)
+    assert once["retry_policy"].maximum_attempts == 1
+    assert once["retry_policy"].maximum_interval == timedelta(seconds=5)
+    explicit = activity_options(tools["fs_write_file"], effect=True)
+    assert explicit["retry_policy"].maximum_attempts == 3
+
+
+async def test_retried_effect_with_changed_guard_facts_is_outcome_unknown(
+    monkeypatch,
+):
+    """Повторная попытка эффекта упёрлась в изменившиеся факты guard: первая
+    могла уже всё сделать — модели «исход неизвестен», а не «не исполнялся»."""
+    from types import SimpleNamespace
+
+    import gc_core.execution.tool_effects as tool_effects
+    import pytest
+    from gc_core.execution.contracts import (
+        GuardPreconditionChanged,
+        ToolOutcomeUnknown,
+    )
+    from gc_core_temporalio import activities
+
+    async def changed(*_args, **_kwargs):
+        raise GuardPreconditionChanged("Guard facts changed after approval")
+
+    monkeypatch.setattr(tool_effects, "execute_native_tool_effect", changed)
+    call = SimpleNamespace(data={"effect": True})
+    for attempt, expected in (
+        (1, GuardPreconditionChanged),
+        (2, ToolOutcomeUnknown),
+    ):
+        monkeypatch.setattr(
+            activities.activity,
+            "info",
+            lambda a=attempt: SimpleNamespace(attempt=a),
+        )
+        with pytest.raises(expected):
+            await activities._effect_attempt(call, None, None)

@@ -194,7 +194,9 @@ _NATIVE_KEYS = {
 }
 
 
-def from_activity_config(native: Any) -> ActivitySettings:
+def from_activity_config(
+    native: Any, *, tool: bool = False
+) -> ActivitySettings:
     """``temporalio.workflow.ActivityConfig`` (и ``RetryPolicy`` в нём) →
     настройки уровня. Нативные типы Temporal — в API, внутри — те же
     настройки, что у JSON-конфига воркера."""
@@ -212,15 +214,21 @@ def from_activity_config(native: Any) -> ActivitySettings:
     }
     policy = native.get("retry_policy")
     if policy is not None:
-        values["retry"] = RetrySettings(
-            initial_interval=policy.initial_interval,
-            backoff_coefficient=policy.backoff_coefficient,
-            maximum_interval=policy.maximum_interval,
-            maximum_attempts=policy.maximum_attempts,
-            non_retryable_error_types=list(
+        retry = {
+            "initial_interval": policy.initial_interval,
+            "backoff_coefficient": policy.backoff_coefficient,
+            "maximum_interval": policy.maximum_interval,
+            "non_retryable_error_types": list(
                 policy.non_retryable_error_types or []
             ),
-        )
+        }
+        # ``RetryPolicy()`` по умолчанию — ``maximum_attempts=0`` («без
+        # ограничения»). Для инструмента это значило бы бесконечный повтор
+        # неидемпотентного эффекта из-за того, что настроили только паузу:
+        # 0 у инструмента — «не задано», эффект остаётся одной попыткой.
+        if not (tool and policy.maximum_attempts == 0):
+            retry["maximum_attempts"] = policy.maximum_attempts
+        values["retry"] = RetrySettings(**retry)
     return ActivitySettings(**values)
 
 

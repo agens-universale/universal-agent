@@ -79,6 +79,29 @@ def cap_tool_output(result, limit=TOOL_OUTPUT_LIMIT_BYTES):
 FETCH_CACHE_LIMIT_BYTES = 64 * 1024 * 1024
 
 
+async def _effect_attempt(call, request, ctx):
+    """Исполнить инструмент; повторная попытка эффекта, упёршаяся в
+    изменившиеся факты guard, — «исход неизвестен»: первая попытка могла уже
+    исполнить эффект (дописать, закоммитить), и «не исполнялся» толкнул бы
+    модель повторить его ещё раз."""
+    from gc_core.execution.contracts import (
+        GuardPreconditionChanged,
+        ToolOutcomeUnknown,
+    )
+    from gc_core.execution.tool_effects import execute_native_tool_effect
+
+    try:
+        return await execute_native_tool_effect(request, ctx=ctx)
+    except GuardPreconditionChanged as exc:
+        if call.data.get("effect") and activity.info().attempt > 1:
+            raise ToolOutcomeUnknown(
+                "Повторная попытка эффекта: факты изменились после первой "
+                "попытки — возможно, эффект уже исполнен. Проверьте состояние, "
+                "прежде чем повторять."
+            ) from exc
+        raise
+
+
 class FetchPageCache:
     """Кэш страниц ``fetch_url`` по сессиям — в памяти воркера.
 
@@ -446,7 +469,6 @@ class AgentActivities:
         )
 
     async def _tool(self, call, ctx):
-        from gc_core.execution.tool_effects import execute_native_tool_effect
 
         request = value_to_type(
             ToolEffectRequest,
@@ -480,12 +502,10 @@ class AgentActivities:
                 ).result
             )
         if request.name != EXEC_FETCH_URL_NAME:
-            return cap_tool_output(
-                await execute_native_tool_effect(request, ctx=ctx)
-            )
+            return cap_tool_output(await _effect_attempt(call, request, ctx))
         session = self.fetch_pages.session_key(call)
         request.state.fetch_url_cache = self.fetch_pages.get(session)
-        result = await execute_native_tool_effect(request, ctx=ctx)
+        result = await _effect_attempt(call, request, ctx)
         if result.delta.fetch_url_cache is not None:
             self.fetch_pages.put(session, result.delta.fetch_url_cache)
             result.delta.fetch_url_cache = None

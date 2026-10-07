@@ -55,8 +55,10 @@ class SessionResume:
     terminal_outcome: str | None = None
     schema_version: int = 1
     #: Сообщения, обработанные завершёнными ходами: ID сообщения → номер
-    #: хода (``wait_for_message`` переживает Continue-As-New).
+    #: хода (``message_state`` переживает Continue-As-New).
     completed: dict[str, int] = field(default_factory=dict)
+    #: Итоги последних ходов по номеру (``message_state``: ответ своего хода).
+    turn_outcomes: dict[str, dict[str, Any]] = field(default_factory=dict)
     #: Владение тредом уже подтверждено прошлым run: перечитывать не нужно.
     store_owner_epoch: int | None = None
     store_generation: int | None = None

@@ -42,6 +42,9 @@ from gc_core_temporalio.operations import (
 from gc_core_temporalio.thread_store_proxy import TemporalThreadStore
 from gc_core_temporalio.thread_store_transport import ThreadStoreTransport
 
+#: Сколько последних ходов хранят свой ответ для ``message_state``.
+TURN_OUTCOMES_KEPT = 8
+
 #: Как часто простаивающая сессия делает Continue-As-New (см. _run_session).
 IDLE_REFRESH = timedelta(days=1)
 
@@ -101,6 +104,9 @@ class AgentWorkflow:
         self.completed_inputs = {}
         #: ID сообщений, отданных идущему ходу.
         self.turn_inputs = []
+        #: Итоги последних ходов по номеру (ответ хода сообщения, а не
+        #: последнего): ``{"<номер>": {"answer", "terminal_outcome", …}}``.
+        self.turn_outcomes = {}
         self.answer = None
         self.formatted_answer = None
         self.post_error = None
@@ -228,44 +234,38 @@ class AgentWorkflow:
             self.pending_messages.append(value)
         return {"message_id": message.message_id, "duplicate": False}
 
-    # Ожидание ответа не держит workflow: если сессия упала или закрылась,
-    # клиент получает «workflow завершён» и сам читает причину
-    # (``AgentSession.wait``). Без ABANDON незавершённый обработчик ронял бы
-    # задачу workflow, и упавшая сессия зависала бы вместо FAILED.
-    @workflow.update(
-        unfinished_policy=workflow.HandlerUnfinishedPolicy.ABANDON
-    )
-    async def wait_for_message(self, message_id: str) -> dict:
-        """Дождаться конца хода, обработавшего сообщение ``message_id``.
+    @workflow.query
+    def message_state(self, message_id: str) -> dict:
+        """Состояние сообщения для ожидающего клиента (опрос, не update).
 
-        Возвращает ответ последнего завершённого хода (как ``AsyncAgent.run``
-        локально) и номер хода сообщения. Сообщение, отброшенное остановкой
-        хода, — ``delivered: False``. Неизвестный ID (не принят или старше
-        последних 1000) — отказ.
+        Ожидание — query: долгие update занимали бы серверный лимит
+        одновременных update (по умолчанию 10), и ответ человека, stop и
+        новые сообщения упирались бы в него. ``state``: ``pending`` (ещё не
+        обработано), ``done`` (ход с номером ``turn`` закончился; его ответ —
+        если ход среди последних хранимых, иначе ``answer_expired``),
+        ``dropped`` (отброшено остановкой хода), ``unknown`` (не принято или
+        старше последних 1000 ID).
         """
-        await workflow.wait_condition(lambda: self.ready)
         if message_id not in self.accepted:
-            raise ApplicationError("Unknown message", non_retryable=True)
-
-        def dropped():
-            return any(
+            return {"message_id": message_id, "state": "unknown"}
+        turn = self.completed_inputs.get(message_id)
+        if turn is None:
+            dropped = any(
                 value.get("message_id") == message_id
                 for value in self.undelivered
             )
-
-        await workflow.wait_condition(
-            lambda: message_id in self.completed_inputs or dropped()
-        )
-        turn = self.completed_inputs.get(message_id)
+            return {
+                "message_id": message_id,
+                "state": "dropped" if dropped else "pending",
+            }
+        outcome = self.turn_outcomes.get(str(turn))
         return {
             "message_id": message_id,
-            "delivered": turn is not None,
+            "state": "done",
             "turn": turn,
             "turns": self.turns,
-            "answer": self.answer,
-            "terminal_outcome": self.terminal_outcome,
-            "formatted_answer": self.formatted_answer,
-            "post_error": self.post_error,
+            "answer_expired": outcome is None,
+            **(outcome or {}),
         }
 
     def _take_undelivered(self, message_id):
@@ -380,6 +380,7 @@ class AgentWorkflow:
         self.pending_messages = list(resume.pending)
         self.turns = resume.turns
         self.completed_inputs = dict(resume.completed)
+        self.turn_outcomes = dict(resume.turn_outcomes)
         self.answer = resume.answer
         self.formatted_answer = resume.formatted_answer
         self.post_error = resume.post_error
@@ -559,6 +560,16 @@ class AgentWorkflow:
             if message_id not in later:
                 self.completed_inputs[message_id] = self.turns
         self.turn_inputs = []
+        self.turn_outcomes[str(self.turns)] = {
+            "answer": self.answer,
+            "terminal_outcome": self.executor.last_terminal_outcome,
+            "formatted_answer": self.formatted_answer,
+            "post_error": self.post_error,
+        }
+        # Последние ходы: ответы бывают большими, а состояние едет в
+        # Continue-As-New (запись истории).
+        for old in sorted(self.turn_outcomes, key=int)[:-TURN_OUTCOMES_KEPT]:
+            del self.turn_outcomes[old]
         self.terminal_outcome = self.executor.last_terminal_outcome
         self.phase = "stopped" if self.stop_requested else "idle"
 
@@ -715,6 +726,7 @@ class AgentWorkflow:
             pending=self.pending_messages,
             turns=self.turns,
             completed=_recent(self.completed_inputs),
+            turn_outcomes=self.turn_outcomes,
             answer=self.answer,
             terminal_outcome=self.terminal_outcome,
             # Run из CAN без хода владеет тредом по resume: передать его дальше,

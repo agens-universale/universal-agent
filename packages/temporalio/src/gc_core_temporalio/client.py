@@ -205,23 +205,44 @@ class AgentSession:
         ).submit_with_start(self.workflow_id, self.request, message)
         return message.message_id
 
-    async def wait(self, message_id):
-        """Дождаться хода, обработавшего сообщение: ответ, номер хода,
-        ``delivered: False`` — если ход остановили до него."""
-        try:
-            return await self.handle.execute_update(
-                AgentWorkflow.wait_for_message, message_id
-            )
-        except Exception as exc:
-            # Сессия упала, пока ход шёл: наружу — её настоящая причина
-            # (отказ хода, расхождение настроек), а не «update не выполнен».
-            reason = await self._failure()
-            if reason is None:
-                raise
-            raise reason from exc
+    async def wait(self, message_id, *, poll=0.2, max_poll=2.0):
+        """Дождаться хода, обработавшего сообщение: ответ этого хода, его
+        номер; ``delivered: False`` — ход остановили до сообщения.
 
-    async def _failure(self):
-        """Причина падения сессии (``WorkflowFailureError``) или ``None``."""
+        Опрос query ``message_state`` с растущей паузой: ожидание не занимает
+        лимит одновременных update на сервере и не держит workflow (его
+        Continue-As-New, закрытие). Упавшая сессия — ``SessionFailed``.
+        """
+        from temporalio.service import RPCError
+
+        delay = poll
+        while True:
+            try:
+                state = await self.handle.query(
+                    AgentWorkflow.message_state, message_id
+                )
+            except RPCError:
+                # Задача workflow в сбое или сессия завершена: причина — если
+                # она упала; иначе (ещё стартует, сбой задачи) — ждать дальше.
+                state = None
+            if state is not None:
+                kind = state["state"]
+                if kind == "done":
+                    return {**state, "delivered": True}
+                if kind == "dropped":
+                    return {**state, "delivered": False, "answer": None}
+                if kind == "unknown":
+                    raise ValueError(f"Unknown message: {message_id}")
+            reason = await self._failure(pending_message=message_id)
+            if reason is not None:
+                raise reason
+            await asyncio.sleep(delay)
+            delay = min(delay * 1.5, max_poll)
+
+    async def _failure(self, pending_message=None):
+        """Причина, по которой ответа не будет: сессия упала
+        (``SessionFailed`` с исходной причиной) или — для ещё не обработанного
+        ``pending_message`` — завершилась иначе (закрыта, прервана)."""
         from temporalio.client import (
             WorkflowExecutionStatus,
             WorkflowFailureError,
@@ -231,8 +252,18 @@ class AgentSession:
             description = await self.handle.describe()
         except Exception:
             return None
-        if description.status != WorkflowExecutionStatus.FAILED:
+        if description.status in (
+            WorkflowExecutionStatus.RUNNING,
+            WorkflowExecutionStatus.CONTINUED_AS_NEW,
+        ):
             return None
+        if description.status != WorkflowExecutionStatus.FAILED:
+            if pending_message is None:
+                return None
+            return SessionFailed(
+                f"Сессия завершилась ({description.status.name}), сообщение "
+                f"{pending_message} не обработано"
+            )
         try:
             await self.handle.result(follow_runs=False)
         except WorkflowFailureError as failure:
