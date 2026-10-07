@@ -17,6 +17,7 @@ from gc_core.config_modules.auth import build_auth_connector
 from gc_core.config_modules.env_interpolation import (
     resolve_env_placeholders_strict,
 )
+from gc_core.context_preparation import settings_from_snapshot
 from gc_core.execution.contracts import ExecutionFailure
 from gc_core.execution.resource_host import WorkerResourceHost
 from gc_core.run_context import acreate_run_context
@@ -320,7 +321,11 @@ class ContextProvider:
             # Снимок для истории проверяется на старте воркера, а не на
             # первом ходе: неизвестный параметр модели (extra_body, …) —
             # отказ сразу, с путём.
-            public_config_snapshot(loaded)
+            # Полный круг: снимок собирается обратно в настройки так же, как
+            # в коде workflow, — иначе сбой проявился бы только там (вечный
+            # сбой задачи вместо ошибки старта).
+            snapshot = public_config_snapshot(loaded)
+            settings_from_snapshot(snapshot.settings, snapshot.runtime)
             kind = settings.os_backend.kind
             if kind in _UNTESTED_BACKENDS:
                 logger.warning(

@@ -225,6 +225,18 @@ def _apply_free_form_policy(
             document[key] = _copy_policy(document[key], schema, ".".join(path))
 
 
+#: Обязательные поля подключения ``os_backend`` по виду: сами они только для
+#: воркера (``worker_only``), но без них снимок не собрать обратно в
+#: настройки (валидатор требует их при этом ``kind``). Код workflow с бэкендом
+#: ОС не работает (``ExternalResources``) — ему достаточно заглушки.
+WORKER_ONLY_PLACEHOLDER = "worker-only"
+_OS_BACKEND_REQUIRED = {
+    "docker": ("docker", "name", WORKER_ONLY_PLACEHOLDER),
+    "ssh": ("ssh", "host", WORKER_ONLY_PLACEHOLDER),
+    "exec": ("exec", "argv_prefix", [WORKER_ONLY_PLACEHOLDER]),
+}
+
+
 def public_settings(settings: AppConfig) -> dict[str, Any]:
     """Вложенный JSON-дамп настроек без закрытых полей (ключи — алиасы)."""
     document = settings.model_dump(
@@ -235,6 +247,13 @@ def public_settings(settings: AppConfig) -> dict[str, Any]:
     )
     for pattern, schema in _FREE_FORM_POLICY.items():
         _apply_free_form_policy(document, (), pattern, schema)
+    backend = document.get("os_backend")
+    required = _OS_BACKEND_REQUIRED.get(
+        settings.os_backend.kind if backend is not None else None
+    )
+    if required is not None:
+        section, field, placeholder = required
+        backend.setdefault(section, {})[field] = placeholder
     return _json_value(document, "settings")
 
 

@@ -394,3 +394,26 @@ def test_runtime_backend_kind_from_schema_is_public(kind):
         )
     )
     assert snapshot.runtime["os_backend"] == kind
+
+
+@pytest.mark.parametrize(
+    "backend",
+    [
+        {"kind": "docker", "docker": {"name": "SECRET_CONTAINER"}},
+        {"kind": "ssh", "ssh": {"host": "SECRET_HOST", "user": "SECRET_USER"}},
+        {"kind": "exec", "exec": {"argv_prefix": ["SECRET_WRAPPER", "-x"]}},
+    ],
+)
+def test_worker_only_os_backend_snapshot_round_trips(backend):
+    """Подключение бэкенда ОС — только для воркера, но снимок обязан
+    собираться обратно в настройки (валидатор требует поле при этом kind):
+    в снимке заглушка, а не значение."""
+    settings = AppConfig.model_validate({"os_backend": backend})
+    snapshot = public_config_snapshot(
+        LoadedSettings(
+            settings=settings, runtime=RuntimeEnv(os_backend=backend["kind"])
+        )
+    )
+    assert "SECRET" not in json.dumps(snapshot.settings)
+    restored = settings_from_snapshot(snapshot.settings, snapshot.runtime)
+    assert restored.settings.os_backend.kind == backend["kind"]
