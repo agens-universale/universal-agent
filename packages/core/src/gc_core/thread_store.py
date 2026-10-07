@@ -474,6 +474,10 @@ def load_thread_messages(
                 payload["id"] = (
                     "m_" + hashlib.sha256(identity.encode()).hexdigest()[:32]
                 )
+                # И ключ с синтезированным id: эта запись в памяти уже с ним,
+                # и история, отправленная в ход целиком (Responses без
+                # previous_response_id), не должна дописаться второй раз.
+                message_keys.add(make_message_key(payload))
             messages.append(payload)
 
     return messages, message_keys, max_seq
@@ -1314,13 +1318,16 @@ class ThreadSession:
                 "Thread generation or ownership changed during this run"
             )
         state = snapshot.state
+        # Ключи хранилища — надмножество: у старых записей без id есть ещё
+        # ключ с синтезированным id. Чужая запись меняет max_seq.
         if state is None or (
-            state.known_keys != self.known_message_keys
+            not self.known_message_keys <= set(state.known_keys)
             or state.max_seq != self.persisted_messages_count
         ):
             raise ThreadStoreConflict(
                 "Thread history changed during this run; reload the agent"
             )
+        self.known_message_keys.update(state.known_keys)
         self._store_snapshot = snapshot
 
     def _store_operation(self, kind: str, payload: dict):
