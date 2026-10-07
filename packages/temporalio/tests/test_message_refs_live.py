@@ -24,7 +24,7 @@ from gc_core_temporalio.contracts import RunRequest
 from gc_core_temporalio.provider import WorkerConfig
 from gc_core_temporalio.worker import build_runtime, worker_options
 from gc_core_temporalio.workflow import AgentWorkflow
-from live_support import call
+from live_support import call, temporal_cli
 from temporalio.api.enums.v1 import EventType
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer, Worker
@@ -122,9 +122,7 @@ def growing_model():
 
 @asynccontextmanager
 async def runtime(tmp_path, url, *, persist="step", core_extra=None):
-    binary = shutil.which("temporal")
-    if binary is None:
-        pytest.skip("Temporal CLI is required")
+    binary = temporal_cli()
     config = WorkerConfig.model_validate(
         {
             "workflow_queue": "refs",

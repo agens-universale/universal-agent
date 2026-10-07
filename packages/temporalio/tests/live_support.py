@@ -131,3 +131,23 @@ async def wait_marker(path, process, handle):
                 await handle.result()
                 raise AssertionError("Workflow ended before checkpoint")
             await asyncio.sleep(0.2)
+
+
+def temporal_cli():
+    """Путь к ``temporal`` CLI для живых тестов (dev-сервер Temporal).
+
+    Без CLI тест пропускается — локальной разработке Temporal не обязателен.
+    С ``REQUIRE_TEMPORAL=1`` (прогон, который должен проверить Temporal)
+    отсутствие CLI — ошибка: иначе живые тесты молча не исполнятся.
+    """
+    import os
+    import shutil
+
+    binary = shutil.which("temporal")
+    if binary is None:
+        if os.environ.get("REQUIRE_TEMPORAL") == "1":
+            pytest.fail(
+                "REQUIRE_TEMPORAL=1, but the temporal CLI is not on PATH"
+            )
+        pytest.skip("Temporal CLI is required")
+    return binary

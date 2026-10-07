@@ -7,6 +7,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
+from live_support import temporal_cli
 from gc_core.config_modules import AppConfig
 from gc_core_temporalio.child_workflow import SubagentWorkflow
 from gc_core_temporalio.contracts import RunRequest
@@ -190,9 +191,7 @@ def child_provider(tmp_path, tool_name):
 async def test_native_child_model_tools_input_human_and_replay(
     tmp_path, monkeypatch, child_provider, stop, tool_name, fallback
 ):
-    binary = shutil.which("temporal")
-    if binary is None:
-        pytest.skip("Temporal CLI is required")
+    binary = temporal_cli()
     monkeypatch.chdir(tmp_path)
     (tmp_path / "example.txt").write_text("native child file")
     url, requests = child_provider

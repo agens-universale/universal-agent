@@ -12,7 +12,7 @@ from gc_core_temporalio.workflow import AgentWorkflow
 from temporalio.client import WorkflowFailureError
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer, Worker
-from live_support import provider  # noqa: F401
+from live_support import provider, temporal_cli  # noqa: F401
 
 
 @pytest.mark.parametrize("provider_unavailable", [False, True])
@@ -22,9 +22,7 @@ async def test_production_provider_worker_client_and_replay(
     provider,  # noqa: F811
     provider_unavailable,
 ):
-    binary = shutil.which("temporal")
-    if binary is None:
-        pytest.skip("Temporal CLI is required")
+    binary = temporal_cli()
     monkeypatch.chdir(tmp_path)
     url, requests = provider
     (tmp_path / "example.txt").write_text(

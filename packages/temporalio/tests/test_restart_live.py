@@ -15,7 +15,7 @@ from gc_core_temporalio.contracts import RunRequest
 from gc_core_temporalio.workflow import AgentWorkflow
 from gc_core_temporalio.storage.sqlite import SQLiteThreadStore
 from gc_core_temporalio.thread_store_contracts import ThreadStoreCall
-from live_support import provider, wait_marker  # noqa: F401
+from live_support import provider, temporal_cli, wait_marker  # noqa: F401
 from restart_interceptor import RestartInterceptor
 from temporalio.converter import value_to_type
 from temporalio.testing import WorkflowEnvironment
@@ -44,9 +44,7 @@ async def test_native_sigkill_durable_boundaries(
     checkpoint,
     persist,
 ):
-    binary = shutil.which("temporal")
-    if not binary:
-        pytest.skip("Temporal CLI is required")
+    binary = temporal_cli()
     url, requests = provider
     (tmp_path / "example.txt").write_text("native durable restart")
     async with await WorkflowEnvironment.start_local(

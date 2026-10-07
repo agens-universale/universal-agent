@@ -32,7 +32,7 @@ from gc_core.tools.subagents.registry import is_subagent_tool
 from gc_core.tools.subagents.selection import subagents_enabled
 
 _fallback_logger = logging.getLogger(__name__)
-from gc_core.execution.ports import port
+from gc_core.execution.ports import is_sandbox_violation, port
 from gc_core.execution.tool_feedback import (
     INTERNAL_TOOL_ERROR as INTERNAL_TOOL_ERROR,
 )
@@ -665,6 +665,8 @@ async def _aapply_tool_text(
     except ExecutionFailure:
         raise
     except Exception as e:
+        if is_sandbox_violation(e):
+            raise
         return annotate_output_with_dropped_arguments(
             _tool_failure_output(
                 e, tool_name=tool_name, ctx=ctx, call_id=kwargs.get("call_id")

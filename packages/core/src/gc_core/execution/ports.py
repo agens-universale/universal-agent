@@ -31,3 +31,21 @@ def port(ctx, name):
             "the local fallback would run inside workflow code"
         )
     return value
+
+
+#: Нарушения песочницы Temporal (по имени: ядро не импортирует temporalio).
+_SANDBOX_VIOLATIONS = frozenset(
+    {"NondeterminismError", "RestrictedWorkflowAccessError"}
+)
+
+
+def is_sandbox_violation(exc: BaseException) -> bool:
+    """Ошибка песочницы durable-рантайма (ввод-вывод в коде workflow).
+
+    Её нельзя превращать в «ошибку инструмента» для модели: это баг
+    интеграции, а не исход инструмента. Наружу — чтобы рантайм показал
+    сбой задачи workflow, а не тихую деградацию.
+    """
+    return any(
+        cls.__name__ in _SANDBOX_VIOLATIONS for cls in type(exc).__mro__
+    )

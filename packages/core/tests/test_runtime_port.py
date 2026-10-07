@@ -24,3 +24,17 @@ def test_bound_port_is_returned_in_both_modes():
     )
     durable = SimpleNamespace(durable_execution=True, prompt_loader=loader)
     assert port(durable, "prompt_loader") is loader
+
+
+def test_sandbox_violation_is_recognised_by_class_name():
+    from gc_core.execution.ports import is_sandbox_violation
+
+    class NondeterminismError(Exception):
+        pass
+
+    class RestrictedWorkflowAccessError(NondeterminismError):
+        pass
+
+    assert is_sandbox_violation(RestrictedWorkflowAccessError("open"))
+    assert is_sandbox_violation(NondeterminismError("x"))
+    assert not is_sandbox_violation(ValueError("x"))

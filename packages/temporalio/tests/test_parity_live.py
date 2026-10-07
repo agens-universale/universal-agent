@@ -14,15 +14,18 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
+from live_support import temporal_cli
 from gc_core.agent_executor import AgentExecutor
-from gc_core.settings import LoadedSettings, RuntimeEnv
+from gc_core.execution.contracts import ToolResult
 from gc_core.run_context import acreate_run_context
+from gc_core.settings import LoadedSettings, RuntimeEnv
 from gc_core.thread_store_file import FileThreadStore
 from gc_core.utils.logging_module import release_run_logger
-from gc_core_temporalio.contracts import RunRequest
+from gc_core_temporalio.contracts import ActivityCall, RunRequest, UserMessage
 from gc_core_temporalio.provider import WorkerConfig
 from gc_core_temporalio.worker import build_runtime, worker_options
 from gc_core_temporalio.workflow import AgentWorkflow
+from temporalio import activity
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer, Worker
 
@@ -46,7 +49,35 @@ CASES = [
     "file_download",
     "stored_output",
     "turn_end_summary",
+    "text_deny",
+    "text_length",
+    "memory_two_turns",
+    "human_boundary",
+    "queued_before",
+    "queued_during",
+    "stop_mid_batch",
 ]
+
+#: Эталонные сценарии ядра, которые под Temporal не гоняются, и почему.
+#: Новый сценарий ядра без решения роняет
+#: ``test_every_core_scenario_runs_under_temporal_or_is_explained``.
+SKIPPED = dict.fromkeys(
+    (
+        "deferred_accounting_length",
+        "deferred_accounting_outcome",
+        "deferred_accounting_refusal",
+    ),
+    "проверяет локальный API отложенного учёта (account_run=False, "
+    "aclose_run_accounting); постобработку хода Temporal (format_text) "
+    "проверяет test_workflow_controls",
+)
+# Режим текстового ответа задаёт рантайм поверхности (RuntimeEnv), а профиль
+# воркера рантайм пока не принимает. Вернуть в CASES, когда профиль станет
+# LoadedSettings (настройки + рантайм).
+SKIPPED["text_allow"] = (
+    "text_answer_mode=allow задаётся RuntimeEnv поверхности; профиль "
+    "воркера его пока не принимает"
+)
 
 
 @pytest.fixture
@@ -56,9 +87,21 @@ def parity_scenarios(monkeypatch):
     )
     from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
     from parity_harness import assistant_text
-    from test_local_runtime_parity import call, finish, scenarios
+    from test_local_runtime_parity import batch, call, finish, scenarios
 
     cases = scenarios()
+    # Калькулятор исполняется в коде workflow, без activity: остановку
+    # привязываем к первому инструменту-activity (чтение файла), одинаково
+    # для обеих сторон.
+    cases["stop_mid_batch"] = {
+        "turns": [
+            batch(
+                call("fs_read_file", {"path": "input.txt"}),
+                call("exec_calculator", {"expression": "2+2"}, "not-started"),
+            )
+        ],
+        "stop_after_tool": True,
+    }
     cases["project_memory_roundtrip"] = {
         "turns": [
             call(
@@ -208,6 +251,83 @@ def parity_scenarios(monkeypatch):
     return cases
 
 
+#: Ввод до хода и посреди хода — те же тексты, что у эталона ядра.
+QUEUED_BEFORE = {
+    "id": "queued-before",
+    "role": "user",
+    "content": "Не забудь проверить итог",
+}
+QUEUED_DURING = {
+    "id": "queued-during",
+    "role": "user",
+    "content": "Уточнение: ответ на русском",
+}
+
+
+def on_first_request(script, action):
+    """Перед ответом на первый запрос к модели выполнить ``action``."""
+    first = script[0]
+
+    def respond(request):
+        action()
+        return first(request) if callable(first) else first
+
+    script[0] = respond
+
+
+async def drive_session(handle, messages):
+    """Довести сессию: ответить человеку, отправить следующие сообщения,
+    закрыть живую сессию. Ответы ходов — по мере их завершения."""
+    answers, questions, answered = [], [], set()
+    sent = 1
+    result = asyncio.ensure_future(handle.result())
+    # Живая сессия делает Continue-As-New после хода: запросы и updates —
+    # к последнему run, а не к первому, к которому привязан ``handle``.
+    handle = handle._client.get_workflow_handle(handle.id)
+    try:
+        while not result.done():
+            status = await handle.query(AgentWorkflow.status)
+            pending = status.get("pending_human")
+            if pending and pending["request_id"] not in answered:
+                answered.add(pending["request_id"])
+                questions.append(pending.get("question"))
+                await handle.execute_update(
+                    AgentWorkflow.answer_human,
+                    args=[pending["request_id"], "1350"],
+                )
+            if len(messages) > 1 and status.get("turns", 0) >= sent:
+                if len(answers) < sent:
+                    answers.append(status.get("answer"))
+                if sent < len(messages):
+                    await handle.execute_update(
+                        AgentWorkflow.submit_message,
+                        UserMessage(f"input-{sent}", messages[sent]),
+                    )
+                    sent += 1
+                else:
+                    await handle.signal(AgentWorkflow.close_session)
+            await asyncio.wait({result}, timeout=0.2)
+        value = result.result()
+    finally:
+        result.cancel()
+    if len(messages) == 1:
+        answers.append(value["answer"])
+    return value, answers, questions
+
+
+def test_every_core_scenario_runs_under_temporal_or_is_explained(
+    parity_scenarios,
+):
+    names = set(parity_scenarios)
+    covered = set(CASES) | set(SKIPPED)
+    assert names <= covered, (
+        "Новые эталонные сценарии ядра не гоняются под Temporal: добавьте в "
+        f"CASES или в SKIPPED с причиной: {sorted(names - covered)}"
+    )
+    assert covered <= names, sorted(covered - names)
+    assert not set(CASES) & set(SKIPPED)
+
+
 @pytest.fixture
 def parity_http():
     scripts, requests, errors = [], [], []
@@ -281,7 +401,9 @@ def normalize(trace, workspace):
 
     def collect(value):
         if isinstance(value, dict):
-            for key, item in value.items():
+            # По имени ключа, а не по порядку вставки: SQLite и файлы
+            # возвращают ключи сообщения в разном порядке.
+            for key, item in sorted(value.items()):
                 if key in identity and isinstance(item, str):
                     ids.setdefault(item, f"<id-{len(ids)}>")
                 collect(item)
@@ -356,9 +478,7 @@ def snapshot(answer, requests, store, workspace):
 async def test_actual_http_local_native_parity(
     tmp_path, monkeypatch, parity_scenarios, parity_http, name, backend
 ):
-    binary = shutil.which("temporal")
-    if binary is None:
-        pytest.skip("Temporal CLI is required")
+    binary = temporal_cli()
     monkeypatch.chdir(tmp_path)
     from gc_core.config_modules import env_vars
 
@@ -430,7 +550,11 @@ async def test_actual_http_local_native_parity(
                             ),
                             **scenario.get("agent_extra", {}),
                         },
-                        "tui": {"text_answer_mode": "deny"},
+                        "tui": {
+                            "text_answer_mode": scenario.get("config", {}).get(
+                                "text_answer_mode", "deny"
+                            )
+                        },
                         "paths": {
                             "chat_completions_system_prompt_path": str(prompt)
                         },
@@ -452,18 +576,66 @@ async def test_actual_http_local_native_parity(
     local_ctx = await acreate_run_context(
         local_config, thread_store=local_store
     )
+    messages = scenario.get("messages", ["Выполни контрольную задачу"])
+    loop = asyncio.get_running_loop()
+    executor = AgentExecutor(local_ctx)
+    local_questions = []
+
+    async def ask(question):
+        local_questions.append(question)
+        return "1350"
+
+    local_ctx.ask_human = ask
+    if scenario.get("queued_before"):
+        executor.add_message(dict(QUEUED_BEFORE))
     script.extend(deepcopy(scenario["turns"]))
-    try:
-        answer = await AgentExecutor(local_ctx).arun(
-            ["Выполни контрольную задачу"],
-            system="test",
-            thread_id="parity",
-            message_ids=["input-0"],
+    if scenario.get("queued_during"):
+
+        async def queue_locally():
+            # Как сообщение клиента: его ID — ``message_id`` (дедупликация
+            # повторов), свой ``id`` сообщению даёт ядро.
+            executor.add_message(
+                {
+                    "role": "user",
+                    "content": QUEUED_DURING["content"],
+                    "message_id": QUEUED_DURING["id"],
+                }
+            )
+
+        on_first_request(
+            script,
+            lambda: asyncio.run_coroutine_threadsafe(
+                queue_locally(), loop
+            ).result(30),
         )
+    if scenario.get("stop_after_tool"):
+        import gc_core.processing_responses as pr
+
+        real_apply = pr.aapply_tool
+
+        async def apply_then_stop(*args, **kwargs):
+            output = await real_apply(*args, **kwargs)
+            executor.stop_run()
+            return output
+
+        monkeypatch.setattr(pr, "aapply_tool", apply_then_stop)
+    try:
+        local_answers = []
+        for number, message in enumerate(messages):
+            local_answers.append(
+                await executor.arun(
+                    [message],
+                    system="test",
+                    thread_id="parity",
+                    message_ids=[f"input-{number}"],
+                )
+            )
         assert not script and not errors
-        local = snapshot(answer, requests, local_store, tmp_path)
+        local = snapshot(local_answers[-1], requests, local_store, tmp_path)
     finally:
         release_run_logger(local_ctx.logger)
+        if scenario.get("stop_after_tool"):
+            monkeypatch.setattr(pr, "aapply_tool", real_apply)
     requests.clear()
     (tmp_path / "result.txt").unlink(missing_ok=True)
     shutil.rmtree(tmp_path / ".gc", ignore_errors=True)
@@ -472,6 +644,26 @@ async def test_actual_http_local_native_parity(
     shutil.rmtree(tmp_path / "downloads", ignore_errors=True)
     script.extend(deepcopy(scenario["turns"]))
     contexts, native, threads = build_runtime(config)
+    session = {}
+    if scenario.get("stop_after_tool"):
+        original_tool = native.tool
+
+        @activity.defn(name="agent.tool.execute")
+        async def tool_then_stop(call: ActivityCall) -> ToolResult:
+            result = await original_tool(call)
+            if not session.get("stopped"):
+                # Сигнал — до завершения activity: workflow примет stop
+                # раньше её результата, как local stop_run после инструмента.
+                session["stopped"] = True
+                await session["handle"].signal(AgentWorkflow.stop)
+            return result
+
+        native.tool = tool_then_stop
+    first = [messages[0]]
+    first_ids = ["input-0"]
+    if scenario.get("queued_before"):
+        first.append(QUEUED_BEFORE["content"])
+        first_ids.append(QUEUED_BEFORE["id"])
     try:
         async with await WorkflowEnvironment.start_local(
             dev_server_existing_path=binary
@@ -488,17 +680,41 @@ async def test_actual_http_local_native_parity(
                         "files",
                         "test",
                         "parity",
-                        ["Выполни контрольную задачу"],
+                        first,
                         "parity",
                         "parity",
-                        message_ids=["input-0"],
+                        message_ids=first_ids,
+                        keep_alive=len(messages) > 1,
                     ),
                     id="native-parity",
                     task_queue="parity",
                 )
-                result = await asyncio.wait_for(handle.result(), 45)
-                history = await handle.fetch_history()
+                session["handle"] = handle
+                if scenario.get("queued_during"):
+                    on_first_request(
+                        script,
+                        lambda: asyncio.run_coroutine_threadsafe(
+                            handle.execute_update(
+                                AgentWorkflow.submit_message,
+                                UserMessage(
+                                    QUEUED_DURING["id"],
+                                    QUEUED_DURING["content"],
+                                ),
+                            ),
+                            loop,
+                        ).result(30),
+                    )
+                (
+                    result,
+                    native_answers,
+                    native_questions,
+                ) = await asyncio.wait_for(drive_session(handle, messages), 60)
+                history = await env.client.get_workflow_handle(
+                    "native-parity"
+                ).fetch_history()
             assert not script and not errors
+            assert native_answers == local_answers
+            assert len(native_questions) == len(local_questions)
             actual = snapshot(
                 result["answer"], requests, contexts.stores["files"], tmp_path
             )

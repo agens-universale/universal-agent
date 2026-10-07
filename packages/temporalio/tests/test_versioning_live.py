@@ -14,7 +14,7 @@ from gc_core_temporalio.worker import (
     worker_options,
 )
 from gc_core_temporalio.workflow import AgentWorkflow
-from live_support import call
+from live_support import call, temporal_cli
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 from test_ownership_live import _config
@@ -36,9 +36,7 @@ def _versioned(tmp_path, url, model, build):
 async def test_turn_is_pinned_and_next_turn_runs_on_new_build(
     tmp_path, monkeypatch, scripted_http
 ):
-    binary = shutil.which("temporal")
-    if binary is None:
-        pytest.skip("Temporal CLI is required")
+    binary = temporal_cli()
     monkeypatch.chdir(tmp_path)
     url, requests, script = scripted_http
     (tmp_path / "a.txt").write_text("a")

@@ -4,6 +4,7 @@ import asyncio
 import shutil
 
 import pytest
+from live_support import temporal_cli
 import test_workflow_controls as controls
 from gc_core.execution.contracts import ExecutionFailure
 from gc_core.thread_store_file_durable import DurableFileThreadStore
@@ -120,9 +121,7 @@ async def test_profile_change_on_worker_restart_keeps_sessions(
     Тот же workflow ID после завершения тоже стартует: владелец контекста
     хода привязан к цепочке run, квитанции прошлой цепочки не мешают.
     """
-    binary = shutil.which("temporal")
-    if binary is None:
-        pytest.skip("Temporal CLI is required")
+    binary = temporal_cli()
     monkeypatch.chdir(tmp_path)
     url, requests, script = scripted_http
     script.extend([[finish("one")], [finish("two")], [finish("three")]])
@@ -282,9 +281,7 @@ async def test_idle_refresh_continue_as_new_keeps_ownership(
     from temporalio.testing import WorkflowEnvironment
     from temporalio.worker import UnsandboxedWorkflowRunner
 
-    binary = shutil.which("temporal")
-    if binary is None:
-        pytest.skip("Temporal CLI is required")
+    binary = temporal_cli()
     monkeypatch.chdir(tmp_path)
     # Без песочницы подмена константы модуля видна коду workflow.
     monkeypatch.setattr(session_workflow, "IDLE_REFRESH", timedelta(seconds=1))

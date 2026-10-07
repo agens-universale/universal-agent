@@ -21,7 +21,7 @@ from gc_core_temporalio.worker import build_runtime, worker_options
 from gc_core_temporalio.workflow import AgentWorkflow
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer, Worker
-from live_support import call
+from live_support import call, temporal_cli
 from test_parity_live import normalize, snapshot
 from test_workflow_controls import finish
 
@@ -149,9 +149,7 @@ def normalized_traces(traces, workspace):
 async def test_automatic_summary_full_trace_parity(
     tmp_path, monkeypatch, summary_http, backend, name
 ):
-    binary = shutil.which("temporal")
-    if binary is None:
-        pytest.skip("Temporal CLI is required")
+    binary = temporal_cli()
     from gc_core.config_modules import env_vars
 
     monkeypatch.chdir(tmp_path)

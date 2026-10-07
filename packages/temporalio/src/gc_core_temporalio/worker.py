@@ -6,6 +6,7 @@ queues must be unique to this host when MCP or background commands are enabled.
 
 import argparse
 import asyncio
+import dataclasses
 import logging
 from contextlib import AsyncExitStack
 from pathlib import Path
@@ -68,6 +69,68 @@ def build_runtime(config):
     return provider, native, ThreadStoreActivities(stores)
 
 
+def workflow_runner():
+    """Песочница кода workflow: умолчания SDK и запрет сетевых клиентов.
+
+    Модель, инструменты и MCP исполняются в activities; HTTP- или MCP-клиент
+    в коде workflow — значит, ядро пошло мимо порта (новый ввод-вывод без
+    activity). Умолчания SDK уже запрещают файлы, процессы и часы; сетевые
+    клиенты пропускаются как есть (``sandbox_passthrough``), поэтому их
+    создание запрещено здесь явно. Только во время исполнения: модуль ядра
+    создаёт клиент при импорте, и это не ход.
+    """
+    from temporalio.worker.workflow_sandbox import (
+        SandboxedWorkflowRunner,
+        SandboxMatcher,
+        SandboxRestrictions,
+    )
+
+    def runtime_use(*names):
+        return SandboxMatcher(use=set(names), only_runtime=True)
+
+    clients = SandboxMatcher(
+        children={
+            # httpx.Client запрещать нельзя: ядро наследует его при импорте
+            # (наследовать класс под ограничением песочница не умеет), а
+            # синхронный клиент ядра — это его ``_CompatClient``.
+            "httpx": runtime_use("AsyncClient"),
+            "gc_core": SandboxMatcher(
+                children={
+                    "utils": SandboxMatcher(
+                        children={
+                            "http_session": runtime_use(
+                                "_CompatClient", "NO_NETRC_SESSION"
+                            )
+                        }
+                    )
+                }
+            ),
+            "mcp": SandboxMatcher(
+                children={
+                    "client": SandboxMatcher(
+                        children={
+                            "session": runtime_use("ClientSession"),
+                            "stdio": runtime_use("stdio_client"),
+                            "sse": runtime_use("sse_client"),
+                            "streamable_http": runtime_use(
+                                "streamablehttp_client",
+                                "streamable_http_client",
+                            ),
+                        }
+                    )
+                }
+            ),
+        }
+    )
+    restrictions = dataclasses.replace(
+        SandboxRestrictions.default,
+        invalid_module_members=(
+            SandboxRestrictions.invalid_module_members_default | clients
+        ),
+    )
+    return SandboxedWorkflowRunner(restrictions=restrictions)
+
+
 def worker_options(config, native, threads):
     """Coalesce equal queues while preserving a single resource context owner."""
     queues = {}
@@ -107,6 +170,8 @@ def worker_options(config, native, threads):
         )
         entry["workflows"].extend(workflows)
         entry["activities"].extend(activities)
+        if workflows:
+            entry["workflow_runner"] = workflow_runner()
     deployment = deployment_config(config)
     if deployment is not None:
         for entry in queues.values():

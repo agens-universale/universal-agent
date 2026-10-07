@@ -12,7 +12,7 @@ from gc_core.thread_store_file_durable import DurableFileThreadStore
 from gc_core_temporalio.client import AgentClient
 from gc_core_temporalio.contracts import ActivityCall, RunRequest
 from gc_core_temporalio.workflow import AgentWorkflow
-from live_support import call, wait_marker
+from live_support import call, wait_marker, temporal_cli
 from restart_interceptor import RestartInterceptor
 from temporalio.client import WorkflowFailureError
 from temporalio.converter import value_to_type
@@ -32,9 +32,7 @@ async def test_actual_resource_host_sigkill_never_reconnects_or_repeats(
         # Новая сессия после потери процесса допустима; повтор эффекта — нет.
         return [line for line in text.splitlines() if '"open"' not in line]
 
-    binary = shutil.which("temporal")
-    if binary is None:
-        pytest.skip("Temporal CLI is required")
+    binary = temporal_cli()
     url, requests, script = scripted_http
     audit = tmp_path / "effects.jsonl"
     core = {

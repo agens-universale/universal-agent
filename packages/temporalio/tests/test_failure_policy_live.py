@@ -4,6 +4,7 @@ import asyncio
 import shutil
 
 import pytest
+from live_support import temporal_cli
 import test_workflow_controls as controls
 from gc_core.agent_executor import AgentExecutor
 from gc_core.execution.contracts import ExecutionFailure, InfrastructureFailure
@@ -48,9 +49,7 @@ def test_session_failure_separates_domain_from_code_errors():
 async def test_workflow_bug_keeps_run_until_fixed_worker(
     tmp_path, monkeypatch, scripted_http
 ):
-    binary = shutil.which("temporal")
-    if binary is None:
-        pytest.skip("Temporal CLI is required")
+    binary = temporal_cli()
     monkeypatch.chdir(tmp_path)
     url, _, script = scripted_http
     script.append([finish("done")])

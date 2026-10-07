@@ -110,6 +110,25 @@ Sonar живут в одном гейте — `scripts/lint.sh` (внутри pr
 поставить хуки, что и где проверяется и как глушить находки — в
 [CONTRIBUTING.md](../CONTRIBUTING.md#качество-кода).
 
+## Temporal
+
+Живые тесты `packages/temporalio/tests/*_live.py` поднимают dev-сервер
+Temporal через `temporal` CLI. Без CLI они пропускаются; прогон, который
+обязан проверить Temporal (перед слиянием, правки ядра), запускайте с
+`REQUIRE_TEMPORAL=1` — тогда отсутствие CLI будет ошибкой, а не пропуском:
+
+```bash
+REQUIRE_TEMPORAL=1 uv run pytest packages/temporalio/tests
+```
+
+Новый ввод-вывод ядра без решения для Temporal ловят тесты без CLI:
+`test_port_contract.py` (каждый необязательный атрибут контекста и порт —
+привязан в Temporal или объяснён) и проверка полноты в `test_parity_live.py`
+(каждый эталонный сценарий ядра гоняется под Temporal или стоит в списке
+пропусков с причиной). В коде ядра без порта используйте
+`gc_core.execution.ports.port(ctx, "<имя>")`: под Temporal отсутствие порта —
+отказ хода, а не локальный запасной путь в коде workflow.
+
 ## Windows
 
 Набор обязан быть зелёным и на Windows. CI нет, поэтому перед слиянием

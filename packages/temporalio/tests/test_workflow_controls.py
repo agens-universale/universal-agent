@@ -16,7 +16,7 @@ from gc_core_temporalio.contracts import UserMessage
 from temporalio.client import WorkflowUpdateFailedError
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer, Worker
-from live_support import call
+from live_support import call, temporal_cli
 
 
 def finish(report="done"):
@@ -98,9 +98,7 @@ def scripted_http():
 
 @asynccontextmanager
 async def runtime(tmp_path, url, *, core_extra=None):
-    binary = shutil.which("temporal")
-    if binary is None:
-        pytest.skip("Temporal CLI is required")
+    binary = temporal_cli()
     core = {
         "backend": {
             "api_mode": "chat_completions",

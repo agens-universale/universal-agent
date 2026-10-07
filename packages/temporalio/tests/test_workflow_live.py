@@ -6,6 +6,7 @@ import shutil
 from collections import Counter
 
 import pytest
+from live_support import temporal_cli
 from gc_core.run_context import acreate_run_context
 from gc_core.thread_store_file_durable import DurableFileThreadStore
 from gc_core_temporalio.activities import AgentActivities
@@ -34,9 +35,7 @@ async def test_native_executor_uses_real_file_session_and_replays(
     batch_flags,
     persist,
 ):
-    binary = shutil.which("temporal")
-    if binary is None:
-        pytest.skip("Temporal CLI is required")
+    binary = temporal_cli()
     monkeypatch.chdir(tmp_path)
     url, requests = provider
     (tmp_path / "example.txt").write_text("file from native workflow")
