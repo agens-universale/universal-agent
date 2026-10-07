@@ -107,16 +107,43 @@ async def test_write_uses_upload(loop_in_thread):
     assert env.uploaded and env.uploaded[0][1] == "/work/new.txt"
 
 
-async def test_is_file_is_dir_use_native_env_handles(loop_in_thread):
-    # is_file/is_dir must delegate to Harbor's BaseEnvironment, not shell `test`.
+async def test_is_file_uses_native_env_handle(loop_in_thread):
     env = FakeEnv()
     backend = HarborBackend(env, loop_in_thread)
     assert await backend.is_file("/work/a.txt") is True
     assert await backend.is_file("/work/dir") is False
-    assert await backend.is_dir("/work/dir/") is True
-    assert await backend.is_dir("/work/a.txt") is False
-    # delegation goes through env.is_file/is_dir, NOT exec → no shell `test` calls
     assert not any("test -" in c for c in env.calls)
+
+
+async def test_is_dir_reads_shell_answer_and_raises_when_backend_is_down(
+    loop_in_thread,
+):
+    """Нативный env.is_dir врёт False на мёртвом Docker. Shell-ответ 0/1 — нет."""
+    env = FakeEnv()
+    answers = {
+        "if test -d /work; then echo 1; else echo 0; fi": FakeExecResult(
+            stdout="1\n"
+        ),
+        "if test -d /missing; then echo 1; else echo 0; fi": FakeExecResult(
+            stdout="0\n"
+        ),
+    }
+
+    async def exec_answer(command, **kw):
+        env.calls.append(command)
+        if command in answers:
+            return answers[command]
+        return FakeExecResult(
+            stderr="Cannot connect to the Docker daemon at tcp://localhost:2375",
+            return_code=1,
+        )
+
+    env.exec = exec_answer
+    backend = HarborBackend(env, loop_in_thread)
+    assert await backend.is_dir("/work") is True
+    assert await backend.is_dir("/missing") is False
+    with pytest.raises(OSError, match="Docker daemon"):
+        await backend.is_dir("/dead")
 
 
 def test_is_sandbox_and_default_exec_timeout(loop_in_thread):

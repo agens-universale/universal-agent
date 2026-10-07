@@ -306,15 +306,24 @@ Important Usage Rules:
             return {"type": "invalid_argument", "field": "cwd"}
         # Прогретый cwd уже известен: Harbor — WORKDIR из `aprime_default_cwd`,
         # RemoteShell — заданный cwd или тот же `pwd`. Повторный `is_dir` перед
-        # каждой командой — лишний round-trip. У Harbor нативный `is_dir`
-        # сводит любой сбой транспорта к False, и мёртвый контейнер уходит
-        # модели как «Not a directory» на cwd, который она не передавала.
-        # Чужой явный cwd по-прежнему проверяется.
+        # каждой командой — лишний round-trip. Чужой явный cwd проверяется.
+        # Сбой транспорта — не «нет каталога»: иначе модель чинит cwd вместо
+        # того, чтобы сдать отчёт через turn_finish.
         default_cwd = getattr(self._backend, "default_cwd", None)
         default = default_cwd() if callable(default_cwd) else None
         if isinstance(default, str) and cwd_used == default:
             return None
-        if not await self._backend.is_dir(cwd_used):
+        try:
+            is_directory = await self._backend.is_dir(cwd_used)
+        except OSError as exc:
+            if not getattr(self._backend, "is_sandbox", False):
+                raise
+            err = str(exc).replace("\n", " ").strip()
+            return {
+                "type": "execution_failed",
+                "message": _probe_failure_message("", err),
+            }
+        if not is_directory:
             return {
                 "type": "invalid_argument",
                 "field": "cwd",

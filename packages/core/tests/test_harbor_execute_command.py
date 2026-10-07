@@ -370,3 +370,28 @@ def test_explicit_cwd_other_than_default_is_still_checked():
     assert env["error"]["message"] == "Not a directory"
     assert b.is_dir_calls == ["/tmp/missing"]
     assert b.calls == []
+
+
+def test_explicit_cwd_transport_failure_is_runtime_down():
+    """Мёртвый Docker на чужом cwd — не «Not a directory», а тот же надж."""
+    b = _RecordingFakeBackend()
+    b._default_cwd = "/app"
+    b.is_sandbox = True
+
+    async def dead_is_dir(path):
+        b.is_dir_calls.append(path)
+        raise OSError(
+            "Cannot connect to the Docker daemon at tcp://localhost:2375"
+        )
+
+    b.is_dir = dead_is_dir
+    env = json.loads(_tool(b)(command="echo test", cwd="/tmp/other"))
+    assert env["ok"] is False
+    assert env["error"]["type"] == "execution_failed"
+    assert "field" not in env["error"]
+    assert "Not a directory" not in env["error"]["message"]
+    assert env["error"]["message"].startswith("Runtime connection failed.")
+    assert "turn_finish" in env["error"]["message"]
+    assert "Docker daemon" in env["error"]["message"]
+    assert b.calls == []
+    assert b.is_dir_calls == ["/tmp/other"]
