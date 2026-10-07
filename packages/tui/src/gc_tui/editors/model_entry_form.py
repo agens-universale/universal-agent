@@ -28,7 +28,6 @@ from copy import deepcopy
 from types import SimpleNamespace
 
 import yaml
-
 from gc_core import onboarding
 from gc_core.config_modules.compat import apply_compat
 from gc_core.config_modules.model_registry import (
@@ -274,6 +273,40 @@ tool_choice: auto
 reasoning_effort: high
 ```
 
+OpenRouter и совместимые прокси (LiteLLM → OpenRouter). Не путать с блоками
+выше: `chat_template_kwargs` / native `thinking.type` сюда часто уходят с
+HTTP 200 и **молча игнорируются**, а reasoning у модели остаётся включённым.
+Диалект OpenRouter — объект `reasoning`:
+
+```yaml
+tool_choice: auto
+reasoning:
+  effort: none
+```
+
+Включить / усилить:
+
+```yaml
+tool_choice: auto
+reasoning:
+  effort: high
+```
+
+Если `effort: none` отвечает 400 «Reasoning is mandatory» (часть GLM на
+OpenRouter) — ставьте `minimal` или `low` вместо полного выключения:
+
+```yaml
+reasoning:
+  effort: minimal
+```
+
+Native DeepSeek Chat Completions (api.deepseek.com), не OpenRouter:
+
+```yaml
+thinking:
+  type: disabled
+```
+
 Модель без thinking API — только сэмплинг, без флагов рассуждения:
 
 ```yaml
@@ -283,8 +316,11 @@ tool_choice: auto
 ```
 
 `auxiliary` той же модели повторяет сэмплинг и гасит рассуждение тем диалектом,
-который понимает этот бэкенд. Для Qwen это `enable_thinking: false`, для GLM —
-`thinking: false` и `reasoning_effort: none`, для OpenAI — `reasoning_effort: none`.
+который понимает этот бэкенд. Для Qwen это `enable_thinking: false`, для GLM на
+vLLM — `thinking: false` и `reasoning_effort: none`, для OpenAI —
+`reasoning_effort: none`, для OpenRouter — `reasoning.effort: none` (или
+`minimal`/`low`, если `none` запрещён). Подробнее — docs/configuration.md,
+«Диалекты thinking».
 
 Поле `backend` — транспорт этой модели поверх общего подключения, не тело
 запроса. Пустое поле означает использование дефолтов конфига:
@@ -460,7 +496,6 @@ def entry_has_own_connection(entry) -> bool:
             authorization=headers.get("Authorization"),
         )
     )
-
 
 
 def _resolved_for_request(
@@ -1192,8 +1227,14 @@ class ModelEntryForm(Vertical):
             id="mef-main",
             classes="mef-yaml",
         )
-        yield Static("YAML: например, temperature: 0.2. Допустимые параметры зависят от API провайдера.", classes=_CLS_ONB_HINT_ONB_DYN)
-        yield Static("Словарь заменяет общий целиком; {} — без дополнительных параметров.", classes=_CLS_ONB_HINT_ONB_DYN)
+        yield Static(
+            "YAML: например, temperature: 0.2. Допустимые параметры зависят от API провайдера.",
+            classes=_CLS_ONB_HINT_ONB_DYN,
+        )
+        yield Static(
+            "Словарь заменяет общий целиком; {} — без дополнительных параметров.",
+            classes=_CLS_ONB_HINT_ONB_DYN,
+        )
         yield Static(_AUX_LABEL, classes=_CLS_ONB_HINT_ONB_DYN_SET_GROUP_GAP)
         yield TextArea(
             self._aux_text,
@@ -1203,7 +1244,10 @@ class ModelEntryForm(Vertical):
             id="mef-auxiliary",
             classes="mef-yaml",
         )
-        yield Static("Для сжатия истории и проверок ответа. Отдельно от main, например temperature: 0.1.", classes=_CLS_ONB_HINT_ONB_DYN)
+        yield Static(
+            "Для сжатия истории и проверок ответа. Отдельно от main, например temperature: 0.1.",
+            classes=_CLS_ONB_HINT_ONB_DYN,
+        )
         yield Static(
             _BACKEND_LABEL, classes=_CLS_ONB_HINT_ONB_DYN_SET_GROUP_GAP
         )
@@ -1215,7 +1259,10 @@ class ModelEntryForm(Vertical):
             id="mef-backend",
             classes="mef-yaml",
         )
-        yield Static("Переопределяет общие настройки: например request_timeout_sec: 120.", classes=_CLS_ONB_HINT_ONB_DYN)
+        yield Static(
+            "Переопределяет общие настройки: например request_timeout_sec: 120.",
+            classes=_CLS_ONB_HINT_ONB_DYN,
+        )
         yield Static(
             connection_line_text(None),
             id="mef-probe-line",
@@ -1647,46 +1694,54 @@ class ModelEntryForm(Vertical):
 
     def _start_models_fetch(self, *, refresh: bool) -> bool:
         """Уйти за списком моделей. `refresh=False` — автоподгрузка при входе в поле
-        (кэш годится), `True` — принудительное перечитывание по Alt+↓."""
+        (кэш годится), `True` — принудительное перечитывание по Alt+↓.
+
+        Всегда ``True``: клавиша уже наша (или автоподгрузка с поля id) — хост
+        съедает её; отличие веток только в статусе/воркере, не в «наша ли»."""
         try:
             backend = (
                 parse_model_backend_text(self._yaml_text("mef-backend")) or {}
             )
         except ValueError as exc:
             self._fail(f"backend: {exc}")
-            return True
-        url = self._current_url()
-        if not url:
-            self._set_status(_LIST_NO_URL)
         else:
-            env_missing = _env_missing_line(url, self._current_token_raw())
-            if env_missing:
-                self._set_status(env_missing)
+            url = self._current_url()
+            if not url:
+                self._set_status(_LIST_NO_URL)
             else:
-                auth, normalize_token = self._current_auth_value()
-                # Поколение бампаем ЗДЕСЬ: `exclusive=True` уже бегущий поток не
-                # останавливает, и ответ прошлой загрузки перемонтировал бы список поверх
-                # свежего (идиома `ModelEditor._start_fetch`).
-                self._list_gen += 1
-                gen = self._list_gen
-                self._set_status(LIST_LOADING)
-                # `group` задан явно: `exclusive` отменяет соседей ПО ГРУППЕ, а не по `name`,
-                # и в общей группе «default» проба гасила бы летящий подбор и наоборот —
-                # клавиши разведены по ролям, значит и по воркерам.
-                self.run_worker(
-                    lambda: self._fetch_blocking(
-                        url, auth, gen, refresh, normalize_token, backend
-                    ),
-                    thread=True,
-                    exclusive=True,
-                    group="model-entry-list",
-                    name="model-entry-list-fetch",
-                )
+                env_missing = _env_missing_line(url, self._current_token_raw())
+                if env_missing:
+                    self._set_status(env_missing)
+                else:
+                    auth, normalize_token = self._current_auth_value()
+                    # Поколение бампаем ЗДЕСЬ: `exclusive=True` уже бегущий поток не
+                    # останавливает, и ответ прошлой загрузки перемонтировал бы список поверх
+                    # свежего (идиома `ModelEditor._start_fetch`).
+                    self._list_gen += 1
+                    gen = self._list_gen
+                    self._set_status(LIST_LOADING)
+                    # `group` задан явно: `exclusive` отменяет соседей ПО ГРУППЕ, а не по `name`,
+                    # и в общей группе «default» проба гасила бы летящий подбор и наоборот —
+                    # клавиши разведены по ролям, значит и по воркерам.
+                    self.run_worker(
+                        lambda: self._fetch_blocking(
+                            url, auth, gen, refresh, normalize_token, backend
+                        ),
+                        thread=True,
+                        exclusive=True,
+                        group="model-entry-list",
+                        name="model-entry-list-fetch",
+                    )
         return True
 
     def _fetch_blocking(
-        self, url: str, auth: str | None, gen: int, refresh: bool,
-        normalize_token: bool, backend: dict,
+        self,
+        url: str,
+        auth: str | None,
+        gen: int,
+        refresh: bool,
+        normalize_token: bool,
+        backend: dict,
     ) -> None:
         try:
             url, auth = _resolved_for_request(
@@ -1886,7 +1941,8 @@ class ModelEntryForm(Vertical):
         initial_backend = yaml.safe_load(self._backend_text) or {}
         initial_headers = (
             initial_backend.get("chat_completion_headers") or {}
-            if isinstance(initial_backend, dict) else {}
+            if isinstance(initial_backend, dict)
+            else {}
         )
         if not isinstance(initial_headers, dict):
             initial_headers = {}
@@ -1912,15 +1968,21 @@ class ModelEntryForm(Vertical):
             return None
         return self._current_auth_value()[0]
 
-    def _resolved_transport(self, backend: dict) -> tuple[bool | str, str | None]:
+    def _resolved_transport(
+        self, backend: dict
+    ) -> tuple[bool | str, str | None]:
         """Снимок транспорта формы раскрывается только в сетевом воркере."""
         from gc_core.config_modules.backend import BackendConfig
-        from gc_core.config_modules.env_interpolation import resolve_env_placeholders
+        from gc_core.config_modules.env_interpolation import (
+            resolve_env_placeholders,
+        )
 
         values = {"use_ssl": self._verify, "proxy": self._config_proxy}
         values.update(self._base0.get("backend") or {})
         values.update(backend)
-        resolved = BackendConfig.model_validate(resolve_env_placeholders(values))
+        resolved = BackendConfig.model_validate(
+            resolve_env_placeholders(values)
+        )
         return resolved.use_ssl, resolved.proxy
 
     def probe_connection(self) -> bool:
@@ -1934,41 +1996,49 @@ class ModelEntryForm(Vertical):
         токеном, и совпавший с ним ответ значит, что сервер токены не различает и
         «принят» заявлять нельзя. Своя копия этого танца здесь и жила до синка —
         без канарейки, то есть врала ровно там, где канон 2026-08-17 научился
-        молчать. Текст вердикта — общий `connection_line_text`."""
+        молчать. Текст вердикта — общий `connection_line_text`.
+
+        Всегда ``True``: зовут только когда форма открыта — клавиша съедена;
+        отличие веток только в строке пробы/воркере."""
         try:
             backend = (
                 parse_model_backend_text(self._yaml_text("mef-backend")) or {}
             )
         except ValueError as exc:
             self._fail(f"backend: {exc}")
-            return True
-        url = self._current_url()
-        if not url:
-            self._set_probe_line(Text(_PROBE_NO_URL, style=DEEP_DIM))
         else:
-            env_missing = _env_missing_line(url, self._current_token_raw())
-            if env_missing:
-                self._set_probe_line(Text(env_missing, style=WARN))
+            url = self._current_url()
+            if not url:
+                self._set_probe_line(Text(_PROBE_NO_URL, style=DEEP_DIM))
             else:
-                auth, normalize_token = self._current_auth_value()
-                model = self._model_value()
-                self._probe_gen += 1
-                gen = self._probe_gen
-                self._set_probe_line(Text(_PROBE_RUNNING, style=DEEP_DIM))
-                self.run_worker(
-                    lambda: self._probe_blocking(
-                        url, auth, model, gen, normalize_token, backend
-                    ),
-                    thread=True,
-                    exclusive=True,
-                    group="model-entry-probe",
-                    name="model-entry-probe",
-                )
+                env_missing = _env_missing_line(url, self._current_token_raw())
+                if env_missing:
+                    self._set_probe_line(Text(env_missing, style=WARN))
+                else:
+                    auth, normalize_token = self._current_auth_value()
+                    model = self._model_value()
+                    self._probe_gen += 1
+                    gen = self._probe_gen
+                    self._set_probe_line(Text(_PROBE_RUNNING, style=DEEP_DIM))
+                    self.run_worker(
+                        lambda: self._probe_blocking(
+                            url, auth, model, gen, normalize_token, backend
+                        ),
+                        thread=True,
+                        exclusive=True,
+                        group="model-entry-probe",
+                        name="model-entry-probe",
+                    )
         return True
 
     def _probe_blocking(
-        self, url: str, auth: str | None, model: str, gen: int,
-        normalize_token: bool, backend: dict,
+        self,
+        url: str,
+        auth: str | None,
+        model: str,
+        gen: int,
+        normalize_token: bool,
+        backend: dict,
     ) -> None:
         from gc_tui.services.settings_probe import (
             ProbeResult,
@@ -1990,7 +2060,10 @@ class ModelEntryForm(Vertical):
             )
         except Exception:
             result = ProbeResult(
-                "unknown", None, None, 0,
+                "unknown",
+                None,
+                None,
+                0,
                 "не удалось подготовить или проверить подключение; "
                 "проверьте backend и ссылки ENV/FILE",
             )
@@ -2008,7 +2081,9 @@ class ModelEntryForm(Vertical):
         if self._no_auth or not self.own_connection():
             return False
         field = self.query_one(_SEL_MEF_TOKEN, Input)
-        source = field.value.strip() or (self._token_current if self._own_token_active() else None)
+        source = field.value.strip() or (
+            self._token_current if self._own_token_active() else None
+        )
         if self._current_auth_value()[0] != source:
             return False
         value = accepted_literal_auth(source, accepted)
@@ -2246,7 +2321,11 @@ class ModelEntryForm(Vertical):
             if isinstance(initial_headers, dict)
             else None
         )
-        if values["token"] and headers.get("Authorization") == initial_auth and initial_auth:
+        if (
+            values["token"]
+            and headers.get("Authorization") == initial_auth
+            and initial_auth
+        ):
             headers = dict(headers)
             headers.pop("Authorization")
             backend = {**backend, "chat_completion_headers": headers}

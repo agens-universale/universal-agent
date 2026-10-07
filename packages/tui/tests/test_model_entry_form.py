@@ -67,22 +67,37 @@ def _models():
 async def test_changed_backend_credential_is_used_by_probe_before_save():
     from textual.widgets import TextArea
 
-    form = _form(initial={"alias": "m", "url": "https://example.test/chat", "token": "old"})
+    form = _form(
+        initial={
+            "alias": "m",
+            "url": "https://example.test/chat",
+            "token": "old",
+        }
+    )
     async with _harness(form).run_test() as pilot:
-        form.query_one("#mef-backend", TextArea).load_text("chat_completion_headers:\n  Authorization: new")
+        form.query_one("#mef-backend", TextArea).load_text(
+            "chat_completion_headers:\n  Authorization: new"
+        )
         await pilot.pause()
         assert form._current_auth_value() == ("new", False)
         ok, _, fields = form.submit()
         assert ok is True
         assert fields["token"] is None
-        assert fields["backend"]["chat_completion_headers"]["Authorization"] == "new"
+        assert (
+            fields["backend"]["chat_completion_headers"]["Authorization"]
+            == "new"
+        )
 
 
 async def test_changed_backend_credential_wins_over_visible_old_token():
     from textual.widgets import Input, TextArea
 
     form = _form(
-        initial={"alias": "m", "url": "https://example.test/chat", "token": "old"}
+        initial={
+            "alias": "m",
+            "url": "https://example.test/chat",
+            "token": "old",
+        }
     )
     async with _harness(form).run_test() as pilot:
         form.query_one("#mef-token", Input).value = "old"
@@ -2903,6 +2918,9 @@ async def test_yaml_fields_round_trip_and_reject_bad_input():
         hint = str(hint_widget.render())
         assert "Поля `main` и `auxiliary`" in hint
         assert "enable_thinking: false" in hint
+        assert "OpenRouter" in hint
+        assert "reasoning:" in hint
+        assert "effort: none" in hint
         assert main.text == safe_yaml_dump(saved).rstrip(
             "\n"
         ) or main.text.rstrip("\n") == safe_yaml_dump(saved).rstrip("\n")
@@ -3045,7 +3063,9 @@ async def test_incomplete_yaml_can_be_corrected_without_losing_form(field):
         assert fields[field] == {}
 
 
-async def test_backend_form_preserves_env_references_on_unrelated_edit(monkeypatch):
+async def test_backend_form_preserves_env_references_on_unrelated_edit(
+    monkeypatch,
+):
     monkeypatch.setenv("MODEL_SETTING", "16384")
     backend = {
         "chat_completions_max_tokens": "${ENV:MODEL_SETTING}",
@@ -3061,7 +3081,9 @@ async def test_backend_form_preserves_env_references_on_unrelated_edit(monkeypat
 
 
 async def test_model_form_migrates_legacy_backend_kwargs():
-    form = _paired_form(initial={"backend": {"chat_completion_kwargs": {"temperature": 0.7}}})
+    form = _paired_form(
+        initial={"backend": {"chat_completion_kwargs": {"temperature": 0.7}}}
+    )
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
         ok, _, fields = form.submit()
@@ -3085,7 +3107,9 @@ async def test_empty_and_explicit_null_yaml_have_distinct_write_intent(text):
         assert fields["main"] is expected
 
 
-@pytest.mark.parametrize("headers", ["oops", "[one]", "'${FILE:/tmp/headers}'"])
+@pytest.mark.parametrize(
+    "headers", ["oops", "[one]", "'${FILE:/tmp/headers}'"]
+)
 async def test_invalid_header_mapping_can_be_corrected(headers):
     from textual.widgets import TextArea
 
@@ -3101,13 +3125,19 @@ async def test_invalid_header_mapping_can_be_corrected(headers):
 
 
 @pytest.mark.parametrize("token_field", [True, False])
-async def test_probe_uses_the_model_backend_and_resolves_token_before_bearer(monkeypatch, token_field):
-    monkeypatch.setenv("PROBE_TOKEN", "Bearer actual-token" if token_field else "bare-token")
+async def test_probe_uses_the_model_backend_and_resolves_token_before_bearer(
+    monkeypatch, token_field
+):
+    monkeypatch.setenv(
+        "PROBE_TOKEN", "Bearer actual-token" if token_field else "bare-token"
+    )
     seen = []
 
     def probe(url, auth, verify, model, **kwargs):
         seen.append((url, auth, verify, kwargs.get("config_proxy")))
-        return ProbeResult("ok" if auth else "rejected", 200 if auth else 401, None, 1, "")
+        return ProbeResult(
+            "ok" if auth else "rejected", 200 if auth else 401, None, 1, ""
+        )
 
     backend = {
         "completions_url": "https://own.example/v1/chat/completions",
@@ -3118,7 +3148,9 @@ async def test_probe_uses_the_model_backend_and_resolves_token_before_bearer(mon
     if token_field:
         initial["token"] = "${ENV:PROBE_TOKEN}"
     else:
-        backend["chat_completion_headers"] = {"Authorization": "${ENV:PROBE_TOKEN}"}
+        backend["chat_completion_headers"] = {
+            "Authorization": "${ENV:PROBE_TOKEN}"
+        }
     form = _form(initial=initial, existing_aliases={"flash"}, probe=probe)
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
@@ -3127,14 +3159,21 @@ async def test_probe_uses_the_model_backend_and_resolves_token_before_bearer(mon
             await pilot.pause()
         assert seen == [
             (backend["completions_url"], None, False, backend["proxy"]),
-            (backend["completions_url"], "Bearer actual-token" if token_field else "bare-token", False, backend["proxy"]),
+            (
+                backend["completions_url"],
+                "Bearer actual-token" if token_field else "bare-token",
+                False,
+                backend["proxy"],
+            ),
         ]
 
 
 async def test_existing_invalid_backend_mapping_is_editable():
     from textual.widgets import TextArea
 
-    form = _paired_form(initial={"backend": {"chat_completion_headers": "oops"}})
+    form = _paired_form(
+        initial={"backend": {"chat_completion_headers": "oops"}}
+    )
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
         assert form.submit() == (False, None, None)
@@ -3144,10 +3183,16 @@ async def test_existing_invalid_backend_mapping_is_editable():
 
 
 @pytest.mark.parametrize("action", ["probe", "list"])
-async def test_invalid_file_transport_is_reported_without_closing_form(tmp_path, action):
+async def test_invalid_file_transport_is_reported_without_closing_form(
+    tmp_path, action
+):
     calls = []
     form = _paired_form(
-        initial={"backend": {"request_timeout_sec": f"${{FILE:{tmp_path / 'missing'}}}"}},
+        initial={
+            "backend": {
+                "request_timeout_sec": f"${{FILE:{tmp_path / 'missing'}}}"
+            }
+        },
         probe=lambda *args, **kwargs: calls.append(args),
         fetch=lambda *args, **kwargs: calls.append(args),
     )
@@ -3162,19 +3207,25 @@ async def test_invalid_file_transport_is_reported_without_closing_form(tmp_path,
         assert calls == []
         assert form.is_mounted
         if action == "probe":
-            assert "не удалось" in str(form.query_one("#mef-probe-line", Static).render())
+            assert "не удалось" in str(
+                form.query_one("#mef-probe-line", Static).render()
+            )
         else:
             assert form._models == []
 
 
-@pytest.mark.parametrize("token", ["secret", "Bearer abc", "Basic abc", "bearer abc"])
+@pytest.mark.parametrize(
+    "token", ["secret", "Bearer abc", "Basic abc", "bearer abc"]
+)
 def test_model_probe_token_uses_runtime_normalization(monkeypatch, token):
     from gc_core.config_modules.model_registry import ModelEntry
     from gc_tui.editors.model_entry_form import _resolved_for_request
 
     monkeypatch.setenv("MODEL_TOKEN", token)
     model = ModelEntry(url="https://example.test", token=token)
-    _, header = _resolved_for_request("https://example.test", "${ENV:MODEL_TOKEN}", normalize_token=True)
+    _, header = _resolved_for_request(
+        "https://example.test", "${ENV:MODEL_TOKEN}", normalize_token=True
+    )
     assert header == model.authorization_header
 
 
@@ -3182,7 +3233,9 @@ def test_model_probe_header_is_trimmed_after_interpolation(monkeypatch):
     from gc_tui.editors.model_entry_form import _resolved_for_request
 
     monkeypatch.setenv("MODEL_HEADER", "  Basic abc  ")
-    _, header = _resolved_for_request("https://example.test", "${ENV:MODEL_HEADER}")
+    _, header = _resolved_for_request(
+        "https://example.test", "${ENV:MODEL_HEADER}"
+    )
     assert header == "Basic abc"
 
 
@@ -3193,25 +3246,50 @@ async def test_inherited_model_token_uses_runtime_normalization():
         assert form._current_auth_header() == "Basic abc"
 
 
-@pytest.mark.parametrize("source,expected", [
-    ("secret", "Bearer secret"),
-    ("${ENV:MODEL_SOURCE}", "${ENV:MODEL_SOURCE}"),
-    ("${FILE:/not/read/by/probe/callback}", "${FILE:/not/read/by/probe/callback}"),
-])
-async def test_probe_normalizes_literal_token_and_preserves_secret_references(monkeypatch, source, expected):
+@pytest.mark.parametrize(
+    "source,expected",
+    [
+        ("secret", "Bearer secret"),
+        ("${ENV:MODEL_SOURCE}", "${ENV:MODEL_SOURCE}"),
+        (
+            "${FILE:/not/read/by/probe/callback}",
+            "${FILE:/not/read/by/probe/callback}",
+        ),
+    ],
+)
+async def test_probe_normalizes_literal_token_and_preserves_secret_references(
+    monkeypatch, source, expected
+):
     from textual.widgets import TextArea
 
     monkeypatch.setenv("MODEL_SOURCE", "secret")
     form = _form(
-        initial={"alias": "m", "url": "https://example.test/chat", "token": source},
+        initial={
+            "alias": "m",
+            "url": "https://example.test/chat",
+            "token": source,
+        },
         existing_aliases={"m"},
     )
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
         token = form.query_one("#mef-token", Input)
         token.value = source
-        form.query_one("#mef-backend", TextArea).load_text("request_timeout_sec: 45")
-        form._on_probe(ProbeResult("ok", 200, None, 1, "ok", auth_state="accepted", accepted_auth="Bearer secret"), form._probe_gen)
+        form.query_one("#mef-backend", TextArea).load_text(
+            "request_timeout_sec: 45"
+        )
+        form._on_probe(
+            ProbeResult(
+                "ok",
+                200,
+                None,
+                1,
+                "ok",
+                auth_state="accepted",
+                accepted_auth="Bearer secret",
+            ),
+            form._probe_gen,
+        )
         assert token.value == expected
         ok, alias, fields = form.submit()
         assert ok is True
@@ -3219,28 +3297,55 @@ async def test_probe_normalizes_literal_token_and_preserves_secret_references(mo
         assert fields["backend"] == {"request_timeout_sec": 45}
 
 
-@pytest.mark.parametrize("source,accepted", [("secret", "Bearer secret"), ("Bearer secret", "secret")])
-async def test_probe_normalizes_existing_literal_token_without_retyping(source, accepted):
+@pytest.mark.parametrize(
+    "source,accepted",
+    [("secret", "Bearer secret"), ("Bearer secret", "secret")],
+)
+async def test_probe_normalizes_existing_literal_token_without_retyping(
+    source, accepted
+):
     form = _form(
-        initial={"alias": "m", "url": "https://example.test/chat", "token": source},
+        initial={
+            "alias": "m",
+            "url": "https://example.test/chat",
+            "token": source,
+        },
         existing_aliases={"m"},
     )
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
         assert form.query_one("#mef-token", Input).value == ""
-        form._on_probe(ProbeResult("ok", 200, None, 1, "ok", auth_state="accepted", accepted_auth=accepted), form._probe_gen)
+        form._on_probe(
+            ProbeResult(
+                "ok",
+                200,
+                None,
+                1,
+                "ok",
+                auth_state="accepted",
+                accepted_auth=accepted,
+            ),
+            form._probe_gen,
+        )
         assert form.query_one("#mef-token", Input).value == accepted
         assert form.is_dirty()
         assert form.submit()[2]["token"] == accepted
 
 
 @pytest.mark.parametrize("from_header", [True, False])
-async def test_explicit_credential_source_switch_removes_the_previous_key(from_header):
+async def test_explicit_credential_source_switch_removes_the_previous_key(
+    from_header,
+):
     from textual.widgets import TextArea
 
     initial = {"alias": "m", "url": "https://example.test/chat"}
     if from_header:
-        initial["backend"] = {"chat_completion_headers": {"Authorization": "old", "X-Test": "kept"}}
+        initial["backend"] = {
+            "chat_completion_headers": {
+                "Authorization": "old",
+                "X-Test": "kept",
+            }
+        }
     else:
         initial["token"] = "old"
     form = _form(initial=initial, existing_aliases={"m"})
@@ -3249,8 +3354,14 @@ async def test_explicit_credential_source_switch_removes_the_previous_key(from_h
         if from_header:
             form.query_one("#mef-token", Input).value = "new"
         else:
-            form.query_one("#mef-backend", TextArea).load_text("chat_completion_headers:\n  Authorization: new")
+            form.query_one("#mef-backend", TextArea).load_text(
+                "chat_completion_headers:\n  Authorization: new"
+            )
         ok, alias, fields = form.submit()
         assert ok is True
         assert fields["token"] == ("new" if from_header else None)
-        assert fields["backend"] == {"chat_completion_headers": {"X-Test": "kept"} if from_header else {"Authorization": "new"}}
+        assert fields["backend"] == {
+            "chat_completion_headers": {"X-Test": "kept"}
+            if from_header
+            else {"Authorization": "new"}
+        }

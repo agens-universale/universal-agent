@@ -74,6 +74,10 @@ models:
         reasoning_effort: none
 
   # --- Ещё один пример полной формы, со своим токеном (без наследования) ---
+  # Диалект ниже — vLLM/GLM-style. На OpenRouter и LiteLLM→OpenRouter он часто
+  # принимается с 200 и ИГНОРИРУЕТСЯ (модель продолжает думать). Для OpenRouter
+  # гасите так: reasoning: {effort: none} — см. docs/configuration.md «Диалекты
+  # thinking». Native DeepSeek Chat: thinking: {type: disabled}.
   deepseek-max:
     model: deepseek/deepseek-chat-v3-0324
     url: https://api.provider.example/v1/chat/completions

@@ -529,6 +529,45 @@ assign:                                  # привязки отдельных �
   запроса — серверные дефолты модели. Сэмплинг и диалекты thinking собираются
   в профиле, per-алиас (рабочий референс — `demo_profile.yml`).
 
+**Диалекты thinking.** Словарь `main` / `auxiliary` уходит в тело запроса
+**как есть** — агент не переводит один вендорный диалект в другой. Непонятный
+бэкенду ключ часто принимается с HTTP 200 и **молча игнорируется**; у моделей,
+где thinking включён по умолчанию (DeepSeek V4 и др.), рассуждение остаётся
+включённым. Ориентир при проверке — `usage.completion_tokens_details.reasoning_tokens`
+в ответе (0 ≈ выключено). `strip_think` на это не влияет: он только решает,
+класть ли мысль в историю, а не генерировать ли её.
+
+| Стек | Выключить | Включить / усилить |
+|---|---|---|
+| Qwen / vLLM | `separate_reasoning: false` + `chat_template_kwargs.enable_thinking: false` | `separate_reasoning: true` + `enable_thinking: true` |
+| GLM / DeepSeek на vLLM-подобных | `chat_template_kwargs: {thinking: false, reasoning_effort: none}` | `thinking: true` + `reasoning_effort: low\|high` |
+| Native DeepSeek Chat Completions | `thinking: {type: disabled}` | `thinking: {type: enabled}` (+ при необходимости `reasoning_effort: low\|high\|max`) |
+| OpenAI-like | `reasoning_effort: none` | `reasoning_effort: low\|medium\|high` |
+| **OpenRouter** и совместимые прокси (LiteLLM → OpenRouter) | `reasoning: {effort: none}` | `reasoning: {effort: low\|medium\|high\|…}` |
+
+OpenRouter **не** понимает Qwen/`chat_template_kwargs` и native DeepSeek
+`thinking.type` как способ выключить reasoning: запрос проходит, модель
+продолжает думать. Для части моделей (например часть GLM на OpenRouter)
+`effort: none` даёт 400 «Reasoning is mandatory» — тогда ставьте
+`effort: minimal` или `low` (на практике часто даёт 0 reasoning tokens).
+Документация OpenRouter: [Reasoning Tokens](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens).
+
+Пример выключения на OpenRouter-прокси:
+
+```yaml
+models:
+  deepseek-v4:
+    model: openrouter/deepseek/deepseek-v4-flash
+    url: https://openrouter.ai/api/v1/chat/completions
+    token: "${ENV:OPENROUTER_API_KEY}"
+    main:
+      reasoning:
+        effort: none
+    auxiliary:
+      reasoning:
+        effort: none
+```
+
 На каждом слое непустая секция и `{}` заменяют нижнюю целиком. Отсутствующий
 ключ сохраняет значение нижнего слоя; YAML `null` явно его сбрасывает.
 Если после наложения слоёв секции нет или она равна `null`, берётся глобальный
