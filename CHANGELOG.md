@@ -21,9 +21,10 @@
 
 ### Feature — нативный Temporal backend
 
+- Серверный Temporal-режим удалён: `execution_backend`, `temporal_config`, `temporal_profile`, `temporal_store` в `config_server.yml` и маршруты `/temporal/{system}/{thread}/…` больше не существуют; gc-server работает только локально. Сессии Temporal — через `AgentClient` или `gc-temporal`.
 - **Переименование**: пакет `gc-ua-temporalio` → `gc-core-temporalio` (модуль `gc_core_temporalio`), префикс `native_` убран из файлов и классов (`AgentWorkflow`, `SubagentWorkflow`, `AgentClient`, `WorkerConfig`, `AgentActivities`, `WorkflowOperations`, `RunRequest`…), команды `gc-temporal-worker` и `gc-temporal`, очереди по умолчанию `ua-workflow`, `ua-model`, `ua-resource-local`. Старые имена не поддерживаются: сессии, начатые под типом `NativeAgentWorkflow`, не продолжатся.
 - Добавлен опциональный пакет `gc-core-temporalio`: штатные `AgentExecutor` и `ThreadSession` работают через workflow, а обращения к модели, внешние эффекты инструментов и операции хранилища выполняются в activities. Локальное исполнение остаётся режимом по умолчанию.
-- Добавлены native worker/client, backend `temporal` для server и remote CLI/TUI, подтверждения, stop, дочерние workflow и управление persistent MCP-ресурсами.
+- Добавлены worker и client (`gc-temporal-worker`, `gc-temporal`, `AgentClient`), подтверждения, stop, дочерние workflow и управление persistent MCP-ресурсами.
 - FileThreadStore и SQLite поддерживают квитанции операций хранилища и восстановление записи. Continue-As-New сохраняет очередь доставки, включая большие checkpoint.
 - Конфигурация, архитектура и ограничения текущего deployment описаны в [документации Temporal](docs/temporal-configuration.md). Legacy workflow сохранён отдельно; автоматическая миграция его истории не выполняется.
 - Профиль native-воркера без `revision`: workflow знает профиль по имени, настройки и токены берутся из текущего процесса воркера. Смена конфигурации или ротация токена — перезапуск воркера; живые сессии продолжают работу. Ключ `revision` в JSON воркера и флаг `--revision` клиента удалены.

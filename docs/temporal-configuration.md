@@ -171,65 +171,12 @@ File/model контексты без живых ресурсов восстан�
 историю не попадает. Под воркером проверены `os_backend.kind: local` и
 `harbor`; `docker`, `ssh`, `exec` и `sandbox` в native-режиме не прогонялись.
 
-## HTTP backend
+## Клиент из кода
 
-В `config_server.yml` включите backend явно:
-
-```yaml
-server:
-  host: 127.0.0.1
-  port: 8000
-  auth_token: ${ENV:GC_REMOTE_TOKEN}
-  execution_backend: temporal
-  temporal_config: /absolute/path/worker.json
-  temporal_profile: production
-  temporal_store: files
-```
-
-Сервер не исполняет модель и инструменты. Обычные `/events/webhook`,
-`/runs/{system}/{task_id}` и `/logs/{system}/{task_id}` используют Temporal
-adapter; webhook требует стабильный `message_id`. Отключение API процесса не
-снимает workflow. Default `execution_backend: local` сохраняет прежнее поведение
-сервера.
-
-HTTP API, под существующей Bearer-авторизацией сервера:
-
-| Метод и суффикс `/temporal/{system}/{thread}` | Назначение |
-|---|---|
-| `POST /messages` | `{"message_id":"m1","text":"..."}`: start или следующий ввод |
-| `GET /status` | Phase, ответ, pending human, active child, pending operation |
-| `GET /history?after=0&limit=100&token=...` | Сообщения и meta из ThreadStore |
-| `POST /answer` | `request_id`, `reply_id`, `answer` |
-| `POST /stop` | `{"turn_id":"..."}`: остановка текущего хода |
-| `POST /close` | Дождаться принятой работы и закрыть сессию |
-| `PATCH /ui` | Только `title`, `pinned`, `archived` |
-| `GET /metrics` | То же, что `status` |
-
-Прямой SDK: `gc_core_temporalio.client.AgentClient` — методы `start`, `status`,
+`gc_core_temporalio.client.AgentClient` — методы `start`, `status`,
 `submit_message`, `answer_human`, `stop_turn`, `stop`, `close_session`, `result`,
-`submit_with_start`. Он получает уже
-подключённый `temporalio.client.Client`, поэтому встраивающее приложение может
-само настроить TLS/auth соединения.
-
-### Native HTTP backend
-
-`worker.json` — тот же `WorkerConfig`, который загружает native
-worker. `temporal_store` должен совпадать с `store_id` выбранного профиля.
-API-процессу нужен доступ к выбранному File/SQLite ThreadStore; модель и
-инструменты исполняет worker. Помещайте хранилище тредов вне workspace агента
-(например, `/var/lib/universal-agent/native/threads`), чтобы история не
-попадала в результаты файловых инструментов.
-
-`history` читает настоящие сообщения и метаданные ThreadStore. Поле `token`
-проверяет уже прочитанный префикс; при компактировании/замене истории сервер
-возвращает `reset: true`, и клиенту нужно перечитать историю целиком. UI title/pinned/archived записываются в `meta.tui` того же store.
-
-Native workflow ID имеет отдельное пространство имён. Чужой workflow owner
-не принимается как native-сессия. Сервер стартует native-сессии с `keep_alive`,
-поэтому отключение HTTP-клиента не завершает исполнение. `/close` закрывает
-сессию после принятой работы, `/stop` проверяет актуальный `turn_id`.
-Сообщение отправляется через Update-With-Start: после `/close` или сбоя тот же
-тред продолжается новым run.
+`submit_with_start`. Он получает уже подключённый `temporalio.client.Client`,
+поэтому приложение само настраивает TLS и авторизацию соединения.
 
 ### Ошибки и восстановление
 

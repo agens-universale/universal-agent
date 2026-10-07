@@ -16,7 +16,7 @@ Temporal меняет только исполнителя внешних опе�
 **Temporal — опциональный backend.** SDK, CLI, server и TUI по умолчанию работают
 локально и к Temporal Server не обращаются. TUI и `gc-cli` работают только локально;
 Temporal включается worker'ом `gc-temporal-worker`, клиентом
-`gc-temporal` или server backend `execution_backend: temporal`.
+`gc-temporal` или из кода через `AgentClient`.
 
 ## С чего начать изучение
 
@@ -295,21 +295,16 @@ replay восстанавливает буфер; при сбое коммита
 модель, как после падения процесса в local. Exactly-once внешних эффектов не
 обещается.
 
-## 9. Сервер и клиент
+## 9. Клиент
 
-`execution_backend: temporal` монтирует HTTP API
-[`http_api`](../packages/temporalio/src/gc_core_temporalio/http_api.py) и
-переводит `/events/webhook`, `/runs`, `/logs` на Temporal. Сообщение отправляется
-через **Update-With-Start**: одна атомарная операция «доставить, при необходимости
-открыв сессию». Закрытая или упавшая сессия с тем же ID начинается новым run и
-продолжает тот же тред. Статусы: `idle`/`completed` → `completed`,
-`stopped` → `cancelled`, `failed` → `failed`.
+Сообщение отправляется через **Update-With-Start**: одна атомарная операция
+«доставить, при необходимости открыв сессию». Закрытая или упавшая сессия с тем
+же ID начинается новым run и продолжает тот же тред.
 
 Команды клиента: `gc-temporal start | status | result | stop | answer | close | send | unlock`
 (`unlock` снимает владение тредом у сессии, которой больше нет — для локального TUI/CLI);
 `--config` (JSON воркера) нужен `unlock`: он находит хранилище тредов.
-Ошибки update и query сессии (устаревший ход, сессия ещё не готова) API отдаёт
-как 409. Повтор сообщения с тем же `message_id` — `duplicate: true`, кроме
+Повтор сообщения с тем же `message_id` — `duplicate: true`, кроме
 сообщения, отброшенного остановкой хода: его повтор принимается заново.
 
 ## 10. Конфигурация
@@ -454,7 +449,7 @@ replay восстанавливает буфер; при сбое коммита
 | Субагенты | [`child_workflow.py`](../packages/temporalio/src/gc_core_temporalio/child_workflow.py), [`child_transport.py`](../packages/temporalio/src/gc_core_temporalio/child_transport.py), [`child_preparation.py`](../packages/temporalio/src/gc_core_temporalio/child_preparation.py) |
 | Размер истории | [`message_refs.py`](../packages/temporalio/src/gc_core_temporalio/message_refs.py) (ссылки во входе модели), страницы треда — `_state_page` в [`thread_store_activities.py`](../packages/temporalio/src/gc_core_temporalio/thread_store_activities.py), `cap_tool_output` в [`activities.py`](../packages/temporalio/src/gc_core_temporalio/activities.py) |
 | Отказы и обслуживание | `session_failure` в [`operations.py`](../packages/temporalio/src/gc_core_temporalio/operations.py) (что делает run FAILED), захват треда — `_claim` в [`thread_store_activities.py`](../packages/temporalio/src/gc_core_temporalio/thread_store_activities.py), [`maintenance.py`](../packages/temporalio/src/gc_core_temporalio/maintenance.py) |
-| Клиент и сервер | [`client.py`](../packages/temporalio/src/gc_core_temporalio/client.py), [`http_api.py`](../packages/temporalio/src/gc_core_temporalio/http_api.py) |
+| Клиент | [`client.py`](../packages/temporalio/src/gc_core_temporalio/client.py) |
 | Конфиг worker'а | [пример `worker.json`](../packages/temporalio/examples/worker.json), [`temporal-configuration.md`](temporal-configuration.md) |
 
 Тесты, которые лучше всего показывают поведение целиком:

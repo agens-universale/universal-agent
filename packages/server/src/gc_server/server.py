@@ -96,10 +96,6 @@ _SWARM_RUN_LOCK = threading.Lock()
 
 app = FastAPI()
 
-from gc_server.rest_api.temporal_backend import configure_temporal
-
-temporal_registry = configure_temporal(app, SERVER_CONFIG)
-
 
 register_cleanup_threads_on_startup(
     app,
@@ -295,13 +291,6 @@ async def get_run_status(system: str, task_id: str):
             detail={"status": "error", "payload": _ERR_SYSTEM_AND_TASK_ID},
         )
 
-    if temporal_registry is not None:
-        from gc_core_temporalio.http_api import api_call
-
-        return await api_call(
-            temporal_registry.legacy_status(sys_norm, task_norm)
-        )
-
     # Бронь и прогон — одним снимком реестра, бронь первой: пока строится
     # контекст, нового прогона ещё нет, а под тем же ключом лежит прошлый
     # завершённый с TTL 15 минут. Клиент, которому только что ответили
@@ -477,13 +466,6 @@ async def events_webhook(request: Request):
     system = normalize_system(source_value, default_system=default_system)
     payload["system"] = system
 
-    if temporal_registry is not None:
-        from gc_core_temporalio.http_api import api_call
-
-        return await api_call(
-            temporal_registry.webhook(system, task_id, payload)
-        )
-
     message_str = json.dumps(payload, ensure_ascii=False)
 
     def _make_user_message(content: str) -> Dict[str, Any]:
@@ -644,13 +626,6 @@ async def get_thread_logs(system: str, task_id: str):
         raise HTTPException(
             status_code=400,
             detail={"status": "error", "payload": "system is required"},
-        )
-
-    if temporal_registry is not None:
-        from gc_core_temporalio.http_api import api_call
-
-        return await api_call(
-            temporal_registry.legacy_logs(sys_norm, task_norm)
         )
 
     try:

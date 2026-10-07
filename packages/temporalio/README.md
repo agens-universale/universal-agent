@@ -12,9 +12,8 @@
 - [Архитектура, проверки и ограничения](../../docs/temporal-architecture.md)
 - [Размещение worker и восстановление](../../docs/temporal.md)
 
-`gc-temporal-worker` / `gc-temporal` используют native workflow.
-Server включает Temporal явно: `execution_backend: temporal`; TUI и
-`gc-cli` работают только локально.
+`gc-temporal-worker` / `gc-temporal` используют Temporal workflow; TUI,
+`gc-cli` и gc-server работают только локально.
 
 Сейчас native worker обслуживает workflow/model/resource queues одним процессом
 для одного workspace. Его cwd должен совпадать с `profiles.<name>.workspace`;
