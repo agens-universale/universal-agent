@@ -22,13 +22,17 @@ from gc_core_temporalio.activity_config import (
     activity_options,
 )
 from gc_core_temporalio.sizes import HistoryLimitExceeded, check_history_size
-from gc_core_temporalio.thread_store_contracts import ThreadStoreReply
+from gc_core_temporalio.thread_store_contracts import (
+    MetaBaseMismatch,
+    ThreadStoreReply,
+)
 
 _STORE_ERRORS = {
     cls.__name__: cls
     for cls in (
         ExecutionFailure,
         HistoryLimitExceeded,
+        MetaBaseMismatch,
         ThreadStoreConflict,
         ThreadStoreOwnershipError,
         ThreadStoreOperationMismatch,

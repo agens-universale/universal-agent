@@ -150,3 +150,70 @@ def test_summary_trace_goes_in_parts_below_the_record_limit():
     final = next(part for part in parts if "final_output" in part)
     assert "обрезано" in final["final_output"]["text"]
     assert trace_parts({"small": 1}, TRACE_PART_BYTES) == [{"small": 1}]
+
+
+def test_latest_answer_survives_continue_as_new_whole():
+    """CAN идёт сразу после хода: ответ ~700 КБ (кириллица) должен дойти до
+    wait/ask целиком, а не урезанным до 256 КБ."""
+    answer = "о" * 120_000
+    resume = SessionResume(
+        answer=answer,
+        turns=2,
+        turn_outcomes={
+            "1": {"answer": answer, "post_error": None},
+            "2": {"answer": answer, "post_error": None},
+        },
+    )
+    fitted = _fit_resume(resume)
+    assert fitted.turn_outcomes["2"]["answer"] == answer
+    assert "answer_truncated" not in fitted.turn_outcomes["2"]
+    assert fitted.turn_outcomes["1"]["answer_truncated"] is True
+    assert payload_size(asdict(fitted)) <= RESUME_BUDGET
+
+
+async def test_truncated_answer_is_an_error_not_a_silent_cut():
+    from gc_core_temporalio.client import AnswerTruncated
+
+    class _Done(_Handle):
+        async def query(self, _query, message_id):
+            return {
+                "message_id": message_id,
+                "state": "done",
+                "turn": 3,
+                "answer": "начало",
+                "answer_truncated": True,
+            }
+
+    session = _session(_Done([]))
+
+    async def sent(text, *, message_id=None):
+        return "m"
+
+    session.send = sent
+    with pytest.raises(AnswerTruncated) as error:
+        await session.ask("вопрос")
+    assert error.value.answer == "начало"
+
+
+def test_oversized_auxiliary_request_is_cut_in_the_middle():
+    """Сводка при лимите шагов: трасса 2.7 МБ одной строкой не роняет ход —
+    середина укорачивается, начало и конец трассы остаются."""
+    from gc_core_temporalio.operations import (
+        AUX_MESSAGES_BYTES,
+        _fit_auxiliary_messages,
+    )
+
+    trace = "НАЧАЛО " + "т" * 450_000 + " КОНЕЦ"
+    messages = [
+        {"role": "system", "content": "You are a trace summarizer."},
+        {"role": "user", "content": trace},
+    ]
+    assert payload_size(messages) > AUX_MESSAGES_BYTES
+    fitted = _fit_auxiliary_messages(messages)
+    assert payload_size(fitted) <= AUX_MESSAGES_BYTES
+    text = fitted[1]["content"]
+    assert text.startswith("НАЧАЛО") and text.endswith("КОНЕЦ")
+    assert "пропущено" in text
+    assert fitted[0] == messages[0]
+    small = [{"role": "user", "content": "коротко"}]
+    assert _fit_auxiliary_messages(small) is small

@@ -40,7 +40,8 @@ TEXT_REF_MIN_CHARS = 1024
 
 #: Разница: ``None`` — без изменений; ``{"=": v}`` — новое значение;
 #: ``{"+": [n, хвост]}`` — список ``old[:n] + хвост``;
-#: ``{"{": {"set", "drop", "sub", "order"}}`` — словарь по ключам.
+#: ``{"{": {"set", "drop", "sub", "order"}}`` — словарь по ключам (``order`` —
+#: набор ключей верхнего уровня, см. ``diff_meta``; порядок не передаётся).
 Delta = dict[str, Any] | None
 
 
@@ -142,11 +143,13 @@ def _encode(value: Any, texts: TextIndex | None) -> Any:
 
 
 def _same(left: Any, right: Any) -> bool:
-    """Равенство в JSON-смысле: ``1``, ``1.0`` и ``True`` — разные значения."""
+    """Равенство в JSON-смысле: ``1``, ``1.0`` и ``True`` — разные значения,
+    а порядок ключей словаря — не важен (JSON-конвертер Temporal и SQLite
+    сортируют ключи, ядро пишет в своём порядке)."""
     if type(left) is not type(right):
         return False
     if isinstance(left, dict):
-        return list(left) == list(right) and all(
+        return left.keys() == right.keys() and all(
             _same(value, right[key]) for key, value in left.items()
         )
     if isinstance(left, list):
@@ -178,11 +181,6 @@ def diff(old: Any, new: Any, texts: TextIndex | None = None) -> Delta:
             body["drop"] = drop
         if sub:
             body["sub"] = sub
-        order = [key for key in old if key in new] + [
-            key for key in new if key not in old
-        ]
-        if order != list(new):
-            body["order"] = list(new)
         return {"{": body}
     if isinstance(old, list) and isinstance(new, list):
         common = 0
@@ -311,6 +309,34 @@ def apply(old: Any, delta: Delta, texts: TextSource | None = None) -> Any:
     return result
 
 
+def canonical(value: Any) -> Any:
+    """Тот же JSON с ключами по алфавиту на всех уровнях: так meta отдаётся
+    хранилищу (как и раньше через конвертер Temporal) — сборка из разницы не
+    зависит от порядка ключей базы."""
+    if isinstance(value, dict):
+        return {key: canonical(value[key]) for key in sorted(value)}
+    if isinstance(value, list):
+        return [canonical(item) for item in value]
+    return value
+
+
+def meta_hash(meta: Any) -> str:
+    """Хэш meta без порядка ключей и без кэша ``fetch_url`` (он живёт в meta
+    хранилища, а workflow видит его пустым): итог сборки на воркере сверяется
+    с тем, что записал workflow."""
+    if isinstance(meta, dict) and isinstance(meta.get("shared"), dict):
+        shared = {
+            key: value
+            for key, value in meta["shared"].items()
+            if key != "fetch_url_cache"
+        }
+        meta = {**meta, "shared": shared}
+    encoded = json.dumps(
+        meta, sort_keys=True, ensure_ascii=True, separators=(",", ":")
+    )
+    return hashlib.sha256(encoded.encode()).hexdigest()[:32]
+
+
 def text_refs(delta: Any) -> set[str]:
     """Хэши сообщений, на тексты которых ссылается разница."""
     found: set[str] = set()
@@ -338,8 +364,10 @@ __all__ = [
     "TextIndex",
     "TextSource",
     "apply",
+    "canonical",
     "diff",
     "diff_meta",
+    "meta_hash",
     "normalize",
     "text_refs",
 ]

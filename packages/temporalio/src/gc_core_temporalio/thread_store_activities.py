@@ -23,13 +23,16 @@ from gc_core_temporalio.meta_delta import (
     MetaDeltaError,
     TextSource,
     apply,
+    canonical,
     diff,
+    meta_hash,
     normalize,
     text_refs,
 )
 from gc_core_temporalio.sizes import payload_size
 from gc_core_temporalio.thread_store_contracts import (
     PAGE_BYTES,
+    MetaBaseMismatch,
     ThreadStatePage,
     ThreadStoreCall,
     ThreadStoreReply,
@@ -218,7 +221,13 @@ class ThreadStoreActivities:
             # страницы; meta больше половины — отдельными кусками.
             reply = ThreadStoreReply(snapshot=replace(snapshot, state=None))
             budget = request.page_bytes - _size(snapshot.meta)
-            if budget < request.page_bytes // 2:
+            if request.meta_known == entry.version:
+                # Эта версия meta у workflow уже есть (чтение перед ходом,
+                # затем с состоянием): второй раз не передавать.
+                reply.snapshot = replace(reply.snapshot, meta={})
+                reply.meta_unchanged = True
+                budget = request.page_bytes
+            elif budget < request.page_bytes // 2:
                 reply.snapshot = replace(reply.snapshot, meta={})
                 reply.meta_chunk, reply.meta_next = _text_chunk(
                     entry.meta_text, 0, request.page_bytes // 2
@@ -305,6 +314,8 @@ class ThreadStoreActivities:
             # Квитанция — без meta: только то, что хранилище поменяло само
             # (разница от ожидаемой workflow meta).
             reply = ThreadStoreReply(receipt=replace(receipt, meta={}))
+            if not request.need_meta:
+                return reply
             change = (
                 diff(expected, normalize(receipt.meta or {}))
                 if exact
@@ -371,9 +382,17 @@ class ThreadStoreActivities:
             for message in state.messages if state is not None else ():
                 messages.setdefault(message_hash(message), message)
         try:
-            return apply(base, delta, TextSource(messages.get, base))
+            meta = canonical(
+                apply(base, delta, TextSource(messages.get, base))
+            )
         except MetaDeltaError as exc:
-            raise ExecutionFailure(f"Meta треда не собрать: {exc}") from exc
+            raise MetaBaseMismatch(f"Meta треда не собрать: {exc}") from exc
+        expected = request.meta_delta.get("h")
+        if expected is not None and meta_hash(meta) != expected:
+            raise MetaBaseMismatch(
+                "Meta треда из разницы не совпала с записанной workflow"
+            )
+        return meta
 
     @activity.defn(name="agent.thread.read_trace")
     async def read_trace(self, request: ThreadStoreCall) -> ThreadStoreReply:

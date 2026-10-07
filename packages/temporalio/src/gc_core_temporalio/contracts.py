@@ -65,6 +65,8 @@ class SessionResume:
     #: Владение тредом уже подтверждено прошлым run: перечитывать не нужно.
     store_owner_epoch: int | None = None
     store_generation: int | None = None
+    #: Отпечаток настроек, принятый из сообщений (``settings_fingerprint``).
+    message_fingerprint: dict[str, str] | None = None
 
 
 @dataclass(frozen=True)

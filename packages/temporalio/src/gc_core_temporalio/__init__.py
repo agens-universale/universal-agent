@@ -15,6 +15,7 @@ from importlib import import_module
 _EXPORTS = {
     "AgentPlugin": "gc_core_temporalio.plugin",
     "AgentSession": "gc_core_temporalio.client",
+    "AnswerTruncated": "gc_core_temporalio.client",
     "AgentClient": "gc_core_temporalio.client",
     "TemporalDurability": "gc_core_temporalio.client",
     "MessageNotProcessed": "gc_core_temporalio.client",
@@ -43,6 +44,7 @@ __all__ = [
     "AgentSession",
     "AgentStepResult",
     "AgentWorkflow",
+    "AnswerTruncated",
     "MessageNotProcessed",
     "RunRequest",
     "SessionFailed",

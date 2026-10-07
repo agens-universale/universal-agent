@@ -180,9 +180,24 @@ class TurnFailed(ExecutionFailure):
     локальном режиме."""
 
 
+class AnswerTruncated(RuntimeError):
+    """Ответ хода больше, чем переживает Continue-As-New (~1 МБ в истории):
+    ``answer`` — его начало, полный — последним сообщением в треде."""
+
+    def __init__(self, message, answer=None):
+        super().__init__(message)
+        self.answer = answer
+
+
 def _raise_turn_error(reply):
     if reply.get("turn_error"):
         raise TurnFailed(reply["turn_error"])
+    if reply.get("answer_truncated"):
+        raise AnswerTruncated(
+            f"Ответ хода {reply.get('turn')} укорочен для истории Temporal; "
+            "полный — последним сообщением в треде",
+            reply.get("answer"),
+        )
 
 
 #: ``wait``: столько попыток задачи workflow подряд — сессия «застряла».

@@ -73,24 +73,27 @@ def _message_digest(text):
 
 
 #: Потолок входа Continue-As-New: запись истории (лимит 2 МБ) с запасом.
-RESUME_BUDGET = 1_000_000
-#: Ответ хода в состоянии, переживающем Continue-As-New, — не тяжелее.
+RESUME_BUDGET = 1_500_000
+#: Ответ последнего хода переживает Continue-As-New целиком до стольких байт:
+#: CAN идёт сразу после хода, и ``wait``/``ask`` читают ответ уже из нового
+#: run. Больше — укорочен с пометкой ``answer_truncated`` (клиент поднимает
+#: ``AnswerTruncated``), полный — последним сообщением в треде.
+LATEST_ANSWER_KEEP_BYTES = 1_000_000
+#: Ответы прошлых ходов и ``status``/результат workflow — не тяжелее.
 ANSWER_KEEP_BYTES = 256 * 1024
 _ANSWER_FIELDS = ("answer", "formatted_answer", "post_error")
 
 
-def _bounded_outcome(outcome):
+def _bounded_outcome(outcome, limit=ANSWER_KEEP_BYTES):
     """Итог хода для переноса: длинный ответ укорочен с пометкой
     ``answer_truncated`` (полный — последним сообщением в треде)."""
     out = dict(outcome)
     for field in _ANSWER_FIELDS:
         value = out.get(field)
-        if value is None or payload_size(value) <= ANSWER_KEEP_BYTES:
+        if value is None or payload_size(value) <= limit:
             continue
         out[field] = (
-            cut_to_payload(value, ANSWER_KEEP_BYTES)
-            if isinstance(value, str)
-            else None
+            cut_to_payload(value, limit) if isinstance(value, str) else None
         )
         out["answer_truncated"] = True
     return out
@@ -100,22 +103,27 @@ def _fit_resume(resume):
     """Состояние для Continue-As-New в пределах ``RESUME_BUDGET``.
 
     Вход CAN — одна запись истории: больше лимита — сервер отвергает команду,
-    и задача workflow падала бы бесконечно (сессия встала бы). Сжимается то,
-    без чего сессия работает: ответы ходов (полные — в треде), тексты
-    отброшенных остановкой сообщений (нужны только их ID), старые итоги
-    ходов и ответы человеку.
+    и задача workflow падала бы бесконечно (сессия встала бы). Ответ
+    последнего хода сохраняется как можно полнее; сжимается то, без чего
+    сессия работает: ответы прошлых ходов (полные — в треде), тексты
+    отброшенных остановкой сообщений (нужны только их ID), старые итоги ходов
+    и ответы человеку.
     """
-    bounded = {
-        **_bounded_outcome(
-            {field: getattr(resume, field) for field in _ANSWER_FIELDS}
-        )
-    }
+    bounded = _bounded_outcome(
+        {field: getattr(resume, field) for field in _ANSWER_FIELDS}
+    )
     bounded.pop("answer_truncated", None)
+    latest = max(resume.turn_outcomes, key=int, default=None)
     resume = replace(
         resume,
         **bounded,
         turn_outcomes={
-            turn: _bounded_outcome(outcome)
+            turn: _bounded_outcome(
+                outcome,
+                LATEST_ANSWER_KEEP_BYTES
+                if turn == latest
+                else ANSWER_KEEP_BYTES,
+            )
             for turn, outcome in resume.turn_outcomes.items()
         },
     )
@@ -130,11 +138,15 @@ def _fit_resume(resume):
     )
     outcomes = dict(resume.turn_outcomes)
     replies = dict(resume.human_replies)
+    latest_cut = False
     while payload_size(asdict(resume)) > RESUME_BUDGET:
         if len(outcomes) > 1:
             outcomes.pop(min(outcomes, key=int))
         elif replies:
             replies.pop(next(iter(replies)))
+        elif latest in outcomes and not latest_cut:
+            outcomes[latest] = _bounded_outcome(outcomes[latest])
+            latest_cut = True
         else:
             break
         resume = replace(resume, turn_outcomes=outcomes, human_replies=replies)
@@ -502,6 +514,7 @@ class AgentWorkflow:
         self.turns = resume.turns
         self.completed_inputs = dict(resume.completed)
         self.turn_outcomes = dict(resume.turn_outcomes)
+        self.message_fingerprint = resume.message_fingerprint
         self.answer = resume.answer
         self.formatted_answer = resume.formatted_answer
         self.post_error = resume.post_error
@@ -877,6 +890,7 @@ class AgentWorkflow:
             turns=self.turns,
             completed=_recent(self.completed_inputs),
             turn_outcomes=self.turn_outcomes,
+            message_fingerprint=self.message_fingerprint,
             answer=self.answer,
             terminal_outcome=self.terminal_outcome,
             # Run из CAN без хода владеет тредом по resume: передать его дальше,

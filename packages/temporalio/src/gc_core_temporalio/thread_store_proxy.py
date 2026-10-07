@@ -21,10 +21,12 @@ from gc_core_temporalio.meta_delta import (
     TextIndex,
     apply,
     diff_meta,
+    meta_hash,
     normalize,
 )
 from gc_core_temporalio.thread_store_contracts import (
     PAGE_BYTES,
+    MetaBaseMismatch,
     ThreadStoreCall,
 )
 
@@ -53,6 +55,17 @@ _APPEND_ONLY_OPERATIONS = _METADATA_OPERATIONS | {
     "claim_owner",
     "release_owner",
 }
+
+
+#: Операции, чью meta квитанции ядро не читает.
+_META_FREE_OPERATIONS = frozenset(
+    {
+        "append_subagent_trace",
+        "append_subagent_trace_record",
+        "claim_owner",
+        "release_owner",
+    }
+)
 
 
 def _hashable(value):
@@ -140,6 +153,7 @@ class TemporalThreadStore:
         запись истории Temporal, и тред любой длины не упирается в лимит
         2 МБ на запись. Тред изменился между страницами — чтение заново.
         """
+        known = self._meta.get((system_id, thread_id))
         for attempt in range(attempts):
             first = await self._call(
                 "agent.thread.load",
@@ -149,11 +163,14 @@ class TemporalThreadStore:
                     thread_id,
                     include_state=include_state,
                     page_bytes=PAGE_BYTES,
+                    meta_known=known[0] if known is not None else None,
                 ),
             )
             snapshot, page = first.snapshot, first.page
             if snapshot is None:
                 return snapshot
+            if first.meta_unchanged:
+                snapshot.meta = deepcopy(known[1])
             expect = [snapshot.revision, snapshot.generation]
 
             def more(expect=expect, **position):
@@ -225,16 +242,39 @@ class TemporalThreadStore:
             # Воркер соберёт полную meta, хранилище получит её целиком.
             written = normalize(payload["meta"])
             texts = TextIndex()
-            texts.add_meta(base)
             texts.add(messages)
             if operation.kind in _APPEND_ONLY_OPERATIONS:
                 texts.parents.append(self._texts.get(key) or TextIndex())
-            request.meta_delta = {"d": diff_meta(base, written, texts)}
+            with_base = TextIndex()
+            with_base.add_meta(base)
+            with_base.parents.append(texts)
+            request.meta_delta = {
+                "d": diff_meta(base, written, with_base),
+                "h": meta_hash(written),
+            }
             request.operation = replace(
                 operation, payload={**payload, "meta": None}
             )
+        elif known is None and operation.kind in _META_FREE_OPERATIONS:
+            # Трасса субагента, владение: ядро meta квитанции не читает, а
+            # без базы её пришлось бы перечитать целиком (у ребёнка — всю
+            # meta родителя).
+            request.need_meta = False
         try:
-            reply = await self._call("agent.thread.commit", request)
+            try:
+                reply = await self._call("agent.thread.commit", request)
+            except MetaBaseMismatch:
+                if written is None:
+                    raise
+                # База в хранилище не та (чужая правка meta, повтор после
+                # записи): та же операция с полной meta — хранилище узнает её
+                # или применит; тексты — ссылками на сообщения.
+                request.meta_base = None
+                request.meta_delta = {
+                    "d": diff_meta({}, written, texts),
+                    "h": meta_hash(written),
+                }
+                reply = await self._call("agent.thread.commit", request)
         except BaseException:
             # No acknowledged outcome: never bridge this gap on a later call.
             # Базу meta не забывать: воркер сверяет её версию с хранилищем, а
@@ -251,7 +291,9 @@ class TemporalThreadStore:
             raise ExecutionFailure(
                 "Thread store did not acknowledge operation"
             )
-        if reply.meta_reload or reply.meta_delta is None:
+        if not request.need_meta:
+            meta = {}
+        elif reply.meta_reload or reply.meta_delta is None:
             snapshot = await self._read_paged(
                 system_id, thread_id, include_state=False
             )

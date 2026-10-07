@@ -26,7 +26,12 @@ from gc_core_temporalio.meta_delta import (
 from gc_core_temporalio.sizes import payload_size
 from gc_core_temporalio.storage.sqlite import SQLiteThreadStore
 from gc_core_temporalio.thread_store_activities import ThreadStoreActivities
-from gc_core_temporalio.thread_store_contracts import PAGE_BYTES
+from gc_core_temporalio.thread_store_contracts import (
+    PAGE_BYTES,
+    ThreadStoreCall,
+    ThreadStoreReply,
+)
+from gc_core_temporalio.thread_store_transport import _STORE_ERRORS
 from gc_core_temporalio.thread_store_proxy import TemporalThreadStore
 from temporalio.converter import DataConverter
 
@@ -56,31 +61,42 @@ def _record(turn, action, content):
     }
 
 
+def _through_history(value, kind):
+    """Значение так, как его увидит другая сторона: через JSON-конвертер
+    Temporal (ключи сортируются, кортежи — списками)."""
+    converter = DataConverter.default.payload_converter
+    return converter.from_payloads(converter.to_payloads([value]), [kind])[0]
+
+
 class _Worker:
-    """Транспорт прокси без сервера; ``fresh()`` — другой воркер (без кэшей)."""
+    """Транспорт прокси без сервера, но через настоящий конвертер Temporal;
+    ``fresh()`` — другой воркер (без кэшей)."""
 
     def __init__(self, store):
         self.store = store
         self.activities = ThreadStoreActivities({"files": store})
-        self.inputs, self.outputs = [], []
+        self.inputs, self.outputs, self.calls = [], [], []
 
     def fresh(self):
         self.activities = ThreadStoreActivities({"files": self.store})
 
     async def __call__(self, name, request):
         self.inputs.append(_size(request))
+        self.calls.append(name)
         handler = {
             "agent.thread.load": self.activities.load,
             "agent.thread.commit": self.activities.commit,
         }[name]
         try:
-            reply = await handler(request)
+            reply = await handler(_through_history(request, ThreadStoreCall))
         except Exception as exc:
-            if getattr(exc, "type", None) == "ThreadStoreConflict":
-                raise ThreadStoreConflict(str(exc)) from exc
+            # Как ThreadStoreTransport: ошибка хранилища — тем же классом.
+            error = _STORE_ERRORS.get(getattr(exc, "type", None))
+            if error is not None:
+                raise error(str(exc)) from exc
             raise
         self.outputs.append(_size(reply))
-        return reply
+        return _through_history(reply, ThreadStoreReply)
 
 
 def _persist(snapshot, messages, meta, *, operation_id="op"):
@@ -101,7 +117,7 @@ def _persist(snapshot, messages, meta, *, operation_id="op"):
 # --- разница ---------------------------------------------------------------
 
 
-def test_diff_round_trip_keeps_values_types_and_order():
+def test_diff_round_trip_keeps_values_and_types():
     old = {
         "a": 1,
         "log": [_record(1, "user_ask", "привет")],
@@ -120,10 +136,23 @@ def test_diff_round_trip_keeps_values_types_and_order():
     for delta in (diff(old, new), diff_meta(old, new)):
         result = apply(deepcopy(old), delta)
         assert result == new
-        assert list(result) == list(new)
-        assert list(result["nested"]) == list(new["nested"])
+        assert set(result) == set(new)
         assert result["nested"]["x"] is 1  # noqa: F632 — не True
     assert diff(new, deepcopy(new)) is None
+
+
+def test_key_order_does_not_count_as_a_change():
+    """База из истории Temporal или SQLite — с ключами по алфавиту, ядро
+    пишет записи в своём порядке: разница — только новая запись, а не весь
+    журнал (дефект r7: 625 КБ на 200 записях)."""
+    log = [
+        _record(i, "user_ask", f"запрос {i} " + "я" * 500) for i in range(200)
+    ]
+    base = _through_history({"user_intent_log": log}, dict)
+    assert list(base["user_intent_log"][0]) != list(log[0])
+    new = {"user_intent_log": [*log, _record(200, "final_answer", "ответ")]}
+    delta = diff_meta(base, new)
+    assert payload_size(delta) < 1_000
 
 
 def test_log_tail_is_sent_from_absolute_index():
@@ -340,3 +369,125 @@ async def test_metadata_operation_without_known_base_reloads_meta(tmp_path):
     )
     assert session_meta["runtime"]["summarizing"] is True
     assert max(worker.outputs) < LIMIT
+
+
+async def test_retry_after_foreign_meta_edit_falls_back_to_full_meta(tmp_path):
+    """Запись прошла, воркер упал до ответа, затем TUI поправил meta
+    напрямую. Повтор из разницы собрал бы другую meta (Mismatch) — хэш это
+    видит, прокси повторяет полной meta, хранилище отдаёт исходную квитанцию."""
+    import uuid
+
+    store = _store("file", tmp_path)
+    store.append_messages(
+        "s", "t", [{"id": "m0", "role": "user", "content": "a"}]
+    )
+    store.save_meta(
+        "s",
+        "t",
+        {"user_intent_log": [_record(0, "user_ask", "a")], "tui": {"x": 1}},
+    )
+    worker = _Worker(store)
+    proxy = TemporalThreadStore("files", worker)
+    snapshot = await proxy.aread_snapshot("s", "t")
+    meta = deepcopy(snapshot.meta)
+    meta["user_intent_log"].append(_record(1, "final_answer", "готово"))
+    operation = _persist(
+        snapshot,
+        [{"id": "m1", "role": "assistant", "content": "готово"}],
+        meta,
+    )
+    first = await proxy.acommit_operation("s", "t", operation)
+    # «Ответ потерян»: прокси не видел квитанции, а хранилище поменяли.
+    current = store.read_snapshot("s", "t", include_state=False)
+    store.commit_operation(
+        "s",
+        "t",
+        ThreadStoreOperation(
+            uuid.uuid4().hex,
+            "update_tui",
+            {"patch": {"title": "чужая правка"}},
+            generation=current.generation,
+        ),
+    )
+    proxy._meta[("s", "t")] = (
+        [snapshot.revision, snapshot.generation],
+        deepcopy(snapshot.meta),
+    )
+    worker.fresh()
+    worker.calls.clear()
+    retried = await proxy.acommit_operation("s", "t", operation)
+    # Разница не сошлась по хэшу → вторая попытка полной meta.
+    assert worker.calls[:2] == ["agent.thread.commit", "agent.thread.commit"]
+    assert retried.revision == first.revision
+    assert retried.max_seq == first.max_seq
+    stored = store.read_snapshot("s", "t", include_state=False).meta
+    assert stored["user_intent_log"][-1]["content"] == "готово"
+    assert len(store.load_messages("s", "t")) == 2
+
+
+async def test_delta_over_changed_base_is_a_conflict_not_a_failure(tmp_path):
+    """Чужая запись между чтением и записью: ядро должно получить конфликт
+    ревизии (оно перечитает и повторит), а не отказ сессии."""
+    store = _store("file", tmp_path)
+    store.save_meta(
+        "s", "t", {"current_user_intent": [_record(0, "user_ask", BIG)]}
+    )
+    worker = _Worker(store)
+    proxy = TemporalThreadStore("files", worker)
+    snapshot = await proxy.aread_snapshot("s", "t")
+    meta = deepcopy(snapshot.meta)
+    meta["user_intent_log"] = [meta["current_user_intent"][0]]
+    meta["current_user_intent"] = []
+    store.save_meta("s", "t", {"other": "чужая meta"})
+    worker.fresh()
+    with pytest.raises(ThreadStoreConflict):
+        await proxy.acommit_operation(
+            "s",
+            "t",
+            _persist(
+                snapshot, [{"id": "x", "role": "user", "content": "y"}], meta
+            ),
+        )
+
+
+async def test_subagent_trace_without_base_does_not_reread_parent_meta(
+    tmp_path,
+):
+    """Прокси ребёнка без базы meta: запись трассы не тянет всю meta
+    родителя (раньше — перечитывание частями)."""
+    store = _store("file", tmp_path)
+    log = [_record(i, "user_ask", f"{i}:" + "ю" * 20_000) for i in range(30)]
+    store.save_meta("s", "t", {"user_intent_log": log})
+    worker = _Worker(store)
+    proxy = TemporalThreadStore("files", worker)
+    await proxy.aappend_subagent_trace(
+        "s",
+        "t",
+        parent_call_id="c1",
+        child_run_id="r1",
+        kind="step",
+        payload={},
+    )
+    assert worker.calls == ["agent.thread.commit"]
+    assert max(worker.outputs) < 10_000
+
+
+async def test_same_meta_version_is_not_sent_twice(tmp_path):
+    """Начало хода: meta без состояния, затем снимок с состоянием — большая
+    meta второй раз не идёт (та же версия у workflow уже есть)."""
+    store = _store("sqlite", tmp_path)
+    store.append_messages(
+        "s", "t", [{"id": "m0", "role": "user", "content": "a"}]
+    )
+    log = [_record(i, "user_ask", f"{i}:" + "ю" * 20_000) for i in range(30)]
+    store.save_meta("s", "t", {"user_intent_log": log})
+    worker = _Worker(store)
+    proxy = TemporalThreadStore("files", worker)
+    first = await proxy.aread_snapshot("s", "t", include_state=False)
+    calls = len(worker.calls)
+    worker.outputs.clear()
+    second = await proxy.aread_snapshot("s", "t")
+    assert len(worker.calls) - calls == 1
+    assert max(worker.outputs) < 10_000
+    assert second.meta == first.meta
+    assert second.meta["user_intent_log"] == log

@@ -214,6 +214,46 @@ def trace_parts(trace, budget):
     return parts
 
 
+#: Сообщения служебного запроса (сводка при лимите шагов, сжатие, судья
+#: хода) во входе activity модели — не тяжелее: это новый текст, ссылкой его
+#: не передать.
+AUX_MESSAGES_BYTES = 1_500_000
+
+
+def _cut_middle(text, limit):
+    """Начало и конец текста в пределах ``limit`` байт истории, посередине —
+    пометка о пропуске."""
+    half = max(limit // 2 - 64, 1)
+    head = cut_to_payload(text, half)
+    tail = cut_to_payload(text[::-1], half)[::-1]
+    skipped = len(text) - len(head) - len(tail)
+    return f"{head}\n…[пропущено {skipped} символов: запрос не помещался в запись истории Temporal]…\n{tail}"
+
+
+def _fit_auxiliary_messages(messages):
+    """Служебный запрос больше записи истории (трасса хода одной строкой):
+    самые длинные тексты укорачиваются посередине, а не валят ход.
+    Локально такой запрос ушёл бы целиком (и, скорее всего, упёрся бы в
+    контекст модели — сводка вышла бы пустой)."""
+    size = payload_size(messages)
+    if size <= AUX_MESSAGES_BYTES:
+        return messages
+    out = [dict(message) for message in messages]
+    for message in sorted(
+        (m for m in out if isinstance(m.get("content"), str)),
+        key=lambda m: payload_size(m["content"]),
+        reverse=True,
+    ):
+        excess = payload_size(out) - AUX_MESSAGES_BYTES
+        if excess <= 0:
+            break
+        content = message["content"]
+        message["content"] = _cut_middle(
+            content, max(payload_size(content) - excess - 1024, 4096)
+        )
+    return out
+
+
 class WorkflowOperations:
     def __init__(self, start, owner_id, new_id):
         self.start, self.owner_id, self.new_id = start, owner_id, new_id
@@ -368,6 +408,17 @@ class WorkflowOperations:
         (``message_refs``). Воркер без них — повтор с сообщениями целиком."""
         self._warn_history_size()
         data = asdict(request)
+        if request.consumer != "main":
+            fitted = _fit_auxiliary_messages(data["messages"])
+            if fitted is not data["messages"]:
+                workflow.logger.warning(
+                    "Служебный запрос %s укорочен для истории Temporal: "
+                    "%s → %s байт",
+                    request.request_label,
+                    payload_size(data["messages"]),
+                    payload_size(fitted),
+                )
+                data["messages"] = fitted
         thread = {
             "store_id": self.start.store_id,
             "system_id": self.start.system_id,
