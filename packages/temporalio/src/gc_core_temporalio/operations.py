@@ -45,7 +45,12 @@ from gc_core_temporalio.message_refs import (
     message_hash,
 )
 from gc_core_temporalio.model_routing import public_router_identity
-from gc_core_temporalio.sizes import ACTIVITY_INPUT_LIMIT, payload_size
+from gc_core_temporalio.sizes import (
+    HistoryLimitExceeded,
+    check_history_size,
+    cut_to_payload,
+    payload_size,
+)
 
 #: Доменные исключения, которые activity переносит значением (``DomainError``)
 #: и которые workflow поднимает тем же типом — ядро обрабатывает их, как в local.
@@ -154,6 +159,61 @@ def activity_summary(name, data):
     return name.removeprefix("agent.").replace(".", " / ")
 
 
+#: Часть трассы сжатия во входе activity (запись истории — до 2 МБ).
+TRACE_PART_BYTES = 256 * 1024
+_CUT_MARK = " …[обрезано для истории Temporal]"
+
+
+def _cut_strings(value, limit):
+    """Строки длиннее ``limit`` байт истории — укорочены с пометкой."""
+    if isinstance(value, str):
+        if payload_size(value) <= limit:
+            return value
+        return cut_to_payload(value, limit) + _CUT_MARK
+    if isinstance(value, dict):
+        return {key: _cut_strings(item, limit) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_cut_strings(item, limit) for item in value]
+    return value
+
+
+def _fit(value, budget):
+    """Значение в пределах ``budget``: длинные строки укорачиваются, пока
+    не уложится (отладочная трасса: суть сохраняется, хвосты — нет)."""
+    limit = budget
+    while payload_size(value) > budget and limit > 64:
+        limit //= 2
+        value = _cut_strings(value, limit)
+    return value
+
+
+def trace_parts(trace, budget):
+    """Трасса сжатия частями не больше ``budget``: по ключам, длинные списки
+    (батчи суммаризатора) — по элементам; то, что не делится, укорачивается."""
+    parts, current = [], {}
+    for key, value in (trace or {}).items():
+        if payload_size({key: value}) <= budget:
+            if current and payload_size({**current, key: value}) > budget:
+                parts.append(current)
+                current = {}
+            current[key] = value
+            continue
+        if isinstance(value, list):
+            chunk = []
+            for item in value:
+                item = _fit(item, budget)
+                if chunk and payload_size({key: [*chunk, item]}) > budget:
+                    parts.append({key: chunk})
+                    chunk = []
+                chunk.append(item)
+            parts.append({key: chunk})
+            continue
+        parts.append({key: _fit(value, budget)})
+    if current or not parts:
+        parts.append(current)
+    return parts
+
+
 class WorkflowOperations:
     def __init__(self, start, owner_id, new_id):
         self.start, self.owner_id, self.new_id = start, owner_id, new_id
@@ -208,15 +268,10 @@ class WorkflowOperations:
         или лимит времени — модель получает ошибку «исход неизвестен», эффект
         второй раз не исполняется.
         """
-        size = payload_size(data)
-        if size > ACTIVITY_INPUT_LIMIT:
-            # Вход activity — запись истории (лимит 2 МБ): больше — сервер
-            # отвергнет команду, и задача workflow падала бы бесконечно.
-            # Отказ хода с причиной вместо вечного цикла.
-            raise ExecutionFailure(
-                f"Вход activity {name} — {size} байт в истории Temporal, "
-                f"больше лимита записи ({ACTIVITY_INPUT_LIMIT})"
-            )
+        # Вход activity — запись истории (лимит 2 МБ): больше — сервер
+        # отвергнет команду, и задача workflow падала бы бесконечно. Отказ
+        # хода с причиной вместо вечного цикла.
+        check_history_size(f"Вход activity {name}", data)
         request = ActivityCall(
             self.start.profile,
             self.owner_id,
@@ -266,6 +321,7 @@ class WorkflowOperations:
                 cls.__name__: cls
                 for cls in (
                     ExecutionFailure,
+                    HistoryLimitExceeded,
                     InfrastructureFailure,
                     OutcomeUnknown,
                 )
@@ -556,7 +612,16 @@ class WorkflowOperations:
         return await self.call("agent.memory.hash", {}, str | None)
 
     async def summary_trace_sink(self, record):
-        await self.call("agent.summary.trace", asdict(record), bool)
+        # Трасса сжатия несёт входы суммаризатора (мегабайты на длинном
+        # треде): частями меньше страницы, каждая — своя строка журнала.
+        data = asdict(record)
+        parts = trace_parts(data["trace_data"], TRACE_PART_BYTES)
+        for index, part in enumerate(parts):
+            if len(parts) > 1:
+                part = {**part, "trace_part": [index + 1, len(parts)]}
+            await self.call(
+                "agent.summary.trace", {**data, "trace_data": part}, bool
+            )
 
     async def mcp_cleanup(self):
         if not self.closed:

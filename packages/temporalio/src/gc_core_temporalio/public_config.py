@@ -297,8 +297,26 @@ def public_config_snapshot(source: Any) -> PublicConfigSnapshot:
 
 
 #: Секции, которые у приложения и воркера законно разные: пути — свои у
-#: процесса (абсолютные, от каталога конфига), логирование — тоже.
-_FINGERPRINT_SKIP = frozenset({"paths", "logging"})
+#: процесса (абсолютные, от каталога конфига), логирование, ACP и цены — на
+#: поведение хода не влияют.
+_FINGERPRINT_SKIP = frozenset({"paths", "logging", "acp", "pricing"})
+#: Из ``tui`` на ход влияет только это (AGENTS.md в промпте); режимы ответа и
+#: судьи хода TUI передаёт через ``RuntimeEnv``, а не настройками.
+_FINGERPRINT_TUI_KEYS = frozenset({"agentsmd_override"})
+#: Листья с путями от каталога конфига вне ``paths``: у процессов разные.
+_FINGERPRINT_SKIP_LEAVES = (("security", "write_guard", "extra_paths"),)
+
+
+def _without_local_paths(value):
+    """Без путей промптов (``*_prompt_path``): абсолютные от каталога
+    конфига, у приложения и воркера разные при одинаковых настройках."""
+    if isinstance(value, dict):
+        return {
+            key: _without_local_paths(item)
+            for key, item in value.items()
+            if not str(key).endswith("_prompt_path")
+        }
+    return value
 
 
 def settings_fingerprint(source: Any) -> dict[str, str]:
@@ -311,9 +329,23 @@ def settings_fingerprint(source: Any) -> dict[str, str]:
     различаются), без закрытых полей; наружу уходят только хэши.
     """
     settings = settings_of(source)
-    document = settings.model_dump(
-        mode="json", by_alias=True, exclude=settings_exclude_spec()
+    document = _without_local_paths(
+        settings.model_dump(
+            mode="json", by_alias=True, exclude=settings_exclude_spec()
+        )
     )
+    if isinstance(document.get("tui"), dict):
+        document["tui"] = {
+            key: value
+            for key, value in document["tui"].items()
+            if key in _FINGERPRINT_TUI_KEYS
+        }
+    for path in _FINGERPRINT_SKIP_LEAVES:
+        parent = document
+        for key in path[:-1]:
+            parent = parent.get(key) if isinstance(parent, dict) else None
+        if isinstance(parent, dict):
+            parent.pop(path[-1], None)
     return {
         section: hashlib.sha256(
             json.dumps(value, sort_keys=True, ensure_ascii=False).encode()

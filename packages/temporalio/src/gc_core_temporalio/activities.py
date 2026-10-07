@@ -49,7 +49,11 @@ from gc_core_temporalio.message_refs import (
     message_hash,
     refs_in,
 )
-from gc_core_temporalio.sizes import cut_to_payload, payload_size
+from gc_core_temporalio.sizes import (
+    check_history_size,
+    cut_to_payload,
+    payload_size,
+)
 
 #: Потолок вывода инструмента через границу activity (байты UTF-8). Результат
 #: activity — запись истории Temporal (лимит 2 МБ). Встроенные инструменты
@@ -289,7 +293,15 @@ class AgentActivities:
                     if resolve_context
                     else None
                 )
-                return await handler(call, ctx)
+                result = await handler(call, ctx)
+                # Результат — запись истории: больше лимита SDK отказал бы
+                # без причины; здесь — отказ хода с размером (ответ модели,
+                # вывод инструмента).
+                check_history_size(
+                    f"Результат activity {handler.__name__.lstrip('_')}",
+                    result,
+                )
+                return result
             except ExecutionFailure as exc:
                 raise ApplicationError(
                     str(exc), type=type(exc).__name__, non_retryable=True

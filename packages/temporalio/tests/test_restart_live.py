@@ -2,21 +2,20 @@
 
 import asyncio
 import json
-import shutil
 import subprocess
 import sys
-from dataclasses import asdict
 from pathlib import Path
 
 import pytest
 from gc_core.thread_store_file_durable import DurableFileThreadStore
 from gc_core_temporalio.client import AgentClient
 from gc_core_temporalio.contracts import RunRequest
-from gc_core_temporalio.workflow import AgentWorkflow
 from gc_core_temporalio.storage.sqlite import SQLiteThreadStore
 from gc_core_temporalio.thread_store_contracts import ThreadStoreCall
+from gc_core_temporalio.workflow import AgentWorkflow
 from live_support import provider, temporal_cli, wait_marker  # noqa: F401
 from restart_interceptor import RestartInterceptor
+from temporalio.converter import default as default_converter
 from temporalio.converter import value_to_type
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer
@@ -166,18 +165,18 @@ async def test_native_sigkill_durable_boundaries(
                 ]["knowledge"]
                 == "durable fact"
             )
+            history = await handle.fetch_history()
             if checkpoint == "after_store_receipt":
+                # Воркер убит после записи, до ответа: повтор activity на
+                # новом воркере (без кэша meta) собрал из разницы ту же
+                # операцию, и хранилище ответило исходной квитанцией.
                 marker = json.loads(
                     (tmp_path / "checkpoint.json").read_text()
                 )["value"]
                 original = value_to_type(ThreadStoreCall, marker["request"])
-                retried = store.commit_operation(
-                    original.system_id,
-                    original.thread_id,
-                    original.operation,
-                )
-                assert asdict(retried) == marker["receipt"]["receipt"]
-            history = await handle.fetch_history()
+                assert original.meta_delta is not None
+                assert original.operation.payload["meta"] is None
+                assert marker["receipt"]["receipt"] in _receipts(history)
         finally:
             for process in processes:
                 if process.poll() is None:
@@ -194,3 +193,17 @@ async def test_native_sigkill_durable_boundaries(
             interceptors=[RestartInterceptor()],
         ).replay_workflow(history)
         assert len(requests) == expected_requests
+
+
+def _receipts(history):
+    """Квитанции хранилища из завершённых activities истории."""
+    converter = default_converter().payload_converter
+    found = []
+    for event in history.events:
+        if not event.HasField("activity_task_completed_event_attributes"):
+            continue
+        payloads = event.activity_task_completed_event_attributes.result
+        for value in converter.from_payloads(payloads.payloads):
+            if isinstance(value, dict) and value.get("receipt"):
+                found.append(value["receipt"])
+    return found

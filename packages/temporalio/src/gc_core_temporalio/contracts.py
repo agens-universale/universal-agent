@@ -23,6 +23,9 @@ MAX_MESSAGE_BYTES = 1_000_000
 class UserMessage:
     message_id: str
     text: str
+    #: Отпечаток настроек приложения (``settings_fingerprint``): расходится с
+    #: уже сверенным у сессии — сообщение отклоняется (``SettingsMismatch``).
+    settings_fingerprint: dict[str, str] | None = None
 
     def validate(self):
         if (

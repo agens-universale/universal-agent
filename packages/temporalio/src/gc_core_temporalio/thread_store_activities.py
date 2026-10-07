@@ -2,6 +2,7 @@
 
 import asyncio
 import inspect
+import json
 from collections import OrderedDict
 from dataclasses import replace
 
@@ -17,8 +18,18 @@ from temporalio.client import WorkflowExecutionStatus
 from temporalio.exceptions import ApplicationError
 from temporalio.service import RPCError, RPCStatusCode
 
+from gc_core_temporalio.message_refs import message_hash
+from gc_core_temporalio.meta_delta import (
+    MetaDeltaError,
+    TextSource,
+    apply,
+    diff,
+    normalize,
+    text_refs,
+)
 from gc_core_temporalio.sizes import payload_size
 from gc_core_temporalio.thread_store_contracts import (
+    PAGE_BYTES,
     ThreadStatePage,
     ThreadStoreCall,
     ThreadStoreReply,
@@ -26,6 +37,10 @@ from gc_core_temporalio.thread_store_contracts import (
 
 #: Снимков треда в кэше воркера для страничного чтения.
 _SNAPSHOT_CACHE_SIZE = 16
+#: Последних известных meta тредов — база разницы записи (``meta_delta``).
+_META_CACHE_SIZE = 64
+#: Больше — квитанция без разницы, workflow перечитает meta частями.
+_RECEIPT_DELTA_BYTES = PAGE_BYTES // 2
 
 
 def _size(value):
@@ -56,6 +71,46 @@ def _state_page(messages, keys, cursor, budget):
     return ThreadStatePage(
         page_messages, page_keys, None if done else [m_end, k_end]
     )
+
+
+def _text_chunk(text, start, budget):
+    """Кусок JSON-текста meta с ``start`` не больше ``budget`` байт в истории
+    (кавычки и ``\\`` в строке экранируются ещё раз). → (кусок, следующая
+    позиция или ``None``)."""
+    length = max(budget - 2, 1)
+    chunk = text[start : start + length]
+    while len(chunk) > 1 and _size(chunk) > budget:
+        length = max(length // 2, 1)
+        chunk = text[start : start + length]
+    end = start + len(chunk)
+    return chunk, end if end < len(text) else None
+
+
+class _CachedSnapshot:
+    """Снимок для следующих страниц: состояние, ключи и текст meta."""
+
+    def __init__(self, raw, has_state):
+        self.raw = raw
+        self.has_state = has_state
+        self.snapshot = _without_fetch_cache(raw)
+        state = raw.state
+        self.messages = list(state.messages) if state is not None else []
+        self.keys = (
+            sorted(state.known_keys, key=repr) if state is not None else []
+        )
+        self._meta_text = None
+
+    @property
+    def version(self):
+        return [self.raw.revision, self.raw.generation]
+
+    @property
+    def meta_text(self):
+        if self._meta_text is None:
+            self._meta_text = json.dumps(
+                self.snapshot.meta, ensure_ascii=True, separators=(",", ":")
+            )
+        return self._meta_text
 
 
 async def _invoke(store, name, *args, **kwargs):
@@ -92,6 +147,8 @@ class ThreadStoreActivities:
         self.raw = dict(stores)
         #: (хранилище, система, тред) → снимок для следующих страниц чтения.
         self._snapshots = OrderedDict()
+        #: (хранилище, система, тред) → ([revision, generation], meta).
+        self._metas = OrderedDict()
         self.stores = {
             name: athread_store(store) for name, store in stores.items()
         }
@@ -111,11 +168,22 @@ class ThreadStoreActivities:
                 non_retryable=True,
             ) from None
 
+    def _remember_meta(self, request, value):
+        """Meta треда после чтения/записи — база следующей разницы."""
+        key = (request.store_id, request.system_id, request.thread_id)
+        self._metas[key] = (
+            [value.revision, value.generation],
+            normalize(value.meta if isinstance(value.meta, dict) else {}),
+        )
+        self._metas.move_to_end(key)
+        while len(self._metas) > _META_CACHE_SIZE:
+            self._metas.popitem(last=False)
+
     @activity.defn(name="agent.thread.load")
     async def load(self, request: ThreadStoreCall) -> ThreadStoreReply:
         store = self._port(request)
         try:
-            if not (request.include_state and request.page_bytes > 0):
+            if request.page_bytes <= 0:
                 snapshot = await _invoke(
                     store,
                     "read_snapshot",
@@ -123,25 +191,53 @@ class ThreadStoreActivities:
                     request.thread_id,
                     include_state=request.include_state,
                 )
+                if snapshot is not None:
+                    self._remember_meta(request, snapshot)
                 return ThreadStoreReply(
                     snapshot=_without_fetch_cache(snapshot)
                 )
-            snapshot, messages, keys = await self._paged_snapshot(
-                store, request
-            )
-            snapshot = _without_fetch_cache(snapshot)
+            entry = await self._paged_snapshot(store, request)
+            if entry is None:
+                return ThreadStoreReply()
+            if request.meta_cursor is not None:
+                chunk, following = _text_chunk(
+                    entry.meta_text, request.meta_cursor, request.page_bytes
+                )
+                return ThreadStoreReply(meta_chunk=chunk, meta_next=following)
+            snapshot = entry.snapshot
+            if request.cursor is not None:
+                page = _state_page(
+                    entry.messages,
+                    entry.keys,
+                    request.cursor,
+                    request.page_bytes,
+                )
+                page.max_seq = snapshot.state.max_seq
+                return ThreadStoreReply(page=page)
+            # Первая страница: meta и начало состояния вместе в пределах
+            # страницы; meta больше половины — отдельными кусками.
+            reply = ThreadStoreReply(snapshot=replace(snapshot, state=None))
+            budget = request.page_bytes - _size(snapshot.meta)
+            if budget < request.page_bytes // 2:
+                reply.snapshot = replace(reply.snapshot, meta={})
+                reply.meta_chunk, reply.meta_next = _text_chunk(
+                    entry.meta_text, 0, request.page_bytes // 2
+                )
+                budget = 0
             if snapshot.state is None:
                 # Хранилище не отдало состояние — как без страниц.
-                return ThreadStoreReply(snapshot=snapshot)
-            page = _state_page(
-                messages, keys, request.cursor, request.page_bytes
-            )
+                return reply
+            if budget > 0:
+                page = _state_page(entry.messages, entry.keys, None, budget)
+            else:
+                page = ThreadStatePage(
+                    [],
+                    [],
+                    [0, 0] if entry.messages or entry.keys else None,
+                )
             page.max_seq = snapshot.state.max_seq
-            first = request.cursor is None
-            return ThreadStoreReply(
-                snapshot=replace(snapshot, state=None) if first else None,
-                page=page,
-            )
+            reply.page = page
+            return reply
         except ExecutionFailure as exc:
             raise _application_error(exc) from exc
 
@@ -152,11 +248,14 @@ class ThreadStoreActivities:
         начнёт чтение заново."""
         key = (request.store_id, request.system_id, request.thread_id)
         cached = self._snapshots.get(key)
-        expect = request.expect
+        continuing = (
+            request.cursor is not None or request.meta_cursor is not None
+        )
         if (
-            request.cursor is not None
+            continuing
             and cached is not None
-            and expect == [cached[0].revision, cached[0].generation]
+            and request.expect == cached.version
+            and (cached.has_state or not request.include_state)
         ):
             self._snapshots.move_to_end(key)
             return cached
@@ -165,17 +264,14 @@ class ThreadStoreActivities:
             "read_snapshot",
             request.system_id,
             request.thread_id,
-            include_state=True,
+            include_state=request.include_state,
         )
-        if request.cursor is not None and expect != [
-            snapshot.revision,
-            snapshot.generation,
-        ]:
+        if snapshot is None:
+            return None
+        entry = _CachedSnapshot(snapshot, request.include_state)
+        if continuing and request.expect != entry.version:
             raise ThreadStoreConflict("Thread changed between page reads")
-        state = snapshot.state
-        messages = list(state.messages) if state is not None else []
-        keys = sorted(state.known_keys, key=repr) if state is not None else []
-        entry = (snapshot, messages, keys)
+        self._remember_meta(request, snapshot)
         self._snapshots[key] = entry
         self._snapshots.move_to_end(key)
         while len(self._snapshots) > _SNAPSHOT_CACHE_SIZE:
@@ -192,22 +288,92 @@ class ThreadStoreActivities:
             )
         store = self._port(request)
         try:
-            if request.operation.kind == "claim_owner":
-                receipt = await _claim(store, request)
-            else:
-                receipt = await _commit(store, request, request.operation)
-            # Квитанция несёт meta треда: кэш страниц fetch_url из meta, что
-            # вёл локальный режим, — не в историю (как и при чтении).
-            meta = receipt.meta if isinstance(receipt.meta, dict) else None
-            shared = meta.get("shared") if meta else None
-            if isinstance(shared, dict) and shared.get("fetch_url_cache"):
-                receipt = replace(
-                    receipt,
-                    meta={**meta, "shared": {**shared, "fetch_url_cache": {}}},
+            base, exact = await self._meta_base(store, request)
+            operation = request.operation
+            expected = base
+            if request.meta_delta is not None:
+                # Хранилище получает полную meta, как в локальном режиме.
+                expected = await self._rebuild_meta(store, request, base)
+                operation = replace(
+                    operation, payload={**operation.payload, "meta": expected}
                 )
-            return ThreadStoreReply(receipt=receipt)
+            if operation.kind == "claim_owner":
+                receipt = await _claim(store, request, operation)
+            else:
+                receipt = await _commit(store, request, operation)
+            self._remember_meta(request, receipt)
+            # Квитанция — без meta: только то, что хранилище поменяло само
+            # (разница от ожидаемой workflow meta).
+            reply = ThreadStoreReply(receipt=replace(receipt, meta={}))
+            change = (
+                diff(expected, normalize(receipt.meta or {}))
+                if exact
+                else None
+            )
+            if not exact or _size(change) > _RECEIPT_DELTA_BYTES:
+                reply.meta_reload = True
+            else:
+                reply.meta_delta = {"d": change}
+            return reply
         except ExecutionFailure as exc:
             raise _application_error(exc) from exc
+
+    async def _meta_base(self, store, request):
+        """Meta, от которой workflow считал разницу. → (meta, точно ли она).
+
+        Не точно — у хранилища другая версия: повтор записи после того, как
+        она прошла (воркер упал до ответа), или чужая запись. Разница
+        абсолютна (хвосты с номера, ключи целиком) — повтор поверх уже
+        записанной meta собирает ту же операцию, и хранилище отвечает
+        исходной квитанцией."""
+        if request.meta_base is None:
+            return {}, True
+        key = (request.store_id, request.system_id, request.thread_id)
+        cached = self._metas.get(key)
+        if cached is not None and cached[0] == request.meta_base:
+            return cached[1], True
+        snapshot = await _invoke(
+            store,
+            "read_snapshot",
+            request.system_id,
+            request.thread_id,
+            include_state=False,
+        )
+        self._remember_meta(request, snapshot)
+        version, meta = self._metas[key]
+        return meta, version == request.meta_base
+
+    async def _rebuild_meta(self, store, request, base):
+        """Полная meta записи: база + разница; тексты по ссылкам — из
+        сообщений операции, иначе из треда."""
+        delta = request.meta_delta.get("d")
+        messages = {
+            message_hash(message): message
+            for message in request.operation.payload.get("messages") or ()
+            if isinstance(message, dict)
+        }
+        wanted = text_refs(delta)
+        cached = self._snapshots.get(
+            (request.store_id, request.system_id, request.thread_id)
+        )
+        if wanted - messages.keys() and cached is not None:
+            for message in cached.messages:
+                messages.setdefault(message_hash(message), message)
+        if wanted - messages.keys():
+            snapshot = await _invoke(
+                store,
+                "read_snapshot",
+                request.system_id,
+                request.thread_id,
+                include_state=True,
+            )
+            state = snapshot.state if snapshot is not None else None
+            for message in state.messages if state is not None else ():
+                messages.setdefault(message_hash(message), message)
+        try:
+            return apply(base, delta, TextSource(messages.get, base))
+        except MetaDeltaError as exc:
+            raise ExecutionFailure(f"Meta треда не собрать: {exc}") from exc
 
     @activity.defn(name="agent.thread.read_trace")
     async def read_trace(self, request: ThreadStoreCall) -> ThreadStoreReply:
@@ -245,7 +411,7 @@ async def _commit(store, request, operation):
     )
 
 
-async def _claim(store, request):
+async def _claim(store, request, operation):
     """Захват треда; владельца, чей workflow уже не RUNNING, снять.
 
     Владелец треда — workflow ID сессии. Упавшая, снятая (terminate) или
@@ -253,7 +419,6 @@ async def _claim(store, request):
     имени старого владельца с его эпохой: новая эпоха отсекает его поздние
     коммиты. Живой чужой владелец — по-прежнему отказ.
     """
-    operation = request.operation
     try:
         return await _commit(store, request, operation)
     except ThreadStoreConflict:

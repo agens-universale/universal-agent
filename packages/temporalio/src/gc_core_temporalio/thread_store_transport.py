@@ -21,13 +21,14 @@ from gc_core_temporalio.activity_config import (
     DEFAULT_ACTIVITY_SETTINGS,
     activity_options,
 )
-from gc_core_temporalio.sizes import ACTIVITY_INPUT_LIMIT, payload_size
+from gc_core_temporalio.sizes import HistoryLimitExceeded, check_history_size
 from gc_core_temporalio.thread_store_contracts import ThreadStoreReply
 
 _STORE_ERRORS = {
     cls.__name__: cls
     for cls in (
         ExecutionFailure,
+        HistoryLimitExceeded,
         ThreadStoreConflict,
         ThreadStoreOwnershipError,
         ThreadStoreOperationMismatch,
@@ -43,14 +44,9 @@ class ThreadStoreTransport:
         self.settings = settings or DEFAULT_ACTIVITY_SETTINGS["thread_store"]
 
     async def __call__(self, name, request):
-        size = payload_size(dataclasses.asdict(request))
-        if size > ACTIVITY_INPUT_LIMIT:
-            # Больше записи истории — сервер отвергнет команду, и задача
-            # workflow падала бы бесконечно: отказ хода с причиной.
-            raise ExecutionFailure(
-                f"Вход {name} — {size} байт в истории Temporal, больше лимита "
-                f"записи ({ACTIVITY_INPUT_LIMIT})"
-            )
+        # Больше записи истории — сервер отвергнет команду, и задача
+        # workflow падала бы бесконечно: отказ хода с причиной и размером.
+        check_history_size(f"Вход {name}", dataclasses.asdict(request))
         try:
             return await workflow.execute_activity(
                 name,

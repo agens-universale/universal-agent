@@ -3,10 +3,13 @@
 JSON-конвертер Temporal пишет с ``ensure_ascii``: каждый не-ASCII символ —
 ``\\uXXXX`` (6 байт), то есть кириллица в истории втрое тяжелее, чем в UTF-8.
 Пределы записи (2 МБ) поэтому считаются по этой форме, а не по ``encode()``.
-Модуль без зависимостей: его импортирует и код workflow.
+Модуль импортирует и код workflow: только ``json`` и контракт ошибок ядра.
 """
 
+import dataclasses
 import json
+
+from gc_core.execution.contracts import ExecutionFailure
 
 #: Предел входа activity в истории Temporal (запись — 2 МиБ, с запасом под
 #: обёртку вызова).
@@ -20,6 +23,26 @@ def payload_size(value) -> int:
             value, ensure_ascii=True, separators=(",", ":"), default=str
         )
     )
+
+
+class HistoryLimitExceeded(ExecutionFailure):
+    """Значение не помещается в запись истории Temporal (вход или результат
+    activity, вход субагента). Отказ хода, а не сессии: сессия продолжает
+    принимать сообщения."""
+
+
+def check_history_size(what: str, value, limit: int = ACTIVITY_INPUT_LIMIT):
+    """``HistoryLimitExceeded`` с размером, если ``value`` (dataclass — по
+    полям) тяжелее ``limit`` в истории. → размер."""
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        value = dataclasses.asdict(value)
+    size = payload_size(value)
+    if size > limit:
+        raise HistoryLimitExceeded(
+            f"{what} — {size} байт в истории Temporal, больше лимита записи "
+            f"({limit})"
+        )
+    return size
 
 
 def cut_to_payload(text: str, limit: int) -> str:
@@ -36,4 +59,10 @@ def cut_to_payload(text: str, limit: int) -> str:
     return text[:low]
 
 
-__all__ = ["ACTIVITY_INPUT_LIMIT", "cut_to_payload", "payload_size"]
+__all__ = [
+    "ACTIVITY_INPUT_LIMIT",
+    "HistoryLimitExceeded",
+    "check_history_size",
+    "cut_to_payload",
+    "payload_size",
+]

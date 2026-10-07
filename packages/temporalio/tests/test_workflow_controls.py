@@ -562,8 +562,9 @@ async def test_two_big_cyrillic_messages_keep_records_below_the_limit(
 ):
     """Воспроизведение ревью: два сообщения у предела (кириллица) в одной
     сессии. Журнал намерений в meta копил оба текста, и запись со второго
-    хода весила > 2 МБ — дальше вечный сбой. Теперь журнал в meta ограничен,
-    оба хода проходят, записи истории меньше лимита."""
+    хода весила > 2 МБ — дальше вечный сбой. Теперь meta идёт разницей, а
+    тексты — ссылками на сообщения: оба хода проходят, записи истории меньше
+    лимита, журнал целый."""
     from test_message_refs_live import LIMIT, _payload_sizes
 
     monkeypatch.chdir(tmp_path)
@@ -608,5 +609,51 @@ async def test_two_big_cyrillic_messages_keep_records_below_the_limit(
         await asyncio.wait_for(handle.result(), 60)
         meta = contexts.stores["files"].load_meta("test", "big")
     assert largest < LIMIT, largest
-    log = meta.get("user_intent_log") or []
-    assert log and all(len(str(r.get("content"))) < 5_000 for r in log)
+    # Журнал не урезан (как в локальном режиме): оба запроса целиком —
+    # в историю они шли ссылками на тексты сообщений.
+    asks = [
+        r["content"]
+        for r in meta["user_intent_log"]
+        if r["action"] == "user_ask"
+    ]
+    assert asks == [big, "Ж" + big[1:]]
+
+
+async def test_model_reply_over_the_record_limit_fails_the_turn_not_the_session(
+    tmp_path, monkeypatch, scripted_http
+):
+    """Ответ модели больше записи истории (кириллица): ход отказывает с
+    размером в причине, сессия жива — следующее сообщение обрабатывается."""
+    monkeypatch.chdir(tmp_path)
+    url, _requests, script = scripted_http
+    script.extend([[finish("ы" * 400_000)], [finish("second")]])
+    async with runtime(tmp_path, url) as (env, _contexts, _):
+        handle = await env.client.start_workflow(
+            AgentWorkflow.run,
+            RunRequest(
+                "test",
+                "files",
+                "test",
+                "huge",
+                ["первое"],
+                "native-controls",
+                "native-controls",
+                message_ids=["m1"],
+                keep_alive=True,
+            ),
+            id="controls-huge",
+            task_queue="native-controls",
+        )
+        session = session_of(env, "controls-huge")
+        first = await asyncio.wait_for(session.wait("m1"), 120)
+        assert "больше лимита записи" in first["turn_error"]
+        assert "байт" in first["turn_error"]
+        await handle.execute_update(
+            AgentWorkflow.submit_message, UserMessage("m2", "второе")
+        )
+        second = await asyncio.wait_for(session.wait("m2"), 120)
+        assert second["turn"] == 2
+        assert second["turn_error"] is None
+        await handle.signal(AgentWorkflow.close_session)
+        result = await asyncio.wait_for(handle.result(), 60)
+    assert result["exit_code"] == 0

@@ -10,6 +10,7 @@ import json
 import logging
 import uuid
 
+from gc_core.execution.contracts import ExecutionFailure
 from gc_core.structured_output import read_format_description
 from temporalio.client import Client, WithStartWorkflowOperation
 from temporalio.common import WorkflowIDConflictPolicy, WorkflowIDReusePolicy
@@ -149,6 +150,47 @@ class SessionFailed(RuntimeError):
     откроет новый run."""
 
 
+class SessionStuck(SessionFailed):
+    """Задача workflow сессии падает раз за разом (сбой кода, недетерминизм):
+    workflow жив, но ход не идёт. Ожидание прекращено; сессия продолжится
+    сама, когда сбой устранят."""
+
+
+class SettingsMismatch(ValueError):
+    """Настройки приложения расходятся с настройками идущей сессии:
+    сообщение не принято (сессия работает дальше по своим настройкам)."""
+
+
+@contextlib.contextmanager
+def _settings_mismatch():
+    from temporalio.client import WorkflowUpdateFailedError
+
+    try:
+        yield
+    except WorkflowUpdateFailedError as exc:
+        cause = exc.cause
+        if getattr(cause, "type", None) == "SettingsMismatch":
+            raise SettingsMismatch(cause.message) from exc
+        raise
+
+
+class TurnFailed(ExecutionFailure):
+    """Ход отказал (значение не легло в запись истории Temporal), сессия
+    жива и принимает следующие сообщения. Как ``ExecutionFailure`` хода в
+    локальном режиме."""
+
+
+def _raise_turn_error(reply):
+    if reply.get("turn_error"):
+        raise TurnFailed(reply["turn_error"])
+
+
+#: ``wait``: столько попыток задачи workflow подряд — сессия «застряла».
+STUCK_TASK_ATTEMPTS = 3
+#: ``wait``: состояние workflow (``describe``) — раз в столько опросов.
+DESCRIBE_EVERY = 5
+
+
 class MessageNotProcessed(RuntimeError):
     """Сообщение отброшено остановкой хода до того, как ход его взял;
     повтор с тем же ID принимается заново."""
@@ -198,6 +240,10 @@ class AgentSession:
     ):
         self.client = client
         self.task_queue = task_queue
+        #: Явный ``workflow_id`` — подключение к уже идущему workflow (шаг
+        #: ``agent_step``): ``send`` его не запускает, иначе под ID шага
+        #: родился бы чужой workflow и следующий шаг с тем же именем упал бы.
+        self.attached = workflow_id is not None
         self.workflow_id = workflow_id or session_workflow_id(
             agent, store_id, system_id, thread_id
         )
@@ -225,44 +271,80 @@ class AgentSession:
     async def send(self, text, *, message_id=None):
         """Отправить сообщение; сессия открывается при необходимости.
         Возвращает ID сообщения (повтор с тем же ID — не второй ход)."""
-        message = UserMessage(message_id or uuid.uuid4().hex, text)
-        await AgentClient(
-            self.client, workflow_queue=self.task_queue
-        ).submit_with_start(self.workflow_id, self.request, message)
+        message = UserMessage(
+            message_id or uuid.uuid4().hex,
+            text,
+            settings_fingerprint=self.request.settings_fingerprint,
+        )
+        client = AgentClient(self.client, workflow_queue=self.task_queue)
+        with _settings_mismatch():
+            if self.attached:
+                await client.submit_message(self.workflow_id, message)
+            else:
+                await client.submit_with_start(
+                    self.workflow_id, self.request, message
+                )
         return message.message_id
 
     async def send_batch(self, items):
         """Несколько сообщений ``[(текст, ID | None), …]`` одним update — в
         один ход. Возвращает их ID."""
         messages = [
-            UserMessage(message_id or uuid.uuid4().hex, text)
+            UserMessage(
+                message_id or uuid.uuid4().hex,
+                text,
+                settings_fingerprint=self.request.settings_fingerprint,
+            )
             for text, message_id in items
         ]
-        await AgentClient(
-            self.client, workflow_queue=self.task_queue
-        ).submit_batch_with_start(self.workflow_id, self.request, messages)
+        with _settings_mismatch():
+            if self.attached:
+                await self.handle.execute_update(
+                    AgentWorkflow.submit_batch, messages
+                )
+            else:
+                await AgentClient(
+                    self.client, workflow_queue=self.task_queue
+                ).submit_batch_with_start(
+                    self.workflow_id, self.request, messages
+                )
         return [message.message_id for message in messages]
 
-    async def wait(self, message_id, *, poll=0.2, max_poll=2.0):
+    async def wait(
+        self,
+        message_id,
+        *,
+        poll=0.2,
+        max_poll=2.0,
+        timeout=None,
+        stuck_attempts=STUCK_TASK_ATTEMPTS,
+    ):
         """Дождаться хода, обработавшего сообщение: ответ этого хода, его
         номер; ``delivered: False`` — ход остановили до сообщения.
 
         Опрос query ``message_state`` с растущей паузой: ожидание не занимает
         лимит одновременных update на сервере и не держит workflow (его
-        Continue-As-New, закрытие). Упавшая сессия — ``SessionFailed``.
+        Continue-As-New, закрытие). Обычно один запрос за шаг; состояние
+        workflow (``describe``) — при ошибке query, на первом шаге и
+        раз в ``DESCRIBE_EVERY`` шагов. Упавшая сессия — ``SessionFailed``; задача
+        workflow падает ``stuck_attempts`` раз подряд — ``SessionStuck``;
+        ``timeout`` (секунды) истёк — ``TimeoutError``.
         """
         from temporalio.service import RPCError
 
-        delay = poll
+        loop = asyncio.get_running_loop()
+        deadline = None if timeout is None else loop.time() + timeout
+        delay, step = poll, 0
         while True:
+            step += 1
+            failed_query = False
             try:
                 state = await self.handle.query(
                     AgentWorkflow.message_state, message_id
                 )
             except RPCError:
-                # Задача workflow в сбое или сессия завершена: причина — если
-                # она упала; иначе (ещё стартует, сбой задачи) — ждать дальше.
-                state = None
+                # Задача workflow в сбое, сессия завершена или ещё стартует.
+                state, failed_query = None, True
             if state is not None:
                 kind = state["state"]
                 if kind == "done":
@@ -271,15 +353,23 @@ class AgentSession:
                     return {**state, "delivered": False, "answer": None}
                 if kind == "unknown":
                     raise ValueError(f"Unknown message: {message_id}")
-            reason = await self._failure(pending_message=message_id)
-            if reason is not None:
-                raise reason
+            if failed_query or step == 1 or step % DESCRIBE_EVERY == 0:
+                reason = await self._failure(
+                    pending_message=message_id, stuck_attempts=stuck_attempts
+                )
+                if reason is not None:
+                    raise reason
+            if deadline is not None and loop.time() + delay > deadline:
+                raise TimeoutError(
+                    f"Сообщение {message_id} не обработано за {timeout} с"
+                )
             await asyncio.sleep(delay)
             delay = min(delay * 1.5, max_poll)
 
-    async def _failure(self, pending_message=None):
+    async def _failure(self, pending_message=None, stuck_attempts=None):
         """Причина, по которой ответа не будет: сессия упала
-        (``SessionFailed`` с исходной причиной) или — для ещё не обработанного
+        (``SessionFailed`` с исходной причиной), её задача workflow раз за
+        разом падает (``SessionStuck``) или — для ещё не обработанного
         ``pending_message`` — завершилась иначе (закрыта, прервана)."""
         from temporalio.client import (
             WorkflowExecutionStatus,
@@ -294,6 +384,15 @@ class AgentSession:
             WorkflowExecutionStatus.RUNNING,
             WorkflowExecutionStatus.CONTINUED_AS_NEW,
         ):
+            task = description.raw_description.pending_workflow_task
+            attempt = task.attempt if task is not None else 0
+            if stuck_attempts and attempt >= stuck_attempts:
+                return SessionStuck(
+                    f"Задача workflow {self.handle.id} падает (попытка "
+                    f"{attempt}): причина — в логе воркера и в истории "
+                    "(WorkflowTaskFailed). Сессия продолжится, когда сбой "
+                    "устранят (например, исправленный воркер)."
+                )
             return None
         if description.status != WorkflowExecutionStatus.FAILED:
             if pending_message is None:
@@ -324,6 +423,7 @@ class AgentSession:
         reply = await self.wait(await self.send(text, message_id=message_id))
         if not reply["delivered"]:
             raise MessageNotProcessed(reply["message_id"])
+        _raise_turn_error(reply)
         return reply["answer"]
 
     async def answer_human(self, request_id, answer, *, reply_id=None):
@@ -462,6 +562,7 @@ class _DurableAgentRuntime:
                     session.request.thread_id,
                     len(self._tail) + (0 if reply["delivered"] else 1),
                 )
+            _raise_turn_error(reply)
             return reply["answer"]
         finally:
             self._running, self._tail = False, []

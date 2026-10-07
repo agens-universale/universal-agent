@@ -135,10 +135,29 @@ def seed_history(store, name):
     store.append_messages("test", "parity", messages)
 
 
+def merged_parts(traces):
+    """Трасса, пришедшая частями (``trace_part``), — снова одной записью."""
+    merged = []
+    for record in deepcopy(traces):
+        data = record["trace_data"]
+        part = data.pop("trace_part", None)
+        if part is None or part[0] == 1:
+            merged.append(record)
+            continue
+        target = merged[-1]["trace_data"]
+        for key, value in data.items():
+            if isinstance(value, list) and isinstance(target.get(key), list):
+                target[key] += value
+            else:
+                target[key] = value
+    return merged
+
+
 def normalized_traces(traces, workspace):
-    values = deepcopy(traces)
+    values = merged_parts(traces)
     for record in values:
         record["id"] = record.pop("newly_summarized_message_id")
+        record["trace_data"] = dict(sorted(record["trace_data"].items()))
     return normalize(values, workspace)
 
 

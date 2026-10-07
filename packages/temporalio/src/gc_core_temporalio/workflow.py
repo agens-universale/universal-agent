@@ -39,6 +39,13 @@ from gc_core_temporalio.operations import (
     WorkflowOperations,
     session_failure,
 )
+from gc_core_temporalio.public_config import fingerprint_mismatch
+from gc_core_temporalio.sizes import (
+    ACTIVITY_INPUT_LIMIT,
+    HistoryLimitExceeded,
+    cut_to_payload,
+    payload_size,
+)
 from gc_core_temporalio.thread_store_proxy import TemporalThreadStore
 from gc_core_temporalio.thread_store_transport import ThreadStoreTransport
 
@@ -63,6 +70,75 @@ def _new_build_announced():
 
 def _message_digest(text):
     return hashlib.sha256(text.encode()).hexdigest()
+
+
+#: Потолок входа Continue-As-New: запись истории (лимит 2 МБ) с запасом.
+RESUME_BUDGET = 1_000_000
+#: Ответ хода в состоянии, переживающем Continue-As-New, — не тяжелее.
+ANSWER_KEEP_BYTES = 256 * 1024
+_ANSWER_FIELDS = ("answer", "formatted_answer", "post_error")
+
+
+def _bounded_outcome(outcome):
+    """Итог хода для переноса: длинный ответ укорочен с пометкой
+    ``answer_truncated`` (полный — последним сообщением в треде)."""
+    out = dict(outcome)
+    for field in _ANSWER_FIELDS:
+        value = out.get(field)
+        if value is None or payload_size(value) <= ANSWER_KEEP_BYTES:
+            continue
+        out[field] = (
+            cut_to_payload(value, ANSWER_KEEP_BYTES)
+            if isinstance(value, str)
+            else None
+        )
+        out["answer_truncated"] = True
+    return out
+
+
+def _fit_resume(resume):
+    """Состояние для Continue-As-New в пределах ``RESUME_BUDGET``.
+
+    Вход CAN — одна запись истории: больше лимита — сервер отвергает команду,
+    и задача workflow падала бы бесконечно (сессия встала бы). Сжимается то,
+    без чего сессия работает: ответы ходов (полные — в треде), тексты
+    отброшенных остановкой сообщений (нужны только их ID), старые итоги
+    ходов и ответы человеку.
+    """
+    bounded = {
+        **_bounded_outcome(
+            {field: getattr(resume, field) for field in _ANSWER_FIELDS}
+        )
+    }
+    bounded.pop("answer_truncated", None)
+    resume = replace(
+        resume,
+        **bounded,
+        turn_outcomes={
+            turn: _bounded_outcome(outcome)
+            for turn, outcome in resume.turn_outcomes.items()
+        },
+    )
+    if payload_size(asdict(resume)) <= RESUME_BUDGET:
+        return resume
+    resume = replace(
+        resume,
+        undelivered=[
+            {"message_id": value.get("message_id")}
+            for value in resume.undelivered
+        ],
+    )
+    outcomes = dict(resume.turn_outcomes)
+    replies = dict(resume.human_replies)
+    while payload_size(asdict(resume)) > RESUME_BUDGET:
+        if len(outcomes) > 1:
+            outcomes.pop(min(outcomes, key=int))
+        elif replies:
+            replies.pop(next(iter(replies)))
+        else:
+            break
+        resume = replace(resume, turn_outcomes=outcomes, human_replies=replies)
+    return resume
 
 
 def _recent(values):
@@ -115,6 +191,13 @@ class AgentWorkflow:
         #: Прокси треда с подтверждённым владением (после claim или resume).
         self.store = None
         self.owner_released = False
+        #: Continue-As-New не уместился в запись истории: сессия живёт в этом
+        #: run (новая сборка не дёргает его снова).
+        self.continue_blocked = False
+        #: Отказ последнего хода (значение больше записи истории).
+        self.turn_error = None
+        #: Отпечаток настроек из сообщений: сверяется воркером в начале хода.
+        self.message_fingerprint = None
         #: Уровень activities.thread_store; до подготовки хода — умолчания.
         self.store_settings = None
 
@@ -224,6 +307,23 @@ class AgentWorkflow:
         for message in messages:
             message.validate()
 
+    def _check_fingerprint(self, fingerprint):
+        """Настройки отправителя против уже известных сессии: расходятся —
+        отказ этого сообщения сразу (сессия работает дальше по своим);
+        сессия их ещё не знает — сверит воркер в начале хода."""
+        if not fingerprint:
+            return
+        known = self.message_fingerprint or self.start.settings_fingerprint
+        mismatch = fingerprint_mismatch(fingerprint, known) if known else []
+        if mismatch:
+            raise ApplicationError(
+                "Настройки приложения расходятся с настройками сессии в "
+                f"секциях: {', '.join(mismatch)}",
+                type="SettingsMismatch",
+                non_retryable=True,
+            )
+        self.message_fingerprint = fingerprint
+
     def _accept(self, message):
         """Принять сообщение: дедупликация по ID, в идущий ход или в
         очередь следующего."""
@@ -240,6 +340,7 @@ class AgentWorkflow:
             # Повтор сообщения, отброшенного остановкой хода: принять заново.
         if self.closed:
             raise ApplicationError("Session is closing", non_retryable=True)
+        self._check_fingerprint(message.settings_fingerprint)
         self._take_undelivered(message.message_id)
         self.accepted[message.message_id] = digest
         value = {
@@ -438,7 +539,8 @@ class AgentWorkflow:
             "agent.context.prepare",
             {
                 "store_id": start.store_id,
-                "settings_fingerprint": start.settings_fingerprint,
+                "settings_fingerprint": self.message_fingerprint
+                or start.settings_fingerprint,
             },
             PreparedContext,
         )
@@ -524,7 +626,7 @@ class AgentWorkflow:
         self.phase = "running"
         self.accepting_inputs = True
         ran = False
-        self.formatted_answer = self.post_error = None
+        self.formatted_answer = self.post_error = self.turn_error = None
         try:
             try:
                 self.answer = await self.executor.arun(
@@ -538,8 +640,13 @@ class AgentWorkflow:
                 # stop отменил запрос к модели вне шага цикла (сжатие
                 # контекста и т.п.) — ход остановлен, не упал.
                 self.answer = None
-            ran = True
-            if start.format_text is not None:
+            except HistoryLimitExceeded as exc:
+                # Значение не легло в запись истории: отказ хода, не сессии
+                # (следующий ход — новый run после Continue-As-New).
+                workflow.logger.warning("Turn failed: %s", exc)
+                self.answer, self.turn_error = None, str(exc)
+            ran = self.turn_error is None
+            if ran and start.format_text is not None:
                 self.phase = "postprocessing"
                 try:
                     self.formatted_answer = await arephrase_turn_outcome(
@@ -558,7 +665,11 @@ class AgentWorkflow:
             try:
                 # stop/ошибка: отложенные шаги не должны остаться только в
                 # истории workflow.
-                await self.executor.aflush_thread()
+                try:
+                    await self.executor.aflush_thread()
+                except HistoryLimitExceeded as exc:
+                    workflow.logger.warning("Turn flush failed: %s", exc)
+                    self.turn_error = self.turn_error or str(exc)
                 if ran and start.format_text is not None:
                     self.phase = "accounting"
                     await self.executor.aclose_run_accounting()
@@ -585,6 +696,7 @@ class AgentWorkflow:
             "terminal_outcome": self.executor.last_terminal_outcome,
             "formatted_answer": self.formatted_answer,
             "post_error": self.post_error,
+            "turn_error": self.turn_error,
         }
         # Последние ходы: ответы бывают большими, а состояние едет в
         # Continue-As-New (запись истории).
@@ -672,7 +784,10 @@ class AgentWorkflow:
                     lambda: (
                         bool(self.pending_messages)
                         or self.closed
-                        or _new_build_announced()
+                        or (
+                            _new_build_announced()
+                            and not self.continue_blocked
+                        )
                     ),
                     timeout=IDLE_REFRESH,
                 )
@@ -690,15 +805,30 @@ class AgentWorkflow:
         await workflow.wait_condition(workflow.all_handlers_finished)
         await self._release_owner(start)
         self.phase = "stopped" if self.stop_requested else "completed"
-        return {
-            "answer": self.answer,
+        # Результат workflow — тоже запись истории: ответ — в пределах
+        # (полный — в треде), отброшенные сообщения — без текста, если много.
+        result = {
+            **_bounded_outcome(
+                {
+                    "answer": self.answer,
+                    "formatted_answer": self.formatted_answer,
+                    "post_error": self.post_error,
+                }
+            ),
             "undelivered": [*self.undelivered, *self.pending_messages],
             "terminal_outcome": self.terminal_outcome,
             "turns": self.turns,
-            "formatted_answer": self.formatted_answer,
-            "post_error": self.post_error,
-            "exit_code": 1 if self.post_error or self.terminal_outcome else 0,
+            "turn_error": self.turn_error,
+            "exit_code": 1
+            if self.post_error or self.terminal_outcome or self.turn_error
+            else 0,
         }
+        if payload_size(result) > RESUME_BUDGET:
+            result["undelivered"] = [
+                {"message_id": value.get("message_id")}
+                for value in result["undelivered"]
+            ]
+        return result
 
     async def _release_owner(self, start):
         """Снять владение тредом, если эта цепочка run его держит.
@@ -758,6 +888,17 @@ class AgentWorkflow:
             if store
             else (self.resumed_store[1] if self.resumed_store else None),
         )
+        resume = _fit_resume(resume)
+        size = payload_size(asdict(resume))
+        if size > ACTIVITY_INPUT_LIMIT:
+            # Не уменьшить (принятый ввод не выбросить): сессия продолжается
+            # в этом run, без Continue-As-New, — не вечный сбой задачи.
+            workflow.logger.warning(
+                "Continue-As-New skipped: session state is %s bytes", size
+            )
+            self.continue_blocked = True
+            self.phase = "idle"
+            return
         # Без await между проверкой и CAN: весь принятый ввод уже в resume.
         workflow.continue_as_new(
             replace(start, messages=[], message_ids=None, resume=resume),

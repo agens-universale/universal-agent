@@ -259,6 +259,90 @@ async def test_settings_mismatch_between_app_and_worker_fails_the_turn(
     assert not requests  # до модели дело не дошло
 
 
+async def test_send_with_other_settings_is_rejected_and_session_continues(
+    tmp_path,
+    monkeypatch,
+    scripted_http,  # noqa: F811
+):
+    """Сессия идёт с настройками приложения A; приложение B с другими
+    настройками пишет в тот же тред — его сообщение отклонено сразу
+    (``SettingsMismatch``), сессия A работает дальше."""
+    import pytest
+    from gc_core_temporalio import SettingsMismatch
+
+    monkeypatch.chdir(tmp_path)
+    url, requests, script = scripted_http
+    script.extend([[finish("first")], [finish("second")]])
+    settings = agent_settings(url, tmp_path)
+    plugin = AgentPlugin(
+        {"shop": settings},
+        thread_store=DurableFileThreadStore(str(tmp_path / "threads")),
+    )
+    async with await WorkflowEnvironment.start_local(
+        dev_server_existing_path=temporal_cli()
+    ) as env:
+        async with Worker(env.client, task_queue="shop", plugins=[plugin]):
+            same = AgentSession(
+                env.client,
+                agent="shop",
+                thread_id="t9",
+                task_queue="shop",
+                settings=settings,
+            )
+            other = AgentSession(
+                env.client,
+                agent="shop",
+                thread_id="t9",
+                task_queue="shop",
+                settings=settings.with_overrides({"agent.max_steps": 11}),
+            )
+            await asyncio.wait_for(same.ask("первое"), 60)
+            with pytest.raises(SettingsMismatch, match="agent"):
+                await other.send("чужое")
+            second = await asyncio.wait_for(same.ask("второе"), 60)
+            await same.close()
+    assert "second" in json.dumps(second, ensure_ascii=False)
+    assert len(requests) == 2
+
+
+def test_fingerprint_ignores_process_local_paths_and_ui_sections(tmp_path):
+    """Те же настройки из разных каталогов (пути промптов абсолютны от
+    каталога конфига) и с разными tui/pricing — один отпечаток; поведение
+    агента (max_steps) — другой."""
+    from gc_core.config_modules.root import AppConfig, resolve_paths
+    from gc_core_temporalio.public_config import settings_fingerprint
+
+    document = {
+        "summary": {"chat_completions_summary_prompt_path": "p/summary.md"},
+        "intent_scope": {
+            "intent_scope_tool_summary_prompt_path": "p/tool.md",
+        },
+        "security": {"write_guard": {"extra_paths": ["data"]}},
+    }
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    first = resolve_paths(
+        AppConfig.model_validate(document), str(tmp_path / "a")
+    )
+    second = resolve_paths(
+        AppConfig.model_validate(
+            {
+                **document,
+                "tui": {"stream_display": "answer"},
+                "pricing": {"currency": "EUR"},
+            }
+        ),
+        str(tmp_path / "b"),
+    )
+    assert (
+        first.summary.chat_completions_summary_prompt_path
+        != second.summary.chat_completions_summary_prompt_path
+    )
+    assert settings_fingerprint(first) == settings_fingerprint(second)
+    changed = AppConfig.model_validate({**document, "agent": {"max_steps": 3}})
+    assert settings_fingerprint(changed) != settings_fingerprint(first)
+
+
 async def test_durable_send_and_stop_follow_local_semantics(
     tmp_path,
     monkeypatch,

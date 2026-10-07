@@ -20,6 +20,14 @@
 останавливает ход — ``AgentSession(..., workflow_id=step_workflow_id(...))``.
 Воркер процесса должен нести ``AgentPlugin`` (он регистрирует
 ``AgentWorkflow`` и activities агента).
+
+Тред шага занимает дочерний workflow: пока в том же треде идёт сессия
+(``AgentSession``) или другой шаг, этот отказывает (тред занят). Родитель
+закрылся — по умолчанию Temporal снимает и ребёнка (``ParentClosePolicy.
+TERMINATE``), тред освобождается при следующем захвате. Свои параметры
+дочернего workflow (``parent_close_policy``, ``execution_timeout``,
+``retry_policy``…) — именованными аргументами ``agent_step``, как у
+``workflow.execute_child_workflow``.
 """
 
 from __future__ import annotations
@@ -31,8 +39,10 @@ from gc_core_temporalio import sandbox_passthrough  # noqa: F401
 
 # isort: split
 from temporalio import workflow
+from temporalio.exceptions import ApplicationError
 
-from gc_core_temporalio.contracts import RunRequest
+from gc_core_temporalio.contracts import RunRequest, UserMessage
+from gc_core_temporalio.sizes import payload_size
 from gc_core_temporalio.workflow import AgentWorkflow
 
 
@@ -64,15 +74,32 @@ async def agent_step(
     step: str | None = None,
     task_queue: str | None = None,
     format_text: str | None = None,
+    **child_options: Any,
 ) -> AgentStepResult:
     """Один ход агента ``agent`` в треде ``thread_id`` — в коде workflow.
 
     ``step`` — имя шага для ID дочернего workflow (по умолчанию ``thread_id``;
     два шага одного треда подряд могут делить имя — первый к тому времени
     завершён). ``task_queue`` — очередь воркера с ``AgentPlugin``; по
-    умолчанию — очередь текущего workflow. Отказ хода — исключение
-    дочернего workflow (``ChildWorkflowError``).
+    умолчанию — очередь текущего workflow. ``child_options`` — параметры
+    ``workflow.execute_child_workflow`` (``parent_close_policy``,
+    ``execution_timeout``, ``retry_policy``…). Отказ хода — исключение:
+    ``ChildWorkflowError`` (сбой сессии) или ``ApplicationError`` типа
+    ``TurnFailed`` (ход не уложился в запись истории); слишком большой
+    промпт — ``ApplicationError`` типа ``HistoryLimitExceeded`` до запуска.
     """
+    message_id = str(workflow.uuid4())
+    try:
+        UserMessage(message_id, prompt).validate()
+    except ValueError as exc:
+        # Исключение не-ApplicationError в коде workflow роняло бы задачу
+        # родителя бесконечно; здесь — отказ шага с размером.
+        raise ApplicationError(
+            f"Промпт шага — {payload_size(prompt)} байт в истории Temporal: "
+            f"{exc}",
+            type="HistoryLimitExceeded",
+            non_retryable=True,
+        ) from None
     child_id = step_workflow_id(workflow.info().workflow_id, step or thread_id)
     result = await workflow.execute_child_workflow(
         AgentWorkflow.run,
@@ -84,12 +111,17 @@ async def agent_step(
             [prompt],
             # Детерминированный и уникальный: replay даёт тот же ID, а два
             # шага одного треда не склеиваются дедупликацией.
-            message_ids=[str(workflow.uuid4())],
+            message_ids=[message_id],
             format_text=format_text,
         ),
         id=child_id,
         task_queue=task_queue or workflow.info().task_queue,
+        **child_options,
     )
+    if result.get("turn_error"):
+        raise ApplicationError(
+            result["turn_error"], type="TurnFailed", non_retryable=True
+        )
     return AgentStepResult(
         answer=result.get("answer"),
         terminal_outcome=result.get("terminal_outcome"),

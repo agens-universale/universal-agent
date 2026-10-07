@@ -26,7 +26,7 @@ from gc_core_temporalio.child_contracts import (
 )
 from gc_core_temporalio.operations import restore_domain_error
 from gc_core_temporalio.public_config import public_config_snapshot
-from gc_core_temporalio.sizes import ACTIVITY_INPUT_LIMIT, payload_size
+from gc_core_temporalio.sizes import check_history_size
 
 
 class RemoteChildInput:
@@ -227,15 +227,12 @@ class ChildTransport:
             self.store.owner_epoch,
             self.store._generation,
         )
-        size = payload_size(dataclasses.asdict(request))
-        if size > ACTIVITY_INPUT_LIMIT:
-            # Вход дочернего workflow — запись истории родителя: больше
-            # лимита — сервер отверг бы команду, и задача родителя падала бы
-            # бесконечно. Ошибка инструмента вместо вечного цикла.
-            raise ExecutionFailure(
-                f"Вход субагента {tool_name} — {size} байт в истории "
-                f"Temporal, больше лимита записи ({ACTIVITY_INPUT_LIMIT})"
-            )
+        # Вход дочернего workflow — запись истории родителя: больше
+        # лимита — сервер отверг бы команду, и задача родителя падала бы
+        # бесконечно. Ошибка вместо вечного цикла.
+        check_history_size(
+            f"Вход субагента {tool_name}", dataclasses.asdict(request)
+        )
         self.active_child = child_id
         self.checkpoint_failure = None
         scope = RemoteChildInput(parent_call_id)
