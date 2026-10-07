@@ -65,6 +65,34 @@ def test_ask_human_question_and_response_events(tmp_path, monkeypatch):
     assert events["ask_human_response"]["response"] == "hello"
 
 
+def test_ask_human_prints_dialog_only_outside_durable_execution(
+    tmp_path, monkeypatch, capsys
+):
+    """CLI видит вопрос в stderr, как раньше; код workflow (durable) — не
+    печатает (печать повторялась бы при replay), журнал прогона тот же."""
+    logger, path, _ = create_run_logger(
+        _jsonl_cfg(tmp_path), run_id="ah3", agent_kind="main"
+    )
+    answers = iter(["hello", "", "again", ""])
+    monkeypatch.setattr(builtins, "input", lambda: next(answers))
+
+    local = _FakeCtx(logger)
+    CallableTool(AskHuman(ctx=local))(question="Вопрос?")
+    assert "AI ASKS HUMAN" in capsys.readouterr().err
+
+    durable = _FakeCtx(logger)
+    durable.durable_execution = True
+    # Ответ в durable идёт портом приложения (здесь его нет) — важна печать.
+    CallableTool(AskHuman(ctx=durable))(question="Вопрос?")
+    assert "AI ASKS HUMAN" not in capsys.readouterr().err
+    for h in logger.handlers:
+        h.flush()
+    questions = [
+        e for e in _read_events(path) if e["event"] == "ask_human_question"
+    ]
+    assert len(questions) == 2
+
+
 def test_ask_human_interrupted_event(tmp_path, monkeypatch):
     logger, path, _ = create_run_logger(
         _jsonl_cfg(tmp_path), run_id="ah2", agent_kind="main"

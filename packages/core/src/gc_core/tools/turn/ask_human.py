@@ -355,14 +355,13 @@ Do not implement until they confirm.
             prose=question,
             tool_name=via_name,
         )
-        print("\n" + "=" * 60, file=sys.stderr)
-        print("AI ASKS HUMAN:", file=sys.stderr)
-        print("-" * 60, file=sys.stderr)
-        print(question, file=sys.stderr)
-        print("-" * 60, file=sys.stderr)
-        print(
-            "Please enter your response (end with EOF or empty line):",
-            file=sys.stderr,
+        self._console("\n" + "=" * 60)
+        self._console("AI ASKS HUMAN:")
+        self._console("-" * 60)
+        self._console(question)
+        self._console("-" * 60)
+        self._console(
+            "Please enter your response (end with EOF or empty line):"
         )
         self._run_logger().info(
             "ask_human_question",
@@ -377,8 +376,8 @@ Do not implement until they confirm.
 
         if response == "":
             response = "(empty response)"
-        print(f"Human responded: {response!r}", file=sys.stderr)
-        print("=" * 60 + "\n", file=sys.stderr)
+        self._console(f"Human responded: {response!r}")
+        self._console("=" * 60 + "\n")
         self._run_logger().info(
             "ask_human_response",
             extra={"event": "ask_human_response", "response": response},
@@ -414,10 +413,17 @@ Do not implement until they confirm.
                 commit_to_run_thread(self._ctx, att).to_dict()
             )
 
+    def _console(self, *values: Any) -> None:
+        """Строка диалога с человеком в stderr (CLI). В durable-исполнении
+        (код workflow) — нет: вопрос идёт приложению, а печать повторялась
+        бы при каждом replay; вопрос и ответ остаются в журнале прогона."""
+        if not getattr(self._ctx, "durable_execution", False):
+            print(*values, file=sys.stderr)
+
     def _ask_interrupted(self, question: str, via_name: Optional[str]) -> str:
         from gc_core.tools.subagents.progress import emit_progress
 
-        print("\n\n[Interaction interrupted by user]", file=sys.stderr)
+        self._console("\n\n[Interaction interrupted by user]")
         self._run_logger().warning(
             "ask_human_interrupted",
             extra={"event": "ask_human_interrupted"},
@@ -446,7 +452,7 @@ Do not implement until they confirm.
         from gc_core.tools.subagents.progress import emit_progress
 
         error_msg = f"(error reading input: {exc!s})"
-        print(f"[turn_ask_human error]: {error_msg}", file=sys.stderr)
+        self._console(f"[turn_ask_human error]: {error_msg}")
         self._run_logger().warning(
             "ask_human_error",
             extra={"event": "ask_human_error", "error": error_msg},

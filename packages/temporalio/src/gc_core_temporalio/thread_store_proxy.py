@@ -237,8 +237,9 @@ class TemporalThreadStore:
             reply = await self._call("agent.thread.commit", request)
         except BaseException:
             # No acknowledged outcome: never bridge this gap on a later call.
+            # Базу meta не забывать: воркер сверяет её версию с хранилищем, а
+            # без базы следующая запись ушла бы полной meta.
             self._metadata_acks.pop(key, None)
-            self._meta.pop(key, None)
             raise
         receipt = reply.receipt
         if (
@@ -247,7 +248,6 @@ class TemporalThreadStore:
             or receipt.kind != operation.kind
         ):
             self._metadata_acks.pop(key, None)
-            self._meta.pop(key, None)
             raise ExecutionFailure(
                 "Thread store did not acknowledge operation"
             )

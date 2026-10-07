@@ -212,6 +212,39 @@ def test_native_retry_policy_never_makes_a_tool_effect_retry_forever(
     assert explicit["retry_policy"].maximum_attempts == 3
 
 
+def test_native_retry_policy_keeps_level_attempt_limits(tmp_path, monkeypatch):
+    """``activity=ActivityConfig(retry_policy=RetryPolicy(...паузы...))``:
+    чтения треда и ресурсы не теряют предел попыток (0 по умолчанию у
+    RetryPolicy — «не задано»), модель по-прежнему ждёт без ограничения."""
+    from datetime import timedelta
+
+    from gc_core.thread_store_file_durable import DurableFileThreadStore
+    from gc_core_temporalio import AgentPlugin
+    from gc_core_temporalio.activity_config import (
+        activity_options,
+        resolve_activity_settings,
+    )
+    from temporalio.common import RetryPolicy
+    from temporalio.workflow import ActivityConfig
+
+    monkeypatch.chdir(tmp_path)
+    plugin = AgentPlugin(
+        {"a": {}},
+        thread_store=DurableFileThreadStore(str(tmp_path / "t")),
+        activity=ActivityConfig(
+            retry_policy=RetryPolicy(maximum_interval=timedelta(seconds=7))
+        ),
+    )
+    levels = resolve_activity_settings(plugin.config.activities)
+    for level in ("resource", "thread_store"):
+        policy = activity_options(levels[level])["retry_policy"]
+        assert policy.maximum_attempts == 5, level
+        assert policy.maximum_interval == timedelta(seconds=7)
+    assert (
+        activity_options(levels["model"])["retry_policy"].maximum_attempts == 0
+    )
+
+
 async def test_retried_effect_with_changed_guard_facts_is_outcome_unknown(
     monkeypatch,
 ):

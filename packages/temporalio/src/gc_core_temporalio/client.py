@@ -525,6 +525,12 @@ class _DurableAgentRuntime:
     async def run(
         self, messages, *, thread_id=None, system="sdk", message_ids=None
     ):
+        if self._running:
+            # Состояние хода (сессия, хвост) — одно на агента, как у
+            # локального исполнителя: второй run разошёлся бы с первым.
+            raise RuntimeError(
+                "run уже идёт: durable-агент ведёт один ход за раз"
+            )
         if self._errors:
             raise self._errors.pop(0)
         # Без thread_id у локального агента нет истории: здесь — новый тред
@@ -536,11 +542,13 @@ class _DurableAgentRuntime:
             (text, ids[index] if index < len(ids) else None)
             for index, text in enumerate(messages)
         ]
-        batch, self._deferred = [*batch, *self._deferred], []
+        deferred = list(self._deferred)
         self._active, self._running, self._tail = session, True, []
         try:
             # Все сообщения — одним update, в один ход (как локальный run).
-            last = (await session.send_batch(batch))[-1]
+            last = (await session.send_batch([*batch, *deferred]))[-1]
+            # Отложенные send ушли с этим ходом; сбой отправки их не теряет.
+            del self._deferred[: len(deferred)]
             reply = await session.wait(last)
             # Хвост: присланное send() во время хода — его ходы тоже часть
             # этого run, ответ — последнего из них (как локальный run).
