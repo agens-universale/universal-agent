@@ -5,16 +5,16 @@
   "model_queue": "ua-model",
   "resource_queue": "ua-resource-local",
   "worker_id": "local",
-  "state_dir": "${ENV:UA_NATIVE_STATE}",
+  "state_dir": "${ENV:UA_STATE}",
   "thread_stores": {
     "files": {
       "kind": "file",
-      "path": "${ENV:UA_NATIVE_STATE}/threads"
+      "path": "${ENV:UA_STATE}/threads"
     }
   },
   "profiles": {
     "production": {
-      "workspace": "${ENV:UA_NATIVE_WORKSPACE}",
+      "workspace": "${ENV:UA_WORKSPACE}",
       "store_id": "files",
       "core": {
         "backend": {

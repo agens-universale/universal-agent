@@ -8,6 +8,7 @@ import argparse
 import asyncio
 import dataclasses
 import logging
+import os
 from contextlib import AsyncExitStack
 from pathlib import Path
 
@@ -21,7 +22,6 @@ from gc_core_temporalio.activities import AgentActivities
 from gc_core_temporalio.activity_config import resolve_activity_settings
 from gc_core_temporalio.child_preparation import ChildActivities
 from gc_core_temporalio.child_workflow import SubagentWorkflow
-from gc_core_temporalio.maintenance import WorkerMaintenance
 from gc_core_temporalio.provider import (
     ContextProvider,
     WorkerConfig,
@@ -52,13 +52,44 @@ def build_stores(config):
     return stores
 
 
-def build_runtime(config):
-    stores = build_stores(config)
+def store_paths(store):
+    """Пути хранилища тредов для ``protected_paths``: агент не читает и не
+    правит чужие треды. Своё хранилище объявляет их методом
+    ``protected_paths()``; без него путь не известен и не защищается."""
+    declared = getattr(store, "protected_paths", None)
+    if callable(declared):
+        return list(declared())
+    if isinstance(store, SQLiteThreadStore):
+        return [
+            store.path,
+            *(
+                f"{store.path}{suffix}"
+                for suffix in ("-wal", "-shm", "-journal")
+            ),
+        ]
+    directory = getattr(store, "_dir", None)
+    return [str(directory)] if directory else []
+
+
+def build_runtime(config, *, stores=None):
+    """Провайдер контекста и activities. ``stores`` — готовые хранилища тредов
+    (объекты); без них — из ``config.thread_stores``."""
+    if stores is None:
+        stores = build_stores(config)
+        paths = config.state_paths()
+    else:
+        stores = dict(stores)
+        paths = []
+        for store in stores.values():
+            for path in store_paths(store):
+                for form in (os.path.abspath(path), os.path.realpath(path)):
+                    if form not in paths:
+                        paths.append(form)
     provider = ContextProvider(
         profiles=config.profiles,
         stores=stores,
         resource_host=WorkerResourceHost(config.worker_id),
-        state_paths=config.state_paths(),
+        state_paths=paths,
     )
     native = AgentActivities(
         context_provider=provider,
@@ -179,6 +210,15 @@ def worker_options(config, native, threads):
     return list(queues.values())
 
 
+def default_build_id():
+    """Номер сборки для Worker Versioning: версия пакета и хэш исходников
+    ``gc_core`` и ``gc_core_temporalio`` (правка кода без подъёма версии —
+    тоже новая сборка). Для ``WorkerDeploymentVersion(build_id=...)``."""
+    from gc_core_temporalio.provider import WorkerVersioningConfig
+
+    return WorkerVersioningConfig().resolved_build_id()
+
+
 def deployment_config(config):
     """``WorkerDeploymentConfig`` при включённом Worker Versioning."""
     versioning = config.versioning
@@ -226,40 +266,53 @@ async def set_current_version(client, config, *, attempts=50, delay=0.2):
             await asyncio.sleep(delay)
 
 
-async def serve(config):
-    provider, native, threads = build_runtime(config)
-    try:
+async def run_worker(config, *, client=None):
+    """Воркер по конфигу: нативные ``Client``/``Worker`` с ``AgentPlugin``.
+
+    По ``Worker`` на каждую различную очередь конфига (workflow, модель,
+    ресурсы); до остановки процесса. ``client`` — уже подключённый (TLS,
+    авторизация — на стороне приложения); без него — ``Client.connect`` по
+    ``address``/``namespace`` конфига.
+    """
+    from gc_core_temporalio.plugin import AgentPlugin
+
+    plugin = AgentPlugin.from_worker_config(config)
+    if client is None:
         client = await Client.connect(
-            config.address, namespace=config.namespace
+            config.address, namespace=config.namespace, plugins=[plugin]
         )
-        async with AsyncExitStack() as stack:
-            for options in worker_options(config, native, threads):
-                await stack.enter_async_context(Worker(client, **options))
-            if not config.versioning.enabled:
-                # Без versioning новый код доигрывает ходы, начатые старым:
-                # изменённая логика workflow ломает их replay (NDE).
-                logging.getLogger(__name__).warning(
-                    "Worker Versioning выключен: перед выкладкой изменённого "
-                    "кода workflow дождитесь окончания ходов или включите "
-                    "versioning.enabled"
-                )
-            else:
-                logging.getLogger(__name__).info(
-                    "Worker Versioning: deployment %s, build %s",
-                    config.versioning.deployment_name,
-                    config.versioning.resolved_build_id(),
-                )
-                if config.versioning.set_current_on_start:
-                    await set_current_version(client, config)
-            # Брошенные контексты (terminate посреди хода) и служебные данные
-            # закрытых сессий — фоном, пока работает воркер.
-            await WorkerMaintenance(
-                client,
-                provider,
-                provider.stores,
-            ).serve()
-    finally:
-        await provider.aclose()
+        extra = {}
+    else:
+        extra = {"plugins": [plugin]}
+    deployment = deployment_config(config)
+    if deployment is not None:
+        extra["deployment_config"] = deployment
+    queues = dict.fromkeys(
+        [config.workflow_queue, config.model_queue, config.resource_queue]
+    )
+    log = logging.getLogger(__name__)
+    async with AsyncExitStack() as stack:
+        for queue in queues:
+            await stack.enter_async_context(
+                Worker(client, task_queue=queue, **extra)
+            )
+        if not config.versioning.enabled:
+            # Без versioning новый код доигрывает ходы, начатые старым:
+            # изменённая логика workflow ломает их replay (NDE).
+            log.warning(
+                "Worker Versioning выключен: перед выкладкой изменённого "
+                "кода workflow дождитесь окончания ходов или включите "
+                "versioning.enabled"
+            )
+        else:
+            log.info(
+                "Worker Versioning: deployment %s, build %s",
+                config.versioning.deployment_name,
+                config.versioning.resolved_build_id(),
+            )
+            if config.versioning.set_current_on_start:
+                await set_current_version(client, config)
+        await asyncio.Event().wait()
 
 
 def main():
@@ -267,7 +320,7 @@ def main():
     parser.add_argument("--config", required=True)
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO)
-    asyncio.run(serve(WorkerConfig.load(args.config)))
+    asyncio.run(run_worker(WorkerConfig.load(args.config)))
 
 
 if __name__ == "__main__":

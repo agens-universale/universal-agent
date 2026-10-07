@@ -206,6 +206,13 @@ class WorkflowOperations:
             resource_owner=self.resource_owner,
             child_context=self.child_context,
         )
+        level = (
+            settings
+            or self.activity_settings["model" if model else "resource"]
+        )
+        queue = level.get("task_queue") or (
+            self.start.model_queue if model else self.start.resource_queue
+        )
         try:
             return await workflow.execute_activity(
                 name,
@@ -213,17 +220,9 @@ class WorkflowOperations:
                 result_type=result_type,
                 activity_id=request.operation_id,
                 summary=activity_summary(name, data),
-                task_queue=self.start.model_queue
-                if model
-                else self.start.resource_queue,
+                task_queue=queue,
                 cancellation_type=workflow.ActivityCancellationType.WAIT_CANCELLATION_COMPLETED,
-                **activity_options(
-                    settings
-                    or self.activity_settings[
-                        "model" if model else "resource"
-                    ],
-                    effect=effect,
-                ),
+                **activity_options(level, effect=effect),
             )
         except ActivityError as exc:
             raise self._activity_error(

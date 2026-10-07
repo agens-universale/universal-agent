@@ -60,6 +60,10 @@ class ActivitySettings(BaseModel):
     schedule_to_close: timedelta | None = None
     heartbeat_timeout: timedelta | None = None
     retry: RetrySettings | None = None
+    #: Своя очередь — только у запросов к модели (их можно вынести на
+    #: отдельные воркеры). Ресурсы и инструменты привязаны к процессу
+    #: (живые MCP-сессии), поэтому идут в очередь сессии.
+    task_queue: str | None = None
 
 
 class ActivitiesConfig(BaseModel):
@@ -118,6 +122,8 @@ def _merge(*layers: ActivitySettings | None) -> dict[str, Any]:
             value = getattr(layer, name)
             if value is not None:
                 out[name] = value.total_seconds()
+        if layer.task_queue is not None:
+            out["task_queue"] = layer.task_queue
         if layer.retry is not None:
             for name, value in layer.retry.model_dump(
                 exclude_unset=True
@@ -140,6 +146,20 @@ def resolve_activity_settings(
     """Итоговые настройки по уровням — данные для workflow (секунды, без
     pydantic): ``{"model": …, "resource": …, "thread_store": …, "tools": {…}}``."""
     config = config or ActivitiesConfig()
+    bad = [
+        level
+        for level in ("default", "resource", "thread_store")
+        if getattr(config, level).task_queue is not None
+    ] + [
+        f"tools[{name}]"
+        for name, settings in config.tools.items()
+        if settings.task_queue is not None
+    ]
+    if bad:
+        raise ValueError(
+            "task_queue задаётся только для activities модели; ресурсы и "
+            f"инструменты идут в очередь сессии: {', '.join(bad)}"
+        )
     resolved = {
         level: _merge(
             _FRAMEWORK[level], config.default, getattr(config, level)
@@ -163,6 +183,45 @@ def resolve_activity_settings(
 
 #: Умолчания до первого ``agent.context.prepare`` хода.
 DEFAULT_ACTIVITY_SETTINGS = resolve_activity_settings(None)
+
+#: Ключи ``temporalio.workflow.ActivityConfig``, которые имеют смысл для
+#: activities агента; прочие (activity_id, summary, …) задаёт сам workflow.
+_NATIVE_KEYS = {
+    "start_to_close_timeout": "start_to_close",
+    "schedule_to_close_timeout": "schedule_to_close",
+    "heartbeat_timeout": "heartbeat_timeout",
+    "task_queue": "task_queue",
+}
+
+
+def from_activity_config(native: Any) -> ActivitySettings:
+    """``temporalio.workflow.ActivityConfig`` (и ``RetryPolicy`` в нём) →
+    настройки уровня. Нативные типы Temporal — в API, внутри — те же
+    настройки, что у JSON-конфига воркера."""
+    if native is None:
+        return ActivitySettings()
+    native = dict(native)
+    unknown = sorted(set(native) - set(_NATIVE_KEYS) - {"retry_policy"})
+    if unknown:
+        raise ValueError(
+            "ActivityConfig: эти ключи для activities агента не задаются "
+            f"(их ставит workflow): {', '.join(unknown)}"
+        )
+    values = {
+        _NATIVE_KEYS[key]: native[key] for key in native if key in _NATIVE_KEYS
+    }
+    policy = native.get("retry_policy")
+    if policy is not None:
+        values["retry"] = RetrySettings(
+            initial_interval=policy.initial_interval,
+            backoff_coefficient=policy.backoff_coefficient,
+            maximum_interval=policy.maximum_interval,
+            maximum_attempts=policy.maximum_attempts,
+            non_retryable_error_types=list(
+                policy.non_retryable_error_types or []
+            ),
+        )
+    return ActivitySettings(**values)
 
 
 def activity_options(settings: dict[str, Any], *, effect: bool = False):

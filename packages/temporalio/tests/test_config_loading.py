@@ -130,8 +130,8 @@ def test_shipped_example_worker_config_loads(monkeypatch, tmp_path):
 
     example = Path(__file__).parents[1] / "examples" / "worker.json"
     for name in (
-        "UA_NATIVE_STATE",
-        "UA_NATIVE_WORKSPACE",
+        "UA_STATE",
+        "UA_WORKSPACE",
         "UA_MODEL_URL",
         "UA_MODEL_API_TOKEN",
         "UA_MODEL_NAME",

@@ -1,7 +1,10 @@
-"""Explicit native workflow client; leaves the legacy session CLI unchanged."""
+"""Клиент сессий агента в Temporal: ``AgentClient`` (низкий уровень),
+``AgentSession`` (тред: отправить и дождаться), ``TemporalDurability``
+(``AsyncAgent`` через Temporal) и CLI ``gc-temporal``."""
 
 import argparse
 import asyncio
+import hashlib
 import json
 import uuid
 
@@ -112,6 +115,186 @@ class AgentClient:
             AgentWorkflow.answer_human,
             args=[request_id, answer, reply_id],
         )
+
+
+def session_workflow_id(store_id, system_id, thread_id):
+    """ID workflow сессии треда: один тред — одна сессия, у любого клиента."""
+    digest = hashlib.sha256(
+        json.dumps([store_id, system_id, thread_id]).encode()
+    ).hexdigest()[:32]
+    return f"ua-session-{digest}"
+
+
+class AgentSession:
+    """Сессия агента в Temporal — один тред.
+
+    ``ask`` — «отправить и дождаться ответа хода»; ``send`` — только
+    отправить (в идущий ход или в следующий). Сессия живёт между
+    сообщениями (``keep_alive``) и переживает перезапуск клиента: тот же
+    тред — тот же workflow.
+    """
+
+    def __init__(
+        self,
+        client,
+        *,
+        agent,
+        thread_id,
+        task_queue,
+        system_id="sdk",
+        store_id="default",
+        resource_queue=None,
+        model_queue=None,
+        format_text=None,
+        workflow_id=None,
+    ):
+        self.client = client
+        self.task_queue = task_queue
+        self.workflow_id = workflow_id or session_workflow_id(
+            store_id, system_id, thread_id
+        )
+        self.request = RunRequest(
+            agent,
+            store_id,
+            system_id,
+            thread_id,
+            [],
+            resource_queue,
+            model_queue,
+            format_text=format_text,
+            keep_alive=True,
+        )
+
+    @property
+    def handle(self):
+        # Без run_id: сессия делает Continue-As-New после каждого хода.
+        return self.client.get_workflow_handle(self.workflow_id)
+
+    async def send(self, text, *, message_id=None):
+        """Отправить сообщение; сессия открывается при необходимости.
+        Возвращает ID сообщения (повтор с тем же ID — не второй ход)."""
+        message = UserMessage(message_id or uuid.uuid4().hex, text)
+        await AgentClient(
+            self.client, workflow_queue=self.task_queue
+        ).submit_with_start(self.workflow_id, self.request, message)
+        return message.message_id
+
+    async def wait(self, message_id):
+        """Дождаться хода, обработавшего сообщение: ответ, номер хода,
+        ``delivered: False`` — если ход остановили до него."""
+        return await self.handle.execute_update(
+            AgentWorkflow.wait_for_message, message_id
+        )
+
+    async def ask(self, text, *, message_id=None):
+        """Отправить и дождаться: ответ хода (как ``AsyncAgent.run``)."""
+        reply = await self.wait(await self.send(text, message_id=message_id))
+        return reply["answer"]
+
+    async def answer_human(self, request_id, answer, *, reply_id=None):
+        return await self.handle.execute_update(
+            AgentWorkflow.answer_human, args=[request_id, answer, reply_id]
+        )
+
+    async def stop(self):
+        """Остановить идущий ход (кооперативно, как ``AsyncAgent.stop``)."""
+        await self.handle.signal(AgentWorkflow.stop)
+
+    async def status(self):
+        return await self.handle.query(AgentWorkflow.status)
+
+    async def close(self):
+        """Закрыть сессию после принятой работы и снять владение тредом."""
+        await self.handle.signal(AgentWorkflow.close_session)
+
+
+class TemporalDurability:
+    """Исполнение ``AsyncAgent`` через Temporal (``durable=``).
+
+    ``AsyncAgent.create(settings, durable=TemporalDurability(client,
+    task_queue="shop", agent="shop"))`` — тот же API агента, а ходы исполняет
+    воркер с ``AgentPlugin``. Настройки агента читает воркер (его профиль
+    ``agent``); ``settings`` приложения нужны только локальному режиму.
+    """
+
+    def __init__(
+        self,
+        client,
+        *,
+        task_queue,
+        agent,
+        store_id="default",
+        resource_queue=None,
+        model_queue=None,
+    ):
+        self.client = client
+        self.options = {
+            "task_queue": task_queue,
+            "agent": agent,
+            "store_id": store_id,
+            "resource_queue": resource_queue,
+            "model_queue": model_queue,
+        }
+
+    async def open(self, settings):
+        return _DurableAgentRuntime(self.client, self.options)
+
+
+class _DurableAgentRuntime:
+    """Сторона ``AsyncAgent`` в durable-режиме: сессии по тредам."""
+
+    def __init__(self, client, options):
+        self.client, self.options = client, options
+        self._active = None
+        self._background = set()
+
+    def _session(self, thread_id, system):
+        return AgentSession(
+            self.client,
+            thread_id=thread_id,
+            system_id=system,
+            **self.options,
+        )
+
+    async def run(
+        self, messages, *, thread_id=None, system="sdk", message_ids=None
+    ):
+        # Без thread_id у локального агента нет истории: здесь — новый тред
+        # на каждый вызов.
+        session = self._session(thread_id or uuid.uuid4().hex, system)
+        self._active = session
+        ids = list(message_ids or [])
+        last = None
+        for index, text in enumerate(messages):
+            last = await session.send(
+                text, message_id=ids[index] if index < len(ids) else None
+            )
+        reply = await session.wait(last)
+        return reply["answer"]
+
+    def send(self, message):
+        session = self._active
+        if session is None:
+            raise RuntimeError("send() без идущего хода: сначала run()")
+        task = asyncio.ensure_future(
+            session.send(
+                str(message.get("content", "")),
+                message_id=message.get("message_id") or message.get("id"),
+            )
+        )
+        self._background.add(task)
+        task.add_done_callback(self._background.discard)
+
+    def stop(self):
+        session = self._active
+        if session is not None:
+            task = asyncio.ensure_future(session.stop())
+            self._background.add(task)
+            task.add_done_callback(self._background.discard)
+
+    async def aclose(self):
+        if self._background:
+            await asyncio.gather(*self._background, return_exceptions=True)
 
 
 async def _unlock(args, temporal):
