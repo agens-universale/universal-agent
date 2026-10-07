@@ -12,6 +12,7 @@ from gc_core.bundled_assets import bundled_root
 from gc_core.config_modules.security import validate_command_moderation_mode
 from gc_core.constants.tool_names import EXEC_PYTHON_NAME
 from gc_core.execution.contracts import ExecutionFailure
+from gc_core.execution.ports import port
 from gc_core.message_projection import project_text_for_model
 from gc_core.security.confirm_port import (
     confirm_available,
@@ -460,7 +461,7 @@ def moderate_command_execution(
             except ValueError:
                 return (yield)
             host_facts = None
-            if callable(getattr(context.ctx, "guard_probe", None)):
+            if callable(port(context.ctx, "guard_probe")):
                 host_facts = yield probe_step(
                     context.ctx,
                     GuardProbeRequest(
@@ -772,7 +773,7 @@ def _default_judge_client(
 
     async def ajudge(judge_payload: dict[str, Any]) -> dict[str, Any]:
         prompts = None
-        if callable(getattr(ctx, "guard_probe", None)):
+        if callable(port(ctx, "guard_probe")):
             facts = await probe_step(
                 ctx,
                 GuardProbeRequest(

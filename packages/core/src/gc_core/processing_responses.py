@@ -35,6 +35,7 @@ from gc_core.execution.contracts import ExecutionFailure
 from gc_core.execution.loop import AgentLoop
 from gc_core.execution.model import arequest_model
 from gc_core.execution.policy import ExecutionPolicy
+from gc_core.execution.ports import port
 from gc_core.intent_guard.guard import FinishGateGuard
 from gc_core.intent_guard.text_answer_judge import ashould_return_text_answer
 from gc_core.intent_guard.turn_finish_emit import (
@@ -414,7 +415,7 @@ async def _arequest_backend_canonical(
     *,
     set_previous_response_id: bool = True,
 ) -> Tuple[List[Dict], str, Dict]:
-    operations = getattr(ctx, "operations", None)
+    operations = port(ctx, "operations")
     if operations is None:
         return await _arequest_backend_canonical_local(
             messages,

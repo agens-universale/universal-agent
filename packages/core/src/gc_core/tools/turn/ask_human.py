@@ -8,6 +8,7 @@ from typing import Any, Dict, Optional
 from gc_core.attachments.model import Attachment, chip_of
 from gc_core.attachments.store import commit_to_run_thread
 from gc_core.execution.human import HumanRequestInterrupted
+from gc_core.execution.ports import port as runtime_port
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 
 _logger = logging.getLogger(__name__)
@@ -87,7 +88,7 @@ async def _aread_human_response(
     одноразовом потоке: всё, что порт держит привязанным к своему loop —
     очередь, соединение, сессия, — там просто не работало.
     """
-    native_port = getattr(ctx, "human_request", None)
+    native_port = runtime_port(ctx, "human_request")
     if callable(native_port):
         from gc_core.execution.human import HumanRequest
 

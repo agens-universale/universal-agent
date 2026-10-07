@@ -12,6 +12,7 @@ import re
 import shlex
 from typing import Any, Callable
 
+from gc_core.execution.ports import port
 from gc_core.security.command_moderation import (
     NO_WORKAROUND_NOTICE,
     effective_command_cwd,
@@ -204,7 +205,7 @@ def _command_guard_flow(
     # ``write_guard.extra_paths`` разрешены для записи и идут обычной
     # модерацией команд (command_moderation), а не автоматическим запретом.
     extra = protected_extra_paths(_settings_source(self_obj, ctx_obj)) or None
-    if callable(getattr(ctx_obj, "guard_probe", None)):
+    if callable(port(ctx_obj, "guard_probe")):
         facts = yield probe_step(
             ctx_obj,
             GuardProbeRequest(

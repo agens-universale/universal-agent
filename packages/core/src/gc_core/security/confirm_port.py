@@ -7,6 +7,7 @@ from typing import Any, Callable
 
 from gc_core.constants.tool_names import ASK_HUMAN_TOOL_NAME
 from gc_core.execution.human import HumanRequest, HumanRequestInterrupted
+from gc_core.execution.ports import port
 from gc_core.settings import settings_of
 
 CONFIRM_ALLOW_REMEMBER = (
@@ -89,7 +90,7 @@ def _ask_human_enabled(ctx: Any) -> bool:
 
 
 def confirm_available(ctx: Any) -> bool:
-    if callable(getattr(ctx, "human_request", None)):
+    if callable(port(ctx, "human_request")):
         return True
     if getattr(ctx, "is_tui", False):
         return True
@@ -285,7 +286,7 @@ def confirmation_step(
         fields=[[str(key), str(value)] for key, value in fields],
         decision_key=decision_key,
     )
-    if callable(getattr(ctx, "human_request", None)):
+    if callable(port(ctx, "human_request")):
         return AwaitOnCaller(lambda: aconfirm_via_human_port(request, ctx=ctx))
     wait = local_wait or partial(
         local_request or request_confirm,

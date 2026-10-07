@@ -17,6 +17,7 @@ import os
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from gc_core.execution.ports import port
 from gc_core.security.confirm_port import confirmation_step, request_confirm
 from gc_core.security.dual_wrapper import dual_wrap
 from gc_core.security.guard_probe import GuardProbeRequest, probe_step
@@ -374,7 +375,7 @@ def _operational_read_block(
         )
     except ValueError:
         return None
-    if callable(getattr(context.ctx, "guard_probe", None)):
+    if callable(port(context.ctx, "guard_probe")):
         facts = yield probe_step(
             context.ctx,
             GuardProbeRequest(
@@ -545,7 +546,7 @@ def _read_guard_flow(
         return (yield)
 
     try:
-        if callable(getattr(context.ctx, "guard_probe", None)):
+        if callable(port(context.ctx, "guard_probe")):
             facts = yield probe_step(
                 context.ctx,
                 GuardProbeRequest(

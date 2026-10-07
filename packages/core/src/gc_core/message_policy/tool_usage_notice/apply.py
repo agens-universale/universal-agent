@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from gc_core.constants.tool_names import PROJECT_MEMORY_TOOL_NAME
+from gc_core.execution.ports import port
 from gc_core.message_policy.notice_policy_log import log_notice_policy_step
 from gc_core.message_policy.project_memory_notice.policy import (
     collect_project_memory_hints,
@@ -125,7 +126,7 @@ async def aapply_tool_usage_notice_before_llm(
     действительно спросит; иначе — прежнее локальное чтение в ``get_hash``.
     """
     project_memory_hash_fn = None
-    loader = getattr(ctx, "project_memory_hash", None)
+    loader = port(ctx, "project_memory_hash")
     if loader is not None and _needs_project_hash(state, ctx, meta):
         value = await loader()
         project_memory_hash_fn = lambda _ctx: value

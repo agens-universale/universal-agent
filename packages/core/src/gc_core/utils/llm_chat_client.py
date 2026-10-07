@@ -9,6 +9,7 @@ from types import MappingProxyType
 from typing import Any, Dict, List, NamedTuple, Optional
 
 from gc_core.config_modules.model_registry import effective_completion_kwargs
+from gc_core.execution.ports import port
 from gc_core.model_router import (
     AliasCircuitOpenError,
     ResolvedModel,
@@ -528,7 +529,7 @@ async def arequest_chat_completion_outcome(
 
     if max_tokens < 1:
         raise ValueError("max_tokens must be >= 1")
-    operations = getattr(ctx, "operations", None)
+    operations = port(ctx, "operations")
     if operations is None:
         return await _arequest_chat_completion_outcome_local(
             ctx=ctx,

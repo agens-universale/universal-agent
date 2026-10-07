@@ -7,6 +7,7 @@ import os
 from dataclasses import dataclass
 from typing import Any, Mapping
 
+from gc_core.execution.ports import port
 from gc_core.settings import settings_of
 from gc_core.trace_id import trace_id_from_config
 
@@ -64,7 +65,7 @@ async def aappend_summary_trace_record(
     Если рантайм дал ``ctx.summary_trace_sink`` (Temporal native), запись уходит
     в него и локальный путь не резолвится; иначе строка пишется в файл здесь же.
     """
-    sink = getattr(ctx, "summary_trace_sink", None)
+    sink = port(ctx, "summary_trace_sink")
     if sink is not None:
         await sink(
             SummaryTraceRecord(

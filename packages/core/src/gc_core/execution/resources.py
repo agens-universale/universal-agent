@@ -4,6 +4,8 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from gc_core.execution.ports import port
+
 
 @dataclass(frozen=True)
 class PromptResourceRequest:
@@ -35,7 +37,7 @@ async def aload_prompt_resource(
     Transport errors must propagate; falling back to local I/O would break replay.
     The callable stays in the process and is never part of the request payload.
     """
-    loader = getattr(ctx, "prompt_resource", None)
+    loader = port(ctx, "prompt_resource")
     if loader is not None:
         return await loader(request)
     return local()

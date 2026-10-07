@@ -9,6 +9,7 @@ import httpx
 
 from gc_core.config_modules.security import DownloadConfig
 from gc_core.constants.tool_names import DOWNLOAD_FILE_NAME
+from gc_core.execution.ports import port
 from gc_core.security.path_policy import (
     WriteGuardViolation,
     audit_policy_decision,
@@ -253,7 +254,7 @@ class DownloadFile(AbstractSimpleTool):
         )
 
         flow = self._write_guard_flow(dest)
-        if callable(getattr(self._ctx, "human_request", None)) or callable(
+        if callable(port(self._ctx, "human_request")) or callable(
             getattr(self._ctx, "guard_probe", None)
         ):
             _, result = await _drive_async(flow)
@@ -514,7 +515,7 @@ class DownloadFile(AbstractSimpleTool):
             return self._result(error=url_error)
         normalized_url = url.strip()
 
-        use_probe = callable(getattr(self._ctx, "guard_probe", None))
+        use_probe = callable(port(self._ctx, "guard_probe"))
         if not use_probe:
             filename_result = self._validate_filename(filename)
             if isinstance(filename_result, dict):

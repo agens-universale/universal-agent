@@ -23,6 +23,7 @@ from gc_core.config_modules.stored_outputs import (
     get_stored_tool_outputs_max_entries,
 )
 from gc_core.execution.contracts import ExecutionFailure
+from gc_core.execution.ports import port
 from gc_core.execution_workspace import launch_root_from_config
 from gc_core.intent_log.user_turn import (
     append_user_ask_deduped,
@@ -286,7 +287,7 @@ class AgentExecutor:
             )
 
     async def _alist_skills(self):
-        loader = getattr(self._ctx, "skills_loader", None)
+        loader = port(self._ctx, "skills_loader")
         if loader is None:
             loader = self._ctx.skills_registry.list_skills
         return await loader()
@@ -411,7 +412,7 @@ class AgentExecutor:
         request = PromptPreparationRequest.from_config(
             self._ctx, verbose=effective_verbose
         )
-        loader = getattr(self._ctx, "prompt_loader", None)
+        loader = port(self._ctx, "prompt_loader")
         if loader is None:
             prepared = load_run_prompts(request, logger=logger)
         else:
@@ -456,7 +457,7 @@ class AgentExecutor:
         }
         if subagents_enabled(settings.agent.use_local_subagents):
             state_data["specific_role"] = ORCHESTRATOR_SPECIFIC_ROLE
-        preparer = getattr(self._ctx, "state_preparer", None)
+        preparer = port(self._ctx, "state_preparer")
         if preparer is None:
             state = await State.acreate(**state_data)
         else:
@@ -808,7 +809,7 @@ class AgentExecutor:
             self._undelivered_messages.extend(self._pending_messages)
             self._pending_messages = []
         try:
-            cleanup = getattr(self._ctx, "mcp_cleanup", None)
+            cleanup = port(self._ctx, "mcp_cleanup")
             if cleanup is None:
                 await _aclose_mcp_and_release(owner_reset)
             else:

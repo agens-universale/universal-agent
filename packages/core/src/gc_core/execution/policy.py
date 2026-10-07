@@ -17,6 +17,7 @@ from typing import (
     Union,
 )
 
+from gc_core.execution.ports import port
 from gc_core.message_policy.user_message_policy import TECHNICAL_TYPE_TECHNICAL
 from gc_core.settings import settings_of
 from gc_core.utils.backend_errors import is_previous_response_cache_miss
@@ -439,7 +440,7 @@ class ExecutionPolicy:
         is_intermediate = (
             tool_name == self.bindings.INTERMEDIATE_REPLY_TOOL_NAME
         )
-        operations = getattr(ctx, "operations", None)
+        operations = port(ctx, "operations")
         clock = (
             operations.monotonic
             if operations is not None
@@ -553,7 +554,7 @@ class ExecutionPolicy:
         run_agent_func,
         tool_call_id,
     ):
-        operations = getattr(ctx, "operations", None)
+        operations = port(ctx, "operations")
         output = await self.bindings.aapply_tool(
             tool_name=tool_name,
             arguments=tool_arguments,

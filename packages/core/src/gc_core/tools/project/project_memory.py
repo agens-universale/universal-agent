@@ -14,6 +14,7 @@ from typing import Any, Dict, Optional
 from gc_core.config_modules.env_vars import gc_paths, project_slug
 from gc_core.config_modules.project_memory import ProjectMemoryConfig
 from gc_core.constants.tool_names import PROJECT_MEMORY_TOOL_NAME
+from gc_core.execution.ports import port as runtime_port
 from gc_core.loop_detector.constants import (
     GENERIC_PROFILE,
     loop_warn_on_repeat,
@@ -261,7 +262,7 @@ Return format (JSON string):
     async def _acall_io(
         self, request: ProjectMemoryRequest
     ) -> ProjectMemoryReply:
-        port = getattr(self._ctx, "project_memory_io", None)
+        port = runtime_port(self._ctx, "project_memory_io")
         if port is None:
             return self.execute_io(request)
         reply = await port(request)

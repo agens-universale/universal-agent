@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
 
+from gc_core.execution.ports import port
 from gc_core.security.confirm_port import confirmation_step
 from gc_core.security.dual_wrapper import dual_wrap
 from gc_core.security.guard_probe import GuardProbeRequest, probe_step
@@ -223,7 +224,7 @@ def _protected_write_block(
 
     if not protection_enabled(_settings_source(None, context.ctx)):
         return None
-    if callable(getattr(context.ctx, "guard_probe", None)):
+    if callable(port(context.ctx, "guard_probe")):
         facts = yield probe_step(
             context.ctx,
             GuardProbeRequest(
@@ -377,7 +378,7 @@ def _resolve_write_violation(
 
 def check_write_guard_path(candidate_path, context, tool_name, operation):
     """Apply the same write perimeter check to decorators and internal writes."""
-    if callable(getattr(context.ctx, "guard_probe", None)):
+    if callable(port(context.ctx, "guard_probe")):
         facts = yield probe_step(
             context.ctx,
             GuardProbeRequest(

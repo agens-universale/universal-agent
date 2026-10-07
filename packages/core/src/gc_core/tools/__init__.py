@@ -32,6 +32,7 @@ from gc_core.tools.subagents.registry import is_subagent_tool
 from gc_core.tools.subagents.selection import subagents_enabled
 
 _fallback_logger = logging.getLogger(__name__)
+from gc_core.execution.ports import port
 from gc_core.execution.tool_feedback import (
     INTERNAL_TOOL_ERROR as INTERNAL_TOOL_ERROR,
 )
@@ -646,7 +647,7 @@ async def _aapply_tool_text(
             uses_leaf_effect,
         )
 
-        if callable(getattr(ctx, "tool_effect", None)) and uses_leaf_effect(
+        if callable(port(ctx, "tool_effect")) and uses_leaf_effect(
             tool_name, tool
         ):
             res = await invoke_native_tool(
