@@ -42,20 +42,6 @@ Temporal включается worker'ом `gc-temporal-native-worker`, клие�
    Temporal + replay) и `test_native_parity_live.py` (local и Temporal на одних
    ответах модели) — самые короткие исполняемые описания.
 
-Схемы для просмотра отдельно и вставки в Outline:
-
-| Схема | PNG | SVG |
-|---|---|---|
-| Штатный агент: компоненты | [Открыть](diagrams/temporal/00-agent-components.png) | [Открыть](diagrams/temporal/00-agent-components.svg) |
-| Штатный агент: один ход | [Открыть](diagrams/temporal/00-agent-turn.png) | [Открыть](diagrams/temporal/00-agent-turn.svg) |
-| Процессы и хранилища | [Открыть](diagrams/temporal/01-architecture.png) | [Открыть](diagrams/temporal/01-architecture.svg) |
-| Порты операций: local и Temporal | [Открыть](diagrams/temporal/02-dispatch.png) | [Открыть](diagrams/temporal/02-dispatch.svg) |
-| Один ход в Temporal | [Открыть](diagrams/temporal/03-turn.png) | [Открыть](diagrams/temporal/03-turn.svg) |
-| Guards, подтверждение и эффект | [Открыть](diagrams/temporal/04-guards.png) | [Открыть](diagrams/temporal/04-guards.svg) |
-| MCP и фоновые процессы | [Открыть](diagrams/temporal/05-mcp.png) | [Открыть](diagrams/temporal/05-mcp.svg) |
-| Субагент в child workflow | [Открыть](diagrams/temporal/06-child.png) | [Открыть](diagrams/temporal/06-child.svg) |
-| Тред и история Temporal | [Открыть](diagrams/temporal/07-persistence.png) | [Открыть](diagrams/temporal/07-persistence.svg) |
-
 ## 0. Как устроен штатный агент без Temporal
 
 ### 0.1. Основные классы
@@ -65,25 +51,6 @@ Temporal включается worker'ом `gc-temporal-native-worker`, клие�
 цикл проверяет результат, исполняет действия и передаёт outputs следующему запросу.
 «Локальное исполнение» здесь означает процесс цикла: модель, MCP и workspace
 могут находиться удалённо.
-
-```mermaid
-flowchart TB
-    C["CLI / TUI / SDK / API"] --> E["AgentExecutor.arun"]
-    R["RunContext<br/>зависимости"] --> E
-    E --> L["AgentLoop + ExecutionPolicy"]
-    E --> S["ThreadSession"]
-    L --> M["Клиент модели"]
-    L --> T["aapply_tool → acall"]
-    L --> D["State + SharedStateData"]
-    T --> F["FsBackend / MCP / SubagentRunner"]
-    S --> P["ThreadStore<br/>FileThreadStore по умолчанию"]
-    classDef control fill:#e9e5ff,stroke:#6552ad,color:#251b45;
-    classDef io fill:#e5f4ed,stroke:#338466,color:#173d2f;
-    classDef data fill:#fff0d6,stroke:#ae7925,color:#493414;
-    class E,L,R control;
-    class M,T,F io;
-    class S,P,D data;
-```
 
 | Класс / функция | Ответственность и связи |
 |---|---|
@@ -96,39 +63,7 @@ flowchart TB
 
 ### 0.2. Один штатный ход
 
-```mermaid
-sequenceDiagram
-    autonumber
-    participant C as Клиент
-    participant E as AgentExecutor
-    participant S as ThreadSession
-    participant L as AgentLoop
-    participant M as Модель
-    participant T as Инструмент
-    C->>E: arun(messages, thread_id)
-    E->>S: afrom_config: история и meta
-    E->>E: State, permissions, summary hooks
-    E->>L: arun_agent
-    loop до завершения хода
-        L->>S: persist callback
-        L->>M: основной или вспомогательный запрос
-        M-->>L: текст / вызовы
-        L->>T: проверка → acall
-        T-->>L: output и изменения состояния
-    end
-    L-->>E: результат и terminal outcome
-    E->>E: cleanup MCP
-    opt account_run = false
-        E-->>C: результат без закрытия учёта
-        C->>M: дополнительный шаг structured output
-        C->>E: aclose_run_accounting
-    end
-    E->>S: финальная meta и usage
-    E-->>C: завершение
-```
-
-Схема показывает путь с подключённым тредом; без `thread_id` его сохранение
-отсутствует. Summary и finish judge могут обращаться к модели между основными
+Ход описан с подключённым тредом; без `thread_id` его сохранения нет. Summary и finish judge могут обращаться к модели между основными
 шагами. Один проход цикла обрабатывает режим `user_ask`, `function_call`,
 `function_call_output` или `text_response`; он не равен всему запросу пользователя.
 
@@ -158,42 +93,6 @@ post-run шаге вызывающий использует `account_run=False`,
 
 ## 1. Процессы, очереди и хранилища
 
-```mermaid
-flowchart TB
-    subgraph Clients["Клиенты"]
-        CLI["gc-temporal-native<br/>NativeAgentClient"]
-        API["gc-server<br/>execution_backend: temporal-native"]
-    end
-    TS["Temporal Server<br/>история и очереди"]
-    subgraph Worker["gc-temporal-native-worker: один процесс, один workspace"]
-        WF["workflow queue<br/>NativeAgentWorkflow<br/>NativeSubagentWorkflow"]
-        MQ["model queue<br/>agent.model.request"]
-        RQ["resource queue<br/>context, guard, tool, thread, memory"]
-        RH["WorkerResourceHost<br/>MCP-сессии и фоновые процессы"]
-    end
-    LLM["Провайдер модели"]
-    WS["Workspace<br/>файлы и команды"]
-    MCP["MCP-серверы"]
-    TH["ThreadStore<br/>DurableFileThreadStore / SQLite / своя БД"]
-    CLI --> TS
-    API --> TS
-    TS <--> WF
-    TS <--> MQ
-    TS <--> RQ
-    MQ --> LLM
-    RQ --> WS
-    RQ --> RH
-    RH --> MCP
-    RQ --> TH
-    API --> TH
-    classDef control fill:#e9e5ff,stroke:#6552ad,color:#251b45;
-    classDef io fill:#e5f4ed,stroke:#338466,color:#173d2f;
-    classDef data fill:#fff0d6,stroke:#ae7925,color:#493414;
-    class WF,TS control;
-    class MQ,RQ,RH,LLM,WS,MCP io;
-    class TH data;
-```
-
 | Элемент | Что это |
 |---|---|
 | [`NativeAgentWorkflow`](../packages/temporalio/src/gc_ua_temporalio/native_workflow.py) | Сессия: очередь сообщений, ответы человека, stop/close, один ход за run. Внутри хода — настоящий `AgentExecutor.arun`. |
@@ -206,28 +105,6 @@ flowchart TB
 | [`message_refs`](../packages/temporalio/src/gc_ua_temporalio/message_refs.py) | Вход activity модели: новые сообщения целиком, уже переданные и прочитанные из треда — хэш-ссылкой; воркер держит сообщения хода в памяти. Вместе со страничным чтением треда и потолком вывода инструмента (1 МБ) держит записи истории меньше лимита Temporal (2 МБ) без отдельного хранилища payload. |
 
 ## 2. Порты операций: один код, два исполнителя
-
-```mermaid
-flowchart LR
-    Core["AgentExecutor / AgentLoop<br/>ThreadSession / guards / summary"]
-    subgraph Ports["Порты RunContext"]
-        P1["operations.model"]
-        P2["tool_effect"]
-        P3["guard_probe"]
-        P4["thread_store"]
-        P5["prompt_loader / state_preparer<br/>skills_loader / prompt_resource"]
-        P6["human_request"]
-    end
-    Core --> Ports
-    Ports -->|"local: прямой вызов"| L["LocalOperations<br/>FileThreadStore<br/>FsBackend, MCP"]
-    Ports -->|"Temporal"| N["NativeOperations<br/>TemporalThreadStore"]
-    N --> A["activities на worker'е<br/>вызывают те же функции core"]
-    P6 -->|"Temporal"| H["workflow.wait_condition<br/>update answer_human"]
-    classDef control fill:#e9e5ff,stroke:#6552ad,color:#251b45;
-    classDef io fill:#e5f4ed,stroke:#338466,color:#173d2f;
-    class Core,Ports control;
-    class L,N,A,H io;
-```
 
 Ядро не импортирует Temporal. Порты заполняет
 [`assemble_native_context`](../packages/temporalio/src/gc_ua_temporalio/native_context.py)
@@ -283,31 +160,6 @@ readability на уровне модулей, как в develop, хотя workfl
 
 ## 3. Один ход
 
-```mermaid
-sequenceDiagram
-    autonumber
-    participant C as Клиент
-    participant W as NativeAgentWorkflow
-    participant E as AgentExecutor
-    participant R as resource activities
-    participant M as agent.model.request
-    C->>W: submit_message (Update-With-Start)
-    W->>R: agent.context.prepare
-    W->>R: agent.thread.load + claim_owner (только первый run сессии,<br/>мёртвый владелец снимается)
-    W->>E: arun(messages, thread_id)
-    E->>R: agent.thread.load (ThreadSession)
-    loop до завершения хода
-        E->>M: запрос модели
-        M-->>E: текст / вызовы
-        E->>R: agent.guard.probe → agent.tool.execute
-        Note over E,R: persist: step — agent.thread.commit после шага<br/>persist: turn — шаг в памяти workflow
-    end
-    E->>R: agent.thread.commit (финальная meta, сброс отложенных шагов)
-    E->>R: agent.context.close
-    W->>R: agent.context.release
-    W->>W: Continue-As-New: новый run, история почти пустая
-```
-
 Workflow не повторяет логику ядра: подготовку `State`, промпты, summary,
 finish gate и учёт делает `AgentExecutor`. Workflow отвечает за доставку
 сообщений, ожидания, stop/close и Continue-As-New.
@@ -332,33 +184,6 @@ workflow владельца: не RUNNING или не найден — влад�
 
 ## 4. Guards, подтверждение и эффект
 
-```mermaid
-sequenceDiagram
-    autonumber
-    participant G as guard (core, в workflow)
-    participant P as agent.guard.probe
-    participant J as agent.model.request (judge)
-    participant H as Человек
-    participant T as agent.tool.execute
-    G->>P: protected_write + факты write_path
-    P-->>G: факты (следующая проверка — из кэша)
-    opt нужна оценка
-        G->>J: judge
-        J-->>G: вердикт
-    end
-    opt нужно подтверждение
-        G->>H: human_request → wait_condition
-        H-->>G: update answer_human
-    end
-    G->>T: эффект + digest аргументов и фактов
-    T->>T: перепроверка фактов (TOCTOU)
-    alt факты изменились
-        T-->>G: GuardPreconditionChanged → ошибка инструмента модели
-    else
-        T-->>G: результат
-    end
-```
-
 Правила guards одни и те же для local и Temporal: генераторы
 [`path_policy`](../packages/core/src/gc_core/security/path_policy.py),
 [`read_guard`](../packages/core/src/gc_core/security/read_guard.py),
@@ -377,24 +202,6 @@ Probe вызывается только для файловых и команд�
 
 ## 5. MCP и фоновые процессы
 
-```mermaid
-flowchart TB
-    WF["workflow: ход N"] -->|"agent.context.prepare"| PR["NativeContextProvider"]
-    PR --> RH["WorkerResourceHost"]
-    RH --> OW["LiveResourceOwner<br/>'workflow/первый run/turn-N'<br/>одна задача asyncio"]
-    OW --> S1["stdio / SSE / Streamable HTTP<br/>persistent-сессии"]
-    OW --> BG["фоновые команды"]
-    WF -->|"agent.tool.execute (live)"| OW
-    WF -->|"agent.context.close / release"| OW
-    X["процесс worker'а потерян"] -.-> L["ResourceOwnerLost → ошибка инструмента;<br/>следующий ход открывает нового владельца"]
-    classDef control fill:#e9e5ff,stroke:#6552ad,color:#251b45;
-    classDef io fill:#e5f4ed,stroke:#338466,color:#173d2f;
-    classDef warn fill:#fde8e8,stroke:#b54747,color:#4a1717;
-    class WF,PR control;
-    class RH,OW,S1,BG io;
-    class X,L warn;
-```
-
 Владелец живых ресурсов — один на ход, как `begin/end run` в local:
 [`WorkerResourceHost`](../packages/core/src/gc_core/execution/resource_host.py).
 Discovery, вызовы и teardown MCP идут в одной задаче, повторная доставка той же
@@ -409,24 +216,6 @@ terminate посреди хода, освобождает `NativeMaintenance`.
 
 ## 6. Субагент в child workflow
 
-```mermaid
-sequenceDiagram
-    autonumber
-    participant P as родитель: SubagentRunner (tool)
-    participant T as NativeChildTransport
-    participant C as NativeSubagentWorkflow
-    participant R as agent.subagent.prepare
-    P->>T: subagent_executor(tool, arguments)
-    T->>C: start_child_workflow
-    C->>R: роль и контекст ребёнка
-    C->>C: SubagentRunner.arun(arun_agent)
-    C-->>T: signal child_checkpoint (usage, memory, permissions)
-    C-->>T: signal child_human → вопрос через родителя
-    T-->>C: answer_human / submit_message / stop
-    C-->>T: результат + checkpoint + undelivered
-    T-->>P: output, поздние сообщения — в цикл родителя
-```
-
 Одновременно активен один ребёнок, как в local. Сигнал ребёнка, пришедший раньше
 handle, ждёт его, а сигнал неактивного ребёнка игнорируется и родителя не роняет.
 Сообщение, пришедшее после конца цикла ребёнка или не доставленное ему сигналом,
@@ -435,31 +224,6 @@ handle, ждёт его, а сигнал неактивного ребёнка �
 `subagent_interrupted` (часть его действий могла выполниться), а не отказ сессии.
 
 ## 7. Хранение: тред и история Temporal
-
-```mermaid
-flowchart LR
-    subgraph T["ThreadStore — история диалога"]
-        T1["сообщения и meta треда"]
-        T2["память агента между ходами,<br/>её читают server и API"]
-    end
-    subgraph H["Event History — журнал выполнения"]
-        H1["входы и результаты activities,<br/>signals и updates"]
-        H2["replay после падения;<br/>обнуляется Continue-As-New"]
-    end
-    subgraph W["Память воркера — сообщения хода"]
-        W1["вход модели: новые сообщения целиком,<br/>прочие — хэш-ссылкой"]
-        W2["промах: ищет в треде,<br/>нет — повтор целиком"]
-    end
-    H -->|"agent.thread.load страницами / commit"| T
-    H -.->|"agent.model.request: ссылки"| W
-    W -.->|"промах кэша"| T
-    classDef data fill:#fff0d6,stroke:#ae7925,color:#493414;
-    classDef control fill:#e9e5ff,stroke:#6552ad,color:#251b45;
-    classDef io fill:#e5f4ed,stroke:#338466,color:#173d2f;
-    class T,T1,T2 data;
-    class H,H1,H2 control;
-    class W,W1,W2 io;
-```
 
 | Слой | Что хранит | Сколько живёт |
 |---|---|---|
