@@ -1,6 +1,7 @@
 """Workflow transport for the native store's async facade."""
 
 import asyncio
+import dataclasses
 
 from gc_core.execution.contracts import ExecutionFailure, InfrastructureFailure
 from gc_core.thread_store_durable import (
@@ -20,6 +21,7 @@ from gc_core_temporalio.activity_config import (
     DEFAULT_ACTIVITY_SETTINGS,
     activity_options,
 )
+from gc_core_temporalio.sizes import ACTIVITY_INPUT_LIMIT, payload_size
 from gc_core_temporalio.thread_store_contracts import ThreadStoreReply
 
 _STORE_ERRORS = {
@@ -41,6 +43,14 @@ class ThreadStoreTransport:
         self.settings = settings or DEFAULT_ACTIVITY_SETTINGS["thread_store"]
 
     async def __call__(self, name, request):
+        size = payload_size(dataclasses.asdict(request))
+        if size > ACTIVITY_INPUT_LIMIT:
+            # Больше записи истории — сервер отвергнет команду, и задача
+            # workflow падала бы бесконечно: отказ хода с причиной.
+            raise ExecutionFailure(
+                f"Вход {name} — {size} байт в истории Temporal, больше лимита "
+                f"записи ({ACTIVITY_INPUT_LIMIT})"
+            )
         try:
             return await workflow.execute_activity(
                 name,

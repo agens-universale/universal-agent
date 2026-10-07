@@ -491,6 +491,7 @@ class AgentWorkflow:
         )
         self.ctx = ctx
         self.executor = AgentExecutor(ctx)
+        self.operations.flush_thread = self.executor.aflush_thread
         self.children.redeliver = self.executor.add_message
         return store
 

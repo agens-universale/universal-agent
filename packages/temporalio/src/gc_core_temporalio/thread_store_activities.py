@@ -2,7 +2,6 @@
 
 import asyncio
 import inspect
-import json
 from collections import OrderedDict
 from dataclasses import replace
 
@@ -18,6 +17,7 @@ from temporalio.client import WorkflowExecutionStatus
 from temporalio.exceptions import ApplicationError
 from temporalio.service import RPCError, RPCStatusCode
 
+from gc_core_temporalio.sizes import payload_size
 from gc_core_temporalio.thread_store_contracts import (
     ThreadStatePage,
     ThreadStoreCall,
@@ -29,7 +29,7 @@ _SNAPSHOT_CACHE_SIZE = 16
 
 
 def _size(value):
-    return len(json.dumps(value, ensure_ascii=False, default=str).encode())
+    return payload_size(value)
 
 
 def _take(items, start, budget):
@@ -196,6 +196,15 @@ class ThreadStoreActivities:
                 receipt = await _claim(store, request)
             else:
                 receipt = await _commit(store, request, request.operation)
+            # Квитанция несёт meta треда: кэш страниц fetch_url из meta, что
+            # вёл локальный режим, — не в историю (как и при чтении).
+            meta = receipt.meta if isinstance(receipt.meta, dict) else None
+            shared = meta.get("shared") if meta else None
+            if isinstance(shared, dict) and shared.get("fetch_url_cache"):
+                receipt = replace(
+                    receipt,
+                    meta={**meta, "shared": {**shared, "fetch_url_cache": {}}},
+                )
             return ThreadStoreReply(receipt=receipt)
         except ExecutionFailure as exc:
             raise _application_error(exc) from exc

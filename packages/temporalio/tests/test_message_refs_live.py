@@ -357,16 +357,24 @@ async def test_huge_mcp_output_is_capped_below_the_record_limit(
     assert any("stored" in o for o in outputs), outputs[:1]
 
 
-def test_tool_output_cap_keeps_valid_utf8_and_marks_the_cut():
+def test_tool_output_cap_counts_temporal_history_size():
+    """Потолок — по размеру в истории Temporal (ensure_ascii: кириллица —
+    6 байт на символ), а не по UTF-8: обрезанный вывод реально помещается."""
     from gc_core.execution.contracts import ToolResult
-    from gc_core_temporalio.activities import cap_tool_output
+    from gc_core_temporalio.activities import (
+        TOOL_OUTPUT_LIMIT_BYTES,
+        cap_tool_output,
+    )
+    from temporalio.converter import default
 
     small = ToolResult("ok")
     assert cap_tool_output(small).output == "ok"
-    big = cap_tool_output(ToolResult("я" * 1_000_000), limit=1001)
-    assert big.output.startswith("я" * 500)
+    big = cap_tool_output(ToolResult("я" * 1_000_000))
+    payload = default().payload_converter.to_payloads([big])[0]
+    assert len(payload.data) < TOOL_OUTPUT_LIMIT_BYTES + 4096
+    assert big.output.startswith("я" * 100_000)
     assert "вывод обрезан воркером Temporal" in big.output
-    assert "из 2000000 байт" in big.output
+    assert "из 1000000 символов" in big.output
     big.output.encode()  # без разорванных символов
 
 
@@ -485,3 +493,56 @@ def test_fetch_page_cache_evicts_whole_sessions_by_size():
     assert cache.get("b") == [] and cache.get("a") and cache.get("c")
     cache.put("big", [["u4", {"content": "x" * 2_000}]])
     assert cache.get("big") == []  # больше всего лимита — не держим
+
+
+async def test_cache_miss_on_a_big_cyrillic_thread_does_not_inline_it(
+    tmp_path, monkeypatch, growing_model
+):
+    """Воспроизведение ревью: тред ~3 МБ кириллицы в истории, воркер теряет
+    кэш ссылок перед каждым запросом, persist: turn. Повтор не шлёт тред
+    одной записью (раньше — PayloadsTooLarge и вечный сбой задачи): шаги
+    хода сначала пишутся в тред, сообщения идут ссылками; ход доходит до
+    конца, каждая запись истории меньше 2 МБ."""
+    monkeypatch.chdir(tmp_path)
+    url, bodies, plan = growing_model
+    plan["steps"] = 3
+    (tmp_path / "big.txt").write_text("щ" * 2_000)
+    store = DurableFileThreadStore(str(tmp_path / "threads"))
+    store.append_messages(
+        "test",
+        "refs",
+        [
+            {
+                "id": f"old{i}",
+                "role": "user" if i % 2 == 0 else "assistant",
+                "content": f"{i}:" + "ж" * 10_000,
+            }
+            for i in range(50)
+        ],
+    )
+    async with runtime(tmp_path, url, persist="turn") as (env, native):
+        original = native._resolve_message_refs
+        misses = []
+
+        async def forgetful(call):
+            native._messages.clear()
+            try:
+                return await original(call)
+            except Exception as exc:
+                misses.append(type(exc).__name__)
+                raise
+
+        native._resolve_message_refs = forgetful
+        handle = await env.client.start_workflow(
+            AgentWorkflow.run,
+            _request(),
+            id="refs-big-miss",
+            task_queue="refs",
+        )
+        result = await asyncio.wait_for(handle.result(), 180)
+        largest, model_inputs, _total = await _payload_sizes(handle)
+    assert "done" in json.dumps(result, ensure_ascii=False)
+    assert misses  # промахи были
+    assert largest < LIMIT, largest
+    assert max(model_inputs) < 600_000, model_inputs
+    assert bodies[0] > 1_000_000  # провайдер получил весь контекст

@@ -2,21 +2,19 @@
 
 import asyncio
 import json
-import shutil
 import threading
 from contextlib import asynccontextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
-from gc_core_temporalio.contracts import RunRequest
+from gc_core_temporalio.contracts import RunRequest, UserMessage
 from gc_core_temporalio.provider import WorkerConfig
 from gc_core_temporalio.worker import build_runtime, worker_options
 from gc_core_temporalio.workflow import AgentWorkflow
-from gc_core_temporalio.contracts import UserMessage
+from live_support import call, temporal_cli
 from temporalio.client import WorkflowUpdateFailedError
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer, Worker
-from live_support import call, temporal_cli
 
 
 def finish(report="done"):
@@ -500,16 +498,19 @@ async def test_stop_cancels_model_request_retried_without_limit(
     await Replayer(workflows=[AgentWorkflow]).replay_workflow(history)
 
 
-def test_message_limit_counts_utf8_bytes_not_chars():
-    """Запись истории ограничена байтами: 600 тыс. символов кириллицы — 1,2 МБ,
-    больше предела, хотя символов меньше миллиона."""
+def test_message_limit_counts_temporal_history_bytes():
+    """Предел — размер в истории Temporal: кириллица там 6 байт на символ
+    (ensure_ascii), 200 тысяч символов — 1,2 МБ, больше предела."""
     from gc_core_temporalio.contracts import MAX_MESSAGE_BYTES
+    from temporalio.converter import default
 
-    UserMessage("m", "a" * MAX_MESSAGE_BYTES).validate()
+    UserMessage("m", "a" * (MAX_MESSAGE_BYTES - 2)).validate()
     with pytest.raises(ValueError, match="bytes"):
-        UserMessage("m", "я" * 600_000).validate()
-    with pytest.raises(ValueError, match="bytes"):
-        UserMessage("m", "\ud800" * (MAX_MESSAGE_BYTES // 3 + 1)).validate()
+        UserMessage("m", "я" * 200_000).validate()
+    fits = UserMessage("m", "я" * 160_000)
+    fits.validate()
+    payload = default().payload_converter.to_payloads([fits])[0]
+    assert len(payload.data) < MAX_MESSAGE_BYTES + 1024
 
 
 async def test_child_signal_failure_does_not_mask_child_error():
@@ -525,3 +526,59 @@ async def test_child_signal_failure_does_not_mask_child_error():
     with pytest.raises(RuntimeError, match="parent is closed"):
         await drain_signals([task], failed=False)
     await drain_signals([], failed=False)
+
+
+async def test_two_big_cyrillic_messages_keep_records_below_the_limit(
+    tmp_path, monkeypatch, scripted_http
+):
+    """Воспроизведение ревью: два сообщения у предела (кириллица) в одной
+    сессии. Журнал намерений в meta копил оба текста, и запись со второго
+    хода весила > 2 МБ — дальше вечный сбой. Теперь журнал в meta ограничен,
+    оба хода проходят, записи истории меньше лимита."""
+    from test_message_refs_live import LIMIT, _payload_sizes
+
+    monkeypatch.chdir(tmp_path)
+    url, _requests, script = scripted_http
+    script.extend([[finish("first")], [finish("second")]])
+    big = "ы" * 160_000  # ~960 КБ в истории Temporal
+    async with runtime(tmp_path, url) as (env, contexts, _):
+        handle = await env.client.start_workflow(
+            AgentWorkflow.run,
+            RunRequest(
+                "test",
+                "files",
+                "test",
+                "big",
+                [big],
+                "native-controls",
+                "native-controls",
+                message_ids=["m1"],
+                keep_alive=True,
+            ),
+            id="controls-big",
+            task_queue="native-controls",
+        )
+        await handle.execute_update(AgentWorkflow.wait_for_message, "m1")
+        await handle.execute_update(
+            AgentWorkflow.submit_message, UserMessage("m2", "Ж" + big[1:])
+        )
+        second = await handle.execute_update(
+            AgentWorkflow.wait_for_message, "m2"
+        )
+        assert second["turn"] == 2
+        largest = 0
+        async for run in env.client.list_workflows(
+            'WorkflowId = "controls-big"'
+        ):
+            size, _, _ = await _payload_sizes(
+                env.client.get_workflow_handle(
+                    "controls-big", run_id=run.run_id
+                )
+            )
+            largest = max(largest, size)
+        await handle.signal(AgentWorkflow.close_session)
+        await asyncio.wait_for(handle.result(), 60)
+        meta = contexts.stores["files"].load_meta("test", "big")
+    assert largest < LIMIT, largest
+    log = meta.get("user_intent_log") or []
+    assert log and all(len(str(r.get("content"))) < 5_000 for r in log)

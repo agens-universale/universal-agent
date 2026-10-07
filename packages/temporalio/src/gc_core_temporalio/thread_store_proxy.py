@@ -16,6 +16,7 @@ from gc_core.thread_store_types import ThreadState
 from gc_core.utils.generate_message_id import generate_msg_id_sha256
 
 from gc_core_temporalio.message_refs import message_hash
+from gc_core_temporalio.sizes import payload_size
 from gc_core_temporalio.thread_store_contracts import (
     PAGE_BYTES,
     ThreadStoreCall,
@@ -34,6 +35,37 @@ _METADATA_OPERATIONS = frozenset(
 
 def _history_fence(value):
     return (value.generation, value.owner_id, value.owner_epoch, value.max_seq)
+
+
+#: Бюджет журнала намерений (``user_intent_log``) в meta треда — в байтах
+#: истории Temporal. Meta целиком уходит в каждую запись и квитанцию, а журнал
+#: хранит текст каждого сообщения пользователя: без бюджета долгий тред или
+#: несколько больших сообщений упирались в лимит записи (2 МБ).
+INTENT_LOG_BUDGET = 256 * 1024
+#: Длиннее — запись журнала укорачивается: полный текст сообщения есть в треде.
+INTENT_RECORD_MAX_CHARS = 4_000
+
+
+def _bounded_meta(meta):
+    """Meta для записи: журнал намерений в пределах бюджета (локальный режим
+    хранит его целиком; у Temporal предел записи)."""
+    log = meta.get("user_intent_log") if isinstance(meta, dict) else None
+    if not isinstance(log, list) or not log:
+        return meta
+    records = []
+    for record in log:
+        content = record.get("content") if isinstance(record, dict) else None
+        if isinstance(content, str) and len(content) > INTENT_RECORD_MAX_CHARS:
+            record = {
+                **record,
+                "content": content[:INTENT_RECORD_MAX_CHARS]
+                + " …[обрезано; полный текст — в треде]",
+            }
+        records.append(record)
+    # Старые записи уходят первыми: свежие намерения важнее для сжатия.
+    while len(records) > 1 and payload_size(records) > INTENT_LOG_BUDGET:
+        records.pop(0)
+    return {**meta, "user_intent_log": records}
 
 
 def _hashable(value):
@@ -158,6 +190,14 @@ class TemporalThreadStore:
 
     async def acommit_operation(self, system_id, thread_id, operation):
         key = (system_id, thread_id)
+        payload = operation.payload
+        if isinstance(payload, dict) and isinstance(payload.get("meta"), dict):
+            # Все записи треда идут сюда (ядро зовёт и напрямую): журнал
+            # намерений в meta — в пределах бюджета записи истории.
+            operation = replace(
+                operation,
+                payload={**payload, "meta": _bounded_meta(payload["meta"])},
+            )
         try:
             reply = await self._call(
                 "agent.thread.commit",
@@ -192,6 +232,15 @@ class TemporalThreadStore:
         ):
             base = previous[0]
         self._metadata_acks[key] = (base, deepcopy(receipt))
+        messages = (
+            payload.get("messages") if isinstance(payload, dict) else None
+        )
+        if isinstance(messages, list):
+            # Записанные сообщения тоже есть в треде: повтор запроса модели
+            # после промаха кэша воркера передаст их ссылками.
+            self.message_hashes.setdefault(key, set()).update(
+                message_hash(message) for message in messages
+            )
         return receipt
 
     def metadata_ack_since(self, system_id, thread_id, revision):

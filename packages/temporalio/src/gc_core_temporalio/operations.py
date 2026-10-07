@@ -41,6 +41,7 @@ from gc_core_temporalio.contracts import (
 )
 from gc_core_temporalio.message_refs import CONTEXT_MISSING, SentMessages
 from gc_core_temporalio.model_routing import public_router_identity
+from gc_core_temporalio.sizes import ACTIVITY_INPUT_LIMIT, payload_size
 
 #: Доменные исключения, которые activity переносит значением (``DomainError``)
 #: и которые workflow поднимает тем же типом — ядро обрабатывает их, как в local.
@@ -155,6 +156,9 @@ class WorkflowOperations:
         self.router = None
         self.resource_owner = None
         self.child_context = None
+        #: Записать отложенные шаги хода в тред (``AgentExecutor.aflush_thread``):
+        #: перед повтором запроса модели после промаха кэша воркера.
+        self.flush_thread = None
         self._prompts = {}
         self.tool_metadata = {}
         #: Снимок подготовки хода (PreparedContext), см. prompt/skills.
@@ -198,6 +202,15 @@ class WorkflowOperations:
         или лимит времени — модель получает ошибку «исход неизвестен», эффект
         второй раз не исполняется.
         """
+        size = payload_size(data)
+        if size > ACTIVITY_INPUT_LIMIT:
+            # Вход activity — запись истории (лимит 2 МБ): больше — сервер
+            # отвергнет команду, и задача workflow падала бы бесконечно.
+            # Отказ хода с причиной вместо вечного цикла.
+            raise ExecutionFailure(
+                f"Вход activity {name} — {size} байт в истории Temporal, "
+                f"больше лимита записи ({ACTIVITY_INPUT_LIMIT})"
+            )
         request = ActivityCall(
             self.start.profile,
             self.owner_id,
@@ -308,8 +321,6 @@ class WorkflowOperations:
             else set()
         )
         for attempt in range(2):
-            if attempt:
-                stored = set()
             state = dict(data["state"])
             state["messages"], inline = self._sent_messages.encode(
                 state.get("messages"), also=stored
@@ -341,8 +352,20 @@ class WorkflowOperations:
                     raise InfrastructureFailure(
                         "Model context is not available on the worker"
                     ) from None
-                # Воркер без этих сообщений (перезапуск, другой процесс, а
-                # в треде их нет): один повтор, всё целиком.
+                # Воркер без этих сообщений (перезапуск, другой процесс).
+                # Не «всё целиком» (тред в мегабайты не влез бы в запись
+                # истории): сначала шаги хода — в тред, затем повтор, где
+                # всё, что есть в треде, идёт ссылками (воркер найдёт в
+                # хранилище); целиком — только то, чего в треде нет
+                # (системный промпт, схемы инструментов).
+                if self.flush_thread is not None:
+                    await self.flush_thread()
+                if store is not None:
+                    stored = set(
+                        store.message_hashes.get(
+                            (thread["system_id"], thread["thread_id"]), set()
+                        )
+                    )
                 self._sent_messages.forget()
                 operation_id = f"{request.operation_id}/full"
                 continue

@@ -832,16 +832,18 @@ def archive_and_replace_thread_files(
 
 def _batches_by_bytes(messages, limit):
     """Сообщения частями не больше ``limit`` байт JSON (хотя бы по одному);
-    без потолка или без сообщений — одной частью (запись меты тоже нужна)."""
+    без потолка или без сообщений — одной частью (запись меты тоже нужна).
+
+    Размер — в ASCII-JSON (не-ASCII символ — ``\\uXXXX``, 6 байт): так пишут
+    durable-рантаймы с лимитом записи (JSON-конвертер Temporal); оценка с
+    запасом для любого другого хранилища."""
     if not limit or not messages:
         return [messages]
     import json
 
     batches, batch, size = [], [], 0
     for message in messages:
-        length = len(
-            json.dumps(message, ensure_ascii=False, default=str).encode()
-        )
+        length = len(json.dumps(message, ensure_ascii=True, default=str))
         if batch and size + length > limit:
             batches.append(batch)
             batch, size = [], 0

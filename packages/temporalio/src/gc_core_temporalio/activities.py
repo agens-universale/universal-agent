@@ -49,6 +49,7 @@ from gc_core_temporalio.message_refs import (
     message_hash,
     refs_in,
 )
+from gc_core_temporalio.sizes import cut_to_payload, payload_size
 
 #: Потолок вывода инструмента через границу activity (байты UTF-8). Результат
 #: activity — запись истории Temporal (лимит 2 МБ). Встроенные инструменты
@@ -60,15 +61,16 @@ TOOL_OUTPUT_LIMIT_BYTES = 1024 * 1024
 
 
 def cap_tool_output(result, limit=TOOL_OUTPUT_LIMIT_BYTES):
-    """``ToolResult`` с выводом не больше ``limit`` байт и пометкой обрезки."""
+    """``ToolResult`` с выводом не тяжелее ``limit`` в истории Temporal
+    (``payload_size``: кириллица — 6 байт на символ) и пометкой обрезки."""
     output = result.output if isinstance(result.output, str) else ""
-    encoded = output.encode()
-    if len(encoded) <= limit:
+    total = payload_size(output)
+    if total <= limit:
         return result
-    kept = encoded[:limit].decode(errors="ignore")
+    kept = cut_to_payload(output, limit)
     result.output = (
-        f"{kept}\n[вывод обрезан воркером Temporal: показано "
-        f"{len(kept.encode())} из {len(encoded)} байт — лимит записи истории]"
+        f"{kept}\n[вывод обрезан воркером Temporal: показано {len(kept)} из "
+        f"{len(output)} символов — лимит записи истории]"
     )
     return result
 
