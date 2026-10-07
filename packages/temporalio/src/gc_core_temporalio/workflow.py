@@ -228,7 +228,13 @@ class AgentWorkflow:
             self.pending_messages.append(value)
         return {"message_id": message.message_id, "duplicate": False}
 
-    @workflow.update
+    # Ожидание ответа не держит workflow: если сессия упала или закрылась,
+    # клиент получает «workflow завершён» и сам читает причину
+    # (``AgentSession.wait``). Без ABANDON незавершённый обработчик ронял бы
+    # задачу workflow, и упавшая сессия зависала бы вместо FAILED.
+    @workflow.update(
+        unfinished_policy=workflow.HandlerUnfinishedPolicy.ABANDON
+    )
     async def wait_for_message(self, message_id: str) -> dict:
         """Дождаться конца хода, обработавшего сообщение ``message_id``.
 
@@ -409,7 +415,10 @@ class AgentWorkflow:
         )
         prepared = await self.operations.call(
             "agent.context.prepare",
-            {"store_id": start.store_id},
+            {
+                "store_id": start.store_id,
+                "settings_fingerprint": start.settings_fingerprint,
+            },
             PreparedContext,
         )
         self.operations.resource_owner = prepared.resource_owner

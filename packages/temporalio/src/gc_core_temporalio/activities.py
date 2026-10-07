@@ -292,6 +292,9 @@ class AgentActivities:
             resolve_subagent_definitions,
         )
 
+        check = getattr(self.context_provider, "check_settings", None)
+        if check is not None:
+            check(call.profile, call.data.get("settings_fingerprint"))
         store = self.stores[call.data["store_id"]]
         public = self.public_config(ctx)
         prompts_request = PromptPreparationRequest.from_config(

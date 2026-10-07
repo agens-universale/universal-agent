@@ -18,6 +18,7 @@ _EXPORTS = {
     "AgentClient": "gc_core_temporalio.client",
     "TemporalDurability": "gc_core_temporalio.client",
     "MessageNotProcessed": "gc_core_temporalio.client",
+    "SessionFailed": "gc_core_temporalio.client",
     "session_workflow_id": "gc_core_temporalio.client",
     "AgentWorkflow": "gc_core_temporalio.workflow",
     "SubagentWorkflow": "gc_core_temporalio.child_workflow",
@@ -26,6 +27,9 @@ _EXPORTS = {
     "WorkerConfig": "gc_core_temporalio.provider",
     "AgentProfile": "gc_core_temporalio.provider",
     "run_worker": "gc_core_temporalio.worker",
+    "agent_step": "gc_core_temporalio.steps",
+    "AgentStepResult": "gc_core_temporalio.steps",
+    "step_workflow_id": "gc_core_temporalio.steps",
     "default_build_id": "gc_core_temporalio.worker",
 }
 
@@ -34,16 +38,20 @@ __all__ = [
     "AgentPlugin",
     "AgentProfile",
     "AgentSession",
+    "AgentStepResult",
     "AgentWorkflow",
     "MessageNotProcessed",
     "RunRequest",
+    "SessionFailed",
     "SubagentWorkflow",
     "TemporalDurability",
     "UserMessage",
     "WorkerConfig",
+    "agent_step",
     "default_build_id",
     "run_worker",
     "session_workflow_id",
+    "step_workflow_id",
 ]
 
 

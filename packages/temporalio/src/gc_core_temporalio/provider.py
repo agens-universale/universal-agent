@@ -16,12 +16,17 @@ from gc_core.config_modules.auth import build_auth_connector
 from gc_core.config_modules.env_interpolation import (
     resolve_env_placeholders_strict,
 )
+from gc_core.execution.contracts import ExecutionFailure
 from gc_core.execution.resource_host import WorkerResourceHost
 from gc_core.run_context import acreate_run_context
 from gc_core.settings import LoadedSettings, RuntimeEnv
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from gc_core_temporalio.activity_config import ActivitiesConfig
+from gc_core_temporalio.public_config import (
+    fingerprint_mismatch,
+    settings_fingerprint,
+)
 
 
 class AgentProfile(BaseModel):
@@ -218,6 +223,8 @@ class ContextProvider:
         self.resource_host: WorkerResourceHost = resource_host
         self.stores = dict(stores)
         self._profiles = {}
+        #: Профиль → отпечаток его настроек (``settings_fingerprint``).
+        self._fingerprints = {}
         self._contexts = {}
         self._refs = {}
         self._locks = {}
@@ -300,6 +307,27 @@ class ContextProvider:
                 ),
             )
             self._profiles[name] = (profile.store_id, loaded)
+            # Отпечаток — исходного профиля, до правок воркера выше: их у
+            # приложения нет, и они не должны давать расхождение.
+            self._fingerprints[name] = settings_fingerprint(profile.core)
+
+    def check_settings(self, profile, expected):
+        """Сверить отпечаток настроек приложения с профилем воркера.
+
+        Ход идёт по профилю воркера: разошедшиеся настройки — отказ хода с
+        перечнем секций, а не агент, который тихо ведёт себя иначе, чем
+        приложение ожидает.
+        """
+        if not expected:
+            return
+        mismatch = fingerprint_mismatch(expected, self._fingerprints[profile])
+        if mismatch:
+            raise ExecutionFailure(
+                f"Настройки приложения и профиля воркера {profile!r} различаются "
+                f"в секциях: {', '.join(mismatch)}. Ход идёт по профилю "
+                "воркера: загрузите в приложении те же настройки или "
+                "перезапустите воркер с новыми"
+            )
 
     async def _resolve(self, call):
         if call.schema_version != 1 or not call.owner_id:

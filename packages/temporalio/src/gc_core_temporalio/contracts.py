@@ -76,6 +76,10 @@ class RunRequest:
     format_text: str | None = None
     keep_alive: bool = False
     resume: SessionResume | None = None
+    #: Отпечаток настроек приложения (``settings_fingerprint``): воркер
+    #: сверяет его со своим профилем на подготовке хода. ``None`` — без
+    #: сверки (CLI, JSON-клиенты).
+    settings_fingerprint: dict[str, str] | None = None
 
 
 @dataclass(frozen=True)

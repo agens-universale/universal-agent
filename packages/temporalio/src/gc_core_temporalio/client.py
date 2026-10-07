@@ -13,6 +13,7 @@ from temporalio.client import Client, WithStartWorkflowOperation
 from temporalio.common import WorkflowIDConflictPolicy, WorkflowIDReusePolicy
 
 from gc_core_temporalio.contracts import RunRequest, UserMessage
+from gc_core_temporalio.public_config import settings_fingerprint
 from gc_core_temporalio.workflow import AgentWorkflow
 
 
@@ -117,6 +118,12 @@ class AgentClient:
         )
 
 
+class SessionFailed(RuntimeError):
+    """Сессия агента упала (отказ хода, расхождение настроек приложения и
+    воркера); текст — исходная причина. Следующее сообщение в тот же тред
+    откроет новый run."""
+
+
 class MessageNotProcessed(RuntimeError):
     """Сообщение отброшено остановкой хода до того, как ход его взял;
     повтор с тем же ID принимается заново."""
@@ -158,6 +165,7 @@ class AgentSession:
         model_queue=None,
         format_text=None,
         workflow_id=None,
+        settings=None,
     ):
         self.client = client
         self.task_queue = task_queue
@@ -174,6 +182,10 @@ class AgentSession:
             model_queue,
             format_text=format_text,
             keep_alive=True,
+            # Настройки приложения: воркер сверит их со своим профилем.
+            settings_fingerprint=settings_fingerprint(settings)
+            if settings is not None
+            else None,
         )
 
     @property
@@ -193,9 +205,43 @@ class AgentSession:
     async def wait(self, message_id):
         """Дождаться хода, обработавшего сообщение: ответ, номер хода,
         ``delivered: False`` — если ход остановили до него."""
-        return await self.handle.execute_update(
-            AgentWorkflow.wait_for_message, message_id
+        try:
+            return await self.handle.execute_update(
+                AgentWorkflow.wait_for_message, message_id
+            )
+        except Exception as exc:
+            # Сессия упала, пока ход шёл: наружу — её настоящая причина
+            # (отказ хода, расхождение настроек), а не «update не выполнен».
+            reason = await self._failure()
+            if reason is None:
+                raise
+            raise reason from exc
+
+    async def _failure(self):
+        """Причина падения сессии (``WorkflowFailureError``) или ``None``."""
+        from temporalio.client import (
+            WorkflowExecutionStatus,
+            WorkflowFailureError,
         )
+
+        try:
+            description = await self.handle.describe()
+        except Exception:
+            return None
+        if description.status != WorkflowExecutionStatus.FAILED:
+            return None
+        try:
+            await self.handle.result(follow_runs=False)
+        except WorkflowFailureError as failure:
+            # Суть — в глубине цепочки причин (ApplicationError отказа хода).
+            cause, message = failure, None
+            while cause is not None:
+                message = getattr(cause, "message", None) or message
+                cause = getattr(cause, "cause", None)
+            error = SessionFailed(message or str(failure))
+            error.__cause__ = failure
+            return error
+        return None
 
     async def ask(self, text, *, message_id=None):
         """Отправить и дождаться: ответ хода (как ``AsyncAgent.run``).
@@ -254,7 +300,9 @@ class TemporalDurability:
         }
 
     async def open(self, settings):
-        return _DurableAgentRuntime(self.client, self.options)
+        return _DurableAgentRuntime(
+            self.client, {**self.options, "settings": settings}
+        )
 
 
 class _DurableAgentRuntime:

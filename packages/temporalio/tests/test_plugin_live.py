@@ -16,6 +16,7 @@ from gc_core_temporalio import (
     AgentPlugin,
     AgentSession,
     RunRequest,
+    SessionFailed,
     TemporalDurability,
     UserMessage,
     WorkerConfig,
@@ -218,3 +219,37 @@ async def test_json_worker_config_runs_the_same_plugin(
             worker.cancel()
             await asyncio.gather(worker, return_exceptions=True)
     assert "from json" in json.dumps(reply["answer"], ensure_ascii=False)
+
+
+async def test_settings_mismatch_between_app_and_worker_fails_the_turn(
+    tmp_path,
+    monkeypatch,
+    scripted_http,  # noqa: F811
+):
+    """Приложение и воркер с разными настройками агента: ход не идёт молча по
+    профилю воркера — отказ с перечнем различающихся секций."""
+    import pytest
+
+    monkeypatch.chdir(tmp_path)
+    url, requests, _script = scripted_http
+    worker_settings = agent_settings(url, tmp_path)
+    app_settings = worker_settings.with_overrides({"agent.max_steps": 11})
+    plugin = AgentPlugin(
+        {"shop": worker_settings},
+        thread_store=DurableFileThreadStore(str(tmp_path / "threads")),
+    )
+    async with await WorkflowEnvironment.start_local(
+        dev_server_existing_path=temporal_cli()
+    ) as env:
+        async with Worker(env.client, task_queue="shop", plugins=[plugin]):
+            agent = await AsyncAgent.create(
+                app_settings,
+                durable=TemporalDurability(
+                    env.client, task_queue="shop", agent="shop"
+                ),
+            )
+            with pytest.raises(
+                SessionFailed, match="различаются в секциях: agent"
+            ):
+                await asyncio.wait_for(agent.run("task", thread_id="t5"), 60)
+    assert not requests  # до модели дело не дошло

@@ -23,6 +23,8 @@ workflow видит заданным ровно то, что задано у в�
 from __future__ import annotations
 
 import dataclasses
+import hashlib
+import json
 import math
 from dataclasses import dataclass
 from functools import lru_cache
@@ -275,12 +277,50 @@ def public_config_snapshot(source: Any) -> PublicConfigSnapshot:
     )
 
 
+#: Секции, которые у приложения и воркера законно разные: пути — свои у
+#: процесса (абсолютные, от каталога конфига), логирование — тоже.
+_FINGERPRINT_SKIP = frozenset({"paths", "logging"})
+
+
+def settings_fingerprint(source: Any) -> dict[str, str]:
+    """Отпечаток настроек агента по секциям: ``{секция: sha256[:16]}``.
+
+    Сравнивает настройки приложения (``AsyncAgent``/``AgentSession``) и
+    профиля воркера: ход идёт по профилю воркера, и разошедшиеся настройки
+    значили бы, что агент ведёт себя не так, как приложение ожидает. Полные
+    значения (с умолчаниями — явно заданное и умолчание с тем же значением не
+    различаются), без закрытых полей; наружу уходят только хэши.
+    """
+    settings = settings_of(source)
+    document = settings.model_dump(
+        mode="json", by_alias=True, exclude=settings_exclude_spec()
+    )
+    return {
+        section: hashlib.sha256(
+            json.dumps(value, sort_keys=True, ensure_ascii=False).encode()
+        ).hexdigest()[:16]
+        for section, value in sorted(document.items())
+        if section not in _FINGERPRINT_SKIP
+    }
+
+
+def fingerprint_mismatch(expected: dict, actual: dict) -> list[str]:
+    """Секции, где отпечатки расходятся (есть только у одной стороны — тоже)."""
+    return sorted(
+        section
+        for section in {*expected, *actual}
+        if expected.get(section) != actual.get(section)
+    )
+
+
 __all__ = [
     "PublicConfigError",
     "PublicConfigSnapshot",
+    "fingerprint_mismatch",
     "is_private_path",
     "public_config_snapshot",
     "public_runtime",
     "public_settings",
     "settings_exclude_spec",
+    "settings_fingerprint",
 ]

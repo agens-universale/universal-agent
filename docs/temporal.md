@@ -202,10 +202,14 @@ uv run --project /path/to/universal-agent --extra temporal \
 `on_stream_delta`, `tools_cache`…) в этом режиме не принимаются: контекст
 собирает воркер.
 
-**Настройки агента читает воркер.** `settings`, переданные в
-`AsyncAgent.create`, в durable-режиме не применяются — ход идёт по профилю
-воркера. Держите их одинаковыми (один и тот же `shop.yaml`); смена настроек или
-токена — перезапуск воркера, живые сессии продолжат работу со следующего хода.
+**Настройки агента читает воркер, а приложение их сверяет.** Ход идёт по
+профилю воркера; `settings`, переданные в `AsyncAgent.create`, уходят в сессию
+отпечатком по секциям (хэши, без значений и секретов), и воркер сравнивает его
+со своим профилем на подготовке хода. Разошлись — ход не начинается:
+`SessionFailed: Настройки приложения и профиля воркера 'shop' различаются в
+секциях: agent…`. Не сравниваются `paths` и `logging` (у каждого процесса
+свои) и рантайм. Смена настроек или токена — перезапуск воркера с новыми
+настройками; приложению — те же.
 
 ### `AgentSession`
 
@@ -234,7 +238,10 @@ await session.close()  # закрыть сессию, снять владени�
   сессии). Сообщение, отброшенное остановкой хода, при повторе принимается
   заново. Текст — до 1 МБ в UTF-8.
 - `wait` переживает Continue-As-New: ход, обработавший сообщение, помнится в
-  состоянии сессии.
+  состоянии сессии. Упавшая сессия — `SessionFailed` с исходной причиной;
+  сообщение, отброшенное остановкой хода, у `ask` — `MessageNotProcessed`.
+- `AgentSession(..., settings=...)` включает ту же сверку настроек, что
+  `AsyncAgent` с `durable=`.
 
 Низкоуровневый клиент — `AgentClient` (`start`, `submit_with_start`,
 `submit_message`, `answer_human`, `stop_turn`, `stop`, `close_session`,
@@ -258,6 +265,52 @@ gc-temporal unlock --config worker.json --system SYSTEM --thread THREAD
 падение процесса): тред снова открывается локально в TUI/CLI. Живую сессию не
 трогает. `start --structured-output-format файл` включает структурированный
 ответ.
+
+### Агент шагом своего workflow
+
+Свой бизнес-процесс в Temporal зовёт агента как обычный шаг — как
+`await agent.run(...)` в workflow у Pydantic AI:
+
+```python
+from datetime import timedelta
+from temporalio import workflow
+from gc_core_temporalio import agent_step
+
+
+@workflow.defn
+class OrderWorkflow:
+    @workflow.run
+    async def run(self, order_id: str) -> str:
+        await workflow.execute_activity(
+            charge, order_id, start_to_close_timeout=timedelta(minutes=1)
+        )
+        step = await agent_step(
+            "shop", f"Проверь заказ {order_id}", thread_id=f"order-{order_id}"
+        )
+        await workflow.execute_activity(
+            send_email,
+            step.answer,
+            start_to_close_timeout=timedelta(minutes=1),
+        )
+        return step.answer
+```
+
+```python
+Worker(
+    client, task_queue="orders", workflows=[OrderWorkflow], plugins=[plugin]
+)
+```
+
+- Шаг — один ход агента в дочернем `AgentWorkflow`: тот же агент, тред и
+  гарантии (повторы модели, эффект — одна попытка, ожидание человека).
+  Несколько шагов одного треда идут подряд и видят общую историю.
+- ID дочернего workflow предсказуем — `step_workflow_id(ID_родителя, шаг)`
+  (шаг по умолчанию — ID треда). По нему приложение отвечает на вопрос агента
+  и останавливает ход: `AgentSession(client, agent=…, thread_id=…,
+  task_queue=…, workflow_id=step_workflow_id(...))`.
+- Воркер процесса несёт `AgentPlugin`. Отказ хода — `ChildWorkflowError` в
+  коде workflow. Код своего workflow не входит в `default_build_id()`: при
+  versioning задавайте `build_id` с учётом своего кода.
 
 ## Настройки агента
 
@@ -470,8 +523,7 @@ Temporal ограничивает запись истории 2 МБ, истор
 - Журнал правок агента (дифф, откат в TUI) не ведётся.
 - Одновременно активен один субагент.
 - Агент — профиль настроек ядра: инструментов-функций на Python, как у
-  Pydantic AI, нет; свой workflow с агентом шагом — через дочерний
-  `AgentWorkflow`.
+  Pydantic AI, нет.
 
 ## Как это устроено
 
