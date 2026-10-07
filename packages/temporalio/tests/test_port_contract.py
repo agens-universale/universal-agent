@@ -249,3 +249,21 @@ def test_every_activity_called_by_the_workflow_is_registered(
     assert called <= registered, (
         f"не зарегистрированы: {sorted(called - registered)}"
     )
+
+
+def test_custom_thread_store_must_declare_its_paths(tmp_path):
+    """Своё хранилище без protected_paths() — отказ, а не тихо незащищённые
+    данные; с объявлением — его пути под защитой."""
+    import pytest
+    from gc_core_temporalio.worker import store_paths
+
+    class Undeclared:
+        pass
+
+    class Declared:
+        def protected_paths(self):
+            return [str(tmp_path / "s3-cache")]
+
+    with pytest.raises(ValueError, match="protected_paths"):
+        store_paths(Undeclared())
+    assert store_paths(Declared()) == [str(tmp_path / "s3-cache")]

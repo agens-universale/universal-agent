@@ -12,75 +12,81 @@ model: openai/${model_name}
 agent_kwargs:
   gc_cli_config:
     # --- backend ---
-    backend.api_mode: chat_completions
+    backend:
+      api_mode: chat_completions
+      chat_completions_max_tokens: 32768
+      chat_completions_min_response_tokens: 1024  # минимум лимита для ретраев
+      use_max_tokens_param: true
+      openai_strict_tools_schema: false
+      use_ssl: false
+      cert_path: null
+      key_path: null
+      use_retry: true
+      request_timeout_sec: 600     # таймаут одного HTTP-запроса к LLM (длинные генерации на медленном vllm)
+      proxy: null
+      stream: true                         # legacy; CLI/harbor non-stream, канон — tui.stream
+      chat_completion_headers: {}
+      # словарь заменяет значение bench-слоя целиком; {} — без kwargs
+      chat_completion_kwargs:
+        chat_template_kwargs:
+          enable_thinking: false
+        tool_choice: auto
     os_backend: harbor
-    agent.harbor_exec_init: bashrc              # model-facing exec читает profile/bashrc (SWE testbed); null = raw
-    backend.chat_completions_max_tokens: 32768
-    backend.chat_completions_min_response_tokens: 1024  # минимум лимита для ретраев
-    backend.use_max_tokens_param: true
-    backend.openai_strict_tools_schema: false
-    backend.use_ssl: false
-    backend.cert_path: null
-    backend.key_path: null
-    backend.use_retry: true
-    backend.request_timeout_sec: 600     # таймаут одного HTTP-запроса к LLM (длинные генерации на медленном vllm)
-    backend.proxy: null
-    backend.stream: true                         # legacy; CLI/harbor non-stream, канон — tui.stream
-    backend.chat_completion_headers: {}
-    backend.chat_completion_kwargs:              # {} НЕ сбрасывает bench-слой (deep-merge dict)
-      chat_template_kwargs:
-        enable_thinking: false
-      tool_choice: auto
-    chat_completions.auxiliary_llm:
-      max_tokens: 24576                # aux LLM: summary / intent-scope (потолок)
-      judge_max_tokens: 24576          # finish-gate / command_moderation (запас под мысль модели)
-      # {} = schema default (без vendor-ключей). Не наследует и не гасит agent kwargs.
-      # Если у агента thinking вкл — задайте anti-thinking явно (см. ua_qwen / dsv4).
-      completion_kwargs: {}
+    agent:
+      harbor_exec_init: bashrc              # model-facing exec читает profile/bashrc (SWE testbed); null = raw
 
-    # --- agent loop ---
-    agent.system_prompt_id: v1
-    agent.max_steps: 1000                      # потолок шагов (tool-вызовов) агента за ран; предохранитель от бесконечных запусков
-    agent.no_tool_call_max_count: 1000         # бюджет подряд идущих «плохих» ответов (нет tool call / ошибка аргументов); исчерпан → ран завершается
-    agent.max_unknown_tool_repeats: 1000
-    agent.session_token_limit: null            # выкл
-    agent.max_tool_calls: null                 # выкл
-    agent.limit_trace_summary: false
-    agent.use_server_subagents: false          # серверные субагенты (через REST) выключены
-    agent.use_local_subagents: false           # локальные in-process субагенты выключены; оркестратор-прелюдия не подмешивается в промпт
-    agent.subagent_max_steps: 100              # лимит шагов одного субагента (действует только при включённых субагентах)
-    agent.subagents_dir: null
-    agent.subagents_max_count: 20
-    agent.strict_turn_finish_validation: true  # строгая валидация turn_finish: финальный отчёт обязан пройти проверки, иначе агент дорабатывает
-    agent.finish_gate_max_iterations: 10       # то же для основного агента: макс. кругов finish-гейта перед принятием ответа
-    agent.subagent_finish_gate_max_iterations: 3  # сколько раз finish-гейт может завернуть финальный ответ субагента на доработку
-    agent.client_name: mini_cli_pub_agent_1
-    agent.x_cl_id: "12345"
-    agent.trace_id_header_name: null
-    agent.trace_header_enabled: false
-    agent.verbose: true
-    agent.server_tool_prefix: system
-    agent.limit_project_metadata: false
-    agent.model_steering: ""
-    agent.exec_timeout_sec: 600                # дефолт timeout для exec_command / exec_python, если модель не передала
-    agent.tool_output_inline_max_chars: 10000  # столько символов вывода тула инлайнится в диалог; остальное — в стор полных выводов
-    agent.exec_output_capture_max_chars: 40000  # потолок захвата stdout/stderr на поток: 20k головы + 20k настоящего хвоста
-    agent.exec_output_preview_edge_chars: 3000  # каждый край front-loaded preview длинного потока; 0 — без preview
-    agent.stored_tool_outputs_max_entries: 50  # ёмкость стора полных выводов (агент может дочитать через session_read_stored_tool_output)
-    agent.inject_tool_fields:                  # инжект синтетического поля в JSON Schema КАЖДОГО тула
-      reason: "At most 10 words: why this call, what you expect."
-    agent.stop_tools: [turn_ask_human, project_memory,
-                 fs_save_base64_file, exec_calculator,
-                 exec_sleep, exec_python, exec_fetch_url,
-                 turn_intermediate_reply, session_think,
-                 session_read_user_intent_log, fs_search_and_replace,
-                 session_compact, skills_list, skills_load,
-                 skills_run_script, skills_read_reference, skills_read_asset,
-                 download_file]       # убрать тулы из реестра: спрашивать человека в автономном бенче нельзя, межзапусковая память не нужна
-    agent.disable_skills: [supercoder, topic-research, complex-task-solver, science-article-creator, articles]  # скрыть нерелевантные бенчу скиллы из реестра
+      # --- agent loop ---
+      system_prompt_id: v1
+      max_steps: 1000                      # потолок шагов (tool-вызовов) агента за ран; предохранитель от бесконечных запусков
+      no_tool_call_max_count: 1000         # бюджет подряд идущих «плохих» ответов (нет tool call / ошибка аргументов); исчерпан → ран завершается
+      max_unknown_tool_repeats: 1000
+      session_token_limit: null            # выкл
+      max_tool_calls: null                 # выкл
+      limit_trace_summary: false
+      use_server_subagents: false          # серверные субагенты (через REST) выключены
+      use_local_subagents: false           # локальные in-process субагенты выключены; оркестратор-прелюдия не подмешивается в промпт
+      subagent_max_steps: 100              # лимит шагов одного субагента (действует только при включённых субагентах)
+      subagents_dir: null
+      subagents_max_count: 20
+      strict_turn_finish_validation: true  # строгая валидация turn_finish: финальный отчёт обязан пройти проверки, иначе агент дорабатывает
+      finish_gate_max_iterations: 10       # то же для основного агента: макс. кругов finish-гейта перед принятием ответа
+      subagent_finish_gate_max_iterations: 3  # сколько раз finish-гейт может завернуть финальный ответ субагента на доработку
+      client_name: mini_cli_pub_agent_1
+      x_cl_id: "12345"
+      trace_id_header_name: null
+      trace_header_enabled: false
+      verbose: true
+      server_tool_prefix: system
+      limit_project_metadata: false
+      model_steering: ""
+      exec_timeout_sec: 600                # дефолт timeout для exec_command / exec_python, если модель не передала
+      tool_output_inline_max_chars: 10000  # столько символов вывода тула инлайнится в диалог; остальное — в стор полных выводов
+      exec_output_capture_max_chars: 40000  # потолок захвата stdout/stderr на поток: 20k головы + 20k настоящего хвоста
+      exec_output_preview_edge_chars: 3000  # каждый край front-loaded preview длинного потока; 0 — без preview
+      stored_tool_outputs_max_entries: 50  # ёмкость стора полных выводов (агент может дочитать через session_read_stored_tool_output)
+      # инжект синтетического поля в JSON Schema КАЖДОГО тула
+      inject_tool_fields:
+        reason: "At most 10 words: why this call, what you expect."
+      stop_tools: [turn_ask_human, project_memory,
+                   fs_save_base64_file, exec_calculator,
+                   exec_sleep, exec_python, exec_fetch_url,
+                   turn_intermediate_reply, session_think,
+                   session_read_user_intent_log, fs_search_and_replace,
+                   session_compact, skills_list, skills_load,
+                   skills_run_script, skills_read_reference, skills_read_asset,
+                   download_file]       # убрать тулы из реестра: спрашивать человека в автономном бенче нельзя, межзапусковая память не нужна
+      disable_skills: [supercoder, topic-research, complex-task-solver, science-article-creator, articles]  # скрыть нерелевантные бенчу скиллы из реестра
+    chat_completions:
+      auxiliary_llm:
+        max_tokens: 24576                # aux LLM: summary / intent-scope (потолок)
+        judge_max_tokens: 24576          # finish-gate / command_moderation (запас под мысль модели)
+        # {} = schema default (без vendor-ключей). Не наследует и не гасит agent kwargs.
+        # Если у агента thinking вкл — задайте anti-thinking явно (см. ua_qwen / dsv4).
+        completion_kwargs: {}
 
     # --- summary ---
-    summary:                      # компакция истории (работает только в chat_completions-режиме)
+    # компакция истории (работает только в chat_completions-режиме)
+    summary:
       chat_completions_summary_trigger_chars: 400000   # объём диалога (символы), после которого запускается суммаризация
       chat_completions_summary_turn_end_trigger_chars: 350000  # порог компакции на границе хода (turn end)
       incremental_batch_chars: 480000    # сколько истории сжимается за одну инкрементальную суммаризацию
@@ -106,33 +112,35 @@ agent_kwargs:
       tools: {}
 
     # --- security (bench: гарды OFF, иначе контейнерные пути режутся по ФС раннера) ---
-    security.command_moderation:
-      enabled: false
-      mode: allow
-    security.write_guard:
-      enabled: false
-    security.read_guard:
-      enabled: false
-    security.url_policy:
-      enabled: false
-    security.protected_paths:
-      enabled: false
-      extra: []
+    security:
+      command_moderation:
+        enabled: false
+        mode: allow
+      write_guard:
+        enabled: false
+      read_guard:
+        enabled: false
+      url_policy:
+        enabled: false
+      protected_paths:
+        enabled: false
+        extra: []
 
     # --- fs / mcp / pricing / logging ---
     fs_tools:
       max_read_bytes: 8388608
       max_mutate_bytes: 16777216
-    mcp.servers: {}
+    mcp:
+      servers: {}
     pricing:
       enabled: false
-    logging.save_logs: false
-    logging.console_trace: false
-    logging.format: text
-    logging.log_level: info
-    logging.redact_secrets:
-      enabled: false
     logging:
+      save_logs: false
+      console_trace: false
+      format: text
+      log_level: info
+      redact_secrets:
+        enabled: false
       full_log_backend: false
     strip_tags_projection:
       tags: []

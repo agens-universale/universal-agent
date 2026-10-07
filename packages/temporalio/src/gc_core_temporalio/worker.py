@@ -54,8 +54,13 @@ def build_stores(config):
 
 def store_paths(store):
     """Пути хранилища тредов для ``protected_paths``: агент не читает и не
-    правит чужие треды. Своё хранилище объявляет их методом
-    ``protected_paths()``; без него путь не известен и не защищается."""
+    правит чужие треды.
+
+    Известные хранилища (файлы, SQLite) — по их пути. Своё обязано объявить
+    пути методом ``protected_paths()`` (хранилище вне диска воркера, например
+    S3, возвращает ``[]``). Без объявления — отказ: молча не защитить
+    данные на диске воркера нельзя.
+    """
     declared = getattr(store, "protected_paths", None)
     if callable(declared):
         return list(declared())
@@ -67,8 +72,13 @@ def store_paths(store):
                 for suffix in ("-wal", "-shm", "-journal")
             ),
         ]
-    directory = getattr(store, "_dir", None)
-    return [str(directory)] if directory else []
+    if isinstance(store, DurableFileThreadStore):
+        return [str(store._dir)]
+    raise ValueError(
+        f"Хранилище тредов {type(store).__name__} не объявило protected_paths(): "
+        "верните пути его данных на диске воркера (или [] — если данных на "
+        "диске нет), чтобы агент не мог их читать и править"
+    )
 
 
 def build_runtime(config, *, stores=None):

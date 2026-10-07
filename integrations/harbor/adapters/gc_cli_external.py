@@ -277,8 +277,9 @@ class GcCliExternal(BaseAgent):
         #
         # gc_cli_config is a per-experiment override bag for the gc-cli settings,
         # passed straight from the harbor agent profile's `agent_kwargs.gc_cli_config`
-        # (→ AgentConfig.kwargs → here). Keys are the historical flat config names or
-        # dotted setting paths; they deep-merge over _build_settings defaults, so
+        # (→ AgentConfig.kwargs → here). Keys are nested sections or dotted setting
+        # paths; each value replaces the default at its path (other fields of the
+        # section stay), see adapters.gc_cli_config, so
         # tuning no_tool_call_max_count / sampling / max_steps needs no code or rebuild.
         super().__init__(*args, **kwargs)
         self._api_base = api_base

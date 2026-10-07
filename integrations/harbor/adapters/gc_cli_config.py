@@ -3,8 +3,9 @@
 There is no YAML on a bench runner, so ``load_settings`` cannot be used — the adapter
 assembles the typed settings itself. It starts from the schema defaults (``AppConfig()``
 with paths resolved, exactly what an empty config file yields) and layers bench
-specifics on top through ``LoadedSettings.with_overrides`` — the same validation and
-merge (``config_modules.merge.deep_merge``) every other override path uses:
+specifics on top through ``LoadedSettings.with_overrides`` — the same validation as
+every other override path; a value replaces the one below at its path (sections are
+expanded into leaves, so other fields stay; dict values and lists are replaced whole):
 
     schema defaults  <  bench defaults  <  profile gc_cli_config  <  runtime (url/model)
 
