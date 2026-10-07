@@ -49,6 +49,7 @@ CASES = [
     "file_download",
     "stored_output",
     "turn_end_summary",
+    "text_allow",
     "text_deny",
     "text_length",
     "memory_two_turns",
@@ -70,13 +71,6 @@ SKIPPED = dict.fromkeys(
     "проверяет локальный API отложенного учёта (account_run=False, "
     "aclose_run_accounting); постобработку хода Temporal (format_text) "
     "проверяет test_workflow_controls",
-)
-# Режим текстового ответа задаёт рантайм поверхности (RuntimeEnv), а профиль
-# воркера рантайм пока не принимает. Вернуть в CASES, когда профиль станет
-# LoadedSettings (настройки + рантайм).
-SKIPPED["text_allow"] = (
-    "text_answer_mode=allow задаётся RuntimeEnv поверхности; профиль "
-    "воркера его пока не принимает"
 )
 
 
@@ -512,6 +506,7 @@ async def test_actual_http_local_native_parity(
                     url.removesuffix("/v1/chat/completions") + "/fixture.txt"
                 )
                 function["arguments"] = json.dumps(arguments)
+    text_mode = scenario.get("config", {}).get("text_answer_mode")
     config = WorkerConfig.model_validate(
         {
             "workflow_queue": "parity",
@@ -550,11 +545,7 @@ async def test_actual_http_local_native_parity(
                             ),
                             **scenario.get("agent_extra", {}),
                         },
-                        "tui": {
-                            "text_answer_mode": scenario.get("config", {}).get(
-                                "text_answer_mode", "deny"
-                            )
-                        },
+                        "tui": {"text_answer_mode": "deny"},
                         "paths": {
                             "chat_completions_system_prompt_path": str(prompt)
                         },
@@ -564,13 +555,18 @@ async def test_actual_http_local_native_parity(
                         },
                         **scenario.get("core", {}),
                     },
+                    # Режим текстового ответа — рантайм поверхности, как
+                    # у TUI/ACP/chat: тот же у local и у профиля воркера.
+                    "runtime": {"text_answer_mode": text_mode},
                 }
             },
         }
     )
     local_config = LoadedSettings(
         settings=config.profiles["test"].core,
-        runtime=RuntimeEnv(launch_root=str(tmp_path)),
+        runtime=RuntimeEnv(
+            launch_root=str(tmp_path), text_answer_mode=text_mode
+        ),
     )
     local_store = FileThreadStore(str(tmp_path / "local_threads"))
     local_ctx = await acreate_run_context(

@@ -219,6 +219,46 @@ async def test_two_turns_continue_as_new_and_delivery_dedup(
         assert len(requests) == 2
 
 
+async def test_wait_for_message_returns_its_turn_across_continue_as_new(
+    tmp_path, monkeypatch, scripted_http
+):
+    """«Отправить и дождаться ответа»: update ждёт конца хода, который
+    обработал сообщение; номер хода переживает Continue-As-New."""
+    monkeypatch.chdir(tmp_path)
+    url, _requests, script = scripted_http
+    script.extend([[finish("first")], [finish("second")]])
+    async with runtime(tmp_path, url) as (env, _contexts, _):
+        handle = await env.client.start_workflow(
+            AgentWorkflow.run,
+            request(keep_alive=True, message_ids=["m1"]),
+            id="controls-wait",
+            task_queue="native-controls",
+        )
+        first = await handle.execute_update(
+            AgentWorkflow.wait_for_message, "m1"
+        )
+        assert first["delivered"] and first["turn"] == 1
+        assert "first" in str(first["answer"])
+        await handle.execute_update(
+            AgentWorkflow.submit_message, UserMessage("m2", "second task")
+        )
+        second = await handle.execute_update(
+            AgentWorkflow.wait_for_message, "m2"
+        )
+        assert second["turn"] == 2 and "second" in str(second["answer"])
+        # Сообщение прошлого run: ответ сразу, номер хода сохранён.
+        again = await handle.execute_update(
+            AgentWorkflow.wait_for_message, "m1"
+        )
+        assert again["turn"] == 1
+        with pytest.raises(WorkflowUpdateFailedError):
+            await handle.execute_update(
+                AgentWorkflow.wait_for_message, "never-sent"
+            )
+        await handle.signal(AgentWorkflow.close_session)
+        await asyncio.wait_for(handle.result(), 30)
+
+
 @pytest.mark.parametrize("stop", [False, True])
 async def test_native_human_reply_or_stop_preserves_lifecycle(
     tmp_path, monkeypatch, scripted_http, stop

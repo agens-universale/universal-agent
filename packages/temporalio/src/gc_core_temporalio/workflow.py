@@ -97,6 +97,10 @@ class AgentWorkflow:
         self.closed = False
         self.ready = False
         self.turns = 0
+        #: ID сообщения → номер хода, который его обработал.
+        self.completed_inputs = {}
+        #: ID сообщений, отданных идущему ходу.
+        self.turn_inputs = []
         self.answer = None
         self.formatted_answer = None
         self.post_error = None
@@ -219,9 +223,44 @@ class AgentWorkflow:
         }
         if self.accepting_inputs:
             self.executor.add_message(value)
+            self.turn_inputs.append(message.message_id)
         else:
             self.pending_messages.append(value)
         return {"message_id": message.message_id, "duplicate": False}
+
+    @workflow.update
+    async def wait_for_message(self, message_id: str) -> dict:
+        """Дождаться конца хода, обработавшего сообщение ``message_id``.
+
+        Возвращает ответ последнего завершённого хода (как ``AsyncAgent.run``
+        локально) и номер хода сообщения. Сообщение, отброшенное остановкой
+        хода, — ``delivered: False``. Неизвестный ID (не принят или старше
+        последних 1000) — отказ.
+        """
+        await workflow.wait_condition(lambda: self.ready)
+        if message_id not in self.accepted:
+            raise ApplicationError("Unknown message", non_retryable=True)
+
+        def dropped():
+            return any(
+                value.get("message_id") == message_id
+                for value in self.undelivered
+            )
+
+        await workflow.wait_condition(
+            lambda: message_id in self.completed_inputs or dropped()
+        )
+        turn = self.completed_inputs.get(message_id)
+        return {
+            "message_id": message_id,
+            "delivered": turn is not None,
+            "turn": turn,
+            "turns": self.turns,
+            "answer": self.answer,
+            "terminal_outcome": self.terminal_outcome,
+            "formatted_answer": self.formatted_answer,
+            "post_error": self.post_error,
+        }
 
     def _take_undelivered(self, message_id):
         """Убрать сообщение из отброшенных остановкой (повтор принят заново)."""
@@ -334,6 +373,7 @@ class AgentWorkflow:
         self.accepted = dict(resume.accepted)
         self.pending_messages = list(resume.pending)
         self.turns = resume.turns
+        self.completed_inputs = dict(resume.completed)
         self.answer = resume.answer
         self.formatted_answer = resume.formatted_answer
         self.post_error = resume.post_error
@@ -447,6 +487,7 @@ class AgentWorkflow:
 
     async def _run_turn(self, start):
         messages, self.pending_messages = self.pending_messages, []
+        self.turn_inputs = [value["message_id"] for value in messages]
         if self.stop_requested:
             self.executor.stop_run()
         self.phase = "running"
@@ -500,12 +541,28 @@ class AgentWorkflow:
             self.pending_messages = []
         await self.operations.release_context()
         self.turns += 1
+        # Обработаны ходом — отданные ему и не вернувшиеся из него
+        # (опоздавшее к последнему забору ввода уходит в следующий ход).
+        later = {value.get("message_id") for value in self.pending_messages}
+        later.update(value.get("message_id") for value in self.undelivered)
+        for message_id in self.turn_inputs:
+            if message_id not in later:
+                self.completed_inputs[message_id] = self.turns
+        self.turn_inputs = []
         self.terminal_outcome = self.executor.last_terminal_outcome
         self.phase = "stopped" if self.stop_requested else "idle"
 
     @workflow.run
     async def run(self, start: RunRequest) -> dict:
         self.run_identity = workflow.info().run_id
+        if start.resource_queue is None or start.model_queue is None:
+            # Без явных очередей activities идут в очередь самого workflow.
+            queue = start.resource_queue or workflow.info().task_queue
+            start = replace(
+                start,
+                resource_queue=queue,
+                model_queue=start.model_queue or queue,
+            )
         self.start = start
         try:
             self._initialize(start)
@@ -649,6 +706,7 @@ class AgentWorkflow:
             accepted=_recent(self.accepted),
             pending=self.pending_messages,
             turns=self.turns,
+            completed=_recent(self.completed_inputs),
             answer=self.answer,
             terminal_outcome=self.terminal_outcome,
             # Run из CAN без хода владеет тредом по resume: передать его дальше,

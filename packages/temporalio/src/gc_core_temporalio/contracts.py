@@ -59,6 +59,9 @@ class SessionResume:
     answer: Any = None
     terminal_outcome: str | None = None
     schema_version: int = 1
+    #: Сообщения, обработанные завершёнными ходами: ID сообщения → номер
+    #: хода (``wait_for_message`` переживает Continue-As-New).
+    completed: dict[str, int] = field(default_factory=dict)
     #: Владение тредом уже подтверждено прошлым run: перечитывать не нужно.
     store_owner_epoch: int | None = None
     store_generation: int | None = None
@@ -71,8 +74,10 @@ class RunRequest:
     system_id: str
     thread_id: str
     messages: list[str]
-    resource_queue: str
-    model_queue: str
+    #: Очереди activities: ``None`` — очередь самого workflow (как у Pydantic
+    #: AI: один воркер на одной очереди обслуживает всё).
+    resource_queue: str | None = None
+    model_queue: str | None = None
     message_ids: list[str] | None = None
     schema_version: int = 1
     format_text: str | None = None

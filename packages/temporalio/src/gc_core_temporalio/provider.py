@@ -29,6 +29,23 @@ class AgentProfile(BaseModel):
     workspace: str
     store_id: str = "files"
     core: AppConfig = Field(default_factory=AppConfig)
+    #: Рантайм агента (как у ``AsyncAgent``: режим текстового ответа и
+    #: прочие факты поверхности). ``launch_root`` воркер всегда ставит в
+    #: ``workspace``.
+    runtime: RuntimeEnv | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _split_loaded_settings(cls, value):
+        """``core`` принимает и ``LoadedSettings`` — те же настройки, что
+        получает ``AsyncAgent.create``: настройки и рантайм разом."""
+        if isinstance(value, dict) and isinstance(
+            value.get("core"), LoadedSettings
+        ):
+            loaded = value["core"]
+            value = {**value, "core": loaded.settings}
+            value.setdefault("runtime", loaded.runtime)
+        return value
 
 
 class StoreConfig(BaseModel):
@@ -277,7 +294,10 @@ class ContextProvider:
             )
             loaded = LoadedSettings(
                 settings=settings,
-                runtime=RuntimeEnv(launch_root=str(workspace.resolve())),
+                runtime=replace(
+                    profile.runtime or RuntimeEnv(),
+                    launch_root=str(workspace.resolve()),
+                ),
             )
             self._profiles[name] = (profile.store_id, loaded)
 
