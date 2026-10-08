@@ -82,3 +82,54 @@ async def test_worker_reads_prompts_from_the_agent_store(
         assert "РОЛЬ-ИЗ-ХРАНИЛИЩА" in system["content"]
     assert ("prompt", "system") in agent_store.reads
     assert ("instructions", "L0") in agent_store.reads
+
+
+async def test_oversized_prompt_from_the_store_fails_the_turn_not_the_session(
+    tmp_path,
+    monkeypatch,
+    scripted_http,  # noqa: F811
+):
+    """Промпт из хранилища агента больше записи истории: подготовка хода не
+    ложится в историю — отказ хода (``TurnFailed``), а не сессии; сессия
+    принимает следующие сообщения."""
+    from gc_core_temporalio.client import TurnFailed
+
+    monkeypatch.chdir(tmp_path)
+    url, _requests, script = scripted_http
+    script.append([finish("ok")])
+    settings = LoadedSettings(
+        settings=resolve_paths(
+            AppConfig.model_validate(
+                {
+                    "backend": {
+                        "api_mode": "chat_completions",
+                        "completions_url": url,
+                        "chat_completion_kwargs": {"stream": False},
+                    },
+                    "agent": {"model": "scripted", "max_steps": 3},
+                }
+            ),
+            str(tmp_path),
+        ),
+        runtime=RuntimeEnv(launch_root=str(tmp_path)),
+    )
+    store = MemoryAgentStore(prompts={"system": "ж" * 400_000})
+    plugin = AgentPlugin(
+        {"a": settings},
+        thread_store=SQLiteThreadStore(str(tmp_path / "threads.sqlite")),
+        workspace=tmp_path,
+        agent_store=store,
+    )
+    async with await WorkflowEnvironment.start_local(
+        dev_server_existing_path=temporal_cli()
+    ) as env:
+        async with Worker(env.client, task_queue="q", plugins=[plugin]):
+            session = AgentSession(
+                env.client, agent="a", thread_id="t1", task_queue="q"
+            )
+            for text in ("первый", "второй"):
+                with pytest.raises(TurnFailed, match="prepare"):
+                    await asyncio.wait_for(session.ask(text), 60)
+            status = await session.status()
+            assert status["phase"] == "idle"
+            await session.close()

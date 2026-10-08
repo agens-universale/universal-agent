@@ -239,3 +239,26 @@ async def test_sdk_agent_uses_the_given_store(tmp_path, monkeypatch):
     assert system["role"] == "system"
     assert "СИСТЕМА-ИЗ-ХРАНИЛИЩА" in system["content"]
     assert ("prompt", "system") in store.reads
+
+
+async def test_context_finds_subagents_in_its_own_store():
+    """Сборка контекста ищет кастомных субагентов в хранилище агента
+    контекста, а не на диске: субагент из ``MemoryAgentStore`` — среди тулов
+    и определений."""
+    from gc_core.run_context import acreate_run_context
+
+    store = MemoryAgentStore(subagents={"helper.md": SUBAGENT})
+    ctx = await acreate_run_context(
+        make_settings(
+            {
+                "agent.model": "M",
+                "backend.api_mode": "chat_completions",
+                "agent.use_local_subagents": True,
+                "logging.save_logs": False,
+            }
+        ),
+        agent_store=store,
+    )
+    assert "subagent_helper" in ctx.subagent_definitions
+    assert "subagent_helper" in ctx.tools_data
+    assert ("subagents", "helper.md") in store.reads

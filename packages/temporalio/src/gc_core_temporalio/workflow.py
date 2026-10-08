@@ -763,6 +763,26 @@ class UniversalAgentWorkflow:
             self.undelivered.extend(self.pending_messages)
             self.pending_messages = []
         await self.operations.release_context()
+        self._finish_turn(self.executor.last_terminal_outcome)
+
+    async def _fail_unprepared_turn(self, exc):
+        """Подготовка хода не легла в запись истории (промпт, AGENTS.md из
+        хранилища агента больше лимита): отказ хода, а не сессии — сообщения
+        хода получают ``turn_error``, сессия принимает следующие."""
+        workflow.logger.warning("Turn failed before start: %s", exc)
+        messages, self.pending_messages = self.pending_messages, []
+        self.turn_inputs = [value["message_id"] for value in messages]
+        self.answer = self.formatted_answer = self.post_error = None
+        self.turn_error = str(exc)
+        self.answer_truncated = False
+        try:
+            await self.operations.release_context()
+        except Exception:
+            workflow.logger.exception("Context release failed")
+        self._finish_turn(None)
+
+    def _finish_turn(self, terminal_outcome):
+        """Учёт законченного хода: номер, обработанные сообщения, итог."""
         self.turns += 1
         # Обработаны ходом — отданные ему и не вернувшиеся из него
         # (опоздавшее к последнему забору ввода уходит в следующий ход).
@@ -774,7 +794,7 @@ class UniversalAgentWorkflow:
         self.turn_inputs = []
         self.turn_outcomes[str(self.turns)] = {
             "answer": self.answer,
-            "terminal_outcome": self.executor.last_terminal_outcome,
+            "terminal_outcome": terminal_outcome,
             "formatted_answer": self.formatted_answer,
             "post_error": self.post_error,
             "turn_error": self.turn_error,
@@ -788,7 +808,7 @@ class UniversalAgentWorkflow:
         self.turn_outcomes = dict(
             _fit_resume(self._session_resume(None)).turn_outcomes
         )
-        self.terminal_outcome = self.executor.last_terminal_outcome
+        self.terminal_outcome = terminal_outcome
         self.phase = "stopped" if self.stop_requested else "idle"
 
     @workflow.run
@@ -854,8 +874,12 @@ class UniversalAgentWorkflow:
         while True:
             ran = False
             if self.pending_messages:
-                await self._prepare_turn(start, owner, self.store)
-                await self._run_turn(start)
+                try:
+                    await self._prepare_turn(start, owner, self.store)
+                except HistoryLimitExceeded as exc:
+                    await self._fail_unprepared_turn(exc)
+                else:
+                    await self._run_turn(start)
                 ran = True
             if not start.keep_alive or (
                 self.closed and not self.pending_messages

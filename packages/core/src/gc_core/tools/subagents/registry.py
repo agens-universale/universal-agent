@@ -211,8 +211,10 @@ def _discover(
     app = settings_of(settings)
     builtin = builtin_subagent_names()
     diagnostics: List[Dict[str, Any]] = []
+    # Источник целиком, а не ``app``: у контекста (и двойника сборки) —
+    # хранилище агента, из которого и читаются определения.
     definitions = discover_subagent_definitions(
-        app,
+        settings,
         builtin_names=builtin,
         logger=logger,
         diagnostics=diagnostics,
