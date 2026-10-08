@@ -203,6 +203,8 @@ async def test_automatic_summary_full_trace_parity(
                         "agent": {
                             "model": "scripted",
                             "max_steps": 5,
+                            # Под Temporal project memory нет.
+                            "stop_tools": ["project_memory"],
                             "use_local_subagents": False,
                             "strict_turn_finish_validation": False,
                         },

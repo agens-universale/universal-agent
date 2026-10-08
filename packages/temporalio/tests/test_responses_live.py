@@ -159,6 +159,8 @@ async def test_responses_two_turns_exact_parity_and_cache_recovery(
                         "agent": {
                             "model": "scripted",
                             "max_steps": 10,
+                            # Под Temporal project memory нет.
+                            "stop_tools": ["project_memory"],
                             "strict_turn_finish_validation": False,
                         },
                         "logging": {

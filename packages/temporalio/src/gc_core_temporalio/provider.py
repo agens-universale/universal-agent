@@ -20,6 +20,7 @@ from gc_core.config_modules.env_interpolation import (
 from gc_core.constants.tool_names import (
     ASK_HUMAN_TOOL_NAME,
     FS_VIEW_IMAGE_NAME,
+    PROJECT_MEMORY_TOOL_NAME,
 )
 from gc_core.context_preparation import settings_from_snapshot
 from gc_core.execution.contracts import ExecutionFailure
@@ -373,6 +374,22 @@ class ContextProvider:
                 )
             if not human_input:
                 settings = _without_human(settings)
+            # Project memory — файл в рабочей папке, общий для всех сессий
+            # проекта: возможность TUI и CLI. Под Temporal её нет при любом
+            # профиле — ни инструмента, ни статуса в промпте, ни activity.
+            if PROJECT_MEMORY_TOOL_NAME not in settings.agent.stop_tools:
+                settings = settings.model_copy(
+                    update={
+                        "agent": settings.agent.model_copy(
+                            update={
+                                "stop_tools": [
+                                    *settings.agent.stop_tools,
+                                    PROJECT_MEMORY_TOOL_NAME,
+                                ]
+                            }
+                        )
+                    }
+                )
             # Журнал правок агента (agent_edits) в durable-исполнении не
             # ведётся при любом профиле: его читают только дифф, сводка хода
             # и откат в TUI, а на воркере он стоил бы снимков файлов и

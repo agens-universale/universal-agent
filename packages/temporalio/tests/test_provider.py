@@ -530,3 +530,20 @@ async def test_worker_without_human_has_no_ask_tool_and_no_ask_modes(
             not human_input
         )
         await provider.aclose()
+
+
+async def test_project_memory_is_off_under_temporal(tmp_path, monkeypatch):
+    """Project memory — файл в рабочей папке, возможность TUI и CLI: под
+    Temporal её нет при любом профиле, с человеком или без."""
+    monkeypatch.chdir(tmp_path)
+    store = DurableFileThreadStore(str(tmp_path / "threads"))
+    for human_input in (False, True):
+        provider = ContextProvider(
+            profiles={"test": profile(tmp_path)},
+            stores={"files": store},
+            resource_host=WorkerResourceHost("test"),
+            human_input=human_input,
+        )
+        stop = provider._profiles["test"][1].settings.agent.stop_tools
+        assert stop.count("project_memory") == 1
+        await provider.aclose()

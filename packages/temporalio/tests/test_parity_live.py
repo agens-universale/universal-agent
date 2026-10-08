@@ -41,8 +41,6 @@ CASES = [
     "file_roundtrip",
     "finish_judge_accept",
     "finish_judge_reject",
-    "project_memory_roundtrip",
-    "project_memory_compaction",
     "session_summary",
     "model_http_failure",
     "file_append_backup_mkdir",
@@ -95,35 +93,6 @@ def parity_scenarios(monkeypatch):
             )
         ],
         "stop_after_tool": True,
-    }
-    cases["project_memory_roundtrip"] = {
-        "turns": [
-            call(
-                "project_memory",
-                {"action": "write", "content": "Stable fact A."},
-            ),
-            call(
-                "project_memory",
-                {"action": "append", "content": "Stable fact B."},
-                "append",
-            ),
-            call("project_memory", {"action": "read", "content": ""}, "read"),
-            finish("Память сохранена"),
-        ]
-    }
-    cases["project_memory_compaction"] = {
-        "turns": [
-            call("project_memory", {"action": "write", "content": "A" * 60}),
-            call(
-                "project_memory",
-                {"action": "append", "content": "B" * 50},
-                "append",
-            ),
-            assistant_text("Facts A and B retained."),
-            call("project_memory", {"action": "read", "content": ""}, "read"),
-            finish("Память сжата"),
-        ],
-        "core": {"project_memory": {"max_chars": 80, "max_append_chars": 100}},
     }
     cases["session_summary"] = {
         "turns": [
@@ -455,7 +424,6 @@ def snapshot(answer, requests, store, workspace):
                 name: (workspace / name).read_text()
                 for name in (
                     "result.txt",
-                    ".gc/project_memory.md",
                     "nested/result.txt",
                     "nested/result.txt.bak",
                     "downloads/fixture.txt",
@@ -539,6 +507,8 @@ async def test_actual_http_local_native_parity(
                         },
                         "agent": {
                             "model": "parity-model",
+                            # Под Temporal project memory нет.
+                            "stop_tools": ["project_memory"],
                             "max_steps": 15,
                             "strict_turn_finish_validation": scenario.get(
                                 "config", {}
@@ -741,20 +711,6 @@ async def test_actual_http_local_native_parity(
                 assert (
                     actual["files"]["downloads/fixture.txt"]
                     == "Downloaded fixture = 42\n"
-                )
-            if name == "project_memory_roundtrip":
-                assert (
-                    "Stable fact A."
-                    in actual["files"][".gc/project_memory.md"]
-                )
-                assert (
-                    "Stable fact B."
-                    in actual["files"][".gc/project_memory.md"]
-                )
-            if name == "project_memory_compaction":
-                assert (
-                    actual["files"][".gc/project_memory.md"]
-                    == "Facts A and B retained."
                 )
             if name in {"session_summary", "turn_end_summary"}:
                 assert any(
