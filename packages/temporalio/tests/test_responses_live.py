@@ -140,6 +140,8 @@ async def test_responses_two_turns_exact_parity_and_cache_recovery(
     config = WorkerConfig.model_validate(
         {
             "workflow_queue": "responses",
+            # Сверка с локальным ходом: тот же набор инструментов.
+            "human_input": True,
             "model_queue": "responses",
             "resource_queue": "responses",
             "state_dir": str(tmp_path),

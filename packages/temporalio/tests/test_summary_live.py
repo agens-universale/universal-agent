@@ -180,6 +180,8 @@ async def test_automatic_summary_full_trace_parity(
     config = WorkerConfig.model_validate(
         {
             "workflow_queue": "summary",
+            # Сверка с локальным ходом: тот же набор инструментов.
+            "human_input": True,
             "resource_queue": "summary",
             "model_queue": "summary",
             "state_dir": str(tmp_path),
