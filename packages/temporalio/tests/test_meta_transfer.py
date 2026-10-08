@@ -491,3 +491,82 @@ async def test_same_meta_version_is_not_sent_twice(tmp_path):
     assert max(worker.outputs) < 10_000
     assert second.meta == first.meta
     assert second.meta["user_intent_log"] == log
+
+
+def _short_log(count):
+    """Журнал из коротких записей (~1 КБ): строки короче порога ссылок на
+    тексты сообщений, а вместе — мегабайты."""
+    return [
+        _record(i % 60, "user_ask", f"{i}: " + "к" * 150) for i in range(count)
+    ]
+
+
+async def test_full_meta_fallback_fits_the_record_with_a_3mb_log(tmp_path):
+    """Ревью r8: meta 3 МБ, чужой update_tui посреди хода (ревизию не
+    поднимает), запись на другом воркере. Запасной путь полной meta раньше
+    слал журнал целиком (HistoryLimitExceeded 3 МБ); теперь — ссылками на
+    записи по содержимому, запись проходит, кэш fetch_url не стёрт."""
+    from gc_core import thread_store as raw
+
+    store = _store("file", tmp_path)
+    store.append_messages(
+        "s", "t", [{"id": "m0", "role": "user", "content": "a"}]
+    )
+    log = _short_log(3100)
+    store.save_meta(
+        "s",
+        "t",
+        {
+            "user_intent_log": log,
+            "tui": {"title": "старый"},
+            "shared": {"fetch_url_cache": {"u": "кэш"}, "k": 1},
+        },
+    )
+    assert payload_size(store.load_meta("s", "t")) > 3_000_000
+    worker = _Worker(store)
+    proxy = TemporalThreadStore("files", worker)
+    snapshot = await proxy.aread_snapshot("s", "t")
+    raw.update_tui_meta(
+        str(tmp_path / "threads"), "s", "t", {"title": "чужой"}
+    )
+    worker.fresh()
+    worker.inputs.clear()
+    meta = deepcopy(snapshot.meta)
+    meta["user_intent_log"].append(_record(61, "final_answer", "готово"))
+    await proxy.acommit_operation(
+        "s",
+        "t",
+        _persist(
+            snapshot,
+            [{"id": "m1", "role": "assistant", "content": "готово"}],
+            meta,
+        ),
+    )
+    assert max(worker.inputs) < 300_000
+    stored = store.load_meta("s", "t")
+    assert stored["user_intent_log"] == [
+        *log,
+        _record(61, "final_answer", "готово"),
+    ]
+    assert stored["shared"]["fetch_url_cache"] == {"u": "кэш"}
+
+
+async def test_meta_known_sees_a_tui_edit_without_revision_bump(tmp_path):
+    """update_tui в файловом хранилище ревизию не поднимает: версия meta —
+    ещё и хэш содержимого, второе чтение отдаёт свежий заголовок."""
+    from gc_core import thread_store as raw
+
+    store = _store("file", tmp_path)
+    store.append_messages(
+        "s", "t", [{"id": "m0", "role": "user", "content": "a"}]
+    )
+    store.save_meta("s", "t", {"tui": {"title": "старый"}})
+    worker = _Worker(store)
+    proxy = TemporalThreadStore("files", worker)
+    first = await proxy.aread_snapshot("s", "t", include_state=False)
+    raw.update_tui_meta(
+        str(tmp_path / "threads"), "s", "t", {"title": "новый"}
+    )
+    second = await proxy.aread_snapshot("s", "t")
+    assert second.revision == first.revision
+    assert second.meta["tui"]["title"] == "новый"

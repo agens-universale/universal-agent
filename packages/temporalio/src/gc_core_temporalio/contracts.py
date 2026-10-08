@@ -67,6 +67,11 @@ class SessionResume:
     store_generation: int | None = None
     #: Отпечаток настроек, принятый из сообщений (``settings_fingerprint``).
     message_fingerprint: dict[str, str] | None = None
+    #: ``answer``/``formatted_answer``/``post_error`` — те же, что в итоге
+    #: последнего хода: в resume не дублируются (берутся оттуда).
+    answer_in_outcome: bool = False
+    #: Ответ для ``status``/результата укорочен (полный — в треде).
+    answer_truncated: bool = False
 
 
 @dataclass(frozen=True)

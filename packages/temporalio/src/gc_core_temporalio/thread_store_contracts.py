@@ -41,10 +41,10 @@ class ThreadStoreCall:
     meta_cursor: int | None = None
     #: Чтение: ``[revision, generation]`` meta, которую workflow уже знает —
     #: совпала с хранилищем, meta не передаётся (``meta_unchanged``).
-    meta_known: list[int] | None = None
+    meta_known: list[Any] | None = None
     #: Запись: ``[revision, generation]`` meta, от которой посчитана разница;
     #: ``None`` — workflow meta треда не знает (разница от пустой).
-    meta_base: list[int] | None = None
+    meta_base: list[Any] | None = None
     #: Запись с meta: ``{"d": разница, "h": хэш итоговой meta}``
     #: (``meta_delta.diff_meta``/``meta_hash``), а в
     #: ``operation.payload["meta"]`` — ``None``; воркер собирает полную meta

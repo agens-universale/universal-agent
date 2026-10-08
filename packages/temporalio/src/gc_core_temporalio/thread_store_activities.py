@@ -76,6 +76,22 @@ def _state_page(messages, keys, cursor, budget):
     )
 
 
+def _keep_fetch_cache(meta, stored):
+    """Кэш ``fetch_url`` из meta хранилища (его вёл локальный режим; workflow
+    видит его пустым) не стирается полной meta запасного пути — как и
+    обычной разницей, которая его не трогает."""
+    shared = meta.get("shared") if isinstance(meta, dict) else None
+    old = stored.get("shared") if isinstance(stored, dict) else None
+    cache = old.get("fetch_url_cache") if isinstance(old, dict) else None
+    if (
+        isinstance(shared, dict)
+        and cache
+        and not shared.get("fetch_url_cache")
+    ):
+        meta = {**meta, "shared": {**shared, "fetch_url_cache": cache}}
+    return meta
+
+
 def _text_chunk(text, start, budget):
     """Кусок JSON-текста meta с ``start`` не больше ``budget`` байт в истории
     (кавычки и ``\\`` в строке экранируются ещё раз). → (кусок, следующая
@@ -106,6 +122,12 @@ class _CachedSnapshot:
     @property
     def version(self):
         return [self.raw.revision, self.raw.generation]
+
+    @property
+    def meta_version(self):
+        """Версия meta — ревизия и хэш содержимого: прямая правка ``tui``
+        (TUI) в файловом хранилище ревизию не поднимает."""
+        return [*self.version, meta_hash(self.snapshot.meta)]
 
     @property
     def meta_text(self):
@@ -174,9 +196,10 @@ class ThreadStoreActivities:
     def _remember_meta(self, request, value):
         """Meta треда после чтения/записи — база следующей разницы."""
         key = (request.store_id, request.system_id, request.thread_id)
+        meta = normalize(value.meta if isinstance(value.meta, dict) else {})
         self._metas[key] = (
-            [value.revision, value.generation],
-            normalize(value.meta if isinstance(value.meta, dict) else {}),
+            [value.revision, value.generation, meta_hash(meta)],
+            meta,
         )
         self._metas.move_to_end(key)
         while len(self._metas) > _META_CACHE_SIZE:
@@ -221,7 +244,10 @@ class ThreadStoreActivities:
             # страницы; meta больше половины — отдельными кусками.
             reply = ThreadStoreReply(snapshot=replace(snapshot, state=None))
             budget = request.page_bytes - _size(snapshot.meta)
-            if request.meta_known == entry.version:
+            if (
+                request.meta_known is not None
+                and request.meta_known == entry.meta_version
+            ):
                 # Эта версия meta у workflow уже есть (чтение перед ходом,
                 # затем с состоянием): второй раз не передавать.
                 reply.snapshot = replace(reply.snapshot, meta={})
@@ -297,7 +323,13 @@ class ThreadStoreActivities:
             )
         store = self._port(request)
         try:
-            base, exact = await self._meta_base(store, request)
+            full = bool((request.meta_delta or {}).get("full"))
+            if full:
+                # Полная meta (запасной путь): тексты и поддеревья — по
+                # содержимому текущей meta хранилища, база не важна.
+                base, exact = await self._store_meta(store, request), True
+            else:
+                base, exact = await self._meta_base(store, request)
             operation = request.operation
             expected = base
             if request.meta_delta is not None:
@@ -354,6 +386,18 @@ class ThreadStoreActivities:
         version, meta = self._metas[key]
         return meta, version == request.meta_base
 
+    async def _store_meta(self, store, request):
+        snapshot = await _invoke(
+            store,
+            "read_snapshot",
+            request.system_id,
+            request.thread_id,
+            include_state=False,
+        )
+        self._remember_meta(request, snapshot)
+        key = (request.store_id, request.system_id, request.thread_id)
+        return self._metas[key][1]
+
     async def _rebuild_meta(self, store, request, base):
         """Полная meta записи: база + разница; тексты по ссылкам — из
         сообщений операции, иначе из треда."""
@@ -381,14 +425,28 @@ class ThreadStoreActivities:
             state = snapshot.state if snapshot is not None else None
             for message in state.messages if state is not None else ():
                 messages.setdefault(message_hash(message), message)
+        full = bool(request.meta_delta.get("full"))
         try:
-            meta = canonical(
-                apply(base, delta, TextSource(messages.get, base))
+            meta = apply(
+                {} if full else base, delta, TextSource(messages.get, base)
             )
         except MetaDeltaError as exc:
+            if full:
+                # Полную meta не собрать из содержимого хранилища: оно
+                # разошлось с workflow — конфликт, ядро перечитает и повторит.
+                raise ThreadStoreConflict(
+                    f"Thread meta changed during this run: {exc}"
+                ) from exc
             raise MetaBaseMismatch(f"Meta треда не собрать: {exc}") from exc
+        if full:
+            meta = _keep_fetch_cache(meta, base)
+        meta = canonical(meta)
         expected = request.meta_delta.get("h")
         if expected is not None and meta_hash(meta) != expected:
+            if full:
+                raise ThreadStoreConflict(
+                    "Thread meta changed during this run"
+                )
             raise MetaBaseMismatch(
                 "Meta треда из разницы не совпала с записанной workflow"
             )

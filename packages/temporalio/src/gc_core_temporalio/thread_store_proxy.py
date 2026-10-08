@@ -213,9 +213,10 @@ class TemporalThreadStore:
                 if attempt + 1 == attempts:
                     raise
                 continue
+            meta = normalize(snapshot.meta)
             self._meta[(system_id, thread_id)] = (
-                expect,
-                normalize(snapshot.meta),
+                [*expect, meta_hash(meta)],
+                meta,
             )
             return snapshot
 
@@ -268,11 +269,16 @@ class TemporalThreadStore:
                     raise
                 # База в хранилище не та (чужая правка meta, повтор после
                 # записи): та же операция с полной meta — хранилище узнает её
-                # или применит; тексты — ссылками на сообщения.
-                request.meta_base = None
+                # или применит (чужая запись — конфликт ревизии). Тексты,
+                # записи журнала и разделы — ссылками по содержимому: воркер
+                # найдёт их в текущей meta хранилища или в сообщениях.
+                full = TextIndex()
+                full.add_meta(base, nodes=True)
+                full.parents.append(texts)
                 request.meta_delta = {
-                    "d": diff_meta({}, written, texts),
+                    "d": diff_meta({}, written, full),
                     "h": meta_hash(written),
+                    "full": True,
                 }
                 reply = await self._call("agent.thread.commit", request)
         except BaseException:
@@ -305,7 +311,10 @@ class TemporalThreadStore:
         else:
             expected = written if written is not None else base
             meta = apply(expected, reply.meta_delta.get("d"))
-            self._meta[key] = ([receipt.revision, receipt.generation], meta)
+            self._meta[key] = (
+                [receipt.revision, receipt.generation, meta_hash(meta)],
+                meta,
+            )
         receipt = replace(receipt, meta=deepcopy(meta))
         if operation.kind not in _APPEND_ONLY_OPERATIONS:
             # Сообщения треда заменены: ссылаться можно только на новые.

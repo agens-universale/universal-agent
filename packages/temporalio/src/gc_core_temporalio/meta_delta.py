@@ -35,6 +35,14 @@ TEXT_REF_KEY = "__ua_text__"
 #: по месту: при повторе записи база — уже записанная meta, где текст есть
 #: (он часть новой meta), хотя бы и в другом месте.
 META_REF_KEY = "__ua_meta_text__"
+#: Ключ ссылки на целое поддерево meta-базы (запись журнала, раздел) по хэшу
+#: содержимого: ``{"__ua_meta_node__": хэш}`` — для записи полной meta
+#: (запасной путь), где ссылаться можно только на содержимое, не на место.
+NODE_REF_KEY = "__ua_meta_node__"
+#: Строки meta-базы короче — без ссылки (ссылка ~55 байт).
+META_TEXT_MIN_CHARS = 200
+#: Поддеревья легче — без ссылки.
+NODE_REF_MIN_BYTES = 256
 #: Короче — строка идёт как есть: ссылка не дешевле.
 TEXT_REF_MIN_CHARS = 1024
 
@@ -68,6 +76,24 @@ def _text_id(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()[:32]
 
 
+def _node_text(value: Any) -> str:
+    return json.dumps(
+        value, sort_keys=True, ensure_ascii=True, separators=(",", ":")
+    )
+
+
+def _nodes(value: Any) -> Iterable[tuple[str, Any]]:
+    """Поддеревья (словари, списки) не легче ``NODE_REF_MIN_BYTES`` — с
+    хэшем содержимого (без порядка ключей)."""
+    if isinstance(value, (dict, list)):
+        text = _node_text(value)
+        if len(text) >= NODE_REF_MIN_BYTES:
+            yield hashlib.sha256(text.encode()).hexdigest()[:32], value
+            items = value.values() if isinstance(value, dict) else value
+            for item in items:
+                yield from _nodes(item)
+
+
 def _strings(value: Any, path: tuple = ()) -> Iterable[tuple[tuple, str]]:
     if isinstance(value, str):
         yield path, value
@@ -87,14 +113,37 @@ class TextIndex:
         self._exact: dict[str, tuple[str, list, int]] = {}
         self._texts: list[tuple[str, list, str]] = []
         self._meta: set[str] = set()
+        self._meta_min = TEXT_REF_MIN_CHARS
+        self._nodes: set[str] = set()
         #: Индексы, где искать после своего (тексты треда за текстами
         #: операции).
         self.parents: list[TextIndex] = []
 
-    def add_meta(self, meta: Any) -> None:
+    def add_meta(self, meta: Any, *, nodes: bool = False) -> None:
+        """Строки meta-базы; ``nodes`` — и целые поддеревья (запасной путь
+        полной meta: короткие строки и записи журнала — тоже ссылками)."""
+        if nodes:
+            self._meta_min = META_TEXT_MIN_CHARS
+            self._nodes.update(node_id for node_id, _node in _nodes(meta))
         for _path, text in _strings(meta):
-            if len(text) >= TEXT_REF_MIN_CHARS:
+            if len(text) >= self._meta_min:
                 self._meta.add(text)
+
+    def has_nodes(self) -> bool:
+        return bool(self._nodes) or any(p.has_nodes() for p in self.parents)
+
+    def node_ref(self, value: Any) -> dict[str, Any] | None:
+        if not self._nodes:
+            for parent in self.parents:
+                ref = parent.node_ref(value)
+                if ref is not None:
+                    return ref
+            return None
+        text = _node_text(value)
+        if len(text) < NODE_REF_MIN_BYTES:
+            return None
+        node_id = hashlib.sha256(text.encode()).hexdigest()[:32]
+        return {NODE_REF_KEY: node_id} if node_id in self._nodes else None
 
     def add(self, messages: Iterable[Any]) -> None:
         for message in messages or ():
@@ -107,10 +156,14 @@ class TextIndex:
                 self._texts.append((digest, list(path), text))
 
     def ref(self, text: str) -> dict[str, Any] | None:
-        if len(text) < TEXT_REF_MIN_CHARS:
-            return None
-        if text in self._meta:
+        if len(text) >= self._meta_min and text in self._meta:
             return {META_REF_KEY: _text_id(text)}
+        if len(text) < TEXT_REF_MIN_CHARS:
+            for parent in self.parents:
+                ref = parent.ref(text)
+                if ref is not None:
+                    return ref
+            return None
         found = self._exact.get(text)
         if found is None:
             # Запрос пользователя в журнале — текст сообщения без пробелов
@@ -135,6 +188,10 @@ def _encode(value: Any, texts: TextIndex | None) -> Any:
         return value
     if isinstance(value, str):
         return texts.ref(value) or value
+    if isinstance(value, (dict, list)) and texts.has_nodes():
+        ref = texts.node_ref(value)
+        if ref is not None:
+            return ref
     if isinstance(value, dict):
         return {key: _encode(item, texts) for key, item in value.items()}
     if isinstance(value, list):
@@ -231,11 +288,21 @@ class TextSource:
         meta: Any = None,
     ) -> None:
         self._messages = messages
+        self._meta_source = meta
         self._meta = {
             _text_id(text): text
             for _path, text in _strings(meta)
-            if len(text) >= TEXT_REF_MIN_CHARS
+            if len(text) >= META_TEXT_MIN_CHARS
         }
+        self._node_index: dict[str, Any] | None = None
+
+    def meta_node(self, node_id: str) -> Any:
+        if self._node_index is None:
+            self._node_index = dict(_nodes(self._meta_source))
+        node = self._node_index.get(node_id)
+        if node is None:
+            raise MetaDeltaError("Поддерева meta нет в базе разницы")
+        return json.loads(_node_text(node))
 
     def meta_text(self, text_id: str) -> str:
         text = self._meta.get(text_id)
@@ -270,6 +337,8 @@ def _decode(value: Any, texts: TextSource | None) -> Any:
             return (texts or TextSource()).message_text(value[TEXT_REF_KEY])
         if len(value) == 1 and META_REF_KEY in value:
             return (texts or TextSource()).meta_text(value[META_REF_KEY])
+        if len(value) == 1 and NODE_REF_KEY in value:
+            return (texts or TextSource()).meta_node(value[NODE_REF_KEY])
         return {key: _decode(item, texts) for key, item in value.items()}
     if isinstance(value, list):
         return [_decode(item, texts) for item in value]
@@ -358,6 +427,7 @@ def text_refs(delta: Any) -> set[str]:
 
 __all__ = [
     "META_REF_KEY",
+    "NODE_REF_KEY",
     "TEXT_REF_KEY",
     "TEXT_REF_MIN_CHARS",
     "MetaDeltaError",

@@ -67,7 +67,34 @@ def test_small_resume_is_unchanged():
         turn_outcomes={"1": {"answer": "ok", "post_error": None}},
         undelivered=[{"message_id": "u", "content": "текст"}],
     )
-    assert _fit_resume(resume) == resume
+    fitted = _fit_resume(resume)
+    # Ответ сессии — ответ последнего хода: в resume одной копией.
+    assert fitted.answer is None and fitted.answer_in_outcome
+    assert fitted.turn_outcomes == resume.turn_outcomes
+    assert fitted.undelivered == resume.undelivered
+
+
+def test_answer_and_formatted_answer_of_600kb_each_survive_whole():
+    """Ответ и форматированный ответ по ~600 КБ: вместе с копией ответа
+    сессии не помещались, и ответ резался до 256 КБ."""
+    answer, formatted = "а" * 100_000, "б" * 100_000
+    resume = SessionResume(
+        answer=answer,
+        formatted_answer=formatted,
+        turns=1,
+        turn_outcomes={
+            "1": {
+                "answer": answer,
+                "formatted_answer": formatted,
+                "post_error": None,
+            }
+        },
+    )
+    fitted = _fit_resume(resume)
+    last = fitted.turn_outcomes["1"]
+    assert last["answer"] == answer and last["formatted_answer"] == formatted
+    assert "answer_truncated" not in last
+    assert payload_size(asdict(fitted)) <= RESUME_BUDGET
 
 
 def test_history_size_error_names_the_size():

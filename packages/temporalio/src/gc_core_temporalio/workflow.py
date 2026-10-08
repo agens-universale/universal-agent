@@ -109,11 +109,23 @@ def _fit_resume(resume):
     отброшенных остановкой сообщений (нужны только их ID), старые итоги ходов
     и ответы человеку.
     """
-    bounded = _bounded_outcome(
-        {field: getattr(resume, field) for field in _ANSWER_FIELDS}
-    )
-    bounded.pop("answer_truncated", None)
     latest = max(resume.turn_outcomes, key=int, default=None)
+    current = {field: getattr(resume, field) for field in _ANSWER_FIELDS}
+    last = resume.turn_outcomes.get(latest) if latest is not None else None
+    if last is not None and all(
+        last.get(field) == value for field, value in current.items()
+    ):
+        # Ответ сессии — ответ последнего хода: второй копией в запись не
+        # идёт (иначе два ответа по ~600 КБ не помещались бы вместе).
+        bounded = dict.fromkeys(_ANSWER_FIELDS)
+        resume = replace(resume, answer_in_outcome=True)
+    else:
+        bounded = _bounded_outcome(current)
+        resume = replace(
+            resume,
+            answer_truncated=bool(bounded.pop("answer_truncated", False))
+            or resume.answer_truncated,
+        )
     resume = replace(
         resume,
         **bounded,
@@ -208,6 +220,8 @@ class AgentWorkflow:
         self.continue_blocked = False
         #: Отказ последнего хода (значение больше записи истории).
         self.turn_error = None
+        #: Ответ сессии укорочен при переносе через Continue-As-New.
+        self.answer_truncated = False
         #: Отпечаток настроек из сообщений: сверяется воркером в начале хода.
         self.message_fingerprint = None
         #: Уровень activities.thread_store; до подготовки хода — умолчания.
@@ -247,6 +261,8 @@ class AgentWorkflow:
             "answer": self.answer,
             "formatted_answer": self.formatted_answer,
             "post_error": self.post_error,
+            # Ответ пережил Continue-As-New укороченным (полный — в треде).
+            "answer_truncated": self.answer_truncated,
             "mailbox_size": len(self.pending_messages),
             "undelivered": self.undelivered,
         }
@@ -392,6 +408,14 @@ class AgentWorkflow:
                 "state": "dropped" if dropped else "pending",
             }
         outcome = self.turn_outcomes.get(str(turn))
+        if outcome is not None:
+            # Тот же вид, что переживёт Continue-As-New: ответ не зависит от
+            # того, успел ли клиент спросить до нового run.
+            latest = str(turn) == max(self.turn_outcomes, key=int)
+            outcome = _bounded_outcome(
+                outcome,
+                LATEST_ANSWER_KEEP_BYTES if latest else ANSWER_KEEP_BYTES,
+            )
         return {
             "message_id": message_id,
             "state": "done",
@@ -515,9 +539,16 @@ class AgentWorkflow:
         self.completed_inputs = dict(resume.completed)
         self.turn_outcomes = dict(resume.turn_outcomes)
         self.message_fingerprint = resume.message_fingerprint
-        self.answer = resume.answer
-        self.formatted_answer = resume.formatted_answer
-        self.post_error = resume.post_error
+        last = (
+            self.turn_outcomes.get(max(self.turn_outcomes, key=int))
+            if resume.answer_in_outcome and self.turn_outcomes
+            else None
+        )
+        source = last if last is not None else asdict(resume)
+        self.answer = source.get("answer")
+        self.formatted_answer = source.get("formatted_answer")
+        self.post_error = source.get("post_error")
+        self.answer_truncated = bool(source.get("answer_truncated"))
         self.terminal_outcome = resume.terminal_outcome
 
     def _initial_messages(self, start):
@@ -640,6 +671,7 @@ class AgentWorkflow:
         self.accepting_inputs = True
         ran = False
         self.formatted_answer = self.post_error = self.turn_error = None
+        self.answer_truncated = False
         try:
             try:
                 self.answer = await self.executor.arun(
@@ -836,6 +868,8 @@ class AgentWorkflow:
             if self.post_error or self.terminal_outcome or self.turn_error
             else 0,
         }
+        if self.answer_truncated:
+            result["answer_truncated"] = True
         if payload_size(result) > RESUME_BUDGET:
             result["undelivered"] = [
                 {"message_id": value.get("message_id")}
