@@ -8,6 +8,7 @@ from copy import deepcopy
 from dataclasses import asdict
 from types import SimpleNamespace
 
+from gc_core.agent_store import agent_store_of
 from gc_core.constants.tool_names import EXEC_FETCH_URL_NAME
 from gc_core.context_preparation import PreparedRunContext
 from gc_core.execution.contracts import (
@@ -338,7 +339,10 @@ class AgentActivities:
             ctx, verbose=bool(settings_of(ctx).agent.verbose)
         )
         prompts = await asyncio.to_thread(
-            load_run_prompts, prompts_request, logger=ctx.logger
+            load_run_prompts,
+            prompts_request,
+            logger=ctx.logger,
+            store=agent_store_of(ctx),
         )
         return PreparedContext(
             human_input=getattr(self.context_provider, "human_input", True),
@@ -413,6 +417,7 @@ class AgentActivities:
             load_run_prompts,
             value_to_type(PromptPreparationRequest, call.data),
             logger=ctx.logger,
+            store=agent_store_of(ctx),
         )
 
     @activity.defn(name="universal_agent.prompt.read")

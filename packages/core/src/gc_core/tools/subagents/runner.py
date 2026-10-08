@@ -8,6 +8,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
+from gc_core.agent_store import AgentResource, agent_store_of
 from gc_core.attachments.store import with_committed_attachments
 from gc_core.bundled_assets import bundled_root
 from gc_core.config_modules.agent import (
@@ -1185,6 +1186,7 @@ class SubagentRunner:
             agent_md_path=parent.agent_md_path,
             verbose=parent.verbose,
             logger=parent.logger,
+            agent_store=agent_store_of(self._ctx),
         )
         return PreparedChildState(
             child_config,
@@ -1256,34 +1258,42 @@ class SubagentRunner:
             prompt_path_raw = (
                 paths.chat_completions_custom_subagent_system_prompt_path
             )
+            name = "custom_subagent"
             default_name = "chat_completions_custom_subagent_system_prompt.md"
         else:
             prompt_path_raw = None
+            name = "subagent"
             default_name = "chat_completions_subagent_system_prompt.md"
 
-        candidate_paths: List[str] = []
+        candidates: List[AgentResource] = []
         if isinstance(prompt_path_raw, str) and prompt_path_raw.strip():
-            candidate_paths.append(os.path.abspath(prompt_path_raw.strip()))
+            candidates.append(
+                AgentResource(
+                    "prompt", name, os.path.abspath(prompt_path_raw.strip())
+                )
+            )
         # bundled_root() — единый резолвер ассетов (editable → repo, wheel → site-packages).
-        candidate_paths.append(str(bundled_root() / "prompts" / default_name))
+        candidates.append(
+            AgentResource(
+                "prompt", name, str(bundled_root() / "prompts" / default_name)
+            )
+        )
 
-        for prompt_path in candidate_paths:
-            if not prompt_path:
-                continue
+        store = agent_store_of(self._ctx)
+        for resource in candidates:
             try:
-                if not os.path.exists(prompt_path):
-                    continue
-                with open(prompt_path, encoding="utf-8") as fd:
-                    loaded = fd.read().strip()
+                loaded = store.read_text(resource).strip()
                 if loaded:
                     return loaded
+            except FileNotFoundError:
+                continue
             # Первый кандидат — путь ИЗ КОНФИГА: файл человека, кодировка его.
             # `UnicodeDecodeError` подкласс `ValueError`, а не `OSError`, и уходил
             # мимо этого фолбэка, роняя запуск сабагента вместо отката на пакетный.
             except (OSError, UnicodeDecodeError):
                 _log.warning(
                     "Failed to read subagent system prompt from %s",
-                    prompt_path,
+                    resource.label,
                     exc_info=True,
                 )
 
@@ -1421,6 +1431,10 @@ class SubagentRunner:
         # иначе child process_tool_calls видит оба флага False и collect выключается.
         child_ctx.is_tui = bool(getattr(self._ctx, "is_tui", False))
         child_ctx.is_cli_mode = bool(getattr(self._ctx, "is_cli_mode", False))
+        # Хранилище агента у ребёнка то же: промпты, инструкции и скиллы
+        # одного агента.
+        if getattr(child_ctx, "agent_store", None) is None:
+            child_ctx.agent_store = getattr(self._ctx, "agent_store", None)
         # Progress bridge: same sink as parent (TUI queue or None/no-op); call_id of
         # the parent subagent_* function_call for correlating nested UI rows.
         child_ctx.subagent_progress_sink = getattr(

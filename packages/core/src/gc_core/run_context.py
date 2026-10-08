@@ -7,6 +7,11 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable, Dict, List, Optional, Set
 
+from gc_core.agent_store import (
+    DEFAULT_AGENT_STORE,
+    AgentStore,
+    check_agent_store,
+)
 from gc_core.attachments.store import ImageStore, image_store_for
 from gc_core.backends.factory import resolve_os_backend
 from gc_core.backends.protocol import FsBackend
@@ -37,8 +42,7 @@ from gc_core.model_router import CircuitBreaker, ModelRouter
 from gc_core.run_preparation import PromptLoader
 from gc_core.state_preparation import StatePreparer
 from gc_core.tools import abuild_tools_data
-from gc_core.tools.skills.provision import aprovision_remote_skills
-from gc_core.tools.skills.registry import SkillsRegistry, get_skills_registry
+from gc_core.tools.skills.registry import SkillsRegistry
 from gc_core.trace_id import trace_header_name, trace_id_from_config
 from gc_core.utils.logging_module import create_run_logger, generate_run_id
 from gc_core.utils.prod_auth import AuthConnector
@@ -127,6 +131,11 @@ class RunContext:
     # Передав своё (например поверх базы), встраивающий уводит туда всю историю:
     # ни ThreadSession, ни ядро больше диска не касаются.
     thread_store: Any = None
+    # Хранилище агента (``gc_core.agent_store``): промпты, AGENTS.md, скиллы,
+    # субагенты — общее для всех тредов агента. Собранный фабрикой контекст
+    # всегда его имеет (по умолчанию файловое); ``None`` — контекст собран в
+    # обход фабрики, читатели берут файловое через ``agent_store_of``.
+    agent_store: Any = None
     # ToolsCache этого контекста, если владелец его передал. Лежит здесь, чтобы
     # субагенты (они пересобирают tools_data на каждый спавн) брали готовое, а не
     # ходили в дискавери заново.
@@ -224,6 +233,7 @@ def assemble_run_context(
         mcp_session_owner=prepared.mcp_session_owner,
         tools_cache=bindings.tools_cache,
         thread_store=bindings.thread_store,
+        agent_store=bindings.agent_store,
         operations=bindings.operations,
         prompt_loader=bindings.prompt_loader,
         state_preparer=bindings.state_preparer,
@@ -270,6 +280,7 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
     human_request: Optional[HumanRequester] = None,
     guard_probe: Optional[GuardProbe] = None,
     tool_effect: Optional[ToolEffectExecutor] = None,
+    agent_store: Optional[AgentStore] = None,
 ) -> RunContext:
     """Собрать RunContext, не блокируя event loop.
 
@@ -328,6 +339,9 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
         from gc_core.thread_store_async import athread_store
 
         athread_store(thread_store)
+    # Хранилище агента — там же и по той же причине: до дискавери.
+    if agent_store is not None:
+        check_agent_store(agent_store)
 
     source = _coerce_settings(settings, runtime)
     prep = _prepare_run_context(
@@ -337,6 +351,7 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
         loop=loop,
         os_backend=os_backend,
         log_handlers=log_handlers,
+        agent_store=agent_store or DEFAULT_AGENT_STORE,
     )
     # Пробы возможностей бэкенда (`has_grep`/`has_find`/…) здесь СОЗНАТЕЛЬНО не
     # прогреваются, хотя `awarm_capabilities` для этого есть.
@@ -370,9 +385,9 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
         await aprime_backend_cwd(prep.backend, source)
         source = await areconcile_remote_root(prep.backend, source)
         prep.settings = source
-        # Remote-бэкенд: скиллы лежат на хосте, а реестр читает через бэкенд —
-        # копируем набор «туда» и пересобираем реестр по удалённым корням.
-        provisioned = await aprovision_remote_skills(
+        # Скиллы, которые надо доставить в среду исполнения (файловое
+        # хранилище и remote-бэкенд), — реестр по доставленной копии.
+        provisioned = await prep.agent_store.aprovision_skills(
             prep.backend, source, run_logger=prep.run_logger
         )
         if provisioned is not None:
@@ -391,6 +406,7 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
             runtime=source.runtime,
             subagent_definitions=None,
             subagent_diagnostics=None,
+            agent_store=prep.agent_store,
         )
         with use_owner(prep.mcp_session_owner):
             tools = await abuild_tools_data(
@@ -495,6 +511,7 @@ class _RunContextPrep:
     backend_was_overridden: bool
     #: Настройки сборки (``LoadedSettings``): из них читает и досборка.
     settings: Any = None
+    agent_store: Any = DEFAULT_AGENT_STORE
 
 
 def _prepare_run_context(
@@ -505,6 +522,7 @@ def _prepare_run_context(
     loop: Optional[Any],
     os_backend: Optional[FsBackend],
     log_handlers: Any = None,
+    agent_store: AgentStore = DEFAULT_AGENT_STORE,
 ) -> _RunContextPrep:
     """Бэкенд, реестр скиллов, логгер и токен владельца MCP-сессий.
 
@@ -528,7 +546,7 @@ def _prepare_run_context(
         settings = settings.with_runtime(
             launch_root=auto_workdir, project_root=auto_workdir
         )
-    skills_registry = get_skills_registry(settings, backend=backend)
+    skills_registry = agent_store.skills_registry(settings, backend=backend)
     # Логгер создаётся ДО сборки тулов: она предупреждает о пропущенных файлах
     # сабагентов и нераспознанных именах тулов, и эти варнинги обязаны попасть в
     # лог-файл рана, а не только в stderr модульного логгера. Создание логгера
@@ -553,6 +571,7 @@ def _prepare_run_context(
         mcp_session_owner=new_owner_token(),
         backend_was_overridden=os_backend is not None,
         settings=settings,
+        agent_store=agent_store,
     )
 
 
@@ -681,6 +700,7 @@ def _finish_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING
         on_messages_evicted=on_messages_evicted,
         tools_cache=tools_cache,
         thread_store=thread_store,
+        agent_store=prep.agent_store,
         prompt_loader=prompt_loader,
         state_preparer=state_preparer,
         human_request=human_request,

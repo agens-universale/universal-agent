@@ -81,9 +81,10 @@ def store_paths(store):
     )
 
 
-def build_runtime(config, *, stores=None, log_handlers=()):
+def build_runtime(config, *, stores=None, log_handlers=(), agent_store=None):
     """Провайдер контекста и activities. ``stores`` — готовые хранилища тредов
-    (объекты); без них — из ``config.thread_stores``."""
+    (объекты); без них — из ``config.thread_stores``. ``agent_store`` —
+    хранилище агента (одно или по профилям); без него — файловое."""
     if stores is None:
         stores = build_stores(config)
         paths = config.state_paths()
@@ -102,6 +103,7 @@ def build_runtime(config, *, stores=None, log_handlers=()):
         state_paths=paths,
         log_handlers=log_handlers,
         human_input=config.human_input,
+        agent_store=agent_store,
     )
     native = AgentActivities(
         context_provider=provider,

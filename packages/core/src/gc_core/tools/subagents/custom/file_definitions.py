@@ -17,8 +17,12 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import yaml
 
+from gc_core.agent_store import (
+    AgentResource,
+    agent_store_of,
+    read_resource_text,
+)
 from gc_core.settings import settings_of
-from gc_core.utils.user_text import read_user_text
 
 # Имя сабагента = имя тула. Префикс обязателен: по нему `is_subagent_tool`
 # отличает вызов сабагента, а `_normalize_agent_kind` отрезает его, получая kind
@@ -263,50 +267,60 @@ def discover_subagent_definitions(
         else None
     )
     base_dir = str(raw_dir).strip() if raw_dir is not None else ""
-    if not base_dir:
-        return []
-
-    if not os.path.isdir(base_dir):
-        _warn(
-            logger,
-            "subagents_dir_missing dir=%s (кастомные сабагенты не загружены)",
-            base_dir,
-            event="subagents_dir_missing",
-            diagnostics=diagnostics,
-            dir=base_dir,
-        )
-        return []
+    store = agent_store_of(settings)
+    directory = AgentResource("subagents", "", base_dir or None)
 
     try:
-        entries = sorted(os.listdir(base_dir))
+        entries = [
+            name for name, kind in store.list_dir(directory) if kind == "file"
+        ]
+    except (FileNotFoundError, NotADirectoryError):
+        # Папка не задана — кастомных нет (своё хранилище может отдать их и
+        # без пути); задана, но её нет — предупреждение.
+        if base_dir:
+            _warn(
+                logger,
+                "subagents_dir_missing dir=%s (кастомные сабагенты не загружены)",
+                base_dir,
+                event="subagents_dir_missing",
+                diagnostics=diagnostics,
+                dir=base_dir,
+            )
+        return []
     except OSError as exc:
         _warn(
             logger,
             "subagents_dir_unreadable dir=%s error=%s",
-            base_dir,
+            directory.label,
             exc,
             event="subagents_dir_unreadable",
             diagnostics=diagnostics,
-            dir=base_dir,
+            dir=directory.label,
         )
         return []
 
     taken: Dict[str, SubagentDefinition] = {}
     builtin = set(builtin_names)
 
-    for entry in entries:
+    for entry in sorted(entries):
         if not entry.endswith(".md"):
             continue
-        path = os.path.join(base_dir, entry)
-        if not os.path.isfile(path):
-            continue
+        path = os.path.join(base_dir, entry) if base_dir else entry
         try:
             # Файл определения пишет человек — значит и кодировка его, а не наша.
             # `UnicodeDecodeError` подкласс `ValueError`, а не `OSError`, и мимо
             # этого перехвата уходил наружу: один файл в чужой кодировке ронял
             # весь старт агента, хотя обещание модуля — «битый файл не лишает
             # оператора остальных».
-            definition = parse_subagent_file(path, read_user_text(path))
+            definition = parse_subagent_file(
+                path,
+                read_resource_text(
+                    store,
+                    AgentResource(
+                        "subagents", entry, path if base_dir else None
+                    ),
+                ),
+            )
         except (
             OSError,
             ValueError,

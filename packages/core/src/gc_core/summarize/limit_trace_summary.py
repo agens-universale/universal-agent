@@ -11,6 +11,13 @@ import logging
 import os
 from typing import Any
 
+from gc_core.agent_store import (
+    DEFAULT_AGENT_STORE,
+    AgentResource,
+    AgentStore,
+    FileAgentStore,
+    agent_store_of,
+)
 from gc_core.execution.contracts import ExecutionFailure
 from gc_core.execution.resources import (
     PromptResourceRequest,
@@ -30,22 +37,28 @@ logger = logging.getLogger(__name__)
 _prompt_cache: str | None = None
 
 
-def _load_limit_summary_prompt() -> str:
+def _load_limit_summary_prompt(
+    store: AgentStore = DEFAULT_AGENT_STORE,
+) -> str:
     from gc_core.bundled_assets import bundled_root
 
     _PROMPT_PATH = os.path.join(
         str(bundled_root()), "prompts", "limit_trace_summary.md"
     )
     global _prompt_cache
-    if _prompt_cache is not None:
+    # Кэш — только у пакетного файла: своё хранилище отвечает само.
+    cacheable = type(store) is FileAgentStore
+    if cacheable and _prompt_cache is not None:
         return _prompt_cache
-    with open(_PROMPT_PATH, encoding="utf-8") as fd:
-        text = fd.read().strip()
+    text = store.read_text(
+        AgentResource("prompt", "limit_summary", _PROMPT_PATH)
+    ).strip()
     if not text:
         raise ValueError(
             f"Limit trace summary prompt is empty: {_PROMPT_PATH}"
         )
-    _prompt_cache = text
+    if cacheable:
+        _prompt_cache = text
     return text
 
 
@@ -150,7 +163,7 @@ async def abuild_limit_envelope(state: Any, reason: str, ctx: Any) -> str:
             prompt_template = await aload_prompt_resource(
                 ctx,
                 PromptResourceRequest("limit_summary"),
-                local=_load_limit_summary_prompt,
+                local=lambda: _load_limit_summary_prompt(agent_store_of(ctx)),
             )
             trace_text = _serialize_trace(state.messages)
             user_content = (

@@ -100,6 +100,7 @@ class RunContextBindings:
     auth_connector: Any = None
     environment: Any = None
     thread_store: Any = None
+    agent_store: Any = None
     tools_cache: Any = None
     on_stream_delta: Any = None
     on_trace_note: Any = None

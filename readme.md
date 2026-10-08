@@ -173,6 +173,7 @@ assign:
 - [Temporal](docs/temporal.md) — тот же агент в durable-исполнении: воркер с `AgentPlugin`, `AsyncAgent(durable=...)`, повторы, MCP, деплой.
 - [Конфигурация](docs/configuration.md) — `config.yml`, приоритет и переопределение, security policy, MCP-серверы, runtime-пути, project-local config.
 - [`os_backend` — справочник](docs/os_backends.md) — YAML-блоки для `local` / `sandbox` / `docker` / `ssh` / `exec` / `harbor`.
+- [Хранилище агента](docs/agent-store.md) — промпты, AGENTS.md, скиллы и субагенты из своего источника (база, S3) через `AgentStore`; по умолчанию — файлы, как раньше.
 - [Сабагенты](docs/subagents.md) — делегирование задач, кастомные сабагенты, лимиты и бюджет вызовов.
 - [Скиллы и пакеты скиллов](docs/skills.md) — трёхслойный поиск, манифест пакета, canonical IDs, встроенные паки.
 - [Серверный режим](docs/server.md) — REST-обёртка (FastAPI), конфиги сервера, эндпоинты, Swarm-режим (Linux).

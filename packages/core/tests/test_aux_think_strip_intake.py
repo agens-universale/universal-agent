@@ -316,7 +316,7 @@ async def test_summarizer_history_strips_think_even_when_config_disables_it(
     )
     monkeypatch.setattr(
         "gc_core.summarize.prompt_loading.load_prompt_template",
-        lambda _p: "prompt",
+        lambda _p, **_kw: "prompt",
     )
 
     ctx = fake_ctx(

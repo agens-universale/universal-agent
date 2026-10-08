@@ -1,5 +1,6 @@
 from typing import Any, Dict, List
 
+from gc_core.agent_store import agent_store_of
 from gc_core.config import _DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS
 from gc_core.config_modules.strip_tags_projection import (
     projection_tags_from_config,
@@ -559,7 +560,8 @@ async def asummarize_dialog_via_chat_completions(
         ctx,
         PromptResourceRequest("summary", path=prompt_path),
         local=lambda: prompt_loading.load_prompt_template(
-            str(prompt_path or prompt_loading.default_prompt_path())
+            str(prompt_path or prompt_loading.default_prompt_path()),
+            store=agent_store_of(ctx),
         ),
     )
 

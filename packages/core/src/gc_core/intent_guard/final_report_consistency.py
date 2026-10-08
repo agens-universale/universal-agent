@@ -1,7 +1,13 @@
 import json
-import os
 from typing import Any, Dict, List
 
+from gc_core.agent_store import (
+    DEFAULT_AGENT_STORE,
+    AgentResource,
+    AgentStore,
+    agent_store_of,
+    read_required_text,
+)
 from gc_core.bundled_assets import bundled_root
 from gc_core.execution.resources import (
     PromptResourceRequest,
@@ -21,7 +27,6 @@ from gc_core.summarize.llm import (
     arequest_auxiliary_completion_text,
     auxiliary_llm_judge_max_tokens,
 )
-from gc_core.utils.user_text import read_user_text
 
 
 def default_guard_prompt_path() -> str:
@@ -91,12 +96,18 @@ def _normalize_handoff_in_finish_args(args: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
-def _load_guard_prompt(prompt_path: str | None = None) -> str:
+def _load_guard_prompt(
+    prompt_path: str | None = None,
+    *,
+    store: AgentStore = DEFAULT_AGENT_STORE,
+) -> str:
     path = prompt_path or default_guard_prompt_path()
-    if not os.path.exists(path):
-        raise FileNotFoundError(f"Intent guard prompt file not found: {path}")
     # Путь задаёт конфиг (`chat_completions_intent_guard_prompt_path`).
-    prompt = read_user_text(path).strip()
+    prompt = read_required_text(
+        store,
+        AgentResource("prompt", "finish_gate", path),
+        missing=f"Intent guard prompt file not found: {path}",
+    ).strip()
     if not prompt:
         raise ValueError(f"Intent guard prompt file is empty: {path}")
     return prompt
@@ -222,7 +233,9 @@ async def avalidate_final_report_vs_user_intent(
     system_prompt = await aload_prompt_resource(
         ctx,
         PromptResourceRequest("finish_gate", path=guard_prompt_path),
-        local=lambda: _load_guard_prompt(guard_prompt_path),
+        local=lambda: _load_guard_prompt(
+            guard_prompt_path, store=agent_store_of(ctx)
+        ),
     )
     is_subagent = getattr(state, "parent_state_id", None) is not None
     payload = {

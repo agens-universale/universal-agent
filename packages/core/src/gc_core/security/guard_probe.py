@@ -121,15 +121,17 @@ def evaluate_guard_probe(
     elif request.kind == "download_destination":
         result = _download_destination(request, settings)
     elif request.kind == "command_prompts":
+        from gc_core.agent_store import agent_store_of
         from gc_core.security.command_moderation import (
             load_command_judge_prompt,
         )
 
+        store = agent_store_of(settings)
         result = replace(
             result,
             data={
-                "system": load_command_judge_prompt("system"),
-                "user": load_command_judge_prompt("user"),
+                "system": load_command_judge_prompt("system", store=store),
+                "user": load_command_judge_prompt("user", store=store),
             },
         )
     elif request.kind == "command_host":

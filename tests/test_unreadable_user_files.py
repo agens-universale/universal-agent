@@ -95,9 +95,10 @@ def _cases() -> list[_Case]:
         return registry_write._read(path)
 
     def _instructions_read(path, **_):
+        from gc_core.agent_store import DEFAULT_AGENT_STORE
         from gc_core.instructions import loader
 
-        return loader._read(Path(path))
+        return loader._read(DEFAULT_AGENT_STORE, "L3", Path(path))
 
     cases += [
         _Case(

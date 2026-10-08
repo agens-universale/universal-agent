@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any
 from uuid import uuid4
 
+from gc_core.agent_store import AgentStore, agent_store_of
 from gc_core.instructions.loader import LoadedInstructions, build_instructions
 from gc_core.project_memory import attach_status_to_prompt_vars
 
@@ -40,10 +41,12 @@ def load_state_metadata(
     *,
     logger: Any = None,
     metadata_config: Any = None,
+    store: AgentStore | None = None,
 ) -> tuple[str | None, LoadedInstructions]:
     """Read instruction layers and project-memory status in the local runtime.
 
     ``metadata_config`` — всё, что принимает ``settings_of`` (контекст, настройки).
+    Инструкции отдаёт хранилище агента (по умолчанию — его же или файловое).
     """
     variables: dict[str, Any] = {}
     attach_status_to_prompt_vars(variables, settings=metadata_config)
@@ -53,6 +56,7 @@ def load_state_metadata(
         agentsmd_override=request.agentsmd_override,
         logger=logger,
         verbose=request.verbose,
+        store=store if store is not None else agent_store_of(metadata_config),
     )
     return variables.get("longMemoryStatus"), instructions
 
@@ -67,14 +71,16 @@ async def prepare_state(
     agentsmd_override: bool = False,
     verbose: bool = False,
     logger: Any = None,
+    agent_store: AgentStore | None = None,
 ) -> PreparedState:
     """Collect project data, identity and metadata before pure State assembly.
 
-    The metadata loader intentionally keeps the existing State semantics: the
-    workspace configuration controls project discovery; memory status uses its
-    ordinary local defaults. Changing that policy is separate from this extraction.
+    The workspace configuration controls project discovery and the
+    project-memory status: with ``project_memory`` in ``agent.stop_tools`` the
+    prompt does not advertise a memory the agent cannot use (D36).
     ``workspace_config`` — настройки рана: всё, что принимают ``settings_of``/
-    ``runtime_of`` (контекст, ``LoadedSettings``).
+    ``runtime_of`` (контекст, ``LoadedSettings``). ``agent_store`` — хранилище
+    агента; не задано — его же у ``workspace_config`` или файловое.
     """
     from gc_core.utils.project_data import get_project_data
 
@@ -90,6 +96,10 @@ async def prepare_state(
             verbose=verbose,
         ),
         logger=logger,
+        metadata_config=workspace_config,
+        store=agent_store
+        if agent_store is not None
+        else agent_store_of(workspace_config),
     )
     return PreparedState(
         state_id=state_id,

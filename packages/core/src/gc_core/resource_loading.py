@@ -1,5 +1,6 @@
 """Worker/local prompt readers. Imported only when an external read executes."""
 
+from gc_core.agent_store import agent_store_of
 from gc_core.execution.resources import PromptResourceRequest
 
 
@@ -22,11 +23,12 @@ def load_prompt_resource(request: PromptResourceRequest, *, ctx) -> str:
     return reader(request, ctx)
 
 
-def _summary(request, _ctx):
+def _summary(request, ctx):
     from gc_core.summarize import prompt_loading
 
     return prompt_loading.load_prompt_template(
-        str(request.path or prompt_loading.default_prompt_path())
+        str(request.path or prompt_loading.default_prompt_path()),
+        store=agent_store_of(ctx),
     )
 
 
@@ -44,15 +46,17 @@ def _memory_patch(request, ctx):
         "chat_completions_memory_patch_replace_prompt_path",
         default_memory_patch_path(),
     )
-    return load_memory_patch_replace_prompt(path, subagent=request.subagent)
+    return load_memory_patch_replace_prompt(
+        path, subagent=request.subagent, store=agent_store_of(ctx)
+    )
 
 
-def _limit(_request, _ctx):
+def _limit(_request, ctx):
     from gc_core.summarize.limit_trace_summary import (
         _load_limit_summary_prompt,
     )
 
-    return _load_limit_summary_prompt()
+    return _load_limit_summary_prompt(agent_store_of(ctx))
 
 
 def _intent_tool(_request, ctx):
@@ -67,18 +71,20 @@ def _intent_final(_request, ctx):
         _resolve_final_answer_prompt_path,
     )
 
-    return _load_prompt_file(_resolve_final_answer_prompt_path(ctx))
+    return _load_prompt_file(
+        _resolve_final_answer_prompt_path(ctx), store=agent_store_of(ctx)
+    )
 
 
-def _project_memory(_request, _ctx):
+def _project_memory(_request, ctx):
     from gc_core.project_memory.compaction import _load_prompt
 
-    return _load_prompt()
+    return _load_prompt(agent_store_of(ctx))
 
 
-def _finish_gate(request, _ctx):
+def _finish_gate(request, ctx):
     from gc_core.intent_guard.final_report_consistency import (
         _load_guard_prompt,
     )
 
-    return _load_guard_prompt(request.path)
+    return _load_guard_prompt(request.path, store=agent_store_of(ctx))

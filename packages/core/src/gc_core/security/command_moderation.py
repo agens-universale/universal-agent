@@ -8,6 +8,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
+from gc_core.agent_store import (
+    DEFAULT_AGENT_STORE,
+    AgentResource,
+    AgentStore,
+    agent_store_of,
+)
 from gc_core.bundled_assets import bundled_root
 from gc_core.config_modules.security import validate_command_moderation_mode
 from gc_core.constants.tool_names import EXEC_PYTHON_NAME
@@ -787,7 +793,9 @@ def _default_judge_client(
         raw_text = await arequest_auxiliary_completion_text(
             ctx=ctx,
             state=state,
-            messages=_build_judge_messages(judge_payload, prompts=prompts),
+            messages=_build_judge_messages(
+                judge_payload, prompts=prompts, store=agent_store_of(ctx)
+            ),
             max_tokens=auxiliary_llm_judge_max_tokens(ctx),
             request_label="command_moderation_judge",
             consumer="command_judge",
@@ -807,16 +815,17 @@ def _build_judge_messages(
     judge_payload: dict[str, Any],
     *,
     prompts: dict[str, str] | None = None,
+    store: AgentStore = DEFAULT_AGENT_STORE,
 ) -> list[dict[str, str]]:
     system_prompt = (
         prompts["system"]
         if prompts is not None
-        else load_command_judge_prompt("system")
+        else load_command_judge_prompt("system", store=store)
     )
     user_template = (
         prompts["user"]
         if prompts is not None
-        else load_command_judge_prompt("user")
+        else load_command_judge_prompt("user", store=store)
     )
     user_prompt = user_template.format(
         judge_payload_json=json.dumps(
@@ -829,7 +838,9 @@ def _build_judge_messages(
     ]
 
 
-def load_command_judge_prompt(kind: str) -> str:
+def load_command_judge_prompt(
+    kind: str, *, store: AgentStore = DEFAULT_AGENT_STORE
+) -> str:
     if kind == "system":
         path = (
             bundled_root() / "prompts" / "security" / "command_judge_system.md"
@@ -840,14 +851,21 @@ def load_command_judge_prompt(kind: str) -> str:
         )
     else:
         raise ValueError("Unknown command judge prompt kind.")
-    return _load_prompt_file(path)
+    return _load_prompt_file(path, store=store, name=f"command_judge_{kind}")
 
 
-def _load_prompt_file(path: Path) -> str:
+def _load_prompt_file(
+    path: Path,
+    *,
+    store: AgentStore = DEFAULT_AGENT_STORE,
+    name: str = "command_judge_system",
+) -> str:
     # «Недоступен» — это и «не декодируется» (`UnicodeDecodeError` подкласс
     # `ValueError`, а не `OSError`): судья отключается, а не роняет ход.
     try:
-        text = path.read_text(encoding="utf-8").strip()
+        text = store.read_text(
+            AgentResource("prompt", name, str(path))
+        ).strip()
     except (OSError, UnicodeDecodeError) as exc:
         raise JudgeUnavailable(
             f"Command judge prompt file is unavailable: {path}"

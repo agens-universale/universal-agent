@@ -127,6 +127,25 @@ def code_fingerprint() -> str:
     return digest.hexdigest()[:12]
 
 
+def _agent_stores(agent_store, profiles) -> dict:
+    """Профиль → хранилище агента; профиля нет в словаре — файловое."""
+    from collections.abc import Mapping
+
+    from gc_core.agent_store import check_agent_store
+
+    if agent_store is None:
+        return {}
+    if not isinstance(agent_store, Mapping):
+        check_agent_store(agent_store)
+        return dict.fromkeys(profiles, agent_store)
+    unknown = sorted(set(agent_store) - set(profiles))
+    if unknown:
+        raise ValueError(f"agent_store: нет таких профилей: {unknown}")
+    return {
+        name: check_agent_store(store) for name, store in agent_store.items()
+    }
+
+
 def _without_human(settings):
     """Профиль для работы без человека: инструмента вопроса нет, режим
     ``ask`` охраны — ``deny`` (отказ с причиной, модель ищет другой путь),
@@ -277,9 +296,13 @@ class ContextProvider:
         state_paths=(),
         log_handlers=(),
         human_input=False,
+        agent_store=None,
     ):
         self.resource_host: WorkerResourceHost = resource_host
         self.stores = dict(stores)
+        #: Хранилище агента (промпты, AGENTS.md, скиллы, субагенты): одно на
+        #: все профили или по профилю; ``None`` — файловое по умолчанию.
+        self.agent_stores = _agent_stores(agent_store, profiles)
         #: Обработчики логов прогона от приложения (``AgentPlugin``).
         self.log_handlers = list(log_handlers or ())
         #: Человек отвечает на вопросы агента (``WorkerConfig.human_input``).
@@ -524,6 +547,7 @@ class ContextProvider:
                     run_id=_digest(call.owner_id)[:24],
                     thread_store=self.stores[store_id],
                     log_handlers=self.log_handlers,
+                    agent_store=self.agent_stores.get(call.profile),
                 )
                 self._contexts[call.owner_id] = ctx
                 return ctx

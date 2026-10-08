@@ -547,3 +547,38 @@ async def test_project_memory_is_off_under_temporal(tmp_path, monkeypatch):
         stop = provider._profiles["test"][1].settings.agent.stop_tools
         assert stop.count("project_memory") == 1
         await provider.aclose()
+
+
+async def test_agent_store_reaches_the_worker_context(tmp_path, monkeypatch):
+    """Хранилище агента приложения — в контексте воркера: одно на всех
+    агентов или по агенту; лишнее имя и чужой объект — отказ на старте."""
+    from gc_testkit.memory_agent_store import MemoryAgentStore
+
+    monkeypatch.chdir(tmp_path)
+    store = DurableFileThreadStore(str(tmp_path / "threads"))
+    agent_store = MemoryAgentStore()
+    for value in (agent_store, {"test": agent_store}):
+        provider = ContextProvider(
+            profiles={"test": profile(tmp_path)},
+            stores={"files": store},
+            resource_host=WorkerResourceHost("test"),
+            agent_store=value,
+        )
+        ctx = await provider(call())
+        assert ctx.agent_store is agent_store
+        await provider.close(call())
+        await provider.aclose()
+    with pytest.raises(ValueError, match="нет таких профилей"):
+        ContextProvider(
+            profiles={"test": profile(tmp_path)},
+            stores={"files": store},
+            resource_host=WorkerResourceHost("test"),
+            agent_store={"other": agent_store},
+        )
+    with pytest.raises(TypeError, match="AgentStore"):
+        ContextProvider(
+            profiles={"test": profile(tmp_path)},
+            stores={"files": store},
+            resource_host=WorkerResourceHost("test"),
+            agent_store=object(),
+        )

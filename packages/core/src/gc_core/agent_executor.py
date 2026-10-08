@@ -404,6 +404,7 @@ class AgentExecutor:
         Без `prompt_loader` в контексте файлы читаются здесь же, как в develop;
         с ним (Temporal native) чтение уходит в загрузчик рантайма.
         """
+        from gc_core.agent_store import agent_store_of
         from gc_core.run_preparation import (
             PromptPreparationRequest,
             load_run_prompts,
@@ -414,7 +415,9 @@ class AgentExecutor:
         )
         loader = port(self._ctx, "prompt_loader")
         if loader is None:
-            prepared = load_run_prompts(request, logger=logger)
+            prepared = load_run_prompts(
+                request, logger=logger, store=agent_store_of(self._ctx)
+            )
         else:
             prepared = await loader(request)
         return prepared.system_prompt, prepared.special_instructions

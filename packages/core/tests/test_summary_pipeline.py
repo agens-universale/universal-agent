@@ -133,7 +133,7 @@ async def test_maybe_run_summary_compaction_twice_uses_meta_user_log(
 
         monkeypatch.setattr(
             "gc_core.summarize.prompt_loading.load_prompt_template",
-            lambda _p: "prompt",
+            lambda _p, **_kw: "prompt",
         )
 
         async def _fake_summary(**_kwargs):
@@ -246,7 +246,7 @@ async def test_persist_batch_writes_user_intent_log_to_meta():
 def test_maybe_run_summary_compaction_works_without_thread(monkeypatch):
     monkeypatch.setattr(
         "gc_core.summarize.prompt_loading.load_prompt_template",
-        lambda _p: "prompt",
+        lambda _p, **_kw: "prompt",
     )
 
     async def _fake_summary(**_kwargs):
@@ -300,7 +300,7 @@ def test_maybe_run_summary_compaction_preserves_system_and_state_metadata(
 ):
     monkeypatch.setattr(
         "gc_core.summarize.prompt_loading.load_prompt_template",
-        lambda _p: "prompt",
+        lambda _p, **_kw: "prompt",
     )
 
     async def _fake_summary(**_kwargs):

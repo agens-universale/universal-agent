@@ -4,6 +4,7 @@ import os
 from dataclasses import dataclass
 from typing import Any, Dict, List
 
+from gc_core.agent_store import agent_store_of
 from gc_core.bundled_assets import bundled_root
 from gc_core.execution.resources import (
     PromptResourceRequest,
@@ -112,6 +113,7 @@ async def arequest_patch_replace(
                 default_memory_patch_path(),
             ),
             subagent=subagent,
+            store=agent_store_of(ctx),
         ),
     )
     user_prompt = (

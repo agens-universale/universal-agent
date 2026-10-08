@@ -71,6 +71,10 @@ class AgentPlugin(SimplePlugin):
     ``thread_store_activity`` / ``tool_activities`` — нативные
     ``ActivityConfig``: поверх умолчаний пакета (модель повторяется без
     ограничения, эффект инструмента — одна попытка).
+
+    ``agent_store`` — хранилище агента (``gc_core.agent_store``): промпты,
+    AGENTS.md, скиллы и субагенты. Одно на всех агентов или словарь
+    «агент → хранилище»; не задано — файлы по путям конфига, как раньше.
     """
 
     def __init__(
@@ -88,6 +92,7 @@ class AgentPlugin(SimplePlugin):
         tool_activities: Mapping[str, Any] | None = None,
         log_handlers: Any = (),
         human_input: bool = False,
+        agent_store: Any = None,
         _activities: ActivitiesConfig | None = None,
     ) -> None:
         stores = dict(thread_stores or {})
@@ -129,7 +134,10 @@ class AgentPlugin(SimplePlugin):
         )
         self.provider, self.activities_host, self.thread_activities = (
             build_runtime(
-                self.config, stores=stores, log_handlers=log_handlers
+                self.config,
+                stores=stores,
+                log_handlers=log_handlers,
+                agent_store=agent_store,
             )
         )
         native, threads = self.activities_host, self.thread_activities

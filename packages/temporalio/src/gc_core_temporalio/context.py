@@ -6,6 +6,7 @@ from copy import deepcopy
 # Load these deterministic core modules during sandbox initialization, rather
 # than on the first late-bound store/tool dispatch in a workflow task.
 from gc_core import thread_store_async as _thread_store_async  # noqa: F401
+from gc_core.agent_store import AgentResource, AgentStore
 from gc_core.config_modules.root import AppConfig
 from gc_core.context_preparation import (
     RunContextBindings,
@@ -46,6 +47,20 @@ class ExternalResources:
         )
 
 
+class ExternalAgentStore(AgentStore):
+    """Хранилище агента в коде workflow: промпты, инструкции, скиллы и
+    субагенты читаются на воркере (activity), здесь чтение — ошибка."""
+
+    def read_text(self, resource: AgentResource) -> str:
+        raise ExecutionFailure(
+            f"Agent resource {resource.kind}:{resource.name} "
+            "requires an external operation"
+        )
+
+    def list_dir(self, resource: AgentResource) -> list:
+        return self.read_text(resource)
+
+
 def assemble_context(prepared, *, operations, store, logger, human_request):
     resources = ExternalResources()
     # Тот же снимок, из которого `assemble_run_context` соберёт настройки ctx.
@@ -84,6 +99,7 @@ def assemble_context(prepared, *, operations, store, logger, human_request):
             tools_data=tools,
             model_router=router,
             thread_store=store,
+            agent_store=ExternalAgentStore(),
             operations=operations,
             lock_factory=nullcontext,
             prompt_loader=operations.prompt_loader,

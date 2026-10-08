@@ -107,7 +107,7 @@ async def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_
 
         monkeypatch.setattr(
             "gc_core.summarize.prompt_loading.load_prompt_template",
-            lambda _p: "prompt",
+            lambda _p, **_kw: "prompt",
         )
 
         async def _fake_summary(**_kwargs):
@@ -257,7 +257,7 @@ async def test_e2e_user_log_skips_technical_and_tool_messages(monkeypatch):
 
         monkeypatch.setattr(
             "gc_core.summarize.prompt_loading.load_prompt_template",
-            lambda _p: "prompt",
+            lambda _p, **_kw: "prompt",
         )
 
         async def _fake_summary(**_kwargs):
