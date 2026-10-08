@@ -77,21 +77,28 @@ async def test_probe_precedes_the_remote_command(monkeypatch):
     calls.clear()
 
     async def dead_process(argv, **kw):
-        calls.append(argv[-1])
+        calls.append((argv[-1], kw.get("capture_max_chars")))
         return ExecResult(stderr="permission denied\n", return_code=1)
 
     monkeypatch.setattr(
         "gc_core.backends.remote_shell._arun_bounded_process", dead_process
     )
     # Свежий бэкенд: успешная проба первого жива 10 с и вторую бы пропустила.
-    backend = RemoteShellBackend(["docker", "exec", "-i", "box"])
+    backend = RemoteShellBackend(
+        ["docker", "exec", "-i", "box"],
+        exec_output_capture_max_chars=4_000,
+        walk_output_max_chars=50_000_000,
+    )
     with pytest.raises(
         RuntimeUnavailable, match="Runtime connection failed"
     ) as err:
         await backend.aexec("echo hi")
     assert "turn_finish" in str(err.value)
     assert len(calls) == 1
-    assert probe_stdout(calls[0]) is not None
+    command, capture = calls[0]
+    assert probe_stdout(command) is not None
+    assert capture == backend.exec_output_capture_max_chars
+    assert capture != backend.walk_output_max_chars
 
 
 async def test_aexec_runs_through_prefix_sh_c(be):

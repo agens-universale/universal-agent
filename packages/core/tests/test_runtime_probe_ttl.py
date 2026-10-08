@@ -7,6 +7,7 @@ import yaml
 from gc_core.backends.factory import resolve_os_backend
 from gc_core.backends.runtime_probe import (
     DEFAULT_RUNTIME_PROBE_TTL_SEC,
+    _PROBE_FAILURE_DETAIL_CHARS,
     RuntimeProbeCache,
     RuntimeUnavailable,
     probe_stdout,
@@ -200,3 +201,20 @@ async def test_parallel_calls_share_one_successful_probe():
     release.set()
     await asyncio.gather(first, second)
     assert len(calls) == 1
+
+
+def test_failed_probe_keeps_only_the_start_of_the_reply():
+    """В надж и в потоки исключения — начало ответа, не весь захват."""
+    blob = "banner\n" + ("x" * 5_000)
+    exc = RuntimeUnavailable(
+        stdout=blob, stderr="docker down\n" + ("y" * 5_000)
+    )
+    assert exc.stdout.startswith("banner\n")
+    assert exc.stdout.endswith("...")
+    assert len(exc.stdout) == _PROBE_FAILURE_DETAIL_CHARS + len("...")
+    assert exc.stderr.startswith("docker down\n")
+    assert len(exc.stderr) == _PROBE_FAILURE_DETAIL_CHARS + len("...")
+    detail = str(exc).split("(", 1)[1].rstrip(")")
+    assert detail.startswith("banner\n")
+    assert len(detail) == _PROBE_FAILURE_DETAIL_CHARS + len("...")
+    assert "yyyy" not in str(exc)

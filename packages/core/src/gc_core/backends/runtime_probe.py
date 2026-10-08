@@ -33,6 +33,10 @@ _RUNTIME_PROBE_NUDGE = (
 )
 _PROBE_COMMAND_RE = re.compile(r"echo \$\(\(([1-9][0-9])\+([1-9][0-9])\)\)")
 
+# Сколько символов ответа пробы класть в надж и в потоки исключения.
+# Сумма — одна строка; 500 хватает на баннер и текст ошибки.
+_PROBE_FAILURE_DETAIL_CHARS = 500
+
 # ``run(command, timeout) -> result`` — сырой exec без повторной пробы.
 ProbeRun = Callable[[str, int], Awaitable[Any]]
 
@@ -48,8 +52,8 @@ class RuntimeUnavailable(Exception):
         return_code: int | None = None,
         timed_out: bool = False,
     ) -> None:
-        self.stdout = stdout or ""
-        self.stderr = stderr or ""
+        self.stdout = _clip_probe_text(stdout or "")
+        self.stderr = _clip_probe_text(stderr or "")
         self.return_code = return_code
         self.timed_out = timed_out
         super().__init__(_probe_failure_message(self.stdout, self.stderr))
@@ -102,10 +106,18 @@ def _probe_came_back(res: Any, total: int) -> bool:
     return any(line.strip() == expect for line in stdout.splitlines())
 
 
+def _clip_probe_text(text: str) -> str:
+    """Начало ответа. Дальше модели не нужно: суммы там уже нет."""
+    if len(text) <= _PROBE_FAILURE_DETAIL_CHARS:
+        return text
+    return text[:_PROBE_FAILURE_DETAIL_CHARS] + "..."
+
+
 def _probe_failure_message(stdout: str, stderr: str) -> str:
     detail = "\n".join(
         part.strip() for part in (stdout, stderr) if part and part.strip()
     )
+    detail = _clip_probe_text(detail)
     if detail:
         return f"{_RUNTIME_PROBE_NUDGE} ({detail})"
     return _RUNTIME_PROBE_NUDGE

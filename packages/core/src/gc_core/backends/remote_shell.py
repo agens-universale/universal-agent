@@ -123,11 +123,14 @@ class RemoteShellBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
 
     # --- транспорт ---
     async def _aprobe(self, command: str, timeout: int) -> ExecResult:
-        """``sh -c`` пробы без повторной пробы и без ``cd``."""
+        """``sh -c`` пробы без повторной пробы и без ``cd``.
+
+        Потолок — трейс команды, не обход дерева: ответ пробы это одна строка.
+        """
         return await self._run(
             command,
             timeout=timeout,
-            capture_max_chars=self.walk_output_max_chars,
+            capture_max_chars=self.exec_output_capture_max_chars,
             probe=False,
         )
 
