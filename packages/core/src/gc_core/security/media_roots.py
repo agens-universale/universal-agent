@@ -29,5 +29,10 @@ def media_roots(settings: Any) -> tuple[Path, ...]:
     охраны; каталог тредов не создаётся — только временный корень SDK без каталога
     тредов, приватным, при первом обращении (`attachments.store._private_temp_root`).
     """
-    store = ImageStore.for_config(settings)
+    # Хранилище картинок прогона, если оно на диске (SDK со своим файловым
+    # хранилищем тредов кладёт картинки рядом с его тредами): охрана обязана
+    # смотреть туда же, куда пишет прогон. Иначе — по конфигу, как раньше.
+    store = getattr(settings, "image_store", None)
+    if not isinstance(store, ImageStore):
+        store = ImageStore.for_config(settings)
     return (Path(store.root), Path(store.staging_dir), mcp_media_dir())

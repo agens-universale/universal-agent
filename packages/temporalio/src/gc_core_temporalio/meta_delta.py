@@ -39,6 +39,11 @@ META_REF_KEY = "__ua_meta_text__"
 #: содержимого: ``{"__ua_meta_node__": хэш}`` — для записи полной meta
 #: (запасной путь), где ссылаться можно только на содержимое, не на место.
 NODE_REF_KEY = "__ua_meta_node__"
+#: Настоящий словарь meta из одного служебного ключа (совпал с ключом
+#: ссылки): в разнице — ``{"__ua_literal__": словарь}``, сборка не примет его
+#: за ссылку.
+LITERAL_KEY = "__ua_literal__"
+_SERVICE_KEYS = frozenset({TEXT_REF_KEY, META_REF_KEY, NODE_REF_KEY})
 #: Строки meta-базы короче — без ссылки (ссылка ~55 байт).
 META_TEXT_MIN_CHARS = 200
 #: Поддеревья легче — без ссылки.
@@ -183,9 +188,34 @@ class TextIndex:
         return {TEXT_REF_KEY: [digest, path, start, len(text), _digest(text)]}
 
 
+def _service_like(value: Any) -> bool:
+    """Словарь, который сборка приняла бы за служебный (ссылку, литерал)."""
+    return (
+        isinstance(value, dict)
+        and len(value) == 1
+        and next(iter(value)) in _SERVICE_KEYS | {LITERAL_KEY}
+    )
+
+
+def _escape(value: Any) -> Any:
+    """Без индекса текстов: значение как есть, кроме служебных двойников."""
+    if isinstance(value, dict):
+        out = {key: _escape(item) for key, item in value.items()}
+        return {LITERAL_KEY: out} if _service_like(value) else out
+    if isinstance(value, list):
+        return [_escape(item) for item in value]
+    return value
+
+
 def _encode(value: Any, texts: TextIndex | None) -> Any:
     if texts is None:
-        return value
+        return _escape(value)
+    if _service_like(value):
+        return {
+            LITERAL_KEY: {
+                key: _encode(item, texts) for key, item in value.items()
+            }
+        }
     if isinstance(value, str):
         return texts.ref(value) or value
     if isinstance(value, (dict, list)) and texts.has_nodes():
@@ -333,6 +363,11 @@ class TextSource:
 
 def _decode(value: Any, texts: TextSource | None) -> Any:
     if isinstance(value, dict):
+        if len(value) == 1 and LITERAL_KEY in value:
+            return {
+                key: _decode(item, texts)
+                for key, item in value[LITERAL_KEY].items()
+            }
         if len(value) == 1 and TEXT_REF_KEY in value:
             return (texts or TextSource()).message_text(value[TEXT_REF_KEY])
         if len(value) == 1 and META_REF_KEY in value:
@@ -412,6 +447,11 @@ def text_refs(delta: Any) -> set[str]:
 
     def walk(value: Any) -> None:
         if isinstance(value, dict):
+            if len(value) == 1 and LITERAL_KEY in value:
+                # Сам литерал — данные; ссылки бывают только внутри значений.
+                for item in value[LITERAL_KEY].values():
+                    walk(item)
+                return
             if len(value) == 1 and TEXT_REF_KEY in value:
                 found.add(value[TEXT_REF_KEY][0])
                 return
@@ -426,6 +466,7 @@ def text_refs(delta: Any) -> set[str]:
 
 
 __all__ = [
+    "LITERAL_KEY",
     "META_REF_KEY",
     "NODE_REF_KEY",
     "TEXT_REF_KEY",

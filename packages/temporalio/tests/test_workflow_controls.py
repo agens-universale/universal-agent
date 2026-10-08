@@ -673,3 +673,40 @@ async def test_model_reply_over_the_record_limit_fails_the_turn_not_the_session(
         await handle.signal(UniversalAgentWorkflow.close_session)
         result = await asyncio.wait_for(handle.result(), 60)
     assert result["exit_code"] == 0
+
+
+async def test_submit_batch_is_all_or_nothing(
+    tmp_path, monkeypatch, scripted_http
+):
+    """Отказ на одном сообщении пакета (повтор ID с другим текстом) не
+    оставляет принятыми остальные: проверка — до приёма первого."""
+    from temporalio.client import WorkflowUpdateFailedError
+
+    monkeypatch.chdir(tmp_path)
+    url, requests, script = scripted_http
+    script.extend([[finish("first")], [finish("second")]])
+    async with runtime(tmp_path, url) as (env, _, _):
+        handle = await env.client.start_workflow(
+            UniversalAgentWorkflow.run,
+            request(keep_alive=True),
+            id="controls-batch",
+            task_queue="native-controls",
+        )
+        await wait_status(
+            handle, lambda s: s["turns"] == 1 and s["phase"] == "idle"
+        )
+        await handle.execute_update(
+            UniversalAgentWorkflow.submit_message, UserMessage("m1", "ONE")
+        )
+        await wait_status(
+            handle, lambda s: s["turns"] == 2 and s["phase"] == "idle"
+        )
+        with pytest.raises(WorkflowUpdateFailedError):
+            await handle.execute_update(
+                UniversalAgentWorkflow.submit_batch,
+                [UserMessage("m2", "NEW"), UserMessage("m1", "CHANGED")],
+            )
+        state = await handle.query(UniversalAgentWorkflow.message_state, "m2")
+        assert state["state"] == "unknown"
+        await handle.signal(UniversalAgentWorkflow.close_session)
+        await handle.result()

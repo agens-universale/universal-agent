@@ -143,6 +143,30 @@ def test_llm_failure_returns_envelope_with_empty_summary(monkeypatch):
     assert env["message"]  # non-empty
 
 
+def test_trace_too_large_for_durable_history_is_an_empty_summary(
+    monkeypatch,
+):
+    """Под Temporal трасса больше записи истории (``PayloadTooLarge``):
+    ход кончается своим статусом с пустой сводкой — как локально, где такой
+    контекст отклонил бы провайдер, — а не ошибкой хода."""
+    from gc_core.execution.contracts import PayloadTooLarge
+
+    async def _too_large(**kw):
+        raise PayloadTooLarge("Запрос к модели: 3 000 000 байт")
+
+    monkeypatch.setattr(
+        summary_llm, "arequest_chat_completion_text", _too_large
+    )
+    state = _make_state(max_steps=1)
+    state.steps = 2
+    state.messages = [{"role": "user", "content": "hi"}]
+    env = json.loads(
+        run_coro(lts.abuild_limit_envelope(state, "step_limit", _make_ctx()))
+    )
+    assert env["status"] == "step_limit"
+    assert env["raw_trace_summary"] == ""
+
+
 # ---------------------------------------------------------------------------
 # Raw non-JSON model text still in raw_trace_summary
 # ---------------------------------------------------------------------------

@@ -39,7 +39,8 @@ _logger = logging.getLogger(__name__)
 # (None — умолчания нет, ссылка обязательная; "" — пустое умолчание).
 _ENV_MARKER = re.compile(r"\$\{ENV:([A-Za-z_]\w*)(?::-([^}]*))?\}", re.ASCII)
 # Умолчание отделяет ПОСЛЕДНИЙ ``:-``: путь с ``:-`` внутри работает, если у
-# ссылки есть умолчание (без умолчания такой путь не записать).
+# ссылки есть умолчание; без умолчания — если файл с таким именем есть
+# (тогда вся строка — путь, см. ``repl_file``).
 _FILE_MARKER = re.compile(r"\$\{FILE:([^}]+?)(?::-((?:(?!:-)[^}])*))?\}")
 _MAX_FILE_BYTES = 65536  # креды маленькие; защита от указания на большой файл
 
@@ -214,6 +215,12 @@ class _Resolver:
 
         def repl_file(m: re.Match[str]) -> str:
             path_raw, default = m.group(1), m.group(2)
+            whole = m.group(0)[len("${FILE:") : -1]
+            if default is not None and os.path.isfile(
+                os.path.expanduser(whole)
+            ):
+                # Файл с ``:-`` в имени существует: это путь, а не умолчание.
+                path_raw, default = whole, None
             value, reason = _read_secret_file(path_raw, self.file_cache)
             if value is not None:
                 return value

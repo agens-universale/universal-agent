@@ -159,6 +159,19 @@ class ChildTransport:
                 abandon=lambda: self.active_child != child_id,
             )
         except HumanRequestInterrupted:
+            # Ответа не будет (человека нет, вопрос снят): живому ребёнку —
+            # отказ, иначе он ждал бы вечно, а с ним и ход родителя.
+            if self.active_child == child_id and not (
+                self._state is not None and self._state.stop_requested
+            ):
+                try:
+                    await self._handle.signal(
+                        "refuse_human", args=[payload["request_id"]]
+                    )
+                except Exception:  # ребёнок уже закрыт — отказывать некому
+                    workflow.logger.warning(
+                        "Child %s closed before the refusal", child_id
+                    )
             return
         if self._state is None or self._state.stop_requested:
             return

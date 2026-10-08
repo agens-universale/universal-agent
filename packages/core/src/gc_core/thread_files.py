@@ -48,6 +48,27 @@ def check_name(name: str) -> str:
     return name
 
 
+def safe_name(name: str) -> str:
+    """Имя файла треда из произвольного (кириллица, пробелы — имя файла от MCP).
+
+    Годное имя — как есть; иначе недопустимые символы заменяются на ``_``, а
+    к основе добавляется хеш исходного имени: два разных имени не сольются в
+    одно. Расширение сохраняется.
+    """
+    try:
+        return check_name(name)
+    except ValueError:
+        pass
+    import hashlib
+
+    stem, dot, ext = name.rpartition(".")
+    if not dot or not re.fullmatch(r"[A-Za-z0-9]{1,8}", ext):
+        stem, ext = name, ""
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", stem).strip("._") or "file"
+    digest = hashlib.sha256(name.encode("utf-8", "surrogatepass")).hexdigest()
+    return f"{cleaned[:80]}-{digest[:8]}" + (f".{ext}" if ext else "")
+
+
 def thread_file_uri(system_id: str, thread_id: str, name: str) -> str:
     return (
         f"{THREAD_FILE_SCHEME}{quote(system_id, safe='')}/"
@@ -79,6 +100,7 @@ __all__ = [
     "check_name",
     "is_thread_file_uri",
     "parse_thread_file_uri",
+    "safe_name",
     "thread_file_uri",
     "thread_files_capability",
 ]

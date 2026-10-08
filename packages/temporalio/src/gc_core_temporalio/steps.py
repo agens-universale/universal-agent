@@ -83,7 +83,9 @@ async def agent_step(
     завершён). ``task_queue`` — очередь воркера с ``AgentPlugin``; по
     умолчанию — очередь текущего workflow. ``child_options`` — параметры
     ``workflow.execute_child_workflow`` (``parent_close_policy``,
-    ``execution_timeout``, ``retry_policy``…). Отказ хода — исключение:
+    ``execution_timeout``, ``retry_policy``…); ``parent_close_policy`` по
+    умолчанию — ``REQUEST_CANCEL``: тред освобождается и при terminate
+    родителя. Отказ хода — исключение:
     ``ChildWorkflowError`` (сбой сессии) или ``ApplicationError`` типа
     ``TurnFailed`` (ход не уложился в запись истории); слишком большой
     промпт — ``ApplicationError`` типа ``HistoryLimitExceeded`` до запуска.
@@ -101,6 +103,12 @@ async def agent_step(
             non_retryable=True,
         ) from None
     child_id = step_workflow_id(workflow.info().workflow_id, step or thread_id)
+    # Закрылся родитель (конец, terminate, таймаут) — ребёнку отмена, а не
+    # terminate: отменённая сессия сама снимает владение тредом, иначе тред
+    # оставался бы занятым до ``gc-temporal unlock``.
+    child_options.setdefault(
+        "parent_close_policy", workflow.ParentClosePolicy.REQUEST_CANCEL
+    )
     result = await workflow.execute_child_workflow(
         UniversalAgentWorkflow.run,
         RunRequest(

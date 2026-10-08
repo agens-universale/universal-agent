@@ -64,6 +64,14 @@ def test_mcp_media_goes_to_thread_files_when_the_store_keeps_them(
         "mcp-media/shot.png",
     )
     assert image_store.read_uri(saved["path"]) == b"png-bytes"
+    # Имя от MCP с кириллицей и пробелом: файл не теряется, имя — безопасное.
+    with api.media_sink_scope(ctx):
+        odd = api._save_media_block(
+            block, {"filename": "снимок экрана.png"}, "browser_take_screenshot"
+        )
+    _sys, _thread, name = parse_thread_file_uri(odd["path"])
+    assert name.startswith("mcp-media/") and name.endswith(".png")
+    assert image_store.read_uri(odd["path"]) == b"png-bytes"
     assert not mcp_media_dir().exists()
     # Вне вызова инструмента — как раньше, файлом в mcp-media.
     plain = api._save_media_block(block, {"filename": "b.png"}, "tool")

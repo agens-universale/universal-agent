@@ -429,13 +429,16 @@ class AgentSession:
             return error
         return None
 
-    async def ask(self, text, *, message_id=None):
+    async def ask(self, text, *, message_id=None, timeout=None):
         """Отправить и дождаться: ответ хода (как ``AsyncAgent.run``).
 
         Сообщение, отброшенное остановкой хода, — ``MessageNotProcessed``:
         ответа на него нет, а ответ прошлого хода выдавать за него нельзя.
+        ``timeout`` (секунды) — как у ``wait``: истёк — ``TimeoutError``,
+        сообщение остаётся в сессии (дождаться его можно ``wait``).
         """
-        reply = await self.wait(await self.send(text, message_id=message_id))
+        message_id = await self.send(text, message_id=message_id)
+        reply = await self.wait(message_id, timeout=timeout)
         if not reply["delivered"]:
             raise MessageNotProcessed(reply["message_id"])
         _raise_turn_error(reply)

@@ -36,6 +36,9 @@ class PreparedRunContext:
     is_tui: bool = False
     #: 2 — настройки снимком ``settings``/``runtime`` (1 — плоский ``config_dict``).
     schema_version: int = 2
+    #: Бэкенд рабочей области — песочница (пути — в координатах контейнера).
+    #: Durable-сборке нужен как данные: живого бэкенда в workflow нет.
+    workspace_is_sandbox: bool = False
 
     @classmethod
     def from_context(cls, ctx, *, settings, runtime):
@@ -56,6 +59,9 @@ class PreparedRunContext:
             workspace_shell=ctx.workspace.shell,
             workspace_os_name=ctx.workspace.os_name,
             workspace_root_writable=ctx.workspace.root_writable,
+            workspace_is_sandbox=bool(
+                getattr(ctx.workspace.backend, "is_sandbox", False)
+            ),
             tools_spec=ctx.tools_spec,
             tools_description=ctx.tools_description,
             mcp_status=ctx.mcp_status,

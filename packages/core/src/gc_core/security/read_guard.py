@@ -17,6 +17,7 @@ import os
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from gc_core.constants.tool_names import FS_VIEW_IMAGE_NAME
 from gc_core.execution.ports import port
 from gc_core.security.confirm_port import confirmation_step, request_confirm
 from gc_core.security.dual_wrapper import dual_wrap
@@ -36,6 +37,8 @@ from gc_core.security.protected_paths import (
     protection_enabled,
 )
 from gc_core.settings import settings_of
+from gc_core.thread_files import THREAD_FILE_SCHEME, parse_thread_file_uri
+from gc_core.thread_paths import thread_address
 
 _GLOB_WILDCARD_MARKERS = {"*", "all"}
 
@@ -504,6 +507,20 @@ def extra_read_roots(settings, candidate_path, ps, media) -> list[str]:
     return extra_allowed
 
 
+def _own_thread_image(func, args, context, candidate_path) -> bool:
+    """``fs_view_image`` по ссылке на свой тред.
+
+    Умеет ли хранилище картинок такие ссылки, решает сам тул (без этого —
+    его отказ); под Temporal охрана идёт в коде workflow, где хранилища нет.
+    """
+    if _tool_name(func, args) != FS_VIEW_IMAGE_NAME:
+        return False
+    parsed = parse_thread_file_uri(candidate_path)
+    return parsed is not None and parsed[:2] == thread_address(
+        getattr(context, "ctx", None)
+    )
+
+
 def _read_guard_flow(
     func, args, kwargs, path_arg, path_extractor, blocked_result_factory
 ):
@@ -544,17 +561,34 @@ def _read_guard_flow(
     if not extracted:
         # Missing paths are validated by the tool itself.
         return (yield)
-    from gc_core.thread_files import parse_thread_file_uri
-    from gc_core.thread_paths import thread_address
-
-    parsed = parse_thread_file_uri(candidate_path)
-    if parsed is not None and parsed[:2] == thread_address(
-        getattr(context, "ctx", None)
-    ):
-        # Файл СВОЕГО треда в хранилище тредов (не путь ФС): читает его сам
-        # тул через хранилище, периметр ФС к нему не относится. Ссылку на
-        # чужой тред охрана не пропускает — она идёт обычной проверкой пути.
-        return (yield)
+    if str(candidate_path).startswith(THREAD_FILE_SCHEME):
+        # Ссылка на файл треда в хранилище тредов — не путь ФС. Открывает её
+        # только ``fs_view_image`` (картинки СВОЕГО треда через хранилище);
+        # прочие тулы поняли бы её как относительный путь в рабочей папке.
+        if _own_thread_image(func, args, context, candidate_path):
+            return (yield)
+        audit_policy_decision(
+            context,
+            tool_name=_tool_name(func, args),
+            decision="blocked",
+            reason_code="thread_file_denied",
+        )
+        return _read_guard_blocked_result(
+            func,
+            {
+                "type": "read_denied",
+                "path": candidate_path,
+                "operation": "read",
+                "message": (
+                    "thread-file:// is a file in the thread store, not a "
+                    "filesystem path: only fs_view_image opens it, and only "
+                    "for images of the current thread."
+                ),
+            },
+            args,
+            kwargs,
+            blocked_result_factory=blocked_result_factory,
+        )
 
     try:
         if callable(port(context.ctx, "guard_probe")):

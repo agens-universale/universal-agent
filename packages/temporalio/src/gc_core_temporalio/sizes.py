@@ -9,7 +9,7 @@ JSON-конвертер Temporal пишет с ``ensure_ascii``: каждый н
 import dataclasses
 import json
 
-from gc_core.execution.contracts import ExecutionFailure
+from gc_core.execution.contracts import PayloadTooLarge
 
 #: Предел входа activity в истории Temporal (запись — 2 МиБ, с запасом под
 #: обёртку вызова).
@@ -25,7 +25,7 @@ def payload_size(value) -> int:
     )
 
 
-class HistoryLimitExceeded(ExecutionFailure):
+class HistoryLimitExceeded(PayloadTooLarge):
     """Значение не помещается в запись истории Temporal (вход или результат
     activity, вход субагента). Отказ хода, а не сессии: сессия продолжает
     принимать сообщения."""

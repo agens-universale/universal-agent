@@ -39,7 +39,18 @@ _BUILTIN_TOOL_TYPES = {
 
 
 class ExternalResources:
-    """Fail loudly if core tries to bypass an explicit external operation."""
+    """Fail loudly if core tries to bypass an explicit external operation.
+
+    ``is_sandbox`` — данные, а не операция: признак бэкенда воркера из
+    подготовленного контекста (координаты путей в отчётах тулов).
+    ``workflow_paths`` — пути отчётов считаются без ``os.path`` (от корня
+    рабочей области).
+    """
+
+    workflow_paths = True
+
+    def __init__(self, *, is_sandbox: bool = False) -> None:
+        self.is_sandbox = bool(is_sandbox)
 
     def __getattr__(self, name):
         raise ExecutionFailure(
@@ -62,7 +73,9 @@ class ExternalAgentStore(AgentStore):
 
 
 def assemble_context(prepared, *, operations, store, logger, human_request):
-    resources = ExternalResources()
+    resources = ExternalResources(
+        is_sandbox=prepared.context.workspace_is_sandbox
+    )
     # Тот же снимок, из которого `assemble_run_context` соберёт настройки ctx.
     loaded = settings_from_snapshot(
         prepared.context.settings, prepared.context.runtime

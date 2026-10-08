@@ -364,3 +364,14 @@ def test_file_path_with_dash_colon_keeps_it_when_default_is_given(tmp_path):
     assert resolve_env_placeholders_strict(f"${{FILE:{token}:-}}") == "value"
     missing = tmp_path / "x:-y" / "tok"
     assert resolve_env_placeholders(f"${{FILE:{missing}:-dflt}}") == "dflt"
+
+
+def test_file_path_with_dash_colon_without_default_reads_the_file(tmp_path):
+    """Без умолчания путь с ``:-`` не режется, если такой файл есть: вся
+    строка — путь (иначе ``a:-b/tok`` читался бы как файл ``a`` с
+    умолчанием ``b/tok``)."""
+    folder = tmp_path / "a:-b"
+    folder.mkdir()
+    token = folder / "tok"
+    token.write_text("value\n")
+    assert resolve_env_placeholders_strict(f"${{FILE:{token}}}") == "value"

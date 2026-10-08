@@ -6,7 +6,7 @@ The proxy contains no history/meta policy and never opens a local file.
 
 import json
 from copy import deepcopy
-from dataclasses import replace
+from dataclasses import asdict, replace
 
 from gc_core.execution.contracts import ExecutionFailure
 from gc_core.thread_store_durable import (
@@ -24,6 +24,7 @@ from gc_core_temporalio.meta_delta import (
     meta_hash,
     normalize,
 )
+from gc_core_temporalio.sizes import ACTIVITY_INPUT_LIMIT, payload_size
 from gc_core_temporalio.thread_store_contracts import (
     PAGE_BYTES,
     MetaBaseMismatch,
@@ -73,6 +74,10 @@ def _hashable(value):
     if isinstance(value, list):
         return tuple(_hashable(item) for item in value)
     return value
+
+
+#: Запасной путь с полной meta — не больше этого (запас до лимита записи).
+FULL_META_BUDGET = ACTIVITY_INPUT_LIMIT * 3 // 4
 
 
 class TemporalThreadStore:
@@ -282,6 +287,12 @@ class TemporalThreadStore:
                     "h": meta_hash(written),
                     "full": True,
                 }
+                if payload_size(asdict(request)) > FULL_META_BUDGET:
+                    # Полная meta не влезает в запись истории: конфликт —
+                    # ядро перечитает тред и соберёт запись заново.
+                    raise ThreadStoreConflict(
+                        "Thread meta changed and is too large to resend whole"
+                    )
                 reply = await self._call(
                     "universal_agent.thread.commit", request
                 )

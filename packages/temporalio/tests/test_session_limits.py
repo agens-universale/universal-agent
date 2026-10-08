@@ -244,3 +244,23 @@ def test_oversized_auxiliary_request_is_cut_in_the_middle():
     assert fitted[0] == messages[0]
     small = [{"role": "user", "content": "коротко"}]
     assert _fit_auxiliary_messages(small) is small
+
+
+def test_fitted_outcomes_do_not_change_on_the_next_fit():
+    """Итоги ходов подгоняются в конце хода тем же ``_fit_resume``, что и
+    вход Continue-As-New. Повторная подгонка уже подогнанного не режет
+    дальше — ``wait`` до и после нового run видит один и тот же ответ, даже
+    если ответ последнего хода пришлось дорезать (два поля по ~900 КБ)."""
+    big = "о" * 150_000
+    resume = SessionResume(
+        turns=1,
+        turn_outcomes={
+            "1": {"answer": big, "formatted_answer": big, "post_error": None}
+        },
+    )
+    fitted = _fit_resume(resume)
+    assert fitted.turn_outcomes["1"]["answer_truncated"] is True
+    again = _fit_resume(
+        SessionResume(turns=1, turn_outcomes=dict(fitted.turn_outcomes))
+    )
+    assert again.turn_outcomes == fitted.turn_outcomes

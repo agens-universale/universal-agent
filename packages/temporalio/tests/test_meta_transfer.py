@@ -31,8 +31,8 @@ from gc_core_temporalio.thread_store_contracts import (
     ThreadStoreCall,
     ThreadStoreReply,
 )
-from gc_core_temporalio.thread_store_transport import _STORE_ERRORS
 from gc_core_temporalio.thread_store_proxy import TemporalThreadStore
+from gc_core_temporalio.thread_store_transport import _STORE_ERRORS
 from temporalio.converter import DataConverter
 
 LIMIT = 2 * 1024 * 1024
@@ -371,11 +371,16 @@ async def test_metadata_operation_without_known_base_reloads_meta(tmp_path):
     assert max(worker.outputs) < LIMIT
 
 
-async def test_retry_after_foreign_meta_edit_falls_back_to_full_meta(tmp_path):
+async def test_retry_after_foreign_meta_edit_is_a_conflict_not_full_meta(
+    tmp_path,
+):
     """Запись прошла, воркер упал до ответа, затем TUI поправил meta
-    напрямую. Повтор из разницы собрал бы другую meta (Mismatch) — хэш это
-    видит, прокси повторяет полной meta, хранилище отдаёт исходную квитанцию."""
+    напрямую. Ревизия ушла от ожидаемой — воркер отвечает конфликтом сразу,
+    без полной meta (она бывает больше записи истории): ядро перечитает тред,
+    уже записанные сообщения не повторит, правка TUI сохранится."""
     import uuid
+
+    from gc_core.thread_store_durable import ThreadStoreConflict
 
     store = _store("file", tmp_path)
     store.append_messages(
@@ -396,7 +401,7 @@ async def test_retry_after_foreign_meta_edit_falls_back_to_full_meta(tmp_path):
         [{"id": "m1", "role": "assistant", "content": "готово"}],
         meta,
     )
-    first = await proxy.acommit_operation("s", "t", operation)
+    await proxy.acommit_operation("s", "t", operation)
     # «Ответ потерян»: прокси не видел квитанции, а хранилище поменяли.
     current = store.read_snapshot("s", "t", include_state=False)
     store.commit_operation(
@@ -415,16 +420,55 @@ async def test_retry_after_foreign_meta_edit_falls_back_to_full_meta(tmp_path):
     )
     worker.fresh()
     worker.calls.clear()
-    retried = await proxy.acommit_operation("s", "t", operation)
-    # Разница не сошлась по хэшу → вторая попытка полной meta.
-    assert worker.calls[:2] == [
-        "universal_agent.thread.commit",
-        "universal_agent.thread.commit",
-    ]
-    assert retried.revision == first.revision
-    assert retried.max_seq == first.max_seq
+    with pytest.raises(ThreadStoreConflict):
+        await proxy.acommit_operation("s", "t", operation)
+    assert worker.calls == ["universal_agent.thread.commit"]
     stored = store.read_snapshot("s", "t", include_state=False).meta
     assert stored["user_intent_log"][-1]["content"] == "готово"
+    assert stored["tui"]["title"] == "чужая правка"
+    assert len(store.load_messages("s", "t")) == 2
+
+
+async def test_meta_edited_without_revision_keeps_both_changes(tmp_path):
+    """База meta workflow разошлась с хранилищем при той же ревизии (правка
+    meta мимо ревизии — например, файл meta поправлен напрямую): разница
+    workflow ложится поверх meta хранилища одной записью — ни полной meta,
+    ни отказа, ни потери чужой правки."""
+    store = _store("file", tmp_path)
+    store.append_messages(
+        "s", "t", [{"id": "m0", "role": "user", "content": "a"}]
+    )
+    store.save_meta(
+        "s",
+        "t",
+        {"user_intent_log": [_record(0, "user_ask", "a")], "tui": {"x": 1}},
+    )
+    worker = _Worker(store)
+    proxy = TemporalThreadStore("files", worker)
+    snapshot = await proxy.aread_snapshot("s", "t")
+    # Workflow помнит другую meta той же ревизии.
+    stale = deepcopy(snapshot.meta)
+    stale["tui"] = {"x": 0}
+    key = ("s", "t")
+    proxy._meta[key] = ([*proxy._meta[key][0][:2], "stale"], stale)
+    meta = deepcopy(stale)
+    meta["user_intent_log"].append(_record(1, "final_answer", "готово"))
+    worker.fresh()
+    worker.calls.clear()
+    await proxy.acommit_operation(
+        "s",
+        "t",
+        _persist(
+            snapshot,
+            [{"id": "m1", "role": "assistant", "content": "готово"}],
+            meta,
+        ),
+    )
+    # Одна запись, без полной meta; итоговую meta workflow перечитывает.
+    assert worker.calls.count("universal_agent.thread.commit") == 1
+    stored = store.read_snapshot("s", "t", include_state=False).meta
+    assert stored["user_intent_log"][-1]["content"] == "готово"
+    assert stored["tui"] == {"x": 1}
     assert len(store.load_messages("s", "t")) == 2
 
 
@@ -592,3 +636,71 @@ def test_sqlite_thread_files_live_and_die_with_the_thread(tmp_path):
     )
     store.reset("s", "t")
     assert store.read_thread_file("s", "t", "images/abc.png") is None
+
+
+async def test_whole_meta_too_large_to_resend_is_a_conflict(tmp_path):
+    """Полная meta из тысяч мелких записей (ссылки по содержимому её не
+    сжимают) не влезает в запись истории: вместо записи больше лимита —
+    конфликт, ядро перечитает тред и соберёт запись заново."""
+    from gc_core.thread_store_durable import ThreadStoreConflict
+    from gc_core_temporalio.thread_store_contracts import MetaBaseMismatch
+
+    store = _store("file", tmp_path)
+    store.append_messages(
+        "s", "t", [{"id": "m0", "role": "user", "content": "a"}]
+    )
+    worker = _Worker(store)
+    proxy = TemporalThreadStore("files", worker)
+    snapshot = await proxy.aread_snapshot("s", "t")
+    meta = deepcopy(snapshot.meta)
+    meta["user_intent_log"] = [
+        _record(i % 60, "user_ask", f"q{i}") for i in range(20_000)
+    ]
+
+    async def mismatch(name, request):
+        worker.calls.append(name)
+        if request.meta_delta and not request.meta_delta.get("full"):
+            raise MetaBaseMismatch("base drifted")
+        raise AssertionError("whole meta must not be sent")
+
+    proxy._call = mismatch
+    with pytest.raises(ThreadStoreConflict):
+        await proxy.acommit_operation(
+            "s",
+            "t",
+            _persist(
+                snapshot,
+                [{"id": "m1", "role": "assistant", "content": "b"}],
+                meta,
+            ),
+        )
+
+
+def test_meta_data_that_looks_like_a_reference_survives_the_delta():
+    """Словарь meta из одного служебного ключа (``__ua_meta_node__`` и др.) —
+    данные, а не ссылка: разница переносит его как есть, с индексом текстов
+    и без него."""
+    from gc_core_temporalio.meta_delta import (
+        LITERAL_KEY,
+        META_REF_KEY,
+        NODE_REF_KEY,
+        TEXT_REF_KEY,
+        TextIndex,
+        apply,
+        diff_meta,
+    )
+
+    old = {"shared": {"a": 1}}
+    new = {
+        "shared": {
+            "a": 1,
+            "node": {NODE_REF_KEY: "deadbeef"},
+            "text": {TEXT_REF_KEY: ["h", ["content"], 0, 1, "d"]},
+            "meta": [{META_REF_KEY: "x"}],
+            "lit": {LITERAL_KEY: {"y": 2}},
+        }
+    }
+    for texts in (None, TextIndex()):
+        delta = diff_meta(old, new, texts)
+        restored = apply(old, _through_history(delta, dict))
+        assert restored == new

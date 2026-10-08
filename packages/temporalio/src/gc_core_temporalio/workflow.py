@@ -326,6 +326,14 @@ class UniversalAgentWorkflow:
         ``AsyncAgent.run([...])`` локально (по одному update ход мог начаться
         до прихода остальных)."""
         await workflow.wait_condition(lambda: self.ready)
+        # Атомарно: всё, что может отказать, — до приёма первого сообщения,
+        # иначе отказ на третьем оставил бы первые два принятыми.
+        seen = {}
+        for message in messages:
+            digest = _message_digest(message.text)
+            if seen.setdefault(message.message_id, digest) != digest:
+                raise ApplicationError("Message ID reused", non_retryable=True)
+            self._precheck(message, digest)
         return [self._accept(message) for message in messages]
 
     @submit_batch.validator
@@ -351,6 +359,23 @@ class UniversalAgentWorkflow:
                 non_retryable=True,
             )
         self.message_fingerprint = fingerprint
+
+    def _precheck(self, message, digest):
+        """Отказы приёма без изменения состояния (``submit_batch`` проверяет
+        весь пакет до приёма)."""
+        existing = self.accepted.get(message.message_id)
+        if existing is not None:
+            if existing != digest:
+                raise ApplicationError("Message ID reused", non_retryable=True)
+            return  # повтор принятого — ``_accept`` ответит duplicate
+        if self.closed:
+            raise ApplicationError("Session is closing", non_retryable=True)
+        if message.settings_fingerprint:
+            known = self.message_fingerprint or self.start.settings_fingerprint
+            if known and fingerprint_mismatch(
+                message.settings_fingerprint, known
+            ):
+                self._check_fingerprint(message.settings_fingerprint)
 
     def _accept(self, message):
         """Принять сообщение: дедупликация по ID, в идущий ход или в
@@ -758,6 +783,11 @@ class UniversalAgentWorkflow:
         # Continue-As-New (запись истории).
         for old in sorted(self.turn_outcomes, key=int)[:-TURN_OUTCOMES_KEPT]:
             del self.turn_outcomes[old]
+        # Итоги ходов — сразу в том виде, что переживёт Continue-As-New:
+        # ``wait`` до и после нового run видит один и тот же ответ.
+        self.turn_outcomes = dict(
+            _fit_resume(self._session_resume(None)).turn_outcomes
+        )
         self.terminal_outcome = self.executor.last_terminal_outcome
         self.phase = "stopped" if self.stop_requested else "idle"
 
@@ -916,14 +946,9 @@ class UniversalAgentWorkflow:
         )
         self.owner_released = True
 
-    async def _continue(self, start, store):
-        self.phase = "continuing"
-        await workflow.wait_condition(workflow.all_handlers_finished)
-        if self.pending_messages or self.closed:
-            # Пока ждали обработчики, пришёл ввод: сначала обслужить его.
-            self.phase = "idle"
-            return
-        resume = SessionResume(
+    def _session_resume(self, store):
+        """Состояние сессии для Continue-As-New (до ``_fit_resume``)."""
+        return SessionResume(
             human_replies=_recent(self.human_replies),
             reply_receipts=_recent(self.reply_receipts),
             formatted_answer=self.formatted_answer,
@@ -947,7 +972,15 @@ class UniversalAgentWorkflow:
             if store
             else (self.resumed_store[1] if self.resumed_store else None),
         )
-        resume = _fit_resume(resume)
+
+    async def _continue(self, start, store):
+        self.phase = "continuing"
+        await workflow.wait_condition(workflow.all_handlers_finished)
+        if self.pending_messages or self.closed:
+            # Пока ждали обработчики, пришёл ввод: сначала обслужить его.
+            self.phase = "idle"
+            return
+        resume = _fit_resume(self._session_resume(store))
         size = payload_size(asdict(resume))
         if size > ACTIVITY_INPUT_LIMIT:
             # Не уменьшить (принятый ввод не выбросить): сессия продолжается

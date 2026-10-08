@@ -23,6 +23,14 @@ class ExecutionFailure(TurnFailure, RuntimeError):
     """An execution/persistence failure, never model-visible tool feedback."""
 
 
+class PayloadTooLarge(ExecutionFailure):
+    """Запрос не помещается в транспорт durable-исполнения (запись истории).
+
+    Локально такой запрос уходит провайдеру и отклоняется им; кто
+    деградирует на отказе провайдера (сводка при лимите), так же деградирует
+    и здесь."""
+
+
 class InfrastructureFailure(ExecutionFailure):
     """A transport or storage operation could not complete."""
 

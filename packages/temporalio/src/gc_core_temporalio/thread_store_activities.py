@@ -334,7 +334,9 @@ class ThreadStoreActivities:
             expected = base
             if request.meta_delta is not None:
                 # Хранилище получает полную meta, как в локальном режиме.
-                expected = await self._rebuild_meta(store, request, base)
+                expected = await self._rebuild_meta(
+                    store, request, base, drift=not (full or exact)
+                )
                 operation = replace(
                     operation, payload={**operation.payload, "meta": expected}
                 )
@@ -398,9 +400,29 @@ class ThreadStoreActivities:
         key = (request.store_id, request.system_id, request.thread_id)
         return self._metas[key][1]
 
-    async def _rebuild_meta(self, store, request, base):
+    def _foreign_write(self, request) -> bool:
+        """Ревизия хранилища ушла от ожидаемой операцией: в тред писали."""
+        expected = request.operation.expected_revision
+        cached = self._metas.get(
+            (request.store_id, request.system_id, request.thread_id)
+        )
+        return (
+            expected is not None
+            and cached is not None
+            and cached[0][0] != expected
+        )
+
+    async def _rebuild_meta(self, store, request, base, *, drift=False):
         """Полная meta записи: база + разница; тексты по ссылкам — из
-        сообщений операции, иначе из треда."""
+        сообщений операции, иначе из треда.
+
+        ``drift`` — meta хранилища не та, от которой workflow считал разницу.
+        Повтор своей уже записанной операции собирается как есть (разница
+        абсолютна) — хранилище ответит исходной квитанцией. Иначе: ревизия
+        ушла (чужая запись) — сразу ``ThreadStoreConflict``, ядро перечитает
+        тред и повторит, полная meta не нужна; ревизия та же (правка meta без
+        ревизии, ``update_tui``) — разница ложится поверх meta хранилища,
+        чужая правка не теряется, workflow перечитает meta по квитанции."""
         delta = request.meta_delta.get("d")
         messages = {
             message_hash(message): message
@@ -431,9 +453,10 @@ class ThreadStoreActivities:
                 {} if full else base, delta, TextSource(messages.get, base)
             )
         except MetaDeltaError as exc:
-            if full:
-                # Полную meta не собрать из содержимого хранилища: оно
-                # разошлось с workflow — конфликт, ядро перечитает и повторит.
+            if full or (drift and self._foreign_write(request)):
+                # Полную meta не собрать из содержимого хранилища (или в тред
+                # писали): оно разошлось с workflow — конфликт, ядро
+                # перечитает и повторит.
                 raise ThreadStoreConflict(
                     f"Thread meta changed during this run: {exc}"
                 ) from exc
@@ -443,13 +466,15 @@ class ThreadStoreActivities:
         meta = canonical(meta)
         expected = request.meta_delta.get("h")
         if expected is not None and meta_hash(meta) != expected:
-            if full:
+            if full or (drift and self._foreign_write(request)):
                 raise ThreadStoreConflict(
                     "Thread meta changed during this run"
                 )
-            raise MetaBaseMismatch(
-                "Meta треда из разницы не совпала с записанной workflow"
-            )
+            if not drift:
+                raise MetaBaseMismatch(
+                    "Meta треда из разницы не совпала с записанной workflow"
+                )
+            # Ревизия та же: правка workflow поверх чужой правки meta.
         return meta
 
     @activity.defn(name="universal_agent.thread.read_trace")

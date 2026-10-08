@@ -445,3 +445,33 @@ async def test_thread_file_link_is_read_through_the_thread_store(tmp_path):
     denied = json.loads(await tool.acall(path=foreign))
     assert denied["ok"] is False
     assert denied["error"]["type"] == "read_denied"
+
+
+async def test_image_in_the_run_image_store_is_media_wherever_it_lives(
+    tmp_path,
+):
+    """SDK со своим ``FileThreadStore(dir)``: картинки лежат рядом с его тредами,
+    не по конфигу. Охрана считает корнем media хранилище картинок ПРОГОНА —
+    повторный просмотр картинки из истории не получает ``read_denied``."""
+    project = tmp_path / "project"
+    project.mkdir()
+    cfg = {
+        "launch_root": str(project),
+        "security.read_guard": {
+            "enabled": True,
+            "mode": "deny",
+            "allowed_read_roots": [str(project)],
+        },
+    }
+    state = _state()
+    tool = _local_tool(tmp_path, state=state, config=cfg)
+    tool._ctx.image_store = ImageStore.for_threads_dir(
+        str(tmp_path / "sdk-threads")
+    )
+    shot = Path(tool._ctx.image_store.root) / "images" / "shot.png"
+    shot.parent.mkdir(parents=True)
+    shot.write_bytes(_png())
+
+    out = json.loads(await tool.acall(path=str(shot)))
+
+    assert out["ok"] is True, out

@@ -237,7 +237,12 @@ class StoreImageStore:
 
     Тот же интерфейс, что у ``ImageStore``; путь вложения — ссылка
     ``thread-file://…`` (``gc_core.thread_files``). Карман процесса — в
-    памяти: картинка до отправки живёт, пока жив процесс.
+    памяти: картинка до отправки живёт, пока жив процесс. Карманом пользуется
+    только прогон без треда (SDK без ``thread_id``) — в одном процессе; под
+    Temporal у сессии тред есть всегда, и снимки сразу ложатся в хранилище
+    (``snapshot``), так что «stage на одном воркере, commit на другом» не
+    случается. Вложение приложения из ``ImageStore`` (файл на диске)
+    ``commit`` и ``read_for_send`` читают с диска.
     """
 
     root = None
@@ -336,14 +341,26 @@ class StoreImageStore:
     ) -> str:
         """Медиа инструмента (картинка или аудио из ответа MCP) — файлом
         треда; → ссылка ``thread-file://`` для модели."""
-        from gc_core.thread_files import thread_file_uri
+        from gc_core.thread_files import safe_name, thread_file_uri
 
-        path = f"{MEDIA_DIRNAME}/{name}"
+        path = f"{MEDIA_DIRNAME}/{safe_name(name)}"
         self._files.write(system_id, thread_id, path, data)
         return thread_file_uri(system_id, thread_id, path)
 
     def read_for_send(self, att: Attachment) -> bytes | None:
-        data = self.read_uri(att.path)
+        """Байты ссылки ``thread-file://`` или файла на диске (вложение,
+        сделанное приложением через ``ImageStore``, тред из локального режима);
+        хеш сверяется с ``att.id``, как у ``ImageStore``."""
+        from gc_core.thread_files import THREAD_FILE_SCHEME
+
+        if str(att.path).startswith(THREAD_FILE_SCHEME):
+            data = self.read_uri(att.path)
+        else:
+            try:
+                with open(att.path, "rb") as handle:
+                    data = handle.read()
+            except (OSError, TypeError, ValueError):
+                data = None
         return data if data is not None and image_id(data) == att.id else None
 
     def delete_thread_images(self, system_id: str, thread_id: str) -> None:

@@ -350,3 +350,6 @@ def test_abbreviated_own_flags_fail_instead_of_default_config(capsys):
     assert main(["--prof", "acp"]) == 2
     assert "--prof (--profile)" in capsys.readouterr().err
     assert _parse_args(["acp", "--experimental"]).abbreviated == []
+    # Короткие флаги клиента, похожие на начало нашего, — его собственные.
+    for flag in ("--c", "--mod", "--lev", "--pro", "--comp"):
+        assert _parse_args(["acp", flag]).abbreviated == [], flag

@@ -328,7 +328,16 @@ def settings_fingerprint(source: Any) -> dict[str, str]:
     значения (с умолчаниями — явно заданное и умолчание с тем же значением не
     различаются), без закрытых полей; наружу уходят только хэши.
     """
-    settings = settings_of(source)
+    # Нормализация лимитов summary — та же, что при загрузке YAML
+    # (``resolve_paths``): ``AppConfig`` из JSON или кода без неё держит
+    # ``None`` там, где загрузка ставит производные значения (0 и пр.) —
+    # поведение одинаковое, а отпечаток расходился бы.
+    from gc_core.config_modules.editing import editable
+    from gc_core.config_modules.root import _normalize_summary_limits
+
+    edit = editable(settings_of(source))
+    _normalize_summary_limits(edit)
+    settings = edit.result()
     document = _without_local_paths(
         settings.model_dump(
             mode="json", by_alias=True, exclude=settings_exclude_spec()

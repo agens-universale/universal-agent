@@ -417,3 +417,40 @@ def test_worker_only_os_backend_snapshot_round_trips(backend):
     assert "SECRET" not in json.dumps(snapshot.settings)
     restored = settings_from_snapshot(snapshot.settings, snapshot.runtime)
     assert restored.settings.os_backend.kind == backend["kind"]
+
+
+def test_fingerprint_of_yaml_and_plain_settings_match(tmp_path):
+    """Приложение на YAML (``load_settings`` нормализует лимиты summary) и
+    воркер на ``AppConfig`` из JSON или кода (без нормализации, ``None``) с
+    одинаковыми настройками дают один отпечаток; разные настройки — разный."""
+    from gc_core.config import load_settings
+    from gc_core.config_modules import AppConfig
+    from gc_core_temporalio.public_config import (
+        fingerprint_mismatch,
+        settings_fingerprint,
+    )
+
+    config = tmp_path / "config.yml"
+    config.write_text(
+        "agent:\n  model: m\n"
+        "summary:\n  chat_completions_summary_trigger_chars: 50000\n"
+    )
+    yaml = load_settings(str(config)).settings
+
+    def plain(trigger):
+        return AppConfig.model_validate(
+            {
+                "agent": {"model": "m"},
+                "summary": {"chat_completions_summary_trigger_chars": trigger},
+            }
+        )
+
+    assert (
+        fingerprint_mismatch(
+            settings_fingerprint(yaml), settings_fingerprint(plain(50000))
+        )
+        == []
+    )
+    assert fingerprint_mismatch(
+        settings_fingerprint(yaml), settings_fingerprint(plain(60000))
+    ) == ["summary"]

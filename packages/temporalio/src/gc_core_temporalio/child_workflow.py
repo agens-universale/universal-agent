@@ -61,6 +61,9 @@ class UniversalSubagentWorkflow:
         self.pending_messages = []
         self.stopped = False
         self.replies = {}
+        self.refused = set()
+        #: Человек отвечает (``human_input`` родителя); до старта — да.
+        self.human_input = True
         self.signal_tasks = []
 
     def new_id(self, prefix):
@@ -91,7 +94,19 @@ class UniversalSubagentWorkflow:
     def answer_human(self, request_id: str, answer: str):
         self.replies.setdefault(request_id, answer)
 
+    @workflow.signal
+    def refuse_human(self, request_id: str):
+        # Родитель не дал ответа (человека нет, вопрос снят): отказ, а не
+        # вечное ожидание.
+        self.refused.add(request_id)
+
     async def human_request(self, request):
+        if not self.human_input:
+            # Без человека (``human_input: false``) — отказ сразу, как у
+            # родителя: спрашивать его некого.
+            raise HumanRequestInterrupted(
+                "No human answers in this deployment (human_input: false)"
+            )
         request_id = self.new_id("human")
         await self.parent.signal(
             "child_human",
@@ -102,9 +117,13 @@ class UniversalSubagentWorkflow:
             },
         )
         await workflow.wait_condition(
-            lambda: self.stopped or request_id in self.replies
+            lambda: (
+                self.stopped
+                or request_id in self.replies
+                or request_id in self.refused
+            )
         )
-        if self.stopped:
+        if self.stopped or request_id not in self.replies:
             raise HumanRequestInterrupted("Child human request interrupted")
         return self.replies[request_id]
 
@@ -154,6 +173,7 @@ class UniversalSubagentWorkflow:
                 request.start, workflow.info().workflow_id, self.new_id
             )
             operations.child_context = request.child_context
+            self.human_input = request.parent_context.human_input
             operations.resource_owner = request.parent_context.resource_owner
             operations.tool_metadata = request.parent_context.tool_metadata
             if request.parent_context.activity_settings:

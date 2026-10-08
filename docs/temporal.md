@@ -389,9 +389,11 @@ worker = Worker(
   task_queue=…, workflow_id=step_workflow_id(...))`. Сессия с явным
   `workflow_id` подключается к идущему workflow: `send` его не запускает.
 - Тред шага занят дочерним workflow: пока в том же треде идёт сессия или
-  другой шаг, этот отказывает. Закрылся родитель — Temporal по умолчанию
-  снимает ребёнка (`ParentClosePolicy.TERMINATE`), тред освобождается при
-  следующем захвате. Параметры дочернего workflow (`parent_close_policy`,
+  другой шаг, этот отказывает. Закрылся родитель (конец, terminate, таймаут) —
+  ребёнку приходит отмена (`ParentClosePolicy.REQUEST_CANCEL` по умолчанию у
+  `agent_step`), и он сам снимает владение тредом. С явным
+  `parent_close_policy=TERMINATE` тред остаётся занятым до
+  `gc-temporal unlock`. Параметры дочернего workflow (`parent_close_policy`,
   `execution_timeout`, `retry_policy`…) — именованными аргументами
   `agent_step`.
 - Промпт больше 1 МБ в истории — `ApplicationError` типа

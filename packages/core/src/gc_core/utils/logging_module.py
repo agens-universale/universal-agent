@@ -97,9 +97,48 @@ class JsonlFormatter(logging.Formatter):
             payload[key] = value
         if record.exc_info:
             payload["exc"] = self.formatException(record.exc_info)
+        elif record.exc_text:
+            payload["exc"] = record.exc_text
         if self._redactor is not None:
             payload = self._redactor.redact(payload)
         return json.dumps(payload, ensure_ascii=False, default=str)
+
+
+class RedactingFilter(logging.Filter):
+    """Маскировка секретов в САМОЙ записи — до любых обработчиков.
+
+    Форматтеры ядра маскируют только свой вывод (файл, консоль), а запись,
+    всплывшая в корневой ``logging`` (``propagate``) или ушедшая в обработчики
+    приложения (``log_handlers``), оставалась сырой. Фильтр стоит на логгере
+    прогона: ``Logger.handle`` зовёт его раньше всех обработчиков, своих и
+    чужих, поэтому каждый получает уже замаскированную запись.
+    """
+
+    def __init__(self, redactor: Any) -> None:
+        super().__init__()
+        self._redactor = redactor
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        redactor = self._redactor
+        record.msg = redactor.redact(record.getMessage())
+        record.args = None
+        for key, value in list(record.__dict__.items()):
+            if key in _RESERVED_LOGRECORD_KEYS:
+                continue
+            # По имени ключа (``authorization=…``) и по содержимому.
+            record.__dict__[key] = redactor.redact({key: value})[key]
+        if record.exc_info and not record.exc_text:
+            record.exc_text = logging.Formatter().formatException(
+                record.exc_info
+            )
+        # Объект исключения несёт сырой текст: дальше — только замаскированный
+        # ``exc_text`` (его выводит и стандартный ``Formatter``).
+        record.exc_info = None
+        if record.exc_text:
+            record.exc_text = redactor.redact(record.exc_text)
+        if record.stack_info:
+            record.stack_info = redactor.redact(record.stack_info)
+        return True
 
 
 class RedactingTextFormatter(logging.Formatter):
@@ -314,6 +353,8 @@ def create_run_logger(
     from gc_core.security.log_redaction import build_redactor
 
     redactor = build_redactor(logging_cfg.redact_secrets.model_dump())
+    if redactor is not None:
+        logger.addFilter(RedactingFilter(redactor))
 
     fmt = str(logging_cfg.format).strip().lower()
     if fmt == "jsonl":

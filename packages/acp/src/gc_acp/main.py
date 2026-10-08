@@ -222,22 +222,23 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         parse_override_args(list(unknown))
     )
     args.overrides.update(setting_flag_overrides(args))
-    # Сокращение своего флага (``--conf``, ``--prof``) — не флаг клиента:
-    # пропуск запустил бы агента на конфиге по умолчанию.
-    own = [
-        option[2:]
-        for option in parser._option_string_actions
-        if option.startswith("--")
-    ]
+    # Сокращение ``--config``/``--profile`` (``--conf``, ``--prof``) — не флаг
+    # клиента: пропуск запустил бы агента на конфиге по умолчанию. Только эти
+    # два и только от четырёх символов: короткий флаг клиента (``--c``,
+    # ``--mod``) — его собственный, а не наше сокращение.
     args.abbreviated = sorted(
         {
             f"--{name} (--{match})"
             for name in args.foreign_flags
-            for match in own
-            if name != match and match.startswith(name)
+            for match in _CONFIG_FLAGS
+            if len(name) >= 4 and name != match and match.startswith(name)
         }
     )
     return args
+
+
+#: Свои флаги, сокращение которых меняет конфиг запуска.
+_CONFIG_FLAGS = ("config", "profile")
 
 
 def _force_utf8_stdio() -> None:

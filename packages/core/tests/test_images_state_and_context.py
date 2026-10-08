@@ -176,3 +176,28 @@ async def test_embedder_store_with_thread_files_keeps_images_inside(
     assert not (tmp_path / "threads").exists()
     store.reset("sys", "t1")
     assert ctx.image_store.read_for_send(att) is None
+
+
+def test_store_with_thread_files_commits_an_attachment_staged_on_disk(
+    tmp_path,
+):
+    """Документированный путь SDK — ``amake_attachment(ImageStore.for_config(cfg),
+    …)`` — при хранилище тредов с файлами треда: вложение из кармана на диске
+    доезжает в тред, а не теряется (``image_commit_failed``)."""
+    from gc_core.attachments.normalize import normalize_image
+    from gc_core.attachments.store import StoreImageStore
+    from gc_core.thread_files import is_thread_file_uri
+
+    png = (
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+        b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\xcf"
+        b"\xc0\x00\x00\x03\x01\x01\x00\xc9\xfe\x92\xef\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+    staged = ImageStore(str(tmp_path / "images")).stage(
+        normalize_image(png), origin="user", label="x", source="s"
+    )
+    image_store = StoreImageStore(MemoryThreadStore())
+    assert image_store.read_for_send(staged) is not None
+    committed = image_store.commit(staged, "sdk", "t1")
+    assert is_thread_file_uri(committed.path)
+    assert image_store.read_for_send(committed) == normalize_image(png).data

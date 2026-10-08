@@ -18,7 +18,7 @@ from gc_core.agent_store import (
     FileAgentStore,
     agent_store_of,
 )
-from gc_core.execution.contracts import ExecutionFailure
+from gc_core.execution.contracts import ExecutionFailure, PayloadTooLarge
 from gc_core.execution.resources import (
     PromptResourceRequest,
     aload_prompt_resource,
@@ -184,6 +184,15 @@ async def abuild_limit_envelope(state: Any, reason: str, ctx: Any) -> str:
             )
             if raw_summary is None:
                 raw_summary = ""
+        except PayloadTooLarge:
+            # Трасса больше записи durable-истории: как отказ провайдера
+            # локально (контекст такого размера модель не примет) — ход
+            # кончается со своим статусом и пустой сводкой, а не ошибкой хода.
+            logger.warning(
+                "limit_trace_summary skipped for reason=%s: trace too large",
+                reason,
+            )
+            raw_summary = ""
         except ExecutionFailure:
             raise
         except Exception:
