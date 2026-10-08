@@ -5,6 +5,7 @@ from typing import Any, Dict, Iterable, Optional, Tuple
 
 from gc_core.backends.factory import parse_os_backend_kind
 from gc_core.backends.protocol import FsBackend
+from gc_core.backends.runtime_probe import RuntimeUnavailable
 from gc_core.tools.arguments_validation import (
     WrongFunctionArgumentsException,
     annotate_output_with_dropped_arguments,
@@ -651,6 +652,23 @@ def _tool_failure_output(
 
     if not isinstance(call_id, str):
         call_id = None
+
+    if isinstance(exc, RuntimeUnavailable):
+        # Среда не ответила на пробу. Это не баг тула: модели нужен совет
+        # подождать и сдать ход, а не «смени стратегию».
+        log.warning(
+            "runtime unavailable tool=%s call_id=%s",
+            tool_name,
+            call_id,
+        )
+        payload: Dict[str, Any] = {
+            "ok": False,
+            "error": {"type": "execution_failed", "message": str(exc)},
+            "timed_out": exc.timed_out,
+        }
+        if isinstance(tool_name, str) and tool_name:
+            payload["tool"] = tool_name
+        return json.dumps(payload, ensure_ascii=False)
 
     log.exception(
         "apply_tool internal error tool=%s call_id=%s",

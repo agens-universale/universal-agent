@@ -26,6 +26,7 @@ from gc_core.backends.protocol import (
     argv_to_posix_command,
     bound_exec_result,
 )
+from gc_core.backends.runtime_probe import aensure_runtime
 from gc_core.backends.walk_util import FlatWalkMixin
 
 # Встроенная политика ``harbor_exec_init: bashrc``. Неинтерактивный ``bash -c``
@@ -214,6 +215,10 @@ class HarborBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
             cap,
         )
 
+    async def _aprobe(self, command: str, timeout: int) -> ExecResult:
+        """Сырой echo пробы: без повторной пробы и без ``cd``."""
+        return await self._aexec_impl(command, timeout=timeout, probe=False)
+
     async def _aexec_impl(
         self,
         command: str,
@@ -223,12 +228,16 @@ class HarborBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
         env: Optional[dict] = None,
         capture_max_chars: Optional[int] = None,
         exec_init: Optional[str] = None,
+        probe: bool = True,
     ) -> ExecResult:
         """Транспорт. ``exec_init`` — только для канала модели (``aexec``).
 
         Сборка строки — ``build_harbor_shell_command``. Внутренние помощники,
         обход, argv и python зовут транспорт без инициализации: сырой канал.
+        Перед действием — проба суммы. ``probe=False`` только у самой пробы.
         """
+        if probe:
+            await aensure_runtime(self._aprobe, timeout=timeout)
         full = build_harbor_shell_command(
             command, cwd=cwd, env=env, exec_init=exec_init
         )
@@ -272,6 +281,8 @@ class HarborBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
         )
 
     async def _aupload_bytes(self, data: bytes, path: str) -> None:
+        # mkdir и upload_file идут мимо ``_aexec_impl``.
+        await aensure_runtime(self._aprobe)
         with tempfile.NamedTemporaryFile("wb", delete=False) as tmp:
             tmp.write(data)
             tmp_path = Path(tmp.name)
@@ -284,6 +295,7 @@ class HarborBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
             tmp_path.unlink(missing_ok=True)
 
     async def _adownload_bytes(self, path: str) -> bytes:
+        await aensure_runtime(self._aprobe)
         with tempfile.NamedTemporaryFile("wb", delete=False) as tmp:
             tmp_path = Path(tmp.name)
         try:

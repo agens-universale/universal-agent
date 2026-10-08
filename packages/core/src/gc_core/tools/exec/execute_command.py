@@ -1,10 +1,10 @@
-import random
 import re
 from typing import Any, Dict, Optional
 
-from gc_core.backends.async_protocol import (
-    aexec_port,
-    arun_backend_exec_raw,
+from gc_core.backends.async_protocol import aexec_port
+from gc_core.backends.runtime_probe import (
+    RuntimeUnavailable,
+    _probe_failure_message,
 )
 from gc_core.config_modules.agent import (
     DEFAULT_EXEC_TIMEOUT_SEC,
@@ -21,55 +21,6 @@ from gc_core.tools.exec.exec_envelope import (
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 
 _ENV_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
-
-# Потолок пробы, не таймаут команды. Мёртвый демон отвечает сразу, живая
-# сумма тоже; 60 с оставляют запас медленному, но живому docker exec.
-# Слагаемые двузначные и без ведущего нуля: `08` в `$((…))` — восьмеричное.
-_RUNTIME_PROBE_TIMEOUT_SEC = 60
-_RUNTIME_PROBE_NUDGE = (
-    "Runtime connection failed. Wait a few seconds and retry this command. "
-    "If several retries with a wait still fail, report it with turn_finish: "
-    "the environment is down and will not recover in this run."
-)
-_PROBE_COMMAND_RE = re.compile(r"echo \$\(\(([1-9][0-9])\+([1-9][0-9])\)\)")
-
-
-def _probe_terms() -> "tuple[int, int]":
-    return random.randint(10, 99), random.randint(10, 99)
-
-
-def _probe_command(left: int, right: int) -> str:
-    return f"echo $(({left}+{right}))"
-
-
-def probe_total_in_command(command: str) -> "int | None":
-    """Сумма из текста пробы, если команда её содержит. Для подставных бэкендов."""
-    match = _PROBE_COMMAND_RE.search(command or "")
-    if match is None:
-        return None
-    return int(match.group(1)) + int(match.group(2))
-
-
-def _probe_came_back(res: Any, total: int) -> bool:
-    """Среди строк stdout есть ровно сумма, код возврата 0.
-
-    Лишние строки профиля не мешают. Эхо текста команды сумму не содержит,
-    поэтому цитата «command … не выполнена» пробу не проходит.
-    """
-    if getattr(res, "timed_out", False) or res.return_code != 0:
-        return False
-    expect = str(total)
-    stdout = getattr(res, "stdout", None) or ""
-    return any(line.strip() == expect for line in stdout.splitlines())
-
-
-def _probe_failure_message(stdout: str, stderr: str) -> str:
-    detail = "\n".join(
-        part.strip() for part in (stdout, stderr) if part and part.strip()
-    )
-    if detail:
-        return f"{_RUNTIME_PROBE_NUDGE} ({detail})"
-    return _RUNTIME_PROBE_NUDGE
 
 
 def _parse_env_vars(env_vars) -> "tuple[dict[str, str], dict | None]":
@@ -316,6 +267,8 @@ Important Usage Rules:
             return None
         try:
             is_directory = await self._backend.is_dir(cwd_used)
+        except RuntimeUnavailable as exc:
+            return {"type": "execution_failed", "message": str(exc)}
         except OSError as exc:
             if not getattr(self._backend, "is_sandbox", False):
                 raise
@@ -437,9 +390,6 @@ Important Usage Rules:
             self._backend, "supports_background", False
         ):
             return await self._abackground(plan)
-        down = await self._adead_runtime(plan)
-        if down is not None:
-            return down
         if run_in_background:
             return await self._abackground(plan)
         try:
@@ -449,6 +399,8 @@ Important Usage Rules:
                 timeout=plan["timeout"],
                 env=plan["env"],
             )
+        except RuntimeUnavailable as exc:
+            return self._runtime_unavailable(plan, exc)
         except Exception as exc:
             return self._exec_failed(plan, exc)
         return self._finish(res, plan)
@@ -497,6 +449,8 @@ Important Usage Rules:
                 cwd=cwd_used,
                 env=plan["env"],
             )
+        except RuntimeUnavailable as exc:
+            return self._runtime_unavailable(plan, exc)
         except Exception as exc:
             return self._exec_failed(plan, exc)
 
@@ -546,53 +500,17 @@ Important Usage Rules:
             },
         )
 
-    def _probe_failed(self, plan: dict, res: Any, *, stderr: str) -> str:
-        """Суммы нет: оболочка пробу не выполнила. Команду не шлём."""
-        stdout = getattr(res, "stdout", None) or "" if res is not None else ""
+    def _runtime_unavailable(self, plan: dict, exc: RuntimeUnavailable) -> str:
+        """Бэкенд не дошёл до команды: проба суммы не вернулась."""
         return self._result(
             ok=False,
             command=plan["command"],
             cwd=plan["cwd"] or "",
-            exit_code=(
-                -1 if res is None else getattr(res, "return_code", None)
-            ),
-            timed_out=bool(
-                res is not None and getattr(res, "timed_out", False)
-            ),
-            stdout=stdout,
-            stderr=stderr,
-            error={
-                "type": "execution_failed" if res is None else "non_zero_exit",
-                "message": _probe_failure_message(stdout, stderr),
-            },
-        )
-
-    async def _adead_runtime(self, plan: dict) -> "str | None":
-        """Проба суммы в песочнице. ``None`` — оболочка её посчитала, команду можно слать.
-
-        В живом окружении `echo $((a+b))` всегда возвращает сумму. Не вернула —
-        среда не в порядке, и это не разбирается по тексту ошибки. Каталог сюда
-        не входит: `cd` в пробе нет, «нет каталога» отвечает `is_dir` нулём
-        или сам запуск команды. Хост не проверяем. Сырой канал, без профиля.
-        """
-        if not getattr(self._backend, "is_sandbox", False):
-            return None
-        left, right = _probe_terms()
-        try:
-            res = await arun_backend_exec_raw(
-                self._backend,
-                _probe_command(left, right),
-                timeout=_RUNTIME_PROBE_TIMEOUT_SEC,
-            )
-        except Exception as exc:
-            err = str(exc).replace("\n", " ").strip()
-            return self._probe_failed(plan, None, stderr=err)
-        if _probe_came_back(res, left + right):
-            return None
-        return self._probe_failed(
-            plan,
-            res,
-            stderr=getattr(res, "stderr", None) or "",
+            exit_code=-1 if exc.return_code is None else exc.return_code,
+            timed_out=exc.timed_out,
+            stdout=exc.stdout,
+            stderr=exc.stderr,
+            error={"type": "execution_failed", "message": str(exc)},
         )
 
     def _exec_failed(self, plan: dict, exc: Exception) -> str:

@@ -253,7 +253,7 @@ Usage:
         return self._result(
             ok=False,
             return_code=None,
-            timed_out=False,
+            timed_out=bool(getattr(exc, "timed_out", False)),
             stdout="",
             stderr="",
             error={"type": "execution_failed", "message": str(exc)},

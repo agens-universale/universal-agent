@@ -14,10 +14,8 @@ import threading
 
 import pytest
 from gc_core.backends.harbor import HarborBackend
-from gc_core.tools.exec.execute_command import (
-    ExecuteCommand,
-    probe_total_in_command,
-)
+from gc_core.backends.runtime_probe import probe_total_in_command
+from gc_core.tools.exec.execute_command import ExecuteCommand
 from gc_testkit.harbor_fakes import bind_os_backend
 
 
@@ -39,10 +37,10 @@ class _Env:
         self._exc = exc
 
     async def exec(self, command, **kw):
-        self.calls.append((command, kw))
         total = probe_total_in_command(str(command))
         if total is not None:
             return _Res(f"{total}\n")
+        self.calls.append((command, kw))
         if self._exc is not None:
             raise self._exc
         return self._res

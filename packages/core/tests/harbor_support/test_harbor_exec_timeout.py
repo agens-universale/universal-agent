@@ -10,10 +10,8 @@ import threading
 
 import pytest
 from gc_core.backends.harbor import HarborBackend
-from gc_core.tools.exec.execute_command import (
-    ExecuteCommand,
-    probe_total_in_command,
-)
+from gc_core.backends.runtime_probe import probe_total_in_command
+from gc_core.tools.exec.execute_command import ExecuteCommand
 from gc_testkit.harbor_fakes import bind_os_backend
 
 
@@ -25,11 +23,11 @@ class RaisingEnv:
         self.calls = []
 
     async def exec(self, command, **kw):
-        self.calls.append(command)
         # Проба — echo $((a+b)); сам отказ относится к команде модели.
         total = probe_total_in_command(str(command))
         if total is not None:
             return _Res(f"{total}\n")
+        self.calls.append(command)
         raise self.exc
 
 
@@ -62,10 +60,10 @@ class StreamingEnv(RaisingEnv):
             self._callbacks.reset(token)
 
     async def exec(self, command, **kw):
-        self.calls.append(command)
         total = probe_total_in_command(str(command))
         if total is not None:
             return _Res(f"{total}\n")
+        self.calls.append(command)
         for text, stream in self.chunks:
             for cb in self._callbacks.get():
                 await cb(text, stream)

@@ -28,6 +28,7 @@ from gc_core.backends.protocol import (
     FsBackend,
     argv_to_posix_command,
 )
+from gc_core.backends.runtime_probe import aensure_runtime
 from gc_core.backends.walk_util import FlatWalkMixin
 
 #: Потолок на одну файловую операцию (stat, upload, download): зависший
@@ -115,6 +116,15 @@ class RemoteShellBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
         self._discovered_cwd: Optional[str] = None
 
     # --- транспорт ---
+    async def _aprobe(self, command: str, timeout: int) -> ExecResult:
+        """``sh -c`` пробы без повторной пробы и без ``cd``."""
+        return await self._run(
+            command,
+            timeout=timeout,
+            capture_max_chars=self.walk_output_max_chars,
+            probe=False,
+        )
+
     async def _run(
         self,
         shell_command: str,
@@ -122,7 +132,10 @@ class RemoteShellBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
         stdin_text: Optional[str] = None,
         timeout: Optional[int] = None,
         capture_max_chars: int,
+        probe: bool = True,
     ) -> ExecResult:
+        if probe:
+            await aensure_runtime(self._aprobe, timeout=timeout)
         remote = ["sh", "-c", shell_command]
         if self.joins_argv:
             remote = [shlex.join(remote)]

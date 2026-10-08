@@ -1,11 +1,11 @@
 import json
 
 from gc_core.backends.protocol import ExecResult, bound_exec_result
-from gc_core.tools.exec.execute_command import (
-    ExecuteCommand,
+from gc_core.backends.runtime_probe import (
+    RuntimeUnavailable,
     _probe_came_back,
-    probe_total_in_command,
 )
+from gc_core.tools.exec.execute_command import ExecuteCommand
 from gc_testkit.harbor_fakes import bind_os_backend
 
 
@@ -34,29 +34,14 @@ class _RecordingFakeBackend:
         self._dirs = set(dirs or [])
         self._default_cwd = None
         self.is_sandbox = False
-        # Живая проба: echo $((a+b)) возвращает сумму своей строкой.
-        # Мёртвая — тот же отказ, что и у команды (демон не достучался).
-        self.probe_alive = True
-        # Свой ответ пробы, если сценарий не «жива/мертва», а ошибка внутри.
-        self.probe_result = None
+        self.exec_error = None
 
     def exec(self, command, *, cwd=None, timeout=None, env=None):
         self.calls.append(
             {"command": command, "cwd": cwd, "timeout": timeout, "env": env}
         )
-        total = probe_total_in_command(command)
-        if self.is_sandbox and total is not None:
-            if self.probe_result is not None:
-                return self.probe_result
-            if not self.probe_alive:
-                return ExecResult(
-                    stdout=self.res.stdout,
-                    stderr=self.res.stderr,
-                    return_code=1,
-                )
-            return ExecResult(
-                stdout=f"profile banner\n{total}\n", return_code=0
-            )
+        if self.exec_error is not None:
+            raise self.exec_error
         return self.res
 
     async def is_dir(self, path):
@@ -273,12 +258,10 @@ def test_cwd_existing_in_container_is_accepted():
 
 
 def test_primed_default_cwd_skips_is_dir_on_harbor_and_remote():
-    """WORKDIR / remote pwd уже прогрет: мёртвый is_dir не должен врать про cwd.
+    """WORKDIR / remote pwd уже прогрет: повторный is_dir перед командой не нужен.
 
-    Harbor сводит упавший exec к False («Not a directory»). RemoteShell
-    перед командой делает тот же `test -d`. Оба бэкенда отдают путь через
-    `default_cwd()`, и для него проверка пропускается. Живость отвечает
-    проба суммы без `cd`; не сошлась — команду не запускаем.
+    Живость среды проверяет сам бэкенд, до тула. Здесь бэкенд — не Harbor,
+    пробы нет, и отказ команды остаётся отказом команды.
     """
     b = _RecordingFakeBackend(
         stderr="Cannot connect to the Docker daemon at tcp://localhost:2375",
@@ -286,30 +269,45 @@ def test_primed_default_cwd_skips_is_dir_on_harbor_and_remote():
     )
     b._default_cwd = "/app"
     b.is_sandbox = True
-    b.probe_alive = False
     env = json.loads(_tool(b)(command="echo test"))
     assert b.is_dir_calls == []
-    # Проба не делает cd: чужой cwd не должен ронять проверку живости.
-    assert b.calls[0]["cwd"] is None
-    assert probe_total_in_command(b.calls[0]["command"]) is not None
-    assert len(b.calls) == 1
+    assert b.calls == [
+        {"command": "echo test", "cwd": "/app", "timeout": 120, "env": None}
+    ]
     assert env["ok"] is False
     assert env["command"] == "echo test"
     assert env["error"]["type"] == "non_zero_exit"
+    assert env["error"]["message"] == "Command exited with status 1"
     assert "Docker daemon" in env["stderr"]["content"]
+
+
+def test_runtime_unavailable_keeps_the_exec_envelope():
+    """Бэкенд не дошёл до команды: конверт тот же, совет — подождать и сдать ход."""
+    b = _RecordingFakeBackend()
+    b._default_cwd = "/app"
+    b.is_sandbox = True
+    b.exec_error = RuntimeUnavailable(
+        stderr="Cannot connect to the Docker daemon at tcp://localhost:2375",
+        return_code=1,
+    )
+    env = json.loads(_tool(b)(command="echo test"))
+    assert env["ok"] is False
+    assert env["command"] == "echo test"
+    assert env["error"]["type"] == "execution_failed"
     assert env["error"]["message"].startswith("Runtime connection failed.")
     assert "Wait a few seconds and retry" in env["error"]["message"]
     assert "turn_finish" in env["error"]["message"]
     assert "tcp://localhost:2375" in env["error"]["message"]
+    assert "internal_tool_error" not in env["error"]["message"]
 
 
-def test_live_probe_then_runs_the_command():
+def test_live_command_is_the_only_call():
     b = _RecordingFakeBackend(stdout="ok", rc=0)
     b.is_sandbox = True
     b._default_cwd = "/work"
     env = json.loads(_tool(b)(command="echo test"))
-    assert probe_total_in_command(b.calls[0]["command"]) is not None
-    assert b.calls[1]["command"] == "echo test"
+    assert b.calls[0]["command"] == "echo test"
+    assert len(b.calls) == 1
     assert env["ok"] is True
     assert env["stdout"]["content"] == "ok"
 
@@ -335,25 +333,17 @@ def test_command_failure_keeps_status_message():
     assert env["error"]["message"] == "Command exited with status 2"
 
 
-def test_harbor_daemon_text_in_stdout_is_a_connection_failure():
-    """Compose сливает stderr клиента в stdout пробы."""
-    b = _RecordingFakeBackend(
-        stdout=(
-            "Cannot connect to the Docker daemon at tcp://localhost:2375. "
-            "Is the docker daemon running?\n"
-        ),
-        rc=1,
-    )
+def test_probe_timeout_keeps_timed_out_on_the_envelope():
+    b = _RecordingFakeBackend()
+    b._default_cwd = "/app"
     b.is_sandbox = True
-    b.probe_alive = False
+    b.exec_error = RuntimeUnavailable(timed_out=True)
     env = json.loads(_tool(b)(command="echo test"))
-    assert env["error"]["type"] == "non_zero_exit"
+    assert env["ok"] is False
+    assert env["timed_out"] is True
+    assert env["error"]["type"] == "execution_failed"
     assert env["error"]["message"].startswith("Runtime connection failed.")
-    assert "Docker daemon" in env["stdout"]["content"]
-    assert any(
-        probe_total_in_command(c["command"]) is not None for c in b.calls
-    )
-    assert all(c["command"] != "echo test" for c in b.calls)
+    assert "turn_finish" in env["error"]["message"]
 
 
 def test_explicit_cwd_equal_to_primed_default_also_skips_is_dir():
@@ -403,7 +393,7 @@ def test_explicit_cwd_transport_failure_is_runtime_down():
 
 
 def test_deleted_default_cwd_is_the_command_failure():
-    """Проба без cd жива. Стёртый каталог виден уже из запуска команды."""
+    """Стёртый каталог виден из запуска команды, а не из проверки живости."""
     b = _RecordingFakeBackend(
         stderr="bash: line 1: cd: /app: No such file or directory\n",
         rc=1,
@@ -411,43 +401,13 @@ def test_deleted_default_cwd_is_the_command_failure():
     b.is_sandbox = True
     b._default_cwd = "/app"
     env = json.loads(_tool(b)(command="echo test"))
-    assert probe_total_in_command(b.calls[0]["command"]) is not None
-    assert b.calls[0]["cwd"] is None
-    assert b.calls[1]["command"] == "echo test"
-    assert b.calls[1]["cwd"] == "/app"
+    assert b.calls == [
+        {"command": "echo test", "cwd": "/app", "timeout": 120, "env": None}
+    ]
     assert env["error"]["type"] == "non_zero_exit"
     assert env["error"]["message"] == "Command exited with status 1"
     assert "No such file or directory" in env["stderr"]["content"]
     assert "Runtime connection failed" not in env["error"]["message"]
-
-
-def test_probe_without_sum_does_not_run_the_command():
-    """Суммы нет — среда не в порядке, чем бы ни был текст. Команду не шлём."""
-    b = _RecordingFakeBackend(stdout="ok", rc=0)
-    b.is_sandbox = True
-    b._default_cwd = "/app"
-    b.probe_result = ExecResult(stderr="permission denied\n", return_code=1)
-    env = json.loads(_tool(b)(command="echo test"))
-    assert env["ok"] is False
-    assert env["error"]["message"].startswith("Runtime connection failed.")
-    assert "permission denied" in env["error"]["message"]
-    assert "turn_finish" in env["error"]["message"]
-    assert all(c["command"] != "echo test" for c in b.calls)
-
-
-def test_probe_timeout_is_a_failed_probe():
-    b = _RecordingFakeBackend()
-    b.is_sandbox = True
-    b._default_cwd = "/app"
-    b.probe_result = ExecResult(
-        stdout="", stderr="", return_code=None, timed_out=True
-    )
-    env = json.loads(_tool(b)(command="echo test"))
-    assert env["ok"] is False
-    assert env["timed_out"] is True
-    assert env["error"]["message"].startswith("Runtime connection failed.")
-    assert "turn_finish" in env["error"]["message"]
-    assert all(c["command"] != "echo test" for c in b.calls)
 
 
 def test_is_dir_without_answer_is_a_failed_probe():

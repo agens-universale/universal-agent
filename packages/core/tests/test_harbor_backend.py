@@ -6,6 +6,7 @@ import threading
 
 import pytest
 from gc_core.backends.harbor import HarborBackend, build_harbor_shell_command
+from gc_core.backends.runtime_probe import RuntimeUnavailable, probe_stdout
 from gc_core.backends.protocol import FsBackend
 
 
@@ -30,6 +31,14 @@ def _user_shell(command, *, cwd=None, env=None):
     )
 
 
+def _probe_result(command):
+    """Живой ответ пробы, если команда — она. Иначе ``None``."""
+    hit = probe_stdout(command)
+    if hit is None:
+        return None
+    return FakeExecResult(stdout=hit, return_code=0)
+
+
 class FakeExecResult:
     def __init__(self, stdout="", stderr="", return_code=0, timed_out=False):
         self.stdout, self.stderr, self.return_code = (
@@ -48,6 +57,10 @@ class FakeEnv:
         self.downloaded = []
 
     async def exec(self, command, **kw):
+        # Проба не попадает в calls: тесты сверяют команды действия.
+        hit = probe_stdout(command)
+        if hit is not None:
+            return FakeExecResult(stdout=hit, return_code=0)
         self.calls.append(command)
         if command.startswith("if test "):
             # Проверки существования отвечают явными 0/1 (см. PosixShellFsMixin._test).
@@ -122,6 +135,9 @@ async def test_is_file_reads_shell_answer_and_raises_when_backend_is_down(
     }
 
     async def exec_answer(command, **kw):
+        hit = probe_stdout(command)
+        if hit is not None:
+            return FakeExecResult(stdout=hit, return_code=0)
         env.calls.append(command)
         if command in answers:
             return answers[command]
@@ -153,6 +169,9 @@ async def test_is_dir_reads_shell_answer_and_raises_when_backend_is_down(
     }
 
     async def exec_answer(command, **kw):
+        hit = probe_stdout(command)
+        if hit is not None:
+            return FakeExecResult(stdout=hit, return_code=0)
         env.calls.append(command)
         if command in answers:
             return answers[command]
@@ -184,6 +203,9 @@ async def test_exec_bounds_large_stdout_to_capture_cap(loop_in_thread):
     huge = "X" * 1000
 
     async def big_exec(command, **kw):
+        probed = _probe_result(command)
+        if probed is not None:
+            return probed
         env.calls.append(command)
         return FakeExecResult(stdout=huge, return_code=0)
 
@@ -203,6 +225,9 @@ async def test_exec_per_call_capture_max_overrides_tool_cap(loop_in_thread):
     huge = "X" * 1000
 
     async def big_exec(command, **kw):
+        probed = _probe_result(command)
+        if probed is not None:
+            return probed
         return FakeExecResult(stdout=huge, return_code=0)
 
     env.exec = big_exec
@@ -253,6 +278,9 @@ async def test_append_creates_file_if_missing(loop_in_thread):
     # exists() -> exec("test -e ...") returns rc 0 by default FakeEnv.exec, so
     # simulate missing file via a custom exec that fails "test -e" but succeeds otherwise.
     async def fake_exec(command, **kw):
+        probed = _probe_result(command)
+        if probed is not None:
+            return probed
         env.calls.append(command)
         if command.startswith("test -e"):
             return FakeExecResult(stdout="", return_code=1)
@@ -270,6 +298,9 @@ async def test_append_concatenates_existing_content(loop_in_thread):
     uploaded_payloads = []
 
     async def fake_exec(command, **kw):
+        probed = _probe_result(command)
+        if probed is not None:
+            return probed
         env.calls.append(command)
         return FakeExecResult(stdout=f"ran:{command}", return_code=0)
 
@@ -475,6 +506,9 @@ async def test_harbor_write_bytes_preserves_cp1251(loop_in_thread):
 
 def _make_exec_returning(env, stdout, return_code=0):
     async def fake_exec(command, **kw):
+        hit = probe_stdout(command)
+        if hit is not None:
+            return FakeExecResult(stdout=hit, return_code=0)
         env.calls.append(command)
         return FakeExecResult(stdout=stdout, return_code=return_code)
 
@@ -485,6 +519,9 @@ async def test_exec_propagates_timed_out_from_environment(loop_in_thread):
     env = FakeEnv()
 
     async def timed_exec(command, **kw):
+        probed = _probe_result(command)
+        if probed is not None:
+            return probed
         env.calls.append(command)
         return FakeExecResult(
             stdout="partial", stderr="", return_code=None, timed_out=True
@@ -505,6 +542,9 @@ async def test_read_head_bytes_uses_head_not_full_file(loop_in_thread):
     raw = b"hel"
 
     async def head_exec(command, **kw):
+        probed = _probe_result(command)
+        if probed is not None:
+            return probed
         env.calls.append(command)
         if "head -c" in command and "base64" in command:
             # Default GNU wrap (76 cols). ``-w 0`` is a one-line blob and
@@ -538,6 +578,9 @@ async def test_read_head_bytes_append_sample_not_cut_by_tool_60k(
     assert len(encoded) > DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS
 
     async def head_exec(command, **kw):
+        probed = _probe_result(command)
+        if probed is not None:
+            return probed
         env.calls.append(command)
         if "head -c" in command and "base64" in command:
             return FakeExecResult(stdout=encoded, return_code=0)
@@ -551,6 +594,9 @@ async def test_read_head_bytes_append_sample_not_cut_by_tool_60k(
     assert sample == raw
 
     async def huge_tool(command, **kw):
+        probed = _probe_result(command)
+        if probed is not None:
+            return probed
         return FakeExecResult(stdout="Y" * 100_000, return_code=0)
 
     env.exec = huge_tool
@@ -567,6 +613,9 @@ async def test_read_head_bytes_raises_if_capture_ceiling_hit(loop_in_thread):
     encoded = base64.b64encode(raw).decode("ascii")
 
     async def head_exec(command, **kw):
+        probed = _probe_result(command)
+        if probed is not None:
+            return probed
         if "head -c" in command and "base64" in command:
             return FakeExecResult(stdout=encoded, return_code=0)
         return FakeExecResult(stdout="", return_code=1)
@@ -586,6 +635,9 @@ async def test_read_head_bytes_preserves_non_utf8_bytes(loop_in_thread):
     raw = bytes([0xCF, 0xF0, 0xE8, 0xE2, 0xE5, 0xF2, 0x00, 0xFF])
 
     async def head_exec(command, **kw):
+        probed = _probe_result(command)
+        if probed is not None:
+            return probed
         env.calls.append(command)
         if "head -c" in command and "base64" in command:
             return FakeExecResult(
@@ -788,6 +840,9 @@ async def test_workspace_root_is_the_container_workdir(loop_in_thread):
 
     class _PwdEnv(FakeEnv):
         async def exec(self, command, **kw):
+            probed = _probe_result(command)
+            if probed is not None:
+                return probed
             self.calls.append(command)
             if command == "pwd":
                 return FakeExecResult(stdout="/testbed\n", return_code=0)
@@ -802,6 +857,80 @@ async def test_workspace_root_is_the_container_workdir(loop_in_thread):
         "pwd — внутренний вызов: сырой канал, без профиля"
     )
     assert build_execution_workspace(backend, {}).root == "/testbed"
+
+
+async def test_probe_runs_before_the_command_and_does_not_cd(loop_in_thread):
+    """Сумма — первый exec, без cd. Команда модели идёт следом."""
+    env = FakeEnv()
+    recorded = []
+
+    async def exec_record(command, **kw):
+        recorded.append(command)
+        probed = _probe_result(command)
+        if probed is not None:
+            return probed
+        return FakeExecResult(stdout="ok\n", return_code=0)
+
+    env.exec = exec_record
+    backend = HarborBackend(env, loop_in_thread, exec_init="bashrc")
+    result = await backend.aexec("echo hi", cwd="/work")
+    assert result.stdout == "ok\n"
+    assert probe_stdout(recorded[0]) is not None
+    assert "cd " not in recorded[0]
+    assert recorded[1] == _user_shell("echo hi", cwd="/work")
+
+
+async def test_failed_probe_does_not_run_the_command(loop_in_thread):
+    env = FakeEnv()
+    recorded = []
+
+    async def exec_dead(command, **kw):
+        recorded.append(command)
+        return FakeExecResult(stderr="permission denied\n", return_code=1)
+
+    env.exec = exec_dead
+    backend = HarborBackend(env, loop_in_thread)
+    with pytest.raises(
+        RuntimeUnavailable, match="Runtime connection failed"
+    ) as err:
+        await backend.aexec("echo hi")
+    assert "permission denied" in str(err.value)
+    assert "turn_finish" in str(err.value)
+    assert len(recorded) == 1
+    assert probe_stdout(recorded[0]) is not None
+
+
+async def test_probe_timeout_is_runtime_unavailable(loop_in_thread):
+    env = FakeEnv()
+
+    async def exec_slow(command, **kw):
+        return FakeExecResult(return_code=None, timed_out=True)
+
+    env.exec = exec_slow
+    backend = HarborBackend(env, loop_in_thread)
+    with pytest.raises(RuntimeUnavailable) as err:
+        await backend.aexec("echo hi")
+    assert err.value.timed_out is True
+    assert "turn_finish" in str(err.value)
+
+
+async def test_upload_probes_before_mkdir(loop_in_thread):
+    env = FakeEnv()
+    recorded = []
+
+    async def exec_record(command, **kw):
+        recorded.append(command)
+        probed = _probe_result(command)
+        if probed is not None:
+            return probed
+        return FakeExecResult(stdout="", return_code=0)
+
+    env.exec = exec_record
+    backend = HarborBackend(env, loop_in_thread)
+    await backend.write_bytes("/work/a.bin", b"x")
+    assert probe_stdout(recorded[0]) is not None
+    assert recorded[1].startswith("mkdir -p ")
+    assert env.uploaded_bytes == [b"x"]
 
 
 def test_env_prefix_rejects_non_identifier_names():
