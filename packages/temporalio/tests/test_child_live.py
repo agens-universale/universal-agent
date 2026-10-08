@@ -246,6 +246,7 @@ async def test_native_child_model_tools_input_human_and_replay(
         )
         core = AppConfig.model_validate(model_config)
     config = WorkerConfig(
+        human_input=True,  # вопрос ребёнка человеку
         workflow_queue="child-test",
         model_queue="child-test",
         resource_queue="child-test",

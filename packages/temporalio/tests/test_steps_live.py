@@ -30,7 +30,9 @@ async def test_agent_step_inside_a_business_workflow(
     )
     store = DurableFileThreadStore(str(tmp_path / "threads"))
     plugin = AgentPlugin(
-        {"shop": agent_settings(url, tmp_path)}, thread_store=store
+        {"shop": agent_settings(url, tmp_path)},
+        thread_store=store,
+        human_input=True,  # шаг задаёт вопрос, тест отвечает
     )
     async with await WorkflowEnvironment.start_local(
         dev_server_existing_path=temporal_cli()

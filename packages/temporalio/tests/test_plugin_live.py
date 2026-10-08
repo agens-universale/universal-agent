@@ -343,6 +343,43 @@ def test_fingerprint_ignores_process_local_paths_and_ui_sections(tmp_path):
     assert settings_fingerprint(changed) != settings_fingerprint(first)
 
 
+async def test_without_human_the_turn_never_waits_for_an_answer(
+    tmp_path,
+    monkeypatch,
+    scripted_http,  # noqa: F811
+):
+    """По умолчанию человека нет: инструмента вопроса у агента нет, и даже
+    если модель позовёт его, ход идёт дальше — сессия не встаёт в
+    ``waiting_human``."""
+    monkeypatch.chdir(tmp_path)
+    url, requests, script = scripted_http
+    script.extend(
+        [
+            [call("ask", "turn_ask_human", {"question": "Какой адрес?"})],
+            [finish("done")],
+        ]
+    )
+    plugin = AgentPlugin(
+        {"shop": agent_settings(url, tmp_path)},
+        thread_store=DurableFileThreadStore(str(tmp_path / "threads")),
+    )
+    async with await WorkflowEnvironment.start_local(
+        dev_server_existing_path=temporal_cli()
+    ) as env:
+        async with Worker(env.client, task_queue="shop", plugins=[plugin]):
+            session = AgentSession(
+                env.client, agent="shop", thread_id="t10", task_queue="shop"
+            )
+            answer = await asyncio.wait_for(session.ask("сделай"), 60)
+            await session.close()
+    assert "done" in json.dumps(answer, ensure_ascii=False)
+    tools = {
+        tool.get("function", {}).get("name")
+        for tool in requests[0].get("tools", [])
+    }
+    assert "turn_ask_human" not in tools
+
+
 async def test_durable_send_and_stop_follow_local_semantics(
     tmp_path,
     monkeypatch,

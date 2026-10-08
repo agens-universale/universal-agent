@@ -495,3 +495,38 @@ async def test_store_without_thread_files_disables_view_image(
         stop = provider._profiles["test"][1].settings.agent.stop_tools
         assert ("fs_view_image" in stop) is disabled, type(store)
         await provider.aclose()
+
+
+async def test_worker_without_human_has_no_ask_tool_and_no_ask_modes(
+    tmp_path, monkeypatch
+):
+    """По умолчанию человека нет (``human_input: false``): инструмента
+    вопроса у агента нет, режим ``ask`` охраны — ``deny``, явный ``allow``
+    профиля не трогается. С человеком — профиль как есть."""
+    monkeypatch.chdir(tmp_path)
+    core = AppConfig.model_validate(
+        {
+            "agent": {"use_local_subagents": False},
+            "logging": {"save_logs": False},
+            "security": {"url_policy": {"mode": "allow"}},
+        }
+    )
+    pinned = AgentProfile(workspace=str(tmp_path), core=core)
+    store = DurableFileThreadStore(str(tmp_path / "threads"))
+    for human_input, expected in ((False, "deny"), (True, "ask")):
+        provider = ContextProvider(
+            profiles={"test": pinned},
+            stores={"files": store},
+            resource_host=WorkerResourceHost("test"),
+            human_input=human_input,
+        )
+        settings = provider._profiles["test"][1].settings
+        security = settings.security
+        assert security.write_guard.mode == expected
+        assert security.read_guard.mode == expected
+        assert security.command_moderation.mode == expected
+        assert security.url_policy.mode == "allow"
+        assert ("turn_ask_human" in settings.agent.stop_tools) is (
+            not human_input
+        )
+        await provider.aclose()

@@ -101,6 +101,7 @@ def build_runtime(config, *, stores=None, log_handlers=()):
         resource_host=WorkerResourceHost(config.worker_id),
         state_paths=paths,
         log_handlers=log_handlers,
+        human_input=config.human_input,
     )
     native = AgentActivities(
         context_provider=provider,

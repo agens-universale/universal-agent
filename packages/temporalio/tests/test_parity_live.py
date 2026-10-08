@@ -510,6 +510,8 @@ async def test_actual_http_local_native_parity(
     config = WorkerConfig.model_validate(
         {
             "workflow_queue": "parity",
+            # Сценарии с вопросом человеку и подтверждениями.
+            "human_input": True,
             "resource_queue": "parity",
             "model_queue": "parity",
             "state_dir": str(tmp_path),

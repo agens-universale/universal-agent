@@ -87,6 +87,7 @@ class AgentPlugin(SimplePlugin):
         thread_store_activity: Any = None,
         tool_activities: Mapping[str, Any] | None = None,
         log_handlers: Any = (),
+        human_input: bool = False,
         _activities: ActivitiesConfig | None = None,
     ) -> None:
         stores = dict(thread_stores or {})
@@ -108,6 +109,7 @@ class AgentPlugin(SimplePlugin):
         )
         self.config = WorkerConfig(
             worker_id=worker_id or f"{socket.gethostname()}-{os.getpid()}",
+            human_input=human_input,
             thread_stores={},
             profiles={
                 name: _profile(spec, root, default_store)

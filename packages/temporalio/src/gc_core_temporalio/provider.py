@@ -17,7 +17,10 @@ from gc_core.config_modules.auth import build_auth_connector
 from gc_core.config_modules.env_interpolation import (
     resolve_env_placeholders_strict,
 )
-from gc_core.constants.tool_names import FS_VIEW_IMAGE_NAME
+from gc_core.constants.tool_names import (
+    ASK_HUMAN_TOOL_NAME,
+    FS_VIEW_IMAGE_NAME,
+)
 from gc_core.context_preparation import settings_from_snapshot
 from gc_core.execution.contracts import ExecutionFailure
 from gc_core.execution.resource_host import WorkerResourceHost
@@ -123,6 +126,38 @@ def code_fingerprint() -> str:
     return digest.hexdigest()[:12]
 
 
+def _without_human(settings):
+    """Профиль для работы без человека: инструмента вопроса нет, режим
+    ``ask`` охраны — ``deny`` (отказ с причиной, модель ищет другой путь),
+    иначе ход ждал бы ответа вечно. Явные ``allow``/``deny`` не трогаются."""
+    security = settings.security
+
+    def no_ask(section, field="mode"):
+        value = getattr(section, field)
+        if value != "ask":
+            return section
+        return section.model_copy(update={field: "deny"})
+
+    read_guard = no_ask(no_ask(security.read_guard), "binary_read_policy")
+    security = security.model_copy(
+        update={
+            "write_guard": no_ask(security.write_guard),
+            "read_guard": read_guard,
+            "url_policy": no_ask(security.url_policy),
+            "command_moderation": no_ask(security.command_moderation),
+        }
+    )
+    stop = list(settings.agent.stop_tools)
+    if ASK_HUMAN_TOOL_NAME not in stop:
+        stop.append(ASK_HUMAN_TOOL_NAME)
+    return settings.model_copy(
+        update={
+            "security": security,
+            "agent": settings.agent.model_copy(update={"stop_tools": stop}),
+        }
+    )
+
+
 class WorkerConfig(BaseModel):
     model_config = ConfigDict(
         extra="forbid", frozen=True, hide_input_in_errors=True
@@ -142,6 +177,10 @@ class WorkerConfig(BaseModel):
     #: Таймауты и повторы activities по уровням (``activity_config``):
     #: сбои провайдера модели по умолчанию повторяются без ограничения.
     activities: ActivitiesConfig = Field(default_factory=ActivitiesConfig)
+    #: Отвечает ли человек на вопросы агента (``turn_ask_human``,
+    #: подтверждения охраны). По умолчанию нет — агент работает автономно:
+    #: инструмента вопроса у него нет, режим ``ask`` охраны — ``deny``.
+    human_input: bool = False
     #: Worker Versioning (по умолчанию выключен).
     versioning: WorkerVersioningConfig = Field(
         default_factory=WorkerVersioningConfig
@@ -237,11 +276,14 @@ class ContextProvider:
         resource_host,
         state_paths=(),
         log_handlers=(),
+        human_input=False,
     ):
         self.resource_host: WorkerResourceHost = resource_host
         self.stores = dict(stores)
         #: Обработчики логов прогона от приложения (``AgentPlugin``).
         self.log_handlers = list(log_handlers or ())
+        #: Человек отвечает на вопросы агента (``WorkerConfig.human_input``).
+        self.human_input = bool(human_input)
         self._profiles = {}
         #: Профиль → отпечаток его настроек (``settings_fingerprint``).
         self._fingerprints = {}
@@ -330,6 +372,8 @@ class ContextProvider:
                         )
                     }
                 )
+            if not human_input:
+                settings = _without_human(settings)
             # Журнал правок агента (agent_edits) в durable-исполнении не
             # ведётся при любом профиле: его читают только дифф, сводка хода
             # и откат в TUI, а на воркере он стоил бы снимков файлов и

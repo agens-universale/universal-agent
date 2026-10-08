@@ -127,6 +127,9 @@ class PreparedContext:
     prompts: PreparedPrompts | None = None
     #: Таймауты и повторы activities воркера (``activity_config``).
     activity_settings: dict[str, Any] = field(default_factory=dict)
+    #: Есть ли человек, который ответит (``WorkerConfig.human_input``): нет —
+    #: запрос к человеку сразу получает отказ, а не вечное ожидание.
+    human_input: bool = True
 
 
 @dataclass

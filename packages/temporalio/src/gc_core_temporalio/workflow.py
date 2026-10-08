@@ -481,6 +481,17 @@ class AgentWorkflow:
         self.human_replies[request_id] = answer
 
     async def human_request(self, request, *, flush=True, abandon=None):
+        prepared = getattr(self.operations, "prepared", None)
+        if prepared is not None and not prepared.human_input:
+            # Человека в этом развёртывании нет (``human_input: false``):
+            # отказ сразу — подтверждение не дано, вопрос без ответа, — а не
+            # вечное ожидание ответа, которого не будет.
+            workflow.logger.warning(
+                "Human request %s refused: human_input is off", request.kind
+            )
+            raise HumanRequestInterrupted(
+                "No human answers in this deployment (human_input: false)"
+            )
         # Ожидание может длиться часами: шаги и сам вопрос — в тред до него.
         # Вопрос ребёнка приходит сигналом, параллельно с основным циклом:
         # там тред родителя не трогаем, он запишется в конце его хода.

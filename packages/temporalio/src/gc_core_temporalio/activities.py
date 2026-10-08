@@ -341,6 +341,7 @@ class AgentActivities:
             load_run_prompts, prompts_request, logger=ctx.logger
         )
         return PreparedContext(
+            human_input=getattr(self.context_provider, "human_input", True),
             context=PreparedRunContext.from_context(
                 ctx, settings=public.settings, runtime=public.runtime
             ),

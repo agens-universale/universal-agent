@@ -116,6 +116,8 @@ async def runtime(tmp_path, url, *, core_extra=None):
     config = WorkerConfig.model_validate(
         {
             "workflow_queue": "native-controls",
+            # Сценарии с вопросом человеку и подтверждениями.
+            "human_input": True,
             "model_queue": "native-controls",
             "resource_queue": "native-controls",
             "state_dir": str(tmp_path),
