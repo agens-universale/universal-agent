@@ -55,6 +55,12 @@ class RuntimeUnavailable(Exception):
         super().__init__(_probe_failure_message(self.stdout, self.stderr))
 
 
+def reraise_runtime_unavailable(exc: BaseException) -> None:
+    """Отказ среды не прятать в соседней ветке ``except Exception``."""
+    if isinstance(exc, RuntimeUnavailable):
+        raise exc
+
+
 def _probe_terms() -> tuple[int, int]:
     return random.randint(10, 99), random.randint(10, 99)
 

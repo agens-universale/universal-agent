@@ -4,6 +4,7 @@ import os
 from typing import Any, Dict, List, Optional
 
 from gc_core.backends.protocol import WalkOutputTooLargeError
+from gc_core.backends.runtime_probe import RuntimeUnavailable
 from gc_core.loop_detector.constants import READ_PROFILE, loop_warn_on_repeat
 from gc_core.security.path_policy import (
     _extract_config_dict,
@@ -382,6 +383,8 @@ Examples:
                 False,
                 {"type": "permission_denied", "message": str(e)},
             )
+        except RuntimeUnavailable:
+            raise
         except Exception as e:
             return (
                 result,
@@ -418,6 +421,8 @@ Examples:
             raise PermissionError(
                 f"Permission denied: cannot list contents of '{root_path}'"
             )
+        except RuntimeUnavailable:
+            raise
         except Exception as e:
             raise RuntimeError(
                 f"Failed to list directory '{root_path}': {e!s}"

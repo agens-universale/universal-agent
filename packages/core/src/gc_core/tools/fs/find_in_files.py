@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from gc_core.backends.protocol import WalkOutputTooLargeError
+from gc_core.backends.runtime_probe import RuntimeUnavailable
 from gc_core.backends.walk_util import WalkEntry
 from gc_core.config_modules.fs_tools import (
     FsFindInFilesConfig,
@@ -2054,6 +2055,8 @@ class FindInFiles(AbstractSimpleTool):
                 )
         except PermissionError as exc:
             return self._error("permission_denied", message=str(exc))
+        except RuntimeUnavailable:
+            raise
         except Exception as exc:
             return self._error("unexpected_error", message=str(exc))
 
@@ -2232,6 +2235,8 @@ class FindInFiles(AbstractSimpleTool):
             return [], 0, self._error("walk_too_large", message=str(exc))
         except PermissionError as exc:
             return [], 0, self._error("permission_denied", message=str(exc))
+        except RuntimeUnavailable:
+            raise
         except Exception as exc:
             return [], 0, self._error("unexpected_error", message=str(exc))
         return candidates, files_too_large, None

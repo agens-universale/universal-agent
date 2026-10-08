@@ -198,6 +198,79 @@ def test_backend_timed_out_sets_timeout_envelope():
     assert env["error"]["message"] == "Execution timed out after 1 seconds"
 
 
+def test_runtime_unavailable_keeps_streams_and_code():
+    """Проба не дошла до кода: конверт тот же, потоки и код исключения на месте."""
+
+    class _Dead(_RecordingFakeBackend):
+        def run_python(
+            self,
+            code,
+            *,
+            cwd=None,
+            timeout=None,
+            env=None,
+            capture_max_chars=None,
+        ):
+            from gc_core.backends.runtime_probe import RuntimeUnavailable
+
+            raise RuntimeUnavailable(
+                stdout="banner\n",
+                stderr="docker down",
+                return_code=1,
+                timed_out=True,
+            )
+
+    env = json.loads(_tool(_Dead())(code="x"))
+    assert env["tool"] == "exec_python"
+    assert env["ok"] is False
+    assert env["return_code"] == 1
+    assert env["timed_out"] is True
+    assert env["stdout"]["content"] == "banner\n"
+    assert env["stderr"]["content"] == "docker down"
+    assert env["error"]["type"] == "execution_failed"
+    assert env["error"]["message"].startswith("Runtime connection failed.")
+    assert "turn_finish" in env["error"]["message"]
+    assert "docker down" in env["error"]["message"]
+
+
+def test_explicit_cwd_runtime_unavailable_stays_in_the_envelope():
+    """Чужой cwd: отказ is_dir остаётся конвертом exec_python, не slim JSON apply_tool."""
+    from gc_core.backends.runtime_probe import RuntimeUnavailable
+
+    b = _RecordingFakeBackend()
+
+    async def dead(path):
+        raise RuntimeUnavailable(stderr="docker down", return_code=1)
+
+    b.is_dir = dead
+    env = json.loads(_tool(b)(code="x", cwd="/tmp/other"))
+    assert env["tool"] == "exec_python"
+    assert "return_code" in env
+    assert env["ok"] is False
+    assert env["error"]["type"] == "execution_failed"
+    assert env["error"]["type"] != "cwd_invalid"
+    assert env["error"]["message"].startswith("Runtime connection failed.")
+    assert "docker down" in env["error"]["message"]
+    assert b.calls == []
+
+
+def test_explicit_cwd_without_answer_is_a_failed_probe():
+    """Нет ответа 0/1 у is_dir — тот же надж, что у exec_command."""
+    b = _RecordingFakeBackend()
+
+    async def denied(path):
+        raise OSError("Permission denied")
+
+    b.is_dir = denied
+    env = json.loads(_tool(b)(code="x", cwd="/tmp/other"))
+    assert env["tool"] == "exec_python"
+    assert env["error"]["type"] == "execution_failed"
+    assert env["error"]["message"].startswith("Runtime connection failed.")
+    assert "Permission denied" in env["error"]["message"]
+    assert "Working directory is not" not in env["error"]["message"]
+    assert b.calls == []
+
+
 def test_backend_exception_returns_execution_failed():
     class _RaisingBackend(_RecordingFakeBackend):
         def run_python(
