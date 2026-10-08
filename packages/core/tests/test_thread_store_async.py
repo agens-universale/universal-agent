@@ -395,7 +395,7 @@ async def test_compaction_keeps_the_trace_on_a_store_without_replace_messages(
 
     `replace_messages` в контракт НЕ входит: он объявлен умолчанием базы, а
     `CONTRACT_METHODS` собираются из абстрактных методов. Хранилище, принятое
-    «по сигнатурам» (законный путь, см. docs/thread-store.md), этого метода не
+    «по сигнатурам» (законный путь, см. docs/sdk/thread-store-contract.md), этого метода не
     имеет — и компакция шла парой `areset` + `aappend_messages`, где `reset` по
     контракту сносит тред вместе с трассой. Терялась она молча и каждый раз, а
     конформанс оставался зелёным.

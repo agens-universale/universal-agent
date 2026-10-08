@@ -151,7 +151,7 @@ answer = await AgentExecutor(ctx).arun(
   поверхность для встраивающего с синхронным хранилищем; ядро её не зовёт — оно
   ходит через `a`-формы и адаптер `thread_store_async`. Убрать её значило бы
   отменить обещание «своё хранилище можно синхронное», ради которого контракт и
-  задуман (см. `docs/thread-store.md`). Рядом стоит `AsyncThreadStoreBase` для
+  задуман (см. `docs/sdk/thread-store-contract.md`). Рядом стоит `AsyncThreadStoreBase` для
   встраивающего с `redis.asyncio` или `asyncpg` — это ВТОРОЙ контракт, а не
   двойник первого.
 
@@ -488,12 +488,12 @@ agent = await AsyncAgent.create(cfg, thread_store=MyDbStore())
 
 Всё остальное — одиннадцать методов, восемь свойств, которые легко нарушить,
 конформанс-набор, таблица лага для синхронного сетевого клиента — вынесено в
-отдельный документ: **[thread-store.md](thread-store.md)**.
+отдельный документ: **[sdk/thread-store-contract.md](sdk/thread-store-contract.md)**; руководство — [sdk/thread-store.md](sdk/thread-store.md).
 
 Промпты, AGENTS.md, скиллы и субагенты — общее для всех тредов агента — дают
 другое хранилище, **хранилище агента**:
 `AsyncAgent.create(settings, agent_store=...)`. По умолчанию — файлы по путям
-конфига, как раньше. Подробно: **[agent-store.md](agent-store.md)**.
+конфига, как раньше. Подробно: **[sdk/agent-store.md](sdk/agent-store.md)**.
 
 ## Хранилище с асинхронным клиентом
 
