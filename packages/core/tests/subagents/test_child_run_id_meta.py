@@ -6,6 +6,7 @@ import json
 from types import SimpleNamespace
 
 from gc_core.tools.subagents.runner import SubagentRunner
+from gc_core.summarize.config import resolve_summary_limits
 from gc_core.usage.account import UsageAccount
 from gc_testkit import as_coro
 
@@ -65,8 +66,11 @@ def _wire(monkeypatch, runner, child, *, run_id="run-abc"):
     monkeypatch.setattr(
         runner_mod, "subagent_thread_memory_bootstrap_text", lambda cfg, mf: ""
     )
+    # Сжатие у ребёнка выключено: пороги нулевые (координатор — no-op).
     monkeypatch.setattr(
-        runner_mod, "parse_summary_trigger_chars", lambda cfg: 0
+        runner_mod,
+        "resolve_summary_limits_for_router",
+        lambda cfg, router, **kwargs: resolve_summary_limits({}),
     )
 
     async def _create(*a, **k):
