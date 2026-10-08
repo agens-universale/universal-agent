@@ -91,6 +91,9 @@ class SQLiteThreadStore(SQLiteDurableOperations, ThreadStoreBase):
                 CREATE TABLE IF NOT EXISTS thread_archives (
                     system TEXT, thread TEXT, suffix TEXT, messages TEXT, meta TEXT,
                     PRIMARY KEY(system,thread,suffix));
+                CREATE TABLE IF NOT EXISTS thread_files (
+                    system TEXT, thread TEXT, name TEXT, data BLOB,
+                    PRIMARY KEY(system,thread,name));
             """)
             columns = {
                 row[1]
@@ -171,6 +174,29 @@ class SQLiteThreadStore(SQLiteDurableOperations, ThreadStoreBase):
     def load_thread_state(self, system_id, thread_id):
         with self.transaction(readonly=True) as db:
             return self._state(db, system_id, thread_id)
+
+    # --- файлы треда (gc_core.thread_files): картинки и медиа MCP ---------
+
+    def write_thread_file(self, system_id, thread_id, name, data):
+        """Файл треда в базе, а не на диске процесса; reset его удаляет.
+        Имя — от содержимого (хэш картинки, имя медиа): повтор — та же запись."""
+        from gc_core.thread_files import check_name
+
+        with self.transaction() as db:
+            db.execute(
+                "INSERT OR REPLACE INTO thread_files(system,thread,name,data) "
+                "VALUES(?,?,?,?)",
+                (system_id, thread_id, check_name(name), bytes(data)),
+            )
+
+    def read_thread_file(self, system_id, thread_id, name):
+        with self.transaction(readonly=True) as db:
+            row = db.execute(
+                "SELECT data FROM thread_files WHERE system=? AND thread=? "
+                "AND name=?",
+                (system_id, thread_id, name),
+            ).fetchone()
+            return bytes(row["data"]) if row else None
 
     def load_meta(self, system_id, thread_id):
         with self.transaction(readonly=True) as db:

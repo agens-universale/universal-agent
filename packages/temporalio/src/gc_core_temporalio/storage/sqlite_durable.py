@@ -349,6 +349,9 @@ class SQLiteDurableOperations:
                 f"DELETE FROM {table} WHERE system=? AND thread=?", key
             ).rowcount:
                 out.result.append(table)
+        # Картинки и медиа треда — вместе с историей (в ``result`` не идут:
+        # его формат — разделы истории, как у файлового хранилища).
+        db.execute("DELETE FROM thread_files WHERE system=? AND thread=?", key)
         out.result.append("threads")
         out.meta = {}
         db.execute(

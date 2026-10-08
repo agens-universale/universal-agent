@@ -90,6 +90,10 @@ class ToolVisionView:
     step_attachments: list[dict[str, Any]] = field(default_factory=list)
     known_attachments: list[dict[str, Any]] = field(default_factory=list)
     view_tool_in_set: bool = False
+    #: Сессия запроса (``State.state_id``, ``x_target``): проба зрения из
+    #: инструмента на воркере шлёт их в заголовках, как ход.
+    state_id: str | None = None
+    x_target: str | None = None
     schema_version: int = 1
 
 
@@ -118,6 +122,9 @@ class ToolEffectRequest:
     guard_checks: list[GuardProbeCheck] = field(default_factory=list)
     effect_step: str = "body"
     effect_data: dict[str, Any] = field(default_factory=dict)
+    #: Адрес треда хода ``[system_id, thread_id]``: файлы треда (снимки
+    #: ``fs_view_image``, медиа MCP) инструмент на воркере кладёт в него.
+    thread: list[str] | None = None
     schema_version: int = 1
 
 

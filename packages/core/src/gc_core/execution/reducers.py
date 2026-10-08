@@ -33,6 +33,8 @@ def tool_vision_view(state: Any) -> ToolVisionView:
         ),
         known_attachments=known,
         view_tool_in_set=view_tool_in_set(getattr(state, "tools", None) or []),
+        state_id=getattr(state, "state_id", None),
+        x_target=getattr(state, "x_target", None),
     )
 
 

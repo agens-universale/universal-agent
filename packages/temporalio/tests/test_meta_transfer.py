@@ -570,3 +570,22 @@ async def test_meta_known_sees_a_tui_edit_without_revision_bump(tmp_path):
     second = await proxy.aread_snapshot("s", "t")
     assert second.revision == first.revision
     assert second.meta["tui"]["title"] == "новый"
+
+
+def test_sqlite_thread_files_live_and_die_with_the_thread(tmp_path):
+    """Файлы треда в SQLite: запись идемпотентна, ревизию треда не двигает,
+    reset удаляет их вместе с историей."""
+    store = _store("sqlite", tmp_path)
+    store.append_messages(
+        "s", "t", [{"id": "m0", "role": "user", "content": "a"}]
+    )
+    revision = store.read_snapshot("s", "t", include_state=False).revision
+    store.write_thread_file("s", "t", "images/abc.png", b"PNG")
+    store.write_thread_file("s", "t", "images/abc.png", b"PNG")
+    assert store.read_thread_file("s", "t", "images/abc.png") == b"PNG"
+    assert store.read_thread_file("s", "other", "images/abc.png") is None
+    assert (
+        store.read_snapshot("s", "t", include_state=False).revision == revision
+    )
+    store.reset("s", "t")
+    assert store.read_thread_file("s", "t", "images/abc.png") is None

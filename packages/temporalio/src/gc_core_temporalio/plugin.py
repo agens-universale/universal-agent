@@ -86,6 +86,7 @@ class AgentPlugin(SimplePlugin):
         resource_activity: Any = None,
         thread_store_activity: Any = None,
         tool_activities: Mapping[str, Any] | None = None,
+        log_handlers: Any = (),
         _activities: ActivitiesConfig | None = None,
     ) -> None:
         stores = dict(thread_stores or {})
@@ -125,7 +126,9 @@ class AgentPlugin(SimplePlugin):
             ),
         )
         self.provider, self.activities_host, self.thread_activities = (
-            build_runtime(self.config, stores=stores)
+            build_runtime(
+                self.config, stores=stores, log_handlers=log_handlers
+            )
         )
         native, threads = self.activities_host, self.thread_activities
         children = ChildActivities(native)

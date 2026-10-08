@@ -133,5 +133,46 @@ async def test_embedder_thread_store_does_not_move_images_off_the_guarded_root(
             "logging.save_logs": False,
         }
     )
-    ctx = await rc.acreate_run_context(cfg, thread_store=MemoryThreadStore())
+
+    class _NoFiles(MemoryThreadStore):
+        write_thread_file = None
+        read_thread_file = None
+
+    ctx = await rc.acreate_run_context(cfg, thread_store=_NoFiles())
     assert Path(ctx.image_store.root) == media_roots(cfg)[0]
+
+
+async def test_embedder_store_with_thread_files_keeps_images_inside(
+    tmp_path, monkeypatch
+):
+    """Хранилище с файлами треда держит картинки у себя: на диске процесса
+    ни каталога, ни файла; путь вложения — ссылка ``thread-file://``."""
+    from gc_core.attachments.normalize import normalize_image
+    from gc_core.attachments.store import StoreImageStore
+    from gc_core.thread_files import is_thread_file_uri
+
+    _no_tools(monkeypatch)
+    cfg = make_settings(
+        {
+            "agent.model": "M",
+            "paths.threads_data_path": str(tmp_path / "threads"),
+            "logging.save_logs": False,
+        }
+    )
+    store = MemoryThreadStore()
+    ctx = await rc.acreate_run_context(cfg, thread_store=store)
+    assert isinstance(ctx.image_store, StoreImageStore)
+    png = (
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+        b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\xcf"
+        b"\xc0\x00\x00\x03\x01\x01\x00\xc9\xfe\x92\xef\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+    image = normalize_image(png)
+    att = ctx.image_store.snapshot(
+        image, "sys", "t1", origin="tool", label="x", source="s"
+    )
+    assert is_thread_file_uri(att.path)
+    assert ctx.image_store.read_for_send(att) == image.data
+    assert not (tmp_path / "threads").exists()
+    store.reset("sys", "t1")
+    assert ctx.image_store.read_for_send(att) is None

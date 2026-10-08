@@ -223,6 +223,18 @@ class ViewImage(AbstractSimpleTool):
         )
 
     async def _aread_source(self, path: str) -> bytes:
+        from gc_core.thread_files import is_thread_file_uri
+
+        if is_thread_file_uri(path):
+            # Файл треда в хранилище тредов (картинка MCP, снимок): байты —
+            # через хранилище, на диске процесса его нет.
+            reader = getattr(self._ctx.image_store, "read_uri", None)
+            data = reader(path) if callable(reader) else None
+            if data is None:
+                raise _InputError("not_found", MSG_NOT_FOUND.format(path=path))
+            if len(data) > MAX_INPUT_BYTES:
+                raise _InputError(REASON_TOO_LARGE, MSG_TOO_LARGE)
+            return data
         if self._is_media(path):
             return self._read_host(path)
         return await self._aread_backend(path)
@@ -281,6 +293,10 @@ class ViewImage(AbstractSimpleTool):
         )
 
     def _report_path(self, path: str) -> str:
+        from gc_core.thread_files import is_thread_file_uri
+
+        if is_thread_file_uri(path):
+            return path
         return tool_report_abspath(path, workspace=self._workspace)
 
     def _attached(self, path: str, image: NormalizedImage) -> str:

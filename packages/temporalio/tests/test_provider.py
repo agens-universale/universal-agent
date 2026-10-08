@@ -5,15 +5,15 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from gc_core.settings import override_settings
 from gc_core.config_modules import AppConfig
 from gc_core.execution.resource_contracts import ResourceOwnerLost
 from gc_core.execution.resource_host import WorkerResourceHost
+from gc_core.settings import override_settings
 from gc_core.thread_store_file_durable import DurableFileThreadStore
 from gc_core_temporalio.contracts import ActivityCall
 from gc_core_temporalio.provider import (
-    ContextProvider,
     AgentProfile,
+    ContextProvider,
 )
 from gc_core_temporalio.storage.sqlite import SQLiteThreadStore
 
@@ -411,3 +411,80 @@ async def test_worker_state_inside_workspace_is_protected(
         protected_decision(database + "-wal", cwd=str(workspace), extra=paths)
         == "deny"
     )
+
+
+async def test_worker_logs_go_to_process_logging_unless_profile_says_files(
+    tmp_path, monkeypatch
+):
+    """Под Temporal лог прогона по умолчанию — не файлом на диске воркера, а в
+    logging процесса (propagate) и обработчики плагина; явное
+    ``save_logs: true`` профиля — по-прежнему файл."""
+    import logging
+
+    monkeypatch.chdir(tmp_path)
+    default = AgentProfile(
+        workspace=str(tmp_path),
+        core=AppConfig.model_validate(
+            {"agent": {"use_local_subagents": False}}
+        ),
+    )
+    explicit = AgentProfile(
+        workspace=str(tmp_path),
+        core=AppConfig.model_validate(
+            {
+                "agent": {"use_local_subagents": False},
+                "logging": {"save_logs": True},
+                "paths": {"logs_dump_dir": str(tmp_path / "logs")},
+            }
+        ),
+    )
+    records = []
+
+    class _Sink(logging.Handler):
+        def emit(self, record):
+            records.append(record)
+
+    store = DurableFileThreadStore(str(tmp_path / "threads"))
+    provider = ContextProvider(
+        profiles={"test": default, "files": explicit},
+        stores={"files": store},
+        resource_host=WorkerResourceHost("test"),
+        log_handlers=[_Sink()],
+    )
+    try:
+        assert (
+            provider._profiles["test"][1].settings.logging.save_logs is False
+        )
+        assert provider._profiles["test"][1].settings.logging.propagate is True
+        assert (
+            provider._profiles["files"][1].settings.logging.save_logs is True
+        )
+        ctx = await provider(call())
+        ctx.logger.info("hello")
+        assert any(r.getMessage() == "hello" for r in records)
+        assert not Path(ctx.logging_path).exists()
+    finally:
+        await provider.aclose()
+
+
+async def test_store_without_thread_files_disables_view_image(
+    tmp_path, monkeypatch
+):
+    """Хранилище без файлов треда и без каталога тредов: снимки
+    ``fs_view_image`` легли бы на диск воркера — инструмент выключен."""
+    from gc_testkit.memory_thread_store import MemoryThreadStore
+
+    class _NoFiles(MemoryThreadStore):
+        write_thread_file = None
+        read_thread_file = None
+
+    monkeypatch.chdir(tmp_path)
+    for store, disabled in (
+        (_NoFiles(), True),
+        (MemoryThreadStore(), False),
+        (DurableFileThreadStore(str(tmp_path / "threads")), False),
+    ):
+        provider, _ = make_provider(tmp_path, store=store)
+        stop = provider._profiles["test"][1].settings.agent.stop_tools
+        assert ("fs_view_image" in stop) is disabled, type(store)
+        await provider.aclose()

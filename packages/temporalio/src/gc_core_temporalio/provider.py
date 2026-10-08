@@ -17,11 +17,13 @@ from gc_core.config_modules.auth import build_auth_connector
 from gc_core.config_modules.env_interpolation import (
     resolve_env_placeholders_strict,
 )
+from gc_core.constants.tool_names import FS_VIEW_IMAGE_NAME
 from gc_core.context_preparation import settings_from_snapshot
 from gc_core.execution.contracts import ExecutionFailure
 from gc_core.execution.resource_host import WorkerResourceHost
 from gc_core.run_context import acreate_run_context
-from gc_core.settings import LoadedSettings, RuntimeEnv
+from gc_core.settings import LoadedSettings, RuntimeEnv, is_explicit
+from gc_core.thread_files import thread_files_capability
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from gc_core_temporalio.activity_config import ActivitiesConfig
@@ -227,9 +229,19 @@ class ContextProvider:
     ротация токена — перезапуск воркера; живые сессии продолжают работать.
     """
 
-    def __init__(self, *, profiles, stores, resource_host, state_paths=()):
+    def __init__(
+        self,
+        *,
+        profiles,
+        stores,
+        resource_host,
+        state_paths=(),
+        log_handlers=(),
+    ):
         self.resource_host: WorkerResourceHost = resource_host
         self.stores = dict(stores)
+        #: Обработчики логов прогона от приложения (``AgentPlugin``).
+        self.log_handlers = list(log_handlers or ())
         self._profiles = {}
         #: Профиль → отпечаток его настроек (``settings_fingerprint``).
         self._fingerprints = {}
@@ -291,6 +303,33 @@ class ContextProvider:
                         )
                     }
                 )
+            # Картинки треда — в хранилище тредов (файлы треда) или рядом с
+            # файловыми тредами. Хранилище без того и другого положило бы их
+            # на диск воркера мимо треда: инструмент выключается.
+            store = stores[profile.store_id]
+            if (
+                thread_files_capability(store) is None
+                and not isinstance(getattr(store, "threads_dir", None), str)
+                and FS_VIEW_IMAGE_NAME not in settings.agent.stop_tools
+            ):
+                logger.warning(
+                    "Profile %s: store %s keeps no thread files; %s disabled",
+                    name,
+                    profile.store_id,
+                    FS_VIEW_IMAGE_NAME,
+                )
+                settings = settings.model_copy(
+                    update={
+                        "agent": settings.agent.model_copy(
+                            update={
+                                "stop_tools": [
+                                    *settings.agent.stop_tools,
+                                    FS_VIEW_IMAGE_NAME,
+                                ]
+                            }
+                        )
+                    }
+                )
             # Журнал правок агента (agent_edits) в durable-исполнении не
             # ведётся при любом профиле: его читают только дифф, сводка хода
             # и откат в TUI, а на воркере он стоил бы снимков файлов и
@@ -302,8 +341,27 @@ class ContextProvider:
                     ),
                     # Консольная трасса печатается из кода workflow: при
                     # replay вывод повторялся бы. Ход виден в истории и логах.
+                    # Лог прогона по умолчанию — не файлом на диске воркера, а
+                    # в logging процесса (propagate) и в обработчики
+                    # приложения; явное значение профиля побеждает.
                     "logging": settings.logging.model_copy(
-                        update={"console_trace": False}
+                        update={
+                            "console_trace": False,
+                            **(
+                                {}
+                                if is_explicit(
+                                    profile.core, "logging.save_logs"
+                                )
+                                else {"save_logs": False}
+                            ),
+                            **(
+                                {}
+                                if is_explicit(
+                                    profile.core, "logging.propagate"
+                                )
+                                else {"propagate": True}
+                            ),
+                        }
                     ),
                 }
             )
@@ -388,6 +446,7 @@ class ContextProvider:
                     auth_connector=build_auth_connector(loaded),
                     run_id=_digest(call.owner_id)[:24],
                     thread_store=self.stores[store_id],
+                    log_handlers=self.log_handlers,
                 )
                 self._contexts[call.owner_id] = ctx
                 return ctx

@@ -544,6 +544,12 @@ def _read_guard_flow(
     if not extracted:
         # Missing paths are validated by the tool itself.
         return (yield)
+    from gc_core.thread_files import is_thread_file_uri
+
+    if is_thread_file_uri(candidate_path):
+        # Файл своего треда в хранилище тредов (не путь ФС): читает его сам
+        # тул через хранилище, периметр ФС к нему не относится.
+        return (yield)
 
     try:
         if callable(port(context.ctx, "guard_probe")):

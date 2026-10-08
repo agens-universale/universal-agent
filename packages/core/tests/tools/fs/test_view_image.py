@@ -412,3 +412,31 @@ async def test_project_file_is_read_through_the_execution_environment(
 
     assert out["attached"] is True
     assert state.pending_tool_attachments[0]["source"] == "/work/shot.png"
+
+
+async def test_thread_file_link_is_read_through_the_thread_store(tmp_path):
+    """Картинка из ответа MCP в хранилище тредов (ссылка ``thread-file://``):
+    тул читает байты через хранилище, снимок кладёт туда же — на диске
+    процесса ни файла, ни каталога."""
+    from gc_core.attachments.store import StoreImageStore
+    from gc_core.thread_files import is_thread_file_uri
+    from gc_testkit.memory_thread_store import MemoryThreadStore
+
+    store = MemoryThreadStore()
+    image_store = StoreImageStore(store)
+    link = image_store.write_media("cli", "t1", "shot.png", _png())
+    state = _state()
+    tool = _local_tool(tmp_path, state=state)
+    tool._ctx.image_store = image_store
+
+    out = json.loads(await tool.acall(path=link))
+
+    assert out["ok"] is True and out["attached"] is True
+    assert out["path"] == link
+    [att] = state.pending_tool_attachments
+    assert is_thread_file_uri(att["path"])
+    assert not (tmp_path / "images").exists()
+    missing = json.loads(
+        await tool.acall(path="thread-file://cli/t1/mcp-media/none.png")
+    )
+    assert missing["ok"] is False

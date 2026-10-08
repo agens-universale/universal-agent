@@ -661,7 +661,10 @@ async def _aapply_tool_text(
                 or str(kwargs.get("call_id") or "tool"),
             )
         else:
-            res = await acall(**args)
+            from gc_core.tools.connect_mcp.api import media_sink_scope
+
+            with media_sink_scope(ctx):
+                res = await acall(**args)
     except ExecutionFailure:
         raise
     except Exception as e:

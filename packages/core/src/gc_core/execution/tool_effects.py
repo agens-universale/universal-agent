@@ -23,6 +23,7 @@ from gc_core.security.guard_probe import (
     active_guard_checks,
     evaluate_guard_probe,
 )
+from gc_core.thread_paths import thread_address
 
 
 def arguments_digest(arguments: dict[str, Any]) -> str:
@@ -76,6 +77,7 @@ async def invoke_native_tool(
 
     checks = []
     token = active_guard_checks.set(checks)
+    address = thread_address(ctx)
 
     async def send_effect(effect_data=None):
         request = ToolEffectRequest(
@@ -92,6 +94,7 @@ async def invoke_native_tool(
             guard_checks=list(checks),
             effect_step="download" if effect_data is not None else "body",
             effect_data=effect_data or {},
+            thread=list(address) if address is not None else None,
         )
         result = await ctx.tool_effect(request)
         if result.schema_version != 1:
@@ -158,6 +161,10 @@ async def execute_native_tool_effect(
             "Tool preparation changed after approval"
         )
     tool, arguments, dropped = prepared
+    if request.thread is not None and thread_address(ctx) is None:
+        # Контекст воркера — на владельца хода, а владелец ведёт один тред:
+        # адрес из запроса делает снимки и медиа файлами этого треда.
+        ctx.system_id, ctx.thread_id = request.thread
     if dropped or arguments_digest(arguments) != request.arguments_digest:
         raise GuardPreconditionChanged("Tool schema changed after approval")
     if request.effect_step == "download":
@@ -167,10 +174,13 @@ async def execute_native_tool_effect(
             raise GuardPreconditionChanged(
                 "Download requires its prepared effect boundary"
             )
+        from gc_core.tools.connect_mcp.api import media_sink_scope
+
         func = type(tool).acall
         while (descriptor := guard_wrapper(func)) is not None:
             func = descriptor.inner
-        output = _tool_result_to_text(await func(tool, **arguments))
+        with media_sink_scope(ctx):
+            output = _tool_result_to_text(await func(tool, **arguments))
     else:
         raise ValueError("Unknown tool effect step")
     from gc_core.tools.subagents.progress import parse_tool_result_status
@@ -211,6 +221,8 @@ def _add_vision_state(state, vision):
     """
     if vision.schema_version != 1:
         raise ValueError("Unsupported tool vision view")
+    state.state_id = vision.state_id
+    state.x_target = vision.x_target
     state.vision_probe_turn = vision.probe_turn
     state.turn_level = vision.turn_level
     state.vision_live_ids = frozenset(vision.live_ids)

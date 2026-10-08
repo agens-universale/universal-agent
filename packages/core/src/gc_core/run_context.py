@@ -7,7 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable, Dict, List, Optional, Set
 
-from gc_core.attachments.store import ImageStore
+from gc_core.attachments.store import ImageStore, image_store_for
 from gc_core.backends.factory import resolve_os_backend
 from gc_core.backends.protocol import FsBackend
 from gc_core.config_modules.chat_completions import (
@@ -688,7 +688,9 @@ def _finish_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING
         tool_effect=tool_effect,
     )
     ctx = assemble_run_context(prepared, bindings)
-    ctx.image_store = ImageStore.for_config(ctx)
+    # Хранилище тредов SDK/воркера с файлами треда держит картинки у себя;
+    # без него — по конфигу, как раньше.
+    ctx.image_store = image_store_for(ctx, thread_store)
     # ``TrackingFsBackend`` ставится ЗДЕСЬ — в том режиме, которому запись
     # правок включена (``agent_edits.record``: TUI по умолчанию, CLI и сервер —
     # по конфигу). Где запись выключена, обёртки нет вовсе: она зовёт

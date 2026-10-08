@@ -391,7 +391,15 @@ agent = await AsyncAgent.create(cfg, log_handlers=[MyHandler()])
 ```
 
 Хендлер **добавляется** к файловому выводу ядра, а не заменяет его; отключить
-файл по-прежнему можно через `save_logs: false`.
+файл по-прежнему можно через `save_logs: false`. С `save_logs: false` ядро не
+создаёт ни каталога логов, ни файла прогона, ни `summary_trace_*.jsonl` — записи
+идут только в переданные обработчики (и в корневой логгер при
+`logging.propagate: true`):
+
+```python
+cfg = loaded.with_overrides({"logging.save_logs": False})
+agent = await AsyncAgent.create(cfg, log_handlers=[MyHandler()])
+```
 
 Цеплять хендлер к `ctx.logger` вручную ПОСЛЕ сборки тоже можно, но раньше это
 был единственный способ, и об этом никто не знал: ядро делает

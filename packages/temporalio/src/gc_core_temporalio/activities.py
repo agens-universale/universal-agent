@@ -588,18 +588,25 @@ class AgentActivities:
     async def _summary_trace(self, call, ctx):
         from gc_core.summarize.summary_logging import (
             SummaryTraceRecord,
-            aappend_summary_trace_record,
         )
 
         record = value_to_type(SummaryTraceRecord, call.data)
-        # Контекст воркера собран без `summary_trace_sink`, так что запись
-        # идёт в локальный summary_trace*.jsonl, а не обратно в activity.
-        await aappend_summary_trace_record(
-            ctx,
-            trigger_reason=record.trigger_reason,
-            trace_data=record.trace_data,
-            newly_summarized_message_id=record.newly_summarized_message_id,
-        )
+        # Трасса сжатия — записью лога прогона, а не отдельным файлом на
+        # диске воркера: куда лог, туда и она (logging процесса, обработчики
+        # приложения, файл при ``save_logs: true``).
+        logger = getattr(ctx, "logger", None)
+        if logger is not None:
+            logger.info(
+                "summary_trace",
+                extra={
+                    "event": "summary_trace",
+                    "trigger_reason": record.trigger_reason,
+                    "summary_trace": record.trace_data,
+                    "newly_summarized_message_id": (
+                        record.newly_summarized_message_id
+                    ),
+                },
+            )
         return True
 
     @activity.defn(name="agent.context.close")
