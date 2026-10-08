@@ -138,11 +138,10 @@ def _without_human(settings):
             return section
         return section.model_copy(update={field: "deny"})
 
-    read_guard = no_ask(no_ask(security.read_guard), "binary_read_policy")
     security = security.model_copy(
         update={
             "write_guard": no_ask(security.write_guard),
-            "read_guard": read_guard,
+            "read_guard": no_ask(security.read_guard),
             "url_policy": no_ask(security.url_policy),
             "command_moderation": no_ask(security.command_moderation),
         }
