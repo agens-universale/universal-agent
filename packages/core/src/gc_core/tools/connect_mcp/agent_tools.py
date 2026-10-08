@@ -207,6 +207,21 @@ def _normalize_property(
 
 
 def _normalize_object_schema(schema: dict, *, openai_strict: bool) -> None:
+    # Объект без перечисленных ключей (`fields: dict`, `dict[str, str]`) —
+    # свободный: по JSON Schema лишние ключи разрешены, если не запрещены явно.
+    # Закрыть его — запретить все ключи. Оставляем открытым; strict для такого
+    # инструмента снимает проекция на отправке (`has_open_object`).
+    if not schema.get("properties") and "additionalProperties" not in schema:
+        schema["additionalProperties"] = True
+    if is_open_object(schema):
+        # Пустые `properties: {}` / `required: []` смысла не меняют, но OpenAI
+        # без strict читает такой объект как пустой и шлёт `{}` (проверено на
+        # gpt-5.4-mini). Оставляем только `additionalProperties`.
+        for key in ("properties", "required"):
+            if not schema.get(key):
+                schema.pop(key, None)
+        return
+
     props = schema.get("properties")
     if not isinstance(props, dict):
         props = {}
@@ -216,15 +231,6 @@ def _normalize_object_schema(schema: dict, *, openai_strict: bool) -> None:
     if not isinstance(required, list):
         required = []
         schema["required"] = required
-
-    # Объект без перечисленных ключей (`fields: dict`, `dict[str, str]`) —
-    # свободный: по JSON Schema лишние ключи разрешены, если не запрещены явно.
-    # Закрыть его — запретить все ключи. Оставляем открытым; strict для такого
-    # инструмента снимает проекция на отправке (`has_open_object`).
-    if not props and "additionalProperties" not in schema:
-        schema["additionalProperties"] = True
-    if is_open_object(schema):
-        return
 
     for name, subschema in list(props.items()):
         props[name] = _normalize_property(

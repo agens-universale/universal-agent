@@ -433,6 +433,11 @@ def test_free_object_param_keeps_its_keys(openai_strict: bool) -> None:
     assert props["extra"]["additionalProperties"] is True
     # Объект с перечисленными ключами закрывается, как и раньше.
     assert props["meta"]["additionalProperties"] is False
+    # Без пустых properties/required: OpenAI без strict читает такой объект
+    # как пустой и шлёт `{}` (gpt-5.4-mini, проверено живым запросом).
+    for name in ("fields", "labels", "extra"):
+        assert "properties" not in props[name]
+        assert "required" not in props[name]
 
     args = parse_and_validate_tool_arguments(
         tool_name="mcp_jira_create_issue",
