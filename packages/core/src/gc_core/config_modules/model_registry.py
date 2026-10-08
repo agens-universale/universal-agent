@@ -439,6 +439,14 @@ class ModelEntry(BaseModel):
             "strip_think: true, false или отсутствие ключа (глобальный флаг)"
         )
 
+    @field_validator(
+        "summary_trigger_chars", "summary_trigger_tokens", mode="before"
+    )
+    @classmethod
+    def _summary_trigger_null_is_unset(cls, value: Any) -> Any:
+        # YAML null — «не задан», как у соседних ключей записи.
+        return 0 if value is None else value
+
     @field_validator("summary_trigger_chars", "summary_trigger_tokens")
     @classmethod
     def _summary_trigger_nonneg(cls, value: int) -> int:
