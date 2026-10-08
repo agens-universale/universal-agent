@@ -8,7 +8,7 @@ import os
 import sys
 import weakref
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, NoReturn, Optional
 
 if TYPE_CHECKING:
     from gc_core.backends.protocol import FsBackend
@@ -130,8 +130,8 @@ async def aprime_backend_cwd(
 
     1. бэкенд уже знает каталог (``default_cwd()`` или прошлый прогрев);
     2. свой прогрев бэкенда (``aprime_default_cwd``) под общим потолком;
-    3. корень задан конфигом (``launch_root``/``project_root``) — спрашивать
-       окружение незачем, отказа нет;
+    3. корень задан конфигом (``launch_root``/``project_root``) — pwd больше
+       не нужен. Для песочницы путь ещё проверит ``areconcile_remote_root``;
     4. НЕ песочница — корень возьмётся из ``os.getcwd()``, до ``/`` дело не
        доходит;
     5. общий ``pwd`` через корутинный exec-порт — он есть у любого бэкенда,
@@ -159,7 +159,9 @@ async def aprime_backend_cwd(
             reasons.append(f"aprime_default_cwd: {type(exc).__name__}")
 
     if _config_root_raw(config):
-        # Корень назван явно — он и победит в `resolve_execution_root`.
+        # Корень назван явно — pwd больше не нужен. Для песочницы это ещё
+        # не разрешение стартовать: `areconcile_remote_root` оставляет путь,
+        # только если он есть на той стороне.
         return
 
     if not getattr(backend, "is_sandbox", False):
@@ -205,6 +207,26 @@ async def aprime_backend_cwd(
     )
 
 
+def _container_cwd(backend: Any) -> Optional[str]:
+    """Каталог, который окружение уже назвало само. Путь из конфига сюда не входит."""
+    default_cwd = getattr(backend, "default_cwd", None)
+    remote = (default_cwd() if callable(default_cwd) else None) or _primed_cwd(
+        backend
+    )
+    if remote is None:
+        return None
+    text = str(remote).strip()
+    return text or None
+
+
+def _refuse_unconfirmed_root(raw: str, detail: str) -> NoReturn:
+    raise WorkspaceRootUnknownError(
+        f"корень {raw!r} не подтверждён на стороне окружения ({detail}). "
+        "Хостовый путь корнем песочницы не оставляем — ран не стартует, "
+        "пока нет каталога той стороны."
+    )
+
+
 async def areconcile_remote_root(
     backend: Any, config: Optional[Dict[str, Any]] = None
 ) -> None:
@@ -214,7 +236,11 @@ async def areconcile_remote_root(
     такого каталога нет, а ``resolve_execution_root`` корень из конфига берёт
     первым — env-блок промпта и guards смотрели бы на путь хоста. Явно заданный
     путь, который на той стороне существует (``/testbed``), остаётся.
-    Звать после ``aprime_backend_cwd``: cwd той стороны к этому моменту известен.
+
+    Путь, которого на той стороне нет, заменяется каталогом, который окружение
+    назвало само. Не ответило на проверку или назвать каталог не смогло —
+    ``WorkspaceRootUnknownError``: хостовый корень на весь ран не оставляем.
+    Звать после ``aprime_backend_cwd``.
     """
     if not getattr(backend, "is_sandbox", False) or not isinstance(
         config, dict
@@ -224,15 +250,17 @@ async def areconcile_remote_root(
     if raw is None:
         return
     try:
-        if await backend.is_dir(raw):
-            return
-    except Exception:  # окружение недоступно — корень не трогаем
+        on_remote = await backend.is_dir(raw)
+    except Exception as exc:
+        _refuse_unconfirmed_root(raw, f"{type(exc).__name__}: {exc}")
+    if on_remote:
         return
-    default_cwd = getattr(backend, "default_cwd", None)
-    remote = (default_cwd() if callable(default_cwd) else None) or _primed_cwd(
-        backend
-    )
+    remote = _container_cwd(backend)
     if not remote:
+        _refuse_unconfirmed_root(
+            raw, "каталога на стороне окружения нет, рабочий каталог не узнан"
+        )
+    if remote == raw:
         return
     logging.getLogger(__name__).info(
         "launch_root %s нет на стороне бэкенда %s — корень рабочей области: %s",
