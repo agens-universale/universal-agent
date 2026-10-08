@@ -1,9 +1,9 @@
 import json
 from typing import Any, Dict, Optional
 
+from gc_core.execution.tool_schema import coalesce_optional_string
 from gc_core.loop_detector.constants import READ_PROFILE, loop_warn_on_repeat
 from gc_core.security.read_guard import enforce_read_guard
-from gc_core.tools.schema_optional import coalesce_optional_string
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 from gc_core.utils.file_text import decode_text_bytes, sha256_hex_of_bytes
 from gc_core.utils.fs_size_limits import (

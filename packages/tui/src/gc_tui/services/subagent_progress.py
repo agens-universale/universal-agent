@@ -11,7 +11,7 @@ from typing import Any, Callable, List, Literal, Optional, Sequence
 
 from gc_core.attachments.model import attachments_of
 from gc_core.constants.tool_names import SESSION_TODO_TOOL_NAME
-from gc_core.tools.subagents.progress import SubagentProgressEvent
+from gc_core.execution.progress import SubagentProgressEvent
 
 ProgressActionKind = Literal[
     "mount_nested_tool",

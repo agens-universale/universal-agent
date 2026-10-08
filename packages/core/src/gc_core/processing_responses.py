@@ -33,7 +33,17 @@ from gc_core.execution.constants import (
 )
 from gc_core.execution.contracts import ExecutionFailure, ModelRequestStopped
 from gc_core.execution.model import arequest_model
+from gc_core.execution.output_wrapping import (
+    maybe_store_and_wrap_tool_output,
+)
 from gc_core.execution.ports import port
+from gc_core.execution.progress import (
+    brief_args_summary,
+    emit_progress,
+    extract_intermediate_prose,
+    parse_tool_result_status,
+    todo_items_from_arguments,
+)
 from gc_core.intent_guard.guard import FinishGateGuard
 from gc_core.intent_guard.text_answer_judge import ashould_return_text_answer
 from gc_core.intent_guard.turn_finish_emit import (
@@ -96,16 +106,6 @@ from gc_core.tools import (
     aapply_tool,
     is_internal_tool_error_output,
     is_unknown_tool_output,
-)
-from gc_core.tools.session.stored_outputs.wrapping import (
-    maybe_store_and_wrap_tool_output,
-)
-from gc_core.tools.subagents.progress import (
-    brief_args_summary,
-    emit_progress,
-    extract_intermediate_prose,
-    parse_tool_result_status,
-    todo_items_from_arguments,
 )
 from gc_core.tools.subagents.sidecar import apersist_subagent_trace
 from gc_core.turn_boundary import begin_turn

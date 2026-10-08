@@ -18,7 +18,7 @@ from gc_core.persistence.state_repository import StateRepository
 from gc_core.persistence.state_serializer import StateSerializer
 from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
 from gc_core.states import State
-from gc_core.tools.session.stored_outputs.tool_call_outputs_store import (
+from gc_core.execution.output_store import (
     ToolCallOutputRecord,
     ToolCallOutputsStore,
 )

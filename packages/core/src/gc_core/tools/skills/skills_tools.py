@@ -18,6 +18,7 @@ from gc_core.config_modules.agent import (
     exec_output_preview_edge_chars_from_config_dict,
     exec_timeout_from_config_dict,
 )
+from gc_core.execution.tool_schema import coalesce_optional_string
 from gc_core.loop_detector.constants import (
     LOOP_WARN_KEY,
     READ_PROFILE,
@@ -28,7 +29,6 @@ from gc_core.tools.exec.exec_envelope import (
     as_captured_stream,
     exec_channels_json,
 )
-from gc_core.tools.schema_optional import coalesce_optional_string
 from gc_core.tools.skills.registry import AmbiguousSkillId, SkillsRegistry
 from gc_core.utils.arg_decorators import parse_json_object_argument
 from gc_core.utils.json_arg_parser import JsonArgParseError

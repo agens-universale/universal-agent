@@ -23,6 +23,7 @@ from gc_core.config_modules.stored_outputs import (
 )
 from gc_core.constants.tool_names import SESSION_MEMORY_TOOL_NAME
 from gc_core.execution.contracts import ExecutionFailure
+from gc_core.execution.progress import emit_progress
 from gc_core.execution_workspace import ExecutionWorkspace
 from gc_core.intent_log.user_turn import (
     append_user_asks_from_messages,
@@ -72,7 +73,6 @@ from gc_core.tools import (
 )
 from gc_core.tools.skills.registry import get_skills_registry
 from gc_core.tools.subagents.active_scope import activate_child_input
-from gc_core.tools.subagents.progress import emit_progress
 from gc_core.tools.subagents.registry import (
     get_subagent_class,
     resolve_subagent_definitions,

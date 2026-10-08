@@ -13,6 +13,7 @@ from gc_core.execution.contracts import (
     ToolResult,
 )
 from gc_core.execution.reducers import apply_state_delta, tool_state_view
+from gc_core.execution.tool_schema import apply_openai_strict_parameters
 from gc_core.settings import LoadedSettings, runtime_of, settings_of
 from gc_core.tools.arguments_validation import (
     WrongFunctionArgumentsException,
@@ -25,7 +26,6 @@ from gc_core.tools.inject_tool_fields import (
     strip_injected_tool_args,
 )
 from gc_core.tools.registry import _apply_stop_tools, get_builtin_tools_data
-from gc_core.tools.schema_optional import apply_openai_strict_parameters
 from gc_core.tools.skills.registry import SkillsRegistry, get_skills_registry
 from gc_core.tools.skills.skills_tools import get_skills_tools_data
 from gc_core.tools.subagents.registry import is_subagent_tool
@@ -728,7 +728,7 @@ async def aapply_tool_result(
         ]
         if cache != before.fetch_url_cache:
             delta.fetch_url_cache = cache
-    from gc_core.tools.subagents.progress import parse_tool_result_status
+    from gc_core.execution.progress import parse_tool_result_status
 
     ok, _ = parse_tool_result_status(output)
     return ToolResult(

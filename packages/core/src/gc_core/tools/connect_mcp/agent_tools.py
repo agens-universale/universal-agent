@@ -8,6 +8,10 @@ import logging
 from typing import Any, Dict, Optional
 
 from gc_core.config_modules.field_meta import plain_dump
+from gc_core.execution.tool_schema import (
+    apply_openai_strict_object,
+    is_open_object,
+)
 from gc_core.loop_detector.constants import GENERIC_PROFILE, LOOP_WARN_KEY
 from gc_core.settings import settings_of
 from gc_core.tools.connect_mcp.api import (
@@ -15,10 +19,6 @@ from gc_core.tools.connect_mcp.api import (
 )
 from gc_core.tools.connect_mcp.registry import ToolsCache
 from gc_core.tools.connect_mcp.tool_wrapper import MCPToolWrapper
-from gc_core.tools.schema_optional import (
-    apply_openai_strict_object,
-    is_open_object,
-)
 from gc_core.trace_id import trace_header_name, trace_id_from_config
 
 logger = logging.getLogger(__name__)

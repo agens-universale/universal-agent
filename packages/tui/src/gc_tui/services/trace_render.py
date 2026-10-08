@@ -334,7 +334,7 @@ def _dispatch_readonly(mount_target, ev, calls: dict) -> None:
     elif ev.kind == "todo":
         # Канон spec 2026-07-31 §2: строки собирает общий билдер (он же у
         # живого канала в main.py), здесь только монтируем.
-        from gc_core.tools.subagents.progress import todo_items_from_arguments
+        from gc_core.execution.progress import todo_items_from_arguments
 
         from gc_tui.services.todo_render import build_todo_block
 

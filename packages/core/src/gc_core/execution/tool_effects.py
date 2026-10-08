@@ -183,7 +183,7 @@ async def execute_native_tool_effect(
             output = _tool_result_to_text(await func(tool, **arguments))
     else:
         raise ValueError("Unknown tool effect step")
-    from gc_core.tools.subagents.progress import parse_tool_result_status
+    from gc_core.execution.progress import parse_tool_result_status
 
     ok, _ = parse_tool_result_status(output)
     from gc_core.execution.contracts import StateDelta

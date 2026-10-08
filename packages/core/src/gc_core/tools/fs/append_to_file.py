@@ -2,8 +2,8 @@ import json
 import os
 from typing import Any
 
+from gc_core.execution.tool_schema import X_PRESERVE_EMPTY_STRING
 from gc_core.security.path_policy import enforce_write_guard
-from gc_core.tools.schema_optional import X_PRESERVE_EMPTY_STRING
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 from gc_core.utils.file_text import (
     APPEND_HEAD_SAMPLE_BYTES,

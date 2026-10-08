@@ -1737,7 +1737,7 @@ class TuiApp(App):
         ctx.on_trace_note = self._trace_note_sink.hook_for(ctx)
         self._session_log_path = ctx.logging_path
         # Live nested progress субагентов: очередь на app, копия на ctx → child.
-        from gc_core.tools.subagents.progress import QueueSubagentProgressSink
+        from gc_core.execution.progress import QueueSubagentProgressSink
 
         self._subagent_progress_sink = QueueSubagentProgressSink()
         ctx.subagent_progress_sink = self._subagent_progress_sink

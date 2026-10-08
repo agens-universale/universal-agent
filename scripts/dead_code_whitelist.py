@@ -21,3 +21,8 @@ html_partial
 # Native sandbox eagerly loads the pure finish-gate module before replay starts;
 # the common guard later accesses it through its ordinary lazy import.
 _final_report_consistency
+
+# Переопределение argparse.ArgumentParser._print_message: argparse зовёт его сам
+# (print_help, print_usage) — вывод справки в потоки команды config.
+# packages/core/src/gc_core/config_command.py.
+_._print_message

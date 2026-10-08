@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import pytest
 
-from gc_core.tools.arguments_validation import parse_and_validate_tool_arguments
+from gc_core.tools.arguments_validation import (
+    parse_and_validate_tool_arguments,
+)
 from gc_core.tools.connect_mcp.agent_tools import (
     _normalize_schema_recursive,
     normalize_tool_spec_for_agent,
@@ -471,7 +473,9 @@ def test_free_object_values_still_validated() -> None:
 
 
 @pytest.mark.parametrize("openai_strict", [False, True])
-def test_tool_with_free_object_is_sent_without_strict(openai_strict: bool) -> None:
+def test_tool_with_free_object_is_sent_without_strict(
+    openai_strict: bool,
+) -> None:
     """strict требует закрыть каждый объект — инструмент со свободным уходит
     со ``strict: false``, свободный объект остаётся открытым; остальные
     инструменты strict сохраняют."""
@@ -495,9 +499,10 @@ def test_tool_with_free_object_is_sent_without_strict(openai_strict: bool) -> No
         [free, plain], openai_strict=openai_strict, send_tool_strict=True
     )
     assert sent_free["strict"] is False
-    assert sent_free["parameters"]["properties"]["fields"][
-        "additionalProperties"
-    ] is True
+    assert (
+        sent_free["parameters"]["properties"]["fields"]["additionalProperties"]
+        is True
+    )
     assert sent_plain["strict"] is True
     # Исходные спеки проекция не меняет.
     assert free["strict"] is True

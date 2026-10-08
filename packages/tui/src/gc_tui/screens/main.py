@@ -2756,7 +2756,7 @@ class TraceScreen(Screen):
             # Когнитивное событие — эпизод раздумья не рвём (как session_think).
             # Канон spec 2026-07-31 §2 — строки собирает общий билдер
             # (он же у read-only канала), здесь только монтируем.
-            from gc_core.tools.subagents.progress import (
+            from gc_core.execution.progress import (
                 todo_items_from_arguments,
             )
 

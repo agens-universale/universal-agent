@@ -19,7 +19,7 @@ from gc_core.tools.subagents.active_scope import (
     is_child_input_active,
     try_enqueue_user_message,
 )
-from gc_core.tools.subagents.progress import QueueSubagentProgressSink
+from gc_core.execution.progress import QueueSubagentProgressSink
 from gc_core.tools.subagents.runner import SubagentRunner
 from gc_testkit.settings import fake_ctx
 

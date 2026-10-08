@@ -9,11 +9,11 @@ import copy
 import logging
 from typing import Any, Dict, List
 
-from gc_core.settings import settings_of
-from gc_core.tools.schema_optional import (
+from gc_core.execution.tool_schema import (
     X_SUPPRESS_OPTIONAL_HINT,
     mark_property_optional,
 )
+from gc_core.settings import settings_of
 
 logger = logging.getLogger(__name__)
 

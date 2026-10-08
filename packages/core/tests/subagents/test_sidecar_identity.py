@@ -5,7 +5,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-from gc_core.tools.subagents.progress import (
+from gc_core.execution.progress import (
     QueueSubagentProgressSink,
     child_progress_enabled,
 )

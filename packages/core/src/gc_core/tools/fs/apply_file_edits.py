@@ -2,6 +2,7 @@ import functools
 import json
 from typing import Any, Dict, List
 
+from gc_core.execution.tool_schema import coalesce_optional_string
 from gc_core.security.path_policy import enforce_write_guard
 from gc_core.tools.fs.edit_line_endings import (
     collect_literal_matches,
@@ -18,7 +19,6 @@ from gc_core.tools.fs.literal_edit_common import (
     load_text_source,
     splice_replacements,
 )
-from gc_core.tools.schema_optional import coalesce_optional_string
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 from gc_core.utils.file_text import sha256_hex_of_bytes
 from gc_core.utils.tool_report_paths import tool_report_abspath

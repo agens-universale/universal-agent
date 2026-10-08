@@ -280,7 +280,7 @@ def test_state_to_dict_roundtrip_is_json_serializable_and_restores_shared_and_st
     state.shared.notes_md = "notes"
     state.shared.fetch_url_cache["https://example.com"] = {"content": "ok"}
 
-    from gc_core.tools.session.stored_outputs.tool_call_outputs_store import (
+    from gc_core.execution.output_store import (
         ToolCallOutputRecord,
     )
 
@@ -427,7 +427,7 @@ def test_state_roundtrip_with_monster_payload_preserves_core_runtime_fields():
         "ts": "2026-05-06T11:01:00Z",
     }
 
-    from gc_core.tools.session.stored_outputs.tool_call_outputs_store import (
+    from gc_core.execution.output_store import (
         ToolCallOutputRecord,
     )
 

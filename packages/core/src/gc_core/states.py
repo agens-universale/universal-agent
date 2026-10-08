@@ -1,6 +1,9 @@
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from uuid import uuid4
 
+from gc_core.execution.output_store import (
+    ToolCallOutputsStore,
+)
 from gc_core.execution.state import ExecutionState, SharedStateData
 from gc_core.execution_workspace import (
     ExecutionWorkspace,
@@ -12,9 +15,6 @@ from gc_core.state_preparation import (
     StatePreparationRequest,
     load_state_metadata,
     prepare_state,
-)
-from gc_core.tools.session.stored_outputs.tool_call_outputs_store import (
-    ToolCallOutputsStore,
 )
 from gc_core.tools.skills.skills_policy import render_skills_catalog
 from gc_core.usage.account import UsageAccount

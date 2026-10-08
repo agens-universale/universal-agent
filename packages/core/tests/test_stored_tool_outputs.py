@@ -34,11 +34,11 @@ from gc_core.states import State
 from gc_core.tools.session.stored_outputs.read_stored_tool_output import (
     ReadStoredToolOutput,
 )
-from gc_core.tools.session.stored_outputs.tool_call_outputs_store import (
+from gc_core.execution.output_store import (
     ToolCallOutputRecord,
     ToolCallOutputsStore,
 )
-from gc_core.tools.session.stored_outputs.wrapping import (
+from gc_core.execution.output_wrapping import (
     maybe_store_and_wrap_tool_output,
 )
 from gc_testkit import run_coro

@@ -46,13 +46,13 @@ from gc_core.attachments.texts import (
 )
 from gc_core.config_modules.images import read_images_config
 from gc_core.constants.tool_names import FS_VIEW_IMAGE_NAME
+from gc_core.execution.tool_schema import coalesce_optional_string
 from gc_core.loop_detector.constants import READ_PROFILE, loop_warn_on_repeat
 from gc_core.security.media_roots import media_roots
 from gc_core.security.path_policy import resolve_tool_context
 from gc_core.security.protected_paths import classify_path, protected_paths
 from gc_core.security.read_guard import enforce_read_guard
 from gc_core.thread_paths import thread_address
-from gc_core.tools.schema_optional import coalesce_optional_string
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 from gc_core.utils.backend_errors import (
     http_status_code,

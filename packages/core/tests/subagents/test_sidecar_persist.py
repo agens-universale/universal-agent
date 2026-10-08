@@ -185,7 +185,7 @@ class TestSidecarPersistCallResult:
         assert "bad args" in rows[1]["payload"]["output"]
 
     def test_ask_human_not_persisted(self, tmp_path, monkeypatch):
-        from gc_core.tools.subagents.progress import QueueSubagentProgressSink
+        from gc_core.execution.progress import QueueSubagentProgressSink
 
         pr = _patch_process(
             monkeypatch, apply_return='{"ok": true, "answer": "yes"}'

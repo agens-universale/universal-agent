@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 
-from gc_core.tools.subagents.progress import (
+from gc_core.execution.progress import (
     QueueSubagentProgressSink,
     SubagentProgressEvent,
 )

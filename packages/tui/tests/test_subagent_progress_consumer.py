@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from gc_core.tools.subagents.progress import (
+from gc_core.execution.progress import (
     QueueSubagentProgressSink,
     SubagentProgressEvent,
 )

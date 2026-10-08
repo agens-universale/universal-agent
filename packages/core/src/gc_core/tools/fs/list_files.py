@@ -4,6 +4,7 @@ import os
 from typing import Any, Dict, List, Optional
 
 from gc_core.backends.protocol import WalkOutputTooLargeError
+from gc_core.execution.tool_schema import coalesce_optional_string
 from gc_core.loop_detector.constants import READ_PROFILE, loop_warn_on_repeat
 from gc_core.security.path_policy import (
     _settings_source,
@@ -18,7 +19,6 @@ from gc_core.security.read_guard import (
 )
 from gc_core.tools.fs.agent_hidden import is_agent_hidden
 from gc_core.tools.fs.cooperative import LoopYielder
-from gc_core.tools.schema_optional import coalesce_optional_string
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 from gc_core.utils.glob_to_regex import compile_glob
 from gc_core.utils.tool_report_paths import tool_report_abspath

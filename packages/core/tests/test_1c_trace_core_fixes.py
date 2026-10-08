@@ -21,7 +21,7 @@ def _fresh_state():
     state.shared = None
     state.user_intent_log = []
     state.current_user_intent = []
-    from gc_core.tools.session.stored_outputs.tool_call_outputs_store import (
+    from gc_core.execution.output_store import (
         ToolCallOutputsStore,
     )
 

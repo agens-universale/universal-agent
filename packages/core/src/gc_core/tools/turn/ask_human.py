@@ -288,7 +288,7 @@ Do not implement until they confirm.
             # `ask_human` из `_begin_ask` оставалось незакрытым, а баннер
             # «агент спрашивает» висел в TUI и у встраивающего после отмены
             # `stream()` или остановки сервера. Закрываем и пробрасываем.
-            from gc_core.tools.subagents.progress import emit_progress
+            from gc_core.execution.progress import emit_progress
 
             emit_progress(
                 self._ctx,
@@ -344,7 +344,7 @@ Do not implement until they confirm.
 
         question = self._normalize_text(question)
 
-        from gc_core.tools.subagents.progress import emit_progress
+        from gc_core.execution.progress import emit_progress
 
         via_name = getattr(self._ctx, "subagent_tool_name", None)
         via_name = via_name if isinstance(via_name, str) else None
@@ -372,7 +372,7 @@ Do not implement until they confirm.
     def _ask_answered(
         self, question: str, via_name: Optional[str], response: str
     ) -> str:
-        from gc_core.tools.subagents.progress import emit_progress
+        from gc_core.execution.progress import emit_progress
 
         if response == "":
             response = "(empty response)"
@@ -421,7 +421,7 @@ Do not implement until they confirm.
             print(*values, file=sys.stderr)
 
     def _ask_interrupted(self, question: str, via_name: Optional[str]) -> str:
-        from gc_core.tools.subagents.progress import emit_progress
+        from gc_core.execution.progress import emit_progress
 
         self._console("\n\n[Interaction interrupted by user]")
         self._run_logger().warning(
@@ -449,7 +449,7 @@ Do not implement until they confirm.
     def _ask_failed(
         self, question: str, via_name: Optional[str], exc: Exception
     ) -> str:
-        from gc_core.tools.subagents.progress import emit_progress
+        from gc_core.execution.progress import emit_progress
 
         error_msg = f"(error reading input: {exc!s})"
         self._console(f"[turn_ask_human error]: {error_msg}")

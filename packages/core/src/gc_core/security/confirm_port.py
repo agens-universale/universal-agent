@@ -133,8 +133,8 @@ def _ask_choice(
 
     # Lazy: security → tools на module load ломает import graph (paths/diff_tui).
     # Nested: path_policy → confirm_port cycle if imported at module top.
+    from gc_core.execution.progress import emit_progress
     from gc_core.security.path_policy import prompt_user_confirmation_choice
-    from gc_core.tools.subagents.progress import emit_progress
 
     via = _via_name(ctx)
     # confirm-порт не знает steps child — для progress достаточно нулей

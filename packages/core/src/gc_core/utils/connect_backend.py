@@ -974,7 +974,7 @@ def project_tool_specs(
     ``strict: false``: strict требует закрыть каждый объект, а закрытый
     свободный объект не примет ни одного ключа.
     """
-    from gc_core.tools.schema_optional import (
+    from gc_core.execution.tool_schema import (
         apply_openai_strict_schema_tree,
         augment_optional_property_descriptions,
         has_open_object,
