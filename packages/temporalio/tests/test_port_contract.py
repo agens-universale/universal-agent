@@ -282,7 +282,7 @@ async def test_ask_refuses_to_answer_a_dropped_message(monkeypatch):
     async def send(_text, **_options):
         return "m1"
 
-    async def wait(message_id):
+    async def wait(message_id, **_options):
         return {"message_id": message_id, "delivered": False, "answer": "old"}
 
     monkeypatch.setattr(session, "send", send)
