@@ -109,6 +109,47 @@ async def test_awarm_capabilities_does_not_block_the_loop():
         monkeypatched.undo()
 
 
+async def test_dead_runtime_is_not_cached_as_missing_tools(monkeypatch):
+    """Короткий отказ среды не выключает find/grep до конца процесса."""
+    from gc_core.backends.runtime_probe import RuntimeUnavailable
+
+    async def down(_backend):
+        raise RuntimeUnavailable()
+
+    monkeypatch.setattr(capabilities, "aprobe_has_find", down)
+    backend = LocalFsBackend()
+    with pytest.raises(RuntimeUnavailable):
+        await backend.awarm_capabilities()
+    assert all(getattr(backend, cache) is None for cache in _CACHES)
+
+    async def alive(_backend):
+        return True
+
+    for name in (
+        "aprobe_has_find",
+        "aprobe_has_grep",
+        "aprobe_grep_exclude_dir",
+        "aprobe_grep_include",
+    ):
+        monkeypatch.setattr(capabilities, name, alive)
+    await backend.awarm_capabilities()
+    assert all(getattr(backend, cache) is True for cache in _CACHES)
+
+
+async def test_probe_crash_on_a_live_shell_is_cached_as_false(monkeypatch):
+    async def crash(_backend):
+        raise OSError("grep recipe blew up")
+
+    monkeypatch.setattr(capabilities, "aprobe_has_find", crash)
+    monkeypatch.setattr(capabilities, "aprobe_has_grep", crash)
+    backend = LocalFsBackend()
+    await backend.awarm_capabilities()
+    assert backend._has_find_cache is False
+    assert backend._has_grep_cache is False
+    assert backend._grep_exclude_dir_cache is False
+    assert backend._grep_include_cache is False
+
+
 async def test_context_build_does_not_warm_the_probes(tmp_path, monkeypatch):
     """Сборка контекста пробы НЕ трогает — и это решение, а не забывчивость.
 

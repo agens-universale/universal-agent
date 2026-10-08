@@ -392,6 +392,38 @@ async def test_watchdog_probe_is_cached_and_reported():
     assert await be._awatchdog() == first
 
 
+async def test_dead_runtime_is_not_cached_as_no_watchdog():
+    from types import SimpleNamespace
+
+    from gc_core.backends.remote_shell import RemoteShellBackend
+    from gc_core.backends.runtime_probe import RuntimeUnavailable
+
+    be = RemoteShellBackend(
+        ["env"],
+        cwd=None,
+        env={},
+        exec_init=None,
+        exec_output_capture_max_chars=1000,
+        walk_output_max_chars=1000,
+    )
+
+    async def down(*_args, **_kwargs):
+        raise RuntimeUnavailable()
+
+    be._afs_exec = down
+    with pytest.raises(RuntimeUnavailable):
+        await be._awatchdog()
+    assert "_watchdog_tool" not in be.__dict__
+
+    async def live(*_args, **_kwargs):
+        return SimpleNamespace(
+            stdout="timeout\n", stderr="", return_code=0, timed_out=False
+        )
+
+    be._afs_exec = live
+    assert await be._awatchdog() == "timeout"
+
+
 async def test_download_rejects_non_base64_noise():
     # Чужой текст в stdout (эхо профиля, предупреждение sh) из букв алфавита
     # base64 раньше вклеивался в байты файла при rc 0.

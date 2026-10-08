@@ -31,6 +31,7 @@ from gc_core.backends.protocol import (
 from gc_core.backends.runtime_probe import (
     DEFAULT_RUNTIME_PROBE_TTL_SEC,
     RuntimeProbeCache,
+    RuntimeUnavailable,
 )
 from gc_core.backends.walk_util import FlatWalkMixin
 
@@ -251,7 +252,11 @@ class RemoteShellBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
 
     # --- exec-семейство ---
     async def _awatchdog(self) -> Optional[str]:
-        """Какой сторож есть на той стороне; `None` — никакого (одна проба)."""
+        """Какой сторож есть на той стороне; `None` — никакого (одна проба).
+
+        ``RuntimeUnavailable`` не запоминается: мёртвая оболочка — не «сторожа
+        нет». Следующий вызов спросит снова и снова обернёт команду.
+        """
         cached = getattr(self, "_watchdog_tool", _MISSING)
         if cached is not _MISSING:
             return cached
@@ -265,6 +270,8 @@ class RemoteShellBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
                 and answer[-1] in _WATCHDOG_TOOLS
             ):
                 tool = answer[-1]
+        except RuntimeUnavailable:
+            raise
         except Exception:
             tool = None
         if tool is None:
