@@ -6,7 +6,11 @@ import threading
 
 import pytest
 from gc_core.backends.harbor import HarborBackend, build_harbor_shell_command
-from gc_core.backends.runtime_probe import RuntimeUnavailable, probe_stdout
+from gc_core.backends.runtime_probe import (
+    _RUNTIME_PROBE_TIMEOUT_SEC,
+    RuntimeUnavailable,
+    probe_stdout,
+)
 from gc_core.backends.protocol import FsBackend
 
 
@@ -926,6 +930,23 @@ async def test_failed_probe_does_not_run_the_command(loop_in_thread):
     assert "turn_finish" in str(err.value)
     assert len(recorded) == 1
     assert probe_stdout(recorded[0]) is not None
+
+
+async def test_short_command_timeout_does_not_shrink_the_probe(loop_in_thread):
+    """``timeout: 1`` у команды не режет echo: проба всегда ждёт свои 60 с."""
+    env = FakeEnv()
+    seen = []
+
+    async def exec_record(command, **kw):
+        if probe_stdout(command) is not None:
+            seen.append(kw.get("timeout_sec"))
+            return FakeExecResult(stdout=probe_stdout(command), return_code=0)
+        return FakeExecResult(stdout="ok\n", return_code=0)
+
+    env.exec = exec_record
+    backend = HarborBackend(env, loop_in_thread)
+    await backend.aexec("echo hi", timeout=1)
+    assert seen == [_RUNTIME_PROBE_TIMEOUT_SEC]
 
 
 async def test_probe_timeout_is_runtime_unavailable(loop_in_thread):

@@ -242,7 +242,7 @@ class HarborBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
         Перед действием — проба суммы. ``probe=False`` только у самой пробы.
         """
         if probe:
-            await self._runtime_probe.ensure(self._aprobe, timeout=timeout)
+            await self._runtime_probe.ensure(self._aprobe)
         full = build_harbor_shell_command(
             command, cwd=cwd, env=env, exec_init=exec_init
         )

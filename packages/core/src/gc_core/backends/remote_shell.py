@@ -144,7 +144,7 @@ class RemoteShellBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
         probe: bool = True,
     ) -> ExecResult:
         if probe:
-            await self._runtime_probe.ensure(self._aprobe, timeout=timeout)
+            await self._runtime_probe.ensure(self._aprobe)
         remote = ["sh", "-c", shell_command]
         if self.joins_argv:
             remote = [shlex.join(remote)]

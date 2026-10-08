@@ -123,28 +123,18 @@ def _probe_failure_message(stdout: str, stderr: str) -> str:
     return _RUNTIME_PROBE_NUDGE
 
 
-def _probe_timeout(timeout: int | None) -> int:
-    """Потолок пробы — 60 с, но не дольше таймаута самого действия.
-
-    Мёртвый демон отвечает сразу. Зависший транспорт должен упереться в
-    таймаут операции, а не ждать отдельные 60 с до неё.
-    """
-    if timeout is None or timeout <= 0:
-        return _RUNTIME_PROBE_TIMEOUT_SEC
-    return min(int(timeout), _RUNTIME_PROBE_TIMEOUT_SEC)
-
-
-async def aensure_runtime(
-    run: ProbeRun, *, timeout: int | None = None
-) -> None:
+async def aensure_runtime(run: ProbeRun) -> None:
     """Убедиться, что ``run`` исполняет оболочку. Иначе ``RuntimeUnavailable``.
 
     Кэша здесь нет: его держит ``RuntimeProbeCache``. ``run`` обязан не звать
-    пробу снова.
+    пробу снова. Потолок echo — свои 60 с, не таймаут команды: живой ответ
+    приходит сразу, а ``timeout: 1`` не объявляет медленный docker мёртвым.
     """
     left, right = _probe_terms()
     try:
-        res = await run(_probe_command(left, right), _probe_timeout(timeout))
+        res = await run(
+            _probe_command(left, right), _RUNTIME_PROBE_TIMEOUT_SEC
+        )
     except RuntimeUnavailable:
         raise
     except Exception as exc:
@@ -175,16 +165,14 @@ class RuntimeProbeCache:
     def _fresh(self) -> bool:
         return self.ttl_sec > 0 and time.monotonic() < self._ok_until
 
-    async def ensure(
-        self, run: ProbeRun, *, timeout: int | None = None
-    ) -> None:
+    async def ensure(self, run: ProbeRun) -> None:
         if self._fresh():
             return
         if self.ttl_sec <= 0:
-            await aensure_runtime(run, timeout=timeout)
+            await aensure_runtime(run)
             return
         async with self._lock:
             if self._fresh():
                 return
-            await aensure_runtime(run, timeout=timeout)
+            await aensure_runtime(run)
             self._ok_until = time.monotonic() + self.ttl_sec

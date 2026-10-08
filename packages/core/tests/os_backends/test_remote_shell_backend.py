@@ -101,6 +101,31 @@ async def test_probe_precedes_the_remote_command(monkeypatch):
     assert capture != backend.walk_output_max_chars
 
 
+async def test_short_command_timeout_does_not_shrink_the_probe(monkeypatch):
+    """``timeout: 1`` у команды не режет echo: проба всегда ждёт свои 60 с."""
+    from gc_core.backends.protocol import ExecResult
+    from gc_core.backends.runtime_probe import (
+        _RUNTIME_PROBE_TIMEOUT_SEC,
+        probe_stdout,
+    )
+
+    seen = []
+
+    async def fake_process(argv, **kw):
+        if probe_stdout(argv[-1]) is not None:
+            seen.append(kw.get("timeout"))
+            return ExecResult(stdout=probe_stdout(argv[-1]), return_code=0)
+        return ExecResult(stdout="ok\n", return_code=0)
+
+    monkeypatch.setattr(
+        "gc_core.backends.remote_shell._arun_bounded_process", fake_process
+    )
+    backend = RemoteShellBackend(["docker", "exec", "-i", "box"])
+    result = await backend.aexec("echo hi", timeout=1)
+    assert result.stdout == "ok\n"
+    assert seen == [_RUNTIME_PROBE_TIMEOUT_SEC]
+
+
 async def test_aexec_runs_through_prefix_sh_c(be):
     res = await be.aexec("echo $0; echo hi")
     assert res.return_code == 0
