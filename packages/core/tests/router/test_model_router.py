@@ -521,3 +521,53 @@ def test_unbound_override_ignored_when_binding_is_alias():
 def test_unbound_override_none_by_default_keeps_level_path():
     router = _router({"models": {"flash": {}}, "slots": {"default": "flash"}})
     assert router.resolve("main").alias == "flash"
+
+
+# --- модель main-трейса для заданного уровня вызова ---------------------------
+
+_TWO_LEVELS = {
+    "models": {
+        "small": {"url": "http://small/v1/chat/completions", "token": ""},
+        "big": {"url": "http://big/v1/chat/completions", "token": ""},
+    },
+    "slots": {"light": "small", "default": "big"},
+}
+
+
+def test_resolve_main_at_level_follows_the_given_level_not_the_live_one():
+    """Уровень вызова задаёт вызывающий (сегодня — закреплённый на ход): живой
+    `/level`, переключённый посреди хода, резолв не уводит."""
+    router = _router(_TWO_LEVELS, level="default")
+    assert router.resolve_main_at_level("light").alias == "small"
+    assert router.resolve("main").alias == "big"
+
+
+def test_resolve_main_at_level_without_a_level_is_the_live_resolve():
+    router = _router(_TWO_LEVELS, level="default")
+    assert router.resolve_main_at_level(None).alias == "big"
+
+
+def test_resolve_main_at_level_keeps_the_subagent_override():
+    """У дочернего Router'а модель заморожена в нём самом — уровень родителя её
+    не подменяет."""
+    parent = _router(_TWO_LEVELS, level="default")
+    child = parent.with_override(parent.resolve_level("light"))
+    assert child.resolve_main_at_level("default").alias == "small"
+
+
+def test_resolve_level_can_skip_the_breaker_for_showcase_reads():
+    """Порог сжатия — свойство записи модели: открытый предохранитель не должен
+    ронять его чтение. Рантайм-резолв по умолчанию отказывает, как и раньше."""
+    from gc_core.model_router import AliasCircuitOpenError
+
+    router = _router(_TWO_LEVELS, level="default")
+    router.breaker.trip("small", "5xx после ретраев")
+    with pytest.raises(AliasCircuitOpenError):
+        router.resolve_level("light")
+    with pytest.raises(AliasCircuitOpenError):
+        router.resolve_main_at_level("light")
+    assert router.resolve_level("light", check_breaker=False).alias == "small"
+    assert (
+        router.resolve_main_at_level("light", check_breaker=False).alias
+        == "small"
+    )

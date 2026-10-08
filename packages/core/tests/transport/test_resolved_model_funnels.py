@@ -36,6 +36,13 @@ def _canonical_once(processing_module, *args, **kwargs):
     )
 
 
+def _serve_main_trace(router) -> None:
+    """Main-трейс берёт модель через `ModelRouter.resolve_main_at_level` (уровень
+    вызова). У фейка без уровней это тот же `resolve("main")` — счёт вызовов
+    `resolve` в проверках остаётся прежним."""
+    router.resolve_main_at_level = lambda level, **_kw: router.resolve("main")
+
+
 def _resolved(**overrides) -> ResolvedModel:
     base = dict(
         alias="light",
@@ -704,6 +711,7 @@ def test_main_trace_resolves_and_declares_main_consumer(monkeypatch):
     router = SimpleNamespace(
         resolve=Mock(return_value=_resolved(model="light-model"))
     )
+    _serve_main_trace(router)
     ctx = SimpleNamespace(
         config_dict={
             "backend_api_mode": "chat_completions",
@@ -779,6 +787,7 @@ def test_main_trace_backend_overrides_apply_to_network_params(monkeypatch):
             )
         )
     )
+    _serve_main_trace(router)
     ctx = SimpleNamespace(
         config_dict={
             "backend_api_mode": "chat_completions",
@@ -903,6 +912,7 @@ def test_main_trace_responses_mode_ignores_network_overrides(monkeypatch):
             )
         )
     )
+    _serve_main_trace(router)
     ctx = SimpleNamespace(
         config_dict={
             "backend_api_mode": "responses",
@@ -1050,6 +1060,7 @@ def test_main_trace_backend_overrides_reach_retry_policy_and_token_limits(
             )
         )
     )
+    _serve_main_trace(router)
     ctx = SimpleNamespace(
         config_dict={
             "backend_api_mode": "chat_completions",

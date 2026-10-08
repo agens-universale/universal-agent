@@ -129,17 +129,21 @@ def resolve_summary_limits_for_resolved(
     )
 
 
-def resolve_summary_limits_for_router(
+def resolve_summary_limits_at_level(
     config_dict: Dict[str, Any],
     router: Any | None,
-    *,
-    consumer: str = "main",
+    level: str | None,
 ) -> ResolvedSummaryLimits:
-    """Пороги алиаса истории через Router. Нет router / ошибка → глобаль."""
+    """Пороги модели, которая ведёт историю, — той же, в которую идут запросы.
+
+    ``level`` — уровень вызова (сегодня — зафиксированный на ход
+    ``state.turn_level``): живой ``/level`` посреди хода модель запросов не
+    меняет, и порог обязан остаться её порогом. Нет router / ошибка → глобаль.
+    Предохранитель не проверяется: порог — свойство записи модели."""
     resolved = None
     if router is not None:
         try:
-            resolved = router.resolve(consumer, check_breaker=False)
+            resolved = router.resolve_main_at_level(level, check_breaker=False)
         except Exception:
             resolved = None
     return resolve_summary_limits_for_resolved(config_dict, resolved)

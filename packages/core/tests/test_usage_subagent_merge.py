@@ -74,8 +74,8 @@ async def test_finally_merge_folds_child_usage_into_parent(monkeypatch):
     # Сжатие у ребёнка выключено: пороги нулевые (координатор — no-op).
     monkeypatch.setattr(
         runner_mod,
-        "resolve_summary_limits_for_router",
-        lambda cfg, router, **kwargs: resolve_summary_limits({}),
+        "resolve_summary_limits_at_level",
+        lambda cfg, router, level: resolve_summary_limits({}),
     )
 
     async def _create(*a, **k):

@@ -55,7 +55,7 @@ from gc_core.run_summary_coordinator import (
 from gc_core.security.permission_store import PermissionStore
 from gc_core.states import SharedStateData, State
 from gc_core.summarize.config import (
-    resolve_summary_limits_for_router,
+    resolve_summary_limits_at_level,
 )
 from gc_core.thread_store import (
     ThreadSession,
@@ -1121,10 +1121,20 @@ class AgentExecutor:
         return getattr(self._ctx, "model_router", None)
 
     def _history_summary_limits(self, config_dict: dict):
-        """Пороги сжатия алиаса истории на момент проверки (не снимок старта run)."""
-        return resolve_summary_limits_for_router(
-            config_dict, self.get_model_router(), consumer="main"
+        """Пороги сжатия модели ХОДА на момент проверки (не снимок старта run):
+        по уровню, зафиксированному `begin_turn`, — тому же, по которому идут
+        запросы. До сборки state уровня ещё нет — обычный резолв `main`."""
+        return resolve_summary_limits_at_level(
+            config_dict,
+            self.get_model_router(),
+            getattr(self._state, "turn_level", None),
         )
+
+    def summary_limits(self):
+        """Пороги сжатия, по которым работает ЭТОТ executor: его снимок конфига,
+        его Router, уровень текущего хода. Читает индикатор контекста TUI — живой
+        конфиг экрана и живой `/level` меняются раньше, чем их увидит ход."""
+        return self._history_summary_limits(self._ctx.config_dict)
 
     def _optional_chat_completions_prompts(
         self, backend_api_mode: str, effective_verbose: bool, logger
