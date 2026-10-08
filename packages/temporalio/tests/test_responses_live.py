@@ -16,7 +16,7 @@ from gc_core.utils.logging_module import release_run_logger
 from gc_core_temporalio.contracts import RunRequest
 from gc_core_temporalio.provider import WorkerConfig
 from gc_core_temporalio.worker import build_runtime, worker_options
-from gc_core_temporalio.workflow import AgentWorkflow
+from gc_core_temporalio.workflow import UniversalAgentWorkflow
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer, Worker
 from test_parity_live import snapshot
@@ -204,7 +204,7 @@ async def test_responses_two_turns_exact_parity_and_cache_recovery(
             ):
                 for turn in range(2):
                     handle = await env.client.start_workflow(
-                        AgentWorkflow.run,
+                        UniversalAgentWorkflow.run,
                         RunRequest(
                             "test",
                             "files",
@@ -240,9 +240,9 @@ async def test_responses_two_turns_exact_parity_and_cache_recovery(
             assert actual == local
             count = len(requests)
             for history in histories:
-                await Replayer(workflows=[AgentWorkflow]).replay_workflow(
-                    history
-                )
+                await Replayer(
+                    workflows=[UniversalAgentWorkflow]
+                ).replay_workflow(history)
             assert len(requests) == count
     finally:
         await contexts.aclose()

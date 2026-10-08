@@ -51,8 +51,8 @@ async def drain_signals(tasks, *, failed):
         await asyncio.gather(*tasks, return_exceptions=failed)
 
 
-@workflow.defn(name="SubagentWorkflow")
-class SubagentWorkflow:
+@workflow.defn(name="UniversalSubagentWorkflow")
+class UniversalSubagentWorkflow:
     def __init__(self):
         self.sequence = 0
         self.checkpoint_sequence = 0
@@ -162,7 +162,7 @@ class SubagentWorkflow:
                 )
             try:
                 prepared = await operations.call(
-                    "agent.subagent.prepare",
+                    "universal_agent.subagent.prepare",
                     {
                         "store_id": request.start.store_id,
                         "parent_state": request.parent_state,

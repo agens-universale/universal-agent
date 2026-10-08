@@ -31,7 +31,7 @@ async def gate(kind, value=None):
 
 
 class GatedThreadActivities(ThreadStoreActivities):
-    @activity.defn(name="agent.thread.commit")
+    @activity.defn(name="universal_agent.thread.commit")
     async def commit(self, request: ThreadStoreCall) -> ThreadStoreReply:
         selected = request.operation.kind == "persist"
         if selected:

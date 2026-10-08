@@ -87,7 +87,7 @@ def test_worker_loss_is_tool_feedback_only_for_effects(effect, expected):
         scheduled_event_id=1,
         started_event_id=2,
         identity="worker",
-        activity_type="agent.tool.execute",
+        activity_type="universal_agent.tool.execute",
         activity_id="tool-1",
         retry_state=RetryState.MAXIMUM_ATTEMPTS_REACHED,
     )
@@ -96,7 +96,7 @@ def test_worker_loss_is_tool_feedback_only_for_effects(effect, expected):
     )
     assert isinstance(
         WorkflowOperations._activity_error(
-            error, "agent.tool.execute", effect=effect
+            error, "universal_agent.tool.execute", effect=effect
         ),
         expected,
     )

@@ -10,7 +10,7 @@ from gc_core.agent_executor import AgentExecutor
 from gc_core.execution.contracts import ExecutionFailure, InfrastructureFailure
 from gc_core_temporalio.operations import session_failure
 from gc_core_temporalio.worker import build_runtime, worker_options
-from gc_core_temporalio.workflow import AgentWorkflow
+from gc_core_temporalio.workflow import UniversalAgentWorkflow
 from temporalio.api.enums.v1 import EventType
 from temporalio.client import WorkflowExecutionStatus
 from temporalio.exceptions import ActivityError, ApplicationError
@@ -28,7 +28,7 @@ def test_session_failure_separates_domain_from_code_errors():
         scheduled_event_id=1,
         started_event_id=2,
         identity="w",
-        activity_type="agent.model.request",
+        activity_type="universal_agent.model.request",
         activity_id="1",
         retry_state=None,
     )
@@ -74,7 +74,7 @@ async def test_workflow_bug_keeps_run_until_fixed_worker(
         contexts, broken_worker = worker()
         async with broken_worker:
             handle = await env.client.start_workflow(
-                AgentWorkflow.run,
+                UniversalAgentWorkflow.run,
                 request(),
                 id="controls",
                 task_queue="native-controls",

@@ -13,7 +13,7 @@ from gc_core_temporalio.worker import (
     set_current_version,
     worker_options,
 )
-from gc_core_temporalio.workflow import AgentWorkflow
+from gc_core_temporalio.workflow import UniversalAgentWorkflow
 from live_support import call, temporal_cli
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
@@ -67,7 +67,7 @@ async def test_turn_is_pinned_and_next_turn_runs_on_new_build(
             async with worker(v1):
                 await set_current_version(env.client, v1)
                 handle = await env.client.start_workflow(
-                    AgentWorkflow.run,
+                    UniversalAgentWorkflow.run,
                     request(keep_alive=True),
                     id="controls",
                     task_queue="native-controls",
@@ -85,7 +85,7 @@ async def test_turn_is_pinned_and_next_turn_runs_on_new_build(
                     # Весь первый ход — на v1, хотя текущей уже стала v2.
                     assert {body["model"] for body in requests} == {"model-a"}
                     await handle.execute_update(
-                        AgentWorkflow.submit_message,
+                        UniversalAgentWorkflow.submit_message,
                         UserMessage("second", "second task"),
                     )
                     await wait_status(
@@ -93,7 +93,7 @@ async def test_turn_is_pinned_and_next_turn_runs_on_new_build(
                         lambda s: s["turns"] == 2 and s["phase"] == "idle",
                     )
                     assert requests[-1]["model"] == "model-b"
-                    await handle.signal(AgentWorkflow.close_session)
+                    await handle.signal(UniversalAgentWorkflow.close_session)
                     await asyncio.wait_for(handle.result(), 30)
     finally:
         for contexts in runtimes:

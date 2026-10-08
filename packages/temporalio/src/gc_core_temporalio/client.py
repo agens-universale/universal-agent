@@ -17,7 +17,7 @@ from temporalio.common import WorkflowIDConflictPolicy, WorkflowIDReusePolicy
 
 from gc_core_temporalio.contracts import RunRequest, UserMessage
 from gc_core_temporalio.public_config import settings_fingerprint
-from gc_core_temporalio.workflow import AgentWorkflow
+from gc_core_temporalio.workflow import UniversalAgentWorkflow
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +49,7 @@ class AgentClient:
         ):
             raise ValueError("At least one nonempty message is required")
         return await self.client.start_workflow(
-            AgentWorkflow.run,
+            UniversalAgentWorkflow.run,
             request,
             id=workflow_id or f"ua-session-{uuid.uuid4().hex}",
             task_queue=self.workflow_queue,
@@ -60,7 +60,7 @@ class AgentClient:
 
     async def status(self, workflow_id):
         return await self.client.get_workflow_handle(workflow_id).query(
-            AgentWorkflow.status
+            UniversalAgentWorkflow.status
         )
 
     async def result(self, workflow_id):
@@ -68,17 +68,17 @@ class AgentClient:
 
     async def stop(self, workflow_id):
         await self.client.get_workflow_handle(workflow_id).signal(
-            AgentWorkflow.stop
+            UniversalAgentWorkflow.stop
         )
 
     async def stop_turn(self, workflow_id, turn_id):
         return await self.client.get_workflow_handle(
             workflow_id
-        ).execute_update(AgentWorkflow.stop_turn, turn_id)
+        ).execute_update(UniversalAgentWorkflow.stop_turn, turn_id)
 
     async def close_session(self, workflow_id):
         await self.client.get_workflow_handle(workflow_id).signal(
-            AgentWorkflow.close_session
+            UniversalAgentWorkflow.close_session
         )
 
     async def submit_with_start(
@@ -90,7 +90,7 @@ class AgentClient:
         """
         message.validate()
         operation = WithStartWorkflowOperation(
-            AgentWorkflow.run,
+            UniversalAgentWorkflow.run,
             request,
             id=workflow_id,
             id_conflict_policy=WorkflowIDConflictPolicy.USE_EXISTING,
@@ -98,7 +98,7 @@ class AgentClient:
             task_queue=self.workflow_queue,
         )
         return await self.client.execute_update_with_start_workflow(
-            AgentWorkflow.submit_message,
+            UniversalAgentWorkflow.submit_message,
             message,
             start_workflow_operation=operation,
         )
@@ -111,7 +111,7 @@ class AgentClient:
         for message in messages:
             message.validate()
         operation = WithStartWorkflowOperation(
-            AgentWorkflow.run,
+            UniversalAgentWorkflow.run,
             request,
             id=workflow_id,
             id_conflict_policy=WorkflowIDConflictPolicy.USE_EXISTING,
@@ -119,7 +119,7 @@ class AgentClient:
             task_queue=self.workflow_queue,
         )
         return await self.client.execute_update_with_start_workflow(
-            AgentWorkflow.submit_batch,
+            UniversalAgentWorkflow.submit_batch,
             messages,
             start_workflow_operation=operation,
         )
@@ -129,7 +129,7 @@ class AgentClient:
         return await self.client.get_workflow_handle(
             workflow_id
         ).execute_update(
-            AgentWorkflow.submit_message,
+            UniversalAgentWorkflow.submit_message,
             message,
         )
 
@@ -139,7 +139,7 @@ class AgentClient:
         return await self.client.get_workflow_handle(
             workflow_id
         ).execute_update(
-            AgentWorkflow.answer_human,
+            UniversalAgentWorkflow.answer_human,
             args=[request_id, answer, reply_id],
         )
 
@@ -315,7 +315,7 @@ class AgentSession:
         with _settings_mismatch():
             if self.attached:
                 await self.handle.execute_update(
-                    AgentWorkflow.submit_batch, messages
+                    UniversalAgentWorkflow.submit_batch, messages
                 )
             else:
                 await AgentClient(
@@ -355,7 +355,7 @@ class AgentSession:
             failed_query = False
             try:
                 state = await self.handle.query(
-                    AgentWorkflow.message_state, message_id
+                    UniversalAgentWorkflow.message_state, message_id
                 )
             except RPCError:
                 # Задача workflow в сбое, сессия завершена или ещё стартует.
@@ -443,19 +443,20 @@ class AgentSession:
 
     async def answer_human(self, request_id, answer, *, reply_id=None):
         return await self.handle.execute_update(
-            AgentWorkflow.answer_human, args=[request_id, answer, reply_id]
+            UniversalAgentWorkflow.answer_human,
+            args=[request_id, answer, reply_id],
         )
 
     async def stop(self):
         """Остановить идущий ход (кооперативно, как ``AsyncAgent.stop``)."""
-        await self.handle.signal(AgentWorkflow.stop)
+        await self.handle.signal(UniversalAgentWorkflow.stop)
 
     async def status(self):
-        return await self.handle.query(AgentWorkflow.status)
+        return await self.handle.query(UniversalAgentWorkflow.status)
 
     async def close(self):
         """Закрыть сессию после принятой работы и снять владение тредом."""
-        await self.handle.signal(AgentWorkflow.close_session)
+        await self.handle.signal(UniversalAgentWorkflow.close_session)
 
 
 class TemporalDurability:

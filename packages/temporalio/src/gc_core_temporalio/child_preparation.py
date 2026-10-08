@@ -63,7 +63,7 @@ class ChildActivities:
     def __init__(self, activities):
         self.native = activities
 
-    @activity.defn(name="agent.subagent.prepare")
+    @activity.defn(name="universal_agent.subagent.prepare")
     async def prepare(self, call: ActivityCall) -> PreparedChild:
         return await self.native._recorded(call, PreparedChild, self._prepare)
 

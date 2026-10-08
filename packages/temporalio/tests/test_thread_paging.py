@@ -59,8 +59,8 @@ class _Recorder:
         if self.before_call is not None:
             self.before_call(self.calls, request)
         handler = {
-            "agent.thread.load": self.activities.load,
-            "agent.thread.read_trace": self.activities.read_trace,
+            "universal_agent.thread.load": self.activities.load,
+            "universal_agent.thread.read_trace": self.activities.read_trace,
         }[name]
         try:
             reply = await handler(request)

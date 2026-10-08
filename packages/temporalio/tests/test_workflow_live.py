@@ -11,7 +11,7 @@ from gc_core.run_context import acreate_run_context
 from gc_core.thread_store_file_durable import DurableFileThreadStore
 from gc_core_temporalio.activities import AgentActivities
 from gc_core_temporalio.contracts import RunRequest
-from gc_core_temporalio.workflow import AgentWorkflow
+from gc_core_temporalio.workflow import UniversalAgentWorkflow
 from gc_core_temporalio.public_config import public_config_snapshot
 from gc_testkit.settings import make_settings
 from gc_core_temporalio.storage.sqlite import SQLiteThreadStore
@@ -106,11 +106,11 @@ async def test_native_executor_uses_real_file_session_and_replays(
         async with Worker(
             env.client,
             task_queue="native-test",
-            workflows=[AgentWorkflow],
+            workflows=[UniversalAgentWorkflow],
             activities=registered,
         ):
             handle = await env.client.start_workflow(
-                AgentWorkflow.run,
+                UniversalAgentWorkflow.run,
                 RunRequest(
                     "test",
                     "files",
@@ -148,10 +148,10 @@ async def test_native_executor_uses_real_file_session_and_replays(
         # Optional startup batching removes one metadata read and one commit.
         # persist: turn — шаги хода одним commit'ом в конце хода.
         assert (
-            activity_counts["agent.thread.commit"]
+            activity_counts["universal_agent.thread.commit"]
             == ({"step": 11 if batch_flags else 12, "turn": 4}[persist])
         )
-        assert activity_counts["agent.thread.load"] == (
+        assert activity_counts["universal_agent.thread.load"] == (
             2 if batch_flags else 3
         )
         measurement = {
@@ -179,5 +179,7 @@ async def test_native_executor_uses_real_file_session_and_replays(
             ]["knowledge"]
             == "durable fact"
         )
-        await Replayer(workflows=[AgentWorkflow]).replay_workflow(history)
+        await Replayer(workflows=[UniversalAgentWorkflow]).replay_workflow(
+            history
+        )
         assert len(requests) == 2

@@ -23,7 +23,7 @@ Temporal — необязательный режим. TUI, `gc-cli`, `gc-server`
 - **Приложение** — шлёт сообщения и получает ответы: тот же `AsyncAgent` с
   `durable=TemporalDurability(...)`, `AgentSession` или команда `gc-temporal`.
 
-Одна сессия агента — один тред: workflow `AgentWorkflow` живёт между
+Одна сессия агента — один тред: workflow `UniversalAgentWorkflow` живёт между
 сообщениями и после каждого хода начинает новый run (Continue-As-New), чтобы
 история не росла.
 
@@ -96,7 +96,7 @@ async with agent:
 ### Из кода: `AgentPlugin`
 
 `AgentPlugin` — плагин `temporalio` (`SimplePlugin`): подключается к `Client`
-или к `Worker`, добавляет workflow `AgentWorkflow` и `SubagentWorkflow`,
+или к `Worker`, добавляет workflow `UniversalAgentWorkflow` и `UniversalSubagentWorkflow`,
 activities агента и песочницу кода workflow. Всё, что относится к Temporal,
 задаётся нативными объектами `temporalio`.
 
@@ -363,11 +363,11 @@ worker = Worker(
     task_queue="orders",
     workflows=[OrderWorkflow],  # ваш workflow
     activities=[charge, send_email],  # ваши activities
-    plugins=[plugin],  # агенты: AgentWorkflow и его activities
+    plugins=[plugin],  # агенты: UniversalAgentWorkflow и его activities
 )
 ```
 
-`agent_step("shop", …)` запускает дочерний `AgentWorkflow` с профилем
+`agent_step("shop", …)` запускает дочерний `UniversalAgentWorkflow` с профилем
 `"shop"` на очереди `task_queue` (по умолчанию — очередь вашего workflow);
 воркер этой очереди находит профиль по имени. Сверки отпечатка настроек у
 шага нет: источник настроек — профиль воркера.
@@ -379,7 +379,7 @@ worker = Worker(
 ждёт в очереди Temporal, ваш workflow ждёт результат шага, и как только
 воркер поднимется, шаг выполнится — обычная durable-семантика Temporal.
 
-- Шаг — один ход агента в дочернем `AgentWorkflow`: тот же агент, тред и
+- Шаг — один ход агента в дочернем `UniversalAgentWorkflow`: тот же агент, тред и
   гарантии (повторы модели, эффект — одна попытка).
   Несколько шагов одного треда идут подряд и видят общую историю.
 - ID дочернего workflow предсказуем — `step_workflow_id(ID_родителя, шаг)`
@@ -686,15 +686,15 @@ Temporal ограничивает запись истории 2 МБ, истор
 
 | Activity | Что делает |
 |---|---|
-| `agent.context.prepare` | собрать настоящий контекст профиля на воркере (MCP, инструменты, промпты); отдать workflow публичную часть |
-| `agent.model.request` | запрос к модели |
-| `agent.tool.execute` | эффект инструмента (одна попытка) |
-| `agent.guard.probe` | факты для guard'ов (файлы, пути) |
-| `agent.thread.load` / `commit` / `read_trace` | чтение и запись треда |
-| `agent.state.prepare`, `agent.prompts.prepare`, `agent.prompt.read`, `agent.skills.list` | подготовка хода |
-| `agent.memory.execute` / `hash` | память проекта |
-| `agent.subagent.prepare` | контекст субагента (дочерний workflow `SubagentWorkflow`) |
-| `agent.summary.trace`, `agent.context.close` / `release` | трасса суммаризации, уборка хода |
+| `universal_agent.context.prepare` | собрать настоящий контекст профиля на воркере (MCP, инструменты, промпты); отдать workflow публичную часть |
+| `universal_agent.model.request` | запрос к модели |
+| `universal_agent.tool.execute` | эффект инструмента (одна попытка) |
+| `universal_agent.guard.probe` | факты для guard'ов (файлы, пути) |
+| `universal_agent.thread.load` / `commit` / `read_trace` | чтение и запись треда |
+| `universal_agent.state.prepare`, `universal_agent.prompts.prepare`, `universal_agent.prompt.read`, `universal_agent.skills.list` | подготовка хода |
+| `universal_agent.memory.execute` / `hash` | память проекта |
+| `universal_agent.subagent.prepare` | контекст субагента (дочерний workflow `UniversalSubagentWorkflow`) |
+| `universal_agent.summary.trace`, `universal_agent.context.close` / `release` | трасса суммаризации, уборка хода |
 
 Подробности по файлам — docstring модулей пакета
 [`gc_core_temporalio`](../packages/temporalio/src/gc_core_temporalio).

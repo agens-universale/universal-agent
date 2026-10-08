@@ -24,7 +24,7 @@ from gc_core.utils.logging_module import release_run_logger
 from gc_core_temporalio.contracts import ActivityCall, RunRequest, UserMessage
 from gc_core_temporalio.provider import WorkerConfig
 from gc_core_temporalio.worker import build_runtime, worker_options
-from gc_core_temporalio.workflow import AgentWorkflow
+from gc_core_temporalio.workflow import UniversalAgentWorkflow
 from temporalio import activity
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer, Worker
@@ -280,13 +280,13 @@ async def drive_session(handle, messages):
     handle = handle._client.get_workflow_handle(handle.id)
     try:
         while not result.done():
-            status = await handle.query(AgentWorkflow.status)
+            status = await handle.query(UniversalAgentWorkflow.status)
             pending = status.get("pending_human")
             if pending and pending["request_id"] not in answered:
                 answered.add(pending["request_id"])
                 questions.append(pending.get("question"))
                 await handle.execute_update(
-                    AgentWorkflow.answer_human,
+                    UniversalAgentWorkflow.answer_human,
                     args=[pending["request_id"], "1350"],
                 )
             if len(messages) > 1 and status.get("turns", 0) >= sent:
@@ -294,12 +294,12 @@ async def drive_session(handle, messages):
                     answers.append(status.get("answer"))
                 if sent < len(messages):
                     await handle.execute_update(
-                        AgentWorkflow.submit_message,
+                        UniversalAgentWorkflow.submit_message,
                         UserMessage(f"input-{sent}", messages[sent]),
                     )
                     sent += 1
                 else:
-                    await handle.signal(AgentWorkflow.close_session)
+                    await handle.signal(UniversalAgentWorkflow.close_session)
             await asyncio.wait({result}, timeout=0.2)
         value = result.result()
     finally:
@@ -646,14 +646,14 @@ async def test_actual_http_local_native_parity(
     if scenario.get("stop_after_tool"):
         original_tool = native.tool
 
-        @activity.defn(name="agent.tool.execute")
+        @activity.defn(name="universal_agent.tool.execute")
         async def tool_then_stop(call: ActivityCall) -> ToolResult:
             result = await original_tool(call)
             if not session.get("stopped"):
                 # Сигнал — до завершения activity: workflow примет stop
                 # раньше её результата, как local stop_run после инструмента.
                 session["stopped"] = True
-                await session["handle"].signal(AgentWorkflow.stop)
+                await session["handle"].signal(UniversalAgentWorkflow.stop)
             return result
 
         native.tool = tool_then_stop
@@ -672,7 +672,7 @@ async def test_actual_http_local_native_parity(
                 **options,
             ):
                 handle = await env.client.start_workflow(
-                    AgentWorkflow.run,
+                    UniversalAgentWorkflow.run,
                     RunRequest(
                         "test",
                         "files",
@@ -693,7 +693,7 @@ async def test_actual_http_local_native_parity(
                         script,
                         lambda: asyncio.run_coroutine_threadsafe(
                             handle.execute_update(
-                                AgentWorkflow.submit_message,
+                                UniversalAgentWorkflow.submit_message,
                                 UserMessage(
                                     QUEUED_DURING["id"],
                                     QUEUED_DURING["content"],
@@ -766,7 +766,9 @@ async def test_actual_http_local_native_parity(
                     in actual["shared"]["working_memory"]["knowledge"]
                 )
             count = len(requests)
-            await Replayer(workflows=[AgentWorkflow]).replay_workflow(history)
+            await Replayer(workflows=[UniversalAgentWorkflow]).replay_workflow(
+                history
+            )
             assert len(requests) == count
     finally:
         await contexts.aclose()

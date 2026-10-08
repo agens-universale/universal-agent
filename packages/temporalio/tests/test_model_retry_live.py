@@ -6,7 +6,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
-from gc_core_temporalio.workflow import AgentWorkflow
+from gc_core_temporalio.workflow import UniversalAgentWorkflow
 from temporalio.api.enums.v1 import EventType
 from test_workflow_controls import finish, request, runtime
 
@@ -79,7 +79,7 @@ async def test_transient_provider_failure_is_retried_by_temporal(
     url, calls = flaky_provider
     async with runtime(tmp_path, url) as (env, _, _):
         handle = await env.client.start_workflow(
-            AgentWorkflow.run,
+            UniversalAgentWorkflow.run,
             request(),
             id="controls",
             task_queue="native-controls",

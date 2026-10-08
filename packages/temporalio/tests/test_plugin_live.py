@@ -124,11 +124,11 @@ async def test_async_agent_runs_through_a_plugin_worker(
     assert len(requests) == 2
     contents = [m.get("content") for m in store.load_messages("sdk", "t1")]
     assert "first task" in contents and "second task" in contents
-    assert ("agent.model.request", "shop-model") in queues
+    assert ("universal_agent.model.request", "shop-model") in queues
     assert all(
         queue == "shop"
         for name, queue in queues
-        if name != "agent.model.request"
+        if name != "universal_agent.model.request"
     )
 
 

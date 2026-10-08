@@ -205,7 +205,7 @@ class ThreadStoreActivities:
         while len(self._metas) > _META_CACHE_SIZE:
             self._metas.popitem(last=False)
 
-    @activity.defn(name="agent.thread.load")
+    @activity.defn(name="universal_agent.thread.load")
     async def load(self, request: ThreadStoreCall) -> ThreadStoreReply:
         store = self._port(request)
         try:
@@ -313,7 +313,7 @@ class ThreadStoreActivities:
             self._snapshots.popitem(last=False)
         return entry
 
-    @activity.defn(name="agent.thread.commit")
+    @activity.defn(name="universal_agent.thread.commit")
     async def commit(self, request: ThreadStoreCall) -> ThreadStoreReply:
         if request.operation is None:
             raise ApplicationError(
@@ -452,7 +452,7 @@ class ThreadStoreActivities:
             )
         return meta
 
-    @activity.defn(name="agent.thread.read_trace")
+    @activity.defn(name="universal_agent.thread.read_trace")
     async def read_trace(self, request: ThreadStoreCall) -> ThreadStoreReply:
         """Трасса субагента; с ``page_bytes`` — страница с ``cursor[0]``.
 

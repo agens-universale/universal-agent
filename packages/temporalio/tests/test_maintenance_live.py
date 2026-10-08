@@ -10,7 +10,7 @@ from gc_core_temporalio.maintenance import (
     WorkerMaintenance,
     owner_workflow,
 )
-from gc_core_temporalio.workflow import AgentWorkflow
+from gc_core_temporalio.workflow import UniversalAgentWorkflow
 from gc_core_temporalio.storage.sqlite import SQLiteThreadStore
 from live_support import call
 from test_workflow_controls import finish, request, runtime, wait_status
@@ -38,7 +38,7 @@ async def test_terminated_turn_context_is_released(
     script.extend([slow, [finish("done")]])
     async with runtime(tmp_path, url) as (env, provider, config):
         handle = await env.client.start_workflow(
-            AgentWorkflow.run,
+            UniversalAgentWorkflow.run,
             request(),
             id="controls",
             task_queue="native-controls",

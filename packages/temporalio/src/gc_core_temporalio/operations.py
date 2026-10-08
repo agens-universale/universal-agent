@@ -147,14 +147,14 @@ def restore_domain_error(cause):
 
 def activity_summary(name, data):
     """Readable UI labels without prompts, file contents or credentials."""
-    if name == "agent.model.request":
+    if name == "universal_agent.model.request":
         request = data["request"]
         return f"Model: {request['request_label']} ({request['consumer']})"
-    if name == "agent.tool.execute":
+    if name == "universal_agent.tool.execute":
         return f"Tool: {data['name']}"
-    if name == "agent.memory.execute":
+    if name == "universal_agent.memory.execute":
         return f"Project memory: {data['action']} / {data['phase']}"
-    if name == "agent.guard.probe":
+    if name == "universal_agent.guard.probe":
         return f"Guard: {data['request']['kind']}"
     return name.removeprefix("agent.").replace(".", " / ")
 
@@ -450,7 +450,7 @@ class WorkflowOperations:
                 )
             try:
                 reply = await self.call(
-                    "agent.model.request",
+                    "universal_agent.model.request",
                     {
                         "request": {**data, "state": state, "messages": batch},
                         "circuit_breaker": router.breaker.snapshot(),
@@ -534,7 +534,7 @@ class WorkflowOperations:
         # а вход и результат activity — записи истории (лимит 2 МБ).
         data["state"]["fetch_url_cache"] = []
         return await self.call(
-            "agent.tool.execute",
+            "universal_agent.tool.execute",
             {**data, "effect": effect},
             ToolResult,
             operation_id=request.operation_id,
@@ -614,7 +614,7 @@ class WorkflowOperations:
             return cached
         companions = self._probe_companions(request)
         reply = await self.call(
-            "agent.guard.probe",
+            "universal_agent.guard.probe",
             {
                 "request": asdict(request),
                 "companions": [asdict(item) for item in companions],
@@ -626,7 +626,7 @@ class WorkflowOperations:
 
     async def state_preparer(self, request):
         return await self.call(
-            "agent.state.prepare", asdict(request), PreparedState
+            "universal_agent.state.prepare", asdict(request), PreparedState
         )
 
     async def prompt_loader(self, request):
@@ -634,13 +634,13 @@ class WorkflowOperations:
         if prepared is not None and prepared.prompts_request == request:
             return deepcopy(prepared.prompts)
         return await self.call(
-            "agent.prompts.prepare", asdict(request), PreparedPrompts
+            "universal_agent.prompts.prepare", asdict(request), PreparedPrompts
         )
 
     async def prompt_resource(self, request):
         if request not in self._prompts:
             self._prompts[request] = await self.call(
-                "agent.prompt.read", asdict(request), str
+                "universal_agent.prompt.read", asdict(request), str
             )
         return self._prompts[request]
 
@@ -648,19 +648,19 @@ class WorkflowOperations:
         prepared = self.prepared
         if prepared is not None and prepared.skills is not None:
             return deepcopy(prepared.skills)
-        return await self.call("agent.skills.list", {}, list[dict])
+        return await self.call("universal_agent.skills.list", {}, list[dict])
 
     async def project_memory_io(self, request):
         # Чтение памяти повторяемо; запись — эффект не более одного раза.
         return await self.call(
-            "agent.memory.execute",
+            "universal_agent.memory.execute",
             asdict(request),
             ProjectMemoryReply,
             effect=request.action != "read",
         )
 
     async def project_memory_hash(self):
-        return await self.call("agent.memory.hash", {}, str | None)
+        return await self.call("universal_agent.memory.hash", {}, str | None)
 
     async def summary_trace_sink(self, record):
         # Трасса сжатия несёт входы суммаризатора (мегабайты на длинном
@@ -671,15 +671,17 @@ class WorkflowOperations:
             if len(parts) > 1:
                 part = {**part, "trace_part": [index + 1, len(parts)]}
             await self.call(
-                "agent.summary.trace", {**data, "trace_data": part}, bool
+                "universal_agent.summary.trace",
+                {**data, "trace_data": part},
+                bool,
             )
 
     async def mcp_cleanup(self):
         if not self.closed:
-            await self.call("agent.context.close", {}, bool)
+            await self.call("universal_agent.context.close", {}, bool)
             self.closed = True
 
     async def release_context(self):
         if not self.released:
-            await self.call("agent.context.release", {}, bool)
+            await self.call("universal_agent.context.release", {}, bool)
             self.released = True

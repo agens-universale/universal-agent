@@ -8,7 +8,7 @@ from gc_core_temporalio.client import AgentClient
 from gc_core_temporalio.contracts import RunRequest
 from gc_core_temporalio.provider import WorkerConfig
 from gc_core_temporalio.worker import build_runtime, worker_options
-from gc_core_temporalio.workflow import AgentWorkflow
+from gc_core_temporalio.workflow import UniversalAgentWorkflow
 from temporalio.client import WorkflowFailureError
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer, Worker
@@ -104,9 +104,9 @@ async def test_production_provider_worker_client_and_replay(
                         failure.value.cause
                     )
                     history = await handle.fetch_history()
-                    await Replayer(workflows=[AgentWorkflow]).replay_workflow(
-                        history
-                    )
+                    await Replayer(
+                        workflows=[UniversalAgentWorkflow]
+                    ).replay_workflow(history)
                     assert not requests
                     assert contexts.stores["files"].load_messages(
                         "test", "production-thread"
@@ -127,7 +127,9 @@ async def test_production_provider_worker_client_and_replay(
                 ]["knowledge"]
                 == "durable fact"
             )
-            await Replayer(workflows=[AgentWorkflow]).replay_workflow(history)
+            await Replayer(workflows=[UniversalAgentWorkflow]).replay_workflow(
+                history
+            )
             assert len(requests) == 2
     finally:
         await contexts.aclose()

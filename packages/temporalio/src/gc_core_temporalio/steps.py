@@ -14,12 +14,12 @@
             await workflow.execute_activity(send_email, step.answer, ...)
             return step.answer
 
-Шаг — один ход агента в дочернем ``AgentWorkflow`` (тот же агент, тред и
+Шаг — один ход агента в дочернем ``UniversalAgentWorkflow`` (тот же агент, тред и
 гарантии, что у сессии). ID дочернего workflow предсказуем
 (``step_workflow_id``): по нему приложение отвечает на вопрос агента и
 останавливает ход — ``AgentSession(..., workflow_id=step_workflow_id(...))``.
 Воркер процесса должен нести ``AgentPlugin`` (он регистрирует
-``AgentWorkflow`` и activities агента).
+``UniversalAgentWorkflow`` и activities агента).
 
 Тред шага занимает дочерний workflow: пока в том же треде идёт сессия
 (``AgentSession``) или другой шаг, этот отказывает (тред занят). Родитель
@@ -43,7 +43,7 @@ from temporalio.exceptions import ApplicationError
 
 from gc_core_temporalio.contracts import RunRequest, UserMessage
 from gc_core_temporalio.sizes import payload_size
-from gc_core_temporalio.workflow import AgentWorkflow
+from gc_core_temporalio.workflow import UniversalAgentWorkflow
 
 
 @dataclass
@@ -102,7 +102,7 @@ async def agent_step(
         ) from None
     child_id = step_workflow_id(workflow.info().workflow_id, step or thread_id)
     result = await workflow.execute_child_workflow(
-        AgentWorkflow.run,
+        UniversalAgentWorkflow.run,
         RunRequest(
             agent,
             store_id,

@@ -11,25 +11,25 @@ from gc_core_temporalio.provider import AgentProfile, WorkerConfig
 from gc_core_temporalio.worker import build_runtime, worker_options
 
 ACTIVITIES = {
-    "agent.context.prepare",
-    "agent.context.close",
-    "agent.context.release",
-    "agent.state.prepare",
-    "agent.prompts.prepare",
-    "agent.prompt.read",
-    "agent.skills.list",
-    "agent.model.request",
-    "agent.tool.execute",
-    "agent.guard.probe",
-    "agent.memory.execute",
-    "agent.memory.hash",
-    "agent.summary.trace",
-    "agent.subagent.prepare",
-    "agent.thread.load",
-    "agent.thread.commit",
-    "agent.thread.read_trace",
+    "universal_agent.context.prepare",
+    "universal_agent.context.close",
+    "universal_agent.context.release",
+    "universal_agent.state.prepare",
+    "universal_agent.prompts.prepare",
+    "universal_agent.prompt.read",
+    "universal_agent.skills.list",
+    "universal_agent.model.request",
+    "universal_agent.tool.execute",
+    "universal_agent.guard.probe",
+    "universal_agent.memory.execute",
+    "universal_agent.memory.hash",
+    "universal_agent.summary.trace",
+    "universal_agent.subagent.prepare",
+    "universal_agent.thread.load",
+    "universal_agent.thread.commit",
+    "universal_agent.thread.read_trace",
 }
-WORKFLOWS = {"AgentWorkflow", "SubagentWorkflow"}
+WORKFLOWS = {"UniversalAgentWorkflow", "UniversalSubagentWorkflow"}
 
 
 def test_registered_names_are_pinned(tmp_path, monkeypatch):

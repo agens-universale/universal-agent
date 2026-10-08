@@ -84,8 +84,8 @@ class _Worker:
         self.inputs.append(_size(request))
         self.calls.append(name)
         handler = {
-            "agent.thread.load": self.activities.load,
-            "agent.thread.commit": self.activities.commit,
+            "universal_agent.thread.load": self.activities.load,
+            "universal_agent.thread.commit": self.activities.commit,
         }[name]
         try:
             reply = await handler(_through_history(request, ThreadStoreCall))
@@ -417,7 +417,10 @@ async def test_retry_after_foreign_meta_edit_falls_back_to_full_meta(tmp_path):
     worker.calls.clear()
     retried = await proxy.acommit_operation("s", "t", operation)
     # Разница не сошлась по хэшу → вторая попытка полной meta.
-    assert worker.calls[:2] == ["agent.thread.commit", "agent.thread.commit"]
+    assert worker.calls[:2] == [
+        "universal_agent.thread.commit",
+        "universal_agent.thread.commit",
+    ]
     assert retried.revision == first.revision
     assert retried.max_seq == first.max_seq
     stored = store.read_snapshot("s", "t", include_state=False).meta
@@ -468,7 +471,7 @@ async def test_subagent_trace_without_base_does_not_reread_parent_meta(
         kind="step",
         payload={},
     )
-    assert worker.calls == ["agent.thread.commit"]
+    assert worker.calls == ["universal_agent.thread.commit"]
     assert max(worker.outputs) < 10_000
 
 

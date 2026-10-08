@@ -11,7 +11,7 @@ import pytest
 from gc_core.thread_store_file_durable import DurableFileThreadStore
 from gc_core_temporalio.client import AgentClient
 from gc_core_temporalio.contracts import ActivityCall, RunRequest
-from gc_core_temporalio.workflow import AgentWorkflow
+from gc_core_temporalio.workflow import UniversalAgentWorkflow
 from live_support import call, wait_marker, temporal_cli
 from restart_interceptor import RestartInterceptor
 from temporalio.client import WorkflowFailureError
@@ -201,7 +201,7 @@ async def test_actual_resource_host_sigkill_never_reconnects_or_repeats(
             for log in logs:
                 log.close()
         await Replayer(
-            workflows=[AgentWorkflow],
+            workflows=[UniversalAgentWorkflow],
             interceptors=[RestartInterceptor()],
         ).replay_workflow(history)
         assert effects(audit.read_text()) == expected
@@ -256,7 +256,7 @@ async def test_native_cancellation_during_actual_mcp_teardown(
 
         monkeypatch.setattr(host, "open", open_owner)
         handle = await env.client.start_workflow(
-            AgentWorkflow.run,
+            UniversalAgentWorkflow.run,
             request(),
             id="cancel-teardown",
             task_queue="native-controls",
@@ -295,6 +295,6 @@ async def test_native_cancellation_during_actual_mcp_teardown(
         finally:
             release.set()
     await Replayer(
-        workflows=[AgentWorkflow],
+        workflows=[UniversalAgentWorkflow],
     ).replay_workflow(history)
     assert len(requests) == 2

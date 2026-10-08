@@ -319,7 +319,7 @@ class AgentActivities:
                     non_retryable=True,
                 ) from exc
 
-    @activity.defn(name="agent.context.prepare")
+    @activity.defn(name="universal_agent.context.prepare")
     async def prepare(self, call: ActivityCall) -> PreparedContext:
         return await self._recorded(call, PreparedContext, self._prepare)
 
@@ -384,7 +384,7 @@ class AgentActivities:
             activity_settings=self.activity_settings,
         )
 
-    @activity.defn(name="agent.state.prepare")
+    @activity.defn(name="universal_agent.state.prepare")
     async def prepare_state(self, call: ActivityCall) -> PreparedState:
         return await self._recorded(call, PreparedState, self._prepare_state)
 
@@ -400,7 +400,7 @@ class AgentActivities:
             **asdict(request),
         )
 
-    @activity.defn(name="agent.prompts.prepare")
+    @activity.defn(name="universal_agent.prompts.prepare")
     async def prepare_prompts(self, call: ActivityCall) -> PreparedPrompts:
         return await self._recorded(
             call, PreparedPrompts, self._prepare_prompts
@@ -415,7 +415,7 @@ class AgentActivities:
             logger=ctx.logger,
         )
 
-    @activity.defn(name="agent.prompt.read")
+    @activity.defn(name="universal_agent.prompt.read")
     async def prompt(self, call: ActivityCall) -> str:
         return await self._recorded(call, str, self._prompt)
 
@@ -428,14 +428,14 @@ class AgentActivities:
             ctx=ctx,
         )
 
-    @activity.defn(name="agent.skills.list")
+    @activity.defn(name="universal_agent.skills.list")
     async def skills(self, call: ActivityCall) -> list[dict]:
         return await self._recorded(call, list[dict], self._skills)
 
     async def _skills(self, _call, ctx):
         return await ctx.skills_registry.list_skills()
 
-    @activity.defn(name="agent.model.request")
+    @activity.defn(name="universal_agent.model.request")
     async def model(self, call: ActivityCall) -> ModelReply:
         return await self._recorded(call, ModelReply, self._model)
 
@@ -481,7 +481,7 @@ class AgentActivities:
                 known[message_hash(message)] = deepcopy(message)
         return ModelReply(result, router.breaker.snapshot())
 
-    @activity.defn(name="agent.tool.execute")
+    @activity.defn(name="universal_agent.tool.execute")
     async def tool(self, call: ActivityCall) -> ToolResult:
         return await self._recorded(
             call, ToolResult, self._tool, effect=call.data.get("effect", False)
@@ -530,7 +530,7 @@ class AgentActivities:
             result.delta.fetch_url_cache = None
         return cap_tool_output(result)
 
-    @activity.defn(name="agent.memory.execute")
+    @activity.defn(name="universal_agent.memory.execute")
     async def memory(self, call: ActivityCall) -> ProjectMemoryReply:
         # Чтение памяти повторяемо, как и решил workflow; запись — эффект.
         return await self._recorded(
@@ -549,7 +549,7 @@ class AgentActivities:
             value_to_type(ProjectMemoryRequest, call.data),
         )
 
-    @activity.defn(name="agent.memory.hash")
+    @activity.defn(name="universal_agent.memory.hash")
     async def memory_hash(self, call: ActivityCall) -> str | None:
         return await self._recorded(call, str | None, self._memory_hash)
 
@@ -558,7 +558,7 @@ class AgentActivities:
 
         return await asyncio.to_thread(get_hash, ctx)
 
-    @activity.defn(name="agent.guard.probe")
+    @activity.defn(name="universal_agent.guard.probe")
     async def guard(self, call: ActivityCall) -> GuardProbes:
         return await self._recorded(call, GuardProbes, self._guard)
 
@@ -582,7 +582,7 @@ class AgentActivities:
         primary, *companions = await asyncio.to_thread(evaluate)
         return GuardProbes(primary, companions)
 
-    @activity.defn(name="agent.summary.trace")
+    @activity.defn(name="universal_agent.summary.trace")
     async def summary_trace(self, call: ActivityCall) -> bool:
         return await self._recorded(call, bool, self._summary_trace)
 
@@ -610,7 +610,7 @@ class AgentActivities:
             )
         return True
 
-    @activity.defn(name="agent.context.close")
+    @activity.defn(name="universal_agent.context.close")
     async def close(self, call: ActivityCall) -> bool:
         return await self._recorded(
             call,
@@ -632,7 +632,7 @@ class AgentActivities:
             await _aclose_mcp_and_release(set_owner(ctx.mcp_session_owner))
         return True
 
-    @activity.defn(name="agent.context.release")
+    @activity.defn(name="universal_agent.context.release")
     async def release(self, call: ActivityCall) -> bool:
         return await self._recorded(
             call, bool, self._release, resolve_context=False

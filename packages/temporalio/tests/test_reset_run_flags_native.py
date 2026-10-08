@@ -35,7 +35,7 @@ async def test_remote_batch_reads_latest_meta_and_acknowledges_one_commit(
         calls.append((name, deepcopy(decoded)))
         method = (
             activities.load
-            if name == "agent.thread.load"
+            if name == "universal_agent.thread.load"
             else activities.commit
         )
         try:
@@ -59,7 +59,7 @@ async def test_remote_batch_reads_latest_meta_and_acknowledges_one_commit(
     )
     calls.clear()
     await areset_run_flags(session)
-    assert [name for name, _ in calls] == ["agent.thread.commit"]
+    assert [name for name, _ in calls] == ["universal_agent.thread.commit"]
     reset = calls[0][1]
     assert reset.operation.kind == "reset_run_flags"
     assert session.meta["runtime"] == {"new": 1}

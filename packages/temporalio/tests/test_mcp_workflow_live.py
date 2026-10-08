@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from gc_core_temporalio.workflow import AgentWorkflow
+from gc_core_temporalio.workflow import UniversalAgentWorkflow
 from temporalio.worker import Replayer
 from live_support import call
 from test_workflow_controls import (  # noqa: F401
@@ -77,7 +77,7 @@ async def test_mcp_two_calls_share_session_and_replay_does_not_reconnect(
             tmp_path, url, core_extra={"mcp": {"servers": {"counter": server}}}
         ) as (env, contexts, _):
             handle = await env.client.start_workflow(
-                AgentWorkflow.run,
+                UniversalAgentWorkflow.run,
                 request(),
                 id="mcp",
                 task_queue="native-controls",
@@ -108,7 +108,9 @@ async def test_mcp_two_calls_share_session_and_replay_does_not_reconnect(
                 if event.HasField("activity_task_failed_event_attributes")
             ]
             assert not failures
-            await Replayer(workflows=[AgentWorkflow]).replay_workflow(history)
+            await Replayer(workflows=[UniversalAgentWorkflow]).replay_workflow(
+                history
+            )
             assert len(requests) == 3
     finally:
         if process is not None:
@@ -121,7 +123,7 @@ async def test_native_child_uses_parent_mcp_actor_and_replays(
     monkeypatch,
     scripted_http,  # noqa: F811
 ):
-    from gc_core_temporalio.child_workflow import SubagentWorkflow
+    from gc_core_temporalio.child_workflow import UniversalSubagentWorkflow
 
     monkeypatch.chdir(tmp_path)
     url, requests, script = scripted_http
@@ -164,7 +166,7 @@ async def test_native_child_uses_parent_mcp_actor_and_replays(
     }
     async with runtime(tmp_path, url, core_extra=core) as (env, contexts, _):
         handle = await env.client.start_workflow(
-            AgentWorkflow.run,
+            UniversalAgentWorkflow.run,
             request(),
             id="child-mcp",
             task_queue="native-controls",
@@ -198,6 +200,6 @@ async def test_native_child_uses_parent_mcp_actor_and_replays(
         assert not contexts._contexts and not contexts.resource_host._owners
         for saved in (history, child_history):
             await Replayer(
-                workflows=[AgentWorkflow, SubagentWorkflow]
+                workflows=[UniversalAgentWorkflow, UniversalSubagentWorkflow]
             ).replay_workflow(saved)
         assert len(requests) == 5

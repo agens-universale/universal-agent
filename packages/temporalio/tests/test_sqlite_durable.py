@@ -266,9 +266,9 @@ def test_sqlite_temporal_wire_conformance(tmp_path):
         store = SQLiteThreadStore(tmp_path / f"wire-{next(counter)}.sqlite")
         activities = ThreadStoreActivities({"sqlite": store})
         methods = {
-            "agent.thread.load": activities.load,
-            "agent.thread.commit": activities.commit,
-            "agent.thread.read_trace": activities.read_trace,
+            "universal_agent.thread.load": activities.load,
+            "universal_agent.thread.commit": activities.commit,
+            "universal_agent.thread.read_trace": activities.read_trace,
         }
 
         async def wire(value, result_type):

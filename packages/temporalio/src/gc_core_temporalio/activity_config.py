@@ -14,7 +14,7 @@
 ``activities.tools.<имя>.retry.maximum_attempts`` (тогда эффект может
 выполниться повторно).
 
-В workflow настройки приходят данными из ``agent.context.prepare``: так код
+В workflow настройки приходят данными из ``universal_agent.context.prepare``: так код
 workflow остаётся детерминированным, а смена конфига действует со следующего
 хода.
 """
@@ -71,12 +71,12 @@ class ActivitiesConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
     default: ActivitySettings = Field(default_factory=ActivitySettings)
-    #: ``agent.model.request``: сбои провайдера (обрыв, 5xx, 429) Temporal
+    #: ``universal_agent.model.request``: сбои провайдера (обрыв, 5xx, 429) Temporal
     #: повторяет по этой политике — ход ждёт, а не падает.
     model: ActivitySettings = Field(default_factory=ActivitySettings)
     #: Подготовка, guards, промпты, чтения, память, субагенты.
     resource: ActivitySettings = Field(default_factory=ActivitySettings)
-    #: ``agent.thread.*``.
+    #: ``universal_agent.thread.*``.
     thread_store: ActivitySettings = Field(default_factory=ActivitySettings)
     #: Инструмент по имени (``exec_command``) поверх ``resource``.
     tools: dict[str, ActivitySettings] = Field(default_factory=dict)
@@ -181,7 +181,7 @@ def resolve_activity_settings(
     return resolved
 
 
-#: Умолчания до первого ``agent.context.prepare`` хода.
+#: Умолчания до первого ``universal_agent.context.prepare`` хода.
 DEFAULT_ACTIVITY_SETTINGS = resolve_activity_settings(None)
 
 #: Ключи ``temporalio.workflow.ActivityConfig``, которые имеют смысл для

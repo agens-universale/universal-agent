@@ -21,7 +21,7 @@ from temporalio.worker import Worker, WorkerDeploymentConfig
 from gc_core_temporalio.activities import AgentActivities
 from gc_core_temporalio.activity_config import resolve_activity_settings
 from gc_core_temporalio.child_preparation import ChildActivities
-from gc_core_temporalio.child_workflow import SubagentWorkflow
+from gc_core_temporalio.child_workflow import UniversalSubagentWorkflow
 from gc_core_temporalio.provider import (
     ContextProvider,
     WorkerConfig,
@@ -29,7 +29,7 @@ from gc_core_temporalio.provider import (
 from gc_core_temporalio.public_config import public_config_snapshot
 from gc_core_temporalio.storage.sqlite import SQLiteThreadStore
 from gc_core_temporalio.thread_store_activities import ThreadStoreActivities
-from gc_core_temporalio.workflow import AgentWorkflow
+from gc_core_temporalio.workflow import UniversalAgentWorkflow
 
 
 def build_stores(config):
@@ -181,7 +181,7 @@ def worker_options(config, native, threads):
     for queue, workflows, activities in (
         (
             config.workflow_queue,
-            [AgentWorkflow, SubagentWorkflow],
+            [UniversalAgentWorkflow, UniversalSubagentWorkflow],
             [],
         ),
         (config.model_queue, [], [native.model]),

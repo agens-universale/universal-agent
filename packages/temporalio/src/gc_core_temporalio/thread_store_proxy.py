@@ -156,7 +156,7 @@ class TemporalThreadStore:
         known = self._meta.get((system_id, thread_id))
         for attempt in range(attempts):
             first = await self._call(
-                "agent.thread.load",
+                "universal_agent.thread.load",
                 ThreadStoreCall(
                     self.store_id,
                     system_id,
@@ -175,7 +175,7 @@ class TemporalThreadStore:
 
             def more(expect=expect, **position):
                 return self._call(
-                    "agent.thread.load",
+                    "universal_agent.thread.load",
                     ThreadStoreCall(
                         self.store_id,
                         system_id,
@@ -263,7 +263,9 @@ class TemporalThreadStore:
             request.need_meta = False
         try:
             try:
-                reply = await self._call("agent.thread.commit", request)
+                reply = await self._call(
+                    "universal_agent.thread.commit", request
+                )
             except MetaBaseMismatch:
                 if written is None:
                     raise
@@ -280,7 +282,9 @@ class TemporalThreadStore:
                     "h": meta_hash(written),
                     "full": True,
                 }
-                reply = await self._call("agent.thread.commit", request)
+                reply = await self._call(
+                    "universal_agent.thread.commit", request
+                )
         except BaseException:
             # No acknowledged outcome: never bridge this gap on a later call.
             # Базу meta не забывать: воркер сверяет её версию с хранилищем, а
@@ -501,7 +505,7 @@ class TemporalThreadStore:
         records, cursor = [], [0]
         while cursor is not None:
             reply = await self._call(
-                "agent.thread.read_trace",
+                "universal_agent.thread.read_trace",
                 ThreadStoreCall(
                     self.store_id,
                     system_id,

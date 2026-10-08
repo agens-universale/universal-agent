@@ -178,8 +178,8 @@ def _recent(values):
 # Worker Versioning (versioning.enabled у воркера): ход закреплён за сборкой,
 # где начался (default_versioning_behavior=PINNED у воркера); Continue-As-New
 # переходит на текущую сборку.
-@workflow.defn(name="AgentWorkflow")
-class AgentWorkflow:
+@workflow.defn(name="UniversalAgentWorkflow")
+class UniversalAgentWorkflow:
     def __init__(self):
         self.start = None
         self.active_turn_id = None
@@ -591,7 +591,7 @@ class AgentWorkflow:
             start, f"{owner}/{chain}/turn-{self.turns + 1}", self.new_id
         )
         prepared = await self.operations.call(
-            "agent.context.prepare",
+            "universal_agent.context.prepare",
             {
                 "store_id": start.store_id,
                 "settings_fingerprint": self.message_fingerprint

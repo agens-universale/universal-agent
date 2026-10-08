@@ -10,7 +10,7 @@ import pytest
 from gc_core_temporalio.contracts import RunRequest, UserMessage
 from gc_core_temporalio.provider import WorkerConfig
 from gc_core_temporalio.worker import build_runtime, worker_options
-from gc_core_temporalio.workflow import AgentWorkflow
+from gc_core_temporalio.workflow import UniversalAgentWorkflow
 from live_support import call, temporal_cli
 from temporalio.client import WorkflowUpdateFailedError
 from temporalio.testing import WorkflowEnvironment
@@ -160,7 +160,7 @@ def request(**kwargs):
 async def wait_status(handle, predicate):
     async with asyncio.timeout(30):
         while True:
-            status = await handle.query(AgentWorkflow.status)
+            status = await handle.query(UniversalAgentWorkflow.status)
             if predicate(status):
                 return status
             await asyncio.sleep(0.05)
@@ -174,7 +174,7 @@ async def test_two_turns_continue_as_new_and_delivery_dedup(
     script.extend([[finish("first")], [finish("second")]])
     async with runtime(tmp_path, url) as (env, contexts, _):
         handle = await env.client.start_workflow(
-            AgentWorkflow.run,
+            UniversalAgentWorkflow.run,
             request(keep_alive=True),
             id="controls",
             task_queue="native-controls",
@@ -187,23 +187,23 @@ async def test_two_turns_continue_as_new_and_delivery_dedup(
             while (await handle.describe()).run_id == first_run:
                 await asyncio.sleep(0.05)
         receipt = await handle.execute_update(
-            AgentWorkflow.submit_message,
+            UniversalAgentWorkflow.submit_message,
             UserMessage("next", "second task"),
         )
         assert not receipt["duplicate"]
         assert (
             await handle.execute_update(
-                AgentWorkflow.submit_message,
+                UniversalAgentWorkflow.submit_message,
                 UserMessage("next", "second task"),
             )
         )["duplicate"]
         with pytest.raises(WorkflowUpdateFailedError):
             await handle.execute_update(
-                AgentWorkflow.submit_message,
+                UniversalAgentWorkflow.submit_message,
                 UserMessage("next", "changed task"),
             )
         await wait_status(handle, lambda s: s["turns"] == 2)
-        await handle.signal(AgentWorkflow.close_session)
+        await handle.signal(UniversalAgentWorkflow.close_session)
         result = await asyncio.wait_for(handle.result(), 30)
         assert result["turns"] == 2 and "second" in str(result["answer"])
         assert not result["undelivered"] and len(requests) == 2
@@ -212,8 +212,10 @@ async def test_two_turns_continue_as_new_and_delivery_dedup(
         first = await env.client.get_workflow_handle(
             "controls", run_id=first_run
         ).fetch_history()
-        await Replayer(workflows=[AgentWorkflow]).replay_workflow(first)
-        await Replayer(workflows=[AgentWorkflow]).replay_workflow(
+        await Replayer(workflows=[UniversalAgentWorkflow]).replay_workflow(
+            first
+        )
+        await Replayer(workflows=[UniversalAgentWorkflow]).replay_workflow(
             await handle.fetch_history()
         )
         assert len(requests) == 2
@@ -249,7 +251,7 @@ async def test_wait_returns_the_answer_of_its_own_turn(
     script.extend([[finish("first")], second_turn])
     async with runtime(tmp_path, url) as (env, _contexts, _):
         handle = await env.client.start_workflow(
-            AgentWorkflow.run,
+            UniversalAgentWorkflow.run,
             request(keep_alive=True, message_ids=["m1"]),
             id="controls-wait",
             task_queue="native-controls",
@@ -259,7 +261,8 @@ async def test_wait_returns_the_answer_of_its_own_turn(
         assert first["delivered"] and first["turn"] == 1
         assert "first" in str(first["answer"])
         await handle.execute_update(
-            AgentWorkflow.submit_message, UserMessage("m2", "second task")
+            UniversalAgentWorkflow.submit_message,
+            UserMessage("m2", "second task"),
         )
         # Ход 2 стоит у модели; 12 ожидающих клиентов не мешают update
         # (лимит сервера — 10 одновременных update на workflow).
@@ -267,7 +270,8 @@ async def test_wait_returns_the_answer_of_its_own_turn(
         await asyncio.sleep(1)
         await asyncio.wait_for(
             handle.execute_update(
-                AgentWorkflow.submit_message, UserMessage("m3", "third")
+                UniversalAgentWorkflow.submit_message,
+                UserMessage("m3", "third"),
             ),
             20,
         )
@@ -284,7 +288,7 @@ async def test_wait_returns_the_answer_of_its_own_turn(
         assert again["turn"] == 1 and "first" in str(again["answer"])
         with pytest.raises(ValueError, match="Unknown message"):
             await session.wait("never-sent")
-        await handle.signal(AgentWorkflow.close_session)
+        await handle.signal(UniversalAgentWorkflow.close_session)
         await asyncio.wait_for(handle.result(), 30)
 
 
@@ -302,7 +306,7 @@ async def test_native_human_reply_or_stop_preserves_lifecycle(
     )
     async with runtime(tmp_path, url) as (env, contexts, _):
         handle = await env.client.start_workflow(
-            AgentWorkflow.run,
+            UniversalAgentWorkflow.run,
             request(),
             id="human",
             task_queue="native-controls",
@@ -312,10 +316,10 @@ async def test_native_human_reply_or_stop_preserves_lifecycle(
         )
         request_id = status["pending_human"]["request_id"]
         if stop:
-            await handle.signal(AgentWorkflow.stop)
+            await handle.signal(UniversalAgentWorkflow.stop)
         else:
             assert await handle.execute_update(
-                AgentWorkflow.answer_human, args=[request_id, "blue"]
+                UniversalAgentWorkflow.answer_human, args=[request_id, "blue"]
             )
         result = await asyncio.wait_for(handle.result(), 30)
         history = contexts.stores["files"].load_messages("test", "controls")
@@ -324,7 +328,7 @@ async def test_native_human_reply_or_stop_preserves_lifecycle(
         if not stop:
             assert "answered" in str(result["answer"])
             assert any("blue" in str(m) for m in history)
-        await Replayer(workflows=[AgentWorkflow]).replay_workflow(
+        await Replayer(workflows=[UniversalAgentWorkflow]).replay_workflow(
             await handle.fetch_history()
         )
         assert len(requests) == (1 if stop else 2)
@@ -343,7 +347,7 @@ async def test_human_reply_receipt_survives_continue_as_new(
     )
     async with runtime(tmp_path, url) as (env, _, _):
         handle = await env.client.start_workflow(
-            AgentWorkflow.run,
+            UniversalAgentWorkflow.run,
             request(keep_alive=True),
             id="human-receipt",
             task_queue="native-controls",
@@ -354,7 +358,7 @@ async def test_human_reply_receipt_survives_continue_as_new(
         )
         request_id = status["pending_human"]["request_id"]
         assert await handle.execute_update(
-            AgentWorkflow.answer_human,
+            UniversalAgentWorkflow.answer_human,
             args=[request_id, "blue", "reply-1"],
         )
         await wait_status(
@@ -364,22 +368,24 @@ async def test_human_reply_receipt_survives_continue_as_new(
             while (await handle.describe()).run_id == first_run:
                 await asyncio.sleep(0.05)
         assert await handle.execute_update(
-            AgentWorkflow.answer_human,
+            UniversalAgentWorkflow.answer_human,
             args=[request_id, "blue", "reply-1"],
         )
         with pytest.raises(WorkflowUpdateFailedError):
             await handle.execute_update(
-                AgentWorkflow.answer_human,
+                UniversalAgentWorkflow.answer_human,
                 args=[request_id, "red", "reply-1"],
             )
-        await handle.signal(AgentWorkflow.close_session)
+        await handle.signal(UniversalAgentWorkflow.close_session)
         assert (await asyncio.wait_for(handle.result(), 30))["turns"] == 1
         assert len(requests) == 2
         for run_id in (first_run, None):
             saved = await env.client.get_workflow_handle(
                 "human-receipt", run_id=run_id
             ).fetch_history()
-            await Replayer(workflows=[AgentWorkflow]).replay_workflow(saved)
+            await Replayer(workflows=[UniversalAgentWorkflow]).replay_workflow(
+                saved
+            )
         assert len(requests) == 2
 
 
@@ -416,7 +422,7 @@ async def test_post_run_result_and_usage_are_accounted_once(
     )
     async with runtime(tmp_path, url) as (env, contexts, _):
         handle = await env.client.start_workflow(
-            AgentWorkflow.run,
+            UniversalAgentWorkflow.run,
             request(format_text='JSON with field "value"'),
             id="post-run",
             task_queue="native-controls",
@@ -440,7 +446,7 @@ async def test_post_run_result_and_usage_are_accounted_once(
         assert not contexts._contexts, (
             "Final release must free worker contexts after accounting"
         )
-        await Replayer(workflows=[AgentWorkflow]).replay_workflow(
+        await Replayer(workflows=[UniversalAgentWorkflow]).replay_workflow(
             await handle.fetch_history()
         )
         assert len(requests) == 2 and meta == store.load_meta(
@@ -466,7 +472,7 @@ async def test_resubmit_after_stopped_turn_is_accepted_again(
     script.extend([slow, [finish("first")], [finish("second")]])
     async with runtime(tmp_path, url) as (env, _, _):
         handle = await env.client.start_workflow(
-            AgentWorkflow.run,
+            UniversalAgentWorkflow.run,
             request(keep_alive=True),
             id="controls",
             task_queue="native-controls",
@@ -475,15 +481,17 @@ async def test_resubmit_after_stopped_turn_is_accepted_again(
             handle, lambda s: s["phase"] == "running" and requests
         )
         await handle.execute_update(
-            AgentWorkflow.submit_message, UserMessage("m2", "SECOND")
+            UniversalAgentWorkflow.submit_message, UserMessage("m2", "SECOND")
         )
-        await handle.execute_update(AgentWorkflow.stop_turn, status["turn_id"])
+        await handle.execute_update(
+            UniversalAgentWorkflow.stop_turn, status["turn_id"]
+        )
         status = await wait_status(
             handle, lambda s: s["turns"] == 1 and s["undelivered"]
         )
         assert [m["message_id"] for m in status["undelivered"]] == ["m2"]
         receipt = await handle.execute_update(
-            AgentWorkflow.submit_message, UserMessage("m2", "SECOND")
+            UniversalAgentWorkflow.submit_message, UserMessage("m2", "SECOND")
         )
         assert receipt["duplicate"] is False
         status = await wait_status(
@@ -491,7 +499,7 @@ async def test_resubmit_after_stopped_turn_is_accepted_again(
         )
         assert status["undelivered"] == []
         assert any("SECOND" in json.dumps(body) for body in requests[-1:])
-        await handle.signal(AgentWorkflow.close_session)
+        await handle.signal(UniversalAgentWorkflow.close_session)
         await handle.result()
 
 
@@ -504,7 +512,7 @@ async def test_stop_cancels_model_request_retried_without_limit(
     monkeypatch.chdir(tmp_path)
     async with runtime(tmp_path, "http://127.0.0.1:1") as (env, _, _):
         handle = await env.client.start_workflow(
-            AgentWorkflow.run,
+            UniversalAgentWorkflow.run,
             request(),
             id="controls",
             task_queue="native-controls",
@@ -516,17 +524,22 @@ async def test_stop_cancels_model_request_retried_without_limit(
                 attempts = [
                     activity.attempt
                     for activity in described.raw_description.pending_activities
-                    if activity.activity_type.name == "agent.model.request"
+                    if activity.activity_type.name
+                    == "universal_agent.model.request"
                 ]
                 if attempts and attempts[0] >= 2:
                     break
                 await asyncio.sleep(0.1)
-        await handle.execute_update(AgentWorkflow.stop_turn, status["turn_id"])
+        await handle.execute_update(
+            UniversalAgentWorkflow.stop_turn, status["turn_id"]
+        )
         result = await asyncio.wait_for(handle.result(), 15)
         assert result["answer"] is None
-        assert (await handle.query(AgentWorkflow.status))["phase"] == "stopped"
+        assert (await handle.query(UniversalAgentWorkflow.status))[
+            "phase"
+        ] == "stopped"
         history = await handle.fetch_history()
-    await Replayer(workflows=[AgentWorkflow]).replay_workflow(history)
+    await Replayer(workflows=[UniversalAgentWorkflow]).replay_workflow(history)
 
 
 def test_message_limit_counts_temporal_history_bytes():
@@ -575,7 +588,7 @@ async def test_two_big_cyrillic_messages_keep_records_below_the_limit(
     big = "ы" * 160_000  # ~960 КБ в истории Temporal
     async with runtime(tmp_path, url) as (env, contexts, _):
         handle = await env.client.start_workflow(
-            AgentWorkflow.run,
+            UniversalAgentWorkflow.run,
             RunRequest(
                 "test",
                 "files",
@@ -593,7 +606,8 @@ async def test_two_big_cyrillic_messages_keep_records_below_the_limit(
         session = session_of(env, "controls-big")
         await asyncio.wait_for(session.wait("m1"), 120)
         await handle.execute_update(
-            AgentWorkflow.submit_message, UserMessage("m2", "Ж" + big[1:])
+            UniversalAgentWorkflow.submit_message,
+            UserMessage("m2", "Ж" + big[1:]),
         )
         second = await asyncio.wait_for(session.wait("m2"), 120)
         assert second["turn"] == 2
@@ -607,7 +621,7 @@ async def test_two_big_cyrillic_messages_keep_records_below_the_limit(
                 )
             )
             largest = max(largest, size)
-        await handle.signal(AgentWorkflow.close_session)
+        await handle.signal(UniversalAgentWorkflow.close_session)
         await asyncio.wait_for(handle.result(), 60)
         meta = contexts.stores["files"].load_meta("test", "big")
     assert largest < LIMIT, largest
@@ -631,7 +645,7 @@ async def test_model_reply_over_the_record_limit_fails_the_turn_not_the_session(
     script.extend([[finish("ы" * 400_000)], [finish("second")]])
     async with runtime(tmp_path, url) as (env, _contexts, _):
         handle = await env.client.start_workflow(
-            AgentWorkflow.run,
+            UniversalAgentWorkflow.run,
             RunRequest(
                 "test",
                 "files",
@@ -651,11 +665,11 @@ async def test_model_reply_over_the_record_limit_fails_the_turn_not_the_session(
         assert "больше лимита записи" in first["turn_error"]
         assert "байт" in first["turn_error"]
         await handle.execute_update(
-            AgentWorkflow.submit_message, UserMessage("m2", "второе")
+            UniversalAgentWorkflow.submit_message, UserMessage("m2", "второе")
         )
         second = await asyncio.wait_for(session.wait("m2"), 120)
         assert second["turn"] == 2
         assert second["turn_error"] is None
-        await handle.signal(AgentWorkflow.close_session)
+        await handle.signal(UniversalAgentWorkflow.close_session)
         result = await asyncio.wait_for(handle.result(), 60)
     assert result["exit_code"] == 0

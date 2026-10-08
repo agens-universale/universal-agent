@@ -29,9 +29,9 @@ async def wire(value, result_type):
 def proxy_for(store):
     activities = ThreadStoreActivities({"files": store})
     methods = {
-        "agent.thread.load": activities.load,
-        "agent.thread.commit": activities.commit,
-        "agent.thread.read_trace": activities.read_trace,
+        "universal_agent.thread.load": activities.load,
+        "universal_agent.thread.commit": activities.commit,
+        "universal_agent.thread.read_trace": activities.read_trace,
     }
     requests = []
 
@@ -76,7 +76,7 @@ async def test_real_session_commits_history_and_meta_in_one_call(tmp_path):
     message = {"id": "u1", "role": "user", "content": "Сохрани результат"}
     requests.clear()
     await session.apersist_batch([message], previous_response_id="r1")
-    assert [name for name, _ in requests] == ["agent.thread.commit"]
+    assert [name for name, _ in requests] == ["universal_agent.thread.commit"]
     assert requests[0][1].operation.kind == "persist"
     assert store.load_messages("cli", "native") == [message]
     assert store.load_meta("cli", "native")["messages_count"] == 1
@@ -177,7 +177,7 @@ async def test_compaction_uses_native_session_and_one_commit(tmp_path):
     result = await session.aarchive_and_compact_summary_payload(
         {"summary_message_content": "Краткая сводка", "dialog_steps_offset": 4}
     )
-    assert [name for name, _ in requests] == ["agent.thread.commit"]
+    assert [name for name, _ in requests] == ["universal_agent.thread.commit"]
     assert requests[0][1].operation.kind == "compact"
     assert result["archive_data_path"]
     assert store.load_messages("cli", "native") == session.history_messages
@@ -226,7 +226,7 @@ async def test_own_metadata_ack_avoids_conflict_and_keeps_pending_meta(
         )
     else:
         await session.apersist_batch([message], previous_response_id="r2")
-    assert [name for name, _ in requests] == ["agent.thread.commit"]
+    assert [name for name, _ in requests] == ["universal_agent.thread.commit"]
     saved = store.load_meta("cli", "native")
     assert saved["runtime"]["worker_note"] == "own"
     assert saved["shared"]["working_memory"]["knowledge"] == "pending"
@@ -273,9 +273,9 @@ async def test_external_metadata_is_not_covered_by_own_ack(
         previous_response_id=None,
     )
     assert [name for name, _ in requests] == [
-        "agent.thread.commit",
-        "agent.thread.load",
-        "agent.thread.commit",
+        "universal_agent.thread.commit",
+        "universal_agent.thread.load",
+        "universal_agent.thread.commit",
     ]
     assert store.load_meta("cli", "native")["tui"]["title"] == "external"
 
@@ -307,8 +307,8 @@ async def test_history_change_with_same_max_seq_cannot_be_acknowledged(
     with pytest.raises(ThreadStoreConflict, match="history changed"):
         await session.apersist_batch([], previous_response_id=None)
     assert [name for name, _ in requests] == [
-        "agent.thread.commit",
-        "agent.thread.load",
+        "universal_agent.thread.commit",
+        "universal_agent.thread.load",
     ]
 
 

@@ -12,7 +12,7 @@ from gc_core_temporalio.client import AgentClient
 from gc_core_temporalio.contracts import RunRequest
 from gc_core_temporalio.storage.sqlite import SQLiteThreadStore
 from gc_core_temporalio.thread_store_contracts import ThreadStoreCall
-from gc_core_temporalio.workflow import AgentWorkflow
+from gc_core_temporalio.workflow import UniversalAgentWorkflow
 from live_support import provider, temporal_cli, wait_marker  # noqa: F401
 from restart_interceptor import RestartInterceptor
 from temporalio.converter import default as default_converter
@@ -189,7 +189,7 @@ async def test_native_sigkill_durable_boundaries(
             for log in logs:
                 log.close()
         await Replayer(
-            workflows=[AgentWorkflow],
+            workflows=[UniversalAgentWorkflow],
             interceptors=[RestartInterceptor()],
         ).replay_workflow(history)
         assert len(requests) == expected_requests

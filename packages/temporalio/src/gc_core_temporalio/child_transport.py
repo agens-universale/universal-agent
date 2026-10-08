@@ -86,7 +86,7 @@ _PARENT_STATE_HEAVY = {
 
 def _light_parent_snapshot(state):
     """Снимок состояния родителя для входа субагента без тяжёлых полей:
-    вход child workflow и ``agent.subagent.prepare`` — записи истории."""
+    вход child workflow и ``universal_agent.subagent.prepare`` — записи истории."""
     from gc_core.execution.output_store import ToolCallOutputsStore
 
     snapshot = state.to_execution_snapshot()
@@ -241,7 +241,7 @@ class ChildTransport:
         self.ctx.child_input_scope = scope
         try:
             self._handle = await workflow.start_child_workflow(
-                "SubagentWorkflow",
+                "UniversalSubagentWorkflow",
                 request,
                 id=child_id,
                 result_type=ChildResult,

@@ -12,7 +12,7 @@ from gc_core.thread_store_journal import durable_owner_id
 from gc_core_temporalio.contracts import UserMessage
 from gc_core_temporalio.provider import WorkerConfig
 from gc_core_temporalio.worker import build_runtime, worker_options
-from gc_core_temporalio.workflow import AgentWorkflow
+from gc_core_temporalio.workflow import UniversalAgentWorkflow
 from temporalio.client import WorkflowFailureError
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
@@ -34,7 +34,7 @@ async def test_keep_alive_close_after_continue_as_new_releases_owner(
     script.append([finish("first")])
     async with runtime(tmp_path, url) as (env, _, _):
         handle = await env.client.start_workflow(
-            AgentWorkflow.run,
+            UniversalAgentWorkflow.run,
             request(keep_alive=True),
             id="controls",
             task_queue="native-controls",
@@ -46,7 +46,7 @@ async def test_keep_alive_close_after_continue_as_new_releases_owner(
                 await asyncio.sleep(0.05)
         # Новый run владеет тредом по resume, без хода.
         assert owner(tmp_path) == "controls"
-        await handle.signal(AgentWorkflow.close_session)
+        await handle.signal(UniversalAgentWorkflow.close_session)
         result = await handle.result()
         assert result["turns"] == 1
         assert owner(tmp_path) is None
@@ -69,7 +69,7 @@ async def test_failed_session_releases_owner(
     )
     async with runtime(tmp_path, url) as (env, _, _):
         handle = await env.client.start_workflow(
-            AgentWorkflow.run,
+            UniversalAgentWorkflow.run,
             request(),
             id="controls",
             task_queue="native-controls",
@@ -141,7 +141,7 @@ async def test_profile_change_on_worker_restart_keeps_sessions(
         contexts, worker = await serve("model-a")
         async with worker:
             handle = await env.client.start_workflow(
-                AgentWorkflow.run,
+                UniversalAgentWorkflow.run,
                 request(keep_alive=True),
                 id="controls",
                 task_queue="native-controls",
@@ -156,18 +156,18 @@ async def test_profile_change_on_worker_restart_keeps_sessions(
         try:
             async with worker:
                 await handle.execute_update(
-                    AgentWorkflow.submit_message,
+                    UniversalAgentWorkflow.submit_message,
                     UserMessage("second", "second task"),
                 )
                 await wait_status(
                     handle, lambda s: s["turns"] == 2 and s["phase"] == "idle"
                 )
                 assert requests[-1]["model"] == "model-b"
-                await handle.signal(AgentWorkflow.close_session)
+                await handle.signal(UniversalAgentWorkflow.close_session)
                 await handle.result()
 
                 again = await env.client.start_workflow(
-                    AgentWorkflow.run,
+                    UniversalAgentWorkflow.run,
                     request(),
                     id="controls",
                     task_queue="native-controls",
@@ -188,7 +188,7 @@ async def test_terminated_owner_is_taken_over_by_new_session(
     script.extend([[finish("first")], [finish("second")]])
     async with runtime(tmp_path, url) as (env, _, _):
         handle = await env.client.start_workflow(
-            AgentWorkflow.run,
+            UniversalAgentWorkflow.run,
             request(keep_alive=True),
             id="controls",
             task_queue="native-controls",
@@ -199,7 +199,7 @@ async def test_terminated_owner_is_taken_over_by_new_session(
         await handle.terminate("operator")
         assert owner(tmp_path) == "controls"
         other = await env.client.start_workflow(
-            AgentWorkflow.run,
+            UniversalAgentWorkflow.run,
             request(),
             id="controls-other",
             task_queue="native-controls",
@@ -216,7 +216,7 @@ async def test_live_owner_is_not_taken_over(
     script.append([finish("first")])
     async with runtime(tmp_path, url) as (env, _, _):
         handle = await env.client.start_workflow(
-            AgentWorkflow.run,
+            UniversalAgentWorkflow.run,
             request(keep_alive=True),
             id="controls",
             task_queue="native-controls",
@@ -225,7 +225,7 @@ async def test_live_owner_is_not_taken_over(
             handle, lambda s: s["turns"] == 1 and s["phase"] == "idle"
         )
         other = await env.client.start_workflow(
-            AgentWorkflow.run,
+            UniversalAgentWorkflow.run,
             request(),
             id="controls-other",
             task_queue="native-controls",
@@ -233,7 +233,7 @@ async def test_live_owner_is_not_taken_over(
         with pytest.raises(WorkflowFailureError):
             await other.result()
         assert owner(tmp_path) == "controls"
-        await handle.signal(AgentWorkflow.close_session)
+        await handle.signal(UniversalAgentWorkflow.close_session)
         await handle.result()
 
 
@@ -250,7 +250,7 @@ async def test_unlock_releases_only_a_dead_owner(
     async with runtime(tmp_path, url) as (env, provider, _):
         store = provider.stores["files"]
         handle = await env.client.start_workflow(
-            AgentWorkflow.run,
+            UniversalAgentWorkflow.run,
             request(keep_alive=True),
             id="controls",
             task_queue="native-controls",
@@ -297,7 +297,7 @@ async def test_idle_refresh_continue_as_new_keeps_ownership(
         ) as env:
             async with Worker(env.client, **options):
                 handle = await env.client.start_workflow(
-                    AgentWorkflow.run,
+                    UniversalAgentWorkflow.run,
                     request(keep_alive=True),
                     id="controls",
                     task_queue="native-controls",
@@ -308,7 +308,7 @@ async def test_idle_refresh_continue_as_new_keeps_ownership(
                         runs.add((await handle.describe()).run_id)
                         await asyncio.sleep(0.2)
                 assert owner(tmp_path) == "controls"
-                await handle.signal(AgentWorkflow.close_session)
+                await handle.signal(UniversalAgentWorkflow.close_session)
                 await handle.result()
     finally:
         await contexts.aclose()

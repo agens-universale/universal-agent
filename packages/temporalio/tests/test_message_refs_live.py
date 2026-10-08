@@ -23,7 +23,7 @@ from gc_core_temporalio.message_refs import (
 from gc_core_temporalio.contracts import RunRequest
 from gc_core_temporalio.provider import WorkerConfig
 from gc_core_temporalio.worker import build_runtime, worker_options
-from gc_core_temporalio.workflow import AgentWorkflow
+from gc_core_temporalio.workflow import UniversalAgentWorkflow
 from live_support import call, temporal_cli
 from temporalio.api.enums.v1 import EventType
 from temporalio.testing import WorkflowEnvironment
@@ -184,7 +184,7 @@ async def _payload_sizes(handle):
             attrs = event.activity_task_scheduled_event_attributes
             size = sum(p.ByteSize() for p in attrs.input.payloads)
             names[event.event_id] = attrs.activity_type.name
-            if attrs.activity_type.name == "agent.model.request":
+            if attrs.activity_type.name == "universal_agent.model.request":
                 model_inputs.append(size)
             largest = max(largest, size)
         elif event.event_type == EventType.EVENT_TYPE_ACTIVITY_TASK_COMPLETED:
@@ -220,7 +220,7 @@ async def test_long_thread_and_long_turn_stay_below_temporal_limits(
     )
     async with runtime(tmp_path, url) as (env, _native):
         handle = await env.client.start_workflow(
-            AgentWorkflow.run,
+            UniversalAgentWorkflow.run,
             _request(),
             id="refs-long",
             task_queue="refs",
@@ -239,7 +239,7 @@ async def test_long_thread_and_long_turn_stay_below_temporal_limits(
     assert largest < LIMIT
     assert max(model_inputs) < 70_000, model_inputs
     assert total < 6_100_000 + 31 * 200_000, total
-    await Replayer(workflows=[AgentWorkflow]).replay_workflow(history)
+    await Replayer(workflows=[UniversalAgentWorkflow]).replay_workflow(history)
 
 
 async def test_worker_without_context_gets_messages_resent(
@@ -267,7 +267,7 @@ async def test_worker_without_context_gets_messages_resent(
 
         native._resolve_message_refs = forgetful
         handle = await env.client.start_workflow(
-            AgentWorkflow.run,
+            UniversalAgentWorkflow.run,
             _request(),
             id="refs-forget",
             task_queue="refs",
@@ -276,7 +276,7 @@ async def test_worker_without_context_gets_messages_resent(
         history = await handle.fetch_history()
     assert len(bodies) == 5
     assert resent  # промахи были и закрылись повтором целиком
-    await Replayer(workflows=[AgentWorkflow]).replay_workflow(history)
+    await Replayer(workflows=[UniversalAgentWorkflow]).replay_workflow(history)
 
 
 def test_sent_messages_encode_refs_only_after_confirmation():
@@ -338,7 +338,7 @@ async def test_huge_mcp_output_is_capped_below_the_record_limit(
     }
     async with runtime(tmp_path, url, core_extra=mcp) as (env, _native):
         handle = await env.client.start_workflow(
-            AgentWorkflow.run,
+            UniversalAgentWorkflow.run,
             _request(),
             id="refs-mcp-big",
             task_queue="refs",
@@ -390,7 +390,7 @@ async def test_long_turn_written_at_the_end_in_parts(
     (tmp_path / "big.txt").write_text("y" * 40_000)
     async with runtime(tmp_path, url, persist="turn") as (env, _native):
         handle = await env.client.start_workflow(
-            AgentWorkflow.run,
+            UniversalAgentWorkflow.run,
             _request(),
             id="refs-turn-parts",
             task_queue="refs",
@@ -409,7 +409,7 @@ async def test_long_turn_written_at_the_end_in_parts(
     ]
     assert len(outputs) >= 120
     assert len({m["id"] for m in messages}) == len(messages)
-    await Replayer(workflows=[AgentWorkflow]).replay_workflow(history)
+    await Replayer(workflows=[UniversalAgentWorkflow]).replay_workflow(history)
 
 
 @pytest.fixture
@@ -463,7 +463,7 @@ async def test_fetch_url_cache_stays_on_the_worker(
     extra = {"security": {"url_policy": {"enabled": False}}}
     async with runtime(tmp_path, url, core_extra=extra) as (env, native):
         handle = await env.client.start_workflow(
-            AgentWorkflow.run,
+            UniversalAgentWorkflow.run,
             _request(),
             id="refs-fetch-cache",
             task_queue="refs",
@@ -479,7 +479,7 @@ async def test_fetch_url_cache_stays_on_the_worker(
         "test", "refs"
     )
     assert not (meta.get("shared") or {}).get("fetch_url_cache")
-    await Replayer(workflows=[AgentWorkflow]).replay_workflow(history)
+    await Replayer(workflows=[UniversalAgentWorkflow]).replay_workflow(history)
 
 
 def test_fetch_page_cache_evicts_whole_sessions_by_size():
@@ -534,7 +534,7 @@ async def test_cache_miss_on_a_big_cyrillic_thread_does_not_inline_it(
 
         native._resolve_message_refs = forgetful
         handle = await env.client.start_workflow(
-            AgentWorkflow.run,
+            UniversalAgentWorkflow.run,
             _request(),
             id="refs-big-miss",
             task_queue="refs",

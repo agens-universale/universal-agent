@@ -213,7 +213,7 @@ def _activity_names_called_by_workflow_code():
             if (
                 isinstance(node, ast.Constant)
                 and isinstance(node.value, str)
-                and node.value.startswith("agent.")
+                and node.value.startswith("universal_agent.")
                 and node.value.count(".") >= 2
                 and " " not in node.value
             ):

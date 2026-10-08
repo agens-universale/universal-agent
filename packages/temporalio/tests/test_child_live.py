@@ -9,7 +9,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import pytest
 from live_support import temporal_cli
 from gc_core.config_modules import AppConfig
-from gc_core_temporalio.child_workflow import SubagentWorkflow
+from gc_core_temporalio.child_workflow import UniversalSubagentWorkflow
 from gc_core_temporalio.contracts import RunRequest
 from gc_core_temporalio.provider import (
     AgentProfile,
@@ -17,7 +17,7 @@ from gc_core_temporalio.provider import (
     WorkerConfig,
 )
 from gc_core_temporalio.worker import build_runtime, worker_options
-from gc_core_temporalio.workflow import AgentWorkflow
+from gc_core_temporalio.workflow import UniversalAgentWorkflow
 from gc_core_temporalio.contracts import UserMessage
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer, Worker
@@ -279,7 +279,7 @@ async def test_native_child_model_tools_input_human_and_replay(
                 **worker_options(config, native, stores)[0],
             ):
                 handle = await env.client.start_workflow(
-                    AgentWorkflow.run,
+                    UniversalAgentWorkflow.run,
                     RunRequest(
                         "test",
                         "files",
@@ -385,7 +385,9 @@ async def test_native_child_model_tools_input_human_and_replay(
             )
             if not stop:
                 assert "native child file" in str(trace)
-            replayer = Replayer(workflows=[AgentWorkflow, SubagentWorkflow])
+            replayer = Replayer(
+                workflows=[UniversalAgentWorkflow, UniversalSubagentWorkflow]
+            )
             await replayer.replay_workflow(parent_history)
             await replayer.replay_workflow(child_history)
             assert len(requests) == expected_calls
