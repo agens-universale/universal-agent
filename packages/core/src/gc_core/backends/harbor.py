@@ -292,12 +292,10 @@ class HarborBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
         finally:
             tmp_path.unlink(missing_ok=True)
 
-    # ``is_file`` — нативная ручка BaseEnvironment.
-    # ``is_dir`` не перекрываем. Нативный ``env.is_dir`` сводит любой сбой
-    # транспорта к False, и мёртвый контейнер выглядит как отсутствие каталога.
-    # Миксин ``_test`` отвечает 0/1 и бросает OSError, если ответа нет.
-    async def is_file(self, path: str) -> bool:
-        return await self._aawait(self._env.is_file(path))
+    # ``is_file`` и ``is_dir`` не перекрываем. Нативные ``env.is_file`` /
+    # ``env.is_dir`` сводят любой сбой транспорта к False, и мёртвый контейнер
+    # выглядит как отсутствие файла или каталога. Миксин ``_test`` отвечает
+    # 0/1 и бросает OSError, если ответа нет.
 
     async def aexec(
         self,

@@ -22,9 +22,10 @@ from gc_core.tools.simple_tool_base import AbstractSimpleTool
 
 _ENV_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
-# Короткий потолок пробы: мёртвый демон отвечает сразу, живая сумма — тоже.
+# Потолок пробы, не таймаут команды. Мёртвый демон отвечает сразу, живая
+# сумма тоже; 60 с оставляют запас медленному, но живому docker exec.
 # Слагаемые двузначные и без ведущего нуля: `08` в `$((…))` — восьмеричное.
-_RUNTIME_PROBE_TIMEOUT_SEC = 20
+_RUNTIME_PROBE_TIMEOUT_SEC = 60
 _RUNTIME_PROBE_NUDGE = (
     "Runtime connection failed. Wait a few seconds and retry this command. "
     "If several retries with a wait still fail, report it with turn_finish: "
@@ -318,6 +319,8 @@ Important Usage Rules:
         except OSError as exc:
             if not getattr(self._backend, "is_sandbox", False):
                 raise
+            # `is_dir` здесь — ответ 0/1. Исключение значит, что ответа нет:
+            # та же ситуация, что и непройденная проба суммы. Текст не разбираем.
             err = str(exc).replace("\n", " ").strip()
             return {
                 "type": "execution_failed",
@@ -543,11 +546,34 @@ Important Usage Rules:
             },
         )
 
+    def _probe_failed(self, plan: dict, res: Any, *, stderr: str) -> str:
+        """Суммы нет: оболочка пробу не выполнила. Команду не шлём."""
+        stdout = getattr(res, "stdout", None) or "" if res is not None else ""
+        return self._result(
+            ok=False,
+            command=plan["command"],
+            cwd=plan["cwd"] or "",
+            exit_code=(
+                -1 if res is None else getattr(res, "return_code", None)
+            ),
+            timed_out=bool(
+                res is not None and getattr(res, "timed_out", False)
+            ),
+            stdout=stdout,
+            stderr=stderr,
+            error={
+                "type": "execution_failed" if res is None else "non_zero_exit",
+                "message": _probe_failure_message(stdout, stderr),
+            },
+        )
+
     async def _adead_runtime(self, plan: dict) -> "str | None":
         """Проба суммы в песочнице. ``None`` — оболочка её посчитала, команду можно слать.
 
-        Хост не проверяем: там нет демона между нами и оболочкой. Сырой канал,
-        без профиля образа.
+        В живом окружении `echo $((a+b))` всегда возвращает сумму. Не вернула —
+        среда не в порядке, и это не разбирается по тексту ошибки. Каталог сюда
+        не входит: `cd` в пробе нет, «нет каталога» отвечает `is_dir` нулём
+        или сам запуск команды. Хост не проверяем. Сырой канал, без профиля.
         """
         if not getattr(self._backend, "is_sandbox", False):
             return None
@@ -556,40 +582,17 @@ Important Usage Rules:
             res = await arun_backend_exec_raw(
                 self._backend,
                 _probe_command(left, right),
-                cwd=plan["cwd"],
                 timeout=_RUNTIME_PROBE_TIMEOUT_SEC,
             )
         except Exception as exc:
             err = str(exc).replace("\n", " ").strip()
-            return self._result(
-                ok=False,
-                command=plan["command"],
-                cwd=plan["cwd"] or "",
-                exit_code=-1,
-                timed_out=False,
-                stdout="",
-                stderr=err,
-                error={
-                    "type": "execution_failed",
-                    "message": _probe_failure_message("", err),
-                },
-            )
+            return self._probe_failed(plan, None, stderr=err)
         if _probe_came_back(res, left + right):
             return None
-        stdout = getattr(res, "stdout", None) or ""
-        stderr = getattr(res, "stderr", None) or ""
-        return self._result(
-            ok=False,
-            command=plan["command"],
-            cwd=plan["cwd"] or "",
-            exit_code=res.return_code,
-            timed_out=bool(getattr(res, "timed_out", False)),
-            stdout=stdout,
-            stderr=stderr,
-            error={
-                "type": "non_zero_exit",
-                "message": _probe_failure_message(stdout, stderr),
-            },
+        return self._probe_failed(
+            plan,
+            res,
+            stderr=getattr(res, "stderr", None) or "",
         )
 
     def _exec_failed(self, plan: dict, exc: Exception) -> str:

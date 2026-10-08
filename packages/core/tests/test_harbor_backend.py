@@ -107,12 +107,35 @@ async def test_write_uses_upload(loop_in_thread):
     assert env.uploaded and env.uploaded[0][1] == "/work/new.txt"
 
 
-async def test_is_file_uses_native_env_handle(loop_in_thread):
+async def test_is_file_reads_shell_answer_and_raises_when_backend_is_down(
+    loop_in_thread,
+):
+    """Нативный env.is_file врёт False на мёртвом Docker. Shell-ответ 0/1 — нет."""
     env = FakeEnv()
+    answers = {
+        "if test -f /work/a.txt; then echo 1; else echo 0; fi": FakeExecResult(
+            stdout="1\n"
+        ),
+        "if test -f /work/dir; then echo 1; else echo 0; fi": FakeExecResult(
+            stdout="0\n"
+        ),
+    }
+
+    async def exec_answer(command, **kw):
+        env.calls.append(command)
+        if command in answers:
+            return answers[command]
+        return FakeExecResult(
+            stderr="Cannot connect to the Docker daemon at tcp://localhost:2375",
+            return_code=1,
+        )
+
+    env.exec = exec_answer
     backend = HarborBackend(env, loop_in_thread)
     assert await backend.is_file("/work/a.txt") is True
     assert await backend.is_file("/work/dir") is False
-    assert not any("test -" in c for c in env.calls)
+    with pytest.raises(OSError, match="Docker daemon"):
+        await backend.is_file("/dead")
 
 
 async def test_is_dir_reads_shell_answer_and_raises_when_backend_is_down(

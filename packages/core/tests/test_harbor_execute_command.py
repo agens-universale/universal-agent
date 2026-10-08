@@ -37,6 +37,8 @@ class _RecordingFakeBackend:
         # Живая проба: echo $((a+b)) возвращает сумму своей строкой.
         # Мёртвая — тот же отказ, что и у команды (демон не достучался).
         self.probe_alive = True
+        # Свой ответ пробы, если сценарий не «жива/мертва», а ошибка внутри.
+        self.probe_result = None
 
     def exec(self, command, *, cwd=None, timeout=None, env=None):
         self.calls.append(
@@ -44,6 +46,8 @@ class _RecordingFakeBackend:
         )
         total = probe_total_in_command(command)
         if self.is_sandbox and total is not None:
+            if self.probe_result is not None:
+                return self.probe_result
             if not self.probe_alive:
                 return ExecResult(
                     stdout=self.res.stdout,
@@ -273,8 +277,8 @@ def test_primed_default_cwd_skips_is_dir_on_harbor_and_remote():
 
     Harbor сводит упавший exec к False («Not a directory»). RemoteShell
     перед командой делает тот же `test -d`. Оба бэкенда отдают путь через
-    `default_cwd()`, и для него проверка пропускается — ошибка транспорта
-    приходит уже из самого запуска.
+    `default_cwd()`, и для него проверка пропускается. Живость отвечает
+    проба суммы без `cd`; не сошлась — команду не запускаем.
     """
     b = _RecordingFakeBackend(
         stderr="Cannot connect to the Docker daemon at tcp://localhost:2375",
@@ -285,7 +289,8 @@ def test_primed_default_cwd_skips_is_dir_on_harbor_and_remote():
     b.probe_alive = False
     env = json.loads(_tool(b)(command="echo test"))
     assert b.is_dir_calls == []
-    assert b.calls[0]["cwd"] == "/app"
+    # Проба не делает cd: чужой cwd не должен ронять проверку живости.
+    assert b.calls[0]["cwd"] is None
     assert probe_total_in_command(b.calls[0]["command"]) is not None
     assert len(b.calls) == 1
     assert env["ok"] is False
@@ -395,3 +400,70 @@ def test_explicit_cwd_transport_failure_is_runtime_down():
     assert "Docker daemon" in env["error"]["message"]
     assert b.calls == []
     assert b.is_dir_calls == ["/tmp/other"]
+
+
+def test_deleted_default_cwd_is_the_command_failure():
+    """Проба без cd жива. Стёртый каталог виден уже из запуска команды."""
+    b = _RecordingFakeBackend(
+        stderr="bash: line 1: cd: /app: No such file or directory\n",
+        rc=1,
+    )
+    b.is_sandbox = True
+    b._default_cwd = "/app"
+    env = json.loads(_tool(b)(command="echo test"))
+    assert probe_total_in_command(b.calls[0]["command"]) is not None
+    assert b.calls[0]["cwd"] is None
+    assert b.calls[1]["command"] == "echo test"
+    assert b.calls[1]["cwd"] == "/app"
+    assert env["error"]["type"] == "non_zero_exit"
+    assert env["error"]["message"] == "Command exited with status 1"
+    assert "No such file or directory" in env["stderr"]["content"]
+    assert "Runtime connection failed" not in env["error"]["message"]
+
+
+def test_probe_without_sum_does_not_run_the_command():
+    """Суммы нет — среда не в порядке, чем бы ни был текст. Команду не шлём."""
+    b = _RecordingFakeBackend(stdout="ok", rc=0)
+    b.is_sandbox = True
+    b._default_cwd = "/app"
+    b.probe_result = ExecResult(stderr="permission denied\n", return_code=1)
+    env = json.loads(_tool(b)(command="echo test"))
+    assert env["ok"] is False
+    assert env["error"]["message"].startswith("Runtime connection failed.")
+    assert "permission denied" in env["error"]["message"]
+    assert "turn_finish" in env["error"]["message"]
+    assert all(c["command"] != "echo test" for c in b.calls)
+
+
+def test_probe_timeout_is_a_failed_probe():
+    b = _RecordingFakeBackend()
+    b.is_sandbox = True
+    b._default_cwd = "/app"
+    b.probe_result = ExecResult(
+        stdout="", stderr="", return_code=None, timed_out=True
+    )
+    env = json.loads(_tool(b)(command="echo test"))
+    assert env["ok"] is False
+    assert env["timed_out"] is True
+    assert env["error"]["message"].startswith("Runtime connection failed.")
+    assert "turn_finish" in env["error"]["message"]
+    assert all(c["command"] != "echo test" for c in b.calls)
+
+
+def test_is_dir_without_answer_is_a_failed_probe():
+    """Нет ответа 0/1 — та же среда не в порядке, текст исключения не классифицируем."""
+    b = _RecordingFakeBackend()
+    b._default_cwd = "/app"
+    b.is_sandbox = True
+
+    async def denied(path):
+        b.is_dir_calls.append(path)
+        raise OSError("Permission denied")
+
+    b.is_dir = denied
+    env = json.loads(_tool(b)(command="echo test", cwd="/tmp/other"))
+    assert env["error"]["type"] == "execution_failed"
+    assert env["error"]["message"].startswith("Runtime connection failed.")
+    assert "Permission denied" in env["error"]["message"]
+    assert "Not a directory" not in env["error"]["message"]
+    assert b.calls == []
