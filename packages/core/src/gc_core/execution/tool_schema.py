@@ -147,12 +147,46 @@ def mark_property_optional(schema: dict[str, Any], key: str) -> None:
         schema["x-optional-keys"] = [*optional, key]
 
 
+def is_open_object(schema: Any) -> bool:
+    """Свободный объект (``dict`` в сигнатуре): ключи не перечислены, любые разрешены.
+
+    Закрыть его (``additionalProperties: false``) — значит запретить все
+    ключи: модель сможет передать только ``{}``. OpenAI strict такой узел не
+    принимает, поэтому инструмент с ним уходит без ``strict``
+    (``has_open_object``).
+    """
+    if not isinstance(schema, dict) or schema.get("type") != "object":
+        return False
+    if schema.get("properties"):
+        return False
+    extra = schema.get("additionalProperties")
+    return extra is True or isinstance(extra, dict)
+
+
+def has_open_object(schema: Any) -> bool:
+    """True, если в схеме (на любой глубине) есть свободный объект."""
+    seen: set[int] = set()
+
+    def _walk(node: Any) -> bool:
+        if not isinstance(node, dict) or id(node) in seen:
+            return False
+        seen.add(id(node))
+        if is_open_object(node):
+            return True
+        return any(_walk(sub) for sub in _nested_schemas(node))
+
+    return _walk(schema)
+
+
 def apply_openai_strict_object(schema: dict[str, Any]) -> None:
     """
     OpenAI strict mode for one object node: every property key is required;
     remember semantic optional keys before expansion.
+
+    Свободный объект не трогаем (``is_open_object``): закрытый, он не принял
+    бы ни одного ключа.
     """
-    if schema.get("type") != "object":
+    if schema.get("type") != "object" or is_open_object(schema):
         return
     props = schema.get("properties")
     if not isinstance(props, dict):

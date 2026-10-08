@@ -15,7 +15,10 @@ from gc_core.tools.connect_mcp.api import (
 )
 from gc_core.tools.connect_mcp.registry import ToolsCache
 from gc_core.tools.connect_mcp.tool_wrapper import MCPToolWrapper
-from gc_core.tools.schema_optional import apply_openai_strict_object
+from gc_core.tools.schema_optional import (
+    apply_openai_strict_object,
+    is_open_object,
+)
 from gc_core.trace_id import trace_header_name, trace_id_from_config
 
 logger = logging.getLogger(__name__)
@@ -180,7 +183,7 @@ def _infer_missing_type(schema: dict) -> None:
     has_ref = isinstance(schema.get("$ref"), str)
     if "type" in schema or has_combinator or has_ref:
         return
-    if "properties" in schema:
+    if "properties" in schema or "additionalProperties" in schema:
         schema["type"] = "object"
     elif "items" in schema:
         schema["type"] = "array"
@@ -213,6 +216,15 @@ def _normalize_object_schema(schema: dict, *, openai_strict: bool) -> None:
     if not isinstance(required, list):
         required = []
         schema["required"] = required
+
+    # Объект без перечисленных ключей (`fields: dict`, `dict[str, str]`) —
+    # свободный: по JSON Schema лишние ключи разрешены, если не запрещены явно.
+    # Закрыть его — запретить все ключи. Оставляем открытым; strict для такого
+    # инструмента снимает проекция на отправке (`has_open_object`).
+    if not props and "additionalProperties" not in schema:
+        schema["additionalProperties"] = True
+    if is_open_object(schema):
+        return
 
     for name, subschema in list(props.items()):
         props[name] = _normalize_property(

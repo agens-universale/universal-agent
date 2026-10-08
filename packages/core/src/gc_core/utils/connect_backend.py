@@ -970,10 +970,14 @@ def project_tool_specs(
     ``openai_strict`` разворачивает ``required`` на каждом object и вешает
     подсказку пустой строки. Иначе остаётся семантический ``required`` и
     подсказка «пропусти поле». ``send_tool_strict: false`` снимает ``strict``.
+    Инструмент со свободным объектом (``dict`` в сигнатуре) уходит со
+    ``strict: false``: strict требует закрыть каждый объект, а закрытый
+    свободный объект не примет ни одного ключа.
     """
     from gc_core.tools.schema_optional import (
         apply_openai_strict_schema_tree,
         augment_optional_property_descriptions,
+        has_open_object,
     )
 
     projected = deepcopy(tools) if isinstance(tools, list) else []
@@ -994,6 +998,8 @@ def project_tool_specs(
         augment_optional_property_descriptions(
             body, openai_strict=openai_strict
         )
+        if body.get("strict") and has_open_object(body.get("parameters")):
+            body["strict"] = False
         if not send_tool_strict:
             body.pop("strict", None)
     return projected

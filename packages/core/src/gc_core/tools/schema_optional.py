@@ -52,6 +52,12 @@ from gc_core.execution.tool_schema import (
     mark_property_optional as mark_property_optional,
 )
 from gc_core.execution.tool_schema import (
+    has_open_object as has_open_object,
+)
+from gc_core.execution.tool_schema import (
+    is_open_object as is_open_object,
+)
+from gc_core.execution.tool_schema import (
     normalize_optional_empty_as_omit as normalize_optional_empty_as_omit,
 )
 from gc_core.execution.tool_schema import (
