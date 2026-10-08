@@ -428,3 +428,189 @@ def test_subagent_uses_own_alias_threshold():
         resolve_summary_limits_at_level(cfg, child, "default").chars_during
         == 50000
     )
+
+
+# --- батч и лимит диалога модели доходят до ЛЮБОГО сжатия ----------------------
+
+
+class _SummarizerReached(Exception):
+    """Суммаризатор вызван: аргументы сняты, дальше сжатие идти не обязано."""
+
+
+def _capture_summarizer(monkeypatch, ctx) -> dict:
+    """Подменить суммаризатор в общей точке сжатия и снять, с чем его позвали."""
+    from gc_core.summarize import compaction
+
+    seen: dict = {}
+
+    async def _fake(**kwargs):
+        seen["batch_chars"] = kwargs.get("batch_chars")
+        seen["max_dialogue_chars"] = kwargs.get("max_dialogue_chars")
+        seen["summary_params"] = ctx.config_dict.get("summary_params")
+        raise _SummarizerReached
+
+    monkeypatch.setattr(
+        compaction, "asummarize_dialog_via_chat_completions", _fake
+    )
+    return seen
+
+
+def _light_turn(level: dict):
+    """Ход, начатый на лёгкой модели (порог 10 символов → батч 12, диалог 50)."""
+    from types import SimpleNamespace
+
+    from gc_core.turn_boundary import begin_turn
+
+    cfg = _two_level_cfg()
+    router = ModelRouter(cfg, level_provider=lambda: level["current"])
+    ctx = SimpleNamespace(
+        config_dict=cfg,
+        model_router=router,
+        logger=None,
+        on_summary_applied=None,
+        is_cli_mode=False,
+    )
+    state = _chat_state()
+    begin_turn(state, ctx)
+    return cfg, ctx, state
+
+
+async def test_compaction_hands_the_models_batch_to_the_summarizer(monkeypatch):
+    """Батч и лимит диалога считаются от порога модели, чтобы кусок истории
+    помещался в её окно. Доходят они параметрами, от модели ХОДА: живой уровень
+    переключён на большую модель, а сжимается история лёгкой."""
+    from gc_core.summarize.compaction import arun_summary_compaction
+
+    level = {"current": "light"}
+    _cfg_dict, ctx, state = _light_turn(level)
+    seen = _capture_summarizer(monkeypatch, ctx)
+    level["current"] = "default"
+    with pytest.raises(_SummarizerReached):
+        await arun_summary_compaction(
+            ctx=ctx, state=state, trigger_reason="t", is_cli_mode=False
+        )
+    assert (seen["batch_chars"], seen["max_dialogue_chars"]) == (12, 50)
+
+
+async def test_compaction_keeps_global_values_for_a_model_without_thresholds(
+    monkeypatch,
+):
+    from types import SimpleNamespace
+
+    from gc_core.summarize.compaction import arun_summary_compaction
+
+    cfg = _cfg(
+        {
+            "summary": _global_summary(chars=200000, batch=77000),
+            "models": {"m": {"url": "http://m/v1/chat/completions", "token": ""}},
+            "slots": {"default": "m"},
+        }
+    )
+    ctx = SimpleNamespace(
+        config_dict=cfg,
+        model_router=ModelRouter(cfg, level_provider=lambda: "default"),
+        logger=None,
+    )
+    seen = _capture_summarizer(monkeypatch, ctx)
+    with pytest.raises(_SummarizerReached):
+        await arun_summary_compaction(
+            ctx=ctx, state=_chat_state(), trigger_reason="t", is_cli_mode=False
+        )
+    assert (seen["batch_chars"], seen["max_dialogue_chars"]) == (77000, 1000000)
+
+
+async def test_automatic_compaction_does_not_rewrite_the_shared_config(
+    monkeypatch,
+):
+    """Раньше батч модели доезжал подменой `config_dict["summary_params"]` на
+    время сжатия. Общий конфиг сжатие не трогает: раздел — тот же объект."""
+    from gc_core.run_summary_coordinator import RunSummaryCoordinator
+
+    level = {"current": "light"}
+    cfg, ctx, state = _light_turn(level)
+    original = cfg["summary_params"]
+    snapshot = dict(original)
+    seen = _capture_summarizer(monkeypatch, ctx)
+
+    def provider():
+        return resolve_summary_limits_at_level(
+            cfg, ctx.model_router, state.turn_level
+        )
+
+    first = provider()
+    coord = RunSummaryCoordinator(
+        ctx=ctx,
+        state=state,
+        thread_session=None,
+        summary_trigger_chars=first.chars_during,
+        summary_trigger_tokens=first.tokens_during,
+        turn_end_trigger_chars=first.chars_after,
+        turn_end_trigger_tokens=first.tokens_after,
+        is_cli_mode=False,
+        pre_backend_trigger_reason="pre_backend",
+        limits_provider=provider,
+    )
+    with pytest.raises(_SummarizerReached):
+        await coord.aforce_compact_once(trigger_reason="t")
+    assert seen["summary_params"] is original
+    assert cfg["summary_params"] is original
+    assert original == snapshot
+    assert seen["batch_chars"] == 12
+
+
+async def test_manual_compaction_uses_the_models_batch(monkeypatch):
+    """Ручное сжатие строит координатор БЕЗ провайдера порогов
+    (`manual_compaction.py`) — батч модели обязан дойти и по этому пути."""
+    from gc_core.run_summary_coordinator import RunSummaryCoordinator
+
+    level = {"current": "light"}
+    _cfg_dict, ctx, state = _light_turn(level)
+    seen = _capture_summarizer(monkeypatch, ctx)
+    coord = RunSummaryCoordinator(
+        ctx=ctx,
+        state=state,
+        thread_session=None,
+        summary_trigger_chars=999999,
+        is_cli_mode=True,
+        pre_backend_trigger_reason="pre_backend",
+    )
+    with pytest.raises(_SummarizerReached):
+        await coord.aforce_compact_once(trigger_reason="manual")
+    assert (seen["batch_chars"], seen["max_dialogue_chars"]) == (12, 50)
+
+
+def test_session_compact_tool_uses_the_models_batch(monkeypatch):
+    """Тул зовёт сжатие напрямую, мимо координатора — та же общая точка."""
+    import json
+
+    from gc_core.tools.session.session_compact import SessionCompact
+    from gc_testkit.helpers.tool_ctx import CallableTool
+
+    level = {"current": "light"}
+    _cfg_dict, ctx, state = _light_turn(level)
+    seen = _capture_summarizer(monkeypatch, ctx)
+    result = json.loads(
+        CallableTool(SessionCompact(ctx=ctx, state=state))(reason="фаза")
+    )
+    assert result["ok"] is False  # суммаризатор в тесте дальше не идёт
+    assert (seen["batch_chars"], seen["max_dialogue_chars"]) == (12, 50)
+
+
+def test_summarizer_limits_prefer_explicit_values_over_the_config():
+    """Положительное значение от вызывающего главнее `summary_params`; 0 — «не
+    задано», берётся конфиг, а без него — дефолт суммаризатора."""
+    from gc_core.summarize.thread_summarizer import _SummaryLimits
+
+    params = {"incremental_batch_chars": 500, "max_dialogue_chars": 900}
+    explicit = _SummaryLimits(params, batch_chars=72, max_dialogue_chars=300)
+    assert (explicit.batch_chars_limit, explicit.max_dialogue_chars) == (72, 300)
+    from_config = _SummaryLimits(params, batch_chars=0, max_dialogue_chars=0)
+    assert (from_config.batch_chars_limit, from_config.max_dialogue_chars) == (
+        500,
+        900,
+    )
+    defaults = _SummaryLimits({})
+    assert (defaults.batch_chars_limit, defaults.max_dialogue_chars) == (
+        10**12,
+        1000000,
+    )

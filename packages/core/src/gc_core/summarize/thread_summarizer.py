@@ -56,9 +56,19 @@ def _int_param(params: Dict[str, Any], key: str, default: int) -> int:
 
 
 class _SummaryLimits:
-    """Лимиты суммаризации из ``summary_params`` с дефолтами."""
+    """Лимиты суммаризации из ``summary_params`` с дефолтами.
 
-    def __init__(self, params: Dict[str, Any]) -> None:
+    ``batch_chars`` / ``max_dialogue_chars`` — значения модели, которая ведёт
+    историю (считает вызывающий, `compaction.arun_summary_compaction`):
+    положительное главнее конфига, ``0`` — «не задано», берётся конфиг."""
+
+    def __init__(
+        self,
+        params: Dict[str, Any],
+        *,
+        batch_chars: int = 0,
+        max_dialogue_chars: int = 0,
+    ) -> None:
         self.last_steps_count = _int_param(
             params, "last_dialog_steps_count", 5
         )
@@ -68,7 +78,7 @@ class _SummaryLimits:
             _DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS,
         )
         self.max_message_chars = _int_param(params, "max_message_chars", 50000)
-        self.max_dialogue_chars = _int_param(
+        self.max_dialogue_chars = max_dialogue_chars or _int_param(
             params, "max_dialogue_chars", 1000000
         )
         self.max_accumulated_summary_chars = _int_param(
@@ -76,13 +86,23 @@ class _SummaryLimits:
         )
         # Размер батча для инкрементальной суммаризации.
         # По умолчанию нормализуется в config.py как int(trigger * 1.2).
-        self.batch_chars_limit = _int_param(
+        self.batch_chars_limit = batch_chars or _int_param(
             params, "incremental_batch_chars", 10**12
         )
 
     @classmethod
-    def from_params(cls, params: Dict[str, Any]) -> "_SummaryLimits":
-        return cls(params)
+    def from_params(
+        cls,
+        params: Dict[str, Any],
+        *,
+        batch_chars: int = 0,
+        max_dialogue_chars: int = 0,
+    ) -> "_SummaryLimits":
+        return cls(
+            params,
+            batch_chars=batch_chars,
+            max_dialogue_chars=max_dialogue_chars,
+        )
 
 
 def _empty_history_result(
@@ -478,6 +498,8 @@ async def asummarize_dialog_via_chat_completions(
     current_user_intent: List[IntentRecord] | None = None,
     max_tokens: int | None = None,
     steps_offset: int = 0,
+    batch_chars: int = 0,
+    max_dialogue_chars: int = 0,
 ) -> Dict[str, Any]:
     """Строит структурированную сводку диалога через chat completions (в т.ч. батчами).
 
@@ -553,7 +575,11 @@ async def asummarize_dialog_via_chat_completions(
         if isinstance(cfg.get("summary_params"), dict)
         else {}
     )
-    lim = _SummaryLimits.from_params(summary_params)
+    lim = _SummaryLimits.from_params(
+        summary_params,
+        batch_chars=batch_chars,
+        max_dialogue_chars=max_dialogue_chars,
+    )
     last_steps_count = lim.last_steps_count
     last_step_message_max_chars = lim.last_step_message_max_chars
     max_message_chars = lim.max_message_chars
