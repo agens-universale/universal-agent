@@ -26,7 +26,10 @@ from gc_core.backends.protocol import (
     argv_to_posix_command,
     bound_exec_result,
 )
-from gc_core.backends.runtime_probe import aensure_runtime
+from gc_core.backends.runtime_probe import (
+    DEFAULT_RUNTIME_PROBE_TTL_SEC,
+    RuntimeProbeCache,
+)
 from gc_core.backends.walk_util import FlatWalkMixin
 
 # Встроенная политика ``harbor_exec_init: bashrc``. Неинтерактивный ``bash -c``
@@ -108,11 +111,13 @@ class HarborBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
         exec_output_capture_max_chars: int = DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS,
         walk_output_max_chars: int = WALK_OUTPUT_MAX_CHARS,
         exec_init: Optional[str] = None,
+        runtime_probe_ttl_sec: int = DEFAULT_RUNTIME_PROBE_TTL_SEC,
     ) -> None:
         self._env = environment
         self._loop = loop
         self.exec_output_capture_max_chars = exec_output_capture_max_chars
         self.walk_output_max_chars = walk_output_max_chars
+        self._runtime_probe = RuntimeProbeCache(runtime_probe_ttl_sec)
         # Инициализация окружения для канала МОДЕЛИ (`aexec`): None — сырой
         # shell, "bashrc" — встроенный bootstrap, иначе свой префикс.
         self.exec_init = exec_init
@@ -237,7 +242,7 @@ class HarborBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
         Перед действием — проба суммы. ``probe=False`` только у самой пробы.
         """
         if probe:
-            await aensure_runtime(self._aprobe, timeout=timeout)
+            await self._runtime_probe.ensure(self._aprobe, timeout=timeout)
         full = build_harbor_shell_command(
             command, cwd=cwd, env=env, exec_init=exec_init
         )
@@ -282,7 +287,7 @@ class HarborBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
 
     async def _aupload_bytes(self, data: bytes, path: str) -> None:
         # mkdir и upload_file идут мимо ``_aexec_impl``.
-        await aensure_runtime(self._aprobe)
+        await self._runtime_probe.ensure(self._aprobe)
         with tempfile.NamedTemporaryFile("wb", delete=False) as tmp:
             tmp.write(data)
             tmp_path = Path(tmp.name)
@@ -295,7 +300,7 @@ class HarborBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
             tmp_path.unlink(missing_ok=True)
 
     async def _adownload_bytes(self, path: str) -> bytes:
-        await aensure_runtime(self._aprobe)
+        await self._runtime_probe.ensure(self._aprobe)
         with tempfile.NamedTemporaryFile("wb", delete=False) as tmp:
             tmp_path = Path(tmp.name)
         try:

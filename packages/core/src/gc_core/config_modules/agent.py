@@ -13,6 +13,7 @@ from gc_core.backends.protocol import (
     DEFAULT_EXEC_OUTPUT_PREVIEW_EDGE_CHARS,
     WALK_OUTPUT_MAX_CHARS,
 )
+from gc_core.backends.runtime_probe import DEFAULT_RUNTIME_PROBE_TTL_SEC
 
 DEFAULT_FINISH_GATE_MAX_ITERATIONS = 10
 DEFAULT_SUBAGENT_FINISH_GATE_MAX_ITERATIONS = 3
@@ -96,6 +97,9 @@ class AgentConfig(BaseModel):
     # Инициализация model-facing exec в Harbor: None = raw, "bashrc" = встроенный
     # profile/bootstrap, любая другая непустая строка = custom shell-префикс.
     harbor_exec_init: str | None = None
+    # Успешная проба живости Harbor/Remote (echo суммы) закрывает следующие
+    # действия на этот срок. 0 — проба перед каждым действием.
+    runtime_probe_ttl_sec: int = DEFAULT_RUNTIME_PROBE_TTL_SEC
     # Синтетические поля tool schema: имя → description. Отсутствует или {} — без инжекта.
     inject_tool_fields: dict[str, str] = Field(default_factory=dict)
     # Steering-текст: при рендере system prompt дописывается в <special_instructions>
@@ -216,6 +220,23 @@ class AgentConfig(BaseModel):
         text = value.strip()
         return text or None
 
+    @field_validator("runtime_probe_ttl_sec", mode="before")
+    @classmethod
+    def normalize_runtime_probe_ttl_sec(cls, value: Any) -> int:
+        if value is None:
+            return DEFAULT_RUNTIME_PROBE_TTL_SEC
+        try:
+            n = int(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "agent.runtime_probe_ttl_sec должен быть целым числом >= 0"
+            ) from exc
+        if n < 0:
+            raise ValueError(
+                "agent.runtime_probe_ttl_sec должен быть целым числом >= 0"
+            )
+        return n
+
 
 def exec_output_preview_edge_chars_from_config_dict(
     config_dict: dict[str, Any] | None,
@@ -276,6 +297,23 @@ def walk_output_max_chars_from_config_dict(
     except (TypeError, ValueError):
         return WALK_OUTPUT_MAX_CHARS
     return n if n > 0 else WALK_OUTPUT_MAX_CHARS
+
+
+def runtime_probe_ttl_sec_from_config_dict(
+    config_dict: dict[str, Any] | None,
+) -> int:
+    """Срок годности успешной пробы живости из плоского config_dict.
+
+    ``0`` — проба перед каждым действием. Мусор и отрицательные — дефолт.
+    """
+    raw = (config_dict or {}).get(
+        "runtime_probe_ttl_sec", DEFAULT_RUNTIME_PROBE_TTL_SEC
+    )
+    try:
+        n = int(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_RUNTIME_PROBE_TTL_SEC
+    return n if n >= 0 else DEFAULT_RUNTIME_PROBE_TTL_SEC
 
 
 def harbor_exec_init_from_config_dict(

@@ -83,6 +83,8 @@ async def test_probe_precedes_the_remote_command(monkeypatch):
     monkeypatch.setattr(
         "gc_core.backends.remote_shell._arun_bounded_process", dead_process
     )
+    # Свежий бэкенд: успешная проба первого жива 10 с и вторую бы пропустила.
+    backend = RemoteShellBackend(["docker", "exec", "-i", "box"])
     with pytest.raises(
         RuntimeUnavailable, match="Runtime connection failed"
     ) as err:

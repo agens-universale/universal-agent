@@ -6,13 +6,21 @@
 выглядел как мёртвый контейнер.
 
 Вызов пробы идёт в обход самой пробы, иначе ``echo`` проверял бы сам себя.
+Успешная проба помнится ``RuntimeProbeCache`` несколько секунд: пока отметка
+свежая, следующий echo не шлётся. Отказ не запоминается.
 """
 
 from __future__ import annotations
 
+import asyncio
 import random
 import re
+import time
 from typing import Any, Awaitable, Callable
+
+# Успешный echo закрывает следующие действия на этот срок. 0 — проба каждый раз.
+# Дольше 10 с мёртвый контейнер слишком долго выглядит живым.
+DEFAULT_RUNTIME_PROBE_TTL_SEC = 10
 
 # Потолок пробы, не таймаут команды. Мёртвый демон отвечает сразу, живая
 # сумма тоже; 60 с оставляют запас медленному, но живому docker exec.
@@ -111,9 +119,10 @@ def _probe_timeout(timeout: int | None) -> int:
 async def aensure_runtime(
     run: ProbeRun, *, timeout: int | None = None
 ) -> None:
-    """Один раз убедиться, что ``run`` исполняет оболочку. Иначе ``RuntimeUnavailable``.
+    """Убедиться, что ``run`` исполняет оболочку. Иначе ``RuntimeUnavailable``.
 
-    ``run`` обязан не звать пробу снова.
+    Кэша здесь нет: его держит ``RuntimeProbeCache``. ``run`` обязан не звать
+    пробу снова.
     """
     left, right = _probe_terms()
     try:
@@ -131,3 +140,33 @@ async def aensure_runtime(
         return_code=getattr(res, "return_code", None),
         timed_out=bool(getattr(res, "timed_out", False)),
     )
+
+
+class RuntimeProbeCache:
+    """Успешная проба жива ``ttl_sec`` секунд. Отказ проверяется снова сразу.
+
+    Параллельные вызовы делят один echo: второй ждёт первый и, если тот
+    прошёл, свой не шлёт.
+    """
+
+    def __init__(self, ttl_sec: int = DEFAULT_RUNTIME_PROBE_TTL_SEC) -> None:
+        self.ttl_sec = ttl_sec
+        self._ok_until = 0.0
+        self._lock = asyncio.Lock()
+
+    def _fresh(self) -> bool:
+        return self.ttl_sec > 0 and time.monotonic() < self._ok_until
+
+    async def ensure(
+        self, run: ProbeRun, *, timeout: int | None = None
+    ) -> None:
+        if self._fresh():
+            return
+        if self.ttl_sec <= 0:
+            await aensure_runtime(run, timeout=timeout)
+            return
+        async with self._lock:
+            if self._fresh():
+                return
+            await aensure_runtime(run, timeout=timeout)
+            self._ok_until = time.monotonic() + self.ttl_sec

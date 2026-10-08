@@ -880,6 +880,34 @@ async def test_probe_runs_before_the_command_and_does_not_cd(loop_in_thread):
     assert recorded[1] == _user_shell("echo hi", cwd="/work")
 
 
+async def test_successful_probe_is_reused_until_ttl(
+    loop_in_thread, monkeypatch
+):
+    """Вторая команда в окне TTL не шлёт echo. После срока — снова."""
+    env = FakeEnv()
+    recorded = []
+
+    async def exec_record(command, **kw):
+        recorded.append(command)
+        probed = _probe_result(command)
+        if probed is not None:
+            return probed
+        return FakeExecResult(stdout="ok\n", return_code=0)
+
+    env.exec = exec_record
+    clock = {"t": 1_000.0}
+    monkeypatch.setattr(
+        "gc_core.backends.runtime_probe.time.monotonic", lambda: clock["t"]
+    )
+    backend = HarborBackend(env, loop_in_thread)
+    await backend.aexec("echo one")
+    await backend.aexec("echo two")
+    assert sum(probe_stdout(cmd) is not None for cmd in recorded) == 1
+    clock["t"] += 11
+    await backend.aexec("echo three")
+    assert sum(probe_stdout(cmd) is not None for cmd in recorded) == 2
+
+
 async def test_failed_probe_does_not_run_the_command(loop_in_thread):
     env = FakeEnv()
     recorded = []

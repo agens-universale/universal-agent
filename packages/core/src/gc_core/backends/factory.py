@@ -25,6 +25,7 @@ from gc_core.backends.sandbox import (
 from gc_core.config_modules.agent import (
     exec_output_capture_max_chars_from_config_dict,
     harbor_exec_init_from_config_dict,
+    runtime_probe_ttl_sec_from_config_dict,
     walk_output_max_chars_from_config_dict,
 )
 from gc_core.config_modules.env_vars import gc_paths
@@ -129,6 +130,9 @@ def resolve_os_backend(
                 config_dict
             ),
             exec_init=harbor_exec_init_from_config_dict(config_dict),
+            runtime_probe_ttl_sec=runtime_probe_ttl_sec_from_config_dict(
+                config_dict
+            ),
         )
 
     section = os_backend_section(config_dict)
@@ -143,6 +147,9 @@ def resolve_os_backend(
                 config_dict
             ),
             joins_argv=kind == "ssh",
+            runtime_probe_ttl_sec=runtime_probe_ttl_sec_from_config_dict(
+                config_dict
+            ),
         )
 
     if kind == "sandbox":

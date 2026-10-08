@@ -28,7 +28,10 @@ from gc_core.backends.protocol import (
     FsBackend,
     argv_to_posix_command,
 )
-from gc_core.backends.runtime_probe import aensure_runtime
+from gc_core.backends.runtime_probe import (
+    DEFAULT_RUNTIME_PROBE_TTL_SEC,
+    RuntimeProbeCache,
+)
 from gc_core.backends.walk_util import FlatWalkMixin
 
 #: Потолок на одну файловую операцию (stat, upload, download): зависший
@@ -102,6 +105,7 @@ class RemoteShellBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
         walk_output_max_chars: int = WALK_OUTPUT_MAX_CHARS,
         joins_argv: bool = False,
         fs_op_timeout_sec: int = FS_OP_TIMEOUT_SEC,
+        runtime_probe_ttl_sec: int = DEFAULT_RUNTIME_PROBE_TTL_SEC,
     ) -> None:
         self.argv_prefix = tuple(str(a) for a in argv_prefix)
         # ssh не сохраняет argv: склеивает хвост пробелами и отдаёт строкой
@@ -113,6 +117,7 @@ class RemoteShellBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
         self.exec_init = exec_init
         self.exec_output_capture_max_chars = exec_output_capture_max_chars
         self.walk_output_max_chars = walk_output_max_chars
+        self._runtime_probe = RuntimeProbeCache(runtime_probe_ttl_sec)
         self._discovered_cwd: Optional[str] = None
 
     # --- транспорт ---
@@ -135,7 +140,7 @@ class RemoteShellBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
         probe: bool = True,
     ) -> ExecResult:
         if probe:
-            await aensure_runtime(self._aprobe, timeout=timeout)
+            await self._runtime_probe.ensure(self._aprobe, timeout=timeout)
         remote = ["sh", "-c", shell_command]
         if self.joins_argv:
             remote = [shlex.join(remote)]
