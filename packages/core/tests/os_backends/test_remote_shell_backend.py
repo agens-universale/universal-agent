@@ -286,15 +286,20 @@ async def test_joining_transport_keeps_cwd_and_writes(tmp_path):
     assert await be.read(p) == "x"
 
 
-async def test_fs_ops_have_a_timeout():
+async def test_fs_ops_have_a_timeout(monkeypatch):
     # Зависший транспорт (пауза контейнера, мёртвый хост) не вешает ФС-операции.
+    # До самой операции идёт проба, и режет её свой потолок (в бою 60 с), не
+    # fs_op_timeout_sec. sleep 30 короче этого потолка и успевает кончиться,
+    # суммы нет, отказ не кэшируется: три вызова держали бы ~90 с, и граница
+    # ниже мерила бы конец sleep, а не отсечку. Здесь потолок ужат до 1 с.
     from gc_core.backends.runtime_probe import RuntimeUnavailable
 
-    be = RemoteShellBackend(
-        ["sh", "-c", "sleep 30", "hang"], fs_op_timeout_sec=1
+    monkeypatch.setattr(
+        "gc_core.backends.runtime_probe._RUNTIME_PROBE_TIMEOUT_SEC", 1
     )
+    be = RemoteShellBackend(["sh", "-c", "sleep 30", "hang"])
     t0 = asyncio.get_running_loop().time()
-    # Проба не получает сумму и упирается в таймаут операции. Это не «файла
+    # Проба не получает сумму и обрывается по своему потолку. Это не «файла
     # нет»: иначе модель пересоздаёт существующее.
     with pytest.raises(RuntimeUnavailable):
         await be.exists("/x")
