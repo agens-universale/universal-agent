@@ -361,6 +361,23 @@ class ContextProvider:
                                 )
                                 else {"propagate": True}
                             ),
+                            # Лог прогона уходит в общий logging процесса
+                            # (сборщик логов) — секреты в нём маскируются,
+                            # если профиль не решил иначе явно.
+                            **(
+                                {}
+                                if is_explicit(
+                                    profile.core,
+                                    "logging.redact_secrets.enabled",
+                                )
+                                else {
+                                    "redact_secrets": (
+                                        settings.logging.redact_secrets.model_copy(
+                                            update={"enabled": True}
+                                        )
+                                    )
+                                }
+                            ),
                         }
                     ),
                 }

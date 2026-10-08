@@ -177,7 +177,11 @@ uv run --project /path/to/universal-agent --extra temporal \
   false` и `propagate: true` — записи идут в `logging` процесса воркера
   (stdout, сборщик логов) и в обработчики `AgentPlugin(log_handlers=[…])`.
   Различать прогоны — по `run_id` и `trace_id` (удобен `logging.format: jsonl`).
-  Явное `logging.save_logs: true` в профиле возвращает файл.
+  Явное `logging.save_logs: true` в профиле возвращает файл. Раз лог уходит в
+  общий сборщик, секреты в нём маскируются (`logging.redact_secrets.enabled:
+  true` по умолчанию под Temporal); содержимое хода (промпты, выводы
+  инструментов) пишется на уровне `debug` — уровень обработчиков решает,
+  попадёт ли оно в сборщик.
 - **Трасса сжатия контекста** — запись лога `summary_trace`, а не отдельный
   файл `summary_trace_*.jsonl`.
 - **Картинки и медиа MCP** лежат в хранилище тредов, если оно умеет файлы треда

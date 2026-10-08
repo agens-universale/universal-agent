@@ -456,6 +456,13 @@ async def test_worker_logs_go_to_process_logging_unless_profile_says_files(
             provider._profiles["test"][1].settings.logging.save_logs is False
         )
         assert provider._profiles["test"][1].settings.logging.propagate is True
+        # Лог уходит в общий logging процесса — секреты маскируются.
+        assert (
+            provider._profiles["test"][
+                1
+            ].settings.logging.redact_secrets.enabled
+            is True
+        )
         assert (
             provider._profiles["files"][1].settings.logging.save_logs is True
         )

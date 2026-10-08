@@ -223,11 +223,18 @@ class ViewImage(AbstractSimpleTool):
         )
 
     async def _aread_source(self, path: str) -> bytes:
-        from gc_core.thread_files import is_thread_file_uri
+        from gc_core.thread_files import parse_thread_file_uri
 
-        if is_thread_file_uri(path):
+        parsed = parse_thread_file_uri(path)
+        if parsed is not None:
             # Файл треда в хранилище тредов (картинка MCP, снимок): байты —
-            # через хранилище, на диске процесса его нет.
+            # через хранилище, на диске процесса его нет. Только своего треда:
+            # ссылка на чужой — не путь к его картинкам.
+            if parsed[:2] != thread_address(self._ctx):
+                raise _InputError(
+                    "read_denied",
+                    MSG_READ_DENIED.format(reason="file of another thread"),
+                )
             reader = getattr(self._ctx.image_store, "read_uri", None)
             data = reader(path) if callable(reader) else None
             if data is None:

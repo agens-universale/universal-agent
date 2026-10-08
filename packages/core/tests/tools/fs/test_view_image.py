@@ -440,3 +440,8 @@ async def test_thread_file_link_is_read_through_the_thread_store(tmp_path):
         await tool.acall(path="thread-file://cli/t1/mcp-media/none.png")
     )
     assert missing["ok"] is False
+    # Ссылка на файл ЧУЖОГО треда — отказ, даже если файл существует.
+    foreign = image_store.write_media("cli", "other", "secret.png", _png())
+    denied = json.loads(await tool.acall(path=foreign))
+    assert denied["ok"] is False
+    assert denied["error"]["type"] == "read_denied"

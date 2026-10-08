@@ -544,11 +544,16 @@ def _read_guard_flow(
     if not extracted:
         # Missing paths are validated by the tool itself.
         return (yield)
-    from gc_core.thread_files import is_thread_file_uri
+    from gc_core.thread_files import parse_thread_file_uri
+    from gc_core.thread_paths import thread_address
 
-    if is_thread_file_uri(candidate_path):
-        # Файл своего треда в хранилище тредов (не путь ФС): читает его сам
-        # тул через хранилище, периметр ФС к нему не относится.
+    parsed = parse_thread_file_uri(candidate_path)
+    if parsed is not None and parsed[:2] == thread_address(
+        getattr(context, "ctx", None)
+    ):
+        # Файл СВОЕГО треда в хранилище тредов (не путь ФС): читает его сам
+        # тул через хранилище, периметр ФС к нему не относится. Ссылку на
+        # чужой тред охрана не пропускает — она идёт обычной проверкой пути.
         return (yield)
 
     try:
