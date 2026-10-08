@@ -31,5 +31,14 @@ def execution_environment(
     try:
         yield
     finally:
-        _utc_source.reset(utc_token)
-        _id_source.reset(id_token)
+        for source, token in (
+            (_utc_source, utc_token),
+            (_id_source, id_token),
+        ):
+            try:
+                source.reset(token)
+            except ValueError:
+                # Корутину закрыли в другом контексте (Temporal выгрузил run
+                # из кэша, GeneratorExit при сборке мусора): в том контексте
+                # восстанавливать нечего.
+                pass
