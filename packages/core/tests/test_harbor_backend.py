@@ -446,6 +446,81 @@ def test_build_harbor_shell_command_quotes_user_inner():
     assert raw == "cd /work && env FOO=x echo hi"
 
 
+def test_bashrc_init_keeps_env_path_and_profile_additions(tmp_path):
+    """Debian-профиль переписывает PATH. Порядок профиля остаётся.
+
+    Каталоги ENV, которые профиль выкинул, дописываются в конец. Уже
+    присутствующие не дублируются, шум профиля не попадает в stdout.
+    """
+    if not _bash_runs("true"):
+        pytest.skip("нет рабочего bash на хосте")
+    from gc_core.backends.harbor import _BASHRC_EXEC_INIT
+
+    profile = tmp_path / "profile"
+    profile.write_text(
+        "echo PROFILE_STDOUT\n"
+        "echo PROFILE_STDERR >&2\n"
+        'PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"\n'
+        "export PATH\n"
+        "set -e\n"
+        "false\n",
+        encoding="utf-8",
+    )
+    home = tmp_path / "home"
+    home.mkdir()
+    glob_dir = tmp_path / "glob"
+    glob_dir.mkdir()
+    (glob_dir / "hit").write_text("", encoding="utf-8")
+    (home / ".bashrc").write_text(
+        'echo BASHRC_STDOUT\nexport PATH="/opt/conda/bin:$PATH"\n',
+        encoding="utf-8",
+    )
+    init = _BASHRC_EXEC_INIT.replace(
+        ". /etc/profile >/dev/null 2>&1 || true",
+        f". {shlex.quote(str(profile))} >/dev/null 2>&1 || true",
+        1,
+    )
+    script = (
+        init
+        + "printf '%s\\n' \"$PATH\"\n"
+        + "printf 'saved=%s\\n' \"${_gc_saved_path-unset}\"\n"
+        + "printf 'glob=%s\\n' \"$GC_GLOB_DIR\"/hi?\n"
+    )
+    proc = subprocess.run(
+        ["bash", "--noprofile", "--norc", "-c", script],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={
+            "PATH": "/usr/local/go/bin:/opt/gc tool:/opt/star*:/usr/bin:/bin",
+            "HOME": str(home),
+            "GC_GLOB_DIR": str(glob_dir),
+        },
+    )
+    assert proc.returncode == 0, proc.stderr
+    lines = proc.stdout.splitlines()
+    assert lines[1:] == ["saved=unset", f"glob={glob_dir / 'hit'}"], (
+        proc.stdout
+    )
+    assert "PROFILE_STDOUT" not in proc.stdout
+    assert "BASHRC_STDOUT" not in proc.stdout
+    assert proc.stderr == ""
+    assert lines[0] == ":".join(
+        [
+            "/opt/conda/bin",
+            "/usr/local/sbin",
+            "/usr/local/bin",
+            "/usr/sbin",
+            "/usr/bin",
+            "/sbin",
+            "/bin",
+            "/usr/local/go/bin",
+            "/opt/gc tool",
+            "/opt/star*",
+        ]
+    )
+
+
 async def test_exec_defaults_to_raw_and_custom_init_is_prefixed(
     loop_in_thread,
 ):
