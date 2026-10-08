@@ -100,14 +100,6 @@ def section_tags() -> tuple[str, ...]:
     return tuple(s.tag for s in SUMMARY_SECTIONS)
 
 
-def agent_visible_section_tags() -> tuple[str, ...]:
-    return tuple(s.tag for s in SUMMARY_SECTIONS if s.agent_visible)
-
-
-def hint_section_tags() -> tuple[str, ...]:
-    return tuple(s.tag for s in SUMMARY_SECTIONS if not s.agent_visible)
-
-
 def primary_section_tag() -> str:
     """Первая секция в каноне (fallback-текст в `fallback_summary_xml`)."""
     return SUMMARY_SECTIONS[0].tag
@@ -153,10 +145,6 @@ def render_tag_roles_for_prompt() -> str:
         f"- {s.tag}: {s.description.strip().splitlines()[0].lstrip('- ')}"
         for s in SUMMARY_SECTIONS
     )
-
-
-def format_section_tags_for_repair() -> str:
-    return ", ".join(section_tags())
 
 
 def extract_summary_bodies(text: str) -> dict[str, str]:

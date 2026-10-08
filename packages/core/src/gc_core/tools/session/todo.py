@@ -17,7 +17,7 @@ from gc_core.tools.simple_tool_base import AbstractSimpleTool
 
 
 def _todo_statuses():
-    # Deferred to avoid circular import: persistence.__init__ → state_serializer → states → tools
+    # Deferred to avoid circular import: persistence → states → tools
     from gc_core.persistence.schema import TODO_STATUSES
 
     return TODO_STATUSES

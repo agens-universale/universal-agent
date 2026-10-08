@@ -10,7 +10,7 @@ from pathlib import Path
 from gc_core.execution.contracts import ToolResult
 from gc_core_temporalio.contracts import ModelReply
 from gc_core_temporalio.provider import WorkerConfig
-from gc_core_temporalio.worker import build_runtime, worker_options
+from gc_core_temporalio.worker import build_runtime
 from gc_core_temporalio.thread_store_activities import ThreadStoreActivities
 from gc_core_temporalio.thread_store_contracts import (
     ThreadStoreCall,
@@ -20,6 +20,7 @@ from restart_interceptor import RestartInterceptor
 from temporalio import activity
 from temporalio.client import Client
 from temporalio.worker import Worker
+from live_support import worker_kwargs, worker_queues
 
 
 async def gate(kind, value=None):
@@ -74,11 +75,11 @@ async def main():
     client = await Client.connect(config.address, namespace=config.namespace)
     try:
         async with AsyncExitStack() as stack:
-            for options in worker_options(config, native, threads):
+            for queue in worker_queues(config):
                 await stack.enter_async_context(
                     Worker(
                         client,
-                        **options,
+                        **worker_kwargs(config, native, threads, queue=queue),
                         interceptors=[RestartInterceptor()],
                     )
                 )

@@ -187,19 +187,3 @@ def compose_adaptive_footer_right(
     out.append("\n")
     out.append_text(_join(usage, sep))
     return out
-
-
-def render_usage_meter(
-    session_meta: Any,
-    last_run_meta: Any,
-    pricing: Any,
-    model: str | None,
-    endpoint_url: str | None = None,
-) -> Text | None:
-    """Rich-Text «запрос …/… · сессия …/…» одной строкой или None (совместимость)."""
-    request, session = usage_segments(
-        session_meta, last_run_meta, pricing, model, endpoint_url
-    )
-    if session is None:
-        return None
-    return _join([s for s in (request, session) if s is not None])

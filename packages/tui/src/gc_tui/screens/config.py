@@ -178,23 +178,6 @@ class ConfigScreen(Screen):
         filtered = _filter_config_by_key(cfg, q)
         return safe_yaml_dump(filtered) if filtered else _NO_MATCH
 
-    def rendered_text(self) -> str:
-        """Для тестов: заголовок профиля/уровня/модели + подсказка + пути + YAML одной строкой."""
-        return (
-            self._profile_header().plain
-            + "\n"
-            + _SNAPSHOT_HINT
-            + "\n"
-            + _paths_block(
-                self._settings,
-                self._config_path,
-                self._project_local,
-                self._profile_path,
-            ).plain
-            + "\n"
-            + self._yaml_text()
-        )
-
     def compose(self) -> ComposeResult:
         with Vertical(id="root"):
             with Horizontal(id="header"):

@@ -31,15 +31,6 @@ async def call_tool_with_progress(session, name, arguments):
 
 
 @contextmanager
-def mcp_progress(callback):
-    token = _PROGRESS.set(callback)
-    try:
-        yield
-    finally:
-        _PROGRESS.reset(token)
-
-
-@contextmanager
 def durable_mcp_calls():
     token = _DURABLE.set(True)
     try:

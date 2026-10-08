@@ -87,14 +87,6 @@ class ProbeResult:
     # исходный источник токена в форме и конфиге не меняется.
     accepted_auth: Optional[str] = None
 
-    @property
-    def reachable(self) -> bool:
-        return self.verdict != "unknown"
-
-    @property
-    def auth_ok(self) -> bool:
-        return self.http_status != 401
-
 
 def probe(
     endpoint: str,

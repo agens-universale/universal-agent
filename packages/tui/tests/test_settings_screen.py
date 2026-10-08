@@ -2007,53 +2007,6 @@ async def _open_addr_with_probe(
     return scr, cfg_file
 
 
-async def test_rejected_token_saves_without_force(tmp_path, monkeypatch):
-    """Токен отклонён, сервер доступен → Enter СОХРАНЯЕТ сразу (оба ключа), флэш warn.
-    Никакого второго Enter / «сохранить как есть»."""
-    from gc_tui import app as app_mod
-    from gc_tui.screens.settings import SettingsScreen
-    from gc_tui.services.settings_probe import ProbeResult
-
-    cfg_file = tmp_path / "c.yml"
-    cfg_file.write_text(
-        'backend:\n  completions_url: "http://old/v1/chat/completions"\n'
-        '  chat_completion_headers:\n    Authorization: ""\n',
-        encoding="utf-8",
-    )
-
-    # probe: сервер доступен (control 401), токен отклонён (with_token 401)
-    def probe(endpoint, auth, verify, model, **kw):
-        return ProbeResult("rejected", 401, None, 10, "отклонён")
-
-    app = app_mod.TuiApp(settings=tui_settings(_cfg()))
-    async with app.run_test() as pilot:
-        scr = SettingsScreen(
-            settings=as_settings(_cfg()),
-            config_path=str(cfg_file),
-            on_apply=lambda: None,
-            probe_fn=probe,
-        )
-        app.push_screen(scr)
-        await pilot.pause()
-        open_settings_section(scr, "Подключение")
-        await pilot.pause()
-        from gc_tui.editors.connection import ConnectionEditor
-        from textual.widgets import Input
-
-        ed = scr.query_one(ConnectionEditor)
-        ed.query_one(
-            "#conn-url", Input
-        ).value = "https://new/v1/chat/completions"
-        values = scr._collect_values(0)
-        r = ProbeResult("rejected", 401, None, 10, "отклонён")
-        scr._smart_enter_decide(0, values, r)
-        await pilot.pause()
-        content = cfg_file.read_text(encoding="utf-8")
-        assert (
-            "https://new/v1/chat/completions" in content
-        )  # сохранено сразу, без force
-
-
 async def test_smart_enter_rejected_saves_immediately_with_warn(tmp_path):
     """Проверка ⊥ Сохранение: rejected — Enter сохраняет сразу (флэш warn), без блока
     и без второго Enter («сохранить как есть» убрано)."""
@@ -4337,7 +4290,7 @@ async def test_delete_key_removes_mcp_server(tmp_path):
     ):
         ed = scr._mcp_editor()
         for _ in range(50):  # статус пакета грузит фоновый воркер
-            if ed.status_ready("ctx7"):
+            if "ctx7" in ed._states:
                 break
             await pilot.pause()
         ed._states["ctx7"] = McpState(

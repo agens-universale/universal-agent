@@ -126,7 +126,7 @@ def test_ok_from_stage1_models():
         fetch_ex=_fetch(models=[mp.ModelInfo(id="m1")], status=200),
     )
     assert r.verdict == "ok" and r.models and r.latency_ms == 7
-    assert r.reachable and r.auth_ok
+    assert r.verdict != "unknown" and r.http_status != 401
 
 
 def test_stage1_401_with_working_post_is_ok():
@@ -141,7 +141,7 @@ def test_stage1_401_with_working_post_is_ok():
         fetch_ex=_fetch(status=401),
         post_ex=_post(status=200),
     )
-    assert r.verdict == "ok" and r.auth_ok
+    assert r.verdict == "ok" and r.http_status != 401
 
 
 @pytest.mark.parametrize(
@@ -233,7 +233,7 @@ def test_stage1_401_and_post_401_is_rejected():
         post_ex=_post(status=401),
     )
     assert r.verdict == "rejected" and r.http_status == 401
-    assert "401" in r.detail and not r.auth_ok
+    assert "401" in r.detail and r.http_status == 401
 
 
 def test_no_model_dummy_post_non401_token_accepted():
@@ -248,7 +248,7 @@ def test_no_model_dummy_post_non401_token_accepted():
         fetch_ex=_fetch(status=401),
         post_ex=_post(status=500),
     )
-    assert r.verdict == "ok" and r.auth_ok
+    assert r.verdict == "ok" and r.http_status != 401
 
 
 def test_no_model_dummy_post_401_is_rejected():
@@ -275,7 +275,7 @@ def test_no_model_dummy_post_404_json_is_ok():
         fetch_ex=_fetch(status=401),
         post_ex=_post(status=404, json_body=True),
     )
-    assert r.verdict == "ok" and r.auth_ok
+    assert r.verdict == "ok" and r.http_status != 401
 
 
 def test_no_model_dummy_post_404_html_is_unknown():
@@ -292,7 +292,7 @@ def test_no_model_dummy_post_404_html_is_unknown():
         post_ex=_post(status=404, json_body=False),
     )
     assert r.verdict == "unknown" and r.http_status == 404
-    assert r.auth_ok
+    assert r.http_status != 401
 
 
 def test_no_model_sends_dummy_probe_model():
@@ -323,7 +323,7 @@ def test_network_stage1_is_unknown():
         "m1",
         fetch_ex=_fetch(net="timeout"),
     )
-    assert r.verdict == "unknown" and not r.reachable
+    assert r.verdict == "unknown"
     assert "timeout" in r.detail
 
 

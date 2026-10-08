@@ -55,6 +55,9 @@ from gc_tui.editors.model_entry_form import (
 from gc_tui.form_frame import KEEP_IN_VIEW, reveal_focus
 from gc_tui.palette import ACCENT, DEEP_DIM, DIM, INK, WARN
 
+# Виджеты подтверждения в секции моделей.
+_CONFIRM_SELECTOR = ".models-confirm"
+
 # Константы вместо повторяющихся литералов (Sonar S1192).
 _CLS_SET_HINT_SET_DYN = "set-hint set-dyn"
 _SEL_MODELS_ROW = ".models-row"
@@ -838,12 +841,6 @@ class ModelsSectionEditor(Vertical):
         заслоняет), свои-новые — после, в порядке файла профиля."""
         base = self._base_entries
         return list(base) + [a for a in self._own_aliases if a not in base]
-
-    @property
-    def _aliases(self) -> list:
-        """Прежнее имя того же списка — строк реестра, то есть эффективного. У
-        основной секции тени нет, и это по-прежнему ровно записи файла."""
-        return self._effective_aliases
 
     def _entry_origin(self, alias: str) -> str:
         """Откуда строка: `base` — стоит одной лишь тенью основного конфига, `own`
@@ -1826,10 +1823,6 @@ class ModelsSectionEditor(Vertical):
         )
 
     @property
-    def picker_open(self) -> bool:
-        return self._picker is not None
-
-    @property
     def form_open(self) -> bool:
         return self._form is not None
 
@@ -1978,12 +1971,6 @@ class ModelsSectionEditor(Vertical):
         return _FOOTER_FORM_FIELD
 
     # --- клавиши --------------------------------------------------------------
-    def toggle_form_help(self) -> bool:
-        if self._form is None or self._picker is not None:
-            return False
-        self._form.toggle_help()
-        return True
-
     def open_form_help(self) -> bool:
         if self._form is None or self._picker is not None:
             return False
@@ -2143,7 +2130,7 @@ class ModelsSectionEditor(Vertical):
 
     def _clear_dirty_exit_confirm(self) -> None:
         self._dirty_exit_pending = False
-        for widget in self.query(".models-confirm"):
+        for widget in self.query(_CONFIRM_SELECTOR):
             widget.remove()
 
     def new_entry(self) -> bool:
@@ -2189,7 +2176,8 @@ class ModelsSectionEditor(Vertical):
         if self._picker is not None or self._env_pending is not None:
             return False  # висит вопрос (слот / перезапись ссылки) — клавиши не формы
         if self._form is not None:
-            return self._form.probe_connection()
+            self._form.probe_connection()
+            return True
         return False
 
     def space(self) -> bool:
@@ -2774,7 +2762,7 @@ class ModelsSectionEditor(Vertical):
 
     def _clear_confirm(self) -> None:
         self._pending = None
-        for widget in self.query(".models-confirm"):
+        for widget in self.query(_CONFIRM_SELECTOR):
             widget.remove()
 
     def _clear_env_confirm(self) -> None:
@@ -2782,7 +2770,7 @@ class ModelsSectionEditor(Vertical):
         confirm удаления (`_ask` один на оба), а состояния взаимоисключающие —
         снос по классу чужого не заденет."""
         self._env_pending = None
-        for widget in self.query(".models-confirm"):
+        for widget in self.query(_CONFIRM_SELECTOR):
             widget.remove()
 
     # --- инлайн-пикер значений (решение 9: свой механизм раскрытия) -----------

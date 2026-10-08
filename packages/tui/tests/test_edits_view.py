@@ -40,6 +40,7 @@ from gc_tui.services.edits_view import (
     _LadderGitFacts,
     diff_limits,
 )
+from gc_testkit.git_support import rev_parse_head
 
 
 def _rec(
@@ -552,7 +553,7 @@ def test_revert_delta_counts_from_precise_baseline_not_counting_base(tmp_path):
         True,
     )  # счётная база
 
-    delta = ws.view.revert_delta(SOURCE_SESSION, "a.py")
+    delta = ws.view.revert_deltas(SOURCE_SESSION, ["a.py"])[0]
 
     assert (delta.add, delta.del_) == (1, 0)
     assert "+B" in delta.hunks
@@ -572,7 +573,7 @@ def test_revert_delta_of_created_file_is_the_whole_file(tmp_path):
     ws.journal.append(_rec("new.py", op="create", ts=1.0, add=1, del_=0))
     ws.journal.append(_rec("new.py", ts=2.0, add=1, del_=0))
 
-    delta = ws.view.revert_delta(SOURCE_SESSION, "new.py")
+    delta = ws.view.revert_deltas(SOURCE_SESSION, ["new.py"])[0]
 
     assert (delta.add, delta.del_) == (2, 0)
     assert "+one" in delta.hunks and "+two" in delta.hunks
@@ -594,7 +595,7 @@ def test_revert_delta_of_created_then_accepted_file_uses_step_not_whole_file(
         fh.write("".join(f"extra{i}\n" for i in range(10)))
     ws.journal.append(_rec("a.py", ts=2.0, call_id="c2", add=10, del_=0))
 
-    delta = ws.view.revert_delta(SOURCE_SESSION, "a.py")
+    delta = ws.view.revert_deltas(SOURCE_SESSION, ["a.py"])[0]
 
     assert (delta.add, delta.del_) == (10, 0)
     assert "line0\n" not in delta.hunks
@@ -607,7 +608,7 @@ def test_revert_delta_of_uncountable_path_has_no_numbers(tmp_path):
     (ws.root / "a.bin").write_bytes(b"\x89PNG\r\n\x1a\n\x00")
     ws.journal.append(_rec("a.bin", add=1, del_=1))
 
-    delta = ws.view.revert_delta(SOURCE_SESSION, "a.bin")
+    delta = ws.view.revert_deltas(SOURCE_SESSION, ["a.bin"])[0]
 
     assert delta.countable is False
     assert (delta.add, delta.del_, delta.hunks) == (0, 0, "")
@@ -621,7 +622,7 @@ def test_revert_delta_of_turn_source_uses_turn_snapshot(tmp_path):
     ws.write("a.py", "сейчас\n")
     ws.journal.append(_rec("a.py", turn="t1"))
 
-    delta = ws.view.revert_delta(SOURCE_TURN, "a.py")
+    delta = ws.view.revert_deltas(SOURCE_TURN, ["a.py"])[0]
 
     assert "-ход" in delta.hunks and "+сейчас" in delta.hunks
     assert "сессия" not in delta.hunks
@@ -631,7 +632,7 @@ def test_revert_delta_of_unknown_path_is_empty(tmp_path):
     ws = _Workspace(tmp_path)
     ws.journal.append(_rec("a.py"))
 
-    delta = ws.view.revert_delta(SOURCE_SESSION, "ghost.py")
+    delta = ws.view.revert_deltas(SOURCE_SESSION, ["ghost.py"])[0]
 
     assert (delta.add, delta.del_, delta.hunks) == (0, 0, "")
     assert delta.countable is True
@@ -2044,7 +2045,7 @@ def test_ladder_head_bytes_skips_reading_oversized_file(tmp_path):
             as_settings({"agent_edits": {"max_diff_source_bytes": cap}}),
         )
         facts = view._ladder_facts
-        facts.prime(git_ops.rev_parse_head(str(root)), {})
+        facts.prime(rev_parse_head(str(root)), {})
         return facts
 
     ws = _Workspace(tmp_path, git=True)
@@ -3272,7 +3273,9 @@ def test_revert_preview_of_many_paths_builds_the_view_once(
         ws.session_base(key, "old\n")
         ws.write(key, "new\n")
         ws.journal.append(_rec(key, ts=float(i), call_id=f"c{i}"))
-    expected = [ws.view.revert_delta(SOURCE_SESSION, key) for key in keys]
+    expected = [
+        ws.view.revert_deltas(SOURCE_SESSION, [key])[0] for key in keys
+    ]
     ws.view.invalidate()
     signatures = []
     real = edits_view_mod.disk_signature

@@ -131,9 +131,6 @@ CODE PLANNER HANDOFF ADDENDUM
             self.agent_role, code_planner_notes
         ), assignment
 
-    def get_agent_name(self):
-        return self.agent_name
-
     @classmethod
     def get_agent_specification(cls):
         return cls.tool_specification

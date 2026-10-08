@@ -2,41 +2,22 @@ from gc_core.config_modules.todo import (
     DEFAULT_TODO_REMINDER_STEPS,
     TodoConfig,
     normalize_todo_config,
-    todo_reminder_steps_from_config,
 )
+from gc_core.settings import settings_of
 from gc_testkit.settings import make_settings
 
 
 def test_default_is_10():
     assert DEFAULT_TODO_REMINDER_STEPS == 10
-    assert todo_reminder_steps_from_config(make_settings({})) == 10
-    assert todo_reminder_steps_from_config(None) == 10
+    assert settings_of(make_settings({})).todo.reminder_steps == 10
 
 
 def test_reads_todo_params():
     assert (
-        todo_reminder_steps_from_config(
+        settings_of(
             make_settings({"todo": {"reminder_steps": 5}})
-        )
+        ).todo.reminder_steps
         == 5
-    )
-
-
-def test_zero_disables():
-    assert (
-        todo_reminder_steps_from_config(
-            make_settings({"todo": {"reminder_steps": 0}})
-        )
-        == 0
-    )
-
-
-def test_negative_clamped_to_zero():
-    assert (
-        todo_reminder_steps_from_config(
-            make_settings({"todo": {"reminder_steps": -3}})
-        )
-        == 0
     )
 
 
@@ -46,11 +27,9 @@ def test_garbage_is_rejected_by_schema():
     from pydantic import ValidationError
 
     with pytest.raises(ValidationError):
-        todo_reminder_steps_from_config(
-            make_settings({"todo": {"reminder_steps": "x"}})
-        )
+        make_settings({"todo": {"reminder_steps": "x"}})
     with pytest.raises(ValidationError):
-        todo_reminder_steps_from_config(make_settings({"todo": "not a dict"}))
+        make_settings({"todo": "not a dict"})
 
 
 def test_normalize_clamps_negative():

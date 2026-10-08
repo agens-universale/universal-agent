@@ -248,7 +248,7 @@ async def test_the_slot_picker_writes_into_the_profile(tmp_path, monkeypatch):
         _cursor_to(ed, "slot", level="light")
         await pilot.press("enter")  # раскрыть пикер значений
         await pilot.pause()
-        assert ed.picker_open
+        assert ed._picker is not None
         await pilot.press("down")  # первая позиция — снятие слота
         await pilot.press("enter")
         await pilot.pause()
@@ -733,10 +733,10 @@ async def test_esc_closes_the_inner_picker_before_the_editor(
         _cursor_to(ed, "slot", level="max")
         await pilot.press("enter")
         await pilot.pause()
-        assert ed.picker_open
+        assert ed._picker is not None
         await pilot.press("escape")
         await pilot.pause()
-        assert not ed.picker_open
+        assert ed._picker is None
         assert not scr.query(".set-profiles-row"), (
             "выбросило к списку профилей"
         )
@@ -1272,7 +1272,7 @@ async def test_renaming_in_an_inactive_profile_still_asks_for_a_default_slot(
         await pilot.press("ctrl+s")  # submit → должен спросить дефолт
         await pilot.pause()
 
-        assert ed.picker_open, (
+        assert ed._picker is not None, (
             "рена́йм не спросил дефолт-слот при неактивном профиле"
         )
         values = {row["value"] for row in ed._picker["rows"]}

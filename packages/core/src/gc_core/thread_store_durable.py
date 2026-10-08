@@ -7,7 +7,6 @@ Legacy stores keep the eleven original methods unchanged.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from functools import wraps
 from typing import Any
 
 from gc_core.execution.contracts import ExecutionFailure
@@ -79,15 +78,3 @@ def durable_store_capability(port: Any) -> tuple[Any, Any] | None:
     if callable(snapshot) and callable(commit):
         return snapshot, commit
     return None
-
-
-def durable_file_helper(function: Any) -> Any:
-    """Preserve public helper signatures while lazily entering file recovery."""
-
-    @wraps(function)
-    def wrapped(*args: Any, **kwargs: Any) -> Any:
-        from gc_core.thread_store_journal import dispatch_file_helper
-
-        return dispatch_file_helper(function, args, kwargs)
-
-    return wrapped

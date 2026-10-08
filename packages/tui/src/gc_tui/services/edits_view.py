@@ -21,7 +21,7 @@
 «Сессии» по лестнице отсчёта (``agent_edits.ladder``): активные файлы — от
 ближайшей ступени (принято/коммит/начало сессии), разобранные (нечего
 смотреть — принято и чисто, либо чисто закоммичено) сворачиваются в отдельную
-группу с кумулятивом сессии. ``revert``/``file_diff``/``revert_delta``
+группу с кумулятивом сессии. ``revert``/``file_diff``/``revert_deltas``
 «Сессии» считают базу по той же лестнице (задача 9) — превью и запись всегда
 одна и та же ступень; счётная база (может достаться только числу — см.
 ``_session_ladder_baseline``) на диск через них не попадает никогда.
@@ -636,7 +636,7 @@ class EditsView:
         )
         # Ступень лестницы «Сессии» на путь — свежа СРАЗУ ПОСЛЕ любого вызова
         # `session_view(SOURCE_SESSION)` (её ставит `_build_session_view` на
-        # каждый промах кэша); `file_diff`/`revert_delta`/`revert`/
+        # каждый промах кэша); `file_diff`/`revert_deltas`/`revert`/
         # `revert_targets` обязаны прогреть её сами перед чтением.
         self._session_ladder: Dict[str, Optional[SessionStep]] = {}
         # Пути, реально уехавшие в коммит за сессию — живёт вместе со ступенями
@@ -799,8 +799,11 @@ class EditsView:
             ), False
         return delta.hunks, True
 
-    def revert_delta(self, source: str, path_key: str) -> FileDelta:
-        """Что именно отменит откат: ТОЧНАЯ база представления против диска.
+    def revert_deltas(
+        self, source: str, path_keys: Sequence[str]
+    ) -> List[FileDelta]:
+        """Что именно отменит откат каждого пути: ТОЧНАЯ база представления
+        против диска.
 
         Отдельный расчёт от ``file_diff`` нужен потому, что базы у счёта и у
         отката разные. ``file_diff`` идёт от счётной базы (более ранней из
@@ -820,15 +823,9 @@ class EditsView:
         выше база — она (находка гейта волны 4: раньше эта функция проверяла
         ``created_here`` в обход поправки, и превью отката лгало о масштабе
         перед подтверждением, хотя сам `revert()` уже писал верно).
-        """
-        return self.revert_deltas(source, [path_key])[0]
 
-    def revert_deltas(
-        self, source: str, path_keys: Sequence[str]
-    ) -> List[FileDelta]:
-        """``revert_delta`` для многих путей — вид и выборка записей ОДИН раз.
-
-        Превью массового отката звало ``revert_delta`` на каждый путь, а тот
+        Вид и выборка записей — ОДИН раз на все пути. Превью массового отката
+        звало прежний одиночный расчёт на каждый путь, а тот
         перебирал все записи журнала и пересобирал ключ кэша вида — ``stat`` по
         всем путям набора. Квадрат: на 10 000 файлов ~10^8 системных вызовов,
         и `Ctrl+R` вешал интерфейс (смок 2026-09-24). Правило базы — одно, здесь.
@@ -1454,7 +1451,7 @@ class EditsView:
         head_rev: Optional[str],
     ) -> Dict[str, Optional[SessionStep]]:
         """Ступень лестницы (§3.2) на путь — один расчёт на счёт, превью и откат
-        «Сессии» (задача 9: ``session_view``/``file_diff``/``revert_delta``/
+        «Сессии» (задача 9: ``session_view``/``file_diff``/``revert_deltas``/
         ``revert``/``revert_targets`` читают один и тот же результат).
         """
         git_facts: Optional[_LadderGitFacts] = None
@@ -1582,7 +1579,7 @@ class EditsView:
         (§3.2 спеки). Единственный источник для всех трёх потребителей,
         которым нужно снять created-трактовку созданного здесь файла:
         `_build_session_view` (через `stepped=` у `deltas.file_entries`),
-        `file_diff`, `revert_delta`. Требует свежего ``self._session_ladder``
+        `file_diff`, `revert_deltas`. Требует свежего ``self._session_ladder``
         — прогревается ``session_view(SOURCE_SESSION)``; вне «Сессии» ступеней
         не бывает (Р27), и вызывающие обязаны гасить эту ветку сами по
         ``source == SOURCE_SESSION`` до вызова — здесь проверки источника нет
@@ -1666,7 +1663,7 @@ class EditsView:
         # ветка 1 лестницы (git=None режет её внутри session_step), ветка
         # «принято» — нет. Батч oid'ов и прайм кэша — только когда HEAD есть.
         # Результат оседает в `self._session_ladder`: его читают ТАКЖЕ
-        # `file_diff`/`revert_delta`/`revert`/`revert_targets` (задача 9) —
+        # `file_diff`/`revert_deltas`/`revert`/`revert_targets` (задача 9) —
         # одна ступень на счёт, превью и запись.
         self._session_ladder = self._compute_session_steps(
             path_keys,

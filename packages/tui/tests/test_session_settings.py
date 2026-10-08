@@ -2,7 +2,6 @@ from gc_testkit.settings import make_settings
 from gc_testkit.tui_support import tui_settings
 from gc_tui.session_settings import (
     SESSION_KEYS,
-    diff_vs_base,
     finish_gate_mode_of,
 )
 
@@ -41,34 +40,13 @@ def test_session_layer_ignores_unknown_keys():
     assert app.effective_settings().settings.paths.threads_data_path == "/base"
 
 
-def test_diff_vs_base_returns_only_changed():
-    base = make_settings(
-        {"tui.finish_gate_mode": "on", "tui.text_answer_mode": "judge"}
-    )
-    overrides = {
-        "tui.finish_gate_mode": "off",
-        "tui.text_answer_mode": "judge",
-    }
-    assert diff_vs_base(base, overrides) == {"tui.finish_gate_mode": "off"}
-
-
-def test_diff_vs_base_compares_effective_default_not_raw_value():
+def test_effective_value_reads_the_effective_default_not_raw_value():
     """Рукописный (или старый) config.yml: tui.finish_gate_mode не задан, а глобальный
     agent.strict_turn_finish_validation выключен явно — эффективное умолчание файла
-    'off'. Включение 'on' в сессии обязано считаться расхождением: иначе строка
-    «Сохранить как умолчание» не появится никогда и записать это умолчание из UI
-    нечем (по сырому значению поля расхождения не видно)."""
+    'off', хотя сырое значение поля другое: сравнивать сессию с базой можно только
+    по действующему значению."""
     base = make_settings(**{"agent.strict_turn_finish_validation": False})
-    assert diff_vs_base(base, {"tui.finish_gate_mode": "on"}) == {
-        "tui.finish_gate_mode": "on"
-    }
-
-
-def test_diff_vs_base_ignores_value_equal_to_effective_default():
-    """Обратная сторона того же правила: сессия выставила ровно то, что и так
-    действует — сохранять нечего, строки-действия быть не должно."""
-    base = make_settings(**{"agent.strict_turn_finish_validation": False})
-    assert diff_vs_base(base, {"tui.finish_gate_mode": "off"}) == {}
+    assert SESSION_KEYS["tui.finish_gate_mode"].effective_value(base) == "off"
 
 
 def test_every_toggle_key_is_session_overridable():
@@ -99,6 +77,3 @@ def test_new_session_key_works_without_code_changes(monkeypatch):
     app = TuiApp(settings=tui_settings({"agent.max_steps": 3}))
     app.set_session_override("agent.max_steps", 5)
     assert app.effective_settings().settings.agent.max_steps == 5
-    assert ss.diff_vs_base(
-        make_settings({"agent.max_steps": 3}), {"agent.max_steps": 5}
-    ) == {"agent.max_steps": 5}

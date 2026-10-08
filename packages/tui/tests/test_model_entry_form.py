@@ -743,7 +743,7 @@ async def test_probe_does_not_send_the_inherited_token_to_a_typed_address():
             "#mef-url", Input
         ).value = "https://foreign/v1/chat/completions"
         await pilot.pause()
-        assert form.probe_connection() is True
+        form.probe_connection()
         for _ in range(3):
             await pilot.pause()
         assert seen and all(
@@ -1696,7 +1696,7 @@ async def test_the_probe_and_the_model_list_of_a_namesake_go_to_the_shadowed_pai
     )
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
-        assert form.probe_connection() is True
+        form.probe_connection()
         for _ in range(3):
             await pilot.pause()
         assert seen and all(e == _SHADOWED["url"] for e, _ in seen), seen
@@ -1762,7 +1762,7 @@ async def test_a_shadowed_record_without_a_token_is_explained_not_masked():
             "запись основного конфига без токена — запросы идут без авторизации"
         )
         assert not token.has_class("has-saved")
-        assert form.probe_connection() is True
+        form.probe_connection()
         for _ in range(3):
             await pilot.pause()
         assert seen == [(_SHADOWED["url"], None)], seen
@@ -2184,7 +2184,7 @@ async def test_ctrl_space_probes_and_alt_down_fetches_and_they_never_swap():
         # (`SettingsScreen._reset_draft_state`): даём событию дойти ДО пробы,
         # иначе оно обесценило бы её же результат.
         await pilot.pause()
-        assert form.probe_connection() is True
+        form.probe_connection()
         for _ in range(3):
             await pilot.pause()
         assert fetches == [], "проба сходила за списком моделей"
@@ -2206,7 +2206,7 @@ async def test_probe_without_any_address_is_honest():
     form = _form(initial=None, existing_aliases=set())
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
-        assert form.probe_connection() is True
+        form.probe_connection()
         await pilot.pause()
         assert "адрес" in str(
             form.query_one("#mef-probe-line", Static).render()
@@ -2243,7 +2243,7 @@ async def test_the_probe_resolves_env_references_before_the_request(
     )
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
-        assert form.probe_connection() is True
+        form.probe_connection()
         for _ in range(3):
             await pilot.pause()
         assert seen, "проба не пошла"
@@ -2351,7 +2351,7 @@ async def test_a_missing_env_variable_is_named_instead_of_a_blind_request(
     )
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
-        assert form.probe_connection() is True
+        form.probe_connection()
         for _ in range(3):
             await pilot.pause()
         line = str(form.query_one("#mef-probe-line", Static).render())
@@ -2396,7 +2396,7 @@ async def test_a_missing_env_variable_in_the_token_stops_the_probe(
     )
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
-        assert form.probe_connection() is True
+        form.probe_connection()
         for _ in range(3):
             await pilot.pause()
         line = str(form.query_one("#mef-probe-line", Static).render())

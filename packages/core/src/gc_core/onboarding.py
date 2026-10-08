@@ -639,6 +639,9 @@ def setup_guide(
 # Подписи участников карты («Участвуют:») — kind из config_origin._overlay_paths
 # плюс своя "base" для самой базы (её _overlay_paths не называет — она точка
 # отсчёта, а не оверлей).
+# Префикс слоёв профиля в метках происхождения (``profile:project``/``profile:base``).
+_PROFILE_LAYER_PREFIX = "profile:"
+
 _BROKEN_CONFIG_LAYER_LABELS = {
     "base": "база",
     "managed": "managed",
@@ -681,7 +684,7 @@ def _participant_lines(participants, flagged: bool) -> list[str]:
     lines = []
     for kind, path in participants:
         suffix = ""
-        if kind.startswith("profile:"):
+        if kind.startswith(_PROFILE_LAYER_PREFIX):
             suffix = "   (активен: --profile)" if flagged else "   (активен)"
         lines.append(
             f"    {_BROKEN_CONFIG_LAYER_LABELS[kind].ljust(10)}{os.path.abspath(path)}{suffix}"
@@ -920,7 +923,7 @@ def explain_broken_config(
     # виновников не остаётся. Пустой `active` (`--profile ""`) — профиля не
     # запрашивали, и «такого профиля нет» не про что.
     flagged_profile_missing = bool(flagged and active) and not any(
-        kind.startswith("profile:") for kind, _ in participants
+        kind.startswith(_PROFILE_LAYER_PREFIX) for kind, _ in participants
     )
     participant_lines = _participant_lines(participants, flagged)
 
@@ -943,7 +946,8 @@ def explain_broken_config(
         fix_lines = _unresolved_fix_lines(unresolved)
         base_to_blame = False
         if not all(
-            ref.layer.startswith("profile:") for ref in unresolved.refs
+            ref.layer.startswith(_PROFILE_LAYER_PREFIX)
+            for ref in unresolved.refs
         ):
             active = None
     else:

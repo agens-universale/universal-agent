@@ -37,16 +37,6 @@ class Command:
     arg_options_provider: Optional[Callable[[Any], tuple]] = None
     arg_hint_provider: Optional[Callable[[Any, Optional[str]], str]] = None
 
-    @property
-    def requires_args(self) -> bool:
-        """True, если без аргумента команду нельзя выполнить (схема `<…>`).
-
-        Опциональные `[…]` (как у /export) — Enter выполняет с дефолтом;
-        обязательные `<path>` / `<id>` — Enter подставляет `/cmd ` для ввода.
-        """
-        a = (self.args or "").strip()
-        return bool(a) and not a.startswith("[")
-
 
 class CommandRegistry:
     def __init__(self) -> None:

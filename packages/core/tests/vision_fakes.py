@@ -11,7 +11,16 @@ from gc_core.utils.llm_chat_client import snapshot_chat_completion
 from gc_core.vision.audience import route_id
 from gc_core.vision.probe import ProbeResult, ProbeStatus
 from gc_core.vision.registry import process_vision_probes
+from gc_core.vision.rejects import process_image_rejects
 from gc_core.vision.route import vision_route_key
+
+
+def clear_image_rejects() -> None:
+    """Сбросить потолки процесса на месте — объект тот же: ссылки, взятые до
+    сброса, видят пустой реестр."""
+    registry = process_image_rejects()
+    with registry._lock:
+        registry._caps = {}
 
 
 def route_key(ctx, *, url=None, model=None, resolved=None):

@@ -2,7 +2,7 @@ import tempfile
 import types
 
 from gc_core.intent_log import append_user_ask
-from gc_core.summarize.compaction import amaybe_run_summary_compaction
+from gc_core.summarize.compaction import arun_summary_compaction
 from gc_core.thread_store import (
     ThreadSession,
     append_new_thread_messages,
@@ -159,10 +159,10 @@ async def test_maybe_run_summary_compaction_twice_uses_meta_user_log(
             "first request", "second request", turn=1
         )
         state.user_turn_seq = 1
-        ran_1 = await amaybe_run_summary_compaction(
+        await arun_summary_compaction(
             ctx=_ctx(trigger_chars=1),
             state=state,
-            summary_trigger_chars=1,
+            trigger_threshold_chars=1,
             trigger_reason="post_step",
             is_cli_mode=False,
             on_summary_applied=lambda event: (
@@ -171,7 +171,6 @@ async def test_maybe_run_summary_compaction_twice_uses_meta_user_log(
                 )
             ),
         )
-        assert ran_1 is True
         assert (
             "<original_user_messages>"
             not in session.history_messages[0]["content"]
@@ -191,10 +190,10 @@ async def test_maybe_run_summary_compaction_twice_uses_meta_user_log(
             previous_response_id=None,
         )
         state.messages = session.get_full_history_messages()
-        ran_2 = await amaybe_run_summary_compaction(
+        await arun_summary_compaction(
             ctx=_ctx(trigger_chars=1),
             state=state,
-            summary_trigger_chars=1,
+            trigger_threshold_chars=1,
             trigger_reason="post_step",
             is_cli_mode=False,
             on_summary_applied=lambda event: (
@@ -203,7 +202,6 @@ async def test_maybe_run_summary_compaction_twice_uses_meta_user_log(
                 )
             ),
         )
-        assert ran_2 is True
         assert intent_user_ask_texts(state.user_intent_log) == [
             "first request",
             "second request",
@@ -274,16 +272,15 @@ def test_maybe_run_summary_compaction_works_without_thread(monkeypatch):
         "first request", "second request", turn=1
     )
     state.user_turn_seq = 1
-    ran = run_coro(
-        amaybe_run_summary_compaction(
+    run_coro(
+        arun_summary_compaction(
             ctx=_ctx(trigger_chars=1),
             state=state,
-            summary_trigger_chars=1,
+            trigger_threshold_chars=1,
             trigger_reason="post_step",
             is_cli_mode=False,
         )
     )
-    assert ran is True
     assert len(state.messages) == 1
     assert (
         "Summarized context from previous dialogue."
@@ -330,17 +327,15 @@ def test_maybe_run_summary_compaction_preserves_system_and_state_metadata(
     initial_project_data_before = dict(state.initial_project_data)
     call_metadata_before = dict(state.call_metadata)
 
-    ran = run_coro(
-        amaybe_run_summary_compaction(
+    run_coro(
+        arun_summary_compaction(
             ctx=_ctx(trigger_chars=1),
             state=state,
-            summary_trigger_chars=1,
+            trigger_threshold_chars=1,
             trigger_reason="post_step",
             is_cli_mode=False,
         )
     )
-
-    assert ran is True
     assert len(state.messages) == 2
     assert state.messages[0]["role"] == "system"
     assert state.messages[0]["content"] == "SYSTEM"

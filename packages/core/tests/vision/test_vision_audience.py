@@ -10,7 +10,6 @@ from gc_core.config_modules.root import AppConfig
 from gc_core.model_router import ModelRouter, ResolvedModel
 from gc_testkit.settings import make_settings
 from gc_core.vision.audience import Audience, compute_audience
-from gc_core.vision.rejects import request_url
 from gc_core.vision.rejects import ImageRejects, mark_blind
 from gc_core.vision.audience import route_id
 from gc_core.vision.route import VisionRouteKey
@@ -217,21 +216,7 @@ def test_the_key_uses_the_fallback_url_when_the_model_has_none():
 
     # Схема даёт пустую строку (общий `completions_url` по умолчанию ""), не None.
     assert not resolved.url
-    assert request_url(resolved, _FALLBACK_URL) == _FALLBACK_URL
     assert _audience(router, rejects).nobody is True
-
-
-def test_request_url_prefers_the_model_address():
-    resolved = ResolvedModel(
-        alias="glm",
-        model="glm-5.1",
-        url=_GLM_URL,
-        authorization=None,
-        backend_overrides={},
-        tariff=None,
-        source="test",
-    )
-    assert request_url(resolved, _FALLBACK_URL) == _GLM_URL
 
 
 def test_legacy_request_model_is_keyed_by_its_model_id():

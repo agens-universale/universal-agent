@@ -8,7 +8,8 @@
 import asyncio
 
 from gc_core_temporalio.provider import AgentProfile, WorkerConfig
-from gc_core_temporalio.worker import build_runtime, worker_options
+from gc_core_temporalio.worker import build_runtime
+from live_support import worker_kwargs
 
 ACTIVITIES = {
     "universal_agent.context.prepare",
@@ -42,7 +43,7 @@ def test_registered_names_are_pinned(tmp_path, monkeypatch):
     provider, native, threads = build_runtime(config)
     try:
         activities, workflows = set(), set()
-        for options in worker_options(config, native, threads):
+        for options in [worker_kwargs(config, native, threads)]:
             activities |= {
                 a.__temporal_activity_definition.name
                 for a in options["activities"]

@@ -4,7 +4,7 @@ import tempfile
 import types
 
 from gc_core.intent_log import deserialize_list
-from gc_core.summarize.compaction import amaybe_run_summary_compaction
+from gc_core.summarize.compaction import arun_summary_compaction
 from gc_core.thread_store import (
     ThreadSession,
     append_new_thread_messages,
@@ -126,10 +126,10 @@ async def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_
             _fake_patch_replace,
         )
 
-        assert await amaybe_run_summary_compaction(
+        await arun_summary_compaction(
             ctx=_ctx(),
             state=state,
-            summary_trigger_chars=1,
+            trigger_threshold_chars=1,
             trigger_reason="post_step",
             is_cli_mode=False,
             on_summary_applied=lambda event: (
@@ -162,10 +162,10 @@ async def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_
         )
         prev_offset = int(state.dialog_steps_offset)
         state.messages = session.get_full_history_messages()
-        assert await amaybe_run_summary_compaction(
+        await arun_summary_compaction(
             ctx=_ctx(),
             state=state,
-            summary_trigger_chars=1,
+            trigger_threshold_chars=1,
             trigger_reason="post_step",
             is_cli_mode=False,
             on_summary_applied=lambda event: (
@@ -276,10 +276,10 @@ async def test_e2e_user_log_skips_technical_and_tool_messages(monkeypatch):
             _fake_patch_replace,
         )
 
-        assert await amaybe_run_summary_compaction(
+        await arun_summary_compaction(
             ctx=_ctx(),
             state=state,
-            summary_trigger_chars=1,
+            trigger_threshold_chars=1,
             trigger_reason="post_step",
             is_cli_mode=False,
             on_summary_applied=lambda event: (

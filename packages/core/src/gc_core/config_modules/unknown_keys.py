@@ -111,21 +111,32 @@ def _walk(
             )
             continue
         kind, nested = _shape(model.model_fields[field_name].annotation)
-        path = (*parts, str(key))
-        if kind == "model":
-            item = _walk(item, nested, path, dropped)
-        elif kind == "dict" and isinstance(item, Mapping):
-            item = {
-                entry: _walk(sub, nested, (*path, str(entry)), dropped)
-                for entry, sub in item.items()
-            }
-        elif kind == "list" and isinstance(item, list):
-            item = [
-                _walk(sub, nested, (*path, str(index)), dropped)
-                for index, sub in enumerate(item)
-            ]
-        out[key] = item
+        out[key] = _walk_field(item, kind, nested, (*parts, str(key)), dropped)
     return out
+
+
+def _walk_field(
+    item: Any,
+    kind: str,
+    nested: Any,
+    path: tuple[str, ...],
+    dropped: list[UnknownKey],
+) -> Any:
+    """Значение известного поля: спуск во вложенную модель, словарь или список
+    моделей; прочее — как есть."""
+    if kind == "model":
+        return _walk(item, nested, path, dropped)
+    if kind == "dict" and isinstance(item, Mapping):
+        return {
+            entry: _walk(sub, nested, (*path, str(entry)), dropped)
+            for entry, sub in item.items()
+        }
+    if kind == "list" and isinstance(item, list):
+        return [
+            _walk(sub, nested, (*path, str(index)), dropped)
+            for index, sub in enumerate(item)
+        ]
+    return item
 
 
 def unknown_key_notice(unknown: UnknownKey, source: str | None = None) -> str:

@@ -35,16 +35,17 @@ def _cfg(url=""):
 def test_status_local(monkeypatch):
     monkeypatch.setattr(vs, "_load_state", lambda: ST)
     monkeypatch.setattr(vs, "_port_alive", lambda st: True)
-    s = vs.status_snapshot(
+    s = vs.status_cheap(
         make_settings(_cfg("http://127.0.0.1:8735/v1/audio/transcriptions"))
     )
     assert s == vs.VoiceStatus(
         installed=True,
-        service_alive=True,
+        service_alive=None,  # живость порта — отдельно, probe_alive
         port=8735,
         model="Systran/faster-whisper-small",
         mode="local",
     )
+    assert vs.probe_alive() is True
 
 
 def test_engine_update_only_when_behind(monkeypatch):
@@ -65,13 +66,13 @@ def test_status_carries_the_available_version(monkeypatch):
     по ОДНОМУ значению, а не пересчитывать каждый по-своему."""
     monkeypatch.setattr(vs, "_port_alive", lambda st: True)
     monkeypatch.setattr(vs, "_load_state", lambda: ST_OLD)
-    s = vs.status_snapshot(
+    s = vs.status_cheap(
         make_settings(_cfg("http://127.0.0.1:8735/v1/audio/transcriptions"))
     )
     assert s.available_version == SPEACHES_PIN
     monkeypatch.setattr(vs, "_load_state", lambda: ST)
     assert (
-        vs.status_snapshot(
+        vs.status_cheap(
             make_settings(
                 _cfg("http://127.0.0.1:8735/v1/audio/transcriptions")
             )
@@ -82,7 +83,7 @@ def test_status_carries_the_available_version(monkeypatch):
 
 def test_status_cloud(monkeypatch):
     monkeypatch.setattr(vs, "_load_state", lambda: None)
-    s = vs.status_snapshot(
+    s = vs.status_cheap(
         make_settings(_cfg("https://api.example/v1/audio/transcriptions"))
     )
     assert s.mode == "cloud" and not s.installed and s.port is None
@@ -90,13 +91,13 @@ def test_status_cloud(monkeypatch):
 
 def test_status_off(monkeypatch):
     monkeypatch.setattr(vs, "_load_state", lambda: None)
-    assert vs.status_snapshot(make_settings({"voice": {}})).mode == "off"
+    assert vs.status_cheap(make_settings({"voice": {}})).mode == "off"
 
 
 def test_status_installed_with_empty_url_is_off(monkeypatch):
     monkeypatch.setattr(vs, "_load_state", lambda: ST)
     monkeypatch.setattr(vs, "_port_alive", lambda st: True)
-    s = vs.status_snapshot(make_settings(_cfg()))
+    s = vs.status_cheap(make_settings(_cfg()))
     assert s.mode == "off" and s.installed is True
 
 

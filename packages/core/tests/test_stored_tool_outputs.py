@@ -28,7 +28,6 @@ def _stub_optional_web_parsers() -> None:
 
 _stub_optional_web_parsers()
 
-from gc_core.persistence.state_repository import StateRepository
 from gc_core.processing_responses import aprocess_tool_calls
 from gc_core.states import State
 from gc_core.tools.session.stored_outputs.read_stored_tool_output import (
@@ -484,53 +483,6 @@ def test_process_tool_calls_wraps_long_tool_output(monkeypatch):
     assert payload["type"] == "stored_tool_output"
     assert payload["from_original_call_id"] == "call_42"
     _assert_pagination_metadata(payload, expect_truncated=True)
-
-
-def test_state_serialization_roundtrip_restores_store_and_lru_order(tmp_path):
-    state = _make_state()
-    state.tool_call_outputs_store.set_max_entries(2)
-    state.tool_call_outputs_store.put(
-        ToolCallOutputRecord(
-            output_ref="r1",
-            source_tool="t",
-            call_id="c1",
-            total_chars=len("A😀"),
-            text="A😀",
-        )
-    )
-    state.tool_call_outputs_store.put(
-        ToolCallOutputRecord(
-            output_ref="r2",
-            source_tool="t",
-            call_id="c2",
-            total_chars=len("BC"),
-            text="BC",
-        )
-    )
-    # Now r2 should be LRU, r1 should be MRU.
-    assert state.tool_call_outputs_store.get("r1") is not None
-
-    dump_path = tmp_path / "state_dump.json"
-    StateRepository.save_snapshot(
-        {state.state_id: state}, str(dump_path), indent=2
-    )
-
-    restored_states = StateRepository.load_snapshot(str(dump_path))
-    restored_state = restored_states.get(state.state_id)
-    assert restored_state is not None
-
-    assert restored_state.tool_call_outputs_store.contains("r1")
-    assert restored_state.tool_call_outputs_store.contains("r2")
-    r3 = ToolCallOutputRecord(
-        output_ref="r3",
-        source_tool="t",
-        call_id="c3",
-        total_chars=1,
-        text="Z",
-    )
-    evicted = restored_state.tool_call_outputs_store.put(r3)
-    assert evicted is not None
-    assert evicted.output_ref == "r2"
 
 
 def test_feature_off_k_zero_clears_store_and_disables_read():

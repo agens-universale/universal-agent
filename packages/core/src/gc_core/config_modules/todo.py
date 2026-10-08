@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
@@ -31,11 +30,3 @@ def normalize_todo_config(cfg: TodoConfig) -> TodoConfig:
         )
         cfg.reminder_steps = 0
     return cfg.result()
-
-
-def todo_reminder_steps_from_config(settings: Any) -> int:
-    """``todo.reminder_steps`` настроек (``settings`` — всё, что принимает ``settings_of``)."""
-    # Ленивый импорт: settings → root → этот модуль.
-    from gc_core.settings import settings_of
-
-    return max(0, settings_of(settings).todo.reminder_steps)

@@ -58,6 +58,9 @@ IDLE_REFRESH = timedelta(days=1)
 #: Сколько последних ID сообщений и ответов помнить для дедупликации.
 DEDUP_WINDOW = 1000
 
+#: Отказ приёма: тот же ID сообщения пришёл с другим текстом.
+_MESSAGE_ID_REUSED = "Message ID reused"
+
 
 def _new_build_announced():
     """Worker Versioning: текущей объявлена другая сборка (без versioning — нет)."""
@@ -170,6 +173,18 @@ def _recent(values):
     if isinstance(values, dict):
         return dict(list(values.items())[-DEDUP_WINDOW:])
     return list(values)[-DEDUP_WINDOW:]
+
+
+def _with_default_queues(start):
+    """Без явных очередей activities идут в очередь самого workflow."""
+    if start.resource_queue is not None and start.model_queue is not None:
+        return start
+    queue = start.resource_queue or workflow.info().task_queue
+    return replace(
+        start,
+        resource_queue=queue,
+        model_queue=start.model_queue or queue,
+    )
 
 
 # Без failure_exception_types=[Exception]: недетерминизм и сбой кода
@@ -332,7 +347,7 @@ class UniversalAgentWorkflow:
         for message in messages:
             digest = _message_digest(message.text)
             if seen.setdefault(message.message_id, digest) != digest:
-                raise ApplicationError("Message ID reused", non_retryable=True)
+                raise ApplicationError(_MESSAGE_ID_REUSED, non_retryable=True)
             self._precheck(message, digest)
         return [self._accept(message) for message in messages]
 
@@ -366,7 +381,7 @@ class UniversalAgentWorkflow:
         existing = self.accepted.get(message.message_id)
         if existing is not None:
             if existing != digest:
-                raise ApplicationError("Message ID reused", non_retryable=True)
+                raise ApplicationError(_MESSAGE_ID_REUSED, non_retryable=True)
             return  # повтор принятого — ``_accept`` ответит duplicate
         if self.closed:
             raise ApplicationError("Session is closing", non_retryable=True)
@@ -384,7 +399,7 @@ class UniversalAgentWorkflow:
         existing = self.accepted.get(message.message_id)
         if existing is not None:
             if existing != digest:
-                raise ApplicationError("Message ID reused", non_retryable=True)
+                raise ApplicationError(_MESSAGE_ID_REUSED, non_retryable=True)
             if not any(
                 value.get("message_id") == message.message_id
                 for value in self.undelivered
@@ -814,21 +829,9 @@ class UniversalAgentWorkflow:
     @workflow.run
     async def run(self, start: RunRequest) -> dict:
         self.run_identity = workflow.info().run_id
-        if start.resource_queue is None or start.model_queue is None:
-            # Без явных очередей activities идут в очередь самого workflow.
-            queue = start.resource_queue or workflow.info().task_queue
-            start = replace(
-                start,
-                resource_queue=queue,
-                model_queue=start.model_queue or queue,
-            )
+        start = _with_default_queues(start)
         self.start = start
-        try:
-            self._initialize(start)
-        except ValueError as exc:
-            raise ApplicationError(
-                str(exc), type="ValueError", non_retryable=True
-            ) from exc
+        self._initialize_checked(start)
         with execution_environment(new_id=self.new_id, now=workflow.now):
             try:
                 result = await self._run_session(start)
@@ -837,50 +840,50 @@ class UniversalAgentWorkflow:
                     raise asyncio.CancelledError(cancellation)
                 return result
             except (Exception, asyncio.CancelledError) as exc:
-                failure = (
-                    None
-                    if isinstance(exc, asyncio.CancelledError)
-                    else session_failure(exc)
-                )
-                if failure is None and not isinstance(
-                    exc, asyncio.CancelledError
-                ):
+                cancelled = isinstance(exc, asyncio.CancelledError)
+                failure = None if cancelled else session_failure(exc)
+                if failure is None and not cancelled:
                     # Сбой кода workflow: без новых команд, только сбой
                     # workflow task. Уборка здесь попала бы в историю, и
                     # replay исправленного кода с ней разошёлся бы.
                     raise
-                self.closed = True
-                self.accepting_inputs = False
-                self.phase = "failed"
-                if self.operations is not None:
-                    try:
-                        await asyncio.shield(self.operations.mcp_cleanup())
-                        await asyncio.shield(self.operations.release_context())
-                    except (Exception, asyncio.CancelledError):
-                        workflow.logger.exception("Context cleanup failed")
-                try:
-                    # Упавшая сессия не держит тред: иначе он закрыт для
-                    # локального TUI/CLI и для workflow с другим ID.
-                    await asyncio.shield(self._release_owner(start))
-                except (Exception, asyncio.CancelledError):
-                    workflow.logger.exception("Thread owner release failed")
+                await self._abort_session(start)
                 if failure is None or failure is exc:
                     raise
                 raise failure from exc
+
+    def _initialize_checked(self, start):
+        """``_initialize`` с отказом некорректного запроса без повторов."""
+        try:
+            self._initialize(start)
+        except ValueError as exc:
+            raise ApplicationError(
+                str(exc), type="ValueError", non_retryable=True
+            ) from exc
+
+    async def _abort_session(self, start):
+        """Уборка упавшей или отменённой сессии: контекст и владение тредом."""
+        self.closed = True
+        self.accepting_inputs = False
+        self.phase = "failed"
+        if self.operations is not None:
+            try:
+                await asyncio.shield(self.operations.mcp_cleanup())
+                await asyncio.shield(self.operations.release_context())
+            except (Exception, asyncio.CancelledError):
+                workflow.logger.exception("Context cleanup failed")
+        try:
+            # Упавшая сессия не держит тред: иначе он закрыт для
+            # локального TUI/CLI и для workflow с другим ID.
+            await asyncio.shield(self._release_owner(start))
+        except (Exception, asyncio.CancelledError):
+            workflow.logger.exception("Thread owner release failed")
 
     async def _run_session(self, start):
         # Владелец треда — сессия целиком: Continue-As-New его не меняет.
         owner = workflow.info().workflow_id
         while True:
-            ran = False
-            if self.pending_messages:
-                try:
-                    await self._prepare_turn(start, owner, self.store)
-                except HistoryLimitExceeded as exc:
-                    await self._fail_unprepared_turn(exc)
-                else:
-                    await self._run_turn(start)
-                ran = True
+            ran = await self._serve_pending(start, owner)
             if not start.keep_alive or (
                 self.closed and not self.pending_messages
             ):
@@ -889,34 +892,55 @@ class UniversalAgentWorkflow:
             if ran and not self.closed and not self.pending_messages:
                 # Ход закончен: новый run начинается с почти пустой историей.
                 await self._continue(start, self.store)
-            try:
-                await workflow.wait_condition(
-                    lambda: (
-                        bool(self.pending_messages)
-                        or self.closed
-                        or (
-                            _new_build_announced()
-                            and not self.continue_blocked
-                        )
-                    ),
-                    timeout=IDLE_REFRESH,
-                )
-            except TimeoutError:
-                # Долго простаивающая сессия раз в сутки начинает новый run:
-                # переходит на текущую сборку воркера (versioning) и не
-                # держит открытым один run неделями.
-                await self._continue(start, self.store)
-            else:
-                if not self.pending_messages and not self.closed:
-                    # Объявлена новая сборка: простаивающая сессия переходит
-                    # на неё сразу, старый воркер не ждёт её сутки.
-                    await self._continue(start, self.store)
+            await self._wait_idle(start)
         self.closed = True
         await workflow.wait_condition(workflow.all_handlers_finished)
         await self._release_owner(start)
         self.phase = "stopped" if self.stop_requested else "completed"
-        # Результат workflow — тоже запись истории: ответ — в пределах
-        # (полный — в треде), отброшенные сообщения — без текста, если много.
+        return self._session_result()
+
+    async def _serve_pending(self, start, owner):
+        """Ход по накопленному вводу; ``True`` — ход был."""
+        if not self.pending_messages:
+            return False
+        try:
+            await self._prepare_turn(start, owner, self.store)
+        except HistoryLimitExceeded as exc:
+            await self._fail_unprepared_turn(exc)
+        else:
+            await self._run_turn(start)
+        return True
+
+    def _idle_wakeup(self):
+        """Повод простаивающей сессии проснуться: ввод, закрытие или новая
+        сборка воркера (если Continue-As-New не заблокирован)."""
+        return (
+            bool(self.pending_messages)
+            or self.closed
+            or (_new_build_announced() and not self.continue_blocked)
+        )
+
+    async def _wait_idle(self, start):
+        """Ожидание ввода простаивающей сессией (с Continue-As-New)."""
+        try:
+            await workflow.wait_condition(
+                self._idle_wakeup, timeout=IDLE_REFRESH
+            )
+        except TimeoutError:
+            # Долго простаивающая сессия раз в сутки начинает новый run:
+            # переходит на текущую сборку воркера (versioning) и не
+            # держит открытым один run неделями.
+            await self._continue(start, self.store)
+        else:
+            if not self.pending_messages and not self.closed:
+                # Объявлена новая сборка: простаивающая сессия переходит
+                # на неё сразу, старый воркер не ждёт её сутки.
+                await self._continue(start, self.store)
+
+    def _session_result(self):
+        """Результат workflow — тоже запись истории: ответ — в пределах
+        (полный — в треде), отброшенные сообщения — без текста, если много."""
+        failed = self.post_error or self.terminal_outcome or self.turn_error
         result = {
             **_bounded_outcome(
                 {
@@ -929,9 +953,7 @@ class UniversalAgentWorkflow:
             "terminal_outcome": self.terminal_outcome,
             "turns": self.turns,
             "turn_error": self.turn_error,
-            "exit_code": 1
-            if self.post_error or self.terminal_outcome or self.turn_error
-            else 0,
+            "exit_code": 1 if failed else 0,
         }
         if self.answer_truncated:
             result["answer_truncated"] = True
@@ -972,6 +994,17 @@ class UniversalAgentWorkflow:
 
     def _session_resume(self, store):
         """Состояние сессии для Continue-As-New (до ``_fit_resume``)."""
+        # Run из CAN без хода владеет тредом по resume: передать его дальше,
+        # иначе суточный CAN простаивающей сессии терял бы владение.
+        if store:
+            owner_epoch, generation = store.owner_epoch, store._generation
+        elif self.resumed_store:
+            owner_epoch, generation = (
+                self.resumed_store[0],
+                self.resumed_store[1],
+            )
+        else:
+            owner_epoch = generation = None
         return SessionResume(
             human_replies=_recent(self.human_replies),
             reply_receipts=_recent(self.reply_receipts),
@@ -987,14 +1020,8 @@ class UniversalAgentWorkflow:
             message_fingerprint=self.message_fingerprint,
             answer=self.answer,
             terminal_outcome=self.terminal_outcome,
-            # Run из CAN без хода владеет тредом по resume: передать его дальше,
-            # иначе суточный CAN простаивающей сессии терял бы владение.
-            store_owner_epoch=store.owner_epoch
-            if store
-            else (self.resumed_store[0] if self.resumed_store else None),
-            store_generation=store._generation
-            if store
-            else (self.resumed_store[1] if self.resumed_store else None),
+            store_owner_epoch=owner_epoch,
+            store_generation=generation,
         )
 
     async def _continue(self, start, store):

@@ -176,11 +176,11 @@ def _isolate_model_list_cache():
     первый тест в порядке прогона молча кэширует свой список для соседей.
     Автосброс до и после каждого теста (после — на случай, если тест сам не
     дошёл до конца)."""
-    from gc_tui.services.model_list_cache import clear_cache
+    from gc_tui.services.model_list_cache import _CACHE
 
-    clear_cache()
+    _CACHE.clear()
     yield
-    clear_cache()
+    _CACHE.clear()
 
 
 @pytest.fixture(autouse=True)

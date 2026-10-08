@@ -227,9 +227,6 @@ SPECIAL AGENT HANDOFF ADDENDUM
             role_prompt, special_notes
         ), assignment
 
-    def get_agent_name(self):
-        return self.agent_name
-
     @classmethod
     def get_agent_specification(cls):
         return cls.tool_specification

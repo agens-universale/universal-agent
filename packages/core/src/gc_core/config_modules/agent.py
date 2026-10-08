@@ -309,21 +309,6 @@ def exec_output_capture_max_chars_from_config_dict(
     return _agent_of(settings).exec_output_capture_max_chars
 
 
-def walk_output_max_chars_from_config_dict(
-    settings: Any,
-) -> int:
-    """Потолок приватного канала обхода (Harbor walk/listdir)."""
-    n = _agent_of(settings).walk_output_max_chars
-    return n if n > 0 else WALK_OUTPUT_MAX_CHARS
-
-
-def harbor_exec_init_from_config_dict(
-    settings: Any,
-) -> str | None:
-    """Optional Harbor model-facing shell init (``agent.harbor_exec_init``)."""
-    return _agent_of(settings).harbor_exec_init
-
-
 def resolve_model_steering_text(
     settings: Any,
     model: str | None = None,

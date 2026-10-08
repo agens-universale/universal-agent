@@ -23,14 +23,15 @@ from gc_core.attachments.texts import (
 )
 from gc_core.constants.tool_names import FS_VIEW_IMAGE_NAME
 from gc_core.model_router import ModelRouter
-from gc_core.vision.rejects import (
-    process_image_rejects,
-    reset_image_rejects_for_tests,
-)
 from gc_testkit import run_coro
 from gc_testkit.settings import fake_ctx, make_settings
 
-from vision_fakes import route_key, warm_routes, unsupported
+from vision_fakes import (
+    clear_image_rejects,
+    route_key,
+    unsupported,
+    warm_routes,
+)
 from gc_core.vision.rejects import mark_blind
 
 URL = "http://test-host/v1/chat/completions"
@@ -52,9 +53,9 @@ READ_TOOL = {
 
 @pytest.fixture(autouse=True)
 def _fresh_rejects():
-    reset_image_rejects_for_tests()
+    clear_image_rejects()
     yield
-    reset_image_rejects_for_tests()
+    clear_image_rejects()
 
 
 @pytest.fixture

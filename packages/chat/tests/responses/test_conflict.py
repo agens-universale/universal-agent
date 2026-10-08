@@ -11,6 +11,12 @@ from gc_chat.responses.turn import TurnRun
 from gc_testkit.settings import make_settings
 
 
+async def _finished(turn) -> dict:
+    """Дождаться конца хода и взять сохранённый ответ."""
+    await turn.done.wait()
+    return turn.result()
+
+
 class FakeAgent:
     def __init__(self, release: asyncio.Event) -> None:
         self.release = release
@@ -89,7 +95,7 @@ async def test_second_post_is_409_and_does_not_send(tmp_path):
     assert len(agent.calls) == 1
     assert agent.calls[0]["system"] == "responses"
     release.set()
-    done = await first.wait_finished()
+    done = await _finished(first)
     assert done["status"] == "completed"
     assert agent.sent == []
     nxt = await facade.open(
@@ -99,7 +105,7 @@ async def test_second_post_is_409_and_does_not_send(tmp_path):
             "previous_response_id": first.response_id,
         }
     )
-    continued = await nxt.wait_finished()
+    continued = await _finished(nxt)
     assert continued["status"] == "completed"
     assert len(agent.calls) == 2
     assert agent.calls[1]["thread_id"] == agent.calls[0]["thread_id"]
@@ -134,7 +140,7 @@ async def test_history_array_starts_only_the_last_user_text(tmp_path):
             "store": False,
         }
     )
-    body = await handle.wait_finished()
+    body = await _finished(handle)
     assert agent.calls[0]["prompt"] == "только это"
     assert agent.calls[0]["system"] == "responses"
     assert body["model"] == "ui-model"
@@ -182,7 +188,7 @@ async def test_get_survives_a_new_facade(tmp_path):
     agent._hold = False
     facade = _facade(tmp_path, agent)
     handle = await facade.open({"model": "m", "input": "сохрани"})
-    saved = await handle.wait_finished()
+    saved = await _finished(handle)
     threads = tmp_path / "threads"
     restarted = ResponsesFacade(
         settings=make_settings(**{"agent.model": "m"}),
@@ -201,7 +207,7 @@ async def test_cwd_mismatch_does_not_start(tmp_path):
     handle = await facade.open(
         {"model": "m", "input": "тут", "metadata": {"cwd": str(work)}}
     )
-    await handle.wait_finished()
+    await _finished(handle)
     with pytest.raises(ApiError) as caught:
         await facade.open(
             {
@@ -252,7 +258,7 @@ async def test_finish_arguments_become_report_not_raw_json(tmp_path):
     )
     facade = _facade(tmp_path, agent)
     handle = await facade.open({"model": "m", "input": "прочитай"})
-    body = await handle.wait_finished()
+    body = await _finished(handle)
     text = _output_text(body)
     assert text == "В README одна фраза.\n\n* заметка: файл короткий"
     assert "solution_type" not in text
@@ -269,7 +275,7 @@ async def test_shown_report_is_not_repeated_with_a_note(tmp_path):
     )
     facade = _facade(tmp_path, agent)
     handle = await facade.open({"model": "m", "input": "прочитай"})
-    body = await handle.wait_finished()
+    body = await _finished(handle)
     assert _output_text(body) == "В README одна фраза."
 
 
@@ -278,7 +284,7 @@ async def test_cancel_before_second_turn_skips_the_model(tmp_path):
     agent._hold = False
     facade = _facade(tmp_path, agent)
     first = await facade.open({"model": "m", "input": "первый"})
-    await first.wait_finished()
+    await _finished(first)
     assert len(agent.calls) == 1
 
     entered = asyncio.Event()

@@ -20,6 +20,7 @@ from gc_core.context_preparation import RunContextBindings
 from gc_core.execution.ports import AgentOperations
 from gc_core_temporalio import context as temporal_context
 from gc_core_temporalio.operations import WorkflowOperations
+from live_support import worker_kwargs
 
 CORE = Path(gc_core.__file__).parent
 PACKAGE = Path(temporal_context.__file__).parent
@@ -228,7 +229,7 @@ def test_every_activity_called_by_the_workflow_is_registered(
 ):
     monkeypatch.chdir(tmp_path)
     from gc_core_temporalio.provider import WorkerConfig
-    from gc_core_temporalio.worker import build_runtime, worker_options
+    from gc_core_temporalio.worker import build_runtime
     from temporalio import activity
 
     config = WorkerConfig.model_validate(
@@ -243,7 +244,7 @@ def test_every_activity_called_by_the_workflow_is_registered(
     provider, native, threads = build_runtime(config)
     registered = {
         activity._Definition.must_from_callable(function).name
-        for options in worker_options(config, native, threads)
+        for options in [worker_kwargs(config, native, threads)]
         for function in options.get("activities", [])
     }
     called = _activity_names_called_by_workflow_code()

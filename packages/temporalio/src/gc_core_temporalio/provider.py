@@ -277,6 +277,154 @@ _NO_EDITS_RECORDING = AgentEditsRecordConfig(
 )
 
 
+def _checked_workspace(name, profile, cwd):
+    """Рабочая папка профиля: существующая абсолютная и равная cwd воркера."""
+    workspace = Path(profile.workspace)
+    if not workspace.is_absolute() or not workspace.is_dir():
+        raise ValueError(
+            f"Profile {name}: workspace must be an existing absolute directory"
+        )
+    if workspace.resolve() != cwd:
+        raise ValueError(
+            f"Profile {name}: start worker in workspace {workspace}; "
+            f"current cwd is {cwd}. The worker never calls chdir."
+        )
+    return workspace
+
+
+def _with_stop_tool(settings, tool):
+    """Настройки с ещё одним выключенным инструментом в ``stop_tools``."""
+    return settings.model_copy(
+        update={
+            "agent": settings.agent.model_copy(
+                update={"stop_tools": [*settings.agent.stop_tools, tool]}
+            )
+        }
+    )
+
+
+def _with_turn_persist(settings, profile):
+    if "thread_store" in profile.core.model_fields_set:
+        return settings
+    # В Temporal по умолчанию тред пишется по ходам: шаги хода
+    # защищает история workflow. Явная настройка профиля главнее.
+    # Точечно, без пересборки путей: профиль хранит пути как
+    # задано, ядро резолвит их от workspace при использовании.
+    return settings.model_copy(
+        update={
+            "thread_store": settings.thread_store.model_copy(
+                update={"persist": "turn"}
+            )
+        }
+    )
+
+
+def _with_protected_state(settings, state_paths):
+    # Служебное состояние воркера агент не трогает, где бы оно ни
+    # лежало: история всех сессий и payload — не его файлы.
+    inside = list(state_paths)
+    protected = settings.security.protected_paths
+    if not inside and not any(str(p).startswith("~") for p in protected.extra):
+        return settings
+    # ``~`` — здесь, на воркере: guard команд в коде workflow не
+    # может обращаться к os.path.
+    expanded = [os.path.expanduser(p) for p in protected.extra]
+    return settings.model_copy(
+        update={
+            "security": settings.security.model_copy(
+                update={
+                    "protected_paths": protected.model_copy(
+                        update={"extra": [*expanded, *inside]}
+                    )
+                }
+            )
+        }
+    )
+
+
+def _with_thread_images(settings, name, profile, store):
+    # Картинки треда — в хранилище тредов (файлы треда) или рядом с
+    # файловыми тредами. Хранилище без того и другого положило бы их
+    # на диск воркера мимо треда: инструмент выключается.
+    if (
+        thread_files_capability(store) is not None
+        or isinstance(getattr(store, "threads_dir", None), str)
+        or FS_VIEW_IMAGE_NAME in settings.agent.stop_tools
+    ):
+        return settings
+    logger.warning(
+        "Profile %s: store %s keeps no thread files; %s disabled",
+        name,
+        profile.store_id,
+        FS_VIEW_IMAGE_NAME,
+    )
+    return _with_stop_tool(settings, FS_VIEW_IMAGE_NAME)
+
+
+def _unless_explicit(profile, path, update):
+    """``update``, если профиль не задал ``path`` явно (иначе — ничего)."""
+    return {} if is_explicit(profile.core, path) else update
+
+
+def _with_durable_logging(settings, profile):
+    # Журнал правок агента (agent_edits) в durable-исполнении не
+    # ведётся при любом профиле: его читают только дифф, сводка хода
+    # и откат в TUI, а на воркере он стоил бы снимков файлов и
+    # `git status` вокруг каждой команды.
+    return settings.model_copy(
+        update={
+            "agent_edits": settings.agent_edits.model_copy(
+                update={"record": _NO_EDITS_RECORDING}
+            ),
+            # Консольная трасса печатается из кода workflow: при
+            # replay вывод повторялся бы. Ход виден в истории и логах.
+            # Лог прогона по умолчанию — не файлом на диске воркера, а
+            # в logging процесса (propagate) и в обработчики
+            # приложения; явное значение профиля побеждает.
+            "logging": settings.logging.model_copy(
+                update={
+                    "console_trace": False,
+                    **_unless_explicit(
+                        profile, "logging.save_logs", {"save_logs": False}
+                    ),
+                    **_unless_explicit(
+                        profile, "logging.propagate", {"propagate": True}
+                    ),
+                    # Лог прогона уходит в общий logging процесса
+                    # (сборщик логов) — секреты в нём маскируются,
+                    # если профиль не решил иначе явно.
+                    **_unless_explicit(
+                        profile,
+                        "logging.redact_secrets.enabled",
+                        {
+                            "redact_secrets": (
+                                settings.logging.redact_secrets.model_copy(
+                                    update={"enabled": True}
+                                )
+                            )
+                        },
+                    ),
+                }
+            ),
+        }
+    )
+
+
+def _worker_settings(name, profile, store, *, state_paths, human_input):
+    """Настройки профиля под воркером Temporal (поверх ``profile.core``)."""
+    settings = _with_turn_persist(profile.core, profile)
+    settings = _with_protected_state(settings, state_paths)
+    settings = _with_thread_images(settings, name, profile, store)
+    if not human_input:
+        settings = _without_human(settings)
+    # Project memory — файл в рабочей папке, общий для всех сессий
+    # проекта: возможность TUI и CLI. Под Temporal её нет при любом
+    # профиле — ни инструмента, ни статуса в промпте, ни activity.
+    if PROJECT_MEMORY_TOOL_NAME not in settings.agent.stop_tools:
+        settings = _with_stop_tool(settings, PROJECT_MEMORY_TOOL_NAME)
+    return _with_durable_logging(settings, profile)
+
+
 class ContextProvider:
     """Build the actual SDK context, never a reduced adapter-specific agent.
 
@@ -322,148 +470,17 @@ class ContextProvider:
         self._last_used = {}
         cwd = Path.cwd().resolve()
         for name, profile in profiles.items():
-            workspace = Path(profile.workspace)
-            if not workspace.is_absolute() or not workspace.is_dir():
-                raise ValueError(
-                    f"Profile {name}: workspace must be an existing absolute directory"
-                )
-            if workspace.resolve() != cwd:
-                raise ValueError(
-                    f"Profile {name}: start worker in workspace {workspace}; "
-                    f"current cwd is {cwd}. The worker never calls chdir."
-                )
+            workspace = _checked_workspace(name, profile, cwd)
             if profile.store_id not in stores:
                 raise ValueError(
                     f"Profile {name}: unknown store {profile.store_id}"
                 )
-            settings = profile.core
-            if "thread_store" not in profile.core.model_fields_set:
-                # В Temporal по умолчанию тред пишется по ходам: шаги хода
-                # защищает история workflow. Явная настройка профиля главнее.
-                # Точечно, без пересборки путей: профиль хранит пути как
-                # задано, ядро резолвит их от workspace при использовании.
-                settings = settings.model_copy(
-                    update={
-                        "thread_store": settings.thread_store.model_copy(
-                            update={"persist": "turn"}
-                        )
-                    }
-                )
-            # Служебное состояние воркера агент не трогает, где бы оно ни
-            # лежало: история всех сессий и payload — не его файлы.
-            inside = list(state_paths)
-            protected = settings.security.protected_paths
-            if inside or any(str(p).startswith("~") for p in protected.extra):
-                # ``~`` — здесь, на воркере: guard команд в коде workflow не
-                # может обращаться к os.path.
-                expanded = [os.path.expanduser(p) for p in protected.extra]
-                settings = settings.model_copy(
-                    update={
-                        "security": settings.security.model_copy(
-                            update={
-                                "protected_paths": protected.model_copy(
-                                    update={"extra": [*expanded, *inside]}
-                                )
-                            }
-                        )
-                    }
-                )
-            # Картинки треда — в хранилище тредов (файлы треда) или рядом с
-            # файловыми тредами. Хранилище без того и другого положило бы их
-            # на диск воркера мимо треда: инструмент выключается.
-            store = stores[profile.store_id]
-            if (
-                thread_files_capability(store) is None
-                and not isinstance(getattr(store, "threads_dir", None), str)
-                and FS_VIEW_IMAGE_NAME not in settings.agent.stop_tools
-            ):
-                logger.warning(
-                    "Profile %s: store %s keeps no thread files; %s disabled",
-                    name,
-                    profile.store_id,
-                    FS_VIEW_IMAGE_NAME,
-                )
-                settings = settings.model_copy(
-                    update={
-                        "agent": settings.agent.model_copy(
-                            update={
-                                "stop_tools": [
-                                    *settings.agent.stop_tools,
-                                    FS_VIEW_IMAGE_NAME,
-                                ]
-                            }
-                        )
-                    }
-                )
-            if not human_input:
-                settings = _without_human(settings)
-            # Project memory — файл в рабочей папке, общий для всех сессий
-            # проекта: возможность TUI и CLI. Под Temporal её нет при любом
-            # профиле — ни инструмента, ни статуса в промпте, ни activity.
-            if PROJECT_MEMORY_TOOL_NAME not in settings.agent.stop_tools:
-                settings = settings.model_copy(
-                    update={
-                        "agent": settings.agent.model_copy(
-                            update={
-                                "stop_tools": [
-                                    *settings.agent.stop_tools,
-                                    PROJECT_MEMORY_TOOL_NAME,
-                                ]
-                            }
-                        )
-                    }
-                )
-            # Журнал правок агента (agent_edits) в durable-исполнении не
-            # ведётся при любом профиле: его читают только дифф, сводка хода
-            # и откат в TUI, а на воркере он стоил бы снимков файлов и
-            # `git status` вокруг каждой команды.
-            settings = settings.model_copy(
-                update={
-                    "agent_edits": settings.agent_edits.model_copy(
-                        update={"record": _NO_EDITS_RECORDING}
-                    ),
-                    # Консольная трасса печатается из кода workflow: при
-                    # replay вывод повторялся бы. Ход виден в истории и логах.
-                    # Лог прогона по умолчанию — не файлом на диске воркера, а
-                    # в logging процесса (propagate) и в обработчики
-                    # приложения; явное значение профиля побеждает.
-                    "logging": settings.logging.model_copy(
-                        update={
-                            "console_trace": False,
-                            **(
-                                {}
-                                if is_explicit(
-                                    profile.core, "logging.save_logs"
-                                )
-                                else {"save_logs": False}
-                            ),
-                            **(
-                                {}
-                                if is_explicit(
-                                    profile.core, "logging.propagate"
-                                )
-                                else {"propagate": True}
-                            ),
-                            # Лог прогона уходит в общий logging процесса
-                            # (сборщик логов) — секреты в нём маскируются,
-                            # если профиль не решил иначе явно.
-                            **(
-                                {}
-                                if is_explicit(
-                                    profile.core,
-                                    "logging.redact_secrets.enabled",
-                                )
-                                else {
-                                    "redact_secrets": (
-                                        settings.logging.redact_secrets.model_copy(
-                                            update={"enabled": True}
-                                        )
-                                    )
-                                }
-                            ),
-                        }
-                    ),
-                }
+            settings = _worker_settings(
+                name,
+                profile,
+                stores[profile.store_id],
+                state_paths=state_paths,
+                human_input=human_input,
             )
             loaded = LoadedSettings(
                 settings=settings,

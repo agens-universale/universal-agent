@@ -791,29 +791,6 @@ def _apply_console_key(console: Any, key: str, chars: list[str]) -> str | None:
     return None
 
 
-def prompt_user_confirmation(
-    *,
-    title: str,
-    fields: list[tuple[str, Any]],
-    question: str,
-) -> bool:
-    """Bool wrapper over 4-way CLI confirm (allow_* → True, else False).
-
-    Prefer request_confirm / prompt_user_confirmation_choice for new code.
-    """
-    from gc_core.security.confirm_port import (
-        CONFIRM_ALLOW_ONCE,
-        CONFIRM_ALLOW_REMEMBER,
-    )
-
-    choice = prompt_user_confirmation_choice(
-        title=title,
-        fields=fields,
-        question=question,
-    )
-    return choice in (CONFIRM_ALLOW_REMEMBER, CONFIRM_ALLOW_ONCE)
-
-
 def _ask_user_confirmation_for_write(
     *,
     tool_name: str,

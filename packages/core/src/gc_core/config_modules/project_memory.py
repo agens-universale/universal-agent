@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
@@ -68,30 +67,3 @@ def normalize_project_memory_config(
             DEFAULT_PROJECT_MEMORY_COMPACTION_MAX_TOKENS
         )
     return cfg.result()
-
-
-def project_memory_from_config_dict(
-    settings: Any,
-) -> ProjectMemoryConfig:
-    """``ProjectMemoryConfig`` настроек (``settings`` — всё, что принимает ``settings_of``)."""
-    # Ленивый импорт: settings → root → этот модуль.
-    from gc_core.settings import settings_of
-
-    return settings_of(settings).project_memory
-
-
-def project_memory_limits_from_config_dict(
-    settings: Any,
-) -> dict[str, int]:
-    cfg = project_memory_from_config_dict(settings)
-    return {
-        "max_chars": cfg.max_chars,
-        "max_append_chars": cfg.max_append_chars,
-    }
-
-
-def project_memory_notice_enabled(settings: Any) -> bool:
-    """Project memory exists/changed hints: только явный флаг в ``project_memory``."""
-    return project_memory_from_config_dict(
-        settings
-    ).enable_project_memory_notice

@@ -141,7 +141,7 @@ class TestAgentExecutorRoutesToChild:
         with _activate(ctx, parent_call_id="call_sub_1") as scope:
             ex.add_message({"role": "user", "content": "to child", "id": "m1"})
             assert scope.drain()[0]["content"] == "to child"
-            with ex.get_lock():
+            with ex._lock:
                 assert ex._pending_messages == []
 
     def test_add_message_goes_to_parent_when_no_child(self):
@@ -151,7 +151,7 @@ class TestAgentExecutorRoutesToChild:
         ctx.child_input_scope = None
         ex = AgentExecutor(ctx)
         ex.add_message({"role": "user", "content": "to parent"})
-        with ex.get_lock():
+        with ex._lock:
             assert len(ex._pending_messages) == 1
             assert ex._pending_messages[0]["content"] == "to parent"
 
@@ -468,5 +468,5 @@ class TestParentPendingUnchangedWithoutChild:
         ex = AgentExecutor(ctx)
         msg = {"role": "user", "content": "hello"}
         ex.add_message(msg)
-        with ex.get_lock():
+        with ex._lock:
             assert ex._pending_messages == [msg]

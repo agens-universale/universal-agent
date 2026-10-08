@@ -31,19 +31,34 @@ def _half_pair(cert: Any, key: Any) -> str | None:
 
 
 def _mtls_notices(cfg: AppConfig) -> list[str]:
-    notices: list[str] = []
+    return [
+        *_backend_mtls_notices(cfg),
+        *_model_mtls_notices(cfg),
+        *_mcp_mtls_notices(cfg),
+    ]
+
+
+def _backend_mtls_notices(cfg: AppConfig) -> list[str]:
+    """Половина пары cert/key у общего ``backend``."""
     backend = cfg.backend
     half = _half_pair(backend.cert_path, backend.key_path)
-    if half:
-        given, missing = (
-            ("backend.cert_path", "backend.key_path")
-            if half == "cert"
-            else ("backend.key_path", "backend.cert_path")
-        )
-        notices.append(
-            f"{given} задан без {missing} — клиентский сертификат (mTLS) не "
-            "используется; задайте оба или уберите оба"
-        )
+    if not half:
+        return []
+    given, missing = (
+        ("backend.cert_path", "backend.key_path")
+        if half == "cert"
+        else ("backend.key_path", "backend.cert_path")
+    )
+    return [
+        f"{given} задан без {missing} — клиентский сертификат (mTLS) не "
+        "используется; задайте оба или уберите оба"
+    ]
+
+
+def _model_mtls_notices(cfg: AppConfig) -> list[str]:
+    """Половина пары у модели с учётом унаследованного из общего ``backend``."""
+    notices: list[str] = []
+    backend = cfg.backend
     for alias, entry in cfg.models.items():
         own = entry.backend
         if own is None:
@@ -59,6 +74,12 @@ def _mtls_notices(cfg: AppConfig) -> list[str]:
                 "один из cert_path/key_path — клиентский сертификат (mTLS) для "
                 "этой модели не используется"
             )
+    return notices
+
+
+def _mcp_mtls_notices(cfg: AppConfig) -> list[str]:
+    """Половина пары client-cert/client-key у MCP-серверов."""
+    notices: list[str] = []
     for name, server in cfg.mcp.servers.items():
         half = _half_pair(server.client_cert, server.client_key)
         if half:

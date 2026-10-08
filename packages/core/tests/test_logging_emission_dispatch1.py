@@ -52,10 +52,9 @@ def _flush(logger):
 # ---------------------------------------------------------------------------
 
 
-def test_summary_started_and_precheck_events(tmp_path):
+def test_summary_started_event(tmp_path):
     from gc_core.summarize.summary_logging import (
         SummaryCompactionLog,
-        log_compaction_precheck,
         log_compaction_started,
     )
 
@@ -66,24 +65,12 @@ def test_summary_started_and_precheck_events(tmp_path):
     log_compaction_started(
         logger, ctx, serialized_chars=100, history_messages_count=3
     )
-    log_compaction_precheck(
-        logger,
-        trigger_reason="turn_end",
-        thread_id="t1",
-        history_messages_count=3,
-        trigger_volume=10,
-        serialized_chars=100,
-        threshold=500,
-    )
     _flush(logger)
     recs = _records(path)
 
     started = [r for r in recs if r["event"] == "summary_started"]
     assert started and started[0]["reason"] == "turn_end"
     assert started[0]["serialized_chars"] == 100
-
-    precheck = [r for r in recs if r["event"] == "summary_precheck"]
-    assert precheck and precheck[0]["threshold"] == 500
 
 
 def test_summary_raw_text_and_message_body_events(tmp_path):

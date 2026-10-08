@@ -187,6 +187,19 @@ def _fit(value, budget):
     return value
 
 
+def _list_parts(key, value, budget):
+    """Длинный список трассы — частями ``{key: [...]}`` не больше ``budget``."""
+    parts, chunk = [], []
+    for item in value:
+        item = _fit(item, budget)
+        if chunk and payload_size({key: [*chunk, item]}) > budget:
+            parts.append({key: chunk})
+            chunk = []
+        chunk.append(item)
+    parts.append({key: chunk})
+    return parts
+
+
 def trace_parts(trace, budget):
     """Трасса сжатия частями не больше ``budget``: по ключам, длинные списки
     (батчи суммаризатора) — по элементам; то, что не делится, укорачивается."""
@@ -199,14 +212,7 @@ def trace_parts(trace, budget):
             current[key] = value
             continue
         if isinstance(value, list):
-            chunk = []
-            for item in value:
-                item = _fit(item, budget)
-                if chunk and payload_size({key: [*chunk, item]}) > budget:
-                    parts.append({key: chunk})
-                    chunk = []
-                chunk.append(item)
-            parts.append({key: chunk})
+            parts.extend(_list_parts(key, value, budget))
             continue
         parts.append({key: _fit(value, budget)})
     if current or not parts:
@@ -228,6 +234,20 @@ def _cut_middle(text, limit):
     tail = cut_to_payload(text[::-1], half)[::-1]
     skipped = len(text) - len(head) - len(tail)
     return f"{head}\n…[пропущено {skipped} символов: запрос не помещался в запись истории Temporal]…\n{tail}"
+
+
+def _fit_auxiliary_request(request, data):
+    """Сообщения служебного запроса (``data``) — в пределах записи истории."""
+    fitted = _fit_auxiliary_messages(data["messages"])
+    if fitted is data["messages"]:
+        return
+    workflow.logger.warning(
+        "Служебный запрос %s укорочен для истории Temporal: %s → %s байт",
+        request.request_label,
+        payload_size(data["messages"]),
+        payload_size(fitted),
+    )
+    data["messages"] = fitted
 
 
 def _fit_auxiliary_messages(messages):
@@ -252,6 +272,44 @@ def _fit_auxiliary_messages(messages):
             content, max(payload_size(content) - excess - 1024, 4096)
         )
     return out
+
+
+#: Сбои исполнения, которые activity переносит типом ``ApplicationError``.
+_FAILURE_TYPES = {
+    cls.__name__: cls
+    for cls in (
+        ExecutionFailure,
+        HistoryLimitExceeded,
+        InfrastructureFailure,
+        OutcomeUnknown,
+    )
+}
+
+
+def _application_error(cause):
+    """Исключение ядра по ``ApplicationError`` activity; ``None`` — тип не
+    из известных (решает общее правило ``_activity_error``)."""
+    if cause.type == "DomainError":
+        return restore_domain_error(cause)
+    if cause.type in _FAILURE_TYPES:
+        return _FAILURE_TYPES[cause.type](cause.message)
+    if cause.type == CONTEXT_MISSING:
+        return _ModelContextMissing(cause.message)
+    if cause.type == "ModelProviderTransient":
+        # Исчерпан заданный в activities.model лимит повторов.
+        return InfrastructureFailure(
+            f"Model provider unavailable: {cause.message}"
+        )
+    return None
+
+
+def _thread_hashes(store, thread):
+    """Хэши сообщений треда, которые уже есть в хранилище (идут ссылками)."""
+    if store is None:
+        return set()
+    return store.message_hashes.get(
+        (thread["system_id"], thread["thread_id"]), set()
+    )
 
 
 class WorkflowOperations:
@@ -355,26 +413,9 @@ class WorkflowOperations:
                 "состояние, прежде чем повторять."
             )
         if isinstance(cause, ApplicationError):
-            if cause.type == "DomainError":
-                return restore_domain_error(cause)
-            failures = {
-                cls.__name__: cls
-                for cls in (
-                    ExecutionFailure,
-                    HistoryLimitExceeded,
-                    InfrastructureFailure,
-                    OutcomeUnknown,
-                )
-            }
-            if cause.type in failures:
-                return failures[cause.type](cause.message)
-            if cause.type == CONTEXT_MISSING:
-                return _ModelContextMissing(cause.message)
-            if cause.type == "ModelProviderTransient":
-                # Исчерпан заданный в activities.model лимит повторов.
-                return InfrastructureFailure(
-                    f"Model provider unavailable: {cause.message}"
-                )
+            error = _application_error(cause)
+            if error is not None:
+                return error
         if effect:
             return ToolOutcomeUnknown(INTERRUPTED_EFFECT)
         if tool:
@@ -409,16 +450,7 @@ class WorkflowOperations:
         self._warn_history_size()
         data = asdict(request)
         if request.consumer != "main":
-            fitted = _fit_auxiliary_messages(data["messages"])
-            if fitted is not data["messages"]:
-                workflow.logger.warning(
-                    "Служебный запрос %s укорочен для истории Temporal: "
-                    "%s → %s байт",
-                    request.request_label,
-                    payload_size(data["messages"]),
-                    payload_size(fitted),
-                )
-                data["messages"] = fitted
+            _fit_auxiliary_request(request, data)
         thread = {
             "store_id": self.start.store_id,
             "system_id": self.start.system_id,
@@ -427,27 +459,9 @@ class WorkflowOperations:
         }
         operation_id = request.operation_id
         store = self.thread_store
-        stored = (
-            store.message_hashes.get(
-                (thread["system_id"], thread["thread_id"]), set()
-            )
-            if store is not None
-            else set()
-        )
+        stored = _thread_hashes(store, thread)
         for attempt in range(2):
-            state = dict(data["state"])
-            state["messages"], inline = self._sent_messages.encode(
-                state.get("messages"), also=stored
-            )
-            batch, inline_batch = self._sent_messages.encode(
-                data["messages"], also={*stored, *inline}
-            )
-            inline_tools = []
-            if isinstance(state.get("tools"), list):
-                # Схемы инструментов одинаковы на всех шагах хода.
-                state["tools"], inline_tools = self._sent_messages.encode(
-                    state["tools"]
-                )
+            state, batch, inline = self._encode_model_input(data, stored)
             try:
                 reply = await self.call(
                     "universal_agent.model.request",
@@ -474,18 +488,11 @@ class WorkflowOperations:
                 # (системный промпт, схемы инструментов).
                 if self.flush_thread is not None:
                     await self.flush_thread()
-                if store is not None:
-                    stored = set(
-                        store.message_hashes.get(
-                            (thread["system_id"], thread["thread_id"]), set()
-                        )
-                    )
+                stored = set(_thread_hashes(store, thread))
                 self._sent_messages.forget()
                 operation_id = f"{request.operation_id}/full"
                 continue
-            self._sent_messages.confirm(
-                [*inline, *inline_batch, *inline_tools]
-            )
+            self._sent_messages.confirm(inline)
             # Ответ модели уже у воркера (activity положила его в кэш):
             # дальше — ссылкой. Промах кэша закрывает повтор через тред.
             self._sent_messages.confirm(
@@ -493,6 +500,24 @@ class WorkflowOperations:
                 for message in (reply.result.messages or [])
             )
             return reply
+
+    def _encode_model_input(self, data, stored):
+        """Состояние и батч запроса модели: переданное раньше — ссылками.
+        → (состояние, батч, хэши переданного целиком)."""
+        state = dict(data["state"])
+        state["messages"], inline = self._sent_messages.encode(
+            state.get("messages"), also=stored
+        )
+        batch, inline_batch = self._sent_messages.encode(
+            data["messages"], also={*stored, *inline}
+        )
+        inline_tools = []
+        if isinstance(state.get("tools"), list):
+            # Схемы инструментов одинаковы на всех шагах хода.
+            state["tools"], inline_tools = self._sent_messages.encode(
+                state["tools"]
+            )
+        return state, batch, [*inline, *inline_batch, *inline_tools]
 
     def _warn_history_size(self):
         """Сервер советует новый run посреди хода — предупредить в логе.

@@ -500,9 +500,6 @@ async def test_runner_not_running_shows_terminal_state_after_finalized(
             def get_task_meta(self, tid):
                 return {"tui": {"status": "completed"}}
 
-            def read_live_messages(self, tid):
-                return []
-
             def update_tui_meta(self, tid, patch):
                 pass
 

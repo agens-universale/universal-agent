@@ -229,6 +229,20 @@ def session_workflow_id(agent, store_id, system_id, thread_id):
     return f"ua-session-{digest}"
 
 
+def _message_reply(state, message_id):
+    """Ответ ``wait`` по состоянию сообщения; ``None`` — ждать дальше."""
+    if state is None:
+        return None
+    kind = state["state"]
+    if kind == "done":
+        return {**state, "delivered": True}
+    if kind == "dropped":
+        return {**state, "delivered": False, "answer": None}
+    if kind == "unknown":
+        raise ValueError(f"Unknown message: {message_id}")
+    return None
+
+
 class AgentSession:
     """Сессия агента в Temporal — один тред.
 
@@ -345,29 +359,15 @@ class AgentSession:
         workflow падает ``stuck_attempts`` раз подряд — ``SessionStuck``;
         ``timeout`` (секунды) истёк — ``TimeoutError``.
         """
-        from temporalio.service import RPCError
-
         loop = asyncio.get_running_loop()
         deadline = None if timeout is None else loop.time() + timeout
         delay, step = poll, 0
         while True:
             step += 1
-            failed_query = False
-            try:
-                state = await self.handle.query(
-                    UniversalAgentWorkflow.message_state, message_id
-                )
-            except RPCError:
-                # Задача workflow в сбое, сессия завершена или ещё стартует.
-                state, failed_query = None, True
-            if state is not None:
-                kind = state["state"]
-                if kind == "done":
-                    return {**state, "delivered": True}
-                if kind == "dropped":
-                    return {**state, "delivered": False, "answer": None}
-                if kind == "unknown":
-                    raise ValueError(f"Unknown message: {message_id}")
+            state, failed_query = await self._message_state(message_id)
+            reply = _message_reply(state, message_id)
+            if reply is not None:
+                return reply
             if failed_query or step == 1 or step % DESCRIBE_EVERY == 0:
                 reason = await self._failure(
                     pending_message=message_id, stuck_attempts=stuck_attempts
@@ -380,6 +380,19 @@ class AgentSession:
                 )
             await asyncio.sleep(delay)
             delay = min(delay * 1.5, max_poll)
+
+    async def _message_state(self, message_id):
+        """Query ``message_state`` → (состояние | ``None``, query не прошёл)."""
+        from temporalio.service import RPCError
+
+        try:
+            state = await self.handle.query(
+                UniversalAgentWorkflow.message_state, message_id
+            )
+        except RPCError:
+            # Задача workflow в сбое, сессия завершена или ещё стартует.
+            return None, True
+        return state, False
 
     async def _failure(self, pending_message=None, stuck_attempts=None):
         """Причина, по которой ответа не будет: сессия упала
@@ -496,6 +509,15 @@ class TemporalDurability:
         )
 
 
+def _with_ids(messages, message_ids):
+    """Пары ``(текст, ID | None)``: ID — по порядку, сколько задано."""
+    ids = list(message_ids or [])
+    return [
+        (text, ids[index] if index < len(ids) else None)
+        for index, text in enumerate(messages)
+    ]
+
+
 class _DurableAgentRuntime:
     """Сторона ``AsyncAgent`` в durable-режиме — с той же семантикой, что
     локальный ``AsyncAgent``:
@@ -556,11 +578,7 @@ class _DurableAgentRuntime:
         # на каждый вызов.
         ephemeral = thread_id is None
         session = self._session(thread_id or uuid.uuid4().hex, system)
-        ids = list(message_ids or [])
-        batch = [
-            (text, ids[index] if index < len(ids) else None)
-            for index, text in enumerate(messages)
-        ]
+        batch = _with_ids(messages, message_ids)
         deferred = list(self._deferred)
         self._active, self._running, self._tail = session, True, []
         try:
@@ -568,19 +586,7 @@ class _DurableAgentRuntime:
             last = (await session.send_batch([*batch, *deferred]))[-1]
             # Отложенные send ушли с этим ходом; сбой отправки их не теряет.
             del self._deferred[: len(deferred)]
-            reply = await session.wait(last)
-            # Хвост: присланное send() во время хода — его ходы тоже часть
-            # этого run, ответ — последнего из них (как локальный run).
-            while reply["delivered"] and (self._tail or self._background):
-                if self._background:
-                    await asyncio.gather(
-                        *self._background, return_exceptions=True
-                    )
-                if self._errors:
-                    raise self._errors.pop(0)
-                if not self._tail:
-                    break
-                reply = await session.wait(self._tail.pop(0))
+            reply = await self._wait_tail(session, await session.wait(last))
             if not reply["delivered"] or self._tail:
                 # Ход остановили: хвост не доигрывается (как локально), но и
                 # не теряется молча.
@@ -599,6 +605,19 @@ class _DurableAgentRuntime:
                 # закрытия (сессия уже упала) не подменяет исход хода.
                 with contextlib.suppress(Exception):
                     await session.close()
+
+    async def _wait_tail(self, session, reply):
+        """Хвост: присланное send() во время хода — его ходы тоже часть
+        этого run, ответ — последнего из них (как локальный run)."""
+        while reply["delivered"] and (self._tail or self._background):
+            if self._background:
+                await asyncio.gather(*self._background, return_exceptions=True)
+            if self._errors:
+                raise self._errors.pop(0)
+            if not self._tail:
+                break
+            reply = await session.wait(self._tail.pop(0))
+        return reply
 
     def send(self, message):
         text = str(message.get("content", ""))

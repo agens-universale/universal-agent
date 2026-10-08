@@ -167,6 +167,43 @@ def _without_fetch_cache(snapshot):
     )
 
 
+def _first_page(request, entry):
+    """Первая страница: meta и начало состояния вместе в пределах
+    страницы; meta больше половины — отдельными кусками."""
+    snapshot = entry.snapshot
+    reply = ThreadStoreReply(snapshot=replace(snapshot, state=None))
+    budget = request.page_bytes - _size(snapshot.meta)
+    if (
+        request.meta_known is not None
+        and request.meta_known == entry.meta_version
+    ):
+        # Эта версия meta у workflow уже есть (чтение перед ходом,
+        # затем с состоянием): второй раз не передавать.
+        reply.snapshot = replace(reply.snapshot, meta={})
+        reply.meta_unchanged = True
+        budget = request.page_bytes
+    elif budget < request.page_bytes // 2:
+        reply.snapshot = replace(reply.snapshot, meta={})
+        reply.meta_chunk, reply.meta_next = _text_chunk(
+            entry.meta_text, 0, request.page_bytes // 2
+        )
+        budget = 0
+    if snapshot.state is None:
+        # Хранилище не отдало состояние — как без страниц.
+        return reply
+    if budget > 0:
+        page = _state_page(entry.messages, entry.keys, None, budget)
+    else:
+        page = ThreadStatePage(
+            [],
+            [],
+            [0, 0] if entry.messages or entry.keys else None,
+        )
+    page.max_seq = snapshot.state.max_seq
+    reply.page = page
+    return reply
+
+
 class ThreadStoreActivities:
     def __init__(self, stores):
         self.raw = dict(stores)
@@ -230,7 +267,6 @@ class ThreadStoreActivities:
                     entry.meta_text, request.meta_cursor, request.page_bytes
                 )
                 return ThreadStoreReply(meta_chunk=chunk, meta_next=following)
-            snapshot = entry.snapshot
             if request.cursor is not None:
                 page = _state_page(
                     entry.messages,
@@ -238,41 +274,9 @@ class ThreadStoreActivities:
                     request.cursor,
                     request.page_bytes,
                 )
-                page.max_seq = snapshot.state.max_seq
+                page.max_seq = entry.snapshot.state.max_seq
                 return ThreadStoreReply(page=page)
-            # Первая страница: meta и начало состояния вместе в пределах
-            # страницы; meta больше половины — отдельными кусками.
-            reply = ThreadStoreReply(snapshot=replace(snapshot, state=None))
-            budget = request.page_bytes - _size(snapshot.meta)
-            if (
-                request.meta_known is not None
-                and request.meta_known == entry.meta_version
-            ):
-                # Эта версия meta у workflow уже есть (чтение перед ходом,
-                # затем с состоянием): второй раз не передавать.
-                reply.snapshot = replace(reply.snapshot, meta={})
-                reply.meta_unchanged = True
-                budget = request.page_bytes
-            elif budget < request.page_bytes // 2:
-                reply.snapshot = replace(reply.snapshot, meta={})
-                reply.meta_chunk, reply.meta_next = _text_chunk(
-                    entry.meta_text, 0, request.page_bytes // 2
-                )
-                budget = 0
-            if snapshot.state is None:
-                # Хранилище не отдало состояние — как без страниц.
-                return reply
-            if budget > 0:
-                page = _state_page(entry.messages, entry.keys, None, budget)
-            else:
-                page = ThreadStatePage(
-                    [],
-                    [],
-                    [0, 0] if entry.messages or entry.keys else None,
-                )
-            page.max_seq = snapshot.state.max_seq
-            reply.page = page
-            return reply
+            return _first_page(request, entry)
         except ExecutionFailure as exc:
             raise _application_error(exc) from exc
 
@@ -424,12 +428,35 @@ class ThreadStoreActivities:
         ревизии, ``update_tui``) — разница ложится поверх meta хранилища,
         чужая правка не теряется, workflow перечитает meta по квитанции."""
         delta = request.meta_delta.get("d")
+        messages = await self._delta_messages(store, request, text_refs(delta))
+        full = bool(request.meta_delta.get("full"))
+        try:
+            meta = apply(
+                {} if full else base, delta, TextSource(messages.get, base)
+            )
+        except MetaDeltaError as exc:
+            if self._meta_conflict(request, full=full, drift=drift):
+                # Полную meta не собрать из содержимого хранилища (или в тред
+                # писали): оно разошлось с workflow — конфликт, ядро
+                # перечитает и повторит.
+                raise ThreadStoreConflict(
+                    f"Thread meta changed during this run: {exc}"
+                ) from exc
+            raise MetaBaseMismatch(f"Meta треда не собрать: {exc}") from exc
+        if full:
+            meta = _keep_fetch_cache(meta, base)
+        meta = canonical(meta)
+        self._check_meta_hash(request, meta, full=full, drift=drift)
+        return meta
+
+    async def _delta_messages(self, store, request, wanted):
+        """Сообщения для ссылок разницы (хэши ``wanted``): из операции, затем
+        из кэша снимков воркера, затем из треда в хранилище."""
         messages = {
             message_hash(message): message
             for message in request.operation.payload.get("messages") or ()
             if isinstance(message, dict)
         }
-        wanted = text_refs(delta)
         cached = self._snapshots.get(
             (request.store_id, request.system_id, request.thread_id)
         )
@@ -447,35 +474,25 @@ class ThreadStoreActivities:
             state = snapshot.state if snapshot is not None else None
             for message in state.messages if state is not None else ():
                 messages.setdefault(message_hash(message), message)
-        full = bool(request.meta_delta.get("full"))
-        try:
-            meta = apply(
-                {} if full else base, delta, TextSource(messages.get, base)
-            )
-        except MetaDeltaError as exc:
-            if full or (drift and self._foreign_write(request)):
-                # Полную meta не собрать из содержимого хранилища (или в тред
-                # писали): оно разошлось с workflow — конфликт, ядро
-                # перечитает и повторит.
-                raise ThreadStoreConflict(
-                    f"Thread meta changed during this run: {exc}"
-                ) from exc
-            raise MetaBaseMismatch(f"Meta треда не собрать: {exc}") from exc
-        if full:
-            meta = _keep_fetch_cache(meta, base)
-        meta = canonical(meta)
+        return messages
+
+    def _meta_conflict(self, request, *, full, drift):
+        """Расхождение meta — конфликт (ядро перечитает тред и повторит):
+        полная meta или чужая запись в тред."""
+        return full or (drift and self._foreign_write(request))
+
+    def _check_meta_hash(self, request, meta, *, full, drift):
+        """Собранная meta против хэша, который записал workflow."""
         expected = request.meta_delta.get("h")
-        if expected is not None and meta_hash(meta) != expected:
-            if full or (drift and self._foreign_write(request)):
-                raise ThreadStoreConflict(
-                    "Thread meta changed during this run"
-                )
-            if not drift:
-                raise MetaBaseMismatch(
-                    "Meta треда из разницы не совпала с записанной workflow"
-                )
-            # Ревизия та же: правка workflow поверх чужой правки meta.
-        return meta
+        if expected is None or meta_hash(meta) == expected:
+            return
+        if self._meta_conflict(request, full=full, drift=drift):
+            raise ThreadStoreConflict("Thread meta changed during this run")
+        if not drift:
+            raise MetaBaseMismatch(
+                "Meta треда из разницы не совпала с записанной workflow"
+            )
+        # Ревизия та же: правка workflow поверх чужой правки meta.
 
     @activity.defn(name="universal_agent.thread.read_trace")
     async def read_trace(self, request: ThreadStoreCall) -> ThreadStoreReply:

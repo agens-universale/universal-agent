@@ -7,9 +7,6 @@ from gc_core.security.read_guard import enforce_read_guard
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 from gc_core.utils.file_text import decode_text_bytes, sha256_hex_of_bytes
 from gc_core.utils.fs_size_limits import (
-    DEFAULT_FS_READ_MAX_BYTES as DEFAULT_READ_FILE_MAX_BYTES,  # noqa: F401  # re-export для тестов
-)
-from gc_core.utils.fs_size_limits import (
     check_file_size,
     fs_read_max_bytes,
 )

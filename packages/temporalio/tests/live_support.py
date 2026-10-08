@@ -151,3 +151,38 @@ def temporal_cli():
             )
         pytest.skip("Temporal CLI is required")
     return binary
+
+
+def worker_queues(config):
+    """Различные очереди конфига воркера — на каждую свой ``Worker``, как у
+    ``gc-temporal-worker``."""
+    return list(
+        dict.fromkeys(
+            [config.workflow_queue, config.model_queue, config.resource_queue]
+        )
+    )
+
+
+def worker_kwargs(config, native, threads, *, queue=None):
+    """Параметры ``Worker`` живых тестов, собранного без ``AgentPlugin``:
+    workflows и activities агента (тот же список, что регистрирует плагин) на
+    очереди ``queue`` (по умолчанию — очереди сессий) плюс Worker Versioning
+    из конфига."""
+    from gc_core_temporalio.child_workflow import UniversalSubagentWorkflow
+    from gc_core_temporalio.worker import (
+        agent_activities,
+        deployment_config,
+        workflow_runner,
+    )
+    from gc_core_temporalio.workflow import UniversalAgentWorkflow
+
+    options = {
+        "task_queue": queue or config.workflow_queue,
+        "workflows": [UniversalAgentWorkflow, UniversalSubagentWorkflow],
+        "activities": agent_activities(native, threads),
+        "workflow_runner": workflow_runner(),
+    }
+    deployment = deployment_config(config)
+    if deployment is not None:
+        options["deployment_config"] = deployment
+    return options

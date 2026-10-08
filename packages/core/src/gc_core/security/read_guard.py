@@ -521,6 +521,44 @@ def _own_thread_image(func, args, context, candidate_path) -> bool:
     )
 
 
+def _check_read_path_step(func, args, context, candidate_path, cfg, source):
+    """Проверка пути чтения — генератор для ``yield from``.
+
+    С портом ``guard_probe`` факты добывает проба (``yield probe_step``), иначе
+    проверка идёт на месте. Нарушение — ``ReadGuardViolation``; разбирает его
+    вызывающий."""
+    if callable(port(context.ctx, "guard_probe")):
+        facts = yield probe_step(
+            context.ctx,
+            GuardProbeRequest(
+                "read_path",
+                _tool_name(func, args),
+                candidate_path,
+                context.launch_root,
+            ),
+        )
+        if facts.violation is not None:
+            error = facts.violation
+            raise ReadGuardViolation(
+                path=error["path"],
+                reason=error["reason"],
+                matched_rule=error.get("matched_rule"),
+                mode=error["mode"],
+            )
+    else:
+        media = media_roots(context.ctx)
+        ps = protected_paths(cwd=context.launch_root, media=media)
+        check_read_path_allowed(
+            candidate_path,
+            launch_root=context.launch_root,
+            cfg=cfg,
+            extra_allowed_paths=extra_read_roots(
+                source, candidate_path, ps, media
+            )
+            or None,
+        )
+
+
 def _read_guard_flow(
     func, args, kwargs, path_arg, path_extractor, blocked_result_factory
 ):
@@ -591,36 +629,9 @@ def _read_guard_flow(
         )
 
     try:
-        if callable(port(context.ctx, "guard_probe")):
-            facts = yield probe_step(
-                context.ctx,
-                GuardProbeRequest(
-                    "read_path",
-                    _tool_name(func, args),
-                    candidate_path,
-                    context.launch_root,
-                ),
-            )
-            if facts.violation is not None:
-                error = facts.violation
-                raise ReadGuardViolation(
-                    path=error["path"],
-                    reason=error["reason"],
-                    matched_rule=error.get("matched_rule"),
-                    mode=error["mode"],
-                )
-        else:
-            media = media_roots(context.ctx)
-            ps = protected_paths(cwd=context.launch_root, media=media)
-            check_read_path_allowed(
-                candidate_path,
-                launch_root=context.launch_root,
-                cfg=cfg,
-                extra_allowed_paths=extra_read_roots(
-                    source, candidate_path, ps, media
-                )
-                or None,
-            )
+        yield from _check_read_path_step(
+            func, args, context, candidate_path, cfg, source
+        )
     except ReadGuardViolation as exc:
         allowed, blocked = yield from _resolve_read_violation(
             exc,

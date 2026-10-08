@@ -5,6 +5,7 @@ import pytest
 # Хвост подсказки прокрутки зависит от того, влезло ли содержимое в окно
 # теста, и к предмету этих сверок не относится.
 from gc_tui.form_frame import FOOTER_SCROLL
+from form_harness import goto_step
 
 
 def _screen(**over):
@@ -57,7 +58,7 @@ async def test_connection_step_submits_accepted_literal_auth(tmp_path):
         )
         await pilot.app.push_screen(scr)
         await pilot.pause()
-        scr._goto(STEP_CONNECTION)
+        goto_step(scr, STEP_CONNECTION)
         await pilot.pause()
         scr._on_auto_probe_done(
             ProbeResult(
@@ -98,7 +99,7 @@ async def test_connection_edit_invalidates_inflight_probe_before_accepted_auth(
         )
         await pilot.app.push_screen(scr)
         await pilot.pause()
-        scr._goto(STEP_CONNECTION)
+        goto_step(scr, STEP_CONNECTION)
         await pilot.pause()
         stale_gen = scr._probe_gen
         token = scr.query_one("#conn-token", Input)
@@ -492,7 +493,7 @@ async def _final_blob(pilot, scr, *, mcp):
         "model": "m",
     }
     scr._mcp_selected = set(mcp)
-    scr._goto(STEP_CONFIRM)
+    goto_step(scr, STEP_CONFIRM)
     await pilot.pause()
     return " ".join(str(w.render()) for w in scr.query("Static.onb-dyn"))
 
@@ -538,7 +539,7 @@ async def test_final_summary_hides_template_sentinels(tmp_path):
         )  # config несёт оба сентинела, поля в этот проход не тронуты
         await pilot.app.push_screen(scr)
         await pilot.pause()
-        scr._goto(STEP_CONFIRM)
+        goto_step(scr, STEP_CONFIRM)
         await pilot.pause()
         blob = " ".join(str(w.render()) for w in scr.query("Static.onb-dyn"))
         assert onboarding.MODEL_SENTINEL not in blob
@@ -562,7 +563,7 @@ async def test_final_summary_glyph_only_for_filled_rows(tmp_path):
         await pilot.app.push_screen(scr)
         await pilot.pause()
         scr._values = {"model": "m"}  # …а модель в этот проход выбрана
-        scr._goto(STEP_CONFIRM)
+        goto_step(scr, STEP_CONFIRM)
         await pilot.pause()
         lines = [
             ln
@@ -604,7 +605,7 @@ async def test_final_summary_shows_a_level_assigned_in_the_config(tmp_path):
         assert (
             "model_light" not in scr._values
         )  # уровень не тронут в этом прогоне
-        scr._goto(STEP_CONFIRM)
+        goto_step(scr, STEP_CONFIRM)
         await pilot.pause()
         lines = [
             ln
@@ -635,7 +636,7 @@ async def test_final_summary_unset_level_says_so_and_gates_the_glyph(tmp_path):
         scr = _screen()  # реестра нет вовсе — оба уровня не заданы
         await pilot.app.push_screen(scr)
         await pilot.pause()
-        scr._goto(STEP_CONFIRM)
+        goto_step(scr, STEP_CONFIRM)
         await pilot.pause()
         lines = [
             ln
@@ -753,7 +754,7 @@ async def test_mcp_installed_marked_and_not_toggleable(tmp_path):
         scr = _screen(mcp=_McpInstalled())
         await pilot.app.push_screen(scr)
         await pilot.pause()
-        scr._goto(STEP_MCP)
+        goto_step(scr, STEP_MCP)
         await pilot.pause()
         await pilot.press(
             "space"
@@ -1867,7 +1868,7 @@ async def test_pagedown_advances_from_mcp_step(tmp_path, monkeypatch):
         scr = _screen()
         await pilot.app.push_screen(scr)
         await pilot.pause()
-        scr._goto(STEP_MCP)
+        goto_step(scr, STEP_MCP)
         await pilot.pause()
         await pilot.press("pagedown")
         await pilot.pause()
@@ -1896,7 +1897,7 @@ async def test_pagedown_does_not_commit_on_confirm_step(tmp_path, monkeypatch):
         scr = _screen()
         await pilot.app.push_screen(scr)
         await pilot.pause()
-        scr._goto(STEP_CONFIRM)
+        goto_step(scr, STEP_CONFIRM)
         await pilot.pause()
         await pilot.press("pagedown")
         await pilot.pause()
@@ -1917,7 +1918,7 @@ async def test_pgup_from_confirm_returns_to_mcp_step(tmp_path):
         scr = _screen()
         await pilot.app.push_screen(scr)
         await pilot.pause()
-        scr._goto(STEP_CONFIRM)
+        goto_step(scr, STEP_CONFIRM)
         await pilot.pause()
         await pilot.press("pageup")
         await pilot.pause()
@@ -2213,7 +2214,7 @@ async def test_mcp_space_toggles(tmp_path):
         scr = _screen(voice=FakeVoice())
         await pilot.app.push_screen(scr)
         await pilot.pause()
-        scr._goto(STEP_MCP)
+        goto_step(scr, STEP_MCP)
         await pilot.pause()
         await pilot.press("space")  # отметить первый (duckduckgo)
         await pilot.pause()
@@ -2297,7 +2298,7 @@ async def test_final_commit_writes_and_calls_on_commit(tmp_path):
             "model": "m",
         }
         scr._mcp_selected = {"office"}
-        scr._goto(STEP_CONFIRM)
+        goto_step(scr, STEP_CONFIRM)
         await pilot.pause()
         await pilot.press("enter")
         await wait_until(pilot, lambda: committed, "commit done")
@@ -2387,7 +2388,7 @@ async def test_review_on_registry_config_keeps_the_configured_model(tmp_path):
         await pilot.pause()
         summary = str(scr.query_one("#onb-summary", Static).render())
         assert "модель: openai/gpt-5.6-terra" in summary
-        scr._goto(STEP_MODEL)
+        goto_step(scr, STEP_MODEL)
         await wait_until(
             pilot,
             lambda: (
@@ -2466,7 +2467,7 @@ async def test_model_step_passthrough_keeps_the_fallback_when_default_is_unset(
         )
         await pilot.app.push_screen(scr)
         await pilot.pause()
-        scr._goto(STEP_MODEL)
+        goto_step(scr, STEP_MODEL)
         await wait_until(
             pilot,
             lambda: (
@@ -2552,7 +2553,7 @@ async def test_model_step_marks_the_default_slot_not_the_active_level(
         )
         await pilot.app.push_screen(scr)
         await pilot.pause()
-        scr._goto(STEP_MODEL)
+        goto_step(scr, STEP_MODEL)
         await wait_until(
             pilot,
             lambda: (
@@ -2590,7 +2591,7 @@ async def test_confirm_row_of_the_default_slot_ignores_the_active_level(
         scr = _screen(review_all=True, config_path=str(cfg_path), config=cfg)
         await pilot.app.push_screen(scr)
         await pilot.pause()
-        scr._goto(STEP_CONFIRM)
+        goto_step(scr, STEP_CONFIRM)
         await pilot.pause()
         body = " ".join(str(w.render()) for w in scr.query("Static.onb-dyn"))
         flat = re.sub(r"\s+", " ", body)
@@ -2644,7 +2645,7 @@ async def test_confirm_summary_shows_the_fallback_model_when_default_is_unset(
         scr = _screen(review_all=True, config_path=str(cfg_path), config=cfg)
         await pilot.app.push_screen(scr)
         await pilot.pause()
-        scr._goto(STEP_CONFIRM)
+        goto_step(scr, STEP_CONFIRM)
         await pilot.pause()
         body = " ".join(str(w.render()) for w in scr.query("Static.onb-dyn"))
         flat = re.sub(r"\s+", " ", body)
@@ -2692,7 +2693,7 @@ async def test_both_wizards_take_the_current_model_of_the_step_from_one_place(
         scr = _screen(review_all=True, config_path=str(cfg_path), config=cfg)
         await pilot.app.push_screen(scr)
         await pilot.pause()
-        scr._goto(STEP_CONFIRM)
+        goto_step(scr, STEP_CONFIRM)
         await pilot.pause()
         body = " ".join(str(w.render()) for w in scr.query("Static.onb-dyn"))
         assert f"модель default: {sentinel}" in re.sub(r"\s+", " ", body)
@@ -3491,7 +3492,7 @@ async def test_model_step_on_placeholder_address_behaves_as_on_empty_one(
         scr = _screen(fetch=fetch)
         await pilot.app.push_screen(scr)
         await pilot.pause()
-        scr._goto(STEP_MODEL)
+        goto_step(scr, STEP_MODEL)
         await wait_until(
             pilot,
             lambda: (
@@ -3585,7 +3586,7 @@ async def test_levels_step_skipped_writes_nothing(tmp_path):
     async with app.run_test() as pilot:
         await pilot.app.push_screen(scr)
         await pilot.pause()
-        scr._goto(STEP_LEVELS)
+        goto_step(scr, STEP_LEVELS)
         await pilot.pause()
         assert scr._step_id() == STEP_LEVELS
         await pilot.press("pagedown")
@@ -3594,7 +3595,7 @@ async def test_levels_step_skipped_writes_nothing(tmp_path):
         assert (
             "model_light" not in scr._values and "model_max" not in scr._values
         )
-        scr._goto(STEP_CONFIRM)
+        goto_step(scr, STEP_CONFIRM)
         await pilot.pause()
         await pilot.press("enter")
         await wait_until(pilot, lambda: committed, "commit done")
@@ -3624,7 +3625,7 @@ async def test_levels_step_fills_light_and_max(tmp_path):
     async with app.run_test() as pilot:
         await pilot.app.push_screen(scr)
         await pilot.pause()
-        scr._goto(STEP_LEVELS)
+        goto_step(scr, STEP_LEVELS)
         await pilot.pause()
         await pilot.press("enter")  # под-форма «лёгкая»
         await wait_until(
@@ -3657,7 +3658,7 @@ async def test_levels_step_fills_light_and_max(tmp_path):
         assert scr._values["model_max"] == "Heavy"
         await pilot.press("enter")
         await pilot.pause()
-        scr._goto(STEP_CONFIRM)
+        goto_step(scr, STEP_CONFIRM)
         await pilot.pause()
         await pilot.press("enter")
         await wait_until(pilot, lambda: committed, "commit done")
@@ -3692,7 +3693,7 @@ async def test_level_form_escape_returns_to_the_list_without_setting(tmp_path):
     async with app.run_test() as pilot:
         await pilot.app.push_screen(scr)
         await pilot.pause()
-        scr._goto(STEP_LEVELS)
+        goto_step(scr, STEP_LEVELS)
         await pilot.pause()
         await pilot.press("enter")
         await wait_until(
@@ -3744,7 +3745,7 @@ async def test_model_step_names_the_level_it_fills(tmp_path):
     async with app.run_test() as pilot:
         await pilot.app.push_screen(scr)
         await pilot.pause()
-        scr._goto(STEP_MODEL)
+        goto_step(scr, STEP_MODEL)
         await pilot.pause()
         blob = " ".join(str(w.render()) for w in scr.query("Static.onb-dyn"))
         assert "уровень default" in blob
@@ -3766,7 +3767,7 @@ async def test_levels_continue_row_leaves_the_step_on_enter(tmp_path):
     async with app.run_test() as pilot:
         await pilot.app.push_screen(scr)
         await pilot.pause()
-        scr._goto(STEP_LEVELS)
+        goto_step(scr, STEP_LEVELS)
         await pilot.pause()
         await pilot.press("down")
         await pilot.press("down")  # light → max → продолжить
@@ -3794,7 +3795,7 @@ async def test_levels_cursor_cycles_through_three_rows(tmp_path):
     async with app.run_test() as pilot:
         await pilot.app.push_screen(scr)
         await pilot.pause()
-        scr._goto(STEP_LEVELS)
+        goto_step(scr, STEP_LEVELS)
         await pilot.pause()
         seen = []
         for _ in range(4):
@@ -3820,7 +3821,7 @@ async def test_levels_footer_follows_the_row_under_the_cursor(tmp_path):
     async with app.run_test() as pilot:
         await pilot.app.push_screen(scr)
         await pilot.pause()
-        scr._goto(STEP_LEVELS)
+        goto_step(scr, STEP_LEVELS)
         await pilot.pause()
         footer = str(scr.query_one("#onb-footer", Static).render()).replace(
             FOOTER_SCROLL, ""
@@ -3853,7 +3854,7 @@ async def test_levels_footer_promises_the_keys_that_work(tmp_path):
     async with app.run_test() as pilot:
         await pilot.app.push_screen(scr)
         await pilot.pause()
-        scr._goto(STEP_LEVELS)
+        goto_step(scr, STEP_LEVELS)
         await pilot.pause()
         footer = str(scr.query_one("#onb-footer", Static).render()).replace(
             FOOTER_SCROLL, ""
@@ -4002,7 +4003,7 @@ async def test_leaving_the_level_form_does_not_survive_the_step(tmp_path):
     async with app.run_test() as pilot:
         await pilot.app.push_screen(scr)
         await pilot.pause()
-        scr._goto(STEP_LEVELS)
+        goto_step(scr, STEP_LEVELS)
         await pilot.pause()
         await pilot.press("enter")  # под-форма «лёгкая»
         await wait_until(
@@ -4013,7 +4014,7 @@ async def test_leaving_the_level_form_does_not_survive_the_step(tmp_path):
             ),
             "models loaded",
         )
-        scr._goto(STEP_MCP)
+        goto_step(scr, STEP_MCP)
         await pilot.pause()  # ушли со шага мимо под-формы
         await pilot.press("pageup")
         await pilot.pause()
@@ -4225,7 +4226,7 @@ async def test_layer_note_shows_on_every_step_for_an_active_profile(
         await pilot.app.push_screen(scr)
         await pilot.pause()
         for step in (STEP_MODEL, STEP_CONFIRM):
-            scr._goto(step)
+            goto_step(scr, step)
             await pilot.pause()
             note = str(scr.query_one("#onb-profile-warn", Static).render())
             assert 'действует профиль "work"' in note
@@ -4260,7 +4261,7 @@ async def test_degraded_config_note_shows_on_every_step(tmp_path, monkeypatch):
         await pilot.app.push_screen(scr)
         await pilot.pause()
         for step in (STEP_CONNECTION, STEP_MODEL, STEP_CONFIRM):
-            scr._goto(step)
+            goto_step(scr, step)
             await pilot.pause()
             assert message in str(
                 scr.query_one("#onb-degraded-warn", Static).render()
@@ -4306,7 +4307,7 @@ async def test_confirm_shows_the_profile_layer_values(tmp_path, monkeypatch):
     async with app.run_test() as pilot:
         await pilot.app.push_screen(scr)
         await pilot.pause()
-        scr._goto(STEP_CONFIRM)
+        goto_step(scr, STEP_CONFIRM)
         await pilot.pause()
         # Витрина подтверждения — тело шага (`.onb-dyn`), а не заголовочный
         # `#onb-body`: тот несёт только имя шага.
@@ -4552,7 +4553,7 @@ async def test_review_levels_step_shows_the_levels_already_assigned(tmp_path):
         )
         await pilot.app.push_screen(scr)
         await pilot.pause()
-        scr._goto(STEP_LEVELS)
+        goto_step(scr, STEP_LEVELS)
         await pilot.pause()
         rows = [str(w.render()) for w in scr.query(".onb-option") if w.display]
         light = [r for r in rows if "light" in r]
@@ -4831,7 +4832,7 @@ async def test_confirm_step_warns_that_the_profile_will_be_deactivated(
         scr = _screen(deactivate_profile=True)
         await pilot.app.push_screen(scr)
         await pilot.pause()
-        scr._goto(STEP_CONFIRM)
+        goto_step(scr, STEP_CONFIRM)
         await pilot.pause()
         blob = " ".join(str(w.render()) for w in scr.query("Static.onb-dyn"))
         assert _of.PROFILE_DEACTIVATION_WARNING in blob
@@ -4854,7 +4855,7 @@ async def test_confirm_step_says_nothing_about_the_profile_on_a_healthy_config(
         scr = _screen()  # признак не передан — ступень не «без профиля»
         await pilot.app.push_screen(scr)
         await pilot.pause()
-        scr._goto(STEP_CONFIRM)
+        goto_step(scr, STEP_CONFIRM)
         await pilot.pause()
         blob = " ".join(str(w.render()) for w in scr.query("Static.onb-dyn"))
         assert "деактив" not in blob.lower()
@@ -4892,7 +4893,7 @@ async def test_confirm_commits_the_deactivation_along_with_the_settings(
     async with app.run_test() as pilot:
         await pilot.app.push_screen(scr)
         await pilot.pause()
-        scr._goto(STEP_CONFIRM)
+        goto_step(scr, STEP_CONFIRM)
         await pilot.pause()
         await pilot.press("enter")
         await wait_until(pilot, lambda: committed, "commit done")
@@ -4942,7 +4943,7 @@ async def test_both_wizards_take_the_deactivation_warning_from_one_place(
         scr = _screen(deactivate_profile=True)
         await pilot.app.push_screen(scr)
         await pilot.pause()
-        scr._goto(STEP_CONFIRM)
+        goto_step(scr, STEP_CONFIRM)
         await pilot.pause()
         blob = " ".join(str(w.render()) for w in scr.query("Static.onb-dyn"))
         assert sentinel in blob

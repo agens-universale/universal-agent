@@ -14,6 +14,7 @@ pytest.importorskip("textual")
 
 from gc_testkit.tui_support import open_settings_section
 from textual.widgets import Static
+from screen_text import config_text
 
 
 def _fake_probe(result=None):
@@ -878,7 +879,7 @@ async def test_config_screen_header_shows_profile_level_model(
         await pilot.pause()
         scr = app.screen
         assert isinstance(scr, ConfigScreen)
-        text = scr.rendered_text()
+        text = config_text(scr)
         assert "профиль: work (проектный)" in text
         assert "уровень: default" in text
         # Модель — третье слагаемое шапки (`tui/screens/config.py:116`). Без неё

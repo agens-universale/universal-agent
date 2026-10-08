@@ -257,5 +257,5 @@ async def test_todo_row_has_air_above_and_no_double_gap():
             "элемента (конвенция трейса, см. .user-band в styles.tcss)"
         )
         # Заголовок внутри блока собственного воздуха не несёт (иначе сложится).
-        header = todo.todo_rows[0]
+        header = todo._rows[0]
         assert header.has_class("line-todo") and header.styles.margin.top == 0

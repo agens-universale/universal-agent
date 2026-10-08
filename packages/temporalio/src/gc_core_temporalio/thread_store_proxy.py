@@ -76,6 +76,58 @@ def _hashable(value):
     return value
 
 
+def _payload_messages(payload):
+    """Сообщения операции (список) или пусто."""
+    messages = payload.get("messages") if isinstance(payload, dict) else None
+    return messages if isinstance(messages, list) else []
+
+
+def _extends_metadata_acks(previous, operation, receipt):
+    """Своя квитанция meta сразу за прошлой, без изменения истории треда:
+    интервал своих квитанций продолжается с прежней базы."""
+    return (
+        previous is not None
+        and operation.kind in _METADATA_OPERATIONS
+        and receipt.revision == previous[1].revision + 1
+        and _history_fence(receipt) == _history_fence(previous[1])
+        and receipt.written == 0
+        and not receipt.added_known_keys
+    )
+
+
+async def _read_meta_chunks(first, more):
+    """Meta кусками: первый — в первой странице, остальные — дочитать."""
+    parts, cursor = [first.meta_chunk], first.meta_next
+    while cursor is not None:
+        reply = await more(meta_cursor=cursor)
+        parts.append(reply.meta_chunk)
+        cursor = reply.meta_next
+    return json.loads("".join(parts))
+
+
+async def _read_state_pages(page, more):
+    """Состояние треда: первая страница и следующие по курсору."""
+    messages, keys = list(page.messages), list(page.keys)
+    cursor = page.next_cursor
+    while cursor is not None:
+        reply = await more(cursor=cursor)
+        messages += reply.page.messages
+        keys += reply.page.keys
+        cursor = reply.page.next_cursor
+    # Ключи приходят JSON-массивами: множество контракта ядра.
+    return ThreadState(
+        messages, {_hashable(key) for key in keys}, page.max_seq
+    )
+
+
+async def _read_rest(snapshot, first, more):
+    """Дочитать снимок после первой страницы: куски meta, затем состояние."""
+    if first.meta_chunk is not None:
+        snapshot.meta = await _read_meta_chunks(first, more)
+    if first.page is not None:
+        snapshot.state = await _read_state_pages(first.page, more)
+
+
 #: Запасной путь с полной meta — не больше этого (запас до лимита записи).
 FULL_META_BUDGET = ACTIVITY_INPUT_LIMIT * 3 // 4
 
@@ -148,6 +200,20 @@ class TemporalThreadStore:
             )
         return snapshot
 
+    def _load(self, system_id, thread_id, include_state, **fields):
+        """Activity чтения страницы треда (без ``await``: его делает вызов)."""
+        return self._call(
+            "universal_agent.thread.load",
+            ThreadStoreCall(
+                self.store_id,
+                system_id,
+                thread_id,
+                include_state=include_state,
+                page_bytes=PAGE_BYTES,
+                **fields,
+            ),
+        )
+
     async def _read_paged(
         self, system_id, thread_id, *, include_state=True, attempts=3
     ):
@@ -160,18 +226,13 @@ class TemporalThreadStore:
         """
         known = self._meta.get((system_id, thread_id))
         for attempt in range(attempts):
-            first = await self._call(
-                "universal_agent.thread.load",
-                ThreadStoreCall(
-                    self.store_id,
-                    system_id,
-                    thread_id,
-                    include_state=include_state,
-                    page_bytes=PAGE_BYTES,
-                    meta_known=known[0] if known is not None else None,
-                ),
+            first = await self._load(
+                system_id,
+                thread_id,
+                include_state,
+                meta_known=known[0] if known is not None else None,
             )
-            snapshot, page = first.snapshot, first.page
+            snapshot = first.snapshot
             if snapshot is None:
                 return snapshot
             if first.meta_unchanged:
@@ -179,41 +240,16 @@ class TemporalThreadStore:
             expect = [snapshot.revision, snapshot.generation]
 
             def more(expect=expect, **position):
-                return self._call(
-                    "universal_agent.thread.load",
-                    ThreadStoreCall(
-                        self.store_id,
-                        system_id,
-                        thread_id,
-                        include_state=include_state,
-                        page_bytes=PAGE_BYTES,
-                        expect=expect,
-                        **position,
-                    ),
+                return self._load(
+                    system_id,
+                    thread_id,
+                    include_state,
+                    expect=expect,
+                    **position,
                 )
 
             try:
-                if first.meta_chunk is not None:
-                    parts, cursor = [first.meta_chunk], first.meta_next
-                    while cursor is not None:
-                        reply = await more(meta_cursor=cursor)
-                        parts.append(reply.meta_chunk)
-                        cursor = reply.meta_next
-                    snapshot.meta = json.loads("".join(parts))
-                if page is not None:
-                    messages, keys = list(page.messages), list(page.keys)
-                    cursor = page.next_cursor
-                    while cursor is not None:
-                        reply = await more(cursor=cursor)
-                        messages += reply.page.messages
-                        keys += reply.page.keys
-                        cursor = reply.page.next_cursor
-                    # Ключи приходят JSON-массивами: множество контракта ядра.
-                    snapshot.state = ThreadState(
-                        messages,
-                        {_hashable(key) for key in keys},
-                        page.max_seq,
-                    )
+                await _read_rest(snapshot, first, more)
             except ThreadStoreConflict:
                 if attempt + 1 == attempts:
                     raise
@@ -230,10 +266,7 @@ class TemporalThreadStore:
         known = self._meta.get(key)
         base = known[1] if known is not None else {}
         payload = operation.payload
-        messages = (
-            payload.get("messages") if isinstance(payload, dict) else None
-        )
-        messages = messages if isinstance(messages, list) else []
+        messages = _payload_messages(payload)
         request = ThreadStoreCall(
             self.store_id,
             system_id,
@@ -241,25 +274,10 @@ class TemporalThreadStore:
             operation,
             meta_base=known[0] if known is not None else None,
         )
-        written = None
+        written, texts = None, None
         if isinstance(payload, dict) and isinstance(payload.get("meta"), dict):
-            # Meta — разницей с известной, длинные тексты — ссылками на
-            # сообщения: запись не тащит в историю весь журнал намерений.
-            # Воркер соберёт полную meta, хранилище получит её целиком.
-            written = normalize(payload["meta"])
-            texts = TextIndex()
-            texts.add(messages)
-            if operation.kind in _APPEND_ONLY_OPERATIONS:
-                texts.parents.append(self._texts.get(key) or TextIndex())
-            with_base = TextIndex()
-            with_base.add_meta(base)
-            with_base.parents.append(texts)
-            request.meta_delta = {
-                "d": diff_meta(base, written, with_base),
-                "h": meta_hash(written),
-            }
-            request.operation = replace(
-                operation, payload={**payload, "meta": None}
+            written, texts = self._with_meta_delta(
+                request, key, base, messages
             )
         elif known is None and operation.kind in _META_FREE_OPERATIONS:
             # Трасса субагента, владение: ядро meta квитанции не читает, а
@@ -267,35 +285,7 @@ class TemporalThreadStore:
             # meta родителя).
             request.need_meta = False
         try:
-            try:
-                reply = await self._call(
-                    "universal_agent.thread.commit", request
-                )
-            except MetaBaseMismatch:
-                if written is None:
-                    raise
-                # База в хранилище не та (чужая правка meta, повтор после
-                # записи): та же операция с полной meta — хранилище узнает её
-                # или применит (чужая запись — конфликт ревизии). Тексты,
-                # записи журнала и разделы — ссылками по содержимому: воркер
-                # найдёт их в текущей meta хранилища или в сообщениях.
-                full = TextIndex()
-                full.add_meta(base, nodes=True)
-                full.parents.append(texts)
-                request.meta_delta = {
-                    "d": diff_meta({}, written, full),
-                    "h": meta_hash(written),
-                    "full": True,
-                }
-                if payload_size(asdict(request)) > FULL_META_BUDGET:
-                    # Полная meta не влезает в запись истории: конфликт —
-                    # ядро перечитает тред и соберёт запись заново.
-                    raise ThreadStoreConflict(
-                        "Thread meta changed and is too large to resend whole"
-                    )
-                reply = await self._call(
-                    "universal_agent.thread.commit", request
-                )
+            reply = await self._commit(request, written, base, texts)
         except BaseException:
             # No acknowledged outcome: never bridge this gap on a later call.
             # Базу meta не забывать: воркер сверяет её версию с хранилищем, а
@@ -312,25 +302,92 @@ class TemporalThreadStore:
             raise ExecutionFailure(
                 "Thread store did not acknowledge operation"
             )
+        meta = await self._receipt_meta(
+            request, reply, written if written is not None else base
+        )
+        receipt = replace(receipt, meta=deepcopy(meta))
+        self._remember_commit(key, operation, receipt, messages)
+        return receipt
+
+    def _with_meta_delta(self, request, key, base, messages):
+        """Meta записи — разницей с известной, длинные тексты — ссылками на
+        сообщения: запись не тащит в историю весь журнал намерений. Воркер
+        соберёт полную meta, хранилище получит её целиком.
+        → (записанная meta, индекс текстов сообщений)."""
+        operation = request.operation
+        payload = operation.payload
+        written = normalize(payload["meta"])
+        texts = TextIndex()
+        texts.add(messages)
+        if operation.kind in _APPEND_ONLY_OPERATIONS:
+            texts.parents.append(self._texts.get(key) or TextIndex())
+        with_base = TextIndex()
+        with_base.add_meta(base)
+        with_base.parents.append(texts)
+        request.meta_delta = {
+            "d": diff_meta(base, written, with_base),
+            "h": meta_hash(written),
+        }
+        request.operation = replace(
+            operation, payload={**payload, "meta": None}
+        )
+        return written, texts
+
+    async def _commit(self, request, written, base, texts):
+        """Activity записи; база meta в хранилище не та — повтор с полной
+        meta."""
+        try:
+            return await self._call("universal_agent.thread.commit", request)
+        except MetaBaseMismatch:
+            if written is None:
+                raise
+            # База в хранилище не та (чужая правка meta, повтор после
+            # записи): та же операция с полной meta — хранилище узнает её
+            # или применит (чужая запись — конфликт ревизии). Тексты,
+            # записи журнала и разделы — ссылками по содержимому: воркер
+            # найдёт их в текущей meta хранилища или в сообщениях.
+            full = TextIndex()
+            full.add_meta(base, nodes=True)
+            full.parents.append(texts)
+            request.meta_delta = {
+                "d": diff_meta({}, written, full),
+                "h": meta_hash(written),
+                "full": True,
+            }
+            if payload_size(asdict(request)) > FULL_META_BUDGET:
+                # Полная meta не влезает в запись истории: конфликт —
+                # ядро перечитает тред и соберёт запись заново.
+                raise ThreadStoreConflict(
+                    "Thread meta changed and is too large to resend whole"
+                )
+            return await self._call("universal_agent.thread.commit", request)
+
+    async def _receipt_meta(self, request, reply, expected):
+        """Meta квитанции: не нужна ядру, перечитанная или ``expected`` +
+        разница от воркера."""
         if not request.need_meta:
-            meta = {}
-        elif reply.meta_reload or reply.meta_delta is None:
+            return {}
+        key = (request.system_id, request.thread_id)
+        if reply.meta_reload or reply.meta_delta is None:
             snapshot = await self._read_paged(
-                system_id, thread_id, include_state=False
+                request.system_id, request.thread_id, include_state=False
             )
             if snapshot is None:
                 raise ExecutionFailure(
                     "Thread store did not return a snapshot"
                 )
-            meta = self._meta[key][1]
-        else:
-            expected = written if written is not None else base
-            meta = apply(expected, reply.meta_delta.get("d"))
-            self._meta[key] = (
-                [receipt.revision, receipt.generation, meta_hash(meta)],
-                meta,
-            )
-        receipt = replace(receipt, meta=deepcopy(meta))
+            return self._meta[key][1]
+        receipt = reply.receipt
+        meta = apply(expected, reply.meta_delta.get("d"))
+        self._meta[key] = (
+            [receipt.revision, receipt.generation, meta_hash(meta)],
+            meta,
+        )
+        return meta
+
+    def _remember_commit(self, key, operation, receipt, messages):
+        """Учёт подтверждённой записи: тексты и хэши сообщений треда,
+        поколение, интервал своих квитанций meta."""
         if operation.kind not in _APPEND_ONLY_OPERATIONS:
             # Сообщения треда заменены: ссылаться можно только на новые.
             self._texts[key] = TextIndex()
@@ -338,14 +395,7 @@ class TemporalThreadStore:
         self._generation = receipt.generation
         previous = self._metadata_acks.get(key)
         base_revision = receipt.revision
-        if (
-            previous is not None
-            and operation.kind in _METADATA_OPERATIONS
-            and receipt.revision == previous[1].revision + 1
-            and _history_fence(receipt) == _history_fence(previous[1])
-            and receipt.written == 0
-            and not receipt.added_known_keys
-        ):
+        if _extends_metadata_acks(previous, operation, receipt):
             base_revision = previous[0]
         self._metadata_acks[key] = (base_revision, deepcopy(receipt))
         if messages:
@@ -354,7 +404,6 @@ class TemporalThreadStore:
             self.message_hashes.setdefault(key, set()).update(
                 message_hash(message) for message in messages
             )
-        return receipt
 
     def metadata_ack_since(self, system_id, thread_id, revision):
         """Return an own metadata receipt only across a proven contiguous span.

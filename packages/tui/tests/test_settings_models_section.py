@@ -320,7 +320,7 @@ async def test_second_entry_is_written_together_with_the_default_slot(
         await pilot.pause()
         await pilot.press("ctrl+s")  # submit → пикер default
         await pilot.pause()
-        assert _editor(scr).picker_open, (
+        assert _editor(scr)._picker is not None, (
             "пикер «какая модель по умолчанию» не открылся"
         )
         assert cfg_file.read_bytes() == before  # до выбора файл не тронут
@@ -361,11 +361,11 @@ async def test_a_write_failure_past_the_slot_picker_closes_it_and_refocuses(
         await pilot.pause()
         await pilot.press("ctrl+s")  # submit → пикер default
         await pilot.pause()
-        assert _editor(scr).picker_open
+        assert _editor(scr)._picker is not None
         await pilot.press("enter")  # выбор → запись падает
         await pilot.pause()
         ed = _editor(scr)
-        assert not ed.picker_open, "пикер остался над формой после отказа"
+        assert ed._picker is None, "пикер остался над формой после отказа"
         assert "не сохранено" in _notice(scr)
         focused = scr.app.focused
         assert (
@@ -402,7 +402,7 @@ async def test_the_default_slot_picker_describes_the_entry_being_written(
         await pilot.press("ctrl+s")  # submit → пикер default
         await pilot.pause()
         ed = _editor(scr)
-        assert ed.picker_open
+        assert ed._picker is not None
         row = next(r for r in ed._picker["rows"] if r["value"] == "opus")
         desc = row["desc"].plain
         assert "anthropic/claude-opus" in desc, desc  # id из формы, не алиас
@@ -453,7 +453,7 @@ async def test_the_base_section_asks_about_the_default_when_a_profile_holds_mode
         await pilot.pause()
         await pilot.press("ctrl+s")  # submit → пикер default
         await pilot.pause()
-        assert _editor(scr).picker_open, (
+        assert _editor(scr)._picker is not None, (
             "пикер «какая модель по умолчанию» не открылся"
         )
         await pilot.press("enter")  # выбрать первую строку пикера
@@ -472,7 +472,8 @@ async def test_the_add_row_opens_the_creation_form(tmp_path):
     async with _section(tmp_path, _REGISTRY) as (pilot, scr, _cfg_file):
         ed = _editor(scr)
         idx = _goto(ed, "add")
-        assert idx == len(ed._aliases)  # сразу за записями, до слотов
+        # сразу за записями, до слотов
+        assert idx == len(ed._effective_aliases)
         await pilot.pause()
         await pilot.press("enter")
         await pilot.pause()
@@ -540,7 +541,7 @@ async def test_editing_fields_without_renaming_keeps_the_edited_alias_a_candidat
         await pilot.press("ctrl+s")  # submit → должен спросить дефолт
         await pilot.pause()
 
-        assert ed.picker_open, (
+        assert ed._picker is not None, (
             "правка полей без переименования не спросила дефолт-слот"
         )
         values = {row["value"] for row in ed._picker["rows"]}
@@ -670,7 +671,7 @@ async def test_removing_an_entry_the_profile_points_at_is_refused_at_once(
         assert "✗ не удалено" in notice
         assert "work.yml" in notice and "slots.default" in notice, notice
         assert cfg_file.read_bytes() == before
-        assert "gc" in ed._aliases  # строка на месте
+        assert "gc" in ed._effective_aliases  # строка на месте
 
 
 async def test_a_raced_removal_tells_the_truth_and_refreshes_the_list(
@@ -1164,7 +1165,7 @@ async def test_ctrl_u_still_falls_through_with_no_form(tmp_path):
         await pilot.pause()
         await pilot.press("enter")  # раскрыть пикер слота — формы нет
         await pilot.pause()
-        assert ed.picker_open
+        assert ed._picker is not None
         assert ed._form is None
         assert ed.clear_token() is False, (
             "без формы Ctrl+U по-прежнему не наш случай"
@@ -1561,7 +1562,7 @@ async def test_slot_picker_opens_under_the_row_with_unset_first(tmp_path):
         await pilot.pause()
         await pilot.press("enter")
         await pilot.pause()
-        assert ed.picker_open, "пикер слота не раскрылся"
+        assert ed._picker is not None, "пикер слота не раскрылся"
         assert [r["label"] for r in ed._picker["rows"]] == [
             "не задан",
             "flash",
@@ -1609,7 +1610,7 @@ async def test_alt_down_opens_the_same_picker(tmp_path):
         await pilot.pause()
         await pilot.press("alt+down")
         await pilot.pause()
-        assert ed.picker_open
+        assert ed._picker is not None
 
 
 async def test_escape_collapses_the_picker_without_writing(tmp_path):
@@ -1624,7 +1625,7 @@ async def test_escape_collapses_the_picker_without_writing(tmp_path):
         await pilot.press("down")  # выбор уехал на алиас
         await pilot.press("escape")
         await pilot.pause()
-        assert not ed.picker_open
+        assert ed._picker is None
         assert scr._view == 1  # из секции не вышли
         assert cfg_file.read_bytes() == before
 
@@ -1641,7 +1642,7 @@ async def test_arrows_do_not_page_values_on_a_collapsed_row(tmp_path):
         await pilot.press("right")
         await pilot.press("left")
         await pilot.pause()
-        assert not ed.picker_open
+        assert ed._picker is None
         assert cfg_file.read_bytes() == before
         assert "не задан" in str(
             list(ed.query(".models-row"))[ed._idx].render()
@@ -1665,7 +1666,7 @@ async def test_choosing_an_alias_writes_the_slot(tmp_path):
         validate_config_text_with_sections(
             cfg_file.read_text(encoding="utf-8")
         )
-        assert not _editor(scr).picker_open
+        assert not _editor(scr)._picker is not None
         assert "opus" in str(
             list(_editor(scr).query(".models-row"))[ed._idx].render()
         )
@@ -1748,7 +1749,7 @@ async def test_enter_on_an_unset_slot_is_an_honest_no_op(tmp_path):
         assert cfg_file.read_bytes() == before
         assert "снят" not in _flash(scr), _flash(scr)
         assert "ничего не изменено" in _notice(scr), _notice(scr)
-        assert not _editor(scr).picker_open
+        assert not _editor(scr)._picker is not None
 
 
 async def test_enter_on_the_current_binding_value_is_an_honest_no_op(tmp_path):
@@ -2156,7 +2157,7 @@ async def test_clicking_a_block_header_collapses_and_expands(tmp_path):
         await pilot.pause()
         assert ed._collapsed == {"entry"}
         assert all(r["kind"] not in ("entry", "add") for r in ed._rows())
-        assert len(ed._rows()) == rows_before - len(ed._aliases) - 1
+        assert len(ed._rows()) == rows_before - len(ed._effective_aliases) - 1
         head = str(list(ed.query(".models-block"))[0].render())
         assert head.startswith("▸") and "2 модели" in head
         assert "─" not in head  # у свёрнутой шапки черты нет
@@ -2399,7 +2400,7 @@ def _lower_rows(ed) -> list:
     """Виджеты нижней половины секции: строки слотов, привязок и резервной модели —
     всё, что идёт после записей реестра и строки «+ добавить» (она — часть верхнего
     блока и меряется своим стражем)."""
-    return list(ed.query(".models-row"))[len(ed._aliases) + 1 :]
+    return list(ed.query(".models-row"))[len(ed._effective_aliases) + 1 :]
 
 
 def _grid_rows(ed) -> list:
@@ -2629,7 +2630,7 @@ def _entry_rows(ed) -> list:
     """Отрисованные строки ЗАПИСЕЙ (первые в списке): у слотов и привязок сетка своя
     (`_binding_columns`), и стерегут её свои тесты выше."""
     widgets = [str(w.render()) for w in ed.query(".models-row")]
-    return widgets[: len(ed._aliases)]
+    return widgets[: len(ed._effective_aliases)]
 
 
 async def test_a_live_resize_recomputes_the_columns(tmp_path):
@@ -2980,7 +2981,7 @@ async def test_form_fields_are_deaf_while_the_default_slot_question_hangs(
         await pilot.pause()
         await pilot.press("ctrl+s")  # submit → пикер default
         await pilot.pause()
-        assert _editor(scr).picker_open
+        assert _editor(scr)._picker is not None
         fields = ("alias", "model", "url", "token")
         before = {f: form.query_one(f"#mef-{f}", Input).value for f in fields}
         for key in ("space", "ctrl+u", "x", "backspace"):
@@ -3018,11 +3019,13 @@ async def test_alt_down_does_not_reach_the_form_while_the_default_slot_question_
         assert form.on_url_field  # там, где Alt+↓ форме есть что делать
         await pilot.press("ctrl+s")  # submit → пикер default
         await pilot.pause()
-        assert _editor(scr).picker_open
+        assert _editor(scr)._picker is not None
         before = cfg_file.read_bytes()
         await pilot.press("alt+down")
         await pilot.pause()
-        assert _editor(scr).picker_open, "вопрос о слоте снят клавишей формы"
+        assert _editor(scr)._picker is not None, (
+            "вопрос о слоте снят клавишей формы"
+        )
         assert not form._presets_ctrl.is_open, (
             "Alt+↓ дошёл до формы сквозь висящий вопрос"
         )
@@ -3046,11 +3049,11 @@ async def test_form_takes_input_back_when_the_question_is_dismissed(tmp_path):
         await pilot.pause()
         await pilot.press("ctrl+s")  # submit → пикер default
         await pilot.pause()
-        assert _editor(scr).picker_open
+        assert _editor(scr)._picker is not None
         before = _cfg_file.read_bytes()
         await pilot.press("escape")  # вопрос снят, форма осталась
         await pilot.pause()
-        assert not _editor(scr).picker_open
+        assert not _editor(scr)._picker is not None
         assert _cfg_file.read_bytes() == before, (
             "отменённый вопрос тронул файл"
         )
@@ -3183,13 +3186,13 @@ async def test_a_click_into_the_form_is_dead_while_a_question_hangs(tmp_path):
         await pilot.press("ctrl+s")  # submit → пикер default
         await pilot.pause()
         ed = _editor(scr)
-        assert ed.picker_open
+        assert ed._picker is not None
         idx_before = form._idx
         model_input.scroll_visible(animate=False)
         await pilot.pause()
         await pilot.click("#mef-model")
         await pilot.pause()
-        assert ed.picker_open, "клик убил пикер вопроса"
+        assert ed._picker is not None, "клик убил пикер вопроса"
         assert form._idx == idx_before, "клик переехал курсором под вопросом"
         assert not form._list.is_open, "список моделей раскрылся поверх пикера"
         # MouseDown фокусирует Input сам — гейт обязан снять фокус обратно:

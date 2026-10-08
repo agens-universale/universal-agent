@@ -1,5 +1,6 @@
 from gc_testkit.tui_support import as_settings, tui_settings
 import pytest
+from screen_text import config_text
 
 
 def test_profile_header_hides_unset_model_sentinel():
@@ -81,7 +82,7 @@ async def test_config_screen_yaml_redacts_secret_and_shows_paths(tmp_path):
         )
         await app.push_screen(scr)
         await pilot.pause()
-        text = scr.rendered_text()  # helper: весь YAML + пути одной строкой
+        text = config_text(scr)  # helper: весь YAML + пути одной строкой
         assert "sk-REAL" not in text  # секрет замаскирован
         assert "***" in text
         assert "/p/config.yml" in text  # путь конфига
@@ -212,7 +213,7 @@ async def test_config_screen_fieldset_panels(tmp_path):
 @pytest.mark.asyncio
 async def test_config_screen_snapshot_hint_caption(tmp_path):
     # Подсказка-снимок: вторая строка трейса (первая — шапка профиль/уровень/модель,
-    # спека §12.3a) и присутствует в rendered_text().
+    # спека §12.3a) и присутствует в тексте экрана (`config_text`).
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
     from gc_tui.screens.config import _SNAPSHOT_HINT, ConfigScreen
@@ -234,7 +235,7 @@ async def test_config_screen_snapshot_hint_caption(tmp_path):
         assert first.has_class("config-caption")
         assert second.has_class("config-caption")
         assert "после перезапуска" in _SNAPSHOT_HINT
-        assert _SNAPSHOT_HINT in scr.rendered_text()
+        assert _SNAPSHOT_HINT in config_text(scr)
 
 
 @pytest.mark.asyncio

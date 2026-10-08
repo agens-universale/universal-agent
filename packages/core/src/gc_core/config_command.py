@@ -310,26 +310,35 @@ def explain_entries(
 
     entries: list[Entry] = []
     for key in keys:
-        if key in by_key:
-            entries.append(_entry(by_key[key], provenance, defaults))
-            continue
-        section = [leaf for leaf in leaves if leaf.key.startswith(key + ".")]
-        if section:
-            entries.extend(
-                _entry(leaf, provenance, defaults) for leaf in section
-            )
-            continue
-        inner = _entry_inside_leaf(key, leaves, provenance)
-        if inner is not None:
-            entries.append(inner)
-            continue
-        close = difflib.get_close_matches(
-            key, _known_names(leaves), n=3, cutoff=0.6
-        )
-        raise UnknownKey(
-            key, list(dict.fromkeys([*suggest_paths(key), *close]))[:3]
+        entries.extend(
+            _entries_for_key(key, leaves, by_key, provenance, defaults)
         )
     return entries
+
+
+def _entries_for_key(
+    key: str,
+    leaves: list,
+    by_key: dict,
+    provenance: Any,
+    defaults: Any,
+) -> list[Entry]:
+    """Строки одного ключа: лист, секция целиком или путь внутри листа;
+    иначе ``UnknownKey`` с подсказками."""
+    if key in by_key:
+        return [_entry(by_key[key], provenance, defaults)]
+    section = [leaf for leaf in leaves if leaf.key.startswith(key + ".")]
+    if section:
+        return [_entry(leaf, provenance, defaults) for leaf in section]
+    inner = _entry_inside_leaf(key, leaves, provenance)
+    if inner is not None:
+        return [inner]
+    close = difflib.get_close_matches(
+        key, _known_names(leaves), n=3, cutoff=0.6
+    )
+    raise UnknownKey(
+        key, list(dict.fromkeys([*suggest_paths(key), *close]))[:3]
+    )
 
 
 def config_files(loaded: Any) -> dict[str, Optional[str]]:

@@ -12,7 +12,6 @@ from gc_core.execution.finish_reason import (
     FINISH_KIND_BLOCKED,
     FINISH_KIND_LENGTH,
     classify_finish_kind,
-    finish_blocks_final,
 )
 from gc_core.message_projection import project_assistant_text
 
@@ -58,11 +57,6 @@ def extract_last_assistant_text(
                 message.get("content"), tags=tags, strip_think=strip_think
             ).strip()
     return ""
-
-
-def is_content_filter_finish(finish_reason: str | None) -> bool:
-    """True для любого provider-blocked finish (content_filter/refusal/safety)."""
-    return finish_blocks_final(finish_reason)
 
 
 def format_no_tool_call_bounce(

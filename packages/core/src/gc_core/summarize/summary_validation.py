@@ -54,10 +54,6 @@ def validate_summary_text(text: str) -> tuple[bool, str]:
     return True, "ok"
 
 
-def is_valid_summary_text(text: str) -> bool:
-    return validate_summary_text(text)[0]
-
-
 def merge_repaired_summary(*, invalid_text: str, repaired_text: str) -> str:
     """Склеивает теги из repair поверх сохранённых из невалидного черновика.
 

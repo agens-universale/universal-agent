@@ -7,6 +7,7 @@ import pytest
 pytest.importorskip("textual")
 
 from gc_tui.services.voice_setup import ProbeResult, VoiceStatus
+from form_harness import settings_voice_cursor_position
 
 
 class FakeVoiceSetup:
@@ -576,7 +577,7 @@ async def test_cursor_starts_on_the_active_mode_row(tmp_path):
     async with app.run_test() as pilot:
         scr, _ = _mk_screen(tmp_path, CLOUD, config_text=CLOUD_CONFIG)
         await _open_voice(app, scr, pilot)
-        assert (scr._voice_cursor_position(), _cursor_row(scr)) == (
+        assert (settings_voice_cursor_position(scr), _cursor_row(scr)) == (
             _VOICE_ROW_CLOUD,
             1,
         )
@@ -590,7 +591,10 @@ async def test_cursor_starts_on_the_active_mode_row(tmp_path):
         for status in (LOCAL, OFF):
             scr2, _ = _mk_screen(tmp_path, status)
             await _open_voice(app, scr2, pilot)
-            assert (scr2._voice_cursor_position(), _cursor_row(scr2)) == (
+            assert (
+                settings_voice_cursor_position(scr2),
+                _cursor_row(scr2),
+            ) == (
                 _VOICE_ROW_LOCAL,
                 0,
             )
@@ -1450,7 +1454,7 @@ async def test_cloud_row_itself_does_not_grab_the_field(tmp_path):
     async with app.run_test() as pilot:
         scr, _ = _mk_screen(tmp_path, OFF)
         await _open_cloud(app, scr, pilot)
-        assert scr._voice_cursor_position() == _VOICE_ROW_CLOUD
+        assert settings_voice_cursor_position(scr) == _VOICE_ROW_CLOUD
         assert scr.focused is None
         assert _cursor_row(scr) == 1
 
@@ -2200,12 +2204,15 @@ async def test_lang_list_arrows_walk_the_list_not_the_cursor(tmp_path):
         scr, _ = _mk_screen(tmp_path, LOCAL)
         await _open_local(app, scr, pilot)
         await _to_field(pilot)
-        place = (scr._voice_cursor_group(), scr._voice_cursor_position())
+        place = (
+            scr._voice_cursor_group(),
+            settings_voice_cursor_position(scr),
+        )
         await pilot.press("down")
         await pilot.pause()
         assert (
             scr._voice_cursor_group(),
-            scr._voice_cursor_position(),
+            settings_voice_cursor_position(scr),
         ) == place
         assert _focused_id(scr) == "voice-lang"
         assert _lang_selected(scr) == ["▸ en    английский"]
@@ -2214,7 +2221,7 @@ async def test_lang_list_arrows_walk_the_list_not_the_cursor(tmp_path):
         await pilot.pause()
         assert (
             scr._voice_cursor_group(),
-            scr._voice_cursor_position(),
+            settings_voice_cursor_position(scr),
         ) == place
         assert _focused_id(scr) == "voice-lang"
         assert _lang_selected(scr) == ["▸ yue   кантонский"]
@@ -2319,14 +2326,17 @@ async def test_escape_collapses_the_list_and_keeps_the_cursor_in_the_field(
         scr, _ = _mk_screen(tmp_path, LOCAL)
         await _open_local(app, scr, pilot)
         await _to_field(pilot)
-        place = (scr._voice_cursor_group(), scr._voice_cursor_position())
+        place = (
+            scr._voice_cursor_group(),
+            settings_voice_cursor_position(scr),
+        )
         await pilot.press("escape")
         await pilot.pause()
         assert not _lang_rows(scr) and _lang_hint(scr) == _LIST_CLOSED_HINT
         assert scr._view == _VOICE
         assert (
             scr._voice_cursor_group(),
-            scr._voice_cursor_position(),
+            settings_voice_cursor_position(scr),
         ) == place
         assert _focused_id(scr) == "voice-lang"
         await pilot.press("tab")  # курсор снова свободен
@@ -4858,7 +4868,8 @@ async def test_tab_moves_between_groups(tmp_path):
 
     async with settings_voice_section(tmp_path, mode="cloud") as (pilot, scr):
         assert scr._voice_cursor_group() == "variants"
-        row_before = scr._voice_cursor_position()  # строка «Свой endpoint»
+        # строка «Свой endpoint»
+        row_before = settings_voice_cursor_position(scr)
         await pilot.press("tab")
         await pilot.pause()
         assert scr._voice_cursor_group() == "fields"
@@ -4869,7 +4880,7 @@ async def test_tab_moves_between_groups(tmp_path):
         await pilot.press("tab")
         await pilot.pause()
         assert scr._voice_cursor_group() == "variants"
-        assert scr._voice_cursor_position() == row_before, (
+        assert settings_voice_cursor_position(scr) == row_before, (
             "позиция должна помниться"
         )
         # Клавиша съедена секцией, а не отдана focus_next: тот увёл бы фокус в соседнее
@@ -4908,7 +4919,7 @@ async def test_arrows_in_fields_do_not_move_the_variant_rows(tmp_path):
     from textual.widgets import Input
 
     async with settings_voice_section(tmp_path, mode="cloud") as (pilot, scr):
-        row_before = scr._voice_cursor_position()
+        row_before = settings_voice_cursor_position(scr)
         await pilot.press("tab")  # в поля
         await pilot.press("down")
         await pilot.pause()
@@ -4931,7 +4942,7 @@ async def test_tab_is_swallowed_when_there_is_no_second_group(tmp_path):
         await pilot.press("tab")
         await pilot.pause()
         assert scr._voice_cursor_group() == "variants"
-        assert scr._voice_cursor_position() == 0
+        assert settings_voice_cursor_position(scr) == 0
         assert pilot.app.focused is focused_before, (
             "Tab не должен водить фокус мимо курсора"
         )
@@ -4973,12 +4984,12 @@ async def test_remembered_field_position_is_clamped(tmp_path):
         # списком он раскрывается сам и забирает ↑/↓ себе (спека §4.2.3).
         scr._set_voice_cursor(group="fields", position=3)
         await pilot.pause()
-        assert scr._voice_cursor_position() == 3
+        assert settings_voice_cursor_position(scr) == 3
         await pilot.press("tab")  # обратно в строки режима
         await pilot.press("up")  # выбрать «Локальный сервис»
         await pilot.press("tab")  # снова в поля — их там меньше
         await pilot.pause()
-        assert scr._voice_cursor_position() == 0, (
+        assert settings_voice_cursor_position(scr) == 0, (
             "позиция должна зажаться в диапазон"
         )
         assert scr._voice_cursor_field() is not None, (

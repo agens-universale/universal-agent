@@ -801,7 +801,7 @@ async def test_huge_diff_is_shown_whole_and_cut_into_parts(tmp_path):
 
     from gc_tui.app import TuiApp
     from gc_tui.screens.diff import CONTEXT_CHUNK
-    from gc_tui.services.diff_render import row_kinds
+    from gc_tui.services.diff_render import _parse, _take
 
     ws = _Workspace(tmp_path)
     ws.base("big.py", "".join(f"line{n:04d}\n" for n in range(600)))
@@ -828,7 +828,9 @@ async def test_huge_diff_is_shown_whole_and_cut_into_parts(tmp_path):
             if w.has_class("diff-hunk")
         ]
         _path, delta = confirm._preview[0]
-        rows = len(row_kinds(delta.hunks))
+        # Строки тела без потолка — второе мнение, независимое от `HunkBody`.
+        parsed = _parse(delta.hunks or "")
+        rows = len(_take(parsed, sum(1 for r in parsed if r.kind != "sep")))
         assert rows > 200  # прежний потолок остался позади
         # Место под тело — всё, до последней строки: полоса прокрутки честна.
         assert sum(int(w.styles.height.value) for w in blocks) == rows

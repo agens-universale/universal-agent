@@ -7,10 +7,6 @@ from __future__ import annotations
 _CACHE: dict = {}
 
 
-def clear_cache() -> None:
-    _CACHE.clear()
-
-
 def make_cached_fetch(fetch):
     def cached(url, auth, verify=True, config_proxy=None, refresh=False):
         """`refresh` — принудительно сходить на сервер мимо кэша (Alt+↓, спека §5.1

@@ -424,21 +424,6 @@ def _render_record_readonly(
     return no
 
 
-def render_thread_readonly(mount_target, records: list) -> None:
-    """Построить и смонтировать виджеты трейса из плоских записей в mount_target —
-    read-only (без pending/баннеров/submit-collapse/индикатора/tool-preview).
-    submit_solution-output отфильтрован уже в map_message (→ None)."""
-    from gc_tui.services.trace_mapper import collect_render_context
-
-    no = 1
-    calls: dict = {}
-    context = collect_render_context(
-        rec.get("payload") for rec in records if isinstance(rec, dict)
-    )
-    for rec in records:
-        no = _render_record_readonly(mount_target, rec, no, calls, context)
-
-
 def render_segments_readonly(mount_target, segments: list) -> dict:
     """Read-only превью из сегментов: полная история (все сегменты сырьём) +
     нумерованные маркеры сжатий #K между ними. Паритет рендера с основным

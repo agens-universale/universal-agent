@@ -169,9 +169,6 @@ def _cli_updates(
     загрузки, поэтому проходят его здесь: переименованный ключ иначе оседал бы
     мёртвым. Третье значение — факты compat для стартовых уведомлений.
     """
-    from gc_core.config_modules.compat import map_legacy_path
-    from gc_core.config_modules.path_hints import check_setting_path
-
     resolved = resolve_env_placeholders_strict(
         extra_overrides, source="--param"
     )
@@ -184,27 +181,41 @@ def _cli_updates(
     updates: Dict[str, Any] = {}
     facts: list[str] = []
     for path, value in resolved.items():
-        mapped = map_legacy_path(path)
+        mapped, value = _map_cli_update(
+            path, value, prefix=prefix, facts=facts
+        )
         if mapped is not None:
-            check_setting_path(mapped, prefix=prefix)
-        if mapped is None:
-            facts.append(f"перекрытие: {path} устарел и игнорируется")
-            continue
-        if mapped != path and not isinstance(value, dict):
-            # Секцию-словарь проведёт compat ниже — со своими фактами.
-            facts.append(f"перекрытие: {path} переименован в {mapped}")
-        if isinstance(value, dict):
-            # Внутри секции могут быть старые листья (`diff_tui.cache_max_orig`).
-            document: Dict[str, Any] = {}
-            _set_nested(document, path, copy.deepcopy(value))
-            facts.extend(
-                f"перекрытие: {fact}" for fact in apply_compat(document)
-            )
-            value = _get_nested(document, mapped)
-            if value is None:
-                continue
-        updates[mapped] = value
+            updates[mapped] = value
     return _paths_from_cwd(updates), trace_id, facts
+
+
+def _map_cli_update(
+    path: str, value: Any, *, prefix: str, facts: list[str]
+) -> tuple[Optional[str], Any]:
+    """Одно перекрытие → (путь схемы, значение); путь ``None`` — пропустить.
+
+    Факты compat дописываются в ``facts``."""
+    from gc_core.config_modules.compat import map_legacy_path
+    from gc_core.config_modules.path_hints import check_setting_path
+
+    mapped = map_legacy_path(path)
+    if mapped is not None:
+        check_setting_path(mapped, prefix=prefix)
+    if mapped is None:
+        facts.append(f"перекрытие: {path} устарел и игнорируется")
+        return None, None
+    if mapped != path and not isinstance(value, dict):
+        # Секцию-словарь проведёт compat ниже — со своими фактами.
+        facts.append(f"перекрытие: {path} переименован в {mapped}")
+    if isinstance(value, dict):
+        # Внутри секции могут быть старые листья (`diff_tui.cache_max_orig`).
+        document: Dict[str, Any] = {}
+        _set_nested(document, path, copy.deepcopy(value))
+        facts.extend(f"перекрытие: {fact}" for fact in apply_compat(document))
+        value = _get_nested(document, mapped)
+        if value is None:
+            return None, None
+    return mapped, value
 
 
 def _is_cli_path_key(dotted: str) -> bool:
@@ -216,23 +227,23 @@ def _is_cli_path_key(dotted: str) -> bool:
     )
 
 
+def _absolute_from_cwd(value: Any) -> Any:
+    """Непустая строка-путь (или список таких) → абсолютный от текущего каталога."""
+    if isinstance(value, str) and value.strip():
+        expanded = os.path.expanduser(value)
+        return (
+            expanded if os.path.isabs(expanded) else os.path.abspath(expanded)
+        )
+    if isinstance(value, list):
+        return [_absolute_from_cwd(item) for item in value]
+    return value
+
+
 def _paths_from_cwd(updates: Dict[str, Any]) -> Dict[str, Any]:
     """Относительный путь из командной строки или ``agent_overrides`` — от
     текущего каталога, как набрал человек (и как было до типизированных
     настроек), а не от каталога конфига."""
     from gc_core.settings import expand_section_updates
-
-    def absolute(value: Any) -> Any:
-        if isinstance(value, str) and value.strip():
-            expanded = os.path.expanduser(value)
-            return (
-                expanded
-                if os.path.isabs(expanded)
-                else os.path.abspath(expanded)
-            )
-        if isinstance(value, list):
-            return [absolute(item) for item in value]
-        return value
 
     sections = ("paths", "summary", "intent_scope", "security")
     with_paths = {
@@ -246,7 +257,9 @@ def _paths_from_cwd(updates: Dict[str, Any]) -> Dict[str, Any]:
         key: value for key, value in updates.items() if key not in with_paths
     }
     for key, value in expand_section_updates(with_paths).items():
-        rest[key] = absolute(value) if _is_cli_path_key(key) else value
+        rest[key] = (
+            _absolute_from_cwd(value) if _is_cli_path_key(key) else value
+        )
     return rest
 
 
@@ -410,6 +423,38 @@ def _revalidate_layer_documents(
             validate_registry_pairs(after, source=str(path), raw_source=before)
 
 
+def _managed_voice_override(
+    managed_raw: Dict[str, Any], raw_config: Dict[str, Any], base_voice: Any
+) -> Optional[str]:
+    """Вердикт «managed-слой перекрыл ваш voice» — только если адрес батарейки
+    победил в итоговом мерже (см. комментарий в ``load_settings``)."""
+    managed_voice = managed_raw.get("voice") or {}
+    if not managed_voice:
+        return None
+    from gc_core.config_modules.voice import overridden_user_voice
+
+    managed_url = str(managed_voice.get("url") or "")
+    merged_voice = raw_config.get("voice")
+    effective_url = (
+        str((merged_voice or {}).get("url") or "")
+        if isinstance(merged_voice, dict)
+        else ""
+    )
+    if effective_url != managed_url:
+        return None
+    return overridden_user_voice(base_voice, managed_url)
+
+
+def _validated_app_config(raw_config: Dict[str, Any]) -> AppConfig:
+    """Схема итогового мержа; отказ — текстом из ``exc.errors()`` без значений."""
+    try:
+        return AppConfig.model_validate(raw_config)
+    except _PydanticValidationError as exc:
+        raise ValueError(
+            f"{SCHEMA_ERROR_PREFIX}{schema_error_details(exc)}"
+        ) from exc
+
+
 def load_settings(
     config_path: Optional[str] = None,
     *,
@@ -541,22 +586,9 @@ def load_settings(
     # voice» там, где работал адрес из <cwd>/.gc/config.yml (находка ревью коллеги).
     # Профиль — такой же слой поверх: если voice.url задан в нём, батарейка тоже ничего
     # не решает, поэтому место расчёта — ниже профильного мержа, а не выше.
-    _voice_overridden: Optional[str] = None
-    _mv = managed_raw.get("voice") or {}
-    if _mv:
-        from gc_core.config_modules.voice import overridden_user_voice
-
-        _managed_url = str(_mv.get("url") or "")
-        _merged_voice = raw_config.get("voice")
-        _effective_url = (
-            str((_merged_voice or {}).get("url") or "")
-            if isinstance(_merged_voice, dict)
-            else ""
-        )
-        if _effective_url == _managed_url:
-            _voice_overridden = overridden_user_voice(
-                _base_voice, _managed_url
-            )
+    _voice_overridden = _managed_voice_override(
+        managed_raw, raw_config, _base_voice
+    )
 
     # Compat-слой (A4): rename/remove устаревших ключей in-memory, файл не трогаем.
     # Применяется к итоговому мержу — профильный слой проходит его так же, как
@@ -569,12 +601,7 @@ def load_settings(
     # Отказ схемы — из `exc.errors()`, не `str(exc)`: pydantic-дамп несёт
     # `input_value=<repr записи>` — токен из файла уезжал в хинт пикера профилей
     # и в статус «не применится» дословным текстом ошибки (MR #80, класс L28).
-    try:
-        app_cfg = AppConfig.model_validate(raw_config)
-    except _PydanticValidationError as exc:
-        raise ValueError(
-            f"{SCHEMA_ERROR_PREFIX}{schema_error_details(exc)}"
-        ) from exc
+    app_cfg = _validated_app_config(raw_config)
     _model_section_notices = validate_model_sections(app_cfg)
     # Межполевые предупреждения — до `resolve_paths`: там явные значения
     # подменяются выведенными умолчаниями (см. `cross_validation`).

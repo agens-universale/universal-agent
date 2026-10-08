@@ -21,7 +21,6 @@ from temporalio.worker import Worker, WorkerDeploymentConfig
 from gc_core_temporalio.activities import AgentActivities
 from gc_core_temporalio.activity_config import resolve_activity_settings
 from gc_core_temporalio.child_preparation import ChildActivities
-from gc_core_temporalio.child_workflow import UniversalSubagentWorkflow
 from gc_core_temporalio.provider import (
     ContextProvider,
     WorkerConfig,
@@ -29,7 +28,6 @@ from gc_core_temporalio.provider import (
 from gc_core_temporalio.public_config import public_config_snapshot
 from gc_core_temporalio.storage.sqlite import SQLiteThreadStore
 from gc_core_temporalio.thread_store_activities import ThreadStoreActivities
-from gc_core_temporalio.workflow import UniversalAgentWorkflow
 
 
 def build_stores(config):
@@ -81,6 +79,17 @@ def store_paths(store):
     )
 
 
+def _stores_state_paths(stores):
+    """Пути состояния готовых хранилищ: абсолютные и реальные, без повторов."""
+    paths = []
+    for store in stores.values():
+        for path in store_paths(store):
+            for form in (os.path.abspath(path), os.path.realpath(path)):
+                if form not in paths:
+                    paths.append(form)
+    return paths
+
+
 def build_runtime(config, *, stores=None, log_handlers=(), agent_store=None):
     """Провайдер контекста и activities. ``stores`` — готовые хранилища тредов
     (объекты); без них — из ``config.thread_stores``. ``agent_store`` —
@@ -90,12 +99,7 @@ def build_runtime(config, *, stores=None, log_handlers=(), agent_store=None):
         paths = config.state_paths()
     else:
         stores = dict(stores)
-        paths = []
-        for store in stores.values():
-            for path in store_paths(store):
-                for form in (os.path.abspath(path), os.path.realpath(path)):
-                    if form not in paths:
-                        paths.append(form)
+        paths = _stores_state_paths(stores)
     provider = ContextProvider(
         profiles=config.profiles,
         stores=stores,
@@ -176,52 +180,31 @@ def workflow_runner():
     return SandboxedWorkflowRunner(restrictions=restrictions)
 
 
-def worker_options(config, native, threads):
-    """Coalesce equal queues while preserving a single resource context owner."""
-    queues = {}
+def agent_activities(native, threads):
+    """Activities агента одним списком: модель, ресурсы воркера, треды.
+
+    Один источник для ``AgentPlugin`` и для тестов, собирающих ``Worker``
+    вручную."""
     children = ChildActivities(native)
-    for queue, workflows, activities in (
-        (
-            config.workflow_queue,
-            [UniversalAgentWorkflow, UniversalSubagentWorkflow],
-            [],
-        ),
-        (config.model_queue, [], [native.model]),
-        (
-            config.resource_queue,
-            [],
-            [
-                children.prepare,
-                native.prepare,
-                native.prepare_state,
-                native.prepare_prompts,
-                native.prompt,
-                native.skills,
-                native.tool,
-                native.guard,
-                native.memory,
-                native.memory_hash,
-                native.summary_trace,
-                native.close,
-                native.release,
-                threads.load,
-                threads.commit,
-                threads.read_trace,
-            ],
-        ),
-    ):
-        entry = queues.setdefault(
-            queue, {"task_queue": queue, "workflows": [], "activities": []}
-        )
-        entry["workflows"].extend(workflows)
-        entry["activities"].extend(activities)
-        if workflows:
-            entry["workflow_runner"] = workflow_runner()
-    deployment = deployment_config(config)
-    if deployment is not None:
-        for entry in queues.values():
-            entry["deployment_config"] = deployment
-    return list(queues.values())
+    return [
+        native.model,
+        children.prepare,
+        native.prepare,
+        native.prepare_state,
+        native.prepare_prompts,
+        native.prompt,
+        native.skills,
+        native.tool,
+        native.guard,
+        native.memory,
+        native.memory_hash,
+        native.summary_trace,
+        native.close,
+        native.release,
+        threads.load,
+        threads.commit,
+        threads.read_trace,
+    ]
 
 
 def default_build_id():

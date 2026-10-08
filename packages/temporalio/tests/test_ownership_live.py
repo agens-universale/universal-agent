@@ -4,14 +4,14 @@ import asyncio
 import shutil
 
 import pytest
-from live_support import temporal_cli
+from live_support import temporal_cli, worker_kwargs
 import test_workflow_controls as controls
 from gc_core.execution.contracts import ExecutionFailure
 from gc_core.thread_store_file_durable import DurableFileThreadStore
 from gc_core.thread_store_journal import durable_owner_id
 from gc_core_temporalio.contracts import UserMessage
 from gc_core_temporalio.provider import WorkerConfig
-from gc_core_temporalio.worker import build_runtime, worker_options
+from gc_core_temporalio.worker import build_runtime
 from gc_core_temporalio.workflow import UniversalAgentWorkflow
 from temporalio.client import WorkflowFailureError
 from temporalio.testing import WorkflowEnvironment
@@ -132,7 +132,7 @@ async def test_profile_change_on_worker_restart_keeps_sessions(
         async def serve(model):
             config = _config(tmp_path, url, model)
             contexts, native, threads = build_runtime(config)
-            (options,) = worker_options(config, native, threads)
+            options = worker_kwargs(config, native, threads)
             return contexts, Worker(
                 env.client,
                 **options,
@@ -274,10 +274,7 @@ async def test_idle_refresh_continue_as_new_keeps_ownership(
     from datetime import timedelta
 
     from gc_core_temporalio import workflow as session_workflow
-    from gc_core_temporalio.worker import (
-        build_runtime,
-        worker_options,
-    )
+    from gc_core_temporalio.worker import build_runtime
     from temporalio.testing import WorkflowEnvironment
     from temporalio.worker import UnsandboxedWorkflowRunner
 
@@ -289,7 +286,7 @@ async def test_idle_refresh_continue_as_new_keeps_ownership(
     script.append([finish("first")])
     config = _config(tmp_path, url, "scripted")
     contexts, native, threads = build_runtime(config)
-    (options,) = worker_options(config, native, threads)
+    options = worker_kwargs(config, native, threads)
     options["workflow_runner"] = UnsandboxedWorkflowRunner()
     try:
         async with await WorkflowEnvironment.start_local(

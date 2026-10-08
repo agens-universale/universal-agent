@@ -1127,27 +1127,3 @@ def test_app_config_wires_loop_detector():
         agent=AgentConfig(loop_detector=LoopDetectorConfig(enabled=False))
     )
     assert cfg_off.agent.loop_detector.model_dump() == {"enabled": False}
-
-
-def test_serializer_drops_loop_window():
-    from gc_core.persistence.state_serializer import StateSerializer
-    from gc_core.states import State
-
-    state = State(
-        verbose=False,
-        model="CodeChat",
-        tools_spec=[],
-        tools_descr=[],
-        skills_list=[],
-        max_steps=2,
-        system_prompt_id="v1",
-        use_server_subagents=False,
-    )
-    state.loop_detector_window = ["fp"]
-    state.loop_detector_pending = [{"tool": "x", "args": {}}]
-    payload = StateSerializer.serialize(state)
-    assert "loop_detector_window" not in payload
-    assert "loop_detector_pending" not in payload
-    restored = StateSerializer.deserialize(payload)
-    assert restored.loop_detector_window == []
-    assert restored.loop_detector_pending == []

@@ -26,3 +26,29 @@ _final_report_consistency
 # (print_help, print_usage) — вывод справки в потоки команды config.
 # packages/core/src/gc_core/config_command.py.
 _._print_message
+
+# Контракт колбэка PortAudio (sounddevice): callback(indata, frames, time_info, status) —
+# сигнатуру задаёт драйвер, аргумент нельзя убрать. packages/tui/src/gc_tui/voice/recorder.py.
+frames
+
+# Переопределение Textual Widget.get_content_height(container, viewport, width): сигнатуру
+# задаёт фреймворк, аргумент нельзя убрать. packages/tui/src/gc_tui/widgets/user_reply.py.
+container
+
+# Протокол рантайма для публичного AsyncAgent.create(durable=...): реализует
+# gc_core_temporalio.TemporalDurability; ядро его типом не ссылается. gc_core/aio/durable.py.
+DurableRuntime
+
+# Публичный контракт AsyncThreadStore/AsyncThreadStoreBase (docs/sdk/thread-store-contract.md,
+# docs/async.md): ядро их не зовёт, но встраивающий реализует и вызывает. Покрывает и
+# SyncThreadStoreAdapter, и прокси gc_core_temporalio.thread_store_proxy.
+_.aload_messages
+_.adiscard_message
+
+# Хук AsyncThreadStoreBase — пара к ThreadStoreBase.ensure_ready; парность методов двух
+# баз сторожит packages/core/tests/test_thread_store_one_contract.py.
+_.aensure_ready
+
+# Абстрактный метод harbor.agents.base.BaseAgent.setup: зовёт Harbor перед запуском агента.
+# integrations/harbor/adapters/gc_cli_external.py.
+_.setup

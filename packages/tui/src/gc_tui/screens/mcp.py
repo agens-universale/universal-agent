@@ -179,14 +179,6 @@ class McpScreen(Screen):
         t.append(f" · {n_tools} тулов", style=_DIM)
         return t
 
-    def rendered_text(self) -> str:
-        empty = self._empty_renderable()
-        if empty is not None:
-            return empty.plain
-        parts = [card._renderable().plain for card in self.cards]
-        parts.append(self._summary_renderable().plain)
-        return "\n\n".join(parts)
-
     def compose(self) -> ComposeResult:
         with Vertical(id="root"):
             with Horizontal(id="header"):

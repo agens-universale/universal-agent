@@ -4,12 +4,12 @@ import asyncio
 import shutil
 
 import pytest
-from live_support import temporal_cli
+from live_support import temporal_cli, worker_kwargs
 import test_workflow_controls as controls
 from gc_core.agent_executor import AgentExecutor
 from gc_core.execution.contracts import ExecutionFailure, InfrastructureFailure
 from gc_core_temporalio.operations import session_failure
-from gc_core_temporalio.worker import build_runtime, worker_options
+from gc_core_temporalio.worker import build_runtime
 from gc_core_temporalio.workflow import UniversalAgentWorkflow
 from temporalio.api.enums.v1 import EventType
 from temporalio.client import WorkflowExecutionStatus
@@ -65,7 +65,7 @@ async def test_workflow_bug_keeps_run_until_fixed_worker(
 
         def worker():
             contexts, native, threads = build_runtime(config)
-            (options,) = worker_options(config, native, threads)
+            options = worker_kwargs(config, native, threads)
             # Без песочницы подмена метода ядра видна коду workflow.
             options["workflow_runner"] = UnsandboxedWorkflowRunner()
             return contexts, Worker(env.client, **options)

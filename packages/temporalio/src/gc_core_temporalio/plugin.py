@@ -40,11 +40,14 @@ from gc_core_temporalio.activity_config import (
     ActivitiesConfig,
     from_activity_config,
 )
-from gc_core_temporalio.child_preparation import ChildActivities
 from gc_core_temporalio.child_workflow import UniversalSubagentWorkflow
 from gc_core_temporalio.maintenance import WorkerMaintenance
 from gc_core_temporalio.provider import AgentProfile, WorkerConfig
-from gc_core_temporalio.worker import build_runtime, workflow_runner
+from gc_core_temporalio.worker import (
+    agent_activities,
+    build_runtime,
+    workflow_runner,
+)
 from gc_core_temporalio.workflow import UniversalAgentWorkflow
 
 logger = logging.getLogger(__name__)
@@ -140,33 +143,15 @@ class AgentPlugin(SimplePlugin):
                 agent_store=agent_store,
             )
         )
-        native, threads = self.activities_host, self.thread_activities
-        children = ChildActivities(native)
         self._client = None
         self._runs = 0
         self._maintenance = None
         super().__init__(
             "gc_core_temporalio.AgentPlugin",
             workflows=[UniversalAgentWorkflow, UniversalSubagentWorkflow],
-            activities=[
-                native.model,
-                children.prepare,
-                native.prepare,
-                native.prepare_state,
-                native.prepare_prompts,
-                native.prompt,
-                native.skills,
-                native.tool,
-                native.guard,
-                native.memory,
-                native.memory_hash,
-                native.summary_trace,
-                native.close,
-                native.release,
-                threads.load,
-                threads.commit,
-                threads.read_trace,
-            ],
+            activities=agent_activities(
+                self.activities_host, self.thread_activities
+            ),
             workflow_runner=_keep_user_runner,
             run_context=self._run_context,
         )

@@ -6,27 +6,8 @@ import yaml
 from gc_core.backends.factory import resolve_os_backend
 from gc_core.backends.protocol import WALK_OUTPUT_MAX_CHARS
 from gc_core.config import load_settings
-from gc_core.config_modules.agent import walk_output_max_chars_from_config_dict
+from gc_core.settings import settings_of
 from gc_testkit.settings import make_settings
-
-
-def test_walk_ceiling_accessor_defaults_and_parses():
-    assert (
-        walk_output_max_chars_from_config_dict(make_settings())
-        == WALK_OUTPUT_MAX_CHARS
-    )
-    assert (
-        walk_output_max_chars_from_config_dict(
-            make_settings({"agent.walk_output_max_chars": -5})
-        )
-        == WALK_OUTPUT_MAX_CHARS
-    )
-    assert (
-        walk_output_max_chars_from_config_dict(
-            make_settings({"agent.walk_output_max_chars": 1000})
-        )
-        == 1000
-    )
 
 
 def test_factory_passes_walk_ceiling_to_harbor():
@@ -58,7 +39,7 @@ def test_loaded_settings_carry_walk_ceiling(tmp_path):
         encoding="utf-8",
     )
     loaded = load_settings(str(cfg_path))
-    assert walk_output_max_chars_from_config_dict(loaded) == 777
+    assert settings_of(loaded).agent.walk_output_max_chars == 777
 
 
 def test_demo_config_documents_the_walk_ceiling():

@@ -172,46 +172,6 @@ def log_compaction_started(
     )
 
 
-def log_compaction_precheck(
-    logger: Any | None,
-    *,
-    trigger_reason: str,
-    thread_id: Any,
-    history_messages_count: int,
-    trigger_volume: int,
-    serialized_chars: int,
-    threshold: int,
-    exceeded_chars: bool = False,
-    exceeded_tokens: bool = False,
-) -> None:
-    if logger is None:
-        return
-    logger.info(
-        "summary_precheck reason=%s thread_id=%s history_messages=%s "
-        "trigger_volume=%s serialized_chars=%s threshold=%s",
-        trigger_reason,
-        thread_id,
-        history_messages_count,
-        trigger_volume,
-        serialized_chars,
-        threshold,
-    )
-    logger.info(
-        "summary_precheck",
-        extra={
-            "event": "summary_precheck",
-            "reason": trigger_reason,
-            "thread_id": thread_id,
-            "history_messages": history_messages_count,
-            "trigger_volume": trigger_volume,
-            "serialized_chars": serialized_chars,
-            "threshold": threshold,
-            "exceeded_chars": exceeded_chars,
-            "exceeded_tokens": exceeded_tokens,
-        },
-    )
-
-
 def log_summary_raw_text(
     logger: Any | None,
     log_ctx: SummaryCompactionLog,

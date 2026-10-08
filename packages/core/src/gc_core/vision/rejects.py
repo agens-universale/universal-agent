@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Mapping, Optional
+from typing import Any, Mapping, Optional
 
 from gc_core.utils.backend_errors import (
     image_limit_from_error,
@@ -12,9 +12,6 @@ from gc_core.utils.backend_errors import (
 )
 from gc_core.vision.registry import process_vision_probes
 from gc_core.vision.route import VisionRouteKey
-
-if TYPE_CHECKING:
-    from gc_core.model_router import ResolvedModel
 
 _Key = VisionRouteKey
 
@@ -95,10 +92,6 @@ class ImageRejects:
         view.limit(key, cap)
         return view
 
-    def _clear(self) -> None:
-        with self._lock:
-            self._caps = {}
-
 
 _PROCESS_REJECTS = ImageRejects()
 
@@ -106,13 +99,6 @@ _PROCESS_REJECTS = ImageRejects()
 def process_image_rejects() -> ImageRejects:
     """Единственный реестр потолков процесса."""
     return _PROCESS_REJECTS
-
-
-def request_url(resolved: ResolvedModel, fallback_url: str) -> str:
-    """Фактический адрес запроса модели — ключ потолка. Запись реестра без своего
-    адреса и без общего `completions_url` уходит на запасной адрес воронки
-    (`processing_responses`, `utils/llm_chat_client`) — он же и ключ."""
-    return resolved.url or fallback_url
 
 
 def mark_blind(key: VisionRouteKey) -> bool:
@@ -142,9 +128,3 @@ def next_image_cap(exc: BaseException, sent: int) -> int:
     stated = image_limit_from_error(exc)
     cap = sent // 2 if stated is None else stated
     return max(0, min(cap, sent - 1))
-
-
-def reset_image_rejects_for_tests() -> None:
-    """Сбросить потолки процесса на месте — объект тот же: ссылки, взятые до сброса,
-    видят пустой реестр. Зовёт autouse-фикстура набора ядра."""
-    _PROCESS_REJECTS._clear()

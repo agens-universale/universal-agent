@@ -1,3 +1,4 @@
+import contextlib
 from dataclasses import asdict
 
 import pytest
@@ -9,6 +10,15 @@ from gc_core.thread_store_durable import (
     ThreadStoreOwnershipError,
 )
 from gc_core.thread_store_file_durable import DurableFileThreadStore
+
+
+@contextlib.contextmanager
+def _file_read_scope(directory, stem):
+    """Барьер чтения по физическому имени файла треда (без разбиения на system/thread)."""
+    with journal._physical_read_scope(
+        directory, journal._physical_control_path(directory, stem)
+    ):
+        yield
 
 
 def operation(identity="first", operation_kind="append_messages", **kwargs):
@@ -302,12 +312,12 @@ def test_path_scope_recovers_without_guessing_identity(tmp_path, monkeypatch):
             "a_b", "c_d", {"ready": True}
         )
     monkeypatch.setattr(journal, "_recover", original)
-    with journal.thread_file_read_scope(str(tmp_path), "a_b_c_d"):
+    with _file_read_scope(str(tmp_path), "a_b_c_d"):
         assert json.loads((tmp_path / "meta_a_b_c_d.json").read_text())[
             "ready"
         ]
     with journal.thread_read_scope(str(tmp_path), "a_b", "c_d"):
-        with journal.thread_file_read_scope(str(tmp_path), "a_b_c_d"):
+        with _file_read_scope(str(tmp_path), "a_b_c_d"):
             assert DurableFileThreadStore(str(tmp_path)).load_meta(
                 "a_b", "c_d"
             )["ready"]
@@ -352,7 +362,7 @@ def test_legacy_path_reader_and_exact_reset_share_barrier(tmp_path):
         return store.reset("cli", "legacy_id")
 
     with ThreadPoolExecutor(max_workers=1) as workers:
-        with journal.thread_file_read_scope(str(tmp_path), "legacy_id"):
+        with _file_read_scope(str(tmp_path), "legacy_id"):
             future = workers.submit(reset)
             assert started.wait(timeout=2)
             # Дать сбросу время пройти барьер, будь тот сломан: проверка

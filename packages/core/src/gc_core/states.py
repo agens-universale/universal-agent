@@ -161,7 +161,7 @@ class State(ExecutionState):
         self.internal_error_repeat_count: int = 0
         self.last_batch_invalid_arguments_count: int = 0
         # Loop detector: per-run in-memory ring of all tool-call fingerprints.
-        # Not persisted (StateSerializer pops it); not thread meta.
+        # Not persisted; not thread meta.
         self.loop_detector_window: list[str] = []
         self.loop_detector_pending: list[dict] = []
         self.project_memory_content_hash: Optional[str] = None
@@ -194,7 +194,7 @@ class State(ExecutionState):
         self.pending_tool_attachments: List[Dict[str, Any]] = []
         # «Кто смотрит» на картинки последнего запроса (`vision.audience`, спека
         # §9.1): считает контроллер на каждый запрос, читает тул `fs_view_image`.
-        # Транзиентно: `StateSerializer` его не пишет (как `workspace`).
+        # Транзиентно: не персистится (как `workspace`).
         self.vision_audience: Optional[Audience] = None
         # Id картинок, ушедших модели запроса целиком (base64) в последнем запросе:
         # тул `fs_view_image` не прикладывает такую картинку второй раз. Тот же

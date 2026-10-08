@@ -47,6 +47,8 @@ from gc_core.thread_store_durable import (
     ThreadStoreOwnershipError,
 )
 
+from gc_testkit.thread_store_conformance import run_checks
+
 SYS = "cli"
 THREAD = "durable"
 
@@ -279,18 +281,7 @@ BEHAVIOUR_CHECKS = (
 
 def assert_durable_conforms(store_factory: Callable[[], Any]) -> List[str]:
     """Проверить durable-хранилище целиком; фабрика вызывается перед каждой проверкой."""
-    passed: List[str] = []
-    store = store_factory()
-    for check in STRUCTURE_CHECKS:
-        check(store)
-        passed.append(check.__name__)
-    for check in BEHAVIOUR_CHECKS:
-        fresh = store_factory()
-        if hasattr(fresh, "ensure_ready"):
-            fresh.ensure_ready()
-        check(fresh)
-        passed.append(check.__name__)
-    return passed
+    return run_checks(store_factory, STRUCTURE_CHECKS, BEHAVIOUR_CHECKS)
 
 
 __all__ = [

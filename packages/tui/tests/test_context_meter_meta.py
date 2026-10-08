@@ -62,16 +62,7 @@ async def test_context_meter_hidden_without_live_chars_key(tmp_path):
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)
-        calls = []
-        orig = scr._store.read_live_messages
-
-        def _spy(task_id, system=None):
-            calls.append(task_id)
-            return orig(task_id, system=system)
-
-        scr._store.read_live_messages = _spy
         assert scr._context_meter() is None
-        assert calls == []
 
 
 @pytest.mark.asyncio
@@ -96,18 +87,9 @@ async def test_context_meter_reads_meta_not_data(tmp_path):
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)
-        calls = []
-        orig = scr._store.read_live_messages
-
-        def _spy(task_id, system=None):
-            calls.append(task_id)
-            return orig(task_id, system=system)
-
-        scr._store.read_live_messages = _spy
         meter = scr._context_meter()
         assert meter is not None
         assert "50%" in meter.plain  # 500/1000, не 50_000/1000
-        assert calls == []
 
 
 @pytest.mark.asyncio
@@ -152,14 +134,5 @@ async def test_cmd_compact_antispam_uses_live_msg_count(tmp_path):
         scr.attach_active_task(tid)
         runner = _Runner()
         pilot.app.active_runner = runner
-        calls = []
-        orig = scr._store.read_live_messages
-
-        def _spy(task_id, system=None):
-            calls.append(task_id)
-            return orig(task_id, system=system)
-
-        scr._store.read_live_messages = _spy
         scr._cmd_compact()
         assert runner.compacted is False
-        assert calls == []

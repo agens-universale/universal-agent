@@ -67,6 +67,8 @@ _ROLE_TO_SOURCE = {"system": "system", "user": "user", "assistant": "agent"}
 # Container root harbor uploads injected skills to (harbor/models/trial/paths.py:41).
 # Used when a profile ships skills but the task injected none.
 DEFAULT_CONTAINER_SKILLS_ROOT = "/harbor/skills"
+# Ключ настроек каталога скиллов в overrides агента.
+_SKILLS_PATH_KEY = "paths.skills_data_path"
 
 # Dependency files (prompts/, skills/) are copied next to adapters/ in the image
 # (see harbor/Dockerfile) and live at repo-root in editable/local runs. Resolve them
@@ -397,7 +399,7 @@ class GcCliExternal(BaseAgent):
         an intentionally empty single-source registry.
         """
         return settings.with_overrides(
-            {"paths.skills_data_path": skills_path or "/harbor/.gc_no_skills"},
+            {_SKILLS_PATH_KEY: skills_path or "/harbor/.gc_no_skills"},
             layer="harbor",
         )
 
@@ -441,9 +443,7 @@ class GcCliExternal(BaseAgent):
         survive. A name already in the container wins: benchmark skills are part of
         the measurement, so the profile copy is skipped rather than overwriting it.
         """
-        skills_data_path = profile_value(
-            self._overrides, "paths.skills_data_path"
-        )
+        skills_data_path = profile_value(self._overrides, _SKILLS_PATH_KEY)
         if not skills_data_path:
             raise RuntimeError(
                 "gc_cli_config paths.skills_data_path is missing or empty — the profile "
@@ -751,9 +751,7 @@ class GcCliExternal(BaseAgent):
             else None
         )
         skill_sources: dict[str, str] = {}
-        profile_skills = profile_value(
-            self._overrides, "paths.skills_data_path"
-        )
+        profile_skills = profile_value(self._overrides, _SKILLS_PATH_KEY)
         if profile_skills:
             container_skills, skill_sources = await self._merge_profile_skills(
                 environment, container_skills

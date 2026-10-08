@@ -294,6 +294,10 @@ def lang_list_controller(
     поверх значения — `Alt+↓` или печать. Правило одно на все три списка панели, и
     заводить исключение «язык всегда раскрывается» нельзя: тогда одно и то же
     действие (вход курсора на поле) вело бы себя по-разному в соседних строках."""
+    if save_hint:
+        no_match_hint = _LANG_HINT_NO_MATCH
+    else:
+        no_match_hint = _LANG_HINT_NO_MATCH_ONBOARDING
     return FieldListController(
         host,
         input_id=input_id,
@@ -305,15 +309,7 @@ def lang_list_controller(
         matches=lambda item, q: q in item[0] or q in item[1],
         value_of=lambda item: item[0],
         initial_index=_lang_initial_index,
-        hint=lambda ok: (
-            _LANG_HINT
-            if ok
-            else (
-                _LANG_HINT_NO_MATCH
-                if save_hint
-                else _LANG_HINT_NO_MATCH_ONBOARDING
-            )
-        ),
+        hint=lambda ok: _LANG_HINT if ok else no_match_hint,
         can_open=lambda value: not value,
         on_pick=on_pick,
         closed_hint=closed_hint,
@@ -831,9 +827,6 @@ class VoiceEndpointEditor(Vertical):
         return (
             ctrl.pick() is not None
         )  # подстановку делает `on_pick` контроллера
-
-    def pick_language(self) -> bool:
-        return self.pick_in("language")
 
     def values(self) -> dict:
         """Введённые значения по ключам полей (обрезанные), без сайд-эффектов."""

@@ -704,31 +704,11 @@ def _unconfigured_setup_exit(
     return 0
 
 
-async def arun_cli() -> int:
+def _load_cli_settings(config_arg, profile_arg):
+    """Настройки запуска: конфиг + CLI-override поверх него.
+
+    ``(loaded, None)`` или ``(None, код выхода)`` — отказ уже объяснён в stderr.
     """
-    Входная точка CLI: парсинг аргументов, загрузка конфига,
-    создание RunContext и запуск агента.
-
-    Возвращает код выхода (0). Финальный ответ агента печатается в stdout
-    при ``console_trace: true``; сырое значение доступно через ``cli.run()``.
-    С ``--structured-output-format`` перефраз всегда попадает в stdout.
-    Если stdout уже поток jsonl, это событие ``final_answer``, без сырой
-    строки. Иначе печатается сам текст.
-    """
-    _ensure_project_gc_dir()
-    _ensure_user_skills_dir()
-
-    service_exit = await _run_service_command()
-    if service_exit is not None:
-        return service_exit
-
-    format_text, format_exit = _load_structured_format()
-    if format_exit is not None:
-        return format_exit
-
-    config_arg = arg_parser.run_args.config
-    profile_arg = getattr(arg_parser.run_args, "profile", None)
-    just_created = _bootstrap_user_config() if config_arg is None else False
     try:
         loaded = load_settings(config_arg, profile_override=profile_arg)
     except ValueError as exc:
@@ -744,7 +724,7 @@ async def arun_cli() -> int:
             ),
             file=sys.stderr,
         )
-        return 1
+        return None, 1
 
     # Единая точка применения CLI-override поверх config.yml.
     try:
@@ -772,12 +752,12 @@ async def arun_cli() -> int:
         # `--param key='${ENV:X}'` с незаданной X — отказ, как у файлов на
         # старте (`_cli_updates` резолвит строго), а не traceback.
         print(f"[gc] {exc}", file=sys.stderr)
-        return 1
+        return None, 1
     except UnknownSettingError as exc:
         # Незнакомое схеме имя (в том числе прежнее плоское `--max_steps`):
         # сообщение подсказывает путь (`--agent.max_steps`).
         print(f"[gc] {exc}", file=sys.stderr)
-        return 2
+        return None, 2
     except ValidationError as exc:
         # Негодное значение параметра: координата и причина, без значения
         # (в нём может быть токен).
@@ -785,12 +765,43 @@ async def arun_cli() -> int:
             f"[gc] некорректный параметр: {schema_error_details(exc)}",
             file=sys.stderr,
         )
-        return 2
+        return None, 2
     except ValueError as exc:
         # Правило пары адрес+токен и прочие отказы правки — текстом, без
         # трейсбека (значения в сообщении нет).
         print(f"[gc] некорректный параметр: {exc}", file=sys.stderr)
-        return 2
+        return None, 2
+    return loaded, None
+
+
+async def arun_cli() -> int:
+    """
+    Входная точка CLI: парсинг аргументов, загрузка конфига,
+    создание RunContext и запуск агента.
+
+    Возвращает код выхода (0). Финальный ответ агента печатается в stdout
+    при ``console_trace: true``; сырое значение доступно через ``cli.run()``.
+    С ``--structured-output-format`` перефраз всегда попадает в stdout.
+    Если stdout уже поток jsonl, это событие ``final_answer``, без сырой
+    строки. Иначе печатается сам текст.
+    """
+    _ensure_project_gc_dir()
+    _ensure_user_skills_dir()
+
+    service_exit = await _run_service_command()
+    if service_exit is not None:
+        return service_exit
+
+    format_text, format_exit = _load_structured_format()
+    if format_exit is not None:
+        return format_exit
+
+    config_arg = arg_parser.run_args.config
+    profile_arg = getattr(arg_parser.run_args, "profile", None)
+    just_created = _bootstrap_user_config() if config_arg is None else False
+    loaded, settings_exit = _load_cli_settings(config_arg, profile_arg)
+    if settings_exit is not None:
+        return settings_exit
     # Режим запуска для ядра: от него зависит запись журнала правок
     # (`agent_edits.record.cli`, по умолчанию выключена — журнал здесь не смотрят).
     loaded = loaded.with_runtime(run_mode=RUN_MODE_CLI)

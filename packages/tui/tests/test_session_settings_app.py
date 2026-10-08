@@ -249,22 +249,6 @@ def test_apply_session_overrides_applies_pair(tmp_path):
     }
 
 
-def test_clear_session_overrides_removes_pair(tmp_path):
-    app = _app(tmp_path)
-    app.tui_state.active_task_id = "t1"
-    app.apply_session_overrides(
-        {
-            "tui.finish_gate_mode": "off",
-            "tui.text_answer_mode": "allow",
-        }
-    )
-    app.clear_session_overrides(
-        ("tui.finish_gate_mode", "tui.text_answer_mode")
-    )
-    # оверрайдов нет — эффективный конфиг = база (ключи сессии сняты)
-    assert app._session_overrides == {}
-
-
 def test_apply_session_overrides_rolls_back_on_meta_failure(
     tmp_path, monkeypatch
 ):
@@ -290,24 +274,6 @@ def test_apply_session_overrides_rolls_back_on_meta_failure(
         )
     # откат целиком: пара не осела, прежний одиночный оверрайд цел
     assert app._session_overrides == {"tui.text_answer_mode": "deny"}
-
-
-def test_clear_session_overrides_noop_when_nothing_to_clear(
-    tmp_path, monkeypatch
-):
-    from gc_tui.services.stores.file_store import FileTaskStore
-
-    app = _app(tmp_path)
-    app.tui_state.active_task_id = "t1"
-    calls = {"n": 0}
-
-    def counting(self, task_id, patch, system=None):
-        calls["n"] += 1
-
-    monkeypatch.setattr(FileTaskStore, "update_tui_meta", counting)
-
-    app.clear_session_overrides(("tui.finish_gate_mode",))  # нечего снимать
-    assert calls["n"] == 0  # persist не звался
 
 
 def test_invalid_thread_override_is_dropped_on_open(tmp_path):

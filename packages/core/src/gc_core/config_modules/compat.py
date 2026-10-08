@@ -170,6 +170,14 @@ def map_legacy_path(dotted: str) -> Optional[str]:
 def apply_compat(raw: Dict[str, Any]) -> List[str]:
     """Мутирует raw. Возвращает человекочитаемые факты для startup-notices."""
     facts: List[str] = []
+    _compat_model_kwargs(raw, facts)
+    _compat_renames(raw, facts)
+    _compat_removed(raw, facts)
+    return facts
+
+
+def _compat_model_kwargs(raw: Dict[str, Any], facts: List[str]) -> None:
+    """``models.<alias>.backend.chat_completion_kwargs`` → ``models.<alias>.main``."""
     models = raw.get("models")
     for alias, entry in models.items() if isinstance(models, dict) else ():
         if not isinstance(entry, dict):
@@ -188,6 +196,10 @@ def apply_compat(raw: Dict[str, Any]) -> List[str]:
             f"models.{alias}.main; явно заданный main имеет приоритет — "
             "сохраните запись модели в настройках или обновите файл вручную"
         )
+
+
+def _compat_renames(raw: Dict[str, Any], facts: List[str]) -> None:
+    """Переименованные ключи (``RENAMES``) — с конвертером значения, если он есть."""
     for old, new in RENAMES.items():
         explicit_new = _has_path(raw, new)
         present, value = _pop_path(raw, old)
@@ -203,6 +215,10 @@ def apply_compat(raw: Dict[str, Any]) -> List[str]:
                 )
                 continue
         facts.append(_place_renamed(raw, old, new, value, explicit_new))
+
+
+def _compat_removed(raw: Dict[str, Any], facts: List[str]) -> None:
+    """Удалённые ключи (``REMOVED``) снимаются из документа с фактом."""
     for old, why in REMOVED.items():
         for concrete in expand_path(raw, old):
             present, _ = pop_parts(raw, concrete)
@@ -210,7 +226,6 @@ def apply_compat(raw: Dict[str, Any]) -> List[str]:
                 facts.append(
                     f"{'.'.join(concrete)} устарел и игнорируется ({why}) — {_SYNC_HINT}"
                 )
-    return facts
 
 
 def _place_renamed(

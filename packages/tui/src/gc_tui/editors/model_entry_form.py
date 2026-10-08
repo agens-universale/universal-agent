@@ -1653,9 +1653,10 @@ class ModelEntryForm(Vertical):
         # Ручное перечитывание = автоподгрузка этими параметрами уже состоялась:
         # иначе уход с поля и возврат сходили бы в сеть ещё раз тем же ключом.
         self._autoload_key = (self._current_url(), self._current_auth_header())
-        return self._start_models_fetch(refresh=True)
+        self._start_models_fetch(refresh=True)
+        return True
 
-    def _start_models_fetch(self, *, refresh: bool) -> bool:
+    def _start_models_fetch(self, *, refresh: bool) -> None:
         """Уйти за списком моделей. `refresh=False` — автоподгрузка при входе в поле
         (кэш годится), `True` — принудительное перечитывание по Alt+↓."""
         try:
@@ -1664,7 +1665,7 @@ class ModelEntryForm(Vertical):
             )
         except ValueError as exc:
             self._fail(f"backend: {exc}")
-            return True
+            return
         url = self._current_url()
         if not url:
             self._set_status(_LIST_NO_URL)
@@ -1692,7 +1693,6 @@ class ModelEntryForm(Vertical):
                     group="model-entry-list",
                     name="model-entry-list-fetch",
                 )
-        return True
 
     def _fetch_blocking(
         self,
@@ -1945,7 +1945,7 @@ class ModelEntryForm(Vertical):
         )
         return resolved.use_ssl, resolved.proxy
 
-    def probe_connection(self) -> bool:
+    def probe_connection(self) -> None:
         """`Ctrl+Space`: проверить связь по тем значениям, что стоят в полях СЕЙЧАС.
         Это ПРОБА, не подбор списка (контракт п.4).
 
@@ -1963,7 +1963,7 @@ class ModelEntryForm(Vertical):
             )
         except ValueError as exc:
             self._fail(f"backend: {exc}")
-            return True
+            return
         url = self._current_url()
         if not url:
             self._set_probe_line(Text(_PROBE_NO_URL, style=DEEP_DIM))
@@ -1986,7 +1986,6 @@ class ModelEntryForm(Vertical):
                     group="model-entry-probe",
                     name="model-entry-probe",
                 )
-        return True
 
     def _probe_blocking(
         self,

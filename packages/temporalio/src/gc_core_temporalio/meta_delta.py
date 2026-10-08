@@ -160,30 +160,36 @@ class TextIndex:
                 self._exact[text] = (digest, list(path), 0)
                 self._texts.append((digest, list(path), text))
 
+    def _parent_ref(self, text: str) -> dict[str, Any] | None:
+        for parent in self.parents:
+            ref = parent.ref(text)
+            if ref is not None:
+                return ref
+        return None
+
+    def _message_place(self, text: str) -> tuple[str, list, int] | None:
+        """Где текст лежит в сообщениях индекса: хэш, путь, начало."""
+        found = self._exact.get(text)
+        if found is not None:
+            return found
+        # Запрос пользователя в журнале — текст сообщения без пробелов
+        # по краям: часть строки, а не вся строка.
+        for digest, path, source in self._texts:
+            start = source.find(text)
+            if start >= 0:
+                return digest, path, start
+        return None
+
     def ref(self, text: str) -> dict[str, Any] | None:
         if len(text) >= self._meta_min and text in self._meta:
             return {META_REF_KEY: _text_id(text)}
-        if len(text) < TEXT_REF_MIN_CHARS:
-            for parent in self.parents:
-                ref = parent.ref(text)
-                if ref is not None:
-                    return ref
-            return None
-        found = self._exact.get(text)
+        found = (
+            self._message_place(text)
+            if len(text) >= TEXT_REF_MIN_CHARS
+            else None
+        )
         if found is None:
-            # Запрос пользователя в журнале — текст сообщения без пробелов
-            # по краям: часть строки, а не вся строка.
-            for digest, path, source in self._texts:
-                start = source.find(text)
-                if start >= 0:
-                    found = (digest, path, start)
-                    break
-        if found is None:
-            for parent in self.parents:
-                ref = parent.ref(text)
-                if ref is not None:
-                    return ref
-            return None
+            return self._parent_ref(text)
         digest, path, start = found
         return {TEXT_REF_KEY: [digest, path, start, len(text), _digest(text)]}
 
@@ -207,26 +213,26 @@ def _escape(value: Any) -> Any:
     return value
 
 
+def _encode_items(value: Any, texts: TextIndex) -> Any:
+    if isinstance(value, dict):
+        return {key: _encode(item, texts) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_encode(item, texts) for item in value]
+    return value
+
+
 def _encode(value: Any, texts: TextIndex | None) -> Any:
     if texts is None:
         return _escape(value)
     if _service_like(value):
-        return {
-            LITERAL_KEY: {
-                key: _encode(item, texts) for key, item in value.items()
-            }
-        }
+        return {LITERAL_KEY: _encode_items(value, texts)}
     if isinstance(value, str):
         return texts.ref(value) or value
     if isinstance(value, (dict, list)) and texts.has_nodes():
         ref = texts.node_ref(value)
         if ref is not None:
             return ref
-    if isinstance(value, dict):
-        return {key: _encode(item, texts) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_encode(item, texts) for item in value]
-    return value
+    return _encode_items(value, texts)
 
 
 def _same(left: Any, right: Any) -> bool:
@@ -244,37 +250,40 @@ def _same(left: Any, right: Any) -> bool:
     return left == right
 
 
+def _diff_dict(old: dict, new: dict, texts: TextIndex | None) -> dict:
+    """Тело разницы словарей: ``set``/``drop``/``sub`` (пустые — без ключа)."""
+    drop = [key for key in old if key not in new]
+    added = {
+        key: _encode(value, texts)
+        for key, value in new.items()
+        if key not in old
+    }
+    sub = {
+        key: change
+        for key, value in new.items()
+        if key in old and (change := diff(old[key], value, texts)) is not None
+    }
+    parts = (("set", added), ("drop", drop), ("sub", sub))
+    return {name: part for name, part in parts if part}
+
+
+def _common_prefix(old: list, new: list) -> int:
+    common = 0
+    for left, right in zip(old, new):
+        if not _same(left, right):
+            break
+        common += 1
+    return common
+
+
 def diff(old: Any, new: Any, texts: TextIndex | None = None) -> Delta:
     """Разница ``old`` → ``new`` (оба — уже JSON-вид, см. ``normalize``)."""
     if _same(old, new):
         return None
     if isinstance(old, dict) and isinstance(new, dict):
-        drop = [key for key in old if key not in new]
-        added = {
-            key: _encode(value, texts)
-            for key, value in new.items()
-            if key not in old
-        }
-        sub = {
-            key: change
-            for key, value in new.items()
-            if key in old
-            and (change := diff(old[key], value, texts)) is not None
-        }
-        body: dict[str, Any] = {}
-        if added:
-            body["set"] = added
-        if drop:
-            body["drop"] = drop
-        if sub:
-            body["sub"] = sub
-        return {"{": body}
+        return {"{": _diff_dict(old, new, texts)}
     if isinstance(old, list) and isinstance(new, list):
-        common = 0
-        for left, right in zip(old, new):
-            if not _same(left, right):
-                break
-            common += 1
+        common = _common_prefix(old, new)
         if common:
             return {"+": [common, _encode(new[common:], texts)]}
     return {"=": _encode(new, texts)}
@@ -361,39 +370,45 @@ class TextSource:
         return text
 
 
+#: Ссылка разницы → метод ``TextSource``, который отдаёт её содержимое.
+# Ключ ссылки → чтение из источника текстов (утиная типизация: подойдёт любой
+# объект с этими методами, не только TextSource).
+_REF_READERS = {
+    TEXT_REF_KEY: lambda texts, ref: texts.message_text(ref),
+    META_REF_KEY: lambda texts, ref: texts.meta_text(ref),
+    NODE_REF_KEY: lambda texts, ref: texts.meta_node(ref),
+}
+
+
+def _decode_dict(value: dict, texts: TextSource | None) -> Any:
+    if len(value) == 1:
+        ((key, item),) = value.items()
+        if key == LITERAL_KEY:
+            return {name: _decode(part, texts) for name, part in item.items()}
+        reader = _REF_READERS.get(key)
+        if reader is not None:
+            return reader(texts or TextSource(), item)
+    return {key: _decode(item, texts) for key, item in value.items()}
+
+
 def _decode(value: Any, texts: TextSource | None) -> Any:
     if isinstance(value, dict):
-        if len(value) == 1 and LITERAL_KEY in value:
-            return {
-                key: _decode(item, texts)
-                for key, item in value[LITERAL_KEY].items()
-            }
-        if len(value) == 1 and TEXT_REF_KEY in value:
-            return (texts or TextSource()).message_text(value[TEXT_REF_KEY])
-        if len(value) == 1 and META_REF_KEY in value:
-            return (texts or TextSource()).meta_text(value[META_REF_KEY])
-        if len(value) == 1 and NODE_REF_KEY in value:
-            return (texts or TextSource()).meta_node(value[NODE_REF_KEY])
-        return {key: _decode(item, texts) for key, item in value.items()}
+        return _decode_dict(value, texts)
     if isinstance(value, list):
         return [_decode(item, texts) for item in value]
     return value
 
 
-def apply(old: Any, delta: Delta, texts: TextSource | None = None) -> Any:
-    """``old`` + разница → новое значение (``old`` не меняется)."""
-    if delta is None:
-        return old
-    if "=" in delta:
-        return _decode(delta["="], texts)
-    if "+" in delta:
-        if not isinstance(old, list):
-            raise MetaDeltaError("Хвост списка meta поверх не-списка")
-        common, tail = delta["+"]
-        if len(old) < common:
-            raise MetaDeltaError("Список meta короче базы разницы")
-        return old[:common] + _decode(tail, texts)
-    body = delta["{"]
+def _apply_tail(old: Any, change: list, texts: TextSource | None) -> list:
+    if not isinstance(old, list):
+        raise MetaDeltaError("Хвост списка meta поверх не-списка")
+    common, tail = change
+    if len(old) < common:
+        raise MetaDeltaError("Список meta короче базы разницы")
+    return old[:common] + _decode(tail, texts)
+
+
+def _apply_dict(old: Any, body: dict, texts: TextSource | None) -> dict:
     if not isinstance(old, dict):
         raise MetaDeltaError("Разница словаря meta поверх не-словаря")
     result = dict(old)
@@ -406,11 +421,22 @@ def apply(old: Any, delta: Delta, texts: TextSource | None = None) -> Any:
     for key, value in body.get("set", {}).items():
         result[key] = _decode(value, texts)
     order = body.get("order")
-    if order is not None:
-        if any(key not in result for key in order):
-            raise MetaDeltaError("Ключа meta нет после разницы")
-        result = {key: result[key] for key in order}
-    return result
+    if order is None:
+        return result
+    if any(key not in result for key in order):
+        raise MetaDeltaError("Ключа meta нет после разницы")
+    return {key: result[key] for key in order}
+
+
+def apply(old: Any, delta: Delta, texts: TextSource | None = None) -> Any:
+    """``old`` + разница → новое значение (``old`` не меняется)."""
+    if delta is None:
+        return old
+    if "=" in delta:
+        return _decode(delta["="], texts)
+    if "+" in delta:
+        return _apply_tail(old, delta["+"], texts)
+    return _apply_dict(old, delta["{"], texts)
 
 
 def canonical(value: Any) -> Any:
@@ -441,27 +467,27 @@ def meta_hash(meta: Any) -> str:
     return hashlib.sha256(encoded.encode()).hexdigest()[:32]
 
 
+def _walk_text_refs(value: Any, found: set[str]) -> None:
+    if isinstance(value, list):
+        items = value
+    elif not isinstance(value, dict):
+        return
+    elif len(value) == 1 and LITERAL_KEY in value:
+        # Сам литерал — данные; ссылки бывают только внутри значений.
+        items = value[LITERAL_KEY].values()
+    elif len(value) == 1 and TEXT_REF_KEY in value:
+        found.add(value[TEXT_REF_KEY][0])
+        return
+    else:
+        items = value.values()
+    for item in items:
+        _walk_text_refs(item, found)
+
+
 def text_refs(delta: Any) -> set[str]:
     """Хэши сообщений, на тексты которых ссылается разница."""
     found: set[str] = set()
-
-    def walk(value: Any) -> None:
-        if isinstance(value, dict):
-            if len(value) == 1 and LITERAL_KEY in value:
-                # Сам литерал — данные; ссылки бывают только внутри значений.
-                for item in value[LITERAL_KEY].values():
-                    walk(item)
-                return
-            if len(value) == 1 and TEXT_REF_KEY in value:
-                found.add(value[TEXT_REF_KEY][0])
-                return
-            for item in value.values():
-                walk(item)
-        elif isinstance(value, list):
-            for item in value:
-                walk(item)
-
-    walk(delta)
+    _walk_text_refs(delta, found)
     return found
 
 

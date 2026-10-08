@@ -147,12 +147,3 @@ def intent_scope_from_config_dict(
     from gc_core.settings import settings_of
 
     return settings_of(settings).intent_scope
-
-
-def backend_allows_intent_scope_hook(
-    settings: Any,
-) -> bool:
-    from gc_core.settings import settings_of
-
-    raw_mode = str(settings_of(settings).backend.api_mode).strip().lower()
-    return raw_mode == "chat_completions"

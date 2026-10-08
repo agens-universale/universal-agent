@@ -202,6 +202,38 @@ def _resolve_server_agent_md(raw: str, server_cfg: Dict[str, Any]) -> str:
     return local
 
 
+def _server_logging_updates(server_cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """Секция ``logging`` сервера → правки ``logging.*``."""
+    log_block = server_cfg.get("logging")
+    if not isinstance(log_block, dict) or not log_block:
+        return {}
+    from gc_core.config_modules.logging_config import LoggingConfig
+    from gc_core.config_modules.unknown_keys import (
+        drop_unknown_keys,
+        unknown_key_notice,
+    )
+
+    # Лишний ключ не роняет старт (как в YAML агента): отбрасывается с
+    # предупреждением.
+    log_block, unknown = drop_unknown_keys(log_block, LoggingConfig)
+    for item in unknown:
+        logger.warning(unknown_key_notice(item, "config_server.yml: logging"))
+    return {f"logging.{key}": value for key, value in log_block.items()}
+
+
+def _server_agent_md_updates(server_cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """``agent.server_agentmd_path`` (от PROJECT_ROOT) → ``paths.agent_md_path``."""
+    agent_cfg = server_cfg.get("agent") or {}
+    server_agent_path = agent_cfg.get("server_agentmd_path")
+    if not isinstance(server_agent_path, str) or not server_agent_path.strip():
+        return {}
+    return {
+        "paths.agent_md_path": _resolve_server_agent_md(
+            server_agent_path, server_cfg
+        )
+    }
+
+
 def build_agent_settings_for_server(server_cfg: Dict[str, Any]):
     """Настройки агента для REST-сервера: ``LoadedSettings``.
 
@@ -217,30 +249,10 @@ def build_agent_settings_for_server(server_cfg: Dict[str, Any]):
       с подсказкой пути.
     """
     loaded = load_settings()
-    updates: Dict[str, Any] = {}
-    log_block = server_cfg.get("logging")
-    if isinstance(log_block, dict) and log_block:
-        from gc_core.config_modules.logging_config import LoggingConfig
-        from gc_core.config_modules.unknown_keys import (
-            drop_unknown_keys,
-            unknown_key_notice,
-        )
-
-        # Лишний ключ не роняет старт (как в YAML агента): отбрасывается с
-        # предупреждением.
-        log_block, unknown = drop_unknown_keys(log_block, LoggingConfig)
-        for item in unknown:
-            logger.warning(
-                unknown_key_notice(item, "config_server.yml: logging")
-            )
-        for key, value in log_block.items():
-            updates[f"logging.{key}"] = value
-    agent_cfg = server_cfg.get("agent") or {}
-    server_agent_path = agent_cfg.get("server_agentmd_path")
-    if isinstance(server_agent_path, str) and server_agent_path.strip():
-        updates["paths.agent_md_path"] = _resolve_server_agent_md(
-            server_agent_path, server_cfg
-        )
+    updates = {
+        **_server_logging_updates(server_cfg),
+        **_server_agent_md_updates(server_cfg),
+    }
     loaded = loaded.with_overrides(updates, layer="server")
     overrides = server_cfg.get("agent_overrides") or {}
     if isinstance(overrides, dict) and overrides:

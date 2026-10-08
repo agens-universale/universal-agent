@@ -1,5 +1,6 @@
 from gc_testkit.tui_support import as_settings, tui_settings
 import pytest
+from form_harness import goto_step
 
 
 class _FakeMcp:
@@ -53,7 +54,7 @@ async def test_onboarding_mcp_row_shows_description(tmp_path):
         scr = _screen()
         await pilot.app.push_screen(scr)
         await pilot.pause()
-        scr._goto(STEP_MCP)
+        goto_step(scr, STEP_MCP)
         await pilot.pause()
         blob = " ".join(str(w.render()) for w in scr.query(".onb-option"))
         assert "веб-поиск" in blob

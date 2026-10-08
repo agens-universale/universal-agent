@@ -3,7 +3,7 @@
 
 Один мьютекс на экземпляр, держится кратко (доступ к state / pending / stop).
 State создаётся заново при каждом run(). Возвращённый из get_state() state
-нельзя мутировать снаружи; изменения — только через add_message() или под get_lock().
+нельзя мутировать снаружи; изменения — только через add_message() или под замком executor'а.
 """
 
 import asyncio
@@ -222,6 +222,38 @@ def _put_attachments(msg: dict, attachments, i: int, commit) -> None:
         msg["attachments"] = [
             (commit(a) if commit is not None else a).to_dict() for a in atts
         ]
+
+
+def _require_supported_persist_mode(settings: Any, ctx: Any) -> None:
+    """``persist: turn`` — только у durable-исполнителя (Temporal).
+
+    Без истории durable-исполнителя несохранённые шаги пропали бы при падении
+    процесса, а UI не видел бы хода."""
+    if settings.thread_store.persist == "turn" and not getattr(
+        ctx, "durable_execution", False
+    ):
+        raise ValueError(
+            "thread_store.persist: turn is supported only by a durable "
+            "executor (Temporal); local runs use persist: step"
+        )
+
+
+def _extend_with_thread_history(
+    state: Any, thread_session: Any, backend_api_mode: str
+) -> None:
+    """chat_completions: история треда — копиями сообщений в ``state.messages``."""
+    if (
+        thread_session is not None
+        and backend_api_mode == "chat_completions"
+        and thread_session.history_messages
+    ):
+        state.messages.extend(
+            [
+                _shallow_copy_msg(m)
+                for m in thread_session.history_messages
+                if isinstance(m, dict)
+            ]
+        )
 
 
 class AgentExecutor:
@@ -894,15 +926,7 @@ class AgentExecutor:
             self._state = None
             self._accounting_closed = False
         settings = settings_of(self._ctx)
-        if settings.thread_store.persist == "turn" and not getattr(
-            self._ctx, "durable_execution", False
-        ):
-            # Без истории durable-исполнителя несохранённые шаги пропали бы
-            # при падении процесса, а UI не видел бы хода.
-            raise ValueError(
-                "thread_store.persist: turn is supported only by a durable "
-                "executor (Temporal); local runs use persist: step"
-            )
+        _require_supported_persist_mode(settings, self._ctx)
         logger = getattr(self._ctx, "logger", None)
         effective_verbose = (
             verbose if verbose is not None else settings.agent.verbose
@@ -971,18 +995,7 @@ class AgentExecutor:
             session_rules=state.shared.confirm_rules
         )
 
-        if (
-            thread_session is not None
-            and backend_api_mode == "chat_completions"
-            and thread_session.history_messages
-        ):
-            state.messages.extend(
-                [
-                    _shallow_copy_msg(m)
-                    for m in thread_session.history_messages
-                    if isinstance(m, dict)
-                ]
-            )
+        _extend_with_thread_history(state, thread_session, backend_api_mode)
 
         summary = RunSummaryCoordinator(
             ctx=self._ctx,
@@ -1144,17 +1157,10 @@ class AgentExecutor:
     def get_state(self) -> State | None:
         """
         Возвращает текущий state (под замком).
-        Не мутировать снаружи; изменения — только через add_message() или под get_lock().
+        Не мутировать снаружи; изменения — только через add_message() или под замком executor'а.
         """
         with self._lock:
             return self._state
-
-    def get_lock(self) -> threading.Lock:
-        """
-        Возвращает мьютекс executor'а.
-        Изменения state — только под этим замком.
-        """
-        return self._lock
 
     def get_model_router(self):
         """Router, зафиксированный при сборке ЭТОГО executor'а (``RunContext.model_router``,

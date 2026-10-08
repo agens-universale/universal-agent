@@ -951,7 +951,7 @@ async def test_typing_an_unmatched_address_returns_the_arrows_to_the_form():
             "#conn-url", Input
         ).value = "https://my-own-host.internal/v1"
         await pilot.pause()
-        assert ed._presets_ctrl.has_matches is False
+        assert not ed._presets_ctrl.visible_items
 
         ed.move(1)
         await pilot.pause()

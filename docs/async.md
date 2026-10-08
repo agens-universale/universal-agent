@@ -159,8 +159,9 @@ answer = await AgentExecutor(ctx).arun(
   `archive_and_compact_summary_payload`) в этом списке раньше стояли по ошибке:
   это не контракт хранилища, а фасад ядра, и синхронных форм у него больше нет
   — только `afrom_config`, `apersist_batch` и `aarchive_and_compact_summary_payload`;
-* **долгоживущий stdio MCP** — `PersistentStdioSession.close`, `close_all` и
-  построчное чтение в `transport`. Их зовёт `atexit`, где loop'а уже нет, а
+* **долгоживущий stdio MCP** — `PersistentStdioSession.close`,
+  `close_everything` и построчное чтение в `transport`. Их зовёт `atexit`,
+  где loop'а уже нет, а
   обмен с процессом блокирующий по существу. Плюс синхронные `list_tools` /
   `call_tool` у `AgentRuntimeClient`: они обслуживают ровно этот транспорт и
   всему остальному отказывают громко.

@@ -36,6 +36,9 @@ from gc_tui.palette import ACCENT, DEEP_DIM, DIM, ERR, INK, OK, WARN
 from gc_tui.services.probe_presentation import connection_line_text
 from gc_tui.widgets.loading_wave import WAVE_INTERVAL, WAVE_SEQ, wave_glyph
 
+# Клавиша сохранения настроек.
+_SAVE_KEY = "ctrl+s"
+
 # Константы вместо повторяющихся литералов (Sonar S1192).
 _SEL_SET_SCROLL = "#set-scroll"
 _SEL_SET_FOOTER = "#set-footer"
@@ -49,7 +52,6 @@ _KEY_CTRL_DOWN = "ctrl+down"
 _KEY_CTRL_SPACE = "ctrl+space"
 _KEY_CTRL_U = "ctrl+u"
 _MSG_APPLIES_NEXT_TURN = "применится со следующего хода агента"
-_MSG_NOTHING_CHANGED = "ничего не изменено"
 _SEL_SET_FRAME = "#set-frame"
 _SEL_SET_MENUROW = ".set-menurow"
 
@@ -1939,21 +1941,6 @@ class SettingsScreen(Screen):
             except NoMatches:
                 pass
 
-    def _smart_enter_decide(self, section: int, values: dict, r) -> None:
-        """Проверка ⊥ Сохранение: Enter всегда сохраняет (блок — только формальная
-        невалидность, её ловит _collect_values→submit). Вердикт сервера — информация.
-
-        Текст реплики — у `probe_presentation.save_warning`: разбирать `verdict`
-        здесь значило бы завести третье прочтение одного результата (после строки
-        секции и глифа хаба), и оно уже разъехалось — «rejected» объявлялось
-        отклонённым токеном даже когда сервер писал про имя модели."""
-        if not values:
-            self._title_note(_MSG_NOTHING_CHANGED)
-            return
-        from gc_tui.services.probe_presentation import save_warning
-
-        self._do_save(section, values, warn_detail=save_warning(r))
-
     # --- guard записи ---
     def _writable(self) -> bool:
         return self._target_writable(self._config_path)
@@ -2199,7 +2186,7 @@ class SettingsScreen(Screen):
             event.prevent_default()
             self._refresh_footer()
             return True
-        if event.key == "ctrl+s" and ed.save_form():
+        if event.key == _SAVE_KEY and ed.save_form():
             event.stop()
             event.prevent_default()
             self._refresh_footer()
@@ -2966,12 +2953,6 @@ class SettingsScreen(Screen):
         запомненная позиция после переключения может оказаться за краем."""
         n = len(self._voice_ribbon_fields())
         return min(max(self._voice_field_idx, 0), n - 1) if n else 0
-
-    def _voice_cursor_position(self) -> int:
-        """Позиция внутри текущей группы (у каждой она своя и помнится отдельно)."""
-        if self._voice_cursor_group() == _VOICE_GROUP_FIELDS:
-            return self._voice_field_position()
-        return self._voice_row
 
     def _voice_highlight_variants(self) -> bool:
         """Красить ли подложкой строку режима. Курсор один (спека §4.1): ушёл в поля —
@@ -7099,8 +7080,10 @@ class SettingsScreen(Screen):
             ed = self._models_editor()
             if ed is not None and ed.form_open and ed._form.is_dirty():
                 self._pending_section_delta = delta
-                while ed._form.escape():
-                    pass
+                # Свернуть все под-состояния формы: каждый Esc снимает одно.
+                collapsed = ed._form.escape()
+                while collapsed:
+                    collapsed = ed._form.escape()
                 ed.escape()
                 self._refresh_footer()
                 return
@@ -7223,7 +7206,7 @@ class SettingsScreen(Screen):
             ed = self._models_editor()
             if ed is not None and self._route_registry_editor(ed, event):
                 return
-        if event.key == "ctrl+s" and self._view == _CONNECTION:
+        if event.key == _SAVE_KEY and self._view == _CONNECTION:
             event.stop()
             if not self._writable():
                 self._notice("конфиг недоступен для записи")
@@ -7280,7 +7263,7 @@ class SettingsScreen(Screen):
                         -1 if event.key == "up" else 1
                     )  # навигация отменяет
                 return  # прочие клавиши — no-op, пока висит confirm
-            if event.key == "ctrl+s":
+            if event.key == _SAVE_KEY:
                 event.stop()
                 if self._voice_pane == "cloud":
                     self._voice_cloud_save()

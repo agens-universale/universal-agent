@@ -3,7 +3,6 @@ from gc_core.config_modules.intent_scope import (
     DEFAULT_INTENT_SCOPE_MAX_RAW_RECORD_CHARS,
     IntentScopeConfig,
     IntentScopeToolConfig,
-    backend_allows_intent_scope_hook,
     intent_scope_active,
     intent_scope_from_config_dict,
     intent_scope_tool_record,
@@ -81,15 +80,6 @@ def test_normalize_intent_scope_config_clamps_invalid_max_raw_record_chars():
     cfg = normalize_intent_scope_config(cfg)
     assert (
         cfg.max_raw_record_chars == DEFAULT_INTENT_SCOPE_MAX_RAW_RECORD_CHARS
-    )
-
-
-def test_backend_allows_intent_scope_hook_only_chat_completions():
-    assert not backend_allows_intent_scope_hook(
-        make_settings({"backend.api_mode": "responses"})
-    )
-    assert backend_allows_intent_scope_hook(
-        make_settings({"backend.api_mode": "chat_completions"})
     )
 
 

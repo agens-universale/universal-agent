@@ -98,27 +98,3 @@ def test_state_exposes_usage_and_last_run_in_memory():
     assert isinstance(st.usage, UsageAccount)
     assert st.usage.is_empty()
     assert st.last_run_usage is None
-
-
-def test_last_run_usage_survives_state_snapshot():
-    # last_run_usage (UsageAccount) сериализуется/восстанавливается в session-снапшоте.
-    from gc_core.persistence.state_serializer import StateSerializer
-    from gc_core.states import State
-
-    st = State(
-        verbose=False,
-        model="m",
-        tools_spec=[],
-        tools_descr=[],
-        skills_list=[],
-        max_steps=10,
-        system_prompt_id="v1",
-        use_server_subagents=False,
-    )
-    st.usage.add(CATEGORY_MAIN, 150, 30)
-    st.last_run_usage = UsageAccount()
-    st.last_run_usage.add(CATEGORY_MAIN, 50, 10)
-    restored = StateSerializer.deserialize(StateSerializer.serialize(st))
-    assert restored.usage.totals()["input"] == 150
-    assert isinstance(restored.last_run_usage, UsageAccount)
-    assert restored.last_run_usage.totals()["input"] == 50

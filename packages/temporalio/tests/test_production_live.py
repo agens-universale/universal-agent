@@ -7,12 +7,16 @@ import pytest
 from gc_core_temporalio.client import AgentClient
 from gc_core_temporalio.contracts import RunRequest
 from gc_core_temporalio.provider import WorkerConfig
-from gc_core_temporalio.worker import build_runtime, worker_options
+from gc_core_temporalio.worker import build_runtime
 from gc_core_temporalio.workflow import UniversalAgentWorkflow
 from temporalio.client import WorkflowFailureError
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer, Worker
-from live_support import provider, temporal_cli  # noqa: F401
+from live_support import (  # noqa: F401
+    provider,
+    temporal_cli,
+    worker_kwargs,
+)
 
 
 @pytest.mark.parametrize("provider_unavailable", [False, True])
@@ -74,7 +78,7 @@ async def test_production_provider_worker_client_and_replay(
         async with await WorkflowEnvironment.start_local(
             dev_server_existing_path=binary
         ) as env:
-            (options,) = worker_options(config, native, threads)
+            options = worker_kwargs(config, native, threads)
             async with Worker(
                 env.client,
                 **options,

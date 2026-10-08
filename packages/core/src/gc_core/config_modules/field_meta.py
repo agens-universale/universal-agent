@@ -257,26 +257,38 @@ def redact_free_form(value: Any) -> Any:
             for key, item in value.items()
         }
     if isinstance(value, list):
-        out: list = []
-        hide_next = False
-        for item in value:
-            if hide_next and item not in (None, ""):
-                out.append(MASK)
-                hide_next = False
-                continue
-            hide_next = False
-            if isinstance(item, str) and item.startswith("-"):
-                name, sep, _rest = item.lstrip("-").partition("=")
-                if is_secret_name(name):
-                    if sep:
-                        out.append(item.split("=", 1)[0] + "=" + MASK)
-                        continue
-                    hide_next = True
-            out.append(redact_free_form(item))
-        return out
+        return _redact_args(value)
     if isinstance(value, str):
         return _mask_url(value)
     return value
+
+
+def _redact_args(items: list) -> list:
+    """Список аргументов: значение после секретного флага скрывается."""
+    out: list = []
+    hide_next = False
+    for item in items:
+        if hide_next and item not in (None, ""):
+            out.append(MASK)
+            hide_next = False
+            continue
+        redacted, hide_next = _redact_arg(item)
+        out.append(redacted)
+    return out
+
+
+def _redact_arg(item: Any) -> tuple[Any, bool]:
+    """Один аргумент → (что показать, скрыть ли следующий аргумент).
+
+    ``--token=VALUE`` маскируется на месте; ``--api-key`` без ``=`` прячет
+    значение, идущее следующим аргументом."""
+    if isinstance(item, str) and item.startswith("-"):
+        name, sep, _rest = item.lstrip("-").partition("=")
+        if is_secret_name(name):
+            if sep:
+                return item.split("=", 1)[0] + "=" + MASK, False
+            return redact_free_form(item), True
+    return redact_free_form(item), False
 
 
 def _is_leaf(parts: tuple[str, ...]) -> bool:

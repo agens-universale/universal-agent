@@ -174,23 +174,19 @@ def _json_value(value: Any, path: str) -> Any:
     raise PublicConfigError(f"Non-JSON public value at {path}")
 
 
-def _copy_policy(value: Any, schema: Any, path: str) -> Any:
-    if schema == "json":
-        return _json_value(value, path)
-    if schema == "scalar_or_list":
-        return _copy_policy(
-            value, ["scalar"] if isinstance(value, list) else "scalar", path
-        )
-    if schema == "scalar":
-        if isinstance(value, (list, dict)):
-            raise PublicConfigError(
-                f"Expected a scalar public value at {path}"
-            )
-        return _json_value(value, path)
-    if isinstance(schema, list):
-        if not isinstance(value, list):
-            raise PublicConfigError(f"Expected a public list at {path}")
-        return [_copy_policy(item, schema[0], f"{path}[]") for item in value]
+def _copy_scalar(value: Any, path: str) -> Any:
+    if isinstance(value, (list, dict)):
+        raise PublicConfigError(f"Expected a scalar public value at {path}")
+    return _json_value(value, path)
+
+
+def _copy_list(value: Any, item_schema: Any, path: str) -> list:
+    if not isinstance(value, list):
+        raise PublicConfigError(f"Expected a public list at {path}")
+    return [_copy_policy(item, item_schema, f"{path}[]") for item in value]
+
+
+def _copy_object(value: Any, schema: dict, path: str) -> dict:
     if not isinstance(value, dict):
         raise PublicConfigError(f"Expected a public object at {path}")
     output = {}
@@ -205,6 +201,20 @@ def _copy_policy(value: Any, schema: Any, path: str) -> Any:
             item, schema.get(key, schema.get("*")), f"{path}.{key}"
         )
     return output
+
+
+def _copy_policy(value: Any, schema: Any, path: str) -> Any:
+    if schema == "json":
+        return _json_value(value, path)
+    if schema == "scalar_or_list":
+        return _copy_policy(
+            value, ["scalar"] if isinstance(value, list) else "scalar", path
+        )
+    if schema == "scalar":
+        return _copy_scalar(value, path)
+    if isinstance(schema, list):
+        return _copy_list(value, schema[0], path)
+    return _copy_object(value, schema, path)
 
 
 def _apply_free_form_policy(

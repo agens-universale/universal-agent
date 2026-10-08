@@ -64,15 +64,6 @@ def test_default_registry_includes_core_commands():
         assert reg.lookup(n) is not None, f"missing /{n}"
 
 
-def test_requires_args_optional_vs_required():
-    """`<…>` — обязательный аргумент; `[…]` и пусто — Enter выполняет сразу."""
-    reg = build_default_registry()
-    assert reg.lookup("view").requires_args is True
-    assert reg.lookup("skill").requires_args is True
-    assert reg.lookup("export").requires_args is False
-    assert reg.lookup("help").requires_args is False
-
-
 def test_default_registry_is_exactly_keep_set():
     reg = build_default_registry()
     names = sorted(c.name for c in reg.list_commands())
@@ -319,4 +310,4 @@ def test_voice_command_registered_with_hotkey():
     cmd = reg.lookup("voice")
     assert cmd is not None
     assert cmd.hotkey == "Ctrl+T"  # F1-справка генерится из реестра
-    assert not cmd.is_toggle and not cmd.requires_args
+    assert not cmd.is_toggle and not cmd.args  # без аргумента

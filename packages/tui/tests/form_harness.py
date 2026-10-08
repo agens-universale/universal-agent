@@ -27,6 +27,35 @@ from unittest import mock
 
 from gc_testkit.tui_support import open_settings_section, wait_until
 
+# --- навигация и курсор экранов (наблюдатели, которых прод-коду не нужно) -------
+
+
+def goto_step(scr, step_id: str) -> None:
+    """Мастер: перейти на именованный шаг напрямую. Прод-переходы идут через
+    `_advance`/`_go_back`; тесты навигации адресуют шаги по имени."""
+    scr._leave_step()
+    scr._step = scr._steps.index(step_id)
+    scr._render_step()
+
+
+def wizard_voice_cursor_position(scr) -> int:
+    """Мастер, шаг голоса: позиция курсора внутри текущей группы (у каждой своя)."""
+    from gc_tui.screens.onboarding import _VOICE_GROUP_FIELDS, STEP_VOICE
+
+    if scr._voice_cursor_group() == _VOICE_GROUP_FIELDS:
+        return scr._voice_field_position()
+    return scr._idx.get(STEP_VOICE, 0)
+
+
+def settings_voice_cursor_position(scr) -> int:
+    """/settings, секция голоса: позиция курсора внутри текущей группы."""
+    from gc_tui.screens.settings import _VOICE_GROUP_FIELDS
+
+    if scr._voice_cursor_group() == _VOICE_GROUP_FIELDS:
+        return scr._voice_field_position()
+    return scr._voice_row
+
+
 # --- фейки для форм (мастер + /settings) --------------------------------------
 #
 # Тесты форм раз за разом подсовывают одни и те же три подмены: пробу подключения,

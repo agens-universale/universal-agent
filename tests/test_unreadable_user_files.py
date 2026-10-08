@@ -176,11 +176,6 @@ def _cases() -> list[_Case]:
 
         return ocw.ensure_pointer_anchor(path, template, key="profile")
 
-    def _ensure_section_anchor(path, **_):
-        from gc_core import onboarding_config_writer as ocw
-
-        return ocw.ensure_section_anchor(path, "models", "models: {}\n")
-
     def _template_setup(tmp: Path) -> dict:
         template = tmp / "config.default.yml"
         template.write_text('profile: ""\nmodel: m\n', encoding="utf-8")
@@ -194,12 +189,6 @@ def _cases() -> list[_Case]:
             _BODY_YAML,
             _ensure_pointer_anchor,
             setup=_template_setup,
-        ),
-        _Case(
-            "ocw.ensure_section_anchor",
-            "config.yml",
-            _BODY_YAML,
-            _ensure_section_anchor,
         ),
     ]
 

@@ -191,25 +191,6 @@ def run_command_judge(
     return validate_judge_result(raw_result)
 
 
-def run_command_judge_with_retry(
-    judge_client: Any, judge_payload: dict[str, Any], *, retries: int = 1
-) -> JudgeResult:
-    """Судья с ретраями: слабая модель часто отдаёт мусорный вердикт разово —
-    один повтор перед тем как признать судью недоступным. Если все попытки
-    исчерпаны — пробрасываем последнее исключение (декоратор переведёт это в
-    judge_unavailable → fail-closed, security не ослаблен)."""
-    last_exc: Exception | None = None
-    for _ in range(retries + 1):
-        try:
-            return run_command_judge(judge_client, judge_payload)
-        except ExecutionFailure:
-            raise
-        except Exception as exc:
-            last_exc = exc
-    assert last_exc is not None
-    raise last_exc
-
-
 def judge_with_retry_flow(
     judge_client: Any, judge_payload: dict[str, Any], *, retries: int = 1
 ):

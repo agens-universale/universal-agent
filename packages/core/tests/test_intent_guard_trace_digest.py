@@ -5,7 +5,6 @@ from gc_core.config_modules.quality_gate import (
     DEFAULT_QUALITY_GATE_MAX_DIALOGUE_CHARS,
     DEFAULT_QUALITY_GATE_MAX_MESSAGE_CHARS,
     QualityGateConfig,
-    digest_limits_from_params,
     normalize_quality_gate_config,
 )
 from gc_core.config_modules.root import AppConfig, resolve_paths
@@ -79,14 +78,6 @@ class FinishGateTraceDigestTest(unittest.TestCase):
         self.assertEqual(
             qg.max_message_chars, DEFAULT_QUALITY_GATE_MAX_MESSAGE_CHARS
         )
-        limits = digest_limits_from_params(qg.model_dump())
-        self.assertEqual(
-            limits["max_dialogue_chars"],
-            DEFAULT_QUALITY_GATE_MAX_DIALOGUE_CHARS,
-        )
-        self.assertEqual(
-            limits["max_message_chars"], DEFAULT_QUALITY_GATE_MAX_MESSAGE_CHARS
-        )
 
     def test_resolve_paths_normalizes_quality_gate_in_config_dict(
         self,
@@ -100,13 +91,12 @@ class FinishGateTraceDigestTest(unittest.TestCase):
                 )
             )
             cfg = resolve_paths(cfg, tmp)
-            limits = digest_limits_from_params(cfg.quality_gate.model_dump())
             self.assertEqual(
-                limits["max_dialogue_chars"],
+                cfg.quality_gate.max_dialogue_chars,
                 DEFAULT_QUALITY_GATE_MAX_DIALOGUE_CHARS,
             )
             self.assertEqual(
-                limits["max_message_chars"],
+                cfg.quality_gate.max_message_chars,
                 DEFAULT_QUALITY_GATE_MAX_MESSAGE_CHARS,
             )
 
@@ -201,7 +191,10 @@ class FinishGateTraceDigestTest(unittest.TestCase):
             },
             {"role": "assistant", "content": "done"},
         ]
-        limits = digest_limits_from_params({})
+        limits = {
+            "max_dialogue_chars": DEFAULT_QUALITY_GATE_MAX_DIALOGUE_CHARS,
+            "max_message_chars": DEFAULT_QUALITY_GATE_MAX_MESSAGE_CHARS,
+        }
         trimmed = dialog_history.trim_history_to_max_dialogue_chars(
             messages,
             max_dialogue_chars=limits["max_dialogue_chars"],

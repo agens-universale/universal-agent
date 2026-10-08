@@ -270,8 +270,44 @@ def discover_subagent_definitions(
     store = agent_store_of(settings)
     directory = AgentResource("subagents", "", base_dir or None)
 
+    entries = _definition_entries(
+        store, directory, base_dir, logger=logger, diagnostics=diagnostics
+    )
+    taken: Dict[str, SubagentDefinition] = {}
+    builtin = set(builtin_names)
+
+    for entry in sorted(entries):
+        if not entry.endswith(".md"):
+            continue
+        path = os.path.join(base_dir, entry) if base_dir else entry
+        definition = _read_definition(
+            store,
+            entry,
+            path,
+            base_dir,
+            logger=logger,
+            diagnostics=diagnostics,
+        )
+        if definition is None or _name_collides(
+            definition, path, builtin, taken, logger, diagnostics
+        ):
+            continue
+        taken[definition.name] = definition
+
+    return list(taken.values())
+
+
+def _definition_entries(
+    store: Any,
+    directory: AgentResource,
+    base_dir: str,
+    *,
+    logger: Optional[logging.Logger],
+    diagnostics: Optional[List[Dict[str, Any]]],
+) -> List[str]:
+    """Имена файлов папки сабагентов; недоступная папка — пусто (с варнингом)."""
     try:
-        entries = [
+        return [
             name for name, kind in store.list_dir(directory) if kind == "file"
         ]
     except (FileNotFoundError, NotADirectoryError):
@@ -299,74 +335,83 @@ def discover_subagent_definitions(
         )
         return []
 
-    taken: Dict[str, SubagentDefinition] = {}
-    builtin = set(builtin_names)
 
-    for entry in sorted(entries):
-        if not entry.endswith(".md"):
-            continue
-        path = os.path.join(base_dir, entry) if base_dir else entry
-        try:
-            # Файл определения пишет человек — значит и кодировка его, а не наша.
-            # `UnicodeDecodeError` подкласс `ValueError`, а не `OSError`, и мимо
-            # этого перехвата уходил наружу: один файл в чужой кодировке ронял
-            # весь старт агента, хотя обещание модуля — «битый файл не лишает
-            # оператора остальных».
-            definition = parse_subagent_file(
-                path,
-                read_resource_text(
-                    store,
-                    AgentResource(
-                        "subagents", entry, path if base_dir else None
-                    ),
-                ),
-            )
-        except (
-            OSError,
-            ValueError,
-        ) as exc:  # ValueError ⊇ SubagentDefinitionError
-            _warn(
-                logger,
-                "subagent_definition_invalid error=%s",
-                exc,
-                event="subagent_definition_invalid",
-                diagnostics=diagnostics,
-                path=path,
-                reason=getattr(exc, "reason", str(exc)),
-            )
-            continue
+def _read_definition(
+    store: Any,
+    entry: str,
+    path: str,
+    base_dir: str,
+    *,
+    logger: Optional[logging.Logger],
+    diagnostics: Optional[List[Dict[str, Any]]],
+) -> Optional[SubagentDefinition]:
+    """Разобрать один файл определения; битый — ``None`` (с варнингом)."""
+    try:
+        # Файл определения пишет человек — значит и кодировка его, а не наша.
+        # `UnicodeDecodeError` подкласс `ValueError`, а не `OSError`, и мимо
+        # этого перехвата уходил наружу: один файл в чужой кодировке ронял
+        # весь старт агента, хотя обещание модуля — «битый файл не лишает
+        # оператора остальных».
+        return parse_subagent_file(
+            path,
+            read_resource_text(
+                store,
+                AgentResource("subagents", entry, path if base_dir else None),
+            ),
+        )
+    except (
+        OSError,
+        ValueError,
+    ) as exc:  # ValueError ⊇ SubagentDefinitionError
+        _warn(
+            logger,
+            "subagent_definition_invalid error=%s",
+            exc,
+            event="subagent_definition_invalid",
+            diagnostics=diagnostics,
+            path=path,
+            reason=getattr(exc, "reason", str(exc)),
+        )
+        return None
 
-        if definition.name in builtin:
-            _warn(
-                logger,
-                "subagent_name_collision name=%s path=%s (совпадает со встроенным, файл пропущен)",
-                definition.name,
-                path,
-                event="subagent_name_collision",
-                diagnostics=diagnostics,
-                subagent_name=definition.name,
-                path=path,
-                winner="builtin",
-            )
-            continue
-        if definition.name in taken:
-            _warn(
-                logger,
-                "subagent_name_collision name=%s path=%s winner=%s (побеждает прочитанный первым)",
-                definition.name,
-                path,
-                taken[definition.name].source_path,
-                event="subagent_name_collision",
-                diagnostics=diagnostics,
-                subagent_name=definition.name,
-                path=path,
-                winner=taken[definition.name].source_path,
-            )
-            continue
 
-        taken[definition.name] = definition
-
-    return list(taken.values())
+def _name_collides(
+    definition: SubagentDefinition,
+    path: str,
+    builtin: set,
+    taken: Dict[str, SubagentDefinition],
+    logger: Optional[logging.Logger],
+    diagnostics: Optional[List[Dict[str, Any]]],
+) -> bool:
+    """Имя занято встроенным или прочитанным раньше — варнинг и ``True``."""
+    if definition.name in builtin:
+        _warn(
+            logger,
+            "subagent_name_collision name=%s path=%s (совпадает со встроенным, файл пропущен)",
+            definition.name,
+            path,
+            event="subagent_name_collision",
+            diagnostics=diagnostics,
+            subagent_name=definition.name,
+            path=path,
+            winner="builtin",
+        )
+        return True
+    if definition.name in taken:
+        _warn(
+            logger,
+            "subagent_name_collision name=%s path=%s winner=%s (побеждает прочитанный первым)",
+            definition.name,
+            path,
+            taken[definition.name].source_path,
+            event="subagent_name_collision",
+            diagnostics=diagnostics,
+            subagent_name=definition.name,
+            path=path,
+            winner=taken[definition.name].source_path,
+        )
+        return True
+    return False
 
 
 def resolve_max_count(settings: Any) -> int:

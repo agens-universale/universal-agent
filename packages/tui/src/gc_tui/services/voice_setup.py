@@ -127,17 +127,6 @@ def probe_alive() -> bool | None:
     return None if st is None else _port_alive(st)
 
 
-def status_snapshot(settings) -> VoiceStatus:
-    """Полный снимок: дешёвая часть + живость порта. Для воркеров и CLI-подобных путей;
-    UI-поток берёт status_cheap и получает живость от probe_alive асинхронно."""
-    s = status_cheap(settings)
-    if not s.installed:
-        return s
-    from dataclasses import replace
-
-    return replace(s, service_alive=bool(probe_alive()))
-
-
 def install_local(echo=print) -> bool:
     from gc_tui.voice_runtime.install import VoiceInstallError, install
 

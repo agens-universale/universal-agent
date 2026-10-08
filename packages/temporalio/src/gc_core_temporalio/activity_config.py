@@ -108,29 +108,33 @@ _FRAMEWORK = {
 }
 
 
+_TIMEOUT_FIELDS = ("start_to_close", "schedule_to_close", "heartbeat_timeout")
+
+
+def _merge_layer(
+    out: dict[str, Any], retry: dict[str, Any], layer: ActivitySettings
+) -> None:
+    """Наложить уровень поверх уже собранных: заданное в нём — побеждает."""
+    for name in _TIMEOUT_FIELDS:
+        value = getattr(layer, name)
+        if value is not None:
+            out[name] = value.total_seconds()
+    if layer.task_queue is not None:
+        out["task_queue"] = layer.task_queue
+    if layer.retry is None:
+        return
+    for name, value in layer.retry.model_dump(exclude_unset=True).items():
+        if isinstance(value, timedelta):
+            value = value.total_seconds()
+        retry[name] = value
+
+
 def _merge(*layers: ActivitySettings | None) -> dict[str, Any]:
     out: dict[str, Any] = {}
     retry: dict[str, Any] = {}
     for layer in layers:
-        if layer is None:
-            continue
-        for name in (
-            "start_to_close",
-            "schedule_to_close",
-            "heartbeat_timeout",
-        ):
-            value = getattr(layer, name)
-            if value is not None:
-                out[name] = value.total_seconds()
-        if layer.task_queue is not None:
-            out["task_queue"] = layer.task_queue
-        if layer.retry is not None:
-            for name, value in layer.retry.model_dump(
-                exclude_unset=True
-            ).items():
-                if isinstance(value, timedelta):
-                    value = value.total_seconds()
-                retry[name] = value
+        if layer is not None:
+            _merge_layer(out, retry, layer)
     types = list(retry.get("non_retryable_error_types") or [])
     retry["non_retryable_error_types"] = [
         *types,

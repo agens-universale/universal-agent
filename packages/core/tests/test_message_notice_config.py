@@ -9,10 +9,9 @@ from gc_core.config_modules.message_notice import (
 from gc_core.config_modules.project_memory import (
     ProjectMemoryConfig,
     normalize_project_memory_config,
-    project_memory_from_config_dict,
-    project_memory_notice_enabled,
 )
 from gc_core.config_modules.root import AppConfig
+from gc_core.settings import settings_of
 from gc_testkit.settings import make_settings
 from pydantic import ValidationError
 
@@ -66,9 +65,9 @@ def test_app_config_rejects_unknown_keys_in_notice_sections():
 
 
 def test_project_memory_notice_from_config_dict_from_params():
-    cfg = project_memory_from_config_dict(
+    cfg = settings_of(
         make_settings({"project_memory": {"check_interval_messages": 3}})
-    )
+    ).project_memory
     assert cfg.check_interval_messages == 3
 
 
@@ -127,13 +126,18 @@ tool_usage_notice:
 
 
 def test_project_memory_notice_enabled_from_nested_and_flat_config():
-    assert not project_memory_notice_enabled(make_settings())
-    assert project_memory_notice_enabled(
+    def enabled(settings):
+        return settings_of(
+            settings
+        ).project_memory.enable_project_memory_notice
+
+    assert not enabled(make_settings())
+    assert enabled(
         make_settings(
             {"project_memory": {"enable_project_memory_notice": True}}
         )
     )
-    assert project_memory_notice_enabled(
+    assert enabled(
         make_settings({"project_memory.enable_project_memory_notice": True})
     )
 

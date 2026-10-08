@@ -151,9 +151,6 @@ class FileDefinedSubagent(AbstractSubagent):
         )
         return role, assignment
 
-    def get_agent_name(self) -> str:
-        return self.definition.name
-
     @classmethod
     def get_agent_specification(
         cls,

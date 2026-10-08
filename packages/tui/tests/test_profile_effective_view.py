@@ -941,7 +941,9 @@ async def test_needs_default_slot_on_the_effective_config(
         await pilot.pause()
         await _fill_entry(pilot, scr, "glm", "zhipu/glm-4")
         ed = _editor(scr)
-        assert ed.picker_open, "вопрос «какая модель по умолчанию» не задан"
+        assert ed._picker is not None, (
+            "вопрос «какая модель по умолчанию» не задан"
+        )
         assert [r["label"] for r in ed._picker["rows"]] == ["flash", "glm"]
         await pilot.press("enter")  # default — на запись ОСНОВНОГО конфига
         await pilot.pause()
@@ -1044,7 +1046,7 @@ async def test_picker_rows_never_wrap(tmp_path, monkeypatch):
         _cursor_to(ed, "assign", consumer="summary")
         await pilot.press("enter")
         await pilot.pause()
-        assert ed.picker_open
+        assert ed._picker is not None
         narrow_seen = False
         for width in range(10, 140):
             await pilot.resize_terminal(width, 40)
@@ -1058,7 +1060,7 @@ async def test_picker_rows_never_wrap(tmp_path, monkeypatch):
             )
             measured = ed._picker_width()
             rows = list(ed.query(".models-picker-row"))
-            assert ed.picker_open, width  # список пережил ресайз
+            assert ed._picker is not None, width  # список пережил ресайз
             if measured is not None and measured < 2:
                 narrow_seen = True
                 heights = [w.region.height for w in rows]
@@ -1297,12 +1299,12 @@ async def test_the_open_picker_neither_promises_nor_takes_the_viewer_key(
         _cursor_to(ed, "slot", level="light")
         await pilot.press("enter")
         await pilot.pause()
-        assert ed.picker_open
+        assert ed._picker is not None
         assert "v — просмотр файла" not in _footer(scr)
         await pilot.press("v")
         await pilot.pause()
         assert pilot.app.screen is scr
-        assert ed.picker_open
+        assert ed._picker is not None
 
 
 async def test_the_main_models_section_has_no_profile_file_to_show(tmp_path):

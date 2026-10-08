@@ -11,10 +11,9 @@ from gc_core_temporalio.provider import WorkerConfig
 from gc_core_temporalio.worker import (
     build_runtime,
     set_current_version,
-    worker_options,
 )
 from gc_core_temporalio.workflow import UniversalAgentWorkflow
-from live_support import call, temporal_cli
+from live_support import call, temporal_cli, worker_kwargs
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 from test_ownership_live import _config
@@ -61,7 +60,7 @@ async def test_turn_is_pinned_and_next_turn_runs_on_new_build(
             def worker(config):
                 contexts, native, threads = build_runtime(config)
                 runtimes.append(contexts)
-                (options,) = worker_options(config, native, threads)
+                options = worker_kwargs(config, native, threads)
                 return Worker(env.client, **options)
 
             async with worker(v1):

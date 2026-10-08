@@ -7,7 +7,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
-from live_support import temporal_cli
+from live_support import temporal_cli, worker_kwargs
 from gc_core.config_modules import AppConfig
 from gc_core_temporalio.child_workflow import UniversalSubagentWorkflow
 from gc_core_temporalio.contracts import RunRequest
@@ -16,7 +16,7 @@ from gc_core_temporalio.provider import (
     StoreConfig,
     WorkerConfig,
 )
-from gc_core_temporalio.worker import build_runtime, worker_options
+from gc_core_temporalio.worker import build_runtime
 from gc_core_temporalio.workflow import UniversalAgentWorkflow
 from gc_core_temporalio.contracts import UserMessage
 from temporalio.testing import WorkflowEnvironment
@@ -276,7 +276,7 @@ async def test_native_child_model_tools_input_human_and_replay(
         ) as env:
             async with Worker(
                 env.client,
-                **worker_options(config, native, stores)[0],
+                **worker_kwargs(config, native, stores),
             ):
                 handle = await env.client.start_workflow(
                     UniversalAgentWorkflow.run,

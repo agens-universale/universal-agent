@@ -15,11 +15,12 @@ from gc_core.thread_store_file import FileThreadStore
 from gc_core.utils.logging_module import release_run_logger
 from gc_core_temporalio.contracts import RunRequest
 from gc_core_temporalio.provider import WorkerConfig
-from gc_core_temporalio.worker import build_runtime, worker_options
+from gc_core_temporalio.worker import build_runtime
 from gc_core_temporalio.workflow import UniversalAgentWorkflow
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer, Worker
 from test_parity_live import snapshot
+from live_support import worker_kwargs
 
 
 def response(number, name, args):
@@ -201,7 +202,7 @@ async def test_responses_two_turns_exact_parity_and_cache_recovery(
         async with await WorkflowEnvironment.start_local(
             dev_server_existing_path=binary
         ) as env:
-            (options,) = worker_options(config, native, threads)
+            options = worker_kwargs(config, native, threads)
             async with Worker(
                 env.client,
                 **options,

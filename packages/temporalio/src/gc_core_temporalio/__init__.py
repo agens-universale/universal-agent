@@ -12,29 +12,33 @@
 
 from importlib import import_module
 
+_CLIENT = "gc_core_temporalio.client"
+_STEPS = "gc_core_temporalio.steps"
+_WORKER = "gc_core_temporalio.worker"
+
 _EXPORTS = {
     "AgentPlugin": "gc_core_temporalio.plugin",
-    "AgentSession": "gc_core_temporalio.client",
-    "AnswerTruncated": "gc_core_temporalio.client",
-    "AgentClient": "gc_core_temporalio.client",
-    "TemporalDurability": "gc_core_temporalio.client",
-    "MessageNotProcessed": "gc_core_temporalio.client",
-    "SessionFailed": "gc_core_temporalio.client",
-    "SessionStuck": "gc_core_temporalio.client",
-    "SettingsMismatch": "gc_core_temporalio.client",
-    "TurnFailed": "gc_core_temporalio.client",
-    "session_workflow_id": "gc_core_temporalio.client",
+    "AgentSession": _CLIENT,
+    "AnswerTruncated": _CLIENT,
+    "AgentClient": _CLIENT,
+    "TemporalDurability": _CLIENT,
+    "MessageNotProcessed": _CLIENT,
+    "SessionFailed": _CLIENT,
+    "SessionStuck": _CLIENT,
+    "SettingsMismatch": _CLIENT,
+    "TurnFailed": _CLIENT,
+    "session_workflow_id": _CLIENT,
     "UniversalAgentWorkflow": "gc_core_temporalio.workflow",
     "UniversalSubagentWorkflow": "gc_core_temporalio.child_workflow",
     "RunRequest": "gc_core_temporalio.contracts",
     "UserMessage": "gc_core_temporalio.contracts",
     "WorkerConfig": "gc_core_temporalio.provider",
     "AgentProfile": "gc_core_temporalio.provider",
-    "run_worker": "gc_core_temporalio.worker",
-    "agent_step": "gc_core_temporalio.steps",
-    "AgentStepResult": "gc_core_temporalio.steps",
-    "step_workflow_id": "gc_core_temporalio.steps",
-    "default_build_id": "gc_core_temporalio.worker",
+    "run_worker": _WORKER,
+    "agent_step": _STEPS,
+    "AgentStepResult": _STEPS,
+    "step_workflow_id": _STEPS,
+    "default_build_id": _WORKER,
 }
 
 __all__ = [

@@ -17,11 +17,11 @@ from gc_core.utils.logging_module import release_run_logger
 from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
 from gc_core_temporalio.contracts import RunRequest
 from gc_core_temporalio.provider import WorkerConfig
-from gc_core_temporalio.worker import build_runtime, worker_options
+from gc_core_temporalio.worker import build_runtime
 from gc_core_temporalio.workflow import UniversalAgentWorkflow
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer, Worker
-from live_support import call, temporal_cli
+from live_support import call, temporal_cli, worker_kwargs
 from test_parity_live import normalize, snapshot
 from test_workflow_controls import finish
 
@@ -294,7 +294,7 @@ async def test_automatic_summary_full_trace_parity(
         ) as env:
             async with Worker(
                 env.client,
-                **worker_options(config, native, stores)[0],
+                **worker_kwargs(config, native, stores),
             ):
                 handle = await env.client.start_workflow(
                     UniversalAgentWorkflow.run,

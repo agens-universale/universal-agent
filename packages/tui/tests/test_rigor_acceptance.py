@@ -88,17 +88,13 @@ def test_session_pair_not_preset_survives(tmp_path):
     assert "rigor" not in str(saved)  # пресет как значение не хранится
 
 
-def test_apply_rigor_preset_never_clears_session_overrides(
-    tmp_path, monkeypatch
-):
+def test_apply_rigor_preset_never_clears_session_overrides(tmp_path):
     """§8, Г-А: «никакой выбор в палитре не снимает сессионные оверрайды» —
     прибиваем буквально, не чтением кода. `SESSION_KEYS` сейчас содержит РОВНО
     `RIGOR_KEYS` (`tui/session_settings.py`) — третьего, истинно-несвязанного
     ключа для оверрайда нет, поэтому честная проверка: до шага сессия несёт
     ЧАСТИЧНЫЙ оверрайд одного ключа пары (нестандартная, «обрезанная» custom-
-    ситуация), `app.clear_session_overrides` подменена шпионом — после
-    `apply_toggle(rigor, preset)` шпион обязан остаться НЕ вызванным (замена
-    пары идёт только через `apply_session_overrides`), а оверрайды — полностью
+    ситуация) — после `apply_toggle(rigor, preset)` оверрайды полностью
     замещены целевой парой (не остались частичными, не были обнулены)."""
     pytest.importorskip("textual")
     from gc_tui.toggles import apply_toggle
@@ -111,16 +107,8 @@ def test_apply_rigor_preset_never_clears_session_overrides(
         {"tui.finish_gate_mode": "on"}
     )  # частичный оверрайд
 
-    clear_calls = []
-    monkeypatch.setattr(
-        app,
-        "clear_session_overrides",
-        lambda keys: clear_calls.append(tuple(keys)),
-    )
-
     apply_toggle(app, "rigor", "low")
 
-    assert clear_calls == []
     assert app._session_overrides == {
         "tui.finish_gate_mode": "off",
         "tui.text_answer_mode": "allow",

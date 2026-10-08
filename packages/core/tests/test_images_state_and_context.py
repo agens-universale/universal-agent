@@ -1,19 +1,11 @@
 """Поля картинок в State и хранилище картинок в RunContext (спека §9.1, контракт задачи 18)."""
 
-import json
 from pathlib import Path
 
 from gc_core import run_context as rc
 from gc_core.attachments.store import ImageStore
-from gc_core.model_router import ResolvedModel
-from gc_core.persistence.state_serializer import (
-    StateSerializer,
-    load_state_from_snapshot,
-)
 from gc_core.security.media_roots import media_roots
 from gc_core.states import State
-from gc_core.vision.audience import Audience
-from gc_core.vision.rejects import ImageRequestLimit
 from gc_testkit import as_coro
 from gc_testkit.memory_thread_store import MemoryThreadStore
 from gc_testkit.settings import make_settings
@@ -46,52 +38,6 @@ def test_new_state_has_no_pending_images_and_no_audience():
     assert state.vision_audience is None
     assert state.vision_live_ids == frozenset()
     assert state.vision_request_limit is None
-
-
-def test_serializer_keeps_pending_images_and_drops_the_audience():
-    state = _state()
-    state.pending_tool_attachments = [
-        {"id": "0000000000000001", "origin": "tool"}
-    ]
-    state.vision_audience = Audience(
-        native=ResolvedModel(
-            alias="a",
-            model="m",
-            url="http://x",
-            authorization=None,
-            backend_overrides={},
-            tariff=None,
-            source="test",
-        ),
-        eyes=None,
-        tool_visible=False,
-    )
-    state.vision_live_ids = frozenset({"0000000000000001"})
-    state.vision_request_limit = ImageRequestLimit(
-        ("http://backend", "m", 1, 0, frozenset({"image-id"})), 0
-    )
-    payload = StateSerializer.serialize(state)
-    assert "vision_request_limit" not in payload
-    assert "vision_audience" not in payload
-    assert "vision_live_ids" not in payload
-    restored = StateSerializer.deserialize(json.loads(json.dumps(payload)))
-    assert restored.pending_tool_attachments == [
-        {"id": "0000000000000001", "origin": "tool"}
-    ]
-    assert restored.vision_audience is None
-    assert restored.vision_live_ids == frozenset()
-    assert restored.vision_request_limit is None
-
-
-def test_snapshot_older_than_the_fields_loads_with_defaults():
-    payload = StateSerializer.serialize(_state())
-    payload.pop("pending_tool_attachments")
-    payload.pop("vision_request_limit", None)
-    restored = load_state_from_snapshot(json.loads(json.dumps(payload)))
-    assert restored.pending_tool_attachments == []
-    assert restored.vision_audience is None
-    assert restored.vision_live_ids == frozenset()
-    assert restored.vision_request_limit is None
 
 
 async def test_context_image_store_root_is_the_media_root_of_the_guards(

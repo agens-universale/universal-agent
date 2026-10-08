@@ -959,6 +959,25 @@ def _tool_schema_flags(
     return bool(openai_strict), bool(send_tool_strict)
 
 
+def _tool_spec_body(tool: dict) -> dict:
+    """Где лежат ``parameters``: в самой спеке или во вложенной ``function``."""
+    function = tool.get("function")
+    if isinstance(function, dict) and "parameters" not in tool:
+        return function
+    return tool
+
+
+def _apply_openai_strict_body(body: dict) -> None:
+    """OpenAI strict: ``required`` на каждом object и подсказка пустой строки."""
+    from gc_core.execution.tool_schema import apply_openai_strict_schema_tree
+    from gc_core.tools import _apply_openai_strict_tools_schema
+
+    _apply_openai_strict_tools_schema(body)
+    params = body.get("parameters")
+    if isinstance(params, dict):
+        apply_openai_strict_schema_tree(params)
+
+
 def project_tool_specs(
     tools: Optional[List],
     *,
@@ -975,7 +994,6 @@ def project_tool_specs(
     свободный объект не примет ни одного ключа.
     """
     from gc_core.execution.tool_schema import (
-        apply_openai_strict_schema_tree,
         augment_optional_property_descriptions,
         has_open_object,
     )
@@ -984,17 +1002,9 @@ def project_tool_specs(
     for tool in projected:
         if not isinstance(tool, dict):
             continue
-        body = tool
-        function = tool.get("function")
-        if isinstance(function, dict) and "parameters" not in tool:
-            body = function
+        body = _tool_spec_body(tool)
         if openai_strict:
-            from gc_core.tools import _apply_openai_strict_tools_schema
-
-            _apply_openai_strict_tools_schema(body)
-            params = body.get("parameters")
-            if isinstance(params, dict):
-                apply_openai_strict_schema_tree(params)
+            _apply_openai_strict_body(body)
         augment_optional_property_descriptions(
             body, openai_strict=openai_strict
         )

@@ -316,15 +316,70 @@ parser.add_argument(
 CONFIG_COMMAND = sys.argv[1:2] == ["config"]
 
 
+#: Флаги-действия: без -q/--query запуск осмыслен только с одним из них.
+_STANDALONE_ACTIONS = (
+    "init_config",
+    "init",
+    "sync_config",
+    "reset_config",
+    "check_update",
+    "update",
+    "query",
+)
+
+#: Несовместимые пары флагов и текст ошибки; порядок — порядок проверки.
+_CONFLICTS = (
+    (
+        "init_config",
+        "query",
+        "--init-config и -q/--query нельзя вместе: --init-config только настраивает и выходит.",
+    ),
+    (
+        "sync_config",
+        "query",
+        "--sync-config и -q/--query нельзя вместе: --sync-config только обновляет файл и выходит.",
+    ),
+    (
+        "reset_config",
+        "query",
+        "--reset-config и -q/--query нельзя вместе: --reset-config только сбрасывает конфиг и выходит.",
+    ),
+    (
+        "init_config",
+        "sync_config",
+        "--init-config и --sync-config нельзя вместе: используйте одно из двух.",
+    ),
+    (
+        "reset_config",
+        "sync_config",
+        "--reset-config и --sync-config нельзя вместе: используйте одно из двух.",
+    ),
+    (
+        "reset_config",
+        "init_config",
+        "--reset-config и --init-config нельзя вместе: используйте одно из двух.",
+    ),
+    (
+        "check_update",
+        "query",
+        "--check-update и -q/--query нельзя вместе: --check-update только проверяет и выходит.",
+    ),
+    (
+        "update",
+        "query",
+        "--update и -q/--query нельзя вместе: --update только запускает обновление и выходит.",
+    ),
+    (
+        "update",
+        "check_update",
+        "--update и --check-update нельзя вместе: используйте одно из двух.",
+    ),
+)
+
+
 def _check_combinations(parsed_args: argparse.Namespace) -> None:
-    if (
-        not parsed_args.init_config
-        and not getattr(parsed_args, "init", False)
-        and not parsed_args.sync_config
-        and not getattr(parsed_args, "reset_config", False)
-        and not parsed_args.check_update
-        and not parsed_args.update
-        and not parsed_args.query
+    if not any(
+        getattr(parsed_args, name, False) for name in _STANDALONE_ACTIONS
     ):
         parser.error(
             "Нужен -q/--query "
@@ -332,42 +387,9 @@ def _check_combinations(parsed_args: argparse.Namespace) -> None:
             "--reset-config для сброса конфига, --init для AGENTS.md, "
             "--check-update/--update для обновления агента)."
         )
-    if parsed_args.init_config and parsed_args.query:
-        parser.error(
-            "--init-config и -q/--query нельзя вместе: --init-config только настраивает и выходит."
-        )
-    if parsed_args.sync_config and parsed_args.query:
-        parser.error(
-            "--sync-config и -q/--query нельзя вместе: --sync-config только обновляет файл и выходит."
-        )
-    if parsed_args.reset_config and parsed_args.query:
-        parser.error(
-            "--reset-config и -q/--query нельзя вместе: --reset-config только сбрасывает конфиг и выходит."
-        )
-    if parsed_args.init_config and parsed_args.sync_config:
-        parser.error(
-            "--init-config и --sync-config нельзя вместе: используйте одно из двух."
-        )
-    if parsed_args.reset_config and parsed_args.sync_config:
-        parser.error(
-            "--reset-config и --sync-config нельзя вместе: используйте одно из двух."
-        )
-    if parsed_args.reset_config and parsed_args.init_config:
-        parser.error(
-            "--reset-config и --init-config нельзя вместе: используйте одно из двух."
-        )
-    if parsed_args.check_update and parsed_args.query:
-        parser.error(
-            "--check-update и -q/--query нельзя вместе: --check-update только проверяет и выходит."
-        )
-    if parsed_args.update and parsed_args.query:
-        parser.error(
-            "--update и -q/--query нельзя вместе: --update только запускает обновление и выходит."
-        )
-    if parsed_args.update and parsed_args.check_update:
-        parser.error(
-            "--update и --check-update нельзя вместе: используйте одно из двух."
-        )
+    for first, second, message in _CONFLICTS:
+        if getattr(parsed_args, first) and getattr(parsed_args, second):
+            parser.error(message)
     if parsed_args.new and not parsed_args.thread_id:
         parser.error(
             "Аргумент -n/--new можно использовать только вместе с -t/--thread-id."

@@ -198,34 +198,6 @@ def test_probe_post_network_error():
     assert status is None and "connection" in err and payload is None
 
 
-def test_get_ex_broken_body_keeps_status(monkeypatch):
-    """_urllib_get_ex: битое тело (не JSON) → status сохраняется, payload=None."""
-    import urllib.request
-
-    class FakeResponse:
-        def __init__(self):
-            self.status = 200
-
-        def read(self):
-            return b"not a json"
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            pass
-
-    def fake_urlopen(req, timeout, context):
-        return FakeResponse()
-
-    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
-
-    reply = mp._urllib_get_ex("http://x", {}, verify=True)
-    assert reply.status == 200
-    assert reply.payload is None
-    assert reply.network_error == ""
-
-
 def test_probe_fetch_status_kept_when_body_broken():
     """probe_fetch: битое тело на обоих путях → финальный статус = последний, не None."""
 

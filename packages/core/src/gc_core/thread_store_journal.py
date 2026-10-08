@@ -39,6 +39,10 @@ _held = contextvars.ContextVar("thread_file_lock", default=())
 _locks: dict[str, threading.RLock] = {}
 _locks_guard = threading.Lock()
 _READERS = {"load_thread_messages", "load_thread_meta", "read_subagent_trace"}
+# Служебный каталог журнала, файл счётчиков треда и суффикс квитанций.
+_STORE_DIR = ".store"
+_CONTROL_FILE = "control.json"
+_JSON_SUFFIX = ".json"
 
 
 def _sync_dir(path: Path) -> None:
@@ -72,7 +76,7 @@ def _json(value) -> bytes:
 def _physical_control_path(directory, stem):
     return (
         Path(directory).absolute()
-        / ".store"
+        / _STORE_DIR
         / hashlib.sha256(stem.encode()).hexdigest()
     )
 
@@ -85,7 +89,7 @@ def _control_path(directory, system_id, thread_id):
 
 
 def _control(base):
-    path = base / "control.json"
+    path = base / _CONTROL_FILE
     return (
         json.loads(path.read_bytes())
         if path.exists()
@@ -104,7 +108,7 @@ def durable_owner_id(directory, system_id, thread_id):
     Нужен обычному ``FileThreadStore``: локальный писатель не должен писать
     в тред, которым сейчас владеет исполнитель с журналом (Temporal).
     """
-    path = _control_path(directory, system_id, thread_id) / "control.json"
+    path = _control_path(directory, system_id, thread_id) / _CONTROL_FILE
     try:
         return json.loads(path.read_bytes()).get("owner_id")
     except (FileNotFoundError, NotADirectoryError):
@@ -181,14 +185,14 @@ def _recover(directory: Path, base: Path):
             _recover_append(path, change)
         else:
             _recover_image(path, change)
-    _write(base / "control.json", _json(journal["control"]))
+    _write(base / _CONTROL_FILE, _json(journal["control"]))
     receipt = journal["receipt"]
     _write(
         base
         / "receipts"
         / (
             hashlib.sha256(receipt["operation_id"].encode()).hexdigest()
-            + ".json"
+            + _JSON_SUFFIX
         ),
         _json(receipt),
     )
@@ -298,7 +302,7 @@ def purge_after_reset(directory, system_id, thread_id, *, keep_operation):
             system, thread
         )
         keep = (
-            hashlib.sha256(keep_operation.encode()).hexdigest() + ".json"
+            hashlib.sha256(keep_operation.encode()).hexdigest() + _JSON_SUFFIX
             if keep_operation
             else None
         )
@@ -320,7 +324,7 @@ def prune_durable_receipts(directory, *, max_age_seconds):
     """
     deadline = time.time() - max_age_seconds
     removed = 0
-    for path in (Path(directory).absolute() / ".store").glob(
+    for path in (Path(directory).absolute() / _STORE_DIR).glob(
         "*/receipts/*.json"
     ):
         try:
@@ -373,21 +377,9 @@ def thread_read_scope(directory, system_id, thread_id):
         yield
 
 
-@contextlib.contextmanager
-def thread_file_read_scope(directory, stem):
-    """Recover a physical filename stem without guessing system/thread split."""
-    from gc_core.thread_store import validate_thread_id
-
-    validate_thread_id(stem)
-    with _physical_read_scope(
-        directory, _physical_control_path(directory, stem)
-    ):
-        yield
-
-
 def recover_pending_threads(directory):
     """Roll forward prepared threads before enumerating their canonical files."""
-    root = Path(directory) / ".store"
+    root = Path(directory) / _STORE_DIR
     for pending in root.glob("*/pending.json"):
         try:
             manifest = json.loads(pending.read_bytes())
@@ -514,7 +506,7 @@ class _FileTransaction:
                 hashlib.sha256(
                     self.operation.operation_id.encode()
                 ).hexdigest()
-                + ".json"
+                + _JSON_SUFFIX
             )
         )
         if receipt_path.exists():
@@ -567,18 +559,7 @@ class _FileTransaction:
             include_archives=self.operation.kind == "delete_thread",
         )
         if self.metadata_only:
-            selected = {
-                Path(
-                    raw._thread_paths(
-                        str(self.directory), self.system_id, self.thread_id
-                    )[1]
-                ),
-                Path(
-                    raw._thread_paths_legacy(
-                        str(self.directory), self.thread_id
-                    )[1]
-                ),
-            }
+            selected = self._meta_paths(raw)
         elif self.sidecar_only:
             selected = {
                 Path(
@@ -598,37 +579,50 @@ class _FileTransaction:
             "append_subagent_trace_record",
         }
         if self.append_history or self.append_sidecar:
-            append_path = Path(
-                raw._thread_paths(
-                    str(self.directory), self.system_id, self.thread_id
-                )[0]
-                if self.append_history
-                else raw.subagent_trace_path(
-                    str(self.directory), self.system_id, self.thread_id
-                )
-            )
-            self.append_paths[append_path.relative_to(self.directory)] = (
-                append_path.stat().st_size if append_path.exists() else 0
-            )
-            selected.discard(append_path)
-            if self.append_history:
-                selected = {
-                    Path(
-                        raw._thread_paths(
-                            str(self.directory), self.system_id, self.thread_id
-                        )[1]
-                    ),
-                    Path(
-                        raw._thread_paths_legacy(
-                            str(self.directory), self.thread_id
-                        )[1]
-                    ),
-                }
+            selected = self._register_append_path(raw, selected)
         self.before = {
             path.relative_to(self.directory): path.read_bytes()
             for path in selected
             if path.exists()
         }
+        self._refresh_max_seq(raw)
+
+    def _meta_paths(self, raw):
+        """Файлы меты треда: текущий путь и legacy-путь."""
+        return {
+            Path(
+                raw._thread_paths(
+                    str(self.directory), self.system_id, self.thread_id
+                )[1]
+            ),
+            Path(
+                raw._thread_paths_legacy(str(self.directory), self.thread_id)[
+                    1
+                ]
+            ),
+        }
+
+    def _register_append_path(self, raw, selected):
+        """Запомнить исходный размер дописываемого файла; вернуть файлы снимка."""
+        append_path = Path(
+            raw._thread_paths(
+                str(self.directory), self.system_id, self.thread_id
+            )[0]
+            if self.append_history
+            else raw.subagent_trace_path(
+                str(self.directory), self.system_id, self.thread_id
+            )
+        )
+        self.append_paths[append_path.relative_to(self.directory)] = (
+            append_path.stat().st_size if append_path.exists() else 0
+        )
+        selected.discard(append_path)
+        if self.append_history:
+            selected = self._meta_paths(raw)
+        return selected
+
+    def _refresh_max_seq(self, raw):
+        """Сверить кэш счётчика ``max_seq`` с диском и при нужде поднять его."""
         data_path = Path(
             raw._thread_paths(
                 str(self.directory), self.system_id, self.thread_id

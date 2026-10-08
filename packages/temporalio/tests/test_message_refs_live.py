@@ -22,9 +22,9 @@ from gc_core_temporalio.message_refs import (
 )
 from gc_core_temporalio.contracts import RunRequest
 from gc_core_temporalio.provider import WorkerConfig
-from gc_core_temporalio.worker import build_runtime, worker_options
+from gc_core_temporalio.worker import build_runtime
 from gc_core_temporalio.workflow import UniversalAgentWorkflow
-from live_support import call, temporal_cli
+from live_support import call, temporal_cli, worker_kwargs
 from temporalio.api.enums.v1 import EventType
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer, Worker
@@ -162,7 +162,7 @@ async def runtime(tmp_path, url, *, persist="step", core_extra=None):
         async with await WorkflowEnvironment.start_local(
             dev_server_existing_path=binary
         ) as env:
-            (options,) = worker_options(config, native, threads)
+            options = worker_kwargs(config, native, threads)
             async with Worker(env.client, **options):
                 yield env, native
     finally:

@@ -12,8 +12,6 @@
    - Если превышен символьный или токенный порог — один вызов ``compaction.run_summary_compaction``
      (см. ``agent_executor``). В логах рядом пишется ``serialized_chars`` для сравнения
      с каноничным видом промпта.
-   - ``compaction.maybe_run_summary_compaction`` остаётся обёрткой «проверка + запуск»
-     для тестов и скриптов; контроллер использует явную пару проверка/запуск.
 
 2. Внутри суммаризации (когда уже решили суммаризировать)
    Цепочка в коде: ``message_format.dialog_history.trim_history_to_max_dialogue_chars`` →
@@ -55,7 +53,7 @@
 Подмодули (текущая раскладка кода)
 ----------------------------------
 - ``compaction`` — ``exceeded_summary_triggers``, ``run_summary_compaction``,
-  ``maybe_run_summary_compaction``, ``apply_summary_state_patch``;
+  ``apply_summary_state_patch``;
 - ``thread_summarizer`` — сценарий батчей LLM и сборка результата;
 - ``message_format`` (отдельный пакет) — такты, батчи, сериализация сообщений для промпта;
 - ``summary_validation`` — strict validate ответа summarizer (теги из ``summary_spec``, regex-extract);

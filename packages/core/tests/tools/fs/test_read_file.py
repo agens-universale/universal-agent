@@ -1,7 +1,8 @@
 import json
 
 from gc_core.tools.fs.file_info import FileInfo
-from gc_core.tools.fs.read_file import DEFAULT_READ_FILE_MAX_BYTES, ReadFile
+from gc_core.tools.fs.read_file import ReadFile
+from gc_core.utils.fs_size_limits import DEFAULT_FS_READ_MAX_BYTES
 from gc_core.utils.file_text import sha256_hex_of_bytes
 from gc_testkit.helpers.crossplatform import require_symlinks
 from gc_testkit.helpers.tool_ctx import with_local_ctx
@@ -270,7 +271,7 @@ def test_read_file_via_symlink(tmp_path):
 
 
 def test_default_max_bytes_constant_is_modest():
-    assert DEFAULT_READ_FILE_MAX_BYTES == 8 * 1024 * 1024
+    assert DEFAULT_FS_READ_MAX_BYTES == 8 * 1024 * 1024
 
 
 def test_unicode_content_not_char_sliced(tmp_path):

@@ -29,6 +29,9 @@ from gc_tui.form_frame import (
 )
 from gc_tui.palette import ACCENT, DEEP_DIM, DIM, INK, OK, WARN
 
+# Подсказка свёрнутого списка выбора.
+_LIST_HINT = "Alt+↓ — показать список"
+
 # Константы вместо повторяющихся литералов (Sonar S1192).
 _SEL_ONB_SCROLL = "#onb-scroll"
 _CLS_SELECTED = " selected"
@@ -351,13 +354,6 @@ class OnboardingScreen(Screen):
         """Имя шага под курсором — им и меряются все развилки экрана."""
         return self._steps[self._step]
 
-    def _goto(self, step_id: str) -> None:
-        """Перейти на именованный шаг. Прод-переходы идут через `_advance`/`_go_back`;
-        сегодня это тест-хелпер — тесты навигации адресуют шаги им."""
-        self._leave_step()
-        self._step = self._steps.index(step_id)
-        self._render_step()
-
     def _leave_step(self) -> None:
         """Уход со шага — общий хвост всех переходов: летящая авто-проба
         обесценивается, а под-состояние шага (под-форма уровня) его не переживает.
@@ -554,7 +550,7 @@ class OnboardingScreen(Screen):
                 # ровно эту позицию курсора) — на «Токене»/«Прокси» клавиша молчит, и
                 # называть её там значило бы обещать неработающее (находка финального
                 # ревью 2026-08-06, D).
-                parts.insert(1, "Alt+↓ — показать список")
+                parts.insert(1, _LIST_HINT)
         elif step == STEP_MODEL or self._level_form_open():
             # Под-форма уровня — тот же редактор со списком с сервера, что шаг
             # «Модель», и та же клавиша перечитывания.
@@ -721,7 +717,7 @@ class OnboardingScreen(Screen):
                 auth_header=auth,
                 proxy_current=proxy_cur or "",
                 create_mode=True,
-                closed_hint="Alt+↓ — показать список",
+                closed_hint=_LIST_HINT,
                 presets=endpoint_presets_from_config(self._settings),
             )
             body.mount(ed)
@@ -1464,7 +1460,7 @@ class OnboardingScreen(Screen):
                 # Mistral) или кастомизация из config.yml.
                 url_presets=voice_endpoint_presets_from_config(self._settings),
                 save_hint=False,
-                closed_list_hint="Alt+↓ — показать список",
+                closed_list_hint=_LIST_HINT,
                 closed_model_hint="Alt+↓ — перечитать список",
             )
         )
@@ -1483,11 +1479,6 @@ class OnboardingScreen(Screen):
 
         eds = list(self.query(VoiceEndpointEditor))
         return eds[-1] if eds else None
-
-    def _voice_model_list(self):
-        """Контроллер списка моделей шага или None (не тот шаг / полей нет)."""
-        ed = self._voice_endpoint_editor()
-        return ed.model_list if ed is not None else None
 
     def _voice_clear_token(self) -> bool:
         """Ctrl+U в полях голосового шага: стереть сохранённый токен. False — клавиша
@@ -1579,12 +1570,6 @@ class OnboardingScreen(Screen):
         зависит от варианта под курсором, и запомненная позиция может оказаться за краем."""
         n = len(self._voice_field_keys())
         return min(max(self._voice_field_idx, 0), n - 1) if n else 0
-
-    def _voice_cursor_position(self) -> int:
-        """Позиция внутри текущей группы (у каждой она своя и помнится отдельно)."""
-        if self._voice_cursor_group() == _VOICE_GROUP_FIELDS:
-            return self._voice_field_position()
-        return self._idx.get(STEP_VOICE, 0)
 
     def _voice_cursor_field(self) -> str | None:
         """Имя поля под курсором или None, если курсор в группе вариантов."""

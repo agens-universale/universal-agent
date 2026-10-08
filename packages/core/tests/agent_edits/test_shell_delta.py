@@ -23,6 +23,7 @@ from gc_core.config_modules import env_vars
 from gc_core.thread_store import edits_journal_path
 from gc_testkit.helpers.crossplatform import require_symlinks
 from gc_testkit.settings import fake_ctx, update_ctx
+from gc_testkit.git_support import rev_parse_head
 
 
 def _git(root: Path, *args: str) -> None:
@@ -1424,7 +1425,7 @@ def test_clean_tracked_gets_precise_base_and_is_revertable(repo):
     assert _snapshot_names(launch_root, ".gitorig") == []
     assert _snapshot_names(launch_root, ".gitturn") == []
     # признак ступени HEAD — ревизия НА МОМЕНТ съёма (§3.2, фикс C1)
-    assert store.session_head_rev("tracked.txt") == git_ops.rev_parse_head(
+    assert store.session_head_rev("tracked.txt") == rev_parse_head(
         str(launch_root)
     )
 
@@ -2023,7 +2024,7 @@ def test_command_created_file_gets_the_creation_mark(repo):
     быть не должно — ревизию ступени HEAD несёт отметка создания. Ревизия — та,
     что была ДО команды, даже если команда сама коммитила."""
     launch_root, threads_dir = repo
-    head_before = git_ops.rev_parse_head(str(launch_root))
+    head_before = rev_parse_head(str(launch_root))
     delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
     _run_command(launch_root, "open('new.txt','wb').write(b'alpha\\n')")
     delta.after_and_record()

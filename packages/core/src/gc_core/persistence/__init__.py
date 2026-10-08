@@ -5,9 +5,6 @@ from importlib import import_module
 _EXPORTS = {
     "STATE_SCHEMA_VERSION": "schema",
     "StateSchemaError": "schema",
-    "StateRepository": "state_repository",
-    "StateSerializer": "state_serializer",
-    "load_state_from_snapshot": "state_serializer",
     "ThreadMetaMapper": "thread_meta_mapper",
 }
 __all__ = list(_EXPORTS)

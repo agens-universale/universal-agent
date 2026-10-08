@@ -1472,22 +1472,6 @@ class TuiApp(App):
             self._session_overrides = prev
             raise
 
-    def clear_session_overrides(self, keys) -> None:
-        """Снять НЕСКОЛЬКО ключей сессии разом — generic primitive для отката
-        целой группы оверрайдов (парой и больше) к глобальному дефолту.
-        Нечего снимать — тихий no-op без persist. Ошибка записи — откат, как в
-        apply_session_overrides."""
-        prev = dict(self._session_overrides)
-        for k in keys:
-            self._session_overrides.pop(k, None)
-        if self._session_overrides == prev:
-            return
-        try:
-            self.persist_session_overrides()
-        except OSError:
-            self._session_overrides = prev
-            raise
-
     def load_session_overrides(self, overrides: dict) -> bool:
         """Заменить набор переопределений целиком — при открытии треда.
         Пустой набор возвращает сессию к умолчаниям конфига.

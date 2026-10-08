@@ -170,17 +170,9 @@ async def execute_native_tool_effect(
     if request.effect_step == "download":
         output = await _execute_download_effect(tool, arguments, request)
     elif request.effect_step == "body":
-        if callable(getattr(tool, "_prepare_download", None)):
-            raise GuardPreconditionChanged(
-                "Download requires its prepared effect boundary"
-            )
-        from gc_core.tools.connect_mcp.api import media_sink_scope
-
-        func = type(tool).acall
-        while (descriptor := guard_wrapper(func)) is not None:
-            func = descriptor.inner
-        with media_sink_scope(ctx):
-            output = _tool_result_to_text(await func(tool, **arguments))
+        output = await _execute_body_effect(
+            tool, arguments, ctx, to_text=_tool_result_to_text
+        )
     else:
         raise ValueError("Unknown tool effect step")
     from gc_core.execution.progress import parse_tool_result_status
@@ -210,6 +202,22 @@ async def execute_native_tool_effect(
         outcome="tool_error" if ok is False else "ok",
         delta=delta,
     )
+
+
+async def _execute_body_effect(tool, arguments, ctx, *, to_text):
+    """Тело тула без guard-обёрток (проверки прошли до одобрения); результат
+    переводится в текст ``to_text`` внутри приёмника медиа."""
+    if callable(getattr(tool, "_prepare_download", None)):
+        raise GuardPreconditionChanged(
+            "Download requires its prepared effect boundary"
+        )
+    from gc_core.tools.connect_mcp.api import media_sink_scope
+
+    func = type(tool).acall
+    while (descriptor := guard_wrapper(func)) is not None:
+        func = descriptor.inner
+    with media_sink_scope(ctx):
+        return to_text(await func(tool, **arguments))
 
 
 def _add_vision_state(state, vision):

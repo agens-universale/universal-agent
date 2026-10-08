@@ -89,9 +89,3 @@ def active_tool_usage_notice_rules(
         for rule in tool_usage_notice_rules_from_config_dict(settings)
         if rule.tool_name not in stopped
     ]
-
-
-def tool_usage_notice_policy_enabled(
-    settings: Any,
-) -> bool:
-    return bool(active_tool_usage_notice_rules(settings))

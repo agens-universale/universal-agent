@@ -217,33 +217,37 @@ class LiveResourceOwner:
             if item is None:
                 break
             if isinstance(item, _PrepareContext):
-                try:
-                    child = await item.callback(ctx)
-                    self._contexts[item.context_id] = child
-                    item.future.set_result(child)
-                except asyncio.CancelledError:
-                    item.future.cancel()
-                    raise
-                except Exception as exc:
-                    # Ошибка подготовки ребёнка не убивает ресурсы родителя.
-                    item.future.set_exception(exc)
-                    self._context_futures.pop(item.context_id, None)
+                await self._serve_prepare(ctx, item)
             else:
-                context_id, *effect = item
-                effect_ctx = (
-                    ctx
-                    if context_id is None
-                    else self._contexts.get(context_id)
-                )
-                if effect_ctx is None:
-                    effect[-1].set_exception(
-                        ResourceOwnerLost(
-                            "Child context was not prepared on owner"
-                        )
-                    )
-                    self._pending.pop(effect[0].operation_id, None)
-                    continue
-                await self._invoke(effect_ctx, *effect)
+                await self._serve_effect(ctx, item)
+
+    async def _serve_prepare(self, ctx, item: _PrepareContext) -> None:
+        """Подготовить дочерний контекст на задаче-владельце ресурсов."""
+        try:
+            child = await item.callback(ctx)
+            self._contexts[item.context_id] = child
+            item.future.set_result(child)
+        except asyncio.CancelledError:
+            item.future.cancel()
+            raise
+        except Exception as exc:
+            # Ошибка подготовки ребёнка не убивает ресурсы родителя.
+            item.future.set_exception(exc)
+            self._context_futures.pop(item.context_id, None)
+
+    async def _serve_effect(self, ctx, item) -> None:
+        """Выполнить эффект в своём контексте; неподготовленный ребёнок — отказ."""
+        context_id, *effect = item
+        effect_ctx = (
+            ctx if context_id is None else self._contexts.get(context_id)
+        )
+        if effect_ctx is None:
+            effect[-1].set_exception(
+                ResourceOwnerLost("Child context was not prepared on owner")
+            )
+            self._pending.pop(effect[0].operation_id, None)
+            return
+        await self._invoke(effect_ctx, *effect)
 
 
 class WorkerResourceHost:

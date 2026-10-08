@@ -1,11 +1,8 @@
 from gc_core.config_modules.pricing import (
-    DEFAULT_CURRENCY,
     DEFAULT_PER_TOKENS,
     PricingConfig,
-    pricing_from_config_dict,
     resolve_model_tariff,
 )
-from gc_testkit.settings import make_settings
 
 
 def _pricing(**kw) -> dict:
@@ -127,16 +124,6 @@ def test_model_inherits_toplevel_cache_read():
 def test_no_toplevel_no_model_returns_none():
     pricing = {"enabled": True, "currency": "₽", "per_tokens": 1_000_000}
     assert resolve_model_tariff(pricing, "anything") is None
-
-
-def test_pricing_from_config_dict_defaults():
-    assert pricing_from_config_dict(None).enabled is False
-    assert (
-        pricing_from_config_dict(make_settings()).currency == DEFAULT_CURRENCY
-    )
-    parsed = pricing_from_config_dict(make_settings({"pricing": _pricing()}))
-    assert parsed.enabled is True
-    assert "MiniMaxAI/MiniMax-M2.7" in parsed.models
 
 
 def test_zero_rates_mean_not_configured():

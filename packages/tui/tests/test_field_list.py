@@ -117,7 +117,7 @@ async def test_hint_switches_when_filter_matches_nothing():
         await pilot.pause()
         host.ctrl.apply_filter("zzz")
         await pilot.pause()
-        assert host.ctrl.has_matches is False
+        assert not host.ctrl.visible_items
         assert _hint(host) == "нет"
 
 

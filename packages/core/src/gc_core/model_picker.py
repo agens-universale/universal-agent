@@ -7,13 +7,14 @@ resolve_proxies, что у backend (config.proxy / env / NO_PROXY).
 
 from __future__ import annotations
 
-import json
 import os
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any, Callable, Optional
 
 from gc_core.utils.http_auth import authorization_attempts
+
+_CONFIG_PATH = "/config"
 
 
 @dataclass(frozen=True)
@@ -99,27 +100,11 @@ def _user_agent() -> str:
     return f"{app_version.DIST_NAME}/{app_version.agent_version()}"
 
 
-def _request(url: str, headers: dict, *, data=None, method=None):
-    """urllib-запрос, представленный по имени. Без User-Agent Python шлёт
-    `Python-urllib/X.Y`, и щит провайдера (Cloudflare у Groq — проверено живьём)
-    отвечает 403 ещё ДО проверки токена: с рабочим ключом список моделей молчал бы.
-    Дефолт идёт первым — заголовок вызывающего его перекрывает."""
-    import urllib.request
-
-    return urllib.request.Request(
-        url,
-        data=data,
-        method=method,
-        headers={"User-Agent": _user_agent(), **headers},
-    )
-
-
 def _headers(auth_header: Optional[str]) -> dict:
     """Заголовки запроса: тип, визитка продукта, авторизация.
 
-    Визитка обязательна и ставится здесь, а не в транспорте: транспортов теперь два
-    (requests-сессия backend'а и urllib-фолбэк), и без User-Agent библиотека шлёт свой
-    дефолт («python-requests/X.Y», «Python-urllib/X.Y») — щит провайдера (Cloudflare у
+    Визитка обязательна и ставится здесь, а не в транспорте: без User-Agent
+    библиотека шлёт свой дефолт («python-requests/X.Y») — щит провайдера (Cloudflare у
     Groq, проверено живьём) отвечает 403 ещё ДО проверки токена, и список моделей
     молчит на рабочем ключе."""
     headers = {"Content-Type": "application/json", "User-Agent": _user_agent()}
@@ -208,32 +193,6 @@ def _requests_post_ex(
         )
 
 
-def _urllib_get_ex(url: str, headers: dict, verify: bool | str) -> HttpReply:
-    """Legacy urllib GET (без proxy). Оставлен для unit-тестов транспорта."""
-    import urllib.error
-    import urllib.request
-
-    from gc_core.utils.async_http import build_ssl_context
-
-    ctx = build_ssl_context(verify)
-    req = _request(url, headers)
-    try:
-        with urllib.request.urlopen(req, timeout=5, context=ctx) as resp:
-            try:
-                payload = json.loads(resp.read().decode("utf-8"))
-            except ValueError:
-                payload = None
-            return HttpReply(status=resp.status, payload=payload)
-    except urllib.error.HTTPError as exc:
-        return HttpReply(status=exc.code, payload=None)
-    except OSError as exc:
-        return HttpReply(
-            status=None,
-            payload=None,
-            network_error=str(exc) or exc.__class__.__name__,
-        )
-
-
 def _parse_reply_models(reply: HttpReply, parser: Callable) -> list:
     """Список моделей из ответа с кодом и телом; пусто, если ответа нет или парсер упал."""
     if reply.status is None or reply.payload is None:
@@ -242,6 +201,55 @@ def _parse_reply_models(reply: HttpReply, parser: Callable) -> list:
         return parser(reply.payload)
     except Exception:
         return []
+
+
+def _get_with_auth_forms(get_ex, url: str, auth_forms: list, verify):
+    """GET по очереди с каждой формой авторизации, пока ответ 401 и формы есть."""
+    for index, form in enumerate(auth_forms):
+        reply = get_ex(url, _headers(form), verify)
+        if reply.status != 401 or index + 1 == len(auth_forms):
+            break
+    return reply
+
+
+def _raw_catalog(reply: HttpReply, path: str):
+    """Сырой список моделей из тела: ``chat.models`` у /config, ``data`` у /models."""
+    payload = reply.payload if isinstance(reply.payload, dict) else {}
+    is_config = path == _CONFIG_PATH
+    source = payload.get("chat") if is_config else payload
+    if not isinstance(source, dict):
+        return None
+    return source.get("models" if is_config else "data")
+
+
+def _is_catalog_reply(reply: HttpReply, parsed: list, raw_models) -> bool:
+    """2xx с моделями или хотя бы со списком (пусть и пустым) — каталог доступен."""
+    return (
+        reply.status is not None
+        and 200 <= reply.status < 300
+        and bool(parsed or isinstance(raw_models, list))
+    )
+
+
+def _failed_fetch_outcome(
+    empty_catalog_status: Optional[int],
+    statuses: list,
+    net_errors: list,
+    latency: int,
+) -> FetchOutcome:
+    """Итог без моделей: пустой каталог → 401 → последний код → сетевые ошибки."""
+    if empty_catalog_status is not None:
+        return FetchOutcome([], empty_catalog_status, "", latency)
+    if 401 in statuses:
+        return FetchOutcome(None, 401, "", latency)
+    if statuses:
+        return FetchOutcome(None, statuses[-1], "", latency)
+    return FetchOutcome(
+        None,
+        None,
+        "; ".join(dict.fromkeys(net_errors)) or "нет соединения",
+        latency,
+    )
 
 
 def probe_fetch(
@@ -272,26 +280,12 @@ def probe_fetch(
     net_errors: list = []
     empty_catalog_status = None
     for path, parser in (
-        ("/config", parse_config_models),
+        (_CONFIG_PATH, parse_config_models),
         ("/models", parse_models_list),
     ):
-        for index, form in enumerate(auth_forms):
-            reply = get_ex(base + path, _headers(form), verify)
-            if reply.status != 401 or index + 1 == len(auth_forms):
-                break
+        reply = _get_with_auth_forms(get_ex, base + path, auth_forms, verify)
         parsed = _parse_reply_models(reply, parser)
-        payload = reply.payload if isinstance(reply.payload, dict) else {}
-        source = payload.get("chat") if path == "/config" else payload
-        raw_models = (
-            source.get("models" if path == "/config" else "data")
-            if isinstance(source, dict)
-            else None
-        )
-        if (
-            reply.status is not None
-            and 200 <= reply.status < 300
-            and (parsed or isinstance(raw_models, list))
-        ):
+        if _is_catalog_reply(reply, parsed, _raw_catalog(reply, path)):
             if parsed:
                 return FetchOutcome(
                     parsed,
@@ -307,17 +301,8 @@ def probe_fetch(
         else:
             net_errors.append(reply.network_error)
     latency = int((time.monotonic() - t0) * 1000)
-    if empty_catalog_status is not None:
-        return FetchOutcome([], empty_catalog_status, "", latency)
-    if 401 in statuses:
-        return FetchOutcome(None, 401, "", latency)
-    if statuses:
-        return FetchOutcome(None, statuses[-1], "", latency)
-    return FetchOutcome(
-        None,
-        None,
-        "; ".join(dict.fromkeys(net_errors)) or "нет соединения",
-        latency,
+    return _failed_fetch_outcome(
+        empty_catalog_status, statuses, net_errors, latency
     )
 
 
@@ -385,7 +370,7 @@ def fetch_models(
         return None
     headers = _headers(auth_header)
     try:
-        cfg = get(base + "/config", headers, verify)
+        cfg = get(base + _CONFIG_PATH, headers, verify)
         parsed = parse_config_models(cfg)
         if parsed:
             return parsed

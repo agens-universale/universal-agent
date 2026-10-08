@@ -43,7 +43,7 @@ from gc_tui.services.trace_mapper import (
     collect_render_context,
     map_message,
 )
-from gc_tui.services.trace_render import render_thread_readonly
+from trace_readonly import render_thread_readonly
 from gc_tui.widgets.user_reply import UserReplyContainer
 from image_helpers import make_attachment_file
 from gc_testkit.tui_support import tui_settings

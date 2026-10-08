@@ -11,6 +11,7 @@ from gc_tui.screens.onboarding import (
     STEP_MCP,
     STEP_VOICE,
 )
+from form_harness import wizard_voice_cursor_position
 
 
 class FakeVoice:
@@ -1278,7 +1279,8 @@ async def test_tab_moves_between_groups(tmp_path):
             "#voice-url", Input
         ).value = "https://s.x/v1/audio/transcriptions"
         assert scr._voice_cursor_group() == "variants"
-        variant_before = scr._voice_cursor_position()  # строка «Свой endpoint»
+        # строка «Свой endpoint»
+        variant_before = wizard_voice_cursor_position(scr)
         await pilot.press("tab")
         await pilot.pause()
         assert scr._voice_cursor_group() == "fields"
@@ -1289,7 +1291,7 @@ async def test_tab_moves_between_groups(tmp_path):
         await pilot.press("tab")
         await pilot.pause()
         assert scr._voice_cursor_group() == "variants"
-        assert scr._voice_cursor_position() == variant_before, (
+        assert wizard_voice_cursor_position(scr) == variant_before, (
             "позиция должна помниться"
         )
         # Клавиша съедена экраном, а не отдана focus_next: тот увёл бы фокус в соседнее
@@ -1342,7 +1344,7 @@ async def test_tab_is_swallowed_when_no_second_group(tmp_path):
         await pilot.press("tab")
         await pilot.pause()
         assert scr._voice_cursor_group() == "variants"
-        assert scr._voice_cursor_position() == 0
+        assert wizard_voice_cursor_position(scr) == 0
         assert pilot.app.focused is focused_before, (
             "Tab не должен водить фокус мимо ленты"
         )
@@ -1367,10 +1369,10 @@ async def test_tab_collapses_open_list_before_leaving(tmp_path):
             await pilot.press("down")
         await pilot.pause()
         assert scr._voice_cursor_field() == "model"
-        assert scr._voice_model_list().is_open
+        assert scr._voice_endpoint_editor().model_list.is_open
         await pilot.press("tab")
         await pilot.pause()
-        assert not scr._voice_model_list().is_open
+        assert not scr._voice_endpoint_editor().model_list.is_open
         assert scr._voice_cursor_group() == "variants"
 
 
@@ -1443,15 +1445,17 @@ async def test_marking_does_not_reopen_a_list_shut_by_escape(tmp_path):
                 break
             await pilot.press("down")
         await pilot.pause()
-        assert scr._voice_model_list().is_open
+        assert scr._voice_endpoint_editor().model_list.is_open
         await pilot.press("escape")  # свернуть список
         await pilot.pause()
-        assert not scr._voice_model_list().is_open
+        assert not scr._voice_endpoint_editor().model_list.is_open
         await pilot.press("enter")  # пометить «Свой endpoint»
         await pilot.pause()
         assert scr._voice_choice == "cloud"  # пометка сделана…
         assert scr._step_id() == STEP_VOICE  # …и шаг не прыгнул
-        assert not scr._voice_model_list().is_open, "Esc отменён пометкой"
+        assert not scr._voice_endpoint_editor().model_list.is_open, (
+            "Esc отменён пометкой"
+        )
 
 
 @pytest.mark.asyncio

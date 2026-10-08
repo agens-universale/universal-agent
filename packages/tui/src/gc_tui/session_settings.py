@@ -9,9 +9,10 @@
 Здесь же — семантика этих ключей: как читается ДЕЙСТВУЮЩЕЕ значение ключа
 (правило коллизии /gate со старым глобальным рубильником — спека
 2026-07-16-palette-toggles-gate-answers-design §3) и в какой форме набор лежит
-в метаданных треда. Один владелец на ключ: витрина (tui/toggles.py) и сравнение
-с действующим умолчанием (`diff_vs_base`) обязаны читать одним и тем же
-правилом — иначе они разойдутся в том, что считают текущим значением ключа.
+в метаданных треда. Один владелец на ключ: витрина (tui/toggles.py) и любой
+другой читатель действующего значения обязаны читать одним и тем же правилом
+(`SessionKey.effective_value`) — иначе они разойдутся в том, что считают
+текущим значением ключа.
 Слой не зависит ни от `TuiApp`, ни от презентации — направление только сюда.
 """
 
@@ -22,6 +23,9 @@ from typing import Any, Callable, Dict
 
 from gc_core.settings import is_explicit, runtime_of, settings_of
 
+# Ключ режима судьи завершения хода.
+_FINISH_GATE_KEY = "tui.finish_gate_mode"
+
 
 def finish_gate_mode_of(settings: Any) -> str:
     """Эффективный режим /gate: явный tui-ключ > явный глобальный off > дефолт smart.
@@ -31,7 +35,7 @@ def finish_gate_mode_of(settings: Any) -> str:
     значению: умолчание схемы явным выбором не считается."""
     settings = settings_of(settings)
     mode = str(settings.tui.finish_gate_mode or "smart")
-    if is_explicit(settings, "tui.finish_gate_mode"):
+    if is_explicit(settings, _FINISH_GATE_KEY):
         return mode
     if (
         is_explicit(settings, "agent.strict_turn_finish_validation")
@@ -82,9 +86,7 @@ def _active_profile_of(settings: Any) -> str:
 
 
 SESSION_KEYS: Dict[str, SessionKey] = {
-    "tui.finish_gate_mode": SessionKey(
-        "tui.finish_gate_mode", finish_gate_mode_of
-    ),
+    _FINISH_GATE_KEY: SessionKey(_FINISH_GATE_KEY, finish_gate_mode_of),
     "tui.text_answer_mode": SessionKey(
         "tui.text_answer_mode", text_answer_mode_of
     ),
@@ -125,23 +127,3 @@ def read_from_meta(meta: Dict[str, Any]) -> Dict[str, Any]:
 def to_meta_patch(overrides: Dict[str, Any]) -> Dict[str, Any]:
     """Набор переопределений как патч для meta.tui (`FileTaskStore.update_tui_meta`)."""
     return {META_KEY: dict(overrides or {})}
-
-
-def diff_vs_base(base: Any, overrides: Dict[str, Any]) -> Dict[str, Any]:
-    """Переопределения, отличающиеся от ДЕЙСТВУЮЩЕГО умолчания базовых
-    настроек (`base` — всё, что принимает `settings_of`) — инструмент сравнения сессии с базой (слой API; сейчас без
-    потребителя в UI, ближайший — будущая фича /rigor).
-
-    Сравниваем с действующим умолчанием базы, а не с сырым значением поля:
-    у ключа может быть своё правило (коллизия /gate), и по сырому значению
-    расхождение видно не всегда — рукописный конфиг с явным глобальным off
-    по сырому значению совпал бы с сессией, включившей режим явно, и результат
-    остался бы пустым, хотя действующие значения расходятся."""
-    changed: Dict[str, Any] = {}
-    for dotted, value in (overrides or {}).items():
-        key = SESSION_KEYS.get(dotted)
-        if key is None:
-            continue
-        if key.effective_value(base) != value:
-            changed[dotted] = value
-    return changed

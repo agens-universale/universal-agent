@@ -9,9 +9,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import pytest
 from gc_core_temporalio.contracts import RunRequest, UserMessage
 from gc_core_temporalio.provider import WorkerConfig
-from gc_core_temporalio.worker import build_runtime, worker_options
+from gc_core_temporalio.worker import build_runtime
 from gc_core_temporalio.workflow import UniversalAgentWorkflow
-from live_support import call, temporal_cli
+from live_support import call, temporal_cli, worker_kwargs
 from temporalio.client import WorkflowUpdateFailedError
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer, Worker
@@ -134,7 +134,7 @@ async def runtime(tmp_path, url, *, core_extra=None):
         async with await WorkflowEnvironment.start_local(
             dev_server_existing_path=binary
         ) as env:
-            (options,) = worker_options(config, native, threads)
+            options = worker_kwargs(config, native, threads)
             async with Worker(
                 env.client,
                 **options,

@@ -2,6 +2,7 @@
 
 from gc_testkit.tui_support import as_settings, tui_settings
 import pytest
+from screen_text import mcp_text
 
 SNAP = {
     "office": {
@@ -66,7 +67,7 @@ async def test_enter_and_space_toggle_focused_card(tmp_path):
         await pilot.pause()
         await pilot.press("enter")
         assert scr.cards[0].expanded is True
-        assert "read_file" in scr.rendered_text()
+        assert "read_file" in mcp_text(scr)
         await pilot.press("space")
         assert scr.cards[0].expanded is False
 
@@ -104,7 +105,7 @@ async def test_expanded_failed_card_shows_full_reason(tmp_path):
         await pilot.pause()
         await pilot.press("down", "enter")
         assert scr.cards[1].expanded is True
-        assert "команда не найдена" in scr.rendered_text()
+        assert "команда не найдена" in mcp_text(scr)
 
 
 @pytest.mark.asyncio
@@ -140,4 +141,4 @@ async def test_keys_on_empty_screen_do_not_crash(tmp_path):
         await app.push_screen(scr)
         await pilot.pause()
         await pilot.press("down", "up", "enter", "pagedown", "pageup")
-        assert "нет MCP-серверов" in scr.rendered_text()
+        assert "нет MCP-серверов" in mcp_text(scr)

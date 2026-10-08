@@ -243,10 +243,9 @@ async def test_project_file_is_checked_lazily_before_attachment(
     assert result["already_in_context"] and len(spy.requests) == 1
 
 
-def test_root_and_children_keep_turn_identity_and_drop_transient_state():
+def test_root_and_children_keep_turn_identity():
     from types import SimpleNamespace
 
-    from gc_core.persistence.state_serializer import StateSerializer
     from gc_core.turn_boundary import begin_turn
     from test_images_state_and_context import _state as real_state
 
@@ -259,15 +258,6 @@ def test_root_and_children_keep_turn_identity_and_drop_transient_state():
     child.vision_probe_turn = first
     begin_turn(child, SimpleNamespace())
     assert child.vision_probe_turn == first
-    root.vision_routes = {"secret": "route"}
-    root.vision_probe_notices = {"notice"}
-    payload = StateSerializer.serialize(root)
-    assert not (
-        {"vision_probe_turn", "vision_routes", "vision_probe_notices"}
-        & payload.keys()
-    )
-    restored = StateSerializer.deserialize(payload)
-    assert restored.vision_probe_turn is None and restored.vision_routes == {}
     begin_turn(root, SimpleNamespace())
     assert root.vision_probe_turn != first
 
