@@ -1,4 +1,4 @@
-"""Policy constants shared by local and durable bindings."""
+"""Policy constants shared by the local loop and durable execution."""
 
 _MAX_CONTEXT_OVERFLOW_RETRIES = 3
 
