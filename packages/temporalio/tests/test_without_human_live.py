@@ -140,3 +140,27 @@ async def test_child_asking_a_human_gets_a_refusal(
     assert not (ws / "AGENTS.md").exists()
     child_output = json.dumps(_tool_outputs(requests), ensure_ascii=False)
     assert "AGENTS.md" in child_output
+
+
+async def test_blocked_command_without_cwd_is_an_answer(
+    tmp_path,
+    monkeypatch,
+    scripted_http,  # noqa: F811
+):
+    """Команда без ``cwd``, которую охрана команд отклонила (защищённый путь —
+    база хранилища тредов): отказ уходит модели, ход продолжается. Отчёт
+    отказа берёт каталог команды у бэкенда — в коде workflow его нет."""
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    monkeypatch.chdir(ws)
+    url, requests, script = scripted_http
+    db = tmp_path / "threads.sqlite"
+    script.extend(
+        [
+            [call("c", "exec_command", {"command": f"cat {db}"})],
+            [finish("отказано")],
+        ]
+    )
+    answer = await _turn(tmp_path, _settings(url, ws, subagents=False))
+    assert _report(answer) == "отказано"
+    assert any("protected" in out.lower() for out in _tool_outputs(requests))

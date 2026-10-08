@@ -44,13 +44,18 @@ class ExternalResources:
     ``is_sandbox`` — данные, а не операция: признак бэкенда воркера из
     подготовленного контекста (координаты путей в отчётах тулов).
     ``workflow_paths`` — пути отчётов считаются без ``os.path`` (от корня
-    рабочей области).
+    рабочей области). ``default_cwd()`` — тоже данные: корень рабочей области
+    воркера; его спрашивает отчёт отказа охраны команды без ``cwd``.
     """
 
     workflow_paths = True
 
-    def __init__(self, *, is_sandbox: bool = False) -> None:
+    def __init__(self, *, is_sandbox: bool = False, root: str = "") -> None:
         self.is_sandbox = bool(is_sandbox)
+        self._root = root or None
+
+    def default_cwd(self):
+        return self._root
 
     def __getattr__(self, name):
         raise ExecutionFailure(
@@ -74,7 +79,8 @@ class ExternalAgentStore(AgentStore):
 
 def assemble_context(prepared, *, operations, store, logger, human_request):
     resources = ExternalResources(
-        is_sandbox=prepared.context.workspace_is_sandbox
+        is_sandbox=prepared.context.workspace_is_sandbox,
+        root=prepared.context.workspace_root,
     )
     # Тот же снимок, из которого `assemble_run_context` соберёт настройки ctx.
     loaded = settings_from_snapshot(
