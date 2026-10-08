@@ -19,6 +19,9 @@ from gc_core.utils.http_auth import authorization_attempts
 _CONFIG_PATH = "/config"
 _MODELS_PATH = "/models"
 _MODEL_ID_KEYS = ("id", "name", "model")
+# Размер окна в `/models`: `context_length` — OpenRouter и Cloud.ru, `max_model_len`
+# — серверы на vLLM (Cloud.ru отдаёт оба). Читает `model_context_window`.
+_CONTEXT_WINDOW_KEYS = ("context_length", "max_model_len")
 
 
 @dataclass(frozen=True)
@@ -87,6 +90,24 @@ def _model_object_collections(payload: dict) -> list[list]:
         if isinstance(chat_models, list):
             collections.append(chat_models)
     return collections
+
+
+def model_context_window(card: Any) -> Optional[int]:
+    """Размер контекстного окна из объекта модели каталога — или `None`.
+
+    Читает строка окна в форме записи модели — из того же объекта, который
+    открывается как сведения провайдера. Окном считается первое положительное
+    целое; ноль и bool — нет (после них смотрим дальше)."""
+    if not isinstance(card, dict):
+        return None
+    candidates = [card.get(key) for key in _CONTEXT_WINDOW_KEYS]
+    plugin_side = card.get("plugin_side")
+    if isinstance(plugin_side, dict):
+        candidates.append(plugin_side.get("context_window_size"))
+    for value in candidates:
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+            return value
+    return None
 
 
 def parse_config_models(payload: dict) -> list:

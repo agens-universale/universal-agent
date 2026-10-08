@@ -18,7 +18,9 @@ pytest.importorskip("pytest_textual_snapshot")
 from gc_testkit.tui_support import open_settings_section, wait_until
 from test_onboarding_screen import _screen as _wizard_screen
 from test_onboarding_voice_step import FakeVoice
-from test_settings_screen import _cfg, _write_cfg
+from test_settings_models_section import _goto
+from test_settings_models_section import _write_cfg as _write_registry_cfg
+from test_settings_screen import _cfg, _loaded, _write_cfg
 from test_settings_screen import _mk_screen as _mk_settings
 from test_settings_voice import CLOUD, CLOUD_CONFIG
 from test_settings_voice import _mk_screen as _mk_voice_settings
@@ -266,6 +268,84 @@ def test_settings_model_snapshot(snap_compare, tmp_path, monkeypatch):
         await _freeze_cursors(pilot)
 
     assert snap_compare(app, terminal_size=_SIZE, run_before=setup)
+
+
+# Форма записи реестра длиннее экрана секции: кадр снимается на высоте, где она
+# видна целиком — от адреса до строки справки (тот же приём, что `_WIZARD_SIZE`).
+_ENTRY_FORM_SIZE = (120, 82)
+
+
+def test_settings_model_entry_form_snapshot(snap_compare, tmp_path, monkeypatch):
+    """/settings → «Модели» → форма записи реестра целиком.
+
+    В кадре всё, что у формы своё: поля в порядке «адрес → токен → id → алиас →
+    пороги автосжатия», один порог задан, второй пуст; две строки-действия — окно
+    модели над порогами (каталог «загружен» фейком) и справка внизу. Курсор стоит
+    на строке окна: она с указателем `▸` и фоном, строка справки — без. Кадр
+    стережёт вид полей: стиль поля привязан в styles.tcss к его id, и поле без
+    записи в селекторах рисуется дефолтным Input — поведенческие тесты этого не
+    видят."""
+    from gc_core import model_picker
+    from gc_core.model_picker import ModelInfo
+    from gc_tui.editors.model_entry_form import ModelEntryForm
+    from gc_tui.editors.models_section import ModelsSectionEditor
+
+    card = {"id": "glm-5.2-fp8", "context_length": 200000}
+    # Сети в кадре быть не должно: и список, и каталог формы — фейком. Каталог
+    # форма запрашивает сама, при открытии записи.
+    monkeypatch.setattr(
+        model_picker, "fetch_models", lambda *a, **k: _models()
+    )
+    monkeypatch.setattr(
+        model_picker,
+        "fetch_models_catalog",
+        lambda *a, **k: (
+            [ModelInfo(id=card["id"])],
+            {"data": [card]},
+        ),
+    )
+    # Запись берётся ИЗ ФАЙЛА: значения, вписанные в поля руками, шли бы через
+    # `Input.Changed` и раскрывали список моделей под полем id.
+    cfg_file = _write_registry_cfg(
+        tmp_path,
+        "models:\n"
+        "  glm:\n"
+        '    model: "glm-5.2-fp8"\n'
+        "    summary_trigger_tokens: 116128\n"
+        "slots:\n"
+        '  default: "glm"\n',
+    )
+    cfg = _loaded(cfg_file)
+    app = _app(tmp_path, cfg)
+
+    async def setup(pilot):
+        await pilot.pause()
+        scr = _mk_settings(config=cfg, config_path=str(cfg_file))
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        open_settings_section(scr, "Модели")
+        await pilot.pause()
+        _goto(scr.query(ModelsSectionEditor).last(), "entry", alias="glm")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        form = scr.query(ModelEntryForm).last()
+        form._presets_ctrl.close()
+        await wait_until(
+            pilot,
+            lambda: form.query_one("#mef-model-meta").enabled,
+            "строка окна модели",
+        )
+        form._idx = form._positions.index("mef-model-meta")
+        form._focus_position()
+        # Курсор переставлен мимо клавиш — футер экрана судит по его позиции.
+        scr._refresh_footer()
+        await pilot.pause()
+        await _freeze_cursors(pilot)
+
+    assert snap_compare(
+        app, terminal_size=_ENTRY_FORM_SIZE, run_before=setup
+    )
 
 
 def test_settings_voice_cloud_snapshot(snap_compare, tmp_path, monkeypatch):
