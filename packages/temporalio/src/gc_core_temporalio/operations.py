@@ -684,9 +684,6 @@ class WorkflowOperations:
             effect=request.action != "read",
         )
 
-    async def project_memory_hash(self):
-        return await self.call("universal_agent.memory.hash", {}, str | None)
-
     async def summary_trace_sink(self, record):
         # Трасса сжатия несёт входы суммаризатора (мегабайты на длинном
         # треде): частями меньше страницы, каждая — своя строка журнала.
@@ -709,4 +706,22 @@ class WorkflowOperations:
     async def release_context(self):
         if not self.released:
             await self.call("universal_agent.context.release", {}, bool)
+            if self._separate_model_queue():
+                # Activity модели на своей очереди собирает свой контекст хода
+                # (с MCP-сессиями и кэшем сообщений) — отпустить и его, иначе
+                # отдельный воркер модели копит контексты до конца сессии.
+                await self.call(
+                    "universal_agent.context.release", {}, bool, model=True
+                )
             self.released = True
+
+    def _separate_model_queue(self) -> bool:
+        model = (
+            self.activity_settings["model"].get("task_queue")
+            or self.start.model_queue
+        )
+        resource = (
+            self.activity_settings["resource"].get("task_queue")
+            or self.start.resource_queue
+        )
+        return model != resource

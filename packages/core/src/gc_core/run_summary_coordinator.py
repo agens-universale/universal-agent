@@ -151,16 +151,7 @@ async def aset_tui_finish_gate_checking(thread_session, active: bool) -> None:
 
 
 from gc_core.execution.preserved_batch import (
-    _find_function_call_in as _find_function_call_in,
-)
-from gc_core.execution.preserved_batch import (
-    _messages_tail_matches as _messages_tail_matches,
-)
-from gc_core.execution.preserved_batch import (
-    _preserved_function_output_batch as _preserved_function_output_batch,
-)
-from gc_core.execution.preserved_batch import (
-    _preserved_user_ask_batch as _preserved_user_ask_batch,
+    _messages_tail_matches,
 )
 from gc_core.execution.preserved_batch import (
     build_preserved_batch as build_preserved_batch,

@@ -150,7 +150,7 @@ def _read_secret_file(
     result: tuple[Optional[str], str]
     try:
         too_large = os.path.getsize(path) > _MAX_FILE_BYTES
-    except OSError:
+    except (OSError, ValueError):
         too_large = (
             False  # нет файла/нет доступа — причину назовёт чтение ниже
         )
@@ -165,6 +165,8 @@ def _read_secret_file(
             result = (None, "не найден")
         except (OSError, UnicodeDecodeError) as exc:
             result = (None, f"не читается ({type(exc).__name__})")
+        except ValueError:
+            result = (None, "некорректный путь")
     cache[path_raw] = result
     return result
 
@@ -204,31 +206,40 @@ class _Resolver:
         return ""
 
     def string(self, value: str, key: str) -> str:
-        def repl_env(m: re.Match[str]) -> str:
-            var, default = m.group(1), m.group(2)
-            current = os.environ.get(var)
-            if default is not None:
-                return current or default
-            if current is not None:
-                return current
-            return self._miss("env", var, "не задана", key)
+        with_env = _ENV_MARKER.sub(lambda m: self._env_value(m, key), value)
+        return _FILE_MARKER.sub(lambda m: self._file_value(m, key), with_env)
 
-        def repl_file(m: re.Match[str]) -> str:
-            path_raw, default = m.group(1), m.group(2)
-            whole = m.group(0)[len("${FILE:") : -1]
-            if default is not None and os.path.isfile(
-                os.path.expanduser(whole)
-            ):
-                # Файл с ``:-`` в имени существует: это путь, а не умолчание.
-                path_raw, default = whole, None
-            value, reason = _read_secret_file(path_raw, self.file_cache)
-            if value is not None:
-                return value
+    def _env_value(self, m: re.Match[str], key: str) -> str:
+        var, default = m.group(1), m.group(2)
+        current = os.environ.get(var)
+        if default is not None:
+            return current or default
+        if current is not None:
+            return current
+        return self._miss("env", var, "не задана", key)
+
+    def _file_value(self, m: re.Match[str], key: str) -> str:
+        path_raw, default = m.group(1), m.group(2)
+        if _UNRESOLVED_RE.search(path_raw):
+            # В пути — незаданная ${ENV:…} (строгий режим уже записал её).
+            # Файл по такому пути не открываем: метка содержит нулевой байт.
+            # Умолчание файла — как обычно, иначе остаётся метка переменной,
+            # и диагностика назовёт её, а не «битый путь».
             if default is not None:
                 return default
-            return self._miss("file", path_raw, reason, key)
-
-        return _FILE_MARKER.sub(repl_file, _ENV_MARKER.sub(repl_env, value))
+            return "".join(
+                match.group(0) for match in _UNRESOLVED_RE.finditer(path_raw)
+            )
+        whole = m.group(0)[len("${FILE:") : -1]
+        if default is not None and os.path.isfile(os.path.expanduser(whole)):
+            # Файл с ``:-`` в имени существует: это путь, а не умолчание.
+            path_raw, default = whole, None
+        value, reason = _read_secret_file(path_raw, self.file_cache)
+        if value is not None:
+            return value
+        if default is not None:
+            return default
+        return self._miss("file", path_raw, reason, key)
 
     def walk(self, obj: Any, key: str = "") -> Any:
         if isinstance(obj, dict):

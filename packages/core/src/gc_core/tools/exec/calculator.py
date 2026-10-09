@@ -110,6 +110,9 @@ def _eval_node(node: ast.AST) -> Any:
 
 @loop_warn_on_repeat(**READ_PROFILE)
 class Calculator(AbstractSimpleTool):
+    # Тело исполняется в ядре (оркестрация или чистое состояние), не на
+    # воркере (execution.tool_effects.uses_leaf_effect).
+    effect_in_core = True
     max_expression_chars = 2000
 
     @staticmethod

@@ -37,9 +37,6 @@ from gc_core.execution.tool_feedback import (
     INTERNAL_TOOL_ERROR as INTERNAL_TOOL_ERROR,
 )
 from gc_core.execution.tool_feedback import (
-    _truncate_for_tool_output as _truncate_for_tool_output,
-)
-from gc_core.execution.tool_feedback import (
     format_internal_tool_error_output as format_internal_tool_error_output,
 )
 from gc_core.execution.tool_feedback import (
@@ -647,9 +644,7 @@ async def _aapply_tool_text(
             uses_leaf_effect,
         )
 
-        if callable(port(ctx, "tool_effect")) and uses_leaf_effect(
-            tool_name, tool
-        ):
+        if callable(port(ctx, "tool_effect")) and uses_leaf_effect(tool):
             res = await invoke_native_tool(
                 tool,
                 tool_name,
@@ -684,6 +679,21 @@ async def _aapply_tool_text(
     )
 
 
+def _owns_session_state(
+    tool_name: str,
+    tools_data_: Optional[Dict[str, Dict[str, Any]]],
+    ctx: Optional[Any],
+) -> bool:
+    """Класс тула объявил ``owns_session_state``: ему — частный срез состояния."""
+    data = (
+        tools_data_
+        if tools_data_ is not None
+        else getattr(ctx, "tools_data", None)
+    )
+    entry = (data or {}).get(tool_name) or {}
+    return bool(getattr(entry.get("tool_fabric"), "owns_session_state", False))
+
+
 async def aapply_tool_result(
     tool_name: str,
     arguments: str | Dict[str, Any],
@@ -700,10 +710,7 @@ async def aapply_tool_result(
     state = kwargs.get("state")
     before = None
     view = None
-    if (
-        tool_name in ("session_memory", "session_todo", "exec_fetch_url")
-        and state is not None
-    ):
+    if state is not None and _owns_session_state(tool_name, tools_data_, ctx):
         before = tool_state_view(state)
         view = SimpleNamespace(
             shared=SimpleNamespace(

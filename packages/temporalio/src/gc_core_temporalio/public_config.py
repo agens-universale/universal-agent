@@ -127,6 +127,7 @@ _COMPLETION_PARAMETERS = {
     **_fields(
         "stream temperature top_p top_k min_p frequency_penalty presence_penalty repetition_penalty max_tokens max_completion_tokens reasoning_effort seed logprobs top_logprobs n parallel_tool_calls store verbosity enable_thinking thinking_budget max_output_tokens"
     ),
+    "stream_options": _fields("include_usage"),
     "stop": "scalar_or_list",
     # "auto" / "none" / {"type": "function", "function": {"name": …}}.
     "tool_choice": "json",
@@ -146,6 +147,10 @@ _COMPLETION_PARAMETERS = {
 
 #: Произвольные словари параметров провайдера: туда кладут что угодно, в том
 #: числе ключи и заголовки, — в снимок идут только известные параметры.
+#: Неизвестный ключ (``extra_body``, ``api_key``…) остаётся на воркере: снимку
+#: он не нужен — запрос к модели собирает activity из настроек воркера
+#: (``ModelRouter(ctx)``), а расхождение приложения и воркера видит
+#: ``settings_fingerprint`` (он считается по полным настройкам).
 _FREE_FORM_POLICY = {
     ("backend", "chat_completion_kwargs"): _COMPLETION_PARAMETERS,
     # Параметры запроса алиаса (main — ход агента, auxiliary — служебные).
@@ -194,9 +199,9 @@ def _copy_object(value: Any, schema: dict, path: str) -> dict:
         if not isinstance(key, str) or (
             key not in schema and "*" not in schema
         ):
-            raise PublicConfigError(
-                f"Unclassified public field at {path}.{key}"
-            )
+            # Неизвестный параметр провайдера — только на воркере
+            # (см. ``_FREE_FORM_POLICY``), в историю не идёт.
+            continue
         output[key] = _copy_policy(
             item, schema.get(key, schema.get("*")), f"{path}.{key}"
         )

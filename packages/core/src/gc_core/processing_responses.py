@@ -77,7 +77,7 @@ from gc_core.message_policy.tool_attachments import (
     build_tool_attachments_message,
 )
 from gc_core.message_policy.tool_usage_notice.apply import (
-    aapply_tool_usage_notice_before_llm as apply_tool_usage_notice_before_llm,
+    apply_tool_usage_notice_before_llm,
 )
 from gc_core.message_policy.user_message_policy import (
     TECHNICAL_TYPE_ERROR_MESSAGE,
@@ -2272,7 +2272,6 @@ class _AgentLoop:
                 step_messages=messages,
                 logger=self.run_logger,
             )
-            messages = await await_callback(messages)
             notice_messages = messages[_messages_before_notice:]
             if notice_messages:
                 to_append = filter_messages_not_in_state(

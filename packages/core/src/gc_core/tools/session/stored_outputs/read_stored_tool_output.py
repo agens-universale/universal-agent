@@ -23,6 +23,10 @@ _NOT_FOUND_MESSAGE = (
 
 @loop_warn_on_repeat(**READ_PROFILE)
 class ReadStoredToolOutput(AbstractSimpleTool):
+    # Тело исполняется в ядре (оркестрация или чистое состояние), не на
+    # воркере (execution.tool_effects.uses_leaf_effect).
+    effect_in_core = True
+
     def _logger(self) -> logging.Logger:
         logger = getattr(self._ctx, "logger", None)
         if isinstance(logger, logging.Logger):

@@ -59,6 +59,9 @@ _HIGH_FILL_HINT = (
 
 @loop_warn_on_repeat(**GENERIC_PROFILE)
 class ProjectMemory(AbstractSimpleTool):
+    # Тело исполняется в ядре (оркестрация или чистое состояние), не на
+    # воркере (execution.tool_effects.uses_leaf_effect).
+    effect_in_core = True
     tool_name = PROJECT_MEMORY_TOOL_NAME
 
     def __init__(

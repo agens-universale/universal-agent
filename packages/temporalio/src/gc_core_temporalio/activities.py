@@ -554,15 +554,6 @@ class AgentActivities:
             value_to_type(ProjectMemoryRequest, call.data),
         )
 
-    @activity.defn(name="universal_agent.memory.hash")
-    async def memory_hash(self, call: ActivityCall) -> str | None:
-        return await self._recorded(call, str | None, self._memory_hash)
-
-    async def _memory_hash(self, _call, ctx):
-        from gc_core.project_memory import get_hash
-
-        return await asyncio.to_thread(get_hash, ctx)
-
     @activity.defn(name="universal_agent.guard.probe")
     async def guard(self, call: ActivityCall) -> GuardProbes:
         return await self._recorded(call, GuardProbes, self._guard)

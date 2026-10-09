@@ -1,5 +1,5 @@
 from gc_core.message_policy.tool_usage_notice.apply import (
-    aapply_tool_usage_notice_before_llm,
+    apply_tool_usage_notice_before_llm,
 )
 from gc_core.states import SharedStateData, State
 from gc_testkit.settings import fake_ctx
@@ -19,7 +19,7 @@ def _state() -> State:
     )
 
 
-async def test_apply_appends_notice_when_threshold_reached():
+def test_apply_appends_notice_when_threshold_reached():
     state = _state()
     state.tool_usage_notice_cnt = {"session_memory": 10}
     meta: dict = {}
@@ -35,7 +35,7 @@ async def test_apply_appends_notice_when_threshold_reached():
             "agent.stop_tools": [],
         }
     )
-    out = await aapply_tool_usage_notice_before_llm(
+    out = apply_tool_usage_notice_before_llm(
         [{"role": "user", "content": "hi", "id": "u1"}],
         state,
         ctx,
@@ -47,12 +47,12 @@ async def test_apply_appends_notice_when_threshold_reached():
     assert state.tool_usage_notice_cnt.get("session_memory", 0) == 0
 
 
-async def test_apply_no_notice_when_rules_empty():
+def test_apply_no_notice_when_rules_empty():
     state = _state()
     state.tool_usage_notice_cnt = {"session_memory": 100}
     meta: dict = {}
     ctx = fake_ctx({"agent.stop_tools": []})
-    out = await aapply_tool_usage_notice_before_llm(
+    out = apply_tool_usage_notice_before_llm(
         [{"role": "user", "content": "hi", "id": "u1"}],
         state,
         ctx,
@@ -63,7 +63,7 @@ async def test_apply_no_notice_when_rules_empty():
     assert state.tool_usage_notice_cnt.get("session_memory", 0) == 100
 
 
-async def test_apply_long_changed_hint_on_k_tick(monkeypatch):
+def test_apply_long_changed_hint_on_k_tick(monkeypatch):
     state = _state()
     state.project_memory_content_hash = "old"
     meta: dict = {}
@@ -83,7 +83,7 @@ async def test_apply_long_changed_hint_on_k_tick(monkeypatch):
         "gc_core.project_memory.get_hash", lambda _ctx: "new_hash"
     )
 
-    out = await aapply_tool_usage_notice_before_llm(
+    out = apply_tool_usage_notice_before_llm(
         [{"role": "user", "content": "x", "id": "u1"}],
         state,
         ctx,
@@ -97,7 +97,7 @@ async def test_apply_long_changed_hint_on_k_tick(monkeypatch):
     )
 
 
-async def test_apply_long_hint_does_not_reset_tool_usage_counter(monkeypatch):
+def test_apply_long_hint_does_not_reset_tool_usage_counter(monkeypatch):
     state = _state()
     state.tool_usage_notice_cnt = {"session_memory": 6}
     state.project_memory_content_hash = "old"
@@ -125,7 +125,7 @@ async def test_apply_long_hint_does_not_reset_tool_usage_counter(monkeypatch):
         "gc_core.project_memory.get_hash", lambda _ctx: "new_hash"
     )
 
-    out = await aapply_tool_usage_notice_before_llm(
+    out = apply_tool_usage_notice_before_llm(
         [{"role": "user", "content": "x", "id": "u1"}],
         state,
         ctx,

@@ -106,6 +106,10 @@ class FetchRequest(NamedTuple):
 class FetchUrlBase(AbstractSimpleTool):
     """База ``FetchUrl`` / ``SimpleFetchUrl``: всё, кроме разбора HTML и запроса."""
 
+    # Меняет состояние сессии (память, todo, кэш fetch): получает частный
+    # срез состояния и возвращает изменения (tools.aapply_tool_result).
+    owns_session_state = True
+
     # GET-чтение страницы: повтор после сбоя исполнителя допустим, внешней
     # мутации инструмент не делает.
     effect_is_read_only = True

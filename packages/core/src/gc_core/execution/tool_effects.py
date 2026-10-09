@@ -37,30 +37,14 @@ def arguments_digest(arguments: dict[str, Any]) -> str:
     ).hexdigest()
 
 
-# These tools own orchestration or pure state. Their native bodies stay in core.
-# All other registered tools retain their native factories and leaf bodies.
-_CORE_TOOLS = frozenset(
-    {
-        "session_memory",
-        "session_todo",
-        "session_compact",
-        "session_think",
-        "session_read_user_intent_log",
-        "session_read_stored_tool_output",
-        "project_memory",
-        "turn_ask_human",
-        "turn_finish",
-        "turn_intermediate_reply",
-        "exec_calculator",
-        "exec_sleep",
-    }
-)
-
-
-def uses_leaf_effect(name: str, tool: Any) -> bool:
+def uses_leaf_effect(tool: Any) -> bool:
     from gc_core.tools import _SubagentTool
 
-    return name not in _CORE_TOOLS and not isinstance(tool, _SubagentTool)
+    # Тело в ядре объявляет сам класс тула (``effect_in_core``): оркестрация
+    # или чистое состояние. Остальные тулы — листовые эффекты на воркере.
+    return not getattr(tool, "effect_in_core", False) and not isinstance(
+        tool, _SubagentTool
+    )
 
 
 async def invoke_native_tool(

@@ -196,9 +196,6 @@ def is_empty_completion(dct: dict) -> bool:
 
 # Семантика finish_reason для транспорта (accept) и политики цикла (bounce/final).
 from gc_core.execution.finish_reason import (
-    _KNOWN_FINISH_KINDS as _KNOWN_FINISH_KINDS,
-)
-from gc_core.execution.finish_reason import (
     FINISH_KIND_BLOCKED as FINISH_KIND_BLOCKED,
 )
 from gc_core.execution.finish_reason import (
@@ -215,9 +212,6 @@ from gc_core.execution.finish_reason import (
 )
 from gc_core.execution.finish_reason import (
     FinishDecision as FinishDecision,
-)
-from gc_core.execution.finish_reason import (
-    _finish_reason_key as _finish_reason_key,
 )
 from gc_core.execution.finish_reason import (
     classify_finish_kind as classify_finish_kind,
@@ -293,7 +287,7 @@ def is_model_unavailable_error(exc: BaseException) -> bool:
 
 
 from gc_core.execution.finish_reason import (
-    _CONTEXT_OVERFLOW_MARKERS as _CONTEXT_OVERFLOW_MARKERS,
+    _CONTEXT_OVERFLOW_MARKERS,
 )
 from gc_core.execution.finish_reason import (
     is_context_overflow_error as is_context_overflow_error,

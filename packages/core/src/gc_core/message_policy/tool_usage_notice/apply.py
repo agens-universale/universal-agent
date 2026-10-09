@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Any
 
 from gc_core.constants.tool_names import PROJECT_MEMORY_TOOL_NAME
-from gc_core.execution.ports import port
 from gc_core.message_policy.notice_policy_log import log_notice_policy_step
 from gc_core.message_policy.project_memory_notice.policy import (
     collect_project_memory_hints,
@@ -69,15 +68,12 @@ def _emit_project_memory_hints(
     settings: AppConfig,
     *,
     enabled: bool,
-    get_hash_fn=None,
 ) -> list[str]:
     """Добавить в ``out`` подсказки project_memory; вернуть их тексты."""
     emitted: list[str] = []
     if not enabled:
         return emitted
-    for hint_text in collect_project_memory_hints(
-        state, meta, ctx, settings, get_hash_fn=get_hash_fn
-    ):
+    for hint_text in collect_project_memory_hints(state, meta, ctx, settings):
         out.append(
             wrap_project_memory_hint_user_message(
                 hint_text, suffix="mem_project"
@@ -108,7 +104,7 @@ def _emitted_tools(
     }
 
 
-async def aapply_tool_usage_notice_before_llm(
+def apply_tool_usage_notice_before_llm(
     messages: list[dict[str, Any]],
     state: Any,
     ctx: Any,
@@ -120,17 +116,7 @@ async def aapply_tool_usage_notice_before_llm(
     """
     После persist-batch, перед LLM: независимые контуры project_memory K-тик и tool_usage_notice.
     Счётчики не сбрасывают друг друга; снимок — только в текстовый log.
-
-    Если рантайм дал ``ctx.project_memory_hash`` (Temporal native), хэш
-    project memory берётся у него и только на том шаге, где политика его
-    действительно спросит; иначе — прежнее локальное чтение в ``get_hash``.
     """
-    project_memory_hash_fn = None
-    loader = port(ctx, "project_memory_hash")
-    if loader is not None and _needs_project_hash(state, ctx, meta):
-        value = await loader()
-        project_memory_hash_fn = lambda _ctx: value
-
     settings = settings_of(ctx)
     if not isinstance(meta, dict):
         meta = {}
@@ -179,7 +165,6 @@ async def aapply_tool_usage_notice_before_llm(
         ctx,
         settings,
         enabled=project_hints_enabled,
-        get_hash_fn=project_memory_hash_fn,
     )
     project_check_final = (
         get_project_memory_check_cnt(meta) if project_hints_enabled else None
@@ -228,19 +213,3 @@ async def aapply_tool_usage_notice_before_llm(
         long_emit=bool(emitted_project_hints),
     )
     return out
-
-
-def _needs_project_hash(state, ctx, meta) -> bool:
-    settings = settings_of(ctx)
-    if not project_memory_hints_enabled(settings):
-        return False
-    if not tool_is_available(
-        available_tool_names(ctx, state), PROJECT_MEMORY_TOOL_NAME
-    ):
-        return False
-    interval = settings.project_memory.check_interval_messages
-    return (
-        get_project_memory_check_cnt(meta if isinstance(meta, dict) else {})
-        + 1
-        >= interval
-    )

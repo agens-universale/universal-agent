@@ -197,7 +197,6 @@ def agent_activities(native, threads):
         native.tool,
         native.guard,
         native.memory,
-        native.memory_hash,
         native.summary_trace,
         native.close,
         native.release,

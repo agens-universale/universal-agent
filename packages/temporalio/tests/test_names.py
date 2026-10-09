@@ -23,7 +23,6 @@ ACTIVITIES = {
     "universal_agent.tool.execute",
     "universal_agent.guard.probe",
     "universal_agent.memory.execute",
-    "universal_agent.memory.hash",
     "universal_agent.summary.trace",
     "universal_agent.subagent.prepare",
     "universal_agent.thread.load",

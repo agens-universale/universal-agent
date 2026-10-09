@@ -131,7 +131,6 @@ def assemble_context(prepared, *, operations, store, logger, human_request):
             prompt_resource=operations.prompt_resource,
             summary_trace_sink=operations.summary_trace_sink,
             project_memory_io=operations.project_memory_io,
-            project_memory_hash=operations.project_memory_hash,
             collect_garbage=lambda: None,
         ),
     )

@@ -92,7 +92,6 @@ async def test_native_executor_uses_real_file_session_and_replays(
         activities.tool,
         activities.guard,
         activities.memory,
-        activities.memory_hash,
         activities.summary_trace,
         activities.close,
         activities.release,

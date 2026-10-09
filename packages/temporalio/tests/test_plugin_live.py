@@ -125,11 +125,71 @@ async def test_async_agent_runs_through_a_plugin_worker(
     contents = [m.get("content") for m in store.load_messages("sdk", "t1")]
     assert "first task" in contents and "second task" in contents
     assert ("universal_agent.model.request", "shop-model") in queues
+    # Контекст хода отпускается на обеих очередях: activity модели собирает
+    # на своей очереди свой.
+    assert ("universal_agent.context.release", "shop-model") in queues
     assert all(
         queue == "shop"
         for name, queue in queues
-        if name != "universal_agent.model.request"
+        if name
+        not in (
+            "universal_agent.model.request",
+            "universal_agent.context.release",
+        )
     )
+
+
+async def test_separate_model_worker_releases_its_contexts(
+    tmp_path,
+    monkeypatch,
+    scripted_http,  # noqa: F811
+):
+    """Очередь модели — отдельный процесс со своим плагином (docs/temporal.md,
+    «Размещение»): контекст хода, который собрал воркер модели, освобождается
+    там же, а не копится до закрытия сессии (ревью PR #135)."""
+    monkeypatch.chdir(tmp_path)
+    url, _requests, script = scripted_http
+    script.extend([[finish("first")], [finish("second")]])
+    settings = agent_settings(url, tmp_path)
+    model_activity = ActivityConfig(
+        task_queue="split-model",
+        start_to_close_timeout=timedelta(minutes=2),
+        retry_policy=RetryPolicy(maximum_interval=timedelta(seconds=5)),
+    )
+
+    def plugin():
+        return AgentPlugin(
+            {"shop": settings},
+            thread_store=DurableFileThreadStore(str(tmp_path / "threads")),
+            model_activity=model_activity,
+        )
+
+    session_plugin, model_plugin = plugin(), plugin()
+    async with await WorkflowEnvironment.start_local(
+        dev_server_existing_path=temporal_cli()
+    ) as env:
+        async with (
+            Worker(env.client, task_queue="split", plugins=[session_plugin]),
+            Worker(
+                env.client, task_queue="split-model", plugins=[model_plugin]
+            ),
+        ):
+            agent = await AsyncAgent.create(
+                settings,
+                durable=TemporalDurability(
+                    env.client, task_queue="split", agent="shop"
+                ),
+            )
+            async with agent:
+                for text in ("first task", "second task"):
+                    await asyncio.wait_for(agent.run(text, thread_id="t1"), 60)
+                # Ход окончен — воркер модели уже не держит его контекст,
+                # хотя сессия ещё открыта.
+                assert model_plugin.provider.idle_owners(0) == []
+                assert not model_plugin.activities_host._messages
+            await AgentSession(
+                env.client, agent="shop", thread_id="t1", task_queue="split"
+            ).close()
 
 
 async def test_session_ask_and_text_answer_mode_from_runtime(

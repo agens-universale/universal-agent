@@ -98,7 +98,6 @@ class RunContext:
     mcp_cleanup: Any = None
     prompt_resource: Any = None
     project_memory_io: Any = None
-    project_memory_hash: Any = None
     summary_trace_sink: Any = None
     collect_garbage: Any = None
     trace_id: str = ""
@@ -245,7 +244,6 @@ def assemble_run_context(
         mcp_cleanup=bindings.mcp_cleanup,
         prompt_resource=bindings.prompt_resource,
         project_memory_io=bindings.project_memory_io,
-        project_memory_hash=bindings.project_memory_hash,
         summary_trace_sink=bindings.summary_trace_sink,
         collect_garbage=bindings.collect_garbage,
     )

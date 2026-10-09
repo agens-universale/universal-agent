@@ -21,6 +21,10 @@ _TOOL_DESCRIPTION = (
 
 
 class IntermediateReply(AbstractSimpleTool):
+    # Тело исполняется в ядре (оркестрация или чистое состояние), не на
+    # воркере (execution.tool_effects.uses_leaf_effect).
+    effect_in_core = True
+
     @staticmethod
     def _result(
         *,

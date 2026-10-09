@@ -70,7 +70,6 @@ CORE_CONTEXT_ATTRIBUTES = {
     "parent_call_id": DATA,
     "permission_store": DATA,
     "project_gc_dir": DATA,
-    "project_memory_hash": BOUND,
     "project_memory_io": BOUND,
     "prompt_loader": BOUND,
     "prompt_resource": BOUND,

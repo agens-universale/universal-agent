@@ -71,6 +71,12 @@ def _total_chars(registers: Dict[str, str]) -> int:
 
 @loop_warn_on_repeat(**GENERIC_PROFILE)
 class WorkingMemory(AbstractSimpleTool):
+    # Меняет состояние сессии (память, todo, кэш fetch): получает частный
+    # срез состояния и возвращает изменения (tools.aapply_tool_result).
+    owns_session_state = True
+    # Тело исполняется в ядре (оркестрация или чистое состояние), не на
+    # воркере (execution.tool_effects.uses_leaf_effect).
+    effect_in_core = True
     tool_name = SESSION_MEMORY_TOOL_NAME
 
     def __init__(

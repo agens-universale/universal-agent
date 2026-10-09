@@ -14,6 +14,9 @@ _TOOL_NAME = "session_read_user_intent_log"
 
 @loop_warn_on_repeat(**READ_PROFILE)
 class ReadUserIntentLog(AbstractSimpleTool):
+    # Тело исполняется в ядре (оркестрация или чистое состояние), не на
+    # воркере (execution.tool_effects.uses_leaf_effect).
+    effect_in_core = True
     tool_name = _TOOL_NAME
 
     def _default_limit(self) -> int:

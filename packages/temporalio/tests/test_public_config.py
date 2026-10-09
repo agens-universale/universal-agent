@@ -23,6 +23,7 @@ from gc_core_temporalio.public_config import (
     PublicConfigError,
     is_private_path,
     public_config_snapshot,
+    settings_fingerprint,
     settings_exclude_spec,
 )
 
@@ -306,12 +307,48 @@ def test_routing_identity_and_currencies_survive_without_transport():
         },
     ],
 )
-def test_unknown_provider_parameters_fail_without_value_in_exception(
-    overlay,
-):
-    with pytest.raises(PublicConfigError) as error:
-        public_config_snapshot(AppConfig.model_validate(overlay))
-    assert "SECRET" not in str(error.value)
+def test_unknown_provider_parameters_stay_on_worker(overlay):
+    """Неизвестный параметр провайдера (мог быть секретом) в снимок не идёт,
+    но и снимок не роняет: ревью PR #135 — ``stream_options``/``extra_body``
+    ломали Temporal при том же конфиге, что работает в CLI и TUI."""
+    snapshot = public_config_snapshot(AppConfig.model_validate(overlay))
+    assert "SECRET" not in json.dumps(snapshot.settings)
+
+
+def test_common_provider_parameters_do_not_break_snapshot():
+    settings = AppConfig.model_validate(
+        {
+            "backend": {
+                "chat_completion_kwargs": {
+                    "temperature": 0.1,
+                    "stream_options": {"include_usage": True},
+                    "extra_body": {"provider": {"order": ["x"]}},
+                }
+            }
+        }
+    )
+    kwargs = public_config_snapshot(settings).settings["backend"][
+        "chat_completion_kwargs"
+    ]
+    assert kwargs == {
+        "temperature": 0.1,
+        "stream_options": {"include_usage": True},
+    }
+
+
+def test_worker_only_provider_parameters_still_count_in_fingerprint():
+    def fingerprint(extra_body):
+        return settings_fingerprint(
+            AppConfig.model_validate(
+                {
+                    "backend": {
+                        "chat_completion_kwargs": {"extra_body": extra_body}
+                    }
+                }
+            )
+        )
+
+    assert fingerprint({"a": 1})["backend"] != fingerprint({"a": 2})["backend"]
 
 
 def test_known_provider_parameters_are_preserved():
@@ -365,17 +402,16 @@ def test_runtime_fields_require_classification_and_backend_kind():
 def test_model_auxiliary_and_os_backend_env_do_not_leak_into_history():
     """Параметры алиаса проходят ту же схему, что и глобальные; переменные
     окружения бэкенда (могут быть токены) в публичный снимок не идут."""
-    with pytest.raises(PublicConfigError) as error:
-        public_config_snapshot(
-            AppConfig.model_validate(
-                {
-                    "models": {
-                        "m": {"model": "x", "auxiliary": {"api_key": "SECRET"}}
-                    }
+    snapshot = public_config_snapshot(
+        AppConfig.model_validate(
+            {
+                "models": {
+                    "m": {"model": "x", "auxiliary": {"api_key": "SECRET"}}
                 }
-            )
+            }
         )
-    assert "SECRET" not in str(error.value)
+    )
+    assert "SECRET" not in json.dumps(snapshot.settings)
     snapshot = public_config_snapshot(
         AppConfig.model_validate(
             {"os_backend": {"kind": "local", "env": {"TOKEN": "SECRET"}}}

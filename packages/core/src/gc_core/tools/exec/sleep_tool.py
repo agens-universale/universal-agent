@@ -6,6 +6,9 @@ from gc_core.tools.simple_tool_base import AbstractSimpleTool
 
 
 class Sleep(AbstractSimpleTool):
+    # Тело исполняется в ядре (оркестрация или чистое состояние), не на
+    # воркере (execution.tool_effects.uses_leaf_effect).
+    effect_in_core = True
     max_seconds = 180
 
     @staticmethod

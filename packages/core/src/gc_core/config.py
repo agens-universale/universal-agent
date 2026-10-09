@@ -463,22 +463,16 @@ def load_settings(
     """Загрузить настройки: ``LoadedSettings(settings, runtime, provenance)``.
 
     Конвейер загрузки: слои → ${ENV} → миграции → compat → схема → пути.
+    Слои: base → managed → project (deep-merge, каждый слой интерполируется
+    ${ENV:VAR} сразу после чтения) → указатель `profile:` резолвится из этого
+    мержа (либо `profile_override`) → контент профиля мержится ПОВЕРХ.
+
+    Побочек на процесс нет, поэтому витрина чужого профиля в Настройках зовёт
+    ту же функцию, что старт и reload.
     """
     from gc_core.config_modules.provenance import Provenance
     from gc_core.settings import LoadedSettings, RuntimeEnv
 
-    """Загрузить эффективный конфиг + метаданные резолва профиля (спека §2, §3).
-
-    Слои: base → managed → project (deep-merge, каждый слой интерполируется
-    ${ENV:VAR} сразу после чтения) → указатель `profile:` резолвится из этого мержа
-    (либо `profile_override`) → контент профиля мержится ПОВЕРХ → compat →
-    `AppConfig.model_validate` → `validate_model_sections` → resolve_paths/flatten.
-    `load_config` (ниже) — тонкая обёртка для обратной совместимости.
-
-    Сбор побочек на процесс не имеет: глушение TLS-предупреждений ушло вместе с
-    urllib3, глобальный конвейер проекций — в `754b8910`. Поэтому витрина чужого
-    профиля в Настройках зовёт ту же функцию, что старт и reload; отдельный
-    флаг `apply_to_process` для неё больше не нужен и снят."""
     if config_path is None and _xdg_config_path() is None:
         _bootstrap_user_config()
     path = resolve_config_path(config_path)

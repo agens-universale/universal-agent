@@ -123,6 +123,5 @@ class RunContextBindings:
     mcp_cleanup: Any = None
     prompt_resource: Any = None
     project_memory_io: Any = None
-    project_memory_hash: Any = None
     summary_trace_sink: Any = None
     collect_garbage: Any = None

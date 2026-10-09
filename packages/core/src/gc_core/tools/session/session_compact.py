@@ -21,6 +21,9 @@ TRIGGER_REASON = "session_compact"
 
 
 class SessionCompact(AbstractSimpleTool):
+    # Тело исполняется в ядре (оркестрация или чистое состояние), не на
+    # воркере (execution.tool_effects.uses_leaf_effect).
+    effect_in_core = True
     tool_name = SESSION_COMPACT_TOOL_NAME
 
     def __init__(
