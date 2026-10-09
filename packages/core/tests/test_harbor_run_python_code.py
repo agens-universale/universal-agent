@@ -196,8 +196,10 @@ def test_backend_timed_out_sets_timeout_envelope():
     assert env["timed_out"] is True
     assert env["return_code"] is None
     assert env["error"]["type"] == "timeout"
-    assert env["error"]["message"].startswith(
-        "Execution timed out after 1 seconds."
+    assert env["error"]["message"] == (
+        "Execution timed out after 1 seconds. "
+        "This deadline is the `timeout` argument of this tool. "
+        "Call again and pass a larger `timeout`."
     )
 
 

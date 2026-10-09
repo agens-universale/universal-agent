@@ -378,9 +378,9 @@ Usage:
                 error={
                     "type": "timeout",
                     "message": (
-                        f"Execution timed out after {effective_timeout} seconds — the `timeout` of this call. "
-                        "If you omitted it, this is the default. "
-                        "Call again with a larger `timeout`."
+                        f"Execution timed out after {effective_timeout} seconds. "
+                        "This deadline is the `timeout` argument of this tool. "
+                        "Call again and pass a larger `timeout`."
                     ),
                 },
             )
