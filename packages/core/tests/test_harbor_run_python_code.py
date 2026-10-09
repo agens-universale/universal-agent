@@ -11,6 +11,7 @@ and asserts it forwards the RAW code/cwd/timeout/validated-env dict to
 import json
 
 from gc_core.backends.protocol import ExecResult, bound_exec_result
+from gc_core.config_modules.agent import DEFAULT_EXEC_TIMEOUT_SEC
 from gc_core.tools.exec.run_python_code import RunPythonCode
 from gc_testkit.harbor_fakes import bind_os_backend
 
@@ -79,7 +80,7 @@ def test_envelope_shape_matches_base_contract():
 def test_default_timeout_is_schema_default():
     b = _RecordingFakeBackend()
     _tool(b)(code="x=1")
-    assert b.calls[0]["timeout"] == 120
+    assert b.calls[0]["timeout"] == DEFAULT_EXEC_TIMEOUT_SEC
 
 
 def test_default_timeout_flows_from_exec_timeout_sec_config():
@@ -195,7 +196,9 @@ def test_backend_timed_out_sets_timeout_envelope():
     assert env["timed_out"] is True
     assert env["return_code"] is None
     assert env["error"]["type"] == "timeout"
-    assert env["error"]["message"] == "Execution timed out after 1 seconds"
+    assert env["error"]["message"].startswith(
+        "Execution timed out after 1 seconds."
+    )
 
 
 def test_backend_exception_returns_execution_failed():
