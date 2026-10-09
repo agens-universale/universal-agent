@@ -52,7 +52,7 @@ from gc_core.run_summary_coordinator import RunSummaryCoordinator
 from gc_core.runtime_notices import maybe_push_fallback_to_active_notice
 from gc_core.states import State
 from gc_core.summarize.config import (
-    resolve_summary_limits_for_router,
+    resolve_summary_limits_at_level,
 )
 from gc_core.tools import (
     SUBAGENT_TOOLS_ALLOW_KEY,
@@ -241,10 +241,10 @@ class SubagentRunner:
             return None
 
         def child_limits():
-            return resolve_summary_limits_for_router(
+            return resolve_summary_limits_at_level(
                 self._config,
                 getattr(child_ctx, "model_router", None),
-                consumer="main",
+                getattr(child_state, "turn_level", None),
             )
 
         # Хук всегда для chat_completions: порог читается на проверке (смена алиаса).

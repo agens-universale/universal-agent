@@ -11,6 +11,7 @@ from types import SimpleNamespace
 import pytest
 from gc_core.tools.subagents import runner as runner_mod
 from gc_core.tools.subagents.runner import SubagentRunner
+from gc_core.summarize.config import resolve_summary_limits
 from gc_core.usage.account import UsageAccount
 from gc_testkit import as_coro
 
@@ -78,8 +79,11 @@ async def _run_with_tools(monkeypatch, tools):
         "subagent_thread_memory_bootstrap_text",
         lambda cfg, mf: BOOT_MARKER,
     )
+    # Сжатие у ребёнка выключено: пороги нулевые (координатор — no-op).
     monkeypatch.setattr(
-        runner_mod, "parse_summary_trigger_chars", lambda cfg: 0
+        runner_mod,
+        "resolve_summary_limits_at_level",
+        lambda cfg, router, level: resolve_summary_limits({}),
     )
 
     async def _create(*a, **k):

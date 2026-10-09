@@ -74,7 +74,8 @@ class ExecuteCommand(AbstractSimpleTool):
             "type": "function",
             "name": "exec_command",
             "description": (
-                "Run a shell command synchronously. Returns JSON with ok, exit_code, stdout, stderr."
+                "Run a shell command synchronously. Returns JSON with ok, exit_code, stdout, stderr. "
+                "The `timeout` argument is the deadline that kills the process; a `timeout` prefix inside the command does not extend it."
             ),
             "parameters": {
                 "type": "object",
@@ -86,7 +87,10 @@ class ExecuteCommand(AbstractSimpleTool):
                     "timeout": {
                         "type": "integer",
                         "description": (
-                            f"Execution timeout in seconds. Default is {timeout_default} (agent.exec_timeout_sec)."
+                            "Deadline for this call, in seconds. When it elapses the process is killed. "
+                            f"Omit it and the default {timeout_default} applies (agent.exec_timeout_sec). "
+                            "A `timeout` prefix inside `command` does not extend this deadline. "
+                            "If the command needs longer, pass a larger number here."
                         ),
                         "default": timeout_default,
                         "minimum": 1,
@@ -118,19 +122,18 @@ class ExecuteCommand(AbstractSimpleTool):
                     "run_in_background": {
                         "type": "boolean",
                         "description": (
-                            "Start the command detached and return immediately, without waiting "
-                            "for it to finish. Use this for anything long-lived: dev servers, "
-                            "watchers, `npm run dev`, `uvicorn`. The command keeps running after "
-                            "the agent exits. Its output is NOT captured — the reply carries only "
-                            "the pid. Check that it works by probing it (e.g. request its port). "
-                            "If it does not come up, find out why with a short diagnostic run "
-                            "in the foreground (small `timeout`): a failing start prints its "
-                            "error and exits, one that keeps running is stopped at the timeout. "
-                            "That run is only for reading the error — the service itself is "
-                            "still started with this flag. A command started WITHOUT this flag "
-                            "does not outlive the call — appending `&` to it is not enough: "
-                            "it is killed with its process group on timeout or cancel, it dies "
-                            "with the agent, and nothing of its output is reported back."
+                            "Start the command detached and return its pid at once. The call does not "
+                            "wait and does not apply `timeout`; the process keeps running after the agent exits. "
+                            "This mode discards stdout and stderr. To keep them, redirect both streams to a file "
+                            "with the syntax of this machine's shell, and read that file if you need the output. "
+                            "Do not send the output through a program that writes only when its input ends: "
+                            "a poll of that file stays empty until the command exits. The exit code is not "
+                            "returned — have the command write it to a second file and wait until that file appears. "
+                            "Use for processes that should outlive the call (dev servers, watchers) and for "
+                            "jobs you would rather poll than block on. Without this flag the tool stops the "
+                            "process on timeout or cancel; detaching inside the command does not prevent that. "
+                            "If a background command exits at once, run it in the foreground with a short "
+                            "`timeout` to see the error."
                         ),
                     },
                 },
@@ -506,7 +509,13 @@ Important Usage Rules:
                 stderr=stderr_stream,
                 error={
                     "type": "timeout",
-                    "message": f"Command timed out after {timeout} seconds",
+                    "message": (
+                        f"Command timed out after {timeout} seconds — the `timeout` of this call. "
+                        "If you omitted it, this is the default. "
+                        "A `timeout` prefix inside the command does not raise it. "
+                        "Call again with a larger `timeout`, or pass `run_in_background: true` "
+                        "and redirect both streams to a file, then read that file if you need the output."
+                    ),
                 },
             )
 

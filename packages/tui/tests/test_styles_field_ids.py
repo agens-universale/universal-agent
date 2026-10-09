@@ -18,6 +18,8 @@ _FRAMED_FIELD_IDS = (
     "mef-model",
     "mef-url",
     "mef-token",
+    "mef-summary-chars",
+    "mef-summary-tokens",
     "set-profile-name",
     "voice-url",
     "voice-token",

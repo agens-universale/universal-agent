@@ -1156,20 +1156,9 @@ class TraceScreen(Screen):
         if self._store is None or self._active_task_id is None:
             return None
         meta = self._store.get_task_meta(self._active_task_id)
-        from gc_core.summarize.config import resolve_summary_limits_for_router
-
-        # Знаменатель — mid-turn активной шкалы резолва алиаса истории.
+        # Знаменатель — mid-turn активной шкалы модели, которая ведёт историю.
         # mid-turn 0 подменяется turn-end той же шкалы.
-        router = None
-        display_router = getattr(self.app, "display_router", None)
-        if callable(display_router):
-            try:
-                router = display_router()
-            except Exception:
-                router = None
-        limits = resolve_summary_limits_for_router(
-            cfg, router, consumer="main"
-        )
+        limits = self._meter_summary_limits(cfg)
         token_mid = limits.tokens_during
         token_end = limits.tokens_after
         saved_tokens = meta.get("last_main_prompt_tokens")
@@ -1196,6 +1185,33 @@ class TraceScreen(Screen):
         except (TypeError, ValueError):
             return None
         return render_context_meter(chars, threshold)
+
+    def _meter_summary_limits(self, cfg: dict):
+        """Пороги для знаменателя индикатора контекста.
+
+        Пока ход идёт — те, по которым сжимает РАБОТАЮЩИЙ агент
+        (`runner.pinned_summary_limits`): его снимок конфига и уровень,
+        закреплённый на ход. Экран видит /level и /profiles сразу, ход — со
+        следующего, и по живым данным бар показывал бы не тот порог, по которому
+        реально сработает сжатие. Вне хода — живой конфиг и живой Router: это
+        пороги СЛЕДУЮЩЕГО хода."""
+        runner = getattr(self.app, "active_runner", None)
+        is_running = getattr(runner, "is_running", None)
+        pinned = getattr(runner, "pinned_summary_limits", None)
+        if callable(is_running) and is_running() and callable(pinned):
+            limits = pinned()
+            if limits is not None:
+                return limits
+        from gc_core.summarize.config import resolve_summary_limits_at_level
+
+        router = None
+        display_router = getattr(self.app, "display_router", None)
+        if callable(display_router):
+            try:
+                router = display_router()
+            except Exception:
+                router = None
+        return resolve_summary_limits_at_level(cfg, router, None)
 
     def _session_status_word(self) -> Optional[str]:
         """Сырое слово статуса сессии (без скобок): asking/running/completed/

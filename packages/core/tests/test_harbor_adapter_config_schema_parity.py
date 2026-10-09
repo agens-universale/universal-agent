@@ -74,7 +74,7 @@ def test_bench_defaults_win_over_schema_defaults():
     assert config["read_guard"]["enabled"] is False
     assert config["command_moderation"]["mode"] == "allow"
     assert config["exec_timeout_sec"] == 600
-    assert AppConfig.model_validate({}).agent.exec_timeout_sec == 120
+    assert AppConfig.model_validate({}).agent.exec_timeout_sec == 200
 
 
 def test_bench_does_not_set_generation_kwargs_without_profile():

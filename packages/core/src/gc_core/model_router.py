@@ -259,7 +259,25 @@ class ModelRouter:
             level, source_prefix="активный ", check_breaker=check_breaker
         )
 
-    def resolve_level(self, level: str) -> ResolvedModel:
+    def resolve_main_at_level(
+        self, level: str | None, *, check_breaker: bool = True
+    ) -> ResolvedModel:
+        """Модель main-трейса для УРОВНЯ ВЫЗОВА — единый ответ для запроса и для
+        всего, что обязано принадлежать той же модели (пороги сжатия истории).
+
+        Уровень задаёт вызывающий: сегодня это уровень, зафиксированный на ход
+        (`turn_boundary.begin_turn` → `state.turn_level`, спека §6.4) — живой
+        `/level` меняется без пересборки executor, и резолв по нему увёл бы модель
+        посреди цикла tool-call'ов. Уровня нет (ход не начинали через `begin_turn`
+        — легаси/тестовые двойники) или Router дочерний (у субагента модель уже
+        заморожена в самом Router'е) — обычный резолв `main`."""
+        if not level or self.is_subagent_child:
+            return self.resolve("main", check_breaker=check_breaker)
+        return self.resolve_level(level, check_breaker=check_breaker)
+
+    def resolve_level(
+        self, level: str, *, check_breaker: bool = True
+    ) -> ResolvedModel:
         """Резолв ПРОИЗВОЛЬНОГО уровня, не только активного (спека §12.1) — витринам
         (палитра `/level`) нужно честно показать, во что резолвится КАЖДАЯ из трёх
         позиций трека, а не только та, что сейчас активна через `level_provider`.
@@ -267,14 +285,17 @@ class ModelRouter:
         как обычно (§4 «Матрица фоллбэков»).
 
         Не только витринный: этим же путём резолвится main-трейс по уровню,
-        зафиксированному на ход (`processing_responses._resolve_main_for_turn`,
-        спека §6.4) — поэтому предохранитель здесь проверяется как в рантайме
-        (`check_breaker` по умолчанию), а не отключается «раз это витрина»."""
+        зафиксированному на ход (`resolve_main_at_level`, спека §6.4) — поэтому
+        предохранитель здесь проверяется как в рантайме (`check_breaker` по
+        умолчанию), а не отключается «раз это витрина». ``check_breaker=False`` —
+        чтение свойств записи (пороги сжатия): открытый алиас его не роняет."""
         if self._force_legacy:
             return self._resolve_legacy(source="легаси-форс --model")
         if self.registry_empty():
             return self._resolve_legacy(source="легаси")
-        return self._resolve_level(level, source_prefix="")
+        return self._resolve_level(
+            level, source_prefix="", check_breaker=check_breaker
+        )
 
     def _lookup_binding(self, consumer: str) -> tuple[str, str] | None:
         if consumer.startswith(SUBAGENT_CONSUMER_PREFIX):

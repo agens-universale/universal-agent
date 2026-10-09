@@ -4,9 +4,10 @@ from dataclasses import dataclass
 from typing import Any, Dict
 
 from gc_core.config_modules.summary import (
-    DEFAULT_INCREMENTAL_BATCH_MULTIPLIER,
-    DEFAULT_TURN_END_TRIGGER_RATIO,
-    SUMMARY_CHARS_PER_TOKEN,
+    derived_incremental_batch_chars,
+    derived_max_dialogue_chars,
+    derived_turn_end_trigger,
+    summary_char_base,
 )
 
 
@@ -86,22 +87,14 @@ def resolve_summary_limits(
     chars = model_chars if model_chars > 0 else 0
     tokens = model_tokens if model_tokens > 0 else 0
     if chars > 0 or tokens > 0:
-        chars_after = (
-            int(chars * DEFAULT_TURN_END_TRIGGER_RATIO) if chars > 0 else 0
-        )
-        tokens_after = (
-            int(tokens * DEFAULT_TURN_END_TRIGGER_RATIO) if tokens > 0 else 0
-        )
-        char_base = chars if chars > 0 else tokens * SUMMARY_CHARS_PER_TOKEN
+        char_base = summary_char_base(chars, tokens)
         return ResolvedSummaryLimits(
             chars_during=chars,
             tokens_during=tokens,
-            chars_after=chars_after,
-            tokens_after=tokens_after,
-            incremental_batch_chars=int(
-                char_base * DEFAULT_INCREMENTAL_BATCH_MULTIPLIER
-            ),
-            max_dialogue_chars=int(char_base * 5),
+            chars_after=derived_turn_end_trigger(chars),
+            tokens_after=derived_turn_end_trigger(tokens),
+            incremental_batch_chars=derived_incremental_batch_chars(char_base),
+            max_dialogue_chars=derived_max_dialogue_chars(char_base),
         )
     return ResolvedSummaryLimits(
         chars_during=parse_summary_trigger_chars(config_dict),
@@ -129,17 +122,21 @@ def resolve_summary_limits_for_resolved(
     )
 
 
-def resolve_summary_limits_for_router(
+def resolve_summary_limits_at_level(
     config_dict: Dict[str, Any],
     router: Any | None,
-    *,
-    consumer: str = "main",
+    level: str | None,
 ) -> ResolvedSummaryLimits:
-    """Пороги алиаса истории через Router. Нет router / ошибка → глобаль."""
+    """Пороги модели, которая ведёт историю, — той же, в которую идут запросы.
+
+    ``level`` — уровень вызова (сегодня — зафиксированный на ход
+    ``state.turn_level``): живой ``/level`` посреди хода модель запросов не
+    меняет, и порог обязан остаться её порогом. Нет router / ошибка → глобаль.
+    Предохранитель не проверяется: порог — свойство записи модели."""
     resolved = None
     if router is not None:
         try:
-            resolved = router.resolve(consumer, check_breaker=False)
+            resolved = router.resolve_main_at_level(level, check_breaker=False)
         except Exception:
             resolved = None
     return resolve_summary_limits_for_resolved(config_dict, resolved)

@@ -2064,6 +2064,7 @@ class SettingsScreen(Screen):
                     verify=verify,
                     config_proxy=proxy,
                     presets=endpoint_presets_from_config(self._config or {}),
+                    global_config=self._config,
                     active_level=self._acting_level(),
                     legacy_editor_factory=self._make_legacy_model_editor,
                     legacy_hints=self._field_hint_specs("model"),
@@ -2140,6 +2141,11 @@ class SettingsScreen(Screen):
             return True
         self._cancel_env_confirm()
         if event.key == "f1" and ed.open_form_help():
+            event.stop()
+            event.prevent_default()
+            self._refresh_footer()
+            return True
+        if event.key == "f2" and ed.open_form_card():
             event.stop()
             event.prevent_default()
             self._refresh_footer()
@@ -5581,6 +5587,13 @@ class SettingsScreen(Screen):
                 config_proxy=proxy,
                 presets=endpoint_presets_from_config(
                     profile_cfg or self._config or {}
+                ),
+                # Стек профиля не собрался — `profile_cfg` несёт одно подключение
+                # (`_open_profile_connection_by_documents`), раздела сжатия в нём нет.
+                global_config=(
+                    profile_cfg
+                    if profile_cfg and "summary_params" in profile_cfg
+                    else self._config
                 ),
                 active_level=self._acting_level(),
                 on_change=self._models_changed,

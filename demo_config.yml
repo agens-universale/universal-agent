@@ -311,7 +311,7 @@ agent:
   walk_output_max_chars: 50000000
   # Дефолтный таймаут execute_command / run_python_code (сек), если модель
   # не передала timeout. Harbor/длинные бенчи обычно ставят 600.
-  exec_timeout_sec: 120
+  exec_timeout_sec: 200
   # Потолок RAM-буфера stdout/stderr на поток (decoded UTF-8 chars) для exec:
   # L = голова floor(L/2) + настоящий хвост (L - floor(L/2)); середина отбрасывается.
   exec_output_capture_max_chars: 40000

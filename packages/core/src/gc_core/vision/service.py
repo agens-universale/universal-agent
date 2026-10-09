@@ -72,12 +72,7 @@ async def aensure_view_audience(ctx, state):
     if router is None:
         return getattr(state, "vision_audience", None)
     cfg = getattr(ctx, "config_dict", {}) or {}
-    level = getattr(state, "turn_level", None)
-    main = (
-        router.resolve_level(level)
-        if level and not router.is_subagent_child
-        else router.resolve("main")
-    )
+    main = router.resolve_main_at_level(getattr(state, "turn_level", None))
     mode = cfg.get("backend_api_mode", "responses")
     candidates = [main] if mode == "chat_completions" else []
     eyes = _resolve_eyes(router)
