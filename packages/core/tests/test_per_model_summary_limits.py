@@ -185,6 +185,63 @@ def test_tokens_only_on_model_zeros_char_scale_and_uses_chars_per_token():
     assert limits.max_dialogue_chars == int(char_base * 5)
 
 
+def test_unset_turn_end_and_batch_match_global_derivation():
+    """Незаданные turn-end и батч модели совпадают с формулой загрузки.
+
+    mid = 1: 60% усекается до 0, общий пол — 1.
+    """
+    cfg = _cfg(
+        {
+            "summary": {
+                "chat_completions_summary_trigger_chars": 1,
+                "chat_completions_summary_trigger_tokens": 0,
+            },
+            "models": {
+                "m": {
+                    "url": "http://m/v1/chat/completions",
+                    "token": "",
+                    "summary_trigger_chars": 1,
+                }
+            },
+            "slots": {"default": "m"},
+        }
+    )
+    params = cfg["summary_params"]
+    limits = resolve_summary_limits(cfg, model_chars=1, model_tokens=0)
+    assert params["chat_completions_summary_turn_end_trigger_chars"] == 1
+    assert limits.chars_after == 1
+    assert limits.tokens_after == 0
+    assert (
+        limits.incremental_batch_chars
+        == params["incremental_batch_chars"]
+        == 1
+    )
+    assert limits.max_dialogue_chars == 5
+
+    tokens_only = _cfg(
+        {
+            "summary": {
+                "chat_completions_summary_trigger_chars": 0,
+                "chat_completions_summary_trigger_tokens": 1,
+            }
+        }
+    )
+    token_params = tokens_only["summary_params"]
+    token_limits = resolve_summary_limits(
+        tokens_only, model_chars=0, model_tokens=1
+    )
+    assert (
+        token_params["chat_completions_summary_turn_end_trigger_tokens"] == 1
+    )
+    assert token_limits.tokens_after == 1
+    assert token_limits.chars_after == 0
+    assert (
+        token_limits.incremental_batch_chars
+        == token_params["incremental_batch_chars"]
+        == 2
+    )
+
+
 def test_resolved_model_exposes_summary_triggers_zero_means_unset():
     cfg = _cfg(
         {
@@ -381,8 +438,12 @@ def test_limits_without_a_pinned_level_follow_the_live_one():
     """Уровня вызова нет (ход ещё не начинали) — обычный резолв `main`."""
     cfg = _two_level_cfg()
     router = ModelRouter(cfg, level_provider=lambda: "light")
-    assert resolve_summary_limits_at_level(cfg, router, None).chars_during == 10
-    assert resolve_summary_limits_at_level(cfg, None, None).chars_during == 999999
+    assert (
+        resolve_summary_limits_at_level(cfg, router, None).chars_during == 10
+    )
+    assert (
+        resolve_summary_limits_at_level(cfg, None, None).chars_during == 999999
+    )
 
 
 def test_limits_survive_an_open_breaker_on_the_alias():
@@ -392,7 +453,8 @@ def test_limits_survive_an_open_breaker_on_the_alias():
     router = ModelRouter(cfg, level_provider=lambda: "default")
     router.breaker.trip("low", "5xx после ретраев")
     assert (
-        resolve_summary_limits_at_level(cfg, router, "light").chars_during == 10
+        resolve_summary_limits_at_level(cfg, router, "light").chars_during
+        == 10
     )
 
 
@@ -475,7 +537,9 @@ def _light_turn(level: dict):
     return cfg, ctx, state
 
 
-async def test_compaction_hands_the_models_batch_to_the_summarizer(monkeypatch):
+async def test_compaction_hands_the_models_batch_to_the_summarizer(
+    monkeypatch,
+):
     """Батч и лимит диалога считаются от порога модели, чтобы кусок истории
     помещался в её окно. Доходят они параметрами, от модели ХОДА: живой уровень
     переключён на большую модель, а сжимается история лёгкой."""
@@ -502,7 +566,9 @@ async def test_compaction_keeps_global_values_for_a_model_without_thresholds(
     cfg = _cfg(
         {
             "summary": _global_summary(chars=200000, batch=77000),
-            "models": {"m": {"url": "http://m/v1/chat/completions", "token": ""}},
+            "models": {
+                "m": {"url": "http://m/v1/chat/completions", "token": ""}
+            },
             "slots": {"default": "m"},
         }
     )
@@ -516,7 +582,10 @@ async def test_compaction_keeps_global_values_for_a_model_without_thresholds(
         await arun_summary_compaction(
             ctx=ctx, state=_chat_state(), trigger_reason="t", is_cli_mode=False
         )
-    assert (seen["batch_chars"], seen["max_dialogue_chars"]) == (77000, 1000000)
+    assert (seen["batch_chars"], seen["max_dialogue_chars"]) == (
+        77000,
+        1000000,
+    )
 
 
 async def test_automatic_compaction_does_not_rewrite_the_shared_config(
@@ -603,7 +672,10 @@ def test_summarizer_limits_prefer_explicit_values_over_the_config():
 
     params = {"incremental_batch_chars": 500, "max_dialogue_chars": 900}
     explicit = _SummaryLimits(params, batch_chars=72, max_dialogue_chars=300)
-    assert (explicit.batch_chars_limit, explicit.max_dialogue_chars) == (72, 300)
+    assert (explicit.batch_chars_limit, explicit.max_dialogue_chars) == (
+        72,
+        300,
+    )
     from_config = _SummaryLimits(params, batch_chars=0, max_dialogue_chars=0)
     assert (from_config.batch_chars_limit, from_config.max_dialogue_chars) == (
         500,
