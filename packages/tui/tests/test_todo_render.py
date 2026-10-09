@@ -139,7 +139,7 @@ def test_todo_block_is_single_focusable_widget():
 
     block = build_todo_block(ITEMS, subagent=False, indent="   ", event_no=7)
     assert block.can_focus
-    rows = block.todo_rows
+    rows = block._rows
     assert len(rows) == 4  # заголовок + три пункта
     assert all(isinstance(r, TraceRow) for r in rows)
     assert not any(r.can_focus for r in rows)

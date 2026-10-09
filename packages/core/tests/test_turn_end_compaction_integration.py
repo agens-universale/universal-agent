@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-from types import SimpleNamespace
 
 import pytest
 from gc_core import processing_responses as pr
@@ -20,6 +19,7 @@ from gc_core.summarize.compaction import apply_summary_state_patch
 from gc_testkit import run_coro
 from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
 from gc_testkit.intent_fixtures import intent_user_ask_texts, seed_state_intent
+from gc_testkit.settings import fake_ctx
 from helpers.turn_finish_apply import stub_turn_finish_apply
 
 
@@ -63,16 +63,16 @@ def _make_ctx(**overrides):
     }
     summary_params.update(summary_overrides)
     cfg = {
-        "backend_api_mode": "chat_completions",
-        "completions_url": "http://backend.local/v1/chat/completions",
-        "console_trace": False,
-        "no_tool_call_max_count": 5,
-        "strict_turn_finish_validation": True,
-        "summary_params": summary_params,
+        "backend.api_mode": "chat_completions",
+        "backend.completions_url": "http://backend.local/v1/chat/completions",
+        "logging.console_trace": False,
+        "agent.no_tool_call_max_count": 5,
+        "agent.strict_turn_finish_validation": True,
+        "summary": summary_params,
     }
     cfg.update(overrides)
-    return SimpleNamespace(
-        config_dict=cfg,
+    return fake_ctx(
+        cfg,
         logger=logging.getLogger("test_turn_end_compaction"),
         auth_connector=None,
     )
@@ -326,7 +326,7 @@ def test_turn_end_runs_on_fail_open_when_volume_high(monkeypatch):
         pr.arun_agent(
             [_submit_solution_call()],
             state,
-            _make_ctx(strict_turn_finish_validation=True),
+            _make_ctx(**{"agent.strict_turn_finish_validation": True}),
             turn_end_compaction_hook=coord.aturn_end_compact_if_needed,
         )
     )
@@ -449,20 +449,20 @@ def test_turn_end_working_memory_in_summary_message(monkeypatch):
     assert "note from patch" in body
 
 
-def _agent_executor_config_dict() -> dict:
+def _agent_executor_config() -> dict:
     return {
-        "verbose": False,
-        "model": "CodeChat",
-        "max_steps": 5,
-        "system_prompt_id": "v1",
-        "use_server_subagents": False,
-        "agent_md_path": None,
-        "limit_project_metadata": True,
-        "backend_api_mode": "chat_completions",
-        "console_trace": False,
-        "no_tool_call_max_count": 5,
-        "strict_turn_finish_validation": True,
-        "summary_params": {
+        "agent.verbose": False,
+        "agent.model": "CodeChat",
+        "agent.max_steps": 5,
+        "agent.system_prompt_id": "v1",
+        "agent.use_server_subagents": False,
+        "paths.agent_md_path": "",
+        "agent.limit_project_metadata": True,
+        "backend.api_mode": "chat_completions",
+        "logging.console_trace": False,
+        "agent.no_tool_call_max_count": 5,
+        "agent.strict_turn_finish_validation": True,
+        "summary": {
             "chat_completions_summary_trigger_chars": 0,
             "chat_completions_summary_turn_end_trigger_chars": 1,
             "incremental_batch_chars": 100,
@@ -505,8 +505,8 @@ def test_agent_executor_fail_open_turn_end_compaction(monkeypatch):
         lambda **kwargs: recorded.append(str(kwargs.get("trigger_reason"))),
     )
 
-    ctx = SimpleNamespace(
-        config_dict=_agent_executor_config_dict(),
+    ctx = fake_ctx(
+        _agent_executor_config(),
         logger=logging.getLogger("test_agent_executor_turn_end"),
         tools_spec=[],
         tools_description=[],

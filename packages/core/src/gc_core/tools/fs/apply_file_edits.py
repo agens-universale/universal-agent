@@ -1,7 +1,8 @@
 import functools
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
+from gc_core.execution.tool_schema import coalesce_optional_string
 from gc_core.security.path_policy import enforce_write_guard
 from gc_core.tools.fs.edit_line_endings import (
     collect_literal_matches,
@@ -18,7 +19,6 @@ from gc_core.tools.fs.literal_edit_common import (
     load_text_source,
     splice_replacements,
 )
-from gc_core.tools.schema_optional import coalesce_optional_string
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 from gc_core.utils.file_text import sha256_hex_of_bytes
 from gc_core.utils.tool_report_paths import tool_report_abspath
@@ -149,9 +149,7 @@ class ApplyFileEdits(AbstractSimpleTool):
     default_max_diff_chars = 12000
 
     @classmethod
-    def tool_description(
-        cls, config_dict: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
+    def tool_description(cls, settings: Any = None) -> Dict[str, Any]:
         return {
             "type": "function",
             "name": "fs_apply_file_edits",
@@ -231,9 +229,7 @@ class ApplyFileEdits(AbstractSimpleTool):
         }
 
     @classmethod
-    def prompt_description(
-        cls, config_dict: Optional[Dict[str, Any]] = None
-    ) -> str:
+    def prompt_description(cls, settings: Any = None) -> str:
         return (
             "Tool name: fs_apply_file_edits\n"
             "Apply multiple exact literal edits to one file atomically.\n"

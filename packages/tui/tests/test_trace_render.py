@@ -1,5 +1,6 @@
 """trace_render — общие строители виджетов трейса (Spec B / A+)."""
 
+from gc_testkit.tui_support import tui_settings
 import pytest
 
 
@@ -96,7 +97,7 @@ def _env(payload, ts="2026-05-30T10:00:00Z"):
 @pytest.mark.asyncio
 async def test_render_thread_readonly_kinds():
     pytest.importorskip("textual")
-    from gc_tui.services.trace_render import render_thread_readonly
+    from trace_readonly import render_thread_readonly
     from gc_tui.widgets.tool_call_row import ToolCallRow
     from gc_tui.widgets.user_reply import UserReplyContainer
     from textual.app import App
@@ -164,7 +165,7 @@ async def test_render_thread_readonly_call_row_uses_wire_tool_name():
     pytest.importorskip("textual")
     from textual.app import App
     from textual.containers import VerticalScroll
-    from gc_tui.services.trace_render import render_thread_readonly
+    from trace_readonly import render_thread_readonly
     from gc_tui.widgets.tool_call_row import ToolCallRow
 
     records = [
@@ -515,7 +516,9 @@ async def test_intermediate_reply_row_has_top_margin(tmp_path):
     from textual.containers import VerticalScroll
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -570,7 +573,7 @@ def test_dispatch_readonly_renders_todo_checklist():
     assert len(mounted) == 1
     block = mounted[0]
     assert block.has_class("todo-block") and block.can_focus
-    rows = block.todo_rows
+    rows = block._rows
     assert len(rows) == 3
     assert all(isinstance(row, TraceRow) for row in rows)
     assert rows[0].has_class("line-todo")  # НЕ line-meta
@@ -620,7 +623,7 @@ def test_todo_event_renders_rich_text_with_glyph_colors():
     _dispatch_readonly(_Target(), ev, calls={})
     # v5: один блок-виджет; строки внутри — заголовок + строка на пункт.
     assert len(mounted) == 1
-    rows = mounted[0].todo_rows
+    rows = mounted[0]._rows
     header = rows[0]._content
     assert isinstance(header, RichText)
     assert header.plain == "session_todo   чек-лист 1/2"

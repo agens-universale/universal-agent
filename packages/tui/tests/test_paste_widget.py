@@ -1,5 +1,6 @@
 """Pilot-тесты: сворачивание большой вставки в плашку, разворот, отправка."""
 
+from gc_testkit.tui_support import tui_settings
 import pytest
 
 BIG6 = "line\n" * 5  # 6 строк → сворачивается
@@ -228,7 +229,9 @@ async def test_ctrl_v_pastes_when_focus_on_trace(tmp_path, monkeypatch):
     monkeypatch.setattr(os_ops, "read_clipboard", lambda: "из трейса")
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen

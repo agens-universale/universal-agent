@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 
 from gc_core.constants.tool_names import SESSION_TODO_TOOL_NAME
-from gc_core.tools.subagents.progress import (
+from gc_core.execution.progress import (
     brief_args_summary,
     todo_items_from_arguments,
 )

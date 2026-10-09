@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-from types import SimpleNamespace
 
 import pytest
 from gc_core import processing_responses as pr
@@ -12,6 +11,7 @@ from gc_core.intent_guard import guard as intent_guard_guard
 from gc_core.intent_guard.validation_result import ValidationResult
 from gc_core.states import State
 from gc_testkit import run_coro
+from gc_testkit.settings import fake_ctx
 from helpers.turn_finish_apply import stub_turn_finish_apply
 
 
@@ -37,15 +37,15 @@ def _make_state(*, max_steps: int = 5) -> State:
 
 def _make_ctx(**overrides):
     cfg = {
-        "backend_api_mode": "chat_completions",
-        "completions_url": "http://backend.local/v1/chat/completions",
-        "console_trace": False,
-        "no_tool_call_max_count": 5,
-        "strict_turn_finish_validation": True,
+        "backend.api_mode": "chat_completions",
+        "backend.completions_url": "http://backend.local/v1/chat/completions",
+        "logging.console_trace": False,
+        "agent.no_tool_call_max_count": 5,
+        "agent.strict_turn_finish_validation": True,
     }
     cfg.update(overrides)
-    return SimpleNamespace(
-        config_dict=cfg,
+    return fake_ctx(
+        cfg,
         logger=logging.getLogger("test_pending_after_compaction"),
         auth_connector=None,
     )
@@ -240,7 +240,7 @@ def test_continued_turn_passes_through_finish_gate(monkeypatch):
         pr.arun_agent(
             [_submit_solution_call()],
             _make_state(),
-            _make_ctx(strict_turn_finish_validation=True),
+            _make_ctx(**{"agent.strict_turn_finish_validation": True}),
             turn_end_compaction_hook=_hook,
             get_pending_messages=_pending_once(compacted),
         )

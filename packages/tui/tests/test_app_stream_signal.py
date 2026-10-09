@@ -1,3 +1,4 @@
+from gc_testkit.tui_support import tui_settings
 import json
 from pathlib import Path
 
@@ -27,7 +28,9 @@ async def test_stream_signal_delegates_to_active_screen(tmp_path, monkeypatch):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config={"model": "M", "backend_api_mode": "chat_completions"},
+        settings=tui_settings(
+            {"agent.model": "M", "backend.api_mode": "chat_completions"}
+        ),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen

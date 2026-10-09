@@ -9,6 +9,7 @@ import pytest
 
 from gc_testkit import as_coro
 from gc_tui.services.trace_note_sink import TraceNoteSink
+from gc_testkit.tui_support import tui_settings
 
 
 def test_drain_returns_the_thread_notes_in_order_and_drops_the_rest():
@@ -76,13 +77,15 @@ def test_executor_build_wires_on_trace_note_to_the_app_sink(
 
     ctx = _Ctx()
     monkeypatch.setattr(
-        "gc_core.config.build_auth_connector", lambda cfg: None
+        "gc_core.config_modules.auth.build_auth_connector", lambda cfg: None
     )
     monkeypatch.setattr(
         "gc_core.run_context.acreate_run_context", as_coro(lambda *a, **k: ctx)
     )
     monkeypatch.setattr("gc_core.agent_executor.AgentExecutor", _Ex)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     app._build_real_executor()
     ctx.on_trace_note("не просмотрено")
     assert app._trace_note_sink.drain("t1") == ["не просмотрено"]
@@ -119,7 +122,7 @@ async def test_poll_tick_mounts_the_gray_line_below_the_reply_and_only_live(
     )
     note = NOTE_MAIN_BLIND.format(alias="glm")
     async with TuiApp(
-        threads_dir=str(threads), system="cli", config={}
+        threads_dir=str(threads), system="cli", settings=tui_settings({})
     ).run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)

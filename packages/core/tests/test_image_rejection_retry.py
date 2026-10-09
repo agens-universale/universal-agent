@@ -32,12 +32,17 @@ from gc_core.model_router import ModelRouter
 from gc_core.vision.notes import NOTE_MAIN_BLIND
 from gc_core.vision.rejects import (
     process_image_rejects,
-    reset_image_rejects_for_tests,
 )
 from transport_fakes import install_transport
 from gc_testkit import run_coro
+from gc_testkit.settings import fake_ctx, make_settings
 
-from vision_fakes import route_key, warm_routes, unsupported
+from vision_fakes import (
+    clear_image_rejects,
+    route_key,
+    unsupported,
+    warm_routes,
+)
 from gc_core.vision.rejects import mark_blind
 
 URL = "http://llm.test/v1/chat/completions"
@@ -68,9 +73,9 @@ VIEW_TOOL = {
 
 @pytest.fixture(autouse=True)
 def _fresh_rejects():
-    reset_image_rejects_for_tests()
+    clear_image_rejects()
     yield
-    reset_image_rejects_for_tests()
+    clear_image_rejects()
 
 
 def _rejects_images(request: httpx.Request) -> httpx.Response:
@@ -82,27 +87,41 @@ def _rejects_images(request: httpx.Request) -> httpx.Response:
 
 def _cfg(**extra) -> dict:
     return {
-        "model": "blind-model",
-        "completions_url": URL,
-        "backend_api_mode": "chat_completions",
-        "chat_completions_max_tokens": 256,
-        "chat_completions_min_response_tokens": 64,
-        "backend_request_timeout_sec": 30,
-        "use_ssl": False,
-        "use_retry": False,
-        "x_cl_id": "test-cl-id",
+        "agent.model": "blind-model",
+        "backend.completions_url": URL,
+        "backend.api_mode": "chat_completions",
+        "backend.chat_completions_max_tokens": 256,
+        "backend.chat_completions_min_response_tokens": 64,
+        "backend.request_timeout_sec": 30,
+        "backend.use_ssl": False,
+        "backend.use_retry": False,
+        "agent.x_cl_id": "test-cl-id",
         **extra,
     }
 
 
-def _ctx(tmp_path, cfg: dict, notes: list) -> SimpleNamespace:
-    return SimpleNamespace(
-        config_dict=cfg,
+def _as_settings(value):
+    """Словарь теста или готовые настройки → ``LoadedSettings``."""
+    from gc_core.settings import AppConfig, LoadedSettings
+    from gc_testkit.settings import make_settings
+
+    if isinstance(value, LoadedSettings):
+        return value
+    if isinstance(value, AppConfig):
+        return LoadedSettings(settings=value)
+    return make_settings(value)
+
+
+def _ctx(tmp_path, cfg, notes: list) -> SimpleNamespace:
+    """``cfg`` — словарь теста (плоские имена) или готовые настройки."""
+    loaded = _as_settings(cfg)
+    return fake_ctx(
+        loaded=loaded,
         on_stream_delta=None,
         logger=logging.getLogger("test_image_rejection_retry"),
         auth_connector=None,
         is_tui=False,
-        model_router=ModelRouter(cfg, level_provider=lambda: "default"),
+        model_router=ModelRouter(loaded, level_provider=lambda: "default"),
         image_store=ImageStore(str(tmp_path)),
         on_trace_note=notes.append,
     )
@@ -323,7 +342,9 @@ def test_model_with_its_own_url_is_marked_by_that_url(tmp_path, monkeypatch):
     spy = install_transport(monkeypatch, _rejects_images)
     notes: list = []
     cfg = _cfg(
-        models={"blind": {"url": OWN_URL, "model": "blind-model"}},
+        models={
+            "blind": {"url": OWN_URL, "model": "blind-model", "token": ""}
+        },
         slots={"default": "blind"},
     )
     ctx = _ctx(tmp_path, cfg, notes)
@@ -564,11 +585,12 @@ def test_an_inferred_limit_is_rechecked_after_its_scope_changes(
         state.messages = [message]
     elif reset == "model":
         ctx.model_router = ModelRouter(
-            _cfg(model="another-model"), level_provider=lambda: "default"
+            make_settings(_cfg(**{"agent.model": "another-model"})),
+            level_provider=lambda: "default",
         )
     else:
         ctx.model_router = ModelRouter(
-            _cfg(completions_url=URL + "/other"),
+            make_settings(_cfg(**{"backend.completions_url": URL + "/other"})),
             level_provider=lambda: "default",
         )
     state.vision_routes.update(warm_routes(ctx))

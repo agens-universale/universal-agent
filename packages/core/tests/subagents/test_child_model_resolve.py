@@ -4,41 +4,34 @@
 См. .superpowers/sdd/2026-07-27-profiles-wave-a-plan/task-8-brief.md.
 """
 
-from gc_core.config import flatten_app_config
-from gc_core.config_modules.root import AppConfig
 from gc_core.model_router import ModelRouter
 from gc_core.states import SharedStateData, State
 from gc_core.tools.subagents.runner import SubagentRunner
 from gc_testkit import run_coro as _await
 from gc_testkit.helpers.tool_ctx import local_ctx
+from gc_testkit.settings import make_settings
 
 
-def _snapshot(raw: dict) -> dict:
-    """Реальный снимок config_dict — через настоящий flatten_app_config, не мок."""
-    return flatten_app_config(AppConfig.model_validate(raw))
-
-
-def _make_config(tmp_path, raw: dict) -> dict:
-    cfg = _snapshot(raw)
-    cfg.update(
+def _make_config(tmp_path, raw: dict, **extra):
+    """Настоящие настройки (строгая валидация, как из файла) из ``raw``."""
+    return make_settings(
         {
-            "use_local_subagents": True,
-            "backend_api_mode": "chat_completions",
-            "subagent_max_steps": 30,
-            "enabled_tools": [],
-            "skills_data_path": "",
-            "mcp_servers": [],
-            "system_prompt_id": "test-prompt",
-            "save_logs": True,
-            "logs_dump_dir": str(tmp_path),
+            **raw,
+            "agent.use_local_subagents": True,
+            "backend.api_mode": "chat_completions",
+            "agent.subagent_max_steps": 30,
+            "paths.skills_data_path": "",
+            "agent.system_prompt_id": "test-prompt",
+            "logging.save_logs": True,
+            "paths.logs_dump_dir": str(tmp_path),
+            **extra,
         }
     )
-    return cfg
 
 
-def _parent_ctx(cfg: dict, *, level: str):
+def _parent_ctx(cfg, *, level: str):
     """Родительский ctx с реальным ExecutionWorkspace (нужен `_build_child_ctx`'у
-    isinstance-проверкой) + собственным ModelRouter на том же снимке `cfg`."""
+    isinstance-проверкой) + собственным ModelRouter на тех же настройках `cfg`."""
     ctx = local_ctx(cfg)
     ctx.run_id = "parent_run"
     ctx.auth_connector = None
@@ -73,26 +66,33 @@ def _make_orchestrator_state() -> State:
 class TestChildConfigMutationIsolation:
     """Регресс shallow-copy: `{**self._config}` расшаривал вложенные dict с
     родителем — мутация ребёнка была бы видна родителю (и всем последующим
-    ходам/субагентам сессии, читающим тот же `self._config`)."""
+    ходам/субагентам сессии, читающим те же настройки)."""
 
     def test_child_header_mutation_does_not_leak_to_parent(self, tmp_path):
         raw = {"models": {"flash": {}}, "slots": {"default": "flash"}}
-        cfg = _make_config(tmp_path, raw)
-        cfg["chat_completion_headers"] = {
-            "Authorization": "Bearer parent-token"
-        }
+        cfg = _make_config(
+            tmp_path,
+            raw,
+            **{
+                "backend.chat_completion_headers": {
+                    "Authorization": "Bearer parent-token"
+                }
+            },
+        )
         ctx = _parent_ctx(cfg, level="default")
-        runner = SubagentRunner(ctx, _make_orchestrator_state(), cfg)
+        runner = SubagentRunner(ctx, _make_orchestrator_state())
 
         child_ctx = _await(
             runner._build_child_ctx(tool_name="subagent_worker")
         )
-        child_ctx.config_dict["chat_completion_headers"]["Authorization"] = (
-            "Bearer child-token"
-        )
+        child_headers = child_ctx.settings.backend.chat_completion_headers
+        assert child_headers["Authorization"] == "Bearer parent-token"
+        # Модель неизменяема, но словарь внутри — нет: ребёнок обязан получить
+        # свою копию, а не ссылку на словарь родителя.
+        child_headers["Authorization"] = "Bearer child-token"
 
         assert (
-            cfg["chat_completion_headers"]["Authorization"]
+            cfg.settings.backend.chat_completion_headers["Authorization"]
             == "Bearer parent-token"
         )
 
@@ -101,8 +101,8 @@ class TestChildConfigMutationIsolation:
     ):
         """Ребёнок наследует модель субагента через `unbound_override`, а не
         через мутацию `slots` (спека §5.2 fix) — сборка child ctx не должна
-        трогать ни deep-copied `child_config["slots"]`, ни (тем более) реестр
-        родителя/его следующие resolve() в этой же сессии."""
+        трогать ни слоты настроек, ни (тем более) реестр родителя/его
+        следующие resolve() в этой же сессии."""
         raw = {
             "models": {"flash": {}, "deepseek-max": {}},
             "slots": {"default": "flash"},
@@ -110,7 +110,7 @@ class TestChildConfigMutationIsolation:
         }
         cfg = _make_config(tmp_path, raw)
         ctx = _parent_ctx(cfg, level="default")
-        runner = SubagentRunner(ctx, _make_orchestrator_state(), cfg)
+        runner = SubagentRunner(ctx, _make_orchestrator_state())
 
         # `_build_child_ctx` — корутина: без run_coro она не исполнялась
         # вовсе, и утверждения ниже проверяли нетронутый конфиг, а не
@@ -118,7 +118,7 @@ class TestChildConfigMutationIsolation:
         # («coroutine ... was never awaited»), но предупреждение не роняет.
         _await(runner._build_child_ctx(tool_name="subagent_planner"))
 
-        assert cfg["slots"]["default"] == "flash"
+        assert cfg.settings.slots.default == "flash"
         assert ctx.model_router.resolve("main").alias == "flash"
 
 
@@ -135,7 +135,7 @@ class TestChildModelResolve:
         }
         cfg = _make_config(tmp_path, raw)
         ctx = _parent_ctx(cfg, level="default")
-        runner = SubagentRunner(ctx, _make_orchestrator_state(), cfg)
+        runner = SubagentRunner(ctx, _make_orchestrator_state())
 
         child_ctx = _await(
             runner._build_child_ctx(tool_name="subagent_planner")
@@ -154,7 +154,7 @@ class TestChildModelResolve:
         }
         cfg = _make_config(tmp_path, raw)
         ctx = _parent_ctx(cfg, level="default")
-        runner = SubagentRunner(ctx, _make_orchestrator_state(), cfg)
+        runner = SubagentRunner(ctx, _make_orchestrator_state())
 
         child_ctx = _await(
             runner._build_child_ctx(tool_name="subagent_planner")
@@ -173,7 +173,7 @@ class TestChildModelResolve:
         }
         cfg = _make_config(tmp_path, raw)
         ctx = _parent_ctx(cfg, level="default")
-        runner = SubagentRunner(ctx, _make_orchestrator_state(), cfg)
+        runner = SubagentRunner(ctx, _make_orchestrator_state())
 
         child_ctx = _await(
             runner._build_child_ctx(tool_name="subagent_worker")
@@ -197,7 +197,7 @@ class TestChildModelResolve:
         }
         cfg = _make_config(tmp_path, raw)
         ctx = _parent_ctx(cfg, level="default")
-        runner = SubagentRunner(ctx, _make_orchestrator_state(), cfg)
+        runner = SubagentRunner(ctx, _make_orchestrator_state())
 
         child_ctx = _await(
             runner._build_child_ctx(tool_name="subagent_planner")
@@ -226,7 +226,7 @@ class TestChildModelResolve:
         }
         cfg = _make_config(tmp_path, raw)
         ctx = _parent_ctx(cfg, level="default")
-        runner = SubagentRunner(ctx, _make_orchestrator_state(), cfg)
+        runner = SubagentRunner(ctx, _make_orchestrator_state())
 
         child_ctx = _await(
             runner._build_child_ctx(tool_name="subagent_planner")
@@ -258,7 +258,7 @@ class TestChildModelResolve:
         ctx.model_router = ModelRouter(
             cfg, level_provider=lambda: level_box["value"]
         )
-        runner = SubagentRunner(ctx, _make_orchestrator_state(), cfg)
+        runner = SubagentRunner(ctx, _make_orchestrator_state())
 
         child_ctx = _await(
             runner._build_child_ctx(tool_name="subagent_worker")
@@ -286,7 +286,7 @@ class TestChildModelResolve:
         cfg = _make_config(tmp_path, raw)
         ctx = _parent_ctx(cfg, level="default")
         orch = _make_orchestrator_state()
-        runner = SubagentRunner(ctx, orch, cfg)
+        runner = SubagentRunner(ctx, orch)
         captured = {}
 
         def fake_run_agent(messages, child_state, child_ctx, **kwargs):
@@ -320,7 +320,7 @@ class TestChildModelResolve:
         ctx.model_router = ModelRouter(
             cfg, level_provider=lambda: "default", force_legacy=True
         )
-        runner = SubagentRunner(ctx, _make_orchestrator_state(), cfg)
+        runner = SubagentRunner(ctx, _make_orchestrator_state())
 
         child_ctx = _await(
             runner._build_child_ctx(tool_name="subagent_planner")
@@ -350,7 +350,7 @@ class TestChildModelResolve:
         ctx.tools_description = []
         ctx.is_tui = False
         # ctx.model_router намеренно не выставлен.
-        runner = SubagentRunner(ctx, _make_orchestrator_state(), cfg)
+        runner = SubagentRunner(ctx, _make_orchestrator_state())
 
         child_ctx = _await(
             runner._build_child_ctx(tool_name="subagent_worker")

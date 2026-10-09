@@ -442,7 +442,7 @@ def test_a_refused_activation_leaves_the_pointerless_project_file_byte_identical
     собираться вовсе). Отказ обязан оставить файл байт-в-байт прежним, а
     активный профиль — прежним."""
     from gc_core import onboarding_config_writer as ocw
-    from gc_core.config import load_config_ex
+    from gc_core.config import load_settings
 
     base, _profiles, project_config = _pointerless_project_stand(stack)
     before = project_config.read_bytes()
@@ -451,7 +451,7 @@ def test_a_refused_activation_leaves_the_pointerless_project_file_byte_identical
         ocw.write_profile_pointer(project_config, "ghost", base_path=base)
 
     assert project_config.read_bytes() == before
-    _cfg, meta = load_config_ex(str(base))
+    meta = load_settings(str(base)).profile_meta
     assert meta.active_name == "work"
 
 
@@ -461,7 +461,7 @@ def test_a_successful_activation_still_appends_the_anchor_and_the_value(stack):
     содержимого файла. Профиль — ДРУГОЙ, чем в базе: победа проектного слоя и
     доказывает, что запись состоялась, а не совпала с прежним ответом базы."""
     from gc_core import onboarding_config_writer as ocw
-    from gc_core.config import load_config_ex
+    from gc_core.config import load_settings
 
     base, _profiles, project_config = _pointerless_project_stand(stack)
 
@@ -470,7 +470,7 @@ def test_a_successful_activation_still_appends_the_anchor_and_the_value(stack):
     text = project_config.read_text(encoding="utf-8")
     assert 'profile: "job"' in text
     assert "level: default" in text
-    _cfg, meta = load_config_ex(str(base))
+    meta = load_settings(str(base)).profile_meta
     assert meta.active_name == "job"
 
 

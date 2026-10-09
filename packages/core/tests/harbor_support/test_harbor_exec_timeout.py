@@ -271,10 +271,7 @@ def test_execute_command_timeout_envelope_carries_partial_output(
         ],
     )
     tool = ExecuteCommand.__new__(ExecuteCommand)
-    tool._config_dict = None
-    tool = bind_os_backend(
-        tool, HarborBackend(env, loop_in_thread), config_dict={}
-    )
+    tool = bind_os_backend(tool, HarborBackend(env, loop_in_thread))
 
     envelope = json.loads(tool(command="wget …", timeout=10))
 
@@ -291,8 +288,7 @@ def test_execute_command_maps_harbor_timeout_envelope(loop_in_thread):
         loop_in_thread,
     )
     tool = ExecuteCommand.__new__(ExecuteCommand)
-    tool._config_dict = None
-    tool = bind_os_backend(tool, backend, config_dict={})
+    tool = bind_os_backend(tool, backend)
 
     env = json.loads(tool(command="sleep 999", timeout=300))
 
@@ -311,8 +307,7 @@ def test_execute_command_non_timeout_runtime_error_stays_execution_failed(
         RuntimeError("Failed to build Docker image"), loop_in_thread
     )
     tool = ExecuteCommand.__new__(ExecuteCommand)
-    tool._config_dict = None
-    tool = bind_os_backend(tool, backend, config_dict={})
+    tool = bind_os_backend(tool, backend)
 
     env = json.loads(tool(command="true", timeout=30))
 

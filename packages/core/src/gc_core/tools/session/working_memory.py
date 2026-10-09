@@ -22,14 +22,13 @@ from gc_core.config_modules.working_memory import (
 from gc_core.config_modules.working_memory import (
     DEFAULT_TOTAL_BUDGET_CHARS as _DEFAULT_TOTAL_BUDGET_CHARS,
 )
-from gc_core.config_modules.working_memory import (
-    working_memory_limits_from_params,
-)
+from gc_core.config_modules.working_memory import WorkingMemoryConfig
 from gc_core.constants.tool_names import SESSION_MEMORY_TOOL_NAME
 from gc_core.loop_detector.constants import (
     GENERIC_PROFILE,
     loop_warn_on_repeat,
 )
+from gc_core.settings import settings_of
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 
 REGISTER_GOAL = "goal"
@@ -72,6 +71,12 @@ def _total_chars(registers: Dict[str, str]) -> int:
 
 @loop_warn_on_repeat(**GENERIC_PROFILE)
 class WorkingMemory(AbstractSimpleTool):
+    # Меняет состояние сессии (память, todo, кэш fetch): получает частный
+    # срез состояния и возвращает изменения (tools.aapply_tool_result).
+    owns_session_state = True
+    # Тело исполняется в ядре (оркестрация или чистое состояние), не на
+    # воркере (execution.tool_effects.uses_leaf_effect).
+    effect_in_core = True
     tool_name = SESSION_MEMORY_TOOL_NAME
 
     def __init__(
@@ -80,49 +85,42 @@ class WorkingMemory(AbstractSimpleTool):
         super().__init__(**kwargs)
         self._ctx = ctx
         self._state = state
-        cfg = getattr(ctx, "config_dict", None) or {}
-        limits_cfg = (
-            working_memory_limits_from_params(cfg.get("working_memory_params"))
-            or {}
+        limits = (
+            settings_of(ctx).working_memory
+            if ctx is not None
+            else WorkingMemoryConfig()
         )
 
         self._register_limits = {
-            REGISTER_GOAL: self._cfg_int(
-                limits_cfg,
-                "max_chars_goal",
+            REGISTER_GOAL: self._positive_int(
+                limits.max_chars_goal,
                 DEFAULT_REGISTER_LIMITS[REGISTER_GOAL],
             ),
-            REGISTER_CONSTRAINTS: self._cfg_int(
-                limits_cfg,
-                "max_chars_constraints",
+            REGISTER_CONSTRAINTS: self._positive_int(
+                limits.max_chars_constraints,
                 DEFAULT_REGISTER_LIMITS[REGISTER_CONSTRAINTS],
             ),
-            REGISTER_STATE: self._cfg_int(
-                limits_cfg,
-                "max_chars_state",
+            REGISTER_STATE: self._positive_int(
+                limits.max_chars_state,
                 DEFAULT_REGISTER_LIMITS[REGISTER_STATE],
             ),
-            REGISTER_KNOWLEDGE: self._cfg_int(
-                limits_cfg,
-                "max_chars_knowledge",
+            REGISTER_KNOWLEDGE: self._positive_int(
+                limits.max_chars_knowledge,
                 DEFAULT_REGISTER_LIMITS[REGISTER_KNOWLEDGE],
             ),
         }
-        self._total_budget_chars = self._cfg_int(
-            limits_cfg, "total_budget_chars", DEFAULT_TOTAL_BUDGET_CHARS
+        self._total_budget_chars = self._positive_int(
+            limits.total_budget_chars, DEFAULT_TOTAL_BUDGET_CHARS
         )
 
     @staticmethod
-    def _cfg_int(cfg: Dict[str, Any], key: str, default: int) -> int:
-        value = cfg.get(key)
+    def _positive_int(value: Any, default: int) -> int:
         if isinstance(value, int) and value > 0:
             return value
         return default
 
     @classmethod
-    def tool_description(
-        cls, config_dict: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
+    def tool_description(cls, settings: Any = None) -> Dict[str, Any]:
         return {
             "type": "function",
             "name": "session_memory",
@@ -195,9 +193,7 @@ class WorkingMemory(AbstractSimpleTool):
         }
 
     @classmethod
-    def prompt_description(
-        cls, config_dict: Optional[Dict[str, Any]] = None
-    ) -> str:
+    def prompt_description(cls, settings: Any = None) -> str:
         return """Tool name: session_memory
 Tool description: Thread/session memory for THIS dialogue only — not project-wide remember-forever.
 Persistent per-thread operational memory for the agent.

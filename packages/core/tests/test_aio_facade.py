@@ -193,3 +193,14 @@ async def test_send_before_run_is_buffered(tmp_path, monkeypatch):
 
     async with await AsyncAgent.create(cfg) as agent:
         agent.send({"role": "user", "content": "вдогонку"})
+
+
+async def test_create_rejects_a_flat_dict():
+    """Плоский словарь фасад не принимает: только AppConfig/LoadedSettings.
+
+    Словарь — изменяемый и непровалидированный; правка настроек должна идти
+    явно, через ``override_settings``. Отказ — сразу и с подсказкой, какой
+    тип нужен, а не невнятное падение где-то в глубине сборки контекста.
+    """
+    with pytest.raises(TypeError, match="AppConfig"):
+        await AsyncAgent.create({"model": "m"})

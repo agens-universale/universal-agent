@@ -111,12 +111,6 @@ class ExecResult:
         )
 
 
-def bound_captured_stream(text: str, max_chars: int) -> tuple[str, bool]:
-    """Нормализовать готовый поток head+tail; вернуть ``(text, truncated)``."""
-    cs = captured_stream_from_text(text, max_chars)
-    return cs.text, cs.truncated
-
-
 def _rebound(
     stream: Optional[CapturedStream], text: str, max_chars: int
 ) -> CapturedStream:

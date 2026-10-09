@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from gc_core.states import SharedStateData, State
 from gc_core.tools.subagents import runner as runner_module
 from gc_core.tools.subagents.runner import SubagentRunner
+from gc_testkit.settings import fake_ctx
 
 
 def _make_orchestrator_state(
@@ -30,22 +31,20 @@ def _make_orchestrator_state(
 
 def _make_config(**overrides):
     cfg = {
-        "use_local_subagents": True,
-        "backend_api_mode": "chat_completions",
-        "enabled_tools": [],
-        "skills_data_path": "",
-        "mcp_servers": [],
-        "model": "test-model",
-        "system_prompt_id": "test-prompt",
-        "subagent_max_steps": 30,
+        "agent.use_local_subagents": True,
+        "backend.api_mode": "chat_completions",
+        "paths.skills_data_path": "",
+        "agent.model": "test-model",
+        "agent.system_prompt_id": "test-prompt",
+        "agent.subagent_max_steps": 30,
     }
     cfg.update(overrides)
     return cfg
 
 
-def _make_ctx(config_dict=None):
-    return SimpleNamespace(
-        config_dict=config_dict or _make_config(),
+def _make_ctx(config=None):
+    return fake_ctx(
+        config or _make_config(),
         auth_connector=None,
         logger=None,
         logging_path="",
@@ -64,7 +63,7 @@ class TestSubagentRunnerRun:
         ctx = _make_ctx(cfg)
         run_agent_func = AsyncMock(return_value="done")
 
-        runner = SubagentRunner(ctx, orch, cfg)
+        runner = SubagentRunner(ctx, orch)
 
         with patch.object(
             runner, "_build_child_ctx", return_value=SimpleNamespace()
@@ -96,7 +95,7 @@ class TestSubagentRunnerRun:
         ctx = _make_ctx(cfg)
         run_agent_func = AsyncMock(return_value="Task completed successfully")
 
-        runner = SubagentRunner(ctx, orch, cfg)
+        runner = SubagentRunner(ctx, orch)
 
         with patch.object(
             runner, "_build_child_ctx", return_value=SimpleNamespace()
@@ -116,7 +115,7 @@ class TestSubagentRunnerRun:
         ctx = _make_ctx(cfg)
         run_agent_func = AsyncMock(return_value=None)
 
-        runner = SubagentRunner(ctx, orch, cfg)
+        runner = SubagentRunner(ctx, orch)
 
         with patch.object(
             runner, "_build_child_ctx", return_value=SimpleNamespace()
@@ -143,7 +142,7 @@ class TestSubagentRunnerRun:
             child_state.shared.working_memory["knowledge"] = "created"
             return "Subagent done"
 
-        runner = SubagentRunner(ctx, orch, cfg)
+        runner = SubagentRunner(ctx, orch)
 
         with patch.object(
             runner, "_build_child_ctx", return_value=SimpleNamespace()
@@ -166,7 +165,7 @@ class TestSubagentRunnerRun:
             captured_child["state"] = child_state
             return "ok"
 
-        runner = SubagentRunner(ctx, orch, cfg)
+        runner = SubagentRunner(ctx, orch)
 
         with patch.object(
             runner, "_build_child_ctx", return_value=SimpleNamespace()
@@ -188,7 +187,7 @@ class TestSubagentRunnerRun:
             captured_child["state"] = child_state
             return "ok"
 
-        runner = SubagentRunner(ctx, orch, cfg)
+        runner = SubagentRunner(ctx, orch)
 
         with patch.object(
             runner, "_build_child_ctx", return_value=SimpleNamespace()
@@ -208,7 +207,7 @@ class TestSubagentRunnerRun:
         ctx = _make_ctx(cfg)
         run_agent_func = AsyncMock()
 
-        runner = SubagentRunner(ctx, orch, cfg)
+        runner = SubagentRunner(ctx, orch)
         result = await runner.arun(
             "nonexistent_agent", {"task": "test"}, run_agent_func
         )
@@ -225,7 +224,7 @@ class TestSubagentRunnerRun:
         ctx = _make_ctx(cfg)
         run_agent_func = AsyncMock(return_value="ok")
 
-        runner = SubagentRunner(ctx, orch, cfg)
+        runner = SubagentRunner(ctx, orch)
 
         with (
             patch.object(runner_module, "get_subagent_class") as mock_get_cls,

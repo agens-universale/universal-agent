@@ -73,7 +73,7 @@ def _stub_tools_modules() -> None:
     async def _apply_tool(*_args, **_kwargs):
         return "ok"
 
-    def _build_tools_data(_config_dict):
+    def _build_tools_data(_settings):
         return {}, [], []
 
     tools_pkg.aapply_tool = _apply_tool
@@ -123,26 +123,27 @@ class SummaryTriggersTest(unittest.IsolatedAsyncioTestCase):
         )
         with open(prompt_path, "w", encoding="utf-8") as fd:
             fd.write("SYSTEM PROMPT")
-        return SimpleNamespace(
-            config_dict={
-                "verbose": False,
-                "model": "CodeChat",
-                "max_steps": 0,
-                "system_prompt_id": "v1",
-                "use_server_subagents": False,
-                "agent_md_path": None,
-                "limit_project_metadata": True,
-                "console_trace": False,
-                "threads_data_path": tmp_dir,
-                "agent_url": "http://backend.local/v1/responses",
-                "completions_url": "http://backend.local/v1/chat/completions",
-                "backend_api_mode": backend_api_mode,
-                "chat_completions_system_prompt_path": prompt_path,
-                "use_ssl": True,
-                "use_retry": False,
-                "x_cl_id": 12345,
-                "no_tool_call_max_count": 5,
-                "summary_params": {
+        from gc_testkit.settings import fake_ctx
+
+        return fake_ctx(
+            {
+                "agent.verbose": False,
+                "agent.model": "CodeChat",
+                "agent.max_steps": 0,
+                "agent.system_prompt_id": "v1",
+                "agent.use_server_subagents": False,
+                "paths.agent_md_path": "",
+                "agent.limit_project_metadata": True,
+                "logging.console_trace": False,
+                "paths.threads_data_path": tmp_dir,
+                "backend.completions_url": "http://backend.local/v1/chat/completions",
+                "backend.api_mode": backend_api_mode,
+                "paths.chat_completions_system_prompt_path": prompt_path,
+                "backend.use_ssl": True,
+                "backend.use_retry": False,
+                "agent.x_cl_id": "12345",
+                "agent.no_tool_call_max_count": 5,
+                "summary": {
                     "chat_completions_summary_trigger_chars": 1,
                     "incremental_batch_chars": 2,
                     "max_accumulated_summary_chars": 20000,

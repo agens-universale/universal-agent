@@ -2,11 +2,12 @@
 
 from gc_core.startup_notices import collect_startup_notices
 from gc_core.upgrade_gate import UpgradeInfo
+from gc_testkit.settings import make_settings
 
 
 def _collect(upgrade_info):
     return collect_startup_notices(
-        {}, set(), None, is_tui=False, upgrade_info=upgrade_info
+        make_settings(), set(), None, is_tui=False, upgrade_info=upgrade_info
     )
 
 

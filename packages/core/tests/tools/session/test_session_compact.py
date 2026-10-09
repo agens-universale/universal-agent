@@ -1,6 +1,5 @@
 import json
 import types
-from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from gc_core.states import State
@@ -12,6 +11,7 @@ from gc_core.tools.session.session_compact import (
 )
 from gc_testkit import run_coro
 from gc_testkit.helpers.tool_ctx import CallableTool
+from gc_testkit.settings import fake_ctx, make_settings
 
 
 def _state(*, backend_api_mode="chat_completions", messages=None):
@@ -30,17 +30,18 @@ def _state(*, backend_api_mode="chat_completions", messages=None):
 
 def test_registered_only_for_chat_completions():
     assert "session_compact" not in get_builtin_tools_data(
-        {"backend_api_mode": "responses"}
+        make_settings({"backend.api_mode": "responses"})
     )
-    tools = get_builtin_tools_data({"backend_api_mode": "chat_completions"})
+    tools = get_builtin_tools_data(
+        make_settings({"backend.api_mode": "chat_completions"})
+    )
     assert "session_compact" in tools
     assert tools["session_compact"]["tool_fabric"] is SessionCompact
 
 
 def test_session_compact_calls_arun_summary_compaction(monkeypatch):
     state = _state()
-    ctx = types.SimpleNamespace(
-        config_dict={},
+    ctx = fake_ctx(
         logger=None,
         on_summary_applied=MagicMock(),
         is_cli_mode=True,
@@ -99,7 +100,7 @@ def test_session_compact_rejects_empty_dialog():
 
 def test_session_compact_reports_compaction_failure(monkeypatch):
     state = _state()
-    ctx = types.SimpleNamespace(config_dict={}, logger=None)
+    ctx = fake_ctx(logger=None)
 
     async def boom(**_kwargs):
         raise RuntimeError("llm down")
@@ -171,7 +172,7 @@ def test_process_tool_calls_after_compact_uses_technical_user_not_orphan_output(
         aprocess_tool_calls(
             batch,
             state,
-            ctx=SimpleNamespace(config_dict={}),
+            ctx=fake_ctx(),
             run_agent_func=lambda *_a, **_k: None,
         )
     )
@@ -241,7 +242,7 @@ def test_process_tool_calls_after_compact_keeps_other_tool_pairs(monkeypatch):
         aprocess_tool_calls(
             batch,
             state,
-            ctx=SimpleNamespace(config_dict={}),
+            ctx=fake_ctx(),
             run_agent_func=lambda *_a, **_k: None,
         )
     )

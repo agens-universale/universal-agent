@@ -14,8 +14,6 @@ import io
 import os
 import types
 
-from PIL import Image
-
 from gc_core.agent_executor import AgentExecutor
 from gc_core.aio import AsyncAgent
 from gc_core.attachments import store as store_module
@@ -27,17 +25,22 @@ from gc_core.attachments.model import (
     user_label,
 )
 from gc_core.attachments.store import ImageStore, amake_attachment
+from gc_testkit.settings import make_settings
+from PIL import Image
 
 
 def _cfg(tmp_path):
-    return {
-        "threads_data_path": str(tmp_path),
-        "backend_api_mode": "chat_completions",
-        "completions_url": "http://test",
-        "model": "x",
-        "max_steps": 1,
-        "system_prompt_id": "v1",
-    }
+    return make_settings(
+        {
+            "paths.threads_data_path": str(tmp_path),
+            "backend.api_mode": "chat_completions",
+            "backend.completions_url": "http://test",
+            "agent.model": "x",
+            "agent.max_steps": 1,
+            "agent.system_prompt_id": "v1",
+            "logging.save_logs": False,
+        }
+    )
 
 
 def _png(color: str = "red") -> bytes:

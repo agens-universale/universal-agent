@@ -41,6 +41,8 @@ class MemoryThreadStore(ThreadStoreBase):
         self._messages: Dict[tuple, List[Dict[str, Any]]] = {}
         self._meta: Dict[tuple, Dict[str, Any]] = {}
         self._traces: Dict[tuple, List[SubagentTraceRecord]] = {}
+        #: Файлы треда (``gc_core.thread_files``): картинки и медиа MCP.
+        self._files: Dict[tuple, Dict[str, bytes]] = {}
         #: Счётчик обращений — тестам удобно проверять, что ходили именно сюда.
         self.calls: Dict[str, int] = {}
 
@@ -192,7 +194,21 @@ class MemoryThreadStore(ThreadStoreBase):
             removed.append("meta")
         if self._traces.pop(key, None) is not None:
             removed.append("subagent_trace")
+        self._files.pop(key, None)
         return removed
+
+    # --- файлы треда ---------------------------------------------------------
+
+    def write_thread_file(self, system_id, thread_id, name, data) -> None:
+        from gc_core.thread_files import check_name
+
+        self._hit("write_thread_file")
+        key = self._key(system_id, thread_id)
+        self._files.setdefault(key, {})[check_name(name)] = bytes(data)
+
+    def read_thread_file(self, system_id, thread_id, name):
+        self._hit("read_thread_file")
+        return self._files.get(self._key(system_id, thread_id), {}).get(name)
 
     # --- трассы субагентов -------------------------------------------------
 

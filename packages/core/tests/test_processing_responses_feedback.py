@@ -1,7 +1,6 @@
 import importlib
 import sys
 import types
-from types import SimpleNamespace
 
 from gc_core.message_policy.user_message_policy import (
     TECHNICAL_TYPE_ERROR_MESSAGE,
@@ -11,6 +10,7 @@ from gc_core.states import State
 from gc_core.utils.convertations import sanitize_messages_for_chat_completions
 from gc_testkit import as_coro, run_coro
 from gc_testkit.paths import module_dir
+from gc_testkit.settings import fake_ctx
 
 
 def teardown_module(_module) -> None:
@@ -157,13 +157,13 @@ def test_request_backend_canonical_sanitizes_state_history_for_chat_completions(
             "status": "completed",
         }
     ]
-    ctx = SimpleNamespace(
-        config_dict={
-            "backend_api_mode": "chat_completions",
-            "completions_url": "http://backend.local/v1/chat/completions",
-            "use_ssl": True,
-            "use_retry": False,
-            "backend_request_timeout_sec": 600,
+    ctx = fake_ctx(
+        {
+            "backend.api_mode": "chat_completions",
+            "backend.completions_url": "http://backend.local/v1/chat/completions",
+            "backend.use_ssl": True,
+            "backend.use_retry": False,
+            "backend.request_timeout_sec": 600,
         },
         logger=None,
     )

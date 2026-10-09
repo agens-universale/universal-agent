@@ -67,13 +67,14 @@ def get_client_cert(server_cfg: Dict[str, Any]) -> Optional[Tuple[str, str]]:
 
 
 def get_backend_client_cert(
-    config_dict: Dict[str, Any],
+    cert_config: Dict[str, Any],
 ) -> Optional[Tuple[str, str]]:
-    """Клиентский сертификат модели-бэкенда из config_dict (cert_path/key_path).
+    """Клиентский сертификат модели-бэкенда из ``{cert_path, key_path}``
+    (см. ``connect_backend.effective_cert_config``).
 
     Оба заданы → (cert, key) с раскрытыми путями; только один → warning + None;
     ни одного → None. Отдельно от MCP get_client_cert (там дефисные ключи)."""
-    cfg = config_dict or {}
+    cfg = cert_config or {}
     cert_path = cfg.get("cert_path")
     key_path = cfg.get("key_path")
     if cert_path and key_path:

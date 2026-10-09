@@ -55,6 +55,9 @@ from gc_tui.editors.model_entry_form import (
 from gc_tui.form_frame import KEEP_IN_VIEW, reveal_focus
 from gc_tui.palette import ACCENT, DEEP_DIM, DIM, INK, WARN
 
+# Виджеты подтверждения в секции моделей.
+_CONFIRM_SELECTOR = ".models-confirm"
+
 # Константы вместо повторяющихся литералов (Sonar S1192).
 _CLS_SET_HINT_SET_DYN = "set-hint set-dyn"
 _SEL_MODELS_ROW = ".models-row"
@@ -82,9 +85,7 @@ _FOOTER_FORM_URL = "Ctrl+S — сохранить/выйти · Alt+↓ — по
 _FOOTER_FORM_MODEL = "Ctrl+S — сохранить/выйти · Alt+↓ — перечитать список · Ctrl+Space — проверить связь · Esc — назад"
 _FOOTER_FORM_NOAUTH = "↑/↓ · Ctrl+S — сохранить/выйти · Space — переключить · Ctrl+Space — проверить связь · Esc — назад"
 _FOOTER_FORM_STRIP = "↑/↓ · Ctrl+S — сохранить/выйти · Space — переключить · Ctrl+Space — проверить связь · Esc — назад"
-_FOOTER_FORM_FIELD = (
-    "↑/↓ · Ctrl+S — сохранить/выйти · Ctrl+Space — проверить связь · Esc — назад"
-)
+_FOOTER_FORM_FIELD = "↑/↓ · Ctrl+S — сохранить/выйти · Ctrl+Space — проверить связь · Esc — назад"
 # Пара своя и курсор на одном из её полей: `Ctrl+U` возвращает общее подключение
 # ЦЕЛИКОМ (§5). Слова взяты из словаря формы, а не списаны заново: ту же клавишу
 # называет подпись поля токена, и разойтись двум обещаниям одного действия нельзя.
@@ -93,9 +94,13 @@ _FOOTER_FORM_FIELD = (
 # Прежнее «Ctrl+U — очистить» с адреса ушло: это был встроенный `delete_left_all`
 # Textual, а над заполненным адресом клавишу теперь забирает пара — над пустым же
 # стирать нечего, и обещать её там значило бы обещать мёртвую клавишу.
-_FOOTER_FORM_URL_PAIR = f"Ctrl+S — сохранить/выйти · Enter — список · {CTRL_U_PAIR} · Esc — назад"
+_FOOTER_FORM_URL_PAIR = (
+    f"Ctrl+S — сохранить/выйти · Enter — список · {CTRL_U_PAIR} · Esc — назад"
+)
 _FOOTER_FORM_LIST = "↑/↓ · Enter — подставить · Ctrl+S — сохранить/выйти · Esc · Ctrl+Space — проверить связь"
-_FOOTER_FORM_LIST_NO_MATCH = "↑/↓ · Ctrl+S — сохранить/выйти · Esc · Ctrl+Space — проверить связь"
+_FOOTER_FORM_LIST_NO_MATCH = (
+    "↑/↓ · Ctrl+S — сохранить/выйти · Esc · Ctrl+Space — проверить связь"
+)
 # Футер раскрытого списка НЕ модальный: `Ctrl+Space` под ним работает, и `Ctrl+U` над
 # своим адресом тоже (список адреса раскрывают поверх заполненного поля, `Alt+↓`).
 # Молчание о работающей клавише — та же ложь футера, что обещание мёртвой.
@@ -837,12 +842,6 @@ class ModelsSectionEditor(Vertical):
         base = self._base_entries
         return list(base) + [a for a in self._own_aliases if a not in base]
 
-    @property
-    def _aliases(self) -> list:
-        """Прежнее имя того же списка — строк реестра, то есть эффективного. У
-        основной секции тени нет, и это по-прежнему ровно записи файла."""
-        return self._effective_aliases
-
     def _entry_origin(self, alias: str) -> str:
         """Откуда строка: `base` — стоит одной лишь тенью основного конфига, `own`
         — есть в файле цели (любая запись основной секции; у профиля — и та, что
@@ -1528,7 +1527,9 @@ class ModelsSectionEditor(Vertical):
                     markup=False,
                 )
             self._legacy = self._make_legacy_editor()
-            if self._legacy_baseline is None and getattr(self._legacy, "models_loaded", True):
+            if self._legacy_baseline is None and getattr(
+                self._legacy, "models_loaded", True
+            ):
                 self._legacy_baseline = getattr(
                     self._legacy, "initial_value", self._legacy.peek()
                 )
@@ -1822,10 +1823,6 @@ class ModelsSectionEditor(Vertical):
         )
 
     @property
-    def picker_open(self) -> bool:
-        return self._picker is not None
-
-    @property
     def form_open(self) -> bool:
         return self._form is not None
 
@@ -1867,7 +1864,11 @@ class ModelsSectionEditor(Vertical):
             value = manual_value
             if value is None:
                 return False
-        if not self._legacy_baseline and initial_value and value == initial_value:
+        if (
+            not self._legacy_baseline
+            and initial_value
+            and value == initial_value
+        ):
             # The effective model may become known asynchronously after the body
             # was first composed; promote that resolved value to the baseline.
             self._legacy_baseline = initial_value
@@ -1970,12 +1971,6 @@ class ModelsSectionEditor(Vertical):
         return _FOOTER_FORM_FIELD
 
     # --- клавиши --------------------------------------------------------------
-    def toggle_form_help(self) -> bool:
-        if self._form is None or self._picker is not None:
-            return False
-        self._form.toggle_help()
-        return True
-
     def open_form_help(self) -> bool:
         if self._form is None or self._picker is not None:
             return False
@@ -2135,7 +2130,7 @@ class ModelsSectionEditor(Vertical):
 
     def _clear_dirty_exit_confirm(self) -> None:
         self._dirty_exit_pending = False
-        for widget in self.query(".models-confirm"):
+        for widget in self.query(_CONFIRM_SELECTOR):
             widget.remove()
 
     def new_entry(self) -> bool:
@@ -2181,7 +2176,8 @@ class ModelsSectionEditor(Vertical):
         if self._picker is not None or self._env_pending is not None:
             return False  # висит вопрос (слот / перезапись ссылки) — клавиши не формы
         if self._form is not None:
-            return self._form.probe_connection()
+            self._form.probe_connection()
+            return True
         return False
 
     def space(self) -> bool:
@@ -2241,7 +2237,8 @@ class ModelsSectionEditor(Vertical):
             initial = {"alias": alias, **self._own_entry(alias)}
         self._form = ModelEntryForm(
             interaction_gate=lambda: (
-                self._picker is not None or self._env_pending is not None
+                self._picker is not None
+                or self._env_pending is not None
                 or self._dirty_exit_pending
             ),
             initial=initial,
@@ -2282,11 +2279,18 @@ class ModelsSectionEditor(Vertical):
         merged = self._merged_entry(prev, fields)
         old_auth = old.get("token")
         if old_auth is None:
-            old_auth = ((old.get("backend") or {}).get("chat_completion_headers") or {}).get("Authorization")
+            old_auth = (
+                (old.get("backend") or {}).get("chat_completion_headers") or {}
+            ).get("Authorization")
         new_auth = merged.get("token")
         if new_auth is None:
-            new_auth = ((merged.get("backend") or {}).get("chat_completion_headers") or {}).get("Authorization")
-        credential_refs, _ = config_raw.env_refs_overwritten({"token": new_auth}, {"token": old_auth})
+            new_auth = (
+                (merged.get("backend") or {}).get("chat_completion_headers")
+                or {}
+            ).get("Authorization")
+        credential_refs, _ = config_raw.env_refs_overwritten(
+            {"token": new_auth}, {"token": old_auth}
+        )
         written = sorted(set(written) | set(credential_refs))
         if written:
             self._env_pending = (alias, fields)
@@ -2758,7 +2762,7 @@ class ModelsSectionEditor(Vertical):
 
     def _clear_confirm(self) -> None:
         self._pending = None
-        for widget in self.query(".models-confirm"):
+        for widget in self.query(_CONFIRM_SELECTOR):
             widget.remove()
 
     def _clear_env_confirm(self) -> None:
@@ -2766,7 +2770,7 @@ class ModelsSectionEditor(Vertical):
         confirm удаления (`_ask` один на оба), а состояния взаимоисключающие —
         снос по классу чужого не заденет."""
         self._env_pending = None
-        for widget in self.query(".models-confirm"):
+        for widget in self.query(_CONFIRM_SELECTOR):
             widget.remove()
 
     # --- инлайн-пикер значений (решение 9: свой механизм раскрытия) -----------

@@ -8,22 +8,28 @@ from gc_core.model_router import ResolvedModel
 from gc_core.usage.account import UsageAccount
 from gc_core.utils import llm_chat_client as client
 from gc_core.utils.backend_errors import EmbeddedChoiceError
+from gc_testkit.settings import fake_ctx, update_ctx
 from transport_fakes import install_transport, json_response
 
 
+def _kwargs(route):
+    return {
+        "stream": True,
+        "response_format": {"type": "json_object"},
+        "provider": {"order": [route]},
+    }
+
+
 def context():
-    return SimpleNamespace(
-        config_dict={
-            "backend_api_mode": "responses",
-            "backend_request_timeout_sec": 3,
-            "use_retry": True,
-            "auxiliary_llm_params": {
-                "completion_kwargs": {
-                    "stream": True,
-                    "response_format": {"type": "json_object"},
-                    "provider": {"order": ["route-a"]},
-                },
-            },
+    return fake_ctx(
+        {
+            "backend.api_mode": "responses",
+            "backend.request_timeout_sec": 3,
+            "backend.use_retry": True,
+            # Служебный one-shot берёт параметры auxiliary (не main).
+            "chat_completions.auxiliary_llm.completion_kwargs": _kwargs(
+                "route-a"
+            ),
         },
         auth_connector=None,
         logger=None,
@@ -98,9 +104,15 @@ async def test_snapshot_budget_finish_reason_and_usage(monkeypatch):
     )
     ctx, st = context(), state()
     prepared = await client.aprepare_chat_completion(ctx, st, resolved=model())
-    ctx.config_dict["auxiliary_llm_params"]["completion_kwargs"]["provider"]["order"] = [
-        "route-b"
-    ]
+    # Снимок уже сделан: правка настроек после него запрос не меняет.
+    update_ctx(
+        ctx,
+        **{
+            "chat_completions.auxiliary_llm.completion_kwargs": _kwargs(
+                "route-b"
+            )
+        },
+    )
     result = await client.arequest_chat_completion_once(
         ctx,
         st,

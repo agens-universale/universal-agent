@@ -6,9 +6,10 @@
 в двойнике.
 """
 
+from gc_core.config_modules.root import AppConfig
 from gc_core.model_router import ModelRouter, ResolvedModel
+from gc_testkit.settings import make_settings
 from gc_core.vision.audience import Audience, compute_audience
-from gc_core.vision.rejects import request_url
 from gc_core.vision.rejects import ImageRejects, mark_blind
 from gc_core.vision.audience import route_id
 from gc_core.vision.route import VisionRouteKey
@@ -25,22 +26,23 @@ def _router(
     """`backend` — явные ключи `models.<alias>.backend` по алиасам, как их
     проецирует конфиг (`backend_overrides`)."""
     backend = backend or {}
-    snapshot = {
-        "models": {
-            "glm": {
-                "model": "glm-5.1",
-                "url": _GLM_URL,
-                "backend_overrides": backend.get("glm", {}),
+
+    def entry(model, url, alias):
+        out = {"model": model, "url": url, "token": ""}
+        if alias in backend:
+            out["backend"] = backend[alias]
+        return out
+
+    snapshot = AppConfig.model_validate(
+        {
+            "models": {
+                "glm": entry("glm-5.1", _GLM_URL, "glm"),
+                "qwen": entry("qwen/qwen3.6-35b-a3b", _QWEN_URL, "qwen"),
             },
-            "qwen": {
-                "model": "qwen/qwen3.6-35b-a3b",
-                "url": _QWEN_URL,
-                "backend_overrides": backend.get("qwen", {}),
-            },
-        },
-        "slots": {"default": "glm"},
-        "assign": assign or {},
-    }
+            "slots": {"default": "glm"},
+            "assign": assign or {},
+        }
+    )
     return ModelRouter(snapshot, level_provider=lambda: "default")
 
 
@@ -73,7 +75,7 @@ def _audience(
         request_resolved=request_resolved or router.resolve("main"),
         api_mode=api_mode,
         tool_in_set=tool_in_set,
-        config=config or {},
+        settings=make_settings(config),
         routes=routes,
     )
 
@@ -170,9 +172,18 @@ def test_an_unresolvable_eyes_level_does_not_break_the_request():
     """Решение считается на КАЖДЫЙ запрос и не бросает: две модели без слотов
     (валидатор такой конфиг не пропустит, но двойник или ручная сборка могут) —
     резолв «глаз» падает `ValueError`, запрос уходит с `eyes=None`."""
-    router = ModelRouter(
-        {"models": {"a": {}, "b": {}}}, level_provider=lambda: "default"
+    # Мимо валидации схемы — как двойник или ручная сборка.
+    from gc_core.config_modules.model_registry import ModelEntry
+
+    snapshot = AppConfig().model_copy(
+        update={
+            "models": {
+                "a": ModelEntry.model_validate({}),
+                "b": ModelEntry.model_validate({}),
+            }
+        }
     )
+    router = ModelRouter(snapshot, level_provider=lambda: "default")
     request = ResolvedModel(
         alias="a",
         model="a",
@@ -194,35 +205,29 @@ def test_the_key_uses_the_fallback_url_when_the_model_has_none():
     """Запись без своего адреса и без общего `completions_url` в снимке: запрос
     уходит на запасной адрес воронки — по нему же ставится и ищется пометка."""
     router = ModelRouter(
-        {"models": {"bare": {}}, "slots": {"default": "bare"}},
+        AppConfig.model_validate(
+            {"models": {"bare": {}}, "slots": {"default": "bare"}}
+        ),
         level_provider=lambda: "default",
     )
     resolved = router.resolve("main")
     rejects = ImageRejects()
     mark_blind(_key(_FALLBACK_URL, "bare"))
 
-    assert resolved.url is None
-    assert request_url(resolved, _FALLBACK_URL) == _FALLBACK_URL
+    # Схема даёт пустую строку (общий `completions_url` по умолчанию ""), не None.
+    assert not resolved.url
     assert _audience(router, rejects).nobody is True
-
-
-def test_request_url_prefers_the_model_address():
-    resolved = ResolvedModel(
-        alias="glm",
-        model="glm-5.1",
-        url=_GLM_URL,
-        authorization=None,
-        backend_overrides={},
-        tariff=None,
-        source="test",
-    )
-    assert request_url(resolved, _FALLBACK_URL) == _GLM_URL
 
 
 def test_legacy_request_model_is_keyed_by_its_model_id():
     """Легаси (пустой реестр): алиаса нет, ключ — адрес и id модели."""
     router = ModelRouter(
-        {"model": "legacy-model", "completions_url": _GLM_URL},
+        make_settings(
+            {
+                "agent.model": "legacy-model",
+                "backend.completions_url": _GLM_URL,
+            }
+        ),
         level_provider=lambda: "default",
     )
     rejects = ImageRejects()
@@ -274,7 +279,7 @@ def test_the_general_backend_flag_applies_to_every_model():
     router = _router({"vision": "qwen"})
 
     audience = _audience(
-        router, ImageRejects(), config={"backend_vision": False}
+        router, ImageRejects(), config={"backend.vision": False}
     )
 
     assert audience.nobody is True
@@ -284,7 +289,7 @@ def test_a_model_value_beats_the_general_flag():
     router = _router({"vision": "qwen"}, backend={"qwen": {"vision": True}})
 
     audience = _audience(
-        router, ImageRejects(), config={"backend_vision": False}
+        router, ImageRejects(), config={"backend.vision": False}
     )
 
     assert audience.native is None
@@ -310,7 +315,7 @@ def test_unknown_candidate_offers_tool_without_admitting_pixels():
         request_resolved=router.resolve("main"),
         api_mode="chat_completions",
         tool_in_set=True,
-        config={},
+        settings=make_settings(),
     )
     assert audience.native is None and audience.eyes is None
     assert audience.tool_visible
@@ -323,6 +328,6 @@ def test_explicit_true_still_requires_confirmation():
         request_resolved=router.resolve("main"),
         api_mode="chat_completions",
         tool_in_set=True,
-        config={},
+        settings=make_settings(),
     )
     assert audience.native is None and audience.tool_visible

@@ -22,6 +22,7 @@ from __future__ import annotations
 import sys
 
 import pytest
+from gc_testkit.settings import make_settings
 
 
 def test_real_import_error_is_not_masked(monkeypatch):
@@ -55,7 +56,7 @@ def test_real_import_error_is_not_masked(monkeypatch):
 
     monkeypatch.setattr(sys, "meta_path", [_BrokenDep(), *sys.meta_path])
     with pytest.raises(ModuleNotFoundError) as e:
-        ensure_mcp_daemons({})
+        ensure_mcp_daemons(make_settings())
     assert e.value.name == "yaml", (
         "чужая ошибка импорта не должна маскироваться"
     )

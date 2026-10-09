@@ -324,6 +324,13 @@ class TrackingFsBackend:
     def is_sandbox(self, value: bool) -> None:
         self._inner.is_sandbox = value
 
+    @property
+    def isolates_exec(self) -> bool:
+        # Песочница (SandboxBackend наследует LocalFsBackend и поэтому
+        # оборачивается здесь) изолирует команды: без проброса MCP с
+        # execute_on: os_backend поднимался бы в процессе агента.
+        return getattr(self._inner, "isolates_exec", False)
+
     def isabs(self, path: str) -> bool:
         return self._inner.isabs(path)
 

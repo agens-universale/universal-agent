@@ -29,7 +29,7 @@ class AgentEditsRecordConfig(BaseModel):
     Библиотечное использование ядра режима не объявляет и не пишет.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     tui: bool = True
     cli: bool = False
@@ -48,7 +48,7 @@ class AgentEditsConfig(BaseModel):
     файлов хранилище растёт сверх этого числа — цена сохранённого отката.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     snapshots_max_files: int = DEFAULT_SNAPSHOTS_MAX_FILES
     max_diff_chars: int = DEFAULT_MAX_DIFF_CHARS

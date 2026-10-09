@@ -14,7 +14,7 @@ from PIL import Image
 from gc_core.attachments.model import ORIGIN_USER, chip_text, user_label
 from gc_core.attachments.normalize import normalize_image
 from gc_core.attachments.store import ImageStore
-from gc_core.tools.subagents.progress import QueueSubagentProgressSink
+from gc_core.execution.progress import QueueSubagentProgressSink
 from gc_core.tools.turn.ask_human import (
     AskHuman,
     HumanAnswer,

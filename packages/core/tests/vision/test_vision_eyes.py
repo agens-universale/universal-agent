@@ -14,13 +14,13 @@ import httpx
 import pytest
 from PIL import Image
 from gc_testkit import as_coro
+from gc_testkit.settings import fake_ctx
 from vision_fakes import warm_routes
 
 from gc_core.attachments.model import ORIGIN_TOOL, TOOL_LABEL
 from gc_core.attachments.normalize import normalize_image
 from gc_core.attachments.store import ImageStore
 from gc_core.attachments.texts import EYES_SYSTEM_PROMPT
-from gc_core.config import flatten_app_config
 from gc_core.config_modules.root import AppConfig
 from gc_core.intent_log.operations import append_user_ask
 from gc_core.model_router import ModelRouter
@@ -41,17 +41,17 @@ def _router() -> ModelRouter:
         "assign": {"vision": "qwen"},
     }
     return ModelRouter(
-        flatten_app_config(AppConfig.model_validate(raw)),
+        AppConfig.model_validate(raw),
         level_provider=lambda: "default",
     )
 
 
 def _ctx(tmp_path, router):
-    ctx = SimpleNamespace(
-        config_dict={
-            "completions_url": "http://backend.local/v1/chat/completions",
-            "backend_request_timeout_sec": 600,
-            "backend_api_mode": "chat_completions",
+    ctx = fake_ctx(
+        {
+            "backend.completions_url": "http://backend.local/v1/chat/completions",
+            "backend.request_timeout_sec": 600,
+            "backend.api_mode": "chat_completions",
         },
         model_router=router,
         logger=None,

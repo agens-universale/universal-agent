@@ -33,11 +33,16 @@ RENAME_CONVERTERS: Dict[str, Callable[[Any], Any]] = {}
 # слияние смешало бы параметры двух разных моделей — там старая отбрасывается.
 MERGE_RENAMED_SECTIONS = frozenset({"diff_tui"})
 # {"dotted.путь": "почему удалён"}  # noqa: ERA001  # описание формата, не выключенный код
+# Сегмент ``*`` — любое имя записи словаря (алиас модели и т.п.).
 REMOVED: Dict[str, str] = {
     "update.check_interval_days": "проверка идёт при каждом запуске; выключить — update.check: off",
     "logging.dump_storage": "debug-дамп storage удалён; обновите config.yml: gc-cli --sync-config",
     "agent_edits.preview_context_lines": "экран правок считает дифф по журналу; контекст хэнков — agent_edits.hunk_context_lines",
     "agent_edits.full_file_max_lines": "порога больше нет: клавиша f на экране правок показывает файл целиком",
+    # На уровне модели никогда не применялись: протокол, поток и строгость
+    # схем тулов действуют на весь бэкенд.
+    "models.*.backend.api_mode": "на уровне модели не применяется — задайте в общей секции backend",
+    "models.*.backend.stream": "на уровне модели не применяется — задайте в общей секции backend",
 }
 
 _SYNC_HINT = "обновите config.yml: gc-cli --sync-config"
@@ -50,6 +55,44 @@ _MANUAL_HINT = "переименуйте ключ в этом файле вру�
 def manual_edit_fact(fact: str) -> str:
     """Факт compat про файл, который ``--sync-config`` не обновляет."""
     return fact.replace(_SYNC_HINT, _MANUAL_HINT)
+
+
+def expand_path(d: Dict[str, Any], pattern: str) -> List[Tuple[str, ...]]:
+    """Пути документа (сегментами), совпадающие с ``pattern``; ``*`` — любое
+    имя записи. Сегменты, а не строка: алиас модели может содержать точку."""
+    found: List[Tuple[Tuple[str, ...], Any]] = [((), d)]
+    for part in pattern.split("."):
+        found = [
+            ((*path, str(key)), node[key])
+            for path, node in found
+            if isinstance(node, dict)
+            for key in (list(node) if part == "*" else [part])
+            if key in node
+        ]
+    return [path for path, _ in found]
+
+
+def pop_parts(d: Dict[str, Any], parts: Tuple[str, ...]) -> Tuple[bool, Any]:
+    """Снять значение по пути-сегментам (без разбора строки по точкам)."""
+    cur: Any = d
+    for part in parts[:-1]:
+        if not isinstance(cur, dict) or part not in cur:
+            return False, None
+        cur = cur[part]
+    if not isinstance(cur, dict) or parts[-1] not in cur:
+        return False, None
+    return True, cur.pop(parts[-1])
+
+
+def matches_pattern(
+    dotted: str, pattern: str, *, prefix: bool = False
+) -> bool:
+    """Путь совпадает с шаблоном (``*`` — любой сегмент); ``prefix`` — путь
+    лежит внутри шаблона (сам шаблон или его потомок)."""
+    parts, pat = dotted.split("."), pattern.split(".")
+    if len(parts) < len(pat) or (not prefix and len(parts) != len(pat)):
+        return False
+    return all(p in ("*", q) for p, q in zip(pat, parts))
 
 
 def _pop_path(d: Dict[str, Any], dotted: str) -> Tuple[bool, Any]:
@@ -118,7 +161,8 @@ def map_legacy_path(dotted: str) -> Optional[str]:
     for old, new in RENAMES.items():
         if path == old or path.startswith(old + "."):
             path = new + path[len(old) :]
-    if any(path == gone or path.startswith(gone + ".") for gone in REMOVED):
+    # ``*`` в REMOVED — любое имя записи (``models.*.backend.stream``).
+    if any(matches_pattern(path, gone, prefix=True) for gone in REMOVED):
         return None
     return path
 
@@ -126,8 +170,16 @@ def map_legacy_path(dotted: str) -> Optional[str]:
 def apply_compat(raw: Dict[str, Any]) -> List[str]:
     """Мутирует raw. Возвращает человекочитаемые факты для startup-notices."""
     facts: List[str] = []
+    _compat_model_kwargs(raw, facts)
+    _compat_renames(raw, facts)
+    _compat_removed(raw, facts)
+    return facts
+
+
+def _compat_model_kwargs(raw: Dict[str, Any], facts: List[str]) -> None:
+    """``models.<alias>.backend.chat_completion_kwargs`` → ``models.<alias>.main``."""
     models = raw.get("models")
-    for alias, entry in (models.items() if isinstance(models, dict) else ()):
+    for alias, entry in models.items() if isinstance(models, dict) else ():
         if not isinstance(entry, dict):
             continue
         backend = entry.get("backend")
@@ -144,6 +196,10 @@ def apply_compat(raw: Dict[str, Any]) -> List[str]:
             f"models.{alias}.main; явно заданный main имеет приоритет — "
             "сохраните запись модели в настройках или обновите файл вручную"
         )
+
+
+def _compat_renames(raw: Dict[str, Any], facts: List[str]) -> None:
+    """Переименованные ключи (``RENAMES``) — с конвертером значения, если он есть."""
     for old, new in RENAMES.items():
         explicit_new = _has_path(raw, new)
         present, value = _pop_path(raw, old)
@@ -159,13 +215,17 @@ def apply_compat(raw: Dict[str, Any]) -> List[str]:
                 )
                 continue
         facts.append(_place_renamed(raw, old, new, value, explicit_new))
+
+
+def _compat_removed(raw: Dict[str, Any], facts: List[str]) -> None:
+    """Удалённые ключи (``REMOVED``) снимаются из документа с фактом."""
     for old, why in REMOVED.items():
-        present, _ = _pop_path(raw, old)
-        if present:
-            facts.append(
-                f"{old} устарел и игнорируется ({why}) — {_SYNC_HINT}"
-            )
-    return facts
+        for concrete in expand_path(raw, old):
+            present, _ = pop_parts(raw, concrete)
+            if present:
+                facts.append(
+                    f"{'.'.join(concrete)} устарел и игнорируется ({why}) — {_SYNC_HINT}"
+                )
 
 
 def _place_renamed(

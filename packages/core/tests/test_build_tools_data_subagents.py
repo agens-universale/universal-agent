@@ -3,6 +3,7 @@
 import sys
 
 import pytest
+from gc_testkit.settings import make_settings
 
 
 @pytest.fixture(autouse=True)
@@ -27,11 +28,9 @@ def _ensure_real_tools_module():
 
 def _base_config(**overrides):
     cfg = {
-        "use_local_subagents": False,
-        "backend_api_mode": "chat_completions",
-        "enabled_tools": [],
-        "skills_data_path": "",
-        "mcp_servers": [],
+        "agent.use_local_subagents": False,
+        "backend.api_mode": "chat_completions",
+        "paths.skills_data_path": "",
     }
     cfg.update(overrides)
     return cfg
@@ -43,9 +42,12 @@ class TestSubagentsInBuildToolsData:
         from gc_core.tools.subagents.registry import SUBAGENT_CLASSES
 
         cfg = _base_config(
-            use_local_subagents=True, backend_api_mode="chat_completions"
+            **{"agent.use_local_subagents": True},
+            **{"backend.api_mode": "chat_completions"},
         )
-        tools_data, tools_spec, tools_descr, _ = await abuild_tools_data(cfg)
+        tools_data, tools_spec, tools_descr, _ = await abuild_tools_data(
+            make_settings(cfg)
+        )
         subagent_names = {cls.agent_name for cls in SUBAGENT_CLASSES}
         for name in subagent_names:
             assert name in tools_data, f"{name} should be in tools_data"
@@ -55,9 +57,10 @@ class TestSubagentsInBuildToolsData:
         from gc_core.tools.subagents.registry import SUBAGENT_CLASSES
 
         cfg = _base_config(
-            use_local_subagents=False, backend_api_mode="chat_completions"
+            **{"agent.use_local_subagents": False},
+            **{"backend.api_mode": "chat_completions"},
         )
-        tools_data, _, _, _ = await abuild_tools_data(cfg)
+        tools_data, _, _, _ = await abuild_tools_data(make_settings(cfg))
         subagent_names = {cls.agent_name for cls in SUBAGENT_CLASSES}
         for name in subagent_names:
             assert name not in tools_data, (
@@ -69,9 +72,10 @@ class TestSubagentsInBuildToolsData:
         from gc_core.tools.subagents.registry import SUBAGENT_CLASSES
 
         cfg = _base_config(
-            use_local_subagents=True, backend_api_mode="responses"
+            **{"agent.use_local_subagents": True},
+            **{"backend.api_mode": "responses"},
         )
-        tools_data, _, _, _ = await abuild_tools_data(cfg)
+        tools_data, _, _, _ = await abuild_tools_data(make_settings(cfg))
         subagent_names = {cls.agent_name for cls in SUBAGENT_CLASSES}
         for name in subagent_names:
             assert name not in tools_data, (
@@ -82,9 +86,9 @@ class TestSubagentsInBuildToolsData:
         from gc_core.tools import abuild_tools_data
         from gc_core.tools.subagents.registry import SUBAGENT_CLASSES
 
-        cfg = _base_config(backend_api_mode="chat_completions")
-        del cfg["use_local_subagents"]
-        tools_data, _, _, _ = await abuild_tools_data(cfg)
+        cfg = _base_config(**{"backend.api_mode": "chat_completions"})
+        del cfg["agent.use_local_subagents"]
+        tools_data, _, _, _ = await abuild_tools_data(make_settings(cfg))
         subagent_names = {cls.agent_name for cls in SUBAGENT_CLASSES}
         for name in subagent_names:
             assert name not in tools_data
@@ -94,9 +98,10 @@ class TestSubagentsInBuildToolsData:
         from gc_core.tools.subagents.registry import SUBAGENT_CLASSES
 
         cfg = _base_config(
-            use_local_subagents=True, backend_api_mode="chat_completions"
+            **{"agent.use_local_subagents": True},
+            **{"backend.api_mode": "chat_completions"},
         )
-        tools_data, _, _, _ = await abuild_tools_data(cfg)
+        tools_data, _, _, _ = await abuild_tools_data(make_settings(cfg))
         subagent_names = {cls.agent_name for cls in SUBAGENT_CLASSES}
         for name in subagent_names:
             spec = tools_data[name]["spec"]
@@ -112,9 +117,10 @@ class TestSubagentsInBuildToolsData:
         from gc_core.tools.subagents.registry import SUBAGENT_CLASSES
 
         cfg = _base_config(
-            use_local_subagents=True, backend_api_mode="chat_completions"
+            **{"agent.use_local_subagents": True},
+            **{"backend.api_mode": "chat_completions"},
         )
-        _, tools_spec, _, _ = await abuild_tools_data(cfg)
+        _, tools_spec, _, _ = await abuild_tools_data(make_settings(cfg))
         spec_names = {s["name"] for s in tools_spec}
         subagent_names = {cls.agent_name for cls in SUBAGENT_CLASSES}
         assert subagent_names.issubset(spec_names)

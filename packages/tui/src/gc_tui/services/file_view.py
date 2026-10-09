@@ -9,15 +9,12 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping, Optional, Union
+from typing import Any, Mapping, Optional
 
 from pygments import lex
 from pygments.lexers import get_lexer_by_name, get_lexer_for_filename
 from pygments.token import Token
 from pygments.util import ClassNotFound
-from rich.syntax import Syntax
-
-from gc_tui.palette import BAND_BG
 
 DEFAULT_MAX_FILE_BYTES = 64 * 1024 * 1024
 DEFAULT_COUNT_EAGER_BYTES = 2 * 1024 * 1024
@@ -27,8 +24,6 @@ PAGE_LINES_MIN = 1
 PAGE_LINES_MAX = 200
 BINARY_PROBE_BYTES = 8192
 MAX_LINE_CHARS = 4000
-# Как yaml_view / json_payload — один стиль с /config.
-_VIEW_SYNTAX_THEME = "solarized-dark"
 _PLAIN_LEXER_ALIASES = frozenset({"text", "txt", "output", "plaintext"})
 MSG_USAGE = "использование: /view <path>"
 MSG_DISABLED = "просмотр файлов выключен"
@@ -190,24 +185,6 @@ def apply_pygments_highlights(
     refresh = getattr(text_area, "refresh", None)
     if callable(refresh):
         refresh()
-
-
-def view_window_renderable(
-    text: str,
-    *,
-    lexer: Optional[str],
-) -> Union[Syntax, str]:
-    """Окно файла → Syntax (если есть lexer) или plain str для Static.update."""
-    if not lexer:
-        return text
-    return Syntax(
-        text,
-        lexer=lexer,
-        theme=_VIEW_SYNTAX_THEME,
-        background_color=BAND_BG,
-        word_wrap=False,
-        line_numbers=False,
-    )
 
 
 def parse_page_lines(raw: Any) -> Optional[int]:

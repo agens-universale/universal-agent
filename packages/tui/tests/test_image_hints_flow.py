@@ -16,6 +16,7 @@ from textual.widgets import Static
 from gc_tui.app import TuiApp
 from gc_tui.services import image_hints, os_ops
 from gc_tui.widgets.command_input import CommandTextArea
+from gc_testkit.tui_support import tui_settings
 
 TIP = "в буфере изображение · Ctrl+V — вставить"
 
@@ -30,7 +31,9 @@ def _app(tmp_path) -> TuiApp:
     return TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config={"model": "M", "threads_data_path": str(tmp_path)},
+        settings=tui_settings(
+            {"agent.model": "M", "paths.threads_data_path": str(tmp_path)}
+        ),
     )
 
 
@@ -288,11 +291,13 @@ async def test_the_open_tip_yields_to_a_refusal_and_waits(
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config={
-            "model": "M",
-            "threads_data_path": str(tmp_path),
-            "images": {"max_per_message": 1},
-        },
+        settings=tui_settings(
+            {
+                "agent.model": "M",
+                "paths.threads_data_path": str(tmp_path),
+                "images": {"max_per_message": 1},
+            }
+        ),
     )
     async with app.run_test() as pilot:
         await _settle(pilot)

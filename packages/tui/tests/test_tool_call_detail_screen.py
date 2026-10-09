@@ -1,5 +1,6 @@
 """ToolCallDetailScreen — CALL + OUTPUT секции, JSON-подсветка / plain fallback."""
 
+from gc_testkit.tui_support import tui_settings
 import json
 from pathlib import Path
 
@@ -74,7 +75,9 @@ async def test_ctrl_click_opens_detail_screen_with_call_and_output_sections(
     )
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         pilot.app.screen.attach_active_task(tid)
@@ -129,7 +132,9 @@ async def test_detail_screen_pending_row_shows_placeholder(tmp_path):
     )
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         pilot.app.screen.attach_active_task(tid)
@@ -186,7 +191,9 @@ async def test_detail_screen_plain_output_not_json(tmp_path):
     )
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         pilot.app.screen.attach_active_task(tid)
@@ -249,7 +256,9 @@ async def test_detail_screen_payload_is_selectable(tmp_path):
     )
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         pilot.app.screen.attach_active_task(tid)

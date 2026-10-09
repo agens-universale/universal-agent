@@ -1,10 +1,20 @@
-import difflib
 import json
 import logging
-from typing import Any, Dict, Iterable, Optional, Tuple
+from collections import OrderedDict
+from copy import deepcopy
+from types import SimpleNamespace
+from typing import Any, Dict, Optional, Tuple
 
 from gc_core.backends.factory import parse_os_backend_kind
 from gc_core.backends.protocol import FsBackend
+from gc_core.execution.contracts import (
+    ExecutionFailure,
+    StateDelta,
+    ToolResult,
+)
+from gc_core.execution.reducers import apply_state_delta, tool_state_view
+from gc_core.execution.tool_schema import apply_openai_strict_parameters
+from gc_core.settings import LoadedSettings, runtime_of, settings_of
 from gc_core.tools.arguments_validation import (
     WrongFunctionArgumentsException,
     annotate_output_with_dropped_arguments,
@@ -16,123 +26,31 @@ from gc_core.tools.inject_tool_fields import (
     strip_injected_tool_args,
 )
 from gc_core.tools.registry import _apply_stop_tools, get_builtin_tools_data
-from gc_core.tools.schema_optional import apply_openai_strict_parameters
 from gc_core.tools.skills.registry import SkillsRegistry, get_skills_registry
 from gc_core.tools.skills.skills_tools import get_skills_tools_data
 from gc_core.tools.subagents.registry import is_subagent_tool
 from gc_core.tools.subagents.selection import subagents_enabled
 
 _fallback_logger = logging.getLogger(__name__)
-_LEGACY_UNKNOWN_TOOL_MARKER = "there is not such tool"
-
-INTERNAL_TOOL_ERROR = "internal_tool_error"
-#: Бэкенды, у которых файловая система — не хост.
-_REMOTE_OS_BACKENDS = frozenset({"harbor", "docker", "ssh", "exec"})
-_INTERNAL_TOOL_ERROR_MESSAGE_CAP = 500
-_INTERNAL_TOOL_ERROR_GUIDANCE_CAP = 800
-_INTERNAL_TOOL_ERROR_GUIDANCE = (
-    "Client runtime failed while executing the tool "
-    "(not an arguments-schema rejection). "
-    "Do not retry the identical call hoping for a different schema outcome. "
-    "Change strategy, pick another tool, or report the failure if the task is blocked."
+from gc_core.execution.ports import is_sandbox_violation, port
+from gc_core.execution.tool_feedback import (
+    INTERNAL_TOOL_ERROR as INTERNAL_TOOL_ERROR,
+)
+from gc_core.execution.tool_feedback import (
+    format_internal_tool_error_output as format_internal_tool_error_output,
+)
+from gc_core.execution.tool_feedback import (
+    format_unknown_tool_output as format_unknown_tool_output,
+)
+from gc_core.execution.tool_feedback import (
+    is_internal_tool_error_output as is_internal_tool_error_output,
+)
+from gc_core.execution.tool_feedback import (
+    is_unknown_tool_output as is_unknown_tool_output,
 )
 
-
-def _truncate_for_tool_output(text: str, cap: int) -> str:
-    if cap <= 0:
-        return ""
-    if len(text) <= cap:
-        return text
-    if cap <= 3:
-        return text[:cap]
-    return text[: cap - 3] + "..."
-
-
-def format_internal_tool_error_output(
-    *,
-    tool_name: str | None,
-    exc: BaseException,
-    call_id: str | None = None,
-) -> str:
-    """Slim JSON tool output for unexpected exceptions in apply_tool (no traceback)."""
-    message = str(exc).strip()
-    if not message:
-        message = type(exc).__name__
-    message = _truncate_for_tool_output(
-        message.replace("\n", " ").strip(),
-        _INTERNAL_TOOL_ERROR_MESSAGE_CAP,
-    )
-    guidance = _truncate_for_tool_output(
-        _INTERNAL_TOOL_ERROR_GUIDANCE,
-        _INTERNAL_TOOL_ERROR_GUIDANCE_CAP,
-    )
-    payload: Dict[str, Any] = {
-        "ok": False,
-        "error": INTERNAL_TOOL_ERROR,
-        "exception_type": type(exc).__name__,
-        "message": message,
-        "guidance": guidance,
-    }
-    if isinstance(tool_name, str) and tool_name:
-        payload["tool"] = tool_name
-    if isinstance(call_id, str) and call_id:
-        payload["call_id"] = call_id
-    return json.dumps(payload, ensure_ascii=False)
-
-
-def is_internal_tool_error_output(output: str) -> bool:
-    if not isinstance(output, str) or not output:
-        return False
-    try:
-        parsed = json.loads(output)
-    except (TypeError, ValueError):
-        return False
-    if not isinstance(parsed, dict):
-        return False
-    return (
-        parsed.get("ok") is False
-        and parsed.get("error") == INTERNAL_TOOL_ERROR
-    )
-
-
-def format_unknown_tool_output(
-    tool_name: str, available_names: Iterable[str]
-) -> str:
-    suggestions = difflib.get_close_matches(
-        tool_name, list(available_names), n=5, cutoff=0.3
-    )
-    error_message = f"No tool named '{tool_name}' on client."
-    use_only = "Use only tools from the provided tool list in section <tools> in system prompt."
-    if suggestions:
-        message = f"Unknown tool '{tool_name}'. Maybe you mean tools: {', '.join(suggestions)}. {use_only}"
-    else:
-        message = f"Unknown tool '{tool_name}'. {use_only}"
-    payload = {
-        "ok": False,
-        "error": {
-            "type": "unknown_tool",
-            "message": error_message,
-            "requested": tool_name,
-            "suggestions": suggestions,
-        },
-        "message": message,
-    }
-    return json.dumps(payload, ensure_ascii=False)
-
-
-def is_unknown_tool_output(output: str) -> bool:
-    if not isinstance(output, str) or not output:
-        return False
-    if _LEGACY_UNKNOWN_TOOL_MARKER in output:
-        return True
-    try:
-        parsed = json.loads(output)
-    except (TypeError, ValueError):
-        return False
-    if not isinstance(parsed, dict):
-        return False
-    error = parsed.get("error")
-    return isinstance(error, dict) and error.get("type") == "unknown_tool"
+#: Бэкенды, у которых файловая система — не хост.
+_REMOTE_OS_BACKENDS = frozenset({"harbor", "docker", "ssh", "exec"})
 
 
 def _ensure_spec_has_required(spec: Dict[str, Any]) -> None:
@@ -201,11 +119,14 @@ def _warn_unknown_filter_names(
 
 def apply_subagent_tools_filter(
     tools_data: Dict[str, Dict[str, Any]],
-    config_dict: Dict[str, Any],
+    settings: Any,
     *,
     logger: Any = None,
 ) -> Dict[str, Dict[str, Any]]:
     """Сузить набор тулов дочернего рана по allow/stop из определения сабагента.
+
+    ``settings`` — всё, что принимает ``runtime_of`` (контекст, ``LoadedSettings``):
+    allow/stop живут в рантайме ребёнка.
 
     Точка применения — здесь, а не в раннере: детские тулы собираются в двух
     местах (``_build_child_state`` и ``_build_child_ctx``), оба зовут
@@ -218,8 +139,9 @@ def apply_subagent_tools_filter(
     раньше: служебное ядро возвращается только если оно ещё есть во входящем
     наборе, снятое им не восстанавливаем.
     """
-    allow_raw = config_dict.get(SUBAGENT_TOOLS_ALLOW_KEY)
-    stop_raw = config_dict.get(SUBAGENT_TOOLS_STOP_KEY)
+    runtime = runtime_of(settings)
+    allow_raw = runtime.subagent_tools_allow
+    stop_raw = runtime.subagent_tools_stop
     allow = set(allow_raw) if allow_raw is not None else None
     stop = set(stop_raw or ())
     if allow is None and not stop:
@@ -247,7 +169,7 @@ def apply_subagent_tools_filter(
 
 
 def _collect_local_tools_data(
-    config_dict: Dict[str, Any],
+    settings: Any,
     *,
     os_backend: FsBackend | None,
     skills_registry: SkillsRegistry | None,
@@ -260,12 +182,12 @@ def _collect_local_tools_data(
     """
     tools_data: Dict[str, Dict[str, Any]] = {}
 
-    builtin_tools_data = get_builtin_tools_data(config_dict)
+    builtin_tools_data = get_builtin_tools_data(settings)
     for k, v in builtin_tools_data.items():
         tools_data[k] = v
 
     registry = skills_registry or get_skills_registry(
-        config_dict, backend=os_backend
+        settings, backend=os_backend
     )
     skills_tools_data = get_skills_tools_data(registry)
     for k, v in skills_tools_data.items():
@@ -274,7 +196,7 @@ def _collect_local_tools_data(
 
 
 async def abuild_tools_data(
-    config_dict: Dict[str, Any],
+    settings: Any,
     on_progress=None,
     *,
     os_backend: FsBackend | None = None,
@@ -288,20 +210,23 @@ async def abuild_tools_data(
     Дискавери — 99.7% времени сборки (866–1405 мс против 2.4–6.9 мс на всё
     остальное), и только она здесь асинхронна. Остальные источники — builtin,
     скиллы, субагенты — это словари в памяти.
+
+    ``settings`` — настройки рана: всё, что принимает ``settings_of``/``runtime_of``
+    (контекст, ``LoadedSettings``, ``AppConfig``).
     """
     from gc_core.tools.connect_mcp.agent_tools import (
         aget_mcp_tools_data_for_config,
     )
 
     tools_data = _collect_local_tools_data(
-        config_dict, os_backend=os_backend, skills_registry=skills_registry
+        settings, os_backend=os_backend, skills_registry=skills_registry
     )
     # `os_backend` обязателен: без него `runs_in_agent_runtime` считает любой
     # MCP-сервер «своим», и `execute_on: os_backend` молча исполнялся на хосте,
     # мимо песочницы. develop передаёт его здесь же; при переводе аргумент
     # потерялся.
     mcp_tools_data, mcp_status = await aget_mcp_tools_data_for_config(
-        config_dict,
+        settings,
         on_progress,
         tools_cache=tools_cache,
         os_backend=os_backend,
@@ -310,7 +235,7 @@ async def abuild_tools_data(
         tools_data,
         mcp_tools_data,
         mcp_status,
-        config_dict,
+        settings,
         logger=logger,
         registered_names=registered_names,
     )
@@ -338,7 +263,7 @@ def _finish_tools_data(
     tools_data: Dict[str, Dict[str, Any]],
     mcp_tools_data: Dict[str, Dict[str, Any]],
     mcp_status: dict,
-    config_dict: Dict[str, Any],
+    settings: Any,
     *,
     logger: Any,
     registered_names: Optional[list] = None,
@@ -351,23 +276,26 @@ def _finish_tools_data(
     for k, v in mcp_tools_data.items():
         tools_data[k] = v
 
-    local_subagents_cfg = config_dict.get("use_local_subagents", False)
-    backend_mode = (
-        str(config_dict.get("backend_api_mode", "responses")).strip().lower()
+    # Настройки — один раз и до реестра субагентов: фильтры и спеки ниже
+    # читают их отсюда.
+    loaded = LoadedSettings(
+        settings=settings_of(settings), runtime=runtime_of(settings)
     )
+    app = loaded.settings
+    backend_mode = app.backend.api_mode.strip().lower()
     if (
-        subagents_enabled(local_subagents_cfg)
+        subagents_enabled(app.agent.use_local_subagents)
         and backend_mode == "chat_completions"
     ):
         from gc_core.tools.subagents.registry import get_subagents_tools_data
 
         # Реестр уже применил список из use_local_subagents к кастомным;
         # встроенные семь доступны всегда, пока фича включена.
-        subagent_tools = get_subagents_tools_data(config_dict, logger=logger)
+        subagent_tools = get_subagents_tools_data(settings, logger=logger)
         for k, v in subagent_tools.items():
             tools_data[k] = v
 
-    if parse_os_backend_kind(config_dict) in _REMOTE_OS_BACKENDS:
+    if parse_os_backend_kind(loaded) in _REMOTE_OS_BACKENDS:
         # Host-only: пишет на локальный диск. Когда файлы живут «там» (harbor,
         # docker, ssh, exec), на хосте им не место — тул снимается.
         tools_data.pop("download_file", None)
@@ -377,16 +305,14 @@ def _finish_tools_data(
     if registered_names is not None:
         registered_names[:] = list(tools_data)
 
-    tools_data = _apply_stop_tools(tools_data, config_dict)
-    tools_data = apply_subagent_tools_filter(
-        tools_data, config_dict, logger=logger
-    )
+    tools_data = _apply_stop_tools(tools_data, loaded)
+    tools_data = apply_subagent_tools_filter(tools_data, loaded, logger=logger)
 
     # Логирование оставляем модульным, так как build_tools_data вызывается
     # при создании RunContext, когда logger ещё не привязан к контексту.
     _fallback_logger.debug("Collected tools_data: %s", tools_data)
 
-    inject_tool_fields = resolve_inject_tool_fields(config_dict)
+    inject_tool_fields = resolve_inject_tool_fields(loaded)
 
     # Бэкенд требует parameters.required — нормализуем все spec'и.
     # Флаги схемы на канон не накладываются: проекция — на отправке.
@@ -463,20 +389,28 @@ def tool_arguments_valid(
     return True
 
 
-def _config_dict_for_call(
+def _settings_source_for_call(
     ctx: Optional[Any], kwargs: Dict[str, Any]
-) -> Dict[str, Any]:
-    if ctx is not None and hasattr(ctx, "config_dict"):
-        cfg = ctx.config_dict or {}
-    else:
-        cfg = kwargs.get("config_dict")
-    return cfg if isinstance(cfg, dict) else {}
+) -> Any:
+    """Источник настроек вызова (то, что принимает ``settings_of``).
+
+    Контекст рана; явные ``settings=`` вызова — только когда контекста нет или
+    у него нет своих настроек (прямые вызовы ``apply_tool`` в тестах/утилитах).
+    """
+    explicit = kwargs.get("settings")
+    if ctx is None:
+        return explicit
+    if explicit is not None and getattr(ctx, "settings", None) is None:
+        return explicit
+    return ctx
 
 
-def _logger_for_call(ctx: Optional[Any]) -> logging.Logger:
+def _logger_for_call(
+    ctx: Optional[Any],
+) -> logging.Logger | logging.LoggerAdapter:
     if ctx is not None and hasattr(ctx, "logger"):
         candidate = ctx.logger
-        if isinstance(candidate, logging.Logger):
+        if isinstance(candidate, (logging.Logger, logging.LoggerAdapter)):
             return candidate
     return _fallback_logger
 
@@ -486,7 +420,7 @@ def _prepare_subagent_call(
     arguments: str | Dict[str, Any],
     tools_data_: Dict[str, Dict[str, Any]],
     ctx: Optional[Any],
-    config_dict: Dict[str, Any],
+    settings: Any,
     kwargs: Dict[str, Any],
 ) -> "tuple[Any, Dict[str, Any], list[str]] | str":
     from gc_core.tools.subagents.runner import SubagentRunner
@@ -515,7 +449,7 @@ def _prepare_subagent_call(
         parsed_args,
         injected_fields=entry.get("injected_fields") or [],
     )
-    runner = SubagentRunner(ctx, orchestrator_state, config_dict)
+    runner = SubagentRunner(ctx, orchestrator_state, settings)
     return (
         _SubagentTool(
             runner,
@@ -547,7 +481,7 @@ def _prepare_tool_call(
 
     - tools_data_ — явный словарь tools_data (обычный путь в тестах/утилитах);
     - ctx — RunContext; если передан и tools_data_ не задан, берём tools_data из ctx.
-      Также из ctx.config_dict читаются use_server_subagents и server_tool_prefix.
+      Также из настроек ctx читаются use_server_subagents и server_tool_prefix.
     """
     if tools_data_ is None:
         if ctx is None or not hasattr(ctx, "tools_data"):
@@ -557,9 +491,10 @@ def _prepare_tool_call(
         tools_data_ = ctx.tools_data
 
     # Настройки server subagents
-    config_dict = _config_dict_for_call(ctx, kwargs)
-    use_server_subagents = config_dict.get("use_server_subagents", False)
-    server_tool_prefix = config_dict.get("server_tool_prefix")
+    source = _settings_source_for_call(ctx, kwargs)
+    settings = settings_of(source)
+    use_server_subagents = settings.agent.use_server_subagents
+    server_tool_prefix = settings.agent.server_tool_prefix
 
     if (
         use_server_subagents
@@ -568,14 +503,14 @@ def _prepare_tool_call(
     ):
         return f"{tool_name} call"
 
-    local_subagents_cfg = config_dict.get("use_local_subagents", False)
+    local_subagents_cfg = settings.agent.use_local_subagents
     # Отдельная сверка со списком не нужна: реестр уже отдаёт только разрешённых
     # кастомных, поэтому is_subagent_tool на отфильтрованном вернёт False.
     if subagents_enabled(local_subagents_cfg) and is_subagent_tool(
-        tool_name, config_dict
+        tool_name, source
     ):
         return _prepare_subagent_call(
-            tool_name, arguments, tools_data_, ctx, config_dict, kwargs
+            tool_name, arguments, tools_data_, ctx, source, kwargs
         )
 
     # Определяем, каким логгером пользоваться: контекстный или модульный.
@@ -612,15 +547,12 @@ def _prepare_tool_call(
         injected_fields=entry.get("injected_fields") or [],
     )
 
-    # Пробрасываем ctx/config_dict в kwargs тула: AbstractSimpleTool.__init__
-    # читает их через kwargs.get(...), и security‑декораторы (root_box,
-    # read_guard, url_policy, command_moderation) резолвят политику через
-    # self._ctx.config_dict. Без этого декораторы получают пустой
-    # config_dict и считают security‑слой не сконфигурированным.
+    # Пробрасываем ctx в kwargs тула: AbstractSimpleTool.__init__ читает его
+    # через kwargs.get(...), и тул вместе с security‑декораторами (root_box,
+    # read_guard, url_policy, command_moderation) берёт настройки рана из
+    # self._ctx. Явные ``settings=`` вызова (если были) уходят туда же.
     fabric_kwargs = dict(kwargs)
     fabric_kwargs.setdefault("ctx", ctx)
-    if config_dict:
-        fabric_kwargs.setdefault("config_dict", config_dict)
     tool = tool_fabric(**fabric_kwargs)
     return tool, arguments, dropped_unknown
 
@@ -646,7 +578,7 @@ def _tool_failure_output(
     log = _fallback_logger
     if ctx is not None and hasattr(ctx, "logger"):
         candidate = ctx.logger
-        if isinstance(candidate, logging.Logger):
+        if isinstance(candidate, (logging.Logger, logging.LoggerAdapter)):
             log = candidate
 
     if not isinstance(call_id, str):
@@ -672,7 +604,7 @@ def _tool_result_to_text(res: Any) -> str:
     return str(res)
 
 
-async def aapply_tool(
+async def _aapply_tool_text(
     tool_name: str,
     arguments: str | Dict[str, Any],
     tools_data_: Optional[Dict[str, Dict[str, Any]]] = None,
@@ -685,7 +617,7 @@ async def aapply_tool(
     Раньше здесь было три ступени: ``acall``, корутинный ``__call__`` и, как
     запасной путь, ``asyncio.to_thread`` для синхронного тула. Третья ступень
     существовала «ради встраивающих», но зарегистрировать свой Python-класс-тул
-    извне нельзя вовсе: ``build_tools_data`` собирает набор из ``config_dict``,
+    извне нельзя вовсе: ``build_tools_data`` собирает набор из настроек,
     параметра для чужих тулов у ``create_run_context`` нет, механизма плагинов
     нет. Точка расширения — MCP, и она асинхронна насквозь.
 
@@ -707,8 +639,32 @@ async def aapply_tool(
             f"Tool {tool_name!r} ({type(tool).__name__}) has no acall(); the tool contract is async-only"
         )
     try:
-        res = await acall(**args)
+        from gc_core.execution.tool_effects import (
+            invoke_native_tool,
+            uses_leaf_effect,
+        )
+
+        if callable(port(ctx, "tool_effect")) and uses_leaf_effect(tool):
+            res = await invoke_native_tool(
+                tool,
+                tool_name,
+                args,
+                ctx=ctx,
+                state=kwargs.get("state"),
+                call_id=kwargs.get("call_id"),
+                operation_id=kwargs.get("tool_operation_id")
+                or str(kwargs.get("call_id") or "tool"),
+            )
+        else:
+            from gc_core.tools.connect_mcp.api import media_sink_scope
+
+            with media_sink_scope(ctx):
+                res = await acall(**args)
+    except ExecutionFailure:
+        raise
     except Exception as e:
+        if is_sandbox_violation(e):
+            raise
         return annotate_output_with_dropped_arguments(
             _tool_failure_output(
                 e, tool_name=tool_name, ctx=ctx, call_id=kwargs.get("call_id")
@@ -723,10 +679,94 @@ async def aapply_tool(
     )
 
 
+def _owns_session_state(
+    tool_name: str,
+    tools_data_: Optional[Dict[str, Dict[str, Any]]],
+    ctx: Optional[Any],
+) -> bool:
+    """Класс тула объявил ``owns_session_state``: ему — частный срез состояния."""
+    data = (
+        tools_data_
+        if tools_data_ is not None
+        else getattr(ctx, "tools_data", None)
+    )
+    entry = (data or {}).get(tool_name) or {}
+    return bool(getattr(entry.get("tool_fabric"), "owns_session_state", False))
+
+
+async def aapply_tool_result(
+    tool_name: str,
+    arguments: str | Dict[str, Any],
+    tools_data_: Optional[Dict[str, Dict[str, Any]]] = None,
+    ctx: Optional[Any] = None,
+    **kwargs: Any,
+) -> ToolResult:
+    """Run a tool and return its explicitly owned state changes.
+
+    Stateful session tools receive a small private view, not the live State.
+    Other legacy tools keep their local contract; durable runtimes must opt in
+    only tools whose external effects and required state they can represent.
+    """
+    state = kwargs.get("state")
+    before = None
+    view = None
+    if state is not None and _owns_session_state(tool_name, tools_data_, ctx):
+        before = tool_state_view(state)
+        view = SimpleNamespace(
+            shared=SimpleNamespace(
+                working_memory=deepcopy(before.working_memory),
+                fetch_url_cache=OrderedDict(deepcopy(before.fetch_url_cache)),
+            ),
+            session_todo=deepcopy(before.session_todo),
+        )
+        kwargs = {**kwargs, "state": view}
+    output = await _aapply_tool_text(
+        tool_name, arguments, tools_data_, ctx, **kwargs
+    )
+    delta = StateDelta()
+    if view is not None:
+        if view.shared.working_memory != before.working_memory:
+            delta.working_memory = deepcopy(view.shared.working_memory)
+        if view.session_todo != before.session_todo:
+            delta.session_todo = deepcopy(view.session_todo)
+        cache = [
+            [key, deepcopy(value)]
+            for key, value in view.shared.fetch_url_cache.items()
+        ]
+        if cache != before.fetch_url_cache:
+            delta.fetch_url_cache = cache
+    from gc_core.execution.progress import parse_tool_result_status
+
+    ok, _ = parse_tool_result_status(output)
+    return ToolResult(
+        output=output,
+        outcome="tool_error" if ok is False else "ok",
+        delta=delta,
+    )
+
+
+async def aapply_tool(
+    tool_name: str,
+    arguments: str | Dict[str, Any],
+    tools_data_: Optional[Dict[str, Dict[str, Any]]] = None,
+    ctx: Optional[Any] = None,
+    **kwargs: Any,
+) -> str:
+    """Compatible string API; the runner applies explicit state deltas once."""
+    result = await aapply_tool_result(
+        tool_name, arguments, tools_data_, ctx, **kwargs
+    )
+    state = kwargs.get("state")
+    if state is not None:
+        apply_state_delta(state, result.delta)
+    return result.output
+
+
 __all__ = [
     "INTERNAL_TOOL_ERROR",
     "WrongFunctionArgumentsException",
     "aapply_tool",
+    "aapply_tool_result",
     "format_internal_tool_error_output",
     "format_unknown_tool_output",
     "is_internal_tool_error_output",

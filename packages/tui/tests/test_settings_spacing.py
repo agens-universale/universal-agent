@@ -1,3 +1,4 @@
+from gc_testkit.tui_support import as_settings, tui_settings
 import pytest
 
 pytest.importorskip("textual")
@@ -26,10 +27,10 @@ async def test_update_action_rows_have_air(tmp_path, monkeypatch):
     )
     cfg = tmp_path / "c.yml"
     cfg.write_text("backend: {}\n", encoding="utf-8")
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
         scr = SettingsScreen(
-            config={},
+            settings=as_settings({}),
             config_path=str(cfg),
             on_apply=lambda: None,
             probe_fn=lambda *a, **k: None,

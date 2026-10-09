@@ -16,7 +16,6 @@ import types
 from pathlib import Path
 
 import pytest
-
 from gc_core.attachments.store import (
     IMAGES_DIRNAME,
     STAGING_DIRNAME,
@@ -37,6 +36,7 @@ from gc_core.security.protected_paths import (
     protected_paths,
 )
 from gc_core.security.read_guard import enforce_read_guard
+from gc_testkit.settings import fake_ctx, make_settings
 
 SHA16 = "3f9a1c27b0e4d5a6"
 
@@ -66,7 +66,10 @@ def layout(tmp_path, monkeypatch):
         / "cache"
         / "mcp-media"
         / "browser_take_screenshot_1.png",
-        config={"launch_root": str(proj), "threads_data_path": str(threads)},
+        config={
+            "launch_root": str(proj),
+            "paths.threads_data_path": str(threads),
+        },
     )
 
 
@@ -108,9 +111,7 @@ def _tui_ctx(config, answer):
         asked.append(kwargs["question"])
         return answer
 
-    ctx = types.SimpleNamespace(
-        config_dict=config, is_tui=True, tui_confirm=tui_confirm, logger=None
-    )
+    ctx = fake_ctx(config, is_tui=True, tui_confirm=tui_confirm, logger=None)
     return ctx, asked
 
 
@@ -121,7 +122,7 @@ def test_media_roots_are_the_image_store_root_own_staging_and_mcp_media(
     layout,
 ):
     images = layout.threads / IMAGES_DIRNAME
-    assert media_roots(layout.config) == (
+    assert media_roots(make_settings(layout.config)) == (
         images,
         images / STAGING_DIRNAME / str(os.getpid()),
         layout.mcp_shot.parent,
@@ -130,12 +131,15 @@ def test_media_roots_are_the_image_store_root_own_staging_and_mcp_media(
 
 def test_media_roots_without_threads_dir_follow_the_temp_image_store(layout):
     store = ImageStore.for_threads_dir("")
-    assert media_roots({})[:2] == (Path(store.root), Path(store.staging_dir))
+    assert media_roots(make_settings({}))[:2] == (
+        Path(store.root),
+        Path(store.staging_dir),
+    )
 
 
 def test_media_roots_touch_nothing_on_disk(layout):
     """Корни считаются на каждую проверку охраны — каталогов при этом не создаём."""
-    media_roots(layout.config)
+    media_roots(make_settings(layout.config))
     assert not layout.threads.exists()
 
 
@@ -153,7 +157,7 @@ def test_protected_set_keeps_three_argument_construction():
 
 def test_media_is_classified_before_operational(layout):
     ps = protected_paths(
-        cwd=str(layout.proj), media=media_roots(layout.config)
+        cwd=str(layout.proj), media=media_roots(make_settings(layout.config))
     )
     assert classify_path(layout.image, ps) == "media"
     assert classify_path(layout.own_staged, ps) == "media"
@@ -174,7 +178,7 @@ def outside(request, tmp_path, monkeypatch):
     proj.mkdir(exist_ok=True)
     config = {"launch_root": str(proj)}
     if request.param == "custom_threads_dir":
-        config["threads_data_path"] = str(tmp_path / "custom-threads")
+        config["paths.threads_data_path"] = str(tmp_path / "custom-threads")
         root = tmp_path / "custom-threads" / IMAGES_DIRNAME
     else:
         root = Path(ImageStore.for_threads_dir("").root)
@@ -193,7 +197,7 @@ def outside(request, tmp_path, monkeypatch):
 def test_foreign_staging_is_operational_wherever_the_root_lives(outside):
     """Чужой карман — вставки другого процесса: operational и вне `<gc_state>`."""
     ps = protected_paths(
-        cwd=str(outside.proj), media=media_roots(outside.config)
+        cwd=str(outside.proj), media=media_roots(make_settings(outside.config))
     )
     assert classify_path(outside.foreign_staged, ps) == "operational"
     assert classify_path(outside.root / STAGING_DIRNAME, ps) == "operational"
@@ -205,7 +209,7 @@ def test_dot_dot_escapes_are_classified_by_where_they_land(layout, outside):
     """Класс — по нормализованному пути: `..` из своего кармана media не наследует."""
     own = f"{outside.own_pocket}"
     ps = protected_paths(
-        cwd=str(outside.proj), media=media_roots(outside.config)
+        cwd=str(outside.proj), media=media_roots(make_settings(outside.config))
     )
     other = f"{own}{os.sep}..{os.sep}{os.getpid() + 1}{os.sep}x.png"
     assert classify_path(other, ps) == "operational"
@@ -215,7 +219,7 @@ def test_dot_dot_escapes_are_classified_by_where_they_land(layout, outside):
     assert classify_path(up, ps) == "none"
 
     ps_default = protected_paths(
-        cwd=str(layout.proj), media=media_roots(layout.config)
+        cwd=str(layout.proj), media=media_roots(make_settings(layout.config))
     )
     own_default = os.path.dirname(layout.own_staged)
     up_default = (
@@ -236,12 +240,10 @@ def test_foreign_staging_outside_gc_state_is_denied_for_read_write_and_commands(
 ):
     config = {
         **outside.config,
-        "read_guard": {"enabled": False},
-        "write_guard": {"enabled": False},
+        "security.read_guard": {"enabled": False},
+        "security.write_guard": {"enabled": False},
     }
-    ctx = types.SimpleNamespace(
-        config_dict=config, is_tui=False, tui_confirm=None, logger=None
-    )
+    ctx = fake_ctx(config, is_tui=False, tui_confirm=None, logger=None)
     read = json.loads(_ReadTool(ctx).read(path=str(outside.foreign_staged)))
     assert read["ok"] is False
     assert read["error"]["type"] == "protected_path_denied"
@@ -250,7 +252,7 @@ def test_foreign_staging_outside_gc_state_is_denied_for_read_write_and_commands(
     )
     assert write["ok"] is False
     assert write["error"]["type"] == "protected_path_denied"
-    media = media_roots(outside.config)
+    media = media_roots(make_settings(outside.config))
     assert (
         scan_command_for_protected(
             f"cat {outside.foreign_staged}", cwd=str(outside.proj), media=media
@@ -262,26 +264,49 @@ def test_foreign_staging_outside_gc_state_is_denied_for_read_write_and_commands(
 def test_perimeter_does_not_allow_foreign_staging_through_the_media_root(
     outside,
 ):
-    """Пол выключен (`protected_paths.enabled: false`) — остаётся периметр: корень
-    хранилища в нём разрешён, но чужой карман под ним — нет, он спрашивается."""
+    """Периметр сам по себе: корень хранилища в нём разрешён, но чужой карман под
+    ним — нет (корни media добавляются только пути класса media).
+
+    На develop это проверялось через инструмент с выключенным полом
+    (`protected_paths.enabled: false` в плоском словаре теста). В ветке пол
+    выключить нельзя (флаг не действует — решение пользователя, как и для YAML на
+    develop), поэтому периметр проверяется напрямую, а инструмент — отказом пола."""
+    from gc_core.security.read_guard import (
+        ReadGuardViolation,
+        check_read_path_allowed,
+        extra_read_roots,
+        parse_read_guard_config,
+    )
+
     config = {
         **outside.config,
-        "protected_paths": {"enabled": False},
-        "read_guard": {"enabled": True, "mode": "ask"},
+        "security.read_guard": {"enabled": True, "mode": "ask"},
     }
+    settings = make_settings(config)
+    media = media_roots(settings)
+    ps = protected_paths(cwd=str(outside.proj), media=media)
+    guard = parse_read_guard_config(settings)
+    own = str(outside.root / f"cli_t1_{SHA16}.png")
+    check_read_path_allowed(
+        own,
+        launch_root=str(outside.proj),
+        cfg=guard,
+        extra_allowed_paths=extra_read_roots(settings, own, ps, media),
+    )
+    foreign = str(outside.foreign_staged)
+    with pytest.raises(ReadGuardViolation):
+        check_read_path_allowed(
+            foreign,
+            launch_root=str(outside.proj),
+            cfg=guard,
+            extra_allowed_paths=extra_read_roots(settings, foreign, ps, media)
+            or None,
+        )
+
     ctx, asked = _tui_ctx(config, "deny")
-    assert (
-        json.loads(
-            _ReadTool(ctx).read(path=str(outside.root / f"cli_t1_{SHA16}.png"))
-        )["ok"]
-        is True
-    )
-    assert asked == []
-    assert (
-        json.loads(_ReadTool(ctx).read(path=str(outside.foreign_staged)))["ok"]
-        is False
-    )
-    assert len(asked) == 1
+    assert json.loads(_ReadTool(ctx).read(path=own))["ok"] is True
+    assert json.loads(_ReadTool(ctx).read(path=foreign))["ok"] is False
+    assert asked == []  # чужой карман режет пол, до вопроса периметра
 
 
 def test_symlink_into_a_foreign_pocket_is_classified_by_its_own_path(
@@ -307,10 +332,12 @@ def test_symlink_into_a_foreign_pocket_is_classified_by_its_own_path(
         pytest.skip("symlink недоступен (Windows без прав)")
     config = {
         "launch_root": str(proj),
-        "threads_data_path": str(threads),
-        "read_guard": {"enabled": True, "mode": "ask"},
+        "paths.threads_data_path": str(threads),
+        "security.read_guard": {"enabled": True, "mode": "ask"},
     }
-    ps = protected_paths(cwd=str(proj), media=media_roots(config))
+    ps = protected_paths(
+        cwd=str(proj), media=media_roots(make_settings(config))
+    )
     assert classify_path(link / f"{SHA16}.png", ps) == "none"
     ctx, asked = _tui_ctx(config, "deny")
     assert (
@@ -341,7 +368,7 @@ def test_a_planted_temp_root_symlink_opens_nothing(tmp_path, monkeypatch):
     monkeypatch.setattr(store.tempfile, "gettempdir", lambda: str(shared_tmp))
     config = {
         "launch_root": str(proj),
-        "read_guard": {"enabled": True, "mode": "ask"},
+        "security.read_guard": {"enabled": True, "mode": "ask"},
     }
     ctx, asked = _tui_ctx(config, "deny")
     assert (
@@ -370,15 +397,15 @@ def test_callers_without_config_keep_today_classes(layout):
 
 def test_media_read_passes_the_floor(layout):
     """Пол `read_guard` пропускает media, хотя корень лежит под operational `<gc_state>`."""
-    config = {**layout.config, "read_guard": {"enabled": False}}
-    ctx = types.SimpleNamespace(config_dict=config, logger=None)
+    config = {**layout.config, "security.read_guard": {"enabled": False}}
+    ctx = fake_ctx(config, logger=None)
     for target in (layout.image, layout.own_staged, layout.mcp_shot):
         assert json.loads(_ReadTool(ctx).read(path=str(target)))["ok"] is True
 
 
 def test_foreign_staging_read_is_denied(layout):
-    config = {**layout.config, "read_guard": {"enabled": False}}
-    ctx = types.SimpleNamespace(config_dict=config, logger=None)
+    config = {**layout.config, "security.read_guard": {"enabled": False}}
+    ctx = fake_ctx(config, logger=None)
     result = json.loads(_ReadTool(ctx).read(path=str(layout.foreign_staged)))
     assert result["ok"] is False
     assert result["error"]["type"] == "protected_path_denied"
@@ -387,7 +414,10 @@ def test_foreign_staging_read_is_denied(layout):
 def test_media_read_is_inside_the_perimeter(layout):
     """Периметр (`ask`) не спрашивает на каждый просмотр: корни media разрешены, как
     каталог скиллов. Для сравнения файл рядом, вне проекта, спрашивается."""
-    config = {**layout.config, "read_guard": {"enabled": True, "mode": "ask"}}
+    config = {
+        **layout.config,
+        "security.read_guard": {"enabled": True, "mode": "ask"},
+    }
     ctx, asked = _tui_ctx(config, "deny")
     assert (
         json.loads(_ReadTool(ctx).read(path=str(layout.image)))["ok"] is True
@@ -414,17 +444,15 @@ def test_media_write_decision_is_deny(layout):
         protected_decision(
             layout.image,
             cwd=str(layout.proj),
-            media=media_roots(layout.config),
+            media=media_roots(make_settings(layout.config)),
         )
         == "deny"
     )
 
 
 def test_media_write_is_denied(layout):
-    config = {**layout.config, "write_guard": {"enabled": False}}
-    ctx = types.SimpleNamespace(
-        config_dict=config, is_tui=False, tui_confirm=None, logger=None
-    )
+    config = {**layout.config, "security.write_guard": {"enabled": False}}
+    ctx = fake_ctx(config, is_tui=False, tui_confirm=None, logger=None)
     for target in (layout.image, layout.own_staged, layout.mcp_shot):
         result = json.loads(
             _WriteTool(ctx).write(path=str(target), content="x")
@@ -443,9 +471,9 @@ def test_custom_threads_dir_from_config_is_media(tmp_path, monkeypatch):
     image = threads / IMAGES_DIRNAME / f"cli_t1_{SHA16}.png"
     config = {
         "launch_root": str(proj),
-        "threads_data_path": str(threads),
-        "read_guard": {"enabled": True, "mode": "ask"},
-        "write_guard": {"enabled": False},
+        "paths.threads_data_path": str(threads),
+        "security.read_guard": {"enabled": True, "mode": "ask"},
+        "security.write_guard": {"enabled": False},
     }
     ctx, asked = _tui_ctx(config, "deny")
     assert json.loads(_ReadTool(ctx).read(path=str(image)))["ok"] is True
@@ -459,7 +487,7 @@ def test_custom_threads_dir_from_config_is_media(tmp_path, monkeypatch):
 
 
 def test_scan_decisions_for_media(layout):
-    media = media_roots(layout.config)
+    media = media_roots(make_settings(layout.config))
     cwd = str(layout.proj)
     assert (
         scan_command_for_protected(
@@ -514,10 +542,8 @@ def test_command_on_media_declined_is_blocked(layout):
 
 def test_command_on_media_without_a_head_is_blocked(layout):
     """Без головы подтверждать некому: существующий путь confirm отдаёт отказ."""
-    config = {**layout.config, "stop_tools": [ASK_HUMAN_TOOL_NAME]}
-    ctx = types.SimpleNamespace(
-        config_dict=config, is_tui=False, tui_confirm=None, logger=None
-    )
+    config = {**layout.config, "agent.stop_tools": [ASK_HUMAN_TOOL_NAME]}
+    ctx = fake_ctx(config, is_tui=False, tui_confirm=None, logger=None)
     result = json.loads(_ExecTool(ctx).run(command=f"cp {layout.image} docs/"))
     assert result["ok"] is False
     assert result["error"]["type"] == "protected_path_denied"

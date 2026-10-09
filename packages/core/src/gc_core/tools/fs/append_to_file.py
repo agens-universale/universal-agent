@@ -1,9 +1,9 @@
 import json
 import os
-from typing import Any, Dict, Optional
+from typing import Any
 
+from gc_core.execution.tool_schema import X_PRESERVE_EMPTY_STRING
 from gc_core.security.path_policy import enforce_write_guard
-from gc_core.tools.schema_optional import X_PRESERVE_EMPTY_STRING
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 from gc_core.utils.file_text import (
     APPEND_HEAD_SAMPLE_BYTES,
@@ -69,7 +69,7 @@ def _encode_chunk(chunk: str, encoding_used: str, is_create: bool):
 
 class AppendToFile(AbstractSimpleTool):
     @classmethod
-    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None):
+    def tool_description(cls, settings: Any = None):
         description = {
             "type": "function",
             "name": "fs_append_file",
@@ -129,7 +129,7 @@ class AppendToFile(AbstractSimpleTool):
         return description
 
     @classmethod
-    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None):
+    def prompt_description(cls, settings: Any = None):
         description = """Tool name: fs_append_file
 Tool description: Appends content to an existing file (e.g., for notes, logs, analysis results).
 Input schema: {"type": "object", "properties": {"path": {"type": "string", "description": "Absolute path to an existing file."}, "content": {"type": "string", "description": "Content to append."}, "separator": {"type": "string", "description": "Text put between the current file end and the new content. Prefer two newlines unless another separator is needed; empty string means no separation."}}, "required": ["path", "content", "separator"], "additionalProperties": false}
@@ -252,7 +252,7 @@ Usage:
         if created_file or not is_recording(self._ctx):
             return None
         try:
-            if size <= fs_mutate_max_bytes(self._config_dict):
+            if size <= fs_mutate_max_bytes(self._settings_source):
                 return await self._backend.read_bytes(path)
         except Exception:
             return None

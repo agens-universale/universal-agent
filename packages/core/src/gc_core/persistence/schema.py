@@ -78,15 +78,6 @@ def validate_thread_meta_for_load(meta: Mapping[str, Any]) -> None:
     require_state_schema_version(meta, context="thread meta")
 
 
-def validate_state_snapshot_for_load(payload: Mapping[str, Any]) -> None:
-    if not payload:
-        raise StateSchemaError(
-            "State snapshot payload must be a non-empty dict."
-        )
-    reject_legacy_memory_keys(payload)
-    require_state_schema_version(payload, context="state snapshot")
-
-
 def normalize_working_memory(raw: Any) -> dict[str, str]:
     if not isinstance(raw, Mapping):
         return {}

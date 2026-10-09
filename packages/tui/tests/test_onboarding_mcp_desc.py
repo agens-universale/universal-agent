@@ -1,4 +1,6 @@
+from gc_testkit.tui_support import as_settings, tui_settings
 import pytest
+from form_harness import goto_step
 
 
 class _FakeMcp:
@@ -22,12 +24,14 @@ def _screen():
     from gc_tui.screens.onboarding import OnboardingScreen
 
     cfg = {
-        "completions_url": "http://your-backend:PORT/v1/chat/completions",
-        "chat_completion_headers": {"Authorization": "Bearer <ВПИШИТЕ_ТОКЕН>"},
-        "model": "<ВПИШИТЕ_МОДЕЛЬ>",
+        "backend.completions_url": "http://your-backend:PORT/v1/chat/completions",
+        "backend.chat_completion_headers": {
+            "Authorization": "Bearer <ВПИШИТЕ_ТОКЕН>"
+        },
+        "agent.model": "<ВПИШИТЕ_МОДЕЛЬ>",
     }
     return OnboardingScreen(
-        config=cfg,
+        settings=as_settings(cfg),
         config_path="cfg.yml",
         review_all=False,
         on_commit=lambda: None,
@@ -43,12 +47,14 @@ async def test_onboarding_mcp_row_shows_description(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.screens.onboarding import STEP_MCP
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen()
         await pilot.app.push_screen(scr)
         await pilot.pause()
-        scr._goto(STEP_MCP)
+        goto_step(scr, STEP_MCP)
         await pilot.pause()
         blob = " ".join(str(w.render()) for w in scr.query(".onb-option"))
         assert "веб-поиск" in blob

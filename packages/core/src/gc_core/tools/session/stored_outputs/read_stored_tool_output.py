@@ -4,12 +4,12 @@ from typing import Any, Dict, Optional
 from gc_core.config_modules.stored_outputs import (
     get_tool_output_inline_max_chars,
 )
-from gc_core.loop_detector.constants import READ_PROFILE, loop_warn_on_repeat
-from gc_core.tools.session.stored_outputs.envelope import (
+from gc_core.execution.output_envelope import (
     PAGINATION_EOF_MARKER_DOC,
     dumps_stored_tool_output_payload,
     utf8_byte_length,
 )
+from gc_core.loop_detector.constants import READ_PROFILE, loop_warn_on_repeat
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 
 _TOOL_NAME = "session_read_stored_tool_output"
@@ -23,6 +23,10 @@ _NOT_FOUND_MESSAGE = (
 
 @loop_warn_on_repeat(**READ_PROFILE)
 class ReadStoredToolOutput(AbstractSimpleTool):
+    # Тело исполняется в ядре (оркестрация или чистое состояние), не на
+    # воркере (execution.tool_effects.uses_leaf_effect).
+    effect_in_core = True
+
     def _logger(self) -> logging.Logger:
         logger = getattr(self._ctx, "logger", None)
         if isinstance(logger, logging.Logger):
@@ -30,9 +34,7 @@ class ReadStoredToolOutput(AbstractSimpleTool):
         return _fallback_logger
 
     @classmethod
-    def tool_description(
-        cls, config_dict: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
+    def tool_description(cls, settings: Any = None) -> Dict[str, Any]:
         return {
             "type": "function",
             "name": _TOOL_NAME,
@@ -70,9 +72,7 @@ class ReadStoredToolOutput(AbstractSimpleTool):
         }
 
     @classmethod
-    def prompt_description(
-        cls, config_dict: Optional[Dict[str, Any]] = None
-    ) -> str:
+    def prompt_description(cls, settings: Any = None) -> str:
         return """Tool name: session_read_stored_tool_output
 Tool description: Read paginated chunks from stored large tool output using output_ref.
 
@@ -100,7 +100,7 @@ Behavior:
 """
 
     def _inline_limit(self) -> int:
-        return get_tool_output_inline_max_chars(self._config_dict or {})
+        return get_tool_output_inline_max_chars(self._settings_source)
 
     @classmethod
     def _payload(cls, **fields: Any) -> str:

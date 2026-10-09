@@ -1,5 +1,6 @@
 """Гейт автостарта, подъём через супервизор, lease, release-гасит-последний."""
 
+from gc_testkit.settings import make_settings
 from gc_tui.voice_runtime import autostart as auto
 from gc_tui.voice_runtime.state import VoiceState
 
@@ -39,27 +40,46 @@ def test_url_is_ours_parses_address_not_substrings():
     /settings показывал «облако» для своей же машины), а хост, в имени которого просто
     встречается «localhost», — своим."""
     ours = auto.url_is_ours
-    assert ours(CFG_OURS, 8735) is True
+    assert ours(make_settings(CFG_OURS), 8735) is True
     assert (
-        ours({"voice": {"url": "http://127.0.0.1:8735"}}, 8735) is True
+        ours(make_settings({"voice": {"url": "http://127.0.0.1:8735"}}), 8735)
+        is True
     )  # без пути
-    assert ours({"voice": {"url": "http://localhost:8735/v1/x"}}, 8735) is True
     assert (
-        ours({"voice": {"url": "http://[::1]:8735/v1/x"}}, 8735) is True
+        ours(
+            make_settings({"voice": {"url": "http://localhost:8735/v1/x"}}),
+            8735,
+        )
+        is True
+    )
+    assert (
+        ours(make_settings({"voice": {"url": "http://[::1]:8735/v1/x"}}), 8735)
+        is True
     )  # IPv6
     assert (
         ours(
-            {"voice": {"url": "http://localhost.evil.example:8735/v1/x"}}, 8735
+            make_settings(
+                {"voice": {"url": "http://localhost.evil.example:8735/v1/x"}}
+            ),
+            8735,
         )
         is False
     )  # чужой хост
     assert (
-        ours({"voice": {"url": "http://127.0.0.1:9999/v1/x"}}, 8735) is False
+        ours(
+            make_settings({"voice": {"url": "http://127.0.0.1:9999/v1/x"}}),
+            8735,
+        )
+        is False
     )  # чужой порт
-    assert ours(CFG_GROQ, 8735) is False
-    assert ours({}, 8735) is False
+    assert ours(make_settings(CFG_GROQ), 8735) is False
+    assert ours(make_settings({}), 8735) is False
     assert (
-        ours({"voice": {"url": "http://127.0.0.1:notaport/x"}}, 8735) is False
+        ours(
+            make_settings({"voice": {"url": "http://127.0.0.1:notaport/x"}}),
+            8735,
+        )
+        is False
     )
 
 
@@ -67,7 +87,9 @@ def test_gate_no_state(monkeypatch):
     _wire(monkeypatch, state=None)
     assert (
         auto.ensure_voice_service(
-            CFG_OURS, supervisor_factory=FakeSupervisor, preheat_async=False
+            make_settings(CFG_OURS),
+            supervisor_factory=FakeSupervisor,
+            preheat_async=False,
         )
         is False
     )
@@ -77,7 +99,9 @@ def test_gate_foreign_url(monkeypatch):
     acquired = _wire(monkeypatch)
     assert (
         auto.ensure_voice_service(
-            CFG_GROQ, supervisor_factory=FakeSupervisor, preheat_async=False
+            make_settings(CFG_GROQ),
+            supervisor_factory=FakeSupervisor,
+            preheat_async=False,
         )
         is False
     )
@@ -88,7 +112,9 @@ def test_port_alive_only_lease_and_preheat(monkeypatch):
     acquired = _wire(monkeypatch, port_ok=True)
     sup = FakeSupervisor()
     ok = auto.ensure_voice_service(
-        CFG_OURS, supervisor_factory=lambda **kw: sup, preheat_async=False
+        make_settings(CFG_OURS),
+        supervisor_factory=lambda **kw: sup,
+        preheat_async=False,
     )
     assert ok is True
     assert sup.started == []  # уже жив — не поднимаем
@@ -99,7 +125,9 @@ def test_spawn_when_port_silent(monkeypatch):
     acquired = _wire(monkeypatch, port_ok=False, ready=True)
     sup = FakeSupervisor()
     ok = auto.ensure_voice_service(
-        CFG_OURS, supervisor_factory=lambda **kw: sup, preheat_async=False
+        make_settings(CFG_OURS),
+        supervisor_factory=lambda **kw: sup,
+        preheat_async=False,
     )
     assert ok is True
     assert sup.started == ["speaches"]
@@ -109,7 +137,9 @@ def test_spawn_when_port_silent(monkeypatch):
 def test_spawn_fail_returns_false(monkeypatch):
     _wire(monkeypatch, port_ok=False, ready=False)  # порт так и не ожил
     ok = auto.ensure_voice_service(
-        CFG_OURS, supervisor_factory=FakeSupervisor, preheat_async=False
+        make_settings(CFG_OURS),
+        supervisor_factory=FakeSupervisor,
+        preheat_async=False,
     )
     assert ok is False
 
@@ -127,7 +157,9 @@ def test_wait_uses_own_timeout_not_mcp_default(monkeypatch):
     monkeypatch.setattr(auto, "wait_daemon_url_ready", fake_wait)
     sup = FakeSupervisor()
     ok = auto.ensure_voice_service(
-        CFG_OURS, supervisor_factory=lambda **kw: sup, preheat_async=False
+        make_settings(CFG_OURS),
+        supervisor_factory=lambda **kw: sup,
+        preheat_async=False,
     )
     assert ok is True
     assert captured.get("timeout") == auto._VOICE_READY_TIMEOUT_SEC
@@ -158,7 +190,9 @@ def test_race_port_alive_after_timeout_is_success(monkeypatch):
     )
     sup = FakeSupervisor()
     ok = auto.ensure_voice_service(
-        CFG_OURS, supervisor_factory=lambda **kw: sup, preheat_async=False
+        make_settings(CFG_OURS),
+        supervisor_factory=lambda **kw: sup,
+        preheat_async=False,
     )
     assert ok is True
     assert sup.started == ["speaches"]
@@ -174,7 +208,9 @@ def test_spawn_marks_service_as_ours(monkeypatch):
         auto, "mark_agent_owned", lambda name: marked.append(name)
     )
     auto.ensure_voice_service(
-        CFG_OURS, supervisor_factory=FakeSupervisor, preheat_async=False
+        make_settings(CFG_OURS),
+        supervisor_factory=FakeSupervisor,
+        preheat_async=False,
     )
     assert marked == ["speaches"]
 
@@ -188,7 +224,9 @@ def test_alive_service_is_not_claimed(monkeypatch):
         auto, "mark_agent_owned", lambda name: marked.append(name)
     )
     auto.ensure_voice_service(
-        CFG_OURS, supervisor_factory=FakeSupervisor, preheat_async=False
+        make_settings(CFG_OURS),
+        supervisor_factory=FakeSupervisor,
+        preheat_async=False,
     )
     assert marked == []
 
@@ -207,7 +245,9 @@ def test_not_claimed_when_supervisor_did_not_spawn(monkeypatch):
         auto, "mark_agent_owned", lambda name: marked.append(name)
     )
     auto.ensure_voice_service(
-        CFG_OURS, supervisor_factory=BusySupervisor, preheat_async=False
+        make_settings(CFG_OURS),
+        supervisor_factory=BusySupervisor,
+        preheat_async=False,
     )
     assert marked == []
 
@@ -222,7 +262,9 @@ def test_late_service_stays_ours(monkeypatch):
     )
     assert (
         auto.ensure_voice_service(
-            CFG_OURS, supervisor_factory=FakeSupervisor, preheat_async=False
+            make_settings(CFG_OURS),
+            supervisor_factory=FakeSupervisor,
+            preheat_async=False,
         )
         is False
     )

@@ -752,15 +752,14 @@ class TraceScreen(Screen):
         """Действующая модель СЛЕДУЮЩЕГО хода из Router (спека §12.2), не
         плоский ключ `cfg["model"]`: должна отражать активный уровень/профиль
         сразу после /level или /profiles, до пересборки executor (Router
-        витрин строится от `effective_config()` на каждый вызов, §6.4).
+        витрин строится от `effective_settings()` на каждый вызов, §6.4).
 
         Легаси-плейсхолдер шаблона (Task 14) — не имя модели, показывать нечего."""
         from gc_core.onboarding import MODEL_SENTINEL
 
         display_router = getattr(self.app, "display_router", None)
         if not callable(display_router):
-            cfg = getattr(self.app, "_config", None) or {}
-            model = cfg.get("model")
+            model = self.app.base_settings().settings.agent.model
             return model if model and model != MODEL_SENTINEL else "?"
         # check_breaker=False: витрина показывает модель честно даже при открытом
         # активном алиасе (спека §12.2) — иначе футер молча замирал бы (§8).
@@ -840,7 +839,7 @@ class TraceScreen(Screen):
         что применится ПОСЛЕ хода, или `None` — переход не нужен (хода нет,
         будущая модель совпадает с фактической). Каждый резолв недёшев: имя
         профиля глобит оба корня профилей (диск), цвет/модель строят Router
-        витрин от `effective_config()` — лесенка усечения в
+        витрин от `effective_settings()` — лесенка усечения в
         `_compose_footer_right` обязана получить снимок готовым, не резолвить
         заново на каждой ступени."""
         profile = self._footer_profile_name()
@@ -1137,19 +1136,19 @@ class TraceScreen(Screen):
         if not snapshot:
             return (None, None)
         session_meta, request_meta = snapshot
-        cfg = getattr(self.app, "_config", None) or {}
+        settings = self.app.base_settings().settings
         return usage_segments(
             session_meta,
             request_meta,
-            cfg.get("pricing"),
-            cfg.get("model"),
-            cfg.get("completions_url"),
+            settings.pricing,
+            settings.agent.model,
+            settings.backend.completions_url,
         )
 
     def _context_meter(self) -> Text | None:
         """Rich-Text индикатора контекста или None (скрыт)."""
-        cfg = getattr(self.app, "_config", None) or {}
-        if str(cfg.get("backend_api_mode")) != "chat_completions":
+        cfg = self.app.base_settings()
+        if str(cfg.settings.backend.api_mode) != "chat_completions":
             return None
         # Знаменатель шкалы — её mid-turn. turn-end (60%) подставляется только когда
         # mid-turn этой шкалы выключен: иначе проактивная уборка показывала бы 100%.
@@ -1437,12 +1436,15 @@ class TraceScreen(Screen):
         """voice-секция + прокси агента: у голоса своего поля прокси нет, а в облако
         он ходит по тем же правилам, что backend (копия — оригинал не трогаем).
 
-        Читаем из ЕДИНОЙ точки (`effective_config`), как витрины и сборка executor:
-        база `app._config` не знает про сессионный слой, и профиль, выбранный на
+        Читаем из ЕДИНОЙ точки (`effective_settings`), как витрины и сборка executor:
+        база окна не знает про сессионный слой, и профиль, выбранный на
         сессию, со своей секцией `voice` до диктовки бы не доехал."""
-        cfg = self.app.effective_config() or {}
-        voice = dict(cfg.get("voice") or {})
-        voice.setdefault("proxy", cfg.get("proxy"))
+        from gc_core.config_modules.field_meta import plain_dump
+
+        settings = self.app.effective_settings().settings
+        # Сырой токен: транскрайбер шлёт его в заголовке Authorization.
+        voice = plain_dump(settings.voice)
+        voice.setdefault("proxy", settings.backend.proxy)
         return voice
 
     def _ensure_voice_flow(self):
@@ -1532,10 +1534,8 @@ class TraceScreen(Screen):
         try:
             from gc_tui.services.voice_setup import status_cheap
 
-            cfg = (
-                self.app.effective_config() or {}
-            )  # единая точка, как в _voice_config
-            return status_cheap(cfg).mode == "local"
+            # единая точка, как в _voice_config
+            return status_cheap(self.app.effective_settings()).mode == "local"
         except Exception:
             return False
 
@@ -1575,7 +1575,7 @@ class TraceScreen(Screen):
         человек за это время успевает уйти — зовём его обратно тостом."""
         self._voice_service_pending = True
         cfg = (
-            self.app.effective_config() or {}
+            self.app.effective_settings()
         )  # единая точка, как в _voice_config
 
         def _work() -> None:
@@ -2111,13 +2111,12 @@ class TraceScreen(Screen):
             self._thinking.remove_class("hidden")
             self._thinking.set_state(state)
             return
-        _cfg = getattr(self.app, "_config", None) or {}
+        stream_display = self.app.base_settings().settings.tui.stream_display
         indicator = ThinkingIndicator(
             started_at=self._thinking_started_at,
             state=state,
             sink=getattr(self.app, "_stream_sink", None),
-            reasoning_tag=_cfg.get("tui_stream_display", "minimal")
-            != "answer_reasoning",
+            reasoning_tag=stream_display != "answer_reasoning",
             reasoning_clock=self._reasoning_clock,
         )
         self._thinking = indicator
@@ -2757,7 +2756,7 @@ class TraceScreen(Screen):
             # Когнитивное событие — эпизод раздумья не рвём (как session_think).
             # Канон spec 2026-07-31 §2 — строки собирает общий билдер
             # (он же у read-only канала), здесь только монтируем.
-            from gc_core.tools.subagents.progress import (
+            from gc_core.execution.progress import (
                 todo_items_from_arguments,
             )
 
@@ -3254,8 +3253,8 @@ class TraceScreen(Screen):
             return None
         from gc_tui.services.edits_view import diff_limits
 
-        cfg = getattr(self.app, "_config", None) or {}
-        launch_root = cfg.get("launch_root")
+        cfg = self.app.base_settings()
+        launch_root = cfg.runtime.launch_root
         launch_root = str(launch_root) if launch_root else None
         max_source_bytes, hunk_context_lines = diff_limits(cfg)
         key = (*identity, launch_root, max_source_bytes, hunk_context_lines)
@@ -3276,8 +3275,11 @@ class TraceScreen(Screen):
 
         Мусор (0, отрицательное, `true`) даёт дефолт, а не пустое тело с
         хвостом «… ещё N строк» — сломанный вид вместо диффа."""
-        cfg = getattr(self.app, "_config", None) or {}
-        return section_limit(cfg.get("agent_edits") or {}, key, default)
+        return section_limit(self._agent_edits_section(), key, default)
+
+    def _agent_edits_section(self) -> dict:
+        """Секция `agent_edits` базовых настроек окна — словарём для `section_limit`."""
+        return self.app.base_settings().settings.agent_edits.model_dump()
 
     def _trace_inline_max_lines(self) -> int:
         """Порог свёртки инлайн-диффа — `agent_edits.trace_inline_max_lines`."""
@@ -3291,8 +3293,7 @@ class TraceScreen(Screen):
         Ровно `0` — «без ограничения»: разворачиваются все ходы (вернём -1 как
         признак «окно не режем», см. `_is_stale_edit_turn`). Прочий мусор
         (отрицательное, `true`, строка) даёт дефолт — общим правилом."""
-        cfg = getattr(self.app, "_config", None) or {}
-        section = cfg.get("agent_edits") or {}
+        section = self._agent_edits_section()
         raw = section.get(
             "replay_expanded_turns", DEFAULT_REPLAY_EXPANDED_TURNS
         )
@@ -3304,8 +3305,7 @@ class TraceScreen(Screen):
 
     def _turn_summary_in_status(self) -> bool:
         """Показывать ли сводку правок в строке-итоге — `agent_edits.turn_summary_in_status`."""
-        cfg = getattr(self.app, "_config", None) or {}
-        section = cfg.get("agent_edits") or {}
+        section = self._agent_edits_section()
         return bool(
             section.get(
                 "turn_summary_in_status", DEFAULT_TURN_SUMMARY_IN_STATUS
@@ -4030,7 +4030,11 @@ class TraceScreen(Screen):
             and getattr(runner, "_last_target", None)
             == (self._active_task_id, self.app._system)
             and self._store is not None
-            and (self._store.get_task_meta(self._active_task_id).get("tui") or {}).get("status") == "running"
+            and (
+                self._store.get_task_meta(self._active_task_id).get("tui")
+                or {}
+            ).get("status")
+            == "running"
         )
         if (
             (self._was_running or _finished_before_poll)
@@ -4228,8 +4232,7 @@ class TraceScreen(Screen):
                 from gc_tui.widgets.stream_block import StreamBlock
 
                 think, answer = sink.snapshot()
-                _cfg = getattr(self.app, "_config", None) or {}
-                mode = _cfg.get("tui_stream_display", "minimal")
+                mode = self.app.base_settings().settings.tui.stream_display
                 clean = format_stream_block(answer=answer)
                 reasoning = format_reasoning_line(think=think)
                 kind, thinking = select_stream_render(mode, clean, reasoning)
@@ -4448,8 +4451,7 @@ class TraceScreen(Screen):
     def _has_mcp_servers(self) -> bool:
         """Заданы ли MCP-серверы в конфиге. При них mcp_status осядет только на
         MCP-settle — карточку досбираем тогда; без них — сразу на boot."""
-        cfg = getattr(self.app, "_config", None) or {}
-        return bool(cfg.get("mcp-servers"))
+        return bool(self.app.base_settings().settings.mcp.servers)
 
     def _compose_card_lines(self, mcp_line: Optional[str]) -> Text:
         """Итог-содержимое правой колонки карточки: до четырёх строк через пустую строку.
@@ -5825,7 +5827,7 @@ class TraceScreen(Screen):
         try:
             inp = self.query_one(_SEL_CMDINPUT, CommandTextArea)
             limit = read_images_config(
-                self.app.effective_config()
+                self.app.effective_settings()
             ).max_per_message
             outcome = await image_paste.astage_paste(
                 path,
@@ -5961,7 +5963,7 @@ class TraceScreen(Screen):
                 skill_is_available,
             )
 
-            reg = get_skills_registry(getattr(self.app, "_config", None) or {})
+            reg = get_skills_registry(self.app.base_settings())
             prefix.append(await build_skill_delivery(pending_skill, reg))
             patch["skills"] = [pending_skill]
             self._pending_skill_marker = (
@@ -6014,7 +6016,7 @@ class TraceScreen(Screen):
         self.app.reload_config_if_changed()  # свежесть глобала — только на пути Settings (дизайн 2026-07-21 §4)
         self.app.push_screen(
             SettingsScreen(
-                config=self.app.screen_config(),
+                settings=self.app.base_settings(),
                 config_path=getattr(self.app, "_config_path", None),
                 on_apply=self.app.reload_config,
             )
@@ -6033,7 +6035,7 @@ class TraceScreen(Screen):
             profile_path = str(ref.path)
         self.app.push_screen(
             ConfigScreen(
-                config=self.app.effective_config(),
+                settings=self.app.effective_settings(),
                 config_path=getattr(self.app, "_config_path", None),
                 project_local=getattr(self.app, "_config_project_local", None),
                 profile_source=profile_source,
@@ -6046,7 +6048,7 @@ class TraceScreen(Screen):
         from gc_tui.screens.file_view import FileViewerScreen
         from gc_tui.services.file_view import FileViewSettings
 
-        cfg = self.app.screen_config()
+        file_view = self.app.base_settings().settings.tui.file_view
         store = getattr(self.app, "view_positions", None)
         if store is None:
             from gc_tui.services.file_view import ViewPositionStore
@@ -6058,9 +6060,7 @@ class TraceScreen(Screen):
                 raw_path=arg or "",
                 cwd=self._current_cwd(),
                 store=store,
-                settings=FileViewSettings.from_mapping(
-                    cfg.get("tui_file_view")
-                ),
+                settings=FileViewSettings.from_mapping(file_view.model_dump()),
             )
         )
 
@@ -6069,7 +6069,7 @@ class TraceScreen(Screen):
 
         self.app.push_screen(
             McpScreen(
-                config=self.app.screen_config(),
+                settings=self.app.base_settings(),
                 tools_snapshot=self._mcp_screen_snapshot(),
             )
         )
@@ -6079,8 +6079,8 @@ class TraceScreen(Screen):
         from gc_tui.screens.diff import DiffScreen
         from gc_tui.services.edits_view import SOURCE_SESSION
 
-        cfg = self.app.screen_config()
-        launch_root = cfg.get("launch_root")
+        cfg = self.app.base_settings()
+        launch_root = cfg.runtime.launch_root
         if not launch_root:
             self._mount_trace_row(
                 prefix="· ",
@@ -6092,7 +6092,7 @@ class TraceScreen(Screen):
         self.app.push_screen(
             DiffScreen(
                 launch_root=str(launch_root),
-                config=cfg,
+                settings=cfg,
                 on_undo_feedback=self._on_diff_undo_feedback,
                 on_ui_ack=self._on_diff_ui_ack,
                 threads_dir=threads_dir,
@@ -6143,12 +6143,10 @@ class TraceScreen(Screen):
             projection_tags_from_config,
         )
 
-        effective = getattr(self.app, "effective_config", None)
-        if callable(effective):
-            cfg = effective() or {}
-        else:
-            cfg = getattr(self.app, "_config", None) or {}
-        return projection_tags_from_config(cfg), True
+        return (
+            projection_tags_from_config(self.app.effective_settings()),
+            True,
+        )
 
     def _append_technical_to_thread(self, msg: dict) -> None:
         tid = self._active_task_id or getattr(
@@ -6529,7 +6527,7 @@ class TraceScreen(Screen):
                 skill_is_available,
             )
 
-            reg = get_skills_registry(getattr(self.app, "_config", None) or {})
+            reg = get_skills_registry(self.app.base_settings())
             loaded = await skill_is_available(skill_id, reg)
             msg = {
                 "role": "user",
@@ -6723,8 +6721,8 @@ class TraceScreen(Screen):
             self._clear_bang_blocks(clear_meta.count)
             return
 
-        cfg = getattr(self.app, "_config", None) or {}
-        settings = BangShellSettings.from_mapping(cfg.get("tui_bang_shell"))
+        bang_shell = self.app.base_settings().settings.tui.bang_shell
+        settings = BangShellSettings.from_mapping(bang_shell.model_dump())
         self._bang_timeout_sec = settings.timeout_sec
 
         self._mount_bang_row(
@@ -6937,7 +6935,7 @@ class TraceScreen(Screen):
             self.app.push_screen(
                 SkillsScreen(
                     skills=await self._load_skills_safe(),
-                    config=self.app.screen_config(),
+                    settings=self.app.base_settings(),
                 )
             )
             return
@@ -7181,7 +7179,7 @@ class TraceScreen(Screen):
         try:
             from gc_core.tools.skills.registry import get_skills_registry
 
-            reg = get_skills_registry(getattr(self.app, "_config", None) or {})
+            reg = get_skills_registry(self.app.base_settings())
             # include_all=True — показываем и внутренние скиллы паков, не только bootstrap.
             return await reg.list_skills(include_all=True)
         except Exception as exc:
@@ -7299,7 +7297,7 @@ class TraceScreen(Screen):
 
         runner = self.app.active_runner
         ah = self.app.tui_state.ask_human_state
-        cfg = self.app.effective_config()
+        active_profile = self.app.effective_settings().runtime.active_profile
         router = self.app.display_router()
         # check_breaker=False: /status показывает модель честно даже при открытом
         # активном алиасе (спека §12.2); недоступность отражаем отдельным флагом.
@@ -7319,7 +7317,7 @@ class TraceScreen(Screen):
             ),
             "last_runner_error": getattr(self.app, "last_runner_error", None),
             "profile": {
-                "name": cfg.get("profile") or None,
+                "name": active_profile or None,
                 "source": _profile_source_label(ref),
                 "level": router.active_level(),
                 "model": resolved.alias or resolved.model,
@@ -7336,8 +7334,8 @@ class TraceScreen(Screen):
 
     def _cmd_compact(self) -> None:
         """/compact — принудительно сжать сессию (гарды: режим/простой/контент)."""
-        cfg = getattr(self.app, "_config", None) or {}
-        if str(cfg.get("backend_api_mode")) != "chat_completions":
+        settings = self.app.base_settings().settings
+        if str(settings.backend.api_mode) != "chat_completions":
             self._mount_trace_row(
                 prefix="· ",
                 content="/compact недоступен в режиме responses",

@@ -20,6 +20,8 @@ def test_authorization_candidates(raw, expected):
     assert authorization_attempts(raw) == expected
 
 
-@pytest.mark.parametrize("raw", [None, "", "key", "Bearer key", "Basic abc", "Custom abc"])
+@pytest.mark.parametrize(
+    "raw", [None, "", "key", "Bearer key", "Basic abc", "Custom abc"]
+)
 def test_model_header_preserves_configured_form(raw):
     assert model_authorization_header(raw) == raw

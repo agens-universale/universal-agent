@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import posixpath
 from typing import Any, Optional
 
 from gc_core.execution_workspace import (
@@ -45,5 +46,12 @@ def tool_report_abspath(
         if not path.startswith("/"):
             path = ws.backend.join(ws.root, path)
         return ws.backend.normpath(path)
+    if ws is not None and getattr(ws.backend, "workflow_paths", False):
+        # Код durable-workflow: ``os.path`` там запрещён (и cwd процесса не
+        # данные истории). Относительный путь — от корня рабочей области
+        # воркера: тулы исполняются в нём.
+        return posixpath.normpath(
+            path if path.startswith("/") else posixpath.join(ws.root, path)
+        )
 
     return os.path.abspath(path)

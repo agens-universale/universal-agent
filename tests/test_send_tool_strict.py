@@ -11,12 +11,15 @@ import tempfile
 from types import SimpleNamespace
 
 import pytest
-from gc_core.config import load_config
+from gc_core.config import load_settings
 from gc_core.config_modules.backend import BackendConfig
 from gc_core.tools import abuild_tools_data
-from gc_core.utils.connect_backend import create_call_data_responses
+from gc_core.utils.connect_backend import (
+    create_call_data_responses,
+)
+from gc_testkit.settings import make_settings
 
-_CONFIG = {"stop_tools": [], "openai_strict_tools_schema": False}
+_CONFIG = {"agent.stop_tools": [], "backend.openai_strict_tools_schema": False}
 
 
 def _specs(send_tool_strict: bool) -> list:
@@ -26,7 +29,9 @@ def _specs(send_tool_strict: bool) -> list:
     # поднимаем его здесь одним `asyncio.run`.
     async def _build():
         return await abuild_tools_data(
-            {**_CONFIG, "send_tool_strict": send_tool_strict}
+            make_settings(
+                {**_CONFIG, "backend.send_tool_strict": send_tool_strict}
+            )
         )
 
     _, specs, *_ = asyncio.run(_build())
@@ -47,13 +52,13 @@ def test_defaults_to_sending_strict():
     assert BackendConfig().send_tool_strict is True
 
 
-def test_load_config_projects_flat_key():
+def test_load_settings_reads_backend_key():
     with tempfile.TemporaryDirectory() as tmp_dir:
         cfg_path = os.path.join(tmp_dir, "config.yml")
         with open(cfg_path, "w", encoding="utf-8") as fd:
             fd.write("backend:\n  send_tool_strict: false\n")
-        cfg = load_config(cfg_path)
-        assert cfg["send_tool_strict"] is False
+        loaded = load_settings(cfg_path)
+        assert loaded.settings.backend.send_tool_strict is False
 
 
 def test_enabled_keeps_strict_in_specs(specs_on):
@@ -77,10 +82,12 @@ def test_disabled_keeps_strict_out_of_chat_completions_payload(specs_off):
     data = create_call_data_completions(
         [{"role": "user", "content": "hi"}],
         state,
-        config_dict={
-            "send_tool_strict": False,
-            "openai_strict_tools_schema": False,
-        },
+        settings=make_settings(
+            {
+                "backend.send_tool_strict": False,
+                "backend.openai_strict_tools_schema": False,
+            }
+        ),
     )
 
     assert data["tools"]
@@ -102,7 +109,7 @@ def test_disabled_keeps_strict_out_of_responses_payload(specs_off):
     call_data = create_call_data_responses(
         [{"role": "user", "content": "hi"}],
         state,
-        config_dict={"send_tool_strict": False},
+        settings=make_settings({"backend.send_tool_strict": False}),
     )
 
     assert [t["name"] for t in call_data["tools"] if "strict" in t] == []

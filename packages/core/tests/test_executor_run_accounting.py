@@ -9,6 +9,7 @@ from gc_core.usage.account import (
     CATEGORY_STRUCTURED_OUTPUT,
     UsageAccount,
 )
+from gc_testkit.settings import fake_ctx
 
 
 class _Logger:
@@ -55,12 +56,12 @@ def _state(*, usage, start, last_run, stop=False):
 
 def _executor(state, session):
     logger = _Logger()
-    ctx = SimpleNamespace(
-        config_dict={
-            "console_trace": True,
-            "logging_format": "text",
-            "model": "m",
-            "completions_url": "http://llm",
+    ctx = fake_ctx(
+        {
+            "logging.console_trace": True,
+            "logging.format": "text",
+            "agent.model": "m",
+            "backend.completions_url": "http://llm",
         },
         logger=logger,
     )

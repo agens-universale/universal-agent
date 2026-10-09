@@ -24,8 +24,11 @@ logging:
   save_logs: false
 
 agent_overrides:
+  # Ключи — пути настроек через точку (agent.max_steps), как в config.yml и в
+  # `gc-cli config explain`; можно и вложенной секцией (agent: {max_steps: 100}).
+  # Плоские имена (max_steps) не принимаются — сервер не стартует с подсказкой пути.
   # Builtin tools, запрещённые в серверном режиме (чтобы не портить файлы библиотеки).
-  stop_tools:
+  agent.stop_tools:
     # Отключаем тулы, которые могут повредить файлы библиотеки и работают с файловой системой веб приложения
     - fs_write_file
     - fs_append_file
@@ -43,9 +46,9 @@ agent_overrides:
     #- session_memory
     # - exec_calculator
     # Отключаем интерактив в консоли
-  verbose: false
-  use_server_subagents: true
-  max_steps: 100
+  agent.verbose: false
+  agent.use_server_subagents: true
+  agent.max_steps: 100
 
 threads_cleanup:
   # Периодическая чистка файлов истории тредов (meta_*.json / data_*.jsonl).

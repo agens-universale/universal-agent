@@ -35,7 +35,13 @@ import pathlib
 
 from gc_testkit.paths import REPO
 
-FRONTENDS = {"gc_cli", "gc_tui", "gc_server"}
+FRONTENDS = {
+    "gc_cli",
+    "gc_tui",
+    "gc_server",
+    "gc_core_temporalio",
+    "temporalio",
+}
 
 
 def _frontend_imports(path: pathlib.Path) -> list[str]:
@@ -50,11 +56,11 @@ def _frontend_imports(path: pathlib.Path) -> list[str]:
             isinstance(node, ast.ImportFrom)
             and node.level == 0
             and node.module
+            and node.module.split(".")[0] in FRONTENDS
         ):
-            if node.module.split(".")[0] in FRONTENDS:
-                found.append(
-                    f"{path}:{node.lineno}: from {node.module} import ..."
-                )
+            found.append(
+                f"{path}:{node.lineno}: from {node.module} import ..."
+            )
     return found
 
 

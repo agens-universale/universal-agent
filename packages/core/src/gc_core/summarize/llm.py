@@ -80,7 +80,7 @@ async def arequest_auxiliary_completion_text(
             messages=messages,
             output_text=raw,
         )
-    tags = projection_tags_from_config(getattr(ctx, "config_dict", None))
+    tags = projection_tags_from_config(ctx)
     return project_text_for_model(raw, tags=tags, strip_think=True)
 
 

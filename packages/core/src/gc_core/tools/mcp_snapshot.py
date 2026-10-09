@@ -2,14 +2,16 @@
 
 from typing import Any, Dict
 
+from gc_core.settings import settings_of
+
 
 def build_mcp_tools_snapshot(
-    config_dict: Dict[str, Any],
+    settings: Any,
     tools_data: Dict[str, Dict[str, Any]],
     mcp_status: Dict[str, Dict[str, Any]] | None = None,
 ) -> Dict[str, Dict[str, Any]]:
     """server_name → {status, reason, description, tools:[{name,description}]}."""
-    servers = config_dict.get("mcp-servers") or {}
+    servers = settings_of(settings).mcp.servers
     status_map = mcp_status or {}
     snapshot: Dict[str, Dict[str, Any]] = {}
     for server_name, scfg in servers.items():
@@ -26,7 +28,7 @@ def build_mcp_tools_snapshot(
         snapshot[server_name] = {
             "status": st.get("status", "unknown"),
             "reason": st.get("reason"),
-            "description": str((scfg or {}).get("description") or ""),
+            "description": str(scfg.description or ""),
             "tools": tools,
         }
     return snapshot

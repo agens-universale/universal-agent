@@ -2,7 +2,7 @@
 раздел «Профили и уровни моделей».
 
 Профиль — YAML-файл в одном из двух корней (проектный/`рядом с базой`), мержится
-поверх проектного конфига под CLI-оверрайдами (см. `config.py::load_config_ex`).
+поверх проектного конфига под CLI-оверрайдами (см. `config.py::load_settings`).
 Этот модуль — только механика поиска/чтения/пофайловой валидации одного профиля;
 оркестрация мержа и итоговая (фаза 2) ссылочная целостность — в `config.py` /
 `config_modules/model_sections_validation.py` соответственно.
@@ -18,7 +18,11 @@ import yaml
 from pydantic import ValidationError
 
 from gc_core.config_modules.compat import apply_compat, manual_edit_fact
-from gc_core.config_modules.env_interpolation import resolve_env_placeholders
+from gc_core.config_modules.env_interpolation import (
+    resolve_env_placeholders,
+    tag_layer,
+)
+from gc_core.config_modules.migrations import migrate_document
 from gc_core.config_modules.model_registry import (
     RESERVED_WORDS,
     validate_registry_pairs,
@@ -28,13 +32,14 @@ from gc_core.config_modules.root import (
     AppConfig,
     schema_error_details,
 )
+from gc_core.config_modules.unknown_keys import drop_unknown_keys
 from gc_core.utils.user_text import unreadable_reason
 
 # Бланк нового файла профиля (`onboarding_config_writer.create_profile_file`):
 # ТОЛЬКО шапка-инструкция, без якорей секций (ревизия владельца по смоку:
 # `models: {}` / `slots: {}` заставляли свежий профиль «переопределять» секции,
 # которых он не трогал, — витрина честно перечисляла ключи файла и путала).
-# Секции допишет writer при первом реальном действии (`ensure_section_anchor`
+# Секции допишет writer при первом реальном действии (`ensure_section_anchor_text`
 # синтезирует якорь сам). Именно бланк, а не учебный пример с готовой записью:
 # пример нёс бы литеральный токен и висячие ссылки слотов на алиас, которого у
 # пользователя нет.
@@ -54,7 +59,7 @@ class ProfileRef:
 
 @dataclass
 class ProfileMeta:
-    """Метаданные резолва профиля для одного вызова `load_config_ex` (спека §3.3)."""
+    """Метаданные резолва профиля для одного вызова `load_settings` (спека §3.3)."""
 
     active_name: Optional[str]
     ref: Optional[ProfileRef]
@@ -225,7 +230,9 @@ def _validate_profile_document(
     сообщение без привязки к пути, как `config.validate_config_text`)."""
     prefix = f"{source}: " if source else ""
     try:
-        AppConfig.model_validate(raw)
+        # Лишние ключи профиля отбросит общая загрузка (с уведомлением и
+        # файлом); здесь они документ не отвергают.
+        AppConfig.model_validate(drop_unknown_keys(raw, AppConfig)[0])
     except ValidationError as exc:
         # Не сырой `str(exc)`: pydantic-дамп несёт `input_value=<repr записи>` —
         # токен НЕАКТИВНОГО профиля уезжал в нотис секции «Модели» этим, вторым
@@ -244,12 +251,21 @@ def load_profile_document(
     *,
     warn_literal_tokens: bool = False,
     notices: Optional[list[str]] = None,
+    unresolved: Optional[list] = None,
+    layer: str = "profile",
 ) -> dict:
     """Прочитать + провалидировать документ одного профиля (спека §3.4):
 
     YAML → (опционально) warning на литеральные токены → per-file env-интерполяция →
-    compat-слой → частичная валидация `AppConfig` (фаза 1, ссылочная целостность не
-    проверяется) → запрет ключа `profile:` внутри (анти-рекурсия, спека §3.2).
+    миграция формата (`config_version`) → compat-слой → частичная валидация
+    `AppConfig` (фаза 1, ссылочная целостность не проверяется) → запрет ключа
+    `profile:` внутри (анти-рекурсия, спека §3.2).
+
+    `unresolved` — строгий режим `${ENV:…}`/`${FILE:…}` (`config.load_settings`):
+    неразрешённые ссылки копятся туда с путём файла и слоем `layer`, а проверки
+    пары и схемы для такого документа пропускаются — загрузчик всё равно
+    откажет списком незаданных переменных, и вердикт по подставленным пустым
+    строкам был бы следствием, а не причиной.
     """
     raw = _read_yaml_document(path)
     if warn_literal_tokens and notices is not None:
@@ -258,8 +274,16 @@ def load_profile_document(
                 f"{path}: models.{alias}.token — литеральный токен в проектном профиле; "
                 f"используйте ${{ENV:VAR}} или наследование из базового конфига"
             )
-    raw = resolve_env_placeholders(raw)
-    # Compat ДО схемы — как `load_config_ex` делает для базы. Схема с
+    start = len(unresolved) if unresolved is not None else 0
+    raw = resolve_env_placeholders(
+        raw, unresolved=unresolved, source=str(path)
+    )
+    if unresolved is not None:
+        tag_layer(unresolved, start, layer=layer)
+    raw, migration_facts = migrate_document(raw, source=str(path))
+    if notices is not None:
+        notices.extend(migration_facts)
+    # Compat ДО схемы — как `load_settings` делает для базы. Схема с
     # extra="forbid" иначе роняет ВЕСЬ профиль на устаревшем ключе, который в
     # config.yml тихо выбрасывается с нотисом; а в профиль такой ключ попадает
     # ровно копипастой секции из старого config.yml. Факты — в тот же канал
@@ -267,6 +291,8 @@ def load_profile_document(
     for fact in apply_compat(raw):
         if notices is not None:
             notices.append(f"{path}: {manual_edit_fact(fact)}")
+    if unresolved is not None and len(unresolved) > start:
+        return raw
     # Пары «адрес+токен» — по СЫРОМУ документу и ДО схемы: слои сливаются позже,
     # и половина пары, наложенная на чужую полную, даёт корректный на вид итог,
     # пока токен базы уходит на адрес этого файла. Здесь же видно, чей это файл.
@@ -293,7 +319,7 @@ def validate_profile_text(text: str) -> None:
         raise ValueError(f"невалидный YAML: {exc}") from exc
     if not isinstance(raw, dict):
         raise ValueError("профиль должен быть YAML-документом (словарём)")
-    raw = resolve_env_placeholders(raw)
+    raw, _facts = migrate_document(resolve_env_placeholders(raw))
     apply_compat(raw)
     _validate_profile_document(raw)
 

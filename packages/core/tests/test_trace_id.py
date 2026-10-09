@@ -6,6 +6,7 @@ from gc_core.trace_id import (
     trace_id_from_config,
     trace_id_slug,
 )
+from gc_testkit.settings import make_settings
 
 
 class TestNormalizeTraceId:
@@ -55,31 +56,39 @@ class TestTraceIdSlug:
 
 class TestTraceIdFromConfig:
     def test_missing_key_is_empty(self):
-        assert trace_id_from_config({}) == ""
+        assert trace_id_from_config(make_settings({})) == ""
         assert trace_id_from_config(None) == ""
 
     def test_empty_string_is_empty(self):
-        assert trace_id_from_config({"trace_id": ""}) == ""
-        assert trace_id_from_config({"trace_id": "  "}) == ""
+        assert trace_id_from_config(make_settings({"trace_id": ""})) == ""
+        assert trace_id_from_config(make_settings({"trace_id": "  "})) == ""
 
     def test_reads_value(self):
-        assert trace_id_from_config({"trace_id": " abc "}) == "abc"
+        assert (
+            trace_id_from_config(make_settings({"trace_id": " abc "})) == "abc"
+        )
 
 
 class TestTraceHeaderName:
     def test_default_when_absent(self):
-        assert trace_header_name({}, "x_trace_id") == "x_trace_id"
         assert (
-            trace_header_name({"trace_id_header_name": None}, "trace_id")
+            trace_header_name(make_settings({}), "x_trace_id") == "x_trace_id"
+        )
+        assert (
+            trace_header_name(
+                make_settings({"agent.trace_id_header_name": None}), "trace_id"
+            )
             == "trace_id"
         )
         assert (
-            trace_header_name({"trace_id_header_name": "  "}, "trace_id")
+            trace_header_name(
+                make_settings({"agent.trace_id_header_name": "  "}), "trace_id"
+            )
             == "trace_id"
         )
 
     def test_override(self):
-        cfg = {"trace_id_header_name": "X-Trace-Id"}
+        cfg = make_settings({"agent.trace_id_header_name": "X-Trace-Id"})
         assert trace_header_name(cfg, "x_trace_id") == "X-Trace-Id"
         assert trace_header_name(cfg, "trace_id") == "X-Trace-Id"
 

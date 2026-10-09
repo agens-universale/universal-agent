@@ -12,13 +12,17 @@ import time
 from pathlib import Path
 
 import pytest
-from rich.text import Text
-
 from gc_core.agent_edits.deltas import FileEntry
 from gc_core.agent_edits.journal import EditRecord, EditsJournal
 from gc_core.agent_edits.ladder import STEP_HEAD
 from gc_core.agent_edits.snapshots import SnapshotStore, snapshots_root
 from gc_core.thread_store import edits_journal_path
+from gc_testkit.tui_support import (
+    as_settings,
+    span_style,
+    tui_settings,
+    wait_until,
+)
 from gc_tui.palette import ERR, OK
 from gc_tui.screens.diff import (
     ACCEPTED_CAPTION_STEM,
@@ -36,12 +40,11 @@ from gc_tui.screens.diff import (
     edit_counter,
     head_caption,
     inexact_note,
-    paint_counters,
     split_body,
     viewer_footer,
 )
 from gc_tui.services.edits_view import SOURCE_SESSION, SOURCE_TURN, EditsView
-from gc_testkit.tui_support import span_style, wait_until
+from rich.text import Text
 
 pytest.importorskip("textual")
 
@@ -118,7 +121,11 @@ class _Workspace:
 
     @property
     def config(self) -> dict:
-        return {"launch_root": str(self.root), "model": "M", "agent_edits": {}}
+        return {
+            "launch_root": str(self.root),
+            "agent.model": "M",
+            "agent_edits": {},
+        }
 
     def write(self, rel: str, text: str) -> None:
         path = self.root / rel
@@ -147,13 +154,17 @@ class _Workspace:
 
     def edits(self) -> EditsView:
         return EditsView(
-            str(self.threads_dir), "cli", "th1", str(self.root), self.config
+            str(self.threads_dir),
+            "cli",
+            "th1",
+            str(self.root),
+            as_settings(self.config),
         )
 
     def screen(self, **kwargs) -> DiffScreen:
         return DiffScreen(
             launch_root=str(self.root),
-            config=self.config,
+            settings=as_settings(self.config),
             threads_dir=str(self.threads_dir),
             system_id="cli",
             thread_id="th1",
@@ -590,7 +601,9 @@ async def test_enter_opens_viewer_with_cumulative_diff(tmp_path):
     )
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = ws.screen()
         await pilot.app.push_screen(scr)
@@ -629,7 +642,9 @@ async def test_viewer_header_names_the_accepted_step_only_for_the_accepted_file(
     ts = ws.store.accepted_state("accepted.py").ts
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = ws.screen()
         await pilot.app.push_screen(scr)
@@ -691,7 +706,7 @@ async def test_viewer_header_names_the_head_step_only_for_the_head_file(
     ws.journal.append(_rec("head.py", ts=1.0))
 
     view = EditsView(
-        str(ws.threads_dir), "cli", "th1", str(ws.root), ws.config
+        str(ws.threads_dir), "cli", "th1", str(ws.root), as_settings(ws.config)
     )
     view.accept(["head.py"])  # принято состояние "v2\n"
     ws.write("head.py", "v3\n")
@@ -717,7 +732,9 @@ async def test_viewer_header_names_the_head_step_only_for_the_head_file(
     )  # свежее — активных первым
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = ws.screen()
         await pilot.app.push_screen(scr)
@@ -750,7 +767,9 @@ async def test_viewer_header_counters_are_painted(tmp_path):
     ws.journal.append(_rec("a.py", ts=1.0))
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         viewer = ws.viewer()
         await pilot.app.push_screen(viewer)
@@ -774,7 +793,9 @@ async def test_body_frame_reserves_place_and_does_not_cut_the_body(tmp_path):
     _two_hunk_file(ws)
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test(size=(80, 24)) as pilot:
         viewer = ws.viewer()
         await pilot.app.push_screen(viewer)
@@ -805,7 +826,9 @@ async def test_body_is_split_into_blocks_with_rich_text(tmp_path):
     _two_hunk_file(ws)
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         viewer = ws.viewer()
         await pilot.app.push_screen(viewer)
@@ -829,7 +852,9 @@ async def test_line_numbers_present(tmp_path):
     _two_hunk_file(ws)
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         viewer = ws.viewer()
         await pilot.app.push_screen(viewer)
@@ -861,7 +886,9 @@ async def test_n_p_move_the_cursor_in_a_circle(tmp_path):
     _two_hunk_file(ws)
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test(size=(80, 10)) as pilot:
         viewer = ws.viewer()
         await pilot.app.push_screen(viewer)
@@ -889,7 +916,9 @@ async def test_cursor_marks_the_edit_even_when_everything_fits(tmp_path):
     _two_hunk_file(ws)
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test(size=(80, 40)) as pilot:
         viewer = ws.viewer()
         await pilot.app.push_screen(viewer)
@@ -918,7 +947,9 @@ async def test_cursor_is_an_accent_edge_and_diff_colours_are_untouched(
     _two_hunk_file(ws)
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test(size=(80, 40)) as pilot:
         viewer = ws.viewer()
         await pilot.app.push_screen(viewer)
@@ -944,7 +975,9 @@ async def test_full_file_mode_still_walks_edits(tmp_path):
     _two_hunk_file(ws)
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test(size=(80, 10)) as pilot:
         viewer = ws.viewer()
         await pilot.app.push_screen(viewer)
@@ -972,7 +1005,9 @@ async def test_cursor_survives_the_full_file_toggle(tmp_path):
     _two_hunk_file(ws)
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test(size=(80, 20)) as pilot:
         viewer = ws.viewer()
         await pilot.app.push_screen(viewer)
@@ -1002,7 +1037,9 @@ async def test_switching_files_recounts_the_edits_in_the_header(tmp_path):
     ws.journal.append(_rec("one.py", ts=2.0))
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test(size=(80, 24)) as pilot:
         viewer = ws.viewer()
         await pilot.app.push_screen(viewer)
@@ -1043,7 +1080,9 @@ async def test_cursor_walks_journal_edits_when_there_is_no_exact_baseline(
         )
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test(size=(80, 24)) as pilot:
         viewer = ws.viewer()
         await pilot.app.push_screen(viewer)
@@ -1071,7 +1110,9 @@ async def test_single_edit_file_says_one_of_one_and_drops_np(tmp_path):
     ws.journal.append(_rec("a.py", ts=1.0))
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test(size=(80, 24)) as pilot:
         viewer = ws.viewer()
         await pilot.app.push_screen(viewer)
@@ -1094,7 +1135,9 @@ async def test_cursor_scrolls_the_frame_only_when_the_edit_is_out_of_it(
     _two_hunk_file(ws)
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test(size=(80, 10)) as pilot:
         viewer = ws.viewer()
         await pilot.app.push_screen(viewer)
@@ -1125,7 +1168,9 @@ async def test_left_right_switch_files_without_pushing_screen(tmp_path):
     ws.journal.append(_rec("b.py", ts=2.0, op="create", add=1, del_=0))
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         viewer = ws.viewer()
         await pilot.app.push_screen(viewer)
@@ -1162,7 +1207,9 @@ async def test_next_file_starts_from_the_top(tmp_path):
     ws.journal.append(_rec("two.py", ts=1.0))
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test(size=(70, 20)) as pilot:
         viewer = ws.viewer()
         await pilot.app.push_screen(viewer)
@@ -1191,7 +1238,9 @@ async def test_viewer_index_returns_to_list_cursor(tmp_path):
         )
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = ws.screen()
         await pilot.app.push_screen(scr)
@@ -1216,7 +1265,9 @@ async def test_f_toggles_full_file_in_place(tmp_path):
     _two_hunk_file(ws)
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         viewer = ws.viewer()
         await pilot.app.push_screen(viewer)
@@ -1276,7 +1327,9 @@ async def test_inexact_source_shows_note_and_journal_edits(tmp_path):
     )
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         viewer = ws.viewer()
         await pilot.app.push_screen(viewer)
@@ -1321,7 +1374,9 @@ async def test_inexact_note_drops_commands_when_a_tool_edit_is_there(tmp_path):
     )
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         viewer = ws.viewer()
         await pilot.app.push_screen(viewer)
@@ -1348,7 +1403,9 @@ async def test_viewer_reads_turn_source(tmp_path):
     ws.journal.append(_rec("new.py", turn="t2", ts=2.0))
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         viewer = ws.viewer(SOURCE_TURN)
         await pilot.app.push_screen(viewer)
@@ -1381,7 +1438,9 @@ async def test_f_is_dead_without_exact_baseline(tmp_path):
     )
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         viewer = ws.viewer()
         await pilot.app.push_screen(viewer)
@@ -1413,7 +1472,9 @@ async def test_viewer_hides_r_for_a_file_without_a_reliable_base(tmp_path):
     ws.journal.append(_rec("rev.py", ts=1.0))
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = ws.screen()
         await pilot.app.push_screen(scr)
@@ -1459,7 +1520,9 @@ async def test_uncountable_file_says_preview_is_unavailable(tmp_path):
     ws.journal.append(_rec("logo.png", op="binary", ts=1.0, add=0, del_=0))
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         viewer = ws.viewer()
         await pilot.app.push_screen(viewer)
@@ -1482,7 +1545,9 @@ async def test_clipboard_source_cite_is_diff_path(tmp_path):
     ws.journal.append(_rec("b.py", ts=2.0, op="create", add=1, del_=0))
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         viewer = ws.viewer()
         await pilot.app.push_screen(viewer)
@@ -1502,7 +1567,9 @@ async def test_resize_rebuilds_body_only_on_width_change(tmp_path):
     _two_hunk_file(ws)
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test(size=(80, 24)) as pilot:
         viewer = ws.viewer()
         await pilot.app.push_screen(viewer)
@@ -1539,7 +1606,9 @@ async def test_body_is_cached_per_file_mode_and_width(tmp_path):
     _two_hunk_file(ws)
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test(size=(80, 24)) as pilot:
         viewer = ws.viewer()
         await pilot.app.push_screen(viewer)
@@ -1589,7 +1658,9 @@ async def test_filled_lines_reach_right_edge_minus_scrollbar(tmp_path):
         }
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test(size=(70, 20)) as pilot:
         viewer = ws.viewer()
         await pilot.app.push_screen(viewer)
@@ -1618,7 +1689,9 @@ async def test_long_body_line_is_cropped_not_wrapped(tmp_path):
     ws.journal.append(_rec("a.py", ts=1.0, add=1, del_=0))
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test(size=(60, 24)) as pilot:
         viewer = ws.viewer()
         await pilot.app.push_screen(viewer)
@@ -1644,7 +1717,9 @@ async def test_long_line_is_reachable_by_horizontal_scrolling(tmp_path):
     ws.journal.append(_rec("a.py", ts=1.0, add=1, del_=0))
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test(size=(60, 24)) as pilot:
         viewer = ws.viewer()
         await pilot.app.push_screen(viewer)
@@ -1678,7 +1753,9 @@ async def test_double_click_row_opens_viewer(tmp_path):
         )
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = ws.screen()
         await pilot.app.push_screen(scr)
@@ -1737,7 +1814,9 @@ async def test_body_is_built_by_the_frame_not_all_at_once(tmp_path):
     _rewritten(ws)
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test(size=(90, 20)) as pilot:
         viewer = ws.viewer()
         await pilot.app.push_screen(viewer)
@@ -1777,7 +1856,9 @@ async def test_cursor_reaches_an_edit_that_was_not_built_yet(tmp_path):
     ws.journal.append(_rec("big.py", add=2, del_=2))
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test(size=(90, 20)) as pilot:
         viewer = ws.viewer()
         await pilot.app.push_screen(viewer)
@@ -1802,10 +1883,9 @@ async def test_selection_crosses_the_border_between_parts(tmp_path):
     Тело разрезано на участки ради раскладки, а не ради пользователя: выделение
     обязано этого не замечать.
     """
-    from textual.events import MouseDown, MouseMove, MouseUp
-
     from gc_tui.app import TuiApp
     from gc_tui.screens.diff import CONTEXT_CHUNK
+    from textual.events import MouseDown, MouseMove, MouseUp
 
     ws = _Workspace(tmp_path)
     _rewritten(ws)
@@ -1826,7 +1906,9 @@ async def test_selection_crosses_the_border_between_parts(tmp_path):
         )
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test(size=(100, 30)) as pilot:
         viewer = ws.viewer()
         await pilot.app.push_screen(viewer)

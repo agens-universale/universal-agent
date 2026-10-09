@@ -172,3 +172,11 @@ def test_demo_profile_yaml_has_no_stray_top_level_keys():
     yaml.safe_load напрямую (без env-интерполяции), сверка с ожидаемым составом."""
     raw = yaml.safe_load(DEMO_PROFILE_PATH.read_text(encoding="utf-8"))
     assert set(raw) == {"models", "slots", "assign", "security", "summary"}
+
+
+def test_demo_profile_loads_without_provider_keys(monkeypatch):
+    """Демо-профиль грузится и без ключей провайдера в окружении (пустой
+    токен), а не падает строгой подстановкой ``${ENV:…}``."""
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    load_profile_document(DEMO_PROFILE_PATH)

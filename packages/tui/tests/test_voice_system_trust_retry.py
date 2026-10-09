@@ -35,9 +35,9 @@ class _Recorder:
 
 @pytest.fixture
 def clean_trust():
-    net.reset_for_tests()
+    net._injected = False  # однократная инъекция траста — заново
     yield
-    net.reset_for_tests()
+    net._injected = False  # однократная инъекция траста — заново
 
 
 def test_retry_after_injection_asks_for_a_fresh_client(

@@ -17,7 +17,7 @@ from gc_core.tools.simple_tool_base import AbstractSimpleTool
 
 
 def _todo_statuses():
-    # Deferred to avoid circular import: persistence.__init__ → state_serializer → states → tools
+    # Deferred to avoid circular import: persistence → states → tools
     from gc_core.persistence.schema import TODO_STATUSES
 
     return TODO_STATUSES
@@ -40,12 +40,16 @@ def _counts(items: List[Dict[str, str]]) -> Dict[str, int]:
 
 @loop_warn_on_repeat(**GENERIC_PROFILE)
 class SessionTodo(AbstractSimpleTool):
+    # Меняет состояние сессии (память, todo, кэш fetch): получает частный
+    # срез состояния и возвращает изменения (tools.aapply_tool_result).
+    owns_session_state = True
+    # Тело исполняется в ядре (оркестрация или чистое состояние), не на
+    # воркере (execution.tool_effects.uses_leaf_effect).
+    effect_in_core = True
     tool_name = SESSION_TODO_TOOL_NAME
 
     @classmethod
-    def tool_description(
-        cls, config_dict: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
+    def tool_description(cls, settings: Any = None) -> Dict[str, Any]:
         return {
             "type": "function",
             "name": SESSION_TODO_TOOL_NAME,
@@ -99,9 +103,7 @@ class SessionTodo(AbstractSimpleTool):
         }
 
     @classmethod
-    def prompt_description(
-        cls, config_dict: Optional[Dict[str, Any]] = None
-    ) -> str:
+    def prompt_description(cls, settings: Any = None) -> str:
         return """Tool name: session_todo
 Tool description: Structured checklist of the CURRENT task (plan + progress). Each call fully replaces the list; empty list clears it. Statuses: pending | in_progress | completed.
 

@@ -11,14 +11,14 @@ import json
 import os
 from types import SimpleNamespace
 
-from PIL import Image
-
 from gc_core.model_router import ResolvedModel
 from gc_core.run_context import acreate_run_context
 from gc_core.tools.fs.view_image import ViewImage
 from gc_core.tools.subagents.runner import SubagentRunner
 from gc_core.tools.subagents.sidecar import bind_thread_identity
 from gc_core.vision.audience import Audience
+from gc_testkit.settings import make_settings
+from PIL import Image
 from vision_fakes import warm_routes
 
 SEEING = Audience(
@@ -47,21 +47,22 @@ async def test_child_view_image_snapshot_lands_in_the_parent_store(tmp_path):
     proj.mkdir()
     threads = tmp_path / "threads"
     config = {
-        "logs_dump_dir": str(tmp_path / "logs"),
-        "console_trace": False,
-        "backend_api_mode": "chat_completions",
-        "completions_url": "http://localhost:1/v1/chat/completions",
-        "model": "test-model",
-        "backend_request_timeout_sec": 600,
+        "paths.logs_dump_dir": str(tmp_path / "logs"),
+        "logging.console_trace": False,
+        "backend.api_mode": "chat_completions",
+        "backend.completions_url": "http://localhost:1/v1/chat/completions",
+        "agent.model": "test-model",
+        "backend.request_timeout_sec": 600,
         "launch_root": str(proj),
-        "threads_data_path": str(threads),
-        "use_local_subagents": True,
+        "paths.threads_data_path": str(threads),
+        "agent.use_local_subagents": True,
     }
+    config = make_settings(config)
     parent = await acreate_run_context(config)
     bind_thread_identity(
         parent, threads_dir=str(threads), system_id="cli", thread_id="t1"
     )
-    # _build_child_ctx читает только self._ctx и self._config — state здесь заглушка.
+    # _build_child_ctx читает только self._ctx и настройки — state здесь заглушка.
     child = await SubagentRunner(
         parent, SimpleNamespace(), config
     )._build_child_ctx("subagent_coder")
@@ -80,9 +81,7 @@ async def test_child_view_image_snapshot_lands_in_the_parent_store(tmp_path):
     state.x_target = None
     warm_routes(child)
     out = json.loads(
-        await ViewImage(
-            ctx=child, state=state, config_dict=child.config_dict
-        ).acall(path=str(src))
+        await ViewImage(ctx=child, state=state).acall(path=str(src))
     )
 
     assert out["attached"] is True

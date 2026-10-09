@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-from gc_core.tools.subagents.progress import (
+from gc_core.execution.progress import (
     QueueSubagentProgressSink,
     child_progress_enabled,
 )
@@ -21,7 +21,6 @@ def _child_ctx(sink, *, tool_name="subagent_worker"):
         subagent_progress_sink=sink,
         subagent_tool_name=tool_name,
         is_tui=True,
-        config_dict={},
         logger=None,
     )
 
@@ -49,16 +48,14 @@ class TestChildCtxCopiesTuiConfirm:
         state.backend_api_mode = "chat_completions"
 
         cfg = {
-            "save_logs": True,
-            "logs_dump_dir": str(tmp_path),
-            "use_local_subagents": True,
-            "backend_api_mode": "chat_completions",
-            "enabled_tools": [],
-            "skills_data_path": "",
-            "mcp_servers": [],
-            "model": "m",
-            "system_prompt_id": "p",
-            "chat_completions_params": {
+            "logging.save_logs": True,
+            "paths.logs_dump_dir": str(tmp_path),
+            "agent.use_local_subagents": True,
+            "backend.api_mode": "chat_completions",
+            "paths.skills_data_path": "",
+            "agent.model": "m",
+            "agent.system_prompt_id": "p",
+            "chat_completions": {
                 "auxiliary_llm": {"max_tokens": 128, "completion_kwargs": {}},
             },
         }
@@ -122,7 +119,6 @@ class TestAskHumanEmit:
             run_id="main",
             subagent_progress_sink=sink,
             is_tui=True,
-            config_dict={},
             logger=None,
         )
         assert not child_progress_enabled(ctx)

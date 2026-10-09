@@ -66,6 +66,9 @@ class _FakeSession:
     def close(self) -> None:
         self.closed = True
 
+    async def aclose(self) -> None:
+        self.closed = True
+
 
 @pytest.fixture()
 def stdio_registry(monkeypatch):
@@ -93,7 +96,8 @@ def test_stdio_same_owner_reuses(stdio_registry):
     assert first is second, "владелец обязан переиспользовать свою сессию"
 
 
-def test_stdio_close_all_spares_other_owners(stdio_registry):
+@pytest.mark.asyncio
+async def test_stdio_aclose_all_spares_other_owners(stdio_registry):
     """Ядро бага: teardown одного прогона не смеет трогать чужое."""
     with use_owner("agent-1"):
         mine = stdio_registry.get_or_create("browser", {})
@@ -101,7 +105,7 @@ def test_stdio_close_all_spares_other_owners(stdio_registry):
         theirs = stdio_registry.get_or_create("browser", {})
 
     with use_owner("agent-1"):
-        stdio_registry.close_all()
+        await stdio_registry.aclose_all()
 
     assert mine.closed is True
     assert theirs.closed is False, "закрыли сессию работающего соседа"

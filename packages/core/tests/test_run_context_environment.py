@@ -1,5 +1,6 @@
 from gc_core.backends.local import LocalFsBackend
 from gc_core.run_context import RunContext, acreate_run_context
+from gc_testkit.settings import make_settings
 
 
 def test_runcontext_has_environment_and_os_backend_fields():
@@ -15,7 +16,9 @@ async def test_create_run_context_accepts_environment_and_builds_backend(
 ):
     monkeypatch.chdir(tmp_path)
     sentinel_env = object()
-    cfg = {"backend_api_mode": "chat_completions", "save_logs": False}
+    cfg = make_settings(
+        {"backend.api_mode": "chat_completions", "logging.save_logs": False}
+    )
     ctx = await acreate_run_context(cfg, environment=sentinel_env)
     assert ctx.environment is sentinel_env
     # режим с записью правок не объявлен — Local без обёртки трекера

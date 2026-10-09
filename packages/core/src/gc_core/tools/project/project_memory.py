@@ -12,10 +12,9 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from gc_core.config_modules.env_vars import gc_paths, project_slug
-from gc_core.config_modules.project_memory import (
-    project_memory_limits_from_config_dict,
-)
+from gc_core.config_modules.project_memory import ProjectMemoryConfig
 from gc_core.constants.tool_names import PROJECT_MEMORY_TOOL_NAME
+from gc_core.execution.ports import port as runtime_port
 from gc_core.loop_detector.constants import (
     GENERIC_PROFILE,
     loop_warn_on_repeat,
@@ -24,8 +23,13 @@ from gc_core.message_policy.project_memory_notice.policy import (
     touch_project_memory_baseline,
 )
 from gc_core.project_memory import compaction, storage
+from gc_core.project_memory.operations import (
+    ProjectMemoryReply,
+    ProjectMemoryRequest,
+)
 from gc_core.project_memory.status import fill_percent
 from gc_core.project_memory.storage import ProjectMemoryError
+from gc_core.settings import settings_of
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 
 _BACKUP_FILE_NAME = "GIGACODE_memory_backup.md"
@@ -55,6 +59,9 @@ _HIGH_FILL_HINT = (
 
 @loop_warn_on_repeat(**GENERIC_PROFILE)
 class ProjectMemory(AbstractSimpleTool):
+    # Тело исполняется в ядре (оркестрация или чистое состояние), не на
+    # воркере (execution.tool_effects.uses_leaf_effect).
+    effect_in_core = True
     tool_name = PROJECT_MEMORY_TOOL_NAME
 
     def __init__(
@@ -69,21 +76,25 @@ class ProjectMemory(AbstractSimpleTool):
         )
         # Backup path: mirrors primary outside the project tree so it survives rm -rf .gc.
         # cwd is the parent of .gc (project root).
-        if gc_dir is not None:
+        if (
+            gc_dir is not None
+            and getattr(ctx, "project_memory_io", None) is None
+        ):
             cwd = str(Path(gc_dir).parent)
             self._backup: Optional[Path] = backup_path(cwd=cwd)
         else:
             self._backup = None
-        limits = project_memory_limits_from_config_dict(
-            getattr(ctx, "config_dict", None) if ctx is not None else None
+        limits = (
+            settings_of(ctx).project_memory
+            if ctx is not None
+            else ProjectMemoryConfig()
         )
-        self._max_chars = limits["max_chars"]
-        self._max_append_chars = limits["max_append_chars"]
+        self._max_chars = limits.max_chars
+        self._max_append_chars = limits.max_append_chars
+        self._baseline_updated = False
 
     @classmethod
-    def tool_description(
-        cls, config_dict: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
+    def tool_description(cls, settings: Any = None) -> Dict[str, Any]:
         return {
             "type": "function",
             "name": "project_memory",
@@ -124,9 +135,7 @@ class ProjectMemory(AbstractSimpleTool):
         }
 
     @classmethod
-    def prompt_description(
-        cls, config_dict: Optional[Dict[str, Any]] = None
-    ) -> str:
+    def prompt_description(cls, settings: Any = None) -> str:
         return """Tool name: project_memory
 Tool description: Persistent project-scoped markdown memory. Survives CLI restarts.
 Use read when Project Info reports long memory and conventions or durable facts may matter.
@@ -232,19 +241,72 @@ Return format (JSON string):
     async def acall(
         self, action: str, content: str = "", **kwargs: Any
     ) -> str:
-        """Инлайн на loop: нативного async у файлов нет (docs/async.md).
+        """Execute file phases separately from the optional compaction model call."""
+        prepared = await self._acall_io(
+            ProjectMemoryRequest("prepare", action, content)
+        )
+        if prepared.output is not None:
+            return prepared.output
+        result = await compaction.acompact_text(
+            prepared.combined, self._ctx, self._state
+        )
+        finished = await self._acall_io(
+            ProjectMemoryRequest(
+                "finish",
+                action,
+                combined=prepared.combined,
+                compaction=result,
+            )
+        )
+        if finished.output is None:
+            raise ValueError("Project memory finish returned no output")
+        return finished.output
 
-        Файловые ветки исполняются прямо здесь — оборачивать нечего. Отличается
-        только ``append``: у него есть редкая ветка переполнения с LLM-компакцией,
-        и её надо ждать нативно — это единственный сетевой шаг в append'е.
-        См. ``_ahandle_append``.
-        """
-        early = self._reject_unusable(action)
-        if early is not None:
-            return early
-        if action == "append":
-            return await self._ahandle_append(content)
-        return self._dispatch_sync(action, content)
+    async def _acall_io(
+        self, request: ProjectMemoryRequest
+    ) -> ProjectMemoryReply:
+        port = runtime_port(self._ctx, "project_memory_io")
+        if port is None:
+            return self.execute_io(request)
+        reply = await port(request)
+        if reply.schema_version != 1:
+            raise ValueError("Unsupported project memory reply")
+        if reply.baseline_updated and self._state is not None:
+            self._state.project_memory_content_hash = reply.baseline_hash
+        return reply
+
+    def execute_io(self, request: ProjectMemoryRequest) -> ProjectMemoryReply:
+        """Worker/local file handler. Never calls a model or changes model policy."""
+        if request.schema_version != 1:
+            raise ValueError("Unsupported project memory request")
+        self._baseline_updated = False
+        combined = ""
+        output = self._reject_unusable(request.action)
+        if output is None:
+            output, combined = self._dispatch_io(request)
+        return ProjectMemoryReply(
+            output=output,
+            combined=combined,
+            baseline_updated=self._baseline_updated,
+            baseline_hash=getattr(
+                self._state, "project_memory_content_hash", None
+            ),
+        )
+
+    def _dispatch_io(
+        self, request: ProjectMemoryRequest
+    ) -> tuple[Optional[str], str]:
+        if request.phase == "finish":
+            if request.action != "append" or request.compaction is None:
+                raise ValueError("Invalid project memory compaction result")
+            return self._append_finish(
+                request.combined, request.compaction
+            ), ""
+        if request.phase != "prepare":
+            raise ValueError("Unknown project memory phase")
+        if request.action == "append":
+            return self._append_prepare(request.content)
+        return self._dispatch_sync(request.action, request.content), ""
 
     def _reject_unusable(self, action: str) -> Optional[str]:
         """Отказ, если тулу негде работать. Общий для обоих входов."""
@@ -271,6 +333,7 @@ Return format (JSON string):
     def _sync_baseline_after_mutation(self) -> None:
         if self._ctx is not None and self._state is not None:
             touch_project_memory_baseline(self._state, self._ctx)
+            self._baseline_updated = True
 
     def _handle_read(self) -> str:
         info = storage.stat(self._path, backup=self._backup)
@@ -283,20 +346,6 @@ Return format (JSON string):
             lines=info.lines if info.exists else 0,
             content=text if not is_empty else "",
             hint=_READ_EMPTY_HINT if is_empty else None,
-        )
-
-    async def _ahandle_append(self, content: str) -> str:
-        """Дописать в long memory; компакцию ждём НАТИВНО.
-
-        Сжатие — LLM-вызов, и он единственное место в append'е, которое ходит
-        по сети: остальное — чтение и запись файла, они инлайновые.
-        """
-        early, combined = self._append_prepare(content)
-        if early is not None:
-            return early
-        return self._append_finish(
-            combined,
-            await compaction.acompact_text(combined, self._ctx, self._state),
         )
 
     def _append_prepare(self, content: str) -> tuple[Optional[str], str]:

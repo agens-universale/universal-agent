@@ -1,9 +1,18 @@
+from __future__ import annotations
+
+import dataclasses
 import logging
 from dataclasses import dataclass, field, replace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Callable, Dict, List, Optional, Set
 
-from gc_core.attachments.store import ImageStore
+from gc_core.agent_store import (
+    DEFAULT_AGENT_STORE,
+    AgentStore,
+    check_agent_store,
+)
+from gc_core.attachments.store import ImageStore, image_store_for
 from gc_core.backends.factory import resolve_os_backend
 from gc_core.backends.protocol import FsBackend
 from gc_core.config_modules.chat_completions import (
@@ -17,6 +26,11 @@ from gc_core.config_modules.intent_scope import (
     IntentScopeConfig,
     intent_scope_from_config_dict,
 )
+from gc_core.context_preparation import PreparedRunContext, RunContextBindings
+from gc_core.execution.contracts import ToolEffectExecutor
+from gc_core.execution.guard_contracts import GuardProbe
+from gc_core.execution.human import HumanRequester
+from gc_core.execution.ports import AgentOperations
 from gc_core.execution_workspace import (
     ExecutionWorkspace,
     aprime_backend_cwd,
@@ -25,9 +39,10 @@ from gc_core.execution_workspace import (
 )
 from gc_core.mcp_session_owner import new_owner_token, use_owner
 from gc_core.model_router import CircuitBreaker, ModelRouter
+from gc_core.run_preparation import PromptLoader
+from gc_core.state_preparation import StatePreparer
 from gc_core.tools import abuild_tools_data
-from gc_core.tools.skills.provision import aprovision_remote_skills
-from gc_core.tools.skills.registry import SkillsRegistry, get_skills_registry
+from gc_core.tools.skills.registry import SkillsRegistry
 from gc_core.trace_id import trace_header_name, trace_id_from_config
 from gc_core.utils.logging_module import create_run_logger, generate_run_id
 from gc_core.utils.prod_auth import AuthConnector
@@ -39,7 +54,7 @@ class RunContext:
     Контекст одного запуска агента (CLI или REST‑запрос).
 
     Содержит:
-    - config_dict — словарь конфигурации;
+    - settings / runtime — настройки (``AppConfig``) и рантайм (``RuntimeEnv``);
     - auth_connector — коннектор авторизации для бэкенда;
     - logger / logging_path — логгер и путь к файлу логов для этого запуска;
     - summary_trace_path — отдельный файл trace для суммаризации;
@@ -53,7 +68,6 @@ class RunContext:
       см. turn_boundary.begin_turn.
     """
 
-    config_dict: Dict[str, Any]
     run_id: str
     auth_connector: Optional[AuthConnector]
     logger: logging.Logger
@@ -69,8 +83,23 @@ class RunContext:
     workspace: ExecutionWorkspace
     model_router: ModelRouter
     # Внешний trace_id этого рана; "" = отсутствует. Производное чтение
-    # config_dict["trace_id"] — источник правды один, вычисление в одном месте
+    # runtime.trace_id — источник правды один, вычисление в одном месте
     # (create_run_context), чтобы значения не разъехались.
+    operations: Optional[AgentOperations] = None
+    # None keeps local file loading. External runtimes supply prepared values
+    # without changing prompt assembly or serializing live clients/loggers.
+    prompt_loader: Optional[PromptLoader] = None
+    state_preparer: Optional[StatePreparer] = None
+    human_request: Optional[HumanRequester] = None
+    guard_probe: Optional[GuardProbe] = None
+    tool_effect: Optional[ToolEffectExecutor] = None
+    lock_factory: Any = None
+    skills_loader: Any = None
+    mcp_cleanup: Any = None
+    prompt_resource: Any = None
+    project_memory_io: Any = None
+    summary_trace_sink: Any = None
+    collect_garbage: Any = None
     trace_id: str = ""
     mcp_status: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     # Имена тулов до вычитания stop_tools. Валидатор сверяется с этим набором:
@@ -101,6 +130,11 @@ class RunContext:
     # Передав своё (например поверх базы), встраивающий уводит туда всю историю:
     # ни ThreadSession, ни ядро больше диска не касаются.
     thread_store: Any = None
+    # Хранилище агента (``gc_core.agent_store``): промпты, AGENTS.md, скиллы,
+    # субагенты — общее для всех тредов агента. Собранный фабрикой контекст
+    # всегда его имеет (по умолчанию файловое); ``None`` — контекст собран в
+    # обход фабрики, читатели берут файловое через ``agent_store_of``.
+    agent_store: Any = None
     # ToolsCache этого контекста, если владелец его передал. Лежит здесь, чтобы
     # субагенты (они пересобирают tools_data на каждый спавн) брали готовое, а не
     # ходили в дискавери заново.
@@ -110,16 +144,117 @@ class RunContext:
     # сессии параллельных агентов. Пустая строка — контекст собран в обход
     # create_run_context (тесты, ручная сборка); тогда владельца нет.
     mcp_session_owner: str = ""
+    #: Типизированные настройки (``AppConfig``) и рантайм (``RuntimeEnv``).
+    settings: Any = None
+    runtime: Any = None
+    #: Определения кастомных субагентов этого контекста (кэш дискавери) и
+    #: диагностика их загрузки. ``None`` — ещё не собраны; durable-сборка
+    #: (Temporal) кладёт сюда готовые определения, чтобы workflow не ходил на диск.
+    subagent_definitions: Any = None
+    subagent_diagnostics: Any = None
     # Хранилище картинок (`gc_core.attachments.store`): проекция читает байты
     # вложений через `read_for_send`, ядро делает `commit` в тред. Заполняет
-    # `_finish_run_context`; контекст, собранный в обход фабрики, — None
-    # (живые картинки уходят запиской «файл недоступен»).
+    # `_finish_run_context`; контекст, собранный в обход фабрики (в том числе
+    # durable-сборка в workflow), — None: живые картинки уходят запиской
+    # «файл недоступен», а файловых операций в workflow нет.
     image_store: Optional[ImageStore] = None
 
 
+def _coerce_settings(settings, runtime):
+    """``LoadedSettings`` сборки из ``LoadedSettings`` или ``AppConfig``.
+
+    Явный ``runtime`` вызывающего главнее рантайма загрузки. Плоский словарь
+    не принимается: ``TypeError``.
+    """
+    from gc_core.settings import AppConfig, LoadedSettings, RuntimeEnv
+
+    if isinstance(settings, LoadedSettings):
+        if runtime is not None and runtime is not settings.runtime:
+            settings = dataclasses.replace(settings, runtime=runtime)
+        return settings
+    if isinstance(settings, AppConfig):
+        return LoadedSettings(
+            settings=settings, runtime=runtime or RuntimeEnv()
+        )
+    raise TypeError(
+        "acreate_run_context принимает LoadedSettings или AppConfig, "
+        f"а не {type(settings).__name__}"
+    )
+
+
+def assemble_run_context(
+    prepared: PreparedRunContext, bindings: RunContextBindings
+) -> RunContext:
+    """Build the real RunContext from prepared values and explicit resources.
+
+    Both local creation and durable execution use this constructor. Discovery,
+    workspace probes, logging files and provider clients belong to preparation.
+    """
+    if prepared.schema_version != 2:
+        raise ValueError("Unsupported PreparedRunContext schema_version")
+    # Настройки — из подготовленных значений: локально это сами объекты,
+    # durable-сборка (Temporal) получает публичный JSON-снимок.
+    from gc_core.context_preparation import settings_from_snapshot
+
+    loaded = settings_from_snapshot(prepared.settings, prepared.runtime)
+    workspace = ExecutionWorkspace(
+        root=prepared.workspace_root,
+        backend=bindings.os_backend,
+        shell=prepared.workspace_shell,
+        os_name=prepared.workspace_os_name,
+        root_writable=prepared.workspace_root_writable,
+    )
+    ctx = RunContext(
+        settings=loaded.settings,
+        runtime=loaded.runtime,
+        run_id=prepared.run_id,
+        trace_id=prepared.trace_id,
+        auth_connector=bindings.auth_connector,
+        logger=bindings.logger,
+        logging_path=prepared.logging_path,
+        summary_trace_path=prepared.summary_trace_path,
+        auxiliary_llm=auxiliary_llm_from_config_dict(loaded),
+        intent_scope=intent_scope_from_config_dict(loaded),
+        tools_data=bindings.tools_data,
+        tools_spec=prepared.tools_spec,
+        tools_description=prepared.tools_description,
+        mcp_status=prepared.mcp_status,
+        registered_tool_names=set(prepared.registered_tool_names),
+        project_gc_dir=Path(prepared.project_gc_dir),
+        environment=bindings.environment,
+        os_backend=bindings.os_backend,
+        skills_registry=bindings.skills_registry,
+        workspace=workspace,
+        model_router=bindings.model_router,
+        on_stream_delta=bindings.on_stream_delta,
+        on_trace_note=bindings.on_trace_note,
+        on_messages_evicted=bindings.on_messages_evicted,
+        mcp_session_owner=prepared.mcp_session_owner,
+        tools_cache=bindings.tools_cache,
+        thread_store=bindings.thread_store,
+        agent_store=bindings.agent_store,
+        operations=bindings.operations,
+        prompt_loader=bindings.prompt_loader,
+        state_preparer=bindings.state_preparer,
+        human_request=bindings.human_request,
+        guard_probe=bindings.guard_probe,
+        tool_effect=bindings.tool_effect,
+        lock_factory=bindings.lock_factory,
+        skills_loader=bindings.skills_loader,
+        mcp_cleanup=bindings.mcp_cleanup,
+        prompt_resource=bindings.prompt_resource,
+        project_memory_io=bindings.project_memory_io,
+        summary_trace_sink=bindings.summary_trace_sink,
+        collect_garbage=bindings.collect_garbage,
+    )
+    ctx.is_tui = prepared.is_tui
+    return ctx
+
+
 async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING.md
-    config_dict: Dict[str, Any],
+    settings: Any,
     *,
+    runtime: Any = None,
     auth_connector: Optional[AuthConnector] = None,
     run_id: Optional[str] = None,
     on_progress=None,
@@ -138,6 +273,12 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
     level_provider: Optional[Callable[[], str]] = None,
     circuit_breaker: Optional[CircuitBreaker] = None,
     force_legacy: bool = False,
+    prompt_loader: Optional[PromptLoader] = None,
+    state_preparer: Optional[StatePreparer] = None,
+    human_request: Optional[HumanRequester] = None,
+    guard_probe: Optional[GuardProbe] = None,
+    tool_effect: Optional[ToolEffectExecutor] = None,
+    agent_store: Optional[AgentStore] = None,
 ) -> RunContext:
     """Собрать RunContext, не блокируя event loop.
 
@@ -172,13 +313,13 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
       ``mcp-servers`` перестанут ходить в сеть (866–1405 мс на реальном
       конфиге). Не передали — поведение прежнее, каждая сборка платит полностью.
     - Логгер создаётся заново для каждого запуска (своё имя файла логов).
-    - ``os_backend`` собирается фабрикой из ``config_dict['os_backend']`` (default: local).
+    - ``os_backend`` собирается фабрикой по ``runtime.os_backend`` (default: local).
       Для ``harbor`` нужны ``environment`` и ``loop``; тесты могут передать ``os_backend=``.
     - Свой LocalFsBackend → ``TrackingFsBackend`` (журнал правок) там, где
       запись включена (``agent_edits.record``: TUI по умолчанию, CLI и сервер —
       по конфигу); библиотечный вызов без режима запуска не оборачивается.
     - ``level_provider`` — источник активного уровня для ``model_router`` (спека §6.4).
-      CLI/server не передают его → константный провайдер из ключа ``config_dict["level"]``.
+      CLI/server не передают его → константный провайдер из ``settings.level``.
       TUI (сессионный слой) передаёт живой callable. run_context не импортирует tui —
       инверсия зависимости через этот параметр.
     - ``circuit_breaker`` — предохранитель модели (спека §8); по умолчанию свежий.
@@ -196,14 +337,19 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
         from gc_core.thread_store_async import athread_store
 
         athread_store(thread_store)
+    # Хранилище агента — там же и по той же причине: до дискавери.
+    if agent_store is not None:
+        check_agent_store(agent_store)
 
+    source = _coerce_settings(settings, runtime)
     prep = _prepare_run_context(
-        config_dict,
+        source,
         run_id=run_id,
         environment=environment,
         loop=loop,
         os_backend=os_backend,
         log_handlers=log_handlers,
+        agent_store=agent_store or DEFAULT_AGENT_STORE,
     )
     # Пробы возможностей бэкенда (`has_grep`/`has_find`/…) здесь СОЗНАТЕЛЬНО не
     # прогреваются, хотя `awarm_capabilities` для этого есть.
@@ -232,12 +378,15 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
     # Закрыть его раньше некому: снос фильтрует по владельцу, а контекста,
     # которому он принадлежит, так и не появилось.
     try:
-        await aprime_backend_cwd(prep.backend, config_dict)
-        await areconcile_remote_root(prep.backend, config_dict)
-        # Remote-бэкенд: скиллы лежат на хосте, а реестр читает через бэкенд —
-        # копируем набор «туда» и пересобираем реестр по удалённым корням.
-        provisioned = await aprovision_remote_skills(
-            prep.backend, config_dict, run_logger=prep.run_logger
+        # sandbox.workdir=auto мог сменить корень рантайма в подготовке.
+        source = prep.settings
+        await aprime_backend_cwd(prep.backend, source)
+        source = await areconcile_remote_root(prep.backend, source)
+        prep.settings = source
+        # Скиллы, которые надо доставить в среду исполнения (файловое
+        # хранилище и remote-бэкенд), — реестр по доставленной копии.
+        provisioned = await prep.agent_store.aprovision_skills(
+            prep.backend, source, run_logger=prep.run_logger
         )
         if provisioned is not None:
             prep.skills_registry = provisioned
@@ -246,9 +395,20 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
         # develop, у нас её не было; тело, которое список заполняет, слилось
         # автоматически — без самого списка оно осталось бы мёртвым кодом.
         registered: list[str] = []
+        # Источник сборки — двойник контекста: реестр субагентов запоминает на
+        # нём найденные определения, и контекст получает их готовыми (иначе
+        # дискавери шёл бы второй раз на первом вызове тула, с повтором
+        # предупреждений).
+        build_source = SimpleNamespace(
+            settings=source.settings,
+            runtime=source.runtime,
+            subagent_definitions=None,
+            subagent_diagnostics=None,
+            agent_store=prep.agent_store,
+        )
         with use_owner(prep.mcp_session_owner):
             tools = await abuild_tools_data(
-                config_dict,
+                build_source,
                 on_progress=on_progress,
                 os_backend=prep.backend,
                 skills_registry=prep.skills_registry,
@@ -256,8 +416,7 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
                 tools_cache=tools_cache,
                 registered_names=registered,
             )
-        return _finish_run_context(
-            config_dict,
+        ctx = _finish_run_context(
             prep,
             tools,
             registered_names=registered,
@@ -272,7 +431,18 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
             level_provider=level_provider,
             circuit_breaker=circuit_breaker,
             force_legacy=force_legacy,
+            prompt_loader=prompt_loader,
+            state_preparer=state_preparer,
+            human_request=human_request,
+            guard_probe=guard_probe,
+            tool_effect=tool_effect,
         )
+        # Локально — сами объекты сборки, а не их пересборка из снимка.
+        ctx.settings, ctx.runtime = source.settings, source.runtime
+        if ctx.subagent_definitions is None:
+            ctx.subagent_definitions = build_source.subagent_definitions
+            ctx.subagent_diagnostics = build_source.subagent_diagnostics
+        return ctx
     except BaseException as exc:
         from gc_core.utils.logging_module import release_run_logger
 
@@ -337,25 +507,30 @@ class _RunContextPrep:
     #: сравнивалось с локальной переменной, всегда не-None. Условие стало
     #: вечно ложным, а обёртка — мёртвым кодом.
     backend_was_overridden: bool
+    #: Настройки сборки (``LoadedSettings``): из них читает и досборка.
+    settings: Any = None
+    agent_store: Any = DEFAULT_AGENT_STORE
 
 
 def _prepare_run_context(
-    config_dict: Dict[str, Any],
+    settings: Any,
     *,
     run_id: Optional[str],
     environment: Optional[Any],
     loop: Optional[Any],
     os_backend: Optional[FsBackend],
     log_handlers: Any = None,
+    agent_store: AgentStore = DEFAULT_AGENT_STORE,
 ) -> _RunContextPrep:
     """Бэкенд, реестр скиллов, логгер и токен владельца MCP-сессий.
 
     Вынесено, чтобы синхронная и асинхронная сборка делили одно тело: между
-    ними отличается ровно один шаг — как дождаться дискавери.
+    ними отличается ровно один шаг — как дождаться дискавери. ``settings`` —
+    всё, что принимают ``settings_of``/``runtime_of`` (``LoadedSettings``).
     """
     effective_run_id = run_id or generate_run_id()
     backend = resolve_os_backend(
-        config_dict,
+        settings,
         environment=environment,
         loop=loop,
         override=os_backend,
@@ -365,16 +540,17 @@ def _prepare_run_context(
     # Побеждает безусловно: TUI/ACP ставят launch_root=cwd ещё до сборки, и
     # без перезаписи guards пускали бы файловые тулы в реальный проект.
     auto_workdir = getattr(backend, "auto_workdir", None)
-    if auto_workdir:
-        config_dict["launch_root"] = auto_workdir
-        config_dict["project_root"] = auto_workdir
-    skills_registry = get_skills_registry(config_dict, backend=backend)
+    if auto_workdir and hasattr(settings, "with_runtime"):
+        settings = settings.with_runtime(
+            launch_root=auto_workdir, project_root=auto_workdir
+        )
+    skills_registry = agent_store.skills_registry(settings, backend=backend)
     # Логгер создаётся ДО сборки тулов: она предупреждает о пропущенных файлах
     # сабагентов и нераспознанных именах тулов, и эти варнинги обязаны попасть в
     # лог-файл рана, а не только в stderr модульного логгера. Создание логгера
-    # зависит лишь от config_dict и run_id, поэтому порядок безопасен.
+    # зависит лишь от настроек и run_id, поэтому порядок безопасен.
     run_logger, logging_path, summary_trace_path = create_run_logger(
-        config_dict,
+        settings,
         run_id=effective_run_id,
         agent_kind="main",
         log_handlers=log_handlers,
@@ -392,12 +568,13 @@ def _prepare_run_context(
         summary_trace_path=summary_trace_path,
         mcp_session_owner=new_owner_token(),
         backend_was_overridden=os_backend is not None,
+        settings=settings,
+        agent_store=agent_store,
     )
 
 
 def _finish_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING.md
-    config_dict: Dict[str, Any],
-    prep: "_RunContextPrep",
+    prep: _RunContextPrep,
     tools: tuple,
     *,
     registered_names: Optional[list] = None,
@@ -412,6 +589,11 @@ def _finish_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING
     level_provider: Optional[Callable[[], str]] = None,
     circuit_breaker: Optional[CircuitBreaker] = None,
     force_legacy: bool = False,
+    prompt_loader: Optional[PromptLoader] = None,
+    state_preparer: Optional[StatePreparer] = None,
+    human_request: Optional[HumanRequester] = None,
+    guard_probe: Optional[GuardProbe] = None,
+    tool_effect: Optional[ToolEffectExecutor] = None,
 ) -> RunContext:
     """Досборка после тулов: логи старта, trace-binding, сам RunContext."""
     # Хранилище встраивающего проверяем ЗДЕСЬ — это и есть точка проводки.
@@ -432,17 +614,20 @@ def _finish_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING
     logging_path = prep.logging_path
     summary_trace_path = prep.summary_trace_path
     mcp_session_owner = prep.mcp_session_owner
+    from gc_core.settings import runtime_of, settings_of
+
+    settings = settings_of(prep.settings)
 
     run_logger.info(
         "agent started: model=%s url=%s mode=%s",
-        config_dict.get("model"),
-        config_dict.get("completions_url"),
-        config_dict.get("backend_api_mode"),
+        settings.agent.model,
+        settings.backend.completions_url,
+        settings.backend.api_mode,
         extra={
             "event": "agent_start",
-            "model": config_dict.get("model"),
-            "url": config_dict.get("completions_url") or None,
-            "backend_api_mode": config_dict.get("backend_api_mode"),
+            "model": settings.agent.model,
+            "url": settings.backend.completions_url or None,
+            "backend_api_mode": settings.backend.api_mode,
         },
     )
 
@@ -455,7 +640,7 @@ def _finish_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING
         },
     )
 
-    _trace_id = trace_id_from_config(config_dict)
+    _trace_id = trace_id_from_config(prep.settings)
     if _trace_id:
         # Одна явная запись «под какими именами этот ран шлёт trace». Заголовки
         # нигде не логируются, а имя заголовка конфигурируемо, поэтому это
@@ -465,52 +650,65 @@ def _finish_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING
             extra={
                 "event": "trace_binding",
                 "trace_id": _trace_id,
-                "model_header": trace_header_name(config_dict, "x_trace_id"),
-                "mcp_header": trace_header_name(config_dict, "trace_id"),
+                "model_header": trace_header_name(settings, "x_trace_id"),
+                "mcp_header": trace_header_name(settings, "trace_id"),
             },
         )
 
-    auxiliary_llm = auxiliary_llm_from_config_dict(config_dict)
-    workspace = build_execution_workspace(backend, config_dict)
+    workspace = build_execution_workspace(backend, prep.settings)
 
-    effective_level_provider = level_provider or (
-        lambda: config_dict.get("level") or "default"
-    )
+    configured_level = settings.level or "default"
+    effective_level_provider = level_provider or (lambda: configured_level)
     model_router = ModelRouter(
-        config_dict,
+        settings,
         level_provider=effective_level_provider,
         breaker=circuit_breaker,
         force_legacy=force_legacy,
     )
 
-    ctx = RunContext(
-        config_dict=config_dict,
+    prepared = PreparedRunContext(
+        settings=settings,
+        runtime=runtime_of(prep.settings),
         run_id=effective_run_id,
         trace_id=_trace_id,
-        auth_connector=auth_connector,
-        logger=run_logger,
         logging_path=logging_path,
         summary_trace_path=summary_trace_path,
-        auxiliary_llm=auxiliary_llm,
-        intent_scope=intent_scope_from_config_dict(config_dict),
-        tools_data=tools_data,
         tools_spec=tools_spec,
         tools_description=tools_description,
         mcp_status=mcp_status,
-        registered_tool_names=set(registered_names or []),
-        project_gc_dir=_resolve_project_gc_dir(),
+        registered_tool_names=list(registered_names or []),
+        project_gc_dir=str(_resolve_project_gc_dir()),
+        workspace_root=workspace.root,
+        workspace_shell=workspace.shell,
+        workspace_os_name=workspace.os_name,
+        workspace_root_writable=workspace.root_writable,
+        mcp_session_owner=mcp_session_owner,
+        is_tui=bool(is_tui),
+    )
+    bindings = RunContextBindings(
+        auth_connector=auth_connector,
+        logger=run_logger,
+        tools_data=tools_data,
         environment=environment,
         os_backend=backend,
         skills_registry=skills_registry,
-        workspace=workspace,
         model_router=model_router,
         on_stream_delta=on_stream_delta,
         on_trace_note=on_trace_note,
         on_messages_evicted=on_messages_evicted,
-        mcp_session_owner=mcp_session_owner,
         tools_cache=tools_cache,
         thread_store=thread_store,
+        agent_store=prep.agent_store,
+        prompt_loader=prompt_loader,
+        state_preparer=state_preparer,
+        human_request=human_request,
+        guard_probe=guard_probe,
+        tool_effect=tool_effect,
     )
+    ctx = assemble_run_context(prepared, bindings)
+    # Хранилище тредов SDK/воркера с файлами треда держит картинки у себя;
+    # без него — по конфигу, как раньше.
+    ctx.image_store = image_store_for(ctx, thread_store)
     # ``TrackingFsBackend`` ставится ЗДЕСЬ — в том режиме, которому запись
     # правок включена (``agent_edits.record``: TUI по умолчанию, CLI и сервер —
     # по конфигу). Где запись выключена, обёртки нет вовсе: она зовёт
@@ -522,9 +720,7 @@ def _finish_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING
     # (``gc_tui.diff_tui.tracking.attach_to_context``), и при слиянии веток
     # это уже приводило ко второй обёртке поверх первой — каждая правка
     # уходила в журнал дважды. Точка установки ровно одна, и она здесь.
-    ctx.is_tui = bool(is_tui)
-    ctx.image_store = ImageStore.for_config(config_dict)
-
+    #
     # Флаг, а не ``os_backend is None``: после ``resolve_os_backend`` параметр
     # уже не отличает «передали свой» от «собрали дефолтный» (см. докстринг
     # ``backend_was_overridden``), и сравнение с ним делало условие вечно
@@ -560,4 +756,5 @@ def _finish_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING
 __all__ = [
     "RunContext",
     "acreate_run_context",
+    "assemble_run_context",
 ]

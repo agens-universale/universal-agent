@@ -1,8 +1,8 @@
-"""Поля config_dict, которые вычисляет рантайм TUI — в файле конфига их нет.
+"""Что вычисляет рантайм TUI поверх загруженных настроек — в файле конфига этого нет.
 
-Ставятся один раз при старте (tui/__init__) и ОБЯЗАНЫ переживать hot-reload
-(TuiApp.reload_config): тот перечитывает файл с диска, где этих полей нет, — без
-явного переноса они молча исчезают.
+Ставится один раз при старте (tui/__init__) и ОБЯЗАНО переживать hot-reload
+(TuiApp.reload_config): тот перечитывает файл с диска, где этих значений нет, —
+поэтому перечитка отдаёт сюда прежний ``launch_root``.
 
 `launch_root` — снапшот cwd на старте. Из него живут периметр path_policy (границы
 записи), project_data и Diff-TUI. Пересчитывать его из live cwd нельзя: агент мог
@@ -12,22 +12,19 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Optional
 
-# Ключи, которых нет в файле конфига: их считает TUI. Новое такое поле — добавлять сюда,
-# иначе оно потеряется при первом же сохранении настроек.
-RUNTIME_KEYS = ("launch_root", "console_trace")
-
-
-def apply_runtime_fields(config_dict: dict) -> None:
-    """Проставить поля рантайма TUI — один раз, на старте."""
-    config_dict["console_trace"] = False  # TUI владеет alt-screen выводом
-    config_dict["launch_root"] = str(
-        Path.cwd().resolve()
-    )  # снапшот, не live cwd
+from gc_core.settings import LoadedSettings
 
 
-def carry_over_runtime_fields(old: dict, new: dict) -> None:
-    """Перенести поля рантайма в свежеперечитанный конфиг (hot-reload)."""
-    for key in RUNTIME_KEYS:
-        if key in old:
-            new[key] = old[key]
+def apply_tui_runtime(
+    loaded: LoadedSettings, *, launch_root: Optional[str] = None
+) -> LoadedSettings:
+    """Настройки под TUI: alt-screen без консольной трассы, снапшот cwd.
+
+    ``launch_root`` — снапшот прежней загрузки (hot-reload); без него — cwd сейчас.
+    """
+    root = launch_root or str(Path.cwd().resolve())
+    return loaded.with_runtime(launch_root=root, is_tui=True).with_overrides(
+        {"logging.console_trace": False}, layer="runtime"
+    )

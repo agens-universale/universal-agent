@@ -13,7 +13,6 @@
 
 import copy
 import os
-import re
 from pathlib import Path
 from typing import Any, Dict, NamedTuple, Optional
 
@@ -24,10 +23,13 @@ from gc_core.config_modules import env_vars
 from gc_core.config_modules import env_vars as mcp_paths
 from gc_core.config_modules.compat import apply_compat, manual_edit_fact
 from gc_core.config_modules.env_interpolation import (
+    _FILE_MARKER,
     resolve_env_only,
     resolve_env_placeholders,
+    tag_layer,
 )
 from gc_core.config_modules.merge import merge_config_layers
+from gc_core.config_modules.migrations import migrate_document
 from gc_core.config_modules.model_registry import (
     RESERVED_WORDS,
     validate_registry_pairs,
@@ -47,6 +49,7 @@ from gc_core.config_modules.root import (
     AppConfig,
     schema_error_details,
 )
+from gc_core.config_modules.unknown_keys import drop_unknown_keys
 from gc_core.utils.user_text import read_user_text_or_none, unreadable_reason
 
 # `None` у пути слоя — законное значение («слоя нет»), поэтому «не передано»
@@ -73,6 +76,9 @@ class _Layers(NamedTuple):
     # диска, а base-voice к этому моменту уже перезаписан мержем.
     managed_raw: Dict[str, Any]
     base_voice: Dict[str, Any]
+    # Документы наложенных слоёв по порядку — для происхождения настроек
+    # (`config explain`): ``(слой, путь, документ до ${ENV}, документ после)``.
+    documents: tuple = ()
 
 
 def _layer_document(path, subject: str) -> Dict[str, Any]:
@@ -88,7 +94,7 @@ def _layer_document(path, subject: str) -> Dict[str, Any]:
     правятся руками, так что негодный слой — рабочий сценарий, а не экзотика.
 
     `OSError` наружу уходит ГОЛЫМ — он нужен чтению базы (`config.py::
-    load_config_ex`, своя формулировка). Слои читаются не отсюда напрямую, а
+    load_settings`, своя формулировка). Слои читаются не отсюда напрямую, а
     через `_readable_layer_document` ниже: граница по нечитаемому файлу стоит
     там."""
     with open(path, encoding="utf-8") as file:
@@ -111,7 +117,7 @@ def _readable_layer_document(path, subject: str) -> Dict[str, Any]:
     «откатить конфиг» подменил бы её, оставив нечитаемый оверлей на месте.
 
     Граница здесь, а не внутри `_layer_document`: голый `OSError` оттуда нужен
-    чтению БАЗЫ (`config.py::load_config_ex`) — там своя формулировка, про
+    чтению БАЗЫ (`config.py::load_settings`) — там своя формулировка, про
     базовый файл, а не про слой. Без обёртки нечитаемый слой уходил мимо
     `except ValueError` ОБЕИХ точек входа (`cli._run_init`, `tui.main`) и мимо
     всех трёх ступеней лестницы починки (`onboarding.load_config_for_repair`):
@@ -207,14 +213,23 @@ def _overlay_layer(
     *,
     require_file: bool,
     notices: list[str],
-) -> tuple[Dict[str, Any], Dict[str, Any]]:
-    """Наложить один файловый слой (managed/project); ``(merged, слой_как_прочитан)``."""
+    layer: str = "",
+    unresolved: Optional[list] = None,
+) -> tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
+    """Наложить файловый слой (managed/project); ``(merged, слой, слой до ${ENV})``.
+
+    Compat — на копии слоя до склейки (`_compat_layer`, факты с путём файла).
+    `unresolved` — строгий режим `${ENV:…}`/`${FILE:…}` (см. `load_settings`):
+    неразрешённые ссылки слоя копятся туда, а правило пары для такого слоя не
+    спрашивается — его вердикт по подставленным пустым строкам был бы следствием,
+    а не причиной, и заслонил бы полный список незаданных переменных. Миграция
+    формата (`migrate_document`) — после подстановки, факты — в `notices`."""
     if layer_path is None or os.path.abspath(
         str(layer_path)
     ) == os.path.abspath(base_path):
-        return raw_config, {}
+        return raw_config, {}, {}
     if require_file and not layer_path.is_file():
-        return raw_config, {}
+        return raw_config, {}, {}
     cand = candidate_for(layer_path)
     layer_raw = (
         cand
@@ -223,13 +238,22 @@ def _overlay_layer(
     )
     layer_raw = _compat_layer(layer_raw, layer_path, notices)
     before_env = layer_raw
-    layer_raw = resolve_env_placeholders(layer_raw)
-    validate_registry_pairs(
-        layer_raw,
-        source=str(layer_path) if require_file else layer_path,
-        raw_source=before_env,
+    start = len(unresolved) if unresolved is not None else 0
+    layer_raw = resolve_env_placeholders(
+        layer_raw, unresolved=unresolved, source=str(layer_path)
     )
-    return merge_config_layers(raw_config, layer_raw), layer_raw
+    if unresolved is not None:
+        tag_layer(unresolved, start, layer=layer)
+    layer_raw, facts = migrate_document(layer_raw, source=str(layer_path))
+    if notices is not None:
+        notices.extend(facts)
+    if unresolved is None or len(unresolved) == start:
+        validate_registry_pairs(
+            layer_raw,
+            source=str(layer_path) if require_file else layer_path,
+            raw_source=before_env,
+        )
+    return merge_config_layers(raw_config, layer_raw), layer_raw, before_env
 
 
 def _overlay_profile(
@@ -239,10 +263,11 @@ def _overlay_profile(
     candidates,
     candidate_for,
     notices: list[str],
-) -> tuple[Dict[str, Any], Optional[ProfileRef]]:
-    """Наложить профиль по указателю; ``(merged, ref)``, без указателя — как есть."""
+    unresolved: Optional[list] = None,
+) -> tuple[Dict[str, Any], Optional[ProfileRef], Dict[str, Any]]:
+    """Наложить профиль по указателю; ``(merged, ref, документ профиля)``."""
     if not pointer:
-        return raw_config, None
+        return raw_config, None, {}
     try:
         ref = resolve_profile(pointer, roots, notices=notices)
     except ValueError:
@@ -257,13 +282,15 @@ def _overlay_profile(
             ref.path,
             warn_literal_tokens=(ref.root_kind == "project"),
             notices=notices,
+            unresolved=unresolved,
+            layer=f"profile:{pointer}",
         )
     )
     # Загруженный с диска документ compat уже прошёл (`load_profile_document`),
     # кандидат из формы — нет; повторный проход идемпотентен.
     profile_raw = _compat_layer(profile_raw, ref.path, notices)
     # Контент профиля мержится ПОВЕРХ base/managed/project (ось 2).
-    return merge_config_layers(raw_config, profile_raw), ref
+    return merge_config_layers(raw_config, profile_raw), ref, profile_raw
 
 
 def _merge_layers(
@@ -275,12 +302,13 @@ def _merge_layers(
     notices: Optional[list[str]] = None,
     managed_path=_UNSET,
     project_path=_UNSET,
+    unresolved: Optional[list] = None,
 ) -> _Layers:
     """Наложить на базу слои, которые накладывает загрузка: managed → project →
     профиль по указателю (оси 1-2 спеки §3). База приходит уже прочитанной и
     интерполированной: этот шаг у вызывающих разный.
 
-    Вынесено из `load_config_ex` ради второго вызывающего — pre-write валидации
+    Вынесено из `load_settings` ради второго вызывающего — pre-write валидации
     секций. Реестр кросс-слоен ПО УСТРОЙСТВУ (слот профиля вправе ссылаться на
     модель базы), поэтому вердикт по одному файлу врёт в обе стороны: пропускает
     merged, который не загрузится, и отвергает рабочую раскладку «модели в базе,
@@ -300,6 +328,12 @@ def _merge_layers(
     третьего вида структуры для точки, где кандидат применяется (профильный
     фолбэк выше перебирает тот же словарь по имени файла, а не по факту пути,
     так что словарь не создаёт для него разнобоя).
+
+    `unresolved` — строгий режим `${ENV:…}`/`${FILE:…}` (только `load_settings`):
+    неразрешённые обязательные ссылки КАЖДОГО слоя копятся в этот список (с
+    файлом, слоем и dotted-ключом), а бросает вызывающий — когда соберёт все.
+    `None` — прежний мягкий режим («пусто + warning»): pre-write валидации и
+    витрины судят запись, а не окружение текущего процесса.
 
     Сравнение путей — ОДНО правило на все три слоя, хотя вырученная им защита не
     везде одинаково нужна: у профиля путь неоднозначен (`profile_roots` ищет в
@@ -346,28 +380,51 @@ def _merge_layers(
     # подмены — сьют тогда проверяет не то состояние, которое считает своим.
     if managed_path is _UNSET:
         managed_path = mcp_paths.managed_config_path()
-    raw_config, managed_raw = _overlay_layer(
+    documents = []
+    raw_config, managed_raw, managed_before = _overlay_layer(
         raw_config,
         managed_path,
         path,
         _candidate_for,
         "config.local.yml",
         require_file=True,
+        layer="managed",
+        unresolved=unresolved,
         notices=notices,
     )
+    if managed_raw:
+        documents.append(
+            (
+                "managed",
+                str(managed_path),
+                managed_before,
+                managed_raw,
+            )
+        )
 
     # Layered loading: project <cwd>/.gc/config.yml поверх глобального.
     if project_path is _UNSET:
         project_path = env_vars.project_local_config_path()
-    raw_config, _ = _overlay_layer(
+    raw_config, project_raw, project_before = _overlay_layer(
         raw_config,
         project_path,
         path,
         _candidate_for,
         "проектный config.yml",
         require_file=False,
+        layer="project",
+        unresolved=unresolved,
         notices=notices,
     )
+    if project_raw:
+        documents.append(
+            (
+                "project",
+                str(project_path),
+                project_before,
+                project_raw,
+            )
+        )
 
     # Профиль (спека §3): указатель резолвится из пре-профильного мержа выше (ось 1,
     # анти-рекурсия — профиль не может выбрать профиль), либо из явного override
@@ -379,9 +436,24 @@ def _merge_layers(
         else str(raw_config.get("profile") or "").strip()
     )
     active_name: Optional[str] = pointer or None
-    raw_config, ref = _overlay_profile(
-        raw_config, pointer, roots, _candidates, _candidate_for, notices
+    raw_config, ref, profile_raw = _overlay_profile(
+        raw_config,
+        pointer,
+        roots,
+        _candidates,
+        _candidate_for,
+        notices,
+        unresolved,
     )
+    if ref is not None:
+        documents.append(
+            (
+                f"profile:{pointer}",
+                str(ref.path),
+                None,
+                profile_raw,
+            )
+        )
 
     return _Layers(
         raw_config,
@@ -392,23 +464,31 @@ def _merge_layers(
         project_path,
         managed_raw,
         _base_voice,
+        tuple(documents),
     )
 
 
 def _raw_from_text(
     text: str, subject: str = _CONFIG_FILENAME
 ) -> Dict[str, Any]:
-    """Текст → документ → ${ENV:VAR}. Отдельный шаг, без compat: стековая фаза 2
-    накладывает слои на СЫРОЙ документ, а compat каждого слоя делает
-    `_merge_layers` (`_compat_layer`) — ровно как загрузчик. Проход compat после
-    склейки остаётся страховкой и на приведённых слоях ничего не находит."""
+    """Текст → документ → ${ENV:VAR} → миграция формата (`config_version`).
+    Отдельный шаг, без compat: стековая фаза 2 накладывает слои на СЫРОЙ
+    документ, а compat каждого слоя делает `_merge_layers` (`_compat_layer`) —
+    ровно как загрузчик. Проход compat после склейки остаётся страховкой и на
+    приведённых слоях ничего не находит.
+
+    `${ENV:…}` здесь мягкий (незаданная → пусто + warning), а не строгий, как у
+    `load_settings`: отсюда судят ЗАПИСЬ (pre-write валидация, стек следующего
+    старта), а не окружение этого процесса — ссылку на переменную, заданную в
+    окружении сервиса, а не в этом терминале, писать законно."""
     try:
         raw = yaml.safe_load(text) or {}
     except yaml.YAMLError as exc:
         raise ValueError(f"невалидный YAML: {exc}") from exc
     if not isinstance(raw, dict):
         raise ValueError(f"{subject} должен быть YAML-объектом")
-    return resolve_env_placeholders(raw)
+    raw, _facts = migrate_document(resolve_env_placeholders(raw))
+    return raw
 
 
 def _app_config_from_raw(raw: Dict[str, Any]) -> AppConfig:
@@ -421,6 +501,9 @@ def _app_config_from_raw(raw: Dict[str, Any]) -> AppConfig:
     хвостом (ревью MR #80, L28). Координата и причина у этих правил самодостаточны —
     `input_value`/`input_type`/ссылка на errors.pydantic.dev человеку не нужны."""
     apply_compat(raw)
+    # Лишние ключи не отвергают документ (см. unknown_keys): загрузка их
+    # отбросит с уведомлением, и гейт записи судит так же.
+    raw, _unknown = drop_unknown_keys(raw, AppConfig)
     try:
         return AppConfig.model_validate(raw)
     except ValidationError as exc:
@@ -441,7 +524,7 @@ def _app_config_from_text(text: str) -> AppConfig:
 def validate_config_text(text: str) -> None:
     """Контрольная валидация текста config.yml перед записью (writer/sync).
 
-    Конвейер тот же, что в load_config_ex: ${ENV:VAR} → compat → схема. Иначе файл со
+    Конвейер тот же, что в load_settings: ${ENV:VAR} → compat → схема. Иначе файл со
     старым (переименованным) ключом или с плейсхолдером в нестроковом поле проходил бы
     загрузку, но отвергался при записи — и юзер оказывался заблокирован в /settings.
     Бросает ValueError с человекочитаемой причиной.
@@ -692,7 +775,9 @@ def resolve_pointer_value(value) -> str:
 # отсутствующий) не зовёт полный резолвер вовсе (ревью N7, находка 4: без
 # кэша битый путь писал «credential file not readable» на каждый кадр).
 _POINTER_FILE_CACHE: list = [None]
-_POINTER_FILE_RE = re.compile(r"\$\{FILE:([^}]*)\}")
+_POINTER_FILE_RE = (
+    _FILE_MARKER  # group(1) — путь (умолчание ``:-`` — в group(2))
+)
 
 
 def _pointer_file_resolved(value: str) -> str:
@@ -715,7 +800,7 @@ def resolve_profile_pointer(base_path, *, candidates=None) -> str:
     """Указатель `profile:` — какое имя назовут слои база → managed → project
     (порядок `_merge_layers`), ЕСЛИ их удастся прочитать, БЕЗ резолва самого
     профиля и без документов слоёв. НЕ симулятор старта: настоящий
-    `load_config_ex`/`_merge_layers` на битом managed или project падает
+    `load_settings`/`_merge_layers` на битом managed или project падает
     (`ValueError`/`OSError`), базу тоже читает без перехвата — эта функция
     осознанно best-effort, потому что её потребители (витрина происхождения,
     ключ кэша, guard ссылок) обязаны отвечать именно тогда, когда конфиг уже

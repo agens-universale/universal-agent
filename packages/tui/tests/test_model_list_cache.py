@@ -1,8 +1,8 @@
-from gc_tui.services.model_list_cache import clear_cache, make_cached_fetch
+from gc_tui.services.model_list_cache import _CACHE, make_cached_fetch
 
 
 def test_second_call_same_key_hits_cache():
-    clear_cache()
+    _CACHE.clear()
     calls = []
 
     def fetch(url, auth, verify=True, config_proxy=None):
@@ -16,7 +16,7 @@ def test_second_call_same_key_hits_cache():
 
 
 def test_key_includes_url_auth_proxy():
-    clear_cache()
+    _CACHE.clear()
     calls = []
 
     def fetch(url, auth, verify=True, config_proxy=None):
@@ -31,7 +31,7 @@ def test_key_includes_url_auth_proxy():
 
 
 def test_error_not_cached():
-    clear_cache()
+    _CACHE.clear()
     state = {"fail": True}
 
     def fetch(url, auth, verify=True, config_proxy=None):
@@ -49,7 +49,7 @@ def test_error_not_cached():
 
 
 def test_none_result_not_cached():
-    clear_cache()
+    _CACHE.clear()
     results = [None, [1]]
 
     def fetch(url, auth, verify=True, config_proxy=None):
@@ -69,7 +69,7 @@ def test_refresh_bypasses_the_cache_and_rewrites_the_key():
     редактора не меняется — без обхода клавиша была бы детерминированным no-op.
     Свежий ответ ложится в тот же ключ, иначе следующий обычный вызов вернул бы
     только что опровергнутый список."""
-    clear_cache()
+    _CACHE.clear()
     results = [[1], [1, 2]]
     calls = []
 
@@ -92,7 +92,7 @@ def test_refresh_bypasses_the_cache_and_rewrites_the_key():
 def test_failed_refresh_keeps_the_cached_list():
     """Неудачное перечитывание ключ НЕ гасит: иначе «сервер моргнул» стёр бы
     нормальный список, и следующий вход в поле пошёл бы в сеть за тем же самым."""
-    clear_cache()
+    _CACHE.clear()
     results = [[1], None]
 
     def fetch(url, auth, verify=True, config_proxy=None):

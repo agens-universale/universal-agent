@@ -17,6 +17,7 @@ from typing import Any
 from gc_core.message_policy.chat_completions import repair_tool_call_pairing
 from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
 from gc_core.run_summary_coordinator import RunSummaryCoordinator
+from gc_core.settings import settings_of
 from gc_core.states import State
 from gc_core.summarize.config import parse_summary_trigger_chars
 from gc_core.thread_store import ThreadSession
@@ -36,15 +37,13 @@ async def acompact_thread(
     (``aforce_compact_once``), без потока из пула на всё время LLM-вызова.
     Синхронный двойник — ``compact_thread`` ниже.
     """
-    config_dict = ctx.config_dict
-    backend_api_mode = (
-        str(config_dict.get("backend_api_mode", "responses")).strip().lower()
-    )
+    settings = settings_of(ctx)
+    backend_api_mode = str(settings.backend.api_mode).strip().lower()
     if backend_api_mode != "chat_completions" or not thread_id:
         return False
     system_id = system or "cli"
     thread_session = await ThreadSession.afrom_config(
-        config_dict=config_dict,
+        settings=ctx,
         system_id=system_id,
         thread_id=thread_id,
         # Хранилище встраивающего, если он его передал.
@@ -58,19 +57,17 @@ async def acompact_thread(
     thread_shared = ThreadMetaMapper.shared_from_meta(meta)
 
     state = await State.acreate(
-        verbose=bool(config_dict.get("verbose", False)),
-        model=config_dict["model"],
+        verbose=settings.agent.verbose,
+        model=settings.agent.model,
         tools_spec=ctx.tools_spec,
         tools_descr=ctx.tools_description,
         skills_list=[],
-        max_steps=int(config_dict.get("max_steps", 30) or 30),
-        system_prompt_id=config_dict.get("system_prompt_id", ""),
-        use_server_subagents=bool(
-            config_dict.get("use_server_subagents", False)
-        ),
+        max_steps=settings.agent.max_steps or 30,
+        system_prompt_id=settings.agent.system_prompt_id,
+        use_server_subagents=settings.agent.use_server_subagents,
         thread_id=thread_id,
         shared=thread_shared,
-        workspace_config=config_dict,
+        workspace_config=ctx,
     )
     state.backend_api_mode = "chat_completions"
     state.usage = UsageAccount.from_meta(meta.get("token_usage"))
@@ -93,7 +90,7 @@ async def acompact_thread(
         ctx=ctx,
         state=state,
         thread_session=thread_session,
-        summary_trigger_chars=parse_summary_trigger_chars(config_dict),
+        summary_trigger_chars=parse_summary_trigger_chars(settings),
         is_cli_mode=(system_id == "cli"),
         pre_backend_trigger_reason="pre_backend",
         logger=getattr(ctx, "logger", None),

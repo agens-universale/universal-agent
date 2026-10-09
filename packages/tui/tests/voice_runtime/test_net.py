@@ -13,7 +13,7 @@ from gc_tui.voice_runtime import net as net
 
 @pytest.fixture(autouse=True)
 def _reset():
-    net.reset_for_tests()
+    net._injected = False  # однократная инъекция траста — заново
 
 
 def test_passthrough_without_error(monkeypatch):

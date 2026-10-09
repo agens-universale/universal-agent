@@ -7,6 +7,7 @@ from gc_core import manual_compaction as mc
 from gc_core.thread_store_async import athread_store
 from gc_core.thread_store_file import FileThreadStore
 from gc_testkit import run_coro
+from gc_testkit.settings import fake_ctx
 
 
 def test_compact_thread_calls_force_compact(monkeypatch, tmp_path):
@@ -69,12 +70,12 @@ def test_compact_thread_calls_force_compact(monkeypatch, tmp_path):
     monkeypatch.setattr(mc, "State", _FakeState)
 
     ex = ae.AgentExecutor.__new__(ae.AgentExecutor)
-    ex._ctx = types.SimpleNamespace(
-        config_dict={
-            "model": "M",
-            "max_steps": 30,
-            "system_prompt_id": "x",
-            "backend_api_mode": "chat_completions",
+    ex._ctx = fake_ctx(
+        {
+            "agent.model": "M",
+            "agent.max_steps": 30,
+            "agent.system_prompt_id": "x",
+            "backend.api_mode": "chat_completions",
         },
         tools_spec=[],
         tools_description=[],
@@ -128,12 +129,12 @@ def _make_compact_executor(
     monkeypatch.setattr(mc, "State", state_cls)
 
     ex = ae.AgentExecutor.__new__(ae.AgentExecutor)
-    ex._ctx = types.SimpleNamespace(
-        config_dict={
-            "model": "M",
-            "max_steps": 30,
-            "system_prompt_id": "x",
-            "backend_api_mode": "chat_completions",
+    ex._ctx = fake_ctx(
+        {
+            "agent.model": "M",
+            "agent.max_steps": 30,
+            "agent.system_prompt_id": "x",
+            "backend.api_mode": "chat_completions",
         },
         tools_spec=[],
         tools_description=[],
@@ -247,12 +248,12 @@ def test_compact_thread_updates_live_state_for_footer(monkeypatch, tmp_path):
 
 def test_compact_thread_noop_in_responses(monkeypatch, tmp_path):
     ex = ae.AgentExecutor.__new__(ae.AgentExecutor)
-    ex._ctx = types.SimpleNamespace(
-        config_dict={
-            "model": "M",
-            "max_steps": 30,
-            "system_prompt_id": "x",
-            "backend_api_mode": "responses",
+    ex._ctx = fake_ctx(
+        {
+            "agent.model": "M",
+            "agent.max_steps": 30,
+            "agent.system_prompt_id": "x",
+            "backend.api_mode": "responses",
         },
         tools_spec=[],
         tools_description=[],

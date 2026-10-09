@@ -7,6 +7,7 @@ import threading
 import pytest
 from gc_core.backends.harbor import HarborBackend, build_harbor_shell_command
 from gc_core.backends.protocol import FsBackend
+from gc_testkit.settings import make_settings
 
 
 def _bash_runs(probe: str) -> bool:
@@ -751,7 +752,9 @@ async def test_workspace_root_is_the_container_workdir(loop_in_thread):
     assert env.calls == ["pwd"], (
         "pwd — внутренний вызов: сырой канал, без профиля"
     )
-    assert build_execution_workspace(backend, {}).root == "/testbed"
+    assert (
+        build_execution_workspace(backend, make_settings()).root == "/testbed"
+    )
 
 
 def test_env_prefix_rejects_non_identifier_names():

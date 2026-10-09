@@ -1,5 +1,6 @@
 """Свободный текст без активной задачи → автосоздание UUID-задачи + executor.run."""
 
+from gc_testkit.tui_support import tui_settings
 import pytest
 
 
@@ -50,7 +51,9 @@ async def test_first_message_creates_task(tmp_path):
             pass
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     app._executor_factory = lambda: _Fake()
 
@@ -95,7 +98,9 @@ async def test_message_while_running_calls_add_message(tmp_path):
             captured["added"].append(m)
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     app._executor_factory = lambda: _Fake()
 
@@ -167,7 +172,9 @@ async def test_message_after_stopped_restarts_same_thread(tmp_path):
             pass
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     app._executor_factory = lambda: _Fake()
 
@@ -238,7 +245,9 @@ async def test_no_duplicate_user_reply(tmp_path):
             pass
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     app._executor_factory = lambda: _Fake()
 

@@ -1,3 +1,4 @@
+from gc_testkit.tui_support import as_settings, tui_settings
 import pytest
 
 pytest.importorskip("textual")
@@ -33,10 +34,10 @@ async def test_update_section_shows_actions_and_hint(tmp_path, monkeypatch):
     cfg_file.write_text(
         'backend:\n  completions_url: "http://x/v1"\n', encoding="utf-8"
     )
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
         scr = SettingsScreen(
-            config={},
+            settings=as_settings({}),
             config_path=str(cfg_file),
             on_apply=lambda: None,
             probe_fn=lambda *a, **k: None,
@@ -79,10 +80,10 @@ async def test_update_section_auto_checks_on_entry_and_cursor_on_top(
     monkeypatch.setattr(check_mod, "check_for_update", _fake_check)
     cfg_file = tmp_path / "c.yml"
     cfg_file.write_text("backend: {}\n", encoding="utf-8")
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
         scr = SettingsScreen(
-            config={},
+            settings=as_settings({}),
             config_path=str(cfg_file),
             on_apply=lambda: None,
             probe_fn=lambda *a, **k: None,
@@ -125,10 +126,10 @@ async def test_check_updates_sets_status(tmp_path, monkeypatch):
     )
     cfg_file = tmp_path / "c.yml"
     cfg_file.write_text("backend: {}\n", encoding="utf-8")
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
         scr = SettingsScreen(
-            config={},
+            settings=as_settings({}),
             config_path=str(cfg_file),
             on_apply=lambda: None,
             probe_fn=lambda *a, **k: None,
@@ -175,10 +176,10 @@ async def test_update_confirm_and_hint_text_use_location_phrase(
     )
     cfg_file = tmp_path / "c.yml"
     cfg_file.write_text("backend: {}\n", encoding="utf-8")
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
         scr = SettingsScreen(
-            config={},
+            settings=as_settings({}),
             config_path=str(cfg_file),
             on_apply=lambda: None,
             probe_fn=lambda *a, **k: None,
@@ -228,10 +229,10 @@ async def test_update_confirm_banner_then_spawn(tmp_path, monkeypatch):
     )
     cfg_file = tmp_path / "c.yml"
     cfg_file.write_text("backend: {}\n", encoding="utf-8")
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
         scr = SettingsScreen(
-            config={},
+            settings=as_settings({}),
             config_path=str(cfg_file),
             on_apply=lambda: None,
             probe_fn=lambda *a, **k: None,
@@ -276,10 +277,10 @@ async def test_update_confirm_banner_blocks_section_switch(
     )
     cfg_file = tmp_path / "c.yml"
     cfg_file.write_text("backend: {}\n", encoding="utf-8")
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
         scr = SettingsScreen(
-            config={},
+            settings=as_settings({}),
             config_path=str(cfg_file),
             on_apply=lambda: None,
             probe_fn=lambda *a, **k: None,
@@ -335,10 +336,10 @@ async def test_update_blocked_when_current(tmp_path, monkeypatch):
     )
     cfg = tmp_path / "c.yml"
     cfg.write_text("backend: {}\n", encoding="utf-8")
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
         scr = SettingsScreen(
-            config={},
+            settings=as_settings({}),
             config_path=str(cfg),
             on_apply=lambda: None,
             probe_fn=lambda *a, **k: None,
@@ -385,10 +386,10 @@ async def test_apply_check_result_persists_even_if_view_changed(
     )
     cfg = tmp_path / "c.yml"
     cfg.write_text("backend: {}\n", encoding="utf-8")
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
         scr = SettingsScreen(
-            config={},
+            settings=as_settings({}),
             config_path=str(cfg),
             on_apply=lambda: None,
             probe_fn=lambda *a, **k: None,
@@ -436,10 +437,10 @@ async def test_apply_check_result_persists_verdict_and_syncs_main_card(
     )
     cfg = tmp_path / "c.yml"
     cfg.write_text("backend: {}\n", encoding="utf-8")
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
         scr = SettingsScreen(
-            config={},
+            settings=as_settings({}),
             config_path=str(cfg),
             on_apply=lambda: None,
             probe_fn=lambda *a, **k: None,
@@ -493,10 +494,10 @@ async def test_apply_check_result_unknown_keeps_known_update_verdict(
     )
     cfg = tmp_path / "c.yml"
     cfg.write_text("backend: {}\n", encoding="utf-8")
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
         scr = SettingsScreen(
-            config={},
+            settings=as_settings({}),
             config_path=str(cfg),
             on_apply=lambda: None,
             probe_fn=lambda *a, **k: None,
@@ -549,10 +550,10 @@ async def test_apply_check_result_current_clears_available(
     )
     cfg = tmp_path / "c.yml"
     cfg.write_text("backend: {}\n", encoding="utf-8")
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
         scr = SettingsScreen(
-            config={},
+            settings=as_settings({}),
             config_path=str(cfg),
             on_apply=lambda: None,
             probe_fn=lambda *a, **k: None,
@@ -598,10 +599,10 @@ async def test_checked_line_unknown_is_dash_not_warn(tmp_path, monkeypatch):
     )
     cfg = tmp_path / "c.yml"
     cfg.write_text("backend: {}\n", encoding="utf-8")
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
         scr = SettingsScreen(
-            config={},
+            settings=as_settings({}),
             config_path=str(cfg),
             on_apply=lambda: None,
             probe_fn=lambda *a, **k: None,
@@ -643,10 +644,10 @@ async def test_update_confirm_warns_when_agent_running(tmp_path, monkeypatch):
     cfg_file.write_text(
         'backend:\n  completions_url: "http://x/v1"\n', encoding="utf-8"
     )
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
         scr = SettingsScreen(
-            config={},
+            settings=as_settings({}),
             config_path=str(cfg_file),
             on_apply=lambda: None,
             probe_fn=lambda *a, **k: None,
@@ -679,10 +680,10 @@ async def test_reset_action_present_next_to_sync(tmp_path, monkeypatch):
     )  # dev, без сети
     cfg_file = tmp_path / "c.yml"
     cfg_file.write_text("backend: {}\n", encoding="utf-8")
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
         scr = SettingsScreen(
-            config={},
+            settings=as_settings({}),
             config_path=str(cfg_file),
             on_apply=lambda: None,
             probe_fn=lambda *a, **k: None,
@@ -717,10 +718,10 @@ async def test_reset_confirm_banner_then_reset_reloads_and_notices_backup(
 
     monkeypatch.setattr(config_sync, "reset_config", _fake_reset)
     applied = []
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
         scr = SettingsScreen(
-            config={},
+            settings=as_settings({}),
             config_path=str(cfg_file),
             on_apply=lambda: applied.append(1),
             probe_fn=lambda *a, **k: None,
@@ -757,10 +758,10 @@ async def test_reset_confirm_banner_blocks_section_switch(
     monkeypatch.setattr(app_version, "install_source", lambda _read=None: None)
     cfg_file = tmp_path / "c.yml"
     cfg_file.write_text("backend: {}\n", encoding="utf-8")
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
         scr = SettingsScreen(
-            config={},
+            settings=as_settings({}),
             config_path=str(cfg_file),
             on_apply=lambda: None,
             probe_fn=lambda *a, **k: None,
@@ -799,10 +800,10 @@ async def test_reset_action_blocked_when_not_writable(tmp_path, monkeypatch):
     monkeypatch.setattr(
         config_sync, "reset_config", lambda *a, **k: called.append(1)
     )
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
         scr = SettingsScreen(
-            config={},
+            settings=as_settings({}),
             config_path=str(cfg_file),
             on_apply=lambda: None,
             probe_fn=lambda *a, **k: None,
@@ -837,15 +838,26 @@ async def test_reset_notice_mentions_session_profile_and_onboarding_suggestion(
         "reset_config",
         lambda path, **k: config_sync.ResetReport(str(cfg_file) + ".bak-x"),
     )
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     app._session_overrides = {"profile": "work"}
 
+    from gc_core import onboarding
+
     def _apply() -> None:
-        app._config = {}  # эмулируем реальный reload_config на плейсхолдерах
+        # эмулируем реальный reload_config на плейсхолдерах шаблона
+        app._settings = tui_settings(
+            {
+                "backend.completions_url": onboarding.URL_SENTINEL,
+                "backend.chat_completion_headers": {
+                    "Authorization": onboarding.TOKEN_SENTINEL
+                },
+                "agent.model": onboarding.MODEL_SENTINEL,
+            }
+        )
 
     async with app.run_test() as pilot:
         scr = SettingsScreen(
-            config={},
+            settings=as_settings({}),
             config_path=str(cfg_file),
             on_apply=_apply,
             probe_fn=lambda *a, **k: None,

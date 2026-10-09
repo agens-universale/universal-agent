@@ -1,6 +1,8 @@
-from typing import Any, Dict, Optional
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from gc_core.config_modules.field_meta import gc_meta
 
 ALLOWED_COMMAND_MODES = {"allow", "ask", "deny"}
 ALLOWED_BINARY_READ_MODES = {"allow", "ask", "deny"}
@@ -39,6 +41,28 @@ def validate_read_guard_mode(raw_mode: Any) -> str:
     return mode
 
 
+def reject_blank_paths(values: list[str]) -> list[str]:
+    """Пустой/пробельный элемент в списке путей guard'а — ошибка схемы.
+
+    Пустая строка не «ничего»: путевые политики раскрывают её в ТЕКУЩИЙ
+    каталог процесса (`os.path.abspath("")`). В `read_guard.allowed_read_paths`
+    это снимало все запреты (`.env`, ключи) для всего cwd; в
+    `write_guard.extra_paths` — роняло каждую охраняемую запись
+    (`path must not be empty`); в `protected_paths.extra` — объявляло
+    защищённым весь cwd. Типичный источник — `${ENV:VAR}`, раскрывшийся в
+    пустоту, поэтому отказ называет индекс элемента; pydantic добавит путь
+    поля (`security.read_guard.allowed_read_paths: …`)."""
+    blank = [i for i, value in enumerate(values) if not str(value).strip()]
+    if blank:
+        indices = ", ".join(f"[{i}]" for i in blank)
+        raise ValueError(
+            f"пустой путь в списке (элемент {indices}) — пустая строка "
+            "раскрывается в текущий каталог процесса; уберите элемент или "
+            "впишите путь"
+        )
+    return values
+
+
 def validate_binary_read_policy(raw_mode: Any) -> str:
     mode = str(raw_mode if raw_mode is not None else "ask").strip().lower()
     if mode not in ALLOWED_BINARY_READ_MODES:
@@ -58,7 +82,7 @@ class WriteGuardConfig(BaseModel):
       allow — нарушение → пропустить, audit log пометит `out_of_perimeter`.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
     enabled: bool = True
     mode: str = "ask"
     extra_paths: list[str] = Field(default_factory=list)
@@ -73,6 +97,11 @@ class WriteGuardConfig(BaseModel):
             )
         return mode
 
+    @field_validator("extra_paths")
+    @classmethod
+    def validate_extra_paths(cls, value: list[str]) -> list[str]:
+        return reject_blank_paths(value)
+
 
 class UrlPolicyConfig(BaseModel):
     """
@@ -84,7 +113,7 @@ class UrlPolicyConfig(BaseModel):
       allow — нарушение → пропустить, audit log пометит `out_of_perimeter`.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
     enabled: bool = True
     mode: str = "ask"
     allowed_schemes: list[str] = Field(
@@ -112,7 +141,7 @@ class ReadGuardConfig(BaseModel):
     forward‑compat, но в v1 не enforce'ятся (kept-for-future).
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
     enabled: bool = True
     mode: str = "ask"
     # Пустой список трактуется как [launch_root] — строгий периметр проекта.
@@ -124,13 +153,19 @@ class ReadGuardConfig(BaseModel):
     denied_file_patterns: list[str] = Field(default_factory=list)
     denied_extensions: list[str] = Field(default_factory=list)
     # forward-compat: размер и бинарная политика (не enforce'ятся в v1).
-    max_file_size_kb: int = 1024
-    binary_read_policy: str = "ask"
+    max_file_size_kb: int = Field(
+        default=1024, json_schema_extra=gc_meta(expert=True)
+    )
+    binary_read_policy: str = Field(
+        default="ask", json_schema_extra=gc_meta(expert=True)
+    )
     binary_allowed_types: list[str] = Field(
-        default_factory=lambda: list(_DEFAULT_BINARY_ALLOWED_TYPES)
+        default_factory=lambda: list(_DEFAULT_BINARY_ALLOWED_TYPES),
+        json_schema_extra=gc_meta(expert=True),
     )
     binary_allowed_extensions: list[str] = Field(
-        default_factory=lambda: list(_DEFAULT_BINARY_ALLOWED_EXTENSIONS)
+        default_factory=lambda: list(_DEFAULT_BINARY_ALLOWED_EXTENSIONS),
+        json_schema_extra=gc_meta(expert=True),
     )
 
     @field_validator("mode")
@@ -148,11 +183,18 @@ class ReadGuardConfig(BaseModel):
     def validate_binary(cls, value: str) -> str:
         return validate_binary_read_policy(value)
 
+    @field_validator(
+        "allowed_read_roots", "allowed_read_paths", "denied_read_paths"
+    )
+    @classmethod
+    def validate_path_lists(cls, value: list[str]) -> list[str]:
+        return reject_blank_paths(value)
+
 
 class DownloadConfig(BaseModel):
     """Настройки тула download_file: каталог загрузки и лимит размера тела ответа."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
     download_dir: str = "downloads"
     max_bytes: int = 52_428_800
 
@@ -166,7 +208,7 @@ class CommandModerationConfig(BaseModel):
     enabled=True + mode=ask/deny — судья активен.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
     enabled: bool = True
     mode: str = "ask"
     allowed_command_examples: list[str] = Field(default_factory=list)
@@ -189,9 +231,14 @@ class ProtectedPathsConfig(BaseModel):
     extra — дополнительные пути, которые нельзя трогать.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
     enabled: bool = True
     extra: list[str] = Field(default_factory=list)
+
+    @field_validator("extra")
+    @classmethod
+    def validate_extra(cls, value: list[str]) -> list[str]:
+        return reject_blank_paths(value)
 
 
 class SecurityConfig(BaseModel):
@@ -207,52 +254,16 @@ class SecurityConfig(BaseModel):
           protected_paths:    {enabled, extra}
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
     command_moderation: CommandModerationConfig = Field(
         default_factory=CommandModerationConfig
     )
     write_guard: WriteGuardConfig = Field(default_factory=WriteGuardConfig)
     read_guard: ReadGuardConfig = Field(default_factory=ReadGuardConfig)
     url_policy: UrlPolicyConfig = Field(default_factory=UrlPolicyConfig)
-    download: DownloadConfig = Field(default_factory=DownloadConfig)
+    download: DownloadConfig = Field(
+        default_factory=DownloadConfig, json_schema_extra=gc_meta(expert=True)
+    )
     protected_paths: ProtectedPathsConfig = Field(
         default_factory=ProtectedPathsConfig
     )
-
-
-def apply_cli_command_moderation_overrides(
-    config_dict: Dict[str, Any],
-    *,
-    write_guard_enabled: Optional[bool] = None,
-    command_moderation_mode: Optional[str] = None,
-    read_guard_enabled: Optional[bool] = None,
-    read_guard_mode: Optional[str] = None,
-) -> None:
-    """
-    Накладывает CLI-override'ы на top-level config_dict (после load_config).
-    Поля верхнего уровня: command_moderation, write_guard, read_guard, url_policy.
-    """
-    command_moderation = config_dict.setdefault("command_moderation", {})
-    if command_moderation_mode is not None:
-        command_moderation["mode"] = validate_command_moderation_mode(
-            command_moderation_mode
-        )
-    elif "mode" not in command_moderation:
-        command_moderation["mode"] = "ask"
-    command_moderation.setdefault("enabled", True)
-
-    write_guard = config_dict.setdefault("write_guard", {})
-    if write_guard_enabled is not None:
-        write_guard["enabled"] = bool(write_guard_enabled)
-    elif "enabled" not in write_guard:
-        write_guard["enabled"] = True
-
-    read_guard = config_dict.setdefault("read_guard", {})
-    if read_guard_enabled is not None:
-        read_guard["enabled"] = bool(read_guard_enabled)
-    elif "enabled" not in read_guard:
-        read_guard["enabled"] = True
-    if read_guard_mode is not None:
-        read_guard["mode"] = validate_read_guard_mode(read_guard_mode)
-    elif "mode" not in read_guard:
-        read_guard["mode"] = "ask"

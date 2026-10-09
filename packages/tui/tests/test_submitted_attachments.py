@@ -5,6 +5,7 @@ import pytest
 
 from gc_core.attachments.model import chip_text
 from image_helpers import make_attachment
+from gc_testkit.tui_support import tui_settings
 
 
 def test_submitted_defaults_to_no_attachments():
@@ -34,7 +35,9 @@ async def test_enter_captures_images_before_the_screen_clears_the_input(
 
     monkeypatch.setattr(TraceScreen, "on_command_text_area_submitted", spy)
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     app._executor_factory = lambda: _Fake()
     async with app.run_test() as pilot:

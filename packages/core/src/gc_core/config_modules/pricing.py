@@ -4,6 +4,8 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from gc_core.config_modules.field_meta import gc_meta
+
 DEFAULT_CURRENCY = "₽"
 DEFAULT_PER_TOKENS = 1_000_000
 
@@ -16,7 +18,7 @@ class ModelTariff(BaseModel):
     Если не задана → кэшированные токены биллятся по обычной ``input``-ставке
     (обратная совместимость: провайдеры/модели без кэша не затронуты)."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     input: float
     output: float
@@ -37,7 +39,7 @@ class PricingConfig(BaseModel):
     конкретные модели (мультимодельные сетапы).
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     enabled: bool = False
     currency: str = DEFAULT_CURRENCY
@@ -45,8 +47,12 @@ class PricingConfig(BaseModel):
     # Дефолтный тариф (fallback, когда модели нет в ``models``).
     input: Optional[float] = None
     output: Optional[float] = None
-    cache_read: Optional[float] = None
-    models: dict[str, ModelTariff] = Field(default_factory=dict)
+    cache_read: Optional[float] = Field(
+        default=None, json_schema_extra=gc_meta(expert=True)
+    )
+    models: dict[str, ModelTariff] = Field(
+        default_factory=dict, json_schema_extra=gc_meta(expert=True)
+    )
 
 
 class ResolvedTariff(BaseModel):
@@ -55,7 +61,7 @@ class ResolvedTariff(BaseModel):
     ``cache_read`` — ставка кэшированных input-токенов; None → кэш биллится по ``input``.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     input: float
     output: float
@@ -75,14 +81,6 @@ def _coerce_pricing(raw: Any) -> PricingConfig:
 # Публичный алиас для внешних модулей (см. usage/cost.py) — приватное имя
 # остаётся ради вызовов внутри этого файла.
 coerce_pricing = _coerce_pricing
-
-
-def pricing_from_config_dict(
-    config_dict: dict[str, Any] | None,
-) -> PricingConfig:
-    """Достать ``PricingConfig`` из плоского config_dict (ключ ``pricing``)."""
-    cfg = config_dict if isinstance(config_dict, dict) else {}
-    return _coerce_pricing(cfg.get("pricing"))
 
 
 def _rates_configured(input_rate: Any, output_rate: Any) -> bool:

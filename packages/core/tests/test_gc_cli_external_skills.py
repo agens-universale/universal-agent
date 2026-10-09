@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 from gc_testkit import as_coro
+from gc_testkit.settings import fake_ctx
 
 # tests/harbor/ (a test-fixture package) shadows the real harbor framework:
 # reorder sys.path so real site-packages wins, then evict cached shadows.
@@ -111,7 +112,7 @@ class FakeEnv:
 
 
 def _agent(**overrides) -> GcCliExternal:
-    cfg = {"completions_url": "http://test/v1/chat/completions"}
+    cfg = {"backend.completions_url": "http://test/v1/chat/completions"}
     cfg.update(overrides)
     return GcCliExternal(
         logs_dir=Path("/tmp"), model_name="openai/m", gc_cli_config=cfg
@@ -121,7 +122,7 @@ def _agent(**overrides) -> GcCliExternal:
 def test_merge_uploads_profile_skills_into_harbor_root(tmp_path):
     _skill(tmp_path, "threat-model")
     _skill(tmp_path, "validation")
-    agent = _agent(skills_data_path=str(tmp_path))
+    agent = _agent(**{"paths.skills_data_path": str(tmp_path)})
     env = FakeEnv(existing_dirs={"/harbor/skills"})
 
     root, sources = asyncio.run(
@@ -144,7 +145,7 @@ def test_merge_uploads_pack_root_whole(tmp_path):
     """
     (tmp_path / "pack.yaml").write_text("id: cybergym\n")
     _skill(tmp_path, "using-cybergym")
-    agent = _agent(skills_data_path=str(tmp_path))
+    agent = _agent(**{"paths.skills_data_path": str(tmp_path)})
     env = FakeEnv(existing_dirs={"/harbor/skills"})
 
     root, sources = asyncio.run(
@@ -159,7 +160,7 @@ def test_merge_uploads_pack_root_whole(tmp_path):
 def test_merge_skips_name_already_present_in_container(tmp_path):
     _skill(tmp_path, "mesh-analysis")
     _skill(tmp_path, "validation")
-    agent = _agent(skills_data_path=str(tmp_path))
+    agent = _agent(**{"paths.skills_data_path": str(tmp_path)})
     # the task already injected mesh-analysis
     env = FakeEnv(
         existing_dirs={"/harbor/skills", "/harbor/skills/mesh-analysis"}
@@ -175,7 +176,7 @@ def test_merge_skips_name_already_present_in_container(tmp_path):
 
 def test_merge_creates_default_root_when_harbor_injected_nothing(tmp_path):
     _skill(tmp_path, "validation")
-    agent = _agent(skills_data_path=str(tmp_path))
+    agent = _agent(**{"paths.skills_data_path": str(tmp_path)})
     env = FakeEnv()
 
     root, sources = asyncio.run(agent._merge_profile_skills(env, None))
@@ -186,7 +187,7 @@ def test_merge_creates_default_root_when_harbor_injected_nothing(tmp_path):
 
 
 def test_merge_raises_when_profile_dir_missing_on_runner(tmp_path):
-    agent = _agent(skills_data_path=str(tmp_path / "nope"))
+    agent = _agent(**{"paths.skills_data_path": str(tmp_path / "nope")})
     env = FakeEnv()
 
     with pytest.raises(RuntimeError, match="does not exist on the runner"):
@@ -197,7 +198,7 @@ def test_merge_raises_when_profile_dir_missing_on_runner(tmp_path):
 
 def test_merge_warns_and_uploads_nothing_when_no_skill_md(tmp_path):
     (tmp_path / "notes").mkdir()
-    agent = _agent(skills_data_path=str(tmp_path))
+    agent = _agent(**{"paths.skills_data_path": str(tmp_path)})
     env = FakeEnv(existing_dirs={"/harbor/skills"})
 
     root, sources = asyncio.run(
@@ -212,11 +213,19 @@ from types import SimpleNamespace
 
 
 def _stub_core(monkeypatch, captured: dict):
-    """Capture the config the core would receive; skip the real agent loop."""
+    """Capture the settings the core would receive; skip the real agent loop."""
+
+    def _context(settings, **_kw):
+        captured["loaded"] = settings
+        return SimpleNamespace(
+            settings=settings.settings,
+            runtime=settings.runtime,
+            os_backend=None,
+        )
 
     class StubExecutor:
         def __init__(self, ctx):
-            captured["config"] = ctx.config_dict
+            captured["config"] = ctx.settings
 
         # Адаптер ведёт агента своим `asyncio.run(executor.arun(...))`:
         # синхронного `run` на этом пути больше нет.
@@ -227,10 +236,7 @@ def _stub_core(monkeypatch, captured: dict):
             return SimpleNamespace(messages=[])
 
     monkeypatch.setattr(
-        "gc_core.run_context.acreate_run_context",
-        _as_async(
-            lambda cfg, **kw: SimpleNamespace(config_dict=cfg, os_backend=None)
-        ),
+        "gc_core.run_context.acreate_run_context", _as_async(_context)
     )
     monkeypatch.setattr("gc_core.agent_executor.AgentExecutor", StubExecutor)
 
@@ -243,8 +249,8 @@ def test_run_merges_profile_skills_and_points_config_at_container_root(
         logs_dir=tmp_path / "logs",
         model_name="openai/m",
         gc_cli_config={
-            "completions_url": "http://test/v1/chat/completions",
-            "skills_data_path": str(tmp_path),
+            "backend.completions_url": "http://test/v1/chat/completions",
+            "paths.skills_data_path": str(tmp_path),
         },
     )
     env = FakeEnv(existing_dirs={"/harbor/skills"})
@@ -258,7 +264,9 @@ def test_run_merges_profile_skills_and_points_config_at_container_root(
         )
     )
 
-    assert captured["config"]["skills_data_path"] == "/harbor/skills"
+    assert captured["config"].paths.skills_data_path == "/harbor/skills"
+    # Файловые и exec-тулы агента — в контейнере задачи.
+    assert captured["loaded"].runtime.os_backend == "harbor"
     assert [t for _, t in env.uploads] == ["/harbor/skills/threat-model"]
 
 
@@ -270,8 +278,8 @@ def test_run_merges_profile_skills_without_backend_special_casing(
         logs_dir=tmp_path / "logs",
         model_name="openai/m",
         gc_cli_config={
-            "completions_url": "http://test/v1/chat/completions",
-            "skills_data_path": str(tmp_path),
+            "backend.completions_url": "http://test/v1/chat/completions",
+            "paths.skills_data_path": str(tmp_path),
         },
     )
     env = FakeEnv(existing_dirs={"/harbor/skills"})
@@ -286,7 +294,7 @@ def test_run_merges_profile_skills_without_backend_special_casing(
     )
 
     assert [t for _, t in env.uploads] == ["/harbor/skills/threat-model"]
-    assert captured["config"]["skills_data_path"] == "/harbor/skills"
+    assert captured["config"].paths.skills_data_path == "/harbor/skills"
 
 
 async def test_skills_debug_artifact_records_loaded_ids_and_sources(
@@ -295,7 +303,9 @@ async def test_skills_debug_artifact_records_loaded_ids_and_sources(
     agent = GcCliExternal(
         logs_dir=tmp_path / "logs",
         model_name="openai/m",
-        gc_cli_config={"completions_url": "http://test/v1/chat/completions"},
+        gc_cli_config={
+            "backend.completions_url": "http://test/v1/chat/completions"
+        },
     )
     monkeypatch.setattr(
         "gc_core.tools.skills.registry.get_skills_registry",
@@ -305,8 +315,8 @@ async def test_skills_debug_artifact_records_loaded_ids_and_sources(
             )
         ),
     )
-    ctx = SimpleNamespace(
-        config_dict={"skills_data_path": "/harbor/skills"}, os_backend=None
+    ctx = fake_ctx(
+        {"paths.skills_data_path": "/harbor/skills"}, os_backend=None
     )
 
     await agent._write_skills_debug(
@@ -329,7 +339,9 @@ async def test_skills_debug_artifact_marks_collision_source_as_task(
     agent = GcCliExternal(
         logs_dir=tmp_path / "logs",
         model_name="openai/m",
-        gc_cli_config={"completions_url": "http://test/v1/chat/completions"},
+        gc_cli_config={
+            "backend.completions_url": "http://test/v1/chat/completions"
+        },
     )
     monkeypatch.setattr(
         "gc_core.tools.skills.registry.get_skills_registry",
@@ -337,8 +349,8 @@ async def test_skills_debug_artifact_marks_collision_source_as_task(
             list_skills=as_coro(lambda: [{"id": "threat-model"}])
         ),
     )
-    ctx = SimpleNamespace(
-        config_dict={"skills_data_path": "/harbor/skills"}, os_backend=None
+    ctx = fake_ctx(
+        {"paths.skills_data_path": "/harbor/skills"}, os_backend=None
     )
 
     # "threat-model" collided: the task already provided a skill with this name, so
@@ -374,12 +386,12 @@ async def test_skills_debug_pack_source_via_real_registry(tmp_path):
     agent = GcCliExternal(
         logs_dir=tmp_path / "logs",
         model_name="openai/m",
-        gc_cli_config={"completions_url": "http://test/v1/chat/completions"},
+        gc_cli_config={
+            "backend.completions_url": "http://test/v1/chat/completions"
+        },
     )
     # Реальный registry (single-source) без стабов — как в проде.
-    ctx = SimpleNamespace(
-        config_dict={"skills_data_path": str(tmp_path)}, os_backend=None
-    )
+    ctx = fake_ctx({"paths.skills_data_path": str(tmp_path)}, os_backend=None)
 
     await agent._write_skills_debug(
         ctx, {"cybergym": "profile", "threat-model": "profile"}
@@ -399,18 +411,18 @@ async def test_skills_debug_artifact_failure_does_not_raise(
     agent = GcCliExternal(
         logs_dir=tmp_path / "logs",
         model_name="openai/m",
-        gc_cli_config={"completions_url": "http://test/v1/chat/completions"},
+        gc_cli_config={
+            "backend.completions_url": "http://test/v1/chat/completions"
+        },
     )
 
-    def _boom(cfg, backend=None):
+    def _boom(*_args, **_kwargs):
         raise RuntimeError("registry exploded")
 
     monkeypatch.setattr(
         "gc_core.tools.skills.registry.get_skills_registry", _boom
     )
 
-    await agent._write_skills_debug(
-        SimpleNamespace(config_dict={}, os_backend=None), {}
-    )
+    await agent._write_skills_debug(fake_ctx(os_backend=None), {})
 
     assert not (tmp_path / "logs" / "skills.json").exists()

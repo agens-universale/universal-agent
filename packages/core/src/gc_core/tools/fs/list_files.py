@@ -4,9 +4,10 @@ import os
 from typing import Any, Dict, List, Optional
 
 from gc_core.backends.protocol import WalkOutputTooLargeError
+from gc_core.execution.tool_schema import coalesce_optional_string
 from gc_core.loop_detector.constants import READ_PROFILE, loop_warn_on_repeat
 from gc_core.security.path_policy import (
-    _extract_config_dict,
+    _settings_source,
     resolve_tool_context,
 )
 from gc_core.security.read_guard import (
@@ -18,7 +19,6 @@ from gc_core.security.read_guard import (
 )
 from gc_core.tools.fs.agent_hidden import is_agent_hidden
 from gc_core.tools.fs.cooperative import LoopYielder
-from gc_core.tools.schema_optional import coalesce_optional_string
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 from gc_core.utils.glob_to_regex import compile_glob
 from gc_core.utils.tool_report_paths import tool_report_abspath
@@ -44,8 +44,11 @@ def _matches(file_matcher, rel: str) -> bool:
 class ListFiles(AbstractSimpleTool):
     """List files and directories under a path with optional depth and glob filter."""
 
+    # A retry can observe newer files, but never repeats an external mutation.
+    effect_is_read_only = True
+
     @classmethod
-    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None):
+    def tool_description(cls, settings: Any = None):
         return {
             "type": "function",
             "name": "fs_list_files",
@@ -99,7 +102,7 @@ class ListFiles(AbstractSimpleTool):
         }
 
     @classmethod
-    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None):
+    def prompt_description(cls, settings: Any = None):
         description = """Tool name: fs_list_files
 List files and directories under an absolute directory path.
 Default max_depth=0 = immediate children only; raise max_depth to list nested entries.
@@ -184,13 +187,11 @@ Examples:
         `extra_allowed` — программные exceptions (например, путь до skills).
         """
         context = resolve_tool_context(self)
-        config_dict = _extract_config_dict(
-            self, getattr(context, "ctx", None), {}
-        )
-        cfg = parse_read_guard_config(config_dict)
+        source = _settings_source(self, getattr(context, "ctx", None), {})
+        cfg = parse_read_guard_config(source)
         if not cfg.enabled:
             return None, None, None
-        skills_root = _resolve_skills_root(config_dict)
+        skills_root = _resolve_skills_root(source)
         extra_allowed = [skills_root] if skills_root else None
         return cfg, context.launch_root, extra_allowed
 

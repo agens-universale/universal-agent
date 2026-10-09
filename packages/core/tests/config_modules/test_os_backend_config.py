@@ -2,11 +2,10 @@
 """Секция `os_backend:` — схема, строковое сокращение, обязательные поля по kind."""
 
 import pytest
-from pydantic import ValidationError
-
-from gc_core.config import flatten_app_config
+from gc_core.backends.factory import os_backend_section
 from gc_core.config_modules.os_backend import OsBackendConfig
 from gc_core.config_modules.root import AppConfig
+from pydantic import ValidationError
 
 
 def test_defaults_are_local():
@@ -74,17 +73,19 @@ def test_sandbox_workdir_only_auto_or_null():
         )
 
 
-def test_app_config_has_section_and_flatten_projects_dict():
+def test_app_config_has_section_and_projects_dict():
     app = AppConfig.model_validate(
         {"os_backend": {"kind": "docker", "docker": {"name": "box"}}}
     )
-    flat = flatten_app_config(app)
-    assert flat["os_backend"]["kind"] == "docker"
-    assert flat["os_backend"]["docker"]["name"] == "box"
+    assert app.os_backend.kind == "docker"
+    section = os_backend_section(app)
+    assert section["kind"] == "docker"
+    assert section["docker"]["name"] == "box"
 
 
-def test_app_config_default_flattens_to_local():
-    assert flatten_app_config(AppConfig())["os_backend"]["kind"] == "local"
+def test_app_config_default_is_local():
+    assert AppConfig().os_backend.kind == "local"
+    assert os_backend_section(AppConfig())["kind"] == "local"
 
 
 def test_fetch_url_locus_and_skills_defaults():

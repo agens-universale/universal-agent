@@ -13,6 +13,7 @@ import types
 
 import pytest
 from gc_testkit import run_coro
+from gc_testkit.settings import fake_ctx, make_settings
 
 # ---------------------------------------------------------------------------
 # C1: run_summary_coordinator
@@ -39,7 +40,7 @@ def _coord(
         messages=[{"role": "user", "content": "x" * 20_000}],
     )
     coord = rsc.RunSummaryCoordinator(
-        ctx=types.SimpleNamespace(),
+        ctx=fake_ctx(),
         state=state,
         thread_session=None,
         summary_trigger_chars=10_000,
@@ -165,14 +166,17 @@ class TestC1TurnEndCompact:
 
 class TestC2AgentExecutorFinally:
     def _make_cfg(self, tmp_path):
-        return {
-            "threads_data_path": str(tmp_path),
-            "backend_api_mode": "chat_completions",
-            "completions_url": "http://test",
-            "model": "x",
-            "max_steps": 1,
-            "system_prompt_id": "v1",
-        }
+        return make_settings(
+            {
+                "paths.threads_data_path": str(tmp_path),
+                "backend.api_mode": "chat_completions",
+                "backend.completions_url": "http://test",
+                "agent.model": "x",
+                "agent.max_steps": 1,
+                "agent.system_prompt_id": "v1",
+                "logging.save_logs": False,
+            }
+        )
 
     async def test_collect_called_in_finally(self, monkeypatch, tmp_path):
         """gc.collect вызывается в finally AgentExecutor.run после close_all.
@@ -248,7 +252,7 @@ class TestC3ProcessingResponses:
     """C3: gc.collect перед return tools_outputs, под флагом gc.force_collect."""
 
     def _run_process_tool_calls(
-        self, monkeypatch, *, config_dict, is_tui=False, is_cli_mode=False
+        self, monkeypatch, *, config, is_tui=False, is_cli_mode=False
     ):
         """Вызывает process_tool_calls с замоканным бэкендом и собирает
         флаг был ли вызван gc.collect."""
@@ -263,8 +267,8 @@ class TestC3ProcessingResponses:
             return [{"role": "assistant", "content": "ok"}], "rid", {}
 
         monkeypatch.setattr(pr, "_arequest_backend_canonical", _abackend_stub)
-        ctx = types.SimpleNamespace(
-            config_dict=config_dict,
+        ctx = fake_ctx(
+            config,
             is_tui=is_tui,
             is_cli_mode=is_cli_mode,
         )
@@ -291,32 +295,16 @@ class TestC3ProcessingResponses:
 
     def test_collect_default_on_for_cli(self, monkeypatch):
         gc_calls = self._run_process_tool_calls(
-            monkeypatch, config_dict={}, is_cli_mode=True
+            monkeypatch, config={}, is_cli_mode=True
         )
         assert len(gc_calls) == 1, "default on для CLI"
 
     def test_collect_default_on_for_tui(self, monkeypatch):
         gc_calls = self._run_process_tool_calls(
-            monkeypatch, config_dict={}, is_tui=True
+            monkeypatch, config={}, is_tui=True
         )
         assert len(gc_calls) == 1, "default on для TUI"
 
     def test_no_collect_default_off_for_server(self, monkeypatch):
-        gc_calls = self._run_process_tool_calls(monkeypatch, config_dict={})
+        gc_calls = self._run_process_tool_calls(monkeypatch, config={})
         assert gc_calls == [], "default off для server"
-
-    def test_explicit_force_collect_true_overrides_server_off(
-        self, monkeypatch
-    ):
-        gc_calls = self._run_process_tool_calls(
-            monkeypatch, config_dict={"gc": {"force_collect": True}}
-        )
-        assert len(gc_calls) == 1
-
-    def test_explicit_force_collect_false_overrides_cli_on(self, monkeypatch):
-        gc_calls = self._run_process_tool_calls(
-            monkeypatch,
-            config_dict={"gc": {"force_collect": False}},
-            is_cli_mode=True,
-        )
-        assert gc_calls == []

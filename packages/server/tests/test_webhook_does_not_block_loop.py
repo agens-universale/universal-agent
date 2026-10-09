@@ -14,6 +14,7 @@ import asyncio
 import time
 
 import pytest
+from gc_testkit.settings import make_settings
 
 # Сборка «идёт» столько; порог разрыва loop заведомо меньше.
 _BUILD_SEC = 0.5
@@ -34,14 +35,14 @@ def blocking_ctx(monkeypatch):
     начнут звать прямо на loop, тест это увидит.
     """
 
-    def _slow(config_dict, on_progress=None, **kwargs):
+    def _slow(settings, on_progress=None, **kwargs):
         time.sleep(_BUILD_SEC)
         return {}, {}
 
-    async def _aslow(config_dict, on_progress=None, **kwargs):
+    async def _aslow(settings, on_progress=None, **kwargs):
         import asyncio as _a
 
-        return await _a.to_thread(_slow, config_dict, on_progress, **kwargs)
+        return await _a.to_thread(_slow, settings, on_progress, **kwargs)
 
     import gc_core.tools.connect_mcp.agent_tools as agent_tools
 
@@ -74,7 +75,9 @@ async def test_context_build_leaves_the_loop_free(blocking_ctx):
         await asyncio.sleep(0.05)
 
         started = time.monotonic()
-        await blocking_ctx.acreate_run_context({}, auth_connector=None)
+        await blocking_ctx.acreate_run_context(
+            make_settings({"logging.save_logs": False}), auth_connector=None
+        )
         elapsed = time.monotonic() - started
 
         stop.set()

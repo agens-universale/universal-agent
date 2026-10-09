@@ -490,7 +490,7 @@ def test_reject_large_file(tmp_path):
     p.write_text("small", encoding="utf-8")
     tool = with_local_ctx(
         SearchAndReplace,
-        config_dict={"fs_tools": {"max_mutate_bytes": 1}},
+        {"fs_tools": {"max_mutate_bytes": 1}},
     )
     res = json.loads(tool(path=str(p), search="x y", replace="z"))
     assert res["ok"] is False and res["matched"] is False

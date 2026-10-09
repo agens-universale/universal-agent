@@ -29,8 +29,7 @@ _HAS_GREP_CASES = [
 def _cfg(root):
     return {
         "launch_root": str(root),
-        "root_box": {"enabled": True, "launch_root": str(root)},
-        "read_guard": {
+        "security.read_guard": {
             "enabled": True,
             "mode": "deny",
             "denied_file_patterns": [".env", ".env.*", "*.pem", "*id_rsa*"],
@@ -72,7 +71,7 @@ def tree(tmp_path):
 
 @pytest.mark.parametrize("has_grep", _HAS_GREP_CASES)
 def test_denied_files_never_reach_the_payload(tree, monkeypatch, has_grep):
-    tool = with_local_ctx(FindInFiles, config_dict=_cfg(tree))
+    tool = with_local_ctx(FindInFiles, _cfg(tree))
     monkeypatch.setattr(
         type(tool._backend), "has_grep", has_grep, raising=False
     )
@@ -91,7 +90,7 @@ def test_denied_files_never_reach_the_payload(tree, monkeypatch, has_grep):
 def test_denied_files_text_mode_never_reach_the_payload(
     tree, monkeypatch, has_grep
 ):
-    tool = with_local_ctx(FindInFiles, config_dict=_cfg(tree))
+    tool = with_local_ctx(FindInFiles, _cfg(tree))
     monkeypatch.setattr(
         type(tool._backend), "has_grep", has_grep, raising=False
     )
@@ -115,7 +114,7 @@ def test_native_denied_hits_first_allowed_still_visible_or_incomplete(
     )
     (tmp_path / "ok.py").write_text('KEY = "visible"\n', encoding="utf-8")
 
-    tool = with_local_ctx(FindInFiles, config_dict=_cfg(tmp_path))
+    tool = with_local_ctx(FindInFiles, _cfg(tmp_path))
     monkeypatch.setattr(type(tool._backend), "has_grep", True, raising=False)
 
     raw = tool(path=str(tmp_path), pattern="KEY", query_mode="text", limit=2)
@@ -140,7 +139,7 @@ def test_native_only_denied_matches_scan_complete(tmp_path, monkeypatch):
     (tmp_path / ".env").write_text(f"KEY={MARKER}\n", encoding="utf-8")
     (tmp_path / "ok.py").write_text("nothing here\n", encoding="utf-8")
 
-    tool = with_local_ctx(FindInFiles, config_dict=_cfg(tmp_path))
+    tool = with_local_ctx(FindInFiles, _cfg(tmp_path))
     monkeypatch.setattr(type(tool._backend), "has_grep", True, raising=False)
 
     raw = tool(path=str(tmp_path), pattern="KEY", query_mode="text")
@@ -158,7 +157,7 @@ def test_native_only_denied_matches_scan_complete(tmp_path, monkeypatch):
 def test_allowed_file_still_found(tree):
     """Гвард не должен глушить обычный поиск."""
     data = json.loads(
-        with_local_ctx(FindInFiles, config_dict=_cfg(tree))(
+        with_local_ctx(FindInFiles, _cfg(tree))(
             path=str(tree), pattern="SECRET", query_mode="python-re"
         )
     )

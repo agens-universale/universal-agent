@@ -19,8 +19,9 @@ from gc_core.tools.subagents.active_scope import (
     is_child_input_active,
     try_enqueue_user_message,
 )
-from gc_core.tools.subagents.progress import QueueSubagentProgressSink
+from gc_core.execution.progress import QueueSubagentProgressSink
 from gc_core.tools.subagents.runner import SubagentRunner
+from gc_testkit.settings import fake_ctx
 
 # Уборщика глобали больше нет: скоуп живёт в контексте прогона и не может
 # пережить тест — переживать негде.
@@ -45,22 +46,20 @@ def _make_orchestrator_state():
 
 def _make_config(**overrides):
     cfg = {
-        "use_local_subagents": True,
-        "backend_api_mode": "chat_completions",
-        "enabled_tools": [],
-        "skills_data_path": "",
-        "mcp_servers": [],
-        "model": "test-model",
-        "system_prompt_id": "test-prompt",
-        "subagent_max_steps": 30,
+        "agent.use_local_subagents": True,
+        "backend.api_mode": "chat_completions",
+        "paths.skills_data_path": "",
+        "agent.model": "test-model",
+        "agent.system_prompt_id": "test-prompt",
+        "agent.subagent_max_steps": 30,
     }
     cfg.update(overrides)
     return cfg
 
 
 def _make_ctx(cfg=None, **extra):
-    ns = SimpleNamespace(
-        config_dict=cfg or _make_config(),
+    ns = fake_ctx(
+        cfg or _make_config(),
         auth_connector=None,
         logger=None,
         logging_path="",
@@ -142,7 +141,7 @@ class TestAgentExecutorRoutesToChild:
         with _activate(ctx, parent_call_id="call_sub_1") as scope:
             ex.add_message({"role": "user", "content": "to child", "id": "m1"})
             assert scope.drain()[0]["content"] == "to child"
-            with ex.get_lock():
+            with ex._lock:
                 assert ex._pending_messages == []
 
     def test_add_message_goes_to_parent_when_no_child(self):
@@ -152,7 +151,7 @@ class TestAgentExecutorRoutesToChild:
         ctx.child_input_scope = None
         ex = AgentExecutor(ctx)
         ex.add_message({"role": "user", "content": "to parent"})
-        with ex.get_lock():
+        with ex._lock:
             assert len(ex._pending_messages) == 1
             assert ex._pending_messages[0]["content"] == "to parent"
 
@@ -176,7 +175,7 @@ class TestRunnerWiresPending:
             captured["drained"] = pending
             return "done"
 
-        runner = SubagentRunner(ctx, orch, cfg)
+        runner = SubagentRunner(ctx, orch)
         runner._parent_call_id = "call_parent_9"
 
         def _run():
@@ -314,7 +313,7 @@ class TestRunnerWiresPending:
             system_id="cli",
             thread_id="task-steer",
         )
-        runner = SubagentRunner(ctx, orch, cfg)
+        runner = SubagentRunner(ctx, orch)
 
         def _run():
             with patch.object(
@@ -469,5 +468,5 @@ class TestParentPendingUnchangedWithoutChild:
         ex = AgentExecutor(ctx)
         msg = {"role": "user", "content": "hello"}
         ex.add_message(msg)
-        with ex.get_lock():
+        with ex._lock:
             assert ex._pending_messages == [msg]

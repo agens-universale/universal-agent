@@ -162,14 +162,16 @@ async def afetch_via_backend(
     raise TooManyRedirects(current, max_redirects)
 
 
-def fetches_on_backend(
-    config_dict: Optional[Dict[str, Any]], backend: Any
-) -> bool:
-    """Качать через бэкенд: так настроено и бэкенд — не хост."""
-    section = (config_dict or {}).get("os_backend")
-    if not isinstance(section, dict):
+def fetches_on_backend(settings: Any, backend: Any) -> bool:
+    """Качать через бэкенд: так настроено и бэкенд — не хост.
+
+    ``settings`` — всё, что принимает ``settings_of``; ``None`` — на хосте.
+    """
+    if settings is None:
         return False
-    if section.get("fetch_url_execute_on") != "os_backend":
+    from gc_core.settings import settings_of
+
+    if settings_of(settings).os_backend.fetch_url_execute_on != "os_backend":
         return False
     return bool(getattr(backend, "is_sandbox", False))
 

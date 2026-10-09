@@ -60,7 +60,12 @@ def test_list_dir_hides_git(tmp_path):
 
 import subprocess
 
-from gc_tui.services.file_index import fuzzy_search, rank
+from gc_tui.services.file_index import PathIndex, rank
+
+
+def fuzzy_search(root: str, query: str) -> list[str]:
+    """Разовый поиск без кэша — свежий PathIndex на каждый запрос."""
+    return PathIndex(root).search(query)
 
 
 def test_rank_prefix_of_basename_first():

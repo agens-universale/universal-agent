@@ -1,8 +1,9 @@
 def test_build_mcp_tools_snapshot_groups_by_server():
     from gc_core.tools.mcp_snapshot import build_mcp_tools_snapshot
+    from gc_testkit.settings import make_settings
 
     config = {
-        "mcp-servers": {"search": {"transport": "sse", "url": "http://x"}}
+        "mcp.servers": {"search": {"transport": "sse", "url": "http://x"}}
     }
     # Реальная форма tools_data: ключ тула = mcp_<server>_<base>; значение содержит "description".
     tools_data = {
@@ -12,7 +13,7 @@ def test_build_mcp_tools_snapshot_groups_by_server():
             "spec": {},
         },  # не-MCP — должен быть исключён
     }
-    snap = build_mcp_tools_snapshot(config, tools_data)
+    snap = build_mcp_tools_snapshot(make_settings(config), tools_data)
     assert "search" in snap
     assert any(
         t["name"] == "mcp_search_web" and "web search" in t["description"]
@@ -25,11 +26,13 @@ def test_build_mcp_tools_snapshot_groups_by_server():
 
 def test_build_mcp_tools_snapshot_empty_servers():
     from gc_core.tools.mcp_snapshot import build_mcp_tools_snapshot
+    from gc_testkit.settings import make_settings
 
-    assert build_mcp_tools_snapshot({}, {}) == {}
+    assert build_mcp_tools_snapshot(make_settings({}), {}) == {}
     assert (
         build_mcp_tools_snapshot(
-            {"mcp-servers": {}}, {"read_file": {"description": "x"}}
+            make_settings({"mcp.servers": {}}),
+            {"read_file": {"description": "x"}},
         )
         == {}
     )
@@ -37,9 +40,10 @@ def test_build_mcp_tools_snapshot_empty_servers():
 
 def test_snapshot_includes_status_and_description():
     from gc_core.tools.mcp_snapshot import build_mcp_tools_snapshot
+    from gc_testkit.settings import make_settings
 
     config = {
-        "mcp-servers": {
+        "mcp.servers": {
             "office": {
                 "transport": "stdio",
                 "command": "office-mcp",
@@ -67,7 +71,9 @@ def test_snapshot_includes_status_and_description():
             "elapsed_ms": 3,
         },
     }
-    snap = build_mcp_tools_snapshot(config, tools_data, mcp_status)
+    snap = build_mcp_tools_snapshot(
+        make_settings(config), tools_data, mcp_status
+    )
     assert snap["office"]["status"] == "connected"
     assert snap["office"]["description"] == "Read office docs"
     assert snap["office"]["tools"] == [
@@ -80,13 +86,14 @@ def test_snapshot_includes_status_and_description():
 
 def test_snapshot_without_status_defaults_unknown():
     from gc_core.tools.mcp_snapshot import build_mcp_tools_snapshot
+    from gc_testkit.settings import make_settings
 
     config = {
-        "mcp-servers": {
+        "mcp.servers": {
             "office": {"transport": "stdio", "command": "office-mcp"}
         }
     }
-    snap = build_mcp_tools_snapshot(config, {}, None)
+    snap = build_mcp_tools_snapshot(make_settings(config), {}, None)
     assert snap["office"]["status"] == "unknown"
     assert snap["office"]["tools"] == []
 

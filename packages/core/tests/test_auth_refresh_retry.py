@@ -1,12 +1,11 @@
 """_request_backend_canonical: на 401 (истёкший токен) пере-выпускает токен и
 повторяет запрос ровно один раз; прочие ошибки — наверх без ретрая."""
 
-import types
-
 import httpx
 import pytest
 from gc_core import processing_responses as pr
 from gc_testkit import run_coro
+from gc_testkit.settings import fake_ctx
 
 
 class _FakeAuth:
@@ -20,9 +19,7 @@ class _FakeAuth:
 
 
 def _ctx(auth):
-    return types.SimpleNamespace(
-        config_dict={}, auth_connector=auth, logger=None
-    )
+    return fake_ctx(auth_connector=auth, logger=None)
 
 
 def _http_401():

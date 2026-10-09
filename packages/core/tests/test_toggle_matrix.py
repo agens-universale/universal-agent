@@ -69,7 +69,7 @@ import re
 from pathlib import Path
 
 import pytest
-from toggle_matrix import ALL_CASES, run_case
+from toggle_matrix import ALL_CASES, UNREPRESENTABLE, run_case
 
 #: Эталон снят на origin/develop (e66a1e90) тем же стендом.
 #:
@@ -124,6 +124,8 @@ async def test_toggle_matches_pre_async(
     case, reference, tmp_path, monkeypatch
 ):
     """Один прогон на положение переключателей — против до-async эталона."""
+    if case.id in UNREPRESENTABLE:
+        pytest.skip(f"схема не выражает: {UNREPRESENTABLE[case.id]}")
     expected = reference[case.id]
     actual = await run_case(case, tmp_path, monkeypatch)
 
@@ -133,6 +135,21 @@ async def test_toggle_matches_pre_async(
         ), f"{case.id}: поле {field!r} разошлось с до-async прогоном" + (
             f"\n  ({case.note})" if case.note else ""
         )
+
+
+@pytest.mark.parametrize(
+    "case",
+    [case for case in ALL_CASES if case.id in UNREPRESENTABLE],
+    ids=lambda c: c.id,
+)
+async def test_unrepresentable_case_is_rejected_by_schema(
+    case, tmp_path, monkeypatch
+):
+    """Исключённый из сверки случай действительно невыразим: сборка отказывает
+    громко, на валидации настроек, а не молча игнорирует значение."""
+    actual = await run_case(case, tmp_path, monkeypatch)
+    assert actual["answer"] is None
+    assert str(actual["error"]).startswith("ValidationError"), actual["error"]
 
 
 def test_summary_cases_actually_compact(reference):
@@ -193,7 +210,12 @@ def test_every_live_schema_key_is_covered_or_explained(reference):
         "logging.format": "logging_format",
         "logging.propagate": "logging_propagate",
     }
-    touched = {p.split(".")[-1] for case in ALL_CASES for p in case.overrides}
+    touched = {
+        p.split(".")[-1]
+        for case in ALL_CASES
+        if case.id not in UNREPRESENTABLE
+        for p in case.overrides
+    }
     gap = [
         leaf
         for leaf in leaves(AppConfig)

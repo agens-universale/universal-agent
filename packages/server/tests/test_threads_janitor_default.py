@@ -31,6 +31,7 @@ from fastapi.testclient import TestClient
 from gc_server.server_cleanup_threads import (
     register_cleanup_threads_on_startup,
 )
+from gc_testkit.settings import make_settings
 
 
 @pytest.fixture(autouse=True)
@@ -58,7 +59,9 @@ def _run(server_config, threads_dir, caplog):
     register_cleanup_threads_on_startup(
         app,
         server_config=server_config,
-        base_agent_config={"threads_data_path": threads_dir},
+        base_agent_settings=make_settings(
+            {"paths.threads_data_path": threads_dir}
+        ),
         logger=logging.getLogger("gc_server.server_cleanup_threads"),
     )
     with caplog.at_level(

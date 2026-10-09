@@ -1,4 +1,6 @@
+from gc_testkit.tui_support import as_settings, tui_settings
 import pytest
+from screen_text import config_text
 
 
 def test_profile_header_hides_unset_model_sentinel():
@@ -7,8 +9,8 @@ def test_profile_header_hides_unset_model_sentinel():
     from gc_core import onboarding
     from gc_tui.screens.config import _profile_header_text
 
-    cfg = {"model": onboarding.MODEL_SENTINEL}
-    text = _profile_header_text(cfg, profile_source=None).plain
+    cfg = {"agent.model": onboarding.MODEL_SENTINEL}
+    text = _profile_header_text(as_settings(cfg), profile_source=None).plain
     assert onboarding.MODEL_SENTINEL not in text
 
 
@@ -20,12 +22,12 @@ def test_profile_header_shows_registry_model_not_flat_key():
     from gc_tui.screens.config import _profile_header_text
 
     cfg = {
-        "model": onboarding.MODEL_SENTINEL,
+        "agent.model": onboarding.MODEL_SENTINEL,
         "level": "default",
         "models": {"flash": {"model": "google/gemini-2.5-flash"}},
         "slots": {"default": "flash"},
     }
-    text = _profile_header_text(cfg, profile_source=None).plain
+    text = _profile_header_text(as_settings(cfg), profile_source=None).plain
     assert "модель: flash" in text
 
 
@@ -35,12 +37,12 @@ def test_profile_header_prefers_resolved_model_over_stale_flat_key():
     from gc_tui.screens.config import _profile_header_text
 
     cfg = {
-        "model": "stale-legacy-model",
+        "agent.model": "stale-legacy-model",
         "level": "default",
         "models": {"flash": {"model": "google/gemini-2.5-flash"}},
         "slots": {"default": "flash"},
     }
-    text = _profile_header_text(cfg, profile_source=None).plain
+    text = _profile_header_text(as_settings(cfg), profile_source=None).plain
     assert "stale-legacy-model" not in text
     assert "модель: flash" in text
 
@@ -50,7 +52,7 @@ def test_profile_header_falls_back_to_flat_model_in_legacy_mode():
     from gc_tui.screens.config import _profile_header_text
 
     text = _profile_header_text(
-        {"model": "qwen3-coder"}, profile_source=None
+        as_settings({"agent.model": "qwen3-coder"}), profile_source=None
     ).plain
     assert "модель: qwen3-coder" in text
 
@@ -61,22 +63,26 @@ async def test_config_screen_yaml_redacts_secret_and_shows_paths(tmp_path):
     from gc_tui.app import TuiApp
 
     cfg = {
-        "model": "M",
-        "chat_completions_auth_token": "sk-REAL",
-        "agent_md_path": "/p/agent.md",
-        "threads_data_path": "/p/threads",
-        "logs_dump_dir": "/p/logs",
-        "mcp-servers": {},
+        "agent.model": "M",
+        "backend.chat_completion_headers": {"Authorization": "Bearer sk-REAL"},
+        "paths.agent_md_path": "/p/agent.md",
+        "paths.threads_data_path": "/p/threads",
+        "paths.logs_dump_dir": "/p/logs",
+        "mcp.servers": {},
     }
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config=cfg)
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings(cfg)
+    )
     app._config_path = "/p/config.yml"
     async with app.run_test() as pilot:
         from gc_tui.screens.config import ConfigScreen
 
-        scr = ConfigScreen(config=app._config, config_path=app._config_path)
+        scr = ConfigScreen(
+            settings=app.base_settings(), config_path=app._config_path
+        )
         await app.push_screen(scr)
         await pilot.pause()
-        text = scr.rendered_text()  # helper: весь YAML + пути одной строкой
+        text = config_text(scr)  # helper: весь YAML + пути одной строкой
         assert "sk-REAL" not in text  # секрет замаскирован
         assert "***" in text
         assert "/p/config.yml" in text  # путь конфига
@@ -91,7 +97,9 @@ async def test_command_config_opens_screen(tmp_path):
     from gc_tui.screens.config import ConfigScreen
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     app._config_path = "/p/config.yml"
     async with app.run_test() as pilot:
@@ -109,7 +117,9 @@ async def test_config_screen_esc_returns_to_main(tmp_path):
     from gc_tui.screens.main import TraceScreen
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     app._config_path = "/p/config.yml"
     async with app.run_test() as pilot:
@@ -129,11 +139,15 @@ async def test_config_screen_has_header_and_footer(tmp_path):
     from gc_tui.screens.config import ConfigScreen
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     app._config_path = "/p/config.yml"
     async with app.run_test() as pilot:
-        scr = ConfigScreen(config=app._config, config_path=app._config_path)
+        scr = ConfigScreen(
+            settings=app.base_settings(), config_path=app._config_path
+        )
         await app.push_screen(scr)
         await pilot.pause()
         assert scr.query("#header") and scr.query("#footer")
@@ -146,7 +160,11 @@ def test_paths_block_is_rich_text_without_pseudo_comment():
     from gc_tui.screens.config import _paths_block
     from rich.text import Text
 
-    t = _paths_block({"agent_md_path": "/p/agent.md"}, "/p/config.yml", None)
+    t = _paths_block(
+        as_settings({"paths.agent_md_path": "/p/agent.md"}),
+        "/p/config.yml",
+        None,
+    )
     assert isinstance(t, Text)
     plain = t.plain
     assert "# Пути" not in plain  # псевдокомментарий ушёл в border_title
@@ -160,7 +178,9 @@ def test_paths_block_is_rich_text_without_pseudo_comment():
 def test_paths_block_project_local_line():
     from gc_tui.screens.config import _paths_block
 
-    plain = _paths_block({}, "/p/config.yml", "/p/.gc/config.yml").plain
+    plain = _paths_block(
+        as_settings({}), "/p/config.yml", "/p/.gc/config.yml"
+    ).plain
     assert "+ project-local:" in plain and "/p/.gc/config.yml" in plain
 
 
@@ -171,11 +191,15 @@ async def test_config_screen_fieldset_panels(tmp_path):
     from gc_tui.screens.config import ConfigScreen
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     app._config_path = "/p/config.yml"
     async with app.run_test() as pilot:
-        scr = ConfigScreen(config=app._config, config_path=app._config_path)
+        scr = ConfigScreen(
+            settings=app.base_settings(), config_path=app._config_path
+        )
         await app.push_screen(scr)
         await pilot.pause()
         panels = list(scr.query(".config-panel"))
@@ -189,17 +213,21 @@ async def test_config_screen_fieldset_panels(tmp_path):
 @pytest.mark.asyncio
 async def test_config_screen_snapshot_hint_caption(tmp_path):
     # Подсказка-снимок: вторая строка трейса (первая — шапка профиль/уровень/модель,
-    # спека §12.3a) и присутствует в rendered_text().
+    # спека §12.3a) и присутствует в тексте экрана (`config_text`).
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
     from gc_tui.screens.config import _SNAPSHOT_HINT, ConfigScreen
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     app._config_path = "/p/config.yml"
     async with app.run_test() as pilot:
-        scr = ConfigScreen(config=app._config, config_path=app._config_path)
+        scr = ConfigScreen(
+            settings=app.base_settings(), config_path=app._config_path
+        )
         await app.push_screen(scr)
         await pilot.pause()
         trace = scr.query_one("#trace")
@@ -207,7 +235,7 @@ async def test_config_screen_snapshot_hint_caption(tmp_path):
         assert first.has_class("config-caption")
         assert second.has_class("config-caption")
         assert "после перезапуска" in _SNAPSHOT_HINT
-        assert _SNAPSHOT_HINT in scr.rendered_text()
+        assert _SNAPSHOT_HINT in config_text(scr)
 
 
 @pytest.mark.asyncio
@@ -219,11 +247,15 @@ async def test_config_trace_quiet_focus_keeps_keyboard_scroll(tmp_path):
     from gc_tui.screens.config import ConfigScreen
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     app._config_path = "/p/config.yml"
     async with app.run_test() as pilot:
-        scr = ConfigScreen(config=app._config, config_path=app._config_path)
+        scr = ConfigScreen(
+            settings=app.base_settings(), config_path=app._config_path
+        )
         await app.push_screen(scr)
         await pilot.pause()
         trace = scr.query_one("#trace")
@@ -251,9 +283,9 @@ def test_quiet_focus_and_panel_rules_in_tcss():
 def test_filter_config_by_key_matches_key_keeps_subtree():
     from gc_tui.screens.config import _filter_config_by_key
 
-    cfg = {"model": "M", "mcp-servers": {"srv": {"transport": "http"}}}
+    cfg = {"agent.model": "M", "mcp.servers": {"srv": {"transport": "http"}}}
     assert _filter_config_by_key(cfg, "mcp") == {
-        "mcp-servers": {"srv": {"transport": "http"}}
+        "mcp.servers": {"srv": {"transport": "http"}}
     }
 
 
@@ -279,10 +311,18 @@ def test_filter_config_by_key_case_insensitive():
 def test_filtered_yaml_text_filters_full_and_no_match():
     from gc_tui.screens.config import ConfigScreen
 
-    scr = ConfigScreen(config={"model": "M", "mcp-servers": {"s": {}}})
+    scr = ConfigScreen(
+        settings=as_settings(
+            {
+                "agent.model": "M",
+                "mcp.servers": {"s": {"transport": "http", "url": "http://x"}},
+            }
+        )
+    )
     scr._filter = "mcp"
     txt = scr._filtered_yaml_text()
-    assert "mcp-servers" in txt and "model" not in txt
+    # Снимок — документом, как config.yml: секция `mcp` с `servers`.
+    assert "servers:" in txt and "model" not in txt
     scr._filter = "zzz"
     assert scr._filtered_yaml_text() == "(нет совпадений)"
     scr._filter = ""
@@ -296,11 +336,15 @@ async def test_config_filter_input_focused_and_filters(tmp_path):
     from gc_tui.screens.config import ConfigScreen
     from textual.widgets import Input
 
-    cfg = {"model": "M", "mcp-servers": {"srv": {"transport": "http"}}}
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config=cfg)
+    cfg = {"agent.model": "M", "mcp.servers": {"srv": {"transport": "http"}}}
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings(cfg)
+    )
     app._config_path = "/p/config.yml"
     async with app.run_test() as pilot:
-        scr = ConfigScreen(config=app._config, config_path=app._config_path)
+        scr = ConfigScreen(
+            settings=app.base_settings(), config_path=app._config_path
+        )
         await app.push_screen(scr)
         await pilot.pause()
         flt = scr.query_one("#config-filter", Input)

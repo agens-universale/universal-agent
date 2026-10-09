@@ -6,6 +6,7 @@ import hashlib
 from types import SimpleNamespace
 
 import pytest
+from gc_testkit.settings import fake_ctx, update_ctx
 
 from gc_core.agent_edits.journal import EditsJournal
 from gc_core.agent_edits.recorder import is_recording, record_edit
@@ -33,9 +34,9 @@ def _ctx(
     thread_id="th1",
     turn_id="turn-1",
 ):
-    return SimpleNamespace(
+    return fake_ctx(
+        {"launch_root": str(launch_root)},
         is_tui=True,  # режим с записью правок по умолчанию
-        config_dict={"launch_root": str(launch_root)},
         threads_dir=str(threads_dir),
         system_id=system_id,
         thread_id=thread_id,
@@ -435,7 +436,7 @@ async def test_ctx_without_thread_identity_is_noop(roots):
     launch_root, threads_dir = roots
     target = launch_root / "src" / "foo.py"
     target.parent.mkdir()
-    ctx = SimpleNamespace(config_dict={"launch_root": str(launch_root)})
+    ctx = fake_ctx({"launch_root": str(launch_root)})
 
     await record_edit(
         ctx,
@@ -563,7 +564,7 @@ async def test_extra_paths_no_longer_buy_a_baseline(roots):
     target.write_bytes(b"x = 1\n")
 
     ctx = _ctx(launch_root, threads_dir)
-    ctx.config_dict["write_guard"] = {"extra_paths": [str(extra)]}
+    update_ctx(ctx, **{"security.write_guard": {"extra_paths": [str(extra)]}})
 
     await record_edit(
         ctx,
@@ -716,11 +717,10 @@ async def test_cyrillic_path_and_cp1251_content_records_and_snapshots_bytes_exac
 def test_is_recording_requires_thread_identity(roots):
     launch_root, threads_dir = roots
     assert is_recording(_ctx(launch_root, threads_dir)) is True
-    assert is_recording(SimpleNamespace(config_dict={})) is False
+    assert is_recording(fake_ctx()) is False
     assert (
         is_recording(
-            SimpleNamespace(
-                config_dict={},
+            fake_ctx(
                 threads_dir=str(threads_dir),
                 system_id="cli",
                 thread_id="",
@@ -785,7 +785,7 @@ async def test_partial_skips_snapshots_and_file_hashes(roots):
 
 def _ctx_with_limit(launch_root, threads_dir, max_files: int):
     ctx = _ctx(launch_root, threads_dir)
-    ctx.config_dict["agent_edits"] = {"snapshots_max_files": max_files}
+    update_ctx(ctx, agent_edits={"snapshots_max_files": max_files})
     return ctx
 
 
@@ -1203,7 +1203,7 @@ async def test_garbage_source_cap_in_config_does_not_kill_the_snapshot(roots):
     target.parent.mkdir()
     target.write_bytes(b"old\n")
     ctx = _ctx(launch_root, threads_dir)
-    ctx.config_dict["agent_edits"] = {"max_diff_source_bytes": -1}
+    update_ctx(ctx, agent_edits={"max_diff_source_bytes": -1})
 
     await record_edit(
         ctx,
@@ -1224,15 +1224,25 @@ async def test_garbage_source_cap_in_config_does_not_kill_the_snapshot(roots):
     )
 
 
+@pytest.mark.filterwarnings("ignore:Pydantic serializer warnings")
 async def test_non_numeric_limit_in_config_does_not_lose_the_record(roots):
     """Нечисловое значение роняло `int()` внутри записи, а внешний
-    `except Exception` глотал исключение — правка исчезала из ленты и счётчиков."""
+    `except Exception` глотал исключение — правка исчезала из ленты и счётчиков.
+
+    Схема такое значение отвергает; здесь оно подложено в обход валидации
+    (`model_copy(update=...)`) — запись обязана пережить и его."""
     launch_root, threads_dir = roots
     target = launch_root / "src" / "foo.py"
     target.parent.mkdir()
     target.write_bytes(b"old\n")
     ctx = _ctx(launch_root, threads_dir)
-    ctx.config_dict["agent_edits"] = {"hunk_context_lines": "три"}
+    ctx.settings = ctx.settings.model_copy(
+        update={
+            "agent_edits": ctx.settings.agent_edits.model_copy(
+                update={"hunk_context_lines": "три"}
+            )
+        }
+    )
 
     await record_edit(
         ctx,
@@ -1287,9 +1297,9 @@ async def test_nothing_is_recorded_where_recording_is_off(tmp_path):
     threads_dir.mkdir()
     target = launch_root / "a.py"
     target.write_bytes(b"new\n")
-    ctx = SimpleNamespace(
+    ctx = fake_ctx(
+        {"launch_root": str(launch_root), "run_mode": "cli"},
         is_tui=False,
-        config_dict={"launch_root": str(launch_root), "run_mode": "cli"},
         threads_dir=str(threads_dir),
         system_id="cli",
         thread_id="th1",

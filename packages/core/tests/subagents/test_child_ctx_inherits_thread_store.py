@@ -31,18 +31,18 @@ INHERITED = (
 )
 
 
-def _build_child_ctx_node() -> ast.AsyncFunctionDef:
+def _build_child_ctx_node() -> ast.FunctionDef:
     tree = ast.parse(
         pathlib.Path(runner_module.__file__).read_text(encoding="utf-8")
     )
     return next(
         n
         for n in ast.walk(tree)
-        if isinstance(n, ast.AsyncFunctionDef) and n.name == "_build_child_ctx"
+        if isinstance(n, ast.FunctionDef) and n.name == "_bind_child_context"
     )
 
 
-def _assigned_from_parent(node: ast.AsyncFunctionDef) -> set:
+def _assigned_from_parent(node: ast.FunctionDef) -> set:
     """Поля `child_ctx.X = getattr(self._ctx, "X", …)`."""
     out = set()
     for stmt in ast.walk(node):

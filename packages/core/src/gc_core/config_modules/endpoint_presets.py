@@ -3,11 +3,13 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, ConfigDict
 
 
 class EndpointPreset(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
     name: str
     url: str
 
@@ -43,16 +45,12 @@ def default_endpoint_presets() -> list[EndpointPreset]:
     return list(DEFAULT_ENDPOINT_PRESETS)
 
 
-def endpoint_presets_from_config(cfg: dict) -> list[EndpointPreset]:
-    """Пресеты из сырого config-dict; ключа нет или содержимое не по форме —
-    кодовый дефолт (TUI работает и на невалидированных dict'ах тестов/легаси)."""
-    raw = (cfg or {}).get("endpoint_presets")
-    if not isinstance(raw, list) or not raw:
-        return default_endpoint_presets()
-    out: list[EndpointPreset] = []
-    for item in raw:
-        try:
-            out.append(EndpointPreset.model_validate(item))
-        except Exception:
-            return default_endpoint_presets()
-    return out
+def endpoint_presets_from_config(settings: Any) -> list[EndpointPreset]:
+    """Пресеты ``endpoint_presets`` настроек (всё, что принимает ``settings_of``);
+    пустой список — кодовый дефолт."""
+    # Ленивый импорт: settings → root → этот модуль.
+    from gc_core.settings import settings_of
+
+    return list(settings_of(settings).endpoint_presets) or (
+        default_endpoint_presets()
+    )

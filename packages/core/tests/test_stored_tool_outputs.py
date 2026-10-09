@@ -28,20 +28,20 @@ def _stub_optional_web_parsers() -> None:
 
 _stub_optional_web_parsers()
 
-from gc_core.persistence.state_repository import StateRepository
 from gc_core.processing_responses import aprocess_tool_calls
 from gc_core.states import State
 from gc_core.tools.session.stored_outputs.read_stored_tool_output import (
     ReadStoredToolOutput,
 )
-from gc_core.tools.session.stored_outputs.tool_call_outputs_store import (
+from gc_core.execution.output_store import (
     ToolCallOutputRecord,
     ToolCallOutputsStore,
 )
-from gc_core.tools.session.stored_outputs.wrapping import (
+from gc_core.execution.output_wrapping import (
     maybe_store_and_wrap_tool_output,
 )
 from gc_testkit import run_coro
+from gc_testkit.settings import fake_ctx, make_settings
 
 
 def _assert_pagination_metadata(
@@ -73,15 +73,15 @@ def _make_state() -> State:
 def test_wrap_short_output_returns_original_text():
     state = _make_state()
     cfg = {
-        "tool_output_inline_max_chars": 5,
-        "stored_tool_outputs_max_entries": 10,
+        "agent.tool_output_inline_max_chars": 5,
+        "agent.stored_tool_outputs_max_entries": 10,
     }
     res = maybe_store_and_wrap_tool_output(
         "abc",
         call_id="call_1",
         tool_name="some_tool",
         state=state,
-        config=cfg,
+        settings=make_settings(cfg),
     )
     assert res == "abc"
     assert len(state.tool_call_outputs_store) == 0
@@ -90,15 +90,15 @@ def test_wrap_short_output_returns_original_text():
 def test_wrap_long_output_stores_and_returns_envelope():
     state = _make_state()
     cfg = {
-        "tool_output_inline_max_chars": 5,
-        "stored_tool_outputs_max_entries": 10,
+        "agent.tool_output_inline_max_chars": 5,
+        "agent.stored_tool_outputs_max_entries": 10,
     }
     res = maybe_store_and_wrap_tool_output(
         "abcdefghij",
         call_id="call_2",
         tool_name="some_tool",
         state=state,
-        config=cfg,
+        settings=make_settings(cfg),
     )
     payload = json.loads(res)
     assert payload["type"] == "stored_tool_output"
@@ -120,28 +120,28 @@ def test_wrap_respects_feature_off_and_skip_self_tool():
     state = _make_state()
     state.tool_call_outputs_store.set_max_entries(0)
     off_cfg = {
-        "tool_output_inline_max_chars": 5,
-        "stored_tool_outputs_max_entries": 10,
+        "agent.tool_output_inline_max_chars": 5,
+        "agent.stored_tool_outputs_max_entries": 10,
     }
     res_off = maybe_store_and_wrap_tool_output(
         "abcdefghij",
         call_id="call_3",
         tool_name="some_tool",
         state=state,
-        config=off_cfg,
+        settings=make_settings(off_cfg),
     )
     assert res_off == "abcdefghij"
 
     on_cfg = {
-        "tool_output_inline_max_chars": 5,
-        "stored_tool_outputs_max_entries": 10,
+        "agent.tool_output_inline_max_chars": 5,
+        "agent.stored_tool_outputs_max_entries": 10,
     }
     res_self = maybe_store_and_wrap_tool_output(
         '{"tool":"session_read_stored_tool_output"}',
         call_id="call_4",
         tool_name="session_read_stored_tool_output",
         state=state,
-        config=on_cfg,
+        settings=make_settings(on_cfg),
     )
     assert res_self == '{"tool":"session_read_stored_tool_output"}'
 
@@ -149,8 +149,8 @@ def test_wrap_respects_feature_off_and_skip_self_tool():
 def test_wrap_never_replaces_turn_finish_status_with_stored_envelope():
     state = _make_state()
     cfg = {
-        "tool_output_inline_max_chars": 5,
-        "stored_tool_outputs_max_entries": 10,
+        "agent.tool_output_inline_max_chars": 5,
+        "agent.stored_tool_outputs_max_entries": 10,
     }
     rejected = json.dumps(
         {
@@ -165,7 +165,7 @@ def test_wrap_never_replaces_turn_finish_status_with_stored_envelope():
         call_id="call_finish",
         tool_name="turn_finish",
         state=state,
-        config=cfg,
+        settings=make_settings(cfg),
     )
     assert res == rejected
     assert json.loads(res)["ok"] is False
@@ -175,8 +175,8 @@ def test_wrap_never_replaces_turn_finish_status_with_stored_envelope():
 def test_wrap_fs_read_file_long_output_goes_to_store():
     state = _make_state()
     cfg = {
-        "tool_output_inline_max_chars": 80,
-        "stored_tool_outputs_max_entries": 10,
+        "agent.tool_output_inline_max_chars": 80,
+        "agent.stored_tool_outputs_max_entries": 10,
     }
     tool_res = json.dumps(
         {
@@ -194,7 +194,7 @@ def test_wrap_fs_read_file_long_output_goes_to_store():
         call_id="call_read",
         tool_name="fs_read_file",
         state=state,
-        config=cfg,
+        settings=make_settings(cfg),
     )
     payload = json.loads(res)
     assert payload["type"] == "stored_tool_output"
@@ -207,8 +207,8 @@ def test_wrap_fs_read_file_long_output_goes_to_store():
 def test_wrap_fs_read_file_short_line_window_stays_inline():
     state = _make_state()
     cfg = {
-        "tool_output_inline_max_chars": 20_000,
-        "stored_tool_outputs_max_entries": 10,
+        "agent.tool_output_inline_max_chars": 20_000,
+        "agent.stored_tool_outputs_max_entries": 10,
     }
     content = "\n".join(f"code {i}" for i in range(60))
     tool_res = json.dumps(
@@ -228,7 +228,7 @@ def test_wrap_fs_read_file_short_line_window_stays_inline():
         call_id="call_window",
         tool_name="fs_read_file",
         state=state,
-        config=cfg,
+        settings=make_settings(cfg),
     )
     assert res == tool_res
     assert json.loads(res)["truncated"] is True
@@ -265,7 +265,8 @@ def test_session_read_stored_tool_output_pagination_and_unicode():
     )
     tool = CallableTool(
         ReadStoredToolOutput(
-            state=state, config_dict={"tool_output_inline_max_chars": 2}
+            state=state,
+            settings=make_settings({"agent.tool_output_inline_max_chars": 2}),
         )
     )
     page1 = json.loads(tool(output_ref="ref-1", offset=0, limit=10))
@@ -309,7 +310,8 @@ def test_session_read_stored_tool_output_updates_lru_recency_before_next_put():
     # Read r1 through the tool: this must move r1 to MRU.
     tool = CallableTool(
         ReadStoredToolOutput(
-            state=state, config_dict={"tool_output_inline_max_chars": 5}
+            state=state,
+            settings=make_settings({"agent.tool_output_inline_max_chars": 5}),
         )
     )
     page = json.loads(tool(output_ref="r1", offset=0, limit=2))
@@ -337,7 +339,8 @@ def test_session_read_stored_tool_output_invalid_and_not_found():
     state = _make_state()
     tool = CallableTool(
         ReadStoredToolOutput(
-            state=state, config_dict={"tool_output_inline_max_chars": 5}
+            state=state,
+            settings=make_settings({"agent.tool_output_inline_max_chars": 5}),
         )
     )
     bad = json.loads(tool(output_ref="", offset=0, limit=1))
@@ -356,7 +359,8 @@ def test_session_read_stored_tool_output_not_found_when_store_missing_has_recove
     state = SimpleNamespace()
     tool = CallableTool(
         ReadStoredToolOutput(
-            state=state, config_dict={"tool_output_inline_max_chars": 5}
+            state=state,
+            settings=make_settings({"agent.tool_output_inline_max_chars": 5}),
         )
     )
     payload = json.loads(tool(output_ref="missing", offset=0, limit=1))
@@ -375,7 +379,8 @@ def test_session_read_stored_tool_output_error_paths_have_zero_next_offset():
     state = _make_state()
     tool = CallableTool(
         ReadStoredToolOutput(
-            state=state, config_dict={"tool_output_inline_max_chars": 5}
+            state=state,
+            settings=make_settings({"agent.tool_output_inline_max_chars": 5}),
         )
     )
 
@@ -420,7 +425,8 @@ def test_not_found_after_real_lru_eviction_has_expected_error_envelope():
 
     tool = CallableTool(
         ReadStoredToolOutput(
-            state=state, config_dict={"tool_output_inline_max_chars": 5}
+            state=state,
+            settings=make_settings({"agent.tool_output_inline_max_chars": 5}),
         )
     )
     payload = json.loads(tool(output_ref="evicted_ref", offset=0, limit=5))
@@ -443,10 +449,10 @@ def test_not_found_after_real_lru_eviction_has_expected_error_envelope():
 
 def test_process_tool_calls_wraps_long_tool_output(monkeypatch):
     state = _make_state()
-    ctx = SimpleNamespace(
-        config_dict={
-            "tool_output_inline_max_chars": 5,
-            "stored_tool_outputs_max_entries": 10,
+    ctx = fake_ctx(
+        {
+            "agent.tool_output_inline_max_chars": 5,
+            "agent.stored_tool_outputs_max_entries": 10,
         }
     )
 
@@ -479,53 +485,6 @@ def test_process_tool_calls_wraps_long_tool_output(monkeypatch):
     _assert_pagination_metadata(payload, expect_truncated=True)
 
 
-def test_state_serialization_roundtrip_restores_store_and_lru_order(tmp_path):
-    state = _make_state()
-    state.tool_call_outputs_store.set_max_entries(2)
-    state.tool_call_outputs_store.put(
-        ToolCallOutputRecord(
-            output_ref="r1",
-            source_tool="t",
-            call_id="c1",
-            total_chars=len("A😀"),
-            text="A😀",
-        )
-    )
-    state.tool_call_outputs_store.put(
-        ToolCallOutputRecord(
-            output_ref="r2",
-            source_tool="t",
-            call_id="c2",
-            total_chars=len("BC"),
-            text="BC",
-        )
-    )
-    # Now r2 should be LRU, r1 should be MRU.
-    assert state.tool_call_outputs_store.get("r1") is not None
-
-    dump_path = tmp_path / "state_dump.json"
-    StateRepository.save_snapshot(
-        {state.state_id: state}, str(dump_path), indent=2
-    )
-
-    restored_states = StateRepository.load_snapshot(str(dump_path))
-    restored_state = restored_states.get(state.state_id)
-    assert restored_state is not None
-
-    assert restored_state.tool_call_outputs_store.contains("r1")
-    assert restored_state.tool_call_outputs_store.contains("r2")
-    r3 = ToolCallOutputRecord(
-        output_ref="r3",
-        source_tool="t",
-        call_id="c3",
-        total_chars=1,
-        text="Z",
-    )
-    evicted = restored_state.tool_call_outputs_store.put(r3)
-    assert evicted is not None
-    assert evicted.output_ref == "r2"
-
-
 def test_feature_off_k_zero_clears_store_and_disables_read():
     state = _make_state()
     state.tool_call_outputs_store.set_max_entries(2)
@@ -547,7 +506,8 @@ def test_feature_off_k_zero_clears_store_and_disables_read():
 
     tool = CallableTool(
         ReadStoredToolOutput(
-            state=state, config_dict={"tool_output_inline_max_chars": 5}
+            state=state,
+            settings=make_settings({"agent.tool_output_inline_max_chars": 5}),
         )
     )
     payload = json.loads(tool(output_ref="ref-1", offset=0, limit=1))

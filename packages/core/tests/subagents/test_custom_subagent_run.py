@@ -4,8 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 from gc_core.run_context import acreate_run_context
-from gc_core.tools import SUBAGENT_TOOLS_ALLOW_KEY, SUBAGENT_TOOLS_STOP_KEY
 from gc_core.tools.subagents.runner import SubagentRunner
+from gc_testkit.settings import make_settings
 
 REQUIRED = (
     "turn_finish",
@@ -31,26 +31,24 @@ def _agent_file(tmp_path, name="subagent_alpha", tools=None, stop_tools=()):
 
 def _config(tmp_path, agents_dir, **extra):
     cfg = {
-        "logs_dump_dir": str(tmp_path / "logs"),
-        "save_logs": True,
-        "logging_format": "jsonl",
-        "console_trace": False,
-        "backend_api_mode": "chat_completions",
-        "completions_url": "http://localhost:1/v1/chat/completions",
-        "model": "test-model",
+        "paths.logs_dump_dir": str(tmp_path / "logs"),
+        "logging.save_logs": True,
+        "logging.format": "jsonl",
+        "logging.console_trace": False,
+        "backend.api_mode": "chat_completions",
+        "backend.completions_url": "http://localhost:1/v1/chat/completions",
+        "agent.model": "test-model",
         "launch_root": str(tmp_path),
-        "use_local_subagents": True,
-        "subagents_dir": agents_dir,
+        "agent.use_local_subagents": True,
+        "agent.subagents_dir": agents_dir,
     }
     cfg.update(extra)
     return cfg
 
 
 async def _runner(tmp_path, cfg, tool_name="subagent_alpha"):
-    ctx = await acreate_run_context(cfg)
-    runner = SubagentRunner(
-        ctx, SimpleNamespace(default_model="test-model"), cfg
-    )
+    ctx = await acreate_run_context(make_settings(cfg))
+    runner = SubagentRunner(ctx, SimpleNamespace(default_model="test-model"))
     runner._active_tool_name = tool_name
     return ctx, runner
 
@@ -64,33 +62,41 @@ class TestChildConfig:
         )
         _ctx, runner = await _runner(tmp_path, _config(tmp_path, agents))
         child = runner._build_child_config()
-        assert child[SUBAGENT_TOOLS_ALLOW_KEY] == ["fs_read_file", *REQUIRED]
-        assert child[SUBAGENT_TOOLS_STOP_KEY] == ["exec_python"]
+        assert child.runtime.subagent_tools_allow == (
+            "fs_read_file",
+            *REQUIRED,
+        )
+        assert child.runtime.subagent_tools_stop == ("exec_python",)
         # Глубина всегда 1.
-        assert child["use_local_subagents"] is False
+        assert child.settings.agent.use_local_subagents is False
 
     async def test_absent_tools_key_means_all_allowed(self, tmp_path):
         agents = _agent_file(tmp_path)
         _ctx, runner = await _runner(tmp_path, _config(tmp_path, agents))
-        assert runner._build_child_config()[SUBAGENT_TOOLS_ALLOW_KEY] is None
+        child = runner._build_child_config()
+        assert child.runtime.subagent_tools_allow is None
+        assert child.runtime.subagent_tools_stop == ()
 
     async def test_builtin_subagent_gets_no_filter(self, tmp_path):
         agents = _agent_file(tmp_path)
-        _ctx, runner = await _runner(
+        ctx, runner = await _runner(
             tmp_path, _config(tmp_path, agents), tool_name="subagent_worker"
         )
         child = runner._build_child_config()
-        assert SUBAGENT_TOOLS_ALLOW_KEY not in child
+        # Встроенный наследует рантайм родителя как есть — своей области нет.
+        assert child.runtime == ctx.runtime
 
     async def test_file_stop_tools_add_to_global_not_replace(self, tmp_path):
         # Глобальный вычитается внутри get_builtin_tools_data, файловый — поверх
         # полного набора. Снять глобальный запрет из файла нельзя.
         agents = _agent_file(tmp_path, stop_tools=("exec_command",))
-        cfg = _config(tmp_path, agents, stop_tools=["exec_python"])
+        cfg = _config(
+            tmp_path, agents, **{"agent.stop_tools": ["exec_python"]}
+        )
         _ctx, runner = await _runner(tmp_path, cfg)
         child = runner._build_child_config()
-        assert child["stop_tools"] == ["exec_python"]
-        assert child[SUBAGENT_TOOLS_STOP_KEY] == ["exec_command"]
+        assert list(child.settings.agent.stop_tools) == ["exec_python"]
+        assert child.runtime.subagent_tools_stop == ("exec_command",)
 
         from gc_core.tools import abuild_tools_data
 
@@ -101,10 +107,10 @@ class TestChildConfig:
 
 @pytest.mark.asyncio
 async def test_both_build_sites_agree(tmp_path):
-    """_build_child_state и _build_child_ctx обязаны видеть один и тот же конфиг.
+    """_build_child_state и _build_child_ctx обязаны видеть одни и те же настройки.
 
     Раньше словарь собирался в двух местах независимо — именно этот класс
-    рассинхрона уже приводил к расхождению ctx.trace_id и config_dict.
+    рассинхрона уже приводил к расхождению ctx.trace_id и конфига.
     """
     agents = _agent_file(tmp_path, tools=("fs_read_file", *REQUIRED))
     cfg = _config(tmp_path, agents)
@@ -113,12 +119,12 @@ async def test_both_build_sites_agree(tmp_path):
     child_ctx = await runner._build_child_ctx("subagent_alpha")
     state_config = runner._build_child_config()
 
-    for key in (
-        SUBAGENT_TOOLS_ALLOW_KEY,
-        SUBAGENT_TOOLS_STOP_KEY,
-        "use_local_subagents",
-    ):
-        assert child_ctx.config_dict.get(key) == state_config.get(key)
+    assert child_ctx.runtime == state_config.runtime
+    assert (
+        child_ctx.settings.agent.use_local_subagents
+        is state_config.settings.agent.use_local_subagents
+        is False
+    )
 
 
 @pytest.mark.asyncio

@@ -7,7 +7,10 @@ sys.argv = ["gc-cli", "-q", "x"]
 
 import pytest
 from gc_cli import cli
+from gc_core.settings import AppConfig
 from gc_core.tools.skills.skill_arg_resolver import SkillCatalog
+
+_SETTINGS = AppConfig()
 
 
 class _FakeReg:
@@ -35,46 +38,48 @@ def _cat():
 def _patch_reg(monkeypatch):
     monkeypatch.setattr(
         "gc_core.tools.skills.registry.get_skills_registry",
-        lambda config_dict=None: _FakeReg(_cat()),
+        lambda settings=None: _FakeReg(_cat()),
     )
 
 
 async def test_empty_is_noop(_patch_reg):
-    assert await cli._resolve_forced_skill("", {}) is None
-    assert await cli._resolve_forced_skill("   ", {}) is None
+    assert await cli._resolve_forced_skill("", _SETTINGS) is None
+    assert await cli._resolve_forced_skill("   ", _SETTINGS) is None
 
 
 async def test_empty_does_not_build_registry(monkeypatch):
-    def _boom(config_dict=None):
+    def _boom(settings=None):
         raise AssertionError("registry must not be built when -s is empty")
 
     monkeypatch.setattr(
         "gc_core.tools.skills.registry.get_skills_registry", _boom
     )
-    assert await cli._resolve_forced_skill("", {}) is None
-    assert await cli._resolve_forced_skill("   ", {}) is None
+    assert await cli._resolve_forced_skill("", _SETTINGS) is None
+    assert await cli._resolve_forced_skill("   ", _SETTINGS) is None
 
 
 async def test_exact_pack_id_resolves_and_notes(_patch_reg, capsys):
-    out = await cli._resolve_forced_skill("supercoder", {})
+    out = await cli._resolve_forced_skill("supercoder", _SETTINGS)
     assert out == "supercoder:using-supercoder"
     assert "note:" in capsys.readouterr().err
 
 
 async def test_canonical_resolves_no_note(_patch_reg, capsys):
-    out = await cli._resolve_forced_skill("supercoder:brainstorming", {})
+    out = await cli._resolve_forced_skill(
+        "supercoder:brainstorming", _SETTINGS
+    )
     assert out == "supercoder:brainstorming"
     assert "note:" not in capsys.readouterr().err
 
 
 async def test_typo_resolves_with_note(_patch_reg, capsys):
-    out = await cli._resolve_forced_skill("suprcoder", {})
+    out = await cli._resolve_forced_skill("suprcoder", _SETTINGS)
     assert out == "supercoder:using-supercoder"
     assert "note:" in capsys.readouterr().err
 
 
 async def test_not_found_soft_fallback_warns(_patch_reg, capsys):
-    out = await cli._resolve_forced_skill("zzzzzzzz", {})
+    out = await cli._resolve_forced_skill("zzzzzzzz", _SETTINGS)
     assert out == "zzzzzzzz"
     err = capsys.readouterr().err
     assert "warning:" in err
@@ -91,9 +96,9 @@ async def test_ambiguous_soft_fallback_warns_with_suggestions(
     )
     monkeypatch.setattr(
         "gc_core.tools.skills.registry.get_skills_registry",
-        lambda config_dict=None: _FakeReg(cat),
+        lambda settings=None: _FakeReg(cat),
     )
-    out = await cli._resolve_forced_skill("dup", {})
+    out = await cli._resolve_forced_skill("dup", _SETTINGS)
     assert out == "dup"
     err = capsys.readouterr().err
     assert "warning:" in err
@@ -109,9 +114,9 @@ async def test_fuzzy_ambiguous_soft_fallback_warns(monkeypatch, capsys):
     )
     monkeypatch.setattr(
         "gc_core.tools.skills.registry.get_skills_registry",
-        lambda config_dict=None: _FakeReg(cat),
+        lambda settings=None: _FakeReg(cat),
     )
-    out = await cli._resolve_forced_skill("foo-x", {})
+    out = await cli._resolve_forced_skill("foo-x", _SETTINGS)
     assert out == "foo-x"
     err = capsys.readouterr().err
     assert "warning:" in err
@@ -120,13 +125,13 @@ async def test_fuzzy_ambiguous_soft_fallback_warns(monkeypatch, capsys):
 
 
 async def test_catalog_build_failure_soft_fallback_warns(monkeypatch, capsys):
-    def _boom(config_dict=None):
+    def _boom(settings=None):
         raise RuntimeError("kaboom")
 
     monkeypatch.setattr(
         "gc_core.tools.skills.registry.get_skills_registry", _boom
     )
-    out = await cli._resolve_forced_skill("supercoder", {})
+    out = await cli._resolve_forced_skill("supercoder", _SETTINGS)
     assert out == "supercoder"
     err = capsys.readouterr().err
     assert "warning:" in err

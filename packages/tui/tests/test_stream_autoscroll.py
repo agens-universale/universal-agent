@@ -5,6 +5,7 @@
 детерминированы: контролируем `_trace_is_at_bottom` и шпионим `scroll_end`
 (без зависимости от геометрии вьюпорта)."""
 
+from gc_testkit.tui_support import tui_settings
 import json
 from pathlib import Path
 
@@ -45,11 +46,13 @@ async def test_stream_autoscrolls_on_growth_when_at_bottom(
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config={
-            "model": "M",
-            "backend_api_mode": "chat_completions",
-            "tui_stream_display": "answer",
-        },
+        settings=tui_settings(
+            {
+                "agent.model": "M",
+                "backend.api_mode": "chat_completions",
+                "tui.stream_display": "answer",
+            }
+        ),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -83,11 +86,13 @@ async def test_stream_no_autoscroll_when_scrolled_up(tmp_path, monkeypatch):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config={
-            "model": "M",
-            "backend_api_mode": "chat_completions",
-            "tui_stream_display": "answer",
-        },
+        settings=tui_settings(
+            {
+                "agent.model": "M",
+                "backend.api_mode": "chat_completions",
+                "tui.stream_display": "answer",
+            }
+        ),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen

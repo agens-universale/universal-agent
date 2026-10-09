@@ -17,17 +17,18 @@ from gc_core.tools.turn.intermediate_reply import IntermediateReply
 from gc_core.utils.logging_module import create_run_logger
 from gc_testkit import as_coro
 from gc_testkit.helpers.tool_ctx import CallableTool
+from gc_testkit.settings import make_settings
 
 
 def _jsonl_cfg(tmp_path, **extra):
     cfg = {
-        "logs_dump_dir": str(tmp_path),
-        "save_logs": True,
-        "console_trace": False,
-        "logging_format": "jsonl",
+        "paths.logs_dump_dir": str(tmp_path),
+        "logging.save_logs": True,
+        "logging.console_trace": False,
+        "logging.format": "jsonl",
     }
     cfg.update(extra)
-    return cfg
+    return make_settings(cfg)
 
 
 def _read_events(path):
@@ -62,6 +63,34 @@ def test_ask_human_question_and_response_events(tmp_path, monkeypatch):
     events = {e["event"]: e for e in _read_events(path)}
     assert events["ask_human_question"]["question"] == "Q?"
     assert events["ask_human_response"]["response"] == "hello"
+
+
+def test_ask_human_prints_dialog_only_outside_durable_execution(
+    tmp_path, monkeypatch, capsys
+):
+    """CLI видит вопрос в stderr, как раньше; код workflow (durable) — не
+    печатает (печать повторялась бы при replay), журнал прогона тот же."""
+    logger, path, _ = create_run_logger(
+        _jsonl_cfg(tmp_path), run_id="ah3", agent_kind="main"
+    )
+    answers = iter(["hello", "", "again", ""])
+    monkeypatch.setattr(builtins, "input", lambda: next(answers))
+
+    local = _FakeCtx(logger)
+    CallableTool(AskHuman(ctx=local))(question="Вопрос?")
+    assert "AI ASKS HUMAN" in capsys.readouterr().err
+
+    durable = _FakeCtx(logger)
+    durable.durable_execution = True
+    # Ответ в durable идёт портом приложения (здесь его нет) — важна печать.
+    CallableTool(AskHuman(ctx=durable))(question="Вопрос?")
+    assert "AI ASKS HUMAN" not in capsys.readouterr().err
+    for h in logger.handlers:
+        h.flush()
+    questions = [
+        e for e in _read_events(path) if e["event"] == "ask_human_question"
+    ]
+    assert len(questions) == 2
 
 
 def test_ask_human_interrupted_event(tmp_path, monkeypatch):
@@ -151,10 +180,10 @@ def minimal_config_dict(monkeypatch, tmp_path):
     )
     return _jsonl_cfg(
         tmp_path,
-        model="qwen2.5",
-        completions_url="http://backend/v1/chat",
-        backend_api_mode="chat_completions",
-        log_level="debug",
+        **{"agent.model": "qwen2.5"},
+        **{"backend.completions_url": "http://backend/v1/chat"},
+        **{"backend.api_mode": "chat_completions"},
+        **{"logging.log_level": "debug"},
     )
 
 

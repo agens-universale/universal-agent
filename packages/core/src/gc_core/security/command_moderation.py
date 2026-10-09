@@ -8,22 +8,33 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
+from gc_core.agent_store import (
+    DEFAULT_AGENT_STORE,
+    AgentResource,
+    AgentStore,
+    agent_store_of,
+)
 from gc_core.bundled_assets import bundled_root
 from gc_core.config_modules.security import validate_command_moderation_mode
-from gc_core.config_modules.strip_tags_projection import (
-    projection_tags_from_config,
-)
 from gc_core.constants.tool_names import EXEC_PYTHON_NAME
+from gc_core.execution.contracts import ExecutionFailure
+from gc_core.execution.ports import port
 from gc_core.message_projection import project_text_for_model
-from gc_core.security.confirm_port import confirm_available, request_confirm
+from gc_core.security.confirm_port import (
+    confirm_available,
+    confirmation_step,
+    request_confirm,
+)
 from gc_core.security.dual_wrapper import AwaitOnCaller, OffLoop, dual_wrap
+from gc_core.security.guard_probe import GuardProbeRequest, probe_step
 from gc_core.security.path_policy import (
     ToolSecurityContext,
-    _extract_config_dict,
+    _settings_source,
     audit_policy_decision,
     resolve_tool_context,
 )
 from gc_core.security.protected_paths import protected_paths
+from gc_core.settings import settings_of
 from gc_core.summarize.llm import (
     arequest_auxiliary_completion_text,
     auxiliary_llm_judge_max_tokens,
@@ -59,9 +70,6 @@ _VERDICT_DANGEROUS_RE = re.compile(
     r'"verdict"\s*:\s*"(?:potentially_dangerous|dangerous|unsafe)"\s*[,}]',
     re.IGNORECASE,
 )
-# bundled_root() — единый резолвер ассетов (editable → repo, wheel → site-packages).
-_PROJECT_ROOT = bundled_root()
-
 _CONFIDENCE_NOT_NUMERIC = "judge result confidence must be numeric"
 
 
@@ -83,15 +91,6 @@ def effective_command_cwd(
     return os.path.abspath(os.getcwd())
 
 
-_SECURITY_PROMPTS_DIR = _PROJECT_ROOT / "prompts" / "security"
-_COMMAND_JUDGE_SYSTEM_PROMPT_PATH = (
-    _SECURITY_PROMPTS_DIR / "command_judge_system.md"
-)
-_COMMAND_JUDGE_USER_PROMPT_PATH = (
-    _SECURITY_PROMPTS_DIR / "command_judge_user.md"
-)
-
-
 @dataclass(frozen=True)
 class ModerationContext:
     tool_name: str
@@ -107,6 +106,7 @@ class ModerationContext:
     insession_examples: dict[str, list[str]] = field(
         default_factory=lambda: {"allowed": [], "denied": []}
     )
+    prepared_never_touch_paths: list[str] | None = None
 
 
 @dataclass(frozen=True)
@@ -136,16 +136,27 @@ def _get_protected_paths(cwd: str | None):
     return protected_paths(cwd=cwd)
 
 
+def load_never_touch_paths(cwd: str | None) -> list[str]:
+    """Snapshot host paths with the command judge's existing local fallback."""
+    try:
+        paths = _get_protected_paths(cwd)
+        return sorted(
+            str(path) for path in paths.instructions | paths.operational
+        )
+    except Exception:
+        return []
+
+
 def build_judge_payload(
     tool_name: str,
     payload: str,
     context: ModerationContext,
 ) -> dict[str, Any]:
-    try:
-        ps = _get_protected_paths(context.cwd)
-        never_touch = sorted(str(p) for p in ps.instructions | ps.operational)
-    except Exception:
-        never_touch = []
+    never_touch = (
+        load_never_touch_paths(context.cwd)
+        if context.prepared_never_touch_paths is None
+        else list(context.prepared_never_touch_paths)
+    )
     return {
         "tool_name": tool_name,
         "payload": payload,
@@ -180,23 +191,6 @@ def run_command_judge(
     return validate_judge_result(raw_result)
 
 
-def run_command_judge_with_retry(
-    judge_client: Any, judge_payload: dict[str, Any], *, retries: int = 1
-) -> JudgeResult:
-    """Судья с ретраями: слабая модель часто отдаёт мусорный вердикт разово —
-    один повтор перед тем как признать судью недоступным. Если все попытки
-    исчерпаны — пробрасываем последнее исключение (декоратор переведёт это в
-    judge_unavailable → fail-closed, security не ослаблен)."""
-    last_exc: Exception | None = None
-    for _ in range(retries + 1):
-        try:
-            return run_command_judge(judge_client, judge_payload)
-        except Exception as exc:
-            last_exc = exc
-    assert last_exc is not None
-    raise last_exc
-
-
 def judge_with_retry_flow(
     judge_client: Any, judge_payload: dict[str, Any], *, retries: int = 1
 ):
@@ -223,6 +217,8 @@ def judge_with_retry_flow(
             if isinstance(raw, JudgeResult):
                 return raw
             return validate_judge_result(raw)
+        except ExecutionFailure:
+            raise
         except Exception as exc:
             last_exc = exc
     assert last_exc is not None
@@ -437,22 +433,13 @@ def moderate_command_execution(
         # свой пул httpx и новое TLS-рукопожатие на каждый `exec_command`.
         def _flow(*args: Any, **kwargs: Any):
             context = resolve_tool_context(*args, **kwargs)
-            # Если в config_dict отсутствует блок command_moderation вообще —
-            # модерация не сконфигурирована, пропускаем (legacy / unit-test поведение,
-            # симметрично write_guard.enabled default'у).
-            _cfg = _extract_config_dict(
-                args[0] if args else None,
-                getattr(context, "ctx", None),
-                kwargs,
+            # Модерация выключена (``security.command_moderation.enabled``) —
+            # тул идёт без судьи. Умолчание модели — включена
+            # (secure-by-default).
+            _source = _settings_source(
+                args[0] if args else None, getattr(context, "ctx", None)
             )
-            cm_cfg = _cfg.get("command_moderation")
-            if not isinstance(cm_cfg, dict):
-                return (yield)
-            # Runtime-fallback при отсутствии enabled — OFF (судья не вызывается).
-            # На нормальном пути load_config кладёт command_moderation из pydantic
-            # (secure-by-default enabled=True), поэтому fallback достижим лишь в
-            # обход load_config (bespoke/тест-конфиги), а не в проде.
-            if not bool(cm_cfg.get("enabled", False)):
+            if not settings_of(_source).security.command_moderation.enabled:
                 return (yield)
             try:
                 payload = _extract_payload(
@@ -460,8 +447,22 @@ def moderate_command_execution(
                 )
             except ValueError:
                 return (yield)
+            host_facts = None
+            if callable(port(context.ctx, "guard_probe")):
+                host_facts = yield probe_step(
+                    context.ctx,
+                    GuardProbeRequest(
+                        "command_host",
+                        tool_name or func.__name__,
+                        str(kwargs.get("cwd") or ""),
+                        context.launch_root,
+                    ),
+                )
             moderation_context = _build_context(
-                tool_name or func.__name__, context, kwargs
+                tool_name or func.__name__,
+                context,
+                kwargs,
+                host_facts=host_facts,
             )
             if moderation_context.mode == "allow":
                 audit_policy_decision(
@@ -489,6 +490,8 @@ def moderate_command_execution(
                     ),
                     retries=1,
                 )
+            except ExecutionFailure:
+                raise
             except Exception as exc:
                 judge_available = False
                 _log_command_judge_failure(
@@ -586,16 +589,26 @@ def _obtain_user_confirmation(
         and decision.reason_code != JUDGE_UNAVAILABLE_CONFIRM_REQUIRED
     ):
         return user_confirmation_extractor(*args, **kwargs)
-    # Единственное, что остаётся блокирующим по существу:
-    # человек думает, и асинхронной формы у этого нет.
     return (
-        yield OffLoop(
-            _ask_user_confirmation,
-            payload,
-            moderation_context,
-            decision,
-            tool_ctx,
-            on_interrupt=False,
+        yield confirmation_step(
+            title="Проверка команды",
+            question=f"Разрешить запуск? ({moderation_context.tool_name})",
+            fields=[
+                (
+                    _primary_payload_label(moderation_context.tool_name),
+                    payload,
+                ),
+                ("Причина", decision.reason),
+                ("Риски", ", ".join(decision.risk_flags) or "-"),
+            ],
+            ctx=tool_ctx,
+            decision_key=f"command:{payload}",
+            local_wait=lambda: _ask_user_confirmation(
+                payload,
+                moderation_context,
+                decision,
+                tool_ctx,
+            ),
         )
     )
 
@@ -604,8 +617,14 @@ def _build_context(
     tool_name: str,
     context: ToolSecurityContext,
     kwargs: dict[str, Any],
+    *,
+    host_facts: Any = None,
 ) -> ModerationContext:
-    cwd_value = effective_command_cwd(tool_name, kwargs, context)
+    cwd_value = (
+        host_facts.canonical_path
+        if host_facts is not None
+        else effective_command_cwd(tool_name, kwargs, context)
+    )
     insession_examples: dict[str, list[str]] = {"allowed": [], "denied": []}
     permission_store = getattr(context.ctx, "permission_store", None)
     if permission_store is not None:
@@ -619,12 +638,25 @@ def _build_context(
         extra_paths=context.write_guard.extra_paths,
         mode=context.command_moderation_mode,
         cwd=str(cwd_value),
-        os_name=os_label(),
-        shell=os.environ.get("SHELL") or os.environ.get("COMSPEC") or "",
-        has_venv=bool(os.environ.get("VIRTUAL_ENV")),
+        os_name=host_facts.os_name if host_facts is not None else os_label(),
+        shell=(
+            host_facts.shell
+            if host_facts is not None
+            else os.environ.get("SHELL") or os.environ.get("COMSPEC") or ""
+        ),
+        has_venv=(
+            host_facts.has_venv
+            if host_facts is not None
+            else bool(os.environ.get("VIRTUAL_ENV"))
+        ),
         allowed_command_examples=context.allowed_command_examples,
         denied_command_examples=context.denied_command_examples,
         insession_examples=insession_examples,
+        prepared_never_touch_paths=(
+            host_facts.data.get("never_touch_paths")
+            if host_facts is not None
+            else None
+        ),
     )
 
 
@@ -719,24 +751,37 @@ def _default_judge_client(
     self_obj = args[0] if args else None
     ctx = kwargs.get("ctx") or getattr(self_obj, "_ctx", None)
     state = kwargs.get("state") or getattr(self_obj, "_state", None)
-    cfg = (
-        getattr(ctx, "config_dict", None)
-        or getattr(self_obj, "_config_dict", None)
-        or {}
-    )
-    if ctx is None or state is None or not cfg.get("completions_url"):
+    settings = settings_of(_settings_source(self_obj, ctx))
+    configured = getattr(ctx, "model_transport_configured", None)
+    if configured is None:
+        configured = bool(settings.backend.completions_url)
+    if ctx is None or state is None or not configured:
         raise JudgeUnavailable("chat/completions context is not configured")
 
     async def ajudge(judge_payload: dict[str, Any]) -> dict[str, Any]:
+        prompts = None
+        if callable(port(ctx, "guard_probe")):
+            facts = await probe_step(
+                ctx,
+                GuardProbeRequest(
+                    "command_prompts",
+                    str(judge_payload.get("tool_name") or ""),
+                    "",
+                    str(judge_payload["launch_root"]),
+                ),
+            ).make_coro()
+            prompts = facts.data
         raw_text = await arequest_auxiliary_completion_text(
             ctx=ctx,
             state=state,
-            messages=_build_judge_messages(judge_payload),
+            messages=_build_judge_messages(
+                judge_payload, prompts=prompts, store=agent_store_of(ctx)
+            ),
             max_tokens=auxiliary_llm_judge_max_tokens(ctx),
             request_label="command_moderation_judge",
             consumer="command_judge",
         )
-        tags = projection_tags_from_config(cfg)
+        tags = tuple(str(tag) for tag in settings.strip_tags_projection.tags)
         return _parse_judge_json(
             raw_text,
             logger=getattr(ctx, "logger", None),
@@ -749,9 +794,21 @@ def _default_judge_client(
 
 def _build_judge_messages(
     judge_payload: dict[str, Any],
+    *,
+    prompts: dict[str, str] | None = None,
+    store: AgentStore = DEFAULT_AGENT_STORE,
 ) -> list[dict[str, str]]:
-    system_prompt = load_command_judge_prompt("system")
-    user_prompt = load_command_judge_prompt("user").format(
+    system_prompt = (
+        prompts["system"]
+        if prompts is not None
+        else load_command_judge_prompt("system", store=store)
+    )
+    user_template = (
+        prompts["user"]
+        if prompts is not None
+        else load_command_judge_prompt("user", store=store)
+    )
+    user_prompt = user_template.format(
         judge_payload_json=json.dumps(
             judge_payload, ensure_ascii=False, indent=2
         )
@@ -762,21 +819,34 @@ def _build_judge_messages(
     ]
 
 
-def load_command_judge_prompt(kind: str) -> str:
+def load_command_judge_prompt(
+    kind: str, *, store: AgentStore = DEFAULT_AGENT_STORE
+) -> str:
     if kind == "system":
-        path = _COMMAND_JUDGE_SYSTEM_PROMPT_PATH
+        path = (
+            bundled_root() / "prompts" / "security" / "command_judge_system.md"
+        )
     elif kind == "user":
-        path = _COMMAND_JUDGE_USER_PROMPT_PATH
+        path = (
+            bundled_root() / "prompts" / "security" / "command_judge_user.md"
+        )
     else:
         raise ValueError("Unknown command judge prompt kind.")
-    return _load_prompt_file(path)
+    return _load_prompt_file(path, store=store, name=f"command_judge_{kind}")
 
 
-def _load_prompt_file(path: Path) -> str:
+def _load_prompt_file(
+    path: Path,
+    *,
+    store: AgentStore = DEFAULT_AGENT_STORE,
+    name: str = "command_judge_system",
+) -> str:
     # «Недоступен» — это и «не декодируется» (`UnicodeDecodeError` подкласс
     # `ValueError`, а не `OSError`): судья отключается, а не роняет ход.
     try:
-        text = path.read_text(encoding="utf-8").strip()
+        text = store.read_text(
+            AgentResource("prompt", name, str(path))
+        ).strip()
     except (OSError, UnicodeDecodeError) as exc:
         raise JudgeUnavailable(
             f"Command judge prompt file is unavailable: {path}"
