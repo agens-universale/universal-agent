@@ -7,6 +7,7 @@ SPEC 2026-07-25 §3.1 B2/B8: Ctrl+C копирует наружу и допис�
 
 from __future__ import annotations
 
+from gc_testkit.tui_support import tui_settings
 import pytest
 
 pytest.importorskip("textual")
@@ -33,7 +34,9 @@ async def test_push_session_copy_buffer_writes_meta(tmp_path, monkeypatch):
     from gc_tui.services import clipboard_ops
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         monkeypatch.setattr(pilot.app, "copy_to_clipboard", lambda t: None)
@@ -54,7 +57,9 @@ async def test_push_session_copy_buffer_no_store_noop(tmp_path, monkeypatch):
     from gc_tui.app import TuiApp
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         # store is None на старте — не должно падать
@@ -92,7 +97,9 @@ async def test_ctrl_c_with_selection_pushes_session_buffer(
             pass
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     app._executor_factory = lambda: _Fake()
 
@@ -150,7 +157,9 @@ async def test_ctrl_c_without_selection_stops_no_push(tmp_path, monkeypatch):
             pass
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     app._executor_factory = lambda: _Fake()
 
@@ -196,7 +205,9 @@ async def test_push_session_buffer_blocked_on_copy_buffer_screen(
             self._active_task_id = "TID4"
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         monkeypatch.setattr(pilot.app, "copy_to_clipboard", lambda t: None)

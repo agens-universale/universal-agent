@@ -5,15 +5,15 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
-from PIL import Image
-from gc_testkit import as_coro
-
 from gc_core import processing_responses as pr
 from gc_core.attachments.model import ORIGIN_USER, chip_text, user_label
 from gc_core.attachments.normalize import normalize_image
 from gc_core.attachments.store import ImageStore
 from gc_core.constants.tool_names import ASK_HUMAN_TOOL_NAME
 from gc_core.tools.turn.ask_human import AskHuman, HumanAnswer
+from gc_testkit import as_coro
+from gc_testkit.settings import fake_ctx
+from PIL import Image
 
 
 def _png() -> bytes:
@@ -61,8 +61,8 @@ async def test_answer_images_ride_the_technical_message_after_the_batch(
     )
     text = f"{chip_text(3)} вот"
     spec = AskHuman.tool_description()
-    ctx = SimpleNamespace(
-        config_dict={},
+    ctx = fake_ctx(
+        {},
         logger=None,
         run_id="run",
         subagent_progress_sink=None,

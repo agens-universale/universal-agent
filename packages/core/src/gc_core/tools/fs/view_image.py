@@ -46,13 +46,13 @@ from gc_core.attachments.texts import (
 )
 from gc_core.config_modules.images import read_images_config
 from gc_core.constants.tool_names import FS_VIEW_IMAGE_NAME
+from gc_core.execution.tool_schema import coalesce_optional_string
 from gc_core.loop_detector.constants import READ_PROFILE, loop_warn_on_repeat
 from gc_core.security.media_roots import media_roots
 from gc_core.security.path_policy import resolve_tool_context
 from gc_core.security.protected_paths import classify_path, protected_paths
 from gc_core.security.read_guard import enforce_read_guard
 from gc_core.thread_paths import thread_address
-from gc_core.tools.schema_optional import coalesce_optional_string
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 from gc_core.utils.backend_errors import (
     http_status_code,
@@ -129,10 +129,11 @@ class _InputError(Exception):
 
 @loop_warn_on_repeat(**READ_PROFILE)
 class ViewImage(AbstractSimpleTool):
+    # Чтение файла картинки: повтор видит тот же или более новый файл.
+    effect_is_read_only = True
+
     @classmethod
-    def tool_description(
-        cls, config_dict: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
+    def tool_description(cls, settings: Any = None) -> Dict[str, Any]:
         return {
             "type": "function",
             "name": FS_VIEW_IMAGE_NAME,
@@ -156,9 +157,7 @@ class ViewImage(AbstractSimpleTool):
         }
 
     @classmethod
-    def prompt_description(
-        cls, config_dict: Optional[Dict[str, Any]] = None
-    ) -> str:
+    def prompt_description(cls, settings: Any = None) -> str:
         return f"Tool name: {FS_VIEW_IMAGE_NAME}\nTool description: {_TOOL_DESCRIPTION}\n"
 
     @enforce_read_guard(path_arg="path")
@@ -213,9 +212,7 @@ class ViewImage(AbstractSimpleTool):
     def _step_limit_refusal(self, path: str, taken: int) -> Optional[str]:
         """Лишний снимок шага модель не увидела бы: пикселями уходят только
         `live_tool_images` последних, а «attached» звало бы смотреть снова."""
-        limit = read_images_config(
-            getattr(self._ctx, "config_dict", None)
-        ).live_tool_images
+        limit = read_images_config(self._settings_source).live_tool_images
         if taken < limit:
             return None
         return self._error(
@@ -226,14 +223,32 @@ class ViewImage(AbstractSimpleTool):
         )
 
     async def _aread_source(self, path: str) -> bytes:
+        from gc_core.thread_files import parse_thread_file_uri
+
+        parsed = parse_thread_file_uri(path)
+        if parsed is not None:
+            # Файл треда в хранилище тредов (картинка MCP, снимок): байты —
+            # через хранилище, на диске процесса его нет. Только своего треда:
+            # ссылка на чужой — не путь к его картинкам.
+            if parsed[:2] != thread_address(self._ctx):
+                raise _InputError(
+                    "read_denied",
+                    MSG_READ_DENIED.format(reason="file of another thread"),
+                )
+            reader = getattr(self._ctx.image_store, "read_uri", None)
+            data = reader(path) if callable(reader) else None
+            if data is None:
+                raise _InputError("not_found", MSG_NOT_FOUND.format(path=path))
+            if len(data) > MAX_INPUT_BYTES:
+                raise _InputError(REASON_TOO_LARGE, MSG_TOO_LARGE)
+            return data
         if self._is_media(path):
             return self._read_host(path)
         return await self._aread_backend(path)
 
     def _is_media(self, path: str) -> bool:
         """Картинки хранилища и MCP-медиа — у агента, не в среде исполнения."""
-        cfg = getattr(self._ctx, "config_dict", None) or {}
-        roots = media_roots(cfg)
+        roots = media_roots(self._settings_source)
         launch_root = resolve_tool_context(self).launch_root
         return (
             classify_path(path, protected_paths(cwd=launch_root, media=roots))
@@ -285,6 +300,10 @@ class ViewImage(AbstractSimpleTool):
         )
 
     def _report_path(self, path: str) -> str:
+        from gc_core.thread_files import is_thread_file_uri
+
+        if is_thread_file_uri(path):
+            return path
         return tool_report_abspath(path, workspace=self._workspace)
 
     def _attached(self, path: str, image: NormalizedImage) -> str:

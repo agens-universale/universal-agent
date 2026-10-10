@@ -29,11 +29,12 @@ class SkillsScreen(Screen):
         self,
         *,
         skills: Optional[list[dict]] = None,
-        config: Optional[dict] = None,
+        settings=None,
     ) -> None:
         super().__init__()
         self._all_skills = skills or []
-        self._config = config or {}
+        # Настройки окна (`LoadedSettings`) — реестр скиллов читает из них пути.
+        self._settings = settings
         self._skills = list(self._all_skills)
         self._selected_idx = 0 if self._skills else -1
         self._filter = ""
@@ -181,7 +182,7 @@ class SkillsScreen(Screen):
         try:
             from gc_core.tools.skills.registry import get_skills_registry
 
-            reg = get_skills_registry(self._config)
+            reg = get_skills_registry(self._settings)
             detail = await reg.load_skill_detail(sid)
         except Exception as exc:
             self.app.notify(f"/skill: {exc}", severity="error")

@@ -10,8 +10,6 @@ from gc_core.attachments.texts import (
     SUMMARY_IMAGES_OPEN,
 )
 from gc_core.config_modules.summary import DEFAULT_INTENT_LOG_PREVIEW_CHARS
-from gc_core.intent_log import serialize, tail_preview
-from gc_core.intent_log.record import IntentRecord
 from gc_core.message_policy.user_message_policy import (
     is_dialog_summary_user_message_text,
 )
@@ -144,36 +142,6 @@ def resolve_intent_log_preview_chars(
     except (TypeError, ValueError):
         value = DEFAULT_INTENT_LOG_PREVIEW_CHARS
     return value if value > 0 else DEFAULT_INTENT_LOG_PREVIEW_CHARS
-
-
-def build_intent_blocks_prefix(
-    closed_records: Iterable[IntentRecord],
-    open_records: Iterable[IntentRecord],
-    *,
-    intent_log_preview_chars: int,
-) -> str:
-    """XML intent blocks для ``dialog_summary`` (не для summarizer/patch LLM).
-
-    Closed log: ``tail_preview``. Open turn: full JSONL. См. ``build_dialog_summary_content``.
-    """
-    safe_chars = (
-        int(intent_log_preview_chars)
-        if int(intent_log_preview_chars) > 0
-        else DEFAULT_INTENT_LOG_PREVIEW_CHARS
-    )
-    preview = tail_preview(list(closed_records), safe_chars)
-    parts: list[str] = []
-    log_block = render_user_intent_log_block(preview)
-    if log_block:
-        parts.append(log_block)
-    current_block = render_current_user_intent_block(
-        serialize(list(open_records))
-    )
-    if current_block:
-        parts.append(current_block)
-    if not parts:
-        return ""
-    return "\n\n".join(parts) + "\n\n"
 
 
 def format_summary_block(summary_text: str) -> str:

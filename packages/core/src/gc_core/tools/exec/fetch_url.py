@@ -39,7 +39,7 @@ class FetchUrl(FetchUrlBase):
     )
 
     @classmethod
-    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None):
+    def tool_description(cls, settings: Any = None):
         return cls._tool_spec(
             description=(
                 "Fetches a URL via HTTP GET and returns extracted readable text when possible. "
@@ -58,7 +58,7 @@ class FetchUrl(FetchUrlBase):
         )
 
     @classmethod
-    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None):
+    def prompt_description(cls, settings: Any = None):
         return """Tool name: exec_fetch_url
 Tool description: Downloads a web page via HTTP GET and extracts the main text content using trafilatura.
 Input schema: {"type": "object", "properties": {"url": {"type": "string", "description": "Absolute URL to fetch."}, "timeout": {"type": "integer", "description": "HTTP timeout in seconds."}, "offset": {"type": "integer", "description": "Character offset for paginated reads."}, "limit": {"type": "integer", "description": "Max characters to return in this call."}, "proxy": {"type": "string", "description": "Optional proxy URL (http/https/socks5/socks5h/socks4). Empty string or omit = no proxy."}}, "required": ["url"], "additionalProperties": false}
@@ -169,7 +169,7 @@ Usage:
         for attempt in range(1, attempts + 1):
             try:
                 if fetches_on_backend(
-                    self._config_dict, self._backend_or_none()
+                    self._settings_source, self._backend_or_none()
                 ):
                     # Сеть у среды исполнения: GET делает python3 той стороны,
                     # редиректы и политика — здесь (см. remote_fetch).

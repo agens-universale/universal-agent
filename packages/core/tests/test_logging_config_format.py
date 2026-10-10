@@ -34,9 +34,9 @@ def test_redact_secrets_shape():
         RedactSecretsConfig(enabled=True, bogus=1)
 
 
-def test_load_config_emits_logging_keys(tmp_path, monkeypatch):
+def test_load_settings_reads_logging_keys(tmp_path, monkeypatch):
     import yaml
-    from gc_core.config import load_config
+    from gc_core.config import load_settings
 
     p = tmp_path / "config.yml"
     p.write_text(
@@ -51,7 +51,7 @@ def test_load_config_emits_logging_keys(tmp_path, monkeypatch):
         ),
         encoding="utf-8",
     )
-    cfg = load_config(str(p))
-    assert cfg["logging_format"] == "jsonl"
-    assert cfg["log_level"] == "debug"
-    assert cfg["redact_secrets"]["enabled"] is True
+    logging = load_settings(str(p)).settings.logging
+    assert logging.format == "jsonl"
+    assert logging.log_level == "debug"
+    assert logging.redact_secrets.enabled is True

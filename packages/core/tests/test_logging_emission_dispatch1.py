@@ -17,18 +17,21 @@ import json
 import pytest
 from gc_core.utils.logging_module import create_run_logger
 from gc_testkit import run_coro
+from gc_testkit.settings import make_settings
 from transport_fakes import install_transport, json_response, stream_response
 
 
 def _make_logger(tmp_path, level="info"):
     cfg = {
-        "logs_dump_dir": str(tmp_path),
-        "save_logs": True,
-        "console_trace": False,
-        "logging_format": "jsonl",
-        "log_level": level,
+        "paths.logs_dump_dir": str(tmp_path),
+        "logging.save_logs": True,
+        "logging.console_trace": False,
+        "logging.format": "jsonl",
+        "logging.log_level": level,
     }
-    logger, path, _ = create_run_logger(cfg, run_id="t", agent_kind="main")
+    logger, path, _ = create_run_logger(
+        make_settings(cfg), run_id="t", agent_kind="main"
+    )
     return logger, path
 
 
@@ -49,10 +52,9 @@ def _flush(logger):
 # ---------------------------------------------------------------------------
 
 
-def test_summary_started_and_precheck_events(tmp_path):
+def test_summary_started_event(tmp_path):
     from gc_core.summarize.summary_logging import (
         SummaryCompactionLog,
-        log_compaction_precheck,
         log_compaction_started,
     )
 
@@ -63,24 +65,12 @@ def test_summary_started_and_precheck_events(tmp_path):
     log_compaction_started(
         logger, ctx, serialized_chars=100, history_messages_count=3
     )
-    log_compaction_precheck(
-        logger,
-        trigger_reason="turn_end",
-        thread_id="t1",
-        history_messages_count=3,
-        trigger_volume=10,
-        serialized_chars=100,
-        threshold=500,
-    )
     _flush(logger)
     recs = _records(path)
 
     started = [r for r in recs if r["event"] == "summary_started"]
     assert started and started[0]["reason"] == "turn_end"
     assert started[0]["serialized_chars"] == 100
-
-    precheck = [r for r in recs if r["event"] == "summary_precheck"]
-    assert precheck and precheck[0]["threshold"] == 500
 
 
 def test_summary_raw_text_and_message_body_events(tmp_path):

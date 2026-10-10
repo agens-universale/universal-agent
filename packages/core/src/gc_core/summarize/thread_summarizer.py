@@ -1,11 +1,18 @@
 from typing import Any, Dict, List
 
+from gc_core.agent_store import agent_store_of
 from gc_core.config import _DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS
 from gc_core.config_modules.strip_tags_projection import (
     projection_tags_from_config,
 )
+from gc_core.config_modules.summary import SummaryConfig
+from gc_core.execution.resources import (
+    PromptResourceRequest,
+    aload_prompt_resource,
+)
 from gc_core.intent_log import IntentRecord, serialize_for_meta
 from gc_core.message_format import dialog_history as dialog_history
+from gc_core.settings import settings_of
 from gc_core.summarize import (
     memory_suggestions,
     prompt_loading,
@@ -46,62 +53,46 @@ class _NullLogger:
 _NULL_LOGGER = _NullLogger()
 
 
-def _int_param(params: Dict[str, Any], key: str, default: int) -> int:
-    """int из summary_params; нечисло или <= 0 → default."""
+def _int_param(raw: Any, default: int) -> int:
+    """int из настройки summary; нечисло или <= 0 → default."""
     try:
-        value = int(params.get(key, default))
+        value = int(raw if raw is not None else default)
     except (TypeError, ValueError):
         return default
     return value if value > 0 else default
 
 
 class _SummaryLimits:
-    """Лимиты суммаризации из ``summary_params`` с дефолтами.
+    """Лимиты суммаризации из ``settings.summary`` с дефолтами.
 
     ``batch_chars`` / ``max_dialogue_chars`` — значения модели, которая ведёт
-    историю (считает вызывающий, `compaction.arun_summary_compaction`):
-    положительное главнее конфига, ``0`` — «не задано», берётся конфиг."""
+    историю (считает вызывающий, ``compaction.arun_summary_compaction``):
+    положительное главнее конфига, ``0`` — «не задано», берётся ``summary``.
+    """
 
     def __init__(
         self,
-        params: Dict[str, Any],
+        summary: SummaryConfig,
         *,
         batch_chars: int = 0,
         max_dialogue_chars: int = 0,
     ) -> None:
-        self.last_steps_count = _int_param(
-            params, "last_dialog_steps_count", 5
-        )
+        self.last_steps_count = _int_param(summary.last_dialog_steps_count, 5)
         self.last_step_message_max_chars = _int_param(
-            params,
-            "last_dialog_step_message_max_chars",
+            summary.last_dialog_step_message_max_chars,
             _DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS,
         )
-        self.max_message_chars = _int_param(params, "max_message_chars", 50000)
+        self.max_message_chars = _int_param(summary.max_message_chars, 50000)
         self.max_dialogue_chars = max_dialogue_chars or _int_param(
-            params, "max_dialogue_chars", 1000000
+            summary.max_dialogue_chars, 1000000
         )
         self.max_accumulated_summary_chars = _int_param(
-            params, "max_accumulated_summary_chars", 20000
+            summary.max_accumulated_summary_chars, 20000
         )
         # Размер батча для инкрементальной суммаризации.
-        # По умолчанию нормализуется в config.py как int(trigger * 1.2).
+        # По умолчанию нормализуется в config-модуле summary (основание × 1.2).
         self.batch_chars_limit = batch_chars or _int_param(
-            params, "incremental_batch_chars", 10**12
-        )
-
-    @classmethod
-    def from_params(
-        cls,
-        params: Dict[str, Any],
-        *,
-        batch_chars: int = 0,
-        max_dialogue_chars: int = 0,
-    ) -> "_SummaryLimits":
-        return cls(
-            params,
-            batch_chars=batch_chars,
-            max_dialogue_chars=max_dialogue_chars,
+            summary.incremental_batch_chars, 10**12
         )
 
 
@@ -512,7 +503,7 @@ async def asummarize_dialog_via_chat_completions(
     вернуть размеченный контент и подробный `trace` для наблюдаемости.
 
     Поведение (кратко):
-        - Читает параметры из `ctx.config_dict["summary_params"]` (лимиты символов,
+        - Читает параметры из `settings.summary` (лимиты символов,
           размер батча, путь к промпту, число последних шагов,
           `last_dialog_step_message_max_chars` для хвоста `<last_dialog_steps>` и т.д.).
         - Усекает историю по `max_dialogue_chars`, нормализует и усекает лог
@@ -531,7 +522,7 @@ async def asummarize_dialog_via_chat_completions(
           `state.shared.working_memory` (см. `compaction.run_summary_compaction`).
 
     Args:
-        ctx: Контекст с `config_dict` и `logger`.
+        ctx: Контекст с настройками и `logger`.
         state: Состояние сессии (модель, заголовки бэкенда).
         full_history_messages: Полная история сообщений треда.
         persistent_state_block: Готовый блок ``<persistent_state>`` для prompt'ов (opaque).
@@ -553,8 +544,7 @@ async def asummarize_dialog_via_chat_completions(
             ``num_batches`` — число батчей LLM;
             ``trace`` — структура с шагами, промптами и результатами для отладки.
     """
-    cfg = getattr(ctx, "config_dict", {}) or {}
-    tags = projection_tags_from_config(cfg)
+    tags = projection_tags_from_config(ctx)
     # История для summarizer / memory patch всегда без ``<think>`` в прозе.
     # Persist ``reasoning_content`` — только канон ``state.messages``.
     strip_think = True
@@ -570,13 +560,9 @@ async def asummarize_dialog_via_chat_completions(
     }
     if not full_history_messages:
         return _empty_history_result(trace, logger)
-    summary_params = (
-        cfg.get("summary_params")
-        if isinstance(cfg.get("summary_params"), dict)
-        else {}
-    )
-    lim = _SummaryLimits.from_params(
-        summary_params,
+    summary = settings_of(ctx).summary
+    lim = _SummaryLimits(
+        summary,
         batch_chars=batch_chars,
         max_dialogue_chars=max_dialogue_chars,
     )
@@ -586,11 +572,15 @@ async def asummarize_dialog_via_chat_completions(
     max_dialogue_chars = lim.max_dialogue_chars
     max_accumulated_summary_chars = lim.max_accumulated_summary_chars
     batch_chars_limit = lim.batch_chars_limit
-    prompt_path = (
-        summary_params.get("chat_completions_summary_prompt_path")
-        or prompt_loading.default_prompt_path()
+    prompt_path = summary.chat_completions_summary_prompt_path
+    system_prompt = await aload_prompt_resource(
+        ctx,
+        PromptResourceRequest("summary", path=prompt_path),
+        local=lambda: prompt_loading.load_prompt_template(
+            str(prompt_path or prompt_loading.default_prompt_path()),
+            store=agent_store_of(ctx),
+        ),
     )
-    system_prompt = prompt_loading.load_prompt_template(str(prompt_path))
 
     history_for_summary = dialog_history.trim_history_to_max_dialogue_chars(
         full_history_messages,

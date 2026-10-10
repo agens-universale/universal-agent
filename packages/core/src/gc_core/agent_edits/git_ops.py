@@ -289,19 +289,6 @@ def add_paths(launch_root: str, rels: Sequence[str]) -> tuple[int, str]:
 # --- лестница отсчёта: git-факты (§3.2/§5 спеки волны 4) ----------------------
 
 
-def rev_parse_head(launch_root: str) -> str | None:
-    """``git rev-parse HEAD`` → полный oid коммита; ``None`` — нет коммитов/не git.
-
-    Решает КОД возврата, не непустой вывод: на отказе ``rev-parse`` иногда всё
-    равно печатает нерезолвленный ``HEAD`` в stdout.
-    """
-    code, out = run_git(launch_root, ["rev-parse", "HEAD"])
-    if code != 0:
-        return None
-    text = _decode(out).strip()
-    return text or None
-
-
 def cat_file_filters(
     launch_root: str, rel: str, *, rev: str = "HEAD"
 ) -> bytes | None:

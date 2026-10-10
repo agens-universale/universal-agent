@@ -4,13 +4,12 @@
 пользователя, и stdin ему не принадлежит.
 """
 
-from types import SimpleNamespace
-
 from gc_core.tools.turn.ask_human import _aread_human_response
+from gc_testkit.settings import fake_ctx
 
 
 def _ctx(**kw):
-    return SimpleNamespace(config_dict={}, logger=None, **kw)
+    return fake_ctx(logger=None, **kw)
 
 
 async def test_sync_port_is_used():

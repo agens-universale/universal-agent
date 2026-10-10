@@ -4,6 +4,7 @@ import logging
 import threading
 import time
 
+from file_search_harness import wait_idle
 from gc_tui.services.file_search import FileSearchSession
 
 
@@ -63,7 +64,7 @@ def test_result_arrives_from_search_thread():
         ),
     )
     session.want("abc")
-    assert session.wait_idle(5)
+    assert wait_idle(session, 5)
     assert seen == [("abc", ["abc.py"], True, False)]
     session.close()
 
@@ -77,7 +78,7 @@ def test_latest_query_wins_while_index_builds():
     session.want("ab")
     session.want("abc")
     index.build_gate.set()
-    assert session.wait_idle(5)
+    assert wait_idle(session, 5)
     assert index.searched == ["abc"]
     assert results == [("abc", ["abc.py"], False)]
     session.close()
@@ -91,7 +92,7 @@ def test_query_changed_during_search_is_searched_next():
     assert index.search_entered.wait(5)
     session.want("q2")
     index.search_gate.set()
-    assert session.wait_idle(5)
+    assert wait_idle(session, 5)
     assert results == [("q1", ["q1.py"], False), ("q2", ["q2.py"], False)]
     session.close()
 
@@ -107,7 +108,7 @@ def test_same_query_again_is_searched_again():
     session.want("abc")
     session.want("ab")
     index.search_gate.set()
-    assert session.wait_idle(5)
+    assert wait_idle(session, 5)
     assert [query for query, _entries, _truncated in results] == ["ab", "ab"]
     session.close()
 
@@ -165,9 +166,9 @@ def test_search_failure_gives_empty_result_and_thread_survives(caplog):
         logging.WARNING, logger="gc_tui.services.file_search"
     ):
         session.want("bad")
-        assert session.wait_idle(5)
+        assert wait_idle(session, 5)
     session.want("ok")
-    assert session.wait_idle(5)
+    assert wait_idle(session, 5)
     assert results == [("bad", [], False), ("ok", ["ok.py"], False)]
     assert any(
         "file search failed" in r.getMessage()
@@ -188,7 +189,7 @@ def test_build_failure_gives_empty_result_once():
     index.build = build
     session, _thread, results = _session(index)
     session.want("abc")
-    assert session.wait_idle(5)
+    assert wait_idle(session, 5)
     assert results == [("abc", [], False)]
     assert index.builds == 1
     session.close()
@@ -201,7 +202,7 @@ def test_one_daemon_thread_serves_all_queries():
     )
     for query in ("a", "ab", "abc", "abcd"):
         session.want(query)
-    assert session.wait_idle(5)
+    assert wait_idle(session, 5)
     new = set(threading.enumerate()) - before
     assert [(t.name, t.daemon) for t in new] == [("file-search", True)]
     session.close()

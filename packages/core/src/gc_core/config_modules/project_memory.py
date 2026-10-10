@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from pydantic import BaseModel, ConfigDict
+
+from gc_core.config_modules.editing import editable
 
 _logger = logging.getLogger(__name__)
 
@@ -18,7 +19,7 @@ DEFAULT_PROJECT_MEMORY_COMPACTION_MAX_TOKENS = 16_384
 class ProjectMemoryConfig(BaseModel):
     """Yaml section ``project_memory:`` — limits and notice policy for long memory."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     enable_project_memory_notice: bool = False
     check_interval_messages: int = (
@@ -29,7 +30,10 @@ class ProjectMemoryConfig(BaseModel):
     compaction_max_tokens: int = DEFAULT_PROJECT_MEMORY_COMPACTION_MAX_TOKENS
 
 
-def normalize_project_memory_config(cfg: ProjectMemoryConfig) -> None:
+def normalize_project_memory_config(
+    cfg: ProjectMemoryConfig,
+) -> ProjectMemoryConfig:
+    cfg = editable(cfg)
     if cfg.check_interval_messages <= 0:
         _logger.warning(
             "project_memory.check_interval_messages=%s must be > 0; using default %s",
@@ -62,34 +66,4 @@ def normalize_project_memory_config(cfg: ProjectMemoryConfig) -> None:
         cfg.compaction_max_tokens = (
             DEFAULT_PROJECT_MEMORY_COMPACTION_MAX_TOKENS
         )
-
-
-def project_memory_from_config_dict(
-    config_dict: dict[str, Any] | None,
-) -> ProjectMemoryConfig:
-    raw = (config_dict or {}).get("project_memory")
-    if isinstance(raw, ProjectMemoryConfig):
-        return raw
-    params = (config_dict or {}).get("project_memory_params")
-    if isinstance(params, dict):
-        return ProjectMemoryConfig.model_validate(params)
-    return ProjectMemoryConfig()
-
-
-def project_memory_limits_from_config_dict(
-    config_dict: dict[str, Any] | None,
-) -> dict[str, int]:
-    cfg = project_memory_from_config_dict(config_dict)
-    return {
-        "max_chars": cfg.max_chars,
-        "max_append_chars": cfg.max_append_chars,
-    }
-
-
-def project_memory_notice_enabled(config_dict: dict[str, Any] | None) -> bool:
-    """Project memory exists/changed hints: только явный флаг в ``project_memory``."""
-    if (config_dict or {}).get("enable_project_memory_notice") is True:
-        return True
-    return project_memory_from_config_dict(
-        config_dict
-    ).enable_project_memory_notice
+    return cfg.result()

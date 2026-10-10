@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from gc_testkit.tui_support import tui_settings
 import json
 from pathlib import Path
 
@@ -66,7 +67,9 @@ async def test_esc_in_live_ask_human_clean_stops(tmp_path):
     - banner снят, ask_human_state сброшен;
     - ThinkingIndicator переходит в состояние «cancelled» (вместо [stopped]-строки в трейсе);
     - active_runner обнулён (clean-restart pattern)."""
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         screen = app.screen
 
@@ -131,7 +134,9 @@ async def test_after_esc_stop_user_can_continue_thread(tmp_path):
     """После Esc-stop в live ask_human юзер пишет любой текст + Enter →
     стартует новый run на том же thread_id через runner.start()."""
     app = TuiApp(
-        threads_dir=str(tmp_path / "threads"), system="cli", config={}
+        threads_dir=str(tmp_path / "threads"),
+        system="cli",
+        settings=tui_settings({}),
     )
     (tmp_path / "threads").mkdir(exist_ok=True)
     thread_id = "ahstop00000000000000000000000001"
@@ -205,7 +210,9 @@ async def test_esc_in_zombie_state_unmounts_banner_and_falls_through(tmp_path):
     banner снят, Esc-state-machine отработала (пустой input → модалка выхода)."""
     from gc_tui.screens.confirm import ConfirmScreen
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         screen = app.screen
         app.active_runner = _DeadRunner()
@@ -288,7 +295,9 @@ async def test_attach_with_dangling_ask_human_unmounts_banner_with_meta_line(
     threads_dir = _write_thread_dangling_ask_human(
         tmp_path, thread_id=thread_id
     )
-    app = TuiApp(threads_dir=str(threads_dir), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(threads_dir), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         screen = app.screen
         # Нет live-агента (runner мог быть прогрет на старте через warm, но не запущен).
@@ -400,7 +409,9 @@ async def test_attach_compacted_answered_ask_human_no_remnant(tmp_path):
         encoding="utf-8",
     )
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = app.screen
         # Нет live-агента (runner мог быть прогрет на старте через warm, но не запущен).
@@ -444,7 +455,9 @@ async def test_stream_reset_compacted_answered_clears_stale_banner(tmp_path):
         encoding="utf-8",
     )
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     app.active_runner = (
         _LiveRunner()
     )  # живой агент ждёт → attach оставит баннер
@@ -517,7 +530,9 @@ async def test_enter_in_zombie_continues_thread_as_new_user_message(tmp_path):
             # после start считаем что побежал.
             return bool(started)
 
-    app = TuiApp(threads_dir=str(threads_dir), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(threads_dir), system="cli", settings=tui_settings({})
+    )
     app._executor_factory = lambda: (
         object()
     )  # чтобы get_runner не строил реальный AgentExecutor
@@ -549,7 +564,9 @@ async def test_reconcile_keeps_active_ask_human_banner(tmp_path):
     """Гвард к Task 5: reconcile в live-потоке НЕ снимает активный баннер
     (живой раннер ждёт, продолжения нет) — иначе юзер не смог бы ответить."""
     pytest.importorskip("textual")
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = app.screen
 
@@ -570,7 +587,9 @@ async def test_reconcile_unmounts_superseded_ask_human_banner(tmp_path):
     """Перекрытый ask_human (после вопроса есть событие = продолжение диалога) →
     reconcile снимает баннер (наш skip-output из Task 1 = kind=result)."""
     pytest.importorskip("textual")
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = app.screen
         _mount_zombie_banner(scr)
@@ -631,7 +650,9 @@ async def test_live_poll_keeps_active_banner_despite_flush_output(tmp_path):
         encoding="utf-8",
     )
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     app.active_runner = _LiveRunner()  # живой агент ждёт ответа на ask_human
     async with app.run_test() as pilot:
         scr = app.screen

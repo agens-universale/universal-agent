@@ -2,6 +2,7 @@ from unittest.mock import MagicMock, patch
 
 from gc_core.config_modules.auth import build_auth_connector
 from gc_core.utils.prod_auth import AuthConnector
+from gc_testkit.settings import make_settings
 
 
 def _make_connector(**kwargs):
@@ -155,15 +156,20 @@ def test_get_auth_url_direct_when_no_proxy(monkeypatch):
 
 def test_build_auth_connector_passes_proxy():
     c = build_auth_connector(
-        {
-            "use_ssl": True,
-            "proxy": "socks5h://127.0.0.1:1080",
-            "agent_auth": {"auth_endpoint": "https://auth.example/config"},
-        }
+        make_settings(
+            {
+                "backend.use_ssl": True,
+                "backend.proxy": "socks5h://127.0.0.1:1080",
+                "agent_auth": {"auth_endpoint": "https://auth.example/config"},
+            }
+        )
     )
     assert c is not None
     assert c.config_proxy == "socks5h://127.0.0.1:1080"
 
 
 def test_build_auth_connector_none_without_agent_auth():
-    assert build_auth_connector({"proxy": "socks5h://x:1"}) is None
+    assert (
+        build_auth_connector(make_settings({"backend.proxy": "socks5h://x:1"}))
+        is None
+    )

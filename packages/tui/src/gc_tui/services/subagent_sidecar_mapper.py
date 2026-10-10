@@ -19,7 +19,7 @@ from typing import (
 )
 
 from gc_core.attachments.model import Attachment, attachments_of
-from gc_core.tools.subagents.progress import (
+from gc_core.execution.progress import (
     brief_args_summary,
     parse_tool_result_status,
 )
@@ -63,7 +63,7 @@ def plan_sidecar_nested_actions(
 ) -> List[SidecarNestedAction]:
     """Group by parent_call_id, order by seq; skip finished/HITL-like noise."""
     from gc_core.constants.tool_names import SESSION_TODO_TOOL_NAME
-    from gc_core.tools.subagents.progress import todo_items_from_arguments
+    from gc_core.execution.progress import todo_items_from_arguments
 
     by_parent: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
     for rec in records:

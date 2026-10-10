@@ -17,7 +17,7 @@
         persistent_session: true
 
 Жизненный цикл сессий привязан к AgentExecutor.run(): в finally вызывается
-PersistentStdioRegistry.instance().close_all(), чтобы не оставлять висящие
+PersistentStdioRegistry.instance().aclose_all(), чтобы не оставлять висящие
 Chromium между запусками агента.
 
 Почему здесь ``subprocess.Popen``, а не ``asyncio.create_subprocess_exec``
@@ -300,6 +300,11 @@ class PersistentStdioSession:
             return
         # На случай если процесс умер между вызовами — чистим хендл.
         if self._proc is not None:
+            from gc_core.tools.connect_mcp.durable_scope import (
+                require_no_reconnect,
+            )
+
+            require_no_reconnect()
             dead = self._proc
             self._proc = None
             # И его читателя: реестр ключуется по id трубы, а запись мёртвого
@@ -394,8 +399,8 @@ class PersistentStdioSession:
             if had_lock:
                 self._close_prologue(proc)
             # Форма терминации одна и корутинная. Loop'а нет в `atexit`, но
-            # встраивающий зовёт `close_all` из своего `finally` — под живым
-            # loop. Голый `asyncio.run` там бросал, общий `except` выше это
+            # встраивающий может звать `close_everything` из своего `finally` —
+            # под живым loop. Голый `asyncio.run` там бросал, общий `except` выше это
             # глушил, и отцепленный процесс оставался жить без хозяина.
             run_coro_blocking(
                 _aterminate_process_tree(proc, graceful_timeout=5.0)
@@ -625,7 +630,7 @@ class PersistentStdioRegistry:
     """Реестр долгоживущих stdio-сессий, ключ — ``(владелец, server_key)``.
 
     Владелец (см. ``gc_core.mcp_session_owner``) в ключе обязателен. Без него ключом было
-    одно лишь имя сервера, и ``close_all()`` из ``arun`` первого доигравшего
+    одно лишь имя сервера, и ``aclose_all()`` из ``arun`` первого доигравшего
     агента убивал браузер, в котором в этот момент работали остальные. Симптом
     был тихим — ``_ensure_started`` молча поднимал процесс заново, — и виден
     только по времени: в прогоне трёх агентов один занял 44.8 с вместо 18.8 с
@@ -685,13 +690,6 @@ class PersistentStdioRegistry:
                 self._sessions[key] = session
             return session
 
-    def _take_own(self) -> list:
-        """Снять с реестра сессии ТЕКУЩЕГО владельца. Чужие не трогаем."""
-        owner = current_owner()
-        with self._lock:
-            keys = [k for k in self._sessions if k[0] == owner]
-            return [self._sessions.pop(k) for k in keys]
-
     def _take_one_own(self):
         """Снять ОДНУ сессию текущего владельца. ``None`` — своих больше нет.
 
@@ -744,22 +742,13 @@ class PersistentStdioRegistry:
             except Exception:
                 pass
 
-    def close_all(self) -> None:
-        """Закрыть сессии текущего владельца. Синхронный вход."""
-        for session in self._take_own():
-            try:
-                session.close()
-            except Exception:
-                pass
-
     async def aclose_all(self) -> None:
         """То же, не занимая поток из пула.
 
         Цикл агента гасит сессии в своём ``finally``, и это до 7 с на сессию
         (SIGTERM → таймаут → SIGKILL) плюс до 10 с на ответ close-тула. Раньше
         всё это уезжало в ``asyncio.to_thread``; теперь ожидание — опрос, и
-        поток не нужен. Форма та же, что у ``stream_client``: синхронный
-        ``close_all`` рядом с ``aclose_all``.
+        поток не нужен.
 
         Отмена приходит из двух РАЗНЫХ мест, и поступать с ними надо
         по-разному; различаем по счётчику ``Task.cancelling()``:
@@ -819,7 +808,7 @@ class PersistentStdioRegistry:
     def close_everything(self) -> None:
         """Закрыть ВСЕ сессии, включая чужие. Завершение процесса и тесты.
 
-        Нужен отдельным именем: обычный ``close_all`` теперь намеренно щадит
+        Нужен отдельным именем: обычный ``aclose_all`` теперь намеренно щадит
         чужих, а на выходе из процесса щадить некого — иначе Chromium
         переживёт агента, ради чего всё и затевалось.
         """

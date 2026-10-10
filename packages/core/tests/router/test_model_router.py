@@ -1,5 +1,4 @@
 import pytest
-from gc_core.config import flatten_app_config
 from gc_core.config_modules.root import AppConfig
 from gc_core.model_router import (
     CONSUMERS,
@@ -9,10 +8,9 @@ from gc_core.model_router import (
 )
 
 
-def _snapshot(raw: dict) -> dict:
-    """Реальный снимок config_dict — через настоящий flatten_app_config, не мок."""
-    app_cfg = AppConfig.model_validate(raw)
-    return flatten_app_config(app_cfg)
+def _snapshot(raw: dict) -> AppConfig:
+    """Настоящие провалидированные настройки (``AppConfig``), не мок."""
+    return AppConfig.model_validate(raw)
 
 
 def _router(
@@ -393,20 +391,16 @@ def test_model_url_inherited_from_own_backend_completions_url_override():
 
 
 def test_backend_overrides_only_explicitly_set_keys():
+    # chat_completion_kwargs на уровне алиаса схема отвергает (MODEL_LEVEL_UNSUPPORTED,
+    # kwargs алиаса — в `main`/`auxiliary`), поэтому явный ключ — таймаут.
     router = _router(
         {
-            "models": {
-                "flash": {
-                    "backend": {"chat_completion_kwargs": {"temperature": 0.2}}
-                }
-            },
+            "models": {"flash": {"backend": {"request_timeout_sec": 42}}},
             "slots": {"default": "flash"},
         }
     )
     resolved = router.resolve("main")
-    assert resolved.backend_overrides == {
-        "chat_completion_kwargs": {"temperature": 0.2}
-    }
+    assert resolved.backend_overrides == {"request_timeout_sec": 42}
 
 
 def test_tariff_passed_through_from_model_pricing():

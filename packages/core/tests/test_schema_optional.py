@@ -10,7 +10,7 @@ from gc_core.tools.fs.list_files import ListFiles
 from gc_core.tools.fs.read_file import ReadFile
 from gc_core.tools.fs.search_and_replace import SearchAndReplace
 from gc_core.tools.inject_tool_fields import apply_injected_fields_to_spec
-from gc_core.tools.schema_optional import (
+from gc_core.execution.tool_schema import (
     OPTIONAL_EMPTY_AS_OMIT_HINT,
     OPTIONAL_OMIT_HINT,
     apply_openai_strict_object,

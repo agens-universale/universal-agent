@@ -72,10 +72,6 @@ class TurnRun:
     def start(self) -> None:
         self._task = asyncio.create_task(self._run())
 
-    async def wait_finished(self) -> dict:
-        await self.done.wait()
-        return self.result()
-
     async def wait_client(self, request: Any) -> dict:
         while not self.done.is_set():
             if await _disconnected(request):

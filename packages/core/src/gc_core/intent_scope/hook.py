@@ -19,10 +19,7 @@ from gc_core.intent_scope.append import (
     append_tool_raw_to_current,
 )
 from gc_core.intent_scope.raw_payload import truncate_raw_tool_payload
-from gc_core.intent_scope.summarizer import (
-    asummarize_tool_intent_line,
-    build_fallback_aggregated_content,
-)
+from gc_core.settings import settings_of
 
 _logger = logging.getLogger(__name__)
 
@@ -172,9 +169,8 @@ async def amaybe_update_intent_scope_from_tool(
         )
         return
 
-    config_dict = getattr(ctx, "config_dict", {}) or {}
     if (
-        str(config_dict.get("backend_api_mode", "responses")).strip().lower()
+        str(settings_of(ctx).backend.api_mode).strip().lower()
         != "chat_completions"
     ):
         log_intent_scope_skipped(
@@ -237,3 +233,19 @@ async def amaybe_update_intent_scope_from_tool(
         ctx=ctx,
         log=log,
     )
+
+
+async def asummarize_tool_intent_line(**kwargs):
+    from gc_core.intent_scope.summarizer import (
+        asummarize_tool_intent_line as summarize,
+    )
+
+    return await summarize(**kwargs)
+
+
+def build_fallback_aggregated_content(**kwargs):
+    from gc_core.intent_scope.summarizer import (
+        build_fallback_aggregated_content as build,
+    )
+
+    return build(**kwargs)

@@ -1,4 +1,4 @@
-"""FileTaskStore — первая реализация TaskStore поверх thread_store.
+"""FileTaskStore — хранилище трейсов TUI поверх thread_store.
 
 Маппинг курсора (tui3_impl §6.4):
   position_token  → byte offset в data_*.jsonl
@@ -27,7 +27,7 @@ from gc_tui.services.trace_mapper import _clean_summary
 
 
 class FileTaskStore:
-    """TaskStore поверх directory с data_*.jsonl/meta_*.json."""
+    """Хранилище трейсов поверх directory с data_*.jsonl/meta_*.json."""
 
     def __init__(self, threads_dir: str, system: str = "cli") -> None:
         self._dir = Path(threads_dir)
@@ -103,21 +103,28 @@ class FileTaskStore:
         self, task_id: str, patch: dict, system: Optional[str] = None
     ) -> None:
         """Объединяет patch с meta.tui sub-dict и сохраняет (TUI-owned)."""
+        from gc_core.thread_store_journal import local_write_scope
+
         sys_ = system or self._system
         meta_path = self._meta_path(task_id, sys_)
-        meta = self.get_task_meta(task_id, system=sys_)
-        if not meta:
-            meta = {"thread_id": task_id, "system_id": sys_}
-        tui_meta = dict(meta.get("tui") or {})
-        tui_meta.update(patch)
-        meta["tui"] = tui_meta
-        # Fresh project dir: TUI may write meta before the executor's first write
-        # (TraceScreen._track_pending on the very first send), so the threads dir
-        # need not exist yet. Own our write — create the dir.
-        meta_path.parent.mkdir(parents=True, exist_ok=True)
-        meta_path.write_text(
-            json.dumps(meta, ensure_ascii=False), encoding="utf-8"
-        )
+        # Мета TUI пишется и при durable-владельце (как update_tui журнала),
+        # но под его блокировкой: иначе гонка с коммитом журнала.
+        with local_write_scope(
+            str(self._dir), sys_, task_id, forbid_owned=False
+        ):
+            meta = self.get_task_meta(task_id, system=sys_)
+            if not meta:
+                meta = {"thread_id": task_id, "system_id": sys_}
+            tui_meta = dict(meta.get("tui") or {})
+            tui_meta.update(patch)
+            meta["tui"] = tui_meta
+            # Fresh project dir: TUI may write meta before the executor's first
+            # write (TraceScreen._track_pending on the very first send), so the
+            # threads dir need not exist yet. Own our write — create the dir.
+            meta_path.parent.mkdir(parents=True, exist_ok=True)
+            meta_path.write_text(
+                json.dumps(meta, ensure_ascii=False), encoding="utf-8"
+            )
 
     def delete_task(self, task_id: str, system: Optional[str] = None) -> None:
         """Полностью удалить тред (все формы файлов). Делегирует в thread_store."""
@@ -301,24 +308,6 @@ class FileTaskStore:
                 {"index": i, "messages": seg, "compacted_by": compacted_by}
             )
         return segments
-
-    def read_live_messages(
-        self, task_id: str, system: Optional[str] = None
-    ) -> list[dict]:
-        """payload-словари сообщений ТОЛЬКО из live data-файла (без архивов).
-        Для лёгкого подсчёта объёма контекста (индикатор). Нет файла → []."""
-        sys_ = system or self._system
-        live = self._data_path(task_id, sys_)
-        if not live.exists():
-            return []
-        out: list[dict] = []
-        with open(live, encoding="utf-8") as f:
-            for line in f:
-                rec = self._parse_line(line.rstrip("\n"))
-                payload = rec.get("payload") if isinstance(rec, dict) else None
-                if isinstance(payload, dict):
-                    out.append(payload)
-        return out
 
     def tail_events(
         self, task_id: str, cursor: TaskCursor, system: Optional[str] = None

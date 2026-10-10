@@ -18,12 +18,13 @@ import yaml
 from pydantic import (
     BaseModel,
     ConfigDict,
+    Field,
     ValidationError,
     field_validator,
     model_validator,
 )
 
-from gc_core.config_modules.backend import BackendConfig
+from gc_core.config_modules.backend import ModelBackendConfig
 from gc_core.config_modules.chat_completions import (
     auxiliary_llm_from_config_dict,
 )
@@ -31,6 +32,7 @@ from gc_core.config_modules.env_interpolation import (
     _FILE_MARKER,
     resolve_env_only,
 )
+from gc_core.config_modules.field_meta import SecretText, gc_meta, secret_value
 from gc_core.config_modules.pricing import ModelTariff
 
 RESERVED_WORDS = ("light", "default", "max", "auto")
@@ -163,7 +165,7 @@ def _validated_backend_overlay(loaded: dict) -> dict[str, Any]:
         if not (isinstance(value, str) and _FILE_MARKER.search(value))
     }
     try:
-        BackendConfig.model_validate(immediate)
+        ModelBackendConfig.model_validate(immediate)
     except ValidationError as exc:
         err = exc.errors()[0]
         loc = ".".join(str(part) for part in err.get("loc") or ())
@@ -192,7 +194,7 @@ def parse_model_backend_text(text: str) -> dict[str, Any] | None:
 
 
 def effective_completion_kwargs(
-    resolved: Any, config_dict: dict | None, *, section: str
+    resolved: Any, settings: Any, *, section: str
 ) -> dict[str, Any]:
     """Kwargs секции резолвленного алиаса.
 
@@ -207,11 +209,14 @@ def effective_completion_kwargs(
     chosen = getattr(resolved, section, None) if resolved is not None else None
     if isinstance(chosen, dict):
         return copy.deepcopy(chosen)
-    cfg = config_dict if isinstance(config_dict, dict) else {}
+    if settings is None:
+        return {}
+    from gc_core.settings import settings_of
+
     if section == "main":
-        global_kw = cfg.get("chat_completion_kwargs")
+        global_kw = settings_of(settings).backend.chat_completion_kwargs
     else:
-        global_kw = auxiliary_llm_from_config_dict(cfg).completion_kwargs
+        global_kw = auxiliary_llm_from_config_dict(settings).completion_kwargs
     if isinstance(global_kw, dict):
         return copy.deepcopy(global_kw)
     return {}
@@ -408,13 +413,15 @@ class ModelEntry(BaseModel):
     """Запись реестра `models`: алиас (ключ словаря) → провайдерская модель + точечные
     оверлеи backend/pricing поверх эффективной секции backend."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     model: str | None = None
     url: str | None = None
-    token: str | None = None
+    token: SecretText | None = Field(
+        default=None, json_schema_extra=gc_meta(secret=True)
+    )
     pricing: ModelTariff | None = None
-    backend: BackendConfig | None = None
+    backend: ModelBackendConfig | None = None
     # None — секция не задана: свой глобальный словарь (main —
     # chat_completion_kwargs, auxiliary — auxiliary_llm.completion_kwargs).
     # {} — задана и пуста: в запрос эти ключи не класть.
@@ -545,15 +552,15 @@ class ModelEntry(BaseModel):
 
     @property
     def authorization_header(self) -> str | None:
-        """Bearer-нормализация token: None → наследование, "" → явно без авторизации,
-        иначе — `Bearer <token>` (уже с префиксом — не дублируется)."""
-        return model_authorization_header(self.token)
+        """Token записи как настроен: None → наследование, "" → явно без
+        авторизации; форму (с ``Bearer`` или без) выбирает проба подключения."""
+        return model_authorization_header(secret_value(self.token))
 
 
 class SlotsConfig(BaseModel):
     """Уровни light/default/max — указатели на алиас из `models`."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     light: str | None = None
     default: str | None = None
@@ -564,7 +571,7 @@ class AssignConfig(BaseModel):
     """Привязки потребителей → уровень или алиас. Ключ `main` запрещён — основной
     трейс управляется уровнем (`level`/`/level`), не привязкой."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     finish_gate: str | None = None
     text_answer_judge: str | None = None

@@ -33,7 +33,7 @@ models:
     # стопки, включая этот же профиль, если он и её перекрывает); token: "" —
     # «сервер не требует авторизации»; значение нормализуется в "Bearer <token>"
     # (уже с префиксом — не дублируется).
-    token: "${ENV:OPENROUTER_API_KEY}"       # env-интерполяция работает и внутри профиля
+    token: "${ENV:OPENROUTER_API_KEY:-}"       # env-интерполяция работает и внутри профиля
     pricing: {input: 12, output: 48}         # тариф модели (формат ModelTariff); главнее pricing.models[<id>]
     backend:                                 # транспорт поверх эффективного backend (ssl, timeout, headers)
       use_max_tokens_param: false
@@ -81,7 +81,9 @@ models:
   deepseek-max:
     model: deepseek/deepseek-chat-v3-0324
     url: https://api.provider.example/v1/chat/completions
-    token: "${ENV:DEEPSEEK_API_KEY}"
+    # Необязательный ключ: `:-` — пустое умолчание. Без него незаданная
+    # переменная роняет загрузку (`${ENV:VAR}` строгий).
+    token: "${ENV:DEEPSEEK_API_KEY:-}"
     strip_think: false                   # как дефолт кода: копировать мысль; true — вырезать
     # Пороги сжатия по ходу хода на ЭТОЙ модели. 0 / нет ключа — шкала не задана;
     # оба 0 — весь набор из глобального summary. Хотя бы одно > 0 — режим модели.
@@ -105,7 +107,7 @@ models:
   qwen-vl:
     model: qwen/qwen2.5-vl-72b-instruct
     url: https://openrouter.ai/api/v1/chat/completions
-    token: "${ENV:OPENROUTER_API_KEY}"
+    token: "${ENV:OPENROUTER_API_KEY:-}"
 
 # -----------------------------------------------------------------------------
 # slots: уровни — УКАЗАТЕЛИ в models (не копии). Одна модель может стоять в

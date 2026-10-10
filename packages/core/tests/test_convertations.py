@@ -34,7 +34,9 @@ def test_identical_answers_from_different_responses_have_distinct_ids():
     b = output_chat_completion_to_response(second)["output"][0]
     assert a["content"] == b["content"]
     assert a["id"] != b["id"]
-    assert output_chat_completion_to_response(first)["output"][0]["id"] == a["id"]
+    assert (
+        output_chat_completion_to_response(first)["output"][0]["id"] == a["id"]
+    )
 
 
 class ConvertationsTest(unittest.TestCase):

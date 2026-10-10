@@ -231,7 +231,7 @@ def test_apply_routes_todo_action_to_callback():
 def test_live_and_sidecar_channels_agree_on_todo_routing():
     """Инвариант: live (apply_drained) и sidecar (plan) маршрутизируют
     одинаково — v3: каждый вызов session_todo обоими каналами → todo."""
-    from gc_core.tools.subagents.progress import SubagentProgressEvent
+    from gc_core.execution.progress import SubagentProgressEvent
     from gc_tui.services.subagent_progress import SubagentProgressConsumer
 
     stream = [

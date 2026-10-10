@@ -1,4 +1,4 @@
-"""backend.proxy → config_dict["proxy"] → proxies при создании httpx-клиента.
+"""backend.proxy → settings.backend.proxy → proxies при создании httpx-клиента.
 
 С Задачи 9 прокси едут в httpx-клиент (mounts по схемам), а не kwargs
 запроса, — поэтому наблюдаем параметры создания клиента.
@@ -10,7 +10,7 @@ import os
 import tempfile
 
 import yaml
-from gc_core.config import load_config
+from gc_core.config import load_settings
 from gc_core.config_modules.backend import BackendConfig
 from gc_core.utils import connect_backend
 from gc_testkit import run_coro
@@ -42,8 +42,8 @@ def test_load_config_maps_backend_proxy():
                 },
                 fd,
             )
-        cfg = load_config(cfg_path)
-        assert cfg["proxy"] == "socks5h://proxy.example:1080"
+        cfg = load_settings(cfg_path).settings
+        assert cfg.backend.proxy == "socks5h://proxy.example:1080"
 
 
 def test_load_config_proxy_null_maps_none():
@@ -54,8 +54,8 @@ def test_load_config_proxy_null_maps_none():
                 {"backend": {"api_mode": "chat_completions", "proxy": None}},
                 fd,
             )
-        cfg = load_config(cfg_path)
-        assert cfg["proxy"] is None
+        cfg = load_settings(cfg_path).settings
+        assert cfg.backend.proxy is None
 
 
 def test_chat_completions_passes_resolved_proxies(monkeypatch):

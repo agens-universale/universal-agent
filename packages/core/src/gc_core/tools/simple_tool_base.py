@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from gc_core.execution_workspace import ExecutionWorkspace
 
@@ -8,8 +8,22 @@ class AbstractSimpleTool(ABC):
     def __init__(self, *args, **kwargs):
         self._ctx = kwargs.get("ctx")
         self._state = kwargs.get("state")
-        self._config_dict = kwargs.get("config_dict")
+        #: Явные настройки тула (всё, что принимает ``settings_of``). Обычно не
+        #: заданы: настройки рана читаются из ``ctx`` (см. ``_settings_source``).
+        self._settings = kwargs.get("settings")
         self._call_id = kwargs.get("call_id")
+
+    @property
+    def _settings_source(self) -> Any:
+        """Источник настроек тула для ``settings_of``/``runtime_of``.
+
+        Явные ``settings=`` конструктора, иначе контекст рана; без обоих —
+        ``None`` (``settings_of(None)`` даёт умолчания).
+        """
+        explicit = getattr(self, "_settings", None)
+        if explicit is not None:
+            return explicit
+        return getattr(self, "_ctx", None)
 
     @property
     def _backend(self):
@@ -46,9 +60,7 @@ class AbstractSimpleTool(ABC):
 
     @classmethod
     @abstractmethod
-    def tool_description(
-        cls, config_dict: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
+    def tool_description(cls, settings: Any = None) -> Dict[str, Any]:
         pass
 
     @classmethod
@@ -63,9 +75,7 @@ class AbstractSimpleTool(ABC):
 
     @classmethod
     @abstractmethod
-    def prompt_description(
-        cls, config_dict: Optional[Dict[str, Any]] = None
-    ) -> str:
+    def prompt_description(cls, settings: Any = None) -> str:
         pass
 
     @abstractmethod
@@ -77,7 +87,7 @@ class AbstractSimpleTool(ABC):
         без неё уводил тул в поток из общего пула. Это создавало две формы у
         каждого тула и третью ступень в диспетчере — ради возможности, которой
         нет: зарегистрировать свой Python-класс-тул извне нельзя вовсе,
-        ``build_tools_data`` собирает набор из ``config_dict``, а точка
+        ``build_tools_data`` собирает набор из настроек, а точка
         расширения для чужих тулов — MCP, и она асинхронна насквозь.
 
         Асинхронность формы НЕ означает, что тело обязано что-то ждать.

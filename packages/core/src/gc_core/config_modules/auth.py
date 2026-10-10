@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import Any, Dict, Optional
 from uuid import uuid4
 
@@ -5,10 +7,20 @@ from gc_core.utils.prod_auth import AuthConnector
 
 
 def build_auth_connector(
-    config_dict: Dict[str, Any],
+    settings: Any,
 ) -> Optional[AuthConnector]:
-    verify = config_dict.get("use_ssl", True)
-    auth_cfg = config_dict.get("agent_auth") or {}
+    """AuthConnector по секции ``agent_auth`` (None — секция пуста или не задана).
+
+    ``settings`` — всё, что принимает ``settings_of``.
+    """
+    # Ленивый импорт: settings → root → config_modules.
+    from gc_core.settings import settings_of
+
+    settings = settings_of(settings)
+    verify = settings.backend.use_ssl
+    auth_cfg: Dict[str, Any] = (
+        settings.agent_auth.model_dump() if settings.agent_auth else {}
+    )
     if not auth_cfg:
         return None
 
@@ -35,5 +47,5 @@ def build_auth_connector(
         device_code_hex=device_code_hex,
         login=login,
         verify=verify,
-        config_proxy=config_dict.get("proxy"),
+        config_proxy=settings.backend.proxy,
     )

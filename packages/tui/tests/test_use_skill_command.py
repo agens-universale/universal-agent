@@ -1,5 +1,6 @@
 """'/skill X' — нет задачи/idle: pending_skill_id + meta; идёт run: add_message + meta."""
 
+from gc_testkit.tui_support import tui_settings
 import json
 import threading
 from pathlib import Path
@@ -13,7 +14,9 @@ async def test_use_skill_no_active_task_stages(tmp_path):
     from gc_tui.app import TuiApp
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")
@@ -71,7 +74,9 @@ async def test_use_skill_running_sends_message_and_updates_meta(tmp_path):
             captured.append(m)
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     app._executor_factory = lambda: _Fake()
 
@@ -130,7 +135,9 @@ async def test_use_skill_idle_task_stages_pending_no_error(tmp_path):
     )
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen

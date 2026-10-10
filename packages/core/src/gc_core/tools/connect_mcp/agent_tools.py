@@ -7,57 +7,23 @@ import copy
 import logging
 from typing import Any, Dict, Optional
 
+from gc_core.config_modules.field_meta import plain_dump
+from gc_core.execution.tool_schema import (
+    apply_openai_strict_object,
+    is_open_object,
+)
 from gc_core.loop_detector.constants import GENERIC_PROFILE, LOOP_WARN_KEY
-from gc_core.tools.connect_mcp.api import acall_mcp_tool
+from gc_core.settings import settings_of
+from gc_core.tools.connect_mcp.api import (
+    acall_mcp_tool,  # transport injection compatibility
+)
 from gc_core.tools.connect_mcp.registry import ToolsCache
-from gc_core.tools.schema_optional import apply_openai_strict_object
+from gc_core.tools.connect_mcp.tool_wrapper import MCPToolWrapper
 from gc_core.trace_id import trace_header_name, trace_id_from_config
 
 logger = logging.getLogger(__name__)
 
 _DEFS_KEY = "$defs"
-
-
-class MCPToolWrapper:
-    """
-    Обёртка над MCP-инструментом с интерфейсом как у локальных тулов:
-    __call__(**arguments) -> str | dict | list.
-    """
-
-    def __init__(
-        self,
-        full_tool_name: str,
-        servers_cfg: Dict[str, Dict[str, Any]],
-        tools_registry: Dict[str, Dict[str, Any]],
-        timeout: float,
-        default_use_retry: bool,
-        *,
-        os_backend: Any = None,
-    ) -> None:
-        self._full_tool_name = full_tool_name
-        self._servers_cfg = servers_cfg
-        self._tools_registry = tools_registry
-        self._timeout = timeout
-        self._default_use_retry = default_use_retry
-        self._os_backend = os_backend
-
-    async def acall(self, **arguments: Any) -> Any:
-        """Быстрый путь для цикла агента: диспетчер зовёт его без потока.
-
-        Форма из docs/async.md — тул с парой ``acall``/``__call__``.
-        Для SDK-транспортов вызов идёт прямо на loop вызывающего; легаси
-        (свои http/stdio на requests и subprocess) уходят в поток внутри
-        ``acall_mcp_tool``, потому что прервать их всё равно нечем.
-        """
-        return await acall_mcp_tool(
-            full_tool_name=self._full_tool_name,
-            arguments=arguments,
-            servers_cfg=self._servers_cfg,
-            tools_registry=self._tools_registry,
-            timeout=self._timeout,
-            default_use_retry=self._default_use_retry,
-            os_backend=self._os_backend,
-        )
 
 
 def _collect_schema_refs(node: Any) -> set[str]:
@@ -217,7 +183,7 @@ def _infer_missing_type(schema: dict) -> None:
     has_ref = isinstance(schema.get("$ref"), str)
     if "type" in schema or has_combinator or has_ref:
         return
-    if "properties" in schema:
+    if "properties" in schema or "additionalProperties" in schema:
         schema["type"] = "object"
     elif "items" in schema:
         schema["type"] = "array"
@@ -241,6 +207,21 @@ def _normalize_property(
 
 
 def _normalize_object_schema(schema: dict, *, openai_strict: bool) -> None:
+    # Объект без перечисленных ключей (`fields: dict`, `dict[str, str]`) —
+    # свободный: по JSON Schema лишние ключи разрешены, если не запрещены явно.
+    # Закрыть его — запретить все ключи. Оставляем открытым; strict для такого
+    # инструмента снимает проекция на отправке (`has_open_object`).
+    if not schema.get("properties") and "additionalProperties" not in schema:
+        schema["additionalProperties"] = True
+    if is_open_object(schema):
+        # Пустые `properties: {}` / `required: []` смысла не меняют, но OpenAI
+        # без strict читает такой объект как пустой и шлёт `{}` (проверено на
+        # gpt-5.4-mini). Оставляем только `additionalProperties`.
+        for key in ("properties", "required"):
+            if not schema.get(key):
+                schema.pop(key, None)
+        return
+
     props = schema.get("properties")
     if not isinstance(props, dict):
         props = {}
@@ -457,15 +438,15 @@ _TRACE_ENV_VAR = "TRACE_ID"
 
 def _servers_cfg_with_trace(
     servers_cfg: Dict[str, Any],
-    config_dict: Dict[str, Any],
+    settings: Any,
 ) -> Dict[str, Any]:
     """Копия конфига MCP-серверов с внешним trace_id.
 
     ПЕРЕСБОРКА, не мутация, и это требование корректности, а не стиль: в
-    серверном режиме config_dict — shallow copy процесс-глобального конфига, то
-    есть ``config_dict["mcp-servers"]`` — тот же объект. Мутация пометила бы все
-    последующие раны процесса, включая раны без trace, а раны идут в
-    конкурентных потоках и писали бы друг другу чужие id.
+    серверном режиме словари серверов могут делиться между ранами (кэш, общий
+    конфиг процесса). Мутация пометила бы все последующие раны процесса,
+    включая раны без trace, а раны идут в конкурентных потоках и писали бы
+    друг другу чужие id.
 
     Отсутствие trace → исходный объект возвращается по identity, то есть
     «ничего не изменилось» буквально.
@@ -474,10 +455,10 @@ def _servers_cfg_with_trace(
     схемным (``config_modules/mcp.py``), иначе руками собранный конфиг вёл бы
     себя не так, как прошедший валидацию.
     """
-    trace_id = trace_id_from_config(config_dict)
+    trace_id = trace_id_from_config(settings)
     if not trace_id:
         return servers_cfg
-    header_name = trace_header_name(config_dict, "trace_id")
+    header_name = trace_header_name(settings, "trace_id")
     out: Dict[str, Any] = {}
     for name, srv in servers_cfg.items():
         if not isinstance(srv, dict) or not srv.get(
@@ -504,8 +485,30 @@ def _servers_cfg_with_trace(
     return out
 
 
+def mcp_cache_config(settings: Any) -> Dict[str, Any]:
+    """Конфиг ``ToolsCache`` из настроек: секция ``mcp`` в проекции нижнего слоя.
+
+    Ниже по слою (кэш, транспорты, ssl_config) конфиг сервера — словарь в
+    проекции плоского вида: ключи по alias (`server-name`, `verify-ssl`, ...),
+    секреты (token) — сырыми: транспорту нужен сам токен. Единственная точка:
+    этот же объект уходит и в ToolsCache (весь discovery), и в замыкание
+    каждого MCPToolWrapper (все вызовы тулов), и повторно сюда же для
+    сабагентов через build_tools_data(настройки ребёнка).
+    """
+    app = settings_of(settings)
+    servers_cfg: Dict[str, Any] = {
+        name: plain_dump(server, by_alias=True)
+        for name, server in app.mcp.servers.items()
+    }
+    return {
+        "mcp-servers": _servers_cfg_with_trace(servers_cfg, settings),
+        "mcp-meta": app.mcp.meta.model_dump(by_alias=True),
+        "use_retry": app.backend.use_retry,
+    }
+
+
 def _prepare_mcp_tools_data(
-    config_dict: Dict[str, Any],
+    settings: Any,
     *,
     tools_cache: Optional[ToolsCache] = None,
     os_backend: Any = None,
@@ -528,19 +531,10 @@ def _prepare_mcp_tools_data(
     некому чистить), протечка между арендаторами сервера с разными наборами
     серверов, и переживание между тестами.
     """
-    servers_cfg = config_dict.get("mcp-servers") or {}
-    if not servers_cfg:
+    cfg = mcp_cache_config(settings)
+    if not cfg["mcp-servers"]:
         return None
-    # Единственная точка: этот же объект уходит и в ToolsCache (весь discovery),
-    # и в замыкание каждого MCPToolWrapper (все вызовы тулов), и повторно сюда же
-    # для сабагентов через build_tools_data(child_config).
-    servers_cfg = _servers_cfg_with_trace(servers_cfg, config_dict)
-
-    cfg: Dict[str, Any] = {
-        "mcp-servers": servers_cfg,
-        "mcp-meta": config_dict.get("mcp-meta") or {},
-        "use_retry": bool(config_dict.get("use_retry", False)),
-    }
+    servers_cfg = cfg["mcp-servers"]
 
     if tools_cache is None:
         # `os_backend` приехал с develop: через него говорят клиенты
@@ -549,7 +543,7 @@ def _prepare_mcp_tools_data(
         tools_cache = ToolsCache(cfg, os_backend=os_backend)
     else:
         # Чужой кэш адресуется по СОДЕРЖИМОМУ mcp-servers (_make_cache_key), а
-        # cfg здесь пересобран из config_dict — поэтому обновляем ссылку, чтобы
+        # cfg здесь пересобран из настроек — поэтому обновляем ссылку, чтобы
         # ключ считался от актуального набора серверов, а не от того, с которым
         # кэш когда-то создали.
         _warn_if_cache_misses_the_sandbox(tools_cache, servers_cfg, os_backend)
@@ -606,7 +600,7 @@ def _split_registry_entry(entry: Any) -> tuple:
 def _assemble_mcp_tools_data(
     mcp_registry: Dict[str, Any],
     status_map: Dict[str, Dict[str, Any]],
-    config_dict: Dict[str, Any],
+    settings: Any,
     servers_cfg: Dict[str, Any],
     os_backend: Any = None,
 ) -> tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
@@ -617,9 +611,10 @@ def _assemble_mcp_tools_data(
     дождаться дискавери, — и дублировать ради неё сотню строк фабрик и
     нормализации схем не за что.
     """
-    timeout = config_dict.get("mcp-meta", {}).get("request_timeout_sec") or 600
+    app = settings_of(settings)
+    timeout = app.mcp.meta.request_timeout_sec or 600
 
-    default_use_retry = bool(config_dict.get("use_retry", False))
+    default_use_retry = app.backend.use_retry
     # Канон MCP без флагов схемы: openai_strict/send_tool_strict накладываются
     # копией на отправке, не здесь.
 
@@ -632,6 +627,7 @@ def _assemble_mcp_tools_data(
                 timeout,
                 default_use_retry=default_use_retry,
                 os_backend=os_backend,
+                caller=acall_mcp_tool,
             )
 
         return fabric
@@ -658,6 +654,7 @@ def _assemble_mcp_tools_data(
 
         tool_data: Dict[str, Any] = {
             "tool_fabric": make_fabric(full_name),
+            "execution_kind": "mcp",
             "spec": normalized_spec,
             "description": normalized_spec.get("description", ""),
         }
@@ -668,7 +665,7 @@ def _assemble_mcp_tools_data(
 
 
 async def aget_mcp_tools_data_for_config(
-    config_dict: Dict[str, Any],
+    settings: Any,
     on_progress=None,
     *,
     tools_cache: Optional[ToolsCache] = None,
@@ -680,7 +677,7 @@ async def aget_mcp_tools_data_for_config(
     набора тулов, и она корутинная.
     """
     prepared = _prepare_mcp_tools_data(
-        config_dict, tools_cache=tools_cache, os_backend=os_backend
+        settings, tools_cache=tools_cache, os_backend=os_backend
     )
     if prepared is None:
         return {}, {}
@@ -694,7 +691,7 @@ async def aget_mcp_tools_data_for_config(
     return _assemble_mcp_tools_data(
         mcp_registry,
         status_map,
-        config_dict,
+        settings,
         servers_cfg,
         os_backend=os_backend,
     )

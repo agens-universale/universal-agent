@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from rich.text import Text
 
-from gc_tui.editors.field_list import FieldListController, LIST_CLOSED_HINT
+from gc_tui.editors.field_list import LIST_CLOSED_HINT, FieldListController
 from gc_tui.palette import ACCENT, DEEP_DIM
 
 # Канон-хинт пресет-листа адреса (спека §2.1, дословно).

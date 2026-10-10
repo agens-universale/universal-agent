@@ -14,7 +14,7 @@ import asyncio
 import sys
 
 from gc_core.aio import AsyncAgent
-from gc_core.config import load_config
+from gc_core.config import load_settings
 
 
 async def _ticker(stop: asyncio.Event) -> int:
@@ -27,12 +27,13 @@ async def _ticker(stop: asyncio.Event) -> int:
 
 
 async def main(config_path: str, prompts: list[str]) -> list[str]:
-    config_dict = load_config(config_path)
+    # Настройки неизменяемы: одни на всех агентов, копировать не нужно.
+    settings = load_settings(config_path)
     stop = asyncio.Event()
     ticker = asyncio.create_task(_ticker(stop))
 
     async def ask(i: int, prompt: str) -> str:
-        async with await AsyncAgent.create(dict(config_dict)) as agent:
+        async with await AsyncAgent.create(settings) as agent:
             return await agent.run(prompt, thread_id=f"embed-{i}")
 
     try:

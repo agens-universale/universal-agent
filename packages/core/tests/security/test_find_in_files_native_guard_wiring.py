@@ -17,8 +17,7 @@ from gc_testkit.helpers.tool_ctx import with_local_ctx
 def _cfg(root):
     return {
         "launch_root": str(root),
-        "root_box": {"enabled": True, "launch_root": str(root)},
-        "read_guard": {
+        "security.read_guard": {
             "enabled": True,
             "mode": "deny",
             "denied_file_patterns": [".env"],
@@ -42,7 +41,7 @@ def test_native_branch_hands_the_predicate_to_run_native_grep(
 
     monkeypatch.setattr(native_fs_search, "arun_native_grep", as_coro(spy))
 
-    tool = with_local_ctx(FindInFiles, config_dict=_cfg(tmp_path))
+    tool = with_local_ctx(FindInFiles, _cfg(tmp_path))
     backend_cls = type(tool._backend)
     monkeypatch.setattr(backend_cls, "has_grep", True, raising=False)
     monkeypatch.setattr(backend_cls, "has_find", True, raising=False)
@@ -78,7 +77,7 @@ def test_capture_cap_below_limit_stays_native_with_output_capped(
 
     monkeypatch.setattr(native_fs_search, "arun_native_grep", as_coro(spy))
 
-    tool = with_local_ctx(FindInFiles, config_dict=_cfg(tmp_path))
+    tool = with_local_ctx(FindInFiles, _cfg(tmp_path))
     backend_cls = type(tool._backend)
     monkeypatch.setattr(backend_cls, "has_grep", True, raising=False)
     monkeypatch.setattr(backend_cls, "has_find", True, raising=False)

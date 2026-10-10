@@ -10,41 +10,52 @@ from gc_acp.main import (
 )
 from gc_acp.prompt_assets import acp_special_instructions_path
 from gc_acp.protocol import StdoutWriter
+from gc_testkit.settings import make_settings
+
+
+def _assert_acp_defaults(loaded):
+    assert loaded.runtime.text_answer_mode == "allow"
+    assert loaded.settings.agent.strict_turn_finish_validation is False
+    assert loaded.runtime.finish_gate_smart is False
+    assert loaded.settings.todo.reminder_steps == 0
 
 
 def test_apply_acp_runtime_defaults_allow_gate_off_todo_off():
-    cfg = {}
-    apply_acp_runtime_defaults(cfg)
-    assert cfg["text_answer_mode"] == "allow"
-    assert cfg["strict_turn_finish_validation"] is False
-    assert cfg["finish_gate_smart"] is False
-    assert cfg["todo_params"]["reminder_steps"] == 0
-    assert cfg["chat_completions_special_instructions_path"] == (
-        acp_special_instructions_path()
+    loaded = apply_acp_runtime_defaults(make_settings())
+    _assert_acp_defaults(loaded)
+    assert (
+        loaded.settings.paths.chat_completions_special_instructions_path
+        == (acp_special_instructions_path())
     )
-    assert cfg["stop_tools"] == [
+    assert loaded.settings.agent.stop_tools == [
         "turn_ask_human",
         "turn_intermediate_reply",
     ]
 
 
 def test_apply_acp_runtime_defaults_respects_overrides():
-    cfg = {
-        "acp_text_answer_mode": "judge",
-        "acp_finish_gate_mode": "smart",
-        "acp_todo_reminder_steps": 7,
-    }
-    apply_acp_runtime_defaults(cfg)
-    assert cfg["text_answer_mode"] == "judge"
-    assert cfg["strict_turn_finish_validation"] is True
-    assert cfg["finish_gate_smart"] is True
-    assert cfg["todo_params"]["reminder_steps"] == 7
+    loaded = apply_acp_runtime_defaults(
+        make_settings(
+            {
+                "acp.text_answer_mode": "judge",
+                "acp.finish_gate_mode": "smart",
+                "acp.todo_reminder_steps": 7,
+            }
+        )
+    )
+    assert loaded.runtime.text_answer_mode == "judge"
+    assert loaded.settings.agent.strict_turn_finish_validation is True
+    assert loaded.runtime.finish_gate_smart is True
+    assert loaded.settings.todo.reminder_steps == 7
 
 
 def test_apply_acp_runtime_defaults_keeps_existing_stop_tools():
-    cfg = {"stop_tools": ["project_memory", "turn_ask_human"]}
-    apply_acp_runtime_defaults(cfg)
-    assert cfg["stop_tools"] == [
+    loaded = apply_acp_runtime_defaults(
+        make_settings(
+            {"agent.stop_tools": ["project_memory", "turn_ask_human"]}
+        )
+    )
+    assert loaded.settings.agent.stop_tools == [
         "project_memory",
         "turn_ask_human",
         "turn_intermediate_reply",
@@ -61,9 +72,9 @@ def test_acp_special_instructions_asset_exists():
 
 
 def test_backend_rejection_names_harbor_and_accepts_local():
-    assert backend_rejection({"os_backend": "local"}) is None
-    assert backend_rejection({}) is None
-    text = backend_rejection({"os_backend": "harbor"})
+    assert backend_rejection(make_settings({"os_backend": "local"})) is None
+    assert backend_rejection(make_settings()) is None
+    text = backend_rejection(make_settings({"os_backend": "harbor"}))
     assert text is not None
     assert "harbor" in text
 
@@ -74,13 +85,13 @@ def test_harbor_exits_before_protocol(monkeypatch, capsys):
     def load(path, profile_override=None):
         seen["path"] = path
         seen["profile"] = profile_override
-        return {"os_backend": "harbor"}, None
+        return make_settings({"os_backend": "harbor"})
 
     def run(coro):
         coro.close()
         raise AssertionError("protocol started")
 
-    monkeypatch.setattr("gc_acp.main.load_config_ex", load)
+    monkeypatch.setattr("gc_acp.main.load_settings", load)
     monkeypatch.setattr("gc_acp.main.asyncio.run", run)
     assert main(["--config", "c.yml", "--profile", "work"]) == 1
     captured = capsys.readouterr()
@@ -97,7 +108,7 @@ def test_unreadable_config_exits_before_protocol(monkeypatch, capsys):
         coro.close()
         raise AssertionError("protocol started")
 
-    monkeypatch.setattr("gc_acp.main.load_config_ex", load)
+    monkeypatch.setattr("gc_acp.main.load_settings", load)
     monkeypatch.setattr(
         "gc_acp.main.explain_broken_config", lambda *args, **kwargs: "сломан"
     )
@@ -115,12 +126,11 @@ async def _no_lines():
 
 def test_local_config_is_silent_on_stdout(monkeypatch, capsys, tmp_path):
     def load(path, profile_override=None):
-        return {
-            "os_backend": "local",
-            "threads_data_path": str(tmp_path),
-        }, None
+        return make_settings(
+            {"os_backend": "local", "paths.threads_data_path": str(tmp_path)}
+        )
 
-    monkeypatch.setattr("gc_acp.main.load_config_ex", load)
+    monkeypatch.setattr("gc_acp.main.load_settings", load)
     monkeypatch.setattr("gc_acp.main.stdin_lines", _no_lines)
     assert main(["--config", "c.yml"]) == 0
     captured = capsys.readouterr()
@@ -131,36 +141,32 @@ def test_local_start_applies_runtime_defaults(monkeypatch, tmp_path):
     held = {}
 
     def load(path, profile_override=None):
-        return {
-            "os_backend": "local",
-            "threads_data_path": str(tmp_path),
-        }, None
+        return make_settings(
+            {"os_backend": "local", "paths.threads_data_path": str(tmp_path)}
+        )
 
     async def serve(config, protocol_out):
         held["config"] = config
         held["protocol_out"] = protocol_out
 
-    monkeypatch.setattr("gc_acp.main.load_config_ex", load)
+    monkeypatch.setattr("gc_acp.main.load_settings", load)
     monkeypatch.setattr("gc_acp.main.serve", serve)
     assert main(["--config", "c.yml"]) == 0
-    cfg = held["config"]
-    assert cfg["text_answer_mode"] == "allow"
-    assert cfg["strict_turn_finish_validation"] is False
-    assert cfg["finish_gate_smart"] is False
-    assert cfg["todo_params"]["reminder_steps"] == 0
-    assert cfg["chat_completions_special_instructions_path"].endswith(
+    loaded = held["config"]
+    _assert_acp_defaults(loaded)
+    assert loaded.settings.logging.console_trace is False
+    assert loaded.settings.paths.chat_completions_special_instructions_path.endswith(
         "chat_completions_acp_special_instructions.md"
     )
-    assert "turn_ask_human" in cfg["stop_tools"]
-    assert "turn_intermediate_reply" in cfg["stop_tools"]
+    assert "turn_ask_human" in loaded.settings.agent.stop_tools
+    assert "turn_intermediate_reply" in loaded.settings.agent.stop_tools
 
 
 def test_core_print_stays_off_protocol_stdout(monkeypatch, capsys, tmp_path):
     def load(path, profile_override=None):
-        return {
-            "os_backend": "local",
-            "threads_data_path": str(tmp_path),
-        }, None
+        return make_settings(
+            {"os_backend": "local", "paths.threads_data_path": str(tmp_path)}
+        )
 
     async def serve(_config, protocol_out):
         print("[MCP] demo: недоступен — connection refused (пропущен)")
@@ -168,7 +174,7 @@ def test_core_print_stays_off_protocol_stdout(monkeypatch, capsys, tmp_path):
             {"jsonrpc": "2.0", "id": 1, "result": {}}
         )
 
-    monkeypatch.setattr("gc_acp.main.load_config_ex", load)
+    monkeypatch.setattr("gc_acp.main.load_settings", load)
     monkeypatch.setattr("gc_acp.main.serve", serve)
     assert main(["--config", "c.yml"]) == 0
     print("after")
@@ -181,86 +187,129 @@ def test_core_print_stays_off_protocol_stdout(monkeypatch, capsys, tmp_path):
 
 
 def test_unsupported_backend_is_rejected():
-    text = backend_rejection({"os_backend": "docker"})
+    text = backend_rejection(make_settings({"os_backend": "docker"}))
     assert text is not None
     assert "docker" in text
 
 
-def test_parse_args_keeps_own_flags_and_collects_overrides():
+def test_parse_args_keeps_own_flags_and_collects_setting_paths():
     bare = _parse_args([])
     assert bare.config is None
     assert bare.profile is None
-    assert bare.overrides == {}
+    assert bare.overrides == {} and bare.foreign_flags == []
 
     jetbrains = _parse_args(
         ["acp", "--experimental", "--config", "c.yml", "--profile", "work"]
     )
     assert jetbrains.config == "c.yml"
     assert jetbrains.profile == "work"
-    assert jetbrains.overrides == {"experimental": True}
+    # Флаг клиента без точки — не настройка: пропускается.
+    assert jetbrains.overrides == {}
+    assert jetbrains.foreign_flags == ["experimental"]
 
     vscode = _parse_args(["--profile", "acp"])
     assert vscode.profile == "acp"
     assert vscode.config is None
-    assert vscode.overrides == {}
 
     junk = _parse_args(["nope", "--foo", "bar", "acp"])
     assert junk.config is None
     assert junk.profile is None
-    assert junk.overrides == {"foo": "bar"}
+    assert junk.overrides == {} and junk.foreign_flags == ["foo"]
 
 
-def test_parse_args_coerces_override_types():
+def test_parse_args_coerces_setting_values():
     args = _parse_args(
-        ["--level", "max", "--max_steps=50", "--verbose", "true"]
+        [
+            "--level",
+            "max",
+            "--agent.max_steps=50",
+            "--agent.verbose",
+            "true",
+            "--model",
+            "forced",
+        ]
     )
     assert args.overrides == {
         "level": "max",
-        "max_steps": 50,
-        "verbose": True,
+        "agent.max_steps": 50,
+        "agent.verbose": True,
+        "agent.model": "forced",
     }
 
 
-def test_cli_overrides_apply_after_profile(monkeypatch, tmp_path):
+def _start(monkeypatch, tmp_path, argv, base=None):
     held = {}
 
     def load(path, profile_override=None):
         held["profile"] = profile_override
-        return {
-            "os_backend": "local",
-            "threads_data_path": str(tmp_path),
-            "level": "default",
-            "max_steps": 100,
-            "models": {"flash": {"model": "m"}},
-        }, None
-
-    async def serve(config, protocol_out):
-        held["config"] = config
-
-    monkeypatch.setattr("gc_acp.main.load_config_ex", load)
-    monkeypatch.setattr("gc_acp.main.serve", serve)
-    assert (
-        main(
-            [
-                "--profile",
-                "work",
-                "--level",
-                "max",
-                "--max_steps",
-                "7",
-                "--model",
-                "forced",
-            ]
+        return make_settings(
+            {
+                "os_backend": "local",
+                "paths.threads_data_path": str(tmp_path),
+                **(base or {}),
+            }
         )
-        == 0
+
+    async def serve(loaded, protocol_out):
+        held["loaded"] = loaded
+
+    monkeypatch.setattr("gc_acp.main.load_settings", load)
+    monkeypatch.setattr("gc_acp.main.serve", serve)
+    return main(argv), held
+
+
+def test_setting_overrides_apply_after_profile(monkeypatch, tmp_path):
+    code, held = _start(
+        monkeypatch,
+        tmp_path,
+        [
+            "--profile",
+            "work",
+            "--level",
+            "max",
+            "--agent.max_steps",
+            "7",
+            "--model",
+            "forced",
+        ],
+        {"agent.max_steps": 100, "models": {"flash": {"model": "m"}}},
     )
-    cfg = held["config"]
+    assert code == 0
+    loaded = held["loaded"]
     assert held["profile"] == "work"
-    assert cfg["level"] == "max"
-    assert cfg["max_steps"] == 7
-    assert cfg["model"] == "forced"
-    assert "model" in cfg["cli_explicit_keys"]
-    assert any("легаси-форс" in n for n in cfg["compat_notices"])
+    assert loaded.settings.level == "max"
+    assert loaded.settings.agent.max_steps == 7
+    assert loaded.settings.agent.model == "forced"
+    assert loaded.provenance.source("agent.model").layer == "cli"
+    assert any("легаси-форс" in n for n in loaded.runtime.notices)
+
+
+def test_unknown_setting_path_fails(monkeypatch, tmp_path, capsys):
+    code, held = _start(monkeypatch, tmp_path, ["--agent.max_step", "7"])
+    assert code == 2 and "loaded" not in held
+    err = capsys.readouterr().err
+    assert "неизвестная настройка --agent.max_step" in err
+
+
+def test_flat_name_is_skipped_with_path_hint(monkeypatch, tmp_path, capsys):
+    code, held = _start(monkeypatch, tmp_path, ["--max_steps", "7"])
+    assert code == 0
+    assert held["loaded"].settings.agent.max_steps != 7
+    assert "--max_steps пропущен" in capsys.readouterr().err
+
+
+def test_invalid_setting_value_is_rejected_without_value(
+    monkeypatch, tmp_path, capsys
+):
+    code, _ = _start(
+        monkeypatch,
+        tmp_path,
+        ["--backend.chat_completion_headers", "Bearer sk-secret"],
+    )
+    assert code == 2
+    err = capsys.readouterr().err
+    assert "backend.chat_completion_headers" in err
+    assert "sk-secret" not in err
 
 
 def test_jetbrains_acp_arg_starts_protocol(monkeypatch, tmp_path):
@@ -269,17 +318,15 @@ def test_jetbrains_acp_arg_starts_protocol(monkeypatch, tmp_path):
     def load(path, profile_override=None):
         held["path"] = path
         held["profile"] = profile_override
-        return {
-            "os_backend": "local",
-            "threads_data_path": str(tmp_path),
-        }, None
+        return make_settings(
+            {"os_backend": "local", "paths.threads_data_path": str(tmp_path)}
+        )
 
     async def serve(config, protocol_out):
         held["started"] = True
-        held["text_answer_mode"] = config["text_answer_mode"]
-        held["experimental"] = config.get("experimental")
+        held["text_answer_mode"] = config.runtime.text_answer_mode
 
-    monkeypatch.setattr("gc_acp.main.load_config_ex", load)
+    monkeypatch.setattr("gc_acp.main.load_settings", load)
     monkeypatch.setattr("gc_acp.main.serve", serve)
     assert (
         main(
@@ -292,5 +339,17 @@ def test_jetbrains_acp_arg_starts_protocol(monkeypatch, tmp_path):
         "profile": "work",
         "started": True,
         "text_answer_mode": "allow",
-        "experimental": True,
     }
+
+
+def test_abbreviated_own_flags_fail_instead_of_default_config(capsys):
+    """`--conf x.yml` / `--prof acp` — не флаги клиента: пропуск запустил бы
+    агента на конфиге по умолчанию. Чужие флаги клиента — по-прежнему мимо."""
+    assert main(["--conf", "x.yml"]) == 2
+    assert "--conf (--config)" in capsys.readouterr().err
+    assert main(["--prof", "acp"]) == 2
+    assert "--prof (--profile)" in capsys.readouterr().err
+    assert _parse_args(["acp", "--experimental"]).abbreviated == []
+    # Короткие флаги клиента, похожие на начало нашего, — его собственные.
+    for flag in ("--c", "--mod", "--lev", "--pro", "--comp"):
+        assert _parse_args(["acp", flag]).abbreviated == [], flag

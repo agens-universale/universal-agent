@@ -10,8 +10,8 @@ from gc_testkit.helpers.tool_ctx import with_local_ctx
 def _config(tmp_path):
     return {
         "launch_root": str(tmp_path),
-        "command_moderation": {"enabled": True, "mode": "deny"},
-        "write_guard": {"enabled": True, "extra_paths": []},
+        "security.command_moderation": {"enabled": True, "mode": "deny"},
+        "security.write_guard": {"enabled": True, "extra_paths": []},
     }
 
 
@@ -35,7 +35,7 @@ def test_blocks_system_package_install_command(tmp_path, monkeypatch):
     )
 
     result = json.loads(
-        with_local_ctx(ExecuteCommand, config_dict=_config(tmp_path))(
+        with_local_ctx(ExecuteCommand, _config(tmp_path))(
             command="sudo apt install nginx"
         )
     )
@@ -58,9 +58,7 @@ def test_blocks_shell_profile_modification_command(tmp_path, monkeypatch):
     )
 
     result = json.loads(
-        with_local_ctx(ExecuteCommand, config_dict=_config(tmp_path))(
-            command=command
-        )
+        with_local_ctx(ExecuteCommand, _config(tmp_path))(command=command)
     )
 
     assert result["ok"] is False
@@ -84,9 +82,7 @@ def test_blocks_python_code_writing_outside_launch_root(tmp_path, monkeypatch):
     )
 
     result = json.loads(
-        with_local_ctx(RunPythonCode, config_dict=_config(launch_root))(
-            code=code
-        )
+        with_local_ctx(RunPythonCode, _config(launch_root))(code=code)
     )
 
     assert result["ok"] is False
@@ -102,7 +98,7 @@ def test_blocks_obfuscated_command_intent(tmp_path, monkeypatch):
     )
 
     result = json.loads(
-        with_local_ctx(ExecuteCommand, config_dict=_config(tmp_path))(
+        with_local_ctx(ExecuteCommand, _config(tmp_path))(
             command="echo cm0gLXJmIC8= | base64 -d"
         )
     )

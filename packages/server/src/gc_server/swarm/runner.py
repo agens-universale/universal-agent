@@ -1,3 +1,4 @@
+import copy
 import json
 import logging
 import os
@@ -9,8 +10,14 @@ from typing import Any, Dict, Optional, Tuple
 import yaml
 from gc_core.config import resolve_base_config_path
 from gc_core.config_modules import env_vars
-from gc_core.config_modules.compat import apply_compat
+from gc_core.config_modules.compat import apply_compat, map_legacy_path
 from gc_core.config_modules.merge import merge_config_layers
+from gc_core.config_modules.path_hints import check_setting_path
+from gc_core.settings import (
+    _replace_at,
+    check_registry_pairs,
+    expand_section_updates,
+)
 from gc_core.utils.user_text import read_user_text_or_none
 
 from gc_server.swarm import storage as storage
@@ -18,55 +25,34 @@ from gc_server.swarm import storage as storage
 logger = logging.getLogger(__name__)
 
 
-# Известные top-level секции в config.yml. Если agent_overrides содержит хотя бы
-# одну из них на верхнем уровне — считаем его raw-структурой; иначе — flat
-# (legacy формат для webhook'а) и оборачиваем в {"agent": ...}.
-_KNOWN_RAW_SECTIONS = frozenset(
-    {
-        "models",
-        "slots",
-        "assign",
-        "backend",
-        "agent",
-        "agent_auth",
-        "logging",
-        "paths",
-        "mcp",
-        "security",
-        "summary",
-        "chat_completions",
-        "working_memory",
-        "quality_gate",
-        "tool_usage_notice",
-        "project_memory",
-        "intent_scope",
-    }
-)
-
-
-def _normalize_agent_overrides_to_raw(
-    overrides: Dict[str, Any],
+def _apply_agent_overrides_to_raw(
+    raw: Dict[str, Any], overrides: Dict[str, Any]
 ) -> Dict[str, Any]:
-    """Привести agent_overrides к raw-структуре YAML.
-
-    - Если на верхнем уровне есть хотя бы одна известная секция — считаем raw,
-      возвращаем как есть.
-    - Иначе flat (legacy формат) — оборачиваем в {"agent": ...}. В webhook'е
-      `cfg.update(agent_overrides)` работает на flat dict; чтобы тот же
-      `agent_overrides: {stop_tools: [...]}` дотянулся до swarm'а через raw
-      YAML, нужно положить эти ключи под секцию `agent:`.
-    """
+    """``agent_overrides`` поверх сырого YAML с семантикой ``override_settings``."""
     if not isinstance(overrides, dict) or not overrides:
-        return {}
-    if any(k in _KNOWN_RAW_SECTIONS for k in overrides):
-        return dict(overrides)
-    return {"agent": dict(overrides)}
+        return raw
+    updates = expand_section_updates(
+        {str(key): value for key, value in overrides.items()}
+    )
+    # Каждый раскрытый путь: опечатка внутри секции (``security:
+    # {read_gard: …}``) иначе молча легла бы лишним ключом.
+    for key in updates:
+        mapped = map_legacy_path(key)
+        if mapped is not None:
+            check_setting_path(mapped)
+    # Правило пары адрес+токен — как в CLI и webhook: адрес записи реестра
+    # без токена оставил бы токен файла на новом адресе.
+    check_registry_pairs(updates)
+    result = copy.deepcopy(raw)
+    for dotted, value in updates.items():
+        _replace_at(result, dotted, copy.deepcopy(value))
+    return result
 
 
 def _apply_swarm_env_to_raw(raw: Dict[str, Any], config_dir: str) -> None:
-    """Параллель `config_modules.common.apply_swarm_env_overrides` для raw YAML.
+    """Параллель `config_modules.common.swarm_env_updates` для raw YAML.
 
-    Та функция работает на FLAT dict (`config_dict["agent_md_path"] = ...`),
+    Та функция работает на настройках (`paths.agent_md_path` и т.п. слоем env),
     а в materialize мы оперируем сырой YAML-структурой, где те же поля
     лежат в `paths.*`. Чтобы избежать divergence с обычным CLI'ем — здесь
     делаем такую же логику, но на raw.
@@ -159,14 +145,14 @@ def _materialize_runtime_config(
          через resolve_base_config_path, либо явный swarm.host_config_path).
       2. Project overlay — <cwd>/.gc/config.yml относительно CWD сервера,
          если файл существует и отличается от base. Симметрично с тем, как
-         load_config делает layered loading для обычного CLI'я.
+         load_settings делает layered loading для обычного CLI'я.
       3. SWARM_* env vars — paths.{agent_md_path, threads_data_path,
          skills_data_path}. Параллель с config_modules.common.apply_swarm_env_overrides
          для raw YAML.
       4. agent_overrides — переопределения из config_server.yml::agent_overrides.
-         Flat-формат (legacy для webhook'а, типа `stop_tools: [...]`) авто-
-         оборачивается в {"agent": ...}. Raw-формат (с секциями `agent:`,
-         `paths:` и т.п.) применяется как есть.
+         Пути через точку (`agent.stop_tools: [...]`) раскладываются во
+         вложенные секции, секции (`agent:`, `paths:` и т.п.) применяются как
+         есть. Плоское имя (`stop_tools`) — ошибка с подсказкой пути.
       5. Swarm-specific overrides — ВСЕГДА применяются последними и
          перезаписывают предыдущие слои для критичных sandbox-полей:
            paths.threads_data_path = "/work/.gc/threads"
@@ -198,8 +184,8 @@ def _materialize_runtime_config(
     raw: Dict[str, Any] = base
 
     # === Слой 2: project overlay <cwd>/.gc/config.yml ===
-    # Симметрично с load_config()'s layered loading. CWD — серверский, тот же,
-    # что увидит load_config() при старте webhook'а. Защитный check
+    # Симметрично с load_settings()'s layered loading. CWD — серверский, тот же,
+    # что увидит load_settings() при старте webhook'а. Защитный check
     # `project_path != host_config_path` обходит самомерж когда base file
     # лежит в <cwd>/.gc/ (это бывает, если сервер запущен из проектной директории).
     try:
@@ -225,11 +211,11 @@ def _materialize_runtime_config(
     _apply_swarm_env_to_raw(raw, config_dir)
 
     # === Слой 4: agent_overrides из config_server.yml ===
+    # Как у CLI и webhook: правка заменяет значение по пути (списки сужаются),
+    # секция раскладывается на листья.
     agent_overrides = swarm_cfg.get("agent_overrides") or {}
     if agent_overrides:
-        wrapped = _normalize_agent_overrides_to_raw(agent_overrides)
-        apply_compat(wrapped)
-        raw = merge_config_layers(raw, wrapped)
+        raw = _apply_agent_overrides_to_raw(raw, agent_overrides)
 
     # === Слой 5: swarm-specific overrides (всегда последний, всегда побеждает) ===
     swarm_overrides: Dict[str, Any] = {
@@ -260,7 +246,7 @@ def _resolve_host_config_path(swarm_cfg: Dict[str, Any]) -> Optional[str]:
 
     Приоритет:
       1. swarm_cfg["host_config_path"] (если задан явно).
-      2. config.resolve_base_config_path() (та же логика что у load_config).
+      2. config.resolve_base_config_path() (та же логика что у load_settings).
     """
     explicit = swarm_cfg.get("host_config_path")
     if isinstance(explicit, str) and explicit.strip():

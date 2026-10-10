@@ -8,6 +8,7 @@ Task 17 переставил механику: правая колонка (#foo
 Поэтому сторожим не промежуточный «бюджет», а ИТОГ этого решения: фактическую
 композицию правой рядом с фактической левой."""
 
+from gc_testkit.tui_support import tui_settings
 import pytest
 from rich.cells import cell_len
 
@@ -44,7 +45,9 @@ async def test_right_column_leaves_room_for_notices_suffix():
     from gc_tui.app import TuiApp
     from gc_tui.screens.main import TraceScreen
 
-    app = TuiApp(config={"model": "anthropic/claude-opus-5"})
+    app = TuiApp(
+        settings=tui_settings({"agent.model": "anthropic/claude-opus-5"})
+    )
     async with app.run_test(size=(120, 30)) as pilot:
         scr = app.screen_stack[0]
         assert isinstance(scr, TraceScreen)
@@ -71,7 +74,7 @@ async def test_right_column_without_notices_is_unchanged():
     """Без уведомлений суффикса нет — та же проверка на голой левой части."""
     from gc_tui.app import TuiApp
 
-    app = TuiApp(config={"model": "m"})
+    app = TuiApp(settings=tui_settings({"agent.model": "m"}))
     async with app.run_test(size=(120, 30)) as pilot:
         scr = app.screen_stack[0]
         app.collect_footer_notices = list
@@ -120,11 +123,13 @@ def _billed(inp, out, cost):
 
 
 def _with_prices(app, scr, *, running=False):
-    app._config = {
-        "model": "some-long-model-name",
-        "pricing": _PRICING,
-        "completions_url": "https://routerai.ru/api/v1/chat/completions",
-    }
+    app._settings = tui_settings(
+        {
+            "agent.model": "some-long-model-name",
+            "pricing": _PRICING,
+            "backend.completions_url": "https://routerai.ru/api/v1/chat/completions",
+        }
+    )
     app.tui_state.active_task_id = "t1"
     scr._active_task_id = "t1"
     app.active_runner = _RunningRunner(
@@ -149,7 +154,10 @@ async def test_profile_name_survives_when_dropping_it_frees_nothing(
     from gc_core.config_modules.profiles import ProfileRef
     from gc_tui.app import TuiApp
 
-    app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "m"})
+    app = TuiApp(
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "m"}),
+    )
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(60, 30)) as pilot:
         scr = pilot.app.screen
@@ -180,7 +188,10 @@ async def test_stop_key_keeps_its_room_on_narrow_window(
     from gc_tui.app import TuiApp
     from gc_tui.screens.main import _FOOTER_RUNNING_LEFT
 
-    app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "m"})
+    app = TuiApp(
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "m"}),
+    )
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(width, 30)) as pilot:
         scr = pilot.app.screen

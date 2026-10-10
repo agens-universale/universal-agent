@@ -54,9 +54,7 @@ def test_background_works_through_the_wrapper(tmp_path):
     project = tmp_path / "proj"
     project.mkdir()
     ticks = tmp_path / "ticks.log"
-    tool = with_local_ctx(
-        ExecuteCommand, config_dict={"launch_root": str(project)}
-    )
+    tool = with_local_ctx(ExecuteCommand, {"launch_root": str(project)})
     ctx = tool._ctx
     ctx.os_backend = TrackingFsBackend(ctx.os_backend, ctx)
 

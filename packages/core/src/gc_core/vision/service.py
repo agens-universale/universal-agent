@@ -1,7 +1,7 @@
 """Lazy admission of an effective route before sending user pixels."""
 
-from gc_core.utils.llm_chat_client import PreparedChatCompletion
 from gc_core.utils.http_auth import authorization_attempts
+from gc_core.utils.llm_chat_client import PreparedChatCompletion
 from gc_core.vision.audience import _declared_blind, route_id
 from gc_core.vision.notes import note_probe
 from gc_core.vision.probe import ProbeResult, ProbeStatus, aprobe_route
@@ -9,12 +9,20 @@ from gc_core.vision.registry import process_vision_probes
 from gc_core.vision.route import vision_route_key
 
 
-def confirmed_route_headers(prepared: PreparedChatCompletion) -> dict[str, str]:
+def confirmed_route_headers(
+    prepared: PreparedChatCompletion,
+) -> dict[str, str]:
     """Использовать принятую пробой форму без сохранения самого секрета в кеше."""
     headers = dict(prepared.headers)
     result = process_vision_probes().peek(vision_route_key(prepared))
-    if result is not None and result.status is ProbeStatus.CONFIRMED and result.authorization_alternative:
-        key = next((key for key in headers if key.lower() == "authorization"), None)
+    if (
+        result is not None
+        and result.status is ProbeStatus.CONFIRMED
+        and result.authorization_alternative
+    ):
+        key = next(
+            (key for key in headers if key.lower() == "authorization"), None
+        )
         forms = authorization_attempts(headers.get(key)) if key else []
         if len(forms) == 2:
             headers[key] = forms[1]
@@ -31,9 +39,7 @@ async def aensure_route(
     if routes is None:
         routes = state.vision_routes = {}
     routes[route_id(prepared.resolved)] = key
-    if _declared_blind(
-        prepared.resolved, getattr(ctx, "config_dict", {}) or {}
-    ):
+    if _declared_blind(prepared.resolved, ctx):
         return ProbeResult(ProbeStatus.BLOCKED, "vision_disabled")
     result = await process_vision_probes().ensure(
         key,
@@ -71,9 +77,10 @@ async def aensure_view_audience(ctx, state):
     router = getattr(ctx, "model_router", None)
     if router is None:
         return getattr(state, "vision_audience", None)
-    cfg = getattr(ctx, "config_dict", {}) or {}
+    from gc_core.settings import settings_of
+
     main = router.resolve_main_at_level(getattr(state, "turn_level", None))
-    mode = cfg.get("backend_api_mode", "responses")
+    mode = settings_of(ctx).backend.api_mode
     candidates = [main] if mode == "chat_completions" else []
     eyes = _resolve_eyes(router)
     if eyes is not None and route_id(eyes) not in {
@@ -81,7 +88,7 @@ async def aensure_view_audience(ctx, state):
     }:
         candidates.append(eyes)
     for candidate in candidates:
-        if _declared_blind(candidate, cfg):
+        if _declared_blind(candidate, ctx):
             continue
         prepared = await aprepare_chat_completion(
             ctx, state, resolved=candidate
@@ -94,7 +101,7 @@ async def aensure_view_audience(ctx, state):
         request_resolved=main,
         api_mode=mode,
         tool_in_set=view_tool_in_set(getattr(state, "tools", []) or []),
-        config=cfg,
+        settings=ctx,
         routes=getattr(state, "vision_routes", {}),
         turn_key=getattr(state, "vision_probe_turn", None),
     )

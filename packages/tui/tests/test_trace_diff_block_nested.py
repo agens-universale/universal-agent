@@ -14,17 +14,17 @@ import pytest
 
 pytest.importorskip("textual")
 
-from textual.containers import VerticalScroll
-from textual.widgets import Static
-
 from gc_core.agent_edits.journal import EditRecord, EditsJournal
 from gc_core.thread_store import (
     append_subagent_trace_record,
     edits_journal_path,
 )
+from gc_testkit.tui_support import tui_settings
 from gc_tui.app import TuiApp
 from gc_tui.widgets.diff_block import DiffBlock
 from gc_tui.widgets.tool_call_row import ToolCallRow
+from textual.containers import VerticalScroll
+from textual.widgets import Static
 
 SHORT_HUNKS = (
     "--- \n+++ \n@@ -1,3 +1,3 @@\n def f():\n-    return 1\n+    return 2\n"
@@ -167,10 +167,12 @@ def _write_journal(tmp_path, tid: str, records: list[EditRecord]) -> None:
 
 @asynccontextmanager
 async def _screen(tmp_path, tid: str, config: dict | None = None):
-    cfg = {"model": "M"}
+    cfg = {"agent.model": "M"}
     if config:
         cfg.update(config)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config=cfg)
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings(cfg)
+    )
     async with app.run_test(size=(100, 40)) as pilot:
         pilot.app.screen.attach_active_task(tid, is_resume=True)
         await pilot.pause(0.3)
@@ -325,7 +327,7 @@ async def test_nested_block_keeps_nested_indent_and_tie(tmp_path):
             "".join(seg.text for seg in strip).rstrip()
             for strip in scr.app.screen._compositor.render_strips()
         ]
-        indent = lambda s: len(s) - len(s.lstrip(" "))  # noqa: E731
+        indent = lambda s: len(s) - len(s.lstrip(" "))
         row = next(i for i, s in enumerate(lines) if "fs_write_file" in s)
         branch = next(i for i, s in enumerate(lines) if "изменено:" in s)
         body = next(i for i, s in enumerate(lines) if "def f():" in s)

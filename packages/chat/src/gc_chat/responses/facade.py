@@ -9,9 +9,10 @@ import uuid
 from collections import OrderedDict
 from typing import Any
 
+from gc_core.settings import LoadedSettings
 from gc_core.thread_store import validate_thread_id
 
-from gc_chat.agent_config import prepare_agent_config
+from gc_chat.agent_config import prepare_agent_settings
 from gc_chat.responses.ask_human import bind_ask_human
 from gc_chat.responses.errors import ApiError
 from gc_chat.responses.index_store import (
@@ -47,23 +48,24 @@ class ResponsesFacade:
     def __init__(
         self,
         *,
-        config: dict,
+        settings: LoadedSettings,
         agent_factory: Any,
         auth_connector: Any = None,
         tools_cache: Any = None,
         os_backend: Any = None,
         index: ResponseIndex | None = None,
     ) -> None:
-        self._config = config
+        self._settings = settings
         self._agent_factory = agent_factory
         self._auth = auth_connector
         self._tools_cache = tools_cache
         self._os_backend = os_backend
-        self._index = index or ResponseIndex(_threads_dir(config))
-        self.auth_token = str(config.get("chat_api_auth_token") or "")
-        self.cors_origins = _cors_origins(config)
-        self.bind_host = str(config.get("chat_api_host") or "127.0.0.1")
-        self.model_id = str(config.get("model") or "")
+        self._index = index or ResponseIndex(_threads_dir(settings))
+        chat_api = settings.settings.chat_api
+        self.auth_token = chat_api.auth_token
+        self.cors_origins = _cors_origins(chat_api.cors_origins)
+        self.bind_host = chat_api.host
+        self.model_id = str(settings.settings.agent.model or "")
         self._agents: OrderedDict[str, Any] = OrderedDict()
         self._busy: set[str] = set()
         self._live: dict[str, TurnRun] = {}
@@ -83,7 +85,7 @@ class ResponsesFacade:
 
     def new_dialog_cwd(self, sent: str | None = None) -> str:
         """Корень нового хода: абсолютный путь или launch_root."""
-        return cwd_for_new(sent, self._config.get("chat_api_launch_root"))
+        return cwd_for_new(sent, self._settings.settings.chat_api.launch_root)
 
     def get(self, response_id: str) -> dict:
         record = self._index.load(response_id)
@@ -141,13 +143,13 @@ class ResponsesFacade:
             if cached is not None:
                 self._agents.move_to_end(thread_id)
                 return cached
-            config = prepare_agent_config(
-                self._config,
+            settings = prepare_agent_settings(
+                self._settings,
                 cwd=cwd,
                 instructions_path=responses_special_instructions_path(),
             )
             agent = await self._agent_factory(
-                config,
+                settings,
                 auth_connector=self._auth,
                 tools_cache=self._tools_cache,
                 os_backend=self._os_backend,
@@ -213,16 +215,13 @@ class ResponsesFacade:
         self._live.pop(response_id, None)
 
 
-def _threads_dir(config: dict) -> str:
+def _threads_dir(settings: LoadedSettings) -> str:
     from gc_core.thread_store import resolve_threads_dir
 
-    return resolve_threads_dir(config)
+    return resolve_threads_dir(settings)
 
 
-def _cors_origins(config: dict) -> list[str]:
-    raw = config.get("chat_api_cors_origins") or []
-    if not isinstance(raw, list):
-        return []
+def _cors_origins(raw: list[str]) -> list[str]:
     cors_origins = [
         item for item in raw if isinstance(item, str) and item not in {"", "*"}
     ]

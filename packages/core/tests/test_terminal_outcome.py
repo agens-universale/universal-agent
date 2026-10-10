@@ -4,11 +4,11 @@ import importlib
 import json
 import sys
 import types
-from types import SimpleNamespace
 
 from gc_core.states import State
 from gc_testkit import run_coro
 from gc_testkit.paths import module_dir
+from gc_testkit.settings import fake_ctx
 
 
 def _make_state(max_steps=2):
@@ -98,22 +98,22 @@ def _make_ctx(**overrides):
     import logging
 
     cfg = {
-        "backend_api_mode": "chat_completions",
-        "completions_url": "http://backend.local/v1/chat/completions",
-        "chat_completions_max_tokens": 100,
-        "chat_completions_min_response_tokens": 30,
-        "backend_request_timeout_sec": 30,
-        "use_ssl": True,
-        "use_retry": False,
-        "console_trace": False,
-        "no_tool_call_max_count": 5,
-        "strict_turn_finish_validation": False,
+        "backend.api_mode": "chat_completions",
+        "backend.completions_url": "http://backend.local/v1/chat/completions",
+        "backend.chat_completions_max_tokens": 100,
+        "backend.chat_completions_min_response_tokens": 30,
+        "backend.request_timeout_sec": 30,
+        "backend.use_ssl": True,
+        "backend.use_retry": False,
+        "logging.console_trace": False,
+        "agent.no_tool_call_max_count": 5,
+        "agent.strict_turn_finish_validation": False,
         # Без live LLM в unit-тестах: envelope возвращается с пустым summary.
-        "limit_trace_summary": False,
+        "agent.limit_trace_summary": False,
     }
     cfg.update(overrides)
-    return SimpleNamespace(
-        config_dict=cfg,
+    return fake_ctx(
+        cfg,
         logger=logging.getLogger("test_terminal_outcome"),
         auth_connector=None,
     )
@@ -310,7 +310,7 @@ def test_tool_call_limit_sets_terminal_outcome(monkeypatch):
         arun_agent(
             [{"role": "user", "content": "привет", "id": "m1"}],
             state,
-            _make_ctx(max_tool_calls=2),
+            _make_ctx(**{"agent.max_tool_calls": 2}),
         )
     )
     _env = json.loads(result)
@@ -373,7 +373,7 @@ def test_token_limit_sets_terminal_outcome_aux_category(monkeypatch):
         arun_agent(
             [{"role": "user", "content": "привет", "id": "m1"}],
             state,
-            _make_ctx(session_token_limit=10),
+            _make_ctx(**{"agent.session_token_limit": 10}),
         )
     )
     _env = json.loads(result)
@@ -405,7 +405,7 @@ def test_token_limit_ignores_thread_cumulative(monkeypatch):
         arun_agent(
             [{"role": "user", "content": "привет", "id": "m1"}],
             state,
-            _make_ctx(session_token_limit=500),
+            _make_ctx(**{"agent.session_token_limit": 500}),
         )
     )
     # ран ничего не потратил → до token_limit не дошли, упёрлись в шаги

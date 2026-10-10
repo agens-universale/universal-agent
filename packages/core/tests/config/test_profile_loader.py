@@ -1,5 +1,5 @@
 """Лоадер профилей-файлов (спека `docs/specs/2026-07-23-profiles-design.md` §3):
-два корня, поиск по имени, двухфазная валидация, оверлей-слой в `load_config_ex`.
+два корня, поиск по имени, двухфазная валидация, оверлей-слой в `load_settings`.
 """
 
 from pathlib import Path
@@ -76,7 +76,7 @@ def test_project_root_wins_name_collision(tmp_path):
 def test_explicit_config_excludes_home_profiles(tmp_path, monkeypatch):
     """`--config /opt/x/config.yml` явный → второй корень = `/opt/x/profiles`,
     `~/.gc/profiles` (здесь — изолированный аналог домашней папки) не участвует."""
-    from gc_core.config import load_config_ex
+    from gc_core.config import load_settings
 
     monkeypatch.setattr("sys.platform", "linux")
     fake_env = EnvVars(gc_home=tmp_path / "gc_home")
@@ -97,7 +97,7 @@ def test_explicit_config_excludes_home_profiles(tmp_path, monkeypatch):
 
     # Будь домашний корень в игре — "work" резолвился бы. Явный --config его исключает.
     with pytest.raises(ValueError, match="не найден"):
-        load_config_ex(str(explicit_config), profile_override="work")
+        load_settings(str(explicit_config), profile_override="work")
 
 
 def test_profile_key_inside_profile_forbidden(tmp_path):
@@ -207,11 +207,11 @@ def test_unopenable_profile_file_is_a_value_error(tmp_path):
     )
 
 
-# --- Интеграционный уровень: load_config_ex (base→managed→project→profile→compat→validate) ---
+# --- Интеграционный уровень: load_settings (base→managed→project→profile→compat→validate) ---
 
 
 def test_profile_content_overlays_project_config(isolated_cwd, tmp_path):
-    from gc_core.config import load_config_ex
+    from gc_core.config import load_settings
 
     base_config = tmp_path / "base_config.yml"
     _write_yaml(base_config, _MINIMAL_BASE)
@@ -228,8 +228,9 @@ def test_profile_content_overlays_project_config(isolated_cwd, tmp_path):
         {"summary": {"chat_completions_summary_trigger_chars": 2}},
     )
 
-    cfg, meta = load_config_ex(str(base_config))
-    assert cfg["summary_params"]["chat_completions_summary_trigger_chars"] == 2
+    loaded = load_settings(str(base_config))
+    meta = loaded.profile_meta
+    assert loaded.settings.summary.chat_completions_summary_trigger_chars == 2
     assert meta.active_name == "work"
     assert meta.ref is not None and meta.ref.root_kind == "project"
 
@@ -237,7 +238,7 @@ def test_profile_content_overlays_project_config(isolated_cwd, tmp_path):
 def test_level_from_profile_beats_project_but_loses_to_cli(
     isolated_cwd, tmp_path
 ):
-    from gc_core.config import apply_cli_overrides, load_config_ex
+    from gc_core.config import apply_cli_overrides, load_settings
 
     base_config = tmp_path / "base_config.yml"
     _write_yaml(base_config, _MINIMAL_BASE)
@@ -250,17 +251,20 @@ def test_level_from_profile_beats_project_but_loses_to_cli(
         isolated_cwd / ".gc" / "profiles" / "work.yml", {"level": "light"}
     )
 
-    cfg, meta = load_config_ex(str(base_config))
-    assert cfg["level"] == "light"
+    loaded = load_settings(str(base_config))
+    assert loaded.settings.level == "light"
 
-    apply_cli_overrides(cfg, extra_overrides={"level": "default"})
-    assert cfg["level"] == "default"
+    overridden = apply_cli_overrides(
+        loaded, extra_overrides={"level": "default"}
+    )
+    assert overridden.settings.level == "default"
+    assert overridden.provenance.source("level").layer == "cli"
 
 
 def test_env_interpolation_per_file_before_validation(
     isolated_cwd, tmp_path, monkeypatch
 ):
-    from gc_core.config import load_config_ex
+    from gc_core.config import load_settings
 
     monkeypatch.setenv("GC_PROFILE_TEST_TIMEOUT", "42")
 
@@ -277,12 +281,12 @@ def test_env_interpolation_per_file_before_validation(
         encoding="utf-8",
     )
 
-    cfg, meta = load_config_ex(str(base_config))
-    assert cfg["backend_request_timeout_sec"] == 42
+    loaded = load_settings(str(base_config))
+    assert loaded.settings.backend.request_timeout_sec == 42
 
 
 def test_mtime_set_includes_both_candidate_paths(isolated_cwd, tmp_path):
-    from gc_core.config import load_config_ex
+    from gc_core.config import load_settings
 
     base_config = tmp_path / "base_config.yml"
     _write_yaml(base_config, _MINIMAL_BASE)
@@ -291,7 +295,7 @@ def test_mtime_set_includes_both_candidate_paths(isolated_cwd, tmp_path):
     project_profile = isolated_cwd / ".gc" / "profiles" / "work.yml"
     _write_yaml(project_profile, {"agent": {"model": "y"}})
 
-    cfg, meta = load_config_ex(str(base_config))
+    meta = load_settings(str(base_config)).profile_meta
     base_root_candidate = base_config.parent / "profiles" / "work.yml"
 
     assert str(project_profile) in meta.mtime_set
@@ -302,14 +306,12 @@ def test_mtime_set_includes_both_candidate_paths(isolated_cwd, tmp_path):
     )  # второй корень — файла нет
 
 
-def test_reserved_profile_file_warns_via_load_config_ex(
-    isolated_cwd, tmp_path
-):
+def test_reserved_profile_file_warns_via_load_settings(isolated_cwd, tmp_path):
     """light.yml лежит рядом с активным профилем corp — резолв corp дискаверит весь
     корень попутно и обязан долетающим warning'ом отметить проигнорированный light.yml
     (спека §3.2). Раньше `resolve_profile` звал `discover_profiles(roots)` без `notices`,
-    и предупреждение терялось — здесь бьём через реальный пайплайн `load_config_ex`."""
-    from gc_core.config import load_config_ex
+    и предупреждение терялось — здесь бьём через реальный пайплайн `load_settings`."""
+    from gc_core.config import load_settings
 
     base_config = tmp_path / "base_config.yml"
     _write_yaml(base_config, _MINIMAL_BASE)
@@ -324,13 +326,14 @@ def test_reserved_profile_file_warns_via_load_config_ex(
         {"agent": {"model": "reserved-file"}},
     )
 
-    cfg, meta = load_config_ex(str(base_config))
+    loaded = load_settings(str(base_config))
+    meta = loaded.profile_meta
     assert any("зарезервировано" in n for n in meta.notices)
-    assert any("зарезервировано" in n for n in cfg["compat_notices"])
+    assert any("зарезервировано" in n for n in loaded.runtime.notices)
 
 
 def test_project_profile_literal_token_warns(isolated_cwd, tmp_path):
-    from gc_core.config import load_config_ex
+    from gc_core.config import load_settings
 
     base_config = tmp_path / "base_config.yml"
     _write_yaml(base_config, _MINIMAL_BASE)
@@ -348,11 +351,12 @@ def test_project_profile_literal_token_warns(isolated_cwd, tmp_path):
         },
     )
 
-    cfg, meta = load_config_ex(str(base_config))
+    loaded = load_settings(str(base_config))
+    meta = loaded.profile_meta
     assert any(
         "token" in n and "sk-literal-secret" not in n for n in meta.notices
     )
-    assert any("token" in n for n in cfg["compat_notices"])
+    assert any("token" in n for n in loaded.runtime.notices)
 
 
 def test_base_root_profile_literal_token_does_not_warn(
@@ -365,7 +369,7 @@ def test_base_root_profile_literal_token_does_not_warn(
     Без негативной половины страж молчал бы о снятии условия: варнить на КАЖДЫЙ
     литеральный токен значит варнить на приватный `~/.gc/profiles/*.yml`, где
     секрет лежит законно, — и приучить пользователя не читать notice."""
-    from gc_core.config import load_config_ex
+    from gc_core.config import load_settings
 
     base_config = tmp_path / "base_config.yml"
     _write_yaml(base_config, _MINIMAL_BASE)
@@ -383,10 +387,11 @@ def test_base_root_profile_literal_token_does_not_warn(
         },
     )
 
-    cfg, meta = load_config_ex(str(base_config))
+    loaded = load_settings(str(base_config))
+    meta = loaded.profile_meta
     assert meta.ref is not None and meta.ref.root_kind == "base"
     assert not [n for n in meta.notices if "token" in n]
-    assert not [n for n in cfg["compat_notices"] if "token" in n]
+    assert not [n for n in loaded.runtime.notices if "token" in n]
 
 
 def test_registry_merges_across_layers_overlay_cannot_remove_a_model(
@@ -396,7 +401,7 @@ def test_registry_merges_across_layers_overlay_cannot_remove_a_model(
     «оверлей не может убрать модель» — три семантики одним снимком.
 
     Родовой `test_config_merge.py` проверяет их на абстрактном dict, но реестр
-    моделей проходит через `flatten_app_config`, и то, что `models` не попал в
+    моделей проходит через загрузку настроек, и то, что `models` не попал в
     список секций-исключений мержа, не утверждает никто.
 
     Громкую половину последствий фаза 2 ловит сама: профиль, заменивший реестр
@@ -407,10 +412,10 @@ def test_registry_merges_across_layers_overlay_cannot_remove_a_model(
 
     Молчит фаза 2 в другом случае: оверлей подменяет реестр ВМЕСТЕ со слотами —
     ссылки сходятся, ошибки нет, модели базового слоя просто исчезают (проверено
-    отдельно: `load_config_ex` отдаёт реестр из одного профиля). Такого сценария
+    отдельно: загрузка отдаёт реестр из одного профиля). Такого сценария
     тест НЕ строит. Первый ассерт ниже, состав реестра, поймал бы и его, но
     доказано это здесь только на громком пути."""
-    from gc_core.config import load_config_ex
+    from gc_core.config import load_settings
 
     base_config = tmp_path / "base_config.yml"
     _write_yaml(base_config, _MINIMAL_BASE)
@@ -438,13 +443,12 @@ def test_registry_merges_across_layers_overlay_cannot_remove_a_model(
         },
     )
 
-    cfg, _meta = load_config_ex(str(base_config))
-    models = cfg["models"]
+    models = load_settings(str(base_config)).settings.models
 
     assert set(models) == {"keep", "shared", "added"}
-    assert models["keep"]["url"] == "http://keep/v1"  # оверлей не убрал
-    assert models["shared"]["url"] == "http://profile/v1"  # оверлей перекрыл
-    assert models["added"]["url"] == "http://added/v1"  # оверлей добавил
+    assert models["keep"].url == "http://keep/v1"  # оверлей не убрал
+    assert models["shared"].url == "http://profile/v1"  # оверлей перекрыл
+    assert models["added"].url == "http://added/v1"  # оверлей добавил
 
 
 def test_model_inherits_from_backend_overridden_by_profile(
@@ -454,7 +458,7 @@ def test_model_inherits_from_backend_overridden_by_profile(
     профилем». Запись реестра без своих url/token берёт их из backend ПОСЛЕ мержа
     всей стопки — то есть из профиля, если тот перекрыл backend; иначе профиль
     «сменить провайдера одной строкой» уводил бы адрес только у явных записей."""
-    from gc_core.config import load_config_ex
+    from gc_core.config import load_settings
     from gc_core.model_router import ModelRouter
 
     base_config = tmp_path / "base_config.yml"
@@ -477,8 +481,8 @@ def test_model_inherits_from_backend_overridden_by_profile(
         },
     )
 
-    cfg, _meta = load_config_ex(str(base_config))
-    resolved = ModelRouter(cfg, level_provider=lambda: "default").resolve(
+    loaded = load_settings(str(base_config))
+    resolved = ModelRouter(loaded, level_provider=lambda: "default").resolve(
         "main"
     )
 
@@ -493,14 +497,14 @@ def test_pointer_into_a_directory_named_like_a_profile_fails_as_value_error(
     создан КАТАЛОГОМ. Загрузка обязана отказать `ValueError` — тем классом, что
     ловят обе точки входа и лестница починки; `PermissionError`/`IsADirectoryError`
     отсюда были бы трейсбеком вместо объяснения."""
-    from gc_core.config import load_config_ex
+    from gc_core.config import load_settings
 
     base_config = tmp_path / "base_config.yml"
     _write_yaml(base_config, {**_MINIMAL_BASE, "profile": "work"})
     (tmp_path / "profiles" / "work.yml").mkdir(parents=True)
 
     with pytest.raises(ValueError):
-        load_config_ex(str(base_config))
+        load_settings(str(base_config))
 
 
 def test_the_read_failure_is_self_sufficient(tmp_path):

@@ -16,6 +16,7 @@ from gc_core.intent_log import (
 from gc_core.tools.registry import get_builtin_tools_data
 from gc_core.tools.session.read_user_intent_log import ReadUserIntentLog
 from gc_testkit.helpers.tool_ctx import CallableTool
+from gc_testkit.settings import fake_ctx, make_settings
 
 FIXED_TS = "2026-05-30T11:35:08Z"
 
@@ -61,10 +62,8 @@ def _make_state(*, log=None, current=None):
 
 
 def _call(state, **kwargs):
-    ctx = SimpleNamespace(config_dict={"backend_api_mode": "chat_completions"})
-    tool = CallableTool(
-        ReadUserIntentLog(ctx=ctx, state=state, config_dict=ctx.config_dict)
-    )
+    ctx = fake_ctx({"backend.api_mode": "chat_completions"})
+    tool = CallableTool(ReadUserIntentLog(ctx=ctx, state=state))
     return json.loads(tool(**kwargs))
 
 
@@ -114,15 +113,13 @@ def test_read_pagination_matches_read_page():
 def test_read_default_limit_from_config():
     records = [_record("short")]
     state = _make_state(log=records)
-    ctx = SimpleNamespace(
-        config_dict={
-            "backend_api_mode": "chat_completions",
-            "intent_scope_params": {"read_page_record_limit": 123},
+    ctx = fake_ctx(
+        {
+            "backend.api_mode": "chat_completions",
+            "intent_scope": {"read_page_record_limit": 123},
         }
     )
-    tool = CallableTool(
-        ReadUserIntentLog(ctx=ctx, state=state, config_dict=ctx.config_dict)
-    )
+    tool = CallableTool(ReadUserIntentLog(ctx=ctx, state=state))
     res = json.loads(tool(action="read", offset=0))
 
     assert res["ok"] is True
@@ -168,9 +165,11 @@ def test_invalid_action_and_missing_state():
 
 def test_registered_only_for_chat_completions():
     assert "session_read_user_intent_log" not in get_builtin_tools_data(
-        {"backend_api_mode": "responses"}
+        make_settings({"backend.api_mode": "responses"})
     )
-    tools = get_builtin_tools_data({"backend_api_mode": "chat_completions"})
+    tools = get_builtin_tools_data(
+        make_settings({"backend.api_mode": "chat_completions"})
+    )
     assert "session_read_user_intent_log" in tools
     assert (
         tools["session_read_user_intent_log"]["tool_fabric"]

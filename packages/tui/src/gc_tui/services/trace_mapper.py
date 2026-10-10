@@ -414,7 +414,7 @@ def map_message(
     # Битые аргументы (items is None) — НЕ чек-лист: проваливаемся в generic
     # call-строку, статус сбоя виден механикой (не врём «чек-лист очищен»).
     if typ == "function_call" and name == "session_todo":
-        from gc_core.tools.subagents.progress import todo_items_from_arguments
+        from gc_core.execution.progress import todo_items_from_arguments
 
         _todo_items = todo_items_from_arguments(msg.get("arguments"))
         if _todo_items is not None:

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import copy
 import logging
 import os
 import sys
@@ -73,7 +72,7 @@ class AcpFacade:
     def __init__(
         self,
         *,
-        config: dict,
+        settings: Any,
         writer: Any,
         agent_factory: Any,
         auth_connector: Any = None,
@@ -81,14 +80,14 @@ class AcpFacade:
         os_backend: Any = None,
         session_index: SessionIndex | None = None,
     ) -> None:
-        self._config = config
+        self._settings = settings
         self._writer = writer
         self._agent_factory = agent_factory
         self._auth = auth_connector
         self._tools_cache = tools_cache
         self._os_backend = os_backend
         self._index = session_index or SessionIndex(
-            resolve_threads_dir(config)
+            resolve_threads_dir(settings)
         )
         self._sessions: dict[str, LiveSession] = {}
         self._releasing: set[asyncio.Task] = set()
@@ -351,7 +350,7 @@ class AcpFacade:
 
     async def _replay(self, session_id: str) -> None:
         thread = await ThreadSession.afrom_config(
-            config_dict=self._config,
+            settings=self._settings,
             system_id=ACP_SYSTEM,
             thread_id=session_id,
         )
@@ -362,11 +361,10 @@ class AcpFacade:
             await self._notify(session_id, update)
 
     async def _open_agent(self, cwd: str) -> Any:
-        config = copy.deepcopy(self._config)
-        config["launch_root"] = cwd
+        settings = self._settings.with_runtime(launch_root=cwd)
         async with self._create_lock:
             agent = await self._agent_factory(
-                config,
+                settings,
                 auth_connector=self._auth,
                 tools_cache=self._tools_cache,
                 os_backend=self._os_backend,

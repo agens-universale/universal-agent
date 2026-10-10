@@ -9,18 +9,18 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from gc_core import run_summary_coordinator as rsc
 from gc_core.run_summary_coordinator import RunSummaryCoordinator
-from gc_core.summarize import summary_logging as summary_logging
 from gc_testkit import run_coro
+from gc_testkit.settings import fake_ctx, make_settings
 
 
 @pytest.fixture()
 def coordinator_ctx(tmp_path):
-    return SimpleNamespace(
-        summary_trace_path="",
-        config_dict={
-            "save_logs": True,
-            "logs_dump_dir": str(tmp_path / "logs"),
+    return fake_ctx(
+        {
+            "logging.save_logs": True,
+            "paths.logs_dump_dir": str(tmp_path / "logs"),
         },
+        summary_trace_path="",
         logger=None,
     )
 
@@ -30,10 +30,12 @@ async def test_summary_trace_prefers_ctx_path_over_logs_dump_dir(
 ):
     custom = tmp_path / "custom_trace.jsonl"
     coordinator_ctx.summary_trace_path = str(custom)
-    coordinator_ctx.config_dict["save_logs"] = True
-    coordinator_ctx.config_dict["logs_dump_dir"] = str(
-        tmp_path / "ignored_logs"
-    )
+    coordinator_ctx.settings = make_settings(
+        {
+            "logging.save_logs": True,
+            "paths.logs_dump_dir": str(tmp_path / "ignored_logs"),
+        }
+    ).settings
 
     state = SimpleNamespace(
         backend_api_mode="chat_completions",
@@ -114,9 +116,7 @@ async def test_archive_called_on_summary_applied(monkeypatch, coordinator_ctx):
         is_cli_mode=False,
         pre_backend_trigger_reason="pre_backend",
     )
-    monkeypatch.setattr(
-        summary_logging, "append_summary_trace_record", lambda *a, **k: None
-    )
+    monkeypatch.setattr(rsc, "aappend_summary_trace_record", AsyncMock())
 
     await coord.on_summary_applied(
         {

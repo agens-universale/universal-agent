@@ -7,6 +7,7 @@ from gc_core.tools.subagents.runner import SubagentRunner
 from gc_core.summarize.config import resolve_summary_limits
 from gc_core.usage.account import CATEGORY_MAIN, CATEGORY_SUMMARY, UsageAccount
 from gc_testkit import as_coro
+from gc_testkit.settings import fake_ctx
 
 
 class _FakeChildState:
@@ -29,8 +30,13 @@ def _runner_with_orchestrator():
         state_id="orch",
         discard_writes_after_stop=False,
     )
-    ctx = SimpleNamespace(logger=None, run_id="r", auth_connector=None)
-    return SubagentRunner(ctx, orch, {"use_local_subagents": True}), orch
+    ctx = fake_ctx(
+        {"agent.use_local_subagents": True},
+        logger=None,
+        run_id="r",
+        auth_connector=None,
+    )
+    return SubagentRunner(ctx, orch, ctx.settings), orch
 
 
 async def test_finally_merge_folds_child_usage_into_parent(monkeypatch):

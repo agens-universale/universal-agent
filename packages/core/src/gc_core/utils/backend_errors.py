@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import re
-from typing import NamedTuple
 
 import httpx
 
+from gc_core.execution.contracts import ModelProviderError
+from gc_core.execution.finish_reason import (
+    nonempty_reasoning_text as nonempty_reasoning_text,
+)
 from gc_core.model_router import AliasCircuitOpenError
 from gc_core.utils.chat_completions_stream import BackendStreamError
 
@@ -19,13 +22,6 @@ _HTTP_RETRY_SKIP_STATUSES = {401, 403, 404}
 # одного провайдера — gigacode («maximum context length»), vLLM («the model's
 # context length»), OpenAI («context window») все содержат "context length"/
 # "context window". Точечные фразы про токены — доп-страховка.
-_CONTEXT_OVERFLOW_MARKERS = (
-    "context length",
-    "context window",
-    "reduce the number of tokens",
-    "please reduce the length",
-    "maximum model length",  # vLLM: «The decoder prompt (length N) is longer than the maximum model length of M»
-)
 
 
 class EmbeddedChoiceError(Exception):
@@ -77,9 +73,36 @@ HTTP_TRANSPORT_ERRORS = (
 )
 
 
+def is_http_status_error(exc):
+    return isinstance(exc, HTTP_STATUS_ERRORS)
+
+
+def is_http_transport_error(exc):
+    return isinstance(exc, HTTP_TRANSPORT_ERRORS)
+
+
+def is_previous_response_cache_miss(exc: BaseException) -> bool:
+    """Classify a lost Responses cache without exposing HTTP data to workflow."""
+    if isinstance(exc, ModelProviderError):
+        return exc.failure.response_cache_miss
+    text = str(exc).lower()
+    if is_http_status_error(exc):
+        # Transport has already read the error body; no I/O occurs here.
+        try:
+            text += " " + exc.response.text.lower()
+        except Exception:
+            pass
+    return (
+        "previous_response_id" in text
+        and ("not found" in text or "cache" in text)
+    ) or ("cache" in text and "not found" in text)
+
+
 def http_status_code(exc: BaseException) -> int | None:
     """Код HTTP-ошибки независимо от транспорта; None — это не HTTP-ошибка."""
-    if isinstance(exc, HTTP_STATUS_ERRORS):
+    if isinstance(exc, ModelProviderError):
+        return exc.failure.details.get("status_code")
+    if is_http_status_error(exc):
         return getattr(getattr(exc, "response", None), "status_code", None)
     return None
 
@@ -89,7 +112,9 @@ def is_auth_error(exc: BaseException) -> bool:
     токена (`auth_connector.get_token(force=True)`) + повтор запроса один раз
     (см. `_request_backend_canonical`). 403 сюда НЕ входит: forbidden рефрешем не
     чинится. Провайдер-агностично: HTTPError (non-stream) и BackendStreamError (stream)."""
-    if isinstance(exc, HTTP_STATUS_ERRORS):
+    if isinstance(exc, ModelProviderError):
+        return exc.failure.auth_error
+    if is_http_status_error(exc):
         status_code = http_status_code(exc)
     elif isinstance(exc, BackendStreamError):
         status_code = exc.status_code
@@ -109,7 +134,9 @@ def is_retriable_backend_error(exc: BaseException) -> bool:
     Паритет stream ↔ non-stream: HTTP 4xx/5xx (кроме auth 401/403/404) ИЛИ
     стрим-ошибка (SSE error в 200-стриме) с таким же кодом. Нечисловой код
     (content_filter) → False."""
-    if isinstance(exc, HTTP_STATUS_ERRORS):
+    if isinstance(exc, ModelProviderError):
+        return exc.failure.retryable
+    if is_http_status_error(exc):
         status_code = http_status_code(exc)
     elif isinstance(exc, BackendStreamError):
         status_code = exc.status_code
@@ -132,24 +159,6 @@ def is_retriable_backend_error(exc: BaseException) -> bool:
         return int(status_code) >= 400
     except (TypeError, ValueError):
         return False
-
-
-def nonempty_reasoning_text(msg) -> str | None:
-    """Канон ``reasoning_content`` или алиас OpenRouter ``reasoning``.
-
-    Берём ОДНО из двух, не сумму — как стрим-ассемблер. Иначе нестрим
-    (бенч/CLI/server) теряет reasoning-only ответ, который TUI спасает.
-    Пробельный CoT → None; иначе возвращаем уже strip'нутый текст.
-    """
-    if not isinstance(msg, dict):
-        return None
-    for key in ("reasoning_content", "reasoning"):
-        value = msg.get(key)
-        if isinstance(value, str):
-            stripped = value.strip()
-            if stripped:
-                return stripped
-    return None
 
 
 def has_payload(msg) -> bool:
@@ -186,90 +195,36 @@ def is_empty_completion(dct: dict) -> bool:
 
 
 # Семантика finish_reason для транспорта (accept) и политики цикла (bounce/final).
-FINISH_KIND_STOP = "stop"
-FINISH_KIND_TOOL_CALLS = "tool_calls"
-FINISH_KIND_LENGTH = "length"
-FINISH_KIND_BLOCKED = "blocked"  # content_filter / refusal / safety
-FINISH_KIND_UNKNOWN = "unknown"
-
-# Известные значения OpenAI-совместимых API → kind. Ключи — lower-case.
-_KNOWN_FINISH_KINDS = {
-    "stop": FINISH_KIND_STOP,
-    "tool_calls": FINISH_KIND_TOOL_CALLS,
-    "length": FINISH_KIND_LENGTH,
-    "content_filter": FINISH_KIND_BLOCKED,
-    "refusal": FINISH_KIND_BLOCKED,
-    "safety": FINISH_KIND_BLOCKED,
-}
-
-
-class FinishDecision(NamedTuple):
-    accept: (
-        bool  # принять payload в историю (не крашиться/не ретраить транспорт)
-    )
-    unknown: bool  # finish_reason незнакомый → залогировать warning
-    kind: str  # stop | tool_calls | length | blocked | unknown
-
-
-def _finish_reason_key(finish_reason) -> str | None:
-    if not isinstance(finish_reason, str):
-        return None
-    key = finish_reason.strip().lower()
-    return key or None
-
-
-def classify_finish_kind(finish_reason) -> str:
-    """Одна классификация finish_reason для цикла агента и bounce-сообщений."""
-    key = _finish_reason_key(finish_reason)
-    if key is None:
-        return FINISH_KIND_UNKNOWN
-    return _KNOWN_FINISH_KINDS.get(key, FINISH_KIND_UNKNOWN)
-
-
-def finish_blocks_final(finish_reason) -> bool:
-    """Отказ провайдера: не принимать как финальный text answer (даже в allow)."""
-    return classify_finish_kind(finish_reason) == FINISH_KIND_BLOCKED
-
-
-def finish_prevents_text_final(finish_reason) -> bool:
-    """Не принимать prose как финал хода: blocked (отказ) или length (усечение).
-
-    Транспортный accept и запись в историю от этого не зависят — только
-    решение text_response в run_agent (даже при text_answer_mode=allow).
-    """
-    kind = classify_finish_kind(finish_reason)
-    return kind in (FINISH_KIND_BLOCKED, FINISH_KIND_LENGTH)
-
-
-def normalize_finish_reason(
-    finish_reason,
-    *,
-    has_content: bool,
-    has_tool_calls: bool,
-    has_reasoning: bool = False,
-) -> FinishDecision:
-    """Permissive-но-честная трактовка finish_reason (провайдер-агностично).
-
-    Известный stop/tool_calls/length/blocked → принять, unknown=False.
-    Незнакомый/null + есть content/tool_calls/reasoning → принять как payload,
-    но пометить unknown (warning). Незнакомый/null + пусто → не принять
-    (генуинно непригодно; конвертер отдаёт пустой батч → bounce, не
-    транспортный ретрай).
-
-    ``kind`` отделяет транспортный accept от политики цикла: blocked/length
-    всё равно попадают в историю (если есть текст), но не становятся финалом
-    (см. ``finish_prevents_text_final``).
-    """
-    key = _finish_reason_key(finish_reason)
-    if key is not None and key in _KNOWN_FINISH_KINDS:
-        return FinishDecision(
-            accept=True, unknown=False, kind=_KNOWN_FINISH_KINDS[key]
-        )
-    if has_content or has_tool_calls or has_reasoning:
-        return FinishDecision(
-            accept=True, unknown=True, kind=FINISH_KIND_UNKNOWN
-        )
-    return FinishDecision(accept=False, unknown=True, kind=FINISH_KIND_UNKNOWN)
+from gc_core.execution.finish_reason import (
+    FINISH_KIND_BLOCKED as FINISH_KIND_BLOCKED,
+)
+from gc_core.execution.finish_reason import (
+    FINISH_KIND_LENGTH as FINISH_KIND_LENGTH,
+)
+from gc_core.execution.finish_reason import (
+    FINISH_KIND_STOP as FINISH_KIND_STOP,
+)
+from gc_core.execution.finish_reason import (
+    FINISH_KIND_TOOL_CALLS as FINISH_KIND_TOOL_CALLS,
+)
+from gc_core.execution.finish_reason import (
+    FINISH_KIND_UNKNOWN as FINISH_KIND_UNKNOWN,
+)
+from gc_core.execution.finish_reason import (
+    FinishDecision as FinishDecision,
+)
+from gc_core.execution.finish_reason import (
+    classify_finish_kind as classify_finish_kind,
+)
+from gc_core.execution.finish_reason import (
+    finish_blocks_final as finish_blocks_final,
+)
+from gc_core.execution.finish_reason import (
+    finish_prevents_text_final as finish_prevents_text_final,
+)
+from gc_core.execution.finish_reason import (
+    normalize_finish_reason as normalize_finish_reason,
+)
 
 
 def is_model_unavailable_error(exc: BaseException) -> bool:
@@ -286,6 +241,8 @@ def is_model_unavailable_error(exc: BaseException) -> bool:
     накрывает и битый ответ живого провайдера (`JSONDecodeError`), и кривой
     url/прокси (`MissingSchema`, `InvalidURL`, `TooManyRedirects`) — от таких
     предохранитель гасил бы алиас на всю сессию, хотя модель жива."""
+    if isinstance(exc, ModelProviderError):
+        return exc.failure.unavailable
     if isinstance(exc, AliasCircuitOpenError):
         return True
     if is_context_overflow_error(exc):
@@ -299,7 +256,7 @@ def is_model_unavailable_error(exc: BaseException) -> bool:
     # Транспорт здесь httpx, а не requests: предикат приехал с develop, где
     # ветка была синхронной. Спрашиваем общие кортежи модуля — они и заведены
     # ради того, чтобы правило не зависело от транспорта.
-    if isinstance(exc, HTTP_STATUS_ERRORS):
+    if is_http_status_error(exc):
         status_code = http_status_code(exc)
     elif isinstance(exc, BackendStreamError):
         status_code = exc.status_code
@@ -311,7 +268,7 @@ def is_model_unavailable_error(exc: BaseException) -> bool:
         # отсутствует вовсе) уходит на общий путь ниже и даёт False: гасить алиас
         # на всю сессию по неизвестной причине нельзя.
         status_code = exc.status_code
-    elif isinstance(exc, HTTP_TRANSPORT_ERRORS):  # noqa: SIM103  # ветка с обоснованием в цепочке elif
+    elif is_http_transport_error(exc):  # noqa: SIM103  # ветка с обоснованием в цепочке elif
         # Только транспортные сбои (таймаут, обрыв, DNS), а не любой сбой
         # клиента: от битого url или лишних редиректов предохранитель гасил бы
         # алиас на всю сессию, хотя модель жива. У httpx это ровно
@@ -329,15 +286,12 @@ def is_model_unavailable_error(exc: BaseException) -> bool:
         return False
 
 
-def is_context_overflow_error(exc: BaseException) -> bool:
-    """True, если ошибка бэкенда — переполнение контекстного окна модели.
-
-    Восстановление в цикле: force-compaction истории + повтор запроса
-    (см. run_agent). Проверяем текст исключения, т.к. тип различается
-    (stream → BackendStreamError, non-stream → HTTPError/ValueError)."""
-    text = str(exc).lower()
-    return any(marker in text for marker in _CONTEXT_OVERFLOW_MARKERS)
-
+from gc_core.execution.finish_reason import (
+    _CONTEXT_OVERFLOW_MARKERS,
+)
+from gc_core.execution.finish_reason import (
+    is_context_overflow_error as is_context_overflow_error,
+)
 
 # Отказ модели принять изображение (спека изображений §10): модель слепая или
 # сервер поднят без зрения. Это факт о модели, а не сбой: повтор его не лечит, и
@@ -363,7 +317,7 @@ def _rejection_text(exc: BaseException) -> str:
     (`connect_backend.arequest_backend_chat_completions`, `_aread_error_text`):
     причина слепоты лежит только там, в статусе её нет. Тело не дочитано
     (обрыв на чтении) — текста нет."""
-    if isinstance(exc, HTTP_STATUS_ERRORS):
+    if is_http_status_error(exc):
         try:
             return exc.response.text
         except httpx.ResponseNotRead:
@@ -381,7 +335,12 @@ def is_image_rejection_error(exc: BaseException) -> bool:
     трёх слоях повторов — транспорт (`connect_backend`), адаптивная политика
     (`request_backend_policy`), предохранитель (`is_model_unavailable_error`):
     отказ не повторяется, не даёт «Ошибка LLM» и не гасит алиас на сессию.
-    Что с ним делать (пометка модели, повтор без картинок) — решает контроллер."""
+    Что с ним делать (пометка модели, повтор без картинок) — решает контроллер.
+
+    ``ModelProviderError`` (durable-исполнение) несёт классификацию, сделанную
+    на воркере по исходному исключению."""
+    if isinstance(exc, ModelProviderError):
+        return exc.failure.image_rejection
     text = _rejection_text(exc).lower()
     return any(marker in text for marker in _IMAGE_REJECTION_MARKERS)
 
@@ -410,7 +369,7 @@ _PAYLOAD_TOO_LARGE = 413
 def _error_status(exc: BaseException) -> int | None:
     """HTTP-код отказа бэкенда в любой его форме: HTTP-статус, SSE-ошибка в 200-стриме,
     ошибка, зашитая прокси в HTTP-200. Нечисловой код — None."""
-    if isinstance(exc, HTTP_STATUS_ERRORS):
+    if is_http_status_error(exc):
         return http_status_code(exc)
     if isinstance(exc, (BackendStreamError, EmbeddedChoiceError)):
         try:
@@ -443,11 +402,15 @@ def is_image_request_error(exc: BaseException) -> bool:
     (`is_model_unavailable_error`): такая ошибка не повторяется тем же запросом, не
     даёт «Ошибка LLM» и не гасит алиас. Ни о чём не говорит без картинок в запросе —
     это проверяет контроллер (`request_carries_images`)."""
+    if isinstance(exc, ModelProviderError):
+        return exc.failure.image_request
     return is_image_rejection_error(exc) or _is_image_limit_error(exc)
 
 
 def image_limit_from_error(exc: BaseException) -> int | None:
     """Предел числа картинок на запрос, названный в тексте ошибки (vLLM: «At most N
     image(s)»), или None, если числа нет."""
+    if isinstance(exc, ModelProviderError):
+        return exc.failure.image_limit
     match = _STATED_IMAGE_LIMIT.search(_rejection_text(exc).lower())
     return int(match.group(1)) if match else None

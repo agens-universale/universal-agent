@@ -10,11 +10,6 @@ _CACHE: dict = {}
 _CATALOG_CACHE: dict = {}
 
 
-def clear_cache() -> None:
-    _CACHE.clear()
-    _CATALOG_CACHE.clear()
-
-
 def make_cached_fetch(fetch):
     return _make_cached(fetch, _CACHE, lambda models: models)
 

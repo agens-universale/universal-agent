@@ -218,7 +218,7 @@ def test_upsert_mapping_entry_insert_second_entry_preserves_next_section_attache
     """Ветка INSERT (записи ещё нет, родитель непуст) защищает прикреплённый
     комментарий СЛЕДУЮЩЕЙ топ-секции так же, как ветка REPLACE. Фикстура — ровно
     та форма (пустая строка + комментарий + топ-ключ), что синтезирует
-    `ensure_section_anchor`."""
+    `ensure_section_anchor_text`."""
     text = "models:\n  glm:\n    url: http://a\n\n# note about slots\nslots:\n  default: glm\n"
     out = w.upsert_mapping_entry(
         text, "models", "flash", ["flash:", "  url: http://b"]
@@ -407,33 +407,29 @@ def test_child_lookup_matches_key_by_yaml_value_not_by_quoting_style():
     )
 
 
-# --- ensure_section_anchor / create_profile_file / write_text -----------------
+# --- ensure_section_anchor_text / create_profile_file / write_text ------------
 
 _LIVE_SECTION_TEMPLATE = (
     "# реестр моделей\nmodels:\n  flash:\n    url: http://tmpl\n"
 )
 
 
-def test_ensure_section_anchor_reuses_live_template_block(tmp_path):
+def test_ensure_section_anchor_reuses_live_template_block():
     """Секция в шаблоне живая (не закомментирована) — вставка реюзает
     `insert_missing` и переносит блок шаблона целиком (с его комментами)."""
-    cfg = tmp_path / "work.yml"
-    cfg.write_text(
-        "summary:\n  chat_completions_summary_trigger_chars: 1\n",
-        encoding="utf-8",
-    )
-    w.ensure_section_anchor(cfg, "models", _LIVE_SECTION_TEMPLATE)
-    out = cfg.read_text(encoding="utf-8")
+    text = "summary:\n  chat_completions_summary_trigger_chars: 1\n"
+    out = w.ensure_section_anchor_text(text, "models", _LIVE_SECTION_TEMPLATE)
     assert "models:\n  flash:\n    url: http://tmpl\n" in out
     assert "models: {}" not in out
 
-    w.ensure_section_anchor(cfg, "models", _LIVE_SECTION_TEMPLATE)
-    assert cfg.read_text(encoding="utf-8") == out  # повторный вызов — no-op
+    # повторный вызов — no-op
+    assert (
+        w.ensure_section_anchor_text(out, "models", _LIVE_SECTION_TEMPLATE)
+        == out
+    )
 
 
-def test_ensure_section_anchor_synthesizes_bare_anchor_for_commented_template(
-    tmp_path,
-):
+def test_ensure_section_anchor_synthesizes_bare_anchor_for_commented_template():
     """config.default.yml несёт models/slots/assign ЗАКОММЕНТИРОВАННЫМИ — вставлять
     из шаблона нечего, синтезируется голый `<section>: {}`; повтор — no-op."""
     from pathlib import Path
@@ -441,14 +437,10 @@ def test_ensure_section_anchor_synthesizes_bare_anchor_for_commented_template(
     from gc_core.config import _default_config_path
 
     template_text = Path(_default_config_path()).read_text(encoding="utf-8")
-    cfg = tmp_path / "config.yml"
-    cfg.write_text(
-        'backend:\n  completions_url: "http://x"\n', encoding="utf-8"
-    )
+    once = 'backend:\n  completions_url: "http://x"\n'
 
     for section in ("models", "slots", "assign"):
-        w.ensure_section_anchor(cfg, section, template_text)
-    once = cfg.read_text(encoding="utf-8")
+        once = w.ensure_section_anchor_text(once, section, template_text)
     parsed = yaml.safe_load(once)
     assert (
         parsed["models"] == {}
@@ -457,8 +449,10 @@ def test_ensure_section_anchor_synthesizes_bare_anchor_for_commented_template(
     )
 
     for section in ("models", "slots", "assign"):
-        w.ensure_section_anchor(cfg, section, template_text)
-    assert cfg.read_text(encoding="utf-8") == once  # повторный вызов — no-op
+        # повторный вызов — no-op
+        assert (
+            w.ensure_section_anchor_text(once, section, template_text) == once
+        )
 
 
 def test_create_profile_file_refuses_existing(tmp_path):
@@ -659,9 +653,7 @@ def test_write_values_inserts_into_file_without_trailing_newline(tmp_path):
     }
 
 
-def test_ensure_section_anchor_bare_anchor_lands_after_template_neighbour(
-    tmp_path,
-):
+def test_ensure_section_anchor_bare_anchor_lands_after_template_neighbour():
     """Синтезированный якорь (`models`/`slots`/`assign` в config.default.yml
     закомментированы) размещается по тому же правилу соседа."""
     from pathlib import Path
@@ -669,16 +661,11 @@ def test_ensure_section_anchor_bare_anchor_lands_after_template_neighbour(
     from gc_core.config import _default_config_path
 
     template_text = Path(_default_config_path()).read_text(encoding="utf-8")
-    cfg = tmp_path / "config.yml"
-    cfg.write_text(
-        'profile: ""\nlevel: default\nbackend:\n  completions_url: "http://real"\n',
-        encoding="utf-8",
-    )
+    out = 'profile: ""\nlevel: default\nbackend:\n  completions_url: "http://real"\n'
 
-    w.ensure_section_anchor(cfg, "models", template_text)
-    w.ensure_section_anchor(cfg, "slots", template_text)
+    out = w.ensure_section_anchor_text(out, "models", template_text)
+    out = w.ensure_section_anchor_text(out, "slots", template_text)
 
-    out = cfg.read_text(encoding="utf-8")
     assert (
         out.index("level:")
         < out.index("models:")

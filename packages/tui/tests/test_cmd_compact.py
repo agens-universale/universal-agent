@@ -4,6 +4,7 @@
 сообщений выросло с момента последнего сжатия (meta.tui.last_compact_msg_count).
 """
 
+from gc_testkit.tui_support import tui_settings
 import json
 
 import pytest
@@ -54,7 +55,7 @@ class _Runner:
 
 
 def _chat_cfg():
-    return {"model": "M", "backend_api_mode": "chat_completions"}
+    return {"agent.model": "M", "backend.api_mode": "chat_completions"}
 
 
 @pytest.mark.asyncio
@@ -64,7 +65,11 @@ async def test_compact_runs_when_grown_since_last_compact(tmp_path):
 
     tid = "cmp00000000000000000000000000001a"
     _write_task(tmp_path, tid, n_messages=3, last_compact=1)  # 3 > 1 → выросло
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config=_chat_cfg())
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings(_chat_cfg()),
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)
@@ -83,7 +88,11 @@ async def test_compact_blocked_when_nothing_new_since_compact(tmp_path):
     _write_task(
         tmp_path, tid, n_messages=3, last_compact=3
     )  # 3 <= 3 → нет нового
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config=_chat_cfg())
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings(_chat_cfg()),
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)
@@ -102,7 +111,11 @@ async def test_compact_runs_when_never_compacted(tmp_path):
     _write_task(
         tmp_path, tid, n_messages=2, last_compact=None
     )  # baseline нет → можно
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config=_chat_cfg())
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings(_chat_cfg()),
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)
@@ -123,7 +136,11 @@ async def test_compact_resets_thinking_timer(tmp_path):
 
     tid = "cmp00000000000000000000000000006a"
     _write_task(tmp_path, tid, n_messages=3, last_compact=1)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config=_chat_cfg())
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings(_chat_cfg()),
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)
@@ -144,7 +161,11 @@ async def test_compact_blocked_when_running(tmp_path):
 
     tid = "cmp00000000000000000000000000003a"
     _write_task(tmp_path, tid, n_messages=3)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config=_chat_cfg())
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings(_chat_cfg()),
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)
@@ -164,7 +185,9 @@ async def test_compact_blocked_in_responses(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config={"model": "M", "backend_api_mode": "responses"},
+        settings=tui_settings(
+            {"agent.model": "M", "backend.api_mode": "responses"}
+        ),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen

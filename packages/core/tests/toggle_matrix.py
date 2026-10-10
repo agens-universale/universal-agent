@@ -46,6 +46,7 @@ from parity_harness import (
     parity_config,
     run_thread_dump,
     strip_volatile,
+    with_path_overrides,
 )
 
 #: Сценарий прогона. Тул, финализатор, вердикт судьи — те же три хода, что в
@@ -85,9 +86,9 @@ SYS, TID = "cli", "t-matrix"
 class Case:
     """Одно положение переключателей.
 
-    ``overrides`` — точечные пути в ПЛОСКОМ словаре конфига
-    (``summary_params.max_message_chars``), потому что вложенные секции там
-    остались словарями, а ``cfg.update()`` затёр бы такую секцию целиком.
+    ``overrides`` — пути настроек через точку (``summary.max_message_chars``);
+    их накладывает ``parity_harness.with_path_overrides``: правка заменяет
+    лист, не затирая соседей по секции.
     """
 
     def __init__(
@@ -109,21 +110,6 @@ class Case:
         self.files = files or {}
 
 
-def _set_dotted(cfg: Dict[str, Any], path: str, value: Any) -> None:
-    """Проставить значение по точечному пути, не затирая соседей по секции."""
-    parts = path.split(".")
-    node: Any = cfg
-    for part in parts[:-1]:
-        nxt = node.get(part)
-        if not isinstance(nxt, dict):
-            nxt = {}
-        else:
-            nxt = dict(nxt)  # копия: секция могла приехать из дефолтов
-        node[part] = nxt
-        node = nxt
-    node[parts[-1]] = value
-
-
 # --- срез B: каждый переключатель поодиночке -------------------------------
 #
 # Значение отклонения выбрано так, чтобы переключатель ЗАДЕЙСТВОВАЛСЯ на этом
@@ -136,49 +122,65 @@ SINGLE: List[Case] = [
     Case(
         "limits/max_steps_1",
         "limits",
-        {"max_steps": 1},
+        {"agent.max_steps": 1},
         "лимит меньше числа ходов — прогон обязан закрыться лимитом",
     ),
-    Case("limits/max_steps_100", "limits", {"max_steps": 100}),
-    Case("limits/max_tool_calls_1", "limits", {"max_tool_calls": 1}),
-    Case("limits/session_token_limit", "limits", {"session_token_limit": 10}),
-    Case("limits/no_tool_call_max_1", "limits", {"no_tool_call_max_count": 1}),
+    Case("limits/max_steps_100", "limits", {"agent.max_steps": 100}),
+    Case("limits/max_tool_calls_1", "limits", {"agent.max_tool_calls": 1}),
+    Case(
+        "limits/session_token_limit",
+        "limits",
+        {"agent.session_token_limit": 10},
+    ),
+    Case(
+        "limits/no_tool_call_max_1",
+        "limits",
+        {"agent.no_tool_call_max_count": 1},
+    ),
     Case(
         "limits/unknown_tool_repeats_1",
         "limits",
-        {"max_unknown_tool_repeats": 1},
+        {"agent.max_unknown_tool_repeats": 1},
     ),
-    Case("limits/exec_timeout_1", "limits", {"exec_timeout_sec": 1}),
+    Case("limits/exec_timeout_1", "limits", {"agent.exec_timeout_sec": 1}),
     Case(
         "limits/exec_capture_50",
         "limits",
-        {"exec_output_capture_max_chars": 50},
+        {"agent.exec_output_capture_max_chars": 50},
     ),
-    Case("limits/subagent_max_steps_1", "limits", {"subagent_max_steps": 1}),
-    Case("limits/subagents_max_count_0", "limits", {"subagents_max_count": 0}),
+    Case(
+        "limits/subagent_max_steps_1",
+        "limits",
+        {"agent.subagent_max_steps": 1},
+    ),
+    Case(
+        "limits/subagents_max_count_0",
+        "limits",
+        {"agent.subagents_max_count": 0},
+    ),
     Case(
         "limits/strict_turn_finish_off",
         "limits",
-        {"strict_turn_finish_validation": False},
+        {"agent.strict_turn_finish_validation": False},
     ),
     Case(
         "limits/strict_turn_finish_on",
         "limits",
-        {"strict_turn_finish_validation": True},
+        {"agent.strict_turn_finish_validation": True},
     ),
     # --- суммаризация ---
     Case(
         "summary/trigger_off",
         "summary",
-        {"summary_params.chat_completions_summary_trigger_chars": 0},
+        {"summary.chat_completions_summary_trigger_chars": 0},
         "0 выключает компакцию по порогу, но НЕ force-compact и не /compact",
     ),
     Case(
         "summary/trigger_tiny",
         "summary",
         {
-            "summary_params.chat_completions_summary_trigger_chars": 200,
-            "summary_params.chat_completions_summary_turn_end_trigger_chars": 120,
+            "summary.chat_completions_summary_trigger_chars": 200,
+            "summary.chat_completions_summary_turn_end_trigger_chars": 120,
         },
         "порог заведомо перешагивается — компакция обязана сработать",
     ),
@@ -186,16 +188,16 @@ SINGLE: List[Case] = [
         "summary/turn_end_off",
         "summary",
         {
-            "summary_params.chat_completions_summary_trigger_chars": 200,
-            "summary_params.chat_completions_summary_turn_end_trigger_chars": 0,
+            "summary.chat_completions_summary_trigger_chars": 200,
+            "summary.chat_completions_summary_turn_end_trigger_chars": 0,
         },
     ),
     Case(
         "summary/batch_chars_tiny",
         "summary",
         {
-            "summary_params.chat_completions_summary_trigger_chars": 200,
-            "summary_params.incremental_batch_chars": 100,
+            "summary.chat_completions_summary_trigger_chars": 200,
+            "summary.incremental_batch_chars": 100,
         },
         "многобатчевая сводка: memory-patch пропускается",
     ),
@@ -203,124 +205,175 @@ SINGLE: List[Case] = [
         "summary/max_accumulated_tiny",
         "summary",
         {
-            "summary_params.chat_completions_summary_trigger_chars": 200,
-            "summary_params.max_accumulated_summary_chars": 100,
+            "summary.chat_completions_summary_trigger_chars": 200,
+            "summary.max_accumulated_summary_chars": 100,
         },
     ),
     Case(
         "summary/max_message_tiny",
         "summary",
         {
-            "summary_params.chat_completions_summary_trigger_chars": 200,
-            "summary_params.max_message_chars": 100,
+            "summary.chat_completions_summary_trigger_chars": 200,
+            "summary.max_message_chars": 100,
         },
     ),
     Case(
         "summary/max_dialogue_tiny",
         "summary",
         {
-            "summary_params.chat_completions_summary_trigger_chars": 200,
-            "summary_params.max_dialogue_chars": 500,
+            "summary.chat_completions_summary_trigger_chars": 200,
+            "summary.max_dialogue_chars": 500,
         },
     ),
     Case(
         "summary/last_steps_1",
         "summary",
         {
-            "summary_params.chat_completions_summary_trigger_chars": 200,
-            "summary_params.last_dialog_steps_count": 1,
+            "summary.chat_completions_summary_trigger_chars": 200,
+            "summary.last_dialog_steps_count": 1,
         },
     ),
     Case(
         "summary/last_step_msg_chars",
         "summary",
         {
-            "summary_params.chat_completions_summary_trigger_chars": 200,
-            "summary_params.last_dialog_step_message_max_chars": 80,
+            "summary.chat_completions_summary_trigger_chars": 200,
+            "summary.last_dialog_step_message_max_chars": 80,
         },
     ),
     Case(
         "summary/intent_preview_chars",
         "summary",
-        {"summary_params.intent_log_preview_chars": 40},
+        {"summary.intent_log_preview_chars": 40},
     ),
     # --- гварды ---
-    Case("guards/write_guard_off", "guards", {"write_guard.enabled": False}),
-    Case("guards/write_guard_on", "guards", {"write_guard.enabled": True}),
+    Case(
+        "guards/write_guard_off",
+        "guards",
+        {"security.write_guard.enabled": False},
+    ),
+    Case(
+        "guards/write_guard_on",
+        "guards",
+        {"security.write_guard.enabled": True},
+    ),
     Case(
         "guards/write_guard_strict",
         "guards",
-        {"write_guard.enabled": True, "write_guard.mode": "strict"},
+        {
+            "security.write_guard.enabled": True,
+            "security.write_guard.mode": "strict",
+        },
     ),
-    Case("guards/read_guard_off", "guards", {"read_guard.enabled": False}),
-    Case("guards/read_guard_on", "guards", {"read_guard.enabled": True}),
+    Case(
+        "guards/read_guard_off",
+        "guards",
+        {"security.read_guard.enabled": False},
+    ),
+    Case(
+        "guards/read_guard_on", "guards", {"security.read_guard.enabled": True}
+    ),
     Case(
         "guards/read_guard_strict",
         "guards",
-        {"read_guard.enabled": True, "read_guard.mode": "strict"},
+        {
+            "security.read_guard.enabled": True,
+            "security.read_guard.mode": "strict",
+        },
     ),
     Case(
         "guards/read_denied_ext",
         "guards",
         {
-            "read_guard.enabled": True,
-            "read_guard.denied_extensions": [".key", ".pem"],
+            "security.read_guard.enabled": True,
+            "security.read_guard.denied_extensions": [".key", ".pem"],
         },
     ),
-    Case("guards/url_policy_off", "guards", {"url_policy.enabled": False}),
-    Case("guards/url_policy_on", "guards", {"url_policy.enabled": True}),
+    Case(
+        "guards/url_policy_off",
+        "guards",
+        {"security.url_policy.enabled": False},
+    ),
+    Case(
+        "guards/url_policy_on", "guards", {"security.url_policy.enabled": True}
+    ),
     Case(
         "guards/url_schemes_https",
         "guards",
-        {"url_policy.enabled": True, "url_policy.allowed_schemes": ["https"]},
+        {
+            "security.url_policy.enabled": True,
+            "security.url_policy.allowed_schemes": ["https"],
+        },
     ),
     Case(
         "guards/url_blacklist",
         "guards",
         {
-            "url_policy.enabled": True,
-            "url_policy.url_blacklist": ["example.com"],
+            "security.url_policy.enabled": True,
+            "security.url_policy.url_blacklist": ["example.com"],
         },
     ),
-    Case("guards/download_max_bytes", "guards", {"download.max_bytes": 1024}),
+    Case(
+        "guards/download_max_bytes",
+        "guards",
+        {"security.download.max_bytes": 1024},
+    ),
     Case(
         "guards/moderation_off",
         "guards",
-        {"command_moderation.enabled": False},
+        {"security.command_moderation.enabled": False},
     ),
     Case(
-        "guards/stop_tools_finish", "guards", {"stop_tools": ["turn_finish"]}
+        "guards/stop_tools_finish",
+        "guards",
+        {"agent.stop_tools": ["turn_finish"]},
     ),
-    Case("guards/stop_tools_empty", "guards", {"stop_tools": []}),
+    Case("guards/stop_tools_empty", "guards", {"agent.stop_tools": []}),
     # --- логирование ---
-    Case("logging/save_logs_on", "logging", {"save_logs": True}),
-    Case("logging/save_logs_off", "logging", {"save_logs": False}),
-    Case("logging/console_trace_on", "logging", {"console_trace": True}),
-    Case("logging/log_level_debug", "logging", {"log_level": "DEBUG"}),
-    Case("logging/log_level_error", "logging", {"log_level": "ERROR"}),
-    Case("logging/format_json", "logging", {"logging_format": "json"}),
-    Case("logging/redact_on", "logging", {"redact_secrets.enabled": True}),
-    Case("logging/redact_off", "logging", {"redact_secrets.enabled": False}),
+    Case("logging/save_logs_on", "logging", {"logging.save_logs": True}),
+    Case("logging/save_logs_off", "logging", {"logging.save_logs": False}),
+    Case(
+        "logging/console_trace_on", "logging", {"logging.console_trace": True}
+    ),
+    Case("logging/log_level_debug", "logging", {"logging.log_level": "DEBUG"}),
+    Case("logging/log_level_error", "logging", {"logging.log_level": "ERROR"}),
+    Case("logging/format_json", "logging", {"logging.format": "json"}),
+    Case(
+        "logging/redact_on",
+        "logging",
+        {"logging.redact_secrets.enabled": True},
+    ),
+    Case(
+        "logging/redact_off",
+        "logging",
+        {"logging.redact_secrets.enabled": False},
+    ),
     Case(
         "logging/redact_extra_keys",
         "logging",
         {
-            "redact_secrets.enabled": True,
-            "redact_secrets.extra_keys": ["мойключ"],
+            "logging.redact_secrets.enabled": True,
+            "logging.redact_secrets.extra_keys": ["мойключ"],
         },
     ),
-    Case("logging/trace_header_on", "logging", {"trace_header_enabled": True}),
     Case(
-        "logging/trace_header_off", "logging", {"trace_header_enabled": False}
+        "logging/trace_header_on",
+        "logging",
+        {"agent.trace_header_enabled": True},
+    ),
+    Case(
+        "logging/trace_header_off",
+        "logging",
+        {"agent.trace_header_enabled": False},
     ),
     Case("logging/trace_id_set", "logging", {"trace_id": "trace-матрица"}),
     Case("logging/pricing_on", "logging", {"pricing.enabled": True}),
     Case("logging/pricing_off", "logging", {"pricing.enabled": False}),
-    Case("logging/verbose_on", "logging", {"verbose": True}),
+    Case("logging/verbose_on", "logging", {"agent.verbose": True}),
     Case(
         "logging/limit_trace_summary_off",
         "logging",
-        {"limit_trace_summary": False},
+        {"agent.limit_trace_summary": False},
     ),
 ]
 
@@ -333,44 +386,48 @@ SINGLE: List[Case] = [
 
 SINGLE += [
     # --- backend: форма запроса и разбор ответа ---
-    Case("backend/stream_off", "backend", {"stream": False}),
-    Case("backend/stream_on", "backend", {"stream": True}),
-    Case("backend/use_retry_on", "backend", {"use_retry": True}),
+    Case("backend/stream_off", "backend", {"backend.stream": False}),
+    Case("backend/stream_on", "backend", {"backend.stream": True}),
+    Case("backend/use_retry_on", "backend", {"backend.use_retry": True}),
     Case(
-        "backend/send_tool_strict_off", "backend", {"send_tool_strict": False}
+        "backend/send_tool_strict_off",
+        "backend",
+        {"backend.send_tool_strict": False},
     ),
     Case(
         "backend/openai_strict_schema",
         "backend",
-        {"openai_strict_tools_schema": True},
+        {"backend.openai_strict_tools_schema": True},
     ),
     Case(
-        "backend/max_tokens_param", "backend", {"use_max_tokens_param": True}
+        "backend/max_tokens_param",
+        "backend",
+        {"backend.use_max_tokens_param": True},
     ),
     Case(
         "backend/max_tokens_small",
         "backend",
-        {"chat_completions_max_tokens": 512},
+        {"backend.chat_completions_max_tokens": 512},
     ),
     Case(
         "backend/min_response_tokens",
         "backend",
-        {"chat_completions_min_response_tokens": 64},
+        {"backend.chat_completions_min_response_tokens": 64},
     ),
     Case(
         "backend/retry_embedded_off",
         "backend",
-        {"retry_embedded_choice_errors": False},
+        {"backend.retry_embedded_choice_errors": False},
     ),
     Case(
         "backend/completion_kwargs",
         "backend",
-        {"chat_completion_kwargs": {"temperature": 0.1}},
+        {"backend.chat_completion_kwargs": {"temperature": 0.1}},
     ),
     Case(
         "backend/extra_headers",
         "backend",
-        {"chat_completion_headers": {"X-Probe": "matrix"}},
+        {"backend.chat_completion_headers": {"X-Probe": "matrix"}},
         "заголовки HTTP — latin-1, кириллица в них невозможна физически",
     ),
     # --- llm: лимиты токенов у вспомогательных вызовов ---
@@ -393,42 +450,54 @@ SINGLE += [
     Case(
         "agent/finish_gate_iters_1",
         "limits",
-        {"finish_gate_max_iterations": 1},
+        {"agent.finish_gate_max_iterations": 1},
     ),
     Case(
         "agent/subagent_finish_gate_1",
         "limits",
-        {"subagent_finish_gate_max_iterations": 1},
+        {"agent.subagent_finish_gate_max_iterations": 1},
     ),
     Case(
         "agent/tool_output_inline_small",
         "limits",
-        {"tool_output_inline_max_chars": 200},
+        {"agent.tool_output_inline_max_chars": 200},
     ),
     Case(
         "agent/limit_project_metadata",
         "limits",
-        {"limit_project_metadata": True},
+        {"agent.limit_project_metadata": True},
     ),
-    Case("agent/local_subagents_on", "limits", {"use_local_subagents": True}),
     Case(
-        "agent/server_subagents_on", "limits", {"use_server_subagents": True}
+        "agent/local_subagents_on",
+        "limits",
+        {"agent.use_local_subagents": True},
     ),
-    Case("agent/disable_skills", "limits", {"disable_skills": ["*"]}),
     Case(
-        "agent/server_tool_prefix", "limits", {"server_tool_prefix": "проба"}
+        "agent/server_subagents_on",
+        "limits",
+        {"agent.use_server_subagents": True},
     ),
-    Case("agent/system_prompt_id", "limits", {"system_prompt_id": "v1"}),
+    Case("agent/disable_skills", "limits", {"agent.disable_skills": ["*"]}),
+    Case(
+        "agent/server_tool_prefix",
+        "limits",
+        {"agent.server_tool_prefix": "проба"},
+    ),
+    Case("agent/system_prompt_id", "limits", {"agent.system_prompt_id": "v1"}),
     Case(
         "agent/x_cl_id",
         "limits",
-        {"x_cl_id": "probe-42"},
+        {"agent.x_cl_id": "probe-42"},
         "уходит в HTTP-заголовок, поэтому только ASCII",
     ),
     Case(
         "agent/inject_tool_fields",
         "limits",
-        {"inject_tool_fields": {"exec_calculator": {"reason": "почему"}}},
+        {
+            "agent.inject_tool_fields": {
+                "exec_calculator": {"reason": "почему"}
+            }
+        },
     ),
     # --- fs_tools: потолки чтения и записи ---
     Case("fs/max_read_small", "guards", {"fs_tools.max_read_bytes": 1024}),
@@ -466,21 +535,28 @@ SINGLE += [
     ),
     Case("intent/tools_empty", "logging", {"intent_scope.tools": {}}),
     # --- логирование: оставшиеся ключи ---
-    Case("logging/full_log_backend_on", "logging", {"full_log_backend": True}),
-    Case("logging/format_json_flat", "logging", {"logging_format": "json"}),
+    Case(
+        "logging/full_log_backend_on",
+        "logging",
+        {"logging.full_log_backend": True},
+    ),
+    Case("logging/format_json_flat", "logging", {"logging.format": "json"}),
     Case("logging/propagate_on", "logging", {"logging_propagate": True}),
     Case(
         "logging/redact_extra_patterns",
         "logging",
         {
-            "redact_secrets.enabled": True,
-            "redact_secrets.extra_patterns": ["секрет-[0-9]+"],
+            "logging.redact_secrets.enabled": True,
+            "logging.redact_secrets.extra_patterns": ["секрет-[0-9]+"],
         },
     ),
     Case(
         "logging/trace_id_header_name",
         "logging",
-        {"trace_header_enabled": True, "trace_id_header_name": "X-Мой-Трейс"},
+        {
+            "agent.trace_header_enabled": True,
+            "agent.trace_id_header_name": "X-Мой-Трейс",
+        },
     ),
     # --- pricing: учёт стоимости ---
     Case(
@@ -548,57 +624,61 @@ SINGLE += [
         "guards/write_extra_paths",
         "guards",
         {
-            "write_guard.enabled": True,
-            "write_guard.extra_paths": ["/нет/такого"],
+            "security.write_guard.enabled": True,
+            "security.write_guard.extra_paths": ["/нет/такого"],
         },
     ),
     Case(
         "guards/read_allowed_roots",
         "guards",
         {
-            "read_guard.enabled": True,
-            "read_guard.allowed_read_roots": ["/tmp"],
+            "security.read_guard.enabled": True,
+            "security.read_guard.allowed_read_roots": ["/tmp"],
         },
     ),
     Case(
         "guards/read_allowed_paths",
         "guards",
         {
-            "read_guard.enabled": True,
-            "read_guard.allowed_read_paths": ["/tmp/да"],
+            "security.read_guard.enabled": True,
+            "security.read_guard.allowed_read_paths": ["/tmp/да"],
         },
     ),
     Case(
         "guards/read_denied_paths",
         "guards",
         {
-            "read_guard.enabled": True,
-            "read_guard.denied_read_paths": ["/tmp/нет"],
+            "security.read_guard.enabled": True,
+            "security.read_guard.denied_read_paths": ["/tmp/нет"],
         },
     ),
     Case(
         "guards/read_denied_patterns",
         "guards",
         {
-            "read_guard.enabled": True,
-            "read_guard.denied_file_patterns": ["*.секрет"],
+            "security.read_guard.enabled": True,
+            "security.read_guard.denied_file_patterns": ["*.секрет"],
         },
     ),
     Case(
         "guards/moderation_examples",
         "guards",
         {
-            "command_moderation.allowed_command_examples": ["ls"],
-            "command_moderation.denied_command_examples": ["rm -rf /"],
+            "security.command_moderation.allowed_command_examples": ["ls"],
+            "security.command_moderation.denied_command_examples": [
+                "rm -rf /"
+            ],
         },
     ),
     Case(
-        "guards/download_dir", "guards", {"download.download_dir": "загрузки"}
+        "guards/download_dir",
+        "guards",
+        {"security.download.download_dir": "загрузки"},
     ),
     Case(
         "guards/protected_extra",
         "guards",
-        {"protected_paths.extra": ["/нет/такого/пути"]},
+        {"security.protected_paths.extra": ["/нет/такого/пути"]},
     ),
     # --- прочее ---
     Case(
@@ -608,7 +688,7 @@ SINGLE += [
     Case(
         "misc/mcp_discovery_timeout",
         "limits",
-        {"mcp-meta.discovery_timeout_sec": 5},
+        {"mcp.meta.discovery_timeout_sec": 5},
     ),
     Case("misc/update_check_off", "misc", {"update.check": False}),
     Case(
@@ -616,10 +696,35 @@ SINGLE += [
     ),
 ]
 
+#: Случаи, чьё положение схема конфига НЕ выражает: значение отвергает модель
+#: (и на develop — та же схема), а ключ без поля в схеме не существует. Эталон
+#: снят правкой плоского словаря в обход схемы, и потребитель молча игнорировал
+#: такое значение — сверять тут нечего. Теперь настройки валидируются строго, и
+#: наблюдаемое поведение — громкий отказ сборки; его и проверяет
+#: ``test_unrepresentable_case_is_rejected_by_schema``.
+UNREPRESENTABLE = {
+    "limits/subagents_max_count_0": "agent.subagents_max_count >= 1",
+    "guards/write_guard_strict": "security.write_guard.mode: allow|ask|deny",
+    "guards/read_guard_strict": "security.read_guard.mode: allow|ask|deny",
+    "pair/read_guard_x_skills": "security.read_guard.mode: allow|ask|deny",
+    "logging/format_json": "logging.format: text|jsonl",
+    "logging/format_json_flat": "logging.format: text|jsonl",
+    "logging/propagate_on": "плоского ключа logging_propagate нет (в YAML — logging.propagate)",
+    "llm/max_tokens_small": "секции chat_completions.llm в схеме нет",
+    "llm/judge_max_tokens_small": "секции chat_completions.llm в схеме нет",
+    "llm/completion_kwargs": "секции chat_completions.llm в схеме нет",
+    "agent/inject_tool_fields": "agent.inject_tool_fields: {инструмент: имя поля}",
+}
+
 #: Ключи схемы, НЕ включённые в матрицу, и почему. Ведётся явно: «не покрыт»
 #: и «покрывать нечем» — разные вещи, и отличать их должен читатель, а не
 #: тот, кто однажды пересчитает покрытие и решит, что про них забыли.
 NOT_IN_MATRIX = {
+    # Локально допустимо только step (как develop); turn — только в durable-
+    # исполнителе и отклоняется локальным прогоном. Покрыто
+    # test_thread_store_persist_turn.py и native test_native_workflow_live.py.
+    "thread_store.persist": "local допускает только step; turn проверяется в test_thread_store_persist_turn и native live",
+    "agent.model_steering": "текст подготовленных инструкций; текущий reader и local/port parity покрыты test_run_prompt_preparation",
     # --- os_backend: выбор физического бэкенда (docker/ssh/exec/sandbox) ------
     #
     # Ключи выбирают, ГДЕ исполняется I/O, а не путь async/sync внутри ядра:
@@ -835,6 +940,26 @@ NOT_IN_MATRIX = {
     "agent_edits.record.tui": "запись журнала правок в TUI; покрыто agent_edits/test_ctx",
     "agent_edits.record.cli": "запись журнала правок в gc-cli; там же",
     "agent_edits.record.server": "запись журнала правок на сервере; там же",
+    # --- единственный случай матрицы задавал значение, невыразимое схемой ----
+    #
+    # См. UNREPRESENTABLE: эталон develop снят правкой плоского словаря в обход
+    # схемы, и для этих листов валидного случая в нём нет — сверять нечего, а
+    # переснять эталон с этой ветки нельзя. Поведение покрыто наборами ниже.
+    "security.write_guard.mode": "в эталоне только невалидный strict; покрытие — security/test_guards_dual_mode, test_native_tool_effects",
+    "security.read_guard.mode": "в эталоне только невалидный strict; покрытие — security/test_guard_defaults, security/test_native_guard_probe",
+    "security.command_moderation.mode": "в эталоне только невалидный strict (лист mode); покрытие — test_command_moderation_config",
+    "security.url_policy.mode": "в эталоне только невалидный strict (лист mode); покрытие — security/test_guards_dual_mode",
+    "logging.format": "в эталоне только невалидный json; покрытие — cli/test_structured_output, test_logging_emission_dispatch3",
+    "logging.propagate": "в эталоне только несуществующий плоский logging_propagate (флаг не доходил); покрытие — test_log_handlers_injectable",
+    "agent.inject_tool_fields": "в эталоне только невалидная форма значения; покрытие — test_inject_tool_fields, test_schema_optional",
+    "chat_completions.auxiliary_llm.max_tokens": "в эталоне только несуществующая секция chat_completions.llm; покрытие — test_summary_llm_request",
+    "chat_completions.auxiliary_llm.judge_max_tokens": "в эталоне только несуществующая секция chat_completions.llm; покрытие — test_finish_gate_handoff_form",
+    "chat_completions.auxiliary_llm.completion_kwargs": "в эталоне только несуществующая секция chat_completions.llm; покрытие — test_summary_llm_request",
+    # --- читатель был скрыт в помощниках config_modules (KNOWN_UNREAD по ошибке)
+    "mcp.meta.recommended_mcp_manifest": "путь манифеста для gc-cli -a/install, не ход агента; покрытие — mcp/test_manifest_versions",
+    "project_memory.enable_project_memory_notice": "эталон develop случая не содержит; покрытие — test_project_memory_notice_policy",
+    "todo.reminder_steps": "эталон develop случая не содержит; покрытие — test_todo_reminder, test_todo_config",
+    "tui.stream_display": "только отображение TUI, не ход агента; покрытие — tui/test_tui_config",
 }
 
 
@@ -849,7 +974,7 @@ SINGLE += [
     Case(
         "skills/catalog_present",
         "skills",
-        {"skills_data_path": "{work}/skills"},
+        {"paths.skills_data_path": "{work}/skills"},
         "каталог скиллов подложен — состав тулов и промпт обязаны совпасть",
         files={
             "skills/проба/SKILL.md": "---\nname: проба\ndescription: пробный скилл матрицы\n---\n\nТело скилла.\n"
@@ -858,14 +983,17 @@ SINGLE += [
     Case(
         "skills/catalog_empty",
         "skills",
-        {"skills_data_path": "{work}/skills"},
+        {"paths.skills_data_path": "{work}/skills"},
         "каталог есть, но пуст",
         files={"skills/.keep": ""},
     ),
     Case(
         "skills/disabled_all",
         "skills",
-        {"skills_data_path": "{work}/skills", "disable_skills": ["*"]},
+        {
+            "paths.skills_data_path": "{work}/skills",
+            "agent.disable_skills": ["*"],
+        },
         files={
             "skills/проба/SKILL.md": "---\nname: проба\ndescription: пробный скилл матрицы\n---\n\nТело.\n"
         },
@@ -873,7 +1001,10 @@ SINGLE += [
     Case(
         "skills/disabled_by_name",
         "skills",
-        {"skills_data_path": "{work}/skills", "disable_skills": ["проба"]},
+        {
+            "paths.skills_data_path": "{work}/skills",
+            "agent.disable_skills": ["проба"],
+        },
         files={
             "skills/проба/SKILL.md": "---\nname: проба\ndescription: пробный скилл матрицы\n---\n\nТело.\n"
         },
@@ -881,7 +1012,7 @@ SINGLE += [
     Case(
         "prompts/system_replaced",
         "prompts",
-        {"chat_completions_system_prompt_path": "{work}/prompts/sys.md"},
+        {"paths.chat_completions_system_prompt_path": "{work}/prompts/sys.md"},
         "системный промпт заменён — он уезжает в meta и в каждый запрос",
         files={"prompts/sys.md": "СИСТЕМНЫЙ ПРОМПТ МАТРИЦЫ"},
     ),
@@ -889,7 +1020,7 @@ SINGLE += [
         "prompts/special_instructions",
         "prompts",
         {
-            "chat_completions_special_instructions_path": "{work}/prompts/special.md"
+            "paths.chat_completions_special_instructions_path": "{work}/prompts/special.md"
         },
         files={"prompts/special.md": "ОСОБЫЕ УКАЗАНИЯ МАТРИЦЫ"},
     ),
@@ -897,7 +1028,7 @@ SINGLE += [
         "prompts/intent_guard",
         "prompts",
         {
-            "chat_completions_intent_guard_prompt_path": "{work}/prompts/guard.md"
+            "paths.chat_completions_intent_guard_prompt_path": "{work}/prompts/guard.md"
         },
         files={"prompts/guard.md": "ПРОМПТ СУДЬИ МАТРИЦЫ"},
     ),
@@ -905,7 +1036,7 @@ SINGLE += [
         "prompts/subagent_system",
         "prompts",
         {
-            "chat_completions_custom_subagent_system_prompt_path": "{work}/prompts/sub.md"
+            "paths.chat_completions_custom_subagent_system_prompt_path": "{work}/prompts/sub.md"
         },
         files={"prompts/sub.md": "ПРОМПТ СУБАГЕНТА МАТРИЦЫ"},
     ),
@@ -913,8 +1044,8 @@ SINGLE += [
         "prompts/summary_prompt",
         "prompts",
         {
-            "summary_params.chat_completions_summary_trigger_chars": 200,
-            "summary_params.chat_completions_summary_prompt_path": "{work}/prompts/summary.md",
+            "summary.chat_completions_summary_trigger_chars": 200,
+            "summary.chat_completions_summary_prompt_path": "{work}/prompts/summary.md",
         },
         "промпт сводки заменён и компакция реально идёт",
         files={"prompts/summary.md": "ПРОМПТ СВОДКИ МАТРИЦЫ"},
@@ -923,8 +1054,8 @@ SINGLE += [
         "prompts/memory_patch_prompt",
         "prompts",
         {
-            "summary_params.chat_completions_summary_trigger_chars": 200,
-            "summary_params.chat_completions_memory_patch_replace_prompt_path": "{work}/prompts/mem.md",
+            "summary.chat_completions_summary_trigger_chars": 200,
+            "summary.chat_completions_memory_patch_replace_prompt_path": "{work}/prompts/mem.md",
         },
         files={"prompts/mem.md": "ПРОМПТ ПАМЯТИ МАТРИЦЫ"},
     ),
@@ -947,14 +1078,17 @@ SINGLE += [
     Case(
         "prompts/agent_md",
         "prompts",
-        {"agent_md_path": "{work}/AGENTS.md"},
+        {"paths.agent_md_path": "{work}/AGENTS.md"},
         "проектные инструкции подложены",
         files={"AGENTS.md": "# Проектные указания\n\nПравило матрицы.\n"},
     ),
     Case(
         "prompts/subagents_dir",
         "prompts",
-        {"subagents_dir": "{work}/subagents", "use_local_subagents": True},
+        {
+            "agent.subagents_dir": "{work}/subagents",
+            "agent.use_local_subagents": True,
+        },
         "каталог субагентов подложен",
         files={
             "subagents/помощник.md": "---\nname: subagent_помощник\ndescription: пробный субагент\n---\n\nТело.\n"
@@ -973,8 +1107,8 @@ PAIRS: List[Case] = [
         "pair/trigger_x_turn_end",
         "summary",
         {
-            "summary_params.chat_completions_summary_trigger_chars": 200,
-            "summary_params.chat_completions_summary_turn_end_trigger_chars": 100,
+            "summary.chat_completions_summary_trigger_chars": 200,
+            "summary.chat_completions_summary_turn_end_trigger_chars": 100,
         },
         "run_summary_coordinator: pre_run/pre_backend против turn_end",
     ),
@@ -982,8 +1116,8 @@ PAIRS: List[Case] = [
         "pair/trigger_x_max_steps",
         "summary",
         {
-            "summary_params.chat_completions_summary_trigger_chars": 200,
-            "max_steps": 2,
+            "summary.chat_completions_summary_trigger_chars": 200,
+            "agent.max_steps": 2,
         },
         "компакция внутри лимита шагов",
     ),
@@ -991,9 +1125,9 @@ PAIRS: List[Case] = [
         "pair/batch_x_accumulated",
         "summary",
         {
-            "summary_params.chat_completions_summary_trigger_chars": 200,
-            "summary_params.incremental_batch_chars": 100,
-            "summary_params.max_accumulated_summary_chars": 80,
+            "summary.chat_completions_summary_trigger_chars": 200,
+            "summary.incremental_batch_chars": 100,
+            "summary.max_accumulated_summary_chars": 80,
         },
         "сжатие сводки внутри многобатча",
     ),
@@ -1001,66 +1135,78 @@ PAIRS: List[Case] = [
         "pair/msg_x_last_step_msg",
         "summary",
         {
-            "summary_params.chat_completions_summary_trigger_chars": 200,
-            "summary_params.max_message_chars": 100,
-            "summary_params.last_dialog_step_message_max_chars": 500,
+            "summary.chat_completions_summary_trigger_chars": 200,
+            "summary.max_message_chars": 100,
+            "summary.last_dialog_step_message_max_chars": 500,
         },
         "min() на thread_summarizer: какой потолок победил",
     ),
     Case(
         "pair/save_logs_x_redact",
         "logging",
-        {"save_logs": True, "redact_secrets.enabled": True},
+        {"logging.save_logs": True, "logging.redact_secrets.enabled": True},
     ),
     Case(
         "pair/write_guard_x_download",
         "guards",
-        {"write_guard.enabled": True, "download.max_bytes": 2048},
+        {
+            "security.write_guard.enabled": True,
+            "security.download.max_bytes": 2048,
+        },
     ),
     Case(
         "pair/read_guard_x_skills",
         "guards",
-        {"read_guard.enabled": True, "read_guard.mode": "strict"},
+        {
+            "security.read_guard.enabled": True,
+            "security.read_guard.mode": "strict",
+        },
     ),
     Case(
         "pair/stop_tools_x_subagents",
         "guards",
-        {"stop_tools": ["turn_finish"], "subagents_max_count": 1},
+        {"agent.stop_tools": ["turn_finish"], "agent.subagents_max_count": 1},
     ),
     Case(
         "pair/trace_x_pricing",
         "logging",
-        {"trace_header_enabled": True, "pricing.enabled": True},
+        {"agent.trace_header_enabled": True, "pricing.enabled": True},
     ),
     Case(
         "pair/tool_calls_x_no_tool_call",
         "limits",
-        {"max_tool_calls": 2, "no_tool_call_max_count": 1},
+        {"agent.max_tool_calls": 2, "agent.no_tool_call_max_count": 1},
     ),
     Case(
         "pair/exec_timeout_x_capture",
         "limits",
-        {"exec_timeout_sec": 2, "exec_output_capture_max_chars": 40},
+        {
+            "agent.exec_timeout_sec": 2,
+            "agent.exec_output_capture_max_chars": 40,
+        },
     ),
     Case(
         "pair/console_trace_x_level",
         "logging",
-        {"console_trace": True, "log_level": "ERROR"},
+        {"logging.console_trace": True, "logging.log_level": "ERROR"},
     ),
     Case(
         "pair/max_steps_x_strict_finish",
         "limits",
-        {"max_steps": 2, "strict_turn_finish_validation": True},
+        {"agent.max_steps": 2, "agent.strict_turn_finish_validation": True},
     ),
     Case(
         "pair/pricing_x_token_limit",
         "limits",
-        {"pricing.enabled": True, "session_token_limit": 50},
+        {"pricing.enabled": True, "agent.session_token_limit": 50},
     ),
     Case(
         "pair/url_x_download_dir",
         "guards",
-        {"url_policy.enabled": True, "download.max_bytes": 512},
+        {
+            "security.url_policy.enabled": True,
+            "security.download.max_bytes": 512,
+        },
     ),
 ]
 
@@ -1080,17 +1226,18 @@ async def run_case(
     from gc_core.agent_executor import AgentExecutor
 
     work = tmp_root / case.id.replace("/", "__")
-    cfg = parity_config(work, monkeypatch)
+    base = parity_config(work, monkeypatch)
 
     for rel, content in case.files.items():
         target = work / rel
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
 
+    overrides: Dict[str, Any] = {}
     for path, value in case.overrides.items():
         if isinstance(value, str) and "{work}" in value:
             value = value.format(work=work)
-        _set_dotted(cfg, path, value)
+        overrides[path] = value
 
     backend = install(monkeypatch, ScriptedBackend([*TURNS, *SUMMARY_TAIL]))
     result: Dict[str, Any] = {
@@ -1099,6 +1246,9 @@ async def run_case(
         "note": case.note,
     }
     try:
+        # Правки — внутри try: невыразимое схемой значение (UNREPRESENTABLE)
+        # отказывает на валидации настроек, и отказ — наблюдаемое поведение.
+        cfg = with_path_overrides(base, overrides)
         _acreate = getattr(_rc, "acreate_run_context", None)
         if _acreate is not None:
             ctx = await _acreate(cfg)
@@ -1129,13 +1279,14 @@ async def run_case(
         result["answer"] = None
         result["error"] = f"{type(exc).__name__}: {exc}"
 
-    result["dump"] = run_thread_dump(cfg, SYS, TID)
+    # Каталог тредов правки не трогают: дамп снимается и после отказа валидации.
+    result["dump"] = run_thread_dump(base, SYS, TID)
     result["backend_calls"] = len(getattr(backend, "calls", []))
 
     try:
         from gc_core.thread_store import load_thread_meta, resolve_threads_dir
 
-        meta = load_thread_meta(resolve_threads_dir(cfg), SYS, TID) or {}
+        meta = load_thread_meta(resolve_threads_dir(base), SYS, TID) or {}
         result["meta"] = strip_volatile(
             {
                 k: v

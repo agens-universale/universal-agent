@@ -25,7 +25,7 @@ async def test_skill_plus_prompt_shows_marker_and_reply():
     """skill+prompt: display_content непустой → map_message → UserReplyContainer +
     маркер [skill] после реплики."""
     pytest.importorskip("textual")
-    from gc_tui.services.trace_render import render_thread_readonly
+    from trace_readonly import render_thread_readonly
     from gc_tui.widgets.trace_row import TraceRow
     from gc_tui.widgets.user_reply import UserReplyContainer
     from textual.app import App
@@ -72,7 +72,7 @@ async def test_mid_run_delivery_shows_only_marker():
     """mid-run delivery: display_content="" → map_message возвращает None.
     Только [skill]-маркер; UserReplyContainer НЕ монтируется."""
     pytest.importorskip("textual")
-    from gc_tui.services.trace_render import render_thread_readonly
+    from trace_readonly import render_thread_readonly
     from gc_tui.widgets.trace_row import TraceRow
     from gc_tui.widgets.user_reply import UserReplyContainer
     from textual.app import App
@@ -117,7 +117,7 @@ async def test_mid_run_delivery_shows_only_marker():
 async def test_normal_user_record_no_marker():
     """Обычная реплика без skill_loaded → [skill]-маркер НЕ монтируется."""
     pytest.importorskip("textual")
-    from gc_tui.services.trace_render import render_thread_readonly
+    from trace_readonly import render_thread_readonly
     from gc_tui.widgets.trace_row import TraceRow
     from gc_tui.widgets.user_reply import UserReplyContainer
     from textual.app import App

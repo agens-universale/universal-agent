@@ -25,17 +25,20 @@ sys.argv = ["gc-cli", "-q", "x"]
 
 from gc_core.utils.logging_module import create_run_logger
 from gc_testkit import run_coro
+from gc_testkit.settings import fake_ctx, make_settings
 
 
 def _make_logger(tmp_path, level="info"):
     cfg = {
-        "logging_format": "jsonl",
-        "log_level": level,
-        "save_logs": True,
-        "console_trace": False,
-        "logs_dump_dir": str(tmp_path),
+        "logging.format": "jsonl",
+        "logging.log_level": level,
+        "logging.save_logs": True,
+        "logging.console_trace": False,
+        "paths.logs_dump_dir": str(tmp_path),
     }
-    logger, path, _ = create_run_logger(cfg, run_id="t", agent_kind="main")
+    logger, path, _ = create_run_logger(
+        make_settings(cfg), run_id="t", agent_kind="main"
+    )
     return logger, path
 
 
@@ -99,24 +102,22 @@ class _SkillsRegistryStub:
 
 
 def _base_ctx(logger, logging_path, thread_dir):
-    return SimpleNamespace(
-        config_dict={
-            "verbose": False,
-            "model": "CodeChat",
-            "max_steps": 0,
-            "system_prompt_id": "v1",
-            "use_server_subagents": False,
-            "agent_md_path": None,
-            "limit_project_metadata": True,
-            "console_trace": False,
-            "threads_data_path": thread_dir,
-            "agent_url": "http://backend.local/v1/responses",
-            "backend_api_mode": "responses",
-            "use_ssl": True,
-            "use_retry": False,
-            "x_cl_id": 12345,
-            "no_tool_call_max_count": 5,
-            "pricing": None,
+    return fake_ctx(
+        {
+            "agent.verbose": False,
+            "agent.model": "CodeChat",
+            "agent.max_steps": 0,
+            "agent.system_prompt_id": "v1",
+            "agent.use_server_subagents": False,
+            "agent.limit_project_metadata": True,
+            "logging.console_trace": False,
+            "paths.threads_data_path": thread_dir,
+            "backend.completions_url": "http://backend.local/v1/responses",
+            "backend.api_mode": "responses",
+            "backend.use_ssl": True,
+            "backend.use_retry": False,
+            "agent.x_cl_id": "12345",
+            "agent.no_tool_call_max_count": 5,
         },
         auth_connector=None,
         logger=logger,
@@ -211,7 +212,7 @@ def test_final_answer_event_is_top_level_event_field(tmp_path):
     logger, logging_path = _make_logger(tmp_path)
     ctx = SimpleNamespace(logger=logger)
 
-    fake_config_dict = {"console_trace": True}
+    fake_config = {"logging.console_trace": True}
 
     with (
         patch.object(cli_module, "_ensure_project_gc_dir"),
@@ -238,8 +239,14 @@ def test_final_answer_event_is_top_level_event_field(tmp_path):
                 auto_mcp=False,
             ),
         ),
-        patch.object(cli_module, "load_config", return_value=fake_config_dict),
-        patch.object(cli_module, "apply_cli_overrides"),
+        patch.object(
+            cli_module,
+            "load_settings",
+            lambda *_a, **_k: make_settings(fake_config),
+        ),
+        patch.object(
+            cli_module, "apply_cli_overrides", lambda loaded, **_kw: loaded
+        ),
         patch.object(
             cli_module,
             "onboarding",

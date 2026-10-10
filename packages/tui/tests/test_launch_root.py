@@ -2,27 +2,36 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import MagicMock
-
-from types import SimpleNamespace
 
 import gc_core.config as _cfg_mod
 import gc_core.config_modules.env_vars as _env_mod
 import gc_core.onboarding as _onb_mod
 import gc_core.thread_store as _ts_mod
 import gc_tui as tui_pkg
+from gc_core.config_modules.profiles import ProfileMeta
+from gc_testkit.settings import make_settings
+
+
+def _loaded(tmp_path):
+    """Загруженные настройки старта: каталог тредов и пустой профиль."""
+    return replace(
+        make_settings({"paths.threads_data_path": str(tmp_path / "threads")}),
+        profile_meta=ProfileMeta(active_name=None, ref=None, mtime_set={}),
+    )
 
 
 def test_tui_main_snapshots_launch_root(tmp_path, monkeypatch):
-    """Перед созданием TuiApp в config_dict фиксируется launch_root = cwd.resolve()."""
+    """Перед созданием TuiApp в настройках (runtime) фиксируется launch_root = cwd.resolve()."""
     monkeypatch.chdir(tmp_path)
 
     captured: dict = {}
 
     class FakeApp:
-        def __init__(self, *, threads_dir, system, config, **kw):
-            captured["config"] = config
+        def __init__(self, *, threads_dir, system, settings, **kw):
+            captured["settings"] = settings
             self._config_path = None
             self._config_project_local = None
 
@@ -53,14 +62,11 @@ def test_tui_main_snapshots_launch_root(tmp_path, monkeypatch):
     # ничего не проверяя). Порядок важен: реальные модули берём ДО подмены
     # importlib.
     monkeypatch.setattr(
-        _cfg_mod,
-        "load_config_ex",
-        lambda *a, **k: (
-            {"threads_data_path": str(tmp_path / "threads")},
-            SimpleNamespace(active_name=None),
-        ),
+        _cfg_mod, "load_settings", lambda *a, **k: _loaded(tmp_path)
     )
-    monkeypatch.setattr(_cfg_mod, "apply_cli_overrides", lambda _cfg: None)
+    monkeypatch.setattr(
+        _cfg_mod, "apply_cli_overrides", lambda loaded, **_kw: loaded
+    )
     monkeypatch.setattr(
         _cfg_mod, "resolve_config_path", lambda _p: str(tmp_path / "c.yml")
     )
@@ -73,7 +79,7 @@ def test_tui_main_snapshots_launch_root(tmp_path, monkeypatch):
 
     rc = tui_pkg.main([])
     assert rc == 0
-    assert captured["config"]["launch_root"] == str(tmp_path.resolve())
+    assert captured["settings"].runtime.launch_root == str(tmp_path.resolve())
 
 
 def test_tui_main_launch_root_not_live_cwd(tmp_path, monkeypatch):
@@ -87,12 +93,12 @@ def test_tui_main_launch_root_not_live_cwd(tmp_path, monkeypatch):
     captured: dict = {}
 
     class FakeApp:
-        def __init__(self, *, threads_dir, system, config, **kw):
+        def __init__(self, *, threads_dir, system, settings, **kw):
             # Имитация: cwd уже сменился к моменту конструктора.
             import os
 
             os.chdir(other)
-            captured["config"] = config
+            captured["settings"] = settings
             self._config_path = None
             self._config_project_local = None
 
@@ -123,14 +129,11 @@ def test_tui_main_launch_root_not_live_cwd(tmp_path, monkeypatch):
     # ничего не проверяя). Порядок важен: реальные модули берём ДО подмены
     # importlib.
     monkeypatch.setattr(
-        _cfg_mod,
-        "load_config_ex",
-        lambda *a, **k: (
-            {"threads_data_path": str(tmp_path / "threads")},
-            SimpleNamespace(active_name=None),
-        ),
+        _cfg_mod, "load_settings", lambda *a, **k: _loaded(tmp_path)
     )
-    monkeypatch.setattr(_cfg_mod, "apply_cli_overrides", lambda _cfg: None)
+    monkeypatch.setattr(
+        _cfg_mod, "apply_cli_overrides", lambda loaded, **_kw: loaded
+    )
     monkeypatch.setattr(
         _cfg_mod, "resolve_config_path", lambda _p: str(tmp_path / "c.yml")
     )
@@ -142,5 +145,5 @@ def test_tui_main_launch_root_not_live_cwd(tmp_path, monkeypatch):
     monkeypatch.setattr(_env_mod, "project_local_config_path", lambda: None)
 
     assert tui_pkg.main([]) == 0
-    assert captured["config"]["launch_root"] == str(start.resolve())
+    assert captured["settings"].runtime.launch_root == str(start.resolve())
     assert Path.cwd().resolve() == other.resolve()

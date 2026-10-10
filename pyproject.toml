@@ -20,6 +20,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+temporal = ["gc-core-temporalio==0.4.0"]
 
 all = []
 
@@ -58,6 +59,7 @@ lint = [
 test = [
 
     "gc-testkit",
+    "gc-core-temporalio==0.4.0",
     "pytest>=9.0.3",
     "pytest-asyncio>=0.23",
     "office-mcp",
@@ -93,6 +95,7 @@ gc-acp = { workspace = true }
 gc-chat = { workspace = true }
 
 gc-testkit = { workspace = true }
+gc-core-temporalio = { workspace = true }
 office-mcp = { path = "packages/mcp/external/vendor/office-mcp", editable = true }
 
 [tool.pytest.ini_options]
@@ -105,6 +108,7 @@ testpaths = [
     "packages/cli/tests",
     "packages/server/tests",
     "packages/tui/tests",
+    "packages/temporalio/tests",
     "packages/acp/tests",
     "packages/chat/tests",
 ]
@@ -188,6 +192,7 @@ paths = [
     "packages/core/src",
     "packages/mcp/src",
     "packages/server/src",
+    "packages/temporalio/src",
     "packages/acp/src",
     "packages/chat/src",
     "packages/core/assets/skills",

@@ -43,9 +43,7 @@ def _harbor(files):
 
 def _base():
     t = ApplyFileEdits.__new__(ApplyFileEdits)
-    return bind_os_backend(
-        t, LocalFsBackend(), config_dict={}
-    )  # write_guard disabled
+    return bind_os_backend(t, LocalFsBackend())  # write_guard disabled
 
 
 def _strip_path_fields(env):

@@ -6,6 +6,7 @@ import json
 
 from gc_core.message_policy.stop_persist import is_persist_discarded
 from gc_testkit import run_coro
+from gc_testkit.settings import fake_ctx
 
 
 def _async_noop(fn):
@@ -113,7 +114,7 @@ def test_stop_before_any_tool_emits_b_for_all(monkeypatch):
         pr.aprocess_tool_calls(
             messages,
             state,
-            type("C", (), {"config_dict": {}, "logger": None})(),
+            fake_ctx(logger=None),
             None,
         )
     )
@@ -164,7 +165,7 @@ def test_stop_after_first_tool_a_then_b_for_rest(monkeypatch):
         pr.aprocess_tool_calls(
             messages,
             state,
-            type("C", (), {"config_dict": {}, "logger": None})(),
+            fake_ctx(logger=None),
             None,
         )
     )
@@ -210,7 +211,7 @@ def test_successful_first_then_stop_before_second_gives_ok_then_b(monkeypatch):
         pr.aprocess_tool_calls(
             messages,
             state,
-            type("C", (), {"config_dict": {}, "logger": None})(),
+            fake_ctx(logger=None),
             None,
         )
     )
@@ -248,7 +249,7 @@ def test_single_tool_batch_stop_only_a_no_b(monkeypatch):
         pr.aprocess_tool_calls(
             messages,
             state,
-            type("C", (), {"config_dict": {}, "logger": None})(),
+            fake_ctx(logger=None),
             None,
         )
     )
@@ -305,7 +306,7 @@ def test_stop_does_not_apply_remaining_even_if_names_differ(monkeypatch):
         pr.aprocess_tool_calls(
             messages,
             state,
-            type("C", (), {"config_dict": {}, "logger": None})(),
+            fake_ctx(logger=None),
             None,
         )
     )
@@ -342,7 +343,7 @@ def test_no_stop_runs_full_batch(monkeypatch):
         pr.aprocess_tool_calls(
             messages,
             state,
-            type("C", (), {"config_dict": {}, "logger": None})(),
+            fake_ctx(logger=None),
             None,
         )
     )
@@ -386,7 +387,7 @@ def test_pairing_persist_despite_discard_writes(monkeypatch):
         pr.aprocess_tool_calls(
             messages,
             state,
-            type("C", (), {"config_dict": {}, "logger": None})(),
+            fake_ctx(logger=None),
             None,
             persist_messages_callback=lambda msgs: persisted.append(
                 list(msgs)
@@ -431,7 +432,7 @@ def test_pairing_writes_state_even_without_persist_callback(monkeypatch):
         pr.aprocess_tool_calls(
             messages,
             state,
-            type("C", (), {"config_dict": {}, "logger": None})(),
+            fake_ctx(logger=None),
             None,
         )
     )
@@ -460,7 +461,7 @@ def test_pairing_persist_clears_allow_flag_after(monkeypatch):
                 },
             ],
             state,
-            type("C", (), {"config_dict": {}, "logger": None})(),
+            fake_ctx(logger=None),
             None,
             persist_messages_callback=cb,
         )
@@ -538,7 +539,7 @@ def test_pairing_commit_does_not_duplicate_already_in_state(monkeypatch):
         pr.aprocess_tool_calls(
             messages,
             state,
-            type("C", (), {"config_dict": {}, "logger": None})(),
+            fake_ctx(logger=None),
             None,
         )
     )
@@ -592,7 +593,7 @@ def test_stop_abort_still_appends_finalizer_skip_outputs(monkeypatch):
         pr.aprocess_tool_calls(
             messages,
             state,
-            type("C", (), {"config_dict": {}, "logger": None})(),
+            fake_ctx(logger=None),
             None,
         )
     )

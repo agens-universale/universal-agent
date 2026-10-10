@@ -34,3 +34,18 @@ def merge_runtime_into_meta(
     runtime = dict(meta.get("runtime") or {})
     runtime.update(dict(patch))
     meta["runtime"] = runtime
+
+
+def clear_run_flags(
+    meta: MutableMapping[str, Any], *, stale_summarizing: bool = False
+) -> None:
+    """Apply the startup reset policy to freshly read metadata."""
+    runtime = dict(meta.get("runtime") or {})
+    if stale_summarizing or runtime.get("summarizing"):
+        runtime.pop("summarizing", None)
+    runtime.pop("finalizing", None)
+    runtime.pop("finish_gate_checking", None)
+    if runtime:
+        meta["runtime"] = runtime
+    else:
+        meta.pop("runtime", None)

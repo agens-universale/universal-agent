@@ -10,6 +10,7 @@ import json
 import pytest
 from gc_core.security.dual_wrapper import dual_wrap
 from gc_core.security.url_policy import enforce_url_policy
+from gc_testkit.settings import fake_ctx
 
 
 def _passthrough_flow(*args, **kwargs):
@@ -134,26 +135,29 @@ def test_double_yield_is_a_loud_error():
 # сделан: политика одна и та же по построению (тело гварда одно), и здесь это
 # видно на живом enforce_url_policy.
 
-_URL_CONFIG = {
-    "url_policy": {
-        "enabled": True,
-        "allowed_schemes": ["https"],
-        "url_blacklist": ["blocked.example"],
-    }
-}
+
+def _url_ctx():
+    return fake_ctx(
+        {
+            "security.url_policy": {
+                "enabled": True,
+                "mode": "deny",
+                "allowed_schemes": ["https"],
+                "url_blacklist": ["blocked.example"],
+            }
+        }
+    )
 
 
 async def test_real_url_guard_blocks_async_tool():
     called = {"n": 0}
 
     @enforce_url_policy(url_arg="url")
-    async def fetch(url: str, config_dict: dict) -> str:
+    async def fetch(url: str, **kwargs) -> str:
         called["n"] += 1
         return json.dumps({"ok": True, "url": url})
 
-    result = json.loads(
-        await fetch("https://blocked.example", config_dict=_URL_CONFIG)
-    )
+    result = json.loads(await fetch("https://blocked.example", ctx=_url_ctx()))
 
     assert result["ok"] is False
     assert result["error"]["type"] == "url_blocked_by_policy"
@@ -163,12 +167,10 @@ async def test_real_url_guard_blocks_async_tool():
 
 async def test_real_url_guard_lets_allowed_async_tool_through():
     @enforce_url_policy(url_arg="url")
-    async def fetch(url: str, config_dict: dict) -> str:
+    async def fetch(url: str, **kwargs) -> str:
         return json.dumps({"ok": True, "url": url})
 
-    result = json.loads(
-        await fetch("https://allowed.example", config_dict=_URL_CONFIG)
-    )
+    result = json.loads(await fetch("https://allowed.example", ctx=_url_ctx()))
 
     assert result == {"ok": True, "url": "https://allowed.example"}
 
@@ -184,11 +186,11 @@ def test_real_url_guard_verdicts_match_across_sync_and_async(
     import asyncio
 
     @enforce_url_policy(url_arg="url")
-    def fetch_sync(url: str, config_dict: dict) -> str:
+    def fetch_sync(url: str, **kwargs) -> str:
         return json.dumps({"ok": True, "url": url})
 
     @enforce_url_policy(url_arg="url")
-    async def fetch_async(url: str, config_dict: dict) -> str:
+    async def fetch_async(url: str, **kwargs) -> str:
         return json.dumps({"ok": True, "url": url})
 
     def _verdict(payload: str) -> dict:
@@ -203,10 +205,8 @@ def test_real_url_guard_verdicts_match_across_sync_and_async(
         "https://allowed.example",
         "http://insecure.example",
     ):
-        sync_verdict = _verdict(fetch_sync(url, config_dict=_URL_CONFIG))
-        async_verdict = _verdict(
-            asyncio.run(fetch_async(url, config_dict=_URL_CONFIG))
-        )
+        sync_verdict = _verdict(fetch_sync(url, ctx=_url_ctx()))
+        async_verdict = _verdict(asyncio.run(fetch_async(url, ctx=_url_ctx())))
         assert sync_verdict == async_verdict, url
 
 

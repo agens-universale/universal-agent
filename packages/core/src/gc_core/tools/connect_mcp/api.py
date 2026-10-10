@@ -4,6 +4,8 @@ import logging
 import os
 import time
 import uuid
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
@@ -78,6 +80,32 @@ _MIME_EXT = {
 }
 
 
+#: Куда класть медиа из ответа MCP вместо каталога процесса: ставит вызов
+#: инструмента, когда картинки треда живут в хранилище тредов
+#: (``media_sink_scope``). ``(имя, байты) -> ссылка``.
+_MEDIA_SINK: ContextVar[Any] = ContextVar("mcp_media_sink", default=None)
+
+
+@contextmanager
+def media_sink_scope(ctx: Any):
+    """На время вызова инструмента: медиа MCP — файлами треда в хранилище
+    тредов (``StoreImageStore.write_media``), если оно их держит. Иначе — как
+    раньше, в ``<gc_cache>/mcp-media``."""
+    from gc_core.thread_paths import thread_address
+
+    store = getattr(ctx, "image_store", None) if ctx is not None else None
+    write = getattr(store, "write_media", None)
+    address = thread_address(ctx) if callable(write) else None
+    if address is None:
+        yield
+        return
+    token = _MEDIA_SINK.set(lambda name, data: write(*address, name, data))
+    try:
+        yield
+    finally:
+        _MEDIA_SINK.reset(token)
+
+
 def _mcp_media_save_dir() -> str:
     """Куда складывать декодированные image/audio: ``mcp_media_dir()``
     (``<gc_cache>/mcp-media``). Создаётся при первой записи.
@@ -128,14 +156,19 @@ def _save_media_block(
     if not isinstance(data, str) or not data:
         return block
     mime = str(block.get("mimeType") or "")
-    save_dir = _mcp_media_save_dir()
+    sink = _MEDIA_SINK.get()
     try:
-        os.makedirs(save_dir, exist_ok=True)
         fname = _pick_filename(arguments, base_tool_name, mime)
-        path = os.path.join(save_dir, fname)
         raw_bytes = base64.b64decode(data, validate=False)
-        with open(path, "wb") as f:
-            f.write(raw_bytes)
+        if sink is not None:
+            # Файл треда в хранилище тредов: на диске процесса ничего.
+            path = sink(fname, raw_bytes)
+        else:
+            save_dir = _mcp_media_save_dir()
+            os.makedirs(save_dir, exist_ok=True)
+            path = os.path.join(save_dir, fname)
+            with open(path, "wb") as f:
+                f.write(raw_bytes)
     except Exception as e:
         logger.warning("Failed to save MCP media block: %s", e)
         return block
@@ -430,7 +463,12 @@ async def acall_mcp_tool(
             target.base_tool_name, target.arguments_obj, timeout=timeout
         )
 
-    data = await _ado_mcp_call(use_retry=target.use_retry, logger=logger)
+    from gc_core.tools.connect_mcp.durable_scope import durable_calls_enabled
+
+    data = await _ado_mcp_call(
+        use_retry=target.use_retry and not durable_calls_enabled(),
+        logger=logger,
+    )
 
     raw = data.get("result", data) if isinstance(data, dict) else data
     return _wrap_mcp_result(

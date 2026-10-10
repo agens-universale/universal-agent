@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict
+from typing import Any
 
 from gc_core.config_modules.summary import (
     derived_incremental_batch_chars,
@@ -9,6 +9,7 @@ from gc_core.config_modules.summary import (
     derived_turn_end_trigger,
     summary_char_base,
 )
+from gc_core.settings import settings_of
 
 
 @dataclass(frozen=True)
@@ -23,66 +24,59 @@ class ResolvedSummaryLimits:
     max_dialogue_chars: int
 
 
-def parse_summary_trigger_chars(config_dict: Dict[str, Any]) -> int:
+def parse_summary_trigger_chars(settings: Any) -> int:
     """
     Порог символов истории для запуска compaction в режиме chat_completions.
 
-    Берётся из config_dict['summary_params']['chat_completions_summary_trigger_chars'].
-    При ошибке приведения или отсутствии секции возвращает 0 (compaction отключён).
+    Берётся из ``settings.summary.chat_completions_summary_trigger_chars``.
+    При ошибке приведения возвращает 0 (compaction отключён).
     """
     return _parse_summary_int(
-        config_dict, "chat_completions_summary_trigger_chars"
+        settings, "chat_completions_summary_trigger_chars"
     )
 
 
-def parse_summary_trigger_tokens(config_dict: Dict[str, Any]) -> int:
+def parse_summary_trigger_tokens(settings: Any) -> int:
     """Порог input-токенов для mid-turn / pre-run. 0 — плечо выключено."""
     return _parse_summary_int(
-        config_dict, "chat_completions_summary_trigger_tokens"
+        settings, "chat_completions_summary_trigger_tokens"
     )
 
 
-def parse_summary_turn_end_trigger_chars(config_dict: Dict[str, Any]) -> int:
+def parse_summary_turn_end_trigger_chars(settings: Any) -> int:
     """
     Порог turn-end compaction после закрытия turn (``turn_finish``).
 
-    Ожидается уже нормализованное значение в ``summary_params`` после ``load_config``
+    Ожидается уже нормализованное значение в ``settings.summary`` после ``load_settings``
     / ``resolve_paths``. Парсер только читает int; дефолт 60% mid-turn задаётся в конфиг-модуле.
     """
     return _parse_turn_end_int(
-        config_dict, "chat_completions_summary_turn_end_trigger_chars"
+        settings, "chat_completions_summary_turn_end_trigger_chars"
     )
 
 
-def parse_summary_turn_end_trigger_tokens(config_dict: Dict[str, Any]) -> int:
+def parse_summary_turn_end_trigger_tokens(settings: Any) -> int:
     """Порог input-токенов после accept ``turn_finish``. 0 — плечо выключено.
 
-    60% от токенного mid-turn считает ``load_config``, если ключа не было.
+    60% от токенного mid-turn считает загрузка настроек (``resolve_paths``), если ключа не было.
     """
     return _parse_turn_end_int(
-        config_dict, "chat_completions_summary_turn_end_trigger_tokens"
-    )
-
-
-def summary_mid_turn_enabled(config_dict: Dict[str, Any]) -> bool:
-    """Mid-turn (pre-run и pre-backend) включён, если хотя бы один его порог > 0."""
-    return (
-        parse_summary_trigger_chars(config_dict) > 0
-        or parse_summary_trigger_tokens(config_dict) > 0
+        settings, "chat_completions_summary_turn_end_trigger_tokens"
     )
 
 
 def resolve_summary_limits(
-    config_dict: Dict[str, Any],
+    settings: Any,
     *,
     model_chars: int = 0,
     model_tokens: int = 0,
 ) -> ResolvedSummaryLimits:
     """Пороги mid-turn / turn-end / батч / диалог для алиаса истории.
 
-    Оба порога модели ``<= 0`` — весь набор из глобального ``summary_params``.
-    Хотя бы один ``> 0`` — режим модели: незаданная шкала mid и turn-end = 0;
-    батч и диалог считаются коэффициентами от символьного основания.
+    ``settings`` — всё, что принимает ``settings_of``. Оба порога модели ``<= 0`` —
+    весь набор из глобального ``settings.summary``. Хотя бы один ``> 0`` — режим
+    модели: незаданная шкала mid и turn-end = 0; батч и диалог считаются
+    коэффициентами от символьного основания.
     """
     chars = model_chars if model_chars > 0 else 0
     tokens = model_tokens if model_tokens > 0 else 0
@@ -97,33 +91,31 @@ def resolve_summary_limits(
             max_dialogue_chars=derived_max_dialogue_chars(char_base),
         )
     return ResolvedSummaryLimits(
-        chars_during=parse_summary_trigger_chars(config_dict),
-        tokens_during=parse_summary_trigger_tokens(config_dict),
-        chars_after=parse_summary_turn_end_trigger_chars(config_dict),
-        tokens_after=parse_summary_turn_end_trigger_tokens(config_dict),
+        chars_during=parse_summary_trigger_chars(settings),
+        tokens_during=parse_summary_trigger_tokens(settings),
+        chars_after=parse_summary_turn_end_trigger_chars(settings),
+        tokens_after=parse_summary_turn_end_trigger_tokens(settings),
         incremental_batch_chars=_parse_summary_int(
-            config_dict, "incremental_batch_chars"
+            settings, "incremental_batch_chars"
         ),
-        max_dialogue_chars=_parse_summary_int(
-            config_dict, "max_dialogue_chars"
-        ),
+        max_dialogue_chars=_parse_summary_int(settings, "max_dialogue_chars"),
     )
 
 
 def resolve_summary_limits_for_resolved(
-    config_dict: Dict[str, Any],
+    settings: Any,
     resolved: Any | None,
 ) -> ResolvedSummaryLimits:
     """Резолв по ``ResolvedModel`` (легаси / None → оба порога 0 → глобаль)."""
     return resolve_summary_limits(
-        config_dict,
+        settings,
         model_chars=int(getattr(resolved, "summary_trigger_chars", 0) or 0),
         model_tokens=int(getattr(resolved, "summary_trigger_tokens", 0) or 0),
     )
 
 
 def resolve_summary_limits_at_level(
-    config_dict: Dict[str, Any],
+    settings: Any,
     router: Any | None,
     level: str | None,
 ) -> ResolvedSummaryLimits:
@@ -139,21 +131,19 @@ def resolve_summary_limits_at_level(
             resolved = router.resolve_main_at_level(level, check_breaker=False)
         except Exception:
             resolved = None
-    return resolve_summary_limits_for_resolved(config_dict, resolved)
+    return resolve_summary_limits_for_resolved(settings, resolved)
 
 
-def _summary_params(config_dict: Dict[str, Any]) -> Dict[str, Any]:
-    raw = config_dict.get("summary_params")
-    return raw if isinstance(raw, dict) else {}
-
-
-def _parse_summary_int(config_dict: Dict[str, Any], key: str) -> int:
+def _parse_summary_int(settings: Any, key: str) -> int:
+    """``settings`` — всё, что принимает ``settings_of`` (контекст, настройки)."""
+    # settings_of — вне try: ValidationError (подкласс ValueError) не глушим.
+    summary = settings_of(settings).summary
     try:
-        return int(_summary_params(config_dict).get(key, 0))
+        return int(getattr(summary, key))
     except (TypeError, ValueError):
         return 0
 
 
-def _parse_turn_end_int(config_dict: Dict[str, Any], key: str) -> int:
-    value = _parse_summary_int(config_dict, key)
+def _parse_turn_end_int(settings: Any, key: str) -> int:
+    value = _parse_summary_int(settings, key)
     return value if value > 0 else 0

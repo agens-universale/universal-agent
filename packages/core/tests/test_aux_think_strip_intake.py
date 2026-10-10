@@ -4,7 +4,7 @@ import json
 from types import SimpleNamespace
 
 import yaml
-from gc_core.config import load_config
+from gc_core.config import load_settings
 from gc_core.intent_guard.validation_result import parse_validator_response
 from gc_core.intent_log.user_turn import seed_subagent_current_user_intent
 from gc_core.intent_scope.summarizer import build_fallback_aggregated_content
@@ -18,6 +18,7 @@ from gc_core.summarize.thread_summarizer import (
 from gc_core.summarize.working_memory_gateway import parse_memory_deltas
 from gc_testkit import as_coro, run_coro
 from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
+from gc_testkit.settings import fake_ctx
 
 _DIRTY_EXTRA = "<think>t</think><redacted_thinking>r</redacted_thinking>"
 
@@ -49,7 +50,7 @@ def test_request_auxiliary_projects_and_logs_dirty(monkeypatch):
     )
     monkeypatch.setattr(summary_llm, "log_llm_prompt_and_result", _fake_log)
 
-    ctx = SimpleNamespace(
+    ctx = fake_ctx(
         logger=object(),
         auxiliary_llm=SimpleNamespace(
             max_tokens=100,
@@ -110,7 +111,7 @@ def test_command_judge_uses_project_and_config_extra_tag():
 
 
 def test_load_config_extras_strip_on_aux_sinks(tmp_path, monkeypatch):
-    """YAML extras → load_config → summary / compaction / finish-gate / judge."""
+    """YAML extras → load_settings → summary / compaction / finish-gate / judge."""
     cfg_path = tmp_path / "config.yml"
     cfg_path.write_text(
         yaml.safe_dump(
@@ -121,14 +122,14 @@ def test_load_config_extras_strip_on_aux_sinks(tmp_path, monkeypatch):
         ),
         encoding="utf-8",
     )
-    loaded = load_config(str(cfg_path))
+    loaded = load_settings(str(cfg_path))
 
     monkeypatch.setattr(
         summary_llm, "log_llm_prompt_and_result", lambda **kwargs: None
     )
-    ctx = SimpleNamespace(
+    ctx = fake_ctx(
+        loaded=loaded,
         logger=object(),
-        config_dict=loaded,
         auxiliary_llm=SimpleNamespace(
             max_tokens=100,
             completion_kwargs={},
@@ -200,7 +201,7 @@ def test_load_config_extras_strip_on_aux_sinks(tmp_path, monkeypatch):
     parsed_judge = command_moderation._parse_judge_json(
         _DIRTY_EXTRA
         + '{"verdict":"safe","reasons":["ok"],"risk_flags":[],"confidence":0.9}',
-        tags=loaded["strip_tags_projection"]["tags"],
+        tags=list(loaded.settings.strip_tags_projection.tags),
     )
     assert parsed_judge["verdict"] == "safe"
 
@@ -219,15 +220,15 @@ async def test_aux_always_strips_think_even_when_config_disables_it(
         ),
         encoding="utf-8",
     )
-    loaded = load_config(str(cfg_path))
-    assert loaded["strip_tags_projection"]["strip_think"] is False
+    loaded = load_settings(str(cfg_path))
+    assert loaded.settings.strip_tags_projection.strip_think is False
 
     monkeypatch.setattr(
         summary_llm, "log_llm_prompt_and_result", lambda **kwargs: None
     )
-    ctx = SimpleNamespace(
+    ctx = fake_ctx(
+        loaded=loaded,
         logger=object(),
-        config_dict=loaded,
         auxiliary_llm=SimpleNamespace(
             max_tokens=100,
             completion_kwargs={},
@@ -315,14 +316,13 @@ async def test_summarizer_history_strips_think_even_when_config_disables_it(
     )
     monkeypatch.setattr(
         "gc_core.summarize.prompt_loading.load_prompt_template",
-        lambda _p: "prompt",
+        lambda _p, **_kw: "prompt",
     )
 
-    ctx = SimpleNamespace(
-        logger=None,
-        config_dict={
+    ctx = fake_ctx(
+        {
             "strip_tags_projection": {"strip_think": False, "tags": []},
-            "summary_params": {
+            "summary": {
                 "chat_completions_summary_trigger_chars": 999999,
                 "incremental_batch_chars": 999999,
                 "max_accumulated_summary_chars": 20000,
@@ -330,6 +330,7 @@ async def test_summarizer_history_strips_think_even_when_config_disables_it(
                 "last_dialog_step_message_max_chars": 5000,
             },
         },
+        logger=None,
     )
     # Форма НАША: синхронная сборка суммаризации снята вместе с порталом.
     result = await asummarize_dialog_via_chat_completions(

@@ -1,7 +1,12 @@
 import argparse
-from typing import Any, Dict, List
+import sys
+from typing import Any, Dict
 
-import yaml
+from gc_core.config_modules.cli_args import (
+    coerce_cli_value,
+    parse_override_args,
+    setting_flag_overrides,
+)
 
 run_args = dict()
 extra_config_overrides: Dict[str, Any] = {}
@@ -16,66 +21,29 @@ def _parse_bool_cli(raw: str) -> bool:
     raise argparse.ArgumentTypeError("Ожидается true или false")
 
 
-def _coerce_value(raw: str) -> Any:
-    """
-    Преобразовать строковое значение из CLI к более подходящему типу.
-
-    Используем yaml.safe_load, чтобы поддержать числа, bool и т.п.
-    В случае неудачи или получения None возвращаем исходную строку.
-    """
-    try:
-        value = yaml.safe_load(raw)
-    except Exception:
-        return raw
-    return raw if value is None else value
-
-
-def _parse_unknown_args(args: List[str]) -> Dict[str, Any]:
-    """
-    Разобрать дополнительные аргументы вида:
-    --param value
-    --param=value
-    --flag
-
-    Возвращает словарь переопределений для config_dict.
-    """
-    overrides: Dict[str, Any] = {}
-    i = 0
-    while i < len(args):
-        token = args[i]
-        if not token.startswith("--"):
-            i += 1
-            continue
-
-        key_part = token[2:]
-        value: Any = True
-
-        if "=" in key_part:
-            key, raw_val = key_part.split("=", 1)
-            value = _coerce_value(raw_val)
-        else:
-            key = key_part
-            if i + 1 < len(args) and not args[i + 1].startswith("--"):
-                raw_val = args[i + 1]
-                value = _coerce_value(raw_val)
-                i += 1
-
-        if key:
-            overrides[key] = value
-
-        i += 1
-
-    return overrides
+# Разбор ``--путь value`` — общий с gc-acp и gc-chat.
+_coerce_value = coerce_cli_value
+_parse_unknown_args = parse_override_args
 
 
 parser = argparse.ArgumentParser(
+    # Без сокращений: «--mod x» не должен молча стать --model, а «--agent …» —
+    # флагом --agentsmd-override. Пути настроек (--agent.max_steps) — целиком.
+    allow_abbrev=False,
     description="CLI-агент для взаимодействия с AI-сервером",
     formatter_class=argparse.RawDescriptionHelpFormatter,
     epilog="""
 Примеры использования:
   agent -q "напиши функцию сортировки списка"
   agent --query "как оптимизировать этот код?" --verbose
-  agent -q "..." --model CodeChat --max_steps 50
+  agent -q "..." --model CodeChat --agent.max_steps 50
+
+Любая настройка — путём через точку: --agent.max_steps 50, --security.read_guard.mode ask
+
+Конфиг (агент не запускается):
+  gc-cli config explain [KEY ...]   значение и источник настроек
+  gc-cli config validate            проверить, что конфиг собирается
+  gc-cli config schema              JSON Schema конфига
         """,
 )
 
@@ -257,6 +225,29 @@ parser.add_argument(
 )
 
 parser.add_argument(
+    "--model",
+    type=str,
+    default=None,
+    dest="model",
+    help=(
+        "Модель на этот запуск (agent.model). При непустом реестре моделей — "
+        "легаси-форс: уровни и алиасы отключаются на этот запуск"
+    ),
+)
+
+parser.add_argument(
+    "--completions_url",
+    "--completions-url",
+    type=str,
+    default=None,
+    dest="completions_url",
+    help=(
+        "Адрес chat/completions на этот запуск (backend.completions_url); "
+        "при непустом реестре моделей — легаси-форс, как у --model"
+    ),
+)
+
+parser.add_argument(
     "--profile",
     type=str,
     default=None,
@@ -318,66 +309,101 @@ parser.add_argument(
 )
 
 
-parsed_args, unknown_args = parser.parse_known_args()
-if (
-    not parsed_args.init_config
-    and not getattr(parsed_args, "init", False)
-    and not parsed_args.sync_config
-    and not getattr(parsed_args, "reset_config", False)
-    and not parsed_args.check_update
-    and not parsed_args.update
-    and not parsed_args.query
-):
-    parser.error(
-        "Нужен -q/--query "
-        "(или --init-config для конфига, --sync-config для обновления конфига, "
-        "--reset-config для сброса конфига, --init для AGENTS.md, "
-        "--check-update/--update для обновления агента)."
-    )
-if parsed_args.init_config and parsed_args.query:
-    parser.error(
-        "--init-config и -q/--query нельзя вместе: --init-config только настраивает и выходит."
-    )
-if parsed_args.sync_config and parsed_args.query:
-    parser.error(
-        "--sync-config и -q/--query нельзя вместе: --sync-config только обновляет файл и выходит."
-    )
-if parsed_args.reset_config and parsed_args.query:
-    parser.error(
-        "--reset-config и -q/--query нельзя вместе: --reset-config только сбрасывает конфиг и выходит."
-    )
-if parsed_args.init_config and parsed_args.sync_config:
-    parser.error(
-        "--init-config и --sync-config нельзя вместе: используйте одно из двух."
-    )
-if parsed_args.reset_config and parsed_args.sync_config:
-    parser.error(
-        "--reset-config и --sync-config нельзя вместе: используйте одно из двух."
-    )
-if parsed_args.reset_config and parsed_args.init_config:
-    parser.error(
-        "--reset-config и --init-config нельзя вместе: используйте одно из двух."
-    )
-if parsed_args.check_update and parsed_args.query:
-    parser.error(
-        "--check-update и -q/--query нельзя вместе: --check-update только проверяет и выходит."
-    )
-if parsed_args.update and parsed_args.query:
-    parser.error(
-        "--update и -q/--query нельзя вместе: --update только запускает обновление и выходит."
-    )
-if parsed_args.update and parsed_args.check_update:
-    parser.error(
-        "--update и --check-update нельзя вместе: используйте одно из двух."
-    )
-if parsed_args.new and not parsed_args.thread_id:
-    parser.error(
-        "Аргумент -n/--new можно использовать только вместе с -t/--thread-id."
-    )
+#: `gc-cli config …` — отдельная команда (gc_core.config_command) со своим
+#: разбором argv: её уводит `cli.main` до старта агента. Парсер агента разбирается
+#: на импорте модуля, поэтому здесь он её не трогает — иначе импорт `gc_cli.cli`
+#: падал бы на «Нужен -q/--query» раньше, чем `main` успеет её увести.
+CONFIG_COMMAND = sys.argv[1:2] == ["config"]
+
+
+#: Флаги-действия: без -q/--query запуск осмыслен только с одним из них.
+_STANDALONE_ACTIONS = (
+    "init_config",
+    "init",
+    "sync_config",
+    "reset_config",
+    "check_update",
+    "update",
+    "query",
+)
+
+#: Несовместимые пары флагов и текст ошибки; порядок — порядок проверки.
+_CONFLICTS = (
+    (
+        "init_config",
+        "query",
+        "--init-config и -q/--query нельзя вместе: --init-config только настраивает и выходит.",
+    ),
+    (
+        "sync_config",
+        "query",
+        "--sync-config и -q/--query нельзя вместе: --sync-config только обновляет файл и выходит.",
+    ),
+    (
+        "reset_config",
+        "query",
+        "--reset-config и -q/--query нельзя вместе: --reset-config только сбрасывает конфиг и выходит.",
+    ),
+    (
+        "init_config",
+        "sync_config",
+        "--init-config и --sync-config нельзя вместе: используйте одно из двух.",
+    ),
+    (
+        "reset_config",
+        "sync_config",
+        "--reset-config и --sync-config нельзя вместе: используйте одно из двух.",
+    ),
+    (
+        "reset_config",
+        "init_config",
+        "--reset-config и --init-config нельзя вместе: используйте одно из двух.",
+    ),
+    (
+        "check_update",
+        "query",
+        "--check-update и -q/--query нельзя вместе: --check-update только проверяет и выходит.",
+    ),
+    (
+        "update",
+        "query",
+        "--update и -q/--query нельзя вместе: --update только запускает обновление и выходит.",
+    ),
+    (
+        "update",
+        "check_update",
+        "--update и --check-update нельзя вместе: используйте одно из двух.",
+    ),
+)
+
+
+def _check_combinations(parsed_args: argparse.Namespace) -> None:
+    if not any(
+        getattr(parsed_args, name, False) for name in _STANDALONE_ACTIONS
+    ):
+        parser.error(
+            "Нужен -q/--query "
+            "(или --init-config для конфига, --sync-config для обновления конфига, "
+            "--reset-config для сброса конфига, --init для AGENTS.md, "
+            "--check-update/--update для обновления агента)."
+        )
+    for first, second, message in _CONFLICTS:
+        if getattr(parsed_args, first) and getattr(parsed_args, second):
+            parser.error(message)
+    if parsed_args.new and not parsed_args.thread_id:
+        parser.error(
+            "Аргумент -n/--new можно использовать только вместе с -t/--thread-id."
+        )
+
+
+parsed_args, unknown_args = parser.parse_known_args(
+    [] if CONFIG_COMMAND else None
+)
+if not CONFIG_COMMAND:
+    _check_combinations(parsed_args)
 run_args = parsed_args
 extra_config_overrides = _parse_unknown_args(list(unknown_args))
-if parsed_args.level is not None:
-    extra_config_overrides["level"] = parsed_args.level
+extra_config_overrides.update(setting_flag_overrides(parsed_args))
 
 
 if __name__ == "__main__":

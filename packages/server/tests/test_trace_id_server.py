@@ -10,8 +10,9 @@ def client(monkeypatch, tmp_path):
 
     captured = {}
 
-    async def _fake_create_run_context(config_dict, **kwargs):
-        captured["config_dict"] = config_dict
+    async def _fake_create_run_context(loaded, **kwargs):
+        # Сервер отдаёт контексту LoadedSettings; его рантайм — то, что увидит ран.
+        captured["loaded"] = loaded
         return object()
 
     async def _fake_start_if_absent(**kwargs):
@@ -27,7 +28,7 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setattr(
         server, "acreate_run_context", _fake_create_run_context
     )
-    monkeypatch.setattr(server, "build_auth_connector", lambda cfg: None)
+    monkeypatch.setattr(server, "build_auth_connector", lambda settings: None)
     monkeypatch.setattr(
         server.agent_run_registry, "astart_if_absent", _fake_start_if_absent
     )
@@ -43,7 +44,7 @@ def test_trace_id_reaches_run_config(client):
         "/events/webhook", json={"task_id": "t1", "trace_id": "wf-42"}
     )
     assert resp.status_code == 200
-    assert captured["config_dict"]["trace_id"] == "wf-42"
+    assert captured["loaded"].runtime.trace_id == "wf-42"
 
 
 def test_trace_id_is_removed_from_the_prompt(client):
@@ -59,7 +60,7 @@ def test_trace_id_is_removed_from_the_prompt(client):
 def test_absent_trace_id_leaves_no_key(client):
     api, captured = client
     api.post("/events/webhook", json={"task_id": "t1"})
-    assert "trace_id" not in captured["config_dict"]
+    assert captured["loaded"].runtime.trace_id is None
 
 
 def test_invalid_trace_id_is_rejected(client):

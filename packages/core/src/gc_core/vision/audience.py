@@ -35,15 +35,17 @@ class Audience:
         return self.native is None and self.eyes is None
 
 
-def _declared_blind(
-    resolved: ResolvedModel, config: Mapping[str, Any]
-) -> bool:
+def _declared_blind(resolved: ResolvedModel, settings: Any) -> bool:
     """Модель заявлена слепой в конфиге: `backend.vision: false` у неё
     (`models.<alias>.backend`) или, без своего значения, в общей секции
-    (плоский `backend_vision`). True и None допускают автоматическую пробу."""
+    `backend`. True и None допускают автоматическую пробу.
+
+    ``settings`` — всё, что принимает ``settings_of``."""
+    from gc_core.settings import settings_of
+
     value = backend_override_value(resolved, "vision")
     if value is NO_BACKEND_OVERRIDE:
-        value = config.get("backend_vision")
+        value = settings_of(settings).backend.vision
     return value is False
 
 
@@ -63,7 +65,7 @@ def compute_audience(
     request_resolved: ResolvedModel,
     api_mode: str,
     tool_in_set: bool,
-    config: Mapping[str, Any],
+    settings: Any,
     routes: Mapping | None = None,
     turn_key: str | None = None,
 ) -> Audience:
@@ -81,13 +83,13 @@ def compute_audience(
     def sees(resolved):
         result = result_for(resolved)
         return (
-            not _declared_blind(resolved, config)
+            not _declared_blind(resolved, settings)
             and result is not None
             and result.status is ProbeStatus.CONFIRMED
         )
 
     def eligible(resolved):
-        if resolved is None or _declared_blind(resolved, config):
+        if resolved is None or _declared_blind(resolved, settings):
             return False
         result = result_for(resolved)
         return (

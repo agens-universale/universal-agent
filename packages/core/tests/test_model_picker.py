@@ -193,30 +193,6 @@ def test_probe_fetch_dedups_identical_network_errors(monkeypatch):
     assert out.network_error.count(err) == 1  # дедуп: не дважды
 
 
-class _FakeResp:
-    status = 200
-
-    def read(self):
-        return b'{"data": []}'
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        return False
-
-
-def _capture_user_agents(monkeypatch) -> list:
-    seen = []
-
-    def _urlopen(req, timeout=None, context=None):
-        seen.append(req.get_header("User-agent"))
-        return _FakeResp()
-
-    monkeypatch.setattr("urllib.request.urlopen", _urlopen)
-    return seen
-
-
 def test_requests_introduce_themselves_by_product_name():
     """Каждый исходящий запрос несёт визитку продукта. Без неё библиотека шлёт свой
     дефолт («python-requests/X.Y», «Python-urllib/X.Y»), и щит провайдера (Cloudflare
@@ -255,21 +231,6 @@ def test_requests_introduce_themselves_by_product_name():
     assert expected.startswith("gc-ua/")
 
 
-def test_the_legacy_urllib_transport_introduces_itself_too(monkeypatch):
-    """`_urllib_get_ex` — легаси-транспорт без прокси: в бою его не зовут, но он
-    остаётся инъектируемой заменой для `probe_fetch`, и визитку ставит своим путём
-    (`_request`), мимо `_headers`. Отвалится — отвалится молча."""
-    from gc_core import app_version
-
-    seen = _capture_user_agents(monkeypatch)
-
-    mp._urllib_get_ex("https://h/v1/models", {}, True)
-
-    expected = f"{app_version.DIST_NAME}/{app_version.agent_version()}"
-    assert seen == [expected]
-    assert "urllib" not in seen[0]
-
-
 def test_the_user_agent_carries_the_live_version(monkeypatch):
     """Имя и версия — из метаданных пакета, не из строки в коде: подняли версию в
     pyproject — визитка поехала сама."""
@@ -278,9 +239,7 @@ def test_the_user_agent_carries_the_live_version(monkeypatch):
     monkeypatch.setattr(app_version, "agent_version", lambda: "9.9.9")
     mp._user_agent.cache_clear()
     try:
-        seen = _capture_user_agents(monkeypatch)
-        mp._urllib_get_ex("https://h/v1/models", {}, True)
-        assert seen == ["gc-ua/9.9.9"]
+        assert mp._headers(None)["User-Agent"] == "gc-ua/9.9.9"
     finally:
         mp._user_agent.cache_clear()
 

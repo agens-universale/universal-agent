@@ -170,8 +170,10 @@ assign:
 - [Установка и запуск](docs/usage.md) — установка (uv/pip), запуск, ключи CLI.
 - [Упаковка и профили](docs/packaging.md) — как пять дистрибутивов собираются из одного репозитория, почему у частичных профилей `#subdirectory=`, как обновление сохраняет профиль.
 - [Тесты](docs/testing.md) — наборы при пакетах (`packages/*/tests`), общий тест-кит, `external/*`, полный прогон.
+- [Temporal](docs/temporal.md) — тот же агент в durable-исполнении: воркер с `AgentPlugin`, `AsyncAgent(durable=...)`, повторы, MCP, деплой.
 - [Конфигурация](docs/configuration.md) — `config.yml`, приоритет и переопределение, security policy, MCP-серверы, runtime-пути, project-local config.
 - [`os_backend` — справочник](docs/os_backends.md) — YAML-блоки для `local` / `sandbox` / `docker` / `ssh` / `exec` / `harbor`.
+- [SDK](docs/sdk/README.md) — агент в своём приложении: `AsyncAgent`, настройки, треды, картинки, логи; [хранилище тредов](docs/sdk/thread-store.md) и [хранилище агента](docs/sdk/agent-store.md) — история, промпты, скиллы и субагенты из своей базы или S3.
 - [Сабагенты](docs/subagents.md) — делегирование задач, кастомные сабагенты, лимиты и бюджет вызовов.
 - [Скиллы и пакеты скиллов](docs/skills.md) — трёхслойный поиск, манифест пакета, canonical IDs, встроенные паки.
 - [Серверный режим](docs/server.md) — REST-обёртка (FastAPI), конфиги сервера, эндпоинты, Swarm-режим (Linux).

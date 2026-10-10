@@ -9,6 +9,7 @@ from gc_core.tools.subagents.runner import SubagentRunner
 from gc_core.summarize.config import resolve_summary_limits
 from gc_core.usage.account import UsageAccount
 from gc_testkit import as_coro
+from gc_testkit.settings import fake_ctx
 
 
 class _FakeChildState:
@@ -87,10 +88,14 @@ def _runner():
         state_id="orch",
         discard_writes_after_stop=False,
     )
-    ctx = SimpleNamespace(
-        logger=None, run_id="r", auth_connector=None, is_tui=False
+    ctx = fake_ctx(
+        {"agent.use_local_subagents": True},
+        logger=None,
+        run_id="r",
+        auth_connector=None,
+        is_tui=False,
     )
-    return SubagentRunner(ctx, orch, {"use_local_subagents": True})
+    return SubagentRunner(ctx, orch)
 
 
 async def test_success_meta_includes_child_run_id_not_path(monkeypatch):
@@ -143,10 +148,14 @@ async def test_early_error_without_ctx_has_no_child_run_id():
         state_id="orch",
         discard_writes_after_stop=False,
     )
-    ctx = SimpleNamespace(
-        logger=None, run_id="r", auth_connector=None, is_tui=False
+    ctx = fake_ctx(
+        {"agent.use_local_subagents": True},
+        logger=None,
+        run_id="r",
+        auth_connector=None,
+        is_tui=False,
     )
-    runner = SubagentRunner(ctx, orch, {"use_local_subagents": True})
+    runner = SubagentRunner(ctx, orch)
 
     async def _fake_run_agent(*a, **k):
         return None

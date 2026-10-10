@@ -19,7 +19,7 @@ from __future__ import annotations
 import os
 
 import pytest
-from gc_core.config import load_config_ex
+from gc_core.config import load_settings
 from gc_testkit.paths import REPO
 
 BENCH_DIR = REPO / "integrations" / "bench_configs"
@@ -29,7 +29,7 @@ CONFIGS = sorted(BENCH_DIR.glob("0*.yml"))
 
 #: Остальные файлы каталога конфигами агента НЕ являются: это определения
 #: прогонов для harbor, у них своя схема (`gc_cli_config`, `model_served`,
-#: `harbor`), и `load_config_ex` отвергает их как `extra_forbidden`. Список
+#: `harbor`), и `load_settings` отвергает их как `extra_forbidden`. Список
 #: поимённый, а не «всё, что не 0*»: новый файл обязан попасть под сетку либо
 #: сюда — то есть решением, а не молча.
 NOT_AGENT_CONFIGS = {
@@ -40,7 +40,7 @@ NOT_AGENT_CONFIGS = {
 
 
 def _markdown_paths(node, prefix=""):
-    """Все значения-пути к .md в разобранном конфиге, с их ключами."""
+    """Все значения-пути к .md в дампе настроек, с их путями."""
     if isinstance(node, dict):
         for key, value in node.items():
             yield from _markdown_paths(
@@ -76,9 +76,9 @@ def test_bench_config_prompts_exist(config):
     Подмена, которую ловит тест: вернуть `../prompts/` вместо
     `../../packages/core/assets/prompts/`.
     """
-    cfg, _meta = load_config_ex(str(config))
+    settings = load_settings(str(config)).settings
 
-    found = list(_markdown_paths(cfg))
+    found = list(_markdown_paths(settings.model_dump()))
     assert found, f"{config.name}: в конфиге нет ни одного пути к промпту"
 
     missing = [

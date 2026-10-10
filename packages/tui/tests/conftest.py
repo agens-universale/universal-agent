@@ -134,6 +134,27 @@ def _isolate_agent_state(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _bare_app_writes_no_logs(monkeypatch):
+    """Окно, собранное в тесте без настроек (``TuiApp()``), не пишет логи агента.
+
+    Умолчание модели — писать, а каталог логов в тесте не задан. Окна с
+    настройками собирают через ``gc_testkit.tui_support.tui_settings``: то же
+    правило («не задал ``save_logs`` — логов нет») живёт там.
+    """
+    from gc_testkit.tui_support import tui_settings
+    from gc_tui import app as app_mod
+
+    original = app_mod.TuiApp.__init__
+
+    def init(self, *args, settings=None, **kwargs):
+        if settings is None:
+            settings = tui_settings()
+        original(self, *args, settings=settings, **kwargs)
+
+    monkeypatch.setattr(app_mod.TuiApp, "__init__", init)
+
+
+@pytest.fixture(autouse=True)
 def _isolate_image_temp_root(tmp_path, monkeypatch):
     """TuiApp без абсолютного `threads_data_path` держит картинки в
     `<temp>/gc-images-<uid>` — каталоге пользователя, общем для всех его процессов:
@@ -169,11 +190,11 @@ def _isolate_model_list_cache():
     первый тест в порядке прогона молча кэширует свой список для соседей.
     Автосброс до и после каждого теста (после — на случай, если тест сам не
     дошёл до конца)."""
-    from gc_tui.services.model_list_cache import clear_cache
+    from gc_tui.services.model_list_cache import _CACHE
 
-    clear_cache()
+    _CACHE.clear()
     yield
-    clear_cache()
+    _CACHE.clear()
 
 
 @pytest.fixture(autouse=True)

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Tuple
+from typing import Any, Tuple
 
 DEFAULT_TOOL_OUTPUT_INLINE_MAX_CHARS = 10000
 DEFAULT_STORED_TOOL_OUTPUTS_MAX_ENTRIES = 50
@@ -26,23 +26,23 @@ def normalize_tool_output_limits(
     return inline, entries
 
 
-def get_tool_output_inline_max_chars(config: Dict[str, Any]) -> int:
-    inline, _ = normalize_tool_output_limits(
-        config.get("tool_output_inline_max_chars"),
-        config.get(
-            "stored_tool_outputs_max_entries",
-            DEFAULT_STORED_TOOL_OUTPUTS_MAX_ENTRIES,
-        ),
+def _agent_limits(settings: Any) -> Tuple[int, int]:
+    """(inline, entries) из ``agent`` настроек — всё, что принимает ``settings_of``."""
+    # Ленивый импорт: settings → root → этот модуль.
+    from gc_core.settings import settings_of
+
+    agent = settings_of(settings).agent
+    return normalize_tool_output_limits(
+        agent.tool_output_inline_max_chars,
+        agent.stored_tool_outputs_max_entries,
     )
+
+
+def get_tool_output_inline_max_chars(settings: Any) -> int:
+    inline, _ = _agent_limits(settings)
     return inline
 
 
-def get_stored_tool_outputs_max_entries(config: Dict[str, Any]) -> int:
-    _, entries = normalize_tool_output_limits(
-        config.get(
-            "tool_output_inline_max_chars",
-            DEFAULT_TOOL_OUTPUT_INLINE_MAX_CHARS,
-        ),
-        config.get("stored_tool_outputs_max_entries"),
-    )
+def get_stored_tool_outputs_max_entries(settings: Any) -> int:
+    _, entries = _agent_limits(settings)
     return entries

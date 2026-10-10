@@ -7,6 +7,8 @@ import os
 from dataclasses import dataclass
 from typing import Any, Mapping
 
+from gc_core.execution.ports import port
+from gc_core.settings import settings_of
 from gc_core.trace_id import trace_id_from_config
 
 _TRIGGER_REASON_LABELS: dict[str, str] = {
@@ -36,21 +38,43 @@ def resolve_summary_trace_path(ctx: Any) -> str:
     path = getattr(ctx, "summary_trace_path", "")
     if isinstance(path, str) and path.strip():
         return path.strip()
-    cfg = getattr(ctx, "config_dict", {}) or {}
-    if not cfg.get("save_logs", False):
+    settings = settings_of(ctx)
+    if not settings.logging.save_logs:
         return ""
-    base_dir = cfg.get("logs_dump_dir") or os.getcwd()
+    base_dir = settings.paths.logs_dump_dir or os.getcwd()
     return os.path.join(base_dir, "summary_trace.jsonl")
 
 
-def append_summary_trace_record(
+@dataclass(frozen=True)
+class SummaryTraceRecord:
+    trigger_reason: str
+    trace_data: dict[str, Any]
+    newly_summarized_message_id: str
+    schema_version: int = 1
+
+
+async def aappend_summary_trace_record(
     ctx: Any,
     *,
     trigger_reason: str,
     trace_data: Mapping[str, Any] | None,
     newly_summarized_message_id: str,
 ) -> None:
-    """Дописать одну строку в ``summary_trace*.jsonl`` (структурированный trace пайплайна)."""
+    """Дописать одну строку в ``summary_trace*.jsonl`` (структурированный trace пайплайна).
+
+    Если рантайм дал ``ctx.summary_trace_sink`` (Temporal native), запись уходит
+    в него и локальный путь не резолвится; иначе строка пишется в файл здесь же.
+    """
+    sink = port(ctx, "summary_trace_sink")
+    if sink is not None:
+        await sink(
+            SummaryTraceRecord(
+                trigger_reason=trigger_reason,
+                trace_data=dict(trace_data or {}),
+                newly_summarized_message_id=newly_summarized_message_id,
+            )
+        )
+        return
     trace_path = resolve_summary_trace_path(ctx)
     if not trace_path:
         return
@@ -65,7 +89,7 @@ def append_summary_trace_record(
     # Этот сток пишется сырым open()/json.dumps, мимо фильтра и форматтера, и у
     # него есть фолбэк в общий summary_trace.jsonl без kind и run_id — то есть
     # переименование файла его не покрывает.
-    trace_id = trace_id_from_config(getattr(ctx, "config_dict", None))
+    trace_id = trace_id_from_config(ctx)
     if trace_id:
         payload["trace_id"] = trace_id
     with open(trace_path, "a", encoding="utf-8") as fd:
@@ -145,46 +169,6 @@ def log_compaction_started(
     _cli_print(
         f"Сжатие: {log_ctx.rule_label} (правило={log_ctx.trigger_reason})",
         _started_cli_detail(log_ctx),
-    )
-
-
-def log_compaction_precheck(
-    logger: Any | None,
-    *,
-    trigger_reason: str,
-    thread_id: Any,
-    history_messages_count: int,
-    trigger_volume: int,
-    serialized_chars: int,
-    threshold: int,
-    exceeded_chars: bool = False,
-    exceeded_tokens: bool = False,
-) -> None:
-    if logger is None:
-        return
-    logger.info(
-        "summary_precheck reason=%s thread_id=%s history_messages=%s "
-        "trigger_volume=%s serialized_chars=%s threshold=%s",
-        trigger_reason,
-        thread_id,
-        history_messages_count,
-        trigger_volume,
-        serialized_chars,
-        threshold,
-    )
-    logger.info(
-        "summary_precheck",
-        extra={
-            "event": "summary_precheck",
-            "reason": trigger_reason,
-            "thread_id": thread_id,
-            "history_messages": history_messages_count,
-            "trigger_volume": trigger_volume,
-            "serialized_chars": serialized_chars,
-            "threshold": threshold,
-            "exceeded_chars": exceeded_chars,
-            "exceeded_tokens": exceeded_tokens,
-        },
     )
 
 

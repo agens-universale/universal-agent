@@ -14,9 +14,6 @@ terminate → ожидание до 5 с → killpg → ещё до 2 с. Пря
 Сам ``Popen`` при этом остаётся ``Popen``: переводить его на
 ``asyncio.create_subprocess_exec`` нельзя, процесс делят разные event loop
 (разбор — в докстроке ``persistent_stdio``). Меняется только СПОСОБ ЖДАТЬ.
-
-Форма повторяет уже принятую в ``stream_client._PersistentSessionManager``:
-синхронный ``close_all`` рядом с ``aclose_all``.
 """
 
 import subprocess
@@ -115,12 +112,3 @@ async def test_registry_aclose_all_is_awaitable():
     await registry.aclose_all()  # пустой реестр: просто не должно падать
 
     assert hasattr(registry, "aclose_all")
-
-
-def test_sync_close_all_still_exists():
-    """Синхронный вход сохранён: его зовут завершение процесса и тесты."""
-    registry = ps.PersistentStdioRegistry()
-
-    registry.close_all()
-
-    assert hasattr(registry, "close_all")

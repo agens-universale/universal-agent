@@ -66,13 +66,6 @@ class VoiceInputFlow:
         return 0.0
 
     @property
-    def input_level(self) -> float:
-        """Живой уровень сигнала микрофона 0..1 (только во время записи)."""
-        if self.state == RECORDING and self._recorder is not None:
-            return getattr(self._recorder, "level", 0.0)
-        return 0.0
-
-    @property
     def input_bands(self) -> tuple:
         """Готовые высоты столбцов эквалайзера 0..1 — БЕЗ побочных эффектов.
 

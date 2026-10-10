@@ -379,7 +379,9 @@ _SUMMARY_UNSET = "не задан · {now}"
 # порога три состояния: пусто — действует порог той записи; своё число; явный ноль
 # — её порог отменён (пишется в файл нулём), действует то, что называет строка.
 _SUMMARY_BASE = "действует порог из записи основного конфига: {value}"
-_SUMMARY_CANCELLED = "порог из записи основного конфига ({base}) отменён · {now}"
+_SUMMARY_CANCELLED = (
+    "порог из записи основного конфига ({base}) отменён · {now}"
+)
 _SUMMARY_BAD_VALUE = "нужно целое число, не меньше 0"
 # Строки-действия (`widgets/action_row.py`): что это и чем открыть. Enter — на самой
 # строке, F-клавиша — из любого поля формы.
@@ -627,7 +629,7 @@ def _resolved_for_request(
     url: str, auth: str | None, *, normalize_token: bool = False
 ) -> tuple[str, str | None]:
     """Раскрыть `${ENV:VAR}`/`${FILE:...}` перед отправкой — тем же резолвером, что у
-    `config.load_config`: сама ссылка не адрес и не токен, и буквальный
+    загрузчика конфига: сама ссылка не адрес и не токен, и буквальный
     `Bearer ${ENV:TOK}` сервер отклоняет — проба врала «✗ токен отклонён» на исправном
     конфиге, а список не грузился никогда.
 
@@ -1587,7 +1589,9 @@ class ModelEntryForm(Vertical):
         поле, и сама галка неактивны, а почему, сказано в строке галки. Живёт отдельным
         предикатом, а не веткой в `move`: там ей место среди навигации."""
         if position == "mef-model-meta":
-            return self.model_card() is None  # строка неактивна — открывать нечего
+            return (
+                self.model_card() is None
+            )  # строка неактивна — открывать нечего
         if not self.own_connection():
             return position == "mef-token" or position is None
         return position == "mef-token" and self._no_auth
@@ -1713,7 +1717,9 @@ class ModelEntryForm(Vertical):
     @staticmethod
     def _on_row(target) -> bool:
         """Позиция — строка, а не поле ввода: фокуса у неё нет."""
-        return target is None or target == "mef-strip" or target in _ACTION_ROWS
+        return (
+            target is None or target == "mef-strip" or target in _ACTION_ROWS
+        )
 
     def refocus(self) -> None:
         """Вернуть ввод в поле под курсором — и только это.
@@ -1916,17 +1922,18 @@ class ModelEntryForm(Vertical):
         # Ручное перечитывание = автоподгрузка этими параметрами уже состоялась:
         # иначе уход с поля и возврат сходили бы в сеть ещё раз тем же ключом.
         self._autoload_key = (self._current_url(), self._current_auth_header())
-        return self._start_models_fetch(refresh=True)
+        self._start_models_fetch(refresh=True)
+        return True
 
     def _start_models_fetch(
         self, *, refresh: bool, quiet: bool = False
-    ) -> bool:
+    ) -> None:
         """Уйти за списком моделей. `refresh=False` — автоподгрузка при входе в поле
         (кэш годится), `True` — принудительное перечитывание по Alt+↓. `quiet` —
         загрузка при открытии формы: курсор не на поле id, статус и отказы молчат.
 
-        Всегда ``True``: клавиша уже наша (или автоподгрузка с поля id) — хост
-        съедает её; отличие веток только в статусе/воркере, не в «наша ли»."""
+        Клавишу съедает вызывающий: здесь только статус и воркер. Запрос, который
+        не ушёл, виден по неизменному ``_list_gen``."""
         say = (lambda _text: None) if quiet else self._set_status
         try:
             backend = (
@@ -1935,39 +1942,38 @@ class ModelEntryForm(Vertical):
         except ValueError as exc:
             if not quiet:
                 self._fail(f"backend: {exc}")
-        else:
-            url = self._current_url()
-            if not url:
-                say(_LIST_NO_URL)
-            else:
-                env_missing = _env_missing_line(url, self._current_token_raw())
-                if env_missing:
-                    say(env_missing)
-                else:
-                    auth, normalize_token = self._current_auth_value()
-                    # Поколение бампаем ЗДЕСЬ: `exclusive=True` уже бегущий поток не
-                    # останавливает, и ответ прошлой загрузки перемонтировал бы список поверх
-                    # свежего (идиома `ModelEditor._start_fetch`).
-                    self._list_gen += 1
-                    gen = self._list_gen
-                    self._pending_catalog_key = (
-                        url,
-                        self._current_auth_header(),
-                    )
-                    say(LIST_LOADING)
-                    # `group` задан явно: `exclusive` отменяет соседей ПО ГРУППЕ, а не по `name`,
-                    # и в общей группе «default» проба гасила бы летящий подбор и наоборот —
-                    # клавиши разведены по ролям, значит и по воркерам.
-                    self.run_worker(
-                        lambda: self._fetch_blocking(
-                            url, auth, gen, refresh, normalize_token, backend
-                        ),
-                        thread=True,
-                        exclusive=True,
-                        group="model-entry-list",
-                        name="model-entry-list-fetch",
-                    )
-        return True
+            return
+        url = self._current_url()
+        if not url:
+            say(_LIST_NO_URL)
+            return
+        env_missing = _env_missing_line(url, self._current_token_raw())
+        if env_missing:
+            say(env_missing)
+            return
+        auth, normalize_token = self._current_auth_value()
+        # Поколение бампаем ЗДЕСЬ: `exclusive=True` уже бегущий поток не
+        # останавливает, и ответ прошлой загрузки перемонтировал бы список поверх
+        # свежего (идиома `ModelEditor._start_fetch`).
+        self._list_gen += 1
+        gen = self._list_gen
+        self._pending_catalog_key = (
+            url,
+            self._current_auth_header(),
+        )
+        say(LIST_LOADING)
+        # `group` задан явно: `exclusive` отменяет соседей ПО ГРУППЕ, а не по `name`,
+        # и в общей группе «default» проба гасила бы летящий подбор и наоборот —
+        # клавиши разведены по ролям, значит и по воркерам.
+        self.run_worker(
+            lambda: self._fetch_blocking(
+                url, auth, gen, refresh, normalize_token, backend
+            ),
+            thread=True,
+            exclusive=True,
+            group="model-entry-list",
+            name="model-entry-list-fetch",
+        )
 
     def _fetch_blocking(
         self,
@@ -2063,9 +2069,7 @@ class ModelEntryForm(Vertical):
         if self.on_model_field:
             return self._list.reload()
         if self.on_action_row:
-            self.query_one(
-                f"#{self._positions[self._idx]}", ActionRow
-            ).press()
+            self.query_one(f"#{self._positions[self._idx]}", ActionRow).press()
             return True
         return False
 
@@ -2312,7 +2316,7 @@ class ModelEntryForm(Vertical):
         )
         return resolved.use_ssl, resolved.proxy
 
-    def probe_connection(self) -> bool:
+    def probe_connection(self) -> None:
         """`Ctrl+Space`: проверить связь по тем значениям, что стоят в полях СЕЙЧАС.
         Это ПРОБА, не подбор списка (контракт п.4).
 
@@ -2323,40 +2327,36 @@ class ModelEntryForm(Vertical):
         токеном, и совпавший с ним ответ значит, что сервер токены не различает и
         «принят» заявлять нельзя. Своя копия этого танца здесь и жила до синка —
         без канарейки, то есть врала ровно там, где канон 2026-08-17 научился
-        молчать. Текст вердикта — общий `connection_line_text`.
-
-        Всегда ``True``: зовут только когда форма открыта — клавиша съедена;
-        отличие веток только в строке пробы/воркере."""
+        молчать. Текст вердикта — общий `connection_line_text`."""
         try:
             backend = (
                 parse_model_backend_text(self._yaml_text("mef-backend")) or {}
             )
         except ValueError as exc:
             self._fail(f"backend: {exc}")
-        else:
-            url = self._current_url()
-            if not url:
-                self._set_probe_line(Text(_PROBE_NO_URL, style=DEEP_DIM))
-            else:
-                env_missing = _env_missing_line(url, self._current_token_raw())
-                if env_missing:
-                    self._set_probe_line(Text(env_missing, style=WARN))
-                else:
-                    auth, normalize_token = self._current_auth_value()
-                    model = self._model_value()
-                    self._probe_gen += 1
-                    gen = self._probe_gen
-                    self._set_probe_line(Text(_PROBE_RUNNING, style=DEEP_DIM))
-                    self.run_worker(
-                        lambda: self._probe_blocking(
-                            url, auth, model, gen, normalize_token, backend
-                        ),
-                        thread=True,
-                        exclusive=True,
-                        group="model-entry-probe",
-                        name="model-entry-probe",
-                    )
-        return True
+            return
+        url = self._current_url()
+        if not url:
+            self._set_probe_line(Text(_PROBE_NO_URL, style=DEEP_DIM))
+            return
+        env_missing = _env_missing_line(url, self._current_token_raw())
+        if env_missing:
+            self._set_probe_line(Text(env_missing, style=WARN))
+            return
+        auth, normalize_token = self._current_auth_value()
+        model = self._model_value()
+        self._probe_gen += 1
+        gen = self._probe_gen
+        self._set_probe_line(Text(_PROBE_RUNNING, style=DEEP_DIM))
+        self.run_worker(
+            lambda: self._probe_blocking(
+                url, auth, model, gen, normalize_token, backend
+            ),
+            thread=True,
+            exclusive=True,
+            group="model-entry-probe",
+            name="model-entry-probe",
+        )
 
     def _probe_blocking(
         self,
@@ -2607,7 +2607,9 @@ class ModelEntryForm(Vertical):
         if card is None:
             if not self._provider_model_id():
                 why = _CARD_NO_MODEL_ID
-            elif not self._catalog_is_current() or self._models_payload is None:
+            elif (
+                not self._catalog_is_current() or self._models_payload is None
+            ):
                 why = _CARD_NO_CATALOG
             else:
                 why = _CARD_NOT_IN_CATALOG

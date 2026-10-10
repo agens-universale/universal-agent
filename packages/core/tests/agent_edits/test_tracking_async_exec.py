@@ -39,7 +39,6 @@ class _Inner:
 
 
 class _Ctx:
-    config_dict: dict = {}
     logger = None
 
 

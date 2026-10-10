@@ -4,19 +4,18 @@ import pytest
 from gc_core.summarize import llm as summary_llm
 from gc_core.utils import llm_chat_client
 from gc_testkit import as_coro, run_coro
+from gc_testkit.settings import fake_ctx, make_settings
 
 
 def test_summary_payload_uses_global_auxiliary_when_section_is_absent():
-    ctx = SimpleNamespace(
-        config_dict={
-            "chat_completion_kwargs": {"temperature": 0.2},
-            "auxiliary_llm_params": {
-                "completion_kwargs": {
-                    "separate_reasoning": False,
-                    "chat_template_kwargs": {"enable_thinking": False},
-                }
+    ctx = make_settings(
+        {
+            "backend.chat_completion_kwargs": {"temperature": 0.2},
+            "chat_completions.auxiliary_llm.completion_kwargs": {
+                "separate_reasoning": False,
+                "chat_template_kwargs": {"enable_thinking": False},
             },
-        },
+        }
     )
     payload = llm_chat_client._build_chat_completion_payload(
         ctx=ctx,
@@ -69,18 +68,19 @@ def test_request_summary_text_uses_ctx_auxiliary_llm(monkeypatch):
         as_coro(lambda _s, _c, resolved=None: {}),
     )
 
-    ctx = SimpleNamespace(
+    ctx = fake_ctx(
         auxiliary_llm=SimpleNamespace(
             max_tokens=7777,
             completion_kwargs={"reasoning_effort": "high"},
         ),
-        config_dict={
-            "completions_url": "http://example.test/v1/chat/completions",
-            "backend_request_timeout_sec": 600,
-            "auxiliary_llm_params": {
-                "completion_kwargs": {"reasoning_effort": "none"},
-            },
-        },
+        loaded=make_settings(
+            {
+                "backend.completions_url": "http://example.test/v1/chat/completions",
+                "chat_completions.auxiliary_llm.completion_kwargs": {
+                    "reasoning_effort": "none"
+                },
+            }
+        ),
         logger=None,
     )
     out = run_coro(
@@ -116,18 +116,19 @@ def test_request_summary_text_merges_optional_payload_overrides(monkeypatch):
         as_coro(lambda _s, _c, resolved=None: {}),
     )
 
-    ctx = SimpleNamespace(
+    ctx = fake_ctx(
         auxiliary_llm=SimpleNamespace(
             max_tokens=100,
             completion_kwargs={"reasoning_effort": "high"},
         ),
-        config_dict={
-            "completions_url": "http://example.test/v1/chat/completions",
-            "backend_request_timeout_sec": 600,
-            "auxiliary_llm_params": {
-                "completion_kwargs": {"reasoning_effort": "none"},
-            },
-        },
+        loaded=make_settings(
+            {
+                "backend.completions_url": "http://example.test/v1/chat/completions",
+                "chat_completions.auxiliary_llm.completion_kwargs": {
+                    "reasoning_effort": "none"
+                },
+            }
+        ),
     )
     run_coro(
         summary_llm.arequest_summary_text(
@@ -147,7 +148,7 @@ def test_request_summary_text_requires_auxiliary_llm_on_ctx():
     with pytest.raises(RuntimeError, match="auxiliary_llm"):
         run_coro(
             summary_llm.arequest_summary_text(
-                ctx=SimpleNamespace(config_dict={}),
+                ctx=fake_ctx(),
                 state=SimpleNamespace(default_model="m"),
                 messages=[{"role": "user", "content": "hi"}],
                 request_label="summary_batch_1",
@@ -196,11 +197,11 @@ def test_request_chat_completion_text_merges_payload_overrides_after_global_kwar
         as_coro(lambda _s, _c, resolved=None: {}),
     )
 
-    ctx = SimpleNamespace(
-        config_dict={
-            "completions_url": "http://example.test/v1/chat/completions",
-            "backend_request_timeout_sec": 600,
-            "chat_completion_kwargs": {
+    ctx = fake_ctx(
+        {
+            "backend.completions_url": "http://example.test/v1/chat/completions",
+            "backend.request_timeout_sec": 600,
+            "backend.chat_completion_kwargs": {
                 "temperature": 1.0,
                 "separate_reasoning": True,
                 "chat_template_kwargs": {"enable_thinking": True},

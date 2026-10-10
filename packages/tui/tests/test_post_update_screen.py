@@ -1,3 +1,4 @@
+from gc_testkit.tui_support import as_settings, tui_settings
 import pytest
 
 pytest.importorskip("textual")
@@ -44,9 +45,11 @@ async def test_post_update_lists_checkboxes(monkeypatch):
     )
     monkeypatch.setattr(config_sync, "needs_sync", lambda *a, **k: True)
     _states(monkeypatch, {"office": "0.3.1", "ddg": "0.2.0"})
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
-        scr = PostUpdateScreen(upgrade=_Upg(), config={}, config_path="c.yml")
+        scr = PostUpdateScreen(
+            upgrade=_Upg(), settings=as_settings({}), config_path="c.yml"
+        )
         app.push_screen(scr)
         await pilot.pause()
         await pilot.pause()
@@ -70,9 +73,11 @@ async def test_post_update_hides_mcp_when_nothing_to_update(monkeypatch):
     )
     monkeypatch.setattr(config_sync, "needs_sync", lambda *a, **k: True)
     _states(monkeypatch, {})  # ни у кого нет обновления
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
-        scr = PostUpdateScreen(upgrade=_Upg(), config={}, config_path="c.yml")
+        scr = PostUpdateScreen(
+            upgrade=_Upg(), settings=as_settings({}), config_path="c.yml"
+        )
         app.push_screen(scr)
         await pilot.pause()
         await pilot.pause()
@@ -93,9 +98,11 @@ async def test_post_update_mcp_row_lists_only_outdated(monkeypatch):
     )
     monkeypatch.setattr(config_sync, "needs_sync", lambda *a, **k: False)
     _states(monkeypatch, {"office": "0.3.1"})  # обновление только у office
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
-        scr = PostUpdateScreen(upgrade=_Upg(), config={}, config_path="c.yml")
+        scr = PostUpdateScreen(
+            upgrade=_Upg(), settings=as_settings({}), config_path="c.yml"
+        )
         app.push_screen(scr)
         await pilot.pause()
         await pilot.pause()
@@ -112,9 +119,11 @@ async def test_post_update_hides_config_when_nothing_to_sync(monkeypatch):
 
     monkeypatch.setattr(cli, "wired_names", lambda config=None: [])
     monkeypatch.setattr(config_sync, "needs_sync", lambda *a, **k: False)
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
-        scr = PostUpdateScreen(upgrade=_Upg(), config={}, config_path="c.yml")
+        scr = PostUpdateScreen(
+            upgrade=_Upg(), settings=as_settings({}), config_path="c.yml"
+        )
         app.push_screen(scr)
         await pilot.pause()
         body = " ".join(str(w.render()) for w in scr.query(Static))
@@ -153,9 +162,11 @@ async def test_post_update_offers_voice_engine_when_behind(monkeypatch):
     monkeypatch.setattr(cli, "wired_names", lambda config=None: [])
     monkeypatch.setattr(config_sync, "needs_sync", lambda *a, **k: False)
     _voice(monkeypatch, installed="v0.8.3")
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
-        scr = PostUpdateScreen(upgrade=_Upg(), config={}, config_path="c.yml")
+        scr = PostUpdateScreen(
+            upgrade=_Upg(), settings=as_settings({}), config_path="c.yml"
+        )
         app.push_screen(scr)
         await pilot.pause()
         body = " ".join(str(w.render()) for w in scr.query(Static))
@@ -171,17 +182,21 @@ async def test_post_update_hides_voice_when_at_pin_or_absent(monkeypatch):
 
     monkeypatch.setattr(cli, "wired_names", lambda config=None: [])
     monkeypatch.setattr(config_sync, "needs_sync", lambda *a, **k: False)
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
         _voice(monkeypatch, installed="v0.9.0")  # уже на пине
-        scr = PostUpdateScreen(upgrade=_Upg(), config={}, config_path="c.yml")
+        scr = PostUpdateScreen(
+            upgrade=_Upg(), settings=as_settings({}), config_path="c.yml"
+        )
         app.push_screen(scr)
         await pilot.pause()
         assert "голосовой движок" not in " ".join(
             str(w.render()) for w in scr.query(Static)
         )
         _voice(monkeypatch, installed=None)  # не установлен вовсе
-        scr2 = PostUpdateScreen(upgrade=_Upg(), config={}, config_path="c.yml")
+        scr2 = PostUpdateScreen(
+            upgrade=_Upg(), settings=as_settings({}), config_path="c.yml"
+        )
         assert scr2._voice_update is None
 
 
@@ -200,17 +215,22 @@ async def test_post_update_enter_updates_voice_engine(monkeypatch):
     monkeypatch.setattr(
         voice_setup,
         "update_local",
-        lambda config, echo=print: updated.append(config) or True,
+        lambda settings, echo=print: updated.append(settings) or True,
     )
     cfg = {"voice": {"url": "http://127.0.0.1:8735/v1/audio/transcriptions"}}
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
-        scr = PostUpdateScreen(upgrade=_Upg(), config=cfg, config_path="c.yml")
+        settings = as_settings(cfg)
+        scr = PostUpdateScreen(
+            upgrade=_Upg(), settings=settings, config_path="c.yml"
+        )
         app.push_screen(scr)
         await pilot.pause()
         await pilot.press("enter")
         await pilot.pause()
-        assert updated == [cfg]  # конфиг доезжает: им поднимают сервис обратно
+        assert updated == [
+            settings
+        ]  # конфиг доезжает: им поднимают сервис обратно
 
 
 async def test_post_update_space_unmarks_then_enter_skips_it(monkeypatch):
@@ -230,9 +250,11 @@ async def test_post_update_space_unmarks_then_enter_skips_it(monkeypatch):
     monkeypatch.setattr(
         upgrade_gate, "mark_current_run", lambda *a, **k: stamped.append(True)
     )
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
-        scr = PostUpdateScreen(upgrade=_Upg(), config={}, config_path="c.yml")
+        scr = PostUpdateScreen(
+            upgrade=_Upg(), settings=as_settings({}), config_path="c.yml"
+        )
         app.push_screen(scr)
         await pilot.pause()
         await pilot.pause()
@@ -276,9 +298,11 @@ async def test_post_update_enter_installs_marked_and_stamps_once(monkeypatch):
     monkeypatch.setattr(
         upgrade_gate, "mark_current_run", lambda *a, **k: stamped.append(True)
     )
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
-        scr = PostUpdateScreen(upgrade=_Upg(), config={}, config_path="c.yml")
+        scr = PostUpdateScreen(
+            upgrade=_Upg(), settings=as_settings({}), config_path="c.yml"
+        )
         app.push_screen(scr)
         await pilot.pause()
         await pilot.pause()
@@ -309,9 +333,11 @@ async def test_post_update_esc_stamps_without_executing(monkeypatch):
     monkeypatch.setattr(
         upgrade_gate, "mark_current_run", lambda *a, **k: stamped.append(True)
     )
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
-        scr = PostUpdateScreen(upgrade=_Upg(), config={}, config_path="c.yml")
+        scr = PostUpdateScreen(
+            upgrade=_Upg(), settings=as_settings({}), config_path="c.yml"
+        )
         app.push_screen(scr)
         await pilot.pause()
         await pilot.press("escape")  # позже — ничего не выполняет
@@ -331,9 +357,11 @@ async def test_post_update_nothing_to_do_shows_only_title(monkeypatch):
     monkeypatch.setattr(cli, "wired_names", lambda config=None: ["office"])
     monkeypatch.setattr(config_sync, "needs_sync", lambda *a, **k: False)
     _states(monkeypatch, {})  # у MCP тоже нечего обновлять
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
-        scr = PostUpdateScreen(upgrade=_Upg(), config={}, config_path="c.yml")
+        scr = PostUpdateScreen(
+            upgrade=_Upg(), settings=as_settings({}), config_path="c.yml"
+        )
         app.push_screen(scr)
         await pilot.pause()
         await pilot.pause()
@@ -354,9 +382,11 @@ async def test_post_update_hint_and_footer_when_there_is_work(monkeypatch):
 
     monkeypatch.setattr(cli, "wired_names", lambda config=None: [])
     monkeypatch.setattr(config_sync, "needs_sync", lambda *a, **k: True)
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
-        scr = PostUpdateScreen(upgrade=_Upg(), config={}, config_path="c.yml")
+        scr = PostUpdateScreen(
+            upgrade=_Upg(), settings=as_settings({}), config_path="c.yml"
+        )
         app.push_screen(scr)
         await pilot.pause()
         body = " ".join(str(w.render()) for w in scr.query(Static))
@@ -378,10 +408,10 @@ async def test_post_update_equal_version_title_is_plain(monkeypatch):
 
     monkeypatch.setattr(cli, "wired_names", lambda config=None: [])
     monkeypatch.setattr(config_sync, "needs_sync", lambda *a, **k: False)
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
         scr = PostUpdateScreen(
-            upgrade=_SameVer(), config={}, config_path="c.yml"
+            upgrade=_SameVer(), settings=as_settings({}), config_path="c.yml"
         )
         app.push_screen(scr)
         await pilot.pause()
@@ -403,10 +433,10 @@ async def test_post_update_title_always_carries_version(monkeypatch):
 
     monkeypatch.setattr(cli, "wired_names", lambda config=None: [])
     monkeypatch.setattr(config_sync, "needs_sync", lambda *a, **k: False)
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
         scr = PostUpdateScreen(
-            upgrade=_SameVer(), config={}, config_path="c.yml"
+            upgrade=_SameVer(), settings=as_settings({}), config_path="c.yml"
         )
         app.push_screen(scr)
         await pilot.pause()
@@ -424,9 +454,11 @@ async def test_post_update_title_divider_only_when_there_is_work(monkeypatch):
 
     monkeypatch.setattr(cli, "wired_names", lambda config=None: [])
     monkeypatch.setattr(config_sync, "needs_sync", lambda *a, **k: False)
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
-        scr = PostUpdateScreen(upgrade=_Upg(), config={}, config_path="c.yml")
+        scr = PostUpdateScreen(
+            upgrade=_Upg(), settings=as_settings({}), config_path="c.yml"
+        )
         app.push_screen(scr)
         await pilot.pause()
         title = scr.query_one(".pu-title")
@@ -437,9 +469,11 @@ async def test_post_update_title_divider_only_when_there_is_work(monkeypatch):
         )  # пусто → без линии
 
     monkeypatch.setattr(config_sync, "needs_sync", lambda *a, **k: True)
-    app2 = app_mod.TuiApp(config={})
+    app2 = app_mod.TuiApp(settings=tui_settings({}))
     async with app2.run_test() as pilot:
-        scr2 = PostUpdateScreen(upgrade=_Upg(), config={}, config_path="c.yml")
+        scr2 = PostUpdateScreen(
+            upgrade=_Upg(), settings=as_settings({}), config_path="c.yml"
+        )
         app2.push_screen(scr2)
         await pilot.pause()
         title2 = scr2.query_one(".pu-title")

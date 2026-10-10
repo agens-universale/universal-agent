@@ -101,9 +101,6 @@ class TestInstance:
             )
         )
 
-    def test_agent_name_comes_from_definition(self):
-        assert self._instance().get_agent_name() == "subagent_doc_writer"
-
     def test_role_carries_body_and_handoff_contract(self):
         role, assignment = self._instance().get_initial_data()
         assert role.startswith("Ты — писатель.")
@@ -121,7 +118,6 @@ class TestInstance:
                 task="t",
                 reason="r",
                 model="какая-то-модель",
-                config_dict={"a": 1},
                 runtime_notices_enabled=True,
             )
         )
@@ -152,7 +148,7 @@ class TestBoundFileSubagent:
         inst = asyncio.run(bound.create_instance(task="t", reason="r"))
         assert inst.task == "t"
         assert inst.reason == "r"
-        assert inst.get_agent_name() == "subagent_doc_writer"
+        assert inst.definition.name == "subagent_doc_writer"
 
     def test_create_instance_tolerates_extra_runner_kwargs(self):
         bound = FileDefinedSubagent.bound(_definition())
@@ -161,7 +157,6 @@ class TestBoundFileSubagent:
                 task="t",
                 reason="r",
                 model="какая-то-модель",
-                config_dict={"a": 1},
                 runtime_notices_enabled=True,
             )
         )

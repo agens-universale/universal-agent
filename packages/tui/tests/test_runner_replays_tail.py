@@ -10,6 +10,7 @@ TUI держит один исполнитель на сессию. Сообще
 окне сноса).
 """
 
+from gc_testkit.settings import make_settings
 import asyncio
 import importlib
 import logging
@@ -24,12 +25,13 @@ _WAIT_SEC = 10.0
 
 def _cfg(tmp_path):
     return {
-        "threads_data_path": str(tmp_path),
-        "backend_api_mode": "chat_completions",
-        "completions_url": "http://test",
-        "model": "x",
-        "max_steps": 1,
-        "system_prompt_id": "v1",
+        "logging.save_logs": False,  # без каталога логов: умолчание модели — писать
+        "paths.threads_data_path": str(tmp_path),
+        "backend.api_mode": "chat_completions",
+        "backend.completions_url": "http://test",
+        "agent.model": "x",
+        "agent.max_steps": 1,
+        "agent.system_prompt_id": "v1",
     }
 
 
@@ -56,7 +58,9 @@ def env(monkeypatch, tmp_path):
 
     monkeypatch.setattr(ae, "arun_agent", _loop)
     monkeypatch.setattr(ae, "_aclose_mcp_and_release", _teardown)
-    ctx = asyncio.run(acreate_run_context(_cfg(tmp_path), auth_connector=None))
+    ctx = asyncio.run(
+        acreate_run_context(make_settings(_cfg(tmp_path)), auth_connector=None)
+    )
     executor = ae.AgentExecutor(ctx)
     arun = executor.arun
 

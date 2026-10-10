@@ -8,7 +8,6 @@ from gc_core.intent_log import (
     ACTION_USER_ASK,
     IntentRecord,
     append_user_ask,
-    records_to_jsonl_lines,
     serialize_for_meta,
 )
 
@@ -41,11 +40,6 @@ def intent_user_ask_texts(records) -> list[str]:
         for record in records
         if getattr(record, "action", None) == ACTION_USER_ASK
     ]
-
-
-def intent_jsonl_lines(records) -> list[str]:
-    """Canonical JSONL wire lines for finish gate / validator payloads."""
-    return records_to_jsonl_lines(records)
 
 
 def intent_user_ask_texts_from_jsonl(lines: list[str]) -> list[str]:

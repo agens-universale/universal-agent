@@ -7,7 +7,6 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
-
 from gc_core.backends.local import LocalFsBackend
 from gc_core.tools.exec.redirect_policy import (
     RedirectBlocked,
@@ -19,6 +18,7 @@ from gc_core.tools.exec.remote_fetch import (
     aone_hop,
     fetches_on_backend,
 )
+from gc_testkit.settings import make_settings
 
 
 class ScriptedBackend:
@@ -166,15 +166,17 @@ async def test_carrier_failures_surface_as_httpx_errors():
 def test_fetches_on_backend_needs_setting_and_sandbox():
     sandbox = SimpleNamespace(is_sandbox=True)
     host = SimpleNamespace(is_sandbox=False)
-    on = {"os_backend": {"fetch_url_execute_on": "os_backend"}}
+    on = make_settings({"os_backend.fetch_url_execute_on": "os_backend"})
     assert fetches_on_backend(on, sandbox) is True
     assert fetches_on_backend(on, host) is False
-    assert (
-        fetches_on_backend({"os_backend": {"kind": "docker"}}, sandbox)
-        is False
+    docker = make_settings(
+        {"os_backend.kind": "docker", "os_backend.docker.name": "box"}
     )
-    assert fetches_on_backend({}, sandbox) is False
-    assert fetches_on_backend({"os_backend": "docker"}, sandbox) is False
+    assert fetches_on_backend(docker, sandbox) is False
+    assert fetches_on_backend(make_settings(), sandbox) is False
+    # Строковый вид — переопределение рантайма, настройку fetch не включает.
+    kind_only = make_settings({"os_backend": "docker"})
+    assert fetches_on_backend(kind_only, sandbox) is False
 
 
 class _Handler(BaseHTTPRequestHandler):

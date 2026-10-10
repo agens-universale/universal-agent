@@ -1,0 +1,17 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gc-core-temporalio"
+version = "0.4.0"
+description = "Temporal execution adapter for the Universal Agent core"
+requires-python = ">=3.11"
+dependencies = ["gc-core==0.4.0", "temporalio==1.33.0"]
+
+[project.scripts]
+gc-temporal-worker = "gc_core_temporalio.worker:main"
+gc-temporal = "gc_core_temporalio.client:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/gc_core_temporalio"]

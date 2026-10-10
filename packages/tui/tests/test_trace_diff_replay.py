@@ -9,16 +9,16 @@ import pytest
 
 pytest.importorskip("textual")
 
-from textual import events
-from textual.containers import VerticalScroll
-from textual.widgets import Static
-
 from gc_core.agent_edits.journal import EditRecord, EditsJournal
 from gc_core.thread_store import edits_journal_path
+from gc_testkit.tui_support import tui_settings
 from gc_tui.app import TuiApp
 from gc_tui.screens.tool_call_detail import ToolCallDetailScreen
 from gc_tui.widgets.diff_block import DiffBlock
 from gc_tui.widgets.tool_call_row import ToolCallRow
+from textual import events
+from textual.containers import VerticalScroll
+from textual.widgets import Static
 
 SHORT_HUNKS = (
     "--- \n+++ \n@@ -1,3 +1,3 @@\n def f():\n-    return 1\n+    return 2\n"
@@ -114,10 +114,12 @@ def _write_journal(tmp_path, tid: str, records: list[EditRecord]) -> None:
 
 @asynccontextmanager
 async def _pilot(tmp_path, tid: str, config: dict | None = None):
-    cfg = {"model": "M"}
+    cfg = {"agent.model": "M"}
     if config:
         cfg.update(config)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config=cfg)
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings(cfg)
+    )
     async with app.run_test(size=(100, 40)) as pilot:
         pilot.app.screen.attach_active_task(tid)
         await pilot.pause(0.3)
@@ -482,12 +484,15 @@ async def test_broken_inline_threshold_keeps_body(tmp_path, value):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("value", [-5, True])
+@pytest.mark.parametrize("value", [-5])
 async def test_broken_replay_limit_falls_back_to_default(tmp_path, value):
-    """Отрицательное / `true` в replay_expanded_turns — мусор, действует дефолт.
+    """Отрицательное в replay_expanded_turns — мусор, действует дефолт.
 
     Ровно `0` — не мусор, а «без ограничения» (см. соседний тест). Правило то
-    же, что у остальных ключей секции (`agent_edits.ctx.section_limit`)."""
+    же, что у остальных ключей секции (`agent_edits.ctx.section_limit`).
+    `true` сюда не доходит: схема (`int`) приводит его к 1 ещё при загрузке, а
+    правило «bool — мусор» самого `section_limit` проверяет
+    `agent_edits/test_ctx.py`."""
     tid = f"broken_replay_{abs(hash(value)) % 1000}"
     _turns_thread(tmp_path, tid, 2)
 

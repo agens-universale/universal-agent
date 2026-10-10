@@ -45,9 +45,7 @@ def test_background_launch_writes_nothing_and_says_output_is_not_captured(
     ответе — путь, который модель всё равно не прочитает.
     """
     project = _project(tmp_path)
-    tool = with_local_ctx(
-        ExecuteCommand, config_dict={"launch_root": str(project)}
-    )
+    tool = with_local_ctx(ExecuteCommand, {"launch_root": str(project)})
 
     res = json.loads(
         tool(command=_CMD, run_in_background=True, cwd=str(project))
@@ -74,12 +72,12 @@ def test_a_log_path_from_the_model_is_dropped_and_nothing_is_written(tmp_path):
     from gc_core.tools import aapply_tool
 
     project = _project(tmp_path)
-    cfg = {"launch_root": str(project)}
+    ctx = local_ctx({"launch_root": str(project)})
     wanted = project / "server.log"
     tools = {
         "exec_command": {
             "tool_fabric": ExecuteCommand,
-            "spec": ExecuteCommand.tool_description(cfg),
+            "spec": ExecuteCommand.tool_description(ctx),
             "injected_fields": [],
         }
     }
@@ -93,7 +91,7 @@ def test_a_log_path_from_the_model_is_dropped_and_nothing_is_written(tmp_path):
                 "log_path": str(wanted),
             },
             tools_data_=tools,
-            ctx=local_ctx(cfg),
+            ctx=ctx,
         )
     )
 

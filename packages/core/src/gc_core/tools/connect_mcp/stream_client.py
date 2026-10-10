@@ -17,6 +17,10 @@ from mcp.shared.exceptions import McpError
 
 from gc_core.mcp_runtime.env import mcp_stdio_env
 from gc_core.mcp_session_owner import current_owner
+from gc_core.tools.connect_mcp.durable_scope import (
+    call_tool_with_progress,
+    require_no_reconnect,
+)
 from gc_core.tools.connect_mcp.transport import _resolve_command
 from gc_core.utils.async_http import build_ssl_context
 from gc_core.utils.ssl_config import get_client_cert, get_verify_ssl
@@ -192,7 +196,7 @@ class _PersistentSessionManager:
             except Exception:
                 pass
 
-    async def aclose_all(self) -> None:
+    async def aclose_all(self, *, in_owner_task: bool = False) -> None:
         """Закрыть сессии ЭТОГО владельца на ЭТОМ loop.
 
         Оба условия обязательны. Чужой loop — закрывать нечем (соединения
@@ -214,17 +218,17 @@ class _PersistentSessionManager:
             self._loops.pop(key, None)
             owner_ref = self._tasks.pop(key, None)
             if cms is not None:
+                closing = self._aclose_stack(
+                    cms,
+                    opened_in=owner_ref() if owner_ref is not None else None,
+                )
+                if in_owner_task:
+                    await closing
+                    continue
                 # `shield` по той же причине, что и у stdio: teardown зовётся
                 # из `finally` цикла агента, и отмена посреди закрытия
                 # оставляет соединение и его anyio task group висеть.
-                await asyncio.shield(
-                    self._aclose_stack(
-                        cms,
-                        opened_in=owner_ref()
-                        if owner_ref is not None
-                        else None,
-                    )
-                )
+                await asyncio.shield(closing)
 
 
 _SESSION_MANAGER = _PersistentSessionManager()
@@ -534,7 +538,7 @@ async def _call_tool_stream_sse_async(
     ):
         await session.initialize()
 
-        result = await session.call_tool(tool_name, arguments or {})
+        result = await call_tool_with_progress(session, tool_name, arguments)
 
         # Преобразуем контент в JSON-совместимый вид.
         content_items: List[Any] = []
@@ -636,7 +640,7 @@ async def _call_tool_stream_sse_persistent(
         return new_session
 
     async def _call(s: ClientSession) -> Dict[str, Any]:
-        result = await s.call_tool(tool_name, arguments or {})
+        result = await call_tool_with_progress(s, tool_name, arguments)
         content_items: List[Any] = []
         for item in getattr(result, "content", []) or []:
             if hasattr(item, "model_dump"):
@@ -657,6 +661,7 @@ async def _call_tool_stream_sse_persistent(
             return await _call(session)
         except Exception:
             await _SESSION_MANAGER.ainvalidate(server_key)
+            require_no_reconnect()
             session = None
 
     session = await _open_session()
@@ -698,6 +703,7 @@ async def acall_tool_stream_sse(
             )
         except Exception:
             await _SESSION_MANAGER.ainvalidate(server_key)
+            require_no_reconnect()
 
     return await _call_tool_stream_sse_async(
         base_url=url,
@@ -830,7 +836,9 @@ async def _call_tool_stream_http_async(
             ):
                 await session.initialize()
 
-                result = await session.call_tool(tool_name, arguments or {})
+                result = await call_tool_with_progress(
+                    session, tool_name, arguments
+                )
 
                 content_items: List[Any] = []
                 for item in getattr(result, "content", []) or []:
@@ -854,6 +862,7 @@ async def _call_tool_stream_http_async(
             is_session_terminated = _is_session_terminated(exc)
             has_fallback = endpoint != endpoints[-1]
             if is_session_terminated and has_fallback:
+                require_no_reconnect()
                 continue
             raise
 
@@ -909,7 +918,7 @@ async def _aopen_persistent_http_session(
 async def _acall_tool_on_session(
     s: ClientSession, tool_name: str, arguments: Dict[str, Any]
 ) -> Dict[str, Any]:
-    result = await s.call_tool(tool_name, arguments or {})
+    result = await call_tool_with_progress(s, tool_name, arguments)
     content_items: List[Any] = []
     for item in getattr(result, "content", []) or []:
         if hasattr(item, "model_dump"):
@@ -964,6 +973,7 @@ async def _call_tool_stream_http_persistent(
             return await _call(session)
         except Exception:
             await _SESSION_MANAGER.ainvalidate(server_key)
+            require_no_reconnect()
             session = None
 
     # Open new persistent session
@@ -975,12 +985,14 @@ async def _call_tool_stream_http_persistent(
         except McpError as exc:
             last_error = exc
             await _SESSION_MANAGER.ainvalidate(server_key)
+            require_no_reconnect()
             if _is_session_terminated(exc) and endpoint != endpoints[-1]:
                 continue
             raise
         except Exception as exc:
             last_error = exc
             await _SESSION_MANAGER.ainvalidate(server_key)
+            require_no_reconnect()
 
     if last_error is not None:
         raise last_error
@@ -1037,6 +1049,7 @@ async def acall_tool_stream_http(
     except Exception:
         # Персистентная сессия не задалась — забываем её и идём stateless.
         await _SESSION_MANAGER.ainvalidate(server_key)
+        require_no_reconnect()
         return await _stateless()
 
 
@@ -1126,7 +1139,7 @@ async def _call_tool_stream_stdio_async(
     ):
         await session.initialize()
 
-        result = await session.call_tool(tool_name, arguments or {})
+        result = await call_tool_with_progress(session, tool_name, arguments)
 
         content_items: List[Any] = []
         for item in getattr(result, "content", []) or []:
@@ -1177,7 +1190,7 @@ async def _call_tool_stream_stdio_persistent(
         return new_session
 
     async def _call(s: ClientSession) -> Dict[str, Any]:
-        result = await s.call_tool(tool_name, arguments or {})
+        result = await call_tool_with_progress(s, tool_name, arguments)
         content_items: List[Any] = []
         for item in getattr(result, "content", []) or []:
             if hasattr(item, "model_dump"):
@@ -1198,6 +1211,7 @@ async def _call_tool_stream_stdio_persistent(
             return await _call(session)
         except Exception:
             await _SESSION_MANAGER.ainvalidate(server_key)
+            require_no_reconnect()
             session = None
 
     session = await _open_session()
@@ -1234,6 +1248,7 @@ async def acall_tool_stream_stdio(
             )
         except Exception:
             await _SESSION_MANAGER.ainvalidate(server_key)
+            require_no_reconnect()
 
     return await _call_tool_stream_stdio_async(
         server_cfg=server_cfg,

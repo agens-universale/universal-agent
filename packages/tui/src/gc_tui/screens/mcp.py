@@ -128,7 +128,7 @@ class ServerCard(Static):
 
 class McpScreen(Screen):
     def __init__(
-        self, *, config: dict | None = None, tools_snapshot: dict | None = None
+        self, *, settings=None, tools_snapshot: dict | None = None
     ) -> None:
         super().__init__()
         self._snapshot = tools_snapshot  # {server: {status,reason,description,tools}} | None
@@ -178,14 +178,6 @@ class McpScreen(Screen):
         t.append(f"{n_fail} failed", style=_ERR if n_fail else _DIM)
         t.append(f" · {n_tools} тулов", style=_DIM)
         return t
-
-    def rendered_text(self) -> str:
-        empty = self._empty_renderable()
-        if empty is not None:
-            return empty.plain
-        parts = [card._renderable().plain for card in self.cards]
-        parts.append(self._summary_renderable().plain)
-        return "\n\n".join(parts)
 
     def compose(self) -> ComposeResult:
         with Vertical(id="root"):

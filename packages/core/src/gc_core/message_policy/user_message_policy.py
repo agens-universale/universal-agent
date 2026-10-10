@@ -1,6 +1,6 @@
 import json
 import re
-from typing import Any, Dict, List
+from typing import Any
 
 from gc_core.constants.tool_names import (
     FS_APPEND_FILE_NAME,
@@ -113,19 +113,6 @@ def user_content_to_text(content: Any) -> str:
     return str(content)
 
 
-def user_display_text(message: Any) -> str | None:
-    """Человеко-текст user-сообщения для показа: display_content если ключ есть
-    (включая ""), иначе content. None — если это не user-сообщение."""
-    if not isinstance(message, dict):
-        return None
-    if str(message.get("role", "")).strip().lower() != "user":
-        return None
-    disp = message.get("display_content")
-    if disp is not None:
-        return str(disp)
-    return user_content_to_text(message.get("content"))
-
-
 def extract_real_user_message_text(message: Any) -> str:
     if not isinstance(message, dict):
         return ""
@@ -160,21 +147,6 @@ def resolve_technical_user_content_type(content: str) -> str:
     if is_dialog_summary_user_message_text(content):
         return TECHNICAL_TYPE_DIALOG_SUMMARY
     return TECHNICAL_TYPE_TECHNICAL
-
-
-def append_user_log_entries(
-    existing: List[str], step_messages: List[Dict[str, Any]]
-) -> List[str]:
-    out = list(existing) if isinstance(existing, list) else []
-    seen = set(out)
-    for message in step_messages:
-        entry = extract_real_user_message_text(message)
-        if not entry:
-            continue
-        if entry not in seen:
-            out.append(entry)
-            seen.add(entry)
-    return out
 
 
 def build_invalid_tool_call_feedback_message(message: dict) -> dict:

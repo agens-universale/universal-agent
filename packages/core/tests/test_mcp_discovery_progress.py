@@ -1,5 +1,6 @@
 from gc_core.tools.connect_mcp import registry as reg
 from gc_testkit import as_coro
+from gc_testkit.settings import make_settings
 
 
 async def test_on_progress_called_per_server(monkeypatch):
@@ -93,7 +94,9 @@ async def test_on_progress_threads_through_build_tools_data(monkeypatch):
         agent_tools, "aget_mcp_tools_data_for_config", fake_get_mcp
     )
     await tools_pkg.abuild_tools_data(
-        {"mcp-servers": {"srv": {"transport": "stdio", "command": "x"}}},
+        make_settings(
+            {"mcp.servers": {"srv": {"transport": "stdio", "command": "x"}}}
+        ),
         on_progress=lambda s, st: captured.__setitem__(s, st["status"]),
     )
     assert captured == {"srv": "connected"}
@@ -113,6 +116,7 @@ async def test_create_run_context_accepts_on_progress(monkeypatch):
         ),
     )
     await rc.acreate_run_context(
-        {"model": "M"}, on_progress=lambda s, st: None
+        make_settings({"agent.model": "M", "logging.save_logs": False}),
+        on_progress=lambda s, st: None,
     )
     assert captured and callable(captured[0])

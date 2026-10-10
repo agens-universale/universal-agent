@@ -1,4 +1,6 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
+
+from gc_core.config_modules.field_meta import gc_meta
 
 DEFAULT_LAST_DIALOG_STEPS_COUNT = 5
 DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS = 1500
@@ -49,14 +51,24 @@ def derived_max_dialogue_chars(char_base: int) -> int:
 
 
 class SummaryConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    chat_completions_summary_prompt_path: str | None = None
-    chat_completions_memory_patch_replace_prompt_path: str | None = None
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    chat_completions_summary_prompt_path: str | None = Field(
+        default=None, json_schema_extra=gc_meta(expert=True)
+    )
+    chat_completions_memory_patch_replace_prompt_path: str | None = Field(
+        default=None, json_schema_extra=gc_meta(expert=True)
+    )
     chat_completions_summary_trigger_chars: int = 0
-    chat_completions_summary_turn_end_trigger_chars: int | None = None
+    chat_completions_summary_turn_end_trigger_chars: int | None = Field(
+        default=None, json_schema_extra=gc_meta(expert=True)
+    )
     chat_completions_summary_trigger_tokens: int = 0
-    chat_completions_summary_turn_end_trigger_tokens: int | None = None
-    incremental_batch_chars: int | None = None
+    chat_completions_summary_turn_end_trigger_tokens: int | None = Field(
+        default=None, json_schema_extra=gc_meta(expert=True)
+    )
+    incremental_batch_chars: int | None = Field(
+        default=None, json_schema_extra=gc_meta(expert=True)
+    )
     max_message_chars: int = DEFAULT_MAX_MESSAGE_CHARS
     max_dialogue_chars: int = DEFAULT_MAX_DIALOGUE_CHARS
     max_accumulated_summary_chars: int = DEFAULT_MAX_ACCUMULATED_SUMMARY_CHARS
@@ -64,4 +76,7 @@ class SummaryConfig(BaseModel):
     last_dialog_step_message_max_chars: int = (
         DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS
     )
-    intent_log_preview_chars: int = DEFAULT_INTENT_LOG_PREVIEW_CHARS
+    intent_log_preview_chars: int = Field(
+        default=DEFAULT_INTENT_LOG_PREVIEW_CHARS,
+        json_schema_extra=gc_meta(expert=True),
+    )

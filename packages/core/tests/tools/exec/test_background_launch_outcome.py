@@ -16,9 +16,7 @@ def _run_in_background(tmp_path, monkeypatch, command: str) -> dict:
     # Запас на медленную машину: `exit N` выходит за миллисекунды, но под полным
     # набором тестов старт процесса бывает долгим.
     monkeypatch.setattr(local_backend, "_BACKGROUND_EARLY_EXIT_SEC", 1.0)
-    tool = with_local_ctx(
-        ExecuteCommand, config_dict={"launch_root": str(tmp_path)}
-    )
+    tool = with_local_ctx(ExecuteCommand, {"launch_root": str(tmp_path)})
     return json.loads(
         tool(command=command, run_in_background=True, cwd=str(tmp_path))
     )

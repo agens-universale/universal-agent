@@ -10,6 +10,7 @@
 воспроизводится теми же приёмами, что в обычных тестах соседних файлов.
 """
 
+from gc_testkit.tui_support import tui_settings
 import pytest
 
 pytest.importorskip("textual")
@@ -125,7 +126,11 @@ def _app(tmp_path, config=None):
     секция «Модель» осталась бы без адреса — список моделей не пошёл бы грузиться."""
     from gc_tui.app import TuiApp
 
-    return TuiApp(threads_dir=str(tmp_path), system="cli", config=config or {})
+    return TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings(config or {}),
+    )
 
 
 # --- мастер первого запуска ---
@@ -275,7 +280,9 @@ def test_settings_model_snapshot(snap_compare, tmp_path, monkeypatch):
 _ENTRY_FORM_SIZE = (120, 82)
 
 
-def test_settings_model_entry_form_snapshot(snap_compare, tmp_path, monkeypatch):
+def test_settings_model_entry_form_snapshot(
+    snap_compare, tmp_path, monkeypatch
+):
     """/settings → «Модели» → форма записи реестра целиком.
 
     В кадре всё, что у формы своё: поля в порядке «адрес → токен → id → алиас →
@@ -343,9 +350,7 @@ def test_settings_model_entry_form_snapshot(snap_compare, tmp_path, monkeypatch)
         await pilot.pause()
         await _freeze_cursors(pilot)
 
-    assert snap_compare(
-        app, terminal_size=_ENTRY_FORM_SIZE, run_before=setup
-    )
+    assert snap_compare(app, terminal_size=_ENTRY_FORM_SIZE, run_before=setup)
 
 
 def test_settings_voice_cloud_snapshot(snap_compare, tmp_path, monkeypatch):

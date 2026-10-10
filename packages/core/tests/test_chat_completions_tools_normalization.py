@@ -5,6 +5,7 @@ from gc_core.utils.connect_backend import (
     create_call_data_completions,
     normalize_chat_completions_tools,
 )
+from gc_testkit.settings import make_settings
 
 
 class ChatCompletionsToolsNormalizationTest(unittest.TestCase):
@@ -185,7 +186,7 @@ class ChatCompletionsToolsNormalizationTest(unittest.TestCase):
             [{"role": "user", "content": "hi"}],
             state=state,
             max_tokens=12000,
-            config_dict={"use_max_tokens_param": True},
+            settings=make_settings({"backend.use_max_tokens_param": True}),
         )
         self.assertEqual(data["max_tokens"], 12000)
         self.assertNotIn("max_completion_tokens", data)
@@ -197,7 +198,9 @@ class ChatCompletionsToolsNormalizationTest(unittest.TestCase):
         data = create_call_data_completions(
             [{"role": "user", "content": "hi"}],
             state=state,
-            config_dict={"chat_completions_max_tokens": 7777},
+            settings=make_settings(
+                {"backend.chat_completions_max_tokens": 7777}
+            ),
         )
         self.assertEqual(data["max_completion_tokens"], 7777)
         self.assertNotIn("max_tokens", data)
@@ -209,10 +212,12 @@ class ChatCompletionsToolsNormalizationTest(unittest.TestCase):
         data = create_call_data_completions(
             [{"role": "user", "content": "hi"}],
             state=state,
-            config_dict={
-                "chat_completions_max_tokens": 5555,
-                "use_max_tokens_param": True,
-            },
+            settings=make_settings(
+                {
+                    "backend.chat_completions_max_tokens": 5555,
+                    "backend.use_max_tokens_param": True,
+                }
+            ),
         )
         self.assertEqual(data["max_tokens"], 5555)
         self.assertNotIn("max_completion_tokens", data)
@@ -224,16 +229,18 @@ class ChatCompletionsToolsNormalizationTest(unittest.TestCase):
         data = create_call_data_completions(
             [{"role": "user", "content": "hi"}],
             state=state,
-            config_dict={
-                "chat_completion_kwargs": {
-                    "temperature": 0.2,
-                    "top_p": 0.9,
-                    "model": "must_not_override",
-                    "messages": [{"role": "user", "content": "override"}],
-                    "max_tokens": 1,
-                    "tool_choice": "required",
+            settings=make_settings(
+                {
+                    "backend.chat_completion_kwargs": {
+                        "temperature": 0.2,
+                        "top_p": 0.9,
+                        "model": "must_not_override",
+                        "messages": [{"role": "user", "content": "override"}],
+                        "max_tokens": 1,
+                        "tool_choice": "required",
+                    }
                 }
-            },
+            ),
         )
         self.assertEqual(data["temperature"], 0.2)
         self.assertEqual(data["top_p"], 0.9)
@@ -249,7 +256,7 @@ class ChatCompletionsToolsNormalizationTest(unittest.TestCase):
         data = create_call_data_completions(
             [{"role": "user", "content": "hi"}],
             state=state,
-            config_dict={"chat_completion_kwargs": {}},
+            settings=make_settings({"backend.chat_completion_kwargs": {}}),
         )
 
         self.assertNotIn("tool_choice", data)

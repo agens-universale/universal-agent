@@ -2,40 +2,44 @@
 
 from types import SimpleNamespace
 
-from gc_core.config import flatten_app_config
+import pytest
 from gc_core.config_modules.model_registry import (
     parse_completion_kwargs_text,
     parse_model_backend_text,
 )
 from gc_core.config_modules.root import AppConfig
 from gc_core.model_router import ModelRouter
+from gc_core.settings import RuntimeEnv
 from gc_core.utils import llm_chat_client
 from gc_core.utils.connect_backend import create_call_data_completions
 from gc_core.utils.llm_chat_client import _build_chat_completion_payload
 from gc_testkit import as_coro, run_coro
+from pydantic import ValidationError
 
 
-def _cfg(raw: dict) -> dict:
-    return flatten_app_config(AppConfig.model_validate(raw))
+def _cfg(raw: dict) -> AppConfig:
+    return AppConfig.model_validate(raw)
 
 
-def _router(cfg: dict, level: str = "default") -> ModelRouter:
+def _router(cfg: AppConfig, level: str = "default") -> ModelRouter:
     return ModelRouter(cfg, level_provider=lambda: level)
 
 
-def _main_payload(cfg: dict, resolved) -> dict:
+def _main_payload(cfg: AppConfig, resolved) -> dict:
     return create_call_data_completions(
         [{"role": "user", "content": "hi"}],
         SimpleNamespace(messages=[], tools=[], default_model="legacy"),
-        config_dict=cfg,
+        settings=cfg,
         resolved=resolved,
     )
 
 
-def _aux_payload(cfg: dict, consumer: str, *, level: str = "default") -> dict:
+def _aux_payload(
+    cfg: AppConfig, consumer: str, *, level: str = "default"
+) -> dict:
     router = _router(cfg, level)
     return _build_chat_completion_payload(
-        ctx=SimpleNamespace(config_dict=cfg),
+        ctx=cfg,
         state=SimpleNamespace(default_model="legacy"),
         messages=[{"role": "user", "content": "hi"}],
         max_tokens=32,
@@ -168,23 +172,25 @@ def test_partial_main_replaces_global_temperature():
 
 
 def test_alias_backend_chat_completion_kwargs_are_not_read():
-    cfg = _cfg(
-        {
-            "backend": {"chat_completion_kwargs": {"temperature": 0.1}},
-            "models": {
-                "only": {
-                    "url": "http://only/v1/chat/completions",
-                    "token": "",
-                    "backend": {
-                        "chat_completion_kwargs": {"temperature": 0.9}
-                    },
-                }
-            },
-            "slots": {"default": "only"},
-        }
-    )
-    data = _main_payload(cfg, _router(cfg).resolve("main"))
-    assert data["temperature"] == 0.1
+    """На модели kwargs — только ``main``/``auxiliary``: схема
+    ``models.<alias>.backend.chat_completion_kwargs`` не принимает (файл со
+    старым ключом переносит в ``main`` миграция загрузчика)."""
+    with pytest.raises(ValidationError, match="chat_completion_kwargs"):
+        _cfg(
+            {
+                "backend": {"chat_completion_kwargs": {"temperature": 0.1}},
+                "models": {
+                    "only": {
+                        "url": "http://only/v1/chat/completions",
+                        "token": "",
+                        "backend": {
+                            "chat_completion_kwargs": {"temperature": 0.9}
+                        },
+                    }
+                },
+                "slots": {"default": "only"},
+            }
+        )
 
 
 def test_unset_main_keeps_the_global_dict():
@@ -228,7 +234,7 @@ def test_summary_finish_gate_and_subagent_read_different_sections():
 
     # Черновик роли — тот же text-only клиент. Модель субагента, секция auxiliary.
     role = _build_chat_completion_payload(
-        ctx=SimpleNamespace(config_dict=cfg),
+        ctx=cfg,
         state=SimpleNamespace(default_model="legacy"),
         messages=[{"role": "user", "content": "hi"}],
         max_tokens=32,
@@ -350,7 +356,8 @@ def test_open_alias_fallback_sends_active_model_kwargs(monkeypatch):
     run_coro(
         llm_chat_client.arequest_chat_completion_text(
             ctx=SimpleNamespace(
-                config_dict=cfg,
+                settings=cfg,
+                runtime=RuntimeEnv(),
                 model_router=router,
                 logger=None,
                 is_tui=False,
@@ -381,14 +388,14 @@ def test_two_aliases_with_one_model_id_do_not_collapse():
         level_provider=lambda: held["level"],
     )
     # Оба алиаса с одним id остаются разными записями снимка.
-    models = cfg["models"]
-    assert models["same-id-a"]["model"] == models["same-id-b"]["model"]
-    assert models["same-id-a"]["main"] != models["same-id-b"]["main"]
+    models = cfg.models
+    assert models["same-id-a"].model == models["same-id-b"].model
+    assert models["same-id-a"].main != models["same-id-b"].main
     assert set(models) >= {"same-id-a", "same-id-b", "quiet"}
     assert "quiet" not in {
-        cfg["slots"]["light"],
-        cfg["slots"]["default"],
-        cfg["slots"]["max"],
+        cfg.slots.light,
+        cfg.slots.default,
+        cfg.slots.max,
     }
     assert direct.resolve("main").alias == "gc_v2"
 
@@ -426,9 +433,9 @@ def test_yaml_syntax_errors_are_validation_errors():
 def test_backend_validation_preserves_environment_references(monkeypatch):
     monkeypatch.setenv("MODEL_SETTING", "16384")
     for key in ("chat_completions_max_tokens", "request_timeout_sec"):
-        assert parse_model_backend_text(
-            key + ': "${ENV:MODEL_SETTING}"'
-        ) == {key: "${ENV:MODEL_SETTING}"}
+        assert parse_model_backend_text(key + ': "${ENV:MODEL_SETTING}"') == {
+            key: "${ENV:MODEL_SETTING}"
+        }
 
 
 def test_backend_validation_checks_resolved_environment_values(monkeypatch):
@@ -442,10 +449,12 @@ def test_backend_validation_checks_resolved_environment_values(monkeypatch):
 def test_backend_field_parsing_does_not_read_credential_files(monkeypatch):
     from gc_core.config_modules import env_interpolation
 
-    def unexpected_read(*args):
+    def unexpected_read(*_args):
         raise AssertionError("editor must not read a file on a keystroke")
 
-    monkeypatch.setattr(env_interpolation, "_read_secret_file", unexpected_read)
+    monkeypatch.setattr(
+        env_interpolation, "_read_secret_file", unexpected_read
+    )
     assert parse_model_backend_text(
         'request_timeout_sec: "${FILE:timeout.txt}"'
     ) == {"request_timeout_sec": "${FILE:timeout.txt}"}
@@ -453,11 +462,12 @@ def test_backend_field_parsing_does_not_read_credential_files(monkeypatch):
 
 def test_file_reference_cannot_replace_a_header_mapping():
     import pytest
-
     from gc_core.config_modules.model_registry import parse_model_backend_text
 
     with pytest.raises(ValueError, match="chat_completion_headers"):
-        parse_model_backend_text("chat_completion_headers: '${FILE:/tmp/headers}'")
+        parse_model_backend_text(
+            "chat_completion_headers: '${FILE:/tmp/headers}'"
+        )
 
 
 def test_model_backend_accepts_vision_from_current_config():

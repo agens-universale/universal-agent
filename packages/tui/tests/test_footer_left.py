@@ -11,6 +11,7 @@ Running: Ctrl+C/stop — и больше ничего (Task 17, решение �
 поведение досказывается confirm-hint в footer-right.
 """
 
+from gc_testkit.tui_support import tui_settings
 import json
 from pathlib import Path
 
@@ -76,7 +77,9 @@ async def test_footer_left_task_idle_no_stop(tmp_path):
     tid = "idle1"
     _write_task(tmp_path, tid)
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         pilot.app.active_runner = None
@@ -123,7 +126,9 @@ async def test_footer_left_task_running_shows_only_stop_at_any_width(tmp_path):
     _write_task(tmp_path, tid)
     for width in (200, 60):
         app = TuiApp(
-            threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+            threads_dir=str(tmp_path),
+            system="cli",
+            settings=tui_settings({"agent.model": "M"}),
         )
         async with app.run_test(size=(width, 30)) as pilot:
             pilot.app._update_available = True  # непустой бейдж уведомлений
@@ -173,7 +178,9 @@ async def test_footer_left_drops_stop_after_runner_finishes(tmp_path):
     tid = "trans1"
     _write_task(tmp_path, tid)
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         pilot.app.screen.attach_active_task(tid)
@@ -287,7 +294,7 @@ async def test_footer_columns_never_touch_and_left_wraps_instead():
     model = "qwen/qwen3.7-flash-super-long-model-name"
     wrapped_somewhere = False
     for width in (140, 110, 96, 90, 84):
-        app = TuiApp(config={"model": model})
+        app = TuiApp(settings=tui_settings({"agent.model": model}))
         async with app.run_test(size=(width, 30)) as pilot:
             await pilot.pause()
             foot = pilot.app.screen.query_one("#footer")

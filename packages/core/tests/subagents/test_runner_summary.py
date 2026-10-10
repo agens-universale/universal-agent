@@ -1,11 +1,11 @@
 """Tests for summary integration inside SubagentRunner."""
 
-from types import SimpleNamespace
 from unittest.mock import patch
 
 from gc_core import run_summary_coordinator as run_summary_coordinator_module
 from gc_core.states import SharedStateData, State
 from gc_core.tools.subagents.runner import SubagentRunner
+from gc_testkit.settings import fake_ctx
 
 
 def _make_orchestrator_state():
@@ -27,17 +27,15 @@ def _make_orchestrator_state():
 
 def _make_config(trigger=100):
     return {
-        "use_local_subagents": True,
-        "backend_api_mode": "chat_completions",
-        "enabled_tools": [],
-        "skills_data_path": "",
-        "mcp_servers": [],
-        "model": "test-model",
-        "system_prompt_id": "test-prompt",
-        "summary_params": {
+        "agent.use_local_subagents": True,
+        "backend.api_mode": "chat_completions",
+        "paths.skills_data_path": "",
+        "agent.model": "test-model",
+        "agent.system_prompt_id": "test-prompt",
+        "summary": {
             "chat_completions_summary_trigger_chars": trigger,
         },
-        "chat_completions_params": {
+        "chat_completions": {
             "auxiliary_llm": {
                 "max_tokens": 8192,
                 "completion_kwargs": {},
@@ -47,8 +45,8 @@ def _make_config(trigger=100):
 
 
 def _make_ctx(cfg):
-    return SimpleNamespace(
-        config_dict=cfg,
+    return fake_ctx(
+        cfg,
         auth_connector=None,
         logger=None,
         logging_path="",
@@ -63,7 +61,7 @@ class TestRunnerSummary:
     async def test_passes_summary_hook_to_run_agent(self):
         orch = _make_orchestrator_state()
         cfg = _make_config(trigger=10)
-        runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
+        runner = SubagentRunner(_make_ctx(cfg), orch)
         captured = {}
 
         def fake_run_agent(messages, child_state, child_ctx, **kwargs):
@@ -72,7 +70,7 @@ class TestRunnerSummary:
 
         with (
             patch.object(
-                runner, "_build_child_ctx", return_value=SimpleNamespace()
+                runner, "_build_child_ctx", return_value=_make_ctx(cfg)
             ),
         ):
             await runner.arun(
@@ -86,7 +84,7 @@ class TestRunnerSummary:
     async def test_runs_pre_backend_summary_check(self):
         orch = _make_orchestrator_state()
         cfg = _make_config(trigger=10)
-        runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
+        runner = SubagentRunner(_make_ctx(cfg), orch)
         calls = []
 
         def fake_run_summary_compaction(**kwargs):
@@ -106,7 +104,7 @@ class TestRunnerSummary:
 
         with (
             patch.object(
-                runner, "_build_child_ctx", return_value=SimpleNamespace()
+                runner, "_build_child_ctx", return_value=_make_ctx(cfg)
             ),
             patch.object(
                 run_summary_coordinator_module,
@@ -129,7 +127,7 @@ class TestRunnerSummary:
     async def test_summary_hook_noops_when_trigger_zero(self):
         orch = _make_orchestrator_state()
         cfg = _make_config(trigger=0)
-        runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
+        runner = SubagentRunner(_make_ctx(cfg), orch)
         captured = {}
 
         def fake_run_agent(messages, child_state, child_ctx, **kwargs):
@@ -137,7 +135,7 @@ class TestRunnerSummary:
             return "ok"
 
         with patch.object(
-            runner, "_build_child_ctx", return_value=SimpleNamespace()
+            runner, "_build_child_ctx", return_value=_make_ctx(cfg)
         ):
             await runner.arun(
                 "subagent_worker", {"task": "task"}, fake_run_agent
@@ -152,8 +150,8 @@ class TestRunnerSummary:
     async def test_summary_enabled_when_only_token_trigger(self):
         orch = _make_orchestrator_state()
         cfg = _make_config(trigger=0)
-        cfg["summary_params"]["chat_completions_summary_trigger_tokens"] = 1000
-        runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
+        cfg["summary"]["chat_completions_summary_trigger_tokens"] = 1000
+        runner = SubagentRunner(_make_ctx(cfg), orch)
         captured = {}
 
         async def fake_run_agent(messages, child_state, child_ctx, **kwargs):
@@ -163,7 +161,7 @@ class TestRunnerSummary:
             return "ok"
 
         with patch.object(
-            runner, "_build_child_ctx", return_value=SimpleNamespace()
+            runner, "_build_child_ctx", return_value=_make_ctx(cfg)
         ):
             await runner.arun(
                 "subagent_worker", {"task": "task"}, fake_run_agent

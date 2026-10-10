@@ -21,11 +21,12 @@ import threading
 
 import pytest
 from gc_testkit.paths import REPO
+from gc_testkit.settings import make_settings
 
 _CFG = {
-    "stop_tools": [],
-    "backend_api_mode": "chat_completions",
-    "save_logs": False,
+    "agent.stop_tools": [],
+    "backend.api_mode": "chat_completions",
+    "logging.save_logs": False,
 }
 
 
@@ -49,7 +50,7 @@ async def test_build_does_not_spawn_threads():
             await asyncio.sleep(0.002)
 
     w = asyncio.create_task(watch())
-    ctx = await acreate_run_context(dict(_CFG))
+    ctx = await acreate_run_context(make_settings(_CFG))
     stop.set()
     await w
 
@@ -71,7 +72,7 @@ async def test_loop_stays_free_during_build(monkeypatch):
     import gc_core.tools.connect_mcp.agent_tools as agent_tools
     from gc_core.run_context import acreate_run_context
 
-    async def _slow(config_dict, on_progress=None, **_kw):
+    async def _slow(settings, on_progress=None, **_kw):  # noqa: ARG001 - callback contract
         await asyncio.sleep(0.2)
         return {}, {}
 
@@ -79,10 +80,14 @@ async def test_loop_stays_free_during_build(monkeypatch):
 
     from gc_testkit import LoopPulse, quiet_gc_for_loop_timing
 
-    cfg = dict(_CFG)
-    cfg["mcp-servers"] = {
-        "srv": {"transport": "stream_http", "url": "http://x"}
-    }
+    cfg = make_settings(
+        {
+            **_CFG,
+            "mcp.servers": {
+                "srv": {"transport": "stream_http", "url": "http://x"}
+            },
+        }
+    )
     # Сборщик глушится на окне: порог абсолютный, а пауза поколения 2 на куче
     # полного набора (180–220 мс) — почти весь бюджет в 0,25 с, и тест судил
     # бы её, а не сборку.
@@ -127,19 +132,10 @@ def test_acreate_is_not_a_thread_wrapper():
 
 
 def test_context_assembly_has_exactly_one_form():
-    """Сборка контекста должна быть ОДНА и корутинная.
+    """Only async creation may prepare resources; pure assembly is shared.
 
-    Раньше форм было две: синхронная `create_run_context` и корутинная. Тест
-    на их месте следил, чтобы они не разъехались — делят ли они
-    `_prepare_run_context` и `_finish_run_context`. Теперь стеречь нечего:
-    синхронная снята, и правильный инвариант сильнее — второй формы быть не
-    должно вовсе.
-
-    Держалась синхронная ради TUI, а docs объясняли её привязкой MCP-сессий к
-    loop'у. Обоснование было неверным: синхронная форма уводила дискавери в
-    `run_coro_blocking`, то есть на такой же одноразовый loop, умиравший до
-    первого хода. Настоящая причина была в том, что фабрика исполнителя в TUI
-    — обычная функция без своего loop; теперь она заводит его сама.
+    test_native_resources separately forbids I/O during assemble_run_context.
+    A synchronous resource-discovery entry point must not return.
     """
     src = (REPO / "packages/core/src/gc_core/run_context.py").read_text(
         encoding="utf-8"
@@ -153,7 +149,7 @@ def test_context_assembly_has_exactly_one_form():
         and "run_context" in n.name
         and not n.name.startswith("_")
     ]
-    assert sync_forms == [], (
+    assert sync_forms == ["assemble_run_context"], (
         f"вернулась синхронная сборка контекста: {sync_forms}"
     )
 

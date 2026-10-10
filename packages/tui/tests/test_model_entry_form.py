@@ -346,7 +346,9 @@ async def test_zero_in_a_profile_cancels_the_base_entry_threshold():
         ok, alias, fields = form.submit()
         assert ok is True
         assert fields["summary_trigger_chars"] == 0
-    text = _upsert_model_text("models:\n  m:\n    model: x\n", "", alias, fields)
+    text = _upsert_model_text(
+        "models:\n  m:\n    model: x\n", "", alias, fields
+    )
     assert yaml.safe_load(text)["models"]["m"]["summary_trigger_chars"] == 0
 
 
@@ -392,7 +394,10 @@ async def test_renamed_entry_no_longer_inherits_from_the_base_entry():
         assert form._provider_model_id() == "other"
         # Подсказка пустого поля id говорит то же правило, что и строка окна.
         model_field = form.query_one("#mef-model", Input)
-        assert model_field.placeholder == "если не указать — id модели равен алиасу"
+        assert (
+            model_field.placeholder
+            == "если не указать — id модели равен алиасу"
+        )
         form.query_one("#mef-summary-chars", Input).value = "0"
         await pilot.pause()
         assert _summary_note(form, "chars") == ""
@@ -537,7 +542,12 @@ def _counting_catalog(calls, *, fail=False):
                 ModelInfo(id="qwen/qwen"),
                 ModelInfo(id="zhipu/glm-4.6"),
             ],
-            {"data": [_CARD, {"id": "zhipu/glm-4.6", "context_length": 200000}]},
+            {
+                "data": [
+                    _CARD,
+                    {"id": "zhipu/glm-4.6", "context_length": 200000},
+                ]
+            },
         )
 
     return fetch
@@ -1020,8 +1030,7 @@ async def test_model_card_row_shows_the_context_window_and_its_keys():
         row = form.query_one("#mef-model-meta")
         assert row.enabled is True
         assert (
-            str(row.render())
-            == "▸ Контекстное окно модели: 131 072 токенов"
+            str(row.render()) == "▸ Контекстное окно модели: 131 072 токенов"
             "   Enter/F2 — открыть сведения провайдера о модели"
         )
         assert form.model_card() == ("qwen/qwen", _CARD)
@@ -1060,7 +1069,9 @@ async def test_action_rows_are_cursor_positions_with_a_pointer():
         assert form._positions[form._idx] == "mef-model-meta"
         assert form.on_action_row is True
         assert _value_color(card.render(), "▸ ") == _rgb(ACCENT)
-        assert str(card.render()) == text_idle  # текст под курсором не сдвигается
+        assert (
+            str(card.render()) == text_idle
+        )  # текст под курсором не сдвигается
         assert card.has_class("selected")
         assert pilot.app.focused is None
         form.move(1)
@@ -1737,7 +1748,7 @@ async def test_probe_does_not_send_the_inherited_token_to_a_typed_address():
             "#mef-url", Input
         ).value = "https://foreign/v1/chat/completions"
         await pilot.pause()
-        assert form.probe_connection() is True
+        form.probe_connection()
         for _ in range(3):
             await pilot.pause()
         assert seen and all(
@@ -1772,7 +1783,10 @@ async def test_the_model_list_does_not_send_the_inherited_token_to_a_typed_addre
         for _ in range(3):
             await pilot.pause()
         assert calls == [
-            ("https://openrouter.ai/api/v1/chat/completions", "Bearer sk-COMMON"),
+            (
+                "https://openrouter.ai/api/v1/chat/completions",
+                "Bearer sk-COMMON",
+            ),
             ("https://foreign/v1/chat/completions", None),
         ], calls
 
@@ -2696,7 +2710,7 @@ async def test_the_probe_and_the_model_list_of_a_namesake_go_to_the_shadowed_pai
     )
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
-        assert form.probe_connection() is True
+        form.probe_connection()
         for _ in range(3):
             await pilot.pause()
         assert seen and all(e == _SHADOWED["url"] for e, _ in seen), seen
@@ -2762,7 +2776,7 @@ async def test_a_shadowed_record_without_a_token_is_explained_not_masked():
             "запись основного конфига без токена — запросы идут без авторизации"
         )
         assert not token.has_class("has-saved")
-        assert form.probe_connection() is True
+        form.probe_connection()
         for _ in range(3):
             await pilot.pause()
         assert seen == [(_SHADOWED["url"], None)], seen
@@ -3186,7 +3200,7 @@ async def test_ctrl_space_probes_and_alt_down_fetches_and_they_never_swap():
         # (`SettingsScreen._reset_draft_state`): даём событию дойти ДО пробы,
         # иначе оно обесценило бы её же результат.
         await pilot.pause()
-        assert form.probe_connection() is True
+        form.probe_connection()
         for _ in range(3):
             await pilot.pause()
         assert fetches == [], "проба сходила за списком моделей"
@@ -3208,7 +3222,7 @@ async def test_probe_without_any_address_is_honest():
     form = _form(initial=None, existing_aliases=set())
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
-        assert form.probe_connection() is True
+        form.probe_connection()
         await pilot.pause()
         assert "адрес" in str(
             form.query_one("#mef-probe-line", Static).render()
@@ -3245,7 +3259,7 @@ async def test_the_probe_resolves_env_references_before_the_request(
     )
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
-        assert form.probe_connection() is True
+        form.probe_connection()
         for _ in range(3):
             await pilot.pause()
         assert seen, "проба не пошла"
@@ -3353,7 +3367,7 @@ async def test_a_missing_env_variable_is_named_instead_of_a_blind_request(
     )
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
-        assert form.probe_connection() is True
+        form.probe_connection()
         for _ in range(3):
             await pilot.pause()
         line = str(form.query_one("#mef-probe-line", Static).render())
@@ -3398,7 +3412,7 @@ async def test_a_missing_env_variable_in_the_token_stops_the_probe(
     )
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
-        assert form.probe_connection() is True
+        form.probe_connection()
         for _ in range(3):
             await pilot.pause()
         line = str(form.query_one("#mef-probe-line", Static).render())

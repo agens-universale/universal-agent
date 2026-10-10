@@ -12,7 +12,6 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 from gc_core.agent_edits import git_ops, shell_delta
@@ -23,6 +22,8 @@ from gc_core.agent_edits.tracking import TrackingFsBackend
 from gc_core.config_modules import env_vars
 from gc_core.thread_store import edits_journal_path
 from gc_testkit.helpers.crossplatform import require_symlinks
+from gc_testkit.settings import fake_ctx, update_ctx
+from gc_testkit.git_support import rev_parse_head
 
 
 def _git(root: Path, *args: str) -> None:
@@ -93,12 +94,12 @@ def repo(tmp_path, monkeypatch):
 
 
 def _ctx(launch_root, threads_dir, *, shell_tracking=True, turn_id="turn-1"):
-    return SimpleNamespace(
-        is_tui=True,  # режим с записью правок по умолчанию
-        config_dict={
+    return fake_ctx(
+        {
             "launch_root": str(launch_root),
             "agent_edits": {"shell_tracking": shell_tracking},
         },
+        is_tui=True,  # режим с записью правок по умолчанию
         threads_dir=str(threads_dir),
         system_id="cli",
         thread_id="th1",
@@ -700,7 +701,7 @@ def test_binary_file_follows_recorder_contract(repo):
 def test_file_over_source_cap_is_recorded_without_diffing(repo, monkeypatch):
     launch_root, threads_dir = repo
     ctx = _ctx(launch_root, threads_dir)
-    ctx.config_dict["agent_edits"]["max_diff_source_bytes"] = 10
+    update_ctx(ctx, **{"agent_edits.max_diff_source_bytes": 10})
     diff_calls: list[str] = []
 
     def _spy_diff(self, rel, *, untracked):
@@ -727,7 +728,7 @@ def test_file_over_source_cap_is_recorded_without_diffing(repo, monkeypatch):
 def test_huge_diff_is_truncated_with_flag_but_counts_stay_accurate(repo):
     launch_root, threads_dir = repo
     ctx = _ctx(launch_root, threads_dir)
-    ctx.config_dict["agent_edits"]["max_diff_chars"] = 40
+    update_ctx(ctx, **{"agent_edits.max_diff_chars": 40})
     delta = ShellDelta.begin(ctx)
     _run_command(
         launch_root,
@@ -780,7 +781,7 @@ def test_shell_tracking_false_writes_nothing(repo):
 
 def test_channel_off_without_thread_identity(repo):
     launch_root, _threads_dir = repo
-    ctx = SimpleNamespace(config_dict={"launch_root": str(launch_root)})
+    ctx = fake_ctx({"launch_root": str(launch_root)})
 
     assert ShellDelta.begin(ctx) is None
 
@@ -1157,7 +1158,7 @@ def test_no_snapshot_for_oversize_record(repo):
     (launch_root / "big.txt").write_bytes(b"y" * 100)
     _git(launch_root, "add", "big.txt")
     ctx = _ctx(launch_root, threads_dir)
-    ctx.config_dict["agent_edits"]["max_diff_source_bytes"] = 10
+    update_ctx(ctx, **{"agent_edits.max_diff_source_bytes": 10})
     delta = ShellDelta.begin(ctx)
     _run_command(launch_root, "open('big.txt','wb').write(b'x' * 100)")
     delta.after_and_record()
@@ -1185,7 +1186,7 @@ def test_shell_channel_evicts_when_it_wrote_a_new_base(repo, monkeypatch):
     launch_root, threads_dir = repo
     (launch_root / "tracked.txt").write_bytes(b"line1\nline2-dirty\n")
     ctx = _ctx(launch_root, threads_dir)
-    ctx.config_dict["agent_edits"]["snapshots_max_files"] = 7
+    update_ctx(ctx, **{"agent_edits.snapshots_max_files": 7})
     calls: list[int] = []
     monkeypatch.setattr(
         SnapshotStore,
@@ -1424,7 +1425,7 @@ def test_clean_tracked_gets_precise_base_and_is_revertable(repo):
     assert _snapshot_names(launch_root, ".gitorig") == []
     assert _snapshot_names(launch_root, ".gitturn") == []
     # признак ступени HEAD — ревизия НА МОМЕНТ съёма (§3.2, фикс C1)
-    assert store.session_head_rev("tracked.txt") == git_ops.rev_parse_head(
+    assert store.session_head_rev("tracked.txt") == rev_parse_head(
         str(launch_root)
     )
 
@@ -1438,7 +1439,7 @@ def test_git_restore_over_user_work_is_recorded_and_revertable(repo):
     молча, без строки на экране и без всякой возможности откатить.
     """
     launch_root, threads_dir = repo
-    (launch_root / "tracked.txt").write_bytes("НЕСОХРАН\n".encode("utf-8"))
+    (launch_root / "tracked.txt").write_bytes("НЕСОХРАН\n".encode())
     delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
     _run_command(
         launch_root,
@@ -1449,7 +1450,7 @@ def test_git_restore_over_user_work_is_recorded_and_revertable(repo):
     recs = [r for r in _records(threads_dir) if r.path == "tracked.txt"]
     assert recs, "правка обязана попасть в журнал"
     base = _snapshot_store(launch_root).session_baseline("tracked.txt")
-    assert base == "НЕСОХРАН\n".encode("utf-8")
+    assert base == "НЕСОХРАН\n".encode()
 
 
 def test_git_reset_hard_over_staged_work_is_recorded_and_revertable(repo):
@@ -1461,7 +1462,7 @@ def test_git_reset_hard_over_staged_work_is_recorded_and_revertable(repo):
     проиндексированная работа пропадала без записи и без отката (ревью PR,
     второй коллега, находка 2)."""
     launch_root, threads_dir = repo
-    (launch_root / "tracked.txt").write_bytes("В ИНДЕКСЕ\n".encode("utf-8"))
+    (launch_root / "tracked.txt").write_bytes("В ИНДЕКСЕ\n".encode())
     _git(launch_root, "add", "tracked.txt")
     delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
     _run_command(
@@ -1473,7 +1474,7 @@ def test_git_reset_hard_over_staged_work_is_recorded_and_revertable(repo):
     recs = [r for r in _records(threads_dir) if r.path == "tracked.txt"]
     assert recs, "правка обязана попасть в журнал"
     base = _snapshot_store(launch_root).session_baseline("tracked.txt")
-    assert base == "В ИНДЕКСЕ\n".encode("utf-8")
+    assert base == "В ИНДЕКСЕ\n".encode()
 
 
 def test_unsaved_work_keeps_its_place_in_the_pocket_ahead_of_staged_files(
@@ -1506,7 +1507,7 @@ def test_unsaved_work_keeps_its_place_in_the_pocket_ahead_of_staged_files(
     delta.after_and_record()
 
     base = _snapshot_store(launch_root).session_baseline("src/x.py")
-    assert base == "НЕСОХРАН\n".encode("utf-8")
+    assert base == "НЕСОХРАН\n".encode()
 
 
 def test_a_known_ignored_file_keeps_its_place_in_the_pocket_ahead_of_staged_files(
@@ -1775,7 +1776,7 @@ def test_pocket_skips_oversize_and_respects_total_cap(tmp_path, monkeypatch):
     threads_dir.mkdir()
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc_home")
     ctx = _ctx(launch_root, threads_dir)
-    ctx.config_dict["agent_edits"]["max_diff_source_bytes"] = 20
+    update_ctx(ctx, **{"agent_edits.max_diff_source_bytes": 20})
     monkeypatch.setattr(shell_delta, "POCKET_TOTAL_CAP_BYTES", 8)
 
     # недавний, но сверх пофайлового капа — не кандидат вовсе, бюджет не тратит
@@ -1808,7 +1809,7 @@ def test_pocket_keeps_filling_after_a_candidate_that_does_not_fit(
     threads_dir.mkdir()
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc_home")
     ctx = _ctx(launch_root, threads_dir)
-    ctx.config_dict["agent_edits"]["max_diff_source_bytes"] = 20
+    update_ctx(ctx, **{"agent_edits.max_diff_source_bytes": 20})
     monkeypatch.setattr(shell_delta, "POCKET_TOTAL_CAP_BYTES", 8)
 
     _seed_known_file(threads_dir, launch_root, "big.txt", b"x" * 7, ts=3.0)
@@ -2023,7 +2024,7 @@ def test_command_created_file_gets_the_creation_mark(repo):
     быть не должно — ревизию ступени HEAD несёт отметка создания. Ревизия — та,
     что была ДО команды, даже если команда сама коммитила."""
     launch_root, threads_dir = repo
-    head_before = git_ops.rev_parse_head(str(launch_root))
+    head_before = rev_parse_head(str(launch_root))
     delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
     _run_command(launch_root, "open('new.txt','wb').write(b'alpha\\n')")
     delta.after_and_record()
@@ -2101,7 +2102,7 @@ def test_staged_add_codes_match_git_status_documentation():
     """
     from gc_core.agent_edits.shell_delta import _STAGED_ADD_XY
 
-    assert _STAGED_ADD_XY == {"A ", "AM", "AT", "AD"}
+    assert {"A ", "AM", "AT", "AD"} == _STAGED_ADD_XY
     assert not (_STAGED_ADD_XY & {"AA", "AU", "UA", "UU", "DD", "DU", "UD"})
 
 
@@ -2120,7 +2121,7 @@ def _awkward_changes(repo):
     tracked = {
         "plain.py": b"a = 1\n",
         "with space.txt": b"x\n",
-        "кириллица.md": "строка\n".encode("utf-8"),
+        "кириллица.md": "строка\n".encode(),
         "br[1].py": b"y = 2\n",
         "crlf.txt": b"one\r\ntwo\r\n",
         "no-eol.txt": b"tail",
@@ -2152,7 +2153,7 @@ def _awkward_changes(repo):
     )  # индекс ≠ HEAD у части путей
     untracked = {
         "fresh.py": b"n = 1\n",
-        "свежий.txt": "да\n".encode("utf-8"),
+        "свежий.txt": "да\n".encode(),
         "empty.txt": b"",
     }
     for rel, data in untracked.items():
@@ -2585,6 +2586,6 @@ def test_shell_channel_does_not_start_where_recording_is_off(repo):
     launch_root, threads_dir = repo
     ctx = _ctx(launch_root, threads_dir)
     ctx.is_tui = False
-    ctx.config_dict["run_mode"] = "cli"
+    update_ctx(ctx, run_mode="cli")
 
     assert ShellDelta.begin(ctx) is None

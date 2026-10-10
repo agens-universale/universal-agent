@@ -11,10 +11,8 @@ import json
 import subprocess
 import sys
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
-
 from gc_core.agent_edits.journal import EditsJournal
 from gc_core.agent_edits.tracking import (
     TrackingFsBackend,
@@ -23,9 +21,10 @@ from gc_core.agent_edits.tracking import (
 from gc_core.backends.local import LocalFsBackend
 from gc_core.config_modules import env_vars
 from gc_core.execution_workspace import build_execution_workspace
-from gc_testkit.helpers.tool_ctx import local_ctx
 from gc_core.thread_store import edits_journal_path, touched_journal_path
 from gc_core.tools.fs.write_to_file_tool import WriteToFile
+from gc_testkit.helpers.tool_ctx import local_ctx
+from gc_testkit.settings import fake_ctx
 
 
 def _has_git() -> bool:
@@ -55,7 +54,11 @@ def launch_root(tmp_path, monkeypatch):
 def _cfg(launch_root: Path) -> dict:
     return {
         "launch_root": str(launch_root),
-        "write_guard": {"enabled": False, "mode": "deny", "extra_paths": []},
+        "security.write_guard": {
+            "enabled": False,
+            "mode": "deny",
+            "extra_paths": [],
+        },
         "agent_edits": {},
     }
 
@@ -70,7 +73,7 @@ def _tool_ctx(launch_root: Path, threads: Path, *, thread_id: str = "t1"):
     ctx.turn_id = "turn-1"
     wrapped = wrap_local_for_tracking(ctx.os_backend, ctx)
     ctx.os_backend = wrapped
-    ctx.workspace = build_execution_workspace(wrapped, cfg)
+    ctx.workspace = build_execution_workspace(wrapped, ctx)
     return ctx
 
 
@@ -88,9 +91,9 @@ async def test_tracking_backend_no_longer_writes_touched_journal(launch_root):
     ctx = _tool_ctx(root, threads)
 
     res = json.loads(
-        await WriteToFile(
-            ctx=ctx, config_dict=ctx.config_dict, call_id="c1"
-        ).acall(path=str(target), content="changed\n")
+        await WriteToFile(ctx=ctx, call_id="c1").acall(
+            path=str(target), content="changed\n"
+        )
     )
     assert res["ok"] is True
     assert not Path(touched_journal_path(str(threads), "tui", "t1")).exists()
@@ -242,7 +245,7 @@ def test_wrap_skips_non_local():
 
 
 def test_wrap_is_idempotent():
-    ctx = SimpleNamespace(is_tui=True, config_dict={})
+    ctx = fake_ctx(is_tui=True)
     wrapped = wrap_local_for_tracking(LocalFsBackend(), ctx)
     assert isinstance(wrapped, TrackingFsBackend)
     assert wrap_local_for_tracking(wrapped, ctx) is wrapped

@@ -14,6 +14,7 @@ from gc_tui.widgets.trace_row import TraceRow
 from gc_tui.widgets.user_reply import UserReplyContainer
 from textual import events
 from textual.app import App, ComposeResult
+from gc_testkit.tui_support import tui_settings
 
 
 def _click(widget, *, ctrl=False, chain=1):
@@ -426,7 +427,7 @@ async def test_a_just_sent_reply_gets_its_event_number_on_delivery(tmp_path):
         json.dumps({"thread_id": tid, "tui": {}}), encoding="utf-8"
     )
     async with TuiApp(
-        threads_dir=str(threads), system="cli", config={}
+        threads_dir=str(threads), system="cli", settings=tui_settings({})
     ).run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)

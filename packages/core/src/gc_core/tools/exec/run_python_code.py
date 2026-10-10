@@ -95,8 +95,8 @@ def _parse_env_vars(
 
 class RunPythonCode(AbstractSimpleTool):
     @classmethod
-    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None):
-        timeout_default = exec_timeout_from_config_dict(config_dict)
+    def tool_description(cls, settings: Any = None):
+        timeout_default = exec_timeout_from_config_dict(settings)
         description = {
             "type": "function",
             "name": "exec_python",
@@ -156,8 +156,8 @@ class RunPythonCode(AbstractSimpleTool):
         return description
 
     @classmethod
-    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None):
-        timeout_default = exec_timeout_from_config_dict(config_dict)
+    def prompt_description(cls, settings: Any = None):
+        timeout_default = exec_timeout_from_config_dict(settings)
         description = (
             """Tool name: exec_python
 Tool description: Run Python in a subprocess; returns JSON with return_code, stdout, stderr.
@@ -196,7 +196,7 @@ Usage:
             stdout=as_captured_stream(stdout),
             stderr=as_captured_stream(stderr),
             preview_edge_chars=exec_output_preview_edge_chars_from_config_dict(
-                self._config_dict
+                self._settings_source
             ),
             error=error,
         )
@@ -331,7 +331,7 @@ Usage:
         effective_timeout = (
             timeout
             if timeout is not None
-            else exec_timeout_from_config_dict(self._config_dict)
+            else exec_timeout_from_config_dict(self._settings_source)
         )
         if not isinstance(effective_timeout, int) or effective_timeout <= 0:
             return reject({"type": "invalid_argument", "field": "timeout"})

@@ -5,41 +5,43 @@ agent.strict_turn_finish_validation=false даёт off; иначе smart (деф
 Владелец правила — tui/session_settings.py (его читают и витрина тоггла, и
 сравнение с умолчанием)."""
 
-from gc_tui.session_settings import effective_finish_gate_mode
+from gc_testkit.settings import make_settings
+from gc_tui.session_settings import finish_gate_mode_of
 
 
 def _cfg(mode="on", explicit=False, strict_false=False):
-    return {
-        "tui_finish_gate_mode": mode,
-        "tui_finish_gate_mode_explicit": explicit,
-        "strict_turn_finish_explicit_false": strict_false,
-    }
+    """Настройки с явностью полей как у файла: `explicit` — tui.finish_gate_mode
+    задан, `strict_false` — agent.strict_turn_finish_validation: false задан."""
+    dotted = {}
+    if explicit:
+        dotted["tui.finish_gate_mode"] = mode
+    if strict_false:
+        dotted["agent.strict_turn_finish_validation"] = False
+    return make_settings(**dotted)
 
 
 def test_both_defaults_is_smart():
-    assert effective_finish_gate_mode(_cfg()) == "smart"
+    assert finish_gate_mode_of(_cfg()) == "smart"
 
 
 def test_explicit_global_off_wins_over_default_tui():
     """Старая воля юзера (strict=false руками) уважается: апдейт молча не включает судью."""
-    assert effective_finish_gate_mode(_cfg(strict_false=True)) == "off"
+    assert finish_gate_mode_of(_cfg(strict_false=True)) == "off"
 
 
 def test_explicit_tui_beats_explicit_global_off():
     assert (
-        effective_finish_gate_mode(
-            _cfg(mode="on", explicit=True, strict_false=True)
-        )
+        finish_gate_mode_of(_cfg(mode="on", explicit=True, strict_false=True))
         == "on"
     )
 
 
 def test_explicit_tui_off():
-    assert effective_finish_gate_mode(_cfg(mode="off", explicit=True)) == "off"
+    assert finish_gate_mode_of(_cfg(mode="off", explicit=True)) == "off"
 
 
 def test_missing_keys_default_smart():
-    assert effective_finish_gate_mode({}) == "smart"
+    assert finish_gate_mode_of(make_settings()) == "smart"
 
 
 def test_template_yaml_default_is_string_not_bool(tmp_path):
@@ -59,59 +61,50 @@ def test_template_yaml_default_is_string_not_bool(tmp_path):
 
 
 def test_tui_wiring_projects_off_into_strict_flag():
-    """Эффективный off проецируется в существующий runtime-ключ строгости —
+    """Эффективный off проецируется в существующий ключ строгости —
     guard.enabled (strict AND chat_completions) гаснет существующей веткой."""
-    from gc_tui.toggles import apply_finish_gate_mode
+    from gc_tui.toggles import tui_agent_settings
 
-    cfg = _cfg(mode="off", explicit=True)
-    cfg["strict_turn_finish_validation"] = (
-        True  # из flatten (глобальный дефолт)
-    )
-    apply_finish_gate_mode(cfg)
-    assert cfg["strict_turn_finish_validation"] is False
+    # agent.strict_turn_finish_validation — глобальный дефолт (True)
+    loaded = tui_agent_settings(_cfg(mode="off", explicit=True))
+    assert loaded.settings.agent.strict_turn_finish_validation is False
 
 
 def test_tui_wiring_on_keeps_strict_true():
-    from gc_tui.toggles import apply_finish_gate_mode
+    from gc_tui.toggles import tui_agent_settings
 
-    cfg = _cfg(
-        mode="on", explicit=True, strict_false=True
+    loaded = tui_agent_settings(
+        _cfg(mode="on", explicit=True, strict_false=True)
     )  # явный tui on поверх глобального off
-    cfg["strict_turn_finish_validation"] = False
-    apply_finish_gate_mode(cfg)
-    assert cfg["strict_turn_finish_validation"] is True
+    assert loaded.settings.agent.strict_turn_finish_validation is True
 
 
 def test_apply_finish_gate_mode_smart_sets_both_runtime_keys():
-    from gc_tui.toggles import apply_finish_gate_mode
+    from gc_tui.toggles import tui_agent_settings
 
-    cfg = {
-        "tui_finish_gate_mode": "smart",
-        "tui_finish_gate_mode_explicit": True,
-    }
-    apply_finish_gate_mode(cfg)
-    assert cfg["strict_turn_finish_validation"] is True
-    assert cfg["finish_gate_smart"] is True
+    loaded = tui_agent_settings(_cfg(mode="smart", explicit=True))
+    assert loaded.settings.agent.strict_turn_finish_validation is True
+    assert loaded.runtime.finish_gate_smart is True
 
 
-# --- §7 test 4a: коллизия через реальный config.yml (load_config/flatten_app_config) ---
+# --- §7 test 4a: коллизия через реальный config.yml (load_settings) ---
 
 
 def _load(tmp_path, yaml_text):
-    """load_config на изолированном config.yml (слои поверх него нейтрализует общая
+    """load_settings на изолированном config.yml (слои поверх него нейтрализует общая
     автофикстура `tests/conftest.py::_isolated_config_layers`)."""
     from gc_core import config as cfgmod
 
     conf = tmp_path / "config.yml"
     conf.write_text(yaml_text, encoding="utf-8")
-    return cfgmod.load_config(str(conf))
+    return cfgmod.load_settings(str(conf))
 
 
 def test_explicit_global_off_without_tui_key_is_off_e2e(tmp_path):
     """agent.strict_turn_finish_validation: false явно, tui.finish_gate_mode отсутствует
-    → через реальный load_config/flatten_app_config эффективный /gate = off."""
+    → через реальный load_settings эффективный /gate = off."""
     cfg = _load(tmp_path, "agent:\n  strict_turn_finish_validation: false\n")
-    assert effective_finish_gate_mode(cfg) == "off"
+    assert finish_gate_mode_of(cfg) == "off"
 
 
 def test_explicit_tui_key_beats_explicit_global_off_e2e(tmp_path):
@@ -120,7 +113,7 @@ def test_explicit_tui_key_beats_explicit_global_off_e2e(tmp_path):
         tmp_path,
         'agent:\n  strict_turn_finish_validation: false\ntui:\n  finish_gate_mode: "on"\n',
     )
-    assert effective_finish_gate_mode(cfg) == "on"
+    assert finish_gate_mode_of(cfg) == "on"
 
 
 def test_toggle_values_carry_hint_and_color():
@@ -251,10 +244,8 @@ def test_next_toggle_value_generic_for_single_key():
     from gc_tui.toggles import next_toggle_value
 
     class _App:
-        _config = {"tui_text_answer_mode": "judge"}
-
-        def effective_config(self):
-            return dict(self._config)
+        def effective_settings(self):
+            return make_settings({"tui.text_answer_mode": "judge"})
 
     assert next_toggle_value(_App(), "answers", 1) == "deny"
     assert next_toggle_value(_App(), "answers", -1) == "allow"
@@ -342,14 +333,11 @@ def test_next_toggle_value_displayed_custom_falls_back_to_idx_zero():
     from gc_tui.toggles import next_toggle_value
 
     class _App:
-        _config = {  # пара нестандартна -> эффективное "custom"
-            "tui_finish_gate_mode": "on",
-            "tui_finish_gate_mode_explicit": True,
-            "tui_text_answer_mode": "allow",
-        }
-
-        def effective_config(self):
-            return dict(self._config)
+        def effective_settings(self):
+            # пара нестандартна -> эффективное "custom"
+            return make_settings(
+                {"tui.finish_gate_mode": "on", "tui.text_answer_mode": "allow"}
+            )
 
     assert next_toggle_value(_App(), "rigor", 1) == "medium"  # idx0 +1
     assert next_toggle_value(_App(), "rigor", -1) == "high"  # idx0 -1 (wrap)

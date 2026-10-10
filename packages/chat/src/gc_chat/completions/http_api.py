@@ -71,7 +71,7 @@ async def create_completion(request: Request) -> Response:
         return _json(error_payload(exc), 400)
     if route == "direct":
         direct = DirectCompletions(
-            config=facade._config, auth_connector=facade._auth
+            settings=facade._settings, auth_connector=facade._auth
         )
         return await direct.forward(body, request)
     opened = await _open_turn(facade, body)

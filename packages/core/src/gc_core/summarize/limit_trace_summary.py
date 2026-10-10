@@ -11,13 +11,20 @@ import logging
 import os
 from typing import Any
 
-from gc_core.bundled_assets import bundled_root
-from gc_core.summarize.llm import arequest_auxiliary_completion_text
-from gc_core.usage.account import UsageAccount
-
-_PROMPT_PATH = os.path.join(
-    str(bundled_root()), "prompts", "limit_trace_summary.md"
+from gc_core.agent_store import (
+    DEFAULT_AGENT_STORE,
+    AgentResource,
+    AgentStore,
+    FileAgentStore,
+    agent_store_of,
 )
+from gc_core.execution.contracts import ExecutionFailure, PayloadTooLarge
+from gc_core.execution.resources import (
+    PromptResourceRequest,
+    aload_prompt_resource,
+)
+from gc_core.settings import AppConfig, settings_of
+from gc_core.usage.account import UsageAccount
 
 _REASON_LABELS = {
     "step_limit": "step limit",
@@ -30,17 +37,28 @@ logger = logging.getLogger(__name__)
 _prompt_cache: str | None = None
 
 
-def _load_limit_summary_prompt() -> str:
+def _load_limit_summary_prompt(
+    store: AgentStore = DEFAULT_AGENT_STORE,
+) -> str:
+    from gc_core.bundled_assets import bundled_root
+
+    _PROMPT_PATH = os.path.join(
+        str(bundled_root()), "prompts", "limit_trace_summary.md"
+    )
     global _prompt_cache
-    if _prompt_cache is not None:
+    # Кэш — только у пакетного файла: своё хранилище отвечает само.
+    cacheable = type(store) is FileAgentStore
+    if cacheable and _prompt_cache is not None:
         return _prompt_cache
-    with open(_PROMPT_PATH, encoding="utf-8") as fd:
-        text = fd.read().strip()
+    text = store.read_text(
+        AgentResource("prompt", "limit_summary", _PROMPT_PATH)
+    ).strip()
     if not text:
         raise ValueError(
             f"Limit trace summary prompt is empty: {_PROMPT_PATH}"
         )
-    _prompt_cache = text
+    if cacheable:
+        _prompt_cache = text
     return text
 
 
@@ -58,17 +76,15 @@ def _tokens_spent(state: Any) -> Any:
         return "?"
 
 
-def _build_message(
-    state: Any, reason: str, config_dict: dict[str, Any]
-) -> str:
+def _build_message(state: Any, reason: str, settings: AppConfig) -> str:
     label = _REASON_LABELS.get(reason, reason)
     if reason == "step_limit":
         return f"Agent stopped: {label} ({state.steps}/{getattr(state, 'max_steps', '?')})."
     if reason == "tool_call_limit":
-        limit = config_dict.get("max_tool_calls")
+        limit = settings.agent.max_tool_calls
         return f"Agent stopped: {label} ({state.tool_calls}/{limit})."
     if reason == "token_limit":
-        limit = config_dict.get("session_token_limit")
+        limit = settings.agent.session_token_limit
         spent = _tokens_spent(state)
         return f"Agent stopped: {label} ({spent}/{limit})."
     return f"Agent stopped: {label}."
@@ -117,15 +133,6 @@ def _serialize_trace(state_messages: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-def _should_enable(config_dict: dict[str, Any]) -> bool:
-    raw = config_dict.get("limit_trace_summary")
-    if raw is None:
-        return True  # по умолчанию on
-    if isinstance(raw, bool):
-        return raw
-    return str(raw).strip().lower() in ("true", "1", "yes", "on")
-
-
 async def abuild_limit_envelope(state: Any, reason: str, ctx: Any) -> str:
     """Возвращает JSON-строку envelope для limit-path.
 
@@ -135,16 +142,17 @@ async def abuild_limit_envelope(state: Any, reason: str, ctx: Any) -> str:
     Args:
         state: State с .messages, .steps, .tool_calls, .max_steps.
         reason: "step_limit" | "tool_call_limit" | "token_limit".
-        ctx: RunContext (нужен config_dict и auxiliary_llm).
+        ctx: RunContext (нужны настройки и auxiliary_llm).
 
     Returns:
         JSON-строка {"ok": false, "status", "message", "raw_trace_summary"}.
     """
-    config_dict = getattr(ctx, "config_dict", {}) or {}
-    message = _build_message(state, reason, config_dict)
+    settings = settings_of(ctx)
+    message = _build_message(state, reason, settings)
 
     raw_summary = ""
-    if _should_enable(config_dict):
+    # agent.limit_trace_summary — bool модели, по умолчанию on.
+    if settings.agent.limit_trace_summary:
         max_tokens = getattr(
             getattr(ctx, "auxiliary_llm", None), "max_tokens", None
         )
@@ -152,7 +160,11 @@ async def abuild_limit_envelope(state: Any, reason: str, ctx: Any) -> str:
             max_tokens = 24576
 
         try:
-            prompt_template = _load_limit_summary_prompt()
+            prompt_template = await aload_prompt_resource(
+                ctx,
+                PromptResourceRequest("limit_summary"),
+                local=lambda: _load_limit_summary_prompt(agent_store_of(ctx)),
+            )
             trace_text = _serialize_trace(state.messages)
             user_content = (
                 prompt_template + "\n\n---\n## Agent trace\n\n" + trace_text
@@ -172,6 +184,17 @@ async def abuild_limit_envelope(state: Any, reason: str, ctx: Any) -> str:
             )
             if raw_summary is None:
                 raw_summary = ""
+        except PayloadTooLarge:
+            # Трасса больше записи durable-истории: как отказ провайдера
+            # локально (контекст такого размера модель не примет) — ход
+            # кончается со своим статусом и пустой сводкой, а не ошибкой хода.
+            logger.warning(
+                "limit_trace_summary skipped for reason=%s: trace too large",
+                reason,
+            )
+            raw_summary = ""
+        except ExecutionFailure:
+            raise
         except Exception:
             logger.warning(
                 "limit_trace_summary LLM call failed for reason=%s; returning envelope with empty summary",
@@ -187,3 +210,11 @@ async def abuild_limit_envelope(state: Any, reason: str, ctx: Any) -> str:
         "raw_trace_summary": raw_summary,
     }
     return json.dumps(envelope, ensure_ascii=False)
+
+
+async def arequest_auxiliary_completion_text(**kwargs):
+    from gc_core.summarize.llm import (
+        arequest_auxiliary_completion_text as request,
+    )
+
+    return await request(**kwargs)

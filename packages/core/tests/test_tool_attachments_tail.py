@@ -11,8 +11,6 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 
-from gc_testkit import as_coro, run_coro
-
 from gc_core import processing_responses as pr
 from gc_core.attachments.model import (
     ORIGIN_TOOL,
@@ -26,6 +24,8 @@ from gc_core.message_policy.tool_attachments import (
     build_tool_attachments_message,
 )
 from gc_core.states import State
+from gc_testkit import as_coro, run_coro
+from gc_testkit.settings import fake_ctx
 
 
 def _att(**overrides) -> Attachment:
@@ -121,8 +121,8 @@ def _ptc_state():
 
 
 def _ptc_ctx(tools_data=None):
-    return SimpleNamespace(
-        config_dict={"loop_detector": {"enabled": True}},
+    return fake_ctx(
+        {"agent.loop_detector": {"enabled": True}},
         tools_data=tools_data or {},
         logger=None,
         run_id="run",
@@ -320,7 +320,7 @@ def test_images_follow_the_session_compact_resume(monkeypatch):
                 _fc("session_compact", "c_compact", '{"reason": "done"}'),
             ],
             state,
-            ctx=SimpleNamespace(config_dict={}),
+            ctx=fake_ctx({}),
             run_agent_func=None,
         )
     )
@@ -374,11 +374,11 @@ def _finish_call():
 
 
 def _agent_ctx():
-    return SimpleNamespace(
-        config_dict={
-            "backend_api_mode": "chat_completions",
-            "strict_turn_finish_validation": False,
-            "no_tool_call_max_count": 5,
+    return fake_ctx(
+        {
+            "backend.api_mode": "chat_completions",
+            "agent.strict_turn_finish_validation": False,
+            "agent.no_tool_call_max_count": 5,
         },
         logger=None,
         auth_connector=None,

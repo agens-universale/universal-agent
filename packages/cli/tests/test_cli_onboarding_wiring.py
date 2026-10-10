@@ -5,6 +5,7 @@ import sys
 sys.argv = ["gc-cli", "-q", "x"]
 
 from gc_cli import cli
+from gc_testkit.settings import make_settings
 
 
 def _stub_repair_load(monkeypatch, config):
@@ -17,7 +18,7 @@ def _stub_repair_load(monkeypatch, config):
         onboarding,
         "load_config_for_repair",
         lambda: onboarding.RepairLoad(
-            config, None, onboarding.REPAIR_STAGE_FULL, None
+            make_settings(config), None, onboarding.REPAIR_STAGE_FULL, None
         ),
     )
 
@@ -30,7 +31,7 @@ def test_run_init_calls_wizard_review_all_when_interactive(
     monkeypatch.setattr(
         cli, "user_config_path", lambda: tmp_path / "config.yml"
     )
-    _stub_repair_load(monkeypatch, {"model": "m"})
+    _stub_repair_load(monkeypatch, {"agent.model": "m"})
     seen = {}
     from gc_cli import onboarding_wizard
 
@@ -53,7 +54,9 @@ def test_run_init_passive_when_not_interactive(monkeypatch, tmp_path, capsys):
     )
     _stub_repair_load(
         monkeypatch,
-        {"completions_url": "http://your-backend:PORT/v1/chat/completions"},
+        {
+            "backend.completions_url": "http://your-backend:PORT/v1/chat/completions"
+        },
     )
     assert cli._run_init() == 0
     assert "config.yml" in capsys.readouterr().err
@@ -65,7 +68,7 @@ def test_run_init_no_mcp(monkeypatch, tmp_path):
     monkeypatch.setattr(
         cli, "user_config_path", lambda: tmp_path / "config.yml"
     )
-    _stub_repair_load(monkeypatch, {"model": "m"})
+    _stub_repair_load(monkeypatch, {"agent.model": "m"})
     seen = {}
     from gc_cli import onboarding_wizard
 
@@ -91,7 +94,7 @@ def test_run_init_returns_1_when_wizard_leaves_config_unconfigured(
     monkeypatch.setattr(
         cli, "user_config_path", lambda: tmp_path / "config.yml"
     )
-    _stub_repair_load(monkeypatch, {"model": "m"})
+    _stub_repair_load(monkeypatch, {"agent.model": "m"})
     from gc_cli import onboarding_wizard
 
     monkeypatch.setattr(
@@ -131,15 +134,14 @@ def test_main_no_auto_wizard(monkeypatch, tmp_path, capsys):
     )
     monkeypatch.setattr(
         cli,
-        "load_config_ex",
-        lambda *a, **k: (
+        "load_settings",
+        lambda *a, **k: make_settings(
             {
-                "completions_url": "http://your-backend:PORT/v1/chat/completions"
-            },
-            None,
+                "backend.completions_url": "http://your-backend:PORT/v1/chat/completions"
+            }
         ),
     )
-    monkeypatch.setattr(cli, "apply_cli_overrides", lambda *a, **k: None)
+    monkeypatch.setattr(cli, "apply_cli_overrides", lambda d, **kw: d)
     monkeypatch.setattr(cli, "_ensure_project_gc_dir", lambda: None)
     monkeypatch.setattr(cli, "_ensure_user_skills_dir", lambda: None)
     monkeypatch.setattr(
@@ -188,15 +190,14 @@ def test_unconfigured_with_structured_format_exits_1(
     )
     monkeypatch.setattr(
         cli,
-        "load_config_ex",
-        lambda *a, **k: (
+        "load_settings",
+        lambda *a, **k: make_settings(
             {
-                "completions_url": "http://your-backend:PORT/v1/chat/completions"
-            },
-            None,
+                "backend.completions_url": "http://your-backend:PORT/v1/chat/completions"
+            }
         ),
     )
-    monkeypatch.setattr(cli, "apply_cli_overrides", lambda *a, **k: None)
+    monkeypatch.setattr(cli, "apply_cli_overrides", lambda d, **kw: d)
     monkeypatch.setattr(cli, "_ensure_project_gc_dir", lambda: None)
     monkeypatch.setattr(cli, "_ensure_user_skills_dir", lambda: None)
     monkeypatch.setattr(

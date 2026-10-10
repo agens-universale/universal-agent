@@ -100,7 +100,7 @@ def test_llm_dropped_when_auxiliary_llm_already_present():
 
 def test_layered_llm_and_auxiliary_llm_loads(tmp_path, monkeypatch):
     """User llm + project auxiliary_llm: агент стартует, побеждает project."""
-    from gc_core.config import load_config
+    from gc_core.config import load_settings
     from gc_core.config_modules import env_vars
     from gc_core.config_modules.env_vars import EnvVars
 
@@ -122,32 +122,36 @@ def test_layered_llm_and_auxiliary_llm_loads(tmp_path, monkeypatch):
     )
     monkeypatch.chdir(proj)
 
-    cfg = load_config(str(global_cfg))
+    loaded = load_settings(str(global_cfg))
     from gc_core.config_modules.chat_completions import (
         auxiliary_llm_from_config_dict,
     )
 
-    assert cfg["auxiliary_llm_params"]["max_tokens"] == 4096
-    assert auxiliary_llm_from_config_dict(cfg).max_tokens == 4096
-    assert "llm" not in cfg["chat_completions_params"]
+    settings = loaded.settings
+    assert settings.chat_completions.auxiliary_llm.max_tokens == 4096
+    assert auxiliary_llm_from_config_dict(loaded).max_tokens == 4096
+    assert "llm" not in settings.chat_completions.model_dump(by_alias=True)
 
 
-def test_load_config_survives_renamed_key(monkeypatch, tmp_path):
+def test_load_settings_survives_renamed_key(monkeypatch, tmp_path):
     monkeypatch.setattr(
         compat, "RENAMES", {"backend.legacy_url": "backend.completions_url"}
     )
-    from gc_core.config import load_config
+    from gc_core.config import load_settings
 
     cfg_file = tmp_path / "config.yml"
     cfg_file.write_text(
         'backend:\n  legacy_url: "http://x/v1/chat/completions"\n',
         encoding="utf-8",
     )
-    config_dict = load_config(
+    loaded = load_settings(
         str(cfg_file)
     )  # без compat здесь упал бы extra=forbid
-    assert config_dict["completions_url"] == "http://x/v1/chat/completions"
-    assert config_dict["compat_notices"]
+    assert (
+        loaded.settings.backend.completions_url
+        == "http://x/v1/chat/completions"
+    )
+    assert loaded.runtime.notices
 
 
 def test_old_diff_tui_section_moves_to_agent_edits():
@@ -194,7 +198,7 @@ def test_old_section_in_a_higher_layer_still_overrides_the_new_one_below(
     настройка проекта молча терялась — вместе со старым листом `cache_max_orig`
     (ревью коммитов режима записи, находка 1). Слои выше базы проходят compat
     ДО склейки."""
-    from gc_core.config import load_config
+    from gc_core.config import load_settings
     from gc_core.config_modules import env_vars
     from gc_core.config_modules.env_vars import EnvVars
 
@@ -215,12 +219,12 @@ def test_old_section_in_a_higher_layer_still_overrides_the_new_one_below(
     )
     monkeypatch.chdir(proj)
 
-    cfg = load_config(str(global_cfg))
+    loaded = load_settings(str(global_cfg))
 
-    assert cfg["agent_edits"]["trace_inline_max_lines"] == 50
-    assert cfg["agent_edits"]["snapshots_max_files"] == 42
+    assert loaded.settings.agent_edits.trace_inline_max_lines == 50
+    assert loaded.settings.agent_edits.snapshots_max_files == 42
     assert any(
-        "config.yml" in n and "diff_tui" in n for n in cfg["compat_notices"]
+        "config.yml" in n and "diff_tui" in n for n in loaded.runtime.notices
     )
 
 
@@ -231,7 +235,7 @@ def test_notice_for_a_file_sync_does_not_update_asks_to_edit_it_by_hand(
     «запустите его» в уведомлении про проектный слой вёл в тупик: команда
     такой файл обновлять отказывается. Для него — править ключ вручную; для
     пользовательского файла совет прежний."""
-    from gc_core.config import load_config
+    from gc_core.config import load_settings
     from gc_core.config_modules import env_vars
     from gc_core.config_modules.env_vars import EnvVars
 
@@ -252,7 +256,7 @@ def test_notice_for_a_file_sync_does_not_update_asks_to_edit_it_by_hand(
     )
     monkeypatch.chdir(proj)
 
-    notices = load_config(str(global_cfg))["compat_notices"]
+    notices = load_settings(str(global_cfg)).runtime.notices
 
     project_notes = [n for n in notices if str(project_cfg) in n]
     base_notes = [n for n in notices if str(global_cfg) in n]
@@ -271,15 +275,15 @@ def test_overrides_with_the_old_section_name_still_apply():
     `diff_tui` оседало мёртвым ключом, и настройка молча не действовала (ревью
     коммитов режима записи, находка 3)."""
     from gc_core.config import apply_cli_overrides
+    from gc_testkit.settings import make_settings
 
-    cfg = {"agent_edits": {"trace_inline_max_lines": 30}, "compat_notices": []}
-    apply_cli_overrides(
-        cfg, extra_overrides={"diff_tui": {"trace_inline_max_lines": 50}}
+    base = make_settings({"agent_edits.trace_inline_max_lines": 30})
+    loaded = apply_cli_overrides(
+        base, extra_overrides={"diff_tui": {"trace_inline_max_lines": 50}}
     )
 
-    assert "diff_tui" not in cfg
-    assert cfg["agent_edits"] == {"trace_inline_max_lines": 50}
-    assert any("diff_tui" in n for n in cfg["compat_notices"])
+    assert loaded.settings.agent_edits.trace_inline_max_lines == 50
+    assert any("diff_tui" in n for n in loaded.runtime.notices)
 
 
 def test_old_name_in_the_base_and_above_keeps_the_base_values(
@@ -292,7 +296,7 @@ def test_old_name_in_the_base_and_above_keeps_the_base_values(
     конфиге сталкивались `llm` базы и `auxiliary_llm` проекта, и проход после
     склейки отбрасывал `llm` базы целиком (ревью починок compat). Все слои, база
     тоже, приходят к склейке с новыми именами."""
-    from gc_core.config import load_config
+    from gc_core.config import load_settings
     from gc_core.config_modules import env_vars
     from gc_core.config_modules.env_vars import EnvVars
 
@@ -313,8 +317,13 @@ def test_old_name_in_the_base_and_above_keeps_the_base_values(
     )
     monkeypatch.chdir(proj)
 
-    cfg = load_config(str(global_cfg))
+    from gc_core.config_modules.chat_completions import (
+        auxiliary_llm_from_config_dict,
+    )
 
-    assert cfg["auxiliary_llm_params"]["max_tokens"] == 4096
-    assert cfg["auxiliary_llm_params"]["judge_max_tokens"] == 2222
-    assert not any("отброшено" in n for n in cfg["compat_notices"])
+    loaded = load_settings(str(global_cfg))
+
+    aux = auxiliary_llm_from_config_dict(loaded)
+    assert aux.max_tokens == 4096
+    assert aux.judge_max_tokens == 2222
+    assert not any("отброшено" in n for n in loaded.runtime.notices)

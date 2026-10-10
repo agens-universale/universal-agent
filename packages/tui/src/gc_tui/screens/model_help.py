@@ -10,8 +10,8 @@ from textual.widgets import Static
 from gc_tui.editors.model_entry_form import KWARGS_HINT
 from gc_tui.services.trace_render import build_block_widgets
 
-
-MODEL_HELP = """# Параметры модели
+MODEL_HELP = (
+    """# Параметры модели
 
 В каждое поле вводится YAML-словарь `ключ: значение`, без внешней обёртки
 `main:`, `auxiliary:` или `backend:`. Параметры тела запроса принимает API
@@ -19,7 +19,9 @@ MODEL_HELP = """# Параметры модели
 
 ## Диалог и служебные запросы
 
-""" + KWARGS_HINT + """
+"""
+    + KWARGS_HINT
+    + """
 
 ## Наследование между слоями
 
@@ -111,6 +113,7 @@ Token и Authorization в backend одновременно не задаются
 Замена ссылки ENV литералом требует подтверждения сохранения.
 
 """
+)
 
 
 class ModelHelpScreen(Screen):
@@ -129,11 +132,17 @@ class ModelHelpScreen(Screen):
                 yield Static("Настройки · Параметры модели", markup=False)
             body = VerticalScroll(id="model-help-body")
             yield body
-            yield Static("Esc — назад · ↑/↓ / PgUp/PgDn — прокрутка", id="model-help-footer", markup=False)
+            yield Static(
+                "Esc — назад · ↑/↓ / PgUp/PgDn — прокрутка",
+                id="model-help-footer",
+                markup=False,
+            )
 
     def on_mount(self) -> None:
         body = self.query_one("#model-help-body", VerticalScroll)
-        widgets = build_block_widgets(MODEL_HELP, prose_bullet=False, event_no=0)
+        widgets = build_block_widgets(
+            MODEL_HELP, prose_bullet=False, event_no=0
+        )
         for widget in widgets:
             widget.can_focus = False
         body.mount(*widgets)

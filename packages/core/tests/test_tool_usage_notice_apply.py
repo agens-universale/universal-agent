@@ -1,9 +1,8 @@
-from types import SimpleNamespace
-
 from gc_core.message_policy.tool_usage_notice.apply import (
     apply_tool_usage_notice_before_llm,
 )
 from gc_core.states import SharedStateData, State
+from gc_testkit.settings import fake_ctx
 
 
 def _state() -> State:
@@ -24,8 +23,8 @@ def test_apply_appends_notice_when_threshold_reached():
     state = _state()
     state.tool_usage_notice_cnt = {"session_memory": 10}
     meta: dict = {}
-    ctx = SimpleNamespace(
-        config_dict={
+    ctx = fake_ctx(
+        {
             "tool_usage_notice": [
                 {
                     "tool_name": "session_memory",
@@ -33,7 +32,7 @@ def test_apply_appends_notice_when_threshold_reached():
                     "notice_message": "You have not used session_memory for some steps.",
                 }
             ],
-            "stop_tools": [],
+            "agent.stop_tools": [],
         }
     )
     out = apply_tool_usage_notice_before_llm(
@@ -52,7 +51,7 @@ def test_apply_no_notice_when_rules_empty():
     state = _state()
     state.tool_usage_notice_cnt = {"session_memory": 100}
     meta: dict = {}
-    ctx = SimpleNamespace(config_dict={"stop_tools": []})
+    ctx = fake_ctx({"agent.stop_tools": []})
     out = apply_tool_usage_notice_before_llm(
         [{"role": "user", "content": "hi", "id": "u1"}],
         state,
@@ -68,11 +67,11 @@ def test_apply_long_changed_hint_on_k_tick(monkeypatch):
     state = _state()
     state.project_memory_content_hash = "old"
     meta: dict = {}
-    ctx = SimpleNamespace(
-        config_dict={
-            "enable_project_memory_notice": True,
-            "project_memory_params": {"check_interval_messages": 2},
-            "stop_tools": [],
+    ctx = fake_ctx(
+        {
+            "project_memory.enable_project_memory_notice": True,
+            "project_memory": {"check_interval_messages": 2},
+            "agent.stop_tools": [],
         }
     )
     from gc_core.message_policy.tool_usage_notice.state import (
@@ -103,10 +102,10 @@ def test_apply_long_hint_does_not_reset_tool_usage_counter(monkeypatch):
     state.tool_usage_notice_cnt = {"session_memory": 6}
     state.project_memory_content_hash = "old"
     meta: dict = {}
-    ctx = SimpleNamespace(
-        config_dict={
-            "enable_project_memory_notice": True,
-            "project_memory_params": {"check_interval_messages": 2},
+    ctx = fake_ctx(
+        {
+            "project_memory.enable_project_memory_notice": True,
+            "project_memory": {"check_interval_messages": 2},
             "tool_usage_notice": [
                 {
                     "tool_name": "session_memory",
@@ -114,7 +113,7 @@ def test_apply_long_hint_does_not_reset_tool_usage_counter(monkeypatch):
                     "notice_message": "You have not used session_memory for some steps.",
                 }
             ],
-            "stop_tools": [],
+            "agent.stop_tools": [],
         }
     )
     from gc_core.message_policy.tool_usage_notice.state import (

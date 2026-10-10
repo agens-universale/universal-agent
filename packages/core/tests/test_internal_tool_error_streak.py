@@ -10,11 +10,11 @@
 from __future__ import annotations
 
 import json
-from types import SimpleNamespace
 
 from gc_core.states import State
 from gc_core.tools import is_internal_tool_error_output
 from gc_testkit import as_coro, run_coro
+from gc_testkit.settings import fake_ctx
 
 
 def _make_state(**overrides):
@@ -61,7 +61,7 @@ def _patch(monkeypatch, output):
 
 
 def _call(pr, state, name="fs_read_file"):
-    ctx = SimpleNamespace(config_dict={}, logger=None)
+    ctx = fake_ctx({}, logger=None)
     messages = [
         {
             "type": "function_call",

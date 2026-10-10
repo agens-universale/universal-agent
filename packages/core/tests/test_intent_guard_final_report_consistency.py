@@ -8,6 +8,7 @@ from gc_core.intent_guard.final_report_consistency import (
 )
 from gc_core.intent_guard.trace_digest import FinishGateTraceDigest
 from gc_testkit import run_coro
+from gc_testkit.settings import fake_ctx
 
 
 def _validator_json(**overrides: object) -> str:
@@ -28,8 +29,8 @@ class ValidateFinalReportConsistencyTest(unittest.TestCase):
         self.state = SimpleNamespace(
             messages=[{"role": "user", "content": "спроси меня"}]
         )
-        self.ctx = SimpleNamespace(
-            config_dict={},
+        self.ctx = fake_ctx(
+            {},
             logger=None,
             auxiliary_llm=SimpleNamespace(
                 max_tokens=8192,

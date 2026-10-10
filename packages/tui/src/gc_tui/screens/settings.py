@@ -9,6 +9,7 @@ from __future__ import annotations
 import time
 from dataclasses import replace
 
+from gc_core.settings import runtime_of, settings_of
 from rich.text import Text
 from textual import events
 from textual.app import ComposeResult
@@ -35,6 +36,9 @@ from gc_tui.palette import ACCENT, DEEP_DIM, DIM, ERR, INK, OK, WARN
 from gc_tui.services.probe_presentation import connection_line_text
 from gc_tui.widgets.loading_wave import WAVE_INTERVAL, WAVE_SEQ, wave_glyph
 
+# Клавиша сохранения настроек.
+_SAVE_KEY = "ctrl+s"
+
 # Константы вместо повторяющихся литералов (Sonar S1192).
 _SEL_SET_SCROLL = "#set-scroll"
 _SEL_SET_FOOTER = "#set-footer"
@@ -48,7 +52,6 @@ _KEY_CTRL_DOWN = "ctrl+down"
 _KEY_CTRL_SPACE = "ctrl+space"
 _KEY_CTRL_U = "ctrl+u"
 _MSG_APPLIES_NEXT_TURN = "применится со следующего хода агента"
-_MSG_NOTHING_CHANGED = "ничего не изменено"
 _SEL_SET_FRAME = "#set-frame"
 _SEL_SET_MENUROW = ".set-menurow"
 
@@ -148,7 +151,9 @@ _FOOTER_PRESET_LIST_NO_MATCH = "↑/↓  ·  Enter — оставить свой
 # `ConnectionEditor.on_url_field` гейтит ровно позицию адреса (`reload_presets`), и
 # `_FOOTERS[_CONNECTION]` в этом состоянии обещал бы неработающую клавишу (находка
 # финального ревью 2026-08-06, D). Тот же текст без сегмента про Alt+↓.
-_FOOTER_CONNECTION_FIELD = "Ctrl+S — сохранить/выйти · Ctrl+Space — проверить связь · Esc — меню"
+_FOOTER_CONNECTION_FIELD = (
+    "Ctrl+S — сохранить/выйти · Ctrl+Space — проверить связь · Esc — меню"
+)
 # Голосовая секция: у неё свой билдер футера (`_voice_footer_text`), в общем словаре
 # записи нет. Бюджет ширины у неё общий со всеми футерами форм — `_FOOTER_MIN_COLS`
 # ниже (то же число и тот же способ замера: не длина строки, а перенос на самом узком
@@ -170,16 +175,16 @@ _TAB_TO_VARIANTS = "Tab — вверх к выбору"
 # хвоста): в развёрнутой форме версия с Ctrl+U не влезала в две строки бюджета футера
 # на 64 колонках (сторож test_all_footers_fit_the_two_line_budget), а два состояния
 # ОДНОЙ строки обязаны звать одни клавиши одними словами.
-_VOICE_FOOTER_LOCAL = f"↑/↓ · {_TAB_TO_FIELDS} · Enter — включить · Del — удалить · Esc"
+_VOICE_FOOTER_LOCAL = (
+    f"↑/↓ · {_TAB_TO_FIELDS} · Enter — включить · Del — удалить · Esc"
+)
 # Тот же футер, когда движок отстал от версии сборки: клавиша обещается ТОЛЬКО тогда
 # (канон секции — не звать клавишу, которая здесь ничего не делает). Глагол и клавиша —
 # как у MCP («Ctrl+U — обновить версию»), там этот сценарий уже живёт.
 _VOICE_FOOTER_LOCAL_UPDATE = f"↑/↓ · {_TAB_TO_FIELDS} · Enter — включить · Ctrl+U — обновить версию · Del — удалить · Esc"
 # Тот же футер, когда удалять нечего: сервиса нет, и Del молчит (`_voice_request_remove`).
 # Полей у такой строки тоже нет — переходить некуда, и Tab здесь не обещан (§6.1).
-_VOICE_FOOTER_LOCAL_FRESH = (
-    "↑/↓ · Enter — установить · Esc — меню"
-)
+_VOICE_FOOTER_LOCAL_FRESH = "↑/↓ · Enter — установить · Esc — меню"
 # Облачная панель: Del здесь не работает вовсе — он стреляет только на строке
 # «Локальный сервис». Обещать его значит врать (та же причина, по которой из локального
 # футера убран Ctrl+Space).
@@ -285,9 +290,7 @@ _VOICE_FOOTER_URL_LIST = (
 # (футер не спорит с хинтом списка), а ↑/↓ снова про курсор секции — ходить нечем.
 # Раздвоена по той же причине, что и языковой список выше: состояние «без совпадений»
 # достижимо и у локального языка (пустой фильтр), и там пробы по-прежнему нет.
-_VOICE_FOOTER_LIST_NO_MATCH_LOCAL = (
-    "↑/↓ · Enter — оставить как есть · Ctrl+S — сохранить и выйти · Esc — свернуть"
-)
+_VOICE_FOOTER_LIST_NO_MATCH_LOCAL = "↑/↓ · Enter — оставить как есть · Ctrl+S — сохранить и выйти · Esc — свернуть"
 _VOICE_FOOTER_LIST_NO_MATCH_CLOUD = "↑/↓ · Enter — оставить как есть · Ctrl+S — сохранить и выйти · Esc — свернуть · Ctrl+Space — проверить связь"
 _VOICE_LANG_ERROR = "не сохранено: код языка — 2-3 латинские буквы, напр. ru"
 
@@ -452,7 +455,7 @@ class SettingsScreen(Screen):
     def __init__(
         self,
         *,
-        config,
+        settings,
         config_path,
         on_apply,
         probe_fn=None,
@@ -460,7 +463,9 @@ class SettingsScreen(Screen):
         voice=None,
     ) -> None:
         super().__init__()
-        self._config = config or {}
+        # База окна (`LoadedSettings`, без сессионного слоя) — для витрин. Правка
+        # и запись config.yml идут сырыми документами (`_read_raw`).
+        self._settings = settings
         self._config_path = config_path
         self._raw = (
             self._read_raw()
@@ -689,7 +694,7 @@ class SettingsScreen(Screen):
             if self._profiles_on_none_row():
                 return (
                     _FOOTER_PROFILES_NONE
-                    if (self._config.get("profile") or None)
+                    if self._config_profile()
                     else _FOOTER_PROFILES_NONE_EMPTY
                 )
             if self._profiles_on_add_row():
@@ -740,8 +745,27 @@ class SettingsScreen(Screen):
         from gc_tui.services.file_view import FileViewSettings
 
         return FileViewSettings.from_mapping(
-            (self._config or {}).get("tui_file_view")
+            self._cfg_settings().tui.file_view.model_dump()
         )
+
+    def _cfg_settings(self):
+        """Типизированный вид базы экрана (`AppConfig`) — для витрин. Правка и
+        запись config.yml по-прежнему идут сырыми документами."""
+        return settings_of(self._settings)
+
+    def _config_profile(self):
+        """Профиль, под которым собрана база экрана (указатель файлов либо флаг
+        запуска `--profile`); None — без профиля. Сессионный выбор `/profiles`
+        сюда не входит — экран правит файлы, а не сессию."""
+        return runtime_of(self._settings).active_profile or None
+
+    def _pull_base_from_app(self) -> None:
+        """Забрать перечитанную базу окна у приложения (после `_on_apply`).
+        Приложение без базы (экран собран вне TUI — юнит-тесты витрин) — база
+        экрана остаётся прежней."""
+        getter = getattr(self.app, "base_settings", None)
+        if callable(getter):
+            self._settings = getter()
 
     def _connection_editor(self):
         """Свежесмонтированный редактор секции «Подключение».
@@ -882,9 +906,9 @@ class SettingsScreen(Screen):
         # собственное смещение между пересборками тела, поэтому без явного сброса
         # ползунок мог оставаться внизу при уже отрисованном верхе формы.
         self.call_after_refresh(
-            lambda: self.query_one(_SEL_SET_SCROLL, VerticalScroll).scroll_home(
-                animate=False
-            )
+            lambda: self.query_one(
+                _SEL_SET_SCROLL, VerticalScroll
+            ).scroll_home(animate=False)
         )
         self._start_config_probe()
         # Живость порта батарейки — первый замер сразу (глиф меню судит по ней) и
@@ -898,7 +922,7 @@ class SettingsScreen(Screen):
     def _read_raw(self) -> dict:
         """Значения полей визарда ИЗ ФАЙЛА конфига, как записаны (без резолва ${ENV:VAR}).
 
-        В self._config они уже резолвнуты (config_modules.env_interpolation), и показать
+        В настройках окна они уже резолвнуты (config_modules.env_interpolation), и показать
         или записать их обратно в файл значит подменить ссылку на переменную её значением —
         секрет открытым текстом в файле, который коммитят. Экран правит ФАЙЛ, значит и
         читать должен файл; резолвнутый конфиг остаётся источником только для probe-запросов
@@ -919,8 +943,9 @@ class SettingsScreen(Screen):
         """Профиль, под которым СОБРАН конфиг этого окна, — для `config_origin.origins`
         (`""` — «без профиля», None — судить нечем, пусть спрашивает указатель у файлов).
 
-        Ответ один на всё приложение — плоский ключ `profile` из `effective_config()`:
-        загрузчик кладёт туда ДЕЙСТВУЮЩЕЕ имя (флаг запуска `--profile` и сессионный
+        Ответ один на всё приложение — `runtime.active_profile` из
+        `effective_settings()`: загрузчик кладёт туда ДЕЙСТВУЮЩЕЕ имя (флаг запуска
+        `--profile` и сессионный
         выбор `/profiles` включительно), а не указатель из файла; своей редакции
         вопроса «какой профиль действует» здесь не заводим — она разошлась бы с
         футером и `/config` на первой же правке.
@@ -933,7 +958,7 @@ class SettingsScreen(Screen):
         Приложения рядом нет (экран собран вне запущенного TUI — так его зовут
         юнит-тесты витрин) — None: судить не по чему, остаётся ответ по файлам."""
         try:
-            profile = self.app.effective_config().get("profile")
+            profile = self.app.effective_settings().runtime.active_profile
         except Exception:
             return None  # диагностика не обязана ронять экран
         return profile if isinstance(profile, str) else None
@@ -941,7 +966,7 @@ class SettingsScreen(Screen):
     def _read_origins(self) -> dict:
         """Происхождение полей визарда: что в базовом файле, чем перекрыто, что действует.
 
-        load_config кладёт поверх базового файла machine-managed и проектный оверлеи —
+        загрузчик кладёт поверх базового файла machine-managed и проектный оверлеи —
         экран правит базовый файл, и без этого молчал бы о том, что правка не подействует."""
         from gc_core.config_origin import origins
         from gc_core.onboarding import FIELD_ANCHOR_PATHS
@@ -1047,7 +1072,7 @@ class SettingsScreen(Screen):
                 model = self._raw_value("model")
                 v.append(display_value(model) if model else "—", style=DIM)
         elif i == _PROFILES:
-            name = self._config.get("profile") or None
+            name = self._config_profile()
             v.append(name if name else "не выбран", style=DIM)
         elif i == _MCP:
             try:
@@ -1241,10 +1266,10 @@ class SettingsScreen(Screen):
         стрелок — разрешения `st_mtime` на Windows для этого не хватает, содержимое же
         отвечает точно и дёшево (≈1 мс против ≈30 мс самой валидации). Указатель —
         общим резолвом `resolve_profile_pointer` (свежий мерж база → managed → project,
-        порядок `_merge_layers`), а не сырым документом базы и не `self._config`
+        порядок `_merge_layers`), а не сырым документом базы и не базой окна
         порознь: раскладка «указатель назначен проектным `.gc/config.yml`, база о нём
         молчит» первому источнику не по зубам, а раскладка «указатель есть в обоих, и
-        они расходятся» — второму (`self._config` может быть собран в обход резолва,
+        они расходятся» — второму (база окна может быть собрана в обход резолва,
         как у синтетических сборок экрана; а победить при конфликте обязан проект,
         а не выигравший по случайности источник)."""
         if not self._config_path:
@@ -1337,7 +1362,7 @@ class SettingsScreen(Screen):
                 )  # адреса нет ни у записей, ни в «Подключении»
             return "✓", OK
         r = self._probe_config
-        model = self._config.get("model") or ""
+        model = self._cfg_settings().agent.model or ""
         if not model or r is None or r.models is None:
             return "—", DEEP_DIM
         ids = [m.id for m in r.models]
@@ -1423,9 +1448,7 @@ class SettingsScreen(Screen):
                 )  # стартовый чек в полёте — вердикт вот-вот будет
             return "—", DEEP_DIM
         if i == _PROFILES:
-            return (
-                ("✓", OK) if self._config.get("profile") else ("—", DEEP_DIM)
-            )
+            return ("✓", OK) if self._config_profile() else ("—", DEEP_DIM)
         return "—", DEEP_DIM
 
     # --- рендер (полная замена тела фрейма, кроме персистентного #set-title) ---
@@ -1591,38 +1614,72 @@ class SettingsScreen(Screen):
         задан, иначе записанный в конфиге. Тот же порядок, что у
         `TuiApp._level_provider` — второго прочтения одного факта здесь не заводим.
 
-        Экран открывается с БАЗОЙ (`screen_config()`, без сессионных переопределений),
-        поэтому спрашивать `self._config` нельзя ни одной витрине, обещающей «сейчас»:
+        Экран открывается с БАЗОЙ (`base_settings()`, без сессионных переопределений),
+        поэтому спрашивать базу экрана нельзя ни одной витрине, обещающей «сейчас»:
         `/level` в файл не пишет, и записанное там — не то, что работает."""
         session = (getattr(self.app, "_session_overrides", None) or {}).get(
             "level"
         )
-        return str(session or (self._config or {}).get("level") or "default")
+        return str(session or self._cfg_settings().level or "default")
 
     # --- probe-инфраструктура (спека B2.1: слоты + generation) ---
     def _probe_args_from_config(self, config=None):
         """(адрес, токен, ssl, модель, прокси) действующего конфига. По умолчанию —
         runtime экрана; `config` передаёт тот, кто спрашивает про ДРУГОЙ стек (под-вид
-        открытого профиля — про свой, см. `_open_profile_config`)."""
+        открытого профиля — про свой, см. `_open_profile_config`): его настройки
+        либо подключение, собранное по документам (`dict`,
+        `_open_profile_connection_by_documents`)."""
         from gc_core.onboarding import (
             MODEL_SENTINEL,
             TOKEN_SENTINEL,
             configured_endpoint,
         )
 
-        c = self._config if config is None else config
-        url = c.get("completions_url") or ""
+        if isinstance(config, dict):
+            url = config.get("completions_url") or ""
+            headers = config.get("chat_completion_headers") or {}
+            proxy = config.get("proxy") or None
+            model = config.get("model") or ""
+            use_ssl = config.get("use_ssl", True)
+        else:
+            settings = settings_of(
+                self._settings if config is None else config
+            )
+            backend = settings.backend
+            url = backend.completions_url or ""
+            headers = backend.chat_completion_headers or {}
+            proxy = backend.proxy or None
+            model = settings.agent.model or ""
+            use_ssl = backend.use_ssl
         endpoint = configured_endpoint(url)
-        auth = (c.get("chat_completion_headers") or {}).get("Authorization")
+        auth = headers.get("Authorization")
         if auth in (TOKEN_SENTINEL, ""):
             auth = None
-        proxy = c.get("proxy") or None
-        model = c.get("model") or ""
         if (
             model == MODEL_SENTINEL
         ):  # плейсхолдер шаблона — не слать его как имя модели
             model = ""
-        return endpoint, auth, c.get("use_ssl", True), model, proxy
+        return endpoint, auth, use_ssl, model, proxy
+
+    def _presets_of(self, config=None) -> list:
+        """Пресеты адреса подключения того же стека, что `_probe_args_from_config`:
+        настроек (своих или открытого профиля) либо подключения по документам —
+        там пресеты уже проверены по форме (`_open_profile_connection_by_documents`),
+        нет их — кодовый дефолт."""
+        from gc_core.config_modules.endpoint_presets import (
+            EndpointPreset,
+            default_endpoint_presets,
+            endpoint_presets_from_config,
+        )
+
+        if isinstance(config, dict):
+            presets = config.get("endpoint_presets")
+            if not presets:
+                return default_endpoint_presets()
+            return [EndpointPreset.model_validate(item) for item in presets]
+        return endpoint_presets_from_config(
+            self._settings if config is None else config
+        )
 
     def _start_config_probe(self) -> None:
         endpoint, auth, verify, model, proxy = self._probe_args_from_config()
@@ -1884,21 +1941,6 @@ class SettingsScreen(Screen):
             except NoMatches:
                 pass
 
-    def _smart_enter_decide(self, section: int, values: dict, r) -> None:
-        """Проверка ⊥ Сохранение: Enter всегда сохраняет (блок — только формальная
-        невалидность, её ловит _collect_values→submit). Вердикт сервера — информация.
-
-        Текст реплики — у `probe_presentation.save_warning`: разбирать `verdict`
-        здесь значило бы завести третье прочтение одного результата (после строки
-        секции и глифа хаба), и оно уже разъехалось — «rejected» объявлялось
-        отклонённым токеном даже когда сервер писал про имя модели."""
-        if not values:
-            self._title_note(_MSG_NOTHING_CHANGED)
-            return
-        from gc_tui.services.probe_presentation import save_warning
-
-        self._do_save(section, values, warn_detail=save_warning(r))
-
     # --- guard записи ---
     def _writable(self) -> bool:
         return self._target_writable(self._config_path)
@@ -2025,7 +2067,7 @@ class SettingsScreen(Screen):
                     url_current=self._raw_value("completions_url"),
                     auth_header=header,
                     proxy_current=self._raw_value("proxy"),
-                    presets=endpoint_presets_from_config(self._config or {}),
+                    presets=endpoint_presets_from_config(self._settings),
                 )
             )
             self._mount_field_hints(frame, "completions_url")
@@ -2063,8 +2105,8 @@ class SettingsScreen(Screen):
                     effective_auth=auth,
                     verify=verify,
                     config_proxy=proxy,
-                    presets=endpoint_presets_from_config(self._config or {}),
-                    global_config=self._config,
+                    presets=endpoint_presets_from_config(self._settings),
+                    global_config=self._settings,
                     active_level=self._acting_level(),
                     legacy_editor_factory=self._make_legacy_model_editor,
                     legacy_hints=self._field_hint_specs("model"),
@@ -2077,7 +2119,7 @@ class SettingsScreen(Screen):
             from gc_tui.editors.mcp_section import McpSectionEditor
             from gc_tui.services.mcp_manager import McpManager
 
-            mgr = McpManager(user_config=self._config)
+            mgr = McpManager(settings=self._settings)
             frame.mount(
                 McpSectionEditor(manager=mgr, on_change=self._mcp_changed)
             )
@@ -2150,7 +2192,7 @@ class SettingsScreen(Screen):
             event.prevent_default()
             self._refresh_footer()
             return True
-        if event.key == "ctrl+s" and ed.save_form():
+        if event.key == _SAVE_KEY and ed.save_form():
             event.stop()
             event.prevent_default()
             self._refresh_footer()
@@ -2320,7 +2362,7 @@ class SettingsScreen(Screen):
             self._refresh_profile_overlay()
         try:
             self._on_apply()
-            self._config = getattr(self.app, "_config", None) or self._config
+            self._pull_base_from_app()
         except Exception as exc:
             self._notice(f"записано, но конфиг не перечитан: {exc}")
             return
@@ -2345,17 +2387,17 @@ class SettingsScreen(Screen):
 
         Профиль важнее голого реестра (реестр без профиля — частный случай, но явный
         выбранный профиль — более конкретная причина «эти поля не действуют»).
-        Источник — effective_config(): сессионный выбор профиля обязан отразиться в
+        Источник — effective_settings(): сессионный выбор профиля обязан отразиться в
         подсказке немедленно, как и everywhere в TUI."""
-        cfg = (
-            self.app.effective_config()
-            if hasattr(self.app, "effective_config")
-            else self._config
+        loaded = (
+            self.app.effective_settings()
+            if hasattr(self.app, "effective_settings")
+            else self._settings
         )
-        profile_name = cfg.get("profile") or None
+        profile_name = runtime_of(loaded).active_profile or None
         if profile_name:
             return f"действует профиль {profile_name} · эти поля — база для незаданного"
-        if cfg.get("models"):
+        if settings_of(loaded).models:
             return "действует реестр моделей · эти поля — база для незаданного"
         return None
 
@@ -2397,7 +2439,7 @@ class SettingsScreen(Screen):
             return self._voice_snapshot_value
         from dataclasses import replace
 
-        s = self._voice_setup.status_cheap(self._config)
+        s = self._voice_setup.status_cheap(self._settings)
         if s.installed and s.service_alive is None:
             # Дешёвый снимок живости не знает (None) — доносим последнюю замеренную.
             # Фасад, который знает сразу (тестовый), экран не поправляет.
@@ -2563,7 +2605,7 @@ class SettingsScreen(Screen):
                         "token": _VOICE_LOCAL_TOKEN,
                         "model": s.model or "",
                         "language": self._voice_setup.local_language(
-                            self._config
+                            self._settings
                         ),
                     },
                     fields=_VOICE_FIELDS,
@@ -2607,17 +2649,15 @@ class SettingsScreen(Screen):
                 fetch=self._voice_setup.list_models,
                 saved_token=str(raw_token or ""),
                 verify_ssl=self._voice_verify_ssl(),
-                config_proxy=self._config.get("proxy") or None,
+                config_proxy=self._cfg_settings().backend.proxy or None,
                 # Поле «URL» — со списком пресетов адреса (спека 2026-08-05 §3). Только
                 # облачная панель: локальная показывает адрес ФАКТОМ (readonly), и
                 # VoiceEndpointEditor сам не заводит список у readonly-поля.
-                url_presets=voice_endpoint_presets_from_config(
-                    self._config or {}
-                ),
+                url_presets=voice_endpoint_presets_from_config(self._settings),
                 save_hint=True,
             )
         )
-        if self._config.get("proxy"):
+        if self._cfg_settings().backend.proxy:
             # Только облачная панель: локальный сервис на этой же машине и идёт мимо
             # прокси — упоминать его там было бы неправдой.
             frame.mount(
@@ -2636,14 +2676,7 @@ class SettingsScreen(Screen):
     def _voice_verify_ssl(self):
         """voice.verify_ssl ДЕЙСТВУЮЩЕГО конфига (там ключ уже нормализован из
         `verify-ssl` схемой) или True — проверять сертификат по умолчанию."""
-        voice = (
-            self._config.get("voice")
-            if isinstance(self._config, dict)
-            else None
-        )
-        if not isinstance(voice, dict) or "verify_ssl" not in voice:
-            return True
-        return voice["verify_ssl"]
+        return self._cfg_settings().voice.verify_ssl
 
     def _voice_fields_shown(self) -> bool:
         """Есть ли что показывать в полях: у локального режима без батарейки — нет."""
@@ -2745,9 +2778,9 @@ class SettingsScreen(Screen):
         s = self._voice_status
         if s is None or s.port is None:
             return False
-        from gc_tui.voice_runtime.autostart import url_is_ours
+        from gc_tui.voice_runtime.autostart import voice_url_is_ours
 
-        return url_is_ours({"voice": {"url": url}}, s.port)
+        return voice_url_is_ours(str(url or ""), s.port)
 
     def _mount_voice_override_hint(self, frame: Vertical) -> None:
         text = self._voice_override_text()
@@ -2926,12 +2959,6 @@ class SettingsScreen(Screen):
         запомненная позиция после переключения может оказаться за краем."""
         n = len(self._voice_ribbon_fields())
         return min(max(self._voice_field_idx, 0), n - 1) if n else 0
-
-    def _voice_cursor_position(self) -> int:
-        """Позиция внутри текущей группы (у каждой она своя и помнится отдельно)."""
-        if self._voice_cursor_group() == _VOICE_GROUP_FIELDS:
-            return self._voice_field_position()
-        return self._voice_row
 
     def _voice_highlight_variants(self) -> bool:
         """Красить ли подложкой строку режима. Курсор один (спека §4.1): ушёл в поля —
@@ -3210,7 +3237,7 @@ class SettingsScreen(Screen):
             self._on_apply()
         except Exception:
             return False
-        self._config = getattr(self.app, "_config", None) or self._config
+        self._pull_base_from_app()
         # Конфиг перечитан — кэш снимка обесценен: он снят по прежним слоям.
         self._invalidate_voice_snapshot()
         return True
@@ -3225,7 +3252,7 @@ class SettingsScreen(Screen):
         suspend, без единого признака жизни. Паттерн
         тот же, что у probe: воркер + `call_from_thread` (виджеты трогаем только на
         UI-потоке). Сбой подъёма экран не роняет."""
-        cfg = self._config
+        cfg = self._settings
 
         def _work() -> None:
             from gc_tui.voice_runtime.autostart import ensure_voice_service
@@ -3291,13 +3318,24 @@ class SettingsScreen(Screen):
             ctrl.reload()
             self._refresh_footer()
             return
-        if self._voice_pane == "local" and self._voice_cursor_group() == _VOICE_GROUP_VARIANTS:
+        if (
+            self._voice_pane == "local"
+            and self._voice_cursor_group() == _VOICE_GROUP_VARIANTS
+        ):
             self._voice_enable_local()
 
     def _voice_is_dirty(self) -> bool:
         raw = self._voice_raw_cloud()
-        original = {"url": str(raw.get("url") or ""), "token": "", "model": str(raw.get("model") or ""), "language": str(raw.get("language") or "ru")}
-        if self._voice_cloud_draft is not None and self._voice_cloud_draft != original:
+        original = {
+            "url": str(raw.get("url") or ""),
+            "token": "",
+            "model": str(raw.get("model") or ""),
+            "language": str(raw.get("language") or "ru"),
+        }
+        if (
+            self._voice_cloud_draft is not None
+            and self._voice_cloud_draft != original
+        ):
             return True
         try:
             editor = self._voice_editor()
@@ -3306,7 +3344,9 @@ class SettingsScreen(Screen):
         values = editor.values()
         if self._voice_pane == "cloud":
             return values != original or editor.token_cleared
-        return values.get("language", "ru") != self._voice_setup.local_language(self._config)
+        return values.get(
+            "language", "ru"
+        ) != self._voice_setup.local_language(self._settings)
 
     def _voice_pick_from_list(self) -> bool:
         """Подставить подсвеченную строку списка ПОД КУРСОРОМ в его поле и свернуть
@@ -3394,7 +3434,7 @@ class SettingsScreen(Screen):
         # Действующий конфиг — фолбэк языка: managed-секции может уже не быть
         # (переезд на свой endpoint её сносит), а выбор человека терять нельзя.
         def _switch() -> bool:
-            return self._voice_setup.switch_to_local(config=self._config)
+            return self._voice_setup.switch_to_local(settings=self._settings)
 
         if installed:
             # Батарейка на месте — это просто wire (запись секции в config.local.yml):
@@ -3447,7 +3487,7 @@ class SettingsScreen(Screen):
         if s is None or not s.available_version:
             return
         ok = self._suspended(
-            lambda: self._voice_setup.update_local(self._config, echo=print),
+            lambda: self._voice_setup.update_local(self._settings, echo=print),
             f"\nОбновляю голосовой движок до {s.available_version} …\n",
         )
         if ok:
@@ -3621,7 +3661,7 @@ class SettingsScreen(Screen):
                 url,
                 token,
                 model,
-                config_proxy=self._config.get("proxy") or None,
+                config_proxy=self._cfg_settings().backend.proxy or None,
                 verify=verify_ssl,
             )
 
@@ -4159,7 +4199,7 @@ class SettingsScreen(Screen):
         self._raw = self._read_raw()
         try:
             self._on_apply()
-            self._config = getattr(self.app, "_config", None) or self._config
+            self._pull_base_from_app()
         except Exception as exc:
             self._notice(f"сохранено, но конфиг не перечитан: {exc}")
             return
@@ -4344,11 +4384,25 @@ class SettingsScreen(Screen):
             self._profiles_base_path(), project_doc=self._project_config_doc()
         )
 
+    def _file_profile_pointer(self):
+        """Указатель профиля В ФАЙЛАХ (база, managed, проект) — без флага
+        запуска `--profile`: именно его пишут активация и деактивация. Под
+        `gc-ua --profile X` `_config_profile()` вернул бы X, и экран отвечал бы
+        «уже активен» / писал `profile: ""` мимо того, что в файле."""
+        if getattr(self.app, "_profile_override", None) is None:
+            return self._config_profile()
+        from gc_core.config_modules.layers import resolve_profile_pointer
+
+        try:
+            return resolve_profile_pointer(self._profiles_base_path()) or None
+        except (OSError, ValueError):
+            return self._config_profile()
+
     def _deactivate_profile(self) -> None:
         """Space на «— без профиля» (клавиша перевешена решением В1 волны B):
         деактивация записью `profile: ""` по единому правилу записи; «ничего не
         активно» — честный no-op."""
-        config_active = self._config.get("profile") or None
+        config_active = self._file_profile_pointer()
         if config_active is None:
             self._title_note("профиль не выбран")
             return
@@ -4366,7 +4420,7 @@ class SettingsScreen(Screen):
             return
         try:
             self._on_apply()
-            self._config = getattr(self.app, "_config", None) or self._config
+            self._pull_base_from_app()
         except Exception as exc:
             self._notice(f"записано в {target}, но конфиг не перечитан: {exc}")
             return
@@ -4383,10 +4437,10 @@ class SettingsScreen(Screen):
 
     def _activate_profile(self, name: str, ref) -> None:
         """Space на строке профиля (клавиша перевешена решением В1 волны B). «Уже
-        активен» — сравнение с КОНФИГ-указателем (`self._config["profile"]`, то, что
+        активен» — сравнение с КОНФИГ-указателем (`_config_profile()`, то, что
         реально пишет активация), не с сессионным выбором: сессия — отдельный
         механизм (`/profiles`), запись файла её не трогает."""
-        config_active = self._config.get("profile") or None
+        config_active = self._file_profile_pointer()
         if name == config_active:
             self._title_note("уже активен")
             return
@@ -4409,7 +4463,7 @@ class SettingsScreen(Screen):
             return
         try:
             self._on_apply()
-            self._config = getattr(self.app, "_config", None) or self._config
+            self._pull_base_from_app()
         except Exception as exc:
             self._notice(f"записано в {target}, но конфиг не перечитан: {exc}")
             return
@@ -4477,7 +4531,7 @@ class SettingsScreen(Screen):
         """Файловые слои, чей указатель `profile:` называет `name` (проектный
         первым — порядок победы при merge).
 
-        Спрашивать «активен ли профиль» у merged-конфига (`self._config["profile"]`)
+        Спрашивать «активен ли профиль» у merged-конфига (`_config_profile()`)
         для файловых операций НЕЛЬЗЯ: там виден только слой-победитель, а `profile:`
         стоит в обоих файлах независимо. Базовый конфиг назвал `work`, проектный
         перекрыл на `corp` — merged отвечает «work не активен», и переименование/
@@ -4744,7 +4798,7 @@ class SettingsScreen(Screen):
         уже сказано notice'ом (сама операция при этом состоялась)."""
         try:
             self._on_apply()
-            self._config = getattr(self.app, "_config", None) or self._config
+            self._pull_base_from_app()
         except Exception as exc:
             self._render_view()
             self._notice(f"{done}, но конфиг не перечитан: {exc}")
@@ -4838,7 +4892,7 @@ class SettingsScreen(Screen):
         if after:
             return f"текущая сессия остаётся на «{after}» (сессионный выбор /profiles)"
         if before:
-            acting = (self._config.get("profile") or None) or "без профиля"
+            acting = self._config_profile() or "без профиля"
             return f"сессионный выбор «{before}» снят — действует «{acting}»"
         if not pointer_changed:
             return ""
@@ -5028,9 +5082,7 @@ class SettingsScreen(Screen):
         layers = self._profile_pointer_layers(name)
         if layers:
             active = (
-                " (сейчас активен)"
-                if (self._config.get("profile") or None) == name
-                else ""
+                " (сейчас активен)" if self._config_profile() == name else ""
             )
             parts.append(
                 f"Указатель на него{active} снимется в: "
@@ -5223,7 +5275,7 @@ class SettingsScreen(Screen):
         self, row: dict, rows: list[dict], selected: bool
     ) -> Text:
         name, ref = row["name"], row["ref"]
-        config_active = self._config.get("profile") or None
+        config_active = self._config_profile()
         name_w = self._profiles_name_width(rows)
         t = Text()
         t.append("▸ " if selected else "  ", style=ACCENT)
@@ -5284,7 +5336,7 @@ class SettingsScreen(Screen):
     def _none_row_text(self, rows: list[dict], selected: bool) -> Text:
         """Строка «— без профиля»: глобальная деактивация; `● активен` — когда
         конфиг-указатель пуст."""
-        config_active = self._config.get("profile") or None
+        config_active = self._config_profile()
         name_w = self._profiles_name_width(rows)
         t = Text()
         t.append("▸ " if selected else "  ", style=ACCENT)
@@ -5317,7 +5369,7 @@ class SettingsScreen(Screen):
             # имя не говорит, куда именно ляжет файл.
             return f"Enter — создать файл {self._profiles_base_root() / '<имя>.yml'}"
         if row["kind"] == "none":
-            if (self._config.get("profile") or None) is None:
+            if self._config_profile() is None:
                 # Единственная фраза секции о ДЕЙСТВУЮЩЕМ состоянии — остальное здесь
                 # про файл. Сессионный выбор его перекрывает, и «действует чистый
                 # конфиг» тогда прямая ложь: в силе профиль, который в это же время
@@ -5341,7 +5393,7 @@ class SettingsScreen(Screen):
             )
         if (
             self._project_sets_profile_pointer()
-            and (self._config.get("profile") or None) == name
+            and self._config_profile() == name
             and ref.root_kind != "project"
         ):
             lines.append("выбор задан .gc/config.yml проекта")
@@ -5563,10 +5615,6 @@ class SettingsScreen(Screen):
         endpoint, auth, verify, _m, proxy = self._probe_args_from_config(
             profile_cfg
         )
-        from gc_core.config_modules.endpoint_presets import (
-            endpoint_presets_from_config,
-        )
-
         frame.mount(
             ModelsSectionEditor(
                 target=row["ref"].path,
@@ -5585,15 +5633,14 @@ class SettingsScreen(Screen):
                 effective_auth=auth,
                 verify=verify,
                 config_proxy=proxy,
-                presets=endpoint_presets_from_config(
-                    profile_cfg or self._config or {}
-                ),
-                # Стек профиля не собрался — `profile_cfg` несёт одно подключение
-                # (`_open_profile_connection_by_documents`), раздела сжатия в нём нет.
+                presets=self._presets_of(profile_cfg),
+                # Стек профиля не собрался — документный ответ несёт одно
+                # подключение, раздела сжатия в нём нет.
                 global_config=(
                     profile_cfg
-                    if profile_cfg and "summary_params" in profile_cfg
-                    else self._config
+                    if profile_cfg is not None
+                    and not isinstance(profile_cfg, dict)
+                    else self._settings
                 ),
                 active_level=self._acting_level(),
                 on_change=self._models_changed,
@@ -5660,7 +5707,7 @@ class SettingsScreen(Screen):
         вида). `{"models", "slots", "assign", "base_url"}`.
 
         Источник — ДОКУМЕНТ базового config.yml (цель основной секции), а не
-        merged `self._config`: тот собран с УЖЕ АКТИВНЫМ профилем, и тень стала бы
+        merged база окна: она собрана с УЖЕ АКТИВНЫМ профилем, и тень стала бы
         гибридной — открытый профиль A показывал бы «основной конфиг» через оверлей
         активного профиля B. По той же причине адрес берётся отсюда, а не у
         `_probe_args_from_config` (он и есть про действующий runtime).
@@ -5705,36 +5752,35 @@ class SettingsScreen(Screen):
         остаёмся на runtime, как было.
 
         Тот же принцип, которым рядом строится тень базы (`_base_registry_snapshot`):
-        `self._config` собран с УЖЕ АКТИВНЫМ профилем, и адрес с токеном, взятые
+        база окна собрана с УЖЕ АКТИВНЫМ профилем, и адрес с токеном, взятые
         оттуда, — из чужого подключения. Профиль со своим `backend` показывал бы
         «наследуется: <адрес активного>», Ctrl+Space и список моделей формы стучались
         бы туда же и чужим токеном, а при активации роутер увёл бы те же записи совсем
         на другой адрес — витрина и проба врали бы обе.
 
-        Представление готовое: тем же `load_config_ex(..., profile_override=...)`
+        Представление готовое: тем же `load_settings(..., profile_override=...)`
         приложение собирает базу при сессионном переключении профиля
-        (`tui/app.py::_profile_remerge`) — с той разницей, что там профиль
+        (`tui/app.py::_profile_remerge_settings`) — с той разницей, что там профиль
         применяют, а здесь показывают; побочек на процесс у сбора нет, так что
         показ ничего не меняет в работающем агенте. Стек не собрался — отвечают ДОКУМЕНТЫ
         (`_open_profile_connection_by_documents`), и в ответе тогда одно только
         подключение: чужой runtime витрине не подходит ничем."""
-        if not self._config_path or name == (self._config or {}).get(
-            "profile"
+        if (
+            not self._config_path
+            or name == runtime_of(self._settings).active_profile
         ):
             return None
-        from gc_core.config import load_config_ex
+        from gc_core.config import load_settings
 
         try:
             # Витрина ПОКАЗЫВАЕТ чужой профиль, а не активирует его. Раньше для
             # этого был флаг `apply_to_process=False`: сбор перепривязывал
             # конвейер проекций всему процессу и глушил предупреждения TLS.
             # Обе побочки из сбора ушли, флаг снят.
-            cfg, _meta = load_config_ex(
-                self._config_path, profile_override=name
-            )
+            loaded = load_settings(self._config_path, profile_override=name)
         except Exception:
             return self._open_profile_connection_by_documents(name)
-        return cfg
+        return loaded
 
     def _open_profile_connection_by_documents(self, name: str) -> dict | None:
         """Подключение открытого профиля по ДОКУМЕНТАМ: `backend` базы, поверх
@@ -5785,15 +5831,28 @@ class SettingsScreen(Screen):
             backend.get("chat_completion_headers"),
         )
         proxy = backend.get("proxy")
-        return {
+        connection = {
             "completions_url": url if isinstance(url, str) else "",
             "chat_completion_headers": headers
             if isinstance(headers, dict)
             else {},
             "use_ssl": backend.get("use_ssl", True),
             "proxy": proxy if isinstance(proxy, str) else None,
-            "endpoint_presets": sections.get("endpoint_presets"),
         }
+        # Пресеты — только годные по форме: их читают типизированно (строго),
+        # а документ схему не проходил. Нет или не по форме — кодовый дефолт.
+        presets = sections.get("endpoint_presets")
+        if isinstance(presets, list):
+            from gc_core.config_modules.endpoint_presets import EndpointPreset
+
+            try:
+                for item in presets:
+                    EndpointPreset.model_validate(item)
+            except ValueError:
+                pass
+            else:
+                connection["endpoint_presets"] = presets
+        return connection
 
     def _profile_document(self, path) -> dict:
         """Сырой документ профиля через кэш прохода — сосед `_profile_summary`:
@@ -6058,7 +6117,9 @@ class SettingsScreen(Screen):
             # показываем короткое «uv», как он сам набрал бы в терминале.
             cmd = " ".join(
                 ["uv"]
-                + build_install_command(resolved, extra_args(self._config))[1:]
+                + build_install_command(resolved, extra_args(self._settings))[
+                    1:
+                ]
             )
             return (
                 f"Закроет агента, установка пойдёт {install_location_phrase()}; когда завершится — "
@@ -6190,7 +6251,7 @@ class SettingsScreen(Screen):
             self._update_awaiting_confirm = False
             self._render_view()
             return
-        command = build_install_command(resolved, extra_args(self._config))
+        command = build_install_command(resolved, extra_args(self._settings))
         # Без авто-рестарта — единообразно с `gc-cli --update`: фоновая переустановка,
         # пользователь запускает gc-ua заново (venv нельзя заменить под живым процессом).
         spawn_detached_update(
@@ -6233,7 +6294,7 @@ class SettingsScreen(Screen):
         lines = []
         try:
             self._on_apply()
-            self._config = getattr(self.app, "_config", None) or self._config
+            self._pull_base_from_app()
         except Exception as exc:
             lines.append(f"сохранено, но конфиг не перечитан: {exc}")
         lines.append(
@@ -6289,7 +6350,7 @@ class SettingsScreen(Screen):
         ]
         try:
             self._on_apply()
-            self._config = getattr(self.app, "_config", None) or self._config
+            self._pull_base_from_app()
         except Exception as exc:
             lines.append(f"сброшено, но конфиг не перечитан: {exc}")
         session_overrides = getattr(self.app, "_session_overrides", None) or {}
@@ -6300,7 +6361,7 @@ class SettingsScreen(Screen):
             )
         from gc_core import onboarding
 
-        if onboarding.is_unconfigured(self._config or {}):
+        if onboarding.is_unconfigured(self._settings):
             lines.append(
                 "настройка не завершена — откройте помощник (--init-config) или впишите поля вручную"
             )
@@ -6556,7 +6617,7 @@ class SettingsScreen(Screen):
         had_session = runner is not None
         try:
             self._on_apply()
-            self._config = getattr(self.app, "_config", None) or self._config
+            self._pull_base_from_app()
         except Exception as exc:
             self._notice(f"сохранено, но конфиг не перечитан: {exc}")
             return
@@ -6623,30 +6684,22 @@ class SettingsScreen(Screen):
         reveal_focus(self)
 
     def _sync_config_from_app(self) -> None:
-        """Подтянуть self._config из app при входе в секцию (см. _open_section):
+        """Подтянуть базу экрана из app при входе в секцию (см. _open_section):
         сама явно зовёт гейт свежести config.yml (reload_config_if_changed) —
         другое окно могло сохранить умолчание, пока этот экран уже открыт — и
-        только потом берёт актуальную базу через screen_config() (тот её лишь
+        только потом берёт актуальную базу через base_settings() (тот её лишь
         отдаёт, без собственной автоперечитки).
 
         Совпадение по ссылке — файл не менялся с прошлой синхронизации
-        (reload_config всегда создаёт новый dict, см. TuiApp.reload_config),
+        (reload_config всегда собирает новый объект, см. TuiApp.reload_config),
         сырые значения/происхождение перечитывать незачем: тот же приём хвоста
         записи, что и в _do_save/_modes_apply, только без своего
-        reload — здесь его уже выполнил гейт.
-
-        Пустая база — особый случай identity-сверки: и screen_config()
-        (`self._config or {}`), и конструктор этого экрана (`config or {}`) на
-        falsy-ветке аллоцируют НОВЫЙ {} при каждом обращении, так что `is` между
-        двумя пустыми базами лжёт «изменилось», хотя на диске (или в тестовом
-        конфиге) ничего не менялось. Ловим это явно, не ослабляя identity-ветку
-        для настоящих конфигов: там reload_config даёт новый объект РОВНО когда
-        файл реально изменился, и это по-прежнему единственный сигнал."""
+        reload — здесь его уже выполнил гейт."""
         self.app.reload_config_if_changed()  # вход в секцию: подхватить чужую правку глобала (дизайн 2026-07-21 §4)
-        fresh = self.app.screen_config()
-        if fresh is self._config or (not fresh and not self._config):
+        fresh = self.app.base_settings()
+        if fresh is self._settings:
             return
-        self._config = fresh
+        self._settings = fresh
         self._raw = self._read_raw()
         self._origins = self._read_origins()
 
@@ -6803,7 +6856,10 @@ class SettingsScreen(Screen):
         self.set_focus(None)
         self._singleton(
             "set-dirty-confirm",
-            Text("Выйти без сохранения? Enter — выйти без сохранения · Esc — остаться", style=WARN),
+            Text(
+                "Выйти без сохранения? Enter — выйти без сохранения · Esc — остаться",
+                style=WARN,
+            ),
             f"set-confirm set-dyn {KEEP_IN_VIEW}",
         )
         self._refresh_footer()
@@ -6997,7 +7053,12 @@ class SettingsScreen(Screen):
                     self._switch_section(delta)
                 else:
                     ed = self._models_editor()
-                    if self._view == _MODELS and ed is not None and ed.legacy_open and not ed.registry_empty:
+                    if (
+                        self._view == _MODELS
+                        and ed is not None
+                        and ed.legacy_open
+                        and not ed.registry_empty
+                    ):
                         ed.escape()
                         self._refresh_footer()
                     else:
@@ -7033,8 +7094,10 @@ class SettingsScreen(Screen):
             ed = self._models_editor()
             if ed is not None and ed.form_open and ed._form.is_dirty():
                 self._pending_section_delta = delta
-                while ed._form.escape():
-                    pass
+                # Свернуть все под-состояния формы: каждый Esc снимает одно.
+                collapsed = ed._form.escape()
+                while collapsed:
+                    collapsed = ed._form.escape()
                 ed.escape()
                 self._refresh_footer()
                 return
@@ -7157,7 +7220,7 @@ class SettingsScreen(Screen):
             ed = self._models_editor()
             if ed is not None and self._route_registry_editor(ed, event):
                 return
-        if event.key == "ctrl+s" and self._view == _CONNECTION:
+        if event.key == _SAVE_KEY and self._view == _CONNECTION:
             event.stop()
             if not self._writable():
                 self._notice("конфиг недоступен для записи")
@@ -7214,7 +7277,7 @@ class SettingsScreen(Screen):
                         -1 if event.key == "up" else 1
                     )  # навигация отменяет
                 return  # прочие клавиши — no-op, пока висит confirm
-            if event.key == "ctrl+s":
+            if event.key == _SAVE_KEY:
                 event.stop()
                 if self._voice_pane == "cloud":
                     self._voice_cloud_save()

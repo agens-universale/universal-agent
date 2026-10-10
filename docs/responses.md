@@ -29,11 +29,11 @@ uv tool install "gc-chat @ git+https://gitverse.ru/gigacode-ai/universal-agent#s
 ```bash
 gc-chat --config ./config.yml
 gc-chat --config ./config.yml --profile <имя>
-# любые --ключ value поверх профиля/config.yml (как у gc-cli / gc-acp):
-gc-chat --config ./config.yml --profile work --level max --chat_api_port 9001
+# настройки путём через точку поверх профиля/config.yml (как у gc-cli / gc-acp):
+gc-chat --config ./config.yml --profile work --level max --chat_api.port 9001
 ```
 
-Помимо `--config` / `--profile` любые `--ключ value` перекрывают runtime-конфиг так же, как у `gc-cli` (уровень `--level`, модель `--model`, порт `--chat_api_port` и т.д.; см. [переопределение из CLI](configuration.md#переопределение-настроек-из-cli)).
+Помимо `--config` / `--profile` настройку перекрывает путь через точку (`--chat_api.port 9001`, `--agent.max_steps 50`) и флаги `--model`, `--completions_url`, `--level` — так же, как у `gc-cli` (см. [переопределение из CLI](configuration.md#переопределение-настроек-из-cli)). Неизвестное имя, в том числе прежнее плоское (`--chat_api_port`), — ошибка с подсказкой пути, код выхода 2, порт не открывается.
 
 Без `--config` поиск конфига тот же, что у остальных команд: явный путь, затем `config.yml` в каталоге Config, затем пакетный шаблон. Конфиг не читается — сообщение в stderr, код выхода 1, порт не открывается.
 
@@ -54,17 +54,17 @@ gc-chat --config ./config.yml --profile work --level max --chat_api_port 9001
 | `chat_api.auth_token` | `""` | Пусто — заголовок не проверяется. Иначе каждый запрос к `/v1/` несёт `Authorization: Bearer <token>`, иначе 401 `invalid_api_key`. |
 | `chat_api.cors_origins` | `[]` | Пусто — CORS выключен: API доступен своей странице и не-браузерным клиентам. Непусто — только эти origin, методы `GET`, `POST`, `DELETE`, `OPTIONS`, заголовки `Authorization`, `Content-Type`. `"*"` из списка выбрасывается: любой сайт в браузере пользователя запускал бы агента с shell. Preflight с `Access-Control-Request-Private-Network` получает `Access-Control-Allow-Private-Network: true`. Страница чата открывается с порта этого процесса и CORS не использует. |
 | `chat_api.launch_root` | `null` | Рабочий каталог нового хода, если в запросе нет абсолютного `metadata.cwd`. Относительный путь не используется: тогда берётся каталог процесса. |
-| `chat_api.text_answer_mode` | `allow` | `deny`, `judge` или `allow`. После загрузки пишется в runtime-ключ `text_answer_mode`. |
-| `chat_api.finish_gate_mode` | `off` | `off`, `on` или `smart`. Пишется в `strict_turn_finish_validation` (`true`, когда режим не `off`) и `finish_gate_smart` (`true` только для `smart`). |
-| `chat_api.todo_reminder_steps` | `0` | Напоминания про `session_todo`. `0` — не напоминать. Сам тул остаётся. Значение пишется в `todo_params.reminder_steps` этого процесса. |
+| `chat_api.text_answer_mode` | `allow` | `deny`, `judge` или `allow`. После загрузки пишется в рантайм хода (`text_answer_mode`). |
+| `chat_api.finish_gate_mode` | `off` | `off`, `on` или `smart`. Пишется в `agent.strict_turn_finish_validation` (`true`, когда режим не `off`) и в рантайм-признак `finish_gate_smart` (`true` только для `smart`). |
+| `chat_api.todo_reminder_steps` | `0` | Напоминания про `session_todo`. `0` — не напоминать. Сам тул остаётся. Значение пишется в `todo.reminder_steps` этого процесса. |
 
 Защита от чужих сайтов в браузере (CSRF, DNS rebinding) действует всегда, токен её не заменяет: `POST` без `Content-Type: application/json` получает 415 — такой запрос браузер не шлёт без preflight. При bind на `127.0.0.1` или `localhost` заголовок `Host` должен быть `127.0.0.1` или `localhost`, иначе 400. При другом bind (например `0.0.0.0`) проверка `Host` выключена — закрывайте доступ токеном.
 
 Значения `off` и `on` в yaml пишите в кавычках: без них YAML читает их как boolean, и загрузка конфига падает.
 
-`agent.strict_turn_finish_validation` и уже лежащий в конфиге `text_answer_mode` на этом процессе не действуют: фасад перекрывает оба ключа после загрузки. То же с профилем и с CLI: `tui.text_answer_mode` / `tui.finish_gate_mode` и плоские `--text_answer_mode` / `--strict_turn_finish_validation` контракт канала не меняют — читаются только `chat_api.*`. Дефолт канала — проза без тула принимается, судья на `turn_finish` не зовётся. `session_todo` остаётся в схеме. Напоминания о нём этот процесс ставит в `0`, если в секции не задано другое число.
+`agent.strict_turn_finish_validation` и режим текстового ответа других поверхностей (`tui.text_answer_mode`) на этом процессе не действуют: после загрузки фасад ставит оба из секции `chat_api` — в том числе поверх профиля и CLI (`--tui.text_answer_mode`, `--agent.strict_turn_finish_validation`). Дефолт канала — проза без тула принимается, судья на `turn_finish` не зовётся. `session_todo` остаётся в схеме. Напоминания о нём этот процесс ставит в `0`, если в секции не задано другое число.
 
-После загрузки режим дописывает в `stop_tools` имена `turn_ask_human` и `turn_intermediate_reply`: ни вопроса человеку, ни промежуточной реплики в схеме нет. Прогресс пишется прозой. Ролевая вставка ставится на копию конфига перед созданием агента, не в общий словарь процесса. У хода Responses это `chat_completions_responses_special_instructions.md`: вопрос пользователю — проза ответа, следующий запрос — ответ человека. У хода Chat Completions другой файл: следующий запрос не увидит трейс. Свой `paths.chat_completions_special_instructions_path` на этом процессе не читается. Порт `ask_human` остаётся и сразу возвращает пустую строку, чтобы случайный вызов не читал stdin.
+После загрузки режим дописывает в `agent.stop_tools` имена `turn_ask_human` и `turn_intermediate_reply` (свои имена из конфига остаются): ни вопроса человеку, ни промежуточной реплики в схеме нет. Прогресс пишется прозой. Ролевая вставка ставится на копию настроек перед созданием агента, общие настройки процесса не меняются. У хода Responses это `chat_completions_responses_special_instructions.md`: вопрос пользователю — проза ответа, следующий запрос — ответ человека. У хода Chat Completions другой файл: следующий запрос не увидит трейс. Свой `paths.chat_completions_special_instructions_path` на этом процессе не читается. Порт `ask_human` остаётся и сразу возвращает пустую строку, чтобы случайный вызов не читал stdin.
 
 Неизвестный ключ внутри `chat_api` загрузка отклоняет (`extra=forbid`).
 

@@ -36,7 +36,9 @@ def test_readable_document_still_parses(tmp_path):
 def test_nested_reference_removal_requires_confirmation():
     from gc_core.config_raw import env_refs_overwritten
 
-    old = {"backend": {"chat_completion_headers": {"Authorization": "${ENV:KEY}"}}}
+    old = {
+        "backend": {"chat_completion_headers": {"Authorization": "${ENV:KEY}"}}
+    }
     assert env_refs_overwritten({"backend": {}}, old) == ([], ["KEY"])
     assert env_refs_overwritten({"backend": None}, old) == ([], ["KEY"])
     assert env_refs_overwritten({}, old) == ([], [])

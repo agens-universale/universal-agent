@@ -5,7 +5,7 @@ import getpass
 import re
 import sys
 from dataclasses import dataclass
-from typing import Callable
+from typing import Any, Callable
 
 from gc_core import onboarding
 from gc_core import onboarding_fields as _of
@@ -14,6 +14,7 @@ from gc_core.onboarding import (
     authorization_header,
     mask_authorization,
 )  # re-export
+from gc_core.settings import settings_of
 from gc_core.utils.is_number import is_number
 
 
@@ -163,15 +164,16 @@ def _collect_auth(io: WizardIO, values: dict) -> None:
     # 3 → пропуск (ничего не пишем, остаётся pending)
 
 
-def _effective(values: dict, config: dict, key: str, header: bool = False):
+def _effective(values: dict, backend, key: str, header: bool = False):
+    """Значение, введённое в этом прогоне, иначе — из секции ``backend``."""
     if header:
         v = values.get("Authorization")
         if v is None:
-            v = (config.get("chat_completion_headers") or {}).get(
-                "Authorization"
-            )
+            v = (backend.chat_completion_headers or {}).get("Authorization")
         return v
-    return values.get(key) if values.get(key) is not None else config.get(key)
+    if values.get(key) is not None:
+        return values.get(key)
+    return getattr(backend, key)
 
 
 def _print_models(io: WizardIO, shown, *, current: str) -> None:
@@ -187,7 +189,7 @@ def _print_models(io: WizardIO, shown, *, current: str) -> None:
 
 
 def _current_line(
-    config: dict, level: str, model_id: str, note: str = ""
+    settings: Any, level: str, model_id: str, note: str = ""
 ) -> str:
     """Строка «сейчас» шага. Имя записи в скобках — только когда слот задан:
     модель из легаси `agent.model` имени не имеет, и выдумывать его нельзя.
@@ -195,7 +197,7 @@ def _current_line(
     и с именем записи она не встречается."""
     if not model_id:
         return f"сейчас: {_of.LEVEL_UNSET} · Enter — оставить"
-    alias = (config.get("slots") or {}).get(level)
+    alias = getattr(settings_of(settings).slots, level)
     entry = f"  (имя записи «{alias}»)" if alias and alias != model_id else ""
     if note:
         entry = f"  {note}"
@@ -308,7 +310,7 @@ def _choose_model(io: WizardIO, models, *, current: str) -> str | None:
             # заново на следующем витке (pending остаётся None)
 
 
-def _fetch_models(config: dict, values: dict, fetch=None):
+def _fetch_models(settings: Any, values: dict, fetch=None):
     """Список моделей у провайдера — по адресу и токену, УЖЕ введённым в этом
     прогоне (иначе список пришёл бы со старого сервера). Сбой сети — None:
     шаг обязан продолжаться свободным вводом.
@@ -319,22 +321,23 @@ def _fetch_models(config: dict, values: dict, fetch=None):
     from gc_core.model_picker import fetch_models
 
     fetch = fetch or fetch_models
+    backend = settings_of(settings).backend
     endpoint = onboarding.configured_endpoint(
-        _effective(values, config, "completions_url")
+        _effective(values, backend, "completions_url")
     )
-    auth = _effective(values, config, "Authorization", header=True)
+    auth = _effective(values, backend, "Authorization", header=True)
     if auth == onboarding.TOKEN_SENTINEL:
         auth = None
     if not endpoint:
         return None
     try:
-        return fetch(endpoint, auth, verify=config.get("use_ssl", True))
+        return fetch(endpoint, auth, verify=backend.use_ssl)
     except Exception:
         return None
 
 
 def _collect_model(
-    io: WizardIO, config: dict, values: dict, *, fetch=None
+    io: WizardIO, settings: Any, values: dict, *, fetch=None
 ) -> list | None:
     """Шаг «Модель». Возвращает полученный список моделей (или None) — шаг
     уровней переиспользует его, второй поход в сеть за тем же ответом лишний.
@@ -350,13 +353,13 @@ def _collect_model(
     # первой — тот же шаг в TUI показывал модель активного уровня. Подпись —
     # источник модели фоллбэка при незаданном default (M12): без неё строка
     # пустела, и «оставить как есть» было не на чем.
-    current, fallback_note = onboarding.model_step_display(config)
+    current, fallback_note = onboarding.model_step_display(settings)
     if current:
         io.printer(
-            f"  {_current_line(config, 'default', current, note=fallback_note)}"
+            f"  {_current_line(settings, 'default', current, note=fallback_note)}"
         )
     io.printer(f"  {_of.MODEL_FETCHING}")
-    models = _fetch_models(config, values, fetch)
+    models = _fetch_models(settings, values, fetch)
     if not models:
         io.printer(f"  {_of.MODEL_NO_LIST}")
         raw = io.reader("  > ", False).strip()
@@ -374,7 +377,7 @@ def _collect_model(
 _LEVELS = ("light", "max")
 
 
-def _collect_levels(io: WizardIO, config: dict, values: dict, models) -> None:
+def _collect_levels(io: WizardIO, settings: Any, values: dict, models) -> None:
     """Шаг «Уровни моделей»: две независимые необязательные под-формы. Пропуск не
     пишет НИЧЕГО — заданный ранее уровень переживает прогон, в котором его
     пропустили (ключа нет в `values` → операции нет → слот не тронут).
@@ -390,8 +393,8 @@ def _collect_levels(io: WizardIO, config: dict, values: dict, models) -> None:
     for level in _LEVELS:
         io.printer("")
         io.printer(f"  {_of.LEVEL_FORM_LABEL[level]}")
-        current = onboarding.assigned_level_model(config, level)
-        io.printer(f"  {_current_line(config, level, current)}")
+        current = onboarding.assigned_level_model(settings, level)
+        io.printer(f"  {_current_line(settings, level, current)}")
         key = onboarding.MODEL_SLOT_KEYS[level]
         if not models:
             io.printer(f"  {_of.MODEL_NO_LIST}")
@@ -408,7 +411,7 @@ def _collect_levels(io: WizardIO, config: dict, values: dict, models) -> None:
 
 def _collect_endpoint(
     io: WizardIO,
-    config: dict,
+    settings: Any,
     values: dict,
     field: "_Field",
     *,
@@ -424,7 +427,9 @@ def _collect_endpoint(
     # пути ниже): показать её как действующий адрес значит соврать о том,
     # куда пойдёт запрос. Сюда она доходит, когда требование адреса закрыл
     # самодостаточный реестр, а плоский `backend` так и остался шаблонным.
-    current = onboarding.configured_endpoint(config.get("completions_url"))
+    current = onboarding.configured_endpoint(
+        settings_of(settings).backend.completions_url
+    )
     if review_all and field.leaf not in pending and current:
         io.printer(f"  [текущее: {current}]")
     while True:
@@ -439,8 +444,8 @@ def _collect_endpoint(
         )
 
 
-def collect_fields(io: WizardIO, config: dict, *, review_all: bool) -> dict:
-    pending = onboarding.pending_field_keys(config)
+def collect_fields(io: WizardIO, settings: Any, *, review_all: bool) -> dict:
+    pending = onboarding.pending_field_keys(settings)
     values: dict = {}
     models = None
     for field in _FIELDS:
@@ -450,12 +455,12 @@ def collect_fields(io: WizardIO, config: dict, *, review_all: bool) -> dict:
             _collect_auth(io, values)
             continue
         if field.kind == "model":
-            models = _collect_model(io, config, values)
+            models = _collect_model(io, settings, values)
             continue
         if field.kind == "endpoint":
             _collect_endpoint(
                 io,
-                config,
+                settings,
                 values,
                 field,
                 review_all=review_all,
@@ -465,7 +470,7 @@ def collect_fields(io: WizardIO, config: dict, *, review_all: bool) -> dict:
     if review_all:
         # Уровни не входят в требования запуска (`_FIELD_CHECKS`), и удлинять ими
         # аварийную донастройку незачем: их спрашивает только режим сверки.
-        _collect_levels(io, config, values, models)
+        _collect_levels(io, settings, values, models)
     return values
 
 
@@ -483,10 +488,11 @@ def default_io() -> WizardIO:
     return WizardIO(reader=reader, printer=lambda m: print(m, file=sys.stderr))
 
 
-def _reload_config() -> dict:
-    from gc_core.config import load_config
+def _reload_config() -> Any:
+    """Перечитать настройки с диска (``LoadedSettings``) — итог записи мастера."""
+    from gc_core.config import load_settings
 
-    return load_config(None)
+    return load_settings(None)
 
 
 def _select_single(io: WizardIO, hint: str, n: int, *, default):
@@ -530,25 +536,26 @@ def _mcp_step(io: WizardIO, mcp) -> None:
 _SUMMARY_LABEL = {"default": "модель", "light": "light", "max": "max"}
 
 
-def _summary_lines(config: dict) -> list[str]:
+def _summary_lines(settings: Any) -> list[str]:
     """Итог прогона: три уровня СВЕЖЕГО конфига. Пропущенный шаг и пустой слот
     выглядят одинаково — и это правда: сводка говорит, что лежит в файле, а не
     что человек вводил."""
     lines = []
+    slots = settings_of(settings).slots
     for level in ("default", "light", "max"):
-        model = onboarding.assigned_level_model(config, level)
+        model = onboarding.assigned_level_model(settings, level)
         via_fallback = not model and level == "default"
         if via_fallback:
             # Модель и подпись — из ядра (переехали туда для M12): те же слова
             # печатает строка «сейчас» шага «Модель» обеих поверхностей.
-            model, note = onboarding.default_fallback_model(config)
+            model, note = onboarding.default_fallback_model(settings)
         if not model:
             lines.append(f"    {_SUMMARY_LABEL[level]:<12} не задан")
             continue
         if via_fallback:
             entry = f"  {note}"
         else:
-            alias = (config.get("slots") or {}).get(level)
+            alias = getattr(slots, level)
             entry = (
                 f"  (имя записи «{alias}»)" if alias and alias != model else ""
             )
@@ -605,7 +612,7 @@ def _report_outcome(
 
 
 def run(
-    config: dict,
+    settings: Any,
     config_path,
     *,
     review_all: bool,
@@ -628,7 +635,7 @@ def run(
     refused = False
     wrote = False
     try:
-        values = collect_fields(io, config, review_all=review_all)
+        values = collect_fields(io, settings, review_all=review_all)
         # Снятие указателя — само по себе повод к записи: человек прошёл мастер
         # ради починки, и оставить конфиг несобираемым потому, что все поля он
         # пропустил, значит не сделать ровно то, что обещано строкой выше.
