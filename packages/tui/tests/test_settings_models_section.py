@@ -3853,7 +3853,7 @@ async def test_empty_summary_trigger_shows_the_threshold_from_the_config_file(
     from unittest import mock
 
     from gc_core import model_picker
-    from gc_core.config import load_config
+    from gc_core.config import load_settings
     from gc_tui import app as app_mod
     from gc_tui.editors.model_entry_form import ModelEntryForm
 
@@ -3863,8 +3863,8 @@ async def test_empty_summary_trigger_shows_the_threshold_from_the_config_file(
         "  chat_completions_summary_trigger_chars: 150000\n"
         "  chat_completions_summary_trigger_tokens: 60000\n",
     )
-    cfg = load_config(str(cfg_file))
-    app = app_mod.TuiApp(config=cfg)
+    cfg = load_settings(str(cfg_file))
+    app = app_mod.TuiApp(settings=cfg)
     with mock.patch.object(model_picker, "fetch_models", lambda *a, **k: []):
         async with app.run_test(size=(120, 80)) as pilot:
             scr = _mk_screen(config=cfg, config_path=str(cfg_file))

@@ -13,6 +13,7 @@
 
 from pathlib import Path
 
+from gc_testkit.settings import make_settings
 import pytest
 
 pytest.importorskip("textual")
@@ -54,6 +55,10 @@ def _form(**kwargs):
         "probe",
         lambda *a, **k: ProbeResult("unknown", None, None, 0, "нет сети"),
     )
+    # Пороги формы читает `settings_of`: плоский словарь после рефакторинга
+    # настроек не принимается. Тест, которому нужен свой раздел `summary`,
+    # передаёт `global_config` сам.
+    kwargs.setdefault("global_config", make_settings())
     return ModelEntryForm(**kwargs)
 
 
@@ -229,12 +234,14 @@ async def test_field_order_is_model_then_alias_then_thresholds():
         assert on_screen == [p for p in form._positions if p is not None]
 
 
-_GLOBAL_SUMMARY = {
-    "summary_params": {
-        "chat_completions_summary_trigger_chars": 200000,
-        "chat_completions_summary_trigger_tokens": 0,
+_GLOBAL_SUMMARY = make_settings(
+    {
+        "summary": {
+            "chat_completions_summary_trigger_chars": 200000,
+            "chat_completions_summary_trigger_tokens": 0,
+        }
     }
-}
+)
 
 
 def _summary_placeholders(form) -> tuple[str, str]:

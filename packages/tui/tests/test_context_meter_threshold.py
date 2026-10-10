@@ -199,25 +199,29 @@ async def test_meter_uses_per_model_mid_turn_threshold(tmp_path):
     # 500 символов при пороге модели 1000 → 50%.
     content = "x" * 500
     _write_task(tmp_path, tid, content)
-    config = {
-        "model": "M",
-        "backend_api_mode": "chat_completions",
-        "summary_params": {
-            "chat_completions_summary_trigger_chars": 10_000_000,
-            "chat_completions_summary_turn_end_trigger_chars": 1,
-        },
-        "models": {
-            "m": {
-                "model": "m",
-                "url": "http://x/v1/chat/completions",
-                "authorization_header": "",
-                "backend_overrides": {},
-                "summary_trigger_chars": 1000,
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings(
+            {
+                "agent.model": "M",
+                "backend.api_mode": "chat_completions",
+                "summary": {
+                    "chat_completions_summary_trigger_chars": 10_000_000,
+                    "chat_completions_summary_turn_end_trigger_chars": 1,
+                },
+                "models": {
+                    "m": {
+                        "model": "m",
+                        "url": "http://x/v1/chat/completions",
+                        "token": "",
+                        "summary_trigger_chars": 1000,
+                    }
+                },
+                "slots": {"default": "m"},
             }
-        },
-        "slots": {"default": "m"},
-    }
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config=config)
+        ),
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)
@@ -239,14 +243,7 @@ async def test_meter_follows_the_running_agent_not_the_live_screen(tmp_path):
 
     tid = "ctxm0000000000000000000000000009a"
     _write_task(tmp_path, tid, "x" * 500)
-    config = {
-        "model": "M",
-        "backend_api_mode": "chat_completions",
-        "summary_params": {
-            "chat_completions_summary_trigger_chars": 1000,
-            "chat_completions_summary_turn_end_trigger_chars": 600,
-        },
-    }
+    settings = tui_settings(_cfg(trigger=1000, turn_end=600))
     pinned = ResolvedSummaryLimits(
         chars_during=2000,
         tokens_during=0,
@@ -256,7 +253,7 @@ async def test_meter_follows_the_running_agent_not_the_live_screen(tmp_path):
         max_dialogue_chars=0,
     )
     running = {"value": True}
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config=config)
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", settings=settings)
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)
