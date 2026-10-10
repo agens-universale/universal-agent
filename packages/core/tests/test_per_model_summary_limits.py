@@ -1,9 +1,11 @@
 """Пороги суммаризации на models.<alias>: резолв mid/turn-end/батч/диалог."""
 
-from gc_core.config import flatten_app_config
 from gc_core.config_modules.root import AppConfig, resolve_paths
-from gc_core.config_modules.summary import DEFAULT_INCREMENTAL_BATCH_MULTIPLIER
-from gc_core.model_router import ModelRouter
+from gc_core.config_modules.summary import (
+    DEFAULT_INCREMENTAL_BATCH_MULTIPLIER,
+    SummaryConfig,
+)
+from gc_core.model_router import ModelRouter, serialize_model_entry
 from gc_core.summarize.config import (
     resolve_summary_limits,
     resolve_summary_limits_at_level,
@@ -12,10 +14,8 @@ from pydantic import ValidationError
 import pytest
 
 
-def _cfg(raw: dict) -> dict:
-    app = AppConfig.model_validate(raw)
-    resolve_paths(app, ".")
-    return flatten_app_config(app)
+def _cfg(raw: dict) -> AppConfig:
+    return resolve_paths(AppConfig.model_validate(raw), ".")
 
 
 def _global_summary(
@@ -102,25 +102,21 @@ def test_both_zero_or_missing_uses_global_summary_params():
         }
     )
     for alias in ("a", "b"):
-        entry = cfg["models"][alias]
+        entry = cfg.models[alias]
         limits = resolve_summary_limits(
             cfg,
-            model_chars=entry.get("summary_trigger_chars", 0),
-            model_tokens=entry.get("summary_trigger_tokens", 0),
+            model_chars=entry.summary_trigger_chars,
+            model_tokens=entry.summary_trigger_tokens,
         )
         assert limits.chars_during == 200000
         assert limits.tokens_during == 50000
         assert (
             limits.chars_after
-            == cfg["summary_params"][
-                "chat_completions_summary_turn_end_trigger_chars"
-            ]
+            == cfg.summary.chat_completions_summary_turn_end_trigger_chars
         )
         assert (
             limits.tokens_after
-            == cfg["summary_params"][
-                "chat_completions_summary_turn_end_trigger_tokens"
-            ]
+            == cfg.summary.chat_completions_summary_turn_end_trigger_tokens
         )
         assert limits.incremental_batch_chars == 111
         assert limits.max_dialogue_chars == 1000000
@@ -141,11 +137,11 @@ def test_chars_only_on_model_zeros_token_scale_and_derives_batch_dialogue():
             "slots": {"default": "m"},
         }
     )
-    entry = cfg["models"]["m"]
+    entry = cfg.models["m"]
     limits = resolve_summary_limits(
         cfg,
-        model_chars=entry["summary_trigger_chars"],
-        model_tokens=entry.get("summary_trigger_tokens", 0),
+        model_chars=entry.summary_trigger_chars,
+        model_tokens=entry.summary_trigger_tokens,
     )
     assert limits.chars_during == 100000
     assert limits.tokens_during == 0
@@ -170,11 +166,11 @@ def test_tokens_only_on_model_zeros_char_scale_and_uses_chars_per_token():
             "slots": {"default": "m"},
         }
     )
-    entry = cfg["models"]["m"]
+    entry = cfg.models["m"]
     limits = resolve_summary_limits(
         cfg,
-        model_chars=entry.get("summary_trigger_chars", 0),
-        model_tokens=entry["summary_trigger_tokens"],
+        model_chars=entry.summary_trigger_chars,
+        model_tokens=entry.summary_trigger_tokens,
     )
     assert limits.chars_during == 0
     assert limits.tokens_during == 116128
@@ -206,15 +202,13 @@ def test_unset_turn_end_and_batch_match_global_derivation():
             "slots": {"default": "m"},
         }
     )
-    params = cfg["summary_params"]
+    params = cfg.summary
     limits = resolve_summary_limits(cfg, model_chars=1, model_tokens=0)
-    assert params["chat_completions_summary_turn_end_trigger_chars"] == 1
+    assert params.chat_completions_summary_turn_end_trigger_chars == 1
     assert limits.chars_after == 1
     assert limits.tokens_after == 0
     assert (
-        limits.incremental_batch_chars
-        == params["incremental_batch_chars"]
-        == 1
+        limits.incremental_batch_chars == params.incremental_batch_chars == 1
     )
     assert limits.max_dialogue_chars == 5
 
@@ -226,18 +220,16 @@ def test_unset_turn_end_and_batch_match_global_derivation():
             }
         }
     )
-    token_params = tokens_only["summary_params"]
+    token_params = tokens_only.summary
     token_limits = resolve_summary_limits(
         tokens_only, model_chars=0, model_tokens=1
     )
-    assert (
-        token_params["chat_completions_summary_turn_end_trigger_tokens"] == 1
-    )
+    assert token_params.chat_completions_summary_turn_end_trigger_tokens == 1
     assert token_limits.tokens_after == 1
     assert token_limits.chars_after == 0
     assert (
         token_limits.incremental_batch_chars
-        == token_params["incremental_batch_chars"]
+        == token_params.incremental_batch_chars
         == 2
     )
 
@@ -269,8 +261,14 @@ def test_resolved_model_exposes_summary_triggers_zero_means_unset():
     unset = router.resolve("main")
     assert unset.summary_trigger_chars == 0
     assert unset.summary_trigger_tokens == 0
-    assert "summary_trigger_chars" not in cfg["models"]["unset"]
-    assert cfg["models"]["set"]["summary_trigger_chars"] == 100000
+    # 0 в проекции роутера не пишется: отсутствие ключа и ноль читаются одинаково.
+    assert "summary_trigger_chars" not in serialize_model_entry(
+        cfg.models["unset"]
+    )
+    assert (
+        serialize_model_entry(cfg.models["set"])["summary_trigger_chars"]
+        == 100000
+    )
 
 
 def test_snapshot_zero_and_missing_key_resolve_alike():
@@ -292,23 +290,22 @@ def test_snapshot_zero_and_missing_key_resolve_alike():
             "slots": {"default": "explicit_zero"},
         }
     )
-    zero = cfg["models"]["explicit_zero"]
-    missing = cfg["models"]["missing"]
+    zero = cfg.models["explicit_zero"]
+    missing = cfg.models["missing"]
     a = resolve_summary_limits(
         cfg,
-        model_chars=zero.get("summary_trigger_chars", 0),
-        model_tokens=zero.get("summary_trigger_tokens", 0),
+        model_chars=zero.summary_trigger_chars,
+        model_tokens=zero.summary_trigger_tokens,
     )
     b = resolve_summary_limits(
         cfg,
-        model_chars=missing.get("summary_trigger_chars", 0),
-        model_tokens=missing.get("summary_trigger_tokens", 0),
+        model_chars=missing.summary_trigger_chars,
+        model_tokens=missing.summary_trigger_tokens,
     )
     assert a == b
 
 
-@pytest.mark.asyncio
-def _two_level_cfg() -> dict:
+def _two_level_cfg() -> AppConfig:
     return _cfg(
         {
             "summary": _global_summary(chars=999999),
@@ -363,7 +360,7 @@ async def test_threshold_belongs_to_the_model_pinned_for_the_turn():
     cfg = _two_level_cfg()
     router = ModelRouter(cfg, level_provider=lambda: level["current"])
     state = _chat_state()
-    ctx = SimpleNamespace(config_dict=cfg, model_router=router, logger=None)
+    ctx = SimpleNamespace(settings=cfg, model_router=router, logger=None)
     begin_turn(state, ctx)
 
     def provider():
@@ -421,7 +418,7 @@ def test_executor_reports_the_limits_its_turn_runs_on():
     level = {"current": "light"}
     cfg = _two_level_cfg()
     router = ModelRouter(cfg, level_provider=lambda: level["current"])
-    ctx = SimpleNamespace(config_dict=cfg, model_router=router)
+    ctx = SimpleNamespace(settings=cfg, model_router=router)
     executor = AgentExecutor(ctx)
     assert executor.summary_limits().chars_during == 10  # хода ещё нет — живой
 
@@ -508,7 +505,7 @@ def _capture_summarizer(monkeypatch, ctx) -> dict:
     async def _fake(**kwargs):
         seen["batch_chars"] = kwargs.get("batch_chars")
         seen["max_dialogue_chars"] = kwargs.get("max_dialogue_chars")
-        seen["summary_params"] = ctx.config_dict.get("summary_params")
+        seen["summary"] = ctx.settings.summary
         raise _SummarizerReached
 
     monkeypatch.setattr(
@@ -526,7 +523,7 @@ def _light_turn(level: dict):
     cfg = _two_level_cfg()
     router = ModelRouter(cfg, level_provider=lambda: level["current"])
     ctx = SimpleNamespace(
-        config_dict=cfg,
+        settings=cfg,
         model_router=router,
         logger=None,
         on_summary_applied=None,
@@ -573,7 +570,7 @@ async def test_compaction_keeps_global_values_for_a_model_without_thresholds(
         }
     )
     ctx = SimpleNamespace(
-        config_dict=cfg,
+        settings=cfg,
         model_router=ModelRouter(cfg, level_provider=lambda: "default"),
         logger=None,
     )
@@ -591,14 +588,14 @@ async def test_compaction_keeps_global_values_for_a_model_without_thresholds(
 async def test_automatic_compaction_does_not_rewrite_the_shared_config(
     monkeypatch,
 ):
-    """Раньше батч модели доезжал подменой `config_dict["summary_params"]` на
+    """Раньше батч модели доезжал подменой ``settings.summary`` на
     время сжатия. Общий конфиг сжатие не трогает: раздел — тот же объект."""
     from gc_core.run_summary_coordinator import RunSummaryCoordinator
 
     level = {"current": "light"}
     cfg, ctx, state = _light_turn(level)
-    original = cfg["summary_params"]
-    snapshot = dict(original)
+    original = cfg.summary
+    snapshot = original.model_dump()
     seen = _capture_summarizer(monkeypatch, ctx)
 
     def provider():
@@ -621,9 +618,9 @@ async def test_automatic_compaction_does_not_rewrite_the_shared_config(
     )
     with pytest.raises(_SummarizerReached):
         await coord.aforce_compact_once(trigger_reason="t")
-    assert seen["summary_params"] is original
-    assert cfg["summary_params"] is original
-    assert original == snapshot
+    assert seen["summary"] is original
+    assert cfg.summary is original
+    assert original.model_dump() == snapshot
     assert seen["batch_chars"] == 12
 
 
@@ -666,11 +663,11 @@ def test_session_compact_tool_uses_the_models_batch(monkeypatch):
 
 
 def test_summarizer_limits_prefer_explicit_values_over_the_config():
-    """Положительное значение от вызывающего главнее `summary_params`; 0 — «не
+    """Положительное значение от вызывающего главнее ``settings.summary``; 0 — «не
     задано», берётся конфиг, а без него — дефолт суммаризатора."""
     from gc_core.summarize.thread_summarizer import _SummaryLimits
 
-    params = {"incremental_batch_chars": 500, "max_dialogue_chars": 900}
+    params = SummaryConfig(incremental_batch_chars=500, max_dialogue_chars=900)
     explicit = _SummaryLimits(params, batch_chars=72, max_dialogue_chars=300)
     assert (explicit.batch_chars_limit, explicit.max_dialogue_chars) == (
         72,
@@ -681,7 +678,7 @@ def test_summarizer_limits_prefer_explicit_values_over_the_config():
         500,
         900,
     )
-    defaults = _SummaryLimits({})
+    defaults = _SummaryLimits(SummaryConfig())
     assert (defaults.batch_chars_limit, defaults.max_dialogue_chars) == (
         10**12,
         1000000,
