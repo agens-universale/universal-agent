@@ -89,7 +89,7 @@ async def _run_with_tools(monkeypatch, tools):
     monkeypatch.setattr(
         runner_mod,
         "resolve_summary_limits_at_level",
-        lambda cfg, router, level: resolve_summary_limits({}),
+        lambda cfg, router, level: resolve_summary_limits(None),
     )
 
     async def _create(*a, **k):

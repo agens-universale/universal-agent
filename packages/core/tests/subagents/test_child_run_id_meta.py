@@ -71,7 +71,7 @@ def _wire(monkeypatch, runner, child, *, run_id="run-abc"):
     monkeypatch.setattr(
         runner_mod,
         "resolve_summary_limits_at_level",
-        lambda cfg, router, level: resolve_summary_limits({}),
+        lambda cfg, router, level: resolve_summary_limits(None),
     )
 
     async def _create(*a, **k):

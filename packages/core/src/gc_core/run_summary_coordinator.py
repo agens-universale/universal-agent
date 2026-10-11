@@ -193,7 +193,9 @@ class RunSummaryCoordinator:
         self._is_cli_mode = is_cli_mode
         self._pre_backend_trigger_reason = pre_backend_trigger_reason
         self._logger = logger
-        self._proj_tags = projection_tags_from_config(ctx)
+        # Теги читаются при сжатии, не в конструкторе: нулевой порог — no-op,
+        # и контекст без настроек (заглушка ребёнка) до settings_of не доходит.
+        self._proj_tags: tuple[str, ...] | None = None
         # Слепой токенный порог: был ли уже хук (значит, и главный запрос) и
         # сказано ли об этом в лог в этом прогоне.
         self._backend_requested = False
@@ -210,6 +212,11 @@ class RunSummaryCoordinator:
         self._summary_trigger_tokens = limits.tokens_during
         self._turn_end_trigger_chars = limits.chars_after
         self._turn_end_trigger_tokens = limits.tokens_after
+
+    def _projection_tags(self) -> tuple[str, ...]:
+        if self._proj_tags is None:
+            self._proj_tags = projection_tags_from_config(self._ctx)
+        return self._proj_tags
 
     def _collect_garbage(self) -> None:
         collect = getattr(self._ctx, "collect_garbage", None) or gc.collect
@@ -258,7 +265,7 @@ class RunSummaryCoordinator:
                     state=state,
                     summary_trigger_chars=self._summary_trigger_chars,
                     summary_trigger_tokens=self._summary_trigger_tokens,
-                    tags=self._proj_tags,
+                    tags=self._projection_tags(),
                     strip_think=True,
                 )
                 if not hits:
@@ -346,7 +353,7 @@ class RunSummaryCoordinator:
                 state=self._state,
                 summary_trigger_chars=self._summary_trigger_tokens
                 * SUMMARY_CHARS_PER_TOKEN,
-                tags=self._proj_tags,
+                tags=self._projection_tags(),
                 strip_think=True,
             )
         ):
@@ -383,7 +390,7 @@ class RunSummaryCoordinator:
             state=state,
             summary_trigger_chars=self._summary_trigger_chars,
             summary_trigger_tokens=self._summary_trigger_tokens,
-            tags=self._proj_tags,
+            tags=self._projection_tags(),
             strip_think=True,
         )
         if not hits:
@@ -459,7 +466,7 @@ class RunSummaryCoordinator:
             state=state,
             summary_trigger_chars=self._turn_end_trigger_chars,
             summary_trigger_tokens=self._turn_end_trigger_tokens,
-            tags=self._proj_tags,
+            tags=self._projection_tags(),
             strip_think=True,
         )
         if not hits:
