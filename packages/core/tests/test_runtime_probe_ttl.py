@@ -11,13 +11,11 @@ from gc_core.backends.runtime_probe import (
     RuntimeProbeCache,
     RuntimeUnavailable,
 )
-from gc_testkit.runtime_probe import probe_stdout
-from gc_core.config import load_config
-from gc_core.config_modules.agent import (
-    AgentConfig,
-    runtime_probe_ttl_sec_from_config_dict,
-)
+from gc_core.config import load_settings
+from gc_core.config_modules.agent import AgentConfig
 from gc_core.config_modules.root import AppConfig
+from gc_testkit.runtime_probe import probe_stdout
+from gc_testkit.settings import make_settings
 
 
 def _ok_run(calls: list):
@@ -37,29 +35,17 @@ def _ok_run(calls: list):
     return run
 
 
-def test_ttl_accessor_defaults_zero_and_rejects_garbage():
-    assert (
-        runtime_probe_ttl_sec_from_config_dict({})
-        == DEFAULT_RUNTIME_PROBE_TTL_SEC
+def test_ttl_schema_defaults_zero_and_rejects_garbage():
+    assert AgentConfig().runtime_probe_ttl_sec == DEFAULT_RUNTIME_PROBE_TTL_SEC
+    assert AgentConfig(runtime_probe_ttl_sec=None).runtime_probe_ttl_sec == (
+        DEFAULT_RUNTIME_PROBE_TTL_SEC
     )
-    assert (
-        runtime_probe_ttl_sec_from_config_dict({"runtime_probe_ttl_sec": 0})
-        == 0
-    )
-    assert (
-        runtime_probe_ttl_sec_from_config_dict({"runtime_probe_ttl_sec": 20})
-        == 20
-    )
-    assert (
-        runtime_probe_ttl_sec_from_config_dict(
-            {"runtime_probe_ttl_sec": "abc"}
-        )
-        == DEFAULT_RUNTIME_PROBE_TTL_SEC
-    )
-    assert (
-        runtime_probe_ttl_sec_from_config_dict({"runtime_probe_ttl_sec": -1})
-        == DEFAULT_RUNTIME_PROBE_TTL_SEC
-    )
+    assert AgentConfig(runtime_probe_ttl_sec=0).runtime_probe_ttl_sec == 0
+    assert AgentConfig(runtime_probe_ttl_sec=20).runtime_probe_ttl_sec == 20
+    with pytest.raises(ValueError, match="runtime_probe_ttl_sec"):
+        AgentConfig(runtime_probe_ttl_sec="abc")
+    with pytest.raises(ValueError, match="runtime_probe_ttl_sec"):
+        AgentConfig(runtime_probe_ttl_sec=-1)
 
 
 def test_agent_config_accepts_zero_and_rejects_negative():
@@ -82,8 +68,8 @@ def test_flat_config_carries_ttl(tmp_path):
         ),
         encoding="utf-8",
     )
-    cfg = load_config(str(cfg_path))
-    assert cfg["runtime_probe_ttl_sec"] == 0
+    agent = load_settings(str(cfg_path)).settings.agent
+    assert agent.runtime_probe_ttl_sec == 0
     assert (
         AppConfig.model_validate({}).agent.runtime_probe_ttl_sec
         == DEFAULT_RUNTIME_PROBE_TTL_SEC
@@ -94,15 +80,23 @@ def test_factory_passes_ttl_to_harbor_and_remote():
     loop = asyncio.new_event_loop()
     try:
         harbor = resolve_os_backend(
-            {"os_backend": "harbor", "runtime_probe_ttl_sec": 0},
+            make_settings(
+                {
+                    "os_backend": "harbor",
+                    "agent.runtime_probe_ttl_sec": 0,
+                }
+            ),
             environment=object(),
             loop=loop,
         )
         remote = resolve_os_backend(
-            {
-                "os_backend": {"kind": "docker", "docker": {"name": "box"}},
-                "runtime_probe_ttl_sec": 7,
-            }
+            make_settings(
+                {
+                    "os_backend.kind": "docker",
+                    "os_backend.docker.name": "box",
+                    "agent.runtime_probe_ttl_sec": 7,
+                }
+            )
         )
     finally:
         loop.close()
