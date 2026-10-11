@@ -23,13 +23,15 @@ from gc_core.attachments.texts import (
 )
 from gc_core.constants.tool_names import FS_VIEW_IMAGE_NAME
 from gc_core.model_router import ModelRouter
-from gc_core.vision.rejects import (
-    process_image_rejects,
-    reset_image_rejects_for_tests,
-)
 from gc_testkit import run_coro
+from gc_testkit.settings import fake_ctx, make_settings
 
-from vision_fakes import route_key, warm_routes, unsupported
+from vision_fakes import (
+    clear_image_rejects,
+    route_key,
+    unsupported,
+    warm_routes,
+)
 from gc_core.vision.rejects import mark_blind
 
 URL = "http://test-host/v1/chat/completions"
@@ -51,9 +53,9 @@ READ_TOOL = {
 
 @pytest.fixture(autouse=True)
 def _fresh_rejects():
-    reset_image_rejects_for_tests()
+    clear_image_rejects()
     yield
-    reset_image_rejects_for_tests()
+    clear_image_rejects()
 
 
 @pytest.fixture
@@ -71,29 +73,31 @@ def capture_responses(monkeypatch):
 
 def _cfg(mode: str = "chat_completions") -> dict:
     return {
-        "model": MODEL,
-        "completions_url": URL,
-        "agent_url": "http://test-host/v1/responses",
-        "stream": False,
-        "backend_api_mode": mode,
-        "chat_completions_max_tokens": 256,
-        "chat_completions_min_response_tokens": 64,
-        "backend_request_timeout_sec": 600,
-        "use_ssl": False,
-        "use_retry": False,
-        "x_cl_id": "test-cl-id",
+        "agent.model": MODEL,
+        # Адрес обоих режимов API — `backend.completions_url` (прежнего
+        # плоского `agent_url` в схеме нет).
+        "backend.completions_url": URL,
+        "backend.stream": False,
+        "backend.api_mode": mode,
+        "backend.chat_completions_max_tokens": 256,
+        "backend.chat_completions_min_response_tokens": 64,
+        "backend.request_timeout_sec": 600,
+        "backend.use_ssl": False,
+        "backend.use_retry": False,
+        "agent.x_cl_id": "test-cl-id",
     }
 
 
 def _ctx(tmp_path, cfg: dict, *, with_router: bool = True) -> SimpleNamespace:
     """Легаси-роутер (пустой реестр): модель запроса и «глаза» — одна модель."""
-    return SimpleNamespace(
-        config_dict=cfg,
+    loaded = make_settings(cfg)
+    return fake_ctx(
+        loaded=loaded,
         on_stream_delta=None,
         logger=logging.getLogger("test_outbound_images"),
         auth_connector=None,
         is_tui=False,
-        model_router=ModelRouter(cfg, level_provider=lambda: "default")
+        model_router=ModelRouter(loaded, level_provider=lambda: "default")
         if with_router
         else None,
         image_store=ImageStore(str(tmp_path)),
@@ -319,7 +323,7 @@ def test_a_model_declared_text_only_gets_notes_without_a_rejection(
     """`backend.vision: false` — прокси молча выбрасывает картинку, отказа не
     будет: картинка не уходит с первого же запроса, без пометки процесса."""
     cfg = _cfg()
-    cfg["backend_vision"] = False
+    cfg["backend.vision"] = False
     ctx = _ctx(tmp_path, cfg)
     att, message = _user_with_image(ctx.image_store)
     state = _state([message], tools=[READ_TOOL, VIEW_TOOL])

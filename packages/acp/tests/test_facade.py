@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 from gc_acp.facade import AcpFacade
 from gc_core.thread_store import append_new_thread_messages
+from gc_testkit.settings import make_settings
 
 
 class MemoryWriter:
@@ -100,10 +101,9 @@ def _open(tmp_path, factory=None):
 
     writer = MemoryWriter()
     facade = AcpFacade(
-        config={
-            "threads_data_path": str(tmp_path),
-            "os_backend": "local",
-        },
+        settings=make_settings(
+            {"paths.threads_data_path": str(tmp_path), "os_backend": "local"}
+        ),
         writer=writer,
         agent_factory=factory or default_factory,
     )
@@ -261,8 +261,8 @@ async def test_prompt_streams_and_second_turn_keeps_the_thread(tmp_path):
     assert agent.calls[0][0] == "see\nreadme (file:///tmp/readme)"
     assert agent.calls[0][1]["thread_id"] == session_id
     assert agent.calls[0][1]["system"] == "acp"
-    assert agent.seen_config["launch_root"] == "/work/app"
-    assert "launch_root" not in facade._config
+    assert agent.seen_config.runtime.launch_root == "/work/app"
+    assert facade._settings.runtime.launch_root is None
     assert await agent.executor._ctx.ask_human("вопрос?") == ""
 
     agent.deltas = [("answer", "ещё")]

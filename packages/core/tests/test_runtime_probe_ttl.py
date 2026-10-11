@@ -10,8 +10,8 @@ from gc_core.backends.runtime_probe import (
     _PROBE_FAILURE_DETAIL_CHARS,
     RuntimeProbeCache,
     RuntimeUnavailable,
-    probe_stdout,
 )
+from gc_testkit.runtime_probe import probe_stdout
 from gc_core.config import load_config
 from gc_core.config_modules.agent import (
     AgentConfig,

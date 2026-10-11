@@ -1,5 +1,6 @@
 """/skills загружает реестр; /skill <id> открывает описание в Viewer."""
 
+from gc_testkit.tui_support import tui_settings
 import pytest
 
 
@@ -33,7 +34,9 @@ async def test_skills_command_lists_from_registry(tmp_path, monkeypatch):
     from textual.widgets import Static
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")

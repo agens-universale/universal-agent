@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Set, Tuple
 
 from gc_core.config_modules.pricing import resolve_model_tariff
+from gc_core.settings import AppConfig, settings_of
 
 
 class Notice(NamedTuple):
@@ -25,14 +26,11 @@ _DEPRECATED_KEYS = {"backend.stream": "tui.stream"}
 
 
 def _stop_tools_unknown(
-    config_dict: Dict[str, Any],
+    settings: AppConfig,
     builtin_tool_names: Set[str],
     known_tool_names: Optional[Set[str]] = None,
 ) -> List[Notice]:
-    raw = config_dict.get("stop_tools")
-    if not isinstance(raw, list):
-        return []
-    stop = {s.strip() for s in raw if isinstance(s, str) and s.strip()}
+    stop = {s.strip() for s in settings.agent.stop_tools if s.strip()}
     # Каталог до вычитания (builtin + то, что собрал build_tools_data: скиллы,
     # MCP, сабагенты). Сверять с уже отфильтрованным набором нельзя: успешно
     # снятый тул снова станет опечаткой. Отдельного вечного списка skills_* нет —
@@ -90,12 +88,12 @@ def _deprecated(deprecated_keys_used: Optional[List[str]]) -> List[Notice]:
     return out
 
 
-def _pricing_no_rates(config_dict: Dict[str, Any]) -> List[Notice]:
+def _pricing_no_rates(settings: AppConfig) -> List[Notice]:
     """Ставки не заданы: у провайдеров без фактической цены денег видно не будет."""
-    pricing = config_dict.get("pricing")
-    if not isinstance(pricing, dict) or not pricing.get("enabled"):
+    pricing = settings.pricing
+    if not pricing.enabled:
         return []
-    if resolve_model_tariff(pricing, config_dict.get("model")) is not None:
+    if resolve_model_tariff(pricing, settings.agent.model) is not None:
         return []
     return [
         Notice(
@@ -109,8 +107,8 @@ def _pricing_no_rates(config_dict: Dict[str, Any]) -> List[Notice]:
     ]
 
 
-def _agentsmd(config_dict: Dict[str, Any], *, is_tui: bool) -> List[Notice]:
-    override = bool(config_dict.get("agentsmd_override"))
+def _agentsmd(settings: AppConfig, *, is_tui: bool) -> List[Notice]:
+    override = settings.tui.agentsmd_override
     if not override:
         return []
     if not is_tui:
@@ -123,7 +121,7 @@ def _agentsmd(config_dict: Dict[str, Any], *, is_tui: bool) -> List[Notice]:
                 highlights=("--agentsmd-override",),
             )
         ]
-    if config_dict.get("agent_md_path"):
+    if settings.paths.agent_md_path:
         # В TUI при заданном пути: путь главнее флага → override не применён.
         # Эквивалент warning из build_instructions (условие: is_tui and agentsmd_override).
         return [
@@ -160,28 +158,23 @@ def _upgrade(upgrade_info) -> List[Notice]:
     ]
 
 
-def _subagent_definitions(config_dict: Dict[str, Any]) -> List[Notice]:
+def _subagent_definitions(settings: AppConfig) -> List[Notice]:
     """Пропущенные файлы кастомных сабагентов и отброшенные имена.
 
     Дискавери зовём здесь намеренно: он читает несколько локальных .md и потому
-    дёшев (в отличие от MCP-дискавери, который ленив). Благодаря мемоизации в
-    config_dict повторного чтения не будет, а уведомления доступны сразу на
+    дёшев (в отличие от MCP-дискавери, который ленив). Уведомления доступны сразу на
     старте TUI, до первого запроса — иначе оператор узнал бы о пропущенном файле
     только после того, как сабагент не нашёлся.
 
     Молча пропущенный файл — ровно та же беда, что `stop_tools` с опечаткой:
     оператор что-то написал, оно не сработало, и в логе он это не увидит.
     """
-    if not str(config_dict.get("subagents_dir") or "").strip():
+    if not (settings.agent.subagents_dir or "").strip():
         return []
     try:
-        from gc_core.tools.subagents.registry import (
-            SUBAGENT_DIAGNOSTICS_KEY,
-            resolve_subagent_definitions,
-        )
+        from gc_core.tools.subagents.registry import subagent_diagnostics
 
-        resolve_subagent_definitions(config_dict)
-        records = config_dict.get(SUBAGENT_DIAGNOSTICS_KEY) or []
+        records = subagent_diagnostics(settings)
     except Exception:  # уведомления не должны ронять старт
         return []
 
@@ -274,7 +267,7 @@ def _basename(path: Any) -> str:
 
 
 def collect_startup_notices(
-    config_dict: Dict[str, Any],
+    settings: Any,
     builtin_tool_names: Set[str],
     mcp_status: Optional[Dict[str, Any]],
     *,
@@ -295,17 +288,21 @@ def collect_startup_notices(
     `known_tool_names` — каталог до вычитания ``stop_tools``. Без него
     валидатор видит только builtin: выключенный скилл-тул не считается
     известным, пока сборка не передала его имя.
+
+    ``settings`` — всё, что принимает ``settings_of`` (``LoadedSettings``,
+    ``AppConfig``, контекст).
     """
+    settings = settings_of(settings)
     warns: List[Notice] = []
     infos: List[Notice] = []
     for n in (
-        _stop_tools_unknown(config_dict, builtin_tool_names, known_tool_names)
-        + _subagent_definitions(config_dict)
+        _stop_tools_unknown(settings, builtin_tool_names, known_tool_names)
+        + _subagent_definitions(settings)
         + _mcp_failed(mcp_status)
-        + _agentsmd(config_dict, is_tui=is_tui)
+        + _agentsmd(settings, is_tui=is_tui)
         + list(extra)
         + _compat(compat_notices)
-        + _pricing_no_rates(config_dict)
+        + _pricing_no_rates(settings)
         + _deprecated(deprecated_keys_used)
         + _upgrade(upgrade_info)
     ):

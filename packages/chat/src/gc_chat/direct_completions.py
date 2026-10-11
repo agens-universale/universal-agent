@@ -11,6 +11,7 @@ from uuid import uuid4
 
 from fastapi import Request
 from fastapi.responses import Response, StreamingResponse
+from gc_core.settings import LoadedSettings, settings_of
 from gc_core.utils.async_http import get_async_client
 from gc_core.utils.connect_backend import (
     acreate_call_headers,
@@ -29,8 +30,10 @@ _SSE = "text/event-stream"
 class DirectCompletions:
     """Прямой запрос: без агента, без треда, один вызов бэкенда."""
 
-    def __init__(self, *, config: dict, auth_connector: Any = None) -> None:
-        self._config = config
+    def __init__(
+        self, *, settings: LoadedSettings, auth_connector: Any = None
+    ) -> None:
+        self._settings = settings
         self._auth = auth_connector
 
     async def forward(self, body: dict, request: Request) -> Response:
@@ -43,8 +46,8 @@ class DirectCompletions:
 
     async def _open(self, body: dict) -> Any:
         try:
-            url, verify, cert, timeout, proxies = _network(self._config)
-            headers = await _backend_headers(self._config, self._auth)
+            url, verify, cert, timeout, proxies = _network(self._settings)
+            headers = await _backend_headers(self._settings, self._auth)
             client = get_async_client(
                 verify=verify, cert=cert, proxies=proxies
             )
@@ -61,21 +64,23 @@ class DirectCompletions:
             return _server_error()
 
 
-def _network(config: dict) -> tuple:
-    url = config.get("completions_url")
+def _network(settings: LoadedSettings) -> tuple:
+    url = settings_of(settings).backend.completions_url
     if not isinstance(url, str) or url == "":
         raise RuntimeError("completions url is empty")
     verify, cert, _retry, timeout, proxy, _embedded = resolve_network_params(
-        config, None
+        settings, None
     )
     proxies = resolve_proxies(proxy, os.environ, url)
     return url, verify, cert, timeout, proxies
 
 
-async def _backend_headers(config: dict, auth_connector: Any) -> dict:
+async def _backend_headers(
+    settings: LoadedSettings, auth_connector: Any
+) -> dict:
     """Те же заголовки, что у хода агента к своей модели. Bearer клиента нет."""
     state = SimpleNamespace(state_id=str(uuid4()), x_target=None)
-    ctx = SimpleNamespace(config_dict=config, auth_connector=auth_connector)
+    ctx = SimpleNamespace(settings=settings, auth_connector=auth_connector)
     return await acreate_call_headers(state, ctx, resolved=None)
 
 

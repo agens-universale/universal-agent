@@ -13,7 +13,7 @@ DEFAULT_TOOL_USAGE_NOTICE_STEP_MESSAGES = 16
 class ToolUsageNoticeRule(BaseModel):
     """Правило «не вызывали tool N persist-шагов» → technical notice."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     tool_name: str
     step_messages_count: int = DEFAULT_TOOL_USAGE_NOTICE_STEP_MESSAGES
@@ -56,52 +56,36 @@ def normalize_tool_usage_notice_rules(
 
 
 def tool_usage_notice_rules_from_config_dict(
-    config_dict: dict[str, Any] | None,
+    settings: Any,
 ) -> list[ToolUsageNoticeRule]:
-    """Активные правила notice из ``tool_usage_notice`` / ``tool_usage_notice_params``."""
-    raw = (config_dict or {}).get("tool_usage_notice")
-    rules: list[ToolUsageNoticeRule] = []
-    if isinstance(raw, list):
-        for item in raw:
-            if isinstance(item, ToolUsageNoticeRule):
-                rules.append(item)
-            elif isinstance(item, dict):
-                rules.append(ToolUsageNoticeRule.model_validate(item))
-    params = (config_dict or {}).get("tool_usage_notice_params")
-    if not rules and isinstance(params, list):
-        for item in params:
-            if isinstance(item, dict):
-                rules.append(ToolUsageNoticeRule.model_validate(item))
-    return normalize_tool_usage_notice_rules(rules)
+    """Правила notice из ``tool_usage_notice`` настроек (нормализованные).
 
+    ``settings`` — всё, что принимает ``settings_of``.
+    """
+    # Ленивый импорт: settings → root → этот модуль.
+    from gc_core.settings import settings_of
 
-def _stopped_tools(config_dict: dict[str, Any] | None) -> set[str]:
-    stop = (
-        config_dict.get("stop_tools")
-        if isinstance(config_dict, dict)
-        else None
+    return normalize_tool_usage_notice_rules(
+        list(settings_of(settings).tool_usage_notice)
     )
-    if not isinstance(stop, list):
-        return set()
+
+
+def _stopped_tools(settings: Any) -> set[str]:
+    from gc_core.settings import settings_of
+
     return {
-        str(item).strip()
-        for item in stop
-        if isinstance(item, str) and item.strip()
+        item.strip()
+        for item in settings_of(settings).agent.stop_tools
+        if item.strip()
     }
 
 
 def active_tool_usage_notice_rules(
-    config_dict: dict[str, Any] | None,
+    settings: Any,
 ) -> list[ToolUsageNoticeRule]:
-    stopped = _stopped_tools(config_dict)
+    stopped = _stopped_tools(settings)
     return [
         rule
-        for rule in tool_usage_notice_rules_from_config_dict(config_dict)
+        for rule in tool_usage_notice_rules_from_config_dict(settings)
         if rule.tool_name not in stopped
     ]
-
-
-def tool_usage_notice_policy_enabled(
-    config_dict: dict[str, Any] | None,
-) -> bool:
-    return bool(active_tool_usage_notice_rules(config_dict))

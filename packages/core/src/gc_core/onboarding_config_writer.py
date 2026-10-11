@@ -385,7 +385,7 @@ def upsert_mapping_entry(
     отступом); функция доиндентивает каждую строку на колонку УЖЕ ЛЕЖАЩИХ
     соседей (родитель + 2 — только когда соседей нет, `_child_indent_len`).
     Родителя нет в `text` → `KeyError` (вызывающий сначала гарантирует якорь
-    через `ensure_section_anchor`). Родитель пуст (`key:` без детей ИЛИ
+    через `ensure_section_anchor_text`). Родитель пуст (`key:` без детей ИЛИ
     `key: {}`) → первая запись, инлайновая `{}` нормализуется в блочную форму, а
     трейлинг-комментарий строки родителя переезжает вместе с ней. Родитель —
     НЕПУСТОЙ инлайновый мэппинг → `ValueError` (`_empty_parent_tail`).
@@ -892,9 +892,9 @@ def ensure_section_anchor_text(
       соседа по порядку шаблона (`_top_level_insert_at` видит и закомментированные
       топ-ключи — иначе секции реестра валились бы в хвост файла).
 
-    Текстовая форма — не только ради вызывающего с путём (`ensure_section_anchor`):
-    слой записи реестра собирает весь итоговый текст в памяти и пишет ОДИН раз,
-    иначе отвергнутая валидацией запись всё равно оставляла бы в файле якорь."""
+    Текстовая форма: слой записи реестра собирает весь итоговый текст в памяти и
+    пишет ОДИН раз, иначе отвергнутая валидацией запись всё равно оставляла бы в
+    файле якорь."""
     try:
         find_anchor(text, section)
         return text
@@ -910,23 +910,6 @@ def ensure_section_anchor_text(
         sep = "" if text.endswith("\n") else "\n"
         return text + sep + "\n" + block
     return text[:insert_at] + "\n" + block + text[insert_at:]
-
-
-def ensure_section_anchor(path, section: str, template_text: str) -> None:
-    """`ensure_section_anchor_text` для файла: якорь уже есть — идемпотентный
-    no-op (файл не переписывается), иначе атомарная запись текста с якорем."""
-    path = Path(path)
-    text = read_user_text(path)
-    new_text = ensure_section_anchor_text(text, section, template_text)
-    if new_text == text:
-        return
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    try:
-        tmp.write_text(new_text, encoding="utf-8")
-        atomic_replace(str(tmp), str(path))
-    finally:
-        if tmp.exists():
-            tmp.unlink(missing_ok=True)
 
 
 # Живые шаблоны пишут закомментированную секцию как «# key:» — с пробелом после

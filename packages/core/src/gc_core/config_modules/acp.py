@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class AcpConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     # Как поступать с текстовым ответом без tool-call в IDE-чате.
     # По умолчанию allow: обсуждение и правка доки — нормальный сценарий ACP.

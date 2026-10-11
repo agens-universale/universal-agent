@@ -17,6 +17,7 @@ from gc_core.security.read_guard import (
     expand_path_placeholders,
     parse_read_guard_config,
 )
+from gc_testkit.settings import make_settings
 
 
 @pytest.fixture
@@ -174,41 +175,52 @@ def test_expand_placeholder_tilde():
     assert out == os.path.realpath(os.path.expanduser("~/.ssh"))
 
 
-def test_parse_disabled_when_no_command_moderation():
+def test_parse_defaults_are_secure_by_default():
     """
-    Если в config_dict отсутствует блок command_moderation, read_guard
-    должен быть выключен (semantics same as root_box).
+    Без блока ``read_guard`` в настройках — умолчания модели: гард включён,
+    режим ask (secure-by-default). Прежний runtime-fallback «нет блока в
+    плоском словаре → выключен» ушёл вместе с плоским видом: в проде
+    настройки всегда несли блок целиком.
     """
-    parsed = parse_read_guard_config({})
-    assert parsed.enabled is False
+    parsed = parse_read_guard_config(make_settings())
+    assert parsed.enabled is True
+    assert parsed.mode == "ask"
 
 
-def test_parse_default_disabled_when_read_guard_block_absent():
+def test_parse_reads_only_read_guard_block():
     """
-    Safe-by-default-OFF: даже если command_moderation присутствует,
-    read_guard выключен без явного top-level `read_guard.enabled: true`.
+    Чужие блоки (command_moderation) на read_guard не влияют; поля
+    read_guard без явного значения берут умолчание модели.
     """
-    parsed = parse_read_guard_config({"command_moderation": {"mode": "deny"}})
-    assert parsed.enabled is False
+    parsed = parse_read_guard_config(
+        make_settings({"security.command_moderation": {"mode": "deny"}})
+    )
+    assert parsed.enabled is True
+    assert parsed.mode == "ask"
 
     parsed = parse_read_guard_config(
-        {"read_guard": {"mode": "deny"}}
+        make_settings({"security.read_guard": {"mode": "deny"}})
     )  # без enabled
-    assert parsed.enabled is False
-
-    parsed = parse_read_guard_config({"read_guard": {"enabled": True}})
     assert parsed.enabled is True
+    assert parsed.mode == "deny"
+
+    parsed = parse_read_guard_config(
+        make_settings({"security.read_guard": {"enabled": False}})
+    )
+    assert parsed.enabled is False
 
 
 def test_parse_respects_explicit_config():
     parsed = parse_read_guard_config(
-        {
-            "read_guard": {
-                "enabled": False,
-                "mode": "ask",
-                "denied_read_paths": ["/secret"],
-            },
-        }
+        make_settings(
+            {
+                "security.read_guard": {
+                    "enabled": False,
+                    "mode": "ask",
+                    "denied_read_paths": ["/secret"],
+                },
+            }
+        )
     )
     assert parsed.enabled is False
     assert parsed.mode == "ask"
@@ -263,12 +275,12 @@ def test_resolve_skills_root_default_and_custom(tmp_path):
     from gc_core.security.read_guard import _resolve_skills_root
 
     # Без skills_data_path → берёт <project_root>/skills.
-    default = _resolve_skills_root({})
+    default = _resolve_skills_root(make_settings())
     assert default is not None
     assert default.endswith(os.sep + "skills")
 
     # С явным skills_data_path → возвращается он.
     custom = str(tmp_path / "my_skills")
     assert _resolve_skills_root(
-        {"skills_data_path": custom}
+        make_settings({"paths.skills_data_path": custom})
     ) == os.path.abspath(custom)

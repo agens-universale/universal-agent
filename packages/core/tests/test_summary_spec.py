@@ -10,11 +10,8 @@ from gc_core.summarize.summary_spec import (
     SUMMARY_SECTIONS,
     SUMMARY_SECTIONS_PLACEHOLDER,
     agent_summary_slice_mode,
-    agent_visible_section_tags,
     assemble_summary_xml,
     extract_summary_bodies,
-    format_section_tags_for_repair,
-    hint_section_tags,
     merge_summary_bodies,
     render_output_shape_for_prompt,
     render_sections_for_prompt,
@@ -80,11 +77,6 @@ class SummarySpecTest(unittest.TestCase):
             self.assertIn(f"<{section.tag}>", block)
             self.assertIn(section.description.strip().splitlines()[0], block)
 
-    def test_repair_lists_same_tags(self) -> None:
-        self.assertEqual(
-            tuple(format_section_tags_for_repair().split(", ")), section_tags()
-        )
-
     def test_merge_repair_keeps_preserved_tags(self) -> None:
         pad = "- test content for validation padding."
         invalid = assemble_summary_xml(
@@ -113,10 +105,11 @@ class SummarySpecTest(unittest.TestCase):
     def test_slice_short_only_agent_visible_tags(self) -> None:
         full = valid_summary_xml_for_tests()
         short = slice_summary(full, "short")
-        for tag in agent_visible_section_tags():
-            self.assertIn(f"<{tag}>", short)
-        for tag in hint_section_tags():
-            self.assertNotIn(f"<{tag}>", short)
+        for section in SUMMARY_SECTIONS:
+            if section.agent_visible:
+                self.assertIn(f"<{section.tag}>", short)
+            else:
+                self.assertNotIn(f"<{section.tag}>", short)
 
     def test_slice_full_all_canon_tags(self) -> None:
         full = assemble_summary_xml(

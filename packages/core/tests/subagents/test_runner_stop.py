@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 from gc_core.states import SharedStateData, State
 from gc_core.tools.subagents.runner import SubagentRunner
+from gc_testkit.settings import fake_ctx
 
 
 def _make_orchestrator_state():
@@ -27,22 +28,20 @@ def _make_orchestrator_state():
 
 def _make_config(**overrides):
     cfg = {
-        "use_local_subagents": True,
-        "backend_api_mode": "chat_completions",
-        "enabled_tools": [],
-        "skills_data_path": "",
-        "mcp_servers": [],
-        "model": "test-model",
-        "system_prompt_id": "test-prompt",
-        "subagent_max_steps": 30,
+        "agent.use_local_subagents": True,
+        "backend.api_mode": "chat_completions",
+        "paths.skills_data_path": "",
+        "agent.model": "test-model",
+        "agent.system_prompt_id": "test-prompt",
+        "agent.subagent_max_steps": 30,
     }
     cfg.update(overrides)
     return cfg
 
 
 def _make_ctx(cfg=None):
-    return SimpleNamespace(
-        config_dict=cfg or _make_config(),
+    return fake_ctx(
+        cfg or _make_config(),
         auth_connector=None,
         logger=None,
         logging_path="",
@@ -65,7 +64,7 @@ class TestStopRequestedPropagation:
             captured["kwargs"] = kwargs
             return "done"
 
-        runner = SubagentRunner(ctx, orch, cfg)
+        runner = SubagentRunner(ctx, orch)
 
         with patch.object(
             runner, "_build_child_ctx", return_value=SimpleNamespace()
@@ -88,7 +87,7 @@ class TestStopRequestedPropagation:
             captured["check_stop"] = kwargs["check_stop"]
             return "done"
 
-        runner = SubagentRunner(ctx, orch, cfg)
+        runner = SubagentRunner(ctx, orch)
 
         with patch.object(
             runner, "_build_child_ctx", return_value=SimpleNamespace()
@@ -116,7 +115,7 @@ class TestStopRequestedPropagation:
                 return None
             return "should not reach"
 
-        runner = SubagentRunner(ctx, orch, cfg)
+        runner = SubagentRunner(ctx, orch)
 
         with patch.object(
             runner, "_build_child_ctx", return_value=SimpleNamespace()
@@ -139,7 +138,7 @@ class TestStopRequestedPropagation:
         async def fake_run_agent(messages, child_state, child_ctx, **kwargs):
             return None
 
-        runner = SubagentRunner(ctx, orch, cfg)
+        runner = SubagentRunner(ctx, orch)
         with patch.object(
             runner,
             "_build_child_ctx",
@@ -164,7 +163,7 @@ class TestStopRequestedPropagation:
             stop_values.append(kwargs["check_stop"]())
             return "ok"
 
-        runner = SubagentRunner(ctx, orch, cfg)
+        runner = SubagentRunner(ctx, orch)
 
         with patch.object(
             runner, "_build_child_ctx", return_value=SimpleNamespace()

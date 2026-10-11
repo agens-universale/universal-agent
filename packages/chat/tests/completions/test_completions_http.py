@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from gc_chat.completions.facade import CompletionsFacade
 from gc_chat.completions.history import SYSTEM
 from gc_chat.completions.http_api import create_app
+from gc_testkit.settings import make_settings
 
 # Host-guard пускает только loopback (gc_chat.http_guard).
 LOOPBACK = "http://127.0.0.1"
@@ -58,15 +59,15 @@ def _app(tmp_path):
     threads.mkdir()
     agent = _Agent(str(threads))
 
-    async def factory(config, **kwargs):
-        del config, kwargs
+    async def factory(settings, **kwargs):
+        del settings, kwargs
         return agent
 
     facade = CompletionsFacade(
-        config={
-            "model": "agent-model",
-            "threads_data_path": str(threads),
-        },
+        settings=make_settings(
+            **{"agent.model": "agent-model"},
+            **{"paths.threads_data_path": str(threads)},
+        ),
         agent_factory=factory,
     )
     return create_app(facade), agent, threads

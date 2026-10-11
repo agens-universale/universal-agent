@@ -49,10 +49,8 @@ def test_is_a_full_backend():
 async def test_probe_precedes_the_remote_command(monkeypatch):
     """Проба — первый ``sh -c``, без ``cd``. Команда идёт только после суммы."""
     from gc_core.backends.protocol import ExecResult
-    from gc_core.backends.runtime_probe import (
-        RuntimeUnavailable,
-        probe_stdout,
-    )
+    from gc_core.backends.runtime_probe import RuntimeUnavailable
+    from gc_testkit.runtime_probe import probe_stdout
 
     calls = []
 
@@ -104,10 +102,8 @@ async def test_probe_precedes_the_remote_command(monkeypatch):
 async def test_short_command_timeout_does_not_shrink_the_probe(monkeypatch):
     """``timeout: 1`` у команды не режет echo: проба всегда ждёт свои 60 с."""
     from gc_core.backends.protocol import ExecResult
-    from gc_core.backends.runtime_probe import (
-        _RUNTIME_PROBE_TIMEOUT_SEC,
-        probe_stdout,
-    )
+    from gc_core.backends.runtime_probe import _RUNTIME_PROBE_TIMEOUT_SEC
+    from gc_testkit.runtime_probe import probe_stdout
 
     seen = []
 

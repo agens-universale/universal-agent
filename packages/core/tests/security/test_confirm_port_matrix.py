@@ -6,8 +6,6 @@ Backward-compat: old ids once/session/deny mapped to new ids.
 Invalid → deny_remember. allow = choice in (allow_remember, allow_once).
 """
 
-import types
-
 from gc_core.security import confirm_port as cp
 from gc_core.security.confirm_port import (
     CONFIRM_ALLOW_ONCE,
@@ -17,6 +15,7 @@ from gc_core.security.confirm_port import (
     request_confirm,
 )
 from gc_core.security.permission_store import PermissionStore
+from gc_testkit.settings import fake_ctx
 
 
 def _ctx(choice, store=None):
@@ -26,10 +25,9 @@ def _ctx(choice, store=None):
         calls["n"] += 1
         return choice
 
-    return types.SimpleNamespace(
+    return fake_ctx(
         is_tui=True,
         tui_confirm=tui_confirm,
-        config_dict={},
         permission_store=store,
     ), calls
 
@@ -225,9 +223,8 @@ def test_unavailable_confirm_is_deny_once_not_session(monkeypatch):
     """No confirm channel → deny_once: block without poisoning insession denied."""
     store = PermissionStore()
     monkeypatch.setattr(cp, "confirm_available", lambda ctx: False)
-    ctx = types.SimpleNamespace(
+    ctx = fake_ctx(
         is_tui=False,
-        config_dict={},
         permission_store=store,
         tui_confirm=None,
     )

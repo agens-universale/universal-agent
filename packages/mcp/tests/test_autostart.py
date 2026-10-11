@@ -7,6 +7,7 @@ from textwrap import dedent
 from unittest.mock import patch
 
 import pytest
+from gc_testkit.settings import make_settings
 from recommended_mcp.autostart import (
     ensure_daemons_for_agent,
     wait_daemon_url_ready,
@@ -33,7 +34,7 @@ def test_resolve_manifest_from_gc_config(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(
         env_vars, "env", env_vars.EnvVars(gc_config_dir=gc_config)
     )
-    path = resolve_agent_manifest_path({})
+    path = resolve_agent_manifest_path(make_settings())
     assert path == manifest.resolve()
 
 
@@ -54,8 +55,8 @@ def test_ensure_starts_only_configured_http_mcp(tmp_path: Path) -> None:
             install: {type: pypi, package: ddgs-mcp==0.1.0}
         """,
     )
-    config_dict = {
-        "mcp-servers": {
+    config = {
+        "mcp.servers": {
             "science": {
                 "transport": "stream_http",
                 "url": "http://127.0.0.1:8765/mcp",
@@ -74,7 +75,7 @@ def test_ensure_starts_only_configured_http_mcp(tmp_path: Path) -> None:
                 "recommended_mcp.autostart.wait_daemon_url_ready",
                 return_value=True,
             ) as wait_ready:
-                ensure_daemons_for_agent(config_dict)
+                ensure_daemons_for_agent(make_settings(config))
     run_entry.assert_called_once()
     assert run_entry.call_args.args[0].name == "science"
     wait_ready.assert_called_once_with("http://127.0.0.1:8765/mcp")
@@ -96,8 +97,8 @@ def test_ensure_skips_ready_wait_when_daemon_already_running(
               args: ["--transport", "http"]
         """,
     )
-    config_dict = {
-        "mcp-servers": {
+    config = {
+        "mcp.servers": {
             "science": {
                 "transport": "stream_http",
                 "url": "http://127.0.0.1:8765/mcp",
@@ -112,7 +113,7 @@ def test_ensure_skips_ready_wait_when_daemon_already_running(
             with patch(
                 "recommended_mcp.autostart.wait_daemon_url_ready"
             ) as wait_ready:
-                ensure_daemons_for_agent(config_dict)
+                ensure_daemons_for_agent(make_settings(config))
     wait_ready.assert_not_called()
 
 
@@ -180,7 +181,7 @@ def test_wired_but_not_installed_daemon_does_not_kill_the_frontend(
         """,
     )
     config = {
-        "mcp-servers": {
+        "mcp.servers": {
             "science": {
                 "transport": "stream_http",
                 "url": "http://127.0.0.1:8765/mcp",
@@ -192,7 +193,9 @@ def test_wired_but_not_installed_daemon_does_not_kill_the_frontend(
         }
     }
 
-    supervisor = ensure_daemons_for_agent(config, manifest_path=manifest)
+    supervisor = ensure_daemons_for_agent(
+        make_settings(config), manifest_path=manifest
+    )
 
     # Ни одного процесса не поднялось, но вызов вернулся штатно.
     assert supervisor is not None
@@ -229,7 +232,7 @@ def test_broken_daemon_does_not_block_its_healthy_neighbour(
         """,
     )
     config = {
-        "mcp-servers": {
+        "mcp.servers": {
             "broken": {
                 "transport": "stream_http",
                 "url": "http://127.0.0.1:8765/mcp",
@@ -254,7 +257,7 @@ def test_broken_daemon_does_not_block_its_healthy_neighbour(
         return False
 
     with patch("recommended_mcp.autostart.run_entry", _fake_run_entry):
-        ensure_daemons_for_agent(config, manifest_path=manifest)
+        ensure_daemons_for_agent(make_settings(config), manifest_path=manifest)
 
     assert seen == ["broken", "healthy"], (
         f"после провала первого рецепта очередь до соседа не дошла: {seen}"
@@ -285,7 +288,7 @@ def test_bridge_never_prevents_the_frontend_from_starting(
         "recommended_mcp.autostart.ensure_daemons_for_agent", _boom
     )
 
-    daemon_autostart.ensure_mcp_daemons({})  # не должно бросить
+    daemon_autostart.ensure_mcp_daemons(make_settings())  # не должно бросить
 
     err = capsys.readouterr().err
     assert "автозапуск MCP пропущен" in err
@@ -316,7 +319,7 @@ def test_bridge_does_not_mask_a_broken_recipes_package(monkeypatch) -> None:
     monkeypatch.setattr(builtins, "__import__", _fake_import)
 
     try:
-        daemon_autostart.ensure_mcp_daemons({})
+        daemon_autostart.ensure_mcp_daemons(make_settings())
     except ImportError:
         pass
     else:
@@ -356,7 +359,7 @@ def _raise_supervisor_error(entry, root, supervisor):
 
 
 _SCIENCE_CONFIG = {
-    "mcp-servers": {
+    "mcp.servers": {
         "science": {
             "transport": "stream_http",
             "url": "http://127.0.0.1:8765/mcp",
@@ -381,7 +384,7 @@ def test_disable_hint_comes_from_the_frontend_not_from_this_module(
 
     with patch("recommended_mcp.autostart.run_entry", _raise_supervisor_error):
         ensure_daemons_for_agent(
-            _SCIENCE_CONFIG,
+            make_settings(_SCIENCE_CONFIG),
             manifest_path=manifest,
             disable_hint="отключить автозапуск: запустите без `-a`",
         )
@@ -412,7 +415,9 @@ def test_autostart_warning_reaches_the_notices_channel(tmp_path, monkeypatch):
 
     with patch("recommended_mcp.autostart.run_entry", _raise_supervisor_error):
         ensure_daemons_for_agent(
-            _SCIENCE_CONFIG, manifest_path=manifest, disable_hint="проба"
+            make_settings(_SCIENCE_CONFIG),
+            manifest_path=manifest,
+            disable_hint="проба",
         )
 
     codes = [n.code for n in runtime_notices._notices]

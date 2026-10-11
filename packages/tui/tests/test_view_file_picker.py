@@ -1,5 +1,6 @@
 """/view <query>: авто-открытие файлового пикера (Command.arg_file)."""
 
+from gc_testkit.tui_support import tui_settings
 import pytest
 
 from file_search_harness import settled
@@ -17,7 +18,9 @@ async def test_view_space_opens_file_picker(tmp_path):
 
     _mk(tmp_path)
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -39,7 +42,9 @@ async def test_command_without_arg_file_does_not_open_picker(tmp_path):
 
     _mk(tmp_path)
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -61,7 +66,9 @@ async def test_at_inside_view_line_stays_file_arg_picker(tmp_path):
 
     _mk(tmp_path)
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -85,7 +92,9 @@ async def test_view_complete_dir_drills_in_file_closes(tmp_path):
 
     _mk(tmp_path)
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -113,7 +122,9 @@ async def test_view_escape_closes_picker_keeps_line(tmp_path):
 
     _mk(tmp_path)
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -144,7 +155,9 @@ async def test_view_at_prefixed_filename_completes_file_arg_not_at_branch(
     _mk(tmp_path)
     (tmp_path / "@agents.py").write_text("x", encoding="utf-8")
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -173,7 +186,9 @@ async def test_view_enter_no_matches_submits_command(tmp_path):
 
     _mk(tmp_path)
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -199,7 +214,9 @@ async def test_view_tab_cursor_left_of_arg_is_noop(tmp_path):
 
     _mk(tmp_path)
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -228,7 +245,9 @@ async def test_backspace_to_bare_command_closes_file_picker(tmp_path):
 
     _mk(tmp_path)
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -258,7 +277,9 @@ async def test_empty_matches_hide_picker_and_it_returns(tmp_path):
 
     _mk(tmp_path)
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -288,7 +309,9 @@ async def test_at_segment_empty_matches_hide_picker(tmp_path):
 
     _mk(tmp_path)
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -312,7 +335,9 @@ async def test_hint_has_keys_margin_and_honest_desired_height(tmp_path):
 
     _mk(tmp_path)
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -346,7 +371,9 @@ async def test_hint_visible_on_open_with_long_list_no_scroll(tmp_path):
             "x", encoding="utf-8"
         )
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test(size=(80, 24)) as pilot:
         scr = pilot.app.screen

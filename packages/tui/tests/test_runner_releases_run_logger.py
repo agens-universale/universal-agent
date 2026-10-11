@@ -8,6 +8,8 @@
 гигабайт и однажды был убит по нехватке памяти.
 """
 
+from gc_testkit.settings import make_settings
+from gc_testkit.tui_support import tui_settings
 import asyncio
 import gc
 import logging
@@ -27,7 +29,10 @@ def _registered(logger) -> bool:
 
 def _run_logger(tmp_path, run_id):
     logger, _, _ = create_run_logger(
-        {"logs_dump_dir": str(tmp_path), "save_logs": True}, run_id=run_id
+        make_settings(
+            {"paths.logs_dump_dir": str(tmp_path), "logging.save_logs": True}
+        ),
+        run_id=run_id,
     )
     return logger
 
@@ -89,15 +94,17 @@ def test_exited_app_is_collected(tmp_path):
     from gc_tui.app import TuiApp
 
     cfg = {
-        "model": "M",
-        "agent_md_path": str(tmp_path / "agent.md"),
-        "threads_data_path": str(tmp_path / "threads"),
-        "logs_dump_dir": str(tmp_path / "logs"),
-        "mcp-servers": {},
+        "agent.model": "M",
+        "paths.agent_md_path": str(tmp_path / "agent.md"),
+        "paths.threads_data_path": str(tmp_path / "threads"),
+        "paths.logs_dump_dir": str(tmp_path / "logs"),
+        "mcp.servers": {},
     }
 
     async def _session():
-        app = TuiApp(threads_dir=str(tmp_path), system="cli", config=cfg)
+        app = TuiApp(
+            threads_dir=str(tmp_path), system="cli", settings=tui_settings(cfg)
+        )
         async with app.run_test() as pilot:
             for _ in range(250):
                 runner = app.active_runner

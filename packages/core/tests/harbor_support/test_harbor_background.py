@@ -14,7 +14,7 @@ import threading
 
 import pytest
 from gc_core.backends.harbor import HarborBackend
-from gc_core.backends.runtime_probe import probe_total_in_command
+from gc_testkit.runtime_probe import probe_total_in_command
 from gc_core.tools.exec.execute_command import ExecuteCommand
 from gc_testkit.harbor_fakes import bind_os_backend
 
@@ -58,8 +58,7 @@ def loop_in_thread():
 
 def _tool(backend):
     tool = ExecuteCommand.__new__(ExecuteCommand)
-    tool._config_dict = None
-    return bind_os_backend(tool, backend, config_dict={})
+    return bind_os_backend(tool, backend)
 
 
 def test_the_tool_starts_a_background_command_in_harbor(loop_in_thread):

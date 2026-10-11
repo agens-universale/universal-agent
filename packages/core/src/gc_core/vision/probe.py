@@ -6,10 +6,10 @@ import logging
 import secrets
 import time
 from dataclasses import dataclass, field, replace
-from types import MappingProxyType
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from enum import StrEnum
+from types import MappingProxyType
 
 import httpx
 
@@ -18,12 +18,12 @@ from gc_core.utils.backend_errors import (
     http_status_code,
     is_image_rejection_error,
 )
+from gc_core.utils.http_auth import authorization_attempts
 from gc_core.utils.llm_chat_client import (
     ChatCompletionText,
     PreparedChatCompletion,
     arequest_chat_completion_once,
 )
-from gc_core.utils.http_auth import authorization_attempts
 
 
 class ProbeStatus(StrEnum):
@@ -134,13 +134,55 @@ def _record_result(ctx, result, attempts, started, finish_reason=None):
     return result
 
 
+def _authorization_forms(
+    prepared: PreparedChatCompletion,
+) -> tuple[str | None, list]:
+    """Заголовок авторизации запроса и его формы для повтора после 401."""
+    auth_key = next(
+        (key for key in prepared.headers if key.lower() == "authorization"),
+        None,
+    )
+    auth_forms = (
+        authorization_attempts(prepared.headers.get(auth_key))
+        if auth_key
+        else []
+    )
+    return auth_key, auth_forms
+
+
+def _alternative_auth_applies(exc: Exception, auth_forms: list) -> bool:
+    """401 при двух формах авторизации — стоит повторить со второй."""
+    return (
+        isinstance(exc, httpx.HTTPStatusError)
+        and exc.response.status_code == 401
+        and len(auth_forms) == 2
+    )
+
+
+def _with_alternative_auth(
+    prepared: PreparedChatCompletion, auth_key: str | None, auth_forms: list
+) -> PreparedChatCompletion:
+    """Тот же запрос со второй формой авторизации."""
+    headers = dict(prepared.headers)
+    headers[auth_key] = auth_forms[1]
+    return replace(prepared, headers=MappingProxyType(headers))
+
+
+def _mark_alternative_auth(
+    result: ProbeResult, authorization_alternative: bool
+) -> ProbeResult:
+    """Подтверждение, полученное со второй формой авторизации, помечается."""
+    if result.status is ProbeStatus.CONFIRMED and authorization_alternative:
+        return replace(result, authorization_alternative=True)
+    return result
+
+
 async def aprobe_route(
     ctx, state, prepared: PreparedChatCompletion
 ) -> ProbeResult:
     started = time.perf_counter()
     previous = None
-    auth_key = next((key for key in prepared.headers if key.lower() == "authorization"), None)
-    auth_forms = authorization_attempts(prepared.headers.get(auth_key)) if auth_key else []
+    auth_key, auth_forms = _authorization_forms(prepared)
     authorization_alternative = False
     requests = 0
     for attempt in range(2):
@@ -173,26 +215,25 @@ async def aprobe_route(
                 )
                 break
             except (httpx.HTTPError, EmbeddedChoiceError, ValueError) as exc:
-                if (
-                    not authorization_alternative
-                    and isinstance(exc, httpx.HTTPStatusError)
-                    and exc.response.status_code == 401
-                    and len(auth_forms) == 2
+                if not authorization_alternative and _alternative_auth_applies(
+                    exc, auth_forms
                 ):
-                    headers = dict(prepared.headers)
-                    headers[auth_key] = auth_forms[1]
-                    prepared = replace(prepared, headers=MappingProxyType(headers))
+                    prepared = _with_alternative_auth(
+                        prepared, auth_key, auth_forms
+                    )
                     authorization_alternative = True
                     continue  # Повтор того же задания; распознавание ещё не состоялось.
                 return _record_result(
                     ctx, _classify_error(exc), requests, started
                 )
-        result = classify_answer(challenge.code, outcome)
-        if result.status is ProbeStatus.CONFIRMED and authorization_alternative:
-            result = replace(result, authorization_alternative=True)
+        result = _mark_alternative_auth(
+            classify_answer(challenge.code, outcome), authorization_alternative
+        )
         if result.status is not ProbeStatus.UNCONFIRMED:
             return _record_result(
                 ctx, result, requests, started, outcome.finish_reason
             )
         previous = challenge.code
-    return _record_result(ctx, result, requests, started, outcome.finish_reason)
+    return _record_result(
+        ctx, result, requests, started, outcome.finish_reason
+    )

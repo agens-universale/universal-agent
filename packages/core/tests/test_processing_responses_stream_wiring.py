@@ -54,18 +54,18 @@ def _patch_policy(monkeypatch):
 
 def _make_ctx_state_messages(stream: bool):
     cfg = {
-        "completions_url": "http://test-host/v1/chat/completions",
-        "stream": stream,
-        "backend_api_mode": "chat_completions",
-        "chat_completions_max_tokens": 256,
-        "chat_completions_min_response_tokens": 64,
-        "use_ssl": False,
-        "use_retry": False,
-        "backend_request_timeout_sec": 600,
-        "x_cl_id": "test-cl-id",
+        "backend.completions_url": "http://test-host/v1/chat/completions",
+        "backend.stream": stream,
+        "backend.api_mode": "chat_completions",
+        "backend.chat_completions_max_tokens": 256,
+        "backend.chat_completions_min_response_tokens": 64,
+        "backend.use_ssl": False,
+        "backend.use_retry": False,
+        "backend.request_timeout_sec": 600,
+        "agent.x_cl_id": "test-cl-id",
     }
-    ctx = SimpleNamespace(
-        config_dict=cfg,
+    ctx = fake_ctx(
+        cfg,
         on_stream_delta=None,
         logger=logging.getLogger("test"),
         auth_connector=None,
@@ -83,6 +83,7 @@ def _make_ctx_state_messages(stream: bool):
 
 import pytest
 from gc_testkit import run_coro
+from gc_testkit.settings import fake_ctx
 
 
 @pytest.fixture

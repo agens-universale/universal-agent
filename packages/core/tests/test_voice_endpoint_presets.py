@@ -7,6 +7,7 @@ from gc_core.config_modules.voice_endpoint_presets import (
     default_voice_endpoint_presets,
     voice_endpoint_presets_from_config,
 )
+from gc_testkit.settings import make_settings
 
 
 def test_defaults_are_openai_groq_mistral_in_owner_order():
@@ -19,7 +20,7 @@ def test_defaults_are_openai_groq_mistral_in_owner_order():
 
 def test_missing_key_falls_back_to_defaults():
     assert (
-        voice_endpoint_presets_from_config({})
+        voice_endpoint_presets_from_config(make_settings({}))
         == default_voice_endpoint_presets()
     )
     assert (
@@ -29,23 +30,17 @@ def test_missing_key_falls_back_to_defaults():
 
 
 def test_config_key_overrides_defaults():
-    cfg = {
-        "voice_endpoint_presets": [
-            {"name": "Свой", "url": "https://x/v1/audio/transcriptions"}
-        ]
-    }
+    cfg = make_settings(
+        {
+            "voice_endpoint_presets": [
+                {"name": "Свой", "url": "https://x/v1/audio/transcriptions"}
+            ]
+        }
+    )
     out = voice_endpoint_presets_from_config(cfg)
     assert [(p.name, p.url) for p in out] == [
         ("Свой", "https://x/v1/audio/transcriptions")
     ]
-
-
-def test_malformed_item_falls_back_to_defaults_entirely():
-    cfg = {"voice_endpoint_presets": [{"name": "без url"}]}
-    assert (
-        voice_endpoint_presets_from_config(cfg)
-        == default_voice_endpoint_presets()
-    )
 
 
 def test_defaults_are_a_fresh_list_each_call():
@@ -67,10 +62,10 @@ def test_appconfig_defaults_to_voice_presets():
     ]
 
 
-def test_load_config_flattens_custom_voice_presets_into_config_dict(tmp_path):
-    """Зеркало `test_load_config_flattens_custom_presets_into_config_dict`
+def test_load_settings_carries_custom_voice_presets(tmp_path):
+    """Зеркало `test_load_settings_carries_custom_presets`
     (tests/test_endpoint_presets.py): та же регрессия могла повториться на соседнем
-    ключе — `flatten_app_config` однажды не пробрасывал `endpoint_presets`, и
+    ключе — проекция однажды не пробрасывала `endpoint_presets`, и
     пользовательские пресеты из config.yml до TUI не доезжали, оставался кодовый
     дефолт. У `voice_endpoint_presets` свой ключ схемы — проверяем его отдельно."""
     from gc_core import config as cfgmod
@@ -80,11 +75,11 @@ def test_load_config_flattens_custom_voice_presets_into_config_dict(tmp_path):
         "voice_endpoint_presets:\n  - name: My\n    url: http://x/v1/audio/transcriptions\n",
         encoding="utf-8",
     )
-    config_dict = cfgmod.load_config(str(conf))
+    loaded = cfgmod.load_settings(str(conf))
 
-    assert config_dict["voice_endpoint_presets"] == [
-        {"name": "My", "url": "http://x/v1/audio/transcriptions"}
-    ]
-    assert voice_endpoint_presets_from_config(config_dict) == [
+    assert [
+        p.model_dump() for p in loaded.settings.voice_endpoint_presets
+    ] == [{"name": "My", "url": "http://x/v1/audio/transcriptions"}]
+    assert voice_endpoint_presets_from_config(loaded) == [
         EndpointPreset(name="My", url="http://x/v1/audio/transcriptions")
     ]

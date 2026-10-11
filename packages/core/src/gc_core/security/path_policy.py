@@ -8,10 +8,21 @@ import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Iterable
+from typing import Any, Callable, Iterable, Mapping
 
-from gc_core.security.dual_wrapper import OffLoop, dual_wrap
+from gc_core.execution.ports import port
+from gc_core.security.confirm_port import confirmation_step
+from gc_core.security.dual_wrapper import dual_wrap
+from gc_core.security.guard_probe import GuardProbeRequest, probe_step
+from gc_core.settings import (
+    AppConfig,
+    LoadedSettings,
+    runtime_of,
+    settings_of,
+)
 from gc_core.trace_id import trace_id_from_config
+
+_WRITE_GUARD_TITLE = "Защита записи"
 
 
 @dataclass(frozen=True)
@@ -157,45 +168,39 @@ def resolve_tool_context(*args: Any, **kwargs: Any) -> ToolSecurityContext:
     ctx = kwargs.get("ctx") or getattr(self_obj, "_ctx", None)
     state = kwargs.get("state") or getattr(self_obj, "_state", None)
     logger = kwargs.get("logger") or getattr(ctx, "logger", None)
-    config_dict = _extract_config_dict(self_obj, ctx, kwargs)
+    source = _settings_source(self_obj, ctx, kwargs)
+    settings = settings_of(source)
+    runtime = runtime_of(source)
+    security = settings.security
     project_data = getattr(state, "initial_project_data", None)
     launch_root = (
-        config_dict.get("launch_root")
-        or config_dict.get("project_root")
+        runtime.launch_root
+        or runtime.project_root
         or (project_data or {}).get("projectDir")
         or os.getcwd()
     )
-    # Runtime-fallback при отсутствии блока — OFF. На нормальном пути load_config
-    # кладёт write_guard/url_policy/command_moderation из pydantic (secure-by-default:
-    # enabled=True, mode=ask), поэтому эти fallback'и достижимы лишь в обход
-    # load_config (bespoke/тест-конфиги), а не в проде.
-    moderation = config_dict.get("command_moderation") or {}
-    write_guard_cfg = config_dict.get("write_guard") or {}
-    url_policy_cfg = config_dict.get("url_policy") or {}
     return ToolSecurityContext(
         launch_root=str(launch_root),
         write_guard=WriteGuardConfig(
-            enabled=bool(write_guard_cfg.get("enabled", False)),
-            mode=str(write_guard_cfg.get("mode", "deny")).strip().lower(),
-            extra_paths=list(write_guard_cfg.get("extra_paths") or []),
+            enabled=bool(security.write_guard.enabled),
+            mode=str(security.write_guard.mode).strip().lower(),
+            extra_paths=list(security.write_guard.extra_paths or []),
         ),
-        command_moderation_mode=str(moderation.get("mode", "allow"))
+        command_moderation_mode=str(security.command_moderation.mode)
         .strip()
         .lower(),
         allowed_command_examples=list(
-            moderation.get("allowed_command_examples") or []
+            security.command_moderation.allowed_command_examples or []
         ),
         denied_command_examples=list(
-            moderation.get("denied_command_examples") or []
+            security.command_moderation.denied_command_examples or []
         ),
         url_allowed_schemes=list(
-            url_policy_cfg.get("allowed_schemes") or ["http", "https"]
+            security.url_policy.allowed_schemes or ["http", "https"]
         ),
-        url_blacklist=list(url_policy_cfg.get("url_blacklist") or []),
-        url_policy_enabled=bool(url_policy_cfg.get("enabled", False)),
-        url_policy_mode=str(url_policy_cfg.get("mode", "deny"))
-        .strip()
-        .lower(),
+        url_blacklist=list(security.url_policy.url_blacklist or []),
+        url_policy_enabled=bool(security.url_policy.enabled),
+        url_policy_mode=str(security.url_policy.mode).strip().lower(),
         ctx=ctx,
         state=state,
         logger=logger,
@@ -217,12 +222,25 @@ def _protected_write_block(
         protection_enabled,
     )
 
-    _cfg = getattr(context.ctx, "config_dict", None) or {}
-    if not protection_enabled(_cfg):
+    if not protection_enabled(_settings_source(None, context.ctx)):
         return None
-    _decision = protected_decision(
-        candidate_path, cwd=context.launch_root, media=media_roots(_cfg)
-    )
+    if callable(port(context.ctx, "guard_probe")):
+        facts = yield probe_step(
+            context.ctx,
+            GuardProbeRequest(
+                "protected_write",
+                _tool_name(func, args),
+                candidate_path,
+                context.launch_root,
+            ),
+        )
+        _decision = facts.protected_decision
+    else:
+        _decision = protected_decision(
+            candidate_path,
+            cwd=context.launch_root,
+            media=media_roots(context.ctx),
+        )
     if _decision == "deny":
         _err = {
             "type": "protected_path_denied",
@@ -246,16 +264,13 @@ def _protected_write_block(
         # Ожидание человека уходит в поток: в TUI это до 600 с, и
         # на event loop вместе с ним встали бы субагенты и
         # keep-alive MCP-сессий. Исполняет драйвер `dual_wrap`.
-        _ok = yield OffLoop(
-            functools.partial(
-                request_confirm,
-                title="Защита записи",
-                question=f"Разрешить запись в {candidate_path}?",
-                fields=[("path", candidate_path)],
-                ctx=context.ctx,
-                decision_key=f"write:{candidate_path}",
-            ),
-            on_interrupt=False,
+        _ok = yield confirmation_step(
+            local_request=request_confirm,
+            title=_WRITE_GUARD_TITLE,
+            question=f"Разрешить запись в {candidate_path}?",
+            fields=[("path", candidate_path)],
+            ctx=context.ctx,
+            decision_key=f"write:{candidate_path}",
         )
         if not _ok:
             _err = {
@@ -305,8 +320,18 @@ def _resolve_write_violation(
     if wg_mode == "ask":
         # Тот же приём, что и у защищённых путей выше: подтверждение
         # ждётся в потоке, а не на event loop вызывающего.
-        confirmed = yield OffLoop(
-            functools.partial(
+        confirmed = yield confirmation_step(
+            title=_WRITE_GUARD_TITLE,
+            question=f"Разрешить запись вне периметра проекта в {candidate_path}?",
+            fields=[
+                ("Tool", tool_name),
+                ("Operation", operation),
+                ("Path", candidate_path),
+                ("Allowed roots", exc.error.get("allowed_write_roots") or []),
+            ],
+            ctx=context.ctx,
+            decision_key=f"write:{candidate_path}",
+            local_wait=functools.partial(
                 _ask_user_confirmation_for_write,
                 tool_name=tool_name,
                 path=candidate_path,
@@ -315,7 +340,6 @@ def _resolve_write_violation(
                 ctx=context.ctx,
                 decision_key=f"write:{candidate_path}",
             ),
-            on_interrupt=False,
         )
         if confirmed:
             audit_policy_decision(
@@ -352,6 +376,37 @@ def _resolve_write_violation(
     )
 
 
+def check_write_guard_path(candidate_path, context, tool_name, operation):
+    """Apply the same write perimeter check to decorators and internal writes."""
+    if callable(port(context.ctx, "guard_probe")):
+        facts = yield probe_step(
+            context.ctx,
+            GuardProbeRequest(
+                "write_path",
+                tool_name,
+                candidate_path,
+                context.launch_root,
+                operation,
+            ),
+        )
+        if facts.violation is not None:
+            error = facts.violation
+            raise WriteGuardViolation(
+                launch_root=error["launch_root"],
+                allowed_write_roots=error["allowed_write_roots"],
+                path=error["path"],
+                operation=error["operation"],
+            )
+    else:
+        check_write_path_allowed(
+            candidate_path,
+            context.launch_root,
+            context.write_guard.extra_paths,
+            base_dir=context.launch_root,
+            operation=operation,
+        )
+
+
 def _write_guard_flow(
     func,
     args,
@@ -365,17 +420,9 @@ def _write_guard_flow(
     context = resolve_tool_context(*args, **kwargs)
     # Floor carve-out: runs BEFORE the write_guard.enabled gate so it
     # applies unconditionally (Spec B §6).
-    try:
-        candidate_path = _extract_named_value(
-            func,
-            args,
-            kwargs,
-            path_arg,
-            path_extractor,
-            "path",
-        )
-    except ValueError:
-        candidate_path = None
+    _, candidate_path = _guard_path_argument(
+        func, args, kwargs, path_arg, path_extractor
+    )
     if candidate_path is not None:
         blocked = yield from _protected_write_block(
             candidate_path,
@@ -396,24 +443,14 @@ def _write_guard_flow(
         )
         return (yield)
     if candidate_path is None:
-        try:
-            candidate_path = _extract_named_value(
-                func,
-                args,
-                kwargs,
-                path_arg,
-                path_extractor,
-                "path",
-            )
-        except ValueError:
+        extracted, candidate_path = _guard_path_argument(
+            func, args, kwargs, path_arg, path_extractor
+        )
+        if not extracted:
             return (yield)
     try:
-        check_write_path_allowed(
-            candidate_path,
-            context.launch_root,
-            context.write_guard.extra_paths,
-            base_dir=context.launch_root,
-            operation=operation,
+        yield from check_write_guard_path(
+            candidate_path, context, _tool_name(func, args), operation
         )
     except WriteGuardViolation as exc:
         allowed, blocked = yield from _resolve_write_violation(
@@ -488,7 +525,7 @@ def audit_policy_decision(
     # поэтому только так аудит-объект остаётся самодостаточным. В jsonl фильтр
     # логгера дополнительно ставит trace_id верхним полем записи.
     trace_id = trace_id_from_config(
-        getattr(getattr(context, "ctx", None), "config_dict", None)
+        _settings_source(None, getattr(context, "ctx", None))
     )
     if trace_id:
         event["trace_id"] = trace_id
@@ -501,19 +538,45 @@ def audit_policy_decision(
         return
 
 
-def _extract_config_dict(
-    self_obj: Any, ctx: Any, kwargs: dict[str, Any]
-) -> dict[str, Any]:
-    explicit = kwargs.get("config_dict")
-    if isinstance(explicit, dict):
+def _settings_source(
+    self_obj: Any, ctx: Any, kwargs: Mapping[str, Any] | None = None
+) -> Any:
+    """Откуда гарду читать настройки (то, что принимает ``settings_of``).
+
+    Контекст рана с типизированными ``settings``, иначе явные ``settings=``
+    тула (``self._settings``), иначе контекст тула (``self._ctx``). Ничего
+    нет — ``None``: ``settings_of(None)`` даёт умолчания модели, а они
+    secure-by-default (гарды включены). Аргументы вызова (``kwargs``) — это
+    аргументы модели, источником настроек они не бывают; параметр оставлен
+    ради прежней сигнатуры.
+    """
+    del kwargs
+    if _has_settings(ctx):
+        return ctx
+    explicit = getattr(self_obj, "_settings", None)
+    if explicit is not None:
         return explicit
-    ctx_config = getattr(ctx, "config_dict", None)
-    if isinstance(ctx_config, dict):
-        return ctx_config
-    self_config = getattr(self_obj, "_config_dict", None)
-    if isinstance(self_config, dict):
-        return self_config
-    return {}
+    tool_ctx = getattr(self_obj, "_ctx", None)
+    if _has_settings(tool_ctx):
+        return tool_ctx
+    return None
+
+
+def _has_settings(ctx: Any) -> bool:
+    """Несёт ли ctx настройки рана."""
+    return isinstance(
+        getattr(ctx, "settings", None), (AppConfig, LoadedSettings)
+    )
+
+
+def _guard_path_argument(func, args, kwargs, path_arg, path_extractor):
+    """Keep extractor values intact; missing paths defer to tool validation."""
+    try:
+        return True, _extract_named_value(
+            func, args, kwargs, path_arg, path_extractor, "path"
+        )
+    except ValueError:
+        return False, None
 
 
 def _extract_named_value(
@@ -728,29 +791,6 @@ def _apply_console_key(console: Any, key: str, chars: list[str]) -> str | None:
     return None
 
 
-def prompt_user_confirmation(
-    *,
-    title: str,
-    fields: list[tuple[str, Any]],
-    question: str,
-) -> bool:
-    """Bool wrapper over 4-way CLI confirm (allow_* → True, else False).
-
-    Prefer request_confirm / prompt_user_confirmation_choice for new code.
-    """
-    from gc_core.security.confirm_port import (
-        CONFIRM_ALLOW_ONCE,
-        CONFIRM_ALLOW_REMEMBER,
-    )
-
-    choice = prompt_user_confirmation_choice(
-        title=title,
-        fields=fields,
-        question=question,
-    )
-    return choice in (CONFIRM_ALLOW_REMEMBER, CONFIRM_ALLOW_ONCE)
-
-
 def _ask_user_confirmation_for_write(
     *,
     tool_name: str,
@@ -763,7 +803,7 @@ def _ask_user_confirmation_for_write(
     from gc_core.security.confirm_port import request_confirm
 
     return request_confirm(
-        title="Защита записи",
+        title=_WRITE_GUARD_TITLE,
         question=f"Разрешить запись вне периметра проекта в {path}?",
         fields=[
             ("Tool", tool_name),

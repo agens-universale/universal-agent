@@ -14,7 +14,6 @@ from recommended_mcp.manifest import (
     default_manifest_path,
     load_agent_dep_dir,
     load_manifest,
-    resolve_manifest_path,
 )
 
 
@@ -28,35 +27,6 @@ def test_default_manifest_path(tmp_path: Path) -> None:
     root = tmp_path / "recommended_mcp"
     root.mkdir()
     assert default_manifest_path(root) == root / "config.yml"
-
-
-def test_resolve_manifest_path_default(tmp_path: Path) -> None:
-    root = tmp_path / "recommended_mcp"
-    root.mkdir()
-    default = root / "config.yml"
-    default.write_text("mcps: []\n", encoding="utf-8")
-    assert resolve_manifest_path(root, None) == default.resolve()
-
-
-def test_resolve_manifest_path_custom_relative(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    root = tmp_path / "recommended_mcp"
-    root.mkdir()
-    custom = root / "config.local.yml"
-    custom.write_text("mcps: []\n", encoding="utf-8")
-    monkeypatch.chdir(tmp_path)
-    assert (
-        resolve_manifest_path(root, Path("recommended_mcp/config.local.yml"))
-        == custom.resolve()
-    )
-
-
-def test_resolve_manifest_path_missing_raises(tmp_path: Path) -> None:
-    root = tmp_path / "recommended_mcp"
-    root.mkdir()
-    with pytest.raises(ManifestError, match="manifest not found"):
-        resolve_manifest_path(root, tmp_path / "nope.yml")
 
 
 def test_wheel_mcp_without_run_block(tmp_path: Path) -> None:

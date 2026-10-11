@@ -14,6 +14,7 @@ from gc_core.backends.protocol import (
     WALK_OUTPUT_MAX_CHARS,
 )
 from gc_core.backends.runtime_probe import DEFAULT_RUNTIME_PROBE_TTL_SEC
+from gc_core.config_modules.field_meta import gc_meta
 
 DEFAULT_FINISH_GATE_MAX_ITERATIONS = 10
 DEFAULT_SUBAGENT_FINISH_GATE_MAX_ITERATIONS = 3
@@ -23,12 +24,12 @@ DEFAULT_EXEC_TIMEOUT_SEC = 120
 
 
 class LoopDetectorConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
     enabled: bool = True
 
 
 class AgentConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
     model: str = "MiniMax-M2.7"
     system_prompt_id: str = "v1"
     use_server_subagents: bool = False
@@ -38,51 +39,87 @@ class AgentConfig(BaseModel):
     subagent_max_steps: int = 100
     # Папка с файлами-определениями кастомных сабагентов. None/пусто → папка не
     # читается вовсе и доступны только встроенные классы.
-    subagents_dir: str | None = None
+    subagents_dir: str | None = Field(
+        default=None, json_schema_extra=gc_meta(expert=True)
+    )
     # Предел числа подхватываемых кастомных сабагентов. ge=1: ноль означал бы
     # «папка задана, но агентов нет» — тихая и необъяснимая для оператора ситуация.
-    subagents_max_count: int = Field(default=20, ge=1)
-    client_name: str = "mini_cli_pub_agent_1"
-    x_cl_id: str = "12345"
+    subagents_max_count: int = Field(
+        default=20, ge=1, json_schema_extra=gc_meta(expert=True)
+    )
+    client_name: str = Field(
+        default="mini_cli_pub_agent_1",
+        json_schema_extra=gc_meta(worker_only=True),
+    )
+    x_cl_id: str = Field(
+        default="12345", json_schema_extra=gc_meta(worker_only=True)
+    )
     # Имя HTTP-заголовка для внешнего trace_id. None → дефолты по назначению:
     # x_trace_id для бэкенда модели, trace_id для MCP. Сам trace_id схемным
     # ключом НЕ является: это свойство вызова, а не конфигурации.
-    trace_id_header_name: str | None = None
+    trace_id_header_name: str | None = Field(
+        default=None, json_schema_extra=gc_meta(expert=True, worker_only=True)
+    )
     # Отправлять ли внешний trace_id в заголовке к бэкенду модели. False
     # (дефолт) — не отправлять: рассылка трейса наружу строго opt-in, как и для
     # MCP-серверов. Гейтит только заголовок; имя лог-файла, записи логов и
     # meta.runtime.trace_ids работают независимо от него.
-    trace_header_enabled: bool = False
+    trace_header_enabled: bool = Field(
+        default=False, json_schema_extra=gc_meta(expert=True, worker_only=True)
+    )
     verbose: bool = True
     stop_tools: list[str] = Field(default_factory=list)
     # Список canonical id скиллов / паков, которые исключаются из SkillsRegistry
     # при загрузке. Пакет (`pack-id`) выбрасывает и bootstrap, и все inner.
     # Flat-скилл (`skill-id`) выбрасывает один скилл. Дедуп+concat при merge
     # с проектным overlay (project может только усилить запрет).
-    disable_skills: list[str] = Field(default_factory=list)
+    disable_skills: list[str] = Field(
+        default_factory=list, json_schema_extra=gc_meta(expert=True)
+    )
     server_tool_prefix: str = "system"
     max_steps: int = 1000
     # Per-run лимиты надёжности (None = выключено). Область — один ран,
     # как max_steps; сабагент наследует те же значения на свой ран.
-    session_token_limit: int | None = None
-    max_tool_calls: int | None = None
+    session_token_limit: int | None = Field(
+        default=None, json_schema_extra=gc_meta(expert=True)
+    )
+    max_tool_calls: int | None = Field(
+        default=None, json_schema_extra=gc_meta(expert=True)
+    )
     # Kill-switch для аварийной LLM-суммаризации трейса при лимите
     # (step_limit / tool_call_limit / token_limit). По умолчанию on.
     # См. docs_md/actual/2026-08-01-limit-trace-summary-spec.md
     limit_trace_summary: bool = True
     no_tool_call_max_count: int = 5
-    max_unknown_tool_repeats: int = 5
-    strict_turn_finish_validation: bool = True
-    finish_gate_max_iterations: int = DEFAULT_FINISH_GATE_MAX_ITERATIONS
-    subagent_finish_gate_max_iterations: int = (
-        DEFAULT_SUBAGENT_FINISH_GATE_MAX_ITERATIONS
+    max_unknown_tool_repeats: int = Field(
+        default=5, json_schema_extra=gc_meta(expert=True)
     )
-    finish_gate_use_rule_hints: bool = False
-    limit_project_metadata: bool = False
-    tool_output_inline_max_chars: int = 20000
-    stored_tool_outputs_max_entries: int = 50
+    strict_turn_finish_validation: bool = True
+    finish_gate_max_iterations: int = Field(
+        default=DEFAULT_FINISH_GATE_MAX_ITERATIONS,
+        json_schema_extra=gc_meta(expert=True),
+    )
+    subagent_finish_gate_max_iterations: int = Field(
+        default=DEFAULT_SUBAGENT_FINISH_GATE_MAX_ITERATIONS,
+        json_schema_extra=gc_meta(expert=True),
+    )
+    finish_gate_use_rule_hints: bool = Field(
+        default=False, json_schema_extra=gc_meta(expert=True)
+    )
+    limit_project_metadata: bool = Field(
+        default=False, json_schema_extra=gc_meta(expert=True)
+    )
+    tool_output_inline_max_chars: int = Field(
+        default=20000, json_schema_extra=gc_meta(expert=True)
+    )
+    stored_tool_outputs_max_entries: int = Field(
+        default=50, json_schema_extra=gc_meta(expert=True)
+    )
     # Таймаут execute_command / run_python_code, если модель не передала timeout.
-    exec_timeout_sec: int = DEFAULT_EXEC_TIMEOUT_SEC
+    exec_timeout_sec: int = Field(
+        default=DEFAULT_EXEC_TIMEOUT_SEC,
+        json_schema_extra=gc_meta(expert=True),
+    )
     # Потолок RAM-буфера stdout/stderr на поток (decoded UTF-8 chars) для exec:
     # L = head floor(L/2) + tail (L - floor(L/2)).
     exec_output_capture_max_chars: int = DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS
@@ -93,18 +130,29 @@ class AgentConfig(BaseModel):
     # Общий потолок внутренних exec-каналов бэкенда (decoded chars): обход дерева
     # (Harbor: find -printf для walk/listdir), нативный grep, MCP-carrier под os_backend.
     # Переполнение — fail-closed: walk_too_large / McpExecCarrierError, не частичный ответ.
-    walk_output_max_chars: int = WALK_OUTPUT_MAX_CHARS
+    walk_output_max_chars: int = Field(
+        default=WALK_OUTPUT_MAX_CHARS, json_schema_extra=gc_meta(expert=True)
+    )
     # Инициализация model-facing exec в Harbor: None = raw, "bashrc" = встроенный
     # profile/bootstrap, любая другая непустая строка = custom shell-префикс.
-    harbor_exec_init: str | None = None
+    harbor_exec_init: str | None = Field(
+        default=None, json_schema_extra=gc_meta(expert=True, worker_only=True)
+    )
     # Успешная проба живости Harbor/Remote (echo суммы) закрывает следующие
     # действия на этот срок. 0 — проба перед каждым действием.
-    runtime_probe_ttl_sec: int = DEFAULT_RUNTIME_PROBE_TTL_SEC
+    runtime_probe_ttl_sec: int = Field(
+        default=DEFAULT_RUNTIME_PROBE_TTL_SEC,
+        json_schema_extra=gc_meta(expert=True, worker_only=True),
+    )
     # Синтетические поля tool schema: имя → description. Отсутствует или {} — без инжекта.
-    inject_tool_fields: dict[str, str] = Field(default_factory=dict)
+    inject_tool_fields: dict[str, str] = Field(
+        default_factory=dict, json_schema_extra=gc_meta(expert=True)
+    )
     # Steering-текст: при рендере system prompt дописывается в <special_instructions>
     # для любой активной модели (пока непустой). Пусто / omit — без инжекта.
-    model_steering: str = ""
+    model_steering: str = Field(
+        default="", json_schema_extra=gc_meta(expert=True)
+    )
     loop_detector: LoopDetectorConfig = Field(
         default_factory=LoopDetectorConfig
     )
@@ -183,21 +231,35 @@ class AgentConfig(BaseModel):
             )
         return n
 
-    @model_validator(mode="after")
-    def clamp_preview_edge_to_capture_tail(self) -> "AgentConfig":
+    @model_validator(mode="before")
+    @classmethod
+    def clamp_preview_edge_to_capture_tail(cls, data: Any) -> Any:
         """P ≤ T = L - floor(L / 2): оба края preview обязаны лежать внутри capture.
 
         Иначе контракт обещал бы полный короткий канал, уже обрезанный меньшим
         capture-cap. Зажимаем, а не отвергаем: ту же нормализацию делает плоский
-        путь, где бросок случился бы уже внутри вызова тулы.
+        путь, где бросок случился бы уже внутри вызова тулы. До валидации —
+        модель неизменяема, и так зажим работает и для конструктора.
         """
-        capture_tail = (
-            self.exec_output_capture_max_chars
-            - self.exec_output_capture_max_chars // 2
+        if not isinstance(data, dict):
+            return data
+        fields = cls.model_fields
+        capture = data.get(
+            "exec_output_capture_max_chars",
+            fields["exec_output_capture_max_chars"].default,
         )
-        if self.exec_output_preview_edge_chars > capture_tail:
-            self.exec_output_preview_edge_chars = capture_tail
-        return self
+        preview = data.get(
+            "exec_output_preview_edge_chars",
+            fields["exec_output_preview_edge_chars"].default,
+        )
+        try:
+            capture, preview = int(capture), int(preview)
+        except (TypeError, ValueError):
+            return data
+        capture_tail = capture - capture // 2
+        if preview > capture_tail:
+            return {**data, "exec_output_preview_edge_chars": capture_tail}
+        return data
 
     @field_validator("model_steering", mode="before")
     @classmethod
@@ -238,98 +300,41 @@ class AgentConfig(BaseModel):
         return n
 
 
+def _agent_of(settings: Any) -> AgentConfig:
+    """Секция ``agent`` из всего, что принимает ``settings_of``."""
+    # Ленивый импорт: settings → root → этот модуль.
+    from gc_core.settings import settings_of
+
+    return settings_of(settings).agent
+
+
 def exec_output_preview_edge_chars_from_config_dict(
-    config_dict: dict[str, Any] | None,
+    settings: Any,
 ) -> int:
-    """Размер края front-loaded preview из плоского config_dict.
+    """Размер края front-loaded preview (``agent.exec_output_preview_edge_chars``).
 
-    Плоский dict приходит и мимо ``AgentConfig`` (bench-профили доливают
-    overrides в уже провалидированный дамп), поэтому ``P <= T`` дожимается
-    здесь, а не только в схеме: иначе preview продублировал бы весь capture.
+    ``P <= T`` схема дожимает сама (``clamp_preview_edge_to_capture_tail``);
+    здесь — страховка, чтобы preview не продублировал весь capture.
     """
-    raw = (config_dict or {}).get(
-        "exec_output_preview_edge_chars",
-        DEFAULT_EXEC_OUTPUT_PREVIEW_EDGE_CHARS,
-    )
-    try:
-        n = int(raw)
-    except (TypeError, ValueError):
-        n = DEFAULT_EXEC_OUTPUT_PREVIEW_EDGE_CHARS
-    if n < 0:
-        n = DEFAULT_EXEC_OUTPUT_PREVIEW_EDGE_CHARS
-    capture = exec_output_capture_max_chars_from_config_dict(config_dict)
-    return min(n, capture - capture // 2)
+    agent = _agent_of(settings)
+    capture = agent.exec_output_capture_max_chars
+    return min(agent.exec_output_preview_edge_chars, capture - capture // 2)
 
 
-def exec_timeout_from_config_dict(config_dict: dict[str, Any] | None) -> int:
-    """Дефолтный exec-timeout из плоского config_dict (после flatten_app_config)."""
-    raw = (config_dict or {}).get("exec_timeout_sec", DEFAULT_EXEC_TIMEOUT_SEC)
-    try:
-        n = int(raw)
-    except (TypeError, ValueError):
-        return DEFAULT_EXEC_TIMEOUT_SEC
-    return n if n > 0 else DEFAULT_EXEC_TIMEOUT_SEC
+def exec_timeout_from_config_dict(settings: Any) -> int:
+    """Дефолтный exec-timeout (``agent.exec_timeout_sec``; схема гарантирует > 0)."""
+    return _agent_of(settings).exec_timeout_sec
 
 
 def exec_output_capture_max_chars_from_config_dict(
-    config_dict: dict[str, Any] | None,
+    settings: Any,
 ) -> int:
-    """Потолок captured stdout/stderr на поток из плоского config_dict."""
-    raw = (config_dict or {}).get(
-        "exec_output_capture_max_chars", DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS
-    )
-    try:
-        n = int(raw)
-    except (TypeError, ValueError):
-        return DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS
-    return n if n >= 0 else DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS
-
-
-def walk_output_max_chars_from_config_dict(
-    config_dict: dict[str, Any] | None,
-) -> int:
-    """Потолок приватного канала обхода (Harbor walk/listdir) из плоского config_dict."""
-    raw = (config_dict or {}).get(
-        "walk_output_max_chars", WALK_OUTPUT_MAX_CHARS
-    )
-    try:
-        n = int(raw)
-    except (TypeError, ValueError):
-        return WALK_OUTPUT_MAX_CHARS
-    return n if n > 0 else WALK_OUTPUT_MAX_CHARS
-
-
-def runtime_probe_ttl_sec_from_config_dict(
-    config_dict: dict[str, Any] | None,
-) -> int:
-    """Срок годности успешной пробы живости из плоского config_dict.
-
-    ``0`` — проба перед каждым действием. Мусор и отрицательные — дефолт.
-    """
-    raw = (config_dict or {}).get(
-        "runtime_probe_ttl_sec", DEFAULT_RUNTIME_PROBE_TTL_SEC
-    )
-    try:
-        n = int(raw)
-    except (TypeError, ValueError):
-        return DEFAULT_RUNTIME_PROBE_TTL_SEC
-    return n if n >= 0 else DEFAULT_RUNTIME_PROBE_TTL_SEC
-
-
-def harbor_exec_init_from_config_dict(
-    config_dict: dict[str, Any] | None,
-) -> str | None:
-    """Optional Harbor model-facing shell init from the flat config."""
-    raw = (config_dict or {}).get("harbor_exec_init")
-    if raw is None:
-        return None
-    if not isinstance(raw, str):
-        raise ValueError("harbor_exec_init должен быть строкой или null")
-    return raw.strip() or None
+    """Потолок captured stdout/stderr на поток (``agent.exec_output_capture_max_chars``)."""
+    return _agent_of(settings).exec_output_capture_max_chars
 
 
 def resolve_model_steering_text(
-    config_dict: dict[str, Any] | None,
+    settings: Any,
     model: str | None = None,
 ) -> str | None:
     """Текст model_steering или None, если пусто.
@@ -337,22 +342,26 @@ def resolve_model_steering_text(
     ``model`` зарезервирован для совместимости вызовов; сейчас не используется.
     """
     del model  # API stable; matching by model name may return later
-    cfg = config_dict or {}
-    raw = cfg.get("model_steering")
-    if not isinstance(raw, str):
-        return None
-    text = raw.strip()
-    return text or None
+    return _agent_of(settings).model_steering.strip() or None
 
 
 def merge_special_instructions_with_model_steering(
     base: str | None,
     *,
-    config_dict: dict[str, Any] | None = None,
+    settings: Any = None,
     model: str | None = None,
 ) -> str | None:
-    """Склеить client special_instructions с model_steering из config_dict."""
-    steering = resolve_model_steering_text(config_dict, model=model)
+    """Склеить client special_instructions с model_steering из настроек."""
+    return join_special_instructions_with_steering(
+        base, resolve_model_steering_text(settings, model=model)
+    )
+
+
+def join_special_instructions_with_steering(
+    base: str | None, steering: str | None
+) -> str | None:
+    """Склеить special_instructions с уже прочитанным текстом steering."""
+    steering = steering.strip() if isinstance(steering, str) else None
     parts: list[str] = []
     if isinstance(base, str) and base.strip():
         parts.append(base.strip())

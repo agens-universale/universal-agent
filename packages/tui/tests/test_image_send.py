@@ -15,6 +15,7 @@ from gc_tui.services.stores.file_store import FileTaskStore
 from gc_tui.widgets.command_input import CommandTextArea
 from gc_tui.widgets.user_reply import UserReplyContainer
 from image_helpers import make_attachment_file
+from gc_testkit.tui_support import tui_settings
 
 
 class _StartRunner:
@@ -99,7 +100,9 @@ def _activate(app, scr, threads: Path, tid: str) -> None:
 
 def _app(threads: Path) -> TuiApp:
     return TuiApp(
-        threads_dir=str(threads), system="cli", config={"model": "M"}
+        threads_dir=str(threads),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
 
 

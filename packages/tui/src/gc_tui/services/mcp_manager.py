@@ -30,10 +30,11 @@ class McpManager:
         self,
         *,
         config: Optional[str] = None,
-        user_config: Optional[dict] = None,
+        settings=None,
     ) -> None:
         self._config = config
-        self._user_config = user_config
+        # Настройки окна (`LoadedSettings`): из них — серверы, заведённые вручную.
+        self._settings = settings
         self._manifest = (
             None  # (entries, root), кэш на сессию: манифест статичен
         )
@@ -55,7 +56,7 @@ class McpManager:
         seen = set(managed_names)
         manual = [
             McpRow(n, wired=False, manual=True)
-            for n in _cli.manual_server_names(self._user_config)
+            for n in _cli.manual_server_names(self._settings)
             if n not in seen
         ]
         return managed + manual

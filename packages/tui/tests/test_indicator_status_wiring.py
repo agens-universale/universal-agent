@@ -55,9 +55,6 @@ async def test_falling_edge_persists_last_indicator(tmp_path, monkeypatch):
             def get_task_meta(self, tid):
                 return {}
 
-            def read_live_messages(self, tid):
-                return []
-
         scr._store = _Store()
         scr._thinking_started_at = 0.0
         scr._was_running = True

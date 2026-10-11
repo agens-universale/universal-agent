@@ -16,6 +16,7 @@ from unittest.mock import patch
 from gc_core.summarize.compaction import arun_summary_compaction
 from gc_core.summarize.working_memory_gateway import WorkingMemoryDeltas
 from gc_testkit import run_coro
+from gc_testkit.settings import fake_ctx
 
 
 def _state_with_full_shared():
@@ -61,9 +62,7 @@ class CompactionPreservesSharedTest(unittest.TestCase):
     @patch("gc_core.summarize.compaction.log_compaction_started")
     def test_summary_payload_carries_whole_shared_block(self, *_logs) -> None:
         state = _state_with_full_shared()
-        ctx = types.SimpleNamespace(
-            config_dict={"summary_params": {}}, logger=None
-        )
+        ctx = fake_ctx({"summary": {}}, logger=None)
         captured: dict = {}
 
         with (

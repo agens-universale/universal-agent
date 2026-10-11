@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from gc_core.config_modules.todo import todo_reminder_steps_from_config
 from gc_core.constants.tool_names import SESSION_TODO_TOOL_NAME
 from gc_core.message_policy.todo_context import format_todo_snapshot
 from gc_core.message_policy.tool_availability import tool_is_available
@@ -19,6 +18,7 @@ from gc_core.message_policy.tool_usage_notice.policy import (
     batch_used_tool,
     wrap_thread_memory_technical_user_message,
 )
+from gc_core.settings import AppConfig, settings_of
 
 _OPEN_STATUSES = ("pending", "in_progress")
 
@@ -61,23 +61,18 @@ def build_todo_reminder_text(items: list) -> str:
     )
 
 
-def _stopped(config_dict: Any) -> bool:
-    stop = (
-        config_dict.get("stop_tools")
-        if isinstance(config_dict, dict)
-        else None
-    )
-    if not isinstance(stop, list):
-        return False
+def _stopped(settings: AppConfig) -> bool:
     return SESSION_TODO_TOOL_NAME in {
-        str(item).strip() for item in stop if isinstance(item, str)
+        str(item).strip()
+        for item in settings.agent.stop_tools
+        if isinstance(item, str)
     }
 
 
 def apply_todo_reminder(
     messages: list[dict[str, Any]],
     state: Any,
-    config_dict: Any,
+    settings: Any,
     *,
     step_messages: list[dict[str, Any]],
     available_tools: set[str] | None = None,
@@ -89,11 +84,13 @@ def apply_todo_reminder(
     применяется). Звать модель к туду, которого в ране нет, нельзя: ``_stopped``
     видит только глобальный ``stop_tools``, а набор сужается ещё и файлом
     сабагента / harbor / неподнявшимся MCP.
+
+    ``settings`` — то, что принимает ``settings_of`` (ctx, ``LoadedSettings``,
+    ``AppConfig``).
     """
-    steps_limit = todo_reminder_steps_from_config(
-        config_dict if isinstance(config_dict, dict) else None
-    )
-    if steps_limit <= 0 or _stopped(config_dict):
+    settings = settings_of(settings)
+    steps_limit = max(0, int(settings.todo.reminder_steps))
+    if steps_limit <= 0 or _stopped(settings):
         return messages
     if not tool_is_available(available_tools, SESSION_TODO_TOOL_NAME):
         return messages

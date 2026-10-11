@@ -326,11 +326,13 @@ class TrackingFsBackend:
 
     @property
     def isolates_exec(self) -> bool:
-        # Флаг изоляции exec живёт на внутреннем бэкенде: у LocalFsBackend он
-        # False, у SandboxBackend — True. Без проброса обёртка врёт
-        # `exec_is_isolated`, и MCP `execute_on: os_backend` поднимает сервер
-        # в нашем процессе, хотя команды идут через bwrap / sandbox-exec.
-        return bool(self._inner.isolates_exec)
+        # Песочница (SandboxBackend наследует LocalFsBackend и поэтому
+        # оборачивается здесь) изолирует команды. Флаг живёт на внутреннем
+        # бэкенде: у LocalFsBackend он False, у SandboxBackend — True.
+        # Без проброса обёртка врёт `exec_is_isolated`, и MCP
+        # `execute_on: os_backend` поднимает сервер в нашем процессе, хотя
+        # команды идут через bwrap / sandbox-exec.
+        return bool(getattr(self._inner, "isolates_exec", False))
 
     @isolates_exec.setter
     def isolates_exec(self, value: bool) -> None:

@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import functools
 import inspect
 import json
 import os
@@ -13,18 +12,22 @@ import re
 import shlex
 from typing import Any, Callable
 
+from gc_core.execution.ports import port
 from gc_core.security.command_moderation import (
     NO_WORKAROUND_NOTICE,
     effective_command_cwd,
 )
-from gc_core.security.dual_wrapper import OffLoop, dual_wrap
+from gc_core.security.confirm_port import confirmation_step
+from gc_core.security.dual_wrapper import dual_wrap
+from gc_core.security.guard_probe import GuardProbeRequest, probe_step
 from gc_core.security.media_roots import media_roots
 from gc_core.security.path_policy import (
-    _extract_config_dict,
+    _settings_source,
     resolve_tool_context,
 )
 from gc_core.security.protected_paths import (
     classify_path,
+    protected_extra_paths,
     protected_paths,
     protection_enabled,
 )
@@ -177,9 +180,7 @@ def _command_guard_flow(
     # `return (yield)` — точка, где вызывается сам тул.
     self_obj = args[0] if args else None
     ctx_obj = kwargs.get("ctx") or getattr(self_obj, "_ctx", None)
-    cfg = _extract_config_dict(self_obj, ctx_obj, kwargs)
-
-    if not protection_enabled(cfg):
+    if not protection_enabled(_settings_source(self_obj, ctx_obj)):
         return (yield)
 
     # Extract the payload (command string or code string).
@@ -200,10 +201,28 @@ def _command_guard_flow(
             effective_tool_name, kwargs, context
         )
 
-    extra = list(context.write_guard.extra_paths) or None
-    decision = scan_command_for_protected(
-        payload, cwd=launch_root, extra=extra, media=media_roots(cfg)
-    )
+    # Защищённые пути — из ``security.protected_paths.extra``; каталоги
+    # ``write_guard.extra_paths`` разрешены для записи и идут обычной
+    # модерацией команд (command_moderation), а не автоматическим запретом.
+    extra = protected_extra_paths(_settings_source(self_obj, ctx_obj)) or None
+    if callable(port(ctx_obj, "guard_probe")):
+        facts = yield probe_step(
+            ctx_obj,
+            GuardProbeRequest(
+                "command",
+                effective_tool_name,
+                payload,
+                launch_root,
+            ),
+        )
+        decision = facts.protected_decision
+    else:
+        decision = scan_command_for_protected(
+            payload,
+            cwd=launch_root,
+            extra=extra,
+            media=media_roots(_settings_source(self_obj, ctx_obj)),
+        )
 
     if decision == "allow":
         return (yield)
@@ -211,16 +230,13 @@ def _command_guard_flow(
     if decision == "ask":
         from gc_core.security.confirm_port import request_confirm
 
-        confirmed = yield OffLoop(
-            functools.partial(
-                request_confirm,
-                title="Защищённый путь",
-                question="Команда затрагивает защищённый путь. Выполнить?",
-                fields=[("command", payload)],
-                ctx=ctx_obj,
-                decision_key=f"command:{payload}",
-            ),
-            on_interrupt=False,
+        confirmed = yield confirmation_step(
+            local_request=request_confirm,
+            title="Защищённый путь",
+            question="Команда затрагивает защищённый путь. Выполнить?",
+            fields=[("command", payload)],
+            ctx=ctx_obj,
+            decision_key=f"command:{payload}",
         )
         if confirmed:
             return (yield)
@@ -261,7 +277,7 @@ def enforce_command_guard(
     ask   → prompts via confirm_port; if not confirmed → blocked.
     allow → falls through to the decorated function unchanged.
 
-    Activated only when protection_enabled(config_dict) is True.
+    Activated only when protection_enabled(...) is True.
     """
 
     def decorator(func: Callable[..., str]) -> Callable[..., str]:

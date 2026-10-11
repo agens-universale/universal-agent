@@ -14,9 +14,10 @@ from gc_core.config_modules.fs_tools import (
     FsFindFilesByNameConfig,
     parse_find_files_by_name_config,
 )
+from gc_core.execution.tool_schema import coalesce_optional_string
 from gc_core.loop_detector.constants import READ_PROFILE, loop_warn_on_repeat
 from gc_core.security.path_policy import (
-    _extract_config_dict,
+    _settings_source,
     resolve_tool_context,
 )
 from gc_core.security.read_guard import (
@@ -26,9 +27,9 @@ from gc_core.security.read_guard import (
     enforce_read_guard,
     parse_read_guard_config,
 )
+from gc_core.settings import settings_of
 from gc_core.tools.fs.agent_hidden import is_agent_hidden
 from gc_core.tools.fs.cooperative import LoopYielder
-from gc_core.tools.schema_optional import coalesce_optional_string
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 from gc_core.utils.file_text import (
     BINARY_SAMPLE_BYTES,
@@ -57,12 +58,13 @@ def _compile_glob_fullmatch(
 class FindFilesByName(AbstractSimpleTool):
     """Full-tree locate by basename, path glob, or path substring (not file contents)."""
 
+    # A retry can observe newer files, but never repeats an external mutation.
+    effect_is_read_only = True
+
     @classmethod
-    def tool_description(
-        cls, config_dict: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
+    def tool_description(cls, settings: Any = None) -> Dict[str, Any]:
         skip = hard_exclude_dir_names_for_prompt()
-        _cfg = parse_find_files_by_name_config(config_dict)
+        _cfg = parse_find_files_by_name_config(settings)
         _dmm, _hmm = _cfg.default_max_matches, _cfg.hard_max_matches
         return {
             "type": "function",
@@ -132,11 +134,9 @@ class FindFilesByName(AbstractSimpleTool):
         }
 
     @classmethod
-    def prompt_description(
-        cls, config_dict: Optional[Dict[str, Any]] = None
-    ) -> str:
+    def prompt_description(cls, settings: Any = None) -> str:
         skip = hard_exclude_dir_names_for_prompt()
-        _cfg = parse_find_files_by_name_config(config_dict)
+        _cfg = parse_find_files_by_name_config(settings)
         _dmm, _hmm = _cfg.default_max_matches, _cfg.hard_max_matches
         return (
             "Tool name: fs_find_files_by_name\n"
@@ -227,22 +227,16 @@ class FindFilesByName(AbstractSimpleTool):
     def _resolve_config(self) -> FsFindFilesByNameConfig:
         """Load find_files_by_name limits from config (FsToolsConfig.find_files_by_name)."""
         context = resolve_tool_context(self)
-        cfg_dict = _extract_config_dict(
-            self, getattr(context, "ctx", None), {}
-        )
-        return parse_find_files_by_name_config(
-            cfg_dict if isinstance(cfg_dict, dict) else {}
-        )
+        source = _settings_source(self, getattr(context, "ctx", None), {})
+        return settings_of(source).fs_tools.find_files_by_name
 
     def _resolve_read_guard(self) -> Tuple[Any, Any, Any]:
         context = resolve_tool_context(self)
-        config_dict = _extract_config_dict(
-            self, getattr(context, "ctx", None), {}
-        )
-        cfg = parse_read_guard_config(config_dict)
+        source = _settings_source(self, getattr(context, "ctx", None), {})
+        cfg = parse_read_guard_config(source)
         if not cfg.enabled:
             return None, None, None
-        skills_root = _resolve_skills_root(config_dict)
+        skills_root = _resolve_skills_root(source)
         extra_allowed = [skills_root] if skills_root else None
         return cfg, context.launch_root, extra_allowed
 

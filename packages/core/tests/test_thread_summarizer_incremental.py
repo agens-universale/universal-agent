@@ -20,6 +20,7 @@ from gc_core.summarize.working_memory_gateway import WorkingMemoryDeltas
 from gc_testkit import run_coro
 from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
 from gc_testkit.intent_fixtures import meta_intent_log, user_ask_records
+from gc_testkit.settings import fake_ctx
 
 
 def _patch_chat_completion(monkeypatch, fake):
@@ -44,22 +45,24 @@ def _patch_memory_patch_empty(monkeypatch):
     )
 
 
-def _ctx(trigger_chars: int = 120000):
+def _ctx(
+    trigger_chars: int = 120000, max_accumulated_summary_chars: int = 20000
+):
     incremental_batch_chars = (
         int(trigger_chars * 1.4) if trigger_chars > 0 else 0
     )
-    return types.SimpleNamespace(
-        config_dict={
-            "model": "test-model",
-            "completions_url": "http://example.test/v1/chat/completions",
-            "summary_params": {
+    return fake_ctx(
+        {
+            "agent.model": "test-model",
+            "backend.completions_url": "http://example.test/v1/chat/completions",
+            "summary": {
                 "chat_completions_summary_trigger_chars": trigger_chars,
                 "incremental_batch_chars": incremental_batch_chars,
-                "max_accumulated_summary_chars": 20000,
+                "max_accumulated_summary_chars": max_accumulated_summary_chars,
                 "last_dialog_steps_count": 5,
                 "last_dialog_step_message_max_chars": 5000,
             },
-            "chat_completions_params": {
+            "chat_completions": {
                 "auxiliary_llm": {
                     "max_tokens": 8192,
                     "completion_kwargs": {},
@@ -100,7 +103,7 @@ def test_summarize_incremental_empty_history_no_model_call(monkeypatch):
 
     monkeypatch.setattr(
         "gc_core.summarize.prompt_loading.load_prompt_template",
-        lambda _p: "prompt",
+        lambda _p, **_kw: "prompt",
     )
     _patch_chat_completion(monkeypatch, _never_call)
     _patch_memory_patch_empty(monkeypatch)
@@ -128,7 +131,7 @@ def test_summarize_incremental_single_batch_one_summary_call(monkeypatch):
 
     monkeypatch.setattr(
         "gc_core.summarize.prompt_loading.load_prompt_template",
-        lambda _p: "prompt",
+        lambda _p, **_kw: "prompt",
     )
     _patch_chat_completion(monkeypatch, _fake_request)
     _patch_memory_patch_empty(monkeypatch)
@@ -166,7 +169,7 @@ def test_memory_deltas_applied_to_working_memory_not_inside_summary(
 
     monkeypatch.setattr(
         "gc_core.summarize.prompt_loading.load_prompt_template",
-        lambda _p: "prompt",
+        lambda _p, **_kw: "prompt",
     )
     _patch_chat_completion(monkeypatch, _fake_request)
     monkeypatch.setattr(
@@ -226,7 +229,7 @@ def test_memory_patch_replace_overwrites_stale_state_register(monkeypatch):
 
     monkeypatch.setattr(
         "gc_core.summarize.prompt_loading.load_prompt_template",
-        lambda _p: "prompt",
+        lambda _p, **_kw: "prompt",
     )
     _patch_chat_completion(monkeypatch, _fake_request)
     monkeypatch.setattr(
@@ -290,7 +293,7 @@ def test_summarize_user_prompt_excludes_intent_blocks(monkeypatch):
 
     monkeypatch.setattr(
         "gc_core.summarize.prompt_loading.load_prompt_template",
-        lambda _p: "prompt",
+        lambda _p, **_kw: "prompt",
     )
     _patch_chat_completion(monkeypatch, _fake_request)
     _patch_memory_patch_empty(monkeypatch)
@@ -334,7 +337,7 @@ def test_summarize_incremental_two_batches_previous_summary_passed(
 
     monkeypatch.setattr(
         "gc_core.summarize.prompt_loading.load_prompt_template",
-        lambda _p: "prompt",
+        lambda _p, **_kw: "prompt",
     )
     _patch_chat_completion(monkeypatch, _fake_request)
     monkeypatch.setattr(
@@ -593,13 +596,12 @@ def test_accumulated_summary_is_compressed_when_limit_exceeded(monkeypatch):
 
     monkeypatch.setattr(
         "gc_core.summarize.prompt_loading.load_prompt_template",
-        lambda _p: "prompt",
+        lambda _p, **_kw: "prompt",
     )
     _patch_chat_completion(monkeypatch, _fake_request)
     _patch_memory_patch_empty(monkeypatch)
 
-    ctx = _ctx(trigger_chars=4500)
-    ctx.config_dict["summary_params"]["max_accumulated_summary_chars"] = 50
+    ctx = _ctx(trigger_chars=4500, max_accumulated_summary_chars=50)
     result = run_coro(
         asummarize_dialog_via_chat_completions(
             ctx=ctx,
@@ -671,7 +673,7 @@ def test_summarize_pipeline_calls_build_history_text_with_max_chars_disabled(
 
     monkeypatch.setattr(
         "gc_core.summarize.prompt_loading.load_prompt_template",
-        lambda _p: "prompt",
+        lambda _p, **_kw: "prompt",
     )
     _patch_chat_completion(monkeypatch, _fake_request)
     _patch_memory_patch_empty(monkeypatch)
@@ -701,7 +703,7 @@ def test_summarize_merges_existing_user_intent_log(monkeypatch):
 
     monkeypatch.setattr(
         "gc_core.summarize.prompt_loading.load_prompt_template",
-        lambda _p: "prompt",
+        lambda _p, **_kw: "prompt",
     )
     _patch_chat_completion(monkeypatch, _fake_request)
     _patch_memory_patch_empty(monkeypatch)
@@ -754,7 +756,7 @@ def test_summarize_preserves_user_intent_log_chronological_order(monkeypatch):
 
     monkeypatch.setattr(
         "gc_core.summarize.prompt_loading.load_prompt_template",
-        lambda _p: "prompt",
+        lambda _p, **_kw: "prompt",
     )
     _patch_chat_completion(monkeypatch, _fake_request)
     _patch_memory_patch_empty(monkeypatch)
@@ -792,7 +794,7 @@ def test_summarize_filters_technical_messages_from_user_intent_log(
 
     monkeypatch.setattr(
         "gc_core.summarize.prompt_loading.load_prompt_template",
-        lambda _p: "prompt",
+        lambda _p, **_kw: "prompt",
     )
     _patch_chat_completion(monkeypatch, _fake_request)
     _patch_memory_patch_empty(monkeypatch)
@@ -820,7 +822,7 @@ def test_invalid_summary_triggers_one_repair_retry(monkeypatch):
 
     monkeypatch.setattr(
         "gc_core.summarize.prompt_loading.load_prompt_template",
-        lambda _p: "prompt",
+        lambda _p, **_kw: "prompt",
     )
     _patch_chat_completion(monkeypatch, _fake_request)
     _patch_memory_patch_empty(monkeypatch)
@@ -857,7 +859,7 @@ def test_memory_patch_replace_format_repair_runs_once_for_long_unparsed_output(
 
     monkeypatch.setattr(
         "gc_core.summarize.prompt_loading.load_prompt_template",
-        lambda _p: "prompt",
+        lambda _p, **_kw: "prompt",
     )
     _patch_chat_completion(monkeypatch, _fake_summary)
     _patch_memory_patch_empty(monkeypatch)

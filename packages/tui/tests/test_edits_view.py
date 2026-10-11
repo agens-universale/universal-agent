@@ -15,7 +15,6 @@ from datetime import datetime
 from pathlib import Path
 
 import pytest
-
 from gc_core.agent_edits import deltas, git_ops
 from gc_core.agent_edits.git_ops import show_index_bytes
 from gc_core.agent_edits.journal import EditRecord, EditsJournal
@@ -23,6 +22,7 @@ from gc_core.agent_edits.ladder import STEP_ACCEPTED, STEP_HEAD
 from gc_core.agent_edits.revert import REASON_NOT_REVERTABLE
 from gc_core.agent_edits.snapshots import SnapshotStore, snapshots_root
 from gc_core.thread_store import edits_journal_path
+from gc_testkit.tui_support import as_settings
 from gc_tui.services.edits_view import (
     ACCEPT_EXTERNAL,
     ACCEPT_READ_FAILED,
@@ -40,6 +40,7 @@ from gc_tui.services.edits_view import (
     _LadderGitFacts,
     diff_limits,
 )
+from gc_testkit.git_support import rev_parse_head
 
 
 def _rec(
@@ -86,7 +87,11 @@ class _Workspace:
             snapshots_root(str(self.root)), "cli_th1", self.threads_dir
         )
         self.view = EditsView(
-            str(self.threads_dir), "cli", "th1", str(self.root), config or {}
+            str(self.threads_dir),
+            "cli",
+            "th1",
+            str(self.root),
+            as_settings(config or {}),
         )
 
     def write(self, rel: str, text: str) -> Path:
@@ -548,7 +553,7 @@ def test_revert_delta_counts_from_precise_baseline_not_counting_base(tmp_path):
         True,
     )  # счётная база
 
-    delta = ws.view.revert_delta(SOURCE_SESSION, "a.py")
+    delta = ws.view.revert_deltas(SOURCE_SESSION, ["a.py"])[0]
 
     assert (delta.add, delta.del_) == (1, 0)
     assert "+B" in delta.hunks
@@ -568,7 +573,7 @@ def test_revert_delta_of_created_file_is_the_whole_file(tmp_path):
     ws.journal.append(_rec("new.py", op="create", ts=1.0, add=1, del_=0))
     ws.journal.append(_rec("new.py", ts=2.0, add=1, del_=0))
 
-    delta = ws.view.revert_delta(SOURCE_SESSION, "new.py")
+    delta = ws.view.revert_deltas(SOURCE_SESSION, ["new.py"])[0]
 
     assert (delta.add, delta.del_) == (2, 0)
     assert "+one" in delta.hunks and "+two" in delta.hunks
@@ -590,7 +595,7 @@ def test_revert_delta_of_created_then_accepted_file_uses_step_not_whole_file(
         fh.write("".join(f"extra{i}\n" for i in range(10)))
     ws.journal.append(_rec("a.py", ts=2.0, call_id="c2", add=10, del_=0))
 
-    delta = ws.view.revert_delta(SOURCE_SESSION, "a.py")
+    delta = ws.view.revert_deltas(SOURCE_SESSION, ["a.py"])[0]
 
     assert (delta.add, delta.del_) == (10, 0)
     assert "line0\n" not in delta.hunks
@@ -603,7 +608,7 @@ def test_revert_delta_of_uncountable_path_has_no_numbers(tmp_path):
     (ws.root / "a.bin").write_bytes(b"\x89PNG\r\n\x1a\n\x00")
     ws.journal.append(_rec("a.bin", add=1, del_=1))
 
-    delta = ws.view.revert_delta(SOURCE_SESSION, "a.bin")
+    delta = ws.view.revert_deltas(SOURCE_SESSION, ["a.bin"])[0]
 
     assert delta.countable is False
     assert (delta.add, delta.del_, delta.hunks) == (0, 0, "")
@@ -617,7 +622,7 @@ def test_revert_delta_of_turn_source_uses_turn_snapshot(tmp_path):
     ws.write("a.py", "сейчас\n")
     ws.journal.append(_rec("a.py", turn="t1"))
 
-    delta = ws.view.revert_delta(SOURCE_TURN, "a.py")
+    delta = ws.view.revert_deltas(SOURCE_TURN, ["a.py"])[0]
 
     assert "-ход" in delta.hunks and "+сейчас" in delta.hunks
     assert "сессия" not in delta.hunks
@@ -627,7 +632,7 @@ def test_revert_delta_of_unknown_path_is_empty(tmp_path):
     ws = _Workspace(tmp_path)
     ws.journal.append(_rec("a.py"))
 
-    delta = ws.view.revert_delta(SOURCE_SESSION, "ghost.py")
+    delta = ws.view.revert_deltas(SOURCE_SESSION, ["ghost.py"])[0]
 
     assert (delta.add, delta.del_, delta.hunks) == (0, 0, "")
     assert delta.countable is True
@@ -657,9 +662,7 @@ def test_revert_uses_precise_baseline_not_counting_base(tmp_path):
 
     [row] = ws.view.session_view(SOURCE_SESSION).active
     assert row.entry.revertable is True
-    assert ws.store.counting_session_baseline("a.py") == "ИНДЕКС\n".encode(
-        "utf-8"
-    )
+    assert ws.store.counting_session_baseline("a.py") == "ИНДЕКС\n".encode()
 
     outcome = ws.view.revert(SOURCE_SESSION, ["a.py"])
 
@@ -691,9 +694,7 @@ def test_revert_in_turn_source_uses_precise_baseline_not_counting_base(
 
     [row] = ws.view.session_view(SOURCE_TURN).active
     assert row.entry.revertable is True
-    assert ws.store.counting_turn_baseline("a.py", "t1") == "ИНДЕКС\n".encode(
-        "utf-8"
-    )
+    assert ws.store.counting_turn_baseline("a.py", "t1") == "ИНДЕКС\n".encode()
 
     outcome = ws.view.revert(SOURCE_TURN, ["a.py"])
 
@@ -872,26 +873,45 @@ def test_source_bytes_cap_comes_from_config(tmp_path):
     assert (entry.add, entry.del_) == (1, 1)  # счётчики из журнала
 
 
-def test_diff_limits_ignore_broken_config_values(tmp_path):
+def test_diff_limits_ignore_broken_config_values():
+    """Мусор, который схема пропускает (отрицательное), даёт дефолт; нечисло
+    схема отвергает сама. `true` схема приводит к 1 (нестрогий int), поэтому
+    правило «bool — мусор» проверяется на сырой секции общим `section_limit`."""
+    from gc_core.agent_edits.ctx import section_limit
     from gc_core.config_modules.agent_edits import (
         DEFAULT_HUNK_CONTEXT_LINES,
         DEFAULT_MAX_DIFF_SOURCE_BYTES,
     )
+    from pydantic import ValidationError
 
-    assert diff_limits({}) == (
+    assert diff_limits(as_settings({})) == (
         DEFAULT_MAX_DIFF_SOURCE_BYTES,
         DEFAULT_HUNK_CONTEXT_LINES,
     )
-    assert diff_limits({"agent_edits": {"hunk_context_lines": True}})[1] == (
-        DEFAULT_HUNK_CONTEXT_LINES
+    assert diff_limits(None) == (
+        DEFAULT_MAX_DIFF_SOURCE_BYTES,
+        DEFAULT_HUNK_CONTEXT_LINES,
     )
-    assert diff_limits({"agent_edits": {"hunk_context_lines": -1}})[1] == (
-        DEFAULT_HUNK_CONTEXT_LINES
+    assert (
+        section_limit(
+            {"hunk_context_lines": True},
+            "hunk_context_lines",
+            DEFAULT_HUNK_CONTEXT_LINES,
+        )
+        == DEFAULT_HUNK_CONTEXT_LINES
     )
-    assert diff_limits({"agent_edits": {"max_diff_source_bytes": "мусор"}})[
-        0
-    ] == (DEFAULT_MAX_DIFF_SOURCE_BYTES)
-    assert diff_limits({"agent_edits": {"hunk_context_lines": 0}})[1] == 0
+    assert diff_limits(
+        as_settings({"agent_edits": {"hunk_context_lines": -1}})
+    )[1] == (DEFAULT_HUNK_CONTEXT_LINES)
+    assert diff_limits(
+        as_settings({"agent_edits": {"max_diff_source_bytes": 0}})
+    )[0] == (DEFAULT_MAX_DIFF_SOURCE_BYTES)
+    with pytest.raises(ValidationError):
+        as_settings({"agent_edits": {"max_diff_source_bytes": "мусор"}})
+    assert (
+        diff_limits(as_settings({"agent_edits": {"hunk_context_lines": 0}}))[1]
+        == 0
+    )
 
 
 # --- принятие и сброс принятия ------------------------------------------------
@@ -2022,10 +2042,10 @@ def test_ladder_head_bytes_skips_reading_oversized_file(tmp_path):
             "cli",
             "th1",
             str(root),
-            {"agent_edits": {"max_diff_source_bytes": cap}},
+            as_settings({"agent_edits": {"max_diff_source_bytes": cap}}),
         )
         facts = view._ladder_facts
-        facts.prime(git_ops.rev_parse_head(str(root)), {})
+        facts.prime(rev_parse_head(str(root)), {})
         return facts
 
     ws = _Workspace(tmp_path, git=True)
@@ -3042,7 +3062,7 @@ def test_a_command_cut_by_the_cap_leaves_its_real_size_in_the_view(tmp_path):
     assert ws.view.session_view(SOURCE_TURN).cut_commands == ()
 
 
-def _committed_workspace(tmp_path, n: int) -> "_Workspace":
+def _committed_workspace(tmp_path, n: int) -> _Workspace:
     """`n` путей со снимком сессии, затем правки, закоммиченные поверх снимков."""
     ws = _Workspace(tmp_path, git=True)
     for i in range(n):
@@ -3253,7 +3273,9 @@ def test_revert_preview_of_many_paths_builds_the_view_once(
         ws.session_base(key, "old\n")
         ws.write(key, "new\n")
         ws.journal.append(_rec(key, ts=float(i), call_id=f"c{i}"))
-    expected = [ws.view.revert_delta(SOURCE_SESSION, key) for key in keys]
+    expected = [
+        ws.view.revert_deltas(SOURCE_SESSION, [key])[0] for key in keys
+    ]
     ws.view.invalidate()
     signatures = []
     real = edits_view_mod.disk_signature
@@ -3333,7 +3355,9 @@ def test_an_accept_by_another_instance_invalidates_the_cached_view(tmp_path):
         row.entry.path for row in ws.view.session_view(SOURCE_SESSION).active
     ] == ["a.py"]
 
-    other = EditsView(str(ws.threads_dir), "cli", "th1", str(ws.root), {})
+    other = EditsView(
+        str(ws.threads_dir), "cli", "th1", str(ws.root), as_settings({})
+    )
     other.accept(["a.py"])
 
     view = ws.view.session_view(SOURCE_SESSION)
@@ -3364,7 +3388,7 @@ def test_revert_state_catches_an_edit_that_kept_the_modification_time(
     assert ws.view.revert_state(["a.py"]) != before
 
 
-def _deleted_and_committed(tmp_path) -> "_Workspace":
+def _deleted_and_committed(tmp_path) -> _Workspace:
     """Файл правили в сессии, затем удалили и закоммитили удаление."""
     ws = _Workspace(tmp_path, git=True)
     ws.write("a.py", "orig\n")

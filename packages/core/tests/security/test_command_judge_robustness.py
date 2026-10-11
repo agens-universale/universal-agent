@@ -37,28 +37,3 @@ def test_validate_still_rejects_unknown_verdict():
     # 'unsafe' содержит 'safe', но не должен стать safe (без подстрочного матча).
     with pytest.raises(ValueError):
         validate_judge_result({"verdict": "unsafe"})
-
-
-def test_retry_recovers_on_second_attempt():
-    # разовый мусорный вердикт не роняет судью — второй вызов отдаёт валидный.
-    calls = {"n": 0}
-
-    def client(payload):
-        calls["n"] += 1
-        return (
-            {"verdict": "nonsense"} if calls["n"] == 1 else {"verdict": "safe"}
-        )
-
-    assert (
-        cm.run_command_judge_with_retry(client, {}, retries=1).verdict
-        == cm.SAFE_VERDICT
-    )
-    assert calls["n"] == 2
-
-
-def test_retry_raises_after_exhausting():
-    # стабильный мусор → пробрасываем (декоратор переведёт в judge_unavailable → fail-closed).
-    with pytest.raises(ValueError):
-        cm.run_command_judge_with_retry(
-            lambda p: {"verdict": "nonsense"}, {}, retries=1
-        )

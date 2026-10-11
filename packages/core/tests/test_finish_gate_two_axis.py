@@ -5,7 +5,6 @@ import json
 import logging
 import sys
 import types
-from types import SimpleNamespace
 
 import pytest
 from gc_core.intent_guard import guard as intent_guard_guard
@@ -20,6 +19,7 @@ from gc_testkit.intent_fixtures import (
     seed_state_intent,
 )
 from gc_testkit.paths import module_dir
+from gc_testkit.settings import fake_ctx
 
 _trace_digest_tests = importlib.import_module("test_intent_guard_trace_digest")
 _ask_human_scenario_messages = _trace_digest_tests._ask_human_scenario_messages
@@ -168,13 +168,13 @@ def _make_state(*, max_steps: int = 5, parent_state_id=None):
 
 def _make_ctx(**overrides):
     cfg = {
-        "backend_api_mode": "chat_completions",
-        "strict_turn_finish_validation": True,
-        "finish_gate_max_iterations": 10,
+        "backend.api_mode": "chat_completions",
+        "agent.strict_turn_finish_validation": True,
+        "agent.finish_gate_max_iterations": 10,
     }
     cfg.update(overrides)
-    return SimpleNamespace(
-        config_dict=cfg,
+    return fake_ctx(
+        cfg,
         logger=logging.getLogger("test_finish_gate_two_axis"),
         auth_connector=None,
     )

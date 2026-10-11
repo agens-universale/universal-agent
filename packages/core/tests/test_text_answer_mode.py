@@ -1,11 +1,10 @@
-from types import SimpleNamespace
-
 from gc_core.intent_guard.text_answer_judge import ashould_return_text_answer
 from gc_testkit import run_coro
+from gc_testkit.settings import fake_ctx
 
 
 def _ctx(mode):
-    return SimpleNamespace(config_dict={"text_answer_mode": mode})
+    return fake_ctx({"text_answer_mode": mode})
 
 
 def test_allow_accepts_text():

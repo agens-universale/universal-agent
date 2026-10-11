@@ -16,7 +16,7 @@ import pytest
 pytest.importorskip("textual")
 pytest.importorskip("pytest_textual_snapshot")
 
-from gc_testkit.tui_support import wait_until
+from gc_testkit.tui_support import tui_settings, wait_until
 
 
 def _write_config_file(tmp_path):
@@ -66,7 +66,12 @@ def _app(tmp_path, monkeypatch):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config={"model": "CodeAgent", "backend_api_mode": "chat_completions"},
+        settings=tui_settings(
+            {
+                "agent.model": "CodeAgent",
+                "backend.api_mode": "chat_completions",
+            }
+        ),
     )
     app.set_config_path(str(cfg_file))
     app._upgrade_info = upgrade_gate.UpgradeInfo(

@@ -9,6 +9,7 @@ from types import MappingProxyType
 from typing import Any, Dict, List, NamedTuple, Optional
 
 from gc_core.config_modules.model_registry import effective_completion_kwargs
+from gc_core.execution.ports import port
 from gc_core.model_router import (
     AliasCircuitOpenError,
     ResolvedModel,
@@ -18,6 +19,7 @@ from gc_core.request_backend_policy import (
     arequest_chat_completions_with_policy,
 )
 from gc_core.runtime_notices import maybe_push_fallback_to_active_notice
+from gc_core.settings import settings_of
 from gc_core.usage.account import category_for_request_label
 from gc_core.usage.context import usage_scope
 from gc_core.utils.backend_errors import is_model_unavailable_error
@@ -187,7 +189,7 @@ def _build_chat_completion_payload(
     payload_overrides: Optional[Dict[str, Any]] = None,
     resolved: Optional[ResolvedModel] = None,
 ) -> Dict[str, Any]:
-    cfg = getattr(ctx, "config_dict", {}) or {}
+    settings = settings_of(ctx)
     # tools НЕ отправляем: этот клиент text-only (судья команд, суммаризация,
     # finish-gate, генерация роли, компакция памяти) — инструменты не
     # использует. Пустой "tools": [] — бессмысленный шум; для plain-completion
@@ -195,7 +197,7 @@ def _build_chat_completion_payload(
     model = (
         resolved.model
         if resolved is not None
-        else (getattr(state, "default_model", None) or cfg.get("model"))
+        else (getattr(state, "default_model", None) or settings.agent.model)
     )
     payload: Dict[str, Any] = {
         "model": model,
@@ -205,7 +207,7 @@ def _build_chat_completion_payload(
         resolved, "use_max_tokens_param"
     )
     if use_max_tokens_param is NO_BACKEND_OVERRIDE:
-        use_max_tokens_param = cfg.get("use_max_tokens_param", False)
+        use_max_tokens_param = settings.backend.use_max_tokens_param
     if bool(use_max_tokens_param):
         payload["max_tokens"] = max_tokens
     else:
@@ -216,7 +218,9 @@ def _build_chat_completion_payload(
     # Диалог и цикл субагента собираются в connect_backend и читают ``main``.
     # ``consumer`` выбирает алиас выше по стеку. При откате на запасную
     # ``resolved`` уже активная: словарь мёртвого алиаса сюда не подмешивается.
-    extra = effective_completion_kwargs(resolved, cfg, section="auxiliary")
+    extra = effective_completion_kwargs(
+        resolved, settings, section="auxiliary"
+    )
     if isinstance(extra, dict) and extra:
         for key, value in extra.items():
             if key in _PROTECTED_CHAT_COMPLETION_KEYS:
@@ -263,8 +267,10 @@ class PreparedChatCompletion:
 
 def snapshot_chat_completion(ctx, state, *, resolved, headers):
     """Snapshot an already authenticated call without fetching another token."""
-    cfg = getattr(ctx, "config_dict", {}) or {}
-    verify, cert, _, timeout, proxy, _ = resolve_network_params(cfg, resolved)
+    settings = settings_of(ctx)
+    verify, cert, _, timeout, proxy, _ = resolve_network_params(
+        settings, resolved
+    )
     payload = _build_chat_completion_payload(
         ctx=ctx, state=state, messages=[], max_tokens=512, resolved=resolved
     )
@@ -272,7 +278,7 @@ def snapshot_chat_completion(ctx, state, *, resolved, headers):
     payload.pop("messages")
     extra = backend_override_value(resolved, "chat_completion_headers")
     if extra is NO_BACKEND_OVERRIDE:
-        extra = cfg.get("chat_completion_headers", {})
+        extra = settings.backend.chat_completion_headers
     explicit = {str(k).strip().lower() for k, v in (extra or {}).items() if v}
     volatile = {
         "x_rq_id",
@@ -283,7 +289,7 @@ def snapshot_chat_completion(ctx, state, *, resolved, headers):
     }
     from gc_core.trace_id import trace_header_name
 
-    volatile.add(trace_header_name(cfg, "x_trace_id").lower())
+    volatile.add(trace_header_name(settings, "x_trace_id").lower())
     return PreparedChatCompletion(
         resolved,
         resolved.url,
@@ -358,13 +364,8 @@ async def _asend_chat_completion_text(
     before_send: Callable[[PreparedChatCompletion], Awaitable[None]]
     | None = None,
 ) -> ChatCompletionText:
-    cfg = getattr(ctx, "config_dict", {}) or {}
-    log_params = cfg.get("logging_params")
-    full_log_backend = (
-        bool(log_params.get("full_log_backend", False))
-        if isinstance(log_params, dict)
-        else False
-    )
+    settings = settings_of(ctx)
+    full_log_backend = bool(settings.logging.full_log_backend)
 
     def _payload_factory(requested_max_tokens: int) -> Dict[str, Any]:
         return _build_chat_completion_payload(
@@ -380,7 +381,7 @@ async def _asend_chat_completion_text(
         resolved, "chat_completions_min_response_tokens"
     )
     min_response_tokens = _positive_int(
-        cfg.get("chat_completions_min_response_tokens")
+        settings.backend.chat_completions_min_response_tokens
         if _min_response_tokens_override is NO_BACKEND_OVERRIDE
         else _min_response_tokens_override,
         default=1024,
@@ -396,8 +397,8 @@ async def _asend_chat_completion_text(
         if resolved is None:
             resolved = ResolvedModel(
                 alias=None,
-                model=cfg["model"],
-                url=cfg["completions_url"],
+                model=settings.agent.model,
+                url=settings.backend.completions_url,
                 authorization=None,
                 backend_overrides={},
                 tariff=None,
@@ -410,7 +411,11 @@ async def _asend_chat_completion_text(
         from gc_core.vision.service import confirmed_route_headers
 
         headers = confirmed_route_headers(prepared)
-    url = resolved.url if resolved is not None else cfg["completions_url"]
+    url = (
+        resolved.url
+        if resolved is not None
+        else settings.backend.completions_url
+    )
     (
         verify,
         cert,
@@ -418,7 +423,7 @@ async def _asend_chat_completion_text(
         timeout,
         config_proxy,
         retry_embedded_choice_errors,
-    ) = resolve_network_params(cfg, resolved)
+    ) = resolve_network_params(settings, resolved)
 
     if prepared is not None:
 
@@ -507,6 +512,57 @@ def _require_text_only(messages: List[Dict[str, Any]]) -> None:
 
 
 async def arequest_chat_completion_outcome(
+    *,
+    ctx: Any,
+    state: Any,
+    messages: List[Dict[str, str]],
+    max_tokens: int,
+    consumer: str,
+    request_label: str = "chat_completion",
+    payload_overrides: Optional[Dict[str, Any]] = None,
+    allow_images: bool = False,
+    before_send: Callable[[PreparedChatCompletion], Awaitable[None]]
+    | None = None,
+) -> ChatCompletionText:
+    """Request text and finish reason through the configured model boundary."""
+    from gc_core.execution.model import arequest_model
+
+    if max_tokens < 1:
+        raise ValueError("max_tokens must be >= 1")
+    operations = port(ctx, "operations")
+    if operations is None:
+        return await _arequest_chat_completion_outcome_local(
+            ctx=ctx,
+            state=state,
+            messages=messages,
+            max_tokens=max_tokens,
+            consumer=consumer,
+            request_label=request_label,
+            payload_overrides=payload_overrides,
+            allow_images=allow_images,
+            before_send=before_send,
+        )
+    if allow_images or before_send is not None:
+        # Картинки и проверка маршрута до отправки — только там, где есть
+        # хранилище картинок и транспорт (локально или в activity воркера):
+        # колбэк ``before_send`` через границу durable-операции не переносится.
+        raise RuntimeError(
+            "вызов модели с картинками или before_send не поддерживается "
+            "через durable-границу"
+        )
+    result = await arequest_model(
+        operations,
+        state,
+        messages,
+        consumer=consumer,
+        max_tokens=max_tokens,
+        request_label=request_label,
+        payload_overrides=payload_overrides,
+    )
+    return ChatCompletionText(result.text or "", result.finish_reason)
+
+
+async def _arequest_chat_completion_outcome_local(
     *,
     ctx: Any,
     state: Any,

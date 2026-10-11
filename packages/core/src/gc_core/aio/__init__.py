@@ -1,8 +1,9 @@
 """Публичный async-фасад SDK: агент, который не блокирует ваш event loop.
 
     from gc_core.aio import AsyncAgent
+    from gc_core.config import load_settings
 
-    async with await AsyncAgent.create(config_dict) as agent:
+    async with await AsyncAgent.create(load_settings("config.yml")) as agent:
         async for kind, text in agent.stream("почини тесты", thread_id="t1"):
             if kind == "answer":
                 print(text, end="")

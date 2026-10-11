@@ -18,7 +18,7 @@ from gc_core.constants.tool_names import (
     INTERMEDIATE_REPLY_TOOL_NAME,
     SESSION_THINK_TOOL_NAME,
 )
-from gc_core.tools.subagents.progress import (
+from gc_core.execution.progress import (
     brief_args_summary,
     parse_tool_result_status,
 )

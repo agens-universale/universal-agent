@@ -1,3 +1,4 @@
+from gc_testkit.tui_support import tui_settings
 import pytest
 from gc_tui.widgets.confirm_banner import (
     _OPTIONS,
@@ -106,7 +107,9 @@ async def test_banner_renders_payload_and_meta_fields(tmp_path):
     from textual.widgets import Static
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -153,7 +156,9 @@ async def test_banner_long_payload_keeps_options_visible(tmp_path):
         for i in range(40)
     )
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test(size=(100, 28)) as pilot:
         scr = pilot.app.screen
@@ -208,7 +213,9 @@ async def test_banner_hugs_short_content(tmp_path):
     from gc_tui.widgets.confirm_banner import ConfirmBanner
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test(size=(100, 40)) as pilot:
         scr = pilot.app.screen
@@ -236,7 +243,9 @@ async def test_banner_body_scrolls_from_keyboard(tmp_path):
 
     long_code = "\n".join(f"line_{i} = {i}" for i in range(60))
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test(size=(100, 30)) as pilot:
         scr = pilot.app.screen
@@ -270,7 +279,9 @@ async def test_scroll_keys_do_not_answer_the_banner(tmp_path):
 
     long_code = "\n".join(f"line_{i}" for i in range(60))
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test(size=(100, 30)) as pilot:
         scr = pilot.app.screen

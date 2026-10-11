@@ -4,11 +4,13 @@ import os
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from gc_core.attachments.store import STAGING_DIRNAME
 from gc_core.config_modules.env_vars import gc_paths, project_gc_dir
 from gc_core.instructions.layers import instruction_file_paths
 from gc_core.security.path_policy import is_within_root
+from gc_core.settings import settings_of
 
 
 @dataclass(frozen=True)
@@ -136,6 +138,45 @@ def protected_decision(path, *, cwd=None, extra=None, media=()) -> str:
     return "allow"
 
 
-def protection_enabled(config_dict: dict) -> bool:
-    block = (config_dict or {}).get("protected_paths") or {}
-    return bool(block.get("enabled", True))
+def protected_extra_paths(source: Any) -> list[str]:
+    """Дополнительные защищённые пути из ``security.protected_paths.extra``.
+
+    Это ЗАПРЕТНЫЕ пути («нельзя читать/писать агенту»), а не разрешённые:
+    ``write_guard.extra_paths`` — их противоположность (дополнительные каталоги
+    для записи), и в набор защищённых им не место. ``~`` раскрывается здесь —
+    ``protected_paths`` берёт только ``abspath``. ``source`` — то, что
+    принимает ``settings_of``.
+    """
+    # ``expanduser`` — только для ``~``: guard команд считает это и в коде
+    # durable-workflow, где обращение к ``os.path`` запрещено песочницей
+    # (воркер раскрывает ``~`` профиля заранее).
+    return [
+        _expand_home(str(raw))
+        for raw in settings_of(source).security.protected_paths.extra
+        if str(raw).strip()
+    ]
+
+
+def _expand_home(raw: str) -> str:
+    if not raw.startswith("~"):
+        return raw
+    try:
+        return os.path.expanduser(raw)
+    except Exception:
+        # Песочница workflow запрещает os.path (воркер раскрывает ~ заранее;
+        # ``~неизвестный`` остаётся как есть) — путь остаётся буквальным.
+        return raw
+
+
+def protection_enabled(settings: Any) -> bool:
+    """Включена ли floor-защита системных путей — всегда да.
+
+    ``security.protected_paths.enabled`` сейчас не действует (см.
+    docs/configuration.md): до гардов этот флаг не доходил никогда — плоский
+    вид настроек секцию не проецировал, — и значение ``false`` защиту не
+    снимает. ``settings`` (то, что принимает ``settings_of``) оставлен ради
+    сигнатуры: включать флаг — отдельное решение, а не побочный эффект
+    перехода на типизированные настройки.
+    """
+    del settings
+    return True

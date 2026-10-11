@@ -21,9 +21,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-
 from gc_core.agent_edits.journal import EditRecord, EditsJournal
-from gc_core.utils.file_text import sha256_hex_of_bytes
 from gc_core.agent_edits.revert import (
     REASON_NO_BASELINE,
     REASON_NOT_REVERTABLE,
@@ -31,6 +29,13 @@ from gc_core.agent_edits.revert import (
 )
 from gc_core.agent_edits.snapshots import SnapshotStore, snapshots_root
 from gc_core.thread_store import edits_journal_path
+from gc_core.utils.file_text import sha256_hex_of_bytes
+from gc_testkit.tui_support import (
+    as_settings,
+    span_style,
+    tui_settings,
+    wait_until,
+)
 from gc_tui.palette import ERR, OK
 from gc_tui.screens.diff import (
     APPROX,
@@ -56,7 +61,6 @@ from gc_tui.screens.diff_revert_confirm import (
     file_caption,
 )
 from gc_tui.services.edits_view import SOURCE_SESSION, SOURCE_TURN
-from gc_testkit.tui_support import span_style, wait_until
 
 pytest.importorskip("textual")
 
@@ -120,7 +124,11 @@ class _Workspace:
 
     @property
     def config(self) -> dict:
-        return {"launch_root": str(self.root), "model": "M", "agent_edits": {}}
+        return {
+            "launch_root": str(self.root),
+            "agent.model": "M",
+            "agent_edits": {},
+        }
 
     def write(self, rel: str, text: str) -> None:
         path = self.root / rel
@@ -174,7 +182,7 @@ class _Workspace:
         )
         return DiffScreen(
             launch_root=str(self.root),
-            config=self.config,
+            settings=as_settings(self.config),
             threads_dir=str(self.threads_dir),
             system_id="cli",
             thread_id="th1",
@@ -561,9 +569,8 @@ def test_revert_texts_keep_the_screen_vocabulary():
 @pytest.mark.asyncio
 async def test_r_shows_fullscreen_confirm_not_modal(tmp_path):
     """Модалка шириной 56 дифф не вмещает — подтверждение полноэкранное."""
-    from textual.screen import ModalScreen
-
     from gc_tui.app import TuiApp
+    from textual.screen import ModalScreen
 
     ws = _Workspace(tmp_path)
     ws.base("a.py", "a\nb\n")
@@ -571,7 +578,9 @@ async def test_r_shows_fullscreen_confirm_not_modal(tmp_path):
     ws.journal.append(_rec("a.py"))
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         await _open(pilot, ws.screen())
         await pilot.press("r")
@@ -621,7 +630,9 @@ async def test_confirm_shows_direct_diff_of_what_disappears(tmp_path):
     ws.journal.append(_rec("a.py", hunks="@@ -1 +1 @@\n-мусор\n+мусор\n"))
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         await _open(pilot, ws.screen())
         await pilot.press("r")
@@ -641,7 +652,9 @@ async def test_confirm_enter_restores_file_content(tmp_path):
     ws.journal.append(_rec("a.py"))
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = await _open(pilot, ws.screen())
         await pilot.press("r")
@@ -664,7 +677,9 @@ async def test_confirm_escape_leaves_file_untouched(tmp_path):
     ws.journal.append(_rec("a.py"))
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = await _open(pilot, ws.screen())
         await pilot.press("r")
@@ -687,7 +702,9 @@ async def test_created_file_revert_deletes_it_and_says_so(tmp_path):
     ws.journal.append(_rec("new.py", op="create", add=1, del_=0))
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         await _open(pilot, ws.screen())
         await pilot.press("r")
@@ -723,7 +740,9 @@ async def test_external_edit_shows_warning(tmp_path):
     )
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = await _open(pilot, ws.screen())
         assert [e.path for e in scr._entries] == ["clean.py", "a.py"]
@@ -751,7 +770,9 @@ async def test_shell_only_file_is_offered_as_skipped_not_reverted(tmp_path):
     ws.journal.append(_rec("shell.py", call_id=None, op="shell"))
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = await _open(pilot, ws.screen())
         entry = scr._entries[0]
@@ -780,7 +801,7 @@ async def test_huge_diff_is_shown_whole_and_cut_into_parts(tmp_path):
 
     from gc_tui.app import TuiApp
     from gc_tui.screens.diff import CONTEXT_CHUNK
-    from gc_tui.services.diff_render import row_kinds
+    from gc_tui.services.diff_render import _parse, _take
 
     ws = _Workspace(tmp_path)
     ws.base("big.py", "".join(f"line{n:04d}\n" for n in range(600)))
@@ -793,7 +814,9 @@ async def test_huge_diff_is_shown_whole_and_cut_into_parts(tmp_path):
     ws.journal.append(_rec("big.py", add=30, del_=30))
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test(size=(100, 24)) as pilot:
         await _open(pilot, ws.screen())
         await pilot.press("r")
@@ -805,7 +828,9 @@ async def test_huge_diff_is_shown_whole_and_cut_into_parts(tmp_path):
             if w.has_class("diff-hunk")
         ]
         _path, delta = confirm._preview[0]
-        rows = len(row_kinds(delta.hunks))
+        # Строки тела без потолка — второе мнение, независимое от `HunkBody`.
+        parsed = _parse(delta.hunks or "")
+        rows = len(_take(parsed, sum(1 for r in parsed if r.kind != "sep")))
         assert rows > 200  # прежний потолок остался позади
         # Место под тело — всё, до последней строки: полоса прокрутки честна.
         assert sum(int(w.styles.height.value) for w in blocks) == rows
@@ -871,7 +896,9 @@ async def test_preview_fill_reaches_right_edge_minus_scrollbar(tmp_path):
         }
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test(size=(70, 20)) as pilot:
         await _open(pilot, ws.screen())
         await pilot.press("r")
@@ -910,7 +937,9 @@ async def test_a_long_file_does_not_eat_the_files_behind_it(tmp_path):
         ws.journal.append(_rec(rel, ts=2.0))
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         await _open(pilot, ws.screen())
         await pilot.press("ctrl+r")
@@ -949,7 +978,9 @@ async def test_every_file_of_the_set_is_shown_with_its_own_counters(tmp_path):
         ws.journal.append(_rec(rel, ts=float(idx)))
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         await _open(pilot, ws.screen())
         await pilot.press("ctrl+r")
@@ -989,7 +1020,9 @@ async def test_revert_confirm_has_no_file_cursor_and_ignores_n_p(tmp_path):
         ws.journal.append(_rec(rel, ts=float(idx), add=40, del_=40))
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test(size=(100, 24)) as pilot:
         await _open(pilot, ws.screen())
         await pilot.press("ctrl+r")
@@ -1049,7 +1082,9 @@ async def test_single_file_confirm_keeps_the_name_only_in_the_title(tmp_path):
     ws.journal.append(_rec("solo.py"))
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         await _open(pilot, ws.screen())
         await pilot.press("r")
@@ -1091,7 +1126,9 @@ async def test_revert_tree_lists_skipped_files_as_blocks(tmp_path):
     ws.journal.append(_rec("app.py", ts=1.0, call_id=None, op="shell"))
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = await _open(pilot, ws.screen())
         assert [(e.path, e.revertable) for e in scr._entries] == [
@@ -1111,7 +1148,7 @@ async def test_revert_tree_lists_skipped_files_as_blocks(tmp_path):
             count=1, can_scroll=False
         )
         # Пропущенный назван блоком: имя — голова, причина — вложенная строка.
-        assert SKIPPED_LINE == f"пропущен: {NOT_REVERTABLE}"
+        assert f"пропущен: {NOT_REVERTABLE}" == SKIPPED_LINE
         assert _tree_rows(confirm) == [
             ("readme.md · +5 −1", "tree-head"),
             ("→ начало сессии", "tree-line"),
@@ -1149,7 +1186,9 @@ async def test_revert_external_warning_lives_inside_its_block(tmp_path):
     )
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         await _open(pilot, ws.screen())
         await pilot.press("ctrl+r")
@@ -1193,7 +1232,9 @@ async def test_single_revert_has_no_name_row_and_names_target_first(tmp_path):
     ws.journal.append(_rec("solo.py"))
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         await _open(pilot, ws.screen())
         await pilot.press("r")
@@ -1222,7 +1263,9 @@ async def test_ctrl_r_reverts_whole_source_and_lists_skipped(tmp_path):
     ws.journal.append(_rec("shell.py", ts=3.0, call_id=None, op="shell"))
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = await _open(pilot, ws.screen())
         await pilot.press("ctrl+r")
@@ -1262,7 +1305,9 @@ async def test_uncountable_file_says_preview_is_unavailable(tmp_path):
     ws.journal.append(_rec("logo.png", op="binary", add=0, del_=0))
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = await _open(pilot, ws.screen())
         assert scr._entries[0].countable is False
@@ -1279,7 +1324,7 @@ async def test_uncountable_file_says_preview_is_unavailable(tmp_path):
         await pilot.pause()
         assert (
             ws.root / "logo.png"
-        ).read_bytes() == "\x00\x01ЗАГЛУШКА".encode("utf-8")
+        ).read_bytes() == "\x00\x01ЗАГЛУШКА".encode()
 
 
 @pytest.mark.asyncio
@@ -1307,7 +1352,9 @@ async def test_preview_is_built_from_the_baseline_the_revert_writes(tmp_path):
     ws.journal.append(_rec("a.py", ts=2.0, add=1, del_=0))
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = await _open(pilot, ws.screen())
         # счётчики списка идут от счётной базы и показывают ноль — это их право
@@ -1344,7 +1391,9 @@ async def test_uncountable_path_promises_no_numbers(tmp_path):
     ws.journal.append(_rec("a.txt", add=1, del_=1))
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = await _open(pilot, ws.screen())
         entry = scr._entries[0]
@@ -1370,7 +1419,9 @@ async def test_confirm_header_survives_resize(tmp_path):
     ws.journal.append(_rec(deep, add=1, del_=0))
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test(size=(120, 24)) as pilot:
         await _open(pilot, ws.screen())
         await pilot.press("r")
@@ -1410,7 +1461,9 @@ async def test_preview_says_nothing_to_undo_when_only_the_counting_base_differs(
     ws.journal.append(_rec("a.py"))
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         await _open(pilot, ws.screen())
         await pilot.press("r")
@@ -1466,7 +1519,7 @@ async def test_preview_names_target_per_step_kind(tmp_path):
     ws.write("acc.py", "v1\n")
     ws.journal.append(_rec("acc.py", ts=1.0, op="create"))
     view = EditsView(
-        str(ws.threads_dir), "cli", "th1", str(ws.root), ws.config
+        str(ws.threads_dir), "cli", "th1", str(ws.root), as_settings(ws.config)
     )
     view.accept(["acc.py"])
     accepted_hhmm = (
@@ -1476,7 +1529,9 @@ async def test_preview_names_target_per_step_kind(tmp_path):
     ws.journal.append(_rec("acc.py", ts=2.0, call_id="c2"))
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         await _open(pilot, ws.screen())
         await pilot.press("r")
@@ -1536,7 +1591,9 @@ async def test_preview_names_target_per_step_kind(tmp_path):
     expected_ref = git_ops.head_commit_label(str(wsh.root), "head.py")
 
     async with TuiApp(
-        threads_dir=str(wsh.threads_dir), system="cli", config=wsh.config
+        threads_dir=str(wsh.threads_dir),
+        system="cli",
+        settings=tui_settings(wsh.config),
     ).run_test() as pilot:
         await _open(pilot, wsh.screen())
         await pilot.press("r")
@@ -1548,12 +1605,14 @@ async def test_preview_names_target_per_step_kind(tmp_path):
     # ...и живьём — для «начало хода» (Р13 ревью: одиночный `r`, не только
     # стрелка массового превью, которая в словарь падежей не заглядывает).
     wst = _Workspace(tmp_path / "turn")
-    wst.store.capture_turn("t.py", "before\n".encode("utf-8"), "t1")
+    wst.store.capture_turn("t.py", b"before\n", "t1")
     wst.write("t.py", "after\n")
     wst.journal.append(_rec("t.py", turn="t1", ts=1.0))
 
     async with TuiApp(
-        threads_dir=str(wst.threads_dir), system="cli", config=wst.config
+        threads_dir=str(wst.threads_dir),
+        system="cli",
+        settings=tui_settings(wst.config),
     ).run_test() as pilot:
         await _open(pilot, wst.screen(source=SOURCE_TURN))
         await pilot.press("r")
@@ -1677,7 +1736,9 @@ async def test_single_u_screen_has_no_name_row_and_names_the_loss(tmp_path):
     ws.write("a.py", "v2\n")  # дописано после принятия — точка теряется
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         await _open(pilot, ws.screen())
         await pilot.press("u")
@@ -1723,7 +1784,9 @@ async def test_reset_tree_lists_every_file_as_a_block_without_dashes(tmp_path):
     ws.accept("kept.py", "v1\n")  # диск равен принятому — терять нечего
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         await _open(pilot, ws.screen())
         await pilot.press("ctrl+u")
@@ -1811,7 +1874,9 @@ async def test_reset_confirm_advertises_scrolling_only_when_the_body_scrolls(
         ws.write(rel, "v2\n")
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test(size=(100, 24)) as pilot:
         await _open(pilot, ws.screen())
         await pilot.press("ctrl+u")
@@ -1853,7 +1918,9 @@ async def test_reset_screen_has_no_cursor_and_ignores_n_p(tmp_path):
         ws.write(rel, "v2\n")
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test(size=(100, 24)) as pilot:
         await _open(pilot, ws.screen())
         await pilot.press("ctrl+u")
@@ -1896,7 +1963,11 @@ async def test_bulk_preview_targets_and_warns(tmp_path):
     ws1.write("acc.py", "v1\n")
     ws1.journal.append(_rec("acc.py", ts=1.0, op="create"))
     view1 = EditsView(
-        str(ws1.threads_dir), "cli", "th1", str(ws1.root), ws1.config
+        str(ws1.threads_dir),
+        "cli",
+        "th1",
+        str(ws1.root),
+        as_settings(ws1.config),
     )
     view1.accept(["acc.py"])
     accepted_hhmm = f"{datetime.fromtimestamp(ws1.store.accepted_state('acc.py').ts):%H:%M}"
@@ -1904,7 +1975,9 @@ async def test_bulk_preview_targets_and_warns(tmp_path):
     ws1.journal.append(_rec("acc.py", ts=2.0, call_id="c2"))
 
     async with TuiApp(
-        threads_dir=str(ws1.threads_dir), system="cli", config=ws1.config
+        threads_dir=str(ws1.threads_dir),
+        system="cli",
+        settings=tui_settings(ws1.config),
     ).run_test() as pilot:
         await _open(pilot, ws1.screen())
         await pilot.press("ctrl+r")
@@ -1916,15 +1989,19 @@ async def test_bulk_preview_targets_and_warns(tmp_path):
 
     # --- «Ход»: у обоих файлов одна цель, ⚠ — только у задетого принятием --
     ws2 = _Workspace(tmp_path / "turn")
-    ws2.store.capture_turn("a.py", "turn-a\n".encode("utf-8"), "t1")
+    ws2.store.capture_turn("a.py", b"turn-a\n", "t1")
     ws2.write("a.py", "now-a\n")
     ws2.journal.append(_rec("a.py", turn="t1", ts=1.0))
-    ws2.store.capture_turn("b.py", "turn-b\n".encode("utf-8"), "t1")
+    ws2.store.capture_turn("b.py", b"turn-b\n", "t1")
     ws2.write("b.py", "now-b\n")
     ws2.journal.append(_rec("b.py", turn="t1", ts=1.0, call_id="c2"))
 
     view2 = EditsView(
-        str(ws2.threads_dir), "cli", "th1", str(ws2.root), ws2.config
+        str(ws2.threads_dir),
+        "cli",
+        "th1",
+        str(ws2.root),
+        as_settings(ws2.config),
     )
     view2.accept(["b.py"])
     accepted_hhmm2 = (
@@ -1932,7 +2009,9 @@ async def test_bulk_preview_targets_and_warns(tmp_path):
     )
 
     async with TuiApp(
-        threads_dir=str(ws2.threads_dir), system="cli", config=ws2.config
+        threads_dir=str(ws2.threads_dir),
+        system="cli",
+        settings=tui_settings(ws2.config),
     ).run_test() as pilot:
         await _open(pilot, ws2.screen(source=SOURCE_TURN))
         await pilot.press("ctrl+r")
@@ -1957,14 +2036,16 @@ async def test_session_preview_never_warns(tmp_path):
     ws.write("acc.py", "v1\n")
     ws.journal.append(_rec("acc.py", ts=1.0, op="create"))
     view = EditsView(
-        str(ws.threads_dir), "cli", "th1", str(ws.root), ws.config
+        str(ws.threads_dir), "cli", "th1", str(ws.root), as_settings(ws.config)
     )
     view.accept(["acc.py"])
     ws.write("acc.py", "v2\n")
     ws.journal.append(_rec("acc.py", ts=2.0, call_id="c2"))
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         await _open(pilot, ws.screen())
         await pilot.press("r")
@@ -1985,7 +2066,9 @@ async def test_absent_target_says_delete(tmp_path):
     ws.journal.append(_rec("new.py", op="create", add=1, del_=0))
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         await _open(pilot, ws.screen())
         await pilot.press("r")
@@ -2017,7 +2100,9 @@ async def test_revert_blocked_while_run_is_active(tmp_path):
     ws.journal.append(_rec("a.py"))
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = await _open(pilot, ws.screen())
         pilot.app.active_runner = SimpleNamespace(is_running=lambda: True)
@@ -2053,7 +2138,9 @@ async def test_list_refreshes_after_revert(tmp_path):
     ws.journal.append(_rec("a.py", add=2, del_=0))
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = await _open(pilot, ws.screen())
         assert "+2" in _plain(scr._rows[0])
@@ -2090,7 +2177,9 @@ async def test_confirm_does_not_overwrite_an_edit_made_after_the_preview(
     ws.journal.append(_rec("a.py"))
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = await _open(pilot, ws.screen())
         await pilot.press("r")
@@ -2129,14 +2218,18 @@ async def test_confirm_does_not_revert_when_the_target_changed_after_the_preview
     ws.journal.append(_rec("a.py"))
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = await _open(pilot, ws.screen())
         await pilot.press("r")
         await pilot.pause()
         assert isinstance(pilot.app.screen, RevertConfirmScreen)
 
-        other = EditsView(str(ws.threads_dir), "cli", "th1", str(ws.root), {})
+        other = EditsView(
+            str(ws.threads_dir), "cli", "th1", str(ws.root), as_settings({})
+        )
         other.reset_accept(["a.py"])
         await pilot.press("enter")
         await pilot.pause()
@@ -2159,7 +2252,9 @@ async def test_revert_from_viewer_returns_to_list(tmp_path):
     ws.journal.append(_rec("b.py", ts=2.0))
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = await _open(pilot, ws.screen())
         await pilot.press("enter")
@@ -2200,7 +2295,9 @@ async def test_ctrl_r_is_not_a_viewer_key_but_stays_on_the_list(tmp_path):
     ws.journal.append(_rec("b.py", ts=2.0))
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = await _open(pilot, ws.screen())
         await pilot.press("enter")
@@ -2234,7 +2331,9 @@ async def test_cancelled_revert_from_viewer_keeps_the_viewer_open(tmp_path):
     ws.journal.append(_rec("a.py"))
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         await _open(pilot, ws.screen())
         await pilot.press("enter")
@@ -2256,13 +2355,15 @@ async def test_turn_source_reverts_to_the_turn_baseline(tmp_path):
 
     ws = _Workspace(tmp_path)
     ws.base("a.py", "сессия\n")
-    ws.store.capture_turn("a.py", "ход\n".encode("utf-8"), "t2")
+    ws.store.capture_turn("a.py", "ход\n".encode(), "t2")
     ws.write("a.py", "сейчас\n")
     ws.journal.append(_rec("a.py", turn="t1", ts=1.0))
     ws.journal.append(_rec("a.py", turn="t2", ts=2.0))
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = await _open(pilot, ws.screen(source=SOURCE_TURN))
         assert scr.source == SOURCE_TURN
@@ -2298,7 +2399,9 @@ async def test_undo_feedback_reaches_the_thread_as_technical_message(tmp_path):
     ws.journal.append(_rec("a.py"))
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         trace = pilot.app.screen
         trace.attach_active_task("th1")
@@ -2344,17 +2447,19 @@ async def test_text_file_overwritten_by_binary_is_restorable(
 
     ws = _Workspace(tmp_path)
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc_home")
-    ctx = SimpleNamespace(
+    from gc_testkit.settings import fake_ctx
+
+    ctx = fake_ctx(
+        {"launch_root": str(ws.root)},
         is_tui=True,
-        config_dict={"launch_root": str(ws.root)},
         threads_dir=str(ws.threads_dir),
         system_id="cli",
         thread_id="th1",
         turn_id="t1",
     )
     target = ws.root / "a.txt"
-    old = "текст\n".encode("utf-8")
-    new = "текст\nдописано\n".encode("utf-8")
+    old = "текст\n".encode()
+    new = "текст\nдописано\n".encode()
     target.write_bytes(new)
     await record_edit(
         ctx,
@@ -2376,7 +2481,7 @@ async def test_text_file_overwritten_by_binary_is_restorable(
     )
 
     view = EditsView(
-        str(ws.threads_dir), "cli", "th1", str(ws.root), ws.config
+        str(ws.threads_dir), "cli", "th1", str(ws.root), as_settings(ws.config)
     )
     entry = next(
         row.entry
@@ -2426,7 +2531,9 @@ async def test_confirmation_of_a_big_set_names_every_file_without_bodies(
     paths = _many_edited(ws, 5, accepted=key == "ctrl+u")
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test(size=(120, 40)) as pilot:
         await _open(pilot, ws.screen())
         await pilot.press(key)

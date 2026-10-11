@@ -39,14 +39,14 @@ def _build(gc_cli_config):
 
     # completions_url: the adapter has no hardcoded default (fail-fast) — supply one.
     cfg = {
-        "completions_url": "http://test/v1/chat/completions",
+        "backend.completions_url": "http://test/v1/chat/completions",
         **gc_cli_config,
     }
     a = mod.GcCliExternal(
         logs_dir=Path("/tmp"), model_name="openai/m", gc_cli_config=cfg
     )
-    c = a._build_config()
-    return c, parse_summary_trigger_chars(c)
+    loaded = a._build_settings()
+    return loaded.settings, parse_summary_trigger_chars(loaded)
 
 
 EXPECT = {
@@ -62,11 +62,13 @@ def test_each_profile_toggles_match():
         prof = yaml.safe_load((PROFILES / fname).read_text())
         gcc = prof["agent_kwargs"]["gc_cli_config"]
         c, parsed_trigger = _build(gcc)
-        assert c["use_local_subagents"] is subagents, fname
+        assert c.agent.use_local_subagents is subagents, fname
         assert parsed_trigger == trigger, fname
         # common faithful keys present in every profile
-        assert c["max_steps"] == 1000, fname
-        assert c["no_tool_call_max_count"] == 5, fname
-        assert c["strict_turn_finish_validation"] is True, fname
-        assert "reason" in c["inject_tool_fields"], fname
-        assert c["chat_completion_kwargs"]["separate_reasoning"] is True, fname
+        assert c.agent.max_steps == 1000, fname
+        assert c.agent.no_tool_call_max_count == 5, fname
+        assert c.agent.strict_turn_finish_validation is True, fname
+        assert "reason" in c.agent.inject_tool_fields, fname
+        assert (
+            c.backend.chat_completion_kwargs["separate_reasoning"] is True
+        ), fname

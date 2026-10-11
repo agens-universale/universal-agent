@@ -3,14 +3,17 @@ import functools
 import gc
 import inspect
 import json
+
+# Переполнение контекста → force-компакция + повтор запроса; лимит на случай,
+# когда даже после сжатия история всё ещё не влезает (единичное огромное сообщение).
+import logging
 import time
 from types import SimpleNamespace
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
-from gc_core.config import (
-    parse_chat_completions_max_tokens,
-    resolve_tui_stream_enabled,
-)
+from gc_core.config import parse_chat_completions_max_tokens
 from gc_core.config_modules.gc import gc_force_collect_enabled
+from gc_core.config_modules.images import read_images_config
 from gc_core.config_modules.strip_tags_projection import (
     persist_reasoning_content_for_model,
     projection_tags_from_config,
@@ -22,6 +25,24 @@ from gc_core.constants.tool_names import (
     SESSION_COMPACT_TOOL_NAME,
     SESSION_TODO_TOOL_NAME,
     TURN_FINALIZING_TOOLS,
+)
+from gc_core.execution.constants import (
+    _MAX_CONTEXT_OVERFLOW_RETRIES,
+    _SESSION_COMPACT_RESUME_USER_TEXT,
+    _TRUNCATED_ARGUMENTS_HINT,
+)
+from gc_core.execution.contracts import ExecutionFailure, ModelRequestStopped
+from gc_core.execution.model import arequest_model
+from gc_core.execution.output_wrapping import (
+    maybe_store_and_wrap_tool_output,
+)
+from gc_core.execution.ports import port
+from gc_core.execution.progress import (
+    brief_args_summary,
+    emit_progress,
+    extract_intermediate_prose,
+    parse_tool_result_status,
+    todo_items_from_arguments,
 )
 from gc_core.intent_guard.guard import FinishGateGuard
 from gc_core.intent_guard.text_answer_judge import ashould_return_text_answer
@@ -39,64 +60,6 @@ from gc_core.loop_detector.detector import clear as clear_loop_detector
 # короткая — инлайн на loop»).
 from gc_core.loop_detector.detector import flush as flush_loop_detector
 from gc_core.loop_detector.detector import observe as observe_loop_detector
-from gc_core.message_policy.stop_persist import is_persist_discarded
-from gc_core.message_policy.user_stop import (
-    not_started_due_to_user_stop_output,
-)
-from gc_core.model_router import AliasCircuitOpenError
-from gc_core.request_backend_policy import (
-    arequest_chat_completions_with_policy,
-)
-from gc_core.run_summary_coordinator import (
-    build_preserved_batch,
-    filter_messages_not_in_state,
-)
-from gc_core.runtime_notices import maybe_push_llm_failure_notice
-from gc_core.summarize.limit_trace_summary import abuild_limit_envelope
-from gc_core.tools import (
-    WrongFunctionArgumentsException,
-    aapply_tool,
-    is_internal_tool_error_output,
-    is_unknown_tool_output,
-)
-from gc_core.tools.session.stored_outputs.wrapping import (
-    maybe_store_and_wrap_tool_output,
-)
-from gc_core.tools.subagents.progress import (
-    brief_args_summary,
-    emit_progress,
-    extract_intermediate_prose,
-    parse_tool_result_status,
-    todo_items_from_arguments,
-)
-from gc_core.tools.subagents.sidecar import apersist_subagent_trace
-from gc_core.utils.aio_compat import await_callback
-from gc_core.utils.backend_errors import (
-    is_auth_error,
-    is_context_overflow_error,
-    is_image_request_error,
-    is_model_unavailable_error,
-)
-from gc_core.utils.connect_backend import (
-    NO_BACKEND_OVERRIDE,
-    acreate_call_headers,
-    acreate_main_and_vision_headers,
-    aresolve_auth_token,
-    backend_override_value,
-    resolve_network_params,
-)
-from gc_core.utils.connect_backend import (
-    arequest_backend_responses as arequest_backend,
-)
-from gc_core.utils.logging_module import human_console_enabled
-
-# Переполнение контекста → force-компакция + повтор запроса; лимит на случай,
-# когда даже после сжатия история всё ещё не влезает (единичное огромное сообщение).
-_MAX_CONTEXT_OVERFLOW_RETRIES = 3
-import logging
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
-
-from gc_core.config_modules.images import read_images_config
 from gc_core.message_policy.attachments_outbound import (
     compute_live_ids,
     count_live_images,
@@ -109,6 +72,7 @@ from gc_core.message_policy.no_tool_call_bounce import (
     extract_last_assistant_text,
     format_no_tool_call_bounce,
 )
+from gc_core.message_policy.stop_persist import is_persist_discarded
 from gc_core.message_policy.tool_attachments import (
     build_tool_attachments_message,
 )
@@ -122,19 +86,57 @@ from gc_core.message_policy.user_message_policy import (
     extract_real_user_message_text,
     wrap_technical_user_content,
 )
+from gc_core.message_policy.user_stop import (
+    not_started_due_to_user_stop_output,
+)
+from gc_core.model_router import AliasCircuitOpenError
+from gc_core.request_backend_policy import (
+    arequest_chat_completions_with_policy,
+)
+from gc_core.run_summary_coordinator import (
+    build_preserved_batch,
+    filter_messages_not_in_state,
+)
+from gc_core.runtime_notices import maybe_push_llm_failure_notice
+from gc_core.settings import AppConfig, settings_of
 from gc_core.states import State
+from gc_core.summarize.limit_trace_summary import abuild_limit_envelope
+from gc_core.tools import (
+    WrongFunctionArgumentsException,
+    aapply_tool,
+    is_internal_tool_error_output,
+    is_unknown_tool_output,
+)
+from gc_core.tools.subagents.sidecar import apersist_subagent_trace
 from gc_core.turn_boundary import begin_turn
 from gc_core.usage.account import CATEGORY_MAIN as USAGE_CATEGORY_MAIN
 from gc_core.usage.account import UsageAccount
 from gc_core.usage.context import usage_scope
 from gc_core.usage.normalize import prompt_input_tokens
+from gc_core.utils.aio_compat import await_callback
 from gc_core.utils.backend_errors import (
     FINISH_KIND_LENGTH,
     classify_finish_kind,
     finish_blocks_final,
     finish_prevents_text_final,
+    is_auth_error,
+    is_context_overflow_error,
+    is_image_request_error,
+    is_model_unavailable_error,
+    is_previous_response_cache_miss,
 )
-from gc_core.utils.connect_backend import create_call_data_completions
+from gc_core.utils.connect_backend import (
+    NO_BACKEND_OVERRIDE,
+    acreate_call_headers,
+    acreate_main_and_vision_headers,
+    aresolve_auth_token,
+    backend_override_value,
+    create_call_data_completions,
+    resolve_network_params,
+)
+from gc_core.utils.connect_backend import (
+    arequest_backend_responses as arequest_backend,
+)
 from gc_core.utils.connect_backend import (
     create_call_data_responses as create_call_data,
 )
@@ -147,6 +149,7 @@ from gc_core.utils.generate_message_id import (
     generate_msg_id_sha256 as generate_message_id_func,
 )
 from gc_core.utils.llm_chat_client import snapshot_chat_completion
+from gc_core.utils.logging_module import human_console_enabled
 from gc_core.vision.audience import (
     Audience,
     _declared_blind,
@@ -215,6 +218,8 @@ async def _maybe_persist(
         state.allow_pairing_persist = True
     try:
         await await_callback(callback(messages))
+    except ExecutionFailure:
+        raise
     except Exception as persist_exc:
         _fallback_logger.warning(
             "Thread messages persist warning: %s",
@@ -273,13 +278,6 @@ def _summarize_call_data_for_log(call_data: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-_SESSION_COMPACT_RESUME_USER_TEXT = (
-    "session_compact finished. The dialog summary user message in the trace is the new "
-    "baseline (updated session memory, last_dialog_steps, user intent). Continue from "
-    "that summary. The pre-compaction step-by-step trace is no longer in context."
-)
-
-
 def _without_tool_call_pairs(
     messages: List[Dict], tool_name: str
 ) -> List[Dict]:
@@ -320,16 +318,11 @@ def _make_technical_feedback_user_message(
 
 
 def _is_previous_response_cache_miss(exc: Exception) -> bool:
-    text = str(exc).lower()
-    return (
-        "previous_response_id" in text
-        and ("not found" in text or "cache" in text)
-    ) or ("cache" in text and "not found" in text)
+    return is_previous_response_cache_miss(exc)
 
 
 def _get_backend_api_mode(ctx: Any) -> str:
-    cfg = getattr(ctx, "config_dict", {}) or {}
-    raw_mode = str(cfg.get("backend_api_mode", "responses")).strip().lower()
+    raw_mode = str(settings_of(ctx).backend.api_mode).strip().lower()
     if raw_mode in {"responses", "chat_completions"}:
         return raw_mode
     raise ValueError(f"Unsupported backend_api_mode: {raw_mode!r}")
@@ -455,7 +448,7 @@ def _request_audience(
             request_resolved=resolved,
             api_mode=api_mode,
             tool_in_set=view_tool_in_set(getattr(state, "tools", None) or []),
-            config=getattr(ctx, "config_dict", None) or {},
+            settings=ctx,
             routes=getattr(state, "vision_routes", {}),
             turn_key=getattr(state, "vision_probe_turn", None),
         )
@@ -489,6 +482,31 @@ def _read_once(
 
 
 async def _arequest_backend_canonical(
+    messages: List[Dict],
+    state: State,
+    ctx: Any,
+    *,
+    set_previous_response_id: bool = True,
+) -> Tuple[List[Dict], str, Dict]:
+    operations = port(ctx, "operations")
+    if operations is None:
+        return await _arequest_backend_canonical_local(
+            messages,
+            state,
+            ctx,
+            set_previous_response_id=set_previous_response_id,
+        )
+    result = await arequest_model(
+        operations,
+        state,
+        messages,
+        consumer="main",
+        set_previous_response_id=set_previous_response_id,
+    )
+    return result.messages, result.response_id or "", result.response_metadata
+
+
+async def _arequest_backend_canonical_local(
     messages: List[Dict],
     state: State,
     ctx: Any,
@@ -549,14 +567,14 @@ async def _arequest_responses_once(
     *,
     resolved: Any,
     call_headers: Dict[str, str],
-    cfg: Dict[str, Any],
+    settings: AppConfig,
     set_previous_response_id: bool,
     network: tuple,
 ) -> Tuple[List[Dict], str, Dict]:
-    # Responses-режим: из ResolvedModel действует только id модели (спека §4) —
-    # url остаётся легаси-ключом agent_url.
+    # Адрес — backend.completions_url в обоих режимах API. Прежний плоский
+    # `agent_url` в схеме не существует (строгая валидация его не пропустит).
     verify, cert, use_retry, request_timeout_sec, config_proxy = network
-    url = cfg["agent_url"]
+    url = settings.backend.completions_url
     # Нативного показа картинок в responses нет (спека §20.5): вложения уходят
     # записками, ключ attachments на провод не попадает, и ни одна картинка не
     # оседает в цепочке previous_response_id.
@@ -579,7 +597,7 @@ async def _arequest_responses_once(
         tools=tools_for_request(getattr(state, "tools", None) or [], audience),
         set_previous_response_id=set_previous_response_id,
         resolved=resolved,
-        config_dict=cfg,
+        settings=settings,
     )
     with usage_scope(
         getattr(state, "usage", None), USAGE_CATEGORY_MAIN, "responses"
@@ -599,7 +617,7 @@ async def _arequest_responses_once(
 
 
 def _chat_token_limits(
-    cfg: Dict[str, Any], resolved_for_network: Any
+    settings: AppConfig, resolved_for_network: Any
 ) -> Tuple[int, int]:
     """(max_tokens, min_response_tokens) с учётом per-model оверрайдов backend."""
     # Лимиты токенов — тоже поля backend, и у модели реестра они СВОИ: окно
@@ -610,7 +628,7 @@ def _chat_token_limits(
         resolved_for_network, "chat_completions_max_tokens"
     )
     completions_max_tokens = parse_chat_completions_max_tokens(
-        cfg.get("chat_completions_max_tokens", 8096)
+        settings.backend.chat_completions_max_tokens
         if _max_tokens_override is NO_BACKEND_OVERRIDE
         else _max_tokens_override,
         default=8096,
@@ -619,12 +637,20 @@ def _chat_token_limits(
         resolved_for_network, "chat_completions_min_response_tokens"
     )
     min_response_tokens = parse_chat_completions_max_tokens(
-        cfg.get("chat_completions_min_response_tokens", 1024)
+        settings.backend.chat_completions_min_response_tokens
         if _min_tokens_override is NO_BACKEND_OVERRIDE
         else _min_tokens_override,
         default=1024,
     )
     return completions_max_tokens, min_response_tokens
+
+
+def _tui_stream_enabled(settings: AppConfig) -> bool:
+    """Мастер-свитч live-стриминга TUI: явный ``tui.stream`` побеждает, иначе
+    legacy ``backend.stream`` (его дефолт True)."""
+    if settings.tui.stream is not None:
+        return bool(settings.tui.stream)
+    return bool(settings.backend.stream)
 
 
 def _first_choice_finish_reason(res: Dict[str, Any]) -> Any:
@@ -644,7 +670,7 @@ async def _asend_chat_completions(
     sanitized_messages: List[Dict],
     sanitized_state_messages: List[Dict],
     read_bytes: Callable[[Any], Optional[bytes]],
-    cfg: Dict[str, Any],
+    settings: AppConfig,
     resolved: Any,
     request_kwargs: Dict[str, Any],
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
@@ -684,7 +710,7 @@ async def _asend_chat_completions(
             chat_state,
             tools=request_tools,
             max_tokens=max_tokens,
-            config_dict=cfg,
+            settings=settings,
             resolved=resolved,
         )
 
@@ -813,14 +839,14 @@ async def _asend_with_image_fallback(
 
 async def _acreate_vision_call_headers(state, ctx, resolved):
     """Refresh the eyes' effective key without probing or fetching auth twice."""
-    cfg = getattr(ctx, "config_dict", {}) or {}
+    settings = settings_of(ctx)
     router = getattr(ctx, "model_router", None)
     eyes = _resolve_eyes(router) if router is not None else None
     if (
         eyes is None
-        or _declared_blind(eyes, cfg)
+        or _declared_blind(eyes, settings)
         or (
-            cfg.get("backend_api_mode") == "chat_completions"
+            settings.backend.api_mode == "chat_completions"
             and resolved is not None
             and route_id(eyes) == route_id(resolved)
         )
@@ -839,7 +865,7 @@ async def _acreate_vision_call_headers(state, ctx, resolved):
 
 
 async def _aprepare_native_vision(
-    state, ctx, resolved, call_headers, messages, cfg
+    state, ctx, resolved, call_headers, messages, settings
 ):
     """Register the authenticated route and probe only live image candidates."""
     if resolved is None:
@@ -853,9 +879,9 @@ async def _aprepare_native_vision(
     state.vision_routes[route_id(resolved)] = key
     candidates = compute_live_ids(
         [*(getattr(state, "messages", []) or []), *messages],
-        images=read_images_config(cfg),
+        images=read_images_config(settings),
     )
-    if candidates and not _declared_blind(resolved, cfg):
+    if candidates and not _declared_blind(resolved, settings):
         await aensure_route(ctx, state, prepared)
         from gc_core.vision.service import confirmed_route_headers
 
@@ -882,13 +908,13 @@ async def _arequest_backend_canonical_once(
     # backend_overrides), не только id модели (спека §6/§7) — поэтому и резолв идёт
     # по уровню, зафиксированному на ход (`_resolve_main_for_turn`), а не по живому:
     # иначе /level посреди хода уводил бы запрос на другой слот. Без ctx.model_router
-    # (легаси/тестовые двойники) — resolved=None, воронки читают cfg напрямую как раньше.
+    # (легаси/тестовые двойники) — resolved=None, воронки читают настройки напрямую как раньше.
     resolved = _resolve_main_for_turn(state, ctx)
     call_headers = await _acreate_vision_call_headers(state, ctx, resolved)
-    cfg = getattr(ctx, "config_dict", {}) or {}
+    settings = settings_of(ctx)
     backend_mode = _get_backend_api_mode(ctx)
     # Per-model url/token/backend-квирки — chat_completions-only (спека §4): в responses
-    # из ResolvedModel действует только id модели, сетевые параметры — легаси cfg.
+    # из ResolvedModel действует только id модели, сетевые параметры — из settings.backend.
     resolved_for_network = (
         resolved if backend_mode == "chat_completions" else None
     )
@@ -899,7 +925,7 @@ async def _arequest_backend_canonical_once(
         request_timeout_sec,
         config_proxy,
         retry_embedded_choice_errors,
-    ) = resolve_network_params(cfg, resolved_for_network)
+    ) = resolve_network_params(settings, resolved_for_network)
 
     if backend_mode == "responses":
         return await _arequest_responses_once(
@@ -908,7 +934,7 @@ async def _arequest_backend_canonical_once(
             ctx,
             resolved=resolved,
             call_headers=call_headers,
-            cfg=cfg,
+            settings=settings,
             set_previous_response_id=set_previous_response_id,
             network=(
                 verify,
@@ -920,10 +946,14 @@ async def _arequest_backend_canonical_once(
         )
 
     route_key = await _aprepare_native_vision(
-        state, ctx, resolved, call_headers, messages, cfg
+        state, ctx, resolved, call_headers, messages, settings
     )
 
-    url = resolved.url if resolved is not None else cfg["completions_url"]
+    url = (
+        resolved.url
+        if resolved is not None
+        else settings.backend.completions_url
+    )
     sanitized_messages = sanitize_messages_for_chat_completions(
         messages,
         invalid_tool_call_factory=build_invalid_tool_call_feedback_message,
@@ -937,10 +967,10 @@ async def _arequest_backend_canonical_once(
     # долбил бы её от чужого потолка к чужому полу. Тот же приём, что в служебной
     # воронке (`utils/llm_chat_client._send_chat_completion_text`).
     completions_max_tokens, min_response_tokens = _chat_token_limits(
-        cfg, resolved_for_network
+        settings, resolved_for_network
     )
 
-    _stream_on = resolve_tui_stream_enabled(cfg)
+    _stream_on = _tui_stream_enabled(settings)
     _on_delta = getattr(ctx, "on_stream_delta", None) if _stream_on else None
     prompt_message_count = len(getattr(state, "messages", []) or [])
 
@@ -950,7 +980,7 @@ async def _arequest_backend_canonical_once(
         sanitized_messages=sanitized_messages,
         sanitized_state_messages=sanitized_state_messages,
         read_bytes=_image_bytes_reader(ctx),
-        cfg=cfg,
+        settings=settings,
         resolved=resolved,
         request_kwargs={
             "initial_max_tokens": completions_max_tokens,
@@ -981,7 +1011,7 @@ async def _arequest_backend_canonical_once(
         # слитой последовательности (повтор по id считается один раз), проекция
         # ложится на оба списка и сохраняет id — дедупликация видит те же ключи.
         merged_messages=[*sanitized_state_messages, *sanitized_messages],
-        images_config=read_images_config(cfg),
+        images_config=read_images_config(settings),
         route_key=route_key,
     )
     if not isinstance(res, dict):
@@ -1002,7 +1032,7 @@ async def _arequest_backend_canonical_once(
     choices = res.get("choices")
     if isinstance(choices, list) and len(choices) > 0:
         first_choice_payload["choices"] = [choices[0]]
-    persist_reasoning = persist_reasoning_content_for_model(resolved, cfg)
+    persist_reasoning = persist_reasoning_content_for_model(resolved, settings)
     canonical = output_chat_completion_to_response(
         first_choice_payload,
         logger_override=getattr(ctx, "logger", _fallback_logger),
@@ -1119,6 +1149,10 @@ def group_messages(messages: List[Dict]) -> Dict[str, List[Dict]]:
             text_messages.append(m)
         elif m_type == "function_call_output":
             tool_outputs.append(m)
+        elif m_type == "reasoning":
+            # Responses metadata stays in the original persisted batch;
+            # it is not a tool or a user-visible assistant message.
+            continue
         else:
             raise ValueError(f"message type error with: {m}")
 
@@ -1247,11 +1281,6 @@ def _split_batch_new_around_finish(
 
 # finish_reason == "length": JSON вызова усечён потолком max_tokens — объясняем
 # модели причину и советуем компактный вариант / разбиение на вызовы.
-_TRUNCATED_ARGUMENTS_HINT = (
-    "⚠ Output was truncated: output token limit reached "
-    '(finish_reason == "length"). Shorten the response '
-    "or split it into multiple calls with smaller payloads."
-)
 
 
 def _attach_truncation_hint(
@@ -1266,7 +1295,10 @@ def _attach_truncation_hint(
         return
     hints = [
         h
-        for h in (getattr(exc, "extra_hint", None), _TRUNCATED_ARGUMENTS_HINT)
+        for h in (
+            getattr(exc, "extra_hint", None),
+            _TRUNCATED_ARGUMENTS_HINT,
+        )
         if h
     ]
     exc.extra_hint = "\n\n".join(hints)
@@ -1317,7 +1349,7 @@ def _not_started_outputs(
             call_id=rem["call_id"],
             tool_name=rem_name,
             state=state,
-            config=getattr(ctx, "config_dict", {}) or {},
+            settings=ctx,
             logger=getattr(ctx, "logger", None),
         )
         outputs.append(_function_call_output_message(rem["call_id"], rem_out))
@@ -1338,7 +1370,9 @@ async def _aexecute_tool_call(
     # intermediate_reply в UI — просто текст «· …», не строка тула ▸/✓,
     # поэтому ниже шлём отдельный сигнал, без «старт тула».
     is_intermediate = tool_name == INTERMEDIATE_REPLY_TOOL_NAME
-    started_at = time.monotonic()
+    operations = port(ctx, "operations")
+    clock = operations.monotonic if operations is not None else time.monotonic
+    started_at = clock()
 
     # Live-прогресс субагента: «тул пошёл». На обычном parent-прогоне — no-op.
     # Sidecar persist параллельно (нужен thread identity; sink не требуется).
@@ -1372,13 +1406,13 @@ async def _aexecute_tool_call(
         # call_id для субагента: чтобы вложенные строки в TUI знали,
         # под какой корневой subagent_* они относятся.
         state.tool_calls += 1
-        tool_res_raw = await aapply_tool(
-            tool_name=tool_name,
-            arguments=tool_arguments,
-            ctx=ctx,
-            state=state,
-            run_agent_func=run_agent_func,
-            call_id=tool_call_id,
+        tool_res_raw, was_invalid = await _ainvoke_tool(
+            tool_name,
+            tool_arguments,
+            state,
+            ctx,
+            run_agent_func,
+            tool_call_id,
         )
     except WrongFunctionArgumentsException as exc:
         # Отказ одного вызова — не отказ хода: невалидные аргументы становятся
@@ -1391,7 +1425,7 @@ async def _aexecute_tool_call(
         tool_res_raw = exc.to_tool_output()
     # Live-прогресс: тул закончил — или текст intermediate_reply.
     # В историю треда это не пишется.
-    elapsed_ms = int((time.monotonic() - started_at) * 1000)
+    elapsed_ms = int((clock() - started_at) * 1000)
     ok, error_brief = parse_tool_result_status(tool_res_raw)
     if is_intermediate:
         await _aemit_intermediate_reply(
@@ -1433,6 +1467,31 @@ async def _aexecute_tool_call(
             },
         )
     return tool_res_raw, was_invalid, ok
+
+
+async def _ainvoke_tool(
+    tool_name,
+    tool_arguments,
+    state,
+    ctx,
+    run_agent_func,
+    tool_call_id,
+):
+    operations = port(ctx, "operations")
+    output = await aapply_tool(
+        tool_name=tool_name,
+        arguments=tool_arguments,
+        ctx=ctx,
+        state=state,
+        run_agent_func=run_agent_func,
+        call_id=tool_call_id,
+        **(
+            {"tool_operation_id": operations.next_operation_id("tool")}
+            if operations is not None
+            else {}
+        ),
+    )
+    return output, False
 
 
 async def _aemit_intermediate_reply(
@@ -1499,7 +1558,9 @@ def _track_repeat_errors(
 
 
 def _apply_session_compact_to_batch(
-    state: State, batch_snapshot: List[Dict], tools_outputs: List[Dict]
+    state: State,
+    batch_snapshot: List[Dict],
+    tools_outputs: List[Dict],
 ) -> List[Dict]:
     # Если внутри batch сработал session_compact — вместо сырых output'ов
     # вернуть сохранённые пары call/output + technical-сообщение «продолжай»,
@@ -1564,12 +1625,13 @@ async def _afinalize_tool_batch(
     # сообщением в самом конце батча (спека §7.1): tool-сообщение картинку не
     # несёт. После принятого turn_finish оно уходит вместе с хвостом
     # (`_split_batch_new_around_finish`).
-    pending_attachments = state.pending_tool_attachments
+    pending_attachments = getattr(state, "pending_tool_attachments", None)
     state.pending_tool_attachments = []
     if pending_attachments:
         tools_outputs.append(
             build_tool_attachments_message(
-                pending_attachments, message_id=generate_message_id_func("m")
+                pending_attachments,
+                message_id=generate_message_id_func("m"),
             )
         )
 
@@ -1577,11 +1639,14 @@ async def _afinalize_tool_batch(
     # мусор между шагами. Default on для CLI/TUI, off для server; явный
     # gc.force_collect в конфиге перекрывает default.
     if gc_force_collect_enabled(
-        getattr(ctx, "config_dict", {}) or {},
+        ctx,
         is_tui=bool(getattr(ctx, "is_tui", False)),
         is_cli_mode=bool(getattr(ctx, "is_cli_mode", False)),
     ):
-        gc.collect()
+        # Рантайм может заменить сборку (Temporal: общий worker не
+        # останавливается ради одного workflow); локально — gc.collect.
+        collect = getattr(ctx, "collect_garbage", None)
+        (collect or gc.collect)()
 
     return tools_outputs
 
@@ -1618,7 +1683,7 @@ async def _afinish_tool_call(
         call_id=m["call_id"],
         tool_name=tool_name,
         state=state,
-        config=getattr(ctx, "config_dict", {}) or {},
+        settings=ctx,
         logger=getattr(ctx, "logger", None),
     )
     if tool_name != FINISH_TOOL_NAME:
@@ -1725,7 +1790,11 @@ async def aprocess_tool_calls(
             persist_messages_callback=persist_messages_callback,
         )
         tool_arguments = str(m.get("arguments", ""))
-        tool_res_raw, was_invalid, ok = await _aexecute_tool_call(
+        (
+            tool_res_raw,
+            was_invalid,
+            ok,
+        ) = await _aexecute_tool_call(
             m, tool_name, tool_arguments, state, ctx, run_agent_func
         )
         invalid_in_batch += int(was_invalid)
@@ -1867,14 +1936,14 @@ class _AgentLoop:
         self.tool_error_cnt = 0
         self.context_overflow_retries = 0
         self.run_logger = getattr(ctx, "logger", None) or _fallback_logger
-        self.cfg = getattr(ctx, "config_dict", {}) or {}
-        self.proj_tags = projection_tags_from_config(self.cfg)
-        self.console_human = human_console_enabled(self.cfg)
-        self.max_tool_errors = self.cfg.get("no_tool_call_max_count", 0)
-        self.session_token_limit = self.cfg.get("session_token_limit")
-        self.max_tool_calls_limit = self.cfg.get("max_tool_calls")
+        agent_cfg = settings_of(ctx).agent
+        self.proj_tags = projection_tags_from_config(ctx)
+        self.console_human = human_console_enabled(ctx)
+        self.max_tool_errors = agent_cfg.no_tool_call_max_count
+        self.session_token_limit = agent_cfg.session_token_limit
+        self.max_tool_calls_limit = agent_cfg.max_tool_calls
         self.max_unknown_tool_repeats = int(
-            self.cfg.get("max_unknown_tool_repeats", 5) or 5
+            agent_cfg.max_unknown_tool_repeats or 5
         )
         state.last_unknown_tool_name = None
         state.unknown_tool_repeat_count = 0
@@ -1912,6 +1981,8 @@ class _AgentLoop:
             messages, mode, early = await self._aprepare_batch(
                 messages, backend_mode
             )
+        except ExecutionFailure:
+            raise
         except Exception as e:
             # Ошибки до успешного разбора батча (санитайз, check_mode, …) — bounce.
             return _Outcome(self._bounce_on_error(e), completed_step=True)
@@ -1926,6 +1997,12 @@ class _AgentLoop:
             outcome = _Outcome(
                 self._bounce_wrong_arguments(e), completed_step=True
             )
+        except ExecutionFailure:
+            raise
+        except ModelRequestStopped:
+            # stop во время ожидания модели — как stop между шагами.
+            clear_loop_detector(self.state)
+            return _Outcome(result=None)
         except Exception as backend_exc:
             if not await self._atry_recover_context_overflow(backend_exc):
                 raise
@@ -2113,7 +2190,10 @@ class _AgentLoop:
         ):
             state.terminal_outcome = "tool_call_limit"
             return await _acall_blocking_hook(
-                abuild_limit_envelope, state, "tool_call_limit", ctx
+                abuild_limit_envelope,
+                state,
+                "tool_call_limit",
+                ctx,
             )
         if self.session_token_limit is not None:
             _baseline = UsageAccount.from_meta(
@@ -2123,7 +2203,10 @@ class _AgentLoop:
             if _spent >= self.session_token_limit:
                 state.terminal_outcome = "token_limit"
                 return await _acall_blocking_hook(
-                    abuild_limit_envelope, state, "token_limit", ctx
+                    abuild_limit_envelope,
+                    state,
+                    "token_limit",
+                    ctx,
                 )
         return _NO_RETURN
 
@@ -2166,6 +2249,8 @@ class _AgentLoop:
             await _acall_blocking_hook(
                 self.pre_backend_compaction_hook, messages, mode
             )
+        except ExecutionFailure:
+            raise
         except Exception as pre_backend_exc:
             self.run_logger.warning(
                 "Pre-backend compaction hook warning: %s",
@@ -2196,6 +2281,8 @@ class _AgentLoop:
                 if to_append:
                     state.messages += to_append
                 await self._apersist_notice_messages(notice_messages)
+        except ExecutionFailure:
+            raise
         except Exception as mem_exc:
             self.run_logger.warning(
                 "Memory messages hook warning: %s",
@@ -2211,6 +2298,8 @@ class _AgentLoop:
             await await_callback(
                 self.persist_messages_callback(notice_messages)
             )
+        except ExecutionFailure:
+            raise
         except Exception as persist_exc:
             self.run_logger.warning(
                 "Thread notice messages persist warning: %s",
@@ -2241,6 +2330,8 @@ class _AgentLoop:
             messages, response_id = await aprocess_user_ask(
                 messages, state, ctx
             )
+        except ExecutionFailure:
+            raise
         except Exception as user_ask_exc:
             can_retry_with_full_history = (
                 backend_mode == "responses"
@@ -2257,7 +2348,11 @@ class _AgentLoop:
             )
             full_history_messages = self.get_full_history_messages()
             state.previous_response_id = None
-            messages, response_id, _ = await _arequest_backend_canonical(
+            (
+                messages,
+                response_id,
+                _,
+            ) = await _arequest_backend_canonical(
                 full_history_messages,
                 state,
                 ctx,
@@ -2538,6 +2633,9 @@ class _AgentLoop:
         return _Outcome(
             self._technical_bounce(bounce_msg), completed_step=True
         )
+
+
+# Keep the public helper/monkeypatch boundary while sharing one loop.
 
 
 async def arun_agent(

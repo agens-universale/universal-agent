@@ -20,6 +20,7 @@ import time
 
 import pytest
 from gc_core.security.dual_wrapper import OffLoop, dual_wrap
+from gc_testkit.settings import fake_ctx
 
 pytestmark = pytest.mark.skipif(
     not hasattr(signal, "SIGINT"), reason="платформа без SIGINT"
@@ -178,14 +179,12 @@ def _slow_human(**_kw) -> str:
 
 
 def _ctx(config: dict):
-    from types import SimpleNamespace
-
     from gc_core.security.permission_store import PermissionStore
 
-    return SimpleNamespace(
+    return fake_ctx(
         is_tui=True,
         tui_confirm=_slow_human,
-        config_dict=config,
+        config=config,
         permission_store=PermissionStore(),
     )
 
@@ -212,7 +211,13 @@ def _write_to_instructions(tmp_path):
     (project / "AGENTS.md").write_text("правила проекта", encoding="utf-8")
 
     class _Tool(_Blocked):
-        _ctx = _ctx({"launch_root": str(project)})
+        # write_guard выключен: ждём человека только floor-защита инструкций.
+        _ctx = _ctx(
+            {
+                "launch_root": str(project),
+                "security.write_guard": {"enabled": False},
+            }
+        )
 
         @enforce_write_guard(path_arg="path")
         async def write(self, path):
@@ -231,7 +236,7 @@ def _write_outside_the_project(tmp_path):
         _ctx = _ctx(
             {
                 "launch_root": str(project),
-                "write_guard": {"enabled": True, "mode": "ask"},
+                "security.write_guard": {"enabled": True, "mode": "ask"},
             }
         )
 
@@ -252,7 +257,7 @@ def _read_outside_the_project(tmp_path):
         _ctx = _ctx(
             {
                 "launch_root": str(project),
-                "read_guard": {
+                "security.read_guard": {
                     "enabled": True,
                     "mode": "ask",
                     "allowed_read_roots": [str(project)],
@@ -274,7 +279,7 @@ def _fetch_a_listed_url(tmp_path):
         _ctx = _ctx(
             {
                 "launch_root": str(tmp_path),
-                "url_policy": {
+                "security.url_policy": {
                     "enabled": True,
                     "mode": "ask",
                     "allowed_schemes": ["https"],
@@ -297,7 +302,10 @@ def _run_without_a_judge(tmp_path):
         _ctx = _ctx(
             {
                 "launch_root": str(tmp_path),
-                "command_moderation": {"enabled": True, "mode": "ask"},
+                "security.command_moderation": {
+                    "enabled": True,
+                    "mode": "ask",
+                },
             }
         )
 
@@ -320,7 +328,10 @@ def _run_touching_instructions(tmp_path):
 
     class _Tool(_Blocked):
         _ctx = _ctx(
-            {"launch_root": str(tmp_path), "gc_protection": {"enabled": True}}
+            {
+                "launch_root": str(tmp_path),
+                "security.protected_paths": {"enabled": True},
+            }
         )
 
         @enforce_command_guard(

@@ -1,5 +1,3 @@
-import json
-
 from gc_core.intent_log import (
     ACTION_TOOL_AGGREGATED,
     ACTION_USER_ASK,
@@ -10,7 +8,6 @@ from gc_core.intent_log import (
 )
 from gc_core.intent_log.serialize import LEGACY_LOAD_TS
 from gc_core.persistence.schema import STATE_SCHEMA_VERSION
-from gc_core.persistence.state_serializer import StateSerializer
 from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
 from gc_core.states import State
 from gc_core.thread_store import load_thread_meta, save_thread_meta
@@ -85,30 +82,6 @@ def test_state_init_from_structured_meta():
     assert state.user_intent_log[0].content == "closed turn"
     assert state.current_user_intent[0].content == "open turn"
     assert state.user_turn_seq == 5
-
-
-def test_state_snapshot_roundtrip_preserves_intent_records_and_seq():
-    state = _make_state()
-    state.shared.working_memory = {"goal": "ship", "knowledge": "fact"}
-    current = append_user_ask([], "open ask", user_turn_seq=1, ts=FIXED_TS)
-    current = append_user_ask(
-        current, "second ask", user_turn_seq=1, ts=FIXED_TS
-    )
-    log = [_closed_record(turn=1)]
-    state.user_intent_log = log
-    state.current_user_intent = current
-    state.user_turn_seq = 1
-
-    payload = StateSerializer.serialize(state)
-    restored = StateSerializer.deserialize(json.loads(json.dumps(payload)))
-
-    assert restored.user_turn_seq == 1
-    assert len(restored.user_intent_log) == 1
-    assert restored.user_intent_log[0].action == ACTION_USER_ASK
-    assert len(restored.current_user_intent) == 2
-    assert restored.current_user_intent[0].content == "open ask"
-    assert restored.current_user_intent[1].content == "second ask"
-    assert restored.shared.working_memory["goal"] == "ship"
 
 
 def test_flush_current_user_intent_increments_seq_and_moves_records():

@@ -10,6 +10,7 @@ import time
 from dataclasses import dataclass
 
 from gc_core.onboarding_config_writer import write_values as _write_values
+from gc_core.settings import settings_of
 
 from gc_tui.voice_runtime.net import with_system_trust_retry
 from gc_tui.voice_runtime.service import make_silence_wav
@@ -82,19 +83,20 @@ def engine_update() -> tuple[str, str] | None:
     return (state.version, want) if want else None
 
 
-def status_cheap(config_dict: dict) -> VoiceStatus:
+def status_cheap(settings) -> VoiceStatus:
     """Снимок без похода в сеть: state.json + конфиг. service_alive=None («не мерялось»).
+    `settings` — настройки окна (всё, что принимает `settings_of`).
 
     Живость порта сюда не входит намеренно: connect к мёртвому порту на машинах, где
     файрвол молча роняет пакеты, сгорает по полному таймауту (~0.5 с, замерено живьём),
     и синхронный вызов с UI-потока замораживал каждый ход курсора в /settings, пока
     сервис лежал. Живость меряет probe_alive — из воркера экрана."""
     st = _load_state()
-    url = str((config_dict.get("voice") or {}).get("url") or "")
+    url = str(settings_of(settings).voice.url or "")
     if st is not None:
         from gc_tui.voice_runtime.autostart import url_is_ours
 
-        if url_is_ours(config_dict, st.port):
+        if url_is_ours(settings, st.port):
             mode = "local"
         else:
             mode = "cloud" if url else "off"
@@ -125,17 +127,6 @@ def probe_alive() -> bool | None:
     return None if st is None else _port_alive(st)
 
 
-def status_snapshot(config_dict: dict) -> VoiceStatus:
-    """Полный снимок: дешёвая часть + живость порта. Для воркеров и CLI-подобных путей;
-    UI-поток берёт status_cheap и получает живость от probe_alive асинхронно."""
-    s = status_cheap(config_dict)
-    if not s.installed:
-        return s
-    from dataclasses import replace
-
-    return replace(s, service_alive=bool(probe_alive()))
-
-
 def install_local(echo=print) -> bool:
     from gc_tui.voice_runtime.install import VoiceInstallError, install
 
@@ -151,14 +142,15 @@ def install_local(echo=print) -> bool:
         return False
 
 
-def update_local(config: dict, echo=print) -> bool:
+def update_local(settings, echo=print) -> bool:
     """Обновить локальный движок до версии, приколотой в этой сборке агента.
 
     Порядок обязателен: погасить → переустановить → поднять заново. На Windows
     работающий сервис держит файлы своего каталога, и переклон под ним не удался бы
     (`install` честно скажет «занят», но человеку нужен результат, а не диагноз).
     Порт и модель берём прежние: их выбирал человек, и смена версии движка — не повод
-    молча вернуть дефолты."""
+    молча вернуть дефолты. `settings` — настройки окна (всё, что принимает
+    `settings_of`)."""
     from gc_tui.voice_runtime.autostart import ensure_voice_service
     from gc_tui.voice_runtime.cli import (
         _stop_service,
@@ -192,7 +184,7 @@ def update_local(config: dict, echo=print) -> bool:
             echo(
                 "[voice] поднимаю сервис заново (холодный старт — до полутора минут)"
             )
-            if not ensure_voice_service(config):
+            if not ensure_voice_service(settings):
                 echo(
                     "[voice] сервис не поднялся — запустится при следующем старте gc-ua"
                 )
@@ -206,25 +198,27 @@ def remove_local() -> bool:
     return _cmd_remove() == 0
 
 
-def _wire_local(config_dict: dict | None = None) -> None:
+def _wire_local(settings=None) -> None:
     st = _load_state()
     if st is not None:
-        wire_voice(st.port, st.model, local_language(config_dict))
+        wire_voice(st.port, st.model, local_language(settings))
 
 
-def local_language(config_dict: dict | None = None) -> str:
+def local_language(settings=None) -> str:
     """Язык, на котором работает локальный режим.
 
     Владелец — managed-слой, но переезд на свой endpoint сносит его секцию целиком
     (`wire_cloud` делает unwire), и к возврату в локальный режим языка там уже нет.
     Тогда берём его из ДЕЙСТВУЮЩЕГО конфига: иначе выбор человека молча сбрасывался
-    бы на дефолт после круга «локальный → облако → локальный»."""
+    бы на дефолт после круга «локальный → облако → локальный». `settings` —
+    действующие настройки (всё, что принимает `settings_of`); None — язык по
+    умолчанию."""
     managed = _managed_language("")
     if managed:
         return managed
-    return str(
-        ((config_dict or {}).get("voice") or {}).get("language") or "ru"
-    )
+    if settings is None:
+        return "ru"
+    return str(settings_of(settings).voice.language or "ru")
 
 
 def set_local_language(language: str) -> bool:
@@ -238,12 +232,12 @@ def set_local_language(language: str) -> bool:
     return True
 
 
-def switch_to_local(echo=print, config: dict | None = None) -> bool:
+def switch_to_local(echo=print, settings=None) -> bool:
     """Install при отсутствии батарейки (он сам wire'ит), иначе — только wire.
-    config — действующий конфиг: из него достаётся язык, если managed-секции нет."""
+    settings — действующие настройки: из них достаётся язык, если managed-секции нет."""
     if _load_state() is None:
         return install_local(echo=echo)
-    _wire_local(config)
+    _wire_local(settings)
     return True
 
 

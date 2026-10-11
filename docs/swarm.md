@@ -207,7 +207,7 @@ client                 server                   wrapper.sh             bwrap + g
    1. **Base** — `host_config_path` (по дефолту resolve через XDG / пакетный default).
    2. **Project overlay** — `<cwd>/.gc/config.yml` относительно CWD сервера (симметрично с обычным CLI'ем).
    3. **SWARM_* env vars** — `SWARM_AGENTMD_PATH` / `SWARM_THREADS_DIR` / `SWARM_SKILLS_DIR` → `paths.*`.
-   4. **`agent_overrides`** из `config_server.yml` — flat-формат авто-оборачивается в `agent:` (для совместимости с webhook'ом), raw-формат с секциями применяется как есть.
+   4. **`agent_overrides`** из `config_server.yml` — пути через точку (`agent.max_steps`) раскладываются во вложенные секции, секции (`agent:`, `paths:`…) применяются как есть. Плоских имён (`max_steps`) больше нет: неизвестное имя — ошибка с подсказкой пути, как у webhook'а.
    5. **Swarm-specific overrides** — всегда последние и всегда побеждают: `paths.threads_data_path=/work/.gc/threads`, `paths.logs_dump_dir=/work/.gc/logs`, `agent.use_server_subagents=False`. Это означает, что никакой `agent_overrides` не может сломать sandbox-изоляцию.
 
    Итог пишется атомарно в `sandbox/.gc/config.yml`.

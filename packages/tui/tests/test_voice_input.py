@@ -143,18 +143,6 @@ def test_toggle_ignored_while_transcribing():
     assert ("text", "текст") in events
 
 
-def test_input_level_only_while_recording():
-    rec = FakeRecorder()
-    rec.level = 0.7
-    flow, _ = make_flow(rec, lambda pcm, cfg: "x")
-    assert flow.input_level == 0.0  # idle — тишина
-    flow.toggle()
-    assert flow.input_level == 0.7  # запись — живой уровень рекордера
-    rec.elapsed = 2.0
-    flow.toggle()
-    assert flow.input_level == 0.0  # transcribing/idle — снова 0
-
-
 def _settle(flow, frames=12):
     """Прогнать несколько кадров: EMA-дисплей сходится к целевым уровням.
 

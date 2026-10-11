@@ -16,15 +16,23 @@ from gc_core.config_modules import env_vars
 # путь принадлежит конфигу, и держать его в MCP-подсистеме значило бы вернуть
 # статическую зависимость ядра конфига от MCP, снятую при разбиении на пакеты.
 from gc_core.config_modules import env_vars as mcp_paths
-from gc_core.config_modules.auth import build_auth_connector
 from gc_core.config_modules.backend import (
     parse_chat_completions_max_tokens,  # noqa: F401  # re-export: processing_responses импортирует из config
 )
 from gc_core.config_modules.common import (
-    apply_swarm_env_overrides,
+    swarm_env_updates,
 )
 from gc_core.config_modules.compat import apply_compat
-from gc_core.config_modules.env_interpolation import resolve_env_placeholders
+from gc_core.config_modules.cross_validation import cross_field_notices
+from gc_core.config_modules.env_interpolation import (
+    UnresolvedPlaceholdersError,
+    raise_unresolved,
+    resolve_env_placeholders,
+    resolve_env_placeholders_strict,
+    settle_unresolved,
+    strip_unresolved_marks,
+    tag_layer,
+)
 from gc_core.config_modules.env_vars import project_gc_dir
 
 # Наложение слоёв и pre-write валидация живут в `config_modules.layers` (слой записи
@@ -45,8 +53,8 @@ from gc_core.config_modules.layers import (  # noqa: F401
     validate_config_text_with_sections,
     validate_profile_text_with_sections,
 )
+from gc_core.config_modules.migrations import migrate_document
 from gc_core.config_modules.model_registry import (
-    ModelEntry,
     validate_registry_pairs,
 )
 from gc_core.config_modules.model_sections_validation import (
@@ -63,11 +71,12 @@ from gc_core.config_modules.root import (
     resolve_paths,
     schema_error_details,
 )
-from gc_core.config_modules.security import (
-    apply_cli_command_moderation_overrides,
-)
 from gc_core.config_modules.summary import (
     DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS,
+)
+from gc_core.config_modules.unknown_keys import (
+    drop_unknown_keys,
+    unknown_key_notice,
 )
 from gc_core.trace_id import normalize_trace_id
 from gc_core.utils.user_text import unreadable_reason
@@ -76,36 +85,6 @@ from gc_core.utils.user_text import unreadable_reason
 _DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS = (
     DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS
 )
-
-_LOGGING_SYNC_KEYS = (
-    "full_log_backend",
-    "console_trace",
-    "save_logs",
-    "logging_format",
-    "log_level",
-)
-
-
-def sync_logging_flat_and_params(config_dict: Dict[str, Any]) -> None:
-    """Согласовать logging_params и плоские ключи (после merge overrides и т.п.)."""
-    lp = dict(config_dict.get("logging_params") or {})
-    for key in _LOGGING_SYNC_KEYS:
-        if key in config_dict:
-            lp[key] = config_dict[key]
-    config_dict["logging_params"] = lp
-    for key in _LOGGING_SYNC_KEYS:
-        if key in lp:
-            config_dict[key] = lp[key]
-
-
-def resolve_tui_stream_enabled(config_dict: Dict[str, Any]) -> bool:
-    """Мастер-свитч live-стриминга TUI: явный `tui_stream` (True/False) побеждает;
-    иначе legacy top-level `stream` (backend.stream); иначе дефолт True.
-    None у `tui_stream` = «не задан» → падаем на legacy, чтобы не затирать его."""
-    tui_stream = config_dict.get("tui_stream")
-    if tui_stream is not None:
-        return bool(tui_stream)
-    return bool(config_dict.get("stream", True))
 
 
 def _default_config_path() -> str:
@@ -171,43 +150,136 @@ def resolve_base_config_path(config_path: Optional[str] = None) -> str:
     return config_path or _xdg_config_path() or _default_config_path()
 
 
-def _apply_models_override(
-    config_dict: Dict[str, Any], resolved: Dict[str, Any]
-) -> None:
-    if "models" not in resolved:
-        return
-    # `--models` задаёт весь реестр строкой и идёт мимо схемы (плоский
-    # config_dict заполняется уже после валидации), поэтому здесь руками
-    # повторяется то, что файловому пути делает flatten_app_config: правило
-    # пары и приведение записей к СЕРИАЛИЗОВАННОЙ форме. Без второго Router
-    # читал бы сырой словарь, где нет `authorization_header`, и `token` из
-    # CLI молча пропадал бы — запись уходила на свой адрес с общим ключом.
-    validate_registry_pairs({"models": resolved["models"]}, source="--models")
-    if isinstance(resolved["models"], dict):
-        config_dict["models"] = {
-            alias: _serialize_model_entry(ModelEntry.model_validate(entry))
-            for alias, entry in resolved["models"].items()
-        }
+def _cli_updates(
+    extra_overrides: Dict[str, Any],
+    *,
+    prefix: str = "--",
+) -> tuple[Dict[str, Any], Optional[str], list[str]]:
+    """``--param`` → точечные пути настроек; ``trace_id`` — не настройка, а рантайм.
+
+    Ключ — путь схемы через точку (``agent.max_steps``). Незнакомое схеме имя
+    (в том числе прежнее плоское ``max_steps``) — ``UnknownSettingError`` с
+    подсказкой пути; ``prefix`` — как имя пишется у источника (``--`` у CLI).
+
+    ``${ENV:…}``/``${FILE:…}`` — строго, как у файлов при старте: незаданная
+    обязательная переменная → ``UnresolvedPlaceholdersError`` (``ValueError``) с
+    ключом ``--<param>``, а не тихая пустая строка.
+
+    Перекрытия (``--ключ`` CLI, ``agent_overrides`` сервера) ложатся мимо compat
+    загрузки, поэтому проходят его здесь: переименованный ключ иначе оседал бы
+    мёртвым. Третье значение — факты compat для стартовых уведомлений.
+    """
+    resolved = resolve_env_placeholders_strict(
+        extra_overrides, source="--param"
+    )
+    trace_id = resolved.pop("trace_id", None)
+    if "models" in resolved:
+        # `--models` задаёт весь реестр строкой: то же правило пары, что у файлов.
+        validate_registry_pairs(
+            {"models": resolved["models"]}, source="--models"
+        )
+    updates: Dict[str, Any] = {}
+    facts: list[str] = []
+    for path, value in resolved.items():
+        mapped, value = _map_cli_update(
+            path, value, prefix=prefix, facts=facts
+        )
+        if mapped is not None:
+            updates[mapped] = value
+    return _paths_from_cwd(updates), trace_id, facts
 
 
-def _normalize_trace_id_key(
-    config_dict: Dict[str, Any], trace_id: Optional[str]
-) -> None:
-    # Внешний trace_id: значение могло приехать и настоящим флагом, и generic
-    # `--param`-оверрайдом (там оно прошло через yaml.safe_load и может быть не
-    # строкой). Нормализуем в одной точке; пусто → ключа нет вовсе, чтобы
-    # «отсутствует» было отсутствием ключа, а не пустой строкой.
-    if trace_id is not None:
-        config_dict["trace_id"] = trace_id
-    normalized_trace_id = normalize_trace_id(config_dict.get("trace_id"))
-    if normalized_trace_id:
-        config_dict["trace_id"] = normalized_trace_id
-    else:
-        config_dict.pop("trace_id", None)
+def _map_cli_update(
+    path: str, value: Any, *, prefix: str, facts: list[str]
+) -> tuple[Optional[str], Any]:
+    """Одно перекрытие → (путь схемы, значение); путь ``None`` — пропустить.
+
+    Факты compat дописываются в ``facts``."""
+    from gc_core.config_modules.compat import map_legacy_path
+    from gc_core.config_modules.path_hints import check_setting_path
+
+    mapped = map_legacy_path(path)
+    if mapped is not None:
+        check_setting_path(mapped, prefix=prefix)
+    if mapped is None:
+        facts.append(f"перекрытие: {path} устарел и игнорируется")
+        return None, None
+    if mapped != path and not isinstance(value, dict):
+        # Секцию-словарь проведёт compat ниже — со своими фактами.
+        facts.append(f"перекрытие: {path} переименован в {mapped}")
+    if isinstance(value, dict):
+        # Внутри секции могут быть старые листья (`diff_tui.cache_max_orig`).
+        document: Dict[str, Any] = {}
+        _set_nested(document, path, copy.deepcopy(value))
+        facts.extend(f"перекрытие: {fact}" for fact in apply_compat(document))
+        value = _get_nested(document, mapped)
+        if value is None:
+            return None, None
+    return mapped, value
+
+
+def _is_cli_path_key(dotted: str) -> bool:
+    """Пути, которые настройки считают от каталога конфига (``resolve_paths``)."""
+    return (
+        dotted.startswith("paths.")
+        or dotted.endswith("_prompt_path")
+        or dotted == "security.write_guard.extra_paths"
+    )
+
+
+def _absolute_from_cwd(value: Any) -> Any:
+    """Непустая строка-путь (или список таких) → абсолютный от текущего каталога."""
+    if isinstance(value, str) and value.strip():
+        expanded = os.path.expanduser(value)
+        return (
+            expanded if os.path.isabs(expanded) else os.path.abspath(expanded)
+        )
+    if isinstance(value, list):
+        return [_absolute_from_cwd(item) for item in value]
+    return value
+
+
+def _paths_from_cwd(updates: Dict[str, Any]) -> Dict[str, Any]:
+    """Относительный путь из командной строки или ``agent_overrides`` — от
+    текущего каталога, как набрал человек (и как было до типизированных
+    настроек), а не от каталога конфига."""
+    from gc_core.settings import expand_section_updates
+
+    sections = ("paths", "summary", "intent_scope", "security")
+    with_paths = {
+        key: value
+        for key, value in updates.items()
+        if key.split(".", 1)[0] in sections
+    }
+    if not with_paths:
+        return updates
+    rest = {
+        key: value for key, value in updates.items() if key not in with_paths
+    }
+    for key, value in expand_section_updates(with_paths).items():
+        rest[key] = (
+            _absolute_from_cwd(value) if _is_cli_path_key(key) else value
+        )
+    return rest
+
+
+def _set_nested(document: Dict[str, Any], dotted: str, value: Any) -> None:
+    parts = dotted.split(".")
+    for part in parts[:-1]:
+        document = document.setdefault(part, {})
+    document[parts[-1]] = value
+
+
+def _get_nested(document: Dict[str, Any], dotted: str) -> Any:
+    for part in dotted.split("."):
+        if not isinstance(document, dict) or part not in document:
+            return None
+        document = document[part]
+    return document
 
 
 def apply_cli_overrides(
-    config_dict: Dict[str, Any],
+    loaded,
     *,
     extra_overrides: Optional[Dict[str, Any]] = None,
     write_guard_enabled: Optional[bool] = None,
@@ -218,49 +290,55 @@ def apply_cli_overrides(
     read_guard_mode: Optional[str] = None,
     agentsmd_override: bool = False,
     trace_id: Optional[str] = None,
-) -> None:
-    if extra_overrides:
-        resolved = resolve_env_placeholders(extra_overrides)
-        # Перекрытия (`--ключ` CLI, `agent_overrides` сервера) ложатся в готовый
-        # конфиг мимо compat загрузки: переименованный ключ оседал бы мёртвым, и
-        # настройка молча не действовала. Копия — словарь принадлежит вызывающему.
-        resolved = copy.deepcopy(resolved)
-        _override_facts = apply_compat(resolved)
-        if _override_facts:
-            config_dict["compat_notices"] = [
-                *(config_dict.get("compat_notices") or []),
-                *(f"перекрытие: {fact}" for fact in _override_facts),
-            ]
-        config_dict.update(resolved)
-        _apply_models_override(config_dict, resolved)
-        # Признак «ключ пришёл именно из CLI» (спека §2): нужен, среди прочего,
-        # для детекта легаси-форса (см. cli_forces_legacy_model ниже).
-        explicit = set(config_dict.get("cli_explicit_keys") or ())
-        config_dict["cli_explicit_keys"] = sorted(explicit | set(resolved))
-    effective_write_guard_override = (
-        False if no_write_guard else write_guard_enabled
+    param_prefix: str = "--",
+):
+    """CLI поверх загруженного: новый ``LoadedSettings`` (слой ``cli``).
+
+    Значения проходят валидацию схемы; источник каждой правки помечается в
+    происхождении — по нему, например, видно легаси-форс модели. Ключ
+    ``extra_overrides`` — путь через точку; незнакомое схеме имя —
+    ``UnknownSettingError`` с подсказкой пути (``param_prefix`` — как имя
+    пишется у источника: ``--`` у CLI, пусто у ``agent_overrides``).
+    """
+    from gc_core.config_modules.security import (
+        validate_command_moderation_mode,
+        validate_read_guard_mode,
     )
-    effective_read_guard_override = (
-        False if no_read_guard else read_guard_enabled
+
+    updates, param_trace_id, override_facts = _cli_updates(
+        dict(extra_overrides or {}), prefix=param_prefix
     )
-    apply_cli_command_moderation_overrides(
-        config_dict,
-        write_guard_enabled=effective_write_guard_override,
-        command_moderation_mode=command_moderation_mode,
-        read_guard_enabled=effective_read_guard_override,
-        read_guard_mode=read_guard_mode,
-    )
+    write_guard = False if no_write_guard else write_guard_enabled
+    read_guard = False if no_read_guard else read_guard_enabled
+    if write_guard is not None:
+        updates["security.write_guard.enabled"] = bool(write_guard)
+    if command_moderation_mode is not None:
+        updates["security.command_moderation.mode"] = (
+            validate_command_moderation_mode(command_moderation_mode)
+        )
+    if read_guard is not None:
+        updates["security.read_guard.enabled"] = bool(read_guard)
+    if read_guard_mode is not None:
+        updates["security.read_guard.mode"] = validate_read_guard_mode(
+            read_guard_mode
+        )
     if agentsmd_override:
-        config_dict["agentsmd_override"] = True
-    # Внешний trace_id: значение могло приехать и настоящим флагом, и generic
-    # `--param`-оверрайдом (там оно прошло через yaml.safe_load и может быть не
-    # строкой). Нормализуем в одной точке; пусто → ключа нет вовсе, чтобы
-    # «отсутствует» было отсутствием ключа, а не пустой строкой.
-    _normalize_trace_id_key(config_dict, trace_id)
-    sync_logging_flat_and_params(config_dict)
+        updates["tui.agentsmd_override"] = True
+    loaded = loaded.with_overrides(updates, layer="cli")
+    # Внешний trace_id: значение могло приехать и флагом, и `--param`
+    # (через yaml.safe_load — не обязательно строкой). Пусто → отсутствует.
+    raw_trace = trace_id if trace_id is not None else param_trace_id
+    normalized = normalize_trace_id(
+        raw_trace if raw_trace is not None else loaded.runtime.trace_id
+    )
+    if override_facts:
+        loaded = loaded.with_runtime(
+            notices=(*loaded.runtime.notices, *override_facts)
+        )
+    return loaded.with_runtime(trace_id=normalized or None)
 
 
-def cli_forces_legacy_model(config_dict: Dict[str, Any]) -> bool:
+def cli_forces_legacy_model(loaded) -> bool:
     """Легаси-форс (спека §2, §12.1): CLI явно передал `model`/`completions_url`
     поверх непустого merged-реестра моделей — резолв уровней/алиасов у
     ``ModelRouter`` отключается на этот запуск (``force_legacy=True``).
@@ -268,248 +346,16 @@ def cli_forces_legacy_model(config_dict: Dict[str, Any]) -> bool:
     в стопке — это решает исключительно резолв модели, не сборку конфига.
     ``--model``/``--completions_url`` при пустом реестре — обычный легаси, без форса.
     """
-    explicit = set(config_dict.get("cli_explicit_keys") or ())
-    if not explicit & {"model", "completions_url"}:
-        return False
-    return bool(config_dict.get("models"))
+    from_cli = any(
+        loaded.provenance.source(path).layer == "cli"
+        for path in ("agent.model", "backend.completions_url")
+    )
+    return from_cli and bool(loaded.settings.models)
 
 
 def resolve_config_path(config_path: Optional[str] = None) -> str:
     """Путь config.yml, использованный сессией (та же цепочка, что в load_config)."""
     return config_path or _xdg_config_path() or _default_config_path()
-
-
-def _serialize_model_entry(entry: ModelEntry) -> Dict[str, Any]:
-    """Проекция ``ModelEntry`` для ``ModelRouter`` (src/model_router.py).
-
-    ``authorization_header`` — уже Bearer-нормализованное значение (None=наследовать,
-    ""=явно без, иначе значение) — потребителю нужен именно computed-результат, не
-    сырой ``token``. ``backend_overrides`` — только явно заданные ключи
-    (``exclude_unset``), чтобы Router накладывал поверх эффективного backend лишь то,
-    что модель реально переопределяет, а не дефолты ``BackendConfig``.
-    """
-    projected: Dict[str, Any] = {
-        "model": entry.model,
-        "url": entry.url,
-        "authorization_header": entry.authorization_header,
-        "pricing": entry.pricing.model_dump()
-        if entry.pricing is not None
-        else None,
-        "backend_overrides": (
-            entry.backend.model_dump(exclude_unset=True)
-            if entry.backend is not None
-            else {}
-        ),
-    }
-    # Пустой dict тоже пишем: он заменяет глобальные kwargs, а отсутствие ключа —
-    # наследование. None (секция не задана) в снимок не кладём.
-    if isinstance(entry.main, dict):
-        projected["main"] = copy.deepcopy(entry.main)
-    if isinstance(entry.auxiliary, dict):
-        projected["auxiliary"] = copy.deepcopy(entry.auxiliary)
-    if isinstance(entry.strip_think, bool):
-        projected["strip_think"] = entry.strip_think
-    return projected
-
-
-def flatten_app_config(app_cfg: AppConfig) -> Dict[str, Any]:
-    """Проекция валидированного AppConfig в плоский config_dict агентного слоя.
-
-    Единственное место, где схема раскладывается в плоские ключи. Любой сборщик
-    конфига (load_config, harbor-адаптер) обязан идти через неё, иначе новый ключ
-    схемы не доедет до потребителей, которые читают его как cfg["..."].
-    """
-    # Устаревшие ключи, заданные юзером ЯВНО (pydantic model_fields_set знает
-    # explicit-set vs дефолт). Голый факт → startup_notices форматирует текст.
-    _deprecated_keys_used: list[str] = []
-    if "stream" in app_cfg.backend.model_fields_set:
-        _deprecated_keys_used.append("backend.stream")
-
-    config_dict: Dict[str, Any] = {
-        "backend_api_mode": app_cfg.backend.api_mode,
-        "completions_url": app_cfg.backend.completions_url,
-        "chat_completions_max_tokens": app_cfg.backend.chat_completions_max_tokens,
-        "chat_completions_min_response_tokens": app_cfg.backend.chat_completions_min_response_tokens,
-        "chat_completion_headers": app_cfg.backend.chat_completion_headers,
-        "chat_completion_kwargs": app_cfg.backend.chat_completion_kwargs,
-        "use_max_tokens_param": app_cfg.backend.use_max_tokens_param,
-        "openai_strict_tools_schema": app_cfg.backend.openai_strict_tools_schema,
-        "send_tool_strict": app_cfg.backend.send_tool_strict,
-        "claude_prompt_cache": app_cfg.backend.claude_prompt_cache,
-        "backend_vision": app_cfg.backend.vision,
-        "use_ssl": app_cfg.backend.use_ssl,
-        "cert_path": app_cfg.backend.cert_path,
-        "key_path": app_cfg.backend.key_path,
-        "use_retry": app_cfg.backend.use_retry,
-        "retry_embedded_choice_errors": app_cfg.backend.retry_embedded_choice_errors,
-        "backend_request_timeout_sec": app_cfg.backend.request_timeout_sec,
-        "proxy": app_cfg.backend.proxy,
-        "stream": app_cfg.backend.stream,  # legacy: канонический ключ — tui.stream
-        "deprecated_keys_used": _deprecated_keys_used,
-        "tui_stream": app_cfg.tui.stream,
-        "tui_stream_display": app_cfg.tui.stream_display,
-        "tui_text_answer_mode": app_cfg.tui.text_answer_mode,
-        "acp_text_answer_mode": app_cfg.acp.text_answer_mode,
-        "acp_finish_gate_mode": app_cfg.acp.finish_gate_mode,
-        "acp_todo_reminder_steps": app_cfg.acp.todo_reminder_steps,
-        "chat_api_host": app_cfg.chat_api.host,
-        "chat_api_port": app_cfg.chat_api.port,
-        "chat_api_auth_token": app_cfg.chat_api.auth_token,
-        "chat_api_cors_origins": list(app_cfg.chat_api.cors_origins),
-        "chat_api_launch_root": app_cfg.chat_api.launch_root,
-        "chat_api_text_answer_mode": app_cfg.chat_api.text_answer_mode,
-        "chat_api_finish_gate_mode": app_cfg.chat_api.finish_gate_mode,
-        "chat_api_todo_reminder_steps": app_cfg.chat_api.todo_reminder_steps,
-        "tui_finish_gate_mode": app_cfg.tui.finish_gate_mode,
-        "tui_finish_gate_mode_explicit": "finish_gate_mode"
-        in app_cfg.tui.model_fields_set,
-        "strict_turn_finish_explicit_false": (
-            "strict_turn_finish_validation" in app_cfg.agent.model_fields_set
-            and not app_cfg.agent.strict_turn_finish_validation
-        ),
-        "update": app_cfg.update.model_dump(),  # спека D: check/extra_args
-        "tui_bang_shell": app_cfg.tui.bang_shell.model_dump(),
-        "tui_file_view": app_cfg.tui.file_view.model_dump(),
-        "voice": {
-            "provider": app_cfg.voice.provider,
-            "url": app_cfg.voice.url,
-            "token": app_cfg.voice.token,
-            "model": app_cfg.voice.model,
-            "language": app_cfg.voice.language,
-            "max_seconds": app_cfg.voice.max_seconds,
-            "timeout_seconds": app_cfg.voice.timeout_seconds,
-            "verify_ssl": app_cfg.voice.verify_ssl,
-        },
-        "endpoint_presets": [p.model_dump() for p in app_cfg.endpoint_presets],
-        "voice_endpoint_presets": [
-            p.model_dump() for p in app_cfg.voice_endpoint_presets
-        ],
-        "command_moderation": {
-            "enabled": app_cfg.security.command_moderation.enabled,
-            "mode": app_cfg.security.command_moderation.mode,
-            "allowed_command_examples": app_cfg.security.command_moderation.allowed_command_examples,
-            "denied_command_examples": app_cfg.security.command_moderation.denied_command_examples,
-        },
-        "write_guard": {
-            "enabled": app_cfg.security.write_guard.enabled,
-            "mode": app_cfg.security.write_guard.mode,
-            "extra_paths": app_cfg.security.write_guard.extra_paths,
-        },
-        "read_guard": app_cfg.security.read_guard.model_dump(),
-        "url_policy": {
-            "enabled": app_cfg.security.url_policy.enabled,
-            "mode": app_cfg.security.url_policy.mode,
-            "allowed_schemes": app_cfg.security.url_policy.allowed_schemes,
-            "url_blacklist": app_cfg.security.url_policy.url_blacklist,
-        },
-        "download": app_cfg.security.download.model_dump(),
-        "summary_params": app_cfg.summary.model_dump(),
-        "chat_completions_params": app_cfg.chat_completions.model_dump(),
-        # Плоский dict рядом с chat_completion_kwargs: deep_merge (бенч/project)
-        # обновляет его; живой pydantic-объект сюда не кладём — иначе early-return
-        # в auxiliary_llm_from_config_dict игнорирует overlay.
-        "auxiliary_llm_params": app_cfg.chat_completions.auxiliary_llm.model_dump(),
-        "quality_gate_params": app_cfg.quality_gate.model_dump(),
-        # Limits for ``session_memory`` tool; yaml/config keys stay ``working_memory*``.
-        "working_memory": app_cfg.working_memory,
-        "working_memory_params": app_cfg.working_memory.model_dump(),
-        "todo_params": app_cfg.todo.model_dump(),
-        "working_memory_max_chars_goal": app_cfg.working_memory.max_chars_goal,
-        "working_memory_max_chars_constraints": app_cfg.working_memory.max_chars_constraints,
-        "working_memory_max_chars_state": app_cfg.working_memory.max_chars_state,
-        "working_memory_max_chars_knowledge": app_cfg.working_memory.max_chars_knowledge,
-        "working_memory_total_budget_chars": app_cfg.working_memory.total_budget_chars,
-        "tool_usage_notice": app_cfg.tool_usage_notice,
-        "tool_usage_notice_params": [
-            rule.model_dump() for rule in app_cfg.tool_usage_notice
-        ],
-        "project_memory": app_cfg.project_memory,
-        "project_memory_params": app_cfg.project_memory.model_dump(),
-        "project_memory_check_interval_messages": app_cfg.project_memory.check_interval_messages,
-        "project_memory_max_chars": app_cfg.project_memory.max_chars,
-        "project_memory_max_append_chars": app_cfg.project_memory.max_append_chars,
-        "enable_project_memory_notice": app_cfg.project_memory.enable_project_memory_notice,
-        "intent_scope": app_cfg.intent_scope,
-        "intent_scope_params": app_cfg.intent_scope.model_dump(),
-        "logging_params": app_cfg.logging.model_dump(),
-        "agent_md_path": app_cfg.paths.agent_md_path,
-        "chat_completions_system_prompt_path": app_cfg.paths.chat_completions_system_prompt_path,
-        "chat_completions_intent_guard_prompt_path": app_cfg.paths.chat_completions_intent_guard_prompt_path,
-        "chat_completions_custom_subagent_system_prompt_path": app_cfg.paths.chat_completions_custom_subagent_system_prompt_path,
-        "chat_completions_special_instructions_path": app_cfg.paths.chat_completions_special_instructions_path,
-        "threads_data_path": app_cfg.paths.threads_data_path,
-        "skills_data_path": app_cfg.paths.skills_data_path,
-        "logs_dump_dir": app_cfg.paths.logs_dump_dir,
-        "agentsmd_override": app_cfg.tui.agentsmd_override,
-        "model": app_cfg.agent.model,
-        "system_prompt_id": app_cfg.agent.system_prompt_id,
-        "use_server_subagents": app_cfg.agent.use_server_subagents,
-        "use_local_subagents": app_cfg.agent.use_local_subagents,
-        "subagent_max_steps": app_cfg.agent.subagent_max_steps,
-        "subagents_dir": app_cfg.agent.subagents_dir,
-        "subagents_max_count": app_cfg.agent.subagents_max_count,
-        "client_name": app_cfg.agent.client_name,
-        "x_cl_id": app_cfg.agent.x_cl_id,
-        "trace_id_header_name": app_cfg.agent.trace_id_header_name,
-        "trace_header_enabled": app_cfg.agent.trace_header_enabled,
-        "verbose": app_cfg.agent.verbose,
-        "stop_tools": app_cfg.agent.stop_tools,
-        "disable_skills": app_cfg.agent.disable_skills,
-        "server_tool_prefix": app_cfg.agent.server_tool_prefix,
-        "max_steps": app_cfg.agent.max_steps,
-        "session_token_limit": app_cfg.agent.session_token_limit,
-        "max_tool_calls": app_cfg.agent.max_tool_calls,
-        "no_tool_call_max_count": app_cfg.agent.no_tool_call_max_count,
-        "max_unknown_tool_repeats": app_cfg.agent.max_unknown_tool_repeats,
-        "strict_turn_finish_validation": app_cfg.agent.strict_turn_finish_validation,
-        "finish_gate_max_iterations": app_cfg.agent.finish_gate_max_iterations,
-        "subagent_finish_gate_max_iterations": app_cfg.agent.subagent_finish_gate_max_iterations,
-        "finish_gate_use_rule_hints": app_cfg.agent.finish_gate_use_rule_hints,
-        "console_trace": app_cfg.logging.console_trace,
-        "save_logs": app_cfg.logging.save_logs,
-        "logging_format": app_cfg.logging.format,
-        "log_level": app_cfg.logging.log_level,
-        "redact_secrets": app_cfg.logging.redact_secrets.model_dump(),
-        "limit_project_metadata": app_cfg.agent.limit_project_metadata,
-        "tool_output_inline_max_chars": app_cfg.agent.tool_output_inline_max_chars,
-        "stored_tool_outputs_max_entries": app_cfg.agent.stored_tool_outputs_max_entries,
-        "exec_timeout_sec": app_cfg.agent.exec_timeout_sec,
-        "exec_output_capture_max_chars": app_cfg.agent.exec_output_capture_max_chars,
-        "exec_output_preview_edge_chars": app_cfg.agent.exec_output_preview_edge_chars,
-        "walk_output_max_chars": app_cfg.agent.walk_output_max_chars,
-        "harbor_exec_init": app_cfg.agent.harbor_exec_init,
-        "runtime_probe_ttl_sec": app_cfg.agent.runtime_probe_ttl_sec,
-        "inject_tool_fields": dict(app_cfg.agent.inject_tool_fields),
-        "model_steering": app_cfg.agent.model_steering,
-        "limit_trace_summary": app_cfg.agent.limit_trace_summary,
-        "loop_detector": app_cfg.agent.loop_detector.model_dump(),
-        "mcp-servers": {
-            name: server.model_dump(by_alias=True)
-            for name, server in app_cfg.mcp.servers.items()
-        },
-        "mcp-meta": app_cfg.mcp.meta.model_dump(by_alias=True),
-        "pricing": app_cfg.pricing.model_dump(),
-        "agent_auth": app_cfg.agent_auth.model_dump()
-        if app_cfg.agent_auth
-        else {},
-        "agent_edits": app_cfg.agent_edits.model_dump(),
-        "fs_tools": app_cfg.fs_tools.model_dump(),
-        "images": app_cfg.images.model_dump(),
-        "strip_tags_projection": app_cfg.strip_tags_projection.model_dump(),
-        # Где живут файлы и команды тулов: kind + подсекция бэкенда (factory).
-        "os_backend": app_cfg.os_backend.model_dump(),
-        # Секции моделей (спека §4/§5) — потребитель: ModelRouter (src/model_router.py).
-        # Router работает от этого снимка, а не от app_cfg напрямую (§6.4).
-        "models": {
-            alias: _serialize_model_entry(entry)
-            for alias, entry in app_cfg.models.items()
-        },
-        "slots": app_cfg.slots.model_dump(),
-        "assign": app_cfg.assign.model_dump(),
-        "profile": app_cfg.profile,
-    }
-
-    return config_dict
 
 
 def _build_mtime_set(
@@ -541,7 +387,7 @@ def _build_mtime_set(
 def profile_mtime_set(
     config_path: Optional[str], active_name: Optional[str] = None
 ) -> Dict[str, Optional[float]]:
-    """Тот же снимок, что строит `load_config_ex` (спека §3.3), но БЕЗ парсинга/
+    """Тот же снимок, что строит `load_settings` (спека §3.3), но БЕЗ парсинга/
     валидации файлов — только `stat()`. Точка входа для TUI (`set_config_path`):
     связывание пути с окном не обязано гонять полную загрузку конфига ради снимка
     свежести."""
@@ -558,23 +404,75 @@ def profile_mtime_set(
     )
 
 
-def load_config_ex(
+def _revalidate_layer_documents(
+    base_after: Any, base_before: Any, base_path: Path, layer_documents
+) -> None:
+    """Проверки слоёв, пропущенные из-за неразрешённых ссылок (см. вызов)."""
+    from gc_core.config_modules.profiles import _validate_profile_document
+
+    validate_registry_pairs(
+        base_after, source=str(base_path), raw_source=base_before
+    )
+    for name, path, before, after in layer_documents:
+        if not after:
+            continue
+        if str(name).startswith("profile:"):
+            validate_registry_pairs(after, source=str(path))
+            _validate_profile_document(after, source=str(path))
+        else:
+            validate_registry_pairs(after, source=str(path), raw_source=before)
+
+
+def _managed_voice_override(
+    managed_raw: Dict[str, Any], raw_config: Dict[str, Any], base_voice: Any
+) -> Optional[str]:
+    """Вердикт «managed-слой перекрыл ваш voice» — только если адрес батарейки
+    победил в итоговом мерже (см. комментарий в ``load_settings``)."""
+    managed_voice = managed_raw.get("voice") or {}
+    if not managed_voice:
+        return None
+    from gc_core.config_modules.voice import overridden_user_voice
+
+    managed_url = str(managed_voice.get("url") or "")
+    merged_voice = raw_config.get("voice")
+    effective_url = (
+        str((merged_voice or {}).get("url") or "")
+        if isinstance(merged_voice, dict)
+        else ""
+    )
+    if effective_url != managed_url:
+        return None
+    return overridden_user_voice(base_voice, managed_url)
+
+
+def _validated_app_config(raw_config: Dict[str, Any]) -> AppConfig:
+    """Схема итогового мержа; отказ — текстом из ``exc.errors()`` без значений."""
+    try:
+        return AppConfig.model_validate(raw_config)
+    except _PydanticValidationError as exc:
+        raise ValueError(
+            f"{SCHEMA_ERROR_PREFIX}{schema_error_details(exc)}"
+        ) from exc
+
+
+def load_settings(
     config_path: Optional[str] = None,
     *,
     profile_override: Optional[str] = None,
-) -> tuple[Dict[str, Any], ProfileMeta]:
-    """Загрузить эффективный конфиг + метаданные резолва профиля (спека §2, §3).
+):
+    """Загрузить настройки: ``LoadedSettings(settings, runtime, provenance)``.
 
+    Конвейер загрузки: слои → ${ENV} → миграции → compat → схема → пути.
     Слои: base → managed → project (deep-merge, каждый слой интерполируется
-    ${ENV:VAR} сразу после чтения) → указатель `profile:` резолвится из этого мержа
-    (либо `profile_override`) → контент профиля мержится ПОВЕРХ → compat →
-    `AppConfig.model_validate` → `validate_model_sections` → resolve_paths/flatten.
-    `load_config` (ниже) — тонкая обёртка для обратной совместимости.
+    ${ENV:VAR} сразу после чтения) → указатель `profile:` резолвится из этого
+    мержа (либо `profile_override`) → контент профиля мержится ПОВЕРХ.
 
-    Сбор побочек на процесс не имеет: глушение TLS-предупреждений ушло вместе с
-    urllib3, глобальный конвейер проекций — в `754b8910`. Поэтому витрина чужого
-    профиля в Настройках зовёт ту же функцию, что старт и reload; отдельный
-    флаг `apply_to_process` для неё больше не нужен и снят."""
+    Побочек на процесс нет, поэтому витрина чужого профиля в Настройках зовёт
+    ту же функцию, что старт и reload.
+    """
+    from gc_core.config_modules.provenance import Provenance
+    from gc_core.settings import LoadedSettings, RuntimeEnv
+
     if config_path is None and _xdg_config_path() is None:
         _bootstrap_user_config()
     path = resolve_config_path(config_path)
@@ -597,34 +495,78 @@ def load_config_ex(
         raise ValueError(unreadable_reason(base_path, exc)) from exc
     # Дорезолвный вид держим для отказа правила пары: после подстановки от `${ENV:X}`
     # остаётся пустая строка, и назвать незаданную переменную уже нечем.
+    #
+    # `${ENV:…}`/`${FILE:…}` на старте — СТРОГО: неразрешённые обязательные
+    # ссылки всех слоёв (файл + dotted-ключ) копятся в `unresolved`, и загрузка
+    # отказывает списком сразу (`UnresolvedPlaceholdersError`) — вместо токена,
+    # молча ставшего пустой строкой и всплывшего потом 401-м от бэкенда.
+    # Необязательное значение помечается умолчанием: `${ENV:VAR:-}`.
+    unresolved: list = []
     base_before_env = raw_config
-    raw_config = resolve_env_placeholders(raw_config)
-    validate_registry_pairs(
-        raw_config, source=str(base_path), raw_source=base_before_env
+    raw_config = resolve_env_placeholders(
+        raw_config, unresolved=unresolved, source=str(base_path)
     )
+    tag_layer(unresolved, 0, layer="base")
+    try:
+        # Формат файла (`config_version`) — каждый слой поднимается до текущей
+        # версии сам (`migrations.migrate_document`), до мержа и схемы.
+        raw_config, migration_notices = migrate_document(
+            raw_config, source=str(base_path)
+        )
+        notices.extend(migration_notices)
+        raw_base_after_env = raw_config
+        if not unresolved:
+            validate_registry_pairs(
+                raw_config, source=str(base_path), raw_source=base_before_env
+            )
 
-    (
-        raw_config,
-        ref,
-        active_name,
-        roots,
-        managed_path,
-        project_path,
-        managed_raw,
-        _base_voice,
-    ) = _merge_layers(
-        raw_config,
-        path,
-        profile_override=profile_override,
-        notices=notices,
-        # Пути слоёв добывает ЗАГРУЗЧИК — своими именами, теми же, что зовёт
-        # `profile_mtime_set` ниже и что подменяют тесты, глуша слои машины
-        # разработчика. Спроси их `_merge_layers` сам у модулей-владельцев —
-        # подмена бы не действовала, и «изолированный» тест читал бы реальный
-        # `~/.gc/config.local.yml` и проектный `.gc/config.yml`.
-        managed_path=mcp_paths.managed_config_path(),
-        project_path=env_vars.project_local_config_path(),
-    )
+        (
+            raw_config,
+            ref,
+            active_name,
+            roots,
+            managed_path,
+            project_path,
+            managed_raw,
+            _base_voice,
+            layer_documents,
+        ) = _merge_layers(
+            raw_config,
+            path,
+            profile_override=profile_override,
+            notices=notices,
+            # Пути слоёв добывает ЗАГРУЗЧИК — своими именами, теми же, что зовёт
+            # `profile_mtime_set` ниже и что подменяют тесты, глуша слои машины
+            # разработчика. Спроси их `_merge_layers` сам у модулей-владельцев —
+            # подмена бы не действовала, и «изолированный» тест читал бы реальный
+            # `~/.gc/config.local.yml` и проектный `.gc/config.yml`.
+            managed_path=mcp_paths.managed_config_path(),
+            project_path=env_vars.project_local_config_path(),
+            unresolved=unresolved,
+        )
+    except ValueError as exc:
+        # Отказ, случившийся ПОСЛЕ незаданной переменной (пустая строка не
+        # прошла схему профиля, профиль по указателю не нашёлся…), — следствие;
+        # человеку нужна причина, и она уже собрана.
+        if not isinstance(exc, UnresolvedPlaceholdersError):
+            raise_unresolved(unresolved)
+        raise
+    # Отказ — только по ссылкам, значения которых дошли до итогового мержа:
+    # перекрытая верхним слоем незаданная переменная ни на что не влияет.
+    raw_config, surviving = settle_unresolved(raw_config, unresolved)
+    raise_unresolved(surviving)
+    if unresolved:
+        raw_base_after_env = strip_unresolved_marks(raw_base_after_env)
+        layer_documents = strip_unresolved_marks(list(layer_documents))
+        managed_raw = strip_unresolved_marks(managed_raw)
+        _base_voice = strip_unresolved_marks(_base_voice)
+        # Документ с неразрешённой ссылкой проверки пары и схемы профиля
+        # пропускал (загрузка всё равно отказывала). Теперь перекрытая ссылка
+        # загрузку не роняет — проверки догоняются здесь, по документу с
+        # пустой подстановкой: fail-closed, как до перекрытия.
+        _revalidate_layer_documents(
+            raw_base_after_env, base_before_env, base_path, layer_documents
+        )
 
     mtime_set = _build_mtime_set(
         base_path, managed_path, project_path, active_name, roots
@@ -638,78 +580,66 @@ def load_config_ex(
     # voice» там, где работал адрес из <cwd>/.gc/config.yml (находка ревью коллеги).
     # Профиль — такой же слой поверх: если voice.url задан в нём, батарейка тоже ничего
     # не решает, поэтому место расчёта — ниже профильного мержа, а не выше.
-    _voice_overridden: Optional[str] = None
-    _mv = managed_raw.get("voice") or {}
-    if _mv:
-        from gc_core.config_modules.voice import overridden_user_voice
-
-        _managed_url = str(_mv.get("url") or "")
-        _merged_voice = raw_config.get("voice")
-        _effective_url = (
-            str((_merged_voice or {}).get("url") or "")
-            if isinstance(_merged_voice, dict)
-            else ""
-        )
-        if _effective_url == _managed_url:
-            _voice_overridden = overridden_user_voice(
-                _base_voice, _managed_url
-            )
+    _voice_overridden = _managed_voice_override(
+        managed_raw, raw_config, _base_voice
+    )
 
     # Compat-слой (A4): rename/remove устаревших ключей in-memory, файл не трогаем.
     # Применяется к итоговому мержу — профильный слой проходит его так же, как
     # остальные (единый вызов после всех merge-слоёв, включая профиль).
     _compat_notices = apply_compat(raw_config)
+    # Лишние ключи — предупреждение, а не отказ: файл пишет человек, и
+    # опечатка или поле из новой версии не должны лишать его агента.
+    raw_config, _unknown_keys = drop_unknown_keys(raw_config, AppConfig)
 
     # Отказ схемы — из `exc.errors()`, не `str(exc)`: pydantic-дамп несёт
     # `input_value=<repr записи>` — токен из файла уезжал в хинт пикера профилей
     # и в статус «не применится» дословным текстом ошибки (MR #80, класс L28).
-    try:
-        app_cfg = AppConfig.model_validate(raw_config)
-    except _PydanticValidationError as exc:
-        raise ValueError(
-            f"{SCHEMA_ERROR_PREFIX}{schema_error_details(exc)}"
-        ) from exc
+    app_cfg = _validated_app_config(raw_config)
     _model_section_notices = validate_model_sections(app_cfg)
-    resolve_paths(app_cfg, config_dir)
+    # Межполевые предупреждения — до `resolve_paths`: там явные значения
+    # подменяются выведенными умолчаниями (см. `cross_validation`).
+    _model_section_notices += cross_field_notices(app_cfg)
+    app_cfg = resolve_paths(app_cfg, config_dir)
 
-    config_dict = flatten_app_config(app_cfg)
-    config_dict["level"] = app_cfg.level
-    # Плоский `profile` — ДЕЙСТВУЮЩИЙ профиль, а не указатель из файлов: документу
-    # профиля запрещено нести ключ `profile:`, поэтому после мержа app_cfg.profile
-    # остаётся пойнтером config.yml и при `--profile other` (или сессионном выборе,
-    # §9.1) врал бы витринам — `overriding_layer_note` называл бы чужое имя.
-    config_dict["profile"] = active_name or ""
-    # Не поле схемы: результат разбора СЫРОГО конфига compat-слоем — докладывает загрузчик.
-    # Фаза 2 секций моделей (ссылочная целостность на merged-реестре) и лоадер
-    # профилей (зарезервированные имена, секрет-политика) — тот же канал notices.
-    config_dict["compat_notices"] = (
-        _compat_notices + _model_section_notices + notices
-    )
-    # Не поле схемы: факт перекрытия юзерского voice managed-слоем — знает только загрузчик.
-    config_dict["voice_overridden_by_managed"] = _voice_overridden
-
-    apply_swarm_env_overrides(config_dict, config_dir)
-
-    sync_logging_flat_and_params(config_dict)
-
-    # Здесь глушились предупреждения urllib3 при `use_ssl: false`. Ядро ходит
-    # httpx, своих предупреждений urllib3 больше не рождает, а сам пакет ядро
-    # не объявляет — он приезжал транзитом через trafilatura. Тот же класс
-    # поломки, что был с requests у голоса, только тише.
     meta = ProfileMeta(
         active_name=active_name, ref=ref, mtime_set=mtime_set, notices=notices
     )
-    return config_dict, meta
+    provenance = Provenance.from_layers(
+        [("base", str(base_path), base_before_env, raw_base_after_env)]
+        + list(layer_documents)
+    )
+    # SWARM_* окружения — последний слой файлов: сервер swarm-раннера задаёт
+    # ими каталоги тредов/скиллов и AGENTS.md поверх конфига.
+    swarm_updates = swarm_env_updates(config_dir)
+    if swarm_updates:
+        from gc_core.settings import override_settings
 
-
-def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
-    config_dict, _meta = load_config_ex(config_path)
-    return config_dict
-
-
-if __name__ == "__main__":
-    cfg = load_config()
-    print(cfg)
-    auth = build_auth_connector(cfg)
-    if auth:
-        print(auth.get_token())
+        app_cfg = override_settings(
+            app_cfg, swarm_updates, config_dir=config_dir
+        )
+        provenance = provenance.with_layer("env", swarm_updates)
+    _unknown_notices = [
+        unknown_key_notice(
+            unknown, provenance.source(unknown.dotted).path or None
+        )
+        for unknown in _unknown_keys
+    ]
+    runtime = RuntimeEnv(
+        config_path=os.path.abspath(path),
+        config_dir=config_dir,
+        active_profile=active_name or "",
+        notices=tuple(
+            _compat_notices
+            + _unknown_notices
+            + _model_section_notices
+            + notices
+        ),
+        voice_overridden_by_managed=_voice_overridden,
+    )
+    return LoadedSettings(
+        settings=app_cfg,
+        runtime=runtime,
+        provenance=provenance,
+        profile_meta=meta,
+    )

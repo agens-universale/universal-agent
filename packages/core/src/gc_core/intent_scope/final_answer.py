@@ -10,7 +10,7 @@ from gc_core.intent_scope.agent_logging import (
     log_intent_scope_skipped,
 )
 from gc_core.intent_scope.append import append_final_answer_to_current
-from gc_core.intent_scope.summarizer import asummarize_final_answer_line
+from gc_core.settings import settings_of
 
 _logger = logging.getLogger(__name__)
 _LABEL = "final_answer"
@@ -43,9 +43,8 @@ async def amaybe_record_final_answer_intent(
         log_intent_scope_skipped(log, tool_name=_LABEL, reason="empty_text")
         return
 
-    config_dict = getattr(ctx, "config_dict", {}) or {}
     if (
-        str(config_dict.get("backend_api_mode", "responses")).strip().lower()
+        str(settings_of(ctx).backend.api_mode).strip().lower()
         != "chat_completions"
     ):
         log_intent_scope_skipped(
@@ -76,3 +75,11 @@ async def amaybe_record_final_answer_intent(
         return
 
     log_intent_scope_skipped(log, tool_name=_LABEL, reason="empty_summary")
+
+
+async def asummarize_final_answer_line(**kwargs):
+    from gc_core.intent_scope.summarizer import (
+        asummarize_final_answer_line as summarize,
+    )
+
+    return await summarize(**kwargs)

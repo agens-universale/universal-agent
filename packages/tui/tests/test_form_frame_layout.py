@@ -11,6 +11,7 @@
 экрана без остальных прошла бы мимо: владелец назвал два экрана, потому что видел
 два, а канон сформулировал общий — «какой бы экран ни был по высоте»."""
 
+from gc_testkit.tui_support import as_settings, tui_settings
 import pytest
 
 pytest.importorskip("textual")
@@ -28,9 +29,11 @@ _TINY = (80, 14)
 
 def _cfg():
     return {
-        "completions_url": "http://host/v1/chat/completions",
-        "chat_completion_headers": {"Authorization": "Bearer secret-token"},
-        "model": "test-model",
+        "backend.completions_url": "http://host/v1/chat/completions",
+        "backend.chat_completion_headers": {
+            "Authorization": "Bearer secret-token"
+        },
+        "agent.model": "test-model",
     }
 
 
@@ -100,10 +103,10 @@ async def test_settings_footer_survives_overflowing_section(tmp_path, section):
     from gc_tui.app import TuiApp
     from gc_tui.screens.settings import SettingsScreen
 
-    app = TuiApp(config=_cfg())
+    app = TuiApp(settings=tui_settings(_cfg()))
     async with app.run_test(size=_TINY) as pilot:
         scr = SettingsScreen(
-            config=_cfg(),
+            settings=as_settings(_cfg()),
             config_path=str(tmp_path / "config.yml"),
             on_apply=lambda: None,
             probe_fn=ok_probe(),
@@ -141,7 +144,7 @@ async def test_selected_row_is_pulled_into_the_capped_frame(tmp_path):
     )
     cfg_file = _write_cfg(tmp_path, registry)
     cfg = _loaded(cfg_file)
-    app = app_mod.TuiApp(config=cfg)
+    app = app_mod.TuiApp(settings=tui_settings(cfg))
     with mock.patch.object(
         model_picker,
         "fetch_models",
@@ -187,16 +190,20 @@ async def test_onboarding_footer_survives_overflowing_step(tmp_path):
         def install(self, name=None):
             return 0
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test(size=_TINY) as pilot:
         scr = OnboardingScreen(
-            config={
-                "completions_url": "http://your-backend:PORT/v1/chat/completions",
-                "chat_completion_headers": {
-                    "Authorization": "Bearer <ВПИШИТЕ_ТОКЕН>"
-                },
-                "model": "<ВПИШИТЕ_МОДЕЛЬ>",
-            },
+            settings=as_settings(
+                {
+                    "backend.completions_url": "http://your-backend:PORT/v1/chat/completions",
+                    "backend.chat_completion_headers": {
+                        "Authorization": "Bearer <ВПИШИТЕ_ТОКЕН>"
+                    },
+                    "agent.model": "<ВПИШИТЕ_МОДЕЛЬ>",
+                }
+            ),
             config_path=str(tmp_path / "config.yml"),
             review_all=False,
             on_commit=lambda: None,
@@ -254,7 +261,7 @@ async def test_delete_confirm_banner_is_pulled_into_view(tmp_path):
     )
     cfg_file = _write_cfg(tmp_path, registry)
     cfg = _loaded(cfg_file)
-    app = app_mod.TuiApp(config=cfg)
+    app = app_mod.TuiApp(settings=tui_settings(cfg))
     with mock.patch.object(
         model_picker,
         "fetch_models",
@@ -277,10 +284,10 @@ async def test_update_confirm_banner_is_pulled_into_view(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.screens.settings import SettingsScreen
 
-    app = TuiApp(config=_cfg())
+    app = TuiApp(settings=tui_settings(_cfg()))
     async with app.run_test(size=_TINY) as pilot:
         scr = SettingsScreen(
-            config=_cfg(),
+            settings=as_settings(_cfg()),
             config_path=str(tmp_path / "config.yml"),
             on_apply=lambda: None,
             probe_fn=ok_probe(),
@@ -314,10 +321,10 @@ async def test_env_overwrite_confirm_is_pulled_into_view(tmp_path):
         '  model: "test-model"\n',
         encoding="utf-8",
     )
-    app = TuiApp(config=_cfg())
+    app = TuiApp(settings=tui_settings(_cfg()))
     async with app.run_test(size=_TINY) as pilot:
         scr = SettingsScreen(
-            config=_cfg(),
+            settings=as_settings(_cfg()),
             config_path=str(cfg_file),
             on_apply=lambda: None,
             probe_fn=ok_probe(),
@@ -342,7 +349,7 @@ async def test_profile_name_prompt_is_pulled_into_view(tmp_path):
     )
     cfg_file = _write_cfg(tmp_path, registry)
     cfg = _loaded(cfg_file)
-    app = app_mod.TuiApp(config=cfg)
+    app = app_mod.TuiApp(settings=tui_settings(cfg))
     async with app.run_test(size=_TINY) as pilot:
         scr = _mk_screen(config=cfg, config_path=str(cfg_file))
         app.push_screen(scr)
@@ -362,10 +369,10 @@ async def test_settings_menu_cursor_is_pulled_into_view(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.screens.settings import SettingsScreen
 
-    app = TuiApp(config=_cfg())
+    app = TuiApp(settings=tui_settings(_cfg()))
     async with app.run_test(size=(80, 16)) as pilot:
         scr = SettingsScreen(
-            config=_cfg(),
+            settings=as_settings(_cfg()),
             config_path=str(tmp_path / "config.yml"),
             on_apply=lambda: None,
             probe_fn=ok_probe(),
@@ -409,9 +416,11 @@ async def test_post_update_footer_survives_overflowing_card(monkeypatch):
         },
     )
     monkeypatch.setattr(config_sync, "needs_sync", lambda *a, **k: True)
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test(size=(60, 12)) as pilot:
-        scr = PostUpdateScreen(upgrade=_Upg(), config={}, config_path="c.yml")
+        scr = PostUpdateScreen(
+            upgrade=_Upg(), settings=as_settings({}), config_path="c.yml"
+        )
         app.push_screen(scr)
         await pilot.pause()
         await pilot.pause()
@@ -445,7 +454,7 @@ async def test_notice_does_not_outrank_the_cursor(tmp_path, h):
     )
     cfg_file = _write_cfg(tmp_path, registry)
     cfg = _loaded(cfg_file)
-    app = app_mod.TuiApp(config=cfg)
+    app = app_mod.TuiApp(settings=tui_settings(cfg))
     with mock.patch.object(
         model_picker,
         "fetch_models",
@@ -479,10 +488,10 @@ async def test_frame_goes_compact_when_its_own_box_would_eat_the_viewport(
     from gc_tui.app import TuiApp
     from gc_tui.screens.settings import SettingsScreen
 
-    app = TuiApp(config=_cfg())
+    app = TuiApp(settings=tui_settings(_cfg()))
     async with app.run_test(size=(80, h)) as pilot:
         scr = SettingsScreen(
-            config=_cfg(),
+            settings=as_settings(_cfg()),
             config_path=str(tmp_path / "config.yml"),
             on_apply=lambda: None,
             probe_fn=ok_probe(),
@@ -523,10 +532,10 @@ async def test_frame_cap_is_never_left_stale_on_floor_height(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.screens.settings import SettingsScreen
 
-    app = TuiApp(config=_cfg())
+    app = TuiApp(settings=tui_settings(_cfg()))
     async with app.run_test(size=(80, 6)) as pilot:
         scr = SettingsScreen(
-            config=_cfg(),
+            settings=as_settings(_cfg()),
             config_path=str(tmp_path / "config.yml"),
             on_apply=lambda: None,
             probe_fn=ok_probe(),
@@ -564,10 +573,10 @@ async def test_canon_survives_live_resize(tmp_path, new_h):
     from gc_tui.app import TuiApp
     from gc_tui.screens.settings import SettingsScreen
 
-    app = TuiApp(config=_cfg())
+    app = TuiApp(settings=tui_settings(_cfg()))
     async with app.run_test(size=(80, 40)) as pilot:
         scr = SettingsScreen(
-            config=_cfg(),
+            settings=as_settings(_cfg()),
             config_path=str(tmp_path / "config.yml"),
             on_apply=lambda: None,
             probe_fn=ok_probe(),
@@ -603,7 +612,7 @@ async def test_voice_remove_confirm_is_pulled_into_view(tmp_path):
     from gc_tui.app import TuiApp
     from test_settings_voice import LOCAL_OUTDATED, _mk_screen, _open_voice
 
-    app = TuiApp(config={"model": "M"})
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     async with app.run_test(size=(80, 16)) as pilot:
         scr, _fake = _mk_screen(tmp_path, LOCAL_OUTDATED)
         await _open_voice(app, scr, pilot)
@@ -705,7 +714,7 @@ async def _connection_at_the_cursor(pilot, tmp_path):
     from gc_tui.screens.settings import SettingsScreen
 
     scr = SettingsScreen(
-        config=_cfg(),
+        settings=as_settings(_cfg()),
         config_path=str(tmp_path / "config.yml"),
         on_apply=lambda: None,
         probe_fn=ok_probe(),
@@ -741,7 +750,9 @@ async def test_automatic_probe_verdict_leaves_the_frame_at_the_cursor(
     from gc_tui.app import TuiApp
 
     app = TuiApp(
-        threads_dir=str(tmp_path / "threads"), system="cli", config=_cfg()
+        threads_dir=str(tmp_path / "threads"),
+        system="cli",
+        settings=tui_settings(_cfg()),
     )
     async with app.run_test(size=(100, 12)) as pilot:
         scr = await _connection_at_the_cursor(pilot, tmp_path)
@@ -767,7 +778,9 @@ async def test_manual_probe_verdict_is_pulled_into_view(tmp_path):
     from gc_tui.app import TuiApp
 
     app = TuiApp(
-        threads_dir=str(tmp_path / "threads"), system="cli", config=_cfg()
+        threads_dir=str(tmp_path / "threads"),
+        system="cli",
+        settings=tui_settings(_cfg()),
     )
     async with app.run_test(size=(100, 12)) as pilot:
         scr = await _connection_at_the_cursor(pilot, tmp_path)
@@ -790,7 +803,7 @@ async def test_manual_voice_probe_verdict_is_pulled_into_view(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.services.voice_setup import ProbeResult
 
-    app = TuiApp(config={"model": "M"})
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     async with app.run_test(size=(80, 12)) as pilot:
         scr, fake = _mk_screen(tmp_path, OFF, config_text=CLOUD_CONFIG)
         fake.probe_result = ProbeResult(ok=True, latency_ms=42, error=None)

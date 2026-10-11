@@ -7,7 +7,7 @@ conftest. После разделения наборов по пакетам т�
 функции переехали сюда.
 
 Здесь только то, что НЕ знает про конкретные экраны и не зависит от файлов набора:
-ожидание условия и открытие секции по имени. Монтаж форм, их фейки и изоляторы —
+ожидание условия, открытие секции по имени и настройки окна для теста. Монтаж форм, их фейки и изоляторы —
 в `packages/tui/tests/form_harness.py`: они лениво импортируют соседние тест-модули
 (`test_settings_screen`, `test_settings_voice`, …), и держать их здесь значило бы,
 что общий дистрибутив зависит от тестовых файлов одного пакета. Такое было с
@@ -16,7 +16,7 @@ conftest. После разделения наборов по пакетам т�
 
 from __future__ import annotations
 
-from typing import Callable
+from typing import Any, Callable, Mapping, Optional
 
 
 async def wait_until(
@@ -50,6 +50,42 @@ def open_settings_section(scr, name: str) -> None:
     idx = settings_section_index(name)
     scr._menu_idx = idx
     scr._open_section(idx)
+
+
+def tui_settings(config: Optional[Mapping[str, Any]] = None, **dotted: Any):
+    """Настройки окна (`LoadedSettings`) для `TuiApp(settings=...)` в тесте.
+
+    То же, что `gc_testkit.settings.make_settings` (пути через точку и секции,
+    строгая валидация), плюс одно правило набора TUI: тест, не задавший
+    ``logging.save_logs`` явно, логов агента не пишет — умолчание модели
+    «писать», а каталог логов в тестовом конфиге не задан. Тест, которому логи
+    нужны, задаёт ``logging.save_logs`` сам.
+    """
+    from gc_testkit.settings import make_settings
+
+    values = dict(config or {})
+    given = {**values, **dotted}
+    section = given.get("logging")
+    if "logging.save_logs" not in given and not (
+        isinstance(section, Mapping) and "save_logs" in section
+    ):
+        values["logging.save_logs"] = False
+    return make_settings(values, **dotted)
+
+
+def as_settings(value: Any = None):
+    """Настройки для экрана из того, что тест держит под рукой: готовые
+    (`LoadedSettings` окна, `AppConfig`) — как есть, словарь теста (пути через
+    точку) — через `make_settings`, None — умолчания."""
+    from gc_core.settings import AppConfig, LoadedSettings
+
+    from gc_testkit.settings import make_settings
+
+    if isinstance(value, LoadedSettings):
+        return value
+    if isinstance(value, AppConfig):
+        return LoadedSettings(settings=value)
+    return make_settings(value)
 
 
 def span_style(text, needle: str) -> str:

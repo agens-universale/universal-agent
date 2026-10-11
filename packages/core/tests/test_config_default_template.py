@@ -3,7 +3,7 @@
 A1 — значения шаблона не расходятся с кодовыми (pydantic) дефолтами:
      расхождения — только в INTENTIONAL_TEMPLATE_OVERRIDES.
 A2 — полнота шаблона: каждый листовой путь схемы либо присутствует в шаблоне,
-     либо осознанно занесён в EXPERT_ONLY_KEYS.
+     либо осознанно помечен экспертным (``gc_meta(expert=True)`` в модели).
 
 Канон дефолтов = AppConfig(). Шаблон — бутстрап/справочник/сентинелы.
 """
@@ -11,7 +11,8 @@ A2 — полнота шаблона: каждый листовой путь с�
 from pathlib import Path
 
 import yaml
-from gc_core.config import _default_config_path, flatten_app_config
+from gc_core.config import _default_config_path
+from gc_core.config_modules.field_meta import meta_for
 from gc_core.config_modules.model_sections_validation import (
     validate_model_sections,
 )
@@ -56,220 +57,22 @@ INTENTIONAL_TEMPLATE_OVERRIDES: set = {
 }
 
 
-# Листовые dotted-пути схемы, ОСОЗНАННО отсутствующие в шаблоне.
-# Правило: шаблон — минимальный бутстрап для обычного пользователя; эти ключи
-# требуют понимания внутренней архитектуры или специфического сценария.
-# Полный справочник значений — demo_config.yml.
-# Пополнять только осознанно; при появлении ключа в шаблоне — удалять отсюда.
-EXPERT_ONLY_KEYS: set = {
-    # --- каталог провайдеров: намеренно живёт в коде, а не в шаблоне ---
-    # Развёрнутый блок впечатывался бы копией в конфиг каждому при первом запуске,
-    # и следующий добавленный провайдер до людей уже не доехал бы. В шаблоне он
-    # лежит закомментированным — как образец формата (сторож этого —
-    # test_default_presets_are_not_materialized_into_the_template).
-    "endpoint_presets",
-    # Голосовой каталог — тот же класс и то же правило.
-    "voice_endpoint_presets",
-    # --- os_backend: где живут файлы и команды тулов ---
-    # Дефолт `local` подходит всем; в шаблоне секция лежит закомментированной
-    # (образец docker/ssh/exec/sandbox), чтобы не впечатываться в конфиг каждому.
-    "os_backend.kind",
-    "os_backend.cwd",
-    "os_backend.env",
-    "os_backend.docker.name",
-    "os_backend.docker.user",
-    "os_backend.docker.binary",
-    "os_backend.ssh.host",
-    "os_backend.ssh.port",
-    "os_backend.ssh.user",
-    "os_backend.ssh.key_path",
-    "os_backend.ssh.options",
-    "os_backend.ssh.control_master",
-    "os_backend.exec.argv_prefix",
-    "os_backend.sandbox.workdir",
-    "os_backend.sandbox.network",
-    "os_backend.sandbox.extra_ro",
-    "os_backend.fetch_url_execute_on",
-    "os_backend.provision_skills",
-    # --- agent: тюнинги finish gate / output storage ---
-    # Экспертные лимиты quality-gate цикла; дефолты подходят для большинства сценариев.
-    "agent.finish_gate_max_iterations",
-    "agent.subagent_finish_gate_max_iterations",
-    "agent.finish_gate_use_rule_hints",  # rule-layer без LLM, вне v1
-    "agent.tool_output_inline_max_chars",  # лимит инлайн-вывода тула (байты контекста)
-    "agent.stored_tool_outputs_max_entries",  # размер стора больших tool-outputs
-    "agent.exec_timeout_sec",  # таймаут execute_command / run_python_code
-    "agent.walk_output_max_chars",  # потолок приватного канала обхода дерева (Harbor)
-    "agent.harbor_exec_init",  # opt-in bootstrap model-facing Harbor exec
-    "agent.runtime_probe_ttl_sec",  # срок годности успешной пробы Harbor/Remote
-    "agent.limit_project_metadata",  # скрыть проектные метаданные из системного промпта
-    # Per-run лимиты надёжности (по умолчанию выключены); см. docs/configuration.md.
-    "agent.session_token_limit",
-    "agent.max_tool_calls",
-    # Списки по умолчанию пусты; наполнение — проектный оверлей (.gc/config.yml)
-    "agent.disable_skills",
-    # Синтетические поля tool schema — инжект description к параметру «reason»;
-    # задаётся под конкретную модель / промпт.
-    "agent.inject_tool_fields",
-    # Имя HTTP-заголовка для внешнего trace_id; None по умолчанию, нужен только
-    # при внешней трассировке (напр. интеграция с оркестратором заказчика).
-    # Промпт для кастомных сабагентов: дефолт резолвится из bundled prompts/,
-    # переопределяется только при своей редакции промпта. См. docs/subagents.md.
-    "paths.chat_completions_custom_subagent_system_prompt_path",
-    "agent.trace_id_header_name",
-    # Разрешение слать trace_id в заголовке к модели; False по умолчанию —
-    # рассылка трейса наружу opt-in, нужна только при внешней трассировке.
-    "agent.trace_header_enabled",
-    # Кастомные сабагенты из папки: None по умолчанию (только встроенные классы),
-    # лимит имеет смысл только вместе с папкой. См. docs/subagents.md.
-    "agent.subagents_dir",
-    "agent.subagents_max_count",
-    # Model steering → special_instructions; строка специфичных инструкций для модели.
-    "agent.model_steering",
-    # --- agent_auth: корпоративная сертификатная авторизация ---
-    # Секция целиком — корп-сценарий mTLS; wiring через runbook, не для публичного шаблона.
-    "agent_auth",
-    # --- backend: параметры chat_completions ---
-    # Минимум токенов в ответе (провайдеро-специфичный параметр).
-    "backend.chat_completions_min_response_tokens",
-    # Ретрай ошибки, зашитой прокси в HTTP-200 (choices[0].error / top-level
-    # error / finish_reason=error); дефолт true, тюнинг — под конкретный прокси.
-    "backend.retry_embedded_choice_errors",
-    # Глобальный флаг стриминга; управляется через tui.stream (в шаблоне есть).
-    "backend.stream",
-    # Закомментированный пример; дефолт — авто по id модели.
-    "backend.claude_prompt_cache",
-    # Закомментированный пример; дефолт — зрение узнаётся по факту отказа.
-    "backend.vision",
-    # --- chat_completions: вспомогательный LLM (summary / finish gate / intent scope) ---
-    # Тюнинг вспомогательных вызовов; публичный шаблон не нацелен на chat_completions.
-    "chat_completions.auxiliary_llm.max_tokens",
-    "chat_completions.auxiliary_llm.judge_max_tokens",  # запас под CoT судей; в шаблоне только completion_kwargs: null
-    "chat_completions.auxiliary_llm.subagent_role_max_tokens",  # лимит генерации роли special_agent
-    # --- backend mTLS: корп-сценарий, справочник — demo_config.yml ---
-    "backend.cert_path",
-    "backend.key_path",
-    # --- тюнинги, пришедшие с master: место справочника — demo_config.yml ---
-    "agent.max_unknown_tool_repeats",  # порог повторов неизвестного тула
-    "tui.bang_shell.timeout_sec",  # таймаут !shell-команды (None = без лимита)
-    "tui.file_view.page_lines",  # шаг PgUp/PgDn в /view (None = авто по высоте)
-    "logging.redact_secrets.enabled",  # редакция секретов в per-run логах
-    "logging.redact_secrets.extra_keys",
-    "logging.redact_secrets.extra_patterns",
-    # --- intent_scope: детальный тюнинг intent-log ---
-    # Секция целиком доступна только при backend.api_mode: chat_completions.
-    # max_final_answer_raw_chars — в шаблоне есть; остальное — экспертный тюнинг.
-    "intent_scope.max_summary_chars",
-    "intent_scope.max_tool_output_chars",
-    "intent_scope.max_raw_record_chars",
-    "intent_scope.read_page_record_limit",
-    "intent_scope.fallback_raw_on_llm_error",
-    # Пути к кастомным prompt'ам вспомогательного LLM.
-    "intent_scope.intent_scope_tool_summary_prompt_path",
-    "intent_scope.intent_scope_final_answer_summary_prompt_path",
-    # Конфигурация per-tool — типовой пример в demo_config.yml.
-    "intent_scope.tools",
-    # --- mcp: wiring серверов и таймауты ---
-    # Серверы задаются через gc-mcp install / project-оверлей, не в публичном шаблоне.
-    "mcp.servers",
-    # Таймауты SDK; дефолты приемлемы, тюнинг нужен только при нестандартных сетевых условиях.
-    "mcp.meta.tools_cache_ttl",
-    "mcp.meta.request_timeout_sec",
-    "mcp.meta.discovery_timeout_sec",
-    # Путь к манифесту рекомендованных MCP; управляется gc-mcp.
-    "mcp.meta.recommended_mcp_manifest",
-    # --- voice: голосовой ввод (опциональная секция) ---
-    # В шаблоне — осознанно закомментированный пример (voice выключен по умолчанию);
-    # заполняется юзером вручную или целиком пишется gc-voice install в config.local.yml.
-    "voice.provider",
-    "voice.url",
-    "voice.token",
-    "voice.model",
-    "voice.language",
-    "voice.max_seconds",
-    "voice.timeout_seconds",
-    "voice.verify_ssl",
-    # --- paths: кастомные пути к промптам и runtime-данным ---
-    # По умолчанию все пути берутся из XDG/GC_HOME; явное задание — только для sandbox.
-    "paths.threads_data_path",
-    "paths.logs_dump_dir",
-    "paths.skills_data_path",
-    # Пути к кастомным system-prompt файлам; типовой пример закомментирован в demo.
-    "paths.chat_completions_system_prompt_path",
-    "paths.chat_completions_intent_guard_prompt_path",
-    "paths.chat_completions_special_instructions_path",
-    # --- pricing: биллинг токенов ---
-    # Базовые ключи (enabled/currency/per_tokens/input/output) шаблон несёт сам —
-    # они пришли из master; здесь остаётся только тюнинг сверх него.
-    "pricing.cache_read",
-    "pricing.models",  # пустой dict — leaf в schema_dump
-    # --- project_memory: long memory (проектная память) ---
-    # Доступна только при наличии project-memory файла; дефолты работают без настройки.
-    "project_memory.enable_project_memory_notice",
-    "project_memory.check_interval_messages",
-    "project_memory.max_chars",
-    "project_memory.max_append_chars",
-    "project_memory.compaction_max_tokens",
-    # --- quality_gate: лимиты digest для finish gate ---
-    # Экспертный тюнинг; дефолты подходят для большинства сценариев.
-    "quality_gate.max_dialogue_chars",
-    "quality_gate.max_message_chars",
-    # --- security.download: настройки тула download_file ---
-    # Каталог загрузки и лимит размера; обычно менять не нужно.
-    "security.download.download_dir",
-    "security.download.max_bytes",
-    # --- security.read_guard: forward-compat поля бинарного чтения ---
-    # В v1 не enforce'ятся (см. комментарий в security.py); тюнинг на будущее.
-    "security.read_guard.binary_read_policy",
-    "security.read_guard.binary_allowed_types",
-    "security.read_guard.binary_allowed_extensions",
-    "security.read_guard.max_file_size_kb",
-    # --- summary: тюнинг суммаризации ---
-    # Доступна только при backend.api_mode: chat_completions.
-    # chat_completions_summary_trigger_chars — в шаблоне есть (preset включён).
-    # Остальные — экспертный тюнинг параметров компакции.
-    "summary.chat_completions_summary_prompt_path",
-    "summary.chat_completions_memory_patch_replace_prompt_path",
-    "summary.chat_completions_summary_turn_end_trigger_chars",
-    "summary.chat_completions_summary_turn_end_trigger_tokens",
-    "summary.incremental_batch_chars",
-    "summary.intent_log_preview_chars",
-    # --- tool_usage_notice: технические reminder'ы о неиспользованных тулах ---
-    # Список правил; типовой пример в demo_config.yml. Пусто = фича выключена.
-    "tool_usage_notice",
-    # --- working_memory: лимиты регистров session_memory ---
-    # Тюнинг char-бюджета рабочей памяти агента; дефолты работают без настройки.
-    "working_memory.max_chars_goal",
-    "working_memory.max_chars_constraints",
-    "working_memory.max_chars_state",
-    "working_memory.max_chars_knowledge",
-    "working_memory.total_budget_chars",
-    # --- Профили v2 (волна A): секции models/slots/assign ---
-    # Схема готова (Task 1); полный документированный пример в шаблоне — Task 15.
-    # Указатели profile/level уже в шаблоне (совпадают с кодовыми дефолтами).
-    "models",
-    "slots.light",
-    "slots.default",
-    "slots.max",
-    "assign.finish_gate",
-    "assign.text_answer_judge",
-    "assign.command_judge",
-    "assign.summary",
-    "assign.intent_scope",
-    "assign.memory_compaction",
-    "assign.auto_judge",
-    "assign.vision",
-    "assign.subagents",
-    # --- chat_api: порт процесса gc-chat, не шаблон CLI/TUI ---
-    "chat_api.host",
-    "chat_api.port",
-    "chat_api.auth_token",
-    "chat_api.cors_origins",
-    "chat_api.launch_root",
-    "chat_api.text_answer_mode",
-    "chat_api.finish_gate_mode",
-    "chat_api.todo_reminder_steps",
-}
+def _expert_only_keys() -> set:
+    """Листовые dotted-пути схемы, ОСОЗНАННО отсутствующие в шаблоне.
+
+    Правило: шаблон — минимальный бутстрап для обычного пользователя; эти ключи
+    требуют понимания внутренней архитектуры или специфического сценария.
+    Полный справочник значений — demo_config.yml.
+
+    Список живёт в моделях: поле помечено ``gc_meta(expert=True)`` (флаг секции
+    наследуют её листья — ``agent_auth``, ``mcp.servers``, ``models``...).
+    Здесь он только сводится к гранулярности дампа схемы: путь листа
+    ``AppConfig().model_dump()`` (пустой dict/list и None — листья)."""
+    return {
+        path
+        for path in _leaf_paths(AppConfig().model_dump())
+        if meta_for(path).expert
+    }
 
 
 def _diff_paths(a, b, prefix=""):
@@ -313,7 +116,7 @@ def test_default_template_with_live_profile_anchor_stays_legacy():
     """§14 «Стражи»: шаблон с живым якорем `profile: ""` остаётся ЛЕГАСИ.
 
     Второй рубеж, а не единственный: ожившую в шаблоне секцию моделей ловят и
-    A1, и A2 выше (`models`, `slots.*`, `assign.*` лежат в `EXPERT_ONLY_KEYS`,
+    A1, и A2 выше (`models`, `slots`, `assign` помечены `expert` в схеме,
     и появление их в шаблоне даёт `stale` — проверено раскомментированием).
     Ценность здесь в другом: те двое падают на бухгалтерии ключей и говорят
     «whitelist разошёлся с шаблоном», а требование §14 — про ПОВЕДЕНИЕ. Этот
@@ -326,7 +129,7 @@ def test_default_template_with_live_profile_anchor_stays_legacy():
     assert raw["level"] == "default"
 
     router = ModelRouter(
-        flatten_app_config(AppConfig.model_validate(raw)),
+        AppConfig.model_validate(raw),
         level_provider=lambda: raw["level"],
     )
     assert router.registry_empty() is True
@@ -441,32 +244,30 @@ def _template_covered(schema_paths: set, template_paths: set) -> set:
 
 
 def test_schema_keys_present_in_template_or_expert_only():
-    """A2: каждый листовой путь схемы либо есть в шаблоне, либо в EXPERT_ONLY_KEYS.
+    """A2: каждый листовой путь схемы либо есть в шаблоне, либо помечен
+    экспертным в модели (``gc_meta(expert=True)``).
 
-    Три ассерта (точная симметрия):
-    - missing  : новый ключ схемы не попал ни в шаблон, ни в whitelist → дрейф.
-    - stale    : ключ из whitelist появился в шаблоне → запись устарела.
-    - phantom  : ключ в whitelist не существует в схеме → мёртвая запись.
+    Два ассерта:
+    - missing  : новый ключ схемы не попал ни в шаблон, ни в экспертные → дрейф.
+    - stale    : экспертный ключ появился в шаблоне → флаг устарел.
+    Мёртвых записей больше не бывает: флаг стоит на самом поле схемы.
     """
     schema_paths = _leaf_paths(AppConfig().model_dump())
     template_paths = _leaf_paths(_template_raw())
     covered = _template_covered(schema_paths, template_paths)
+    expert_only = _expert_only_keys()
 
-    missing = schema_paths - covered - EXPERT_ONLY_KEYS
-    stale = EXPERT_ONLY_KEYS & covered
-    phantom = EXPERT_ONLY_KEYS - schema_paths
+    missing = schema_paths - covered - expert_only
+    stale = expert_only & covered
 
     assert not missing, (
         "Новые ключи схемы отсутствуют в шаблоне — добавь в config.default.yml "
-        "ИЛИ осознанно в EXPERT_ONLY_KEYS:\n" + "\n".join(sorted(missing))
+        "ИЛИ осознанно пометь поле gc_meta(expert=True):\n"
+        + "\n".join(sorted(missing))
     )
     assert not stale, (
-        "EXPERT_ONLY_KEYS содержит ключи, которые теперь есть в шаблоне — удали из whitelist:\n"
+        "Экспертные ключи (gc_meta(expert=True)) теперь есть в шаблоне — сними флаг с поля:\n"
         + "\n".join(sorted(stale))
-    )
-    assert not phantom, (
-        "EXPERT_ONLY_KEYS содержит пути, отсутствующие в схеме (AppConfig) — удали мёртвые записи:\n"
-        + "\n".join(sorted(phantom))
     )
 
 
@@ -524,13 +325,13 @@ def test_default_template_payload_has_only_runtime_keys():
     )
     from gc_core.utils.connect_backend import create_call_data_completions
 
-    cfg = flatten_app_config(AppConfig.model_validate(_template_raw()))
-    assert cfg["chat_completion_kwargs"] == {}
+    cfg = AppConfig.model_validate(_template_raw())
+    assert cfg.backend.chat_completion_kwargs == {}
     state = SimpleNamespace(messages=[], tools=[], default_model="m")
     data = create_call_data_completions(
         [{"role": "user", "content": "hi"}],
         state=state,
-        config_dict=cfg,
+        settings=cfg,
     )
     assert set(data) <= _RUNTIME_PAYLOAD_KEYS
     assert "max_tokens" in data or "max_completion_tokens" in data

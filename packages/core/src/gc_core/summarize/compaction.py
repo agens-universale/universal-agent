@@ -27,10 +27,10 @@ from gc_core.message_policy.user_message_policy import (
     TECHNICAL_TYPE_DIALOG_SUMMARY,
     wrap_technical_user_content,
 )
+from gc_core.settings import settings_of
 from gc_core.summarize.summary_logging import (
     SummaryCompactionLog,
     log_compaction_completed,
-    log_compaction_precheck,
     log_compaction_started,
     log_summary_message_body,
     log_summary_raw_text,
@@ -105,13 +105,10 @@ def _emit_messages_evicted(state: Any, dropped: List[dict]) -> None:
 def _intent_log_preview_chars_from_ctx(ctx: Any | None) -> int:
     if ctx is None:
         return resolve_intent_log_preview_chars(None)
-    cfg = getattr(ctx, "config_dict", {}) or {}
-    summary_params = (
-        cfg.get("summary_params")
-        if isinstance(cfg.get("summary_params"), dict)
-        else {}
+    summary = settings_of(ctx).summary
+    return resolve_intent_log_preview_chars(
+        {"intent_log_preview_chars": summary.intent_log_preview_chars}
     )
-    return resolve_intent_log_preview_chars(summary_params)
 
 
 def _ensure_shared(state: Any):
@@ -412,7 +409,7 @@ async def arun_summary_compaction(
     """
     logger = logger_from_ctx(ctx)
     thread_id = getattr(state, "thread_id", None)
-    tags = projection_tags_from_config(getattr(ctx, "config_dict", None))
+    tags = projection_tags_from_config(ctx)
     full_messages = without_system_messages(getattr(state, "messages", []))
     trigger_volume = calc_history_chars_for_trigger(
         full_messages, tags=tags, strip_think=True
@@ -550,60 +547,3 @@ async def arun_summary_compaction(
         archive_suffix=archive_suffix,
     )
     clear_loop_detector(state)
-
-
-async def amaybe_run_summary_compaction(
-    *,
-    ctx: Any,
-    state: Any,
-    summary_trigger_chars: int,
-    trigger_reason: str,
-    is_cli_mode: bool,
-    on_summary_applied: Optional[Callable[[Dict[str, Any]], None]] = None,
-    summary_trigger_tokens: int = 0,
-) -> bool:
-    """Проверка порогов плюс один запуск сжатия. Основная реализация — эта."""
-    logger = logger_from_ctx(ctx)
-    thread_id = getattr(state, "thread_id", None)
-    if summary_trigger_chars <= 0 and summary_trigger_tokens <= 0:
-        return False
-    tags = projection_tags_from_config(getattr(ctx, "config_dict", None))
-    hits = exceeded_summary_triggers(
-        state=state,
-        summary_trigger_chars=summary_trigger_chars,
-        summary_trigger_tokens=summary_trigger_tokens,
-        tags=tags,
-        strip_think=True,
-    )
-    full_messages = without_system_messages(getattr(state, "messages", []))
-    trigger_volume = calc_history_chars_for_trigger(
-        full_messages, tags=tags, strip_think=True
-    )
-    serialized_chars = calc_messages_chars_total(
-        full_messages, tags=tags, strip_think=True
-    )
-    log_compaction_precheck(
-        logger,
-        trigger_reason=trigger_reason,
-        thread_id=thread_id,
-        history_messages_count=len(full_messages),
-        trigger_volume=trigger_volume,
-        serialized_chars=serialized_chars,
-        threshold=summary_trigger_chars,
-        exceeded_chars=hits.chars,
-        exceeded_tokens=hits.tokens,
-    )
-    if not hits:
-        return False
-
-    await arun_summary_compaction(
-        ctx=ctx,
-        state=state,
-        trigger_reason=trigger_reason,
-        is_cli_mode=is_cli_mode,
-        on_summary_applied=on_summary_applied,
-        trigger_threshold_chars=summary_trigger_chars,
-        exceeded_chars=hits.chars,
-        exceeded_tokens=hits.tokens,
-    )
-    return True

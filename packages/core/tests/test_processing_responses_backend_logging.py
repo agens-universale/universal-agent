@@ -2,10 +2,10 @@ import importlib
 import logging
 import sys
 import types
-from types import SimpleNamespace
 
 from gc_testkit import as_coro, run_coro
 from gc_testkit.paths import module_dir
+from gc_testkit.settings import fake_ctx
 
 
 def teardown_module(_module) -> None:
@@ -106,13 +106,13 @@ def test_chat_completions_logs_raw_backend_payload_on_conversion_error(
     )
 
     logger = logging.getLogger("test_backend_payload_logging")
-    ctx = SimpleNamespace(
-        config_dict={
-            "backend_api_mode": "chat_completions",
-            "completions_url": "http://backend.local/v1/chat/completions",
-            "use_ssl": True,
-            "use_retry": False,
-            "backend_request_timeout_sec": 600,
+    ctx = fake_ctx(
+        {
+            "backend.api_mode": "chat_completions",
+            "backend.completions_url": "http://backend.local/v1/chat/completions",
+            "backend.use_ssl": True,
+            "backend.use_retry": False,
+            "backend.request_timeout_sec": 600,
         },
         logger=logger,
     )

@@ -1,5 +1,4 @@
 import json
-from types import SimpleNamespace
 
 from gc_core.security.url_policy import (
     enforce_url_policy,
@@ -7,6 +6,7 @@ from gc_core.security.url_policy import (
     parse_and_validate_url,
     validate_url_policy,
 )
+from gc_testkit.settings import fake_ctx
 
 
 class _Logger:
@@ -65,21 +65,22 @@ def test_match_url_blacklist_supports_exact_and_glob_rules():
 
 
 def test_enforce_url_policy_returns_structured_error(tmp_path):
-    config_dict = {
-        "url_policy": {
-            "enabled": True,
-            "allowed_schemes": ["https"],
-            "url_blacklist": ["blocked.example"],
+    ctx = fake_ctx(
+        {
+            "security.url_policy": {
+                "enabled": True,
+                "mode": "deny",
+                "allowed_schemes": ["https"],
+                "url_blacklist": ["blocked.example"],
+            }
         }
-    }
+    )
 
     @enforce_url_policy(url_arg="url")
-    def fetch(url: str, config_dict: dict) -> str:
+    def fetch(url: str, **kwargs) -> str:
         return json.dumps({"ok": True, "url": url})
 
-    result = json.loads(
-        fetch("https://blocked.example", config_dict=config_dict)
-    )
+    result = json.loads(fetch("https://blocked.example", ctx=ctx))
 
     assert result["ok"] is False
     assert result["error"]["type"] == "url_blocked_by_policy"
@@ -88,10 +89,11 @@ def test_enforce_url_policy_returns_structured_error(tmp_path):
 
 def test_enforce_url_policy_audits_blocked_decision():
     logger = _Logger()
-    ctx = SimpleNamespace(
-        config_dict={
-            "url_policy": {
+    ctx = fake_ctx(
+        {
+            "security.url_policy": {
                 "enabled": True,
+                "mode": "deny",
                 "allowed_schemes": ["https"],
                 "url_blacklist": ["blocked.example"],
             }
@@ -114,9 +116,9 @@ def test_enforce_url_policy_audits_blocked_decision():
 def test_enforce_url_policy_mode_allow_passes_with_audit():
     """mode=allow: blocked URL пропускается, в audit log пишется out_of_perimeter."""
     logger = _Logger()
-    ctx = SimpleNamespace(
-        config_dict={
-            "url_policy": {
+    ctx = fake_ctx(
+        {
+            "security.url_policy": {
                 "enabled": True,
                 "mode": "allow",
                 "allowed_schemes": ["https"],
@@ -148,9 +150,9 @@ def test_enforce_url_policy_mode_ask_confirmed_passes(monkeypatch):
     monkeypatch.setattr(_cp, "request_confirm", lambda **_: True)
 
     logger = _Logger()
-    ctx = SimpleNamespace(
-        config_dict={
-            "url_policy": {
+    ctx = fake_ctx(
+        {
+            "security.url_policy": {
                 "enabled": True,
                 "mode": "ask",
                 "allowed_schemes": ["https"],
@@ -177,9 +179,9 @@ def test_enforce_url_policy_mode_ask_declined_blocks(monkeypatch):
     monkeypatch.setattr(_cp, "request_confirm", lambda **_: False)
 
     logger = _Logger()
-    ctx = SimpleNamespace(
-        config_dict={
-            "url_policy": {
+    ctx = fake_ctx(
+        {
+            "security.url_policy": {
                 "enabled": True,
                 "mode": "ask",
                 "allowed_schemes": ["https"],

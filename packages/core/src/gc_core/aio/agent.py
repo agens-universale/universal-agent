@@ -38,9 +38,16 @@ class AsyncAgent:
     """
 
     def __init__(
-        self, executor: AgentExecutor, subscribers: set[asyncio.Queue]
+        self,
+        executor: AgentExecutor | None,
+        subscribers: set[asyncio.Queue],
+        *,
+        durable: Any = None,
     ) -> None:
         self._executor = executor
+        # Durable-рантайм (``durable=`` в ``create``): ходы исполняет он, а
+        # своего исполнителя и пула у агента нет.
+        self._durable = durable
         # Живые подписчики stream(). Пустой набор — дельты никуда не копятся.
         self._subscribers = subscribers
         # Результат последнего stream(): сам итератор вернуть его не может.
@@ -57,13 +64,19 @@ class AsyncAgent:
     @classmethod
     async def create(
         cls,
-        config_dict: dict,
+        settings: Any,
         *,
         auth_connector: Any = None,
         on_stream_delta: Any = None,
+        durable: Any = None,
         **context_kwargs: Any,
     ) -> AsyncAgent:
         """Собрать агента, не блокируя loop.
+
+        ``settings`` — ``AppConfig`` (``default_settings(...)``) или
+        ``LoadedSettings`` (``load_settings(path)``): провалидированные и
+        неизменяемые. Плоский словарь не принимается — правка настроек
+        только явная, ``override_settings`` даёт новый объект.
 
         ``on_stream_delta`` — необязательный «второй слушатель»: дельты и так
         уходят в очередь для ``stream()``, но приложению бывает нужен ещё и
@@ -75,10 +88,10 @@ class AsyncAgent:
         приложение, поднимающее агентов пачками, заплатит за каждого. Общий
         кэш снимает это, и он же достаётся субагентам через ``ctx``::
 
-            backend = resolve_os_backend(config_dict)   # harbor: + environment, loop
-            cache = ToolsCache(config_dict, os_backend=backend)
-            a1 = await AsyncAgent.create(cfg, tools_cache=cache, os_backend=backend)
-            a2 = await AsyncAgent.create(cfg, tools_cache=cache, os_backend=backend)
+            backend = resolve_os_backend(settings)   # harbor: + environment, loop
+            cache = ToolsCache(os_backend=backend)
+            a1 = await AsyncAgent.create(settings, tools_cache=cache, os_backend=backend)
+            a2 = await AsyncAgent.create(settings, tools_cache=cache, os_backend=backend)
 
         Бэкенд кэшу нужен ОБЯЗАТЕЛЬНО, если в конфиге есть MCP-сервер с
         ``execute_on: os_backend``: свой бэкенд кэш получает только при
@@ -87,6 +100,27 @@ class AsyncAgent:
         процессе агента — для stdio это запуск сервера НА ХОСТЕ, мимо
         песочницы. Вызовы тулов при этом уходят правильно: течёт дискавери.
         """
+        from gc_core.config_modules.root import AppConfig
+        from gc_core.settings import LoadedSettings
+
+        if not isinstance(settings, (AppConfig, LoadedSettings)):
+            raise TypeError(
+                "AsyncAgent.create принимает AppConfig или LoadedSettings, "
+                f"а не {type(settings).__name__}: соберите настройки через "
+                "gc_core.config.load_settings(path) или "
+                "gc_core.settings.default_settings(**{'agent.model': ...})"
+            )
+        if durable is not None:
+            # Ходы исполняет durable-рантайм (``gc_core.aio.durable``;
+            # Temporal — ``gc_core_temporalio.TemporalDurability``): контекст,
+            # MCP и модель — на его стороне, локально ничего не поднимается.
+            if context_kwargs or auth_connector or on_stream_delta:
+                raise TypeError(
+                    "durable=: контекст собирает рантайм; "
+                    "auth_connector, on_stream_delta и параметры контекста "
+                    "здесь не принимаются"
+                )
+            return cls(None, set(), durable=await durable.open(settings))
         # Набор ЖИВЫХ подписчиков вместо одной очереди на агента.
         #
         # Одна общая очередь давала два бага, оба воспроизводились замером:
@@ -118,7 +152,7 @@ class AsyncAgent:
         acquire_clients()
         try:
             ctx = await acreate_run_context(
-                config_dict,
+                settings,
                 auth_connector=auth_connector,
                 on_stream_delta=_sink,
                 **context_kwargs,
@@ -136,6 +170,10 @@ class AsyncAgent:
     @property
     def executor(self) -> AgentExecutor:
         """Исполнитель под фасадом — для того, чего фасад не покрывает."""
+        if self._durable is not None:
+            raise RuntimeError(
+                "durable-агент: исполнитель — на стороне рантайма"
+            )
         return self._executor
 
     async def run(
@@ -171,6 +209,8 @@ class AsyncAgent:
         """
         messages = [prompt] if isinstance(prompt, str) else list(prompt)
         kwargs.setdefault("system", "sdk")
+        if self._durable is not None:
+            return await self._run_durable(messages, attachments, kwargs)
         self._stop_requested = False
         # Хвост, взятый у исполнителя и ещё не доставленный: его несёт
         # следующий ход. Исполнитель его уже не вернёт — для него это аргументы
@@ -207,6 +247,24 @@ class AsyncAgent:
                 [*in_flight, *_take_tail(self._executor)], "failed", kwargs
             )
             raise
+
+    async def _run_durable(self, messages, attachments, kwargs) -> Any:
+        """Ход через durable-рантайм: отправить и дождаться ответа хода."""
+        unsupported = sorted(
+            set(kwargs) - {"system", "thread_id", "message_ids"}
+        )
+        if attachments or unsupported:
+            raise TypeError(
+                "durable-агент принимает thread_id, system и message_ids; "
+                f"не поддержано: {['attachments'] if attachments else []}"
+                f"{unsupported}"
+            )
+        return await self._durable.run(
+            messages,
+            thread_id=kwargs.get("thread_id"),
+            system=kwargs["system"],
+            message_ids=kwargs.get("message_ids"),
+        )
 
     def _turn_was_stopped(self) -> bool:
         """Останавливали ли ход, который только что закончился, — или весь `run`."""
@@ -255,6 +313,11 @@ class AsyncAgent:
         Очередь заводится НА ВЫЗОВ, а не на агента: иначе два параллельных
         ``stream()`` делили бы одну, и первый забирал бы чужие дельты.
         """
+        if self._durable is not None:
+            # Потоковых дельт durable-рантайм не передаёт: ответ — целиком
+            # в ``last_answer`` по завершении хода.
+            self._last_answer = await self.run(prompt, **kwargs)
+            return
         queue: asyncio.Queue = asyncio.Queue()
         self._subscribers.add(queue)
         task = asyncio.create_task(self.run(prompt, **kwargs))
@@ -313,6 +376,9 @@ class AsyncAgent:
         Картинки — ключ ``attachments`` (словари ``Attachment.to_dict()`` из
         кармана): ход копирует их в тред, когда агент принимает сообщение.
         """
+        if self._durable is not None:
+            self._durable.send(message)
+            return
         self._executor.add_message(message)
 
     def stop(self) -> None:
@@ -321,6 +387,9 @@ class AsyncAgent:
         Хвост остановленного `run` не доигрывается.
         """
         self._stop_requested = True
+        if self._durable is not None:
+            self._durable.stop()
+            return
         self._executor.stop_run()
 
     async def aclose(self) -> None:
@@ -341,6 +410,9 @@ class AsyncAgent:
         if self._closed:
             return
         self._closed = True
+        if self._durable is not None:
+            await self._durable.aclose()
+            return
         try:
             await self._aclose_owned_mcp_sessions()
         finally:

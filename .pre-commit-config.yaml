@@ -117,7 +117,7 @@ repos:
         entry: >-
           uv run --group lint pylint --disable=all --enable=duplicate-code --score=n
           packages/cli/src packages/core/src packages/mcp/src packages/server/src
-          packages/testkit/src packages/tui/src packages/core/assets/skills scripts integrations
+          packages/testkit/src packages/tui/src packages/temporalio/src packages/core/assets/skills scripts integrations
         language: system
         types: [python]
         pass_filenames: false

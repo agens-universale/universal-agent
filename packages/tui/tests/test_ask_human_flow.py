@@ -1,5 +1,6 @@
 """ask_human flow: detection → banner mount → user answer → banner unmount."""
 
+from gc_testkit.tui_support import tui_settings
 import json
 
 import pytest
@@ -46,7 +47,9 @@ async def test_ask_human_banner_appears_and_disappears(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config={"model": "M", "backend_api_mode": "chat_completions"},
+        settings=tui_settings(
+            {"agent.model": "M", "backend.api_mode": "chat_completions"}
+        ),
     )
     app._executor_factory = lambda: fake
     # Fix D: без живого runner-а recovery-блок снял бы banner. Здесь мы тестируем
@@ -232,7 +235,9 @@ async def test_replay_unanswered_question_does_not_swallow_later_ones(
     )
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -314,7 +319,9 @@ async def test_replay_answered_question_keeps_question_row(tmp_path):
     )
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -353,7 +360,9 @@ async def test_ask_human_esc_clean_stops(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config={"model": "M", "backend_api_mode": "chat_completions"},
+        settings=tui_settings(
+            {"agent.model": "M", "backend.api_mode": "chat_completions"}
+        ),
     )
     app._executor_factory = lambda: fake
     # Fix D: установить live-runner, чтобы recovery в attach_active_task не снял
@@ -397,7 +406,9 @@ async def test_ask_human_esc_closes_open_overlay_first(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config={"model": "M", "backend_api_mode": "chat_completions"},
+        settings=tui_settings(
+            {"agent.model": "M", "backend.api_mode": "chat_completions"}
+        ),
     )
     app._executor_factory = lambda: fake
     runner = _StubLiveRunner()
@@ -448,7 +459,9 @@ async def test_ask_human_esc_with_text_clears_input_first(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config={"model": "M", "backend_api_mode": "chat_completions"},
+        settings=tui_settings(
+            {"agent.model": "M", "backend.api_mode": "chat_completions"}
+        ),
     )
     app._executor_factory = lambda: fake
     runner = _StubLiveRunner()

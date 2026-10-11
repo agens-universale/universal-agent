@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from typing import Any, Mapping
 
+from gc_core.execution.environment import utc_now
 from gc_core.intent_log.record import (
     ACTION_FINAL_ANSWER,
     ACTION_TOOL_AGGREGATED,
@@ -17,9 +17,7 @@ from gc_core.intent_log.serialize import serialize
 
 
 def utc_now_ts() -> str:
-    return (
-        datetime.now(UTC).replace(microsecond=0).strftime("%Y-%m-%dT%H:%M:%SZ")
-    )
+    return utc_now().replace(microsecond=0).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _open_turn(user_turn_seq: int) -> int:

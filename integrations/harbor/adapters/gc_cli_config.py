@@ -1,15 +1,22 @@
-"""Build the gc-cli ``config_dict`` for a bench run.
+"""Build the gc-cli settings (``LoadedSettings``) for a bench run.
 
-There is no YAML on a bench runner, so ``load_config`` cannot be used — but the shape it
-produces is the contract the agent layer reads. Hand-rolling that dict here meant every
-key added to ``AppConfig`` and read hard by a consumer (``cfg["backend_request_timeout_sec"]``)
-was simply absent, and the run died with KeyError. So we start from the schema defaults
-(the same projection ``load_config`` applies) and layer bench specifics on top:
+There is no YAML on a bench runner, so ``load_settings`` cannot be used — the adapter
+assembles the typed settings itself. It starts from the schema defaults (``AppConfig()``
+with paths resolved, exactly what an empty config file yields) and layers bench
+specifics on top through ``LoadedSettings.with_overrides`` — the same validation as
+every other override path; a value replaces the one below at its path (sections are
+expanded into leaves, so other fields stay; dict values and lists are replaced whole):
 
     schema defaults  <  bench defaults  <  profile gc_cli_config  <  runtime (url/model)
 
-Layering uses ``config_modules.merge.deep_merge`` — the same rules the project-local
-``.gc/config.yml`` overlay follows, so a bench profile and a project overlay behave alike.
+Every layer is validated by ``AppConfig``: a misspelt key or a bad value in a profile
+fails the trial at build time instead of being silently ignored by the agent.
+
+The profile's ``gc_cli_config`` keys are setting paths — dotted (``agent.max_steps``)
+and/or nested sections (``summary: {max_message_chars: …}``), exactly as in
+``config.yml``. The old flat ``config_dict`` names (``max_steps``, ``summary_params``)
+are gone: an unknown name fails the build with a path hint. Keys that are runtime
+facts rather than settings (``os_backend``) go to ``RuntimeEnv``.
 
 Kept free of any ``harbor`` import on purpose: the config contract is testable without
 the harbor runtime installed.
@@ -17,24 +24,34 @@ the harbor runtime installed.
 
 from __future__ import annotations
 
+import copy
+import dataclasses
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Mapping, Optional, Tuple
 
-from gc_core.config import flatten_app_config
 from gc_core.config_modules.env_interpolation import resolve_env_placeholders
-from gc_core.config_modules.merge import deep_merge
+from gc_core.config_modules.path_hints import check_setting_path
 from gc_core.config_modules.root import AppConfig, resolve_paths
+from gc_core.settings import (
+    LoadedSettings,
+    RuntimeEnv,
+    expand_section_updates,
+)
+
+#: Профильные ключи, которые не настройки, а факты запуска (``RuntimeEnv``).
+_RUNTIME_KEYS = frozenset(f.name for f in dataclasses.fields(RuntimeEnv))
+
+#: Рантайм бенча: файловые и exec-тулы работают в контейнере задачи.
+BENCH_RUNTIME: Dict[str, Any] = {"os_backend": "harbor"}
 
 
-def schema_defaults(config_dir: str) -> Dict[str, Any]:
-    """Flat config_dict for an empty YAML — every key of the schema, at its default."""
-    app_cfg = AppConfig.model_validate({})
-    resolve_paths(app_cfg, config_dir)
-    return flatten_app_config(app_cfg)
+def schema_defaults(config_dir: str) -> AppConfig:
+    """Settings of an empty YAML — every field at its default, paths resolved."""
+    return resolve_paths(AppConfig(), config_dir)
 
 
 def bench_defaults(prompts_dir: Path, skills_dir: Path) -> Dict[str, Any]:
-    """What a bench needs differently from a release default.
+    """What a bench needs differently from a release default (dotted setting paths).
 
     Generation kwargs belong to the model profile. Open models ship recommended
     sampling values in generation_config.json, which the backend applies when the
@@ -42,43 +59,86 @@ def bench_defaults(prompts_dir: Path, skills_dir: Path) -> Dict[str, Any]:
     chat_completion_kwargs instead.
     """
     return {
-        "backend_api_mode": "chat_completions",
+        "backend.api_mode": "chat_completions",
         # Text benches keep their tool set; vision experiments opt in explicitly.
-        "backend_vision": False,
-        "chat_completions_system_prompt_path": str(
+        "backend.vision": False,
+        "paths.chat_completions_system_prompt_path": str(
             prompts_dir / "chat_completions_system_prompt.md"
         ),
-        "chat_completions_intent_guard_prompt_path": str(
+        "paths.chat_completions_intent_guard_prompt_path": str(
             prompts_dir / "chat_completions_intent_guard_prompt.md"
         ),
-        "skills_data_path": str(skills_dir),
-        "summary_params": {
-            "chat_completions_summary_prompt_path": str(
-                prompts_dir / "chat_completions_summary_prompt.md"
-            ),
-            "chat_completions_memory_patch_replace_prompt_path": str(
-                prompts_dir / "chat_completions_memory_patch_replace.md"
-            ),
-        },
-        "use_ssl": False,
-        "use_retry": True,
-        "os_backend": {"kind": "harbor"},
-        "system_prompt_id": "v1",
-        "save_logs": False,
-        "console_trace": False,
+        "paths.skills_data_path": str(skills_dir),
+        "summary.chat_completions_summary_prompt_path": str(
+            prompts_dir / "chat_completions_summary_prompt.md"
+        ),
+        "summary.chat_completions_memory_patch_replace_prompt_path": str(
+            prompts_dir / "chat_completions_memory_patch_replace.md"
+        ),
+        "backend.use_ssl": False,
+        "backend.use_retry": True,
+        "os_backend.kind": "harbor",
+        "agent.system_prompt_id": "v1",
+        "logging.save_logs": False,
+        "logging.console_trace": False,
         # Guards pinned OFF for benches regardless of release defaults: host-path guards
         # resolve against the RUNNER's fs tree (container paths always "out of perimeter"),
         # and "ask" auto-declines on non-tty == deny. Profiles may re-enable them.
-        "read_guard": {"enabled": False},
-        "write_guard": {"enabled": False},
-        "url_policy": {"enabled": False},
-        "command_moderation": {"mode": "allow"},
+        "security.read_guard.enabled": False,
+        "security.write_guard.enabled": False,
+        "security.url_policy.enabled": False,
+        "security.command_moderation.mode": "allow",
         # Длинные контейнерные сборки/тесты; schema default = 120.
-        "exec_timeout_sec": 600,
+        "agent.exec_timeout_sec": 600,
     }
 
 
-def build_gc_cli_config(
+def profile_updates(
+    overrides: Mapping[str, Any],
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """Профильный ``gc_cli_config`` → (правки настроек по путям, поля ``RuntimeEnv``).
+
+    Ключ — путь через точку (``agent.max_steps``) или вложенная секция
+    (``summary: {...}``). Профиль сливается с умолчаниями бенча (правка по
+    пути заменяет значение), поэтому секции раскладываются на листья
+    (``expand_section_updates``): заданное заменяется, прочее остаётся.
+    Незнакомое схеме имя (прежнее плоское ``max_steps``) —
+    ``UnknownSettingError`` с подсказкой пути. Значения копируются: сборка не
+    должна менять словарь профиля.
+    """
+    updates: Dict[str, Any] = {}
+    runtime: Dict[str, Any] = {}
+    for key, value in overrides.items():
+        if key in _RUNTIME_KEYS:
+            runtime[key] = value
+            continue
+        updates[key] = copy.deepcopy(value)
+    expanded = expand_section_updates(updates)
+    for path in expanded:
+        check_setting_path(path)
+    return expanded, runtime
+
+
+def profile_value(overrides: Mapping[str, Any], path: str) -> Any:
+    """Значение настройки ``path`` из профильного ``gc_cli_config`` (путь через
+    точку или вложенная секция); не задано — ``None``. Без валидации: адаптеру
+    нужно сырое значение профиля (``agent.model``, ``paths.skills_data_path``)."""
+    if path in overrides:
+        return overrides[path]
+    parts = path.split(".")
+    for depth in range(len(parts) - 1, 0, -1):
+        node: Any = overrides.get(".".join(parts[:depth]))
+        for part in parts[depth:]:
+            if not isinstance(node, Mapping) or part not in node:
+                node = None
+                break
+            node = node[part]
+        if node is not None:
+            return node
+    return None
+
+
+def build_gc_cli_settings(
     *,
     completions_url: str,
     model: str,
@@ -86,21 +146,33 @@ def build_gc_cli_config(
     skills_dir: Path,
     config_dir: str,
     overrides: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
-    """Assemble the config_dict a bench run hands to gc-cli."""
-    config = deep_merge(
-        schema_defaults(config_dir),
-        bench_defaults(prompts_dir, skills_dir),
+) -> LoadedSettings:
+    """Assemble the settings a bench run hands to gc-cli."""
+    # `config_dir` — якорь умолчаний схемы (как каталог config.yml у загрузчика).
+    # В RuntimeEnv его НЕ кладём: относительный путь из профиля раньше доходил до
+    # потребителя как есть и читался от cwd раннера — `with_overrides` без
+    # `runtime.config_dir` резолвит его от cwd же.
+    loaded = LoadedSettings(
+        settings=schema_defaults(config_dir),
+        runtime=RuntimeEnv(**BENCH_RUNTIME),
     )
-    config = deep_merge(config, dict(overrides or {}))
-    # `${ENV:…}` и `${FILE:…}` — как на файловом пути ядра (`load_config`).
+    loaded = loaded.with_overrides(
+        bench_defaults(prompts_dir, skills_dir), layer="bench"
+    )
+    # `${ENV:…}` и `${FILE:…}` — как на файловом пути ядра (`load_settings`).
     # Бенч-путь их не разворачивал, и профиль был обязан держать секрет открытым:
     # `agent_kwargs.gc_cli_config` уезжает в `config.json` трайла на диск, а через
     # `--ak` ключ виден ещё и в `ps`. Теперь профиль пишет `"${ENV:GC_API_KEY}"`,
     # а сам ключ живёт в окружении раннера.
-    config = resolve_env_placeholders(config)
+    updates, runtime = profile_updates(
+        resolve_env_placeholders(dict(overrides or {}))
+    )
+    loaded = loaded.with_overrides(updates, layer="bench_profile")
+    if runtime:
+        loaded = loaded.with_runtime(**runtime)
     # Runtime wins: a stale completions_url/model in a profile must not beat what the
     # runner actually passed (api_base / --model).
-    config["completions_url"] = completions_url
-    config["model"] = model
-    return config
+    return loaded.with_overrides(
+        {"backend.completions_url": completions_url, "agent.model": model},
+        layer="runtime",
+    )

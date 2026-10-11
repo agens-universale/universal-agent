@@ -1,4 +1,4 @@
-"""render_usage_meter: футер «запрос <tok>/<cost> · сессия <tok>/<cost>».
+"""Футер usage-метра (`usage_segments` одной строкой): «запрос <tok>/<cost> · сессия <tok>/<cost>».
 
 Правила видимости:
 - сессия пуста (нет токенов провайдера) → None (весь блок скрыт);
@@ -13,7 +13,25 @@ from gc_core.usage.account import (
 )
 from gc_core.usage.cost import compute_cost
 from gc_core.usage.report import render_cost_report
-from gc_tui.services.usage_meter import format_nonzero_cost, render_usage_meter
+from gc_tui.services.usage_meter import (
+    _join,
+    format_nonzero_cost,
+    usage_segments,
+)
+
+
+def render_usage_meter(
+    session_meta, last_run_meta, pricing, model, endpoint_url=None
+):
+    """«запрос …/… · сессия …/…» одной строкой или None — оба сегмента футера
+    `usage_segments`, склеенные разделителем футера."""
+    request, session = usage_segments(
+        session_meta, last_run_meta, pricing, model, endpoint_url
+    )
+    if session is None:
+        return None
+    return _join([s for s in (request, session) if s is not None])
+
 
 _PRICING_ON = {
     "enabled": True,

@@ -7,6 +7,8 @@ import re
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from gc_core.config_modules.editing import editable
+
 _logger = logging.getLogger(__name__)
 
 # Имя тега: без пробелов и ``/``; обёртки ``<>`` снимаются до проверки.
@@ -23,7 +25,7 @@ class StripTagsProjectionConfig(BaseModel):
     Из саммари, intent, судей и памяти ``<think>`` вырезается всегда.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     strip_think: bool = False
     tags: list[str] = Field(default_factory=list)
@@ -31,8 +33,9 @@ class StripTagsProjectionConfig(BaseModel):
 
 def normalize_strip_tags_projection_config(
     cfg: StripTagsProjectionConfig,
-) -> None:
+) -> StripTagsProjectionConfig:
     """warn+drop invalid; снять ``<>``; dedupe case-insensitive; ``think`` валиден."""
+    cfg = editable(cfg)
     raw = list(cfg.tags or [])
     cleaned: list[str] = []
     seen: set[str] = set()
@@ -46,28 +49,23 @@ def normalize_strip_tags_projection_config(
         seen.add(key)
         cleaned.append(name)
     cfg.tags = cleaned
+    return cfg.result()
 
 
-def _section_from_config(config: object) -> dict | None:
-    if isinstance(config, dict):
-        section = config.get("strip_tags_projection")
-        if isinstance(section, dict):
-            return section
-    return None
+def _section_from_config(settings: object) -> StripTagsProjectionConfig:
+    """Секция ``strip_tags_projection`` из всего, что принимает ``settings_of``."""
+    # Ленивый импорт: settings → root → этот модуль.
+    from gc_core.settings import settings_of
+
+    return settings_of(settings).strip_tags_projection
 
 
-def projection_tags_from_config(config: object) -> tuple[str, ...]:
+def projection_tags_from_config(settings: object) -> tuple[str, ...]:
     """Extra-теги прозы. Persist-флаг ``strip_think`` сюда не входит."""
-    section = _section_from_config(config)
-    if section is None:
-        return ()
-    raw_tags = section.get("tags") or ()
-    if isinstance(raw_tags, (list, tuple)):
-        return tuple(str(item) for item in raw_tags)
-    return ()
+    return tuple(_section_from_config(settings).tags)
 
 
-def persist_reasoning_content_from_config(config: object) -> bool:
+def persist_reasoning_content_from_config(settings: object) -> bool:
     """Класть ли ``reasoning_content`` на канонический item в ``state.messages``.
 
     Глобальный флаг. Дефолт ``strip_think: false`` — поле копируется.
@@ -76,14 +74,11 @@ def persist_reasoning_content_from_config(config: object) -> bool:
     вызовы этот флаг не читают: summary, судьи, finish_gate и intent режут
     мысль всегда.
     """
-    section = _section_from_config(config)
-    if section is None:
-        return True
-    return not bool(section.get("strip_think", False))
+    return not _section_from_config(settings).strip_think
 
 
 def persist_reasoning_content_for_model(
-    resolved: object, config: object
+    resolved: object, settings: object
 ) -> bool:
     """Persist мысли хода этой модели.
 
@@ -98,7 +93,7 @@ def persist_reasoning_content_for_model(
     )
     if isinstance(flag, bool):
         return not flag
-    return persist_reasoning_content_from_config(config)
+    return persist_reasoning_content_from_config(settings)
 
 
 def _clean_tag_name(item: object) -> str | None:

@@ -1,8 +1,9 @@
 import functools
 import json
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from gc_core.backends.runtime_probe import RuntimeUnavailable
+from gc_core.execution.tool_schema import coalesce_optional_string
 from gc_core.security.path_policy import enforce_write_guard
 from gc_core.tools.fs.edit_line_endings import (
     collect_literal_matches,
@@ -19,7 +20,6 @@ from gc_core.tools.fs.literal_edit_common import (
     load_text_source,
     splice_replacements,
 )
-from gc_core.tools.schema_optional import coalesce_optional_string
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 from gc_core.utils.file_text import sha256_hex_of_bytes
 from gc_core.utils.tool_report_paths import tool_report_abspath
@@ -209,9 +209,7 @@ class SearchAndReplace(AbstractSimpleTool):
     default_max_diff_chars = 12000
 
     @classmethod
-    def tool_description(
-        cls, config_dict: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
+    def tool_description(cls, settings: Any = None) -> Dict[str, Any]:
         return {
             "type": "function",
             "name": "fs_search_and_replace",
@@ -305,9 +303,7 @@ class SearchAndReplace(AbstractSimpleTool):
         }
 
     @classmethod
-    def prompt_description(
-        cls, config_dict: Optional[Dict[str, Any]] = None
-    ) -> str:
+    def prompt_description(cls, settings: Any = None) -> str:
         description = """Tool name: fs_search_and_replace
 Tool description: Replaces exact text in a file using literal matching; supports dry-run, occurrence selection, expected match count, backup, and optional diff output.
 Input schema: {"type": "object", "properties": {"path": {"type": "string", "description": "The absolute path of the file to modify."}, "search": {"type": "string", "description": "The exact content to find and replace.  May be multiline."}, "replace": {"type": "string", "description": "The new content to replace the found content with.  May be multiline."}, "dry_run": {"type": "boolean"}, "expected_matches": {"type": "integer", "minimum": 0}, "occurrence": {"anyOf": [{"type": "string", "enum": ["first", "last", "all"]}, {"type": "integer", "minimum": 1}]}, "backup": {"type": "boolean"}, "return_diff": {"type": "boolean"}, "diff_context_lines": {"type": "integer", "minimum": 0}, "max_diff_chars": {"type": "integer", "minimum": 1}}, "required": ["path", "search", "replace"], "additionalProperties": false}

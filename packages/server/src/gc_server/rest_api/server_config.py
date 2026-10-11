@@ -3,15 +3,20 @@ import os
 from typing import Any, Dict
 
 import yaml
-from gc_core.agent_edits.ctx import RUN_MODE_KEY, RUN_MODE_SERVER
+from gc_core.agent_edits.ctx import RUN_MODE_SERVER
 from gc_core.bundled_assets import bundled_root, repo_root
 from gc_core.config import (
     apply_cli_overrides,
-    load_config,
-    sync_logging_flat_and_params,
+    load_settings,
 )
-from gc_core.config_modules.env_interpolation import resolve_env_placeholders
+from gc_core.config_modules.env_interpolation import (
+    resolve_env_placeholders_strict,
+)
+from gc_core.config_modules.path_hints import UnknownSettingError
+from gc_core.config_modules.root import schema_error_details
+from gc_core.settings import expand_section_updates
 from gc_core.utils.user_text import read_user_text
+from pydantic import ValidationError
 
 # Константы вместо повторяющихся литералов (Sonar S1192).
 _SERVER_CONFIG_NAME = "config_server.yml"
@@ -120,8 +125,11 @@ def load_server_config() -> Dict[str, Any]:
 
     # ${ENV:VAR} / ${FILE:path} — как в основном config.yml, чтобы серверные
     # секреты (server.auth_token и пр.) не приходилось держать в файле открытым
-    # текстом. Отсутствующий источник → пустая строка + warning, как везде.
-    raw = resolve_env_placeholders(raw)
+    # текстом. Строго, как у config.yml на старте: незаданная обязательная
+    # переменная — отказ старта (ValueError → SystemExit в server.py) с файлом и
+    # ключом, а не пустой auth_token, с которым сервер поднялся бы без
+    # авторизации. Необязательное значение — с умолчанием: ${ENV:VAR:-}.
+    raw = resolve_env_placeholders_strict(raw, source=str(cfg_path))
 
     # Гарантируем наличие ключевых секций.
     server_cfg = raw.get("server") or {}
@@ -194,65 +202,82 @@ def _resolve_server_agent_md(raw: str, server_cfg: Dict[str, Any]) -> str:
     return local
 
 
-def build_agent_config_for_server(
-    server_cfg: Dict[str, Any],
-) -> Dict[str, Any]:
-    """
-    Построить config_dict для агента при запуске через REST-сервер.
-
-    Логика:
-    - Берём базовый config.yml через load_config().
-    - Если в server_cfg задана секция logging — мержим её в cfg["logging_params"]
-      и синхронизируем плоские ключи (console_trace, save_logs, full_log_backend).
-    - Если в server_cfg.agent задан server_agentmd_path:
-        - резолвим путь относительно PROJECT_ROOT (если он относительный);
-        - перезаписываем cfg["agent_md_path"] значением server_agentmd_path.
-    - Применяем перекрытия из server_cfg.agent_overrides через apply_cli_overrides
-      (тот же путь, что CLI-аргументы) — так agent_overrides.model/completions_url
-      тоже попадают в cli_explicit_keys и детектируются cli_forces_legacy_model
-      (легаси-форс §2: перекрытие модели поверх непустого реестра моделей).
-    """
-    cfg = load_config()
-
+def _server_logging_updates(server_cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """Секция ``logging`` сервера → правки ``logging.*``."""
     log_block = server_cfg.get("logging")
-    if isinstance(log_block, dict) and log_block:
-        lp = dict(cfg.get("logging_params") or {})
-        lp.update(log_block)
-        cfg["logging_params"] = lp
-        for key in (
-            "full_log_backend",
-            "console_trace",
-            "save_logs",
-        ):
-            if key in log_block:
-                cfg[key] = log_block[key]
+    if not isinstance(log_block, dict) or not log_block:
+        return {}
+    from gc_core.config_modules.logging_config import LoggingConfig
+    from gc_core.config_modules.unknown_keys import (
+        drop_unknown_keys,
+        unknown_key_notice,
+    )
 
+    # Лишний ключ не роняет старт (как в YAML агента): отбрасывается с
+    # предупреждением.
+    log_block, unknown = drop_unknown_keys(log_block, LoggingConfig)
+    for item in unknown:
+        logger.warning(unknown_key_notice(item, "config_server.yml: logging"))
+    return {f"logging.{key}": value for key, value in log_block.items()}
+
+
+def _server_agent_md_updates(server_cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """``agent.server_agentmd_path`` (от PROJECT_ROOT) → ``paths.agent_md_path``."""
     agent_cfg = server_cfg.get("agent") or {}
     server_agent_path = agent_cfg.get("server_agentmd_path")
-    if isinstance(server_agent_path, str) and server_agent_path.strip():
-        server_agent_path = _resolve_server_agent_md(
+    if not isinstance(server_agent_path, str) or not server_agent_path.strip():
+        return {}
+    return {
+        "paths.agent_md_path": _resolve_server_agent_md(
             server_agent_path, server_cfg
         )
-        cfg["agent_md_path"] = server_agent_path
+    }
 
+
+def build_agent_settings_for_server(server_cfg: Dict[str, Any]):
+    """Настройки агента для REST-сервера: ``LoadedSettings``.
+
+    - База — обычная загрузка ``config.yml`` со слоями.
+    - Секция ``logging`` сервера → правки ``logging.*``.
+    - ``agent.server_agentmd_path`` (относительно PROJECT_ROOT) → ``paths.agent_md_path``.
+    - ``agent_overrides`` → тем же путём, что CLI-аргументы: их
+      ``agent.model``/``backend.completions_url`` видны легаси-форсу (§2) как
+      заданные из CLI. Ключ — путь через точку (``agent.max_steps``) или
+      вложенная секция (``agent: {max_steps: 100}``): секция раскладывается на
+      листья и перекрывает только заданные поля — так же, как у swarm.
+      Незнакомое схеме имя (прежнее плоское ``max_steps``) — ``ValueError``
+      с подсказкой пути.
+    """
+    loaded = load_settings()
+    updates = {
+        **_server_logging_updates(server_cfg),
+        **_server_agent_md_updates(server_cfg),
+    }
+    loaded = loaded.with_overrides(updates, layer="server")
     overrides = server_cfg.get("agent_overrides") or {}
     if isinstance(overrides, dict) and overrides:
-        apply_cli_overrides(cfg, extra_overrides=overrides)
-
-    sync_logging_flat_and_params(cfg)
-
-    # В серверном режиме ограничиваем проектные метаданные,
-    # чтобы не передавать структуру файловой системы пользователя.
-    cfg.setdefault("limit_project_metadata", True)
+        try:
+            loaded = apply_cli_overrides(
+                loaded,
+                extra_overrides=expand_section_updates(overrides),
+                param_prefix="",
+            )
+        except UnknownSettingError as exc:
+            raise ValueError(f"agent_overrides: {exc}") from None
+        except ValidationError as exc:
+            # Координата и причина без значения: в нём может быть токен.
+            raise ValueError(
+                f"agent_overrides: {schema_error_details(exc)}"
+            ) from None
+    # Прежний `setdefault("limit_project_metadata", True)` ничего не менял:
+    # плоский словарь всегда уже содержал ключ. Поведение сохранено.
     # Режим запуска для ядра: от него зависит запись журнала правок
     # (`agent_edits.record.server`, по умолчанию выключена).
-    cfg[RUN_MODE_KEY] = RUN_MODE_SERVER
-
-    return cfg
+    return loaded.with_runtime(run_mode=RUN_MODE_SERVER)
 
 
 __all__ = [
     "PROJECT_ROOT",
-    "build_agent_config_for_server",
+    "build_agent_settings_for_server",
     "load_server_config",
 ]

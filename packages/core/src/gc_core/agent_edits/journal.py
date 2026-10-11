@@ -199,11 +199,3 @@ class EditsJournal:
 
     def turn_records(self, turn_id: str) -> List[EditRecord]:
         return [r for r in self.read_all() if r.turn_id == turn_id]
-
-    @staticmethod
-    def files_summary(records: List[EditRecord]) -> Dict[str, Tuple[int, int]]:
-        summary: Dict[str, Tuple[int, int]] = {}
-        for r in records:
-            add, del_ = summary.get(r.path, (0, 0))
-            summary[r.path] = (add + r.add, del_ + r.del_)
-        return summary

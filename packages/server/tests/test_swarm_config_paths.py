@@ -248,18 +248,18 @@ def test_config_path_of_load_server_config_feeds_the_anchor(
 def test_swarm_propagates_agent_overrides_from_server_cfg(isolated_env):
     """server_cfg.agent_overrides должен попасть в swarm_cfg как есть.
 
-    Materializer потом авто-обернёт flat-формат в {agent: ...}.
+    Materializer потом разложит пути через точку во вложенные секции.
     """
     server_cfg = {
         "agent_overrides": {
-            "stop_tools": ["write_to_file"],
-            "max_steps": 100,
+            "agent.stop_tools": ["write_to_file"],
+            "agent.max_steps": 100,
         },
     }
     cfg = build_swarm_config(server_cfg)
     assert cfg["agent_overrides"] == {
-        "stop_tools": ["write_to_file"],
-        "max_steps": 100,
+        "agent.stop_tools": ["write_to_file"],
+        "agent.max_steps": 100,
     }
 
 
@@ -294,11 +294,11 @@ def test_swarm_agent_overrides_invalid_type_falls_back_to_empty(isolated_env):
 def test_swarm_agent_overrides_is_a_copy_not_reference(isolated_env):
     """build_swarm_config должен сделать копию, чтобы мутации swarm_cfg
     не затрагивали оригинал в server_cfg."""
-    original = {"stop_tools": ["write_to_file"]}
+    original = {"agent.stop_tools": ["write_to_file"]}
     server_cfg = {"agent_overrides": original}
     cfg = build_swarm_config(server_cfg)
-    cfg["agent_overrides"]["max_steps"] = 100
-    assert "max_steps" not in original
+    cfg["agent_overrides"]["agent.max_steps"] = 100
+    assert "agent.max_steps" not in original
 
 
 def test_wrapper_path_from_develop_template_falls_back_to_the_packaged_one(

@@ -8,6 +8,8 @@ docs 2026-08-09-profiles-a-migration-plan).
 дальше — до минимума 5, Task 11 + Task 17), и только ниже минимума снимается
 целиком — точка остаётся всегда."""
 
+from gc_testkit.settings import make_settings
+from gc_testkit.tui_support import tui_settings
 from pathlib import Path
 
 import pytest
@@ -28,7 +30,10 @@ async def test_footer_profile_name_truncated_to_ceiling_even_on_wide_screen(
     from gc_core.config_modules.profiles import ProfileRef
     from gc_tui.app import TuiApp
 
-    app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "m"})
+    app = TuiApp(
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "m"}),
+    )
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(100, 30)) as pilot:
         scr = pilot.app.screen
@@ -50,7 +55,10 @@ async def test_footer_profile_name_shrinks_toward_floor_under_width_deficit(
     from gc_core.config_modules.profiles import ProfileRef
     from gc_tui.app import TuiApp
 
-    app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "m"})
+    app = TuiApp(
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "m"}),
+    )
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(100, 30)) as pilot:
         scr = pilot.app.screen
@@ -74,7 +82,10 @@ async def test_footer_profile_name_dropped_entirely_below_floor_dot_stays(
     from gc_core.config_modules.profiles import ProfileRef
     from gc_tui.app import TuiApp
 
-    app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "m"})
+    app = TuiApp(
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "m"}),
+    )
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(100, 30)) as pilot:
         scr = pilot.app.screen
@@ -98,7 +109,10 @@ async def test_footer_dot_present_across_truncation_ladder(
     from gc_core.config_modules.profiles import ProfileRef
     from gc_tui.app import TuiApp
 
-    app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "m"})
+    app = TuiApp(
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "m"}),
+    )
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(100, 30)) as pilot:
         scr = pilot.app.screen
@@ -121,7 +135,10 @@ async def test_footer_dot_present_without_active_profile(
     monkeypatch.chdir(tmp_path)
     from gc_tui.app import TuiApp
 
-    app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "m"})
+    app = TuiApp(
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "m"}),
+    )
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(100, 30)) as pilot:
         scr = pilot.app.screen
@@ -138,7 +155,10 @@ async def test_footer_shows_profile_name_before_dot_when_active(
     from gc_core.config_modules.profiles import ProfileRef
     from gc_tui.app import TuiApp
 
-    app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "m"})
+    app = TuiApp(
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "m"}),
+    )
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(100, 30)) as pilot:
         scr = pilot.app.screen
@@ -160,7 +180,7 @@ async def test_footer_dot_color_matches_active_level_from_toggles(
 
     app = TuiApp(
         threads_dir=str(tmp_path / "t"),
-        config={"model": "m", "level": "light"},
+        settings=tui_settings({"agent.model": "m", "level": "light"}),
     )
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(100, 30)) as pilot:
@@ -190,7 +210,10 @@ async def test_footer_drops_profile_name_first_on_narrow_width_keeps_dot(
     from gc_core.config_modules.profiles import ProfileRef
     from gc_tui.app import TuiApp
 
-    app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "m"})
+    app = TuiApp(
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "m"}),
+    )
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(100, 30)) as pilot:
         scr = pilot.app.screen
@@ -215,7 +238,10 @@ async def test_footer_keeps_profile_name_when_width_allows(
     from gc_core.config_modules.profiles import ProfileRef
     from gc_tui.app import TuiApp
 
-    app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "m"})
+    app = TuiApp(
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "m"}),
+    )
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(100, 30)) as pilot:
         scr = pilot.app.screen
@@ -268,7 +294,7 @@ async def test_footer_stacks_usage_before_dropping_profile(
 
     app = TuiApp(
         threads_dir=str(tmp_path / "t"),
-        config={"model": "m", "pricing": pricing},
+        settings=tui_settings({"agent.model": "m", "pricing": pricing}),
     )
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(100, 30)) as pilot:
@@ -372,7 +398,10 @@ async def test_footer_shows_transition_with_dot_when_level_changes_mid_turn(
     from gc_core.model_router import ModelRouter
     from gc_tui.app import TuiApp
 
-    app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "m"})
+    app = TuiApp(
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "m"}),
+    )
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(100, 30)) as pilot:
         scr = pilot.app.screen
@@ -380,8 +409,12 @@ async def test_footer_shows_transition_with_dot_when_level_changes_mid_turn(
             "models": {"minimax-m3": {}, "opus-4.8": {}},
             "slots": {"light": "minimax-m3", "max": "opus-4.8"},
         }
-        pinned_router = ModelRouter(snapshot, level_provider=lambda: "light")
-        live_router = ModelRouter(snapshot, level_provider=lambda: "max")
+        pinned_router = ModelRouter(
+            make_settings(snapshot), level_provider=lambda: "light"
+        )
+        live_router = ModelRouter(
+            make_settings(snapshot), level_provider=lambda: "max"
+        )
         app.active_runner = _pinned_runner("light", pinned_router)
         monkeypatch.setattr(app, "display_router", lambda: live_router)
 
@@ -403,7 +436,10 @@ async def test_footer_shows_new_profile_name_and_dotted_transition_when_both_cha
     from gc_core.model_router import ModelRouter
     from gc_tui.app import TuiApp
 
-    app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "m"})
+    app = TuiApp(
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "m"}),
+    )
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(100, 30)) as pilot:
         scr = pilot.app.screen
@@ -416,9 +452,11 @@ async def test_footer_shows_new_profile_name_and_dotted_transition_when_both_cha
             "slots": {"max": "opus-4.8"},
         }
         pinned_router = ModelRouter(
-            old_snapshot, level_provider=lambda: "light"
+            make_settings(old_snapshot), level_provider=lambda: "light"
         )
-        live_router = ModelRouter(new_snapshot, level_provider=lambda: "max")
+        live_router = ModelRouter(
+            make_settings(new_snapshot), level_provider=lambda: "max"
+        )
         app.active_runner = _pinned_runner("light", pinned_router)
         monkeypatch.setattr(app, "display_router", lambda: live_router)
         ref = ProfileRef(name="other", path=Path("x"), root_kind="project")
@@ -443,7 +481,10 @@ async def test_footer_shows_transition_without_dot_when_only_profile_changes(
     from gc_core.model_router import ModelRouter
     from gc_tui.app import TuiApp
 
-    app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "m"})
+    app = TuiApp(
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "m"}),
+    )
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(100, 30)) as pilot:
         scr = pilot.app.screen
@@ -456,10 +497,10 @@ async def test_footer_shows_transition_without_dot_when_only_profile_changes(
             "slots": {"default": "gpt-5.5"},
         }
         pinned_router = ModelRouter(
-            old_snapshot, level_provider=lambda: "default"
+            make_settings(old_snapshot), level_provider=lambda: "default"
         )
         live_router = ModelRouter(
-            new_snapshot, level_provider=lambda: "default"
+            make_settings(new_snapshot), level_provider=lambda: "default"
         )
         app.active_runner = _pinned_runner("default", pinned_router)
         monkeypatch.setattr(app, "display_router", lambda: live_router)
@@ -479,7 +520,10 @@ async def test_footer_no_arrow_when_future_model_matches_fact(
     from gc_core.model_router import ModelRouter
     from gc_tui.app import TuiApp
 
-    app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "m"})
+    app = TuiApp(
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "m"}),
+    )
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(100, 30)) as pilot:
         scr = pilot.app.screen
@@ -487,7 +531,9 @@ async def test_footer_no_arrow_when_future_model_matches_fact(
             "models": {"opus-4.8": {}},
             "slots": {"default": "opus-4.8"},
         }
-        router = ModelRouter(snapshot, level_provider=lambda: "default")
+        router = ModelRouter(
+            make_settings(snapshot), level_provider=lambda: "default"
+        )
         app.active_runner = _pinned_runner("default", router)
         monkeypatch.setattr(app, "display_router", lambda: router)
 
@@ -505,7 +551,10 @@ async def test_footer_no_arrow_when_turn_finished(tmp_path, monkeypatch):
     from gc_core.model_router import ModelRouter
     from gc_tui.app import TuiApp
 
-    app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "m"})
+    app = TuiApp(
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "m"}),
+    )
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(100, 30)) as pilot:
         scr = pilot.app.screen
@@ -513,8 +562,12 @@ async def test_footer_no_arrow_when_turn_finished(tmp_path, monkeypatch):
             "models": {"minimax-m3": {}, "opus-4.8": {}},
             "slots": {"light": "minimax-m3", "max": "opus-4.8"},
         }
-        pinned_router = ModelRouter(snapshot, level_provider=lambda: "light")
-        live_router = ModelRouter(snapshot, level_provider=lambda: "max")
+        pinned_router = ModelRouter(
+            make_settings(snapshot), level_provider=lambda: "light"
+        )
+        live_router = ModelRouter(
+            make_settings(snapshot), level_provider=lambda: "max"
+        )
 
         class _FinishedRunner:
             def is_running(self):
@@ -547,7 +600,10 @@ async def test_footer_drops_profile_name_before_dropping_transition_block(
     from gc_tui.app import TuiApp
     from rich.cells import cell_len
 
-    app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "m"})
+    app = TuiApp(
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "m"}),
+    )
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(100, 30)) as pilot:
         scr = pilot.app.screen
@@ -555,8 +611,12 @@ async def test_footer_drops_profile_name_before_dropping_transition_block(
             "models": {"minimax-m3": {}, "opus-4.8": {}},
             "slots": {"light": "minimax-m3", "max": "opus-4.8"},
         }
-        pinned_router = ModelRouter(snapshot, level_provider=lambda: "light")
-        live_router = ModelRouter(snapshot, level_provider=lambda: "max")
+        pinned_router = ModelRouter(
+            make_settings(snapshot), level_provider=lambda: "light"
+        )
+        live_router = ModelRouter(
+            make_settings(snapshot), level_provider=lambda: "max"
+        )
         app.active_runner = _pinned_runner("light", pinned_router)
         monkeypatch.setattr(app, "display_router", lambda: live_router)
         ref = ProfileRef(
@@ -587,7 +647,10 @@ async def test_footer_drops_transition_block_when_still_too_narrow_without_profi
     from gc_tui.app import TuiApp
     from rich.cells import cell_len
 
-    app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "m"})
+    app = TuiApp(
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "m"}),
+    )
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(100, 30)) as pilot:
         scr = pilot.app.screen
@@ -595,8 +658,12 @@ async def test_footer_drops_transition_block_when_still_too_narrow_without_profi
             "models": {"minimax-m3": {}, "opus-4.8": {}},
             "slots": {"light": "minimax-m3", "max": "opus-4.8"},
         }
-        pinned_router = ModelRouter(snapshot, level_provider=lambda: "light")
-        live_router = ModelRouter(snapshot, level_provider=lambda: "max")
+        pinned_router = ModelRouter(
+            make_settings(snapshot), level_provider=lambda: "light"
+        )
+        live_router = ModelRouter(
+            make_settings(snapshot), level_provider=lambda: "max"
+        )
         app.active_runner = _pinned_runner("light", pinned_router)
         monkeypatch.setattr(app, "display_router", lambda: live_router)
         ref = ProfileRef(
@@ -655,7 +722,7 @@ async def test_footer_two_line_layout_keeps_profile_and_transition(
     }
     app = TuiApp(
         threads_dir=str(tmp_path / "t"),
-        config={"model": "m", "pricing": pricing},
+        settings=tui_settings({"agent.model": "m", "pricing": pricing}),
     )
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(100, 30)) as pilot:
@@ -664,8 +731,12 @@ async def test_footer_two_line_layout_keeps_profile_and_transition(
             "models": {"minimax-m3": {}, "opus-4.8": {}},
             "slots": {"light": "minimax-m3", "max": "opus-4.8"},
         }
-        pinned_router = ModelRouter(snapshot, level_provider=lambda: "light")
-        live_router = ModelRouter(snapshot, level_provider=lambda: "max")
+        pinned_router = ModelRouter(
+            make_settings(snapshot), level_provider=lambda: "light"
+        )
+        live_router = ModelRouter(
+            make_settings(snapshot), level_provider=lambda: "max"
+        )
         app.active_runner = _pinned_runner_with_usage(
             "light", pinned_router, (_meta(2_000_000, 0), _meta(1_000_000, 0))
         )
@@ -733,7 +804,7 @@ async def test_footer_two_line_layout_drops_profile_before_transition(
     }
     app = TuiApp(
         threads_dir=str(tmp_path / "t"),
-        config={"model": "m", "pricing": pricing},
+        settings=tui_settings({"agent.model": "m", "pricing": pricing}),
     )
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(100, 30)) as pilot:
@@ -742,8 +813,12 @@ async def test_footer_two_line_layout_drops_profile_before_transition(
             "models": {"minimax-m3": {}, "opus-4.8": {}},
             "slots": {"light": "minimax-m3", "max": "opus-4.8"},
         }
-        pinned_router = ModelRouter(snapshot, level_provider=lambda: "light")
-        live_router = ModelRouter(snapshot, level_provider=lambda: "max")
+        pinned_router = ModelRouter(
+            make_settings(snapshot), level_provider=lambda: "light"
+        )
+        live_router = ModelRouter(
+            make_settings(snapshot), level_provider=lambda: "max"
+        )
         app.active_runner = _pinned_runner_with_usage(
             "light", pinned_router, (_meta(2_000_000, 0), _meta(1_000_000, 0))
         )
@@ -818,7 +893,7 @@ async def test_footer_drops_transition_last_when_two_line_still_too_narrow(
     }
     app = TuiApp(
         threads_dir=str(tmp_path / "t"),
-        config={"model": "m", "pricing": pricing},
+        settings=tui_settings({"agent.model": "m", "pricing": pricing}),
     )
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(100, 30)) as pilot:
@@ -827,8 +902,12 @@ async def test_footer_drops_transition_last_when_two_line_still_too_narrow(
             "models": {"minimax-m3": {}, "opus-4.8": {}},
             "slots": {"light": "minimax-m3", "max": "opus-4.8"},
         }
-        pinned_router = ModelRouter(snapshot, level_provider=lambda: "light")
-        live_router = ModelRouter(snapshot, level_provider=lambda: "max")
+        pinned_router = ModelRouter(
+            make_settings(snapshot), level_provider=lambda: "light"
+        )
+        live_router = ModelRouter(
+            make_settings(snapshot), level_provider=lambda: "max"
+        )
         app.active_runner = _pinned_runner_with_usage(
             "light", pinned_router, (_meta(2_000_000, 0), _meta(1_000_000, 0))
         )
@@ -880,7 +959,7 @@ async def test_footer_one_line_priority_kept_with_profile_transition_and_usage(
     }
     app = TuiApp(
         threads_dir=str(tmp_path / "t"),
-        config={"model": "m", "pricing": pricing},
+        settings=tui_settings({"agent.model": "m", "pricing": pricing}),
     )
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(200, 30)) as pilot:
@@ -889,8 +968,12 @@ async def test_footer_one_line_priority_kept_with_profile_transition_and_usage(
             "models": {"minimax-m3": {}, "opus-4.8": {}},
             "slots": {"light": "minimax-m3", "max": "opus-4.8"},
         }
-        pinned_router = ModelRouter(snapshot, level_provider=lambda: "light")
-        live_router = ModelRouter(snapshot, level_provider=lambda: "max")
+        pinned_router = ModelRouter(
+            make_settings(snapshot), level_provider=lambda: "light"
+        )
+        live_router = ModelRouter(
+            make_settings(snapshot), level_provider=lambda: "max"
+        )
         app.active_runner = _pinned_runner_with_usage(
             "light", pinned_router, (_meta(2_000_000, 0), _meta(1_000_000, 0))
         )
@@ -1034,8 +1117,10 @@ def _arm_transition(app, monkeypatch, *, profile=None, usage=None):
         "models": {"minimax-m3": {}, "opus-4.8": {}},
         "slots": {"light": "minimax-m3", "max": "opus-4.8"},
     }
-    pinned = ModelRouter(snapshot, level_provider=lambda: "light")
-    live = ModelRouter(snapshot, level_provider=lambda: "max")
+    pinned = ModelRouter(
+        make_settings(snapshot), level_provider=lambda: "light"
+    )
+    live = ModelRouter(make_settings(snapshot), level_provider=lambda: "max")
     app.active_runner = (
         _pinned_runner_with_usage("light", pinned, usage)
         if usage
@@ -1069,7 +1154,7 @@ async def test_footer_moves_prices_down_where_profile_used_to_be_dropped(
 
     app = TuiApp(
         threads_dir=str(tmp_path / "t"),
-        config={"model": "m", "pricing": _PRICING},
+        settings=tui_settings({"agent.model": "m", "pricing": _PRICING}),
     )
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(200, 30)) as pilot:
@@ -1128,7 +1213,10 @@ async def test_footer_moves_left_to_two_rows_before_shrinking_profile(
     from gc_tui.screens.main import _PROFILE_NAME_MAX_COLS
     from rich.cells import cell_len
 
-    app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "m"})
+    app = TuiApp(
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "m"}),
+    )
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(200, 30)) as pilot:
         scr = pilot.app.screen
@@ -1167,7 +1255,10 @@ async def test_footer_keeps_full_profile_when_left_goes_two_rows(
     from gc_tui.screens.main import _PROFILE_NAME_MIN_COLS
     from rich.cells import cell_len
 
-    app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "m"})
+    app = TuiApp(
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "m"}),
+    )
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(200, 30)) as pilot:
         scr = pilot.app.screen
@@ -1207,7 +1298,10 @@ async def test_footer_shrinks_profile_on_the_two_row_pass(
     from gc_tui.screens.main import _PROFILE_NAME_MAX_COLS
     from rich.cells import cell_len
 
-    app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "m"})
+    app = TuiApp(
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "m"}),
+    )
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(200, 30)) as pilot:
         scr = pilot.app.screen
@@ -1263,7 +1357,10 @@ async def test_footer_ladder_order_holds_across_terminal_widths(
     from gc_tui.app import TuiApp
     from gc_tui.screens.main import _PROFILE_NAME_MIN_COLS
 
-    app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "m"})
+    app = TuiApp(
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "m"}),
+    )
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(200, 30)) as pilot:
         scr = pilot.app.screen
@@ -1333,7 +1430,7 @@ async def test_footer_ladder_is_monotone_prices_never_come_back_up(
 
     app = TuiApp(
         threads_dir=str(tmp_path / "t"),
-        config={"model": "m", "pricing": _PRICING},
+        settings=tui_settings({"agent.model": "m", "pricing": _PRICING}),
     )
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(200, 30)) as pilot:
@@ -1397,12 +1494,14 @@ async def test_footer_context_meter_stays_on_the_first_line_at_every_step(
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config={
-            "model": "m",
-            "pricing": _PRICING,
-            "backend_api_mode": "chat_completions",
-            "summary_params": {"chat_completions_summary_trigger_chars": 1000},
-        },
+        settings=tui_settings(
+            {
+                "agent.model": "m",
+                "pricing": _PRICING,
+                "backend.api_mode": "chat_completions",
+                "summary": {"chat_completions_summary_trigger_chars": 1000},
+            }
+        ),
     )
     async with app.run_test(size=(200, 30)) as pilot:
         scr = pilot.app.screen
@@ -1452,12 +1551,14 @@ async def test_footer_resolves_context_meter_once_per_frame(
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config={
-            "model": "m",
-            "pricing": _PRICING,
-            "backend_api_mode": "chat_completions",
-            "summary_params": {"chat_completions_summary_trigger_chars": 1000},
-        },
+        settings=tui_settings(
+            {
+                "agent.model": "m",
+                "pricing": _PRICING,
+                "backend.api_mode": "chat_completions",
+                "summary": {"chat_completions_summary_trigger_chars": 1000},
+            }
+        ),
     )
     async with app.run_test(size=(70, 30)) as pilot:
         scr = pilot.app.screen

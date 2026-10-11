@@ -1,5 +1,6 @@
 """Реестр команд: метаданные, lookup, closest-match (§4)."""
 
+from gc_testkit.tui_support import tui_settings
 from gc_tui.commands import (
     Command,
     CommandRegistry,
@@ -61,15 +62,6 @@ def test_default_registry_includes_core_commands():
         "view",
     ]:
         assert reg.lookup(n) is not None, f"missing /{n}"
-
-
-def test_requires_args_optional_vs_required():
-    """`<…>` — обязательный аргумент; `[…]` и пусто — Enter выполняет сразу."""
-    reg = build_default_registry()
-    assert reg.lookup("view").requires_args is True
-    assert reg.lookup("skill").requires_args is True
-    assert reg.lookup("export").requires_args is False
-    assert reg.lookup("help").requires_args is False
 
 
 def test_default_registry_is_exactly_keep_set():
@@ -304,7 +296,7 @@ async def test_f6_opens_settings_with_input_focused():
     from gc_tui.app import TuiApp
     from gc_tui.screens.settings import SettingsScreen
 
-    app = TuiApp(config={})
+    app = TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
         app.screen.query_one("#cmdinput").focus()
         await pilot.pause()
@@ -318,4 +310,4 @@ def test_voice_command_registered_with_hotkey():
     cmd = reg.lookup("voice")
     assert cmd is not None
     assert cmd.hotkey == "Ctrl+T"  # F1-справка генерится из реестра
-    assert not cmd.is_toggle and not cmd.requires_args
+    assert not cmd.is_toggle and not cmd.args  # без аргумента

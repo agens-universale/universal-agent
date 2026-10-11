@@ -30,16 +30,19 @@ Child run_agent drains via get_pending_messages (same contract as parent).
 from __future__ import annotations
 
 import threading
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from typing import Any, Callable, Dict, Iterator, List, Optional
 
 
 class ChildInputScope:
     """Thread-safe pending queue for one executing subagent."""
 
-    def __init__(self, *, parent_call_id: str) -> None:
+    def __init__(
+        self, *, parent_call_id: str, thread_safe: bool = True
+    ) -> None:
         self.parent_call_id = parent_call_id or ""
-        self._q_lock = threading.Lock()
+        self.thread_safe = thread_safe
+        self._q_lock = threading.Lock() if thread_safe else nullcontext()
         self._pending: List[Dict[str, Any]] = []
         self._on_enqueue: Optional[Callable[[Dict[str, Any]], None]] = None
 
@@ -58,7 +61,8 @@ class ChildInputScope:
             try:
                 cb(message)
             except Exception:
-                pass
+                if not self.thread_safe:
+                    raise
 
     def drain(self) -> List[Dict[str, Any]]:
         with self._q_lock:
@@ -69,10 +73,12 @@ class ChildInputScope:
 
 @contextmanager
 def activate_child_input(
-    ctx: Any, *, parent_call_id: str
+    ctx: Any, *, parent_call_id: str, thread_safe: bool = True
 ) -> Iterator[ChildInputScope]:
     """Зарегистрировать этого ребёнка как адресата ввода ДЛЯ ЭТОГО прогона."""
-    scope = ChildInputScope(parent_call_id=parent_call_id)
+    scope = ChildInputScope(
+        parent_call_id=parent_call_id, thread_safe=thread_safe
+    )
     ctx.child_input_scope = scope
     try:
         yield scope

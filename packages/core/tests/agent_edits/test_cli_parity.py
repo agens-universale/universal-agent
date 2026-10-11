@@ -19,6 +19,7 @@ from gc_core.agent_edits.journal import EditsJournal
 from gc_core.agent_edits.tracking import TrackingFsBackend
 from gc_core.config_modules import env_vars
 from gc_core.run_context import acreate_run_context
+from gc_testkit.settings import make_settings
 from gc_core.thread_store import edits_journal_path
 from gc_core.tools.fs.write_to_file_tool import WriteToFile
 from gc_core.tools.subagents.sidecar import (
@@ -82,13 +83,15 @@ async def _cli_ctx(
     bind_thread_identity, без треда — clear_thread_identity.
     """
     ctx = await acreate_run_context(
-        {
-            "backend_api_mode": "chat_completions",
-            "save_logs": False,
-            "launch_root": str(launch_root),
-            "run_mode": "cli",
-            "agent_edits": {"record": {"cli": True}},
-        }
+        make_settings(
+            {
+                "backend.api_mode": "chat_completions",
+                "logging.save_logs": False,
+                "launch_root": str(launch_root),
+                "run_mode": "cli",
+                "agent_edits": {"record": {"cli": True}},
+            }
+        )
     )
     if identity:
         bind_thread_identity(
@@ -134,9 +137,9 @@ async def test_fs_edit_from_cli_context_lands_in_journal(roots):
     target = launch_root / "app.py"
 
     res = json.loads(
-        await WriteToFile(
-            ctx=ctx, config_dict=ctx.config_dict, call_id="call-cli"
-        ).acall(path=str(target), content="hello\n")
+        await WriteToFile(ctx=ctx, call_id="call-cli").acall(
+            path=str(target), content="hello\n"
+        )
     )
     assert res["ok"] is True
 
@@ -152,9 +155,9 @@ async def test_cli_context_without_identity_writes_no_journal(roots):
     target = launch_root / "app.py"
 
     res = json.loads(
-        await WriteToFile(
-            ctx=ctx, config_dict=ctx.config_dict, call_id="call-cli"
-        ).acall(path=str(target), content="hello\n")
+        await WriteToFile(ctx=ctx, call_id="call-cli").acall(
+            path=str(target), content="hello\n"
+        )
     )
     assert res["ok"] is True
     assert target.read_bytes() == b"hello\n"

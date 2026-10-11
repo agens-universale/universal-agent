@@ -5,18 +5,19 @@ from gc_core.tools import abuild_tools_data
 from gc_core.tools.arguments_validation import (
     parse_and_validate_tool_arguments,
 )
+from gc_testkit.settings import make_settings
 
 CONFIG = {
-    "inject_tool_fields": {
+    "agent.inject_tool_fields": {
         "reason": "One short, concrete sentence explaining the purpose of this tool call."
     },
-    "stop_tools": [],
+    "agent.stop_tools": [],
 }
 
 
 @pytest.fixture(scope="module")
 async def specs() -> dict:
-    tools_data, _, _, _ = await abuild_tools_data(CONFIG)
+    tools_data, _, _, _ = await abuild_tools_data(make_settings(CONFIG))
     return {name: entry["spec"] for name, entry in tools_data.items()}
 
 

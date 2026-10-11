@@ -22,22 +22,19 @@ def test_limits_reject_invalid(field, bad):
         AgentConfig(**{field: bad})
 
 
-def test_limits_reach_flat_config_dict():
-    from gc_core.config import flatten_app_config
+def test_limits_reach_app_config():
     from gc_core.config_modules.root import AppConfig
 
     app_cfg = AppConfig(
         agent={"session_token_limit": 12345, "max_tool_calls": 7}
     )
-    flat = flatten_app_config(app_cfg)
-    assert flat["session_token_limit"] == 12345
-    assert flat["max_tool_calls"] == 7
+    assert app_cfg.agent.session_token_limit == 12345
+    assert app_cfg.agent.max_tool_calls == 7
 
 
-def test_limits_flat_default_none():
-    from gc_core.config import flatten_app_config
+def test_limits_app_config_default_none():
     from gc_core.config_modules.root import AppConfig
 
-    flat = flatten_app_config(AppConfig())
-    assert flat["session_token_limit"] is None
-    assert flat["max_tool_calls"] is None
+    app_cfg = AppConfig()
+    assert app_cfg.agent.session_token_limit is None
+    assert app_cfg.agent.max_tool_calls is None

@@ -1,5 +1,5 @@
 """Идентичность треда без тяжёлых импортов: проверка идентификаторов, каталог
-тредов из конфига и адрес треда прогона.
+тредов из настроек и адрес треда прогона.
 
 Только стандартная библиотека: модуль импортирует хранилище картинок
 (``attachments/store.py``), а его — охрана путей и тулы; ``thread_store`` же
@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import os
 import re
-from typing import Any, Mapping, Optional
+from typing import Any, Optional
 
 _THREAD_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
 _SYSTEM_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
@@ -55,15 +55,19 @@ def sanitize_system_id(system_id: str) -> str:
     return s
 
 
-def resolve_threads_dir(config_dict: Mapping[str, Any]) -> str:
+def resolve_threads_dir(settings: Any) -> str:
     """
     Определить директорию для хранения тредов.
 
-    Контракт: config_dict["threads_data_path"] должен быть АБСОЛЮТНЫМ
-    путём, заполненным config_modules.root.resolve_paths(). Пустое значение
-    означает, что resolve_paths() не вызывался — это ошибка интеграции.
+    ``settings`` — всё, что принимает ``settings_of``. Контракт:
+    ``paths.threads_data_path`` должен быть АБСОЛЮТНЫМ путём, заполненным
+    config_modules.root.resolve_paths(). Пустое значение означает, что
+    resolve_paths() не вызывался — это ошибка интеграции.
     """
-    path_cfg = config_dict.get("threads_data_path")
+    # Ленивый импорт: модуль держится на стандартной библиотеке (см. докстринг).
+    from gc_core.settings import settings_of
+
+    path_cfg = settings_of(settings).paths.threads_data_path
     if not isinstance(path_cfg, str) or len(path_cfg.strip()) == 0:
         raise ValueError(
             "threads_data_path пуст; "

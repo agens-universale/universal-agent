@@ -4,8 +4,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from gc_core.agent_store import (
+    DEFAULT_AGENT_STORE,
+    AgentResource,
+    AgentStore,
+    read_resource_or_none,
+)
 from gc_core.instructions.layers import instruction_layer_specs
-from gc_core.utils.user_text import read_user_text_or_none
 
 _PREAMBLE = (
     "Precedence: when instructions conflict, more specific instructions override "
@@ -24,9 +29,14 @@ class LoadedInstructions:
     warnings: list[str] = field(default_factory=list)
 
 
-def _read(path) -> str | None:
+def _read(store: AgentStore, layer: str, path) -> str | None:
     # Файл человека (AGENTS.md и слои инструкций) может лежать в любой кодировке.
-    return read_user_text_or_none(path)
+    return read_resource_or_none(
+        store,
+        AgentResource(
+            "instructions", layer, str(path) if path is not None else None
+        ),
+    )
 
 
 def _wrap(sections: list[str]) -> str:
@@ -34,17 +44,17 @@ def _wrap(sections: list[str]) -> str:
 
 
 def _load_l0(
-    agent_md_path: str,
+    agent_md_path: str | None,
     *,
     is_tui: bool,
     agentsmd_override: bool,
     logger: Any | None,
     verbose: bool,
+    body: str | None,
 ) -> LoadedInstructions:
     warnings: list[str] = []
     if is_tui and agentsmd_override:
         warnings.append(AGENTSMD_OVERRIDE_IGNORED_WARNING)
-    body = _read(Path(agent_md_path))
     if body is None:
         # agent_md_path is the caller-supplied override — unlike the optional
         # global/project layers, its absence/unreadability is worth surfacing
@@ -62,11 +72,11 @@ def _load_l0(
     return LoadedInstructions(text=text, loaded_ids=["L0"], warnings=warnings)
 
 
-def _load_layers(specs) -> LoadedInstructions:
+def _load_layers(specs, store: AgentStore) -> LoadedInstructions:
     sections: list[str] = []
     loaded: list[str] = []
     for spec in specs:
-        body = _read(spec.path)
+        body = _read(store, spec.id, spec.path)
         if body is None:
             continue
         loaded.append(spec.id)
@@ -86,15 +96,20 @@ def build_instructions(
     cwd: str | None = None,
     logger: Any | None = None,
     verbose: bool = False,
+    store: AgentStore = DEFAULT_AGENT_STORE,
 ) -> LoadedInstructions:
     # 1. agent_md_path задан → ТОЛЬКО L0 (замена), в любом режиме. Путь > флаг.
-    if agent_md_path:
+    # Без пути роль запуска может дать своё хранилище агента (у файлового её
+    # без пути нет — дальше как раньше).
+    l0 = _read(store, "L0", Path(agent_md_path) if agent_md_path else None)
+    if agent_md_path or l0 is not None:
         return _load_l0(
             agent_md_path,
             is_tui=is_tui,
             agentsmd_override=agentsmd_override,
             logger=logger,
             verbose=verbose,
+            body=l0,
         )
 
     # 2. TUI без L0 → собрать L1–L3 (или только L3 при override).
@@ -102,7 +117,7 @@ def build_instructions(
         specs = instruction_layer_specs(cwd=cwd)
         if agentsmd_override:
             specs = [s for s in specs if s.id == "L3"]
-        return _load_layers(specs)
+        return _load_layers(specs, store)
 
     # 3. CLI/server/swarm без L0 → пусто.
     return LoadedInstructions(text="", loaded_ids=[], warnings=[])

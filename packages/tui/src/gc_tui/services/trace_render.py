@@ -334,7 +334,7 @@ def _dispatch_readonly(mount_target, ev, calls: dict) -> None:
     elif ev.kind == "todo":
         # Канон spec 2026-07-31 §2: строки собирает общий билдер (он же у
         # живого канала в main.py), здесь только монтируем.
-        from gc_core.tools.subagents.progress import todo_items_from_arguments
+        from gc_core.execution.progress import todo_items_from_arguments
 
         from gc_tui.services.todo_render import build_todo_block
 
@@ -422,21 +422,6 @@ def _render_record_readonly(
     if sk:
         _mount_skill_marker_readonly(mount_target, sk, no)  # после реплики
     return no
-
-
-def render_thread_readonly(mount_target, records: list) -> None:
-    """Построить и смонтировать виджеты трейса из плоских записей в mount_target —
-    read-only (без pending/баннеров/submit-collapse/индикатора/tool-preview).
-    submit_solution-output отфильтрован уже в map_message (→ None)."""
-    from gc_tui.services.trace_mapper import collect_render_context
-
-    no = 1
-    calls: dict = {}
-    context = collect_render_context(
-        rec.get("payload") for rec in records if isinstance(rec, dict)
-    )
-    for rec in records:
-        no = _render_record_readonly(mount_target, rec, no, calls, context)
 
 
 def render_segments_readonly(mount_target, segments: list) -> dict:

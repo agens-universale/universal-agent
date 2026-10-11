@@ -2,6 +2,7 @@ from gc_core.security.protected_paths import (
     protected_decision,
     protection_enabled,
 )
+from gc_testkit.settings import make_settings
 
 
 def test_decisions(tmp_path, monkeypatch):
@@ -28,5 +29,17 @@ def test_decisions(tmp_path, monkeypatch):
 
 
 def test_protection_enabled_default_true():
-    assert protection_enabled({}) is True
-    assert protection_enabled({"protected_paths": {"enabled": False}}) is False
+    assert protection_enabled(make_settings()) is True
+    assert protection_enabled(None) is True
+
+
+def test_protection_enabled_flag_does_not_disable_floor():
+    """``security.protected_paths.enabled: false`` floor-защиту не снимает.
+
+    Так в проде всегда и было (docs/configuration.md): до гарда флаг не
+    доходил — плоский вид настроек секцию не проецировал. Выключить её мог
+    только плоский тест-словарь, а его больше нет.
+    """
+    settings = make_settings({"security.protected_paths": {"enabled": False}})
+    assert settings.settings.security.protected_paths.enabled is False
+    assert protection_enabled(settings) is True

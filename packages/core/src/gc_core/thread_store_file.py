@@ -41,6 +41,21 @@ from gc_core.thread_store_types import (
     ThreadState,
 )
 
+#: Пишущие файловые функции (по имени: часть импортируется по месту).
+_WRITE_HELPERS = frozenset(
+    {
+        "append_new_thread_messages",
+        "append_subagent_trace_record",
+        "archive_and_replace_thread_files",
+        "discard_message_by_id",
+        "patch_runtime_flag",
+        "reset_thread_files",
+        "restore_subagent_trace_records",
+        "save_thread_meta",
+        "update_runtime_meta",
+    }
+)
+
 
 class FileThreadStore(ThreadStoreBase):
     """Хранилище треда в каталоге с ``data_*.jsonl`` и ``meta_*.json``."""
@@ -56,6 +71,22 @@ class FileThreadStore(ThreadStoreBase):
     def ensure_ready(self) -> None:
         ensure_threads_dir(self._dir)
 
+    def _call(self, helper, *args, **kwargs):
+        """Единая точка вызова файловых функций.
+
+        Чтение — прямой вызов. Запись в тред, который знает журнал durable
+        хранилища, — под его блокировкой (``local_write_scope``).
+        ``DurableFileThreadStore`` переопределяет её, чтобы провести те же
+        функции через журнал.
+        """
+        if helper.__name__ not in _WRITE_HELPERS:
+            return helper(*args, **kwargs)
+        from gc_core.thread_store_journal import local_write_scope
+
+        directory, system_id, thread_id = args[:3]
+        with local_write_scope(directory, system_id, thread_id):
+            return helper(*args, **kwargs)
+
     # --- чтение ------------------------------------------------------------
 
     def load_messages(
@@ -64,8 +95,8 @@ class FileThreadStore(ThreadStoreBase):
         # Модульная функция отдаёт тройку (сообщения, ключи, счётчик записанных).
         # Наружу контракт обещает только сообщения: ключи — деталь дедупликации,
         # и держать её должен сам store, а не каждый вызывающий.
-        messages, _keys, _count = load_thread_messages(
-            self._dir, system_id, thread_id
+        messages, _keys, _count = self._call(
+            load_thread_messages, self._dir, system_id, thread_id
         )
         return messages or []
 
@@ -76,8 +107,8 @@ class FileThreadStore(ThreadStoreBase):
         ``discard_message`` номер проседает и переиспользуется. Это и есть
         контрактное поведение: держат НЕУБЫВАНИЕ, а не уникальность.
         """
-        messages, keys, max_seq = load_thread_messages(
-            self._dir, system_id, thread_id
+        messages, keys, max_seq = self._call(
+            load_thread_messages, self._dir, system_id, thread_id
         )
         return ThreadState(
             messages=(messages or []),
@@ -86,13 +117,15 @@ class FileThreadStore(ThreadStoreBase):
         )
 
     def _known_keys(self, system_id: str, thread_id: str) -> Set[MessageKey]:
-        _messages, keys, _count = load_thread_messages(
-            self._dir, system_id, thread_id
+        _messages, keys, _count = self._call(
+            load_thread_messages, self._dir, system_id, thread_id
         )
         return keys or set()
 
     def load_meta(self, system_id: str, thread_id: str) -> Dict[str, Any]:
-        return load_thread_meta(self._dir, system_id, thread_id) or {}
+        return (
+            self._call(load_thread_meta, self._dir, system_id, thread_id) or {}
+        )
 
     # --- запись ------------------------------------------------------------
 
@@ -117,7 +150,8 @@ class FileThreadStore(ThreadStoreBase):
             if known_keys is not None
             else self._known_keys(system_id, thread_id)
         )
-        return append_new_thread_messages(
+        return self._call(
+            append_new_thread_messages,
             self._dir,
             system_id,
             thread_id,
@@ -129,7 +163,7 @@ class FileThreadStore(ThreadStoreBase):
     def save_meta(
         self, system_id: str, thread_id: str, meta: Dict[str, Any]
     ) -> None:
-        save_thread_meta(self._dir, system_id, thread_id, meta)
+        self._call(save_thread_meta, self._dir, system_id, thread_id, meta)
 
     def patch_runtime_flag(
         self,
@@ -140,7 +174,8 @@ class FileThreadStore(ThreadStoreBase):
         active: bool,
         session_meta: Optional[Dict[str, Any]] = None,
     ) -> None:
-        patch_runtime_flag(
+        self._call(
+            patch_runtime_flag,
             self._dir,
             system_id,
             thread_id,
@@ -152,17 +187,23 @@ class FileThreadStore(ThreadStoreBase):
     def update_runtime_meta(
         self, system_id: str, thread_id: str, patch: Dict[str, Any]
     ) -> None:
-        update_runtime_meta(self._dir, system_id, thread_id, patch)
+        self._call(update_runtime_meta, self._dir, system_id, thread_id, patch)
 
     def discard_message(
         self, system_id: str, thread_id: str, message_id: str
     ) -> bool:
         return bool(
-            discard_message_by_id(self._dir, system_id, thread_id, message_id)
+            self._call(
+                discard_message_by_id,
+                self._dir,
+                system_id,
+                thread_id,
+                message_id,
+            )
         )
 
     def reset(self, system_id: str, thread_id: str) -> List[str]:
-        return reset_thread_files(self._dir, system_id, thread_id)
+        return self._call(reset_thread_files, self._dir, system_id, thread_id)
 
     # --- трассы субагентов -------------------------------------------------
 
@@ -179,8 +220,12 @@ class FileThreadStore(ThreadStoreBase):
         """
         from gc_core.thread_store import restore_subagent_trace_records
 
-        restore_subagent_trace_records(
-            self._dir, system_id, thread_id, list(records)
+        self._call(
+            restore_subagent_trace_records,
+            self._dir,
+            system_id,
+            thread_id,
+            list(records),
         )
 
     def append_subagent_trace(
@@ -193,7 +238,8 @@ class FileThreadStore(ThreadStoreBase):
         kind: str,
         payload: Dict[str, Any],
     ) -> SubagentTraceRecord:
-        return append_subagent_trace_record(
+        return self._call(
+            append_subagent_trace_record,
             self._dir,
             system_id,
             thread_id,
@@ -206,7 +252,10 @@ class FileThreadStore(ThreadStoreBase):
     def read_subagent_trace(
         self, system_id: str, thread_id: str
     ) -> List[SubagentTraceRecord]:
-        return read_subagent_trace(self._dir, system_id, thread_id) or []
+        return (
+            self._call(read_subagent_trace, self._dir, system_id, thread_id)
+            or []
+        )
 
     # --- необязательная способность: архив перед компакцией ------------------
 
@@ -230,8 +279,12 @@ class FileThreadStore(ThreadStoreBase):
         Возвращает ``{"archive_suffix", "archive_data_path", "archive_meta_path"}``;
         пути — ``None``, если архивировать было нечего.
         """
-        return archive_and_replace_thread_files(
-            self._dir, system_id, thread_id, messages
+        return self._call(
+            archive_and_replace_thread_files,
+            self._dir,
+            system_id,
+            thread_id,
+            messages,
         )
 
 

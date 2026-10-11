@@ -44,11 +44,6 @@ class TodoBlock(ClickModelMixin, Widget):
         self._rows = list(rows)
         self._event_no = event_no
 
-    @property
-    def todo_rows(self) -> list:
-        """Строки блока (заголовок + пункты) — для тестов и отладки."""
-        return list(self._rows)
-
     def compose(self) -> ComposeResult:
         yield from self._rows
 

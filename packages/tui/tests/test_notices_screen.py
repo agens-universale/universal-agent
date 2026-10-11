@@ -1,5 +1,6 @@
 """NoticesScreen: F4-биндинг + экран уведомлений (Task 7)."""
 
+from gc_testkit.tui_support import tui_settings
 import pytest
 
 
@@ -9,13 +10,13 @@ async def test_notices_screen_lists_all(tmp_path):
     from gc_tui.app import TuiApp
 
     cfg = {
-        "model": "M",
-        "backend_api_mode": "chat_completions",
-        "stop_tools": ["bogus"],
-        "agentsmd_override": True,
+        "agent.model": "M",
+        "backend.api_mode": "chat_completions",
+        "agent.stop_tools": ["bogus"],
+        "tui.agentsmd_override": True,
     }
     async with TuiApp(
-        threads_dir=str(tmp_path / "t"), config=cfg
+        threads_dir=str(tmp_path / "t"), settings=tui_settings(cfg)
     ).run_test() as pilot:
         await pilot.press("f4")
         await pilot.pause()
@@ -81,9 +82,9 @@ async def test_notices_screen_empty_state(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    cfg = {"model": "M", "backend_api_mode": "chat_completions"}
+    cfg = {"agent.model": "M", "backend.api_mode": "chat_completions"}
     async with TuiApp(
-        threads_dir=str(tmp_path / "t"), config=cfg
+        threads_dir=str(tmp_path / "t"), settings=tui_settings(cfg)
     ).run_test() as pilot:
         await pilot.press("f4")
         await pilot.pause()

@@ -10,6 +10,7 @@
 воспроизводится теми же приёмами, что в обычных тестах соседних файлов.
 """
 
+from gc_testkit.tui_support import tui_settings
 import pytest
 
 pytest.importorskip("textual")
@@ -123,7 +124,11 @@ def _app(tmp_path, config=None):
     секция «Модель» осталась бы без адреса — список моделей не пошёл бы грузиться."""
     from gc_tui.app import TuiApp
 
-    return TuiApp(threads_dir=str(tmp_path), system="cli", config=config or {})
+    return TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings(config or {}),
+    )
 
 
 # --- мастер первого запуска ---

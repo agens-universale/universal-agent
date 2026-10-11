@@ -10,9 +10,16 @@ def test_unsupported_config_payload_continues_to_models(payload):
 
     def get_ex(url, headers, verify):
         calls.append(url)
-        return mp.HttpReply(200, payload if url.endswith("/config") else {"data": [{"id": "usable"}]})
+        return mp.HttpReply(
+            200,
+            payload
+            if url.endswith("/config")
+            else {"data": [{"id": "usable"}]},
+        )
 
-    result = mp.probe_fetch("http://x/v1/chat/completions", None, http_get_ex=get_ex)
+    result = mp.probe_fetch(
+        "http://x/v1/chat/completions", None, http_get_ex=get_ex
+    )
     assert [model.id for model in result.models] == ["usable"]
     assert calls == ["http://x/v1/config", "http://x/v1/models"]
 
@@ -52,9 +59,14 @@ def test_probe_fetch_empty_success_does_not_try_another_auth_form():
         calls.append((url, headers.get("Authorization")))
         return mp.HttpReply(200, {"chat": {"models": []}})
 
-    out = mp.probe_fetch("http://x/v1/chat/completions", "secret", http_get_ex=get_ex)
+    out = mp.probe_fetch(
+        "http://x/v1/chat/completions", "secret", http_get_ex=get_ex
+    )
     assert out.models == []
-    assert calls == [("http://x/v1/config", "secret"), ("http://x/v1/models", "secret")]
+    assert calls == [
+        ("http://x/v1/config", "secret"),
+        ("http://x/v1/models", "secret"),
+    ]
 
 
 def test_empty_config_continues_to_nonempty_models():
@@ -62,10 +74,16 @@ def test_empty_config_continues_to_nonempty_models():
 
     def get_ex(url, headers, verify):
         calls.append(url)
-        payload = {"chat": {"models": []}} if url.endswith("/config") else {"data": [{"id": "usable"}]}
+        payload = (
+            {"chat": {"models": []}}
+            if url.endswith("/config")
+            else {"data": [{"id": "usable"}]}
+        )
         return mp.HttpReply(200, payload)
 
-    out = mp.probe_fetch("http://x/v1/chat/completions", None, http_get_ex=get_ex)
+    out = mp.probe_fetch(
+        "http://x/v1/chat/completions", None, http_get_ex=get_ex
+    )
     assert [model.id for model in out.models] == ["usable"]
     assert calls == ["http://x/v1/config", "http://x/v1/models"]
 
@@ -77,7 +95,9 @@ def test_empty_config_remains_available_when_models_unavailable(status):
             return mp.HttpReply(200, {"chat": {"models": []}})
         return mp.HttpReply(status, None, "timeout" if status is None else "")
 
-    out = mp.probe_fetch("http://x/v1/chat/completions", None, http_get_ex=get_ex)
+    out = mp.probe_fetch(
+        "http://x/v1/chat/completions", None, http_get_ex=get_ex
+    )
     assert out.models == []
     assert out.status == 200
     assert out.network_error == ""
@@ -89,9 +109,15 @@ def test_probe_fetch_tries_alternative_only_after_401():
     def get_ex(url, headers, verify):
         token = headers.get("Authorization")
         calls.append(token)
-        return mp.HttpReply(401, None) if token == "secret" else mp.HttpReply(200, {"chat": {"models": [{"model": "m"}]}})
+        return (
+            mp.HttpReply(401, None)
+            if token == "secret"
+            else mp.HttpReply(200, {"chat": {"models": [{"model": "m"}]}})
+        )
 
-    out = mp.probe_fetch("http://x/v1/chat/completions", "secret", http_get_ex=get_ex)
+    out = mp.probe_fetch(
+        "http://x/v1/chat/completions", "secret", http_get_ex=get_ex
+    )
     assert [m.id for m in out.models] == ["m"]
     assert calls == ["secret", "Bearer secret"]
 
@@ -170,34 +196,6 @@ def test_probe_post_network_error():
         "http://x/v1/chat/completions", None, "m1", http_post_ex=post_ex
     )
     assert status is None and "connection" in err and payload is None
-
-
-def test_get_ex_broken_body_keeps_status(monkeypatch):
-    """_urllib_get_ex: битое тело (не JSON) → status сохраняется, payload=None."""
-    import urllib.request
-
-    class FakeResponse:
-        def __init__(self):
-            self.status = 200
-
-        def read(self):
-            return b"not a json"
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            pass
-
-    def fake_urlopen(req, timeout, context):
-        return FakeResponse()
-
-    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
-
-    reply = mp._urllib_get_ex("http://x", {}, verify=True)
-    assert reply.status == 200
-    assert reply.payload is None
-    assert reply.network_error == ""
 
 
 def test_probe_fetch_status_kept_when_body_broken():

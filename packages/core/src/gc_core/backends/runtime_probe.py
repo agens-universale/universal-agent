@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import asyncio
 import random
-import re
 import time
 from typing import Any, Awaitable, Callable
 
@@ -31,8 +30,6 @@ _RUNTIME_PROBE_NUDGE = (
     "If several retries with a wait still fail, report it with turn_finish: "
     "the environment is down and will not recover in this run."
 )
-_PROBE_COMMAND_RE = re.compile(r"echo \$\(\(([1-9][0-9])\+([1-9][0-9])\)\)")
-
 # Сколько символов ответа пробы класть в надж и в потоки исключения.
 # Сумма — одна строка; 500 хватает на баннер и текст ошибки.
 _PROBE_FAILURE_DETAIL_CHARS = 500
@@ -71,26 +68,6 @@ def _probe_terms() -> tuple[int, int]:
 
 def _probe_command(left: int, right: int) -> str:
     return f"echo $(({left}+{right}))"
-
-
-def probe_total_in_command(command: str) -> int | None:
-    """Сумма из текста пробы, если команда её содержит. Для подставных бэкендов."""
-    match = _PROBE_COMMAND_RE.search(command or "")
-    if match is None:
-        return None
-    return int(match.group(1)) + int(match.group(2))
-
-
-def probe_stdout(command: str) -> str | None:
-    """Ответ живой пробы: строка с суммой. ``None`` — это не проба.
-
-    Фейки окружения возвращают её до своей логики, не записывая вызов:
-    иначе каждая проверка ``env.calls`` видела бы лишний ``echo``.
-    """
-    total = probe_total_in_command(command)
-    if total is None:
-        return None
-    return f"{total}\n"
 
 
 def _probe_came_back(res: Any, total: int) -> bool:

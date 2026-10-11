@@ -9,9 +9,10 @@ from gc_core.backends.harbor import HarborBackend, build_harbor_shell_command
 from gc_core.backends.runtime_probe import (
     _RUNTIME_PROBE_TIMEOUT_SEC,
     RuntimeUnavailable,
-    probe_stdout,
 )
+from gc_testkit.runtime_probe import probe_stdout
 from gc_core.backends.protocol import FsBackend
+from gc_testkit.settings import make_settings
 
 
 def _bash_runs(probe: str) -> bool:
@@ -935,7 +936,9 @@ async def test_workspace_root_is_the_container_workdir(loop_in_thread):
     assert env.calls == ["pwd"], (
         "pwd — внутренний вызов: сырой канал, без профиля"
     )
-    assert build_execution_workspace(backend, {}).root == "/testbed"
+    assert (
+        build_execution_workspace(backend, make_settings()).root == "/testbed"
+    )
 
 
 async def test_probe_runs_before_the_command_and_does_not_cd(loop_in_thread):

@@ -75,7 +75,7 @@ def _call(tool, **kwargs) -> str:
 
 def _url_policy_config(allowed_schemes=None, url_blacklist=None):
     return {
-        "url_policy": {
+        "security.url_policy": {
             "enabled": True,
             "allowed_schemes": allowed_schemes or ["http", "https"],
             "url_blacklist": url_blacklist or [],
@@ -127,9 +127,7 @@ def test_fetch_url_policy_blocks_before_request(monkeypatch):
         _call(
             with_local_ctx(
                 FetchUrl,
-                config_dict=_url_policy_config(
-                    url_blacklist=["blocked.example"]
-                ),
+                _url_policy_config(url_blacklist=["blocked.example"]),
             ),
             url="https://blocked.example/page",
         )
@@ -153,7 +151,7 @@ def test_fetch_url_policy_blocks_disallowed_scheme_before_legacy_validation(
         _call(
             with_local_ctx(
                 FetchUrl,
-                config_dict=_url_policy_config(allowed_schemes=["https"]),
+                _url_policy_config(allowed_schemes=["https"]),
             ),
             url="http://example.com",
         )
@@ -347,7 +345,7 @@ def test_simple_fetch_url_policy_blocks_before_request(monkeypatch):
         _call(
             with_local_ctx(
                 SimpleFetchUrl,
-                config_dict=_url_policy_config(url_blacklist=["*.internal"]),
+                _url_policy_config(url_blacklist=["*.internal"]),
             ),
             url="https://api.internal/path",
         )
@@ -581,12 +579,11 @@ def test_fetch_url_on_os_backend_uses_remote_carrier(monkeypatch):
 
     for cls in (FetchUrl, SimpleFetchUrl):
         cfg = {
-            "os_backend": {
-                "kind": "docker",
-                "fetch_url_execute_on": "os_backend",
-            }
+            "os_backend.kind": "docker",
+            "os_backend.docker.name": "box",
+            "os_backend.fetch_url_execute_on": "os_backend",
         }
-        tool = with_local_ctx(cls, config_dict=cfg)
+        tool = with_local_ctx(cls, cfg)
         remote = Remote()
         tool._ctx.os_backend = remote
         data = json.loads(_call(tool, url="https://example.org/page"))
@@ -601,9 +598,10 @@ def test_fetch_url_on_host_backend_ignores_os_backend_setting(monkeypatch):
     # local-бэкенд не sandbox → качаем как раньше, хостом.
     _install(monkeypatch, _resp("<html><body><p>host text</p></body></html>"))
     cfg = {
-        "os_backend": {"kind": "local", "fetch_url_execute_on": "os_backend"}
+        "os_backend.kind": "local",
+        "os_backend.fetch_url_execute_on": "os_backend",
     }
-    tool = with_local_ctx(SimpleFetchUrl, config_dict=cfg)
+    tool = with_local_ctx(SimpleFetchUrl, cfg)
     data = json.loads(_call(tool, url="https://example.org/"))
     assert data["ok"] is True
     assert "host text" in data["content"] or "host text" in data.get(

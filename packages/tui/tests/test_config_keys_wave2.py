@@ -27,7 +27,7 @@ def test_app_config_includes_agent_edits_wave2_keys():
 def test_flatten_exposes_agent_edits_wave2_keys_from_yaml(
     tmp_path, monkeypatch
 ):
-    """Значения из config.yml доходят до config_dict['agent_edits']."""
+    """Значения из config.yml доходят до настроек (`settings.agent_edits`)."""
     import gc_core.config as cfgmod
     import gc_core.config_modules.env_vars as env_vars
 
@@ -46,7 +46,7 @@ def test_flatten_exposes_agent_edits_wave2_keys_from_yaml(
         "  turn_summary_in_status: false\n",
         encoding="utf-8",
     )
-    cfg = cfgmod.load_config(str(conf))
-    assert cfg["agent_edits"]["trace_inline_max_lines"] == 9
-    assert cfg["agent_edits"]["replay_expanded_turns"] == 1
-    assert cfg["agent_edits"]["turn_summary_in_status"] is False
+    edits = cfgmod.load_settings(str(conf)).settings.agent_edits
+    assert edits.trace_inline_max_lines == 9
+    assert edits.replay_expanded_turns == 1
+    assert edits.turn_summary_in_status is False

@@ -3,6 +3,7 @@
 когда пара нестандартна; дети /gate,/answers видны в подвале всегда, flat и
 серые (спека ревизии 7, §2, §4.1)."""
 
+from gc_testkit.tui_support import tui_settings
 import pytest
 
 
@@ -11,7 +12,7 @@ def _app(tmp_path, yaml_text):
 
     cfg_file = tmp_path / "config.yml"
     cfg_file.write_text(yaml_text, encoding="utf-8")
-    app = TuiApp(config={})
+    app = TuiApp(settings=tui_settings({}))
     app._config_path = str(cfg_file)
     app.reload_config()
     app._threads_dir = str(tmp_path / "threads")
@@ -29,10 +30,10 @@ def test_apply_rigor_preset_writes_pair_to_session(tmp_path):
     )
     got = apply_toggle(app, "rigor", "low")
     assert got == "low"
-    eff = app.effective_config()
+    eff = app.effective_settings()
     assert (
-        eff["tui_finish_gate_mode"] == "off"
-        and eff["tui_text_answer_mode"] == "allow"
+        eff.settings.tui.finish_gate_mode == "off"
+        and eff.settings.tui.text_answer_mode == "allow"
     )
     assert toggle_state(app, "rigor") == "low"
     # config.yml не тронут (сессия)
@@ -110,14 +111,16 @@ async def test_rigor_palette_cycles_three_values(tmp_path):
         await pilot.pause(0.1)
         await pilot.press("right")  # medium -> high
         await pilot.pause(0.05)
-        assert app.effective_config()["tui_finish_gate_mode"] == "on"
+        assert app.effective_settings().settings.tui.finish_gate_mode == "on"
         assert cfg_file.read_text(encoding="utf-8") == original
         assert pilot.app.query(".palette")
         await pilot.press("left")  # high -> medium
         await pilot.press("left")  # medium -> low
         await pilot.pause(0.05)
-        assert app.effective_config()["tui_finish_gate_mode"] == "off"
-        assert app.effective_config()["tui_text_answer_mode"] == "allow"
+        assert app.effective_settings().settings.tui.finish_gate_mode == "off"
+        assert (
+            app.effective_settings().settings.tui.text_answer_mode == "allow"
+        )
 
 
 def _toggle_row_text(palette, name):
@@ -198,9 +201,9 @@ async def test_child_spin_shows_custom_without_moving_rows_then_preset_step_clea
         await pilot.pause(0.05)
 
         # (a) сессионная пара изменилась ТОЛЬКО по этому ключу.
-        assert app.effective_config()["tui_finish_gate_mode"] == "on"
+        assert app.effective_settings().settings.tui.finish_gate_mode == "on"
         assert (
-            app.effective_config()["tui_text_answer_mode"] == "judge"
+            app.effective_settings().settings.tui.text_answer_mode == "judge"
         )  # answers не тронут
         assert (
             cfg_file.read_text(encoding="utf-8") == original
@@ -236,8 +239,12 @@ async def test_child_spin_shows_custom_without_moving_rows_then_preset_step_clea
         await pilot.press("right")  # custom (idx0) +1 -> medium
         await pilot.pause(0.05)
 
-        assert app.effective_config()["tui_finish_gate_mode"] == "smart"
-        assert app.effective_config()["tui_text_answer_mode"] == "judge"
+        assert (
+            app.effective_settings().settings.tui.finish_gate_mode == "smart"
+        )
+        assert (
+            app.effective_settings().settings.tui.text_answer_mode == "judge"
+        )
         assert cfg_file.read_text(encoding="utf-8") == original
         assert toggle_state(app, "rigor") == "medium"
 

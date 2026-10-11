@@ -28,7 +28,6 @@ from copy import deepcopy
 from types import SimpleNamespace
 
 import yaml
-
 from gc_core import onboarding
 from gc_core.config_modules.compat import apply_compat
 from gc_core.config_modules.model_registry import (
@@ -462,12 +461,11 @@ def entry_has_own_connection(entry) -> bool:
     )
 
 
-
 def _resolved_for_request(
     url: str, auth: str | None, *, normalize_token: bool = False
 ) -> tuple[str, str | None]:
     """Раскрыть `${ENV:VAR}`/`${FILE:...}` перед отправкой — тем же резолвером, что у
-    `config.load_config`: сама ссылка не адрес и не токен, и буквальный
+    загрузчика конфига: сама ссылка не адрес и не токен, и буквальный
     `Bearer ${ENV:TOK}` сервер отклоняет — проба врала «✗ токен отклонён» на исправном
     конфиге, а список не грузился никогда.
 
@@ -1192,8 +1190,14 @@ class ModelEntryForm(Vertical):
             id="mef-main",
             classes="mef-yaml",
         )
-        yield Static("YAML: например, temperature: 0.2. Допустимые параметры зависят от API провайдера.", classes=_CLS_ONB_HINT_ONB_DYN)
-        yield Static("Словарь заменяет общий целиком; {} — без дополнительных параметров.", classes=_CLS_ONB_HINT_ONB_DYN)
+        yield Static(
+            "YAML: например, temperature: 0.2. Допустимые параметры зависят от API провайдера.",
+            classes=_CLS_ONB_HINT_ONB_DYN,
+        )
+        yield Static(
+            "Словарь заменяет общий целиком; {} — без дополнительных параметров.",
+            classes=_CLS_ONB_HINT_ONB_DYN,
+        )
         yield Static(_AUX_LABEL, classes=_CLS_ONB_HINT_ONB_DYN_SET_GROUP_GAP)
         yield TextArea(
             self._aux_text,
@@ -1203,7 +1207,10 @@ class ModelEntryForm(Vertical):
             id="mef-auxiliary",
             classes="mef-yaml",
         )
-        yield Static("Для сжатия истории и проверок ответа. Отдельно от main, например temperature: 0.1.", classes=_CLS_ONB_HINT_ONB_DYN)
+        yield Static(
+            "Для сжатия истории и проверок ответа. Отдельно от main, например temperature: 0.1.",
+            classes=_CLS_ONB_HINT_ONB_DYN,
+        )
         yield Static(
             _BACKEND_LABEL, classes=_CLS_ONB_HINT_ONB_DYN_SET_GROUP_GAP
         )
@@ -1215,7 +1222,10 @@ class ModelEntryForm(Vertical):
             id="mef-backend",
             classes="mef-yaml",
         )
-        yield Static("Переопределяет общие настройки: например request_timeout_sec: 120.", classes=_CLS_ONB_HINT_ONB_DYN)
+        yield Static(
+            "Переопределяет общие настройки: например request_timeout_sec: 120.",
+            classes=_CLS_ONB_HINT_ONB_DYN,
+        )
         yield Static(
             connection_line_text(None),
             id="mef-probe-line",
@@ -1643,9 +1653,10 @@ class ModelEntryForm(Vertical):
         # Ручное перечитывание = автоподгрузка этими параметрами уже состоялась:
         # иначе уход с поля и возврат сходили бы в сеть ещё раз тем же ключом.
         self._autoload_key = (self._current_url(), self._current_auth_header())
-        return self._start_models_fetch(refresh=True)
+        self._start_models_fetch(refresh=True)
+        return True
 
-    def _start_models_fetch(self, *, refresh: bool) -> bool:
+    def _start_models_fetch(self, *, refresh: bool) -> None:
         """Уйти за списком моделей. `refresh=False` — автоподгрузка при входе в поле
         (кэш годится), `True` — принудительное перечитывание по Alt+↓."""
         try:
@@ -1654,7 +1665,7 @@ class ModelEntryForm(Vertical):
             )
         except ValueError as exc:
             self._fail(f"backend: {exc}")
-            return True
+            return
         url = self._current_url()
         if not url:
             self._set_status(_LIST_NO_URL)
@@ -1682,11 +1693,15 @@ class ModelEntryForm(Vertical):
                     group="model-entry-list",
                     name="model-entry-list-fetch",
                 )
-        return True
 
     def _fetch_blocking(
-        self, url: str, auth: str | None, gen: int, refresh: bool,
-        normalize_token: bool, backend: dict,
+        self,
+        url: str,
+        auth: str | None,
+        gen: int,
+        refresh: bool,
+        normalize_token: bool,
+        backend: dict,
     ) -> None:
         try:
             url, auth = _resolved_for_request(
@@ -1886,7 +1901,8 @@ class ModelEntryForm(Vertical):
         initial_backend = yaml.safe_load(self._backend_text) or {}
         initial_headers = (
             initial_backend.get("chat_completion_headers") or {}
-            if isinstance(initial_backend, dict) else {}
+            if isinstance(initial_backend, dict)
+            else {}
         )
         if not isinstance(initial_headers, dict):
             initial_headers = {}
@@ -1912,18 +1928,24 @@ class ModelEntryForm(Vertical):
             return None
         return self._current_auth_value()[0]
 
-    def _resolved_transport(self, backend: dict) -> tuple[bool | str, str | None]:
+    def _resolved_transport(
+        self, backend: dict
+    ) -> tuple[bool | str, str | None]:
         """Снимок транспорта формы раскрывается только в сетевом воркере."""
         from gc_core.config_modules.backend import BackendConfig
-        from gc_core.config_modules.env_interpolation import resolve_env_placeholders
+        from gc_core.config_modules.env_interpolation import (
+            resolve_env_placeholders,
+        )
 
         values = {"use_ssl": self._verify, "proxy": self._config_proxy}
         values.update(self._base0.get("backend") or {})
         values.update(backend)
-        resolved = BackendConfig.model_validate(resolve_env_placeholders(values))
+        resolved = BackendConfig.model_validate(
+            resolve_env_placeholders(values)
+        )
         return resolved.use_ssl, resolved.proxy
 
-    def probe_connection(self) -> bool:
+    def probe_connection(self) -> None:
         """`Ctrl+Space`: проверить связь по тем значениям, что стоят в полях СЕЙЧАС.
         Это ПРОБА, не подбор списка (контракт п.4).
 
@@ -1941,7 +1963,7 @@ class ModelEntryForm(Vertical):
             )
         except ValueError as exc:
             self._fail(f"backend: {exc}")
-            return True
+            return
         url = self._current_url()
         if not url:
             self._set_probe_line(Text(_PROBE_NO_URL, style=DEEP_DIM))
@@ -1964,11 +1986,15 @@ class ModelEntryForm(Vertical):
                     group="model-entry-probe",
                     name="model-entry-probe",
                 )
-        return True
 
     def _probe_blocking(
-        self, url: str, auth: str | None, model: str, gen: int,
-        normalize_token: bool, backend: dict,
+        self,
+        url: str,
+        auth: str | None,
+        model: str,
+        gen: int,
+        normalize_token: bool,
+        backend: dict,
     ) -> None:
         from gc_tui.services.settings_probe import (
             ProbeResult,
@@ -1990,7 +2016,10 @@ class ModelEntryForm(Vertical):
             )
         except Exception:
             result = ProbeResult(
-                "unknown", None, None, 0,
+                "unknown",
+                None,
+                None,
+                0,
                 "не удалось подготовить или проверить подключение; "
                 "проверьте backend и ссылки ENV/FILE",
             )
@@ -2008,7 +2037,9 @@ class ModelEntryForm(Vertical):
         if self._no_auth or not self.own_connection():
             return False
         field = self.query_one(_SEL_MEF_TOKEN, Input)
-        source = field.value.strip() or (self._token_current if self._own_token_active() else None)
+        source = field.value.strip() or (
+            self._token_current if self._own_token_active() else None
+        )
         if self._current_auth_value()[0] != source:
             return False
         value = accepted_literal_auth(source, accepted)
@@ -2246,7 +2277,11 @@ class ModelEntryForm(Vertical):
             if isinstance(initial_headers, dict)
             else None
         )
-        if values["token"] and headers.get("Authorization") == initial_auth and initial_auth:
+        if (
+            values["token"]
+            and headers.get("Authorization") == initial_auth
+            and initial_auth
+        ):
             headers = dict(headers)
             headers.pop("Authorization")
             backend = {**backend, "chat_completion_headers": headers}

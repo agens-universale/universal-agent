@@ -278,7 +278,7 @@ async def test_shell_does_not_inherit_agent_process_env(tmp_path, monkeypatch):
     # Shell модели получал os.environ агента целиком (токены, ключи), хотя
     # run_python чистил окружение. Теперь оба — один allowlist.
     monkeypatch.setenv("GC_SB_TEST_SECRET", "leak")
-    root = _root(tmp_path) if "_root" in globals() else str(tmp_path)
+    root = str(tmp_path)
     be = SandboxBackend(
         wrapper=build_sandbox_wrapper(root, {"sandbox": {"network": True}}),
         root=root,

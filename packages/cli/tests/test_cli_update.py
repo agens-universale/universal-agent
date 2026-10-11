@@ -149,3 +149,29 @@ def test_update_message_uses_location_phrase(monkeypatch, tmp_path, capsys):
     err = capsys.readouterr().err
     assert "в фоне" in err
     assert "в отдельном окне" not in err
+
+
+def test_update_survives_broken_config(monkeypatch, tmp_path, capsys):
+    """Обновление чинит и сломанный конфиг: незаданная ${ENV} — не трейсбек."""
+    cfg = tmp_path / "config.yml"
+    cfg.write_text(
+        "voice: {token: '${ENV:GC_T_UPDATE_MISSING}'}\n", encoding="utf-8"
+    )
+    monkeypatch.delenv("GC_T_UPDATE_MISSING", raising=False)
+    monkeypatch.setattr(
+        cli.arg_parser, "run_args", _fake_run_args(config=str(cfg))
+    )
+    monkeypatch.setattr(
+        cli.updater_source,
+        "resolved_source",
+        lambda: UpdateSource(url="https://x/y", ref="master", commit="old"),
+    )
+    spawned = {}
+    monkeypatch.setattr(
+        cli.updater_runner,
+        "spawn_detached_update",
+        lambda command, **kw: spawned.update(command=command),
+    )
+    assert cli._run_update() == 0
+    assert spawned["command"]
+    assert "GC_T_UPDATE_MISSING" in capsys.readouterr().err

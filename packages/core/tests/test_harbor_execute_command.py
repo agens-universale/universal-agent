@@ -7,6 +7,7 @@ from gc_core.backends.runtime_probe import (
 )
 from gc_core.tools.exec.execute_command import ExecuteCommand
 from gc_testkit.harbor_fakes import bind_os_backend
+from gc_testkit.helpers.tool_ctx import tool_settings
 
 
 class _RecordingFakeBackend:
@@ -52,11 +53,11 @@ class _RecordingFakeBackend:
         return self._default_cwd
 
 
-def _tool(backend, config_dict=None):
+def _tool(backend, config=None):
     t = ExecuteCommand.__new__(ExecuteCommand)
-    cfg = config_dict if config_dict is not None else {}
-    t._config_dict = cfg
-    return bind_os_backend(t, backend, config_dict=cfg)
+    # Описание теста — словарь: гарды, не заданные тестом, выключены
+    # (``tool_settings``), как и прежде при плоском словаре.
+    return bind_os_backend(t, backend, settings=tool_settings(config))
 
 
 def test_envelope_shape_matches_base_contract():
@@ -86,7 +87,7 @@ def test_envelope_shape_matches_base_contract():
 def test_default_timeout_flows_from_exec_timeout_sec_config():
     """When timeout is omitted, agent.exec_timeout_sec from config is used."""
     b = _RecordingFakeBackend()
-    _tool(b, config_dict={"exec_timeout_sec": 600})(command="x")
+    _tool(b, config={"agent.exec_timeout_sec": 600})(command="x")
     assert b.calls[0]["timeout"] == 600
 
 
@@ -107,9 +108,9 @@ def test_output_truncated_by_capture_cap():
     env = json.loads(
         _tool(
             b,
-            config_dict={
-                "exec_output_capture_max_chars": 100,
-                "exec_output_preview_edge_chars": 10,
+            config={
+                "agent.exec_output_capture_max_chars": 100,
+                "agent.exec_output_preview_edge_chars": 10,
             },
         )(command="x")
     )

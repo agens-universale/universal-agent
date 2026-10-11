@@ -68,10 +68,11 @@ swarm нет: он запускается только через `POST /swarm/r
     # и агент работает без системных инструкций.
     server_agentmd_path: "./server_agent.md"
 
-  # Набор аргументов, переопределяющих значения в конфиге cli клиента в серверном запуске
+  # Набор аргументов, переопределяющих значения в конфиге cli клиента в серверном запуске.
+  # Ключи — пути настроек через точку (как в config.yml и `gc-cli config explain`).
   agent_overrides:
     # Список simple-tools, запрещённых в серверном режиме (чтобы не портить файлы библиотеки).
-    stop_tools:
+    agent.stop_tools:
       - fs_write_file
       - fs_append_file
       - fs_read_file
@@ -87,24 +88,20 @@ swarm нет: он запускается только через `POST /swarm/r
 
   - Путь к этому файлу можно переопределить через переменную окружения `SERVER_CONFIG_PATH`.
   - Секция `agent_overrides` перекрывает соответствующие поля `config.yml`
-    (аналогично тому, как CLI‑аргументы перекрывают конфиг в `packages/cli/src/gc_cli/cli.py`).
+    (аналогично тому, как CLI‑аргументы `--agent.max_steps` перекрывают конфиг в `packages/cli/src/gc_cli/cli.py`).
+  - Ключ — **путь настройки через точку** (`agent.max_steps`, `backend.completions_url`)
+    или вложенная секция (`agent: {max_steps: 100}`); заданные в секции поля перекрываются,
+    остальные остаются из `config.yml`. Прежние плоские имена (`max_steps`, `stop_tools`)
+    не принимаются: сервер не стартует, а сообщение подсказывает путь
+    (`agent_overrides: неизвестная настройка max_steps (возможно, agent.max_steps)`).
   - **Унификация webhook ↔ swarm:** `agent_overrides` применяется и к webhook'у, и
-    к swarm-режиму. В webhook-режиме используется flat-формат (как в примере выше
-    — ключи на верхнем уровне). В swarm-материализаторе тот же flat-формат
-    автоматически оборачивается в секцию `agent:`, поэтому `stop_tools`,
-    `max_steps` и подобные `agent.*` поля работают одинаково в обоих режимах.
-    Для перезаписи полей вне `agent:` (например `paths.*`, `backend.*`) — используй
-    **raw-формат** с явными секциями:
+    к swarm-режиму в одном и том же виде:
     ```yaml
     agent_overrides:
-      agent:
-        max_steps: 100
+      agent.max_steps: 100
       backend:
         completions_url: "http://custom-llm:8011/v1/chat/completions"
     ```
-    Detector смотрит на верхний уровень: если есть хотя бы один known section
-    (`agent`, `backend`, `paths`, `mcp`, `security`, `logging`, …) — считаем raw,
-    иначе считаем flat и оборачиваем в `agent:`.
 
 - **Файл инструкций агента для сервера**:
   - по умолчанию берётся bundled `prompts/server_agent.md` из ассетов `gc-core`;
@@ -121,8 +118,8 @@ swarm нет: он запускается только через `POST /swarm/r
 
 - **Папка со скиллами**:
   - как и для CLI, пути к скиллам настраиваются в `config.yml`;
-  - серверный режим использует тот же `build_tools_data(config_dict)` и `skills_registry`,
-    но с учётом `agent_overrides.stop_tools` (опасные FS‑тулзы вырезаются из реестра - чтобы не работать с файловой системой веб приложения).
+  - серверный режим использует ту же сборку тулов (`build_tools_data(settings)`) и `skills_registry`,
+    но с учётом `agent.stop_tools` из `agent_overrides` (опасные FS‑тулзы вырезаются из реестра - чтобы не работать с файловой системой веб приложения).
 
 ## Запуск серверного режима
 
@@ -286,9 +283,9 @@ Meta без `system` и `thread_id` (старый формат) удаляетс
 
 Важное отличие от CLI:
 
-- В `config_server.yml` в секции `agent_overrides.stop_tools` перечислены simple‑tools,
+- В `config_server.yml` в `agent_overrides` под ключом `agent.stop_tools` перечислены simple‑tools,
   которые **отключаются** в серверном режиме (fs/командные тулзы).
-- При построении `config_dict` для сервера эти поля попадают в конфиг как `stop_tools`,
+- При построении настроек агента для сервера (`build_agent_settings_for_server`) эти поля ложатся в `agent.stop_tools`,
   и `packages/core/src/gc_core/tools/registry.py` (`_apply_stop_tools`) автоматически вырезает такие тулы из реестра.
 - Это защищает директорию библиотеки и окружение сервера от нежелательных изменений файловой системы.
 - Имена сверяются точно, шаблонов нет: тул, появившийся в новой версии, сервер получит, пока его

@@ -21,10 +21,40 @@
 
 from __future__ import annotations
 
+from gc_testkit.tui_support import tui_settings
 from contextlib import asynccontextmanager, contextmanager
 from unittest import mock
 
 from gc_testkit.tui_support import open_settings_section, wait_until
+
+# --- навигация и курсор экранов (наблюдатели, которых прод-коду не нужно) -------
+
+
+def goto_step(scr, step_id: str) -> None:
+    """Мастер: перейти на именованный шаг напрямую. Прод-переходы идут через
+    `_advance`/`_go_back`; тесты навигации адресуют шаги по имени."""
+    scr._leave_step()
+    scr._step = scr._steps.index(step_id)
+    scr._render_step()
+
+
+def wizard_voice_cursor_position(scr) -> int:
+    """Мастер, шаг голоса: позиция курсора внутри текущей группы (у каждой своя)."""
+    from gc_tui.screens.onboarding import _VOICE_GROUP_FIELDS, STEP_VOICE
+
+    if scr._voice_cursor_group() == _VOICE_GROUP_FIELDS:
+        return scr._voice_field_position()
+    return scr._idx.get(STEP_VOICE, 0)
+
+
+def settings_voice_cursor_position(scr) -> int:
+    """/settings, секция голоса: позиция курсора внутри текущей группы."""
+    from gc_tui.screens.settings import _VOICE_GROUP_FIELDS
+
+    if scr._voice_cursor_group() == _VOICE_GROUP_FIELDS:
+        return scr._voice_field_position()
+    return scr._voice_row
+
 
 # --- фейки для форм (мастер + /settings) --------------------------------------
 #
@@ -153,7 +183,7 @@ async def settings_connection(
     # Конфиг приложения — тот же, что у экрана: вход в секцию забирает его у
     # приложения (SettingsScreen._sync_config_from_app), и с пустым конфигом
     # секция осталась бы без адреса.
-    app = app_mod.TuiApp(config=_cfg())
+    app = app_mod.TuiApp(settings=tui_settings(_cfg()))
     async with app.run_test() as pilot:
         scr = _mk_screen(config_path=str(cfg_file))
         if probe is not None:
@@ -200,7 +230,7 @@ async def settings_voice_section(
     )
     config_text = CLOUD_CONFIG if mode == "cloud" else "model: m\n"
     with _isolated_voice_data(tmp_path):
-        app = app_mod.TuiApp(config={"voice": {}})
+        app = app_mod.TuiApp(settings=tui_settings({"voice": {}}))
         async with app.run_test() as pilot:
             scr, fake = _mk_screen(tmp_path, status, config_text=config_text)
             fake.probe_result = probe
@@ -256,7 +286,7 @@ async def settings_mcp_section(tmp_path, *, servers=()):
             return 0
 
     cfg_file = _write_cfg(tmp_path)
-    app = app_mod.TuiApp(config=_cfg())
+    app = app_mod.TuiApp(settings=tui_settings(_cfg()))
     with mock.patch.object(mcp_manager_mod, "McpManager", _FakeManager):
         async with app.run_test() as pilot:
             scr = _mk_screen(config_path=str(cfg_file))
@@ -305,7 +335,7 @@ async def wizard_voice_step(
 
     keys = [k for k, _t, _d in _VOICE_OPTIONS]
     with _isolated_voice_data(tmp_path):
-        app = TuiApp(config={"model": "M"})
+        app = TuiApp(settings=tui_settings({"agent.model": "M"}))
         async with app.run_test() as pilot:
             voice = FakeVoice(installed=installed)
             voice.models = models
@@ -344,7 +374,7 @@ async def wizard_connection_step(tmp_path):
         # реальный `voice_setup`, когда его не передали, — снимок «Подключения»
         # зависел бы от того, стоит ли на машине батарейка.
         with _isolated_voice_data(tmp_path):
-            app = TuiApp(config={"model": "M"})
+            app = TuiApp(settings=tui_settings({"agent.model": "M"}))
             async with app.run_test() as pilot:
                 screen = _screen(voice=FakeVoice())
                 await app.push_screen(screen)

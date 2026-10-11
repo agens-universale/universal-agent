@@ -38,8 +38,8 @@ def test_app_config_includes_agent_edits():
     assert app.agent_edits.max_diff_chars == 100_000
 
 
-def test_flatten_exposes_agent_edits(tmp_path):
-    """Значение из config.yml доходит до config_dict['agent_edits']."""
+def test_load_settings_exposes_agent_edits(tmp_path):
+    """Значение из config.yml доходит до настроек `agent_edits`."""
     from gc_core import config as cfgmod
 
     conf = tmp_path / "config.yml"
@@ -47,8 +47,8 @@ def test_flatten_exposes_agent_edits(tmp_path):
         "agent_edits:\n  snapshots_max_files: 42\n  max_diff_chars: 100\n",
         encoding="utf-8",
     )
-    cfg = cfgmod.load_config(str(conf))
-    assert cfg["agent_edits"] == {
+    loaded = cfgmod.load_settings(str(conf))
+    assert loaded.settings.agent_edits.model_dump() == {
         "snapshots_max_files": 42,
         "max_diff_chars": 100,
         "hunk_context_lines": 3,

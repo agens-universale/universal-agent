@@ -1,8 +1,8 @@
-"""Пар sync/async в одной области видимости — ровно восемь, и все названы.
+"""Пар sync/async в одной области видимости — ровно семь, и все названы.
 
 Ветка async-only держит одну форму на операцию. Синхронный двойник допустим
 только там, где обмен блокирующий по существу и вызывающего с живым loop не
-бывает: все восемь обслуживают долгоживущий stdio MCP — их зовёт `atexit`, где
+бывает: все семь обслуживают долгоживущий stdio MCP — их зовёт `atexit`, где
 loop'а уже нет. Две пары успели появиться незамеченными уже после того, как
 «восемь» было объявлено: счётчик тогда гоняли руками.
 """
@@ -21,7 +21,6 @@ EXPECTED = {
     "gc_core/tools/connect_mcp/persistent_stdio.py::PersistentStdioSession._close_prologue",
     "gc_core/tools/connect_mcp/persistent_stdio.py::PersistentStdioSession._read_matching_on",
     "gc_core/tools/connect_mcp/persistent_stdio.py::PersistentStdioSession.close",
-    "gc_core/tools/connect_mcp/persistent_stdio.py::PersistentStdioRegistry.close_all",
 }
 
 

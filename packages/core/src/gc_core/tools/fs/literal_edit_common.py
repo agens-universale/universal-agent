@@ -142,7 +142,7 @@ async def load_text_source(
         )
     size_err = check_file_size(
         file_size,
-        fs_mutate_max_bytes(tool._config_dict),
+        fs_mutate_max_bytes(tool._settings_source),
         operation=operation,
     )
     if size_err is not None:

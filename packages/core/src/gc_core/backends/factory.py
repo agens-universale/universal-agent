@@ -1,4 +1,4 @@
-"""Resolve ``FsBackend`` from config and runtime dependencies."""
+"""Resolve ``FsBackend`` from settings and runtime dependencies."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from typing import Any, Optional
 
 from gc_core.backends.harbor import HarborBackend
 from gc_core.backends.local import LocalFsBackend
-from gc_core.backends.protocol import FsBackend
+from gc_core.backends.protocol import WALK_OUTPUT_MAX_CHARS, FsBackend
 from gc_core.backends.remote_shell import (
     RemoteShellBackend,
     docker_argv_prefix,
@@ -22,39 +22,26 @@ from gc_core.backends.sandbox import (
     build_sandbox_wrapper,
     sandbox_auto_workdir,
 )
-from gc_core.config_modules.agent import (
-    exec_output_capture_max_chars_from_config_dict,
-    harbor_exec_init_from_config_dict,
-    runtime_probe_ttl_sec_from_config_dict,
-    walk_output_max_chars_from_config_dict,
-)
 from gc_core.config_modules.env_vars import gc_paths
 from gc_core.execution_workspace import launch_root_from_config
+from gc_core.settings import runtime_of, settings_of
 
 _SUPPORTED = frozenset({"local", "harbor", "docker", "ssh", "exec", "sandbox"})
 
 
-def os_backend_section(config_dict: dict) -> dict:
-    """Нормализовать ``config_dict['os_backend']`` к словарю с ``kind``.
+def os_backend_section(settings: Any) -> dict:
+    """Секция ``os_backend`` словарём с нормализованным ``kind``.
 
-    Принимает отсутствие ключа, голую строку (старые конфиги, Harbor-адаптер)
-    и секцию из ``flatten_app_config``.
+    Источник — ``settings.os_backend`` (проверенная схема). ``RuntimeEnv.os_backend``
+    — переопределение вида встраивающим кодом (Harbor-адаптер ставит ``harbor``).
+    ``settings`` — всё, что принимают ``settings_of``/``runtime_of``.
     """
-    raw = config_dict.get("os_backend", "local")
-    if raw is None:
-        return {"kind": "local"}
-    if isinstance(raw, str):
-        return {"kind": raw.strip().lower() or "local"}
-    if isinstance(raw, dict):
-        section = dict(raw)
-        kind = section.get("kind")
-        section["kind"] = (
-            (str(kind).strip().lower() or "local") if kind else "local"
-        )
-        return section
-    raise ValueError(
-        f"unsupported os_backend: {raw!r} (expected str or section)"
-    )
+    section = settings_of(settings).os_backend.model_dump()
+    override = runtime_of(settings).os_backend
+    if isinstance(override, str) and override.strip():
+        section["kind"] = override.strip().lower()
+    section["kind"] = str(section.get("kind") or "local").strip().lower()
+    return section
 
 
 def _reject_option_like_values(section: dict) -> None:
@@ -87,9 +74,10 @@ def ssh_control_dir() -> Path:
     return path
 
 
-def parse_os_backend_kind(config_dict: dict) -> str:
-    """Нормализованный ``kind`` секции ``os_backend``."""
-    kind = os_backend_section(config_dict)["kind"]
+def parse_os_backend_kind(settings: Any) -> str:
+    """Нормализованный ``kind`` секции ``os_backend`` (с переопределением
+    ``RuntimeEnv.os_backend``)."""
+    kind = os_backend_section(settings)["kind"]
     if kind not in _SUPPORTED:
         raise ValueError(
             f"unsupported os_backend: {kind!r} (expected one of {sorted(_SUPPORTED)})"
@@ -98,7 +86,7 @@ def parse_os_backend_kind(config_dict: dict) -> str:
 
 
 def resolve_os_backend(
-    config_dict: dict,
+    settings: Any,
     *,
     environment: Optional[Any] = None,
     loop: Optional[asyncio.AbstractEventLoop] = None,
@@ -107,13 +95,16 @@ def resolve_os_backend(
     """Build the physical I/O backend for a run.
 
     ``override`` wins (tests) and keeps its own ``exec_output_capture_max_chars``.
-    ``harbor`` requires ``environment`` and ``loop``.
+    ``harbor`` requires ``environment`` and ``loop``. ``settings`` — anything
+    ``settings_of``/``runtime_of`` accept (context, ``LoadedSettings``).
     """
     if override is not None:
         return override
 
-    cap = exec_output_capture_max_chars_from_config_dict(config_dict)
-    kind = parse_os_backend_kind(config_dict)
+    agent = settings_of(settings).agent
+    # Нормализацию (None → дефолт, нечисло и < 0 — ошибка) делает схема.
+    cap = agent.exec_output_capture_max_chars
+    kind = parse_os_backend_kind(settings)
     if kind == "local":
         return LocalFsBackend(exec_output_capture_max_chars=cap)
 
@@ -126,36 +117,36 @@ def resolve_os_backend(
             environment,
             loop,
             exec_output_capture_max_chars=cap,
-            walk_output_max_chars=walk_output_max_chars_from_config_dict(
-                config_dict
+            walk_output_max_chars=(
+                agent.walk_output_max_chars
+                if agent.walk_output_max_chars > 0
+                else WALK_OUTPUT_MAX_CHARS
             ),
-            exec_init=harbor_exec_init_from_config_dict(config_dict),
-            runtime_probe_ttl_sec=runtime_probe_ttl_sec_from_config_dict(
-                config_dict
-            ),
+            exec_init=(agent.harbor_exec_init or "").strip() or None,
+            runtime_probe_ttl_sec=agent.runtime_probe_ttl_sec,
         )
 
-    section = os_backend_section(config_dict)
+    section = os_backend_section(settings)
     if kind in ("docker", "ssh", "exec"):
         return RemoteShellBackend(
             _remote_argv_prefix(kind, section),
             cwd=section.get("cwd"),
             env=section.get("env") or {},
-            exec_init=harbor_exec_init_from_config_dict(config_dict),
+            exec_init=(agent.harbor_exec_init or "").strip() or None,
             exec_output_capture_max_chars=cap,
-            walk_output_max_chars=walk_output_max_chars_from_config_dict(
-                config_dict
+            walk_output_max_chars=(
+                agent.walk_output_max_chars
+                if agent.walk_output_max_chars > 0
+                else WALK_OUTPUT_MAX_CHARS
             ),
             joins_argv=kind == "ssh",
-            runtime_probe_ttl_sec=runtime_probe_ttl_sec_from_config_dict(
-                config_dict
-            ),
+            runtime_probe_ttl_sec=agent.runtime_probe_ttl_sec,
         )
 
     if kind == "sandbox":
         # Слаг — от launch_root конфига, а не от cwd процесса: TUI резолвит
         # симлинки, явный launch_root может быть не там, где запущен процесс.
-        configured_root = launch_root_from_config(config_dict)
+        configured_root = launch_root_from_config(settings)
         auto = (
             sandbox_auto_workdir(configured_root)
             if (section.get("sandbox") or {}).get("workdir") == "auto"
@@ -173,7 +164,8 @@ def resolve_os_backend(
 
 
 def _remote_argv_prefix(kind: str, section: dict) -> list:
-    """argv-префикс RemoteShellBackend; плоский dict мог обойти pydantic."""
+    """argv-префикс RemoteShellBackend (секция уже прошла схему; проверка
+    ведущего ``-`` — на случай переопределения мимо неё)."""
     _reject_option_like_values(section)
     if kind == "docker":
         if not (section.get("docker") or {}).get("name"):

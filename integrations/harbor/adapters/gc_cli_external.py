@@ -3,9 +3,9 @@
 The gc-cli agent loop runs in-process on the host (not a subprocess). Its synchronous
 tool loop runs in a worker thread; Harbor's async `environment` is reached through
 HarborBackend, which marshals coroutines onto this adapter's event loop. gc-cli's
-filesystem/shell tools use ``ctx.os_backend`` (``HarborBackend`` when ``os_backend: harbor``
-in config), so file edits land inside the task container. ``download_file`` is omitted
-when ``os_backend`` is ``harbor`` (host-only tool).
+filesystem/shell tools use ``ctx.os_backend`` (``HarborBackend`` when the run's
+``RuntimeEnv.os_backend`` is ``harbor``), so file edits land inside the task container.
+``download_file`` is omitted when ``os_backend`` is ``harbor`` (host-only tool).
 
 Setup (once): install gc-cli into the harbor runner env so it imports directly:
     uv pip install --python "$(command -v harbor)/../python" -e /path/to/background-agent
@@ -23,7 +23,7 @@ import re
 import shlex
 import threading
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from harbor.agents.base import BaseAgent
 from harbor.environments.base import BaseEnvironment
@@ -38,8 +38,11 @@ from harbor.models.trajectories import (
 )
 from harbor.utils.trajectory_utils import format_trajectory_json
 
-from adapters.gc_cli_config import build_gc_cli_config
+from adapters.gc_cli_config import build_gc_cli_settings, profile_value
 from adapters.step_timings import StepTimings
+
+if TYPE_CHECKING:
+    from gc_core.settings import LoadedSettings
 
 # Harbor task transports -> gc-cli transports, 1:1. Harbor normalises `http` to
 # `streamable-http` (models/task/config.py), so those three are all we ever see.
@@ -64,6 +67,8 @@ _ROLE_TO_SOURCE = {"system": "system", "user": "user", "assistant": "agent"}
 # Container root harbor uploads injected skills to (harbor/models/trial/paths.py:41).
 # Used when a profile ships skills but the task injected none.
 DEFAULT_CONTAINER_SKILLS_ROOT = "/harbor/skills"
+# Ключ настроек каталога скиллов в overrides агента.
+_SKILLS_PATH_KEY = "paths.skills_data_path"
 
 # Dependency files (prompts/, skills/) are copied next to adapters/ in the image
 # (see harbor/Dockerfile) and live at repo-root in editable/local runs. Resolve them
@@ -272,9 +277,11 @@ class GcCliExternal(BaseAgent):
         # session_id as constructor kwargs. We accept them so the agent talks to the
         # cluster LLM proxy (Polar) instead of a hardcoded backend.
         #
-        # gc_cli_config is a per-experiment override bag for the gc-cli config_dict,
+        # gc_cli_config is a per-experiment override bag for the gc-cli settings,
         # passed straight from the harbor agent profile's `agent_kwargs.gc_cli_config`
-        # (→ AgentConfig.kwargs → here). It deep-merges over _build_config defaults, so
+        # (→ AgentConfig.kwargs → here). Keys are nested sections or dotted setting
+        # paths; each value replaces the default at its path (other fields of the
+        # section stay), see adapters.gc_cli_config, so
         # tuning no_tool_call_max_count / sampling / max_steps needs no code or rebuild.
         super().__init__(*args, **kwargs)
         self._api_base = api_base
@@ -304,12 +311,12 @@ class GcCliExternal(BaseAgent):
         m = (
             self.model_name
             or os.environ.get("GC_CLI_MODEL")
-            or self._overrides.get("model")
+            or profile_value(self._overrides, "agent.model")
         )
         if not m:
             raise RuntimeError(
                 "No model configured: pass --model to the runner, set GC_CLI_MODEL, "
-                "or provide gc_cli_config.model in the agent profile."
+                "or provide gc_cli_config agent.model in the agent profile."
             )
         if m.startswith("openai/"):
             m = m[len("openai/") :]
@@ -326,14 +333,14 @@ class GcCliExternal(BaseAgent):
                 if base.endswith("/chat/completions")
                 else base + "/chat/completions"
             )
-        url = os.environ.get("GC_CLI_BACKEND_URL") or self._overrides.get(
-            "completions_url"
+        url = os.environ.get("GC_CLI_BACKEND_URL") or profile_value(
+            self._overrides, "backend.completions_url"
         )
         if not url:
             raise RuntimeError(
                 "No LLM backend configured: the runner passed no api_base, "
                 "GC_CLI_BACKEND_URL is unset, and the profile has no "
-                "gc_cli_config.completions_url. For local runs: "
+                "gc_cli_config backend.completions_url. For local runs: "
                 "export GC_CLI_BACKEND_URL=http://127.0.0.1:<port>/v1/chat/completions"
             )
         return url
@@ -349,22 +356,29 @@ class GcCliExternal(BaseAgent):
 
     @staticmethod
     def _apply_polar_session(
-        config_dict: dict, session_id: str | None
-    ) -> None:
+        settings: "LoadedSettings", session_id: str | None
+    ) -> "LoadedSettings":
         """Send the Polar session id on every LLM call: the core sends a state UUID, so
-        completions land in an unregistered session and the merge finds no dialog.json."""
+        completions land in an unregistered session and the merge finds no dialog.json.
+
+        Settings are immutable: a new ``LoadedSettings`` is returned."""
         if not session_id:
-            return
-        headers = dict(config_dict.get("chat_completion_headers") or {})
+            return settings
+        headers = dict(settings.settings.backend.chat_completion_headers)
         headers["x-session-id"] = session_id
         headers.setdefault("Authorization", f"Bearer {session_id}")
-        config_dict["chat_completion_headers"] = headers
+        return settings.with_overrides(
+            {"backend.chat_completion_headers": headers}, layer="polar"
+        )
 
-    def _build_config(self) -> dict:
-        # schema defaults < bench defaults < profile gc_cli_config < runtime (url/model).
-        # See adapters.gc_cli_config — starting from the schema is what keeps a newly
-        # added AppConfig key from KeyError-ing every bench run.
-        config = build_gc_cli_config(
+    def _build_settings(self) -> "LoadedSettings":
+        """``LoadedSettings`` of the run (before task MCP servers / skills root).
+
+        schema defaults < bench defaults < profile gc_cli_config < runtime (url/model).
+        See adapters.gc_cli_config — starting from the schema is what keeps a newly
+        added AppConfig field at its default instead of missing on every bench run.
+        """
+        settings = build_gc_cli_settings(
             completions_url=self._backend_url,
             model=self._model,
             prompts_dir=_PROMPTS_DIR,
@@ -372,21 +386,21 @@ class GcCliExternal(BaseAgent):
             config_dir=str(_ADAPTER_DIR),
             overrides=self._overrides,
         )
-        self._apply_polar_session(config, self._polar_session_id)
-        return config
+        return self._apply_polar_session(settings, self._polar_session_id)
 
     @staticmethod
     def _apply_injected_skills(
-        config_dict: dict, skills_path: str | None
-    ) -> None:
+        settings: "LoadedSettings", skills_path: str | None
+    ) -> "LoadedSettings":
         """Configure a single backend-visible skills root.
 
         Harbor must never retain the adapter's bundled host path: the backend
         can only see container paths. A nonexistent container sentinel produces
         an intentionally empty single-source registry.
         """
-        config_dict["skills_data_path"] = (
-            skills_path or "/harbor/.gc_no_skills"
+        return settings.with_overrides(
+            {_SKILLS_PATH_KEY: skills_path or "/harbor/.gc_no_skills"},
+            layer="harbor",
         )
 
     @staticmethod
@@ -429,17 +443,17 @@ class GcCliExternal(BaseAgent):
         survive. A name already in the container wins: benchmark skills are part of
         the measurement, so the profile copy is skipped rather than overwriting it.
         """
-        skills_data_path = self._overrides.get("skills_data_path")
+        skills_data_path = profile_value(self._overrides, _SKILLS_PATH_KEY)
         if not skills_data_path:
             raise RuntimeError(
-                "gc_cli_config.skills_data_path is missing or empty — the profile "
+                "gc_cli_config paths.skills_data_path is missing or empty — the profile "
                 "must set it to a directory on the runner filesystem before calling "
                 "_merge_profile_skills."
             )
         local_root = Path(str(skills_data_path))
         if not local_root.is_dir():
             raise RuntimeError(
-                f"gc_cli_config.skills_data_path does not exist on the runner: "
+                f"gc_cli_config paths.skills_data_path does not exist on the runner: "
                 f"{local_root}. It must be a directory on the runner filesystem — "
                 "the adapter uploads it into the task container."
             )
@@ -479,11 +493,11 @@ class GcCliExternal(BaseAgent):
         a debug artifact must never fail a run.
         """
         try:
+            from gc_core.settings import settings_of
             from gc_core.tools.skills.registry import get_skills_registry
 
-            config_dict = getattr(ctx, "config_dict", {}) or {}
-            root = config_dict.get("skills_data_path")
-            registry = get_skills_registry(config_dict, backend=ctx.os_backend)
+            root = settings_of(ctx).paths.skills_data_path
+            registry = get_skills_registry(ctx, backend=ctx.os_backend)
             entries = sorted(
                 await registry.list_skills(), key=lambda e: str(e["id"])
             )
@@ -645,9 +659,9 @@ class GcCliExternal(BaseAgent):
 
     @staticmethod
     def _apply_mcp_servers(
-        config_dict: dict, servers: list, *, logger: Any = None
-    ) -> None:
-        """Merge task MCP servers into the run config; existing entries win.
+        settings: "LoadedSettings", servers: list, *, logger: Any = None
+    ) -> "LoadedSettings":
+        """Merge task MCP servers into the run settings; existing entries win.
 
         An explicit entry in the agent's own config is a deliberate statement
         about that server (including its locus), so autotagging never overrides
@@ -655,25 +669,29 @@ class GcCliExternal(BaseAgent):
         """
         mapped = GcCliExternal._harbor_mcp_to_config(servers, logger=logger)
         if not mapped:
-            return
-        existing = dict(config_dict.get("mcp-servers") or {})
+            return settings
+        mcp = settings.settings.mcp
         # An explicit entry wins — including when the user wrote the server's
         # natural name (`user-server`) and the mapper sanitised it to
         # `user_server`. Comparing raw keys would register the sidecar twice and
         # discover it under two tool prefixes.
-        claimed = {re.sub(r"[^A-Za-z0-9_]", "_", str(k)) for k in existing}
+        claimed = {re.sub(r"[^A-Za-z0-9_]", "_", str(k)) for k in mcp.servers}
         fresh = {k: v for k, v in mapped.items() if k not in claimed}
-        config_dict["mcp-servers"] = {**fresh, **existing}
-        meta = dict(config_dict.get("mcp-meta") or {})
         # Every MCP operation is now an exec round-trip into the container, and a
         # sim-user answer is a full LLM call on the other side.
-        meta["request_timeout_sec"] = max(
-            int(meta.get("request_timeout_sec") or 0), 600
-        )
-        meta["discovery_timeout_sec"] = max(
-            int(meta.get("discovery_timeout_sec") or 0), 120
-        )
-        config_dict["mcp-meta"] = meta
+        updates: dict[str, Any] = {
+            "mcp.meta.request_timeout_sec": max(
+                mcp.meta.request_timeout_sec, 600
+            ),
+            "mcp.meta.discovery_timeout_sec": max(
+                mcp.meta.discovery_timeout_sec, 120
+            ),
+        }
+        # Правка заменяет значение по своему пути: каждая задачная запись —
+        # своим путём, записи конфига остаются.
+        for name, server in fresh.items():
+            updates[f"mcp.servers.{name}"] = server
+        return settings.with_overrides(updates, layer="harbor")
 
     def _dump_outcome(self, state, *, executor, timings, context) -> None:
         """Сбросить траекторию, тайминги и счётчики токенов — что бы ни случилось.
@@ -721,9 +739,8 @@ class GcCliExternal(BaseAgent):
         from gc_core.run_context import acreate_run_context
 
         loop = asyncio.get_running_loop()
-        config_dict = self._build_config()
-        self._apply_mcp_servers(
-            config_dict,
+        settings = self._apply_mcp_servers(
+            self._build_settings(),
             getattr(self, "mcp_servers", None) or [],
             logger=self.logger,
         )
@@ -734,12 +751,12 @@ class GcCliExternal(BaseAgent):
             else None
         )
         skill_sources: dict[str, str] = {}
-        profile_skills = self._overrides.get("skills_data_path")
+        profile_skills = profile_value(self._overrides, _SKILLS_PATH_KEY)
         if profile_skills:
             container_skills, skill_sources = await self._merge_profile_skills(
                 environment, container_skills
             )
-        self._apply_injected_skills(config_dict, container_skills)
+        settings = self._apply_injected_skills(settings, container_skills)
         instruction = self._nudge_instruction(instruction, container_skills)
 
         executor = None
@@ -759,7 +776,7 @@ class GcCliExternal(BaseAgent):
             ctx = None
             try:
                 ctx = await acreate_run_context(
-                    config_dict,
+                    settings,
                     environment=environment,
                     loop=loop,
                     on_messages_evicted=_on_messages_evicted,

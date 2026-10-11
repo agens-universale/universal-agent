@@ -12,6 +12,7 @@ from gc_core.tools.session.working_memory import (
     WorkingMemory,
 )
 from gc_testkit.helpers.tool_ctx import CallableTool
+from gc_testkit.settings import fake_ctx, make_settings
 
 
 def _make_state(working_memory=None):
@@ -170,9 +171,7 @@ def test_empty_register_missing_register():
 
 
 def test_register_limit_exceeded():
-    ctx = SimpleNamespace(
-        config_dict={"working_memory_params": {"max_chars_goal": 10}}
-    )
+    ctx = fake_ctx({"working_memory": {"max_chars_goal": 10}})
     tool = CallableTool(WorkingMemory(ctx=ctx, state=_make_state()))
     res = json.loads(
         tool(
@@ -191,11 +190,7 @@ def test_total_budget_limit_exceeded():
     assert DEFAULT_TOTAL_BUDGET_CHARS == 20_000
     tool = CallableTool(
         WorkingMemory(
-            ctx=SimpleNamespace(
-                config_dict={
-                    "working_memory_params": {"total_budget_chars": 50}
-                }
-            ),
+            ctx=fake_ctx({"working_memory": {"total_budget_chars": 50}}),
             state=state,
         )
     )
@@ -218,6 +213,6 @@ def test_no_state_error():
 
 
 def test_registered_in_builtin_tools_data():
-    tools = get_builtin_tools_data({})
+    tools = get_builtin_tools_data(make_settings())
     assert "session_memory" in tools
     assert tools["session_memory"]["tool_fabric"] is WorkingMemory

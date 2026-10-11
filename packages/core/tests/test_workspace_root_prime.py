@@ -25,6 +25,7 @@ from gc_core.execution_workspace import (
     build_execution_workspace,
     discover_backend_cwd,
 )
+from gc_testkit.settings import make_settings
 
 
 class _Res:
@@ -79,7 +80,7 @@ async def test_generic_pwd_answers_for_an_async_only_sandbox():
     """
     backend = _AsyncOnlySandbox(pwd="/work")
 
-    await aprime_backend_cwd(backend, {})
+    await aprime_backend_cwd(backend, make_settings())
 
     assert backend.asked == 1, "окружение не спросили вовсе"
     assert discover_backend_cwd(backend) == "/work", (
@@ -97,7 +98,7 @@ async def test_a_silent_environment_is_a_loud_error():
     backend = _AsyncOnlySandbox(raises=RuntimeError("контейнер не отвечает"))
 
     with pytest.raises(WorkspaceRootUnknownError) as excinfo:
-        await aprime_backend_cwd(backend, {})
+        await aprime_backend_cwd(backend, make_settings())
 
     assert "launch_root" in str(excinfo.value), (
         "в отказе нет подсказки, чем его лечить"
@@ -108,7 +109,9 @@ async def test_a_config_root_makes_the_failure_harmless():
     """Корень назван явно — спрашивать окружение незачем и отказывать не за что."""
     backend = _AsyncOnlySandbox(raises=RuntimeError("контейнер не отвечает"))
 
-    await aprime_backend_cwd(backend, {"launch_root": "/testbed"})
+    await aprime_backend_cwd(
+        backend, make_settings({"launch_root": "/testbed"})
+    )
 
     assert backend.asked == 0, "окружение спросили, хотя корень задан конфигом"
 
@@ -120,7 +123,7 @@ async def test_a_hanging_environment_does_not_hang_the_build(monkeypatch):
 
     started = time.monotonic()
     with pytest.raises(WorkspaceRootUnknownError):
-        await aprime_backend_cwd(backend, {})
+        await aprime_backend_cwd(backend, make_settings())
     spent = time.monotonic() - started
 
     assert spent < 1.0, f"сборка ждала молчащее окружение {spent:.2f} с"
@@ -135,7 +138,7 @@ async def test_a_declared_cwd_is_not_asked_again():
 
     backend = _Knows()
 
-    await aprime_backend_cwd(backend, {})
+    await aprime_backend_cwd(backend, make_settings())
 
     assert backend.asked == 0
 
@@ -222,7 +225,7 @@ async def test_a_local_backend_is_never_a_hard_failure(caplog):
             return None
 
     with caplog.at_level(logging.WARNING):
-        await aprime_backend_cwd(_Local(), {})
+        await aprime_backend_cwd(_Local(), make_settings())
 
     assert any(
         "backend_cwd_prime_failed" in r.getMessage() for r in caplog.records
@@ -319,7 +322,7 @@ async def test_the_primed_answer_is_not_kept_forever():
     import weakref
 
     backend = _AsyncOnlySandbox(pwd="/work")
-    await aprime_backend_cwd(backend, {})
+    await aprime_backend_cwd(backend, make_settings())
     ref = weakref.ref(backend)
 
     del backend

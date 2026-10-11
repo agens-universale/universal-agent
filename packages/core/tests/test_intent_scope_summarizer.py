@@ -3,18 +3,19 @@ from types import SimpleNamespace
 from gc_core.config_modules.model_registry import effective_completion_kwargs
 from gc_core.intent_scope import summarizer
 from gc_testkit import run_coro
+from gc_testkit.settings import make_settings
 
 
 def test_auxiliary_section_absent_uses_global_auxiliary_kwargs():
-    cfg = {
-        "auxiliary_llm_params": {
-            "completion_kwargs": {
+    cfg = make_settings(
+        {
+            "chat_completions.auxiliary_llm.completion_kwargs": {
                 "reasoning_effort": "none",
                 "separate_reasoning": False,
                 "chat_template_kwargs": {"enable_thinking": False},
             }
         }
-    }
+    )
     assert effective_completion_kwargs(None, cfg, section="auxiliary") == {
         "reasoning_effort": "none",
         "separate_reasoning": False,
@@ -84,7 +85,7 @@ def test_summarize_tool_intent_line_uses_auxiliary_llm_completion_kwargs(
 
 
 def test_summarize_tool_intent_line_fail_open_on_llm_error(monkeypatch):
-    async def _boom(**kwargs):
+    async def _boom(**_kwargs):
         raise RuntimeError("boom")
 
     monkeypatch.setattr(summarizer, "arequest_summary_text", _boom)

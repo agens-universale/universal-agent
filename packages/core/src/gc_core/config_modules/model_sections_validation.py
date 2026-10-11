@@ -10,7 +10,7 @@ merged-реестра, ключи `assign.subagents` → канонически�
 
 Отсюда же уходят стартовые notices про сами записи (§7 спеки пары: ослабленный
 транспорт под общим токеном) — канал у предупреждений один, и второго заводить
-незачем: `load_config` мёржит их в `config_dict["compat_notices"]`.
+незачем: `load_settings` кладёт их в `runtime.notices`.
 """
 
 from __future__ import annotations
@@ -136,7 +136,7 @@ def validate_model_sections(
     (или собранными сразу несколькими — сообщение объединяет все). Возвращает
     список warning-строк (например, «привязки без реестра моделей не действуют»)
     — тем же каналом, что и предупреждения compat-слоя (`load_config` мёржит их
-    в `config_dict["compat_notices"]`).
+    в `runtime.notices`).
     """
     prefix = f"{source_hint}: " if source_hint else ""
     models = cfg.models

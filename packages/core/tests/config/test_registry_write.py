@@ -1044,7 +1044,9 @@ def test_validate_profile_text_rejects_broken_yaml():
         validate_profile_text("models: [незакрытый\n  список")
 
 
-def test_explicit_null_is_distinct_from_removing_a_model_field(tmp_path, template):
+def test_explicit_null_is_distinct_from_removing_a_model_field(
+    tmp_path, template
+):
     from gc_core.config_modules.registry_write import YAML_NULL
 
     path = _cfg(tmp_path, _REGISTRY)

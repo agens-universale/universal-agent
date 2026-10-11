@@ -84,6 +84,6 @@ def test_executor_addresses_its_own_run():
         assert scope_a.drain() == [], (
             "сообщение сессии B ушло субагенту сессии A"
         )
-        with ex_b.get_lock():
+        with ex_b._lock:
             assert [m["content"] for m in ex_b._pending_messages] == ["для B"]
         assert ex_b.is_child_input_active() is False

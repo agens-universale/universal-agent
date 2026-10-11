@@ -1,10 +1,10 @@
 """ImagesConfig: дефолты, валидатор «свежее сообщение живо целиком», проекция и читатель."""
 
 import pytest
-from pydantic import ValidationError
-
 from gc_core.config_modules.images import ImagesConfig, read_images_config
 from gc_core.config_modules.root import AppConfig
+from gc_testkit.settings import make_settings
+from pydantic import ValidationError
 
 
 def test_defaults():
@@ -57,9 +57,9 @@ def test_app_config_carries_the_section():
         )
 
 
-def test_flatten_exposes_images(tmp_path):
-    """Значение из config.yml доходит до config_dict['images'] и до читателя."""
-    from gc_core import config as cfgmod
+def test_load_settings_exposes_images(tmp_path):
+    """Значение из config.yml доходит до настроек и до читателя."""
+    from gc_core.config import load_settings
 
     conf = tmp_path / "config.yml"
     conf.write_text(
@@ -69,31 +69,31 @@ def test_flatten_exposes_images(tmp_path):
         "  live_tool_images: 1\n",
         encoding="utf-8",
     )
-    cfg = cfgmod.load_config(str(conf))
-    assert cfg["images"] == {
-        "max_per_message": 4,
-        "live_user_images": 6,
-        "live_tool_images": 1,
-    }
-    assert read_images_config(cfg) == ImagesConfig(
+    loaded = load_settings(str(conf))
+    expected = ImagesConfig(
         max_per_message=4, live_user_images=6, live_tool_images=1
     )
+    assert loaded.settings.images == expected
+    assert read_images_config(loaded) == expected
 
 
 def test_reader_without_the_section_returns_defaults():
-    """Читатель зовётся на каждом запросе, а у двойников ctx секции нет вовсе."""
-    assert read_images_config({}) == ImagesConfig()
-    assert read_images_config({"images": None}) == ImagesConfig()
+    """Читатель зовётся на каждом запросе: без настроек — умолчания схемы."""
     assert read_images_config(None) == ImagesConfig()
+    assert read_images_config(make_settings()) == ImagesConfig()
+    assert read_images_config(AppConfig()) == ImagesConfig()
 
 
 @pytest.mark.parametrize(
-    "config_dict",
+    "config",
     [
         {"images": {"max_per_message": 12, "live_user_images": 10}},
         {"images": {"unknown": 1}},
         {"images": "broken"},
     ],
 )
-def test_reader_falls_back_to_defaults_on_an_invalid_section(config_dict):
-    assert read_images_config(config_dict) == ImagesConfig()
+def test_invalid_section_is_rejected_by_the_schema(config):
+    """Невалидная секция до читателя не доходит: настройки отвергают её при
+    сборке (на develop читатель молча откатывался к умолчаниям)."""
+    with pytest.raises(ValidationError):
+        make_settings(config)

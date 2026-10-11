@@ -7,9 +7,9 @@ to retry or silently substitute.
 """
 
 import json
-import types
 
 from gc_core.security.permission_store import PermissionStore
+from gc_testkit.settings import fake_ctx, make_settings
 
 
 def _tui_ctx(choice):
@@ -20,13 +20,19 @@ def _tui_ctx(choice):
         calls["n"] += 1
         return choice
 
-    ctx = types.SimpleNamespace(
+    ctx = fake_ctx(
         is_tui=True,
         tui_confirm=tui_confirm,
-        config_dict={},
         permission_store=PermissionStore(),
     )
     return ctx, calls
+
+
+def _configure(ctx, config):
+    """Подменить настройки рана у готового ctx (тул уже держит ссылку на ctx)."""
+    loaded = make_settings(config)
+    ctx.settings = loaded.settings
+    ctx.runtime = loaded.runtime
 
 
 # ---------------------------------------------------------------------------
@@ -60,11 +66,14 @@ def test_write_guard_decline_caches_run_and_instructs(monkeypatch, tmp_path):
             captured["err"] = err
             return json.dumps({"ok": False, "error": err})
 
-    # Patch config_dict to enable write_guard in ask mode with our launch_root
-    ctx.config_dict = {
-        "launch_root": str(launch_root),
-        "write_guard": {"enabled": True, "mode": "ask"},
-    }
+    # Включить write_guard в режиме ask с нашим launch_root
+    _configure(
+        ctx,
+        {
+            "launch_root": str(launch_root),
+            "security.write_guard": {"enabled": True, "mode": "ask"},
+        },
+    )
 
     tool = _Tool()
 
@@ -105,15 +114,18 @@ def test_url_policy_decline_caches_and_instructs(monkeypatch, tmp_path):
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
 
     ctx, calls = _tui_ctx("deny")
-    ctx.config_dict = {
-        "launch_root": str(tmp_path),
-        "url_policy": {
-            "enabled": True,
-            "mode": "ask",
-            "allowed_schemes": ["https"],
-            "url_blacklist": ["example.com"],
+    _configure(
+        ctx,
+        {
+            "launch_root": str(tmp_path),
+            "security.url_policy": {
+                "enabled": True,
+                "mode": "ask",
+                "allowed_schemes": ["https"],
+                "url_blacklist": ["example.com"],
+            },
         },
-    }
+    )
 
     captured = {}
 
@@ -170,14 +182,17 @@ def test_read_guard_decline_caches_and_instructs(monkeypatch, tmp_path):
     launch_root.mkdir()
     outside = str(tmp_path / "secret.txt")
 
-    ctx.config_dict = {
-        "launch_root": str(launch_root),
-        "read_guard": {
-            "enabled": True,
-            "mode": "ask",
-            "allowed_read_roots": [str(launch_root)],
+    _configure(
+        ctx,
+        {
+            "launch_root": str(launch_root),
+            "security.read_guard": {
+                "enabled": True,
+                "mode": "ask",
+                "allowed_read_roots": [str(launch_root)],
+            },
         },
-    }
+    )
 
     captured = {}
 
@@ -225,13 +240,16 @@ def test_command_moderation_decline_caches_and_instructs(
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
 
     ctx, calls = _tui_ctx("deny")
-    ctx.config_dict = {
-        "launch_root": str(tmp_path),
-        "command_moderation": {
-            "enabled": True,
-            "mode": "ask",
+    _configure(
+        ctx,
+        {
+            "launch_root": str(tmp_path),
+            "security.command_moderation": {
+                "enabled": True,
+                "mode": "ask",
+            },
         },
-    }
+    )
 
     captured = {}
 
@@ -300,10 +318,13 @@ def test_command_guard_decline_caches(monkeypatch, tmp_path):
     agents_md.write_text("instructions")
 
     ctx, calls = _tui_ctx("deny")
-    ctx.config_dict = {
-        "launch_root": str(tmp_path),
-        "gc_protection": {"enabled": True},
-    }
+    _configure(
+        ctx,
+        {
+            "launch_root": str(tmp_path),
+            "security.protected_paths": {"enabled": True},
+        },
+    )
 
     class _Tool:
         _ctx = ctx

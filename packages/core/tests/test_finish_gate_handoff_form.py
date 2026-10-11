@@ -19,6 +19,7 @@ from gc_core.intent_guard.final_report_consistency import (
 from gc_core.intent_guard.trace_digest import FinishGateTraceDigest
 from gc_core.tools.turn.submit_solution import SubmitSolution
 from gc_testkit import run_coro
+from gc_testkit.settings import fake_ctx
 
 _DIGEST_HANDOFF = {"artifacts": ["report.md"]}
 
@@ -39,8 +40,8 @@ def _validator_json(**overrides: object) -> str:
 def _ctx_state_digest(*, digest_handoff: dict | None = None):
     handoff = digest_handoff if digest_handoff is not None else _DIGEST_HANDOFF
     state = SimpleNamespace(messages=[{"role": "user", "content": "done?"}])
-    ctx = SimpleNamespace(
-        config_dict={},
+    ctx = fake_ctx(
+        {},
         logger=None,
         auxiliary_llm=SimpleNamespace(
             max_tokens=8192,

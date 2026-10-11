@@ -14,7 +14,7 @@ from urllib.parse import urlparse
 
 from gc_core import config_raw
 from gc_core.app_version import REPO_GIT_URL
-from gc_core.utils.http_auth import authorization_attempts
+from gc_core.settings import settings_of
 
 
 def _mcp_hint() -> str:
@@ -152,7 +152,7 @@ def _entry_carries_own_connection(entry: Dict[str, Any]) -> bool:
     `backend.chat_completion_headers.Authorization`), и заполненный по документации
     реестр объявлялся бы ненастроенным.
 
-    Форма здесь — снимок (`config._serialize_model_entry`): сырого `token` в
+    Форма здесь — снимок (`model_router.serialize_model_entry`): сырого `token` в
     загруженном конфиге уже нет, вместо него вычисленный `authorization_header`
     (None — наследовать, "" — ЗАДАННЫЙ токен «сервер не требует авторизации»), а
     явные оверлеи backend лежат в `backend_overrides`.
@@ -176,7 +176,7 @@ def _entry_carries_own_connection(entry: Dict[str, Any]) -> bool:
     )
 
 
-def _registry_is_self_sufficient(c: Dict[str, Any]) -> bool:
+def _registry_is_self_sufficient(c: Any) -> bool:
     """КАЖДАЯ запись реестра работает через СВОЁ подключение — тогда плоский
     `backend` не нужен вовсе (спека §4: незаданное у записи наследуется от него).
 
@@ -187,28 +187,32 @@ def _registry_is_self_sufficient(c: Dict[str, Any]) -> bool:
     тащить его в детект первого запуска нельзя, а «самодостаточны все» ошибается
     только в безопасную сторону — лишний раз предложить мастер, но не объявить
     готовым конфиг, который уйдёт на `your-backend:PORT`."""
-    models = c.get("models") or {}
+    from gc_core.model_router import serialize_model_entry
+
+    settings = settings_of(c)
+    models = settings.models
     return (
-        c.get("backend_api_mode") == "chat_completions"
+        settings.backend.api_mode == "chat_completions"
         and bool(models)
         and all(
-            _entry_carries_own_connection(entry) for entry in models.values()
+            _entry_carries_own_connection(serialize_model_entry(entry))
+            for entry in models.values()
         )
     )
 
 
-def _endpoint_set(c: Dict[str, Any]) -> bool:
-    if c.get("completions_url") not in (None, URL_SENTINEL):
+def _endpoint_set(c: Any) -> bool:
+    if settings_of(c).backend.completions_url != URL_SENTINEL:
         return True
     return _registry_is_self_sufficient(c)
 
 
-def _legacy_model_set(c: Dict[str, Any]) -> bool:
+def _legacy_model_set(c: Any) -> bool:
     """Плоский `agent.model` заполнен (не плейсхолдер шаблона)."""
-    return c.get("model") not in (None, "", MODEL_SENTINEL)
+    return settings_of(c).agent.model not in ("", MODEL_SENTINEL)
 
 
-def _model_set(c: Dict[str, Any]) -> bool:
+def _model_set(c: Any) -> bool:
     """Требование модели: непустой merged-реестр (любой слой, спека §11) ИЛИ
     заполненный легаси-ключ.
 
@@ -217,22 +221,23 @@ def _model_set(c: Dict[str, Any]) -> bool:
     поэтому такой реестр поверх плейсхолдерного endpoint'а — «нечем работать», а не
     «настроено». Адрес и токен реестр закрывает отдельно и по другому условию —
     когда их несут сами записи (`_registry_is_self_sufficient`)."""
-    return bool(c.get("models")) or _legacy_model_set(c)
+    return bool(settings_of(c).models) or _legacy_model_set(c)
 
 
-def _agent_auth_set(c: Dict[str, Any]) -> bool:
-    auth_cfg = c.get("agent_auth") or {}
+def _agent_auth_set(c: Any) -> bool:
+    agent_auth = settings_of(c).agent_auth
+    auth_cfg = agent_auth.model_dump() if agent_auth else {}
     return bool(auth_cfg) and bool(auth_cfg.get("auth_endpoint"))
 
 
-def _auth_set(c: Dict[str, Any]) -> bool:
+def _auth_set(c: Any) -> bool:
     # Auth «не задан» (pending) ТОЛЬКО если в конфиге остался шаблонный плейсхолдер
     # токена (и нет полноценного agent_auth). Реальный токен ИЛИ намеренное отсутствие
     # заголовка (локальный прокси / эндпоинт без auth сам ставит авторизацию) → задан.
     # Гейт — детектор незаполненного шаблона, а не валидатор auth: отсутствие ≠ сентинел.
     # Симметрично адресу: авторизацию может нести и сама запись реестра — целой парой
     # со своим адресом, порознь их правило пары (§3) в конфиг не пускает.
-    auth = (c.get("chat_completion_headers") or {}).get("Authorization")
+    auth = settings_of(c).backend.chat_completion_headers.get("Authorization")
     if auth == TOKEN_SENTINEL:
         return _agent_auth_set(c) or _registry_is_self_sufficient(c)
     return True
@@ -279,17 +284,24 @@ FIELD_ANCHOR_PATHS: Dict[str, str] = {
 }
 
 
-def pending_field_keys(config: Dict[str, Any]) -> set:
-    """Ключи-якоря полей, ещё не удовлетворённых конфигом (для визарда)."""
-    return {key for key, is_set in _FIELD_CHECKS.items() if not is_set(config)}
+def pending_field_keys(settings: Any) -> set:
+    """Ключи-якоря полей, ещё не удовлетворённых конфигом (для визарда).
+
+    ``config`` — всё, что принимает ``settings_of``.
+    """
+    settings = settings_of(settings)
+    return {
+        key for key, is_set in _FIELD_CHECKS.items() if not is_set(settings)
+    }
 
 
-def pending_requirements(config: Dict[str, Any]) -> List[_Requirement]:
+def pending_requirements(settings: Any) -> List[_Requirement]:
     """Требования, ещё не удовлетворённые текущим конфигом."""
-    return [r for r in REQUIREMENTS if not r.is_satisfied(config)]
+    settings = settings_of(settings)
+    return [r for r in REQUIREMENTS if not r.is_satisfied(settings)]
 
 
-def is_unconfigured(config: Dict[str, Any]) -> bool:
+def is_unconfigured(settings: Any) -> bool:
     """True, если конфиг ещё не готов к запуску (есть незакрытое требование).
 
     Требования проверяются ВСЕ — реестр моделей входит в них через `_model_set`
@@ -297,7 +309,7 @@ def is_unconfigured(config: Dict[str, Any]) -> bool:
     целиком: иначе конфиг с живым реестром и плейсхолдерным адресом считался бы
     настроенным, мастер отчитывался бы «✓ Готово», следующий старт больше не
     предложил бы настройку, а запрос ушёл бы на `your-backend:PORT`."""
-    return bool(pending_requirements(config))
+    return bool(pending_requirements(settings))
 
 
 def _registry_overridden_above(
@@ -334,7 +346,7 @@ def _registry_overridden_above(
     return any(origin.overlay_kind for origin in found.values())
 
 
-def effective_model(config: Dict[str, Any]) -> str:
+def effective_model(settings: Any) -> str:
     """Действующая модель конфига — ПРОВАЙДЕРСКИЙ id из резолва `ModelRouter`
     (§6/§7), а не плоский `agent.model`: волна B пишет реестр (`models.<алиас>`
     + `slots.default`), а плоский ключ оставляет шаблонным сентинелом — по нему
@@ -349,13 +361,14 @@ def effective_model(config: Dict[str, Any]) -> str:
     на несуществующий алиас) — фоллбэк на плоский ключ: мастер обязан
     открываться на любом конфиге. Сентинел шаблона — «ещё не задано», а не
     значение: отдаём пусто, как и на конфиге без модели вовсе."""
-    name = config.get("model")
+    settings = settings_of(settings)
+    name = settings.agent.model
     try:
         from gc_core.model_router import ModelRouter
 
         resolved = ModelRouter(
-            config,
-            level_provider=lambda: config.get("level") or "default",
+            settings,
+            level_provider=lambda: settings.level or "default",
         ).resolve("main", check_breaker=False)
         name = resolved.model
     except Exception:
@@ -363,7 +376,7 @@ def effective_model(config: Dict[str, Any]) -> str:
     return "" if not name or name == MODEL_SENTINEL else name
 
 
-def assigned_level_model(config: Dict[str, Any], level: str) -> str:
+def assigned_level_model(settings: Any, level: str) -> str:
     """Провайдерский id модели, ЯВНО назначенной уровню, — или пусто, если слот
     не задан.
 
@@ -371,15 +384,21 @@ def assigned_level_model(config: Dict[str, Any], level: str) -> str:
     моделью `default`, но написать против него её имя значило бы сказать
     «уровень назначен» там, где он не назначен, — и следующий шаг закрепил бы
     выдуманное."""
-    alias = (config.get("slots") or {}).get(level)
+    settings = settings_of(settings)
+    alias = getattr(settings.slots, level, None)
     if not alias:
         return ""
-    entry = (config.get("models") or {}).get(alias)
-    model = entry.get("model") if isinstance(entry, dict) else None
+    entry = settings.models.get(alias)
+    model = entry.model if entry is not None else None
     return model or alias
 
 
-def model_step_current(config: Dict[str, Any]) -> str:
+def _any_slot(settings: Any) -> bool:
+    """Задан ли хоть один слот уровня."""
+    return any(settings_of(settings).slots.model_dump().values())
+
+
+def model_step_current(settings: Any) -> str:
     """Что шаг «Модель» называет текущим (пусто — «нечего показать»).
 
     Шаг задаёт слот `default` — про него и говорит. Не `effective_model`: та
@@ -397,13 +416,13 @@ def model_step_current(config: Dict[str, Any]) -> str:
     Дом — здесь, потому что поверхностей две (плоский мастер и экран TUI), и
     вторая редакция этого правила разошлась бы с первой на первой же правке: ровно
     так дефект и жил — в плоском починен, в TUI остался."""
-    current = assigned_level_model(config, "default")
-    if not current and not any((config.get("slots") or {}).values()):
-        current = effective_model(config)
+    current = assigned_level_model(settings, "default")
+    if not current and not _any_slot(settings):
+        current = effective_model(settings)
     return current
 
 
-def default_fallback_model(config: Dict[str, Any]) -> tuple:
+def default_fallback_model(settings: Any) -> tuple:
     """`slots.default` пуст: чем уровень default работает СЕЙЧАС — (модель,
     подпись об источнике). Источник ищем тем же обходом матрицы `LEVEL_FALLBACK`
     (`config_modules/model_registry.py`), что и резолв: первый уровень после
@@ -419,13 +438,13 @@ def default_fallback_model(config: Dict[str, Any]) -> tuple:
     from gc_core.config_modules.model_registry import LEVEL_FALLBACK
 
     for level in LEVEL_FALLBACK["default"][1:]:
-        model = assigned_level_model(config, level)
+        model = assigned_level_model(settings, level)
         if model:
             return model, f"(default не задан — работает {level})"
-    return effective_model(config), "(default не задан)"
+    return effective_model(settings), "(default не задан)"
 
 
-def model_step_display(config: Dict[str, Any]) -> tuple:
+def model_step_display(settings: Any) -> tuple:
     """Строка «сейчас» шага «Модель»: (модель, подпись об источнике или пусто).
 
     Слот `default` задан (или слотов нет вовсе — прежнее правило
@@ -440,16 +459,17 @@ def model_step_display(config: Dict[str, Any]) -> tuple:
 
     Дом — здесь, по той же причине, что у `model_step_current`: поверхностей две,
     и вторая редакция правила уже расходилась с первой."""
-    current = model_step_current(config)
+    settings = settings_of(settings)
+    current = model_step_current(settings)
     if current:
         return current, ""
-    if any((config.get("slots") or {}).values()):
-        return default_fallback_model(config)
+    if _any_slot(settings):
+        return default_fallback_model(settings)
     return "", ""
 
 
 def overriding_layer_note(
-    config: Dict[str, Any], config_path=None, *, ignore_profile: bool = False
+    settings: Any, config_path=None, *, ignore_profile: bool = False
 ) -> Optional[str]:
     """Спека §11: что перекроет выбор, сделанный в мастере (мастер пишет БАЗОВЫЙ
     config.yml, а конфиг собирается стопкой слоёв — ось 2, §2).
@@ -459,7 +479,15 @@ def overriding_layer_note(
     файла: свой же реестр config.yml мастер с волны B дописывает сам (решение 10),
     и предупреждать там не о чем, а проектный слой молча оставил бы выбор человека
     без эффекта. Без `config_path` слой не различить — тогда только профиль."""
-    profile = config.get("profile") or None
+    from gc_core.settings import AppConfig, runtime_of
+
+    # Действующий профиль — рантайм; у голой модели рантайма нет — указатель
+    # из её документа (то же правило, что у плоского вида).
+    profile = (
+        settings.profile
+        if isinstance(settings, AppConfig)
+        else runtime_of(settings).active_profile
+    )
     if profile and not ignore_profile:
         # Текст — общий для всех поверхностей (экран мастера и подсказка gc-cli),
         # поэтому это чистый факт без адреса действия: звать в «Настройки · Профили»
@@ -467,7 +495,7 @@ def overriding_layer_note(
         return (
             f'действует профиль "{profile}" — он перекроет модельные настройки'
         )
-    if config.get("models") and _registry_overridden_above(
+    if settings_of(settings).models and _registry_overridden_above(
         config_path, ignore_profile=ignore_profile
     ):
         return (
@@ -498,13 +526,11 @@ def _configured_guide(
     return f"{base}\n[gc] {profile_note}." if profile_note else base
 
 
-def _setup_notes(
-    config: Dict[str, Any], stage: str, named: str, program: str
-) -> str:
+def _setup_notes(settings: Any, stage: str, named: str, program: str) -> str:
     note = ""
-    if _legacy_model_set(config):
+    if _legacy_model_set(settings):
         note = (
-            f"\n  Модель по умолчанию уже задана (agent.model = {config.get('model')}) —\n"
+            f"\n  Модель по умолчанию уже задана (agent.model = {settings_of(settings).agent.model}) —\n"
             f"  осталось указать для неё адрес и токен; либо укажите свою модель\n"
             f"  и соответствующие адрес/токен.\n"
         )
@@ -524,7 +550,7 @@ def _setup_notes(
 
 def setup_guide(
     config_path: str,
-    config: Dict[str, Any],
+    settings: Any,
     program: str = "gc-cli",
     just_created: bool = False,
     *,
@@ -539,7 +565,8 @@ def setup_guide(
     нужны для preset-модели; либо укажи свою модель и адрес/токен под неё.
 
     `repair` — итог лестницы `load_config_for_repair`, если конфиг пришёл от
-    неё (`--init-config` без TTY). На деградировавшей ступени `config` — не то,
+    неё (`--init-config` без TTY). ``settings`` — всё, что принимает
+    ``settings_of``. На деградировавшей ступени `settings` — не то,
     что соберёт следующий старт: без профиля «настроен — можно запускать» врало
     бы человеку, чей старт с профилем падает той же ошибкой (ревью), а на
     шаблоне перечисленные поля — поля шаблона, а не его файла. Гайд говорит и
@@ -572,19 +599,19 @@ def setup_guide(
     # `tui/screens/onboarding.py::_layer_note`) — выведенный из ступени, он глушил
     # ремарку там, где экран её показывает.
     profile_note = overriding_layer_note(
-        config,
+        settings,
         config_path,
         ignore_profile=repair.deactivate_profile
         if repair is not None
         else False,
     )
-    pending = pending_requirements(config)
+    pending = pending_requirements(settings)
     if not pending:
         return _configured_guide(
             stage, named, program, _display_path(config_path), profile_note
         )
     fields = "\n".join(f"    • {r.hint}" for r in pending)
-    note = _setup_notes(config, stage, named, program)
+    note = _setup_notes(settings, stage, named, program)
     if just_created:
         header = (
             "  GigaCode — конфигурация создана, настройка не завершена\n\n"
@@ -612,6 +639,9 @@ def setup_guide(
 # Подписи участников карты («Участвуют:») — kind из config_origin._overlay_paths
 # плюс своя "base" для самой базы (её _overlay_paths не называет — она точка
 # отсчёта, а не оверлей).
+# Префикс слоёв профиля в метках происхождения (``profile:project``/``profile:base``).
+_PROFILE_LAYER_PREFIX = "profile:"
+
 _BROKEN_CONFIG_LAYER_LABELS = {
     "base": "база",
     "managed": "managed",
@@ -654,7 +684,7 @@ def _participant_lines(participants, flagged: bool) -> list[str]:
     lines = []
     for kind, path in participants:
         suffix = ""
-        if kind.startswith("profile:"):
+        if kind.startswith(_PROFILE_LAYER_PREFIX):
             suffix = "   (активен: --profile)" if flagged else "   (активен)"
         lines.append(
             f"    {_BROKEN_CONFIG_LAYER_LABELS[kind].ljust(10)}{os.path.abspath(path)}{suffix}"
@@ -745,6 +775,81 @@ def _workaround_lines(
     return lines
 
 
+def _unresolved_error(exc: BaseException):
+    """`UnresolvedPlaceholdersError` из исключения или его цепочки причин
+    (загрузчик бросает его сам, но вызывающий мог завернуть); иначе None."""
+    from gc_core.config_modules.env_interpolation import (
+        UnresolvedPlaceholdersError,
+    )
+
+    seen = set()
+    current: Optional[BaseException] = exc
+    while current is not None and id(current) not in seen:
+        if isinstance(current, UnresolvedPlaceholdersError):
+            return current
+        seen.add(id(current))
+        current = current.__cause__ or current.__context__
+    return None
+
+
+def _unresolved_fix_lines(error) -> list[str]:
+    """Советы по незаданным источникам: по строке на переменную/файл, с местами,
+    где на них ссылаются (файл: ключ)."""
+    import os
+
+    places: Dict[tuple, list[str]] = {}
+    for ref in error.refs:
+        where = ": ".join(
+            part
+            for part in (
+                os.path.abspath(ref.source)
+                if ref.source and ref.source != "--param"
+                else ref.source,
+                ref.key,
+            )
+            if part
+        )
+        places.setdefault((ref.kind, ref.name), []).append(where)
+    lines: list[str] = []
+    for (kind, name), wheres in places.items():
+        refs = "; ".join(dict.fromkeys(wheres))
+        if kind == "env":
+            lines.append(
+                f"задать переменную окружения {name} (export {name}=…) — "
+                f"на неё ссылается: {refs}"
+            )
+        else:
+            lines.append(
+                f"создать файл {name} (или поправить ссылку) — на него "
+                f"ссылается: {refs}"
+            )
+    lines.append(
+        "либо, если значение необязательное, дописать умолчание в ссылку: "
+        "${ENV:VAR:-умолчание} (пустое — ${ENV:VAR:-})"
+    )
+    return lines
+
+
+def _exc_summary(exc: Exception) -> str:
+    """Короткая причина для однострочных сообщений лестницы починки: список
+    незаданных переменных вместо многострочного объяснения."""
+    unresolved = _unresolved_error(exc)
+    if unresolved is None:
+        return str(exc)
+    parts = []
+    if unresolved.env_names:
+        parts.append(
+            "не заданы переменные окружения: "
+            + ", ".join(unresolved.env_names)
+        )
+    files = list(
+        dict.fromkeys(r.name for r in unresolved.refs if r.kind == "file")
+    )
+    if files:
+        parts.append("не читаются файлы: " + ", ".join(files))
+    return "; ".join(parts)
+
+
 def explain_broken_config(
     config_path: str,
     exc: Exception,
@@ -752,11 +857,11 @@ def explain_broken_config(
     program: str = "gc-cli",
     profile_override: Optional[str] = None,
 ) -> str:
-    """Человекочитаемое объяснение вместо трейсбека, когда `load_config_ex()` не
+    """Человекочитаемое объяснение вместо трейсбека, когда `load_settings()` не
     смог собрать конфиг. `exc` — пойманный `ValueError` (pydantic `ValidationError`
     входит в него подклассом — единственный исход загрузки после защиты чтения
     базы, см. config.py/layers.py::_layer_document). `profile_override` — тот же,
-    что ушёл в `load_config_ex` (`--profile`): объяснение обязано описывать стек,
+    что ушёл в `load_settings` (`--profile`): объяснение обязано описывать стек,
     который грузила сессия, а не указатель из файла — иначе при `--profile broken`
     карта называла одну базу и советовала чинить в ней ключ, который верен
     (ревью). Имя из флага, не нашедшее файла, так и называется: чинить его во
@@ -818,33 +923,48 @@ def explain_broken_config(
     # виновников не остаётся. Пустой `active` (`--profile ""`) — профиля не
     # запрашивали, и «такого профиля нет» не про что.
     flagged_profile_missing = bool(flagged and active) and not any(
-        kind.startswith("profile:") for kind, _ in participants
+        kind.startswith(_PROFILE_LAYER_PREFIX) for kind, _ in participants
     )
     participant_lines = _participant_lines(participants, flagged)
 
     # Координаты названных ошибкой ключей — ОДИН разбор на всё объяснение: их
     # спрашивают и виновники, и совет про профиль из флага. Второе чтение той же
     # строки — второе прочтение одного правила, и разъезжаются они молча.
-    # Загрузка (`config.load_config_ex`) отдаёт отказ схемы уже завёрнутым —
+    # Загрузка (`config.load_settings`) отдаёт отказ схемы уже завёрнутым —
     # ValueError с текстом без pydantic-дампа (`input_value=<repr записи>` нёс
     # токен из файла; MR #80, класс L28), а сам `ValidationError` едет в
     # `__cause__`: его `loc` точнее текста (заходит в списки и не ограничен
     # закрытым списком подозреваемых `error_keys`), и виновники ищутся по нему.
     # Сырой `ValidationError` первым аргументом — страховка на прямых вызовах.
-    error_text, keys = _broken_error_text_and_keys(exc)
-    culprits = key_origins(
-        config_path, keys, profile_override=profile_override
-    )
+    unresolved = _unresolved_error(exc)
+    if unresolved is not None:
+        # Незаданная переменная — не поломка файла: чинится окружением (или
+        # умолчанием `:-` в ссылке), и откат конфига к шаблону тут ничего не
+        # чинит, а модели/MCP/голос теряет. Обход без профиля — только когда
+        # все ссылки живут в профиле.
+        error_text = str(unresolved)
+        fix_lines = _unresolved_fix_lines(unresolved)
+        base_to_blame = False
+        if not all(
+            ref.layer.startswith(_PROFILE_LAYER_PREFIX)
+            for ref in unresolved.refs
+        ):
+            active = None
+    else:
+        error_text, keys = _broken_error_text_and_keys(exc)
+        culprits = key_origins(
+            config_path, keys, profile_override=profile_override
+        )
 
-    fix_lines, base_to_blame = _fix_targets(
-        culprits,
-        keys,
-        config_path,
-        participants,
-        error_text,
-        flagged_profile_missing=flagged_profile_missing,
-        active=active,
-    )
+        fix_lines, base_to_blame = _fix_targets(
+            culprits,
+            keys,
+            config_path,
+            participants,
+            error_text,
+            flagged_profile_missing=flagged_profile_missing,
+            active=active,
+        )
 
     # Советы-команды целятся в ФАЙЛ СЕССИИ, а не в дефолтный (ревью M9): при
     # `--config <путь>` фиксированный `gc-cli --reset-config` сбрасывал ЧУЖОЙ
@@ -895,12 +1015,15 @@ class RepairLoad(NamedTuple):
     выведенный из одной лишь ступени, обещал человеку деактивацию, которой не
     будет, и успевал положить пустой якорь профиля в базу."""
 
-    config: Dict[str, Any]
+    #: ``LoadedSettings`` ступени (то, что принимает ``settings_of``; прежде —
+    #: плоский вид). Тот же объект, что ``settings``.
+    config: Any
     meta: Any  # ProfileMeta загрузчика
     stage: str
     message: Optional[str]
     profile: str = ""  # умолчания = «ничего не снималось» (ступень full)
     deactivate_profile: bool = False
+    settings: Any = None  # LoadedSettings той же ступени
 
 
 class RepairRefused(Exception):
@@ -940,7 +1063,7 @@ def _refusal_message(
     pointer_shown = os.path.abspath(str(pointer_path))
     return (
         f"[gc] Мастер эту раскладку не починит: config.yml не читается и без "
-        f'профиля ({exc}), а профиль "{profile}" останется активным — стек '
+        f'профиля ({_exc_summary(exc)}), а профиль "{profile}" останется активным — стек '
         f"следующего старта отвергнет запись мастера целиком.\n"
         f"  Что сделать:\n"
         f"    • поправить файл руками:  {base_shown}\n"
@@ -971,14 +1094,14 @@ def _repair_message(
     if stage == REPAIR_STAGE_WITHOUT_PROFILE:
         named = f' "{profile}"' if profile else ""
         text = (
-            f"config.yml не читается с профилем{named} ({exc}) — профиль снят на этот "
+            f"config.yml не читается с профилем{named} ({_exc_summary(exc)}) — профиль снят на этот "
             f"запуск, остальные ваши настройки (адрес, токен, реестр моделей) действуют."
         )
         if pinned_by:
             text += f" Указатель на профиль лежит в managed-файле {pinned_by} — мастер его не снимет, снять нужно там."
         return text
     return (
-        f"config.yml не читается ({exc}) — продолжаю на пакетном шаблоне: ваших "
+        f"config.yml не читается ({_exc_summary(exc)}) — продолжаю на пакетном шаблоне: ваших "
         f"настроек в мастере не видно. Ответы лягут в ваш файл точечно, целиком он "
         f"не переписывается, и поломка, которой они не касаются, останется — тогда "
         f"поправьте файл руками или сбросьте его: gc-cli --reset-config."
@@ -1020,25 +1143,32 @@ def load_config_for_repair() -> RepairLoad:
     в `RepairLoad.config` доехал бы до `resolve_threads_dir` следом."""
     from gc_core.config import (
         _default_config_path,
-        load_config_ex,
+        load_settings,
         resolve_config_path,
     )
 
     try:
-        config, meta = load_config_ex(None)
-        return RepairLoad(config, meta, REPAIR_STAGE_FULL, None, "", False)
+        loaded = load_settings(None)
+        return RepairLoad(
+            loaded,
+            loaded.profile_meta,
+            REPAIR_STAGE_FULL,
+            None,
+            "",
+            False,
+            loaded,
+        )
     except ValueError as exc:
         broken = exc
 
     try:
-        config, meta = load_config_ex(None, profile_override="")
+        loaded = load_settings(None, profile_override="")
     except ValueError:
         try:
-            config, meta = load_config_ex(
-                _default_config_path(), profile_override=""
-            )
+            loaded = load_settings(_default_config_path(), profile_override="")
         except ValueError:
             raise broken from None
+        config, meta = loaded, loaded.profile_meta
         # Живой указатель на ступени шаблона — тупик записи (M10): гейт судит
         # стек следующего старта, где профиль лежит поверх несобираемой базы, и
         # отвергнет всё, что мастер соберёт (включая отдельное снятие
@@ -1067,8 +1197,10 @@ def load_config_for_repair() -> RepairLoad:
             _repair_message(REPAIR_STAGE_TEMPLATE, broken, ""),
             "",
             False,
+            loaded,
         )
 
+    config, meta = loaded, loaded.profile_meta
     from gc_core.config_modules.layers import (
         profile_pointer_write_target,
         resolve_profile_pointer,
@@ -1107,6 +1239,7 @@ def load_config_for_repair() -> RepairLoad:
         ),
         profile,
         pinned_by is None,
+        loaded,
     )
 
 

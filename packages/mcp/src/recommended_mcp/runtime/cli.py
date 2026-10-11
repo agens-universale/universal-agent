@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import Any, Optional, Sequence
 
 
 def _inst():
@@ -436,11 +436,17 @@ def installed_state(
     return {"installed": True, "version": version, "update": update}
 
 
-def manual_server_names(user_config: Optional[dict]) -> list:
+def manual_server_names(settings: Any) -> list:
     """Имена серверов, заведённых вручную в user config.yml (рантайм-ключ
-    'mcp-servers'), — управлять ими из TUI нельзя (read-only блок)."""
-    servers = (user_config or {}).get("mcp-servers") or {}
-    return list(servers.keys())
+    'mcp-servers'), — управлять ими из TUI нельзя (read-only блок).
+
+    ``settings`` — всё, что принимает ``settings_of`` (контекст,
+    ``LoadedSettings``, ``AppConfig``); ``None`` — серверов нет."""
+    if settings is None:
+        return []
+    from gc_core.settings import settings_of
+
+    return list(settings_of(settings).mcp.servers)
 
 
 if __name__ == "__main__":

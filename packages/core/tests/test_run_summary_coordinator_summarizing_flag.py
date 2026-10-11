@@ -2,7 +2,6 @@
 
 import pytest
 from gc_core import run_summary_coordinator as rsc
-from gc_core import thread_store
 
 
 class _FakeTS:
@@ -12,10 +11,10 @@ class _FakeTS:
     здесь как раз и делегирует в модульные функции, которые тест подменяет.
     """
 
-    def __init__(self):
+    def __init__(self, tmp_path):
         from gc_core.thread_store_file import FileThreadStore
 
-        self.threads_dir = "/tmp/x"
+        self.threads_dir = str(tmp_path)
         self.system_id = "cli"
         self.thread_id = "t1"
         self.meta = {}
@@ -34,17 +33,21 @@ class _FakeTS:
 
 
 def _patch_flush(monkeypatch, ts):
-    monkeypatch.setattr(thread_store, "load_thread_meta", lambda *a, **k: {})
+    original = ts.store.patch_runtime_flag
 
-    def fake_save(threads_dir, system_id, thread_id, meta):
-        rt = meta.get("runtime") or {}
-        ts.flushed_states.append(bool(rt.get("summarizing")))
+    def record(*args, **kwargs):
+        result = original(*args, **kwargs)
+        disk = ts.store.load_meta(ts.system_id, ts.thread_id)
+        ts.flushed_states.append(
+            bool((disk.get("runtime") or {}).get("summarizing"))
+        )
+        return result
 
-    monkeypatch.setattr(thread_store, "save_thread_meta", fake_save)
+    monkeypatch.setattr(ts.store, "patch_runtime_flag", record)
 
 
-async def test_flag_set_during_and_cleared_after(monkeypatch):
-    ts = _FakeTS()
+async def test_flag_set_during_and_cleared_after(monkeypatch, tmp_path):
+    ts = _FakeTS(tmp_path)
     _patch_flush(monkeypatch, ts)
     seen_during = {}
 
@@ -59,8 +62,8 @@ async def test_flag_set_during_and_cleared_after(monkeypatch):
     assert ts.flushed_states == [True, False]
 
 
-async def test_flag_cleared_on_exception(monkeypatch):
-    ts = _FakeTS()
+async def test_flag_cleared_on_exception(monkeypatch, tmp_path):
+    ts = _FakeTS(tmp_path)
     _patch_flush(monkeypatch, ts)
     with pytest.raises(ValueError):
         async with rsc._asummarizing_flag(ts):
