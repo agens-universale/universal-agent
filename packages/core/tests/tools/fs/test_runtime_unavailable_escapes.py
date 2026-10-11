@@ -2,7 +2,6 @@
 
 import json
 import logging
-from types import SimpleNamespace
 
 import pytest
 from gc_core.backends.runtime_probe import RuntimeUnavailable
@@ -19,6 +18,7 @@ from gc_core.tools.fs.literal_edit_common import (
 from gc_core.tools.fs.search_and_replace import SearchAndReplace
 from gc_core.tools.fs.write_to_file_tool import WriteToFile
 from gc_testkit.harbor_fakes import FakeBackend, bind_os_backend
+from gc_testkit.settings import fake_ctx
 
 _DOWN = RuntimeUnavailable(stderr="docker down")
 _DIR = {"/work/.keep": "", "/work/f.txt": "hello\n"}
@@ -240,13 +240,14 @@ async def test_apply_tool_reports_runtime_down_not_internal_error():
     from gc_core.tools import aapply_tool
 
     backend = _Boom(_DIR, op="write")
-    cfg: dict = {}
-    ctx = SimpleNamespace(
-        config_dict=cfg,
+    # Корень — каталог фиктивной среды: иначе охрана записи видит /work
+    # вне cwd хоста и отменяет вызов, не дойдя до отказа среды.
+    ctx = fake_ctx(
+        {"launch_root": "/work"},
         os_backend=backend,
-        workspace=build_execution_workspace(backend, cfg),
         logger=logging.getLogger("test_runtime_unavailable"),
     )
+    ctx.workspace = build_execution_workspace(backend, ctx)
     raw = await aapply_tool(
         tool_name="fs_write_file",
         arguments=json.dumps({"path": "/work/f.txt", "content": "x"}),
