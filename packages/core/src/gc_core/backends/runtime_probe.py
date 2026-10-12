@@ -12,7 +12,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import random
 import time
 from typing import Any, Awaitable, Callable
@@ -130,14 +129,14 @@ async def aensure_runtime(run: ProbeRun) -> None:
 class RuntimeProbeCache:
     """Успешная проба жива ``ttl_sec`` секунд. Отказ проверяется снова сразу.
 
-    Параллельные вызовы делят один echo: второй ждёт первый и, если тот
-    прошёл, свой не шлёт.
+    Лока нет: бэкенд переживает несколько ``asyncio.run`` (TUI — по одному на
+    ход), а ``asyncio.Lock`` привязывается к loop первого захвата и на следующем
+    ходе падает. Двойной echo безвреден — лишний round-trip, не рассогласование.
     """
 
     def __init__(self, ttl_sec: int = DEFAULT_RUNTIME_PROBE_TTL_SEC) -> None:
         self.ttl_sec = ttl_sec
         self._ok_until = 0.0
-        self._lock = asyncio.Lock()
 
     def _fresh(self) -> bool:
         return self.ttl_sec > 0 and time.monotonic() < self._ok_until
@@ -145,11 +144,6 @@ class RuntimeProbeCache:
     async def ensure(self, run: ProbeRun) -> None:
         if self._fresh():
             return
-        if self.ttl_sec <= 0:
-            await aensure_runtime(run)
-            return
-        async with self._lock:
-            if self._fresh():
-                return
-            await aensure_runtime(run)
+        await aensure_runtime(run)
+        if self.ttl_sec > 0:
             self._ok_until = time.monotonic() + self.ttl_sec

@@ -162,39 +162,84 @@ async def test_zero_ttl_probes_every_call():
     assert len(calls) == 2
 
 
-async def test_parallel_calls_share_one_successful_probe():
+async def test_parallel_calls_all_succeed_without_a_lock():
+    """Без лока гонка даёт лишний echo, но не падает и кэш после успеха жив."""
     calls: list[str] = []
-    started = asyncio.Event()
-    release = asyncio.Event()
+    cache = RuntimeProbeCache(10)
+    await asyncio.gather(
+        cache.ensure(_ok_run(calls)),
+        cache.ensure(_ok_run(calls)),
+        cache.ensure(_ok_run(calls)),
+    )
+    assert 1 <= len(calls) <= 3
+    n = len(calls)
+    await cache.ensure(_ok_run(calls))
+    assert len(calls) == n
 
-    async def run(command: str, _timeout: int):
-        calls.append(command)
-        if len(calls) == 1:
-            started.set()
-            await release.wait()
-        return type(
-            "Res",
-            (),
-            {
-                "stdout": probe_stdout(command),
-                "stderr": "",
-                "return_code": 0,
-                "timed_out": False,
-            },
-        )()
 
+def test_cache_survives_two_asyncio_run_with_parallel_calls(monkeypatch):
+    """TUI: бэкенд живёт сессию, каждый ход — свой asyncio.run.
+
+    Раньше ``asyncio.Lock`` привязывался к loop первого хода и на втором
+    параллельном ensure падал ``is bound to a different event loop``.
+    """
+    calls: list[str] = []
+    clock = {"t": 100.0}
+    monkeypatch.setattr(
+        "gc_core.backends.runtime_probe.time.monotonic", lambda: clock["t"]
+    )
     cache = RuntimeProbeCache(10)
 
-    async def go():
-        await cache.ensure(run)
+    async def burst():
+        await asyncio.gather(
+            cache.ensure(_ok_run(calls)),
+            cache.ensure(_ok_run(calls)),
+            cache.ensure(_ok_run(calls)),
+        )
 
-    first = asyncio.create_task(go())
-    await started.wait()
-    second = asyncio.create_task(go())
-    await asyncio.sleep(0)
-    release.set()
-    await asyncio.gather(first, second)
-    assert len(calls) == 1
+    asyncio.run(burst())
+    first = len(calls)
+    assert first >= 1
+    clock["t"] += 10
+    asyncio.run(burst())
+    assert len(calls) > first
+
+
+def test_remote_shell_survives_two_asyncio_run_with_parallel_aexec(
+    monkeypatch,
+):
+    """Тот же сценарий через RemoteShellBackend — как в TUI с docker/ssh/exec."""
+    from gc_core.backends.protocol import ExecResult
+    from gc_core.backends.remote_shell import RemoteShellBackend
+
+    clock = {"t": 100.0}
+    monkeypatch.setattr(
+        "gc_core.backends.runtime_probe.time.monotonic", lambda: clock["t"]
+    )
+
+    async def fake_process(argv, **kw):
+        hit = probe_stdout(argv[-1])
+        if hit is not None:
+            return ExecResult(stdout=hit, return_code=0)
+        return ExecResult(stdout="ok\n", return_code=0)
+
+    monkeypatch.setattr(
+        "gc_core.backends.remote_shell._arun_bounded_process", fake_process
+    )
+    backend = RemoteShellBackend(["docker", "exec", "-i", "box"])
+
+    async def burst():
+        return await asyncio.gather(
+            backend.aexec("echo a"),
+            backend.aexec("echo b"),
+            backend.aexec("echo c"),
+        )
+
+    first = asyncio.run(burst())
+    assert [r.stdout for r in first] == ["ok\n", "ok\n", "ok\n"]
+    clock["t"] += 10
+    second = asyncio.run(burst())
+    assert [r.stdout for r in second] == ["ok\n", "ok\n", "ok\n"]
 
 
 def test_failed_probe_keeps_only_the_start_of_the_reply():
