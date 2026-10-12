@@ -99,14 +99,6 @@ def _occurrence_arg_error(
                 "field": "occurrence",
             },
         )
-    if occurrence == "all" and expected_matches is None:
-        return (
-            "Argument 'expected_matches' is required when occurrence='all'.",
-            {
-                "type": "invalid_argument",
-                "field": "expected_matches",
-            },
-        )
     return None
 
 
@@ -133,8 +125,9 @@ def _match_error_payload(
     original_search: str,
     content: str,
     expected_total_matches,
+    occurrence,
 ) -> "Dict[str, Any] | None":
-    """Payload ошибки поиска (нет вхождений / не то число), либо None."""
+    """Payload ошибки поиска (нет вхождений / не то число / нет expected_matches), либо None."""
     if not match_entries:
         return _miss_payload(original_search, content)
     if (
@@ -142,6 +135,8 @@ def _match_error_payload(
         and len(match_entries) != expected_total_matches
     ):
         return _mismatch_payload(match_entries, expected_total_matches)
+    if occurrence == "all" and expected_total_matches is None:
+        return _expected_matches_required_payload(match_entries)
     return None
 
 
@@ -165,6 +160,32 @@ def _mismatch_payload(
         suggestions=[],
         suggestions_total=0,
         error={"type": "match_count_mismatch"},
+    )
+
+
+def _expected_matches_required_payload(match_entries: list) -> Dict[str, Any]:
+    match_count = len(match_entries)
+    return dict(
+        ok=False,
+        matched=True,
+        replaced=0,
+        match_count=match_count,
+        line_numbers=sorted({entry[1] for entry in match_entries}),
+        match_ranges=[
+            {"start_line": entry[1], "end_line": entry[2]}
+            for entry in match_entries
+        ],
+        message=(
+            "occurrence='all' requires expected_matches equal to the total match "
+            f"count (found {match_count}). No changes made. "
+            f"Retry with expected_matches={match_count}."
+        ),
+        suggestions=[],
+        suggestions_total=0,
+        error={
+            "type": "expected_matches_required",
+            "field": "expected_matches",
+        },
     )
 
 
@@ -217,7 +238,8 @@ class SearchAndReplace(AbstractSimpleTool):
                 "Replaces exact text in a file using literal matching. "
                 "Uses literal string matching (case-sensitive, no regex). "
                 "Supports dry-run, occurrence selection, optional backup, and optional unified diff output. "
-                "When occurrence='all', expected_matches is required (tool fails without it). "
+                "When occurrence='all', expected_matches is required; if omitted, tool reports match_count "
+                "and makes no changes. "
                 "Always returns a JSON string with fields: ok, applied, matched, replaced, path, message, error."
             ),
             "parameters": {
@@ -239,15 +261,6 @@ class SearchAndReplace(AbstractSimpleTool):
                         "type": "boolean",
                         "description": "If true, do not modify the file; only report whether replacement would happen.",
                     },
-                    "expected_matches": {
-                        "type": "integer",
-                        "minimum": 0,
-                        "description": (
-                            "Required when occurrence='all' (tool fails with invalid_argument if omitted). "
-                            "Otherwise optional: if provided, tool fails unless the total number of matches "
-                            "in the file equals this value."
-                        ),
-                    },
                     "occurrence": {
                         "description": (
                             "Which occurrence to replace: 'first' (default), 'last', 'all', or 1-based integer index. "
@@ -260,6 +273,15 @@ class SearchAndReplace(AbstractSimpleTool):
                             },
                             {"type": "integer", "minimum": 1},
                         ],
+                    },
+                    "expected_matches": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "description": (
+                            "Required when occurrence='all' (if omitted, tool reports match_count and makes "
+                            "no changes). Otherwise optional: if provided, tool fails unless the total number "
+                            "of matches in the file equals this value."
+                        ),
                     },
                     "backup": {
                         "type": "boolean",
@@ -306,13 +328,13 @@ class SearchAndReplace(AbstractSimpleTool):
     def prompt_description(cls, settings: Any = None) -> str:
         description = """Tool name: fs_search_and_replace
 Tool description: Replaces exact text in a file using literal matching; supports dry-run, occurrence selection, expected match count, backup, and optional diff output.
-Input schema: {"type": "object", "properties": {"path": {"type": "string", "description": "The absolute path of the file to modify."}, "search": {"type": "string", "description": "The exact content to find and replace.  May be multiline."}, "replace": {"type": "string", "description": "The new content to replace the found content with.  May be multiline."}, "dry_run": {"type": "boolean"}, "expected_matches": {"type": "integer", "minimum": 0}, "occurrence": {"anyOf": [{"type": "string", "enum": ["first", "last", "all"]}, {"type": "integer", "minimum": 1}]}, "backup": {"type": "boolean"}, "return_diff": {"type": "boolean"}, "diff_context_lines": {"type": "integer", "minimum": 0}, "max_diff_chars": {"type": "integer", "minimum": 1}}, "required": ["path", "search", "replace"], "additionalProperties": false}
+Input schema: {"type": "object", "properties": {"path": {"type": "string", "description": "The absolute path of the file to modify."}, "search": {"type": "string", "description": "The exact content to find and replace.  May be multiline."}, "replace": {"type": "string", "description": "The new content to replace the found content with.  May be multiline."}, "dry_run": {"type": "boolean"}, "occurrence": {"anyOf": [{"type": "string", "enum": ["first", "last", "all"]}, {"type": "integer", "minimum": 1}]}, "expected_matches": {"type": "integer", "minimum": 0}, "backup": {"type": "boolean"}, "return_diff": {"type": "boolean"}, "diff_context_lines": {"type": "integer", "minimum": 0}, "max_diff_chars": {"type": "integer", "minimum": 1}}, "required": ["path", "search", "replace"], "additionalProperties": false}
 
 Usage:
 - Modifies a **single file** by replacing one occurrence of `search` with `replace`.
 - The `search` string must match **exactly** (case-sensitive).
 - By default, only the **first match** is replaced. You can choose `occurrence="last"`, `occurrence="all"`, or a 1-based occurrence number.
-- When `occurrence="all"`, `expected_matches` is **required** (must equal the total match count); omitting it fails with invalid_argument.
+- When `occurrence="all"`, `expected_matches` is **required** (must equal the total match count); if omitted, tool reports `match_count` and makes no changes.
 - File is rewritten safely (write + replace) to prevent data loss.
 - Optional `dry_run=true` computes result without writing.
 - Optional `expected_matches` (always required for `occurrence="all"`) guards against unintended edits when total match count differs.
@@ -554,7 +576,11 @@ Update version string:
         )
         match_count = len(match_entries)
         match_error = _match_error_payload(
-            match_entries, original_search, content, expected_total_matches
+            match_entries,
+            original_search,
+            content,
+            expected_total_matches,
+            occurrence,
         )
         if match_error is not None:
             return _result(**match_error)

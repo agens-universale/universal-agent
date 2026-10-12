@@ -155,7 +155,7 @@ def test_message_text_for_summary_includes_reasoning_tail():
 def test_message_text_for_summary_reasoning_tail_is_capped():
     from gc_core.message_format.serialization import _REASONING_TAIL_MAX_CHARS
 
-    long_rc = ("HEAD" * 800) + ("TAIL_MARKER_" + "z" * 40)
+    long_rc = ("HEAD" * 2500) + ("TAIL_MARKER_" + "z" * 40)
     assert len(long_rc) > _REASONING_TAIL_MAX_CHARS
     msg = {
         "type": "message",
