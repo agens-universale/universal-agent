@@ -3,10 +3,12 @@ import importlib.util
 import sys
 from pathlib import Path
 
+import pytest
 import yaml
-from gc_testkit.paths import HARBOR
+from gc_testkit.paths import HARBOR, REPO
 
 PROFILES = HARBOR / "profiles"
+BENCH_CONFIGS = REPO / "integrations" / "bench_configs"
 
 
 def _build(gc_cli_config):
@@ -72,3 +74,58 @@ def test_each_profile_toggles_match():
         assert (
             c.backend.chat_completion_kwargs["separate_reasoning"] is True
         ), fname
+
+
+def _gc_cli_configs(doc):
+    """gc_cli_config harbor-прогона: плоский профиль (``agent_kwargs``) или
+    Hydra-обёртка флита (``harbor_job.agents[i].kwargs``)."""
+    if "gc_cli_config" in (doc.get("agent_kwargs") or {}):
+        yield doc["agent_kwargs"]["gc_cli_config"]
+    for agent in (doc.get("harbor_job") or {}).get("agents") or []:
+        if "gc_cli_config" in (agent.get("kwargs") or {}):
+            yield agent["kwargs"]["gc_cli_config"]
+
+
+#: Определения harbor-прогонов в bench_configs (конфиги агента `0*.yml` судит
+#: tests/test_bench_configs_resolve.py). Страж там их только перечисляет, и
+#: профили uag_pre_v0.4_s200k_* дожили до develop с плоскими ключами
+#: (`backend_api_mode`), которые схема отвергает с 3f4ea089b.
+HARBOR_RUNS = sorted(
+    p
+    for p in BENCH_CONFIGS.glob("*.yml")
+    if list(_gc_cli_configs(yaml.safe_load(p.read_text()) or {}))
+)
+
+
+def test_harbor_runs_found():
+    """Страховка от вакуума: без файлов параметризация ниже пуста и зелена."""
+    assert len(HARBOR_RUNS) >= 6, [p.name for p in HARBOR_RUNS]
+
+
+@pytest.mark.parametrize("path", HARBOR_RUNS, ids=lambda p: p.stem)
+def test_bench_config_harbor_run_builds(path):
+    """Каждый gc_cli_config harbor-прогона собирается адаптером (схема develop)."""
+    for gcc in _gc_cli_configs(yaml.safe_load(path.read_text())):
+        _build(gcc)
+
+
+#: thinking в основном запросе, strip_think — три варианта эксперимента 2026-10-08.
+UAG_EXPECT = {
+    "uag_pre_v0.4_s200k_no_think.yml": (False, True),
+    "uag_pre_v0.4_s200k_think_strip.yml": (True, True),
+    "uag_pre_v0.4_s200k_think_keep.yml": (True, False),
+}
+
+
+@pytest.mark.parametrize("fname", sorted(UAG_EXPECT))
+def test_uag_s200k_profiles_keep_their_setup(fname):
+    thinking, strip = UAG_EXPECT[fname]
+    doc = yaml.safe_load((BENCH_CONFIGS / fname).read_text())
+    (gcc,) = _gc_cli_configs(doc)
+    c, _ = _build(gcc)
+    kwargs = c.backend.chat_completion_kwargs
+    assert kwargs["chat_template_kwargs"]["enable_thinking"] is thinking
+    assert c.strip_tags_projection.strip_think is strip
+    assert c.summary.chat_completions_summary_trigger_tokens == 200000
+    assert c.summary.chat_completions_summary_trigger_chars == 0
+    assert c.agent.harbor_exec_init == "bashrc"
