@@ -278,6 +278,18 @@ class AgentRunner:
             return None
         return ex.get_model_router()
 
+    def pinned_summary_limits(self) -> Any:
+        """Read-only: пороги сжатия, по которым работает ЭТОТ executor
+        (`AgentExecutor.summary_limits`) — его снимок конфига, его Router, уровень
+        хода. Индикатор контекста берёт знаменатель отсюда, а не из живого конфига
+        экрана: тот отражает /level и /profiles раньше, чем их увидит ход.
+
+        None — executor ещё не построен."""
+        ex = self._executor
+        if ex is None or not hasattr(ex, "summary_limits"):
+            return None
+        return ex.summary_limits()
+
     def usage_snapshot(self) -> Optional[tuple]:
         """Снимок usage от executor'а для футера: ``(session_meta, last_run_meta|None)``
         или None. Не строит executor (снапшот нужен и до первого прогона — тогда None)."""

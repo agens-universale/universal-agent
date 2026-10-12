@@ -14,7 +14,13 @@ from typing import Any, Callable, Optional
 
 from gc_core.utils.http_auth import authorization_attempts
 
+# Пути каталога моделей: /config (gigacode) предпочтительнее /models.
 _CONFIG_PATH = "/config"
+_MODELS_PATH = "/models"
+_MODEL_ID_KEYS = ("id", "name", "model")
+# Размер окна в `/models`: `context_length` — OpenRouter и Cloud.ru, `max_model_len`
+# — серверы на vLLM (Cloud.ru отдаёт оба). Читает `model_context_window`.
+_CONTEXT_WINDOW_KEYS = ("context_length", "max_model_len")
 
 
 @dataclass(frozen=True)
@@ -40,6 +46,71 @@ class FetchOutcome:
     status: Optional[int]
     network_error: str
     latency_ms: int
+    # Сырое тело ответа, из которого собран список id (форма показывает JSON карточки).
+    payload: Optional[dict] = None
+
+
+def match_model_objects(payload: Optional[dict], model_id: str) -> list[dict]:
+    """Объекты карточки с ``id``/``name``/``model`` == model_id из сырого тела.
+
+    Ищет в ``data[]``, верхнем ``models[]`` и ``chat.models[]`` — что есть в теле.
+    Совпало несколько — все, по порядку обхода коллекций и элементов.
+    """
+    if not isinstance(payload, dict) or not model_id:
+        return []
+    found: list[dict] = []
+    for collection in _model_object_collections(payload):
+        for obj in collection:
+            if _card_matches_model_id(obj, model_id):
+                found.append(obj)
+    return found
+
+
+def _card_matches_model_id(obj: Any, model_id: str) -> bool:
+    if not isinstance(obj, dict):
+        return False
+    for key in _MODEL_ID_KEYS:
+        if key in obj and str(obj[key]) == model_id:
+            return True
+    return False
+
+
+def _model_object_collections(payload: dict) -> list[list]:
+    collections: list[list] = []
+    data = payload.get("data")
+    if isinstance(data, list):
+        collections.append(data)
+    models = payload.get("models")
+    if isinstance(models, list):
+        collections.append(models)
+    chat = payload.get("chat")
+    if isinstance(chat, dict):
+        chat_models = chat.get("models")
+        if isinstance(chat_models, list):
+            collections.append(chat_models)
+    return collections
+
+
+def model_context_window(card: Any) -> Optional[int]:
+    """Размер контекстного окна из объекта модели каталога — или `None`.
+
+    Читает строка окна в форме записи модели — из того же объекта, который
+    открывается как сведения провайдера. Окном считается первое положительное
+    целое; ноль и bool — нет (после них смотрим дальше)."""
+    if not isinstance(card, dict):
+        return None
+    candidates = [card.get(key) for key in _CONTEXT_WINDOW_KEYS]
+    plugin_side = card.get("plugin_side")
+    if isinstance(plugin_side, dict):
+        candidates.append(plugin_side.get("context_window_size"))
+    for value in candidates:
+        if (
+            isinstance(value, int)
+            and not isinstance(value, bool)
+            and value > 0
+        ):
+            return value
+    return None
 
 
 def parse_config_models(payload: dict) -> list:
@@ -263,40 +334,40 @@ def probe_fetch(
     """models-цепочка (/config → /models); без доступного каталога 401 приоритетнее прочих кодов."""
     import time
 
-    if http_get_ex is None:
-
-        def get_ex(url, headers, verify):
-            return _requests_get_ex(
-                url, headers, verify, config_proxy=config_proxy
-            )
-    else:
-        get_ex = http_get_ex
+    get_ex = http_get_ex or (
+        lambda url, headers, verify: _requests_get_ex(
+            url, headers, verify, config_proxy=config_proxy
+        )
+    )
     base = api_base(completions_url)
-    auth_forms = authorization_attempts(auth_header) or [auth_header]
-    t0 = time.monotonic()
     if not base:
         return FetchOutcome(None, None, "пустой адрес", 0)
+    auth_forms = authorization_attempts(auth_header) or [auth_header]
+    t0 = time.monotonic()
     statuses: list = []
     net_errors: list = []
     empty_catalog_status = None
     for path, parser in (
         (_CONFIG_PATH, parse_config_models),
-        ("/models", parse_models_list),
+        (_MODELS_PATH, parse_models_list),
     ):
         reply = _get_with_auth_forms(get_ex, base + path, auth_forms, verify)
         parsed = _parse_reply_models(reply, parser)
         if _is_catalog_reply(reply, parsed, _raw_catalog(reply, path)):
             if parsed:
+                payload = (
+                    reply.payload if isinstance(reply.payload, dict) else None
+                )
                 return FetchOutcome(
                     parsed,
                     reply.status,
                     "",
                     int((time.monotonic() - t0) * 1000),
+                    payload=payload,
                 )
-            # Пустой /config ещё не исключает каталог на /models. Если и
-            # там моделей нет, сохраняем факт доступного пустого каталога.
+            # Пустой /config ещё не исключает каталог на /models.
             empty_catalog_status = reply.status
-        if reply.status is not None:
+        elif reply.status is not None:
             statuses.append(reply.status)
         else:
             net_errors.append(reply.network_error)
@@ -304,6 +375,25 @@ def probe_fetch(
     return _failed_fetch_outcome(
         empty_catalog_status, statuses, net_errors, latency
     )
+
+
+def fetch_models_catalog(
+    completions_url: str,
+    auth_header: Optional[str],
+    *,
+    verify: bool | str = True,
+    config_proxy: Optional[str] = None,
+    http_get_ex: Optional[Callable] = None,
+) -> tuple[Optional[list], Optional[dict]]:
+    """Список id и сырое тело ответа — для формы модели (карточка JSON)."""
+    out = probe_fetch(
+        completions_url,
+        auth_header,
+        verify=verify,
+        config_proxy=config_proxy,
+        http_get_ex=http_get_ex,
+    )
+    return out.models, out.payload
 
 
 def probe_post(
@@ -377,7 +467,7 @@ def fetch_models(
     except Exception:
         pass
     try:
-        lst = get(base + "/models", headers, verify)
+        lst = get(base + _MODELS_PATH, headers, verify)
         return parse_models_list(lst)
     except Exception:
         pass

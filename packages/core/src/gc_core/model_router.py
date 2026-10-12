@@ -78,6 +78,9 @@ class ResolvedModel:
     auxiliary: dict | None = None
     # None — у алиаса ключа нет, persist берёт глобальный strip_think.
     strip_think: bool | None = None
+    # Mid-turn пороги сжатия. 0 = не задан (как отсутствие ключа в снимке).
+    summary_trigger_chars: int = 0
+    summary_trigger_tokens: int = 0
 
 
 class AliasCircuitOpenError(RuntimeError):
@@ -139,6 +142,15 @@ def _level_phrase(requested_level: str, resolved_level: str) -> str:
     return f"фоллбэк {requested_level} → {resolved_level}"
 
 
+def _nonneg_int(raw: Any) -> int:
+    """0 и отсутствие ключа — одно и то же для порогов сжатия на модели."""
+    try:
+        value = int(raw or 0)
+    except (TypeError, ValueError):
+        return 0
+    return value if value > 0 else 0
+
+
 def serialize_model_entry(entry: ModelEntry) -> dict[str, Any]:
     """Проекция ``ModelEntry`` для роутера.
 
@@ -168,6 +180,11 @@ def serialize_model_entry(entry: ModelEntry) -> dict[str, Any]:
         projected["auxiliary"] = deepcopy(entry.auxiliary)
     if isinstance(entry.strip_think, bool):
         projected["strip_think"] = entry.strip_think
+    # 0 = «не задан» — резолв порога читает 0 и отсутствие ключа одинаково.
+    if entry.summary_trigger_chars > 0:
+        projected["summary_trigger_chars"] = entry.summary_trigger_chars
+    if entry.summary_trigger_tokens > 0:
+        projected["summary_trigger_tokens"] = entry.summary_trigger_tokens
     return projected
 
 
@@ -297,7 +314,25 @@ class ModelRouter:
             level, source_prefix="активный ", check_breaker=check_breaker
         )
 
-    def resolve_level(self, level: str) -> ResolvedModel:
+    def resolve_main_at_level(
+        self, level: str | None, *, check_breaker: bool = True
+    ) -> ResolvedModel:
+        """Модель main-трейса для УРОВНЯ ВЫЗОВА — единый ответ для запроса и для
+        всего, что обязано принадлежать той же модели (пороги сжатия истории).
+
+        Уровень задаёт вызывающий: сегодня это уровень, зафиксированный на ход
+        (`turn_boundary.begin_turn` → `state.turn_level`, спека §6.4) — живой
+        `/level` меняется без пересборки executor, и резолв по нему увёл бы модель
+        посреди цикла tool-call'ов. Уровня нет (ход не начинали через `begin_turn`
+        — легаси/тестовые двойники) или Router дочерний (у субагента модель уже
+        заморожена в самом Router'е) — обычный резолв `main`."""
+        if not level or self.is_subagent_child:
+            return self.resolve("main", check_breaker=check_breaker)
+        return self.resolve_level(level, check_breaker=check_breaker)
+
+    def resolve_level(
+        self, level: str, *, check_breaker: bool = True
+    ) -> ResolvedModel:
         """Резолв ПРОИЗВОЛЬНОГО уровня, не только активного (спека §12.1) — витринам
         (палитра `/level`) нужно честно показать, во что резолвится КАЖДАЯ из трёх
         позиций трека, а не только та, что сейчас активна через `level_provider`.
@@ -305,14 +340,17 @@ class ModelRouter:
         как обычно (§4 «Матрица фоллбэков»).
 
         Не только витринный: этим же путём резолвится main-трейс по уровню,
-        зафиксированному на ход (`processing_responses._resolve_main_for_turn`,
-        спека §6.4) — поэтому предохранитель здесь проверяется как в рантайме
-        (`check_breaker` по умолчанию), а не отключается «раз это витрина»."""
+        зафиксированному на ход (`resolve_main_at_level`, спека §6.4) — поэтому
+        предохранитель здесь проверяется как в рантайме (`check_breaker` по
+        умолчанию), а не отключается «раз это витрина». ``check_breaker=False`` —
+        чтение свойств записи (пороги сжатия): открытый алиас его не роняет."""
         if self._force_legacy:
             return self._resolve_legacy(source="легаси-форс --model")
         if self.registry_empty():
             return self._resolve_legacy(source="легаси")
-        return self._resolve_level(level, source_prefix="")
+        return self._resolve_level(
+            level, source_prefix="", check_breaker=check_breaker
+        )
 
     def _lookup_binding(self, consumer: str) -> tuple[str, str] | None:
         if consumer.startswith(SUBAGENT_CONSUMER_PREFIX):
@@ -375,6 +413,10 @@ class ModelRouter:
         strip_think = entry.get("strip_think")
         if not isinstance(strip_think, bool):
             strip_think = None
+        summary_trigger_chars = _nonneg_int(entry.get("summary_trigger_chars"))
+        summary_trigger_tokens = _nonneg_int(
+            entry.get("summary_trigger_tokens")
+        )
         url = (
             entry.get("url")
             or backend_overrides.get("completions_url")
@@ -391,6 +433,8 @@ class ModelRouter:
             main=main,
             auxiliary=auxiliary,
             strip_think=strip_think,
+            summary_trigger_chars=summary_trigger_chars,
+            summary_trigger_tokens=summary_trigger_tokens,
         )
         # Сессионный предохранитель (спека §8): открытый алиас — мгновенный отказ
         # резолва, без обращения к транспорту, В ЛЮБОМ потребителе (единая точка).

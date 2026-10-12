@@ -107,7 +107,7 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
                 cfg.summary.chat_completions_summary_trigger_chars,
                 123,
             )
-            self.assertEqual(cfg.summary.incremental_batch_chars, 172)
+            self.assertEqual(cfg.summary.incremental_batch_chars, 147)
             self.assertEqual(
                 cfg.summary.chat_completions_summary_turn_end_trigger_chars,
                 73,
@@ -269,7 +269,7 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
                     "  chat_completions_summary_trigger_chars: 50000\n"
                 )
             cfg = _load(cfg_path)
-            self.assertEqual(cfg.summary.incremental_batch_chars, 70000)
+            self.assertEqual(cfg.summary.incremental_batch_chars, 60000)
             self.assertEqual(
                 cfg.summary.chat_completions_summary_turn_end_trigger_chars,
                 30000,

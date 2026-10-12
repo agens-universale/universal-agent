@@ -54,6 +54,7 @@ from gc_tui.editors.model_entry_form import (
 )
 from gc_tui.form_frame import KEEP_IN_VIEW, reveal_focus
 from gc_tui.palette import ACCENT, DEEP_DIM, DIM, INK, WARN
+from gc_tui.widgets.action_row import ActionRow
 
 # Виджеты подтверждения в секции моделей.
 _CONFIRM_SELECTOR = ".models-confirm"
@@ -85,6 +86,7 @@ _FOOTER_FORM_URL = "Ctrl+S — сохранить/выйти · Alt+↓ — по
 _FOOTER_FORM_MODEL = "Ctrl+S — сохранить/выйти · Alt+↓ — перечитать список · Ctrl+Space — проверить связь · Esc — назад"
 _FOOTER_FORM_NOAUTH = "↑/↓ · Ctrl+S — сохранить/выйти · Space — переключить · Ctrl+Space — проверить связь · Esc — назад"
 _FOOTER_FORM_STRIP = "↑/↓ · Ctrl+S — сохранить/выйти · Space — переключить · Ctrl+Space — проверить связь · Esc — назад"
+_FOOTER_FORM_ACTION = "↑/↓ · Enter — открыть · Ctrl+S — сохранить/выйти · Ctrl+Space — проверить связь · Esc — назад"
 _FOOTER_FORM_FIELD = "↑/↓ · Ctrl+S — сохранить/выйти · Ctrl+Space — проверить связь · Esc — назад"
 # Пара своя и курсор на одном из её полей: `Ctrl+U` возвращает общее подключение
 # ЦЕЛИКОМ (§5). Слова взяты из словаря формы, а не списаны заново: ту же клавишу
@@ -695,8 +697,10 @@ class ModelsSectionEditor(Vertical):
         on_change=None,
         on_notice=None,
         on_legacy_save=None,
+        global_config: dict | None = None,
     ) -> None:
         super().__init__(classes="onb-dyn")
+        self._global_config = global_config
         self._target = target
         self._template = template
         # Что за файл перед нами — единственное, чем режимы отличаются: валидатор
@@ -1961,6 +1965,8 @@ class ModelsSectionEditor(Vertical):
             return _FOOTER_FORM_NOAUTH
         if form.on_strip_row:
             return _FOOTER_FORM_STRIP
+        if form.on_action_row:
+            return _FOOTER_FORM_ACTION
         # Остались поле токена и поле алиаса. Ни одному из них футер клавишу не
         # обещает: у токена её называет ПОДПИСЬ ПОЛЯ (`_TOKEN_LABEL_INHERIT`, канон
         # `ConnectionEditor._token_label`) — повторять то же обещание в одном кадре
@@ -1978,6 +1984,35 @@ class ModelsSectionEditor(Vertical):
 
         self.app.push_screen(ModelHelpScreen())
         return True
+
+    def open_form_card(self) -> bool:
+        """Запись о модели из каталога провайдера — отдельным экраном: в форме от
+        неё одна строка. `False` — открывать нечего, клавиша не наша."""
+        if self._form is None or self._picker is not None:
+            return False
+        card = self._form.model_card()
+        if card is None:
+            return False
+        from gc_tui.screens.viewer import ViewerScreen
+
+        model_id, content = card
+        self.app.push_screen(
+            ViewerScreen(
+                title=f"Настройки · Сведения провайдера о модели · {model_id}",
+                content=content,
+            )
+        )
+        return True
+
+    def on_action_row_pressed(self, message: ActionRow.Pressed) -> None:
+        """Enter или клик по строке-действию формы — то же действие, что её
+        F-клавиша. Под вопросом секции мышь молчит, как клавиши."""
+        message.stop()
+        if self.awaiting_confirm:
+            return
+        {"help": self.open_form_help, "card": self.open_form_card}[
+            message.action
+        ]()
 
     def form_keeps_key(self, key: str) -> bool:
         """YAML-поля формы держат Enter и стрелки внутри текста.
@@ -2250,6 +2285,7 @@ class ModelsSectionEditor(Vertical):
             config_proxy=self._config_proxy,
             base_aliases=frozenset(self._base_entries),
             base_entry=self._base_entry(alias) if alias is not None else {},
+            global_config=self._global_config,
         )
         self._legacy_open = False  # форма занимает тело целиком
         self._rebuild()

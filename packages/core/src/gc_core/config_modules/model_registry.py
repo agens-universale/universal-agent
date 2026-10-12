@@ -430,6 +430,10 @@ class ModelEntry(BaseModel):
     # None — ключа нет, ход берёт глобальный strip_tags_projection.strip_think.
     # true — вырезать мысль из истории. false — копировать скрытое поле.
     strip_think: bool | None = None
+    # Mid-turn пороги сжатия на алиасе. 0 / нет ключа — шкала не задана.
+    # Хотя бы одно > 0 — режим модели (см. summarize.config.resolve_summary_limits).
+    summary_trigger_chars: int = 0
+    summary_trigger_tokens: int = 0
 
     @field_validator("strip_think", mode="before")
     @classmethod
@@ -441,6 +445,23 @@ class ModelEntry(BaseModel):
         raise ValueError(
             "strip_think: true, false или отсутствие ключа (глобальный флаг)"
         )
+
+    @field_validator(
+        "summary_trigger_chars", "summary_trigger_tokens", mode="before"
+    )
+    @classmethod
+    def _summary_trigger_null_is_unset(cls, value: Any) -> Any:
+        # YAML null — «не задан», как у соседних ключей записи.
+        return 0 if value is None else value
+
+    @field_validator("summary_trigger_chars", "summary_trigger_tokens")
+    @classmethod
+    def _summary_trigger_nonneg(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError(
+                "summary_trigger_chars/tokens: отрицательное недопустимо"
+            )
+        return value
 
     @field_validator("main", "auxiliary", mode="before")
     @classmethod

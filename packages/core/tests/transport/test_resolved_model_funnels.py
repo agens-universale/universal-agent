@@ -37,6 +37,13 @@ def _canonical_once(processing_module, *args, **kwargs):
     )
 
 
+def _serve_main_trace(router) -> None:
+    """Main-трейс берёт модель через `ModelRouter.resolve_main_at_level` (уровень
+    вызова). У фейка без уровней это тот же `resolve("main")` — счёт вызовов
+    `resolve` в проверках остаётся прежним."""
+    router.resolve_main_at_level = lambda level, **_kw: router.resolve("main")
+
+
 def _resolved(**overrides) -> ResolvedModel:
     base = dict(
         alias="light",
@@ -655,7 +662,7 @@ def test_thread_summarizer_batch_declares_summary_consumer(monkeypatch):
             "backend.completions_url": "http://example.test/v1/chat/completions",
             "summary": {
                 "chat_completions_summary_trigger_chars": 999999,
-                "incremental_batch_chars": int(999999 * 1.4),
+                "incremental_batch_chars": int(999999 * 1.2),
                 "max_accumulated_summary_chars": 20000,
                 "last_dialog_steps_count": 5,
                 "last_dialog_step_message_max_chars": 5000,
@@ -715,6 +722,7 @@ def test_main_trace_resolves_and_declares_main_consumer(monkeypatch):
     router = SimpleNamespace(
         resolve=Mock(return_value=_resolved(model="light-model"))
     )
+    _serve_main_trace(router)
     ctx = fake_ctx(
         {
             "backend.api_mode": "chat_completions",
@@ -790,6 +798,7 @@ def test_main_trace_backend_overrides_apply_to_network_params(monkeypatch):
             )
         )
     )
+    _serve_main_trace(router)
     ctx = fake_ctx(
         {
             "backend.api_mode": "chat_completions",
@@ -914,6 +923,7 @@ def test_main_trace_responses_mode_ignores_network_overrides(monkeypatch):
             )
         )
     )
+    _serve_main_trace(router)
     ctx = fake_ctx(
         {
             "backend.api_mode": "responses",
@@ -1060,6 +1070,7 @@ def test_main_trace_backend_overrides_reach_retry_policy_and_token_limits(
             )
         )
     )
+    _serve_main_trace(router)
     ctx = fake_ctx(
         {
             "backend.api_mode": "chat_completions",

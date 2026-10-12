@@ -55,10 +55,7 @@ from gc_core.security.permission_store import PermissionStore
 from gc_core.settings import settings_of
 from gc_core.states import SharedStateData, State
 from gc_core.summarize.config import (
-    parse_summary_trigger_chars,
-    parse_summary_trigger_tokens,
-    parse_summary_turn_end_trigger_chars,
-    parse_summary_turn_end_trigger_tokens,
+    resolve_summary_limits_at_level,
 )
 from gc_core.thread_store import (
     ThreadSession,
@@ -956,12 +953,15 @@ class AgentExecutor:
         await areset_run_flags(thread_session)
         await self._amcp_snapshot(thread_session, thread_id, system_id)
 
-        summary_trigger_chars = parse_summary_trigger_chars(settings)
-        summary_trigger_tokens = parse_summary_trigger_tokens(settings)
-        turn_end_trigger_tokens = parse_summary_turn_end_trigger_tokens(
-            settings
-        )
-        turn_end_trigger_chars = parse_summary_turn_end_trigger_chars(settings)
+        # Стартовый снимок — модель хода ещё не зафиксирована (резолв main).
+        # limits_provider перечитывает пороги на каждой проверке: по уровню,
+        # который begin_turn записал в state, а не по глобальному summary.
+        limits_provider = self._history_summary_limits
+        initial_limits = limits_provider()
+        summary_trigger_chars = initial_limits.chars_during
+        summary_trigger_tokens = initial_limits.tokens_during
+        turn_end_trigger_chars = initial_limits.chars_after
+        turn_end_trigger_tokens = initial_limits.tokens_after
 
         chat_completions_system_prompt: str | None = None
         special_instructions: str | None = None
@@ -994,7 +994,6 @@ class AgentExecutor:
         self._ctx.permission_store = PermissionStore(
             session_rules=state.shared.confirm_rules
         )
-
         _extend_with_thread_history(state, thread_session, backend_api_mode)
 
         summary = RunSummaryCoordinator(
@@ -1008,6 +1007,7 @@ class AgentExecutor:
             is_cli_mode=is_cli_mode,
             pre_backend_trigger_reason="pre_backend",
             logger=logger,
+            limits_provider=limits_provider,
         )
         self._ctx.on_summary_applied = summary.on_summary_applied
         self._ctx.is_cli_mode = is_cli_mode
@@ -1173,6 +1173,22 @@ class AgentExecutor:
         ход её реально увидит. ``None`` — у ``ctx`` нет ``model_router`` (тестовые двойники).
         """
         return getattr(self._ctx, "model_router", None)
+
+    def _history_summary_limits(self):
+        """Пороги сжатия модели ХОДА на момент проверки (не снимок старта run):
+        по уровню, зафиксированному `begin_turn`, — тому же, по которому идут
+        запросы. До сборки state уровня ещё нет — обычный резолв `main`."""
+        return resolve_summary_limits_at_level(
+            self._ctx,
+            self.get_model_router(),
+            getattr(self._state, "turn_level", None),
+        )
+
+    def summary_limits(self):
+        """Пороги сжатия, по которым работает ЭТОТ executor: его снимок конфига,
+        его Router, уровень текущего хода. Читает индикатор контекста TUI — живой
+        конфиг экрана и живой `/level` меняются раньше, чем их увидит ход."""
+        return self._history_summary_limits()
 
     def usage_meta_snapshot(self) -> Optional[tuple[dict, Optional[dict]]]:
         """Снимок usage для TUI-футера: ``(session_meta, request_meta | None)``.

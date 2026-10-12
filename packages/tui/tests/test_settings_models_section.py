@@ -3706,3 +3706,180 @@ async def test_yaml_fields_use_settings_frame_and_focus_palette(tmp_path):
             "scrollbar_background_active",
         ):
             assert getattr(area.styles, name) == getattr(body.styles, name)
+
+
+# --- строки-действия формы: справка и карточка модели -------------------------
+
+_CARD = {"id": "google/gemini-2.5-flash", "context_length": 1048576}
+
+
+async def _open_form_with_card(pilot, scr):
+    """Форма новой записи с уже «загруженным» каталогом — без похода в сеть."""
+    from gc_core.model_picker import ModelInfo
+    from gc_tui.editors.model_entry_form import ModelEntryForm
+
+    await pilot.press("alt+n")
+    await pilot.pause()
+    form = scr.query(ModelEntryForm).last()
+    form._presets_ctrl.close()
+    form.query_one("#mef-alias", Input).value = "flash"
+    form.query_one("#mef-model", Input).value = _CARD["id"]
+    form._models = [ModelInfo(id=_CARD["id"])]
+    form._models_payload = {"data": [_CARD]}
+    form._catalog_key = (form._current_url(), form._current_auth_header())
+    form._refresh_model_metadata()
+    await pilot.pause()
+    # Вписанный руками id прошёл через `Input.Changed` и раскрыл список моделей;
+    # человек свернул бы его Esc, прежде чем идти стрелками дальше.
+    form._list.close()
+    await pilot.pause()  # раскладка без списка: клик целится по ней
+    return form
+
+
+async def _open_action_row(pilot, scr, form, row: str, how: str, key: str):
+    """Три пути к одному экрану: своя F-клавиша из любого поля, Enter на строке и
+    клик по ней."""
+    if how == "key":
+        await pilot.press(key)
+    elif how == "enter":
+        form._idx = form._positions.index(row)
+        form._focus_position()
+        scr._refresh_footer()
+        await pilot.pause()
+        await pilot.press("enter")
+    else:
+        await pilot.click(f"#{row}")
+
+
+@pytest.mark.parametrize("how", ["key", "enter", "click"])
+async def test_model_card_opens_in_a_viewer_and_esc_returns_to_the_form(
+    tmp_path, how
+):
+    """Полная карточка — отдельным экраном с прокруткой, а не простынёй в форме.
+    F2, Enter на строке и клик ведут в одно место; Esc возвращает в форму с
+    набранным."""
+    from gc_tui.editors.model_entry_form import ModelEntryForm
+    from gc_tui.screens.viewer import ViewerScreen
+
+    async with _section(tmp_path, size=(120, 80)) as (pilot, scr, _cfg_file):
+        form = await _open_form_with_card(pilot, scr)
+        await _open_action_row(pilot, scr, form, "mef-model-meta", how, "f2")
+        await pilot.pause()
+        viewer = pilot.app.screen
+        assert isinstance(viewer, ViewerScreen)
+        assert viewer._title == (
+            "Настройки · Сведения провайдера о модели"
+            " · google/gemini-2.5-flash"
+        )
+        assert viewer._content == _CARD
+        await pilot.press("escape")
+        await pilot.pause()
+        assert pilot.app.screen is scr
+        assert scr.query(ModelEntryForm).last() is form
+        assert form.query_one("#mef-alias", Input).value == "flash"
+
+
+@pytest.mark.parametrize("how", ["f2", "click"])
+async def test_inactive_window_row_opens_nothing(tmp_path, how):
+    """Сведений о модели нет — строка окна неактивна: ни F2, ни клик экран не
+    открывают."""
+    from gc_tui.editors.model_entry_form import ModelEntryForm
+
+    async with _section(tmp_path, size=(120, 80)) as (pilot, scr, _cfg_file):
+        await pilot.press("alt+n")
+        await pilot.pause()
+        form = scr.query(ModelEntryForm).last()
+        form._presets_ctrl.close()
+        await pilot.pause()
+        if how == "f2":
+            await pilot.press("f2")
+        else:
+            await pilot.click("#mef-model-meta")
+        await pilot.pause()
+        assert pilot.app.screen is scr
+        assert scr.query(ModelEntryForm)
+
+
+@pytest.mark.parametrize("how", ["key", "enter", "click"])
+async def test_form_help_opens_by_key_enter_and_click(tmp_path, how):
+    from gc_tui.screens.model_help import ModelHelpScreen
+
+    async with _section(tmp_path, size=(120, 80)) as (pilot, scr, _cfg_file):
+        form = await _open_form_with_card(pilot, scr)
+        await _open_action_row(pilot, scr, form, "mef-help-line", how, "f1")
+        await pilot.pause()
+        assert isinstance(pilot.app.screen, ModelHelpScreen)
+        await pilot.press("escape")
+        await pilot.pause()
+        assert pilot.app.screen is scr
+
+
+async def test_action_line_click_is_ignored_while_a_question_is_pending(
+    tmp_path,
+):
+    """Под вопросом секции мышь молчит так же, как клавиши: экран поверх баннера
+    увёл бы человека от вопроса, на который он ещё не ответил."""
+    async with _section(tmp_path, size=(120, 80)) as (pilot, scr, _cfg_file):
+        await _open_form_with_card(pilot, scr)
+        ed = _editor(scr)
+        ed._dirty_exit_pending = True
+        await pilot.click("#mef-help-line")
+        await pilot.pause()
+        assert pilot.app.screen is scr
+
+
+async def test_footer_on_an_action_row_promises_enter(tmp_path):
+    """Футер судит по позиции курсора: на строке-действии он обещает Enter, и
+    обещание одно на обе строки."""
+    async with _section(tmp_path, size=(120, 80)) as (pilot, scr, _cfg_file):
+        form = await _open_form_with_card(pilot, scr)
+        for row in ("mef-model-meta", "mef-help-line"):
+            form._idx = form._positions.index(row)
+            form._focus_position()
+            scr._refresh_footer()
+            await pilot.pause()
+            assert _footer(scr).startswith(
+                "↑/↓ · Enter — открыть · Ctrl+S — сохранить/выйти"
+            )
+
+
+async def test_empty_summary_trigger_shows_the_threshold_from_the_config_file(
+    tmp_path,
+):
+    """Сквозной путь от файла до поля: пустой порог показывает общий порог ИЗ
+    КОНФИГА, которым открыт экран, а не константу. Конфиг грузится настоящим
+    загрузчиком: упрощённый `_loaded` раздела `summary` не несёт, и на нём
+    проверка прошла бы мимо."""
+    from unittest import mock
+
+    from gc_core import model_picker
+    from gc_core.config import load_settings
+    from gc_tui import app as app_mod
+    from gc_tui.editors.model_entry_form import ModelEntryForm
+
+    cfg_file = _write_cfg(
+        tmp_path,
+        "summary:\n"
+        "  chat_completions_summary_trigger_chars: 150000\n"
+        "  chat_completions_summary_trigger_tokens: 60000\n",
+    )
+    cfg = load_settings(str(cfg_file))
+    app = app_mod.TuiApp(settings=cfg)
+    with mock.patch.object(model_picker, "fetch_models", lambda *a, **k: []):
+        async with app.run_test(size=(120, 80)) as pilot:
+            scr = _mk_screen(config=cfg, config_path=str(cfg_file))
+            app.push_screen(scr)
+            await pilot.pause()
+            open_settings_section(scr, _SECTION)
+            await pilot.pause()
+            await pilot.press("alt+n")
+            await pilot.pause()
+            form = scr.query(ModelEntryForm).last()
+            assert form.query_one("#mef-summary-chars", Input).placeholder == (
+                "не задан · действует общий порог для всех моделей: 150 000"
+            )
+            assert form.query_one(
+                "#mef-summary-tokens", Input
+            ).placeholder == (
+                "не задан · действует общий порог для всех моделей: 60 000"
+            )

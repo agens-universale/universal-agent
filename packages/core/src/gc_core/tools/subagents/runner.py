@@ -64,9 +64,7 @@ from gc_core.settings import (
 from gc_core.state_preparation import prepare_state
 from gc_core.states import State
 from gc_core.summarize.config import (
-    parse_summary_trigger_chars,
-    parse_summary_trigger_tokens,
-    summary_mid_turn_enabled,
+    resolve_summary_limits_at_level,
 )
 from gc_core.tools import (
     abuild_tools_data,
@@ -299,23 +297,31 @@ class SubagentRunner:
         self, child_ctx: Any, child_state: Any
     ) -> Optional[Callable]:
         """Хук компакции ребёнка перед backend-вызовом; ``None`` — компакция выключена."""
-        settings = self._parent_settings()
-        summary_trigger_chars = parse_summary_trigger_chars(settings)
-        should_enable_summary = (
-            child_state.backend_api_mode == "chat_completions"
-            and summary_mid_turn_enabled(settings)
-        )
-        if not should_enable_summary:
+        if child_state.backend_api_mode != "chat_completions":
             return None
+
+        def child_limits():
+            return resolve_summary_limits_at_level(
+                self._parent_source(),
+                getattr(child_ctx, "model_router", None),
+                getattr(child_state, "turn_level", None),
+            )
+
+        # Хук для chat_completions: порог читается на проверке (смена алиаса).
+        # Глобальный mid-turn выключен и у модели хода оба порога 0 — координатор no-op.
+        limits = child_limits()
         summary = RunSummaryCoordinator(
             ctx=child_ctx,
             state=child_state,
             thread_session=None,
-            summary_trigger_chars=summary_trigger_chars,
-            summary_trigger_tokens=parse_summary_trigger_tokens(settings),
+            summary_trigger_chars=limits.chars_during,
+            summary_trigger_tokens=limits.tokens_during,
+            turn_end_trigger_chars=limits.chars_after,
+            turn_end_trigger_tokens=limits.tokens_after,
             is_cli_mode=False,
             pre_backend_trigger_reason="subagent_pre_backend",
             logger=_log,
+            limits_provider=child_limits,
         )
         # Sidecar marker when child compaction applies (append-only; no rewrite).
         _orig_on_summary = summary.on_summary_applied

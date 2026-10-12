@@ -20,7 +20,7 @@ DEFAULT_FINISH_GATE_MAX_ITERATIONS = 10
 DEFAULT_SUBAGENT_FINISH_GATE_MAX_ITERATIONS = 3
 # Дефолтный таймаут execute_command / run_python_code (секунды).
 # Harbor и длинные бенчи поднимают через config (обычно 600).
-DEFAULT_EXEC_TIMEOUT_SEC = 120
+DEFAULT_EXEC_TIMEOUT_SEC = 200
 
 
 class LoopDetectorConfig(BaseModel):

@@ -8,7 +8,6 @@ from gc_core.summarize.config import (
     parse_summary_trigger_tokens,
     parse_summary_turn_end_trigger_chars,
     parse_summary_turn_end_trigger_tokens,
-    summary_mid_turn_enabled,
 )
 from gc_testkit.settings import make_settings
 from pydantic import ValidationError
@@ -117,26 +116,6 @@ def test_turn_end_tokens_default_sixty_percent_via_load_settings():
         assert summary.chat_completions_summary_trigger_chars == 0
 
 
-def test_mid_turn_enabled_when_either_threshold_positive():
-    assert summary_mid_turn_enabled(make_settings({"summary": {}})) is False
-    assert (
-        summary_mid_turn_enabled(
-            make_settings(
-                {"summary": {"chat_completions_summary_trigger_chars": 10}}
-            )
-        )
-        is True
-    )
-    assert (
-        summary_mid_turn_enabled(
-            make_settings(
-                {"summary": {"chat_completions_summary_trigger_tokens": 10}}
-            )
-        )
-        is True
-    )
-
-
 def _load_summary(summary_yaml: str):
     with tempfile.TemporaryDirectory() as tmp_dir:
         cfg_path = os.path.join(tmp_dir, "config.yml")
@@ -153,16 +132,16 @@ def test_batch_from_chars_threshold_when_set():
         "  chat_completions_summary_trigger_chars: 200000\n"
         "  chat_completions_summary_trigger_tokens: 50000\n"
     )
-    assert params.incremental_batch_chars == 280000
+    assert params.incremental_batch_chars == 240000
 
 
 def test_batch_from_tokens_threshold_when_chars_off():
-    # Два символа на токен — тот же курс, что и в оценке хвоста; ×1.4 — как у символов.
+    # Два символа на токен — тот же курс, что и в оценке хвоста; ×1.2 — как у символов.
     params = _load_summary(
         "  chat_completions_summary_trigger_chars: 0\n"
         "  chat_completions_summary_trigger_tokens: 100000\n"
     )
-    assert params.incremental_batch_chars == 280000
+    assert params.incremental_batch_chars == 240000
 
 
 def test_explicit_batch_wins_over_tokens_threshold():

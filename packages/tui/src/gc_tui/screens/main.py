@@ -1155,18 +1155,11 @@ class TraceScreen(Screen):
         if self._store is None or self._active_task_id is None:
             return None
         meta = self._store.get_task_meta(self._active_task_id)
-        from gc_core.summarize.config import (
-            parse_summary_trigger_chars,
-            parse_summary_trigger_tokens,
-            parse_summary_turn_end_trigger_chars,
-            parse_summary_turn_end_trigger_tokens,
-        )
-
-        # Токенная шкала — сохранённое число провайдера без хвоста. Числа нет
-        # или токенный порог выключен — символы, как раньше. Знаменатель шкалы —
-        # её mid-turn; mid-turn 0 подменяется её turn-end, и только тогда.
-        token_mid = parse_summary_trigger_tokens(cfg)
-        token_end = parse_summary_turn_end_trigger_tokens(cfg)
+        # Знаменатель — mid-turn активной шкалы модели, которая ведёт историю.
+        # mid-turn 0 подменяется turn-end той же шкалы.
+        limits = self._meter_summary_limits(cfg)
+        token_mid = limits.tokens_during
+        token_end = limits.tokens_after
         saved_tokens = meta.get("last_main_prompt_tokens")
         if (
             not isinstance(saved_tokens, bool)
@@ -1179,9 +1172,7 @@ class TraceScreen(Screen):
                 return None
             return render_context_meter(saved_tokens, denominator)
 
-        threshold = parse_summary_trigger_chars(
-            cfg
-        ) or parse_summary_turn_end_trigger_chars(cfg)
+        threshold = limits.chars_during or limits.chars_after
         if threshold <= 0:
             return None
         # Источник символьной шкалы — meta.runtime.live_history_chars (persist).
@@ -1193,6 +1184,33 @@ class TraceScreen(Screen):
         except (TypeError, ValueError):
             return None
         return render_context_meter(chars, threshold)
+
+    def _meter_summary_limits(self, cfg: dict):
+        """Пороги для знаменателя индикатора контекста.
+
+        Пока ход идёт — те, по которым сжимает РАБОТАЮЩИЙ агент
+        (`runner.pinned_summary_limits`): его снимок конфига и уровень,
+        закреплённый на ход. Экран видит /level и /profiles сразу, ход — со
+        следующего, и по живым данным бар показывал бы не тот порог, по которому
+        реально сработает сжатие. Вне хода — живой конфиг и живой Router: это
+        пороги СЛЕДУЮЩЕГО хода."""
+        runner = getattr(self.app, "active_runner", None)
+        is_running = getattr(runner, "is_running", None)
+        pinned = getattr(runner, "pinned_summary_limits", None)
+        if callable(is_running) and is_running() and callable(pinned):
+            limits = pinned()
+            if limits is not None:
+                return limits
+        from gc_core.summarize.config import resolve_summary_limits_at_level
+
+        router = None
+        display_router = getattr(self.app, "display_router", None)
+        if callable(display_router):
+            try:
+                router = display_router()
+            except Exception:
+                router = None
+        return resolve_summary_limits_at_level(cfg, router, None)
 
     def _session_status_word(self) -> Optional[str]:
         """Сырое слово статуса сессии (без скобок): asking/running/completed/

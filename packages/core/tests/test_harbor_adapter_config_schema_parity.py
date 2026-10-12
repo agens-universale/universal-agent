@@ -155,7 +155,7 @@ def test_bench_defaults_win_over_schema_defaults():
     assert config.security.read_guard.enabled is False
     assert config.security.command_moderation.mode == "allow"
     assert config.agent.exec_timeout_sec == 600
-    assert AppConfig.model_validate({}).agent.exec_timeout_sec == 120
+    assert AppConfig.model_validate({}).agent.exec_timeout_sec == 200
 
 
 def test_profile_can_override_runtime_os_backend():

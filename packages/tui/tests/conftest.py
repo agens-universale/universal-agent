@@ -167,6 +167,20 @@ def _isolate_image_temp_root(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_network_model_catalog(monkeypatch):
+    """Форма записи реестра запрашивает каталог провайдера при открытии записи с
+    id модели. Без инъекции `fetch` она взяла бы настоящий
+    `model_picker.fetch_models_catalog` и пошла бы в сеть из любого теста, открывшего
+    запись. Здесь каталог «не ответил»; тесту, которому он нужен, — свой `fetch`
+    или своя подмена поверх этой."""
+    from gc_core import model_picker
+
+    monkeypatch.setattr(
+        model_picker, "fetch_models_catalog", lambda *a, **k: (None, None)
+    )
+
+
+@pytest.fixture(autouse=True)
 def _isolate_model_list_cache():
     """ModelEditor ходит за списком моделей через session-кэш
     (`gc_tui.services.model_list_cache`) — модуль-уровневый dict переживает между

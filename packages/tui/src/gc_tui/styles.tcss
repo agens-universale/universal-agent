@@ -610,9 +610,10 @@ TextArea.ask-human-mode { border: solid $run-color; }
 #onb-degraded-warn { height: auto; margin-bottom: 1; }
 #onb-body { height: auto; padding: 0; margin-bottom: 1; }   /* воздух под заголовком шага (как #set-title) */
 /* Поля ввода — плоские, как #config-filter (без дефолтной рамки Input, что мусорит box-символами). */
-#onb-model, #onb-level-model, #conn-url, #conn-token, #conn-proxy, #mef-alias, #mef-model, #mef-url, #mef-token, #set-profile-name, #voice-url, #voice-token, #voice-model, #voice-lang { height: 1; width: 1fr; border: none; padding: 0; background: $bg; color: $ink; }
+#onb-model, #onb-level-model, #conn-url, #conn-token, #conn-proxy, #mef-alias, #mef-model, #mef-url, #mef-token, #mef-summary-chars, #mef-summary-tokens, #set-profile-name, #voice-url, #voice-token, #voice-model, #voice-lang { height: 1; width: 1fr; border: none; padding: 0; background: $bg; color: $ink; }
 #onb-model:focus, #onb-level-model:focus, #conn-url:focus, #conn-token:focus, #conn-proxy:focus,
 #mef-alias:focus, #mef-model:focus, #mef-url:focus, #mef-token:focus,
+#mef-summary-chars:focus, #mef-summary-tokens:focus,
 #set-profile-name:focus, #voice-url:focus, #voice-token:focus, #voice-model:focus,
 #voice-lang:focus { border: none; background: $band-bg; }
 .onb-option { height: auto; padding: 0 1; width: 1fr; }
@@ -714,6 +715,7 @@ TextArea.ask-human-mode { border: solid $run-color; }
 #onb-model.set-framed, #onb-level-model.set-framed,
 #conn-url.set-framed, #conn-token.set-framed, #conn-proxy.set-framed,
 #mef-alias.set-framed, #mef-model.set-framed, #mef-url.set-framed, #mef-token.set-framed,
+#mef-summary-chars.set-framed, #mef-summary-tokens.set-framed,
 #set-profile-name.set-framed,
 #voice-url.set-framed, #voice-token.set-framed, #voice-model.set-framed, #voice-lang.set-framed {
     border: round $run-color; height: 3; width: 1fr; padding: 0 1; background: $bg;
@@ -722,6 +724,7 @@ TextArea.ask-human-mode { border: solid $run-color; }
 #conn-url.set-framed:focus, #conn-token.set-framed:focus, #conn-proxy.set-framed:focus,
 #mef-alias.set-framed:focus, #mef-model.set-framed:focus,
 #mef-url.set-framed:focus, #mef-token.set-framed:focus, #set-profile-name.set-framed:focus,
+#mef-summary-chars.set-framed:focus, #mef-summary-tokens.set-framed:focus,
 #voice-url.set-framed:focus, #voice-token.set-framed:focus, #voice-model.set-framed:focus,
 #voice-lang.set-framed:focus {
     border: round $run-color; background: $band-bg;

@@ -45,7 +45,7 @@
       - без `usage` в ответе провайдера порог не срабатывает; когда история по символам уже выше порога, а числа нет, в лог уходит предупреждение `summary_token_trigger_no_prompt_tokens`;
       - порог рассчитан как дополнение к символьному: в пользовательских конфигах символьный держать включённым, режим «только токены» — для бенчей;
     - `summary_params.chat_completions_summary_turn_end_trigger_chars` и `summary_params.chat_completions_summary_turn_end_trigger_tokens` — пороги уборки после принятого `turn_finish`; нет ключа — 60% от mid-turn порога той же шкалы, явный `0` выключает;
-    - `summary_params.incremental_batch_chars` — размер батча для кумулятивной суммаризации; если не задан, используется `int(summary_params.chat_completions_summary_trigger_chars * 1.4)`, а при выключенном символьном пороге — `int(summary_params.chat_completions_summary_trigger_tokens * 2 * 1.4)`;
+    - `summary_params.incremental_batch_chars` — размер батча для кумулятивной суммаризации; если не задан, используется `int(summary_params.chat_completions_summary_trigger_chars * 1.2)`, а при выключенном символьном пороге — `int(summary_params.chat_completions_summary_trigger_tokens * 2 * 1.2)`;
     - `summary_params.chat_completions_summary_prompt_path` (опционально), по умолчанию `prompts/chat_completions_summary_prompt.md`;
     - `summary_params.max_message_chars` — максимум символов на одно сообщение при подготовке истории к суммаризации (по умолчанию `50000`);
     - `summary_params.max_dialogue_chars` — максимум символов на весь диалог для суммаризации (по умолчанию `1000000`, берется хвост целыми сообщениями);
@@ -53,7 +53,8 @@
     - `summary_params.original_user_messages_max_chars` — лимит символов для `meta.user_messages_log` (единственный источник user-запросов для суммаризации); сохраняются последние сообщения целиком (по умолчанию `20000`);
     - `summary_params.last_dialog_steps_count` — сколько последних сообщений включать;
     - `summary_params.last_dialog_step_message_max_chars` — максимум символов на одно сообщение (лишнее обрезается).
-  - **Поток суммаризации** (только при `backend_api_mode: chat_completions` и положительном `summary_params.chat_completions_summary_trigger_chars` или `summary_params.chat_completions_summary_trigger_tokens`):
+  - **Пороги на модели:** у `models.<alias>` можно задать `summary_trigger_chars` / `summary_trigger_tokens` (mid-turn). Читаются при проверке для модели, которая ведёт историю: у главного хода — модель уровня, закреплённого на ход (та же, в которую идут запросы; `/level` посреди хода порог не меняет, новый действует со следующего хода), у субагента — его модель. Это не снимок со старта `run`. Оба `0` — глобальный `summary`; иначе режим модели (см. таблицу ключей алиаса ниже). Батч и лимит диалога модели действуют при любом сжатии её истории: автоматическом, по команде `/compact` и из тула `session_compact`.
+  - **Поток суммаризации** (только при `backend_api_mode: chat_completions` и положительном mid-turn пороге — глобальном или на модели истории):
     - перед стартом цикла агента выполняется **pre-run** compaction (если объём диалога в `state.messages` уже достиг порога);
     - после шага с исходящим результатом инструмента (**post-step**, сразу после обработки `function_call_output`) снова проверяется порог и при необходимости запускается compaction;
     - источник данных для решения «суммаризировать или нет» — только текущие сообщения сессии (`state.messages`); при запуске с `-t` после успешного compaction дополнительно обновляются файлы треда через `thread_store` (архив старых `data_*/meta_*` и запись compact-истории).
@@ -371,7 +372,7 @@ mcp:
   Обычно настройку задают для одной модели: `models.<alias>.backend.vision`.
   `true` разрешает проверку, но не подтверждает зрение. Подробнее — раздел «Изображения».
 - `agent.exec_timeout_sec` — дефолтный таймаут `execute_command` / `run_python_code`
-  (секунды), если модель не передала `timeout`. По умолчанию `120`. Для длинных
+  (секунды), если модель не передала `timeout`. По умолчанию `200`. Для длинных
   контейнерных сборок (Harbor) обычно поднимают до `600`.
 - `agent.harbor_exec_init` — инициализация окружения перед model-facing
   `execute_command` при `os_backend: harbor`. По умолчанию `null`: команда уходит в
@@ -642,6 +643,45 @@ assign:                                  # привязки отдельных �
   запроса — серверные дефолты модели. Сэмплинг и диалекты thinking собираются
   в профиле, per-алиас (рабочий референс — `demo_profile.yml`).
 
+**Диалекты thinking.** Словарь `main` / `auxiliary` уходит в тело запроса
+**как есть** — агент не переводит один вендорный диалект в другой. Непонятный
+бэкенду ключ часто принимается с HTTP 200 и **молча игнорируется**; у моделей,
+где thinking включён по умолчанию (DeepSeek V4 и др.), рассуждение остаётся
+включённым. Ориентир при проверке — `usage.completion_tokens_details.reasoning_tokens`
+в ответе (0 ≈ выключено). `strip_think` на это не влияет: он только решает,
+класть ли мысль в историю, а не генерировать ли её.
+
+| Стек | Выключить | Включить / усилить |
+|---|---|---|
+| Qwen / vLLM | `separate_reasoning: false` + `chat_template_kwargs.enable_thinking: false` | `separate_reasoning: true` + `enable_thinking: true` |
+| GLM / DeepSeek на vLLM-подобных | `chat_template_kwargs: {thinking: false, reasoning_effort: none}` | `thinking: true` + `reasoning_effort: low\|high` |
+| Native DeepSeek Chat Completions | `thinking: {type: disabled}` | `thinking: {type: enabled}` (+ при необходимости `reasoning_effort: low\|high\|max`) |
+| OpenAI-like | `reasoning_effort: none` | `reasoning_effort: low\|medium\|high` |
+| **OpenRouter** и совместимые прокси (LiteLLM → OpenRouter) | `reasoning: {effort: none}` | `reasoning: {effort: low\|medium\|high\|…}` |
+
+OpenRouter **не** понимает Qwen/`chat_template_kwargs` и native DeepSeek
+`thinking.type` как способ выключить reasoning: запрос проходит, модель
+продолжает думать. Для части моделей (например часть GLM на OpenRouter)
+`effort: none` даёт 400 «Reasoning is mandatory» — тогда ставьте
+`effort: minimal` или `low` (на практике часто даёт 0 reasoning tokens).
+Документация OpenRouter: [Reasoning Tokens](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens).
+
+Пример выключения на OpenRouter-прокси:
+
+```yaml
+models:
+  deepseek-v4:
+    model: openrouter/deepseek/deepseek-v4-flash
+    url: https://openrouter.ai/api/v1/chat/completions
+    token: "${ENV:OPENROUTER_API_KEY}"
+    main:
+      reasoning:
+        effort: none
+    auxiliary:
+      reasoning:
+        effort: none
+```
+
 На каждом слое непустая секция и `{}` заменяют нижнюю целиком. Отсутствующий
 ключ сохраняет значение нижнего слоя; YAML `null` явно его сбрасывает.
 Если после наложения слоёв секции нет или она равна `null`, берётся глобальный
@@ -660,6 +700,7 @@ vendor-ключей; это следствие пустой глобали, а �
 | `main` | kwargs диалога и цикла субагента |
 | `auxiliary` | kwargs summary, судей, finish_gate, intent, черновика роли |
 | `strip_think` | вырезание мысли из истории. В поставке глобально `strip_tags_projection.strip_think: true` (нестрогий бэкенд отвечает 400 на мысль в истории). `false` на алиасе сохраняет скрытое поле; ключа нет — остаётся глобальный флаг |
+| `summary_trigger_chars` / `summary_trigger_tokens` | mid-turn пороги сжатия на алиасе, который ведёт историю. `0` / нет ключа — шкала не задана. Оба нуля — весь набор из глобального `summary`. Хотя бы одно `> 0` — режим модели: незаданная шкала mid и turn-end = `0`; turn-end = 60% mid; `incremental_batch_chars` = ×1.2 и `max_dialogue_chars` = ×5 от символьного основания (если символы выкл — от `токены × 2`) |
 | `backend.use_max_tokens_param` | `true` — в тело `max_tokens`, `false` — `max_completion_tokens`. Нет ключа — глобальный `backend`. Профиль может перекрыть и сам глобальный ключ своей секцией `backend` |
 | `backend.openai_strict_tools_schema` | проекция схемы тулов в `chat_completions`: `true` — все properties в `required`. Нет ключа — глобальный `backend` |
 | `backend.send_tool_strict` | слать ли `function.strict`. `false` снимает поле с копии на отправке. Нет ключа — глобальный `backend` |

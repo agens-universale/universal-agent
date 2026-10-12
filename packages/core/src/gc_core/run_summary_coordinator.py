@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import contextlib
 import gc
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from gc_core.config_modules.strip_tags_projection import (
@@ -23,6 +24,7 @@ from gc_core.summarize.compaction import (
     exceeded_summary_triggers,
     history_exceeds_summary_trigger,
 )
+from gc_core.summarize.config import ResolvedSummaryLimits
 from gc_core.summarize.summary_logging import (
     SummaryCompactionLog,
     aappend_summary_trace_record,
@@ -178,6 +180,7 @@ class RunSummaryCoordinator:
         is_cli_mode: bool,
         pre_backend_trigger_reason: str,
         logger: Any | None = None,
+        limits_provider: Callable[[], ResolvedSummaryLimits] | None = None,
     ) -> None:
         self._ctx = ctx
         self._state = state
@@ -186,14 +189,34 @@ class RunSummaryCoordinator:
         self._turn_end_trigger_chars = turn_end_trigger_chars
         self._summary_trigger_tokens = summary_trigger_tokens
         self._turn_end_trigger_tokens = turn_end_trigger_tokens
+        self._limits_provider = limits_provider
         self._is_cli_mode = is_cli_mode
         self._pre_backend_trigger_reason = pre_backend_trigger_reason
         self._logger = logger
-        self._proj_tags = projection_tags_from_config(ctx)
+        # Теги читаются при сжатии, не в конструкторе: нулевой порог — no-op,
+        # и контекст без настроек (заглушка ребёнка) до settings_of не доходит.
+        self._proj_tags: tuple[str, ...] | None = None
         # Слепой токенный порог: был ли уже хук (значит, и главный запрос) и
         # сказано ли об этом в лог в этом прогоне.
         self._backend_requested = False
         self._blind_token_trigger_warned = False
+
+    def _refresh_limits(self) -> None:
+        """Пороги срабатывания на момент проверки: от провайдера модели истории;
+        без провайдера остаётся снимок конструктора. Батч и лимит диалога сюда не
+        входят — их считает само сжатие (`compaction.arun_summary_compaction`)."""
+        if self._limits_provider is None:
+            return
+        limits = self._limits_provider()
+        self._summary_trigger_chars = limits.chars_during
+        self._summary_trigger_tokens = limits.tokens_during
+        self._turn_end_trigger_chars = limits.chars_after
+        self._turn_end_trigger_tokens = limits.tokens_after
+
+    def _projection_tags(self) -> tuple[str, ...]:
+        if self._proj_tags is None:
+            self._proj_tags = projection_tags_from_config(self._ctx)
+        return self._proj_tags
 
     def _collect_garbage(self) -> None:
         collect = getattr(self._ctx, "collect_garbage", None) or gc.collect
@@ -229,6 +252,7 @@ class RunSummaryCoordinator:
         state = self._state
         if state.backend_api_mode != "chat_completions":
             return
+        self._refresh_limits()
         if (
             self._summary_trigger_chars <= 0
             and self._summary_trigger_tokens <= 0
@@ -241,7 +265,7 @@ class RunSummaryCoordinator:
                     state=state,
                     summary_trigger_chars=self._summary_trigger_chars,
                     summary_trigger_tokens=self._summary_trigger_tokens,
-                    tags=self._proj_tags,
+                    tags=self._projection_tags(),
                     strip_think=True,
                 )
                 if not hits:
@@ -272,6 +296,7 @@ class RunSummaryCoordinator:
                 # некого, следующий круг вёл бы только их.
                 if self._summary_trigger_chars <= 0:
                     break
+                self._refresh_limits()
             # C1: старая история отцеплена компакцией — собираем циклический мусор.
             if rounds > 0:
                 self._collect_garbage()
@@ -299,6 +324,7 @@ class RunSummaryCoordinator:
         state = self._state
         if state.backend_api_mode != "chat_completions":
             return
+        self._refresh_limits()
         async with _asummarizing_flag(self._thread_session):
             await arun_summary_compaction(
                 ctx=self._ctx,
@@ -327,7 +353,7 @@ class RunSummaryCoordinator:
                 state=self._state,
                 summary_trigger_chars=self._summary_trigger_tokens
                 * SUMMARY_CHARS_PER_TOKEN,
-                tags=self._proj_tags,
+                tags=self._projection_tags(),
                 strip_think=True,
             )
         ):
@@ -352,6 +378,7 @@ class RunSummaryCoordinator:
         state = self._state
         if state.backend_api_mode != "chat_completions":
             return
+        self._refresh_limits()
         if (
             self._summary_trigger_chars <= 0
             and self._summary_trigger_tokens <= 0
@@ -363,7 +390,7 @@ class RunSummaryCoordinator:
             state=state,
             summary_trigger_chars=self._summary_trigger_chars,
             summary_trigger_tokens=self._summary_trigger_tokens,
-            tags=self._proj_tags,
+            tags=self._projection_tags(),
             strip_think=True,
         )
         if not hits:
@@ -429,6 +456,7 @@ class RunSummaryCoordinator:
         state = self._state
         if state.backend_api_mode != "chat_completions":
             return
+        self._refresh_limits()
         if (
             self._turn_end_trigger_chars <= 0
             and self._turn_end_trigger_tokens <= 0
@@ -438,7 +466,7 @@ class RunSummaryCoordinator:
             state=state,
             summary_trigger_chars=self._turn_end_trigger_chars,
             summary_trigger_tokens=self._turn_end_trigger_tokens,
-            tags=self._proj_tags,
+            tags=self._projection_tags(),
             strip_think=True,
         )
         if not hits:

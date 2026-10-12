@@ -187,3 +187,93 @@ async def test_meter_token_mid_turn_not_replaced_by_turn_end(tmp_path):
         scr.attach_active_task(tid)
         meter = scr._context_meter()
         assert _meter_percent(meter) == 0
+
+
+@pytest.mark.asyncio
+async def test_meter_uses_per_model_mid_turn_threshold(tmp_path):
+    """Бар делит сэмпл на mid-turn активного алиаса, не на глобальный summary."""
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+
+    tid = "ctxm0000000000000000000000000008a"
+    # 500 символов при пороге модели 1000 → 50%.
+    content = "x" * 500
+    _write_task(tmp_path, tid, content)
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings(
+            {
+                "agent.model": "M",
+                "backend.api_mode": "chat_completions",
+                "summary": {
+                    "chat_completions_summary_trigger_chars": 10_000_000,
+                    "chat_completions_summary_turn_end_trigger_chars": 1,
+                },
+                "models": {
+                    "m": {
+                        "model": "m",
+                        "url": "http://x/v1/chat/completions",
+                        "token": "",
+                        "summary_trigger_chars": 1000,
+                    }
+                },
+                "slots": {"default": "m"},
+            }
+        ),
+    )
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(tid)
+        meter = scr._context_meter()
+        assert _meter_percent(meter) == 50
+
+
+@pytest.mark.asyncio
+async def test_meter_follows_the_running_agent_not_the_live_screen(tmp_path):
+    """Пока ход идёт, знаменатель — пороги РАБОТАЮЩЕГО агента: он сжимает по своему
+    снимку конфига и по уровню, закреплённому на ход, а экран видит новый `/level`
+    и новый профиль сразу. По живым данным бар показал бы не то, по чему реально
+    сработает сжатие. Ход кончился — снова живой конфиг."""
+    pytest.importorskip("textual")
+    from types import SimpleNamespace
+
+    from gc_core.summarize.config import ResolvedSummaryLimits
+    from gc_tui.app import TuiApp
+
+    tid = "ctxm0000000000000000000000000009a"
+    _write_task(tmp_path, tid, "x" * 500)
+    settings = tui_settings(_cfg(trigger=1000, turn_end=600))
+    pinned = ResolvedSummaryLimits(
+        chars_during=2000,
+        tokens_during=0,
+        chars_after=1200,
+        tokens_after=0,
+        incremental_batch_chars=0,
+        max_dialogue_chars=0,
+    )
+    running = {"value": True}
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", settings=settings)
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(tid)
+        app.active_runner = SimpleNamespace(
+            is_running=lambda: running["value"],
+            pinned_summary_limits=lambda: pinned,
+        )
+        assert _meter_percent(scr._context_meter()) == 25  # 500 / 2000
+        running["value"] = False
+        assert _meter_percent(scr._context_meter()) == 50  # 500 / 1000
+        app.active_runner = None
+
+
+def test_runner_passes_the_executor_limits_through():
+    from types import SimpleNamespace
+
+    from gc_tui.services.agent_runner import AgentRunner
+
+    runner = AgentRunner.__new__(AgentRunner)
+    runner._executor = None
+    assert runner.pinned_summary_limits() is None
+    runner._executor = SimpleNamespace(summary_limits=lambda: "limits")
+    assert runner.pinned_summary_limits() == "limits"

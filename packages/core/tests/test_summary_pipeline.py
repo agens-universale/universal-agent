@@ -36,7 +36,7 @@ def _ctx(trigger_chars: int = 1):
             "backend.completions_url": "http://example.test/v1/chat/completions",
             "summary": {
                 "chat_completions_summary_trigger_chars": trigger_chars,
-                "incremental_batch_chars": int(trigger_chars * 1.4)
+                "incremental_batch_chars": int(trigger_chars * 1.2)
                 if trigger_chars > 0
                 else 0,
                 "max_accumulated_summary_chars": 20000,
