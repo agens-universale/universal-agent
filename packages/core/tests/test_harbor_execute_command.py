@@ -274,7 +274,12 @@ def test_primed_default_cwd_skips_is_dir_on_harbor_and_remote():
     env = json.loads(_tool(b)(command="echo test"))
     assert b.is_dir_calls == []
     assert b.calls == [
-        {"command": "echo test", "cwd": "/app", "timeout": 120, "env": None}
+        {
+            "command": "echo test",
+            "cwd": "/app",
+            "timeout": DEFAULT_EXEC_TIMEOUT_SEC,
+            "env": None,
+        }
     ]
     assert env["ok"] is False
     assert env["command"] == "echo test"
@@ -404,7 +409,12 @@ def test_deleted_default_cwd_is_the_command_failure():
     b._default_cwd = "/app"
     env = json.loads(_tool(b)(command="echo test"))
     assert b.calls == [
-        {"command": "echo test", "cwd": "/app", "timeout": 120, "env": None}
+        {
+            "command": "echo test",
+            "cwd": "/app",
+            "timeout": DEFAULT_EXEC_TIMEOUT_SEC,
+            "env": None,
+        }
     ]
     assert env["error"]["type"] == "non_zero_exit"
     assert env["error"]["message"] == "Command exited with status 1"
