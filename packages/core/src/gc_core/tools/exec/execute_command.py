@@ -74,7 +74,8 @@ class ExecuteCommand(AbstractSimpleTool):
             "type": "function",
             "name": "exec_command",
             "description": (
-                "Run a shell command synchronously. Returns JSON with ok, exit_code, stdout, stderr."
+                "Run a shell command synchronously. Returns JSON with ok, exit_code, stdout, stderr. "
+                "The `timeout` argument is the deadline that kills the process; a `timeout` prefix inside the command does not extend it."
             ),
             "parameters": {
                 "type": "object",
@@ -86,7 +87,10 @@ class ExecuteCommand(AbstractSimpleTool):
                     "timeout": {
                         "type": "integer",
                         "description": (
-                            f"Execution timeout in seconds. Default is {timeout_default} (agent.exec_timeout_sec)."
+                            "Deadline for this call, in seconds. When it elapses the process is killed. "
+                            f"Omit it and the default {timeout_default} applies (agent.exec_timeout_sec). "
+                            "A `timeout` prefix inside `command` does not extend this deadline. "
+                            "If the command needs longer, pass a larger number here."
                         ),
                         "default": timeout_default,
                         "minimum": 1,
@@ -118,19 +122,17 @@ class ExecuteCommand(AbstractSimpleTool):
                     "run_in_background": {
                         "type": "boolean",
                         "description": (
-                            "Start the command detached and return immediately, without waiting "
-                            "for it to finish. Use this for anything long-lived: dev servers, "
-                            "watchers, `npm run dev`, `uvicorn`. The command keeps running after "
-                            "the agent exits. Its output is NOT captured — the reply carries only "
-                            "the pid. Check that it works by probing it (e.g. request its port). "
-                            "If it does not come up, find out why with a short diagnostic run "
-                            "in the foreground (small `timeout`): a failing start prints its "
-                            "error and exits, one that keeps running is stopped at the timeout. "
-                            "That run is only for reading the error — the service itself is "
-                            "still started with this flag. A command started WITHOUT this flag "
-                            "does not outlive the call — appending `&` to it is not enough: "
-                            "it is killed with its process group on timeout or cancel, it dies "
-                            "with the agent, and nothing of its output is reported back."
+                            "Start the command detached and return without waiting for it to finish. "
+                            "Use for long-lived processes: dev servers, watchers, `npm run dev`, `uvicorn`. "
+                            "It keeps running after the agent exits. Stdout and stderr are not captured. "
+                            "A process still running is reported by pid. One that exits at once is an error "
+                            "with its exit code and no pid. Check a server by probing it (e.g. request its port). "
+                            "To see a startup error, run that command once in the foreground with a small "
+                            "`timeout`: the failure is in stdout/stderr, and a process that stays up is killed "
+                            "when the timeout elapses. That run does not leave it running — start the service "
+                            "again with this flag. Without this flag the command does not outlive the call. "
+                            "Appending `&` does not change that: on timeout or cancel the process group is killed, "
+                            "and the process dies with the agent. Output printed before that kill is in the reply."
                         ),
                     },
                 },
@@ -149,7 +151,7 @@ class ExecuteCommand(AbstractSimpleTool):
 Tool description: Run a shell command synchronously; returns JSON with exit_code, stdout, stderr.
 Input schema: {"type": "object", "properties": {"command": {"type": "string", "description": "The CLI command to execute."}, "timeout": {"type": "integer", "description": "Execution timeout in seconds.", "default": """
             + str(timeout_default)
-            + """}, "cwd": {"type": "string", "description": "Optional working directory (absolute or relative)."}, "env_vars": {"type":"array","description":"Optional env overrides as [{name,value}]","items":{"type":"object","properties":{"name":{"type":"string"},"value":{"type":"string"}},"required":["name","value"],"additionalProperties":false}}, "run_in_background": {"type": "boolean", "description": "Start detached and return the pid at once; for long-lived commands. Output is not captured."}}, "required": ["command"], "additionalProperties": false}
+            + """}, "cwd": {"type": "string", "description": "Optional working directory (absolute or relative)."}, "env_vars": {"type":"array","description":"Optional env overrides as [{name,value}]","items":{"type":"object","properties":{"name":{"type":"string"},"value":{"type":"string"}},"required":["name","value"],"additionalProperties":false}}, "run_in_background": {"type": "boolean", "description": "Start detached and return at once; for long-lived commands. Output is not captured. Pid if the process is still running."}}, "required": ["command"], "additionalProperties": false}
 
 Usage:
 - Use this tool to run shell commands such as listing directories (`ls`, `dir`), checking versions (`python --version`), or running scripts.
@@ -159,14 +161,15 @@ Usage:
 - Be cautious with destructive commands (e.g., `rm`, `del`, `rmdir`).
 - Long-lived commands (dev servers, watchers, `npm run dev`, `uvicorn`) MUST be started
   with `run_in_background: true`. They then keep running after this call returns and
-  after the agent itself exits. Their output is NOT captured: check that such a command
-  works by probing it (e.g. request its port). If it does not come up, find out why with
-  a short diagnostic run in the foreground (small `timeout`): a failing start prints its
-  error and exits, one that keeps running is stopped at the timeout. That run is only for
-  reading the error — the service itself is still started in the background.
-  Appending `&` to a normal foreground command is NOT enough: such a command is killed
-  with its process group on timeout or cancel, it dies with the agent, and nothing of
-  its output is reported back.
+  after the agent itself exits. Stdout and stderr are not captured. A process still
+  running is reported by pid; one that exits at once is an error with its exit code
+  and no pid. Check a server by probing it (e.g. request its port). To see a startup
+  error, run that command once in the foreground with a small `timeout`: the failure
+  is in stdout/stderr, and a process that stays up is killed when the timeout elapses.
+  That run does not leave it running — start the service again with `run_in_background: true`.
+  Without this flag the command does not outlive the call. Appending `&` does not change
+  that: on timeout or cancel the process group is killed, and the process dies with the
+  agent. Output printed before that kill is in the reply.
 - On timeout the command is stopped and its work is lost. If it simply needs longer,
   re-run it with a bigger `timeout`, or start it with `run_in_background: true`.
 - Don't remove or create any files or folders outside of project directory!
@@ -524,7 +527,12 @@ Important Usage Rules:
                 stderr=stderr_stream,
                 error={
                     "type": "timeout",
-                    "message": f"Command timed out after {timeout} seconds",
+                    "message": (
+                        f"Command timed out after {timeout} seconds. "
+                        "This deadline is the `timeout` argument of this tool. "
+                        "A `timeout` prefix inside the command does not extend it. "
+                        "Call again and pass a larger `timeout`."
+                    ),
                 },
             )
 

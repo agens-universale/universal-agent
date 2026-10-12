@@ -263,3 +263,24 @@ def test_transport_survives_non_latin1_header(local_http_server):
     )
     assert reply.status is None
     assert reply.network_error
+
+
+def test_model_context_window_reads_one_positive_integer():
+    """Окно модели читает одна функция — и разбор списка, и строка формы: ноль и
+    bool окном не считаются, после них берётся следующее поле; у каталога GigaCode
+    окно лежит в `plugin_side`."""
+    from gc_core.model_picker import model_context_window
+
+    assert model_context_window({"context_length": 1000}) == 1000
+    assert model_context_window({"max_model_len": 2000}) == 2000
+    assert (
+        model_context_window({"context_length": 0, "max_model_len": 32768})
+        == 32768
+    )
+    assert model_context_window({"context_length": True}) is None
+    assert model_context_window({"context_length": "много"}) is None
+    assert (
+        model_context_window({"plugin_side": {"context_window_size": 262144}})
+        == 262144
+    )
+    assert model_context_window({}) is None

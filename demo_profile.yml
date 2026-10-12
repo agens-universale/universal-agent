@@ -74,6 +74,10 @@ models:
         reasoning_effort: none
 
   # --- Ещё один пример полной формы, со своим токеном (без наследования) ---
+  # Диалект ниже — vLLM/GLM-style. На OpenRouter и LiteLLM→OpenRouter он часто
+  # принимается с 200 и ИГНОРИРУЕТСЯ (модель продолжает думать). Для OpenRouter
+  # гасите так: reasoning: {effort: none} — см. docs/configuration.md «Диалекты
+  # thinking». Native DeepSeek Chat: thinking: {type: disabled}.
   deepseek-max:
     model: deepseek/deepseek-chat-v3-0324
     url: https://api.provider.example/v1/chat/completions
@@ -81,6 +85,10 @@ models:
     # переменная роняет загрузку (`${ENV:VAR}` строгий).
     token: "${ENV:DEEPSEEK_API_KEY:-}"
     strip_think: false                   # как дефолт кода: копировать мысль; true — вырезать
+    # Пороги сжатия по ходу хода на ЭТОЙ модели. 0 / нет ключа — шкала не задана;
+    # оба 0 — весь набор из глобального summary. Хотя бы одно > 0 — режим модели.
+    summary_trigger_chars: 0
+    summary_trigger_tokens: 116128
     main:
       temperature: 1.0
       top_p: 1.0

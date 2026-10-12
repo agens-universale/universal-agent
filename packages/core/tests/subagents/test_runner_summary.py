@@ -124,7 +124,7 @@ class TestRunnerSummary:
         assert "subagent_pre_backend" in calls
         assert "subagent_pre_run" not in calls
 
-    async def test_summary_disabled_when_trigger_zero(self):
+    async def test_summary_hook_noops_when_trigger_zero(self):
         orch = _make_orchestrator_state()
         cfg = _make_config(trigger=0)
         runner = SubagentRunner(_make_ctx(cfg), orch)
@@ -142,7 +142,8 @@ class TestRunnerSummary:
             )
 
         assert captured.get("persist_messages_callback") is not None
-        assert captured.get("pre_backend_compaction_hook") is None
+        # Хук есть: порог читается на проверке; при нулях mid-turn — no-op.
+        assert captured.get("pre_backend_compaction_hook") is not None
         assert captured.get("session_meta") == {}
         assert "post_step_hook" not in captured
 

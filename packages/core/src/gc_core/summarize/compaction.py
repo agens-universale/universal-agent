@@ -28,6 +28,7 @@ from gc_core.message_policy.user_message_policy import (
     wrap_technical_user_content,
 )
 from gc_core.settings import settings_of
+from gc_core.summarize.config import resolve_summary_limits_at_level
 from gc_core.summarize.summary_logging import (
     SummaryCompactionLog,
     log_compaction_completed,
@@ -438,10 +439,20 @@ async def arun_summary_compaction(
         getattr(state, "current_user_intent", []) or []
     )
     memory_snapshot = read_snapshot_from_state(state)
+    # Батч и лимит диалога — от модели, которая ведёт историю. Считаются здесь, в
+    # общей точке всех путей сжатия (автоматическое, ручное, тул `session_compact`),
+    # и едут параметрами: общий конфиг сжатие не переписывает.
+    limits = resolve_summary_limits_at_level(
+        ctx,
+        getattr(ctx, "model_router", None),
+        getattr(state, "turn_level", None),
+    )
     summary_result = await asummarize_dialog_via_chat_completions(
         ctx=ctx,
         state=state,
         full_history_messages=full_messages,
+        batch_chars=limits.incremental_batch_chars,
+        max_dialogue_chars=limits.max_dialogue_chars,
         persistent_state_block=render_persistent_state_for_prompt(
             memory_snapshot,
             session_todo=read_session_todo_from_state(state),

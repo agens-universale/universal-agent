@@ -25,7 +25,7 @@ from gc_testkit.settings import make_settings
 
 def test_agent_config_timeout_default():
     assert AgentConfig().exec_timeout_sec == DEFAULT_EXEC_TIMEOUT_SEC
-    assert DEFAULT_EXEC_TIMEOUT_SEC == 120
+    assert DEFAULT_EXEC_TIMEOUT_SEC == 200
 
 
 def test_agent_config_timeout_custom():
@@ -230,7 +230,7 @@ def test_tool_schema_timeout_default_comes_from_config():
         timeout = spec["parameters"]["properties"]["timeout"]
         assert timeout["default"] == 600
         assert "600" in timeout["description"]
-        assert "120" not in timeout["description"]
+        assert str(DEFAULT_EXEC_TIMEOUT_SEC) not in timeout["description"]
         assert '"default": 600' in cls.prompt_description(
             make_settings({"agent.exec_timeout_sec": 600})
         )

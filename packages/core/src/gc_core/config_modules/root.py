@@ -64,16 +64,16 @@ from gc_core.config_modules.strip_tags_projection import (
     normalize_strip_tags_projection_config,
 )
 from gc_core.config_modules.summary import (
-    DEFAULT_INCREMENTAL_BATCH_MULTIPLIER,
     DEFAULT_INTENT_LOG_PREVIEW_CHARS,
     DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS,
     DEFAULT_LAST_DIALOG_STEPS_COUNT,
     DEFAULT_MAX_ACCUMULATED_SUMMARY_CHARS,
     DEFAULT_MAX_DIALOGUE_CHARS,
     DEFAULT_MAX_MESSAGE_CHARS,
-    DEFAULT_TURN_END_TRIGGER_RATIO,
-    SUMMARY_CHARS_PER_TOKEN,
     SummaryConfig,
+    derived_incremental_batch_chars,
+    derived_turn_end_trigger,
+    summary_char_base,
 )
 from gc_core.config_modules.thread_persist import ThreadStoreSettings
 from gc_core.config_modules.todo import TodoConfig, normalize_todo_config
@@ -298,15 +298,11 @@ def _normalize_summary_limits(cfg: AppConfig) -> AppConfig:
         cfg.summary.incremental_batch_chars is None
         or cfg.summary.incremental_batch_chars <= 0
     ):
-        trigger = (
-            cfg.summary.chat_completions_summary_trigger_chars
-            or cfg.summary.chat_completions_summary_trigger_tokens
-            * SUMMARY_CHARS_PER_TOKEN
-        )
-        cfg.summary.incremental_batch_chars = (
-            int(trigger * DEFAULT_INCREMENTAL_BATCH_MULTIPLIER)
-            if trigger > 0
-            else 0
+        cfg.summary.incremental_batch_chars = derived_incremental_batch_chars(
+            summary_char_base(
+                cfg.summary.chat_completions_summary_trigger_chars,
+                cfg.summary.chat_completions_summary_trigger_tokens,
+            )
         )
     return cfg.result()
 
@@ -409,9 +405,7 @@ def _clamp_summary_trigger(value: int) -> int:
 def _resolve_turn_end_trigger(raw: int | None, mid: int) -> int:
     """Нет ключа — 60% от mid-turn этой же шкалы. Явный 0 и отрицательное — плечо выкл."""
     if raw is None:
-        return (
-            max(1, int(mid * DEFAULT_TURN_END_TRIGGER_RATIO)) if mid > 0 else 0
-        )
+        return derived_turn_end_trigger(mid)
     return 0 if raw <= 0 else raw
 
 

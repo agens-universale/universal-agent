@@ -63,24 +63,35 @@ def _int_param(raw: Any, default: int) -> int:
 
 
 class _SummaryLimits:
-    """Лимиты суммаризации из ``settings.summary`` с дефолтами."""
+    """Лимиты суммаризации из ``settings.summary`` с дефолтами.
 
-    def __init__(self, summary: SummaryConfig) -> None:
+    ``batch_chars`` / ``max_dialogue_chars`` — значения модели, которая ведёт
+    историю (считает вызывающий, ``compaction.arun_summary_compaction``):
+    положительное главнее конфига, ``0`` — «не задано», берётся ``summary``.
+    """
+
+    def __init__(
+        self,
+        summary: SummaryConfig,
+        *,
+        batch_chars: int = 0,
+        max_dialogue_chars: int = 0,
+    ) -> None:
         self.last_steps_count = _int_param(summary.last_dialog_steps_count, 5)
         self.last_step_message_max_chars = _int_param(
             summary.last_dialog_step_message_max_chars,
             _DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS,
         )
         self.max_message_chars = _int_param(summary.max_message_chars, 50000)
-        self.max_dialogue_chars = _int_param(
+        self.max_dialogue_chars = max_dialogue_chars or _int_param(
             summary.max_dialogue_chars, 1000000
         )
         self.max_accumulated_summary_chars = _int_param(
             summary.max_accumulated_summary_chars, 20000
         )
         # Размер батча для инкрементальной суммаризации.
-        # По умолчанию нормализуется в config.py как int(trigger * 1.4).
-        self.batch_chars_limit = _int_param(
+        # По умолчанию нормализуется в config-модуле summary (основание × 1.2).
+        self.batch_chars_limit = batch_chars or _int_param(
             summary.incremental_batch_chars, 10**12
         )
 
@@ -478,6 +489,8 @@ async def asummarize_dialog_via_chat_completions(
     current_user_intent: List[IntentRecord] | None = None,
     max_tokens: int | None = None,
     steps_offset: int = 0,
+    batch_chars: int = 0,
+    max_dialogue_chars: int = 0,
 ) -> Dict[str, Any]:
     """Строит структурированную сводку диалога через chat completions (в т.ч. батчами).
 
@@ -548,7 +561,11 @@ async def asummarize_dialog_via_chat_completions(
     if not full_history_messages:
         return _empty_history_result(trace, logger)
     summary = settings_of(ctx).summary
-    lim = _SummaryLimits(summary)
+    lim = _SummaryLimits(
+        summary,
+        batch_chars=batch_chars,
+        max_dialogue_chars=max_dialogue_chars,
+    )
     last_steps_count = lim.last_steps_count
     last_step_message_max_chars = lim.last_step_message_max_chars
     max_message_chars = lim.max_message_chars

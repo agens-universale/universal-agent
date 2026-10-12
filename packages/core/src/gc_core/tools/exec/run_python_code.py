@@ -101,7 +101,8 @@ class RunPythonCode(AbstractSimpleTool):
             "type": "function",
             "name": "exec_python",
             "description": (
-                "Run Python code synchronously in a subprocess. Returns JSON with ok, return_code, stdout, stderr."
+                "Run Python code synchronously in a subprocess. Returns JSON with ok, return_code, stdout, stderr. "
+                "The `timeout` argument is the deadline that kills the process."
             ),
             "parameters": {
                 "type": "object",
@@ -116,8 +117,9 @@ class RunPythonCode(AbstractSimpleTool):
                     "timeout": {
                         "type": "integer",
                         "description": (
-                            f"Maximum execution time in seconds before the process is terminated. "
-                            f"Default is {timeout_default} (agent.exec_timeout_sec)."
+                            "Deadline for this call, in seconds. When it elapses the process is killed. "
+                            f"Omit it and the default {timeout_default} applies (agent.exec_timeout_sec). "
+                            "If the code needs longer, pass a larger number here."
                         ),
                         "default": timeout_default,
                         "minimum": 1,
@@ -375,7 +377,11 @@ Usage:
                 stderr=stderr_stream,
                 error={
                     "type": "timeout",
-                    "message": f"Execution timed out after {effective_timeout} seconds",
+                    "message": (
+                        f"Execution timed out after {effective_timeout} seconds. "
+                        "This deadline is the `timeout` argument of this tool. "
+                        "Call again and pass a larger `timeout`."
+                    ),
                 },
             )
 

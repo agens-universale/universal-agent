@@ -373,10 +373,7 @@ def _resolve_main_for_turn(state: State, ctx: Any) -> Optional[Any]:
     router = getattr(ctx, "model_router", None)
     if router is None:
         return None
-    level = getattr(state, "turn_level", None)
-    if not level or router.is_subagent_child:
-        return router.resolve("main")
-    return router.resolve_level(level)
+    return router.resolve_main_at_level(getattr(state, "turn_level", None))
 
 
 def _maybe_trip_and_raise_main_unavailable(

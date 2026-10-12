@@ -1,6 +1,7 @@
 import json
 
 from gc_core.backends.protocol import ExecResult, bound_exec_result
+from gc_core.config_modules.agent import DEFAULT_EXEC_TIMEOUT_SEC
 from gc_core.tools.exec.execute_command import ExecuteCommand
 from gc_testkit.harbor_fakes import bind_os_backend
 from gc_testkit.helpers.tool_ctx import tool_settings
@@ -83,7 +84,7 @@ def test_default_timeout_flows_from_exec_timeout_sec_config():
 def test_default_timeout_without_config_is_schema_default():
     b = _RecordingFakeBackend()
     _tool(b)(command="x")
-    assert b.calls[0]["timeout"] == 120
+    assert b.calls[0]["timeout"] == DEFAULT_EXEC_TIMEOUT_SEC
 
 
 def test_explicit_timeout_forwarded():

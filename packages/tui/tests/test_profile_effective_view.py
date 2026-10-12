@@ -1683,6 +1683,9 @@ async def test_the_namesake_form_keeps_inherited_fields_empty_and_writes_none_of
                 "auxiliary": None,
                 "backend": {"use_ssl": False},
                 "strip_think": None,
+                # Пороги автосжатия не заданы — None, писатель снимает ключ.
+                "summary_trigger_chars": None,
+                "summary_trigger_tokens": None,
             },
         )
         form._presets_ctrl.close()  # раскрытый на входе пресет-лист съел бы Enter
@@ -1734,6 +1737,8 @@ async def test_ctrl_u_on_a_namesake_returns_the_pair_to_the_shadowed_record(
             "auxiliary": None,
             "backend": None,
             "strip_think": None,
+            "summary_trigger_chars": None,
+            "summary_trigger_tokens": None,
         }
         await pilot.press("ctrl+s")
         await pilot.pause()
