@@ -38,9 +38,10 @@ from gc_core.backends.walk_util import FlatWalkMixin
 # после source — чтобы ``set -e`` / ``return`` в rc не подменили код возврата
 # пользовательской команды. Имя окружения не зашито.
 # ``/etc/profile`` на Debian для root задаёт PATH заново и выбрасывает каталоги
-# из ENV образа (``/usr/local/go/bin``, cargo). Порядок профиля и bashrc
-# сохраняется (conda/rustup остаются впереди), выпавшие каталоги ENV
-# дописываются в конец без дублей.
+# из ENV образа (``/opt/venv/bin``, ``/usr/local/go/bin``, cargo). Впереди
+# остаются только каталоги, которых не было в сохранённом PATH (conda/rustup),
+# в том порядке, в каком их поставили профиль и bashrc. Дальше сохранённый
+# PATH в исходном порядке: системные каталоги профиля его не переставляют.
 _BASHRC_EXEC_INIT = """\
 PS1=${PS1-dummy}
 _gc_saved_path=$PATH
@@ -50,16 +51,26 @@ set +e
 _gc_ifs=$IFS
 IFS=:
 case $- in *f*) _gc_noglob=1 ;; *) _gc_noglob=0; set -f ;; esac
-for _gc_dir in ${_gc_saved_path}; do
-  case ":${PATH}:" in
-    *":${_gc_dir}:"*) ;;
-    *) PATH="${PATH:+$PATH:}${_gc_dir}" ;;
+_gc_new=
+for _gc_dir in ${PATH}; do
+  [ -z "${_gc_dir}" ] && continue
+  case ":${_gc_saved_path}:" in
+    *":${_gc_dir}:"*) continue ;;
   esac
+  case ":${_gc_new}:" in
+    *":${_gc_dir}:"*) continue ;;
+  esac
+  _gc_new="${_gc_new:+${_gc_new}:}${_gc_dir}"
 done
+if [ -n "${_gc_new}" ]; then
+  PATH="${_gc_new}${_gc_saved_path:+:${_gc_saved_path}}"
+else
+  PATH="${_gc_saved_path}"
+fi
 [ "${_gc_noglob}" -eq 0 ] && set +f
 IFS=$_gc_ifs
 export PATH
-unset _gc_saved_path _gc_ifs _gc_dir _gc_noglob
+unset _gc_saved_path _gc_ifs _gc_dir _gc_noglob _gc_new
 """
 
 

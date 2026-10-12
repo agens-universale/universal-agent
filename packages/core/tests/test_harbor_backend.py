@@ -448,10 +448,11 @@ def test_build_harbor_shell_command_quotes_user_inner():
 
 
 def test_bashrc_init_keeps_env_path_and_profile_additions(tmp_path):
-    """Debian-профиль переписывает PATH. Порядок профиля остаётся.
+    """Debian-профиль переписывает PATH. Порядок образа остаётся.
 
-    Каталоги ENV, которые профиль выкинул, дописываются в конец. Уже
-    присутствующие не дублируются, шум профиля не попадает в stdout.
+    Впереди только каталоги, которых не было в ENV (conda и системные,
+    отсутствовавшие в образе). Уже присутствующие не дублируются, шум
+    профиля не попадает в stdout.
     """
     if not _bash_runs("true"):
         pytest.skip("нет рабочего bash на хосте")
@@ -512,14 +513,31 @@ def test_bashrc_init_keeps_env_path_and_profile_additions(tmp_path):
             "/usr/local/sbin",
             "/usr/local/bin",
             "/usr/sbin",
-            "/usr/bin",
             "/sbin",
-            "/bin",
             "/usr/local/go/bin",
             "/opt/gc tool",
             "/opt/star*",
+            "/usr/bin",
+            "/bin",
         ]
     )
+    image_path = (
+        "/opt/venv/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:"
+        "/usr/sbin:/usr/bin:/sbin:/bin"
+    )
+    image_proc = subprocess.run(
+        ["bash", "--noprofile", "--norc", "-c", script],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={
+            "PATH": image_path,
+            "HOME": str(home),
+            "GC_GLOB_DIR": str(glob_dir),
+        },
+    )
+    assert image_proc.returncode == 0, image_proc.stderr
+    assert image_proc.stdout.splitlines()[0] == "/opt/conda/bin:" + image_path
 
 
 async def test_exec_defaults_to_raw_and_custom_init_is_prefixed(
