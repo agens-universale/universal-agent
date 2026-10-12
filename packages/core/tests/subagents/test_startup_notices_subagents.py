@@ -138,16 +138,15 @@ class TestResilience:
     def test_notices_do_not_crash_startup(self, tmp_path, monkeypatch):
         """Сбой дискавери не должен ронять старт — уведомления вторичны."""
         from gc_core import startup_notices as mod
+        from gc_core.tools.subagents import registry as reg
 
         def _boom(*_a, **_kw):
             raise RuntimeError("дискавери сломался")
 
-        # Уведомления собирает дискавери реестра (``subagent_diagnostics`` →
-        # ``_discover``) — роняем именно его.
-        monkeypatch.setattr(
-            "gc_core.tools.subagents.registry._discover",
-            _boom,
-        )
+        # Патчим то, что ``_subagent_definitions`` импортирует по имени из
+        # модуля (не ``_discover`` строкой): иначе при расхождении import-path
+        # подмена молча мимо, и тест видит настоящий Notice по bad.md.
+        monkeypatch.setattr(reg, "subagent_diagnostics", _boom)
         _write(tmp_path, "bad.md", "без фронтматтера")
         assert (
             mod.collect_startup_notices(
