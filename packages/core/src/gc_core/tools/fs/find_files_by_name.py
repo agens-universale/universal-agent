@@ -9,6 +9,7 @@ import re
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from gc_core.backends.protocol import WalkOutputTooLargeError
+from gc_core.backends.runtime_probe import RuntimeUnavailable
 from gc_core.config_modules.fs_tools import (
     FsFindFilesByNameConfig,
     parse_find_files_by_name_config,
@@ -517,6 +518,8 @@ class FindFilesByName(AbstractSimpleTool):
                 ok=False,
                 error={"type": "permission_denied", "message": str(e)},
             )
+        except RuntimeUnavailable:
+            raise
         except Exception as e:
             return _result(
                 ok=False, error={"type": "unexpected_error", "message": str(e)}

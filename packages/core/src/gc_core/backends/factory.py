@@ -123,6 +123,7 @@ def resolve_os_backend(
                 else WALK_OUTPUT_MAX_CHARS
             ),
             exec_init=(agent.harbor_exec_init or "").strip() or None,
+            runtime_probe_ttl_sec=agent.runtime_probe_ttl_sec,
         )
 
     section = os_backend_section(settings)
@@ -139,6 +140,7 @@ def resolve_os_backend(
                 else WALK_OUTPUT_MAX_CHARS
             ),
             joins_argv=kind == "ssh",
+            runtime_probe_ttl_sec=agent.runtime_probe_ttl_sec,
         )
 
     if kind == "sandbox":

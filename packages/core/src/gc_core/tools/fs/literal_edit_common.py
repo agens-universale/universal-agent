@@ -12,6 +12,7 @@ from __future__ import annotations
 import difflib
 from typing import Any, Dict
 
+from gc_core.backends.runtime_probe import RuntimeUnavailable
 from gc_core.utils.file_text import (
     check_expected_file_sha256,
     decode_text_bytes,
@@ -132,6 +133,8 @@ async def load_text_source(
     """
     try:
         file_size = await tool._backend.getsize(path)
+    except RuntimeUnavailable:
+        raise
     except Exception as e:
         return LoadError(
             "Failed to get file size.",
@@ -146,6 +149,8 @@ async def load_text_source(
         return LoadError(size_err["message"], size_err)
     try:
         raw = await tool._backend.read_bytes(path)
+    except RuntimeUnavailable:
+        raise
     except Exception as e:
         return LoadError(
             "Failed to read file.", {"type": "read_failed", "message": str(e)}
@@ -180,6 +185,8 @@ async def encode_and_write(
             )
         assert out_bytes is not None
         await tool._backend.write_bytes(path, out_bytes)
+    except RuntimeUnavailable:
+        raise
     except Exception as e:
         return None, (
             "Failed to write file.",

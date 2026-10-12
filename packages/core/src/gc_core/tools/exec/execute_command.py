@@ -2,6 +2,10 @@ import re
 from typing import Any
 
 from gc_core.backends.async_protocol import aexec_port
+from gc_core.backends.runtime_probe import (
+    RuntimeUnavailable,
+    _probe_failure_message,
+)
 from gc_core.config_modules.agent import (
     DEFAULT_EXEC_TIMEOUT_SEC,
     exec_output_preview_edge_chars_from_config_dict,
@@ -255,7 +259,30 @@ Important Usage Rules:
             return None
         if not isinstance(cwd_used, str) or not cwd_used.strip():
             return {"type": "invalid_argument", "field": "cwd"}
-        if not await self._backend.is_dir(cwd_used):
+        # Прогретый cwd уже известен: Harbor — WORKDIR из `aprime_default_cwd`,
+        # RemoteShell — заданный cwd или тот же `pwd`. Повторный `is_dir` перед
+        # каждой командой — лишний round-trip. Чужой явный cwd проверяется.
+        # Сбой транспорта — не «нет каталога»: иначе модель чинит cwd вместо
+        # того, чтобы сдать отчёт через turn_finish.
+        default_cwd = getattr(self._backend, "default_cwd", None)
+        default = default_cwd() if callable(default_cwd) else None
+        if isinstance(default, str) and cwd_used == default:
+            return None
+        try:
+            is_directory = await self._backend.is_dir(cwd_used)
+        except RuntimeUnavailable as exc:
+            return {"type": "execution_failed", "message": str(exc)}
+        except OSError as exc:
+            if not getattr(self._backend, "is_sandbox", False):
+                raise
+            # `is_dir` здесь — ответ 0/1. Исключение значит, что ответа нет:
+            # та же ситуация, что и непройденная проба суммы. Текст не разбираем.
+            err = str(exc).replace("\n", " ").strip()
+            return {
+                "type": "execution_failed",
+                "message": _probe_failure_message("", err),
+            }
+        if not is_directory:
             return {
                 "type": "invalid_argument",
                 "field": "cwd",
@@ -362,6 +389,10 @@ Important Usage Rules:
         early, plan = await self._plan(command, timeout, cwd, env_vars)
         if early is not None:
             return early
+        if run_in_background and not getattr(
+            self._backend, "supports_background", False
+        ):
+            return await self._abackground(plan)
         if run_in_background:
             return await self._abackground(plan)
         try:
@@ -371,6 +402,8 @@ Important Usage Rules:
                 timeout=plan["timeout"],
                 env=plan["env"],
             )
+        except RuntimeUnavailable as exc:
+            return self._runtime_unavailable(plan, exc)
         except Exception as exc:
             return self._exec_failed(plan, exc)
         return self._finish(res, plan)
@@ -419,6 +452,8 @@ Important Usage Rules:
                 cwd=cwd_used,
                 env=plan["env"],
             )
+        except RuntimeUnavailable as exc:
+            return self._runtime_unavailable(plan, exc)
         except Exception as exc:
             from gc_core.execution.resource_scope import (
                 resource_capture_active,
@@ -484,6 +519,19 @@ Important Usage Rules:
                 "cwd": cwd_used or "",
                 "background": background,
             },
+        )
+
+    def _runtime_unavailable(self, plan: dict, exc: RuntimeUnavailable) -> str:
+        """Бэкенд не дошёл до команды: проба суммы не вернулась."""
+        return self._result(
+            ok=False,
+            command=plan["command"],
+            cwd=plan["cwd"] or "",
+            exit_code=-1 if exc.return_code is None else exc.return_code,
+            timed_out=exc.timed_out,
+            stdout=exc.stdout,
+            stderr=exc.stderr,
+            error={"type": "execution_failed", "message": str(exc)},
         )
 
     def _exec_failed(self, plan: dict, exc: Exception) -> str:

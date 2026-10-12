@@ -36,6 +36,9 @@ NOT_AGENT_CONFIGS = {
     "bench_config.yml",
     "bench_config_dsv4_v0.2.3.yml",
     "ua_qwen36_35b_pre_v0_3_0.yml",
+    "uag_pre_v0.4_s200k_no_think.yml",
+    "uag_pre_v0.4_s200k_think_keep.yml",
+    "uag_pre_v0.4_s200k_think_strip.yml",
 }
 
 

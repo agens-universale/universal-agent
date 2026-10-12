@@ -2,6 +2,10 @@ import json
 import os
 from typing import Any
 
+from gc_core.backends.runtime_probe import (
+    RuntimeUnavailable,
+    reraise_runtime_unavailable,
+)
 from gc_core.security.path_policy import enforce_write_guard
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 from gc_core.utils.file_text import (
@@ -196,6 +200,8 @@ Usage:
             return {"type": "parent_not_found"}
         try:
             await self._backend.makedirs(parent)
+        except RuntimeUnavailable:
+            raise
         except Exception as e:
             return {"type": "mkdir_failed", "message": str(e)}
         return None
@@ -222,6 +228,8 @@ Usage:
                 self._settings_source
             ):
                 return await self._backend.read_bytes(path)
+        except RuntimeUnavailable:
+            raise
         except Exception:
             return None
         return None
@@ -280,6 +288,7 @@ Usage:
             try:
                 await self._backend.copy(path, backup_path)
             except Exception as e:
+                reraise_runtime_unavailable(e)
                 return self._result(
                     ok=False,
                     path=path,
@@ -308,6 +317,7 @@ Usage:
             assert out_bytes is not None
             await self._backend.write_bytes(path, out_bytes)
         except Exception as e:
+            reraise_runtime_unavailable(e)
             return self._result(
                 ok=False,
                 path=path,

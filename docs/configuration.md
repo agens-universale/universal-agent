@@ -380,6 +380,10 @@ mcp:
   (`/etc/profile` и `~/.bashrc` с обходом non-interactive guard). Любая другая
   непустая строка выполняется как custom shell-префикс перед командой. Внутренние
   FS/search/capability/MCP-вызовы всегда используют raw-канал и этот ключ игнорируют.
+- `agent.runtime_probe_ttl_sec` — сколько секунд не повторять пробу живости
+  Harbor и Remote (`docker` / `ssh` / `exec`) после успешного `echo` суммы.
+  По умолчанию `10`. `0` — проба перед каждым действием. Неудачная проба не
+  запоминается: следующий вызов проверяет оболочку сразу.
 - `agent.exec_output_capture_max_chars` — потолок захвата stdout/stderr на поток
   (decoded UTF-8 chars) для exec. По умолчанию `40000`: первые `floor(L/2)` символов
   головы и последние `L - floor(L/2)` символов настоящего хвоста, середина необратимо
@@ -1267,6 +1271,7 @@ ddgs-mcp --http
 | `provision_skills` | `true` по умолчанию: для `docker`/`ssh`/`exec` скиллы (system + user + project) копируются на старте рана в `<launch_root>/.gc/skills_runtime/<слой>/`, реестр и `skills_run_script` работают по этим путям; повторный ран с тем же набором ничего не копирует (манифест sha256). `false` — скиллы не загружаются |
 
 `agent.harbor_exec_init` действует и для `docker` / `ssh` / `exec` (профиль перед командой модели).
+`agent.runtime_probe_ttl_sec` — срок годности успешной пробы живости той же оболочки (по умолчанию 10 с, `0` — перед каждым действием).
 `sandbox` требует `bwrap` (Linux) или `sandbox-exec` (macOS); без них запуск падает, тихого отката в `local` нет. Windows не поддерживается. Изолируются только shell-команды модели и только на запись; MCP с `execute_on: os_backend` идёт под той же обёрткой, `download_file` работает как при `local` (файлы хостовые). `workdir: auto` — подмена рабочей области: файлы проекта, его `.git` и проектные скиллы тулам не видны.
 Удалённой стороне нужны GNU `stat`/`find`, `sh`, `cat`, `base64`, `sha256sum`; `python3` — для `run_python_code`, MCP `execute_on: os_backend` и `fetch_url_execute_on: os_backend`; `bash` — для фоновых команд (`run_in_background`), как и в Harbor.
 Правило разделения: хост — панель управления агента (конфиг, AGENTS.md, `project_memory`, треды и логи, MCP с `execute_on: agent`); среда исполнения — всё, с чем работает модель (`fs_*`, `exec_*`, фон, скиллы, MCP с `execute_on: os_backend`, при `fetch_url_execute_on: os_backend` — и сеть `exec_fetch_url`). `download_file` для remote-kind снят: он писал бы на хост.

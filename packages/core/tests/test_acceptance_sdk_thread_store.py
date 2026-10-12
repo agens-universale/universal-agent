@@ -322,8 +322,13 @@ async def test_loop_stays_responsive_with_a_slow_async_store(
                 await agent.run("сделай что-нибудь", thread_id="t-sdk")
 
     assert store.awaited >= 10, f"хранилище звали всего {store.awaited} раз"
+    # Порог пропусков 50 мс: джиттер планировщика 20–40 мс под нагрузкой не
+    # считается залипанием, а синхронные куски хранилища (~85 и ~100 мс) — да.
     assert_loop_was_free(
-        pulse.gaps, tick=pulse.step, label="хранилище с RTT 5 мс: "
+        pulse.gaps,
+        tick=pulse.step,
+        label="хранилище с RTT 5 мс: ",
+        stall_after=0.050,
     )
 
 

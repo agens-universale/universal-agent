@@ -6,6 +6,11 @@ import threading
 
 import pytest
 from gc_core.backends.harbor import HarborBackend, build_harbor_shell_command
+from gc_core.backends.runtime_probe import (
+    _RUNTIME_PROBE_TIMEOUT_SEC,
+    RuntimeUnavailable,
+)
+from gc_testkit.runtime_probe import probe_stdout
 from gc_core.backends.protocol import FsBackend
 from gc_testkit.settings import make_settings
 
@@ -31,6 +36,14 @@ def _user_shell(command, *, cwd=None, env=None):
     )
 
 
+def _probe_result(command):
+    """Живой ответ пробы, если команда — она. Иначе ``None``."""
+    hit = probe_stdout(command)
+    if hit is None:
+        return None
+    return FakeExecResult(stdout=hit, return_code=0)
+
+
 class FakeExecResult:
     def __init__(self, stdout="", stderr="", return_code=0, timed_out=False):
         self.stdout, self.stderr, self.return_code = (
@@ -49,6 +62,10 @@ class FakeEnv:
         self.downloaded = []
 
     async def exec(self, command, **kw):
+        # Проба не попадает в calls: тесты сверяют команды действия.
+        hit = probe_stdout(command)
+        if hit is not None:
+            return FakeExecResult(stdout=hit, return_code=0)
         self.calls.append(command)
         if command.startswith("if test "):
             # Проверки существования отвечают явными 0/1 (см. PosixShellFsMixin._test).
@@ -108,16 +125,72 @@ async def test_write_uses_upload(loop_in_thread):
     assert env.uploaded and env.uploaded[0][1] == "/work/new.txt"
 
 
-async def test_is_file_is_dir_use_native_env_handles(loop_in_thread):
-    # is_file/is_dir must delegate to Harbor's BaseEnvironment, not shell `test`.
+async def test_is_file_reads_shell_answer_and_raises_when_backend_is_down(
+    loop_in_thread,
+):
+    """Нативный env.is_file врёт False на мёртвом Docker. Shell-ответ 0/1 — нет."""
     env = FakeEnv()
+    answers = {
+        "if test -f /work/a.txt; then echo 1; else echo 0; fi": FakeExecResult(
+            stdout="1\n"
+        ),
+        "if test -f /work/dir; then echo 1; else echo 0; fi": FakeExecResult(
+            stdout="0\n"
+        ),
+    }
+
+    async def exec_answer(command, **kw):
+        hit = probe_stdout(command)
+        if hit is not None:
+            return FakeExecResult(stdout=hit, return_code=0)
+        env.calls.append(command)
+        if command in answers:
+            return answers[command]
+        return FakeExecResult(
+            stderr="Cannot connect to the Docker daemon at tcp://localhost:2375",
+            return_code=1,
+        )
+
+    env.exec = exec_answer
     backend = HarborBackend(env, loop_in_thread)
     assert await backend.is_file("/work/a.txt") is True
     assert await backend.is_file("/work/dir") is False
-    assert await backend.is_dir("/work/dir/") is True
-    assert await backend.is_dir("/work/a.txt") is False
-    # delegation goes through env.is_file/is_dir, NOT exec → no shell `test` calls
-    assert not any("test -" in c for c in env.calls)
+    with pytest.raises(OSError, match="Docker daemon"):
+        await backend.is_file("/dead")
+
+
+async def test_is_dir_reads_shell_answer_and_raises_when_backend_is_down(
+    loop_in_thread,
+):
+    """Нативный env.is_dir врёт False на мёртвом Docker. Shell-ответ 0/1 — нет."""
+    env = FakeEnv()
+    answers = {
+        "if test -d /work; then echo 1; else echo 0; fi": FakeExecResult(
+            stdout="1\n"
+        ),
+        "if test -d /missing; then echo 1; else echo 0; fi": FakeExecResult(
+            stdout="0\n"
+        ),
+    }
+
+    async def exec_answer(command, **kw):
+        hit = probe_stdout(command)
+        if hit is not None:
+            return FakeExecResult(stdout=hit, return_code=0)
+        env.calls.append(command)
+        if command in answers:
+            return answers[command]
+        return FakeExecResult(
+            stderr="Cannot connect to the Docker daemon at tcp://localhost:2375",
+            return_code=1,
+        )
+
+    env.exec = exec_answer
+    backend = HarborBackend(env, loop_in_thread)
+    assert await backend.is_dir("/work") is True
+    assert await backend.is_dir("/missing") is False
+    with pytest.raises(OSError, match="Docker daemon"):
+        await backend.is_dir("/dead")
 
 
 def test_is_sandbox_and_default_exec_timeout(loop_in_thread):
@@ -135,6 +208,9 @@ async def test_exec_bounds_large_stdout_to_capture_cap(loop_in_thread):
     huge = "X" * 1000
 
     async def big_exec(command, **kw):
+        probed = _probe_result(command)
+        if probed is not None:
+            return probed
         env.calls.append(command)
         return FakeExecResult(stdout=huge, return_code=0)
 
@@ -154,6 +230,9 @@ async def test_exec_per_call_capture_max_overrides_tool_cap(loop_in_thread):
     huge = "X" * 1000
 
     async def big_exec(command, **kw):
+        probed = _probe_result(command)
+        if probed is not None:
+            return probed
         return FakeExecResult(stdout=huge, return_code=0)
 
     env.exec = big_exec
@@ -204,6 +283,9 @@ async def test_append_creates_file_if_missing(loop_in_thread):
     # exists() -> exec("test -e ...") returns rc 0 by default FakeEnv.exec, so
     # simulate missing file via a custom exec that fails "test -e" but succeeds otherwise.
     async def fake_exec(command, **kw):
+        probed = _probe_result(command)
+        if probed is not None:
+            return probed
         env.calls.append(command)
         if command.startswith("test -e"):
             return FakeExecResult(stdout="", return_code=1)
@@ -221,6 +303,9 @@ async def test_append_concatenates_existing_content(loop_in_thread):
     uploaded_payloads = []
 
     async def fake_exec(command, **kw):
+        probed = _probe_result(command)
+        if probed is not None:
+            return probed
         env.calls.append(command)
         return FakeExecResult(stdout=f"ran:{command}", return_code=0)
 
@@ -362,6 +447,99 @@ def test_build_harbor_shell_command_quotes_user_inner():
     assert raw == "cd /work && env FOO=x echo hi"
 
 
+def test_bashrc_init_keeps_env_path_and_profile_additions(tmp_path):
+    """Debian-профиль переписывает PATH. Порядок образа остаётся.
+
+    Впереди только каталоги, которых не было в ENV (conda и системные,
+    отсутствовавшие в образе). Уже присутствующие не дублируются, шум
+    профиля не попадает в stdout.
+    """
+    if not _bash_runs("true"):
+        pytest.skip("нет рабочего bash на хосте")
+    from gc_core.backends.harbor import _BASHRC_EXEC_INIT
+
+    profile = tmp_path / "profile"
+    profile.write_text(
+        "echo PROFILE_STDOUT\n"
+        "echo PROFILE_STDERR >&2\n"
+        'PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"\n'
+        "export PATH\n"
+        "set -e\n"
+        "false\n",
+        encoding="utf-8",
+    )
+    home = tmp_path / "home"
+    home.mkdir()
+    glob_dir = tmp_path / "glob"
+    glob_dir.mkdir()
+    (glob_dir / "hit").write_text("", encoding="utf-8")
+    (home / ".bashrc").write_text(
+        'echo BASHRC_STDOUT\nexport PATH="/opt/conda/bin:$PATH"\n',
+        encoding="utf-8",
+    )
+    init = _BASHRC_EXEC_INIT.replace(
+        ". /etc/profile >/dev/null 2>&1 || true",
+        f". {shlex.quote(str(profile))} >/dev/null 2>&1 || true",
+        1,
+    )
+    script = (
+        init
+        + "printf '%s\\n' \"$PATH\"\n"
+        + "printf 'saved=%s\\n' \"${_gc_saved_path-unset}\"\n"
+        + "printf 'glob=%s\\n' \"$GC_GLOB_DIR\"/hi?\n"
+    )
+    proc = subprocess.run(
+        ["bash", "--noprofile", "--norc", "-c", script],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={
+            "PATH": "/usr/local/go/bin:/opt/gc tool:/opt/star*:/usr/bin:/bin",
+            "HOME": str(home),
+            "GC_GLOB_DIR": str(glob_dir),
+        },
+    )
+    assert proc.returncode == 0, proc.stderr
+    lines = proc.stdout.splitlines()
+    assert lines[1:] == ["saved=unset", f"glob={glob_dir / 'hit'}"], (
+        proc.stdout
+    )
+    assert "PROFILE_STDOUT" not in proc.stdout
+    assert "BASHRC_STDOUT" not in proc.stdout
+    assert proc.stderr == ""
+    assert lines[0] == ":".join(
+        [
+            "/opt/conda/bin",
+            "/usr/local/sbin",
+            "/usr/local/bin",
+            "/usr/sbin",
+            "/sbin",
+            "/usr/local/go/bin",
+            "/opt/gc tool",
+            "/opt/star*",
+            "/usr/bin",
+            "/bin",
+        ]
+    )
+    image_path = (
+        "/opt/venv/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:"
+        "/usr/sbin:/usr/bin:/sbin:/bin"
+    )
+    image_proc = subprocess.run(
+        ["bash", "--noprofile", "--norc", "-c", script],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={
+            "PATH": image_path,
+            "HOME": str(home),
+            "GC_GLOB_DIR": str(glob_dir),
+        },
+    )
+    assert image_proc.returncode == 0, image_proc.stderr
+    assert image_proc.stdout.splitlines()[0] == "/opt/conda/bin:" + image_path
+
+
 async def test_exec_defaults_to_raw_and_custom_init_is_prefixed(
     loop_in_thread,
 ):
@@ -426,6 +604,9 @@ async def test_harbor_write_bytes_preserves_cp1251(loop_in_thread):
 
 def _make_exec_returning(env, stdout, return_code=0):
     async def fake_exec(command, **kw):
+        hit = probe_stdout(command)
+        if hit is not None:
+            return FakeExecResult(stdout=hit, return_code=0)
         env.calls.append(command)
         return FakeExecResult(stdout=stdout, return_code=return_code)
 
@@ -436,6 +617,9 @@ async def test_exec_propagates_timed_out_from_environment(loop_in_thread):
     env = FakeEnv()
 
     async def timed_exec(command, **kw):
+        probed = _probe_result(command)
+        if probed is not None:
+            return probed
         env.calls.append(command)
         return FakeExecResult(
             stdout="partial", stderr="", return_code=None, timed_out=True
@@ -456,6 +640,9 @@ async def test_read_head_bytes_uses_head_not_full_file(loop_in_thread):
     raw = b"hel"
 
     async def head_exec(command, **kw):
+        probed = _probe_result(command)
+        if probed is not None:
+            return probed
         env.calls.append(command)
         if "head -c" in command and "base64" in command:
             # Default GNU wrap (76 cols). ``-w 0`` is a one-line blob and
@@ -489,6 +676,9 @@ async def test_read_head_bytes_append_sample_not_cut_by_tool_60k(
     assert len(encoded) > DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS
 
     async def head_exec(command, **kw):
+        probed = _probe_result(command)
+        if probed is not None:
+            return probed
         env.calls.append(command)
         if "head -c" in command and "base64" in command:
             return FakeExecResult(stdout=encoded, return_code=0)
@@ -502,6 +692,9 @@ async def test_read_head_bytes_append_sample_not_cut_by_tool_60k(
     assert sample == raw
 
     async def huge_tool(command, **kw):
+        probed = _probe_result(command)
+        if probed is not None:
+            return probed
         return FakeExecResult(stdout="Y" * 100_000, return_code=0)
 
     env.exec = huge_tool
@@ -518,6 +711,9 @@ async def test_read_head_bytes_raises_if_capture_ceiling_hit(loop_in_thread):
     encoded = base64.b64encode(raw).decode("ascii")
 
     async def head_exec(command, **kw):
+        probed = _probe_result(command)
+        if probed is not None:
+            return probed
         if "head -c" in command and "base64" in command:
             return FakeExecResult(stdout=encoded, return_code=0)
         return FakeExecResult(stdout="", return_code=1)
@@ -537,6 +733,9 @@ async def test_read_head_bytes_preserves_non_utf8_bytes(loop_in_thread):
     raw = bytes([0xCF, 0xF0, 0xE8, 0xE2, 0xE5, 0xF2, 0x00, 0xFF])
 
     async def head_exec(command, **kw):
+        probed = _probe_result(command)
+        if probed is not None:
+            return probed
         env.calls.append(command)
         if "head -c" in command and "base64" in command:
             return FakeExecResult(
@@ -739,6 +938,9 @@ async def test_workspace_root_is_the_container_workdir(loop_in_thread):
 
     class _PwdEnv(FakeEnv):
         async def exec(self, command, **kw):
+            probed = _probe_result(command)
+            if probed is not None:
+                return probed
             self.calls.append(command)
             if command == "pwd":
                 return FakeExecResult(stdout="/testbed\n", return_code=0)
@@ -755,6 +957,125 @@ async def test_workspace_root_is_the_container_workdir(loop_in_thread):
     assert (
         build_execution_workspace(backend, make_settings()).root == "/testbed"
     )
+
+
+async def test_probe_runs_before_the_command_and_does_not_cd(loop_in_thread):
+    """Сумма — первый exec, без cd. Команда модели идёт следом."""
+    env = FakeEnv()
+    recorded = []
+
+    async def exec_record(command, **kw):
+        recorded.append(command)
+        probed = _probe_result(command)
+        if probed is not None:
+            return probed
+        return FakeExecResult(stdout="ok\n", return_code=0)
+
+    env.exec = exec_record
+    backend = HarborBackend(env, loop_in_thread, exec_init="bashrc")
+    result = await backend.aexec("echo hi", cwd="/work")
+    assert result.stdout == "ok\n"
+    assert probe_stdout(recorded[0]) is not None
+    assert "cd " not in recorded[0]
+    assert recorded[1] == _user_shell("echo hi", cwd="/work")
+
+
+async def test_successful_probe_is_reused_until_ttl(
+    loop_in_thread, monkeypatch
+):
+    """Вторая команда в окне TTL не шлёт echo. После срока — снова."""
+    env = FakeEnv()
+    recorded = []
+
+    async def exec_record(command, **kw):
+        recorded.append(command)
+        probed = _probe_result(command)
+        if probed is not None:
+            return probed
+        return FakeExecResult(stdout="ok\n", return_code=0)
+
+    env.exec = exec_record
+    clock = {"t": 1_000.0}
+    monkeypatch.setattr(
+        "gc_core.backends.runtime_probe.time.monotonic", lambda: clock["t"]
+    )
+    backend = HarborBackend(env, loop_in_thread)
+    await backend.aexec("echo one")
+    await backend.aexec("echo two")
+    assert sum(probe_stdout(cmd) is not None for cmd in recorded) == 1
+    clock["t"] += 11
+    await backend.aexec("echo three")
+    assert sum(probe_stdout(cmd) is not None for cmd in recorded) == 2
+
+
+async def test_failed_probe_does_not_run_the_command(loop_in_thread):
+    env = FakeEnv()
+    recorded = []
+
+    async def exec_dead(command, **kw):
+        recorded.append(command)
+        return FakeExecResult(stderr="permission denied\n", return_code=1)
+
+    env.exec = exec_dead
+    backend = HarborBackend(env, loop_in_thread)
+    with pytest.raises(
+        RuntimeUnavailable, match="Runtime connection failed"
+    ) as err:
+        await backend.aexec("echo hi")
+    assert "permission denied" in str(err.value)
+    assert "turn_finish" in str(err.value)
+    assert len(recorded) == 1
+    assert probe_stdout(recorded[0]) is not None
+
+
+async def test_short_command_timeout_does_not_shrink_the_probe(loop_in_thread):
+    """``timeout: 1`` у команды не режет echo: проба всегда ждёт свои 60 с."""
+    env = FakeEnv()
+    seen = []
+
+    async def exec_record(command, **kw):
+        if probe_stdout(command) is not None:
+            seen.append(kw.get("timeout_sec"))
+            return FakeExecResult(stdout=probe_stdout(command), return_code=0)
+        return FakeExecResult(stdout="ok\n", return_code=0)
+
+    env.exec = exec_record
+    backend = HarborBackend(env, loop_in_thread)
+    await backend.aexec("echo hi", timeout=1)
+    assert seen == [_RUNTIME_PROBE_TIMEOUT_SEC]
+
+
+async def test_probe_timeout_is_runtime_unavailable(loop_in_thread):
+    env = FakeEnv()
+
+    async def exec_slow(command, **kw):
+        return FakeExecResult(return_code=None, timed_out=True)
+
+    env.exec = exec_slow
+    backend = HarborBackend(env, loop_in_thread)
+    with pytest.raises(RuntimeUnavailable) as err:
+        await backend.aexec("echo hi")
+    assert err.value.timed_out is True
+    assert "turn_finish" in str(err.value)
+
+
+async def test_upload_probes_before_mkdir(loop_in_thread):
+    env = FakeEnv()
+    recorded = []
+
+    async def exec_record(command, **kw):
+        recorded.append(command)
+        probed = _probe_result(command)
+        if probed is not None:
+            return probed
+        return FakeExecResult(stdout="", return_code=0)
+
+    env.exec = exec_record
+    backend = HarborBackend(env, loop_in_thread)
+    await backend.write_bytes("/work/a.bin", b"x")
+    assert probe_stdout(recorded[0]) is not None
+    assert recorded[1].startswith("mkdir -p ")
+    assert env.uploaded_bytes == [b"x"]
 
 
 def test_env_prefix_rejects_non_identifier_names():

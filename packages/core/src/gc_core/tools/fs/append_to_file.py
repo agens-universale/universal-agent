@@ -2,6 +2,10 @@ import json
 import os
 from typing import Any
 
+from gc_core.backends.runtime_probe import (
+    RuntimeUnavailable,
+    reraise_runtime_unavailable,
+)
 from gc_core.execution.tool_schema import X_PRESERVE_EMPTY_STRING
 from gc_core.security.path_policy import enforce_write_guard
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
@@ -195,6 +199,8 @@ Usage:
             return {"type": "parent_not_found"}
         try:
             await self._backend.makedirs(parent)
+        except RuntimeUnavailable:
+            raise
         except Exception as e:
             return {"type": "mkdir_failed", "message": str(e)}
         return None
@@ -254,6 +260,8 @@ Usage:
         try:
             if size <= fs_mutate_max_bytes(self._settings_source):
                 return await self._backend.read_bytes(path)
+        except RuntimeUnavailable:
+            raise
         except Exception:
             return None
         return None
@@ -375,6 +383,7 @@ Usage:
                 )
             content_sha256 = await self._backend.sha256_bytes(path)
         except Exception as e:
+            reraise_runtime_unavailable(e)
             return self._result(
                 ok=False,
                 path=path,

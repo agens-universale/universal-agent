@@ -21,9 +21,11 @@ from gc_core import execution_workspace as ew
 from gc_core.execution_workspace import (
     WorkspaceRootUnknownError,
     aprime_backend_cwd,
+    areconcile_remote_root,
     build_execution_workspace,
     discover_backend_cwd,
 )
+from gc_core.settings import runtime_of
 from gc_testkit.settings import make_settings
 
 
@@ -140,6 +142,80 @@ async def test_a_declared_cwd_is_not_asked_again():
     await aprime_backend_cwd(backend, make_settings())
 
     assert backend.asked == 0
+
+
+class _SandboxRoot:
+    """Песочница с уже известным cwd и управляемым ответом ``is_dir``."""
+
+    is_sandbox = True
+
+    def __init__(self, *, cwd=None, is_dir_result=False, is_dir_error=None):
+        self._cwd = cwd
+        self._is_dir_result = is_dir_result
+        self._is_dir_error = is_dir_error
+        self.checked = []
+
+    def default_cwd(self):
+        return self._cwd
+
+    async def is_dir(self, path):
+        self.checked.append(path)
+        if self._is_dir_error is not None:
+            raise self._is_dir_error
+        return self._is_dir_result
+
+
+async def test_dead_sandbox_does_not_keep_a_host_launch_root(tmp_path):
+    """Оболочка не ответила на проверку корня — ран не стартует с путём хоста."""
+    backend = _SandboxRoot(is_dir_error=RuntimeError("docker down"))
+    settings = make_settings(
+        {"launch_root": str(tmp_path), "project_root": str(tmp_path)}
+    )
+
+    with pytest.raises(WorkspaceRootUnknownError) as excinfo:
+        await areconcile_remote_root(backend, settings)
+
+    assert runtime_of(settings).launch_root == str(tmp_path)
+    assert "Хостовый путь" in str(excinfo.value)
+    assert backend.checked == [str(tmp_path)]
+
+
+async def test_missing_remote_dir_without_container_cwd_does_not_start():
+    """Каталога на той стороне нет и cwd окружения не узнан — хостовый корень не оставляем."""
+    backend = _SandboxRoot(cwd=None, is_dir_result=False)
+    settings = make_settings({"launch_root": "/home/alex/proj"})
+
+    with pytest.raises(WorkspaceRootUnknownError):
+        await areconcile_remote_root(backend, settings)
+
+    assert runtime_of(settings).launch_root == "/home/alex/proj"
+
+
+async def test_host_path_is_replaced_when_container_cwd_is_known():
+    backend = _SandboxRoot(cwd="/data", is_dir_result=False)
+    settings = make_settings(
+        {"launch_root": "/home/alex/proj", "project_root": "/home/alex/proj"}
+    )
+
+    updated = await areconcile_remote_root(backend, settings)
+
+    assert runtime_of(updated).launch_root == "/data"
+    assert runtime_of(updated).project_root == "/data"
+    assert runtime_of(settings).launch_root == "/home/alex/proj"
+
+
+async def test_confirmed_container_launch_root_is_kept():
+    backend = _SandboxRoot(cwd="/data", is_dir_result=True)
+    settings = make_settings(
+        {"launch_root": "/data/sub", "project_root": "/data/sub"}
+    )
+
+    updated = await areconcile_remote_root(backend, settings)
+
+    assert updated is settings
+    assert runtime_of(updated).launch_root == "/data/sub"
+    assert runtime_of(updated).project_root == "/data/sub"
+    assert backend.checked == ["/data/sub"]
 
 
 async def test_a_local_backend_is_never_a_hard_failure(caplog):

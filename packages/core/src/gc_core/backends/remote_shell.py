@@ -28,6 +28,11 @@ from gc_core.backends.protocol import (
     FsBackend,
     argv_to_posix_command,
 )
+from gc_core.backends.runtime_probe import (
+    DEFAULT_RUNTIME_PROBE_TTL_SEC,
+    RuntimeProbeCache,
+    RuntimeUnavailable,
+)
 from gc_core.backends.walk_util import FlatWalkMixin
 
 #: Потолок на одну файловую операцию (stat, upload, download): зависший
@@ -101,6 +106,7 @@ class RemoteShellBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
         walk_output_max_chars: int = WALK_OUTPUT_MAX_CHARS,
         joins_argv: bool = False,
         fs_op_timeout_sec: int = FS_OP_TIMEOUT_SEC,
+        runtime_probe_ttl_sec: int = DEFAULT_RUNTIME_PROBE_TTL_SEC,
     ) -> None:
         self.argv_prefix = tuple(str(a) for a in argv_prefix)
         # ssh не сохраняет argv: склеивает хвост пробелами и отдаёт строкой
@@ -112,9 +118,22 @@ class RemoteShellBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
         self.exec_init = exec_init
         self.exec_output_capture_max_chars = exec_output_capture_max_chars
         self.walk_output_max_chars = walk_output_max_chars
+        self._runtime_probe = RuntimeProbeCache(runtime_probe_ttl_sec)
         self._discovered_cwd: Optional[str] = None
 
     # --- транспорт ---
+    async def _aprobe(self, command: str, timeout: int) -> ExecResult:
+        """``sh -c`` пробы без повторной пробы и без ``cd``.
+
+        Потолок — трейс команды, не обход дерева: ответ пробы это одна строка.
+        """
+        return await self._run(
+            command,
+            timeout=timeout,
+            capture_max_chars=self.exec_output_capture_max_chars,
+            probe=False,
+        )
+
     async def _run(
         self,
         shell_command: str,
@@ -122,7 +141,10 @@ class RemoteShellBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
         stdin_text: Optional[str] = None,
         timeout: Optional[int] = None,
         capture_max_chars: int,
+        probe: bool = True,
     ) -> ExecResult:
+        if probe:
+            await self._runtime_probe.ensure(self._aprobe)
         remote = ["sh", "-c", shell_command]
         if self.joins_argv:
             remote = [shlex.join(remote)]
@@ -233,7 +255,11 @@ class RemoteShellBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
 
     # --- exec-семейство ---
     async def _awatchdog(self) -> Optional[str]:
-        """Какой сторож есть на той стороне; `None` — никакого (одна проба)."""
+        """Какой сторож есть на той стороне; `None` — никакого (одна проба).
+
+        ``RuntimeUnavailable`` не запоминается: мёртвая оболочка — не «сторожа
+        нет». Следующий вызов спросит снова и снова обернёт команду.
+        """
         cached = getattr(self, "_watchdog_tool", _MISSING)
         if cached is not _MISSING:
             return cached
@@ -247,6 +273,8 @@ class RemoteShellBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
                 and answer[-1] in _WATCHDOG_TOOLS
             ):
                 tool = answer[-1]
+        except RuntimeUnavailable:
+            raise
         except Exception:
             tool = None
         if tool is None:

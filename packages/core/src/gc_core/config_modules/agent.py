@@ -13,6 +13,7 @@ from gc_core.backends.protocol import (
     DEFAULT_EXEC_OUTPUT_PREVIEW_EDGE_CHARS,
     WALK_OUTPUT_MAX_CHARS,
 )
+from gc_core.backends.runtime_probe import DEFAULT_RUNTIME_PROBE_TTL_SEC
 from gc_core.config_modules.field_meta import gc_meta
 
 DEFAULT_FINISH_GATE_MAX_ITERATIONS = 10
@@ -136,6 +137,12 @@ class AgentConfig(BaseModel):
     # profile/bootstrap, любая другая непустая строка = custom shell-префикс.
     harbor_exec_init: str | None = Field(
         default=None, json_schema_extra=gc_meta(expert=True, worker_only=True)
+    )
+    # Успешная проба живости Harbor/Remote (echo суммы) закрывает следующие
+    # действия на этот срок. 0 — проба перед каждым действием.
+    runtime_probe_ttl_sec: int = Field(
+        default=DEFAULT_RUNTIME_PROBE_TTL_SEC,
+        json_schema_extra=gc_meta(expert=True, worker_only=True),
     )
     # Синтетические поля tool schema: имя → description. Отсутствует или {} — без инжекта.
     inject_tool_fields: dict[str, str] = Field(
@@ -274,6 +281,23 @@ class AgentConfig(BaseModel):
             )
         text = value.strip()
         return text or None
+
+    @field_validator("runtime_probe_ttl_sec", mode="before")
+    @classmethod
+    def normalize_runtime_probe_ttl_sec(cls, value: Any) -> int:
+        if value is None:
+            return DEFAULT_RUNTIME_PROBE_TTL_SEC
+        try:
+            n = int(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "agent.runtime_probe_ttl_sec должен быть целым числом >= 0"
+            ) from exc
+        if n < 0:
+            raise ValueError(
+                "agent.runtime_probe_ttl_sec должен быть целым числом >= 0"
+            )
+        return n
 
 
 def _agent_of(settings: Any) -> AgentConfig:

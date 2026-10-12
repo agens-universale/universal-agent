@@ -2,6 +2,7 @@ import functools
 import json
 from typing import Any, Dict
 
+from gc_core.backends.runtime_probe import RuntimeUnavailable
 from gc_core.execution.tool_schema import coalesce_optional_string
 from gc_core.security.path_policy import enforce_write_guard
 from gc_core.tools.fs.edit_line_endings import (
@@ -462,6 +463,8 @@ Update version string:
         backup_path = f"{path}.bak"
         try:
             await self._backend.copy(path, backup_path)
+        except RuntimeUnavailable:
+            raise
         except Exception as e:
             return backup_path, {"type": "backup_failed", "message": str(e)}
         return backup_path, None

@@ -3,7 +3,9 @@
 Probes run production-shaped recipes (not ``command -v`` / ``--version`` alone):
 the grep argv and the ``find | xargs | grep`` wire are built by the very helpers
 production uses (``utils.native_fs_search``), so probe and production cannot
-drift apart. Any step failure → False; never raise to tool callers.
+drift apart. A step that fails on a live shell returns False and does not
+raise to tool callers. ``RuntimeUnavailable`` means the shell did not answer:
+it propagates, so a short outage is not cached as "no find/grep".
 
 Пробы КОРУТИННЫЕ: каждая запускает процессы, а в песочнице это сеть, до ~10 с
 на пробу. Синхронной формы у них больше нет — она была последним, что звало
@@ -24,6 +26,7 @@ import tempfile
 import uuid
 from typing import TYPE_CHECKING, List, Optional, Sequence
 
+from gc_core.backends.runtime_probe import RuntimeUnavailable
 from gc_core.backends.walk_util import WalkEntry
 from gc_core.utils.native_fs_search import (
     build_find_xargs_grep_command,
@@ -95,6 +98,8 @@ async def _awhich_bin(backend: FsBackend, name: str) -> Optional[str]:
             path = (res.stdout or "").strip().splitlines()
             if path and path[0]:
                 return path[0].strip()
+    except RuntimeUnavailable:
+        raise
     except Exception:
         pass
     try:
@@ -103,6 +108,8 @@ async def _awhich_bin(backend: FsBackend, name: str) -> Optional[str]:
         # still smoke real recipes.
         if res.return_code is not None and res.return_code in (0, 1, 2):
             return name
+    except RuntimeUnavailable:
+        raise
     except Exception:
         pass
     return name  # try bare name in recipe; smoke decides
@@ -191,6 +198,8 @@ async def _aprobe_pipe(backend: FsBackend, grep_bin: str) -> bool:
             stdin="alpha\nbeta\n",
             timeout=10,
         )
+    except RuntimeUnavailable:
+        raise
     except Exception:
         return False
     out = res.stdout or ""
@@ -259,6 +268,8 @@ async def aprobe_has_grep(backend: FsBackend) -> bool:
         if not root:
             return False
         return await _aprobe_tree_and_file(backend, grep_bin, root, fpath)
+    except RuntimeUnavailable:
+        raise
     except Exception:
         return False
     finally:
@@ -333,6 +344,8 @@ async def aprobe_grep_exclude_dir(backend: FsBackend) -> bool:
         if "keep" not in text and "hit.txt" not in text:
             return False
         return res.return_code in (0, 1)
+    except RuntimeUnavailable:
+        raise
     except Exception:
         return False
     finally:
@@ -361,6 +374,8 @@ async def aprobe_grep_include(backend: FsBackend) -> bool:
         if "other.txt" in text:
             return False
         return res.return_code in (0, 1)
+    except RuntimeUnavailable:
+        raise
     except Exception:
         return False
     finally:
@@ -417,6 +432,8 @@ async def aprobe_find_xargs_grep(backend: FsBackend) -> bool:
             env=dict(_GREP_CLEAN_ENV),
         )
         return res.return_code == 0 and not (res.stdout or "").strip()
+    except RuntimeUnavailable:
+        raise
     except Exception:
         return False
     finally:

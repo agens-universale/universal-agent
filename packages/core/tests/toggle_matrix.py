@@ -768,6 +768,10 @@ NOT_IN_MATRIX = {
     # сверял бы фичу develop с самой собой. Её покрытие живёт в наборах
     # develop: `test_exec_output_preview.py`, `test_strip_tags_projection*`.
     "agent.exec_output_preview_edge_chars": "форма вывода, не путь исполнения",
+    # Срок годности успешной пробы Harbor/Remote. Матрица гоняется на local,
+    # пробы там нет: случай сверял бы рычаг, которого эталон не видит.
+    # Сам рычаг покрыт test_runtime_probe_ttl.py.
+    "agent.runtime_probe_ttl_sec": "кэш пробы Harbor/Remote, не путь local-хода; покрытие в test_runtime_probe_ttl",
     "strip_tags_projection.strip_think": "форма проекции, не путь исполнения",
     # --- приехало с develop при вливании 17.09.2026 (PR #101) -----------------
     #

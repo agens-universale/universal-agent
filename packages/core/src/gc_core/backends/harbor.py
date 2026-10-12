@@ -26,18 +26,51 @@ from gc_core.backends.protocol import (
     argv_to_posix_command,
     bound_exec_result,
 )
+from gc_core.backends.runtime_probe import (
+    DEFAULT_RUNTIME_PROBE_TTL_SEC,
+    RuntimeProbeCache,
+)
 from gc_core.backends.walk_util import FlatWalkMixin
 
 # Встроенная политика ``harbor_exec_init: bashrc``. Неинтерактивный ``bash -c``
 # иначе пропускает bashrc (``[ -z "$PS1" ] && return``). Потоки профиля
 # глушатся, чтобы conda-хуки не попали в stdout/stderr команды; ``set +e``
 # после source — чтобы ``set -e`` / ``return`` в rc не подменили код возврата
-# пользовательской команды. Имя окружения не зашито. Из develop, как есть.
+# пользовательской команды. Имя окружения не зашито.
+# ``/etc/profile`` на Debian для root задаёт PATH заново и выбрасывает каталоги
+# из ENV образа (``/opt/venv/bin``, ``/usr/local/go/bin``, cargo). Впереди
+# остаются только каталоги, которых не было в сохранённом PATH (conda/rustup),
+# в том порядке, в каком их поставили профиль и bashrc. Дальше сохранённый
+# PATH в исходном порядке: системные каталоги профиля его не переставляют.
 _BASHRC_EXEC_INIT = """\
 PS1=${PS1-dummy}
+_gc_saved_path=$PATH
 . /etc/profile >/dev/null 2>&1 || true
 [ -f "${HOME}/.bashrc" ] && . "${HOME}/.bashrc" >/dev/null 2>&1 || true
 set +e
+_gc_ifs=$IFS
+IFS=:
+case $- in *f*) _gc_noglob=1 ;; *) _gc_noglob=0; set -f ;; esac
+_gc_new=
+for _gc_dir in ${PATH}; do
+  [ -z "${_gc_dir}" ] && continue
+  case ":${_gc_saved_path}:" in
+    *":${_gc_dir}:"*) continue ;;
+  esac
+  case ":${_gc_new}:" in
+    *":${_gc_dir}:"*) continue ;;
+  esac
+  _gc_new="${_gc_new:+${_gc_new}:}${_gc_dir}"
+done
+if [ -n "${_gc_new}" ]; then
+  PATH="${_gc_new}${_gc_saved_path:+:${_gc_saved_path}}"
+else
+  PATH="${_gc_saved_path}"
+fi
+[ "${_gc_noglob}" -eq 0 ] && set +f
+IFS=$_gc_ifs
+export PATH
+unset _gc_saved_path _gc_ifs _gc_dir _gc_noglob _gc_new
 """
 
 
@@ -107,11 +140,13 @@ class HarborBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
         exec_output_capture_max_chars: int = DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS,
         walk_output_max_chars: int = WALK_OUTPUT_MAX_CHARS,
         exec_init: Optional[str] = None,
+        runtime_probe_ttl_sec: int = DEFAULT_RUNTIME_PROBE_TTL_SEC,
     ) -> None:
         self._env = environment
         self._loop = loop
         self.exec_output_capture_max_chars = exec_output_capture_max_chars
         self.walk_output_max_chars = walk_output_max_chars
+        self._runtime_probe = RuntimeProbeCache(runtime_probe_ttl_sec)
         # Инициализация окружения для канала МОДЕЛИ (`aexec`): None — сырой
         # shell, "bashrc" — встроенный bootstrap, иначе свой префикс.
         self.exec_init = exec_init
@@ -214,6 +249,10 @@ class HarborBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
             cap,
         )
 
+    async def _aprobe(self, command: str, timeout: int) -> ExecResult:
+        """Сырой echo пробы: без повторной пробы и без ``cd``."""
+        return await self._aexec_impl(command, timeout=timeout, probe=False)
+
     async def _aexec_impl(
         self,
         command: str,
@@ -223,12 +262,16 @@ class HarborBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
         env: Optional[dict] = None,
         capture_max_chars: Optional[int] = None,
         exec_init: Optional[str] = None,
+        probe: bool = True,
     ) -> ExecResult:
         """Транспорт. ``exec_init`` — только для канала модели (``aexec``).
 
         Сборка строки — ``build_harbor_shell_command``. Внутренние помощники,
         обход, argv и python зовут транспорт без инициализации: сырой канал.
+        Перед действием — проба суммы. ``probe=False`` только у самой пробы.
         """
+        if probe:
+            await self._runtime_probe.ensure(self._aprobe)
         full = build_harbor_shell_command(
             command, cwd=cwd, env=env, exec_init=exec_init
         )
@@ -272,6 +315,8 @@ class HarborBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
         )
 
     async def _aupload_bytes(self, data: bytes, path: str) -> None:
+        # mkdir и upload_file идут мимо ``_aexec_impl``.
+        await self._runtime_probe.ensure(self._aprobe)
         with tempfile.NamedTemporaryFile("wb", delete=False) as tmp:
             tmp.write(data)
             tmp_path = Path(tmp.name)
@@ -284,6 +329,7 @@ class HarborBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
             tmp_path.unlink(missing_ok=True)
 
     async def _adownload_bytes(self, path: str) -> bytes:
+        await self._runtime_probe.ensure(self._aprobe)
         with tempfile.NamedTemporaryFile("wb", delete=False) as tmp:
             tmp_path = Path(tmp.name)
         try:
@@ -292,12 +338,10 @@ class HarborBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
         finally:
             tmp_path.unlink(missing_ok=True)
 
-    # Нативные ручки BaseEnvironment там, где они есть (миксин спросил бы shell).
-    async def is_file(self, path: str) -> bool:
-        return await self._aawait(self._env.is_file(path))
-
-    async def is_dir(self, path: str) -> bool:
-        return await self._aawait(self._env.is_dir(path))
+    # ``is_file`` и ``is_dir`` не перекрываем. Нативные ``env.is_file`` /
+    # ``env.is_dir`` сводят любой сбой транспорта к False, и мёртвый контейнер
+    # выглядит как отсутствие файла или каталога. Миксин ``_test`` отвечает
+    # 0/1 и бросает OSError, если ответа нет.
 
     async def aexec(
         self,

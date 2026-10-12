@@ -178,7 +178,9 @@ def test_tracking_wraps_sandbox_like_local(tmp_path):
     )
 
     be = SandboxBackend(wrapper=lambda cwd: [], root=str(tmp_path))
-    assert isinstance(wrap_local_for_tracking(be, object()), TrackingFsBackend)
+    wrapped = wrap_local_for_tracking(be, object())
+    assert isinstance(wrapped, TrackingFsBackend)
+    assert wrapped.isolates_exec is True
 
 
 async def test_background_spawn_outlives_parent_thread(tmp_path, monkeypatch):

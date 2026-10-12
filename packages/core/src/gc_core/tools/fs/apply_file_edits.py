@@ -2,6 +2,7 @@ import functools
 import json
 from typing import Any, Dict, List
 
+from gc_core.backends.runtime_probe import reraise_runtime_unavailable
 from gc_core.execution.tool_schema import coalesce_optional_string
 from gc_core.security.path_policy import enforce_write_guard
 from gc_core.tools.fs.edit_line_endings import (
@@ -536,6 +537,7 @@ class ApplyFileEdits(AbstractSimpleTool):
             try:
                 await self._backend.copy(path, backup_path)
             except Exception as e:
+                reraise_runtime_unavailable(e)
                 return partial(
                     message="Failed to create backup file.",
                     error={"type": "backup_failed", "message": str(e)},

@@ -595,8 +595,10 @@ async def test_click_inside_summary_span_opens_screen_in_turn_source(tmp_path):
         _scr, ind = await _turn_with_edits(pilot, tmp_path, tid)
         start, _end = ind._summary_span
 
-        await pilot.click(ind, offset=(start + 1, 0))
-        await pilot.pause()
+        # Не pilot.click: он обходит App.on_event, и on_mouse_down не всегда
+        # успевает выставить _pressed_in_summary — под нагрузкой клик молчит.
+        # Тот же путь, что у test_single_click_still_opens_the_screen_through_the_queue.
+        await _gesture(pilot, ind, start + 1)
 
         assert isinstance(pilot.app.screen, DiffScreen)
         assert pilot.app.screen.source == SOURCE_TURN

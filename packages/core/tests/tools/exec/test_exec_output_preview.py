@@ -4,6 +4,7 @@ import json
 import sys
 from types import SimpleNamespace
 
+from gc_testkit.runtime_probe import probe_total_in_command
 from gc_core.tools.exec.execute_command import ExecuteCommand
 from gc_core.tools.exec.run_python_code import RunPythonCode
 from gc_core.execution.output_store import (
@@ -197,6 +198,15 @@ async def test_backend_result_without_stream_structure_still_builds_envelope():
             env=None,
             capture_max_chars=None,
         ):
+            # Песочница сначала шлёт echo $((a+b)) и ищет сумму отдельной строкой.
+            total = probe_total_in_command(str(command))
+            if total is not None:
+                return SimpleNamespace(
+                    stdout=f"{total}\n",
+                    stderr="",
+                    return_code=0,
+                    timed_out=False,
+                )
             return SimpleNamespace(
                 stdout="hi", stderr="", return_code=0, timed_out=False
             )

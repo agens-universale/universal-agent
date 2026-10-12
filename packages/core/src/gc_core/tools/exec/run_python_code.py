@@ -4,6 +4,10 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from gc_core.backends.async_protocol import aexec_port
+from gc_core.backends.runtime_probe import (
+    RuntimeUnavailable,
+    _probe_failure_message,
+)
 from gc_core.config_modules.agent import (
     exec_output_preview_edge_chars_from_config_dict,
     exec_timeout_from_config_dict,
@@ -246,16 +250,29 @@ Usage:
                 timeout=plan["timeout"],
                 env=plan["env"],
             )
+        except RuntimeUnavailable as exc:
+            return self._runtime_unavailable(exc)
         except Exception as exc:
             return self._exec_failed(exc)
         return self._finish(res, plan)
+
+    def _runtime_unavailable(self, exc: RuntimeUnavailable) -> str:
+        """Бэкенд не дошёл до кода: проба суммы не вернулась."""
+        return self._result(
+            ok=False,
+            return_code=-1 if exc.return_code is None else exc.return_code,
+            timed_out=exc.timed_out,
+            stdout=exc.stdout,
+            stderr=exc.stderr,
+            error={"type": "execution_failed", "message": str(exc)},
+        )
 
     def _exec_failed(self, exc: Exception) -> str:
         """Отказ запуска — общий для обоих входов."""
         return self._result(
             ok=False,
             return_code=None,
-            timed_out=False,
+            timed_out=bool(getattr(exc, "timed_out", False)),
             stdout="",
             stderr="",
             error={"type": "execution_failed", "message": str(exc)},
@@ -267,9 +284,24 @@ Usage:
         """Рабочий каталог запуска или ошибка cwd_invalid (с подсказкой, куда можно писать)."""
         if self._backend.is_sandbox:
             cwd_used = cwd  # None → container default workdir
-            if cwd_used is not None and not await self._backend.is_dir(
-                cwd_used
-            ):
+            if cwd_used is None:
+                return cwd_used, None
+            # Сбой транспорта — не «каталога нет»: иначе модель чинит cwd.
+            # `is_dir` здесь — ответ 0/1. Исключение значит, что ответа нет.
+            try:
+                is_directory = await self._backend.is_dir(cwd_used)
+            except RuntimeUnavailable as exc:
+                return cwd_used, {
+                    "type": "execution_failed",
+                    "message": str(exc),
+                }
+            except OSError as exc:
+                err = str(exc).replace("\n", " ").strip()
+                return cwd_used, {
+                    "type": "execution_failed",
+                    "message": _probe_failure_message("", err),
+                }
+            if not is_directory:
                 return cwd_used, _cwd_invalid_error(cwd_used, [])
             return cwd_used, None
         security_context = resolve_tool_context(self, **kwargs)

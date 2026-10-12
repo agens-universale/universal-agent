@@ -343,9 +343,10 @@ class FsBackend(ABC):
         чтения четырёх свойств, то есть держал поток пула на всё время проб, а
         существовал ровно потому, что пробы были синхронными.
 
-        Проба, упавшая сама по себе, пишет в кэш ``False`` и прогрев не
-        роняет: недоступный бэкенд всплывёт на первом настоящем вызове с
-        внятной ошибкой, а не здесь.
+        Проба, упавшая сама по себе на живой оболочке, пишет в кэш ``False``
+        и прогрев не роняет. ``RuntimeUnavailable`` — оболочка не ответила,
+        это не ответ про утилиту: исключение пробрасывается, кэш остаётся
+        пустым, следующий прогрев спросит снова.
         """
         from gc_core.backends.capabilities import (
             aprobe_grep_exclude_dir,
@@ -353,12 +354,15 @@ class FsBackend(ABC):
             aprobe_has_find,
             aprobe_has_grep,
         )
+        from gc_core.backends.runtime_probe import RuntimeUnavailable
 
         async def _fill(cache_attr: str, probe) -> bool:
             if getattr(self, cache_attr) is not None:
                 return bool(getattr(self, cache_attr))
             try:
                 value = bool(await probe(self))
+            except RuntimeUnavailable:
+                raise
             except Exception:
                 value = False
             setattr(self, cache_attr, value)

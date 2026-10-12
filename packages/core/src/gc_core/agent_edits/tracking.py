@@ -69,10 +69,10 @@ class TrackingFsBackend:
         # Кэш путей набора карманного подканала (по подписи файла журнала):
         # та же причина жить на обёртке, что у _edits_seen.
         self._pocket_paths_cache: dict = {}
-        # `is_sandbox` и `default_exec_timeout` НЕ присваиваем: оба стали
-        # property с сеттером (проброс поверхности бэкенда), и присваивание
-        # здесь молча писало бы во ВНУТРЕННИЙ backend вместо обёртки — а читать
-        # их всё равно надо у него, что property и делает.
+        # `is_sandbox`, `isolates_exec` и `default_exec_timeout` НЕ присваиваем:
+        # все стали property с сеттером (проброс поверхности бэкенда), и
+        # присваивание здесь молча писало бы во ВНУТРЕННИЙ backend вместо
+        # обёртки — а читать их всё равно надо у него, что property и делает.
 
     @property
     def exec_output_capture_max_chars(self) -> int:
@@ -327,9 +327,16 @@ class TrackingFsBackend:
     @property
     def isolates_exec(self) -> bool:
         # Песочница (SandboxBackend наследует LocalFsBackend и поэтому
-        # оборачивается здесь) изолирует команды: без проброса MCP с
-        # execute_on: os_backend поднимался бы в процессе агента.
-        return getattr(self._inner, "isolates_exec", False)
+        # оборачивается здесь) изолирует команды. Флаг живёт на внутреннем
+        # бэкенде: у LocalFsBackend он False, у SandboxBackend — True.
+        # Без проброса обёртка врёт `exec_is_isolated`, и MCP
+        # `execute_on: os_backend` поднимает сервер в нашем процессе, хотя
+        # команды идут через bwrap / sandbox-exec.
+        return bool(getattr(self._inner, "isolates_exec", False))
+
+    @isolates_exec.setter
+    def isolates_exec(self, value: bool) -> None:
+        self._inner.isolates_exec = value
 
     def isabs(self, path: str) -> bool:
         return self._inner.isabs(path)

@@ -46,6 +46,82 @@ def test_is_a_full_backend():
     assert RemoteShellBackend(["env"]).supports_background is True
 
 
+async def test_probe_precedes_the_remote_command(monkeypatch):
+    """Проба — первый ``sh -c``, без ``cd``. Команда идёт только после суммы."""
+    from gc_core.backends.protocol import ExecResult
+    from gc_core.backends.runtime_probe import RuntimeUnavailable
+    from gc_testkit.runtime_probe import probe_stdout
+
+    calls = []
+
+    async def fake_process(argv, **kw):
+        calls.append(argv[-1])
+        hit = probe_stdout(argv[-1])
+        if hit is not None:
+            return ExecResult(stdout=hit, return_code=0)
+        return ExecResult(stdout="ok\n", return_code=0)
+
+    monkeypatch.setattr(
+        "gc_core.backends.remote_shell._arun_bounded_process", fake_process
+    )
+    backend = RemoteShellBackend(["docker", "exec", "-i", "box"])
+    result = await backend.aexec("echo hi", cwd="/work")
+    assert result.stdout == "ok\n"
+    assert probe_stdout(calls[0]) is not None
+    assert not calls[0].startswith("cd ")
+    assert calls[1].startswith("cd /work || exit; ")
+    assert "echo hi" in calls[1]
+
+    calls.clear()
+
+    async def dead_process(argv, **kw):
+        calls.append((argv[-1], kw.get("capture_max_chars")))
+        return ExecResult(stderr="permission denied\n", return_code=1)
+
+    monkeypatch.setattr(
+        "gc_core.backends.remote_shell._arun_bounded_process", dead_process
+    )
+    # Свежий бэкенд: успешная проба первого жива 10 с и вторую бы пропустила.
+    backend = RemoteShellBackend(
+        ["docker", "exec", "-i", "box"],
+        exec_output_capture_max_chars=4_000,
+        walk_output_max_chars=50_000_000,
+    )
+    with pytest.raises(
+        RuntimeUnavailable, match="Runtime connection failed"
+    ) as err:
+        await backend.aexec("echo hi")
+    assert "turn_finish" in str(err.value)
+    assert len(calls) == 1
+    command, capture = calls[0]
+    assert probe_stdout(command) is not None
+    assert capture == backend.exec_output_capture_max_chars
+    assert capture != backend.walk_output_max_chars
+
+
+async def test_short_command_timeout_does_not_shrink_the_probe(monkeypatch):
+    """``timeout: 1`` у команды не режет echo: проба всегда ждёт свои 60 с."""
+    from gc_core.backends.protocol import ExecResult
+    from gc_core.backends.runtime_probe import _RUNTIME_PROBE_TIMEOUT_SEC
+    from gc_testkit.runtime_probe import probe_stdout
+
+    seen = []
+
+    async def fake_process(argv, **kw):
+        if probe_stdout(argv[-1]) is not None:
+            seen.append(kw.get("timeout"))
+            return ExecResult(stdout=probe_stdout(argv[-1]), return_code=0)
+        return ExecResult(stdout="ok\n", return_code=0)
+
+    monkeypatch.setattr(
+        "gc_core.backends.remote_shell._arun_bounded_process", fake_process
+    )
+    backend = RemoteShellBackend(["docker", "exec", "-i", "box"])
+    result = await backend.aexec("echo hi", timeout=1)
+    assert result.stdout == "ok\n"
+    assert seen == [_RUNTIME_PROBE_TIMEOUT_SEC]
+
+
 async def test_aexec_runs_through_prefix_sh_c(be):
     res = await be.aexec("echo $0; echo hi")
     assert res.return_code == 0
@@ -206,19 +282,26 @@ async def test_joining_transport_keeps_cwd_and_writes(tmp_path):
     assert await be.read(p) == "x"
 
 
-async def test_fs_ops_have_a_timeout():
+async def test_fs_ops_have_a_timeout(monkeypatch):
     # Зависший транспорт (пауза контейнера, мёртвый хост) не вешает ФС-операции.
-    be = RemoteShellBackend(
-        ["sh", "-c", "sleep 30", "hang"], fs_op_timeout_sec=1
+    # До самой операции идёт проба, и режет её свой потолок (в бою 60 с), не
+    # fs_op_timeout_sec. sleep 30 короче этого потолка и успевает кончиться,
+    # суммы нет, отказ не кэшируется: три вызова держали бы ~90 с, и граница
+    # ниже мерила бы конец sleep, а не отсечку. Здесь потолок ужат до 1 с.
+    from gc_core.backends.runtime_probe import RuntimeUnavailable
+
+    monkeypatch.setattr(
+        "gc_core.backends.runtime_probe._RUNTIME_PROBE_TIMEOUT_SEC", 1
     )
+    be = RemoteShellBackend(["sh", "-c", "sleep 30", "hang"])
     t0 = asyncio.get_running_loop().time()
-    # Зависший транспорт — ошибка, а не «файла нет»: иначе модель пересоздаёт
-    # существующее (остановленный контейнер выглядел как пустой диск).
-    with pytest.raises(OSError):
+    # Проба не получает сумму и обрывается по своему потолку. Это не «файла
+    # нет»: иначе модель пересоздаёт существующее.
+    with pytest.raises(RuntimeUnavailable):
         await be.exists("/x")
-    with pytest.raises(OSError):
+    with pytest.raises(RuntimeUnavailable):
         await be.write("/x", "y")
-    with pytest.raises(OSError):
+    with pytest.raises(RuntimeUnavailable):
         await be.read_bytes("/x")
     assert asyncio.get_running_loop().time() - t0 < 15
 
@@ -340,6 +423,38 @@ async def test_watchdog_probe_is_cached_and_reported():
     assert first in ("timeout", "gtimeout", "setsid", "perl", None)
     be._afs_exec = None  # вторая проба не должна исполняться
     assert await be._awatchdog() == first
+
+
+async def test_dead_runtime_is_not_cached_as_no_watchdog():
+    from types import SimpleNamespace
+
+    from gc_core.backends.remote_shell import RemoteShellBackend
+    from gc_core.backends.runtime_probe import RuntimeUnavailable
+
+    be = RemoteShellBackend(
+        ["env"],
+        cwd=None,
+        env={},
+        exec_init=None,
+        exec_output_capture_max_chars=1000,
+        walk_output_max_chars=1000,
+    )
+
+    async def down(*_args, **_kwargs):
+        raise RuntimeUnavailable()
+
+    be._afs_exec = down
+    with pytest.raises(RuntimeUnavailable):
+        await be._awatchdog()
+    assert "_watchdog_tool" not in be.__dict__
+
+    async def live(*_args, **_kwargs):
+        return SimpleNamespace(
+            stdout="timeout\n", stderr="", return_code=0, timed_out=False
+        )
+
+    be._afs_exec = live
+    assert await be._awatchdog() == "timeout"
 
 
 async def test_download_rejects_non_base64_noise():
