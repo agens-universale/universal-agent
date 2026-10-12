@@ -65,21 +65,32 @@ def history_has_dialog_summary_message(messages: List[Dict[str, Any]]) -> bool:
 # Единственная реализация живёт в ``user_message_policy``; здесь — локальное имя для читаемости.
 _message_content_to_text = user_content_to_text
 
-# Хвост ``reasoning_content`` / ``reasoning`` в саммари и digest (DeepSeek и аналоги).
-_REASONING_TAIL_MAX_CHARS = 8000
+_REASONING_LIMIT_CHARS = 8000
+_REASONING_TAIL_FLOOR_CHARS = 1500
+_REASONING_HEADER = "\n[reasoning]\n"
 
 
-def _reasoning_tail_for_summary(message: Dict[str, Any]) -> str:
-    """Хвост скрытого reasoning для суммаризатора / finish-gate digest."""
+def _reasoning_source(message: Dict[str, Any]) -> str:
+    """Сырой ``reasoning_content`` или алиас ``reasoning``, как в запросе к модели."""
     for key in ("reasoning_content", "reasoning"):
         value = message.get(key)
-        if isinstance(value, str):
-            stripped = value.strip()
-            if stripped:
-                if len(stripped) > _REASONING_TAIL_MAX_CHARS:
-                    return stripped[-_REASONING_TAIL_MAX_CHARS:]
-                return stripped
+        if isinstance(value, str) and value.strip():
+            return value
     return ""
+
+
+def _clip_reasoning(text: str) -> str:
+    """Начало и хвост в лимите 8000. Маркер — если середина не влезла."""
+    if not text:
+        return ""
+    limit = _REASONING_LIMIT_CHARS
+    half = limit // 2
+    tail = max(_REASONING_TAIL_FLOOR_CHARS, half)
+    head = max(0, limit - tail)
+    cut = len(text) - head - tail
+    if cut > 0:
+        return f"{text[:head]}...[cutted {cut} chars...]...{text[-tail:]}"
+    return text
 
 
 def message_text_for_summary(
@@ -92,9 +103,8 @@ def message_text_for_summary(
     Строит каноничное текстовое представление одного сообщения для LLM-промптов и метрик размера.
 
     Используется ``message_format.dialog_history``, суммаризацией и finish gate (trace digest).
-    Для assistant добавляет блок ``[reasoning]`` с хвостом ``reasoning_content`` /
-    ``reasoning``, если поле есть в каноне (иначе промежуточные выводы DeepSeek
-    теряются при компакции).
+    Для assistant добавляет блок ``[reasoning]``: начало и хвост ``reasoning_content`` /
+    ``reasoning`` в лимите 8000.
     """
     if not isinstance(message, dict):
         return ""
@@ -119,9 +129,9 @@ def message_text_for_summary(
             raw_content, tags=tags, strip_think=strip_think
         )
         text = f"[{role}] {content}".strip()
-        reasoning = _reasoning_tail_for_summary(message)
-        if reasoning:
-            text = f"{text}\n[reasoning]\n{reasoning}".strip()
+        raw = _reasoning_source(message).strip()
+        if raw:
+            text = f"{text}{_REASONING_HEADER}{_clip_reasoning(raw)}"
         return text
     content = _message_content_to_text(raw_content)
     return f"[{role}] {content}".strip()
@@ -136,8 +146,9 @@ def message_raw_payload_chars_for_trigger(
     """Оценка длины содержимого для порога суммаризации, без префиксов ``[role]``.
 
     Assistant: видимая проза при ``strip_think``; think-only (salvage) — сырой
-    payload, он уходит в основной запрос. Хвост ``reasoning_content`` /
-    ``reasoning`` учитывается так же, как в ``message_text_for_summary``.
+    payload, он уходит в основной запрос. ``reasoning_content`` /
+    ``reasoning`` считается целиком — той длиной, которая уходит в запрос,
+    а не урезанным блоком ``[reasoning]`` в промпте суммаризатора.
 
     Ваша картинка весит ``CONTEXT_CHARS_PER_IMAGE``: в ``content`` её нет, а
     контекст модели она занимает (спека §5); снимок агента — записку
@@ -167,7 +178,7 @@ def message_raw_payload_chars_for_trigger(
             if projected
             else len(_message_content_to_text(raw_content))
         )
-        return prose + len(_reasoning_tail_for_summary(message))
+        return prose + len(_reasoning_source(message))
     return len(_message_content_to_text(raw_content)) + sum(
         CONTEXT_CHARS_PER_IMAGE
         if att.origin == ORIGIN_USER

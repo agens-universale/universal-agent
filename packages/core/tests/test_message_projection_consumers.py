@@ -16,6 +16,13 @@ from gc_core.utils.format_messages import (
 )
 
 
+def _split_cut_reasoning(text: str) -> tuple[str, int, str]:
+    body = text.split("[reasoning]\n", 1)[1]
+    head, rest = body.split("...[cutted ", 1)
+    cut, tail = rest.split(" chars...]...", 1)
+    return head, int(cut), tail
+
+
 def test_format_canonical_assistant_keeps_think_prose_as_in_messages():
     msg = {
         "type": "message",
@@ -152,21 +159,21 @@ def test_message_text_for_summary_includes_reasoning_tail():
     assert "s078 WA 38" in text
 
 
-def test_message_text_for_summary_reasoning_tail_is_capped():
-    from gc_core.message_format.serialization import _REASONING_TAIL_MAX_CHARS
-
-    long_rc = ("HEAD" * 2500) + ("TAIL_MARKER_" + "z" * 40)
-    assert len(long_rc) > _REASONING_TAIL_MAX_CHARS
+def test_message_text_for_summary_reasoning_keeps_head_and_tail():
+    raw = ("H" * 6000) + ("M" * 4000) + ("T" * 6000) + "END"
     msg = {
         "type": "message",
         "role": "assistant",
         "content": "ok",
-        "reasoning_content": long_rc,
+        "reasoning_content": raw,
     }
     text = message_text_for_summary(msg)
-    reasoning_body = text.split("[reasoning]\n", 1)[1]
-    assert reasoning_body == long_rc[-_REASONING_TAIL_MAX_CHARS:]
-    assert "TAIL_MARKER_" in reasoning_body
+    head, cut, tail = _split_cut_reasoning(text)
+    assert len(head) == len(tail) == 4000
+    assert head.startswith("H")
+    assert tail.endswith("END")
+    assert "M" not in head and "M" not in tail
+    assert cut == len(raw) - 8000
 
 
 def test_message_text_for_summary_uses_openrouter_reasoning_alias():
@@ -181,15 +188,16 @@ def test_message_text_for_summary_uses_openrouter_reasoning_alias():
     assert "alias-only verdict" in text
 
 
-def test_trigger_volume_counts_reasoning_tail():
+def test_trigger_volume_counts_full_reasoning_content():
+    raw = "R" * 20000
     msg = {
         "type": "message",
         "role": "assistant",
         "content": "visible",
-        "reasoning_content": "hidden facts",
+        "reasoning_content": raw,
     }
     assert message_raw_payload_chars_for_trigger(msg) == len("visible") + len(
-        "hidden facts"
+        raw
     )
 
 

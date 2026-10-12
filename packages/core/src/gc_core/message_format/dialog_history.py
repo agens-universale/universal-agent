@@ -104,6 +104,10 @@ def message_text_limited(
             if preview == dump:
                 return _wrap_cutted_envelope(assembled, max_message_chars)
             return assembled
+    # Маркер [cutted N chars...] стоит между началом и хвостом.
+    # Конверт режет с головы и снова отбрасывает конец.
+    if "\n[reasoning]\n" in text:
+        return text
     return _wrap_cutted_envelope(text, max_message_chars)
 
 
