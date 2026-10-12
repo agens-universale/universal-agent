@@ -5,6 +5,7 @@ from gc_core.intent_guard.validation_result import (
     expected_action_for_axes,
     fail_open_validation_result,
     parse_validator_response,
+    salvage_validator_axes,
 )
 
 
@@ -179,6 +180,55 @@ class ParseValidatorResponseTest(unittest.TestCase):
             expected_action_for_axes(trace_ok=False, report_ok=False),
             "fix_report_and_continue",
         )
+
+    def test_salvage_axes_from_broken_json(self) -> None:
+        raw = (
+            "almost json\n"
+            '{"trace_gaps": ["x"], "report_mismatches": [], '
+            '"trace_ok": false, "report_ok": true, "action": "continue_work"'
+        )
+        result = salvage_validator_axes(raw)
+        assert result is not None
+        self.assertFalse(result.trace_ok)
+        self.assertTrue(result.report_ok)
+        self.assertEqual(result.action, "continue_work")
+        self.assertFalse(result.ok)
+        self.assertIn("trace_ok", result.feedback_for_agent)
+
+    def test_salvage_prefers_last_axis_occurrence(self) -> None:
+        raw = '"trace_ok": true, "report_ok": true\n"trace_ok": false, "report_ok": false'
+        result = salvage_validator_axes(raw)
+        assert result is not None
+        self.assertFalse(result.trace_ok)
+        self.assertFalse(result.report_ok)
+        self.assertEqual(result.action, "fix_report_and_continue")
+
+    def test_salvage_none_without_both_axes(self) -> None:
+        self.assertIsNone(salvage_validator_axes('"trace_ok": true only'))
+        self.assertIsNone(salvage_validator_axes("no axes here"))
+
+    def test_salvage_uses_action_from_text_when_present(self) -> None:
+        raw = '"trace_ok": true, "report_ok": false, "action": "fix_report"'
+        result = salvage_validator_axes(raw)
+        assert result is not None
+        self.assertEqual(result.action, "fix_report")
+
+    def test_salvage_without_action_derives_from_axes(self) -> None:
+        raw = '"trace_ok": false, "report_ok": true'
+        result = salvage_validator_axes(raw)
+        assert result is not None
+        self.assertEqual(result.action, "continue_work")
+
+    def test_salvage_action_mismatch_normalized_to_axes(self) -> None:
+        with self.assertLogs(
+            "gc_core.intent_guard.validation_result", level="WARNING"
+        ) as logs:
+            result = salvage_validator_axes(
+                '"trace_ok": true, "report_ok": false, "action": "accept"'
+            )
+        assert result is not None
+        self.assertEqual(result.action, "fix_report")
+        self.assertTrue(any("normalized" in m for m in logs.output))
 
 
 if __name__ == "__main__":

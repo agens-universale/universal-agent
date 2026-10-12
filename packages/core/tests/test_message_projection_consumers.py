@@ -138,6 +138,61 @@ def test_message_text_for_summary_assistant_without_think():
     assert "<think" not in text
 
 
+def test_message_text_for_summary_includes_reasoning_tail():
+    msg = {
+        "type": "message",
+        "role": "assistant",
+        "content": "",
+        "reasoning_content": "s041 wrong; s075 correct; s078 WA 38",
+    }
+    text = message_text_for_summary(msg)
+    assert "[assistant]" in text
+    assert "[reasoning]" in text
+    assert "s075 correct" in text
+    assert "s078 WA 38" in text
+
+
+def test_message_text_for_summary_reasoning_tail_is_capped():
+    from gc_core.message_format.serialization import _REASONING_TAIL_MAX_CHARS
+
+    long_rc = ("HEAD" * 800) + ("TAIL_MARKER_" + "z" * 40)
+    assert len(long_rc) > _REASONING_TAIL_MAX_CHARS
+    msg = {
+        "type": "message",
+        "role": "assistant",
+        "content": "ok",
+        "reasoning_content": long_rc,
+    }
+    text = message_text_for_summary(msg)
+    reasoning_body = text.split("[reasoning]\n", 1)[1]
+    assert reasoning_body == long_rc[-_REASONING_TAIL_MAX_CHARS:]
+    assert "TAIL_MARKER_" in reasoning_body
+
+
+def test_message_text_for_summary_uses_openrouter_reasoning_alias():
+    msg = {
+        "type": "message",
+        "role": "assistant",
+        "content": "",
+        "reasoning": "alias-only verdict",
+    }
+    text = message_text_for_summary(msg)
+    assert "[reasoning]" in text
+    assert "alias-only verdict" in text
+
+
+def test_trigger_volume_counts_reasoning_tail():
+    msg = {
+        "type": "message",
+        "role": "assistant",
+        "content": "visible",
+        "reasoning_content": "hidden facts",
+    }
+    assert message_raw_payload_chars_for_trigger(msg) == len("visible") + len(
+        "hidden facts"
+    )
+
+
 def test_build_history_text_smoke_no_think_in_assistant():
     messages = [
         {"type": "message", "role": "user", "content": "hi"},
