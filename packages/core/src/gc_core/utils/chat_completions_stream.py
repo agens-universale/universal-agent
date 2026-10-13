@@ -20,6 +20,17 @@ from gc_core.utils.stream_assembler import (  # публичные имена ф
 )
 
 
+def without_answer_deltas(on_delta: OnDelta) -> OnDelta:
+    """Тот же приёмник без канала `answer`: `reset`, `think` и `tool` проходят как
+    есть. Кому глушить текст ответа, решает вызывающий — здесь только фильтр по
+    виду дельты."""
+    def emit(kind: str, text: str) -> None:
+        if kind != "answer":
+            on_delta(kind, text)
+
+    return emit
+
+
 def iter_sse_data_lines(raw_lines: Iterable) -> Iterable[str]:
     """Yield JSON payload strings from SSE `data:` lines; stop at `[DONE]`."""
     for line in raw_lines:
@@ -60,4 +71,5 @@ __all__ = [
     "StreamAssembler",
     "assemble_streamed_completion",
     "iter_sse_data_lines",
+    "without_answer_deltas",
 ]

@@ -13,6 +13,11 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from gc_core.auto_routing import state_ops
 from gc_core.auto_routing.levels import auto_active, effective_level
+from gc_core.auto_routing.log_events import (
+    log_artifact_reroute,
+    log_routing_decision,
+    log_routing_pair,
+)
 from gc_core.auto_routing.policy import (
     Decision,
     FINISH_REJECT,
@@ -85,6 +90,7 @@ from gc_core.loop_detector.detector import clear as clear_loop_detector
 from gc_core.loop_detector.detector import flush as flush_loop_detector
 from gc_core.loop_detector.detector import observe as observe_loop_detector
 from gc_core.tools.arguments_validation import arguments_without_service_fields
+from gc_core.utils.chat_completions_stream import without_answer_deltas
 from gc_core.message_policy.attachments_outbound import (
     compute_live_ids,
     count_live_images,
@@ -399,6 +405,88 @@ def _resolve_main_for_turn(state: State, ctx: Any) -> Optional[Any]:
     if router is None:
         return None
     return router.resolve_main_at_level(getattr(state, "turn_level", None))
+
+
+def resolve_main_for_call(
+    state: State, ctx: Any, *, level_override: Optional[str] = None
+) -> Optional[Any]:
+    """Единственный резолв модели главного трейса перед LLM-вызовом (спека
+    автороутинга §5.2 п.3): ручной уровень и AUTO используют решение текущего
+    такта; следующий такт читает новый выбор пользователя. Результат (`ResolvedModel`:
+    модель, адрес, токен, квирки) передаётся в воронку целиком, внутри вызова
+    повторных резолвов нет — иначе смена уровня между решением и отправкой давала
+    бы «половинчатую подмену» (лог от одной модели, запрос к другой).
+
+    `level_override` — зафиксированный уровень из точки решения (`aroute_before_call`):
+    без него `router.resolve("main")` читал бы
+    провайдер уровня ЗАНОВО, независимо от чтения внутри `aroute_before_call` — и
+    `/level` между решением и этим резолвом развёл бы их. `None` (вызовы вне
+    `aprepare_main_call`, напр. существующие тесты) — прежнее поведение, живой
+    провайдер.
+
+    Открытый алиас активной модели main-трейса — честная ошибка класса 2 до
+    транспорта (`_raise_honest_main_unavailable`); у ребёнка-субагента class-2
+    ведёт `SubagentRunner`, поэтому его `AliasCircuitOpenError` уходит сырым.
+    Без `ctx.model_router` — `None`, воронки читают cfg напрямую как раньше."""
+    router = getattr(ctx, "model_router", None)
+    if router is None:
+        return None
+    try:
+        resolved = router.resolve("main", level_override=level_override)
+    except AliasCircuitOpenError as exc:
+        if getattr(router, "is_subagent_child", False):
+            raise
+        _raise_honest_main_unavailable(ctx, exc.resolved, exc.reason, exc)
+    state.default_model = resolved.model
+    return resolved
+
+
+def _raw_routing_params(ctx: Any) -> RoutingParams:
+    """Параметры политики этого прогона. Обе точки сборки RunContext кладут их на
+    ctx; тестовые двойники ctx поля не имеют — дефолтные параметры и есть
+    продуктовое поведение без экспериментов."""
+    params = getattr(ctx, "routing_params", None)
+    return params if isinstance(params, RoutingParams) else RoutingParams()
+
+
+def _routing_params(ctx: Any, state: Any) -> RoutingParams:
+    """Параметры такта: параметры прогона, где `safe_level: auto` уже заменён
+    уровнем хода (`policy.turn_params`; пары нет — `max`). Все решения и переигрыши
+    контроллера читают `safe_level` только отсюда — литерал `auto` в правила не
+    попадает ни при какой политике."""
+    return turn_params(
+        _raw_routing_params(ctx), getattr(state, "turn_safe_level", None)
+    )
+
+
+def _first_alive_level(
+    router: Any, levels: Tuple[str, ...]
+) -> Optional[Tuple[str, Any]]:
+    """Первый уровень из `levels` (`first_alive`), чей алиас главного вызова не
+    разомкнут предохранителем, и его комплект вызова — из того же резолва,
+    которым проверялась живость; все мертвы — None: у решения честный отказ
+    дальше, в резолве `resolve_main_for_call`, у пола ответ остаётся в силе.
+    Одно правило живости для замены мёртвого уровня решения и для цели пола:
+    живость спрашивается у Router'а тем же резолвом, каким пойдёт вызов, —
+    привязки и оверрайд деградации учтены сами."""
+    kits: Dict[str, Any] = {}
+
+    def is_alive(level: str) -> bool:
+        try:
+            kits[level] = router.resolve("main", level_override=level)
+        except AliasCircuitOpenError:
+            return False
+        return True
+
+    level = first_alive(levels, is_alive)
+    return None if level is None else (level, kits[level])
+
+
+def _apply_call_kit(state: State, ctx: Any, level: str) -> Optional[Any]:
+    """Комплект вызова и фактический уровень такта; схемы проецируются транспортом."""
+    resolved = resolve_main_for_call(state, ctx, level_override=level)
+    state._call_level = level
+    return resolved
 
 
 def _maybe_trip_and_raise_main_unavailable(
