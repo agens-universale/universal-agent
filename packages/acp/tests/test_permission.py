@@ -585,3 +585,79 @@ async def test_confirm_before_poll_uses_the_call_just_written(tmp_path):
     ]
     assert ids == ["call-early"]
     await facade.shutdown()
+
+
+async def test_parent_confirm_after_nested_crash_uses_parent_call(
+    tmp_path, monkeypatch
+):
+    """Вложенный тул бросает после kind=call — confirm родителя не липнет к нему."""
+    from types import SimpleNamespace
+
+    from gc_core import processing_responses as pr
+
+    facade, writer, agents = _open(tmp_path)
+    await _init(facade)
+    await _new(facade, "/work/app")
+    session_id = _by_id(writer, 2)["result"]["sessionId"]
+    path = tmp_path / f"data_acp_{session_id}.jsonl"
+    agent = agents[0]
+    agent.executor._ctx.permission_store = PermissionStore()
+    agent.hold = True
+    await facade.handle_line(
+        _line(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "a"}],
+            },
+            3,
+        )
+    )
+    await agent.started.wait()
+    _append_call(path, "subagent_explore", "parent-1", {"task": "найти"})
+
+    async def boom(**_kwargs):
+        raise RuntimeError("nested broke")
+
+    monkeypatch.setattr(pr, "aapply_tool", boom)
+    child = SimpleNamespace(
+        parent_call_id="parent-1",
+        threads_dir=str(tmp_path),
+        system_id="acp",
+        thread_id=session_id,
+        run_id="child-1",
+        subagent_progress_sink=None,
+    )
+    state = SimpleNamespace(tool_calls=0, steps=0, max_steps=1)
+    with pytest.raises(RuntimeError, match="nested broke"):
+        await pr._aexecute_tool_call(
+            {
+                "type": "function_call",
+                "name": "exec_command",
+                "call_id": "nested-1",
+                "arguments": "{}",
+            },
+            "exec_command",
+            "{}",
+            state,
+            child,
+            None,
+        )
+    sidecar = tmp_path / f"data_subagents_acp_{session_id}.jsonl"
+    kinds = [
+        json.loads(line)["kind"]
+        for line in sidecar.read_text(encoding="utf-8").splitlines()
+    ]
+    assert kinds == ["call", "error"]
+
+    async def reply():
+        msg = await _wait_permission(writer)
+        assert msg["params"]["toolCall"]["toolCallId"] == "parent-1"
+        await facade.handle_line(_response(msg["id"], _selected("allow_once")))
+
+    task = asyncio.create_task(reply())
+    assert await _ask(agent.executor._ctx, "command:ls") is True
+    await task
+    agent.release.set()
+    await facade._sessions[session_id].prompt_task
+    await facade.shutdown()
