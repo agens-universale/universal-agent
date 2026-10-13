@@ -91,6 +91,8 @@ class ToolFlow:
     def __init__(self, path: str, *, sidecar_path: str | None = None) -> None:
         self._parent = _Tail(path)
         self._sidecar = _Tail(sidecar_path or "")
+        self._parent_from = self._parent.offset
+        self._sidecar_from = self._sidecar.offset
         self._seen: set[str] = set()
         self._finished: set[str] = set()
 
@@ -106,6 +108,54 @@ class ToolFlow:
             if update is not None:
                 updates.append(update)
         return updates
+
+    def current_call_id(self) -> str | None:
+        """Вызов, который исполняется сейчас. Id тот же, что у карточки.
+
+        Срез — с создания хода: незаконченный вызов прошлого prompt не
+        прилипает. Родительский батч уже лежит в jsonl и идёт с начала,
+        поэтому текущий — первый без output. Вложенный тул дописывается
+        в sidecar в момент старта, поэтому текущий — последний открытый там.
+        """
+        nested = _open_call_ids(
+            self._sidecar.path, self._sidecar_from, "sidecar"
+        )
+        if nested:
+            return nested[-1]
+        parent = _open_call_ids(self._parent.path, self._parent_from, "parent")
+        if parent:
+            return parent[0]
+        return None
+
+
+def _open_call_ids(path: str, start: int, kind: str) -> list[str]:
+    seen: set[str] = set()
+    finished: set[str] = set()
+    order: list[str] = []
+    for raw in _read_from(path, start):
+        update = _decode(kind, raw, seen, finished)
+        if update is None or update.get("sessionUpdate") != "tool_call":
+            continue
+        call_id = update.get("toolCallId")
+        if isinstance(call_id, str) and call_id != "":
+            order.append(call_id)
+    return [item for item in order if item not in finished]
+
+
+def _read_from(path: str, start: int) -> list[bytes]:
+    if path == "":
+        return []
+    try:
+        size = os.path.getsize(path)
+        if size < start:
+            start = 0
+        with open(path, "rb") as handle:
+            handle.seek(start)
+            blob = handle.read()
+    except OSError:
+        return []
+    lines, _rest = _complete_lines(blob)
+    return lines
 
 
 def _call_report(message: dict, seen: set[str]) -> dict | None:

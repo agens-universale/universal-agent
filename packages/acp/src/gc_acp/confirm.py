@@ -82,7 +82,7 @@ def permission_message(
     request_id: Any,
     session_id: str,
     request: HumanRequest,
-    open_ids: list[str],
+    tool_call_id: str | None,
 ) -> dict:
     return {
         "jsonrpc": "2.0",
@@ -91,7 +91,8 @@ def permission_message(
         "params": {
             "sessionId": session_id,
             "toolCall": {
-                "toolCallId": _tool_call_id(request.decision_key, open_ids),
+                "toolCallId": tool_call_id
+                or _synthetic_id(request.decision_key),
                 "title": request.title,
                 "kind": _tool_kind(request.decision_key),
                 "status": "pending",
@@ -149,9 +150,7 @@ def _tool_kind(decision_key: str | None) -> str:
     return _KIND.get(prefix, "other")
 
 
-def _tool_call_id(decision_key: str | None, open_ids: list[str]) -> str:
-    if open_ids:
-        return open_ids[-1]
+def _synthetic_id(decision_key: str | None) -> str:
     key = decision_key if isinstance(decision_key, str) else ""
     return f"confirm:{key}"
 

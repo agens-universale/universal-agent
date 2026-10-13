@@ -288,6 +288,155 @@ def test_poll_reads_sidecar_created_after_start(tmp_path):
     ]
 
 
+def test_current_call_id_before_poll_matches_the_later_card(tmp_path):
+    path = tmp_path / "data_acp_s.jsonl"
+    flow = ToolFlow(str(path))
+    path.write_text(
+        _line(
+            {
+                "type": "function_call",
+                "name": "fs_read_file",
+                "call_id": "c1",
+                "arguments": '{"path": "a.py"}',
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    assert flow.current_call_id() == "c1"
+    assert flow.poll()[0]["toolCallId"] == "c1"
+
+
+def test_current_call_id_is_the_first_unfinished_parent_call(tmp_path):
+    path = tmp_path / "data_acp_s.jsonl"
+    flow = ToolFlow(str(path))
+    path.write_text(
+        _line(
+            {
+                "type": "function_call",
+                "name": "fs_read_file",
+                "call_id": "first",
+                "arguments": "{}",
+            }
+        )
+        + "\n"
+        + _line(
+            {
+                "type": "function_call",
+                "name": "exec_command",
+                "call_id": "second",
+                "arguments": "{}",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    assert flow.current_call_id() == "first"
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(
+            _line(
+                {
+                    "type": "function_call_output",
+                    "call_id": "first",
+                    "output": '{"ok": true}',
+                }
+            )
+            + "\n"
+        )
+    assert flow.current_call_id() == "second"
+
+
+def test_current_call_id_is_the_latest_open_nested_call(tmp_path):
+    thread = tmp_path / "data_acp_s.jsonl"
+    sidecar = tmp_path / "data_subagents_acp_s.jsonl"
+    flow = ToolFlow(str(thread), sidecar_path=str(sidecar))
+    thread.write_text(
+        _line(
+            {
+                "type": "function_call",
+                "name": "subagent_explore",
+                "call_id": "sub",
+                "arguments": "{}",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    sidecar.write_text(
+        _sidecar(
+            {
+                "parent_call_id": "sub",
+                "kind": "call",
+                "payload": {
+                    "type": "function_call",
+                    "name": "fs_read_file",
+                    "call_id": "c1",
+                    "arguments": "{}",
+                },
+            }
+        )
+        + "\n"
+        + _sidecar(
+            {
+                "parent_call_id": "sub",
+                "kind": "result",
+                "payload": {
+                    "type": "function_call_output",
+                    "call_id": "c1",
+                    "output": '{"ok": true}',
+                },
+            }
+        )
+        + "\n"
+        + _sidecar(
+            {
+                "parent_call_id": "sub",
+                "kind": "call",
+                "payload": {
+                    "type": "function_call",
+                    "name": "exec_command",
+                    "call_id": "c2",
+                    "arguments": "{}",
+                },
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    assert flow.current_call_id() == "sub:c2"
+
+
+def test_current_call_id_ignores_the_previous_prompt(tmp_path):
+    path = tmp_path / "data_acp_s.jsonl"
+    path.write_text(
+        _line(
+            {
+                "type": "function_call",
+                "name": "fs_read_file",
+                "call_id": "old",
+                "arguments": "{}",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    flow = ToolFlow(str(path))
+    assert flow.current_call_id() is None
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(
+            _line(
+                {
+                    "type": "function_call",
+                    "name": "fs_read_file",
+                    "call_id": "new",
+                    "arguments": "{}",
+                }
+            )
+            + "\n"
+        )
+    assert flow.current_call_id() == "new"
+
+
 def test_report_without_call_id_is_skipped():
     seen: set[str] = set()
     assert (

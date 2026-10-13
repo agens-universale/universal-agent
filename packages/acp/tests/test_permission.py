@@ -458,3 +458,44 @@ async def test_open_tool_card_id_is_reused(tmp_path):
     agent.release.set()
     await facade._sessions[session_id].prompt_task
     await facade.shutdown()
+
+
+async def test_confirm_before_poll_uses_the_call_just_written(tmp_path):
+    facade, writer, agents = _open(tmp_path)
+    await _init(facade)
+    await _new(facade, "/work/app")
+    session_id = _by_id(writer, 2)["result"]["sessionId"]
+    path = tmp_path / f"data_acp_{session_id}.jsonl"
+    agent = agents[0]
+    agent.executor._ctx.permission_store = PermissionStore()
+    agent.hold = True
+    await facade.handle_line(
+        _line(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "a"}],
+            },
+            3,
+        )
+    )
+    await agent.started.wait()
+    _append_call(path, "fs_read_file", "call-early", {"path": "src/a.py"})
+
+    async def reply():
+        msg = await _wait_permission(writer)
+        assert msg["params"]["toolCall"]["toolCallId"] == "call-early"
+        await facade.handle_line(_response(msg["id"], _selected("allow_once")))
+
+    task = asyncio.create_task(reply())
+    assert await _ask(agent.executor._ctx, "read:src/a.py") is True
+    await task
+    agent.release.set()
+    await facade._sessions[session_id].prompt_task
+    ids = [
+        item.get("toolCallId")
+        for item in _updates(writer)
+        if item.get("sessionUpdate") == "tool_call"
+    ]
+    assert ids == ["call-early"]
+    await facade.shutdown()

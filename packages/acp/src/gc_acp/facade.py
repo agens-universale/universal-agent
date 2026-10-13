@@ -7,7 +7,7 @@ import logging
 import os
 import sys
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from gc_core.thread_store import (
@@ -75,7 +75,7 @@ class LiveSession:
     prompt_finished: bool = False
     response_sent: bool = False
     failed: bool = False
-    open_tool_ids: list[str] = field(default_factory=list)
+    tool_flow: ToolFlow | None = None
 
 
 class AcpFacade:
@@ -259,6 +259,7 @@ class AcpFacade:
         live.prompt_finished = False
         live.response_sent = False
         live.failed = False
+        live.tool_flow = None
         live.prompt_id = request_id
         live.prompt_task = asyncio.create_task(
             self._run_prompt(live, request_id, text)
@@ -431,12 +432,14 @@ class AcpFacade:
         future = asyncio.get_running_loop().create_future()
         self._pending.add(request_id, session_id, future)
         try:
+            flow = live.tool_flow
+            call_id = None if flow is None else flow.current_call_id()
             await self._send(
                 permission_message(
                     request_id,
                     session_id,
                     request,
-                    list(live.open_tool_ids),
+                    call_id,
                 )
             )
             incoming = await asyncio.wait_for(
@@ -475,6 +478,7 @@ class AcpFacade:
             self._index.thread_path(live.session_id),
             sidecar_path=self._index.subagent_path(live.session_id),
         )
+        live.tool_flow = flow
         stop = asyncio.Event()
         watch = asyncio.create_task(self._watch_tools(live, flow, stop))
         try:
@@ -483,6 +487,7 @@ class AcpFacade:
             stop.set()
             await watch
             await self._emit_tools(live, flow)
+            live.tool_flow = None
         if live.cancel_requested:
             return
         final = SubmitSolution.present_result(
@@ -514,7 +519,6 @@ class AcpFacade:
 
     async def _emit_tools(self, live: LiveSession, flow: ToolFlow) -> None:
         for update in flow.poll():
-            _track_open_tool(live, update)
             await self._notify(live.session_id, update)
 
     async def _close_prompt(self, live: LiveSession, request_id: Any) -> None:
@@ -691,9 +695,6 @@ def _outcome(live: LiveSession) -> str | None:
     return None
 
 
-_TOOL_DONE = frozenset({"completed", "failed"})
-
-
 def broken_reply_for(incoming: Incoming) -> Incoming:
     """Битый JSON с нашим id: закрыть ожидание, не подменяя чужой id."""
     reply = broken_reply()
@@ -704,24 +705,6 @@ def broken_reply_for(incoming: Incoming) -> Incoming:
         error=reply.error,
         parse_error=True,
     )
-
-
-def _track_open_tool(live: LiveSession, update: dict) -> None:
-    kind = update.get("sessionUpdate")
-    call_id = update.get("toolCallId")
-    if not isinstance(call_id, str) or call_id == "":
-        return
-    if kind == "tool_call":
-        if call_id not in live.open_tool_ids:
-            live.open_tool_ids.append(call_id)
-        return
-    if kind != "tool_call_update":
-        return
-    if update.get("status") not in _TOOL_DONE:
-        return
-    live.open_tool_ids = [
-        item for item in live.open_tool_ids if item != call_id
-    ]
 
 
 def _mark_cancel(live: LiveSession) -> None:
