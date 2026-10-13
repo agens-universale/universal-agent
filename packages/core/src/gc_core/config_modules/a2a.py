@@ -13,6 +13,9 @@ class A2aConfig(BaseModel):
     # Слушает этот процесс. По умолчанию только loopback.
     host: str = "127.0.0.1"
     port: int = Field(default=8091, ge=1, le=65535)
+    # URL в карточке (supportedInterfaces.url). None — собрать из host:port.
+    # Нужен, когда bind на 0.0.0.0/:: : пир по адресу сокета не ходит.
+    public_url: str | None = None
     # Пустая строка — заголовок Authorization не проверяется.
     auth_token: str = Field(default="", json_schema_extra=gc_meta(secret=True))
     # cwd нового диалога, если в сообщении нет абсолютного metadata.cwd.
@@ -34,6 +37,22 @@ class A2aConfig(BaseModel):
         text = value.strip()
         if text == "":
             raise ValueError("a2a.host должен быть непустой строкой")
+        return text
+
+    @field_validator("public_url", mode="before")
+    @classmethod
+    def _public_url(cls, value: object) -> str | None:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError("a2a.public_url должен быть строкой или null")
+        text = value.strip()
+        if text == "":
+            return None
+        if not text.startswith(("http://", "https://")):
+            raise ValueError(
+                "a2a.public_url должен начинаться с http:// или https://"
+            )
         return text
 
     @field_validator("auth_token", mode="before")

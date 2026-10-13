@@ -346,6 +346,7 @@ gRPC и HTTP+JSON фасад не объявляет.
 |---|---|---|
 | `a2a.host` | `127.0.0.1` | адрес bind |
 | `a2a.port` | `8091` | порт |
+| `a2a.public_url` | `null` | URL в карточке; пусто — из `host`:`port`. Нужен при bind на `0.0.0.0` |
 | `a2a.auth_token` | `""` | пусто — без Bearer |
 | `a2a.launch_root` | `null` | cwd нового диалога, если в сообщении нет абсолютного `metadata.cwd` |
 | `a2a.name` | `GigaCode` | `name` карточки |

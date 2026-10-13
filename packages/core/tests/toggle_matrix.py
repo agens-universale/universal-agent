@@ -893,6 +893,7 @@ NOT_IN_MATRIX = {
     "chat_api.todo_reminder_steps": "только процесс gc-chat",
     "a2a.host": "только процесс gc-a2a",
     "a2a.port": "только процесс gc-a2a",
+    "a2a.public_url": "только процесс gc-a2a",
     "a2a.auth_token": "только процесс gc-a2a",
     "a2a.launch_root": "только процесс gc-a2a",
     "a2a.name": "только процесс gc-a2a",

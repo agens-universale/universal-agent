@@ -77,10 +77,11 @@ class A2aFacade:
 
     def card(self) -> dict:
         section = self._settings.settings.a2a
+        url = section.public_url or interface_url(section.host, section.port)
         return agent_card(
             name=section.name,
             description=section.description,
-            url=interface_url(section.host, section.port),
+            url=url,
             secured=section.auth_token != "",
         )
 

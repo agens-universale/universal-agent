@@ -59,6 +59,21 @@ async def test_card_reads_section_and_declares_bearer(tmp_path):
     assert card["securityRequirements"] == [{"schemes": {"bearer": {}}}]
 
 
+async def test_card_public_url_is_not_bind_host(tmp_path):
+    async with session(
+        tmp_path,
+        **{
+            "a2a.host": "0.0.0.0",
+            "a2a.port": 8091,
+            "a2a.public_url": "http://192.168.1.10:8091/rpc",
+        },
+    ) as (client, _facade, _created):
+        response = await client.get("/.well-known/agent-card.json")
+    assert response.json()["supportedInterfaces"][0]["url"] == (
+        "http://192.168.1.10:8091/rpc"
+    )
+
+
 async def test_rpc_requires_bearer_card_does_not(tmp_path):
     async with session(tmp_path, token="secret") as (client, _f, _c):
         card = await client.get("/.well-known/agent-card.json")
