@@ -1,4 +1,6 @@
 """RoutingParams: сборка из конфига, валидация схемы, проводка на оба RunContext."""
+import json
+
 import pytest
 from pydantic import ValidationError
 
@@ -178,3 +180,119 @@ def test_child_keeps_auto_params_instead_of_parent_pair(tmp_path, parent_pair):
     assert child.routing_params.safe_level == "auto"
     assert parent.turn_safe_level == parent_pair
     assert parent.pair_window_left == 7
+
+
+@pytest.mark.parametrize("parent_pair,reply,want", [
+    ("max", '{"score":2,"reason":"small"}', "default"),
+    ("default", '{"score":3,"reason":"complex"}', "max"),
+    (None, '{"score":4,"reason":"complex"}', "max"),
+    ("default", 'not json', "max"),
+    ("default", RuntimeError("judge unavailable"), "max"),
+])
+def test_independent_child_judges_its_own_task(tmp_path, monkeypatch, parent_pair, reply, want):
+    import json
+    from gc_core.auto_routing import judge_runner
+    cfg = _child_config(tmp_path, auto_routing_safe_level="auto")
+    parent = _orchestrator_state()
+    parent.turn_safe_level = parent_pair
+    parent.pair_window_left = 7
+    parent.current_user_intent = []
+    cards = []
+
+    async def judge(**kwargs):
+        cards.append(json.loads(kwargs["messages"][-1]["content"]))
+        if isinstance(reply, Exception):
+            raise reply
+        return reply
+
+    monkeypatch.setattr(judge_runner, "arequest_auxiliary_completion_text", judge)
+    task = "delegated task " + "context " * 400 + "FINAL_REQUIREMENT_CHILD"
+    runner = SubagentRunner(_parent_ctx(cfg, level="auto"), parent, cfg)
+
+    async def inspect(messages, state, ctx, **kwargs):
+        await pr.aprepare_main_call(state, ctx)
+        assert state.turn_safe_level == want
+        assert state._call_level == want
+        await pr.aprepare_main_call(state, ctx)  # the same prepared request
+        assert state._call_level == want
+        return "checked"
+
+    result = run_coro(runner.arun("subagent_worker", {"task": task, "reason": "Delegate"}, inspect))
+    assert json.loads(result)["ok"] is True, result
+    assert len(cards) == 1
+    assert "FINAL_REQUIREMENT_CHILD" in cards[0]["request"]
+    assert "previous_turn" not in cards[0]
+    assert parent.turn_safe_level == parent_pair
+    assert parent.pair_window_left == 7
+
+
+def test_independent_child_ladder_and_snapshot_keep_parent_untouched(tmp_path, monkeypatch):
+    from gc_core.auto_routing import judge_runner, state_ops
+    from gc_core.auto_routing.policy import TOOL_CALL_ERROR
+    cfg = _child_config(tmp_path, auto_routing_safe_level="auto")
+    parent = _orchestrator_state()
+    parent.turn_safe_level, parent.pair_window_left, parent.pair_raises = "max", 7, 1
+    calls = []
+
+    async def judge(**kwargs):
+        calls.append(kwargs["request_label"])
+        return '{"score":2,"reason":"small"}'
+
+    monkeypatch.setattr(judge_runner, "arequest_auxiliary_completion_text", judge)
+    runner = SubagentRunner(_parent_ctx(cfg, level="auto"), parent, cfg)
+
+    async def inspect(messages, state, ctx, **kwargs):
+        await pr.aprepare_main_call(state, ctx)
+        state_ops.close_tick(state, state._call_level)
+        state.tick_signals = {TOOL_CALL_ERROR}
+        await pr.aprepare_main_call(state, ctx)
+        assert state.turn_safe_level == "max"
+        assert state.pair_raises == 1
+        restored = State.from_execution_snapshot(state.to_execution_snapshot())
+        restored.workspace, restored.logger = state.workspace, state.logger
+        ctx.attach_state(restored)
+        await pr.aprepare_main_call(restored, ctx)
+        assert restored._call_level == "max"
+        assert restored.pair_window_left == 10
+        while restored.pair_window_left:
+            state_ops.close_tick(restored, restored._call_level)
+            await pr.aprepare_main_call(restored, ctx)
+        assert restored.turn_safe_level == "default"
+        state_ops.close_tick(restored, restored._call_level)
+        restored.tick_signals = {TOOL_CALL_ERROR}
+        await pr.aprepare_main_call(restored, ctx)
+        assert restored.turn_safe_level == "max"
+        assert restored.pair_raises == 2
+        assert restored.pair_window_left is None
+        return "checked"
+
+    result = run_coro(runner.arun("subagent_worker", {"task": "read it", "reason": "Delegate"}, inspect))
+    assert json.loads(result)["ok"] is True, result
+    assert len(calls) == 1
+    assert (parent.turn_safe_level, parent.pair_window_left, parent.pair_raises) == ("max", 7, 1)
+
+
+@pytest.mark.parametrize("binding", ["big", "max"])
+@pytest.mark.parametrize("key", ["subagent_worker", "*"])
+def test_bound_child_does_not_call_pair_judge(tmp_path, monkeypatch, binding, key):
+    from gc_core.auto_routing import judge_runner
+    cfg = _child_config(tmp_path, auto_routing_safe_level="auto").with_overrides({
+        "assign.subagents": {key: binding},
+    })
+    cards = []
+
+    async def judge(**kwargs):
+        cards.append(kwargs)
+        return '{"score":2}'
+
+    monkeypatch.setattr(judge_runner, "arequest_auxiliary_completion_text", judge)
+    runner = SubagentRunner(_parent_ctx(cfg, level="auto"), _orchestrator_state(), cfg)
+
+    async def inspect(messages, state, ctx, **kwargs):
+        resolved = await pr.aprepare_main_call(state, ctx)
+        assert resolved.alias == "big"
+        return "checked"
+
+    result = run_coro(runner.arun("subagent_worker", {"task": "read", "reason": "r"}, inspect))
+    assert json.loads(result)["ok"] is True, result
+    assert cards == []

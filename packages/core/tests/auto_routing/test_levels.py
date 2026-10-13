@@ -258,7 +258,7 @@ def test_child_binding_preserves_old_durable_alias_comparison():
     cfg = make_settings({"models": {alias: {"model": "same"} for alias in ("a", "b", "c")},
         "slots": {"light": "a", "default": "b", "max": "c"},
         "backend.api_mode": "chat_completions"})
-    child = SimpleNamespace(settings=cfg.settings, runtime=cfg.runtime, routing_contract_v2=False,
+    child = SimpleNamespace(settings=cfg.settings, runtime=cfg.runtime, routing_contract_v2=False, subagent_independent_auto=False,
                             model_router=ModelRouter(cfg, level_provider=lambda: "auto"))
     runner = object.__new__(SubagentRunner)
     runner._ctx = SimpleNamespace()
