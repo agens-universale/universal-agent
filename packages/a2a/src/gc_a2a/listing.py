@@ -10,11 +10,15 @@ from gc_a2a.store import Task, public
 
 def page(tasks: list[Task], query: TaskQuery) -> dict:
     rows = [task for task in tasks if _match(task, query)]
-    rows.sort(key=lambda task: (task.timestamp, task.sequence), reverse=True)
-    start = query.offset
-    chunk = rows[start : start + query.page_size]
-    next_at = start + len(chunk)
-    token = "" if next_at >= len(rows) else str(next_at)
+    rows.sort(key=_sort_key, reverse=True)
+    total = len(rows)
+    if query.cursor is not None:
+        rows = [task for task in rows if _sort_key(task) < query.cursor]
+    chunk = rows[: query.page_size]
+    token = ""
+    if len(rows) > query.page_size:
+        last = chunk[-1]
+        token = f"{last.timestamp}|{last.sequence}"
     return {
         "tasks": [
             public(
@@ -26,8 +30,12 @@ def page(tasks: list[Task], query: TaskQuery) -> dict:
         ],
         "nextPageToken": token,
         "pageSize": query.page_size,
-        "totalSize": len(rows),
+        "totalSize": total,
     }
+
+
+def _sort_key(task: Task) -> tuple[str, int]:
+    return task.timestamp, task.sequence
 
 
 def _match(task: Task, query: TaskQuery) -> bool:

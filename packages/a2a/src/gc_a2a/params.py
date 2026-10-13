@@ -57,7 +57,7 @@ class TaskQuery:
         after: datetime | None,
         history_length: int | None,
         page_size: int,
-        offset: int,
+        cursor: tuple[str, int] | None,
         include_artifacts: bool,
     ) -> None:
         self.context_id = context_id
@@ -65,7 +65,7 @@ class TaskQuery:
         self.after = after
         self.history_length = history_length
         self.page_size = page_size
-        self.offset = offset
+        self.cursor = cursor
         self.include_artifacts = include_artifacts
 
 
@@ -107,7 +107,7 @@ def parse_list(params: Any) -> TaskQuery:
         after=_after(body.get("statusTimestampAfter")),
         history_length=_history_length(body, "historyLength"),
         page_size=_page_size(body.get("pageSize")),
-        offset=_offset(body),
+        cursor=_cursor(body),
         include_artifacts=_include_artifacts(body.get("includeArtifacts")),
     )
 
@@ -239,15 +239,18 @@ def _bounded_int(value: Any, *, minimum: int, maximum: int | None) -> int:
     return value
 
 
-def _offset(body: dict) -> int:
+def _cursor(body: dict) -> tuple[str, int] | None:
     token = body.get("pageToken")
     if token is None:
         token = body.get("nextPageToken")
     if token in (None, ""):
-        return 0
-    if not isinstance(token, str) or not token.isdigit():
+        return None
+    if not isinstance(token, str):
         raise invalid_params()
-    return int(token)
+    stamp, sep, sequence = token.rpartition("|")
+    if sep == "" or stamp == "" or not sequence.isdigit():
+        raise invalid_params()
+    return stamp, int(sequence)
 
 
 def _include_artifacts(value: Any) -> bool:

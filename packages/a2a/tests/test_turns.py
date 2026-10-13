@@ -239,7 +239,8 @@ async def test_get_and_list_and_cancel(tmp_path):
         assert page["totalSize"] == 2
         assert page["tasks"][0]["id"] == fast["id"]
         assert "artifacts" not in page["tasks"][0]
-        assert page["nextPageToken"] == "1"
+        assert page["nextPageToken"] != ""
+        assert "|" in page["nextPageToken"]
         rest = await rpc(
             client,
             "ListTasks",
