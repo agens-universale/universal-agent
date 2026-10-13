@@ -4,6 +4,8 @@ import html
 from typing import Any, Callable, Dict, List, Sequence, TypeVar
 
 from gc_core.message_format.serialization import (
+    _REASONING_HEADER,
+    _reasoning_source,
     message_text_for_summary,
     strip_original_user_messages_block,
 )
@@ -104,11 +106,24 @@ def message_text_limited(
             if preview == dump:
                 return _wrap_cutted_envelope(assembled, max_message_chars)
             return assembled
-    # Маркер [cutted N chars...] стоит между началом и хвостом.
-    # Конверт режет с головы и снова отбрасывает конец.
-    if "\n[reasoning]\n" in text:
-        return text
+    # Ответ — лимит сообщения. Блок [reasoning] уже обрезан в serialization
+    # (начало и хвост); конверт режет с головы и снова отбросил бы этот хвост.
+    if _assistant_reasoning_appended(message) and _REASONING_HEADER in text:
+        answer, _, reasoning = text.rpartition(_REASONING_HEADER)
+        return (
+            f"{_wrap_cutted_envelope(answer, max_message_chars)}"
+            f"{_REASONING_HEADER}{reasoning}"
+        )
     return _wrap_cutted_envelope(text, max_message_chars)
+
+
+def _assistant_reasoning_appended(message: Dict[str, Any]) -> bool:
+    """Блок ``[reasoning]`` дописывает только assistant с непустым reasoning."""
+    if not isinstance(message, dict):
+        return False
+    if str(message.get("role") or "").strip().lower() != "assistant":
+        return False
+    return bool(_reasoning_source(message))
 
 
 def build_history_text(

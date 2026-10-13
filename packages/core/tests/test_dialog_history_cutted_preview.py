@@ -4,8 +4,10 @@ import html
 import re
 
 from gc_core.message_format.dialog_history import (
+    build_history_text,
     format_last_dialog_steps,
     message_text_limited,
+    trim_history_to_max_dialogue_chars,
     truncate_text,
 )
 from gc_core.message_format.serialization import message_text_for_summary
@@ -147,3 +149,71 @@ def test_truncate_text_still_appends_text_cutted():
 def test_message_text_limited_no_limit_keeps_full_text():
     msg = {"role": "user", "content": "x" * 100}
     assert message_text_limited(msg, 0) == message_text_for_summary(msg)
+
+
+def test_long_answer_with_short_reasoning_limits_answer_keeps_reasoning():
+    answer = "A" * 250_000
+    reasoning = "short-reason-tail"
+    msg = {
+        "role": "assistant",
+        "content": answer,
+        "reasoning_content": reasoning,
+    }
+    limit = 5_000
+    text = message_text_limited(msg, limit)
+    answer_part, header, reasoning_part = text.rpartition("\n[reasoning]\n")
+    assert header == "\n[reasoning]\n"
+    assert reasoning_part == reasoning
+    match = _ENVELOPE_RE.fullmatch(answer_part)
+    assert match is not None
+    assert int(match.group(1)) == limit
+    assert len(text) < 20_000
+
+
+def test_long_reasoning_tail_survives_message_limit():
+    raw = ("H" * 6000) + ("M" * 4000) + ("T" * 6000) + "END"
+    msg = {
+        "role": "assistant",
+        "content": "A" * 20_000,
+        "reasoning_content": raw,
+    }
+    text = message_text_limited(msg, 5_000)
+    full = message_text_for_summary(msg)
+    _, _, expected_reasoning = full.rpartition("\n[reasoning]\n")
+    answer_part, _, reasoning_part = text.rpartition("\n[reasoning]\n")
+    assert reasoning_part == expected_reasoning
+    assert reasoning_part.endswith("END")
+    assert "M" not in reasoning_part
+    assert _ENVELOPE_RE.fullmatch(answer_part) is not None
+
+
+def test_user_text_with_reasoning_marker_uses_message_limit():
+    body = ("u" * 20_000) + "\n[reasoning]\n" + ("v" * 20_000)
+    msg = {"role": "user", "content": body}
+    limit = 5_000
+    text = message_text_limited(msg, limit)
+    full = message_text_for_summary(msg)
+    match = _ENVELOPE_RE.fullmatch(text)
+    assert match is not None
+    assert int(match.group(1)) == limit
+    assert int(match.group(2)) == len(full)
+    assert "v" * 100 not in text
+
+
+def test_long_reasoning_answer_keeps_prior_tool_output_in_history():
+    tool = {"type": "function_call_output", "output": "TOOL_FACT_123"}
+    assistant = {
+        "role": "assistant",
+        "content": "A" * 250_000,
+        "reasoning_content": "short-reason",
+    }
+    trimmed = trim_history_to_max_dialogue_chars(
+        [tool, assistant],
+        max_dialogue_chars=200_000,
+        max_message_chars=5_000,
+    )
+    assert trimmed[0] is tool
+    text = build_history_text(trimmed, max_chars=0, max_message_chars=5_000)
+    assert "TOOL_FACT_123" in text
+    assert "short-reason" in text
+    assert len(text) < 200_000
