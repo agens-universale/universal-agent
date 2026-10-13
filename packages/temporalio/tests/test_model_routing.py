@@ -259,3 +259,11 @@ def test_old_prepared_child_without_facts_keeps_old_contract():
     from gc_core_temporalio.child_preparation import PreparedChildContext
     adapter = PreparedChildContext(PreparedChild(None, None), None, independent_auto=False)
     assert adapter.independent_auto is False
+
+
+@pytest.mark.parametrize("value", [1, "true", None])
+def test_invalid_child_contract_version_is_not_silently_enabled(value):
+    from gc_core.execution.contracts import ExecutionFailure
+    from gc_core_temporalio.child_contracts import child_independent_auto
+    with pytest.raises(ExecutionFailure):
+        child_independent_auto({"independent_auto": value})
