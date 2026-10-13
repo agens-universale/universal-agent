@@ -7,6 +7,8 @@ the credential-bearing worker configuration.
 """
 
 from collections.abc import Mapping
+from gc_core.auto_routing.request_equivalence import PreparedRequestEquivalence
+
 from dataclasses import dataclass
 from typing import Any
 
@@ -126,3 +128,5 @@ class RunContextBindings:
     summary_trace_sink: Any = None
     collect_garbage: Any = None
     execution_patch: Any = None
+    prepared_request_equivalence: PreparedRequestEquivalence | None = None
+    subagent_independent_auto: bool = True

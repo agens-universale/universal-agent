@@ -79,7 +79,10 @@ class ExternalAgentStore(AgentStore):
         return self.read_text(resource)
 
 
-def assemble_context(prepared, *, operations, store, logger, human_request):
+def assemble_context(
+    prepared, *, operations, store, logger, human_request,
+    request_equivalence=None, subagent_independent_auto=True,
+):
     resources = ExternalResources(
         is_sandbox=prepared.context.workspace_is_sandbox,
         root=prepared.context.workspace_root,
@@ -111,32 +114,39 @@ def assemble_context(prepared, *, operations, store, logger, human_request):
         loaded, level_provider=lambda: loaded.settings.level or "default"
     )
     operations.router = router
-    ctx = assemble_run_context(
-        prepared.context,
-        RunContextBindings(
-            os_backend=resources,
-            skills_registry=resources,
-            logger=logger,
-            tools_data=tools,
-            model_router=router,
-            thread_store=store,
-            agent_store=ExternalAgentStore(),
-            operations=operations,
-            execution_patch=workflow.patched,
-            lock_factory=nullcontext,
-            prompt_loader=operations.prompt_loader,
-            state_preparer=operations.state_preparer,
-            human_request=human_request,
-            guard_probe=operations.guard_probe,
-            tool_effect=operations.tool_effect,
-            skills_loader=operations.skills_loader,
-            mcp_cleanup=operations.mcp_cleanup,
-            prompt_resource=operations.prompt_resource,
-            summary_trace_sink=operations.summary_trace_sink,
-            project_memory_io=operations.project_memory_io,
-            collect_garbage=lambda: None,
-        ),
-    )
+    try:
+        ctx = assemble_run_context(
+            prepared.context,
+            RunContextBindings(
+                os_backend=resources,
+                skills_registry=resources,
+                logger=logger,
+                tools_data=tools,
+                model_router=router,
+                thread_store=store,
+                agent_store=ExternalAgentStore(),
+                operations=operations,
+                execution_patch=workflow.patched,
+                prepared_request_equivalence=request_equivalence,
+                subagent_independent_auto=subagent_independent_auto,
+                lock_factory=nullcontext,
+                prompt_loader=operations.prompt_loader,
+                state_preparer=operations.state_preparer,
+                human_request=human_request,
+                guard_probe=operations.guard_probe,
+                tool_effect=operations.tool_effect,
+                skills_loader=operations.skills_loader,
+                mcp_cleanup=operations.mcp_cleanup,
+                prompt_resource=operations.prompt_resource,
+                summary_trace_sink=operations.summary_trace_sink,
+                project_memory_io=operations.project_memory_io,
+                collect_garbage=lambda: None,
+            ),
+        )
+    except ValueError as exc:
+        if request_equivalence is None:
+            raise
+        raise ExecutionFailure("Invalid prepared child routing context") from exc
 
     seed_prepared_subagent_definitions(ctx, prepared.subagent_definitions)
     operations.router_provider = lambda: ctx.model_router

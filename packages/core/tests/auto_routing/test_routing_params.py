@@ -147,17 +147,34 @@ def test_routing_params_contains_the_pair_settings():
     }
 
 
-def test_a_child_gets_the_pair_of_the_parent_turn_and_never_auto(tmp_path):
+def test_legacy_child_gets_the_pair_of_the_parent_turn(tmp_path):
     cfg = _child_config(tmp_path, auto_routing_safe_level="auto")
     parent = _orchestrator_state()
     parent.turn_safe_level = "default"
-    runner = SubagentRunner(_parent_ctx(cfg, level="auto"), parent, cfg)
+    parent_ctx = _parent_ctx(cfg, level="auto")
+    parent_ctx.subagent_independent_auto = False
+    runner = SubagentRunner(parent_ctx, parent, cfg)
     child_ctx = run_coro(runner._build_child_ctx(tool_name="subagent_worker"))
     assert child_ctx.routing_params.safe_level == "default"
 
 
-def test_a_child_of_a_parent_without_a_pair_takes_the_hard_pair(tmp_path):
+def test_legacy_child_without_a_parent_pair_takes_the_hard_pair(tmp_path):
     cfg = _child_config(tmp_path, auto_routing_safe_level="auto")
-    runner = SubagentRunner(_parent_ctx(cfg, level="auto"), _orchestrator_state(), cfg)
+    parent_ctx = _parent_ctx(cfg, level="auto")
+    parent_ctx.subagent_independent_auto = False
+    runner = SubagentRunner(parent_ctx, _orchestrator_state(), cfg)
     child_ctx = run_coro(runner._build_child_ctx(tool_name="subagent_worker"))
     assert child_ctx.routing_params.safe_level == "max"
+
+
+@pytest.mark.parametrize("parent_pair", [None, "default", "max"])
+def test_child_keeps_auto_params_instead_of_parent_pair(tmp_path, parent_pair):
+    cfg = _child_config(tmp_path, auto_routing_safe_level="auto")
+    parent = _orchestrator_state()
+    parent.turn_safe_level = parent_pair
+    parent.pair_window_left = 7
+    runner = SubagentRunner(_parent_ctx(cfg, level="auto"), parent, cfg)
+    child = run_coro(runner._build_child_ctx(tool_name="subagent_worker"))
+    assert child.routing_params.safe_level == "auto"
+    assert parent.turn_safe_level == parent_pair
+    assert parent.pair_window_left == 7

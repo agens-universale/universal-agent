@@ -224,6 +224,8 @@ class ChildTransport:
         # передают AUTO отдельно от уровня уже выбранного вызова родителя.
         if workflow.patched("subagent-frozen-live-level-v1"):
             child_context["frozen_live_level"] = router.live_level()
+        if workflow.patched("subagent-independent-auto-v1"):
+            child_context["independent_auto"] = True
         try:
             parent_snapshot = _light_parent_snapshot(self._state)
         except ValueError as exc:

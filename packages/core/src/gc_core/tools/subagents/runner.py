@@ -1488,6 +1488,7 @@ class SubagentRunner:
             subagent_diagnostics=getattr(
                 self._ctx, "subagent_diagnostics", None
             ),
+            subagent_independent_auto=getattr(self._ctx, "subagent_independent_auto", True),
         )
         return self._bind_child_context(child_ctx, tool_name)
 
@@ -1498,10 +1499,12 @@ class SubagentRunner:
             child_ctx, force_legacy=bool(getattr(router, "force_legacy", False)),
             legacy_call_kits=not getattr(child_ctx, "routing_contract_v2", True),
         )
-        child_ctx.routing_params = turn_params(
-            resolve_routing_params(child_ctx, legacy_call_kits=not getattr(child_ctx, "routing_contract_v2", True)),
-            getattr(self._orchestrator_state, "turn_safe_level", None),
+        params = resolve_routing_params(
+            child_ctx, legacy_call_kits=not getattr(child_ctx, "routing_contract_v2", True),
         )
+        if not getattr(child_ctx, "subagent_independent_auto", True):
+            params = turn_params(params, getattr(self._orchestrator_state, "turn_safe_level", None))
+        child_ctx.routing_params = params
         if router is not None:
             live = router.live_level
 

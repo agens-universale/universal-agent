@@ -211,3 +211,51 @@ async def test_old_child_context_without_raw_mode_keeps_effective_level():
     }), parent)
     assert child.model_router.live_level() == "light"
     assert child.model_router.resolve("main").alias == "fast"
+
+
+@pytest.mark.parametrize("difference", ["url", "token", "headers"])
+def test_public_child_facts_preserve_working_pairs_and_floor(difference):
+    from types import SimpleNamespace
+    from gc_core.auto_routing.levels import auto_available, resolve_routing_params
+    from gc_core.auto_routing.policy import RoutingParams
+    from gc_core.auto_routing.request_equivalence import prepare_request_equivalence
+    from gc_core.context_preparation import settings_from_snapshot
+    from gc_core.processing_responses import _floor_target
+    from gc_core_temporalio.public_config import public_config_snapshot
+    from gc_testkit.settings import make_settings
+
+    models = {}
+    for alias in ("fast", "mid", "big"):
+        models[alias] = {"model": "shared-model", "url": "https://shared.invalid/v1", "token": "common"}
+        if difference == "url":
+            models[alias]["url"] = f"https://{alias}.invalid/v1"
+        elif difference == "token":
+            models[alias]["token"] = f"secret-{alias}"
+        else:
+            models[alias]["backend"] = {"chat_completion_headers": {"X-Private": alias}}
+    full = make_settings({"models": models, "level": "auto", "backend.api_mode": "chat_completions",
+                          "slots": {"light": "fast", "default": "mid", "max": "big"}})
+    snapshot = public_config_snapshot(full)
+    restored = settings_from_snapshot(snapshot.settings, snapshot.runtime)
+    ctx = SimpleNamespace(settings=restored.settings, runtime=restored.runtime, run_id="child",
+        routing_contract_v2=True, prepared_request_equivalence=prepare_request_equivalence(full, context_id="child"))
+    ctx.model_router = ModelRouter(ctx, level_provider=lambda: "light")
+    assert auto_available(ctx, force_legacy=False) is True
+    assert resolve_routing_params(ctx).safe_level == "auto"
+    weak = ctx.model_router.resolve("main", level_override="light")
+    assert _floor_target(ctx, "light", weak, RoutingParams(safe_level="default")) == "default"
+
+
+def test_prepared_child_rejects_missing_facts_on_new_version():
+    from gc_core.execution.contracts import ExecutionFailure
+    from gc_core_temporalio.child_contracts import PreparedChild
+    from gc_core_temporalio.child_preparation import PreparedChildContext
+    with pytest.raises(ExecutionFailure):
+        PreparedChildContext(PreparedChild(None, None), None, independent_auto=True)
+
+
+def test_old_prepared_child_without_facts_keeps_old_contract():
+    from gc_core_temporalio.child_contracts import PreparedChild
+    from gc_core_temporalio.child_preparation import PreparedChildContext
+    adapter = PreparedChildContext(PreparedChild(None, None), None, independent_auto=False)
+    assert adapter.independent_auto is False

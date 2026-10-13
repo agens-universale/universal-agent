@@ -7,6 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
+from gc_core.auto_routing.request_equivalence import PreparedRequestEquivalence
 from gc_core.agent_store import (
     DEFAULT_AGENT_STORE,
     AgentStore,
@@ -177,6 +178,8 @@ class RunContext:
     routing_params: RoutingParams = field(default_factory=RoutingParams)
     # Старые durable-истории сохраняют прежнюю карточку и сравнение комплектов.
     routing_contract_v2: bool = True
+    prepared_request_equivalence: PreparedRequestEquivalence | None = None
+    subagent_independent_auto: bool = True
     # Версия поведения исполнения: durable-рантайм выбирает ветку по истории;
     # локально отсутствие порта означает текущее поведение.
     execution_patch: Optional[Callable[[str], bool]] = None
@@ -275,17 +278,23 @@ def assemble_run_context(
         project_memory_io=bindings.project_memory_io,
         summary_trace_sink=bindings.summary_trace_sink,
         collect_garbage=bindings.collect_garbage,
+        prepared_request_equivalence=bindings.prepared_request_equivalence,
+        subagent_independent_auto=bindings.subagent_independent_auto,
     )
     ctx.is_tui = prepared.is_tui
     ctx.routing_contract_v2 = bindings.execution_patch is None or bindings.execution_patch(
         "routing-request-contract-v2"
     )
+    if ctx.prepared_request_equivalence is not None:
+        from gc_core.auto_routing.request_equivalence import validate_request_equivalence
+
+        validate_request_equivalence(ctx, ctx.prepared_request_equivalence, context_id=ctx.run_id)
     ctx.auto_available = auto_available(
-        loaded.settings,
+        ctx,
         force_legacy=(bindings.model_router.force_legacy or not bindings.model_router.auto_allowed),
         legacy_call_kits=not ctx.routing_contract_v2,
     )
-    ctx.routing_params = resolve_routing_params(loaded.settings, legacy_call_kits=not ctx.routing_contract_v2)
+    ctx.routing_params = resolve_routing_params(ctx, legacy_call_kits=not ctx.routing_contract_v2)
     live = bindings.model_router.live_level
 
     def effective_provider():
