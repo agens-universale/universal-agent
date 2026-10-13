@@ -146,3 +146,9 @@ def test_brief_summary_truncates_long_current_item():
     assert len(out) <= 81, f"сводка длиной {len(out)}: {out[:120]}"
     assert out.startswith("чек-лист 0/1 · ")
     assert out.endswith("…")
+
+
+def test_brief_args_summary_keeps_normal_read_file_arguments():
+    assert brief_args_summary(
+        json.dumps({"path": "a.py", "offset": 9}), tool_name="fs_read_file"
+    ) == "path='a.py', offset=9"
