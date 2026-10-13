@@ -171,9 +171,18 @@ def minimal_config_dict(monkeypatch, tmp_path):
         "abuild_tools_data",
         as_coro(
             lambda cfg, on_progress=None, **_kwargs: (
-                {"tool_a": {}, "tool_b": {}},
-                [],
-                [],
+                {
+                    "tool_a": {
+                        "spec": {"type": "function", "name": "tool_a"},
+                        "description": "tool_a",
+                    },
+                    "tool_b": {
+                        "spec": {"type": "function", "name": "tool_b"},
+                        "description": "tool_b",
+                    },
+                },
+                [{"type": "function", "name": "tool_a"}, {"type": "function", "name": "tool_b"}],
+                ["tool_a", "tool_b"],
                 {},
             )
         ),

@@ -1,15 +1,13 @@
-"""Фиксация модели на ход (спека §6.4, Task 5 плана «Профили v2, волна A»).
+"""Граница хода: `begin_turn` — единственная точка, где начинается новый ход
+главного цикла или субагента.
 
-``begin_turn`` — единственная точка, где ``state.default_model`` пересчитывается
-через ``ctx.model_router.resolve("main")``. Вызывается из обеих точек начала хода:
-- старт рана — ``AgentExecutor.run()`` (``src/agent_executor.py``);
-- подхват pending-сообщения как новый ход — ``processing_responses.run_agent``
-  (после ``state.flush_current_user_intent()``, когда очередь непуста).
+Вызывается из трёх мест: старт рана (`AgentExecutor.arun()`), подхват pending-очереди
+как новый ход (`processing_responses._pickup_pending_as_new_turn`), старт субагента
+(`SubagentRunner`). Модель выбирается перед каждым новым вызовом
+(`processing_responses.resolve_main_for_call`). `state.default_model` — стартовая
+модель для витрин и лога, далее её обновляет точка вызова.
 
-Внутри хода модель не перечитывается — ``state.default_model`` меняется только здесь.
-
-В легаси-режиме (пустой реестр ``models``) ``ModelRouter.resolve("main")`` резолвит
-плоский ``model`` из снимка конфига — поведение не отличается от до-Router кода.
+В легаси-режиме (пустой реестр `models`) `resolve("main")` резолвит плоский `model`.
 """
 
 from __future__ import annotations
@@ -17,26 +15,38 @@ from __future__ import annotations
 from typing import Any
 from uuid import uuid4
 
+from gc_core.auto_routing import state_ops
+from gc_core.auto_routing.levels import auto_active
 from gc_core.execution.state import ExecutionState as State
 
 
 def begin_turn(state: State, ctx: Any) -> None:
-    """Снимает ``ctx.model_router.resolve("main")`` и фиксирует ``state.default_model``
-    вместе с уровнем хода (``state.turn_level``).
+    """Граница хода: сброс роутинга + стартовая модель.
 
-    Уровень фиксируется отдельной строкой, потому что фиксации одного
-    ``default_model`` мало: воронка запроса получает весь ``ResolvedModel``
-    (url/токен/квирки), и без пина уровня она резолвила бы его заново на КАЖДЫЙ
-    запрос — ``/level`` переключается без пересборки executor (единственный такой
-    тоггл), и смена посреди хода уводила бы запросы на другую модель прямо в
-    середине цикла tool-call'ов. Тот же приём, что у дочернего Router'а субагента
-    (``SubagentRunner._build_child_model_router`` замораживает level_provider
-    константой) — читает пин ``processing_responses._resolve_main_for_turn``.
+    Уровень не закрепляется на ход: новый выбор применяется перед новым вызовом.
+    `turn_level` очищается для снимков прежней версии; текущий вызов хранит
+    свой уровень в `_call_level`, а повторы используют мемо решения такта.
+    `state_ops.reset` — безусловно, первой строкой: сброс роутинга не зависит
+    от наличия Router. Затем `state.default_model` из `ctx.model_router.resolve("main")`.
 
-    Нет-op, если у ``ctx`` нет ``model_router`` (тестовые двойники контекста, не
-    оперирующие Router'ом) — ``state.default_model`` остаётся тем, что задал
-    вызывающий код.
-    """
+    Нет-op по модели, если у `ctx` нет `model_router` (тестовые двойники) —
+    `default_model` остаётся тем, что задал вызывающий код.
+
+    При активном auto (`levels.auto_active`) стартовая модель резолвится без
+    предохранителя (`check_breaker=False`): уровень хода выбирает точка решения,
+    она же заменяет мёртвый уровень ближайшим живым, а если мертвы все три —
+    честно отказывает на первом вызове. В ручном режиме открытый алиас, как и
+    раньше, поднимает `AliasCircuitOpenError` здесь, на старте хода.
+
+    Здесь же снимается граница сообщений хода:
+    свои сообщения ход в историю ещё не положил, а поставит её
+    `State.mark_turn_start` на первом же батче."""
+    attach = getattr(ctx, "attach_state", None)
+    if callable(attach):
+        attach(state)
+    state_ops.reset(state)
+    state.turn_level = None
+    state.turn_messages_start = None
     if not getattr(state, "parent_state_id", None):
         # Ключ хода для проб зрения. В durable-исполнении id выдаёт среда
         # (``supplied_id``): ``uuid4`` в workflow недетерминирован.
@@ -47,8 +57,12 @@ def begin_turn(state: State, ctx: Any) -> None:
     router = getattr(ctx, "model_router", None)
     if router is None:
         return
-    state.turn_level = router.active_level()
-    state.default_model = router.resolve("main").model
+    active = auto_active(
+        router, router.live_level(), getattr(ctx, "auto_available", True)
+    )
+    state.default_model = router.resolve(
+        "main", check_breaker=not active
+    ).model
 
 
 __all__ = ["begin_turn"]

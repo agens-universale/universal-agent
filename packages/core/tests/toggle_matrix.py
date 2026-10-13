@@ -944,6 +944,17 @@ NOT_IN_MATRIX = {
     "agent_edits.record.tui": "запись журнала правок в TUI; покрыто agent_edits/test_ctx",
     "agent_edits.record.cli": "запись журнала правок в gc-cli; там же",
     "agent_edits.record.server": "запись журнала правок на сервере; там же",
+    # --- автовыбор уровня модели (level: auto) --------------------------------
+    #
+    # Всё это выбирает модель вызова, а матрица ходит в одну модель: автовыбор в
+    # ней не наблюдаем. Покрыт своими тестами — packages/core/tests/auto_routing.
+    "agent.auto_routing": "выбор модели: харнесс маршрутизирует по agent.model",
+    "agent.auto_routing_safe_level": "выбор модели: харнесс маршрутизирует по agent.model",
+    "agent.auto_routing_two_level.weak_steps": "выбор модели: харнесс маршрутизирует по agent.model",
+    "agent.auto_routing_two_level.strong_steps": "выбор модели: харнесс маршрутизирует по agent.model",
+    "agent.auto_routing_two_level.pair_threshold": "выбор модели: харнесс маршрутизирует по agent.model",
+    "assign.routing_judge": "выбор модели: харнесс маршрутизирует по agent.model",
+    "paths.chat_completions_routing_pair_judge_prompt_path": "промпт судьи пары: зовётся только при safe_level: auto",
     # --- единственный случай матрицы задавал значение, невыразимое схемой ----
     #
     # См. UNREPRESENTABLE: эталон develop снят правкой плоского словаря в обход
