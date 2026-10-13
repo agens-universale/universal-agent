@@ -84,18 +84,43 @@ AUTO → ручной → AUTO в том же ходе; второй начал�
 от символов, а при токенной шкале от tokens×2. Автоматическое и ручное сжатие
 используют эти batch/dialogue лимиты; общий конфиг не переписывается.
 
-Непривязанный субагент сохраняет собственное состояние маршрутизации и получает
-параметры/пару родителя по существующему контракту. Его raw level/mode provider
-фиксируется при запуске (`_build_child_model_router` использует константу), поэтому
-дальнейший `/level` родителя не переключает уже запущенного child. Это снимок
-raw-mode, а не ручной turn pin: собственный AUTO ребёнка продолжает выбирать
-модель на своих тактах. Через Temporal исходный режим передаётся отдельно от
-эффективного уровня и восстанавливается на worker и в дочернем workflow.
-Старые истории без этого поля сохраняют прежний ручной уровень; отсутствие
-исходного режима не трактуется как AUTO. Явная привязка/override
-субагента имеет приоритет: родительский live-уровень её не подменяет. Модельный
-порт и worker получают уже выбранный комплект/уровень; новый live-resolve в
-транспорте не отменяет решение контроллера.
+Непривязанный субагент наследует разрешённые настройки автороутинга без
+подстановки `turn_safe_level` родителя. Общий контроллер оценивает поручение
+ребёнка, выбирает его стартовую пару и ведёт собственные серии, сигналы,
+лестницу подъёма и переигрыш до эффектов. Пара и счётчики находятся в дочернем
+State; состояние маршрутизации родителя не копируется и не изменяется. Единственная
+рабочая пара после разрешения соседних уровней или фиксированный safe-level
+не требуют начального судьи. Если различимы обе соседние пары (в том числе
+в раскладке `A → B → A`), судья выбирает между ними.
+Ошибки судьи выбирают верхнюю пару по общему правилу.
+
+Raw level/mode provider фиксируется при запуске, поэтому дальнейший `/level`
+родителя не переключает уже запущенного ребёнка. Через Temporal исходный режим
+передаётся отдельно от эффективного уровня. Явная привязка/override субагента,
+включая wildcard, имеет приоритет: родительский live-уровень её не подменяет.
+Модельный порт и worker получают уже выбранный комплект/уровень; новый
+live-resolve в транспорте не отменяет решение контроллера.
+
+Версия `subagent-independent-auto-v1` фиксируется на границе запуска и входит
+в дочерний input. На worker по полным настройкам ядро вычисляет отношение
+эквивалентности запросов трёх уровней, включая fallback незаданных слотов.
+`PreparedChild.request_equivalence` содержит context_id, публичные alias/model
+и номера групп; адреса, токены, заголовки и их хэши туда не попадают. Контекст
+workflow использует записанные факты для доступности AUTO, разрешения пар и
+пола переигрыша. Данные проверяются до маршрутизации: для новой версии
+отсутствие или несовпадение context_id/слотов означает явную ошибку сборки.
+Пересчёт по публичному снимку либо новым закрытым настройкам при replay запрещён.
+
+При подтверждённой недоступности модели ручная деградация снимает мемо
+упавшего AUTO-запроса, сохраняя пару и счётчики хода. Продолжение получает один
+технический батч; уже выполненные вызовы и результаты остаются в State и не
+исполняются повторно. Нового судьи пары нет. Старые версии сохраняют прежний
+порядок восстановления.
+
+Старый вход без новой версии сохраняет фиксацию пары родителя и не требует
+фактов эквивалентности. Самые старые истории без исходного режима сохраняют
+прежний ручной уровень; отсутствие поля не трактуется как AUTO. Новая версия
+самостоятельного ребёнка независима от `routing-request-contract-v2`.
 
 Для vision фактический уровень также пересекает границу исполнения инструмента:
 reducer передаёт `State._call_level` в `ToolVisionView.call_level`, worker
@@ -171,6 +196,14 @@ usage сохраняет вложенную разбивку `by_model`, вкл�
 | Реальный Temporal child чередует модели; новая и старая истории воспроизводятся | temporalio `test_child_live.py::test_native_unbound_child_auto_and_old_history_replay` |
 | Битый JSON от сильной удерживает восстановление; valid mixed calls исполняются | core `auto_routing/test_two_level_wiring.py::test_malformed_json_from_strong_restarts_its_series`, `::test_malformed_json_after_weak_replay_keeps_recovery_on_strong` |
 | Старая история с битым JSON сохраняет порядок запросов и воспроизводится | temporalio `test_workflow_controls.py::test_malformed_tool_json_recovery_and_old_history_replay` |
+| Ребёнок оценивает своё поручение, независимо от пары родителя; ошибка судьи выбирает верхнюю пару | core `auto_routing/test_routing_params.py::test_independent_child_judges_its_own_task` |
+| Лестница и восстановление снимка ребёнка не меняют родительское состояние | core `auto_routing/test_routing_params.py::test_independent_child_ladder_and_snapshot_keep_parent_untouched` |
+| Явные alias/level/wildcard выключают собственного судью ребёнка | core `auto_routing/test_routing_params.py::test_bound_child_does_not_call_pair_judge` |
+| Закрытые различия сохраняют рабочие пары и floor после публичной проекции | temporalio `test_model_routing.py::test_public_child_facts_preserve_working_pairs_and_floor` |
+| Новая версия требует факты; старый PreparedChild без них читается | temporalio `test_model_routing.py::test_prepared_child_rejects_missing_facts_on_new_version`, `::test_old_prepared_child_without_facts_keeps_old_contract` |
+| Собственный judge, слабая запись и strong replay, новая/две старые версии воспроизводятся без HTTP | temporalio `test_child_live.py::test_independent_child_pair_and_recorded_history_replay` |
+| Подтверждённая недоступность слабой модели снимает старое AUTO-мемо и продолжает вручную без второго судьи | core `auto_routing/test_routing_params.py::test_prepared_child_fallback_leaves_failed_auto_call_before_manual_retry` |
+| Продолжение сохраняет State-историю и не исполняет завершённые tools повторно | core `auto_routing/test_routing_params.py::test_child_fallback_resumes_real_loop_without_reexecuting_history`; temporalio `test_child_live.py::test_independent_child_pair_and_recorded_history_replay[fallback]` |
 | Явная модель ребёнка не подменяется уровнем родителя | core `router/test_run_context_router.py::test_resolve_main_for_call_keeps_subagent_override` |
 | Footer: все 12 переходов между четырьмя уровнями, текущий запрос/повтор и обратный переход | tui `test_agent_runner_turn_pin.py::test_footer_keeps_prepared_call_and_applies_selection_to_next_call` |
 | Reader не строит executor и не читает legacy pin | tui `test_agent_runner_turn_pin.py::test_runner_reads_prepared_call_level_and_mode_without_building_executor` |
