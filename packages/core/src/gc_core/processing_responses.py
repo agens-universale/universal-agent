@@ -394,25 +394,6 @@ def _raise_honest_main_unavailable(
     raise RuntimeError(message) from source_exc
 
 
-def _resolve_main_for_turn(state: State, ctx: Any) -> Optional[Any]:
-    """Резолв `main` по уровню, ЗАФИКСИРОВАННОМУ на ход (`turn_boundary.begin_turn`).
-
-    Контракт §6.4 — «внутри хода модель не перечитывается» — держится не на
-    `state.default_model` (воронка берёт модель из `ResolvedModel`, а не оттуда), а
-    на пине уровня: `/level` меняется без пересборки executor, и живой резолв уводил
-    бы url/токен/модель на другой слот прямо посреди цикла tool-call'ов.
-
-    Предохранитель проверяется КАЖДЫЙ раз (алиас мог открыться посреди хода) —
-    `resolve_level` идёт тем же путём `_resolve_alias`, что и `resolve("main")`.
-    Пина нет (ход не начинали через `begin_turn` — легаси/тестовые двойники) или
-    Router дочерний (у субагента уровень уже заморожен в самом Router'е) — обычный
-    резолв. Без `ctx.model_router` — `None`, воронки читают cfg напрямую как раньше."""
-    router = getattr(ctx, "model_router", None)
-    if router is None:
-        return None
-    return router.resolve_main_at_level(getattr(state, "turn_level", None))
-
-
 def resolve_main_for_call(
     state: State, ctx: Any, *, level_override: Optional[str] = None
 ) -> Optional[Any]:

@@ -345,16 +345,15 @@ def _chat_state(chars: int = 100):
     return state
 
 
-async def test_threshold_belongs_to_the_model_pinned_for_the_turn():
-    """Порог сжатия — от той модели, в которую идут запросы хода. `/level` посреди
-    хода модель не меняет (уровень закреплён `begin_turn`), значит и порог обязан
-    остаться прежним: с порогом новой, большой модели лёгкая переполнила бы окно.
-    Новый порог начинает действовать с началом следующего хода."""
+async def test_threshold_belongs_to_the_model_prepared_for_the_call():
+    """Подготовленный запрос сохраняет порог; следующий получает новый выбор."""
     from types import SimpleNamespace
     from unittest.mock import patch
 
     from gc_core.run_summary_coordinator import RunSummaryCoordinator
     from gc_core.turn_boundary import begin_turn
+    from gc_core import processing_responses as pr
+    from gc_core.auto_routing import state_ops
 
     level = {"current": "light"}
     cfg = _two_level_cfg()
@@ -362,9 +361,10 @@ async def test_threshold_belongs_to_the_model_pinned_for_the_turn():
     state = _chat_state()
     ctx = SimpleNamespace(settings=cfg, model_router=router, logger=None)
     begin_turn(state, ctx)
+    await pr.aprepare_main_call(state, ctx)
 
     def provider():
-        return resolve_summary_limits_at_level(cfg, router, state.turn_level)
+        return resolve_summary_limits_at_level(cfg, router, state._call_level)
 
     first = provider()
     assert first.chars_during == 10
@@ -389,16 +389,16 @@ async def test_threshold_belongs_to_the_model_pinned_for_the_turn():
         "gc_core.run_summary_coordinator.arun_summary_compaction",
         side_effect=fake_compact,
     ):
-        # Посреди хода живой уровень ушёл на большую модель — запросы хода
-        # по-прежнему идут в лёгкую, и сжимать надо по её порогу.
+        # Выбор меняется во время подготовки: текущий запрос ещё лёгкий.
         level["current"] = "default"
         await coord.apre_backend_compaction_hook(
             [state.messages[-1]], "user_ask"
         )
         assert compact_calls == [10]
 
-        # Новый ход: уровень закреплён заново, действует порог большой модели.
-        begin_turn(state, ctx)
+        # Следующий запрос того же хода принимает новый выбор и его порог.
+        state_ops.close_tick(state, "light")
+        await pr.aprepare_main_call(state, ctx)
         compact_calls.clear()
         await coord.apre_backend_compaction_hook(
             [state.messages[-1]], "user_ask"
@@ -406,14 +406,15 @@ async def test_threshold_belongs_to_the_model_pinned_for_the_turn():
         assert compact_calls == []
 
 
-def test_executor_reports_the_limits_its_turn_runs_on():
-    """`summary_limits()` — то, по чему этот executor сжимает: его конфиг, его
-    Router и уровень хода. Индикатор контекста читает именно это: живой `/level`
-    экрана меняется раньше, чем его увидит ход."""
+@pytest.mark.asyncio
+async def test_executor_reports_the_limits_of_the_prepared_call():
+    """Executor показывает порог подготовленного запроса до следующего выбора."""
     from types import SimpleNamespace
 
     from gc_core.agent_executor import AgentExecutor
     from gc_core.turn_boundary import begin_turn
+    from gc_core import processing_responses as pr
+    from gc_core.auto_routing import state_ops
 
     level = {"current": "light"}
     cfg = _two_level_cfg()
@@ -425,9 +426,11 @@ def test_executor_reports_the_limits_its_turn_runs_on():
     state = _chat_state()
     begin_turn(state, ctx)
     executor._bind_state(state, discard_writes_after_stop=False)
+    await pr.aprepare_main_call(state, ctx)
     level["current"] = "default"
     assert executor.summary_limits().chars_during == 10
-    begin_turn(state, ctx)
+    state_ops.close_tick(state, "light")
+    await pr.aprepare_main_call(state, ctx)
     assert executor.summary_limits().chars_during == 1_000_000
 
 
@@ -514,11 +517,12 @@ def _capture_summarizer(monkeypatch, ctx) -> dict:
     return seen
 
 
-def _light_turn(level: dict):
+async def _light_turn(level: dict):
     """Ход, начатый на лёгкой модели (порог 10 символов → батч 12, диалог 50)."""
     from types import SimpleNamespace
 
     from gc_core.turn_boundary import begin_turn
+    from gc_core import processing_responses as pr
 
     cfg = _two_level_cfg()
     router = ModelRouter(cfg, level_provider=lambda: level["current"])
@@ -531,6 +535,7 @@ def _light_turn(level: dict):
     )
     state = _chat_state()
     begin_turn(state, ctx)
+    await pr.aprepare_main_call(state, ctx)
     return cfg, ctx, state
 
 
@@ -543,7 +548,7 @@ async def test_compaction_hands_the_models_batch_to_the_summarizer(
     from gc_core.summarize.compaction import arun_summary_compaction
 
     level = {"current": "light"}
-    _cfg_dict, ctx, state = _light_turn(level)
+    _cfg_dict, ctx, state = await _light_turn(level)
     seen = _capture_summarizer(monkeypatch, ctx)
     level["current"] = "default"
     with pytest.raises(_SummarizerReached):
@@ -593,14 +598,14 @@ async def test_automatic_compaction_does_not_rewrite_the_shared_config(
     from gc_core.run_summary_coordinator import RunSummaryCoordinator
 
     level = {"current": "light"}
-    cfg, ctx, state = _light_turn(level)
+    cfg, ctx, state = await _light_turn(level)
     original = cfg.summary
     snapshot = original.model_dump()
     seen = _capture_summarizer(monkeypatch, ctx)
 
     def provider():
         return resolve_summary_limits_at_level(
-            cfg, ctx.model_router, state.turn_level
+            cfg, ctx.model_router, state._call_level
         )
 
     first = provider()
@@ -630,7 +635,7 @@ async def test_manual_compaction_uses_the_models_batch(monkeypatch):
     from gc_core.run_summary_coordinator import RunSummaryCoordinator
 
     level = {"current": "light"}
-    _cfg_dict, ctx, state = _light_turn(level)
+    _cfg_dict, ctx, state = await _light_turn(level)
     seen = _capture_summarizer(monkeypatch, ctx)
     coord = RunSummaryCoordinator(
         ctx=ctx,
@@ -650,10 +655,11 @@ def test_session_compact_tool_uses_the_models_batch(monkeypatch):
     import json
 
     from gc_core.tools.session.session_compact import SessionCompact
+    from gc_testkit import run_coro
     from gc_testkit.helpers.tool_ctx import CallableTool
 
     level = {"current": "light"}
-    _cfg_dict, ctx, state = _light_turn(level)
+    _cfg_dict, ctx, state = run_coro(_light_turn(level))
     seen = _capture_summarizer(monkeypatch, ctx)
     result = json.loads(
         CallableTool(SessionCompact(ctx=ctx, state=state))(reason="фаза")
@@ -683,3 +689,98 @@ def test_summarizer_limits_prefer_explicit_values_over_the_config():
         10**12,
         1000000,
     )
+
+
+@pytest.mark.parametrize("change_live_mode", [False, True])
+@pytest.mark.parametrize("start_mode,important_weak", [("auto", False), ("auto", True), ("default", False)])
+async def test_loop_compacts_for_the_upcoming_model(monkeypatch, tmp_path, change_live_mode, start_mode, important_weak):
+    import asyncio
+    import json
+    import httpx
+    from gc_core import processing_responses as pr
+    from gc_core.agent_executor import AgentExecutor
+    from gc_core.execution.local import LocalOperations
+    from gc_core.run_context import acreate_run_context
+    from gc_core.run_summary_coordinator import RunSummaryCoordinator
+    from gc_core.summarize import compaction
+    from gc_core.turn_boundary import begin_turn
+    from gc_core.utils import connect_backend
+    from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
+
+    cfg = _cfg({
+        "level": start_mode,
+        "backend": {"api_mode": "chat_completions", "vision": False},
+        "logging": {"save_logs": False},
+        "agent": {"auto_routing_safe_level": "default"},
+        "models": {
+            "low": {"url": "http://low/v1/chat/completions", "token": "", "summary_trigger_chars": 2000},
+            "high": {"url": "http://high/v1/chat/completions", "token": "", "summary_trigger_chars": 1_000_000},
+        },
+        "slots": {"light": "low", "default": "high", "max": "high"},
+    })
+    box = {"value": start_mode}
+    ctx = await acreate_run_context(cfg, level_provider=lambda: box["value"])
+    state = _chat_state(chars=10000)
+    state.messages[0]["id"] = "old"
+    executor = AgentExecutor(ctx)
+    executor._bind_state(state, discard_writes_after_stop=False)
+    begin_turn(state, ctx)
+    ctx.operations = LocalOperations(ctx)
+    first = executor.summary_limits()
+    coordinator = RunSummaryCoordinator(
+        ctx=ctx, state=state, thread_session=None,
+        summary_trigger_chars=first.chars_during,
+        summary_trigger_tokens=first.tokens_during,
+        turn_end_trigger_chars=first.chars_after,
+        turn_end_trigger_tokens=first.tokens_after,
+        is_cli_mode=False, pre_backend_trigger_reason="pre_backend",
+        limits_provider=executor.summary_limits,
+    )
+    compacted = []
+
+    async def summary(**kwargs):
+        compacted.append((len(sent), kwargs["batch_chars"], kwargs["max_dialogue_chars"]))
+        if change_live_mode:
+            await asyncio.sleep(0)
+            box["value"] = "max"
+        return {"raw_summary": valid_summary_xml_for_tests(seed="compact"),
+                "last_dialog_steps": "", "num_batches": 1, "trace": {},
+                "memory_append_deltas": {}, "memory_replace_deltas": {}}
+
+    sent = []
+
+    def reply(request):
+        payload = json.loads(request.content)
+        sent.append(payload)
+        index = len(sent)
+        if start_mode == "default" and index == 2:
+            box["value"] = "light"
+        function = {"name": "exec_calculator", "arguments": json.dumps({"expression": f"{index}+1"})}
+        if important_weak and index == 3:
+            function = {"name": "fs_write_file", "arguments": json.dumps({
+                "path": str(tmp_path / "discarded.txt"), "content": "must not execute",
+            })}
+        return httpx.Response(200, json={
+            "id": f"r{index}", "choices": [{"finish_reason": "tool_calls", "message": {
+                "role": "assistant", "content": None, "tool_calls": [{
+                    "id": f"c{index}", "type": "function", "function": function,
+                }],
+            }}],
+        })
+
+    transport = httpx.MockTransport(reply)
+    monkeypatch.setattr(connect_backend, "get_async_client", lambda **_: httpx.AsyncClient(transport=transport))
+    monkeypatch.setattr(compaction, "asummarize_dialog_via_chat_completions", summary)
+    await pr.arun_agent(
+        [{"role": "user", "content": "Calculate three sums.", "id": "new"}], state, ctx,
+        pre_backend_compaction_hook=coordinator.apre_backend_compaction_hook,
+        check_stop=lambda: len(sent) == (4 if important_weak else 3),
+    )
+    assert [payload["model"] for payload in sent] == ["high", "high", "low"] + (["high"] if important_weak else [])
+    assert len(json.dumps(sent[2]["messages"])) < 2000
+    assert compacted == [(2, 2400, 10000)]
+    assert state.steps_in_turn == 3
+    assert not (tmp_path / "discarded.txt").exists()
+    if important_weak:
+        assert sent[3]["messages"] == sent[2]["messages"]
+        assert executor.summary_limits().chars_during == 1_000_000
