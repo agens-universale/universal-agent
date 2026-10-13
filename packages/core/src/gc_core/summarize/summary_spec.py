@@ -116,7 +116,24 @@ def _build_section_body_patterns() -> dict[str, re.Pattern[str]]:
     }
 
 
+def _build_unclosed_section_patterns() -> dict[str, re.Pattern[str]]:
+    """Fallback: ``<tag>`` без close — тело до следующего канон-open / ``</summary>`` / EOS.
+
+    Не зависит от порядка секций: граница — любой whitelist open, не «следующий по спеке».
+    """
+    open_alt = "|".join(re.escape(tag) for tag in section_tags())
+    boundary = rf"(?=\s*<(?:{open_alt})(?:\s|>)|</summary>|\Z)"
+    return {
+        section.tag: re.compile(
+            rf"<{re.escape(section.tag)}>\s*(.*?){boundary}",
+            re.DOTALL,
+        )
+        for section in SUMMARY_SECTIONS
+    }
+
+
 _SECTION_BODY_PATTERNS = _build_section_body_patterns()
+_UNCLOSED_SECTION_PATTERNS = _build_unclosed_section_patterns()
 
 
 def render_sections_for_prompt() -> str:
@@ -147,19 +164,31 @@ def render_tag_roles_for_prompt() -> str:
     )
 
 
+def _last_body(pattern: re.Pattern[str], text: str) -> str | None:
+    last_match: re.Match[str] | None = None
+    for match in pattern.finditer(text):
+        last_match = match
+    if last_match is None:
+        return None
+    return last_match.group(1).strip()
+
+
 def extract_summary_bodies(text: str) -> dict[str, str]:
-    """Вырезает тела известных секций regex ``<tag>…</tag>`` (последний match); пустое тело → ``''``."""
+    """Вырезает тела известных секций (последний match); пустое тело → ``''``.
+
+    Сначала строгий ``<tag>…</tag>``; если пары нет — незакрытый ``<tag>`` до
+    следующего канон-open / ``</summary>`` / EOS. Закрытые теги не меняются.
+    """
     s = (text or "").strip()
     if not s:
         return {}
     bodies: dict[str, str] = {}
     for section in SUMMARY_SECTIONS:
-        pattern = _SECTION_BODY_PATTERNS[section.tag]
-        last_match: re.Match[str] | None = None
-        for match in pattern.finditer(s):
-            last_match = match
-        if last_match is not None:
-            bodies[section.tag] = last_match.group(1).strip()
+        body = _last_body(_SECTION_BODY_PATTERNS[section.tag], s)
+        if body is None:
+            body = _last_body(_UNCLOSED_SECTION_PATTERNS[section.tag], s)
+        if body is not None:
+            bodies[section.tag] = body
     return bodies
 
 

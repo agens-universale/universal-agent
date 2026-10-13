@@ -4,6 +4,9 @@ import html
 from typing import Any, Callable, Dict, List, Sequence, TypeVar
 
 from gc_core.message_format.serialization import (
+    _REASONING_HEADER,
+    _clip_reasoning,
+    _reasoning_source,
     message_text_for_summary,
     strip_original_user_messages_block,
 )
@@ -79,32 +82,61 @@ def _wrap_cutted_envelope(text: str, max_chars: int) -> str:
     )
 
 
+def _reasoning_suffix(message: Dict[str, Any], include_reasoning: bool) -> str:
+    """Уже обрезанный блок ``[reasoning]``. Пусто, если его не дописываем."""
+    if not include_reasoning or not _assistant_reasoning_appended(message):
+        return ""
+    raw = _reasoning_source(message).strip()
+    if not raw:
+        return ""
+    return f"{_REASONING_HEADER}{_clip_reasoning(raw)}"
+
+
 def message_text_limited(
     message: Dict[str, Any],
     max_message_chars: int,
     *,
     tags: Sequence[str] = (),
     strip_think: bool = True,
+    include_reasoning: bool = True,
 ) -> str:
-    text = strip_original_user_messages_block(
-        message_text_for_summary(message, tags=tags, strip_think=strip_think)
+    prose = strip_original_user_messages_block(
+        message_text_for_summary(
+            message,
+            tags=tags,
+            strip_think=strip_think,
+            include_reasoning=False,
+        )
     )
+    suffix = _reasoning_suffix(message, include_reasoning)
     if max_message_chars <= 0:
-        return text
+        return prose + suffix
     msg_type = (
         str(message.get("type") or "message")
         if isinstance(message, dict)
         else "message"
     )
     if msg_type in _TOOL_BLOB_TYPES:
-        header, sep, dump = text.partition("\n")
+        header, sep, dump = prose.partition("\n")
         if sep:
             preview = _wrap_cutted_preview(dump, max_message_chars)
             assembled = f"{header}\n{preview}"
             if preview == dump:
                 return _wrap_cutted_envelope(assembled, max_message_chars)
             return assembled
-    return _wrap_cutted_envelope(text, max_message_chars)
+    # Лимит сообщения режет только прозу. Блок [reasoning] уже обрезан
+    # в serialization и дописывается после, поэтому маркер внутри поля
+    # не становится границей и не попадает под этот лимит.
+    return _wrap_cutted_envelope(prose, max_message_chars) + suffix
+
+
+def _assistant_reasoning_appended(message: Dict[str, Any]) -> bool:
+    """Блок ``[reasoning]`` дописывает только assistant с непустым reasoning."""
+    if not isinstance(message, dict):
+        return False
+    if str(message.get("role") or "").strip().lower() != "assistant":
+        return False
+    return bool(_reasoning_source(message))
 
 
 def build_history_text(
@@ -318,6 +350,7 @@ def format_last_dialog_steps(
     *,
     tags: Sequence[str] = (),
     strip_think: bool = True,
+    include_reasoning: bool = True,
 ) -> str:
     turns = group_into_turns(messages)
     tail = turns[-max_steps:] if len(turns) > max_steps else turns
@@ -327,7 +360,11 @@ def format_last_dialog_steps(
         rendered: List[str] = []
         for msg in turn:
             text = message_text_limited(
-                msg, message_max_chars, tags=tags, strip_think=strip_think
+                msg,
+                message_max_chars,
+                tags=tags,
+                strip_think=strip_think,
+                include_reasoning=include_reasoning,
             ).strip()
             if text:
                 rendered.append(text)

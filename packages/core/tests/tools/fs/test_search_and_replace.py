@@ -86,7 +86,20 @@ def test_occurrence_all_requires_expected_matches(tmp_path):
         )
     )
     assert guarded["ok"] is False
-    assert guarded["error"]["type"] == "invalid_argument"
+    assert guarded["applied"] is False
+    assert guarded["matched"] is True
+    assert guarded["match_count"] == 3
+    assert guarded["replaced"] == 0
+    assert guarded["error"]["type"] == "expected_matches_required"
+    assert guarded["error"]["field"] == "expected_matches"
+    assert "expected_matches=3" in guarded["message"]
+    assert p.read_text(encoding="utf-8") == "a b a b a"
+
+
+def test_schema_occurrence_before_expected_matches():
+    props = SearchAndReplace.tool_description()["parameters"]["properties"]
+    keys = list(props)
+    assert keys.index("occurrence") < keys.index("expected_matches")
 
 
 def test_occurrence_all_replaces_everything(tmp_path):
