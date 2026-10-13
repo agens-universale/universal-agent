@@ -49,6 +49,7 @@ from gc_core.message_policy.tool_usage_notice.state import (
     persist_tool_usage_notice_state,
 )
 from gc_core.message_policy.user_message_policy import (
+    build_model_fallback_resume_message,
     extract_real_user_message_text,
 )
 from gc_core.message_policy.user_stop import cancelled_by_user_output
@@ -437,9 +438,11 @@ class SubagentRunner:
         # батч, на котором упал вызов). Повторный фейл — честная ошибка тула,
         # без ещё одного фоллбэка (fallback_ctx строится максимум один раз).
         child_ctx = fallback_ctx
-        retry_messages = (
-            messages if child_state.steps == 0 else child_state.messages
-        )
+        if child_state.steps > 0 and getattr(child_ctx, "subagent_independent_auto", True):
+            # История уже в State: повтор передаёт новый батч, а не старые calls.
+            retry_messages = [build_model_fallback_resume_message(child_state.state_id)]
+        else:
+            retry_messages = messages if child_state.steps == 0 else child_state.messages
         try:
             result = await self._arun_child_loop(
                 messages=retry_messages, child_ctx=child_ctx, **loop_kwargs
@@ -973,11 +976,12 @@ class SubagentRunner:
             mode=kind,
             enabled=bool(getattr(self._ctx, "is_tui", False)),
         )
-        # `begin_turn` НЕ зовём (спека автороутинга §5.1): override делает
-        # ребёнка эффективно привязанным (`auto_allowed` False у нового Router'а)
-        # — auto выключается тем же правилом на следующем `aroute_before_call`
-        # (`state_ops.leave`), без пересчёта стартовой модели хода задним числом.
+        # Деградация заменяет упавший комплект, поэтому его AUTO-мемо больше
+        # не относится к повтору. Пара и факты хода сохраняются без begin_turn.
+        # Старые durable-входы оставляют прежнюю последовательность команд.
         child_ctx.model_router = router.with_override(active_resolved)
+        if getattr(child_ctx, "subagent_independent_auto", True):
+            state_ops.leave(child_state)
         return child_ctx
 
     def _check_stop_requested(self) -> bool:

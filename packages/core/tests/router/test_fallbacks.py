@@ -727,8 +727,9 @@ async def test_subagent_first_call_failure_restarts_on_active_model(tmp_path):
     assert parent_router.breaker.is_open("deepseek-max") is True
 
 
+@pytest.mark.parametrize("independent", [True, False])
 async def test_subagent_non_first_call_failure_degrades_without_restart(
-    tmp_path,
+    tmp_path, independent,
 ):
     from gc_core.tools.subagents.runner import SubagentRunner
 
@@ -740,6 +741,7 @@ async def test_subagent_non_first_call_failure_degrades_without_restart(
     cfg = _subagent_cfg(tmp_path, raw)
     parent_router = _router(raw, level="default")
     parent_ctx = _subagent_ctx(cfg, parent_router)
+    parent_ctx.subagent_independent_auto = independent
     orch = _subagent_orchestrator_state()
     runner = SubagentRunner(parent_ctx, orch, cfg)
 
@@ -756,8 +758,16 @@ async def test_subagent_non_first_call_failure_degrades_without_restart(
                 seeded_trace_message
             ]
             raise _http_error(500)
-        # Деградация: трейс сохранён (та же child_state.messages передана как batch).
-        assert seeded_trace_message in messages
+        # История сохраняется в State; новая версия не выдаёт её за новый batch.
+        assert seeded_trace_message in child_state.messages
+        if independent:
+            from gc_core.message_policy.user_message_policy import extract_real_user_message_text
+
+            assert len(messages) == 1
+            assert extract_real_user_message_text(messages[0]) == ""
+            assert seeded_trace_message not in messages
+        else:
+            assert seeded_trace_message in messages
         return "ok"
 
     result = await runner.arun(

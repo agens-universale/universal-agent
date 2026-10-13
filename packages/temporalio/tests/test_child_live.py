@@ -512,6 +512,7 @@ async def test_native_unbound_child_auto_and_old_history_replay(tmp_path, monkey
 @pytest.fixture
 def independent_child_provider(tmp_path):
     requests, child_requests, cards = [], [], []
+    control = {"fail_weak": False}
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *_args):
@@ -538,6 +539,14 @@ def independent_child_provider(tmp_path):
                 content = json.dumps({'score': score, 'reason': 'scripted difficulty'})
             elif child:
                 child_requests.append(request)
+                if control["fail_weak"] and self.path == "/fast":
+                    body = b'{"error":{"message":"provider unavailable"}}'
+                    self.send_response(503)
+                    self.send_header('Content-Type', 'application/json')
+                    self.send_header('Content-Length', str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
                 n = len(child_requests)
                 if n <= 2:
                     calls = [tool(f'read-{n}', 'fs_read_file', {'path': str(tmp_path / f'file-{n}.txt')})]
@@ -569,21 +578,22 @@ def independent_child_provider(tmp_path):
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
-        yield f'http://127.0.0.1:{server.server_port}', requests, child_requests, cards
+        yield f'http://127.0.0.1:{server.server_port}', requests, child_requests, cards, control
     finally:
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
 
 
-@pytest.mark.parametrize('version', ['new', 'old_auto', 'old_manual', 'private'])
+@pytest.mark.parametrize('version', ['new', 'old_auto', 'old_manual', 'private', 'fallback'])
 async def test_independent_child_pair_and_recorded_history_replay(tmp_path, monkeypatch, independent_child_provider, version):
     from gc_core_temporalio.child_contracts import ChildRequest, PreparedChild
     binary = temporal_cli()
     monkeypatch.chdir(tmp_path)
     for n in (1, 2):
         (tmp_path / f'file-{n}.txt').write_text(f'file {n}')
-    url, requests, child_requests, cards = independent_child_provider
+    url, requests, child_requests, cards, control = independent_child_provider
+    control["fail_weak"] = version == "fallback"
     private = version == 'private'
     models = {alias: {'model': 'shared-model' if private else f'{alias}-model',
                      'url': f'{url}/{alias}', 'token': f'private-{alias}' if private else ''}
@@ -623,11 +633,16 @@ async def test_independent_child_pair_and_recorded_history_replay(tmp_path, monk
             assert 'Parent done' in str(result['answer'])
             assert (tmp_path / 'child-result.txt').read_text() == 'child result'
             child_cards = [c for c in cards if 'CHILD_REVIEW_TASK' in c['request']]
-            if version in ('new', 'private'):
+            if version in ('new', 'private', 'fallback'):
                 assert len(child_cards) == 1
                 assert request.child_context['independent_auto'] is True
                 assert request.child_context['frozen_live_level'] == 'auto'
-                assert [r['_endpoint'] for r in child_requests] == ['/mid', '/mid', '/fast', '/mid', '/mid']
+                endpoints = [r['_endpoint'] for r in child_requests]
+                if version == 'fallback':
+                    assert endpoints.count('/fast') >= 1
+                    assert [p for p in endpoints if p != '/fast'] == ['/mid', '/mid', '/big', '/big']
+                else:
+                    assert endpoints == ['/mid', '/mid', '/fast', '/mid', '/mid']
                 # Decode the recorded child preparation, not fresh worker settings.
                 completion = next(e for e in child_history.events if e.HasField('activity_task_completed_event_attributes'))
                 (prepared,) = await env.client.data_converter.decode(

@@ -296,3 +296,123 @@ def test_bound_child_does_not_call_pair_judge(tmp_path, monkeypatch, binding, ke
     result = run_coro(runner.arun("subagent_worker", {"task": "read", "reason": "r"}, inspect))
     assert json.loads(result)["ok"] is True, result
     assert cards == []
+
+
+def test_prepared_child_fallback_leaves_failed_auto_call_before_manual_retry(tmp_path, monkeypatch):
+    import httpx
+
+    from gc_core.auto_routing import judge_runner, state_ops
+    from gc_core.auto_routing.request_equivalence import prepare_request_equivalence
+
+    cfg = _child_config(tmp_path, auto_routing_safe_level="auto")
+    parent = _orchestrator_state()
+    parent.turn_safe_level = "max"
+    parent.pair_window_left = 7
+    parent_ctx = _parent_ctx(cfg, level="auto")
+    parent_ctx.model_router = parent_ctx.model_router.with_level_providers(
+        lambda: "max", lambda: "auto",
+    )
+    judge_calls, sent, children = [], [], []
+
+    async def judge(**kwargs):
+        judge_calls.append(kwargs["messages"])
+        return '{"score":2,"reason":"small child task"}'
+
+    async def backend(messages, state, ctx, *, resolved, **kwargs):
+        sent.append(resolved.alias)
+        if resolved.alias == "fast":
+            request = httpx.Request("POST", "https://synthetic.invalid")
+            raise httpx.HTTPStatusError("provider unavailable", request=request,
+                response=httpx.Response(503, request=request))
+        return [], "result", {}
+
+    monkeypatch.setattr(judge_runner, "arequest_auxiliary_completion_text", judge)
+    monkeypatch.setattr(pr, "_arequest_backend_canonical", backend)
+
+    async def child_run(messages, state, ctx, **kwargs):
+        if not children:
+            children.append(state)
+            ctx.prepared_request_equivalence = prepare_request_equivalence(ctx, context_id=ctx.run_id)
+            for _ in range(2):
+                await pr.aprepare_main_call(state, ctx)
+                state_ops.close_tick(state, state._call_level)
+                state.steps += 1
+            await pr.aprepare_main_call(state, ctx)
+            assert state._call_level == "light"
+        else:
+            assert children == [state]
+            assert not ctx.model_router.auto_allowed
+            assert state.current_level is None
+            assert state._tick_decision is None
+            assert state.turn_safe_level == "default"
+            assert state.steps_in_turn == 2
+        await pr._amain_call(messages, state, ctx)
+        return "child continued on fallback"
+
+    result = run_coro(SubagentRunner(parent_ctx, parent, cfg).arun(
+        "subagent_worker", {"task": "small child task", "reason": "Delegate"}, child_run,
+    ))
+    assert json.loads(result)["ok"] is True, result
+    assert sent == ["fast", "big"]
+    assert len(judge_calls) == 1
+    assert parent.turn_safe_level == "max" and parent.pair_window_left == 7
+
+
+def test_child_fallback_resumes_real_loop_without_reexecuting_history(tmp_path, monkeypatch):
+    import httpx
+
+    from gc_core.auto_routing import judge_runner
+    from gc_core.auto_routing.request_equivalence import prepare_request_equivalence
+
+    monkeypatch.chdir(tmp_path)
+    for n in (1, 2):
+        (tmp_path / f"read-{n}.txt").write_text(str(n))
+    cfg = _child_config(tmp_path, auto_routing_safe_level="auto", strict_turn_finish_validation=False)
+    parent_ctx = _parent_ctx(cfg, level="auto")
+    parent_ctx.model_router = parent_ctx.model_router.with_level_providers(lambda: "max", lambda: "auto")
+    parent = _orchestrator_state()
+    sent, children, judge_calls = [], [], []
+
+    async def judge(**kwargs):
+        judge_calls.append(kwargs["messages"])
+        return '{"score":2,"reason":"small"}'
+
+    async def backend(messages, state, ctx, *, resolved, **kwargs):
+        sent.append(resolved.alias)
+        n = len(sent)
+        if n <= 2:
+            name, arguments = "fs_read_file", {"path": str(tmp_path / f"read-{n}.txt")}
+        elif resolved.alias == "fast":
+            request = httpx.Request("POST", "https://synthetic.invalid")
+            raise httpx.HTTPStatusError("provider unavailable", request=request,
+                response=httpx.Response(503, request=request))
+        elif n == 4:
+            name, arguments = "fs_write_file", {"path": str(tmp_path / "result.txt"), "content": "3"}
+        else:
+            name, arguments = "turn_finish", {"solution_type": "full_solution", "task": "child",
+                "task_report": "Done", "handoff": "{}"}
+        return [{"type": "function_call", "id": f"fc_{n}", "status": "completed",
+            "call_id": f"call_{n}", "name": name, "arguments": json.dumps(arguments)}], f"r-{n}", {}
+
+    monkeypatch.setattr(judge_runner, "arequest_auxiliary_completion_text", judge)
+    monkeypatch.setattr(pr, "_arequest_backend_canonical", backend)
+
+    async def child_run(messages, state, ctx, **kwargs):
+        if not children:
+            children.append(state)
+            ctx.prepared_request_equivalence = prepare_request_equivalence(ctx, context_id=ctx.run_id)
+        return await pr.arun_agent(messages, state, ctx, **kwargs)
+
+    result = run_coro(SubagentRunner(parent_ctx, parent, cfg).arun(
+        "subagent_worker", {"task": "Read both files and write their sum", "reason": "Delegate"}, child_run,
+    ))
+    assert json.loads(result)["ok"] is True, result
+    assert sent == ["mid", "mid", "fast", "big", "big"]
+    assert (tmp_path / "result.txt").read_text() == "3"
+    assert len(judge_calls) == 1
+    outputs = [m["call_id"] for m in children[0].messages if m.get("type") == "function_call_output"]
+    assert outputs.count("call_1") == 1
+    assert outputs.count("call_2") == 1
+    assert outputs.count("call_4") == 1
+    assert children[0].tool_calls == 4
+    assert children[0].turn_safe_level == "default"

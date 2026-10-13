@@ -7,10 +7,10 @@ the credential-bearing worker configuration.
 """
 
 from collections.abc import Mapping
-from gc_core.auto_routing.request_equivalence import PreparedRequestEquivalence
-
 from dataclasses import dataclass
 from typing import Any
+
+from gc_core.auto_routing.request_equivalence import PreparedRequestEquivalence
 
 
 @dataclass(frozen=True)
