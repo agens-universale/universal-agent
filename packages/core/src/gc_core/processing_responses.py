@@ -1456,12 +1456,12 @@ def _floor_target(
     if alive is None:
         return None
     level, candidate = alive
-    if not getattr(ctx, "routing_contract_v2", True):
-        identical = candidate.same_call_kit(resolved)
-    else:
-        from gc_core.utils.connect_backend import same_main_request
+    from gc_core.auto_routing.request_equivalence import same_routing_request
 
-        identical = same_main_request(ctx, candidate, resolved)
+    identical = same_routing_request(
+        ctx, candidate, resolved, first_level=level, second_level=from_level,
+        legacy=not getattr(ctx, "routing_contract_v2", True),
+    )
     return None if identical else level
 
 

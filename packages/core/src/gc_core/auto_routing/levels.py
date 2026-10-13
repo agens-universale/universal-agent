@@ -26,7 +26,7 @@ def auto_unavailable_reason(
         return "выключен настройкой auto_routing"
     if cfg.backend.api_mode != "chat_completions":
         return "режим API responses"
-    return _one_model_reason(cfg, legacy_call_kits=legacy_call_kits)
+    return _one_model_reason(source, legacy_call_kits=legacy_call_kits)
 
 
 def auto_available(source: Any, *, force_legacy: bool, legacy_call_kits: bool = False) -> bool:
@@ -78,32 +78,20 @@ def _one_model_reason(cfg: Any, *, legacy_call_kits: bool = False) -> str | None
     return reason
 
 
-def _level_kits(cfg: Any) -> dict[str, Any]:
-    """Комплекты вызова уровней light/default/max. Резолв — тем же `ModelRouter`,
-    что у рантайма (фоллбэк незаданных слотов, единственная модель реестра,
-    легаси). Уровень, который не резолвится вовсе (битый реестр), в словарь не
-    попадает и в сравнениях не участвует. Импорт ленивый: `levels` грузится рано
-    (его тянет пакет `gc_core.tools`), а `model_router` — всё дерево конфига."""
-    from gc_core.model_router import ModelRouter
+def _level_kits(source: Any) -> dict[str, Any]:
+    from gc_core.auto_routing.request_equivalence import resolve_level_requests
 
-    router = ModelRouter(cfg, level_provider=lambda: START_LEVEL)
-    kits: dict[str, Any] = {}
-    for level in LEVEL_ORDER:
-        try:
-            kits[level] = router.resolve_level(level)
-        except ValueError:
-            continue
-    return kits
+    return resolve_level_requests(source)
 
 
 def _one_call_kit(kits: Mapping[str, Any], levels: Iterable[str], *, source: Any, legacy: bool) -> bool:
     """Все резолвящиеся уровни из `levels` дают один комплект вызова."""
-    found = [kits[level] for level in levels if level in kits]
-    if legacy:
-        return all(kit.same_call_kit(found[0]) for kit in found[1:])
-    from gc_core.utils.connect_backend import same_main_request
+    from gc_core.auto_routing.request_equivalence import same_routing_request
 
-    return all(same_main_request(source, kit, found[0]) for kit in found[1:])
+    found = [(level, kits[level]) for level in levels if level in kits]
+    return all(same_routing_request(
+        source, kit, found[0][1], first_level=level, second_level=found[0][0], legacy=legacy,
+    ) for level, kit in found[1:])
 
 
 def auto_active(router: Any, live_level: str | None, available: bool) -> bool:
