@@ -115,6 +115,8 @@ class TaskStore:
     ) -> None:
         async with self._cv:
             task = self._tasks[task_id]
+            if task.state in TERMINAL or task.broken:
+                return
             task.artifact_id = artifact_id
             task.artifact_text = text
             self._become(task, COMPLETED, status_message=None)
@@ -124,6 +126,8 @@ class TaskStore:
     ) -> None:
         async with self._cv:
             task = self._tasks[task_id]
+            if task.state in TERMINAL or task.broken:
+                return
             self._become(
                 task,
                 FAILED,

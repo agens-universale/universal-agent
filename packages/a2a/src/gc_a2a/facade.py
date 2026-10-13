@@ -106,11 +106,8 @@ class A2aFacade:
         turn, done = await self._arm_cancel(task_id)
         if done:
             return await self._store.view(task_id, None)
-        if turn is not None:
-            await turn.cancel()
-            await turn.done.wait()
-        else:
-            await self._store.mark_canceled(task_id)
+        await turn.cancel()
+        await turn.done.wait()
         return await self._store.view(task_id, None)
 
     async def shutdown(self) -> None:
@@ -186,8 +183,13 @@ class A2aFacade:
             logger.exception("a2a agent")
             await self._fail_setup(opened.context_id, task_id, exc)
             return await self._deliver_task(task_id, incoming)
-        self._live[task_id] = turn
-        turn.start()
+        async with self._gate:
+            task = self._store.task(task_id)
+            if task is None or task.state in TERMINAL:
+                self._release(opened.context_id, task_id)
+            else:
+                self._live[task_id] = turn
+                turn.start()
         return await self._deliver_task(task_id, incoming)
 
     async def _deliver(self, incoming: Incoming) -> dict:
@@ -275,7 +277,11 @@ class A2aFacade:
                 return None, True
             if task.state in TERMINAL:
                 raise not_cancelable()
-            return self._live.get(task_id), False
+            turn = self._live.get(task_id)
+            if turn is None:
+                await self._store.mark_canceled(task_id)
+                return None, True
+            return turn, False
 
     def _release(self, context_id: str, task_id: str) -> None:
         self._busy.discard(context_id)

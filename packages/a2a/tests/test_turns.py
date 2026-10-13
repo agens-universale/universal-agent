@@ -1,5 +1,7 @@
 """Ход: ответ, вопрос, отмена, список и чтение задачи."""
 
+import asyncio
+
 from harness import (
     AnswerAgent,
     AskAgent,
@@ -110,6 +112,51 @@ async def test_unrecorded_failure_is_internal_error(tmp_path):
     assert response.status_code == 200
     assert response.json()["error"]["code"] == -32603
     assert response.json()["error"]["data"]["reason"] == "InternalError"
+
+
+async def test_cancel_during_agent_create_does_not_start_turn(tmp_path):
+    ready = asyncio.Event()
+    release = asyncio.Event()
+    agent = AnswerAgent()
+
+    async with session(tmp_path) as (client, facade, created):
+
+        async def slow_factory(agent_settings, **kwargs):
+            del kwargs
+            agent.launch_root = agent_settings.runtime.launch_root
+            created.append(agent)
+            ready.set()
+            await release.wait()
+            return agent
+
+        facade._agent_factory = slow_factory
+        send = asyncio.create_task(
+            rpc(
+                client,
+                "SendMessage",
+                {
+                    **message(),
+                    "configuration": {"returnImmediately": True},
+                },
+            )
+        )
+        await ready.wait()
+        listed = await rpc(client, "ListTasks", {})
+        task_id = listed.json()["result"]["tasks"][0]["id"]
+        canceled = await rpc(client, "CancelTask", {"id": task_id})
+        assert canceled.json()["result"]["status"]["state"] == (
+            "TASK_STATE_CANCELED"
+        )
+        release.set()
+        sent = await send
+        assert sent.json()["result"]["task"]["status"]["state"] == (
+            "TASK_STATE_CANCELED"
+        )
+        got = await rpc(client, "GetTask", {"id": task_id})
+        assert got.json()["result"]["status"]["state"] == (
+            "TASK_STATE_CANCELED"
+        )
+    assert agent.calls == []
 
 
 async def test_get_and_list_and_cancel(tmp_path):
