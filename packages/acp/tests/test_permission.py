@@ -335,6 +335,34 @@ async def test_cancel_request_on_permission_id_unblocks(tmp_path):
     await facade.shutdown()
 
 
+async def test_child_guard_asks_same_session_before_recording(tmp_path):
+    """Гвард ребёнка спрашивает ту же сессию и не пишет run-правило заранее."""
+    from types import SimpleNamespace
+
+    from gc_core.tools.subagents.runner import SubagentRunner
+
+    facade, writer, agent, session_id, store = await _ready(tmp_path)
+    parent = agent.executor._ctx
+    child = SubagentRunner(parent, None)._bind_child_context(
+        SimpleNamespace(), "subagent_worker"
+    )
+    key = "read:/etc/hosts"
+
+    async def reply():
+        msg = await _wait_permission(writer)
+        assert msg["params"]["sessionId"] == session_id
+        assert store.decision_for(key) is None
+        assert key not in store.export_run_rules()
+        await facade.handle_line(_response(msg["id"], _selected("allow_once")))
+
+    task = asyncio.create_task(reply())
+    assert await _ask(child, key) is True
+    await task
+    assert store.decision_for(key) is True
+    assert key not in store.session_rules()
+    await facade.shutdown()
+
+
 async def test_shutdown_unblocks_confirm(tmp_path):
     facade, writer, agent, _session_id, _store = await _ready(tmp_path)
 

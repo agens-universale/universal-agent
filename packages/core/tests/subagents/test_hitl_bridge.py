@@ -73,6 +73,8 @@ class TestChildCtxCopiesTuiConfirm:
         parent.tools_description = []
         parent.is_tui = True
         parent.tui_confirm = confirm
+        confirm_port = MagicMock(return_value="allow_once")
+        parent.confirm_request = confirm_port
         parent.permission_store = object()
         # Порт «спросить человека»: без него дочерний `turn_ask_human` читал
         # `input()` в потоке пула, а подмена stdin в TUI потоко-локальна —
@@ -83,6 +85,7 @@ class TestChildCtxCopiesTuiConfirm:
         runner._parent_call_id = "call_x"
         child = await runner._build_child_ctx(tool_name="subagent_worker")
         assert child.tui_confirm is confirm
+        assert child.confirm_request is confirm_port
         assert child.subagent_tool_name == "subagent_worker"
         assert (
             getattr(child, "permission_store", None) is parent.permission_store
