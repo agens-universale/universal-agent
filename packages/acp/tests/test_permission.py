@@ -337,6 +337,36 @@ async def test_close_or_delete_during_permission_denies_and_acloses(
     await facade.shutdown()
 
 
+async def test_cancel_while_send_waits_for_the_lock_skips_permission(tmp_path):
+    """Отмена, пришедшая пока send ждёт lock, не открывает диалог."""
+    facade, writer, agent, session_id, _store = await _ready(tmp_path)
+    lock = asyncio.Lock()
+    writer._lock = lock
+
+    def write_locked(payload):
+        writer.sent.append(payload)
+
+    writer.write_locked = write_locked
+    await lock.acquire()
+    try:
+        task = asyncio.create_task(_ask(agent.executor._ctx, "command:ls"))
+        for _ in range(100):
+            if facade._pending._items:
+                break
+            await asyncio.sleep(0.01)
+        else:
+            raise AssertionError("confirm did not arm")
+        await facade.handle_line(
+            _line("session/cancel", {"sessionId": session_id}, notify=True)
+        )
+    finally:
+        if lock.locked():
+            lock.release()
+    assert await task is False
+    assert _permission_calls(writer) == []
+    await facade.shutdown()
+
+
 async def test_session_cancel_unblocks_confirm(tmp_path):
     facade, writer, agent, session_id, store = await _ready(tmp_path)
     key = "read:/etc/passwd"

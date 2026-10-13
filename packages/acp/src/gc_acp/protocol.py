@@ -100,6 +100,10 @@ def notification(method: str, params: dict) -> dict:
     return {"jsonrpc": "2.0", "method": method, "params": params}
 
 
+def _encode_line(payload: dict) -> str:
+    return json.dumps(payload, ensure_ascii=False) + "\n"
+
+
 class StdoutWriter:
     """Одна строка JSON и flush под общим lock.
 
@@ -112,10 +116,17 @@ class StdoutWriter:
         self._stream = sys.stdout if stream is None else stream
 
     async def send(self, payload: dict) -> None:
-        line = json.dumps(payload, ensure_ascii=False) + "\n"
+        line = _encode_line(payload)
         async with self._lock:
-            self._stream.write(line)
-            self._stream.flush()
+            self._write(line)
+
+    def write_locked(self, payload: dict) -> None:
+        """Писать, уже держа ``_lock``. Повторный acquire из send — дедлок."""
+        self._write(_encode_line(payload))
+
+    def _write(self, line: str) -> None:
+        self._stream.write(line)
+        self._stream.flush()
 
 
 async def _read_stdin_line(reader: asyncio.StreamReader) -> bytes:

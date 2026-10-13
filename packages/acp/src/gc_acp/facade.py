@@ -434,14 +434,19 @@ class AcpFacade:
         try:
             flow = live.tool_flow
             call_id = None if flow is None else flow.current_call_id()
-            await self._send(
+            # Пока send ждёт lock писателя, cancel уже мог снять future.
+            # После этого await request не пишем: диалог в IDE нечем закрыть.
+            if not await self._deliver_permission(
+                session_id,
+                future,
                 permission_message(
                     request_id,
                     session_id,
                     request,
                     call_id,
-                )
-            )
+                ),
+            ):
+                return CONFIRM_DENY_ONCE
             incoming = await asyncio.wait_for(
                 asyncio.shield(future), timeout=timeout_sec(self._settings)
             )
@@ -450,6 +455,25 @@ class AcpFacade:
         finally:
             self._pending.discard(request_id)
         return choice_from_incoming(incoming)
+
+    async def _deliver_permission(
+        self, session_id: str, future: asyncio.Future, payload: dict
+    ) -> bool:
+        """False — ожидание уже снято, ``session/request_permission`` не ушёл."""
+        writer = self._writer
+        lock = getattr(writer, "_lock", None)
+        write_locked = getattr(writer, "write_locked", None)
+        if isinstance(lock, asyncio.Lock) and callable(write_locked):
+            await lock.acquire()
+            try:
+                if _permission_dropped(self._sessions, session_id, future):
+                    return False
+                write_locked(payload)
+            finally:
+                lock.release()
+            return True
+        await writer.send(payload)
+        return not _permission_dropped(self._sessions, session_id, future)
 
     async def _run_prompt(
         self, live: LiveSession, request_id: Any, text: str
@@ -705,6 +729,15 @@ def broken_reply_for(incoming: Incoming) -> Incoming:
         error=reply.error,
         parse_error=True,
     )
+
+
+def _permission_dropped(
+    sessions: dict[str, LiveSession], session_id: str, future: asyncio.Future
+) -> bool:
+    """Отмена или снятие сессии, пока отправка ждала lock."""
+    if future.done():
+        return True
+    return session_id not in sessions
 
 
 def _mark_cancel(live: LiveSession) -> None:
