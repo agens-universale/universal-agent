@@ -74,8 +74,10 @@ def persist_reasoning_content_from_config(settings: object) -> bool:
     Глобальный флаг. Дефолт ``strip_think: false`` — поле копируется.
     ``true`` в конфиге вырезание включает. Алиас со своим ``strip_think``
     перекрывает его через ``persist_reasoning_content_for_model``. Служебные
-    вызовы этот флаг не читают: summary, судьи, finish_gate и intent режут
-    мысль всегда.
+    вызовы этот флаг не читают. История саммари и патч памяти оставляют
+    ``<think>`` в тексте ответа и дописывают клип ``reasoning_content``.
+    Хвост ``<last_dialog_steps>`` — без этих тегов и без поля reasoning.
+    Intent, судьи, finish_gate и ответ aux-модели идут без этих тегов.
     """
     return not _section_from_config(settings).strip_think
 
