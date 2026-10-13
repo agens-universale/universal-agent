@@ -127,14 +127,17 @@ from gc_tui.services.usage_meter import (
 from gc_tui.services.voice_pill import render_pill
 from gc_tui.session_settings import read_breaker_from_meta, read_from_meta
 from gc_tui.toggles import (
+    AUTO_LEVEL_VALUE,
     PROFILE_NONE_VALUE,
     TOGGLES,
     apply_toggle,
     dynamic_toggle_hint,
+    effective_toggle_values,
     next_toggle_value,
     preset_custom_hint,
     preset_track_extra,
     toggle_state,
+    toggle_unavailable_hint,
 )
 from gc_tui.widgets.click_model import focus_target_at
 from gc_tui.widgets.command_input import CommandTextArea
@@ -338,10 +341,11 @@ _RIGHT_PRICES_DOWN = 0
 # значение (плашка контекста скрыта).
 _UNRESOLVED = object()
 
-# Снимок футер-головы (Task 15, docs 2026-08-09-profiles-a-migration-plan):
-# profile/level_color/model — «факт» (пин хода или, вне хода, живой резолв);
-# transition — (цвет_нового_уровня_или_None, новая_модель) или None (переход
-# не нужен). См. `TraceScreen._footer_head_snapshot`.
+# Снимок футер-головы (спека auto-routing §7.1): profile/mode_auto/level_color/
+# model/running — mode_auto различает режим (`● auto`) от факта (`● → ● модель`)
+# и от ручного уровня; model/level_color — факт бегущего хода (Router executor'а
+# по фактическому уровню подготовленного вызова) либо живой резолв витрины. См.
+# `TraceScreen._footer_head_snapshot`.
 _FooterHeadSnapshot = namedtuple(
     "_FooterHeadSnapshot", ("profile", "level_color", "model", "transition")
 )
@@ -1147,7 +1151,7 @@ class TraceScreen(Screen):
 
     def _context_meter(self) -> Text | None:
         """Rich-Text индикатора контекста или None (скрыт)."""
-        cfg = self.app.base_settings()
+        cfg = self.app.effective_settings()
         if str(cfg.settings.backend.api_mode) != "chat_completions":
             return None
         # Знаменатель шкалы — её mid-turn. turn-end (60%) подставляется только когда
@@ -1189,9 +1193,9 @@ class TraceScreen(Screen):
         """Пороги для знаменателя индикатора контекста.
 
         Пока ход идёт — те, по которым сжимает РАБОТАЮЩИЙ агент
-        (`runner.pinned_summary_limits`): его снимок конфига и уровень,
-        закреплённый на ход. Экран видит /level и /profiles сразу, ход — со
-        следующего, и по живым данным бар показывал бы не тот порог, по которому
+        (`runner.pinned_summary_limits`): его снимок конфига и уровень
+        подготовленного вызова. /level действует со следующего нового вызова,
+        /profiles требует пересборки runner, и по живым данным бар показывал бы не тот порог, по которому
         реально сработает сжатие. Вне хода — живой конфиг и живой Router: это
         пороги СЛЕДУЮЩЕГО хода."""
         runner = getattr(self.app, "active_runner", None)
@@ -5166,6 +5170,7 @@ class TraceScreen(Screen):
             toggle_dynamic_hint=lambda name, value: dynamic_toggle_hint(
                 self.app, name, value
             ),
+            toggle_values=lambda name: effective_toggle_values(self.app, name),
         )
         self._palette = palette
         self._mount_input_overlay(palette)
@@ -7003,7 +7008,7 @@ class TraceScreen(Screen):
         # имён): /voice и /profiles выше — не тогглы, а действия, поэтому идут своими
         # ветками.
         if cmd.is_toggle:
-            self._toggle_info_command(name)
+            self._toggle_info_command(name, arg)
             return
 
     def _cmd_profiles(self, arg: str) -> None:
@@ -7040,13 +7045,23 @@ class TraceScreen(Screen):
         except (ValueError, OSError) as exc:
             self._show_footer_refusal(f"✗ не сохранено: {exc}")
 
-    def _toggle_info_command(self, name: str) -> None:
+    def _toggle_info_command(self, name: str, arg: str = "") -> None:
         """`/gate` или `/answers`, набранные и подтверждённые текстом (не через
         стрелки палитры — у toggle-команд нет args-схемы, поэтому пробел после
         имени закрывает палитру и Enter доходит сюда как обычная команда):
         ничего не меняет (иначе набор команды был бы неочевидным side-effect'ом) —
         показывает текущее значение и как переключать (←/→ и Enter в открытой
-        палитре)."""
+        палитре). Набранное значение, которого тоггл сейчас не предлагает
+        (`/level auto` при недоступном автовыборе), получает ответ с причиной, а не
+        молчаливое игнорирование."""
+        unavailable = (
+            toggle_unavailable_hint(self.app, name, arg) if arg else None
+        )
+        if unavailable:
+            self._show_footer_hint(
+                f"/{name} {arg} — {unavailable}", seconds=5.0
+            )
+            return
         current = toggle_state(self.app, name)
         self._show_footer_hint(
             f"/{name} — текущее значение: {current} · для переключения: ←/→ и Enter в меню команд",

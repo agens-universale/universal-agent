@@ -83,11 +83,14 @@ def resolve_rigor_state(settings: Any) -> str:
 @dataclass(frozen=True)
 class ToggleValue:
     """Одно значение тоггла: каноническое имя + подсказка (§5 спеки) + цвет ползунка
-    (§3 спеки; токен-константа tui/palette.py)."""
+    (§3 спеки; токен-константа tui/palette.py). `off_scale` (спека автороутинга
+    §3) — значение вне базовой шкалы (`/level`: `auto`): рисуется `render_track`
+    ПОСЛЕ двойного пробела, не в базовом треке."""
 
     value: str
     hint: str
     color: str
+    off_scale: bool = False
 
 
 @dataclass(frozen=True)
@@ -118,8 +121,9 @@ class ToggleSpec:
     `app.switch_session_profile` (пересборка + notice + предохранитель,
     спека §9.1), не generic `apply_session_override`. `rebuild_on_apply` —
     False у `/level`: единственный тоггл, переключаемый БЕЗ `invalidate_runner`
-    (спека §6.4 — уровень фиксируется на ход инжектируемым провайдером, не
-    снимком executor)."""
+    (спека §6.4 — модель резолвится перед каждым вызовом по живому уровню
+    инжектируемого провайдера, /level действует со следующего вызова; снимок
+    executor тут не при чём)."""
 
     values: Tuple[ToggleValue, ...]
     # Читатель действующего значения: настройки окна (`LoadedSettings`).
@@ -140,6 +144,9 @@ class ToggleSpec:
     empty_value_text: str = "—"
     values_provider: Optional[Callable[[Any], Tuple[ToggleValue, ...]]] = None
     hint_provider: Optional[Callable[[Any, str], str]] = None
+    # Почему значение сейчас не предлагается (набранное `/level auto` при
+    # недоступном автовыборе): `(app, value) -> причина | None`.
+    unavailable_hint: Optional[Callable[[Any, str], Optional[str]]] = None
     session_switch_profile: bool = False
     rebuild_on_apply: bool = True
 
@@ -153,7 +160,77 @@ LEVEL_ROLE_TEXT: Dict[str, str] = {
     "light": "быстрая и дешёвая: простые задачи",
     "default": "основная рабочая: повседневные задачи",
     "max": "самая сильная: сложные задачи",
+    "auto": "уровень меняется автоматически по ходу работы",
 }
+
+# Единственный владелец позиции `auto` (спека автороутинга §3): цвет — BRAND,
+# читается отсюда и палитрой/Настройками (через `level_values`), и футером
+# (задача 4) — литерал цвета не дублируется.
+AUTO_LEVEL_VALUE = ToggleValue("auto", "", _pal.BRAND, off_scale=True)
+
+
+def auto_unavailable_reason_cfg(cfg: Any) -> Optional[str]:
+    """Причина недоступности `auto` для данного конфига или None (спека
+    автороутинга §3): единственная точка чтения решения ядра
+    (`auto_routing.levels.auto_unavailable_reason`) в TUI — состав значений,
+    витрина state, хинт тоггла и другие витрины TUI за пределами этого модуля
+    (`app.py::display_router`, `app.py::auto_mode_active`,
+    `screens/config.py::_effective_model_name`) спрашивают отсюда или через
+    `auto_available_cfg`, условие не дублируют.
+    `force_legacy` — тем же детектом, что и стартовый нотис."""
+    from gc_core.auto_routing.levels import auto_unavailable_reason
+    from gc_core.config import cli_forces_legacy_model
+
+    return auto_unavailable_reason(
+        cfg, force_legacy=cli_forces_legacy_model(cfg)
+    )
+
+
+def auto_available_cfg(cfg: Any) -> bool:
+    """Доступна ли позиция `auto` тоггла `/level` для данного конфига."""
+    return auto_unavailable_reason_cfg(cfg) is None
+
+
+def level_values(app: Any) -> Tuple[ToggleValue, ...]:
+    """Состав значений `/level` (спека автороутинга §3, values_provider — по
+    образцу `profile_values`): статичная тройка `TOGGLES["level"].values` плюс
+    `auto` вне шкалы, когда фича доступна для эффективного конфига приложения.
+    Потребители без `app` (футер, `cycle_value` пресетов) видят только
+    статичную тройку — её состав здесь не меняется."""
+    values = TOGGLES["level"].values
+    if auto_available_cfg(_effective_settings(app)):
+        return values + (AUTO_LEVEL_VALUE,)
+    return values
+
+
+def resolve_level_state(cfg: Any) -> str:
+    """Витрина эффективного `/level` (state-callable, спека автороутинга §3):
+    `auto` — когда конфиг реально хранит литерал `auto` И фича доступна
+    (в этой ветке `effective_level` при недоступности вернул бы `default`,
+    что соврало бы состоянию конфига); иначе — перевод через единственную
+    точку `effective_level` (легаси/недоступность и честный `light/default/max`
+    остаются её заботой)."""
+    from gc_core.auto_routing.levels import effective_level
+
+    available = auto_available_cfg(cfg)
+    if settings_of(cfg).level == "auto" and available:
+        return "auto"
+    return effective_level(settings_of(cfg).level, None, available)
+
+
+def level_unavailable_hint(app: Any, value: str) -> Optional[str]:
+    """Почему значения `value` сейчас нет в составе `/level`, или None. Выпасть
+    из состава может только `auto`; фраза причины — та же, что у нотиса ядра
+    (`startup_notices.auto_routing_unavailable_reason_text`), без хвоста про
+    default: набор уровень не меняет, действующий показывает футер."""
+    if value != AUTO_LEVEL_VALUE.value:
+        return None
+    reason = auto_unavailable_reason_cfg(_effective_settings(app))
+    if reason is None:
+        return None
+    from gc_core.startup_notices import auto_routing_unavailable_reason_text
+
+    return auto_routing_unavailable_reason_text(reason)
 
 
 def level_value_hint(app: Any, value: str) -> str:
@@ -161,7 +238,11 @@ def level_value_hint(app: Any, value: str) -> str:
     резолвнутая Router'ом ДЛЯ ЭТОГО уровня (не обязательно активного —
     `ModelRouter.resolve_level`), + роль уровня. Легаси/легаси-форс — честные
     пометки вместо модели+роли (канон §12.1); фоллбэк уровня — честная стрелка
-    «light → default» вместо модели притворного light-слота."""
+    «light → default» вместо модели притворного light-слота. `auto` (спека
+    автороутинга §3) — фиксированный текст роли ДО любого резолва: модели за
+    ней нет, уровень меняется автоматически по ходу работы."""
+    if value == "auto":
+        return LEVEL_ROLE_TEXT["auto"]
     from gc_core.model_router import AliasCircuitOpenError
 
     router = app.display_router()
@@ -503,13 +584,22 @@ def modes_section_names() -> list:
     ]
 
 
-def effective_toggle_names(app: Any, name: str) -> Tuple[str, ...]:
-    """Набор значений тоггла для текущего состояния: динамический
-    (`values_provider(app)`, `/profiles`) либо статический (`spec.names`)."""
+def effective_toggle_values(app: Any, name: str) -> Tuple[ToggleValue, ...]:
+    """Состав значений тоггла `name` для текущего состояния приложения:
+    динамический (`values_provider(app)`, `/profiles`, `/level`) либо
+    статический (`spec.values`) — полные `ToggleValue` (цвет, `off_scale`),
+    не только имена; владелец выбора для рендера трека (палитра, Настройки)."""
     spec = TOGGLES[name]
     if spec.values_provider is not None:
-        return tuple(v.value for v in spec.values_provider(app))
-    return spec.names
+        return spec.values_provider(app)
+    return spec.values
+
+
+def effective_toggle_names(app: Any, name: str) -> Tuple[str, ...]:
+    """Набор ИМЁН значений тоггла для текущего состояния — та же развязка
+    статический/динамический состав, что у `effective_toggle_values`, но для
+    потребителей цикла (←/→), которым имя важнее цвета/off_scale."""
+    return tuple(v.value for v in effective_toggle_values(app, name))
 
 
 TOGGLES: Dict[str, ToggleSpec] = {
@@ -520,12 +610,14 @@ TOGGLES: Dict[str, ToggleSpec] = {
             ToggleValue("default", "", _pal.RUN_COLOR),
             ToggleValue("max", "", _pal.ACCENT),
         ),
-        state=lambda settings: str(settings_of(settings).level or "default"),
+        values_provider=level_values,
+        state=resolve_level_state,
         label="уровень модели",
         summary="от лёгкой до максимальной сложности задачи",
         group="level",
         settings_label="уровень модели по умолчанию",
         hint_provider=level_value_hint,
+        unavailable_hint=level_unavailable_hint,
         rebuild_on_apply=False,
         palette_default=True,
     ),
@@ -681,33 +773,55 @@ def _fit_value_hint(value: str, hint: str, width: int) -> str:
 
 
 def render_track(
-    spec: ToggleSpec, current: str, *, extra_lit: Any = None
+    spec: ToggleSpec,
+    current: str,
+    *,
+    extra_lit: Any = None,
+    values: Optional[Tuple[ToggleValue, ...]] = None,
 ) -> Text:
     """Канонический трек тоггла (спека §2–§3): ● на позиции current цветом
-    значения (bold), пустые позиции — ○ DEEP_DIM. `extra_lit` (спека §4.1,
-    /rigor, ревизия 4): None — 4-й позиции нет вовсе (бит-в-бит как было,
-    single-key тогглы); False — 4-я позиция ЗАРЕЗЕРВИРОВАНА, но пуста
-    (двойной пробел + один ПРОБЕЛ вместо глифа — custom не горит, никакого
-    намёка на выбираемую позицию, она больше не выбирается стрелкой вовсе);
-    True — 4-я `●` BRAND (эффективная пара нестандартна — custom применена),
-    при этом база вся тусклая. Только трек — колонки/подпись у потребителя."""
-    idx = spec.names.index(current) if current in spec.names else 0
+    значения (bold), пустые позиции — ○ DEEP_DIM. `values` (спека автороутинга
+    §3) — состав для рендера, по умолчанию `spec.values`; делится на базовую
+    шкалу (`off_scale=False`) и вне-шкальные значения (`off_scale=True`,
+    `/level`: `auto`) — база рисуется как раньше, вне-шкальные — ПОСЛЕ
+    двойного пробела, каждое своим `●` цветом значения при совпадении с
+    `current`, иначе тусклым `○`; `current` вне базовой шкалы — база вся
+    тусклая (idx не находится). Без вне-шкальных значений в `values` и без
+    `extra_lit` 4-й зоны нет вовсе (бит-в-бит как было). `extra_lit` (спека
+    §4.1, /rigor, ревизия 4) — отдельный, единственный на /rigor вне-шкальный
+    глиф custom (значение не входит ни в один трек `values`): None — зоны нет;
+    False — зона ЗАРЕЗЕРВИРОВАНА, но пуста (без тусклой ○ — custom не
+    выбирается стрелкой); True — `●` BRAND (custom применена), база вся
+    тусклая. Только трек — колонки/подпись у потребителя."""
+    values = values or spec.values
+    on_scale = tuple(v for v in values if not v.off_scale)
+    off_scale = tuple(v for v in values if v.off_scale)
+    on_names = tuple(v.value for v in on_scale)
+    idx = on_names.index(current) if current in on_names else -1
     t = Text()
-    for i, val in enumerate(spec.values):
+    for i, val in enumerate(on_scale):
         if i == idx and extra_lit is not True:
             t.append("●", style=f"bold {val.color}")
         else:
             t.append("○", style=_pal.DEEP_DIM)
-        if i < len(spec.values) - 1:
+        if i < len(on_scale) - 1:
             t.append(" ")
-    if extra_lit is not None:
-        t.append("  ")  # двойной пробел — отделяет вне-шкальную позицию custom
-        if extra_lit is True:
-            t.append("●", style=f"bold {_pal.BRAND}")
-        else:
-            t.append(
-                " "
-            )  # резерв: 4-я позиция пуста, без тусклой ○ (ревизия 4)
+    if off_scale or extra_lit is not None:
+        t.append("  ")  # двойной пробел — отделяет вне-шкальные позиции
+        for j, val in enumerate(off_scale):
+            if val.value == current:
+                t.append("●", style=f"bold {val.color}")
+            else:
+                t.append("○", style=_pal.DEEP_DIM)
+            if j < len(off_scale) - 1:
+                t.append(" ")
+        if extra_lit is not None:
+            if off_scale:
+                t.append(" ")
+            if extra_lit is True:
+                t.append("●", style=f"bold {_pal.BRAND}")
+            else:
+                t.append(" ")  # резерв: custom пуст, без тусклой ○ (ревизия 4)
     return t
 
 
@@ -718,17 +832,21 @@ def padded_track(
     extra_lit: Any,
     base_w: int,
     extra_w: int,
+    values: Optional[Tuple[ToggleValue, ...]] = None,
 ) -> Text:
     """Трек тоггла, выровненный по ЛЕВОМУ краю общего поля (ревизия 5, спека §6:
     системный контракт, владелец здесь — переиспользуют палитра и Settings).
-    `render_track` остаётся ядром без изменений — эта функция только паддит
+    `render_track` остаётся ЕДИНСТВЕННЫМ рендером — эта функция только паддит
     его результат пробелами СПРАВА (не слева, как было): базовый трек — до
     `base_w` (тройки друг под другом по левому краю), затем extra-зона
-    (двойной пробел + глиф/пробел custom-резерва, если `extra_w` > 0) — до
-    `extra_w`, пустая целиком у строк без своего резерва (`extra_lit=None`,
-    дети пресета) — место общее для всех видимых строк подвала."""
-    base_len = 2 * len(spec.values) - 1
-    full = render_track(spec, current, extra_lit=extra_lit)
+    (двойной пробел + глифы вне-шкальных значений/custom-резерва, если
+    `extra_w` > 0) — до `extra_w`, пустая целиком у строк без своего резерва
+    (`extra_lit=None`, дети пресета) — место общее для всех видимых строк
+    подвала. `values` (спека автороутинга §3) — состав для `render_track`;
+    `base_len` считается только по on-scale части переданного состава."""
+    values = values or spec.values
+    base_len = 2 * sum(1 for v in values if not v.off_scale) - 1
+    full = render_track(spec, current, extra_lit=extra_lit, values=values)
     t = Text()
     t.append_text(full[:base_len])
     t.append(" " * (base_w - base_len))
@@ -769,14 +887,22 @@ def owning_preset_name(toggle_name: str) -> Optional[str]:
     return None
 
 
+def cycle_in(names: list[str], current: str, direction: int) -> str:
+    """Следующее значение по кругу (±1) в произвольном списке `names`, начиная
+    от `current`. Единственная точка индексной формулы тоггл-цикла — источник
+    списка задаёт вызывающий (статический `TOGGLES[name].names` у `cycle_value`,
+    динамический `effective_toggle_names` у `next_toggle_value` и у `_modes_apply`
+    в settings.py)."""
+    idx = names.index(current) if current in names else 0
+    return names[(idx + direction) % len(names)]
+
+
 def cycle_value(name: str, current: str, direction: int) -> str:
     """Следующее значение тоггла `name` по кругу (±1 по TOGGLES[name].names). Чистая
     функция — ничего не пишет и не применяет; роутинг main.py (←/→/Enter на toggle-
     строке) зовёт её от ТЕКУЩЕГО отображаемого состояния (`toggle_state`) прямо перед
     `apply_toggle` — мгновенная модель, черновика нет."""
-    names = TOGGLES[name].names
-    idx = names.index(current) if current in names else 0
-    return names[(idx + direction) % len(names)]
+    return cycle_in(TOGGLES[name].names, current, direction)
 
 
 def apply_toggle(app: Any, name: str, value: str) -> str:
@@ -845,8 +971,7 @@ def next_toggle_value(app: Any, name: str, direction: int) -> str:
     current = toggle_state(app, name)
     if not names:
         return current
-    idx = names.index(current) if current in names else 0
-    return names[(idx + direction) % len(names)]
+    return cycle_in(names, current, direction)
 
 
 def preset_track_extra(app: Any, name: str) -> Any:
@@ -893,6 +1018,13 @@ def preset_custom_hint(
                 "шаг на пресет заменит пару · закрепить — в /settings"
             )
     return f"ваш дефолт: самопроверка {x}, формат {y} · менять в /settings"
+
+
+def toggle_unavailable_hint(app: Any, name: str, value: str) -> Optional[str]:
+    """Причина, по которой тоггл `name` сейчас не предлагает `value`, или None —
+    значение доступно либо у тоггла такой причины не бывает."""
+    provider = TOGGLES[name].unavailable_hint
+    return provider(app, value) if provider is not None else None
 
 
 def dynamic_toggle_hint(app: Any, name: str, value: str) -> str:

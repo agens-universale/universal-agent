@@ -1848,7 +1848,7 @@ def test_subagent_rows_come_from_the_code_registry():
 def test_consumer_labels_reuse_the_transport_dictionary():
     """6 готовых подписей берутся ИЗ транспортного словаря, а не копируются в UI
     (копия разошлась бы с ним на первой же правке); свой UI-словарь — только для
-    остальных: `auto_judge`, субагенты поимённо, wildcard."""
+    остальных: субагенты поимённо, wildcard."""
     from gc_core.utils.llm_chat_client import CONSUMER_RU_LABEL
     from gc_tui.editors import models_section
 

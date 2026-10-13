@@ -3794,12 +3794,16 @@ class SettingsScreen(Screen):
         label_w — макс. ширина головы строки: «name · label» и у пресета, и у
         ребёнка (ревизия 7 — flat, маркера/отступа нет, оба head в одном
         формате — `_modes_head`, одна формула на все строки) + 3 + 2 на курсор;
-        base_w — макс. ширина БАЗОВОГО
-        трека (2*n-1 ячеек, без 4-й позиции); extra_w — макс. ширина custom-
-        резерва (3 ячейки у preset-тоггла — 4-я позиция зарезервирована в
-        Settings всегда, спека §4.2; 0 у single-key тогглов — у них 4-й
-        позиции нет вовсе); value_w (ревизия 6 п.3) — фикс-ширина колонки
-        подписи значения: макс. длина имени значения по ВСЕМ тогглам секции,
+        base_w — макс. ширина БАЗОВОГО трека (2*n-1 ячеек по ON-SCALE значениям
+        ДЕЙСТВУЮЩЕГО состава — `effective_toggle_values`, статика или
+        `values_provider`, спека автороутинга §3); extra_w — макс. ширина
+        вне-шкальной зоны: 3 ячейки у preset-тоггла (4-я позиция custom
+        зарезервирована в Settings всегда, спека §4.2), `2 + 2*k - 1` у тоггла
+        с k вне-шкальными значениями действующего состава (`/level` — `auto`,
+        k=1 → 3), 0 у single-key тогглов без вне-шкальных значений; value_w
+        (ревизия 6 п.3) — фикс-ширина колонки подписи значения: макс. длина
+        имени значения по ВСЕМ тогглам секции (действующий состав — включает
+        `auto`, когда он виден),
         ПЛЮС `PRESET_CUSTOM` — пресет-строка может показать «custom», хотя
         оно не входит в `spec.names` ни одного тоггла. Точный контракт брал
         бы max только по строкам, где custom реально достижим (preset-
@@ -3808,7 +3812,12 @@ class SettingsScreen(Screen):
         сужает колонку ни для одной строки, только потенциально резервирует
         на символ-два больше, чем строго необходимо, зато без разбора
         preset/не-preset)."""
-        from gc_tui.toggles import PRESET_CUSTOM, TOGGLES, modes_section_names
+        from gc_tui.toggles import (
+            PRESET_CUSTOM,
+            TOGGLES,
+            modes_section_names,
+            effective_toggle_values,
+        )
 
         names = modes_section_names()
         widths = [len(self._modes_head(name)) for name in names]
@@ -3818,10 +3827,15 @@ class SettingsScreen(Screen):
         value_names = [PRESET_CUSTOM]
         for name in names:
             spec = TOGGLES[name]
-            base_w = max(base_w, 2 * len(spec.values) - 1)
+            values = effective_toggle_values(self.app, name)
+            on_scale = [v for v in values if not v.off_scale]
+            off_scale = [v for v in values if v.off_scale]
+            base_w = max(base_w, 2 * len(on_scale) - 1)
             if spec.preset_keys:
                 extra_w = max(extra_w, 3)
-            value_names.extend(spec.names)
+            elif off_scale:
+                extra_w = max(extra_w, 2 + 2 * len(off_scale) - 1)
+            value_names.extend(v.value for v in values)
         value_w = max(len(v) for v in value_names)
         return label_w, base_w, extra_w, value_w
 
@@ -3844,6 +3858,7 @@ class SettingsScreen(Screen):
             padded_track,
             toggle_state,
             toggle_state_base,
+            effective_toggle_values,
         )
 
         spec = TOGGLES[name]
@@ -3854,8 +3869,14 @@ class SettingsScreen(Screen):
         is_child = self._modes_is_child(name)
         head = self._modes_head(name)
         extra = (current == PRESET_CUSTOM) if spec.preset_keys else None
+        values = effective_toggle_values(self.app, name)
         track = padded_track(
-            spec, current, extra_lit=extra, base_w=base_w, extra_w=extra_w
+            spec,
+            current,
+            extra_lit=extra,
+            base_w=base_w,
+            extra_w=extra_w,
+            values=values,
         )
         t = Text()
         t.append(
@@ -4123,27 +4144,31 @@ class SettingsScreen(Screen):
         """←/→/Enter на строке тоггла (канон §1/§3): мгновенно записать
         переключённое ГЛОБАЛЬНОЕ значение в config.yml (Settings = глобальный
         дефолт, дизайн 2026-07-21 §3). Цикл значения — от ТЕКУЩЕГО глобального
-        состояния. Guard записи — как у остальных секций (_writable): пакетный
-        шаблон не пишем. Ошибка — флеш, значение не меняется. Сессионные
-        переопределения НЕ трогаем — их перекрытие показывает пометка §6.2."""
+        состояния, по действующему составу (`effective_toggle_names` — статика
+        или `values_provider`, спека автороутинга §3: `/level` цикл включает
+        `auto`, когда фича доступна, тем же generic путём, каким пресет всегда
+        цикл по низкий/средний/высокий — без разбора по имени тоггла). Guard
+        записи — как у остальных секций (_writable): пакетный шаблон не пишем.
+        Ошибка — флеш, значение не меняется. Сессионные переопределения НЕ
+        трогаем — их перекрытие показывает пометка §6.2."""
         from gc_core import onboarding_config_writer as w
         from gc_core.config import _default_config_path, validate_config_text
 
         from gc_tui.toggles import (
+            toggle_state_base,
             PRESETS,
             TOGGLES,
-            cycle_value,
             modes_section_names,
-            toggle_state_base,
+            effective_toggle_names,
+            cycle_in,
         )
 
         names = modes_section_names()
         name = names[self._modes_idx]
         spec = TOGGLES[name]
         current = toggle_state_base(self.app, name)
-        new_value = cycle_value(
-            name, current, direction
-        )  # пресет: по low/medium/high
+        cycle_names = effective_toggle_names(self.app, name)
+        new_value = cycle_in(cycle_names, current, direction)
         values = (
             PRESETS[new_value]
             if spec.preset_keys

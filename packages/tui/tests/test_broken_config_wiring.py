@@ -692,6 +692,41 @@ def test_the_repair_wizard_is_not_handed_the_profile_flag(
     assert captured.get("profile_override") is None  # …и флаг в неё не уехал
 
 
+def test_the_repair_wizard_is_not_handed_the_level_flag(monkeypatch, tmp_path):
+    """Симметрия флагов запуска: `--level` гасится под `--init-config` тем же
+    правилом, что и `--profile` в тесте выше — чинилка читает и пишет
+    пользовательский файл, флаги, назвавшие ДРУГОЙ конфиг, там не в счёт."""
+    pytest.importorskip("textual")
+    _isolate_default_config_at(tmp_path, monkeypatch)
+    (tmp_path / "config.yml").write_text("this is: : : not [valid yaml }\n", encoding="utf-8")
+
+    captured: dict = {}
+    from gc_tui import app as tui_app
+
+    class _FakeApp:
+        def __init__(self, **kw):
+            captured.update(kw)
+
+        def set_config_path(self, path):
+            pass
+
+        def _maybe_notice_profile_activation(self, *a, **k):
+            pass
+
+        def run(self):
+            captured["ran"] = True
+
+    monkeypatch.setattr(tui_app, "TuiApp", _FakeApp)
+
+    import gc_tui as tui_mod
+    monkeypatch.setattr(tui_mod, "_interactive", lambda: True, raising=False)
+
+    rc = tui_mod.main(argv=["--init-config", "--level", "max"])
+    assert rc == 0
+    assert captured.get("ran") is True                # дошли до сборки приложения
+    assert captured.get("level_override") is None      # …и флаг в неё не уехал
+
+
 def test_main_explains_an_unreadable_layer_instead_of_a_traceback(
     monkeypatch, tmp_path, capsys, request
 ):

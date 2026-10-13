@@ -57,6 +57,27 @@ def test_profile_header_falls_back_to_flat_model_in_legacy_mode():
     assert "модель: qwen3-coder" in text
 
 
+def test_profile_header_resolves_auto_level_to_default_slot_model():
+    """level: auto (спека auto-routing §5.1) переводится через `effective_level`
+    ДО Router'а — сырой литерал иначе роняет резолв (ValueError), и шапка
+    показала бы фоллбэк вместо модели default-слота. Строка «уровень:» —
+    литерал `auto` при доступном автовыборе (как /status), иначе действующий
+    уровень."""
+    from gc_tui.screens.config import _profile_header_text
+
+    cfg = {
+        "agent.model": "m",
+        "level": "auto",
+        "backend.api_mode": "chat_completions",
+        "agent.auto_routing": True,
+        "models": {"fast": {}, "mid": {}, "big": {}},
+        "slots": {"light": "fast", "default": "mid", "max": "big"},
+    }
+    text = _profile_header_text(as_settings(cfg), profile_source=None).plain
+    assert "уровень: auto" in text
+    assert "модель: mid" in text
+
+
 @pytest.mark.asyncio
 async def test_config_screen_yaml_redacts_secret_and_shows_paths(tmp_path):
     pytest.importorskip("textual")
@@ -356,3 +377,30 @@ async def test_config_filter_input_focused_and_filters(tmp_path):
         assert any(
             p.border_title == "пути" for p in scr.query(".config-panel")
         )
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"agent.auto_routing": False},
+        {"backend.api_mode": "responses"},
+        {"models": {"only": {}}, "slots": {"default": "only"}},
+    ],
+    ids=["auto_routing_off", "responses", "one_model"],
+)
+def test_profile_header_shows_the_working_level_when_auto_is_unavailable(
+    extra,
+):
+    from gc_tui.screens.config import _profile_header_text
+
+    cfg = {
+        "agent.model": "m",
+        "level": "auto",
+        "backend.api_mode": "chat_completions",
+        "agent.auto_routing": True,
+        "models": {"fast": {}, "mid": {}, "big": {}},
+        "slots": {"light": "fast", "default": "mid", "max": "big"},
+        **extra,
+    }
+    text = _profile_header_text(as_settings(cfg), profile_source=None).plain
+    assert "уровень: default" in text

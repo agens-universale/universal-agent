@@ -5411,6 +5411,48 @@ async def test_level_row_track_is_lit_in_the_colour_of_the_level(
         )
 
 
+# --- level: четвёртая позиция `auto` вне шкалы (спека автороутинга §3) ------
+
+# Два разных комплекта вызова: с одной моделью автовыбор недоступен.
+_TWO_KITS_YAML = "models:\n  fast: {}\n  mid: {}\nslots:\n  light: fast\n  default: mid\n"
+
+
+async def test_level_row_shows_auto_off_scale_when_available(tmp_path, monkeypatch):
+    """Четвёртая позиция `auto` — доступна в Настройках тем же составом
+    значений, что и в палитре (`effective_toggle_values`, values_provider
+    `/level`): `backend.api_mode: chat_completions` + рубильник `auto_routing`
+    по умолчанию включён + в реестре два разных комплекта вызова."""
+    pytest.importorskip("textual")
+
+    monkeypatch.chdir(tmp_path)
+    app, _ = _app_with_config(
+        tmp_path, 'level: "default"\nbackend:\n  api_mode: "chat_completions"\n' + _TWO_KITS_YAML)
+    async with app.run_test() as pilot:
+        scr = await _open_modes_section(pilot)
+
+        text = scr._mode_row_text("level", selected=False).plain
+        assert "○ ● ○  ○  default" in text
+
+
+async def test_level_row_cycle_includes_auto(tmp_path, monkeypatch):
+    """←/→ на строке `level` ходит по действующему составу
+    (`effective_toggle_names`) — включает `auto`, когда фича доступна, тем же
+    generic путём, каким цикл обычно идёт по трём базовым позициям."""
+    pytest.importorskip("textual")
+    import yaml
+
+    monkeypatch.chdir(tmp_path)
+    app, cfg_file = _app_with_config(
+        tmp_path, 'level: "max"\nbackend:\n  api_mode: "chat_completions"\n' + _TWO_KITS_YAML)
+    async with app.run_test() as pilot:
+        scr = await _open_modes_section(pilot)
+        scr._modes_idx = modes_row_index("level")
+
+        scr._modes_apply(1)     # max -> auto (4-я позиция сразу за max)
+
+        assert yaml.safe_load(cfg_file.read_text(encoding="utf-8"))["level"] == "auto"
+
+
 # --- Правило записи секции: куда пишем и что действует ---
 
 

@@ -143,6 +143,13 @@ def test_cycle_value_still_works_with_value_objects():
     assert cycle_value("answers", "deny", -1) == "judge"
 
 
+def test_cycle_in_wraps_around_a_four_name_cycle():
+    from gc_tui.toggles import cycle_in
+    names = ["light", "default", "max", "auto"]
+    assert cycle_in(names, "auto", 1) == "light"
+    assert cycle_in(names, "light", -1) == "auto"
+
+
 def test_toggle_specs_carry_label_and_summary():
     from gc_tui.toggles import TOGGLES
 
