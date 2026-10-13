@@ -89,7 +89,7 @@ class FakeAgent:
         self.closed = True
 
 
-def _open(tmp_path, factory=None):
+def _open(tmp_path, factory=None, settings_extra=None):
     agents = []
 
     async def default_factory(config, **kwargs):
@@ -100,10 +100,11 @@ def _open(tmp_path, factory=None):
         return agent
 
     writer = MemoryWriter()
+    cfg = {"paths.threads_data_path": str(tmp_path), "os_backend": "local"}
+    if settings_extra:
+        cfg.update(settings_extra)
     facade = AcpFacade(
-        settings=make_settings(
-            {"paths.threads_data_path": str(tmp_path), "os_backend": "local"}
-        ),
+        settings=make_settings(cfg),
         writer=writer,
         agent_factory=factory or default_factory,
     )

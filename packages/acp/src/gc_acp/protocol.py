@@ -10,6 +10,7 @@ import asyncio
 import json
 import re
 import sys
+import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any, TextIO
@@ -39,6 +40,10 @@ class Incoming:
     has_id: bool = False
     method: str | None = None
     params: Any = None
+    result: Any = None
+    error: Any = None
+    has_result: bool = False
+    has_error: bool = False
     parse_error: bool = False
     not_object: bool = False
 
@@ -65,11 +70,17 @@ def parse_line(line: str) -> Incoming | None:
     has_id = (
         "id" in payload and raw_id is not None and not isinstance(raw_id, bool)
     )
+    has_result = "result" in payload
+    has_error = "error" in payload
     return Incoming(
         id=raw_id if has_id else None,
         has_id=has_id,
         method=method,
         params=payload.get("params"),
+        result=payload.get("result") if has_result else None,
+        error=payload.get("error") if has_error else None,
+        has_result=has_result,
+        has_error=has_error,
     )
 
 
@@ -151,6 +162,65 @@ def _decode_line(raw: bytes) -> str | None:
     if text.endswith("\r"):
         text = text[:-1]
     return text
+
+
+class PendingOutbound:
+    """Исходящие request агента: id → Future, пока клиент не ответит.
+
+    Id — uuid, чтобы не пересечься с id запросов клиента. Ответ с чужим id
+    сюда не попадает.
+    """
+
+    def __init__(self) -> None:
+        self._items: dict[Any, tuple[str, asyncio.Future]] = {}
+
+    def next_id(self) -> str:
+        return str(uuid.uuid4())
+
+    def add(
+        self, request_id: Any, session_id: str, future: asyncio.Future
+    ) -> None:
+        self._items[request_id] = (session_id, future)
+
+    def pop(self, request_id: Any) -> asyncio.Future | None:
+        found = self._items.pop(request_id, None)
+        if found is None:
+            return None
+        return found[1]
+
+    def discard(self, request_id: Any) -> None:
+        self._items.pop(request_id, None)
+
+    def resolve(self, incoming: Incoming) -> bool:
+        """Ответ на наш id. False — id не наш, dispatch идёт как раньше."""
+        future = self.pop(incoming.id)
+        if future is None:
+            return False
+        if not future.done():
+            future.set_result(incoming)
+        return True
+
+    def cancel_id(self, request_id: Any, incoming: Incoming) -> bool:
+        future = self.pop(request_id)
+        if future is None:
+            return False
+        if not future.done():
+            future.set_result(incoming)
+        return True
+
+    def cancel_session(self, session_id: str, incoming: Incoming) -> None:
+        self._settle(lambda _rid, sid: sid == session_id, incoming)
+
+    def cancel_all(self, incoming: Incoming) -> None:
+        self._settle(lambda _rid, _sid: True, incoming)
+
+    def _settle(self, predicate, incoming: Incoming) -> None:
+        for request_id, (session_id, future) in list(self._items.items()):
+            if not predicate(request_id, session_id):
+                continue
+            self._items.pop(request_id, None)
+            if not future.done():
+                future.set_result(incoming)
 
 
 def _salvage_id(line: str) -> Any:

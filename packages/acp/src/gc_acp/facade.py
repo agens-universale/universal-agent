@@ -7,7 +7,7 @@ import logging
 import os
 import sys
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from gc_core.thread_store import (
@@ -19,6 +19,14 @@ from gc_core.tools.turn.submit_solution import SubmitSolution
 
 from gc_acp.ask_human import bind_ask_human
 from gc_acp.capabilities import initialize_result
+from gc_acp.confirm import (
+    bind_confirm,
+    broken_reply,
+    cancelled_reply,
+    choice_from_incoming,
+    permission_message,
+    timeout_sec,
+)
 from gc_acp.prompt import PromptRejected, flatten_prompt
 from gc_acp.protocol import (
     INTERNAL_ERROR,
@@ -28,6 +36,7 @@ from gc_acp.protocol import (
     PARSE_ERROR,
     SESSION_NOT_FOUND,
     Incoming,
+    PendingOutbound,
     error_message,
     notification,
     parse_line,
@@ -66,6 +75,7 @@ class LiveSession:
     prompt_finished: bool = False
     response_sent: bool = False
     failed: bool = False
+    open_tool_ids: list[str] = field(default_factory=list)
 
 
 class AcpFacade:
@@ -93,12 +103,18 @@ class AcpFacade:
         self._releasing: set[asyncio.Task] = set()
         self._initialized = False
         self._create_lock = asyncio.Lock()
+        self._pending = PendingOutbound()
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     async def handle_line(self, line: str) -> None:
+        self._loop = asyncio.get_running_loop()
         incoming = parse_line(line)
         if incoming is None:
             return
         if incoming.parse_error:
+            broken = broken_reply_for(incoming)
+            if incoming.has_id and self._pending.resolve(broken):
+                return
             print("gc-acp: parse error", file=sys.stderr)
             if incoming.has_id:
                 await self._send(
@@ -114,12 +130,30 @@ class AcpFacade:
                     error_message(incoming.id, INTERNAL_ERROR, _RUN_FAILED)
                 )
 
+    def confirm_blocking(self, session_id: str, request: Any) -> str:
+        """Синхронный confirm с потока тула. Таймаут и сбой — deny_once."""
+        from gc_core.security.confirm_port import CONFIRM_DENY_ONCE
+
+        loop = self._loop
+        if loop is None or not loop.is_running():
+            return CONFIRM_DENY_ONCE
+        timeout = timeout_sec(self._settings)
+        future = asyncio.run_coroutine_threadsafe(
+            self._confirm(session_id, request), loop
+        )
+        try:
+            return future.result(timeout=timeout + 1.0)
+        except Exception:
+            future.cancel()
+            return CONFIRM_DENY_ONCE
+
     async def shutdown(self) -> None:
         """Отменить живые ходы и закрыть простаивающих агентов.
 
         Идущий ход не ждём: stop() кооперативный, команда может занять
         весь таймаут, а stdin после выхода уже закрыт.
         """
+        self._pending.cancel_all(cancelled_reply())
         leftover = list(self._sessions.values())
         self._sessions.clear()
         for live in leftover:
@@ -131,6 +165,12 @@ class AcpFacade:
     async def _dispatch(self, incoming: Incoming) -> None:
         if incoming.method in _SILENT:
             await self._on_notification(incoming)
+            return
+        if (
+            incoming.has_id
+            and incoming.method is None
+            and self._pending.resolve(incoming)
+        ):
             return
         if not incoming.has_id:
             if incoming.not_object or incoming.method is None:
@@ -178,7 +218,7 @@ class AcpFacade:
         warn_ignored_client_fields(body)
         session_id = validate_thread_id(str(uuid.uuid4()))
         try:
-            agent = await self._open_agent(cwd)
+            agent = await self._open_agent(cwd, session_id)
         except Exception:
             logger.exception(_METHOD_NEW)
             await self._fail(request_id)
@@ -340,7 +380,7 @@ class AcpFacade:
         if live is not None:
             return live
         try:
-            agent = await self._open_agent(record.cwd)
+            agent = await self._open_agent(record.cwd, record.session_id)
         except Exception:
             logger.exception("acp agent")
             return None
@@ -360,7 +400,8 @@ class AcpFacade:
         ):
             await self._notify(session_id, update)
 
-    async def _open_agent(self, cwd: str) -> Any:
+    async def _open_agent(self, cwd: str, session_id: str) -> Any:
+        self._loop = asyncio.get_running_loop()
         settings = self._settings.with_runtime(launch_root=cwd)
         async with self._create_lock:
             agent = await self._agent_factory(
@@ -371,10 +412,38 @@ class AcpFacade:
             )
         try:
             bind_ask_human(agent)
+            bind_confirm(agent, session_id, self)
         except Exception:
             await _safe_aclose(agent)
             raise
         return agent
+
+    async def _confirm(self, session_id: str, request: Any) -> str:
+        from gc_core.security.confirm_port import CONFIRM_DENY_ONCE
+
+        live = self._sessions.get(session_id)
+        if live is None or live.cancel_requested:
+            return CONFIRM_DENY_ONCE
+        request_id = self._pending.next_id()
+        future = asyncio.get_running_loop().create_future()
+        self._pending.add(request_id, session_id, future)
+        try:
+            await self._send(
+                permission_message(
+                    request_id,
+                    session_id,
+                    request,
+                    list(live.open_tool_ids),
+                )
+            )
+            incoming = await asyncio.wait_for(
+                asyncio.shield(future), timeout=timeout_sec(self._settings)
+            )
+        except TimeoutError:
+            return CONFIRM_DENY_ONCE
+        finally:
+            self._pending.discard(request_id)
+        return choice_from_incoming(incoming)
 
     async def _run_prompt(
         self, live: LiveSession, request_id: Any, text: str
@@ -442,6 +511,7 @@ class AcpFacade:
 
     async def _emit_tools(self, live: LiveSession, flow: ToolFlow) -> None:
         for update in flow.poll():
+            _track_open_tool(live, update)
             await self._notify(live.session_id, update)
 
     async def _close_prompt(self, live: LiveSession, request_id: Any) -> None:
@@ -463,16 +533,22 @@ class AcpFacade:
 
     def _cancel_session(self, params: Any) -> None:
         live = self._live_from(params)
-        if live is not None:
-            _mark_cancel(live)
+        if live is None:
+            return
+        self._pending.cancel_session(live.session_id, cancelled_reply())
+        _mark_cancel(live)
 
     def _cancel_by_request_id(self, params: Any) -> None:
         body = _object_params(params)
         if body is None or "id" not in body:
             return
         target = body.get("id")
+        self._pending.cancel_id(target, cancelled_reply())
         for live in self._sessions.values():
             if live.prompt_id == target:
+                self._pending.cancel_session(
+                    live.session_id, cancelled_reply()
+                )
                 _mark_cancel(live)
                 return
 
@@ -609,6 +685,39 @@ def _outcome(live: LiveSession) -> str | None:
     if outcome is None or isinstance(outcome, str):
         return outcome
     return None
+
+
+_TOOL_DONE = frozenset({"completed", "failed"})
+
+
+def broken_reply_for(incoming: Incoming) -> Incoming:
+    """Битый JSON с нашим id: закрыть ожидание, не подменяя чужой id."""
+    reply = broken_reply()
+    return Incoming(
+        id=incoming.id,
+        has_id=True,
+        has_error=reply.has_error,
+        error=reply.error,
+        parse_error=True,
+    )
+
+
+def _track_open_tool(live: LiveSession, update: dict) -> None:
+    kind = update.get("sessionUpdate")
+    call_id = update.get("toolCallId")
+    if not isinstance(call_id, str) or call_id == "":
+        return
+    if kind == "tool_call":
+        if call_id not in live.open_tool_ids:
+            live.open_tool_ids.append(call_id)
+        return
+    if kind != "tool_call_update":
+        return
+    if update.get("status") not in _TOOL_DONE:
+        return
+    live.open_tool_ids = [
+        item for item in live.open_tool_ids if item != call_id
+    ]
 
 
 def _mark_cancel(live: LiveSession) -> None:

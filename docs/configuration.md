@@ -85,6 +85,8 @@
     `turn_finish` в ACP; в IDE человек сам видит ответ и сверяет с интентом.
   - `acp.todo_reminder_steps` (число, по умолчанию `0`) — technical reminder про
     `session_todo`; `0` = выкл. В IDE-чате иначе легко толкает к реализации вопреки обсуждению.
+  - `acp.confirm_timeout_sec` (число, по умолчанию `600`) — ожидание ответа IDE
+    на `session/request_permission`. По таймауту операция отклоняется.
   - Канал ACP также подставляет bundled special instructions
     (`chat_completions_acp_special_instructions.md`: discussion ≠ implementation).
     Пример профиля — `packages/acp/profiles/acp.yml`. Гайд по процессу — [acp.md](acp.md).

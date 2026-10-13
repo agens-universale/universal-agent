@@ -90,6 +90,7 @@ stderr. `console_trace` процесс принудительно выключа
 | `acp.text_answer_mode` | `allow` | `deny` / `judge` / `allow` — проза без tool-call. В IDE обсуждение и правка доки — нормальный сценарий, поэтому дефолт `allow`, не `judge` как в TUI. |
 | `acp.finish_gate_mode` | `off` | `on` / `off` / `smart` — судья на `turn_finish`. В IDE человек сам видит ответ и дифф. Значения `off` и `on` в YAML пишите в кавычках. |
 | `acp.todo_reminder_steps` | `0` | Technical reminder про `session_todo` каждые N шагов. `0` — выкл. Иначе чек-лист легко толкает к «пиши код» вопреки обсуждению. |
+| `acp.confirm_timeout_sec` | `600` | Сколько секунд ждать ответ IDE на `session/request_permission`. По таймауту операция отклоняется, процесс остаётся. |
 
 После загрузки фасад пишет эти значения в runtime-ключи хода (`text_answer_mode`,
 `strict_turn_finish_validation`, `finish_gate_smart`, `todo_params.reminder_steps`)
@@ -110,9 +111,22 @@ acp:
   text_answer_mode: allow
   finish_gate_mode: "off"
   todo_reminder_steps: 0
+  confirm_timeout_sec: 600
 ```
 
 Подробнее про соседние ключи конфига — [configuration.md](configuration.md).
+
+## Подтверждение гвардов
+
+Если у гварда чтения, записи или команды `mode=ask`, ядро останавливает тул и
+ждёт человека. `gc-acp` отправляет это клиенту запросом `session/request_permission`:
+четыре варианта ACP (allow once / always, reject once / always). Пока ответа нет,
+тул ждёт. Отмена сессии, ошибка JSON-RPC и таймаут отклоняют операцию, ход не
+зависает. Запомнить выбор (always) пишет то же `permission_store`, что и баннер
+в TUI.
+
+Свободный вопрос человеку сюда не входит. `turn_ask_human` в ACP выключен:
+модель спрашивает прозой или финалом хода, ответ — следующий `session/prompt`.
 
 ## Возможности протокола
 
