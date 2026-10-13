@@ -9,8 +9,10 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Set, Tuple
 
+from gc_core.auto_routing.levels import auto_unavailable_reason
+from gc_core.config import cli_forces_legacy_model
 from gc_core.config_modules.pricing import resolve_model_tariff
-from gc_core.settings import AppConfig, settings_of
+from gc_core.settings import AppConfig, LoadedSettings, settings_of
 
 
 class Notice(NamedTuple):
@@ -133,6 +135,40 @@ def _agentsmd(settings: AppConfig, *, is_tui: bool) -> List[Notice]:
             )
         ]
     return []
+
+
+def auto_routing_unavailable_reason_text(reason: str) -> str:
+    """Фраза причины недоступности автовыбора — одна на все входы (нотис при
+    старте, runtime-нотис TUI, ответ на набранный `/level auto`)."""
+    return f"автовыбор моделей недоступен: {reason}"
+
+
+def auto_routing_unavailable_message(reason: str) -> str:
+    """Текст нотиса: фраза причины и уровень, которым идёт работа. Ответ на
+    набранный `/level auto` берёт одну фразу — набор уровень не меняет, и хвост
+    про default соврал бы на light и max."""
+    return f"{auto_routing_unavailable_reason_text(reason)} — работает уровень default"
+
+
+def auto_routing_unavailable_notice(source: Any) -> Optional[Notice]:
+    """`level: auto` выбран, а фича недоступна — один нотис с причиной (спека
+    auto-routing §6). Работает уровень default; палитра позицию auto не показывает."""
+    if str(settings_of(source).level or "").strip() != "auto":
+        return None
+    loaded = (
+        source if isinstance(source, LoadedSettings)
+        else LoadedSettings(settings=settings_of(source))
+    )
+    reason = auto_unavailable_reason(
+        loaded, force_legacy=cli_forces_legacy_model(loaded))
+    if reason is None:
+        return None
+    return Notice("info", "auto_routing_unavailable", auto_routing_unavailable_message(reason))
+
+
+def _auto_routing(source: Any) -> List[Notice]:
+    notice = auto_routing_unavailable_notice(source)
+    return [notice] if notice is not None else []
 
 
 def _compat(compat_notices: Optional[List[str]]) -> List[Notice]:
@@ -292,6 +328,7 @@ def collect_startup_notices(
     ``settings`` — всё, что принимает ``settings_of`` (``LoadedSettings``,
     ``AppConfig``, контекст).
     """
+    source = settings
     settings = settings_of(settings)
     warns: List[Notice] = []
     infos: List[Notice] = []
@@ -300,6 +337,7 @@ def collect_startup_notices(
         + _subagent_definitions(settings)
         + _mcp_failed(mcp_status)
         + _agentsmd(settings, is_tui=is_tui)
+        + _auto_routing(source)
         + list(extra)
         + _compat(compat_notices)
         + _pricing_no_rates(settings)

@@ -426,13 +426,15 @@ def test_main_trace_trips_breaker_and_raises_honest_error_with_hint(
         is_tui=False,
     )
 
-    def _once(messages, state, ctx, *, set_previous_response_id=True):
+    def _once(messages, state, ctx, *, resolved=None, set_previous_response_id=True, mute_answer=False):
         raise _http_error(500)
 
     monkeypatch.setattr(pr, "_arequest_backend_canonical_once", _once)
 
     with pytest.raises(RuntimeError) as excinfo:
-        run_coro(pr._arequest_backend_canonical([], object(), ctx))
+        run_coro(pr._arequest_backend_canonical(
+            [], object(), ctx, resolved=router.resolve("main", check_breaker=False)
+        ))
 
     message = str(excinfo.value)
     assert "/level" in message
@@ -542,6 +544,10 @@ def test_subagent_ctx_build_both_open_returns_honest_tool_error(tmp_path):
 
 
 def test_main_trace_open_alias_fails_instantly_without_transport(monkeypatch):
+    """Один резолв на вызов: предпроверка открытого алиаса живёт в
+    `resolve_main_for_call` (точка решения), не в `_request_backend_canonical`
+    — она отказывает ДО того, как воронка вообще узнаёт про `resolved`,
+    транспорт не вызывается вовсе."""
     from gc_core import processing_responses as pr
 
     router = _router(
@@ -558,14 +564,14 @@ def test_main_trace_open_alias_fails_instantly_without_transport(monkeypatch):
     )
     calls = {"n": 0}
 
-    def _once(messages, state, ctx, *, set_previous_response_id=True):
+    def _once(messages, state, ctx, *, resolved=None, set_previous_response_id=True, mute_answer=False):
         calls["n"] += 1
         return (["msg"], "rid", {})
 
     monkeypatch.setattr(pr, "_arequest_backend_canonical_once", _once)
 
     with pytest.raises(RuntimeError):
-        run_coro(pr._arequest_backend_canonical([], object(), ctx))
+        pr.resolve_main_for_call(object(), ctx)
 
     assert calls["n"] == 0
 
@@ -584,13 +590,15 @@ def test_main_trace_legacy_breaker_not_tracked_error_unchanged(monkeypatch):
         is_tui=False,
     )
 
-    def _once(messages, state, ctx, *, set_previous_response_id=True):
+    def _once(messages, state, ctx, *, resolved=None, set_previous_response_id=True, mute_answer=False):
         raise _http_error(500)
 
     monkeypatch.setattr(pr, "_arequest_backend_canonical_once", _once)
 
     with pytest.raises(httpx.HTTPStatusError):
-        run_coro(pr._arequest_backend_canonical([], object(), ctx))
+        run_coro(pr._arequest_backend_canonical(
+            [], object(), ctx, resolved=router.resolve("main", check_breaker=False)
+        ))
 
     assert router.breaker.snapshot() == {}
 
@@ -612,13 +620,15 @@ def test_main_trace_context_overflow_not_treated_as_unavailable(monkeypatch):
         is_tui=False,
     )
 
-    def _once(messages, state, ctx, *, set_previous_response_id=True):
+    def _once(messages, state, ctx, *, resolved=None, set_previous_response_id=True, mute_answer=False):
         raise ValueError("maximum context length exceeded")
 
     monkeypatch.setattr(pr, "_arequest_backend_canonical_once", _once)
 
     with pytest.raises(ValueError, match="maximum context length"):
-        run_coro(pr._arequest_backend_canonical([], object(), ctx))
+        run_coro(pr._arequest_backend_canonical(
+            [], object(), ctx, resolved=router.resolve("main", check_breaker=False)
+        ))
 
     assert router.breaker.snapshot() == {}
 
@@ -874,16 +884,17 @@ async def test_unpinned_subagent_failure_trips_breaker_and_propagates_to_main(
     assert payload2["ok"] is False
     assert calls["n"] == 0
 
-    # main следующего хода — мгновенный честный класс 2, без обращения в транспорт.
+    # main следующего вызова — мгновенный честный класс 2 из resolve_main_for_call
+    # (точка решения), без обращения в транспорт.
     once_calls = {"n": 0}
 
-    def _once(messages, state, ctx, *, set_previous_response_id=True):
+    def _once(messages, state, ctx, *, resolved=None, set_previous_response_id=True, mute_answer=False):
         once_calls["n"] += 1
         return (["msg"], "rid", {})
 
     monkeypatch.setattr(pr, "_arequest_backend_canonical_once", _once)
     with pytest.raises(RuntimeError):
-        await pr._arequest_backend_canonical([], object(), parent_ctx)
+        pr.resolve_main_for_call(object(), parent_ctx)
     assert once_calls["n"] == 0
 
 

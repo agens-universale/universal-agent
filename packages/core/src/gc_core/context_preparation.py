@@ -125,3 +125,4 @@ class RunContextBindings:
     project_memory_io: Any = None
     summary_trace_sink: Any = None
     collect_garbage: Any = None
+    execution_patch: Any = None

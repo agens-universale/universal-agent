@@ -5,7 +5,7 @@ import logging
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from gc_core.agent_store import (
     DEFAULT_AGENT_STORE,
@@ -41,7 +41,12 @@ from gc_core.mcp_session_owner import new_owner_token, use_owner
 from gc_core.model_router import CircuitBreaker, ModelRouter
 from gc_core.run_preparation import PromptLoader
 from gc_core.state_preparation import StatePreparer
+from gc_core.startup_notices import auto_routing_unavailable_notice
 from gc_core.tools import abuild_tools_data
+from gc_core.auto_routing.levels import auto_available, effective_level, resolve_routing_params
+from gc_core.auto_routing.policy import RoutingParams
+from gc_core.auto_routing.pair_judge import require_prompt as require_pair_judge_prompt
+from gc_core.settings import settings_of
 from gc_core.tools.skills.registry import SkillsRegistry
 from gc_core.trace_id import trace_header_name, trace_id_from_config
 from gc_core.utils.logging_module import create_run_logger, generate_run_id
@@ -159,6 +164,27 @@ class RunContext:
     # «файл недоступен», а файловых операций в workflow нет.
     image_store: Optional[ImageStore] = None
 
+    active_state: Any = field(default=None, repr=False)
+    # Доступна ли фича auto этому запуску (спека §5.1) — считается ОДИН раз при
+    # сборке ctx (`acreate_run_context`, конфиг рана не меняется) и кладётся сюда;
+    # `aroute_before_call` читает готовое значение вместо повторного вычисления из
+    # `config_dict` на каждый вызов (единая точка предиката, без отдельной ветки
+    # на случай отсутствия поля).
+    auto_available: bool = True
+    # Параметры политики автовыбора: политика, доли жребия, экспериментальные
+    # флаги. Считаются один раз при сборке ctx (конфиг прогона не меняется), как
+    # `auto_available`; обе точки сборки RunContext кладут их сами.
+    routing_params: RoutingParams = field(default_factory=RoutingParams)
+    # Версия поведения исполнения: durable-рантайм выбирает ветку по истории;
+    # локально отсутствие порта означает текущее поведение.
+    execution_patch: Optional[Callable[[str], bool]] = None
+
+    def attach_state(self, state: Any) -> None:
+        """Привязать State рана к контексту — единственная точка записи
+        `active_state` (спека auto-routing §5.1)."""
+        self.active_state = state
+
+
 
 def _coerce_settings(settings, runtime):
     """``LoadedSettings`` сборки из ``LoadedSettings`` или ``AppConfig``.
@@ -234,6 +260,7 @@ def assemble_run_context(
         thread_store=bindings.thread_store,
         agent_store=bindings.agent_store,
         operations=bindings.operations,
+        execution_patch=bindings.execution_patch,
         prompt_loader=bindings.prompt_loader,
         state_preparer=bindings.state_preparer,
         human_request=bindings.human_request,
@@ -248,6 +275,18 @@ def assemble_run_context(
         collect_garbage=bindings.collect_garbage,
     )
     ctx.is_tui = prepared.is_tui
+    ctx.auto_available = auto_available(
+        loaded.settings,
+        force_legacy=(bindings.model_router.force_legacy or not bindings.model_router.auto_allowed),
+    )
+    ctx.routing_params = resolve_routing_params(loaded.settings)
+    live = bindings.model_router.live_level
+
+    def effective_provider():
+        state = ctx.active_state
+        return effective_level(live(), getattr(state, "current_level", None), ctx.auto_available)
+
+    ctx.model_router = bindings.model_router.with_level_providers(effective_provider, live)
     return ctx
 
 
@@ -342,6 +381,12 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
         check_agent_store(agent_store)
 
     source = _coerce_settings(settings, runtime)
+    selected_level = level_provider() if level_provider is not None else settings_of(source).level
+    if selected_level == "auto":
+        require_pair_judge_prompt(
+            source, resolve_routing_params(source),
+            store=agent_store or DEFAULT_AGENT_STORE, force_legacy=force_legacy,
+        )
     prep = _prepare_run_context(
         source,
         run_id=run_id,
@@ -630,6 +675,10 @@ def _finish_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING
             "backend_api_mode": settings.backend.api_mode,
         },
     )
+
+    notice = auto_routing_unavailable_notice(prep.settings)
+    if notice is not None:
+        run_logger.warning(notice.message)
 
     run_logger.debug(
         "agent_tools",
