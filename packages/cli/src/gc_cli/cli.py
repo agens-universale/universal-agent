@@ -562,6 +562,36 @@ def _run_update() -> int:
     return 0
 
 
+def _print_startup_notices(
+    loaded: Any, ctx: Any, *, upgrade_info=None
+) -> None:
+    """Стартовые уведомления → stderr (не-блокирующие; на основном пути онбординг
+    идёт раньше; `--init` его не проходит). Один вывод на все пути, которые
+    запускают агента: `--init` и основной запуск видят одни и те же
+    предупреждения о конфиге."""
+    from gc_core.startup_notices import (
+        collect_startup_notices,
+        render_notices_for_cli,
+    )
+    from gc_core.tools.registry import all_builtin_tool_names
+
+    notices = collect_startup_notices(
+        loaded,
+        all_builtin_tool_names(loaded),
+        getattr(ctx, "mcp_status", None),
+        is_tui=False,
+        known_tool_names=getattr(ctx, "registered_tool_names", None),
+        deprecated_keys_used=(
+            ["backend.stream"]
+            if is_explicit(loaded.settings, "backend.stream") else []
+        ),
+        upgrade_info=upgrade_info,
+        compat_notices=list(loaded.runtime.notices),
+    )
+    if notices:
+        print(render_notices_for_cli(notices), file=sys.stderr)
+
+
 async def _run_init_agents_md() -> int:
     """`gc-cli --init`: агент сам сканирует репозиторий и пишет AGENTS.md.
 
@@ -573,21 +603,30 @@ async def _run_init_agents_md() -> int:
 
     # Тот же режим запуска, что у основного входа: правило одно для всех
     # контекстов gc-cli (запись журнала правок — `agent_edits.record.cli`).
-    loaded = load_settings(arg_parser.run_args.config).with_runtime(
-        run_mode=RUN_MODE_CLI
+    loaded, settings_exit = _load_cli_settings(
+        arg_parser.run_args.config,
+        getattr(arg_parser.run_args, "profile", None),
     )
+    if settings_exit is not None:
+        return settings_exit
+    loaded = loaded.with_runtime(run_mode=RUN_MODE_CLI)
     auth_connector = build_auth_connector(loaded)
+    force_legacy = cli_forces_legacy_model(loaded)
     # Асинхронная сборка: мы уже внутри работающего loop. Синхронный
     # create_run_context морозил бы его на всё MCP-дискавери — замер на
     # зависшем сервере с дедлайном 2 с: 2.01 с заморозки и 9 тиков хартбита
     # против 0.01 с и 365 тиков у асинхронного двойника.
-    ctx = await acreate_run_context(loaded, auth_connector=auth_connector)
+    ctx = await acreate_run_context(
+        loaded, auth_connector=auth_connector, force_legacy=force_legacy
+    )
     # Тот же порт, что и в `arun_cli`. Без него вопрос агента в этом режиме шёл
     # старым путём — `input()` в потоке пула: Ctrl+C обрывал прогон, а выход
     # ждал строку в stdin. Режим `--init` как раз и спрашивает человека.
     from gc_cli.ask_human_port import make_cli_ask_human_port
 
     ctx.ask_human = make_cli_ask_human_port()
+
+    _print_startup_notices(loaded, ctx)
 
     from gc_core.utils.async_http import aclose_clients
 
@@ -871,29 +910,7 @@ async def arun_cli() -> int:
 
     ctx.ask_human = make_cli_ask_human_port()
 
-    # Стартовые уведомления → stderr (не-блокирующие; онбординг остаётся выше).
-    from gc_core.startup_notices import (
-        collect_startup_notices,
-        render_notices_for_cli,
-    )
-    from gc_core.tools.registry import all_builtin_tool_names
-
-    _notices = collect_startup_notices(
-        loaded,
-        all_builtin_tool_names(loaded),
-        getattr(ctx, "mcp_status", None),
-        is_tui=False,
-        known_tool_names=getattr(ctx, "registered_tool_names", None),
-        deprecated_keys_used=(
-            ["backend.stream"]
-            if is_explicit(loaded.settings, "backend.stream")
-            else []
-        ),
-        upgrade_info=_upgrade_info,
-        compat_notices=list(loaded.runtime.notices),
-    )
-    if _notices:
-        print(render_notices_for_cli(_notices), file=sys.stderr)
+    _print_startup_notices(loaded, ctx, upgrade_info=_upgrade_info)
 
     user_parts, attachments = _cli_user_parts(
         arg_parser.run_args.query,

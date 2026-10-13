@@ -1391,6 +1391,25 @@ def test_effective_model_is_empty_on_the_template_sentinel():
     assert onboarding.effective_model(cfg) == ""
 
 
+def test_effective_model_resolves_auto_level_to_default_slot():
+    """level: auto (спека auto-routing §5.1) переводится через `effective_level`
+    ДО Router'а — сырой литерал иначе роняет резолв (ValueError), и мастер на
+    уже настроенном auto-конфиге видел бы устаревший плоский ключ вместо
+    модели default-слота."""
+    cfg = make_settings({
+        "models": {
+            "fast": {"model": "qwen/qwen3-8b"},
+            "brain": {"model": "qwen/qwen3-235b"},
+        },
+        "slots": {"light": "fast", "default": "brain"},
+        "level": "auto",
+        "backend.api_mode": "chat_completions",
+        "agent.auto_routing": True,
+        "agent.model": "MiniMax-M2.7",
+    })
+    assert onboarding.effective_model(cfg) == "qwen/qwen3-235b"
+
+
 def test_assigned_level_model_reports_only_explicit_slots():
     """Незаданный `max` работает моделью `default`, но «назначен» он не был:
     написать против него её имя значило бы закрепить выдуманное."""

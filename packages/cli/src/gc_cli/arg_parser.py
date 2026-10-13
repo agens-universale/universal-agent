@@ -259,9 +259,12 @@ parser.add_argument(
 
 parser.add_argument(
     "--level",
-    choices=["light", "default", "max"],
+    choices=["light", "default", "max", "auto"],
     default=None,
-    help="Активный уровень модели на этот запуск (перекрывает config.yml и профиль)",
+    help=(
+        "Активный уровень модели на этот запуск (перекрывает config.yml и профиль); "
+        "auto — уровень меняется автоматически по ходу работы"
+    ),
 )
 
 parser.add_argument(
