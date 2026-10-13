@@ -128,6 +128,15 @@ async def test_cwd_is_absolute_launch_root_or_rejected(tmp_path):
         first = await rpc(client, "SendMessage", message())
         context = first.json()["result"]["task"]["contextId"]
         assert created[0].launch_root == os.path.normpath(str(root))
+        relative = await rpc(
+            client,
+            "SendMessage",
+            message(
+                "опечатка",
+                message_id="m-rel",
+                metadata={"cwd": "work"},
+            ),
+        )
         foreign = await rpc(
             client,
             "SendMessage",
@@ -147,6 +156,7 @@ async def test_cwd_is_absolute_launch_root_or_rejected(tmp_path):
                 metadata={"cwd": str(other)},
             ),
         )
+    assert relative.json()["error"]["code"] == -32602
     assert foreign.json()["error"]["code"] == -32602
     assert explicit.status_code == 200
     assert created[1].launch_root == os.path.normpath(str(other))

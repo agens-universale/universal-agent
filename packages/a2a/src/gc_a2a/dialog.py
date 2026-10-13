@@ -89,7 +89,9 @@ def _open_tasks(store: TaskStore, task_ids: list[str]) -> list:
 
 
 def cwd_for_new(sent: str | None, launch_root: Any) -> str:
-    if isinstance(sent, str) and os.path.isabs(sent):
+    if sent is not None:
+        if not os.path.isabs(sent):
+            raise DialogError("invalid")
         return os.path.normpath(sent)
     if isinstance(launch_root, str) and os.path.isabs(launch_root):
         return os.path.normpath(launch_root)
