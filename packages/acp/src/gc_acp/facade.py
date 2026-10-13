@@ -560,6 +560,7 @@ class AcpFacade:
 
     def _release_later(self, live: LiveSession, *, drop_thread: bool) -> None:
         """Ответ клиенту уже можно слать: ход досматривается отдельно."""
+        self._pending.cancel_session(live.session_id, cancelled_reply())
         _mark_cancel(live)
         task = asyncio.create_task(
             self._release(live, drop_thread=drop_thread)

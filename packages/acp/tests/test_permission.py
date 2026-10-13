@@ -10,6 +10,7 @@ from gc_core.security.permission_store import PermissionStore
 from test_facade import (
     _append_call,
     _by_id,
+    _drain,
     _init,
     _line,
     _new,
@@ -298,6 +299,39 @@ async def test_foreign_response_does_not_break_dispatch(tmp_path):
     assert store.decision_for(key) is True
     await facade.handle_line(_line("session/list", {}, 9))
     assert "result" in _by_id(writer, 9)
+    await facade.shutdown()
+
+
+@pytest.mark.parametrize("method", ["session/close", "session/delete"])
+async def test_close_or_delete_during_permission_denies_and_acloses(
+    tmp_path, method
+):
+    facade, writer, agent, session_id, store = await _ready(tmp_path)
+    agent.hold = True
+    await facade.handle_line(
+        _line(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "a"}],
+            },
+            3,
+        )
+    )
+    await agent.started.wait()
+    key = "command:ls"
+
+    async def drop():
+        await _wait_permission(writer)
+        await facade.handle_line(_line(method, {"sessionId": session_id}, 4))
+
+    task = asyncio.create_task(drop())
+    assert await _ask(agent.executor._ctx, key) is False
+    await task
+    assert _by_id(writer, 4)["result"] == {}
+    assert key not in store.session_rules()
+    await _drain(facade)
+    assert agent.closed is True
     await facade.shutdown()
 
 
