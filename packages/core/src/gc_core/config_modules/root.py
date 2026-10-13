@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from gc_core.bundled_assets import bundled_root
 from gc_core.config_modules import env_vars
+from gc_core.config_modules.a2a import A2aConfig
 from gc_core.config_modules.acp import AcpConfig
 from gc_core.config_modules.agent import (
     DEFAULT_FINISH_GATE_MAX_ITERATIONS,
@@ -139,6 +140,10 @@ class AppConfig(BaseModel):
     acp: AcpConfig = Field(default_factory=AcpConfig)
     chat_api: ChatApiConfig = Field(
         default_factory=ChatApiConfig,
+        json_schema_extra=gc_meta(expert=True, worker_only=True),
+    )
+    a2a: A2aConfig = Field(
+        default_factory=A2aConfig,
         json_schema_extra=gc_meta(expert=True, worker_only=True),
     )
     voice: VoiceConfig = Field(

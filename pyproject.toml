@@ -17,6 +17,7 @@ dependencies = [
     "gc-mcp==0.4.0",
     "gc-acp==0.4.0",
     "gc-chat==0.4.0",
+    "gc-a2a==0.4.0",
 ]
 
 [project.optional-dependencies]
@@ -33,6 +34,7 @@ gc-mcp-install = "recommended_mcp.runtime.install_cli:main"
 gc-voice = "gc_tui.voice_runtime.cli:main"
 gc-acp = "gc_acp.main:main"
 gc-chat = "gc_chat.main:main"
+gc-a2a = "gc_a2a.main:main"
 
 [tool.hatch.build.targets.wheel]
 bypass-selection = true
@@ -93,6 +95,7 @@ gc-server = { workspace = true }
 gc-mcp = { workspace = true }
 gc-acp = { workspace = true }
 gc-chat = { workspace = true }
+gc-a2a = { workspace = true }
 
 gc-testkit = { workspace = true }
 gc-core-temporalio = { workspace = true }
@@ -111,6 +114,7 @@ testpaths = [
     "packages/temporalio/tests",
     "packages/acp/tests",
     "packages/chat/tests",
+    "packages/a2a/tests",
 ]
 asyncio_mode = "auto"
 

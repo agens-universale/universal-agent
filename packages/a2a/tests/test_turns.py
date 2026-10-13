@@ -1,0 +1,202 @@
+"""Ход: ответ, вопрос, отмена, список и чтение задачи."""
+
+from harness import (
+    AnswerAgent,
+    AskAgent,
+    Clock,
+    FailAgent,
+    SlowAgent,
+    message,
+    rpc,
+    session,
+)
+
+
+async def test_send_returns_completed_task_with_artifact(tmp_path):
+    async with session(tmp_path) as (client, _f, created):
+        response = await rpc(
+            client,
+            "SendMessage",
+            message(),
+            extra_headers={"A2A-Extensions": "something"},
+        )
+    body = response.json()
+    assert response.status_code == 200
+    assert "error" not in body
+    task = body["result"]["task"]
+    assert task["status"]["state"] == "TASK_STATE_COMPLETED"
+    assert task["status"]["timestamp"].endswith("Z")
+    assert task["artifacts"][0]["parts"] == [
+        {"text": "В src 42 файла.", "mediaType": "text/plain"}
+    ]
+    assert task["history"] == [
+        {
+            "messageId": "m-1",
+            "role": "ROLE_USER",
+            "parts": [{"text": "Сколько файлов в src?"}],
+        }
+    ]
+    assert "В src 42 файла." not in str(task["history"])
+    call = created[0].calls[0]
+    assert call["system"] == "a2a"
+    assert call["thread_id"] == task["contextId"]
+    assert call["prompt"] == "Сколько файлов в src?"
+
+
+async def test_same_message_id_does_not_start_a_second_turn(tmp_path):
+    async with session(tmp_path) as (client, _f, created):
+        first = await rpc(client, "SendMessage", message())
+        second = await rpc(client, "SendMessage", message(text="другое"))
+    assert (
+        first.json()["result"]["task"]["id"]
+        == (second.json()["result"]["task"]["id"])
+    )
+    assert len(created[0].calls) == 1
+    assert second.json()["result"]["task"]["history"][0]["parts"] == [
+        {"text": "Сколько файлов в src?"}
+    ]
+
+
+async def test_question_then_reply_continues_the_same_task(tmp_path):
+    async with session(tmp_path, agents=[AskAgent()]) as (client, _f, created):
+        asked = await rpc(client, "SendMessage", message())
+        task = asked.json()["result"]["task"]
+        assert task["status"]["state"] == "TASK_STATE_INPUT_REQUIRED"
+        assert task["status"]["message"]["role"] == "ROLE_AGENT"
+        assert task["status"]["message"]["parts"][0]["text"] == "Какие файлы?"
+        assert [item["role"] for item in task["history"]] == [
+            "ROLE_USER",
+            "ROLE_AGENT",
+        ]
+        replied = await rpc(
+            client,
+            "SendMessage",
+            message(
+                "Только *.py",
+                message_id="m-2",
+                taskId=task["id"],
+                contextId=task["contextId"],
+            ),
+        )
+    done = replied.json()["result"]["task"]
+    assert done["id"] == task["id"]
+    assert done["status"]["state"] == "TASK_STATE_COMPLETED"
+    assert done["artifacts"][0]["parts"][0]["text"] == "учтено: Только *.py"
+    roles = [item["role"] for item in done["history"]]
+    assert roles == ["ROLE_USER", "ROLE_AGENT", "ROLE_USER"]
+    assert len(created[0].calls) == 1
+
+
+async def test_failed_turn_is_a_task_not_an_rpc_error(tmp_path):
+    async with session(tmp_path, agents=[FailAgent()]) as (client, _f, _c):
+        response = await rpc(client, "SendMessage", message())
+    body = response.json()
+    assert response.status_code == 200
+    assert "error" not in body
+    task = body["result"]["task"]
+    assert task["status"]["state"] == "TASK_STATE_FAILED"
+    assert task["status"]["message"]["parts"][0]["text"] == "boom"
+
+
+async def test_unrecorded_failure_is_internal_error(tmp_path):
+    async with session(tmp_path) as (client, facade, _c):
+
+        async def broken(*_args, **_kwargs):
+            raise RuntimeError("disk")
+
+        facade._store.mark_completed = broken
+        facade._store.mark_failed = broken
+        response = await rpc(client, "SendMessage", message())
+    assert response.status_code == 200
+    assert response.json()["error"]["code"] == -32603
+    assert response.json()["error"]["data"]["reason"] == "InternalError"
+
+
+async def test_get_and_list_and_cancel(tmp_path):
+    clock = Clock()
+    async with session(
+        tmp_path, agents=[SlowAgent(), AnswerAgent("второй")], clock=clock
+    ) as (client, _f, created):
+        working = await rpc(
+            client,
+            "SendMessage",
+            {
+                **message(message_id="slow"),
+                "configuration": {"returnImmediately": True},
+            },
+        )
+        slow_id = working.json()["result"]["task"]["id"]
+        assert working.json()["result"]["task"]["status"]["state"] == (
+            "TASK_STATE_WORKING"
+        )
+        done = await rpc(
+            client, "SendMessage", message("ещё", message_id="fast")
+        )
+        fast = done.json()["result"]["task"]
+        listed = await rpc(
+            client, "ListTasks", {"pageSize": 1, "includeArtifacts": False}
+        )
+        page = listed.json()["result"]
+        assert page["pageSize"] == 1
+        assert page["totalSize"] == 2
+        assert page["tasks"][0]["id"] == fast["id"]
+        assert "artifacts" not in page["tasks"][0]
+        assert page["nextPageToken"] == "1"
+        rest = await rpc(
+            client,
+            "ListTasks",
+            {"pageSize": 1, "pageToken": page["nextPageToken"]},
+        )
+        assert rest.json()["result"]["tasks"][0]["id"] == slow_id
+        assert rest.json()["result"]["nextPageToken"] == ""
+        fetched = await rpc(client, "GetTask", {"id": fast["id"]})
+        assert fetched.json()["result"]["artifacts"][0]["parts"][0][
+            "text"
+        ] == ("второй")
+        missing = await rpc(client, "GetTask", {"id": "no-such"})
+        assert missing.json()["error"]["code"] == -32001
+        canceled = await rpc(client, "CancelTask", {"id": slow_id})
+        assert canceled.json()["result"]["status"]["state"] == (
+            "TASK_STATE_CANCELED"
+        )
+        again = await rpc(client, "CancelTask", {"id": slow_id})
+        assert (
+            again.json()["result"]["status"]["state"] == "TASK_STATE_CANCELED"
+        )
+        terminal = await rpc(client, "CancelTask", {"id": fast["id"]})
+        assert terminal.json()["error"]["code"] == -32002
+    assert created[0].stopped is True
+
+
+async def test_history_length_and_filters(tmp_path):
+    clock = Clock()
+    async with session(tmp_path, clock=clock) as (client, _f, _c):
+        first = await rpc(client, "SendMessage", message(message_id="a"))
+        first_task = first.json()["result"]["task"]
+        context = first_task["contextId"]
+        await rpc(
+            client,
+            "SendMessage",
+            message("дальше", message_id="b", contextId=context),
+        )
+        hidden = await rpc(
+            client,
+            "GetTask",
+            {"id": first_task["id"], "historyLength": 0},
+        )
+        tail = await rpc(
+            client,
+            "ListTasks",
+            {
+                "contextId": context,
+                "status": "TASK_STATE_COMPLETED",
+                "historyLength": 1,
+                "statusTimestampAfter": first_task["status"]["timestamp"],
+            },
+        )
+        wide = await rpc(client, "ListTasks", {"pageSize": 0})
+    assert "history" not in hidden.json()["result"]
+    tasks = tail.json()["result"]["tasks"]
+    assert tail.json()["result"]["totalSize"] == 1
+    assert tasks[0]["history"][0]["messageId"] == "b"
+    assert wide.json()["error"]["code"] == -32602
