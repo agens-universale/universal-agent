@@ -60,6 +60,7 @@ from gc_core.loop_detector.detector import clear as clear_loop_detector
 # короткая — инлайн на loop»).
 from gc_core.loop_detector.detector import flush as flush_loop_detector
 from gc_core.loop_detector.detector import observe as observe_loop_detector
+from gc_core.tools.arguments_validation import arguments_without_service_fields
 from gc_core.message_policy.attachments_outbound import (
     compute_live_ids,
     count_live_images,

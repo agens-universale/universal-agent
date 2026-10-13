@@ -5,6 +5,7 @@ from typing import Any, Dict, Type
 
 from jsonschema import Draft7Validator
 
+from gc_core.tools.inject_tool_fields import strip_injected_tool_args
 from gc_core.execution.tool_schema import (
     normalize_optional_empty_as_omit,
     parameters_schema_for_local_validation,
@@ -314,6 +315,65 @@ def _recover_arguments(
     return None
 
 
+def prepare_tool_arguments(
+    raw: str | Dict[str, Any] | None, entry: Dict[str, Any]
+) -> tuple[Dict[str, Any] | None, Dict[str, Any]]:
+    """Разбор JSON → `prepare_args_before_strip` фабрики → снятие служебных полей
+    (`entry["injected_fields"]`). Единственный путь для всех потребителей аргументов
+    (исполнение, вердикт финализатора, отпечаток loop-детектора, чтение оценок —
+    решение 6 канона автороутинга): служебное поле снимается ДО валидации схемы,
+    мусор в нём вызов не роняет. Возвращает `(аргументы_без_служебных, служебные)`;
+    `(None, {})` — не JSON-объект (валидация ниже даст честную ошибку по исходной строке)."""
+    if isinstance(raw, dict):
+        parsed: Any = dict(raw)
+    else:
+        text = "" if raw is None else str(raw).strip()
+        if not text:
+            # Пустые аргументы у тула без собственных параметров — пустой объект:
+            # служебные поля (`injected_fields`) параметрами тула не считаются,
+            # иначе инжект оценки в auto отбивал бы `""` у тула без параметров.
+            return ({}, {}) if _has_no_own_parameters(entry) else (None, {})
+        try:
+            parsed = json.loads(text)
+        except (TypeError, ValueError):
+            return None, {}
+    if not isinstance(parsed, dict):
+        return None, {}
+    prepare = getattr(
+        entry.get("tool_fabric"), "prepare_args_before_strip", None
+    )
+    if callable(prepare):
+        parsed = prepare(parsed)
+        if not isinstance(parsed, dict):
+            return None, {}
+    injected = [
+        f for f in (entry.get("injected_fields") or []) if isinstance(f, str)
+    ]
+    service = {name: parsed[name] for name in injected if name in parsed}
+    return strip_injected_tool_args(parsed, injected_fields=injected), service
+
+
+def _has_no_own_parameters(entry: Dict[str, Any]) -> bool:
+    """Все свойства схемы записи — служебные поля (`injected_fields`) либо их нет."""
+    spec = entry.get("spec")
+    if not isinstance(spec, dict):
+        return False
+    params = spec.get("parameters") if isinstance(spec, dict) else None
+    properties = params.get("properties") if isinstance(params, dict) else None
+    return set(properties or {}) <= set(entry.get("injected_fields") or [])
+
+
+def arguments_without_service_fields(raw: Any, entry: Dict[str, Any]) -> Any:
+    """Аргументы вызова для потребителей вне исполнения тула — возврат хода,
+    судья finish gate, intent-scope: служебные поля (`entry["injected_fields"]`)
+    сняты тем же помощником `prepare_tool_arguments`. Ничего не снято или
+    аргументы не JSON-объект — исходное значение байт в байт."""
+    args, service = prepare_tool_arguments(raw, entry)
+    if args is None or not service:
+        return raw
+    return json.dumps(args, ensure_ascii=False)
+
+
 def parse_and_validate_tool_arguments(
     *,
     tool_name: str,
@@ -321,6 +381,7 @@ def parse_and_validate_tool_arguments(
     tool_spec: Dict[str, Any],
     allow_empty_for_empty_schema: bool,
     tool_fabric: Type[Any] | None = None,
+    prepared: Dict[str, Any] | None = None,
     dropped_unknown: list[str] | None = None,
 ) -> Dict[str, Any]:
     params_schema = (
@@ -339,10 +400,14 @@ def parse_and_validate_tool_arguments(
         tool_fabric=tool_fabric,
         parsed_args=None,
     )
-    parsed_args = _parse_arguments_object(
-        arguments,
-        reject,
-        allow_empty=allow_empty_for_empty_schema and is_empty_schema,
+    parsed_args = (
+        prepared
+        if prepared is not None
+        else _parse_arguments_object(
+            arguments,
+            reject,
+            allow_empty=allow_empty_for_empty_schema and is_empty_schema,
+        )
     )
     if not isinstance(parsed_args, dict):
         _raise_wrong_function_arguments(
@@ -372,7 +437,11 @@ def parse_and_validate_tool_arguments(
         else:
             _raise_wrong_function_arguments(
                 message=str(e),
-                received_args=json.dumps(parsed_args, ensure_ascii=False),
+                received_args=(
+                    str(arguments)
+                    if prepared is not None
+                    else json.dumps(parsed_args, ensure_ascii=False)
+                ),
                 expected_schema=tool_spec,
                 tool_name=tool_name,
                 tool_fabric=tool_fabric,
@@ -384,10 +453,43 @@ def parse_and_validate_tool_arguments(
     return normalize_optional_empty_as_omit(parsed_args, params_schema)
 
 
+def tool_arguments_valid(
+    tool_name: str,
+    arguments: Any,
+    tools_data_: Dict[str, Dict[str, Any]],
+) -> bool:
+    """True, если аргументы прошли бы валидацию aapply_tool (те же правила и spec).
+
+    Неизвестный тул или запись без spec не судим (True): решать будет сам
+    aapply_tool. Исключение ловится здесь же, поэтому результат не зависит от
+    того, какое поколение модуля держит вызывающая сторона.
+    """
+    entry = tools_data_.get(tool_name) or {}
+    spec = entry.get("spec")
+    if not isinstance(spec, dict):
+        return True
+    try:
+        prepared, _service = prepare_tool_arguments(arguments, entry)
+        parse_and_validate_tool_arguments(
+            tool_name=tool_name,
+            arguments=arguments,
+            tool_spec=spec,
+            allow_empty_for_empty_schema=True,
+            tool_fabric=entry.get("tool_fabric"),
+            prepared=prepared,
+        )
+    except WrongFunctionArgumentsException:
+        return False
+    return True
+
+
 __all__ = [
     "WrongFunctionArgumentsException",
     "annotate_output_with_dropped_arguments",
+    "arguments_without_service_fields",
     "format_dropped_arguments_note",
     "parse_and_validate_tool_arguments",
+    "prepare_tool_arguments",
     "resolve_tool_arguments_feedback_hint",
+    "tool_arguments_valid",
 ]
