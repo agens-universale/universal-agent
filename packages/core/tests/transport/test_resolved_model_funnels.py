@@ -737,8 +737,13 @@ def test_main_trace_resolves_and_declares_main_consumer(monkeypatch):
     )
     state = _state(default_model="legacy-model")
 
+    resolved = processing_module.resolve_main_for_call(state, ctx)
     _canonical_once(
-        processing_module, [{"role": "user", "content": "hi"}], state, ctx
+        processing_module,
+        [{"role": "user", "content": "hi"}],
+        state,
+        ctx,
+        resolved=resolved,
     )
 
     # main фиксируется один раз; vision резолвится для свежего ключа доступа
@@ -813,8 +818,13 @@ def test_main_trace_backend_overrides_apply_to_network_params(monkeypatch):
     )
     state = _state(default_model="legacy-model")
 
+    resolved = processing_module.resolve_main_for_call(state, ctx)
     _canonical_once(
-        processing_module, [{"role": "user", "content": "hi"}], state, ctx
+        processing_module,
+        [{"role": "user", "content": "hi"}],
+        state,
+        ctx,
+        resolved=resolved,
     )
 
     assert captured["verify"] is False
@@ -870,7 +880,11 @@ def test_main_trace_legacy_network_params_without_overrides(monkeypatch):
     state = _state(default_model="legacy-model")
 
     _canonical_once(
-        processing_module, [{"role": "user", "content": "hi"}], state, ctx
+        processing_module,
+        [{"role": "user", "content": "hi"}],
+        state,
+        ctx,
+        resolved=None,
     )
 
     assert captured["verify"] is True
@@ -938,8 +952,13 @@ def test_main_trace_responses_mode_ignores_network_overrides(monkeypatch):
     )
     state = _state(default_model="legacy-model")
 
+    resolved = processing_module.resolve_main_for_call(state, ctx)
     _canonical_once(
-        processing_module, [{"role": "user", "content": "hi"}], state, ctx
+        processing_module,
+        [{"role": "user", "content": "hi"}],
+        state,
+        ctx,
+        resolved=resolved,
     )
 
     assert captured["verify"] is True
@@ -1087,11 +1106,14 @@ def test_main_trace_backend_overrides_reach_retry_policy_and_token_limits(
         logger=None,
     )
 
+    state = _state(default_model="legacy-model")
+    resolved = processing_module.resolve_main_for_call(state, ctx)
     _canonical_once(
         processing_module,
         [{"role": "user", "content": "hi"}],
-        _state(default_model="legacy-model"),
+        state,
         ctx,
+        resolved=resolved,
     )
 
     assert captured["retry_embedded_choice_errors"] is False
@@ -1231,6 +1253,69 @@ def test_fields_declared_per_model_are_actually_read_by_the_funnels():
     assert not missing, (
         f"заявлены per-model, но не читаются ни одной воронкой: {missing}"
     )
+
+
+def test_openai_strict_schema_is_read_per_model_of_the_call(tmp_path):
+    """Спека auto-routing §5.2 п.4: модель с `backend.openai_strict_tools_schema: true`
+    получает строгую схему инструментов, соседняя без ключа — обычную, в одном ране."""
+    from gc_core import processing_responses as pr
+    from gc_core import run_context as rc
+    from gc_core.config_modules.root import AppConfig
+
+    raw = {
+        "models": {
+            "strict-one": {"backend": {"openai_strict_tools_schema": True}},
+            "loose-one": {},
+        },
+        "slots": {"light": "loose-one", "max": "strict-one"},
+        "backend": {"api_mode": "chat_completions"},
+        "logging": {"save_logs": False},
+    }
+    cfg = AppConfig.model_validate(raw)
+    level = {"value": "light"}
+    ctx = run_coro(
+        rc.acreate_run_context(cfg, level_provider=lambda: level["value"])
+    )
+    state = _state(default_model="legacy-model", tools=ctx.tools_spec)
+
+    loose = pr.resolve_main_for_call(state, ctx)
+    canonical_loose = ctx.tools_data["fs_read_file"]["spec"]
+    loose_data = create_call_data_completions(
+        [], state, settings=cfg, resolved=loose
+    )
+    level["value"] = "max"
+    strict = pr.resolve_main_for_call(state, ctx)
+    canonical_strict = ctx.tools_data["fs_read_file"]["spec"]
+    strict_data = create_call_data_completions(
+        [], state, settings=cfg, resolved=strict
+    )
+
+    def read_spec(data):
+        return next(
+            t["function"]
+            for t in data["tools"]
+            if t["function"]["name"] == "fs_read_file"
+        )
+
+    assert state.tools is ctx.tools_spec
+    strict_params = read_spec(strict_data)["parameters"]
+    loose_params = read_spec(loose_data)["parameters"]
+    assert set(strict_params["required"]) == set(strict_params["properties"])
+    assert set(loose_params["required"]) < set(loose_params["properties"])
+    assert strict_params["additionalProperties"] is False
+    assert "x-openai-strict" not in canonical_loose["parameters"]
+    assert "x-openai-strict" not in canonical_strict["parameters"]
+
+
+def test_openai_strict_schema_per_model_override_is_ignored_in_responses_mode():
+    tools = [{"name": "read", "type": "function", "description": "read", "parameters": {
+        "type": "object", "properties": {"path": {"type": "string"}, "optional": {"type": "string"}},
+        "required": ["path"]}}]
+    state = _state(tools=tools)
+    settings = make_settings({"backend.api_mode": "responses"})
+    data = create_call_data_responses([], state, settings=settings,
+        resolved=_resolved(backend_overrides={"openai_strict_tools_schema": True}))
+    assert data["tools"][0]["parameters"]["required"] == ["path"]
 
 
 # ---------------------------------------------------------------------------

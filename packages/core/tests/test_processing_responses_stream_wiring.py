@@ -96,7 +96,7 @@ def test_on_delta_passed_when_stream_on(monkeypatch, chat_state_ctx):
     ctx, state, messages = chat_state_ctx(stream=True)
     cb = lambda k, t: None
     ctx.on_stream_delta = cb
-    run_coro(pr._arequest_backend_canonical(messages, state, ctx))
+    run_coro(pr._arequest_backend_canonical(messages, state, ctx, resolved=None))
     assert seen["on_delta"] is cb
 
 
@@ -104,7 +104,7 @@ def test_on_delta_none_when_stream_off(monkeypatch, chat_state_ctx):
     seen = _patch_policy(monkeypatch)
     ctx, state, messages = chat_state_ctx(stream=False)
     ctx.on_stream_delta = lambda k, t: None
-    run_coro(pr._arequest_backend_canonical(messages, state, ctx))
+    run_coro(pr._arequest_backend_canonical(messages, state, ctx, resolved=None))
     assert seen["on_delta"] is None
 
 
@@ -115,12 +115,38 @@ def test_on_delta_none_when_stream_on_but_no_callback(
     seen = _patch_policy(monkeypatch)
     ctx, state, messages = chat_state_ctx(stream=True)
     ctx.on_stream_delta = None
-    run_coro(pr._arequest_backend_canonical(messages, state, ctx))
+    run_coro(pr._arequest_backend_canonical(messages, state, ctx, resolved=None))
     assert seen["on_delta"] is None
 
 
 def test_main_agent_funnel_salvages_reasoning(monkeypatch, chat_state_ctx):
     seen = _patch_policy(monkeypatch)
     ctx, state, messages = chat_state_ctx(stream=False)
-    run_coro(pr._arequest_backend_canonical(messages, state, ctx))
+    run_coro(pr._arequest_backend_canonical(messages, state, ctx, resolved=None))
     assert seen["salvage_reasoning"] is True
+
+
+def test_muted_answer_drops_only_the_answer_channel(monkeypatch, chat_state_ctx):
+    seen = _patch_policy(monkeypatch)
+    ctx, state, messages = chat_state_ctx(stream=True)
+    received = []
+    ctx.on_stream_delta = lambda kind, text: received.append((kind, text))
+    run_coro(pr._arequest_backend_canonical(
+        messages, state, ctx, resolved=None, mute_answer=True
+    ))
+    for delta in (("reset", ""), ("think", "думаю"), ("answer", "текст"), ("tool", '{"path"')):
+        seen["on_delta"](*delta)
+    assert received == [("reset", ""), ("think", "думаю"), ("tool", '{"path"')]
+
+
+@pytest.mark.parametrize("stream, has_callback", [(False, True), (True, False)])
+def test_muted_answer_never_turns_streaming_on(monkeypatch, chat_state_ctx, stream, has_callback):
+    """Приглушение — фильтр поверх приёмника, а не повод стримить: без стрима или
+    без приёмника `on_delta` остаётся None."""
+    seen = _patch_policy(monkeypatch)
+    ctx, state, messages = chat_state_ctx(stream=stream)
+    ctx.on_stream_delta = (lambda k, t: None) if has_callback else None
+    run_coro(pr._arequest_backend_canonical(
+        messages, state, ctx, resolved=None, mute_answer=True
+    ))
+    assert seen["on_delta"] is None
