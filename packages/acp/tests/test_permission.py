@@ -269,13 +269,69 @@ async def test_timeout_denies_and_late_allow_does_not_stick(tmp_path):
     assert await _ask(agent.executor._ctx, key) is False
     msg = await task
     await facade.handle_line(_response(msg["id"], _selected("allow_always")))
-    assert store.decision_for(key) is False
+    assert store.decision_for(key) is None
+    assert key not in store.export_run_rules()
     assert key not in store.session_rules()
+    assert [
+        item
+        for item in writer.sent
+        if item.get("method") == "$/cancel_request"
+    ] == [
+        {
+            "jsonrpc": "2.0",
+            "method": "$/cancel_request",
+            "params": {"id": msg["id"]},
+        }
+    ]
     assert not any(
         item.get("id") == msg["id"] and "error" in item for item in writer.sent
     )
+
+    async def allow_again():
+        for _ in range(200):
+            found = _permission_calls(writer)
+            if len(found) >= 2:
+                await facade.handle_line(
+                    _response(found[-1]["id"], _selected("allow_once"))
+                )
+                return
+            await asyncio.sleep(0.01)
+        raise AssertionError(writer.sent)
+
+    again = asyncio.create_task(allow_again())
+    assert await _ask(agent.executor._ctx, key) is True
+    await again
+    assert len(_permission_calls(writer)) == 2
     await facade.handle_line(_line("session/list", {}, 9))
     assert _by_id(writer, 9)["result"]["sessions"] == []
+    await facade.shutdown()
+
+
+async def test_allow_arriving_with_timeout_is_applied(tmp_path, monkeypatch):
+    """Allow в тот же тик, что TimeoutError, не подменяется отказом."""
+    facade, writer, agent, _session_id, store = await _ready(tmp_path)
+    key = "command:ls"
+
+    async def racing(aw, **_kwargs):
+        await aw
+        raise TimeoutError
+
+    monkeypatch.setattr(asyncio, "wait_for", racing)
+
+    async def reply():
+        msg = await _wait_permission(writer)
+        await facade.handle_line(
+            _response(msg["id"], _selected("allow_always"))
+        )
+
+    task = asyncio.create_task(reply())
+    assert await _ask(agent.executor._ctx, key) is True
+    await task
+    assert store.decision_for(key) is True
+    assert store.session_rules()[key] is True
+    assert not any(
+        item.get("method") == "$/cancel_request" for item in writer.sent
+    )
     await facade.shutdown()
 
 

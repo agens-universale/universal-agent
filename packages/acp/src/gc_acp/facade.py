@@ -49,7 +49,8 @@ from gc_acp.updates import ChunkAssembler, history_updates
 
 logger = logging.getLogger(__name__)
 
-_SILENT = frozenset({"session/cancel", "$/cancel_request"})
+_METHOD_CANCEL_REQUEST = "$/cancel_request"
+_SILENT = frozenset({"session/cancel", _METHOD_CANCEL_REQUEST})
 _PARSE_ERROR = "Parse error"
 _INVALID_REQUEST = "Invalid Request"
 _METHOD_NOT_FOUND = "Method not found"
@@ -204,7 +205,7 @@ class AcpFacade:
         if incoming.method == "session/cancel":
             self._cancel_session(incoming.params)
             return
-        if incoming.method == "$/cancel_request":
+        if incoming.method == _METHOD_CANCEL_REQUEST:
             self._cancel_by_request_id(incoming.params)
 
     async def _initialize(self, request_id: Any, _params: Any) -> None:
@@ -423,7 +424,10 @@ class AcpFacade:
         return agent
 
     async def _confirm(self, session_id: str, request: Any) -> str:
-        from gc_core.security.confirm_port import CONFIRM_DENY_ONCE
+        from gc_core.security.confirm_port import (
+            CONFIRM_DENY_ONCE,
+            CONFIRM_TIMED_OUT,
+        )
 
         live = self._sessions.get(session_id)
         if live is None or live.cancel_requested:
@@ -447,11 +451,22 @@ class AcpFacade:
                 ),
             ):
                 return CONFIRM_DENY_ONCE
-            incoming = await asyncio.wait_for(
-                asyncio.shield(future), timeout=timeout_sec(self._settings)
-            )
-        except TimeoutError:
-            return CONFIRM_DENY_ONCE
+            try:
+                incoming = await asyncio.wait_for(
+                    asyncio.shield(future),
+                    timeout=timeout_sec(self._settings),
+                )
+            except TimeoutError:
+                # Ответ мог лечь в future в тот же тик, что и таймаут.
+                if future.done() and not future.cancelled():
+                    incoming = future.result()
+                else:
+                    await self._send(
+                        notification(
+                            _METHOD_CANCEL_REQUEST, {"id": request_id}
+                        )
+                    )
+                    return CONFIRM_TIMED_OUT
         finally:
             self._pending.discard(request_id)
         return choice_from_incoming(incoming)
