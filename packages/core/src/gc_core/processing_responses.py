@@ -11,6 +11,7 @@ import time
 from types import SimpleNamespace
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
+from gc_core.auto_routing import state_ops
 from gc_core.auto_routing.policy import (
     Decision,
     FINISH_REJECT,

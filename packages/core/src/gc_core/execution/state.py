@@ -6,6 +6,8 @@ from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional
 
+from gc_core.auto_routing.policy import Decision
+from gc_core.auto_routing.state_ops import ROUTING_FIELDS, ensure_fields
 from gc_core.execution.output_store import ToolCallOutputsStore
 from gc_core.intent_log import deserialize_list, flush
 from gc_core.intent_log.serialize import serialize_for_meta
@@ -33,7 +35,8 @@ class SharedStateData:
     session_todo: List[Dict[str, str]] = field(default_factory=list)
 
 
-STATE_FIELDS = (
+STATE_FIELDS = ROUTING_FIELDS + (
+    "turn_messages_start",
     "agent_md_path",
     "agentsmd_override",
     "backend_api_mode",
@@ -144,6 +147,10 @@ class ExecutionState:
     def add_message(self, message):
         self.messages.append(message)
 
+    def mark_turn_start(self) -> None:
+        if self.turn_messages_start is None:
+            self.turn_messages_start = len(self.messages)
+
     def set_previous_response_id(self, previous_response_id):
         self.previous_response_id = previous_response_id
 
@@ -220,6 +227,15 @@ class ExecutionState:
             for name in STATE_FIELDS
             if hasattr(self, name)
         }
+        for name in ("tick_signals",):
+            if name in data:
+                data[name] = sorted(data[name])
+        memo = data.get("_tick_decision")
+        if memo is not None:
+            decision = asdict(memo[2]) if memo[2] is not None else None
+            if decision is not None:
+                decision["heuristics"] = list(decision["heuristics"])
+            data["_tick_decision"] = [memo[0], memo[1], decision, memo[3]]
         data["shared"] = asdict(self.shared)
         data["tool_call_outputs_store"] = (
             self.tool_call_outputs_store.to_dict()
@@ -245,6 +261,16 @@ class ExecutionState:
                 f"Unexpected execution fields: {sorted(unexpected)}"
             )
         state = cls.__new__(cls)
+        ensure_fields(data)
+        for name in ("tick_signals",):
+            data[name] = set(data[name])
+        memo = data.get("_tick_decision")
+        if memo is not None:
+            decision = memo[2]
+            if decision is not None:
+                decision = Decision(**{**decision, "heuristics": tuple(decision["heuristics"])})
+            data["_tick_decision"] = (memo[0], memo[1], decision, memo[3])
+        data.setdefault("turn_messages_start", None)
         state.__dict__ = data
         state.shared = SharedStateData(**data["shared"])
         state.tool_call_outputs_store = ToolCallOutputsStore.from_dict(

@@ -1,6 +1,7 @@
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from uuid import uuid4
 
+from gc_core.auto_routing.state_ops import reset as _reset_routing
 from gc_core.execution.output_store import (
     ToolCallOutputsStore,
 )
@@ -117,6 +118,14 @@ class State(ExecutionState):
             )
         self.call_metadata = self.set_call_metadata()
         self.messages = []
+        # Индекс первого сообщения ТЕКУЩЕГО хода в ``messages``; None — ход ещё
+        # ничего в историю не положил. Ставит ``mark_turn_start`` (там, где
+        # первый батч хода входит в историю), снимает граница хода
+        # (``turn_boundary.begin_turn``). По нему режут историю читатели,
+        # которым нужен только текущий ход (карточка судьи уровня).
+        self.turn_messages_start: Optional[int] = None
+        # Поле прежних снимков; уровень текущего запроса хранится в _call_level.
+        self.turn_level: Optional[str] = None
         # Optional sink for messages dropped by context compaction.
         # Core does not retain them; harbor/other hosts may archive for trajectory.
         self.on_messages_evicted: Optional[Any] = None
@@ -143,11 +152,6 @@ class State(ExecutionState):
         self.turn_tool_calls: int = (
             0  # вызовов инструментов за текущий ход (smart-гейт, спека §3)
         )
-        # Уровень моделей, зафиксированный на текущий ход (`turn_boundary.begin_turn`).
-        # None — ход ещё не начинали; транспорт тогда резолвит живой уровень. Объявлено
-        # здесь, а не заводится на лету: читатели берут поле через getattr, и без
-        # объявления «не начинали» было бы неотличимо от «поля нет».
-        self.turn_level: Optional[str] = None
         self.terminal_outcome: Optional[str] = (
             None  # None | "step_limit" | "tool_errors"
         )
@@ -206,6 +210,8 @@ class State(ExecutionState):
         self.vision_probe_turn: str | None = None
         self.vision_routes: dict = {}
         self.vision_probe_notices: set = set()
+        # Поля автороутинга (спека §4); в снапшот не пишутся.
+        _reset_routing(self)
 
     @classmethod
     def from_prepared(cls, prepared: PreparedState, **kwargs) -> "State":
