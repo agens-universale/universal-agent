@@ -480,7 +480,7 @@ async def _arequest_backend_responses_once(
 
     response_obj = result["response"]
     if isinstance(response_obj, dict):
-        record_usage(response_obj.get("usage"), url)
+        record_usage(response_obj.get("usage"), url, data.get("model"))
     _log_backend_response(logger, "responses", response_obj)
     return response_obj, r_headers
 
@@ -547,7 +547,7 @@ async def _astream_chat_completions(
                 status_code=None,
             )
         if isinstance(assembled, dict):
-            record_usage(assembled.get("usage"), url)
+            record_usage(assembled.get("usage"), url, data.get("model"))
         _log_backend_response(logger, "chat_completions", assembled)
         return assembled
 
@@ -681,7 +681,7 @@ async def _arequest_backend_chat_completions_once(
 
     payload = r.json()
     if isinstance(payload, dict):
-        record_usage(payload.get("usage"), url)
+        record_usage(payload.get("usage"), url, data.get("model"))
     _log_backend_response(logger, "chat_completions", payload)
     return payload
 

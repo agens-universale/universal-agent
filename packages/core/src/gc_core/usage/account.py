@@ -3,6 +3,11 @@
 Хранится на ``State`` (``state.usage``); агрегируется вверх через ``merge``
 (вклад субагентов сворачивается в категорию ``subagent`` у родителя).
 Персистится в ``meta.json`` (``to_meta``/``from_meta``).
+
+Второе измерение — модель вызова (``by_model``): под автовыбором один ход идёт на
+нескольких моделях, и расход каждой нужен отдельно. Внутри каждой категории
+``by_model`` хранит также биллённые токены для тарифного расчёта остатка.
+Фактические деньги ведутся по категориям.
 """
 
 from __future__ import annotations
@@ -55,6 +60,8 @@ _FIELDS = (
 # валют нельзя, а валюта — свойство конкретного вызова (её знает провайдер
 # в момент ответа), поэтому она фиксируется при записи, а не при показе.
 MONEY_FIELD = "cost_by_currency"
+# Поля бакета модели: токены и вызовы, без денег (см. докстринг модуля).
+_MODEL_FIELDS = ("input", "output", "cached", "calls", "missing_usage_calls")
 
 # Ключ для сумм, записанных версией без валюты (старые meta): «валюта неизвестна».
 # Разрешается при показе — по адресу эндпоинта из текущего конфига.
@@ -113,9 +120,12 @@ def _empty_bucket() -> Dict[str, Any]:
 
 class UsageAccount:
     def __init__(
-        self, by_category: Optional[Dict[str, Dict[str, Any]]] = None
+        self,
+        by_category: Optional[Dict[str, Dict[str, Any]]] = None,
+        by_model: Optional[Dict[str, Dict[str, Any]]] = None,
     ) -> None:
         self.by_category: Dict[str, Dict[str, Any]] = {}
+        self.by_model: Dict[str, Dict[str, int]] = {}
         if by_category:
             for category, bucket in by_category.items():
                 if not isinstance(bucket, dict):
@@ -127,6 +137,26 @@ class UsageAccount:
                         int(raw) if isinstance(raw, (int, float)) else 0
                     )
                 dst[MONEY_FIELD] = _money_from_raw(bucket)
+                models = bucket.get("by_model")
+                if isinstance(models, dict):
+                    for model, model_bucket in models.items():
+                        if not isinstance(model_bucket, dict):
+                            continue
+                        attributed = self._category_model_bucket(
+                            str(category), str(model)
+                        )
+                        for field in _FIELDS:
+                            attributed[field] = int(_num(model_bucket.get(field, 0)))
+        if by_model:
+            for model, bucket in by_model.items():
+                if not isinstance(bucket, dict):
+                    continue
+                dst = self._model_bucket(str(model))
+                for field in _MODEL_FIELDS:
+                    raw = bucket.get(field, 0)
+                    dst[field] = (
+                        int(raw) if isinstance(raw, (int, float)) else 0
+                    )
 
     def _bucket(self, category: str) -> Dict[str, Any]:
         bucket = self.by_category.get(category)
@@ -134,6 +164,19 @@ class UsageAccount:
             bucket = _empty_bucket()
             self.by_category[category] = bucket
         return bucket
+
+    def _model_bucket(self, model: str) -> Dict[str, int]:
+        bucket = self.by_model.get(model)
+        if bucket is None:
+            bucket = {field: 0 for field in _MODEL_FIELDS}
+            self.by_model[model] = bucket
+        return bucket
+
+    def _category_model_bucket(
+        self, category: str, model: str
+    ) -> Dict[str, int]:
+        models = self._bucket(category).setdefault("by_model", {})
+        return models.setdefault(model, dict.fromkeys(_FIELDS, 0))
 
     def add(
         self,
@@ -144,38 +187,57 @@ class UsageAccount:
         cost: Optional[float] = None,
         billed: bool = False,
         currency: Optional[str] = None,
+        model: Optional[str] = None,
     ) -> None:
         """Учесть один вызов. ``currency`` — валюта фактической цены (её знает
         транспорт по адресу вызова); не передана → сумма ляжет как «валюта
-        неизвестна» и будет разрешена при показе по текущему конфигу."""
+        неизвестна» и будет разрешена при показе по текущему конфигу.
+        ``model`` — модель вызова из тела запроса; не передана → в разбивку по
+        моделям вызов не попадает."""
         bucket = self._bucket(category)
         inp = max(0, int(input_tokens or 0))
         out = max(0, int(output_tokens or 0))
         cached = min(max(0, int(cached_tokens or 0)), inp)
-        bucket["input"] += inp
-        bucket["output"] += out
-        bucket["cached"] += cached
-        bucket["calls"] += 1
+        buckets = [bucket]
+        if model:
+            buckets.append(self._category_model_bucket(category, model))
+        for target in buckets:
+            target["input"] += inp
+            target["output"] += out
+            target["cached"] += cached
+            target["calls"] += 1
+            if billed:
+                target["billed_calls"] += 1
+                target["billed_input"] += inp
+                target["billed_output"] += out
+                target["billed_cached"] += cached
+        if model:
+            model_bucket = self._model_bucket(model)
+            model_bucket["input"] += inp
+            model_bucket["output"] += out
+            model_bucket["cached"] += cached
+            model_bucket["calls"] += 1
         if billed:
-            bucket["billed_calls"] += 1
-            bucket["billed_input"] += inp
-            bucket["billed_output"] += out
-            bucket["billed_cached"] += cached
             key = currency if currency is not None else LEGACY_CURRENCY
             money = bucket[MONEY_FIELD]
             money[key] = money.get(key, 0.0) + float(cost or 0.0)
 
-    def add_missing(self, category: str) -> None:
+    def add_missing(self, category: str, model: Optional[str] = None) -> None:
         """Вызов был, но провайдер не вернул usage: токены не считаем."""
-        bucket = self._bucket(category)
-        bucket["calls"] += 1
-        bucket["missing_usage_calls"] += 1
+        buckets = [self._bucket(category)]
+        if model:
+            buckets.append(self._model_bucket(model))
+            buckets.append(self._category_model_bucket(category, model))
+        for bucket in buckets:
+            bucket["calls"] += 1
+            bucket["missing_usage_calls"] += 1
 
     def merge(
         self, other: UsageAccount, as_category: Optional[str] = None
     ) -> None:
         """Влить чужой счёт. ``as_category`` — свернуть все категории other в одну
-        (используется для субагентов: их вклад → категория ``subagent`` родителя)."""
+        (используется для субагентов: их вклад → категория ``subagent`` родителя).
+        Модели не сворачиваются: токены ребёнка ушли в реальную модель."""
         if not isinstance(other, UsageAccount):
             return
         for category, bucket in other.by_category.items():
@@ -185,6 +247,16 @@ class UsageAccount:
             dst_money = dst[MONEY_FIELD]
             for cur, amount in (bucket.get(MONEY_FIELD) or {}).items():
                 dst_money[cur] = dst_money.get(cur, 0.0) + _num(amount)
+            for model, model_bucket in (bucket.get("by_model") or {}).items():
+                attributed = self._category_model_bucket(
+                    as_category or category, model
+                )
+                for field in _FIELDS:
+                    attributed[field] += int(model_bucket.get(field, 0) or 0)
+        for model, bucket in other.by_model.items():
+            dst = self._model_bucket(model)
+            for field in _MODEL_FIELDS:
+                dst[field] += int(bucket.get(field, 0) or 0)
 
     def delta_from(self, baseline: UsageAccount) -> UsageAccount:
         """Новый аккаунт = self − baseline (по полям, не ниже 0).
@@ -221,8 +293,37 @@ class UsageAccount:
                     continue
                 dst_money[cur] = value
                 has_delta = True
+            base_attribution = base_bucket.get("by_model") or {}
+            for model, model_bucket in (bucket.get("by_model") or {}).items():
+                base_model = base_attribution.get(model, {})
+                attributed = {
+                    field: max(
+                        0,
+                        int(_num(model_bucket.get(field, 0)) - _num(base_model.get(field, 0))),
+                    )
+                    for field in _FIELDS
+                }
+                if any(attributed.values()):
+                    dst.setdefault("by_model", {})[model] = attributed
             if not has_delta:
                 del out.by_category[category]
+        base_models = (
+            baseline.by_model if isinstance(baseline, UsageAccount) else {}
+        )
+        for model, bucket in self.by_model.items():
+            base_bucket = base_models.get(model, {})
+            delta = {
+                field: max(
+                    0,
+                    int(
+                        _num(bucket.get(field, 0))
+                        - _num(base_bucket.get(field, 0))
+                    ),
+                )
+                for field in _MODEL_FIELDS
+            }
+            if any(delta.values()):
+                out.by_model[model] = delta
         return out
 
     def totals(self) -> Dict[str, Any]:
@@ -247,8 +348,18 @@ class UsageAccount:
             # накопитель продолжит менять уже сериализованный снимок.
             copy = dict(bucket)
             copy[MONEY_FIELD] = dict(bucket.get(MONEY_FIELD) or {})
+            if bucket.get("by_model"):
+                copy["by_model"] = {
+                    model: dict(values)
+                    for model, values in bucket["by_model"].items()
+                }
             out[category] = copy
-        return {"by_category": out}
+        meta: Dict[str, Any] = {"by_category": out}
+        if self.by_model:
+            meta["by_model"] = {
+                model: dict(bucket) for model, bucket in self.by_model.items()
+            }
+        return meta
 
     @classmethod
     def from_meta(cls, raw: Any) -> UsageAccount:
@@ -257,7 +368,11 @@ class UsageAccount:
         by_category = raw.get("by_category")
         if not isinstance(by_category, dict):
             return cls()
-        return cls(by_category=by_category)
+        by_model = raw.get("by_model")
+        return cls(
+            by_category=by_category,
+            by_model=by_model if isinstance(by_model, dict) else None,
+        )
 
     def __repr__(self) -> str:  # pragma: no cover - диагностика
         return f"UsageAccount({self.totals()})"

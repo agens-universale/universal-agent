@@ -66,13 +66,25 @@ def format_parts(
     return f"{text}?" if unpriced else text
 
 
+def _model_rows(models: dict[str, dict[str, int]]) -> list[str]:
+    """Строки «модель — вход — выход» в порядке первого вызова."""
+    return [
+        f"{name:<20}{format_tokens(bucket.get('input', 0)):>10}{format_tokens(bucket.get('output', 0)):>10}"
+        for name, bucket in models.items()
+    ]
+
+
 def render_cost_report(
     report: CostReport,
     *,
     model_name: str | None = None,
     title: str = "Run usage",
+    models: dict[str, dict[str, int]] | None = None,
 ) -> str:
-    lines: list[str] = [_report_header(title, model_name)]
+    lines: list[str] = [
+        f"{title}    models: {', '.join(models)}"
+        if models else _report_header(title, model_name)
+    ]
     show_cost = report.has_cost
     lines.append(_columns_header(show_cost))
 
@@ -99,6 +111,10 @@ def render_cost_report(
 
     if show_cost and report.multi_currency:
         lines.extend(_currency_subtotal_lines(report))
+
+    if models and len(models) > 1:
+        lines.append("by model:")
+        lines.extend(_model_rows(models))
 
     lines.extend(_usage_caveat_lines(report))
 
@@ -202,7 +218,10 @@ def build_run_usage_report(
         provider_currency=provider_currency,
     )
     return render_cost_report(
-        cost_report, model_name=model_name, title="Run usage"
+        cost_report,
+        model_name=model_name,
+        title="Run usage",
+        models=run_usage.by_model,
     )
 
 
@@ -249,6 +268,20 @@ def build_run_usage_dict(
         "categories": categories,
         "total": total,
     }
+    if run_usage.by_model:
+        # Расход по моделям вызова; поля — только ненулевые сверх обязательных.
+        models: dict[str, dict[str, int]] = {}
+        for name, bucket in run_usage.by_model.items():
+            entry = {
+                "input": bucket["input"],
+                "output": bucket["output"],
+                "calls": bucket["calls"],
+            }
+            for field in ("cached", "missing_usage_calls"):
+                if bucket.get(field):
+                    entry[field] = bucket[field]
+            models[name] = entry
+        out["models"] = models
     if report.has_cost:
         out["cost"] = {"by_currency": dict(report.by_currency)}
     return out

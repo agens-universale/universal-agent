@@ -37,7 +37,7 @@ def test_delta_from_empty_baseline():
 
 def test_build_report_with_pricing():
     acc = UsageAccount()
-    acc.add(CATEGORY_MAIN, 250_000, 40_000)
+    acc.add(CATEGORY_MAIN, 250_000, 40_000, model="m")
     text = build_run_usage_report(acc, _PRICING, "m")
     assert text is not None
     assert "Run usage" in text
