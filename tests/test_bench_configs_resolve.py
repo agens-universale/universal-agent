@@ -39,6 +39,9 @@ NOT_AGENT_CONFIGS = {
     "uag_pre_v0.4_s200k_no_think.yml",
     "uag_pre_v0.4_s200k_think_keep.yml",
     "uag_pre_v0.4_s200k_think_strip.yml",
+    "uag_pre_v0.4.1_s200k_no_think.yml",
+    "uag_pre_v0.4.1_s200k_think_keep.yml",
+    "uag_pre_v0.4.1_s200k_think_strip.yml",
 }
 
 

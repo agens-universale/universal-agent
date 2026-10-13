@@ -86,15 +86,31 @@ def _gc_cli_configs(doc):
             yield agent["kwargs"]["gc_cli_config"]
 
 
+#: Профили прогонов 2026-10-08 на master 8c76e8b0c — с плоскими ключами
+#: (`backend_api_mode`), которые схема отвергает с 3f4ea089b. Хранятся как
+#: есть, чтобы прогон можно было повторить на том же коде; для develop их
+#: вложенная форма — uag_pre_v0.4.1_s200k_*.
+MASTER_FLAT_RUNS = {
+    "uag_pre_v0.4_s200k_no_think.yml",
+    "uag_pre_v0.4_s200k_think_keep.yml",
+    "uag_pre_v0.4_s200k_think_strip.yml",
+}
+
 #: Определения harbor-прогонов в bench_configs (конфиги агента `0*.yml` судит
-#: tests/test_bench_configs_resolve.py). Страж там их только перечисляет, и
-#: профили uag_pre_v0.4_s200k_* дожили до develop с плоскими ключами
-#: (`backend_api_mode`), которые схема отвергает с 3f4ea089b.
+#: tests/test_bench_configs_resolve.py). Страж там их только перечисляет,
+#: поэтому сборку адаптером проверяем здесь.
 HARBOR_RUNS = sorted(
     p
     for p in BENCH_CONFIGS.glob("*.yml")
-    if list(_gc_cli_configs(yaml.safe_load(p.read_text()) or {}))
+    if p.name not in MASTER_FLAT_RUNS
+    and list(_gc_cli_configs(yaml.safe_load(p.read_text()) or {}))
 )
+
+
+def test_master_flat_runs_exist():
+    """Исключение поимённое: переименованный файл не должен выпасть из стража молча."""
+    missing = {n for n in MASTER_FLAT_RUNS if not (BENCH_CONFIGS / n).exists()}
+    assert not missing, missing
 
 
 def test_harbor_runs_found():
@@ -109,11 +125,12 @@ def test_bench_config_harbor_run_builds(path):
         _build(gcc)
 
 
-#: thinking в основном запросе, strip_think — три варианта эксперимента 2026-10-08.
+#: thinking в основном запросе, strip_think — три варианта эксперимента 2026-10-08
+#: во вложенной форме v0.4.1.
 UAG_EXPECT = {
-    "uag_pre_v0.4_s200k_no_think.yml": (False, True),
-    "uag_pre_v0.4_s200k_think_strip.yml": (True, True),
-    "uag_pre_v0.4_s200k_think_keep.yml": (True, False),
+    "uag_pre_v0.4.1_s200k_no_think.yml": (False, True),
+    "uag_pre_v0.4.1_s200k_think_strip.yml": (True, True),
+    "uag_pre_v0.4.1_s200k_think_keep.yml": (True, False),
 }
 
 

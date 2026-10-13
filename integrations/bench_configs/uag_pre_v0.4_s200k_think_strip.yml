@@ -18,117 +18,114 @@ harbor_job:
         api_base: ${system.polar.host_api_base}
         session_id: __FLEET_SESSION_ID__
         gc_cli_config:
-          backend:
-            # --- backend ---
-            api_mode: chat_completions
-            chat_completions_max_tokens: 32768
-            chat_completions_min_response_tokens: 1024  # минимум лимита для ретраев
-            use_max_tokens_param: true
-            openai_strict_tools_schema: false    # не требовать все properties в required (GigaCode / non-OpenAI)
-            send_tool_strict: true               # слать function.strict на провод
-            retry_embedded_choice_errors: true   # ретрай, если бэкенд вернул choice с ошибкой внутри
-            claude_prompt_cache: null            # авто по id модели; Qwen не claude
-            use_ssl: false
-            cert_path: null
-            key_path: null
-            use_retry: true
-            request_timeout_sec: 600         # таймаут одного HTTP-запроса к LLM (длинные генерации на медленном vllm)
-            proxy: null
-            stream: true                             # legacy; CLI/harbor non-stream, канон — tui_stream
-            chat_completion_headers: {}
-            chat_completion_kwargs:                  # dict deep-merge: ключи ниже плюс bench enable_thinking/tool_choice
-              separate_reasoning: true               # мысль → reasoning_content, не в content
-              chat_template_kwargs:
-                enable_thinking: true      # setup: thinking ON (aux calls stay false)
-              tool_choice: auto
+          # --- backend ---
+          backend_api_mode: chat_completions
           os_backend: harbor
-          agent:
-            # Model-facing exec идёт через bash -c с source /etc/profile + ~/.bashrc.
-            # Неинтерактивный bash -c иначе пропускает bashrc ([ -z "$PS1" ] && return),
-            # и conda-env testbed остаётся неактивированным (343/497 трейсов 2026-09-11
-            # работали в base-env, пока верификатор гонял тесты в envs/testbed).
-            harbor_exec_init: bashrc
-            # --- agent loop ---
-            system_prompt_id: v1
-            max_steps: 1000                          # потолок шагов (tool-вызовов) агента за ран; предохранитель от бесконечных запусков
-            no_tool_call_max_count: 1000             # бюджет подряд идущих «плохих» ответов (нет tool call / ошибка аргументов); исчерпан → ран завершается
-            max_unknown_tool_repeats: 1000           # dsv4 пинит 1000
-            session_token_limit: null                # выкл
-            max_tool_calls: null                     # выкл
-            limit_trace_summary: true                # аварийная LLM-сводка трейса при step/tool/token limit
-            use_server_subagents: false              # серверные субагенты (через REST) выключены
-            use_local_subagents: false               # локальные in-process субагенты выключены; оркестратор-прелюдия не подмешивается в промпт
-            subagent_max_steps: 100                  # лимит шагов одного субагента (действует только при включённых субагентах)
-            subagents_dir: null
-            subagents_max_count: 20
-            strict_turn_finish_validation: true      # вкл finish-gate: LLM-судья на turn_finish (нужен backend_api_mode: chat_completions)
-            finish_gate_max_iterations: 10           # макс. reject основного агента; дальше fail-open, отчёт принимается
-            subagent_finish_gate_max_iterations: 3   # то же для субагента (здесь субагенты выкл)
-            finish_gate_use_rule_hints: false        # зарезервировано, код не читает; rule-layer без LLM вне v1
-            client_name: mini_cli_pub_agent_1
-            x_cl_id: "12345"
-            trace_id_header_name: null
-            trace_header_enabled: false
-            verbose: true
-            server_tool_prefix: system
-            limit_project_metadata: false
-            model_steering: ""
-            exec_timeout_sec: 600                    # дефолт timeout_seconds для exec_command / exec_python, если модель не передала
-            tool_output_inline_max_chars: 20000      # столько символов вывода тула инлайнится в диалог; остальное — в стор полных выводов
-            exec_output_capture_max_chars: 40000     # потолок захвата stdout/stderr на поток: 20k головы + 20k настоящего хвоста
-            exec_output_preview_edge_chars: 3000     # каждый край front-loaded preview длинного потока; 0 — без preview
-            walk_output_max_chars: 50000000          # потолок внутренних walk/grep каналов, fail-closed
-            stored_tool_outputs_max_entries: 50      # ёмкость стора полных выводов (агент может дочитать через session_read_stored_tool_output)
-            inject_tool_fields:                      # инжект синтетического поля в JSON Schema КАЖДОГО тула
-              reason: "One short, concrete sentence explaining the immediate purpose of this tool call, why this tool is the right next step, and what observation/change/deliverable you expect; avoid generic filler."
-            loop_detector:
-              enabled: true                          # notice модели на повтор идентичного tool call
-            stop_tools:  # убрать тулы из реестра: спрашивать человека в автономном бенче нельзя, межзапусковая память не нужна
-              - turn_ask_human
-              - project_memory
-              - fs_save_base64_file
-              - exec_calculator
-              - exec_sleep
-              - exec_python
-              - exec_fetch_url
-              - turn_intermediate_reply
-              - session_think
-              - session_read_user_intent_log
-              - session_compact
-              - skills_list
-              - skills_load
-              - skills_run_script
-              - skills_read_reference
-              - skills_read_asset
-              - download_file
-            disable_skills:  # скрыть все скиллы
-              - articles
-              - autonomous-benchmark-agent
-              - codebase
-              - complex-task-solver
-              - computer-use
-              - default-coworker
-              - science-article-creator
-              - skill-creator
-              - supercoder
-              - topic-research
-          chat_completions:
-            # Aux LLM (summary / intent / judges). Since background-agent #128
-            # (model-args-profiles) aux calls no longer inherit chat_completion_kwargs:
-            # they send only completion_kwargs below. Pinned to the main dict so aux
-            # behaves as in pre_v0.4_260923 (Qwen3.6 would think by default and burn
-            # the judge budget). Flat key is canonical; chat_completions_params.llm is legacy.
-            auxiliary_llm:
-              max_tokens: 8192                       # aux LLM: summary / intent-scope
-              judge_max_tokens: 10000                # finish-gate / command_moderation
-              subagent_role_max_tokens: 4096         # special_agent role draft; субагенты выкл
-              completion_kwargs:
-                separate_reasoning: false            # aux: не ждать reasoning_content
-                chat_template_kwargs:
-                  enable_thinking: false
-                tool_choice: auto
+          # Model-facing exec идёт через bash -c с source /etc/profile + ~/.bashrc.
+          # Неинтерактивный bash -c иначе пропускает bashrc ([ -z "$PS1" ] && return),
+          # и conda-env testbed остаётся неактивированным (343/497 трейсов 2026-09-11
+          # работали в base-env, пока верификатор гонял тесты в envs/testbed).
+          harbor_exec_init: bashrc
+          chat_completions_max_tokens: 32768
+          chat_completions_min_response_tokens: 1024  # минимум лимита для ретраев
+          use_max_tokens_param: true
+          openai_strict_tools_schema: false    # не требовать все properties в required (GigaCode / non-OpenAI)
+          send_tool_strict: true               # слать function.strict на провод
+          retry_embedded_choice_errors: true   # ретрай, если бэкенд вернул choice с ошибкой внутри
+          claude_prompt_cache: null            # авто по id модели; Qwen не claude
+          use_ssl: false
+          cert_path: null
+          key_path: null
+          use_retry: true
+          backend_request_timeout_sec: 600         # таймаут одного HTTP-запроса к LLM (длинные генерации на медленном vllm)
+          proxy: null
+          stream: true                             # legacy; CLI/harbor non-stream, канон — tui_stream
+          chat_completion_headers: {}
+          chat_completion_kwargs:                  # dict deep-merge: ключи ниже плюс bench enable_thinking/tool_choice
+            separate_reasoning: true               # мысль → reasoning_content, не в content
+            chat_template_kwargs:
+              enable_thinking: true      # setup: thinking ON (aux calls stay false)
+            tool_choice: auto
+          # Aux LLM (summary / intent / judges). Since background-agent #128
+          # (model-args-profiles) aux calls no longer inherit chat_completion_kwargs:
+          # they send only completion_kwargs below. Pinned to the main dict so aux
+          # behaves as in pre_v0.4_260923 (Qwen3.6 would think by default and burn
+          # the judge budget). Flat key is canonical; chat_completions_params.llm is legacy.
+          auxiliary_llm_params:
+            max_tokens: 8192                       # aux LLM: summary / intent-scope
+            judge_max_tokens: 10000                # finish-gate / command_moderation
+            subagent_role_max_tokens: 4096         # special_agent role draft; субагенты выкл
+            completion_kwargs:
+              separate_reasoning: false            # aux: не ждать reasoning_content
+              chat_template_kwargs:
+                enable_thinking: false
+              tool_choice: auto
+          # --- agent loop ---
+          system_prompt_id: v1
+          max_steps: 1000                          # потолок шагов (tool-вызовов) агента за ран; предохранитель от бесконечных запусков
+          no_tool_call_max_count: 1000             # бюджет подряд идущих «плохих» ответов (нет tool call / ошибка аргументов); исчерпан → ран завершается
+          max_unknown_tool_repeats: 1000           # dsv4 пинит 1000
+          session_token_limit: null                # выкл
+          max_tool_calls: null                     # выкл
+          limit_trace_summary: true                # аварийная LLM-сводка трейса при step/tool/token limit
+          use_server_subagents: false              # серверные субагенты (через REST) выключены
+          use_local_subagents: false               # локальные in-process субагенты выключены; оркестратор-прелюдия не подмешивается в промпт
+          subagent_max_steps: 100                  # лимит шагов одного субагента (действует только при включённых субагентах)
+          subagents_dir: null
+          subagents_max_count: 20
+          strict_turn_finish_validation: true      # вкл finish-gate: LLM-судья на turn_finish (нужен backend_api_mode: chat_completions)
+          finish_gate_max_iterations: 10           # макс. reject основного агента; дальше fail-open, отчёт принимается
+          subagent_finish_gate_max_iterations: 3   # то же для субагента (здесь субагенты выкл)
+          finish_gate_use_rule_hints: false        # зарезервировано, код не читает; rule-layer без LLM вне v1
+          client_name: mini_cli_pub_agent_1
+          x_cl_id: "12345"
+          trace_id_header_name: null
+          trace_header_enabled: false
+          verbose: true
+          server_tool_prefix: system
+          limit_project_metadata: false
+          model_steering: ""
+          exec_timeout_sec: 600                    # дефолт timeout_seconds для exec_command / exec_python, если модель не передала
+          tool_output_inline_max_chars: 20000      # столько символов вывода тула инлайнится в диалог; остальное — в стор полных выводов
+          exec_output_capture_max_chars: 40000     # потолок захвата stdout/stderr на поток: 20k головы + 20k настоящего хвоста
+          exec_output_preview_edge_chars: 3000     # каждый край front-loaded preview длинного потока; 0 — без preview
+          walk_output_max_chars: 50000000          # потолок внутренних walk/grep каналов, fail-closed
+          stored_tool_outputs_max_entries: 50      # ёмкость стора полных выводов (агент может дочитать через session_read_stored_tool_output)
+          inject_tool_fields:                      # инжект синтетического поля в JSON Schema КАЖДОГО тула
+            reason: "One short, concrete sentence explaining the immediate purpose of this tool call, why this tool is the right next step, and what observation/change/deliverable you expect; avoid generic filler."
+          loop_detector:
+            enabled: true                          # notice модели на повтор идентичного tool call
+          stop_tools:  # убрать тулы из реестра: спрашивать человека в автономном бенче нельзя, межзапусковая память не нужна
+            - turn_ask_human
+            - project_memory
+            - fs_save_base64_file
+            - exec_calculator
+            - exec_sleep
+            - exec_python
+            - exec_fetch_url
+            - turn_intermediate_reply
+            - session_think
+            - session_read_user_intent_log
+            - session_compact
+            - skills_list
+            - skills_load
+            - skills_run_script
+            - skills_read_reference
+            - skills_read_asset
+            - download_file
+          disable_skills:  # скрыть все скиллы
+            - articles
+            - autonomous-benchmark-agent
+            - codebase
+            - complex-task-solver
+            - computer-use
+            - default-coworker
+            - science-article-creator
+            - skill-creator
+            - supercoder
+            - topic-research
           # --- summary ---
-          summary:                          # компакция истории (работает только в chat_completions-режиме)
+          summary_params:                          # компакция истории (работает только в chat_completions-режиме)
             # Token-based compaction (setup experiment 2026-10-08): char triggers off, 200k tokens
             # of the 262144-token window (leaves room for a 32k reply + one large tool step + the
             # summary call). The harbor flat config is not normalized, so derived values are explicit:
@@ -145,61 +142,60 @@ harbor_job:
             max_accumulated_summary_chars: 20000
             intent_log_preview_chars: 10000
           # --- quality / memory / notices ---
-          quality_gate:
+          quality_gate_params:
             max_dialogue_chars: 200000
             max_message_chars: 5000
-          working_memory:
+          working_memory_params:
             max_chars_goal: 2000
             max_chars_constraints: 4000
             max_chars_state: 6000
             max_chars_knowledge: 8000
             total_budget_chars: 20000
-          todo:
+          todo_params:
             reminder_steps: 10                     # каждые N шагов без session_todo при открытых пунктах; 0 = выкл
           tool_usage_notice: []
-          intent_scope:
+          intent_scope_params:
             tools: {}
             max_summary_chars: 500
             max_tool_output_chars: 8000
             max_raw_record_chars: 5000
             max_final_answer_raw_chars: 2000
             fallback_raw_on_llm_error: true
-          security:
-            # --- security ---
-            # Гарды OFF явно: иначе контейнерные пути режутся по ФС раннера.
-            command_moderation:
-              enabled: false
-              mode: allow
-              allowed_command_examples: []
-              denied_command_examples: []
-            write_guard:
-              enabled: false
-              mode: ask
-              extra_paths: []
-            read_guard:
-              enabled: false
-              mode: allow
-              allowed_read_roots: []
-              allowed_read_paths: []
-              denied_read_paths: []
-              denied_file_patterns: []
-              denied_extensions: []
-              max_file_size_kb: 1024
-              binary_read_policy: ask
-              binary_allowed_types:
-                - application/pdf
-                - application/vnd.openxmlformats-officedocument.wordprocessingml.document
-                - image/png
-                - image/jpeg
-              binary_allowed_extensions:
-                - .pdf
-                - .docx
-                - .png
-                - .jpg
-                - .jpeg
-            protected_paths:
-              enabled: false
-              extra: []
+          # --- security ---
+          # Гарды OFF явно: иначе контейнерные пути режутся по ФС раннера.
+          command_moderation:
+            enabled: false
+            mode: allow
+            allowed_command_examples: []
+            denied_command_examples: []
+          write_guard:
+            enabled: false
+            mode: ask
+            extra_paths: []
+          read_guard:
+            enabled: false
+            mode: allow
+            allowed_read_roots: []
+            allowed_read_paths: []
+            denied_read_paths: []
+            denied_file_patterns: []
+            denied_extensions: []
+            max_file_size_kb: 1024
+            binary_read_policy: ask
+            binary_allowed_types:
+              - application/pdf
+              - application/vnd.openxmlformats-officedocument.wordprocessingml.document
+              - image/png
+              - image/jpeg
+            binary_allowed_extensions:
+              - .pdf
+              - .docx
+              - .png
+              - .jpg
+              - .jpeg
+          protected_paths:
+            enabled: false
+            extra: []
           # --- fs / mcp / pricing / logging ---
           fs_tools:
             max_read_bytes: 8388608
@@ -223,12 +219,11 @@ harbor_job:
               default_max_matches: 100
               hard_max_matches: 300
               max_visited: 500000
-          mcp:
-            servers: {}
-            meta:
-              tools-cache-ttl: 3600
-              request_timeout_sec: 600               # адаптер поднимает до max(это, 600)
-              discovery_timeout_sec: 120             # адаптер поднимает до max(это, 120); схема была 30
+          mcp-servers: {}
+          mcp-meta:
+            tools-cache-ttl: 3600
+            request_timeout_sec: 600               # адаптер поднимает до max(это, 600)
+            discovery_timeout_sec: 120             # адаптер поднимает до max(это, 120); схема была 30
           pricing:
             enabled: false
             currency: "₽"
@@ -237,15 +232,15 @@ harbor_job:
             output: null
             cache_read: null
             models: {}
-          logging:
-            save_logs: false
-            console_trace: false
-            format: text
-            log_level: info
-            redact_secrets:
-              enabled: false
-              extra_keys: []
-              extra_patterns: []
+          save_logs: false
+          console_trace: false
+          logging_format: text
+          log_level: info
+          redact_secrets:
+            enabled: false
+            extra_keys: []
+            extra_patterns: []
+          logging_params:
             full_log_backend: false
           strip_tags_projection:
             strip_think: true                      # не класть reasoning_content в messages; false = вернуть модели
