@@ -717,3 +717,21 @@ def test_old_rejection_recovery_patch_keeps_previous_request_sequence(monkeypatc
     run_coro(pr.arun_agent([{"role": "user", "content": "почини тест", "id": "u1"}], state, ctx))
 
     assert _aliases(calls) == ["mid", "mid", "fast", "mid"]
+
+
+def test_fallback_alias_with_the_same_request_does_not_replay_weak_write(monkeypatch):
+    entry = {"model": "fast-model", "url": "http://local/v1/chat/completions", "token": ""}
+    ctx = _ctx({"value": "auto"}, registry={
+        "models": {"fast": entry, "copy": entry, "mid": {"model": "strong-model"}},
+        "slots": {"light": "fast", "default": "mid", "max": "copy"}})
+    state = _state(ctx)
+    calls = _stub_transport(monkeypatch, _reads(1, 3) + [([_write("w")], "r4", {}), ([_write("w")], "r5", {})])
+    executed = []
+    monkeypatch.setattr(pr, "aapply_tool", as_coro(lambda **kw: executed.append(kw["call_id"]) or '{"ok":true}'))
+    monkeypatch.setattr(pr, "amaybe_update_intent_scope_from_tool", as_coro(lambda **kw: None))
+    _ask(state, ctx, times=3)
+    ctx.model_router.breaker.trip("mid", "unavailable")
+    response, _ = _ask(state, ctx)
+    run_coro(pr.aprocess_tool_calls(response, state, ctx, run_agent_func=None))
+    assert _aliases(calls) == ["mid", "mid", "mid", "fast"]
+    assert executed == ["w"]

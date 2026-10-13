@@ -283,8 +283,9 @@ def assemble_run_context(
     ctx.auto_available = auto_available(
         loaded.settings,
         force_legacy=(bindings.model_router.force_legacy or not bindings.model_router.auto_allowed),
+        legacy_call_kits=not ctx.routing_contract_v2,
     )
-    ctx.routing_params = resolve_routing_params(loaded.settings)
+    ctx.routing_params = resolve_routing_params(loaded.settings, legacy_call_kits=not ctx.routing_contract_v2)
     live = bindings.model_router.live_level
 
     def effective_provider():

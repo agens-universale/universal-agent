@@ -188,3 +188,83 @@ def test_auto_safe_level_runs_the_ladder_only_when_both_pairs_have_two_models(re
 @pytest.mark.parametrize("safe_level", ["default", "max"])
 def test_a_fixed_safe_level_is_kept_as_is(safe_level):
     assert resolve_routing_params(make_settings(_two_level(_NO_MAX, safe_level))).safe_level == safe_level
+
+
+@pytest.mark.parametrize("copies", [2, 3])
+def test_identical_requests_under_different_aliases_disable_auto(copies):
+    aliases = ["a", "b", "c"][:copies]
+    entry = {"model": "same", "url": "http://local/v1/chat/completions", "token": "",
+             "main": {"temperature": 0.2}}
+    cfg = make_settings({"models": {alias: entry for alias in aliases},
+        "slots": {"light": "a", "default": "b", "max": aliases[-1]},
+        "backend.api_mode": "chat_completions"})
+    assert auto_unavailable_reason(cfg, force_legacy=False) == "во всех уровнях одна модель"
+
+
+@pytest.mark.parametrize("overlay", [
+    {"auxiliary": {"temperature": 0.9}},
+    {"summary_trigger_chars": 12345},
+    {"strip_think": False},
+])
+def test_non_main_metadata_does_not_enable_auto(overlay):
+    entry = {"model": "same", "main": {"temperature": 0.2}}
+    cfg = make_settings({"models": {"a": entry, "b": {**entry, **overlay}},
+        "slots": {"light": "a", "default": "b"}, "backend.api_mode": "chat_completions"})
+    assert auto_available(cfg, force_legacy=False) is False
+
+
+def test_inherited_and_explicit_equal_main_kwargs_are_one_request():
+    cfg = make_settings({"models": {"a": {"model": "same"},
+        "b": {"model": "same", "main": {"temperature": 0.2}}},
+        "backend.chat_completion_kwargs": {"temperature": 0.2},
+        "slots": {"light": "a", "default": "b"}, "backend.api_mode": "chat_completions"})
+    assert auto_available(cfg, force_legacy=False) is False
+
+
+def test_old_durable_contract_retains_alias_identity():
+    cfg = make_settings({"models": {"a": {"model": "same"}, "b": {"model": "same"}},
+        "slots": {"light": "a", "default": "b"}, "backend.api_mode": "chat_completions"})
+    assert auto_available(cfg, force_legacy=False, legacy_call_kits=True) is True
+
+
+@pytest.mark.parametrize("overlay", [
+    {"main": {"temperature": 0.9}},
+    {"token": "different"},
+    {"url": "http://other/v1/chat/completions"},
+    {"backend": {"send_tool_strict": False}},
+    {"backend": {"chat_completions_max_tokens": 1234}},
+    {"backend": {"chat_completion_headers": {"x-backend": "different"}}},
+])
+def test_actual_main_request_differences_keep_auto_available(overlay):
+    entry = {"model": "same", "url": "http://local/v1/chat/completions", "token": "",
+             "main": {"temperature": 0.2}}
+    cfg = make_settings({"models": {"a": entry, "b": {**entry, **overlay}},
+        "slots": {"light": "a", "default": "b"}, "backend.api_mode": "chat_completions"})
+    assert auto_available(cfg, force_legacy=False) is True
+
+
+def test_vision_none_and_true_are_the_same_request():
+    cfg = make_settings({"models": {"a": {"model": "same"},
+        "b": {"model": "same", "backend": {"vision": True}}},
+        "slots": {"light": "a", "default": "b"},
+        "backend.api_mode": "chat_completions", "backend.vision": None})
+    assert auto_available(cfg, force_legacy=False) is False
+
+
+def test_child_binding_preserves_old_durable_alias_comparison():
+    from types import SimpleNamespace
+    from gc_core.model_router import ModelRouter
+    from gc_core.tools.subagents.runner import SubagentRunner
+    cfg = make_settings({"models": {alias: {"model": "same"} for alias in ("a", "b", "c")},
+        "slots": {"light": "a", "default": "b", "max": "c"},
+        "backend.api_mode": "chat_completions"})
+    child = SimpleNamespace(settings=cfg.settings, runtime=cfg.runtime, routing_contract_v2=False,
+                            model_router=ModelRouter(cfg, level_provider=lambda: "auto"))
+    runner = object.__new__(SubagentRunner)
+    runner._ctx = SimpleNamespace()
+    runner._orchestrator_state = SimpleNamespace(turn_safe_level="max")
+    runner._parent_call_id = "parent"
+    result = runner._bind_child_context(child, "subagent_worker")
+    assert result.auto_available is True
+    assert result.routing_params.safe_level == "max"
+    assert result.model_router.live_level() == "auto"

@@ -1456,7 +1456,13 @@ def _floor_target(
     if alive is None:
         return None
     level, candidate = alive
-    return None if candidate.same_call_kit(resolved) else level
+    if not getattr(ctx, "routing_contract_v2", True):
+        identical = candidate.same_call_kit(resolved)
+    else:
+        from gc_core.utils.connect_backend import same_main_request
+
+        identical = same_main_request(ctx, candidate, resolved)
+    return None if identical else level
 
 
 def _answer_stream_muted(

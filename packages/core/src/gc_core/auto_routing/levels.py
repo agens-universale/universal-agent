@@ -12,7 +12,7 @@ AUTO = "auto"
 
 
 def auto_unavailable_reason(
-    source: Any, *, force_legacy: bool
+    source: Any, *, force_legacy: bool, legacy_call_kits: bool = False
 ) -> str | None:
     """Почему автовыбор недоступен этому конфигу, или None — доступен.
     Единственная точка решения: `auto_available`, стартовый нотис и витрины TUI
@@ -26,14 +26,14 @@ def auto_unavailable_reason(
         return "выключен настройкой auto_routing"
     if cfg.backend.api_mode != "chat_completions":
         return "режим API responses"
-    return _one_model_reason(cfg)
+    return _one_model_reason(cfg, legacy_call_kits=legacy_call_kits)
 
 
-def auto_available(source: Any, *, force_legacy: bool) -> bool:
-    return auto_unavailable_reason(source, force_legacy=force_legacy) is None
+def auto_available(source: Any, *, force_legacy: bool, legacy_call_kits: bool = False) -> bool:
+    return auto_unavailable_reason(source, force_legacy=force_legacy, legacy_call_kits=legacy_call_kits) is None
 
 
-def resolve_routing_params(source: Any) -> RoutingParams:
+def resolve_routing_params(source: Any, *, legacy_call_kits: bool = False) -> RoutingParams:
     """Параметры автовыбора конфига — единственная точка их сборки для рантайма.
 
     `safe_level: auto` (пару хода выбирает судья, лестница пар) работает, только когда
@@ -46,34 +46,34 @@ def resolve_routing_params(source: Any) -> RoutingParams:
     if params.safe_level != SAFE_LEVEL_AUTO:
         return params
     kits = _level_kits(source)
-    lower_two = not _one_call_kit(kits, pair_levels(replace(params, safe_level=PAIR_LOWER)))
-    upper_two = not _one_call_kit(kits, pair_levels(replace(params, safe_level=PAIR_UPPER)))
+    lower_two = not _one_call_kit(kits, pair_levels(replace(params, safe_level=PAIR_LOWER)), source=source, legacy=legacy_call_kits)
+    upper_two = not _one_call_kit(kits, pair_levels(replace(params, safe_level=PAIR_UPPER)), source=source, legacy=legacy_call_kits)
     if lower_two and upper_two:
         return params
     return replace(params, safe_level=PAIR_UPPER if upper_two and not lower_two else PAIR_LOWER)
 
 
-def _one_model_reason(cfg: Any) -> str | None:
+def _one_model_reason(cfg: Any, *, legacy_call_kits: bool = False) -> str | None:
     """Автовыбор недоступен, когда рабочая пара резолвится в один комплект вызова.
 
     Незаданный слот подменяется соседним. Если другая пара даёт две разные
     модели, причина подсказывает соответствующий безопасный уровень.
     """
     kits = _level_kits(cfg)
-    if _one_call_kit(kits, LEVEL_ORDER):
+    if _one_call_kit(kits, LEVEL_ORDER, source=cfg, legacy=legacy_call_kits):
         return "во всех уровнях одна модель"
-    params = resolve_routing_params(cfg)
+    params = resolve_routing_params(cfg, legacy_call_kits=legacy_call_kits)
     if params.safe_level == SAFE_LEVEL_AUTO:
         # Лестница пар осталась включённой — значит, в обеих парах разные модели.
         return None
     weak, strong = pair_levels(params)
-    if not _one_call_kit(kits, (weak, strong)):
+    if not _one_call_kit(kits, (weak, strong), source=cfg, legacy=legacy_call_kits):
         return None
     reason = f"в паре {weak}+{strong} одна модель"
     # Сильным бывает любой уровень, у которого есть ступень ниже.
     for other in LEVEL_ORDER[1:]:
         other_pair = pair_levels(replace(params, safe_level=other))
-        if other != strong and not _one_call_kit(kits, other_pair):
+        if other != strong and not _one_call_kit(kits, other_pair, source=cfg, legacy=legacy_call_kits):
             return f"{reason}; другая пара — auto_routing_safe_level: {other}"
     return reason
 
@@ -96,10 +96,14 @@ def _level_kits(cfg: Any) -> dict[str, Any]:
     return kits
 
 
-def _one_call_kit(kits: Mapping[str, Any], levels: Iterable[str]) -> bool:
+def _one_call_kit(kits: Mapping[str, Any], levels: Iterable[str], *, source: Any, legacy: bool) -> bool:
     """Все резолвящиеся уровни из `levels` дают один комплект вызова."""
     found = [kits[level] for level in levels if level in kits]
-    return all(kit.same_call_kit(found[0]) for kit in found[1:])
+    if legacy:
+        return all(kit.same_call_kit(found[0]) for kit in found[1:])
+    from gc_core.utils.connect_backend import same_main_request
+
+    return all(same_main_request(source, kit, found[0]) for kit in found[1:])
 
 
 def auto_active(router: Any, live_level: str | None, available: bool) -> bool:

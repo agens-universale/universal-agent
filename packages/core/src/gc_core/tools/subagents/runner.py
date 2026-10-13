@@ -1495,10 +1495,11 @@ class SubagentRunner:
         """Common routing, parent identity, human frontend and sidecar binding."""
         router = getattr(child_ctx, "model_router", None)
         child_ctx.auto_available = auto_available(
-            child_ctx, force_legacy=bool(getattr(router, "force_legacy", False))
+            child_ctx, force_legacy=bool(getattr(router, "force_legacy", False)),
+            legacy_call_kits=not getattr(child_ctx, "routing_contract_v2", True),
         )
         child_ctx.routing_params = turn_params(
-            resolve_routing_params(child_ctx),
+            resolve_routing_params(child_ctx, legacy_call_kits=not getattr(child_ctx, "routing_contract_v2", True)),
             getattr(self._orchestrator_state, "turn_safe_level", None),
         )
         if router is not None:
