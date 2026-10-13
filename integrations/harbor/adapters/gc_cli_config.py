@@ -29,7 +29,9 @@ import dataclasses
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional, Tuple
 
+from gc_core.config_modules.compat import apply_compat, manual_edit_fact
 from gc_core.config_modules.env_interpolation import resolve_env_placeholders
+from gc_core.config_modules.model_registry import validate_registry_pairs
 from gc_core.config_modules.path_hints import check_setting_path
 from gc_core.config_modules.root import AppConfig, resolve_paths
 from gc_core.settings import (
@@ -55,8 +57,8 @@ def bench_defaults(prompts_dir: Path, skills_dir: Path) -> Dict[str, Any]:
 
     Generation kwargs belong to the model profile. Open models ship recommended
     sampling values in generation_config.json, which the backend applies when the
-    client sends none. Pin any generation override per model in the profile's
-    chat_completion_kwargs instead.
+    client sends none. Pin generation overrides per model in the profile's
+    main and auxiliary sections instead.
     """
     return {
         "backend.api_mode": "chat_completions",
@@ -67,6 +69,9 @@ def bench_defaults(prompts_dir: Path, skills_dir: Path) -> Dict[str, Any]:
         ),
         "paths.chat_completions_intent_guard_prompt_path": str(
             prompts_dir / "chat_completions_intent_guard_prompt.md"
+        ),
+        "paths.chat_completions_routing_pair_judge_prompt_path": str(
+            prompts_dir / "chat_completions_routing_pair_judge_prompt.md"
         ),
         "paths.skills_data_path": str(skills_dir),
         "summary.chat_completions_summary_prompt_path": str(
@@ -144,6 +149,7 @@ def build_gc_cli_settings(
     model: str,
     prompts_dir: Path,
     skills_dir: Path,
+    logs_dir: Path,
     config_dir: str,
     overrides: Optional[Dict[str, Any]] = None,
 ) -> LoadedSettings:
@@ -164,15 +170,41 @@ def build_gc_cli_settings(
     # `agent_kwargs.gc_cli_config` уезжает в `config.json` трайла на диск, а через
     # `--ak` ключ виден ещё и в `ps`. Теперь профиль пишет `"${ENV:GC_API_KEY}"`,
     # а сам ключ живёт в окружении раннера.
-    updates, runtime = profile_updates(
-        resolve_env_placeholders(dict(overrides or {}))
-    )
+    # Compat работает с файловым документом; профиль принимает также dotted-пути.
+    profile: Dict[str, Any] = {}
+    runtime_overrides: Dict[str, Any] = {}
+    for path, value in (overrides or {}).items():
+        if path in _RUNTIME_KEYS:
+            runtime_overrides[path] = copy.deepcopy(value)
+            continue
+        node = profile
+        parts = path.split(".")
+        for part in parts[:-1]:
+            node = node.setdefault(part, {})
+        node[parts[-1]] = copy.deepcopy(value)
+    raw_profile = copy.deepcopy(profile)
+    profile = resolve_env_placeholders(profile)
+    validate_registry_pairs(profile, source="gc_cli_config", raw_source=raw_profile)
+    compat_facts = apply_compat(profile)
+    updates, runtime = profile_updates({
+        **expand_section_updates(profile), **resolve_env_placeholders(runtime_overrides),
+    })
     loaded = loaded.with_overrides(updates, layer="bench_profile")
     if runtime:
         loaded = loaded.with_runtime(**runtime)
+    if compat_facts:
+        loaded = loaded.with_runtime(
+            notices=(*loaded.runtime.notices, *(
+                f"бенч-профиль: {manual_edit_fact(fact)}" for fact in compat_facts
+            ))
+        )
     # Runtime wins: a stale completions_url/model in a profile must not beat what the
     # runner actually passed (api_base / --model).
     return loaded.with_overrides(
-        {"backend.completions_url": completions_url, "agent.model": model},
+        {
+            "backend.completions_url": completions_url,
+            "agent.model": model,
+            "paths.logs_dump_dir": str(logs_dir),
+        },
         layer="runtime",
     )

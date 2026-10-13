@@ -45,6 +45,7 @@ def _loaded(overrides: dict | None = None) -> LoadedSettings:
         model="test-model",
         prompts_dir=_PROMPTS,
         skills_dir=_SKILLS,
+        logs_dir=_HARBOR_DIR / "logs",
         config_dir=str(_HARBOR_DIR),
         overrides=overrides,
     )
@@ -95,6 +96,7 @@ def test_only_intended_fields_differ_from_schema_defaults():
     intended = set(bench_defaults(_PROMPTS, _SKILLS)) | {
         "backend.completions_url",
         "agent.model",
+        "paths.logs_dump_dir",
     }
 
     assert changed <= intended, sorted(changed - intended)
@@ -378,7 +380,12 @@ async def test_stock_profiles_and_children_make_no_probe_with_attachment(
             ],
         )
         state.vision_probe_turn = "bench-root"
-        await pr._arequest_backend_canonical([message], state, ctx)
+        await pr._arequest_backend_canonical(
+            [message],
+            state,
+            ctx,
+            resolved=pr.resolve_main_for_call(state, ctx),
+        )
     assert len(spy.requests) == 2  # exactly the two working text calls
     assert all(
         b'"image_url"' not in r.content and b'"fs_view_image"' not in r.content
@@ -430,9 +437,76 @@ async def test_custom_image_bench_requires_successful_probe(
         ],
     )
     state.vision_probe_turn = "custom-image-bench"
-    await pr._arequest_backend_canonical([message], state, ctx)
+    await pr._arequest_backend_canonical(
+        [message], state, ctx, resolved=pr.resolve_main_for_call(state, ctx)
+    )
     assert len(spy.requests) == 2
     assert pngs(spy.requests[0]) == [challenge.png]
     assert pngs(spy.requests[1]) == [ctx.image_store.read_for_send(att)]
     assert state.vision_audience.native is not None
     assert b'"fs_view_image"' in spy.requests[1].content
+
+
+def test_two_level_numbers_reach_the_bench_config_and_a_profile_overrides_one_of_them():
+    """Конфиг бенча растёт из типизированной схемы: подключ `two_level` обязан в
+    нём быть, а профиль, назвавший одно число, второе не теряет."""
+    from gc_core.auto_routing.policy import RoutingParams
+
+    assert _config().agent.auto_routing_two_level.model_dump() == {
+        "weak_steps": 10,
+        "strong_steps": 2,
+        "pair_threshold": 3,
+    }
+    config = _config(
+        {
+            "agent.auto_routing_two_level": {"strong_steps": 4},
+        }
+    )
+    assert config.agent.auto_routing_two_level.model_dump() == {
+        "weak_steps": 10,
+        "strong_steps": 4,
+        "pair_threshold": 3,
+    }
+    params = RoutingParams.from_config(config)
+    assert (params.policy, params.weak_steps, params.strong_steps) == (
+        "two_level",
+        10,
+        4,
+    )
+
+
+def test_runtime_logs_directory_wins_over_profile():
+    config = _config({"paths.logs_dump_dir": "/tmp/unrelated-profile-logs"})
+    assert config.paths.logs_dump_dir == str(_HARBOR_DIR / "logs")
+
+
+def test_routing_defaults_reach_bench_settings_and_explicit_updates_win():
+    defaults = _config().agent
+    assert defaults.auto_routing is True
+    assert defaults.auto_routing_safe_level == "auto"
+    assert defaults.auto_routing_two_level.model_dump() == {
+        "weak_steps": 10, "strong_steps": 2, "pair_threshold": 3,
+    }
+    config = _config({"agent.auto_routing_two_level": {"weak_steps": 6}})
+    assert config.agent.auto_routing_two_level.model_dump() == {
+        "weak_steps": 6, "strong_steps": 2, "pair_threshold": 3,
+    }
+
+
+@pytest.mark.parametrize("overrides", [
+    {"agent.auto_routing_experimental": {"finish_floor": True, "replay_exec": True}},
+    {"agent": {"auto_routing_experimental": {"finish_floor": True, "replay_exec": True}}},
+    {"agent.auto_routing_experimental.finish_floor": True,
+     "agent.auto_routing_experimental.replay_exec": True},
+])
+def test_old_routing_experiments_are_removed_from_bench_profiles_with_notice(overrides):
+    loaded = _loaded(overrides)
+    assert not hasattr(loaded.settings.agent, "auto_routing_experimental")
+    assert any("auto_routing_experimental устарел" in fact for fact in loaded.runtime.notices)
+    assert all("--sync-config" not in fact for fact in loaded.runtime.notices)
+
+
+def test_setting_os_backend_kind_stays_separate_from_runtime_backend():
+    loaded = _loaded({"os_backend.kind": "local"})
+    assert loaded.settings.os_backend.kind == "local"
+    assert loaded.runtime.os_backend == "harbor"

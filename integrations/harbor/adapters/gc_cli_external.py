@@ -383,6 +383,7 @@ class GcCliExternal(BaseAgent):
             model=self._model,
             prompts_dir=_PROMPTS_DIR,
             skills_dir=_SKILLS_DIR,
+            logs_dir=self.logs_dir,
             config_dir=str(_ADAPTER_DIR),
             overrides=self._overrides,
         )
