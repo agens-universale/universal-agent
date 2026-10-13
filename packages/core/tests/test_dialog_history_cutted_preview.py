@@ -210,6 +210,53 @@ def test_long_reasoning_tail_survives_message_limit():
     assert _ENVELOPE_RE.fullmatch(answer_part) is not None
 
 
+def test_reasoning_marker_inside_field_does_not_shrink_reasoning():
+    raw = ("H" * 1000) + "\n[reasoning]\n" + ("T" * 1000) + "END"
+    msg = {
+        "role": "assistant",
+        "content": "A" * 20_000,
+        "reasoning_content": raw,
+    }
+    limit = 5_000
+    text = message_text_limited(msg, limit)
+    prose = message_text_for_summary(msg, include_reasoning=False)
+    full = message_text_for_summary(msg)
+    suffix = full[len(prose) :]
+    assert suffix.startswith("\n[reasoning]\n")
+    assert text.endswith(suffix)
+    answer = text[: -len(suffix)]
+    match = _ENVELOPE_RE.fullmatch(answer)
+    assert match is not None
+    assert int(match.group(1)) == limit
+    assert "H" * 100 in suffix
+    assert suffix.endswith("END")
+
+
+def test_prose_reasoning_marker_without_appended_field_uses_message_limit():
+    tail = "T" * 250_000
+    msg = {
+        "role": "assistant",
+        "content": "prefix\n[reasoning]\n" + tail,
+        "reasoning_content": "field-not-included",
+    }
+    limit = 1_500
+    text = message_text_limited(msg, limit, include_reasoning=False)
+    full = message_text_for_summary(msg, include_reasoning=False)
+    match = _ENVELOPE_RE.fullmatch(text)
+    assert match is not None
+    assert int(match.group(1)) == limit
+    assert int(match.group(2)) == len(full)
+    assert "field-not-included" not in text
+    assert "T" * 2_000 not in text
+    steps = format_last_dialog_steps(
+        [msg],
+        message_max_chars=limit,
+        include_reasoning=False,
+    )
+    assert "field-not-included" not in steps
+    assert len(steps) < 5_000
+
+
 def test_user_text_with_reasoning_marker_uses_message_limit():
     body = ("u" * 20_000) + "\n[reasoning]\n" + ("v" * 20_000)
     msg = {"role": "user", "content": body}

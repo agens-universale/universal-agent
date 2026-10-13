@@ -5,6 +5,7 @@ from typing import Any, Callable, Dict, List, Sequence, TypeVar
 
 from gc_core.message_format.serialization import (
     _REASONING_HEADER,
+    _clip_reasoning,
     _reasoning_source,
     message_text_for_summary,
     strip_original_user_messages_block,
@@ -81,6 +82,16 @@ def _wrap_cutted_envelope(text: str, max_chars: int) -> str:
     )
 
 
+def _reasoning_suffix(message: Dict[str, Any], include_reasoning: bool) -> str:
+    """Уже обрезанный блок ``[reasoning]``. Пусто, если его не дописываем."""
+    if not include_reasoning or not _assistant_reasoning_appended(message):
+        return ""
+    raw = _reasoning_source(message).strip()
+    if not raw:
+        return ""
+    return f"{_REASONING_HEADER}{_clip_reasoning(raw)}"
+
+
 def message_text_limited(
     message: Dict[str, Any],
     max_message_chars: int,
@@ -89,38 +100,34 @@ def message_text_limited(
     strip_think: bool = True,
     include_reasoning: bool = True,
 ) -> str:
-    text = strip_original_user_messages_block(
+    prose = strip_original_user_messages_block(
         message_text_for_summary(
             message,
             tags=tags,
             strip_think=strip_think,
-            include_reasoning=include_reasoning,
+            include_reasoning=False,
         )
     )
+    suffix = _reasoning_suffix(message, include_reasoning)
     if max_message_chars <= 0:
-        return text
+        return prose + suffix
     msg_type = (
         str(message.get("type") or "message")
         if isinstance(message, dict)
         else "message"
     )
     if msg_type in _TOOL_BLOB_TYPES:
-        header, sep, dump = text.partition("\n")
+        header, sep, dump = prose.partition("\n")
         if sep:
             preview = _wrap_cutted_preview(dump, max_message_chars)
             assembled = f"{header}\n{preview}"
             if preview == dump:
                 return _wrap_cutted_envelope(assembled, max_message_chars)
             return assembled
-    # Ответ — лимит сообщения. Блок [reasoning] уже обрезан в serialization
-    # (начало и хвост); конверт режет с головы и снова отбросил бы этот хвост.
-    if _assistant_reasoning_appended(message) and _REASONING_HEADER in text:
-        answer, _, reasoning = text.rpartition(_REASONING_HEADER)
-        return (
-            f"{_wrap_cutted_envelope(answer, max_message_chars)}"
-            f"{_REASONING_HEADER}{reasoning}"
-        )
-    return _wrap_cutted_envelope(text, max_message_chars)
+    # Лимит сообщения режет только прозу. Блок [reasoning] уже обрезан
+    # в serialization и дописывается после, поэтому маркер внутри поля
+    # не становится границей и не попадает под этот лимит.
+    return _wrap_cutted_envelope(prose, max_message_chars) + suffix
 
 
 def _assistant_reasoning_appended(message: Dict[str, Any]) -> bool:
