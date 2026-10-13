@@ -40,6 +40,8 @@ from gc_core.auto_routing.policy import (
     two_level_decision,
     with_fallback,
 )
+from gc_core.auto_routing.reroute import floor_verdict
+from gc_core.auto_routing.response import discarded_answer
 from gc_core.config import parse_chat_completions_max_tokens
 from gc_core.config_modules.gc import gc_force_collect_enabled
 from gc_core.config_modules.images import read_images_config
@@ -1291,6 +1293,120 @@ async def _aask_backend_and_record(messages, state: State, ctx: Any):
     )
     state.set_resp_headers_metadata(res_headers or {})
     return resp_messages, response_id
+
+
+def _usage_snapshot(state: State) -> Optional[UsageAccount]:
+    """Клон `state.usage` для дельты «токены и цена именно этого вызова»:
+    `usage_scope` внутри `_arequest_backend_canonical` пишет в `state.usage`
+    кумулятивно, снимок до вызова плюс `delta_from` после дают вклад одного
+    вызова без отдельного учётного механизма."""
+    usage = getattr(state, "usage", None)
+    if usage is None:
+        return None
+    return UsageAccount.from_meta(usage.to_meta())
+
+
+def _floor_target(
+    ctx: Any,
+    from_level: str,
+    resolved: Optional[Any],
+    params: RoutingParams,
+) -> Optional[str]:
+    """Уровень, на который пол переигрывает вызов уровня `from_level`, или None —
+    переигрывать некуда. Кандидаты — `floor_levels` (безопасный уровень, при его
+    мёртвом алиасе — ближайший живой выше `from_level`); берётся первый живой
+    (`_first_alive_level`). Его комплект вызова совпал с комплектом исходного
+    вызова (`resolved`) — та же модель с теми же параметрами ответила бы тем же,
+    переигрыш был бы дублем."""
+    router = getattr(ctx, "model_router", None)
+    if router is None or resolved is None:
+        return None
+    alive = _first_alive_level(router, floor_levels(from_level, params=params))
+    if alive is None:
+        return None
+    level, candidate = alive
+    return None if candidate.same_call_kit(resolved) else level
+
+
+def _answer_stream_muted(
+    state: State,
+    ctx: Any,
+    resolved: Optional[Any],
+    params: RoutingParams,
+) -> bool:
+    """Глушить ли канал `answer` потока у ЭТОГО вызова. Под `two_level` ответ без
+    вызовов тулов от уровня ниже сильной переигрывается, и пользователь увидел бы
+    готовую прозу, которая исчезает и переписывается. Всё известно до запроса:
+    политика `two_level`, auto решал вызов (`state.current_level`) и у уровня
+    вызова есть цель переигрыша (`_floor_target`). Рассуждение и аргументы тулов
+    идут в поток как обычно; цели нет — прозу слабой не переиграют, поток полный."""
+    if getattr(state, "current_level", None) is None:
+        return False
+    from_level = getattr(state, "_call_level", None) or "default"
+    return _floor_target(ctx, from_level, resolved, params) is not None
+
+
+async def _amaybe_reroute_for_floors(
+    messages: List[Dict],
+    resp_messages: List[Dict],
+    response_id: str,
+    res_headers: Dict,
+    state: State,
+    ctx: Any,
+    *,
+    resolved: Optional[Any],
+    usage_before: Optional[UsageAccount],
+) -> Tuple[List[Dict], str, Dict]:
+    """Переигрыш ответа слабой модели на живой сильной: важный или битый вызов,
+    либо ответ без вызовов инструментов. Отброшенный ответ не исполняется.
+    Один переигрыш на основной запрос; важное действие сильной начинает
+    её серию заново. Расход сохраняется, а мемо такта фиксирует новый уровень."""
+    if getattr(state, "current_level", None) is None:
+        return resp_messages, response_id, res_headers
+    params = _routing_params(ctx, state)
+    source = ctx
+    verdict = floor_verdict(
+        resp_messages,
+        tools_data=getattr(ctx, "tools_data", None),
+        is_subagent=lambda name: is_subagent_tool(name, source),
+    )
+    if verdict is None:
+        return resp_messages, response_id, res_headers
+    from_level = getattr(state, "_call_level", None) or "default"
+    if (
+        verdict.important_tools
+        and not level_below(from_level, params.safe_level)
+    ):
+        # Продление: важный вызов самой сильной — тоже повод, её серия считается
+        # от него. Сброс стоит до `close_tick` в `_amain_call`: тот сделает из нуля 1.
+        state_ops.restart_series(state)
+        return resp_messages, response_id, res_headers
+    target = _floor_target(ctx, from_level, resolved, params)
+    if target is None:
+        return resp_messages, response_id, res_headers
+    logger = getattr(ctx, "logger", None) or _fallback_logger
+
+    discarded_calls, discarded_text = discarded_answer(resp_messages)
+    log_artifact_reroute(
+        logger,
+        state,
+        from_level=from_level,
+        to_level=target,
+        tools=verdict.tools,
+        triggers=verdict.triggers,
+        usage_before=usage_before,
+        discarded_calls=discarded_calls,
+        discarded_text=discarded_text,
+    )
+    state_ops.enter_floor(state, target, verdict.reason)
+    resolved = _apply_call_kit(
+        state,
+        ctx,
+        target,
+    )
+    return await _arequest_backend_canonical(
+        messages, state, ctx, resolved=resolved
+    )
 
 
 async def aprocess_user_ask(messages, state: State, ctx: Any):
