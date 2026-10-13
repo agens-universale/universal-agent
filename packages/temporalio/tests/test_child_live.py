@@ -393,3 +393,117 @@ async def test_native_child_model_tools_input_human_and_replay(
             assert len(requests) == expected_calls
     finally:
         await provider.aclose()
+
+
+@pytest.fixture
+def auto_child_provider(tmp_path):
+    """Детерминированные ответы реальному HTTP-транспорту родителя и ребёнка."""
+    child_requests = []
+    requests = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *_args):
+            pass
+
+        def do_POST(self):
+            request = json.loads(self.rfile.read(int(self.headers["content-length"])))
+            requests.append(request)
+            child = any("name: subagent_worker" in str(m.get("content", ""))
+                        for m in request["messages"] if m["role"] == "system")
+            if child:
+                child_requests.append(request)
+            if child and len(child_requests) <= 3:
+                n = len(child_requests)
+                calls = [tool(f"read-{n}", "fs_read_file", {"path": str(tmp_path / f"file-{n}.txt")})]
+            elif not child and len(requests) == 1:
+                calls = [tool("child-call", "subagent_worker", {"task": "Read three files", "reason": "Delegate"})]
+            else:
+                calls = [tool("finish", "turn_finish", {
+                    "solution_type": "full_solution", "task": "demo",
+                    "task_report": "Child done" if child else "Parent done", "handoff": "{}",
+                })]
+            body = json.dumps({
+                "id": f"response-{len(requests)}", "model": request["model"],
+                "object": "chat.completion", "choices": [{"index": 0, "message": {
+                    "role": "assistant", "content": None, "tool_calls": calls,
+                }, "finish_reason": "tool_calls"}],
+                "usage": {"prompt_tokens": 40, "completion_tokens": 10, "total_tokens": 50},
+            }).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}/v1/chat/completions", child_requests
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+@pytest.mark.parametrize("legacy", [False, True], ids=["auto", "old_history"])
+async def test_native_unbound_child_auto_and_old_history_replay(tmp_path, monkeypatch, auto_child_provider, legacy):
+    """Ребёнок чередует модели; история без patch marker сохраняет ручной путь."""
+    from gc_core_temporalio.child_contracts import ChildRequest
+    binary = temporal_cli()
+    monkeypatch.chdir(tmp_path)
+    for n in range(1, 4):
+        (tmp_path / f"file-{n}.txt").write_text(f"file {n}")
+    url, child_requests = auto_child_provider
+    core = AppConfig.model_validate({
+        "level": "auto",
+        "models": {"fast": {"model": "fast-model", "url": url, "token": ""},
+                   "mid": {"model": "mid-model", "url": url, "token": ""}},
+        "slots": {"light": "fast", "default": "mid"},
+        "backend": {"api_mode": "chat_completions", "stream": False,
+                    "chat_completion_kwargs": {"stream": False}},
+        "agent": {"use_local_subagents": True, "max_steps": 10,
+                  "strict_turn_finish_validation": False,
+                  "auto_routing_two_level": {"strong_steps": 2, "weak_steps": 10}},
+        "logging": {"save_logs": False, "console_trace": False},
+        "tui": {"text_answer_mode": "deny"},
+    })
+    config = WorkerConfig(
+        workflow_queue="auto-child", model_queue="auto-child", resource_queue="auto-child",
+        state_dir=str(tmp_path),
+        thread_stores={"files": StoreConfig(path=str(tmp_path / "threads"))},
+        profiles={"test": AgentProfile(workspace=str(tmp_path), core=core)},
+    )
+    provider, native, stores = build_runtime(config)
+    try:
+        async with await WorkflowEnvironment.start_local(dev_server_existing_path=binary) as env:
+            options = worker_kwargs(config, native, stores)
+            if legacy:
+                # SDK записывает настоящую историю старого пути без patch marker;
+                # затем новый код Replayer сам выбирает прежнее поведение.
+                options["patch_activation_callback"] = lambda _patch: False
+            async with Worker(env.client, **options):
+                handle = await env.client.start_workflow(
+                    UniversalAgentWorkflow.run,
+                    RunRequest("test", "files", "test", "thread", ["Delegate three reads"], "auto-child", "auto-child"),
+                    id="unbound-auto-child", task_queue="auto-child",
+                )
+                result = await asyncio.wait_for(handle.result(), 45)
+                parent_history = await handle.fetch_history()
+                event = next(e for e in parent_history.events if e.HasField("start_child_workflow_execution_initiated_event_attributes"))
+                attrs = event.start_child_workflow_execution_initiated_event_attributes
+                (child_request,) = await env.client.data_converter.decode(attrs.input.payloads, [ChildRequest])
+                child_history = await env.client.get_workflow_handle(attrs.workflow_id).fetch_history()
+            assert "Parent done" in str(result["answer"])
+            if legacy:
+                assert "frozen_live_level" not in child_request.child_context
+                assert [r["model"] for r in child_requests] == ["mid-model"] * 4
+            else:
+                assert child_request.child_context["frozen_live_level"] == "auto"
+                assert child_request.child_context["frozen_level"] == "default"
+                assert [r["model"] for r in child_requests] == ["mid-model", "mid-model", "fast-model", "fast-model", "mid-model"]
+            replayer = Replayer(workflows=[UniversalAgentWorkflow, UniversalSubagentWorkflow])
+            await replayer.replay_workflow(parent_history)
+            await replayer.replay_workflow(child_history)
+    finally:
+        await provider.aclose()

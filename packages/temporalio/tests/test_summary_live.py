@@ -161,12 +161,13 @@ def normalized_traces(traces, workspace):
     return normalize(values, workspace)
 
 
+@pytest.mark.parametrize("legacy", [False, True], ids=["current", "old_history"])
 @pytest.mark.parametrize("backend", ["file", "sqlite"])
 @pytest.mark.parametrize(
     "name", ["pre_run", "pre_backend", "multibatch", "repair"]
 )
 async def test_automatic_summary_full_trace_parity(
-    tmp_path, monkeypatch, summary_http, backend, name
+    tmp_path, monkeypatch, summary_http, backend, name, legacy
 ):
     binary = temporal_cli()
     from gc_core.config_modules import env_vars
@@ -240,6 +241,8 @@ async def test_automatic_summary_full_trace_parity(
         runtime=RuntimeEnv(launch_root=str(tmp_path)),
     )
     ctx = await acreate_run_context(local_config, thread_store=local_store)
+    if legacy:
+        ctx.execution_patch = lambda _patch: False
     traces = []
 
     async def trace(record):
@@ -292,10 +295,10 @@ async def test_automatic_summary_full_trace_parity(
         async with await WorkflowEnvironment.start_local(
             dev_server_existing_path=binary
         ) as env:
-            async with Worker(
-                env.client,
-                **worker_kwargs(config, native, stores),
-            ):
+            options = worker_kwargs(config, native, stores)
+            if legacy:
+                options["patch_activation_callback"] = lambda _patch: False
+            async with Worker(env.client, **options):
                 handle = await env.client.start_workflow(
                     UniversalAgentWorkflow.run,
                     RunRequest(

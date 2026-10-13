@@ -23,6 +23,8 @@ from gc_core.tools.connect_mcp.tool_wrapper import MCPToolWrapper
 from gc_core.tools.registry import get_builtin_tools_data
 from gc_core.tools.skills.skills_tools import get_skills_tools_data
 
+from temporalio import workflow
+
 from gc_core_temporalio.child_preparation import (
     prepared_subagent_factories,
     seed_prepared_subagent_definitions,
@@ -120,6 +122,7 @@ def assemble_context(prepared, *, operations, store, logger, human_request):
             thread_store=store,
             agent_store=ExternalAgentStore(),
             operations=operations,
+            execution_patch=workflow.patched,
             lock_factory=nullcontext,
             prompt_loader=operations.prompt_loader,
             state_preparer=operations.state_preparer,

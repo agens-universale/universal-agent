@@ -214,6 +214,9 @@ class UniversalSubagentWorkflow:
                     level_provider=lambda: request.child_context[
                         "frozen_level"
                     ],
+                    live_level_provider=lambda: request.child_context.get(
+                        "frozen_live_level", request.child_context["frozen_level"]
+                    ),
                     force_legacy=request.child_context["force_legacy"],
                     breaker=CircuitBreaker.restore(
                         request.parent_transfer.circuit_breaker

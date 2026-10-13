@@ -36,10 +36,13 @@ FRONTEND = "хук фронтенда"
 
 #: Имена, которые ядро достаёт из контекста через ``getattr``/``hasattr``.
 CORE_CONTEXT_ATTRIBUTES = {
+    "active_state": DATA + ": ссылка на State текущего workflow-хода, без копии состояния",
     "agent_store": BOUND
     + " (ExternalAgentStore: чтение ресурсов агента — только в activity)",
     "ask_human": FRONTEND + ": вопрос человеку — human_request",
+    "attach_state": DATA + ": привязка State к RunContext в памяти, без ввода-вывода",
     "auth_connector": WORKER + ": токен модели — activity модели",
+    "auto_available": DATA + ": вычисляется assemble_run_context из настроек и router",
     "auxiliary_llm": DATA,
     "child_input_scope": BOUND + " (child_transport)",
     "collect_garbage": BOUND + " (no-op)",
@@ -47,6 +50,7 @@ CORE_CONTEXT_ATTRIBUTES = {
     "ctx": DATA,
     "download_publish": FRONTEND + ": публикация загрузки TUI",
     "durable_execution": DATA,
+    "execution_patch": BOUND + " (workflow.patched: прежняя ветка при replay)",
     "environment": WORKER + ": окружение Harbor",
     "guard_probe": BOUND,
     "human_request": BOUND + " (updates/signals workflow)",
@@ -74,6 +78,7 @@ CORE_CONTEXT_ATTRIBUTES = {
     "prompt_loader": BOUND,
     "prompt_resource": BOUND,
     "provider_currency": DATA,
+    "routing_params": DATA + ": типизированные параметры two_level из настроек",
     "run_id": DATA,
     "runtime": DATA,
     "settings": DATA,

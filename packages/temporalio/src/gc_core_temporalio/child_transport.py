@@ -220,6 +220,10 @@ class ChildTransport:
             "force_legacy": router.force_legacy,
             "circuit_breaker": router.breaker.snapshot(),
         }
+        # Старые истории сохраняют прежний вход child workflow; новые
+        # передают AUTO отдельно от уровня уже выбранного вызова родителя.
+        if workflow.patched("subagent-frozen-live-level-v1"):
+            child_context["frozen_live_level"] = router.live_level()
         try:
             parent_snapshot = _light_parent_snapshot(self._state)
         except ValueError as exc:

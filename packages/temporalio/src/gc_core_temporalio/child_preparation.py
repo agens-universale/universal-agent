@@ -29,6 +29,9 @@ async def prepare_child_context(call, parent_ctx):
     parent.model_router = ModelRouter(
         parent,
         level_provider=lambda: ref["frozen_level"],
+        live_level_provider=lambda: ref.get(
+            "frozen_live_level", ref["frozen_level"]
+        ),
         force_legacy=ref["force_legacy"],
         breaker=CircuitBreaker.restore(ref["circuit_breaker"]),
     )
