@@ -461,7 +461,7 @@ def _write_slot_text(text: str, template: str, level: str, alias) -> str:
     return ocw.upsert_mapping_entry(text, "slots", level, block)
 
 
-def _write_assign_text(text: str, template: str, consumer: str, value) -> str:
+def _write_assign_text(text: str, _template: str, consumer: str, value) -> str:
     """Задать/снять привязку потребителя. Снятие — под тем же стражем, что и слот
     (`_write_slot_text`): формы без отдельной строки бывают не только инлайновые,
     но и «ключ записан другими кавычками» (`'*'` против `"*"` писателя).
@@ -477,7 +477,8 @@ def _write_assign_text(text: str, template: str, consumer: str, value) -> str:
             text, parent, key, f"привязки assign.{consumer}"
         )
     value = str(value)
-    text = ocw.ensure_section_anchor_text(text, "assign", template)
+    # Запись одной привязки не применяет остальные привязки шаблона.
+    text = ocw.ensure_section_anchor_text(text, "assign", "")
     if parent != "assign":
         # Вложенный якорь (`assign.subagents`) — не топ-уровневый, его
         # `ensure_section_anchor_text` не заводит: заводим записью-словарём.

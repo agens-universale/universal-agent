@@ -429,9 +429,10 @@ def test_ensure_section_anchor_reuses_live_template_block():
     )
 
 
-def test_ensure_section_anchor_synthesizes_bare_anchor_for_commented_template():
-    """config.default.yml несёт models/slots/assign ЗАКОММЕНТИРОВАННЫМИ — вставлять
-    из шаблона нечего, синтезируется голый `<section>: {}`; повтор — no-op."""
+def test_ensure_section_anchor_synthesizes_bare_anchor_for_commented_template(
+    tmp_path,
+):
+    """Закомментированные секции дают пустые якоря, живая — блок шаблона."""
     from pathlib import Path
 
     from gc_core.config import _default_config_path
@@ -445,7 +446,7 @@ def test_ensure_section_anchor_synthesizes_bare_anchor_for_commented_template():
     assert (
         parsed["models"] == {}
         and parsed["slots"] == {}
-        and parsed["assign"] == {}
+        and parsed["assign"] == yaml.safe_load(template_text)["assign"]
     )
 
     for section in ("models", "slots", "assign"):
