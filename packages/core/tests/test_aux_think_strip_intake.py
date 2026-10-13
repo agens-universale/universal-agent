@@ -289,10 +289,10 @@ async def test_aux_always_strips_think_even_when_config_disables_it(
     assert parsed_judge["verdict"] == "safe"
 
 
-async def test_summarizer_history_strips_think_even_when_config_disables_it(
+async def test_summarizer_history_keeps_think_tags_in_assistant_content(
     monkeypatch,
 ):
-    """История в промпте summarizer/patch — без ``<think>``, даже при strip_think: false."""
+    """История саммари сохраняет ``<think>`` в тексте ответа."""
     seen_user_prompts: list[str] = []
 
     async def _fake_request(**kwargs):
@@ -342,13 +342,18 @@ async def test_summarizer_history_strips_think_even_when_config_disables_it(
                 "type": "message",
                 "role": "assistant",
                 "content": "<think>secret reasoning</think>visible answer",
+                "reasoning_content": "field-reasoning-tail",
             },
         ],
     )
     assert seen_user_prompts
     joined = "\n".join(seen_user_prompts)
-    assert "<think" not in joined
-    assert "secret reasoning" not in joined
+    assert "<think>secret reasoning</think>" in joined
+    assert "field-reasoning-tail" in joined
     assert "visible answer" in joined
-    assert "<think" not in result["last_dialog_steps"]
-    assert "visible answer" in result["last_dialog_steps"]
+    steps = result["last_dialog_steps"]
+    assert "<think" not in steps
+    assert "secret reasoning" not in steps
+    assert "field-reasoning-tail" not in steps
+    assert "[reasoning]" not in steps
+    assert "visible answer" in steps

@@ -87,9 +87,15 @@ def message_text_limited(
     *,
     tags: Sequence[str] = (),
     strip_think: bool = True,
+    include_reasoning: bool = True,
 ) -> str:
     text = strip_original_user_messages_block(
-        message_text_for_summary(message, tags=tags, strip_think=strip_think)
+        message_text_for_summary(
+            message,
+            tags=tags,
+            strip_think=strip_think,
+            include_reasoning=include_reasoning,
+        )
     )
     if max_message_chars <= 0:
         return text
@@ -337,6 +343,7 @@ def format_last_dialog_steps(
     *,
     tags: Sequence[str] = (),
     strip_think: bool = True,
+    include_reasoning: bool = True,
 ) -> str:
     turns = group_into_turns(messages)
     tail = turns[-max_steps:] if len(turns) > max_steps else turns
@@ -346,7 +353,11 @@ def format_last_dialog_steps(
         rendered: List[str] = []
         for msg in turn:
             text = message_text_limited(
-                msg, message_max_chars, tags=tags, strip_think=strip_think
+                msg,
+                message_max_chars,
+                tags=tags,
+                strip_think=strip_think,
+                include_reasoning=include_reasoning,
             ).strip()
             if text:
                 rendered.append(text)

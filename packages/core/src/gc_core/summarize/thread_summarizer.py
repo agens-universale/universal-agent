@@ -545,9 +545,9 @@ async def asummarize_dialog_via_chat_completions(
             ``trace`` — структура с шагами, промптами и результатами для отладки.
     """
     tags = projection_tags_from_config(ctx)
-    # История для summarizer / memory patch всегда без ``<think>`` в прозе.
-    # Persist ``reasoning_content`` — только канон ``state.messages``.
-    strip_think = True
+    # ``<think>`` остаётся в тексте ответа и режется лимитом сообщения.
+    # Поле ``reasoning_content`` дописывается отдельно: клип 8000, начало и хвост.
+    strip_think = False
     logger = getattr(ctx, "logger", None)
     trace: Dict[str, Any] = {
         "step1_batches": [],
@@ -684,13 +684,15 @@ async def asummarize_dialog_via_chat_completions(
         )
         logger.info("summary_final_raw_text=\n%s", text)
 
+    # Хвост читает основная модель: без ``<think>`` и без поля reasoning.
     last_dialog_steps = dialog_history.format_last_dialog_steps(
         history_for_summary,
         max_steps=last_steps_count,
         message_max_chars=min(last_step_message_max_chars, max_message_chars),
         steps_offset=max(0, int(steps_offset or 0)),
         tags=tags,
-        strip_think=strip_think,
+        strip_think=True,
+        include_reasoning=False,
     )
     trace["final_output"] = {
         "raw_summary": text,

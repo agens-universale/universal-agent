@@ -22,7 +22,10 @@ class StripTagsProjectionConfig(BaseModel):
     ``strip_think: true`` — не копировать. Salvage ``<think>`` — только если
     кроме ризонинга ничего нет (нет прозы и нет тулов). Смешанный ход
     (think + проза) кладёт в историю только прозу.
-    Из саммари, intent, судей и памяти ``<think>`` вырезается всегда.
+    История саммари и патч памяти оставляют ``<think>`` в тексте ответа
+    и дописывают клип ``reasoning_content``. Хвост ``<last_dialog_steps>``
+    для основной модели — без этих тегов и без поля reasoning.
+    Intent, судьи и ответ aux-модели по-прежнему без этих тегов.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)

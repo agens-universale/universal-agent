@@ -98,13 +98,14 @@ def message_text_for_summary(
     *,
     tags: Sequence[str] = (),
     strip_think: bool = True,
+    include_reasoning: bool = True,
 ) -> str:
     """
     Строит каноничное текстовое представление одного сообщения для LLM-промптов и метрик размера.
 
     Используется ``message_format.dialog_history``, суммаризацией и finish gate (trace digest).
-    Для assistant добавляет блок ``[reasoning]``: начало и хвост ``reasoning_content`` /
-    ``reasoning`` в лимите 8000.
+    Для assistant при ``include_reasoning`` добавляет блок ``[reasoning]``: начало и хвост
+    ``reasoning_content`` / ``reasoning`` в лимите 8000.
     """
     if not isinstance(message, dict):
         return ""
@@ -130,7 +131,7 @@ def message_text_for_summary(
         )
         text = f"[{role}] {content}".strip()
         raw = _reasoning_source(message).strip()
-        if raw:
+        if raw and include_reasoning:
             text = f"{text}{_REASONING_HEADER}{_clip_reasoning(raw)}"
         return text
     content = _message_content_to_text(raw_content)

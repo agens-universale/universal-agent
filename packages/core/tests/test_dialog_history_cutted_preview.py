@@ -151,6 +151,29 @@ def test_message_text_limited_no_limit_keeps_full_text():
     assert message_text_limited(msg, 0) == message_text_for_summary(msg)
 
 
+def test_think_tags_stay_in_content_reasoning_field_stays_clipped():
+    think = "<think>" + ("T" * 3000) + "</think>"
+    prose = "P" * 4000
+    raw = ("H" * 6000) + ("M" * 4000) + ("T" * 6000) + "END"
+    msg = {
+        "role": "assistant",
+        "content": think + prose,
+        "reasoning_content": raw,
+    }
+    text = message_text_limited(msg, 5_000, strip_think=False)
+    full = message_text_for_summary(msg, strip_think=False)
+    answer_part, _, reasoning_part = text.rpartition("\n[reasoning]\n")
+    _, _, expected_reasoning = full.rpartition("\n[reasoning]\n")
+    assert "<think>" in full
+    assert reasoning_part == expected_reasoning
+    assert reasoning_part.endswith("END")
+    assert "M" not in reasoning_part
+    match = _ENVELOPE_RE.fullmatch(answer_part)
+    assert match is not None
+    assert int(match.group(1)) == 5_000
+    assert _unescape(match.group(3)).startswith("[assistant] <think>")
+
+
 def test_long_answer_with_short_reasoning_limits_answer_keeps_reasoning():
     answer = "A" * 250_000
     reasoning = "short-reason-tail"
