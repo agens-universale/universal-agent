@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 import pytest
 from gc_core.config_modules.root import AppConfig
 from gc_core.model_router import (
@@ -39,6 +41,7 @@ def test_consumers_constant_matches_spec():
         "memory_compaction",
         "auto_judge",
         "vision",
+        "routing_judge",
     )
     assert SUBAGENT_CONSUMER_PREFIX == "subagent:"
 
@@ -214,20 +217,6 @@ def test_unbound_scalar_consumer_uses_active_level():
     assert "активный" in resolved.source and "max" in resolved.source
 
 
-def test_auto_judge_without_binding_uses_default_statically_not_active_level():
-    router = _router(
-        {
-            "models": {"a": {}, "b": {}, "c": {}},
-            "slots": {"light": "a", "default": "b", "max": "c"},
-        },
-        level="max",
-    )  # активный уровень max — auto_judge обязан игнорировать это
-    resolved = router.resolve("auto_judge")
-    assert resolved.alias == "b"
-    assert "default" in resolved.source
-    assert "auto_judge" in resolved.source
-
-
 def test_level_fallback_matrix_when_requested_slot_unset():
     router = _router(
         {
@@ -240,6 +229,21 @@ def test_level_fallback_matrix_when_requested_slot_unset():
     assert resolved.alias == "b"
     assert "фоллбэк" in resolved.source
     assert "light" in resolved.source and "default" in resolved.source
+
+
+def test_raw_auto_level_raises_honest_error_instead_of_key_error():
+    """`_resolve_level` индексирует
+    `LEVEL_FALLBACK[level]` — сырой литерал `auto` ("`level: auto`" не переведён
+    через `auto_routing.levels.effective_level`) раньше падал `KeyError: 'auto'`.
+    Честная ошибка вместо этого — молчаливого дефолта нет."""
+    router = _router(
+        {"models": {"b": {}}, "slots": {"default": "b"}}, level="auto"
+    )
+    with pytest.raises(ValueError) as excinfo:
+        router.resolve_level("auto")
+    message = str(excinfo.value)
+    assert "auto" in message
+    assert "effective_level" in message
 
 
 def test_single_model_registry_without_any_slot_resolves_to_it():
@@ -515,6 +519,77 @@ def test_unbound_override_ignored_when_binding_is_alias():
 def test_unbound_override_none_by_default_keeps_level_path():
     router = _router({"models": {"flash": {}}, "slots": {"default": "flash"}})
     assert router.resolve("main").alias == "flash"
+
+
+def test_same_call_kit_ignores_only_the_source():
+    """Комплект вызова — всё, кроме витринного `source`: фоллбэк незаданного слота
+    и сам слот дают тот же запрос; одна модель с разными параметрами — нет."""
+    router = _router(
+        {
+            "models": {
+                "cold": {
+                    "model": "m-1",
+                    "main": {"temperature": 0.2},
+                },
+                "hot": {
+                    "model": "m-1",
+                    "main": {"temperature": 0.9},
+                },
+            },
+            "slots": {"light": "cold", "default": "hot"},
+        }
+    )
+    default = router.resolve_level("default")
+    fallback = router.resolve_level("max")  # max не задан → фоллбэк на default
+    assert (
+        fallback.source != default.source
+        and fallback.same_call_kit(default) is True
+    )
+    assert router.resolve_level("light").same_call_kit(default) is False
+
+
+def test_same_call_kit_compares_every_field_but_the_source():
+    """Один алиас, различие в одном поле: параметры, адрес и токен различают
+    комплекты вызова, витринное `source` — нет."""
+    kit = ResolvedModel(
+        alias="mid",
+        model="m-1",
+        url="http://127.0.0.1:8014/v1/chat/completions",
+        authorization=None,
+        backend_overrides={"temperature": 0.2},
+        tariff=None,
+        source="уровень default",
+    )
+    assert (
+        kit.same_call_kit(replace(kit, backend_overrides={"temperature": 0.9}))
+        is False
+    )
+    assert (
+        kit.same_call_kit(
+            replace(kit, url="http://127.0.0.1:8015/v1/chat/completions")
+        )
+        is False
+    )
+    assert (
+        kit.same_call_kit(replace(kit, authorization="Bearer other")) is False
+    )
+    assert (
+        kit.same_call_kit(replace(kit, source="фоллбэк max → default")) is True
+    )
+
+
+def test_auto_judge_without_binding_uses_default_statically_not_active_level():
+    router = _router(
+        {
+            "models": {"a": {}, "b": {}, "c": {}},
+            "slots": {"light": "a", "default": "b", "max": "c"},
+        },
+        level="max",
+    )  # активный уровень max — auto_judge обязан игнорировать это
+    resolved = router.resolve("auto_judge")
+    assert resolved.alias == "b"
+    assert "default" in resolved.source
+    assert "auto_judge" in resolved.source
 
 
 # --- модель main-трейса для заданного уровня вызова ---------------------------

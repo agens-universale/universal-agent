@@ -231,14 +231,11 @@ def validate_model_alias(alias: str) -> None:
 
 
 def validate_level_value(value: str) -> str:
-    """level ∉ LEVELS — ошибка; auto получает отдельную подсказку (появится в волне C)."""
-    if value == "auto":
+    """level ∉ LEVELS — ошибка; `auto` — режим автовыбора (перевод в уровень —
+    `auto_routing.levels.effective_level`)."""
+    if value != "auto" and value not in LEVELS:
         raise ValueError(
-            "level: значение 'auto' появится с функцией авто-выбора — пока недоступно"
-        )
-    if value not in LEVELS:
-        raise ValueError(
-            f"level должен быть одним из {LEVELS}, получено '{value}'"
+            f"level должен быть одним из {LEVELS} или 'auto', получено '{value}'"
         )
     return value
 
@@ -574,14 +571,27 @@ class AssignConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     finish_gate: str | None = None
-    text_answer_judge: str | None = None
+    text_answer_judge: str | None = Field(
+        default=None, json_schema_extra=gc_meta(expert=True)
+    )
     command_judge: str | None = None
     summary: str | None = None
-    intent_scope: str | None = None
-    memory_compaction: str | None = None
-    auto_judge: str | None = None
-    vision: str | None = None
-    subagents: dict[str, str] = {}
+    intent_scope: str | None = Field(
+        default=None, json_schema_extra=gc_meta(expert=True)
+    )
+    memory_compaction: str | None = Field(
+        default=None, json_schema_extra=gc_meta(expert=True)
+    )
+    auto_judge: str | None = Field(
+        default=None, json_schema_extra=gc_meta(expert=True)
+    )
+    vision: str | None = Field(
+        default=None, json_schema_extra=gc_meta(expert=True)
+    )
+    routing_judge: str | None = None
+    subagents: dict[str, str] = Field(
+        default_factory=dict, json_schema_extra=gc_meta(expert=True)
+    )
 
     @model_validator(mode="before")
     @classmethod

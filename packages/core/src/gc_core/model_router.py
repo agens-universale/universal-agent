@@ -18,7 +18,7 @@ Router читает секции `models`/`slots`/`assign` из снимка н�
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Callable
 
 from gc_core.config_modules.model_registry import (
@@ -42,6 +42,7 @@ CONSUMERS = (
     "memory_compaction",
     "auto_judge",
     "vision",
+    "routing_judge",
 )
 SUBAGENT_CONSUMER_PREFIX = "subagent:"
 
@@ -57,7 +58,14 @@ _SCALAR_ASSIGN_FIELDS = (
     "memory_compaction",
     "auto_judge",
     "vision",
+    "routing_judge",
 )
+
+# Потребители, чей НЕПРИВЯЗАННЫЙ резолв идёт фиксированным уровнем вместо уровня
+# такта. Единственная запись — судья автовыбора: арбитр не следует за тем, кого
+# судит, и старые конфиги без строки `assign.routing_judge` не увозят его на max
+# вместе с исполнителем. Таблица, а не ветка по имени: правило описано данными.
+UNBOUND_CONSUMER_LEVEL = {"routing_judge": "default"}
 
 
 @dataclass(frozen=True)
@@ -81,6 +89,15 @@ class ResolvedModel:
     # Mid-turn пороги сжатия. 0 = не задан (как отсутствие ключа в снимке).
     summary_trigger_chars: int = 0
     summary_trigger_tokens: int = 0
+
+    def same_call_kit(self, other: ResolvedModel) -> bool:
+        """Тот же комплект вызова: совпадает всё, кроме `source` — витринного
+        «почему», которое у фоллбэка незаданного слота и у самого слота разное при
+        одном и том же запросе. Два алиаса одной модели с разными параметрами
+        (`backend_overrides`, адрес, токен, тариф) — разные комплекты. Два алиаса с
+        одинаковыми настройками — тоже разные: `alias` сравнивается сознательно, по
+        правилу «все поля, кроме `source`»."""
+        return replace(self, source="") == replace(other, source="")
 
 
 class AliasCircuitOpenError(RuntimeError):
@@ -198,13 +215,18 @@ class ModelRouter:
         breaker: CircuitBreaker | None = None,
         force_legacy: bool = False,
         unbound_override: ResolvedModel | None = None,
+        is_subagent_child: bool = False,
+        live_level_provider: Callable[[], str] | None = None,
     ) -> None:
         """``unbound_override`` — явный канал «во что резолвится этот Router, если
-        потребитель НЕ имеет assign-привязки» (используется дочерним Router'ом
+        потребитель НЕ имеет assign-привязки» (дочерний Router привязанного
         субагента, спека §7 п.4). Консультируется ТОЛЬКО когда `_lookup_binding`
         вернул None — явные привязки (и уровнем, и алиасом, §5.2: индирекция
         через слоты/реестр) резолвятся как обычно, override их не перекрывает.
         `None` (по умолчанию) — прежнее поведение (level_provider → слот).
+
+        ``is_subagent_child`` отмечает дочерний Router; ``live_level_provider``
+        возвращает исходный режим, до решения AUTO.
 
         ``settings`` — снимок настроек: всё, что принимает ``settings_of``
         (``AppConfig``, ``LoadedSettings``, контекст); ``None`` — умолчания."""
@@ -212,9 +234,11 @@ class ModelRouter:
         # Снимок фиксируется типизированным: клон (`with_override`) берёт его же.
         self._settings = settings_of(settings)
         self._level_provider = level_provider
+        self._live_level_provider = live_level_provider or level_provider
         self.breaker = breaker if breaker is not None else CircuitBreaker()
         self._force_legacy = force_legacy
         self._unbound_override = unbound_override
+        self._is_subagent_child = is_subagent_child
         # Записи реестра — в проекции `serialize_model_entry`: вычисленный
         # `authorization_header`, `backend_overrides` только из явных ключей,
         # тариф словарём (его и ждут потребители `ResolvedModel.tariff`).
@@ -229,7 +253,30 @@ class ModelRouter:
         return not self._models
 
     def active_level(self) -> str:
+        """Эффективный уровень (через `level_provider`; при `auto` — уровень
+        решения точки автороутинга, спека §5.1)."""
         return self._level_provider()
+
+    def live_level(self) -> str:
+        """Сырой режим (`auto` или уровень) — БЕЗ перевода `auto` в решение
+        (спека автороутинга §5.1); читают точка решения (`aroute_before_call`) и
+        витрины сырого режима."""
+        return self._live_level_provider()
+
+    @property
+    def auto_allowed(self) -> bool:
+        """auto разрешён только у Router'а без ``unbound_override`` (спека §5.1,
+        правило «auto только у непривязанного»): override делает потребителя
+        эффективно привязанным — и класс-2 (субагент с assign-привязкой), и
+        класс-1 деградация (`_maybe_pin_fallback`) выключают auto одним и тем
+        же правилом, без отдельного флага."""
+        return self._unbound_override is None
+
+    def has_binding(self, consumer: str) -> bool:
+        """Публичная обёртка над `_lookup_binding`: есть ли явная привязка
+        (уровень/алиас) у ЭТОГО потребителя, без резолва (спека §5.1: субагент
+        решает bound/unbound ДО выбора формы дочернего Router'а)."""
+        return self._lookup_binding(consumer) is not None
 
     @property
     def force_legacy(self) -> bool:
@@ -241,35 +288,56 @@ class ModelRouter:
 
     @property
     def is_subagent_child(self) -> bool:
-        """True — этот Router построен для субагента (``unbound_override`` задан,
-        спека §7 п.4): ``SubagentRunner._build_child_model_router`` ставит override
-        для ЛЮБОГО субагента, пинованного или нет (непинованный резолвится через
-        override в ту же активную модель, что вернул бы обычный резолв уровня) —
-        не путать с «у этого субагента ЕСТЬ пин отдельно от активной модели».
-        Читают потребители фоллбэков (спека §8): main-трейс (`processing_responses`)
-        пропускает class-2-обработку для ЛЮБОГО ребёнка-субагента (её ведёт
-        `SubagentRunner._maybe_pin_fallback` — пин там или нет, решает сравнение
-        резолвов, а не этот флаг)."""
-        return self._unbound_override is not None
+        """True — этот Router построен для субагента (флаг конструктора, спека
+        автороутинга §5.1). Читают потребители фоллбэков (спека §8): main-трейс
+        (`processing_responses`) пропускает class-2-обработку для ЛЮБОГО
+        ребёнка-субагента — её ведёт `SubagentRunner._maybe_pin_fallback`."""
+        return self._is_subagent_child
+
+    def with_level_providers(self, effective: Callable[[], str], live: Callable[[], str]) -> ModelRouter:
+        return ModelRouter(
+            self._settings, level_provider=effective, live_level_provider=live,
+            breaker=self.breaker, force_legacy=self._force_legacy,
+            unbound_override=self._unbound_override, is_subagent_child=self._is_subagent_child,
+        )
 
     def with_override(self, override: ResolvedModel | None) -> ModelRouter:
         """Клон Router'а с другим ``unbound_override`` — тот же снимок конфига,
-        level_provider и breaker (спека §8: деградация субагента на активную
-        модель без пересборки снимка/уровня, см. ``SubagentRunner``)."""
+        level_provider/live_level_provider и breaker (спека §8: деградация
+        субагента на активную модель без пересборки снимка/уровня, см.
+        ``SubagentRunner``)."""
         return ModelRouter(
             self._settings,
             level_provider=self._level_provider,
             breaker=self.breaker,
             force_legacy=self._force_legacy,
             unbound_override=override,
+            is_subagent_child=self._is_subagent_child,
+            live_level_provider=self._live_level_provider,
         )
 
     def resolve(
-        self, consumer: str, *, check_breaker: bool = True
+        self,
+        consumer: str,
+        *,
+        check_breaker: bool = True,
+        level_override: str | None = None,
     ) -> ResolvedModel:
         """``check_breaker=False`` — витринный резолв (футер, `/status`, спека §12.2):
         открытый алиас не роняет резолв, модель отдаётся честно. Рантайм-потребители
-        оставляют дефолт ``True`` — открытый алиас отказывает мгновенно (§8)."""
+        оставляют дефолт ``True`` — открытый алиас отказывает мгновенно (§8).
+
+        ``level_override`` — зафиксированный уровень ЭТОГО резолва вместо повторного
+        чтения `level_provider()`: без него точка
+        решения (`aroute_before_call`) и резолв читали бы живой провайдер независимо —
+        `/level` между ними развёл бы решение (что записано в state/лог) и комплект
+        вызова (что реально резолвится). Действует ТОЛЬКО на ветку «нет привязки, нет
+        override» — привязки и `unbound_override` резолвятся как обычно, поэтому
+        зафиксированный уровень не может обойти более точную привязку.
+
+        Потребитель из `UNBOUND_CONSUMER_LEVEL` без привязки идёт своим
+        фиксированным уровнем, а не уровнем такта: судья автовыбора не следует за
+        исполнителем, которого судит."""
         if not (
             consumer in CONSUMERS
             or consumer.startswith(SUBAGENT_CONSUMER_PREFIX)
@@ -309,9 +377,16 @@ class ModelRouter:
                 check_breaker=check_breaker,
             )
 
-        level = self._level_provider()
+        fixed = UNBOUND_CONSUMER_LEVEL.get(consumer)
+        if level_override is not None:
+            level = level_override
+        else:
+            level = fixed if fixed is not None else self._level_provider()
+        prefix = (
+            "" if fixed is not None and level_override is None else "активный "
+        )
         return self._resolve_level(
-            level, source_prefix="активный ", check_breaker=check_breaker
+            level, source_prefix=prefix, check_breaker=check_breaker
         )
 
     def resolve_main_at_level(
@@ -320,14 +395,14 @@ class ModelRouter:
         """Модель main-трейса для УРОВНЯ ВЫЗОВА — единый ответ для запроса и для
         всего, что обязано принадлежать той же модели (пороги сжатия истории).
 
-        Уровень задаёт вызывающий: сегодня это уровень, зафиксированный на ход
-        (`turn_boundary.begin_turn` → `state.turn_level`, спека §6.4) — живой
-        `/level` меняется без пересборки executor, и резолв по нему увёл бы модель
-        посреди цикла tool-call'ов. Уровня нет (ход не начинали через `begin_turn`
-        — легаси/тестовые двойники) или Router дочерний (у субагента модель уже
-        заморожена в самом Router'е) — обычный резолв `main`."""
-        if not level or self.is_subagent_child:
-            return self.resolve("main", check_breaker=check_breaker)
+        Уровень задаёт вызывающий из решения текущего запроса (`state._call_level`):
+        новый выбор применяется перед следующим запросом, а подготовленный запрос
+        сохраняет модель и её пороги. Уровня ещё нет — обычный резолв `main`.
+        Дочерний Router сохраняет свои явные привязки."""
+        if not level or self.is_subagent_child or not self.auto_allowed:
+            return self.resolve(
+                "main", check_breaker=check_breaker, level_override=level
+            )
         return self.resolve_level(level, check_breaker=check_breaker)
 
     def resolve_level(
@@ -340,7 +415,7 @@ class ModelRouter:
         как обычно (§4 «Матрица фоллбэков»).
 
         Не только витринный: этим же путём резолвится main-трейс по уровню,
-        зафиксированному на ход (`resolve_main_at_level`, спека §6.4) — поэтому
+        зафиксированному на вызов (`resolve_main_at_level`, спека §6.4) — поэтому
         предохранитель здесь проверяется как в рантайме (`check_breaker` по
         умолчанию), а не отключается «раз это витрина». ``check_breaker=False`` —
         чтение свойств записи (пороги сжатия): открытый алиас его не роняет."""
@@ -371,6 +446,11 @@ class ModelRouter:
     def _resolve_level(
         self, level: str, source_prefix: str, *, check_breaker: bool = True
     ) -> ResolvedModel:
+        if level not in LEVELS:
+            raise ValueError(
+                f"уровень '{level}' сюда не приходит: переводите через "
+                "auto_routing.levels.effective_level"
+            )
         for candidate_level in LEVEL_FALLBACK[level]:
             alias = self._slots.get(candidate_level)
             if alias:

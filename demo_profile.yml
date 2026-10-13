@@ -149,12 +149,13 @@ assign:
 
   # Все служебные потребители вне субагентов. Каждый — свой LLM-вызов
   # системы, привязка не обязательна (без неё — активная модель).
-  finish_gate: light           # судья завершения хода (+ его JSON-retry)
+  finish_gate: default         # судья финала на light пропускал бы больше
   text_answer_judge: light     # судья текст-ответа (TUI adaptive bounce; переиспользует воронку finish_gate)
-  command_judge: light         # судья модерации опасных команд/кода
-  summary: light                # суммаризация: батчи треда, сжатие/починка, working-memory patch, /compact
+  command_judge: default       # судья команд не опускается вместе с исполнителем
+  summary: default              # ошибки суммаризации необратимы
   intent_scope: light          # intent-scope выжимки (per-tool и final_answer)
   memory_compaction: light     # компакция проектной памяти (long memory)
+  routing_judge: default       # судья начальной пары, не следует за исполнителем
   vision: qwen-vl              # «глаза»: описывают изображение, если модель хода его не видит
                                # (тул fs_view_image); нужна модель со зрением — пин алиасом
 

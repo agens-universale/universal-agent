@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import (
     BaseModel,
@@ -26,6 +26,44 @@ DEFAULT_EXEC_TIMEOUT_SEC = 200
 class LoopDetectorConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     enabled: bool = True
+
+
+class AutoRoutingTwoLevelConfig(BaseModel):
+    """Числа автовыбора пары: `weak_steps` — сколько шагов подряд идёт слабая
+    модель пары, прежде чем шаг отдаётся сильной; `strong_steps` — сколько шагов
+    держится сильная после любого повода (важный вызов, сигнал) и на старте хода.
+    Шаг — один закрытый вызов модели главного цикла. `pair_threshold` — порог судьи
+    пары при `auto_routing_safe_level: auto`: оценка сложности хода 1–5 не ниже
+    порога выбирает пару default+max."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    weak_steps: int = 10
+    strong_steps: int = 2
+    pair_threshold: int = 3
+
+    @field_validator("pair_threshold", mode="before")
+    @classmethod
+    def validate_pair_threshold(cls, value: Any) -> Any:
+        # Порог 1 отправлял бы на сложную пару каждый ход; 5 — только «пятёрки».
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, int)
+            or not 2 <= value <= 5
+        ):
+            raise ValueError(
+                "auto_routing_two_level.pair_threshold: целое от 2 до 5"
+            )
+        return value
+
+    @field_validator("weak_steps", "strong_steps", mode="before")
+    @classmethod
+    def validate_steps(cls, value: Any) -> Any:
+        # mode="before": иначе True уже приведён pydantic к 1 и тихо стал числом шагов.
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError("auto_routing_two_level: целые >= 1")
+        if value < 1:
+            raise ValueError("auto_routing_two_level: целые >= 1")
+        return value
 
 
 class AgentConfig(BaseModel):
@@ -152,6 +190,21 @@ class AgentConfig(BaseModel):
     # для любой активной модели (пока непустой). Пусто / omit — без инжекта.
     model_steering: str = Field(
         default="", json_schema_extra=gc_meta(expert=True)
+    )
+    # Автовыбор уровня модели (спека 2026-09-08-auto-routing-design.md):
+    # рубильник фичи для деплоя/пресетов. False — автовыбор выключен целиком:
+    # `level: auto` работает как default (нотис при старте), позиция auto в /level
+    # не показывается. Сам по себе режим не включает —
+    # режим выбирает `level: auto` / `/level auto` / `--level auto`.
+    auto_routing: bool = True
+    # Сильная модель пары: default — light+default, max — default+max.
+    # auto — пару выбирает судья в начале хода, когда обе пары различаются;
+    # иначе используется обычная пара из двух разных моделей.
+    auto_routing_safe_level: Literal["default", "max", "auto"] = "auto"
+    # Шагов подряд на слабой до подъёма; шагов на сильной после любого повода
+    # и на старте хода; порог выбора сложной пары судьёй.
+    auto_routing_two_level: AutoRoutingTwoLevelConfig = Field(
+        default_factory=AutoRoutingTwoLevelConfig
     )
     loop_detector: LoopDetectorConfig = Field(
         default_factory=LoopDetectorConfig

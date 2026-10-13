@@ -190,9 +190,7 @@ class AppConfig(BaseModel):
     slots: SlotsConfig = Field(
         default_factory=SlotsConfig, json_schema_extra=gc_meta(expert=True)
     )
-    assign: AssignConfig = Field(
-        default_factory=AssignConfig, json_schema_extra=gc_meta(expert=True)
-    )
+    assign: AssignConfig = Field(default_factory=AssignConfig)
 
     @field_validator("config_version", mode="before")
     @classmethod
@@ -349,6 +347,11 @@ def resolve_paths(cfg: AppConfig, config_dir: str) -> AppConfig:
     cfg.paths.chat_completions_intent_guard_prompt_path = to_abs(
         cfg.paths.chat_completions_intent_guard_prompt_path
     ) or _prompt_default(config_dir, "chat_completions_intent_guard_prompt.md")
+    cfg.paths.chat_completions_routing_pair_judge_prompt_path = to_abs(
+        cfg.paths.chat_completions_routing_pair_judge_prompt_path
+    ) or _prompt_default(
+        config_dir, "chat_completions_routing_pair_judge_prompt.md"
+    )
     cfg.paths.chat_completions_custom_subagent_system_prompt_path = to_abs(
         cfg.paths.chat_completions_custom_subagent_system_prompt_path
     ) or _prompt_default(

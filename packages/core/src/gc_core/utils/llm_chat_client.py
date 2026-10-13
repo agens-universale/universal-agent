@@ -48,6 +48,7 @@ CONSUMER_RU_LABEL = {
     "intent_scope": "intent scope",
     "memory_compaction": "компакция памяти",
     "vision": "модель для зрения",
+    "routing_judge": "судья автовыбора",
 }
 
 _PROTECTED_CHAT_COMPLETION_KEYS = frozenset(

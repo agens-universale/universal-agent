@@ -11,6 +11,28 @@ import time
 from types import SimpleNamespace
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
+from gc_core.auto_routing.policy import (
+    Decision,
+    FINISH_REJECT,
+    LOOP,
+    NO_TOOL_BOUNCE,
+    PAIR_DESCEND,
+    PAIR_LOWER,
+    PAIR_START,
+    RoutingParams,
+    SAFE_LEVEL_AUTO,
+    TOOL_CALL_ERROR,
+    first_alive,
+    floor_levels,
+    level_below,
+    nearest_levels,
+    pair_entry_decision,
+    pair_start,
+    pair_tick,
+    turn_params,
+    two_level_decision,
+    with_fallback,
+)
 from gc_core.config import parse_chat_completions_max_tokens
 from gc_core.config_modules.gc import gc_force_collect_enabled
 from gc_core.config_modules.images import read_images_config
