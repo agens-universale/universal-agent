@@ -37,7 +37,7 @@ from gc_a2a.params import (
     parse_send,
     parse_task_id,
 )
-from gc_a2a.store import CANCELED, TERMINAL, TaskStore
+from gc_a2a.store import CANCELED, TERMINAL, WORKING, TaskStore
 from gc_a2a.turn import Turn
 
 logger = logging.getLogger(__name__)
@@ -173,24 +173,32 @@ class A2aFacade:
     async def _begin(
         self, opened: OpenTask, task_id: str, incoming: Incoming
     ) -> dict:
+        started = False
         try:
-            agent = await self._agent_for(opened.context_id, opened.cwd)
-            turn = self._turn(agent, opened.context_id, task_id, incoming.text)
-            bind_ask_human(agent, turn.ask)
-        except RpcError:
-            raise
-        except Exception as exc:
-            logger.exception("a2a agent")
-            await self._fail_setup(opened.context_id, task_id, exc)
+            try:
+                agent = await self._agent_for(opened.context_id, opened.cwd)
+                turn = self._turn(
+                    agent, opened.context_id, task_id, incoming.text
+                )
+                bind_ask_human(agent, turn.ask)
+            except RpcError:
+                raise
+            except Exception as exc:
+                logger.exception("a2a agent")
+                await self._fail_setup(opened.context_id, task_id, exc)
+                return await self._deliver_task(task_id, incoming)
+            async with self._gate:
+                task = self._store.task(task_id)
+                if task is None or task.state in TERMINAL:
+                    self._release(opened.context_id, task_id)
+                else:
+                    self._live[task_id] = turn
+                    turn.start()
+                    started = True
             return await self._deliver_task(task_id, incoming)
-        async with self._gate:
-            task = self._store.task(task_id)
-            if task is None or task.state in TERMINAL:
-                self._release(opened.context_id, task_id)
-            else:
-                self._live[task_id] = turn
-                turn.start()
-        return await self._deliver_task(task_id, incoming)
+        finally:
+            if not started:
+                await self._abandon_setup(opened.context_id, task_id)
 
     async def _deliver(self, incoming: Incoming) -> dict:
         task_id = self._store.message_task(incoming.message_id)
@@ -267,6 +275,16 @@ class A2aFacade:
             self._release(context_id, task_id)
             raise internal_error() from seal_exc
         self._release(context_id, task_id)
+
+    async def _abandon_setup(self, context_id: str, task_id: str) -> None:
+        """Снять резерв, если ход так и не стартовал (обрыв запроса и т.п.)."""
+        async with self._gate:
+            if task_id in self._live:
+                return
+            task = self._store.task(task_id)
+            if task is not None and task.state == WORKING:
+                await self._store.mark_canceled(task_id)
+            self._release(context_id, task_id)
 
     async def _arm_cancel(self, task_id: str) -> tuple[Turn | None, bool]:
         async with self._gate:

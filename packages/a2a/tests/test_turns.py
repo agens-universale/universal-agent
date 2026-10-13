@@ -159,6 +159,57 @@ async def test_cancel_during_agent_create_does_not_start_turn(tmp_path):
     assert agent.calls == []
 
 
+async def test_request_cancel_during_agent_create_seals_task(tmp_path):
+    ready = asyncio.Event()
+    first = True
+
+    async with session(tmp_path) as (client, facade, created):
+
+        async def slow_factory(agent_settings, **kwargs):
+            nonlocal first
+            del kwargs
+            agent = AnswerAgent("после")
+            agent.launch_root = agent_settings.runtime.launch_root
+            created.append(agent)
+            if first:
+                first = False
+                ready.set()
+                await asyncio.Event().wait()
+            return agent
+
+        facade._agent_factory = slow_factory
+        send = asyncio.create_task(
+            rpc(client, "SendMessage", message(message_id="m-1"))
+        )
+        await ready.wait()
+        listed = await rpc(client, "ListTasks", {})
+        task = listed.json()["result"]["tasks"][0]
+        task_id = task["id"]
+        context_id = task["contextId"]
+        send.cancel()
+        try:
+            await send
+        except asyncio.CancelledError:
+            pass
+        again = await rpc(client, "SendMessage", message(message_id="m-1"))
+        assert again.json()["result"]["task"]["id"] == task_id
+        assert again.json()["result"]["task"]["status"]["state"] == (
+            "TASK_STATE_CANCELED"
+        )
+        nxt = await rpc(
+            client,
+            "SendMessage",
+            message("дальше", message_id="m-2", contextId=context_id),
+        )
+        assert "error" not in nxt.json()
+        assert nxt.json()["result"]["task"]["status"]["state"] == (
+            "TASK_STATE_COMPLETED"
+        )
+        assert nxt.json()["result"]["task"]["artifacts"][0]["parts"][0][
+            "text"
+        ] == ("после")
+
+
 async def test_get_and_list_and_cancel(tmp_path):
     clock = Clock()
     async with session(
