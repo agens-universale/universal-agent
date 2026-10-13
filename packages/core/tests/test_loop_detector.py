@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 
+from gc_core.auto_routing.policy import LOOP
 from gc_core.loop_detector.constants import (
     GENERIC_PROFILE,
     LOOP_WARN_ATTR,
@@ -538,6 +539,7 @@ def _ptc_state(**extra):
         last_batch_unknown_tool_count=0,
         last_batch_invalid_arguments_count=0,
         stop_requested=False,
+        tick_signals=set(),
         **extra,
     )
 
@@ -584,13 +586,14 @@ def test_process_tool_calls_second_read_executes_and_emits_technical(
 
     tools_data = {"fs_read_file": _entry(**READ_PROFILE)}
     args = json.dumps({"path": "a.py", "reason": "look"})
+    state = _ptc_state()
     outs = run_coro(
         pr.aprocess_tool_calls(
             messages=[
                 _fc("fs_read_file", "c1", args),
                 _fc("fs_read_file", "c2", args),
             ],
-            state=_ptc_state(),
+            state=state,
             ctx=_ptc_ctx(tools_data),
             run_agent_func=None,
         )
@@ -606,6 +609,7 @@ def test_process_tool_calls_second_read_executes_and_emits_technical(
     assert len(tech) == 1
     assert "Loop detector:" in tech[0]["content"]
     assert "fs_read_file" in tech[0]["content"]
+    assert LOOP in state.tick_signals
 
 
 def test_process_tool_calls_user_stop_clears_window(monkeypatch):
@@ -1127,3 +1131,61 @@ def test_app_config_wires_loop_detector():
         agent=AgentConfig(loop_detector=LoopDetectorConfig(enabled=False))
     )
     assert cfg_off.agent.loop_detector.model_dump() == {"enabled": False}
+
+
+def test_thread_meta_does_not_persist_loop_window():
+    from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
+    from gc_core.states import State
+
+    constructor = {
+        "verbose": False,
+        "model": "CodeChat",
+        "tools_spec": [],
+        "tools_descr": [],
+        "skills_list": [],
+        "max_steps": 2,
+        "system_prompt_id": "v1",
+        "use_server_subagents": False,
+    }
+    state = State(**constructor)
+    state.loop_detector_window = ["fp"]
+    state.loop_detector_pending = [{"tool": "x", "args": {}}]
+    payload = ThreadMetaMapper.merge_state_into_meta({}, state)
+    assert "loop_detector_window" not in payload
+    assert "loop_detector_pending" not in payload
+    restored = State(**constructor, shared=ThreadMetaMapper.shared_from_meta(payload))
+    assert restored.loop_detector_window == []
+    assert restored.loop_detector_pending == []
+
+
+def test_execution_snapshot_preserves_loop_window_for_resuming_a_run():
+    from gc_core.states import State
+
+    state = State(
+        verbose=False, model="CodeChat", tools_spec=[], tools_descr=[],
+        skills_list=[], max_steps=2, system_prompt_id="v1",
+        use_server_subagents=False,
+    )
+    state.loop_detector_window = ["fp"]
+    state.loop_detector_pending = [{"tool": "x", "args": {}}]
+    restored = State.from_execution_snapshot(state.to_execution_snapshot())
+    assert restored.loop_detector_window == ["fp"]
+    assert restored.loop_detector_pending == [{"tool": "x", "args": {}}]
+
+
+def test_empty_argument_string_fingerprints_as_an_empty_object():
+    """Вызов с пустой строкой аргументов — отпечаток `{}`, как у `"{}"`: повтор
+    такого вызова считается и доходит до напоминания."""
+    entry = _entry(**GENERIC_PROFILE, injected=("execution_confidence",))
+    entry["spec"] = {
+        "parameters": {
+            "type": "object",
+            "properties": {"todos": {"type": "array"}},
+        }
+    }
+    ctx = _ctx({"session_todo": entry})
+    state = _state()
+    for _ in range(3):
+        observe(state, ctx, "session_todo", "")
+    assert state.loop_detector_window[-1] == fingerprint("session_todo", {})
+    assert flush(state) is not None

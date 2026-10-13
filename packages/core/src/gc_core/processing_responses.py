@@ -1840,6 +1840,7 @@ async def _afinalize_tool_batch(
 
     notice = flush_loop_detector(state)
     if notice:
+        state.tick_signals.add(LOOP)
         tools_outputs.append(
             _make_technical_feedback_user_message(
                 notice,
@@ -2148,6 +2149,9 @@ class _AgentLoop:
     ) -> None:
         self.state = state
         self.ctx = ctx
+        attach = getattr(ctx, "attach_state", None)
+        if callable(attach):
+            attach(state)
         self.get_full_history_messages = get_full_history_messages
         self.persist_messages_callback = persist_messages_callback
         self.pre_backend_compaction_hook = pre_backend_compaction_hook
@@ -2281,6 +2285,7 @@ class _AgentLoop:
         )
 
     def _bounce_empty_messages(self) -> List[Dict]:
+        self.state.tick_signals.add(NO_TOOL_BOUNCE)
         self.run_logger.error("Empty messages list")
         self.tool_error_cnt += 1
         self.state.steps += 1
@@ -2298,6 +2303,7 @@ class _AgentLoop:
         self.tool_error_cnt += 1
         # Страховка для путей вне батча (finish-аргументы и т.п.): батч
         # свои невалидные вызовы закрывает сам в process_tool_calls.
+        self.state.tick_signals.add(TOOL_CALL_ERROR)
         _attach_truncation_hint(e, self.state)
         return [
             _make_technical_feedback_user_message(
@@ -2375,10 +2381,31 @@ class _AgentLoop:
         _pre_sanitize_digest = json.dumps(
             messages, ensure_ascii=False, sort_keys=True, default=str
         )
+
+        rejected_feedback: List[Dict] = []
+
+        def rejected_tool_call(message: Dict) -> Dict:
+            # Рантайм сохраняет прежнюю последовательность команд при replay;
+            # локально исправленное поведение включено без отдельной настройки.
+            execution_patch = port(self.ctx, "execution_patch")
+            feedback = build_invalid_tool_call_feedback_message(message)
+            if execution_patch is None or execution_patch(
+                "tool-call-rejection-recovery-v1"
+            ):
+                self.state.tick_signals.add(TOOL_CALL_ERROR)
+                rejected_feedback.append(feedback)
+            return feedback
+
         messages = sanitize_messages_for_chat_completions(
             messages,
-            invalid_tool_call_factory=build_invalid_tool_call_feedback_message,
+            invalid_tool_call_factory=rejected_tool_call,
         )
+        if rejected_feedback and _batch_has_pending_function_calls(messages):
+            # Фидбэк не должен закрыть режим батча или разорвать в истории
+            # корректный вызов и его будущий output при отправке в API.
+            messages = rejected_feedback + [
+                message for message in messages if message not in rejected_feedback
+            ]
         _post_sanitize_digest = json.dumps(
             messages, ensure_ascii=False, sort_keys=True, default=str
         )
@@ -2644,7 +2671,10 @@ class _AgentLoop:
         if finish_new:
             # I3: finish output в state до gate; persist — после apply.
             state.messages += finish_new
-        finish_arguments = closing_finish.get("arguments")
+        finish_arguments = arguments_without_service_fields(
+            closing_finish.get("arguments"),
+            (getattr(self.ctx, "tools_data", None) or {}).get(FINISH_TOOL_NAME) or {},
+        )
         if backend_mode != "chat_completions":
             if finish_new:
                 await _maybe_persist(
@@ -2659,6 +2689,7 @@ class _AgentLoop:
             finish_arguments, finish_call_id
         )
         if decision.outcome == "reject":
+            state.tick_signals.add(FINISH_REJECT)
             if tail_new:
                 state.messages += tail_new
                 await _maybe_persist(
@@ -2737,6 +2768,7 @@ class _AgentLoop:
             getattr(state, "last_batch_invalid_arguments_count", 0) or 0
         )
         if n_unknown + n_invalid > 0:
+            state.tick_signals.add(TOOL_CALL_ERROR)
             # Бюджет считаем по ходам без нормального вызова, а не
             # по вызовам: один кривой батч стоит одну единицу, иначе
             # он гасит прогон раньше, чем модель увидит фидбэк.
@@ -2852,6 +2884,7 @@ class _AgentLoop:
                     await await_callback(self.mark_finalizing(False))
             return await self._aclose_turn(assistant_text)
         # === reject ===
+        state.tick_signals.add(NO_TOOL_BOUNCE)
         self.tool_error_cnt += 1
         bounce_msg = self._text_reject_bounce_msg(
             decision_reject_feedback, last_finish, bounce_msg
