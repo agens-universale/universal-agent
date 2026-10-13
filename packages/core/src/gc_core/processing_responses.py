@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from gc_core.auto_routing import state_ops
+from gc_core.auto_routing.judge_runner import arun_pair_judge
 from gc_core.auto_routing.levels import auto_active, effective_level
 from gc_core.auto_routing.log_events import (
     log_artifact_reroute,
@@ -459,6 +460,70 @@ def _routing_params(ctx: Any, state: Any) -> RoutingParams:
     return turn_params(
         _raw_routing_params(ctx), getattr(state, "turn_safe_level", None)
     )
+
+
+def _strong_lower_last(state: State) -> bool:
+    """Последний закрытый вызов сделала сильная модель нижней пары (уровень `default`).
+    Меток уровня хватает: лестница пар работает, только когда в обеих парах разные
+    модели (`levels.resolve_routing_params`), так что `light` и `default` — всегда
+    разные модели."""
+    return getattr(state, "_last_effective_level", None) == PAIR_LOWER
+
+
+async def _aupdate_turn_pair(
+    state: State,
+    ctx: Any,
+    *,
+    mid_turn: bool,
+    signals: Tuple[str, ...],
+) -> Optional[str]:
+    """Пара хода (спеки pair-judge и pair-ladder): политика `two_level`,
+    `safe_level: auto`. Пары нет — судья и старт лестницы (`pair_start`); есть — шаг
+    лестницы (`pair_tick`) по сигналам такта. Каждая смена — событие `routing_pair`.
+    Возвращает причину смены на ЭТОМ такте (`raise` | `lock` | `descend`) — решение
+    такта тогда берётся из `pair_entry_decision`; старт и «без смены» — None."""
+    raw = _raw_routing_params(ctx)
+    if raw.safe_level != SAFE_LEVEL_AUTO:
+        return None
+    logger = getattr(ctx, "logger", None) or _fallback_logger
+    turn = int(getattr(state, "user_turn_seq", 0) or 0) + 1
+    step = int(getattr(state, "steps_in_turn", 0) or 0)
+    if getattr(state, "turn_safe_level", None) is None:
+        choice = await arun_pair_judge(
+            state, ctx, params=raw, mid_turn=mid_turn
+        )
+        pair = pair_start(choice.score, raw)
+        state_ops.set_pair(state, pair)
+        log_routing_pair(
+            logger,
+            turn=turn,
+            step=step,
+            cause=PAIR_START,
+            before=None,
+            after=pair,
+            score=choice.score,
+        )
+        return None
+    before = state_ops.read_pair(state)
+    strong_lower_last = (
+        bool(signals)
+        and before.safe_level == PAIR_LOWER
+        and _strong_lower_last(state)
+    )
+    after, cause = pair_tick(before, signals, strong_lower_last, raw)
+    if cause is None:
+        return None
+    state_ops.set_pair(state, after)
+    log_routing_pair(
+        logger,
+        turn=turn,
+        step=step,
+        cause=cause,
+        before=before,
+        after=after,
+        signals=() if cause == PAIR_DESCEND else signals,
+    )
+    return cause
 
 
 def _first_alive_level(

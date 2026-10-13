@@ -19,6 +19,7 @@ CATEGORY_INTENT_SCOPE = "intent_scope"
 CATEGORY_STRUCTURED_OUTPUT = "structured_output"
 CATEGORY_SUBAGENT = "subagent"
 CATEGORY_VISION = "vision"
+CATEGORY_ROUTING_JUDGE = "routing_judge"
 CATEGORY_UNCATEGORIZED = "uncategorized"
 
 _KNOWN_CATEGORIES = (
@@ -31,6 +32,7 @@ _KNOWN_CATEGORIES = (
     CATEGORY_STRUCTURED_OUTPUT,
     CATEGORY_SUBAGENT,
     CATEGORY_VISION,
+    CATEGORY_ROUTING_JUDGE,
     CATEGORY_UNCATEGORIZED,
 )
 
@@ -98,6 +100,8 @@ def category_for_request_label(request_label: str | None) -> str:
         return CATEGORY_VISION
     if label == "structured_output":
         return CATEGORY_STRUCTURED_OUTPUT
+    if "routing_judge" in label:
+        return CATEGORY_ROUTING_JUDGE
     return CATEGORY_MAIN
 
 
