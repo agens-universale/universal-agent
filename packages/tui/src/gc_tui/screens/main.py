@@ -347,7 +347,9 @@ _UNRESOLVED = object()
 # по фактическому уровню подготовленного вызова) либо живой резолв витрины. См.
 # `TraceScreen._footer_head_snapshot`.
 _FooterHeadSnapshot = namedtuple(
-    "_FooterHeadSnapshot", ("profile", "level_color", "model", "transition")
+    "_FooterHeadSnapshot",
+    ("profile", "mode_auto", "level_color", "model", "running", "transition"),
+    defaults=(None,),
 )
 
 
@@ -774,8 +776,8 @@ class TraceScreen(Screen):
     def _footer_live_level(self) -> str:
         """Активный уровень ЖИВОГО резолва (спека §12.1/§12.2): реагирует на
         /level и активацию профиля сразу, без пересборки executor. Общий
-        источник для цвета точки будущего состояния и сравнения «уровень
-        менялся?» посреди хода (спека Task 15)."""
+        источник для цвета будущей модели и сравнения «уровень менялся?»
+        посреди вызова; факт берётся через Router работающего executor."""
         display_router = getattr(self.app, "display_router", None)
         return (
             display_router().active_level()
@@ -797,34 +799,28 @@ class TraceScreen(Screen):
         ref = ref_fn() if callable(ref_fn) else None
         return ref.name if ref is not None else None
 
-    def _footer_pinned_resolution(self) -> tuple[str, str, str] | None:
-        """(уровень, цвет, имя модели) ХОДА, зафиксированного на пине (спека
-        Task 15) — «факт», на чём реально идут запросы, а не живой резолв.
+    def _footer_running_resolution(self) -> "tuple[str, str, str, bool] | None":
+        """Факт подготовленного вызова через Router работающего executor.
 
-        None — активного хода нет (раннер отсутствует / не бежит), пина нет
-        (легаси-старт не через `begin_turn`) или у раннера нет Router'а этого
-        executor'а. Резолвит `pinned_level()` ЧЕРЕЗ `pinned_router()` — снимок
-        `models`/`slots`/`assign`, зафиксированный при сборке ИМЕННО этого
-        executor'а, — не живой `display_router()` TUI: тот отражает /profiles
-        мгновенно и подменил бы «факт» на модель уже переключившегося профиля
-        раньше, чем ход её реально увидит."""
+        Новый выбор уровня или профиля не подменяет этот комплект. До первого
+        решения используется живой резолв того же Router. Чтение не строит executor.
+        """
         runner = getattr(self.app, "active_runner", None)
         is_running = getattr(runner, "is_running", None)
         if runner is None or not callable(is_running) or not is_running():
             return None
-        pinned_level_fn = getattr(runner, "pinned_level", None)
-        pinned_router_fn = getattr(runner, "pinned_router", None)
-        if not callable(pinned_level_fn) or not callable(pinned_router_fn):
-            return None
-        level = pinned_level_fn()
-        router = pinned_router_fn()
-        if not level or router is None:
+        router_fn = getattr(runner, "executor_router", None)
+        router = router_fn() if callable(router_fn) else None
+        if router is None:
             return None
         from gc_core.model_router import AliasCircuitOpenError
         from gc_core.onboarding import MODEL_SENTINEL
 
+        call_level = getattr(runner, "call_level", None)
+        prepared_level = call_level() if callable(call_level) else None
+        level = prepared_level or router.active_level()
         try:
-            resolved = router.resolve_level(level)
+            resolved = router.resolve_main_at_level(level, check_breaker=False)
         except AliasCircuitOpenError as exc:
             resolved = exc.resolved
         except ValueError:
@@ -832,78 +828,111 @@ class TraceScreen(Screen):
         model = resolved.alias or resolved.model
         if not model or model == MODEL_SENTINEL:
             return None
-        return (level, self._level_color(level), model)
+        return (level, self._level_color(level), model, prepared_level is not None)
 
     def _footer_head_snapshot(self) -> _FooterHeadSnapshot:
-        """Снимок футер-головы — один резолв на отрисовку футера.
-
-        `profile`/`level_color`/`model` — «факт»: то, на чём реально идёт
-        текущий ход (пин, спека Task 15), либо, вне хода, живой резолв, как
-        раньше. `transition` — `(цвет_нового_уровня_или_None, новая_модель)`,
-        что применится ПОСЛЕ хода, или `None` — переход не нужен (хода нет,
-        будущая модель совпадает с фактической). Каждый резолв недёшев: имя
-        профиля глобит оба корня профилей (диск), цвет/модель строят Router
-        витрин от `effective_settings()` — лесенка усечения в
-        `_compose_footer_right` обязана получить снимок готовым, не резолвить
-        заново на каждой ступени."""
+        """Один снимок на кадр: фактический вызов и выбранный следующий режим."""
         profile = self._footer_profile_name()
-        live_level = self._footer_live_level()
-        live_color = self._level_color(live_level)
-        live_model = str(self._footer_model_name())
-        pinned = self._footer_pinned_resolution()
-        if pinned is None:
-            return _FooterHeadSnapshot(profile, live_color, live_model, None)
-        pinned_level, fact_color, fact_model = pinned
-        if fact_model == live_model:
-            return _FooterHeadSnapshot(profile, fact_color, fact_model, None)
-        transition = (
-            live_color if pinned_level != live_level else None,
-            live_model,
-        )
-        return _FooterHeadSnapshot(profile, fact_color, fact_model, transition)
+        running = self._run_in_progress()
+        auto_mode_active = getattr(self.app, "auto_mode_active", None)
+        selected_auto = auto_mode_active() if callable(auto_mode_active) else False
+        resolution = self._footer_running_resolution()
+        next_selection = None
+        if resolution is not None:
+            selection = getattr(self.app.active_runner, "next_call_selection", None)
+            next_selection = selection() if callable(selection) else None
+            if next_selection is not None:
+                selected_auto = next_selection[0]
+        transition = None
+        mode_auto = selected_auto
+        if resolution is not None:
+            level, color, model, prepared = resolution
+            runner = self.app.active_runner
+            call_mode = getattr(runner, "call_mode", None)
+            actual_mode = call_mode() if callable(call_mode) else None
+            if actual_mode is not None:
+                mode_auto = actual_mode == "auto"
+            if selected_auto:
+                if actual_mode == "manual":
+                    transition = (AUTO_LEVEL_VALUE.color, "auto")
+            else:
+                if next_selection is None:
+                    live_level = self._footer_live_level()
+                    live_model = str(self._footer_model_name())
+                else:
+                    _, live_level, live_model = next_selection
+                if prepared and (model != live_model or level != live_level or actual_mode == "auto"):
+                    transition = (
+                        self._level_color(live_level) if level != live_level or mode_auto else None,
+                        live_model,
+                    )
+        else:
+            color = self._level_color(self._footer_live_level())
+            model = str(self._footer_model_name())
+        return _FooterHeadSnapshot(profile, mode_auto, color, model, running, transition)
 
     def _footer_head(
         self,
         *,
         with_profile: bool,
         profile_name_cols: int = _PROFILE_NAME_MAX_COLS,
-        snapshot: _FooterHeadSnapshot | None = None,
+        snapshot: "_FooterHeadSnapshot | None" = None,
+        with_model_name: bool = True,
+        with_level_block: bool = True,
         with_transition: bool = True,
-        meter: Text | object | None = _UNRESOLVED,
-    ) -> Text:
-        """head = [профиль ] ● модель[ → [● ]модель][ · контекст]. Точка —
-        жирная, цвет уровня, сама и есть разделитель перед моделью (спека
-        Task 8). Переход «сейчас → станет» (спека Task 15) — только посреди
-        хода и только если будущая модель отличается от фактической; точка
-        нового уровня — только если уровень менялся.
+        meter: "Text | None | object" = _UNRESOLVED,
+    ) -> "Text":
+        """head = [профиль ] ●[ auto | → ● модель | модель][ · контекст]. Правило
+        единое для обоих режимов (спека auto-routing §7.1): нет активного хода —
+        точка режима + режим (` auto` в auto, модель в ручном); идёт ход —
+        точка режима + факт (` → ● модель` в auto, просто модель в ручном).
+        `transition` отдельно называет выбранный следующий режим/модель,
+        не подменяя уже подготовленный вызов. Точка режима — жирная, ВСЕГДА первая и видна: в auto
+        цветом BRAND (`AUTO_LEVEL_VALUE.color`, единственный источник), иначе
+        цветом уровня.
+
+        Порядок жертв по ширине (спека auto-routing §7.1): текст после
+        последней точки снимается первым (имя модели или слово `auto`,
+        `with_model_name=False`), затем у auto — стрелка и точка уровня
+        (`with_level_block=False`); точка режима остаётся всегда.
 
         Имя профиля режется ХВОСТОМ до `profile_name_cols` колонок (Task 9):
         потолок — `_PROFILE_NAME_MAX_COLS`, чтобы длинное имя не отжирало
         футер даже на широком экране.
 
         `snapshot` — готовый результат `_footer_head_snapshot()`; не передан —
-        резолвим сами (одиночный вызов вне лесенки). `with_transition=False` —
-        порядок жертв по ширине (спека Task 15): блок за стрелкой снимается
-        ПОСЛЕ того, как имя профиля снято целиком — точка и факт-модель
-        остаются всегда.
+        резолвим сами (одиночный вызов вне лесенки).
 
         `meter` — готовая плашка контекста (`None` = скрыта); не передана —
         резолвим сами. Как и `snapshot`, это ОДИН резолв на кадр: метр читает
-        meta треда с диска, а лесенка строит голову до 22 раз."""
+        meta треда с диска, а лесенка строит голову до 25 раз."""
         if snapshot is None:
             snapshot = self._footer_head_snapshot()
         if meter is _UNRESOLVED:
             meter = self._context_meter()
-        profile, level_color, model_name, transition = snapshot
+        profile, mode_auto, level_color, model_name, running, transition = snapshot
         head = Text()
         if with_profile and profile:
             head.append(
                 _truncate_profile_name(profile, profile_name_cols), style=_INK
             )
             head.append(" ")
-        head.append("●", style=f"bold {level_color}")
-        head.append(" ")
-        head.append(model_name, style=_INK)
+        if mode_auto:
+            head.append("●", style=f"bold {AUTO_LEVEL_VALUE.color}")
+            if running:
+                if with_level_block:
+                    head.append(" → ", style=_DIM)
+                    head.append("●", style=f"bold {level_color}")
+                    if with_model_name:
+                        head.append(" ")
+                        head.append(model_name, style=_INK)
+            elif with_model_name:
+                head.append(" auto", style=_INK)
+        else:
+            head.append("●", style=f"bold {level_color}")
+            if with_model_name:
+                head.append(" ")
+                head.append(model_name, style=_INK)
         if with_transition and transition is not None:
             future_color, future_model = transition
             head.append(" → ", style=_DIM)
@@ -916,8 +945,8 @@ class TraceScreen(Screen):
             head.append_text(meter)
         return head
 
-    def _compose_footer_right(self) -> Text:
-        """Правый край футера: [профиль ]● модель[ → …] · контекст [+ цены вниз].
+    def _compose_footer_right(self) -> "Text":
+        """Правый край футера: [профиль ]●[ модель] · контекст [+ цены вниз].
 
         Единая лесенка жертв (Task 17, порядок — дословное решение юзера);
         первое подошедшее и есть ответ:
@@ -929,7 +958,8 @@ class TraceScreen(Screen):
            это делает Rich-wrap); имя профиля ВСЁ ЕЩЁ в потолке;
         4. имя профиля ужимается `_PROFILE_NAME_MAX_COLS` → `_MIN_COLS`;
         5. имя профиля снимается целиком;
-        6. снимается блок за стрелкой — последняя жертва.
+        6. снимается имя модели (или слово `auto`), затем у auto — стрелка с
+           точкой уровня; точка режима/уровня остаётся всегда.
 
         Ступени 1-3 ничего не теряют: вторая строка футера (height: 2)
         зарезервирована в ОБЕИХ колонках и так, и перенос подсказок вниз — то же
@@ -940,7 +970,7 @@ class TraceScreen(Screen):
         потолок — раньше имя ужималось при левой, спокойно стоявшей в один ряд.
 
         Лесенка МОНОТОННА по СОДЕРЖИМОМУ: при сужении окна цены, имя профиля и
-        переход не возвращаются. Поэтому вариант «всё одной строкой» живёт лишь
+        имя модели не возвращаются. Поэтому вариант «всё одной строкой» живёт лишь
         в первом проходе — иначе на границе ступени 3 (левой разрешили 2 ряда,
         места стало больше) цены прыгали бы обратно наверх, а это ровно то
         дёрганье, против которого задача и заведена. Уехали вниз — остались
@@ -958,7 +988,7 @@ class TraceScreen(Screen):
         лесенка перебирает варианты правой с предикатом «сколько рядов при
         этом остатке занимает левая», а не считает бюджет от левой (так было
         до Task 17: левая не отдавала ни колонки никогда, и правая заранее
-        теряла имя профиля и переход — живой смок).
+        теряла имя профиля и имя модели — живой смок).
 
         «Рядов левой» считает `footer_left_rows` — то же ядро, что её и
         рисует: параллельный оценщик разъехался бы с отрисовкой.
@@ -977,15 +1007,19 @@ class TraceScreen(Screen):
             profile_cols: int | None,
             layout_width: int,
             *,
-            with_transition: bool = True,
+            with_model_name: bool = True,
+            with_level_block: bool = True,
             with_request: bool = True,
             with_prices: bool = True,
         ) -> Text:
+            pending_transition = snapshot.transition is not None
             head = self._footer_head(
                 with_profile=profile_cols is not None,
                 profile_name_cols=profile_cols or _PROFILE_NAME_MAX_COLS,
                 snapshot=snapshot,
-                with_transition=with_transition,
+                with_model_name=with_model_name or pending_transition,
+                with_level_block=with_level_block,
+                with_transition=with_model_name,
                 meter=meter,
             )
             request = request_seg if (with_prices and with_request) else None
@@ -1050,9 +1084,11 @@ class TraceScreen(Screen):
                 if fits(result, allowed_left_rows):
                     return result
 
-        # Резерв (ступени 6-8), от богатого к бедному: снимается блок за стрелкой,
-        # затем «запрос» (сессия остаётся), затем цены целиком. Точка уровня,
-        # факт-модель и плашка контекста остаются всегда.
+        # Резерв (4 рунга шапки × до 3 уровней цен), от богатого к бедному:
+        # снимается имя модели (или слово `auto`), затем у auto — стрелка с
+        # точкой уровня, затем «запрос» (сессия остаётся), затем цены целиком.
+        # Точка режима (в ручном — точка уровня) и плашка контекста остаются
+        # всегда.
         #
         # Почему цены вообще стали жертвой (решение владельца, синк 2026-08-20):
         # раньше последняя ступень возвращалась БЕЗУСЛОВНО, и на узком окне левой
@@ -1062,7 +1098,7 @@ class TraceScreen(Screen):
         #
         # И почему берётся не первый попавшийся: когда цены стоят на второй строке,
         # ширину правой колонки диктуют ОНИ, а не шапка, — тогда снятие имени профиля
-        # и перехода не освобождает ни колонки. Поэтому если место не нашлось ни на
+        # и имени модели не освобождает ни колонки. Поэтому если место не нашлось ни на
         # одной ступени, берётся вариант с МИНИМАЛЬНОЙ шириной, а среди равных по
         # ширине — первый, то есть самый богатый: жертва принимается только когда
         # она что-то даёт.
@@ -1070,10 +1106,13 @@ class TraceScreen(Screen):
         # «запрос» освобождает больше, чем имя профиля, и после неё имя часто
         # возвращается на место. Перебирать в другом порядке значило бы отдавать
         # имя навсегда ради экономии, которой хватило бы и без него.
+        # Последняя ступень (`with_level_block=False`) влияет только на auto:
+        # в ручном режиме `_footer_head` игнорирует этот флаг вовсе.
         head_ladder = (
-            (_PROFILE_NAME_MAX_COLS, True),
-            (None, True),
-            (None, False),
+            (_PROFILE_NAME_MAX_COLS, True, True),
+            (None, True, True),
+            (None, False, True),
+            (None, False, False),
         )
         # Ценами жертвуем ТОЛЬКО ради пола левой колонки. Когда слева обычные
         # F-подсказки, пола нет и терять цены не за что: место всё равно достанется
@@ -1085,10 +1124,14 @@ class TraceScreen(Screen):
         )
         reserve = [
             build(
-                cols, _RIGHT_PRICES_DOWN, with_transition=transition, **prices
+                cols,
+                _RIGHT_PRICES_DOWN,
+                with_model_name=name,
+                with_level_block=level_block,
+                **prices,
             )
             for prices in price_ladder
-            for cols, transition in head_ladder
+            for cols, name, level_block in head_ladder
         ]
         for candidate in reserve:
             if fits(candidate, 2):
@@ -1102,8 +1145,8 @@ class TraceScreen(Screen):
             # равных по ширине — первый, то есть самый богатый.
             return min(affordable, key=width_of)
         # Правая не влезает даже в отведённую ей ширину: её обрежет терминал, и
-        # действует прежний контракт вёрстки — самый бедный вариант, где переход
-        # снят последним (`test_footer_drops_transition_last_...`).
+        # действует прежний контракт вёрстки — самый бедный вариант, где имя
+        # модели снято последним (точка остаётся).
         return reserve[-1]
 
     def _footer_total_width(self) -> int:

@@ -250,27 +250,32 @@ class AgentRunner:
             t = self._thread
         return t is not None and t.is_alive()
 
-    def pinned_level(self) -> Optional[str]:
-        """Read-only: уровень активного хода, зафиксированный `turn_boundary.begin_turn`
-        (`state.turn_level`) — не живой уровень сессии (тот меняется мгновенно на
-        /level; посреди хода запросы всё ещё идут на прежнем, спека Task 15).
+    def call_level(self) -> Optional[str]:
+        """Фактический уровень подготовленного вызова из State, независимо от режима.
 
-        None — executor ещё не построен / state нет / ход не начинали через
-        begin_turn (легаси/тестовые двойники). Не мутирует state."""
+        Чтение не строит executor и не меняет State. До первого решения — None.
+        """
         ex = self._executor
         if ex is None or not hasattr(ex, "get_state"):
             return None
-        state = ex.get_state()
-        if state is None:
-            return None
-        return getattr(state, "turn_level", None)
+        return getattr(ex.get_state(), "_call_level", None)
 
-    def pinned_router(self) -> Any:
+    def call_mode(self) -> Optional[str]:
+        """Режим незакрытого такта; выбранный в UI режим может уже быть другим."""
+        ex = self._executor
+        if ex is None or not hasattr(ex, "get_state"):
+            return None
+        memo = getattr(ex.get_state(), "_tick_decision", None)
+        if memo is None:
+            return None
+        return "auto" if memo[1] else "manual"
+
+    def executor_router(self) -> Any:
         """Read-only: Router, зафиксированный при сборке ЭТОГО executor'а
         (`AgentExecutor.get_model_router`) — не живой `app.display_router()` TUI,
-        который отражает /profiles мгновенно. Футер (Task 15) резолвит
-        `pinned_level()` этим Router'ом, чтобы «факт» посреди хода не
-        подменился моделью уже переключившегося профиля.
+        который отражает /profiles мгновенно. Футер резолвит модель бегущего хода
+        этим Router'ом по уровню подготовленного вызова: смена профиля
+        посреди хода не подменяет факт моделью нового профиля.
 
         None — executor ещё не построен / у него нет Router'а (легаси)."""
         ex = self._executor
@@ -278,10 +283,25 @@ class AgentRunner:
             return None
         return ex.get_model_router()
 
+    def next_call_selection(self) -> Optional[tuple[bool, str, str]]:
+        """Живой выбор следующего вызова в реестре работающего контекста."""
+        from gc_core.auto_routing.levels import auto_active, effective_level
+
+        router = self.executor_router()
+        ctx = getattr(self._executor, "_ctx", None)
+        if router is None or ctx is None:
+            return None
+        live = router.live_level()
+        available = getattr(ctx, "auto_available", True)
+        selected_auto = auto_active(router, live, available)
+        level = effective_level(live, None, available)
+        resolved = router.resolve_main_at_level(level, check_breaker=False)
+        return selected_auto, level, resolved.alias or resolved.model
+
     def pinned_summary_limits(self) -> Any:
         """Read-only: пороги сжатия, по которым работает ЭТОТ executor
         (`AgentExecutor.summary_limits`) — его снимок конфига, его Router, уровень
-        хода. Индикатор контекста берёт знаменатель отсюда, а не из живого конфига
+        подготовленного вызова. Индикатор контекста берёт знаменатель отсюда, а не из живого конфига
         экрана: тот отражает /level и /profiles раньше, чем их увидит ход.
 
         None — executor ещё не построен."""
