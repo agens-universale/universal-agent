@@ -19,7 +19,7 @@ def log_routing_decision(
     resolved: Optional[Any],
     params: RoutingParams,
 ) -> None:
-    """Событие `routing_decision`: `mode`/`reason` по режиму, `score`/`heuristics`
+    """Событие `routing_decision`: `mode`/`reason` по режиму, `heuristics`
     — только при активном auto, счётчики — всегда.
 
     Поле уровня называется `routing_level`, НЕ `level`: `JsonlFormatter.format`
@@ -28,8 +28,8 @@ def log_routing_decision(
     цикл по `extra` пропускает ключи, уже занятые в `payload`, — одноимённое
     поле `extra["level"]` молча терялось на реальном форматтере.
 
-    Сообщение записи человекочитаемое (`level=… reason=… score=…
-    model=…`) — в текстовом формате лога голое `"routing_decision"` не несло
+    Сообщение записи человекочитаемое (`level=… reason=… model=…`) — в текстовом
+    формате лога голое `"routing_decision"` не несло
     ничего, кроме имени события; `event` для jsonl остаётся в `extra`
     (`JsonlFormatter` берёт готовый `record.getMessage()` как есть, отдельно от
     остальных полей `payload`)."""
@@ -53,17 +53,15 @@ def log_routing_decision(
         "steps_on_current_level": getattr(state, "steps_on_current_level", 0),
     }
     if active and decision is not None:
-        payload["score"] = None
         payload["heuristics"] = list(decision.heuristics)
-        # Политика — не режим: `mode` остаётся auto/manual, случайное решение
-        # узнаётся по reason.
+        # Идентификатор алгоритма отдельно от режима auto/manual.
         payload["policy"] = params.policy
         if decision.fallback_from is not None:
             # Выбранный уровень мёртв (предохранитель) — вызов идёт ближайшим живым.
             payload["fallback_from"] = decision.fallback_from
     logger.info(
-        "routing_decision level=%s reason=%s score=%s model=%s",
-        level, reason, payload.get("score"), model,
+        "routing_decision level=%s reason=%s model=%s",
+        level, reason, model,
         extra=payload,
     )
 

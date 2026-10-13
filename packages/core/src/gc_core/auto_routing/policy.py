@@ -6,7 +6,6 @@ from typing import Any, Callable, Iterable
 
 LEVEL_ORDER = ("light", "default", "max")
 POLICY_TWO_LEVEL = "two_level"
-DEFAULT_POLICY = POLICY_TWO_LEVEL
 START_LEVEL = "default"
 DEFAULT_SAFE_LEVEL = "default"
 DEFAULT_WEAK_STEPS = 10
@@ -221,8 +220,7 @@ def two_level_decision(
 
     Счёт серии ведут `state_ops.apply_decision` и `close_tick`: после сброса
     закрытый вызов даёт серию 1, поэтому на сильной проходит ровно `strong_steps`
-    вызовов, на слабой — ровно `weak_steps`. Оценку, окно открытия и тул подъёма
-    политика не читает."""
+    вызовов, на слабой — ровно `weak_steps`."""
     weak, strong = pair_levels(params)
     if steps_in_turn == 0:
         return Decision(strong, REASON_START_TURN, (), strong != current)

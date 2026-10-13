@@ -43,8 +43,7 @@ def test_bare_routing_params_matches_schema_defaults():
     реальный рабочий объект (`default_factory` у `RunContext.routing_params`,
     фолбэк `_routing_params`), так что он обязан совпадать с тем, что рождает
     схема и разрешает `resolve_routing_params` (рантайм получает параметры только
-    разрешёнными: без трёх моделей `safe_level: auto` — это `default`). `rng` объявлен
-    `compare=False` — сравнение корректно."""
+    разрешёнными: без трёх моделей `safe_level: auto` — это `default`)."""
     assert RoutingParams() == resolve_routing_params(AppConfig())
 
 
@@ -142,10 +141,10 @@ def test_unbound_child_ctx_inherits_the_two_level_numbers(tmp_path):
     assert (params.weak_steps, params.strong_steps) == (5, 2)
 
 
-def test_routing_params_has_no_fields_for_alternatives_or_experiments():
-    params = RoutingParams()
-    for name in ("rng", "weights", "thresholds", "boost_tool", "judge_window", "replay_exec", "max_opening_steps", "active"):
-        assert not hasattr(params, name), name
+def test_routing_params_contains_the_pair_settings():
+    assert set(vars(RoutingParams())) == {
+        "safe_level", "weak_steps", "strong_steps", "pair_threshold",
+    }
 
 
 def test_a_child_gets_the_pair_of_the_parent_turn_and_never_auto(tmp_path):

@@ -179,7 +179,7 @@ def test_the_routing_decision_event_carries_the_policy_and_the_descend_reason(mo
     decisions = [e for e in events if e.get("event") == "routing_decision"]
     assert [e["reason"] for e in decisions] == ["start_turn", "hold", "hold", "descend"]
     assert decisions[-1]["policy"] == "two_level" and decisions[-1]["routing_level"] == "light"
-    assert decisions[-1]["heuristics"] == [] and decisions[-1]["score"] is None
+    assert decisions[-1]["heuristics"] == []
 
 
 # --- сигналы --------------------------------------------------------------------
@@ -496,23 +496,6 @@ def test_an_important_call_next_to_a_broken_one_from_the_strong_model_extends(mo
     assert _aliases(calls) == ["mid", "mid", "mid", "mid"]
 
 
-
-
-# --- что предлагается модели --------------------------------------------------------
-
-
-
-def test_two_level_offers_neither_the_confidence_field_nor_the_boost_tool(monkeypatch):
-    """Ни на обычном вызове, ни на переигранном — даже при включённом ключе тула."""
-    ctx = _ctx({"value": "auto"})
-    s = _state(ctx)
-    calls = _stub_transport(monkeypatch, _reads(1, 3) + [([_write("c4")], "r4", {}), ([_write("c5")], "r5", {})])
-    _ask(s, ctx, times=4)
-    assert _aliases(calls) == ["mid", "mid", "mid", "fast", "mid"]
-    for call in calls:
-        assert "execution_confidence" not in call["tools"]
-        assert "turn_boost_level" not in call["tool_names"]
-        assert "## Execution Confidence" not in call["system"] and "## Model Level Boost" not in call["system"]
 
 
 # --- поток: канал `answer` у заведомо переигрываемого вызова --------------------------

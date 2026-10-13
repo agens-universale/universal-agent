@@ -1,6 +1,6 @@
-"""Чтение ответа модели для автовыбора: служебные поля роутинга по батчу вызовов,
-состав батча, на который смотрит пол, и выброшенный переигрышем ответ — для
-события лога. Чистые функции над сообщениями ответа и
+"""Чтение ответа модели для автовыбора: состав батча для решения о переигрыше
+и выброшенный переигрышем ответ для события лога. Чистые функции над сообщениями
+ответа и
 реестром тулов — ни State, ни ctx, ни логирования.
 
 Ответ читается фильтром по `function_call`, а не строгой группировкой
@@ -8,7 +8,7 @@
 сообщения): читатели зовутся и на сыром ответе модели, до исполнения батча.
 
 Импортируют модуль только контроллер (`processing_responses`) и
-`auto_routing.reroute` — не `policy`, `levels`, `field`, `state_ops`: модуль тянет
+`auto_routing.reroute` — не `policy`, `levels`, `state_ops`: модуль тянет
 пакет `gc_core.tools`, который сам импортирует `auto_routing.levels`/`policy`,
 и обратный импорт замкнул бы цикл."""
 from __future__ import annotations
@@ -17,7 +17,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
 from gc_core.constants.tool_names import IMPORTANT_TOOL_NAMES
 from gc_core.message_projection import project_assistant_text
-from gc_core.tools.arguments_validation import prepare_tool_arguments, tool_arguments_valid
+from gc_core.tools.arguments_validation import tool_arguments_valid
 
 
 def _function_calls(messages: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:

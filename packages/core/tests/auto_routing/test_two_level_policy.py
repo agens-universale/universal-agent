@@ -12,7 +12,7 @@ from gc_core.config_modules.root import AppConfig
 
 from gc_core.auto_routing import state_ops
 from gc_core.auto_routing.policy import (
-    DEFAULT_POLICY, DEFAULT_STRONG_STEPS, DEFAULT_WEAK_STEPS,
+    DEFAULT_STRONG_STEPS, DEFAULT_WEAK_STEPS,
     FINISH_REJECT, LOOP, NO_TOOL_BOUNCE, POLICY_TWO_LEVEL,
     REASON_DESCEND, REASON_HEURISTICS, REASON_HOLD, REASON_PROMOTE,
     REASON_START_TURN, REROUTE_IMPORTANT, TOOL_CALL_ERROR, RoutingParams,
@@ -34,13 +34,12 @@ SMALL_HIGH = RoutingParams(safe_level="max", weak_steps=4, strong_steps=2)
 def test_constants_are_canon():
     assert (POLICY_TWO_LEVEL, REASON_DESCEND) == ("two_level", "descend")
     assert (DEFAULT_WEAK_STEPS, DEFAULT_STRONG_STEPS) == (10, 2)
-    assert DEFAULT_POLICY == POLICY_TWO_LEVEL
 
 
-def test_default_policy_is_the_single_source_of_the_params_default():
-    assert RoutingParams().policy == DEFAULT_POLICY
-    assert RoutingParams.from_config(AppConfig.model_validate({"agent": {}})).policy == DEFAULT_POLICY
-    assert RoutingParams.from_config(AppConfig()).policy == DEFAULT_POLICY
+def test_routing_params_identify_the_two_level_policy():
+    assert RoutingParams().policy == POLICY_TWO_LEVEL
+    assert RoutingParams.from_config(AppConfig.model_validate({"agent": {}})).policy == POLICY_TWO_LEVEL
+    assert RoutingParams.from_config(AppConfig()).policy == POLICY_TWO_LEVEL
 
 
 def test_two_level_numbers_default_and_come_from_the_config_subkey():

@@ -69,7 +69,7 @@ def test_the_package_reexports_the_function_of_the_submodule():
     assert "tool_arguments_valid" in submodule.__all__
 
 
-def test_injected_confidence_is_removed_before_validation():
+def test_injected_service_field_is_removed_before_validation():
     import copy
 
     from gc_core.tools.inject_tool_fields import inject_property_into_spec
@@ -77,13 +77,13 @@ def test_injected_confidence_is_removed_before_validation():
     entry = copy.deepcopy(_TOOLS_DATA["turn_ask_human"])
     entry["injected_fields"] = inject_property_into_spec(
         entry["spec"],
-        field_name="execution_confidence",
+        field_name="service_metric",
         property_schema={"type": "number"},
     )
     assert (
         tool_arguments_valid(
             "turn_ask_human",
-            '{"question": "which one?", "execution_confidence": {"bad": true}}',
+            '{"question": "which one?", "service_metric": {"bad": true}}',
             {"turn_ask_human": entry},
         )
         is True
@@ -91,7 +91,7 @@ def test_injected_confidence_is_removed_before_validation():
     assert (
         tool_arguments_valid(
             "turn_ask_human",
-            '{"execution_confidence": 0.9}',
+            '{"service_metric": 0.9}',
             {"turn_ask_human": entry},
         )
         is False
@@ -109,9 +109,9 @@ def test_invalid_arguments_feedback_keeps_original_service_fields():
 
     entry = {
         **_TOOLS_DATA["turn_ask_human"],
-        "injected_fields": ["execution_confidence"],
+        "injected_fields": ["service_metric"],
     }
-    raw = '{"execution_confidence": 0.9}'
+    raw = '{"service_metric": 0.9}'
     prepared, _ = prepare_tool_arguments(raw, entry)
     with pytest.raises(WrongFunctionArgumentsException) as exc:
         parse_and_validate_tool_arguments(

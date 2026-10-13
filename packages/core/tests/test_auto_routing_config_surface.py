@@ -1,4 +1,4 @@
-"""Продуктовый конфиг автовыбора: пара моделей и совместимость старых файлов."""
+"""Продуктовый конфиг автовыбора: параметры пары и валидация настроек."""
 from pathlib import Path
 
 import pytest
@@ -8,20 +8,10 @@ from pydantic import ValidationError
 from gc_core.auto_routing.levels import resolve_routing_params
 from gc_core.auto_routing.policy import DEFAULT_PAIR_THRESHOLD, RoutingParams, pair_levels, pair_start, turn_params
 from gc_core.config import _default_config_path, apply_cli_overrides
-from gc_core.config_modules.compat import REMOVED, apply_compat
 from gc_core.config_modules.root import AppConfig
 from gc_core.settings import LoadedSettings
 from gc_testkit.paths import REPO
 from gc_testkit.settings import fake_ctx
-
-REMOVED_ROUTING_KEYS = {
-    "auto_routing_policy": "random",
-    "auto_routing_score_thresholds": {"max_upto": 6, "light_from": 9},
-    "auto_routing_random_weights": {"light": 40, "default": 30, "max": 30},
-    "auto_routing_judge_window": 10,
-    "auto_routing_boost_tool": True,
-    "auto_routing_experimental": {"replay_exec": True, "max_opening_steps": 3},
-}
 
 
 def test_schema_has_only_the_product_routing_settings():
@@ -34,7 +24,6 @@ def test_schema_has_only_the_product_routing_settings():
     assert {key for key in type(cfg.agent).model_fields if key.startswith("auto_routing")} == {
         "auto_routing", "auto_routing_safe_level", "auto_routing_two_level",
     }
-    assert not hasattr(RoutingParams(), "rng")
 
 
 def test_shipped_templates_carry_product_defaults_and_bindings():
@@ -45,38 +34,13 @@ def test_shipped_templates_carry_product_defaults_and_bindings():
         assert raw["agent"]["auto_routing_two_level"] == {
             "weak_steps": 10, "strong_steps": 2, "pair_threshold": 3,
         }
-        assert not REMOVED_ROUTING_KEYS.keys() & raw["agent"].keys()
+        assert {key for key in raw["agent"] if key.startswith("auto_routing")} == {
+            "auto_routing", "auto_routing_safe_level", "auto_routing_two_level",
+        }
         assert raw["assign"] == {
             "command_judge": "default", "finish_gate": "max",
             "routing_judge": "default", "summary": "default",
         }
-
-
-@pytest.mark.parametrize("key,value", REMOVED_ROUTING_KEYS.items())
-def test_removed_settings_are_declared_and_old_configs_still_validate(key, value):
-    dotted = f"agent.{key}"
-    assert dotted in REMOVED
-    raw = {"agent": {key: value, "auto_routing_safe_level": "max"}}
-    facts = apply_compat(raw)
-    assert raw == {"agent": {"auto_routing_safe_level": "max"}}
-    assert any(dotted in fact and "устарел" in fact for fact in facts)
-    assert AppConfig.model_validate(raw).agent.auto_routing_safe_level == "max"
-    with pytest.raises(ValidationError):
-        AppConfig.model_validate({"agent": {key: value}})
-
-
-@pytest.mark.parametrize("key,value", REMOVED_ROUTING_KEYS.items())
-def test_removed_flat_keys_are_ignored_with_a_notice(key, value):
-    raw = {key: value}
-    assert apply_compat(raw)
-    assert raw == {}
-
-
-def test_removed_judge_prompt_setting_has_an_explicit_compat_rule():
-    raw = {"paths": {"chat_completions_routing_judge_prompt_path": "old.md"}}
-    assert apply_compat(raw)
-    assert raw == {"paths": {}}
-    AppConfig.model_validate(raw)
 
 
 @pytest.mark.parametrize("value", ["default", "max", "auto"])
@@ -136,15 +100,13 @@ def test_nested_two_level_settings_are_immutable(field):
         setattr(AppConfig().agent.auto_routing_two_level, field, 2)
 
 
-def test_cli_overrides_validate_typed_pair_settings_and_ignore_removed_policy():
+def test_cli_overrides_validate_typed_pair_settings():
     cfg = apply_cli_overrides(LoadedSettings(settings=AppConfig()), extra_overrides={
         "agent.auto_routing_safe_level": "max",
         "agent.auto_routing_two_level.strong_steps": 4,
-        "agent.auto_routing_policy": "random",
     })
     assert cfg.settings.agent.auto_routing_safe_level == "max"
     assert cfg.settings.agent.auto_routing_two_level.strong_steps == 4
-    assert any("auto_routing_policy" in fact for fact in cfg.runtime.notices)
     with pytest.raises(ValidationError):
         apply_cli_overrides(cfg, extra_overrides={"agent.auto_routing_two_level.strong_steps": 0})
 

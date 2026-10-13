@@ -493,19 +493,6 @@ def test_routing_defaults_reach_bench_settings_and_explicit_updates_win():
     }
 
 
-@pytest.mark.parametrize("overrides", [
-    {"agent.auto_routing_experimental": {"finish_floor": True, "replay_exec": True}},
-    {"agent": {"auto_routing_experimental": {"finish_floor": True, "replay_exec": True}}},
-    {"agent.auto_routing_experimental.finish_floor": True,
-     "agent.auto_routing_experimental.replay_exec": True},
-])
-def test_old_routing_experiments_are_removed_from_bench_profiles_with_notice(overrides):
-    loaded = _loaded(overrides)
-    assert not hasattr(loaded.settings.agent, "auto_routing_experimental")
-    assert any("auto_routing_experimental устарел" in fact for fact in loaded.runtime.notices)
-    assert all("--sync-config" not in fact for fact in loaded.runtime.notices)
-
-
 def test_setting_os_backend_kind_stays_separate_from_runtime_backend():
     loaded = _loaded({"os_backend.kind": "local"})
     assert loaded.settings.os_backend.kind == "local"

@@ -1176,7 +1176,7 @@ def test_execution_snapshot_preserves_loop_window_for_resuming_a_run():
 def test_empty_argument_string_fingerprints_as_an_empty_object():
     """Вызов с пустой строкой аргументов — отпечаток `{}`, как у `"{}"`: повтор
     такого вызова считается и доходит до напоминания."""
-    entry = _entry(**GENERIC_PROFILE, injected=("execution_confidence",))
+    entry = _entry(**GENERIC_PROFILE, injected=("service_metric",))
     entry["spec"] = {
         "parameters": {
             "type": "object",

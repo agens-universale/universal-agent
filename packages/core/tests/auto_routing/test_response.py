@@ -56,7 +56,7 @@ def test_important_names_of_an_empty_or_missing_response_are_empty(tools_data):
 
 def test_a_name_outside_the_registry_is_never_important(tools_data):
     """Имя из списка, снятое `stop_tools`, и выдуманный `subagent_*` — неизвестные
-    тулы: у них свой путь (сигнал `score`/`judge`, повод `invalid_call`)."""
+    тулы: их вызов даёт повод `invalid_call` для переигрыша."""
     without_finish = {name: entry for name, entry in tools_data.items() if name != "turn_finish"}
     response = [_fc("turn_finish")]
     assert important_tool_names(response, without_finish, is_subagent=_never) == ()
@@ -117,14 +117,3 @@ def test_the_discarded_answer_keeps_the_think_of_a_reasoning_only_answer():
     assert discarded_answer([_message("<think>Надо прочитать файл.</think>")]) == (
         [], "<think>Надо прочитать файл.</think>",
     )
-
-
-def test_response_has_no_difficulty_reader():
-    from gc_core.auto_routing import response
-    assert not hasattr(response, "read_difficulty")
-
-
-def test_the_readers_of_the_old_floor_are_gone():
-    from gc_core.auto_routing import response
-    assert not hasattr(response, "artifact_tool_names")
-    assert not hasattr(response, "has_finish_call")
