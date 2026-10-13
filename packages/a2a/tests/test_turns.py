@@ -97,7 +97,7 @@ async def test_failed_turn_is_a_task_not_an_rpc_error(tmp_path):
     assert "error" not in body
     task = body["result"]["task"]
     assert task["status"]["state"] == "TASK_STATE_FAILED"
-    assert task["status"]["message"]["parts"][0]["text"] == "boom"
+    assert task["status"]["message"]["parts"][0]["text"] == "Ход не выполнен."
 
 
 async def test_unrecorded_failure_is_internal_error(tmp_path):

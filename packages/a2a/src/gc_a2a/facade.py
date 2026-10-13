@@ -38,7 +38,7 @@ from gc_a2a.params import (
     parse_task_id,
 )
 from gc_a2a.store import CANCELED, TERMINAL, WORKING, TaskStore
-from gc_a2a.turn import Turn
+from gc_a2a.turn import PEER_FAILURE_TEXT, Turn
 
 logger = logging.getLogger(__name__)
 
@@ -263,13 +263,15 @@ class A2aFacade:
             await _safe_aclose(self._agents.pop(key))
 
     async def _fail_setup(
-        self, context_id: str, task_id: str, exc: BaseException
+        self, context_id: str, task_id: str, _exc: BaseException
     ) -> None:
         agent = self._agents.pop(context_id, None)
         if agent is not None:
             await _safe_aclose(agent)
         try:
-            await self._store.mark_failed(task_id, _new_id(), str(exc))
+            await self._store.mark_failed(
+                task_id, _new_id(), PEER_FAILURE_TEXT
+            )
         except Exception as seal_exc:
             logger.exception("a2a seal")
             await self._store.mark_broken(task_id)

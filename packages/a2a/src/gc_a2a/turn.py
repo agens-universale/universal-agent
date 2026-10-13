@@ -25,11 +25,13 @@ def answer_text(agent: Any) -> str:
     return str(raw)
 
 
+# Пиру в status.message — без путей и текста исключения ядра.
+PEER_FAILURE_TEXT = "Ход не выполнен."
+
+
 def error_text(exc: BaseException) -> str:
-    text = str(exc).strip()
-    if text:
-        return text
-    return exc.__class__.__name__
+    del exc
+    return PEER_FAILURE_TEXT
 
 
 class Turn:
