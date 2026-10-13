@@ -169,8 +169,11 @@ class AcpFacade:
         if (
             incoming.has_id
             and incoming.method is None
-            and self._pending.resolve(incoming)
+            and (incoming.has_result or incoming.has_error)
         ):
+            # Ответ на наш request, не запрос клиента. Поздний selected
+            # после таймаута или отмены решение не меняет и -32600 не шлём.
+            self._pending.resolve(incoming)
             return
         if not incoming.has_id:
             if incoming.not_object or incoming.method is None:

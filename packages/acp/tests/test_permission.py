@@ -269,8 +269,11 @@ async def test_timeout_denies_and_late_allow_does_not_stick(tmp_path):
     assert await _ask(agent.executor._ctx, key) is False
     msg = await task
     await facade.handle_line(_response(msg["id"], _selected("allow_always")))
-    assert store.decision_for(key) is not True
+    assert store.decision_for(key) is False
     assert key not in store.session_rules()
+    assert not any(
+        item.get("id") == msg["id"] and "error" in item for item in writer.sent
+    )
     await facade.handle_line(_line("session/list", {}, 9))
     assert _by_id(writer, 9)["result"]["sessions"] == []
     await facade.shutdown()
@@ -291,8 +294,7 @@ async def test_foreign_response_does_not_break_dispatch(tmp_path):
     task = asyncio.create_task(reply())
     assert await _ask(agent.executor._ctx, key) is True
     msg = await task
-    foreign = [item for item in writer.sent if item.get("id") == "foreign"]
-    assert foreign and foreign[-1]["error"]["code"] == -32600
+    assert not any(item.get("id") == "foreign" for item in writer.sent)
     assert not any(
         item.get("id") == msg["id"] and "error" in item for item in writer.sent
     )
