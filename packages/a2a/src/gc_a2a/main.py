@@ -64,6 +64,10 @@ def main(argv: list[str] | None = None) -> int:
         print(rejection, file=sys.stderr)
         return 1
     loaded = apply_a2a_runtime_defaults(loaded)
+    rejection = auth_rejection(loaded)
+    if rejection is not None:
+        print(rejection, file=sys.stderr)
+        return 1
     if not loaded.settings.a2a.auth_token:
         print("gc-a2a: сервер без авторизации", file=sys.stderr)
     asyncio.run(serve(loaded))
@@ -116,6 +120,26 @@ def backend_rejection(loaded: Any) -> str | None:
     return (
         "gc-a2a: os_backend " + kind + " на этом запуске не поддерживается: "
         "рабочий каталог хода — путь на машине этого процесса"
+    )
+
+
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+
+
+def auth_rejection(loaded: Any) -> str | None:
+    """Не-loopback без токена — до bind: агент с тулами нельзя светить в сеть."""
+    section = loaded.settings.a2a
+    if section.auth_token:
+        return None
+    host = section.host.strip().lower()
+    if host.startswith("[") and host.endswith("]"):
+        host = host[1:-1]
+    if host in _LOOPBACK_HOSTS:
+        return None
+    return (
+        "gc-a2a: a2a.host "
+        + section.host
+        + " не loopback — нужен непустой a2a.auth_token"
     )
 
 

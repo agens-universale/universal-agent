@@ -4,6 +4,7 @@ import pytest
 from gc_a2a.main import (
     _parse_args,
     apply_a2a_runtime_defaults,
+    auth_rejection,
     backend_rejection,
     main,
 )
@@ -113,3 +114,31 @@ def test_harbor_rejection_text():
     assert "gc-a2a" in text
     assert "harbor" in text
     assert backend_rejection(make_settings(os_backend="local")) is None
+
+
+def test_auth_rejection_blocks_non_loopback_without_token():
+    assert auth_rejection(make_settings()) is None
+    assert auth_rejection(make_settings(**{"a2a.host": "127.0.0.1"})) is None
+    assert auth_rejection(make_settings(**{"a2a.host": "::1"})) is None
+    blocked = auth_rejection(make_settings(**{"a2a.host": "0.0.0.0"}))
+    assert blocked is not None
+    assert "auth_token" in blocked
+    assert (
+        auth_rejection(
+            make_settings(
+                **{"a2a.host": "0.0.0.0", "a2a.auth_token": "secret"}
+            )
+        )
+        is None
+    )
+
+
+def test_non_loopback_without_token_exits_before_bind(monkeypatch, capsys):
+    def load(path, profile_override=None):
+        del path, profile_override
+        return make_settings(**{"a2a.host": "0.0.0.0"})
+
+    monkeypatch.setattr("gc_a2a.main.load_settings", load)
+    code = main([])
+    assert code == 1
+    assert "auth_token" in capsys.readouterr().err
