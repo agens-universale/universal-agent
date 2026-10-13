@@ -28,7 +28,7 @@ class _FakeRunner:
 
 def _meta(inp, out):
     acc = UsageAccount()
-    acc.add(CATEGORY_MAIN, inp, out)
+    acc.add(CATEGORY_MAIN, inp, out, model="m")
     return acc.to_meta()
 
 

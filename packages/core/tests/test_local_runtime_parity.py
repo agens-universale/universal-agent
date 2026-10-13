@@ -243,6 +243,31 @@ def normalize(value, workspace, ids=None):
         "state_id",
     }
     if isinstance(value, dict):
+        if "by_category" in value and "by_model" in value:
+            # Новый разрез по моделям проверяется отдельно от неизменённого
+            # эталона develop: суммарные токены и вызовы обязаны совпадать.
+            fields = ("input", "output", "cached", "calls", "missing_usage_calls")
+            for field in fields:
+                assert sum(bucket.get(field, 0) for bucket in value["by_model"].values()) == sum(
+                    bucket.get(field, 0) for bucket in value["by_category"].values()
+                )
+            categories = {}
+            attributed_fields = (*fields, "billed_calls", "billed_input", "billed_output", "billed_cached")
+            for category, bucket in value["by_category"].items():
+                attributed = bucket.get("by_model")
+                if isinstance(attributed, dict):
+                    assert set(attributed) <= set(value["by_model"])
+                    for field in attributed_fields:
+                        assert sum(part.get(field, 0) for part in attributed.values()) == bucket.get(field, 0)
+                categories[category] = {key: item for key, item in bucket.items() if key != "by_model"}
+            for model, bucket in value["by_model"].items():
+                for field in fields:
+                    assert sum(
+                        category.get("by_model", {}).get(model, {}).get(field, 0)
+                        for category in value["by_category"].values()
+                    ) == bucket.get(field, 0)
+            value = {key: item for key, item in value.items() if key != "by_model"}
+            value["by_category"] = categories
         result = {}
         for key, item in value.items():
             if key in volatile:

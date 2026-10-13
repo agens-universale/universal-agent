@@ -197,7 +197,7 @@ async def test_card_shows_nonzero_session_cost(tmp_path):
     from gc_core.usage.account import CATEGORY_MAIN, UsageAccount
 
     acc = UsageAccount()
-    acc.add(CATEGORY_MAIN, 2_000_000, 0)  # при input=1.0 → 2.0 ₽
+    acc.add(CATEGORY_MAIN, 2_000_000, 0, model="m")  # при input=1.0 → 2.0 ₽
     _seed(tmp_path, "cccccccc", "с ценой", token_usage=acc.to_meta())
     from gc_tui.app import TuiApp
     from gc_tui.screens.sessions import SessionsScreen

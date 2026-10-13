@@ -478,7 +478,7 @@ _PRICING = {
 
 def test_compute_cost_basic():
     acc = UsageAccount()
-    acc.add(CATEGORY_MAIN, 250_000, 40_000)
+    acc.add(CATEGORY_MAIN, 250_000, 40_000, model="m")
     report = compute_cost(acc, _PRICING, "m")
     assert report.has_cost is True
     # 250000/1e6*93 + 40000/1e6*295 = 23.25 + 11.8 = 35.05
@@ -488,7 +488,7 @@ def test_compute_cost_basic():
 
 def test_compute_cost_no_tariff():
     acc = UsageAccount()
-    acc.add(CATEGORY_MAIN, 100, 20)
+    acc.add(CATEGORY_MAIN, 100, 20, model="unknown")
     report = compute_cost(acc, _PRICING, "unknown")
     assert report.has_cost is False
     assert report.categories[0].parts == []
@@ -512,7 +512,7 @@ _PRICING_CACHE = {
 
 def test_compute_cost_with_cache_read():
     acc = UsageAccount()
-    acc.add(CATEGORY_MAIN, 1000, 100, 800)  # 800 из 1000 input — cached
+    acc.add(CATEGORY_MAIN, 1000, 100, 800, model="deepseek")  # 800 из 1000 input — cached
     report = compute_cost(acc, _PRICING_CACHE, "deepseek")
     # (1000-800)/1e6*59 + 800/1e6*0.49 + 100/1e6*118
     expected = 200 / 1e6 * 59 + 800 / 1e6 * 0.49 + 100 / 1e6 * 118
@@ -522,7 +522,7 @@ def test_compute_cost_with_cache_read():
 
 def test_compute_cost_cache_absent_bills_as_input():
     acc = UsageAccount()
-    acc.add(CATEGORY_MAIN, 1000, 100, 800)
+    acc.add(CATEGORY_MAIN, 1000, 100, 800, model="m")
     # тариф без cache_read → cached по обычной input-ставке
     report = compute_cost(
         acc, _PRICING, "m"
@@ -541,9 +541,9 @@ def test_real_deepseek_billing_matches_150():
         (15132, 240, 14720),
         (15620, 374, 15104),
     ]:
-        acc.add(CATEGORY_MAIN, prompt, comp, cached)
+        acc.add(CATEGORY_MAIN, prompt, comp, cached, model="deepseek")
     # finish_gate без кэша
-    acc.add("finish_gate", 4571, 1400, 0)
+    acc.add("finish_gate", 4571, 1400, 0, model="deepseek")
     report = compute_cost(acc, _PRICING_CACHE, "deepseek")
     cost = report.by_currency["₽"]
     assert round(cost, 1) == 1.5, f"got {cost:.4f}"
@@ -564,15 +564,13 @@ def test_compute_cost_multi_currency():
             },
         },
     }
-    # Один прогон — одна модель, поэтому multi-currency проверяем на уровне by_currency,
-    # имитируя две категории с разными тарифами недоступно через одну модель.
-    # Здесь просто проверяем, что разные модели дают разные валюты.
     acc = UsageAccount()
-    acc.add(CATEGORY_MAIN, 1000, 500)
-    r_rub = compute_cost(acc, pricing, "m")
-    r_usd = compute_cost(acc, pricing, "usd")
-    assert "₽" in r_rub.by_currency
-    assert "$" in r_usd.by_currency
+    acc.add(CATEGORY_MAIN, 1000, 500, model="m")
+    acc.add(CATEGORY_SUMMARY, 1000, 500, model="usd")
+    report = compute_cost(acc, pricing, "m")
+    assert "₽" in report.by_currency
+    assert "$" in report.by_currency
+    assert report.multi_currency
 
 
 _PRICING_RUB = {
@@ -604,7 +602,7 @@ def test_fully_billed_category_uses_fact():
 
 def test_unbilled_category_uses_tariff():
     acc = UsageAccount()
-    acc.add(CATEGORY_MAIN, 1_000_000, 100_000)
+    acc.add(CATEGORY_MAIN, 1_000_000, 100_000, model="m")
     r = compute_cost(acc, _PRICING_RUB, "m")
     cat = r.categories[0]
     assert cat.cost_source == "tariff"
@@ -613,8 +611,8 @@ def test_unbilled_category_uses_tariff():
 
 def test_mixed_category_splits_fact_and_tariff():
     acc = UsageAccount()
-    acc.add(CATEGORY_MAIN, 1_000_000, 100_000, 0, cost=7.5, billed=True)
-    acc.add(CATEGORY_MAIN, 500_000, 50_000)  # без цены
+    acc.add(CATEGORY_MAIN, 1_000_000, 100_000, 0, cost=7.5, billed=True, model="m")
+    acc.add(CATEGORY_MAIN, 500_000, 50_000, model="m")  # без цены
     r = compute_cost(acc, _PRICING_RUB, "m")
     cat = r.categories[0]
     assert cat.cost_source == "mixed"
@@ -698,8 +696,8 @@ def test_usage_less_call_does_not_create_phantom_currency():
 def test_tariff_remainder_accounts_for_cached():
     pricing = dict(_PRICING_RUB, cache_read=10)
     acc = UsageAccount()
-    acc.add(CATEGORY_MAIN, 1_000_000, 0, 1_000_000, cost=1.0, billed=True)
-    acc.add(CATEGORY_MAIN, 1_000_000, 0, 400_000)
+    acc.add(CATEGORY_MAIN, 1_000_000, 0, 1_000_000, cost=1.0, billed=True, model="m")
+    acc.add(CATEGORY_MAIN, 1_000_000, 0, 400_000, model="m")
     r = compute_cost(acc, pricing, "m")
     # Остаток: input 1M, из них cached 0.4M по 10, остальные 0.6M по 100.
     assert CostPart(64.0, "₽", "tariff") in r.categories[0].parts
@@ -730,8 +728,8 @@ def test_ru_endpoint_and_rub_tariff_collapse_into_one_currency():
     # Ради этого случая правило и вводилось: факт и тариф сходятся в рублях,
     # а не расходятся на два подытога с маркером неполноты.
     acc = UsageAccount()
-    acc.add(CATEGORY_MAIN, 1_000_000, 100_000, 0, cost=7.5, billed=True)
-    acc.add(CATEGORY_MAIN, 500_000, 50_000)
+    acc.add(CATEGORY_MAIN, 1_000_000, 100_000, 0, cost=7.5, billed=True, model="m")
+    acc.add(CATEGORY_MAIN, 500_000, 50_000, model="m")
     r = compute_cost(acc, _PRICING_RUB, "m", _RU_URL)
     assert set(r.by_currency) == {"₽"}
     assert r.multi_currency is False
@@ -748,8 +746,8 @@ def test_ru_endpoint_with_usd_tariff_still_splits():
         "models": {"m": {"input": 100, "output": 200, "currency": "$"}},
     }
     acc = UsageAccount()
-    acc.add(CATEGORY_MAIN, 1_000_000, 100_000, 0, cost=7.5, billed=True)
-    acc.add(CATEGORY_MAIN, 500_000, 50_000)
+    acc.add(CATEGORY_MAIN, 1_000_000, 100_000, 0, cost=7.5, billed=True, model="m")
+    acc.add(CATEGORY_MAIN, 500_000, 50_000, model="m")
     r = compute_cost(acc, pricing, "m", _RU_URL)
     assert set(r.by_currency) == {"₽", "$"}
     assert r.multi_currency is True
@@ -778,8 +776,8 @@ def test_disabled_pricing_with_ru_endpoint_shows_no_money():
 
 def test_ru_endpoint_report_has_single_total_without_subtotals():
     acc = UsageAccount()
-    acc.add(CATEGORY_MAIN, 1_000_000, 100_000, 0, cost=7.5, billed=True)
-    acc.add(CATEGORY_MAIN, 500_000, 50_000)
+    acc.add(CATEGORY_MAIN, 1_000_000, 100_000, 0, cost=7.5, billed=True, model="m")
+    acc.add(CATEGORY_MAIN, 500_000, 50_000, model="m")
     text = render_cost_report(
         compute_cost(acc, _PRICING_RUB, "m", _RU_URL), model_name="m"
     )
@@ -823,7 +821,7 @@ def test_report_no_tilde_when_only_tariff():
     # Чисто тарифный отчёт (нет факта провайдера нигде) — тильды нет: она ничего
     # не сообщает, когда сторона всего одна.
     acc = UsageAccount()
-    acc.add(CATEGORY_MAIN, 1_000_000, 100_000)
+    acc.add(CATEGORY_MAIN, 1_000_000, 100_000, model="m")
     text = render_cost_report(
         compute_cost(acc, _PRICING_RUB, "m"), model_name="m"
     )
@@ -834,8 +832,8 @@ def test_report_no_tilde_when_only_tariff():
 def test_report_marks_tariff_part_with_tilde_when_mixed():
     # Реальное смешение (одна категория факт, другая тариф) — тильда нужна и есть.
     acc = UsageAccount()
-    acc.add(CATEGORY_MAIN, 1_000_000, 100_000, 0, cost=7.5, billed=True)
-    acc.add(CATEGORY_FINISH_GATE, 1_000_000, 100_000)
+    acc.add(CATEGORY_MAIN, 1_000_000, 100_000, 0, cost=7.5, billed=True, model="m")
+    acc.add(CATEGORY_FINISH_GATE, 1_000_000, 100_000, model="m")
     text = render_cost_report(
         compute_cost(acc, _PRICING_RUB, "m"), model_name="m"
     )
@@ -932,8 +930,8 @@ def test_report_joins_currencies_with_plus():
         cost=2.0,
         billed=True,
         currency="$",
-    )
-    acc.add(CATEGORY_MAIN, 1_000_000, 100_000)  # остаток по рублёвому тарифу
+     model="m",)
+    acc.add(CATEGORY_MAIN, 1_000_000, 100_000, model="m")  # остаток по рублёвому тарифу
     text = render_cost_report(
         compute_cost(acc, _PRICING_RUB, "m"), model_name="m"
     )
@@ -944,7 +942,7 @@ def test_report_joins_currencies_with_plus():
 
 def test_render_with_pricing_and_missing():
     acc = UsageAccount()
-    acc.add(CATEGORY_MAIN, 210_500, 38_200)
+    acc.add(CATEGORY_MAIN, 210_500, 38_200, model="m")
     acc.add_missing(
         CATEGORY_SUMMARY
     )  # вызов без usage — токенов нет, цену узнать нечем

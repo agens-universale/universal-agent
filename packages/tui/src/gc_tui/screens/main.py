@@ -7382,6 +7382,9 @@ class TraceScreen(Screen):
             resolved.alias
         )
         ref = self.app.active_profile_ref()
+        # Действующий уровень — то же правило, что у палитры и футера: `auto`,
+        # только когда автовыбор реально активен, иначе уровень, которым идёт работа.
+        level = toggle_state(self.app, "level")
         payload["runtime"] = {
             "active_task_id": tid,
             "runner_is_running": bool(runner and runner.is_running()),
@@ -7395,7 +7398,12 @@ class TraceScreen(Screen):
             "profile": {
                 "name": active_profile or None,
                 "source": _profile_source_label(ref),
-                "level": router.active_level(),
+                "level": level,
+                "routing_policy": (
+                    "two_level"
+                    if level == "auto"
+                    else None
+                ),
                 "model": resolved.alias or resolved.model,
                 "circuit_breaker_open": breaker_open,
             },
