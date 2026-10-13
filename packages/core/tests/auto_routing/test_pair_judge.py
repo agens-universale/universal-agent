@@ -39,8 +39,11 @@ def test_the_first_turn_card_has_the_request_and_no_previous_turn():
 
 def test_a_continuation_carries_the_previous_request_and_its_finish_report():
     log, seq = _closed("migrate the storage layer to postgres")
-    messages = [SYS, _finish("schema done, data layer left"), {"role": "user", "content": "go on"}]
-    card = json.loads(build_pair_card(_state("go on", log=log, seq=seq, messages=messages, start=2)))
+    messages = [SYS, {"role": "user", "content": "migrate the storage layer to postgres"},
+                _finish("schema done, data layer left"),
+                {"type": "function_call_output", "call_id": "f1", "output": '{"ok": true, "status": "submitted"}'},
+                {"role": "user", "content": "go on"}]
+    card = json.loads(build_pair_card(_state("go on", log=log, seq=seq, messages=messages, start=4)))
     assert card["turn"] == 2 and card["request"] == "go on"
     assert card["previous_turn"] == {"request": "migrate the storage layer to postgres",
                                      "outcome": "partial_solution: schema done, data layer left"}
@@ -56,7 +59,7 @@ def test_the_final_answer_of_the_previous_turn_wins_over_an_older_finish():
 def test_without_an_outcome_the_previous_turn_has_only_the_request():
     log, seq = _closed("rename the module")
     card = json.loads(build_pair_card(_state("and the tests", log=log, seq=seq)))
-    assert card["previous_turn"] == {"request": "rename the module"}
+    assert card["previous_turn"] == {"request": "rename the module", "outcome_available": False}
 
 
 def test_long_texts_are_cut_to_the_card_limits():

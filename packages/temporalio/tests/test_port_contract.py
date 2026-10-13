@@ -78,6 +78,7 @@ CORE_CONTEXT_ATTRIBUTES = {
     "prompt_loader": BOUND,
     "prompt_resource": BOUND,
     "provider_currency": DATA,
+    "routing_contract_v2": DATA + ": результат execution_patch при assemble_run_context, без ввода-вывода",
     "routing_params": DATA + ": типизированные параметры two_level из настроек",
     "run_id": DATA,
     "runtime": DATA,

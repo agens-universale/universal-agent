@@ -19,8 +19,9 @@ from gc_core.bundled_assets import bundled_root
 from gc_core.constants.tool_names import FINISH_TOOL_NAME
 from gc_core.intent_log.record import ACTION_FINAL_ANSWER, ACTION_USER_ASK
 from gc_core.intent_log.serialize import deserialize_list
+from gc_core.utils.text_preview import head_tail_preview
 from gc_core.message_policy.user_message_policy import (
-    is_dialog_summary_user_message_text, user_content_to_text,
+    extract_real_user_message_text, is_dialog_summary_user_message_text, user_content_to_text,
 )
 
 #: Лимиты карточки — константы модуля, не конфиг: судья обязан оставаться дешёвым.
@@ -88,21 +89,21 @@ class PairChoice:
     error: Optional[str]
 
 
-def build_pair_card(state: Any) -> str:
+def build_pair_card(state: Any, *, legacy: bool = False) -> str:
     """Карточка судьи пары (JSON): номер хода, признак сжатой истории, текущий
     запрос и — на продолжении — запрос и итог прошлого хода."""
     card: dict = {
         "turn": int(getattr(state, "user_turn_seq", 0) or 0) + 1,
         "earlier_history_compacted": _history_compacted(state),
-        "request": task_text(state, limit=TASK_MAX_CHARS),
+        "request": task_text(state, limit=TASK_MAX_CHARS, legacy=legacy),
     }
-    previous = _previous_turn(state)
+    previous = _previous_turn(state, legacy=legacy)
     if previous:
         card["previous_turn"] = previous
     return json.dumps(card, ensure_ascii=False, indent=1)
 
 
-def _previous_turn(state: Any) -> dict:
+def _previous_turn(state: Any, *, legacy: bool = False) -> dict:
     log = deserialize_list(getattr(state, "user_intent_log", None) or [])
     turns = [r.turn for r in log if isinstance(r.turn, int)]
     if not turns:
@@ -111,35 +112,76 @@ def _previous_turn(state: Any) -> dict:
     records = [r for r in log if r.turn == last_turn]
     asks = [str(r.content).strip() for r in records
             if r.action == ACTION_USER_ASK and isinstance(r.content, str)]
-    block = {"request": "\n".join(a for a in asks if a)[:PREVIOUS_MAX_CHARS]}
-    outcome = _final_answer(records) or _last_finish(state)
+    request = "\n".join(a for a in asks if a)
+    block = {"request": _preview(request, legacy=legacy)}
+    outcome = _final_answer(records, legacy=legacy) or _last_finish(state, records=records, legacy=legacy)
     if outcome:
         block["outcome"] = outcome
+    elif not legacy:
+        block["outcome_available"] = False
     return block
 
 
-def _final_answer(records: list) -> str:
-    """Итог хода, закончившегося ответом текстом (запись журнала есть только у него)."""
+def _preview(text: str, *, legacy: bool) -> str:
+    return text[:PREVIOUS_MAX_CHARS] if legacy else head_tail_preview(text, PREVIOUS_MAX_CHARS)
+
+
+def _final_answer(records: list, *, legacy: bool = False) -> str:
+    """Сохранённый итог завершённого хода: проза или разрешённый turn_finish."""
     for record in reversed(records):
         if record.action != ACTION_FINAL_ANSWER:
             continue
         content = record.content
         text = content if isinstance(content, str) else json.dumps(content, ensure_ascii=False)
-        return text.strip()[:PREVIOUS_MAX_CHARS]
+        return _preview(text.strip(), legacy=legacy)
     return ""
 
 
-def _last_finish(state: Any) -> str:
-    """Итог хода, закрытого `turn_finish`: последний такой вызов до начала текущего
-    хода — тип результата и отчёт. После сжатия истории его может не быть."""
+def _last_finish(state: Any, *, records: list, legacy: bool = False) -> str:
+    """Старый итог — только если trace подтверждает завершение нужного хода."""
     messages = list(getattr(state, "messages", None) or [])
     start = getattr(state, "turn_messages_start", None)
     if start is not None and int(start) <= len(messages):
         messages = messages[:int(start)]
-    for message in reversed(messages):
+    closed_asks = {str(r.content).strip() for r in records if r.action == ACTION_USER_ASK}
+    if not legacy:
+        open_asks = {str(r.content).strip() for r in deserialize_list(
+            getattr(state, "current_user_intent", None) or []
+        ) if r.action == ACTION_USER_ASK}
+        # При attach граница бывает после сохранённого незакрытого хода.
+        # Его отчёт нельзя приписывать последнему закрытому ходу журнала.
+        if any(isinstance(m, dict) and extract_real_user_message_text(m).strip() in open_asks
+               for m in messages):
+            return ""
+    for index in range(len(messages) - 1, -1, -1):
+        message = messages[index]
         if not (isinstance(message, dict) and message.get("type") == "function_call"
                 and message.get("name") == FINISH_TOOL_NAME):
             continue
+        if not legacy:
+            preceding_ask = next((extract_real_user_message_text(m).strip()
+                for m in reversed(messages[:index]) if isinstance(m, dict)
+                and extract_real_user_message_text(m).strip()), "")
+            if preceding_ask not in closed_asks:
+                return ""
+            call_id = message.get("call_id")
+            if not isinstance(call_id, str) or not call_id:
+                return ""
+            outputs = [m.get("output") for m in messages[index + 1:]
+                if isinstance(m, dict) and m.get("type") == "function_call_output"
+                and m.get("call_id") == call_id]
+            try:
+                output = outputs[-1] if outputs else None
+                if isinstance(output, str):
+                    output = json.loads(output)
+            except (TypeError, ValueError):
+                return ""
+            if (not isinstance(output, dict) or output.get("ok") is not True
+                    or output.get("status") != "submitted"):
+                return ""
+            gate = output.get("finish_gate") or {}
+            if isinstance(gate, dict) and gate.get("action") == "reject":
+                return ""
         try:
             args = json.loads(message.get("arguments") or "{}")
         except (TypeError, ValueError):
@@ -147,9 +189,13 @@ def _last_finish(state: Any) -> str:
         if not isinstance(args, dict):
             return ""
         kind = str(args.get("solution_type") or "").strip()
+        if not legacy and isinstance(gate, dict):
+            runtime_outcome = gate.get("runtime_outcome")
+            if runtime_outcome in ("fail_open_error", "fail_open_limit"):
+                kind += f" [{runtime_outcome}]"
         report = str(args.get("task_report") or "").strip()
         text = f"{kind}: {report}" if kind and report else (kind or report)
-        return text[:PREVIOUS_MAX_CHARS]
+        return _preview(text, legacy=legacy)
     return ""
 
 

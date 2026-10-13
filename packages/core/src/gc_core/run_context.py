@@ -175,6 +175,8 @@ class RunContext:
     # и порог пары. Считаются один раз при сборке ctx, как
     # `auto_available`; обе точки сборки RunContext кладут их сами.
     routing_params: RoutingParams = field(default_factory=RoutingParams)
+    # Старые durable-истории сохраняют прежнюю карточку и сравнение комплектов.
+    routing_contract_v2: bool = True
     # Версия поведения исполнения: durable-рантайм выбирает ветку по истории;
     # локально отсутствие порта означает текущее поведение.
     execution_patch: Optional[Callable[[str], bool]] = None
@@ -275,6 +277,9 @@ def assemble_run_context(
         collect_garbage=bindings.collect_garbage,
     )
     ctx.is_tui = prepared.is_tui
+    ctx.routing_contract_v2 = bindings.execution_patch is None or bindings.execution_patch(
+        "routing-request-contract-v2"
+    )
     ctx.auto_available = auto_available(
         loaded.settings,
         force_legacy=(bindings.model_router.force_legacy or not bindings.model_router.auto_allowed),

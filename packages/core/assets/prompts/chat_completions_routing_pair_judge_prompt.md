@@ -6,6 +6,15 @@ Input: a card (JSON) with the turn number, whether earlier history was compacted
 on a continuation — the previous turn's request and outcome. For short follow-ups ("yes, do it", "go on"), rate the
 work being continued, using the previous turn.
 
+The card preserves the beginning and end of long fields within their limits; an omission marker denotes the
+missing middle. Do not infer details from that missing part. earlier_history_compacted describes history at the
+time of THIS assessment, before any compaction for the upcoming executor request. It does not predict whether
+that request will need compaction: the threshold depends on the selected model. Compaction alone is not a measure
+of task difficulty. If previous_turn.outcome_available is false, the previous outcome is unavailable; do not
+invent one. A finish outcome marked fail_open_error or fail_open_limit was allowed to close without a confirming
+final-judge verdict. For a follow-up, use the available previous request and outcome; when context is insufficient,
+apply the conservative grading rule below.
+
 Rate by three signs: scope (how many parts, files, sources or steps are touched), clarity of the path (is it clear
 from the request what to do and where, or will the agent have to search and investigate), and the cost of an
 unnoticed mistake (how easy it is to check the result).

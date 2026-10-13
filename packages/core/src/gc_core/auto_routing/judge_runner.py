@@ -63,7 +63,7 @@ async def arun_pair_judge(state: Any, ctx: Any, *, params: RoutingParams, mid_tu
     card = ""
     choice = PairChoice(PAIR_FALLBACK_LEVEL, None, "", SOURCE_FALLBACK, None)
     try:
-        card = build_pair_card(state)
+        card = build_pair_card(state, legacy=not getattr(ctx, "routing_contract_v2", True))
         system_prompt = await aload_prompt_resource(
             ctx, PromptResourceRequest(
                 "routing_pair_judge",

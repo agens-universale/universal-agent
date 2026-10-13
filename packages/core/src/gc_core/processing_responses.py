@@ -84,7 +84,9 @@ from gc_core.intent_guard.turn_finish_emit import (
     apply_finish_gate_to_turn_finish_output_in_state,
     get_function_call_output_text,
 )
-from gc_core.intent_scope.final_answer import amaybe_record_final_answer_intent
+from gc_core.intent_scope.final_answer import (
+    amaybe_record_final_answer_intent, record_turn_finish_outcome,
+)
 from gc_core.intent_scope.hook import amaybe_update_intent_scope_from_tool
 from gc_core.loop_detector.detector import clear as clear_loop_detector
 
@@ -2883,6 +2885,10 @@ class _AgentLoop:
             return _Outcome(messages, completed_step=True)
         # accept / fail_open_error / fail_open_limit / прочее —
         # все завершают ход одинаково.
+        if getattr(self.ctx, "routing_contract_v2", True):
+            record_turn_finish_outcome(
+                arguments=finish_arguments, outcome=decision.outcome, state=state,
+            )
         state.steps += 1
         state.flush_current_user_intent()
         clear_loop_detector(state)

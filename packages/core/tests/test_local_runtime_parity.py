@@ -1,4 +1,4 @@
-"""Local runtime must preserve develop's requests, results and persisted state.
+"""Legacy routing execution preserves develop's requests, results and persisted state.
 
 Only model HTTP responses are scripted; the executor, loop, tools, finish gate,
 serialization and thread store run normally. Reference digests are captured by
@@ -294,7 +294,7 @@ def normalize(value, workspace, ids=None):
     return value
 
 
-async def run_scenario(name, workspace, monkeypatch, *, streaming=False):
+async def run_scenario(name, workspace, monkeypatch, *, streaming=False, legacy_routing_contract=False):
     monkeypatch.setattr(
         intent_operations, "utc_now_ts", lambda: "2026-01-01T00:00:00Z"
     )
@@ -323,6 +323,9 @@ async def run_scenario(name, workspace, monkeypatch, *, streaming=False):
     monkeypatch.chdir(workspace)
     backend = install(monkeypatch, ScriptedBackend(scenario["turns"]))
     ctx = await acreate_run_context(cfg)
+    if legacy_routing_contract:
+        # Frozen develop references predate the persisted finish outcome.
+        ctx.routing_contract_v2 = False
     executor = AgentExecutor(ctx)
     deltas = []
     human_questions = []
@@ -507,11 +510,11 @@ async def run_scenario(name, workspace, monkeypatch, *, streaming=False):
 
 @pytest.mark.parametrize("name", list(scenarios()))
 @pytest.mark.parametrize("streaming", [False, True], ids=["json", "sse"])
-async def test_local_runtime_matches_develop(
+async def test_legacy_routing_runtime_matches_develop(
     name, streaming, tmp_path, monkeypatch
 ):
     summary, _ = await run_scenario(
-        name, tmp_path, monkeypatch, streaming=streaming
+        name, tmp_path, monkeypatch, streaming=streaming, legacy_routing_contract=True
     )
     reference = json.loads(REFERENCE.read_text())
     key = f"{name}:{'sse' if streaming else 'json'}"

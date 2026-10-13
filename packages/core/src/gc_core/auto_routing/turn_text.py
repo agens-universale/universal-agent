@@ -6,6 +6,7 @@ from typing import Any
 
 from gc_core.intent_log.record import ACTION_USER_ASK
 from gc_core.intent_log.serialize import deserialize_list
+from gc_core.utils.text_preview import head_tail_preview
 from gc_core.message_policy.user_message_policy import extract_real_user_message_text
 
 
@@ -35,11 +36,12 @@ def opening_user_text(state: Any) -> str:
     return ""
 
 
-def task_text(state: Any, *, limit: int) -> str:
+def task_text(state: Any, *, limit: int, legacy: bool = False) -> str:
     """Все `user_ask` открытого хода через перевод строки (их бывает несколько:
     подгруженный прерванный прогон, сообщения посреди хода); журнал пуст — первое
-    реальное сообщение хода. Обрезка с головы до `limit`."""
+    реальное сообщение хода. Начало и конец укладываются в `limit`."""
     records = deserialize_list(getattr(state, "current_user_intent", None) or [])
     asks = [r.content for r in records if getattr(r, "action", "") == ACTION_USER_ASK]
     text = "\n".join(str(a).strip() for a in asks if isinstance(a, str) and a.strip()).strip()
-    return (text or opening_user_text(state))[:limit]
+    text = text or opening_user_text(state)
+    return text[:limit] if legacy else head_tail_preview(text, limit)
