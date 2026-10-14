@@ -588,18 +588,25 @@ class GcCliExternal(BaseAgent):
     def _usage_by_model(self, state: Any) -> dict[str, dict[str, int]] | None:
         """Tokens per provider model from `state.usage.by_model` — AUTO runs two
         models, and downstream pricing needs the split. No prices here."""
-        usage = getattr(state, "usage", None) if state is not None else None
-        by_model = getattr(usage, "by_model", None) or {}
-        if not by_model:
-            return None
-        return {
-            name: {
-                "input": int(bucket.get("input", 0) or 0),
-                "output": int(bucket.get("output", 0) or 0),
-                "cached": int(bucket.get("cached", 0) or 0),
+        # Best-effort like `_populate_usage`: runs in the `finally` metadata build.
+        try:
+            usage = (
+                getattr(state, "usage", None) if state is not None else None
+            )
+            by_model = getattr(usage, "by_model", None) or {}
+            if not by_model:
+                return None
+            return {
+                name: {
+                    "input": int(bucket.get("input", 0) or 0),
+                    "output": int(bucket.get("output", 0) or 0),
+                    "cached": int(bucket.get("cached", 0) or 0),
+                }
+                for name, bucket in by_model.items()
             }
-            for name, bucket in by_model.items()
-        }
+        except Exception:
+            self.logger.exception("could not report token usage by model to Harbor")
+            return None
 
     def _write_trajectory(self, state: Any) -> int:
         """Dump the gc-cli run as ATIF `trajectory.json`, mirroring Terminus2.

@@ -405,3 +405,9 @@ def test_usage_by_model_reaches_the_metadata():
         "vendor/big": {"input": 300, "output": 30, "cached": 10},
     }
     assert _agent()._usage_by_model(None) is None
+
+
+def test_usage_by_model_failure_never_breaks_the_run():
+    """Same finally-path as _populate_usage: a broken bucket yields None, not a raise."""
+    state = SimpleNamespace(usage=SimpleNamespace(by_model={"m": None}))
+    assert _agent()._usage_by_model(state) is None
