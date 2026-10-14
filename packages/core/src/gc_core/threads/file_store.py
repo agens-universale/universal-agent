@@ -78,6 +78,17 @@ def _line(record: JsonObject) -> bytes:
     return (json.dumps(record, ensure_ascii=False) + "\n").encode()
 
 
+def _json_row(line: str) -> JsonObject | None:
+    row = line.strip()
+    if not row:
+        return None
+    try:
+        value = json.loads(row)
+    except json.JSONDecodeError:
+        return None
+    return value if isinstance(value, dict) else None
+
+
 def _jsonl(path: str | Path) -> list[JsonObject]:
     if not os.path.exists(path):
         return []
@@ -159,6 +170,45 @@ class FileThreadStore(ThreadStore):
         )
         return "created_at" in v2 or any(os.path.exists(f) for f in files)
 
+    def _load(self, key: ThreadKey) -> tuple[JsonObject, JsonObject]:
+        """``control.json`` треда и его секция v2 — с учётом удаления
+        старым кодом (``delete_thread`` убирает файлы, но не ``.store``)."""
+        control = _control(self._base(key))
+        v2 = self._v2(control)
+        if self._deleted_outside(key, v2):
+            v2 = self._v2(
+                {
+                    "v2": {
+                        "generation": v2["generation"] + 1,
+                        "epoch": v2["epoch"],
+                        "deleted": True,
+                    }
+                }
+            )
+        return control, v2
+
+    def _deleted_outside(self, key: ThreadKey, v2: JsonObject) -> bool:
+        """У треда были записи, а файлов не осталось — его удалили мимо v2."""
+        if v2.get("deleted") or not (
+            v2["revision"] or any(v2["high"].values())
+        ):
+            return False
+        s, t, d = key.system, key.thread, self._dir
+        files = [
+            layout.meta_file(d, s, t),
+            layout.history_file(d, s, t),
+            layout.subagent_trace_path(d, s, t),
+            str(layout.edits_journal_path(d, s, t)),
+            *(layout.stream_path(d, s, t, n) for n in v2["high"]),
+        ]
+        return not any(os.path.exists(f) for f in files)
+
+    def _keep_caches(self, key, control, v2) -> None:
+        """Сохранить кеши, посчитанные при чтении: иначе тред, созданный
+        develop, пересчитывался бы на каждом шаге."""
+        if control.get("v2") != v2:
+            self._save_control(key, control, v2)
+
     def _save_control(self, key, control, v2) -> None:
         file_tx.write_control(
             self._base(key), {**control, "v2": v2}, self._durability
@@ -218,15 +268,45 @@ class FileThreadStore(ThreadStore):
         cached = v2.setdefault("stats", {}).get(stream)
         if cached and cached["path"] == path and cached["size"] == size:
             return cached
-        entries = self._entries(key, stream)
-        stats = {
-            "path": path,
-            "size": size,
-            "count": len(entries),
-            "max": max((e.seq for e in entries), default=0),
-        }
+        if cached and cached["path"] == path and cached["size"] < size:
+            stats = self._grown(key, stream, cached)
+        else:
+            entries = self._entries(key, stream)
+            stats = {
+                "path": path,
+                "size": size,
+                "count": len(entries),
+                "max": max((e.seq for e in entries), default=0),
+            }
         v2["stats"][stream] = stats
         return stats
+
+    def _grown(self, key, stream: str, cached: JsonObject) -> JsonObject:
+        """Файл дописали мимо v2: досчитать только хвост, и только целые
+        строки — строку, которую пишут прямо сейчас, оставить на потом."""
+        with open(cached["path"], "rb") as handle:
+            handle.seek(cached["size"])
+            tail = handle.read()
+        complete = tail[: tail.rfind(b"\n") + 1]
+        lines = complete.decode("utf-8").splitlines()
+        count, top = cached["count"], cached["max"]
+        if stream == _HISTORY:
+            records, _keys, _max = layout.read_history_lines(
+                lines, key.system, key.thread
+            )
+            count += len(records)
+            top = max([top, *(r[0] for r in records)])
+        else:
+            rows = [r for r in (_json_row(line) for line in lines) if r]
+            count += len(rows)
+            seqs = [int(r.get("seq") or 0) for r in rows]
+            top = count if stream == _EDITS else max([top, *seqs])
+        return {
+            "path": cached["path"],
+            "size": cached["size"] + len(complete),
+            "count": count,
+            "max": top,
+        }
 
     def _high(self, key: ThreadKey, v2: JsonObject, stream: str) -> int:
         """Высшая выданная отметка потока: номер удалённого хвоста не
@@ -419,10 +499,13 @@ class FileThreadStore(ThreadStore):
 
     async def get_thread(self, key: ThreadKey) -> ThreadRecord | None:
         with self._scope(key):
-            v2 = self._v2(_control(self._base(key)))
+            control, v2 = self._load(key)
             if not self._exists(key, v2):
+                self._keep_caches(key, control, v2)
                 return None
-            return self._record(key, v2)
+            record = self._record(key, v2)
+            self._keep_caches(key, control, v2)
+            return record
 
     async def list_threads(self, query: ThreadQuery) -> Page[ThreadRecord]:
         records = []
@@ -460,7 +543,7 @@ class FileThreadStore(ThreadStore):
     ) -> list[StreamEntry]:
         check_stream_name(stream)
         with self._scope(key):
-            v2 = self._v2(_control(self._base(key)))
+            _control_doc, v2 = self._load(key)
             if v2.get("deleted"):
                 return []
             fresh = [
@@ -493,8 +576,7 @@ class FileThreadStore(ThreadStore):
             replayed = self._replayed(base, change)
             if replayed is not None:
                 return replayed
-            control = _control(base)
-            v2 = self._v2(control)
+            control, v2 = self._load(key)
             current = self._lease(v2) if self._exists(key, v2) else None
             _check_durable_owner(control, change.lease.owner)
             check_writer(current, change.lease, self._clock())
@@ -514,8 +596,7 @@ class FileThreadStore(ThreadStore):
             replayed = self._replayed(base, change)
             if replayed is not None:
                 return replayed
-            control = _control(base)
-            v2 = self._v2(control)
+            control, v2 = self._load(key)
             if not self._exists(key, v2):
                 v2 = self._created(v2)
             return self._side(key, control, v2, change)
@@ -569,8 +650,7 @@ class FileThreadStore(ThreadStore):
 
     async def claim(self, key: ThreadKey, lease: LeaseRequest) -> ThreadRecord:
         with self._scope(key):
-            control = _control(self._base(key))
-            v2 = self._v2(control)
+            control, v2 = self._load(key)
             if not self._exists(key, v2):
                 v2 = self._created(v2)
             _check_durable_owner(control, lease.owner)
@@ -592,8 +672,7 @@ class FileThreadStore(ThreadStore):
 
     async def release(self, key: ThreadKey, lease: Lease) -> None:
         with self._scope(key):
-            control = _control(self._base(key))
-            v2 = self._v2(control)
+            control, v2 = self._load(key)
             if same_lease(self._lease(v2), lease):
                 v2["lease"] = None
                 if control.get("owner_id") == lease.owner:
@@ -603,8 +682,7 @@ class FileThreadStore(ThreadStore):
     async def delete(self, key: ThreadKey, *, op_id: str) -> None:
         with self._scope(key):
             base = self._base(key)
-            control = _control(base)
-            v2 = self._v2(control)
+            control, v2 = self._load(key)
             if not self._exists(key, v2):
                 return
             changes = file_tx.Changes(Path(self._dir))
@@ -713,7 +791,8 @@ class _Commit:
         # Тред в старом формате без system в имени: первая запись переносит
         # историю в канонический файл целиком.
         source = layout.history_file(store.threads_dir, key.system, key.thread)
-        self.rewrite = source != data and os.path.exists(source)
+        self.from_legacy = source != data and os.path.exists(source)
+        self.rewrite = self.from_legacy
 
     def _loaded(self) -> list:
         if self.history is None:
@@ -839,7 +918,11 @@ class _Commit:
             return
         kept, count = self._kept()
         whole = kept + tail
-        self.changes.put(self.canonical, whole or None)
+        # Тред старого формата: пустой канонический файл, а не его
+        # отсутствие — иначе чтение вернулось бы к старому файлу.
+        self.changes.put(
+            self.canonical, whole if whole or self.from_legacy else None
+        )
         self.count = count + len(self.fresh)
         self.v2.setdefault("stats", {})[_HISTORY] = {
             "path": self.canonical,
