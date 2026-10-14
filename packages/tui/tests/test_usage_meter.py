@@ -395,3 +395,30 @@ def test_footer_does_not_price_legacy_tokens_as_current_model():
     text = render_usage_meter(account.to_meta(), None, _PRICING_RUB, _MODEL)
     assert "0.50$?" in text.plain
     assert "₽" not in text.plain
+
+
+_PRICING_OTHER_MODEL = {
+    "enabled": True,
+    "currency": "₽",
+    "per_tokens": 1_000_000,
+    "models": {"other/model": {"input": 100, "output": 200}},
+}
+
+
+def test_footer_shows_unknown_cost_instead_of_hiding_it():
+    """Ставки заданы, но у этой модели цены нет — трата неизвестна, а не ноль
+    (спека PR140 Р5)."""
+    text = render_usage_meter(_meta(1000, 100), None, _PRICING_OTHER_MODEL, _MODEL)
+    assert text.plain.endswith("/?")
+
+
+def test_sessions_show_unknown_cost_instead_of_hiding_it():
+    assert format_nonzero_cost(_meta(1000, 100), _PRICING_OTHER_MODEL, _MODEL) == "?"
+
+
+def test_no_rates_at_all_keeps_the_cost_hidden():
+    """Шаблон: pricing включён, ставок нет — стартовое уведомление обещает, что
+    стоимость скрыта; «?» у каждой сессии был бы шумом."""
+    text = render_usage_meter(_meta(1000, 100), None, _PRICING_NO_RATES, _MODEL)
+    assert "/" not in text.plain
+    assert format_nonzero_cost(_meta(1000, 100), _PRICING_NO_RATES, _MODEL) is None

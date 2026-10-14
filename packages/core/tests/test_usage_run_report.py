@@ -98,3 +98,23 @@ def test_state_exposes_usage_and_last_run_in_memory():
     assert isinstance(st.usage, UsageAccount)
     assert st.usage.is_empty()
     assert st.last_run_usage is None
+
+
+_PRICING_OTHER = {
+    "enabled": True,
+    "currency": "₽",
+    "per_tokens": 1_000_000,
+    "models": {"other": {"input": 93, "output": 295}},
+}
+
+
+def test_report_and_dict_mark_unknown_cost_without_a_sum():
+    from gc_core.usage.report import build_run_usage_dict
+
+    run = UsageAccount()
+    run.add(CATEGORY_MAIN, 1000, 100, model="m")
+    text = build_run_usage_report(run, _PRICING_OTHER, "m")
+    assert "cost" in text and "—?" in text
+    assert "? — часть вызовов без цены, итог неполный" in text
+    data = build_run_usage_dict(run, _PRICING_OTHER, "m")
+    assert data["cost"] == {"by_currency": {}, "unpriced": True}

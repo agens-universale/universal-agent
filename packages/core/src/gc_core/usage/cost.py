@@ -21,6 +21,7 @@ from typing import Dict
 from gc_core.config_modules.pricing import (
     ResolvedTariff,
     coerce_pricing,
+    pricing_has_rates,
     resolve_model_tariff,
 )
 from gc_core.usage.account import LEGACY_CURRENCY, MONEY_FIELD, UsageAccount
@@ -76,6 +77,15 @@ class CostReport:
     has_unpriced: bool = (
         False  # есть категория с остатком, цену которого узнать нечем
     )
+    # Задана ли хоть одна ставка (`pricing_has_rates`): без ставок неизвестная
+    # трата не показывается — стоимость скрыта, о чём сообщает старт.
+    rates_configured: bool = False
+
+    @property
+    def unknown_only(self) -> bool:
+        """Денег не известно ни копейки, но трата есть — показать «?», а не
+        выдавать сессию за бесплатную (спека PR140 Р5)."""
+        return not self.has_cost and self.has_unpriced and self.rates_configured
 
     @property
     def multi_currency(self) -> bool:
@@ -232,4 +242,5 @@ def compute_cost(
         report.total_missing_usage_calls += missing
 
     report.has_cost = bool(report.by_currency)
+    report.rates_configured = pricing_has_rates(pricing)
     return report

@@ -95,6 +95,17 @@ def _rates_configured(input_rate: Any, output_rate: Any) -> bool:
     return float(input_rate) != 0 or float(output_rate) != 0
 
 
+def pricing_has_rates(pricing: PricingConfig | dict | None) -> bool:
+    """Задана ли хоть одна ставка: общий тариф или запись `models`. Без ставок
+    стоимость остаётся скрытой (уведомление при старте), а не «неизвестной»."""
+    pricing = _coerce_pricing(pricing)
+    if not pricing.enabled:
+        return False
+    if _rates_configured(pricing.input, pricing.output):
+        return True
+    return any(_rates_configured(t.input, t.output) for t in pricing.models.values())
+
+
 def resolve_model_tariff(
     pricing: PricingConfig | dict | None,
     model_name: str | None,

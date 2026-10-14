@@ -85,7 +85,7 @@ def render_cost_report(
         f"{title}    models: {', '.join(models)}"
         if models else _report_header(title, model_name)
     ]
-    show_cost = report.has_cost
+    show_cost = report.has_cost or report.unknown_only
     lines.append(_columns_header(show_cost))
 
     # Тильда осмысленна только когда в отчёте есть ОБЕ стороны — факт и тариф;
@@ -251,7 +251,7 @@ def build_run_usage_dict(
     categories: dict[str, dict[str, Any]] = {}
     for c in report.categories:
         categories[c.category] = _category_usage_entry(
-            c, has_cost=report.has_cost
+            c, has_cost=report.has_cost or report.unknown_only
         )
 
     total: dict[str, Any] = {
@@ -282,8 +282,11 @@ def build_run_usage_dict(
                     entry[field] = bucket[field]
             models[name] = entry
         out["models"] = models
-    if report.has_cost:
-        out["cost"] = {"by_currency": dict(report.by_currency)}
+    if report.has_cost or report.unknown_only:
+        cost: dict[str, Any] = {"by_currency": dict(report.by_currency)}
+        if report.has_unpriced:
+            cost["unpriced"] = True
+        out["cost"] = cost
     return out
 
 
