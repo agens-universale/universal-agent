@@ -340,7 +340,7 @@ class AgentExecutor:
             # там — файловое, как раньше.
             _reset_store = getattr(self._ctx, "thread_store", None)
             if _reset_store is None:
-                from gc_core.thread_store_file import FileThreadStore
+                from gc_core.threads.file_store import FileThreadStore
 
                 _reset_store = FileThreadStore(resolve_threads_dir(self._ctx))
             from gc_core.thread_store_async import athread_store

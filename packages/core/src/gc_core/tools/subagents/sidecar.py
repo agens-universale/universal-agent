@@ -143,7 +143,7 @@ async def apersist_subagent_trace(
             # молчаливая запись мимо контракта уже была однажды (см. докстроку
             # `FileThreadStore.archive_and_replace`).
             return None
-        from gc_core.thread_store_file import FileThreadStore
+        from gc_core.threads.file_store import FileThreadStore
 
         store = FileThreadStore(ident.threads_dir)
 
