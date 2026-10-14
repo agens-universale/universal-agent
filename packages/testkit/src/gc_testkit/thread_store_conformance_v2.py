@@ -835,6 +835,44 @@ async def check_watch_across_replace(store, _clock: FakeClock) -> None:
     )
 
 
+async def check_watch_across_delete(store, _clock: FakeClock) -> None:
+    lease = await _claim(store)
+    await store.commit(
+        KEY, _change("op1", 0, lease, append_messages=_msgs("m1", "m2"))
+    )
+    record = await store.get_thread(KEY)
+    seen: list[str] = []
+
+    async def consume():
+        async for entry in store.watch(
+            KEY,
+            "messages",
+            after_seq=2,
+            generation=record.generation,
+            history_version=record.history_version,
+            poll_interval=0,
+        ):
+            seen.append(entry.data["id"])
+
+    async def until(count: int) -> None:
+        while len(seen) < count:
+            await asyncio.sleep(0)
+
+    task = asyncio.create_task(consume())
+    try:
+        await asyncio.sleep(0)
+        await store.delete(KEY, op_id="d")
+        again = await _claim(store)
+        await store.commit(
+            KEY, _change("op2", 0, again, append_messages=_msgs("n1"))
+        )
+        await asyncio.wait_for(until(1), _WAIT)
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+    _expect(seen == ["n1"], "после удаления тред читается с начала")
+
+
 CHECKS: tuple[Callable[..., Awaitable[None]], ...] = (
     check_missing_thread,
     check_claim_creates_thread,
@@ -869,6 +907,7 @@ CHECKS: tuple[Callable[..., Awaitable[None]], ...] = (
     check_prune_receipts,
     check_watch_default,
     check_watch_across_replace,
+    check_watch_across_delete,
     check_expired_lease_rejected_without_takeover,
     check_commit_with_pre_extension_lease,
     check_lease_checked_before_revision,

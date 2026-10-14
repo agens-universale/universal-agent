@@ -179,29 +179,52 @@ class ThreadStore(ABC):
         stream: str,
         *,
         after_seq: int,
+        generation: int | None = None,
         history_version: int | None = None,
         poll_interval: float = 0.5,
     ) -> AsyncIterator[StreamEntry]:
         """Новые записи потока по мере появления; остановка — отменой задачи.
 
-        Курсор читателя — пара ``(history_version, after_seq)``: если история
-        заменена (версия не та, что у курсора), выдача начинается с начала
-        новой истории. ``history_version=None`` — версия на момент старта.
+        Курсор читателя — ``(generation, history_version, after_seq)``: если
+        тред удалён и создан заново (другое поколение) или история заменена
+        (другая версия), выдача начинается с начала новой истории.
+        ``None`` — значение на момент старта.
 
         По умолчанию — опрос. Хранилище с push (LISTEN/NOTIFY, Redis streams)
         переопределяет.
         """
-        cursor, version = after_seq, history_version
+        cursor, mark = after_seq, None
+        if generation is not None or history_version is not None:
+            mark = (generation, history_version)
         while True:
             record = await self.get_thread(key)
-            current = record.history_version if record is not None else 0
-            if version is not None and current != version:
+            current = (
+                (record.generation, record.history_version)
+                if record is not None
+                else None
+            )
+            if (
+                mark is not None
+                and current != mark
+                and _changed(mark, current)
+            ):
                 cursor = 0
-            version = current
+            mark = current
             for entry in await self.read_stream(key, stream, after_seq=cursor):
                 cursor = entry.seq
                 yield entry
             await asyncio.sleep(poll_interval)
+
+
+def _changed(mark: tuple, current: tuple | None) -> bool:
+    """Сменилось ли поколение или версия истории (``None`` в курсоре — «не
+    задано вызывающим», не сравнивается)."""
+    if current is None:
+        return True
+    return any(
+        wanted is not None and wanted != now
+        for wanted, now in zip(mark, current, strict=True)
+    )
 
 
 #: Абстрактные методы контракта — то, что обязана реализовать база.

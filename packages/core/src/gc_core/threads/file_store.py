@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import hashlib
 import json
@@ -27,6 +28,8 @@ from typing import Any
 from gc_core.thread_store_journal import (
     _control,
     _control_path,
+    _physical_control_path,
+    _physical_read_scope,
     thread_read_scope,
 )
 from gc_core.threads import file_layout as layout
@@ -78,6 +81,76 @@ def _line(record: JsonObject) -> bytes:
     return (json.dumps(record, ensure_ascii=False) + "\n").encode()
 
 
+#: Сколько последних записей потока помнит индекс смещений.
+_RECENT = 256
+
+
+def _recent(previous: list, fresh: list) -> list:
+    return [*previous, *fresh][-_RECENT:]
+
+
+def _resume_offset(cached: JsonObject, after_seq: int | None) -> int | None:
+    """Откуда читать, чтобы отдать записи после ``after_seq``; ``None`` —
+    только целиком (читатель отстал дальше индекса последних записей)."""
+    if after_seq is None or after_seq >= cached["max"]:
+        return cached["size"]
+    recent = cached.get("recent") or []
+    if not recent or after_seq < recent[0][0] - 1:
+        return None
+    return next(off for seq, off in recent if seq > after_seq)
+
+
+def _read_plan(cached, path: str, size: int, after_seq):
+    """Кеш, на который можно опереться, и смещение, с которого читать:
+    ``(None, 0)`` — читать целиком."""
+    if not cached or cached["path"] != path or cached["size"] > size:
+        return None, 0
+    start = _resume_offset(cached, after_seq)
+    return (None, 0) if start is None else (cached, start)
+
+
+def _count_before(cached, start: int) -> int:
+    """Сколько записей лежит до смещения ``start``."""
+    if cached is None:
+        return 0
+    known = [r for r in cached.get("recent") or [] if r[1] >= start]
+    return cached["count"] - len(known)
+
+
+def _grown_stats(cached, path: str, size: int, pairs) -> JsonObject:
+    """Статистика после чтения: новыми считаются строки за концом кеша."""
+    fresh = [p for p in pairs if cached is None or p[1] >= cached["size"]]
+    return {
+        "path": path,
+        "size": size,
+        "count": (cached["count"] if cached else 0) + len(fresh),
+        "max": max(
+            [cached["max"] if cached else 0, *(e.seq for e, _ in fresh)]
+        ),
+        "recent": _recent(
+            (cached.get("recent") or []) if cached else [],
+            [[e.seq, offset] for e, offset in fresh],
+        ),
+    }
+
+
+def _read_lines(path: str, offset: int) -> tuple[list[tuple[str, int]], int]:
+    """Целые строки файла с байтового смещения — пары (текст, смещение
+    строки) — и сколько байт они заняли: строку, которую дописывают прямо
+    сейчас, оставляем на следующее чтение."""
+    if not os.path.exists(path):
+        return [], 0
+    with open(path, "rb") as handle:
+        handle.seek(offset)
+        tail = handle.read()
+    complete = tail[: tail.rfind(b"\n") + 1]
+    rows, position = [], offset
+    for raw in complete.split(b"\n")[:-1]:
+        rows.append((raw.decode("utf-8"), position))
+        position += len(raw) + 1
+    return rows, len(complete)
+
+
 def _json_row(line: str) -> JsonObject | None:
     row = line.strip()
     if not row:
@@ -87,24 +160,6 @@ def _json_row(line: str) -> JsonObject | None:
     except json.JSONDecodeError:
         return None
     return value if isinstance(value, dict) else None
-
-
-def _jsonl(path: str | Path) -> list[JsonObject]:
-    if not os.path.exists(path):
-        return []
-    rows: list[JsonObject] = []
-    with open(path, encoding="utf-8") as stream:
-        for line in stream:
-            row = line.strip()
-            if not row:
-                continue
-            try:
-                value = json.loads(row)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(value, dict):
-                rows.append(value)
-    return rows
 
 
 class FileThreadStore(ThreadStore):
@@ -120,6 +175,10 @@ class FileThreadStore(ThreadStore):
         self._dir = str(Path(threads_dir).absolute())
         self._durability = durability
         self._clock = clock or (lambda: datetime.now(UTC))
+        #: Кеши, посчитанные при чтении (статистика потоков, архивы), — в
+        #: памяти: чтение не пишет на диск; в control.json они попадают с
+        #: ближайшей записью.
+        self._memo: dict[ThreadKey, JsonObject] = {}
 
     @property
     def threads_dir(self) -> str:
@@ -140,6 +199,26 @@ class FileThreadStore(ThreadStore):
     def _scope(self, key: ThreadKey):
         os.makedirs(self._dir, exist_ok=True)
         return thread_read_scope(self._dir, key.system, key.thread)
+
+    @contextlib.contextmanager
+    def _read_scope(self, key: ThreadKey):
+        """Чтение: блокировка только у треда, у которого уже есть ``.store``
+        (там может ждать доигрыш прерванной записи). Каталогов не создаёт и
+        identity не пишет — чтение по чужому id ничего не меняет на диске."""
+        bases = sorted(
+            {
+                base
+                for base in (
+                    self._base(key),
+                    _physical_control_path(self._dir, key.thread),
+                )
+                if base.is_dir()
+            }
+        )
+        with contextlib.ExitStack() as stack:
+            for base in bases:
+                stack.enter_context(_physical_read_scope(self._dir, base))
+            yield
 
     def _v2(self, control: JsonObject) -> JsonObject:
         v2 = copy.deepcopy(control.get("v2") or {})
@@ -175,6 +254,7 @@ class FileThreadStore(ThreadStore):
         старым кодом (``delete_thread`` убирает файлы, но не ``.store``)."""
         control = _control(self._base(key))
         v2 = self._v2(control)
+        self._with_memo(key, v2)
         if self._deleted_outside(key, v2):
             v2 = self._v2(
                 {
@@ -203,11 +283,24 @@ class FileThreadStore(ThreadStore):
         ]
         return not any(os.path.exists(f) for f in files)
 
-    def _keep_caches(self, key, control, v2) -> None:
-        """Сохранить кеши, посчитанные при чтении: иначе тред, созданный
-        develop, пересчитывался бы на каждом шаге."""
-        if control.get("v2") != v2:
-            self._save_control(key, control, v2)
+    def _with_memo(self, key: ThreadKey, v2: JsonObject) -> None:
+        """Подмешать кеши из памяти: из двух записей одного файла берётся та,
+        что дочитана дальше; список архивов из control.json главнее."""
+        memo = self._memo.get(key) or {}
+        stats = v2.setdefault("stats", {})
+        for stream, cached in (memo.get("stats") or {}).items():
+            current = stats.get(stream)
+            if (
+                current is None
+                or current["path"] != cached["path"]
+                or current["size"] < cached["size"]
+            ):
+                stats[stream] = cached
+        if "archives" not in v2 and "archives" in memo:
+            v2["archives"] = memo["archives"]
+
+    def _forget(self, key: ThreadKey) -> None:
+        self._memo.pop(key, None)
 
     def _save_control(self, key, control, v2) -> None:
         file_tx.write_control(
@@ -220,93 +313,97 @@ class FileThreadStore(ThreadStore):
         path = layout.history_file(self._dir, key.system, key.thread)
         return layout.read_history_file(path, key.system, key.thread)
 
-    def _entries(self, key: ThreadKey, stream: str) -> list[StreamEntry]:
-        if stream == _HISTORY:
-            records, _keys, _max = self._history(key)
-            return [
-                StreamEntry(seq=max(seq, n + 1), ts=ts, data=payload)
-                for n, (seq, ts, payload) in enumerate(records)
-            ]
-        if stream == _SUBAGENTS:
-            path = layout.subagent_trace_path(
-                self._dir, key.system, key.thread
-            )
-            return [
-                StreamEntry(
-                    seq=int(row.get("seq") or n + 1),
-                    ts=str(row.get("ts") or ""),
-                    data={
-                        k: v for k, v in row.items() if k not in ("ts", "seq")
-                    },
-                )
-                for n, row in enumerate(_jsonl(path))
-            ]
-        if stream == _EDITS:
-            path = layout.edits_journal_path(self._dir, key.system, key.thread)
-            return [
-                StreamEntry(seq=n + 1, ts=str(row.get("ts") or ""), data=row)
-                for n, row in enumerate(_jsonl(path))
-            ]
-        path = layout.stream_path(self._dir, key.system, key.thread, stream)
-        return [StreamEntry.model_validate(row) for row in _jsonl(path)]
-
     def _read_path(self, key: ThreadKey, stream: str) -> str:
         if stream == _HISTORY:
             return layout.history_file(self._dir, key.system, key.thread)
         return str(self._stream_file(key, stream))
 
-    def _stats(
-        self, key: ThreadKey, v2: JsonObject, stream: str
-    ) -> JsonObject:
-        """Число записей и max seq файла потока — из кеша ``control.json``.
+    def _parse(
+        self, key: ThreadKey, stream: str, rows, start: int
+    ) -> list[tuple[StreamEntry, int]]:
+        """Записи потока со смещениями их строк; ``start`` — сколько записей
+        до первой строки (журнал правок нумеруется по строкам)."""
+        parsed: list[tuple[StreamEntry, int]] = []
+        for text, offset in rows:
+            entry = self._entry(key, stream, text, start + len(parsed) + 1)
+            if entry is not None:
+                parsed.append((entry, offset))
+        return parsed
 
-        Кеш верен, пока размер файла тот же; иначе файл писали мимо v2
-        (старый код, TUI) — пересчёт по файлу.
+    def _entry(
+        self, key: ThreadKey, stream: str, text: str, number: int
+    ) -> StreamEntry | None:
+        if stream == _HISTORY:
+            records, _keys, _max = layout.read_history_lines(
+                [text], key.system, key.thread
+            )
+            if not records:
+                return None
+            seq, ts, payload = records[0]
+            return StreamEntry(
+                seq=seq if seq >= 1 else number, ts=ts, data=payload
+            )
+        row = _json_row(text)
+        if row is None:
+            return None
+        if stream == _SUBAGENTS:
+            data = {k: v for k, v in row.items() if k not in ("ts", "seq")}
+            return StreamEntry(
+                seq=int(row.get("seq") or number),
+                ts=str(row.get("ts") or ""),
+                data=data,
+            )
+        if stream == _EDITS:
+            return StreamEntry(
+                seq=number, ts=str(row.get("ts") or ""), data=row
+            )
+        return StreamEntry.model_validate(row)
+
+    def _entries(self, key: ThreadKey, stream: str) -> list[StreamEntry]:
+        rows, _used = _read_lines(self._read_path(key, stream), 0)
+        return [entry for entry, _offset in self._parse(key, stream, rows, 0)]
+
+    def _scan(
+        self,
+        key: ThreadKey,
+        v2: JsonObject,
+        stream: str,
+        *,
+        after_seq: int | None = None,
+    ) -> tuple[JsonObject, list[StreamEntry]]:
+        """Статистика потока (число записей, max seq) и, если задан
+        ``after_seq``, записи после него — с минимальным чтением файла.
+
+        Кеш (путь, байты целых строк, число, max и смещения последних
+        записей) верен, пока файл тот же: не изменился — не читаем вовсе;
+        дописан (в том числе мимо v2) или читатель отстал на последние
+        записи — читаем с известного смещения; перезаписан или читатель
+        отстал дальше — целиком.
         """
         path = self._read_path(key, stream)
         size = os.path.getsize(path) if os.path.exists(path) else 0
-        cached = v2.setdefault("stats", {}).get(stream)
-        if cached and cached["path"] == path and cached["size"] == size:
-            return cached
-        if cached and cached["path"] == path and cached["size"] < size:
-            stats = self._grown(key, stream, cached)
-        else:
-            entries = self._entries(key, stream)
-            stats = {
-                "path": path,
-                "size": size,
-                "count": len(entries),
-                "max": max((e.seq for e in entries), default=0),
-            }
-        v2["stats"][stream] = stats
-        return stats
+        cached, start = _read_plan(
+            v2.setdefault("stats", {}).get(stream), path, size, after_seq
+        )
+        if cached is not None and start == cached["size"] == size:
+            return cached, []
+        rows, used = _read_lines(path, start)
+        before = _count_before(cached, start)
+        pairs = self._parse(key, stream, rows, before)
+        stats = _grown_stats(cached, path, start + used, pairs)
+        self._remember_stats(key, v2, stream, stats)
+        if after_seq is None:
+            return stats, []
+        return stats, [e for e, _ in pairs if e.seq > after_seq]
 
-    def _grown(self, key, stream: str, cached: JsonObject) -> JsonObject:
-        """Файл дописали мимо v2: досчитать только хвост, и только целые
-        строки — строку, которую пишут прямо сейчас, оставить на потом."""
-        with open(cached["path"], "rb") as handle:
-            handle.seek(cached["size"])
-            tail = handle.read()
-        complete = tail[: tail.rfind(b"\n") + 1]
-        lines = complete.decode("utf-8").splitlines()
-        count, top = cached["count"], cached["max"]
-        if stream == _HISTORY:
-            records, _keys, _max = layout.read_history_lines(
-                lines, key.system, key.thread
-            )
-            count += len(records)
-            top = max([top, *(r[0] for r in records)])
-        else:
-            rows = [r for r in (_json_row(line) for line in lines) if r]
-            count += len(rows)
-            seqs = [int(r.get("seq") or 0) for r in rows]
-            top = count if stream == _EDITS else max([top, *seqs])
-        return {
-            "path": cached["path"],
-            "size": cached["size"] + len(complete),
-            "count": count,
-            "max": top,
-        }
+    def _stats(
+        self, key: ThreadKey, v2: JsonObject, stream: str
+    ) -> JsonObject:
+        return self._scan(key, v2, stream)[0]
+
+    def _remember_stats(self, key, v2, stream, stats) -> None:
+        v2["stats"][stream] = stats
+        self._memo.setdefault(key, {}).setdefault("stats", {})[stream] = stats
 
     def _high(self, key: ThreadKey, v2: JsonObject, stream: str) -> int:
         """Высшая выданная отметка потока: номер удалённого хвоста не
@@ -314,7 +411,8 @@ class FileThreadStore(ThreadStore):
         stats = self._stats(key, v2, stream)
         return max(int(v2["high"].get(stream, 0)), stats["max"])
 
-    def _after_append(self, v2, key, stream, tail: bytes, added: int, seq):
+    def _after_append(self, v2, key, stream, lines, seqs) -> None:
+        """Кеш потока после своего дописывания: смещения строк известны."""
         path = (
             self._stream_file(key, stream)
             if stream != _HISTORY
@@ -322,13 +420,22 @@ class FileThreadStore(ThreadStore):
         )
         stats = self._stats(key, v2, stream)
         size = os.path.getsize(path) if os.path.exists(path) else 0
+        offsets, position = [], size
+        for line in lines:
+            offsets.append(position)
+            position += len(line)
         v2["stats"][stream] = {
             "path": str(path),
-            "size": size + len(tail),
-            "count": stats["count"] + added,
-            "max": max(stats["max"], seq),
+            "size": position,
+            "count": stats["count"] + len(lines),
+            "max": max([stats["max"], *seqs]),
+            "recent": _recent(
+                stats.get("recent") or [],
+                [[seq, off] for seq, off in zip(seqs, offsets, strict=True)],
+            ),
         }
-        v2["high"][stream] = max(int(v2["high"].get(stream, 0)), seq)
+        if seqs:
+            v2["high"][stream] = max(int(v2["high"].get(stream, 0)), seqs[-1])
 
     # --- запись потоков ----------------------------------------------------------
 
@@ -350,12 +457,13 @@ class FileThreadStore(ThreadStore):
 
     def _append_stream(self, changes, key, v2, stream, items) -> None:
         seq, ts = self._high(key, v2, stream), self._now()
-        tail = b""
+        lines, seqs = [], []
         for item in items:
             seq += 1
-            tail += self._stream_line(stream, seq, ts, item)
-        changes.append(self._stream_file(key, stream), tail)
-        self._after_append(v2, key, stream, tail, len(items), seq)
+            lines.append(self._stream_line(stream, seq, ts, item))
+            seqs.append(seq)
+        changes.append(self._stream_file(key, stream), b"".join(lines))
+        self._after_append(v2, key, stream, lines, seqs)
 
     # --- квитанции и алиасы ------------------------------------------------------
 
@@ -463,6 +571,7 @@ class FileThreadStore(ThreadStore):
             v2["archives"] = [
                 a.model_dump(mode="json") for a in self._scan_archives(key)
             ]
+            self._memo.setdefault(key, {})["archives"] = v2["archives"]
         return [ArchiveInfo.model_validate(a) for a in v2["archives"]]
 
     def _scan_archives(self, key: ThreadKey) -> list[ArchiveInfo]:
@@ -491,21 +600,18 @@ class FileThreadStore(ThreadStore):
     def history_keys(self, key: ThreadKey) -> set[str]:
         """Ключи сообщений истории, включая ключи записей «как есть» до
         синтеза id у старых записей — их сверяет дедупликация сессии."""
-        with self._scope(key):
+        with self._read_scope(key):
             _records, keys, _max = self._history(key)
         return keys
 
     # --- чтение --------------------------------------------------------------------
 
     async def get_thread(self, key: ThreadKey) -> ThreadRecord | None:
-        with self._scope(key):
-            control, v2 = self._load(key)
+        with self._read_scope(key):
+            _control_doc, v2 = self._load(key)
             if not self._exists(key, v2):
-                self._keep_caches(key, control, v2)
                 return None
-            record = self._record(key, v2)
-            self._keep_caches(key, control, v2)
-            return record
+            return self._record(key, v2)
 
     async def list_threads(self, query: ThreadQuery) -> Page[ThreadRecord]:
         records = []
@@ -542,13 +648,11 @@ class FileThreadStore(ThreadStore):
         limit: int | None = None,
     ) -> list[StreamEntry]:
         check_stream_name(stream)
-        with self._scope(key):
+        with self._read_scope(key):
             _control_doc, v2 = self._load(key)
             if v2.get("deleted"):
                 return []
-            fresh = [
-                e for e in self._entries(key, stream) if e.seq > after_seq
-            ]
+            _stats, fresh = self._scan(key, v2, stream, after_seq=after_seq)
         return fresh if limit is None else fresh[:limit]
 
     async def read_archive(
@@ -680,6 +784,7 @@ class FileThreadStore(ThreadStore):
                 self._save_control(key, control, v2)
 
     async def delete(self, key: ThreadKey, *, op_id: str) -> None:
+        self._forget(key)
         with self._scope(key):
             base = self._base(key)
             control, v2 = self._load(key)
@@ -900,18 +1005,18 @@ class _Commit:
 
     def _write_history(self) -> None:
         s, t = self.key.system, self.key.thread
-        tail = b"".join(
+        lines = [
             layout.history_line(s, t, seq, ts, payload).encode()
             for seq, ts, payload in self.fresh
-        )
+        ]
+        tail = b"".join(lines)
         if not self.rewrite:
             self.store._after_append(
                 self.v2,
                 self.key,
                 _HISTORY,
-                tail,
-                len(self.fresh),
-                self.fresh[-1][0] if self.fresh else 0,
+                lines,
+                [seq for seq, _ts, _payload in self.fresh],
             )
             self.changes.append(self.canonical, tail)
             self.count = self.v2["stats"][_HISTORY]["count"]
@@ -928,6 +1033,7 @@ class _Commit:
             "path": self.canonical,
             "size": len(whole),
             "count": self.count,
+            "recent": [],
             "max": max(
                 [r[0] for r in self._loaded()]
                 + [r[0] for r in self.fresh]
