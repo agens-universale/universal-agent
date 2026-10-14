@@ -173,10 +173,13 @@ def build_gc_cli_settings(
     # Compat работает с файловым документом; профиль принимает также dotted-пути.
     profile: Dict[str, Any] = {}
     runtime_overrides: Dict[str, Any] = {}
+    settings_overrides: Dict[str, Any] = {}
     for path, value in (overrides or {}).items():
         if path in _RUNTIME_KEYS:
             runtime_overrides[path] = copy.deepcopy(value)
             continue
+        settings_overrides[path] = value
+    for path, value in expand_section_updates(settings_overrides).items():
         node = profile
         parts = path.split(".")
         for part in parts[:-1]:
