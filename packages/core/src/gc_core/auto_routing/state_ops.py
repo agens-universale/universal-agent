@@ -98,6 +98,20 @@ def enter_floor(state: Any, level: str, reason: str) -> None:
         state._tick_decision = (memo[0], memo[1], memo[2], level)
 
 
+def reroute_tick(state: Any, level: str) -> None:
+    """Замена уровня незакрытого такта после подтверждённой недоступности его
+    модели (спека PR140 Р3). Как пол: живой выбор и решение такта в мемо
+    остаются — смена `/level` во время упавшего запроса действует со следующего
+    такта; меняется фактический уровень. Серия с нуля, если уровень сменился
+    (то же правило, что у замены мёртвого уровня в решении, `with_fallback`)."""
+    if level != state.current_level:
+        state.steps_on_current_level = 0
+    state.current_level = level
+    memo = state._tick_decision
+    if memo is not None:
+        state._tick_decision = (memo[0], memo[1], memo[2], level)
+
+
 def restart_series(state: Any) -> None:
     """Серия шагов на текущем уровне — с нуля; уровень и причина прежние. Политика
     `two_level`: важный вызов сделала сама сильная модель, и отсчёт `strong_steps`

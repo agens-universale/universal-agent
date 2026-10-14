@@ -257,3 +257,24 @@ def maybe_push_fallback_to_active_notice(
             mode=mode,
         )
     )
+
+
+def notice_from_level_reroute(*, failed_alias: str, level: str, model: str) -> Notice:
+    """Автовыбор заменил подтверждённо недоступную модель такта ближайшим живым
+    уровнем (спека PR140 Р3). Не «выполнено активной»: замена идёт по правилу
+    уровней, а не на активную модель."""
+    message = (
+        f"автовыбор: {failed_alias} недоступна — запрос повторён уровнем "
+        f"{level} ({model})"
+    )
+    return Notice("warning", "level_reroute", message, (failed_alias, level))
+
+
+def maybe_push_level_reroute_notice(
+    *, failed_alias: str, level: str, model: str, enabled: bool = True
+) -> None:
+    if not enabled:
+        return
+    push_runtime_notice(
+        notice_from_level_reroute(failed_alias=failed_alias, level=level, model=model)
+    )

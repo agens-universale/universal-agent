@@ -199,6 +199,13 @@ class ModelProviderError(TurnFailure, RuntimeError):
         self.failure = failure
 
 
+class MainModelUnavailable(RuntimeError):
+    """Подтверждённая недоступность модели основного запроса после всех ретраев —
+    честная ошибка хода. Отдельный тип, чтобы AUTO отличал её от прочих
+    RuntimeError без разбора текста и заменял модель такта (спека PR140 Р3);
+    для всех остальных это по-прежнему RuntimeError."""
+
+
 @dataclass
 class ModelResult:
     """Canonical model data and usage delta for the calling agent.

@@ -163,3 +163,19 @@ def test_the_pair_fields_are_routing_fields_and_old_snapshots_get_them():
     snapshot = {}
     ensure_fields(snapshot)
     assert (snapshot["pair_window_left"], snapshot["pair_raises"]) == (None, 0)
+
+
+def test_reroute_tick_keeps_the_tick_decision_and_replaces_the_level():
+    """Замена упавшей модели — как пол: живой выбор и решение такта в мемо
+    остаются, меняется фактический уровень; серия с нуля, если уровень сменился."""
+    state = SimpleNamespace()
+    state_ops.reset(state)
+    state.current_level, state.steps_on_current_level = "light", 4
+    state._tick_decision = ("auto", True, "decision", "light")
+    state_ops.reroute_tick(state, "default")
+    assert state.current_level == "default" and state.steps_on_current_level == 0
+    assert state._tick_decision == ("auto", True, "decision", "default")
+
+    state.steps_on_current_level = 2
+    state_ops.reroute_tick(state, "default")
+    assert state.steps_on_current_level == 2

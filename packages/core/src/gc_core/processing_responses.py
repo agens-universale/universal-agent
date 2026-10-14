@@ -65,7 +65,7 @@ from gc_core.execution.constants import (
     _SESSION_COMPACT_RESUME_USER_TEXT,
     _TRUNCATED_ARGUMENTS_HINT,
 )
-from gc_core.execution.contracts import ExecutionFailure, ModelRequestStopped
+from gc_core.execution.contracts import ExecutionFailure, MainModelUnavailable, ModelRequestStopped
 from gc_core.execution.model import arequest_model
 from gc_core.execution.output_wrapping import (
     maybe_store_and_wrap_tool_output,
@@ -393,7 +393,7 @@ def _raise_honest_main_unavailable(
     )
     logger = getattr(ctx, "logger", None) or _fallback_logger
     logger.error(message)
-    raise RuntimeError(message) from source_exc
+    raise MainModelUnavailable(message) from source_exc
 
 
 def resolve_main_for_call(
