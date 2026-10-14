@@ -55,12 +55,6 @@ INTENTIONAL_TEMPLATE_OVERRIDES: set = {
     "pricing.enabled",  # true при нулевых ставках ниже
     "pricing.input",  # 0 — шаблон предлагает вписать реальные ставки
     "pricing.output",  # 0 — но включённый pricing с нулями даёт startup-notice
-    # --- Привязки по умолчанию (решение 4 канона автороутинга: ворота и
-    # суммаризация не ниже default) ---
-    "assign.command_judge",
-    "assign.finish_gate",
-    "assign.routing_judge",
-    "assign.summary",
 }
 
 
@@ -137,28 +131,21 @@ def test_default_template_with_live_profile_anchor_stays_legacy():
     assert router.resolve("main").source == "легаси"
 
 
-def test_shipped_templates_explain_inactive_assign_without_registry():
-    """Шаблоны загружаются; без реестра привязки не действуют и дают notice."""
+def test_shipped_templates_carry_no_live_assign():
+    """Уровни служебных потребителей без привязки живут в коде (`unbound_level`,
+    спека PR140 Р1): шаблоны их не навязывают, поэтому и предупреждения
+    «привязки без реестра» у поставляемых файлов нет."""
     for path in (Path(_default_config_path()), DEMO_CONFIG_PATH):
+        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        assert "assign" not in raw, f"{path.name}: активный assign вернулся"
         loaded = load_settings(str(path))
-        assert loaded.settings.models == {}, (
-            f"{path.name}: ожидался пустой реестр моделей"
-        )
         notices = collect_startup_notices(
-            loaded,
-            set(),
-            None,
-            is_tui=False,
+            loaded, set(), None, is_tui=False,
             compat_notices=loaded.runtime.notices,
         )
-        assign_warnings = [
-            n
-            for n in notices
-            if n.level == "warning" and "assign" in n.message
-        ]
-        assert any(
+        assert not any(
             "привязки без реестра моделей не действуют" in n.message
-            for n in assign_warnings
+            for n in notices
         )
 
 
@@ -211,8 +198,8 @@ def test_demo_config_carries_commented_model_sections_example():
     для `yaml.safe_load` невидимы, и он одинаково зелен, если блок удалить и если
     его раскомментировать. Здесь проверяется ровно то, чего он не видит:
     пример `models`/`slots` на месте, живым он НЕ становится (иначе demo перестал
-    бы показывать легаси-умолчание); `assign` — живой, с привязками по умолчанию
-    (решение 4 канона автороутинга).
+    бы показывать легаси-умолчание); `assign` — только закомментированный пример:
+    уровни без привязки задаёт код.
     """
     text = DEMO_CONFIG_PATH.read_text(encoding="utf-8")
     lines = text.splitlines()
@@ -227,12 +214,7 @@ def test_demo_config_carries_commented_model_sections_example():
             f"секция {section} в demo_config.yml ожила — пример обязан оставаться "
             "закомментированным (§13: демо показывает и легаси-умолчание тоже)"
         )
-    assert raw.get("assign") == {
-        "command_judge": "default",
-        "finish_gate": "max",
-        "routing_judge": "default",
-        "summary": "default",
-    }, "demo_config.yml потерял живые привязки по умолчанию assign"
+    assert "assign" not in raw, "demo_config.yml снова навязывает привязки"
 
 
 def test_demo_config_commented_example_is_valid_when_uncommented():
@@ -240,7 +222,7 @@ def test_demo_config_commented_example_is_valid_when_uncommented():
     грузиться. Проверяется тем же путём, что и правка руками: блок снимается с
     комментария, кладётся поверх остального demo_config и идёт через обе фазы
     (схема + ссылочная целостность на merged), а не только через `safe_load`.
-    `assign` в примере больше нет — живые привязки уже есть в самом demo_config."""
+"""
     text = DEMO_CONFIG_PATH.read_text(encoding="utf-8")
     example = yaml.safe_load(_uncomment_block(text, "# models:")) or {}
     assert set(example) == {"models", "slots"}, (

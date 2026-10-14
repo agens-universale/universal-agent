@@ -571,24 +571,14 @@ class AssignConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     finish_gate: str | None = None
-    text_answer_judge: str | None = Field(
-        default=None, json_schema_extra=gc_meta(expert=True)
-    )
+    text_answer_judge: str | None = None
     command_judge: str | None = None
     summary: str | None = None
-    intent_scope: str | None = Field(
-        default=None, json_schema_extra=gc_meta(expert=True)
-    )
-    memory_compaction: str | None = Field(
-        default=None, json_schema_extra=gc_meta(expert=True)
-    )
-    vision: str | None = Field(
-        default=None, json_schema_extra=gc_meta(expert=True)
-    )
+    intent_scope: str | None = None
+    memory_compaction: str | None = None
+    vision: str | None = None
     routing_judge: str | None = None
-    subagents: dict[str, str] = Field(
-        default_factory=dict, json_schema_extra=gc_meta(expert=True)
-    )
+    subagents: dict[str, str] = Field(default_factory=dict)
 
     @model_validator(mode="before")
     @classmethod

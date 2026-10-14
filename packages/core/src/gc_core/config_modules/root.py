@@ -190,7 +190,9 @@ class AppConfig(BaseModel):
     slots: SlotsConfig = Field(
         default_factory=SlotsConfig, json_schema_extra=gc_meta(expert=True)
     )
-    assign: AssignConfig = Field(default_factory=AssignConfig)
+    assign: AssignConfig = Field(
+        default_factory=AssignConfig, json_schema_extra=gc_meta(expert=True)
+    )
 
     @field_validator("config_version", mode="before")
     @classmethod

@@ -432,7 +432,8 @@ def test_ensure_section_anchor_reuses_live_template_block():
 def test_ensure_section_anchor_synthesizes_bare_anchor_for_commented_template(
     tmp_path,
 ):
-    """Закомментированные секции дают пустые якоря, живая — блок шаблона."""
+    """Закомментированные секции дают пустые якоря (PR140 Р1: `assign` в
+    шаблоне теперь тоже закомментирован)."""
     from pathlib import Path
 
     from gc_core.config import _default_config_path
@@ -446,7 +447,7 @@ def test_ensure_section_anchor_synthesizes_bare_anchor_for_commented_template(
     assert (
         parsed["models"] == {}
         and parsed["slots"] == {}
-        and parsed["assign"] == yaml.safe_load(template_text)["assign"]
+        and parsed["assign"] == {}
     )
 
     for section in ("models", "slots", "assign"):

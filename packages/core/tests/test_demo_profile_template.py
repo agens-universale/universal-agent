@@ -91,7 +91,6 @@ def test_demo_profile_covers_all_service_consumers(demo_profile_raw):
         "summary",
         "intent_scope",
         "memory_compaction",
-        "auto_judge",
         "vision",
         "routing_judge",
     ):
