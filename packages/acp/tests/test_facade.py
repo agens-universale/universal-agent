@@ -260,7 +260,17 @@ async def test_prompt_streams_and_second_turn_keeps_the_thread(tmp_path):
     assert kinds == [
         "session_info_update",
         "agent_thought_chunk",
+        "agent_thought_chunk",
         "agent_message_chunk",
+    ]
+    thoughts = [
+        item["content"]["text"]
+        for item in _updates(writer)
+        if item["sessionUpdate"] == "agent_thought_chunk"
+    ]
+    assert thoughts == [
+        f"Модель: {facade._settings.settings.agent.model}\n",
+        "hmm",
     ]
     assert _by_id(writer, 3)["result"] == {"stopReason": "end_turn"}
     assert agent.calls[0][0] == "see\nreadme (file:///tmp/readme)"
@@ -287,6 +297,12 @@ async def test_prompt_streams_and_second_turn_keeps_the_thread(tmp_path):
     assert len(agents) == 1
     assert agent.calls[1][1]["thread_id"] == session_id
     assert _by_id(writer, 4)["result"]["stopReason"] == "end_turn"
+    thoughts = [
+        item["content"]["text"]
+        for item in _updates(writer)
+        if item["sessionUpdate"] == "agent_thought_chunk"
+    ]
+    assert thoughts[-1] == f"Модель: {facade._settings.settings.agent.model}\n"
     await facade.shutdown()
 
 
@@ -400,6 +416,7 @@ async def test_prompt_reports_a_tool_call_between_prose(tmp_path):
     ]
     assert flow == [
         ("session_info_update", None, None),
+        ("agent_thought_chunk", None, None),
         ("agent_message_chunk", None, None),
         ("tool_call", "call-1", "in_progress"),
         ("tool_call_update", "call-1", "completed"),
@@ -499,6 +516,7 @@ async def test_prompt_reports_tools_inside_a_subagent(tmp_path):
     ]
     assert flow == [
         ("session_info_update", None, None),
+        ("agent_thought_chunk", None, None),
         ("agent_message_chunk", None, None),
         ("tool_call", "sub", "in_progress"),
         ("tool_call", "sub:c1", "in_progress"),

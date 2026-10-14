@@ -149,8 +149,12 @@ acp:
 `session/prompt` и на `session/load` / `session/resume` уходит
 `session_info_update`, без обязательного повторного list. В конце хода, если
 известны и `last_main_prompt_tokens`, и размер окна модели, шлётся
-`usage_update`; иначе тишина. Служебные technical / сводки компакции в ленту
-как `user_message_chunk` не попадают. `notice` / `compaction_*` пока не шлём.
+`usage_update`; иначе тишина. В начале каждого хода, до дельт модели, уходит
+`agent_thought_chunk` со строкой активной модели этого хода (алиас и
+провайдерский id, если они различаются). Плагин без пикера показывает её в
+трейсе рассуждения. В файл треда строка не пишется и при `session/load` не
+проигрывается. Служебные technical / сводки компакции в ленту как
+`user_message_chunk` не попадают. `notice` / `compaction_*` пока не шлём.
 
 `session/new`, `session/load` и `session/resume` отдают одну опцию
 `configOptions` с `id: "model"`: алиасы уровней `default`, `light`, `max`

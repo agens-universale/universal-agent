@@ -31,6 +31,7 @@ from gc_acp.confirm import (
 )
 from gc_acp.diffs import DiffBackend, DiffLog, attach_diff
 from gc_acp.model_config import (
+    active_model_line,
     config_options_payload,
     level_for_choice,
     listed,
@@ -69,7 +70,12 @@ from gc_acp.session_index import (
 )
 from gc_acp.stop_reason import stop_reason
 from gc_acp.tool_flow import ToolFlow
-from gc_acp.updates import ChunkAssembler, history_updates
+from gc_acp.updates import (
+    ChunkAssembler,
+    history_updates,
+    new_message_id,
+    text_chunk,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +93,7 @@ _CWD_MISMATCH = "cwd mismatch"
 _METHOD_NEW = "session/new"
 _METHOD_DELETE = "session/delete"
 _TOOL_POLL_S = 0.05
+_MODEL_TRACE = "agent_thought_chunk"
 # Запас сверх confirm_timeout: обёртка с потока не должна сработать раньше
 # внутреннего wait_for. Если всё же сработала после отправки запроса,
 # закрытие пикера уходит отдельной задачей.
@@ -630,6 +637,7 @@ class AcpFacade:
     async def _stream_prompt(
         self, live: LiveSession, assembler: ChunkAssembler, text: str
     ) -> None:
+        await self._announce_model(live)
         flow = ToolFlow(
             self._index.thread_path(live.session_id),
             sidecar_path=self._index.subagent_path(live.session_id),
@@ -705,6 +713,22 @@ class AcpFacade:
             return
         todos = todos_from_agent(live.agent)
         await self._notify(live.session_id, plan_update(todos))
+
+    async def _announce_model(self, live: LiveSession) -> None:
+        """До дельт модели: плагин без пикера видит модель в трейсе хода.
+
+        В файл треда строка не пишется. Свой messageId, чтобы рассуждение
+        модели не прилипло к этой строке.
+        """
+        text = active_model_line(
+            self._settings, session_level(self._settings, live.level)
+        )
+        if text is None:
+            return
+        await self._notify(
+            live.session_id,
+            text_chunk(_MODEL_TRACE, text + "\n", new_message_id()),
+        )
 
     async def _maybe_title(self, live: LiveSession, text: str) -> None:
         if live.title_sent:

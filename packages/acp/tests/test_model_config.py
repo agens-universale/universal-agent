@@ -4,12 +4,20 @@ import asyncio
 from types import SimpleNamespace
 
 from gc_acp.facade import AcpFacade
-from gc_acp.model_config import model_config_option
+from gc_acp.model_config import active_model_line, model_config_option
 from gc_core.config import cli_forces_legacy_model
 from gc_core.model_router import CircuitBreaker, ModelRouter
 from gc_core.turn_boundary import begin_turn
 from gc_testkit.settings import make_settings
-from test_facade import FakeAgent, MemoryWriter, _by_id, _init, _line, _new
+from test_facade import (
+    FakeAgent,
+    MemoryWriter,
+    _by_id,
+    _init,
+    _line,
+    _new,
+    _updates,
+)
 
 
 def _loaded(tmp_path, extra=None, *, cli_model=None):
@@ -431,3 +439,94 @@ def test_unresolved_level_is_skipped(tmp_path):
         },
     )
     assert model_config_option(hidden, "light") is None
+
+
+def _thoughts(writer):
+    return [
+        item["content"]["text"]
+        for item in _updates(writer)
+        if item.get("sessionUpdate") == "agent_thought_chunk"
+    ]
+
+
+def test_active_model_line_names_the_turn_model(tmp_path):
+    loaded = _loaded(tmp_path, _models())
+    assert active_model_line(loaded, "default") == "Модель: glm-local"
+    assert (
+        active_model_line(loaded, "light")
+        == "Модель: flash (qwen/qwen-2.5-flash)"
+    )
+    legacy = _loaded(tmp_path)
+    assert (
+        active_model_line(legacy, "default")
+        == f"Модель: {legacy.settings.agent.model}"
+    )
+    forced = _loaded(tmp_path, _models(), cli_model="forced-id")
+    assert active_model_line(forced, "light") == "Модель: forced-id"
+    blank = _loaded(tmp_path, {"agent.model": ""})
+    assert active_model_line(blank, "default") is None
+    broken = _loaded(
+        tmp_path,
+        {
+            "models": {"a": {"model": "a"}, "b": {"model": "b"}},
+            "slots": {},
+        },
+    )
+    assert active_model_line(broken, "default") is None
+
+
+async def test_each_turn_names_the_model_in_the_trace(tmp_path):
+    facade, writer, agents = _open(_loaded(tmp_path, _models()))
+    await _init(facade)
+    await _new(facade, "/work")
+    session_id = _by_id(writer, 2)["result"]["sessionId"]
+    await facade.handle_line(
+        _line(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "go"}],
+            },
+            3,
+        )
+    )
+    await facade._sessions[session_id].prompt_task
+    assert _thoughts(writer) == ["Модель: glm-local\n"]
+    await _set(facade, session_id, "flash", 4)
+    agents[0].started = asyncio.Event()
+    writer.sent.clear()
+    await facade.handle_line(
+        _line(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "ещё"}],
+            },
+            5,
+        )
+    )
+    await facade._sessions[session_id].prompt_task
+    assert _thoughts(writer) == ["Модель: flash (qwen/qwen-2.5-flash)\n"]
+    await facade.shutdown()
+
+
+async def test_prompt_skips_the_trace_line_without_a_model_name(tmp_path):
+    facade, writer, _agents = _open(_loaded(tmp_path, {"agent.model": ""}))
+    await _init(facade)
+    await _new(facade, "/work")
+    session_id = _by_id(writer, 2)["result"]["sessionId"]
+    writer.sent.clear()
+    await facade.handle_line(
+        _line(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "go"}],
+            },
+            3,
+        )
+    )
+    await facade._sessions[session_id].prompt_task
+    assert _thoughts(writer) == []
+    assert _by_id(writer, 3)["result"]["stopReason"] == "end_turn"
+    await facade.shutdown()

@@ -24,6 +24,21 @@ def session_level(loaded: Any, override: str | None) -> str:
     return configured or "default"
 
 
+def active_model_line(loaded: Any, level: str) -> str | None:
+    """Строка трейса: модель, которой пойдёт ход.
+
+    ``None`` — резолв не дал имени. Открытый предохранитель строку не прячет:
+    это витрина, как футер, а не запрос к транспорту.
+    """
+    try:
+        resolved = _router(loaded, level, None).resolve(
+            "main", check_breaker=False
+        )
+    except (ValueError, KeyError):
+        return None
+    return _model_line(resolved.alias, resolved.model)
+
+
 def model_config_option(
     loaded: Any, level: str, *, breaker: Any = None
 ) -> dict | None:
@@ -116,6 +131,17 @@ def _alias_row(
     model_id = resolved.model or alias
     description = model_id if model_id != alias else None
     return alias, description
+
+
+def _model_line(alias: str | None, model: str | None) -> str | None:
+    name = (model or "").strip()
+    label = (alias or "").strip()
+    if label and name and label != name:
+        return f"Модель: {label} ({name})"
+    shown = name or label
+    if shown == "":
+        return None
+    return f"Модель: {shown}"
 
 
 def _select(current: str, rows: list[tuple[str, str | None]]) -> dict:
