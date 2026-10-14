@@ -701,6 +701,10 @@ class FileThreadStore(ThreadStore):
             if replayed is not None:
                 return replayed
             control, v2 = self._load(key)
+            if _touches_turn(change):
+                # Тред durable-исполнителя: чужой процесс может вести только
+                # своё состояние фронтенда (как update_tui в develop).
+                _check_durable_owner(control, None)
             if not self._exists(key, v2):
                 v2 = self._created(v2)
             return self._side(key, control, v2, change)
@@ -790,6 +794,9 @@ class FileThreadStore(ThreadStore):
             control, v2 = self._load(key)
             if not self._exists(key, v2):
                 return
+            # Тред, который ведёт durable-исполнитель, не удаляет никто
+            # другой (уборщик по TTL, фронтенд) — как в develop.
+            _check_durable_owner(control, None)
             changes = file_tx.Changes(Path(self._dir))
             for path in self._thread_files(key, v2):
                 changes.put(path, None)
@@ -862,7 +869,14 @@ class FileThreadStore(ThreadStore):
         return removed
 
 
-def _check_durable_owner(control: JsonObject, owner: str) -> None:
+def _touches_turn(change: SideChange) -> bool:
+    """Запись сбоку, которая касается хода, а не только состояния фронтенда."""
+    return bool(
+        change.set_runtime is not None or change.append or change.add_aliases
+    )
+
+
+def _check_durable_owner(control: JsonObject, owner: str | None) -> None:
     """Тред, которым владеет durable-исполнитель журнала (``owner_id``,
     Temporal), пишет только он сам."""
     durable = control.get("owner_id")

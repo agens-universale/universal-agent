@@ -67,3 +67,30 @@ def test_timed_v2_lease_does_not_lock_out_develop_writers(tmp_path):
         store.claim(KEY, LeaseRequest(owner="host", ttl=timedelta(60)))
     )
     assert durable_owner_id(str(tmp_path), "cli", "t") is None
+
+
+def test_v2_delete_refuses_thread_of_durable_executor(tmp_path):
+    _owned_by_old_journal(tmp_path, owner="wf-1")
+    (tmp_path / "data_cli_t.jsonl").write_text("", encoding="utf-8")
+    store = FileThreadStore(tmp_path)
+    with pytest.raises(OwnershipError):
+        asyncio.run(store.delete(KEY, op_id="janitor"))
+
+
+def test_v2_side_writes_to_durable_thread_allow_only_frontend_state(tmp_path):
+    from gc_core.threads.models import RuntimeStatus, SideChange
+
+    _owned_by_old_journal(tmp_path, owner="wf-1")
+    store = FileThreadStore(tmp_path)
+    asyncio.run(
+        store.append_side(
+            KEY, SideChange(op_id="tui", set_frontend=("tui", {"x": 1}))
+        )
+    )
+    for change in (
+        SideChange(op_id="rt", set_runtime=RuntimeStatus(turn="running")),
+        SideChange(op_id="tr", append=[("subagent_events", [{"k": 1}])]),
+        SideChange(op_id="al", add_aliases=["resp_1"]),
+    ):
+        with pytest.raises(OwnershipError):
+            asyncio.run(store.append_side(KEY, change))
