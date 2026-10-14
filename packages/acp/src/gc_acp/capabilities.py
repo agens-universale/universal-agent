@@ -21,7 +21,7 @@ def initialize_result() -> dict:
             "promptCapabilities": {
                 "image": False,
                 "audio": False,
-                "embeddedContext": False,
+                "embeddedContext": True,
             },
             "mcpCapabilities": {"http": False, "sse": False},
             "sessionCapabilities": {

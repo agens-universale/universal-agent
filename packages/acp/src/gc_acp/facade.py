@@ -277,8 +277,8 @@ class AcpFacade:
             return
         try:
             text = flatten_prompt(body.get("prompt"))
-        except PromptRejected:
-            await self._invalid_params(request_id)
+        except PromptRejected as rejected:
+            await self._invalid_params(request_id, str(rejected))
             return
         live.cancel_requested = False
         live.prompt_finished = False
@@ -749,9 +749,13 @@ class AcpFacade:
     async def _send(self, payload: dict) -> None:
         await self._writer.send(payload)
 
-    async def _invalid_params(self, request_id: Any) -> None:
+    async def _invalid_params(
+        self, request_id: Any, message: str = ""
+    ) -> None:
         await self._send(
-            error_message(request_id, INVALID_PARAMS, _INVALID_PARAMS)
+            error_message(
+                request_id, INVALID_PARAMS, message or _INVALID_PARAMS
+            )
         )
 
     async def _missing(self, request_id: Any) -> None:

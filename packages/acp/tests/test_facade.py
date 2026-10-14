@@ -213,7 +213,7 @@ async def test_initialize_shape_and_blocks_session_until_then(tmp_path):
     assert result["agentCapabilities"]["promptCapabilities"] == {
         "image": False,
         "audio": False,
-        "embeddedContext": False,
+        "embeddedContext": True,
     }
     assert result["agentCapabilities"]["mcpCapabilities"] == {
         "http": False,
@@ -687,6 +687,68 @@ async def test_image_does_not_start_a_turn(tmp_path):
         )
     )
     assert _by_id(writer, 3)["error"]["code"] == -32602
+    assert _by_id(writer, 3)["error"]["message"] == "image not supported"
+    assert agents[0].calls == []
+    await facade.shutdown()
+
+
+async def test_embedded_resource_is_one_user_message(tmp_path):
+    facade, writer, agents = _open(tmp_path)
+    await _init(facade)
+    await _new(facade, "/work")
+    session_id = _by_id(writer, 2)["result"]["sessionId"]
+    await facade.handle_line(
+        _line(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [
+                    {"type": "text", "text": "see"},
+                    {
+                        "type": "resource",
+                        "resource": {
+                            "uri": "file:///tmp/a.py",
+                            "text": "x = 1",
+                        },
+                    },
+                ],
+            },
+            3,
+        )
+    )
+    await facade._sessions[session_id].prompt_task
+    assert agents[0].calls[0][0] == "see\nfile:///tmp/a.py\nx = 1"
+    assert _by_id(writer, 3)["result"] == {"stopReason": "end_turn"}
+    await facade.shutdown()
+
+
+async def test_blob_resource_does_not_start_a_turn(tmp_path):
+    facade, writer, agents = _open(tmp_path)
+    await _init(facade)
+    await _new(facade, "/work")
+    session_id = _by_id(writer, 2)["result"]["sessionId"]
+    await facade.handle_line(
+        _line(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [
+                    {
+                        "type": "resource",
+                        "resource": {
+                            "uri": "file:///tmp/a.png",
+                            "blob": "aaaa",
+                        },
+                    }
+                ],
+            },
+            3,
+        )
+    )
+    assert _by_id(writer, 3)["error"]["code"] == -32602
+    assert (
+        _by_id(writer, 3)["error"]["message"] == "embedded blob not supported"
+    )
     assert agents[0].calls == []
     await facade.shutdown()
 
