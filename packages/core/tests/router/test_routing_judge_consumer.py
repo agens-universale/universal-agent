@@ -2,7 +2,7 @@
 import pytest
 
 from gc_core.config_modules.root import AppConfig
-from gc_core.model_router import UNBOUND_CONSUMER_LEVEL, ModelRouter
+from gc_core.model_router import ModelRouter, unbound_level
 from gc_core.usage.account import CATEGORY_ROUTING_JUDGE, category_for_request_label
 
 REGISTRY = {
@@ -20,7 +20,7 @@ def _router(level, assign=None):
 
 def test_an_unbound_judge_goes_default_not_the_tick_level():
     """Арбитр не следует за тем, кого судит: на такте max он всё равно default."""
-    assert UNBOUND_CONSUMER_LEVEL == {"routing_judge": "default"}
+    assert unbound_level("routing_judge") == "default"
     assert _router("max").resolve("routing_judge").alias == "mid"
     assert _router("light").resolve("routing_judge").alias == "mid"
     assert _router("max").resolve("main").alias == "big"

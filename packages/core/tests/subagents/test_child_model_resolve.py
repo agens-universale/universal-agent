@@ -147,7 +147,7 @@ class TestChildModelResolve:
         resolved = child_ctx.model_router.resolve("main")
         assert resolved.alias == "deepseek-max"
 
-    def test_pinned_subagent_nested_unbound_consumer_inherits_pin(
+    def test_pinned_subagent_judges_and_summary_go_default_others_inherit_pin(
         self, tmp_path
     ):
         raw = {
@@ -163,10 +163,10 @@ class TestChildModelResolve:
             runner._build_child_ctx(tool_name="subagent_planner")
         )
 
-        # "summary" has no assign binding — must inherit the subagent's own model,
-        # not the active-level model ("flash") an unpinned subagent would get.
-        resolved = child_ctx.model_router.resolve("summary")
-        assert resolved.alias == "deepseek-max"
+        # Таблица `unbound_level`: суммаризация привязанного ребёнка — уровнем
+        # default (решение PR140 Р1 1б), прочие непривязанные — пином ребёнка.
+        assert child_ctx.model_router.resolve("summary").alias == "flash"
+        assert child_ctx.model_router.resolve("intent_scope").alias == "deepseek-max"
 
     def test_unpinned_subagent_falls_back_to_active_level(self, tmp_path):
         raw = {

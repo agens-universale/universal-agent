@@ -61,11 +61,22 @@ _SCALAR_ASSIGN_FIELDS = (
     "routing_judge",
 )
 
-# Потребители, чей НЕПРИВЯЗАННЫЙ резолв идёт фиксированным уровнем вместо уровня
-# такта. Единственная запись — судья автовыбора: арбитр не следует за тем, кого
-# судит, и старые конфиги без строки `assign.routing_judge` не увозят его на max
-# вместе с исполнителем. Таблица, а не ветка по имени: правило описано данными.
-UNBOUND_CONSUMER_LEVEL = {"routing_judge": "default"}
+# Потребители, которые без привязки работают фиксированным уровнем, а не
+# уровнем текущего шага: судьи и суммаризация не опускаются и не дорожают
+# вместе с исполнителем. Явная привязка сильнее; пин субагента — нет: судей
+# привязанного ребёнка определяет этот уровень (спека PR140 Р1).
+_UNBOUND_LEVELS = {
+    "finish_gate": "default",
+    "command_judge": "default",
+    "summary": "default",
+    "routing_judge": "default",
+}
+
+
+def unbound_level(consumer: str) -> str | None:
+    """Уровень потребителя без привязки; None — идёт за активным уровнем.
+    Одно место правды и для резолва, и для экрана настроек."""
+    return _UNBOUND_LEVELS.get(consumer)
 
 
 @dataclass(frozen=True)
@@ -335,9 +346,9 @@ class ModelRouter:
         override» — привязки и `unbound_override` резолвятся как обычно, поэтому
         зафиксированный уровень не может обойти более точную привязку.
 
-        Потребитель из `UNBOUND_CONSUMER_LEVEL` без привязки идёт своим
-        фиксированным уровнем, а не уровнем такта: судья автовыбора не следует за
-        исполнителем, которого судит."""
+        Потребитель из `unbound_level` без собственной привязки идёт своим
+        фиксированным уровнем — раньше override ребёнка и раньше уровня такта:
+        судьи и суммаризация не следуют за исполнителем."""
         if not (
             consumer in CONSUMERS
             or consumer.startswith(SUBAGENT_CONSUMER_PREFIX)
@@ -367,6 +378,14 @@ class ModelRouter:
                 check_breaker=check_breaker,
             )
 
+        fixed = unbound_level(consumer)
+        if fixed is not None:
+            return self._resolve_level(
+                fixed,
+                source_prefix=f"{consumer} без привязки → ",
+                check_breaker=check_breaker,
+            )
+
         if self._unbound_override is not None:
             return self._unbound_override
 
@@ -377,16 +396,11 @@ class ModelRouter:
                 check_breaker=check_breaker,
             )
 
-        fixed = UNBOUND_CONSUMER_LEVEL.get(consumer)
-        if level_override is not None:
-            level = level_override
-        else:
-            level = fixed if fixed is not None else self._level_provider()
-        prefix = (
-            "" if fixed is not None and level_override is None else "активный "
+        level = (
+            level_override if level_override is not None else self._level_provider()
         )
         return self._resolve_level(
-            level, source_prefix=prefix, check_breaker=check_breaker
+            level, source_prefix="активный ", check_breaker=check_breaker
         )
 
     def resolve_main_at_level(

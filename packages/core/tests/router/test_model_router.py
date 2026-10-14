@@ -212,7 +212,9 @@ def test_unbound_scalar_consumer_uses_active_level():
         },
         level="max",
     )
-    resolved = router.resolve("finish_gate")
+    # PR140 Р1: finish_gate теперь с фиксированным уровнем, активный уровень
+    # проверяем на потребителе вне таблицы unbound_level.
+    resolved = router.resolve("intent_scope")
     assert resolved.alias == "glm-local"
     assert "активный" in resolved.source and "max" in resolved.source
 
@@ -481,7 +483,7 @@ def test_unbound_override_used_for_unbound_scalar_consumer():
         level="default",
         unbound_override=_pin(),
     )
-    assert router.resolve("summary").alias == "pinned"
+    assert router.resolve("intent_scope").alias == "pinned"
 
 
 def test_unbound_override_ignored_when_binding_is_level():
