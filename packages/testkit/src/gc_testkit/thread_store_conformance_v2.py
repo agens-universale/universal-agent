@@ -547,6 +547,30 @@ async def check_side_does_not_bump_revision(store, _clock: FakeClock) -> None:
     )
 
 
+async def check_patch_frontend_merges(store, _clock: FakeClock) -> None:
+    await store.append_side(
+        KEY,
+        SideChange(op_id="s1", set_frontend=("tui", {"status": "idle"})),
+    )
+    await store.append_side(
+        KEY,
+        SideChange(op_id="s2", patch_frontend=("tui", {"branch": "main"})),
+    )
+    await store.append_side(
+        KEY,
+        SideChange(
+            op_id="s3",
+            patch_frontend=("tui", {"status": None, "skills": ["a"]}),
+        ),
+    )
+    frontend = (await store.get_thread(KEY)).frontend
+    _expect(
+        frontend.get("tui")
+        == {"status": None, "branch": "main", "skills": ["a"]},
+        "patch_frontend сливает ключи (dict.update, null хранится)",
+    )
+
+
 async def check_side_creates_thread(store: ThreadStore, _clock: FakeClock):
     await store.append_side(
         KEY, SideChange(op_id="s", append=[("inbox", [{"text": "привет"}])])
@@ -897,6 +921,7 @@ CHECKS: tuple[Callable[..., Awaitable[None]], ...] = (
     check_reset_history,
     check_side_does_not_bump_revision,
     check_side_creates_thread,
+    check_patch_frontend_merges,
     check_side_cannot_touch_messages,
     check_frontend_streams,
     check_aliases,

@@ -216,6 +216,10 @@ class SideChange(_Model):
     op_id: str = Field(min_length=1)
     set_runtime: RuntimeStatus | None = None
     set_frontend: tuple[str, JsonObject] | None = None
+    #: Слить ключи в состояние фронтенда (``dict.update``; нет — создать):
+    #: мелкие правки из разных потоков не теряют друг друга, слияние — под
+    #: блокировкой хранилища.
+    patch_frontend: tuple[str, JsonObject] | None = None
     append: list[tuple[str, list[JsonObject]]] = Field(default_factory=list)
     add_aliases: list[str] = Field(default_factory=list)
 

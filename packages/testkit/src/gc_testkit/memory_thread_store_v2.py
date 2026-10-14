@@ -46,6 +46,7 @@ from gc_core.threads.rules import (
     check_writer,
     granted_lease,
     page_of,
+    patched_frontend,
     same_lease,
 )
 from gc_core.threads.store import ThreadStore
@@ -324,6 +325,11 @@ class MemoryThreadStore(ThreadStore):
         if change.set_frontend is not None:
             name, state = change.set_frontend
             thread.frontend[name] = copy.deepcopy(state)
+        if change.patch_frontend is not None:
+            name, patch = change.patch_frontend
+            thread.frontend[name] = patched_frontend(
+                thread.frontend.get(name), patch
+            )
         for stream, items in change.append:
             self._append(thread, stream, items)
         self._alias(key, change.add_aliases)

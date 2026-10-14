@@ -65,6 +65,7 @@ from gc_core.threads.rules import (
     check_writer,
     granted_lease,
     page_of,
+    patched_frontend,
     same_lease,
 )
 from gc_core.threads.store import ThreadStore
@@ -726,7 +727,11 @@ class FileThreadStore(ThreadStore):
         self._add_aliases(changes, key, v2, change.add_aliases)
         for stream, items in change.append:
             self._append_stream(changes, key, v2, stream, items)
-        if change.set_runtime is not None or change.set_frontend is not None:
+        if (
+            change.set_runtime is not None
+            or change.set_frontend is not None
+            or change.patch_frontend is not None
+        ):
             meta = self._meta(key)
             parts = parts_from_meta(meta)
             if change.set_runtime is not None:
@@ -734,6 +739,10 @@ class FileThreadStore(ThreadStore):
             if change.set_frontend is not None:
                 name, state = change.set_frontend
                 parts = parts.with_(frontend={**parts.frontend, name: state})
+            if change.patch_frontend is not None:
+                name, patch = change.patch_frontend
+                merged = patched_frontend(parts.frontend.get(name), patch)
+                parts = parts.with_(frontend={**parts.frontend, name: merged})
             meta = meta_from_parts(parts, base=meta)
             self._write_meta(changes, key, meta, v2, touch=False)
         receipt = Receipt(

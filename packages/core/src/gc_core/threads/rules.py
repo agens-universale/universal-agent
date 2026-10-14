@@ -6,11 +6,13 @@
 
 from __future__ import annotations
 
+import copy
 from collections.abc import Iterable
 from datetime import UTC, datetime
 
 from gc_core.threads.errors import OwnershipError
 from gc_core.threads.models import (
+    JsonObject,
     Lease,
     LeaseRequest,
     Page,
@@ -105,3 +107,13 @@ def page_of(
         last = page[-1]
         cursor = f"{last.info.updated_at}|{last.key.system}|{last.key.thread}"
     return Page[ThreadRecord](items=page, next_cursor=cursor)
+
+
+def patched_frontend(
+    current: JsonObject | None, patch: JsonObject
+) -> JsonObject:
+    """Состояние фронтенда после слияния ``patch`` — ``dict.update``, как
+    всегда делал ``update_tui_meta``: ключ со значением ``None`` хранит null."""
+    merged = copy.deepcopy(current or {})
+    merged.update(copy.deepcopy(patch))
+    return merged

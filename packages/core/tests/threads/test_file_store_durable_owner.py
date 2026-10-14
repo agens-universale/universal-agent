@@ -84,7 +84,7 @@ def test_v2_side_writes_to_durable_thread_allow_only_frontend_state(tmp_path):
     store = FileThreadStore(tmp_path)
     asyncio.run(
         store.append_side(
-            KEY, SideChange(op_id="tui", set_frontend=("tui", {"x": 1}))
+            KEY, SideChange(op_id="tui", patch_frontend=("tui", {"x": 1}))
         )
     )
     for change in (
