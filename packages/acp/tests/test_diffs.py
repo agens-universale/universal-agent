@@ -4,6 +4,7 @@ import asyncio
 import json
 from types import SimpleNamespace
 
+from gc_acp.diffs import attach_diff
 from gc_acp.facade import AcpFacade
 from gc_core.backends.local import LocalFsBackend
 from gc_testkit.settings import make_settings
@@ -194,6 +195,77 @@ def _thread(tmp_path, session_id):
     return tmp_path / f"data_acp_{session_id}.jsonl"
 
 
+def _preview(payload):
+    return {
+        "type": "content",
+        "content": {
+            "type": "text",
+            "text": json.dumps(
+                payload, ensure_ascii=False, separators=(",", ":")
+            ),
+        },
+    }
+
+
+class _DiffBlocks:
+    def content(self, call_id):
+        if call_id != "w1":
+            return None
+        return [
+            {
+                "type": "diff",
+                "path": "/abs/note.txt",
+                "oldText": "было\n",
+                "newText": "стало\n",
+            }
+        ]
+
+
+def test_attach_diff_keeps_the_preview_ahead_of_the_diff():
+    update = {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "w1",
+        "status": "completed",
+        "content": [_preview({"ok": True})],
+    }
+    shown = attach_diff(update, _DiffBlocks())
+    assert shown["content"] == [
+        _preview({"ok": True}),
+        {
+            "type": "diff",
+            "path": "/abs/note.txt",
+            "oldText": "было\n",
+            "newText": "стало\n",
+        },
+    ]
+    assert update["content"] == [_preview({"ok": True})]
+
+
+def test_attach_diff_uses_the_oversize_note_after_the_preview():
+    class _Oversize:
+        def content(self, call_id):
+            del call_id
+            return [
+                {
+                    "type": "content",
+                    "content": {
+                        "type": "text",
+                        "text": "/abs/big.txt: old 1 bytes, new 2 bytes",
+                    },
+                }
+            ]
+
+    update = {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "big",
+        "status": "completed",
+        "content": [_preview({"ok": True})],
+    }
+    shown = attach_diff(update, _Oversize())
+    assert shown["content"][0] == _preview({"ok": True})
+    assert shown["content"][1]["content"]["text"].startswith("/abs/big.txt:")
+
+
 def _diff_blocks(update):
     return [
         block
@@ -223,6 +295,7 @@ async def test_write_reports_diff_and_lands_on_disk_without_asking(tmp_path):
     await _prompt(facade, session_id)
     update = _completed(writer, "w1")
     assert update["status"] == "completed"
+    assert update["content"][0] == _preview({"ok": True})
     assert _diff_blocks(update) == [
         {
             "type": "diff",
@@ -381,7 +454,8 @@ async def test_oversize_text_is_a_short_block_and_the_turn_lives(tmp_path):
     update = _completed(writer, "big")
     assert update["status"] == "completed"
     assert _diff_blocks(update) == []
-    block = update["content"][0]
+    assert update["content"][0] == _preview({"ok": True})
+    block = update["content"][1]
     assert block["type"] == "content"
     assert block["content"]["type"] == "text"
     text = block["content"]["text"]
@@ -413,10 +487,12 @@ async def test_unknown_pair_completes_the_card_without_a_diff(tmp_path):
     await _prompt(facade, session_id)
     written = _completed(writer, "w1")
     assert written["status"] == "completed"
-    assert "content" not in written
+    assert written["content"] == [_preview({"ok": True})]
+    assert _diff_blocks(written) == []
     read = _completed(writer, "r1")
     assert read["status"] == "completed"
-    assert "content" not in read
+    assert read["content"] == [_preview({"ok": True})]
+    assert _diff_blocks(read) == []
     assert disk.files[target] == "текст".encode()
     assert _by_id(writer, 3)["result"] == {"stopReason": "end_turn"}
     await facade.shutdown()
@@ -440,7 +516,8 @@ async def test_binary_write_completes_without_a_diff(tmp_path):
     await _prompt(facade, session_id)
     update = _completed(writer, "bin")
     assert update["status"] == "completed"
-    assert "content" not in update
+    assert update["content"] == [_preview({"ok": True})]
+    assert _diff_blocks(update) == []
     assert target.read_bytes() == b"\xff"
     assert _by_id(writer, 3)["result"] == {"stopReason": "end_turn"}
     await facade.shutdown()
@@ -472,7 +549,8 @@ async def test_failed_write_is_not_reported_as_a_diff(tmp_path):
     await _prompt(facade, session_id)
     update = _completed(writer, "w1")
     assert update["status"] == "failed"
-    assert "content" not in update
+    assert update["content"] == [_preview({"ok": False})]
+    assert _diff_blocks(update) == []
     assert target not in disk.files
     assert _by_id(writer, 3)["result"] == {"stopReason": "end_turn"}
     await facade.shutdown()

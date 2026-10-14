@@ -128,17 +128,21 @@ class DiffBackend:
 
 
 def attach_diff(update: dict, log: DiffLog | None) -> dict:
-    """Дописать ``content`` к завершению карточки, если пара известна."""
+    """Дописать diff следом за превью. Превью остаётся первым блоком."""
     if log is None or update.get("sessionUpdate") != "tool_call_update":
         return update
     call_id = update.get("toolCallId")
     if not isinstance(call_id, str):
         return update
-    content = log.content(call_id)
-    if not content:
+    extra = log.content(call_id)
+    if not extra:
         return update
     shown = dict(update)
-    shown["content"] = content
+    preview = update.get("content")
+    if isinstance(preview, list) and preview:
+        shown["content"] = [*preview, *extra]
+    else:
+        shown["content"] = extra
     return shown
 
 
