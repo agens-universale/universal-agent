@@ -53,6 +53,50 @@ def _json_text(value: str) -> str:
     return json.dumps(value, ensure_ascii=False)[1:-1]
 
 
+def _is_json_text(value: str) -> bool:
+    if value[:1] not in ("{", "["):
+        return False
+    try:
+        json.loads(value)
+    except ValueError:
+        return False
+    return True
+
+
+def _swap(value, swaps: dict[str, str]):
+    if isinstance(value, dict):
+        return {key: _swap(item, swaps) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_swap(item, swaps) for item in value]
+    if not isinstance(value, str) or not any(p in value for p in swaps):
+        return value
+    # Аргументы и вывод тула — JSON внутри JSON-строки: путь там стоит
+    # в строке ещё одного уровня, и его слеши экранируются ещё раз.
+    nested = _is_json_text(value)
+    for placeholder, real in swaps.items():
+        value = value.replace(
+            placeholder, _json_text(real) if nested else real
+        )
+    return value
+
+
+def substitute_paths(text: str, swaps: dict[str, str]) -> str:
+    """Подставить настоящие пути вместо плейсхолдеров в ``.json``/``.jsonl``.
+
+    Плейсхолдеры стоят только в однострочном JSON (строки истории и
+    индексы). Строка с плейсхолдером разбирается и собирается обратно тем же
+    ``json.dumps(..., ensure_ascii=False)``, которым её писал develop, —
+    поэтому байты меняются только в подставленных путях.
+    """
+    out = []
+    for line in text.split("\n"):
+        if any(p in line for p in swaps):
+            row = _swap(json.loads(line), swaps)
+            line = json.dumps(row, ensure_ascii=False)
+        out.append(line)
+    return "\n".join(out)
+
+
 def install_legacy_threads(root: Path) -> Path:
     """Копия фикстур в ``root``; возвращает каталог тредов ``root/threads``.
 
@@ -61,14 +105,14 @@ def install_legacy_threads(root: Path) -> Path:
     """
     shutil.copytree(FIXTURE_ROOT, root, dirs_exist_ok=True)
     swaps = {
-        "<THREADS_DIR>": _json_text(str(root / "threads")),
-        "<WORKSPACE>": _json_text(str(root / "workspace")),
-        "<ROOT>": _json_text(str(root)),
+        "<THREADS_DIR>": str(root / "threads"),
+        "<WORKSPACE>": str(root / "workspace"),
+        "<ROOT>": str(root),
     }
     for path in root.rglob("*"):
         if path.is_file() and path.suffix in _TEXT_SUFFIXES:
             text = path.read_text(encoding="utf-8")
-            for placeholder, real in swaps.items():
-                text = text.replace(placeholder, real)
-            path.write_text(text, encoding="utf-8", newline="")
+            path.write_text(
+                substitute_paths(text, swaps), encoding="utf-8", newline=""
+            )
     return root / "threads"

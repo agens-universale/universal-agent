@@ -11,6 +11,7 @@ from gc_testkit.legacy_threads import (
     FIXTURE_ROOT,
     LEGACY_THREADS,
     install_legacy_threads,
+    substitute_paths,
 )
 
 PLACEHOLDERS = ("<THREADS_DIR>", "<WORKSPACE>", "<ROOT>")
@@ -63,3 +64,60 @@ def test_install_does_not_touch_frozen_files(tmp_path):
     install_legacy_threads(tmp_path)
     after = {p: p.read_bytes() for p in FIXTURE_ROOT.rglob("*") if p.is_file()}
     assert before == after
+
+
+def _write_rows(threads, fixture):
+    data = threads / f"data_{fixture.system}_{fixture.thread_id}.jsonl"
+    rows = [
+        json.loads(line)["payload"]
+        for line in data.read_text(encoding="utf-8").splitlines()
+        if line
+    ]
+    calls = [
+        r
+        for r in rows
+        if r.get("type") == "function_call" and r["name"] == "fs_write_file"
+    ]
+    outputs = [
+        r
+        for r in rows
+        if r.get("type") == "function_call_output"
+        and r["call_id"] == calls[0]["call_id"]
+    ]
+    return calls, outputs
+
+
+def test_nested_json_paths_point_into_installed_tree(tmp_path):
+    threads = install_legacy_threads(tmp_path)
+    calls, outputs = _write_rows(threads, LEGACY_THREADS["cli_two_turns"])
+    expected = str(tmp_path / "workspace") + "/result.txt"
+    assert json.loads(calls[0]["arguments"])["path"] == expected
+    assert json.loads(outputs[0]["output"])["path"] == expected
+
+
+def test_substitution_escapes_windows_paths_per_nesting_level():
+    # Путь Windows: в JSON-строке слеши экранируются один раз, в JSON внутри
+    # JSON-строки (аргументы и вывод тула) — дважды.
+    root = "C:\\Users\\tmp\\workspace"
+    line = json.dumps(
+        {
+            "plain": "<WORKSPACE>/a.txt",
+            "nested": json.dumps({"path": "<WORKSPACE>/b.txt"}),
+        },
+        ensure_ascii=False,
+    )
+    row = json.loads(substitute_paths(line, {"<WORKSPACE>": root}))
+    assert row["plain"] == root + "/a.txt"
+    assert json.loads(row["nested"])["path"] == root + "/b.txt"
+
+
+def test_substitution_keeps_bytes_when_paths_need_no_escaping():
+    swaps = {p: "/tmp/x" for p in PLACEHOLDERS}
+    for path in FIXTURE_ROOT.rglob("*"):
+        if path.suffix not in {".json", ".jsonl"}:
+            continue
+        text = path.read_text(encoding="utf-8")
+        naive = text
+        for placeholder, real in swaps.items():
+            naive = naive.replace(placeholder, real)
+        assert substitute_paths(text, swaps) == naive, path
