@@ -582,9 +582,6 @@ class AssignConfig(BaseModel):
     memory_compaction: str | None = Field(
         default=None, json_schema_extra=gc_meta(expert=True)
     )
-    auto_judge: str | None = Field(
-        default=None, json_schema_extra=gc_meta(expert=True)
-    )
     vision: str | None = Field(
         default=None, json_schema_extra=gc_meta(expert=True)
     )

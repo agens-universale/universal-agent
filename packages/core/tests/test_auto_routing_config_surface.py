@@ -111,19 +111,18 @@ def test_cli_overrides_validate_typed_pair_settings():
         apply_cli_overrides(cfg, extra_overrides={"agent.auto_routing_two_level.strong_steps": 0})
 
 
-def test_named_routing_judge_and_reserved_auto_judge_remain_independent():
+def test_named_routing_judge_binding_resolves_and_validates():
     from gc_core.config_modules.model_sections_validation import validate_model_sections
     from gc_core.model_router import ModelRouter
 
     cfg = AppConfig.model_validate({
         "models": {"main-model": {}, "judge-model": {"model": "judge"}},
         "slots": {"default": "main-model"},
-        "assign": {"routing_judge": "judge-model", "auto_judge": "default"},
+        "assign": {"routing_judge": "judge-model"},
     })
     assert validate_model_sections(cfg) == []
     router = ModelRouter(cfg, level_provider=lambda: "max")
     assert router.resolve("routing_judge").alias == "judge-model"
-    assert router.resolve("auto_judge").alias == "main-model"
     with pytest.raises(ValueError, match="assign.routing_judge"):
         validate_model_sections(AppConfig.model_validate({"assign": {"routing_judge": "missing"}}))
 

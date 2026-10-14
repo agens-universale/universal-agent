@@ -327,3 +327,45 @@ def test_old_name_in_the_base_and_above_keeps_the_base_values(
     assert aux.max_tokens == 4096
     assert aux.judge_max_tokens == 2222
     assert not any("отброшено" in n for n in loaded.runtime.notices)
+
+
+def test_removed_auto_judge_binding_is_dropped_with_notice():
+    """`assign.auto_judge` был в релизном demo_profile.yml активной строкой:
+    скопированный конфиг не должен перестать грузиться (спека PR140 Р2)."""
+    raw = {"assign": {"auto_judge": "max", "finish_gate": "default"}}
+    facts = compat.apply_compat(raw)
+    assert raw == {"assign": {"finish_gate": "default"}}
+    assert any("assign.auto_judge" in f for f in facts)
+
+
+def test_load_settings_survives_the_old_auto_judge(tmp_path):
+    from gc_core.config import load_settings
+
+    cfg_file = tmp_path / "config.yml"
+    cfg_file.write_text("assign:\n  auto_judge: max\n", encoding="utf-8")
+    loaded = load_settings(str(cfg_file))
+    assert loaded.settings.assign.finish_gate is None
+    assert any("assign.auto_judge" in n for n in loaded.runtime.notices)
+
+
+def test_a_profile_with_the_old_auto_judge_still_loads(tmp_path):
+    from gc_core.config import load_settings
+
+    base = tmp_path / "config.yml"
+    base.write_text("backend:\n  api_mode: chat_completions\n", encoding="utf-8")
+    profiles = tmp_path / "profiles"
+    profiles.mkdir()
+    (profiles / "old.yml").write_text("assign:\n  auto_judge: max\n", encoding="utf-8")
+    loaded = load_settings(str(base), profile_override="old")
+    assert loaded.runtime.active_profile == "old"
+    assert any("assign.auto_judge" in n for n in loaded.runtime.notices)
+
+
+def test_auto_judge_is_rejected_without_compat():
+    import pytest
+    from pydantic import ValidationError
+
+    from gc_core.config_modules.root import AppConfig
+
+    with pytest.raises(ValidationError):
+        AppConfig.model_validate({"assign": {"auto_judge": "max"}})

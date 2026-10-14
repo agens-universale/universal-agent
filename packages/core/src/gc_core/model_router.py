@@ -40,7 +40,6 @@ CONSUMERS = (
     "summary",
     "intent_scope",
     "memory_compaction",
-    "auto_judge",
     "vision",
     "routing_judge",
 )
@@ -56,7 +55,6 @@ _SCALAR_ASSIGN_FIELDS = (
     "summary",
     "intent_scope",
     "memory_compaction",
-    "auto_judge",
     "vision",
     "routing_judge",
 )
@@ -388,13 +386,6 @@ class ModelRouter:
 
         if self._unbound_override is not None:
             return self._unbound_override
-
-        if consumer == "auto_judge":
-            return self._resolve_level(
-                "default",
-                source_prefix="auto_judge без привязки → ",
-                check_breaker=check_breaker,
-            )
 
         level = (
             level_override if level_override is not None else self._level_provider()

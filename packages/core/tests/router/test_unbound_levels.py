@@ -84,3 +84,8 @@ def test_a_pinned_child_still_runs_main_and_other_consumers_on_the_pin():
 def test_a_pinned_child_with_its_own_judge_binding_uses_the_binding():
     router = _router("default", {"finish_gate": "max"}, unbound_override=_pin())
     assert router.resolve("finish_gate").alias == "big"
+
+
+def test_auto_judge_is_not_a_consumer():
+    with pytest.raises(ValueError, match="неизвестный consumer"):
+        _router("default").resolve("auto_judge")

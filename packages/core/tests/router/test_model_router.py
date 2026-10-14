@@ -39,7 +39,6 @@ def test_consumers_constant_matches_spec():
         "summary",
         "intent_scope",
         "memory_compaction",
-        "auto_judge",
         "vision",
         "routing_judge",
     )
@@ -51,8 +50,7 @@ def test_consumer_registries_agree():
     пропуск любого молчит: без `_SCALAR_ASSIGN_FIELDS` Router игнорирует
     `assign.<имя>`, без `_ASSIGN_SCALAR_FIELDS` валидатор пропускает опечатку в
     алиасе, без поля схемы конфиг не грузится, без подписи notice отката и строка
-    /settings показывают сырое имя. Подписи `auto_judge` в транспортном словаре
-    нет намеренно — `utils/llm_chat_client.py`, комментарий над словарём."""
+    /settings показывают сырое имя."""
     from gc_core.config_modules.model_registry import AssignConfig
     from gc_core.config_modules.model_sections_validation import (
         _ASSIGN_SCALAR_FIELDS,
@@ -64,12 +62,12 @@ def test_consumer_registries_agree():
     assert set(_SCALAR_ASSIGN_FIELDS) == service
     assert set(_ASSIGN_SCALAR_FIELDS) == service
     assert set(AssignConfig.model_fields) - {"subagents"} == service
-    assert set(CONSUMER_RU_LABEL) == service - {"auto_judge"}
+    assert set(CONSUMER_RU_LABEL) == service
 
 
 def test_vision_without_binding_follows_the_active_level():
-    """«Глаза» без привязки — активная модель, по общему правилу, без особого
-    случая `auto_judge` (спека изображений §8)."""
+    """«Глаза» без привязки — активная модель, по общему правилу
+    (спека изображений §8)."""
     router = _router(
         {
             "models": {"a": {}, "b": {}, "c": {}},
@@ -578,20 +576,6 @@ def test_same_call_kit_compares_every_field_but_the_source():
     assert (
         kit.same_call_kit(replace(kit, source="фоллбэк max → default")) is True
     )
-
-
-def test_auto_judge_without_binding_uses_default_statically_not_active_level():
-    router = _router(
-        {
-            "models": {"a": {}, "b": {}, "c": {}},
-            "slots": {"light": "a", "default": "b", "max": "c"},
-        },
-        level="max",
-    )  # активный уровень max — auto_judge обязан игнорировать это
-    resolved = router.resolve("auto_judge")
-    assert resolved.alias == "b"
-    assert "default" in resolved.source
-    assert "auto_judge" in resolved.source
 
 
 # --- модель main-трейса для заданного уровня вызова ---------------------------
