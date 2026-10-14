@@ -608,9 +608,9 @@ slots:                                   # уровни — указатели �
   max: flash
 
 assign:                                  # привязки отдельных потребителей
-  command_judge: default                 # судья команд не опускается вместе с исполнителем
-  finish_gate: max                       # значение — уровень ИЛИ алиас; в поставке — max
-  summary: default                       # ошибки суммаризации необратимы
+  command_judge: default                 # явная привязка; без неё тоже default
+  finish_gate: max                       # явная привязка: финал судит max (уровень ИЛИ алиас); без неё — default
+  summary: default                       # явная привязка; без неё тоже default
   subagents:
     subagent_critic: max
     "*": default                         # все остальные субагенты
