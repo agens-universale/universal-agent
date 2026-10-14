@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import logging
 import os
 import sys
@@ -132,21 +133,21 @@ class AcpFacade:
                 )
 
     def confirm_blocking(self, session_id: str, request: Any) -> str:
-        """Синхронный confirm с потока тула. Таймаут и сбой — deny_once."""
-        from gc_core.security.confirm_port import CONFIRM_DENY_ONCE
+        """Синхронный confirm с потока тула. Таймаут и сбой — отказ без записи."""
+        from gc_core.security.confirm_port import CONFIRM_TIMED_OUT
 
         loop = self._loop
         if loop is None or not loop.is_running():
-            return CONFIRM_DENY_ONCE
+            return CONFIRM_TIMED_OUT
         timeout = timeout_sec(self._settings)
-        future = asyncio.run_coroutine_threadsafe(
-            self._confirm(session_id, request), loop
+        done, cancel = _schedule_confirm(
+            loop, self._confirm(session_id, request)
         )
         try:
-            return future.result(timeout=timeout + 1.0)
+            return done.result(timeout=timeout + 1.0)
         except Exception:
-            future.cancel()
-            return CONFIRM_DENY_ONCE
+            loop.call_soon_threadsafe(cancel)
+            return CONFIRM_TIMED_OUT
 
     async def shutdown(self) -> None:
         """Отменить живые ходы и закрыть простаивающих агентов.
@@ -748,6 +749,45 @@ def broken_reply_for(incoming: Incoming) -> Incoming:
         error=reply.error,
         parse_error=True,
     )
+
+
+def _schedule_confirm(
+    loop: asyncio.AbstractEventLoop, coro: Any
+) -> tuple[concurrent.futures.Future, Any]:
+    """Поставить confirm на loop. ``cancel`` останавливает задачу, не Future."""
+    done: concurrent.futures.Future = concurrent.futures.Future()
+    state: dict[str, Any] = {"task": None, "drop": False}
+
+    def deliver(task: asyncio.Task) -> None:
+        if done.done():
+            return
+        if task.cancelled():
+            done.cancel()
+            return
+        exc = task.exception()
+        if exc is not None:
+            done.set_exception(exc)
+            return
+        done.set_result(task.result())
+
+    def schedule() -> None:
+        if state["drop"]:
+            coro.close()
+            if not done.done():
+                done.cancel()
+            return
+        task = loop.create_task(coro)
+        state["task"] = task
+        task.add_done_callback(deliver)
+
+    def cancel() -> None:
+        state["drop"] = True
+        task = state["task"]
+        if task is not None and not task.done():
+            task.cancel()
+
+    loop.call_soon_threadsafe(schedule)
+    return done, cancel
 
 
 def _cancel_notice(request_id: Any) -> dict:

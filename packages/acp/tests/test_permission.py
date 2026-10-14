@@ -307,6 +307,41 @@ async def test_timeout_denies_and_late_allow_does_not_stick(tmp_path):
     await facade.shutdown()
 
 
+async def test_blocked_writer_timeout_does_not_cache_deny(tmp_path):
+    """Lock писателя дольше timeout+1 не пишет run-правило и не открывает диалог."""
+    facade, writer, agent, _session_id, store = await _ready(
+        tmp_path, **{"acp.confirm_timeout_sec": 0.05}
+    )
+    key = "command:ls"
+    lock = asyncio.Lock()
+    writer._lock = lock
+
+    def write_locked(payload):
+        writer.sent.append(payload)
+
+    writer.write_locked = write_locked
+    await lock.acquire()
+    try:
+        assert await _ask(agent.executor._ctx, key) is False
+    finally:
+        if lock.locked():
+            lock.release()
+    await asyncio.sleep(0.05)
+    assert _permission_calls(writer) == []
+    assert store.decision_for(key) is None
+    assert key not in store.export_run_rules()
+
+    async def allow():
+        msg = await _wait_permission(writer)
+        await facade.handle_line(_response(msg["id"], _selected("allow_once")))
+
+    again = asyncio.create_task(allow())
+    assert await _ask(agent.executor._ctx, key) is True
+    await again
+    assert len(_permission_calls(writer)) == 1
+    await facade.shutdown()
+
+
 async def test_allow_arriving_with_timeout_is_applied(tmp_path, monkeypatch):
     """Allow в тот же тик, что TimeoutError, не подменяется отказом."""
     facade, writer, agent, _session_id, store = await _ready(tmp_path)
