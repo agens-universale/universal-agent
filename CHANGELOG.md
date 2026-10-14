@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Хранилища v2 — фронтенды читают и пишут треды через хранилище тредов
+
+- TUI, CLI, сервер, gc-chat и gc-acp работают с тредами через фасад `Threads` поверх `ThreadStore`; формат файлов тредов прежний, новое только добавляется.
+- gc-chat: ответ Responses — запись потока `chat.responses` треда, `response_id` — алиас треда. Новые файлы `responses-index/*.json` не пишутся, старые читаются.
+- gc-acp: cwd и заголовок сессии — в треде (`frontend["acp"]`). Новые `acp-sessions/*.json` не пишутся, старые читаются до первого хода сессии.
+- `/export log-json` собирает строки треда из хранилища (тот же конверт строки истории); строки, которые не читаются как запись истории, в выгрузку не попадают.
+- Тред, который ведёт durable-исполнитель (Temporal), удаляет только он сам: уборщик сервера и `/sessions` в TUI его пропускают (TUI — с предупреждением).
+- После удаления треда в `.store/` остаётся служебная запись с его поколением: по ней читатели замечают, что тред с тем же id создан заново.
+
 ### Feature — limit trace summary (LIMIT_TRACE_SUMMARY_SPEC)
 
 - When the main agent or a subagent hits a limit (`step_limit` / `tool_call_limit` / `token_limit`), the trace is now summarized by a single auxiliary LLM call and returned as a JSON envelope `{ok:false, status, message, raw_trace_summary}` instead of a flat string.

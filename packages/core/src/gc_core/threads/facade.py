@@ -11,7 +11,7 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import Any
@@ -20,7 +20,6 @@ from gc_core.threads.meta_map import meta_from_record
 from gc_core.threads.models import (
     JsonObject,
     Receipt,
-    RuntimeStatus,
     SideChange,
     StreamEntry,
     ThreadKey,
@@ -141,6 +140,17 @@ class Threads:
     async def resolve(self, alias: str) -> ThreadKey | None:
         return await self.store.resolve_alias(alias)
 
+    async def snapshot(
+        self, key: ThreadKey, streams: Sequence[str]
+    ) -> TailBatch | None:
+        """Все записи потоков и курсор сразу за ними — начало показа треда.
+        Треда нет — ``None``."""
+        record = await self.store.get_thread(key)
+        if record is None:
+            return None
+        start = Cursor(record.generation, record.history_version)
+        return await self.tail(key, streams, start)
+
     async def tail(
         self,
         key: ThreadKey,
@@ -219,13 +229,18 @@ class Threads:
         key: ThreadKey,
         message_id: str,
         *,
-        runtime: RuntimeStatus | None = None,
+        recount: Callable[[list[JsonObject]], JsonObject] | None = None,
     ) -> bool:
-        """Удалить сообщение; ``runtime`` — пересчитанный объём истории."""
+        """Удалить сообщение. ``recount(история) -> {"live_…": …}`` —
+        пересчитать объём живой истории в ``runtime`` (остальное в нём —
+        как было)."""
         removed = await self._port.adiscard_message(
             key.system, key.thread, message_id
         )
-        if removed and runtime is not None:
+        record = await self.store.get_thread(key) if removed else None
+        if record is not None and recount is not None:
+            messages = [entry.data for entry in await self.history(key)]
+            runtime = record.runtime.model_copy(update=recount(messages))
             await self.store.append_side(
                 key, SideChange(op_id=_op_id("runtime"), set_runtime=runtime)
             )

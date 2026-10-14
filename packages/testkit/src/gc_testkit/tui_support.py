@@ -100,3 +100,20 @@ def span_style(text, needle: str) -> str:
         if span.start <= start < span.end:
             return str(span.style)
     return ""
+
+
+def compact_thread(
+    threads_dir: str, system: str, thread: str, messages: list
+) -> None:
+    """Сжать историю треда так, как это делает ядро: прежняя история уходит
+    в архив, вместо неё — ``messages`` (через хранилище тредов).
+
+    Синхронно и изнутри работающего loop (тесты TUI на ``run_test``):
+    файловое хранилище ничего внешнего не ждёт.
+    """
+    from gc_core.threads.facade import run_sync
+    from gc_core.threads.file_store import FileThreadStore
+    from gc_core.threads.session_port import SessionPort
+
+    port = SessionPort(FileThreadStore(threads_dir))
+    run_sync(port.aarchive_and_replace(system, thread, list(messages)))

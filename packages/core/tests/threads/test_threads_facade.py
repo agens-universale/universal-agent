@@ -6,7 +6,7 @@ import asyncio
 import pytest
 from gc_core.threads.facade import Threads, run_sync
 from gc_core.threads.file_store import FileThreadStore
-from gc_core.threads.models import RuntimeStatus, ThreadKey
+from gc_core.threads.models import RuntimeStatus, SideChange, ThreadKey
 from gc_testkit.legacy_threads import LEGACY_THREADS, install_legacy_threads
 from gc_testkit.memory_thread_store_v2 import MemoryThreadStore
 
@@ -35,6 +35,20 @@ def test_tail_from_now_then_new_entries(threads):
         assert not batch.reset
         idle = await threads.tail(KEY, ["messages"], batch.cursor)
         assert idle.entries == []
+
+    asyncio.run(scenario())
+
+
+def test_snapshot_reads_everything_and_continues_with_tail(threads):
+    async def scenario():
+        assert await threads.snapshot(KEY, ["messages"]) is None
+        await threads.append_messages(KEY, _msgs("a", "b"))
+        start = await threads.snapshot(KEY, ["messages"])
+        assert [e.data["id"] for _s, e in start.entries] == ["a", "b"]
+        assert not start.reset
+        await threads.append_messages(KEY, _msgs("c"))
+        batch = await threads.tail(KEY, ["messages"], start.cursor)
+        assert [e.data["id"] for _s, e in batch.entries] == ["c"]
 
     asyncio.run(scenario())
 
@@ -91,13 +105,21 @@ def test_frontend_stream_alias_and_summary_in_one_write(threads):
     asyncio.run(scenario())
 
 
-def test_discard_updates_runtime_when_given(threads):
+def test_discard_recounts_live_volume_and_keeps_the_rest(threads):
     async def scenario():
         await threads.append_messages(KEY, _msgs("a", "b"))
-        runtime = RuntimeStatus(live_msg_count=1, live_history_chars=7)
-        assert await threads.discard_message(KEY, "a", runtime=runtime)
-        record = await threads.get(KEY)
-        assert record.runtime.live_msg_count == 1
+        await threads.store.append_side(
+            KEY,
+            SideChange(op_id="img", set_runtime=RuntimeStatus(image_seq=3)),
+        )
+
+        def recount(messages):
+            return {"live_msg_count": len(messages), "live_history_chars": 7}
+
+        assert await threads.discard_message(KEY, "a", recount=recount)
+        runtime = (await threads.get(KEY)).runtime
+        assert (runtime.live_msg_count, runtime.live_history_chars) == (1, 7)
+        assert runtime.image_seq == 3
         assert [e.data["id"] for e in await threads.history(KEY)] == ["b"]
         assert not await threads.discard_message(KEY, "нет такого")
 

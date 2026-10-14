@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from gc_testkit.tui_support import tui_settings
+from gc_testkit.tui_support import compact_thread, tui_settings
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -192,36 +192,12 @@ async def test_stream_reset_gcs_delivered_pending_from_user_ask(tmp_path):
         )
         assert len(_read_pending(tmp_path, tid)) == 1
 
-        # Компакция → stream_reset
-        (tmp_path / f"data_cli_{tid}.jsonl").write_text(
-            json.dumps(
-                {
-                    "type": "message",
-                    "thread_id": tid,
-                    "system": "cli",
-                    "seq": 1,
-                    "ts": "2026-06-11T11:00:00+00:00",
-                    "payload": {
-                        "id": "s1",
-                        "role": "assistant",
-                        "content": "после-сжатия",
-                    },
-                },
-                ensure_ascii=False,
-            )
-            + "\n",
-            encoding="utf-8",
-        )
-        meta = json.loads(meta_path.read_text(encoding="utf-8"))
-        meta.update(
-            {
-                "updated_at": "2026-06-11T11:00:00+00:00",
-                "messages_count": 1,
-                "last_summary_archive_suffix": "2026-06-11T11-00-00",
-            }
-        )
-        meta_path.write_text(
-            json.dumps(meta, ensure_ascii=False), encoding="utf-8"
+        # Компакция ядром → stream_reset
+        compact_thread(
+            str(tmp_path),
+            "cli",
+            tid,
+            [{"id": "s1", "role": "assistant", "content": "после-сжатия"}],
         )
 
         def trace_text():

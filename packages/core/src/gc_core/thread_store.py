@@ -232,40 +232,6 @@ def _thread_archive_paths(
     )
 
 
-def delete_thread(
-    threads_dir: str, system_id: str, thread_id: str
-) -> List[str]:
-    """Полностью удалить тред: canonical + legacy + lock + sidecar + touched + __pre_summary__
-    + картинки треда (`images/<sys>_<tid>_*`).
-
-    Возвращает список удалённых путей файлов истории (картинки в него не входят —
-    их раскладкой владеет `ImageStore`). Отсутствие файла — no-op.
-    """
-    paths: List[str] = []
-    paths.extend(_thread_paths(threads_dir, system_id, thread_id))
-    paths.extend(_thread_paths_legacy(threads_dir, thread_id))
-    paths.extend(_thread_archive_paths(threads_dir, system_id, thread_id))
-    sidecar = subagent_trace_path(threads_dir, system_id, thread_id)
-    paths.append(sidecar)
-    paths.append(touched_journal_path(threads_dir, system_id, thread_id))
-    edits_path = str(edits_journal_path(threads_dir, system_id, thread_id))
-    paths.append(edits_path)
-    # См. комментарий в `reset_thread_files`: лок журнала — отдельный файл,
-    # сам по себе он не сносится удалением журнала.
-    paths.append(edits_path + ".lock")
-    paths.append(_lock_path(threads_dir, system_id, thread_id))
-
-    deleted = _remove_existing(paths)
-    # Сброс process-local счётчика sidecar seq, иначе recreate получит «дырявый» seq (S5).
-    with _sidecar_seq_lock:
-        _sidecar_last_seq.pop(sidecar, None)
-    # Идентичность — нормализованная, как у файлов истории выше: `CLI` и `cli` — один тред.
-    ImageStore.for_threads_dir(threads_dir).delete_thread_images(
-        sanitize_system_id(system_id), validate_thread_id(thread_id)
-    )
-    return deleted
-
-
 def _max_subagent_trace_seq(path: str) -> int:
     """Максимальный seq в sidecar; битые строки пропускаем."""
     if not os.path.exists(path):
