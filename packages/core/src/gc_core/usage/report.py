@@ -66,10 +66,10 @@ def format_parts(
     return f"{text}?" if unpriced else text
 
 
-def _model_rows(models: dict[str, dict[str, int]]) -> list[str]:
+def _model_rows(models: dict[str, dict[str, int]], name_w: int) -> list[str]:
     """Строки «модель — вход — выход» в порядке первого вызова."""
     return [
-        f"{name:<20}{format_tokens(bucket.get('input', 0)):>10}{format_tokens(bucket.get('output', 0)):>10}"
+        f"{name:<{name_w}}{format_tokens(bucket.get('input', 0)):>10}{format_tokens(bucket.get('output', 0)):>10}"
         for name, bucket in models.items()
     ]
 
@@ -86,7 +86,13 @@ def render_cost_report(
         if models else _report_header(title, model_name)
     ]
     show_cost = report.has_cost or report.unknown_only
-    lines.append(_columns_header(show_cost))
+    # Одна ширина первой колонки на весь отчёт: длинное имя модели не сдвигает числа.
+    name_w = max(
+        [20]
+        + [len(c.category) for c in report.categories]
+        + [len(name) for name in (models or {})]
+    )
+    lines.append(_columns_header(show_cost, name_w))
 
     # Тильда осмысленна только когда в отчёте есть ОБЕ стороны — факт и тариф;
     # чисто тарифный (или чисто фактический) отчёт её не ставит нигде.
@@ -100,11 +106,13 @@ def render_cost_report(
 
     for c in report.categories:
         lines.append(
-            _category_row(c, show_cost=show_cost, mark_tariff=mark_tariff)
+            _category_row(
+                c, show_cost=show_cost, mark_tariff=mark_tariff, name_w=name_w
+            )
         )
 
-    lines.append("─" * (62 if show_cost else 40))
-    total_row = f"{'total':<20}{format_tokens(report.total_input):>10}{format_tokens(report.total_output):>10}"
+    lines.append("─" * (name_w + 20 + (22 if show_cost else 0)))
+    total_row = f"{'total':<{name_w}}{format_tokens(report.total_input):>10}{format_tokens(report.total_output):>10}"
     if show_cost:
         total_row += f"{_total_cost_cell(report):>22}"
     lines.append(total_row)
@@ -114,7 +122,7 @@ def render_cost_report(
 
     if models and len(models) > 1:
         lines.append("by model:")
-        lines.extend(_model_rows(models))
+        lines.extend(_model_rows(models, name_w))
 
     lines.extend(_usage_caveat_lines(report))
 
@@ -124,8 +132,8 @@ def render_cost_report(
     return "\n".join(lines)
 
 
-def _columns_header(show_cost: bool) -> str:
-    base = f"{'category':<20}{'input':>10}{'output':>10}"
+def _columns_header(show_cost: bool, name_w: int) -> str:
+    base = f"{'category':<{name_w}}{'input':>10}{'output':>10}"
     return base + f"{'cost':>22}" if show_cost else base
 
 
@@ -142,8 +150,10 @@ def _report_header(title: str, model_name: str | None) -> str:
     return f"{title}    model: {model_name}" if model_name else title
 
 
-def _category_row(c: Any, *, show_cost: bool, mark_tariff: bool) -> str:
-    row = f"{c.category:<20}{format_tokens(c.input):>10}{format_tokens(c.output):>10}"
+def _category_row(
+    c: Any, *, show_cost: bool, mark_tariff: bool, name_w: int
+) -> str:
+    row = f"{c.category:<{name_w}}{format_tokens(c.input):>10}{format_tokens(c.output):>10}"
     if show_cost:
         row += f"{format_parts(c.parts, c.unpriced, mark_tariff):>22}"
     return row

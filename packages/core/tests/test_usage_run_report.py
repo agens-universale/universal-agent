@@ -118,3 +118,20 @@ def test_report_and_dict_mark_unknown_cost_without_a_sum():
     assert "? — часть вызовов без цены, итог неполный" in text
     data = build_run_usage_dict(run, _PRICING_OTHER, "m")
     assert data["cost"] == {"by_currency": {}, "unpriced": True}
+
+
+def test_long_model_names_keep_every_column_aligned():
+    run = UsageAccount()
+    run.add(CATEGORY_MAIN, 1000, 100, model="deepseek-ai/DeepSeek-V3.2-Exp-long-name")
+    run.add(CATEGORY_MAIN, 500, 50, model="m")
+    lines = build_run_usage_report(run, _PRICING, "m").splitlines()
+    header = next(line for line in lines if line.startswith("category"))
+    end = header.index("input") + len("input")     # правый край колонки input
+    rows = [line for line in lines if line.startswith(("main", "total", "deepseek-ai/"))]
+    assert len(rows) == 3
+    for row in rows:
+        assert row[end - 1] != " ", row         # число input упирается в тот же край
+        assert row[:end] == row[:end].rstrip(), row
+        assert row[end] == " ", row            # дальше — колонка output, а не хвост имени
+    separator = next(line for line in lines if line.startswith("─"))
+    assert len(separator) == len(header)
