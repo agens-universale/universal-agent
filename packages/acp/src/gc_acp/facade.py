@@ -28,6 +28,7 @@ from gc_acp.confirm import (
     permission_message,
     timeout_sec,
 )
+from gc_acp.diffs import DiffBackend, DiffLog, attach_diff
 from gc_acp.model_config import (
     config_options_payload,
     level_for_choice,
@@ -89,6 +90,7 @@ class LiveSession:
     response_sent: bool = False
     failed: bool = False
     tool_flow: ToolFlow | None = None
+    diffs: DiffLog | None = None
     # Выбор пикера. None — уровень конфига (``settings.level`` / ``--level``).
     # close забывает сессию вместе с этим полем; в файл конфига не пишется.
     level: str | None = None
@@ -476,7 +478,7 @@ class AcpFacade:
                 settings,
                 auth_connector=self._auth,
                 tools_cache=self._tools_cache,
-                os_backend=self._os_backend,
+                os_backend=self._session_backend(live),
                 level_provider=level_provider,
             )
         try:
@@ -486,6 +488,19 @@ class AcpFacade:
             await _safe_aclose(agent)
             raise
         return agent
+
+    def _session_backend(self, live: LiveSession) -> Any:
+        """Обёртка диска этой сессии. Чужой бэкенд и журнал ядра не трогаем."""
+        backend = self._os_backend
+        if backend is None:
+            return None
+        live.diffs = DiffLog()
+        return DiffBackend(
+            backend,
+            live.diffs,
+            cwd=live.cwd,
+            call_id=lambda: _open_call_id(live),
+        )
 
     async def _confirm(self, session_id: str, request: Any) -> str:
         from gc_core.security.confirm_port import (
@@ -637,7 +652,9 @@ class AcpFacade:
 
     async def _emit_tools(self, live: LiveSession, flow: ToolFlow) -> None:
         for update in flow.poll():
-            await self._notify(live.session_id, update)
+            await self._notify(
+                live.session_id, attach_diff(update, live.diffs)
+            )
 
     async def _close_prompt(self, live: LiveSession, request_id: Any) -> None:
         cancelled = live.cancel_requested
@@ -812,6 +829,14 @@ def _session_id_of(params: Any) -> str | None:
     if body is None:
         return None
     return _session_id(body.get("sessionId"))
+
+
+def _open_call_id(live: LiveSession) -> str | None:
+    """Карточка, которая исполняется сейчас. До хода её ещё нет."""
+    flow = live.tool_flow
+    if flow is None:
+        return None
+    return flow.current_call_id()
 
 
 def _prompt_running(live: LiveSession) -> bool:
