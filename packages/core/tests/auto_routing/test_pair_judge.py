@@ -93,37 +93,3 @@ def test_a_dialog_summary_in_the_history_marks_the_history_compacted():
         "no_score", "prose_around_json", "prose", "empty"])
 def test_the_score_parser(text, expected):
     assert parse_pair_score(text) == expected
-
-
-def _preflight_settings(**updates):
-    from gc_testkit.settings import make_settings
-
-    return make_settings({
-        "models": {"fast": {}, "mid": {}, "big": {}},
-        "slots": {"light": "fast", "default": "mid", "max": "big"},
-        "backend.api_mode": "chat_completions",
-        "level": "auto",
-        "paths.chat_completions_routing_pair_judge_prompt_path": "/virtual/pair-prompt.md",
-        **updates,
-    }).settings
-
-
-def test_preflight_reads_a_virtual_prompt_from_the_agent_store():
-    from gc_core.auto_routing.pair_judge import require_prompt
-    from gc_core.auto_routing.policy import RoutingParams
-    from gc_testkit.memory_agent_store import MemoryAgentStore
-
-    store = MemoryAgentStore(prompts={"routing_pair_judge": "Choose the initial pair."}, fallback=None)
-    require_prompt(_preflight_settings(), RoutingParams(safe_level="auto"), store=store)
-    assert store.reads == [("prompt", "routing_pair_judge")]
-
-
-@pytest.mark.parametrize("updates", [
-    {"agent.auto_routing": False},
-    {"backend.api_mode": "responses"},
-])
-def test_preflight_skips_a_bad_prompt_when_auto_is_unavailable(updates):
-    from gc_core.auto_routing.pair_judge import require_prompt
-    from gc_core.auto_routing.policy import RoutingParams
-
-    require_prompt(_preflight_settings(**updates), RoutingParams(safe_level="auto"))

@@ -46,7 +46,6 @@ from gc_core.startup_notices import auto_routing_unavailable_notice
 from gc_core.tools import abuild_tools_data
 from gc_core.auto_routing.levels import auto_available, effective_level, resolve_routing_params
 from gc_core.auto_routing.policy import RoutingParams
-from gc_core.auto_routing.pair_judge import require_prompt as require_pair_judge_prompt
 from gc_core.settings import settings_of
 from gc_core.tools.skills.registry import SkillsRegistry
 from gc_core.trace_id import trace_header_name, trace_id_from_config
@@ -396,12 +395,6 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
         check_agent_store(agent_store)
 
     source = _coerce_settings(settings, runtime)
-    selected_level = level_provider() if level_provider is not None else settings_of(source).level
-    if selected_level == "auto":
-        require_pair_judge_prompt(
-            source, resolve_routing_params(source),
-            store=agent_store or DEFAULT_AGENT_STORE, force_legacy=force_legacy,
-        )
     prep = _prepare_run_context(
         source,
         run_id=run_id,

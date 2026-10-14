@@ -8,12 +8,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, Optional
 
-from gc_core.agent_store import (
-    DEFAULT_AGENT_STORE, AgentResource, AgentStore, read_required_text,
-)
-from gc_core.auto_routing.policy import (
-    PAIR_SCORE_MAX, PAIR_SCORE_MIN, SAFE_LEVEL_AUTO, RoutingParams,
-)
+from gc_core.auto_routing.policy import PAIR_SCORE_MAX, PAIR_SCORE_MIN
 from gc_core.auto_routing.turn_text import task_text
 from gc_core.bundled_assets import bundled_root
 from gc_core.constants.tool_names import FINISH_TOOL_NAME
@@ -41,39 +36,12 @@ def __getattr__(name: str):
     raise AttributeError(name)
 
 
-PROMPT_PATH_KEY = "chat_completions_routing_pair_judge_prompt_path"
-
-
 def prompt_path(source: Any) -> str:
     """Путь инструкции судьи пары: из конфига (`paths.…`), иначе встроенный."""
     from gc_core.settings import settings_of
 
     return settings_of(source).paths.chat_completions_routing_pair_judge_prompt_path or default_pair_judge_prompt_path()
 
-
-def require_prompt(
-    source: Any,
-    params: RoutingParams,
-    *,
-    store: AgentStore = DEFAULT_AGENT_STORE,
-    force_legacy: bool = False,
-) -> None:
-    """Проверить ресурс судьи пары до старта локального контекста, если auto доступен."""
-    from gc_core.auto_routing.levels import auto_available
-
-    if params.safe_level != SAFE_LEVEL_AUTO or not auto_available(source, force_legacy=force_legacy):
-        return
-    path = prompt_path(source)
-    missing = (f"инструкция судьи пары не найдена: {path} "
-               f"(paths.{PROMPT_PATH_KEY}, нужна при auto_routing_safe_level: auto)")
-    try:
-        text = read_required_text(
-            store, AgentResource("prompt", "routing_pair_judge", path), missing=missing,
-        )
-    except FileNotFoundError as exc:
-        raise ValueError(str(exc)) from None
-    if not text.strip():
-        raise ValueError(f"инструкция судьи пары пуста: {path} (paths.{PROMPT_PATH_KEY})")
 
 _FENCED_OBJECT = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
 

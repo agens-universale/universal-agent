@@ -24,6 +24,7 @@ from gc_core.auto_routing.pair_judge import (
 from gc_core.auto_routing.policy import (
     PAIR_FALLBACK_LEVEL, RoutingParams, pair_levels, pair_safe_level,
 )
+from gc_core.runtime_notices import maybe_push_pair_prompt_notice
 from gc_core.settings import settings_of
 from gc_core.summarize.llm import (
     arequest_auxiliary_completion_text,
@@ -64,15 +65,23 @@ async def arun_pair_judge(state: Any, ctx: Any, *, params: RoutingParams, mid_tu
     choice = PairChoice(PAIR_FALLBACK_LEVEL, None, "", SOURCE_FALLBACK, None)
     try:
         card = build_pair_card(state, legacy=not getattr(ctx, "routing_contract_v2", True))
-        system_prompt = await aload_prompt_resource(
-            ctx, PromptResourceRequest(
-                "routing_pair_judge",
-                path=settings_of(ctx).paths.chat_completions_routing_pair_judge_prompt_path,
-            ),
-            local=lambda: _load_judge_prompt(
-                pair_prompt_path(ctx), store=agent_store_of(ctx),
-            ),
-        )
+        try:
+            system_prompt = await aload_prompt_resource(
+                ctx, PromptResourceRequest(
+                    "routing_pair_judge",
+                    path=settings_of(ctx).paths.chat_completions_routing_pair_judge_prompt_path,
+                ),
+                local=lambda: _load_judge_prompt(
+                    pair_prompt_path(ctx), store=agent_store_of(ctx),
+                ),
+            )
+        except (FileNotFoundError, ValueError) as exc:
+            path = pair_prompt_path(ctx)
+            logger.warning(f"routing pair judge prompt unusable: {path}: {exc}")
+            maybe_push_pair_prompt_notice(
+                path=path, reason=str(exc), enabled=bool(getattr(ctx, "is_tui", False)),
+            )
+            raise
         raw = await arequest_auxiliary_completion_text(
             ctx=ctx,
             state=state,

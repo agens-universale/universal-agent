@@ -479,7 +479,7 @@ async def test_create_run_context_uses_the_virtual_pair_prompt_store(minimal_set
     ctx = await rc.acreate_run_context(cfg, agent_store=store)
     assert ctx.agent_store is store
     assert ctx.auto_available is True
-    assert ("prompt", "routing_pair_judge") in store.reads
+    assert ("prompt", "routing_pair_judge") not in store.reads
 
 
 @pytest.mark.parametrize("updates,force_legacy", [
@@ -500,14 +500,14 @@ async def test_create_run_context_skips_irrelevant_bad_pair_prompt(minimal_setti
     assert ctx.auto_available is False
 
 
-@pytest.mark.parametrize("source_level,selected_level,refused", [
-    ("default", None, False),
-    ("default", "default", False),
-    ("auto", "default", False),
-    ("auto", None, True),
-    ("default", "auto", True),
+@pytest.mark.parametrize("source_level,selected_level", [
+    ("default", None),
+    ("default", "default"),
+    ("auto", "default"),
+    ("auto", None),
+    ("default", "auto"),
 ])
-async def test_pair_prompt_preflight_follows_the_selected_mode(minimal_settings, source_level, selected_level, refused):
+async def test_a_missing_pair_prompt_never_refuses_the_start(minimal_settings, source_level, selected_level):
     from gc_testkit.memory_agent_store import MemoryAgentStore
 
     cfg = minimal_settings.with_overrides({
@@ -521,10 +521,6 @@ async def test_pair_prompt_preflight_follows_the_selected_mode(minimal_settings,
     kwargs = {"agent_store": store}
     if selected_level is not None:
         kwargs["level_provider"] = lambda: selected_level
-    if refused:
-        with pytest.raises(ValueError, match="missing-pair-prompt.md"):
-            await rc.acreate_run_context(cfg, **kwargs)
-    else:
-        ctx = await rc.acreate_run_context(cfg, **kwargs)
-        assert ctx.model_router.live_level() == (selected_level or source_level)
-        assert ("prompt", "routing_pair_judge") not in store.reads
+    ctx = await rc.acreate_run_context(cfg, **kwargs)
+    assert ctx.model_router.live_level() == (selected_level or source_level)
+    assert ("prompt", "routing_pair_judge") not in store.reads

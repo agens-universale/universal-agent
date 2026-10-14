@@ -157,3 +157,26 @@ def test_worker_resource_loader_reads_the_configured_pair_prompt(tmp_path):
     own.write_text("Configured worker pair prompt.", encoding="utf-8")
     ctx = fake_ctx({"paths.chat_completions_routing_pair_judge_prompt_path": str(own)})
     assert load_prompt_resource(PromptResourceRequest("routing_pair_judge"), ctx=ctx) == "Configured worker pair prompt."
+
+
+@pytest.mark.parametrize("content", [None, "  \n"])
+def test_a_missing_or_empty_prompt_is_the_hard_pair_with_a_warning(monkeypatch, tmp_path, content):
+    """Сломанный путь к инструкции судьи — сбой судьи: верхняя пара и видимое
+    предупреждение с путём (спека PR140 Р7), а не отказ запуска."""
+    from gc_core import runtime_notices
+
+    prompt = tmp_path / "pair.md"
+    if content is not None:
+        prompt.write_text(content, encoding="utf-8")
+    pushed, warned = [], []
+    monkeypatch.setattr(runtime_notices, "push_runtime_notice", pushed.append)
+    _stub_backend(monkeypatch, '{"score": 2, "reason": "x"}')
+    ctx = _ctx([])
+    ctx.is_tui = True
+    ctx.logger = SimpleNamespace(info=lambda *a, **k: None,
+                                 warning=lambda msg, *a, **k: warned.append(msg))
+    update_ctx(ctx, {"paths.chat_completions_routing_pair_judge_prompt_path": str(prompt)})
+    choice = run_coro(judge_runner.arun_pair_judge(_state(), ctx, params=PARAMS, mid_turn=False))
+    assert choice.safe_level == "max" and choice.source == "fallback"
+    assert any(str(prompt) in n.message for n in pushed)
+    assert any(str(prompt) in w for w in warned)
