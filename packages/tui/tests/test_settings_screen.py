@@ -5840,3 +5840,51 @@ async def test_modes_write_to_the_project_config_survives_a_packaged_base(
         assert 'finish_gate_mode: "off"' in packaged.read_text(
             encoding="utf-8"
         )
+
+
+async def test_level_cycle_in_settings_never_writes_auto_when_only_the_session_profile_allows_it(
+    tmp_path, monkeypatch
+):
+    """Спека PR140 Р4: база без пары моделей, профиль сессии с парой. Палитра
+    видит `auto`, но Settings правит базу: ←/→ по всему кругу не предлагает
+    `auto` и не пишет его в файл."""
+    pytest.importorskip("textual")
+    import yaml
+
+    monkeypatch.chdir(tmp_path)
+    profile = tmp_path / "profiles" / "pair.yml"
+    profile.parent.mkdir(parents=True)
+    profile.write_text(
+        yaml.safe_dump(
+            {
+                "models": {
+                    "fast": {"url": "http://fast/v1/chat/completions", "token": ""},
+                    "mid": {"url": "http://mid/v1/chat/completions", "token": ""},
+                },
+                "slots": {"light": "fast", "default": "mid"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    app, cfg_file = _app_with_config(
+        tmp_path,
+        'backend:\n  api_mode: chat_completions\n'
+        '  completions_url: "http://base/v1/chat/completions"\n'
+        'level: "default"\n',
+    )
+    app.switch_session_profile("pair")
+    from gc_tui.toggles import effective_toggle_names
+
+    assert "auto" in effective_toggle_names(app, "level")  # сессия его видит
+    async with app.run_test() as pilot:
+        scr = await _open_modes_section(pilot)
+        scr._modes_idx = modes_row_index("level")
+        written = []
+        for key in ("right",) * 5 + ("left",) * 5:
+            await pilot.press(key)
+            await pilot.pause(0.1)
+            written.append(
+                yaml.safe_load(cfg_file.read_text(encoding="utf-8")).get("level")
+            )
+        assert "auto" not in written
+        assert set(written) >= {"light", "default", "max"}
