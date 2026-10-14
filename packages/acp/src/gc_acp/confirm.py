@@ -14,6 +14,7 @@ from gc_core.security.confirm_port import (
     CONFIRM_ALLOW_REMEMBER,
     CONFIRM_DENY_ONCE,
     CONFIRM_DENY_REMEMBER,
+    CONFIRM_TIMED_OUT,
 )
 
 from gc_acp.protocol import PARSE_ERROR, Incoming
@@ -109,23 +110,25 @@ def permission_message(
 
 
 def choice_from_incoming(incoming: Incoming) -> str:
-    """Ответ клиента → choice. Всё неясное — ``deny_once``."""
+    """Ответ клиента → choice.
+
+    Явные четыре optionId пишутся в стор. Отмена, ошибка JSON-RPC и
+    неизвестный optionId — отказ без записи, как голый таймаут: человек
+    reject_once не выбирал.
+    """
     if incoming.has_error or incoming.parse_error:
-        return CONFIRM_DENY_ONCE
+        return CONFIRM_TIMED_OUT
     result = incoming.result
     if not isinstance(result, dict):
-        return CONFIRM_DENY_ONCE
+        return CONFIRM_TIMED_OUT
     outcome = result.get("outcome")
     if not isinstance(outcome, dict):
-        return CONFIRM_DENY_ONCE
-    kind = outcome.get("outcome")
-    if kind == "cancelled":
-        return CONFIRM_DENY_ONCE
-    if kind != "selected":
-        return CONFIRM_DENY_ONCE
+        return CONFIRM_TIMED_OUT
+    if outcome.get("outcome") != "selected":
+        return CONFIRM_TIMED_OUT
     mapped = _OPTION_TO_CHOICE.get(outcome.get("optionId"))
     if mapped is None:
-        return CONFIRM_DENY_ONCE
+        return CONFIRM_TIMED_OUT
     return mapped
 
 

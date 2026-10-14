@@ -186,7 +186,7 @@ async def test_option_id_wins_over_distorted_kind(
         {"outcome": "selected"},
     ],
 )
-async def test_fail_closed_outcomes_deny_once(tmp_path, result):
+async def test_fail_closed_outcomes_do_not_cache(tmp_path, result):
     facade, writer, agent, _session_id, store = await _ready(tmp_path)
     key = "read:/tmp/a"
 
@@ -198,7 +198,73 @@ async def test_fail_closed_outcomes_deny_once(tmp_path, result):
     task = asyncio.create_task(reply())
     assert await _ask(agent.executor._ctx, key) is False
     await task
+    assert store.decision_for(key) is None
+    assert key not in store.export_run_rules()
     assert key not in store.session_rules()
+    await facade.shutdown()
+
+
+@pytest.mark.parametrize(
+    "reply_with",
+    ["cancelled", "method_not_found"],
+)
+async def test_unclear_reply_asks_the_same_key_again(tmp_path, reply_with):
+    facade, writer, agent, _session_id, store = await _ready(tmp_path)
+    key = "command:ls"
+
+    async def reply():
+        msg = await _wait_permission(writer)
+        if reply_with == "cancelled":
+            line = _response(msg["id"], {"outcome": {"outcome": "cancelled"}})
+        else:
+            line = _response(
+                msg["id"],
+                error={"code": -32601, "message": "Method not found"},
+            )
+        await facade.handle_line(line)
+
+    task = asyncio.create_task(reply())
+    assert await _ask(agent.executor._ctx, key) is False
+    await task
+    assert store.decision_for(key) is None
+    assert key not in store.export_run_rules()
+
+    async def allow():
+        for _ in range(200):
+            found = _permission_calls(writer)
+            if len(found) >= 2:
+                await facade.handle_line(
+                    _response(found[-1]["id"], _selected("allow_once"))
+                )
+                return
+            await asyncio.sleep(0.01)
+        raise AssertionError(writer.sent)
+
+    again = asyncio.create_task(allow())
+    assert await _ask(agent.executor._ctx, key) is True
+    await again
+    assert len(_permission_calls(writer)) == 2
+    await facade.shutdown()
+
+
+async def test_reject_once_still_records_run_rule(tmp_path):
+    facade, writer, agent, _session_id, store = await _ready(tmp_path)
+    key = "command:ls"
+
+    async def reply():
+        msg = await _wait_permission(writer)
+        await facade.handle_line(
+            _response(msg["id"], _selected("reject_once"))
+        )
+
+    task = asyncio.create_task(reply())
+    assert await _ask(agent.executor._ctx, key) is False
+    await task
+    assert store.decision_for(key) is False
+    assert store.export_run_rules()[key] is False
+    assert key not in store.session_rules()
+    assert await _ask(agent.executor._ctx, key) is False
+    assert len(_permission_calls(writer)) == 1
     await facade.shutdown()
 
 
