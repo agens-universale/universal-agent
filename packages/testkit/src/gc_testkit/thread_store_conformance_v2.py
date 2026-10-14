@@ -260,6 +260,54 @@ async def check_release(store: ThreadStore, _clock: FakeClock) -> None:
     _expect(again.epoch == lease.epoch + 1, "эпоха переживает release")
 
 
+async def check_expired_lease_rejected_without_takeover(store, clock):
+    lease = await _claim(store, owner="a")
+    clock.advance(MINUTE + timedelta(seconds=1))
+    await _raises(
+        OwnershipError,
+        store.commit(KEY, _change("op", 0, lease, append_messages=_msgs("a"))),
+        "истёкшая аренда, даже если её никто не забрал",
+    )
+
+
+async def check_commit_with_pre_extension_lease(store, clock) -> None:
+    first = await _claim(store, owner="a")
+    clock.advance(timedelta(seconds=30))
+    await _claim(store, owner="a")
+    clock.advance(timedelta(seconds=40))
+    # Срок считает хранилище по своей аренде, а не по копии у вызывающего.
+    await store.commit(
+        KEY, _change("op", 0, first, append_messages=_msgs("a"))
+    )
+
+
+async def check_lease_checked_before_revision(store, clock) -> None:
+    old = await _claim(store, owner="a")
+    await store.commit(KEY, _change("op1", 0, old, append_messages=_msgs("a")))
+    clock.advance(MINUTE + timedelta(seconds=1))
+    await _claim(store, owner="b")
+    await _raises(
+        OwnershipError,
+        store.commit(KEY, _change("op2", 0, old, append_messages=_msgs("x"))),
+        "чужая аренда важнее устаревшей ревизии",
+    )
+
+
+async def check_epoch_survives_delete(store, _clock: FakeClock) -> None:
+    old = await _claim(store, owner="a")
+    await store.delete(KEY, op_id="d")
+    again = await _claim(store, owner="a")
+    _expect(again.epoch > old.epoch, "эпоха переживает delete")
+    await _raises(
+        OwnershipError,
+        store.commit(
+            KEY, _change("ghost", 0, old, append_messages=_msgs("g"))
+        ),
+        "запись по аренде удалённого треда",
+    )
+    _expect(await _ids(store) == [], "призрачная запись не прошла")
+
+
 async def check_untimed_lease(store: ThreadStore, clock: FakeClock) -> None:
     lease = await _claim(store, owner="wf", ttl=None)
     _expect(lease.expires_at is None, "ttl=None — бессрочная аренда")
@@ -365,7 +413,10 @@ async def check_discard_message(store: ThreadStore, _clock: FakeClock) -> None:
 async def check_reset_history(store: ThreadStore, _clock: FakeClock) -> None:
     lease = await _claim(store)
     await store.commit(
-        KEY, _change("op1", 0, lease, append_messages=_msgs("a"))
+        KEY, _change("op1", 0, lease, append_messages=_msgs("a", "b"))
+    )
+    await store.append_side(
+        KEY, SideChange(op_id="s", append=[("edits", [{"e": 1}])])
     )
     before = await store.get_thread(KEY)
     await store.commit(KEY, _change("op2", 1, lease, reset_history=True))
@@ -377,6 +428,68 @@ async def check_reset_history(store: ThreadStore, _clock: FakeClock) -> None:
         "history_version + 1",
     )
     _expect(after.lease is None, "сброс снимает аренду")
+    _expect(
+        len(await store.read_stream(KEY, "edits")) == 1,
+        "сброс истории не трогает другие потоки",
+    )
+    again = await _claim(store)
+    await store.commit(
+        KEY, _change("op3", 2, again, append_messages=_msgs("c"))
+    )
+    entries = await store.read_stream(KEY, "messages")
+    _expect([e.seq for e in entries] == [1], "после сброса нумерация с 1")
+
+
+async def check_commit_applies_in_order(store, _clock: FakeClock) -> None:
+    lease = await _claim(store)
+    await store.commit(
+        KEY, _change("op1", 0, lease, append_messages=_msgs("a"))
+    )
+    await store.commit(
+        KEY,
+        _change(
+            "op2", 1, lease, reset_history=True, append_messages=_msgs("z")
+        ),
+    )
+    entries = await store.read_stream(KEY, "messages")
+    _expect(
+        [(e.seq, e.data["id"]) for e in entries] == [(1, "z")],
+        "порядок в commit: сброс, замена, удаление, дописывание",
+    )
+
+
+async def check_replace_without_archive(store, _clock: FakeClock) -> None:
+    lease = await _claim(store)
+    await store.commit(
+        KEY, _change("op1", 0, lease, append_messages=_msgs("a", "b"))
+    )
+    replace = Compaction(messages=_msgs("s"), archive=False)
+    receipt = await store.commit(
+        KEY, _change("op2", 1, lease, replace_history=replace)
+    )
+    record = await store.get_thread(KEY)
+    _expect(receipt.archive_id is None, "archive=False — без архива")
+    _expect(record.archives == [], "архивов не прибавилось")
+    _expect(await _ids(store) == ["s"], "история заменена")
+
+
+async def check_seq_never_reused(store: ThreadStore, _clock: FakeClock):
+    lease = await _claim(store)
+    await store.commit(
+        KEY, _change("op1", 0, lease, append_messages=_msgs("m1", "m2", "m3"))
+    )
+    await store.commit(
+        KEY, _change("op2", 1, lease, discard_message_ids=["m3"])
+    )
+    await store.commit(
+        KEY, _change("op3", 2, lease, append_messages=_msgs("m4"))
+    )
+    tail = await store.read_stream(KEY, "messages", after_seq=3)
+    _expect(
+        [(e.seq, e.data["id"]) for e in tail] == [(4, "m4")],
+        "seq удалённого хвоста не переиспользуется: читатель с курсора 3 "
+        "иначе потерял бы m4",
+    )
 
 
 # --- запись сбоку ---------------------------------------------------------------
@@ -414,12 +527,20 @@ async def check_side_creates_thread(store: ThreadStore, _clock: FakeClock):
     _expect(len(await store.read_stream(KEY, "inbox")) == 1, "inbox записан")
 
 
-async def check_side_cannot_touch_messages(_store, _clock: FakeClock) -> None:
-    try:
-        SideChange(op_id="s", append=[("messages", [{"id": "x"}])])
-    except ValueError:
-        return
-    raise ConformanceError("историю треда пишет только commit")
+async def check_side_cannot_touch_messages(store, _clock: FakeClock) -> None:
+    # Модель SideChange такое не пропустит; хранилище обязано отказать и
+    # само — его зовут и мимо модели (прокси, model_construct).
+    bypass = SideChange.model_construct(
+        op_id="s",
+        set_runtime=None,
+        set_frontend=None,
+        append=[("messages", [{"id": "x"}])],
+        add_aliases=[],
+    )
+    await _raises(
+        ValueError, store.append_side(KEY, bypass), "история через append_side"
+    )
+    _expect(await _ids(store) == [], "отвергнутая запись ничего не пишет")
 
 
 async def check_frontend_streams(
@@ -447,6 +568,97 @@ async def check_aliases(store: ThreadStore, _clock: FakeClock) -> None:
     _expect(await store.resolve_alias("resp_2") == KEY, "алиас из append_side")
     await store.delete(KEY, op_id="d")
     _expect(await store.resolve_alias("resp_1") is None, "delete сносит алиас")
+
+
+async def check_alias_collision(store, _clock: FakeClock) -> None:
+    lease = await _claim(store)
+    await store.commit(KEY, _change("op", 0, lease, add_aliases=["resp_1"]))
+    other = ThreadKey(system="cli", thread="other")
+    other_lease = await _claim(store, key=other)
+    await _raises(
+        ValueError,
+        store.commit(
+            other,
+            _change(
+                "op",
+                0,
+                other_lease,
+                add_aliases=["resp_1"],
+                append_messages=_msgs("x"),
+            ),
+        ),
+        "алиас чужого треда",
+    )
+    _expect(await store.resolve_alias("resp_1") == KEY, "алиас не угнан")
+    record = await store.get_thread(other)
+    _expect(record.revision == 0, "отвергнутый commit ничего не пишет")
+
+
+async def check_op_id_shared_by_commit_and_side(store, _clock) -> None:
+    lease = await _claim(store)
+    await store.commit(KEY, _change("x", 0, lease, append_messages=_msgs("a")))
+    await _raises(
+        OperationMismatch,
+        store.append_side(KEY, SideChange(op_id="x")),
+        "op_id треда общий у commit и append_side",
+    )
+
+
+async def check_side_receipt_has_no_lease(store, _clock: FakeClock) -> None:
+    await _claim(store, owner="a")
+    receipt = await store.append_side(KEY, SideChange(op_id="s"))
+    _expect(
+        receipt.lease is None, "квитанция append_side не раскрывает аренду"
+    )
+
+
+async def check_set_info_replaces(store, _clock: FakeClock) -> None:
+    lease = await _claim(store)
+    await store.commit(
+        KEY, _change("op1", 0, lease, set_info=ThreadInfo(workspace="/w"))
+    )
+    await store.commit(
+        KEY, _change("op2", 1, lease, set_info=ThreadInfo(title="t"))
+    )
+    info = (await store.get_thread(KEY)).info
+    _expect(info.title == "t", "set_info записан")
+    _expect(info.workspace is None, "set_* заменяет целиком, а не сливает")
+
+
+async def check_updated_at_only_on_commit(store, clock: FakeClock) -> None:
+    lease = await _claim(store)
+    await store.commit(
+        KEY, _change("op1", 0, lease, append_messages=_msgs("a"))
+    )
+    stamp = (await store.get_thread(KEY)).info.updated_at
+    clock.advance(timedelta(seconds=5))
+    await store.append_side(
+        KEY,
+        SideChange(op_id="s", set_runtime=RuntimeStatus(turn="running")),
+    )
+    await _claim(store)
+    _expect(
+        (await store.get_thread(KEY)).info.updated_at == stamp,
+        "append_side и claim не двигают updated_at",
+    )
+    await store.commit(
+        KEY, _change("op2", 1, lease, append_messages=_msgs("b"))
+    )
+    _expect(
+        (await store.get_thread(KEY)).info.updated_at != stamp,
+        "commit двигает updated_at",
+    )
+
+
+async def check_stored_data_is_isolated(store, _clock: FakeClock) -> None:
+    lease = await _claim(store)
+    sent = _msgs("a")
+    await store.commit(KEY, _change("op", 0, lease, append_messages=sent))
+    sent[0]["content"] = "испорчено снаружи"
+    read = await store.read_stream(KEY, "messages")
+    read[0].data["content"] = "испорчено читателем"
+    again = await store.read_stream(KEY, "messages")
+    _expect(again[0].data["content"] == "текст a", "данные изолированы")
 
 
 async def check_blobs(store: ThreadStore, _clock: FakeClock) -> None:
@@ -516,16 +728,17 @@ async def check_delete(store: ThreadStore, _clock: FakeClock) -> None:
 
 async def check_prune_receipts(store: ThreadStore, clock: FakeClock) -> None:
     lease = await _claim(store, ttl=None)
-    change = _change("op1", 0, lease, append_messages=_msgs("a"))
-    await store.commit(KEY, change)
+    old = _change("op1", 0, lease, append_messages=_msgs("a"))
+    await store.commit(KEY, old)
     clock.advance(timedelta(days=8))
+    fresh = _change("op2", 1, lease, append_messages=_msgs("b"))
+    receipt = await store.commit(KEY, fresh)
     pruned = await store.prune_receipts(timedelta(days=7))
-    _expect(pruned >= 1, "старая квитанция удаляется")
+    _expect(pruned == 1, "удаляется ровно старая квитанция")
+    _expect(await store.commit(KEY, fresh) == receipt, "свежая живёт")
     # Квитанции нет — повтор защищает ревизия, а не тихая повторная запись.
-    await _raises(
-        ThreadConflict, store.commit(KEY, change), "повтор после prune"
-    )
-    _expect(await _ids(store) == ["a"], "история не задвоилась")
+    await _raises(ThreadConflict, store.commit(KEY, old), "повтор после prune")
+    _expect(await _ids(store) == ["a", "b"], "история не задвоилась")
 
 
 async def check_watch_default(store: ThreadStore, _clock: FakeClock) -> None:
@@ -556,6 +769,40 @@ async def check_watch_default(store: ThreadStore, _clock: FakeClock) -> None:
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
     _expect(seen == [1, 2], "watch отдаёт новые записи по порядку")
+
+
+async def check_watch_across_replace(store, _clock: FakeClock) -> None:
+    lease = await _claim(store)
+    await store.commit(
+        KEY, _change("op1", 0, lease, append_messages=_msgs("m1", "m2"))
+    )
+    seen: list[str] = []
+
+    async def consume():
+        async for entry in store.watch(
+            KEY, "messages", after_seq=2, poll_interval=0
+        ):
+            seen.append(entry.data["id"])
+
+    async def until(count: int) -> None:
+        while len(seen) < count:
+            await asyncio.sleep(0)
+
+    task = asyncio.create_task(consume())
+    try:
+        await asyncio.sleep(0)
+        summary = Compaction(messages=_msgs("s1"), archive=True)
+        await store.commit(
+            KEY, _change("op2", 1, lease, replace_history=summary)
+        )
+        await asyncio.wait_for(until(1), _WAIT)
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+    _expect(
+        seen == ["s1"],
+        "после замены истории watch начинает новую историю с начала",
+    )
 
 
 CHECKS: tuple[Callable[..., Awaitable[None]], ...] = (
@@ -589,6 +836,20 @@ CHECKS: tuple[Callable[..., Awaitable[None]], ...] = (
     check_delete,
     check_prune_receipts,
     check_watch_default,
+    check_watch_across_replace,
+    check_expired_lease_rejected_without_takeover,
+    check_commit_with_pre_extension_lease,
+    check_lease_checked_before_revision,
+    check_epoch_survives_delete,
+    check_commit_applies_in_order,
+    check_replace_without_archive,
+    check_seq_never_reused,
+    check_alias_collision,
+    check_op_id_shared_by_commit_and_side,
+    check_side_receipt_has_no_lease,
+    check_set_info_replaces,
+    check_updated_at_only_on_commit,
+    check_stored_data_is_isolated,
 )
 
 

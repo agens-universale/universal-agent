@@ -72,3 +72,35 @@ def test_models_are_frozen():
     key = ThreadKey(system="cli", thread="t")
     with pytest.raises(ValidationError):
         key.thread = "u"
+
+
+_DIGEST_SCRIPT = """
+from gc_core.threads.models import RuntimeStatus, SideChange, change_digest
+flags = frozenset({"summarizing", "finalizing", "finish_gate_checking"})
+side = SideChange(op_id="s", set_runtime=RuntimeStatus(flags=flags))
+print(change_digest(side))
+"""
+
+
+def test_change_digest_is_stable_across_processes():
+    # Порядок обхода frozenset зависит от PYTHONHASHSEED: повтор операции на
+    # другом инстансе обязан дать тот же отпечаток, иначе OperationMismatch.
+    import os
+    import subprocess
+    import sys
+
+    digests = {
+        subprocess.run(
+            [sys.executable, "-c", _DIGEST_SCRIPT],
+            env={**os.environ, "PYTHONHASHSEED": str(seed)},
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        for seed in (1, 2, 3, 4)
+    }
+    assert len(digests) == 1
+
+
+def test_query_system_is_normalized_like_key():
+    assert ThreadQuery(system=" CLI ").system == "cli"

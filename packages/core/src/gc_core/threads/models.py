@@ -21,6 +21,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    field_serializer,
     field_validator,
 )
 
@@ -129,6 +130,13 @@ class RuntimeStatus(_OpenModel):
     live_history_chars: int | None = None
     mcp_tools: Any = None
     trace_ids: list[str] | None = None
+
+    @field_serializer("flags")
+    def _sorted_flags(self, flags: frozenset[str]) -> list[str]:
+        # Порядок обхода frozenset зависит от PYTHONHASHSEED: без сортировки
+        # отпечаток операции (change_digest) разный в разных процессах, и
+        # повтор на другом инстансе получил бы OperationMismatch.
+        return sorted(flags)
 
 
 class LeaseRequest(_Model):
@@ -253,6 +261,11 @@ class ThreadQuery(_Model):
     updated_after: str | None = None
     cursor: str | None = None
     limit: int = Field(default=100, ge=1, le=1000)
+
+    @field_validator("system")
+    @classmethod
+    def _system(cls, value: str | None) -> str | None:
+        return None if value is None else sanitize_system_id(value)
 
 
 T = TypeVar("T")

@@ -107,6 +107,9 @@ IGNORE_DECORATORS = [
     "@field_validator",
     "@model_validator",
     "@*validator",
+    # Сериализаторы pydantic, как и валидаторы, зовёт сама модель.
+    "@field_serializer",
+    "@model_serializer",
     "@computed_field",
     "@*.on_event",
     "@*.get",

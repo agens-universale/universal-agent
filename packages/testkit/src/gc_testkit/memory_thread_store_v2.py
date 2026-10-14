@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import copy
 import hashlib
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -65,6 +66,9 @@ class _Thread:
     lease: Lease | None = None
     epoch: int = 0
     updated_at: str = ""
+    #: Последний выданный seq каждого потока: удалённый хвост не освобождает
+    #: номер, иначе читатель с курсора пропустил бы следующую запись.
+    high: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -74,16 +78,19 @@ class _Stored:
     at: datetime
 
 
-def _max_seq(entries: list[StreamEntry]) -> int:
-    return max((e.seq for e in entries), default=0)
+def _instant(stamp: str | None) -> datetime:
+    """Момент времени из ISO-8601 (``Z`` или смещение); пусто — самое раннее."""
+    if not stamp:
+        return datetime.min.replace(tzinfo=UTC)
+    return datetime.fromisoformat(stamp)
 
 
 def _after_cursor(record: ThreadRecord, cursor: str) -> bool:
     """Идёт ли запись после курсора в порядке (updated_at ↓, system, thread)."""
     updated, system, thread = cursor.split("|", 2)
-    mine = record.info.updated_at or ""
-    if mine != updated:
-        return mine < updated
+    mine, theirs = _instant(record.info.updated_at), _instant(updated)
+    if mine != theirs:
+        return mine < theirs
     return (record.key.system, record.key.thread) > (system, thread)
 
 
@@ -96,7 +103,8 @@ class MemoryThreadStore(ThreadStore):
         self._receipts: dict[tuple[ThreadKey, str], _Stored] = {}
         self._aliases: dict[str, ThreadKey] = {}
         self._blobs: dict[tuple[ThreadKey, str], bytes] = {}
-        self._tombstones: dict[ThreadKey, int] = {}
+        #: Удалённые треды: (generation, epoch) — фенсинг переживает delete.
+        self._tombstones: dict[ThreadKey, tuple[int, int]] = {}
 
     # --- внутреннее ----------------------------------------------------------
 
@@ -112,10 +120,12 @@ class MemoryThreadStore(ThreadStore):
         thread = self._threads.get(key)
         if thread is None:
             now = self._now()
+            generation, epoch = self._tombstones.get(key, (0, 0))
             thread = _Thread(
                 created_at=now,
                 updated_at=now,
-                generation=self._tombstones.get(key, 0),
+                generation=generation,
+                epoch=epoch,
             )
             self._threads[key] = thread
         return thread
@@ -132,19 +142,15 @@ class MemoryThreadStore(ThreadStore):
         return ThreadRecord(
             key=key,
             info=info,
-            state=thread.state,
-            usage=thread.usage,
-            runtime=thread.runtime,
-            frontend=dict(thread.frontend),
+            state=thread.state.model_copy(deep=True),
+            usage=thread.usage.model_copy(deep=True),
+            runtime=thread.runtime.model_copy(deep=True),
+            frontend=copy.deepcopy(thread.frontend),
             archives=list(thread.archives),
             revision=thread.revision,
             generation=thread.generation,
             history_version=thread.history_version,
-            max_seq={
-                name: _max_seq(entries)
-                for name, entries in thread.streams.items()
-                if entries
-            },
+            max_seq={n: seq for n, seq in thread.high.items() if seq},
             lease=thread.lease,
         )
 
@@ -155,7 +161,6 @@ class MemoryThreadStore(ThreadStore):
             generation=thread.generation,
             history_version=thread.history_version,
             max_seq=self._record(key, thread).max_seq,
-            lease=thread.lease,
             **extra,
         )
 
@@ -186,13 +191,17 @@ class MemoryThreadStore(ThreadStore):
 
     def _append(self, thread: _Thread, stream: str, items) -> None:
         entries = thread.streams.setdefault(stream, [])
-        seq, now = _max_seq(entries), self._now()
+        seq, now = thread.high.get(stream, 0), self._now()
         for item in items:
             seq += 1
-            entries.append(StreamEntry(seq=seq, ts=now, data=item))
+            entries.append(
+                StreamEntry(seq=seq, ts=now, data=copy.deepcopy(item))
+            )
+        thread.high[stream] = seq
 
     def _renumber(self, thread: _Thread, items) -> None:
         thread.streams[_HISTORY] = []
+        thread.high[_HISTORY] = 0
         self._append(thread, _HISTORY, items)
         thread.history_version += 1
 
@@ -232,11 +241,11 @@ class MemoryThreadStore(ThreadStore):
 
     def _apply_sets(self, thread: _Thread, change: ThreadChange) -> None:
         if change.set_state is not None:
-            thread.state = change.set_state
+            thread.state = change.set_state.model_copy(deep=True)
         if change.set_usage is not None:
-            thread.usage = change.set_usage
+            thread.usage = change.set_usage.model_copy(deep=True)
         if change.set_info is not None:
-            thread.info = change.set_info
+            thread.info = change.set_info.model_copy(deep=True)
 
     def _apply(self, key: ThreadKey, thread: _Thread, change: ThreadChange):
         if change.reset_history:
@@ -252,6 +261,15 @@ class MemoryThreadStore(ThreadStore):
         for alias in aliases:
             self._aliases[alias] = key
 
+    def _check_aliases(self, key: ThreadKey, aliases: list[str]) -> None:
+        for alias in aliases:
+            owner = self._aliases.get(alias)
+            if owner is not None and owner != key:
+                raise ValueError(
+                    f"алиас {alias!r} принадлежит треду "
+                    f"{owner.system}/{owner.thread}"
+                )
+
     # --- чтение --------------------------------------------------------------
 
     async def get_thread(self, key: ThreadKey) -> ThreadRecord | None:
@@ -262,7 +280,7 @@ class MemoryThreadStore(ThreadStore):
         records = [self._record(k, t) for k, t in self._threads.items()]
         records = [r for r in records if self._matches(r, query)]
         records.sort(key=lambda r: (r.key.system, r.key.thread))
-        records.sort(key=lambda r: r.info.updated_at or "", reverse=True)
+        records.sort(key=lambda r: _instant(r.info.updated_at), reverse=True)
         if query.cursor:
             records = [r for r in records if _after_cursor(r, query.cursor)]
         page = records[: query.limit]
@@ -276,13 +294,14 @@ class MemoryThreadStore(ThreadStore):
 
     @staticmethod
     def _matches(record: ThreadRecord, query: ThreadQuery) -> bool:
-        updated = record.info.updated_at or ""
+        updated = _instant(record.info.updated_at)
+        after, before = query.updated_after, query.updated_before
         checks = (
             query.system is None or record.key.system == query.system,
             query.workspace is None
             or record.info.workspace == query.workspace,
-            query.updated_after is None or updated > query.updated_after,
-            query.updated_before is None or updated < query.updated_before,
+            after is None or updated > _instant(after),
+            before is None or updated < _instant(before),
         )
         return all(checks)
 
@@ -297,14 +316,15 @@ class MemoryThreadStore(ThreadStore):
         check_stream_name(stream)
         thread = self._threads.get(key)
         entries = thread.streams.get(stream, []) if thread else []
-        fresh = [e for e in entries if e.seq > after_seq]
+        fresh = [e.model_copy(deep=True) for e in entries if e.seq > after_seq]
         return fresh if limit is None else fresh[:limit]
 
     async def read_archive(
         self, key: ThreadKey, archive_id: str
     ) -> list[StreamEntry]:
         thread = self._threads.get(key)
-        return list(thread.archived.get(archive_id, [])) if thread else []
+        entries = thread.archived.get(archive_id, []) if thread else []
+        return [e.model_copy(deep=True) for e in entries]
 
     async def resolve_alias(self, alias: str) -> ThreadKey | None:
         return self._aliases.get(alias)
@@ -321,6 +341,7 @@ class MemoryThreadStore(ThreadStore):
             raise ThreadConflict(
                 f"ревизия {thread.revision}, ожидалась {change.expected_revision}"
             )
+        self._check_aliases(key, change.add_aliases)
         archive_id = self._apply(key, thread, change)
         thread.revision += 1
         thread.updated_at = self._now()
@@ -333,16 +354,19 @@ class MemoryThreadStore(ThreadStore):
         replayed = self._replayed(key, change)
         if replayed is not None:
             return replayed
+        for stream, _items in change.append:
+            if check_stream_name(stream) == _HISTORY:
+                raise ValueError("историю треда пишет только commit")
+        self._check_aliases(key, change.add_aliases)
         thread = self._thread(key)
         if change.set_runtime is not None:
             thread.runtime = change.set_runtime
         if change.set_frontend is not None:
             name, state = change.set_frontend
-            thread.frontend[name] = state
+            thread.frontend[name] = copy.deepcopy(state)
         for stream, items in change.append:
             self._append(thread, stream, items)
         self._alias(key, change.add_aliases)
-        thread.updated_at = self._now()
         receipt = self._receipt(key, thread, change.op_id)
         return self._remember(key, change, receipt)
 
@@ -377,7 +401,7 @@ class MemoryThreadStore(ThreadStore):
         thread = self._threads.pop(key, None)
         if thread is None:
             return
-        self._tombstones[key] = thread.generation + 1
+        self._tombstones[key] = (thread.generation + 1, thread.epoch)
         self._aliases = {a: k for a, k in self._aliases.items() if k != key}
         self._blobs = {b: d for b, d in self._blobs.items() if b[0] != key}
         self._receipts = {

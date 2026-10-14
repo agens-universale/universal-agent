@@ -35,11 +35,21 @@ class _NoFencing(MemoryThreadStore):
             super()._check_lease(thread, lease)
 
 
+class _ReusesSeq(MemoryThreadStore):
+    """Сломанная реализация: удалённый хвост освобождает номер seq."""
+
+    def _discard(self, thread, ids):
+        super()._discard(thread, ids)
+        history = thread.streams.get("messages", [])
+        thread.high["messages"] = max((e.seq for e in history), default=0)
+
+
 @pytest.mark.parametrize(
     ("broken", "check"),
     [
         (_NoRevisionCheck, "check_revision_conflict"),
         (_NoFencing, "check_lease_expiry_and_fencing"),
+        (_ReusesSeq, "check_seq_never_reused"),
     ],
 )
 def test_conformance_catches_broken_store(broken, check):
