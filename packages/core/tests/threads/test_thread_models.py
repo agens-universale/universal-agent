@@ -46,7 +46,7 @@ def test_stream_names_rejected(name):
 
 
 def test_unknown_runtime_and_usage_keys_survive():
-    assert RuntimeStatus(image_seq=3).model_dump()["image_seq"] == 3
+    assert RuntimeStatus(probe=3).model_dump()["probe"] == 3
     usage = Usage(by_category={"main": {"input": 1}}, currency="RUB")
     assert usage.model_dump()["currency"] == "RUB"
 

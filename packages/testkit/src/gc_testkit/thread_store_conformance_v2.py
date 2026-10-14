@@ -328,7 +328,7 @@ async def check_state_usage_info_roundtrip(store, _clock: FakeClock) -> None:
         user_turn_seq=2,
     )
     usage = Usage(by_category={"main": {"input": 1}}, currency="RUB")
-    info = ThreadInfo(title="T", workspace="/w", last_response_id="r1")
+    info = ThreadInfo(title="T", workspace="/w", api_mode="chat_completions")
     await store.commit(
         KEY,
         _change(
@@ -336,7 +336,10 @@ async def check_state_usage_info_roundtrip(store, _clock: FakeClock) -> None:
         ),
     )
     runtime = RuntimeStatus(
-        turn="running", flags=frozenset({"summarizing"}), image_seq=3
+        turn="running",
+        flags=frozenset({"summarizing"}),
+        image_seq=3,
+        probe="x",
     )
     await store.append_side(KEY, SideChange(op_id="s", set_runtime=runtime))
     record = await store.get_thread(KEY)
@@ -345,6 +348,23 @@ async def check_state_usage_info_roundtrip(store, _clock: FakeClock) -> None:
     _expect(record.info.title == "T", "карточка сохраняется")
     _expect(record.info.workspace == "/w", "workspace сохраняется")
     _expect(record.runtime == runtime, "RuntimeStatus с лишним ключом")
+
+
+async def check_commit_sets_runtime(store, _clock: FakeClock) -> None:
+    lease = await _claim(store)
+    runtime = RuntimeStatus(
+        live_msg_count=2, live_history_chars=40, image_seq=1
+    )
+    await store.commit(
+        KEY,
+        _change(
+            "op", 0, lease, append_messages=_msgs("a"), set_runtime=runtime
+        ),
+    )
+    _expect(
+        (await store.get_thread(KEY)).runtime == runtime,
+        "commit пишет runtime вместе с шагом",
+    )
 
 
 async def check_store_owns_timestamps_and_count(store, _clock: FakeClock):
@@ -821,6 +841,7 @@ CHECKS: tuple[Callable[..., Awaitable[None]], ...] = (
     check_release,
     check_untimed_lease,
     check_state_usage_info_roundtrip,
+    check_commit_sets_runtime,
     check_store_owns_timestamps_and_count,
     check_replace_history_renumbers,
     check_discard_message,

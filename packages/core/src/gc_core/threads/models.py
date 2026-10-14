@@ -86,7 +86,6 @@ class ThreadInfo(_Model):
     created_at: str | None = None
     updated_at: str | None = None
     messages_count: int = 0
-    last_response_id: str | None = None
 
 
 class TodoItem(_Model):
@@ -107,8 +106,14 @@ class SessionState(_Model):
     user_turn_seq: int = 0
     dialog_steps_offset: int = 0
     todo_reminder_count: int = 0
-    tool_usage_notice_count: int = 0
+    #: Сколько раз показана подсказка об инструменте — по имени инструмента.
+    tool_usage_notice: dict[str, int] = Field(default_factory=dict)
     project_memory_version: str | None = None
+    project_memory_check_count: int | None = None
+    #: Цепочка Responses API (``previous_response_id``) и id последнего
+    #: ответа бэкенда — состояние протокола, а не карточка треда.
+    previous_response_id: str | None = None
+    last_backend_response_id: str | None = None
     last_prompt_tokens: int | None = None
     last_prompt_message_count: int | None = None
     rendered_system_prompt: str | None = None
@@ -128,6 +133,8 @@ class RuntimeStatus(_OpenModel):
     flags: frozenset[RunFlag] = frozenset()
     live_msg_count: int | None = None
     live_history_chars: int | None = None
+    #: Сквозной номер плашек картинок треда (``[Изображение #N]``).
+    image_seq: int | None = None
     mcp_tools: Any = None
     trace_ids: list[str] | None = None
 
@@ -193,6 +200,8 @@ class ThreadChange(_Model):
     set_state: SessionState | None = None
     set_usage: Usage | None = None
     set_info: ThreadInfo | None = None
+    #: Шаг пишет и живой объём истории, и счётчик картинок — как develop.
+    set_runtime: RuntimeStatus | None = None
     replace_history: Compaction | None = None
     discard_message_ids: list[str] = Field(default_factory=list)
     reset_history: bool = False

@@ -246,6 +246,8 @@ class MemoryThreadStore(ThreadStore):
             thread.usage = change.set_usage.model_copy(deep=True)
         if change.set_info is not None:
             thread.info = change.set_info.model_copy(deep=True)
+        if change.set_runtime is not None:
+            thread.runtime = change.set_runtime.model_copy(deep=True)
 
     def _apply(self, key: ThreadKey, thread: _Thread, change: ThreadChange):
         if change.reset_history:
