@@ -1239,3 +1239,28 @@ async def test_attach_sanitizes_an_unreadable_session_profile(tmp_path):
         assert "profile" not in app._session_overrides
         codes = [n.code for n in collect_runtime_notices()]
         assert "session_profile_stale" in codes
+
+
+def _write_pair_profile(tmp_path: Path) -> Path:
+    return _write_yaml(
+        tmp_path / "profiles" / "pair.yml",
+        {
+            "models": {
+                "fast": {"url": "http://fast/v1/chat/completions", "token": ""},
+                "mid": {"url": "http://mid/v1/chat/completions", "token": ""},
+            },
+            "slots": {"light": "fast", "default": "mid"},
+        },
+    )
+
+
+def test_settings_offers_auto_only_when_the_base_supports_it(tmp_path):
+    """Settings правит глобальную базу: доступность `auto` считается по ней же,
+    а не по профилю сессии (спека PR140 Р4). Палитра сессии — по действующему."""
+    from gc_tui.toggles import base_toggle_names, effective_toggle_names
+
+    _write_pair_profile(tmp_path)
+    app = _app_with_base(tmp_path)
+    app.switch_session_profile("pair")
+    assert "auto" in effective_toggle_names(app, "level")
+    assert "auto" not in base_toggle_names(app, "level")

@@ -1282,9 +1282,9 @@ async def test_palette_rebuild_asks_each_values_provider_once_and_skips_trackles
     for name in ("level", "profiles"):
         real = tg.TOGGLES[name].values_provider
 
-        def counting(app, _real=real, _name=name):
+        def counting(app, settings, _real=real, _name=name):
             calls[_name] += 1
-            return _real(app)
+            return _real(app, settings)
 
         monkeypatch.setitem(
             tg.TOGGLES,

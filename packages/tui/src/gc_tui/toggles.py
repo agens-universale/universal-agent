@@ -109,7 +109,8 @@ class ToggleSpec:
     gate/answers/rigor ничего не меняют, только новые `models`-тогглы указывают
     свой. `show_track` — False у trackless-тоггла (`/profiles`: произвольное
     число профилей, шкала не имеет смысла — сразу значение-имя, спека §12.1).
-    `values_provider(app) -> значения` — динамический набор значений вместо
+    `values_provider(app, settings) -> значения` — состав для переданных настроек
+    (база окна для Settings или действующие для палитры) вместо
     статического `values` (профили из файлов, а не фиксированный список);
     `hint_provider(app, value) -> текст` — динамический hint вместо статического
     `ToggleValue.hint` (модель, резолвнутая Router'ом для `/level`; состав
@@ -142,7 +143,7 @@ class ToggleSpec:
     # Trackless: чем показать пустое значение (у /profiles «без профиля» —
     # осмысленное состояние, не «не задано», ревизия 2026-07-28).
     empty_value_text: str = "—"
-    values_provider: Optional[Callable[[Any], Tuple[ToggleValue, ...]]] = None
+    values_provider: Optional[Callable[[Any, Any], Tuple[ToggleValue, ...]]] = None
     hint_provider: Optional[Callable[[Any, str], str]] = None
     # Почему значение сейчас не предлагается (набранное `/level auto` при
     # недоступном автовыборе): `(app, value) -> причина | None`.
@@ -191,14 +192,12 @@ def auto_available_cfg(cfg: Any) -> bool:
     return auto_unavailable_reason_cfg(cfg) is None
 
 
-def level_values(app: Any) -> Tuple[ToggleValue, ...]:
-    """Состав значений `/level` (спека автороутинга §3, values_provider — по
-    образцу `profile_values`): статичная тройка `TOGGLES["level"].values` плюс
-    `auto` вне шкалы, когда фича доступна для эффективного конфига приложения.
-    Потребители без `app` (футер, `cycle_value` пресетов) видят только
-    статичную тройку — её состав здесь не меняется."""
+def level_values(app: Any, settings: Any) -> Tuple[ToggleValue, ...]:
+    """Состав значений `/level`: статичная тройка плюс `auto` вне шкалы, когда
+    фича доступна для ПЕРЕДАННЫХ настроек — база окна у Settings, действующие у
+    палитры (спека автороутинга §3, PR140 Р4)."""
     values = TOGGLES["level"].values
-    if auto_available_cfg(_effective_settings(app)):
+    if auto_available_cfg(settings):
         return values + (AUTO_LEVEL_VALUE,)
     return values
 
@@ -290,7 +289,7 @@ def _discovered_profiles(app: Any) -> Dict[str, Any]:
     return discover_profiles(_profile_roots(app))
 
 
-def profile_values(app: Any) -> Tuple[ToggleValue, ...]:
+def profile_values(app: Any, settings: Any = None) -> Tuple[ToggleValue, ...]:
     """Алфавитный объединённый список профилей (спека §3.1/§12.1): тёзка — одна
     позиция (`discover_profiles` уже разрешает коллизию в пользу проектного).
     Цвет/hint не несут смысла здесь — trackless, `hint_provider` динамический."""
@@ -584,22 +583,31 @@ def modes_section_names() -> list:
     ]
 
 
-def effective_toggle_values(app: Any, name: str) -> Tuple[ToggleValue, ...]:
-    """Состав значений тоггла `name` для текущего состояния приложения:
-    динамический (`values_provider(app)`, `/profiles`, `/level`) либо
-    статический (`spec.values`) — полные `ToggleValue` (цвет, `off_scale`),
-    не только имена; владелец выбора для рендера трека (палитра, Настройки)."""
+def _toggle_values_for(app: Any, name: str, settings: Any) -> Tuple[ToggleValue, ...]:
     spec = TOGGLES[name]
     if spec.values_provider is not None:
-        return spec.values_provider(app)
+        return spec.values_provider(app, settings)
     return spec.values
 
 
+def effective_toggle_values(app: Any, name: str) -> Tuple[ToggleValue, ...]:
+    """Состав значений тоггла по действующим настройкам окна (база + сессия) —
+    палитра и всё, что показывает текущий контекст."""
+    return _toggle_values_for(app, name, _effective_settings(app))
+
+
 def effective_toggle_names(app: Any, name: str) -> Tuple[str, ...]:
-    """Набор ИМЁН значений тоггла для текущего состояния — та же развязка
-    статический/динамический состав, что у `effective_toggle_values`, но для
-    потребителей цикла (←/→), которым имя важнее цвета/off_scale."""
     return tuple(v.value for v in effective_toggle_values(app, name))
+
+
+def base_toggle_values(app: Any, name: str) -> Tuple[ToggleValue, ...]:
+    """Состав значений для секции Settings — по глобальной базе без сессии, тот же
+    источник, что `toggle_state_base`: значение и его доступность из одного места."""
+    return _toggle_values_for(app, name, _global_settings(app))
+
+
+def base_toggle_names(app: Any, name: str) -> Tuple[str, ...]:
+    return tuple(v.value for v in base_toggle_values(app, name))
 
 
 TOGGLES: Dict[str, ToggleSpec] = {

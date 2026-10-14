@@ -3795,7 +3795,7 @@ class SettingsScreen(Screen):
         ребёнка (ревизия 7 — flat, маркера/отступа нет, оба head в одном
         формате — `_modes_head`, одна формула на все строки) + 3 + 2 на курсор;
         base_w — макс. ширина БАЗОВОГО трека (2*n-1 ячеек по ON-SCALE значениям
-        ДЕЙСТВУЮЩЕГО состава — `effective_toggle_values`, статика или
+        состава БАЗЫ — `base_toggle_values`, статика или
         `values_provider`, спека автороутинга §3); extra_w — макс. ширина
         вне-шкальной зоны: 3 ячейки у preset-тоггла (4-я позиция custom
         зарезервирована в Settings всегда, спека §4.2), `2 + 2*k - 1` у тоггла
@@ -3816,7 +3816,7 @@ class SettingsScreen(Screen):
             PRESET_CUSTOM,
             TOGGLES,
             modes_section_names,
-            effective_toggle_values,
+            base_toggle_values,
         )
 
         names = modes_section_names()
@@ -3827,7 +3827,7 @@ class SettingsScreen(Screen):
         value_names = [PRESET_CUSTOM]
         for name in names:
             spec = TOGGLES[name]
-            values = effective_toggle_values(self.app, name)
+            values = base_toggle_values(self.app, name)
             on_scale = [v for v in values if not v.off_scale]
             off_scale = [v for v in values if v.off_scale]
             base_w = max(base_w, 2 * len(on_scale) - 1)
@@ -3858,7 +3858,7 @@ class SettingsScreen(Screen):
             padded_track,
             toggle_state,
             toggle_state_base,
-            effective_toggle_values,
+            base_toggle_values,
         )
 
         spec = TOGGLES[name]
@@ -3869,7 +3869,7 @@ class SettingsScreen(Screen):
         is_child = self._modes_is_child(name)
         head = self._modes_head(name)
         extra = (current == PRESET_CUSTOM) if spec.preset_keys else None
-        values = effective_toggle_values(self.app, name)
+        values = base_toggle_values(self.app, name)
         track = padded_track(
             spec,
             current,
@@ -4144,7 +4144,7 @@ class SettingsScreen(Screen):
         """←/→/Enter на строке тоггла (канон §1/§3): мгновенно записать
         переключённое ГЛОБАЛЬНОЕ значение в config.yml (Settings = глобальный
         дефолт, дизайн 2026-07-21 §3). Цикл значения — от ТЕКУЩЕГО глобального
-        состояния, по действующему составу (`effective_toggle_names` — статика
+        состояния, по составу базы (`base_toggle_names` — статика
         или `values_provider`, спека автороутинга §3: `/level` цикл включает
         `auto`, когда фича доступна, тем же generic путём, каким пресет всегда
         цикл по низкий/средний/высокий — без разбора по имени тоггла). Guard
@@ -4159,7 +4159,7 @@ class SettingsScreen(Screen):
             PRESETS,
             TOGGLES,
             modes_section_names,
-            effective_toggle_names,
+            base_toggle_names,
             cycle_in,
         )
 
@@ -4167,7 +4167,7 @@ class SettingsScreen(Screen):
         name = names[self._modes_idx]
         spec = TOGGLES[name]
         current = toggle_state_base(self.app, name)
-        cycle_names = effective_toggle_names(self.app, name)
+        cycle_names = base_toggle_names(self.app, name)
         new_value = cycle_in(cycle_names, current, direction)
         values = (
             PRESETS[new_value]
