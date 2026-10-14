@@ -17,6 +17,7 @@ from gc_core.execution.contracts import MainModelUnavailable
 from gc_core.intent_guard.guard import FinishGateDecision
 from gc_core.states import State
 from gc_core.turn_boundary import begin_turn
+from gc_core.usage.account import CATEGORY_MAIN
 from gc_testkit import as_coro, run_coro
 
 RAW = {
@@ -82,6 +83,7 @@ def _transport(monkeypatch, dead=(), reply=None, on_dead=None):
                 on_dead()
             raise _unavailable()
         n = len(sent)
+        state.usage.add(CATEGORY_MAIN, 100, 10, model=resolved.model)
         calls = reply(resolved.alias, n) if reply else [_read(f"c{n}")]
         return calls, f"r{n}", {}
 
@@ -119,6 +121,25 @@ def test_a_dead_strong_model_of_the_lower_pair_is_replaced_by_max(monkeypatch):
     # Причина предохранителя — исходная, а не текст честной ошибки: иначе
     # следующая честная ошибка по этому алиасу вложила бы в себя прежнюю.
     assert ctx.model_router.breaker.snapshot() == {"mid": "provider unavailable"}
+    # Расход — ровно один успешный вызов: упавшая попытка ничего не списала.
+    assert s.usage.totals()["calls"] == 1
+    assert s.usage.totals()["input"] == 100
+    assert list(s.usage.by_model) == [ctx.model_router.resolve_level("max").model]
+
+
+def test_the_replacement_is_logged_as_one_structured_event(monkeypatch):
+    ctx = _ctx({"value": "auto"})
+    s = _state(ctx)
+    events = []
+    monkeypatch.setattr(ctx.logger, "info", lambda msg, *a, **k: events.append(k.get("extra", {})))
+    _transport(monkeypatch, dead={"mid"})
+    _ask(s, ctx)
+    found = [e for e in events if e.get("event") == "routing_unavailable_reroute"]
+    assert len(found) == 1
+    assert found[0]["from_level"] == "default" and found[0]["to_level"] == "max"
+    assert found[0]["failed_alias"] == "mid" and found[0]["replacement_alias"] == "big"
+    assert found[0]["replacement_model"] == ctx.model_router.resolve_level("max").model
+    assert found[0]["turn"] == 1
 
 
 def test_when_every_level_is_dead_the_turn_fails_with_the_honest_error(monkeypatch):
@@ -210,13 +231,31 @@ def test_a_copy_of_the_dead_model_is_tried_and_skipped_without_looping(monkeypat
 
 
 def test_a_failed_attempt_leaves_no_trace_in_the_history(monkeypatch):
+    """Упавшая попытка успела отдать часть ответа в поток. В историю она не
+    попадает, а поток начинается заново (`reset`, как в `connect_backend`), и ответ
+    приходит только от замены."""
     ctx = _ctx({"value": "auto"})
+    deltas = []
+    ctx.on_stream_delta = lambda kind, text: deltas.append((kind, text))
     s = _state(ctx)
-    _transport(monkeypatch, dead={"mid"})
+    attempts = []
+
+    async def once(messages, state, ctx, *, resolved, set_previous_response_id=True, mute_answer=False):
+        attempts.append(resolved.alias)
+        ctx.on_stream_delta("reset", "")
+        ctx.on_stream_delta("answer", f"часть от {resolved.alias}")
+        if resolved.alias == "mid":
+            raise _unavailable()
+        return [_read("c2")], "r2", {}
+
+    monkeypatch.setattr(pr, "_arequest_backend_canonical_once", once)
     before = list(s.messages)
     response, _ = _ask(s, ctx)
     assert s.messages == before
     assert response == [_read("c2")]
+    assert attempts == ["mid", "big"]
+    assert deltas == [("reset", ""), ("answer", "часть от mid"),
+                      ("reset", ""), ("answer", "часть от big")]
 
 
 def test_old_durable_histories_keep_the_honest_error(monkeypatch):

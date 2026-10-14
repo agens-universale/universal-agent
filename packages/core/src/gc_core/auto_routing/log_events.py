@@ -175,3 +175,32 @@ def log_artifact_reroute(
         from_level, to_level, list(triggers), list(tools),
         extra=payload,
     )
+
+
+def log_unavailable_reroute(
+    logger: Any,
+    *,
+    turn: int,
+    from_level: str,
+    to_level: str,
+    failed_alias: Optional[str],
+    replacement_alias: Optional[str],
+    replacement_model: Optional[str],
+) -> None:
+    """Событие `routing_unavailable_reroute`: запрос такта отказал подтверждённой
+    недоступностью модели и тот же такт повторён на ближайшем живом уровне. Решение
+    такта (`routing_decision`) остаётся прежним, факт замены пишется отдельно."""
+    payload: Dict[str, Any] = {
+        "event": "routing_unavailable_reroute",
+        "turn": turn,
+        "from_level": from_level,
+        "to_level": to_level,
+        "failed_alias": failed_alias,
+        "replacement_alias": replacement_alias,
+        "replacement_model": replacement_model,
+    }
+    logger.info(
+        "routing_unavailable_reroute turn=%s from_level=%s to_level=%s failed=%s replacement=%s",
+        turn, from_level, to_level, failed_alias, replacement_alias,
+        extra=payload,
+    )

@@ -18,6 +18,7 @@ from gc_core.auto_routing.log_events import (
     log_artifact_reroute,
     log_routing_decision,
     log_routing_pair,
+    log_unavailable_reroute,
 )
 from gc_core.auto_routing.policy import (
     Decision,
@@ -608,12 +609,23 @@ async def _arequest_rerouting(
             if level is None:
                 raise
             failed = resolved
+            from_level = getattr(state, "_call_level", None) or "default"
             resolved = _apply_call_kit(state, ctx, level)
             message = (
                 f"автовыбор: {failed.alias} недоступна — запрос повторён уровнем "
                 f"{level} ({resolved.model})"
             )
-            (getattr(ctx, "logger", None) or _fallback_logger).warning(message)
+            logger = getattr(ctx, "logger", None) or _fallback_logger
+            logger.warning(message)
+            log_unavailable_reroute(
+                logger,
+                turn=int(getattr(state, "user_turn_seq", 0) or 0) + 1,
+                from_level=from_level,
+                to_level=level,
+                failed_alias=failed.alias,
+                replacement_alias=resolved.alias,
+                replacement_model=resolved.model,
+            )
             maybe_push_level_reroute_notice(
                 failed_alias=failed.alias,
                 level=level,
