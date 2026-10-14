@@ -449,6 +449,9 @@ def address_host(url: str) -> str:
 # --- нижняя половина секции: слоты (уровень → алиас) и привязки потребителей ---
 _SLOT_UNSET = "не задан"
 _ASSIGN_ACTIVE = "активная"
+# Привязки нет, но потребитель работает фиксированным уровнем (`unbound_level`):
+# слова пустого слота — «не задана → default».
+_ASSIGN_UNSET = "не задана"
 # Значение, которого в файле цели нет, а в основном конфиге есть (§7-8): смысл
 # несёт СЛОВО, а не приглушённый цвет (замер ревью развёл DIM и DEEP_DIM на
 # неразличимые 1.26 контраста). Это же слово — подпись первой строки пикера: канон
@@ -471,7 +474,6 @@ _SLOT_DEAD_HINT = "уровень не резолвится: задайте хо
 # `.md`-файлов и общая привязка «всем сразу, кому своя не задана»
 # (`ModelRouter._lookup_binding`: точное имя → `*`).
 _UI_CONSUMER_LABEL = {
-    "auto_judge": "судья auto_judge · появится с авто-выбором",
     "*": "* · кастомные и будущие субагенты",
 }
 # Роль субагента рядом с его именем — грамматика «имя · описание» канона
@@ -1435,10 +1437,16 @@ class ModelsSectionEditor(Vertical):
 
     def _assign_unset_label(self, consumer: str) -> str:
         """Значение строки привязки без своего ключа: привязка основного конфига —
-        словом «основной → light» (§8), иначе прежняя «активная» (потребитель идёт
-        за активным уровнем, фиксировать нечего)."""
+        словом «основной → light» (§8); потребитель с фиксированным уровнем без
+        привязки — «не задана → default», как пустой слот; иначе «активная»
+        (идёт за активным уровнем, фиксировать нечего)."""
+        from gc_core.model_router import unbound_level
+
         inherited = self._base_assign_value(consumer)
-        return inherited_value(inherited) if inherited else _ASSIGN_ACTIVE
+        if inherited:
+            return inherited_value(inherited)
+        level = unbound_level(consumer)
+        return f"{_ASSIGN_UNSET} → {level}" if level else _ASSIGN_ACTIVE
 
     def _slot_row_text(self, level: str, selected: bool) -> Text:
         return self._binding_row_text(
@@ -2890,6 +2898,20 @@ class ModelsSectionEditor(Vertical):
             t.append_text(self._picker_fallback_desc(level))
         return t
 
+    def _assign_unset_entry(self, consumer: str) -> tuple[str, Text]:
+        """Подпись и описание пункта «без привязки»: фиксированный уровень —
+        «не задана · действует default → модель», иначе «активная»."""
+        from gc_core.model_router import unbound_level
+
+        level = unbound_level(consumer)
+        if level is None:
+            return _ASSIGN_ACTIVE, self._picker_active_desc()
+        t = Text("действует ", style=DEEP_DIM)
+        t.append(level, style=value_style(level))
+        t.append(" ")
+        t.append_text(self._picker_level_desc(level))
+        return _ASSIGN_UNSET, t
+
     def _picker_active_desc(self) -> Text:
         t = Text(_ACTIVE_DESC_LEAD, style=DEEP_DIM)
         t.append(self._active_level, style=value_style(self._active_level))
@@ -2943,8 +2965,7 @@ class ModelsSectionEditor(Vertical):
             [
                 self._picker_unset_row(
                     self._base_assign_value(consumer),
-                    _ASSIGN_ACTIVE,
-                    self._picker_active_desc(),
+                    *self._assign_unset_entry(consumer),
                 )
             ]
             + [
