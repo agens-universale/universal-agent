@@ -94,11 +94,6 @@ _thread_paths_legacy = file_layout.legacy_thread_paths
 _thread_paths = file_layout.thread_paths
 
 
-def thread_meta_path(threads_dir: str, system_id: str, thread_id: str) -> str:
-    """Путь канонической meta треда: meta_{system}_{thread_id}.json."""
-    return _thread_paths(threads_dir, system_id, thread_id)[1]
-
-
 subagent_trace_path = file_layout.subagent_trace_path
 
 

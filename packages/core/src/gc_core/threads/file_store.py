@@ -76,6 +76,7 @@ _EDITS = "edits"
 _ALIASES_DIR = "aliases"
 _EXTENSIONS = {"image/png": ".png", "image/jpeg": ".jpg"}
 _SUFFIX_FORMAT = "%Y%m%d_%H%M%S"
+_JSON = ".json"
 
 
 def _line(record: JsonObject) -> bytes:
@@ -488,7 +489,7 @@ class FileThreadStore(ThreadStore):
         }
 
     def _alias_path(self, alias: str) -> Path:
-        name = hashlib.sha256(alias.encode()).hexdigest() + ".json"
+        name = hashlib.sha256(alias.encode()).hexdigest() + _JSON
         return Path(self._dir) / _ALIASES_DIR / name
 
     def _alias_owner(self, alias: str) -> ThreadKey | None:
@@ -826,6 +827,65 @@ class FileThreadStore(ThreadStore):
             for receipt in (base / file_tx.RECEIPTS).glob("*.json"):
                 receipt.unlink()
 
+    def sweep_orphans(
+        self, cutoff: datetime, *, dry_run: bool = False
+    ) -> tuple[int, int]:
+        """Обслуживание (необязательная способность файлового хранилища):
+        удалить устаревшие файлы, которые не являются живым тредом, — архивы
+        сжатия (у них своё время жизни) и meta старых форматов
+        (``meta_<tid>.json``, meta без идентификатора треда). Вернуть, сколько
+        удалено meta и data. Треды целиком удаляет ``delete``."""
+        removed_meta = removed_data = 0
+        root = Path(self._dir)
+        for meta_path in (
+            sorted(root.glob("meta_*.json")) if root.is_dir() else ()
+        ):
+            meta = _meta_or_none(meta_path)
+            if meta is None or self._is_canonical(meta_path, meta):
+                continue
+            if not _older_than(meta, cutoff):
+                continue
+            data_path = meta_path.with_name(
+                "data_" + meta_path.name[len("meta_") : -len(_JSON)] + ".jsonl"
+            )
+            removed_meta += 1
+            removed_data += int(data_path.exists())
+            if not dry_run:
+                meta_path.unlink(missing_ok=True)
+                data_path.unlink(missing_ok=True)
+                self._drop_archive_cache(meta_path.name, meta)
+        return removed_meta, removed_data
+
+    def _is_canonical(self, meta_path: Path, meta: JsonObject) -> bool:
+        system, thread = meta.get("system"), meta.get("thread_id")
+        if not isinstance(system, str) or not isinstance(thread, str):
+            return False
+        try:
+            _data, canonical = layout.thread_paths(self._dir, system, thread)
+        except ValueError:
+            return False
+        return Path(canonical) == meta_path
+
+    def _drop_archive_cache(self, name: str, meta: JsonObject) -> None:
+        """Удалённый архив уходит и из кеша архивов его треда."""
+        system, thread = meta.get("system"), meta.get("thread_id")
+        if layout.ARCHIVE_MARK not in name or not (
+            isinstance(system, str) and isinstance(thread, str)
+        ):
+            return
+        suffix = name.split(layout.ARCHIVE_MARK, 1)[1][: -len(_JSON)]
+        key = ThreadKey(system=system, thread=thread)
+        self._forget(key)
+        if not self._base(key).is_dir():
+            return  # кеша архивов на диске нет — помнить нечего
+        with self._scope(key):
+            control, v2 = self._load(key)
+            if "archives" in v2:
+                v2["archives"] = [
+                    a for a in v2["archives"] if a["id"] != suffix
+                ]
+                self._save_control(key, control, v2)
+
     def _thread_files(self, key: ThreadKey, v2: JsonObject) -> list[Path]:
         s, t, d = key.system, key.thread, self._dir
         stem = f"{s}_{t}"
@@ -876,6 +936,27 @@ class FileThreadStore(ThreadStore):
                 path.unlink()
                 removed += 1
         return removed
+
+
+def _meta_or_none(path: Path) -> JsonObject | None:
+    try:
+        meta = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return meta if isinstance(meta, dict) else None
+
+
+def _older_than(meta: JsonObject, cutoff: datetime) -> bool:
+    stamp = meta.get("updated_at") or meta.get("created_at")
+    if not isinstance(stamp, str):
+        return False
+    try:
+        moment = datetime.fromisoformat(stamp)
+    except ValueError:
+        return False
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=cutoff.tzinfo)
+    return moment < cutoff
 
 
 def _touches_turn(change: SideChange) -> bool:

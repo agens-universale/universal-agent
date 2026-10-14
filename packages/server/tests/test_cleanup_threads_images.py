@@ -162,7 +162,11 @@ def test_old_thread_with_meta_archive_counts_no_errors(tmp_path):
 
     stats = cleanup_threads(str(threads), ttl_days=7)
 
-    assert sorted(p.name for p in threads.iterdir()) == []
+    # `.store` — служебный каталог хранилища v2: там остаётся надгробие
+    # удалённого треда (его поколение), чтобы курсор читателя заметил
+    # пересоздание треда с тем же id. Файлов треда не остаётся.
+    assert sorted(p.name for p in threads.iterdir()) == [".store"]
+    assert not list((threads / ".store").rglob("data_*"))
     assert stats["errors"] == 0
 
 

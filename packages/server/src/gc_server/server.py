@@ -15,13 +15,9 @@ from gc_core.config import (
 )
 from gc_core.config_modules.auth import build_auth_connector
 from gc_core.run_context import acreate_run_context
-from gc_core.thread_store import (
-    load_thread_messages,
-    load_thread_meta,
-    resolve_threads_dir,
-    sanitize_system_id,
-    validate_thread_id,
-)
+from gc_core.thread_store import sanitize_system_id, validate_thread_id
+from gc_core.threads.facade import Threads
+from gc_core.threads.models import ThreadKey, ThreadRecord
 from gc_core.trace_id import normalize_trace_id
 from gc_core.utils.generate_message_id import (
     generate_msg_id_sha256 as generate_message_id_func,
@@ -41,7 +37,6 @@ from gc_server.server_cleanup_threads import (
 )
 
 # Константы вместо повторяющихся литералов (Sonar S1192).
-_JSON_SUFFIX = ".json"
 _ERR_SYSTEM_AND_TASK_ID = "system and task_id are required"
 
 
@@ -628,8 +623,25 @@ async def get_thread_logs(system: str, task_id: str):
             detail={"status": "error", "payload": "system is required"},
         )
 
+    threads = _threads()
+    key = ThreadKey(system=sys_norm, thread=task_norm)
+    record = await threads.get(key)
+    if record is None:
+        raise HTTPException(status_code=404, detail={"status": "not_found"})
+
+    return {
+        "status": "ok",
+        "system": sys_norm,
+        "task_id": task_norm,
+        "meta": threads.legacy_meta(record),
+        "messages": [entry.data for entry in await threads.history(key)],
+    }
+
+
+def _threads() -> Threads:
+    """Треды сервера — через фасад; ошибка каталога тредов — 500."""
     try:
-        threads_dir = resolve_threads_dir(BASE_AGENT_SETTINGS)
+        return Threads.from_settings(BASE_AGENT_SETTINGS)
     except Exception as e:
         raise HTTPException(
             status_code=500,
@@ -639,39 +651,14 @@ async def get_thread_logs(system: str, task_id: str):
             },
         )
 
-    meta = load_thread_meta(threads_dir, sys_norm, task_norm)
-    messages, _, _ = load_thread_messages(threads_dir, sys_norm, task_norm)
 
-    if not meta and not messages:
-        raise HTTPException(status_code=404, detail={"status": "not_found"})
-
-    return {
-        "status": "ok",
-        "system": sys_norm,
-        "task_id": task_norm,
-        "meta": meta,
-        "messages": messages,
-    }
-
-
-def _thread_log_entry(meta: dict, name: str) -> dict:
-    system = meta.get("system")
-    if not isinstance(system, str) or not system.strip():
-        system = "unknown"
-
-    task_id = meta.get("thread_id")
-    if not isinstance(task_id, str) or not task_id.strip():
-        # legacy fallback: meta_<thread_id>.json
-        task_id = name.removeprefix("meta_").removesuffix(_JSON_SUFFIX)
-
-    updated_at = meta.get("updated_at") or meta.get("created_at")
-    messages_count = meta.get("messages_count")
-
+def _thread_log_entry(record: ThreadRecord) -> dict:
+    system, task_id = record.key.system, record.key.thread
     return {
         "system": system,
         "task_id": task_id,
-        "updated_at": updated_at,
-        "messages_count": messages_count,
+        "updated_at": record.info.updated_at or record.info.created_at,
+        "messages_count": record.info.messages_count,
         "logs_url": f"/logs/{system}/{task_id}",
     }
 
@@ -684,42 +671,8 @@ async def get_all_thread_logs():
     Служебный эндпоинт для режима вебхука: system можно заранее не знать,
     а также удобно построить UI "журнала".
     """
-    try:
-        threads_dir = resolve_threads_dir(BASE_AGENT_SETTINGS)
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "status": "error",
-                "payload": f"threads resolve error: {e!r}",
-            },
-        )
-
-    out: list[dict[str, Any]] = []
-    try:
-        names = [
-            n
-            for n in os.listdir(threads_dir)
-            if n.startswith("meta_")
-            and n.endswith(_JSON_SUFFIX)
-            and "__pre_summary__" not in n
-        ]
-    except FileNotFoundError:
-        return {"status": "ok", "logs": []}
-
-    for name in names:
-        meta_path = os.path.join(threads_dir, name)
-        try:
-            with open(meta_path, encoding="utf-8") as f:
-                meta = json.load(f)
-        except Exception:
-            continue
-
-        if not isinstance(meta, dict):
-            continue
-
-        out.append(_thread_log_entry(meta, name))
-
+    threads = _threads()
+    out = [_thread_log_entry(r) async for r in threads.iter_threads()]
     out.sort(key=lambda x: str(x.get("updated_at") or ""), reverse=True)
     return {"status": "ok", "logs": out}
 
