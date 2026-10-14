@@ -814,7 +814,7 @@ async def test_list_resume_load_after_restart(tmp_path):
             5,
         )
     )
-    assert _by_id(writer2, 5)["result"] == {}
+    assert set(_by_id(writer2, 5)["result"]) <= {"configOptions"}
     assert len(agents2) == 1
     await restored.handle_line(
         _line(
@@ -838,7 +838,7 @@ async def test_list_resume_load_after_restart(tmp_path):
         "agent_message_chunk",
     ]
     assert updates[0]["content"]["text"] == "привет"
-    assert _by_id(writer2, 7)["result"] == {}
+    assert set(_by_id(writer2, 7)["result"]) <= {"configOptions"}
     # Проигрыш кончился до ответа load.
     load_at = next(
         index

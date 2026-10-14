@@ -28,6 +28,13 @@ from gc_acp.confirm import (
     permission_message,
     timeout_sec,
 )
+from gc_acp.model_config import (
+    config_options_payload,
+    level_for_choice,
+    listed,
+    model_config_option,
+    session_level,
+)
 from gc_acp.prompt import PromptRejected, flatten_prompt
 from gc_acp.protocol import (
     INTERNAL_ERROR,
@@ -78,6 +85,9 @@ class LiveSession:
     response_sent: bool = False
     failed: bool = False
     tool_flow: ToolFlow | None = None
+    # Выбор пикера. None — уровень конфига (``settings.level`` / ``--level``).
+    # close забывает сессию вместе с этим полем; в файл конфига не пишется.
+    level: str | None = None
 
 
 class AcpFacade:
@@ -222,12 +232,14 @@ class AcpFacade:
             return
         warn_ignored_client_fields(body)
         session_id = validate_thread_id(str(uuid.uuid4()))
+        live = LiveSession(session_id, cwd, None)
         try:
-            agent = await self._open_agent(cwd, session_id)
+            agent = await self._open_agent(live)
         except Exception:
             logger.exception(_METHOD_NEW)
             await self._fail(request_id)
             return
+        live.agent = agent
         try:
             self._index.create(session_id, cwd)
         except Exception:
@@ -235,8 +247,13 @@ class AcpFacade:
             await _safe_aclose(agent)
             await self._fail(request_id)
             return
-        self._sessions[session_id] = LiveSession(session_id, cwd, agent)
-        await self._send(result_message(request_id, {"sessionId": session_id}))
+        self._sessions[session_id] = live
+        await self._send(
+            result_message(
+                request_id,
+                {"sessionId": session_id, **self._model_fields(live)},
+            )
+        )
 
     async def _session_prompt(self, request_id: Any, params: Any) -> None:
         body = _object_params(params)
@@ -304,7 +321,7 @@ class AcpFacade:
         if live is None:
             await self._fail(request_id)
             return
-        await self._send(result_message(request_id, {}))
+        await self._send(result_message(request_id, self._model_fields(live)))
 
     async def _session_load(self, request_id: Any, params: Any) -> None:
         record = await self._disk_session(request_id, params, mcp=True)
@@ -320,7 +337,38 @@ class AcpFacade:
             logger.exception("session/load")
             await self._fail(request_id)
             return
-        await self._send(result_message(request_id, {}))
+        await self._send(result_message(request_id, self._model_fields(live)))
+
+    async def _session_set_config_option(
+        self, request_id: Any, params: Any
+    ) -> None:
+        body = _object_params(params)
+        if body is None or _config_type_rejected(body):
+            await self._invalid_params(request_id)
+            return
+        live = self._live_from(params)
+        if (
+            live is None
+            or body.get("configId") != "model"
+            or "value" not in body
+        ):
+            await self._invalid_params(request_id)
+            return
+        value = body.get("value")
+        level = session_level(self._settings, live.level)
+        option = model_config_option(self._settings, level)
+        if not listed(option, value):
+            await self._invalid_params(request_id)
+            return
+        chosen = level_for_choice(self._settings, level, value)
+        if chosen is not None:
+            live.level = chosen
+            option = model_config_option(
+                self._settings, session_level(self._settings, live.level)
+            )
+        await self._send(
+            result_message(request_id, {"configOptions": [option]})
+        )
 
     async def _session_delete(self, request_id: Any, params: Any) -> None:
         session_id = _session_id_of(params)
@@ -385,12 +433,13 @@ class AcpFacade:
         live = self._sessions.get(record.session_id)
         if live is not None:
             return live
+        live = LiveSession(record.session_id, record.cwd, None)
         try:
-            agent = await self._open_agent(record.cwd, record.session_id)
+            agent = await self._open_agent(live)
         except Exception:
             logger.exception("acp agent")
             return None
-        live = LiveSession(record.session_id, record.cwd, agent)
+        live.agent = agent
         self._sessions[record.session_id] = live
         return live
 
@@ -406,19 +455,29 @@ class AcpFacade:
         ):
             await self._notify(session_id, update)
 
-    async def _open_agent(self, cwd: str, session_id: str) -> Any:
+    def _model_fields(self, live: LiveSession) -> dict:
+        return config_options_payload(
+            self._settings, session_level(self._settings, live.level)
+        )
+
+    async def _open_agent(self, live: LiveSession) -> Any:
         self._loop = asyncio.get_running_loop()
-        settings = self._settings.with_runtime(launch_root=cwd)
+        settings = self._settings.with_runtime(launch_root=live.cwd)
+
+        def level_provider() -> str:
+            return session_level(self._settings, live.level)
+
         async with self._create_lock:
             agent = await self._agent_factory(
                 settings,
                 auth_connector=self._auth,
                 tools_cache=self._tools_cache,
                 os_backend=self._os_backend,
+                level_provider=level_provider,
             )
         try:
             bind_ask_human(agent)
-            bind_confirm(agent, session_id, self)
+            bind_confirm(agent, live.session_id, self)
         except Exception:
             await _safe_aclose(agent)
             raise
@@ -675,6 +734,7 @@ def _request_handlers(facade: AcpFacade) -> dict:
         "session/list": facade._session_list,
         "session/resume": facade._session_resume,
         "session/load": facade._session_load,
+        "session/set_config_option": facade._session_set_config_option,
         _METHOD_DELETE: facade._session_delete,
     }
 
@@ -698,6 +758,13 @@ def warn_ignored_client_fields(params: dict) -> None:
             "gc-acp: additionalDirectories не применяются",
             file=sys.stderr,
         )
+
+
+def _config_type_rejected(body: dict) -> bool:
+    """``type`` для select не обязателен. ``boolean`` и прочие — отказ."""
+    if "type" not in body:
+        return False
+    return body.get("type") != "select"
 
 
 def _object_params(params: Any) -> dict | None:

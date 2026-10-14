@@ -193,6 +193,7 @@ async def _create_agent(
     auth_connector: Any,
     tools_cache: Any,
     os_backend: Any,
+    level_provider: Any = None,
 ) -> AsyncAgent:
     return await AsyncAgent.create(
         loaded,
@@ -200,6 +201,7 @@ async def _create_agent(
         tools_cache=tools_cache,
         os_backend=os_backend,
         force_legacy=cli_forces_legacy_model(loaded),
+        level_provider=level_provider,
     )
 
 
