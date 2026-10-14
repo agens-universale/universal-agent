@@ -69,6 +69,7 @@ from gc_core.thread_store_types import (
     SubagentTraceRecord,
     ThreadState,
 )
+from gc_core.threads.store import ThreadStore as ThreadStoreV2
 
 #: Дольше этого МЕДИАННЫЙ вызов хранилища держит цикл заметно: одиннадцать
 #: подряд съедают треть бюджета приёмки. Порог предупреждения, не отказа —
@@ -498,8 +499,6 @@ def athread_store(
 
     Адаптер на одно хранилище ОДИН — см. ``_ADAPTER_ATTR``.
     """
-    from gc_core.threads.store import ThreadStore as ThreadStoreV2
-
     if isinstance(store, ThreadStoreV2):
         # Хранилище контракта v2: сессия говорит с ним через свой порт.
         from gc_core.threads.session_port import session_port
