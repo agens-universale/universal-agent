@@ -257,7 +257,11 @@ async def test_prompt_streams_and_second_turn_keeps_the_thread(tmp_path):
     await agent.started.wait()
     await facade._sessions[session_id].prompt_task
     kinds = [item["sessionUpdate"] for item in _updates(writer)]
-    assert kinds == ["agent_thought_chunk", "agent_message_chunk"]
+    assert kinds == [
+        "session_info_update",
+        "agent_thought_chunk",
+        "agent_message_chunk",
+    ]
     assert _by_id(writer, 3)["result"] == {"stopReason": "end_turn"}
     assert agent.calls[0][0] == "see\nreadme (file:///tmp/readme)"
     assert agent.calls[0][1]["thread_id"] == session_id
@@ -395,14 +399,19 @@ async def test_prompt_reports_a_tool_call_between_prose(tmp_path):
         for item in _updates(writer)
     ]
     assert flow == [
+        ("session_info_update", None, None),
         ("agent_message_chunk", None, None),
         ("tool_call", "call-1", "in_progress"),
         ("tool_call_update", "call-1", "completed"),
         ("agent_message_chunk", None, None),
         ("agent_message_chunk", None, None),
     ]
-    titles = [item.get("title") for item in _updates(writer)]
-    assert titles[1] == "fs_read_file(path='src/a.py')"
+    tool = next(
+        item
+        for item in _updates(writer)
+        if item.get("sessionUpdate") == "tool_call"
+    )
+    assert tool["title"] == "fs_read_file(path='src/a.py')"
     assert _by_id(writer, 3)["result"] == {"stopReason": "end_turn"}
     await facade.shutdown()
 
@@ -489,6 +498,7 @@ async def test_prompt_reports_tools_inside_a_subagent(tmp_path):
         for item in _updates(writer)
     ]
     assert flow == [
+        ("session_info_update", None, None),
         ("agent_message_chunk", None, None),
         ("tool_call", "sub", "in_progress"),
         ("tool_call", "sub:c1", "in_progress"),
@@ -887,6 +897,7 @@ async def test_list_resume_load_after_restart(tmp_path):
     )
     assert len(agents2) == 1
 
+    before_load = len(writer2.sent)
     await restored.handle_line(
         _line(
             "session/load",
@@ -894,12 +905,20 @@ async def test_list_resume_load_after_restart(tmp_path):
             7,
         )
     )
-    updates = _updates(writer2)
+    updates = [
+        item["params"]["update"]
+        for item in writer2.sent[before_load:]
+        if item.get("method") == "session/update"
+    ]
     assert [item["sessionUpdate"] for item in updates] == [
         "user_message_chunk",
         "agent_message_chunk",
+        "plan",
+        "session_info_update",
     ]
     assert updates[0]["content"]["text"] == "привет"
+    assert updates[2] == {"sessionUpdate": "plan", "entries": []}
+    assert updates[3]["title"] == "привет"
     assert set(_by_id(writer2, 7)["result"]) <= {"configOptions"}
     # Проигрыш кончился до ответа load.
     load_at = next(

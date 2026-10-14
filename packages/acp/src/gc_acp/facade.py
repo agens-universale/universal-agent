@@ -11,6 +11,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
+from gc_core.constants.tool_names import SESSION_TODO_TOOL_NAME
 from gc_core.thread_store import (
     ThreadSession,
     resolve_threads_dir,
@@ -36,6 +37,14 @@ from gc_acp.model_config import (
     model_config_option,
     session_level,
 )
+from gc_acp.plan import (
+    plan_update,
+    session_info_update,
+    todos_from_agent,
+    todos_from_meta,
+    usage_from_agent,
+    usage_from_meta,
+)
 from gc_acp.prompt import PromptRejected, flatten_prompt
 from gc_acp.protocol import (
     INTERNAL_ERROR,
@@ -51,7 +60,13 @@ from gc_acp.protocol import (
     parse_line,
     result_message,
 )
-from gc_acp.session_index import ACP_SYSTEM, SessionFile, SessionIndex
+from gc_acp.session_index import (
+    ACP_SYSTEM,
+    SessionFile,
+    SessionIndex,
+    prompt_title_line,
+    session_title,
+)
 from gc_acp.stop_reason import stop_reason
 from gc_acp.tool_flow import ToolFlow
 from gc_acp.updates import ChunkAssembler, history_updates
@@ -94,6 +109,10 @@ class LiveSession:
     # Выбор пикера. None — уровень конфига (``settings.level`` / ``--level``).
     # close забывает сессию вместе с этим полем; в файл конфига не пишется.
     level: str | None = None
+    # Title уже ушёл клиенту — повторно с тем же не слать.
+    title_sent: bool = False
+    # Имя тула по toolCallId (родительский ход) — для plan после session_todo.
+    tool_names: dict[str, str] | None = None
 
 
 class AcpFacade:
@@ -285,6 +304,7 @@ class AcpFacade:
         live.response_sent = False
         live.failed = False
         live.tool_flow = None
+        live.tool_names = {}
         live.prompt_id = request_id
         live.prompt_task = asyncio.create_task(
             self._run_prompt(live, request_id, text)
@@ -327,6 +347,7 @@ class AcpFacade:
         if live is None:
             await self._fail(request_id)
             return
+        await self._emit_session_snapshot(live, replayed=False)
         await self._send(result_message(request_id, self._model_fields(live)))
 
     async def _session_load(self, request_id: Any, params: Any) -> None:
@@ -343,6 +364,7 @@ class AcpFacade:
             logger.exception("session/load")
             await self._fail(request_id)
             return
+        await self._emit_session_snapshot(live, replayed=True)
         await self._send(result_message(request_id, self._model_fields(live)))
 
     async def _session_set_config_option(
@@ -593,6 +615,7 @@ class AcpFacade:
             # прошлого прогона, а AsyncAgent.run его сбрасывает: ход шёл бы
             # целиком, клиенту всё равно ушёл бы cancelled. В stream не входим.
             if not live.cancel_requested:
+                await self._maybe_title(live, text)
                 await self._stream_prompt(live, assembler, text)
         except asyncio.CancelledError:
             live.cancel_requested = True
@@ -655,6 +678,63 @@ class AcpFacade:
             await self._notify(
                 live.session_id, attach_diff(update, live.diffs)
             )
+            await self._maybe_plan(live, update)
+
+    async def _maybe_plan(self, live: LiveSession, update: dict) -> None:
+        kind = update.get("sessionUpdate")
+        call_id = update.get("toolCallId")
+        if not isinstance(call_id, str) or call_id == "":
+            return
+        # Субагент: составной id — plan сессии не трогаем.
+        if ":" in call_id:
+            return
+        names = live.tool_names
+        if names is None:
+            names = {}
+            live.tool_names = names
+        if kind == "tool_call":
+            name = update.get("name")
+            if isinstance(name, str) and name != "":
+                names[call_id] = name
+            return
+        if kind != "tool_call_update":
+            return
+        if names.get(call_id) != SESSION_TODO_TOOL_NAME:
+            return
+        if update.get("status") != "completed":
+            return
+        todos = todos_from_agent(live.agent)
+        await self._notify(live.session_id, plan_update(todos))
+
+    async def _maybe_title(self, live: LiveSession, text: str) -> None:
+        if live.title_sent:
+            return
+        title = prompt_title_line(text)
+        if title is None:
+            return
+        await self._notify(live.session_id, session_info_update(title))
+        live.title_sent = True
+
+    async def _emit_session_snapshot(
+        self, live: LiveSession, *, replayed: bool
+    ) -> None:
+        """После load (с replay) или resume — plan, title, usage из meta."""
+        del replayed
+        threads = self._index.threads_dir
+        session_id = live.session_id
+        await self._notify(
+            session_id, plan_update(todos_from_meta(threads, session_id))
+        )
+        title = session_title(threads, session_id)
+        if title is not None:
+            await self._notify(session_id, session_info_update(title))
+            live.title_sent = True
+        level = session_level(self._settings, live.level)
+        usage = usage_from_meta(
+            threads, session_id, settings=self._settings, level=level
+        )
+        if usage is not None:
+            await self._notify(session_id, usage)
 
     async def _close_prompt(self, live: LiveSession, request_id: Any) -> None:
         cancelled = live.cancel_requested
@@ -670,8 +750,17 @@ class AcpFacade:
                 error_message(request_id, INTERNAL_ERROR, _RUN_FAILED)
             )
             return
+        await self._emit_usage(live)
         reason = stop_reason(_outcome(live), cancelled=False)
         await self._send(result_message(request_id, {"stopReason": reason}))
+
+    async def _emit_usage(self, live: LiveSession) -> None:
+        level = session_level(self._settings, live.level)
+        usage = usage_from_agent(
+            live.agent, settings=self._settings, level=level
+        )
+        if usage is not None:
+            await self._notify(live.session_id, usage)
 
     async def _cancel_session(self, params: Any) -> None:
         live = self._live_from(params)

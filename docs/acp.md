@@ -140,6 +140,16 @@ acp:
 
 Между кусками ответа клиент показывает имя тула и короткое превью аргументов.
 
+Чек-лист `session_todo` оркестратора уходит клиенту как `session/update` с
+`sessionUpdate: "plan"` (полный replace списка; clear — `entries: []`).
+Чек-лист субагента в plan сессии не зеркалится. Title сессии — тем же правилом,
+что `session/list` (первая строка первой реальной user-реплики): при первом
+`session/prompt` и на `session/load` / `session/resume` уходит
+`session_info_update`, без обязательного повторного list. В конце хода, если
+известны и `last_main_prompt_tokens`, и размер окна модели, шлётся
+`usage_update`; иначе тишина. Служебные technical / сводки компакции в ленту
+как `user_message_chunk` не попадают. `notice` / `compaction_*` пока не шлём.
+
 `session/new`, `session/load` и `session/resume` отдают одну опцию
 `configOptions` с `id: "model"`: алиасы уровней `default`, `light`, `max`
 без повторов, провайдерский id — только в `description`, если он не совпадает
