@@ -298,7 +298,7 @@ def test_bound_child_does_not_call_pair_judge(tmp_path, monkeypatch, binding, ke
     assert cards == []
 
 
-def test_prepared_child_fallback_leaves_failed_auto_call_before_manual_retry(tmp_path, monkeypatch):
+def test_child_in_auto_replaces_a_dead_level_inside_its_own_turn(tmp_path, monkeypatch):
     import httpx
 
     from gc_core.auto_routing import judge_runner, state_ops
@@ -330,30 +330,25 @@ def test_prepared_child_fallback_leaves_failed_auto_call_before_manual_retry(tmp
     monkeypatch.setattr(pr, "_arequest_backend_canonical", backend)
 
     async def child_run(messages, state, ctx, **kwargs):
-        if not children:
-            children.append(state)
-            ctx.prepared_request_equivalence = prepare_request_equivalence(ctx, context_id=ctx.run_id)
-            for _ in range(2):
-                await pr.aprepare_main_call(state, ctx)
-                state_ops.close_tick(state, state._call_level)
-                state.steps += 1
+        children.append(state)
+        ctx.prepared_request_equivalence = prepare_request_equivalence(ctx, context_id=ctx.run_id)
+        for _ in range(2):
             await pr.aprepare_main_call(state, ctx)
-            assert state._call_level == "light"
-        else:
-            assert children == [state]
-            assert not ctx.model_router.auto_allowed
-            assert state.current_level is None
-            assert state._tick_decision is None
-            assert state.turn_safe_level == "default"
-            assert state.steps_in_turn == 2
+            state_ops.close_tick(state, state._call_level)
+            state.steps += 1
+        await pr.aprepare_main_call(state, ctx)
+        assert state._call_level == "light"
         await pr._amain_call(messages, state, ctx)
-        return "child continued on fallback"
+        assert state._call_level == "default" and state.current_level == "default"
+        assert ctx.model_router.breaker.is_open("fast")
+        return "child continued on the nearest live level"
 
     result = run_coro(SubagentRunner(parent_ctx, parent, cfg).arun(
         "subagent_worker", {"task": "small child task", "reason": "Delegate"}, child_run,
     ))
     assert json.loads(result)["ok"] is True, result
-    assert sent == ["fast", "big"]
+    assert sent == ["fast", "mid"]
+    assert len(children) == 1
     assert len(judge_calls) == 1
     assert parent.turn_safe_level == "max" and parent.pair_window_left == 7
 
@@ -407,7 +402,7 @@ def test_child_fallback_resumes_real_loop_without_reexecuting_history(tmp_path, 
         "subagent_worker", {"task": "Read both files and write their sum", "reason": "Delegate"}, child_run,
     ))
     assert json.loads(result)["ok"] is True, result
-    assert sent == ["mid", "mid", "fast", "big", "big"]
+    assert sent == ["mid", "mid", "fast", "mid", "mid"]
     assert (tmp_path / "result.txt").read_text() == "3"
     assert len(judge_calls) == 1
     outputs = [m["call_id"] for m in children[0].messages if m.get("type") == "function_call_output"]
@@ -416,3 +411,56 @@ def test_child_fallback_resumes_real_loop_without_reexecuting_history(tmp_path, 
     assert outputs.count("call_4") == 1
     assert children[0].tool_calls == 4
     assert children[0].turn_safe_level == "default"
+
+
+def test_child_without_the_reroute_marker_keeps_the_runner_fallback(tmp_path, monkeypatch):
+    """Durable-история ребёнка без маркера замены: прежняя деградация раннера на
+    модель родителя (`fc75202a7`) остаётся рабочей."""
+    import httpx
+
+    from gc_core.auto_routing import judge_runner
+    from gc_core.auto_routing.request_equivalence import prepare_request_equivalence
+
+    cfg = _child_config(tmp_path, auto_routing_safe_level="auto")
+    parent = _orchestrator_state()
+    parent_ctx = _parent_ctx(cfg, level="auto")
+    parent_ctx.model_router = parent_ctx.model_router.with_level_providers(lambda: "max", lambda: "auto")
+    sent, runs = [], []
+
+    async def judge(**kwargs):
+        return '{"score":2,"reason":"small"}'
+
+    async def backend(messages, state, ctx, *, resolved, **kwargs):
+        sent.append(resolved.alias)
+        if resolved.alias == "mid":
+            request = httpx.Request("POST", "https://synthetic.invalid")
+            raise httpx.HTTPStatusError("provider unavailable", request=request,
+                response=httpx.Response(503, request=request))
+        return [], "result", {}
+
+    monkeypatch.setattr(judge_runner, "arequest_auxiliary_completion_text", judge)
+    monkeypatch.setattr(pr, "_arequest_backend_canonical", backend)
+
+    async def child_run(messages, state, ctx, **kwargs):
+        runs.append(state.current_level)
+        if not sent:
+            # Локальный контекст ребёнка порт `execution_patch` родителя не
+            # наследует (дочерний workflow Temporal привязывает свой) — история
+            # без маркера задаётся прямо на контексте ребёнка.
+            ctx.execution_patch = lambda patch: patch != pr.UNAVAILABLE_REROUTE_PATCH
+            # Факты эквивалентности запросов — как в соседних тестах ребёнка: без них
+            # AUTO ребёнка недоступен, и тест прошёл бы по ложной причине.
+            ctx.prepared_request_equivalence = prepare_request_equivalence(ctx, context_id=ctx.run_id)
+            await pr.aprepare_main_call(state, ctx)
+            assert state.current_level == "default"  # первый запуск — в AUTO
+        await pr._amain_call(messages, state, ctx)
+        return "done"
+
+    result = run_coro(SubagentRunner(parent_ctx, parent, cfg).arun(
+        "subagent_worker", {"task": "small child task", "reason": "Delegate"}, child_run,
+    ))
+    assert json.loads(result)["ok"] is True, result
+    assert sent == ["mid", "big"]
+    # Второй запуск — деградация раннера (AUTO ребёнка снят), а не замена уровня
+    # внутри хода: та тоже дала бы big (`default → max`).
+    assert runs == [None, None] and parent_ctx.model_router.breaker.is_open("mid")

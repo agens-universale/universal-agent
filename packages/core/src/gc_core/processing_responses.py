@@ -135,7 +135,10 @@ from gc_core.run_summary_coordinator import (
     build_preserved_batch,
     filter_messages_not_in_state,
 )
-from gc_core.runtime_notices import maybe_push_llm_failure_notice
+from gc_core.runtime_notices import (
+    maybe_push_level_reroute_notice,
+    maybe_push_llm_failure_notice,
+)
 from gc_core.settings import AppConfig, settings_of
 from gc_core.states import State
 from gc_core.summarize.limit_trace_summary import abuild_limit_envelope
@@ -533,6 +536,89 @@ def _first_alive_level(
 
     level = first_alive(levels, is_alive)
     return None if level is None else (level, kits[level])
+
+
+#: Маркер durable-истории: в AUTO подтверждённо недоступная модель такта
+#: заменяется ближайшим живым уровнем (спека PR140 Р3). Без маркера — прежняя
+#: честная ошибка.
+UNAVAILABLE_REROUTE_PATCH = "main-unavailable-reroute-v1"
+
+
+def _alive_level(ctx: Any, levels: Tuple[str, ...]) -> Optional[str]:
+    """Первый живой уровень из `levels` по предохранителю — тем же правилом, что
+    замена мёртвого уровня в решении такта."""
+    router = getattr(ctx, "model_router", None)
+    alive = _first_alive_level(router, levels) if router is not None else None
+    return None if alive is None else alive[0]
+
+
+def _reroute_level(
+    state: State,
+    ctx: Any,
+    failed: Optional[Any],
+    exc: BaseException,
+    next_level: Callable[[str], Optional[str]],
+) -> Optional[str]:
+    """Уровень замены после отказа запроса такта или None — отказ остаётся
+    отказом. Заменяется только запрос, который решал AUTO (`current_level`):
+    в ручном режиме модель выбрана явно. Отказ — подтверждённая недоступность:
+    честная ошибка основного хода или исходное исключение ребёнка (его
+    предохранитель здесь же и взводится). Старые durable-истории без маркера —
+    прежнее поведение."""
+    if getattr(state, "current_level", None) is None:
+        return None
+    if not (isinstance(exc, MainModelUnavailable) or is_model_unavailable_error(exc)):
+        return None
+    router = getattr(ctx, "model_router", None)
+    if router is None or failed is None or failed.alias is None:
+        return None
+    execution_patch = port(ctx, "execution_patch")
+    if execution_patch is not None and not execution_patch(UNAVAILABLE_REROUTE_PATCH):
+        return None
+    if not router.breaker.is_open(failed.alias):
+        # Честная ошибка основного хода уже взвела его с исходной причиной.
+        router.breaker.trip(failed.alias, str(exc).strip()[:300] or type(exc).__name__)
+    level = next_level(getattr(state, "_call_level", None) or "default")
+    if level is not None:
+        state_ops.reroute_tick(state, level)
+    return level
+
+
+async def _arequest_rerouting(
+    messages: List[Dict],
+    state: State,
+    ctx: Any,
+    *,
+    resolved: Optional[Any],
+    next_level: Callable[[str], Optional[str]],
+    mute: Callable[[Optional[Any]], bool],
+) -> Tuple[Tuple[List[Dict], str, Dict], Optional[Any]]:
+    """Запрос такта с заменой подтверждённо недоступной модели (спека PR140 Р3).
+    Повтор того же сообщения, не новый такт. Цикл конечен: каждый отказ выводит
+    алиас из живых. Возвращает ответ и комплект, которым он получен."""
+    while True:
+        try:
+            result = await _arequest_backend_canonical(
+                messages, state, ctx, resolved=resolved, mute_answer=mute(resolved)
+            )
+            return result, resolved
+        except Exception as exc:
+            level = _reroute_level(state, ctx, resolved, exc, next_level)
+            if level is None:
+                raise
+            failed = resolved
+            resolved = _apply_call_kit(state, ctx, level)
+            message = (
+                f"автовыбор: {failed.alias} недоступна — запрос повторён уровнем "
+                f"{level} ({resolved.model})"
+            )
+            (getattr(ctx, "logger", None) or _fallback_logger).warning(message)
+            maybe_push_level_reroute_notice(
+                failed_alias=failed.alias,
+                level=level,
+                model=resolved.model,
+                enabled=bool(getattr(ctx, "is_tui", False)),
+            )
 
 
 async def aroute_before_call(
@@ -1536,14 +1622,16 @@ async def _amaybe_reroute_for_floors(
         discarded_text=discarded_text,
     )
     state_ops.enter_floor(state, target, verdict.reason)
-    resolved = _apply_call_kit(
+    target_kit = _apply_call_kit(state, ctx, target)
+    result, _ = await _arequest_rerouting(
+        messages,
         state,
         ctx,
-        target,
+        resolved=target_kit,
+        next_level=lambda _failed: _floor_target(ctx, from_level, resolved, params),
+        mute=lambda _kit: False,
     )
-    return await _arequest_backend_canonical(
-        messages, state, ctx, resolved=resolved
-    )
+    return result
 
 
 async def _amain_call(messages, state: State, ctx: Any):
@@ -1559,18 +1647,14 @@ async def _amain_call(messages, state: State, ctx: Any):
         if getattr(state, "current_level", None) is not None
         else None
     )
-    (
-        resp_messages,
-        response_id,
-        res_headers,
-    ) = await _arequest_backend_canonical(
+    params = _routing_params(ctx, state)
+    (resp_messages, response_id, res_headers), resolved = await _arequest_rerouting(
         messages,
         state,
         ctx,
         resolved=resolved,
-        mute_answer=_answer_stream_muted(
-            state, ctx, resolved, _routing_params(ctx, state)
-        ),
+        next_level=lambda failed_level: _alive_level(ctx, nearest_levels(failed_level)),
+        mute=lambda kit: _answer_stream_muted(state, ctx, kit, params),
     )
     resp_messages, response_id, res_headers = await _amaybe_reroute_for_floors(
         messages,
