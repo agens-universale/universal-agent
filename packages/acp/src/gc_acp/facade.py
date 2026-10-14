@@ -10,11 +10,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
-from gc_core.thread_store import (
-    ThreadSession,
-    resolve_threads_dir,
-    validate_thread_id,
-)
+from gc_core.thread_store import validate_thread_id
 from gc_core.tools.turn.submit_solution import SubmitSolution
 
 from gc_acp.ask_human import bind_ask_human
@@ -33,7 +29,12 @@ from gc_acp.protocol import (
     parse_line,
     result_message,
 )
-from gc_acp.session_index import ACP_SYSTEM, SessionFile, SessionIndex
+from gc_acp.session_index import (
+    ACP_SYSTEM,
+    SessionIndex,
+    SessionRecord,
+    thread_key,
+)
 from gc_acp.stop_reason import stop_reason
 from gc_acp.tool_flow import ToolFlow
 from gc_acp.updates import ChunkAssembler, history_updates
@@ -86,9 +87,7 @@ class AcpFacade:
         self._auth = auth_connector
         self._tools_cache = tools_cache
         self._os_backend = os_backend
-        self._index = session_index or SessionIndex(
-            resolve_threads_dir(settings)
-        )
+        self._index = session_index or SessionIndex.from_settings(settings)
         self._sessions: dict[str, LiveSession] = {}
         self._releasing: set[asyncio.Task] = set()
         self._initialized = False
@@ -184,7 +183,7 @@ class AcpFacade:
             await self._fail(request_id)
             return
         try:
-            self._index.create(session_id, cwd)
+            await self._index.create(session_id, cwd)
         except Exception:
             logger.exception(_METHOD_NEW)
             await _safe_aclose(agent)
@@ -246,7 +245,7 @@ class AcpFacade:
         await self._send(
             result_message(
                 request_id,
-                {"sessions": self._index.list_sessions(cwd)},
+                {"sessions": await self._index.list_sessions(cwd)},
             )
         )
 
@@ -278,7 +277,7 @@ class AcpFacade:
 
     async def _session_delete(self, request_id: Any, params: Any) -> None:
         session_id = _session_id_of(params)
-        if session_id is None or self._index.load(session_id) is None:
+        if session_id is None or await self._index.load(session_id) is None:
             await self._missing(request_id)
             return
         live = self._sessions.pop(session_id, None)
@@ -286,7 +285,7 @@ class AcpFacade:
             # Запись индекса снимаем сразу, чтобы load не поднял второй
             # агент на тот же тред. jsonl — после хода, он ещё пишется.
             try:
-                self._index.drop_record(session_id)
+                await self._index.drop_record(session_id)
             except Exception:
                 logger.exception(_METHOD_DELETE)
                 await self._fail(request_id)
@@ -297,7 +296,7 @@ class AcpFacade:
         if live is not None:
             await self._release(live, drop_thread=False)
         try:
-            self._index.remove(session_id)
+            await self._index.remove(session_id)
         except Exception:
             logger.exception(_METHOD_DELETE)
             await self._fail(request_id)
@@ -306,7 +305,7 @@ class AcpFacade:
 
     async def _disk_session(
         self, request_id: Any, params: Any, *, mcp: bool
-    ) -> SessionFile | None:
+    ) -> SessionRecord | None:
         body = _object_params(params)
         session_id = _session_id(
             None if body is None else body.get("sessionId")
@@ -323,7 +322,7 @@ class AcpFacade:
         if mcp and not isinstance(body.get("mcpServers"), list):
             await self._invalid_params(request_id)
             return None
-        record = self._index.load(session_id)
+        record = await self._index.load(session_id)
         if record is None:
             await self._missing(request_id)
             return None
@@ -335,7 +334,7 @@ class AcpFacade:
         warn_ignored_client_fields(body)
         return record
 
-    async def _ensure_live(self, record: SessionFile) -> LiveSession | None:
+    async def _ensure_live(self, record: SessionRecord) -> LiveSession | None:
         live = self._sessions.get(record.session_id)
         if live is not None:
             return live
@@ -349,15 +348,13 @@ class AcpFacade:
         return live
 
     async def _replay(self, session_id: str) -> None:
-        thread = await ThreadSession.afrom_config(
-            settings=self._settings,
-            system_id=ACP_SYSTEM,
-            thread_id=session_id,
-        )
-        for update in history_updates(
-            thread.get_full_history_messages(),
-            subagent_records=self._index.subagent_records(session_id),
-        ):
+        threads, key = self._index.threads, thread_key(session_id)
+        messages = [entry.data for entry in await threads.history(key)]
+        records = [
+            {"ts": entry.ts, "seq": entry.seq, **entry.data}
+            for entry in await threads.subagent_events(key)
+        ]
+        for update in history_updates(messages, subagent_records=records):
             await self._notify(session_id, update)
 
     async def _open_agent(self, cwd: str) -> Any:
@@ -394,14 +391,13 @@ class AcpFacade:
                 logger.exception("session/prompt")
         if not live.response_sent:
             await self._close_prompt(live, request_id)
-        _touch(self._index, live.session_id)
+        await _touch(self._index, live.session_id)
 
     async def _stream_prompt(
         self, live: LiveSession, assembler: ChunkAssembler, text: str
     ) -> None:
-        flow = ToolFlow(
-            self._index.thread_path(live.session_id),
-            sidecar_path=self._index.subagent_path(live.session_id),
+        flow = await ToolFlow.start(
+            self._index.threads, thread_key(live.session_id)
         )
         stop = asyncio.Event()
         watch = asyncio.create_task(self._watch_tools(live, flow, stop))
@@ -441,7 +437,7 @@ class AcpFacade:
                 continue
 
     async def _emit_tools(self, live: LiveSession, flow: ToolFlow) -> None:
-        for update in flow.poll():
+        for update in await flow.poll():
             await self._notify(live.session_id, update)
 
     async def _close_prompt(self, live: LiveSession, request_id: Any) -> None:
@@ -507,7 +503,7 @@ class AcpFacade:
         if not drop_thread:
             return
         try:
-            self._index.drop_thread(live.session_id)
+            await self._index.drop_thread(live.session_id)
         except Exception:
             logger.exception(_METHOD_DELETE)
 
@@ -621,9 +617,9 @@ def _mark_cancel(live: LiveSession) -> None:
         stop()
 
 
-def _touch(index: SessionIndex, session_id: str) -> None:
+async def _touch(index: SessionIndex, session_id: str) -> None:
     try:
-        index.touch(session_id)
+        await index.touch(session_id)
     except Exception:
         logger.exception("acp session touch")
 

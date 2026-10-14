@@ -1,57 +1,65 @@
-"""Хвост jsonl → карточка тула, без повтора уже записанного."""
+"""Хвост треда → карточка тула, без повтора уже записанного."""
 
 import json
 
+from gc_core.threads.facade import Threads
+from gc_core.threads.models import ThreadKey
+from gc_core.threads.session_port import SessionPort
+from gc_testkit.memory_thread_store_v2 import MemoryThreadStore
+
 from gc_acp.tool_flow import ToolFlow, report_from_record
 
+KEY = ThreadKey(system="acp", thread="s")
 
-def _line(payload):
-    return json.dumps(
-        {"type": "message", "payload": payload}, ensure_ascii=False
+
+def _threads():
+    return Threads(MemoryThreadStore())
+
+
+def _call(name, call_id, arguments):
+    return {
+        "type": "function_call",
+        "name": name,
+        "call_id": call_id,
+        "arguments": json.dumps(arguments),
+    }
+
+
+def _output(call_id, output):
+    return {
+        "type": "function_call_output",
+        "call_id": call_id,
+        "output": output,
+    }
+
+
+async def _write(threads, *messages):
+    """Сообщения треда — каждое своей записью, как шаги хода."""
+    for message in messages:
+        await threads.append_messages(KEY, [message])
+
+
+async def _subagent(threads, kind, payload):
+    await SessionPort(threads.store).aappend_subagent_trace(
+        KEY.system,
+        KEY.thread,
+        parent_call_id="sub",
+        child_run_id="child",
+        kind=kind,
+        payload=payload,
     )
 
 
-def test_poll_skips_bytes_already_on_disk_and_hides_bookkeeping(tmp_path):
-    path = tmp_path / "data_acp_s.jsonl"
-    path.write_text(
-        _line(
-            {
-                "type": "function_call",
-                "name": "fs_read_file",
-                "call_id": "old",
-                "arguments": '{"path": "old.py"}',
-            }
-        )
-        + "\n",
-        encoding="utf-8",
+async def test_poll_skips_entries_already_written_and_hides_bookkeeping():
+    threads = _threads()
+    await _write(threads, _call("fs_read_file", "old", {"path": "old.py"}))
+    flow = await ToolFlow.start(threads, KEY)
+    await _write(
+        threads,
+        _call("exec_command", "c1", {"command": "pytest -q"}),
+        _call("turn_ask_human", "ask", {}),
     )
-    flow = ToolFlow(str(path))
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(
-            _line(
-                {
-                    "type": "function_call",
-                    "name": "exec_command",
-                    "call_id": "c1",
-                    "arguments": '{"command": "pytest -q"}',
-                }
-            )
-            + "\n"
-        )
-        handle.write(
-            _line(
-                {
-                    "type": "function_call",
-                    "name": "turn_ask_human",
-                    "call_id": "ask",
-                    "arguments": "{}",
-                }
-            )
-            + "\n"
-        )
-        handle.write("not-json\n")
-    updates = flow.poll()
-    assert updates == [
+    assert await flow.poll() == [
         {
             "sessionUpdate": "tool_call",
             "toolCallId": "c1",
@@ -59,64 +67,30 @@ def test_poll_skips_bytes_already_on_disk_and_hides_bookkeeping(tmp_path):
             "status": "in_progress",
         }
     ]
-    assert flow.poll() == []
+    assert await flow.poll() == []
 
 
-def test_poll_after_compaction_rewrites_shorter_file(tmp_path):
-    path = tmp_path / "data_acp_s.jsonl"
-    path.write_text(
-        _line(
-            {
-                "type": "function_call",
-                "name": "fs_read_file",
-                "call_id": "before",
-                "arguments": '{"path": "a.py"}',
-            }
-        )
-        + "\n"
-        + _line({"role": "assistant", "content": "длинный хвост " * 40})
-        + "\n",
-        encoding="utf-8",
+async def test_poll_after_compaction_reads_the_new_history():
+    threads = _threads()
+    await _write(
+        threads,
+        _call("fs_read_file", "before", {"path": "a.py"}),
+        {"role": "assistant", "content": "длинный хвост " * 40},
     )
-    flow = ToolFlow(str(path))
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(
-            _line(
-                {
-                    "type": "function_call",
-                    "name": "fs_read_file",
-                    "call_id": "mid",
-                    "arguments": '{"path": "b.py"}',
-                }
-            )
-            + "\n"
-        )
-    assert flow.poll()[0]["toolCallId"] == "mid"
+    flow = await ToolFlow.start(threads, KEY)
+    await _write(threads, _call("fs_read_file", "mid", {"path": "b.py"}))
+    assert (await flow.poll())[0]["toolCallId"] == "mid"
 
-    path.write_text(
-        _line(
-            {
-                "role": "user",
-                "content": '<technical type="dialog_summary">сводка</technical>',
-            }
-        )
-        + "\n",
-        encoding="utf-8",
+    summary = {
+        "role": "user",
+        "content": '<technical type="dialog_summary">сводка</technical>',
+        "id": "summary",
+    }
+    await SessionPort(threads.store).aarchive_and_replace(
+        KEY.system, KEY.thread, [summary]
     )
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(
-            _line(
-                {
-                    "type": "function_call",
-                    "name": "exec_command",
-                    "call_id": "after",
-                    "arguments": '{"command": "ls"}',
-                }
-            )
-            + "\n"
-        )
-    updates = flow.poll()
-    assert updates == [
+    await _write(threads, _call("exec_command", "after", {"command": "ls"}))
+    assert await flow.poll() == [
         {
             "sessionUpdate": "tool_call",
             "toolCallId": "after",
@@ -126,92 +100,17 @@ def test_poll_after_compaction_rewrites_shorter_file(tmp_path):
     ]
 
 
-def _sidecar(record):
-    return json.dumps(record, ensure_ascii=False)
-
-
-def _at(ts, payload):
-    return json.dumps(
-        {"ts": ts, "type": "message", "payload": payload},
-        ensure_ascii=False,
+async def test_poll_places_subagent_tools_between_call_and_result():
+    threads = _threads()
+    flow = await ToolFlow.start(threads, KEY)
+    await _write(threads, _call("subagent_explore", "sub", {"task": "найти"}))
+    await _subagent(
+        threads, "call", _call("fs_read_file", "c1", {"path": "a.py"})
     )
-
-
-def test_poll_places_subagent_tools_between_call_and_result(tmp_path):
-    thread = tmp_path / "data_acp_s.jsonl"
-    sidecar = tmp_path / "data_subagents_acp_s.jsonl"
-    thread.write_text("", encoding="utf-8")
-    flow = ToolFlow(str(thread), sidecar_path=str(sidecar))
-    thread.write_text(
-        _at(
-            "2026-01-01T00:00:01+00:00",
-            {
-                "type": "function_call",
-                "name": "subagent_explore",
-                "call_id": "sub",
-                "arguments": '{"task": "найти"}',
-            },
-        )
-        + "\n"
-        + _at(
-            "2026-01-01T00:00:03+00:00",
-            {
-                "type": "function_call_output",
-                "call_id": "sub",
-                "output": '{"ok": true}',
-            },
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    sidecar.write_text(
-        _sidecar(
-            {
-                "ts": "2026-01-01T00:00:02+00:00",
-                "seq": 1,
-                "parent_call_id": "sub",
-                "kind": "call",
-                "payload": {
-                    "type": "function_call",
-                    "name": "fs_read_file",
-                    "call_id": "c1",
-                    "arguments": '{"path": "a.py"}',
-                },
-            }
-        )
-        + "\n"
-        + _sidecar(
-            {
-                "ts": "2026-01-01T00:00:02.500000+00:00",
-                "seq": 2,
-                "parent_call_id": "sub",
-                "kind": "result",
-                "payload": {
-                    "type": "function_call_output",
-                    "call_id": "c1",
-                    "output": '{"ok": true}',
-                },
-            }
-        )
-        + "\n"
-        + _sidecar(
-            {
-                "ts": "2026-01-01T00:00:02.600000+00:00",
-                "seq": 3,
-                "parent_call_id": "sub",
-                "kind": "call",
-                "payload": {
-                    "type": "function_call",
-                    "name": "turn_finish",
-                    "call_id": "fin",
-                    "arguments": "{}",
-                },
-            }
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    assert flow.poll() == [
+    await _subagent(threads, "result", _output("c1", '{"ok": true}'))
+    await _subagent(threads, "call", _call("turn_finish", "fin", {}))
+    await _write(threads, _output("sub", '{"ok": true}'))
+    assert await flow.poll() == [
         {
             "sessionUpdate": "tool_call",
             "toolCallId": "sub",
@@ -235,45 +134,18 @@ def test_poll_places_subagent_tools_between_call_and_result(tmp_path):
             "status": "completed",
         },
     ]
-    assert flow.poll() == []
+    assert await flow.poll() == []
 
 
-def test_poll_reads_sidecar_created_after_start(tmp_path):
-    thread = tmp_path / "data_acp_s.jsonl"
-    sidecar = tmp_path / "data_subagents_acp_s.jsonl"
-    flow = ToolFlow(str(thread), sidecar_path=str(sidecar))
-    assert flow.poll() == []
-    sidecar.write_text(
-        _sidecar(
-            {
-                "seq": 1,
-                "parent_call_id": "sub",
-                "kind": "call",
-                "payload": {
-                    "type": "function_call",
-                    "name": "exec_command",
-                    "call_id": "c1",
-                    "arguments": '{"command": "ls"}',
-                },
-            }
-        )
-        + "\n"
-        + _sidecar(
-            {
-                "seq": 2,
-                "parent_call_id": "sub",
-                "kind": "error",
-                "payload": {
-                    "type": "function_call_output",
-                    "call_id": "c1",
-                    "output": "boom",
-                },
-            }
-        )
-        + "\n",
-        encoding="utf-8",
+async def test_poll_reads_thread_created_after_start():
+    threads = _threads()
+    flow = await ToolFlow.start(threads, KEY)
+    assert await flow.poll() == []
+    await _subagent(
+        threads, "call", _call("exec_command", "c1", {"command": "ls"})
     )
-    assert flow.poll() == [
+    await _subagent(threads, "error", _output("c1", "boom"))
+    assert await flow.poll() == [
         {
             "sessionUpdate": "tool_call",
             "toolCallId": "sub:c1",
