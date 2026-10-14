@@ -71,6 +71,10 @@ _CWD_MISMATCH = "cwd mismatch"
 _METHOD_NEW = "session/new"
 _METHOD_DELETE = "session/delete"
 _TOOL_POLL_S = 0.05
+# Запас сверх confirm_timeout: обёртка с потока не должна сработать раньше
+# внутреннего wait_for. Если всё же сработала после отправки запроса,
+# закрытие пикера уходит отдельной задачей.
+_CONFIRM_OUTER_SLACK_SEC = 1.0
 
 
 @dataclass
@@ -154,7 +158,7 @@ class AcpFacade:
             loop, self._confirm(session_id, request)
         )
         try:
-            return done.result(timeout=timeout + 1.0)
+            return done.result(timeout=timeout + _CONFIRM_OUTER_SLACK_SEC)
         except Exception:
             loop.call_soon_threadsafe(cancel)
             return CONFIRM_TIMED_OUT
@@ -495,6 +499,7 @@ class AcpFacade:
         request_id = self._pending.next_id()
         future = asyncio.get_running_loop().create_future()
         self._pending.add(request_id, session_id, future)
+        delivered = False
         try:
             flow = live.tool_flow
             call_id = None if flow is None else flow.current_call_id()
@@ -511,6 +516,7 @@ class AcpFacade:
                 ),
             ):
                 return CONFIRM_DENY_ONCE
+            delivered = True
             try:
                 incoming = await asyncio.wait_for(
                     asyncio.shield(future),
@@ -523,9 +529,26 @@ class AcpFacade:
                 else:
                     await self._send(_cancel_notice(request_id))
                     return CONFIRM_TIMED_OUT
+        except asyncio.CancelledError:
+            # Обёртка с потока уже вернула timed_out. await здесь отменится
+            # вместе с задачей, поэтому закрытие пикера — отдельная задача.
+            if delivered:
+                self._close_delivered_permission(request_id)
+            raise
         finally:
             self._pending.discard(request_id)
         return choice_from_incoming(incoming)
+
+    def _close_delivered_permission(self, request_id: Any) -> None:
+        """Пикер уже у клиента. Отмена confirm не должна унести `$/cancel_request`."""
+        try:
+            task = asyncio.get_running_loop().create_task(
+                self._send(_cancel_notice(request_id))
+            )
+        except RuntimeError:
+            return
+        self._releasing.add(task)
+        task.add_done_callback(self._forget_release)
 
     async def _deliver_permission(
         self, session_id: str, future: asyncio.Future, payload: dict

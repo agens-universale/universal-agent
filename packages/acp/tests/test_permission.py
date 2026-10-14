@@ -408,6 +408,43 @@ async def test_blocked_writer_timeout_does_not_cache_deny(tmp_path):
     await facade.shutdown()
 
 
+async def test_outer_timeout_after_send_still_closes_picker(
+    tmp_path, monkeypatch
+):
+    """Сторож потока после уже ушедшего request всё равно закрывает пикер."""
+    import gc_acp.facade as facade_mod
+
+    monkeypatch.setattr(facade_mod, "_CONFIRM_OUTER_SLACK_SEC", 0.3)
+    facade, writer, agent, _session_id, store = await _ready(
+        tmp_path, **{"acp.confirm_timeout_sec": 0}
+    )
+    key = "command:ls"
+
+    async def hang(_aw, **_kwargs):
+        await asyncio.Future()
+
+    monkeypatch.setattr(asyncio, "wait_for", hang)
+    assert await _ask(agent.executor._ctx, key) is False
+    msg = _permission_calls(writer)[-1]
+    for _ in range(100):
+        notices = [
+            item
+            for item in writer.sent
+            if item.get("method") == "$/cancel_request"
+            and (item.get("params") or {}).get("requestId") == msg["id"]
+        ]
+        if notices:
+            break
+        await asyncio.sleep(0.01)
+    else:
+        raise AssertionError(writer.sent)
+    await facade.handle_line(_response(msg["id"], _selected("allow_always")))
+    assert store.decision_for(key) is None
+    assert key not in store.export_run_rules()
+    assert key not in store.session_rules()
+    await facade.shutdown()
+
+
 async def test_allow_arriving_with_timeout_is_applied(tmp_path, monkeypatch):
     """Allow в тот же тик, что TimeoutError, не подменяется отказом."""
     facade, writer, agent, _session_id, store = await _ready(tmp_path)
