@@ -513,12 +513,12 @@ def test_non_object_arguments_omit_raw_input():
 
 def test_long_argument_strings_are_cut_and_the_call_is_left_intact():
     arguments = {
-        "command": "x" * 600,
+        "command": "x" * 6000,
         "n": 3,
         "ok": True,
         "gap": None,
-        "nested": {"body": "y" * 600},
-        "items": ["z" * 600, 1],
+        "nested": {"body": "y" * 6000},
+        "items": ["z" * 6000, 1],
     }
     seen: set[str] = set()
     report = report_from_record(
@@ -526,14 +526,14 @@ def test_long_argument_strings_are_cut_and_the_call_is_left_intact():
         seen,
     )
     raw = report["rawInput"]
-    assert raw["command"] == "x" * 500
-    assert raw["nested"]["body"] == "y" * 500
-    assert raw["items"] == ["z" * 500, 1]
+    assert raw["command"] == "x" * 5000
+    assert raw["nested"]["body"] == "y" * 5000
+    assert raw["items"] == ["z" * 5000, 1]
     assert raw["n"] == 3
     assert raw["ok"] is True
     assert raw["gap"] is None
-    assert arguments["command"] == "x" * 600
-    assert arguments["nested"]["body"] == "y" * 600
+    assert arguments["command"] == "x" * 6000
+    assert arguments["nested"]["body"] == "y" * 6000
     assert "locations" not in report
     assert "content" not in report
 
@@ -585,7 +585,7 @@ def test_completion_sends_status_and_a_short_preview():
         _call("fs_read_file", "c1", {"path": "a.py", "offset": 2}),
         seen,
     )
-    body = "a" * 600
+    body = "a" * 6000
     update = report_from_record(
         {
             "type": "function_call_output",
@@ -600,7 +600,7 @@ def test_completion_sends_status_and_a_short_preview():
     assert update["toolCallId"] == "c1"
     text = update["content"][0]["content"]["text"]
     assert text.startswith('{"ok":false,"error":"')
-    assert len(text) == 500
+    assert len(text) == 5000
     assert "start_line" not in text
     assert "rawOutput" not in update
     assert "locations" not in update
@@ -627,7 +627,7 @@ def test_stored_output_envelope_is_previewed_as_it_lies():
     envelope = {
         "type": "stored_tool_output",
         "output_ref": "ref-1",
-        "content": ("q" * 800) + "TAIL-MARKER",
+        "content": ("q" * 8000) + "TAIL-MARKER",
     }
     seen: set[str] = set()
     report_from_record(_call("fs_read_file", "c1", {"path": "a.py"}), seen)
@@ -640,7 +640,7 @@ def test_stored_output_envelope_is_previewed_as_it_lies():
         seen,
     )
     text = update["content"][0]["content"]["text"]
-    assert len(text) == 500
+    assert len(text) == 5000
     assert text.startswith('{"type":"stored_tool_output"')
     assert "TAIL-MARKER" not in text
 

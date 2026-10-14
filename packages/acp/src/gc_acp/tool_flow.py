@@ -45,7 +45,7 @@ _HIDDEN = frozenset(
     }
 )
 # Потолок строки на карточке: и аргумент, и превью результата.
-_CARD_LIMIT = 500
+_CARD_LIMIT = 5000
 
 
 def report_from_record(
