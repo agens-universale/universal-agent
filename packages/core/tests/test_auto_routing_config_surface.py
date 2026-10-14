@@ -26,7 +26,7 @@ def test_schema_has_only_the_product_routing_settings():
     }
 
 
-def test_shipped_templates_carry_product_defaults_and_bindings():
+def test_shipped_templates_carry_product_defaults_without_live_bindings():
     for path in (Path(_default_config_path()), REPO / "demo_config.yml"):
         raw = yaml.safe_load(path.read_text(encoding="utf-8"))
         assert raw["agent"]["auto_routing"] is True
@@ -37,10 +37,9 @@ def test_shipped_templates_carry_product_defaults_and_bindings():
         assert {key for key in raw["agent"] if key.startswith("auto_routing")} == {
             "auto_routing", "auto_routing_safe_level", "auto_routing_two_level",
         }
-        assert raw["assign"] == {
-            "command_judge": "default", "finish_gate": "max",
-            "routing_judge": "default", "summary": "default",
-        }
+        # PR140 Р1: уровни служебных потребителей без привязки задаёт код
+        # (unbound_level), шаблоны привязок не навязывают.
+        assert "assign" not in raw
 
 
 @pytest.mark.parametrize("value", ["default", "max", "auto"])
