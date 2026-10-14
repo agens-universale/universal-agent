@@ -353,6 +353,51 @@ def test_child_in_auto_replaces_a_dead_level_inside_its_own_turn(tmp_path, monke
     assert parent.turn_safe_level == "max" and parent.pair_window_left == 7
 
 
+def test_child_in_auto_with_every_level_dead_ends_with_the_honest_tool_error(tmp_path, monkeypatch):
+    """Ребёнок в собственном AUTO, мертвы все уровни: замена перебирает их внутри
+    хода, а затем — честная ошибка инструмента субагента без перехода на модель
+    родителя (она в том же предохранителе)."""
+    import httpx
+
+    from gc_core.auto_routing import judge_runner
+    from gc_core.auto_routing.request_equivalence import prepare_request_equivalence
+
+    cfg = _child_config(tmp_path, auto_routing_safe_level="auto")
+    parent = _orchestrator_state()
+    parent_ctx = _parent_ctx(cfg, level="auto")
+    parent_ctx.model_router = parent_ctx.model_router.with_level_providers(lambda: "max", lambda: "auto")
+    sent, runs = [], []
+
+    async def judge(**kwargs):
+        return '{"score":2,"reason":"small"}'
+
+    async def backend(messages, state, ctx, *, resolved, **kwargs):
+        sent.append(resolved.alias)
+        request = httpx.Request("POST", "https://synthetic.invalid")
+        raise httpx.HTTPStatusError("provider unavailable", request=request,
+            response=httpx.Response(503, request=request))
+
+    monkeypatch.setattr(judge_runner, "arequest_auxiliary_completion_text", judge)
+    monkeypatch.setattr(pr, "_arequest_backend_canonical", backend)
+
+    async def child_run(messages, state, ctx, **kwargs):
+        runs.append(state)
+        ctx.prepared_request_equivalence = prepare_request_equivalence(ctx, context_id=ctx.run_id)
+        await pr.aprepare_main_call(state, ctx)
+        assert state.current_level == "default"
+        await pr._amain_call(messages, state, ctx)
+        return "unreachable"
+
+    result = json.loads(run_coro(SubagentRunner(parent_ctx, parent, cfg).arun(
+        "subagent_worker", {"task": "small child task", "reason": "Delegate"}, child_run,
+    )))
+    assert result["ok"] is False
+    assert result["error"]["code"] == "subagent_run_failed"
+    assert sent == ["mid", "big", "fast"]
+    assert len(runs) == 1
+    assert all(parent_ctx.model_router.breaker.is_open(alias) for alias in ("fast", "mid", "big"))
+
+
 def test_child_fallback_resumes_real_loop_without_reexecuting_history(tmp_path, monkeypatch):
     import httpx
 

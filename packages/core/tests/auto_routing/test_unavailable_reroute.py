@@ -182,6 +182,22 @@ def test_a_dead_replay_target_moves_the_replay_up(monkeypatch):
     assert s._call_level == "max"
 
 
+def test_a_dead_replay_with_nothing_live_above_fails_with_the_honest_error(monkeypatch):
+    """Слабая сделала важный вызов, а сильная пары и `max` умерли прямо на
+    переигрыше: кандидаты пола исчерпаны — прежнее поведение, честная ошибка."""
+    ctx = _ctx({"value": "auto"})
+    s = _state(ctx)
+    dead = set()
+    reply = lambda alias, n: [_write(f"c{n}")] if alias == "fast" else [_read(f"c{n}")]
+    sent = _transport(monkeypatch, dead=dead, reply=reply)
+    _ask(s, ctx, times=2)                    # две сильные: mid, mid
+    dead.update({"mid", "big"})              # кандидаты пола умирают к третьему шагу
+    with pytest.raises(MainModelUnavailable):
+        _ask(s, ctx)                         # fast пишет → пол: mid (мёртв) → big (мёртв)
+    assert sent == ["mid", "mid", "fast", "mid", "big"]
+    assert s.steps_in_turn == 2
+
+
 def test_a_copy_of_the_dead_model_is_tried_and_skipped_without_looping(monkeypatch):
     entry = {"model": "mid-model", "url": "http://mid/v1/chat/completions", "token": ""}
     ctx = _ctx({"value": "auto"}, registry={

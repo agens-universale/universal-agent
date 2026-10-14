@@ -597,9 +597,10 @@ async def _arequest_rerouting(
     Повтор того же сообщения, не новый такт. Цикл конечен: каждый отказ выводит
     алиас из живых. Возвращает ответ и комплект, которым он получен."""
     while True:
+        muted = mute(resolved)
         try:
             result = await _arequest_backend_canonical(
-                messages, state, ctx, resolved=resolved, mute_answer=mute(resolved)
+                messages, state, ctx, resolved=resolved, mute_answer=muted
             )
             return result, resolved
         except Exception as exc:
