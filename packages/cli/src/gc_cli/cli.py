@@ -12,7 +12,6 @@ from gc_core.attachments.model import (
     user_label,
 )
 from gc_core.attachments.normalize import REASON_TOO_LARGE, NormalizeError
-from gc_core.attachments.numbering import read_image_seq
 from gc_core.attachments.store import ImageStore, amake_attachment
 from gc_core.config import (
     _bootstrap_user_config,
@@ -35,8 +34,8 @@ from gc_core.message_policy.user_message_policy import (
 )
 from gc_core.run_context import RunContext, acreate_run_context
 from gc_core.settings import is_explicit
-from gc_core.thread_store import resolve_threads_dir
-from gc_core.thread_store_file import FileThreadStore
+from gc_core.threads.facade import Threads
+from gc_core.threads.models import ThreadKey
 from gc_core.updater import check as updater_check
 from gc_core.updater import runner as updater_runner
 from gc_core.updater import source as updater_source
@@ -162,8 +161,8 @@ class ImageArgError(ValueError):
     """Отказ `--image`: текст готов для stderr."""
 
 
-def _first_image_number(
-    threads_dir: str, thread_id: str | None, start_new_thread: bool
+async def _afirst_image_number(
+    threads: Threads, thread_id: str | None, start_new_thread: bool
 ) -> int:
     """Номер первой картинки запроса — сквозной по треду (спека §4).
 
@@ -173,12 +172,9 @@ def _first_image_number(
     """
     if not thread_id or start_new_thread:
         return 1
-    return (
-        read_image_seq(
-            FileThreadStore(threads_dir).load_meta("cli", thread_id)
-        )
-        + 1
-    )
+    record = await threads.get(ThreadKey(system="cli", thread=thread_id))
+    image_seq = record.runtime.image_seq if record is not None else None
+    return (image_seq or 0) + 1
 
 
 async def _astage_cli_images(
@@ -244,8 +240,8 @@ async def _aprepare_cli_images(
         pass
     if not image_paths:
         return _CliImages(store, [], 1)
-    first_n = _first_image_number(
-        resolve_threads_dir(settings), thread_id, start_new_thread
+    first_n = await _afirst_image_number(
+        Threads.from_settings(settings), thread_id, start_new_thread
     )
     try:
         images = await _astage_cli_images(

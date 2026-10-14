@@ -58,7 +58,6 @@ _.setup
 # docs/superpowers/plans/2026-10-15-storage-v2-stage3-frontends.md, разными коммитами.
 # Каждая строка уходит отсюда вместе с переводом фронтенда, который её зовёт;
 # к гейту этапа (задача 12) этот блок обязан быть пустым.
-_.from_settings  # CLI, сервер
 _.legacy_meta  # сервер /logs, TUI /status
 _.iter_threads  # сервер, ACP, chat, TUI
 _.subagent_events  # ACP, TUI

@@ -36,6 +36,8 @@ from gc_core.message_policy.user_message_policy import (
     wrap_technical_user_content,
 )
 from gc_core.thread_store import save_thread_meta
+from gc_core.threads.facade import Threads
+from gc_core.threads.file_store import FileThreadStore
 from gc_core.utils.format_messages import format_message_responses
 from gc_testkit.settings import make_settings
 from PIL import Image
@@ -174,14 +176,15 @@ async def test_too_large_file_is_refused(tmp_path):
     assert str(exc.value) == cli.IMAGE_TOO_LARGE.format(path=str(path))
 
 
-def test_first_number_continues_the_thread(tmp_path):
-    threads = str(tmp_path / "threads")
-    save_thread_meta(threads, "cli", "t1", {"runtime": {"image_seq": 4}})
+async def test_first_number_continues_the_thread(tmp_path):
+    threads_dir = str(tmp_path / "threads")
+    save_thread_meta(threads_dir, "cli", "t1", {"runtime": {"image_seq": 4}})
+    threads = Threads(FileThreadStore(threads_dir))
 
-    assert cli._first_image_number(threads, "t1", False) == 5
-    assert cli._first_image_number(threads, "t1", True) == 1
-    assert cli._first_image_number(threads, None, False) == 1
-    assert cli._first_image_number(threads, "fresh", False) == 1
+    assert await cli._afirst_image_number(threads, "t1", False) == 5
+    assert await cli._afirst_image_number(threads, "t1", True) == 1
+    assert await cli._afirst_image_number(threads, None, False) == 1
+    assert await cli._afirst_image_number(threads, "fresh", False) == 1
 
 
 # --- сообщения запуска -----------------------------------------------------------
