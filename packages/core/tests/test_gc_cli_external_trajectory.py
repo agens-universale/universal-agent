@@ -389,3 +389,19 @@ def test_reporting_failure_never_breaks_the_run():
             raise RuntimeError("state is half-torn-down")
 
     assert _agent()._populate_usage(AgentContext(), Exploding()) is None
+
+
+def test_usage_by_model_reaches_the_metadata():
+    """AUTO ходит двумя моделями: без разбивки снаружи нельзя посчитать цену
+    прогона (спека PR140 Р8). Цены не считаются, cost_usd не трогается."""
+    from gc_core.usage.account import CATEGORY_MAIN, UsageAccount
+
+    account = UsageAccount()
+    account.add(CATEGORY_MAIN, input_tokens=1000, output_tokens=100, model="vendor/fast")
+    account.add(CATEGORY_MAIN, input_tokens=300, output_tokens=30, cached_tokens=10, model="vendor/big")
+    by_model = _agent()._usage_by_model(SimpleNamespace(usage=account))
+    assert by_model == {
+        "vendor/fast": {"input": 1000, "output": 100, "cached": 0},
+        "vendor/big": {"input": 300, "output": 30, "cached": 10},
+    }
+    assert _agent()._usage_by_model(None) is None
