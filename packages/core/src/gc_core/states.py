@@ -210,7 +210,7 @@ class State(ExecutionState):
         self.vision_probe_turn: str | None = None
         self.vision_routes: dict = {}
         self.vision_probe_notices: set = set()
-        # Поля автороутинга (спека §4); в снапшот не пишутся.
+        # Поля автороутинга (спека §4): пишутся в execution snapshot (durable-продолжение хода) и сбрасываются новым ходом пользователя (`state_ops.reset`).
         _reset_routing(self)
 
     @classmethod

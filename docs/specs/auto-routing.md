@@ -130,11 +130,22 @@ workflow использует записанные факты для досту�
 отсутствие или несовпадение context_id/слотов означает явную ошибку сборки.
 Пересчёт по публичному снимку либо новым закрытым настройкам при replay запрещён.
 
-При подтверждённой недоступности модели ручная деградация снимает мемо
-упавшего AUTO-запроса, сохраняя пару и счётчики хода. Продолжение получает один
-технический батч; уже выполненные вызовы и результаты остаются в State и не
-исполняются повторно. Нового судьи пары нет. Старые версии сохраняют прежний
-порядок восстановления.
+При подтверждённой недоступности модели такта AUTO повторяет тот же такт на
+ближайшем живом уровне, сначала вверх (`nearest_levels`); переигрыш использует
+кандидатов пола (`_floor_target`). Второго судьи пары нет; `/level`, изменённый
+во время неудавшегося запроса, применяется со следующего такта. Мертвы все уровни —
+явная ошибка с последней опробованной моделью. В ручном режиме недоступность —
+явная ошибка хода; ребёнок в AUTO подчиняется тому же правилу. Замена фиксируется
+маркером `main-unavailable-reroute-v1`; уже выполненные вызовы и результаты
+остаются в State и не исполняются повторно. Старые версии сохраняют прежний
+порядок восстановления. Предохранитель без таймера: `/level` его не сбрасывает,
+смена профиля, перезагрузка конфига со сменой профиля, сброс устаревшего профиля и
+переход на другой тред в TUI — сбрасывают.
+
+Нет файла инструкции судьи пары или он пуст — сбой судьи: верхняя пара,
+предупреждение в TUI с путём и запись в лог при каждом вызове судьи; стартовой
+предпроверки нет. Ограничение: в durable-запуске (Temporal) отсутствие инструкции
+приходит как InfrastructureFailure и в верхнюю пару не превращается.
 
 Старый вход без новой версии сохраняет фиксацию пары родителя и не требует
 фактов эквивалентности. Самые старые истории без исходного режима сохраняют
@@ -221,7 +232,9 @@ usage сохраняет вложенную разбивку `by_model`, вкл�
 | Закрытые различия сохраняют рабочие пары и floor после публичной проекции | temporalio `test_model_routing.py::test_public_child_facts_preserve_working_pairs_and_floor` |
 | Новая версия требует факты; старый PreparedChild без них читается | temporalio `test_model_routing.py::test_prepared_child_rejects_missing_facts_on_new_version`, `::test_old_prepared_child_without_facts_keeps_old_contract` |
 | Собственный judge, слабая запись и strong replay, новая/две старые версии воспроизводятся без HTTP | temporalio `test_child_live.py::test_independent_child_pair_and_recorded_history_replay` |
-| Подтверждённая недоступность слабой модели снимает старое AUTO-мемо и продолжает вручную без второго судьи | core `auto_routing/test_routing_params.py::test_prepared_child_fallback_leaves_failed_auto_call_before_manual_retry` |
+| В AUTO недоступная модель такта заменяется ближайшим живым уровнем в том же такте | core `auto_routing/test_unavailable_reroute.py` |
+| Ребёнок в AUTO заменяет мёртвый уровень внутри своего хода | core `auto_routing/test_routing_params.py::test_child_in_auto_replaces_a_dead_level_inside_its_own_turn` |
+| Нет инструкции судьи пары — верхняя пара с предупреждением | core `auto_routing/test_pair_judge_runner.py::test_a_missing_or_empty_prompt_is_the_hard_pair_with_a_warning` |
 | Продолжение сохраняет State-историю и не исполняет завершённые tools повторно | core `auto_routing/test_routing_params.py::test_child_fallback_resumes_real_loop_without_reexecuting_history`; temporalio `test_child_live.py::test_independent_child_pair_and_recorded_history_replay[fallback]` |
 | Явная модель ребёнка не подменяется уровнем родителя | core `router/test_run_context_router.py::test_resolve_main_for_call_keeps_subagent_override` |
 | Footer: все 12 переходов между четырьмя уровнями, текущий запрос/повтор и обратный переход | tui `test_agent_runner_turn_pin.py::test_footer_keeps_prepared_call_and_applies_selection_to_next_call` |
