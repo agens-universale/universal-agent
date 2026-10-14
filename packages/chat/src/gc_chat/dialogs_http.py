@@ -67,14 +67,14 @@ async def list_dialogs(request: Request) -> Response:
     denied = _guard(request)
     if denied is not None:
         return denied
-    return _body(dialog_list(_index(request)))
+    return _body(await dialog_list(_index(request)))
 
 
 async def read_dialog(thread_id: str, request: Request) -> Response:
     denied = _guard(request)
     if denied is not None:
         return denied
-    turns = dialog_turns(_index(request), thread_id)
+    turns = await dialog_turns(_index(request), thread_id)
     if turns is None:
         return _missing()
     return _body(turns)
@@ -137,7 +137,7 @@ async def read_artifacts(
     denied = _guard(request)
     if denied is not None:
         return denied
-    folder = dialog_folder(_index(request), thread_id, path)
+    folder = await dialog_folder(_index(request), thread_id, path)
     if folder is None:
         return _missing()
     return _body(folder)
@@ -157,7 +157,9 @@ async def create_artifact(thread_id: str, request: Request) -> Response:
     if invalid is not None:
         return invalid
     try:
-        created = make_directory(_index(request), thread_id, parent, name)
+        created = await make_directory(
+            _index(request), thread_id, parent, name
+        )
     except ApiError as exc:
         return _body(error_payload(exc), exc.status)
     if created is None:
@@ -174,7 +176,7 @@ async def delete_artifact(
     running = _running(request, thread_id)
     if running is not None:
         return running
-    if not remove_entry(_index(request), thread_id, path):
+    if not await remove_entry(_index(request), thread_id, path):
         return _missing()
     return _body({"ok": True})
 
@@ -185,7 +187,7 @@ async def download_artifact(
     denied = _guard(request)
     if denied is not None:
         return denied
-    found = file_bytes(_index(request), thread_id, path)
+    found = await file_bytes(_index(request), thread_id, path)
     if found is None:
         return _missing()
     return _download(found)

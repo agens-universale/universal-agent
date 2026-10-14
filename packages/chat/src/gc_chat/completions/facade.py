@@ -9,7 +9,8 @@ import uuid
 from typing import Any
 
 from gc_core.settings import LoadedSettings
-from gc_core.thread_store import resolve_threads_dir, validate_thread_id
+from gc_core.thread_store import validate_thread_id
+from gc_core.threads.facade import Threads
 
 from gc_chat.agent_config import prepare_agent_settings
 from gc_chat.completions.ask_human import bind_ask_human
@@ -17,7 +18,7 @@ from gc_chat.completions.content import ContentMap
 from gc_chat.completions.history import (
     forget_thread,
     seed_prior,
-    thread_data_path,
+    thread_key,
 )
 from gc_chat.completions.input_text import (
     IncomingTurn,
@@ -48,7 +49,7 @@ class CompletionsFacade:
         self._auth = auth_connector
         self._tools_cache = tools_cache
         self._os_backend = os_backend
-        self._threads_dir = resolve_threads_dir(settings)
+        self._threads = Threads.from_settings(settings)
         chat_api = settings.settings.chat_api
         self.auth_token = chat_api.auth_token
         self.cors_origins = _cors_origins(chat_api.cors_origins)
@@ -65,13 +66,13 @@ class CompletionsFacade:
         agent = await self._agent_for(thread_id, cwd)
         try:
             bind_ask_human(agent)
-            seed_prior(self._threads_dir, thread_id, incoming.prior)
+            await seed_prior(self._threads, thread_id, incoming.prior)
         except Exception:
             logger.exception("completions seed")
             await _safe_aclose(agent)
-            _forget_quietly(self._threads_dir, thread_id)
+            await _forget_quietly(self._threads, thread_id)
             raise
-        return self._begin(incoming, thread_id, agent)
+        return await self._begin(incoming, thread_id, agent)
 
     async def _agent_for(self, thread_id: str, cwd: str) -> Any:
         del thread_id
@@ -88,16 +89,16 @@ class CompletionsFacade:
                 os_backend=self._os_backend,
             )
 
-    def _begin(
+    async def _begin(
         self, incoming: IncomingTurn, thread_id: str, agent: Any
     ) -> TurnRun:
         run = TurnRun(
             agent=agent,
             content=ContentMap(),
-            flow=ToolFlow(thread_data_path(self._threads_dir, thread_id)),
+            flow=await ToolFlow.start(self._threads, thread_key(thread_id)),
             prompt=incoming.prompt,
             thread_id=thread_id,
-            threads_dir=self._threads_dir,
+            threads=self._threads,
             completion_id="chatcmpl_" + str(uuid.uuid4()),
             created=int(time.time()),
             model=incoming.model,
@@ -106,9 +107,9 @@ class CompletionsFacade:
         return run
 
 
-def _forget_quietly(threads_dir: str, thread_id: str) -> None:
+async def _forget_quietly(threads: Threads, thread_id: str) -> None:
     try:
-        forget_thread(threads_dir, thread_id)
+        await forget_thread(threads, thread_id)
     except Exception:
         logger.exception("completions delete thread")
 

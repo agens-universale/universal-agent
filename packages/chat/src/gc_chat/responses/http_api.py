@@ -84,7 +84,7 @@ async def read_response(response_id: str, request: Request) -> Response:
     if denied is not None:
         return denied
     try:
-        return _json(facade.get(response_id))
+        return _json(await facade.get(response_id))
     except ApiError as exc:
         return _json(error_payload(exc), exc.status)
 

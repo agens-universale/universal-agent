@@ -107,3 +107,14 @@ def test_discarding_sole_message_of_legacy_named_thread(tmp_path):
         )
     )
     assert run(store.read_stream(KEY, "messages")) == []
+
+
+def test_broken_meta_of_one_thread_does_not_hide_the_others(tmp_path):
+    store = FileThreadStore(tmp_path)
+    other = ThreadKey(system="cli", thread="t2")
+    run(_write(store, "a"))
+    run(_write(store, "b", key=other, op="op2"))
+    (tmp_path / "meta_cli_t2.json").write_text("{не json", encoding="utf-8")
+    (tmp_path / "meta_legacy.json").write_text("{не json", encoding="utf-8")
+    listed = run(store.list_threads(ThreadQuery(limit=100))).items
+    assert [r.key for r in listed] == [KEY]

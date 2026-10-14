@@ -52,10 +52,3 @@ _.aensure_ready
 # Абстрактный метод harbor.agents.base.BaseAgent.setup: зовёт Harbor перед запуском агента.
 # integrations/harbor/adapters/gc_cli_external.py.
 _.setup
-
-# ВРЕМЕННО, хранилища v2 этап 3: фасад Threads (gc_core/threads/facade.py) вводится
-# раньше потребителей — фронтенды переводятся на него задачами 5–9 плана
-# docs/superpowers/plans/2026-10-15-storage-v2-stage3-frontends.md, разными коммитами.
-# Каждая строка уходит отсюда вместе с переводом фронтенда, который её зовёт;
-# к гейту этапа (задача 12) этот блок обязан быть пустым.
-_.append_frontend  # chat

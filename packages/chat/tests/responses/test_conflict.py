@@ -14,7 +14,7 @@ from gc_testkit.settings import make_settings
 async def _finished(turn) -> dict:
     """Дождаться конца хода и взять сохранённый ответ."""
     await turn.done.wait()
-    return turn.result()
+    return await turn.result()
 
 
 class FakeAgent:
@@ -71,7 +71,7 @@ def _facade(tmp_path, agent: FakeAgent) -> ResponsesFacade:
             **{"agent.model": "from-config", "chat_api.launch_root": None}
         ),
         agent_factory=factory,
-        index=ResponseIndex(str(threads)),
+        index=ResponseIndex.for_threads_dir(str(threads)),
     )
 
 
@@ -145,7 +145,7 @@ async def test_history_array_starts_only_the_last_user_text(tmp_path):
     assert agent.calls[0]["system"] == "responses"
     assert body["model"] == "ui-model"
     assert body["status"] == "completed"
-    assert facade.get(handle.response_id)["id"] == handle.response_id
+    assert (await facade.get(handle.response_id))["id"] == handle.response_id
 
 
 async def test_empty_last_element_does_not_start(tmp_path):
@@ -193,9 +193,9 @@ async def test_get_survives_a_new_facade(tmp_path):
     restarted = ResponsesFacade(
         settings=make_settings(**{"agent.model": "m"}),
         agent_factory=facade._agent_factory,
-        index=ResponseIndex(str(threads)),
+        index=ResponseIndex.for_threads_dir(str(threads)),
     )
-    assert restarted.get(handle.response_id) == saved
+    assert await restarted.get(handle.response_id) == saved
 
 
 async def test_cwd_mismatch_does_not_start(tmp_path):

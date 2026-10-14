@@ -19,6 +19,7 @@ import contextlib
 import copy
 import hashlib
 import json
+import logging
 import os
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
@@ -77,6 +78,8 @@ _ALIASES_DIR = "aliases"
 _EXTENSIONS = {"image/png": ".png", "image/jpeg": ".jpg"}
 _SUFFIX_FORMAT = "%Y%m%d_%H%M%S"
 _JSON = ".json"
+
+logger = logging.getLogger(__name__)
 
 
 def _line(record: JsonObject) -> bytes:
@@ -618,7 +621,13 @@ class FileThreadStore(ThreadStore):
     async def list_threads(self, query: ThreadQuery) -> Page[ThreadRecord]:
         records = []
         for key in self._known_keys():
-            record = await self.get_thread(key)
+            try:
+                record = await self.get_thread(key)
+            except (OSError, ValueError):
+                # Один испорченный тред не прячет остальные: список его
+                # пропускает, чтение по ключу падает громко.
+                logger.warning("тред %s не читается", key, exc_info=True)
+                continue
             if record is not None:
                 records.append(record)
         return page_of(records, query)
@@ -629,7 +638,10 @@ class FileThreadStore(ThreadStore):
         for path in root.glob("meta_*.json") if root.is_dir() else ():
             if layout.ARCHIVE_MARK in path.name:
                 continue
-            meta = layout.read_meta_file(str(path))
+            try:
+                meta = layout.read_meta_file(str(path))
+            except (OSError, ValueError):
+                continue  # тред найдётся по identity, если он v2
             if meta.get("system") and meta.get("thread_id"):
                 keys.add(
                     ThreadKey(system=meta["system"], thread=meta["thread_id"])

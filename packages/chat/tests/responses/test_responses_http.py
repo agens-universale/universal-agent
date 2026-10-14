@@ -54,7 +54,7 @@ def _app(tmp_path, *, token: str = "", origins: list[str] | None = None):
             }
         ),
         agent_factory=factory,
-        index=ResponseIndex(str(threads)),
+        index=ResponseIndex.for_threads_dir(str(threads)),
     )
     return create_app(facade), agent
 
@@ -150,7 +150,7 @@ def test_non_stream_failure_is_500(tmp_path):
     facade = ResponsesFacade(
         settings=make_settings(**{"agent.model": "m"}),
         agent_factory=factory,
-        index=ResponseIndex(str(threads)),
+        index=ResponseIndex.for_threads_dir(str(threads)),
     )
     client = TestClient(create_app(facade), base_url=LOOPBACK)
     response = client.post(
@@ -289,7 +289,7 @@ def test_wide_bind_skips_host_check(tmp_path):
             **{"agent.model": "m", "chat_api.host": "0.0.0.0"}
         ),
         agent_factory=factory,
-        index=ResponseIndex(str(threads)),
+        index=ResponseIndex.for_threads_dir(str(threads)),
     )
     client = TestClient(create_app(facade), base_url="http://gpu-box:8090")
     assert client.get("/v1/models").status_code == 200

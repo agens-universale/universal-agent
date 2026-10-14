@@ -73,6 +73,24 @@ def test_frontend_patches_merge_and_survive_agent_step(threads):
     asyncio.run(scenario())
 
 
+def test_frontend_stream_alias_and_summary_in_one_write(threads):
+    async def scenario():
+        await threads.append_frontend(
+            KEY,
+            "chat.responses",
+            [{"response_id": "resp_1"}],
+            aliases=["resp_1"],
+            patch=("chat", {"latest_response_id": "resp_1"}),
+        )
+        assert await threads.resolve("resp_1") == KEY
+        entries = await threads.read_frontend(KEY, "chat.responses")
+        assert [e.data for e in entries] == [{"response_id": "resp_1"}]
+        record = await threads.get(KEY)
+        assert record.frontend["chat"] == {"latest_response_id": "resp_1"}
+
+    asyncio.run(scenario())
+
+
 def test_discard_updates_runtime_when_given(threads):
     async def scenario():
         await threads.append_messages(KEY, _msgs("a", "b"))

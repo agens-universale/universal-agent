@@ -1,4 +1,4 @@
-"""Один ход: ``AsyncAgent.stream``, карточки из jsonl, затем забвение треда."""
+"""Один ход: ``AsyncAgent.stream``, карточки из хвоста треда, затем забвение треда."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import asyncio
 import logging
 from typing import Any
 
+from gc_core.threads.facade import Threads
 from gc_core.tools.turn.submit_solution import SubmitSolution
 
 from gc_chat.completions.content import ContentMap
@@ -47,7 +48,7 @@ class TurnRun:
         flow: ToolFlow,
         prompt: str,
         thread_id: str,
-        threads_dir: str,
+        threads: Threads,
         completion_id: str,
         created: int,
         model: str,
@@ -57,7 +58,7 @@ class TurnRun:
         self._flow = flow
         self._prompt = prompt
         self.thread_id = thread_id
-        self._threads_dir = threads_dir
+        self._threads = threads
         self.completion_id = completion_id
         self.created = created
         self.model = model
@@ -129,7 +130,7 @@ class TurnRun:
     async def _watch(self, stop: asyncio.Event) -> None:
         while not stop.is_set():
             async with self._emit_lock:
-                self._put_tools()
+                await self._put_tools()
             try:
                 await asyncio.wait_for(stop.wait(), _TOOL_POLL_S)
             except TimeoutError:
@@ -137,7 +138,7 @@ class TurnRun:
 
     async def _after_stream(self, failed: BaseException | None) -> None:
         async with self._emit_lock:
-            self._put_tools()
+            await self._put_tools()
             if failed is None and not self.cancel_requested:
                 answer = SubmitSolution.present_result(
                     getattr(self.agent, "last_answer", None),
@@ -158,14 +159,14 @@ class TurnRun:
 
     async def _forget(self) -> None:
         try:
-            forget_thread(self._threads_dir, self.thread_id)
+            await forget_thread(self._threads, self.thread_id)
         except Exception:
             logger.exception("completions delete thread")
         await _safe_aclose(self.agent)
 
-    def _put_tools(self) -> None:
+    async def _put_tools(self) -> None:
         chunks: list[str] = []
-        for report in self._flow.poll():
+        for report in await self._flow.poll():
             chunks.extend(self._content.apply_tool(report))
         self._put(chunks)
 

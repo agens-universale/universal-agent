@@ -1,22 +1,44 @@
-"""Карточка тула из хвоста jsonl: без тел, без служебных тулов."""
+"""Карточка тула из хвоста треда: без тел, без служебных тулов."""
 
 import json
 
 from gc_chat.responses.tool_flow import ToolFlow
+from gc_core.threads.facade import Threads
+from gc_core.threads.models import ThreadKey
+from gc_core.threads.session_port import SessionPort
+from gc_testkit.memory_thread_store_v2 import MemoryThreadStore
+
+KEY = ThreadKey(system="responses", thread="t")
 
 
-def _write(path, payloads: list[dict]) -> None:
-    with open(path, "a", encoding="utf-8") as handle:
-        for payload in payloads:
-            record = {"type": "message", "payload": payload}
-            handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+def _threads():
+    return Threads(MemoryThreadStore())
 
 
-def test_card_has_title_and_no_bodies(tmp_path):
-    path = tmp_path / "thread.jsonl"
-    flow = ToolFlow(str(path))
-    _write(
-        path,
+async def _write(threads, payloads: list[dict]) -> None:
+    """Сообщения хода — каждое своей записью, как шаги исполнителя."""
+    for payload in payloads:
+        await threads.append_messages(KEY, [payload])
+
+
+async def _sidecar(threads, records: list[dict]) -> None:
+    port = SessionPort(threads.store)
+    for record in records:
+        await port.aappend_subagent_trace(
+            KEY.system,
+            KEY.thread,
+            parent_call_id=record["parent_call_id"],
+            child_run_id=record.get("child_run_id", "child"),
+            kind=record["kind"],
+            payload=record["payload"],
+        )
+
+
+async def test_card_has_title_and_no_bodies():
+    threads = _threads()
+    flow = await ToolFlow.start(threads, KEY)
+    await _write(
+        threads,
         [
             {
                 "type": "function_call",
@@ -26,7 +48,7 @@ def test_card_has_title_and_no_bodies(tmp_path):
             }
         ],
     )
-    opened = flow.poll()
+    opened = await flow.poll()
     assert len(opened) == 1
     card = opened[0]
     assert card["op"] == "open"
@@ -35,8 +57,8 @@ def test_card_has_title_and_no_bodies(tmp_path):
     assert "path" in card["title"]
     assert "arguments" not in card
     assert "output" not in card
-    _write(
-        path,
+    await _write(
+        threads,
         [
             {
                 "type": "function_call_output",
@@ -47,16 +69,16 @@ def test_card_has_title_and_no_bodies(tmp_path):
             }
         ],
     )
-    closed = flow.poll()
+    closed = await flow.poll()
     assert closed == [{"op": "close", "call_id": "c1", "status": "failed"}]
     assert "сырое тело" not in json.dumps(closed)
 
 
-def test_success_output_completes_and_hides_body(tmp_path):
-    path = tmp_path / "thread.jsonl"
-    flow = ToolFlow(str(path))
-    _write(
-        path,
+async def test_success_output_completes_and_hides_body():
+    threads = _threads()
+    flow = await ToolFlow.start(threads, KEY)
+    await _write(
+        threads,
         [
             {
                 "type": "function_call",
@@ -71,17 +93,17 @@ def test_success_output_completes_and_hides_body(tmp_path):
             },
         ],
     )
-    reports = flow.poll()
+    reports = await flow.poll()
     assert reports[0]["title"] == "list_dir"
     assert reports[1]["status"] == "completed"
     assert "a.py" not in json.dumps(reports)
 
 
-def test_hidden_tools_and_duplicate_call_id(tmp_path):
-    path = tmp_path / "thread.jsonl"
-    flow = ToolFlow(str(path))
-    _write(
-        path,
+async def test_hidden_tools_and_duplicate_call_id():
+    threads = _threads()
+    flow = await ToolFlow.start(threads, KEY)
+    await _write(
+        threads,
         [
             {
                 "type": "function_call",
@@ -121,7 +143,7 @@ def test_hidden_tools_and_duplicate_call_id(tmp_path):
             },
         ],
     )
-    reports = flow.poll()
+    reports = await flow.poll()
     assert [item["call_id"] for item in reports] == ["same"]
     blob = json.dumps(reports)
     assert "turn_finish" not in blob
@@ -130,125 +152,72 @@ def test_hidden_tools_and_duplicate_call_id(tmp_path):
     assert "session_think" not in blob
 
 
-def test_offset_skips_lines_from_before_this_turn(tmp_path):
-    path = tmp_path / "thread.jsonl"
-    _write(
-        path,
-        [
-            {
-                "type": "function_call",
-                "name": "read_file",
-                "call_id": "old",
-                "arguments": "{}",
-            }
-        ],
-    )
-    flow = ToolFlow(str(path))
-    _write(
-        path,
-        [
-            {
-                "type": "function_call",
-                "name": "read_file",
-                "call_id": "new",
-                "arguments": "{}",
-            }
-        ],
-    )
-    reports = flow.poll()
+async def test_offset_skips_lines_from_before_this_turn():
+    threads = _threads()
+    await _write(threads, [_call("read_file", "old")])
+    flow = await ToolFlow.start(threads, KEY)
+    await _write(threads, [_call("read_file", "new")])
+    reports = await flow.poll()
     assert [item["call_id"] for item in reports] == ["new"]
 
 
-def test_poll_after_compaction_reads_rewritten_shorter_file(tmp_path):
-    path = tmp_path / "thread.jsonl"
-    _write(
-        path,
+async def test_poll_after_compaction_reads_the_new_history():
+    threads = _threads()
+    await _write(
+        threads,
         [
-            {
-                "type": "function_call",
-                "name": "read_file",
-                "call_id": "before",
-                "arguments": "{}",
-            },
+            _call("read_file", "before"),
             {"role": "assistant", "content": "длинный хвост " * 40},
         ],
     )
-    flow = ToolFlow(str(path))
-    _write(
-        path,
-        [
-            {
-                "type": "function_call",
-                "name": "read_file",
-                "call_id": "mid",
-                "arguments": json.dumps({"path": "b.py"}),
-            }
-        ],
+    flow = await ToolFlow.start(threads, KEY)
+    await _write(
+        threads, [_call("read_file", "mid", json.dumps({"path": "b.py"}))]
     )
-    assert flow.poll()[0]["call_id"] == "mid"
+    assert (await flow.poll())[0]["call_id"] == "mid"
 
-    path.write_text(
-        json.dumps(
-            {
-                "type": "message",
-                "payload": {
-                    "role": "user",
-                    "content": (
-                        '<technical type="dialog_summary">сводка</technical>'
-                    ),
-                },
-            },
-            ensure_ascii=False,
-        )
-        + "\n",
-        encoding="utf-8",
+    summary = {
+        "role": "user",
+        "content": '<technical type="dialog_summary">сводка</technical>',
+        "id": "summary",
+    }
+    await SessionPort(threads.store).aarchive_and_replace(
+        KEY.system, KEY.thread, [summary]
     )
-    _write(
-        path,
-        [
-            {
-                "type": "function_call",
-                "name": "exec_command",
-                "call_id": "after",
-                "arguments": json.dumps({"command": "ls"}),
-            }
-        ],
+    await _write(
+        threads,
+        [_call("exec_command", "after", json.dumps({"command": "ls"}))],
     )
-    reports = flow.poll()
+    reports = await flow.poll()
     assert [item["call_id"] for item in reports] == ["after"]
     assert reports[0]["op"] == "open"
     assert reports[0]["title"] == "exec_command(command='ls')"
     assert "сводка" not in json.dumps(reports)
 
 
-def _sidecar(path, records: list[dict]) -> None:
-    with open(path, "a", encoding="utf-8") as handle:
-        for record in records:
-            handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+def _call(name: str, call_id: str, arguments: str = "{}") -> dict:
+    return {
+        "type": "function_call",
+        "name": name,
+        "call_id": call_id,
+        "arguments": arguments,
+    }
 
 
 def _nested_call(parent: str, call_id: str, name: str, arguments: str) -> dict:
     return {
-        "seq": 1,
         "parent_call_id": parent,
         "child_run_id": "child",
         "kind": "call",
-        "payload": {
-            "type": "function_call",
-            "name": name,
-            "call_id": call_id,
-            "arguments": arguments,
-        },
+        "payload": _call(name, call_id, arguments),
     }
 
 
-def test_sidecar_tool_is_a_card_under_the_parent(tmp_path):
-    thread = tmp_path / "data_responses_t.jsonl"
-    thread.write_text("", encoding="utf-8")
-    flow = ToolFlow(str(thread))
-    sidecar = tmp_path / "data_subagents_responses_t.jsonl"
-    _sidecar(
-        sidecar,
+async def test_sidecar_tool_is_a_card_under_the_parent():
+    threads = _threads()
+    flow = await ToolFlow.start(threads, KEY)
+    await _sidecar(
+        threads,
         [
             _nested_call(
                 "sub",
@@ -283,7 +252,7 @@ def test_sidecar_tool_is_a_card_under_the_parent(tmp_path):
             },
         ],
     )
-    reports = flow.poll()
+    reports = await flow.poll()
     assert [item["op"] for item in reports] == ["open", "close"]
     opened, closed = reports
     assert opened["call_id"] == "sub/c1"
@@ -304,30 +273,28 @@ def test_sidecar_tool_is_a_card_under_the_parent(tmp_path):
     assert "turn_finish" not in blob
 
 
-def test_same_child_call_id_under_two_parents_are_two_cards(tmp_path):
-    thread = tmp_path / "thread.jsonl"
-    flow = ToolFlow(str(thread))
-    sidecar = tmp_path / "thread.subagents.jsonl"
-    _sidecar(
-        sidecar,
+async def test_same_child_call_id_under_two_parents_are_two_cards():
+    threads = _threads()
+    flow = await ToolFlow.start(threads, KEY)
+    await _sidecar(
+        threads,
         [
             _nested_call("left", "c1", "read_file", "{}"),
             _nested_call("right", "c1", "exec_command", "{}"),
         ],
     )
-    reports = flow.poll()
+    reports = await flow.poll()
     assert [item["call_id"] for item in reports] == ["left/c1", "right/c1"]
     assert [item["parent_call_id"] for item in reports] == ["left", "right"]
 
 
-def test_sidecar_error_closes_the_card_as_failed(tmp_path):
-    thread = tmp_path / "thread.jsonl"
-    flow = ToolFlow(str(thread))
-    sidecar = tmp_path / "thread.subagents.jsonl"
-    _sidecar(sidecar, [_nested_call("sub", "c1", "exec_command", "{}")])
-    assert flow.poll()[0]["op"] == "open"
-    _sidecar(
-        sidecar,
+async def test_sidecar_error_closes_the_card_as_failed():
+    threads = _threads()
+    flow = await ToolFlow.start(threads, KEY)
+    await _sidecar(threads, [_nested_call("sub", "c1", "exec_command", "{}")])
+    assert (await flow.poll())[0]["op"] == "open"
+    await _sidecar(
+        threads,
         [
             {
                 "parent_call_id": "sub",
@@ -340,33 +307,20 @@ def test_sidecar_error_closes_the_card_as_failed(tmp_path):
             }
         ],
     )
-    assert flow.poll() == [
+    assert await flow.poll() == [
         {"op": "close", "call_id": "sub/c1", "status": "failed"}
     ]
 
 
-def test_sidecar_after_rewrite_still_reports_the_new_call(tmp_path):
-    thread = tmp_path / "thread.jsonl"
-    flow = ToolFlow(str(thread))
-    sidecar = tmp_path / "thread.subagents.jsonl"
-    _sidecar(
-        sidecar,
-        [_nested_call("sub", "before", "read_file", "{}")]
-        + [{"role": "pad", "content": "длинный хвост " * 40}],
+async def test_recreated_thread_still_reports_the_new_call():
+    """Трасса начинается заново только с треда, созданного заново."""
+    threads = _threads()
+    flow = await ToolFlow.start(threads, KEY)
+    await _sidecar(threads, [_nested_call("sub", "before", "read_file", "{}")])
+    assert (await flow.poll())[0]["call_id"] == "sub/before"
+    await threads.delete(KEY)
+    await _sidecar(
+        threads, [_nested_call("sub", "after", "exec_command", "{}")]
     )
-    assert flow.poll()[0]["call_id"] == "sub/before"
-    sidecar.write_text(
-        json.dumps(
-            {
-                "parent_call_id": "sub",
-                "kind": "child_summary",
-                "payload": {"synthesis": "сводка"},
-            },
-            ensure_ascii=False,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    _sidecar(sidecar, [_nested_call("sub", "after", "exec_command", "{}")])
-    reports = flow.poll()
+    reports = await flow.poll()
     assert [item["call_id"] for item in reports] == ["sub/after"]

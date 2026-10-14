@@ -1,4 +1,4 @@
-"""Хвост jsonl треда и sidecar субагента → короткая карточка тула.
+"""Хвост истории треда и трассы субагентов → короткая карточка тула.
 
 Сырые ``arguments`` и тело ``output`` в карточку не попадают.
 ``turn_finish``, ``turn_ask_human``, ``turn_intermediate_reply`` и
@@ -8,9 +8,7 @@
 
 from __future__ import annotations
 
-import json
-import os
-from typing import Any, Callable
+from typing import Any
 
 from gc_core.constants.tool_names import (
     ASK_HUMAN_TOOL_NAME,
@@ -22,10 +20,13 @@ from gc_core.execution.progress import (
     brief_args_summary,
     parse_tool_result_status,
 )
+from gc_core.threads.facade import Cursor, Threads
+from gc_core.threads.models import ThreadKey
 
 _CALL = "function_call"
 _CALL_OUTPUT = "function_call_output"
-_ENVELOPE = "message"
+_HISTORY = "messages"
+_SUBAGENTS = "subagent_events"
 _COMPLETED = "completed"
 _FAILED = "failed"
 _SIDECAR_CALL = "call"
@@ -40,8 +41,6 @@ _HIDDEN = frozenset(
     }
 )
 
-_LineParser = Callable[[bytes, set[str]], dict | None]
-
 
 def report_from_record(message: dict, seen: set[str]) -> dict | None:
     """Один function_call или его результат. Чужое и служебное — None."""
@@ -53,50 +52,42 @@ def report_from_record(message: dict, seen: set[str]) -> dict | None:
     return None
 
 
-class _Tail:
-    """Смещение и недочитанный хвост одного jsonl."""
-
-    def __init__(self, path: str) -> None:
-        self.path = path
-        self.offset = _file_size(path)
-        self.pending = b""
-
-
 class ToolFlow:
-    """Хвост jsonl с момента создания. Повторный poll дочитывает только новое.
+    """Хвост треда с момента :meth:`start`. Повторный poll дочитывает новое.
 
-    Рядом с тредом читается sidecar субагента: вложенный тул — отдельная
-    карточка, ``call_id`` склеен с ``parent_call_id``.
+    Рядом с историей читается трасса субагента: вложенный тул — отдельная
+    карточка, ``call_id`` склеен с ``parent_call_id``. Сжатие истории посреди
+    хода начинает её чтение заново; показанные карточки не повторяются.
     """
 
-    def __init__(self, path: str) -> None:
-        self._thread = _Tail(path)
-        self._sidecar = _Tail(_sidecar_path(path))
+    def __init__(self, threads: Threads, key: ThreadKey) -> None:
+        self._threads = threads
+        self._key = key
+        self._cursor: Cursor | None = None
         self._seen: set[str] = set()
 
-    def poll(self) -> list[dict]:
-        reports = _poll_tail(self._thread, self._seen, _from_thread_line)
-        reports.extend(
-            _poll_tail(self._sidecar, self._seen, _from_sidecar_line)
+    @classmethod
+    async def start(cls, threads: Threads, key: ThreadKey) -> ToolFlow:
+        flow = cls(threads, key)
+        flow._cursor = (
+            await threads.tail(key, (_HISTORY, _SUBAGENTS), None)
+        ).cursor
+        return flow
+
+    async def poll(self) -> list[dict]:
+        batch = await self._threads.tail(
+            self._key, (_HISTORY, _SUBAGENTS), self._cursor
         )
+        self._cursor = batch.cursor
+        reports: list[dict] = []
+        for stream, entry in batch.entries:
+            if stream == _SUBAGENTS:
+                report = _from_sidecar(entry.data, self._seen)
+            else:
+                report = report_from_record(entry.data, self._seen)
+            if report is not None:
+                reports.append(report)
         return reports
-
-
-def _sidecar_path(thread_path: str) -> str:
-    """``data_{system}_{thread}.jsonl`` → ``data_subagents_...``.
-
-    Имя совпадает с ``subagent_trace_path``. Прочий jsonl в тестах
-    получает соседний ``*.subagents.jsonl``.
-    """
-    directory, name = os.path.split(thread_path)
-    prefix = "data_"
-    nested = "data_subagents_"
-    if name.startswith(prefix) and not name.startswith(nested):
-        sidecar_name = nested + name[len(prefix) :]
-    else:
-        root, ext = os.path.splitext(name)
-        sidecar_name = root + ".subagents" + ext
-    return os.path.join(directory, sidecar_name)
 
 
 def _card_id(call_id: str, parent: str | None) -> str:
@@ -167,57 +158,7 @@ def _call_id(message: dict) -> str | None:
     return None
 
 
-def _file_size(path: str) -> int:
-    try:
-        return os.path.getsize(path)
-    except OSError:
-        return 0
-
-
-def _read_new(tail: _Tail) -> bytes:
-    try:
-        size = os.path.getsize(tail.path)
-        # Компакция переписывает jsonl короткой сводкой: старый offset за EOF,
-        # seek+read даёт пусто, и карточки хода больше не появляются.
-        if size < tail.offset:
-            tail.offset = 0
-            tail.pending = b""
-        with open(tail.path, "rb") as handle:
-            handle.seek(tail.offset)
-            chunk = handle.read()
-            tail.offset = handle.tell()
-    except OSError:
-        return b""
-    return chunk
-
-
-def _poll_tail(tail: _Tail, seen: set[str], parse: _LineParser) -> list[dict]:
-    tail.pending += _read_new(tail)
-    updates: list[dict] = []
-    blob = tail.pending
-    while b"\n" in blob:
-        raw, blob = blob.split(b"\n", 1)
-        update = parse(raw, seen)
-        if update is not None:
-            updates.append(update)
-    tail.pending = blob
-    return updates
-
-
-def _from_thread_line(raw: bytes, seen: set[str]) -> dict | None:
-    record = _json_object(raw)
-    if record is None:
-        return None
-    message = _message(record)
-    if message is None:
-        return None
-    return report_from_record(message, seen)
-
-
-def _from_sidecar_line(raw: bytes, seen: set[str]) -> dict | None:
-    record = _json_object(raw)
-    if record is None:
-        return None
+def _from_sidecar(record: dict, seen: set[str]) -> dict | None:
     payload = record.get("payload")
     parent = record.get("parent_call_id")
     if not isinstance(payload, dict):
@@ -232,23 +173,3 @@ def _from_sidecar_line(raw: bytes, seen: set[str]) -> dict | None:
     if kind == _SIDECAR_ERROR:
         return _output_report(payload, seen, parent=parent, failed=True)
     return None
-
-
-def _json_object(raw: bytes) -> dict | None:
-    text = raw.decode("utf-8", errors="replace").strip()
-    if text == "":
-        return None
-    try:
-        record = json.loads(text)
-    except json.JSONDecodeError:
-        return None
-    if isinstance(record, dict):
-        return record
-    return None
-
-
-def _message(record: dict) -> dict | None:
-    payload = record.get("payload")
-    if record.get("type") == _ENVELOPE and isinstance(payload, dict):
-        return payload
-    return record

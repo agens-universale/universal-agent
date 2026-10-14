@@ -132,6 +132,12 @@ class Threads:
     ) -> list[StreamEntry]:
         return await self.store.read_stream(key, "edits", after_seq=after_seq)
 
+    async def read_frontend(
+        self, key: ThreadKey, stream: str
+    ) -> list[StreamEntry]:
+        """Поток фронтенда ``<фронтенд>.<имя>`` целиком."""
+        return await self.store.read_stream(key, stream)
+
     async def resolve(self, alias: str) -> ThreadKey | None:
         return await self.store.resolve_alias(alias)
 
@@ -187,13 +193,17 @@ class Threads:
         items: list[JsonObject],
         *,
         aliases: Sequence[str] = (),
+        patch: tuple[str, JsonObject] | None = None,
     ) -> Receipt:
+        """Дописать в поток фронтенда; алиасы треда и слияние ``patch`` в
+        состояние фронтенда — той же записью."""
         return await self.store.append_side(
             key,
             SideChange(
                 op_id=_op_id("stream"),
                 append=[(stream, items)],
                 add_aliases=list(aliases),
+                patch_frontend=patch,
             ),
         )
 

@@ -2,13 +2,26 @@
 
 import json
 import os
+import uuid
+from datetime import timedelta
 from urllib.parse import quote
 
 from fastapi.testclient import TestClient
 from gc_chat.app import create_app
 from gc_chat.completions.facade import CompletionsFacade
 from gc_chat.responses.facade import ResponsesFacade
-from gc_chat.responses.index_store import ResponseIndex, ResponseRecord
+from gc_chat.responses.index_store import (
+    ResponseIndex,
+    ResponseRecord,
+    thread_key,
+)
+from gc_core.threads.facade import run_sync
+from gc_core.threads.models import (
+    LeaseRequest,
+    SessionState,
+    ThreadChange,
+    ThreadKey,
+)
 from gc_testkit.settings import make_settings
 
 # Host-guard пускает только loopback (gc_chat.http_guard).
@@ -37,7 +50,7 @@ def _joint(tmp_path, *, token: str = "", launch_root: str | None = None):
         del settings, kwargs
         raise AssertionError("agent")
 
-    index = ResponseIndex(str(threads))
+    index = ResponseIndex.for_threads_dir(str(threads))
     responses = ResponsesFacade(
         settings=settings, agent_factory=factory, index=index
     )
@@ -65,32 +78,51 @@ def _save(
         "previous_response_id": previous,
         "output": list(output or []),
     }
-    index.save(
-        ResponseRecord(
-            response_id,
-            thread_id,
-            cwd,
-            previous,
-            created,
-            status,
-            body,
+    run_sync(
+        index.save(
+            ResponseRecord(
+                response_id,
+                thread_id,
+                cwd,
+                previous,
+                created,
+                status,
+                body,
+            )
         )
     )
     return response_id
 
 
-def _jsonl(index: ResponseIndex, thread_id: str, payloads: list[dict]) -> None:
-    path = index.thread_path(thread_id)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as handle:
-        for seq, payload in enumerate(payloads, start=1):
-            record = {
-                "type": "message",
-                "system": "responses",
-                "seq": seq,
-                "payload": payload,
-            }
-            handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+def _jsonl(
+    index: ResponseIndex,
+    thread_id: str,
+    payloads: list[dict],
+    *,
+    state: SessionState | None = None,
+    key: ThreadKey | None = None,
+) -> None:
+    """История треда — одним шагом исполнителя, дословно (без отсева
+    повторов, который делает дописывание сессии)."""
+    run_sync(_step(index, key or thread_key(thread_id), payloads, state))
+
+
+async def _step(index, key, payloads, state) -> None:
+    store = index.threads.store
+    record = await store.claim(
+        key, LeaseRequest(owner="test", ttl=timedelta(minutes=1))
+    )
+    await store.commit(
+        key,
+        ThreadChange(
+            op_id=uuid.uuid4().hex,
+            expected_revision=record.revision,
+            lease=record.lease,
+            append_messages=payloads,
+            set_state=state,
+        ),
+    )
+    await store.release(key, record.lease)
 
 
 def _user(text: str) -> dict:
@@ -234,50 +266,31 @@ def test_dialogs_group_by_thread_head_and_updated_order(tmp_path):
     assert older["title"] == "х" * 120
 
 
-def test_dialogs_skip_foreign_threads_and_broken_index(tmp_path):
+def test_dialogs_skip_other_systems_and_broken_index(tmp_path):
     app, index, threads = _joint(tmp_path)
     cwd = tmp_path / "work"
     cwd.mkdir()
     _save(index, n=1, thread_id="kept", cwd=str(cwd), created=10)
     _jsonl(index, "kept", [_user("виден")])
-    _save(index, n=2, thread_id="foreign", cwd=str(cwd), created=20)
-    foreign = index.thread_path("foreign")
-    with open(foreign, "w", encoding="utf-8") as handle:
-        handle.write(
-            json.dumps(
-                {
-                    "type": "message",
-                    "system": "completions",
-                    "payload": _user("чужой"),
-                }
-            )
-            + "\n"
-        )
-    comp = threads / "data_completions_ephemeral.jsonl"
-    comp.write_text(
-        json.dumps(
-            {
-                "type": "message",
-                "system": "completions",
-                "payload": _user("эфемерный"),
-            }
-        )
-        + "\n",
-        encoding="utf-8",
+    _jsonl(
+        index,
+        "ephemeral",
+        [_user("эфемерный")],
+        key=ThreadKey(system="completions", thread="ephemeral"),
     )
+    # Ответ develop, испорченный на диске, — пропускается.
     broken = threads.parent / "responses-index" / (_rid(9) + ".json")
+    broken.parent.mkdir()
     broken.write_text("{", encoding="utf-8")
     _save(index, n=4, thread_id="no-jsonl", cwd=str(cwd), created=5)
-    bad_jsonl = index.thread_path("bad-jsonl")
     _save(index, n=5, thread_id="bad-jsonl", cwd=str(cwd), created=4)
-    os.makedirs(os.path.dirname(bad_jsonl), exist_ok=True)
-    with open(bad_jsonl, "w", encoding="utf-8") as handle:
-        handle.write("{not json}\n")
+    # История, испорченная чужим писателем, — без строк, которые не читаются.
+    bad_jsonl = threads / "data_responses_bad-jsonl.jsonl"
+    bad_jsonl.write_text("{not json}\n", encoding="utf-8")
     client = TestClient(app, base_url=LOOPBACK)
     body = client.get("/v1/dialogs").json()
     ids = [item["thread_id"] for item in body]
     assert "kept" in ids
-    assert "foreign" not in ids
     assert "ephemeral" not in ids
     assert "no-jsonl" in ids
     assert "bad-jsonl" in ids
@@ -285,7 +298,6 @@ def test_dialogs_skip_foreign_threads_and_broken_index(tmp_path):
     assert by_id["kept"]["title"] == "виден"
     assert by_id["no-jsonl"]["title"] == ""
     assert by_id["bad-jsonl"]["title"] == ""
-    assert "чужой" not in json.dumps(body)
     assert "эфемерный" not in json.dumps(body)
 
 
@@ -346,44 +358,33 @@ def _ask(text: str, turn: int = 1) -> dict:
     }
 
 
-def _meta(index: ResponseIndex, thread_id: str, body: dict) -> None:
-    data_path = index.thread_path(thread_id)
-    meta_path = os.path.join(
-        os.path.dirname(data_path),
-        "meta_"
-        + os.path.basename(data_path)[len("data_") : -len(".jsonl")]
-        + ".json",
-    )
-    with open(meta_path, "w", encoding="utf-8") as handle:
-        json.dump(body, handle)
+def _intents(logged: list[dict], current: list[dict] | None = None):
+    """Журнал намерений треда — как его ведёт ядро."""
+    return SessionState(intent_log=logged, current_intent=current or [])
 
 
 def test_dialog_title_reads_intent_log_after_summary(tmp_path):
-    app, index, _threads = _joint(tmp_path)
+    app, index, threads = _joint(tmp_path)
     cwd = tmp_path / "work"
     cwd.mkdir()
     long_prompt = "переписать разбор заголовка диалога целиком"
     later = "ещё более длинная формулировка следующей задачи после сводки"
     summary = '<technical type="dialog_summary">сводка без имени</technical>'
     _save(index, n=1, thread_id="summed", cwd=str(cwd), created=10)
-    _jsonl(index, "summed", [_user(summary), _user("ок")])
-    _meta(
+    _jsonl(
         index,
         "summed",
-        {
-            "user_intent_log": [_ask("ты тут?"), _ask(long_prompt, 2)],
-            "current_user_intent": [_ask("спасибо", 3)],
-        },
+        [_user(summary), _user("ок")],
+        state=_intents(
+            [_ask("ты тут?"), _ask(long_prompt, 2)], [_ask("спасибо", 3)]
+        ),
     )
     _save(index, n=2, thread_id="open-ask", cwd=str(cwd), created=20)
-    _jsonl(index, "open-ask", [_user(summary)])
-    _meta(
+    _jsonl(
         index,
         "open-ask",
-        {
-            "user_intent_log": [_ask("ты тут?")],
-            "current_user_intent": [_ask(later, 2)],
-        },
+        [_user(summary)],
+        state=_intents([_ask("ты тут?")], [_ask(later, 2)]),
     )
     _save(index, n=3, thread_id="task-still-wins", cwd=str(cwd), created=30)
     _jsonl(
@@ -394,23 +395,8 @@ def test_dialog_title_reads_intent_log_after_summary(tmp_path):
             _call("fs_read_file", {"path": "a"}),
             _call("turn_finish", {"task": "сжать лог"}),
         ],
+        state=_intents([_ask(later)]),
     )
-    _meta(
-        index,
-        "task-still-wins",
-        {"user_intent_log": [_ask(later)]},
-    )
-    _save(index, n=4, thread_id="broken-meta", cwd=str(cwd), created=5)
-    _jsonl(index, "broken-meta", [_user(summary)])
-    data_path = index.thread_path("broken-meta")
-    meta_path = os.path.join(
-        os.path.dirname(data_path),
-        "meta_"
-        + os.path.basename(data_path)[len("data_") : -len(".jsonl")]
-        + ".json",
-    )
-    with open(meta_path, "w", encoding="utf-8") as handle:
-        handle.write("{not json")
     client = TestClient(app, base_url=LOOPBACK)
     by_id = {
         item["thread_id"]: item for item in client.get("/v1/dialogs").json()
@@ -418,7 +404,22 @@ def test_dialog_title_reads_intent_log_after_summary(tmp_path):
     assert by_id["summed"]["title"] == long_prompt
     assert by_id["open-ask"]["title"] == later
     assert by_id["task-still-wins"]["title"] == "сжать лог"
-    assert by_id["broken-meta"]["title"] == ""
+
+
+def test_dialog_with_broken_meta_does_not_break_the_list(tmp_path):
+    """Сводка диалога v2 лежит в meta треда: испорченная meta уносит диалог
+    из списка (в develop он оставался без имени), остальные — на месте."""
+    app, index, threads = _joint(tmp_path)
+    cwd = tmp_path / "work"
+    cwd.mkdir()
+    _save(index, n=1, thread_id="kept", cwd=str(cwd), created=10)
+    _save(index, n=2, thread_id="broken-meta", cwd=str(cwd), created=5)
+    meta = threads / "meta_responses_broken-meta.json"
+    meta.write_text("{not json", encoding="utf-8")
+    client = TestClient(app, base_url=LOOPBACK)
+    response = client.get("/v1/dialogs")
+    assert response.status_code == 200
+    assert [item["thread_id"] for item in response.json()] == ["kept"]
 
 
 def test_dialog_feed_is_chain_order_with_text_and_output(tmp_path):

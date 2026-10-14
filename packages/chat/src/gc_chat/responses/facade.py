@@ -10,6 +10,7 @@ from collections import OrderedDict
 from typing import Any
 
 from gc_core.settings import LoadedSettings
+from gc_core.thread_paths import resolve_threads_dir
 from gc_core.thread_store import validate_thread_id
 
 from gc_chat.agent_config import prepare_agent_settings
@@ -19,6 +20,7 @@ from gc_chat.responses.index_store import (
     SYSTEM,
     ResponseIndex,
     ResponseRecord,
+    thread_key,
 )
 from gc_chat.responses.input_text import (
     IncomingTurn,
@@ -60,7 +62,9 @@ class ResponsesFacade:
         self._auth = auth_connector
         self._tools_cache = tools_cache
         self._os_backend = os_backend
-        self._index = index or ResponseIndex(_threads_dir(settings))
+        self._index = index or ResponseIndex.for_threads_dir(
+            resolve_threads_dir(settings)
+        )
         chat_api = settings.settings.chat_api
         self.auth_token = chat_api.auth_token
         self.cors_origins = _cors_origins(chat_api.cors_origins)
@@ -81,20 +85,20 @@ class ResponsesFacade:
             self._busy.discard(thread_id)
             logger.exception("responses agent")
             raise
-        return self._begin(incoming, thread_id, cwd, agent)
+        return await self._begin(incoming, thread_id, cwd, agent)
 
     def new_dialog_cwd(self, sent: str | None = None) -> str:
         """Корень нового хода: абсолютный путь или launch_root."""
         return cwd_for_new(sent, self._settings.settings.chat_api.launch_root)
 
-    def get(self, response_id: str) -> dict:
-        record = self._index.load(response_id)
+    async def get(self, response_id: str) -> dict:
+        record = await self._index.load(response_id)
         if record is None:
             raise ApiError(404, _NOT_FOUND, _RESPONSE_NOT_FOUND)
         return record.response
 
     async def cancel(self, response_id: str) -> dict:
-        record = self._index.load(response_id)
+        record = await self._index.load(response_id)
         live = self._live.get(response_id)
         if record is None and live is None:
             raise ApiError(404, _NOT_FOUND, _RESPONSE_NOT_FOUND)
@@ -102,7 +106,7 @@ class ResponsesFacade:
             return record.response if record is not None else {}
         await live.request_stop()
         await live.done.wait()
-        return live.result()
+        return await live.result()
 
     def turn_busy(self, thread_id: str) -> bool:
         return thread_id in self._busy
@@ -123,7 +127,7 @@ class ResponsesFacade:
                 thread_id = validate_thread_id(str(uuid.uuid4()))
                 cwd = self.new_dialog_cwd(incoming.cwd_sent)
             else:
-                record = self._index.load(incoming.previous_response_id)
+                record = await self._index.load(incoming.previous_response_id)
                 if record is None:
                     raise ApiError(404, _NOT_FOUND, _RESPONSE_NOT_FOUND)
                 thread_id = record.thread_id
@@ -170,7 +174,7 @@ class ResponsesFacade:
         for thread_id in idle[: max(0, len(self._agents) - MAX_LIVE_AGENTS)]:
             await _safe_aclose(self._agents.pop(thread_id))
 
-    def _begin(
+    async def _begin(
         self, incoming: IncomingTurn, thread_id: str, cwd: str, agent: Any
     ) -> TurnRun:
         response_id = "resp_" + str(uuid.uuid4())
@@ -192,14 +196,17 @@ class ResponsesFacade:
             mapper.snapshot(),
         )
         try:
-            self._index.save(record)
+            await self._index.save(record)
+            flow = await ToolFlow.start(
+                self._index.threads, thread_key(thread_id)
+            )
         except Exception:
             self._busy.discard(thread_id)
             raise
         run = TurnRun(
             agent=agent,
             mapper=mapper,
-            flow=ToolFlow(self._index.thread_path(thread_id)),
+            flow=flow,
             index=self._index,
             record=record,
             prompt=incoming.text,
@@ -213,12 +220,6 @@ class ResponsesFacade:
     def _release(self, thread_id: str, response_id: str) -> None:
         self._busy.discard(thread_id)
         self._live.pop(response_id, None)
-
-
-def _threads_dir(settings: LoadedSettings) -> str:
-    from gc_core.thread_store import resolve_threads_dir
-
-    return resolve_threads_dir(settings)
 
 
 def _cors_origins(raw: list[str]) -> list[str]:

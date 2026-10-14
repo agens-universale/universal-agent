@@ -164,7 +164,7 @@ def test_joint_and_responses_list_the_same_ids(tmp_path):
     responses = ResponsesFacade(
         settings=settings,
         agent_factory=factory,
-        index=ResponseIndex(str(threads)),
+        index=ResponseIndex.for_threads_dir(str(threads)),
     )
     completions = CompletionsFacade(settings=settings, agent_factory=factory)
     joint = TestClient(create_joint(responses, completions), base_url=LOOPBACK)
@@ -457,7 +457,7 @@ def test_responses_rejects_other_models_without_a_thread(tmp_path):
             **{"paths.threads_data_path": str(threads)},
         ),
         agent_factory=factory,
-        index=ResponseIndex(str(threads)),
+        index=ResponseIndex.for_threads_dir(str(threads)),
     )
     client = TestClient(create_responses(facade), base_url=LOOPBACK)
     for model in ("backend-model", "other", "", "gc-ua"):
@@ -469,8 +469,7 @@ def test_responses_rejects_other_models_without_a_thread(tmp_path):
     missing = client.post("/v1/responses", json={"input": "привет"})
     assert missing.status_code == 400
     assert created == []
-    index = threads.parent / "responses-index"
-    assert not index.exists()
+    assert list(threads.glob("meta_*.json")) == []
     opened = client.post(
         "/v1/responses", json={"model": "GC-UA", "input": "привет"}
     )

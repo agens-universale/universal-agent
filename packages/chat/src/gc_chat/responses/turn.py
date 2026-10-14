@@ -1,4 +1,4 @@
-"""Один ход: ``AsyncAgent.stream``, карточки из jsonl, терминальный статус."""
+"""Один ход: ``AsyncAgent.stream``, карточки из хвоста треда, терминальный статус."""
 
 from __future__ import annotations
 
@@ -80,10 +80,10 @@ class TurnRun:
                 await asyncio.wait_for(self.done.wait(), _TOOL_POLL_S)
             except TimeoutError:
                 continue
-        return self.result()
+        return await self.result()
 
-    def result(self) -> dict:
-        loaded = self._index.load(self.response_id)
+    async def result(self) -> dict:
+        loaded = await self._index.load(self.response_id)
         if loaded is None:
             return self._record.response
         return loaded.response
@@ -157,7 +157,7 @@ class TurnRun:
     async def _watch(self, stop: asyncio.Event) -> None:
         while not stop.is_set():
             async with self._emit_lock:
-                _put(self._queue, self._tool_events())
+                _put(self._queue, await self._tool_events())
             try:
                 await asyncio.wait_for(stop.wait(), _TOOL_POLL_S)
             except TimeoutError:
@@ -165,7 +165,7 @@ class TurnRun:
 
     async def _after_stream(self, failed: BaseException | None) -> None:
         async with self._emit_lock:
-            events = self._tool_events()
+            events = await self._tool_events()
             if failed is None and not self.cancel_requested:
                 answer = SubmitSolution.present_result(
                     getattr(self.agent, "last_answer", None),
@@ -196,14 +196,14 @@ class TurnRun:
                 status,
                 body,
             )
-            self._index.save(self._record)
+            await self._index.save(self._record)
             self.sealed = True
             self._release_busy(self.thread_id, self.response_id)
             self.done.set()
 
-    def _tool_events(self) -> list[dict]:
+    async def _tool_events(self) -> list[dict]:
         events: list[dict] = []
-        for report in self._flow.poll():
+        for report in await self._flow.poll():
             events.extend(self._mapper.apply_tool(report))
         return events
 
