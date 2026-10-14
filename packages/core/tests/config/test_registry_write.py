@@ -626,7 +626,10 @@ def test_first_assign_write_into_an_old_config_adds_only_the_chosen_binding(tmp_
     assert snapshot["assign"] == {"intent_scope": "light"}
     assert "раскомментируйте" not in text                 # комментарий-пример шаблона не переехал
     router = ModelRouter(AppConfig.model_validate(snapshot), level_provider=lambda: "light")
-    for consumer in ("command_judge", "finish_gate", "summary"):
+    # PR140 Р1: судьи и суммаризация без привязки идут кодовым уровнем default,
+    # поэтому «не приехали привязки шаблона» проверяем на потребителях вне таблицы
+    # unbound_level — они по-прежнему следуют за уровнем шага.
+    for consumer in ("text_answer_judge", "memory_compaction"):
         assert router.resolve(consumer, check_breaker=False).alias == "flash"
 
 
