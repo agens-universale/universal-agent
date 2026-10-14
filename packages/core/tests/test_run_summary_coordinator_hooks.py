@@ -428,7 +428,7 @@ async def test_deferred_startup_preserves_current_batch_across_rounds(monkeypatc
     monkeypatch.setattr(rsc, "exceeded_summary_triggers", lambda **_kw: len(calls) < rounds)
     coord = RunSummaryCoordinator(ctx=ctx_stub, state=state, thread_session=None,
         summary_trigger_chars=10, is_cli_mode=False, pre_backend_trigger_reason="pre_backend",
-        deferred_startup_compaction=True)
+        deferred_startup_compaction=True, startup_progress_guard=False)
     await coord.apre_backend_compaction_hook(current, "user_ask")
     assert calls == ["pre_run"] * rounds
     assert state.messages[-1] == current[-1]
@@ -452,7 +452,7 @@ async def test_deferred_startup_keeps_the_existing_round_limit(monkeypatch, ctx_
     monkeypatch.setattr(rsc, "log_pre_run_max_rounds", lambda *_a, **kw: limit_logs.append(kw))
     coord = RunSummaryCoordinator(ctx=ctx_stub, state=state, thread_session=None,
         summary_trigger_chars=10, is_cli_mode=False, pre_backend_trigger_reason="pre_backend",
-        deferred_startup_compaction=True)
+        deferred_startup_compaction=True, startup_progress_guard=False)
     await coord.apre_backend_compaction_hook(current, "user_ask")
     assert len(calls) == 20
     assert limit_logs[0]["max_rounds"] == 20

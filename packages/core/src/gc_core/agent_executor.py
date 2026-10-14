@@ -1012,6 +1012,10 @@ class AgentExecutor:
             logger=logger,
             limits_provider=limits_provider,
             deferred_startup_compaction=deferred_startup_compaction,
+            startup_progress_guard=(
+                deferred_startup_compaction
+                and (execution_patch is None or execution_patch("startup-compaction-progress-v1"))
+            ),
         )
         self._ctx.on_summary_applied = summary.on_summary_applied
         self._ctx.is_cli_mode = is_cli_mode

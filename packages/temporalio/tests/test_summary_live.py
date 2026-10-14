@@ -335,3 +335,90 @@ async def test_automatic_summary_full_trace_parity(
             assert len(requests) == count
     finally:
         await provider.aclose()
+
+
+@pytest.mark.parametrize('legacy_progress', [False, True], ids=['progress', 'old20'])
+async def test_startup_long_preserved_request_progress_and_replay(
+    tmp_path, monkeypatch, summary_http, legacy_progress,
+):
+    """A 5700-char new request stays whole; startup needs one summary or old 20."""
+    binary = temporal_cli()
+    from gc_core.config_modules import env_vars
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(env_vars, 'env', env_vars.EnvVars(gc_home=tmp_path / 'home'))
+    url, requests, categories, scenario = summary_http
+    scenario['name'] = 'long_preserved'
+    config = WorkerConfig.model_validate({
+        'workflow_queue': 'startup-summary', 'resource_queue': 'startup-summary',
+        'model_queue': 'startup-summary', 'state_dir': str(tmp_path),
+        'profiles': {'test': {'workspace': str(tmp_path), 'core': {
+            'level': 'default',
+            'backend': {'api_mode': 'chat_completions', 'completions_url': url,
+                        'chat_completion_kwargs': {'stream': False}},
+            'agent': {'model': 'scripted', 'max_steps': 5, 'stop_tools': ['project_memory'],
+                      'use_local_subagents': False, 'strict_turn_finish_validation': False},
+            'logging': {'save_logs': False, 'console_trace': False},
+            'tui': {'text_answer_mode': 'deny'},
+            'summary': {'chat_completions_summary_trigger_chars': 2000,
+                        'chat_completions_summary_trigger_tokens': 0,
+                        'chat_completions_summary_turn_end_trigger_chars': 0,
+                        'chat_completions_summary_turn_end_trigger_tokens': 0},
+        }}}})
+    provider, native, stores = build_runtime(config)
+    main_inputs = []
+    resolve_messages = native._resolve_message_refs
+
+    async def record_main_input(call):
+        resolved = await resolve_messages(call)
+        if resolved['consumer'] == 'main':
+            main_inputs.append(deepcopy(resolved))
+        return resolved
+
+    native._resolve_message_refs = record_main_input
+    try:
+        async with await WorkflowEnvironment.start_local(dev_server_existing_path=binary) as env:
+            options = worker_kwargs(config, native, stores)
+            if legacy_progress:
+                options['patch_activation_callback'] = lambda item: item.patch_id != 'startup-compaction-progress-v1'
+            async with Worker(env.client, **options):
+                handle = await env.client.start_workflow(UniversalAgentWorkflow.run,
+                    RunRequest('test', 'files', 'test', 'startup', ['x' * 5700],
+                               'startup-summary', 'startup-summary', message_ids=['new']),
+                    id='startup-summary', task_queue='startup-summary')
+                result = await asyncio.wait_for(handle.result(), 60)
+                history = await handle.fetch_history()
+            version = 'old20' if legacy_progress else 'progress'
+            (tmp_path / f'startup-history-{version}.json').write_text(history.to_json())
+            evidence = {'categories': categories, 'requests': len(requests), 'new_request_chars': 5700,
+                        'summary_trigger_chars': 2000, 'legacy_progress': legacy_progress}
+            (tmp_path / 'startup-http-evidence.json').write_text(json.dumps(evidence))
+            assert 'Verified 42' in str(result['answer'])
+            before_main = categories[:categories.index('main')]
+            assert before_main.count('summary') == (20 if legacy_progress else 1)
+            assert before_main.count('memory') == (20 if legacy_progress else 1)
+            assert categories.count('main') == 1
+            main = requests[categories.index('main')]
+            assert sum(m.get('role') == 'user' and m.get('content') == 'x' * 5700 for m in main['messages']) == 1
+            assert len(main_inputs) == 1
+            canonical = main_inputs[0]['messages']
+            assert sum(m.get('id') == 'new' for m in canonical) == 1
+            incoming = next(m for m in canonical if m.get('id') == 'new')
+            assert incoming['role'] == 'user'
+            assert incoming['content'] == 'x' * 5700
+            messages = provider.stores['files'].load_messages('test', 'startup')
+            assert sum(m.get('id') == 'new' for m in messages) == 1
+            assert next(m for m in messages if m.get('id') == 'new') == incoming
+            from gc_core.message_policy.user_message_policy import is_dialog_summary_user_message_text
+            matches = [{'id': m.get('id'), 'role': m.get('role'),
+                        'content_chars': len(str(m.get('content', ''))),
+                        'dialog_summary': is_dialog_summary_user_message_text(str(m.get('content', '')))}
+                       for m in canonical if 'x' * 5700 in str(m.get('content', ''))]
+            evidence['matching_canonical_messages'] = matches
+            evidence['canonical_new_count'] = sum(m.get('id') == 'new' for m in canonical)
+            (tmp_path / 'startup-http-evidence.json').write_text(json.dumps(evidence))
+            count = len(requests)
+            await Replayer(workflows=[UniversalAgentWorkflow]).replay_workflow(history)
+            assert len(requests) == count
+    finally:
+        await provider.aclose()

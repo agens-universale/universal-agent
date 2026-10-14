@@ -18,6 +18,7 @@ from gc_core.config_modules.summary import SUMMARY_CHARS_PER_TOKEN
 from gc_core.execution.contracts import ExecutionFailure
 from gc_core.execution.message_keys import filter_messages_not_in_state
 from gc_core.execution.ports import port
+from gc_core.message_format.serialization import calc_history_chars_for_trigger
 from gc_core.execution.message_keys import (
     filter_messages_not_in_state as filter_messages_not_in_state,
 )
@@ -25,6 +26,7 @@ from gc_core.summarize.compaction import (
     arun_summary_compaction,
     exceeded_summary_triggers,
     history_exceeds_summary_trigger,
+    without_system_messages,
 )
 from gc_core.summarize.config import ResolvedSummaryLimits
 from gc_core.summarize.summary_logging import (
@@ -184,6 +186,7 @@ class RunSummaryCoordinator:
         logger: Any | None = None,
         limits_provider: Callable[[], ResolvedSummaryLimits] | None = None,
         deferred_startup_compaction: bool = False,
+        startup_progress_guard: bool = True,
     ) -> None:
         self._ctx = ctx
         self._state = state
@@ -194,6 +197,7 @@ class RunSummaryCoordinator:
         self._turn_end_trigger_tokens = turn_end_trigger_tokens
         self._limits_provider = limits_provider
         self._startup_compaction_pending = deferred_startup_compaction
+        self._startup_progress_guard = startup_progress_guard
         self._is_cli_mode = is_cli_mode
         self._pre_backend_trigger_reason = pre_backend_trigger_reason
         self._logger = logger
@@ -379,11 +383,18 @@ class RunSummaryCoordinator:
         self._startup_compaction_pending = False
         reason = "pre_run" if startup else self._pre_backend_trigger_reason
         rounds = _PRE_RUN_SUMMARY_MAX_ROUNDS if startup else 1
+        guard_progress = startup and self._startup_progress_guard
         for _ in range(rounds):
+            before_chars = self._history_chars(self._state.messages) if guard_progress else 0
             compacted = await self._acompact_backend_batch(
                 current_messages, mode, reason
             )
             if not compacted or not startup or self._summary_trigger_chars <= 0:
+                return
+            if guard_progress and (
+                self._history_chars(current_messages) > self._summary_trigger_chars
+                or self._history_chars(self._state.messages) >= before_chars
+            ):
                 return
         if exceeded_summary_triggers(
             state=self._state,
@@ -397,6 +408,13 @@ class RunSummaryCoordinator:
                 thread_id=getattr(self._thread_session, "thread_id", None),
                 max_rounds=_PRE_RUN_SUMMARY_MAX_ROUNDS,
             )
+
+    def _history_chars(self, messages: list[dict]) -> int:
+        return calc_history_chars_for_trigger(
+            without_system_messages(messages),
+            tags=self._projection_tags(),
+            strip_think=True,
+        )
 
     async def _acompact_backend_batch(
         self, current_messages: list[dict], mode: str, trigger_reason: str
