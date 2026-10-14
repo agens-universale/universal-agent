@@ -19,7 +19,6 @@ from datetime import UTC, datetime, timedelta
 
 from gc_core.threads.errors import (
     OperationMismatch,
-    OwnershipError,
     ThreadConflict,
 )
 from gc_core.threads.models import (
@@ -42,6 +41,12 @@ from gc_core.threads.models import (
     Usage,
     change_digest,
     check_stream_name,
+)
+from gc_core.threads.rules import (
+    check_writer,
+    granted_lease,
+    page_of,
+    same_lease,
 )
 from gc_core.threads.store import ThreadStore
 
@@ -78,22 +83,6 @@ class _Stored:
     at: datetime
 
 
-def _instant(stamp: str | None) -> datetime:
-    """Момент времени из ISO-8601 (``Z`` или смещение); пусто — самое раннее."""
-    if not stamp:
-        return datetime.min.replace(tzinfo=UTC)
-    return datetime.fromisoformat(stamp)
-
-
-def _after_cursor(record: ThreadRecord, cursor: str) -> bool:
-    """Идёт ли запись после курсора в порядке (updated_at ↓, system, thread)."""
-    updated, system, thread = cursor.split("|", 2)
-    mine, theirs = _instant(record.info.updated_at), _instant(updated)
-    if mine != theirs:
-        return mine < theirs
-    return (record.key.system, record.key.thread) > (system, thread)
-
-
 class MemoryThreadStore(ThreadStore):
     """``clock`` — часы хранилища: по ним истекает аренда и стареют квитанции."""
 
@@ -110,11 +99,6 @@ class MemoryThreadStore(ThreadStore):
 
     def _now(self) -> str:
         return self._clock().isoformat()
-
-    def _expired(self, lease: Lease) -> bool:
-        return (
-            lease.expires_at is not None and lease.expires_at <= self._clock()
-        )
 
     def _thread(self, key: ThreadKey) -> _Thread:
         thread = self._threads.get(key)
@@ -181,13 +165,7 @@ class MemoryThreadStore(ThreadStore):
         return receipt
 
     def _check_lease(self, thread: _Thread | None, lease: Lease) -> None:
-        current = thread.lease if thread is not None else None
-        if current is None:
-            raise OwnershipError("запись без claim")
-        if (current.owner, current.epoch) != (lease.owner, lease.epoch):
-            raise OwnershipError("аренда сменилась: запись по чужой эпохе")
-        if self._expired(current):
-            raise OwnershipError("аренда истекла")
+        check_writer(thread.lease if thread else None, lease, self._clock())
 
     def _append(self, thread: _Thread, stream: str, items) -> None:
         entries = thread.streams.setdefault(stream, [])
@@ -279,33 +257,9 @@ class MemoryThreadStore(ThreadStore):
         return None if thread is None else self._record(key, thread)
 
     async def list_threads(self, query: ThreadQuery) -> Page[ThreadRecord]:
-        records = [self._record(k, t) for k, t in self._threads.items()]
-        records = [r for r in records if self._matches(r, query)]
-        records.sort(key=lambda r: (r.key.system, r.key.thread))
-        records.sort(key=lambda r: _instant(r.info.updated_at), reverse=True)
-        if query.cursor:
-            records = [r for r in records if _after_cursor(r, query.cursor)]
-        page = records[: query.limit]
-        cursor = None
-        if len(records) > query.limit:
-            last = page[-1]
-            cursor = (
-                f"{last.info.updated_at}|{last.key.system}|{last.key.thread}"
-            )
-        return Page[ThreadRecord](items=page, next_cursor=cursor)
-
-    @staticmethod
-    def _matches(record: ThreadRecord, query: ThreadQuery) -> bool:
-        updated = _instant(record.info.updated_at)
-        after, before = query.updated_after, query.updated_before
-        checks = (
-            query.system is None or record.key.system == query.system,
-            query.workspace is None
-            or record.info.workspace == query.workspace,
-            after is None or updated > _instant(after),
-            before is None or updated < _instant(before),
+        return page_of(
+            (self._record(k, t) for k, t in self._threads.items()), query
         )
-        return all(checks)
 
     async def read_stream(
         self,
@@ -376,27 +330,16 @@ class MemoryThreadStore(ThreadStore):
 
     async def claim(self, key: ThreadKey, lease: LeaseRequest) -> ThreadRecord:
         thread = self._thread(key)
-        current = thread.lease
-        expires = None if lease.ttl is None else self._clock() + lease.ttl
-        if current is not None and not self._expired(current):
-            if current.owner != lease.owner:
-                raise OwnershipError(f"тред ведёт {current.owner!r}")
-            epoch = current.epoch
-        else:
-            thread.epoch += 1
-            epoch = thread.epoch
-        thread.lease = Lease(
-            owner=lease.owner, epoch=epoch, expires_at=expires
+        granted = granted_lease(
+            thread.lease, thread.epoch, lease, self._clock()
         )
+        thread.epoch = granted.epoch
+        thread.lease = granted
         return self._record(key, thread)
 
     async def release(self, key: ThreadKey, lease: Lease) -> None:
         thread = self._threads.get(key)
-        current = thread.lease if thread else None
-        if current and (current.owner, current.epoch) == (
-            lease.owner,
-            lease.epoch,
-        ):
+        if thread is not None and same_lease(thread.lease, lease):
             thread.lease = None
 
     async def delete(self, key: ThreadKey, *, op_id: str) -> None:

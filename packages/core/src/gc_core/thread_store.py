@@ -1,12 +1,10 @@
 import glob
-import hashlib
 import json
 import logging
 import os
 import re
 import threading
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 from gc_core.attachments.numbering import (
@@ -37,7 +35,6 @@ from gc_core.persistence.meta_ownership import (
     resolve_runtime_flag_name,
 )
 from gc_core.persistence.thread_meta_mapper import (
-    ThreadMetaMapper,
     read_optional_nonneg_int,
 )
 from gc_core.settings import settings_of
@@ -46,13 +43,12 @@ from gc_core.thread_paths import (
     sanitize_system_id,
     validate_thread_id,
 )
+from gc_core.threads import file_layout
 from gc_core.utils.aio_compat import await_callback
 from gc_core.utils.atomic_io import atomic_replace
 from gc_core.utils.generate_message_id import (
     generate_msg_id_sha256 as generate_message_id_func,
 )
-
-_META_SCHEMA_VERSION = 2
 
 # Process-local счётчик последнего выданного seq sidecar (SPEC 2026-07-30-sidecar-append-o1-seq).
 # Ключ — нормализованный путь jsonl. Cold init на первый append для path; далее O(1).
@@ -93,27 +89,9 @@ def _bump_image_seq(base_meta: Dict[str, Any], fresh: List[Dict]) -> None:
 _logger = logging.getLogger(__name__)
 
 
-def _thread_paths_legacy(threads_dir: str, thread_id: str) -> Tuple[str, str]:
-    """Старый формат файлов без system в имени."""
-    normalized = validate_thread_id(thread_id)
-    data_path = os.path.join(threads_dir, f"data_{normalized}.jsonl")
-    meta_path = os.path.join(threads_dir, f"meta_{normalized}.json")
-    return data_path, meta_path
-
-
-def _thread_paths(
-    threads_dir: str, system_id: str, thread_id: str
-) -> Tuple[str, str]:
-    """Новый формат файлов с system в имени."""
-    sys_norm = sanitize_system_id(system_id)
-    normalized_thread_id = validate_thread_id(thread_id)
-    data_path = os.path.join(
-        threads_dir, f"data_{sys_norm}_{normalized_thread_id}.jsonl"
-    )
-    meta_path = os.path.join(
-        threads_dir, f"meta_{sys_norm}_{normalized_thread_id}.json"
-    )
-    return data_path, meta_path
+# Раскладка файлов — общая с FileThreadStore v2 (gc_core.threads.file_layout).
+_thread_paths_legacy = file_layout.legacy_thread_paths
+_thread_paths = file_layout.thread_paths
 
 
 def thread_meta_path(threads_dir: str, system_id: str, thread_id: str) -> str:
@@ -121,13 +99,7 @@ def thread_meta_path(threads_dir: str, system_id: str, thread_id: str) -> str:
     return _thread_paths(threads_dir, system_id, thread_id)[1]
 
 
-def subagent_trace_path(
-    threads_dir: str, system_id: str, thread_id: str
-) -> str:
-    """Путь sidecar nested-трейса: data_subagents_{system}_{thread_id}.jsonl."""
-    sys_norm = sanitize_system_id(system_id)
-    tid = validate_thread_id(thread_id)
-    return os.path.join(threads_dir, f"data_subagents_{sys_norm}_{tid}.jsonl")
+subagent_trace_path = file_layout.subagent_trace_path
 
 
 def touched_journal_path(
@@ -139,13 +111,7 @@ def touched_journal_path(
     return os.path.join(threads_dir, f"touched_{sys_norm}_{tid}.json")
 
 
-def edits_journal_path(
-    threads_dir: str, system_id: str, thread_id: str
-) -> Path:
-    """Путь журнала правок агента: edits_<system>_<thread_id>.jsonl."""
-    sys_norm = sanitize_system_id(system_id)
-    tid = validate_thread_id(thread_id)
-    return Path(threads_dir) / f"edits_{sys_norm}_{tid}.jsonl"
+edits_journal_path = file_layout.edits_journal_path
 
 
 def ensure_threads_dir(threads_dir: str) -> None:
@@ -421,84 +387,26 @@ def read_subagent_trace(
     return records
 
 
-def _parse_message_record(row: str) -> Optional[Dict[str, Any]]:
-    """Запись типа message из строки jsonl (в т.ч. в строковой обёртке) или None."""
-    try:
-        record = json.loads(row)
-    except json.JSONDecodeError:
-        return None
-    # Допускаем строковую обёртку (двойной json.dumps строки записи).
-    if isinstance(record, str):
-        try:
-            record = json.loads(record)
-        except json.JSONDecodeError:
-            return None
-    if not isinstance(record, dict) or record.get("type") != "message":
-        return None
-    return record
+_parse_message_record = file_layout.parse_message_record
 
 
 def load_thread_messages(
     threads_dir: str, system_id: str, thread_id: str
 ) -> Tuple[List[Dict[str, Any]], Set[str], int]:
-    data_path, _ = _thread_paths(threads_dir, system_id, thread_id)
-    if not os.path.exists(data_path):
-        # fallback: старые файлы без system в имени
-        data_path, _ = _thread_paths_legacy(threads_dir, thread_id)
-    if not os.path.exists(data_path):
-        return [], set(), 0
-
-    messages: List[Dict[str, Any]] = []
-    message_keys: Set[str] = set()
-    max_seq = 0
-    with open(data_path, encoding="utf-8") as f:
-        for line in f:
-            row = line.strip()
-            record = _parse_message_record(row) if row else None
-            if record is None:
-                continue
-            seq = record.get("seq")
-            if isinstance(seq, int) and seq > max_seq:
-                max_seq = seq
-            payload = record.get("payload")
-            if not isinstance(payload, dict):
-                continue
-            # Ключ — по записи как есть, до синтеза id: так же он считается при
-            # записи, и сверка после конфликта ревизии сходится.
-            message_keys.add(make_message_key(payload))
-            if not isinstance(payload.get("id"), str) or not payload["id"]:
-                # Legacy records need the same identity on every snapshot,
-                # including after a process restart and unrelated deletions.
-                identity = f"{sanitize_system_id(system_id)}:{thread_id}:{row}"
-                payload = dict(payload)
-                payload["id"] = (
-                    "m_" + hashlib.sha256(identity.encode()).hexdigest()[:32]
-                )
-                # И ключ с синтезированным id: эта запись в памяти уже с ним,
-                # и история, отправленная в ход целиком (Responses без
-                # previous_response_id), не должна дописаться второй раз.
-                message_keys.add(make_message_key(payload))
-            messages.append(payload)
-
-    return messages, message_keys, max_seq
+    records, message_keys, max_seq = file_layout.read_history_file(
+        file_layout.history_file(threads_dir, system_id, thread_id),
+        system_id,
+        thread_id,
+    )
+    return [payload for _seq, _ts, payload in records], message_keys, max_seq
 
 
 def load_thread_meta(
     threads_dir: str, system_id: str, thread_id: str
 ) -> Dict[str, Any]:
-    _, meta_path = _thread_paths(threads_dir, system_id, thread_id)
-    if not os.path.exists(meta_path):
-        # fallback: старые файлы без system в имени
-        _, meta_path = _thread_paths_legacy(threads_dir, thread_id)
-
-    if not os.path.exists(meta_path):
-        return {}
-
-    with open(meta_path, encoding="utf-8") as f:
-        data = json.load(f)
-    if not isinstance(data, dict):
-        return {}
-    return data
+    return file_layout.read_meta_file(
+        file_layout.meta_file(threads_dir, system_id, thread_id)
+    )
 
 
 def save_thread_meta(
@@ -508,17 +416,10 @@ def save_thread_meta(
     _, meta_path = _thread_paths(threads_dir, sys_norm, thread_id)
     ensure_threads_dir(threads_dir)
 
-    to_save = ThreadMetaMapper.ensure_v2_meta(dict(meta))
-    to_save["thread_id"] = validate_thread_id(thread_id)
-    to_save["system"] = sys_norm
-    to_save["schema_version"] = _META_SCHEMA_VERSION
-    to_save["updated_at"] = _utc_now_iso()
-    if not to_save.get("created_at"):
-        to_save["created_at"] = to_save["updated_at"]
-
+    to_save = file_layout.stamp_meta(meta, sys_norm, thread_id, _utc_now_iso())
     tmp_path = f"{meta_path}.tmp"
     with open(tmp_path, "w", encoding="utf-8") as f:
-        json.dump(to_save, f, ensure_ascii=False, indent=2)
+        f.write(file_layout.meta_text(to_save))
     atomic_replace(tmp_path, meta_path)
 
 
@@ -741,15 +642,11 @@ def append_new_thread_messages(
             if key in known_message_keys:
                 continue
             seq += 1
-            record = {
-                "type": "message",
-                "thread_id": thread_id,
-                "system": sanitize_system_id(system_id),
-                "seq": seq,
-                "ts": _utc_now_iso(),
-                "payload": message,
-            }
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+            f.write(
+                file_layout.history_line(
+                    system_id, thread_id, seq, _utc_now_iso(), message
+                )
+            )
             known_message_keys.add(key)
             written_payloads.append(message)
             wrote += 1

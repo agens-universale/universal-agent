@@ -41,7 +41,6 @@ from gc_core.threads.models import (
     ThreadInfo,
     ThreadKey,
     ThreadQuery,
-    TodoItem,
     Usage,
 )
 from gc_core.threads.store import ThreadStore
@@ -324,7 +323,7 @@ async def check_state_usage_info_roundtrip(store, _clock: FakeClock) -> None:
     lease = await _claim(store)
     state = SessionState(
         working_memory={"goal": "g"},
-        todo=[TodoItem(content="шаг", status="pending")],
+        todo=[{"content": "шаг", "status": "pending"}],
         user_turn_seq=2,
     )
     usage = Usage(by_category={"main": {"input": 1}}, currency="RUB")

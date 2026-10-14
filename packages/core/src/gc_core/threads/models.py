@@ -88,17 +88,13 @@ class ThreadInfo(_Model):
     messages_count: int = 0
 
 
-class TodoItem(_Model):
-    content: str
-    status: Literal["pending", "in_progress", "completed"]
-
-
 class SessionState(_Model):
     """Состояние сессии агента, переживающее ходы."""
 
     working_memory: dict[str, str] = Field(default_factory=dict)
     notes: str = ""
-    todo: list[TodoItem] = Field(default_factory=list)
+    #: Пункты ``session_todo`` как есть: смысл задач проверяет ядро, не хранилище.
+    todo: list[JsonObject] = Field(default_factory=list)
     fetch_url_cache: JsonObject = Field(default_factory=dict)
     confirm_rules: JsonObject = Field(default_factory=dict)
     intent_log: list[JsonObject] = Field(default_factory=list)

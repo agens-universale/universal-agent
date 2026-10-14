@@ -1,0 +1,772 @@
+"""Файловое хранилище тредов v2 — в прежнем формате файлов develop.
+
+Треды лежат там же и так же, как всегда (``gc_core.threads.file_layout``):
+история ``data_*.jsonl``, meta ``meta_*.json`` (те же ключи — через
+``meta_map``), трасса субагентов, журнал правок, архивы ``__pre_summary__``,
+картинки ``images/``. Новое только добавляется: секция ``v2`` в
+``.store/<h>/control.json`` (ревизия, аренда, высшие отметки потоков),
+потоки ``stream_*`` и каталог ``aliases/``. Ключ ``owner_id`` старого журнала
+не трогается — агент develop после отката пишет в такие треды как раньше.
+
+Атомарность — журнал ``.store/`` (``file_tx``) под блокировкой треда
+``thread_read_scope``. Несколько процессов на одной ФС безопасны, пока тред
+пишет один из них (аренда); блокировкам на NFS доверять нельзя.
+"""
+
+from __future__ import annotations
+
+import copy
+import hashlib
+import json
+import os
+from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import Any
+
+from gc_core.thread_store_journal import (
+    _control,
+    _control_path,
+    thread_read_scope,
+)
+from gc_core.threads import file_layout as layout
+from gc_core.threads import file_tx
+from gc_core.threads.errors import (
+    OperationMismatch,
+    ThreadConflict,
+)
+from gc_core.threads.meta_map import (
+    ARCHIVE_SUFFIX_KEY,
+    meta_from_parts,
+    parts_from_meta,
+)
+from gc_core.threads.models import (
+    ArchiveInfo,
+    BlobRef,
+    JsonObject,
+    Lease,
+    LeaseRequest,
+    Page,
+    Receipt,
+    SideChange,
+    StreamEntry,
+    ThreadChange,
+    ThreadKey,
+    ThreadQuery,
+    ThreadRecord,
+    change_digest,
+    check_stream_name,
+)
+from gc_core.threads.rules import (
+    check_writer,
+    granted_lease,
+    page_of,
+    same_lease,
+)
+from gc_core.threads.store import ThreadStore
+
+_HISTORY = "messages"
+_SUBAGENTS = "subagent_events"
+_EDITS = "edits"
+_ALIASES_DIR = "aliases"
+_EXTENSIONS = {"image/png": ".png", "image/jpeg": ".jpg"}
+_SUFFIX_FORMAT = "%Y%m%d_%H%M%S"
+
+
+def _line(record: JsonObject) -> bytes:
+    return (json.dumps(record, ensure_ascii=False) + "\n").encode()
+
+
+def _jsonl(path: str | Path) -> list[JsonObject]:
+    if not os.path.exists(path):
+        return []
+    rows: list[JsonObject] = []
+    with open(path, encoding="utf-8") as stream:
+        for line in stream:
+            row = line.strip()
+            if not row:
+                continue
+            try:
+                value = json.loads(row)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(value, dict):
+                rows.append(value)
+    return rows
+
+
+class FileThreadStore(ThreadStore):
+    """Треды в каталоге ``threads_dir`` (абсолютный путь из настроек)."""
+
+    def __init__(
+        self,
+        threads_dir: str | Path,
+        *,
+        durability: file_tx.Durability = "atomic",
+        clock: Callable[[], datetime] | None = None,
+    ) -> None:
+        self._dir = str(Path(threads_dir).absolute())
+        self._durability = durability
+        self._clock = clock or (lambda: datetime.now(UTC))
+
+    @property
+    def threads_dir(self) -> str:
+        return self._dir
+
+    def protected_paths(self) -> list[str]:
+        """Данные хранилища на диске, к которым агенту нельзя прикасаться."""
+        return [self._dir]
+
+    # --- адреса и служебное ----------------------------------------------------
+
+    def _now(self) -> str:
+        return self._clock().isoformat()
+
+    def _base(self, key: ThreadKey) -> Path:
+        return _control_path(self._dir, key.system, key.thread)
+
+    def _scope(self, key: ThreadKey):
+        os.makedirs(self._dir, exist_ok=True)
+        return thread_read_scope(self._dir, key.system, key.thread)
+
+    def _v2(self, control: JsonObject) -> JsonObject:
+        v2 = copy.deepcopy(control.get("v2") or {})
+        v2.setdefault("revision", 0)
+        v2.setdefault("generation", control.get("generation", 0))
+        v2.setdefault("history_version", 0)
+        v2.setdefault("epoch", control.get("owner_epoch", 0))
+        v2.setdefault("lease", None)
+        v2.setdefault("high", {})
+        v2.setdefault("aliases", [])
+        v2.setdefault("deleted", False)
+        return v2
+
+    @staticmethod
+    def _lease(v2: JsonObject) -> Lease | None:
+        raw = v2.get("lease")
+        return None if raw is None else Lease.model_validate(raw)
+
+    def _identity(self, key: ThreadKey) -> dict[str, str]:
+        return {"system_id": key.system, "thread_id": key.thread}
+
+    def _exists(self, key: ThreadKey, v2: JsonObject) -> bool:
+        if v2.get("deleted"):
+            return False
+        files = (
+            layout.meta_file(self._dir, key.system, key.thread),
+            layout.history_file(self._dir, key.system, key.thread),
+        )
+        return "created_at" in v2 or any(os.path.exists(f) for f in files)
+
+    def _save_control(self, key, control, v2) -> None:
+        file_tx.write_control(
+            self._base(key), {**control, "v2": v2}, self._durability
+        )
+
+    # --- потоки: чтение --------------------------------------------------------
+
+    def _history(self, key: ThreadKey):
+        path = layout.history_file(self._dir, key.system, key.thread)
+        return layout.read_history_file(path, key.system, key.thread)
+
+    def _entries(self, key: ThreadKey, stream: str) -> list[StreamEntry]:
+        if stream == _HISTORY:
+            records, _keys, _max = self._history(key)
+            return [
+                StreamEntry(seq=max(seq, n + 1), ts=ts, data=payload)
+                for n, (seq, ts, payload) in enumerate(records)
+            ]
+        if stream == _SUBAGENTS:
+            path = layout.subagent_trace_path(
+                self._dir, key.system, key.thread
+            )
+            return [
+                StreamEntry(
+                    seq=int(row.get("seq") or n + 1),
+                    ts=str(row.get("ts") or ""),
+                    data={
+                        k: v for k, v in row.items() if k not in ("ts", "seq")
+                    },
+                )
+                for n, row in enumerate(_jsonl(path))
+            ]
+        if stream == _EDITS:
+            path = layout.edits_journal_path(self._dir, key.system, key.thread)
+            return [
+                StreamEntry(seq=n + 1, ts=str(row.get("ts") or ""), data=row)
+                for n, row in enumerate(_jsonl(path))
+            ]
+        path = layout.stream_path(self._dir, key.system, key.thread, stream)
+        return [StreamEntry.model_validate(row) for row in _jsonl(path)]
+
+    def _high(self, key: ThreadKey, v2: JsonObject, stream: str) -> int:
+        if stream in v2["high"]:
+            return int(v2["high"][stream])
+        return max((e.seq for e in self._entries(key, stream)), default=0)
+
+    # --- запись потоков ----------------------------------------------------------
+
+    def _stream_file(self, key: ThreadKey, stream: str) -> str | Path:
+        if stream == _SUBAGENTS:
+            return layout.subagent_trace_path(
+                self._dir, key.system, key.thread
+            )
+        if stream == _EDITS:
+            return layout.edits_journal_path(self._dir, key.system, key.thread)
+        return layout.stream_path(self._dir, key.system, key.thread, stream)
+
+    def _stream_line(self, stream: str, seq: int, ts: str, data) -> bytes:
+        if stream == _SUBAGENTS:
+            return _line({"ts": ts, "seq": seq, **data})
+        if stream == _EDITS:
+            return _line(data)
+        return _line({"seq": seq, "ts": ts, "data": data})
+
+    def _append_stream(self, changes, key, v2, stream, items) -> None:
+        seq, ts = self._high(key, v2, stream), self._now()
+        tail = b""
+        for item in items:
+            seq += 1
+            tail += self._stream_line(stream, seq, ts, item)
+        changes.append(self._stream_file(key, stream), tail)
+        v2["high"][stream] = seq
+
+    # --- квитанции и алиасы ------------------------------------------------------
+
+    def _replayed(self, base: Path, change) -> Receipt | None:
+        stored = file_tx.read_receipt(base, change.op_id)
+        if stored is None:
+            return None
+        if stored.get("digest") != change_digest(change):
+            raise OperationMismatch(
+                f"op_id {change.op_id!r} уже применён с другим содержимым"
+            )
+        return Receipt.model_validate(stored["receipt"])
+
+    def _receipt_doc(self, change, receipt: Receipt) -> JsonObject:
+        return {
+            "operation_id": change.op_id,
+            "v2": 1,
+            "digest": change_digest(change),
+            "at": self._now(),
+            "receipt": receipt.model_dump(mode="json"),
+        }
+
+    def _alias_path(self, alias: str) -> Path:
+        name = hashlib.sha256(alias.encode()).hexdigest() + ".json"
+        return Path(self._dir) / _ALIASES_DIR / name
+
+    def _alias_owner(self, alias: str) -> ThreadKey | None:
+        path = self._alias_path(alias)
+        if not path.exists():
+            return None
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        return ThreadKey(system=raw["system"], thread=raw["thread"])
+
+    def _add_aliases(self, changes, key, v2, aliases) -> None:
+        for alias in aliases:
+            owner = self._alias_owner(alias)
+            if owner is not None and owner != key:
+                raise ValueError(
+                    f"алиас {alias!r} принадлежит треду "
+                    f"{owner.system}/{owner.thread}"
+                )
+        for alias in aliases:
+            doc = {"alias": alias, "system": key.system, "thread": key.thread}
+            changes.put(self._alias_path(alias), _line(doc))
+            if alias not in v2["aliases"]:
+                v2["aliases"].append(alias)
+
+    # --- meta --------------------------------------------------------------------
+
+    def _meta(self, key: ThreadKey) -> JsonObject:
+        return layout.read_meta_file(
+            layout.meta_file(self._dir, key.system, key.thread)
+        )
+
+    def _write_meta(self, changes, key, meta, v2, *, touch: bool) -> None:
+        stored = self._meta(key)
+        now = self._now()
+        stamped = layout.stamp_meta(
+            meta,
+            key.system,
+            key.thread,
+            now if touch else stored.get("updated_at") or now,
+        )
+        # created_at — время создания треда; его ставит только хранилище.
+        stamped["created_at"] = (
+            stored.get("created_at") or v2.get("created_at") or now
+        )
+        _, path = layout.thread_paths(self._dir, key.system, key.thread)
+        changes.put(path, layout.meta_text(stamped).encode())
+
+    # --- запись истории ------------------------------------------------------------
+
+    def _record(self, key: ThreadKey, v2: JsonObject) -> ThreadRecord:
+        meta = self._meta(key)
+        parts = parts_from_meta(meta)
+        history, _keys, _max = self._history(key)
+        info = parts.info.model_copy(
+            update={
+                "created_at": meta.get("created_at") or v2.get("created_at"),
+                "updated_at": meta.get("updated_at") or v2.get("created_at"),
+                "messages_count": len(history),
+            }
+        )
+        streams = (_HISTORY, _SUBAGENTS, _EDITS)
+        high = {s: self._high(key, v2, s) for s in streams}
+        high.update(v2["high"])
+        return ThreadRecord(
+            key=key,
+            info=info,
+            state=parts.state,
+            usage=parts.usage,
+            runtime=parts.runtime,
+            frontend=parts.frontend,
+            archives=self._archives(key),
+            revision=v2["revision"],
+            generation=v2["generation"],
+            history_version=v2["history_version"],
+            max_seq={s: n for s, n in high.items() if n},
+            lease=self._lease(v2),
+            extra=parts.extra,
+        )
+
+    def _archives(self, key: ThreadKey) -> list[ArchiveInfo]:
+        infos = []
+        for suffix in layout.archive_suffixes(
+            self._dir, key.system, key.thread
+        ):
+            data, _meta = layout.archive_paths(
+                self._dir, key.system, key.thread, suffix
+            )
+            records, _keys, _max = layout.read_history_file(
+                data, key.system, key.thread
+            )
+            stamp = datetime.strptime(suffix[:15], _SUFFIX_FORMAT)
+            infos.append(
+                ArchiveInfo(
+                    id=suffix,
+                    created_at=stamp.replace(tzinfo=UTC).isoformat(),
+                    messages_count=len(records),
+                )
+            )
+        return infos
+
+    # --- чтение --------------------------------------------------------------------
+
+    async def get_thread(self, key: ThreadKey) -> ThreadRecord | None:
+        with self._scope(key):
+            v2 = self._v2(_control(self._base(key)))
+            if not self._exists(key, v2):
+                return None
+            return self._record(key, v2)
+
+    async def list_threads(self, query: ThreadQuery) -> Page[ThreadRecord]:
+        records = []
+        for key in self._known_keys():
+            record = await self.get_thread(key)
+            if record is not None:
+                records.append(record)
+        return page_of(records, query)
+
+    def _known_keys(self) -> set[ThreadKey]:
+        keys: set[ThreadKey] = set()
+        root = Path(self._dir)
+        for path in root.glob("meta_*.json") if root.is_dir() else ():
+            if layout.ARCHIVE_MARK in path.name:
+                continue
+            meta = layout.read_meta_file(str(path))
+            if meta.get("system") and meta.get("thread_id"):
+                keys.add(
+                    ThreadKey(system=meta["system"], thread=meta["thread_id"])
+                )
+        for identity in root.glob(".store/*/identity.json"):
+            raw = json.loads(identity.read_text(encoding="utf-8"))
+            keys.add(
+                ThreadKey(system=raw["system_id"], thread=raw["thread_id"])
+            )
+        return keys
+
+    async def read_stream(
+        self,
+        key: ThreadKey,
+        stream: str,
+        *,
+        after_seq: int = 0,
+        limit: int | None = None,
+    ) -> list[StreamEntry]:
+        check_stream_name(stream)
+        with self._scope(key):
+            v2 = self._v2(_control(self._base(key)))
+            if v2.get("deleted"):
+                return []
+            fresh = [
+                e for e in self._entries(key, stream) if e.seq > after_seq
+            ]
+        return fresh if limit is None else fresh[:limit]
+
+    async def read_archive(
+        self, key: ThreadKey, archive_id: str
+    ) -> list[StreamEntry]:
+        data, _meta = layout.archive_paths(
+            self._dir, key.system, key.thread, archive_id
+        )
+        records, _keys, _max = layout.read_history_file(
+            data, key.system, key.thread
+        )
+        return [
+            StreamEntry(seq=max(seq, n + 1), ts=ts, data=payload)
+            for n, (seq, ts, payload) in enumerate(records)
+        ]
+
+    async def resolve_alias(self, alias: str) -> ThreadKey | None:
+        return self._alias_owner(alias)
+
+    # --- запись ---------------------------------------------------------------------
+
+    async def commit(self, key: ThreadKey, change: ThreadChange) -> Receipt:
+        with self._scope(key):
+            base = self._base(key)
+            replayed = self._replayed(base, change)
+            if replayed is not None:
+                return replayed
+            control = _control(base)
+            v2 = self._v2(control)
+            current = self._lease(v2) if self._exists(key, v2) else None
+            check_writer(current, change.lease, self._clock())
+            if change.expected_revision != v2["revision"]:
+                raise ThreadConflict(
+                    f"ревизия {v2['revision']}, "
+                    f"ожидалась {change.expected_revision}"
+                )
+            return _Commit(self, key, control, v2, change).run()
+
+    async def append_side(self, key: ThreadKey, change: SideChange) -> Receipt:
+        for stream, _items in change.append:
+            if check_stream_name(stream) == _HISTORY:
+                raise ValueError("историю треда пишет только commit")
+        with self._scope(key):
+            base = self._base(key)
+            replayed = self._replayed(base, change)
+            if replayed is not None:
+                return replayed
+            control = _control(base)
+            v2 = self._v2(control)
+            if not self._exists(key, v2):
+                v2 = self._created(v2)
+            return self._side(key, control, v2, change)
+
+    def _created(self, v2: JsonObject) -> JsonObject:
+        return {
+            **v2,
+            "created_at": self._now(),
+            "deleted": False,
+            "high": {},
+            "aliases": [],
+            "lease": None,
+        }
+
+    def _side(self, key, control, v2, change: SideChange) -> Receipt:
+        changes = file_tx.Changes(Path(self._dir))
+        self._add_aliases(changes, key, v2, change.add_aliases)
+        for stream, items in change.append:
+            self._append_stream(changes, key, v2, stream, items)
+        if change.set_runtime is not None or change.set_frontend is not None:
+            meta = self._meta(key)
+            parts = parts_from_meta(meta)
+            if change.set_runtime is not None:
+                parts = parts.with_(runtime=change.set_runtime)
+            if change.set_frontend is not None:
+                name, state = change.set_frontend
+                parts = parts.with_(frontend={**parts.frontend, name: state})
+            meta = meta_from_parts(parts, base=meta)
+            self._write_meta(changes, key, meta, v2, touch=False)
+        receipt = Receipt(
+            op_id=change.op_id,
+            revision=v2["revision"],
+            generation=v2["generation"],
+            history_version=v2["history_version"],
+            max_seq={s: n for s, n in v2["high"].items() if n},
+        )
+        file_tx.publish(
+            Path(self._dir),
+            self._base(key),
+            changes=changes,
+            control={**control, "v2": v2},
+            receipt=self._receipt_doc(change, receipt),
+            identity=self._identity(key),
+            durability=self._durability,
+        )
+        return receipt
+
+    # --- аренда и жизненный цикл --------------------------------------------------
+
+    async def claim(self, key: ThreadKey, lease: LeaseRequest) -> ThreadRecord:
+        with self._scope(key):
+            control = _control(self._base(key))
+            v2 = self._v2(control)
+            if not self._exists(key, v2):
+                v2 = self._created(v2)
+            granted = granted_lease(
+                self._lease(v2), v2["epoch"], lease, self._clock()
+            )
+            v2["epoch"] = granted.epoch
+            v2["lease"] = granted.model_dump(mode="json")
+            self._save_control(key, control, v2)
+            return self._record(key, v2)
+
+    async def release(self, key: ThreadKey, lease: Lease) -> None:
+        with self._scope(key):
+            control = _control(self._base(key))
+            v2 = self._v2(control)
+            if same_lease(self._lease(v2), lease):
+                v2["lease"] = None
+                self._save_control(key, control, v2)
+
+    async def delete(self, key: ThreadKey, *, op_id: str) -> None:
+        with self._scope(key):
+            base = self._base(key)
+            control = _control(base)
+            v2 = self._v2(control)
+            if not self._exists(key, v2):
+                return
+            changes = file_tx.Changes(Path(self._dir))
+            for path in self._thread_files(key, v2):
+                changes.put(path, None)
+            tomb = {
+                "generation": v2["generation"] + 1,
+                "epoch": v2["epoch"],
+                "deleted": True,
+            }
+            file_tx.publish(
+                Path(self._dir),
+                base,
+                changes=changes,
+                control={**control, "v2": tomb},
+                receipt={"operation_id": f"delete:{op_id}", "v2": 1},
+                identity=self._identity(key),
+                durability=self._durability,
+            )
+            for receipt in (base / file_tx.RECEIPTS).glob("*.json"):
+                receipt.unlink()
+
+    def _thread_files(self, key: ThreadKey, v2: JsonObject) -> list[Path]:
+        s, t, d = key.system, key.thread, self._dir
+        stem = f"{s}_{t}"
+        files = [
+            *layout.thread_paths(d, s, t),
+            *layout.legacy_thread_paths(d, t),
+            layout.subagent_trace_path(d, s, t),
+            layout.edits_journal_path(d, s, t),
+            os.path.join(d, f"touched_{stem}.json"),
+            os.path.join(d, "locks", f"lock_{stem}.json"),
+        ]
+        for suffix in layout.archive_suffixes(d, s, t):
+            files.extend(layout.archive_paths(d, s, t, suffix))
+        root = Path(d)
+        files.extend(root.glob(f"stream_*_{stem}.jsonl"))
+        files.extend((root / layout.IMAGES_DIR).glob(f"{stem}_*"))
+        files.extend(self._alias_path(a) for a in v2["aliases"])
+        return [Path(f) for f in files if Path(f).exists()]
+
+    # --- вложения и обслуживание ----------------------------------------------------
+
+    async def put_blob(
+        self, key: ThreadKey, data: bytes, *, mime: str
+    ) -> BlobRef:
+        digest = hashlib.sha256(data).hexdigest()[:16]
+        name = f"{key.system}_{key.thread}_{digest}{_EXTENSIONS.get(mime, '.bin')}"
+        path = Path(self._dir) / layout.IMAGES_DIR / name
+        if not path.exists():
+            file_tx._plain_write(path, data)
+        return BlobRef(key=key, name=name, mime=mime, location=str(path))
+
+    async def get_blob(self, ref: BlobRef) -> bytes:
+        path = Path(self._dir) / layout.IMAGES_DIR / ref.name
+        if not path.exists():
+            raise FileNotFoundError(ref.location)
+        return path.read_bytes()
+
+    async def prune_receipts(self, older_than: timedelta) -> int:
+        cutoff = self._clock() - older_than
+        removed = 0
+        for path in Path(self._dir).glob(".store/*/receipts/*.json"):
+            doc = json.loads(path.read_bytes())
+            if (
+                doc.get("v2")
+                and doc.get("at")
+                and (datetime.fromisoformat(doc["at"]) < cutoff)
+            ):
+                path.unlink()
+                removed += 1
+        return removed
+
+
+class _Commit:
+    """Одна запись истории и состояния: изменения файлов и новый control."""
+
+    def __init__(self, store, key, control, v2, change: ThreadChange) -> None:
+        self.store, self.key, self.control = store, key, control
+        self.v2, self.change = v2, change
+        self.changes = file_tx.Changes(Path(store.threads_dir))
+        self.archive_id: str | None = None
+        records, _keys, _max = store._history(key)
+        self.history = [(seq, ts, payload) for seq, ts, payload in records]
+        self.rewrite = self._legacy_only()
+        self.renumbered = False
+        self.discarded: set[str] = set()
+        self.fresh: list = []
+
+    def _legacy_only(self) -> bool:
+        data, _meta = layout.thread_paths(
+            self.store.threads_dir, self.key.system, self.key.thread
+        )
+        # Тред в старом формате без system в имени: первая запись переносит
+        # историю в канонический файл целиком.
+        return bool(self.history) and not os.path.exists(data)
+
+    def run(self) -> Receipt:
+        change = self.change
+        if change.reset_history:
+            self._reset()
+        if change.replace_history is not None:
+            self._replace()
+        if change.discard_message_ids:
+            self._discard(set(change.discard_message_ids))
+        self._append(change.append_messages)
+        self.store._add_aliases(
+            self.changes, self.key, self.v2, change.add_aliases
+        )
+        self._write_history()
+        self._write_meta()
+        self.v2["revision"] += 1
+        receipt = Receipt(
+            op_id=change.op_id,
+            revision=self.v2["revision"],
+            generation=self.v2["generation"],
+            history_version=self.v2["history_version"],
+            max_seq={s: n for s, n in self.v2["high"].items() if n},
+            archive_id=self.archive_id,
+            lease=self.store._lease(self.v2),
+        )
+        file_tx.publish(
+            Path(self.store.threads_dir),
+            self.store._base(self.key),
+            changes=self.changes,
+            control={**self.control, "v2": self.v2},
+            receipt=self.store._receipt_doc(change, receipt),
+            identity=self.store._identity(self.key),
+            durability=self.store._durability,
+        )
+        return receipt
+
+    def _renumber(self, payloads: list[JsonObject]) -> None:
+        ts = self.store._now()
+        self.history = [(n + 1, ts, p) for n, p in enumerate(payloads)]
+        self.v2["high"][_HISTORY] = len(payloads)
+        self.v2["history_version"] += 1
+        self.rewrite = self.renumbered = True
+
+    def _reset(self) -> None:
+        self._renumber([])
+        self.v2["generation"] += 1
+        self.v2["lease"] = None
+
+    def _replace(self) -> None:
+        compaction = self.change.replace_history
+        if compaction.archive:
+            self._archive()
+        self._renumber(list(compaction.messages))
+
+    def _archive(self) -> None:
+        store, key = self.store, self.key
+        d, s, t = store.threads_dir, key.system, key.thread
+        stamp = store._clock().strftime(_SUFFIX_FORMAT)
+        suffix, n = stamp, 1
+        while os.path.exists(layout.archive_paths(d, s, t, suffix)[0]):
+            n += 1
+            suffix = f"{stamp}_{n}"
+        data, meta = layout.thread_paths(d, s, t)
+        archived_data, archived_meta = layout.archive_paths(d, s, t, suffix)
+        source = layout.history_file(d, s, t)
+        if os.path.exists(source):
+            self.changes.put(archived_data, Path(source).read_bytes())
+        meta_source = layout.meta_file(d, s, t)
+        if os.path.exists(meta_source):
+            self.changes.put(archived_meta, Path(meta_source).read_bytes())
+        self.archive_id = suffix
+
+    def _discard(self, ids: set[str]) -> None:
+        self.history = [r for r in self.history if r[2].get("id") not in ids]
+        self.discarded |= ids
+        self.rewrite = True
+
+    def _append(self, messages: list[JsonObject]) -> None:
+        seq = self.store._high(self.key, self.v2, _HISTORY)
+        ts = self.store._now()
+        for message in messages:
+            seq += 1
+            self.fresh.append((seq, ts, copy.deepcopy(message)))
+        self.v2["high"][_HISTORY] = max(seq, self.v2["high"].get(_HISTORY, 0))
+
+    def _write_history(self) -> None:
+        d, s, t = self.store.threads_dir, self.key.system, self.key.thread
+        data, _meta = layout.thread_paths(d, s, t)
+        lines = (
+            layout.history_line(s, t, seq, ts, payload).encode()
+            for seq, ts, payload in self.fresh
+        )
+        if self.rewrite:
+            whole = self._kept_bytes() + b"".join(lines)
+            self.changes.put(data, whole or None)
+        else:
+            self.changes.append(data, b"".join(lines))
+        self.history.extend(self.fresh)
+
+    def _kept_bytes(self) -> bytes:
+        """История, которая остаётся: после перенумерации — заново, иначе —
+        исходные строки файла как есть, без удалённых (как develop)."""
+        d, s, t = self.store.threads_dir, self.key.system, self.key.thread
+        if self.renumbered:
+            return b"".join(
+                layout.history_line(s, t, seq, ts, p).encode()
+                for seq, ts, p in self.history
+            )
+        source = layout.history_file(d, s, t)
+        kept = []
+        with open(source, encoding="utf-8") as stream:
+            for line in stream:
+                row = line.strip()
+                if not row:
+                    continue
+                if self._line_id(row) not in self.discarded:
+                    kept.append(row + "\n")
+        return "".join(kept).encode()
+
+    def _line_id(self, row: str) -> str | None:
+        records, _keys, _max = layout.read_history_lines(
+            [row], self.key.system, self.key.thread
+        )
+        return records[0][2].get("id") if records else None
+
+    def _write_meta(self) -> None:
+        change, key = self.change, self.key
+        meta = self.store._meta(key)
+        parts = parts_from_meta(meta)
+        updates: dict[str, Any] = {}
+        for field, value in (
+            ("info", change.set_info),
+            ("state", change.set_state),
+            ("usage", change.set_usage),
+            ("runtime", change.set_runtime),
+        ):
+            if value is not None:
+                updates[field] = value
+        new_meta = meta_from_parts(parts.with_(**updates), base=meta)
+        new_meta["messages_count"] = len(self.history)
+        if self.archive_id is not None:
+            new_meta[ARCHIVE_SUFFIX_KEY] = self.archive_id
+        self.store._write_meta(
+            self.changes, key, new_meta, self.v2, touch=True
+        )
