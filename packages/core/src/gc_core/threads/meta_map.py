@@ -24,6 +24,7 @@ from typing import Any
 
 from pydantic import BaseModel, ValidationError
 
+from gc_core.persistence.schema import STATE_SCHEMA_VERSION
 from gc_core.threads.models import (
     JsonObject,
     RuntimeStatus,
@@ -316,3 +317,36 @@ def meta_from_parts(parts: MetaParts, *, base: JsonObject) -> JsonObject:
     for key, value in extra.items():
         meta[key] = value
     return _ordered_like(meta, base)
+
+
+def meta_from_record(record) -> JsonObject:
+    """Meta develop из записи треда — то, что старый код видит как meta.
+
+    Значения, которые ставит хранилище (``created_at``, ``updated_at``,
+    ``messages_count``), берутся из ``record.info``; служебные ключи файлового
+    хранилища (штампы, суффикс архива) уже лежат в ``record.extra``.
+    """
+    info = record.info.model_copy(
+        update={
+            "created_at": record.info.created_at,
+            "updated_at": record.info.updated_at,
+            "messages_count": record.info.messages_count,
+        }
+    )
+    parts = MetaParts(
+        info=info,
+        state=record.state,
+        usage=record.usage,
+        runtime=record.runtime,
+        frontend=record.frontend,
+        extra=record.extra,
+    )
+    meta = meta_from_parts(parts, base={})
+    for key in ("created_at", "updated_at"):
+        if meta.get(key) is None:
+            meta.pop(key, None)
+    # Инвариант develop: meta с состоянием агента несёт версию схемы, иначе
+    # загрузка треда откажет (validate_thread_meta_for_load). Файловое
+    # хранилище хранит штамп само; для остальных он ставится здесь.
+    meta.setdefault("state_schema_version", STATE_SCHEMA_VERSION)
+    return meta

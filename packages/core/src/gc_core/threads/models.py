@@ -198,6 +198,9 @@ class ThreadChange(_Model):
     set_info: ThreadInfo | None = None
     #: Шаг пишет и живой объём истории, и счётчик картинок — как develop.
     set_runtime: RuntimeStatus | None = None
+    #: Ключи meta, которых модели не знают: форма meta открытая (секции
+    #: сторонних процессов отдаются наружу дословно). Заменяет целиком.
+    set_extra: JsonObject | None = None
     replace_history: Compaction | None = None
     discard_message_ids: list[str] = Field(default_factory=list)
     reset_history: bool = False

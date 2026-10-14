@@ -199,10 +199,55 @@ class FileThreadStore(ThreadStore):
         path = layout.stream_path(self._dir, key.system, key.thread, stream)
         return [StreamEntry.model_validate(row) for row in _jsonl(path)]
 
+    def _read_path(self, key: ThreadKey, stream: str) -> str:
+        if stream == _HISTORY:
+            return layout.history_file(self._dir, key.system, key.thread)
+        return str(self._stream_file(key, stream))
+
+    def _stats(
+        self, key: ThreadKey, v2: JsonObject, stream: str
+    ) -> JsonObject:
+        """Число записей и max seq файла потока — из кеша ``control.json``.
+
+        Кеш верен, пока размер файла тот же; иначе файл писали мимо v2
+        (старый код, TUI) — пересчёт по файлу.
+        """
+        path = self._read_path(key, stream)
+        size = os.path.getsize(path) if os.path.exists(path) else 0
+        cached = v2.setdefault("stats", {}).get(stream)
+        if cached and cached["path"] == path and cached["size"] == size:
+            return cached
+        entries = self._entries(key, stream)
+        stats = {
+            "path": path,
+            "size": size,
+            "count": len(entries),
+            "max": max((e.seq for e in entries), default=0),
+        }
+        v2["stats"][stream] = stats
+        return stats
+
     def _high(self, key: ThreadKey, v2: JsonObject, stream: str) -> int:
-        if stream in v2["high"]:
-            return int(v2["high"][stream])
-        return max((e.seq for e in self._entries(key, stream)), default=0)
+        """Высшая выданная отметка потока: номер удалённого хвоста не
+        возвращается, а запись мимо v2 учитывается по файлу."""
+        stats = self._stats(key, v2, stream)
+        return max(int(v2["high"].get(stream, 0)), stats["max"])
+
+    def _after_append(self, v2, key, stream, tail: bytes, added: int, seq):
+        path = (
+            self._stream_file(key, stream)
+            if stream != _HISTORY
+            else (layout.thread_paths(self._dir, key.system, key.thread)[0])
+        )
+        stats = self._stats(key, v2, stream)
+        size = os.path.getsize(path) if os.path.exists(path) else 0
+        v2["stats"][stream] = {
+            "path": str(path),
+            "size": size + len(tail),
+            "count": stats["count"] + added,
+            "max": max(stats["max"], seq),
+        }
+        v2["high"][stream] = max(int(v2["high"].get(stream, 0)), seq)
 
     # --- запись потоков ----------------------------------------------------------
 
@@ -229,7 +274,7 @@ class FileThreadStore(ThreadStore):
             seq += 1
             tail += self._stream_line(stream, seq, ts, item)
         changes.append(self._stream_file(key, stream), tail)
-        v2["high"][stream] = seq
+        self._after_append(v2, key, stream, tail, len(items), seq)
 
     # --- квитанции и алиасы ------------------------------------------------------
 
@@ -305,17 +350,15 @@ class FileThreadStore(ThreadStore):
     def _record(self, key: ThreadKey, v2: JsonObject) -> ThreadRecord:
         meta = self._meta(key)
         parts = parts_from_meta(meta)
-        history, _keys, _max = self._history(key)
         info = parts.info.model_copy(
             update={
                 "created_at": meta.get("created_at") or v2.get("created_at"),
                 "updated_at": meta.get("updated_at") or v2.get("created_at"),
-                "messages_count": len(history),
+                "messages_count": self._stats(key, v2, _HISTORY)["count"],
             }
         )
-        streams = (_HISTORY, _SUBAGENTS, _EDITS)
+        streams = {_HISTORY, _SUBAGENTS, _EDITS, *v2["high"]}
         high = {s: self._high(key, v2, s) for s in streams}
-        high.update(v2["high"])
         return ThreadRecord(
             key=key,
             info=info,
@@ -323,7 +366,7 @@ class FileThreadStore(ThreadStore):
             usage=parts.usage,
             runtime=parts.runtime,
             frontend=parts.frontend,
-            archives=self._archives(key),
+            archives=self._archives(key, v2),
             revision=v2["revision"],
             generation=v2["generation"],
             history_version=v2["history_version"],
@@ -332,7 +375,16 @@ class FileThreadStore(ThreadStore):
             extra=parts.extra,
         )
 
-    def _archives(self, key: ThreadKey) -> list[ArchiveInfo]:
+    def _archives(self, key: ThreadKey, v2: JsonObject) -> list[ArchiveInfo]:
+        """Архивы треда; список кешируется в ``control.json`` (обход каталога
+        тредов дорог, а архив появляется только при сжатии через v2)."""
+        if "archives" not in v2:
+            v2["archives"] = [
+                a.model_dump(mode="json") for a in self._scan_archives(key)
+            ]
+        return [ArchiveInfo.model_validate(a) for a in v2["archives"]]
+
+    def _scan_archives(self, key: ThreadKey) -> list[ArchiveInfo]:
         infos = []
         for suffix in layout.archive_suffixes(
             self._dir, key.system, key.thread
@@ -352,6 +404,15 @@ class FileThreadStore(ThreadStore):
                 )
             )
         return infos
+
+    # --- необязательное: ключи истории для старой сессии -------------------------
+
+    def history_keys(self, key: ThreadKey) -> set[str]:
+        """Ключи сообщений истории, включая ключи записей «как есть» до
+        синтеза id у старых записей — их сверяет дедупликация сессии."""
+        with self._scope(key):
+            _records, keys, _max = self._history(key)
+        return keys
 
     # --- чтение --------------------------------------------------------------------
 
@@ -463,6 +524,8 @@ class FileThreadStore(ThreadStore):
             "created_at": self._now(),
             "deleted": False,
             "high": {},
+            "stats": {},
+            "archives": [],
             "aliases": [],
             "lease": None,
         }
@@ -604,27 +667,35 @@ class FileThreadStore(ThreadStore):
 
 
 class _Commit:
-    """Одна запись истории и состояния: изменения файлов и новый control."""
+    """Одна запись истории и состояния: изменения файлов и новый control.
+
+    История целиком читается только для перезаписи (сброс, замена, удаление
+    сообщения, перенос старого файла); обычный шаг — дописывание по кешу.
+    """
 
     def __init__(self, store, key, control, v2, change: ThreadChange) -> None:
         self.store, self.key, self.control = store, key, control
         self.v2, self.change = v2, change
         self.changes = file_tx.Changes(Path(store.threads_dir))
         self.archive_id: str | None = None
-        records, _keys, _max = store._history(key)
-        self.history = [(seq, ts, payload) for seq, ts, payload in records]
-        self.rewrite = self._legacy_only()
+        self.history: list | None = None  # читается лениво
         self.renumbered = False
         self.discarded: set[str] = set()
         self.fresh: list = []
-
-    def _legacy_only(self) -> bool:
         data, _meta = layout.thread_paths(
-            self.store.threads_dir, self.key.system, self.key.thread
+            store.threads_dir, key.system, key.thread
         )
+        self.canonical = data
         # Тред в старом формате без system в имени: первая запись переносит
         # историю в канонический файл целиком.
-        return bool(self.history) and not os.path.exists(data)
+        source = layout.history_file(store.threads_dir, key.system, key.thread)
+        self.rewrite = source != data and os.path.exists(source)
+
+    def _loaded(self) -> list:
+        if self.history is None:
+            records, _keys, _max = self.store._history(self.key)
+            self.history = list(records)
+        return self.history
 
     def run(self) -> Receipt:
         change = self.change
@@ -687,7 +758,6 @@ class _Commit:
         while os.path.exists(layout.archive_paths(d, s, t, suffix)[0]):
             n += 1
             suffix = f"{stamp}_{n}"
-        data, meta = layout.thread_paths(d, s, t)
         archived_data, archived_meta = layout.archive_paths(d, s, t, suffix)
         source = layout.history_file(d, s, t)
         if os.path.exists(source):
@@ -695,15 +765,30 @@ class _Commit:
         meta_source = layout.meta_file(d, s, t)
         if os.path.exists(meta_source):
             self.changes.put(archived_meta, Path(meta_source).read_bytes())
+        archives = store._archives(key, self.v2)
+        archives.append(
+            ArchiveInfo(
+                id=suffix,
+                created_at=store._clock().isoformat(),
+                messages_count=len(self._loaded()),
+            )
+        )
+        self.v2["archives"] = [a.model_dump(mode="json") for a in archives]
         self.archive_id = suffix
 
     def _discard(self, ids: set[str]) -> None:
-        self.history = [r for r in self.history if r[2].get("id") not in ids]
+        self.history = [r for r in self._loaded() if r[2].get("id") not in ids]
         self.discarded |= ids
         self.rewrite = True
 
     def _append(self, messages: list[JsonObject]) -> None:
-        seq = self.store._high(self.key, self.v2, _HISTORY)
+        # После замены или сброса файл ещё старый: нумерация — от новой
+        # истории этой же записи, а не от файла.
+        seq = (
+            self.v2["high"][_HISTORY]
+            if self.renumbered
+            else self.store._high(self.key, self.v2, _HISTORY)
+        )
         ts = self.store._now()
         for message in messages:
             seq += 1
@@ -711,38 +796,56 @@ class _Commit:
         self.v2["high"][_HISTORY] = max(seq, self.v2["high"].get(_HISTORY, 0))
 
     def _write_history(self) -> None:
-        d, s, t = self.store.threads_dir, self.key.system, self.key.thread
-        data, _meta = layout.thread_paths(d, s, t)
-        lines = (
+        s, t = self.key.system, self.key.thread
+        tail = b"".join(
             layout.history_line(s, t, seq, ts, payload).encode()
             for seq, ts, payload in self.fresh
         )
-        if self.rewrite:
-            whole = self._kept_bytes() + b"".join(lines)
-            self.changes.put(data, whole or None)
-        else:
-            self.changes.append(data, b"".join(lines))
-        self.history.extend(self.fresh)
+        if not self.rewrite:
+            self.store._after_append(
+                self.v2,
+                self.key,
+                _HISTORY,
+                tail,
+                len(self.fresh),
+                self.fresh[-1][0] if self.fresh else 0,
+            )
+            self.changes.append(self.canonical, tail)
+            self.count = self.v2["stats"][_HISTORY]["count"]
+            return
+        kept, count = self._kept()
+        whole = kept + tail
+        self.changes.put(self.canonical, whole or None)
+        self.count = count + len(self.fresh)
+        self.v2.setdefault("stats", {})[_HISTORY] = {
+            "path": self.canonical,
+            "size": len(whole),
+            "count": self.count,
+            "max": max(
+                [r[0] for r in self._loaded()]
+                + [r[0] for r in self.fresh]
+                + [0]
+            ),
+        }
 
-    def _kept_bytes(self) -> bytes:
+    def _kept(self) -> tuple[bytes, int]:
         """История, которая остаётся: после перенумерации — заново, иначе —
         исходные строки файла как есть, без удалённых (как develop)."""
-        d, s, t = self.store.threads_dir, self.key.system, self.key.thread
+        s, t = self.key.system, self.key.thread
         if self.renumbered:
-            return b"".join(
+            body = b"".join(
                 layout.history_line(s, t, seq, ts, p).encode()
                 for seq, ts, p in self.history
             )
-        source = layout.history_file(d, s, t)
+            return body, len(self.history)
+        source = layout.history_file(self.store.threads_dir, s, t)
         kept = []
         with open(source, encoding="utf-8") as stream:
             for line in stream:
                 row = line.strip()
-                if not row:
-                    continue
-                if self._line_id(row) not in self.discarded:
+                if row and self._line_id(row) not in self.discarded:
                     kept.append(row + "\n")
-        return "".join(kept).encode()
+        return "".join(kept).encode(), len(self._loaded())
 
     def _line_id(self, row: str) -> str | None:
         records, _keys, _max = layout.read_history_lines(
@@ -760,11 +863,12 @@ class _Commit:
             ("state", change.set_state),
             ("usage", change.set_usage),
             ("runtime", change.set_runtime),
+            ("extra", change.set_extra),
         ):
             if value is not None:
                 updates[field] = value
         new_meta = meta_from_parts(parts.with_(**updates), base=meta)
-        new_meta["messages_count"] = len(self.history)
+        new_meta["messages_count"] = self.count
         if self.archive_id is not None:
             new_meta[ARCHIVE_SUFFIX_KEY] = self.archive_id
         self.store._write_meta(

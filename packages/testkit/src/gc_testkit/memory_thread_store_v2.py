@@ -71,6 +71,7 @@ class _Thread:
     lease: Lease | None = None
     epoch: int = 0
     updated_at: str = ""
+    extra: JsonObject = field(default_factory=dict)
     #: Последний выданный seq каждого потока: удалённый хвост не освобождает
     #: номер, иначе читатель с курсора пропустил бы следующую запись.
     high: dict[str, int] = field(default_factory=dict)
@@ -136,6 +137,7 @@ class MemoryThreadStore(ThreadStore):
             history_version=thread.history_version,
             max_seq={n: seq for n, seq in thread.high.items() if seq},
             lease=thread.lease,
+            extra=copy.deepcopy(thread.extra),
         )
 
     def _receipt(self, key: ThreadKey, thread: _Thread, op_id: str, **extra):
@@ -226,6 +228,8 @@ class MemoryThreadStore(ThreadStore):
             thread.info = change.set_info.model_copy(deep=True)
         if change.set_runtime is not None:
             thread.runtime = change.set_runtime.model_copy(deep=True)
+        if change.set_extra is not None:
+            thread.extra = copy.deepcopy(change.set_extra)
 
     def _apply(self, key: ThreadKey, thread: _Thread, change: ThreadChange):
         if change.reset_history:

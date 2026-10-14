@@ -464,8 +464,42 @@ def patch_runtime_flag(
     ``flag``: ``summarizing``|``finalizing``|``finish_gate_checking``.
     """
     sys_norm = sanitize_system_id(system_id)
-    name = resolve_runtime_flag_name(flag)
     disk = load_thread_meta(threads_dir, sys_norm, thread_id) or {}
+    apply_runtime_flag_to_meta(
+        disk, flag, active=active, session_meta=session_meta
+    )
+    save_thread_meta(threads_dir, sys_norm, thread_id, disk)
+
+
+def _sync_session_runtime(disk: Dict[str, Any], session_meta) -> None:
+    """Сессия видит ``runtime`` и ``tui`` диска (I1: без clobber ``tui``)."""
+    if session_meta is None:
+        return
+    if disk.get("runtime"):
+        session_meta["runtime"] = dict(disk["runtime"])
+    else:
+        session_meta.pop("runtime", None)
+    disk_tui = disk.get("tui")
+    if isinstance(disk_tui, dict):
+        session_meta["tui"] = dict(disk_tui)
+    elif "tui" in session_meta:
+        session_meta.pop("tui", None)
+        disk.pop("tui", None)
+
+
+def apply_runtime_flag_to_meta(
+    disk: Dict[str, Any],
+    flag: str,
+    *,
+    active: bool,
+    session_meta: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Взвести или снять флаг в ``disk["runtime"]`` и синхронизировать сессию.
+
+    Чистая часть ``patch_runtime_flag``: её же применяет порт сессии поверх
+    хранилища v2 (``gc_core.threads.session_port``).
+    """
+    name = resolve_runtime_flag_name(flag)
     runtime = dict(disk.get("runtime") or {})
     if active:
         runtime[name] = True
@@ -475,20 +509,7 @@ def patch_runtime_flag(
         disk["runtime"] = runtime
     else:
         disk.pop("runtime", None)
-
-    if session_meta is not None:
-        if runtime:
-            session_meta["runtime"] = dict(runtime)
-        else:
-            session_meta.pop("runtime", None)
-        disk_tui = disk.get("tui")
-        if isinstance(disk_tui, dict):
-            session_meta["tui"] = dict(disk_tui)
-        elif "tui" in session_meta:
-            session_meta.pop("tui", None)
-            disk.pop("tui", None)
-
-    save_thread_meta(threads_dir, sys_norm, thread_id, disk)
+    _sync_session_runtime(disk, session_meta)
 
 
 def reset_run_flags(
@@ -500,9 +521,23 @@ def reset_run_flags(
     session_meta: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Atomically clear startup flags against current disk meta, preserving TUI."""
-    from gc_core.persistence.meta_ownership import clear_run_flags
 
     disk = load_thread_meta(threads_dir, system_id, thread_id) or {}
+    reset_run_flags_in_meta(
+        disk, stale_summarizing=stale_summarizing, session_meta=session_meta
+    )
+    save_thread_meta(threads_dir, system_id, thread_id, disk)
+
+
+def reset_run_flags_in_meta(
+    disk: Dict[str, Any],
+    *,
+    stale_summarizing: bool = False,
+    session_meta: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Чистая часть ``reset_run_flags``: снять флаги запуска в ``disk``."""
+    from gc_core.persistence.meta_ownership import clear_run_flags
+
     runtime = (session_meta or {}).get("runtime")
     runtime = runtime if isinstance(runtime, dict) else {}
     clear_run_flags(
@@ -510,17 +545,7 @@ def reset_run_flags(
         stale_summarizing=stale_summarizing
         or bool(runtime.get("summarizing")),
     )
-    if session_meta is not None:
-        if disk.get("runtime"):
-            session_meta["runtime"] = dict(disk["runtime"])
-        else:
-            session_meta.pop("runtime", None)
-        if isinstance(disk.get("tui"), dict):
-            session_meta["tui"] = dict(disk["tui"])
-        elif "tui" in session_meta:
-            session_meta.pop("tui", None)
-            disk.pop("tui", None)
-    save_thread_meta(threads_dir, system_id, thread_id, disk)
+    _sync_session_runtime(disk, session_meta)
 
 
 def _carry_meta_string(
@@ -776,7 +801,7 @@ class ThreadSession:
         # Хранилище сессии. None — файловое по умолчанию: сессию собирают и
         # напрямую (тесты, ручные сценарии), и ломать их не за что.
         if store is None:
-            from gc_core.thread_store_file import FileThreadStore
+            from gc_core.threads.file_store import FileThreadStore
 
             store = FileThreadStore(threads_dir)
         self.store = store
@@ -929,12 +954,10 @@ class ThreadSession:
         # безусловно значило бы требовать `threads_data_path` от того, кто
         # держит историю в базе и файлов не заводит вовсе — а он и не
         # обязан его настраивать. Поймано гейтом на in-memory хранилище.
-        from gc_core.thread_store_file import FileThreadStore
+        from gc_core.threads.file_store import FileThreadStore
 
         threads_dir = resolve_threads_dir(settings)
-        store = FileThreadStore(threads_dir)
-        store.ensure_ready()
-        return store, threads_dir
+        return FileThreadStore(threads_dir), threads_dir
 
     @classmethod
     def _build(
@@ -1178,6 +1201,12 @@ class ThreadSession:
                 capability, step_messages, previous_response_id
             )
             return
+        step = getattr(self.port, "apersist_step", None)
+        if callable(step):
+            await self._apersist_step(
+                step, step_messages, previous_response_id
+            )
+            return
         known_before = self._persist_batch_begin(step_messages)
         written = await self.port.aappend_messages(
             self.system_id,
@@ -1197,6 +1226,50 @@ class ThreadSession:
             self.thread_id,
             self._persist_batch_meta(base_meta, step_messages, known_before),
         )
+
+    async def _apersist_step(
+        self,
+        step,
+        step_messages: List[Dict[str, Any]],
+        previous_response_id: Optional[str],
+    ) -> None:
+        """История и meta шага — одной записью (порт хранилища v2).
+
+        Та же политика, что у пары ``aappend_messages`` + ``asave_meta``, но
+        шаг атомарен: сообщения и meta ложатся вместе или не ложатся вовсе.
+        Состояние сессии готовится на копии и переносится только после
+        записи — упавшая запись не оставляет сессию впереди хранилища.
+        """
+        from copy import copy, deepcopy
+
+        staged = copy(self)
+        staged.meta = deepcopy(self.meta)
+        staged.history_messages = list(self.history_messages)
+        known_before = staged._persist_batch_begin(step_messages)
+        fresh, seen = [], set(known_before)
+        for message in step_messages:
+            key = make_message_key(message)
+            if key not in seen:
+                fresh.append(message)
+                seen.add(key)
+        staged._persist_batch_apply(
+            step_messages, known_before, len(fresh), previous_response_id
+        )
+        base_meta = (
+            await self.port.aload_meta(self.system_id, self.thread_id) or {}
+        )
+        meta = staged._persist_batch_meta(
+            base_meta, step_messages, known_before
+        )
+        await step(self.system_id, self.thread_id, fresh, meta)
+        self.history_messages = staged.history_messages
+        self.persisted_messages_count = staged.persisted_messages_count
+        self.previous_response_id = staged.previous_response_id
+        self.known_keys_snapshot_before_last_batch = (
+            staged.known_keys_snapshot_before_last_batch
+        )
+        # Ключи пополняются на месте и только записанным, как у aappend_messages.
+        self.known_message_keys.update(make_message_key(m) for m in fresh)
 
     async def _areload_store_snapshot(self, read_snapshot) -> None:
         from gc_core.thread_store_durable import (

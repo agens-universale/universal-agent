@@ -366,6 +366,17 @@ async def check_commit_sets_runtime(store, _clock: FakeClock) -> None:
     )
 
 
+async def check_extra_roundtrip(store, _clock: FakeClock) -> None:
+    lease = await _claim(store)
+    extra = {"custom_section": {"owner": "сервер", "n": 1}}
+    await store.commit(KEY, _change("op", 0, lease, set_extra=extra))
+    record = await store.get_thread(KEY)
+    _expect(
+        record.extra.get("custom_section") == extra["custom_section"],
+        "незнакомая секция meta сохраняется как есть",
+    )
+
+
 async def check_store_owns_timestamps_and_count(store, _clock: FakeClock):
     lease = await _claim(store)
     fake = ThreadInfo(created_at="x", updated_at="y", messages_count=99)
@@ -841,6 +852,7 @@ CHECKS: tuple[Callable[..., Awaitable[None]], ...] = (
     check_untimed_lease,
     check_state_usage_info_roundtrip,
     check_commit_sets_runtime,
+    check_extra_roundtrip,
     check_store_owns_timestamps_and_count,
     check_replace_history_renumbers,
     check_discard_message,

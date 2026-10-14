@@ -498,6 +498,13 @@ def athread_store(
 
     Адаптер на одно хранилище ОДИН — см. ``_ADAPTER_ATTR``.
     """
+    from gc_core.threads.store import ThreadStore as ThreadStoreV2
+
+    if isinstance(store, ThreadStoreV2):
+        # Хранилище контракта v2: сессия говорит с ним через свой порт.
+        from gc_core.threads.session_port import session_port
+
+        return session_port(store)
     if is_async_thread_store(store):
         return store
 
