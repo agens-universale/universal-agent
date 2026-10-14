@@ -33,6 +33,7 @@ from gc_core.threads import file_layout as layout
 from gc_core.threads import file_tx
 from gc_core.threads.errors import (
     OperationMismatch,
+    OwnershipError,
     ThreadConflict,
 )
 from gc_core.threads.meta_map import (
@@ -495,6 +496,7 @@ class FileThreadStore(ThreadStore):
             control = _control(base)
             v2 = self._v2(control)
             current = self._lease(v2) if self._exists(key, v2) else None
+            _check_durable_owner(control, change.lease.owner)
             check_writer(current, change.lease, self._clock())
             if change.expected_revision != v2["revision"]:
                 raise ThreadConflict(
@@ -571,11 +573,20 @@ class FileThreadStore(ThreadStore):
             v2 = self._v2(control)
             if not self._exists(key, v2):
                 v2 = self._created(v2)
+            _check_durable_owner(control, lease.owner)
             granted = granted_lease(
                 self._lease(v2), v2["epoch"], lease, self._clock()
             )
             v2["epoch"] = granted.epoch
             v2["lease"] = granted.model_dump(mode="json")
+            if granted.expires_at is None:
+                # Бессрочная аренда (durable-исполнитель) видна и старому
+                # коду: писатель develop не пишет в тред с ``owner_id``.
+                control = {
+                    **control,
+                    "owner_id": granted.owner,
+                    "owner_epoch": granted.epoch,
+                }
             self._save_control(key, control, v2)
             return self._record(key, v2)
 
@@ -585,6 +596,8 @@ class FileThreadStore(ThreadStore):
             v2 = self._v2(control)
             if same_lease(self._lease(v2), lease):
                 v2["lease"] = None
+                if control.get("owner_id") == lease.owner:
+                    control = {**control, "owner_id": None}
                 self._save_control(key, control, v2)
 
     async def delete(self, key: ThreadKey, *, op_id: str) -> None:
@@ -664,6 +677,17 @@ class FileThreadStore(ThreadStore):
                 path.unlink()
                 removed += 1
         return removed
+
+
+def _check_durable_owner(control: JsonObject, owner: str) -> None:
+    """Тред, которым владеет durable-исполнитель журнала (``owner_id``,
+    Temporal), пишет только он сам."""
+    durable = control.get("owner_id")
+    if durable and durable != owner:
+        raise OwnershipError(
+            f"тред ведёт durable-исполнитель {durable!r}; "
+            "локальная запись запрещена"
+        )
 
 
 class _Commit:

@@ -918,8 +918,12 @@ class ThreadSession:
     def _check_file_owner(store, threads_dir, system_id, thread_id) -> None:
         """Обычный файловый писатель не пишет в тред, занятый durable-владельцем."""
         from gc_core.thread_store_file import FileThreadStore
+        from gc_core.threads.file_store import FileThreadStore as FileStoreV2
 
-        if type(store) is not FileThreadStore or not threads_dir:
+        if (
+            type(store) not in (FileThreadStore, FileStoreV2)
+            or not threads_dir
+        ):
             return
         from gc_core.thread_store_durable import ThreadStoreOwnershipError
         from gc_core.thread_store_journal import durable_owner_id

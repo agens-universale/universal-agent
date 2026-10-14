@@ -1,0 +1,69 @@
+"""Тред, которым владеет durable-исполнитель (Temporal), закрыт для локального
+писателя — и на старом журнале (``owner_id``), и на аренде v2 без срока."""
+
+import asyncio
+from datetime import timedelta
+
+import pytest
+from gc_core.thread_store import ThreadSession
+from gc_core.thread_store_durable import (
+    ThreadStoreOperation,
+    ThreadStoreOwnershipError,
+)
+from gc_core.thread_store_file_durable import DurableFileThreadStore
+from gc_core.thread_store_journal import durable_owner_id
+from gc_core.threads.errors import OwnershipError
+from gc_core.threads.file_store import FileThreadStore
+from gc_core.threads.models import LeaseRequest, ThreadKey
+
+KEY = ThreadKey(system="cli", thread="t")
+
+
+def _owned_by_old_journal(tmp_path, owner="wf-1"):
+    DurableFileThreadStore(str(tmp_path)).commit_operation(
+        "cli",
+        "t",
+        ThreadStoreOperation(
+            "claim-1", "claim_owner", {"owner_id": owner}, generation=0
+        ),
+    )
+
+
+def test_local_session_refuses_thread_owned_by_durable_executor(tmp_path):
+    _owned_by_old_journal(tmp_path)
+    with pytest.raises(ThreadStoreOwnershipError, match="durable executor"):
+        asyncio.run(
+            ThreadSession.afrom_config(
+                settings=None,
+                system_id="cli",
+                thread_id="t",
+                store=FileThreadStore(tmp_path),
+            )
+        )
+
+
+def test_v2_claim_refuses_old_durable_owner(tmp_path):
+    _owned_by_old_journal(tmp_path, owner="wf-1")
+    store = FileThreadStore(tmp_path)
+    with pytest.raises(OwnershipError):
+        asyncio.run(
+            store.claim(KEY, LeaseRequest(owner="host", ttl=timedelta(60)))
+        )
+    record = asyncio.run(store.claim(KEY, LeaseRequest(owner="wf-1")))
+    assert record.lease.owner == "wf-1"
+
+
+def test_untimed_v2_lease_is_visible_to_develop_writers(tmp_path):
+    store = FileThreadStore(tmp_path)
+    record = asyncio.run(store.claim(KEY, LeaseRequest(owner="wf-2")))
+    assert durable_owner_id(str(tmp_path), "cli", "t") == "wf-2"
+    asyncio.run(store.release(KEY, record.lease))
+    assert durable_owner_id(str(tmp_path), "cli", "t") is None
+
+
+def test_timed_v2_lease_does_not_lock_out_develop_writers(tmp_path):
+    store = FileThreadStore(tmp_path)
+    asyncio.run(
+        store.claim(KEY, LeaseRequest(owner="host", ttl=timedelta(60)))
+    )
+    assert durable_owner_id(str(tmp_path), "cli", "t") is None
