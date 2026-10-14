@@ -121,3 +121,30 @@ def test_cache_from_older_stage_without_offsets_still_reads(tmp_path):
     fresh = FileThreadStore(tmp_path)
     tail = run(fresh.read_stream(KEY, "messages", after_seq=1))
     assert [e.data["id"] for e in tail] == ["m1", "m2"]
+
+
+def test_last_line_without_newline_counts_when_it_is_whole(tmp_path):
+    lines = [
+        json.dumps(
+            {
+                "type": "message",
+                "seq": n,
+                "ts": "x",
+                "payload": {"id": f"m{n}"},
+            }
+        )
+        for n in (1, 2)
+    ]
+    data = tmp_path / "data_cli_t1.jsonl"
+    data.write_text("\n".join(lines), encoding="utf-8")  # без \n в конце
+    store = FileThreadStore(tmp_path)
+    entries = run(store.read_stream(KEY, "messages"))
+    assert [e.data["id"] for e in entries] == ["m1", "m2"]
+    with data.open("a", encoding="utf-8") as stream:
+        stream.write(
+            "\n"
+            + lines[0].replace('"m1"', '"m3"').replace('"seq": 1', '"seq": 3')
+            + "\n"
+        )
+    tail = run(store.read_stream(KEY, "messages", after_seq=2))
+    assert [e.data["id"] for e in tail] == ["m3"]

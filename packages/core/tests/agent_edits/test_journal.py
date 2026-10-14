@@ -6,11 +6,7 @@ from gc_core.agent_edits.snapshots import (
     SnapshotStore,
     snapshots_root,
 )
-from gc_core.thread_store import (
-    delete_thread,
-    edits_journal_path,
-    reset_thread_files,
-)
+from gc_core.thread_store import edits_journal_path, reset_thread_files
 
 
 def make_rec(path="a.py", turn="t1", **kw):
@@ -167,19 +163,6 @@ def test_reset_thread_files_removes_edits_journal(tmp_path):
     deleted = reset_thread_files(
         str(threads_dir), system_id="cli", thread_id="demo-thread"
     )
-
-    assert str(journal_path) in deleted
-    assert not journal_path.exists()
-
-
-def test_delete_thread_removes_edits_journal(tmp_path):
-    threads_dir = tmp_path / "threads"
-    threads_dir.mkdir()
-    journal_path = edits_journal_path(str(threads_dir), "cli", "demo-thread")
-    EditsJournal(journal_path).append(make_rec())
-    assert journal_path.exists()
-
-    deleted = delete_thread(str(threads_dir), "cli", "demo-thread")
 
     assert str(journal_path) in deleted
     assert not journal_path.exists()

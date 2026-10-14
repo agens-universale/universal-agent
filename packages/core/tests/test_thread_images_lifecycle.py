@@ -5,6 +5,7 @@
 `__pre_summary__` ссылается на те же файлы.
 """
 
+import asyncio
 import io
 import os
 
@@ -14,11 +15,15 @@ from PIL import Image
 from gc_core.attachments.model import ORIGIN_USER, user_label
 from gc_core.attachments.normalize import normalize_image
 from gc_core.attachments.store import IMAGES_DIRNAME, ImageStore
-from gc_core.thread_store import (
-    ThreadSession,
-    delete_thread,
-    reset_thread_files,
-)
+from gc_core.thread_store import ThreadSession, reset_thread_files
+from gc_core.threads.file_store import FileThreadStore
+from gc_core.threads.models import ThreadKey
+
+
+def delete_thread(threads_dir: str, system: str, thread: str) -> None:
+    """Удаление треда хранилищем — так удаляют сессии TUI и уборщик сервера."""
+    key = ThreadKey(system=system, thread=thread)
+    asyncio.run(FileThreadStore(threads_dir).delete(key, op_id="delete"))
 
 
 def _png(color: str) -> bytes:

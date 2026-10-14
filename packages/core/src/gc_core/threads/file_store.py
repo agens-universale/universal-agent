@@ -142,7 +142,11 @@ def _grown_stats(cached, path: str, size: int, pairs) -> JsonObject:
 def _read_lines(path: str, offset: int) -> tuple[list[tuple[str, int]], int]:
     """Целые строки файла с байтового смещения — пары (текст, смещение
     строки) — и сколько байт они заняли: строку, которую дописывают прямо
-    сейчас, оставляем на следующее чтение."""
+    сейчас, оставляем на следующее чтение.
+
+    Последняя строка без перевода строки — целая, если это целый JSON-объект
+    (так её читал develop): недописанный объект не разбирается, а дописанный
+    без ``\\n`` — уже готовая запись."""
     if not os.path.exists(path):
         return [], 0
     with open(path, "rb") as handle:
@@ -153,6 +157,10 @@ def _read_lines(path: str, offset: int) -> tuple[list[tuple[str, int]], int]:
     for raw in complete.split(b"\n")[:-1]:
         rows.append((raw.decode("utf-8"), position))
         position += len(raw) + 1
+    rest = tail[len(complete) :]
+    if rest.strip() and _json_row(rest.decode("utf-8", errors="replace")):
+        rows.append((rest.decode("utf-8"), position))
+        complete = tail
     return rows, len(complete)
 
 
@@ -590,11 +598,10 @@ class FileThreadStore(ThreadStore):
             records, _keys, _max = layout.read_history_file(
                 data, key.system, key.thread
             )
-            stamp = datetime.strptime(suffix[:15], _SUFFIX_FORMAT)
             infos.append(
                 ArchiveInfo(
                     id=suffix,
-                    created_at=stamp.replace(tzinfo=UTC).isoformat(),
+                    created_at=_archive_created(suffix, data),
                     messages_count=len(records),
                 )
             )
@@ -642,10 +649,9 @@ class FileThreadStore(ThreadStore):
                 meta = layout.read_meta_file(str(path))
             except (OSError, ValueError):
                 continue  # тред найдётся по identity, если он v2
-            if meta.get("system") and meta.get("thread_id"):
-                keys.add(
-                    ThreadKey(system=meta["system"], thread=meta["thread_id"])
-                )
+            key = _meta_identity(path, meta)
+            if key is not None:
+                keys.add(key)
         for identity in root.glob(".store/*/identity.json"):
             raw = json.loads(identity.read_text(encoding="utf-8"))
             keys.add(
@@ -811,6 +817,16 @@ class FileThreadStore(ThreadStore):
 
     async def delete(self, key: ThreadKey, *, op_id: str) -> None:
         self._forget(key)
+        # Проверка без записи: удаление несуществующего треда не заводит ему
+        # служебный каталог.
+        with self._read_scope(key):
+            _control, v2 = self._load(key)
+            exists = self._exists(key, v2)
+        if exists:
+            self._delete_thread(key, op_id)
+        self._drop_leftovers(key)
+
+    def _delete_thread(self, key: ThreadKey, op_id: str) -> None:
         with self._scope(key):
             base = self._base(key)
             control, v2 = self._load(key)
@@ -838,6 +854,20 @@ class FileThreadStore(ThreadStore):
             )
             for receipt in (base / file_tx.RECEIPTS).glob("*.json"):
                 receipt.unlink()
+
+    def _drop_leftovers(self, key: ThreadKey) -> None:
+        """Картинки и лок журнала правок — по возможности, после удаления
+        треда: их держат открытыми другие процессы (просмотрщик, второе окно
+        TUI), и на Windows такой файл не удаляется. Тред удалён и без них;
+        картинки — тем же путём, что в develop (отказ пишется в лог)."""
+        from gc_core.attachments.store import ImageStore
+
+        ImageStore.for_threads_dir(self._dir).delete_thread_images(
+            key.system, key.thread
+        )
+        journal = layout.edits_journal_path(self._dir, key.system, key.thread)
+        with contextlib.suppress(OSError):
+            os.unlink(f"{journal}.lock")
 
     def sweep_orphans(
         self, cutoff: datetime, *, dry_run: bool = False
@@ -869,13 +899,12 @@ class FileThreadStore(ThreadStore):
         return removed_meta, removed_data
 
     def _is_canonical(self, meta_path: Path, meta: JsonObject) -> bool:
-        system, thread = meta.get("system"), meta.get("thread_id")
-        if not isinstance(system, str) or not isinstance(thread, str):
+        key = _meta_identity(meta_path, meta)
+        if key is None:
             return False
-        try:
-            _data, canonical = layout.thread_paths(self._dir, system, thread)
-        except ValueError:
-            return False
+        _data, canonical = layout.thread_paths(
+            self._dir, key.system, key.thread
+        )
         return Path(canonical) == meta_path
 
     def _drop_archive_cache(self, name: str, meta: JsonObject) -> None:
@@ -913,7 +942,9 @@ class FileThreadStore(ThreadStore):
             files.extend(layout.archive_paths(d, s, t, suffix))
         root = Path(d)
         files.extend(root.glob(f"stream_*_{stem}.jsonl"))
-        files.extend((root / layout.IMAGES_DIR).glob(f"{stem}_*"))
+        # Архивы журналов старых версий: суммаризация их больше не заводит.
+        files.extend(root.glob(f"touched_{stem}__pre_summary__*.json"))
+        files.extend(root.glob(f"edits_{stem}__pre_summary__*.jsonl"))
         files.extend(self._alias_path(a) for a in v2["aliases"])
         return [Path(f) for f in files if Path(f).exists()]
 
@@ -948,6 +979,42 @@ class FileThreadStore(ThreadStore):
                 path.unlink()
                 removed += 1
         return removed
+
+
+def _archive_created(suffix: str, data_path: str) -> str:
+    """Время архива сжатия — из суффикса имени; суффикс не из часов
+    хранилища (старый формат, переименован руками) — время файла."""
+    try:
+        stamp = datetime.strptime(suffix[:15], _SUFFIX_FORMAT)
+        return stamp.replace(tzinfo=UTC).isoformat()
+    except ValueError:
+        moment = (
+            os.path.getmtime(data_path) if os.path.exists(data_path) else 0
+        )
+        return datetime.fromtimestamp(moment, UTC).isoformat()
+
+
+def _meta_identity(path: Path, meta: JsonObject) -> ThreadKey | None:
+    """Тред, чья это meta. ``system`` пишет ядро; meta, которую develop-TUI
+    создавал до первого хода, несёт только ``system_id``; без обоих система —
+    из имени ``meta_<system>_<thread>.json``."""
+    thread = meta.get("thread_id")
+    if not isinstance(thread, str) or not thread:
+        return None
+    system = meta.get("system") or meta.get("system_id")
+    suffix = f"_{thread}.json"
+    if (
+        not system
+        and path.name.startswith("meta_")
+        and path.name.endswith(suffix)
+    ):
+        system = path.name[len("meta_") : -len(suffix)]
+    if not isinstance(system, str) or not system:
+        return None
+    try:
+        return ThreadKey(system=system, thread=thread)
+    except ValueError:
+        return None
 
 
 def _meta_or_none(path: Path) -> JsonObject | None:

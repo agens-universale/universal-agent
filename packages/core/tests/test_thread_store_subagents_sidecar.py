@@ -5,7 +5,6 @@ from pathlib import Path
 
 from gc_core.thread_store import (
     append_subagent_trace_record,
-    delete_thread,
     read_subagent_trace,
     reset_thread_files,
     subagent_trace_path,
@@ -105,23 +104,6 @@ def test_read_subagent_trace_missing_is_empty(tmp_path: Path) -> None:
     assert read_subagent_trace(str(tmp_path), "cli", "missing") == []
 
 
-def test_delete_thread_removes_subagents_sidecar(tmp_path: Path) -> None:
-    threads_dir = str(tmp_path)
-    (tmp_path / "locks").mkdir()
-    sidecar = tmp_path / "data_subagents_cli_abc.jsonl"
-    data = tmp_path / "data_cli_abc.jsonl"
-    meta = tmp_path / "meta_cli_abc.json"
-    other = tmp_path / "data_subagents_cli_other.jsonl"
-    for p in (sidecar, data, meta, other):
-        p.write_text("x\n", encoding="utf-8")
-
-    deleted = delete_thread(threads_dir, "cli", "abc")
-
-    assert str(sidecar) in deleted
-    assert not sidecar.exists()
-    assert other.exists()
-
-
 def test_reset_thread_files_removes_subagents_sidecar(tmp_path: Path) -> None:
     threads_dir = tmp_path / "threads"
     threads_dir.mkdir()
@@ -217,21 +199,6 @@ def test_append_cold_init_continues_from_preseed_seq(tmp_path):
 
     r = _append_call(threads_dir, 99)
     assert r["seq"] == 6
-
-
-def test_delete_thread_resets_seq_counter(tmp_path):
-    """T4: delete_thread сбрасывает счётчик → следующий append снова seq=1."""
-    threads_dir = str(tmp_path)
-    (tmp_path / "locks").mkdir()
-    r1 = _append_call(threads_dir, 1)
-    assert r1["seq"] == 1
-    r2 = _append_call(threads_dir, 2)
-    assert r2["seq"] == 2
-
-    delete_thread(threads_dir, "cli", "t1")
-
-    r3 = _append_call(threads_dir, 3)
-    assert r3["seq"] == 1, "после delete счётчик должен сброситься"
 
 
 def test_reset_thread_files_resets_seq_counter(tmp_path):

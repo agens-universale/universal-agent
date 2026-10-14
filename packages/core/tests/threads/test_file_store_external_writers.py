@@ -1,12 +1,11 @@
 """FileThreadStore v2 рядом со старым кодом, который пишет файлы треда
-напрямую (до этапа 3 так делают TUI, chat, ACP и сервер): удаление старым
-кодом, журнал правок, тред старого формата."""
+напрямую (старая версия gc на том же каталоге, журнал правок ядра):
+удаление старым кодом, журнал правок, тред старого формата."""
 
 import asyncio
 import json
 from datetime import timedelta
 
-from gc_core import thread_store as develop
 from gc_core.threads import file_layout
 from gc_core.threads.file_store import FileThreadStore
 from gc_core.threads.models import (
@@ -46,7 +45,9 @@ async def _write(store, *ids, key=KEY, op="op"):
 def test_thread_deleted_by_old_code_is_gone_for_v2(tmp_path):
     store = FileThreadStore(tmp_path)
     run(_write(store, "a", "b"))
-    develop.delete_thread(str(tmp_path), "cli", "t1")
+    # Старая версия удаляет тред файлами и про .store не знает.
+    for name in ("data_cli_t1.jsonl", "meta_cli_t1.json"):
+        (tmp_path / name).unlink()
     assert run(store.get_thread(KEY)) is None
     listed = run(store.list_threads(ThreadQuery(limit=100))).items
     assert KEY not in {r.key for r in listed}
@@ -118,3 +119,30 @@ def test_broken_meta_of_one_thread_does_not_hide_the_others(tmp_path):
     (tmp_path / "meta_legacy.json").write_text("{не json", encoding="utf-8")
     listed = run(store.list_threads(ThreadQuery(limit=100))).items
     assert [r.key for r in listed] == [KEY]
+
+
+def test_archive_with_foreign_suffix_is_still_a_part_of_the_thread(tmp_path):
+    def line(message_id):
+        return json.dumps(
+            {
+                "type": "message",
+                "seq": 1,
+                "ts": "x",
+                "payload": {"id": message_id},
+            }
+        )
+
+    (tmp_path / "data_cli_t1__pre_summary__20260101.jsonl").write_text(
+        line("old") + "\n", encoding="utf-8"
+    )
+    (tmp_path / "data_cli_t1.jsonl").write_text(
+        line("new") + "\n", encoding="utf-8"
+    )
+    (tmp_path / "meta_cli_t1.json").write_text(
+        json.dumps({"system": "cli", "thread_id": "t1"}), encoding="utf-8"
+    )
+    store = FileThreadStore(tmp_path)
+    record = run(store.get_thread(KEY))
+    assert [a.id for a in record.archives] == ["20260101"]
+    archived = run(store.read_archive(KEY, "20260101"))
+    assert [e.data["id"] for e in archived] == ["old"]
