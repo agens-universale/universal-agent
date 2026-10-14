@@ -81,8 +81,11 @@ class ExternalAgentStore(AgentStore):
 
 def assemble_context(
     prepared, *, operations, store, logger, human_request,
-    request_equivalence=None, subagent_independent_auto=True,
+    request_equivalence=None, require_request_equivalence=False,
+    subagent_independent_auto=True,
 ):
+    if require_request_equivalence and request_equivalence is None:
+        raise ExecutionFailure("Root routing needs prepared request equivalence")
     resources = ExternalResources(
         is_sandbox=prepared.context.workspace_is_sandbox,
         root=prepared.context.workspace_root,
@@ -146,7 +149,7 @@ def assemble_context(
     except ValueError as exc:
         if request_equivalence is None:
             raise
-        raise ExecutionFailure("Invalid prepared child routing context") from exc
+        raise ExecutionFailure("Invalid prepared routing context") from exc
 
     seed_prepared_subagent_definitions(ctx, prepared.subagent_definitions)
     operations.router_provider = lambda: ctx.model_router

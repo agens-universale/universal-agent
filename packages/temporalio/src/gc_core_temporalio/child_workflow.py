@@ -205,6 +205,7 @@ class UniversalSubagentWorkflow:
                 operations.thread_store = store
                 parent_ctx = assemble_context(
                     request.parent_context,
+                    request_equivalence=request.parent_context.request_equivalence,
                     operations=operations,
                     store=store,
                     logger=workflow.logger,

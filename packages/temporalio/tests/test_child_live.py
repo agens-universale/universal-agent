@@ -649,6 +649,9 @@ async def test_independent_child_pair_and_recorded_history_replay(tmp_path, monk
                     completion.activity_task_completed_event_attributes.result.payloads, [PreparedChild])
                 assert prepared.request_equivalence is not None
                 assert prepared.request_equivalence.context_id == prepared.context.context.run_id
+                assert request.parent_context.request_equivalence is not None
+                assert request.parent_context.request_equivalence.context_id == request.parent_context.context.run_id
+                assert request.parent_context.request_equivalence.context_id != prepared.request_equivalence.context_id
                 from dataclasses import asdict
                 recorded = json.dumps(asdict(prepared), default=str)
                 assert 'private-fast' not in recorded
