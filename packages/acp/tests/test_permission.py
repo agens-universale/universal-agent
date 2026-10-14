@@ -280,7 +280,7 @@ async def test_timeout_denies_and_late_allow_does_not_stick(tmp_path):
         {
             "jsonrpc": "2.0",
             "method": "$/cancel_request",
-            "params": {"id": msg["id"]},
+            "params": {"requestId": msg["id"]},
         }
     ]
     assert not any(
@@ -380,13 +380,19 @@ async def test_close_or_delete_during_permission_denies_and_acloses(
     key = "command:ls"
 
     async def drop():
-        await _wait_permission(writer)
+        msg = await _wait_permission(writer)
         await facade.handle_line(_line(method, {"sessionId": session_id}, 4))
+        return msg
 
     task = asyncio.create_task(drop())
     assert await _ask(agent.executor._ctx, key) is False
-    await task
+    msg = await task
     assert _by_id(writer, 4)["result"] == {}
+    assert {
+        "jsonrpc": "2.0",
+        "method": "$/cancel_request",
+        "params": {"requestId": msg["id"]},
+    } in writer.sent
     assert key not in store.session_rules()
     await _drain(facade)
     assert agent.closed is True
@@ -428,15 +434,21 @@ async def test_session_cancel_unblocks_confirm(tmp_path):
     key = "read:/etc/passwd"
 
     async def cancel():
-        await _wait_permission(writer)
+        msg = await _wait_permission(writer)
         await facade.handle_line(
             _line("session/cancel", {"sessionId": session_id}, notify=True)
         )
+        return msg
 
     task = asyncio.create_task(cancel())
     assert await _ask(agent.executor._ctx, key) is False
-    await task
+    msg = await task
     assert key not in store.session_rules()
+    assert {
+        "jsonrpc": "2.0",
+        "method": "$/cancel_request",
+        "params": {"requestId": msg["id"]},
+    } in writer.sent
     await facade.shutdown()
 
 
@@ -447,13 +459,53 @@ async def test_cancel_request_on_permission_id_unblocks(tmp_path):
     async def cancel():
         msg = await _wait_permission(writer)
         await facade.handle_line(
-            _line("$/cancel_request", {"id": msg["id"]}, notify=True)
+            _line(
+                "$/cancel_request",
+                {"requestId": msg["id"]},
+                notify=True,
+            )
         )
 
     task = asyncio.create_task(cancel())
     assert await _ask(agent.executor._ctx, key) is False
     await task
     assert key not in store.session_rules()
+    await facade.shutdown()
+
+
+async def test_cancel_request_on_prompt_id_unblocks_confirm(tmp_path):
+    """$/cancel_request с requestId промпта снимает confirm и закрывает пикер."""
+    facade, writer, agent, session_id, _store = await _ready(tmp_path)
+    agent.hold = True
+    await facade.handle_line(
+        _line(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "a"}],
+            },
+            3,
+        )
+    )
+    await agent.started.wait()
+
+    async def cancel():
+        msg = await _wait_permission(writer)
+        await facade.handle_line(
+            _line("$/cancel_request", {"requestId": 3}, notify=True)
+        )
+        return msg
+
+    task = asyncio.create_task(cancel())
+    assert await _ask(agent.executor._ctx, "command:ls") is False
+    msg = await task
+    assert {
+        "jsonrpc": "2.0",
+        "method": "$/cancel_request",
+        "params": {"requestId": msg["id"]},
+    } in writer.sent
+    agent.release.set()
+    await facade._sessions[session_id].prompt_task
     await facade.shutdown()
 
 

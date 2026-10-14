@@ -586,7 +586,9 @@ async def test_cancel_request_and_exception_from_the_turn(tmp_path):
         )
     )
     await agents[0].started.wait()
-    await facade.handle_line(_line("$/cancel_request", {"id": 9}, notify=True))
+    await facade.handle_line(
+        _line("$/cancel_request", {"requestId": 9}, notify=True)
+    )
     await facade._sessions[session_id].prompt_task
     assert _by_id(writer, 9)["result"]["stopReason"] == "cancelled"
     await facade.shutdown()

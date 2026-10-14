@@ -219,19 +219,22 @@ class PendingOutbound:
             future.set_result(incoming)
         return True
 
-    def cancel_session(self, session_id: str, incoming: Incoming) -> None:
-        self._settle(lambda _rid, sid: sid == session_id, incoming)
+    def cancel_session(self, session_id: str, incoming: Incoming) -> list[Any]:
+        return self._settle(lambda _rid, sid: sid == session_id, incoming)
 
-    def cancel_all(self, incoming: Incoming) -> None:
-        self._settle(lambda _rid, _sid: True, incoming)
+    def cancel_all(self, incoming: Incoming) -> list[Any]:
+        return self._settle(lambda _rid, _sid: True, incoming)
 
-    def _settle(self, predicate, incoming: Incoming) -> None:
+    def _settle(self, predicate, incoming: Incoming) -> list[Any]:
+        settled: list[Any] = []
         for request_id, (session_id, future) in list(self._items.items()):
             if not predicate(request_id, session_id):
                 continue
             self._items.pop(request_id, None)
+            settled.append(request_id)
             if not future.done():
                 future.set_result(incoming)
+        return settled
 
 
 def _salvage_id(line: str) -> Any:

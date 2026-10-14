@@ -203,10 +203,10 @@ class AcpFacade:
 
     async def _on_notification(self, incoming: Incoming) -> None:
         if incoming.method == "session/cancel":
-            self._cancel_session(incoming.params)
+            await self._cancel_session(incoming.params)
             return
         if incoming.method == _METHOD_CANCEL_REQUEST:
-            self._cancel_by_request_id(incoming.params)
+            await self._cancel_by_request_id(incoming.params)
 
     async def _initialize(self, request_id: Any, _params: Any) -> None:
         self._initialized = True
@@ -273,7 +273,7 @@ class AcpFacade:
             return
         self._sessions.pop(live.session_id, None)
         if _prompt_running(live):
-            self._release_later(live, drop_thread=False)
+            await self._release_later(live, drop_thread=False)
             await self._send(result_message(request_id, {}))
             return
         await self._release(live, drop_thread=False)
@@ -336,7 +336,7 @@ class AcpFacade:
                 logger.exception(_METHOD_DELETE)
                 await self._fail(request_id)
                 return
-            self._release_later(live, drop_thread=True)
+            await self._release_later(live, drop_thread=True)
             await self._send(result_message(request_id, {}))
             return
         if live is not None:
@@ -461,11 +461,7 @@ class AcpFacade:
                 if future.done() and not future.cancelled():
                     incoming = future.result()
                 else:
-                    await self._send(
-                        notification(
-                            _METHOD_CANCEL_REQUEST, {"id": request_id}
-                        )
-                    )
+                    await self._send(_cancel_notice(request_id))
                     return CONFIRM_TIMED_OUT
         finally:
             self._pending.discard(request_id)
@@ -577,26 +573,32 @@ class AcpFacade:
         reason = stop_reason(_outcome(live), cancelled=False)
         await self._send(result_message(request_id, {"stopReason": reason}))
 
-    def _cancel_session(self, params: Any) -> None:
+    async def _cancel_session(self, params: Any) -> None:
         live = self._live_from(params)
         if live is None:
             return
-        self._pending.cancel_session(live.session_id, cancelled_reply())
+        await self._dismiss_permissions(live.session_id)
         _mark_cancel(live)
 
-    def _cancel_by_request_id(self, params: Any) -> None:
+    async def _cancel_by_request_id(self, params: Any) -> None:
         body = _object_params(params)
-        if body is None or "id" not in body:
+        if body is None or "requestId" not in body:
             return
-        target = body.get("id")
-        self._pending.cancel_id(target, cancelled_reply())
+        target = body.get("requestId")
+        if self._pending.cancel_id(target, cancelled_reply()):
+            return
         for live in self._sessions.values():
             if live.prompt_id == target:
-                self._pending.cancel_session(
-                    live.session_id, cancelled_reply()
-                )
+                await self._dismiss_permissions(live.session_id)
                 _mark_cancel(live)
                 return
+
+    async def _dismiss_permissions(self, session_id: str) -> None:
+        """Снять ожидание и закрыть пикер: клиент узнаёт request по requestId."""
+        for request_id in self._pending.cancel_session(
+            session_id, cancelled_reply()
+        ):
+            await self._send(_cancel_notice(request_id))
 
     def _live_from(self, params: Any) -> LiveSession | None:
         session_id = _session_id_of(params)
@@ -604,9 +606,11 @@ class AcpFacade:
             return None
         return self._sessions.get(session_id)
 
-    def _release_later(self, live: LiveSession, *, drop_thread: bool) -> None:
+    async def _release_later(
+        self, live: LiveSession, *, drop_thread: bool
+    ) -> None:
         """Ответ клиенту уже можно слать: ход досматривается отдельно."""
-        self._pending.cancel_session(live.session_id, cancelled_reply())
+        await self._dismiss_permissions(live.session_id)
         _mark_cancel(live)
         task = asyncio.create_task(
             self._release(live, drop_thread=drop_thread)
@@ -744,6 +748,11 @@ def broken_reply_for(incoming: Incoming) -> Incoming:
         error=reply.error,
         parse_error=True,
     )
+
+
+def _cancel_notice(request_id: Any) -> dict:
+    """Отмена своего request. В ACP v1 поле — ``requestId``, не ``id``."""
+    return notification(_METHOD_CANCEL_REQUEST, {"requestId": request_id})
 
 
 def _permission_dropped(
