@@ -90,13 +90,38 @@ def _deprecated(deprecated_keys_used: Optional[List[str]]) -> List[Notice]:
     return out
 
 
+def _configured_models(settings: AppConfig) -> List[str]:
+    """Модели провайдера, которыми конфиг ходит. При непустом реестре `models` —
+    его записи (как ModelRouter: `entry.model or alias`); иначе `agent.model`
+    (legacy-путь). Без повторов, в порядке появления."""
+    if settings.models:
+        names = [entry.model or alias for alias, entry in settings.models.items()]
+    else:
+        names = [settings.agent.model]
+    return [name for name in dict.fromkeys(names) if name]
+
+
 def _pricing_no_rates(settings: AppConfig) -> List[Notice]:
-    """Ставки не заданы: у провайдеров без фактической цены денег видно не будет."""
+    """Ставки не заданы ни для одной модели конфига — прежнее уведомление; заданы
+    не для всех — уведомление со списком моделей без ставки (спека PR140 Р6)."""
     pricing = settings.pricing
     if not pricing.enabled:
         return []
-    if resolve_model_tariff(pricing, settings.agent.model) is not None:
+    models = _configured_models(settings)
+    unpriced = [m for m in models if resolve_model_tariff(pricing, m) is None]
+    if models and not unpriced:
         return []
+    if unpriced and len(unpriced) < len(models):
+        return [
+            Notice(
+                "info",
+                "pricing_partial_rates",
+                "pricing: нет ставки для моделей: " + ", ".join(unpriced)
+                + ". Их стоимость будет отмечена «?» — задайте цены в "
+                "pricing.models (см. /config).",
+                highlights=("pricing.models",),
+            )
+        ]
     return [
         Notice(
             "info",
