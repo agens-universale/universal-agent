@@ -124,10 +124,44 @@ def _resume_offset(cached: JsonObject, after_seq: int | None) -> int | None:
     return next((off for seq, off in recent if seq > after_seq), None)
 
 
+#: Сколько последних байт закешированной части потока сверяется с файлом.
+_TAIL_BYTES = 64
+
+
+def _tail(path: str, end: int) -> str:
+    """Последние байты файла до ``end`` — hex."""
+    if end <= 0:
+        return ""
+    with open(path, "rb") as handle:
+        handle.seek(max(0, end - _TAIL_BYTES))
+        return handle.read(min(end, _TAIL_BYTES)).hex()
+
+
+def _inode(path: str) -> int | None:
+    try:
+        return os.stat(path).st_ino
+    except FileNotFoundError:
+        return None
+
+
+def _cache_holds(cached, path: str, size: int) -> bool:
+    """Файл — тот же, что видел кеш, и дописан только в конец. Размер
+    этого не доказывает: develop переписывает файл (сжатие, удаление
+    сообщения), и новый может оказаться длиннее."""
+    if not cached or cached["path"] != path or cached["size"] > size:
+        return False
+    if cached.get("ino") not in (None, _inode(path)):
+        return False
+    try:
+        return cached.get("tail") == _tail(path, cached["size"])
+    except FileNotFoundError:
+        return False
+
+
 def _read_plan(cached, path: str, size: int, after_seq):
     """Кеш, на который можно опереться, и смещение, с которого читать:
     ``(None, 0)`` — читать целиком."""
-    if not cached or cached["path"] != path or cached["size"] > size:
+    if not _cache_holds(cached, path, size):
         return None, 0
     start = _resume_offset(cached, after_seq)
     return (None, 0) if start is None else (cached, start)
@@ -147,6 +181,8 @@ def _grown_stats(cached, path: str, size: int, pairs) -> JsonObject:
     return {
         "path": path,
         "size": size,
+        "ino": _inode(path),
+        "tail": _tail(path, size) if os.path.exists(path) else "",
         "count": (cached["count"] if cached else 0) + len(fresh),
         "max": max(
             [cached["max"] if cached else 0, *(e.seq for e, _ in fresh)]
@@ -467,15 +503,24 @@ class FileThreadStore(ThreadStore):
             else (layout.thread_paths(self._dir, key.system, key.thread)[0])
         )
         stats = self._stats(key, v2, stream)
-        size = os.path.getsize(path) if os.path.exists(path) else 0
+        exists = os.path.exists(path)
+        size = os.path.getsize(path) if exists else 0
         # Разделитель, который file_tx поставит перед хвостом.
-        offsets, position = [], size + int(file_tx.unterminated(path))
+        separator = b"\n" if file_tx.unterminated(path) else b""
+        offsets, position = [], size + len(separator)
         for line in lines:
             offsets.append(position)
             position += len(line)
+        before = bytes.fromhex(_tail(str(path), size)) if exists else b""
         v2["stats"][stream] = {
             "path": str(path),
             "size": position,
+            # Дописывание файл не подменяет; нового файла ещё нет — его
+            # inode узнает следующее чтение.
+            "ino": _inode(str(path)) if exists else None,
+            "tail": (before + separator + b"".join(lines))[
+                -_TAIL_BYTES:
+            ].hex(),
             "count": stats["count"] + len(lines),
             "max": max([stats["max"], *seqs]),
             "recent": _recent(
@@ -1472,6 +1517,9 @@ class _Commit:
         self.v2.setdefault("stats", {})[_HISTORY] = {
             "path": self.canonical,
             "size": len(whole),
+            # Файл заменяется целиком: inode — новый, его узнает чтение.
+            "ino": None,
+            "tail": whole[-_TAIL_BYTES:].hex(),
             "count": self.count,
             "recent": [],
             "max": max(
