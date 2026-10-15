@@ -165,6 +165,31 @@ async def test_confirm_does_not_read_the_server_terminal(
     assert task["artifacts"][0]["parts"][0]["text"] == "нет"
 
 
+async def test_limit_stop_is_failed_not_completed(tmp_path):
+    """Лимит шагов, токенов или тулов — не успешный артефакт."""
+
+    class LimitAgent(AnswerAgent):
+        def __init__(self, outcome: str) -> None:
+            super().__init__('{"ok": false, "status": "%s"}' % outcome)
+            self.executor.last_terminal_outcome = outcome
+
+    for outcome in ("step_limit", "token_limit", "tool_call_limit"):
+        async with session(tmp_path, agents=[LimitAgent(outcome)]) as (
+            client,
+            _f,
+            _created,
+        ):
+            response = await rpc(
+                client, "SendMessage", message(message_id=outcome)
+            )
+        task = response.json()["result"]["task"]
+        assert task["status"]["state"] == "TASK_STATE_FAILED"
+        assert "artifacts" not in task
+        assert task["status"]["message"]["parts"][0]["text"] == (
+            "Ход не выполнен."
+        )
+
+
 async def test_failed_turn_is_a_task_not_an_rpc_error(tmp_path):
     async with session(tmp_path, agents=[FailAgent()]) as (client, _f, _c):
         response = await rpc(client, "SendMessage", message())

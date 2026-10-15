@@ -28,6 +28,19 @@ def answer_text(agent: Any) -> str:
 # Пиру в status.message — без путей и текста исключения ядра.
 PEER_FAILURE_TEXT = "Ход не выполнен."
 
+# Остановка по бюджету — не ответ. JSON ``ok: false`` в артефакт не кладём.
+_LIMITS = frozenset({"step_limit", "token_limit", "tool_call_limit"})
+
+
+def limit_outcome(agent: Any) -> str | None:
+    executor = getattr(agent, "executor", None)
+    if executor is None:
+        return None
+    outcome = getattr(executor, "last_terminal_outcome", None)
+    if isinstance(outcome, str) and outcome in _LIMITS:
+        return outcome
+    return None
+
 
 def error_text(exc: BaseException) -> str:
     del exc
@@ -141,6 +154,11 @@ class Turn:
         if failed is not None:
             await self._store.mark_failed(
                 self.task_id, self._new_id(), error_text(failed)
+            )
+            return
+        if limit_outcome(self.agent) is not None:
+            await self._store.mark_failed(
+                self.task_id, self._new_id(), PEER_FAILURE_TEXT
             )
             return
         await self._store.mark_completed(

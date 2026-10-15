@@ -212,7 +212,7 @@ gRPC и HTTP+JSON фасад не объявляет.
 | `TASK_STATE_WORKING` | ход выполняется |
 | `TASK_STATE_INPUT_REQUIRED` | ход остановился на `turn_ask_human`; текст вопроса в `status.message` |
 | `TASK_STATE_COMPLETED` | ход закончился ответом; текст в артефакте |
-| `TASK_STATE_FAILED` | ход упал; пояснение в `status.message` |
+| `TASK_STATE_FAILED` | ход упал или остановился по лимиту шагов, токенов или вызовов инструментов; пояснение в `status.message`, артефакта нет |
 | `TASK_STATE_CANCELED` | ход отменён через `CancelTask` |
 
 `TASK_STATE_REJECTED`, `TASK_STATE_AUTH_REQUIRED` и `TASK_STATE_UNSPECIFIED`
