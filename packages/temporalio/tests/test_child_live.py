@@ -639,8 +639,12 @@ async def test_independent_child_pair_and_recorded_history_replay(tmp_path, monk
                 assert request.child_context['frozen_live_level'] == 'auto'
                 endpoints = [r['_endpoint'] for r in child_requests]
                 if version == 'fallback':
-                    assert endpoints.count('/fast') >= 1
-                    assert [p for p in endpoints if p != '/fast'] == ['/mid', '/mid', '/big', '/big']
+                    # Слабая недоступна (сколько бы ни было ретраев транспорта) —
+                    # тот же такт повторяется ближайшим живым уровнем вверх (mid),
+                    # завершение — в серии сильной; модель родителя не нужна.
+                    fails = endpoints.count('/fast')
+                    assert fails >= 1
+                    assert endpoints == ['/mid', '/mid'] + ['/fast'] * fails + ['/mid', '/mid']
                 else:
                     assert endpoints == ['/mid', '/mid', '/fast', '/mid', '/mid']
                 # Decode the recorded child preparation, not fresh worker settings.
