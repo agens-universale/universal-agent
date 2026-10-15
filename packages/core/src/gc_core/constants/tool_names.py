@@ -4,10 +4,13 @@
 FINISH_TOOL_NAME = "turn_finish"
 ASK_HUMAN_TOOL_NAME = "turn_ask_human"
 INTERMEDIATE_REPLY_TOOL_NAME = "turn_intermediate_reply"
+PROPOSE_PLAN_TOOL_NAME = "turn_propose_plan"
 
 # Тулы, завершающие ход агента (ход не продолжается после них). intermediate_reply
 # сюда НЕ входит: он «Finalizes turn: no» — агент продолжает работу в том же ходу.
-TURN_FINALIZING_TOOLS = frozenset({FINISH_TOOL_NAME, ASK_HUMAN_TOOL_NAME})
+TURN_FINALIZING_TOOLS = frozenset(
+    {FINISH_TOOL_NAME, ASK_HUMAN_TOOL_NAME, PROPOSE_PLAN_TOOL_NAME}
+)
 
 # Session
 SESSION_MEMORY_TOOL_NAME = "session_memory"
