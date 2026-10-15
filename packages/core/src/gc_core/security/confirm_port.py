@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import sys
 from functools import partial
 from types import SimpleNamespace
@@ -8,6 +9,11 @@ from typing import Any, Callable
 from gc_core.constants.tool_names import ASK_HUMAN_TOOL_NAME
 from gc_core.execution.human import HumanRequest, HumanRequestInterrupted
 from gc_core.execution.ports import port
+from gc_core.message_policy.permission_denials import (
+    declined_error,
+    unattended_error,
+)
+from gc_core.security.permission_store import remembers_similar
 from gc_core.settings import settings_of
 
 CONFIRM_ALLOW_REMEMBER = (
@@ -34,6 +40,49 @@ CONFIRM_KEY_T = frozenset({"t", "T", "е", "Е"})  # deny_once
 
 # Human-facing one-liner (CLI prompt / docs); mirrors banner Y/O/N/T labels.
 CONFIRM_CHOICE_HINT = "[Y/Н] и подобные в сессии  [O/Щ] разово  [N/Т] запрет+ в сессии  [T/Е] запрет разово"
+# То же для вопросов НЕ про команду (запись, чтение, адрес, MCP, скрипт):
+# «подобных» там нет — запоминается ровно это действие, и судье команд ответ
+# подсказкой не уходит.
+CONFIRM_CHOICE_HINT_PLAIN = "[Y/Н] разрешить в сессии  [O/Щ] разово  [N/Т] запретить в сессии  [T/Е] запрет разово"
+
+
+def confirm_choice_hint(decision_key: str | None, mode: Any = "edit") -> str:
+    """Строка-подсказка ответов под вид вопроса (консольный запрос).
+
+    «И подобные» — ровно там, где ответ действительно уйдёт судье команд
+    (`remembers_similar`)."""
+    if remembers_similar(decision_key, mode):
+        return CONFIRM_CHOICE_HINT
+    return CONFIRM_CHOICE_HINT_PLAIN
+
+
+def call_with_optional(
+    fn: Callable[..., Any], *args: Any, **optional: Any
+) -> Any:
+    """Позвать ``fn``, отдав ему только те необязательные именованные
+    параметры, которые он принимает.
+
+    Показ вопроса проходит несколько звеньев (порт → раннер → приложение →
+    экран), и у каждого есть упрощённые реализации с короткой сигнатурой.
+    Новый необязательный параметр не должен ломать ни одну из них.
+    """
+    try:
+        parameters = inspect.signature(fn).parameters.values()
+    except (TypeError, ValueError):
+        return fn(*args)
+    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in parameters):
+        return fn(*args, **optional)
+    names = {
+        p.name
+        for p in parameters
+        if p.kind
+        in (
+            inspect.Parameter.KEYWORD_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        )
+    }
+    return fn(*args, **{k: v for k, v in optional.items() if k in names})
+
 
 # Backward-compat aliases (optional one release): old tui_confirm returns
 # once|session|deny — маппим в новые 4-choice ids. CLI input() aliases removed.
@@ -100,6 +149,17 @@ def confirm_available(ctx: Any) -> bool:
     return bool(stdin and stdin.isatty())
 
 
+def unconfirmed_error(ctx: Any, **fields: Any) -> dict:
+    """Тело отказа после вопроса, на который не ответили «да».
+
+    Причин две, и человеку с моделью нужно знать, какая: человек отказал —
+    или спросить было некого (запуск без человека), и вопрос стал отказом.
+    """
+    if confirm_available(ctx):
+        return declined_error(**fields)
+    return unattended_error(**fields)
+
+
 def _via_name(ctx: Any) -> str | None:
     name = getattr(ctx, "subagent_tool_name", None)
     return name if isinstance(name, str) and name.strip() else None
@@ -153,27 +213,27 @@ def _ask_choice(
             if not callable(tui_confirm):
                 # Нет рабочего present → deny_once (не учить few-shot), не CLI input() за Textual.
                 return CONFIRM_DENY_ONCE
-            try:
-                choice = tui_confirm(
-                    title=title,
-                    question=question,
-                    fields=fields,
-                    via=via,
-                )
-            except TypeError:
-                choice = tui_confirm(
-                    title=title, question=question, fields=fields
-                )
+            choice = call_with_optional(
+                partial(
+                    tui_confirm, title=title, question=question, fields=fields
+                ),
+                via=via,
+                decision_key=decision_key,
+            )
             result = coerce_confirm_choice(choice)
         else:
             # Non-TUI fallback (headless CLI / scripts). Product path is TUI;
             # mode=ask is not the intended CLI UX (allow|deny policy instead),
             # but if confirm is reached, key matrix matches TUI.
+            from gc_core.security.permission_mode import resolve_mode
+
             result = coerce_confirm_choice(
                 prompt_user_confirmation_choice(
                     title=title,
                     fields=fields,
                     question=question,
+                    decision_key=decision_key,
+                    permission_mode=resolve_mode(ctx).value,
                 )
             )
     finally:

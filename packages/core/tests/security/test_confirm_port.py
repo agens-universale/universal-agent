@@ -183,3 +183,75 @@ def test_invalid_tui_confirm_return_maps_to_deny():
         assert result is False, (
             f"bad choice {bad_choice!r} должен давать deny, но вернул {result}"
         )
+
+
+def test_choice_hint_matches_the_kind_of_question():
+    """Консольная подсказка, как и баннер: «и подобные» — только там, где
+    ответ уйдёт судье команд, то есть под ключом `command:`."""
+    from gc_core.security.confirm_port import (
+        CONFIRM_CHOICE_HINT,
+        CONFIRM_CHOICE_HINT_PLAIN,
+        confirm_choice_hint,
+    )
+    from gc_core.security.permission_store import (
+        PermissionStore,
+        is_command_key,
+    )
+
+    assert is_command_key("command:ls") is True
+    assert is_command_key("write:/p/a.py") is False
+    assert is_command_key(None) is False
+    assert confirm_choice_hint("command:ls") == CONFIRM_CHOICE_HINT
+    assert confirm_choice_hint("write:/p/a.py") == CONFIRM_CHOICE_HINT_PLAIN
+    assert confirm_choice_hint(None) == CONFIRM_CHOICE_HINT_PLAIN
+    assert "подобные" not in CONFIRM_CHOICE_HINT_PLAIN
+    for key in ("[Y/Н]", "[O/Щ]", "[N/Т]", "[T/Е]"):
+        assert key in CONFIRM_CHOICE_HINT and key in CONFIRM_CHOICE_HINT_PLAIN
+
+    # одно правило на подпись и на механизм: судье уходят ровно те ответы,
+    # про которые подпись говорит «и подобные»
+    store = PermissionStore()
+    store.record("command:pip install x", True, session=True)
+    store.record("write:/p/a.py", True, session=True)
+    assert store.insession_examples()["allowed"] == ["pip install x"]
+
+
+def test_presenter_gets_only_the_optional_parameters_it_accepts():
+    """Показ вопроса идёт через несколько звеньев с разными сигнатурами:
+    новый необязательный параметр не должен ломать короткие реализации."""
+    from gc_core.security.confirm_port import call_with_optional
+
+    assert call_with_optional(
+        lambda t, q: (t, q), 1, 2, via="v", decision_key="k"
+    ) == (1, 2)
+    assert call_with_optional(
+        lambda t, via=None: (t, via), 1, via="v", decision_key="k"
+    ) == (1, "v")
+    assert call_with_optional(lambda *a: a, 1, 2, decision_key="k") == (1, 2)
+    assert call_with_optional(
+        lambda t, **kw: kw, 1, via="v", decision_key="k"
+    ) == {
+        "via": "v",
+        "decision_key": "k",
+    }
+
+
+def test_decision_key_reaches_the_tui_presenter():
+    """Ключ решения доезжает до показа вопроса: по нему баннер выбирает подписи."""
+    from gc_core.security.confirm_port import request_confirm
+
+    seen = {}
+
+    def tui_confirm(*, title, question, fields, via=None, decision_key=None):
+        seen["decision_key"] = decision_key
+        return "allow_once"
+
+    ctx = _ctx(is_tui=True, tui_confirm=tui_confirm)
+    assert request_confirm(
+        title="t",
+        question="q?",
+        fields=[],
+        ctx=ctx,
+        decision_key="write:/p/a.py",
+    )
+    assert seen["decision_key"] == "write:/p/a.py"

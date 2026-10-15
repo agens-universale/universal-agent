@@ -310,6 +310,8 @@ def test_t15_cli_prints_payload_before_meta(fake_tty, monkeypatch):
             ("Риски", "network_to_private"),
         ],
         question="Разрешить запуск?",
+        # вид вопроса задаёт ключ решения: «и подобные» — только для команд
+        decision_key="command:curl -sL https://example.com/very/long",
     )
     assert result == "deny_once"
     text = printed.getvalue()

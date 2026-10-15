@@ -91,8 +91,10 @@ def test_write_guard_decline_caches_run_and_instructs(monkeypatch, tmp_path):
         "tui_confirm must NOT be called again (run-cache hit)"
     )
 
-    # Instructive message check
-    err_msg = captured["err"]["message"]
+    # Instructive message check. Повторный вызов отвечает уже не вопросом, а
+    # запомненным запретом человека: его конверт несёт инструкцию модели
+    # отдельным полем `guidance` (как отказы модерации команд).
+    err_msg = captured["err"].get("message") or captured["err"]["guidance"]
     assert "Do NOT retry" in err_msg, (
         f"Expected 'Do NOT retry' in: {err_msg!r}"
     )
@@ -217,10 +219,11 @@ def test_read_guard_decline_caches_and_instructs(monkeypatch, tmp_path):
     assert json.loads(res2)["ok"] is False
     assert calls["n"] == 1, "Second call must use cache, no re-prompt"
 
+    # Повторный вызов отвечает запомненным запретом человека (он сильнее
+    # режима и проверяется первым): свой тип, инструкция модели — в `guidance`.
     err = captured.get("err", {})
-    assert err.get("type") == "read_guard_cancelled_by_user"
-    # Instructive message
-    msg = err.get("message", "")
+    assert err.get("type") == "denied_by_user_for_session"
+    msg = err.get("guidance", "")
     assert "Do NOT retry" in msg, f"Expected 'Do NOT retry' in: {msg!r}"
     assert "ask the user" in msg, f"Expected 'ask the user' in: {msg!r}"
 
@@ -290,8 +293,10 @@ def test_command_moderation_decline_caches_and_instructs(
     # Запрет на обход едет отдельным полем guidance (make_block_error), а reason
     # остаётся причиной отказа: раньше одна и та же формулировка лежала в одном
     # словаре дважды — и в reason, и в guidance.
+    # Повторный вызов отвечает запомненным запретом человека, а не повтором
+    # решения модерации: запрет сильнее режима и проверяется первым.
     err = captured.get("err", {})
-    assert err.get("reason") == "User declined the command."
+    assert err.get("reason") == "Denied by the user for this session."
     guidance = err.get("guidance", "")
     assert "Do NOT retry" in guidance, (
         f"Expected 'Do NOT retry' in guidance: {guidance!r}"
