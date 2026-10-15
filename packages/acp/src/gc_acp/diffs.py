@@ -12,7 +12,7 @@ from typing import Any, Callable
 
 from gc_core.utils.file_text import decode_text_bytes
 
-# Потолок одной стороны diff. Выше — короткий текст, карточку не держим.
+# Потолок одной стороны diff. Выше — в логе только размер, в карточке короткий текст.
 _LIMIT = 256 * 1024
 _OWN = ("_inner", "_log", "_cwd", "_call_id")
 
@@ -38,6 +38,8 @@ class DiffLog:
 
     Несколько ``write_bytes`` одного вызова в один файл — один diff:
     старый текст с первого чтения, новый с последней записи.
+    Сторона тяжелее потолка в лог не кладётся: остаётся размер.
+    ``content`` забирает вызов и больше его не держит.
     """
 
     def __init__(self) -> None:
@@ -45,9 +47,10 @@ class DiffLog:
 
     def add(self, call_id: str, path: str, old: _Text, new: _Text) -> None:
         known = old.known and new.known
+        keep = known and old.size <= _LIMIT and new.size <= _LIMIT
         side = _Side(
-            old.text if known else None,
-            new.text if known else None,
+            old.text if keep else None,
+            new.text if keep else None,
             old.size,
             new.size,
             known,
@@ -60,13 +63,16 @@ class DiffLog:
         previous.new_text = side.new_text
         previous.new_size = side.new_size
         if previous.known and side.known:
+            if previous.old_size > _LIMIT or previous.new_size > _LIMIT:
+                previous.old_text = None
+                previous.new_text = None
             return
         previous.known = False
         previous.old_text = None
         previous.new_text = None
 
     def content(self, call_id: str) -> list[dict] | None:
-        bucket = self._by_call.get(call_id)
+        bucket = self._by_call.pop(call_id, None)
         if not bucket:
             return None
         blocks: list[dict] = []
@@ -151,7 +157,10 @@ def _text_of(data: bytes) -> _Text:
     text = decoded.text
     if not decoded.ok or not isinstance(text, str):
         return _Text(None, len(data), False)
-    return _Text(text, len(text.encode("utf-8")), True)
+    size = len(text.encode("utf-8"))
+    if size > _LIMIT:
+        return _Text(None, size, True)
+    return _Text(text, size, True)
 
 
 def _content_block(path: str, side: _Side) -> dict | None:

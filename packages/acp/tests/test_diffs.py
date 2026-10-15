@@ -4,7 +4,7 @@ import asyncio
 import json
 from types import SimpleNamespace
 
-from gc_acp.diffs import attach_diff
+from gc_acp.diffs import DiffBackend, DiffLog, attach_diff
 from gc_acp.facade import AcpFacade
 from gc_core.backends.local import LocalFsBackend
 from gc_testkit.settings import make_settings
@@ -621,3 +621,86 @@ async def test_exact_ceiling_stays_a_diff(tmp_path):
         }
     ]
     await facade.shutdown()
+
+
+async def test_oversize_bodies_stay_out_of_the_log():
+    disk = MemoryDisk()
+    old = "a" * (_LIMIT + 1)
+    new = "b" * (_LIMIT + 2)
+    disk.files["/work/big.txt"] = old.encode()
+    log = DiffLog()
+    backend = DiffBackend(disk, log, cwd="/work", call_id=lambda: "big")
+    await backend.write_bytes("/work/big.txt", new.encode())
+    side = log._by_call["big"]["/work/big.txt"]
+    assert side.old_text is None
+    assert side.new_text is None
+    assert side.known is True
+    assert side.old_size == _LIMIT + 1
+    assert side.new_size == _LIMIT + 2
+    shown = attach_diff(
+        {
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "big",
+            "status": "completed",
+        },
+        log,
+    )
+    text = shown["content"][0]["content"]["text"]
+    assert text.startswith("/work/big.txt:")
+    assert str(_LIMIT + 1) in text
+    assert str(_LIMIT + 2) in text
+    assert log._by_call == {}
+
+
+async def test_kept_text_leaves_when_the_card_is_attached():
+    disk = MemoryDisk()
+    disk.files["note.txt"] = "было\n".encode()
+    log = DiffLog()
+    backend = DiffBackend(disk, log, cwd="/work", call_id=lambda: "w1")
+    await backend.write_bytes("note.txt", "стало\n".encode())
+    shown = attach_diff(
+        {
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "w1",
+            "status": "completed",
+            "content": [_preview({"ok": True})],
+        },
+        log,
+    )
+    assert _diff_blocks(shown) == [
+        {
+            "type": "diff",
+            "path": "/work/note.txt",
+            "oldText": "было\n",
+            "newText": "стало\n",
+        }
+    ]
+    assert log._by_call == {}
+
+
+async def test_later_oversize_write_drops_text_kept_earlier():
+    disk = MemoryDisk()
+    disk.files["edit.txt"] = b"v0"
+    log = DiffLog()
+    backend = DiffBackend(disk, log, cwd="/work", call_id=lambda: "batch")
+    await backend.write_bytes("edit.txt", b"v1")
+    side = log._by_call["batch"]["/work/edit.txt"]
+    assert side.old_text == "v0"
+    assert side.new_text == "v1"
+    await backend.write_bytes("edit.txt", ("v" * (_LIMIT + 1)).encode())
+    side = log._by_call["batch"]["/work/edit.txt"]
+    assert side.old_text is None
+    assert side.new_text is None
+    assert side.old_size == 2
+    assert side.new_size == _LIMIT + 1
+    shown = attach_diff(
+        {
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "batch",
+            "status": "completed",
+        },
+        log,
+    )
+    assert _diff_blocks(shown) == []
+    assert shown["content"][0]["content"]["text"].startswith("/work/edit.txt:")
+    assert log._by_call == {}
