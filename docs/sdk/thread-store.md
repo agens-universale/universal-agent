@@ -1,27 +1,33 @@
-[Назад к SDK](README.md)
+[Назад к SDK](README.md) · [Контракт для авторов хранилищ](thread-store-contract.md)
 
 # Хранилище тредов
 
-Тред — это вся история разговора с агентом: сообщения (вопросы, ответы модели,
-вызовы инструментов и их результаты), meta треда (счётчики токенов, журнал
-намерений, память сессии), трассы субагентов и картинки. Всё это лежит в
-**хранилище тредов**. По умолчанию — файлы на диске; своё хранилище (база, S3)
-передаётся агенту объектом. Через конфиг оно не выбирается.
+Тред — вся история разговора с агентом: сообщения (вопросы, ответы модели,
+вызовы инструментов и их результаты), состояние сессии (рабочая память, журнал
+намерений, расход токенов), трассы субагентов, журнал правок и вложения
+(картинки). Всё это лежит в **хранилище тредов**. По умолчанию — файлы на
+диске; своё хранилище (база, S3) передаётся агенту объектом. Через конфиг оно
+не выбирается — в YAML есть только `paths.threads_data_path` для файлового.
 
 Хранилище тредов отвечает за то, что относится к одному треду. Промпты,
-AGENTS.md, скиллы и субагенты — общее для всех тредов агента — даёт другое
-хранилище: [хранилище агента](agent-store.md).
+AGENTS.md, скиллы, субагенты и память проекта — общее для всех тредов агента —
+даёт другое хранилище: [хранилище агента](agent-store.md).
 
 ## Какие есть
 
+Все реализуют контракт `gc_core.threads.store.ThreadStore` («v2»).
+
 | Хранилище | Где | Когда |
 |---|---|---|
-| `FileThreadStore` | `gc_core.thread_store_file` | по умолчанию в SDK, CLI, TUI, сервере: файлы `data_*.jsonl` и `meta_*.json` в `paths.threads_data_path` |
-| `MemoryThreadStore` | `gc_testkit.memory_thread_store` | тесты; образец своего хранилища |
-| `FileThreadStore` v2 | `gc_core.threads.file_store` | контракт v2 (`ThreadStore`): те же файлы плюс служебный каталог `.store/`; под Temporal — `durability="fsync"` |
-| `SQLiteThreadStore` | `gc_stores.sqlite` | контракт v2: один файл базы, файлы треда в ней же |
-| `PostgresThreadStore` | `gc_stores.postgres` (дистрибутив `gc-stores[postgres]`) | несколько инстансов на одной базе: контракт v2 (`gc_core.threads.store.ThreadStore`), см. «Postgres» ниже |
-| своё | ваш код | база, S3, Redis — по контракту ниже |
+| `FileThreadStore` | `gc_core.threads.file_store` | по умолчанию в SDK, CLI, TUI, сервере, gc-chat, gc-acp: файлы `data_*.jsonl` и `meta_*.json` в `paths.threads_data_path` (формат прежний) плюс служебный каталог `.store/`; под Temporal — `durability="fsync"` |
+| `SQLiteThreadStore` | `gc_stores.sqlite` (дистрибутив `gc-stores`) | один файл базы; файлы треда (картинки) — в ней же |
+| `PostgresThreadStore` | `gc_stores.postgres` (`gc-stores[postgres]`) | несколько инстансов на одной базе — [ниже](#postgres-несколько-инстансов-на-одной-базе) |
+| `MemoryThreadStore` | `gc_testkit.memory_thread_store_v2` | тесты; самый короткий образец своего хранилища |
+| своё | ваш код | база, S3, Redis — по [контракту](thread-store-contract.md) |
+
+Хранилище прежнего контракта (`ThreadStoreBase` — одиннадцать методов
+`load_messages`, `save_meta`…) по-прежнему принимается: ядро заворачивает его
+в адаптер. Новое пишите на v2 — см. [контракт](thread-store-contract.md#прежний-контракт-threadstorebase).
 
 ## Как передать агенту
 
@@ -35,9 +41,11 @@ answer = await agent.run("привет", thread_id="t1")              # system="
 answer = await agent.run("привет", thread_id="t1", system="crm")
 ```
 
-Адрес треда — пара `(system, thread_id)`: `system` разделяет треды разных
-приложений в одном хранилище (у SDK по умолчанию `"sdk"`, у CLI — `"cli"`).
-Без `thread_id` история не сохраняется: каждый ход — с чистого листа.
+Адрес треда — `ThreadKey(system, thread)`: `system` разделяет треды разных
+приложений в одном хранилище (у SDK по умолчанию `"sdk"`, у CLI — `"cli"`),
+`thread` — только латинские буквы, цифры, `_` и `-`. Читайте тред тем же
+`system`, каким писали. Без `thread_id` история не сохраняется: каждый ход —
+с чистого листа.
 
 Temporal — в плагин воркера, одно хранилище или несколько по именам:
 
@@ -45,82 +53,99 @@ Temporal — в плагин воркера, одно хранилище или 
 from gc_core_temporalio import AgentPlugin, AgentSession
 
 plugin = AgentPlugin({"support": settings}, thread_store=store)
-plugin = AgentPlugin({"support": settings}, thread_stores={"s3": s3_store})
+plugin = AgentPlugin({"support": settings}, thread_stores={"pg": pg_store})
 
 session = AgentSession(client, agent="support", thread_id="T-1",
-                       task_queue="agents", store_id="s3")
+                       task_queue="agents", store_id="pg")
 ```
 
-Под Temporal хранилище обязано выполнять durable-контракт (ниже): запись в
-тред идёт из activity, а activity после падения воркера повторяется.
+## Как устроен тред
 
-## Своё хранилище для SDK
+Хранилище отдаёт тред одной записью (`ThreadRecord`) и потоками:
 
-Наследуйте `ThreadStoreBase` (`gc_core.thread_store_base`): одиннадцать
-абстрактных методов — чтение истории и meta, запись, трассы субагентов, сброс.
-Забытый метод — отказ при создании объекта, а общие правила meta (штампы
-версии схемы, флаги рантайма) достаются от базы готовыми.
+| Часть | Что внутри |
+|---|---|
+| `info` | заголовок, workspace, режим API, `created_at` / `updated_at` / `messages_count` (их ставит хранилище) |
+| `state` | состояние сессии: рабочая память, заметки, todo, журнал намерений, счётчики, кэш `fetch_url` |
+| `usage` | расход токенов по категориям вызовов |
+| `runtime` | живой статус хода: `turn`, флаги (`summarizing`, `finalizing`…), объём живой истории, снимок MCP |
+| `frontend` | состояние фронтендов по имени (`"tui"`, `"acp"`) — его знает только фронтенд |
+| `archives` | архивы истории, ушедшей при сжатии контекста |
+| `extra` | ключи meta, которых модели не знают (данные старых версий, сторонние секции) — хранятся как есть |
+| потоки | `messages` (история), `subagent_events`, `edits`, `inbox`, потоки фронтендов `<фронтенд>.<имя>` (`chat.responses`) |
+
+Запись в историю — `commit`: атомарно, по ревизии треда и по аренде
+пишущего, повтор той же операции (тот же `op_id`) возвращает прежнюю
+квитанцию. Статус хода, состояние фронтендов и журналы рядом с историей —
+`append_side`, с ходом они не конфликтуют. Аренда (`claim`) — кто сейчас
+ведёт тред: ход SDK/CLI/сервера — со сроком (по умолчанию 60 с, продлевается),
+сессия Temporal — бессрочно. Алиасы — внешние идентификаторы треда
+(`response_id` gc-chat), по ним тред находится с любого инстанса.
+
+Файловое хранилище раскладывает всё это в прежние ключи `meta_*.json`:
+старые треды открываются, формат файлов не изменился.
+
+## Читать треды из приложения: фасад `Threads`
+
+Фронтенды и приложения работают с тредами через фасад, а не через сырые
+методы хранилища:
 
 ```python
-from gc_core.thread_store_base import ThreadStoreBase
+from gc_core.threads.facade import Threads
+from gc_core.threads.models import ThreadKey
 
+threads = Threads(store)                     # или Threads.from_settings(settings)
+key = ThreadKey(system="sdk", thread="t1")
 
-class PostgresThreadStore(ThreadStoreBase):
-    def __init__(self, dsn):
-        self.db = connect(dsn)
-
-    def load_messages(self, system_id, thread_id): ...
-    def load_thread_state(self, system_id, thread_id): ...
-    def load_meta(self, system_id, thread_id): ...
-    def append_messages(self, system_id, thread_id, messages, *,
-                        known_keys=None, start_seq=0): ...
-    def save_meta(self, system_id, thread_id, meta): ...
-    # …и ещё шесть: patch_runtime_flag, update_runtime_meta,
-    # discard_message, reset, append_subagent_trace, read_subagent_trace
+async for record in threads.iter_threads(system="sdk"):
+    print(record.key.thread, record.info.title, record.info.updated_at)
+history = await threads.history(key)         # записи потока messages
+parts = await threads.parts(key)             # архивы по порядку, затем живая история
+await threads.update_frontend(key, "myapp", {"pinned": True})
+found = await threads.resolve("resp_123")    # тред по алиасу
+await threads.delete(key)
 ```
 
-Клиент базы асинхронный (`asyncpg`, `redis.asyncio`) — `AsyncThreadStoreBase`:
-те же методы с приставкой `a`, ядро ждёт их нативно.
+`Threads.legacy_meta(record)` отдаёт запись в прежней форме meta (ключи
+`shared`, `runtime`, `tui`…) — для кода, который читал `meta_*.json`.
+
+## Своё хранилище
+
+Наследуйте `gc_core.threads.store.ThreadStore` и реализуйте его методы — все
+асинхронные: чтение (`get_thread`, `list_threads`, `read_stream`,
+`read_archive`, `resolve_alias`), запись (`commit`, `append_side`), аренда и
+жизненный цикл (`claim`, `release`, `delete`), вложения и обслуживание
+(`put_blob`, `get_blob`, `prune_receipts`). Порядок проверок, правила аренды,
+нумерации потоков и времени — в [контракте](thread-store-contract.md);
+правила, общие для всех реализаций, — готовыми функциями в
+`gc_core.threads.rules`.
+
+Образцы: `MemoryThreadStore` (`gc_testkit.memory_thread_store_v2`, ~400 строк
+— всё явно и без оптимизаций), `SQLiteThreadStore` и `PostgresThreadStore`
+(`gc_stores`).
 
 Проверка — конформанс-набор, одной строкой в тестах:
-
-```python
-from gc_testkit.thread_store_conformance import assert_conforms
-
-
-def test_my_store():
-    assert_conforms(lambda: PostgresThreadStore(TEST_DSN))
-```
-
-Что именно делает каждый метод, восемь свойств, которые легко нарушить, и
-поведение синхронного сетевого клиента — в
-[контракте хранилища тредов](thread-store-contract.md). Образцы:
-`FileThreadStore` и `MemoryThreadStore`.
-
-## Своё хранилище для Temporal
-
-Под Temporal работает любое хранилище контракта v2
-(`gc_core.threads.store.ThreadStore`): `FileThreadStore` v2, `SQLiteThreadStore`,
-`PostgresThreadStore` или своё. Идемпотентность записи — часть контракта:
-`commit` с тем же `op_id` и тем же содержимым возвращает прежнюю квитанцию
-(воркер упал после записи, activity повторилась), чужая запись между чтением и
-записью — `ThreadConflict`, запись не по своей аренде — `OwnershipError`.
-Владелец треда — workflow сессии (аренда без срока).
-
-Обязательно объявите `protected_paths()` — пути данных хранилища на диске
-воркера, к которым агенту нельзя прикасаться, или `[]`, если на диске ничего
-нет. Без него воркер не стартует. Квитанции старше 7 дней обслуживание воркера
-удаляет `prune_receipts(older_than)`.
-
-Проверка:
 
 ```python
 from gc_testkit.thread_store_conformance_v2 import assert_conforms
 
 
 def test_my_store():
-    assert_conforms(lambda clock: S3ThreadStore(bucket, prefix, clock=clock))
+    assert_conforms(lambda clock: MyStore(dsn, clock=clock))
 ```
+
+## Своё хранилище для Temporal
+
+Под Temporal работает любое хранилище контракта v2: код workflow говорит с
+ним через activities `universal_agent.thread.*`, ядро пишет тред так же, как
+локально. Идемпотентность записи — часть контракта: повтор `commit` после
+записи (воркер упал до ответа) хранилище узнаёт по `op_id`. Владелец треда —
+цепочка run сессии (бессрочная аренда).
+
+Обязательно объявите `protected_paths()` — пути данных хранилища на диске
+воркера, к которым агенту нельзя прикасаться, или `[]`, если на диске ничего
+нет. Без него воркер не стартует. Квитанции старше 7 дней обслуживание воркера
+удаляет `prune_receipts(older_than)`. Подробно — [Temporal](../temporal.md#хранилища-тредов).
 
 ## Postgres: несколько инстансов на одной базе
 
@@ -174,33 +199,26 @@ await store.close()              # или `async with PostgresThreadStore(...)`
   аренде удалённого.
 - **`watch`** — опрос (`poll_interval`); LISTEN/NOTIFY — позже.
 
-## Необязательные возможности
+## Картинки и файлы треда
 
-Хранилище объявляет их методами; нет метода — ядро работает по-старому.
-
-- **Файлы треда** — `write_thread_file(system_id, thread_id, name, data)` и
-  `read_thread_file(system_id, thread_id, name)`. Картинки (снимки
-  `fs_view_image`, вложения сообщений) и медиа из ответов MCP ложатся в
-  хранилище, а не на диск процесса; модель видит их ссылкой
-  `thread-file://<system>/<thread>/<имя>`. Удаляет их само хранилище вместе с
-  тредом (`reset`). Под Temporal хранилище без файлов треда и без каталога на
-  диске выключает `fs_view_image`: картинкам негде жить, кроме диска воркера.
-- **Архив перед компакцией** — `archive_and_replace(system_id, thread_id,
-  messages)`: старая история уходит в архив одной операцией, когда сжатие
-  контекста заменяет её сводкой.
-- **Замена истории одной операцией** — `replace_messages`: компакция без пары
-  `reset` + `append_messages`, трасса субагентов не трогается.
+Картинки сообщений и снимки `fs_view_image` у файлового хранилища лежат в
+`<threads_dir>/images/`, у SQLite — в самой базе (файлы треда,
+`write_thread_file` / `read_thread_file`), модель видит их ссылкой
+`thread-file://<system>/<thread>/<имя>`. У хранилища без каталога и без
+файлов треда (Postgres) картинки ложатся во временный каталог процесса и
+после перезапуска недоступны; под Temporal такое хранилище выключает
+`fs_view_image`. Подробно — в [контракте](thread-store-contract.md#картинки-и-файлы-треда).
 
 ## Где что лежит
 
 | Файл | Что |
 |---|---|
-| `gc_core/thread_store_base.py` | `ThreadStoreBase`, `AsyncThreadStoreBase` — контракт |
-| `gc_core/threads/store.py`, `models.py` | `ThreadStore` — контракт v2 и его модели |
-| `gc_core/thread_store_file.py` | `FileThreadStore` |
-| `gc_core/threads/file_store.py` | `FileThreadStore` v2 |
-| `gc_core/thread_files.py` | файлы треда, ссылки `thread-file://` |
-| `gc_stores/sqlite/store.py`, `schema.sql` | `SQLiteThreadStore` и его таблицы |
-| `gc_stores/postgres/store.py`, `schema.sql` | `PostgresThreadStore` и его таблицы |
-| `gc_testkit/memory_thread_store.py` | `MemoryThreadStore` |
-| `gc_testkit/thread_store_conformance.py`, `thread_store_conformance_v2.py` | проверки своей реализации (старый контракт и v2) |
+| `gc_core/threads/store.py`, `models.py`, `errors.py` | `ThreadStore` — контракт v2, модели, отказы |
+| `gc_core/threads/rules.py` | правила, общие для реализаций (аренда, список, запись сбоку) |
+| `gc_core/threads/facade.py` | `Threads` — фасад для фронтендов и приложений |
+| `gc_core/threads/session_port.py` | `SessionPort` — сессия агента поверх хранилища v2 |
+| `gc_core/threads/file_store.py` | `FileThreadStore` |
+| `gc_stores/sqlite/`, `gc_stores/postgres/` | `SQLiteThreadStore`, `PostgresThreadStore` и их схемы |
+| `gc_testkit/memory_thread_store_v2.py` | `MemoryThreadStore` |
+| `gc_testkit/thread_store_conformance_v2.py` | проверка своей реализации |
+| `gc_core/thread_store_base.py`, `thread_store_async.py` | прежний контракт и адаптер к нему |
