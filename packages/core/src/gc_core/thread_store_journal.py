@@ -12,6 +12,7 @@ import contextlib
 import contextvars
 import hashlib
 import json
+import logging
 import os
 import shutil
 import threading
@@ -25,6 +26,8 @@ class JournalRecoveryError(OSError):
     записал прерванный коммит (их правили руками или другой процесс). Тред
     не читается, пока это не разобрать."""
 
+
+logger = logging.getLogger(__name__)
 
 _active = contextvars.ContextVar("thread_file_transaction", default=False)
 _held = contextvars.ContextVar("thread_file_lock", default=())
@@ -81,17 +84,26 @@ def _control_path(directory, system_id, thread_id):
 
 
 def _control(base):
+    """``control.json`` треда. Испорченный (пустой после отключения питания
+    в режиме без fsync, чужой писатель) — как отсутствующий: тред читается
+    и пишется дальше с нуля по ревизии, а не закрывается намертво."""
     path = base / _CONTROL_FILE
-    return (
-        json.loads(path.read_bytes())
-        if path.exists()
-        else {
-            "revision": 0,
-            "generation": 0,
-            "owner_id": None,
-            "owner_epoch": 0,
-        }
-    )
+    fresh = {
+        "revision": 0,
+        "generation": 0,
+        "owner_id": None,
+        "owner_epoch": 0,
+    }
+    if not path.exists():
+        return fresh
+    try:
+        control = json.loads(path.read_bytes())
+    except ValueError:
+        control = None
+    if not isinstance(control, dict):
+        logger.warning("испорченный %s — тред с чистой ревизией", path)
+        return fresh
+    return control
 
 
 def durable_owner_id(directory, system_id, thread_id):
@@ -103,7 +115,7 @@ def durable_owner_id(directory, system_id, thread_id):
     path = _control_path(directory, system_id, thread_id) / _CONTROL_FILE
     try:
         return json.loads(path.read_bytes()).get("owner_id")
-    except (FileNotFoundError, NotADirectoryError):
+    except (FileNotFoundError, NotADirectoryError, ValueError, AttributeError):
         return None
 
 
@@ -155,6 +167,17 @@ def _recover_image(path, change):
         _write(path, after)
 
 
+def _readable_journal(pending: Path) -> dict | None:
+    try:
+        journal = json.loads(pending.read_bytes())
+    except ValueError:
+        return None
+    keys = ("changes", "control", "receipt")
+    if not isinstance(journal, dict) or any(k not in journal for k in keys):
+        return None
+    return journal
+
+
 def _recover(directory: Path, base: Path):
     # Stage прерванного коммита (SIGKILL внутри транзакции): под блокировкой
     # треда активного коммита нет, каталог можно убрать.
@@ -163,7 +186,14 @@ def _recover(directory: Path, base: Path):
     pending = base / "pending.json"
     if not pending.exists():
         return
-    journal = json.loads(pending.read_bytes())
+    journal = _readable_journal(pending)
+    if journal is None:
+        # Журнал не дописан (отключение питания без fsync): доиграть нечего,
+        # а оставить — значит закрыть тред для всех. Он уходит в сторону.
+        aside = pending.with_name(f"pending.json.corrupt-{os.getpid()}")
+        os.replace(pending, aside)
+        logger.error("испорченный журнал записи треда: %s", aside)
+        return
     for change in journal["changes"]:
         path = directory / change["path"]
         if "offset" in change:

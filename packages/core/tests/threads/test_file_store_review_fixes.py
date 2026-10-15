@@ -172,3 +172,90 @@ def test_side_write_leaves_thread_stamps_alone(tmp_path):
     assert meta["tui"] == {"title": "x"}
     assert "updated_at" not in meta
     assert list(meta)[:3] == ["thread_id", "system_id", "memory_files"]
+
+
+def _committed_thread(tmp_path, key):
+    from datetime import timedelta
+
+    from gc_core.threads.file_store import FileThreadStore
+    from gc_core.threads.models import LeaseRequest, ThreadChange
+
+    store = FileThreadStore(tmp_path)
+    lease = asyncio.run(
+        store.claim(key, LeaseRequest(owner="h", ttl=timedelta(60)))
+    ).lease
+    asyncio.run(
+        store.commit(
+            key,
+            ThreadChange(
+                op_id="op",
+                expected_revision=0,
+                lease=lease,
+                append_messages=[{"id": "m", "role": "user", "content": "x"}],
+            ),
+        )
+    )
+    asyncio.run(store.release(key, lease))
+    return store
+
+
+def test_bad_updated_at_does_not_break_the_list(tmp_path):
+    """Одна meta с ``updated_at`` не по ISO (или без пояса) — тред в конце
+    списка, остальные на месте; курсор листает дальше."""
+    import json
+
+    from gc_core.threads.models import ThreadKey, ThreadQuery
+
+    good = ThreadKey(system="cli", thread="good")
+    store = _committed_thread(tmp_path, good)
+    for name, stamp in (("bad", "вчера"), ("naive", "2026-01-01T00:00:00")):
+        (tmp_path / f"meta_cli_{name}.json").write_text(
+            json.dumps(
+                {"thread_id": name, "system": "cli", "updated_at": stamp}
+            ),
+            encoding="utf-8",
+        )
+    page = asyncio.run(store.list_threads(ThreadQuery(limit=1)))
+    assert [r.key.thread for r in page.items] == ["good"]
+    rest = asyncio.run(
+        store.list_threads(ThreadQuery(limit=10, cursor=page.next_cursor))
+    )
+    assert [r.key.thread for r in rest.items] == ["naive", "bad"]
+
+
+def test_corrupt_control_and_journal_do_not_lock_the_thread(tmp_path):
+    """Пустой ``control.json`` и недописанный ``pending.json`` (отключение
+    питания без fsync) не закрывают тред: он читается и пишется дальше."""
+    from gc_core.threads.models import ThreadKey
+
+    key = ThreadKey(system="cli", thread="t")
+    store = _committed_thread(tmp_path, key)
+    (base,) = [
+        p
+        for p in (tmp_path / ".store").iterdir()
+        if (p / "control.json").exists()
+    ]
+    (base / "control.json").write_bytes(b"")
+    (base / "pending.json").write_bytes(b'{"changes": [')
+    record = asyncio.run(store.get_thread(key))
+    assert record is not None and record.info.messages_count == 1
+    assert not (base / "pending.json").exists()
+    _committed_thread(tmp_path, key)  # ревизия — с нуля, запись проходит
+
+
+def test_foreign_stream_line_is_skipped(tmp_path):
+    from gc_core.threads import file_layout as layout
+    from gc_core.threads.models import SideChange, ThreadKey
+
+    key = ThreadKey(system="cli", thread="t")
+    store = _committed_thread(tmp_path, key)
+    asyncio.run(
+        store.append_side(
+            key, SideChange(op_id="s", append=[("chat.responses", [{}])])
+        )
+    )
+    path = layout.stream_path(str(tmp_path), "cli", "t", "chat.responses")
+    with open(path, "a", encoding="utf-8") as handle:
+        handle.write('{"seq": "не число", "data": 1}\n')
+    entries = asyncio.run(store.read_stream(key, "chat.responses"))
+    assert len(entries) == 1

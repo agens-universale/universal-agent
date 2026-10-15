@@ -21,12 +21,28 @@ from gc_core.threads.models import (
     ThreadRecord,
 )
 
+_EARLIEST = datetime.min.replace(tzinfo=UTC)
+
 
 def instant(stamp: str | None) -> datetime:
     """Момент времени из ISO-8601 (``Z`` или смещение); пусто — самое раннее."""
     if not stamp:
-        return datetime.min.replace(tzinfo=UTC)
+        return _EARLIEST
     return datetime.fromisoformat(stamp)
+
+
+def _updated(record: ThreadRecord) -> datetime:
+    """Когда тред обновлён — для порядка списка. Время не по ISO (meta,
+    испорченная чужим писателем) — самое раннее: тред в конце списка, а не
+    отказ всего списка; без смещения — UTC."""
+    stamp = record.info.updated_at
+    if not isinstance(stamp, str):
+        return _EARLIEST
+    try:
+        moment = instant(stamp)
+    except ValueError:
+        return _EARLIEST
+    return moment if moment.tzinfo else moment.replace(tzinfo=UTC)
 
 
 def lease_expired(lease: Lease, now: datetime) -> bool:
@@ -95,7 +111,7 @@ def same_lease(current: Lease | None, lease: Lease) -> bool:
 
 
 def _matches(record: ThreadRecord, query: ThreadQuery) -> bool:
-    updated = instant(record.info.updated_at)
+    updated = _updated(record)
     after, before = query.updated_after, query.updated_before
     checks = (
         query.system is None or record.key.system == query.system,
@@ -109,10 +125,20 @@ def _matches(record: ThreadRecord, query: ThreadQuery) -> bool:
 def _after_cursor(record: ThreadRecord, cursor: str) -> bool:
     """Идёт ли запись после курсора в порядке (updated_at ↓, system, thread)."""
     updated, system, thread = cursor.split("|", 2)
-    mine, theirs = instant(record.info.updated_at), instant(updated)
+    mine, theirs = _updated(record), _cursor_instant(updated)
     if mine != theirs:
         return mine < theirs
     return (record.key.system, record.key.thread) > (system, thread)
+
+
+def _cursor_instant(stamp: str) -> datetime:
+    """Время из курсора (``page_of`` пишет его в ISO); чужой курсор — самое
+    раннее."""
+    try:
+        moment = instant(stamp)
+    except ValueError:
+        return _EARLIEST
+    return moment if moment.tzinfo else moment.replace(tzinfo=UTC)
 
 
 def page_of(
@@ -122,14 +148,15 @@ def page_of(
     thread), курсор — непрозрачная строка последней записи страницы."""
     chosen = [r for r in records if _matches(r, query)]
     chosen.sort(key=lambda r: (r.key.system, r.key.thread))
-    chosen.sort(key=lambda r: instant(r.info.updated_at), reverse=True)
+    chosen.sort(key=_updated, reverse=True)
     if query.cursor:
         chosen = [r for r in chosen if _after_cursor(r, query.cursor)]
     page = chosen[: query.limit]
     cursor = None
     if len(chosen) > query.limit:
         last = page[-1]
-        cursor = f"{last.info.updated_at}|{last.key.system}|{last.key.thread}"
+        stamp = _updated(last).isoformat()
+        cursor = f"{stamp}|{last.key.system}|{last.key.thread}"
     return Page[ThreadRecord](items=page, next_cursor=cursor)
 
 

@@ -430,6 +430,22 @@ class FileThreadStore(ThreadStore):
         row = _json_row(text)
         if row is None:
             return None
+        try:
+            return self._side_entry(stream, row, number)
+        except (TypeError, ValueError):
+            # Чужая по форме строка (сторонний писатель) — пропускается, как
+            # нечитаемая строка истории: тред из-за неё не закрывается.
+            logger.warning(
+                "поток %s треда %s: строка %d не читается",
+                stream,
+                key,
+                number,
+                exc_info=True,
+            )
+            return None
+
+    @staticmethod
+    def _side_entry(stream: str, row: JsonObject, number: int) -> StreamEntry:
         if stream == _SUBAGENTS:
             data = {k: v for k, v in row.items() if k not in ("ts", "seq")}
             return StreamEntry(
