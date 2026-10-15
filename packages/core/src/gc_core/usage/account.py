@@ -75,6 +75,85 @@ def _num(value: Any) -> float:
     return float(value) if isinstance(value, (int, float)) else 0.0
 
 
+def _int(value: Any) -> int:
+    return int(value) if isinstance(value, (int, float)) else 0
+
+
+def _read_fields(raw: Dict[str, Any], fields: tuple) -> Dict[str, int]:
+    """Счётчики из сырого meta: нечисловое → 0, дробное → целое."""
+    return {field: _int(raw.get(field, 0)) for field in fields}
+
+
+def _add_fields(
+    dst: Dict[str, Any], src: Dict[str, Any], fields: tuple
+) -> None:
+    for field in fields:
+        dst[field] += int(src.get(field, 0) or 0)
+
+
+def _add_money(dst: Dict[str, float], src: Optional[Dict[str, Any]]) -> None:
+    for cur, amount in (src or {}).items():
+        dst[cur] = dst.get(cur, 0.0) + _num(amount)
+
+
+def _sub_fields(
+    bucket: Dict[str, Any], base: Dict[str, Any], fields: tuple
+) -> Dict[str, int]:
+    """Разность счётчиков по полям, не ниже 0."""
+    return {
+        field: max(
+            0, int(_num(bucket.get(field, 0)) - _num(base.get(field, 0)))
+        )
+        for field in fields
+    }
+
+
+def _sub_money(
+    money: Optional[Dict[str, Any]], base: Optional[Dict[str, Any]]
+) -> Dict[str, float]:
+    """Разность денег по валютам. Эпсилон на КАЖДУЮ валюту: иначе float-хвост
+    вычитания оставит ключ с 1e-17 и создаст фантомную валюту в отчёте."""
+    base = base or {}
+    out: Dict[str, float] = {}
+    for cur, amount in (money or {}).items():
+        value = max(0.0, _num(amount) - _num(base.get(cur, 0.0)))
+        if value >= COST_EPSILON:
+            out[cur] = value
+    return out
+
+
+def _sub_models(
+    models: Optional[Dict[str, Dict[str, Any]]],
+    base: Dict[str, Dict[str, Any]],
+    fields: tuple,
+) -> Dict[str, Dict[str, int]]:
+    """Разность бакетов моделей; модели без изменений не попадают."""
+    out: Dict[str, Dict[str, int]] = {}
+    for model, bucket in (models or {}).items():
+        delta = _sub_fields(bucket, base.get(model, {}), fields)
+        if any(delta.values()):
+            out[model] = delta
+    return out
+
+
+def _category_delta(
+    bucket: Dict[str, Any], base: Dict[str, Any]
+) -> Optional[Dict[str, Any]]:
+    """Бакет категории = bucket − base или None, если не изменились ни токены,
+    ни деньги (разбивка по моделям на это решение не влияет)."""
+    counts = _sub_fields(bucket, base, _FIELDS)
+    money = _sub_money(bucket.get(MONEY_FIELD), base.get(MONEY_FIELD))
+    if not any(counts.values()) and not money:
+        return None
+    delta: Dict[str, Any] = {**counts, MONEY_FIELD: money}
+    models = _sub_models(
+        bucket.get("by_model"), base.get("by_model") or {}, _FIELDS
+    )
+    if models:
+        delta["by_model"] = models
+    return delta
+
+
 def _money_from_raw(bucket: Dict[str, Any]) -> Dict[str, float]:
     """Деньги бакета из сырого meta: новый словарь либо legacy-число."""
     raw = bucket.get(MONEY_FIELD)
@@ -126,37 +205,28 @@ class UsageAccount:
     ) -> None:
         self.by_category: Dict[str, Dict[str, Any]] = {}
         self.by_model: Dict[str, Dict[str, int]] = {}
-        if by_category:
-            for category, bucket in by_category.items():
-                if not isinstance(bucket, dict):
-                    continue
-                dst = self._bucket(str(category))
-                for field in _FIELDS:
-                    raw = bucket.get(field, 0)
-                    dst[field] = (
-                        int(raw) if isinstance(raw, (int, float)) else 0
-                    )
-                dst[MONEY_FIELD] = _money_from_raw(bucket)
-                models = bucket.get("by_model")
-                if isinstance(models, dict):
-                    for model, model_bucket in models.items():
-                        if not isinstance(model_bucket, dict):
-                            continue
-                        attributed = self._category_model_bucket(
-                            str(category), str(model)
-                        )
-                        for field in _FIELDS:
-                            attributed[field] = int(_num(model_bucket.get(field, 0)))
-        if by_model:
-            for model, bucket in by_model.items():
-                if not isinstance(bucket, dict):
-                    continue
-                dst = self._model_bucket(str(model))
-                for field in _MODEL_FIELDS:
-                    raw = bucket.get(field, 0)
-                    dst[field] = (
-                        int(raw) if isinstance(raw, (int, float)) else 0
-                    )
+        for category, bucket in (by_category or {}).items():
+            if isinstance(bucket, dict):
+                self._load_category(str(category), bucket)
+        for model, bucket in (by_model or {}).items():
+            if isinstance(bucket, dict):
+                self._model_bucket(str(model)).update(
+                    _read_fields(bucket, _MODEL_FIELDS)
+                )
+
+    def _load_category(self, category: str, raw: Dict[str, Any]) -> None:
+        """Бакет категории из сырого meta, вместе с разбивкой по моделям."""
+        dst = self._bucket(category)
+        dst.update(_read_fields(raw, _FIELDS))
+        dst[MONEY_FIELD] = _money_from_raw(raw)
+        models = raw.get("by_model")
+        if not isinstance(models, dict):
+            return
+        for model, model_bucket in models.items():
+            if isinstance(model_bucket, dict):
+                self._category_model_bucket(category, str(model)).update(
+                    _read_fields(model_bucket, _FIELDS)
+                )
 
     def _bucket(self, category: str) -> Dict[str, Any]:
         bucket = self.by_category.get(category)
@@ -241,22 +311,18 @@ class UsageAccount:
         if not isinstance(other, UsageAccount):
             return
         for category, bucket in other.by_category.items():
-            dst = self._bucket(as_category or category)
-            for field in _FIELDS:
-                dst[field] += int(bucket.get(field, 0) or 0)
-            dst_money = dst[MONEY_FIELD]
-            for cur, amount in (bucket.get(MONEY_FIELD) or {}).items():
-                dst_money[cur] = dst_money.get(cur, 0.0) + _num(amount)
+            target = as_category or category
+            dst = self._bucket(target)
+            _add_fields(dst, bucket, _FIELDS)
+            _add_money(dst[MONEY_FIELD], bucket.get(MONEY_FIELD))
             for model, model_bucket in (bucket.get("by_model") or {}).items():
-                attributed = self._category_model_bucket(
-                    as_category or category, model
+                _add_fields(
+                    self._category_model_bucket(target, model),
+                    model_bucket,
+                    _FIELDS,
                 )
-                for field in _FIELDS:
-                    attributed[field] += int(model_bucket.get(field, 0) or 0)
         for model, bucket in other.by_model.items():
-            dst = self._model_bucket(model)
-            for field in _MODEL_FIELDS:
-                dst[field] += int(bucket.get(field, 0) or 0)
+            _add_fields(self._model_bucket(model), bucket, _MODEL_FIELDS)
 
     def delta_from(self, baseline: UsageAccount) -> UsageAccount:
         """Новый аккаунт = self − baseline (по полям, не ниже 0).
@@ -265,65 +331,17 @@ class UsageAccount:
         ``self`` — кумулятив, а ``baseline`` — снимок до старта прогона.
         """
         out = UsageAccount()
-        base = (
-            baseline.by_category if isinstance(baseline, UsageAccount) else {}
-        )
+        has_baseline = isinstance(baseline, UsageAccount)
+        base = baseline.by_category if has_baseline else {}
         for category, bucket in self.by_category.items():
-            base_bucket = base.get(category, {})
-            dst = out._bucket(category)
-            has_delta = False
-            for field in _FIELDS:
-                value = max(
-                    0,
-                    int(
-                        _num(bucket.get(field, 0))
-                        - _num(base_bucket.get(field, 0))
-                    ),
-                )
-                dst[field] = value
-                if value:
-                    has_delta = True
-            base_money = base_bucket.get(MONEY_FIELD) or {}
-            dst_money = dst[MONEY_FIELD]
-            for cur, amount in (bucket.get(MONEY_FIELD) or {}).items():
-                # Эпсилон на КАЖДУЮ валюту: иначе float-хвост вычитания оставит
-                # ключ с 1e-17 и создаст фантомную валюту в отчёте.
-                value = max(0.0, _num(amount) - _num(base_money.get(cur, 0.0)))
-                if value < COST_EPSILON:
-                    continue
-                dst_money[cur] = value
-                has_delta = True
-            base_attribution = base_bucket.get("by_model") or {}
-            for model, model_bucket in (bucket.get("by_model") or {}).items():
-                base_model = base_attribution.get(model, {})
-                attributed = {
-                    field: max(
-                        0,
-                        int(_num(model_bucket.get(field, 0)) - _num(base_model.get(field, 0))),
-                    )
-                    for field in _FIELDS
-                }
-                if any(attributed.values()):
-                    dst.setdefault("by_model", {})[model] = attributed
-            if not has_delta:
-                del out.by_category[category]
-        base_models = (
-            baseline.by_model if isinstance(baseline, UsageAccount) else {}
+            delta = _category_delta(bucket, base.get(category, {}))
+            if delta is not None:
+                out.by_category[category] = delta
+        out.by_model = _sub_models(
+            self.by_model,
+            baseline.by_model if has_baseline else {},
+            _MODEL_FIELDS,
         )
-        for model, bucket in self.by_model.items():
-            base_bucket = base_models.get(model, {})
-            delta = {
-                field: max(
-                    0,
-                    int(
-                        _num(bucket.get(field, 0))
-                        - _num(base_bucket.get(field, 0))
-                    ),
-                )
-                for field in _MODEL_FIELDS
-            }
-            if any(delta.values()):
-                out.by_model[model] = delta
         return out
 
     def totals(self) -> Dict[str, Any]:

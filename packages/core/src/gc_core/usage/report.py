@@ -259,12 +259,29 @@ def build_run_usage_dict(
         provider_currency=provider_currency,
     )
 
-    categories: dict[str, dict[str, Any]] = {}
-    for c in report.categories:
-        categories[c.category] = _category_usage_entry(
-            c, has_cost=report.has_cost or report.unknown_only
-        )
+    has_cost = report.has_cost or report.unknown_only
+    out: dict[str, Any] = {
+        "model": model_name,
+        "categories": {
+            c.category: _category_usage_entry(c, has_cost=has_cost)
+            for c in report.categories
+        },
+        "total": _total_usage_entry(report),
+    }
+    if run_usage.by_model:
+        out["models"] = {
+            name: _model_usage_entry(bucket)
+            for name, bucket in run_usage.by_model.items()
+        }
+    if has_cost:
+        cost: dict[str, Any] = {"by_currency": dict(report.by_currency)}
+        if report.has_unpriced:
+            cost["unpriced"] = True
+        out["cost"] = cost
+    return out
 
+
+def _total_usage_entry(report: CostReport) -> dict[str, Any]:
     total: dict[str, Any] = {
         "input": report.total_input,
         "output": report.total_output,
@@ -273,32 +290,20 @@ def build_run_usage_dict(
         total["cached"] = report.total_cached
     if report.total_missing_usage_calls:
         total["missing_usage_calls"] = report.total_missing_usage_calls
+    return total
 
-    out: dict[str, Any] = {
-        "model": model_name,
-        "categories": categories,
-        "total": total,
+
+def _model_usage_entry(bucket: dict[str, int]) -> dict[str, int]:
+    """Расход модели вызова; поля — только ненулевые сверх обязательных."""
+    entry = {
+        "input": bucket["input"],
+        "output": bucket["output"],
+        "calls": bucket["calls"],
     }
-    if run_usage.by_model:
-        # Расход по моделям вызова; поля — только ненулевые сверх обязательных.
-        models: dict[str, dict[str, int]] = {}
-        for name, bucket in run_usage.by_model.items():
-            entry = {
-                "input": bucket["input"],
-                "output": bucket["output"],
-                "calls": bucket["calls"],
-            }
-            for field in ("cached", "missing_usage_calls"):
-                if bucket.get(field):
-                    entry[field] = bucket[field]
-            models[name] = entry
-        out["models"] = models
-    if report.has_cost or report.unknown_only:
-        cost: dict[str, Any] = {"by_currency": dict(report.by_currency)}
-        if report.has_unpriced:
-            cost["unpriced"] = True
-        out["cost"] = cost
-    return out
+    for field in ("cached", "missing_usage_calls"):
+        if bucket.get(field):
+            entry[field] = bucket[field]
+    return entry
 
 
 def _category_usage_entry(c: Any, *, has_cost: bool) -> dict[str, Any]:
