@@ -101,6 +101,7 @@ from gc_core.runtime_notices import maybe_push_llm_failure_notice
 from gc_core.settings import AppConfig, settings_of
 from gc_core.states import State
 from gc_core.summarize.limit_trace_summary import abuild_limit_envelope
+from gc_core.threads.errors import ThreadStoreError
 from gc_core.tools import (
     WrongFunctionArgumentsException,
     aapply_tool,
@@ -192,6 +193,13 @@ async def _acall_blocking_hook(fn, *args: Any, **kwargs: Any):
     return await asyncio.to_thread(lambda: fn(*args, **kwargs))
 
 
+def _store_refused(exc: ThreadStoreError) -> ExecutionFailure:
+    """Отказ контракта хранилища при записи шага (тред ведёт другой
+    инстанс, аренда перехвачена) — отказ хода, а не сбой записи:
+    продолжить ход значило бы ответить пользователю, оставив в треде дыры."""
+    return ExecutionFailure(f"Тред недоступен для записи: {exc}")
+
+
 async def _maybe_persist(
     callback,
     messages: list,
@@ -220,6 +228,8 @@ async def _maybe_persist(
         await await_callback(callback(messages))
     except ExecutionFailure:
         raise
+    except ThreadStoreError as refused:
+        raise _store_refused(refused) from refused
     except Exception as persist_exc:
         _fallback_logger.warning(
             "Thread messages persist warning: %s",
@@ -2298,6 +2308,8 @@ class _AgentLoop:
             )
         except ExecutionFailure:
             raise
+        except ThreadStoreError as refused:
+            raise _store_refused(refused) from refused
         except Exception as persist_exc:
             self.run_logger.warning(
                 "Thread notice messages persist warning: %s",

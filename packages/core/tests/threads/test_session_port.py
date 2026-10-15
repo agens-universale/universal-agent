@@ -84,3 +84,62 @@ async def test_adopted_lease_needs_no_claim():
     port.adopt_lease(key, record.lease)
     await _two_steps(port)
     assert store.claims == 1, "запись взяла аренду заново"
+
+
+async def test_renewal_extends_the_lease_and_release_frees_the_thread():
+    """Фоновое продление сдвигает срок аренды, снятие после хода сразу
+    отдаёт тред другому инстансу (без ожидания срока)."""
+    from datetime import timedelta
+
+    from gc_core.threads.models import LeaseRequest, ThreadKey
+
+    store = _Recording()
+    key = ThreadKey(system="wf", thread="t")
+    port = SessionPort(store, owner="host-a", ttl=timedelta(seconds=60))
+    await _two_steps(port)
+    before = (await store.get_thread(key)).lease.expires_at
+    await port.arenew_lease("wf", "t")
+    assert (await store.get_thread(key)).lease.expires_at > before
+    await port.arelease_lease("wf", "t")
+    record = await store.claim(
+        key, LeaseRequest(owner="host-b", ttl=timedelta(seconds=60))
+    )
+    assert record.lease.owner == "host-b"
+
+
+async def test_renewal_of_a_lost_lease_fails_the_next_write():
+    from datetime import timedelta
+
+    from gc_core.threads.errors import OwnershipError
+    from gc_core.threads.models import ThreadKey
+
+    store = _Recording()
+    key = ThreadKey(system="wf", thread="t")
+    port = SessionPort(store, owner="host-a", ttl=timedelta(seconds=60))
+    await _two_steps(port)
+    lease = (await store.get_thread(key)).lease
+    await store.release(key, lease)
+    other = SessionPort(store, owner="host-b", ttl=timedelta(seconds=60))
+    await other.aappend_messages(
+        "wf", "t", [{"id": "b", "role": "user", "content": "b"}]
+    )
+    with pytest.raises(OwnershipError):
+        await port.arenew_lease("wf", "t")
+    with pytest.raises(OwnershipError):
+        await port.aappend_messages(
+            "wf", "t", [{"id": "a", "role": "user", "content": "a"}]
+        )
+
+
+async def test_untimed_lease_is_neither_renewed_nor_released():
+    """Бессрочную аренду (workflow) держит и снимает её владелец."""
+    store = _Recording()
+    port = SessionPort(store, owner="wf", ttl=None)
+    await _two_steps(port)
+    await port.arenew_lease("wf", "t")
+    await port.arelease_lease("wf", "t")
+    assert store.claims == 1
+    from gc_core.threads.models import ThreadKey
+
+    record = await store.get_thread(ThreadKey(system="wf", thread="t"))
+    assert record.lease is not None and record.lease.owner == "wf"

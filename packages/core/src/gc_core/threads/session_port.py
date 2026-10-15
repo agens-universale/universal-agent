@@ -79,6 +79,41 @@ class SessionPort:
         сессии): первая запись не идёт за ней в хранилище."""
         self._leases[key] = lease
 
+    @property
+    def renews_lease(self) -> bool:
+        """Аренда со сроком — её продлевают, пока идёт ход; бессрочную
+        (workflow) — нет: таймер продления в workflow — лишние события."""
+        return self._ttl is not None
+
+    async def arenew_lease(self, system_id: str, thread_id: str) -> None:
+        """Продлить свою аренду со сроком, пока ход идёт (фоновое продление):
+        шаг дольше срока аренды не отдаёт тред другому инстансу. Аренды нет
+        или она бессрочная — ничего; её перехватили — забыть (следующая
+        запись честно получит ``OwnershipError``)."""
+        key = _key(system_id, thread_id)
+        lease = self._leases.get(key)
+        if lease is None or lease.expires_at is None:
+            return
+        try:
+            record = await self._store.claim(
+                key, LeaseRequest(owner=self._owner, ttl=self._ttl)
+            )
+        except OwnershipError:
+            self._leases.pop(key, None)
+            raise
+        self._leases[key] = record.lease
+
+    async def arelease_lease(self, system_id: str, thread_id: str) -> None:
+        """Отпустить свою аренду со сроком после хода: тред сразу свободен
+        для другого инстанса. Бессрочную (workflow) снимает её владелец."""
+        key = _key(system_id, thread_id)
+        lease = self._leases.get(key)
+        if lease is None or lease.expires_at is None:
+            return
+        self._leases.pop(key, None)
+        self._revisions.pop(key, None)
+        await self._store.release(key, lease)
+
     async def _lease(self, key: ThreadKey) -> Lease:
         lease = self._leases.get(key)
         if lease is not None and (
