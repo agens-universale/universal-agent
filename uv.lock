@@ -18,6 +18,7 @@ resolution-markers = [
 
 [manifest]
 members = [
+    "gc-a2a",
     "gc-acp",
     "gc-chat",
     "gc-cli",
@@ -1129,6 +1130,23 @@ wheels = [
 ]
 
 [[package]]
+name = "gc-a2a"
+version = "0.4.0"
+source = { editable = "packages/a2a" }
+dependencies = [
+    { name = "fastapi" },
+    { name = "gc-core" },
+    { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "fastapi", specifier = ">=0.115.0" },
+    { name = "gc-core", editable = "packages/core" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.31.1" },
+]
+
+[[package]]
 name = "gc-acp"
 version = "0.4.0"
 source = { editable = "packages/acp" }
@@ -1328,6 +1346,7 @@ name = "gc-ua"
 version = "0.4.0"
 source = { editable = "." }
 dependencies = [
+    { name = "gc-a2a" },
     { name = "gc-acp" },
     { name = "gc-chat" },
     { name = "gc-cli" },
@@ -1394,6 +1413,7 @@ test = [
 
 [package.metadata]
 requires-dist = [
+    { name = "gc-a2a", editable = "packages/a2a" },
     { name = "gc-acp", editable = "packages/acp" },
     { name = "gc-chat", editable = "packages/chat" },
     { name = "gc-cli", editable = "packages/cli" },
