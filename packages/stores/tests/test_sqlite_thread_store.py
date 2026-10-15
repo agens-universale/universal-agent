@@ -1,6 +1,9 @@
 """``SQLiteThreadStore`` проходит конформанс контракта v2, порт сессии
 поверх него — старый асинхронный набор; файлы треда живут в базе."""
 
+import os
+
+import pytest
 from gc_core.threads.models import LeaseRequest, ThreadKey
 from gc_core.threads.session_port import SessionPort
 from gc_stores.sqlite import SQLiteThreadStore
@@ -47,3 +50,14 @@ def test_protected_paths_cover_the_journals(tmp_path):
         f"{path}-shm",
         f"{path}-journal",
     ]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="права POSIX")
+async def test_database_is_private_to_its_owner(tmp_path):
+    """В базе история и квитанции агента: файл и журналы — только владельцу."""
+    path = tmp_path / "t.db"
+    store = SQLiteThreadStore(path)
+    await store.claim(KEY, LeaseRequest(owner="a"))
+    for name in (path, tmp_path / "t.db-wal"):
+        if name.exists():
+            assert name.stat().st_mode & 0o777 == 0o600, name

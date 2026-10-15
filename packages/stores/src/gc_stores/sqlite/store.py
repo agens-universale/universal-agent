@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import os
 import sqlite3
 from collections.abc import Callable
 from contextlib import closing
@@ -70,6 +71,15 @@ _SELECT_THREAD = (
 _FILE_MIME = "application/octet-stream"
 
 
+def _private_file(path: str) -> None:
+    """Создать файл базы с правами 0600: в нём история и квитанции агента.
+
+    SQLite создаёт ``-wal``/``-shm`` с правами файла базы.
+    """
+    if not Path(path).exists():
+        os.close(os.open(path, os.O_CREAT | os.O_WRONLY, 0o600))
+
+
 def _stamp(moment: datetime) -> str:
     """Время в базе: UTC, микросекунды всегда — строки сравниваются как
     моменты."""
@@ -113,6 +123,7 @@ class SQLiteThreadStore(ThreadStore):
         self.path = str(path)
         self._clock = clock or (lambda: datetime.now(UTC))
         Path(self.path).parent.mkdir(parents=True, exist_ok=True)
+        _private_file(self.path)
         ddl = (
             resources.files("gc_stores.sqlite")
             .joinpath("schema.sql")
