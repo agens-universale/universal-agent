@@ -63,6 +63,7 @@ from gc_core.threads.models import (
     check_stream_name,
 )
 from gc_core.threads.rules import (
+    check_side_writer,
     check_writer,
     granted_lease,
     page_of,
@@ -774,10 +775,11 @@ class FileThreadStore(ThreadStore):
             replayed = self._replayed(base, change)
             if replayed is not None:
                 return replayed
-            # Владельца ``append_side`` не несёт: статус хода и трассу
-            # субагентов на треде durable-исполнителя пишет сам исполнитель
-            # (Temporal) — как и контракт, запись не проверяется.
             control, v2 = self._load(key)
+            # Тред durable-исполнителя: статус хода, потоки и алиасы — только
+            # по его аренде; состояние фронтенда — любой процесс.
+            current = self._lease(v2) if self._exists(key, v2) else None
+            check_side_writer(current, change)
             if not self._exists(key, v2):
                 v2 = self._created(v2)
             return self._side(key, control, v2, change)
@@ -1220,7 +1222,12 @@ class _Commit:
     def _reset(self) -> None:
         self._renumber([])
         self.v2["generation"] += 1
+        lease = self.store._lease(self.v2)
         self.v2["lease"] = None
+        # Сброс снимает аренду — и отметку durable-владельца для старого
+        # кода: иначе тред остался бы закрыт без аренды, которую снять.
+        if lease is not None and self.control.get("owner_id") == lease.owner:
+            self.control = {**self.control, "owner_id": None}
 
     def _replace(self) -> None:
         compaction = self.change.replace_history

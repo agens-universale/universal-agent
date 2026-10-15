@@ -39,8 +39,10 @@ from temporalio.client import WorkflowExecutionStatus
 from temporalio.exceptions import ApplicationError
 from temporalio.service import RPCError, RPCStatusCode
 
+from gc_core_temporalio.message_refs import message_hash
 from gc_core_temporalio.meta_delta import (
     MetaDeltaError,
+    TextSource,
     apply,
     diff,
     meta_hash,
@@ -49,11 +51,13 @@ from gc_core_temporalio.meta_delta import (
 from gc_core_temporalio.sizes import payload_size
 from gc_core_temporalio.thread_store_contracts import (
     PAGE_BYTES,
+    RECORD_PARTS,
     BaseMismatch,
     ThreadCall,
     ThreadChanged,
     ThreadReply,
     expected_record,
+    parse_lease_owner,
     strip_fetch_cache,
 )
 
@@ -104,13 +108,6 @@ def record_json(record: ThreadRecord) -> dict:
     if "state" in data:
         data["state"] = strip_fetch_cache(data["state"])
     return data
-
-
-def state_json(record: ThreadRecord) -> dict:
-    """Состояние сессии записи — база разницы ``set_state``."""
-    return strip_fetch_cache(
-        normalize(record.state.model_dump(mode="json", exclude_unset=True))
-    )
 
 
 def _keep_fetch_cache(
@@ -219,13 +216,15 @@ class ThreadStoreActivities:
         data = record_json(record)
         version = meta_hash(data)
         known = call.args.get("known")
-        if known == version:
-            return ThreadReply(unchanged=True, version=version)
         slot = (call.store_id, call.system, call.thread)
+        # Запись, которую видел workflow, — база следующих разниц: и когда
+        # она не изменилась (кэш мог её потерять: другой воркер, вытеснение).
         base = self._records.get((*slot, known)) if known else None
         self._remember(
             self._records, (*slot, version), data, _RECORD_CACHE_SIZE
         )
+        if known == version:
+            return ThreadReply(unchanged=True, version=version)
         if base is not None:
             delta = diff(base, data)
             if payload_size(delta) <= _DELTA_BYTES:
@@ -295,28 +294,37 @@ class ThreadStoreActivities:
         return await self._run(self._commit, call)
 
     async def _commit(self, store, key, call):
-        data = dict(call.args["change"])
         record = await store.get_thread(key)
-        state = call.args.get("state")
-        if state is not None:
-            data["set_state"] = _state_from(state, record, data)
+        base = self._known_base(call, record)
+        data = with_parts(call.args, base)
         change = _keep_fetch_cache(ThreadChange.model_validate(data), record)
         receipt = await store.commit(key, change)
         reply = ThreadReply(value=receipt.model_dump(mode="json"))
-        known = call.args.get("known")
-        base = self._records.get(
-            (call.store_id, call.system, call.thread, known)
-        )
         if base is not None:
-            await self._after_commit(
+            await self._learn(
                 store, key, call, reply, expected_record(base, data)
             )
         return reply
 
-    async def _after_commit(self, store, key, call, reply, expected) -> None:
-        """Запись треда после ``commit`` — разницей к той, что workflow
+    def _known_base(self, call: ThreadCall, record) -> dict | None:
+        """Запись, которую знает workflow (отпечаток ``known``): из кэша или
+        прочитанная сейчас, если отпечаток совпал (воркер без кэша)."""
+        known = call.args.get("known")
+        if not known:
+            return None
+        slot = (call.store_id, call.system, call.thread, known)
+        base = self._records.get(slot)
+        if base is None and record is not None:
+            data = record_json(record)
+            if meta_hash(data) == known:
+                base = data
+                self._remember(self._records, slot, data, _RECORD_CACHE_SIZE)
+        return base
+
+    async def _learn(self, store, key, call, reply, expected) -> None:
+        """Запись треда после своей записи — разницей к той, что workflow
         соберёт сам (известная + свои части): следующий ``get`` ответит
-        «не изменилась», и состояние не идёт в историю второй раз."""
+        «не изменилась», и части не идут в историю второй раз."""
         record = await store.get_thread(key)
         if record is None:
             return
@@ -333,9 +341,17 @@ class ThreadStoreActivities:
         return await self._run(self._append_side, call)
 
     async def _append_side(self, store, key, call):
-        change = SideChange.model_validate(call.args["change"])
-        receipt = await store.append_side(key, change)
-        return ThreadReply(value=receipt.model_dump(mode="json"))
+        base = None
+        if call.args.get("known"):
+            base = self._known_base(call, await store.get_thread(key))
+        data = with_parts(call.args, base)
+        receipt = await store.append_side(key, SideChange.model_validate(data))
+        reply = ThreadReply(value=receipt.model_dump(mode="json"))
+        if base is not None:
+            await self._learn(
+                store, key, call, reply, expected_record(base, data)
+            )
+        return reply
 
     # --- аренда и жизненный цикл --------------------------------------------
 
@@ -395,25 +411,34 @@ class ThreadStoreActivities:
         ]
 
 
-def _state_from(spec: dict, record: ThreadRecord | None, change: dict):
-    """``set_state`` из провода: целиком или база записи + разница.
+def with_parts(args: dict, base: dict | None) -> dict:
+    """Изменение из провода: части записи (``set_state``, ``set_runtime``…)
+    собраны из разниц — к известной workflow записи ``base`` или с нуля;
+    длинные тексты — по ссылкам на сообщения этой же записи.
 
-    База — состояние записи хранилища на ``expected_revision`` с тем же
-    хэшем; другой ревизии (повтор после записи, чужая запись) или хэша —
-    ``BaseMismatch``: workflow пришлёт состояние целиком, и хранилище само
-    узнает повтор (квитанция) или конфликт.
+    База нужна, а её нет (воркер не знает записи: повтор после записи,
+    чужая запись) — ``BaseMismatch``: workflow пришлёт части целиком, и
+    хранилище само узнает повтор (квитанция) или конфликт.
     """
-    if "full" in spec:
-        return spec["full"]
-    if record is None or record.revision != change["expected_revision"]:
-        raise BaseMismatch("ревизия треда не та, что у базы состояния")
-    base = state_json(record)
-    if meta_hash(base) != spec["base"]:
-        raise BaseMismatch("состояние треда не то, что у базы разницы")
-    try:
-        return apply(base, spec["delta"])
-    except MetaDeltaError as exc:
-        raise BaseMismatch(str(exc)) from exc
+    data = dict(args["change"])
+    compaction = data.get("replace_history") or {}
+    messages = [
+        *(data.get("append_messages") or []),
+        *(compaction.get("messages") or []),
+    ]
+    by_hash = {message_hash(m): m for m in messages}
+    source = TextSource(messages=by_hash.get)
+    for name, spec in (args.get("parts") or {}).items():
+        old = None
+        if spec.get("known"):
+            if base is None:
+                raise BaseMismatch("воркер не знает записи — базы разницы")
+            old = base.get(RECORD_PARTS[name])
+        try:
+            data[name] = apply(old, spec["delta"], source)
+        except MetaDeltaError as exc:
+            raise BaseMismatch(str(exc)) from exc
+    return data
 
 
 async def _take_over(store, key, request: LeaseRequest):
@@ -427,6 +452,10 @@ async def _take_over(store, key, request: LeaseRequest):
     stale = record.lease if record is not None else None
     if stale is None or stale.owner == request.owner:
         return await store.claim(key, request)
+    if stale.expires_at is not None:
+        # Аренда со сроком (локальный TUI/CLI, сервер) истечёт сама; её
+        # владелец — не workflow, и «нет такого workflow» не значит «мёртв».
+        raise OwnershipError(f"тред ведёт {stale.owner!r} (аренда со сроком)")
     if await _owner_alive(stale.owner):
         raise OwnershipError(f"тред ведёт живая сессия {stale.owner!r}")
     await store.release(key, stale)
@@ -436,13 +465,18 @@ async def _take_over(store, key, request: LeaseRequest):
     return await store.claim(key, request)
 
 
-async def _owner_alive(workflow_id: str, client=None) -> bool:
-    """Workflow владельца ещё исполняется (без клиента — считать живым)."""
+async def _owner_alive(owner: str, client=None) -> bool:
+    """Цепочка run владельца ещё исполняется (без клиента — считать живой).
+
+    Владелец — ``<workflow ID>#<first_execution_run_id>``: тот же workflow ID
+    с другой цепочкой (новый запуск после terminate) — владелец мёртв.
+    """
     if client is None:
         try:
             client = activity.client()
         except RuntimeError:
             return True
+    workflow_id, chain = parse_lease_owner(owner)
     try:
         description = await client.get_workflow_handle(workflow_id).describe()
     except RPCError as exc:
@@ -451,7 +485,9 @@ async def _owner_alive(workflow_id: str, client=None) -> bool:
         # Транзиентный сбой Temporal (UNAVAILABLE, DEADLINE…): повтор activity,
         # а не отказ захвата.
         raise
-    return description.status == WorkflowExecutionStatus.RUNNING
+    if description.status != WorkflowExecutionStatus.RUNNING:
+        return False
+    return chain is None or description.raw_info.first_run_id == chain
 
 
 async def release_stale_owner(
@@ -466,7 +502,10 @@ async def release_stale_owner(
     key = ThreadKey(system=system_id, thread=thread_id)
     record = await store.get_thread(key)
     lease = record.lease if record is not None else None
-    if lease is None or await _owner_alive(lease.owner, client):
+    # Аренда со сроком (локальный процесс) истечёт сама — её не снимаем.
+    if lease is None or lease.expires_at is not None:
+        return None
+    if await _owner_alive(lease.owner, client):
         return None
     await store.release(key, lease)
     return lease.owner
@@ -476,5 +515,5 @@ __all__ = [
     "ThreadStoreActivities",
     "record_json",
     "release_stale_owner",
-    "state_json",
+    "with_parts",
 ]

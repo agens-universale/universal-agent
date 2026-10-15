@@ -53,6 +53,7 @@ from gc_core.threads.models import (
     check_stream_name,
 )
 from gc_core.threads.rules import (
+    check_side_writer,
     check_writer,
     granted_lease,
     instant,
@@ -561,6 +562,7 @@ class PostgresThreadStore(ThreadStore):
             replayed = await self._replayed(conn, key, change.op_id, digest)
             if replayed is not None:
                 return replayed
+            check_side_writer(row.lease, change)
             now = await self._now(conn)
             await self._add_aliases(conn, key, change.add_aliases)
             apply_side(row, change)

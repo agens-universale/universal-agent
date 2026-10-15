@@ -3,6 +3,7 @@
 история растёт разницами, а не полным состоянием."""
 
 from copy import deepcopy
+from datetime import timedelta
 
 import pytest
 from gc_core.thread_store import ThreadSession
@@ -38,15 +39,21 @@ class Wire:
     """Транспорт прокси: вызов activity через конвертер, учёт вызовов."""
 
     def __init__(self, store):
-        self.activities = ThreadStoreActivities({"main": store})
-        self.methods = {
-            _Definition.must_from_callable(method).name: method
-            for method in self.activities.registered
-        }
+        self.store = store
+        self._start_worker()
         self.calls: list[tuple[str, ThreadCall]] = []
         self.replies: list[tuple[str, ThreadReply]] = []
         #: Имя операции → сколько ещё раз её «повторить после записи».
         self.lose_reply: dict[str, int] = {}
+        #: Повтор после потерянного ответа — на новом воркере (без кэша).
+        self.restart_on_retry = False
+
+    def _start_worker(self):
+        self.activities = ThreadStoreActivities({"main": self.store})
+        self.methods = {
+            _Definition.must_from_callable(method).name: method
+            for method in self.activities.registered
+        }
 
     async def __call__(self, name, call):
         decoded = await wire(call, ThreadCall)
@@ -56,6 +63,8 @@ class Wire:
             if self.lose_reply.get(name.rsplit(".", 1)[-1]):
                 # Воркер записал и упал до ответа: Temporal повторит activity.
                 self.lose_reply[name.rsplit(".", 1)[-1]] -= 1
+                if self.restart_on_retry:
+                    self._start_worker()
                 result = await self.methods[name](decoded)
         except ApplicationError as exc:
             raise _STORE_ERRORS[exc.type](exc.message) from exc
@@ -115,10 +124,14 @@ async def test_a_step_is_one_commit_activity():
     ]
 
 
-async def test_state_goes_as_delta_and_full_after_lost_reply():
-    """Состояние — разницей к известному; повтор activity после записи (ответ
-    потерян) воркер не соберёт из разницы — прокси шлёт целиком, хранилище
-    узнаёт операцию по ``op_id``: та же квитанция, без дубля."""
+@pytest.mark.parametrize("restart", [False, True])
+async def test_state_goes_as_delta_and_retry_after_lost_reply_writes_once(
+    restart,
+):
+    """Состояние — разницей к известной записи. Повтор activity после записи
+    (ответ потерян): тот же воркер собирает ту же запись из кэша; новый
+    воркер базы не знает — прокси шлёт части с нуля. Хранилище узнаёт
+    операцию по ``op_id``: та же квитанция, история без дубля."""
     from gc_core.threads.models import ThreadChange
 
     store = MemoryThreadStore()
@@ -136,8 +149,10 @@ async def test_state_goes_as_delta_and_full_after_lost_reply():
             set_state=state,
         ),
     )
+    await proxy.get_thread(KEY)
     transport.calls.clear()
     transport.lose_reply["commit"] = 1
+    transport.restart_on_retry = restart
     await proxy.commit(
         KEY,
         ThreadChange(
@@ -149,9 +164,14 @@ async def test_state_goes_as_delta_and_full_after_lost_reply():
         ),
     )
     sent = [call.args for op, call in transport.calls if op == "commit"]
-    assert "delta" in sent[0]["state"], "первая попытка — разницей"
-    assert len(str(sent[0]["state"])) < len(big)
-    assert "full" in sent[1]["state"], "после потерянного ответа — целиком"
+    first_state = sent[0]["parts"]["set_state"]
+    assert first_state.get("known"), "первая попытка — разницей к известной"
+    assert len(str(first_state)) < len(big)
+    if restart:
+        retry_state = sent[1]["parts"]["set_state"]
+        assert not retry_state.get("known"), "новый воркер — части с нуля"
+    else:
+        assert len(sent) == 1, "тот же воркер собрал повтор из кэша"
     ids = [e.data["id"] for e in await store.read_stream(KEY, "messages")]
     assert ids == ["m0", "m1"]
     record = await store.get_thread(KEY)
@@ -270,3 +290,161 @@ async def test_claim_never_takes_from_a_live_owner(monkeypatch):
     monkeypatch.setattr(thread_store_activities, "_owner_alive", alive)
     with pytest.raises(OwnershipError):
         await proxy.claim(KEY, LeaseRequest(owner="new-wf"))
+
+
+class _Session:
+    """Запись, как её шлёт сессия на шаге: сообщения и все части meta."""
+
+    def __init__(self, proxy):
+        self.proxy = proxy
+        self.revision = 0
+
+    async def step(self, n, *, runtime=None, state=None, text=None):
+        from gc_core.threads.models import (
+            RuntimeStatus,
+            ThreadChange,
+            ThreadInfo,
+            Usage,
+        )
+
+        lease = self.proxy.lease
+        receipt = await self.proxy.commit(
+            KEY,
+            ThreadChange(
+                op_id=f"step{n}",
+                expected_revision=self.revision,
+                lease=lease,
+                append_messages=[_message(n, text)],
+                set_state=state or SessionState(notes=f"шаг {n}"),
+                set_usage=Usage(by_category={"main": {"calls": n}}),
+                set_info=ThreadInfo(title="t"),
+                set_runtime=runtime or RuntimeStatus(turn="running"),
+            ),
+        )
+        self.revision = receipt.revision
+
+
+async def _stepping(store, transport_factory=None):
+    proxy, transport = proxy_for(store)
+    await proxy.claim(KEY, LeaseRequest(owner="wf"))
+    await proxy.get_thread(KEY)
+    return proxy, transport, _Session(proxy)
+
+
+async def test_big_runtime_goes_as_delta_every_step():
+    """Снимок MCP-тулов в ``runtime`` (десятки КБ) не уходит в историю на
+    каждом шаге: части записи — разницей к известной записи."""
+    from gc_core.threads.models import RuntimeStatus
+
+    store = MemoryThreadStore()
+    proxy, transport, session = await _stepping(store)
+    runtime = RuntimeStatus(turn="running", mcp_tools={"tools": "т" * 30_000})
+    await session.step(0, runtime=runtime)
+    transport.calls.clear()
+    for n in range(1, 4):
+        await proxy.get_thread(KEY)
+        await session.step(n, runtime=runtime)
+    sizes = [len(str(call.args)) for _op, call in transport.calls]
+    assert max(sizes) < 5_000, sizes
+    assert (await store.get_thread(KEY)).runtime.mcp_tools == runtime.mcp_tools
+
+
+async def test_user_text_in_state_goes_by_reference():
+    """Текст запроса и в сообщении, и в журнале намерений — в записи один
+    раз: в состоянии он идёт ссылкой на сообщение."""
+    store = MemoryThreadStore()
+    proxy, transport, session = await _stepping(store)
+    text = "ж" * 100_000
+    state = SessionState(current_intent=[{"text": text}])
+    await session.step(0, state=state, text=text)
+    [(_op, call)] = [c for c in transport.calls if c[0] == "commit"]
+    assert len(str(call.args)) < 1.3 * len(str(text.encode("unicode_escape")))
+    assert (await store.get_thread(KEY)).state.current_intent == [
+        {"text": text}
+    ]
+
+
+async def test_worker_without_cache_takes_the_known_record_from_store():
+    """Запись на воркере, который не видел записи workflow (другой воркер,
+    вытеснение из кэша): база — запись хранилища с тем же отпечатком, после
+    записи следующий ``get`` — «не изменилась», а не запись целиком."""
+    store = MemoryThreadStore()
+    proxy, transport, session = await _stepping(store)
+
+    async def fresh_worker(name, call):
+        transport.activities = ThreadStoreActivities({"main": store})
+        transport.methods = {
+            _Definition.must_from_callable(m).name: m
+            for m in transport.activities.registered
+        }
+        return await Wire.__call__(transport, name, call)
+
+    proxy._call = fresh_worker
+    for n in range(3):
+        await proxy.get_thread(KEY)
+        await session.step(n)
+    gets = [reply for op, reply in transport.replies if op == "get"]
+    assert all(reply.unchanged for reply in gets[1:]), gets
+
+
+async def test_thread_changing_on_every_read_is_a_domain_failure():
+    """Запись меняется между кусками на каждом чтении — отказ контракта
+    хранилища (доменный: ход падает, workflow task — нет)."""
+    from gc_core.threads.errors import ThreadStoreError
+    from gc_core_temporalio.thread_store_contracts import ThreadChanged
+
+    assert issubclass(ThreadChanged, ThreadStoreError)
+
+
+async def test_timed_lease_of_a_local_process_is_not_taken_over(monkeypatch):
+    """Аренда со сроком (TUI/CLI на машине) истечёт сама: «нет такого
+    workflow» не значит «владелец мёртв»."""
+    store = MemoryThreadStore()
+    await store.claim(KEY, LeaseRequest(owner="my-laptop", ttl=timedelta(60)))
+    proxy, _transport = proxy_for(store, owner="wf#run")
+
+    async def gone(owner, client=None):
+        return False
+
+    monkeypatch.setattr(thread_store_activities, "_owner_alive", gone)
+    with pytest.raises(OwnershipError):
+        await proxy.claim(KEY, LeaseRequest(owner="wf#run"))
+    released = await thread_store_activities.release_stale_owner(
+        store, KEY.system, KEY.thread, client=None
+    )
+    assert released is None
+    assert (await store.get_thread(KEY)).lease.owner == "my-laptop"
+
+
+class _Described:
+    def __init__(self, first_run_id, running=True):
+        from temporalio.client import WorkflowExecutionStatus
+
+        self.status = (
+            WorkflowExecutionStatus.RUNNING
+            if running
+            else WorkflowExecutionStatus.TERMINATED
+        )
+        self.raw_info = type("Raw", (), {"first_run_id": first_run_id})()
+
+
+class _Client:
+    def __init__(self, first_run_id):
+        self.first_run_id = first_run_id
+
+    def get_workflow_handle(self, _workflow_id):
+        client = self
+
+        class Handle:
+            async def describe(self):
+                return _Described(client.first_run_id)
+
+        return Handle()
+
+
+async def test_owner_is_the_run_chain_not_the_workflow_id():
+    """Новый запуск с тем же workflow ID (после terminate) — другая цепочка:
+    владелец прежней цепочки мёртв, его запись отсекает новая эпоха."""
+    alive = thread_store_activities._owner_alive
+    assert await alive("session#chain-1", _Client("chain-1"))
+    assert not await alive("session#chain-1", _Client("chain-2"))

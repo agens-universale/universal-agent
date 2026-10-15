@@ -179,6 +179,9 @@ async def test_native_sigkill_durable_boundaries(
                 )["value"]
                 original = value_to_type(ThreadCall, marker["request"])
                 assert original.args["change"]["append_messages"]
+                # Части записи шага — разницей к известной записи треда.
+                parts = original.args.get("parts") or {}
+                assert parts and all(p.get("known") for p in parts.values())
                 assert marker["receipt"]["value"] in _receipts(history)
         finally:
             for process in processes:

@@ -46,6 +46,7 @@ from gc_core_temporalio.sizes import (
     cut_to_payload,
     payload_size,
 )
+from gc_core_temporalio.thread_store_contracts import lease_owner
 from gc_core_temporalio.thread_store_proxy import TemporalThreadStore
 from gc_core_temporalio.thread_store_transport import ThreadStoreTransport
 
@@ -645,14 +646,15 @@ class UniversalAgentWorkflow:
             self.operations.activity_settings = prepared.activity_settings
         self.store_settings = self.operations.activity_settings["thread_store"]
         if store is None:
-            store = self._thread_store(start, owner)
+            holder = _lease_owner()
+            store = self._thread_store(start, holder)
             key = _thread_key(start)
             if self.resumed_store is not None:
-                store.adopt(key, Lease(owner=owner, epoch=self.resumed_store))
+                store.adopt(key, Lease(owner=holder, epoch=self.resumed_store))
             else:
-                # Тред сессии — за ней, бессрочно; у владельца, чей workflow
-                # уже не исполняется, воркер его отбирает.
-                await store.claim(key, LeaseRequest(owner=owner, ttl=None))
+                # Тред сессии — за её цепочкой run, бессрочно; у владельца,
+                # чья цепочка уже не исполняется, воркер его отбирает.
+                await store.claim(key, LeaseRequest(owner=holder, ttl=None))
         self.store = store
         # Сообщения, прочитанные из треда, идут в activity модели ссылками.
         self.operations.thread_store = store
@@ -950,9 +952,9 @@ class UniversalAgentWorkflow:
             return
         store, key = self.store, _thread_key(start)
         if store is None and self.resumed_store is not None:
-            owner = workflow.info().workflow_id
-            store = self._thread_store(start, owner)
-            store.adopt(key, Lease(owner=owner, epoch=self.resumed_store))
+            holder = _lease_owner()
+            store = self._thread_store(start, holder)
+            store.adopt(key, Lease(owner=holder, epoch=self.resumed_store))
         if store is None or store.lease is None:
             return
         await store.release(key, store.lease)
@@ -1016,3 +1018,9 @@ class UniversalAgentWorkflow:
 
 def _thread_key(start) -> ThreadKey:
     return ThreadKey(system=start.system_id, thread=start.thread_id)
+
+
+def _lease_owner() -> str:
+    """Владелец аренды треда — цепочка run сессии (переживает CAN)."""
+    info = workflow.info()
+    return lease_owner(info.workflow_id, info.first_execution_run_id)

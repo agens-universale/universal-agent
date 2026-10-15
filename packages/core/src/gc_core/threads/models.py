@@ -214,6 +214,10 @@ class SideChange(_Model):
     """
 
     op_id: str = Field(min_length=1)
+    #: Аренда пишущего, если она у него есть. Запись хода (статус, потоки,
+    #: алиасы) в тред с бессрочной арендой (durable-исполнитель) проходит
+    #: только по ней: чужой процесс не перепишет статус живой сессии.
+    lease: Lease | None = None
     set_runtime: RuntimeStatus | None = None
     set_frontend: tuple[str, JsonObject] | None = None
     #: Слить ключи в состояние фронтенда (``dict.update``; нет — создать):

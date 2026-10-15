@@ -43,6 +43,7 @@ from gc_core.threads.models import (
     check_stream_name,
 )
 from gc_core.threads.rules import (
+    check_side_writer,
     check_writer,
     granted_lease,
     page_of,
@@ -323,6 +324,8 @@ class MemoryThreadStore(ThreadStore):
             if check_stream_name(stream) == _HISTORY:
                 raise ValueError("историю треда пишет только commit")
         self._check_aliases(key, change.add_aliases)
+        existing = self._threads.get(key)
+        check_side_writer(existing.lease if existing else None, change)
         thread = self._thread(key)
         if change.set_runtime is not None:
             thread.runtime = change.set_runtime

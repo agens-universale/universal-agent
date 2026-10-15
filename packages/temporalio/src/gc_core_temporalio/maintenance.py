@@ -100,9 +100,7 @@ class WorkerMaintenance:
                 logger.info("Releasing abandoned context %s", owner)
                 await self.provider.forget_owner(owner)
         for store in self.stores.values():
-            await store.prune_receipts(
-                timedelta(seconds=RECEIPT_MAX_AGE_SECONDS)
-            )
+            await _prune_receipts(store)
 
     async def serve(self):
         while True:
@@ -111,3 +109,17 @@ class WorkerMaintenance:
                 await self.run_once()
             except Exception:
                 logger.exception("Worker maintenance failed")
+
+
+async def _prune_receipts(store):
+    """Старые квитанции хранилища тредов. Файловое обходит все треды на
+    диске синхронно — в потоке, чтобы не держать event loop воркера (и
+    heartbeat соседних activities)."""
+    from gc_core.threads.facade import run_sync
+    from gc_core.threads.file_store import FileThreadStore
+
+    older = timedelta(seconds=RECEIPT_MAX_AGE_SECONDS)
+    if isinstance(store, FileThreadStore):
+        await asyncio.to_thread(run_sync, store.prune_receipts(older))
+    else:
+        await store.prune_receipts(older)

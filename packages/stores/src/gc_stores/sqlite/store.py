@@ -44,6 +44,7 @@ from gc_core.threads.models import (
     check_stream_name,
 )
 from gc_core.threads.rules import (
+    check_side_writer,
     check_writer,
     granted_lease,
     instant,
@@ -384,7 +385,13 @@ class SQLiteThreadStore(ThreadStore):
                 "SELECT seq, ts, data FROM gc_stream_entries "
                 f"WHERE {_BY_THREAD} AND stream = ? AND seq > ? "
                 "ORDER BY seq LIMIT ?",
-                (key.system, key.thread, stream, after_seq, limit or -1),
+                (
+                    key.system,
+                    key.thread,
+                    stream,
+                    after_seq,
+                    -1 if limit is None else limit,
+                ),
             ).fetchall()
 
         return [_entry(r) for r in await self._read(work)]
@@ -457,6 +464,7 @@ class SQLiteThreadStore(ThreadStore):
         replayed = self._replayed(conn, key, change.op_id, digest)
         if replayed is not None:
             return replayed
+        check_side_writer(row.lease, change)
         now = self._clock()
         self._add_aliases(conn, key, change.add_aliases)
         apply_side(row, change)

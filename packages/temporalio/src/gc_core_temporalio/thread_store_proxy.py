@@ -44,9 +44,16 @@ from gc_core.threads.session_port import SessionPort, attach_session_port
 from gc_core.threads.store import ThreadStore
 
 from gc_core_temporalio.message_refs import message_hash
-from gc_core_temporalio.meta_delta import apply, diff, meta_hash, normalize
+from gc_core_temporalio.meta_delta import (
+    TextIndex,
+    apply,
+    diff,
+    meta_hash,
+    normalize,
+)
 from gc_core_temporalio.thread_store_contracts import (
     PAGE_BYTES,
+    RECORD_PARTS,
     BaseMismatch,
     ThreadCall,
     ThreadChanged,
@@ -104,8 +111,6 @@ class TemporalThreadStore(ThreadStore):
         self.lease: Lease | None = None
         #: тред → (отпечаток, запись JSON), которую видел workflow.
         self._records: dict[ThreadKey, tuple[str, dict]] = {}
-        #: тред → (ревизия, состояние JSON): база разницы ``set_state``.
-        self._states: dict[ThreadKey, tuple[int, dict]] = {}
         #: тред → ключи истории хранилища из последнего чтения.
         self._keys: dict[ThreadKey, set[str] | None] = {}
         self.port = SessionPort(self, owner=owner, ttl=None)
@@ -177,7 +182,6 @@ class TemporalThreadStore(ThreadStore):
         data = normalize(data)
         self._records[key] = (meta_hash(data), data)
         record = ThreadRecord.model_validate(data)
-        self._states[key] = (record.revision, data.get("state", {}))
         return record
 
     async def _record_data(self, key, reply: ThreadReply, known):
@@ -245,24 +249,48 @@ class TemporalThreadStore(ThreadStore):
     # --- запись -----------------------------------------------------------
 
     async def commit(self, key: ThreadKey, change: ThreadChange) -> Receipt:
+        messages = list(change.append_messages)
+        if change.replace_history is not None:
+            messages += change.replace_history.messages
+        reply = await self._write("commit", key, change, messages)
+        receipt = Receipt.model_validate(reply.value)
+        self._after_commit(key, change, receipt)
+        return receipt
+
+    async def append_side(self, key: ThreadKey, change: SideChange) -> Receipt:
+        reply = await self._write("append_side", key, change, [])
+        return Receipt.model_validate(reply.value)
+
+    async def _write(self, op: str, key: ThreadKey, change, messages):
+        """Запись с частями (``set_state``, ``set_runtime``…) разницей к
+        известной записи треда, длинные тексты — ссылками на сообщения
+        записи; воркер не знает записи — те же части с нуля. После записи —
+        запись треда, какой её видит workflow (разница воркера)."""
         data = change.model_dump(mode="json", exclude_unset=True)
-        state = data.pop("set_state", None)
-        args: dict[str, Any] = {"change": data}
+        values = {}
+        for name in RECORD_PARTS:
+            value = data.pop(name, None)
+            if value is not None:
+                value = normalize(value)
+                values[name] = (
+                    strip_fetch_cache(value) if name == "set_state" else value
+                )
         known = self._records.get(key)
+        texts = TextIndex()
+        texts.add(messages)
+        args = {"change": data, "parts": _parts(values, known, texts)}
         if known is not None:
             args["known"] = known[0]
-        if state is not None:
-            state = strip_fetch_cache(normalize(state))
-            args["state"] = self._state_spec(key, change, state)
         try:
-            reply = await self._ask("commit", key, args)
+            reply = await self._ask(op, key, args)
         except BaseMismatch:
-            args["state"] = {"full": state}
-            reply = await self._ask("commit", key, args)
-        receipt = Receipt.model_validate(reply.value)
-        self._after_commit(key, change, state, receipt)
-        self._learn_record(key, known, {**data, "set_state": state}, reply)
-        return receipt
+            args = {"change": data, "parts": _parts(values, None, texts)}
+            reply = await self._ask(op, key, args)
+        written = {**data, **values}
+        self._learn_record(
+            key, known if "known" in args else None, written, reply
+        )
+        return reply
 
     def _learn_record(self, key, known, change: dict, reply: ThreadReply):
         """Запись треда после своей записи — из известной, своих частей и
@@ -274,19 +302,8 @@ class TemporalThreadStore(ThreadStore):
         if meta_hash(data) == reply.version:
             self._records[key] = (reply.version, data)
 
-    def _state_spec(self, key, change: ThreadChange, state: dict) -> dict:
-        base = self._states.get(key)
-        if base is None or base[0] != change.expected_revision:
-            return {"full": state}
-        return {"delta": diff(base[1], state), "base": meta_hash(base[1])}
-
-    def _after_commit(self, key, change, state, receipt: Receipt) -> None:
-        """Базы следующих записей и хэши сообщений треда."""
-        base = self._states.get(key)
-        if state is not None:
-            self._states[key] = (receipt.revision, state)
-        elif base is not None and base[0] == change.expected_revision:
-            self._states[key] = (receipt.revision, base[1])
+    def _after_commit(self, key, change, receipt: Receipt) -> None:
+        """Хэши сообщений треда (идут в activity модели ссылками) и аренда."""
         hashes = self.message_hashes.setdefault(
             (key.system, key.thread), set()
         )
@@ -300,14 +317,6 @@ class TemporalThreadStore(ThreadStore):
         hashes.update(message_hash(m) for m in change.append_messages)
         if receipt.lease is None and self.lease is not None:
             self.lease = None
-
-    async def append_side(self, key: ThreadKey, change: SideChange) -> Receipt:
-        reply = await self._ask(
-            "append_side",
-            key,
-            {"change": change.model_dump(mode="json", exclude_unset=True)},
-        )
-        return Receipt.model_validate(reply.value)
 
     # --- аренда и жизненный цикл -------------------------------------------
 
@@ -340,7 +349,6 @@ class TemporalThreadStore(ThreadStore):
     async def delete(self, key: ThreadKey, *, op_id: str) -> None:
         await self._ask("delete", key, {"op_id": op_id})
         self._records.pop(key, None)
-        self._states.pop(key, None)
 
     async def put_blob(
         self, key: ThreadKey, data: bytes, *, mime: str
@@ -352,6 +360,19 @@ class TemporalThreadStore(ThreadStore):
 
     async def prune_receipts(self, older_than: timedelta) -> int:
         raise NotImplementedError(_NOT_IN_WORKFLOW)
+
+
+def _parts(values: dict, known, texts: TextIndex) -> dict:
+    """Части записи для провода: разница к полю известной записи (``known``)
+    или с нуля; длинные тексты — ссылками на сообщения записи."""
+    parts = {}
+    for name, value in values.items():
+        if known is None:
+            parts[name] = {"delta": diff(None, value, texts)}
+        else:
+            base = known[1].get(RECORD_PARTS[name])
+            parts[name] = {"known": True, "delta": diff(base, value, texts)}
+    return parts
 
 
 __all__ = ["TemporalThreadStore"]

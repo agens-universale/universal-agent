@@ -58,6 +58,26 @@ async def test_database_is_private_to_its_owner(tmp_path):
     path = tmp_path / "t.db"
     store = SQLiteThreadStore(path)
     await store.claim(KEY, LeaseRequest(owner="a"))
-    for name in (path, tmp_path / "t.db-wal"):
-        if name.exists():
+    # Журналы WAL живут, пока открыто соединение.
+    conn = store._connect()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute("DELETE FROM gc_receipts WHERE 0")
+        conn.execute("COMMIT")
+        journals = [tmp_path / "t.db-wal", tmp_path / "t.db-shm"]
+        assert all(j.exists() for j in journals)
+        for name in (path, *journals):
             assert name.stat().st_mode & 0o777 == 0o600, name
+    finally:
+        conn.close()
+
+
+async def test_read_stream_limit_zero_reads_nothing(tmp_path):
+    from gc_core.threads.models import SideChange
+
+    store = SQLiteThreadStore(tmp_path / "t.db")
+    await store.append_side(
+        KEY, SideChange(op_id="s", append=[("subagent_events", [{"k": 1}])])
+    )
+    assert await store.read_stream(KEY, "subagent_events", limit=0) == []
+    assert len(await store.read_stream(KEY, "subagent_events")) == 1

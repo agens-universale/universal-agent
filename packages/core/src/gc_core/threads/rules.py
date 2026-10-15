@@ -16,6 +16,7 @@ from gc_core.threads.models import (
     Lease,
     LeaseRequest,
     Page,
+    SideChange,
     ThreadQuery,
     ThreadRecord,
 )
@@ -61,6 +62,29 @@ def check_writer(current: Lease | None, lease: Lease, now: datetime) -> None:
         raise OwnershipError("аренда сменилась: запись по чужой эпохе")
     if lease_expired(current, now):
         raise OwnershipError("аренда истекла")
+
+
+def touches_turn(change: SideChange) -> bool:
+    """Запись сбоку касается хода (статус, потоки, алиасы), а не только
+    состояния фронтенда."""
+    return bool(
+        change.set_runtime is not None or change.append or change.add_aliases
+    )
+
+
+def check_side_writer(current: Lease | None, change: SideChange) -> None:
+    """Запись хода сбоку в тред durable-исполнителя (бессрочная аренда) —
+    только по его аренде; состояние фронтенда и треды без такой аренды —
+    без проверки (``append_side`` не конфликтует с ходом)."""
+    if current is None or current.expires_at is not None:
+        return
+    if touches_turn(change) and not (
+        change.lease is not None and same_lease(current, change.lease)
+    ):
+        raise OwnershipError(
+            f"тред ведёт durable-исполнитель {current.owner!r}: статус хода, "
+            "потоки и алиасы пишет только он"
+        )
 
 
 def same_lease(current: Lease | None, lease: Lease) -> bool:

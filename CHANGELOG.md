@@ -6,7 +6,8 @@
 
 - Под Temporal ядро пишет тред через контракт `ThreadStore` v2, как локально: хранилище воркера — любое v2 (`FileThreadStore` из `gc_core.threads.file_store`, `SQLiteThreadStore` из `gc_stores.sqlite`, `PostgresThreadStore`, своё — проверка `gc_testkit.thread_store_conformance_v2`). Activities треда — `universal_agent.thread.{get,read_stream,read_archive,resolve_alias,commit,append_side,claim,release,delete}` вместо `load`/`commit`/`read_trace`.
 - Удалены старый durable-контракт (`gc_core.thread_store_durable`: снимок, операция, квитанция), `DurableFileThreadStore`, `gc_core_temporalio.storage` (SQLite переехал в `gc-stores`, схема новая) и `gc_testkit.durable_thread_store_conformance`. Совместимость с историями и базами прежних воркеров не поддерживается (Temporal не в эксплуатации).
-- Владелец треда — аренда v2 `LeaseRequest(owner=<workflow id>, ttl=None)`; она переживает Continue-As-New и передаётся субагентам. `gc-core-temporalio` зависит от `gc-stores`.
+- Владелец треда — аренда v2 `LeaseRequest(owner="<workflow id>#<first_execution_run_id>", ttl=None)` (цепочка run): переживает Continue-As-New, передаётся субагентам; новый запуск с тем же workflow ID — новая эпоха. Аренду со сроком (локальный TUI/CLI) сессия не отбирает. `gc-core-temporalio` зависит от `gc-stores`.
+- `SideChange.lease`: запись хода сбоку (статус, потоки, алиасы) в тред с бессрочной арендой проходит только по ней (`rules.check_side_writer`, все хранилища v2); состояние фронтенда — без аренды.
 - `persist: turn` включается настройкой (под Temporal), а не способностью хранилища; компакция под Temporal — две записи (`replace_history`, затем состояние), как локально.
 - Квитанция `commit` во всех хранилищах v2 несёт аренду после записи (`reset_history` её снимает): пишущий не берёт аренду заново перед каждой записью.
 

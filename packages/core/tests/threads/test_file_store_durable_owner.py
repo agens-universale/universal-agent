@@ -67,20 +67,54 @@ def test_delete_refuses_thread_of_durable_executor(tmp_path):
         asyncio.run(store.delete(KEY, op_id="janitor"))
 
 
-def test_executor_writes_status_and_traces_beside_its_turn(tmp_path):
-    """``append_side`` владельца не несёт: статус хода и трассу субагентов
-    на своём треде пишет сам исполнитель — запись проходит."""
+def test_only_the_executor_writes_status_beside_its_turn(tmp_path):
+    """Статус хода, трассу и алиасы треда durable-исполнителя сбоку пишет
+    только он (по аренде); состояние фронтенда — любой процесс."""
     from gc_core.threads.models import RuntimeStatus, SideChange
 
-    _owned_by_executor(tmp_path, owner="wf-1")
+    lease = _owned_by_executor(tmp_path, owner="wf-1")
     store = FileThreadStore(tmp_path)
+    asyncio.run(
+        store.append_side(
+            KEY, SideChange(op_id="tui", patch_frontend=("tui", {"x": 1}))
+        )
+    )
     for change in (
-        SideChange(op_id="tui", patch_frontend=("tui", {"x": 1})),
         SideChange(op_id="rt", set_runtime=RuntimeStatus(turn="running")),
         SideChange(op_id="tr", append=[("subagent_events", [{"k": 1}])]),
         SideChange(op_id="al", add_aliases=["resp_1"]),
     ):
-        asyncio.run(store.append_side(KEY, change))
+        with pytest.raises(OwnershipError):
+            asyncio.run(store.append_side(KEY, change))
+        asyncio.run(
+            store.append_side(
+                KEY,
+                change.model_copy(
+                    update={"op_id": "own-" + change.op_id, "lease": lease}
+                ),
+            )
+        )
     record = asyncio.run(store.get_thread(KEY))
     assert record.runtime.turn == "running"
     assert asyncio.run(store.resolve_alias("resp_1")) == KEY
+
+
+def test_reset_history_frees_the_thread_for_develop_writers(tmp_path):
+    """Сброс истории снимает аренду — и отметку durable-владельца: тред не
+    остаётся закрытым без аренды, которую можно снять."""
+    from gc_core.threads.models import ThreadChange
+
+    lease = _owned_by_executor(tmp_path, owner="wf-1")
+    store = FileThreadStore(tmp_path)
+    asyncio.run(
+        store.commit(
+            KEY,
+            ThreadChange(
+                op_id="reset",
+                expected_revision=0,
+                lease=lease,
+                reset_history=True,
+            ),
+        )
+    )
+    assert durable_owner_id(str(tmp_path), "cli", "t") is None

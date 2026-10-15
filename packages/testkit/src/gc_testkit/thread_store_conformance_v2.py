@@ -737,6 +737,36 @@ async def check_commit_receipt_carries_lease(store, _clock) -> None:
     _expect(reset.lease is None, "после reset_history аренды в квитанции нет")
 
 
+async def check_side_writes_to_durable_thread(store, _clock) -> None:
+    """Тред durable-исполнителя (бессрочная аренда): статус хода, потоки и
+    алиасы сбоку пишет только он (``SideChange.lease``), состояние
+    фронтенда — любой процесс."""
+    lease = await _claim(store, owner="wf", ttl=None)
+    await store.append_side(
+        KEY, SideChange(op_id="tui", patch_frontend=("tui", {"x": 1}))
+    )
+    for op_id, fields in (
+        ("rt", {"set_runtime": RuntimeStatus(turn="running")}),
+        ("tr", {"append": [("subagent_events", [{"k": 1}])]}),
+        ("al", {"add_aliases": ["resp-1"]}),
+    ):
+        await _raises(
+            OwnershipError,
+            store.append_side(KEY, SideChange(op_id=op_id, **fields)),
+            f"запись хода чужим в тред durable-исполнителя ({op_id})",
+        )
+    await store.append_side(
+        KEY,
+        SideChange(
+            op_id="own", lease=lease, set_runtime=RuntimeStatus(turn="idle")
+        ),
+    )
+    _expect(
+        (await store.get_thread(KEY)).runtime.turn == "idle",
+        "запись хода самим исполнителем проходит",
+    )
+
+
 async def check_side_receipt_has_no_lease(store, _clock: FakeClock) -> None:
     await _claim(store, owner="a")
     receipt = await store.append_side(KEY, SideChange(op_id="s"))
@@ -909,11 +939,20 @@ async def check_watch_across_replace(store, _clock: FakeClock) -> None:
     await store.commit(
         KEY, _change("op1", 0, lease, append_messages=_msgs("m1", "m2"))
     )
+    # Курсор читателя — явно (как в check_watch_across_delete): отметка
+    # «на момент старта» снимается первым опросом, а у хранилища с
+    # настоящим вводом-выводом замена истории может его опередить.
+    record = await store.get_thread(KEY)
     seen: list[str] = []
 
     async def consume():
         async for entry in store.watch(
-            KEY, "messages", after_seq=2, poll_interval=0
+            KEY,
+            "messages",
+            after_seq=2,
+            generation=record.generation,
+            history_version=record.history_version,
+            poll_interval=0,
         ):
             seen.append(entry.data["id"])
 
@@ -1025,6 +1064,7 @@ CHECKS: tuple[Callable[..., Awaitable[None]], ...] = (
     check_op_id_shared_by_commit_and_side,
     check_side_receipt_has_no_lease,
     check_commit_receipt_carries_lease,
+    check_side_writes_to_durable_thread,
     check_set_info_replaces,
     check_updated_at_only_on_commit,
     check_stored_data_is_isolated,

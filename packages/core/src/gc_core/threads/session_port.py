@@ -128,8 +128,11 @@ class SessionPort:
         return self._revisions[key]
 
     async def _side(self, key: ThreadKey, **fields: Any) -> Receipt:
+        # Аренда — та, что уже держим (без захвата): durable-исполнитель
+        # пишет статус своего треда, чужой процесс получает отказ.
+        lease = self._leases.get(key)
         return await self._store.append_side(
-            key, SideChange(op_id=_op_id(), **fields)
+            key, SideChange(op_id=_op_id(), lease=lease, **fields)
         )
 
     # --- чтение ----------------------------------------------------------------
