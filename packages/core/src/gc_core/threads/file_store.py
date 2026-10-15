@@ -619,14 +619,23 @@ class FileThreadStore(ThreadStore):
         )
 
     def _write_meta(self, changes, key, meta, v2, *, touch: bool) -> None:
+        """``touch=False`` — запись сбоку (статус хода, состояние фронтенда):
+        как ``update_tui_meta`` develop, без штампов треда — время не
+        двигается и не появляется (тред не всплывает в списке), старые ключи
+        памяти не проверяются (их отвергнет ход, а не правка заголовка)."""
         stored = self._meta(key)
         now = self._now()
-        stamped = layout.stamp_meta(
-            meta,
-            key.system,
-            key.thread,
-            now if touch else stored.get("updated_at") or now,
-        )
+        if not touch:
+            # Идентичность — для списка тредов (meta без хода тоже в нём).
+            unstamped = dict(meta)  # порядок ключей прежней meta — как был
+            unstamped.setdefault("thread_id", key.thread)
+            unstamped.setdefault("system", key.system)
+            changes.put(
+                layout.thread_paths(self._dir, key.system, key.thread)[1],
+                layout.meta_text(unstamped).encode(),
+            )
+            return
+        stamped = layout.stamp_meta(meta, key.system, key.thread, now)
         # created_at — время создания треда; его ставит только хранилище.
         stamped["created_at"] = (
             stored.get("created_at") or v2.get("created_at") or now

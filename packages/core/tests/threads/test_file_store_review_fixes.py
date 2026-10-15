@@ -141,3 +141,34 @@ def test_listing_develop_thread_does_not_read_its_history(
     exact = run(store.get_thread(KEY))
     assert exact.info.messages_count == 3
     assert exact.max_seq["messages"] == 3
+
+
+def test_side_write_leaves_thread_stamps_alone(tmp_path):
+    """Запись сбоку (заголовок TUI, статус хода) — как ``update_tui_meta``
+    develop: у древнего треда с ``memory_files`` не падает (его отвергнет
+    ход, а не правка заголовка), а meta без ``updated_at`` его не получает —
+    тред не всплывает в списке."""
+    import json
+
+    from gc_core.threads.file_store import FileThreadStore
+    from gc_core.threads.models import SideChange, ThreadKey
+
+    key = ThreadKey(system="cli", thread="old")
+    meta_path = tmp_path / "meta_cli_old.json"
+    meta_path.write_text(
+        json.dumps(
+            {"thread_id": "old", "system_id": "cli", "memory_files": {}}
+        ),
+        encoding="utf-8",
+    )
+    store = FileThreadStore(tmp_path)
+    asyncio.run(
+        store.append_side(
+            key,
+            SideChange(op_id="tui", patch_frontend=("tui", {"title": "x"})),
+        )
+    )
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    assert meta["tui"] == {"title": "x"}
+    assert "updated_at" not in meta
+    assert list(meta)[:3] == ["thread_id", "system_id", "memory_files"]
