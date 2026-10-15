@@ -452,6 +452,120 @@ def test_current_call_id_ignores_the_previous_prompt(tmp_path):
     assert flow.current_call_id() == "new"
 
 
+def _grow_past(path, old_size: int) -> None:
+    """Дописать журнал так, чтобы он стал длиннее среза до компакции."""
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(
+            _line({"role": "assistant", "content": "y" * (old_size + 100)})
+            + "\n"
+        )
+    assert path.stat().st_size > old_size
+
+
+def test_current_call_id_keeps_poll_rewind_after_journal_grows(tmp_path):
+    path = tmp_path / "data_acp_s.jsonl"
+    path.write_text(
+        _line({"role": "assistant", "content": "x" * 4000}) + "\n",
+        encoding="utf-8",
+    )
+    flow = ToolFlow(str(path))
+    old_size = path.stat().st_size
+    path.write_text(
+        _line(
+            {
+                "role": "user",
+                "content": '<technical type="dialog_summary">сводка</technical>',
+            }
+        )
+        + "\n"
+        + _line(
+            {
+                "type": "function_call",
+                "name": "fs_write_file",
+                "call_id": "edit",
+                "arguments": '{"path": "a.py"}',
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    assert flow.poll()[0]["toolCallId"] == "edit"
+    _grow_past(path, old_size)
+    assert flow.current_call_id() == "edit"
+
+
+def test_current_call_id_remembers_its_own_rewind_after_journal_grows(
+    tmp_path,
+):
+    path = tmp_path / "data_acp_s.jsonl"
+    path.write_text(
+        _line({"role": "assistant", "content": "x" * 4000}) + "\n",
+        encoding="utf-8",
+    )
+    flow = ToolFlow(str(path))
+    old_size = path.stat().st_size
+    path.write_text(
+        _line(
+            {
+                "type": "function_call",
+                "name": "fs_write_file",
+                "call_id": "edit",
+                "arguments": '{"path": "a.py"}',
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    assert flow.current_call_id() == "edit"
+    _grow_past(path, old_size)
+    assert flow.current_call_id() == "edit"
+
+
+def test_nested_call_id_keeps_rewind_after_sidecar_grows(tmp_path):
+    thread = tmp_path / "data_acp_s.jsonl"
+    sidecar = tmp_path / "data_subagents_acp_s.jsonl"
+    thread.write_text("", encoding="utf-8")
+    sidecar.write_text(
+        _sidecar(
+            {
+                "parent_call_id": "sub",
+                "kind": "call",
+                "payload": {
+                    "type": "function_call",
+                    "name": "exec_command",
+                    "call_id": "old",
+                    "arguments": "{}",
+                },
+            }
+        )
+        + "\n"
+        + _line({"role": "assistant", "content": "x" * 4000})
+        + "\n",
+        encoding="utf-8",
+    )
+    flow = ToolFlow(str(thread), sidecar_path=str(sidecar))
+    old_size = sidecar.stat().st_size
+    sidecar.write_text(
+        _sidecar(
+            {
+                "parent_call_id": "sub",
+                "kind": "call",
+                "payload": {
+                    "type": "function_call",
+                    "name": "exec_command",
+                    "call_id": "c2",
+                    "arguments": "{}",
+                },
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    assert flow.poll()[0]["toolCallId"] == "sub:c2"
+    _grow_past(sidecar, old_size)
+    assert flow.current_call_id() == "sub:c2"
+
+
 def _preview(text):
     return {"type": "content", "content": {"type": "text", "text": text}}
 

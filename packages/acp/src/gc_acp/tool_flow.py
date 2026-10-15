@@ -94,8 +94,6 @@ class ToolFlow:
     def __init__(self, path: str, *, sidecar_path: str | None = None) -> None:
         self._parent = _Tail(path)
         self._sidecar = _Tail(sidecar_path or "")
-        self._parent_from = self._parent.offset
-        self._sidecar_from = self._sidecar.offset
         self._seen: set[str] = set()
         self._finished: set[str] = set()
 
@@ -119,23 +117,22 @@ class ToolFlow:
         прилипает. Родительский батч уже лежит в jsonl и идёт с начала,
         поэтому текущий — первый без output. Вложенный тул дописывается
         в sidecar в момент старта, поэтому текущий — последний открытый там.
+        Компакция обнуляет срез, и ноль сохраняется после дозаписи.
         """
-        nested = _open_call_ids(
-            self._sidecar.path, self._sidecar_from, "sidecar"
-        )
+        nested = _open_call_ids(self._sidecar, "sidecar")
         if nested:
             return nested[-1]
-        parent = _open_call_ids(self._parent.path, self._parent_from, "parent")
+        parent = _open_call_ids(self._parent, "parent")
         if parent:
             return parent[0]
         return None
 
 
-def _open_call_ids(path: str, start: int, kind: str) -> list[str]:
+def _open_call_ids(tail: _Tail, kind: str) -> list[str]:
     seen: set[str] = set()
     finished: set[str] = set()
     order: list[str] = []
-    for raw in _read_from(path, start):
+    for raw in _read_from(tail):
         update = _decode(kind, raw, seen, finished)
         if update is None or update.get("sessionUpdate") != "tool_call":
             continue
@@ -145,15 +142,17 @@ def _open_call_ids(path: str, start: int, kind: str) -> list[str]:
     return [item for item in order if item not in finished]
 
 
-def _read_from(path: str, start: int) -> list[bytes]:
-    if path == "":
+def _read_from(tail: _Tail) -> list[bytes]:
+    if tail.path == "":
         return []
     try:
-        size = os.path.getsize(path)
-        if size < start:
-            start = 0
-        with open(path, "rb") as handle:
-            handle.seek(start)
+        size = os.path.getsize(tail.path)
+        # Срез запоминается на хвосте. Иначе после дозаписи файл снова
+        # длиннее старого смещения, и seek попадает в середину записи.
+        if size < tail.origin:
+            tail.origin = 0
+        with open(tail.path, "rb") as handle:
+            handle.seek(tail.origin)
             blob = handle.read()
     except OSError:
         return []
@@ -316,14 +315,21 @@ def _call_id(message: dict) -> str | None:
 
 @dataclass
 class _Tail:
-    """Непрочитанный хвост одного jsonl. Файл может появиться позже."""
+    """Непрочитанный хвост одного jsonl. Файл может появиться позже.
+
+    ``origin`` — срез поиска текущего вызова. Компакция обнуляет его
+    вместе с курсором чтения, и ноль сохраняется после дозаписи.
+    """
 
     path: str
     offset: int = 0
+    origin: int = 0
     pending: bytes = b""
 
     def __post_init__(self) -> None:
-        self.offset = _file_size(self.path)
+        size = _file_size(self.path)
+        self.offset = size
+        self.origin = size
 
     def read_lines(self) -> list[bytes]:
         if self.path == "":
@@ -347,9 +353,12 @@ def _read_new(tail: _Tail) -> bytes:
         size = os.path.getsize(tail.path)
         # Компакция переписывает jsonl короткой сводкой: старый offset за EOF,
         # seek+read даёт пусто, и карточки хода больше не появляются.
+        # Тот же ноль — срез поиска вызова, иначе после дозаписи он смотрит
+        # в середину новой записи.
         if size < tail.offset:
             tail.offset = 0
             tail.pending = b""
+            tail.origin = 0
         with open(tail.path, "rb") as handle:
             handle.seek(tail.offset)
             chunk = handle.read()
