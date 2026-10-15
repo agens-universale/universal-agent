@@ -1,8 +1,9 @@
 """Диалог: один ход, корень, идемпотентность границ и потолок агентов."""
 
+import asyncio
 import os
 
-from harness import SlowAgent, message, rpc, session
+from harness import AnswerAgent, SlowAgent, message, rpc, session
 from gc_a2a.facade import MAX_LIVE_AGENTS
 
 
@@ -206,3 +207,79 @@ async def test_busy_agent_is_not_evicted_and_the_extra_dialog_starts(tmp_path):
         assert created[0].closed is False
         assert created[1].closed is True
         assert len(created) == MAX_LIVE_AGENTS + 1
+
+
+async def test_canceled_setup_does_not_free_the_next_task(
+    tmp_path, monkeypatch
+):
+    """Отмена подготовки не снимает резерв задачи, которая уже заняла диалог."""
+    monkeypatch.setattr("gc_a2a.facade.MAX_LIVE_AGENTS", 1)
+    ready = asyncio.Event()
+    release = asyncio.Event()
+    first = True
+
+    async with session(tmp_path) as (client, facade, created):
+
+        async def slow_factory(agent_settings, **kwargs):
+            nonlocal first
+            del kwargs
+            if first:
+                first = False
+                agent = SlowAgent()
+                agent.launch_root = agent_settings.runtime.launch_root
+                created.append(agent)
+                ready.set()
+                await release.wait()
+                return agent
+            agent = AnswerAgent("лишний")
+            agent.launch_root = agent_settings.runtime.launch_root
+            created.append(agent)
+            return agent
+
+        facade._agent_factory = slow_factory
+        send = asyncio.create_task(
+            rpc(
+                client,
+                "SendMessage",
+                {
+                    **message(message_id="m-1"),
+                    "configuration": {"returnImmediately": True},
+                },
+            )
+        )
+        await ready.wait()
+        listed = await rpc(client, "ListTasks", {})
+        task = listed.json()["result"]["tasks"][0]
+        canceled = await rpc(client, "CancelTask", {"id": task["id"]})
+        assert canceled.json()["result"]["status"]["state"] == (
+            "TASK_STATE_CANCELED"
+        )
+        second = asyncio.create_task(
+            rpc(
+                client,
+                "SendMessage",
+                {
+                    **message(
+                        "дальше",
+                        message_id="m-2",
+                        contextId=task["contextId"],
+                    ),
+                    "configuration": {"returnImmediately": True},
+                },
+            )
+        )
+        await asyncio.sleep(0.05)
+        release.set()
+        await send
+        started = await second
+        assert started.json()["result"]["task"]["status"]["state"] == (
+            "TASK_STATE_WORKING"
+        )
+        for _ in range(50):
+            if created[0].calls:
+                break
+            await asyncio.sleep(0.02)
+        assert created[0].calls
+        extra = await rpc(client, "SendMessage", message(message_id="m-3"))
+        assert "error" not in extra.json()
+        assert created[0].closed is False

@@ -70,7 +70,7 @@ class A2aFacade:
         self._launch_root = section.launch_root
         self._store = TaskStore(clock)
         self._agents: OrderedDict[str, Any] = OrderedDict()
-        self._busy: set[str] = set()
+        self._busy: dict[str, str] = {}
         self._live: dict[str, Turn] = {}
         self._gate = asyncio.Lock()
         self._create_lock = asyncio.Lock()
@@ -164,7 +164,7 @@ class A2aFacade:
             sent_task_id=incoming.task_id,
             sent_context_id=incoming.context_id,
         )
-        self._busy.add(context_id)
+        self._busy[context_id] = task_id
         return OpenTask(context_id, decision.cwd), task_id
 
     async def _perform(self, plan: Any, incoming: Incoming) -> dict:
@@ -329,7 +329,8 @@ class A2aFacade:
             raise invalid_params()
 
     def _release(self, context_id: str, task_id: str) -> None:
-        self._busy.discard(context_id)
+        if self._busy.get(context_id) == task_id:
+            self._busy.pop(context_id, None)
         self._live.pop(task_id, None)
 
 
