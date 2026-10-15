@@ -22,6 +22,7 @@ from gc_core.constants.tool_names import (
     ASK_HUMAN_TOOL_NAME,
     FINISH_TOOL_NAME,
     INTERMEDIATE_REPLY_TOOL_NAME,
+    PROPOSE_PLAN_TOOL_NAME,
     SESSION_COMPACT_TOOL_NAME,
     SESSION_TODO_TOOL_NAME,
     TURN_FINALIZING_TOOLS,
@@ -98,6 +99,7 @@ from gc_core.run_summary_coordinator import (
     filter_messages_not_in_state,
 )
 from gc_core.runtime_notices import maybe_push_llm_failure_notice
+from gc_core.security.permission_mode import tools_for_mode
 from gc_core.settings import AppConfig, settings_of
 from gc_core.states import State
 from gc_core.summarize.limit_trace_summary import abuild_limit_envelope
@@ -591,7 +593,11 @@ async def _arequest_responses_once(
             read_bytes=_image_bytes_reader(ctx),
         ),
         state,
-        tools=tools_for_request(getattr(state, "tools", None) or [], audience),
+        tools=tools_for_mode(
+            tools_for_request(getattr(state, "tools", None) or [], audience),
+            ctx,
+            state,
+        ),
         set_previous_response_id=set_previous_response_id,
         resolved=resolved,
         settings=settings,
@@ -667,6 +673,7 @@ async def _asend_chat_completions(
     sanitized_messages: List[Dict],
     sanitized_state_messages: List[Dict],
     read_bytes: Callable[[Any], Optional[bytes]],
+    ctx: Any,
     settings: AppConfig,
     resolved: Any,
     request_kwargs: Dict[str, Any],
@@ -697,8 +704,10 @@ async def _asend_chat_completions(
         api_mode=backend_mode,
         read_bytes=read_bytes,
     )
-    request_tools = tools_for_request(
-        getattr(state, "tools", None) or [], audience
+    request_tools = tools_for_mode(
+        tools_for_request(getattr(state, "tools", None) or [], audience),
+        ctx,
+        state,
     )
 
     def _create_payload(max_tokens: int) -> Dict[str, Any]:
@@ -977,6 +986,7 @@ async def _arequest_backend_canonical_once(
         sanitized_messages=sanitized_messages,
         sanitized_state_messages=sanitized_state_messages,
         read_bytes=_image_bytes_reader(ctx),
+        ctx=ctx,
         settings=settings,
         resolved=resolved,
         request_kwargs={
@@ -1331,6 +1341,44 @@ def _after_ask_human_skip_output(call_id: Any) -> Dict[str, Any]:
             f'reconsider it based on the reply in a new batch."}}'
         ),
     }
+
+
+def _after_plan_proposed_skip_output(call_id: Any) -> Dict[str, Any]:
+    return {
+        "id": generate_message_id_func("fco"),
+        "type": "function_call_output",
+        "call_id": call_id,
+        "output": (
+            f'{{"ok": false, "skipped": true, "message": '
+            f'"Skipped: {PROPOSE_PLAN_TOOL_NAME} ended the turn; the plan '
+            f'waits for user approval."}}'
+        ),
+    }
+
+
+def _after_judge_stop_skip_output(call_id: Any) -> Dict[str, Any]:
+    return {
+        "id": generate_message_id_func("fco"),
+        "type": "function_call_output",
+        "call_id": call_id,
+        "output": (
+            '{"ok": false, "skipped": true, "message": '
+            '"Skipped: the automatic review of actions is unavailable and '
+            'the run was stopped."}'
+        ),
+    }
+
+
+def _batch_ended_skip_output(
+    state: Any, call_id: Any
+) -> Dict[str, Any] | None:
+    """Пропуск остатка батча, когда ход уже кончился: план предложен — ждёт
+    одобрения; проверка действий недоступна — прогон останавливается."""
+    if getattr(state, "plan_proposed", False):
+        return _after_plan_proposed_skip_output(call_id)
+    if getattr(state, "judge_stop_reason", None):
+        return _after_judge_stop_skip_output(call_id)
+    return None
 
 
 def _not_started_outputs(
@@ -1776,6 +1824,10 @@ async def aprocess_tool_calls(
         tool_name = str(m.get("name") or "")
         if successful_ask_human:
             tools_outputs.append(_after_ask_human_skip_output(m["call_id"]))
+            continue
+        skipped = _batch_ended_skip_output(state, m["call_id"])
+        if skipped is not None:
+            tools_outputs.append(skipped)
             continue
         # smart-гейт: считаем КАЖДЫЙ исполняемый вызов, кроме завершителя хода.
         # До try — упавший вызов (неверные аргументы) тоже считается.
@@ -2379,6 +2431,10 @@ class _AgentLoop:
             run_agent_func=arun_agent,
             persist_messages_callback=self.persist_messages_callback,
         )
+        if getattr(state, "plan_proposed", False):
+            return await self._aclose_plan_turn(messages)
+        if getattr(state, "judge_stop_reason", None):
+            return await self._astop_on_judge_unavailable(messages)
         closing_finish = _closing_finish_after_batch(
             pending_tool_calls,
             messages,
@@ -2448,6 +2504,65 @@ class _AgentLoop:
         state.flush_current_user_intent()
         clear_loop_detector(state)
         return await self._aclose_turn(finish_arguments)
+
+    async def _aclose_plan_turn(self, messages) -> _Outcome:
+        """Ход закрыт предложенным планом (``turn_propose_plan``).
+
+        Отдельная ветка, а не путь ``turn_finish``: судья финала к плану не
+        применяется — план не ответ на запрос. Батч вливается в состояние ДО
+        компакции конца хода, иначе она увидела бы непарный вызов тула.
+        """
+        state = self.state
+        batch_new = filter_messages_not_in_state(
+            list(getattr(state, "messages", []) or []), messages
+        )
+        if batch_new:
+            state.messages += batch_new
+            await _maybe_persist(
+                self.persist_messages_callback, batch_new, state
+            )
+        state.plan_proposed = False
+        state.steps += 1
+        state.flush_current_user_intent()
+        clear_loop_detector(state)
+        plan = getattr(state.shared, "plan", None) or {}
+        outcome = await self._aclose_turn(
+            json.dumps(
+                {
+                    "plan": str(plan.get("text") or ""),
+                    "status": str(plan.get("status") or ""),
+                },
+                ensure_ascii=False,
+            )
+        )
+        if not outcome.restart:
+            # Человек дослал сообщение во время хода — ход продолжается, и
+            # признак «прогон кончился планом» ставить нельзя: баннер одобрения
+            # показывается только по нему.
+            state.terminal_outcome = "plan_proposed"
+        return outcome
+
+    async def _astop_on_judge_unavailable(self, messages) -> _Outcome:
+        """Проверка действий судьёй недоступна — прогон завершается.
+
+        Батч вливается в состояние и сохраняется: отказ проверки и пропуски
+        остатка — часть истории, и следующий прогон не должен увидеть
+        непарный вызов тула. Ход журнала намерений не закрывается: задача не
+        выполнена, человек продолжит её в том же ходе.
+        """
+        state = self.state
+        batch_new = filter_messages_not_in_state(
+            list(getattr(state, "messages", []) or []), messages
+        )
+        if batch_new:
+            state.messages += batch_new
+            await _maybe_persist(
+                self.persist_messages_callback, batch_new, state
+            )
+        reason = str(state.judge_stop_reason)
+        state.judge_stop_reason = None
+        state.terminal_outcome = "judge_unavailable"
+        return _Outcome(result=reason)
 
     async def _aevaluate_finish_gate(self, finish_arguments, finish_call_id):
         state, ctx = self.state, self.ctx
