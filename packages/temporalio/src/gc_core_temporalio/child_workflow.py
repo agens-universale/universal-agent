@@ -230,7 +230,8 @@ class UniversalSubagentWorkflow:
                     parent_state.stop_requested or self.stopped
                 )
                 parent_ctx.permission_store = PermissionStore(
-                    parent_state.shared.confirm_rules
+                    parent_state.shared.confirm_rules,
+                    shared=parent_state.shared,
                 )
                 parent_ctx.permission_store.replace_run_rules(
                     request.parent_transfer.run_permissions

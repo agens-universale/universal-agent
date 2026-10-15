@@ -483,6 +483,37 @@ class SubagentRunner:
             child_run_id=str(getattr(child_ctx, "run_id", "") or ""),
         )
 
+    async def _astopped_response(
+        self, tool_name: str, child_state: Any, child_ctx: Any, result: Any
+    ) -> Any:
+        """Ответ родителю, если ребёнок остановлен лимитом или недоступной
+        проверкой действий; None — прогон закончился обычно."""
+        outcome = getattr(child_state, "terminal_outcome", None)
+        if outcome in ("step_limit", "token_limit", "tool_call_limit"):
+            await self._afinish_on_limit(
+                tool_name, child_state, child_ctx, outcome
+            )
+            # Pass-through: child run_agent already built the limit envelope
+            # (ok=false, status, message, raw_trace_summary). Do NOT rebuild
+            # our own JSON or call LLM here — spec §6.2.
+            return result
+        if outcome == "judge_unavailable":
+            # Проверка действий судьёй недоступна: субагент остановлен,
+            # родитель и соседи продолжают — о недоступности родитель
+            # узнает на своём первом спорном действии.
+            await self._afinish_on_limit(
+                tool_name, child_state, child_ctx, outcome
+            )
+            return self._error_response(
+                tool_name=tool_name,
+                code=outcome,
+                message=str(result or ""),
+                retryable=False,
+                steps=child_state.steps,
+                child_run_id=str(getattr(child_ctx, "run_id", "") or ""),
+            )
+        return None
+
     async def _afinish_on_limit(
         self,
         tool_name: str,
@@ -694,19 +725,11 @@ class SubagentRunner:
                     tool_name, child_state, child_ctx
                 )
 
-            _limit_outcome = getattr(child_state, "terminal_outcome", None)
-            if _limit_outcome in (
-                "step_limit",
-                "token_limit",
-                "tool_call_limit",
-            ):
-                await self._afinish_on_limit(
-                    tool_name, child_state, child_ctx, _limit_outcome
-                )
-                # Pass-through: child run_agent already built the limit envelope
-                # (ok=false, status, message, raw_trace_summary). Do NOT rebuild
-                # our own JSON or call LLM here — spec §6.2.
-                return result
+            stopped = await self._astopped_response(
+                tool_name, child_state, child_ctx, result
+            )
+            if stopped is not None:
+                return stopped
 
             result_payload: Any = (
                 result or "Subagent finished without explicit result."
@@ -1431,8 +1454,28 @@ class SubagentRunner:
         )
         return self._bind_child_context(child_ctx, tool_name)
 
+    def _root_user_words(self) -> list[str]:
+        """Слова пользователя корневой сессии — для судьи действий ребёнка.
+
+        Читаются в момент проверки, а не при запуске. В этой ветке родитель
+        ждёт ребёнка, и за это время его журнал не меняется; фоновым
+        субагентам источник нужно будет подменить на текущее состояние
+        корневой сессии — тогда граница, названная человеком после запуска
+        ребёнка, дойдёт до его судьи.
+        """
+        inherited = getattr(self._ctx, "root_user_messages", None)
+        if callable(inherited):
+            return list(inherited())
+        from gc_core.security.action_judge_input import user_words
+
+        return user_words(
+            self._orchestrator_state,
+            getattr(self._ctx, "tools_data", None) or {},
+        )
+
     def _bind_child_context(self, child_ctx: Any, tool_name: str) -> Any:
         """Common parent identity, shared human frontend and sidecar binding."""
+        child_ctx.root_user_messages = self._root_user_words
         # Режим родителя (C3 gc.force_collect default on CLI/TUI) — наследуем,
         # иначе child process_tool_calls видит оба флага False и collect выключается.
         child_ctx.is_tui = bool(getattr(self._ctx, "is_tui", False))

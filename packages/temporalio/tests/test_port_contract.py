@@ -74,6 +74,9 @@ CORE_CONTEXT_ATTRIBUTES = {
     "prompt_loader": BOUND,
     "prompt_resource": BOUND,
     "provider_currency": DATA,
+    "root_user_messages": DATA
+    + " (слова пользователя корневой сессии для судьи действий субагента; "
+    "ставит раннер субагента при привязке контекста ребёнка, ввода-вывода нет)",
     "run_id": DATA,
     "runtime": DATA,
     "settings": DATA,
