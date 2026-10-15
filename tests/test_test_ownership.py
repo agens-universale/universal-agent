@@ -32,6 +32,7 @@ ALLOWED = {
     "cli": {"gc_core", "gc_cli", "recommended_mcp"},
     "server": {"gc_core", "gc_server", "recommended_mcp"},
     "tui": {"gc_core", "gc_tui", "recommended_mcp"},
+    "stores": {"gc_core", "gc_stores"},
 }
 
 OUR_PACKAGES = {
@@ -41,6 +42,7 @@ OUR_PACKAGES = {
     "gc_server",
     "recommended_mcp",
     "gc_core_temporalio",
+    "gc_stores",
 }
 
 

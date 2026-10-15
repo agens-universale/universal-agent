@@ -129,6 +129,27 @@ REQUIRE_TEMPORAL=1 uv run pytest packages/temporalio/tests
 `gc_core.execution.ports.port(ctx, "<имя>")`: под Temporal отсутствие порта —
 отказ хода, а не локальный запасной путь в коде workflow.
 
+## Postgres
+
+Тесты `packages/stores/tests` берут базу из `GC_TEST_POSTGRES_DSN`; без
+переменной тесты с базой пропускаются, `REQUIRE_POSTGRES=1` делает её
+отсутствие ошибкой. Каждое хранилище в тестах живёт на своей схеме
+(`gc_test_<id>`), схемы удаляются в конце теста — подойдёт любая база, где
+пользователю можно создавать схемы.
+
+```bash
+# временный кластер (Homebrew Postgres), только TCP
+initdb -D /tmp/gc-pg -U postgres --auth=trust -E UTF8
+pg_ctl -D /tmp/gc-pg -o "-p 55432 -c unix_socket_directories='' -c listen_addresses=127.0.0.1" -l /tmp/gc-pg.log start
+GC_TEST_POSTGRES_DSN=postgresql://postgres@127.0.0.1:55432/postgres REQUIRE_POSTGRES=1 \
+    uv run pytest packages/stores/tests
+```
+
+Набор: конформанс контракта v2 (`assert_conforms`) и старый асинхронный набор
+через порт сессии (путь, которым ходит агент), плюс то, чего конформанс не
+видит: два инстанса на одной базе, данные байт в байт, часы базы, схема у
+пользователя без права `CREATE`.
+
 ## Windows
 
 Набор обязан быть зелёным и на Windows. CI нет, поэтому перед слиянием

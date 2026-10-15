@@ -38,6 +38,7 @@ MANIFESTS = [
     ROOT / "packages" / "mcp" / _MANIFEST_NAME,
     ROOT / "packages" / "acp" / _MANIFEST_NAME,
     ROOT / "packages" / "chat" / _MANIFEST_NAME,
+    ROOT / "packages" / "stores" / _MANIFEST_NAME,
     ROOT / "packages" / "testkit" / _MANIFEST_NAME,
 ]
 

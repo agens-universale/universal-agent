@@ -60,6 +60,7 @@ test = [
 
     "gc-testkit",
     "gc-core-temporalio==0.4.0",
+    "gc-stores[postgres]",
     "pytest>=9.0.3",
     "pytest-asyncio>=0.23",
     "office-mcp",
@@ -96,6 +97,7 @@ gc-chat = { workspace = true }
 
 gc-testkit = { workspace = true }
 gc-core-temporalio = { workspace = true }
+gc-stores = { workspace = true }
 office-mcp = { path = "packages/mcp/external/vendor/office-mcp", editable = true }
 
 [tool.pytest.ini_options]
@@ -111,6 +113,7 @@ testpaths = [
     "packages/temporalio/tests",
     "packages/acp/tests",
     "packages/chat/tests",
+    "packages/stores/tests",
 ]
 asyncio_mode = "auto"
 
@@ -195,6 +198,7 @@ paths = [
     "packages/temporalio/src",
     "packages/acp/src",
     "packages/chat/src",
+    "packages/stores/src",
     "packages/core/assets/skills",
     "scripts",
     "integrations",

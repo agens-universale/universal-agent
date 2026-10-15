@@ -49,6 +49,7 @@ MANIFESTS = {
     "gc_core_temporalio": "packages/temporalio",
     "gc_acp": "packages/acp",
     "gc_chat": "packages/chat",
+    "gc_stores": "packages/stores",
 }
 
 
@@ -251,6 +252,18 @@ def test_server_wheel_contents(wheels):
         assert m in names, m
 
 
+def test_stores_wheel_ships_the_schema(wheels):
+    """SQL схемы лежит файлом рядом с кодом: без него ``ensure_schema()``
+    установленного колеса падает на первом старте."""
+    names = wheels["gc_stores"]
+    assert {n.split("/")[0] for n in names} == {"gc_stores"}, sorted(names)
+    for m in (
+        "gc_stores/postgres/store.py",
+        "gc_stores/postgres/schema.sql",
+    ):
+        assert m in names, m
+
+
 def test_vendored_ddgs_ships_without_build_junk(wheels):
     """В колесо едут только версионированные файлы вендоренного ddgs-mcp.
 
@@ -377,8 +390,8 @@ def test_each_distribution_declares_only_its_own_commands():
         )
         got = set(man["project"].get("scripts", {}))
 
-        if name == "gc_core":
-            # gc-core — БИБЛИОТЕКА: команды в PATH не кладёт.
+        if name in ("gc_core", "gc_stores"):
+            # gc-core и gc-stores — БИБЛИОТЕКИ: команды в PATH не кладут.
             assert not got, f"{sub} — библиотека, точек входа быть не должно"
         elif name == "gc_ua":
             expected = set().union(
@@ -461,6 +474,7 @@ def test_versions_are_pinned_together():
         "packages/mcp",
         "packages/acp",
         "packages/chat",
+        "packages/stores",
     ):
         leaf = tomllib.loads(
             (REPO / sub / "pyproject.toml").read_text(encoding="utf-8")
@@ -473,6 +487,7 @@ def test_versions_are_pinned_together():
         "packages/mcp",
         "packages/acp",
         "packages/chat",
+        "packages/stores",
     ):
         leaf = tomllib.loads(
             (REPO / sub / "pyproject.toml").read_text(encoding="utf-8")
@@ -643,7 +658,7 @@ def test_docs_never_offer_bare_pip_for_our_distributions():
             if "pip install" not in stripped or "uv pip install" in stripped:
                 continue
             if re.search(
-                r"\bgc-(core|cli|tui|server|mcp|ua|testkit)\b", stripped
+                r"\bgc-(core|cli|tui|server|mcp|ua|testkit|stores)\b", stripped
             ):
                 offenders.append(f"{doc.relative_to(REPO)}:{num}: {stripped}")
 

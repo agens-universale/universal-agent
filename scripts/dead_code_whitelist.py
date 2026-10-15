@@ -52,3 +52,8 @@ _.aensure_ready
 # Абстрактный метод harbor.agents.base.BaseAgent.setup: зовёт Harbor перед запуском агента.
 # integrations/harbor/adapters/gc_cli_external.py.
 _.setup
+
+# Публичный API PostgresThreadStore (docs/sdk/thread-store.md, «Postgres»): таблицы
+# создаёт встраивающий при старте, ядро хранилище не создаёт и не зовёт.
+# packages/stores/src/gc_stores/postgres/store.py.
+_.ensure_schema

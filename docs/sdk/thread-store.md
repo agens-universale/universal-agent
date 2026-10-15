@@ -20,6 +20,7 @@ AGENTS.md, скиллы и субагенты — общее для всех т�
 | `MemoryThreadStore` | `gc_testkit.memory_thread_store` | тесты; образец своего хранилища |
 | `DurableFileThreadStore` | `gc_core.thread_store_file_durable` | Temporal: те же файлы плюс служебный каталог `.store/` |
 | `SQLiteThreadStore` | `gc_core_temporalio.storage.sqlite` | Temporal: один файл базы |
+| `PostgresThreadStore` | `gc_stores.postgres` (дистрибутив `gc-stores[postgres]`) | несколько инстансов на одной базе: контракт v2 (`gc_core.threads.store.ThreadStore`), см. «Postgres» ниже |
 | своё | ваш код | база, S3, Redis — по контракту ниже |
 
 ## Как передать агенту
@@ -130,6 +131,58 @@ def test_my_durable_store():
     assert_durable_conforms(lambda: S3ThreadStore(bucket, prefix))
 ```
 
+## Postgres: несколько инстансов на одной базе
+
+`PostgresThreadStore` из дистрибутива `gc-stores` — хранилище контракта v2
+(`gc_core.threads.store.ThreadStore`) для нескольких инстансов агента на одной
+базе. Драйвер — extra `postgres` (asyncpg):
+
+```bash
+uv pip install "gc-stores[postgres] @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/stores"
+```
+
+```python
+from gc_core.aio import AsyncAgent
+from gc_stores.postgres import PostgresThreadStore
+
+store = PostgresThreadStore("postgresql://agent@db/agents")
+await store.ensure_schema()      # таблицы, если их нет; повторно — безвредно
+agent = await AsyncAgent.create(settings, thread_store=store)
+...
+await store.close()              # или `async with PostgresThreadStore(...)`
+```
+
+- **Таблицы** создаёт только `ensure_schema()` (SQL — `gc_stores/postgres/schema.sql`);
+  два инстанса, стартующие одновременно, не мешают друг другу. Уже созданные
+  таблицы пользователю без права `CREATE` не мешают: DDL не выполняется.
+- **Схема базы** — параметр `schema` (по умолчанию `public`): несколько
+  независимых наборов тредов в одной базе.
+- **Пул** — свой (создаётся при первом вызове, параметры — `pool_options` →
+  `asyncpg.create_pool`) или ваш: `PostgresThreadStore(pool=pool)`; чужой пул
+  `close()` не закрывает. Пул asyncpg привязан к event loop: после закрытого
+  loop (`asyncio.run(store.ensure_schema())` на старте) хранилище открывает
+  новый пул в следующем, из другого работающего loop — понятный отказ.
+  Свой пул ставит сессиям `idle_in_transaction_session_timeout = 60s`
+  (`pool_options={"server_settings": …}` переопределяет): замёрзший посреди
+  транзакции инстанс не держит строку треда бессрочно.
+- **Конкурентность.** Каждая запись — одна транзакция READ COMMITTED (явно,
+  независимо от `default_transaction_isolation` сервера): строка треда
+  блокируется (`SELECT … FOR UPDATE`), затем проверки контракта (квитанция →
+  аренда → ревизия). Две записи по одной ревизии с разных инстансов — одна
+  проходит, вторая получает `ThreadConflict`; повтор той же операции (тот же
+  `op_id`), пока первая ещё пишет, — та же квитанция без дубля.
+- **Время** — часы базы (`clock_timestamp()` после блокировки строки):
+  истечение аренды не зависит от часов инстансов, `updated_at` треда не идёт
+  назад.
+- **Данные** — текст JSON в колонках `text` (не `jsonb` и не `json`):
+  история читается ровно той, что записана — порядок ключей, `\u0000` в
+  выводе тулов, `NaN`/`Infinity`, как у файлового хранилища. JSON-операторов
+  в запросах нет; для разбора в SQL — `data::json`.
+- **Удалённые треды** оставляют строку в `gc_tombstones` (поколение и эпоха
+  аренды): тред, созданный заново под тем же ключом, не пропустит запись по
+  аренде удалённого.
+- **`watch`** — опрос (`poll_interval`); LISTEN/NOTIFY — позже.
+
 ## Необязательные возможности
 
 Хранилище объявляет их методами; нет метода — ядро работает по-старому.
@@ -157,5 +210,6 @@ def test_my_durable_store():
 | `gc_core/thread_store_file_durable.py` | `DurableFileThreadStore` |
 | `gc_core/thread_files.py` | файлы треда, ссылки `thread-file://` |
 | `gc_core_temporalio/storage/sqlite.py` | `SQLiteThreadStore` |
+| `gc_stores/postgres/store.py`, `schema.sql` | `PostgresThreadStore` и его таблицы |
 | `gc_testkit/memory_thread_store.py` | `MemoryThreadStore` |
 | `gc_testkit/thread_store_conformance.py`, `durable_thread_store_conformance.py` | проверки своей реализации |

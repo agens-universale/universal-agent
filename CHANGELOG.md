@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Добавлено — `PostgresThreadStore` (дистрибутив `gc-stores`)
+
+- Новый дистрибутив `gc-stores` (библиотека, в `gc-ua` не входит): хранилища тредов на базах. `gc_stores.postgres.PostgresThreadStore` — контракт `ThreadStore` v2 на Postgres для нескольких инстансов на одной базе; драйвер — extra `gc-stores[postgres]` (asyncpg). Таблицы создаёт `await store.ensure_schema()`; подключение — `AsyncAgent.create(settings, thread_store=store)`.
+- Конформанс-наборы хранилищ тредов (`thread_store_conformance_v2.assert_conforms`, `thread_store_conformance.assert_conforms_async`) закрывают хранилище после каждой проверки (`await store.close()`, если метод есть) — для хранилищ с пулом соединений. Новые проверки: явно заданные поля моделей (`model_fields_set`) переживают хранилище — по ним строится meta; `NaN`/`Infinity` в данных пишутся и читаются, как у файлового хранилища.
+
 ### Breaking — хранилище агента v2 (`AgentStore`)
 
 - Контракт `gc_core.agent_store.AgentStore` асинхронный и по логическим именам: `read(kind, name) -> bytes | None`, `list(kind, prefix)`, `read_memory(project)`, `write_memory(project, text, expected_version=…)`. Виды: `prompt` (имена — `Prompt`), `instructions` (`L0`, `L1`), `subagent`, `skill`. Ядро больше не передаёт хранилищу путь: `FileAgentStore(settings)` вычисляет его сам по настройкам (с runtime-слоем фронтенда), как раньше ядро. Прежние `read_text`/`list_dir`/`AgentResource`/`DEFAULT_AGENT_STORE` удалены; `MemoryAgentStore` (testkit) и конформанс-набор `gc_testkit.agent_store_conformance` — под новый контракт.

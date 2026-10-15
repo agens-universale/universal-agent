@@ -725,6 +725,9 @@ def assert_conforms_async(store_factory: Callable[[], Any]) -> List[str]:
 
         def test_my_redis_store():
             assert_conforms_async(lambda: RedisThreadStore(url=TEST_URL))
+
+    Хранилище с соединениями набор закрывает после каждой проверки в том же
+    loop: зовёт ``await store.close()``, если такой метод есть.
     """
     import asyncio
 
@@ -736,12 +739,23 @@ def assert_conforms_async(store_factory: Callable[[], Any]) -> List[str]:
 
     loop = asyncio.new_event_loop()
     try:
+        _close_in(loop, store)
         for check in BEHAVIOUR_CHECKS:
-            check(_AwaitingFacade(store_factory(), loop))
+            store = store_factory()
+            try:
+                check(_AwaitingFacade(store, loop))
+            finally:
+                _close_in(loop, store)
             passed.append(check.__name__)
     finally:
         loop.close()
     return passed
+
+
+def _close_in(loop: Any, store: Any) -> None:
+    close = getattr(store, "close", None)
+    if inspect.iscoroutinefunction(close):
+        loop.run_until_complete(close())
 
 
 __all__ = [

@@ -4,8 +4,8 @@
 
 Код разбит на настоящие пакеты с собственным пространством имён:
 `gc_core` (SDK), `gc_cli`, `gc_tui`, `gc_server`, `recommended_mcp`, `gc_acp`,
-`gc_chat`. Каждый живёт в своём каталоге под `packages/` и собирается своим
-манифестом.
+`gc_chat`, `gc_stores`. Каждый живёт в своём каталоге под `packages/` и
+собирается своим манифестом.
 
 ## Профили
 
@@ -18,11 +18,14 @@
 | `gc-mcp` | `recommended_mcp` | `gc-mcp`, `gc-mcp-install` |
 | `gc-acp` | `gc_acp` | `gc-acp` |
 | `gc-chat` | `gc_chat` | `gc-chat` |
+| `gc-stores` | `gc_stores` | **нет** — библиотека: хранилища тредов на базах, драйвер — extra (`gc-stores[postgres]`) |
 | `gc-ua` | — (только метаданные) | все листовые команды выше |
 
 `gc-cli`, `gc-tui` и `gc-server` зависят от `gc-core` и `gc-mcp`; друг от друга —
 нет. `gc-mcp`, `gc-acp` и `gc-chat` зависят от `gc-core` (`gc-chat` ещё тянет
-FastAPI/uvicorn). `gc-ua` тянет все листовые дистрибутивы.
+FastAPI/uvicorn). `gc-ua` тянет все листовые дистрибутивы. `gc-stores` зависит
+от `gc-core` и в `gc-ua` не входит: его ставит встраивающий, которому нужно
+хранилище на базе.
 
 Колесо меты пустое (`bypass-selection = true`): она объявляет зависимости и
 точки входа, но не несёт ни одного файла. Раньше в ней жил `meta/gc_ua_launcher.py`,
@@ -43,6 +46,9 @@ uv tool install "gc-tui @ git+https://gitverse.ru/gigacode-ai/universal-agent#su
 uv tool install "gc-server @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/server" --with-executables-from gc-mcp
 uv tool install "gc-acp @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/acp"
 uv tool install "gc-chat @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/chat"
+
+# библиотека, в окружение приложения (не `uv tool`):
+uv pip install "gc-stores[postgres] @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/stores"
 ```
 
 `--with-executables-from gc-mcp` у узких профилей не украшение: `uv` выносит в

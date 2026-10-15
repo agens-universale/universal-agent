@@ -64,6 +64,9 @@ universal-agent/
   packages/chat/
     pyproject.toml               # gc-chat  → gc-core, FastAPI, uvicorn
     src/gc_chat/                 # HTTP Responses + Chat Completions
+  packages/stores/
+    pyproject.toml               # gc-stores → gc-core; extra [postgres] = asyncpg
+    src/gc_stores/               # хранилища тредов на базах: postgres/
   packages/testkit/
     pyproject.toml               # gc-testkit — только dev, в колёса не попадает
     src/gc_testkit/              # раскладка, фикстуры, pytest-плагин

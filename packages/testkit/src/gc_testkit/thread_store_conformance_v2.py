@@ -14,12 +14,15 @@
 иначе проверки истечения ждали бы минуту живого времени.
 
 Каждая проверка получает свежие часы и свежее хранилище. Отказ —
-:class:`ConformanceError` с объяснением, что именно нарушено.
+:class:`ConformanceError` с объяснением, что именно нарушено. Хранилище с
+соединениями (пул базы привязан к loop) набор закрывает после каждой
+проверки в том же loop: зовёт ``await store.close()``, если такой метод есть.
 """
 
 from __future__ import annotations
 
 import asyncio
+import inspect
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -364,6 +367,65 @@ async def check_commit_sets_runtime(store, _clock: FakeClock) -> None:
         (await store.get_thread(KEY)).runtime == runtime,
         "commit пишет runtime вместе с шагом",
     )
+
+
+async def check_explicit_fields_survive(store, _clock: FakeClock) -> None:
+    """По ``model_fields_set`` фасад строит meta (ключ есть ⇔ поле задано):
+    «не задано» и «задано значением по умолчанию» после чтения разные."""
+    lease = await _claim(store)
+    await store.commit(
+        KEY,
+        _change(
+            "op",
+            0,
+            lease,
+            set_state=SessionState(notes=""),
+            set_runtime=RuntimeStatus(turn="idle"),
+            set_info=ThreadInfo(title="t"),
+            set_usage=Usage(),
+        ),
+    )
+    record = await store.get_thread(KEY)
+    _expect(
+        record.state.model_fields_set == {"notes"},
+        f"заданные поля state: {sorted(record.state.model_fields_set)}",
+    )
+    _expect(
+        record.runtime.model_fields_set == {"turn"},
+        f"заданные поля runtime: {sorted(record.runtime.model_fields_set)}",
+    )
+    info_set = record.info.model_fields_set
+    _expect(
+        "title" in info_set and "workspace" not in info_set,
+        f"заданные поля info: {sorted(info_set)}",
+    )
+    _expect(
+        not record.usage.model_fields_set,
+        f"заданные поля usage: {sorted(record.usage.model_fields_set)}",
+    )
+
+
+async def check_non_finite_numbers_survive(store, _clock: FakeClock) -> None:
+    """NaN и Infinity в данных (вывод тулов, расход) пишутся и читаются, как
+    у файлового хранилища: ``json`` их принимает, отказ ронял бы ход."""
+    lease = await _claim(store)
+    nan, inf = float("nan"), float("inf")
+    await store.commit(
+        KEY,
+        _change(
+            "op",
+            0,
+            lease,
+            append_messages=[{"id": "m", "v": nan, "w": -inf}],
+            set_extra={"score": inf},
+        ),
+    )
+    [entry] = await store.read_stream(KEY, "messages")
+    value = entry.data["v"]
+    _expect(value != value, "NaN в истории пережил хранилище")
+    _expect(entry.data["w"] == -inf, "-Infinity в истории")
+    record = await store.get_thread(KEY)
+    _expect(record.extra.get("score") == inf, "Infinity в extra")
 
 
 async def check_extra_roundtrip(store, _clock: FakeClock) -> None:
@@ -915,6 +977,8 @@ CHECKS: tuple[Callable[..., Awaitable[None]], ...] = (
     check_state_usage_info_roundtrip,
     check_commit_sets_runtime,
     check_extra_roundtrip,
+    check_explicit_fields_survive,
+    check_non_finite_numbers_survive,
     check_store_owns_timestamps_and_count,
     check_replace_history_renumbers,
     check_discard_message,
@@ -949,6 +1013,15 @@ CHECKS: tuple[Callable[..., Awaitable[None]], ...] = (
 )
 
 
+async def _run_closing(check, store: ThreadStore, clock: FakeClock) -> None:
+    try:
+        await check(store, clock)
+    finally:
+        close = getattr(store, "close", None)
+        if inspect.iscoroutinefunction(close):
+            await close()
+
+
 def assert_conforms(factory: Callable[[FakeClock], ThreadStore]) -> list[str]:
     """Прогнать все проверки; вернуть имена пройденных.
 
@@ -960,7 +1033,7 @@ def assert_conforms(factory: Callable[[FakeClock], ThreadStore]) -> list[str]:
         clock = FakeClock()
         store = factory(clock)
         try:
-            asyncio.run(check(store, clock))
+            asyncio.run(_run_closing(check, store, clock))
         except ConformanceError as exc:
             raise ConformanceError(f"{check.__name__}: {exc}") from exc
         passed.append(check.__name__)
