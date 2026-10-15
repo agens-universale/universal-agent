@@ -1212,12 +1212,14 @@ version = "0.4.0"
 source = { editable = "packages/temporalio" }
 dependencies = [
     { name = "gc-core" },
+    { name = "gc-stores" },
     { name = "temporalio" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "gc-core", editable = "packages/core" },
+    { name = "gc-stores", editable = "packages/stores" },
     { name = "temporalio", specifier = "==1.33.0" },
 ]
 

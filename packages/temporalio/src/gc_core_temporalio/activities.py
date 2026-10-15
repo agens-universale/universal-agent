@@ -30,8 +30,8 @@ from gc_core.project_memory.operations import (
 from gc_core.run_preparation import PreparedPrompts, PromptPreparationRequest
 from gc_core.settings import settings_of
 from gc_core.state_preparation import PreparedState, StatePreparationRequest
-from gc_core.thread_store_async import athread_store
-from gc_core.thread_store_durable import durable_store_capability
+from gc_core.threads.models import ThreadKey
+from gc_core.threads.store import ThreadStore
 from temporalio import activity
 from temporalio.converter import value_to_type
 from temporalio.exceptions import ApplicationError
@@ -234,15 +234,14 @@ class AgentActivities:
         #: — уходят в workflow с подготовкой хода.
         self.activity_settings = activity_settings or DEFAULT_ACTIVITY_SETTINGS
         self.context_provider = context_provider
-        self.stores = {
-            name: athread_store(store) for name, store in stores.items()
-        }
-        self.public_config = public_config
-        for store in self.stores.values():
-            if durable_store_capability(store) is None:
+        for name, store in stores.items():
+            if not isinstance(store, ThreadStore):
                 raise ValueError(
-                    "Temporal requires a durable ThreadStore capability"
+                    f"ThreadStore {name!r}: Temporal requires ThreadStore v2 "
+                    "(gc_core.threads.store)"
                 )
+        self.stores = dict(stores)
+        self.public_config = public_config
 
     @asynccontextmanager
     async def _operation_scope(self, call):
@@ -334,7 +333,6 @@ class AgentActivities:
         check = getattr(self.context_provider, "check_settings", None)
         if check is not None:
             check(call.profile, call.data.get("settings_fingerprint"))
-        store = self.stores[call.data["store_id"]]
         public = self.public_config(ctx)
         prompts_request = PromptPreparationRequest.from_config(
             ctx, verbose=bool(settings_of(ctx).agent.verbose)
@@ -368,16 +366,6 @@ class AgentActivities:
                 }
                 for name, entry in ctx.tools_data.items()
             },
-            store_capabilities=[
-                name
-                for name in (
-                    "replace_messages",
-                    "archive_and_replace",
-                    "reset_run_flags",
-                )
-                if callable(getattr(store, "a" + name, None))
-            ],
-            threads_dir=str(getattr(store, "threads_dir", "")),
             resource_owner=(await self.context_provider.resource_owner(call))
             if callable(getattr(self.context_provider, "resource_owner", None))
             else None,
@@ -681,13 +669,8 @@ class AgentActivities:
         store = self.stores.get(thread.get("store_id"))
         if store is None or not thread.get("thread_id"):
             return
-        capability = durable_store_capability(store)
-        if capability is None:
-            return
-        snapshot = await capability[0](
-            thread.get("system_id"), thread["thread_id"]
+        key = ThreadKey(
+            system=thread.get("system_id"), thread=thread["thread_id"]
         )
-        if snapshot is None or snapshot.state is None:
-            return
-        for message in snapshot.state.messages:
-            known.setdefault(message_hash(message), deepcopy(message))
+        for entry in await store.read_stream(key, "messages"):
+            known.setdefault(message_hash(entry.data), deepcopy(entry.data))

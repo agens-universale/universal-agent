@@ -206,7 +206,7 @@ async def test_thread_deleted_between_create_and_lock_is_created_again(
     """Вставку опередил параллельный вызов, а его тред успели удалить до
     нашей блокировки: ``claim`` создаёт тред заново, а не падает."""
     import asyncpg
-    from gc_stores.postgres.rows import ThreadRow
+    from gc_stores.rows import ThreadRow
 
     reached, go = asyncio.Event(), asyncio.Event()
 

@@ -774,11 +774,10 @@ class FileThreadStore(ThreadStore):
             replayed = self._replayed(base, change)
             if replayed is not None:
                 return replayed
+            # Владельца ``append_side`` не несёт: статус хода и трассу
+            # субагентов на треде durable-исполнителя пишет сам исполнитель
+            # (Temporal) — как и контракт, запись не проверяется.
             control, v2 = self._load(key)
-            if _touches_turn(change):
-                # Тред durable-исполнителя: чужой процесс может вести только
-                # своё состояние фронтенда (как update_tui в develop).
-                _check_durable_owner(control, None)
             if not self._exists(key, v2):
                 v2 = self._created(v2)
             return self._side(key, control, v2, change)
@@ -1131,13 +1130,6 @@ def _older_than(meta: JsonObject, cutoff: datetime) -> bool:
     if moment.tzinfo is None:
         moment = moment.replace(tzinfo=cutoff.tzinfo)
     return moment < cutoff
-
-
-def _touches_turn(change: SideChange) -> bool:
-    """Запись сбоку, которая касается хода, а не только состояния фронтенда."""
-    return bool(
-        change.set_runtime is not None or change.append or change.add_aliases
-    )
 
 
 def _check_durable_owner(control: JsonObject, owner: str | None) -> None:

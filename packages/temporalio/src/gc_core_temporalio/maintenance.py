@@ -10,8 +10,8 @@ MCP-процессами жили бы до рестарта воркера. Р�
 
 import asyncio
 import logging
+from datetime import timedelta
 
-from gc_core.thread_store_journal import prune_durable_receipts
 from temporalio.client import WorkflowExecutionStatus
 from temporalio.service import RPCError, RPCStatusCode
 
@@ -100,7 +100,9 @@ class WorkerMaintenance:
                 logger.info("Releasing abandoned context %s", owner)
                 await self.provider.forget_owner(owner)
         for store in self.stores.values():
-            await asyncio.to_thread(_prune_store_receipts, store)
+            await store.prune_receipts(
+                timedelta(seconds=RECEIPT_MAX_AGE_SECONDS)
+            )
 
     async def serve(self):
         while True:
@@ -109,13 +111,3 @@ class WorkerMaintenance:
                 await self.run_once()
             except Exception:
                 logger.exception("Worker maintenance failed")
-
-
-def _prune_store_receipts(store):
-    prune = getattr(store, "prune_receipts", None)
-    if prune is not None:
-        prune(max_age_seconds=RECEIPT_MAX_AGE_SECONDS)
-    elif getattr(store, "threads_dir", None):
-        prune_durable_receipts(
-            store.threads_dir, max_age_seconds=RECEIPT_MAX_AGE_SECONDS
-        )

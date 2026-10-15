@@ -27,7 +27,8 @@ from gc_testkit.paths import REPO
 #: доступны. Ядру — нет: оно тянет их лениво и обязано работать без них.
 ALLOWED = {
     "core": {"gc_core"},
-    "temporalio": {"gc_core", "gc_core_temporalio"},
+    # gc-core-temporalio зависит от gc-stores (SQLiteThreadStore воркера).
+    "temporalio": {"gc_core", "gc_core_temporalio", "gc_stores"},
     "mcp": {"gc_core", "recommended_mcp"},
     "cli": {"gc_core", "gc_cli", "recommended_mcp"},
     "server": {"gc_core", "gc_server", "recommended_mcp"},

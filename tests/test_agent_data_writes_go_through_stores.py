@@ -45,8 +45,9 @@ _TESTKIT = "packages/testkit/src/gc_testkit/"
 
 _OS_BACKEND = "запись workspace через os_backend"
 _CONFIG = "конфиги пользователя и проекта"
-_OLD_DURABLE = (
-    "старое durable-хранилище тредов — до перевода Temporal на ThreadStore v2"
+_OLD_FILE_STORE = (
+    "старое файловое хранилище тредов (контракт ThreadStoreBase у "
+    "встраивающих): запись через блокировку журнала"
 )
 _EDITS = (
     "журнал и снимки правок workspace — до перевода журнала на append_side"
@@ -60,8 +61,11 @@ ALLOWED: dict[str, str] = {
     # Реализации хранилищ.
     _CORE + "threads/file_tx.py": "файловое хранилище тредов v2",
     _CORE + "attachments/store.py": "файлы вложений тредов (картинки)",
-    _CORE + "thread_store.py": _OLD_DURABLE,
-    _CORE + "thread_store_journal.py": _OLD_DURABLE,
+    _CORE + "thread_store.py": _OLD_FILE_STORE,
+    _CORE + "thread_store_journal.py": (
+        "примитивы атомарной записи и блокировки файлов тредов (file_tx v2, "
+        "старое файловое хранилище)"
+    ),
     _CORE + "project_memory/storage.py": (
         "файлы памяти проекта у FileAgentStore (атомарная запись, бэкап)"
     ),
@@ -112,11 +116,6 @@ ALLOWED: dict[str, str] = {
     _SWARM + "lifecycle.py": "swarm: рабочие каталоги участников",
     _SWARM + "runner.py": "swarm: рабочие каталоги участников",
     _SWARM + "storage.py": "swarm: своё хранилище состояния роя",
-    # Temporal.
-    "packages/temporalio/src/gc_core_temporalio/storage/sqlite.py": (
-        "хранилище durable-исполнения Temporal (SQLite) — до перевода "
-        "Temporal на ThreadStore v2"
-    ),
     # Тестовый инструментарий.
     _TESTKIT + "helpers/crossplatform.py": _TESTKIT_REASON,
     _TESTKIT + "legacy_threads.py": _TESTKIT_REASON,

@@ -11,7 +11,13 @@ from gc_core_temporalio.contracts import RunRequest, UserMessage
 from gc_core_temporalio.provider import WorkerConfig
 from gc_core_temporalio.worker import build_runtime
 from gc_core_temporalio.workflow import UniversalAgentWorkflow
-from live_support import call, temporal_cli, worker_kwargs
+from live_support import (
+    call,
+    temporal_cli,
+    thread_messages,
+    thread_meta,
+    worker_kwargs,
+)
 from temporalio.client import WorkflowUpdateFailedError
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer, Worker
@@ -207,7 +213,9 @@ async def test_two_turns_continue_as_new_and_delivery_dedup(
         result = await asyncio.wait_for(handle.result(), 30)
         assert result["turns"] == 2 and "second" in str(result["answer"])
         assert not result["undelivered"] and len(requests) == 2
-        history = contexts.stores["files"].load_messages("test", "controls")
+        history = await thread_messages(
+            contexts.stores["files"], "test", "controls"
+        )
         assert sum(m.get("content") == "second task" for m in history) == 1
         first = await env.client.get_workflow_handle(
             "controls", run_id=first_run
@@ -322,7 +330,9 @@ async def test_native_human_reply_or_stop_preserves_lifecycle(
                 UniversalAgentWorkflow.answer_human, args=[request_id, "blue"]
             )
         result = await asyncio.wait_for(handle.result(), 30)
-        history = contexts.stores["files"].load_messages("test", "controls")
+        history = await thread_messages(
+            contexts.stores["files"], "test", "controls"
+        )
         assert any("Choose a value" in str(m) for m in history)
         assert len(requests) == (1 if stop else 2)
         if not stop:
@@ -436,12 +446,12 @@ async def test_post_run_result_and_usage_are_accounted_once(
             assert result["formatted_answer"] is None
             assert result["exit_code"] == 1 and reason in result["post_error"]
         store = contexts.stores["files"]
-        meta = store.load_meta("test", "controls")
+        meta = await thread_meta(store, "test", "controls")
         usage = meta["token_usage"]["by_category"]["structured_output"]
         assert usage["input"] == 12 and usage["output"] == 2
         assert not any(
             "value" in m.get("output", "")
-            for m in store.load_messages("test", "controls")
+            for m in await thread_messages(store, "test", "controls")
         )
         assert not contexts._contexts, (
             "Final release must free worker contexts after accounting"
@@ -449,8 +459,8 @@ async def test_post_run_result_and_usage_are_accounted_once(
         await Replayer(workflows=[UniversalAgentWorkflow]).replay_workflow(
             await handle.fetch_history()
         )
-        assert len(requests) == 2 and meta == store.load_meta(
-            "test", "controls"
+        assert len(requests) == 2 and meta == await thread_meta(
+            store, "test", "controls"
         )
 
 
@@ -623,7 +633,7 @@ async def test_two_big_cyrillic_messages_keep_records_below_the_limit(
             largest = max(largest, size)
         await handle.signal(UniversalAgentWorkflow.close_session)
         await asyncio.wait_for(handle.result(), 60)
-        meta = contexts.stores["files"].load_meta("test", "big")
+        meta = await thread_meta(contexts.stores["files"], "test", "big")
     assert largest < LIMIT, largest
     # Журнал не урезан (как в локальном режиме): оба запроса целиком —
     # в историю они шли ссылками на тексты сообщений.

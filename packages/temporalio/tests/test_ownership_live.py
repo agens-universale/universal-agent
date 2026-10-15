@@ -7,7 +7,7 @@ import pytest
 from live_support import temporal_cli, worker_kwargs
 import test_workflow_controls as controls
 from gc_core.execution.contracts import ExecutionFailure
-from gc_core.thread_store_file_durable import DurableFileThreadStore
+from gc_core.threads.file_store import FileThreadStore
 from gc_core.thread_store_journal import durable_owner_id
 from gc_core_temporalio.contracts import UserMessage
 from gc_core_temporalio.provider import WorkerConfig
@@ -57,16 +57,14 @@ async def test_failed_session_releases_owner(
 ):
     monkeypatch.chdir(tmp_path)
     url, _, _ = scripted_http
-    commit = DurableFileThreadStore.commit_operation
+    commit = FileThreadStore.commit
 
-    def failing_commit(self, system_id, thread_id, operation):
-        if operation.kind == "persist":
+    async def failing_commit(self, key, change):
+        if change.append_messages:
             raise ExecutionFailure("injected persist failure")
-        return commit(self, system_id, thread_id, operation)
+        return await commit(self, key, change)
 
-    monkeypatch.setattr(
-        DurableFileThreadStore, "commit_operation", failing_commit
-    )
+    monkeypatch.setattr(FileThreadStore, "commit", failing_commit)
     async with runtime(tmp_path, url) as (env, _, _):
         handle = await env.client.start_workflow(
             UniversalAgentWorkflow.run,

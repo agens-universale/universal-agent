@@ -31,9 +31,41 @@ from gc_core.threads.models import (
 )
 from pydantic import BaseModel
 
-from gc_stores.postgres.queries import THREAD_COLUMNS
-
 HISTORY = "messages"
+
+#: Колонки строки треда после ключа ``(system, thread_id)`` — в этом порядке
+#: их отдаёт ``ThreadRow.values()``.
+THREAD_COLUMNS: tuple[str, ...] = (
+    "workspace",
+    "info",
+    "state",
+    "usage",
+    "runtime",
+    "frontend",
+    "archives",
+    "extra",
+    "max_seq",
+    "messages_count",
+    "revision",
+    "generation",
+    "history_version",
+    "lease_owner",
+    "lease_epoch",
+    "lease_expires_at",
+    "created_at",
+    "updated_at",
+)
+
+#: Таблицы схемы (``schema.sql``): все на месте — DDL не нужен.
+TABLES: tuple[str, ...] = (
+    "gc_threads",
+    "gc_stream_entries",
+    "gc_archives",
+    "gc_blobs",
+    "gc_aliases",
+    "gc_receipts",
+    "gc_tombstones",
+)
 
 
 def dumps(value: Any) -> str:
@@ -176,7 +208,11 @@ class ThreadRow:
             extra=self.extra,
         )
 
-    def receipt(self, op_id: str, archive_id: str | None = None) -> Receipt:
+    def receipt(
+        self, op_id: str, archive_id: str | None = None, *, lease: bool = False
+    ) -> Receipt:
+        """Квитанция; ``lease`` — с арендой после записи (``commit``: после
+        ``reset_history`` её нет), у ``append_side`` — без."""
         return Receipt(
             op_id=op_id,
             revision=self.revision,
@@ -184,6 +220,7 @@ class ThreadRow:
             history_version=self.history_version,
             max_seq=self.stream_high(),
             archive_id=archive_id,
+            lease=self.lease if lease else None,
         )
 
 

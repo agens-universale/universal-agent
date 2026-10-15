@@ -7,13 +7,19 @@ import sys
 from pathlib import Path
 
 import pytest
-from gc_core.thread_store_file_durable import DurableFileThreadStore
+from gc_core.threads.file_store import FileThreadStore
 from gc_core_temporalio.client import AgentClient
 from gc_core_temporalio.contracts import RunRequest
-from gc_core_temporalio.storage.sqlite import SQLiteThreadStore
-from gc_core_temporalio.thread_store_contracts import ThreadStoreCall
+from gc_stores.sqlite import SQLiteThreadStore
+from gc_core_temporalio.thread_store_contracts import ThreadCall
 from gc_core_temporalio.workflow import UniversalAgentWorkflow
-from live_support import provider, temporal_cli, wait_marker  # noqa: F401
+from live_support import (
+    provider,
+    temporal_cli,
+    thread_messages,
+    thread_meta,
+    wait_marker,
+)  # noqa: F401
 from restart_interceptor import RestartInterceptor
 from temporalio.converter import default as default_converter
 from temporalio.converter import value_to_type
@@ -147,11 +153,11 @@ async def test_native_sigkill_durable_boundaries(
             assert "Recovered successfully" in str(result["answer"])
             assert len(requests) == expected_requests
             store = (
-                DurableFileThreadStore(str(store_path))
+                FileThreadStore(str(store_path))
                 if backend == "file"
                 else SQLiteThreadStore(str(store_path))
             )
-            messages = store.load_messages("test", "restart-thread")
+            messages = await thread_messages(store, "test", "restart-thread")
             assert len({message["id"] for message in messages}) == len(
                 messages
             )
@@ -159,24 +165,21 @@ async def test_native_sigkill_durable_boundaries(
                 "native durable restart" in str(message)
                 for message in messages
             )
-            assert (
-                store.load_meta("test", "restart-thread")["shared"][
-                    "working_memory"
-                ]["knowledge"]
-                == "durable fact"
-            )
+            assert (await thread_meta(store, "test", "restart-thread"))[
+                "shared"
+            ]["working_memory"]["knowledge"] == "durable fact"
             history = await handle.fetch_history()
             if checkpoint == "after_store_receipt":
                 # Воркер убит после записи, до ответа: повтор activity на
-                # новом воркере (без кэша meta) собрал из разницы ту же
-                # операцию, и хранилище ответило исходной квитанцией.
+                # новом воркере пришёл с тем же op_id (состояние — целиком,
+                # если базу уже не собрать), и хранилище ответило исходной
+                # квитанцией: запись не задвоилась.
                 marker = json.loads(
                     (tmp_path / "checkpoint.json").read_text()
                 )["value"]
-                original = value_to_type(ThreadStoreCall, marker["request"])
-                assert original.meta_delta is not None
-                assert original.operation.payload["meta"] is None
-                assert marker["receipt"]["receipt"] in _receipts(history)
+                original = value_to_type(ThreadCall, marker["request"])
+                assert original.args["change"]["append_messages"]
+                assert marker["receipt"]["value"] in _receipts(history)
         finally:
             for process in processes:
                 if process.poll() is None:
@@ -204,6 +207,7 @@ def _receipts(history):
             continue
         payloads = event.activity_task_completed_event_attributes.result
         for value in converter.from_payloads(payloads.payloads):
-            if isinstance(value, dict) and value.get("receipt"):
-                found.append(value["receipt"])
+            inner = value.get("value") if isinstance(value, dict) else None
+            if isinstance(inner, dict) and inner.get("op_id"):
+                found.append(inner)
     return found

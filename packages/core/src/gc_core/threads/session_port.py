@@ -8,16 +8,21 @@
 сессию фасадом и уберёт порт.
 
 Аренда берётся лениво, на первой записи, и продлевается, когда до истечения
-остаётся меньше половины срока. Ревизия перечитывается прямо перед каждой
+остаётся меньше половины срока; бессрочная (``ttl=None`` — владелец workflow
+Temporal) берётся один раз. Ревизия перечитывается прямо перед каждой
 записью: гонку двух писателей решает повтор, как и раньше.
+
+Код порта исполняется и в workflow Temporal: идентификаторы операций и время
+— из среды исполнения (``generate_msg_id_sha256``, ``utc_now``), там они
+детерминированы, а повтор activity приходит с тем же ``op_id``.
 """
 
 from __future__ import annotations
 
-import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from typing import Any
 
+from gc_core.execution.environment import utc_now
 from gc_core.execution.message_keys import make_message_key
 from gc_core.threads.errors import OwnershipError, ThreadConflict
 from gc_core.threads.instance import instance_id
@@ -32,6 +37,7 @@ from gc_core.threads.models import (
     ThreadKey,
 )
 from gc_core.threads.store import ThreadStore
+from gc_core.utils.generate_message_id import generate_msg_id_sha256
 
 _HISTORY = "messages"
 _SUBAGENTS = "subagent_events"
@@ -41,7 +47,7 @@ LEASE_TTL = timedelta(seconds=60)
 
 
 def _op_id() -> str:
-    return f"session_{uuid.uuid4().hex}"
+    return generate_msg_id_sha256("session")
 
 
 class SessionPort:
@@ -52,7 +58,7 @@ class SessionPort:
         store: ThreadStore,
         *,
         owner: str | None = None,
-        ttl: timedelta = LEASE_TTL,
+        ttl: timedelta | None = LEASE_TTL,
     ) -> None:
         self._store = store
         self._owner = owner or instance_id()
@@ -68,13 +74,16 @@ class SessionPort:
 
     # --- аренда и запись -------------------------------------------------------
 
+    def adopt_lease(self, key: ThreadKey, lease: Lease) -> None:
+        """Аренда, уже взятая вызывающим (workflow взял тред в начале
+        сессии): первая запись не идёт за ней в хранилище."""
+        self._leases[key] = lease
+
     async def _lease(self, key: ThreadKey) -> Lease:
         lease = self._leases.get(key)
-        now = datetime.now(UTC)
-        if (
-            lease is not None
-            and lease.expires_at is not None
-            and lease.expires_at - now > self._ttl / 2
+        if lease is not None and (
+            lease.expires_at is None
+            or lease.expires_at - utc_now() > self._ttl / 2
         ):
             return lease
         record = await self._store.claim(
@@ -139,10 +148,12 @@ class SessionPort:
         key = _key(system_id, thread_id)
         entries = await self._store.read_stream(key, _HISTORY)
         history_keys = getattr(self._store, "history_keys", None)
-        if callable(history_keys):
+        keys = history_keys(key) if callable(history_keys) else None
+        if keys is not None:
             messages = [entry.data for entry in entries]
-            keys = history_keys(key)
         else:
+            # Хранилище ключей истории не ведёт (``None`` — так отвечает и
+            # прокси Temporal поверх такого хранилища).
             messages, keys = _with_ids(key, [entry.data for entry in entries])
         record = await self._store.get_thread(key)
         max_seq = record.max_seq.get(_HISTORY, 0) if record else 0
@@ -388,6 +399,12 @@ def _key(system_id: str, thread_id: str) -> ThreadKey:
 
 #: Порт на одно хранилище один — как у адаптера синхронных хранилищ.
 _PORT_ATTR = "_gc_session_port"
+
+
+def attach_session_port(store: ThreadStore, port: SessionPort) -> None:
+    """Порт сессии, заданный владельцем хранилища (workflow Temporal: свой
+    владелец аренды, бессрочно), — его и отдаст ``session_port``."""
+    setattr(store, _PORT_ATTR, port)
 
 
 def session_port(store: ThreadStore) -> SessionPort:

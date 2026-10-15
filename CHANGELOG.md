@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Breaking — Temporal на контракте хранилища тредов v2
+
+- Под Temporal ядро пишет тред через контракт `ThreadStore` v2, как локально: хранилище воркера — любое v2 (`FileThreadStore` из `gc_core.threads.file_store`, `SQLiteThreadStore` из `gc_stores.sqlite`, `PostgresThreadStore`, своё — проверка `gc_testkit.thread_store_conformance_v2`). Activities треда — `universal_agent.thread.{get,read_stream,read_archive,resolve_alias,commit,append_side,claim,release,delete}` вместо `load`/`commit`/`read_trace`.
+- Удалены старый durable-контракт (`gc_core.thread_store_durable`: снимок, операция, квитанция), `DurableFileThreadStore`, `gc_core_temporalio.storage` (SQLite переехал в `gc-stores`, схема новая) и `gc_testkit.durable_thread_store_conformance`. Совместимость с историями и базами прежних воркеров не поддерживается (Temporal не в эксплуатации).
+- Владелец треда — аренда v2 `LeaseRequest(owner=<workflow id>, ttl=None)`; она переживает Continue-As-New и передаётся субагентам. `gc-core-temporalio` зависит от `gc-stores`.
+- `persist: turn` включается настройкой (под Temporal), а не способностью хранилища; компакция под Temporal — две записи (`replace_history`, затем состояние), как локально.
+- Квитанция `commit` во всех хранилищах v2 несёт аренду после записи (`reset_history` её снимает): пишущий не берёт аренду заново перед каждой записью.
+
 ### Добавлено — `PostgresThreadStore` (дистрибутив `gc-stores`)
 
 - Новый дистрибутив `gc-stores` (библиотека, в `gc-ua` не входит): хранилища тредов на базах. `gc_stores.postgres.PostgresThreadStore` — контракт `ThreadStore` v2 на Postgres для нескольких инстансов на одной базе; драйвер — extra `gc-stores[postgres]` (asyncpg). Таблицы создаёт `await store.ensure_schema()`; подключение — `AsyncAgent.create(settings, thread_store=store)`.

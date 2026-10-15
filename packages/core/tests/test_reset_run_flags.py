@@ -1,4 +1,7 @@
-"""Startup batching reads fresh metadata and retains custom-store behavior."""
+"""Startup batching reads fresh metadata and retains custom-store behavior.
+
+Пакетный сброс флагов — у порта хранилища v2 (``SessionPort``); эталон —
+отдельные вызовы над старым файловым хранилищем."""
 
 from copy import deepcopy
 from types import SimpleNamespace
@@ -12,9 +15,10 @@ from gc_core.run_summary_coordinator import (
 )
 from gc_core.thread_store import ThreadSession
 from gc_core.thread_store_async import athread_store
-from gc_core.thread_store_durable import ThreadStoreOperation
 from gc_core.thread_store_file import FileThreadStore
-from gc_core.thread_store_file_durable import DurableFileThreadStore
+from gc_core.threads.file_store import FileThreadStore as FileThreadStoreV2
+from gc_core.threads.models import SideChange, ThreadKey
+from gc_core.threads.session_port import SessionPort
 from gc_testkit.memory_thread_store import MemoryThreadStore
 
 
@@ -23,9 +27,9 @@ from gc_testkit.memory_thread_store import MemoryThreadStore
 async def test_batch_matches_original_flags_and_tui(
     tmp_path, disk_flag, cached_flag
 ):
-    stores = [
-        DurableFileThreadStore(str(tmp_path / "batch")),
-        FileThreadStore(str(tmp_path / "legacy")),
+    ports = [
+        athread_store(FileThreadStoreV2(tmp_path / "batch")),
+        athread_store(FileThreadStore(str(tmp_path / "legacy"))),
     ]
     meta = {
         "runtime": {
@@ -38,14 +42,14 @@ async def test_batch_matches_original_flags_and_tui(
     if disk_flag is not None:
         meta["runtime"]["summarizing"] = disk_flag
     sessions = []
-    for store in stores:
-        store.save_meta("s", "t", deepcopy(meta))
+    for port in ports:
+        await port.asave_meta("s", "t", deepcopy(meta))
         cached = {"runtime": {}, "tui": {"title": "stale"}, "pending": "keep"}
         if cached_flag is not None:
             cached["runtime"]["summarizing"] = cached_flag
         sessions.append(
             SimpleNamespace(
-                port=athread_store(store),
+                port=port,
                 meta=cached,
                 system_id="s",
                 thread_id="t",
@@ -56,43 +60,34 @@ async def test_batch_matches_original_flags_and_tui(
     await aset_tui_finalizing(sessions[1], False)
     await aset_tui_finish_gate_checking(sessions[1], False)
     assert sessions[0].meta == sessions[1].meta
-    actual, expected = [store.load_meta("s", "t") for store in stores]
+    actual, expected = [await port.aload_meta("s", "t") for port in ports]
     for key in ("runtime", "tui"):
         assert actual.get(key) == expected.get(key)
     assert actual["runtime"]["external"] == 9
 
 
 async def test_external_write_between_open_and_batch_is_preserved(tmp_path):
-    store = DurableFileThreadStore(str(tmp_path))
+    store = FileThreadStoreV2(tmp_path)
     session = await ThreadSession.afrom_config(
         settings=None, system_id="s", thread_id="t", store=store
     )
-    store.save_meta(
-        "s",
-        "t",
-        {
-            "runtime": {"summarizing": True, "new_external": 7},
-            "tui": {"title": "new", "pinned": True},
-        },
+    # Записи других писателей между открытием сессии и сбросом флагов:
+    # статус хода и секция TUI (её фронтенд пишет своей записью).
+    await SessionPort(store, owner="other").asave_meta(
+        "s", "t", {"runtime": {"summarizing": True, "new_external": 7}}
     )
-    before = store.read_snapshot("s", "t", include_state=False)
+    await store.append_side(
+        ThreadKey(system="s", thread="t"),
+        SideChange(
+            op_id="tui", set_frontend=("tui", {"title": "new", "pinned": True})
+        ),
+    )
     await areset_run_flags(session)
-    after = store.read_snapshot("s", "t", include_state=False)
-    assert after.revision == before.revision + 1
-    assert after.meta["runtime"] == {"new_external": 7}
-    assert after.meta["tui"] == {"title": "new", "pinned": True}
-    assert session.meta["runtime"] == after.meta["runtime"]
-    assert session.meta["tui"] == after.meta["tui"]
-
-
-def test_reset_batch_retry_returns_original_receipt(tmp_path):
-    store = DurableFileThreadStore(str(tmp_path))
-    store.save_meta("s", "t", {"runtime": {"summarizing": True}})
-    operation = ThreadStoreOperation("reset-flags", "reset_run_flags", {})
-    original = store.commit_operation("s", "t", operation)
-    store.patch_runtime_flag("s", "t", "summarizing", active=True)
-    assert store.commit_operation("s", "t", operation) == original
-    assert store.load_meta("s", "t")["runtime"]["summarizing"] is True
+    after = await athread_store(store).aload_meta("s", "t")
+    assert after["runtime"] == {"new_external": 7}
+    assert after["tui"] == {"title": "new", "pinned": True}
+    assert session.meta["runtime"] == after["runtime"]
+    assert session.meta["tui"] == after["tui"]
 
 
 async def test_custom_store_without_batch_keeps_original_calls():

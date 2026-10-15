@@ -16,6 +16,7 @@ from gc_core.thread_store_file import FileThreadStore
 from gc_core.utils.logging_module import release_run_logger
 from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
 from gc_core_temporalio.contracts import RunRequest
+from live_support import seed_messages
 from gc_core_temporalio.provider import WorkerConfig
 from gc_core_temporalio.worker import build_runtime
 from gc_core_temporalio.workflow import UniversalAgentWorkflow
@@ -113,7 +114,7 @@ def summary_http():
         thread.join()
 
 
-def seed_history(store, name):
+async def seed_history(store, name):
     if name == "pre_backend":
         return
     messages = []
@@ -132,7 +133,10 @@ def seed_history(store, name):
                 },
             ]
         )
-    store.append_messages("test", "parity", messages)
+    if callable(getattr(store, "append_messages", None)):
+        store.append_messages("test", "parity", messages)  # старое файловое
+    else:
+        await seed_messages(store, "test", "parity", messages)
 
 
 def merged_parts(traces):
@@ -234,7 +238,7 @@ async def test_automatic_summary_full_trace_parity(
         }
     )
     local_store = FileThreadStore(tmp_path / "local_threads")
-    seed_history(local_store, name)
+    await seed_history(local_store, name)
     local_config = LoadedSettings(
         settings=config.profiles["test"].core,
         runtime=RuntimeEnv(launch_root=str(tmp_path)),
@@ -253,7 +257,7 @@ async def test_automatic_summary_full_trace_parity(
             thread_id="parity",
             message_ids=["input-0"],
         )
-        expected = snapshot(answer, requests, local_store, tmp_path)
+        expected = await snapshot(answer, requests, local_store, tmp_path)
         expected_traces = normalized_traces(traces, tmp_path)
         expected_categories = list(categories)
     finally:
@@ -280,7 +284,7 @@ async def test_automatic_summary_full_trace_parity(
     scenario.update(main=0, summary=0)
     shutil.rmtree(tmp_path / "home", ignore_errors=True)
     provider, native, stores = build_runtime(config)
-    seed_history(provider.stores["files"], name)
+    await seed_history(provider.stores["files"], name)
     original = native._summary_trace
 
     async def native_trace(call, context):
@@ -313,7 +317,7 @@ async def test_automatic_summary_full_trace_parity(
                 )
                 result = await asyncio.wait_for(handle.result(), 45)
                 history = await handle.fetch_history()
-            actual = snapshot(
+            actual = await snapshot(
                 result["answer"], requests, provider.stores["files"], tmp_path
             )
             (tmp_path / "local-summary.json").write_text(

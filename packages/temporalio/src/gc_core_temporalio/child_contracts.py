@@ -23,9 +23,9 @@ class ChildRequest:
     tool_name: str
     arguments: dict[str, Any]
     parent_call_id: str
+    #: Аренда треда родителя: трасса субагента идёт в его тред.
     store_owner_id: str | None
     store_owner_epoch: int | None
-    store_generation: int
 
 
 @dataclass(frozen=True)

@@ -56,13 +56,14 @@ from gc_core.threads.rules import (
     check_writer,
     granted_lease,
     instant,
-    patched_frontend,
 )
 from gc_core.threads.store import ThreadStore
 
-from gc_stores.postgres.queries import TABLES, Queries
-from gc_stores.postgres.rows import (
+from gc_stores.common import EXTENSIONS, apply_sets, apply_side
+from gc_stores.postgres.queries import Queries
+from gc_stores.rows import (
     HISTORY,
+    TABLES,
     ThreadRow,
     dumps,
     entry_of,
@@ -71,7 +72,6 @@ from gc_stores.postgres.rows import (
     stamp,
 )
 
-_EXTENSIONS = {"image/png": ".png", "image/jpeg": ".jpg"}
 _POOL_DEFAULTS = {"min_size": 1, "max_size": 10}
 #: Сессия, замёрзшая посреди транзакции (инстанс остановлен), держала бы
 #: блокировку строки треда бессрочно — и чужой claim не перехватил бы тред
@@ -446,7 +446,7 @@ class PostgresThreadStore(ThreadStore):
             await self._renumber(conn, row, compaction.messages, now)
         await self._discard(conn, row, change.discard_message_ids)
         await self._append(conn, row, HISTORY, change.append_messages, now)
-        _apply_sets(row, change)
+        apply_sets(row, change)
         return archive_id
 
     # --- чтение ---------------------------------------------------------------------
@@ -548,7 +548,7 @@ class PostgresThreadStore(ThreadStore):
             # опрос списка (updated_after) потерял бы запись.
             row.updated_at = max(now, row.updated_at)
             await self._save(conn, row)
-            receipt = row.receipt(change.op_id, archive_id)
+            receipt = row.receipt(change.op_id, archive_id, lease=True)
             return await self._remember(conn, key, digest, receipt, now)
 
     async def append_side(self, key: ThreadKey, change: SideChange) -> Receipt:
@@ -563,7 +563,7 @@ class PostgresThreadStore(ThreadStore):
                 return replayed
             now = await self._now(conn)
             await self._add_aliases(conn, key, change.add_aliases)
-            _apply_side(row, change)
+            apply_side(row, change)
             for stream, items in change.append:
                 await self._append(conn, row, stream, items, now)
             await self._save(conn, row, _SIDE_COLUMNS)
@@ -613,7 +613,7 @@ class PostgresThreadStore(ThreadStore):
         self, key: ThreadKey, data: bytes, *, mime: str
     ) -> BlobRef:
         name = hashlib.sha256(data).hexdigest()[:16]
-        name += _EXTENSIONS.get(mime, ".bin")
+        name += EXTENSIONS.get(mime, ".bin")
         async with self._connection() as conn:
             now = await self._now(conn)
             await conn.execute(
@@ -642,28 +642,3 @@ class PostgresThreadStore(ThreadStore):
             cutoff = await self._now(conn) - older_than
             status = await conn.execute(self._sql.prune_receipts, cutoff)
         return _affected(status)
-
-
-def _apply_sets(row: ThreadRow, change: ThreadChange) -> None:
-    """``set_*`` заменяют значение целиком (слияние — забота фасада)."""
-    if change.set_state is not None:
-        row.state = change.set_state
-    if change.set_usage is not None:
-        row.usage = change.set_usage
-    if change.set_info is not None:
-        row.info = change.set_info
-    if change.set_runtime is not None:
-        row.runtime = change.set_runtime
-    if change.set_extra is not None:
-        row.extra = change.set_extra
-
-
-def _apply_side(row: ThreadRow, change: SideChange) -> None:
-    if change.set_runtime is not None:
-        row.runtime = change.set_runtime
-    if change.set_frontend is not None:
-        name, state = change.set_frontend
-        row.frontend[name] = state
-    if change.patch_frontend is not None:
-        name, patch = change.patch_frontend
-        row.frontend[name] = patched_frontend(row.frontend.get(name), patch)

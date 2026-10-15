@@ -720,6 +720,23 @@ async def check_op_id_shared_by_commit_and_side(store, _clock) -> None:
     )
 
 
+async def check_commit_receipt_carries_lease(store, _clock) -> None:
+    lease = await _claim(store)
+    receipt = await store.commit(
+        KEY, _change("op1", 0, lease, append_messages=_msgs("a"))
+    )
+    got = receipt.lease
+    _expect(
+        got is not None
+        and (got.owner, got.epoch) == (lease.owner, lease.epoch),
+        "квитанция commit несёт аренду после записи",
+    )
+    reset = await store.commit(
+        KEY, _change("op2", 1, lease, reset_history=True)
+    )
+    _expect(reset.lease is None, "после reset_history аренды в квитанции нет")
+
+
 async def check_side_receipt_has_no_lease(store, _clock: FakeClock) -> None:
     await _claim(store, owner="a")
     receipt = await store.append_side(KEY, SideChange(op_id="s"))
@@ -1007,6 +1024,7 @@ CHECKS: tuple[Callable[..., Awaitable[None]], ...] = (
     check_alias_collision,
     check_op_id_shared_by_commit_and_side,
     check_side_receipt_has_no_lease,
+    check_commit_receipt_carries_lease,
     check_set_info_replaces,
     check_updated_at_only_on_commit,
     check_stored_data_is_isolated,

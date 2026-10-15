@@ -1,16 +1,12 @@
-"""Тред, которым владеет durable-исполнитель (Temporal), закрыт для локального
-писателя — и на старом журнале (``owner_id``), и на аренде v2 без срока."""
+"""Тред, которым владеет durable-исполнитель (Temporal: бессрочная аренда v2,
+в ``control.json`` — ``owner_id``), закрыт для локального писателя и для
+чужого захвата; сам исполнитель пишет в него и сбоку (статус, трассы)."""
 
 import asyncio
 from datetime import timedelta
 
 import pytest
 from gc_core.thread_store import ThreadSession
-from gc_core.thread_store_durable import (
-    ThreadStoreOperation,
-    ThreadStoreOwnershipError,
-)
-from gc_core.thread_store_file_durable import DurableFileThreadStore
 from gc_core.thread_store_journal import durable_owner_id
 from gc_core.threads.errors import OwnershipError
 from gc_core.threads.file_store import FileThreadStore
@@ -19,19 +15,14 @@ from gc_core.threads.models import LeaseRequest, ThreadKey
 KEY = ThreadKey(system="cli", thread="t")
 
 
-def _owned_by_old_journal(tmp_path, owner="wf-1"):
-    DurableFileThreadStore(str(tmp_path)).commit_operation(
-        "cli",
-        "t",
-        ThreadStoreOperation(
-            "claim-1", "claim_owner", {"owner_id": owner}, generation=0
-        ),
-    )
+def _owned_by_executor(tmp_path, owner="wf-1"):
+    store = FileThreadStore(tmp_path)
+    return asyncio.run(store.claim(KEY, LeaseRequest(owner=owner))).lease
 
 
 def test_local_session_refuses_thread_owned_by_durable_executor(tmp_path):
-    _owned_by_old_journal(tmp_path)
-    with pytest.raises(ThreadStoreOwnershipError, match="durable executor"):
+    _owned_by_executor(tmp_path)
+    with pytest.raises(OwnershipError, match="durable executor"):
         asyncio.run(
             ThreadSession.afrom_config(
                 settings=None,
@@ -42,8 +33,8 @@ def test_local_session_refuses_thread_owned_by_durable_executor(tmp_path):
         )
 
 
-def test_v2_claim_refuses_old_durable_owner(tmp_path):
-    _owned_by_old_journal(tmp_path, owner="wf-1")
+def test_claim_refuses_thread_of_durable_executor(tmp_path):
+    _owned_by_executor(tmp_path, owner="wf-1")
     store = FileThreadStore(tmp_path)
     with pytest.raises(OwnershipError):
         asyncio.run(
@@ -53,15 +44,14 @@ def test_v2_claim_refuses_old_durable_owner(tmp_path):
     assert record.lease.owner == "wf-1"
 
 
-def test_untimed_v2_lease_is_visible_to_develop_writers(tmp_path):
-    store = FileThreadStore(tmp_path)
-    record = asyncio.run(store.claim(KEY, LeaseRequest(owner="wf-2")))
+def test_untimed_lease_is_visible_to_develop_writers(tmp_path):
+    lease = _owned_by_executor(tmp_path, owner="wf-2")
     assert durable_owner_id(str(tmp_path), "cli", "t") == "wf-2"
-    asyncio.run(store.release(KEY, record.lease))
+    asyncio.run(FileThreadStore(tmp_path).release(KEY, lease))
     assert durable_owner_id(str(tmp_path), "cli", "t") is None
 
 
-def test_timed_v2_lease_does_not_lock_out_develop_writers(tmp_path):
+def test_timed_lease_does_not_lock_out_develop_writers(tmp_path):
     store = FileThreadStore(tmp_path)
     asyncio.run(
         store.claim(KEY, LeaseRequest(owner="host", ttl=timedelta(60)))
@@ -69,28 +59,28 @@ def test_timed_v2_lease_does_not_lock_out_develop_writers(tmp_path):
     assert durable_owner_id(str(tmp_path), "cli", "t") is None
 
 
-def test_v2_delete_refuses_thread_of_durable_executor(tmp_path):
-    _owned_by_old_journal(tmp_path, owner="wf-1")
+def test_delete_refuses_thread_of_durable_executor(tmp_path):
+    _owned_by_executor(tmp_path, owner="wf-1")
     (tmp_path / "data_cli_t.jsonl").write_text("", encoding="utf-8")
     store = FileThreadStore(tmp_path)
     with pytest.raises(OwnershipError):
         asyncio.run(store.delete(KEY, op_id="janitor"))
 
 
-def test_v2_side_writes_to_durable_thread_allow_only_frontend_state(tmp_path):
+def test_executor_writes_status_and_traces_beside_its_turn(tmp_path):
+    """``append_side`` владельца не несёт: статус хода и трассу субагентов
+    на своём треде пишет сам исполнитель — запись проходит."""
     from gc_core.threads.models import RuntimeStatus, SideChange
 
-    _owned_by_old_journal(tmp_path, owner="wf-1")
+    _owned_by_executor(tmp_path, owner="wf-1")
     store = FileThreadStore(tmp_path)
-    asyncio.run(
-        store.append_side(
-            KEY, SideChange(op_id="tui", patch_frontend=("tui", {"x": 1}))
-        )
-    )
     for change in (
+        SideChange(op_id="tui", patch_frontend=("tui", {"x": 1})),
         SideChange(op_id="rt", set_runtime=RuntimeStatus(turn="running")),
         SideChange(op_id="tr", append=[("subagent_events", [{"k": 1}])]),
         SideChange(op_id="al", add_aliases=["resp_1"]),
     ):
-        with pytest.raises(OwnershipError):
-            asyncio.run(store.append_side(KEY, change))
+        asyncio.run(store.append_side(KEY, change))
+    record = asyncio.run(store.get_thread(KEY))
+    assert record.runtime.turn == "running"
+    assert asyncio.run(store.resolve_alias("resp_1")) == KEY

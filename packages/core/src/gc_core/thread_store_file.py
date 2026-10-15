@@ -74,10 +74,10 @@ class FileThreadStore(ThreadStoreBase):
     def _call(self, helper, *args, **kwargs):
         """Единая точка вызова файловых функций.
 
-        Чтение — прямой вызов. Запись в тред, который знает журнал durable
-        хранилища, — под его блокировкой (``local_write_scope``).
-        ``DurableFileThreadStore`` переопределяет её, чтобы провести те же
-        функции через журнал.
+        Чтение — прямой вызов. Запись в тред, у которого есть служебный
+        каталог ``.store/`` (его ведёт ``FileThreadStore`` v2), — под той же
+        блокировкой (``local_write_scope``); тред durable-исполнителя
+        (бессрочная аренда) — отказ.
         """
         if helper.__name__ not in _WRITE_HELPERS:
             return helper(*args, **kwargs)

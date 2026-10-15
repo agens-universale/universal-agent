@@ -44,7 +44,7 @@ import asyncio
 from datetime import timedelta
 
 from gc_core.config import load_settings
-from gc_core.thread_store_file_durable import DurableFileThreadStore
+from gc_core.threads.file_store import FileThreadStore
 from gc_core_temporalio import AgentPlugin
 from temporalio.client import Client
 from temporalio.common import RetryPolicy
@@ -57,7 +57,7 @@ async def main():
         agents={
             "shop": load_settings("shop.yaml")
         },  # те же настройки, что у AsyncAgent
-        thread_store=DurableFileThreadStore("/var/ua/threads"),
+        thread_store=FileThreadStore("/var/ua/threads", durability="fsync"),
         model_activity=ActivityConfig(
             start_to_close_timeout=timedelta(minutes=10),
             retry_policy=RetryPolicy(maximum_interval=timedelta(minutes=1)),
@@ -103,7 +103,7 @@ activities агента и песочницу кода workflow. Всё, что 
 | Параметр | Что это |
 |---|---|
 | `agents` | Имя агента → его настройки: `LoadedSettings` (из `load_settings`, вместе с рантаймом), `AppConfig` или `AgentProfile`. Имя — то, что приложение передаёт как `agent=`; у живых сессий его не меняют |
-| `thread_store` | Хранилище тредов **объектом**: `DurableFileThreadStore`, `SQLiteThreadStore` (`gc_core_temporalio.storage.sqlite`) или своё (см. [хранилища](#хранилища-тредов)) |
+| `thread_store` | Хранилище тредов контракта v2 **объектом**: `FileThreadStore` (`gc_core.threads.file_store`), `SQLiteThreadStore` (`gc_stores.sqlite`), `PostgresThreadStore` (`gc_stores.postgres`) или своё (см. [хранилища](#хранилища-тредов)) |
 | `thread_stores` | Несколько хранилищ по именам (`store_id` у приложения) |
 | `workspace` | Рабочий каталог агентов; по умолчанию cwd. Воркер должен быть запущен в нём |
 | `activity`, `model_activity`, `resource_activity`, `thread_store_activity` | `temporalio.workflow.ActivityConfig` по уровням (см. [таймауты и повторы](#таймауты-и-повторы)) |
@@ -593,18 +593,36 @@ Worker(
 ## Хранилища тредов
 
 Диалог агента живёт в хранилище тредов, история Temporal — только шаги ходов
-(удаляется по retention namespace). Своей базы у воркера нет.
+(удаляется по retention namespace). Своей базы у воркера нет. Хранилище —
+любое контракта v2 (`gc_core.threads.store.ThreadStore`, то же, что у
+`AsyncAgent` локально): код workflow говорит с ним через activities
+`universal_agent.thread.*`, ядро пишет тред так же, как локально.
 
-- `DurableFileThreadStore` — файлы треда плюс служебный каталог `.store/`
-  (квитанции операций, журнал прерванной записи, владелец).
-- `SQLiteThreadStore` (`gc_core_temporalio.storage.sqlite`) — один файл базы,
-  права 0600.
-- **Своё** (S3, Postgres…) — реализация durable-контракта ядра: чтение снимка и
-  идемпотентная запись операции по ID. Проверка — набор
-  `gc_testkit.durable_thread_store_conformance`. Своё хранилище **обязано**
-  объявить метод `protected_paths()` — пути своих данных на диске воркера
-  (агент не сможет их читать и править) или `[]`, если на диске ничего нет;
-  без него воркер не стартует.
+- `FileThreadStore` (`gc_core.threads.file_store`) — файлы треда в прежнем
+  формате плюс служебный каталог `.store/`; для воркера —
+  `durability="fsync"` (так его создаёт `gc-temporal-worker` из JSON).
+- `SQLiteThreadStore` (`gc_stores.sqlite`) — один файл базы; картинки и медиа
+  треда — в той же базе.
+- `PostgresThreadStore` (`gc_stores.postgres`, extra `gc-stores[postgres]`) —
+  несколько воркеров на одной базе.
+- **Своё** (S3, Redis…) — реализация контракта v2, проверка —
+  `gc_testkit.thread_store_conformance_v2.assert_conforms`. Своё хранилище
+  **обязано** объявить метод `protected_paths()` — пути своих данных на диске
+  воркера (агент не сможет их читать и править) или `[]`, если на диске ничего
+  нет; без него воркер не стартует.
+
+**Владелец треда** — workflow сессии: в начале сессии он берёт аренду
+`claim(LeaseRequest(owner=<workflow id>, ttl=None))`, бессрочно; она
+переживает Continue-As-New, её получают субагенты, снимается она при закрытии
+или сбое сессии. Тред с такой арендой не пишет локальный TUI/CLI и не удаляет
+уборщик. Сессию, которая упала или снята (terminate), не дождавшись уборки,
+следующая сессия того же треда сменяет сама (workflow старого владельца уже не
+RUNNING); снять вручную — `gc-temporal unlock`.
+
+**Повтор записи.** Запись — `commit` контракта с `op_id` из детерминированного
+генератора workflow: повтор activity после записи (воркер упал до ответа)
+хранилище узнаёт по `op_id` и отвечает прежней квитанцией, история не
+задваивается.
 
 ## Хранилище агента
 
@@ -630,19 +648,16 @@ Temporal ограничивает запись истории 2 МБ, истор
   шаги хода в тред и повторяет запрос, где всё записанное снова идёт
   ссылками, — тред любого размера не уходит одной записью.
 - При `persist: turn` шаги хода пишутся в тред частями по 400 КБ.
-- Meta треда (журнал намерений и прочее) идёт так же, как сообщения: запись
-  несёт только изменённые ключи и новые записи журнала, длинные тексты —
-  ссылкой на сообщение или на уже записанную строку meta; квитанция — без
-  meta; чтение — частями, если meta больше половины страницы (и не второй
-  раз, если версия у workflow уже есть; версия — ревизия и хэш содержимого:
-  правка `tui` из TUI ревизию не поднимает). Порядок ключей не важен. Воркер
-  сверяет собранную meta по хэшу; не сошлось (чужая правка meta, повтор после
-  записи) — запись повторяется с полной meta, где записи журнала, разделы и
-  тексты идут ссылками по содержимому текущей meta хранилища (не помещается —
-  конфликт ревизии, ядро перечитает и повторит). Кэш `fetch_url` локального
-  режима при этом не стирается. Хранилище получает полную meta,
-  журнал не урезается — тред, который вёл локальный режим, продолжается под
-  Temporal и обратно без потерь.
+- Состояние сессии (журнал намерений, рабочая память и прочее) в записи идёт
+  разницей к состоянию на ожидаемой ревизии; воркер собирает его из записи
+  хранилища и сверяет по хэшу. Не сошлось (повтор после записи, чужая запись)
+  — запись повторяется с состоянием целиком, и хранилище узнаёт повтор по
+  `op_id` или отвечает конфликтом ревизии. Запись треда, которую workflow уже
+  видел, приходит разницей к ней (после своей записи — признаком «не
+  изменилась»), большой ответ — кусками по 400 КБ. Кэш `fetch_url`
+  локального режима при этом не стирается и в историю не идёт. Хранилище
+  получает полное состояние, журнал не урезается — тред, который вёл
+  локальный режим, продолжается под Temporal и обратно без потерь.
 - Служебный запрос к модели (сводка при лимите шагов) больше записи истории
   укорачивается посередине с пометкой — ход не отказывает.
 - Трасса сжатия контекста (отладочный журнал) уходит частями меньше 256 КБ.
@@ -702,7 +717,8 @@ Temporal ограничивает запись истории 2 МБ, истор
 | `universal_agent.model.request` | запрос к модели |
 | `universal_agent.tool.execute` | эффект инструмента (одна попытка) |
 | `universal_agent.guard.probe` | факты для guard'ов (файлы, пути) |
-| `universal_agent.thread.load` / `commit` / `read_trace` | чтение и запись треда |
+| `universal_agent.thread.get` / `read_stream` / `read_archive` / `resolve_alias` | чтение треда (запись, потоки, архивы, алиасы) |
+| `universal_agent.thread.commit` / `append_side` / `claim` / `release` / `delete` | запись треда и аренда (контракт `ThreadStore` v2) |
 | `universal_agent.state.prepare`, `universal_agent.prompts.prepare`, `universal_agent.prompt.read`, `universal_agent.skills.list` | подготовка хода |
 | `universal_agent.memory.execute` / `hash` | память проекта |
 | `universal_agent.subagent.prepare` | контекст субагента (дочерний workflow `UniversalSubagentWorkflow`) |

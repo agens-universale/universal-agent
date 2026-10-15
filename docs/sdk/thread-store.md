@@ -18,8 +18,8 @@ AGENTS.md, скиллы и субагенты — общее для всех т�
 |---|---|---|
 | `FileThreadStore` | `gc_core.thread_store_file` | по умолчанию в SDK, CLI, TUI, сервере: файлы `data_*.jsonl` и `meta_*.json` в `paths.threads_data_path` |
 | `MemoryThreadStore` | `gc_testkit.memory_thread_store` | тесты; образец своего хранилища |
-| `DurableFileThreadStore` | `gc_core.thread_store_file_durable` | Temporal: те же файлы плюс служебный каталог `.store/` |
-| `SQLiteThreadStore` | `gc_core_temporalio.storage.sqlite` | Temporal: один файл базы |
+| `FileThreadStore` v2 | `gc_core.threads.file_store` | контракт v2 (`ThreadStore`): те же файлы плюс служебный каталог `.store/`; под Temporal — `durability="fsync"` |
+| `SQLiteThreadStore` | `gc_stores.sqlite` | контракт v2: один файл базы, файлы треда в ней же |
 | `PostgresThreadStore` | `gc_stores.postgres` (дистрибутив `gc-stores[postgres]`) | несколько инстансов на одной базе: контракт v2 (`gc_core.threads.store.ThreadStore`), см. «Postgres» ниже |
 | своё | ваш код | база, S3, Redis — по контракту ниже |
 
@@ -99,36 +99,27 @@ def test_my_store():
 
 ## Своё хранилище для Temporal
 
-К обычному контракту добавляются два метода:
-
-- `read_snapshot(system_id, thread_id, *, include_state=True)` — снимок треда:
-  meta, сообщения, ревизия, поколение, владелец;
-- `commit_operation(system_id, thread_id, operation)` — атомарно применить
-  операцию записи и вернуть квитанцию.
-
-У каждой операции есть ID. Хранилище запоминает её результат (**квитанцию**):
-если воркер упал после записи, но до ответа Temporal, activity повторится с
-тем же ID, и хранилище вернёт исходную квитанцию, а не запишет сообщения второй
-раз. Ещё хранилище проверяет ревизию (чужая запись между чтением и записью —
-`ThreadStoreConflict`, ядро перечитает тред и повторит) и владельца треда (одна
-сессия пишет тред, другие получают отказ).
+Под Temporal работает любое хранилище контракта v2
+(`gc_core.threads.store.ThreadStore`): `FileThreadStore` v2, `SQLiteThreadStore`,
+`PostgresThreadStore` или своё. Идемпотентность записи — часть контракта:
+`commit` с тем же `op_id` и тем же содержимым возвращает прежнюю квитанцию
+(воркер упал после записи, activity повторилась), чужая запись между чтением и
+записью — `ThreadConflict`, запись не по своей аренде — `OwnershipError`.
+Владелец треда — workflow сессии (аренда без срока).
 
 Обязательно объявите `protected_paths()` — пути данных хранилища на диске
 воркера, к которым агенту нельзя прикасаться, или `[]`, если на диске ничего
-нет. Без него воркер не стартует.
-
-Квитанции нужны только на время повторов activity. Метод
-`prune_receipts(*, max_age_seconds)` даёт обслуживанию воркера удалять старые
-(старше 7 дней); без него квитанции копятся.
+нет. Без него воркер не стартует. Квитанции старше 7 дней обслуживание воркера
+удаляет `prune_receipts(older_than)`.
 
 Проверка:
 
 ```python
-from gc_testkit.durable_thread_store_conformance import assert_durable_conforms
+from gc_testkit.thread_store_conformance_v2 import assert_conforms
 
 
-def test_my_durable_store():
-    assert_durable_conforms(lambda: S3ThreadStore(bucket, prefix))
+def test_my_store():
+    assert_conforms(lambda clock: S3ThreadStore(bucket, prefix, clock=clock))
 ```
 
 ## Postgres: несколько инстансов на одной базе
@@ -205,11 +196,11 @@ await store.close()              # или `async with PostgresThreadStore(...)`
 | Файл | Что |
 |---|---|
 | `gc_core/thread_store_base.py` | `ThreadStoreBase`, `AsyncThreadStoreBase` — контракт |
-| `gc_core/thread_store_durable.py` | снимок, операция, квитанция, ошибки durable-контракта |
+| `gc_core/threads/store.py`, `models.py` | `ThreadStore` — контракт v2 и его модели |
 | `gc_core/thread_store_file.py` | `FileThreadStore` |
-| `gc_core/thread_store_file_durable.py` | `DurableFileThreadStore` |
+| `gc_core/threads/file_store.py` | `FileThreadStore` v2 |
 | `gc_core/thread_files.py` | файлы треда, ссылки `thread-file://` |
-| `gc_core_temporalio/storage/sqlite.py` | `SQLiteThreadStore` |
+| `gc_stores/sqlite/store.py`, `schema.sql` | `SQLiteThreadStore` и его таблицы |
 | `gc_stores/postgres/store.py`, `schema.sql` | `PostgresThreadStore` и его таблицы |
 | `gc_testkit/memory_thread_store.py` | `MemoryThreadStore` |
-| `gc_testkit/thread_store_conformance.py`, `durable_thread_store_conformance.py` | проверки своей реализации |
+| `gc_testkit/thread_store_conformance.py`, `thread_store_conformance_v2.py` | проверки своей реализации (старый контракт и v2) |

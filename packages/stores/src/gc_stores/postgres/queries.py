@@ -8,39 +8,7 @@ from __future__ import annotations
 
 import re
 
-#: Колонки строки треда после ключа ``(system, thread_id)`` — в этом порядке
-#: их отдаёт ``ThreadRow.values()``.
-THREAD_COLUMNS: tuple[str, ...] = (
-    "workspace",
-    "info",
-    "state",
-    "usage",
-    "runtime",
-    "frontend",
-    "archives",
-    "extra",
-    "max_seq",
-    "messages_count",
-    "revision",
-    "generation",
-    "history_version",
-    "lease_owner",
-    "lease_epoch",
-    "lease_expires_at",
-    "created_at",
-    "updated_at",
-)
-
-#: Таблицы схемы (``schema.sql``): все на месте — DDL не нужен.
-TABLES: tuple[str, ...] = (
-    "gc_threads",
-    "gc_stream_entries",
-    "gc_archives",
-    "gc_blobs",
-    "gc_aliases",
-    "gc_receipts",
-    "gc_tombstones",
-)
+from gc_stores.rows import THREAD_COLUMNS
 
 _SCHEMA_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,62}")
 _BY_THREAD = "system = $1 AND thread_id = $2"

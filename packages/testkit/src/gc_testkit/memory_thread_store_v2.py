@@ -307,7 +307,11 @@ class MemoryThreadStore(ThreadStore):
         thread.revision += 1
         thread.updated_at = self._now()
         receipt = self._receipt(
-            key, thread, change.op_id, archive_id=archive_id
+            key,
+            thread,
+            change.op_id,
+            archive_id=archive_id,
+            lease=thread.lease,
         )
         return self._remember(key, change, receipt)
 

@@ -1,14 +1,13 @@
-"""Workflow transport for the native store's async facade."""
+"""Транспорт прокси хранилища тредов: вызов activity из кода workflow."""
 
 import asyncio
 import dataclasses
 
 from gc_core.execution.contracts import ExecutionFailure, InfrastructureFailure
-from gc_core.thread_store_durable import (
-    ThreadStoreConflict,
-    ThreadStoreOperationMismatch,
-    ThreadStoreOwnershipError,
-    ThreadStoreRecoveryError,
+from gc_core.threads.errors import (
+    OperationMismatch,
+    OwnershipError,
+    ThreadConflict,
 )
 from temporalio import workflow
 from temporalio.exceptions import (
@@ -23,20 +22,25 @@ from gc_core_temporalio.activity_config import (
 )
 from gc_core_temporalio.sizes import HistoryLimitExceeded, check_history_size
 from gc_core_temporalio.thread_store_contracts import (
-    MetaBaseMismatch,
-    ThreadStoreReply,
+    BaseMismatch,
+    ThreadChanged,
+    ThreadReply,
 )
 
+#: Отказы activity, которые доходят до ядра своим типом: отказы контракта
+#: хранилища (``SessionPort`` повторяет запись на конфликте), провода
+#: (база разницы, ответ менялся) и хода.
 _STORE_ERRORS = {
     cls.__name__: cls
     for cls in (
         ExecutionFailure,
         HistoryLimitExceeded,
-        MetaBaseMismatch,
-        ThreadStoreConflict,
-        ThreadStoreOwnershipError,
-        ThreadStoreOperationMismatch,
-        ThreadStoreRecoveryError,
+        ThreadConflict,
+        OwnershipError,
+        OperationMismatch,
+        BaseMismatch,
+        ThreadChanged,
+        ValueError,
     )
 }
 
@@ -47,16 +51,16 @@ class ThreadStoreTransport:
         #: Уровень ``activities.thread_store`` (данные с воркера).
         self.settings = settings or DEFAULT_ACTIVITY_SETTINGS["thread_store"]
 
-    async def __call__(self, name, request):
+    async def __call__(self, name, call):
         # Больше записи истории — сервер отвергнет команду, и задача
         # workflow падала бы бесконечно: отказ хода с причиной и размером.
-        check_history_size(f"Вход {name}", dataclasses.asdict(request))
+        check_history_size(f"Вход {name}", dataclasses.asdict(call))
         try:
             return await workflow.execute_activity(
                 name,
-                request,
-                result_type=ThreadStoreReply,
-                summary=f"Thread store: {request.operation.kind if request.operation else name.rsplit('.', 1)[-1]}",
+                call,
+                result_type=ThreadReply,
+                summary=f"Thread store: {name.rsplit('.', 1)[-1]}",
                 task_queue=self.task_queue,
                 cancellation_type=workflow.ActivityCancellationType.WAIT_CANCELLATION_COMPLETED,
                 **activity_options(self.settings),

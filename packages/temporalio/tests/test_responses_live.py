@@ -189,7 +189,7 @@ async def test_responses_two_turns_exact_parity_and_cache_recovery(
                 message_ids=[f"input-{turn}"],
             )
         assert not script
-        local = snapshot(answer, requests, local_store, workspace)
+        local = await snapshot(answer, requests, local_store, workspace)
     finally:
         release_run_logger(ctx.logger)
     requests.clear()
@@ -233,7 +233,7 @@ async def test_responses_two_turns_exact_parity_and_cache_recovery(
                 assert not requests[3].get("previous_response_id")
                 assert "Task 0" in str(requests[3]["input"])
                 assert "Task 1" in str(requests[3]["input"])
-            actual = snapshot(
+            actual = await snapshot(
                 result["answer"], requests, contexts.stores["files"], workspace
             )
             (tmp_path / "local-trace.json").write_text(

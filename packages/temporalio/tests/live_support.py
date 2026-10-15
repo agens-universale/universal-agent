@@ -186,3 +186,50 @@ def worker_kwargs(config, native, threads, *, queue=None):
     if deployment is not None:
         options["deployment_config"] = deployment
     return options
+
+
+async def thread_messages(store, system, thread):
+    """История треда хранилища v2 (данные записей потока ``messages``)."""
+    from gc_core.threads.models import ThreadKey
+
+    key = ThreadKey(system=system, thread=thread)
+    return [entry.data for entry in await store.read_stream(key, "messages")]
+
+
+async def thread_meta(store, system, thread):
+    """Meta треда в прежней форме (``meta_from_record``) или ``{}``."""
+    from gc_core.threads.meta_map import meta_from_record
+    from gc_core.threads.models import ThreadKey
+
+    record = await store.get_thread(ThreadKey(system=system, thread=thread))
+    return {} if record is None else meta_from_record(record)
+
+
+async def thread_owner(store, system, thread):
+    """Владелец аренды треда (workflow сессии) или ``None``."""
+    from gc_core.threads.models import ThreadKey
+
+    record = await store.get_thread(ThreadKey(system=system, thread=thread))
+    lease = record.lease if record is not None else None
+    return None if lease is None else lease.owner
+
+
+async def seed_messages(store, system, thread, messages):
+    """Засеять историю треда (как будто её вёл локальный режим) и отпустить
+    аренду: сессия Temporal возьмёт тред без захвата."""
+    from gc_core.threads.models import ThreadKey
+    from gc_core.threads.session_port import SessionPort
+
+    port = SessionPort(store, owner="seed")
+    await port.aappend_messages(system, thread, list(messages))
+    key = ThreadKey(system=system, thread=thread)
+    record = await store.get_thread(key)
+    if record is not None and record.lease is not None:
+        await store.release(key, record.lease)
+
+
+async def thread_trace(store, system, thread):
+    """Трасса субагентов треда в прежней форме записей (порт сессии)."""
+    from gc_core.thread_store_async import athread_store
+
+    return await athread_store(store).aread_subagent_trace(system, thread)

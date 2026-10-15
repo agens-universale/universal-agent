@@ -1,23 +1,31 @@
-"""The native async store contract survives the actual Temporal wire codec."""
+"""Провод хранилища тредов v2 (прокси workflow ↔ activities воркера) через
+настоящий конвертер Temporal: ядро видит то же хранилище, что локально, а
+история растёт разницами, а не полным состоянием."""
 
 from copy import deepcopy
 
 import pytest
-from gc_core.execution.contracts import ExecutionFailure
 from gc_core.thread_store import ThreadSession
-from gc_core.thread_store_durable import ThreadStoreConflict
-from gc_core.thread_store_file_durable import DurableFileThreadStore
-from gc_testkit.memory_thread_store import MemoryThreadStore
+from gc_core.threads.errors import OwnershipError
+from gc_core.threads.file_store import FileThreadStore
+from gc_core.threads.models import LeaseRequest, SessionState, ThreadKey
+from gc_testkit.memory_thread_store_v2 import MemoryThreadStore
+from gc_testkit.settings import make_settings
 from gc_testkit.thread_store_conformance import assert_conforms_async
+from gc_core_temporalio import thread_store_activities
 from gc_core_temporalio.thread_store_activities import ThreadStoreActivities
 from gc_core_temporalio.thread_store_contracts import (
-    ThreadStoreCall,
-    ThreadStoreReply,
+    PAGE_BYTES,
+    ThreadCall,
+    ThreadReply,
 )
 from gc_core_temporalio.thread_store_proxy import TemporalThreadStore
 from gc_core_temporalio.thread_store_transport import _STORE_ERRORS
+from temporalio.activity import _Definition
 from temporalio.converter import DataConverter
 from temporalio.exceptions import ApplicationError
+
+KEY = ThreadKey(system="cli", thread="t")
 
 
 async def wire(value, result_type):
@@ -26,327 +34,239 @@ async def wire(value, result_type):
     return (await converter.decode(payloads, [result_type]))[0]
 
 
-def proxy_for(store):
-    activities = ThreadStoreActivities({"files": store})
-    methods = {
-        "universal_agent.thread.load": activities.load,
-        "universal_agent.thread.commit": activities.commit,
-        "universal_agent.thread.read_trace": activities.read_trace,
-    }
-    requests = []
+class Wire:
+    """Транспорт прокси: вызов activity через конвертер, учёт вызовов."""
 
-    async def call(name, request):
-        decoded = await wire(request, ThreadStoreCall)
-        requests.append((name, deepcopy(decoded)))
+    def __init__(self, store):
+        self.activities = ThreadStoreActivities({"main": store})
+        self.methods = {
+            _Definition.must_from_callable(method).name: method
+            for method in self.activities.registered
+        }
+        self.calls: list[tuple[str, ThreadCall]] = []
+        self.replies: list[tuple[str, ThreadReply]] = []
+        #: Имя операции → сколько ещё раз её «повторить после записи».
+        self.lose_reply: dict[str, int] = {}
+
+    async def __call__(self, name, call):
+        decoded = await wire(call, ThreadCall)
+        self.calls.append((name.rsplit(".", 1)[-1], deepcopy(decoded)))
         try:
-            result = await methods[name](decoded)
+            result = await self.methods[name](decoded)
+            if self.lose_reply.get(name.rsplit(".", 1)[-1]):
+                # Воркер записал и упал до ответа: Temporal повторит activity.
+                self.lose_reply[name.rsplit(".", 1)[-1]] -= 1
+                result = await self.methods[name](decoded)
         except ApplicationError as exc:
             raise _STORE_ERRORS[exc.type](exc.message) from exc
-        return await wire(result, ThreadStoreReply)
+        reply = await wire(result, ThreadReply)
+        self.replies.append((name.rsplit(".", 1)[-1], reply))
+        return reply
 
-    proxy = TemporalThreadStore(
-        "files",
-        call,
-        capabilities=("replace_messages", "archive_and_replace"),
-        threads_dir=store.threads_dir,
-    )
-    return proxy, requests
+    def ops(self) -> list[str]:
+        return [op for op, _call in self.calls]
 
 
-def test_native_proxy_keeps_existing_async_store_contract(tmp_path):
-    counter = 0
+def proxy_for(store, owner="wf"):
+    transport = Wire(store)
+    return TemporalThreadStore("main", transport, owner=owner), transport
 
+
+def test_session_port_over_the_wire_keeps_old_contract():
     def factory():
-        nonlocal counter
-        counter += 1
-        return proxy_for(DurableFileThreadStore(str(tmp_path / str(counter))))[
-            0
-        ]
+        return proxy_for(MemoryThreadStore())[0].port
 
-    assert_conforms_async(factory)
+    assert len(assert_conforms_async(factory)) == 18
 
 
-@pytest.mark.asyncio
-async def test_real_session_commits_history_and_meta_in_one_call(tmp_path):
-    store = DurableFileThreadStore(str(tmp_path))
-    proxy, requests = proxy_for(store)
-    session = await ThreadSession.afrom_config(
-        settings=None, system_id="cli", thread_id="native", store=proxy
-    )
-    message = {"id": "u1", "role": "user", "content": "Сохрани результат"}
-    requests.clear()
-    await session.apersist_batch([message], previous_response_id="r1")
-    assert [name for name, _ in requests] == ["universal_agent.thread.commit"]
-    assert requests[0][1].operation.kind == "persist"
-    assert store.load_messages("cli", "native") == [message]
-    assert store.load_meta("cli", "native")["messages_count"] == 1
-    assert session.persisted_messages_count == 1
-    await session.apersist_batch([message], previous_response_id="r1")
-    assert session.persisted_messages_count == 1
-    assert session.history_messages == [message]
-
-
-@pytest.mark.asyncio
-async def test_session_recomputes_after_ui_patch_without_losing_fields(
-    tmp_path,
-):
-    from gc_core.thread_store import update_tui_meta
-
-    store = DurableFileThreadStore(str(tmp_path))
-    proxy, requests = proxy_for(store)
-    session = await ThreadSession.afrom_config(
-        settings=None, system_id="cli", thread_id="native", store=proxy
-    )
-    store._call(
-        update_tui_meta, str(tmp_path), "cli", "native", {"title": "Название"}
-    )
-    session.meta["shared"] = {"working_memory": {"knowledge": "Факт"}}
-    await session.apersist_batch(
-        [{"id": "u1", "role": "user", "content": "Задача"}],
-        previous_response_id=None,
-    )
-    saved = store.load_meta("cli", "native")
-    assert saved["tui"]["title"] == "Название"
-    assert saved["shared"]["working_memory"]["knowledge"] == "Факт"
-    commits = [r.operation for name, r in requests if name.endswith("commit")]
-    assert len(commits) == 2
-    assert commits[0].operation_id != commits[1].operation_id
-
-
-@pytest.mark.asyncio
-async def test_failed_commit_does_not_advance_session(tmp_path, monkeypatch):
-    store = DurableFileThreadStore(str(tmp_path))
-    proxy, _ = proxy_for(store)
-    session = await ThreadSession.afrom_config(
-        settings=None, system_id="cli", thread_id="native", store=proxy
-    )
-    before = deepcopy(
-        (session.meta, session.history_messages, session.known_message_keys)
+async def _session(proxy):
+    return await ThreadSession.afrom_config(
+        settings=make_settings({}),
+        system_id=KEY.system,
+        thread_id=KEY.thread,
+        store=proxy,
     )
 
-    async def fail(*_args, **_kwargs):
-        raise ExecutionFailure("storage unavailable")
 
-    monkeypatch.setattr(proxy, "acommit_operation", fail)
-    with pytest.raises(ExecutionFailure, match="storage unavailable"):
-        await session.apersist_batch(
-            [{"id": "u1", "role": "user", "content": "Задача"}],
-            previous_response_id="not-saved",
-        )
-    assert (
-        session.meta,
-        session.history_messages,
-        session.known_message_keys,
-    ) == before
-    assert session.previous_response_id is None
-    assert session.persisted_messages_count == 0
-    assert session.known_keys_snapshot_before_last_batch is None
+def _message(n, content=None):
+    return {"id": f"m{n}", "role": "user", "content": content or f"step {n}"}
 
 
-@pytest.mark.asyncio
-async def test_concurrent_history_writer_is_not_silently_adopted(tmp_path):
-    store = DurableFileThreadStore(str(tmp_path))
-    proxy, _ = proxy_for(store)
-    session = await ThreadSession.afrom_config(
-        settings=None, system_id="cli", thread_id="native", store=proxy
-    )
-    store.append_messages(
-        "cli", "native", [{"id": "other", "role": "user", "content": "Чужой"}]
-    )
-    with pytest.raises(ThreadStoreConflict, match="history changed"):
-        await session.apersist_batch(
-            [{"id": "mine", "role": "user", "content": "Мой"}],
-            previous_response_id=None,
-        )
-    assert session.history_messages == []
-    assert len(store.load_messages("cli", "native")) == 1
-
-
-@pytest.mark.asyncio
-async def test_compaction_uses_native_session_and_one_commit(tmp_path):
-    store = DurableFileThreadStore(str(tmp_path))
-    proxy, requests = proxy_for(store)
-    session = await ThreadSession.afrom_config(
-        settings=None, system_id="cli", thread_id="native", store=proxy
-    )
-    await session.apersist_batch(
-        [{"id": "u1", "role": "user", "content": "Длинная история"}],
-        previous_response_id="r1",
-    )
-    requests.clear()
-    result = await session.aarchive_and_compact_summary_payload(
-        {"summary_message_content": "Краткая сводка", "dialog_steps_offset": 4}
-    )
-    assert [name for name, _ in requests] == ["universal_agent.thread.commit"]
-    assert requests[0][1].operation.kind == "compact"
-    assert result["archive_data_path"]
-    assert store.load_messages("cli", "native") == session.history_messages
-    assert session.meta["dialog_steps_offset"] == 4
-    assert session.previous_response_id is None
-
-
-def test_durable_worker_refuses_legacy_store_without_breaking_local_support():
-    with pytest.raises(ValueError, match="durable snapshot/commit"):
-        ThreadStoreActivities({"legacy": MemoryThreadStore()})
-
-
-def test_proxy_does_not_invent_optional_backend_capabilities():
-    proxy = TemporalThreadStore("custom", None)
-    assert proxy.areplace_messages is None
-    assert proxy.aarchive_and_replace is None
-    assert not hasattr(proxy, "replace_messages")
-
-
-@pytest.mark.parametrize("compact", [False, True])
-async def test_own_metadata_ack_avoids_conflict_and_keeps_pending_meta(
-    tmp_path, compact
-):
-    store = DurableFileThreadStore(str(tmp_path))
-    proxy, requests = proxy_for(store)
-    session = await ThreadSession.afrom_config(
-        settings=None, system_id="cli", thread_id="native", store=proxy
-    )
-    message = {"id": "u1", "role": "user", "content": "Task"}
-    await session.apersist_batch([message], previous_response_id="r1")
-    revision = session._store_snapshot.revision
-    await proxy.apatch_runtime_flag("cli", "native", "finalizing", active=True)
-    await proxy.aupdate_runtime_meta("cli", "native", {"worker_note": "own"})
-    ack = proxy.metadata_ack_since("cli", "native", revision)
-    assert ack.revision == revision + 2
-    assert proxy.metadata_ack_since("cli", "other", revision) is None
-    session.meta["shared"] = {"working_memory": {"knowledge": "pending"}}
-    pending = deepcopy(session.meta)
-    session._accept_metadata_ack()
-    assert session.meta == pending
-    assert session._store_snapshot.revision == revision + 2
-    requests.clear()
-    if compact:
-        await session.aarchive_and_compact_summary_payload(
-            {"summary_message_content": "Summary", "dialog_steps_offset": 2}
-        )
-    else:
-        await session.apersist_batch([message], previous_response_id="r2")
-    assert [name for name, _ in requests] == ["universal_agent.thread.commit"]
-    saved = store.load_meta("cli", "native")
-    assert saved["runtime"]["worker_note"] == "own"
-    assert saved["shared"]["working_memory"]["knowledge"] == "pending"
-
-
-@pytest.mark.parametrize("external_first", [False, True])
-async def test_external_metadata_is_not_covered_by_own_ack(
-    tmp_path, external_first
-):
-    from gc_core.thread_store import update_tui_meta
-
-    store = DurableFileThreadStore(str(tmp_path))
-    proxy, requests = proxy_for(store)
-    session = await ThreadSession.afrom_config(
-        settings=None, system_id="cli", thread_id="native", store=proxy
-    )
-    if external_first:
-        store._call(
-            update_tui_meta,
-            str(tmp_path),
-            "cli",
-            "native",
-            {"title": "external"},
-        )
-    await proxy.apatch_runtime_flag("cli", "native", "finalizing", active=True)
-    if not external_first:
-        store._call(
-            update_tui_meta,
-            str(tmp_path),
-            "cli",
-            "native",
-            {"title": "external"},
-        )
-    if external_first:
-        assert (
-            proxy.metadata_ack_since(
-                "cli", "native", session._store_snapshot.revision
-            )
-            is None
-        )
-    requests.clear()
-    await session.apersist_batch(
-        [{"id": "u1", "role": "user", "content": "Task"}],
-        previous_response_id=None,
-    )
-    assert [name for name, _ in requests] == [
-        "universal_agent.thread.commit",
-        "universal_agent.thread.load",
-        "universal_agent.thread.commit",
-    ]
-    assert store.load_meta("cli", "native")["tui"]["title"] == "external"
-
-
-@pytest.mark.parametrize("observe_read", [False, True])
-async def test_history_change_with_same_max_seq_cannot_be_acknowledged(
-    tmp_path, observe_read
-):
-    store = DurableFileThreadStore(str(tmp_path))
-    proxy, requests = proxy_for(store)
-    session = await ThreadSession.afrom_config(
-        settings=None, system_id="cli", thread_id="native", store=proxy
-    )
-    await session.apersist_batch(
-        [{"id": "original", "role": "user", "content": "Task"}],
-        previous_response_id=None,
-    )
-    revision = session._store_snapshot.revision
-    await proxy.apatch_runtime_flag("cli", "native", "finalizing", active=True)
-    changed = [{"id": "external", "role": "user", "content": "Different"}]
-    if observe_read:
-        store.replace_messages("cli", "native", changed)
-        await proxy.aload_meta("cli", "native")
-    else:
-        await proxy.areplace_messages("cli", "native", changed)
-    await proxy.aupdate_runtime_meta("cli", "native", {"worker_note": "own"})
-    assert proxy.metadata_ack_since("cli", "native", revision) is None
-    requests.clear()
-    with pytest.raises(ThreadStoreConflict, match="history changed"):
-        await session.apersist_batch([], previous_response_id=None)
-    assert [name for name, _ in requests] == [
-        "universal_agent.thread.commit",
-        "universal_agent.thread.load",
+async def test_a_step_is_one_commit_activity():
+    """Аренда взята в начале сессии: шаг — одна activity ``commit``."""
+    store = MemoryThreadStore()
+    proxy, transport = proxy_for(store)
+    await proxy.claim(KEY, LeaseRequest(owner="wf"))
+    session = await _session(proxy)
+    transport.calls.clear()
+    for n in range(3):
+        await session.apersist_batch([_message(n)], previous_response_id=None)
+    # Сессия перечитывает meta перед шагом (сливает чужие секции): после
+    # своей записи прокси знает запись треда, и ответ — «не изменилась».
+    assert transport.ops() == ["get", "commit"] * 3
+    gets = [reply for op, reply in transport.replies if op == "get"]
+    assert all(reply.unchanged for reply in gets[1:]), gets
+    assert [
+        e.data["id"] for e in await store.read_stream(KEY, "messages")
+    ] == [
+        "m0",
+        "m1",
+        "m2",
     ]
 
 
-@pytest.mark.parametrize(
-    "field,value",
-    [
-        ("generation", 10),
-        ("owner_id", "other"),
-        ("owner_epoch", 10),
-        ("max_seq", 10),
-        ("written", 1),
-        ("added_known_keys", ["unexpected"]),
-        ("kind", "persist"),
-        ("revision", 0),
-    ],
-)
-async def test_session_rejects_ack_with_changed_fence(
-    tmp_path, monkeypatch, field, value
-):
-    from gc_core.thread_store_durable import ThreadStoreReceipt
+async def test_state_goes_as_delta_and_full_after_lost_reply():
+    """Состояние — разницей к известному; повтор activity после записи (ответ
+    потерян) воркер не соберёт из разницы — прокси шлёт целиком, хранилище
+    узнаёт операцию по ``op_id``: та же квитанция, без дубля."""
+    from gc_core.threads.models import ThreadChange
 
-    proxy, _ = proxy_for(DurableFileThreadStore(str(tmp_path)))
-    session = await ThreadSession.afrom_config(
-        settings=None, system_id="cli", thread_id="native", store=proxy
+    store = MemoryThreadStore()
+    proxy, transport = proxy_for(store)
+    lease = (await proxy.claim(KEY, LeaseRequest(owner="wf"))).lease
+    big = "x" * 50_000
+    state = SessionState(working_memory={"k": big})
+    first = await proxy.commit(
+        KEY,
+        ThreadChange(
+            op_id="op1",
+            expected_revision=0,
+            lease=lease,
+            append_messages=[_message(0)],
+            set_state=state,
+        ),
     )
-    snapshot = session._store_snapshot
-    receipt = ThreadStoreReceipt(
-        "own",
-        "patch_runtime_flag",
-        "digest",
-        snapshot.revision + 1,
-        snapshot.generation,
-        max_seq=snapshot.max_seq,
-        owner_id=snapshot.owner_id,
-        owner_epoch=snapshot.owner_epoch,
-        meta={"runtime": {"own": True}},
+    transport.calls.clear()
+    transport.lose_reply["commit"] = 1
+    await proxy.commit(
+        KEY,
+        ThreadChange(
+            op_id="op2",
+            expected_revision=first.revision,
+            lease=lease,
+            append_messages=[_message(1)],
+            set_state=state.model_copy(update={"notes": "заметка"}),
+        ),
     )
-    setattr(receipt, field, value)
-    monkeypatch.setattr(proxy, "metadata_ack_since", lambda *_args: receipt)
-    session._accept_metadata_ack()
-    assert session._store_snapshot is snapshot
+    sent = [call.args for op, call in transport.calls if op == "commit"]
+    assert "delta" in sent[0]["state"], "первая попытка — разницей"
+    assert len(str(sent[0]["state"])) < len(big)
+    assert "full" in sent[1]["state"], "после потерянного ответа — целиком"
+    ids = [e.data["id"] for e in await store.read_stream(KEY, "messages")]
+    assert ids == ["m0", "m1"]
+    record = await store.get_thread(KEY)
+    assert record.state.notes == "заметка"
+    assert record.state.working_memory == {"k": big}
+
+
+async def test_long_history_is_read_in_chunks():
+    store = MemoryThreadStore()
+    lease = (await store.claim(KEY, LeaseRequest(owner="wf"))).lease
+    from gc_core.threads.models import ThreadChange
+
+    await store.commit(
+        KEY,
+        ThreadChange(
+            op_id="op",
+            expected_revision=0,
+            lease=lease,
+            append_messages=[_message(n, "ж" * 30_000) for n in range(40)],
+        ),
+    )
+    proxy, transport = proxy_for(store)
+    entries = await proxy.read_stream(KEY, "messages")
+    assert [e.data["id"] for e in entries] == [f"m{n}" for n in range(40)]
+    reads = [call for op, call in transport.calls if op == "read_stream"]
+    assert len(reads) > 1, "история больше страницы — несколько activities"
+    replies = [len(str(call.args)) for call in reads]
+    assert max(replies) < PAGE_BYTES
+
+
+async def test_known_record_comes_as_delta_or_unchanged():
+    store = MemoryThreadStore()
+    proxy, transport = proxy_for(store)
+    await proxy.claim(KEY, LeaseRequest(owner="wf"))
+    session = await _session(proxy)
+    await session.apersist_batch([_message(0)], previous_response_id=None)
+    first = await proxy.get_thread(KEY)
+    again = await proxy.get_thread(KEY)
+    assert again == first
+    await session.apersist_batch([_message(1)], previous_response_id=None)
+    newer = await proxy.get_thread(KEY)
+    assert newer.revision == first.revision + 1
+    # Чужая запись рядом с ходом (статус от фронтенда) — разница к известной.
+    from gc_core.threads.models import SideChange
+
+    await store.append_side(
+        KEY, SideChange(op_id="tui", patch_frontend=("tui", {"title": "t"}))
+    )
+    assert (await proxy.get_thread(KEY)).frontend["tui"] == {"title": "t"}
+    replies = [reply for op, reply in transport.replies if op == "get"]
+    assert any(r.unchanged for r in replies), "без изменений — признак"
+    assert replies[-1].delta is not None, "после чужой записи — разница"
+    assert replies[-1].chunk is None
+
+
+async def test_fetch_cache_stays_on_the_worker():
+    """Кэш ``fetch_url`` хранилища (его вёл локальный режим) не идёт в
+    историю и не стирается записью workflow с пустым кэшем."""
+    store = MemoryThreadStore()
+    lease = (await store.claim(KEY, LeaseRequest(owner="wf"))).lease
+    from gc_core.threads.models import ThreadChange
+
+    cache = {"https://example.org": {"text": "страница" * 1000}}
+    await store.commit(
+        KEY,
+        ThreadChange(
+            op_id="op",
+            expected_revision=0,
+            lease=lease,
+            set_state=SessionState(fetch_url_cache=cache),
+        ),
+    )
+    proxy, transport = proxy_for(store)
+    proxy.adopt(KEY, lease)
+    session = await _session(proxy)
+    assert session.meta.get("shared", {}).get("fetch_url_cache") in (None, {})
+    await session.apersist_batch([_message(0)], previous_response_id=None)
+    assert "страница" not in str([call.args for _op, call in transport.calls])
+    assert (await store.get_thread(KEY)).state.fetch_url_cache == cache
+
+
+async def test_history_keys_of_the_file_store_cross_the_wire(tmp_path):
+    """Дедуп сессии под Temporal — по ключам файлового хранилища, как
+    локально (у старых записей без id ключи есть и до синтеза id)."""
+    store = FileThreadStore(tmp_path)
+    proxy, _transport = proxy_for(store)
+    await proxy.claim(KEY, LeaseRequest(owner="wf"))
+    session = await _session(proxy)
+    await session.apersist_batch([_message(0)], previous_response_id=None)
+    await proxy.read_stream(KEY, "messages")
+    assert proxy.history_keys(KEY) == store.history_keys(KEY)
+
+
+async def test_claim_takes_the_thread_from_a_dead_owner(monkeypatch):
+    store = MemoryThreadStore()
+    await store.claim(KEY, LeaseRequest(owner="dead-wf"))
+    proxy, _transport = proxy_for(store, owner="new-wf")
+
+    async def alive(owner, client=None):
+        return owner != "dead-wf"
+
+    monkeypatch.setattr(thread_store_activities, "_owner_alive", alive)
+    record = await proxy.claim(KEY, LeaseRequest(owner="new-wf"))
+    assert record.lease.owner == "new-wf"
+    assert record.lease.epoch == 2, "смена владельца — новая эпоха"
+
+
+async def test_claim_never_takes_from_a_live_owner(monkeypatch):
+    store = MemoryThreadStore()
+    await store.claim(KEY, LeaseRequest(owner="live-wf"))
+    proxy, _transport = proxy_for(store, owner="new-wf")
+
+    async def alive(owner, client=None):
+        return True
+
+    monkeypatch.setattr(thread_store_activities, "_owner_alive", alive)
+    with pytest.raises(OwnershipError):
+        await proxy.claim(KEY, LeaseRequest(owner="new-wf"))

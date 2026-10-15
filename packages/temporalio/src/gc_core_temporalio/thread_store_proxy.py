@@ -1,610 +1,357 @@
-"""Async ThreadStore facade; every I/O operation uses the supplied transport.
+"""Хранилище тредов v2 в коде workflow: операции — activities воркера.
 
-ThreadSession, compaction and sidecar writers use their normal store contract.
-The proxy contains no history/meta policy and never opens a local file.
+``TemporalThreadStore`` реализует ``ThreadStore`` v2; ядро говорит с ним
+через ``SessionPort`` — так же, как локально с файловым хранилищем. Каждая
+операция — activity ``universal_agent.thread.<операция>`` (транспорт —
+``ThreadStoreTransport``), хранилище на воркере — любое v2.
+
+Запись истории Temporal ограничена (2 МБ на запись, 50 МБ на историю),
+поэтому прокси (``thread_store_contracts``):
+
+* читает большие ответы кусками и собирает их;
+* держит последнюю запись треда, которую видел: воркер отвечает разницей к
+  ней или признаком «не изменилась»;
+* шлёт ``set_state`` разницей к состоянию на ``expected_revision``, а на
+  ``BaseMismatch`` — целиком (повтор после успешной записи хранилище узнаёт
+  по ``op_id``).
+
+Владелец аренды — workflow ID сессии, бессрочно (``ttl=None``). Код
+исполняется в песочнице workflow: без часов, случайности и файлов.
 """
 
-import json
-from copy import deepcopy
-from dataclasses import asdict, replace
+from __future__ import annotations
 
-from gc_core.execution.contracts import ExecutionFailure
-from gc_core.thread_store_durable import (
-    ThreadStoreConflict,
-    ThreadStoreOperation,
+import json
+from collections.abc import Callable
+from datetime import timedelta
+from typing import Any
+
+from gc_core.threads.models import (
+    BlobRef,
+    Lease,
+    LeaseRequest,
+    Page,
+    Receipt,
+    SideChange,
+    StreamEntry,
+    ThreadChange,
+    ThreadKey,
+    ThreadQuery,
+    ThreadRecord,
+    check_stream_name,
 )
-from gc_core.thread_store_types import ThreadState
-from gc_core.utils.generate_message_id import generate_msg_id_sha256
+from gc_core.threads.session_port import SessionPort, attach_session_port
+from gc_core.threads.store import ThreadStore
 
 from gc_core_temporalio.message_refs import message_hash
-from gc_core_temporalio.meta_delta import (
-    TextIndex,
-    apply,
-    diff_meta,
-    meta_hash,
-    normalize,
-)
-from gc_core_temporalio.sizes import ACTIVITY_INPUT_LIMIT, payload_size
+from gc_core_temporalio.meta_delta import apply, diff, meta_hash, normalize
 from gc_core_temporalio.thread_store_contracts import (
     PAGE_BYTES,
-    MetaBaseMismatch,
-    ThreadStoreCall,
+    BaseMismatch,
+    ThreadCall,
+    ThreadChanged,
+    ThreadReply,
+    expected_record,
+    strip_fetch_cache,
 )
 
-# Only these operations acknowledge metadata without changing thread history.
-_METADATA_OPERATIONS = frozenset(
-    {
-        "save_meta",
-        "patch_runtime_flag",
-        "reset_run_flags",
-        "update_runtime_meta",
-    }
-)
-
-
-def _history_fence(value):
-    return (value.generation, value.owner_id, value.owner_epoch, value.max_seq)
-
-
-#: Операции, после которых сообщения треда остаются на местах: разница meta
-#: может ссылаться на тексты любых сообщений треда (воркер найдёт их и при
-#: повторе). Остальные (сжатие, замена, сброс) — только на свои сообщения.
-_APPEND_ONLY_OPERATIONS = _METADATA_OPERATIONS | {
-    "persist",
-    "append_messages",
-    "append_subagent_trace",
-    "claim_owner",
-    "release_owner",
+_HISTORY = "messages"
+#: Activities операций хранилища (полные имена — их сверяет
+#: ``test_port_contract`` с регистрацией воркера).
+_ACTIVITIES = {
+    "get": "universal_agent.thread.get",
+    "read_stream": "universal_agent.thread.read_stream",
+    "read_archive": "universal_agent.thread.read_archive",
+    "resolve_alias": "universal_agent.thread.resolve_alias",
+    "commit": "universal_agent.thread.commit",
+    "append_side": "universal_agent.thread.append_side",
+    "claim": "universal_agent.thread.claim",
+    "release": "universal_agent.thread.release",
+    "delete": "universal_agent.thread.delete",
 }
+#: Чтений заново, если ответ менялся между кусками.
+_ATTEMPTS = 3
+_NOT_IN_WORKFLOW = "операция хранилища тредов не вызывается из кода workflow"
 
 
-#: Операции, чью meta квитанции ядро не читает.
-_META_FREE_OPERATIONS = frozenset(
-    {
-        "append_subagent_trace",
-        "append_subagent_trace_record",
-        "claim_owner",
-        "release_owner",
-    }
-)
+class TemporalThreadStore(ThreadStore):
+    """``ThreadStore`` v2 поверх activities хранилища ``store_id``.
 
+    ``call(name, ThreadCall) -> ThreadReply`` — транспорт activity.
+    ``owner`` — владелец аренды (workflow ID сессии).
+    """
 
-def _hashable(value):
-    """JSON-массив обратно в кортеж: ключ идемпотентности — элемент множества."""
-    if isinstance(value, list):
-        return tuple(_hashable(item) for item in value)
-    return value
-
-
-def _payload_messages(payload):
-    """Сообщения операции (список) или пусто."""
-    messages = payload.get("messages") if isinstance(payload, dict) else None
-    return messages if isinstance(messages, list) else []
-
-
-def _extends_metadata_acks(previous, operation, receipt):
-    """Своя квитанция meta сразу за прошлой, без изменения истории треда:
-    интервал своих квитанций продолжается с прежней базы."""
-    return (
-        previous is not None
-        and operation.kind in _METADATA_OPERATIONS
-        and receipt.revision == previous[1].revision + 1
-        and _history_fence(receipt) == _history_fence(previous[1])
-        and receipt.written == 0
-        and not receipt.added_known_keys
-    )
-
-
-async def _read_meta_chunks(first, more):
-    """Meta кусками: первый — в первой странице, остальные — дочитать."""
-    parts, cursor = [first.meta_chunk], first.meta_next
-    while cursor is not None:
-        reply = await more(meta_cursor=cursor)
-        parts.append(reply.meta_chunk)
-        cursor = reply.meta_next
-    return json.loads("".join(parts))
-
-
-async def _read_state_pages(page, more):
-    """Состояние треда: первая страница и следующие по курсору."""
-    messages, keys = list(page.messages), list(page.keys)
-    cursor = page.next_cursor
-    while cursor is not None:
-        reply = await more(cursor=cursor)
-        messages += reply.page.messages
-        keys += reply.page.keys
-        cursor = reply.page.next_cursor
-    # Ключи приходят JSON-массивами: множество контракта ядра.
-    return ThreadState(
-        messages, {_hashable(key) for key in keys}, page.max_seq
-    )
-
-
-async def _read_rest(snapshot, first, more):
-    """Дочитать снимок после первой страницы: куски meta, затем состояние."""
-    if first.meta_chunk is not None:
-        snapshot.meta = await _read_meta_chunks(first, more)
-    if first.page is not None:
-        snapshot.state = await _read_state_pages(first.page, more)
-
-
-#: Запасной путь с полной meta — не больше этого (запас до лимита записи).
-FULL_META_BUDGET = ACTIVITY_INPUT_LIMIT * 3 // 4
-
-
-class TemporalThreadStore:
     def __init__(
         self,
-        store_id,
-        call,
+        store_id: str,
+        call: Callable[[str, ThreadCall], Any],
         *,
-        owner_id=None,
-        owner_epoch=None,
-        generation=0,
-        capabilities=(),
-        threads_dir="",
-    ):
+        owner: str,
+        threads_dir: str = "",
+    ) -> None:
         self.store_id = store_id
         self._call = call
-        self.owner_id = owner_id
-        self.owner_epoch = owner_epoch
-        self._generation = generation
-        self._capabilities = frozenset(capabilities)
+        self.owner = owner
+        #: Каталог тредов воркера; в workflow пустой — путей здесь нет.
         self.threads_dir = threads_dir
-        # Per-thread (base revision, latest confirmed value). The interval above
-        # base contains only contiguous own metadata receipts with one fence.
-        self._metadata_acks = {}
-        #: (система, тред) → хэши сообщений последнего чтения треда.
-        self.message_hashes = {}
-        #: (система, тред) → ([revision, generation], meta): база разницы
-        #: meta следующей записи (``meta_delta``).
-        self._meta = {}
-        #: (система, тред) → длинные тексты сообщений треда для ссылок из meta.
-        self._texts = {}
-        #: Потолок одной операции: вход activity — запись истории Temporal
-        #: (лимит 2 МБ). Отложенные шаги хода (persist: turn) ядро пишет
-        #: частями по нему.
+        #: Потолок одной записи: отложенные шаги хода (persist: turn) ядро
+        #: пишет частями по нему.
         self.max_operation_bytes = PAGE_BYTES
+        #: (система, тред) → хэши сообщений, которые есть в треде: activity
+        #: модели получает их ссылками (``message_refs``).
+        self.message_hashes: dict[tuple[str, str], set[str]] = {}
+        #: Аренда треда сессии (переживает Continue-As-New и идёт детям).
+        self.lease: Lease | None = None
+        #: тред → (отпечаток, запись JSON), которую видел workflow.
+        self._records: dict[ThreadKey, tuple[str, dict]] = {}
+        #: тред → (ревизия, состояние JSON): база разницы ``set_state``.
+        self._states: dict[ThreadKey, tuple[int, dict]] = {}
+        #: тред → ключи истории хранилища из последнего чтения.
+        self._keys: dict[ThreadKey, set[str] | None] = {}
+        self.port = SessionPort(self, owner=owner, ttl=None)
+        attach_session_port(self, self.port)
 
-    async def aread_snapshot(
-        self, system_id, thread_id, *, include_state=True
-    ):
-        snapshot = await self._read_paged(
-            system_id, thread_id, include_state=include_state
-        )
-        if snapshot is None:
-            raise ExecutionFailure("Thread store did not return a snapshot")
-        if snapshot.state is not None:
-            # Эти сообщения есть в треде: activity модели получает их
-            # ссылками, воркер найдёт их в хранилище (``message_refs``).
-            self.message_hashes[(system_id, thread_id)] = {
-                message_hash(message) for message in snapshot.state.messages
-            }
-            texts = self._texts[(system_id, thread_id)] = TextIndex()
-            texts.add(snapshot.state.messages)
-        self._generation = snapshot.generation
-        key = (system_id, thread_id)
-        previous = self._metadata_acks.get(key)
-        if previous is None or (
-            previous[1].revision != snapshot.revision
-            or _history_fence(previous[1]) != _history_fence(snapshot)
-            or previous[1].meta != snapshot.meta
-        ):
-            self._metadata_acks[key] = (
-                snapshot.revision,
-                replace(
-                    snapshot,
-                    state=None,
-                    meta=deepcopy(snapshot.meta),
-                ),
-            )
-        return snapshot
+    # --- провод -----------------------------------------------------------
 
-    def _load(self, system_id, thread_id, include_state, **fields):
-        """Activity чтения страницы треда (без ``await``: его делает вызов)."""
-        return self._call(
-            "universal_agent.thread.load",
-            ThreadStoreCall(
-                self.store_id,
-                system_id,
-                thread_id,
-                include_state=include_state,
-                page_bytes=PAGE_BYTES,
-                **fields,
-            ),
+    async def _ask(self, op: str, key: ThreadKey, args: dict) -> ThreadReply:
+        return await self._call(
+            _ACTIVITIES[op],
+            ThreadCall(self.store_id, key.system, key.thread, args),
         )
 
-    async def _read_paged(
-        self, system_id, thread_id, *, include_state=True, attempts=3
+    async def _text(
+        self, op: str, key: ThreadKey, reply: ThreadReply, args: dict
     ):
-        """Снимок страницами по ``PAGE_BYTES``: сначала meta (кусками, если
-        больше половины страницы), затем состояние.
-
-        Каждая страница — отдельная activity: результат одной activity — одна
-        запись истории Temporal, и тред любой длины не упирается в лимит
-        2 МБ на запись. Тред изменился между страницами — чтение заново.
-        """
-        known = self._meta.get((system_id, thread_id))
-        for attempt in range(attempts):
-            first = await self._load(
-                system_id,
-                thread_id,
-                include_state,
-                meta_known=known[0] if known is not None else None,
+        """JSON большого ответа: первый кусок ``reply`` и следующие той же
+        версии (с теми же аргументами — воркер пересчитает, если забыл)."""
+        parts, position = [reply.chunk], reply.next
+        while position is not None:
+            more = await self._ask(
+                op, key, {**args, "offset": position, "version": reply.version}
             )
-            snapshot = first.snapshot
-            if snapshot is None:
-                return snapshot
-            if first.meta_unchanged:
-                snapshot.meta = deepcopy(known[1])
-            expect = [snapshot.revision, snapshot.generation]
+            parts.append(more.chunk)
+            position = more.next
+        return json.loads("".join(parts))
 
-            def more(expect=expect, **position):
-                return self._load(
-                    system_id,
-                    thread_id,
-                    include_state,
-                    expect=expect,
-                    **position,
-                )
-
+    async def _read(self, op: str, key: ThreadKey, args: dict):
+        """Ответ целиком; изменился между кусками — заново."""
+        for _attempt in range(_ATTEMPTS):
+            reply = await self._ask(op, key, args)
+            if reply.chunk is None:
+                return reply.value
             try:
-                await _read_rest(snapshot, first, more)
-            except ThreadStoreConflict:
-                if attempt + 1 == attempts:
-                    raise
+                return await self._text(op, key, reply, args)
+            except ThreadChanged:
                 continue
-            meta = normalize(snapshot.meta)
-            self._meta[(system_id, thread_id)] = (
-                [*expect, meta_hash(meta)],
-                meta,
-            )
-            return snapshot
+        raise ThreadChanged(
+            f"тред {key.system}/{key.thread} менялся при чтении"
+        )
 
-    async def acommit_operation(self, system_id, thread_id, operation):
-        key = (system_id, thread_id)
-        known = self._meta.get(key)
-        base = known[1] if known is not None else {}
-        payload = operation.payload
-        messages = _payload_messages(payload)
-        request = ThreadStoreCall(
-            self.store_id,
-            system_id,
-            thread_id,
-            operation,
-            meta_base=known[0] if known is not None else None,
-        )
-        written, texts = None, None
-        if isinstance(payload, dict) and isinstance(payload.get("meta"), dict):
-            written, texts = self._with_meta_delta(
-                request, key, base, messages
+    # --- аренда сессии ---------------------------------------------------
+
+    def adopt(self, key: ThreadKey, lease: Lease) -> None:
+        """Аренда, взятая раньше (прошлый run до Continue-As-New, родитель
+        субагента): запись идёт по ней без нового ``claim``."""
+        self.lease = lease
+        self.port.adopt_lease(key, lease)
+
+    # --- чтение ----------------------------------------------------------
+
+    async def get_thread(self, key: ThreadKey) -> ThreadRecord | None:
+        known = self._records.get(key)
+        args = {"known": known[0]} if known is not None else {}
+        for _attempt in range(_ATTEMPTS):
+            reply = await self._ask("get", key, args)
+            try:
+                data = await self._record_data(key, reply, known)
+            except ThreadChanged:
+                continue
+            break
+        else:
+            raise ThreadChanged(
+                f"тред {key.system}/{key.thread} менялся при чтении"
             )
-        elif known is None and operation.kind in _META_FREE_OPERATIONS:
-            # Трасса субагента, владение: ядро meta квитанции не читает, а
-            # без базы её пришлось бы перечитать целиком (у ребёнка — всю
-            # meta родителя).
-            request.need_meta = False
+        if data is None:
+            self._records.pop(key, None)
+            return None
+        data = normalize(data)
+        self._records[key] = (meta_hash(data), data)
+        record = ThreadRecord.model_validate(data)
+        self._states[key] = (record.revision, data.get("state", {}))
+        return record
+
+    async def _record_data(self, key, reply: ThreadReply, known):
+        if reply.unchanged:
+            return known[1]
+        if reply.delta is not None:
+            return apply(known[1], reply.delta)
+        if reply.chunk is not None:
+            return await self._text("get", key, reply, {})
+        return reply.value
+
+    async def list_threads(self, query: ThreadQuery) -> Page[ThreadRecord]:
+        raise NotImplementedError(_NOT_IN_WORKFLOW)
+
+    async def read_stream(
+        self,
+        key: ThreadKey,
+        stream: str,
+        *,
+        after_seq: int = 0,
+        limit: int | None = None,
+    ) -> list[StreamEntry]:
+        check_stream_name(stream)
+        whole_history = stream == _HISTORY and not after_seq and limit is None
+        data = await self._read(
+            "read_stream",
+            key,
+            {
+                "stream": stream,
+                "after_seq": after_seq,
+                "limit": limit,
+                "keys": whole_history,
+            },
+        )
+        entries = [StreamEntry.model_validate(e) for e in data["entries"]]
+        if whole_history:
+            keys = data.get("keys")
+            self._keys[key] = None if keys is None else set(keys)
+            self.message_hashes[(key.system, key.thread)] = {
+                message_hash(e.data) for e in entries
+            }
+        return entries
+
+    def history_keys(self, key: ThreadKey) -> set[str] | None:
+        """Ключи истории хранилища из последнего чтения (``SessionPort``
+        сверяет по ним дубли, как у файлового хранилища локально);
+        ``None`` — хранилище их не ведёт."""
+        return self._keys.get(key)
+
+    async def read_archive(
+        self, key: ThreadKey, archive_id: str
+    ) -> list[StreamEntry]:
+        data = await self._read(
+            "read_archive", key, {"archive_id": archive_id}
+        )
+        return [StreamEntry.model_validate(e) for e in data["entries"]]
+
+    async def resolve_alias(self, alias: str) -> ThreadKey | None:
+        reply = await self._call(
+            _ACTIVITIES["resolve_alias"],
+            ThreadCall(self.store_id, "", "", {"alias": alias}),
+        )
+        return None if reply.value is None else ThreadKey(**reply.value)
+
+    # --- запись -----------------------------------------------------------
+
+    async def commit(self, key: ThreadKey, change: ThreadChange) -> Receipt:
+        data = change.model_dump(mode="json", exclude_unset=True)
+        state = data.pop("set_state", None)
+        args: dict[str, Any] = {"change": data}
+        known = self._records.get(key)
+        if known is not None:
+            args["known"] = known[0]
+        if state is not None:
+            state = strip_fetch_cache(normalize(state))
+            args["state"] = self._state_spec(key, change, state)
         try:
-            reply = await self._commit(request, written, base, texts)
-        except BaseException:
-            # No acknowledged outcome: never bridge this gap on a later call.
-            # Базу meta не забывать: воркер сверяет её версию с хранилищем, а
-            # без базы следующая запись ушла бы полной meta.
-            self._metadata_acks.pop(key, None)
-            raise
-        receipt = reply.receipt
-        if (
-            receipt is None
-            or receipt.operation_id != operation.operation_id
-            or receipt.kind != operation.kind
-        ):
-            self._metadata_acks.pop(key, None)
-            raise ExecutionFailure(
-                "Thread store did not acknowledge operation"
-            )
-        meta = await self._receipt_meta(
-            request, reply, written if written is not None else base
-        )
-        receipt = replace(receipt, meta=deepcopy(meta))
-        self._remember_commit(key, operation, receipt, messages)
+            reply = await self._ask("commit", key, args)
+        except BaseMismatch:
+            args["state"] = {"full": state}
+            reply = await self._ask("commit", key, args)
+        receipt = Receipt.model_validate(reply.value)
+        self._after_commit(key, change, state, receipt)
+        self._learn_record(key, known, {**data, "set_state": state}, reply)
         return receipt
 
-    def _with_meta_delta(self, request, key, base, messages):
-        """Meta записи — разницей с известной, длинные тексты — ссылками на
-        сообщения: запись не тащит в историю весь журнал намерений. Воркер
-        соберёт полную meta, хранилище получит её целиком.
-        → (записанная meta, индекс текстов сообщений)."""
-        operation = request.operation
-        payload = operation.payload
-        written = normalize(payload["meta"])
-        texts = TextIndex()
-        texts.add(messages)
-        if operation.kind in _APPEND_ONLY_OPERATIONS:
-            texts.parents.append(self._texts.get(key) or TextIndex())
-        with_base = TextIndex()
-        with_base.add_meta(base)
-        with_base.parents.append(texts)
-        request.meta_delta = {
-            "d": diff_meta(base, written, with_base),
-            "h": meta_hash(written),
-        }
-        request.operation = replace(
-            operation, payload={**payload, "meta": None}
+    def _learn_record(self, key, known, change: dict, reply: ThreadReply):
+        """Запись треда после своей записи — из известной, своих частей и
+        разницы воркера; без разницы — неизвестна до следующего чтения."""
+        self._records.pop(key, None)
+        if known is None or reply.delta is None:
+            return
+        data = apply(expected_record(known[1], change), reply.delta)
+        if meta_hash(data) == reply.version:
+            self._records[key] = (reply.version, data)
+
+    def _state_spec(self, key, change: ThreadChange, state: dict) -> dict:
+        base = self._states.get(key)
+        if base is None or base[0] != change.expected_revision:
+            return {"full": state}
+        return {"delta": diff(base[1], state), "base": meta_hash(base[1])}
+
+    def _after_commit(self, key, change, state, receipt: Receipt) -> None:
+        """Базы следующих записей и хэши сообщений треда."""
+        base = self._states.get(key)
+        if state is not None:
+            self._states[key] = (receipt.revision, state)
+        elif base is not None and base[0] == change.expected_revision:
+            self._states[key] = (receipt.revision, base[1])
+        hashes = self.message_hashes.setdefault(
+            (key.system, key.thread), set()
         )
-        return written, texts
-
-    async def _commit(self, request, written, base, texts):
-        """Activity записи; база meta в хранилище не та — повтор с полной
-        meta."""
-        try:
-            return await self._call("universal_agent.thread.commit", request)
-        except MetaBaseMismatch:
-            if written is None:
-                raise
-            # База в хранилище не та (чужая правка meta, повтор после
-            # записи): та же операция с полной meta — хранилище узнает её
-            # или применит (чужая запись — конфликт ревизии). Тексты,
-            # записи журнала и разделы — ссылками по содержимому: воркер
-            # найдёт их в текущей meta хранилища или в сообщениях.
-            full = TextIndex()
-            full.add_meta(base, nodes=True)
-            full.parents.append(texts)
-            request.meta_delta = {
-                "d": diff_meta({}, written, full),
-                "h": meta_hash(written),
-                "full": True,
-            }
-            if payload_size(asdict(request)) > FULL_META_BUDGET:
-                # Полная meta не влезает в запись истории: конфликт —
-                # ядро перечитает тред и соберёт запись заново.
-                raise ThreadStoreConflict(
-                    "Thread meta changed and is too large to resend whole"
-                )
-            return await self._call("universal_agent.thread.commit", request)
-
-    async def _receipt_meta(self, request, reply, expected):
-        """Meta квитанции: не нужна ядру, перечитанная или ``expected`` +
-        разница от воркера."""
-        if not request.need_meta:
-            return {}
-        key = (request.system_id, request.thread_id)
-        if reply.meta_reload or reply.meta_delta is None:
-            snapshot = await self._read_paged(
-                request.system_id, request.thread_id, include_state=False
+        if change.reset_history or change.replace_history is not None:
+            hashes.clear()
+            self._keys.pop(key, None)
+        if change.replace_history is not None:
+            hashes.update(
+                message_hash(m) for m in change.replace_history.messages
             )
-            if snapshot is None:
-                raise ExecutionFailure(
-                    "Thread store did not return a snapshot"
-                )
-            return self._meta[key][1]
-        receipt = reply.receipt
-        meta = apply(expected, reply.meta_delta.get("d"))
-        self._meta[key] = (
-            [receipt.revision, receipt.generation, meta_hash(meta)],
-            meta,
+        hashes.update(message_hash(m) for m in change.append_messages)
+        if receipt.lease is None and self.lease is not None:
+            self.lease = None
+
+    async def append_side(self, key: ThreadKey, change: SideChange) -> Receipt:
+        reply = await self._ask(
+            "append_side",
+            key,
+            {"change": change.model_dump(mode="json", exclude_unset=True)},
         )
-        return meta
+        return Receipt.model_validate(reply.value)
 
-    def _remember_commit(self, key, operation, receipt, messages):
-        """Учёт подтверждённой записи: тексты и хэши сообщений треда,
-        поколение, интервал своих квитанций meta."""
-        if operation.kind not in _APPEND_ONLY_OPERATIONS:
-            # Сообщения треда заменены: ссылаться можно только на новые.
-            self._texts[key] = TextIndex()
-        self._texts.setdefault(key, TextIndex()).add(messages)
-        self._generation = receipt.generation
-        previous = self._metadata_acks.get(key)
-        base_revision = receipt.revision
-        if _extends_metadata_acks(previous, operation, receipt):
-            base_revision = previous[0]
-        self._metadata_acks[key] = (base_revision, deepcopy(receipt))
-        if messages:
-            # Записанные сообщения тоже есть в треде: повтор запроса модели
-            # после промаха кэша воркера передаст их ссылками.
-            self.message_hashes.setdefault(key, set()).update(
-                message_hash(message) for message in messages
-            )
+    # --- аренда и жизненный цикл -------------------------------------------
 
-    def metadata_ack_since(self, system_id, thread_id, revision):
-        """Return an own metadata receipt only across a proven contiguous span.
-
-        A fresh read or a history mutation can establish a new baseline, but
-        cannot justify adopting it from an older session snapshot.
-        """
-        interval = self._metadata_acks.get((system_id, thread_id))
-        if interval is None:
-            return None
-        base, latest = interval
-        if base <= revision < latest.revision:
-            return deepcopy(latest)
-        return None
-
-    async def _mutate(self, system_id, thread_id, kind, payload):
-        return await self.acommit_operation(
-            system_id,
-            thread_id,
-            ThreadStoreOperation(
-                operation_id=generate_msg_id_sha256("store"),
-                kind=kind,
-                payload=deepcopy(payload),
-                generation=self._generation,
-                owner_id=self.owner_id,
-                owner_epoch=self.owner_epoch,
-            ),
+    async def claim(self, key: ThreadKey, lease: LeaseRequest) -> ThreadRecord:
+        """Взять тред (у владельца, чей workflow уже не исполняется, —
+        отобрать). Запись — без состояния: в историю идут только аренда и
+        версии треда."""
+        ttl = None if lease.ttl is None else lease.ttl / timedelta(seconds=1)
+        reply = await self._ask(
+            "claim", key, {"owner": lease.owner, "ttl": ttl, "take_over": True}
+        )
+        value = reply.value
+        granted = Lease.model_validate(value["lease"])
+        self.adopt(key, granted)
+        return ThreadRecord(
+            key=key,
+            lease=granted,
+            revision=value["revision"],
+            generation=value["generation"],
+            history_version=value["history_version"],
         )
 
-    async def aload_thread_state(self, system_id, thread_id):
-        snapshot = await self.aread_snapshot(system_id, thread_id)
-        if snapshot.state is None:
-            raise ExecutionFailure("Thread store did not return thread state")
-        return snapshot.state
-
-    async def aload_messages(self, system_id, thread_id):
-        return (await self.aload_thread_state(system_id, thread_id)).messages
-
-    async def aload_meta(self, system_id, thread_id):
-        snapshot = await self.aread_snapshot(
-            system_id, thread_id, include_state=False
+    async def release(self, key: ThreadKey, lease: Lease) -> None:
+        await self._ask(
+            "release", key, {"lease": lease.model_dump(mode="json")}
         )
-        return snapshot.meta
+        if self.lease == lease:
+            self.lease = None
 
-    async def aappend_messages(
-        self,
-        system_id,
-        thread_id,
-        messages,
-        *,
-        known_keys=None,
-        start_seq=0,
-    ):
-        receipt = await self._mutate(
-            system_id,
-            thread_id,
-            "append_messages",
-            {
-                "messages": list(messages),
-                "known_keys": (
-                    sorted(known_keys) if known_keys is not None else None
-                ),
-                "start_seq": start_seq,
-            },
-        )
-        if known_keys is not None:
-            known_keys.update(receipt.added_known_keys)
-        return receipt.written
+    async def delete(self, key: ThreadKey, *, op_id: str) -> None:
+        await self._ask("delete", key, {"op_id": op_id})
+        self._records.pop(key, None)
+        self._states.pop(key, None)
 
-    async def asave_meta(self, system_id, thread_id, meta):
-        await self._mutate(system_id, thread_id, "save_meta", {"meta": meta})
+    async def put_blob(
+        self, key: ThreadKey, data: bytes, *, mime: str
+    ) -> BlobRef:
+        raise NotImplementedError(_NOT_IN_WORKFLOW)
 
-    async def apatch_runtime_flag(
-        self,
-        system_id,
-        thread_id,
-        flag,
-        *,
-        active,
-        session_meta=None,
-    ):
-        receipt = await self._mutate(
-            system_id,
-            thread_id,
-            "patch_runtime_flag",
-            {"flag": flag, "active": active},
-        )
-        if session_meta is not None:
-            for section in ("runtime", "tui"):
-                if section in receipt.meta:
-                    session_meta[section] = deepcopy(receipt.meta[section])
-                else:
-                    session_meta.pop(section, None)
+    async def get_blob(self, ref: BlobRef) -> bytes:
+        raise NotImplementedError(_NOT_IN_WORKFLOW)
 
-    @property
-    def areset_run_flags(self):
-        if "reset_run_flags" not in self._capabilities:
-            return None
-        return self._areset_run_flags
+    async def prune_receipts(self, older_than: timedelta) -> int:
+        raise NotImplementedError(_NOT_IN_WORKFLOW)
 
-    async def _areset_run_flags(
-        self, system_id, thread_id, *, session_meta=None
-    ):
-        runtime = (session_meta or {}).get("runtime")
-        runtime = runtime if isinstance(runtime, dict) else {}
-        receipt = await self._mutate(
-            system_id,
-            thread_id,
-            "reset_run_flags",
-            {"stale_summarizing": bool(runtime.get("summarizing"))},
-        )
-        if session_meta is not None:
-            for section in ("runtime", "tui"):
-                if section in receipt.meta:
-                    session_meta[section] = deepcopy(receipt.meta[section])
-                else:
-                    session_meta.pop(section, None)
 
-    async def aupdate_runtime_meta(self, system_id, thread_id, patch):
-        await self._mutate(
-            system_id, thread_id, "update_runtime_meta", {"patch": patch}
-        )
-
-    async def adiscard_message(self, system_id, thread_id, message_id):
-        receipt = await self._mutate(
-            system_id, thread_id, "discard_message", {"message_id": message_id}
-        )
-        return bool(receipt.result)
-
-    async def areset(self, system_id, thread_id):
-        receipt = await self._mutate(system_id, thread_id, "reset", {})
-        return receipt.result
-
-    async def aappend_subagent_trace(
-        self,
-        system_id,
-        thread_id,
-        *,
-        parent_call_id,
-        child_run_id,
-        kind,
-        payload,
-    ):
-        receipt = await self._mutate(
-            system_id,
-            thread_id,
-            "append_subagent_trace",
-            {
-                "parent_call_id": parent_call_id,
-                "child_run_id": child_run_id,
-                "kind": kind,
-                "payload": payload,
-            },
-        )
-        return receipt.result
-
-    async def aread_subagent_trace(self, system_id, thread_id):
-        """Трасса субагента страницами по ``PAGE_BYTES`` (как тред)."""
-        records, cursor = [], [0]
-        while cursor is not None:
-            reply = await self._call(
-                "universal_agent.thread.read_trace",
-                ThreadStoreCall(
-                    self.store_id,
-                    system_id,
-                    thread_id,
-                    page_bytes=PAGE_BYTES,
-                    cursor=cursor,
-                ),
-            )
-            if reply.trace is None:
-                raise ExecutionFailure("Thread store did not return a trace")
-            records += reply.trace
-            cursor = None if reply.trace_next is None else [reply.trace_next]
-        return records
-
-    @property
-    def areplace_messages(self):
-        if "replace_messages" not in self._capabilities:
-            return None
-        return self._areplace_messages
-
-    async def _areplace_messages(self, system_id, thread_id, messages):
-        await self._mutate(
-            system_id,
-            thread_id,
-            "replace_messages",
-            {"messages": list(messages)},
-        )
-
-    @property
-    def aarchive_and_replace(self):
-        if "archive_and_replace" not in self._capabilities:
-            return None
-        return self._aarchive_and_replace
-
-    async def _aarchive_and_replace(self, system_id, thread_id, messages):
-        receipt = await self._mutate(
-            system_id,
-            thread_id,
-            "archive_and_replace",
-            {"messages": list(messages)},
-        )
-        return receipt.archive
+__all__ = ["TemporalThreadStore"]

@@ -10,7 +10,7 @@ workflow. Своё в плагине — только понятия агент�
 
     plugin = AgentPlugin(
         agents={"shop": load_settings("shop.yaml")},
-        thread_store=DurableFileThreadStore("/var/ua/threads"),
+        thread_store=FileThreadStore("/var/ua/threads", durability="fsync"),
         model_activity=ActivityConfig(start_to_close_timeout=timedelta(minutes=10)),
     )
     client = await Client.connect("localhost:7233", plugins=[plugin])
@@ -64,9 +64,10 @@ class AgentPlugin(SimplePlugin):
     ``AgentProfile``. Имя — то, что клиент передаёт в ``RunRequest.profile``
     (``TemporalDurability(agent=...)``); менять его у живых сессий нельзя.
 
-    ``thread_store`` — хранилище тредов (объект с durable-контрактом:
-    ``DurableFileThreadStore``, ``SQLiteThreadStore`` или своё, проверенное
-    ``gc_testkit.durable_thread_store_conformance``); ``thread_stores`` —
+    ``thread_store`` — хранилище тредов контракта v2
+    (``gc_core.threads.store.ThreadStore``: ``FileThreadStore``,
+    ``SQLiteThreadStore``, ``PostgresThreadStore`` или своё, проверенное
+    ``gc_testkit.thread_store_conformance_v2``); ``thread_stores`` —
     несколько по именам. ``workspace`` — рабочий каталог агентов (по
     умолчанию cwd): воркер должен быть запущен в нём, chdir он не делает.
 

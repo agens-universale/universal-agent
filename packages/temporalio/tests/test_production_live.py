@@ -16,6 +16,8 @@ from live_support import (  # noqa: F401
     provider,
     temporal_cli,
     worker_kwargs,
+    thread_messages,
+    thread_meta,
 )
 
 
@@ -112,8 +114,8 @@ async def test_production_provider_worker_client_and_replay(
                         workflows=[UniversalAgentWorkflow]
                     ).replay_workflow(history)
                     assert not requests
-                    assert contexts.stores["files"].load_messages(
-                        "test", "production-thread"
+                    assert await thread_messages(
+                        contexts.stores["files"], "test", "production-thread"
                     )
                     return
                 result = await asyncio.wait_for(handle.result(), 45)
@@ -123,14 +125,13 @@ async def test_production_provider_worker_client_and_replay(
             files = contexts.stores["files"]
             assert any(
                 "production provider file" in str(message)
-                for message in files.load_messages("test", "production-thread")
+                for message in await thread_messages(
+                    files, "test", "production-thread"
+                )
             )
-            assert (
-                files.load_meta("test", "production-thread")["shared"][
-                    "working_memory"
-                ]["knowledge"]
-                == "durable fact"
-            )
+            assert (await thread_meta(files, "test", "production-thread"))[
+                "shared"
+            ]["working_memory"]["knowledge"] == "durable fact"
             await Replayer(workflows=[UniversalAgentWorkflow]).replay_workflow(
                 history
             )

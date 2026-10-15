@@ -6,15 +6,15 @@ import shutil
 from collections import Counter
 
 import pytest
-from live_support import temporal_cli
+from live_support import temporal_cli, thread_messages, thread_meta
 from gc_core.run_context import acreate_run_context
-from gc_core.thread_store_file_durable import DurableFileThreadStore
+from gc_core.threads.file_store import FileThreadStore
 from gc_core_temporalio.activities import AgentActivities
 from gc_core_temporalio.contracts import RunRequest
 from gc_core_temporalio.workflow import UniversalAgentWorkflow
 from gc_core_temporalio.public_config import public_config_snapshot
 from gc_testkit.settings import make_settings
-from gc_core_temporalio.storage.sqlite import SQLiteThreadStore
+from gc_stores.sqlite import SQLiteThreadStore
 from gc_core_temporalio.thread_store_activities import ThreadStoreActivities
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer, Worker
@@ -66,7 +66,7 @@ async def test_native_executor_uses_real_file_session_and_replays(
         return contexts[call.owner_id]
 
     # История и мета агента — в переданном FileThreadStore.
-    files = DurableFileThreadStore(str(tmp_path / "threads"))
+    files = FileThreadStore(str(tmp_path / "threads"))
     activities = AgentActivities(
         context_provider=context_provider,
         stores={"files": files},
@@ -95,9 +95,7 @@ async def test_native_executor_uses_real_file_session_and_replays(
         activities.summary_trace,
         activities.close,
         activities.release,
-        thread.load,
-        thread.commit,
-        thread.read_trace,
+        *thread.registered,
     ]
     async with await WorkflowEnvironment.start_local(
         dev_server_existing_path=binary
@@ -168,16 +166,13 @@ async def test_native_executor_uses_real_file_session_and_replays(
         )
         assert "Recovered successfully" in str(result["answer"])
         assert len(requests) == 2
-        messages = files.load_messages("test", "native-thread")
+        messages = await thread_messages(files, "test", "native-thread")
         assert any(
             "file from native workflow" in str(message) for message in messages
         )
-        assert (
-            files.load_meta("test", "native-thread")["shared"][
-                "working_memory"
-            ]["knowledge"]
-            == "durable fact"
-        )
+        assert (await thread_meta(files, "test", "native-thread"))["shared"][
+            "working_memory"
+        ]["knowledge"] == "durable fact"
         await Replayer(workflows=[UniversalAgentWorkflow]).replay_workflow(
             history
         )
