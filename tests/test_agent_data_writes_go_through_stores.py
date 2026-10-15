@@ -5,13 +5,19 @@
 него молча осталась бы на диске процесса. Сторож обходит ``packages/*/src``
 и запрещает файловые записи:
 
-- ``open(...)`` и ``os.fdopen(...)`` с режимами ``w``, ``a``, ``x``, ``+``;
-- ``Path.write_text``, ``Path.write_bytes`` (``await backend.write_bytes`` —
-  запись workspace через ``os_backend``, не считается);
-- ``os.replace``, ``os.rename``, ``atomic_replace``, ``shutil.copy*``,
-  ``shutil.move``;
+- ``open``/``io.open``/``codecs.open``/``os.fdopen`` с режимами ``w``,
+  ``a``, ``x``, ``+`` (режим не константой — тоже), ``Path.open`` с таким
+  режимом, ``os.open`` с флагами записи;
+- ``Path.write_text``, ``Path.write_bytes`` — и вызовом, и ссылкой
+  (``asyncio.to_thread(path.write_text, …)``); ``await backend.write_bytes``
+  — запись workspace через ``os_backend``, не считается;
+- ``os.replace``, ``os.rename``, ``Path.rename``, ``atomic_replace``,
+  ``shutil.copy*``, ``shutil.move``;
 - ``tempfile.mkstemp`` и ``tempfile.NamedTemporaryFile``;
 - ``json.dump`` в файловый объект.
+
+Имена сверяются с импортами модуля: ``import os as _os`` и
+``from shutil import move`` не прячут вызов.
 
 Модуль, которому писать файлы можно, — в ``ALLOWED`` с причиной. Причина
 «до …» — временное исключение, которое уходит вместе с переводом.
@@ -24,8 +30,12 @@ from pathlib import Path
 from gc_testkit.paths import REPO
 
 _WRITE_MODES = frozenset("wax+")
-_OS_CALLS = frozenset({"replace", "rename", "fdopen"})
 _TEMPFILE_CALLS = frozenset({"mkstemp", "NamedTemporaryFile"})
+_OPENERS = frozenset({"open", "io.open", "codecs.open", "builtins.open"})
+_OS_OPEN_WRITE_FLAGS = frozenset(
+    {"O_WRONLY", "O_RDWR", "O_CREAT", "O_APPEND", "O_TRUNC"}
+)
+_PATH_WRITES = frozenset({"write_text", "write_bytes"})
 
 _CORE = "packages/core/src/gc_core/"
 _TUI = "packages/tui/src/gc_tui/"
@@ -91,12 +101,20 @@ ALLOWED: dict[str, str] = {
         "блокировка сессии между окнами TUI одной машины (аренда v2 — "
         "по имени машины)"
     ),
+    _TUI + "services/terminal_guard.py": (
+        "вывод в /dev/null, когда терминал умер"
+    ),
     _TUI + "voice_runtime/leases.py": _VOICE,
     _TUI + "voice_runtime/state.py": _VOICE,
     # Swarm.
     _SWARM + "lifecycle.py": "swarm: рабочие каталоги участников",
     _SWARM + "runner.py": "swarm: рабочие каталоги участников",
     _SWARM + "storage.py": "swarm: своё хранилище состояния роя",
+    # Temporal.
+    "packages/temporalio/src/gc_core_temporalio/storage/sqlite.py": (
+        "хранилище durable-исполнения Temporal (SQLite) — до перевода "
+        "Temporal на ThreadStore v2"
+    ),
     # Тестовый инструментарий.
     _TESTKIT + "helpers/crossplatform.py": _TESTKIT_REASON,
     _TESTKIT + "legacy_threads.py": _TESTKIT_REASON,
@@ -112,62 +130,119 @@ def _awaited(tree: ast.AST) -> set[int]:
     }
 
 
-def _mode(call: ast.Call, position: int) -> str | None:
-    for keyword in call.keywords:
-        if keyword.arg == "mode" and isinstance(keyword.value, ast.Constant):
-            return keyword.value.value
-    if len(call.args) > position and isinstance(
-        call.args[position], ast.Constant
-    ):
-        return call.args[position].value
-    return None
+def _aliases(tree: ast.AST) -> dict[str, str]:
+    """Локальное имя → полное: ``import os as _os`` даёт ``_os → os``,
+    ``from shutil import move as mv`` — ``mv → shutil.move``."""
+    names: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                names[alias.asname or alias.name] = alias.name
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            for alias in node.names:
+                full = f"{node.module}.{alias.name}"
+                names[alias.asname or alias.name] = full
+    return names
 
 
-def _writes_by_mode(mode: object) -> bool:
-    return isinstance(mode, str) and bool(set(mode) & _WRITE_MODES)
-
-
-def _module_call(func: ast.Attribute) -> tuple[str, str] | None:
-    if isinstance(func.value, ast.Name):
-        return func.value.id, func.attr
-    return None
-
-
-def _write_call(call: ast.Call, awaited: set[int]) -> str | None:
-    func = call.func
+def _qualified(func: ast.expr, aliases: dict[str, str]) -> str | None:
     if isinstance(func, ast.Name):
-        if func.id == "open" and _writes_by_mode(_mode(call, 1)):
-            return "open"
-        return "atomic_replace" if func.id == "atomic_replace" else None
+        return aliases.get(func.id, func.id)
+    if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
+        return f"{aliases.get(func.value.id, func.value.id)}.{func.attr}"
+    return None
+
+
+def _mode_arg(call: ast.Call, position: int) -> ast.expr | None:
+    for keyword in call.keywords:
+        if keyword.arg == "mode":
+            return keyword.value
+    return call.args[position] if len(call.args) > position else None
+
+
+def _writes_by_mode(call: ast.Call, position: int) -> bool:
+    """Режим записи; режим не константой — считается записью."""
+    mode = _mode_arg(call, position)
+    if mode is None:
+        return False
+    if not isinstance(mode, ast.Constant):
+        return True
+    return isinstance(mode.value, str) and bool(set(mode.value) & _WRITE_MODES)
+
+
+def _os_open_writes(call: ast.Call) -> bool:
+    flags = call.args[1] if len(call.args) > 1 else None
+    if flags is None:
+        return False
+    names = {
+        node.attr if isinstance(node, ast.Attribute) else node.id
+        for node in ast.walk(flags)
+        if isinstance(node, (ast.Attribute, ast.Name))
+    }
+    return bool(names & _OS_OPEN_WRITE_FLAGS)
+
+
+def _named_write(name: str, call: ast.Call) -> str | None:
+    if name in _OPENERS:
+        return name if _writes_by_mode(call, 1) else None
+    if name == "os.fdopen":
+        return name if _writes_by_mode(call, 1) else None
+    if name == "os.open":
+        return name if _os_open_writes(call) else None
+    module, _, attr = name.rpartition(".")
+    if name in ("os.replace", "os.rename") or attr == "atomic_replace":
+        return name
+    if module == "shutil" and (attr.startswith("copy") or attr == "move"):
+        return name
+    if module == "tempfile" and attr in _TEMPFILE_CALLS:
+        return name
+    return name if name == "json.dump" else None
+
+
+def _method_write(call: ast.Call, awaited: set[int]) -> str | None:
+    func = call.func
     if not isinstance(func, ast.Attribute):
         return None
-    named = _module_call(func)
-    if named is not None:
-        module, name = named
-        if module == "os" and name in _OS_CALLS:
-            if name != "fdopen" or _writes_by_mode(_mode(call, 1)):
-                return f"os.{name}"
-            return None
-        if module == "shutil" and (name.startswith("copy") or name == "move"):
-            return f"shutil.{name}"
-        if module == "tempfile" and name in _TEMPFILE_CALLS:
-            return f"tempfile.{name}"
-        if module == "json" and name == "dump":
-            return "json.dump"
-    if func.attr == "open" and _writes_by_mode(_mode(call, 0)):
+    # ``.open`` бывает у чего угодно (``facade.open(body)``): запись — только
+    # явный режим записи константой.
+    mode = _mode_arg(call, 0)
+    if (
+        func.attr == "open"
+        and isinstance(mode, ast.Constant)
+        and _writes_by_mode(call, 0)
+    ):
         return "Path.open"
-    if func.attr in ("write_text", "write_bytes") and id(call) not in awaited:
+    if func.attr in _PATH_WRITES and id(call) not in awaited:
         return f"Path.{func.attr}"
+    return "Path.rename" if func.attr == "rename" else None
+
+
+def _write_call(
+    call: ast.Call, awaited: set[int], aliases: dict[str, str]
+) -> str | None:
+    name = _qualified(call.func, aliases)
+    if name is not None:
+        found = _named_write(name, call)
+        if found is not None:
+            return found
+    found = _method_write(call, awaited)
+    if found is not None:
+        return found
+    # Запись, переданная ссылкой: ``asyncio.to_thread(path.write_text, s)``.
+    for arg in call.args:
+        if isinstance(arg, ast.Attribute) and arg.attr in _PATH_WRITES:
+            return f"Path.{arg.attr} (ссылка)"
     return None
 
 
 def _writes(path: Path) -> list[str]:
     tree = ast.parse(path.read_text(encoding="utf-8"))
     awaited = _awaited(tree)
+    aliases = _aliases(tree)
     found = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Call):
-            kind = _write_call(node, awaited)
+            kind = _write_call(node, awaited, aliases)
             if kind is not None:
                 found.append(f"{kind}:{node.lineno}")
     return found
@@ -207,31 +282,47 @@ def test_every_exception_is_still_needed():
 def test_guard_catches_every_primitive(tmp_path):
     sample = tmp_path / "sample.py"
     sample.write_text(
-        "import json, os, shutil, tempfile\n"
+        "import asyncio, io, json, os, shutil, tempfile\n"
+        "import os as _os\n"
+        "from shutil import move as mv\n"
         "from gc_core.utils.atomic_io import atomic_replace\n"
         "open(p, 'a')\n"
+        "open(p, mode)\n"
+        "io.open(p, 'wb')\n"
         "os.fdopen(fd, 'w')\n"
+        "os.open(p, os.O_CREAT | os.O_WRONLY)\n"
         "Path(p).write_text('x')\n"
         "Path(p).open(mode='wb')\n"
-        "os.replace(a, b)\n"
+        "Path(p).rename(q)\n"
+        "_os.replace(a, b)\n"
         "atomic_replace(a, b)\n"
         "shutil.copyfile(a, b)\n"
+        "mv(a, b)\n"
         "tempfile.mkstemp()\n"
         "json.dump({}, handle)\n"
+        "asyncio.to_thread(path.write_bytes, data)\n"
         "open(p)\n"
+        "os.open(p, os.O_RDONLY)\n"
+        "facade.open(body)\n"
         "async def f(backend):\n"
         "    await backend.write_bytes(p, b'')\n",
         encoding="utf-8",
     )
-    kinds = [item.split(":")[0] for item in _writes(sample)]
+    kinds = [item.rsplit(":", 1)[0] for item in _writes(sample)]
     assert kinds == [
         "open",
+        "open",
+        "io.open",
         "os.fdopen",
+        "os.open",
         "Path.write_text",
         "Path.open",
+        "Path.rename",
         "os.replace",
-        "atomic_replace",
+        "gc_core.utils.atomic_io.atomic_replace",
         "shutil.copyfile",
+        "shutil.move",
         "tempfile.mkstemp",
         "json.dump",
+        "Path.write_bytes (ссылка)",
     ]
