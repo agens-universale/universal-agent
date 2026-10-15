@@ -23,7 +23,8 @@
     prompt        system, special_instructions, subagent, custom_subagent,
                   summary, memory_patch, limit_summary, intent_tool,
                   intent_final, finish_gate, project_memory_compaction,
-                  command_judge_system, command_judge_user
+                  command_judge_system, command_judge_user,
+                  action_judge_system, action_judge_user
     instructions  L0 (роль запуска), L1 (глобальные), L2 (.gc/AGENTS.md),
                   L3 (AGENTS.md проекта)
     subagents     ""  — каталог определений; "<файл>.md" — определение
