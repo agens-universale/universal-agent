@@ -388,13 +388,12 @@ def test_legacy_and_fresh_sums_merge_into_one_part():
 
 
 
-def test_footer_does_not_price_legacy_tokens_as_current_model():
+def test_footer_prices_legacy_tokens_at_current_model_rate():
     account = UsageAccount()
     account.add(CATEGORY_MAIN, 1000, 0, cost=0.5, billed=True, currency="$")
     account.add(CATEGORY_MAIN, 1000, 0)
     text = render_usage_meter(account.to_meta(), None, _PRICING_RUB, _MODEL)
-    assert "0.50$?" in text.plain
-    assert "₽" not in text.plain
+    assert text.plain == "сессия 2.0k/0.50$+0.10₽~"
 
 
 _PRICING_OTHER_MODEL = {

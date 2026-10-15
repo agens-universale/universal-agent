@@ -46,7 +46,7 @@ def test_unknown_model_preserves_known_subtotal_and_marks_incomplete():
     assert report.has_unpriced
 
 
-def test_legacy_category_without_model_does_not_invent_a_tariff():
+def test_legacy_category_without_by_model_priced_at_agent_model_rate():
     account = UsageAccount.from_meta({
         "by_category": {"main": {"input": 2000, "calls": 2}},
         "by_model": {
@@ -55,26 +55,26 @@ def test_legacy_category_without_model_does_not_invent_a_tariff():
         },
     })
     report = compute_cost(account, PRICING, "fast")
-    assert report.by_currency == {}
-    assert report.has_unpriced
+    assert report.by_currency == {"USD": 2}
+    assert not report.has_unpriced
 
 
-def test_legacy_billed_money_is_preserved_with_unknown_tariff_remainder():
+def test_legacy_billed_money_is_preserved_with_agent_tariff_remainder():
     account = UsageAccount()
     account.add("main", 1000, 0, billed=True, cost=7, currency="USD")
     account.add("main", 1000, 0)
     account = UsageAccount.from_meta(account.to_meta())
     report = compute_cost(account, PRICING, "fast")
-    assert report.by_currency == {"USD": 7}
-    assert report.has_unpriced
+    assert report.by_currency == {"USD": 8}
+    assert not report.has_unpriced
 
 
-def test_new_calls_after_legacy_resume_price_only_known_models():
+def test_new_calls_after_legacy_resume_add_to_agent_rate_remainder():
     account = UsageAccount.from_meta({"by_category": {"main": {"input": 1000, "calls": 1}}})
     baseline = UsageAccount.from_meta(account.to_meta())
     account.add("main", 1000, 0, model="big")
-    assert compute_cost(account, PRICING, "fast").by_currency == {"USD": 10}
-    assert compute_cost(account, PRICING, "fast").has_unpriced
+    assert compute_cost(account, PRICING, "fast").by_currency == {"USD": 11}
+    assert not compute_cost(account, PRICING, "fast").has_unpriced
     delta = account.delta_from(baseline)
     assert compute_cost(delta, PRICING, "fast").by_currency == {"USD": 10}
     assert not compute_cost(delta, PRICING, "fast").has_unpriced
@@ -163,9 +163,30 @@ def test_tariff_and_unpriced_can_coexist_in_one_category():
     account = UsageAccount()
     account.add("main", 1000, 0, model="fast")
     account.add("main", 1000, 0)
-    report = compute_cost(account, PRICING, "fast")
+    report = compute_cost(account, PRICING, "unknown")
     assert report.categories[0].cost_source == "tariff"
     assert report.categories[0].unpriced
     text = render_cost_report(report)
     assert "1.00 USD?" in text
     assert "итог неполный" in text
+
+
+def test_develop_meta_without_by_model_priced_at_agent_model_rate():
+    # Реальная форма meta develop: одна категория main, без by_model.
+    account = UsageAccount.from_meta(
+        {"by_category": {"main": {"input": 10_000, "output": 1_000, "calls": 3}}}
+    )
+    report = compute_cost(account, PRICING, "big")
+    assert report.by_currency == {"USD": 10_000 / 1000 * 10 + 1_000 / 1000 * 20}
+    assert report.categories[0].cost_source == "tariff"
+    assert not report.has_unpriced
+
+
+def test_legacy_remainder_without_agent_tariff_is_unpriced():
+    account = UsageAccount.from_meta(
+        {"by_category": {"main": {"input": 10_000, "output": 1_000, "calls": 3}}}
+    )
+    report = compute_cost(account, PRICING, "unknown")
+    assert report.by_currency == {}
+    assert report.has_unpriced
+    assert not compute_cost(account, PRICING, None).by_currency
