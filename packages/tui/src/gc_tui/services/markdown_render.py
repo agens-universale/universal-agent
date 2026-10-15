@@ -79,7 +79,22 @@ def _parse_table_aligns(sep_line: str, ncols: int) -> list[str]:
     return (aligns + ["left"] * ncols)[:ncols]
 
 
-_FENCE_RE = re.compile(r"^(`{3,})(.*)$")
+# Ограда может стоять с отступом: внутри пункта списка модель сдвигает блок
+# кода под текст пункта. Без этого такой блок оставался сырым текстом с
+# видимыми кавычками.
+_FENCE_RE = re.compile(r"^[ \t]*(`{3,})(.*)$")
+
+
+def _indent(line: str) -> int:
+    return len(line) - len(line.lstrip(" \t"))
+
+
+def _dedent_fenced(lines: list[str], fence_line: str) -> list[str]:
+    """Снять с тела блока отступ его ограды (не больше, чем есть в строке)."""
+    indent = _indent(fence_line)
+    if not indent:
+        return lines
+    return [line[min(indent, _indent(line)) :] for line in lines]
 
 
 def _fence_open(line: str) -> tuple[int, str | None] | None:
@@ -90,10 +105,17 @@ def _fence_open(line: str) -> tuple[int, str | None] | None:
     return len(m.group(1)), (m.group(2).strip() or None)
 
 
-def _fence_closes(line: str, opened: int) -> bool:
-    """Закрывающая ограда — одни кавычки, не короче открывающей (CommonMark)."""
+def _fence_closes(line: str, opened: int, opened_indent: int = 0) -> bool:
+    """Закрывающая ограда — одни кавычки, не короче открывающей и не глубже её
+    отступа плюс три пробела (CommonMark): сдвинутые кавычки внутри кода
+    (пример в докстроке) блок не закрывают."""
     m = _FENCE_RE.match(line)
-    return bool(m) and len(m.group(1)) >= opened and not m.group(2).strip()
+    return (
+        bool(m)
+        and len(m.group(1)) >= opened
+        and not m.group(2).strip()
+        and _indent(line) <= opened_indent + 3
+    )
 
 
 def segment_answer(text: str) -> list[Block]:
@@ -122,10 +144,12 @@ def segment_answer(text: str) -> list[Block]:
             fence_len, lang_tag = opened
             j = i + 1
             chunk: list[str] = []
-            while j < len(lines) and not _fence_closes(lines[j], fence_len):
+            while j < len(lines) and not _fence_closes(
+                lines[j], fence_len, _indent(ln)
+            ):
                 chunk.append(lines[j])
                 j += 1
-            content = "\n".join(chunk)
+            content = "\n".join(_dedent_fenced(chunk, ln))
             # Пустой блок панелью не становится (Е2): ни кнопки копирования, ни рамки
             # вокруг пустоты — обе половины ленты (финал и живой путь) читают сегменты.
             if content.strip():
@@ -203,17 +227,19 @@ def render_prose(text: str) -> Text:
     Возвращает rich.Text в нормальном цвете (INK)."""
     out = Text()
     in_fence = 0  # 0 — вне блока, иначе длина открывающей ограды
+    fence_indent = 0
     for i, line in enumerate(text.split("\n")):
         if i:
             out.append("\n")
         if in_fence:
-            if _fence_closes(line, in_fence):
+            if _fence_closes(line, in_fence, fence_indent):
                 in_fence = 0
             out.append(line, style=_INK)
             continue
         opened = _fence_open(line)
         if opened is not None:
             in_fence = opened[0]
+            fence_indent = _indent(line)
             out.append(line, style=_INK)
             continue
         m = _PROSE_HEADING_RE.match(line)
