@@ -279,6 +279,10 @@ Return format (JSON string):
         combined, base_version = "", None
         output = await self._areject_unusable(request.action)
         if output is None:
+            # Удалённую память возвращает из копии только сам тул — как в
+            # develop; статус и отпечаток памяти её не трогают.
+            if self._project is not None:
+                await self._store.restore_memory(self._project)
             output, combined, base_version = await self._adispatch_io(request)
         return ProjectMemoryReply(
             output=output,

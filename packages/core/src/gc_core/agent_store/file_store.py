@@ -108,10 +108,16 @@ class FileAgentStore(AgentStore):
     async def read_memory(self, project: ProjectKey) -> ProjectMemory | None:
         from gc_core.project_memory import storage
 
-        path = memory_path(project)
         with storage._lock:
-            storage.restore_from_backup(path, memory_backup_path(project))
-            return _memory_on_disk(path)
+            return _memory_on_disk(memory_path(project))
+
+    async def restore_memory(self, project: ProjectKey) -> None:
+        from gc_core.project_memory import storage
+
+        with storage._lock:
+            storage.restore_from_backup(
+                memory_path(project), memory_backup_path(project)
+            )
 
     async def write_memory(
         self,

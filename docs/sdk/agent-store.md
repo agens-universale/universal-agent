@@ -63,6 +63,7 @@ class AgentStore(ABC):
     async def write_memory(
         self, project: ProjectKey, text: str, *, expected_version: str | None
     ) -> ProjectMemory: ...
+    async def restore_memory(self, project: ProjectKey) -> None: ...  # необяз.
     def label(self, kind, name) -> str: ...  # как назвать ресурс в отказе
     def memory_label(self, project) -> str: ...  # как назвать память в отказе
 ```
@@ -80,6 +81,10 @@ class AgentStore(ABC):
   `memory_version(text)`: sha256 текста, `None` для пустого. Запись проходит,
   только если на месте версия `expected_version` (`None` — памяти нет или она
   пуста); иначе `MemoryConflict(current)`.
+- `restore_memory` (по умолчанию — ничего): вернуть удалённую память из
+  резервной копии. Зовёт только тул `project_memory`; `read_memory` копию не
+  трогает — статус и отпечаток памяти читают её на каждом прогоне и шаге, и
+  удалённое пользователем не должно возвращаться само.
 
 Ядро отвечает на отказ так же, как раньше на файл: обязательный промпт роняет
 запуск или ход с понятным текстом, необязательный (`special_instructions`, `L1`)
