@@ -977,3 +977,33 @@ def test_report_without_cost_column_has_no_legends():
     assert "cost" not in text
     assert "~ —" not in text
     assert "+ —" not in text
+
+
+def test_to_compact_meta_drops_per_model_and_billed_keys():
+    from gc_core.usage.account import CATEGORY_MAIN, UsageAccount
+
+    account = UsageAccount()
+    account.add(
+        CATEGORY_MAIN,
+        100,
+        20,
+        10,
+        cost=0.5,
+        billed=True,
+        currency="USD",
+        model="m1",
+    )
+
+    assert account.to_compact_meta() == {
+        "by_category": {
+            CATEGORY_MAIN: {
+                "input": 100,
+                "output": 20,
+                "cached": 10,
+                "calls": 1,
+                "missing_usage_calls": 0,
+                "cost_by_currency": {"USD": 0.5},
+            }
+        }
+    }
+    assert "by_model" in account.to_meta()

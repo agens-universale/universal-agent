@@ -764,7 +764,7 @@ class SubagentRunner:
                 result=result_payload,
                 steps=child_state.steps,
                 finish_reason="completed",
-                usage=child_state.usage.to_meta(),
+                usage=child_state.usage.to_compact_meta(),
                 child_run_id=str(getattr(child_ctx, "run_id", "") or ""),
             )
         finally:

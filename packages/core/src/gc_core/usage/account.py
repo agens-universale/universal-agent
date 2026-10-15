@@ -361,6 +361,21 @@ class UsageAccount:
             }
         return meta
 
+    def to_compact_meta(self) -> Dict[str, Any]:
+        """Короткая сводка для модели: токены и деньги по категориям, без
+        разбивки по моделям и ``billed_*`` (в персист и снимки не идёт)."""
+        full = self.to_meta()["by_category"]
+        return {
+            "by_category": {
+                category: {
+                    key: value
+                    for key, value in bucket.items()
+                    if key != "by_model" and not key.startswith("billed_")
+                }
+                for category, bucket in full.items()
+            }
+        }
+
     @classmethod
     def from_meta(cls, raw: Any) -> UsageAccount:
         if not isinstance(raw, dict):
