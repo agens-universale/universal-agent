@@ -102,7 +102,7 @@ def _resume_offset(cached: JsonObject, after_seq: int | None) -> int | None:
     recent = cached.get("recent") or []
     if not recent or after_seq < recent[0][0] - 1:
         return None
-    return next(off for seq, off in recent if seq > after_seq)
+    return next((off for seq, off in recent if seq > after_seq), None)
 
 
 def _read_plan(cached, path: str, size: int, after_seq):
@@ -433,7 +433,8 @@ class FileThreadStore(ThreadStore):
         )
         stats = self._stats(key, v2, stream)
         size = os.path.getsize(path) if os.path.exists(path) else 0
-        offsets, position = [], size
+        # Разделитель, который file_tx поставит перед хвостом.
+        offsets, position = [], size + int(file_tx.unterminated(path))
         for line in lines:
             offsets.append(position)
             position += len(line)
@@ -549,18 +550,31 @@ class FileThreadStore(ThreadStore):
 
     # --- запись истории ------------------------------------------------------------
 
-    def _record(self, key: ThreadKey, v2: JsonObject) -> ThreadRecord:
+    def _record(
+        self, key: ThreadKey, v2: JsonObject, *, listing: bool = False
+    ) -> ThreadRecord:
+        """Запись треда. ``listing`` — для списка: поток, который v2 ещё не
+        читал (тред develop), не читается целиком — число сообщений берётся
+        из meta (его и показывал develop), отметка — по последней строке
+        файла, архивы — только из кеша."""
         meta = self._meta(key)
         parts = parts_from_meta(meta)
         info = parts.info.model_copy(
             update={
                 "created_at": meta.get("created_at") or v2.get("created_at"),
                 "updated_at": meta.get("updated_at") or v2.get("created_at"),
-                "messages_count": self._stats(key, v2, _HISTORY)["count"],
+                "messages_count": self._count(key, v2, meta, listing),
             }
         )
         streams = {_HISTORY, _SUBAGENTS, _EDITS, *v2["high"]}
-        high = {s: self._high(key, v2, s) for s in streams}
+        if listing:
+            high = {s: self._listed_high(key, v2, s) for s in streams}
+            archives = [
+                ArchiveInfo.model_validate(a) for a in v2.get("archives", [])
+            ]
+        else:
+            high = {s: self._high(key, v2, s) for s in streams}
+            archives = self._archives(key, v2, meta)
         return ThreadRecord(
             key=key,
             info=info,
@@ -568,7 +582,7 @@ class FileThreadStore(ThreadStore):
             usage=parts.usage,
             runtime=parts.runtime,
             frontend=parts.frontend,
-            archives=self._archives(key, v2),
+            archives=archives,
             revision=v2["revision"],
             generation=v2["generation"],
             history_version=v2["history_version"],
@@ -577,15 +591,45 @@ class FileThreadStore(ThreadStore):
             extra=parts.extra,
         )
 
-    def _archives(self, key: ThreadKey, v2: JsonObject) -> list[ArchiveInfo]:
-        """Архивы треда; список кешируется в ``control.json`` (обход каталога
-        тредов дорог, а архив появляется только при сжатии через v2)."""
-        if "archives" not in v2:
-            v2["archives"] = [
-                a.model_dump(mode="json") for a in self._scan_archives(key)
-            ]
-            self._memo.setdefault(key, {})["archives"] = v2["archives"]
+    def _archives(
+        self, key: ThreadKey, v2: JsonObject, meta: JsonObject
+    ) -> list[ArchiveInfo]:
+        """Архивы треда; список кешируется (обход каталога тредов дорог).
+
+        Кеш сверяется с отметкой последнего сжатия в meta: develop после
+        отката сжимает тред мимо v2, и архива из отметки в кеше нет."""
+        marker = meta.get(ARCHIVE_SUFFIX_KEY)
+        if not _knows(v2.get("archives"), marker):
+            memo = self._memo.setdefault(key, {})
+            # Отметка, для которой каталог уже обходили: архив из неё мог
+            # убрать уборщик — второй обход ничего не даст.
+            if "archives" in memo and (
+                memo.get("archives_for") == marker
+                or _knows(memo["archives"], marker)
+            ):
+                v2["archives"] = memo["archives"]
+            else:
+                v2["archives"] = [
+                    a.model_dump(mode="json") for a in self._scan_archives(key)
+                ]
+                memo["archives"] = v2["archives"]
+                memo["archives_for"] = marker
         return [ArchiveInfo.model_validate(a) for a in v2["archives"]]
+
+    def _count(
+        self, key: ThreadKey, v2: JsonObject, meta: JsonObject, listing: bool
+    ) -> int:
+        counted = meta.get("messages_count")
+        unread = listing and _HISTORY not in v2.get("stats", {})
+        if unread and isinstance(counted, int) and counted >= 0:
+            return counted
+        return self._stats(key, v2, _HISTORY)["count"]
+
+    def _listed_high(self, key: ThreadKey, v2: JsonObject, stream: str) -> int:
+        if stream in v2.get("stats", {}):
+            return self._high(key, v2, stream)
+        last = _last_seq(self._read_path(key, stream), stream)
+        return max(int(v2["high"].get(stream, 0)), last)
 
     def _scan_archives(self, key: ThreadKey) -> list[ArchiveInfo]:
         infos = []
@@ -629,7 +673,7 @@ class FileThreadStore(ThreadStore):
         records = []
         for key in self._known_keys():
             try:
-                record = await self.get_thread(key)
+                record = self._listed(key)
             except (OSError, ValueError):
                 # Один испорченный тред не прячет остальные: список его
                 # пропускает, чтение по ключу падает громко.
@@ -638,6 +682,13 @@ class FileThreadStore(ThreadStore):
             if record is not None:
                 records.append(record)
         return page_of(records, query)
+
+    def _listed(self, key: ThreadKey) -> ThreadRecord | None:
+        with self._read_scope(key):
+            _control_doc, v2 = self._load(key)
+            if not self._exists(key, v2):
+                return None
+            return self._record(key, v2, listing=True)
 
     def _known_keys(self) -> set[ThreadKey]:
         keys: set[ThreadKey] = set()
@@ -653,10 +704,13 @@ class FileThreadStore(ThreadStore):
             if key is not None:
                 keys.add(key)
         for identity in root.glob(".store/*/identity.json"):
-            raw = json.loads(identity.read_text(encoding="utf-8"))
-            keys.add(
-                ThreadKey(system=raw["system_id"], thread=raw["thread_id"])
-            )
+            try:
+                raw = json.loads(identity.read_text(encoding="utf-8"))
+                keys.add(
+                    ThreadKey(system=raw["system_id"], thread=raw["thread_id"])
+                )
+            except (OSError, ValueError, KeyError, TypeError):
+                continue  # один испорченный служебный файл — не весь список
         return keys
 
     async def read_stream(
@@ -970,15 +1024,56 @@ class FileThreadStore(ThreadStore):
         cutoff = self._clock() - older_than
         removed = 0
         for path in Path(self._dir).glob(".store/*/receipts/*.json"):
-            doc = json.loads(path.read_bytes())
+            try:
+                doc = json.loads(path.read_bytes())
+            except (OSError, ValueError):
+                continue  # убрана параллельно (delete, другой уборщик)
             if (
                 doc.get("v2")
                 and doc.get("at")
                 and (datetime.fromisoformat(doc["at"]) < cutoff)
             ):
-                path.unlink()
+                path.unlink(missing_ok=True)
                 removed += 1
         return removed
+
+
+#: С какого окна с конца файла список ищет последнюю запись (растёт ×4).
+_TAIL_PROBE = 8 * 1024
+
+
+def _last_seq(path: str | Path, stream: str) -> int:
+    """Номер последней целой записи потока по концу файла — без чтения
+    файла целиком; журнал правок нумеруется по строкам — для него 0."""
+    if stream == _EDITS or not os.path.exists(path):
+        return 0
+    with open(path, "rb") as handle:
+        size = handle.seek(0, 2)
+        probe = _TAIL_PROBE
+        while True:
+            handle.seek(max(0, size - probe))
+            seq = _last_seq_in(handle.read())
+            if seq or probe >= size:
+                return seq
+            probe *= 4
+
+
+def _last_seq_in(tail: bytes) -> int:
+    for raw in reversed(tail.splitlines()):
+        row = _json_row(raw.decode("utf-8", errors="replace"))
+        seq = None if row is None else row.get("seq")
+        if isinstance(seq, int) and seq >= 1:
+            return seq
+    return 0
+
+
+def _knows(archives: list | None, marker: object) -> bool:
+    """Кеш архивов есть и знает архив последнего сжатия."""
+    if archives is None:
+        return False
+    return not isinstance(marker, str) or any(
+        a.get("id") == marker for a in archives
+    )
 
 
 def _archive_created(suffix: str, data_path: str) -> str:
@@ -1156,7 +1251,7 @@ class _Commit:
         meta_source = layout.meta_file(d, s, t)
         if os.path.exists(meta_source):
             self.changes.put(archived_meta, Path(meta_source).read_bytes())
-        archives = store._archives(key, self.v2)
+        archives = store._archives(key, self.v2, store._meta(key))
         archives.append(
             ArchiveInfo(
                 id=suffix,

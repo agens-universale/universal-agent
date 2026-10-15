@@ -71,11 +71,17 @@ class Changes:
         )
 
     def append(self, path: str | Path, tail: bytes) -> None:
-        """Дописать в конец; размер до записи — ``offset`` для повтора."""
+        """Дописать в конец; размер до записи — ``offset`` для повтора.
+
+        Файл кончается не переводом строки (develop, оборванная запись) —
+        перед хвостом ставится разделитель: иначе новая строка приклеилась
+        бы к последней, и не читались бы обе."""
         if not tail:
             return
         current = Path(path)
         offset = current.stat().st_size if current.exists() else 0
+        if unterminated(current):
+            tail = b"\n" + tail
         self.items.append(
             {
                 "path": self._relative(path),
@@ -83,6 +89,16 @@ class Changes:
                 "append": base64.b64encode(tail).decode(),
             }
         )
+
+
+def unterminated(path: str | Path) -> bool:
+    """Файл непуст и кончается не переводом строки."""
+    try:
+        with open(path, "rb") as stream:
+            stream.seek(-1, 2)
+            return stream.read(1) != b"\n"
+    except OSError:  # нет файла или он пуст (seek до начала)
+        return False
 
 
 def _plain_write(path: Path, data: bytes) -> None:
