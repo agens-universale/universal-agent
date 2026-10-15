@@ -8,7 +8,9 @@ import secrets
 
 from fastapi import FastAPI, Request
 from fastapi.responses import Response
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from gc_a2a.card import http_origin
 from gc_a2a.errors import (
     RpcError,
     error_body,
@@ -25,6 +27,9 @@ from gc_a2a.jsonrpc import parse_call, version_ok
 logger = logging.getLogger(__name__)
 
 _JSON = "application/json"
+# IPv6-loopback (`::1`) не в списке: TrustedHostMiddleware режет порт по
+# первому ":". При бинде на `::1` проверка Host выключается.
+_LOOPBACK_HOSTS = ("127.0.0.1", "localhost")
 _UNSUPPORTED = frozenset(
     {
         "SendStreamingMessage",
@@ -49,6 +54,10 @@ def create_app(facade: A2aFacade) -> FastAPI:
         "/.well-known/agent-card.json", agent_card, methods=["GET"]
     )
     app.add_api_route("/rpc", rpc, methods=["POST"])
+    if facade.bind_host in _LOOPBACK_HOSTS:
+        app.add_middleware(
+            TrustedHostMiddleware, allowed_hosts=list(_LOOPBACK_HOSTS)
+        )
     return app
 
 
@@ -61,6 +70,8 @@ async def rpc(request: Request) -> Response:
     request_id = None
     try:
         _authorize(request, facade.auth_token)
+        _require_json(request)
+        _reject_foreign_origin(request, facade)
         call = parse_call(await request.body())
         request_id = call["id"]
         _require_version(request)
@@ -103,6 +114,35 @@ def _bearer_ok(header: str | None, token: str) -> bool:
         return False
     got = header[len("Bearer ") :]
     return secrets.compare_digest(got, token)
+
+
+def _require_json(request: Request) -> None:
+    """POST без ``application/json`` браузер шлёт без preflight."""
+    ctype = request.headers.get("content-type", "")
+    if ctype.split(";", 1)[0].strip().lower() == _JSON:
+        return
+    raise RpcError(
+        -32005,
+        "ContentTypeNotSupportedError",
+        "Content type not supported",
+        status=415,
+    )
+
+
+def _reject_foreign_origin(request: Request, facade: A2aFacade) -> None:
+    """Чужой Origin — сайт в браузере пользователя, не клиент протокола."""
+    origin = request.headers.get("origin")
+    if origin is None or origin == "":
+        return
+    allowed = http_origin(facade.bind_host, facade.bind_port)
+    if origin == allowed:
+        return
+    raise RpcError(
+        -32600,
+        "InvalidRequestError",
+        "Invalid Request",
+        status=403,
+    )
 
 
 def _require_version(request: Request) -> None:

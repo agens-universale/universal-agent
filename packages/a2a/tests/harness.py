@@ -80,7 +80,15 @@ class Clock:
 
 
 @asynccontextmanager
-async def session(tmp_path, *, token="", agents=None, clock=None, **settings):
+async def session(
+    tmp_path,
+    *,
+    token="",
+    agents=None,
+    clock=None,
+    base_url="http://127.0.0.1:8091",
+    **settings,
+):
     created: list[AnswerAgent] = []
     queue = list(agents or [])
 
@@ -101,7 +109,7 @@ async def session(tmp_path, *, token="", agents=None, clock=None, **settings):
     )
     transport = httpx.ASGITransport(app=create_app(facade))
     async with httpx.AsyncClient(
-        transport=transport, base_url="http://127.0.0.1:8091"
+        transport=transport, base_url=base_url
     ) as client:
         try:
             yield client, facade, created

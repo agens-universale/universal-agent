@@ -116,12 +116,100 @@ async def test_version_header_query_and_rejection(tmp_path):
     assert created == []
 
 
+async def test_browser_post_cannot_start_a_turn(tmp_path):
+    """Чужой сайт не запускает агента простым POST без preflight."""
+    body = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "SendMessage",
+        "params": {
+            "message": {
+                "messageId": "m-1",
+                "role": "ROLE_USER",
+                "parts": [{"text": "x"}],
+                "metadata": {"cwd": "/"},
+            }
+        },
+    }
+    raw = (
+        '{"jsonrpc":"2.0","id":1,"method":"SendMessage","params":'
+        '{"message":{"messageId":"m-1","role":"ROLE_USER",'
+        '"parts":[{"text":"x"}],"metadata":{"cwd":"/"}}}}'
+    )
+    async with session(tmp_path) as (client, _f, created):
+        plain = await client.post(
+            "/rpc?A2A-Version=1.0",
+            content=raw.encode(),
+            headers={
+                "Content-Type": "text/plain",
+                "Origin": "https://evil.example",
+            },
+        )
+        foreign = await client.post(
+            "/rpc",
+            json=body,
+            headers={
+                "A2A-Version": "1.0",
+                "Origin": "https://evil.example",
+            },
+        )
+        own = await client.post(
+            "/rpc",
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "ListTasks",
+                "params": {},
+            },
+            headers={
+                "A2A-Version": "1.0",
+                "Origin": "http://127.0.0.1:8091",
+            },
+        )
+    assert plain.status_code == 415
+    assert foreign.status_code == 403
+    assert own.status_code == 200
+    assert created == []
+
+
+async def test_rebound_host_is_rejected_on_loopback(tmp_path):
+    """DNS rebinding: чужой Host на loopback-бинде не доходит до метода."""
+    async with session(tmp_path, base_url="http://evil.example:8091") as (
+        client,
+        _f,
+        created,
+    ):
+        rebound = await rpc(client, "ListTasks")
+    assert rebound.status_code == 400
+    assert created == []
+    async with session(tmp_path, base_url="http://localhost:8091") as (
+        client,
+        _f,
+        _created,
+    ):
+        local = await rpc(client, "ListTasks")
+    assert local.status_code == 200
+
+
+async def test_wide_bind_does_not_check_host(tmp_path):
+    async with session(
+        tmp_path,
+        base_url="http://gpu-box:8091",
+        **{"a2a.host": "0.0.0.0"},
+    ) as (client, _f, _created):
+        response = await rpc(client, "ListTasks")
+    assert response.status_code == 200
+
+
 async def test_envelope_errors(tmp_path):
     async with session(tmp_path) as (client, _f, _c):
         broken = await client.post(
             "/rpc",
             content=b"not-json",
-            headers={"A2A-Version": "1.0"},
+            headers={
+                "A2A-Version": "1.0",
+                "Content-Type": "application/json",
+            },
         )
         not_object = await client.post(
             "/rpc",
