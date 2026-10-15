@@ -7,6 +7,7 @@ from gc_core.config_modules.cli_args import (
     parse_override_args,
     setting_flag_overrides,
 )
+from gc_core.security.permission_mode import AVAILABLE_MODES
 
 run_args = dict()
 extra_config_overrides: Dict[str, Any] = {}
@@ -221,6 +222,16 @@ parser.add_argument(
     help=(
         "Режим read_guard: allow выполняет без проверок, "
         "ask запрашивает подтверждение для подозрительного, deny блокирует"
+    ),
+)
+
+parser.add_argument(
+    "--permission-mode",
+    choices=[mode.value for mode in AVAILABLE_MODES],
+    default=None,
+    help=(
+        "Режим разрешений на этот запуск (сильнее режима, сохранённого в "
+        "сессии; по умолчанию — security.permissions.default_mode)"
     ),
 )
 

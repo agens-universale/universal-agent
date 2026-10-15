@@ -49,6 +49,7 @@ from recommended_mcp.runtime.daemon_autostart import (
 )
 
 from gc_cli import arg_parser
+from gc_cli.plan_approval import arun_plan_approval
 from gc_cli.structured_output import (
     StructuredOutputError,
     aemit_structured_result,
@@ -906,6 +907,11 @@ async def arun_cli() -> int:
     verbose = arg_parser.run_args.verbose
 
     executor = AgentExecutor(ctx)
+    # Флаг запуска — выбор режима на эту сессию: он сильнее сохранённого в
+    # треде, поэтому идёт исполнителю, а не слоем конфига.
+    permission_mode = getattr(arg_parser.run_args, "permission_mode", None)
+    if permission_mode:
+        executor.set_permission_mode(permission_mode)
     structured_exit: int | None = None
     # Учёт закрывается один раз, после всего, что ещё прибавится к прогону.
     # Сейчас это перефраз. Следующий такой шаг встаёт перед той же точкой.
@@ -921,6 +927,15 @@ async def arun_cli() -> int:
             account_run=not close_accounting_after,
         )
         ran = True
+        # До уборки ниже: продолжение после одобрения — ещё один прогон тем
+        # же процессом, ему нужны те же клиенты и MCP-демоны.
+        response = await arun_plan_approval(
+            executor,
+            response,
+            thread_id=thread_id,
+            verbose=verbose,
+            account_run=not close_accounting_after,
+        )
         structured_exit = await _emit_structured_if_requested(
             format_text=format_text,
             response=response,
