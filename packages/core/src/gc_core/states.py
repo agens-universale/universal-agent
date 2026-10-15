@@ -149,8 +149,17 @@ class State(ExecutionState):
         # объявления «не начинали» было бы неотличимо от «поля нет».
         self.turn_level: Optional[str] = None
         self.terminal_outcome: Optional[str] = (
-            None  # None | "step_limit" | "tool_errors"
+            None  # None | "step_limit" | "tool_errors" | "plan_proposed" | "judge_unavailable"
         )
+        # Успешный turn_propose_plan в текущем батче: по этому флагу цикл
+        # агента закрывает ход. Транзиентный, в мету не пишется.
+        self.plan_proposed: bool = False
+        # Судья действий режима auto: сбои проверки подряд у ЭТОГО агента (у
+        # субагента свои) и причина, по которой прогон надо остановить. В мету
+        # треда не пишутся: состояние новое на каждый прогон. Отказы судьи
+        # считаются на сессию — в `SharedStateData`.
+        self.judge_failures_in_a_row: int = 0
+        self.judge_stop_reason: Optional[str] = None
         self.last_unknown_tool_name: Optional[str] = None
         self.unknown_tool_repeat_count: int = 0
         self.last_batch_unknown_tool_count: int = 0

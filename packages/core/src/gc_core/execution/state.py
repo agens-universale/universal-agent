@@ -31,6 +31,28 @@ class SharedStateData:
     # Субагент ведёт свой — см. ``State.session_todo``: shared у них общий, и
     # replace-семантика затирала бы план родителя.
     session_todo: List[Dict[str, str]] = field(default_factory=list)
+    # Режим разрешений, выбранный в сессии (Shift+Tab, флаг запуска). None —
+    # выбора не было, действует `security.permissions.default_mode`. Субагент
+    # наследует режим родителя: shared у них общий.
+    permission_mode: Optional[str] = None
+    # План режима plan: {text, status, approved_mode, updated_at}
+    # (`gc_core.plan_store`). None — плана нет.
+    plan: Optional[Dict[str, Any]] = None
+    # О каком режиме модели уже сказано ("plan" | "auto" | None): техсообщение
+    # о входе и выходе шлётся по факту смены, один раз, а не на каждое
+    # переключение.
+    mode_announced: Optional[str] = None
+    # Человек убрал план (`/plan clear`): следующий прогон один раз сообщит об
+    # этом модели — в истории и в сводке план ещё виден.
+    plan_removed_notice: bool = False
+    # Предохранитель судьи действий (auto) — как у эталона: 3 отказа
+    # подряд или 20 за сессию ставят паузу; на паузе спорное действие решает
+    # человек, а спросить некого — отказ без судьи. Счёт и пауза общие для
+    # сессии и её субагентов (shared у них один) и снимаются только «да»
+    # человека (`gc_core.security.action_judge_step`).
+    judge_denials_in_a_row: int = 0
+    judge_denials_total: int = 0
+    judge_paused: bool = False
 
 
 STATE_FIELDS = (
@@ -65,6 +87,9 @@ STATE_FIELDS = (
     "messages",
     "mode",
     "parent_state_id",
+    "plan_proposed",
+    "judge_failures_in_a_row",
+    "judge_stop_reason",
     "previous_response_id",
     "prepared_metadata",
     "project_memory_content_hash",
