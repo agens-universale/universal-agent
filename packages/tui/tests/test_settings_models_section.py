@@ -1601,14 +1601,24 @@ async def test_assign_picker_offers_levels_and_aliases_after_active(tmp_path):
         ]
 
 
+_FIXED_CONSUMERS = (
+    "finish_gate",
+    "text_answer_judge",
+    "command_judge",
+    "summary",
+    "routing_judge",
+)
+
+
 async def test_fixed_consumer_without_binding_shows_the_level_it_really_uses(tmp_path):
-    """Судьи финала и команд, суммаризация и судья автовыбора без привязки
-    работают уровнем default (спека PR140 Р1): строка и первый пункт пикера
-    говорят это словами пустого слота («не задана → default», «действует
-    default → модель»). Остальные потребители без привязки — «активная»."""
+    """Судьи финала, текстового ответа и команд, суммаризация и судья
+    автовыбора без привязки работают уровнем default (спека PR140 Р1): строка
+    и первый пункт пикера говорят это словами пустого слота («не задана →
+    default», «действует default → модель»). Остальные потребители без
+    привязки — «активная»."""
     async with _section(tmp_path, _REGISTRY) as (pilot, scr, _cfg_file):
         ed = _editor(scr)
-        for consumer in ("finish_gate", "command_judge", "summary", "routing_judge"):
+        for consumer in _FIXED_CONSUMERS:
             assert ed._assign_unset_label(consumer) == "не задана → default"
         assert ed._assign_unset_label("vision") == "активная"
         _goto(ed, "assign", consumer="finish_gate")
@@ -1618,6 +1628,32 @@ async def test_fixed_consumer_without_binding_shows_the_level_it_really_uses(tmp
         first = ed._picker["rows"][0]
         assert first["value"] is None and first["label"] == "не задана"
         assert str(first["desc"]) == "действует default → flash"
+
+
+async def test_fixed_consumer_without_default_slot_shows_active(tmp_path):
+    """Слот default не задан — кодовый уровень не действует: судьи без привязки
+    идут активным уровнем, как прочие потребители, и экран говорит «активная»,
+    а не «не задана → default» с фоллбэком на max."""
+    registry = (
+        "models:\n"
+        "  flash:\n"
+        '    model: "google/gemini-2.5-flash"\n'
+        "  opus:\n"
+        '    model: "anthropic/claude-opus"\n'
+        "slots:\n"
+        '  light: "flash"\n'
+        '  max: "opus"\n'
+    )
+    async with _section(tmp_path, registry) as (pilot, scr, _cfg_file):
+        ed = _editor(scr)
+        for consumer in _FIXED_CONSUMERS:
+            assert ed._assign_unset_label(consumer) == "активная"
+        _goto(ed, "assign", consumer="finish_gate")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        first = ed._picker["rows"][0]
+        assert first["value"] is None and first["label"] == "активная"
 
 
 async def test_alt_down_opens_the_same_picker(tmp_path):

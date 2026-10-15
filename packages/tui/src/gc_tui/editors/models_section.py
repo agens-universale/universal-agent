@@ -449,8 +449,8 @@ def address_host(url: str) -> str:
 # --- нижняя половина секции: слоты (уровень → алиас) и привязки потребителей ---
 _SLOT_UNSET = "не задан"
 _ASSIGN_ACTIVE = "активная"
-# Привязки нет, но потребитель работает фиксированным уровнем (`unbound_level`):
-# слова пустого слота — «не задана → default».
+# Привязки нет, но потребитель работает фиксированным уровнем
+# (`fixed_unbound_level`): слова пустого слота — «не задана → default».
 _ASSIGN_UNSET = "не задана"
 # Значение, которого в файле цели нет, а в основном конфиге есть (§7-8): смысл
 # несёт СЛОВО, а не приглушённый цвет (замер ревью развёл DIM и DEEP_DIM на
@@ -1440,13 +1440,20 @@ class ModelsSectionEditor(Vertical):
         словом «основной → light» (§8); потребитель с фиксированным уровнем без
         привязки — «не задана → default», как пустой слот; иначе «активная»
         (идёт за активным уровнем, фиксировать нечего)."""
-        from gc_core.model_router import unbound_level
-
         inherited = self._base_assign_value(consumer)
         if inherited:
             return inherited_value(inherited)
-        level = unbound_level(consumer)
+        level = self._fixed_unbound_level(consumer)
         return f"{_ASSIGN_UNSET} → {level}" if level else _ASSIGN_ACTIVE
+
+    def _fixed_unbound_level(self, consumer: str) -> str | None:
+        """Фиксированный уровень потребителя без привязки при ЭФФЕКТИВНЫХ слотах
+        экрана — правило роутера (`fixed_unbound_level`), не своё: уровень
+        действует, только когда его слот задан."""
+        from gc_core.model_router import fixed_unbound_level
+
+        slots = {lvl: self._effective_slot_value(lvl) for lvl in LEVELS}
+        return fixed_unbound_level(consumer, slots)
 
     def _slot_row_text(self, level: str, selected: bool) -> Text:
         return self._binding_row_text(
@@ -2901,9 +2908,7 @@ class ModelsSectionEditor(Vertical):
     def _assign_unset_entry(self, consumer: str) -> tuple[str, Text]:
         """Подпись и описание пункта «без привязки»: фиксированный уровень —
         «не задана · действует default → модель», иначе «активная»."""
-        from gc_core.model_router import unbound_level
-
-        level = unbound_level(consumer)
+        level = self._fixed_unbound_level(consumer)
         if level is None:
             return _ASSIGN_ACTIVE, self._picker_active_desc()
         t = Text("действует ", style=DEEP_DIM)

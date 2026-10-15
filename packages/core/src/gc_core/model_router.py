@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, replace
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 from gc_core.config_modules.model_registry import (
     LEVEL_FALLBACK,
@@ -62,9 +62,11 @@ _SCALAR_ASSIGN_FIELDS = (
 # Потребители, которые без привязки работают фиксированным уровнем, а не
 # уровнем текущего шага: судьи и суммаризация не опускаются и не дорожают
 # вместе с исполнителем. Явная привязка сильнее; пин субагента — нет: судей
-# привязанного ребёнка определяет этот уровень (спека PR140 Р1).
+# привязанного ребёнка определяет этот уровень (спека PR140 Р1). Действует
+# уровень, только когда его слот задан (`fixed_unbound_level`).
 _UNBOUND_LEVELS = {
     "finish_gate": "default",
+    "text_answer_judge": "default",
     "command_judge": "default",
     "summary": "default",
     "routing_judge": "default",
@@ -72,9 +74,22 @@ _UNBOUND_LEVELS = {
 
 
 def unbound_level(consumer: str) -> str | None:
-    """Уровень потребителя без привязки; None — идёт за активным уровнем.
-    Одно место правды и для резолва, и для экрана настроек."""
+    """Уровень потребителя без привязки по таблице; None — идёт за активным
+    уровнем. Действует ли он в конкретном реестре — `fixed_unbound_level`."""
     return _UNBOUND_LEVELS.get(consumer)
+
+
+def fixed_unbound_level(
+    consumer: str, slots: Mapping[str, object]
+) -> str | None:
+    """Уровень, которым потребитель без привязки работает при этих слотах.
+
+    Уровень таблицы действует, только если его слот задан: фоллбэк незаданного
+    `default` по матрице уводит на `max`, и судьи ручного `light` шли бы самой
+    дорогой моделью. Иначе None — потребитель идёт как вне таблицы (пин ребёнка,
+    затем активный уровень). Одно место правды для резолва и экрана настроек."""
+    level = unbound_level(consumer)
+    return level if level is not None and slots.get(level) else None
 
 
 @dataclass(frozen=True)
@@ -346,7 +361,8 @@ class ModelRouter:
 
         Потребитель из `unbound_level` без собственной привязки идёт своим
         фиксированным уровнем — раньше override ребёнка и раньше уровня такта:
-        судьи и суммаризация не следуют за исполнителем."""
+        судьи и суммаризация не следуют за исполнителем. Слот этого уровня не
+        задан — потребитель идёт как вне таблицы (`fixed_unbound_level`)."""
         if not (
             consumer in CONSUMERS
             or consumer.startswith(SUBAGENT_CONSUMER_PREFIX)
@@ -376,7 +392,7 @@ class ModelRouter:
                 check_breaker=check_breaker,
             )
 
-        fixed = unbound_level(consumer)
+        fixed = fixed_unbound_level(consumer, self._slots)
         if fixed is not None:
             return self._resolve_level(
                 fixed,
