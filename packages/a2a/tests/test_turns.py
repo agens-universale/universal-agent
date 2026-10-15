@@ -60,6 +60,51 @@ async def test_same_message_id_does_not_start_a_second_turn(tmp_path):
     ]
 
 
+async def test_duplicate_message_id_rejects_a_different_request(tmp_path):
+    """Повтор messageId с другим taskId или contextId — не чужая задача."""
+    async with session(tmp_path, agents=[AskAgent()]) as (
+        client,
+        _f,
+        created,
+    ):
+        asked = await rpc(client, "SendMessage", message())
+        task = asked.json()["result"]["task"]
+        assert task["status"]["state"] == "TASK_STATE_INPUT_REQUIRED"
+        reply = await rpc(
+            client,
+            "SendMessage",
+            message(
+                "Только *.py",
+                message_id="m-1",
+                taskId=task["id"],
+                contextId=task["contextId"],
+            ),
+        )
+        other = await rpc(
+            client, "SendMessage", message("второй", message_id="m-other")
+        )
+        foreign = other.json()["result"]["task"]
+        stolen = await rpc(
+            client,
+            "SendMessage",
+            message(
+                "чужое",
+                message_id="m-1",
+                contextId=foreign["contextId"],
+            ),
+        )
+        replay = await rpc(client, "SendMessage", message())
+        waiting = await rpc(client, "GetTask", {"id": task["id"]})
+    assert reply.json()["error"]["code"] == -32602
+    assert stolen.json()["error"]["code"] == -32602
+    assert "result" not in stolen.json()
+    assert replay.json()["result"]["task"]["id"] == task["id"]
+    assert waiting.json()["result"]["status"]["state"] == (
+        "TASK_STATE_INPUT_REQUIRED"
+    )
+    assert len(created[0].calls) == 1
+
+
 async def test_question_then_reply_continues_the_same_task(tmp_path):
     async with session(tmp_path, agents=[AskAgent()]) as (client, _f, created):
         asked = await rpc(client, "SendMessage", message())

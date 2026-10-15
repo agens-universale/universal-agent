@@ -124,6 +124,7 @@ class A2aFacade:
     async def _reserve(self, incoming: Incoming) -> Any:
         async with self._gate:
             if self._store.message_task(incoming.message_id) is not None:
+                self._require_same_request(incoming)
                 return None
             try:
                 decision = decide(self._store, incoming, self._launch_root)
@@ -131,7 +132,11 @@ class A2aFacade:
                 raise _map(exc) from exc
             if isinstance(decision, Resume):
                 await self._store.accept_reply(
-                    decision.task_id, incoming.message_id, incoming.parts
+                    decision.task_id,
+                    incoming.message_id,
+                    incoming.parts,
+                    sent_task_id=incoming.task_id,
+                    sent_context_id=incoming.context_id,
                 )
                 return decision
             return await self._open(decision, incoming)
@@ -150,6 +155,8 @@ class A2aFacade:
             message_id=incoming.message_id,
             parts=incoming.parts,
             new_dialog=isinstance(decision, OpenNew),
+            sent_task_id=incoming.task_id,
+            sent_context_id=incoming.context_id,
         )
         self._busy.add(context_id)
         return OpenTask(context_id, decision.cwd), task_id
@@ -303,6 +310,16 @@ class A2aFacade:
                 await self._store.mark_canceled(task_id)
                 return None, True
             return turn, False
+
+    def _require_same_request(self, incoming: Incoming) -> None:
+        recorded = self._store.message_request(incoming.message_id)
+        if recorded is None:
+            raise invalid_params()
+        sent_task_id, sent_context_id = recorded
+        if incoming.task_id != sent_task_id:
+            raise invalid_params()
+        if incoming.context_id != sent_context_id:
+            raise invalid_params()
 
     def _release(self, context_id: str, task_id: str) -> None:
         self._busy.discard(context_id)

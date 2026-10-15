@@ -51,10 +51,17 @@ class TaskStore:
         self._tasks: dict[str, Task] = {}
         self._dialogs: dict[str, Dialog] = {}
         self._messages: dict[str, str] = {}
+        self._requests: dict[str, tuple[str | None, str | None]] = {}
         self._sequence = 0
 
     def message_task(self, message_id: str) -> str | None:
         return self._messages.get(message_id)
+
+    def message_request(
+        self, message_id: str
+    ) -> tuple[str | None, str | None] | None:
+        """taskId и contextId, с которыми этот messageId пришёл впервые."""
+        return self._requests.get(message_id)
 
     def dialog(self, context_id: str) -> Dialog | None:
         return self._dialogs.get(context_id)
@@ -77,6 +84,8 @@ class TaskStore:
         message_id: str,
         parts: tuple[str, ...],
         new_dialog: bool,
+        sent_task_id: str | None = None,
+        sent_context_id: str | None = None,
     ) -> None:
         async with self._cv:
             if new_dialog:
@@ -88,15 +97,23 @@ class TaskStore:
                 context_id,
                 [_user_message(message_id, parts)],
                 message_id,
+                sent_task_id=sent_task_id,
+                sent_context_id=sent_context_id,
             )
 
     async def accept_reply(
-        self, task_id: str, message_id: str, parts: tuple[str, ...]
+        self,
+        task_id: str,
+        message_id: str,
+        parts: tuple[str, ...],
+        *,
+        sent_task_id: str | None = None,
+        sent_context_id: str | None = None,
     ) -> None:
         async with self._cv:
             task = self._tasks[task_id]
             task.history.append(_user_message(message_id, parts))
-            self._messages[message_id] = task_id
+            self._remember(message_id, task_id, sent_task_id, sent_context_id)
             self._become(task, WORKING, status_message=None)
 
     async def mark_input_required(
@@ -192,6 +209,9 @@ class TaskStore:
         context_id: str,
         history: list[dict],
         message_id: str,
+        *,
+        sent_task_id: str | None = None,
+        sent_context_id: str | None = None,
     ) -> None:
         self._sequence += 1
         task = Task(
@@ -203,8 +223,18 @@ class TaskStore:
             sequence=self._sequence,
         )
         self._tasks[task_id] = task
-        self._messages[message_id] = task_id
+        self._remember(message_id, task_id, sent_task_id, sent_context_id)
         self._cv.notify_all()
+
+    def _remember(
+        self,
+        message_id: str,
+        task_id: str,
+        sent_task_id: str | None,
+        sent_context_id: str | None,
+    ) -> None:
+        self._messages[message_id] = task_id
+        self._requests[message_id] = (sent_task_id, sent_context_id)
 
     def _become(
         self, task: Task, state: str, *, status_message: dict | None
