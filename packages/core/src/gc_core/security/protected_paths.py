@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
@@ -75,6 +76,19 @@ def protected_paths(
     )
 
 
+_VCS_DIR = ".git"
+_CASE_INSENSITIVE_FS = os.name == "nt" or sys.platform == "darwin"
+
+
+def _is_vcs(p: str) -> bool:
+    """Путь внутри любого каталога `.git` — корня или вложенного репозитория:
+    в нём конфиг и хуки, которые git исполняет сам (`core.fsmonitor` при
+    `git status`, хуки при `git commit`). Регистр не различается везде: на
+    Маке `.GIT` — тот же каталог; на различающих регистр системах лишняя
+    защита одноимённого каталога безвредна."""
+    return _VCS_DIR in (part.lower() for part in Path(p).parts)
+
+
 def _is_media(p: str, roots: frozenset[Path], ci: bool) -> bool:
     """Путь под корнем `media`, но не в кармане `_staging` этого корня.
 
@@ -100,7 +114,9 @@ def _in_staging(p: str, roots: frozenset[Path], ci: bool) -> bool:
 
 def classify_path(path, ps: ProtectedSet) -> str:
     p = os.path.abspath(os.fspath(path))
-    ci = os.name == "nt"
+    # Регистр не различают файловые системы Windows и по умолчанию macOS:
+    # `.GC` там — тот же служебный каталог, `Agents.md` — тот же файл.
+    ci = _CASE_INSENSITIVE_FS
     if any(
         is_within_root(p, r, case_insensitive=ci) for r in ps.skills_exceptions
     ):
@@ -121,17 +137,18 @@ def classify_path(path, ps: ProtectedSet) -> str:
     if ps.workspace_exception is not None and is_within_root(
         p, ps.workspace_exception, case_insensitive=ci
     ):
-        return "none"
+        return "vcs" if _is_vcs(p) else "none"
     if any(is_within_root(p, r, case_insensitive=ci) for r in ps.operational):
         return "operational"
-    return "none"
+    # После служебных: `.git` под ними остаётся запретом, а не вопросом.
+    return "vcs" if _is_vcs(p) else "none"
 
 
 def protected_decision(path, *, cwd=None, extra=None, media=()) -> str:
     cls = classify_path(
         path, protected_paths(cwd=cwd, extra=extra, media=media)
     )
-    if cls == "instructions":
+    if cls in ("instructions", "vcs"):
         return "ask"
     if cls in ("operational", "media"):
         return "deny"

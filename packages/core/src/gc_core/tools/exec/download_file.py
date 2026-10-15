@@ -16,6 +16,8 @@ from gc_core.security.path_policy import (
     check_write_guard_path,
     normalize_path_for_policy,
     resolve_tool_context,
+    write_decision_key,
+    write_mode_stage,
 )
 from gc_core.security.url_policy import enforce_url_policy
 from gc_core.settings import settings_of
@@ -268,6 +270,15 @@ class DownloadFile(AbstractSimpleTool):
             ctx=self._ctx,
             state=self._state,
         )
+        # Стадия режима разрешений — до `write_guard.enabled`, как у декоратора:
+        # выключенная защита режим не отменяет.
+        call_now, error = yield from write_mode_stage(
+            dest, context, self.registered_tool_name(), "write"
+        )
+        if error is not None:
+            return error
+        if call_now:
+            return None
         if not context.write_guard.enabled:
             return None
         try:
@@ -301,7 +312,7 @@ class DownloadFile(AbstractSimpleTool):
                         ),
                     ],
                     ctx=context.ctx,
-                    decision_key=f"write:{dest}",
+                    decision_key=write_decision_key(dest, context),
                 )
                 if confirmed:
                     audit_policy_decision(
