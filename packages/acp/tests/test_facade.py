@@ -3,6 +3,7 @@
 import asyncio
 import importlib.metadata
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 from gc_acp.facade import AcpFacade
@@ -824,6 +825,39 @@ async def test_list_resume_load_after_restart(tmp_path):
         item.get("method") == "session/update"
         for item in writer2.sent[:load_at]
     )
+    await restored.shutdown()
+
+
+async def test_load_replays_a_message_written_twice_once(tmp_path):
+    """Тред develop с повтором строки (повтор шага): ``session/load``
+    проигрывает сообщение один раз — как develop."""
+    from gc_core.threads import file_layout as layout
+
+    facade, writer, _agents = _open(tmp_path)
+    await _init(facade)
+    await _new(facade, "/work/app")
+    session_id = _by_id(writer, 2)["result"]["sessionId"]
+    Thread(tmp_path, session_id).append(
+        {"id": "u1", "role": "user", "content": "привет"}
+    )
+    data = Path(layout.history_file(str(tmp_path), "acp", session_id))
+    lines = data.read_text(encoding="utf-8").splitlines(keepends=True)
+    data.write_text("".join([*lines, lines[-1]]), encoding="utf-8")
+    await facade.shutdown()
+
+    restored, writer2, _agents2 = _open(tmp_path)
+    await _init(restored)
+    await restored.handle_line(
+        _line(
+            "session/load",
+            {"sessionId": session_id, "cwd": "/work/app", "mcpServers": []},
+            3,
+        )
+    )
+    updates = _updates(writer2)
+    assert [item["sessionUpdate"] for item in updates] == [
+        "user_message_chunk"
+    ]
     await restored.shutdown()
 
 
