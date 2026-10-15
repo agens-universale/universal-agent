@@ -79,6 +79,10 @@ class TestChildCtxCopiesTuiConfirm:
         # поток делил настоящую консоль с Textual, и ход висел навсегда.
         ask_port = MagicMock(return_value="синий")
         parent.ask_human = ask_port
+        # Отказ подтверждения родителя (A2A ставит deny_once). Без копии
+        # guard ребёнка при tty уходит в input() процесса.
+        confirm_port = MagicMock(return_value="deny_once")
+        parent.confirm_request = confirm_port
         runner = SubagentRunner(parent, state, cfg)
         runner._parent_call_id = "call_x"
         child = await runner._build_child_ctx(tool_name="subagent_worker")
@@ -88,6 +92,7 @@ class TestChildCtxCopiesTuiConfirm:
             getattr(child, "permission_store", None) is parent.permission_store
         )
         assert getattr(child, "ask_human", None) is ask_port
+        assert getattr(child, "confirm_request", None) is confirm_port
 
 
 class TestAskHumanEmit:
