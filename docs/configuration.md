@@ -585,7 +585,6 @@ models:                                  # реестр: алиас → пров
     model: qwen/qwen-2.5-flash           # провайдерский id
     url: https://openrouter.ai/api/v1/chat/completions
     token: "${ENV:OPENROUTER_API_KEY}"
-    pricing: {input: 12, output: 48}     # тариф этой модели (формат секции pricing)
     main:                                # kwargs диалога и субагентов
       temperature: 1.0
       top_p: 1.0
