@@ -333,24 +333,37 @@ def prepare_tool_arguments(
             # служебные поля (`injected_fields`) параметрами тула не считаются,
             # иначе инжект оценки в auto отбивал бы `""` у тула без параметров.
             return ({}, {}) if _has_no_own_parameters(entry) else (None, {})
-        try:
-            parsed = json.loads(text)
-        except (TypeError, ValueError):
-            return None, {}
-    if not isinstance(parsed, dict):
+        parsed = _json_or_none(text)
+    parsed = _fabric_prepared_object(parsed, entry)
+    if parsed is None:
         return None, {}
-    prepare = getattr(
-        entry.get("tool_fabric"), "prepare_args_before_strip", None
-    )
-    if callable(prepare):
-        parsed = prepare(parsed)
-        if not isinstance(parsed, dict):
-            return None, {}
     injected = [
         f for f in (entry.get("injected_fields") or []) if isinstance(f, str)
     ]
     service = {name: parsed[name] for name in injected if name in parsed}
     return strip_injected_tool_args(parsed, injected_fields=injected), service
+
+
+def _json_or_none(text: str) -> Any:
+    try:
+        return json.loads(text)
+    except (TypeError, ValueError):
+        return None
+
+
+def _fabric_prepared_object(
+    parsed: Any, entry: Dict[str, Any]
+) -> "Dict[str, Any] | None":
+    """JSON-объект после `prepare_args_before_strip` фабрики; не объект до или
+    после хука — `None`."""
+    if not isinstance(parsed, dict):
+        return None
+    prepare = getattr(
+        entry.get("tool_fabric"), "prepare_args_before_strip", None
+    )
+    if callable(prepare):
+        parsed = prepare(parsed)
+    return parsed if isinstance(parsed, dict) else None
 
 
 def _has_no_own_parameters(entry: Dict[str, Any]) -> bool:

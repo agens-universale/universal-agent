@@ -178,3 +178,32 @@ def test_arguments_without_service_fields_strips_only_what_the_entry_injected():
     assert json.loads(arguments_without_service_fields(raw, entry)) == {"path": "a.py"}
     assert arguments_without_service_fields('{"path":  "a.py"}', entry) == '{"path":  "a.py"}'
     assert arguments_without_service_fields("{not json", entry) == "{not json"
+
+
+def test_prepare_branches_with_a_fabric_hook_and_an_empty_schema():
+    """Характеризация разбора: хук фабрики зовётся только для JSON-объекта,
+    пустые аргументы тула без своих параметров — `{}` в обход хука."""
+    from gc_core.tools.arguments_validation import prepare_tool_arguments
+
+    calls = []
+
+    class Fabric:
+        @staticmethod
+        def prepare_args_before_strip(args):
+            calls.append(dict(args))
+            return args.get("replace", {**args, "added": 1})
+
+    entry = {"tool_fabric": Fabric, "injected_fields": ["audit_tag", 7],
+             "spec": {"parameters": {"properties": {"audit_tag": {}}}}}
+    raw = {"audit_tag": 3, "path": "a"}
+    assert prepare_tool_arguments(raw, entry) == ({"path": "a", "added": 1}, {"audit_tag": 3})
+    assert raw == {"audit_tag": 3, "path": "a"}
+    assert prepare_tool_arguments('{"replace": [1]}', entry) == (None, {})
+    assert prepare_tool_arguments("null", entry) == (None, {})
+    assert len(calls) == 2
+    assert prepare_tool_arguments(None, entry) == ({}, {})
+    assert prepare_tool_arguments("  ", entry) == ({}, {})
+    assert len(calls) == 2
+    entry["spec"]["parameters"]["properties"]["path"] = {}
+    assert prepare_tool_arguments("  ", entry) == (None, {})
+    assert prepare_tool_arguments({"path": "a"}, {"tool_fabric": object()}) == ({"path": "a"}, {})
