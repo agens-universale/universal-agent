@@ -57,7 +57,7 @@ async def test_right_column_leaves_room_for_notices_suffix():
         ]
         await pilot.pause()
         need = _need(scr)
-        left = cell_len(scr._footer_left_text())
+        left = cell_len(scr._footer_left_text().plain)
         assert need + left + _CHROME <= 120, (
             f"правая часть {need} + левая {left} > ширины окна 120: правая часть налезет на счётчик уведомлений"
         )
@@ -80,7 +80,7 @@ async def test_right_column_without_notices_is_unchanged():
         app.collect_footer_notices = list
         await pilot.pause()
         need = _need(scr)
-        assert need + cell_len(scr._footer_left_text()) + _CHROME <= 120
+        assert need + cell_len(scr._footer_left_text().plain) + _CHROME <= 120
         assert _left_rows(scr, 120, need) == 1
 
 
@@ -198,9 +198,12 @@ async def test_stop_key_keeps_its_room_on_narrow_window(
         _with_prices(app, scr, running=True)
         await pilot.pause()
 
-        assert scr._footer_left_commands() == _FOOTER_RUNNING_LEFT
+        assert scr._footer_tail_commands() == _FOOTER_RUNNING_LEFT
+        # пол левой — режим хотя бы глифом и стоп-клавиша за ним
+        floor = scr._footer_left_commands(narrow=True)
+        assert floor.endswith(_FOOTER_RUNNING_LEFT)
         left_width = scr._footer_total_width() - _need(scr) - _CHROME
-        assert left_width >= cell_len(_FOOTER_RUNNING_LEFT), (
+        assert left_width >= cell_len(floor), (
             f"ширина {width}: левой осталось {left_width} колонок, "
-            f"а «{_FOOTER_RUNNING_LEFT}» требует {cell_len(_FOOTER_RUNNING_LEFT)}"
+            f"а «{floor}» требует {cell_len(floor)}"
         )

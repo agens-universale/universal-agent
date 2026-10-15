@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from gc_core.security.permission_mode import mode_label
 from gc_core.settings import runtime_of, settings_of
 from rich.text import Text
 from textual import events
@@ -138,6 +139,26 @@ def _profile_header_text(config, profile_source: str | None) -> Text:
     return t
 
 
+#: Откуда взят действующий режим разрешений — словами для человека.
+_MODE_SOURCE_LABELS = {
+    "session": "выбран в этой сессии",
+    "config": "из конфига",
+    "default": "по умолчанию",
+}
+
+
+def _permission_mode_text(mode: str, source: str | None) -> Text:
+    """«режим разрешений: manual mode (выбран в этой сессии)» — в стиле шапки
+    профиля. В отличие от снимка ниже, режим меняется на лету (Shift+Tab)."""
+    t = Text()
+    t.append("режим разрешений: ", style=DIM)
+    t.append(mode_label(mode), style=MUTED)
+    label = _MODE_SOURCE_LABELS.get(source or "")
+    if label:
+        t.append(f" ({label})", style=DIM)
+    return t
+
+
 class ConfigScreen(Screen):
     def __init__(
         self,
@@ -147,6 +168,8 @@ class ConfigScreen(Screen):
         project_local: str | None = None,
         profile_source: str | None = None,
         profile_path: str | None = None,
+        permission_mode: str | None = None,
+        permission_mode_source: str | None = None,
     ) -> None:
         super().__init__()
         # Снимок базы окна (`LoadedSettings`) на момент открытия экрана.
@@ -155,6 +178,8 @@ class ConfigScreen(Screen):
         self._project_local = project_local
         self._profile_source = profile_source
         self._profile_path = profile_path
+        self._permission_mode = permission_mode
+        self._permission_mode_source = permission_mode_source
         self._filter = ""
         self._yaml_w: Static | None = None
 
@@ -186,6 +211,14 @@ class ConfigScreen(Screen):
                 )
             with VerticalScroll(id="trace", classes="quiet-focus"):
                 yield Static(self._profile_header(), classes="config-caption")
+                if self._permission_mode is not None:
+                    yield Static(
+                        _permission_mode_text(
+                            self._permission_mode, self._permission_mode_source
+                        ),
+                        id="config-permission-mode",
+                        classes="config-caption",
+                    )
                 yield Static(
                     _SNAPSHOT_HINT, classes="config-caption", markup=False
                 )

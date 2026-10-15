@@ -332,6 +332,56 @@ def test_main_hands_the_profile_flag_to_the_app(monkeypatch, tmp_path):
     assert called.get("profile_override") == "work"
 
 
+def test_main_hands_the_permission_mode_flag_to_the_app(monkeypatch, tmp_path):
+    """`--permission-mode` доезжает до приложения как ЗАКРЕПЛЁННЫЙ выбор: режим,
+    сохранённый в открываемой сессии, его не перебивает. Без флага приложение
+    не трогают — действует конфиг."""
+    pytest.importorskip("textual")
+
+    from gc_tui import app as tui_app
+
+    locked: list[str] = []
+
+    class _FakeApp:
+        def __init__(self, **kw):
+            pass
+
+        def set_config_path(self, path):
+            self._config_path = path
+
+        def _maybe_notice_profile_activation(self, *a, **k):
+            pass
+
+        def lock_permission_mode(self, mode):
+            locked.append(mode)
+
+        def run(self):
+            return None
+
+    monkeypatch.setattr(tui_app, "TuiApp", _FakeApp)
+    monkeypatch.setattr(
+        "recommended_mcp.runtime.daemon_autostart.ensure_mcp_daemons",
+        lambda cfg, **kw: None,
+    )
+    monkeypatch.setattr(
+        "recommended_mcp.runtime.daemon_autostart.shutdown_mcp_daemons",
+        lambda: None,
+    )
+
+    from gc_tui import main
+
+    cfg_path = _cfg_for_main(tmp_path)
+    assert main(argv=["--config", str(cfg_path)]) == 0
+    assert locked == []
+    assert (
+        main(argv=["--config", str(cfg_path), "--permission-mode", "manual"])
+        == 0
+    )
+    assert locked == ["manual"]
+    with pytest.raises(SystemExit):  # незнакомый режим — отказ разбора
+        main(argv=["--config", str(cfg_path), "--permission-mode", "турбо"])
+
+
 def test_main_emergency_exit_reuses_the_one_cleanup(monkeypatch, tmp_path):
     """Аварийный выход сторожа терминала и штатный `finally` зовут одну уборку
     main(), и она выполняется ровно раз — иначе демоны либо сиротеют, либо

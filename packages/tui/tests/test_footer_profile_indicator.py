@@ -1079,10 +1079,13 @@ def _left_rows_requested(scr, total: int, right_plain: str) -> int:
 
     need = max(cell_len(line) for line in right_plain.split("\n"))
     width = total - need - _FOOTER_CHROME
-    if width <= 0:
+    # Платные ступени меряют левую с пилюлей режима в один глиф, и уже этого
+    # пола правая отнять не может.
+    commands = scr._footer_left_commands(narrow=True)
+    if width < max(1, cell_len(commands)):
         return 99
     return footer_left_rows(
-        scr._footer_left_commands(),
+        commands,
         format_notices_badge(scr._collect_footer_notices()),
         width=width,
     )
@@ -1179,7 +1182,7 @@ async def test_footer_moves_prices_down_where_profile_used_to_be_dropped(
         # столько, сколько ей нужно на ДВА ряда (одного ряда уже не хватает).
         left_two = min(
             w
-            for w in range(20, cell_len(commands) + 1)
+            for w in range(1, cell_len(commands) + 1)
             if _rows(commands, w) <= 2
         )
         total = need + _FOOTER_CHROME + left_two
@@ -1289,9 +1292,10 @@ async def test_footer_keeps_full_profile_when_left_goes_two_rows(
 async def test_footer_shrinks_profile_on_the_two_row_pass(
     tmp_path, monkeypatch
 ):
-    """Ступень 4: имя ужимается 14 → 5 — но ТОЛЬКО во втором проходе, когда
-    левая уже в двух рядах. Ширина здесь мала даже для потолка при двухрядной
-    левой — имя ужимается, но не снимается."""
+    """Имя профиля ужимается 14 → 5 — но ТОЛЬКО в платном проходе, когда
+    бесплатные ходы кончились и пилюля режима слева уже сжата до глифа. Ширина
+    здесь на одну колонку меньше, чем нужно потолку имени рядом с полом левой, —
+    имя ужимается, но не снимается."""
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
     from gc_tui.app import TuiApp
@@ -1315,21 +1319,18 @@ async def test_footer_shrinks_profile_on_the_two_row_pass(
                 snapshot=snapshot,
             ).plain
         )
-        commands = scr._footer_left_commands()
-        left_two = min(
-            w
-            for w in range(20, cell_len(commands) + 1)
-            if _rows(commands, w) <= 2
-        )
-        # На одну колонку уже, чем нужно потолку при двухрядной левой.
-        total = ceiling_need + _FOOTER_CHROME + left_two - 1
+        # Пол левой: пилюля режима в один глиф (за ней в покое ничего нет).
+        floor = cell_len(scr._footer_left_commands(narrow=True))
+        # На одну колонку уже, чем нужно потолку имени рядом с полом левой.
+        total = ceiling_need + _FOOTER_CHROME + floor - 1
 
         await pilot.resize_terminal(total, 30)
         plain = scr._compose_footer_right().plain
 
         assert plain.startswith(_LONG_NAME[:12] + "…")  # 13 колонок вместо 14
         assert "→" in plain
-        assert _left_rows_beside(scr, total, plain) == 2
+        # левой досталось ровно столько, сколько занимает глиф режима
+        assert total - cell_len(plain) - _FOOTER_CHROME == floor
 
 
 @pytest.mark.asyncio
@@ -1369,7 +1370,7 @@ async def test_footer_ladder_order_holds_across_terminal_widths(
         seen_profile_dropped = False
         seen_transition_dropped = False
         prev_profile_cols = None
-        for total in range(115, 59, -1):
+        for total in range(115, 29, -1):
             await pilot.resize_terminal(total, 30)
             plain = scr._compose_footer_right().plain
             has_profile = plain.startswith(_LONG_NAME[:_PROFILE_MIN_VISIBLE])

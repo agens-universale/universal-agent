@@ -141,7 +141,8 @@ async def test_footer_stacks_session_on_narrow_width(tmp_path):
     from gc_tui.app import TuiApp
 
     app = TuiApp(threads_dir=str(tmp_path / "threads"))
-    async with app.run_test(size=(40, 24)) as pilot:
+    # 48 колонок: ценам хватает второй строки рядом с глифом режима слева.
+    async with app.run_test(size=(48, 24)) as pilot:
         scr = pilot.app.screen
         app._settings = tui_settings({"agent.model": "m", "pricing": _PRICING})
         scr._active_task_id = "t1"
@@ -159,7 +160,7 @@ async def test_footer_stacks_session_on_narrow_width(tmp_path):
 async def test_footer_never_flush_against_left(tmp_path):
     """Граничная ширина: right-блок влезает ровно впритык к footer-left
     (хром футера съедает весь резерв) → должен уйти в стек, а не клеиться.
-    W=67: left=25 (_FOOTER_LEFT), right=39, хром=3 → зазор был бы 0."""
+    W=67: правой нужно 39, хром=3 → левой осталось бы 25, меньше пилюли режима."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 

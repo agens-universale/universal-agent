@@ -64,6 +64,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(_missing_textual_msg(), file=sys.stderr)
         return 1
 
+    from gc_core.security.permission_mode import AVAILABLE_MODES
+
     parser = argparse.ArgumentParser(
         prog="gc-ua", add_help=False, allow_abbrev=False
     )
@@ -76,6 +78,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         help=(
             "Активировать профиль <имя> поверх указателя profile: из config.yml "
             "(~/.gc/profiles/ или <project>/.gc/profiles/)"
+        ),
+    )
+    parser.add_argument(
+        "--permission-mode",
+        choices=[mode.value for mode in AVAILABLE_MODES],
+        default=None,
+        help=(
+            "Режим разрешений на этот запуск (сильнее режима, сохранённого в "
+            "сессии; по умолчанию — security.permissions.default_mode)"
         ),
     )
     parser.add_argument(
@@ -116,8 +127,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         # запуск на другом конфиге (`--conf my.yml` → ~/.gc/config.yml).
         print(
             f"gc-ua: неизвестные аргументы: {' '.join(unknown)} (флаги не "
-            "сокращаются: --config, --profile, --init-config, --task-root, "
-            "--no-auto-mcp; справка — gc-ua --help)",
+            "сокращаются: --config, --profile, --permission-mode, "
+            "--init-config, --task-root, --no-auto-mcp; справка — gc-ua --help)",
             file=sys.stderr,
         )
         return 2
@@ -317,6 +328,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     app.set_config_path(
         onb_write_path if onboarding_mode else resolve_config_path(args.config)
     )
+    if args.permission_mode:
+        app.lock_permission_mode(args.permission_mode)
     app._config_project_local = project_local_config_path()  # str | None
     # Подъём (`ensure_voice_service`: spawn + ожидание готовности, до 90 с на холодном
     # старте) идёт ЦЕЛИКОМ фоном: TuiApp запускает его после первого кадра
