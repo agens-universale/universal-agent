@@ -50,6 +50,9 @@ _OPTION_TO_CHOICE = {
 }
 _KIND = {"read": "read", "write": "edit", "command": "execute"}
 _DEFAULT_TIMEOUT_SEC = 600.0
+# Quick pick VS Code рисует title и молчит про content. Команда должна
+# помещаться в заголовок, длинный payload режется.
+_TITLE_COMMAND_LIMIT = 200
 
 
 def bind_confirm(agent: Any, session_id: str, facade: Any) -> None:
@@ -94,7 +97,7 @@ def permission_message(
             "toolCall": {
                 "toolCallId": tool_call_id
                 or _synthetic_id(request.decision_key),
-                "title": request.title,
+                "title": _permission_title(request),
                 "kind": _tool_kind(request.decision_key),
                 "status": "pending",
                 "content": [
@@ -156,6 +159,48 @@ def _tool_kind(decision_key: str | None) -> str:
 def _synthetic_id(decision_key: str | None) -> str:
     key = decision_key if isinstance(decision_key, str) else ""
     return f"confirm:{key}"
+
+
+def _permission_title(request: HumanRequest) -> str:
+    """Заголовок диалога. Для команды — ещё и сам payload.
+
+    Клиент, который не рисует карточку и не читает ``content``, показывает
+    только эту строку. Без payload в ней не видно, что именно одобряешь.
+    """
+    base = request.title if isinstance(request.title, str) else ""
+    if _tool_kind(request.decision_key) != "execute":
+        return base
+    payload = _command_payload(request)
+    if payload is None:
+        return base
+    shown = _one_line(payload, _TITLE_COMMAND_LIMIT)
+    if shown == "":
+        return base
+    if base == "":
+        return shown
+    return f"{base}: {shown}"
+
+
+def _command_payload(request: HumanRequest) -> str | None:
+    """Первое поле гварда команды: «Команда», «Код» или ``command``."""
+    for row in request.fields:
+        if isinstance(row, (list, tuple)) and len(row) >= 2:
+            value = row[1]
+            if isinstance(value, str):
+                return value
+            if value is not None:
+                return str(value)
+        return None
+    return None
+
+
+def _one_line(text: str, limit: int) -> str:
+    flat = " ".join(text.split())
+    if len(flat) <= limit:
+        return flat
+    if limit <= 1:
+        return flat[:limit]
+    return flat[: limit - 1] + "…"
 
 
 def _body(request: HumanRequest) -> str:

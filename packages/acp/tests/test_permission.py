@@ -5,6 +5,8 @@ import json
 
 import pytest
 from gc_acp.ask_human import empty_ask_human
+from gc_acp.confirm import permission_message
+from gc_core.execution.human import HumanRequest
 from gc_core.security.confirm_port import request_confirm
 from gc_core.security.permission_store import PermissionStore
 from test_facade import (
@@ -89,6 +91,60 @@ async def _ask(
     return await asyncio.to_thread(run)
 
 
+def test_command_permission_title_carries_payload_and_cuts_it():
+    long_cmd = "curl -s http://example.test/" + ("a" * 400)
+    msg = permission_message(
+        1,
+        "sess",
+        HumanRequest(
+            kind="confirm",
+            title="Проверка команды",
+            question="Разрешить запуск?",
+            fields=[
+                ["Команда", "python -c 'print(1)\nprint(2)'"],
+                ["Причина", "нужно подтверждение"],
+            ],
+            decision_key="command:python",
+        ),
+        None,
+    )
+    assert (
+        msg["params"]["toolCall"]["title"]
+        == "Проверка команды: python -c 'print(1) print(2)'"
+    )
+
+    clipped = permission_message(
+        2,
+        "sess",
+        HumanRequest(
+            kind="confirm",
+            title="Проверка команды",
+            question="Разрешить запуск?",
+            fields=[["Команда", long_cmd]],
+            decision_key=f"command:{long_cmd}",
+        ),
+        None,
+    )
+    title = clipped["params"]["toolCall"]["title"]
+    assert title.startswith("Проверка команды: curl -s http://example.test/")
+    assert title.endswith("…")
+    assert len(title) == len("Проверка команды: ") + 200
+
+    read = permission_message(
+        3,
+        "sess",
+        HumanRequest(
+            kind="confirm",
+            title="Защита чтения",
+            question="Разрешить?",
+            fields=[["Path", "/etc/passwd"]],
+            decision_key="read:/etc/passwd",
+        ),
+        None,
+    )
+    assert read["params"]["toolCall"]["title"] == "Защита чтения"
+
+
 async def test_confirm_request_shape_and_allow_once_reaches_store(tmp_path):
     facade, writer, agent, _session_id, store = await _ready(tmp_path)
     ctx = agent.executor._ctx
@@ -111,7 +167,7 @@ async def test_confirm_request_shape_and_allow_once_reaches_store(tmp_path):
     assert params["sessionId"]
     tool = params["toolCall"]
     assert tool["toolCallId"] == "confirm:command:ls"
-    assert tool["title"] == "Проверка команды"
+    assert tool["title"] == "Проверка команды: ls"
     assert tool["kind"] == "execute"
     assert tool["status"] == "pending"
     assert tool["content"] == [
