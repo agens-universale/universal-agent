@@ -19,10 +19,18 @@ from typing import Any, Callable
 
 from gc_core.constants.tool_names import FS_VIEW_IMAGE_NAME
 from gc_core.execution.ports import port
-from gc_core.security.confirm_port import confirmation_step, request_confirm
+from gc_core.security.confirm_port import (
+    confirmation_step,
+    request_confirm,
+)
 from gc_core.security.dual_wrapper import dual_wrap
 from gc_core.security.guard_probe import GuardProbeRequest, probe_step
 from gc_core.security.media_roots import media_roots
+from gc_core.security.mode_stage import (
+    ModeAction,
+    remembered_denial,
+    resolve_by_mode,
+)
 from gc_core.security.path_policy import (
     _extract_named_value,
     _guard_path_argument,
@@ -31,6 +39,14 @@ from gc_core.security.path_policy import (
     audit_policy_decision,
     resolve_tool_context,
 )
+from gc_core.security.permission_mode import ALLOW as MODE_ALLOW
+from gc_core.security.permission_mode import (
+    CAT_READ,
+    decision_path_key,
+    read_decision,
+    read_profile,
+)
+from gc_core.security.permission_mode import PASS as MODE_PASS
 from gc_core.security.protected_paths import (
     classify_path,
     protected_paths,
@@ -82,6 +98,10 @@ class ReadGuardConfig:
     denied_read_paths: list[str] = field(default_factory=list)
     denied_file_patterns: list[str] = field(default_factory=list)
     denied_extensions: list[str] = field(default_factory=list)
+
+
+#: Правило нарушения периметра чтения; прочие правила — чёрный список.
+_PERIMETER_RULE = "allowed_read_roots"
 
 
 class ReadGuardViolation(ValueError):
@@ -318,7 +338,7 @@ def check_read_path_allowed(
     raise ReadGuardViolation(
         path=candidate,
         reason=f"path is outside allowed_read_roots: {roots_abs}",
-        matched_rule="allowed_read_roots",
+        matched_rule=_PERIMETER_RULE,
         mode=cfg.mode,
     )
 
@@ -458,7 +478,9 @@ def _resolve_read_violation(
                 ("Reason", exc.error.get("reason", "")),
             ],
             ctx=context.ctx,
-            decision_key=f"read:{_rg_path}",
+            # Ключ — по пути из вызова, единого вида: тот же, что у вопроса
+            # режима, иначе ответ на один не закрывал бы другой.
+            decision_key=_read_key(candidate_path, context),
         )
         if confirmed:
             audit_policy_decision(
@@ -521,6 +543,75 @@ def _own_thread_image(func, args, context, candidate_path) -> bool:
     )
 
 
+def _read_key(candidate_path, context) -> str:
+    return decision_path_key("read", candidate_path, context.launch_root)
+
+
+def _mode_read_stage(func, args, context, candidate_path, cfg, source):
+    """Стадия режима разрешений для чтения: ``(call_now, error)``.
+
+    ``error`` — тело отказа; ``call_now`` — читать сразу; оба пусты — режим
+    ничего не добавил, решает обычный ход защиты. Стоит ДО ``read_guard.enabled``:
+    выключенная в конфиге защита режим не отменяет.
+    """
+    tool_name = _tool_name(func, args)
+    key = _read_key(candidate_path, context)
+    error_fields = {"path": candidate_path, "operation": "read"}
+    denied = remembered_denial(context, tool_name, key, **error_fields)
+    if denied is not None:
+        return False, denied
+    if read_profile(context.ctx).adds_nothing:
+        return False, None
+    deny_listed = False
+    try:
+        yield from _check_read_path_step(
+            func, args, context, candidate_path, cfg, source
+        )
+        inside = True
+    except ReadGuardViolation as exc:
+        inside = False
+        # Нарушение периметра — «вне проекта»; остальное — чёрный список
+        # чтения (`.env`, `*id_rsa*`, `~/.ssh`), где бы файл ни лежал.
+        deny_listed = exc.error.get("matched_rule") != _PERIMETER_RULE
+    except ValueError:
+        return False, None  # пустой путь и т.п. — дело валидации самого тула
+    decision = read_decision(context.ctx, inside=inside)
+    if decision in (MODE_ALLOW, MODE_PASS):
+        return False, None
+    from gc_core.security.action_judge import (
+        FLAG_OUTSIDE_PROJECT,
+        FLAG_PROTECTED_PATH,
+    )
+
+    # Как у записи: судья видит, что путь вне проекта. Закрытый для чтения
+    # файл — строгая пометка: только по прямой просьбе человека.
+    if deny_listed:
+        flags = (FLAG_PROTECTED_PATH,)
+    elif inside:
+        flags = ()
+    else:
+        flags = (FLAG_OUTSIDE_PROJECT,)
+    allowed, error = yield from resolve_by_mode(
+        decision,
+        ModeAction(
+            context=context,
+            tool_name=tool_name,
+            category=CAT_READ,
+            decision_key=key,
+            question=(
+                "Чтение файла",
+                f"Разрешить чтение {candidate_path}?",
+                [("Путь", candidate_path), ("Операция", "read")],
+            ),
+            flags=flags,
+            error_fields=error_fields,
+            deny_type="read_denied_by_mode",
+            deny_reason="Read not permitted in the current permission mode.",
+        ),
+    )
+    return (True, None) if allowed else (False, error)
+
+
 def _check_read_path_step(func, args, context, candidate_path, cfg, source):
     """Проверка пути чтения — генератор для ``yield from``.
 
@@ -559,6 +650,20 @@ def _check_read_path_step(func, args, context, candidate_path, cfg, source):
         )
 
 
+def _mode_read_outcome(
+    func, args, context, extracted, candidate_path, cfg, source
+):
+    """Стадия режима для пути из вызова — ``(call_now, error)``; ссылку на
+    файл треда и вызов без пути режим не решает."""
+    if not extracted or str(candidate_path).startswith(THREAD_FILE_SCHEME):
+        return False, None
+    return (
+        yield from _mode_read_stage(
+            func, args, context, candidate_path, cfg, source
+        )
+    )
+
+
 def _read_guard_flow(
     func, args, kwargs, path_arg, path_extractor, blocked_result_factory
 ):
@@ -584,6 +689,23 @@ def _read_guard_flow(
         if blocked is not None:
             return blocked
 
+    extracted, candidate_path = _guard_path_argument(
+        func, args, kwargs, path_arg, path_extractor
+    )
+    call_now, error = yield from _mode_read_outcome(
+        func, args, context, extracted, candidate_path, cfg, source
+    )
+    if error is not None:
+        return _read_guard_blocked_result(
+            func,
+            error,
+            args,
+            kwargs,
+            blocked_result_factory=blocked_result_factory,
+        )
+    if call_now:
+        return (yield)
+
     if not cfg.enabled:
         audit_policy_decision(
             context,
@@ -593,9 +715,6 @@ def _read_guard_flow(
         )
         return (yield)
 
-    extracted, candidate_path = _guard_path_argument(
-        func, args, kwargs, path_arg, path_extractor
-    )
     if not extracted:
         # Missing paths are validated by the tool itself.
         return (yield)
