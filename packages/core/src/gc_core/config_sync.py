@@ -192,6 +192,25 @@ def _validate_subtree(top_key: str, subtree: Any) -> bool:
         return False
 
 
+def _prune_empty_ancestors(
+    user_text: str, user_raw: Any, parent: tuple[str, ...]
+) -> str:
+    """Убрать родителей, опустевших после вырезания ключа: пустой ``update: {}``
+    перекрыл бы умолчания секции из шаблона как значение юзера."""
+    while parent:
+        node: Any = user_raw
+        for part in parent:
+            node = node.get(part) if isinstance(node, dict) else None
+        if node != {}:
+            return user_text
+        compat.pop_parts(user_raw, parent)
+        user_text = remove_mapping_entry(
+            user_text, ".".join(parent[:-1]), parent[-1]
+        )
+        parent = parent[:-1]
+    return user_text
+
+
 def _strip_removed_patterns(
     user_text: str, user_raw: Any
 ) -> tuple[str, List[str]]:
@@ -211,6 +230,7 @@ def _strip_removed_patterns(
                 user_text, ".".join(parts[:-1]), parts[-1]
             )
             stripped.append(dotted)
+            user_text = _prune_empty_ancestors(user_text, user_raw, parts[:-1])
     return user_text, stripped
 
 

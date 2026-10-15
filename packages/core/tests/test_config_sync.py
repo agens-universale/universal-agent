@@ -3,6 +3,7 @@
 import pytest
 import yaml
 from gc_core import config_sync
+from gc_core.config import _default_config_path
 from gc_core.config_modules import compat as compat
 
 TEMPLATE = (
@@ -398,8 +399,6 @@ def test_sync_strips_exact_removed_key_inside_section_outside_template(
 ):
     """Точный REMOVED-ключ в блоке вне шаблона (assign) не переезжает в файл
     вместе с блоком, попадает в removed один раз, повторный синк ничего не меняет."""
-    from gc_core.config import _default_config_path
-
     user = (
         "models:\n"
         "  flash:\n"
@@ -429,3 +428,30 @@ def test_sync_strips_exact_removed_key_inside_section_outside_template(
     assert yaml.safe_load(cfg.read_text(encoding="utf-8")) == yaml.safe_load(
         out
     )
+
+
+def test_sync_removed_key_does_not_leave_empty_section_over_template_defaults(
+    tmp_path,
+):
+    """Секция, опустевшая после вырезания REMOVED-ключа, не перекрывает
+    умолчания шаблона пустым значением юзера."""
+    user = (
+        "update:\n"
+        "  check_interval_days: 3\n"
+        "logging:\n"
+        "  level: INFO\n"
+        "  dump_storage: true\n"
+    )
+    cfg = tmp_path / "config.yml"
+    cfg.write_text(user, encoding="utf-8")
+    report = config_sync.sync_config(
+        cfg, _default_config_path(), timestamp="t"
+    )
+    assert report.removed == [
+        "update.check_interval_days",
+        "logging.dump_storage",
+    ]
+    out = yaml.safe_load(cfg.read_text(encoding="utf-8"))
+    assert out["update"]["check"] == "auto"
+    assert "dump_storage" not in out["logging"]
+    assert out["logging"]["level"] == "INFO"
