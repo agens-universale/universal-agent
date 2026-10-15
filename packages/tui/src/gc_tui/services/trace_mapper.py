@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any, Iterable, Mapping, Optional
 
 from gc_core.attachments.model import ORIGIN_USER, Attachment, attachments_of
+from gc_core.constants.tool_names import PROPOSE_PLAN_TOOL_NAME
 from gc_core.vision.errors import (
     ERR_NO_IMAGE_STORE,
     ERR_NO_VISION_MODEL,
@@ -56,6 +57,9 @@ _SUMMARIZED_PREFIX_RE = re.compile(
 # Новый формат summary (master): <summary> содержит вложенные секционные теги
 # (<task_and_context>…) — разворачиваем их в текст, иначе сырой XML утекает в плашку.
 _SUMMARY_SECTION_RE = re.compile(r"<([a-z][a-z0-9_]*)>(.*?)</\1>", re.DOTALL)
+
+#: Имя тула плана в том виде, в каком его видит маппер (без пространства имён).
+PROPOSE_PLAN_ID = tool_id(PROPOSE_PLAN_TOOL_NAME)
 
 
 def _clean_summary(inner_raw: str) -> str:
@@ -409,6 +413,40 @@ def map_message(
                 tool_name="intermediate_reply",
             )
         return None
+
+    # TURN_PROPOSE_PLAN call — план как проза агента (markdown): смысл
+    # одобрения несёт баннер, а не строка вызова.
+    if typ == "function_call" and name == PROPOSE_PLAN_ID:
+        plan_text = coerce_args(msg.get("arguments")).get("plan") or ""
+        if isinstance(plan_text, str) and plan_text.strip():
+            return TraceEvent(
+                no=no,
+                event_ts_utc_iso=ts,
+                kind="agent",
+                title="",
+                summary=plan_text.strip(),
+                full_payload=msg,
+                message_id=mid,
+                call_id=call_id,
+                tool_name=name,
+            )
+        return None
+
+    # TURN_PROPOSE_PLAN output — успешный глушим (машинный статус не нужен);
+    # отказ (вне plan, слишком длинный) остаётся виден обычной строкой.
+    if typ == "function_call_output":
+        _pp_out = msg.get("output")
+        if isinstance(_pp_out, str):
+            try:
+                _pp_data = json.loads(_pp_out)
+            except json.JSONDecodeError:
+                _pp_data = None
+            if (
+                isinstance(_pp_data, dict)
+                and tool_id(_pp_data.get("tool")) == PROPOSE_PLAN_ID
+                and _pp_data.get("ok") is True
+            ):
+                return None
 
     # SESSION_TODO call — чек-лист inline (kind=todo); успешный output глушим ниже.
     # Битые аргументы (items is None) — НЕ чек-лист: проваливаемся в generic
@@ -832,13 +870,17 @@ def _summarize_output(output: Any, *, error: bool) -> str:
 
     if error:
         err = data.get("error") or data.get("message") or ""
-        # error может быть dict {type, message, ...} — извлекаем message/type.
+        # error может быть dict {type, reason, message, ...}. `reason` — причина
+        # для человека: у отказов защит и режима рядом с ней лежит инструкция
+        # модели (`guidance` либо хвост `message`), ей в ленте не место. Обычная
+        # ошибка тула причины не несёт — её описание и есть message.
         if isinstance(err, dict):
             vision_row = _vision_error_row(err)
             if vision_row:
                 return vision_row
             err = (
-                err.get("message")
+                err.get("reason")
+                or err.get("message")
                 or err.get("type")
                 or json.dumps(err, ensure_ascii=False)
             )

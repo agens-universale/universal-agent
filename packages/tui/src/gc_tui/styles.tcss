@@ -567,6 +567,19 @@ TextArea.ask-human-mode { border: solid $run-color; }
     padding: 0 1;
     margin: 0 0 1 0;
 }
+/* План режима plan в ленте: рамка с подписью по образцу .config-panel,
+   подпись — цветом пилюли plan. */
+.plan-panel {
+    height: auto;
+    border: round $deep-dim;
+    border-title-color: $accent;
+    padding: 0 1;
+    margin: 1 0 0 0;
+}
+/* строка «план утверждён»: галочка цвета режима plan, текст — как у line-meta */
+.line-plan-accepted .trace-prefix { color: $accent; }
+/* план принят, идёт реализация — рамка цвета режима plan */
+.plan-panel.plan-accepted { border: round $accent; }
 /* read-only вьюверы: фокус-outline бессмыслен (фокусироваться больше не на чем)
    и рисуется поверх контента */
 #trace.quiet-focus:focus { outline: none; }

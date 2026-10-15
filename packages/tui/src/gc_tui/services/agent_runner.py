@@ -15,6 +15,8 @@ import threading
 import time
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
+from gc_core.security.confirm_port import call_with_optional
+
 from gc_tui.services.stdin_bridge import redirect_stdin
 
 if TYPE_CHECKING:
@@ -133,6 +135,13 @@ class AgentRunner:
             queue.Queue()
         )
         self._prebuild_messages: list[dict] = []
+        #: Режим разрешений, выбранный до сборки исполнителя (сборка ленивая, в
+        #: рабочем потоке): применяется, как только исполнитель появится.
+        self._permission_mode: Optional[str] = None
+        #: Решения по плану, принятые до сборки исполнителя: план принят
+        #: (режим, тред) и «Обсудить и доработать план» (тред).
+        self._plan_accepted: Optional[tuple] = None
+        self._plan_rework: Optional[str] = None
         #: Прогон ещё принимает сообщения в свою очередь. Ставится при запуске
         #: воркера и снимается им под `_lock` в том же шаге, где он убедился,
         #: что хвоста нет (`_close_or_take_tail`). Сообщение либо ляжет в
@@ -220,7 +229,54 @@ class AgentRunner:
                         ctx.ask_human = self._read_answer
                     except Exception:
                         pass
+                if self._permission_mode is not None and hasattr(
+                    self._executor, "set_permission_mode"
+                ):
+                    self._executor.set_permission_mode(self._permission_mode)
+                if self._plan_accepted is not None and hasattr(
+                    self._executor, "accept_plan"
+                ):
+                    self._executor.accept_plan(*self._plan_accepted)
+                if self._plan_rework is not None and hasattr(
+                    self._executor, "arm_plan_rework"
+                ):
+                    self._executor.arm_plan_rework(self._plan_rework)
             return self._executor
+
+    def set_permission_mode(self, mode: str) -> None:
+        """Донести выбранный режим разрешений до исполнителя (или до его сборки)."""
+        self._permission_mode = mode
+        executor = self._executor
+        if executor is not None and hasattr(executor, "set_permission_mode"):
+            executor.set_permission_mode(mode)
+
+    def accept_plan(self, mode: str, thread_id: Optional[str]) -> None:
+        """Донести до исполнителя, что человек принял план (или до его сборки —
+        она идёт в рабочем потоке, ждать её здесь нельзя)."""
+        self._plan_accepted = (mode, thread_id)
+        executor = self._executor
+        if executor is not None and hasattr(executor, "accept_plan"):
+            executor.accept_plan(mode, thread_id)
+
+    def clear_plan(self, thread_id: Optional[str]) -> None:
+        """Человек убрал план сессии: отложенные решения по нему не нужны."""
+        if (
+            self._plan_accepted is not None
+            and self._plan_accepted[1] == thread_id
+        ):
+            self._plan_accepted = None
+        if self._plan_rework == thread_id:
+            self._plan_rework = None
+        executor = self._executor
+        if executor is not None and hasattr(executor, "clear_plan"):
+            executor.clear_plan(thread_id)
+
+    def arm_plan_rework(self, thread_id: Optional[str]) -> None:
+        """Донести до исполнителя «Доработать план» (или до его сборки)."""
+        self._plan_rework = thread_id
+        executor = self._executor
+        if executor is not None and hasattr(executor, "arm_plan_rework"):
+            executor.arm_plan_rework(thread_id)
 
     def warm(self) -> None:
         """Собрать executor в фоне (off-UI), без запуска run. Идемпотентно.
@@ -701,16 +757,19 @@ class AgentRunner:
             question: str,
             fields: list,
             via: str | None = None,
+            decision_key: str | None = None,
         ) -> str:
             self._confirm_event.clear()
             self._confirm_choice = "deny_once"
             try:
-                mounted = present(title, question, fields, via=via)
-            except TypeError:
-                try:
-                    mounted = present(title, question, fields)
-                except Exception:
-                    return "deny_once"
+                mounted = call_with_optional(
+                    present,
+                    title,
+                    question,
+                    fields,
+                    via=via,
+                    decision_key=decision_key,
+                )
             except Exception:
                 return "deny_once"
             # False = explicit fail; None/True — mounted (None = legacy present без ack).
