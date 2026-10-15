@@ -39,6 +39,7 @@ class DiffLog:
     Несколько ``write_bytes`` одного вызова в один файл — один diff:
     старый текст с первого чтения, новый с последней записи.
     Сторона тяжелее потолка в лог не кладётся: остаётся размер.
+    Тяжёлая сторона другую не стирает.
     ``content`` забирает вызов и больше его не держит.
     """
 
@@ -47,10 +48,9 @@ class DiffLog:
 
     def add(self, call_id: str, path: str, old: _Text, new: _Text) -> None:
         known = old.known and new.known
-        keep = known and old.size <= _LIMIT and new.size <= _LIMIT
         side = _Side(
-            old.text if keep else None,
-            new.text if keep else None,
+            _side_text(old),
+            _side_text(new),
             old.size,
             new.size,
             known,
@@ -63,9 +63,6 @@ class DiffLog:
         previous.new_text = side.new_text
         previous.new_size = side.new_size
         if previous.known and side.known:
-            if previous.old_size > _LIMIT or previous.new_size > _LIMIT:
-                previous.old_text = None
-                previous.new_text = None
             return
         previous.known = False
         previous.old_text = None
@@ -163,6 +160,12 @@ def _text_of(data: bytes) -> _Text:
     return _Text(text, size, True)
 
 
+def _side_text(part: _Text) -> str | None:
+    if part.known and part.size <= _LIMIT:
+        return part.text
+    return None
+
+
 def _content_block(path: str, side: _Side) -> dict | None:
     if not side.known:
         return None
@@ -174,12 +177,20 @@ def _content_block(path: str, side: _Side) -> dict | None:
                 "text": _oversize_text(path, side.old_size, side.new_size),
             },
         }
+    if _text_lost(side.old_text, side.old_size) or _text_lost(
+        side.new_text, side.new_size
+    ):
+        return None
     return {
         "type": "diff",
         "path": path,
         "oldText": side.old_text,
         "newText": side.new_text,
     }
+
+
+def _text_lost(text: str | None, size: int) -> bool:
+    return text is None and size > 0
 
 
 def _oversize_text(path: str, old_size: int, new_size: int) -> str:

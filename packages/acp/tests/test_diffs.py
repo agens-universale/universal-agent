@@ -4,7 +4,7 @@ import asyncio
 import json
 from types import SimpleNamespace
 
-from gc_acp.diffs import DiffBackend, DiffLog, attach_diff
+from gc_acp.diffs import DiffBackend, DiffLog, _Side, attach_diff
 from gc_acp.facade import AcpFacade
 from gc_core.backends.local import LocalFsBackend
 from gc_testkit.settings import make_settings
@@ -678,7 +678,7 @@ async def test_kept_text_leaves_when_the_card_is_attached():
     assert log._by_call == {}
 
 
-async def test_later_oversize_write_drops_text_kept_earlier():
+async def test_later_oversize_write_keeps_the_light_old_side():
     disk = MemoryDisk()
     disk.files["edit.txt"] = b"v0"
     log = DiffLog()
@@ -689,7 +689,7 @@ async def test_later_oversize_write_drops_text_kept_earlier():
     assert side.new_text == "v1"
     await backend.write_bytes("edit.txt", ("v" * (_LIMIT + 1)).encode())
     side = log._by_call["batch"]["/work/edit.txt"]
-    assert side.old_text is None
+    assert side.old_text == "v0"
     assert side.new_text is None
     assert side.old_size == 2
     assert side.new_size == _LIMIT + 1
@@ -703,4 +703,46 @@ async def test_later_oversize_write_drops_text_kept_earlier():
     )
     assert _diff_blocks(shown) == []
     assert shown["content"][0]["content"]["text"].startswith("/work/edit.txt:")
+    assert log._by_call == {}
+
+
+async def test_small_text_returns_after_an_oversize_write():
+    disk = MemoryDisk()
+    disk.files["edit.txt"] = b"v0"
+    log = DiffLog()
+    backend = DiffBackend(disk, log, cwd="/work", call_id=lambda: "batch")
+    await backend.write_bytes("edit.txt", b"v1")
+    await backend.write_bytes("edit.txt", ("v" * (_LIMIT + 1)).encode())
+    await backend.write_bytes("edit.txt", b"v2")
+    shown = attach_diff(
+        {
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "batch",
+            "status": "completed",
+        },
+        log,
+    )
+    assert _diff_blocks(shown) == [
+        {
+            "type": "diff",
+            "path": "/work/edit.txt",
+            "oldText": "v0",
+            "newText": "v2",
+        }
+    ]
+    assert disk.files["edit.txt"] == b"v2"
+    assert log._by_call == {}
+
+
+def test_lost_text_under_the_limit_is_not_sent():
+    log = DiffLog()
+    log._by_call["batch"] = {
+        "/work/edit.txt": _Side(None, None, 2, 2, True),
+    }
+    update = {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "batch",
+        "status": "completed",
+    }
+    assert attach_diff(update, log) == update
     assert log._by_call == {}
