@@ -107,64 +107,94 @@ def _final_answer(records: list, *, legacy: bool = False) -> str:
 
 def _last_finish(state: Any, *, records: list, legacy: bool = False) -> str:
     """Старый итог — только если trace подтверждает завершение нужного хода."""
+    messages = _messages_before_turn(state)
+    # При attach граница бывает после сохранённого незакрытого хода.
+    # Его отчёт нельзя приписывать последнему закрытому ходу журнала.
+    if not legacy and _has_open_ask(state, messages):
+        return ""
+    index = next((i for i in range(len(messages) - 1, -1, -1) if _is_finish_call(messages[i])), None)
+    if index is None:
+        return ""
+    gate = {} if legacy else _submitted_finish_gate(messages, index, records)
+    if gate is None:
+        return ""
+    return _preview(_finish_text(messages[index], gate), legacy=legacy)
+
+
+def _messages_before_turn(state: Any) -> list:
     messages = list(getattr(state, "messages", None) or [])
     start = getattr(state, "turn_messages_start", None)
     if start is not None and int(start) <= len(messages):
         messages = messages[:int(start)]
+    return messages
+
+
+def _has_open_ask(state: Any, messages: list) -> bool:
+    open_asks = {str(r.content).strip() for r in deserialize_list(
+        getattr(state, "current_user_intent", None) or []
+    ) if r.action == ACTION_USER_ASK}
+    return any(isinstance(m, dict) and extract_real_user_message_text(m).strip() in open_asks
+               for m in messages)
+
+
+def _is_finish_call(message: Any) -> bool:
+    return (isinstance(message, dict) and message.get("type") == "function_call"
+            and message.get("name") == FINISH_TOOL_NAME)
+
+
+def _submitted_finish_gate(messages: list, index: int, records: list) -> Any:
+    """Решение гейта для turn_finish `messages[index]`, если trace подтверждает его
+    приём в закрытом ходе журнала; `None` — подтверждения нет."""
     closed_asks = {str(r.content).strip() for r in records if r.action == ACTION_USER_ASK}
-    if not legacy:
-        open_asks = {str(r.content).strip() for r in deserialize_list(
-            getattr(state, "current_user_intent", None) or []
-        ) if r.action == ACTION_USER_ASK}
-        # При attach граница бывает после сохранённого незакрытого хода.
-        # Его отчёт нельзя приписывать последнему закрытому ходу журнала.
-        if any(isinstance(m, dict) and extract_real_user_message_text(m).strip() in open_asks
-               for m in messages):
-            return ""
-    for index in range(len(messages) - 1, -1, -1):
-        message = messages[index]
-        if not (isinstance(message, dict) and message.get("type") == "function_call"
-                and message.get("name") == FINISH_TOOL_NAME):
-            continue
-        if not legacy:
-            preceding_ask = next((extract_real_user_message_text(m).strip()
-                for m in reversed(messages[:index]) if isinstance(m, dict)
-                and extract_real_user_message_text(m).strip()), "")
-            if preceding_ask not in closed_asks:
-                return ""
-            call_id = message.get("call_id")
-            if not isinstance(call_id, str) or not call_id:
-                return ""
-            outputs = [m.get("output") for m in messages[index + 1:]
-                if isinstance(m, dict) and m.get("type") == "function_call_output"
-                and m.get("call_id") == call_id]
-            try:
-                output = outputs[-1] if outputs else None
-                if isinstance(output, str):
-                    output = json.loads(output)
-            except (TypeError, ValueError):
-                return ""
-            if (not isinstance(output, dict) or output.get("ok") is not True
-                    or output.get("status") != "submitted"):
-                return ""
-            gate = output.get("finish_gate") or {}
-            if isinstance(gate, dict) and gate.get("action") == "reject":
-                return ""
-        try:
-            args = json.loads(message.get("arguments") or "{}")
-        except (TypeError, ValueError):
-            return ""
-        if not isinstance(args, dict):
-            return ""
-        kind = str(args.get("solution_type") or "").strip()
-        if not legacy and isinstance(gate, dict):
-            runtime_outcome = gate.get("runtime_outcome")
-            if runtime_outcome in ("fail_open_error", "fail_open_limit"):
-                kind += f" [{runtime_outcome}]"
-        report = str(args.get("task_report") or "").strip()
-        text = f"{kind}: {report}" if kind and report else (kind or report)
-        return _preview(text, legacy=legacy)
-    return ""
+    if _preceding_ask(messages[:index]) not in closed_asks:
+        return None
+    call_id = messages[index].get("call_id")
+    if not isinstance(call_id, str) or not call_id:
+        return None
+    output = _last_call_output(messages[index + 1:], call_id)
+    if (not isinstance(output, dict) or output.get("ok") is not True
+            or output.get("status") != "submitted"):
+        return None
+    gate = output.get("finish_gate") or {}
+    if isinstance(gate, dict) and gate.get("action") == "reject":
+        return None
+    return gate
+
+
+def _preceding_ask(messages: list) -> str:
+    texts = (extract_real_user_message_text(m).strip() for m in reversed(messages) if isinstance(m, dict))
+    return next((text for text in texts if text), "")
+
+
+def _last_call_output(messages: list, call_id: str) -> Any:
+    outputs = [m.get("output") for m in messages
+               if isinstance(m, dict) and m.get("type") == "function_call_output"
+               and m.get("call_id") == call_id]
+    output = outputs[-1] if outputs else None
+    if not isinstance(output, str):
+        return output
+    try:
+        return json.loads(output)
+    except ValueError:
+        return None
+
+
+def _finish_text(message: dict, gate: Any) -> str:
+    """`тип: отчёт` из аргументов turn_finish; непринятый гейтом итог помечен."""
+    try:
+        args = json.loads(message.get("arguments") or "{}")
+    except (TypeError, ValueError):
+        return ""
+    if not isinstance(args, dict):
+        return ""
+    kind = str(args.get("solution_type") or "").strip() + _fail_open_mark(gate)
+    report = str(args.get("task_report") or "").strip()
+    return f"{kind}: {report}" if kind and report else (kind or report)
+
+
+def _fail_open_mark(gate: Any) -> str:
+    runtime_outcome = gate.get("runtime_outcome") if isinstance(gate, dict) else None
+    return f" [{runtime_outcome}]" if runtime_outcome in ("fail_open_error", "fail_open_limit") else ""
 
 
 def _history_compacted(state: Any) -> bool:
