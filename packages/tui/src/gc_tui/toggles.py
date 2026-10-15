@@ -192,7 +192,10 @@ def auto_available_cfg(cfg: Any) -> bool:
     return auto_unavailable_reason_cfg(cfg) is None
 
 
-def level_values(app: Any, settings: Any) -> Tuple[ToggleValue, ...]:
+def level_values(
+    app: Any,  # noqa: ARG001  # сигнатура values_provider(app, settings)
+    settings: Any,
+) -> Tuple[ToggleValue, ...]:
     """Состав значений `/level`: статичная тройка плюс `auto` вне шкалы, когда
     фича доступна для ПЕРЕДАННЫХ настроек — база окна у Settings, действующие у
     палитры (спека автороутинга §3, PR140 Р4)."""
@@ -289,7 +292,10 @@ def _discovered_profiles(app: Any) -> Dict[str, Any]:
     return discover_profiles(_profile_roots(app))
 
 
-def profile_values(app: Any, settings: Any = None) -> Tuple[ToggleValue, ...]:
+def profile_values(
+    app: Any,
+    settings: Any = None,  # noqa: ARG001  # сигнатура values_provider(app, settings)
+) -> Tuple[ToggleValue, ...]:
     """Алфавитный объединённый список профилей (спека §3.1/§12.1): тёзка — одна
     позиция (`discover_profiles` уже разрешает коллизию в пользу проектного).
     Цвет/hint не несут смысла здесь — trackless, `hint_provider` динамический."""
@@ -898,19 +904,10 @@ def owning_preset_name(toggle_name: str) -> Optional[str]:
 def cycle_in(names: list[str], current: str, direction: int) -> str:
     """Следующее значение по кругу (±1) в произвольном списке `names`, начиная
     от `current`. Единственная точка индексной формулы тоггл-цикла — источник
-    списка задаёт вызывающий (статический `TOGGLES[name].names` у `cycle_value`,
-    динамический `effective_toggle_names` у `next_toggle_value` и у `_modes_apply`
-    в settings.py)."""
+    списка задаёт вызывающий (`effective_toggle_names` у `next_toggle_value` и
+    у `_modes_apply` в settings.py)."""
     idx = names.index(current) if current in names else 0
     return names[(idx + direction) % len(names)]
-
-
-def cycle_value(name: str, current: str, direction: int) -> str:
-    """Следующее значение тоггла `name` по кругу (±1 по TOGGLES[name].names). Чистая
-    функция — ничего не пишет и не применяет; роутинг main.py (←/→/Enter на toggle-
-    строке) зовёт её от ТЕКУЩЕГО отображаемого состояния (`toggle_state`) прямо перед
-    `apply_toggle` — мгновенная модель, черновика нет."""
-    return cycle_in(TOGGLES[name].names, current, direction)
 
 
 def apply_toggle(app: Any, name: str, value: str) -> str:
@@ -964,7 +961,7 @@ def _effective_settings(app: Any) -> Any:
 
 def next_toggle_value(app: Any, name: str, direction: int) -> str:
     """Generic следующий шаг тоггла по кругу — та же формула, что у
-    `cycle_value`, но отправная точка читается через эффективное состояние
+    `cycle_in`, но отправная точка читается через эффективное состояние
     (`toggle_state(app, name)`), а не передаётся аргументом: preset-тогглу
     нужен резолв пары через конфиг приложения, single-key — просто текущее
     значение. Custom НЕ позиция трека (ревизия 4) — эффективное значение вне

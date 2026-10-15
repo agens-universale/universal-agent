@@ -7,18 +7,19 @@ import pytest
 
 
 def test_cycle_value_wraps_around():
-    """Чистая функция цикла: ±1 по кортежу values, по кругу, без записи."""
-    from gc_tui.toggles import cycle_value
+    """Цикл ±1 по names тоггла, по кругу, без записи."""
+    from gc_tui.toggles import TOGGLES, cycle_in
 
-    assert cycle_value("gate", "on", 1) == "off"  # (idx2+1)%3 -> off
-    assert (
-        cycle_value("gate", "off", 1) == "smart"
-    )  # было "on" -> теперь "smart"
-    assert cycle_value("gate", "smart", 1) == "on"
-    assert cycle_value("answers", "judge", 1) == "deny"
-    assert cycle_value("answers", "allow", 1) == "judge"
-    assert cycle_value("answers", "deny", 1) == "allow"
-    assert cycle_value("answers", "deny", -1) == "judge"
+    def cycle(name, current, direction):
+        return cycle_in(TOGGLES[name].names, current, direction)
+
+    assert cycle("gate", "on", 1) == "off"  # (idx2+1)%3 -> off
+    assert cycle("gate", "off", 1) == "smart"  # было "on" -> теперь "smart"
+    assert cycle("gate", "smart", 1) == "on"
+    assert cycle("answers", "judge", 1) == "deny"
+    assert cycle("answers", "allow", 1) == "judge"
+    assert cycle("answers", "deny", 1) == "allow"
+    assert cycle("answers", "deny", -1) == "judge"
 
 
 def test_palette_renders_toggle_state(monkeypatch):
@@ -1229,7 +1230,7 @@ def test_five_value_toggle_works_generically(monkeypatch):
 
     txt = pal._format_toggle_row(reg.lookup("fake")).plain
     assert "○ ○ ● ○ ○" in txt and txt.rstrip().endswith("v2")
-    assert tg.cycle_value("fake", "v4", 1) == "v0"  # цикл по кругу
+    assert tg.cycle_in(tg.TOGGLES["fake"].names, "v4", 1) == "v0"  # цикл по кругу
     hint = pal._toggle_hint(reg.lookup("fake"))
     assert hint.startswith("v2 — подсказка 2")
 

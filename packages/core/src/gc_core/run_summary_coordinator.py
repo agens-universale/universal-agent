@@ -16,12 +16,11 @@ from gc_core.config_modules.strip_tags_projection import (
 )
 from gc_core.config_modules.summary import SUMMARY_CHARS_PER_TOKEN
 from gc_core.execution.contracts import ExecutionFailure
-from gc_core.execution.message_keys import filter_messages_not_in_state
-from gc_core.execution.ports import port
-from gc_core.message_format.serialization import calc_history_chars_for_trigger
 from gc_core.execution.message_keys import (
     filter_messages_not_in_state as filter_messages_not_in_state,
 )
+from gc_core.execution.ports import port
+from gc_core.message_format.serialization import calc_history_chars_for_trigger
 from gc_core.summarize.compaction import (
     arun_summary_compaction,
     exceeded_summary_triggers,

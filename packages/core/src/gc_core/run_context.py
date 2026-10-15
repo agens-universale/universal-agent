@@ -5,15 +5,21 @@ import logging
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set
 
-from gc_core.auto_routing.request_equivalence import PreparedRequestEquivalence
 from gc_core.agent_store import (
     DEFAULT_AGENT_STORE,
     AgentStore,
     check_agent_store,
 )
 from gc_core.attachments.store import ImageStore, image_store_for
+from gc_core.auto_routing.levels import (
+    auto_available,
+    effective_level,
+    resolve_routing_params,
+)
+from gc_core.auto_routing.policy import RoutingParams
+from gc_core.auto_routing.request_equivalence import PreparedRequestEquivalence
 from gc_core.backends.factory import resolve_os_backend
 from gc_core.backends.protocol import FsBackend
 from gc_core.config_modules.chat_completions import (
@@ -41,12 +47,9 @@ from gc_core.execution_workspace import (
 from gc_core.mcp_session_owner import new_owner_token, use_owner
 from gc_core.model_router import CircuitBreaker, ModelRouter
 from gc_core.run_preparation import PromptLoader
-from gc_core.state_preparation import StatePreparer
 from gc_core.startup_notices import auto_routing_unavailable_notice
+from gc_core.state_preparation import StatePreparer
 from gc_core.tools import abuild_tools_data
-from gc_core.auto_routing.levels import auto_available, effective_level, resolve_routing_params
-from gc_core.auto_routing.policy import RoutingParams
-from gc_core.settings import settings_of
 from gc_core.tools.skills.registry import SkillsRegistry
 from gc_core.trace_id import trace_header_name, trace_id_from_config
 from gc_core.utils.logging_module import create_run_logger, generate_run_id
