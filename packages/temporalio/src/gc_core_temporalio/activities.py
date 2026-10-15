@@ -327,6 +327,7 @@ class AgentActivities:
     async def _prepare(self, call, ctx):
         from gc_core.run_preparation import aload_run_prompts
         from gc_core.tools.subagents.registry import (
+            aprepare_subagent_definitions,
             resolve_subagent_definitions,
         )
 
@@ -341,6 +342,9 @@ class AgentActivities:
         prompts = await aload_run_prompts(
             prompts_request, logger=ctx.logger, store=agent_store_of(ctx)
         )
+        # Своё хранилище агента на воркере асинхронное: определения —
+        # заранее, синхронное чтение ниже берёт их готовыми.
+        await aprepare_subagent_definitions(ctx, logger=ctx.logger)
         return PreparedContext(
             human_input=getattr(self.context_provider, "human_input", True),
             context=PreparedRunContext.from_context(

@@ -46,6 +46,7 @@ async def assert_conforms(make: Callable[[Seed], AgentStore]) -> None:
         _check_memory_round_trip,
         _check_memory_conflict,
         _check_blank_memory_has_no_version,
+        _check_written_version_is_read_version,
     ):
         await check(make(seed), seed)
 
@@ -96,3 +97,21 @@ async def _check_blank_memory_has_no_version(
     blank = await store.write_memory(PROJECT, "  \n", expected_version=None)
     assert blank.version is None
     await store.write_memory(PROJECT, "снова", expected_version=None)
+
+
+async def _check_written_version_is_read_version(
+    store: AgentStore, _seed: Seed
+) -> None:
+    """Версия из ``write_memory`` — та же, что у следующего чтения, даже если
+    хранилище нормализует текст (переводы строк): по ней пишут дальше."""
+    written = await store.write_memory(
+        PROJECT, "строка\r\nещё\rконец", expected_version=None
+    )
+    read = await store.read_memory(PROJECT)
+    assert read is not None and read.version == written.version, (
+        written,
+        read,
+    )
+    await store.write_memory(
+        PROJECT, "дальше", expected_version=written.version
+    )

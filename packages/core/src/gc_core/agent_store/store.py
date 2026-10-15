@@ -77,6 +77,10 @@ class AgentStore(ABC):
         """Как назвать ресурс в тексте отказа (файловое — путь)."""
         return f"{kind}:{name}"
 
+    def memory_label(self, project: ProjectKey) -> str:
+        """Как назвать память проекта в тексте отказа (файловое — путь)."""
+        return f"project memory {project.id}"
+
     def skills_registry(
         self, settings: Any, *, backend: Any
     ) -> SkillsRegistry:
@@ -88,6 +92,11 @@ class AgentStore(ABC):
     async def aprovision_skills(
         self, backend: Any, settings: Any, *, run_logger: Any = None
     ) -> SkillsRegistry | None:
-        """Реестр для среды исполнения, если скиллы надо туда доставить;
-        ``None`` — реестр из ``skills_registry`` годится как есть."""
-        return None
+        """Реестр для среды исполнения; ``None`` — реестр из
+        ``skills_registry`` годится как есть.
+
+        Зовётся после сверки корня рана с бэкендом (``settings`` — уже
+        сверенные): ``skills_registry`` строился раньше, на корне хоста, а
+        скрипты своего хранилища выкладываются от корня среды исполнения.
+        """
+        return self.skills_registry(settings, backend=backend)

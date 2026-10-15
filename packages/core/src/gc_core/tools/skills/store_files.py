@@ -7,13 +7,22 @@
 
 Скрипту нужен файл в среде исполнения, а хранилище отдаёт байты: перед
 запуском файлы скилла выкладываются через ``os_backend`` в
-``<launch_root>/.gc/skills_runtime/<слой>/<скилл>`` с манифестом
-``.manifest.sha256`` (повторный запуск с тем же набором ничего не копирует) —
-как выкладка скиллов в docker/ssh (``provision.py``).
+``<launch_root>/.gc/skills_runtime/<слой>/<скилл>/<версия>`` с манифестом
+``.manifest.sha256`` — как выкладка скиллов в docker/ssh (``provision.py``).
+
+* Версия — отпечаток набора файлов: файл, удалённый из хранилища, в новой
+  версии не появится (удалять в среде исполнения бэкенд не умеет).
+* Копию модель может править (каталог открыт на запись), поэтому перед каждым
+  запуском файлы сверяются с хранилищем по sha256, правленые выкладываются
+  заново; неизменённый скилл не копируется.
+* Имена файлов приходят из своего хранилища (база, S3 с загрузкой
+  пользователями): путь вне каталога скилла — отказ, а не запись мимо него.
 """
 
 from __future__ import annotations
 
+import hashlib
+import logging
 import posixpath
 from typing import Any, AsyncIterator, Dict
 
@@ -24,6 +33,19 @@ from gc_core.tools.skills.registry import (
 )
 
 LAYERS = ("system", "user", "project")
+_VERSION_CHARS = 16
+
+logger = logging.getLogger(__name__)
+
+
+def relative_inside(path: str) -> str:
+    """Путь из хранилища — относительный и не выходит наверх; иначе
+    ``ValueError``: имя записи не выводит выкладку за каталог скилла."""
+    normalized = posixpath.normpath(path.replace("\\", "/"))
+    head = normalized.split("/", 1)[0]
+    if normalized.startswith("/") or head in ("..", ".") or ":" in head:
+        raise ValueError(f"файл скилла вне каталога скилла: {path!r}")
+    return normalized
 
 
 class StoreSkillFiles:
@@ -133,18 +155,33 @@ class StoreSkillsRegistry(SkillsRegistry):
                 "используйте инструкции, references и assets скилла."
             )
         files = [
-            (rel, await self._abytes(posixpath.join(skill.root_path, rel)))
+            (
+                relative_inside(rel),
+                await self._abytes(posixpath.join(skill.root_path, rel)),
+            )
             async for rel in self._backend.iter_files(skill.root_path)
         ]
         files.sort(key=lambda item: item[0])
         digest = provision._digest(files)
         target = posixpath.join(
-            launch_root, provision.RUNTIME_SUBDIR, skill.root_path
+            launch_root,
+            provision.RUNTIME_SUBDIR,
+            relative_inside(skill.root_path),
+            digest[:_VERSION_CHARS],
         )
         manifest = posixpath.join(target, provision.MANIFEST_NAME)
+        stale = files
         if await provision._remote_manifest(self._runtime, manifest) == digest:
-            return target
-        for rel, data in files:
+            stale = await self._changed_in_copy(target, files)
+            if not stale:
+                return target
+            logger.warning(
+                "skills_runtime: %s изменён после выкладки (%s) — "
+                "выкладываю заново",
+                target,
+                ", ".join(rel for rel, _data in stale),
+            )
+        for rel, data in stale:
             path = posixpath.join(target, rel)
             await self._runtime.makedirs(posixpath.dirname(path))
             await self._runtime.write_bytes(path, data)
@@ -152,6 +189,25 @@ class StoreSkillsRegistry(SkillsRegistry):
         await self._runtime.makedirs(target)
         await self._runtime.write(manifest, digest + "\n")
         return target
+
+    async def _changed_in_copy(
+        self, target: str, files: list[tuple[str, bytes]]
+    ) -> list[tuple[str, bytes]]:
+        """Файлы выложенной копии, которые разошлись с хранилищем."""
+        changed = []
+        for rel, data in files:
+            try:
+                same = (
+                    await self._runtime.sha256_bytes(
+                        posixpath.join(target, rel)
+                    )
+                    == hashlib.sha256(data).hexdigest()
+                )
+            except OSError:
+                same = False
+            if not same:
+                changed.append((rel, data))
+        return changed
 
     async def _abytes(self, name: str) -> bytes:
         data = await self._store.read("skill", name.strip("/"))
@@ -178,5 +234,6 @@ __all__ = [
     "LAYERS",
     "StoreSkillFiles",
     "StoreSkillsRegistry",
+    "relative_inside",
     "store_skills_registry",
 ]

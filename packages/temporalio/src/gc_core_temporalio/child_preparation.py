@@ -7,7 +7,10 @@ from gc_core.execution.contracts import ExecutionFailure
 from gc_core.model_router import CircuitBreaker, ModelRouter
 from gc_core.settings import LoadedSettings
 from gc_core.states import State
-from gc_core.tools.subagents.registry import resolve_subagent_definitions
+from gc_core.tools.subagents.registry import (
+    aprepare_subagent_definitions,
+    resolve_subagent_definitions,
+)
 from gc_core.tools.subagents.runner import SubagentRunner
 from gc_core.tools.subagents.runner_preparation import (
     resolve_prepared_subagent,
@@ -76,6 +79,9 @@ class ChildActivities:
         runner._active_tool_name = call.child_context["tool_name"]
         state = await runner._prepare_local_child_state()
         context = await self.native._prepare(call, child_ctx)
+        await aprepare_subagent_definitions(
+            parent_ctx, logger=parent_ctx.logger
+        )
         context.subagent_definitions = resolve_subagent_definitions(parent_ctx)
         # Настройки ребёнка едут один раз — публичным снимком его контекста
         # (`context.context`); в подготовленном состоянии их нет. Workflow

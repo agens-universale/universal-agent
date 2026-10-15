@@ -189,10 +189,107 @@ class _DictBackend:
             raise FileNotFoundError(path)
         return self.files[path].decode()
 
+    async def sha256_bytes(self, path: str) -> str:
+        import hashlib
 
-async def test_scripts_of_own_store_skill_are_provisioned_once(tmp_path):
+        if path not in self.files:
+            raise FileNotFoundError(path)
+        return hashlib.sha256(self.files[path]).hexdigest()
+
+
+def _provisioned_registry(store, tmp_path):
     from gc_core.tools.skills.store_files import store_skills_registry
 
+    runtime = _DictBackend()
+    registry = store_skills_registry(
+        store,
+        make_settings({"launch_root": str(tmp_path)}),
+        runtime_backend=runtime,
+    )
+    return registry, runtime
+
+
+async def test_scripts_of_own_store_skill_are_provisioned_once(tmp_path):
+    store = MemoryAgentStore(
+        skills={
+            "user/demo/SKILL.md": SKILL,
+            "user/demo/scripts/run.sh": "echo hi",
+        },
+        fallback=None,
+    )
+    registry, runtime = _provisioned_registry(store, tmp_path)
+    resolved = await registry.resolve_script("demo", "run.sh")
+    root = resolved["path"].removesuffix("/scripts/run.sh")
+    base, _sep, version = root.rpartition("/")
+    assert base == f"{tmp_path}/.gc/skills_runtime/user/demo"
+    assert len(version) == 16
+    assert runtime.files[resolved["path"]] == b"echo hi"
+    assert f"{root}/.manifest.sha256" in runtime.files
+    copied = runtime.writes
+    await registry.resolve_script("demo", "scripts/run.sh")
+    assert runtime.writes == copied, "неизменённый скилл выложен заново"
+
+
+async def test_copy_edited_by_the_model_is_restored(tmp_path):
+    """Каталог выкладки открыт модели на запись: правленый скрипт перед
+    запуском возвращается к тексту из хранилища."""
+    store = MemoryAgentStore(
+        skills={
+            "user/demo/SKILL.md": SKILL,
+            "user/demo/scripts/run.sh": "echo hi",
+        },
+        fallback=None,
+    )
+    registry, runtime = _provisioned_registry(store, tmp_path)
+    path = (await registry.resolve_script("demo", "run.sh"))["path"]
+    runtime.files[path] = b"rm -rf ~"
+    await registry.resolve_script("demo", "run.sh")
+    assert runtime.files[path] == b"echo hi"
+
+
+async def test_file_removed_from_store_is_not_in_new_copy(tmp_path):
+    skills = {
+        "user/demo/SKILL.md": SKILL,
+        "user/demo/scripts/run.sh": "echo hi",
+        "user/demo/scripts/helper.py": "OLD = 1",
+    }
+    store = MemoryAgentStore(skills=skills, fallback=None)
+    registry, runtime = _provisioned_registry(store, tmp_path)
+    first = (await registry.resolve_script("demo", "run.sh"))["path"]
+    del store._data["skill"]["user/demo/scripts/helper.py"]
+    registry, runtime_again = _provisioned_registry(store, tmp_path)
+    runtime_again.files = runtime.files
+    second = (await registry.resolve_script("demo", "run.sh"))["path"]
+    assert second != first, "новый набор — новый каталог"
+    new_root = second.removesuffix("/scripts/run.sh")
+    assert f"{new_root}/scripts/helper.py" not in runtime.files
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["user/demo/../../../../../escaped.txt", "user/demo/scripts/../../../x"],
+)
+async def test_store_entry_cannot_escape_the_skill_dir(tmp_path, name):
+    """Имена файлов приходят из своего хранилища (база, S3 с загрузкой
+    пользователями): путь наверх — отказ, а не запись мимо каталога."""
+    store = MemoryAgentStore(
+        skills={
+            "user/demo/SKILL.md": SKILL,
+            "user/demo/scripts/run.sh": "echo hi",
+            name: "pwned",
+        },
+        fallback=None,
+    )
+    registry, runtime = _provisioned_registry(store, tmp_path)
+    with pytest.raises(ValueError, match="вне каталога скилла"):
+        await registry.resolve_script("demo", "run.sh")
+    assert runtime.files == {}
+
+
+async def test_own_store_registry_follows_reconciled_root(tmp_path):
+    """Реестр своего хранилища собирается заново по сверенному корню рана:
+    до сверки у TUI/ACP корень — каталог хоста, а скрипты выкладываются в
+    среде исполнения (docker/ssh)."""
     store = MemoryAgentStore(
         skills={
             "user/demo/SKILL.md": SKILL,
@@ -201,19 +298,45 @@ async def test_scripts_of_own_store_skill_are_provisioned_once(tmp_path):
         fallback=None,
     )
     runtime = _DictBackend()
-    registry = store_skills_registry(
-        store,
-        make_settings({"launch_root": str(tmp_path)}),
-        runtime_backend=runtime,
+    registry = await store.aprovision_skills(
+        runtime, make_settings({"launch_root": "/remote/work"})
     )
     resolved = await registry.resolve_script("demo", "run.sh")
-    root = f"{tmp_path}/.gc/skills_runtime/user/demo"
-    assert resolved["path"] == f"{root}/scripts/run.sh"
-    assert runtime.files[resolved["path"]] == b"echo hi"
-    assert f"{root}/.manifest.sha256" in runtime.files
-    copied = runtime.writes
-    await registry.resolve_script("demo", "scripts/run.sh")
-    assert runtime.writes == copied, "неизменённый скилл выложен заново"
+    assert resolved["path"].startswith("/remote/work/.gc/skills_runtime/")
+
+
+async def test_responses_mode_tool_call_does_not_wait_on_store_synchronously():
+    """Диспетчер тулов спрашивает «это субагент?» на каждом вызове и в
+    режиме responses: определения своего (сетевого) хранилища засеяны
+    заранее, синхронного ожидания хранилища нет."""
+    import asyncio
+
+    from gc_core.run_context import acreate_run_context
+    from gc_core.tools.subagents.registry import is_subagent_tool
+
+    class _NetStore(MemoryAgentStore):
+        async def list(self, kind, prefix=""):
+            await asyncio.sleep(0)
+            return await super().list(kind, prefix)
+
+        async def read(self, kind, name):
+            await asyncio.sleep(0)
+            return await super().read(kind, name)
+
+    store = _NetStore(subagents={"helper.md": SUBAGENT})
+    ctx = await acreate_run_context(
+        make_settings(
+            {
+                "agent.model": "M",
+                "backend.api_mode": "responses",
+                "agent.use_local_subagents": True,
+                "logging.save_logs": False,
+            }
+        ),
+        agent_store=store,
+    )
+    assert is_subagent_tool("fs_read", ctx) is False
+    assert is_subagent_tool("subagent_helper", ctx) is True
 
 
 async def test_service_prompts_go_through_the_store():

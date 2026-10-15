@@ -71,6 +71,9 @@ class FileAgentStore(AgentStore):
         paths = self._paths(kind, name)
         return paths[0] if paths else f"{kind}:{name}"
 
+    def memory_label(self, project: ProjectKey) -> str:
+        return str(memory_path(project))
+
     async def read(self, kind: ResourceKind, name: str) -> bytes | None:
         paths = self._paths(kind, name)
         if not paths:
@@ -132,7 +135,11 @@ class FileAgentStore(AgentStore):
                 raise MemoryConflict(current)
             storage._atomic_write(path, text)
             storage.mirror_backup(memory_backup_path(project), text)
-        return ProjectMemory(text, memory_version(text))
+        # Версия — та, что вернёт следующее чтение: файл читается с
+        # приведением переводов строк (\r\n и \r → \n), иначе следующая
+        # запись по этой версии упрётся в ложный конфликт.
+        stored = text.replace("\r\n", "\n").replace("\r", "\n")
+        return ProjectMemory(stored, memory_version(stored))
 
     # --- скиллы ---------------------------------------------------------------
 

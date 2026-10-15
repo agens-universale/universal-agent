@@ -401,7 +401,9 @@ Return format (JSON string):
                     await self._aerr(
                         action="append",
                         error_type="io_error",
-                        message=unreadable_reason("project memory", exc),
+                        message=unreadable_reason(
+                            self._store.memory_label(self._project), exc
+                        ),
                     ),
                     "",
                     None,

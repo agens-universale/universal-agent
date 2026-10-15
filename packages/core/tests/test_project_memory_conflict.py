@@ -87,3 +87,19 @@ async def test_store_rejects_stale_write():
         assert conflict.current.text == "два"
     else:
         raise AssertionError("устаревшая версия прошла")
+
+
+async def test_unreadable_memory_names_its_file(tmp_path):
+    """Нечитаемая память (чужая кодировка) — отказ дописывания с путём к
+    файлу в тексте, как до хранилища."""
+    from gc_core.agent_store import FileAgentStore
+
+    path = tmp_path / ".gc" / "project_memory.md"
+    path.parent.mkdir()
+    path.write_bytes("память".encode("cp1251"))
+    tool = _tool(FileAgentStore())
+    tool._project = ProjectKey(id="unreadable", root=str(tmp_path))
+    out = json.loads(await tool.acall("append", "новое"))
+    assert out["error"]["type"] == "io_error"
+    assert out["error"]["message"].startswith(f"{path}: не удалось прочитать")
+    assert path.read_bytes() == "память".encode("cp1251")
