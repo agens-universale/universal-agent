@@ -34,6 +34,7 @@ from gc_core.summarize.summary_logging import (
     aappend_summary_trace_record,
     log_compaction_failed,
     log_pre_run_max_rounds,
+    log_pre_run_no_progress,
     log_token_trigger_no_prompt_tokens,
 )
 
@@ -384,30 +385,49 @@ class RunSummaryCoordinator:
         reason = "pre_run" if startup else self._pre_backend_trigger_reason
         rounds = _PRE_RUN_SUMMARY_MAX_ROUNDS if startup else 1
         guard_progress = startup and self._startup_progress_guard
-        for _ in range(rounds):
+        for done in range(1, rounds + 1):
             before_chars = self._history_chars(self._state.messages) if guard_progress else 0
             compacted = await self._acompact_backend_batch(
                 current_messages, mode, reason
             )
             if not compacted or not startup or self._summary_trigger_chars <= 0:
                 return
-            if guard_progress and (
-                self._history_chars(current_messages) > self._summary_trigger_chars
-                or self._history_chars(self._state.messages) >= before_chars
-            ):
+            if guard_progress and self._startup_stalled(current_messages, before_chars):
+                self._log_startup_stop(done)
                 return
-        if exceeded_summary_triggers(
-            state=self._state,
-            summary_trigger_chars=self._summary_trigger_chars,
-            summary_trigger_tokens=self._summary_trigger_tokens,
-            tags=self._projection_tags(),
-            strip_think=True,
-        ):
+        if self._startup_trigger_exceeded():
             log_pre_run_max_rounds(
                 self._logger,
                 thread_id=getattr(self._thread_session, "thread_id", None),
                 max_rounds=_PRE_RUN_SUMMARY_MAX_ROUNDS,
             )
+
+    def _startup_stalled(self, current_messages: list[dict], before_chars: int) -> bool:
+        """Нет прогресса: текущий батч сам выше порога или история не сократилась."""
+        return (
+            self._history_chars(current_messages) > self._summary_trigger_chars
+            or self._history_chars(self._state.messages) >= before_chars
+        )
+
+    def _log_startup_stop(self, rounds: int) -> None:
+        """Ранняя остановка стартового сжатия — в лог, если порог всё ещё превышен."""
+        if self._startup_trigger_exceeded():
+            log_pre_run_no_progress(
+                self._logger,
+                thread_id=getattr(self._thread_session, "thread_id", None),
+                rounds=rounds,
+            )
+
+    def _startup_trigger_exceeded(self) -> bool:
+        return bool(
+            exceeded_summary_triggers(
+                state=self._state,
+                summary_trigger_chars=self._summary_trigger_chars,
+                summary_trigger_tokens=self._summary_trigger_tokens,
+                tags=self._projection_tags(),
+                strip_think=True,
+            )
+        )
 
     def _history_chars(self, messages: list[dict]) -> int:
         return calc_history_chars_for_trigger(

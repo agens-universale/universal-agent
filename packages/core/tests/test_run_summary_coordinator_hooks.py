@@ -594,3 +594,23 @@ async def test_old_execution_patch_retains_failure_command_order(monkeypatch, ct
         await coord.apre_backend_compaction_hook(current, "user_ask")
     assert patches == ["summary-batch-preservation-v1"]
     thread.apersist_batch.assert_not_awaited()
+
+
+async def test_startup_no_progress_stop_is_logged(monkeypatch, ctx_stub):
+    current = [{"role": "user", "content": "new task", "id": "new"}]
+    state = _minimal_state(messages=[{"role": "user", "content": "old history", "id": "old"}, *current])
+    calls = []
+
+    async def compact(**kwargs):
+        calls.append(kwargs["trigger_reason"])
+
+    monkeypatch.setattr(rsc, "arun_summary_compaction", compact)
+    monkeypatch.setattr(rsc, "exceeded_summary_triggers", lambda **_kw: True)
+    stops = []
+    monkeypatch.setattr(rsc, "log_pre_run_no_progress", lambda *_a, **kw: stops.append(kw))
+    coord = RunSummaryCoordinator(ctx=ctx_stub, state=state, thread_session=None,
+        summary_trigger_chars=10, is_cli_mode=False, pre_backend_trigger_reason="pre_backend",
+        deferred_startup_compaction=True, startup_progress_guard=True)
+    await coord.apre_backend_compaction_hook(current, "user_ask")
+    assert len(calls) == 1
+    assert stops == [{"thread_id": None, "rounds": 1}]
