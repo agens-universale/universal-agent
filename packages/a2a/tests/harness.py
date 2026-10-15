@@ -63,6 +63,44 @@ class SlowAgent(AnswerAgent):
             yield ("answer", "")
 
 
+class HungStreamAgent(AnswerAgent):
+    """Прогон живёт отдельно от итератора, как ``AsyncAgent.stream``.
+
+    ``aclose`` дожидается прогона. Брошенный итератор — нет: задача
+    доигрывает текущий вызов и после ``stop()``.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.active = 0
+        self.peak = 0
+        self.entered = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def stream(self, prompt, thread_id=None, system=None):
+        self.calls.append(
+            {"prompt": prompt, "thread_id": thread_id, "system": system}
+        )
+        self.active += 1
+        self.peak = max(self.peak, self.active)
+        self.entered.set()
+        task = asyncio.create_task(self._work())
+        try:
+            yield ("tick", "")
+            while not task.done():
+                await asyncio.sleep(0.01)
+                yield ("tick", "")
+        finally:
+            await task
+            self.active -= 1
+
+    async def _work(self) -> None:
+        while not self.stopped:
+            await asyncio.sleep(0.01)
+        await self.release.wait()
+        self.last_answer = "остановлен"
+
+
 class FailAgent(AnswerAgent):
     async def stream(self, prompt, thread_id=None, system=None):
         del prompt, thread_id, system

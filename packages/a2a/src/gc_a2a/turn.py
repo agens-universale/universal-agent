@@ -107,11 +107,19 @@ class Turn:
     async def _forward(self) -> None:
         if self.cancel_requested:
             return
-        async for _kind, _text in self.agent.stream(
+        stream = self.agent.stream(
             self._prompt, thread_id=self._context_id, system=SYSTEM
-        ):
-            if self.cancel_requested:
-                return
+        )
+        try:
+            async for _kind, _text in stream:
+                if self.cancel_requested:
+                    break
+        finally:
+            # ``return``/``break`` из ``async for`` не ждут ``finally`` генератора:
+            # прогон ``AsyncAgent.stream`` остаётся жить, а диалог уже свободен.
+            close = getattr(stream, "aclose", None)
+            if close is not None:
+                await close()
 
     async def _seal(self, failed: BaseException | None) -> None:
         if self.sealed:

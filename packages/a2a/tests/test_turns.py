@@ -7,6 +7,7 @@ from harness import (
     AskAgent,
     Clock,
     FailAgent,
+    HungStreamAgent,
     SlowAgent,
     message,
     rpc,
@@ -208,6 +209,59 @@ async def test_request_cancel_during_agent_create_seals_task(tmp_path):
         assert nxt.json()["result"]["task"]["artifacts"][0]["parts"][0][
             "text"
         ] == ("после")
+
+
+async def test_cancel_waits_until_the_run_finishes(tmp_path):
+    """Отмена не снимает диалог, пока прогон после stop() ещё идёт."""
+    async with session(tmp_path, agents=[HungStreamAgent()]) as (
+        client,
+        _f,
+        created,
+    ):
+        first = await rpc(
+            client,
+            "SendMessage",
+            {
+                **message(message_id="m-1"),
+                "configuration": {"returnImmediately": True},
+            },
+        )
+        hung = created[0]
+        await hung.entered.wait()
+        task = first.json()["result"]["task"]
+        cancel = asyncio.create_task(
+            rpc(client, "CancelTask", {"id": task["id"]})
+        )
+        await asyncio.sleep(0.05)
+        assert cancel.done() is False
+        assert hung.active == 1
+        overlap = await rpc(
+            client,
+            "SendMessage",
+            {
+                **message(
+                    "ещё", message_id="m-2", contextId=task["contextId"]
+                ),
+                "configuration": {"returnImmediately": True},
+            },
+        )
+        assert overlap.json()["error"]["code"] == -32004
+        assert hung.peak == 1
+        hung.release.set()
+        body = await cancel
+        assert body.json()["result"]["status"]["state"] == (
+            "TASK_STATE_CANCELED"
+        )
+        assert hung.active == 0
+        nxt = await rpc(
+            client,
+            "SendMessage",
+            message("дальше", message_id="m-3", contextId=task["contextId"]),
+        )
+    assert nxt.json()["result"]["task"]["status"]["state"] == (
+        "TASK_STATE_COMPLETED"
+    )
+    assert hung.peak == 1
 
 
 async def test_get_and_list_and_cancel(tmp_path):
