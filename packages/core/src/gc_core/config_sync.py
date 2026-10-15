@@ -195,17 +195,15 @@ def _validate_subtree(top_key: str, subtree: Any) -> bool:
 def _strip_removed_patterns(
     user_text: str, user_raw: Any
 ) -> tuple[str, List[str]]:
-    """Вырезать записи ``REMOVED`` с ``*`` (``models.*.backend.stream``) из текста
-    и данных юзера до переноса.
+    """Вырезать записи ``REMOVED`` (точные и с ``*``, ``models.*.backend.stream``)
+    из текста и данных юзера до переноса.
 
-    Секцию вне шаблона (``models``) перенос копирует текстом целиком, и без
-    этого устаревший лист уехал бы в новый файл, а при строгой проверке
+    Секцию вне шаблона (``models``, ``assign``) перенос копирует текстом целиком,
+    и без этого устаревший лист уехал бы в новый файл, а при строгой проверке
     поддерева вся секция — в бэкап. Возвращает текст и снятые пути.
     """
     stripped: List[str] = []
     for pattern in compat.REMOVED:
-        if "*" not in pattern:
-            continue  # точные пути — прежним порядком в _sync_path
         for parts in compat.expand_path(user_raw, pattern):
             dotted = ".".join(parts)
             compat.pop_parts(user_raw, parts)

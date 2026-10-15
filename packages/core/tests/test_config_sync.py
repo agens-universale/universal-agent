@@ -1,6 +1,7 @@
 """config_sync: ре-материализация user config.yml из свежего шаблона."""
 
 import pytest
+import yaml
 from gc_core import config_sync
 from gc_core.config_modules import compat as compat
 
@@ -390,3 +391,41 @@ def test_sync_keeps_the_new_name_when_both_sections_are_in_one_file(
     assert parsed["agent_edits"]["trace_inline_max_lines"] == 99
     # лист, заданный только старым именем, не теряется — как у загрузчика
     assert parsed["agent_edits"]["replay_expanded_turns"] == 4
+
+
+def test_sync_strips_exact_removed_key_inside_section_outside_template(
+    tmp_path,
+):
+    """Точный REMOVED-ключ в блоке вне шаблона (assign) не переезжает в файл
+    вместе с блоком, попадает в removed один раз, повторный синк ничего не меняет."""
+    from gc_core.config import _default_config_path
+
+    user = (
+        "models:\n"
+        "  flash:\n"
+        "    model: qwen\n"
+        "    url: http://h/v1/chat/completions\n"
+        "    token: t\n"
+        "slots:\n"
+        "  default: flash\n"
+        "assign:\n"
+        "  auto_judge: max\n"
+        "  finish_gate: default\n"
+    )
+    cfg = tmp_path / "config.yml"
+    cfg.write_text(user, encoding="utf-8")
+    report = config_sync.sync_config(
+        cfg, _default_config_path(), timestamp="t1"
+    )
+    assert report.removed == ["assign.auto_judge"]
+    out = cfg.read_text(encoding="utf-8")
+    assert "auto_judge" not in out
+    assert "finish_gate: default" in out
+
+    again = config_sync.sync_config(
+        cfg, _default_config_path(), timestamp="t2"
+    )
+    assert again.removed == []
+    assert yaml.safe_load(cfg.read_text(encoding="utf-8")) == yaml.safe_load(
+        out
+    )
