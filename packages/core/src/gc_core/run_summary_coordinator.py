@@ -440,23 +440,7 @@ class RunSummaryCoordinator:
     ) -> bool:
         """Сжать полный контекст, сохранив текущий батч для отправки модели."""
         state = self._state
-        if state.backend_api_mode != "chat_completions":
-            return False
-        self._refresh_limits()
-        if (
-            self._summary_trigger_chars <= 0
-            and self._summary_trigger_tokens <= 0
-        ):
-            return False
-        if self._summary_trigger_tokens > 0:
-            self._warn_if_token_trigger_blind()
-        hits = exceeded_summary_triggers(
-            state=state,
-            summary_trigger_chars=self._summary_trigger_chars,
-            summary_trigger_tokens=self._summary_trigger_tokens,
-            tags=self._projection_tags(),
-            strip_think=True,
-        )
+        hits = self._backend_batch_trigger_hits()
         if not hits:
             return False
         exceeded_chars, exceeded_tokens = _hit_pair(hits)
@@ -465,18 +449,11 @@ class RunSummaryCoordinator:
         if not isinstance(state_tail, list):
             return False
 
-        keys_before_commit: frozenset[str] | None = None
-        ts = self._thread_session
-        if ts is not None:
-            snap = getattr(ts, "known_keys_snapshot_before_last_batch", None)
-            if isinstance(snap, frozenset):
-                keys_before_commit = snap
-
         preserved_batch = build_preserved_batch(
             current_messages=list(current_messages),
             mode=str(mode),
             state_messages=list(state_tail),
-            message_keys_already_persisted=keys_before_commit,
+            message_keys_already_persisted=self._keys_persisted_before_last_batch(),
         )
         suffix_exact = list(current_messages)
         if not _messages_tail_matches(state_tail, suffix_exact):
@@ -501,13 +478,9 @@ class RunSummaryCoordinator:
             completed = True
         finally:
             msgs = getattr(state, "messages", None)
-            restore = completed
-            if not completed and isinstance(msgs, list) and msgs is not state_tail:
-                execution_patch = port(self._ctx, "execution_patch")
-                restore = execution_patch is None or execution_patch(
-                    "summary-batch-preservation-v1"
-                )
-            if restore:
+            if completed or self._restore_after_failed_compaction(
+                msgs, state_tail
+            ):
                 if isinstance(msgs, list):
                     msgs.extend(filter_messages_not_in_state(msgs, preserved_batch))
                 if self._thread_session is not None and preserved_batch:
@@ -518,6 +491,46 @@ class RunSummaryCoordinator:
                 current_messages[:] = preserved_batch
                 self._collect_garbage()
         return True
+
+    def _backend_batch_trigger_hits(self) -> Any:
+        """Сработавшие триггеры сжатия перед вызовом бэкенда; пусто — сжимать
+        не нужно (не `chat_completions` или триггеры выключены)."""
+        if self._state.backend_api_mode != "chat_completions":
+            return None
+        self._refresh_limits()
+        if (
+            self._summary_trigger_chars <= 0
+            and self._summary_trigger_tokens <= 0
+        ):
+            return None
+        if self._summary_trigger_tokens > 0:
+            self._warn_if_token_trigger_blind()
+        return exceeded_summary_triggers(
+            state=self._state,
+            summary_trigger_chars=self._summary_trigger_chars,
+            summary_trigger_tokens=self._summary_trigger_tokens,
+            tags=self._projection_tags(),
+            strip_think=True,
+        )
+
+    def _keys_persisted_before_last_batch(self) -> frozenset[str] | None:
+        snap = getattr(
+            self._thread_session, "known_keys_snapshot_before_last_batch", None
+        )
+        return snap if isinstance(snap, frozenset) else None
+
+    def _restore_after_failed_compaction(
+        self, msgs: Any, state_tail: list
+    ) -> bool:
+        """Возвращать ли батч после сбоя сжатия. История не заменена — нет:
+        батч в ней остался; заменена — решает патч исполнения (durable-истории
+        до патча возврата не делали)."""
+        if not isinstance(msgs, list) or msgs is state_tail:
+            return False
+        execution_patch = port(self._ctx, "execution_patch")
+        return execution_patch is None or execution_patch(
+            "summary-batch-preservation-v1"
+        )
 
     async def aturn_end_compact_if_needed(self) -> None:
         """Compaction после accept ``turn_finish`` (turn-end trigger).
