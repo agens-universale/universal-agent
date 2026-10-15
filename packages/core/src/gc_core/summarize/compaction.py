@@ -20,6 +20,7 @@ from gc_core.message_format.serialization import (
     calc_history_chars_for_trigger,
     calc_messages_chars_total,
 )
+from gc_core.message_policy.mode_messages import render_mode_block
 from gc_core.message_policy.todo_context import (
     render_todo_for_persistent_state,
 )
@@ -40,6 +41,7 @@ from gc_core.summarize.summary_logging import (
 )
 from gc_core.summarize.summary_message_body import (
     build_dialog_summary_content,
+    render_plan_block,
     render_summary_images_block,
     resolve_intent_log_preview_chars,
 )
@@ -213,6 +215,7 @@ def apply_summary_state_patch(
     # из него переезжают в тело сводки блоком <images> — указателем на файлы; кроме
     # сообщений, которые вернутся как есть (`kept_messages`).
     collapsed = getattr(state, "messages", None)
+    is_root = getattr(state, "parent_state_id", None) is None
     summary_message_content = build_dialog_summary_content(
         summary_text=str(raw_summary or ""),
         last_dialog_steps=str(last_dialog_steps or ""),
@@ -223,6 +226,16 @@ def apply_summary_state_patch(
         images_block=render_summary_images_block(
             collapsed if isinstance(collapsed, list) else [],
             kept=kept_messages,
+        ),
+        # Только корневому агенту: план и объявления о режиме — его дело, а
+        # общее состояние сессии субагент делит с родителем.
+        plan_block=(
+            render_plan_block(getattr(shared, "plan", None)) if is_root else ""
+        ),
+        mode_block=(
+            render_mode_block(getattr(shared, "mode_announced", None))
+            if is_root
+            else ""
         ),
     )
     prev_offset = int(getattr(state, "dialog_steps_offset", 0) or 0)
