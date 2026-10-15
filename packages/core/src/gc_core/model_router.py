@@ -45,6 +45,17 @@ CONSUMERS = (
 )
 SUBAGENT_CONSUMER_PREFIX = "subagent:"
 
+# Потребители, которые без привязки работают фиксированным уровнем, а не
+# активным уровнем хода. Судьи — как классификатор у эталона: проверка не
+# должна дорожать и медлить оттого, что человек перевёл ход на max.
+_UNBOUND_LEVELS = {"auto_judge": "default", "command_judge": "default"}
+
+
+def unbound_level(consumer: str) -> str | None:
+    """Уровень потребителя без привязки; None — идёт за активным уровнем.
+    Одно место правды и для резолва, и для экрана настроек."""
+    return _UNBOUND_LEVELS.get(consumer)
+
 
 # Привязки assign, у которых значение читается скалярным полем AssignConfig (все,
 # кроме subagents-словаря и запрещённого main).
@@ -302,10 +313,11 @@ class ModelRouter:
         if self._unbound_override is not None:
             return self._unbound_override
 
-        if consumer == "auto_judge":
+        level = unbound_level(consumer)
+        if level is not None:
             return self._resolve_level(
-                "default",
-                source_prefix="auto_judge без привязки → ",
+                level,
+                source_prefix=f"{consumer} без привязки → ",
                 check_breaker=check_breaker,
             )
 

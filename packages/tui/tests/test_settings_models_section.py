@@ -1601,6 +1601,30 @@ async def test_assign_picker_offers_levels_and_aliases_after_active(tmp_path):
         ]
 
 
+async def test_judge_without_binding_shows_the_level_it_really_uses(tmp_path):
+    """Судья команд и действий без привязки работает уровнем default, а не
+    активным: строка и первый пункт пикера говорят это словами пустого слота
+    («не задана → default», «действует default → модель»). Остальные
+    потребители без привязки — по-прежнему «активная»."""
+    from gc_tui.editors.models_section import consumer_labels
+
+    assert consumer_labels()["command_judge"] == (
+        "судья command_judge · команды в edit, действия в auto"
+    )
+    async with _section(tmp_path, _REGISTRY) as (pilot, scr, _cfg_file):
+        ed = _editor(scr)
+        assert ed._assign_unset_label("command_judge") == "не задана → default"
+        assert ed._assign_unset_label("auto_judge") == "не задана → default"
+        assert ed._assign_unset_label("finish_gate") == "активная"
+        _goto(ed, "assign", consumer="command_judge")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        first = ed._picker["rows"][0]
+        assert first["value"] is None and first["label"] == "не задана"
+        assert str(first["desc"]) == "действует default → flash"
+
+
 async def test_alt_down_opens_the_same_picker(tmp_path):
     """Канон клавиш: `Alt+↓` — раскрыть список. У строки слота список тот же, что и
     у Enter (решение 9 называет обе клавиши), а не вторая, отдельная механика."""
@@ -1854,7 +1878,8 @@ def test_consumer_labels_reuse_the_transport_dictionary():
 
     labels = models_section.consumer_labels()
     for consumer, label in CONSUMER_RU_LABEL.items():
-        assert labels[consumer] == label
+        role = models_section._CONSUMER_ROLE.get(consumer)
+        assert labels[consumer] == (f"{label} · {role}" if role else label)
     assert not set(models_section._UI_CONSUMER_LABEL) & set(CONSUMER_RU_LABEL)
     assert set(labels) == set(models_section.assign_consumers())
 
@@ -2028,8 +2053,13 @@ async def test_picker_rows_carry_the_same_color_semantics(tmp_path):
 
 async def test_slot_row_head_is_the_canonical_level_copy(tmp_path):
     """Голова строки слота — канон §1 дословно (тот же источник, что хинты `/level`):
-    «default · основная рабочая: повседневные задачи»."""
-    async with _section(tmp_path, _REGISTRY) as (_pilot, scr, _cfg_file):
+    «default · основная рабочая: повседневные задачи». Окно шире 80 колонок:
+    проверяется текст подписи, а не порядок ужатия (он — ниже, свипами)."""
+    async with _section(tmp_path, _REGISTRY, size=(100, 24)) as (
+        _pilot,
+        scr,
+        _cfg_file,
+    ):
         ed = _editor(scr)
         head = ed._row_text({"kind": "slot", "level": "default"}, False).plain
         assert "default · основная рабочая: повседневные задачи" in head
@@ -2599,7 +2629,7 @@ async def test_the_role_is_cut_before_the_name_of_the_level(tmp_path):
     async with _section(tmp_path, _ADDRESSED) as (pilot, scr, _cfg_file):
         await pilot.pause()
         ed = _editor(scr)
-        ed._row_width = lambda: 55
+        ed._row_width = lambda: 66
         row = ed._row_text({"kind": "slot", "level": "default"}, False)
         assert row.plain.startswith("  default · основная рабочая: повс")
         assert "…" in row.plain  # ужато описание, не строка
@@ -2614,11 +2644,11 @@ async def test_a_narrow_frame_drops_the_role_whole(tmp_path):
     async with _section(tmp_path, _ADDRESSED) as (pilot, scr, _cfg_file):
         await pilot.pause()
         ed = _editor(scr)
-        ed._row_width = lambda: 26
+        ed._row_width = lambda: 37
         assert ed._row_text(
             {"kind": "slot", "level": "default"}, False
         ).plain.startswith("  default · осн…")  # ступенью выше огрызок ещё жив
-        ed._row_width = lambda: 25
+        ed._row_width = lambda: 36
         row = ed._row_text({"kind": "slot", "level": "default"}, False)
         assert "·" not in row.plain
         assert "…" not in row.plain

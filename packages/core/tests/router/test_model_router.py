@@ -517,6 +517,34 @@ def test_unbound_override_none_by_default_keeps_level_path():
     assert router.resolve("main").alias == "flash"
 
 
+def test_command_judge_without_binding_uses_default_not_the_active_level():
+    """Судья команд (edit) и действий (auto) без привязки — уровнем default:
+    как классификатор у эталона, не моделью, которую человек выбрал для хода.
+    На max каждая проверка иначе шла бы в самую тяжёлую модель."""
+    router = _router(
+        {
+            "models": {"a": {}, "b": {}, "c": {}},
+            "slots": {"light": "a", "default": "b", "max": "c"},
+        },
+        level="max",
+    )
+    resolved = router.resolve("command_judge")
+    assert resolved.alias == "b"
+    assert "command_judge" in resolved.source and "default" in resolved.source
+
+
+def test_unbound_level_names_who_does_not_follow_the_active_level():
+    """Одно место правды для экрана настроек: каким уровнем потребитель
+    работает без привязки; None — идёт за активным уровнем."""
+    from gc_core.model_router import CONSUMERS, unbound_level
+
+    assert unbound_level("command_judge") == "default"
+    assert unbound_level("auto_judge") == "default"
+    others = [c for c in CONSUMERS if c not in ("command_judge", "auto_judge")]
+    assert [unbound_level(c) for c in others] == [None] * len(others)
+    assert unbound_level("subagent:subagent_worker") is None
+
+
 # --- модель main-трейса для заданного уровня вызова ---------------------------
 
 _TWO_LEVELS = {
