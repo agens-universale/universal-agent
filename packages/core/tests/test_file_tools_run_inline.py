@@ -195,8 +195,11 @@ async def test_project_memory_acall_runs_file_work_on_the_calling_thread():
             seen["thread"] = threading.get_ident()
             return "ok"
 
+    from gc_testkit.memory_agent_store import MemoryAgentStore
+
     probe = _Probe(ctx=None)
     probe._project = object()  # не None — иначе тул откажет до диспетчеризации
+    probe._store = MemoryAgentStore()  # тул зовёт restore_memory до работы
 
     assert await probe.acall(action="read") == "ok"
     assert seen["thread"] == threading.get_ident(), (
