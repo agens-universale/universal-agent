@@ -891,6 +891,16 @@ NOT_IN_MATRIX = {
     "chat_api.text_answer_mode": "только процесс gc-chat",
     "chat_api.finish_gate_mode": "только процесс gc-chat",
     "chat_api.todo_reminder_steps": "только процесс gc-chat",
+    "a2a.host": "только процесс gc-a2a",
+    "a2a.port": "только процесс gc-a2a",
+    "a2a.public_url": "только процесс gc-a2a",
+    "a2a.auth_token": "только процесс gc-a2a",
+    "a2a.launch_root": "только процесс gc-a2a",
+    "a2a.name": "только процесс gc-a2a",
+    "a2a.description": "только процесс gc-a2a",
+    "a2a.text_answer_mode": "только процесс gc-a2a",
+    "a2a.finish_gate_mode": "только процесс gc-a2a",
+    "a2a.todo_reminder_steps": "только процесс gc-a2a",
     "todo.reminder_steps": (
         "напоминание чеклиста; матрица гоняет CLI и этот лист не "
         "переключает. Канал Responses пишет его в runtime"

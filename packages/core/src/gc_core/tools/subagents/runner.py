@@ -1491,6 +1491,10 @@ class SubagentRunner:
         # потоко-локальна: поток читал настоящую консоль, которую держит
         # Textual, и делил с ним нажатия — ход висел, клавиши пропадали.
         child_ctx.ask_human = getattr(self._ctx, "ask_human", None)
+        # Порт подтверждения — туда же. Без него write/command guard ребёнка
+        # при tty читает `input()` процесса: у A2A на родителе стоит отказ,
+        # а дочерний ход снова вешает задачу в WORKING на терминале сервера.
+        child_ctx.confirm_request = getattr(self._ctx, "confirm_request", None)
         # Пометка «изображение не просмотрено» — в ленту родителя: отказ «глаз»
         # внутри субагента иначе ушёл бы только в журнал ребёнка.
         child_ctx.on_trace_note = getattr(self._ctx, "on_trace_note", None)
