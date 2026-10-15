@@ -152,3 +152,24 @@ def test_tail_events_idempotent_with_same_cursor(tmp_path):
     assert t1.new_records == []
     assert t2.new_records == []
     assert t1.next_cursor == t2.next_cursor
+
+
+def test_tail_tick_survives_a_lock_timeout(tmp_path, monkeypatch):
+    """Блокировку треда держит агент, а ``msvcrt.locking`` на Windows после
+    ~10 с ждёт уже ``OSError``: тик пропускается, курсор на месте — следующий
+    дочитает; опрос UI не падает."""
+    data = tmp_path / "data_cli_t1.jsonl"
+    _append_record(data, 1, "user", "первое")
+    _write_meta(tmp_path / "meta_cli_t1.json", msgs=1)
+    store = FileTaskStore(str(tmp_path), system="cli")
+    _, cur = store.read_all_events("t1")
+    _append_record(data, 2, "assistant", "ответ")
+
+    def locked(*_args, **_kwargs):
+        raise OSError(36, "Resource deadlock avoided")
+
+    with monkeypatch.context() as patched:
+        patched.setattr(store._threads, "tail", locked)
+        tail = store.tail_events("t1", cur)
+    assert tail.new_records == [] and tail.next_cursor == cur
+    assert len(store.tail_events("t1", cur).new_records) == 1

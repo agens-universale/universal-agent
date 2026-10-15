@@ -77,7 +77,9 @@ async def dialog_list(index: ResponseIndex) -> list[dict]:
             continue
         try:
             thread = await index.threads.get(thread_key(thread_id))
-        except ValueError:
+        except (OSError, ValueError):
+            # Битый id или тред, чья запись не доигрывается
+            # (JournalRecoveryError), — не повод прятать остальные диалоги.
             continue
         title = "" if thread is None else await _title(index, thread)
         items.append(_summary(thread_id, chain(records), title))

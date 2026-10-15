@@ -280,7 +280,7 @@ def test_dialogs_skip_other_systems_and_broken_index(tmp_path):
     )
     # Ответ develop, испорченный на диске, — пропускается.
     broken = threads.parent / "responses-index" / (_rid(9) + ".json")
-    broken.parent.mkdir()
+    broken.parent.mkdir(exist_ok=True)  # его заводит и двойная запись
     broken.write_text("{", encoding="utf-8")
     _save(index, n=4, thread_id="no-jsonl", cwd=str(cwd), created=5)
     _save(index, n=5, thread_id="bad-jsonl", cwd=str(cwd), created=4)

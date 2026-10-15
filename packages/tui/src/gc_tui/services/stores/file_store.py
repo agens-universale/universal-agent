@@ -14,6 +14,7 @@ TUI работает с локальным файловым хранилищем
 
 from __future__ import annotations
 
+import logging
 from typing import Optional, Sequence
 
 from gc_core.message_policy.user_message_policy import (
@@ -27,6 +28,8 @@ from gc_core.threads.models import StreamEntry, ThreadKey, ThreadRecord
 
 from gc_tui.models import TailResult, TaskCursor, TaskSummary
 from gc_tui.services.trace_mapper import _clean_summary
+
+logger = logging.getLogger(__name__)
 
 _HISTORY = "messages"
 _TUI = "tui"
@@ -200,6 +203,19 @@ class FileTaskStore:
 
     def tail_events(
         self, task_id: str, cursor: TaskCursor, system: Optional[str] = None
+    ) -> TailResult:
+        """Хвост истории для опроса UI. Блокировку треда держит пишущий
+        агент, а на Windows ``msvcrt.locking`` после ~10 с ожидания бросает
+        ``OSError``: тик пропускается — следующий дочитает, — а не роняет
+        TUI."""
+        try:
+            return self._tail_events(task_id, cursor, system)
+        except OSError:
+            logger.debug("хвост треда %s не прочитан", task_id, exc_info=True)
+            return TailResult(new_records=[], next_cursor=cursor)
+
+    def _tail_events(
+        self, task_id: str, cursor: TaskCursor, system: Optional[str]
     ) -> TailResult:
         key = self._key(task_id, system)
         if cursor.position_token is None:

@@ -6,7 +6,9 @@
 Запись потока, алиас и сводка — одна запись хранилища.
 
 Ответы develop лежали файлами ``responses-index/<id>.json`` рядом с каталогом
-тредов. Они читаются, когда ответа нет в хранилище, и больше не пишутся.
+тредов. Они читаются, когда ответа нет в хранилище, и пишутся вместе с ним:
+откат на develop видит ответы ветки (``previous_response_id``, список
+диалогов). Двойная запись — до следующего релиза.
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import tempfile
 from dataclasses import dataclass
 from typing import Any
 
@@ -21,6 +24,7 @@ from gc_core.thread_store import validate_thread_id
 from gc_core.threads.facade import Threads
 from gc_core.threads.file_store import FileThreadStore
 from gc_core.threads.models import JsonObject, ThreadKey, ThreadRecord
+from gc_core.utils.atomic_io import atomic_replace
 
 SYSTEM = "responses"
 _STREAM = "chat.responses"
@@ -83,6 +87,7 @@ class ResponseIndex:
             aliases=[record.response_id],
             patch=(_FRONTEND, summary),
         )
+        self._write_legacy(record)
 
     async def load(self, response_id: str) -> ResponseRecord | None:
         if _RESPONSE_ID.match(response_id) is None:
@@ -140,6 +145,25 @@ class ResponseIndex:
             item for item in self._legacy_all() if item.thread_id == key.thread
         ]
         return chain([*earlier, record])[0].created_at
+
+    def _write_legacy(self, record: ResponseRecord) -> None:
+        """Файл ответа develop — как его писал develop (tmp + замена)."""
+        if self._legacy_dir is None:
+            return
+        os.makedirs(self._legacy_dir, exist_ok=True)
+        path = os.path.join(self._legacy_dir, record.response_id + _JSON)
+        fd, temporary = tempfile.mkstemp(
+            dir=self._legacy_dir, prefix=".resp-", suffix=_JSON
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                json.dump(_payload(record), handle, ensure_ascii=False)
+                handle.write("\n")
+            atomic_replace(temporary, path)
+        except Exception:
+            if os.path.exists(temporary):
+                os.remove(temporary)
+            raise
 
     def _legacy(self, response_id: str) -> ResponseRecord | None:
         if self._legacy_dir is None:

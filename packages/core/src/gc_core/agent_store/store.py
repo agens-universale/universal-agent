@@ -73,6 +73,12 @@ class AgentStore(ABC):
         """Записать память целиком, если на месте версия ``expected_version``
         (``None`` — памяти нет или она пуста); иначе ``MemoryConflict``."""
 
+    async def restore_memory(self, project: ProjectKey) -> None:
+        """Вернуть память проекта из резервной копии, если её удалили
+        (зовёт только тул ``project_memory``: статус и отпечаток памяти
+        удалённое пользователем не возвращают). Без копий — ничего."""
+        del project
+
     def label(self, kind: ResourceKind, name: str) -> str:
         """Как назвать ресурс в тексте отказа (файловое — путь)."""
         return f"{kind}:{name}"

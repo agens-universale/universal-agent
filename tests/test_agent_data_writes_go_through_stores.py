@@ -56,6 +56,10 @@ _MCP_RUNTIME = "MCP runtime: установка и состояние серве
 _VOICE = "голосовой рантайм: свои аренды и состояние"
 _UPDATER = "апдейтер"
 _TESTKIT_REASON = "тестовый инструментарий, в продукт не входит"
+_ROLLBACK = (
+    "файлы develop (acp-sessions, responses-index) рядом с тредом — откат "
+    "на develop видит сессии и ответы ветки; до следующего релиза"
+)
 
 ALLOWED: dict[str, str] = {
     # Реализации хранилищ.
@@ -64,6 +68,9 @@ ALLOWED: dict[str, str] = {
         "хранилище тредов SQLite: файл базы создаётся с правами 0600"
     ),
     _CORE + "attachments/store.py": "файлы вложений тредов (картинки)",
+    # Совместимость отката: файлы develop пишутся вместе с хранилищем.
+    "packages/acp/src/gc_acp/session_index.py": _ROLLBACK,
+    "packages/chat/src/gc_chat/responses/index_store.py": _ROLLBACK,
     _CORE + "thread_store.py": _OLD_FILE_STORE,
     _CORE + "thread_store_journal.py": (
         "примитивы атомарной записи и блокировки файлов тредов (file_tx v2, "

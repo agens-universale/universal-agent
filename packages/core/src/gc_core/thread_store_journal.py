@@ -12,6 +12,7 @@ import contextlib
 import contextvars
 import hashlib
 import json
+import logging
 import os
 import shutil
 import threading
@@ -25,6 +26,8 @@ class JournalRecoveryError(OSError):
     записал прерванный коммит (их правили руками или другой процесс). Тред
     не читается, пока это не разобрать."""
 
+
+logger = logging.getLogger(__name__)
 
 _active = contextvars.ContextVar("thread_file_transaction", default=False)
 _held = contextvars.ContextVar("thread_file_lock", default=())
@@ -81,17 +84,26 @@ def _control_path(directory, system_id, thread_id):
 
 
 def _control(base):
+    """``control.json`` треда. Испорченный (пустой после отключения питания
+    в режиме без fsync, чужой писатель) — как отсутствующий: тред читается
+    и пишется дальше с нуля по ревизии, а не закрывается намертво."""
     path = base / _CONTROL_FILE
-    return (
-        json.loads(path.read_bytes())
-        if path.exists()
-        else {
-            "revision": 0,
-            "generation": 0,
-            "owner_id": None,
-            "owner_epoch": 0,
-        }
-    )
+    fresh = {
+        "revision": 0,
+        "generation": 0,
+        "owner_id": None,
+        "owner_epoch": 0,
+    }
+    if not path.exists():
+        return fresh
+    try:
+        control = json.loads(path.read_bytes())
+    except ValueError:
+        control = None
+    if not isinstance(control, dict):
+        logger.warning("испорченный %s — тред с чистой ревизией", path)
+        return fresh
+    return control
 
 
 def durable_owner_id(directory, system_id, thread_id):
@@ -103,7 +115,7 @@ def durable_owner_id(directory, system_id, thread_id):
     path = _control_path(directory, system_id, thread_id) / _CONTROL_FILE
     try:
         return json.loads(path.read_bytes()).get("owner_id")
-    except (FileNotFoundError, NotADirectoryError):
+    except (FileNotFoundError, NotADirectoryError, ValueError, AttributeError):
         return None
 
 
@@ -155,6 +167,17 @@ def _recover_image(path, change):
         _write(path, after)
 
 
+def _readable_journal(pending: Path) -> dict | None:
+    try:
+        journal = json.loads(pending.read_bytes())
+    except ValueError:
+        return None
+    keys = ("changes", "control", "receipt")
+    if not isinstance(journal, dict) or any(k not in journal for k in keys):
+        return None
+    return journal
+
+
 def _recover(directory: Path, base: Path):
     # Stage прерванного коммита (SIGKILL внутри транзакции): под блокировкой
     # треда активного коммита нет, каталог можно убрать.
@@ -163,7 +186,14 @@ def _recover(directory: Path, base: Path):
     pending = base / "pending.json"
     if not pending.exists():
         return
-    journal = json.loads(pending.read_bytes())
+    journal = _readable_journal(pending)
+    if journal is None:
+        # Журнал не дописан (отключение питания без fsync): доиграть нечего,
+        # а оставить — значит закрыть тред для всех. Он уходит в сторону.
+        aside = pending.with_name(f"pending.json.corrupt-{os.getpid()}")
+        os.replace(pending, aside)
+        logger.error("испорченный журнал записи треда: %s", aside)
+        return
     for change in journal["changes"]:
         path = directory / change["path"]
         if "offset" in change:
@@ -195,34 +225,77 @@ def _physical_read_scope(directory, base):
         raise RuntimeError(
             "Cross-thread file scopes must acquire locks in global order"
         )
-    base.mkdir(parents=True, exist_ok=True)
     with _locks_guard:
         lock = _locks.setdefault(str(base), threading.RLock())
-    with lock, (base / "lock").open("a+b") as stream:
-        if os.name == "nt":
-            import msvcrt
-
-            stream.seek(0)
-            if not stream.read(1):
-                stream.write(b"\0")
-                stream.flush()
-            stream.seek(0)
-            msvcrt.locking(stream.fileno(), msvcrt.LK_LOCK, 1)
-        else:
-            import fcntl
-
-            fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
+    with lock, _locked_file(base):
         token = _held.set((*_held.get(), str(base)))
         try:
             _recover(Path(directory).absolute(), base)
             yield
         finally:
             _held.reset(token)
-            if os.name == "nt":
-                stream.seek(0)
-                msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
-            else:
-                fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+
+
+def _lock_stream(stream) -> None:
+    if os.name == "nt":
+        import msvcrt
+
+        stream.seek(0)
+        if not stream.read(1):
+            stream.write(b"\0")
+            stream.flush()
+        stream.seek(0)
+        msvcrt.locking(stream.fileno(), msvcrt.LK_LOCK, 1)
+    else:
+        import fcntl
+
+        fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
+
+
+def _unlock_stream(stream) -> None:
+    if os.name == "nt":
+        import msvcrt
+
+        stream.seek(0)
+        msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+    else:
+        import fcntl
+
+        fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+
+
+def _still_there(stream, path: Path) -> bool:
+    try:
+        return os.path.samestat(os.fstat(stream.fileno()), os.stat(path))
+    except FileNotFoundError:
+        return False
+
+
+@contextlib.contextmanager
+def _locked_file(base: Path):
+    """Захватить ``base/lock``. Служебный каталог удалённого треда уборка
+    убирает под этой же блокировкой (``FileThreadStore.sweep_tombstones``):
+    дождавшийся её получает файл, которого уже нет по пути, — тогда
+    каталог заводится и блокировка берётся заново."""
+    path = base / "lock"
+    while True:
+        base.mkdir(parents=True, exist_ok=True)
+        try:
+            stream = path.open("a+b")
+        except FileNotFoundError:
+            continue  # каталог убрали между mkdir и open
+        _lock_stream(stream)
+        if _still_there(stream, path):
+            break
+        _unlock_stream(stream)
+        stream.close()
+    try:
+        yield stream
+    finally:
+        try:
+            _unlock_stream(stream)
+        finally:
+            stream.close()
 
 
 def _bind_identity(directory, base, identity):

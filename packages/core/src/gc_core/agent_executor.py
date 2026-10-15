@@ -9,6 +9,7 @@ State создаётся заново при каждом run(). Возвращ�
 import asyncio
 import functools
 import gc
+import logging
 import threading
 from copy import copy as _shallow_copy_msg
 from typing import Any, Optional
@@ -62,6 +63,7 @@ from gc_core.thread_store import (
     make_message_key,
     resolve_threads_dir,
 )
+from gc_core.threads.session_port import LEASE_TTL
 from gc_core.tools.connect_mcp.persistent_stdio import PersistentStdioRegistry
 from gc_core.tools.connect_mcp.stream_client import (
     _SESSION_MANAGER as _STREAM_SESSION_MANAGER,
@@ -219,6 +221,62 @@ def _put_attachments(msg: dict, attachments, i: int, commit) -> None:
         msg["attachments"] = [
             (commit(a) if commit is not None else a).to_dict() for a in atts
         ]
+
+
+#: Как часто продлевать аренду треда во время хода: треть срока — два
+#: сбоя продления подряд ещё не отдают тред другому инстансу.
+LEASE_RENEW_SECONDS = LEASE_TTL.total_seconds() / 3
+
+
+def _thread_port(thread_session: Any) -> Any:
+    port = getattr(thread_session, "port", None) if thread_session else None
+    return port if callable(getattr(port, "arenew_lease", None)) else None
+
+
+def _start_lease_keeper(thread_session: Any) -> asyncio.Task | None:
+    """Фоновое продление аренды треда, пока идёт цикл (порт хранилища v2).
+    Нет порта или аренда бессрочная (workflow) — ``None``."""
+    port = _thread_port(thread_session)
+    if port is None or not getattr(port, "renews_lease", False):
+        return None
+
+    async def keep() -> None:
+        while True:
+            await asyncio.sleep(LEASE_RENEW_SECONDS)
+            try:
+                await port.arenew_lease(
+                    thread_session.system_id, thread_session.thread_id
+                )
+            except Exception:
+                # Продлить не удалось — следующая запись хода получит отказ
+                # хранилища сама; здесь только предупреждение.
+                logging.getLogger(__name__).warning(
+                    "thread lease renewal failed", exc_info=True
+                )
+
+    return asyncio.create_task(keep())
+
+
+async def _stop_lease_keeper(keeper: asyncio.Task | None) -> None:
+    if keeper is None:
+        return
+    keeper.cancel()
+    await asyncio.gather(keeper, return_exceptions=True)
+
+
+async def _arelease_lease(thread_session: Any, logger: Any) -> None:
+    """Отпустить аренду треда после хода; сбой — предупреждение (аренда
+    истечёт сама)."""
+    port = _thread_port(thread_session)
+    if port is None:
+        return
+    try:
+        await port.arelease_lease(
+            thread_session.system_id, thread_session.thread_id
+        )
+    except Exception:
+        if logger is not None:
+            logger.warning("thread lease release failed", exc_info=True)
 
 
 def _require_supported_persist_mode(settings: Any, ctx: Any) -> None:
@@ -805,6 +863,8 @@ class AgentExecutor:
         logger = getattr(self._ctx, "logger", None)
         await self._afinalize_thread(self._thread_session, state, logger)
         self._accounting_closed = True
+        # Последняя запись хода — тред свободен для другого инстанса.
+        await _arelease_lease(self._thread_session, logger)
         try:
             baseline = UsageAccount.from_meta(
                 getattr(state, "run_start_usage_meta", None)
@@ -1065,6 +1125,7 @@ class AgentExecutor:
         )
         loop_finished = False
         teardown_cancel: BaseException | None = None
+        keeper = _start_lease_keeper(thread_session)
         # Накопленное ДО старта уходит в ПЕРВЫЙ батч, после собственных
         # сообщений прогона: клиент, которому ответили `queued`, должен попасть
         # к модели в том же запросе, а не ждать следующего хода.
@@ -1105,7 +1166,11 @@ class AgentExecutor:
                 state, "terminal_outcome", None
             )
         finally:
+            await _stop_lease_keeper(keeper)
             teardown_cancel = await self._ateardown_run(_owner_reset)
+            if not loop_finished:
+                # Ход упал — учёт не закроется, аренду не держать до срока.
+                await _arelease_lease(thread_session, logger)
 
         if teardown_cancel is not None:
             # Незавершённый цикл сюда не попадает: его исключение выходит из

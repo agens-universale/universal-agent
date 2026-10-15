@@ -47,3 +47,31 @@ async def test_develop_dialog_continues_in_v2(tmp_path):
         *(record.response_id for record in old_chain),
         new.response_id,
     ]
+
+
+async def test_v2_answers_are_also_written_for_develop(tmp_path):
+    """Откат на develop: его ``ResponseIndex.load`` читает только
+    ``responses-index/*.json`` — ответ ветки лежит и там, в его формате."""
+    import json
+
+    threads = tmp_path / "threads"
+    index = ResponseIndex.for_threads_dir(str(threads))
+    record = ResponseRecord(
+        "resp_" + str(uuid.uuid4()),
+        "dialog-1",
+        str(tmp_path),
+        None,
+        100,
+        "completed",
+        {"output": []},
+    )
+    await index.save(record)
+    path = tmp_path / "responses-index" / f"{record.response_id}.json"
+    assert json.loads(path.read_text(encoding="utf-8")) == {
+        "thread_id": "dialog-1",
+        "cwd": str(tmp_path),
+        "previous_response_id": None,
+        "created_at": 100,
+        "status": "completed",
+        "response": {"output": []},
+    }

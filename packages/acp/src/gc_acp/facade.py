@@ -10,6 +10,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
+from gc_core.execution.message_keys import make_message_key
 from gc_core.thread_store import validate_thread_id
 from gc_core.tools.turn.submit_solution import SubmitSolution
 
@@ -349,7 +350,7 @@ class AcpFacade:
 
     async def _replay(self, session_id: str) -> None:
         threads, key = self._index.threads, thread_key(session_id)
-        messages = [entry.data for entry in await threads.history(key)]
+        messages = _unique(entry.data for entry in await threads.history(key))
         records = [
             {"ts": entry.ts, "seq": entry.seq, **entry.data}
             for entry in await threads.subagent_events(key)
@@ -632,3 +633,17 @@ async def _safe_aclose(agent: Any) -> None:
         await close()
     except Exception:
         logger.exception("acp aclose")
+
+
+def _unique(messages) -> list[dict]:
+    """История без повторов по ключу сообщения — как отдавал её develop
+    (``get_full_history_messages``): тред develop мог записать сообщение
+    дважды (повтор шага), а клиент получил бы его дважды."""
+    seen: set[str] = set()
+    unique: list[dict] = []
+    for message in messages:
+        key = make_message_key(message)
+        if key not in seen:
+            seen.add(key)
+            unique.append(message)
+    return unique

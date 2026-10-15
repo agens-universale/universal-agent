@@ -129,3 +129,85 @@ async def test_loop_stays_free_with_slow_v2_store(tmp_path, monkeypatch):
         label="хранилище v2 с RTT 5 мс: ",
         stall_after=0.050,
     )
+
+
+async def test_lease_is_released_after_the_turn(tmp_path, monkeypatch):
+    """Аренда — на время хода: после него тред свободен для другого
+    инстанса (раньше она висела до истечения срока)."""
+    cfg = parity_config(tmp_path, monkeypatch)
+    install(monkeypatch, ScriptedBackend(list(TURNS)))
+    store = MemoryThreadStore()
+    await _run(cfg, store)
+    assert (await store.get_thread(KEY)).lease is None
+
+
+async def test_lease_is_renewed_while_the_turn_runs(tmp_path, monkeypatch):
+    """Шаг дольше срока аренды не отдаёт тред: пока идёт ход, аренда
+    продлевается в фоне."""
+    from gc_core import agent_executor
+
+    class Counting(MemoryThreadStore):
+        claims = 0
+
+        async def claim(self, key, lease):
+            Counting.claims += 1
+            return await super().claim(key, lease)
+
+    from gc_core import processing_responses as pr
+    from helpers.turn_finish_apply import stub_turn_finish_apply
+
+    async def slow_step(**kwargs):
+        if kwargs.get("tool_name") == "exec_sleep":
+            await asyncio.sleep(0.2)
+        return await stub_turn_finish_apply(**kwargs)
+
+    monkeypatch.setattr(pr, "aapply_tool", slow_step)
+    monkeypatch.setattr(agent_executor, "LEASE_RENEW_SECONDS", 0.005)
+    cfg = parity_config(tmp_path, monkeypatch)
+    install(monkeypatch, ScriptedBackend(list(TURNS)))
+    store = Counting()
+    await _run(cfg, store)
+    assert Counting.claims > 3, "аренда не продлевалась во время хода"
+    assert (await store.get_thread(KEY)).lease is None
+
+
+async def test_second_instance_continues_the_thread_right_away(
+    tmp_path, monkeypatch
+):
+    """Два инстанса (разные хосты) на одном каталоге тредов: второй ведёт
+    тред сразу после хода первого, без «тред ведёт другой»."""
+    from gc_core.threads.file_store import FileThreadStore
+    from gc_core.threads.instance import INSTANCE_ENV
+
+    cfg = parity_config(tmp_path, monkeypatch)
+    threads = tmp_path / "shared-threads"
+    for host in ("host-a", "host-b"):
+        monkeypatch.setenv(INSTANCE_ENV, host)
+        install(monkeypatch, ScriptedBackend(list(TURNS)))
+        assert await _run(cfg, FileThreadStore(threads), f"ход {host}")
+    history = await FileThreadStore(threads).read_stream(KEY, "messages")
+    texts = [str(e.data.get("content")) for e in history]
+    assert any("ход host-a" in t for t in texts)
+    assert any("ход host-b" in t for t in texts)
+
+
+async def test_store_refusal_fails_the_turn_instead_of_losing_steps(
+    tmp_path, monkeypatch
+):
+    """Хранилище отказало в записи шага (тред ведёт другой инстанс) — ход
+    падает, а не отвечает пользователю с дырами в истории."""
+    from gc_core.threads.errors import OwnershipError
+
+    class Refusing(MemoryThreadStore):
+        async def commit(self, key, change):
+            if change.append_messages:
+                raise OwnershipError("тред ведёт 'other-host'")
+            return await super().commit(key, change)
+
+    from gc_core.execution.contracts import ExecutionFailure
+
+    cfg = parity_config(tmp_path, monkeypatch)
+    install(monkeypatch, ScriptedBackend(list(TURNS)))
+    with pytest.raises(ExecutionFailure, match="other-host") as failure:
+        await _run(cfg, Refusing())
+    assert isinstance(failure.value.__cause__, OwnershipError)
