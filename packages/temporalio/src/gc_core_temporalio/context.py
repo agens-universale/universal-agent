@@ -6,7 +6,7 @@ from copy import deepcopy
 # Load these deterministic core modules during sandbox initialization, rather
 # than on the first late-bound store/tool dispatch in a workflow task.
 from gc_core import thread_store_async as _thread_store_async  # noqa: F401
-from gc_core.agent_store import AgentResource, AgentStore
+from gc_core.agent_store import AgentStore
 from gc_core.config_modules.root import AppConfig
 from gc_core.context_preparation import (
     RunContextBindings,
@@ -64,17 +64,26 @@ class ExternalResources:
 
 
 class ExternalAgentStore(AgentStore):
-    """Хранилище агента в коде workflow: промпты, инструкции, скиллы и
-    субагенты читаются на воркере (activity), здесь чтение — ошибка."""
+    """Хранилище агента в коде workflow: промпты, инструкции, скиллы,
+    субагенты и память читаются на воркере (activity), здесь — ошибка."""
 
-    def read_text(self, resource: AgentResource) -> str:
-        raise ExecutionFailure(
-            f"Agent resource {resource.kind}:{resource.name} "
-            "requires an external operation"
+    @staticmethod
+    def _external(what: str):
+        return ExecutionFailure(
+            f"Agent resource {what} requires an external operation"
         )
 
-    def list_dir(self, resource: AgentResource) -> list:
-        return self.read_text(resource)
+    async def read(self, kind, name):
+        raise self._external(f"{kind}:{name}")
+
+    async def list(self, kind, prefix=""):
+        raise self._external(f"{kind}:{prefix}")
+
+    async def read_memory(self, project):
+        raise self._external(f"memory:{project.id}")
+
+    async def write_memory(self, project, text, *, expected_version):
+        raise self._external(f"memory:{project.id}")
 
 
 def assemble_context(prepared, *, operations, store, logger, human_request):

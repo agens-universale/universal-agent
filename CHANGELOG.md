@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Breaking — хранилище агента v2 (`AgentStore`)
+
+- Контракт `gc_core.agent_store.AgentStore` асинхронный и по логическим именам: `read(kind, name) -> bytes | None`, `list(kind, prefix)`, `read_memory(project)`, `write_memory(project, text, expected_version=…)`. Виды: `prompt` (имена — `Prompt`), `instructions` (`L0`, `L1`), `subagent`, `skill`. Ядро больше не передаёт хранилищу путь: `FileAgentStore(settings)` вычисляет его сам по настройкам (с runtime-слоем фронтенда), как раньше ядро. Прежние `read_text`/`list_dir`/`AgentResource`/`DEFAULT_AGENT_STORE` удалены; `MemoryAgentStore` (testkit) и конформанс-набор `gc_testkit.agent_store_conformance` — под новый контракт.
+- Память проекта — через хранилище агента: версия (sha256 текста) и запись с проверкой версии. Параллельная правка (второй инстанс, второе окно) больше не теряется: тул `project_memory` перечитывает память и применяет `append` к свежему тексту, повторный конфликт — ошибка тула `conflict`.
+- Скрипты скиллов из своего хранилища агента запускаются: файлы скилла выкладываются через `os_backend` в `<launch_root>/.gc/skills_runtime/<слой>/<скилл>` (раньше — отказ).
+- `L2` (`.gc/AGENTS.md`) и `L3` (`AGENTS.md` проекта) читаются из workspace, не из хранилища агента.
+- `PromptPreparationRequest` и `StatePreparationRequest` (порты `prompt_loader`/`state_preparer`) больше не несут путей промптов и роли запуска: их знает хранилище исполнителя.
+
 ### Хранилища v2 — фронтенды читают и пишут треды через хранилище тредов
 
 - TUI, CLI, сервер, gc-chat и gc-acp работают с тредами через фасад `Threads` поверх `ThreadStore`; формат файлов тредов прежний, новое только добавляется.

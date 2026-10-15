@@ -15,6 +15,11 @@ from gc_testkit.intent_fixtures import intent_user_ask_texts
 from gc_testkit.settings import fake_ctx, make_settings
 
 
+async def _fake_summary_prompt(_store):
+    """Промпт суммаризации без хранилища агента."""
+    return "prompt"
+
+
 def _patch_chat_completion(monkeypatch, fake):
     monkeypatch.setattr(
         "gc_core.summarize.thread_summarizer.arequest_summary_text", fake
@@ -106,8 +111,8 @@ async def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_
         state.user_turn_seq = 1
 
         monkeypatch.setattr(
-            "gc_core.summarize.prompt_loading.load_prompt_template",
-            lambda _p, **_kw: "prompt",
+            "gc_core.summarize.prompt_loading.aload_summary_prompt",
+            _fake_summary_prompt,
         )
 
         async def _fake_summary(**_kwargs):
@@ -256,8 +261,8 @@ async def test_e2e_user_log_skips_technical_and_tool_messages(monkeypatch):
         state.user_turn_seq = 1
 
         monkeypatch.setattr(
-            "gc_core.summarize.prompt_loading.load_prompt_template",
-            lambda _p, **_kw: "prompt",
+            "gc_core.summarize.prompt_loading.aload_summary_prompt",
+            _fake_summary_prompt,
         )
 
         async def _fake_summary(**_kwargs):

@@ -95,10 +95,14 @@ def _cases() -> list[_Case]:
         return registry_write._read(path)
 
     def _instructions_read(path, **_):
-        from gc_core.agent_store import DEFAULT_AGENT_STORE
-        from gc_core.instructions import loader
+        from types import SimpleNamespace
 
-        return loader._read(DEFAULT_AGENT_STORE, "L3", Path(path))
+        from gc_core.agent_store import FileAgentStore
+        from gc_core.instructions import loader
+        from gc_testkit import run_coro
+
+        layer = SimpleNamespace(id="L3", path=Path(path))
+        return run_coro(loader._aread_layer(FileAgentStore(), layer))
 
     cases += [
         _Case(
@@ -129,7 +133,7 @@ def _cases() -> list[_Case]:
             "registry_write._read", "config.yml", _BODY_YAML, _registry_read
         ),
         _Case(
-            "instructions.loader._read",
+            "instructions.loader._aread_layer",
             "AGENTS.md",
             _BODY_TEXT,
             _instructions_read,
@@ -385,18 +389,21 @@ def _cases() -> list[_Case]:
     # --- определения кастомных сабагентов: файлы пишет человек ---
     def _discover_subagents(path, **_):
         from gc_core.tools.subagents.custom.file_definitions import (
-            discover_subagent_definitions,
+            adiscover_subagent_definitions,
         )
+        from gc_testkit import run_coro
         from gc_testkit.settings import make_settings
 
-        return discover_subagent_definitions(
-            make_settings({"agent.subagents_dir": str(Path(path).parent)}),
-            builtin_names=(),
+        return run_coro(
+            adiscover_subagent_definitions(
+                make_settings({"agent.subagents_dir": str(Path(path).parent)}),
+                builtin_names=(),
+            )
         )
 
     cases.append(
         _Case(
-            "file_definitions.discover_subagent_definitions",
+            "file_definitions.adiscover_subagent_definitions",
             "reviewer.md",
             "---\nname: reviewer\n---\nТы ревьюер.\n",
             _discover_subagents,
@@ -404,47 +411,81 @@ def _cases() -> list[_Case]:
     )
 
     # --- промпты по путям из конфига: человек вправе показать на свой файл ---
+    def _store(**dotted):
+        from gc_core.agent_store import FileAgentStore
+        from gc_testkit.settings import make_settings
+
+        return FileAgentStore(make_settings(dotted))
+
     def _summary_prompt(path, **_):
         from gc_core.summarize import prompt_loading
+        from gc_testkit import run_coro
 
-        return prompt_loading.load_prompt_template(str(path))
+        store = _store(
+            **{"summary.chat_completions_summary_prompt_path": str(path)}
+        )
+        return run_coro(prompt_loading.aload_summary_prompt(store))
 
     def _intent_scope_prompt(path, **_):
         from gc_core.intent_scope import summarizer
+        from gc_testkit import run_coro
 
-        return summarizer._load_prompt_file(str(path))
+        store = _store(
+            **{
+                "intent_scope.intent_scope_final_answer_summary_prompt_path": str(
+                    path
+                )
+            }
+        )
+        return run_coro(summarizer.aload_intent_prompt(store, "intent_final"))
 
     def _intent_guard_prompt(path, **_):
         from gc_core.intent_guard import final_report_consistency
+        from gc_testkit import run_coro
 
-        return final_report_consistency._load_guard_prompt(str(path))
+        store = _store(
+            **{"paths.chat_completions_intent_guard_prompt_path": str(path)}
+        )
+        return run_coro(final_report_consistency.aload_guard_prompt(store))
 
     def _command_judge_prompt(path, **_):
+        from gc_core.agent_store import FileAgentStore
         from gc_core.security import command_moderation
+        from gc_testkit import run_coro
 
-        return command_moderation._load_prompt_file(Path(path))
+        class _OneFile(FileAgentStore):
+            """Судья — пакетный ассет; здесь на его месте файл человека."""
+
+            def _paths(self, kind, name):
+                return [str(path)]
+
+        return run_coro(
+            command_moderation.aload_command_judge_prompt(
+                "system", store=_OneFile()
+            )
+        )
 
     cases += [
         _Case(
-            "summarize.load_prompt_template",
+            "summarize.aload_summary_prompt",
             "summary_prompt.md",
             _BODY_TEXT,
             _summary_prompt,
         ),
         _Case(
-            "intent_scope._load_prompt_file",
+            "intent_scope.aload_intent_prompt",
             "scope_prompt.md",
             _BODY_TEXT,
             _intent_scope_prompt,
         ),
         _Case(
-            "intent_guard._load_guard_prompt",
+            "intent_guard.aload_guard_prompt",
             "guard_prompt.md",
             _BODY_TEXT,
             _intent_guard_prompt,
         ),
         _Case(
-            "command_moderation._load_prompt_file",
+            "command_moderation.aload_command_judge_prompt",
             "judge_prompt.md",
             _BODY_TEXT,
             _command_judge_prompt,

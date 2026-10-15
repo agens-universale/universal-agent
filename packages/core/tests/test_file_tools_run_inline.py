@@ -191,12 +191,12 @@ async def test_project_memory_acall_runs_file_work_on_the_calling_thread():
     seen = {}
 
     class _Probe(ProjectMemory):
-        def _dispatch_sync(self, action, content):
+        async def _adispatch_simple(self, action, content):
             seen["thread"] = threading.get_ident()
             return "ok"
 
     probe = _Probe(ctx=None)
-    probe._path = object()  # не None — иначе тул откажет до диспетчеризации
+    probe._project = object()  # не None — иначе тул откажет до диспетчеризации
 
     assert await probe.acall(action="read") == "ok"
     assert seen["thread"] == threading.get_ident(), (

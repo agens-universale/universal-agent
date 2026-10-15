@@ -20,6 +20,11 @@ from gc_testkit.settings import fake_ctx, make_settings
 TS = "2026-05-30T11:35:08Z"
 
 
+async def _fake_summary_prompt(_store):
+    """Промпт суммаризации без хранилища агента."""
+    return "prompt"
+
+
 def _patch_chat_completion(monkeypatch, fake):
     monkeypatch.setattr(
         "gc_core.summarize.thread_summarizer.arequest_summary_text", fake
@@ -132,8 +137,8 @@ async def test_maybe_run_summary_compaction_twice_uses_meta_user_log(
         )
 
         monkeypatch.setattr(
-            "gc_core.summarize.prompt_loading.load_prompt_template",
-            lambda _p, **_kw: "prompt",
+            "gc_core.summarize.prompt_loading.aload_summary_prompt",
+            _fake_summary_prompt,
         )
 
         async def _fake_summary(**_kwargs):
@@ -243,8 +248,8 @@ async def test_persist_batch_writes_user_intent_log_to_meta():
 
 def test_maybe_run_summary_compaction_works_without_thread(monkeypatch):
     monkeypatch.setattr(
-        "gc_core.summarize.prompt_loading.load_prompt_template",
-        lambda _p, **_kw: "prompt",
+        "gc_core.summarize.prompt_loading.aload_summary_prompt",
+        _fake_summary_prompt,
     )
 
     async def _fake_summary(**_kwargs):
@@ -296,8 +301,8 @@ def test_maybe_run_summary_compaction_preserves_system_and_state_metadata(
     monkeypatch,
 ):
     monkeypatch.setattr(
-        "gc_core.summarize.prompt_loading.load_prompt_template",
-        lambda _p, **_kw: "prompt",
+        "gc_core.summarize.prompt_loading.aload_summary_prompt",
+        _fake_summary_prompt,
     )
 
     async def _fake_summary(**_kwargs):

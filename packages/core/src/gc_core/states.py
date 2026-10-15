@@ -13,9 +13,10 @@ from gc_core.intent_log import IntentRecord
 from gc_core.state_preparation import (
     PreparedState,
     StatePreparationRequest,
-    load_state_metadata,
+    aload_state_metadata,
     prepare_state,
 )
+from gc_core.threads.facade import run_sync
 from gc_core.tools.skills.skills_policy import render_skills_catalog
 from gc_core.usage.account import UsageAccount
 
@@ -235,7 +236,6 @@ class State(ExecutionState):
             workspace_config=workspace_config,
             workspace=workspace,
             os_backend=os_backend,
-            agent_md_path=kwargs.get("agent_md_path"),
             is_tui=kwargs.get("is_tui", False),
             agentsmd_override=kwargs.get("agentsmd_override", False),
             verbose=kwargs.get("verbose", False),
@@ -256,17 +256,22 @@ class State(ExecutionState):
         metadata["systemPromptId"] = self.system_prompt_id
         metadata["promptVariables"] = self.initial_project_data
         if not getattr(self, "prepared_metadata", False):
-            status, loaded = load_state_metadata(
-                StatePreparationRequest(
-                    agent_md_path=getattr(self, "agent_md_path", None),
-                    is_tui=bool(getattr(self, "is_tui", False)),
-                    agentsmd_override=bool(
-                        getattr(self, "agentsmd_override", False)
+            # Запасной путь: State собран без подготовленных метаданных (в
+            # работе State.acreate готовит их заранее). Чтение — тем же
+            # асинхронным путём, синхронно: хранилище по умолчанию — файлы.
+            status, loaded = run_sync(
+                aload_state_metadata(
+                    StatePreparationRequest(
+                        is_tui=bool(getattr(self, "is_tui", False)),
+                        agentsmd_override=bool(
+                            getattr(self, "agentsmd_override", False)
+                        ),
+                        verbose=self.verbose,
                     ),
-                    verbose=self.verbose,
-                ),
-                logger=self.logger,
-                metadata_config=getattr(self, "workspace_config", None),
+                    logger=self.logger,
+                    metadata_config=getattr(self, "workspace_config", None),
+                    store=_state_agent_store(self),
+                )
             )
             self._apply_prepared_metadata(status, loaded.text, loaded.warnings)
         if self.skills_list:
@@ -298,3 +303,16 @@ class State(ExecutionState):
                 "</user_defined_instructions>"
             )
             self.initial_project_data["userInstructions"] = user_instructions
+
+
+def _state_agent_store(state: Any) -> Any:
+    """Хранилище для State, собранного без подготовленных метаданных: роль
+    запуска (L0) — его ``agent_md_path``, как у прямого конструктора всегда."""
+    from gc_core.agent_store import FileAgentStore
+    from gc_core.settings import override_settings, settings_of
+
+    settings = settings_of(getattr(state, "workspace_config", None))
+    role = getattr(state, "agent_md_path", None) or ""
+    if role != (settings.paths.agent_md_path or ""):
+        settings = override_settings(settings, {"paths.agent_md_path": role})
+    return FileAgentStore(settings)

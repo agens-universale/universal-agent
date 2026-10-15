@@ -10,7 +10,7 @@ from gc_core.tools.subagents.coder import CodeGenerator
 from gc_core.tools.subagents.critic import Critic
 from gc_core.tools.subagents.custom.file_definitions import (
     SubagentDefinition,
-    discover_subagent_definitions,
+    adiscover_subagent_definitions,
     resolve_max_count,
 )
 from gc_core.tools.subagents.custom.file_subagent import FileDefinedSubagent
@@ -204,16 +204,42 @@ def resolve_subagent_definitions(
     return resolved
 
 
+async def aprepare_subagent_definitions(
+    source: Any, *, logger: Any = None
+) -> None:
+    """Определения из хранилища агента — заранее, асинхронно, на контекст
+    рана: синхронный реестр (``resolve_subagent_definitions``) отдаёт их
+    дальше готовыми, своё хранилище не ждут из синхронного кода."""
+    if not _is_run_context(source) or (
+        getattr(source, _DEFS_ATTR, None) is not None
+    ):
+        return
+    resolved, diagnostics = await _adiscover_definitions(source, logger=logger)
+    _remember(source, resolved, diagnostics)
+
+
 def _discover(
     settings: Any, *, logger: Any = None
 ) -> tuple[Dict[str, SubagentDefinition], List[Dict[str, Any]]]:
-    """Прочитать папку сабагентов: ``(определения, диагностика)``."""
+    """Прочитать папку сабагентов: ``(определения, диагностика)``.
+
+    Синхронно — только для источника без засеянных определений (настройки,
+    файловое хранилище по умолчанию): контекст рана засевает их заранее
+    (``aprepare_subagent_definitions``)."""
+    from gc_core.threads.facade import run_sync
+
+    return run_sync(_adiscover_definitions(settings, logger=logger))
+
+
+async def _adiscover_definitions(
+    settings: Any, *, logger: Any = None
+) -> tuple[Dict[str, SubagentDefinition], List[Dict[str, Any]]]:
     app = settings_of(settings)
     builtin = builtin_subagent_names()
     diagnostics: List[Dict[str, Any]] = []
     # Источник целиком, а не ``app``: у контекста (и двойника сборки) —
     # хранилище агента, из которого и читаются определения.
-    definitions = discover_subagent_definitions(
+    definitions = await adiscover_subagent_definitions(
         settings,
         builtin_names=builtin,
         logger=logger,

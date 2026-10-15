@@ -325,7 +325,7 @@ class AgentActivities:
         return await self._recorded(call, PreparedContext, self._prepare)
 
     async def _prepare(self, call, ctx):
-        from gc_core.run_preparation import load_run_prompts
+        from gc_core.run_preparation import aload_run_prompts
         from gc_core.tools.subagents.registry import (
             resolve_subagent_definitions,
         )
@@ -338,11 +338,8 @@ class AgentActivities:
         prompts_request = PromptPreparationRequest.from_config(
             ctx, verbose=bool(settings_of(ctx).agent.verbose)
         )
-        prompts = await asyncio.to_thread(
-            load_run_prompts,
-            prompts_request,
-            logger=ctx.logger,
-            store=agent_store_of(ctx),
+        prompts = await aload_run_prompts(
+            prompts_request, logger=ctx.logger, store=agent_store_of(ctx)
         )
         return PreparedContext(
             human_input=getattr(self.context_provider, "human_input", True),
@@ -411,10 +408,9 @@ class AgentActivities:
         )
 
     async def _prepare_prompts(self, call, ctx):
-        from gc_core.run_preparation import load_run_prompts
+        from gc_core.run_preparation import aload_run_prompts
 
-        return await asyncio.to_thread(
-            load_run_prompts,
+        return await aload_run_prompts(
             value_to_type(PromptPreparationRequest, call.data),
             logger=ctx.logger,
             store=agent_store_of(ctx),
@@ -425,12 +421,10 @@ class AgentActivities:
         return await self._recorded(call, str, self._prompt)
 
     async def _prompt(self, call, ctx):
-        from gc_core.resource_loading import load_prompt_resource
+        from gc_core.resource_loading import aload_prompt_resource_here
 
-        return await asyncio.to_thread(
-            load_prompt_resource,
-            value_to_type(PromptResourceRequest, call.data),
-            ctx=ctx,
+        return await aload_prompt_resource_here(
+            value_to_type(PromptResourceRequest, call.data), ctx=ctx
         )
 
     @activity.defn(name="universal_agent.skills.list")
@@ -549,9 +543,8 @@ class AgentActivities:
         from gc_core.tools.project.project_memory import ProjectMemory
 
         state = SimpleNamespace(project_memory_content_hash=None)
-        return await asyncio.to_thread(
-            ProjectMemory(ctx=ctx, state=state).execute_io,
-            value_to_type(ProjectMemoryRequest, call.data),
+        return await ProjectMemory(ctx=ctx, state=state).aexecute_io(
+            value_to_type(ProjectMemoryRequest, call.data)
         )
 
     @activity.defn(name="universal_agent.guard.probe")

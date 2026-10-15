@@ -232,6 +232,18 @@ async def abuild_tools_data(
         tools_cache=tools_cache,
         os_backend=os_backend,
     )
+    app = settings_of(settings)
+    if (
+        subagents_enabled(app.agent.use_local_subagents)
+        and app.backend.api_mode.strip().lower() == "chat_completions"
+    ):
+        from gc_core.tools.subagents.registry import (
+            aprepare_subagent_definitions,
+        )
+
+        # Определения из хранилища агента — асинхронно и заранее: досборка
+        # ниже синхронная, свой реестр она берёт готовым.
+        await aprepare_subagent_definitions(settings, logger=logger)
     return _finish_tools_data(
         tools_data,
         mcp_tools_data,

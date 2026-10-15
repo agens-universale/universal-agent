@@ -2268,6 +2268,7 @@ class _AgentLoop:
                 self.session_meta,
                 step_messages=messages,
                 logger=self.run_logger,
+                project_memory_hash=await _aproject_memory_hash(self.ctx),
             )
             notice_messages = messages[_messages_before_notice:]
             if notice_messages:
@@ -2668,3 +2669,21 @@ async def arun_agent(
         mark_finish_gate_checking=mark_finish_gate_checking,
     )
     return await loop.arun(messages)
+
+
+async def _aproject_memory_hash(ctx: Any) -> Optional[str]:
+    """Версия памяти проекта для подсказок — только когда они включены:
+    память читает хранилище агента, а цепочка подсказок синхронная."""
+    from gc_core.message_policy.project_memory_notice.policy import (
+        project_memory_hints_enabled,
+    )
+
+    try:
+        enabled = project_memory_hints_enabled(ctx)
+    except TypeError:  # контекст без настроек (заглушка) — подсказок нет
+        return None
+    if not enabled:
+        return None
+    from gc_core.project_memory import aget_hash
+
+    return await aget_hash(ctx)

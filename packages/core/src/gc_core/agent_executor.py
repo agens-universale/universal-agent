@@ -436,7 +436,7 @@ class AgentExecutor:
         from gc_core.agent_store import agent_store_of
         from gc_core.run_preparation import (
             PromptPreparationRequest,
-            load_run_prompts,
+            aload_run_prompts,
         )
 
         request = PromptPreparationRequest.from_config(
@@ -444,7 +444,7 @@ class AgentExecutor:
         )
         loader = port(self._ctx, "prompt_loader")
         if loader is None:
-            prepared = load_run_prompts(
+            prepared = await aload_run_prompts(
                 request, logger=logger, store=agent_store_of(self._ctx)
             )
         else:
@@ -497,7 +497,6 @@ class AgentExecutor:
 
             prepared = await preparer(
                 StatePreparationRequest(
-                    agent_md_path=state_data["agent_md_path"],
                     is_tui=state_data["is_tui"],
                     agentsmd_override=state_data["agentsmd_override"],
                     verbose=effective_verbose,

@@ -9,7 +9,7 @@ from gc_core.project_memory.compaction import (
     acompact_text,
 )
 from gc_core.project_memory.status import (
-    attach_status_to_prompt_vars,
+    aattach_status_to_prompt_vars,
     build_project_memory_status,
     build_project_memory_status_for_cwd,
     fill_percent,
@@ -39,9 +39,30 @@ def resolve_project_memory_path(ctx: Any | None = None) -> Path:
     return Path(gc_dir) / _PROJECT_MEMORY_FILE
 
 
-def get_hash(ctx: Any | None = None) -> str | None:
-    """Хеш содержимого long memory для baseline/changed hints (D10, D40)."""
-    return content_hash(resolve_project_memory_path(ctx))
+def project_of(ctx: Any | None = None):
+    """Проект памяти: каталог ``ctx.project_gc_dir`` или текущий каталог."""
+    import os
+
+    from gc_core.agent_store import ProjectKey, project_key_of
+    from gc_core.config_modules.env_vars import project_slug
+
+    key = project_key_of(ctx) if ctx is not None else None
+    if key is not None:
+        return key
+    root = os.getcwd()
+    return ProjectKey(id=project_slug(root), root=root)
+
+
+async def aget_hash(ctx: Any | None = None) -> str | None:
+    """Версия long memory для baseline/changed hints (D10, D40): sha256
+    текста, ``None`` — памяти нет, она пуста или не читается."""
+    from gc_core.agent_store import agent_store_of
+
+    try:
+        memory = await agent_store_of(ctx).read_memory(project_of(ctx))
+    except (OSError, UnicodeDecodeError):
+        return None
+    return memory.version if memory is not None else None
 
 
 __all__ = [
@@ -51,14 +72,15 @@ __all__ = [
     "CompactionResult",
     "ProjectMemoryError",
     "ProjectMemoryStat",
+    "aattach_status_to_prompt_vars",
     "acompact_text",
+    "aget_hash",
     "append",
-    "attach_status_to_prompt_vars",
     "build_project_memory_status",
     "build_project_memory_status_for_cwd",
     "content_hash",
     "fill_percent",
-    "get_hash",
+    "project_of",
     "read",
     "resolve_project_memory_path",
     "stat",

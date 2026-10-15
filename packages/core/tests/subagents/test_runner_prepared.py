@@ -115,7 +115,7 @@ async def test_prepared_runner_preserves_shared_state_usage_and_input(
         "release_run_logger",
     ):
         monkeypatch.setattr(runner_module, name, _forbid)
-    monkeypatch.setattr(runner, "_resolve_subagent_system_prompt", _forbid)
+    monkeypatch.setattr(runner, "_aresolve_subagent_system_prompt", _forbid)
     monkeypatch.setattr(asyncio, "run_coroutine_threadsafe", _forbid)
     monkeypatch.setattr(builtins, "open", _forbid)
     traces = []

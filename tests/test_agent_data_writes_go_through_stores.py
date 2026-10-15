@@ -62,7 +62,9 @@ ALLOWED: dict[str, str] = {
     _CORE + "attachments/store.py": "файлы вложений тредов (картинки)",
     _CORE + "thread_store.py": _OLD_DURABLE,
     _CORE + "thread_store_journal.py": _OLD_DURABLE,
-    _CORE + "project_memory/storage.py": "память проекта — до AgentStore",
+    _CORE + "project_memory/storage.py": (
+        "файлы памяти проекта у FileAgentStore (атомарная запись, бэкап)"
+    ),
     # Workspace — через os_backend и тулы файловой системы.
     _CORE + "backends/capabilities.py": _OS_BACKEND,
     _CORE + "backends/harbor.py": _OS_BACKEND,

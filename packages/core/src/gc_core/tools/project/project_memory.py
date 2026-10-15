@@ -8,10 +8,14 @@ messages without leaking implementation details.
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import Any, Dict, Optional
 
-from gc_core.config_modules.env_vars import gc_paths, project_slug
+from gc_core.agent_store import (
+    MemoryConflict,
+    agent_store_of,
+    project_key_of,
+)
+from gc_core.agent_store import ProjectMemory as StoredMemory
 from gc_core.config_modules.project_memory import ProjectMemoryConfig
 from gc_core.constants.tool_names import PROJECT_MEMORY_TOOL_NAME
 from gc_core.execution.ports import port as runtime_port
@@ -22,32 +26,22 @@ from gc_core.loop_detector.constants import (
 from gc_core.message_policy.project_memory_notice.policy import (
     touch_project_memory_baseline,
 )
-from gc_core.project_memory import compaction, storage
+from gc_core.project_memory import compaction
 from gc_core.project_memory.operations import (
     ProjectMemoryReply,
     ProjectMemoryRequest,
 )
 from gc_core.project_memory.status import fill_percent
-from gc_core.project_memory.storage import ProjectMemoryError
 from gc_core.settings import settings_of
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
-
-_BACKUP_FILE_NAME = "GIGACODE_memory_backup.md"
-
-
-def backup_path(*, cwd: str | None = None) -> Path:
-    """Return the backup path for long memory: <gc_state>/projects/<slug>/GIGACODE_memory_backup.md.
-
-    The backup lives outside the project tree so it survives `rm -rf .gc`.
-    """
-    slug = project_slug(cwd)
-    return gc_paths()["state"] / "projects" / slug / _BACKUP_FILE_NAME
-
-
-_FILE_NAME = "project_memory.md"
+from gc_core.utils.user_text import unreadable_reason
 
 _READ_EMPTY_HINT = "long memory is empty. Use action=write to seed it with important facts you want to remember across sessions."
 _AUTO_COMPACTION_HINT = "Memory was compacted to fit the limit. Call action=read if you want to see what was kept."
+_CONFLICT_MESSAGE = (
+    "project memory was changed concurrently by another session. "
+    "Call action=read and retry."
+)
 _HIGH_FILL_THRESHOLD_PERCENT = 70
 _HIGH_FILL_HINT = (
     f"Project memory is over {_HIGH_FILL_THRESHOLD_PERCENT}% full. Consider action=write to reorganize it: "
@@ -70,20 +64,10 @@ class ProjectMemory(AbstractSimpleTool):
         super().__init__(**kwargs)
         self._ctx = ctx
         self._state = state
-        gc_dir: Optional[Path] = getattr(ctx, "project_gc_dir", None)
-        self._path: Optional[Path] = (
-            (Path(gc_dir) / _FILE_NAME) if gc_dir else None
-        )
-        # Backup path: mirrors primary outside the project tree so it survives rm -rf .gc.
-        # cwd is the parent of .gc (project root).
-        if (
-            gc_dir is not None
-            and getattr(ctx, "project_memory_io", None) is None
-        ):
-            cwd = str(Path(gc_dir).parent)
-            self._backup: Optional[Path] = backup_path(cwd=cwd)
-        else:
-            self._backup = None
+        # Память — в хранилище агента (у файлового — <проект>/.gc/
+        # project_memory.md с бэкапом вне дерева проекта).
+        self._project = project_key_of(ctx) if ctx is not None else None
+        self._store = agent_store_of(ctx) if ctx is not None else None
         limits = (
             settings_of(ctx).project_memory
             if ctx is not None
@@ -176,11 +160,18 @@ Return format (JSON string):
             "max_append_chars": self._max_append_chars,
         }
 
-    def _current_length(self) -> int:
-        if self._path is None:
+    async def _amemory(self) -> Optional[StoredMemory]:
+        """Память для ответа модели: не читается — как пустая (как раньше)."""
+        try:
+            return await self._store.read_memory(self._project)
+        except (OSError, UnicodeDecodeError):
+            return None
+
+    async def _alength(self) -> int:
+        if self._project is None:
             return 0
-        info = storage.stat(self._path, backup=self._backup)
-        return info.chars if info.exists else 0
+        memory = await self._amemory()
+        return len(memory.text) if memory is not None else 0
 
     def _high_fill_hint(self, length: int) -> Optional[str]:
         if (
@@ -223,8 +214,10 @@ Return format (JSON string):
             payload["hint"] = resolved_hint
         return json.dumps(payload, ensure_ascii=False)
 
-    def _err(self, *, action: str, error_type: str, message: str) -> str:
-        current_length = self._current_length()
+    async def _aerr(
+        self, *, action: str, error_type: str, message: str
+    ) -> str:
+        current_length = await self._alength()
         payload: Dict[str, Any] = {
             "tool": ProjectMemory.registered_tool_name(),
             "ok": False,
@@ -256,6 +249,7 @@ Return format (JSON string):
                 action,
                 combined=prepared.combined,
                 compaction=result,
+                base_version=prepared.base_version,
             )
         )
         if finished.output is None:
@@ -267,7 +261,7 @@ Return format (JSON string):
     ) -> ProjectMemoryReply:
         port = runtime_port(self._ctx, "project_memory_io")
         if port is None:
-            return self.execute_io(request)
+            return await self.aexecute_io(request)
         reply = await port(request)
         if reply.schema_version != 1:
             raise ValueError("Unsupported project memory reply")
@@ -275,160 +269,219 @@ Return format (JSON string):
             self._state.project_memory_content_hash = reply.baseline_hash
         return reply
 
-    def execute_io(self, request: ProjectMemoryRequest) -> ProjectMemoryReply:
-        """Worker/local file handler. Never calls a model or changes model policy."""
+    async def aexecute_io(
+        self, request: ProjectMemoryRequest
+    ) -> ProjectMemoryReply:
+        """Worker/local memory handler. Never calls a model or changes model policy."""
         if request.schema_version != 1:
             raise ValueError("Unsupported project memory request")
         self._baseline_updated = False
-        combined = ""
-        output = self._reject_unusable(request.action)
+        combined, base_version = "", None
+        output = await self._areject_unusable(request.action)
         if output is None:
-            output, combined = self._dispatch_io(request)
+            output, combined, base_version = await self._adispatch_io(request)
         return ProjectMemoryReply(
             output=output,
             combined=combined,
+            base_version=base_version,
             baseline_updated=self._baseline_updated,
             baseline_hash=getattr(
                 self._state, "project_memory_content_hash", None
             ),
         )
 
-    def _dispatch_io(
+    async def _adispatch_io(
         self, request: ProjectMemoryRequest
-    ) -> tuple[Optional[str], str]:
+    ) -> tuple[Optional[str], str, Optional[str]]:
         if request.phase == "finish":
             if request.action != "append" or request.compaction is None:
                 raise ValueError("Invalid project memory compaction result")
-            return self._append_finish(
-                request.combined, request.compaction
-            ), ""
+            output = await self._aappend_finish(
+                request.combined, request.compaction, request.base_version
+            )
+            return output, "", None
         if request.phase != "prepare":
             raise ValueError("Unknown project memory phase")
         if request.action == "append":
-            return self._append_prepare(request.content)
-        return self._dispatch_sync(request.action, request.content), ""
+            return await self._aappend_prepare(request.content)
+        return (
+            await self._adispatch_simple(request.action, request.content),
+            "",
+            None,
+        )
 
-    def _reject_unusable(self, action: str) -> Optional[str]:
+    async def _areject_unusable(self, action: str) -> Optional[str]:
         """Отказ, если тулу негде работать. Общий для обоих входов."""
-        if self._path is None:
-            return self._err(
+        if self._project is None:
+            return await self._aerr(
                 action=action,
                 error_type="not_configured",
                 message="project_memory path is not available in this context.",
             )
         return None
 
-    def _dispatch_sync(self, action: str, content: str) -> str:
-        """Ветки без компакции: они одинаковы для синхронного и async входа."""
+    async def _adispatch_simple(self, action: str, content: str) -> str:
+        """Ветки без компакции."""
         if action == "read":
-            return self._handle_read()
+            return await self._ahandle_read()
         if action == "write":
-            return self._handle_write(content)
-        return self._err(
+            return await self._ahandle_write(content)
+        return await self._aerr(
             action=action,
             error_type="invalid_action",
             message=f"unknown action: {action!r}. expected one of read|append|write.",
         )
 
-    def _sync_baseline_after_mutation(self) -> None:
+    def _sync_baseline(self, version: Optional[str]) -> None:
+        """Базовая версия подсказки «память изменилась» — та, что тул
+        только что прочитал или записал."""
         if self._ctx is not None and self._state is not None:
-            touch_project_memory_baseline(self._state, self._ctx)
+            touch_project_memory_baseline(
+                self._state, self._ctx, get_hash_fn=lambda _ctx: version
+            )
             self._baseline_updated = True
 
-    def _handle_read(self) -> str:
-        info = storage.stat(self._path, backup=self._backup)
-        text = storage.read(self._path, backup=self._backup)
-        is_empty = (not info.exists) or (not text.strip())
-        self._sync_baseline_after_mutation()
+    async def _ahandle_read(self) -> str:
+        memory = await self._amemory()
+        text = memory.text if memory is not None else ""
+        is_empty = not text.strip()
+        self._sync_baseline(memory.version if memory is not None else None)
         return self._ok(
             action="read",
-            length=info.chars if info.exists else 0,
-            lines=info.lines if info.exists else 0,
+            length=len(text),
+            lines=_count_lines(text),
             content=text if not is_empty else "",
             hint=_READ_EMPTY_HINT if is_empty else None,
         )
 
-    def _append_prepare(self, content: str) -> tuple[Optional[str], str]:
-        """``(готовый ответ, текст для компакции)`` — ровно одно из двух значимо.
+    async def _aappend_prepare(
+        self, content: str
+    ) -> tuple[Optional[str], str, Optional[str]]:
+        """``(готовый ответ, текст для компакции, его версия)`` — либо ответ,
+        либо текст для компакции.
 
-        Всё, что не зависит от способа дождаться компакции: валидация, чтение
-        текущего содержимого и простая дозапись, если всё влезает. Вынесено,
-        чтобы у двух входов не разошлись правила — расходились бы молча.
+        Валидация, чтение текущего содержимого и простая дозапись, если всё
+        влезает. Чужая запись между чтением и записью — повтор по свежему
+        тексту, один раз.
         """
         delta = content if isinstance(content, str) else ""
         delta_stripped = delta.strip()
         if not delta_stripped:
-            return self._err(
-                action="append",
-                error_type="empty_content",
-                message="content must be non-empty for append.",
-            ), ""
-        if len(delta_stripped) > self._max_append_chars:
-            return self._err(
-                action="append",
-                error_type="input_too_long",
-                message=(
-                    f"delta is {len(delta_stripped)} chars "
-                    f"(> {self._max_append_chars}). "
-                    "Rewrite more concisely (store facts, not raw text) and retry."
+            return (
+                await self._aerr(
+                    action="append",
+                    error_type="empty_content",
+                    message="content must be non-empty for append.",
                 ),
-            ), ""
-        existing = storage.read(self._path, backup=self._backup)
-        existing_stripped = existing.strip()
-        combined = (
-            f"{existing_stripped}\n\n{delta_stripped}"
-            if existing_stripped
-            else delta_stripped
-        )
-        if len(combined) <= self._max_chars:
+                "",
+                None,
+            )
+        if len(delta_stripped) > self._max_append_chars:
+            return (
+                await self._aerr(
+                    action="append",
+                    error_type="input_too_long",
+                    message=(
+                        f"delta is {len(delta_stripped)} chars "
+                        f"(> {self._max_append_chars}). "
+                        "Rewrite more concisely (store facts, not raw text) and retry."
+                    ),
+                ),
+                "",
+                None,
+            )
+        for _attempt in range(2):
+            # Дописывание — это read-modify-write: непрочитанное «существующее»
+            # ушло бы в память ПУСТЫМ, то есть стёрло бы её. Нечитаемая память
+            # — отказ, а не "".
             try:
-                info = storage.append(
-                    self._path,
-                    delta_stripped,
-                    max_chars=self._max_chars,
-                    backup=self._backup,
+                memory = await self._store.read_memory(self._project)
+            except (OSError, UnicodeDecodeError) as exc:
+                return (
+                    await self._aerr(
+                        action="append",
+                        error_type="io_error",
+                        message=unreadable_reason("project memory", exc),
+                    ),
+                    "",
+                    None,
                 )
-            except ProjectMemoryError as e:
-                return self._err(
-                    action="append", error_type=e.code, message=e.message
-                ), ""
-            self._sync_baseline_after_mutation()
-            return self._ok(
-                action="append", length=info.chars, lines=info.lines
-            ), ""
-        # Overflow path: compact existing + delta together; LLM decides what to keep.
-        return None, combined
+            existing = (memory.text if memory is not None else "").strip()
+            version = memory.version if memory is not None else None
+            combined = (
+                f"{existing}\n\n{delta_stripped}"
+                if existing
+                else delta_stripped
+            )
+            if len(combined) > self._max_chars:
+                # Переполнение: сжать существующее вместе с дельтой (решает LLM).
+                return None, combined, version
+            try:
+                written = await self._store.write_memory(
+                    self._project, combined, expected_version=version
+                )
+            except MemoryConflict:
+                continue
+            self._sync_baseline(written.version)
+            return (
+                self._ok(
+                    action="append",
+                    length=len(combined),
+                    lines=_count_lines(combined),
+                ),
+                "",
+                None,
+            )
+        return (
+            await self._aerr(
+                action="append",
+                error_type="conflict",
+                message=_CONFLICT_MESSAGE,
+            ),
+            "",
+            None,
+        )
 
-    def _append_finish(self, combined: str, result: Any) -> str:
-        """Разобрать итог компакции и записать результат."""
+    async def _aappend_finish(
+        self, combined: str, result: Any, base_version: Optional[str]
+    ) -> str:
+        """Разобрать итог компакции и записать его поверх версии prepare."""
         if not result.ok:
-            return self._err(
+            return await self._aerr(
                 action="append",
                 error_type="compaction_failed",
                 message=result.error_message or "compaction failed",
             )
         if len(result.text) > self._max_chars:
-            return self._err(
+            return await self._aerr(
                 action="append",
                 error_type="limit_exceeded",
                 message="content too large even after compaction.",
             )
+        text = result.text.strip()
+        if not text:
+            return await self._aerr(
+                action="append",
+                error_type="empty_content",
+                message="content must be non-empty for write.",
+            )
         try:
-            info = storage.write(
-                self._path,
-                result.text,
-                max_chars=self._max_chars,
-                backup=self._backup,
+            written = await self._store.write_memory(
+                self._project, text, expected_version=base_version
             )
-        except ProjectMemoryError as e:
-            return self._err(
-                action="append", error_type=e.code, message=e.message
+        except MemoryConflict:
+            # Сжатие считалось по тексту, который уже заменили: повторять его
+            # по свежему — новый вызов модели; пусть решит агент.
+            return await self._aerr(
+                action="append",
+                error_type="conflict",
+                message=_CONFLICT_MESSAGE,
             )
-        self._sync_baseline_after_mutation()
+        self._sync_baseline(written.version)
         return self._ok(
             action="append",
-            length=info.chars,
-            lines=info.lines,
+            length=len(text),
+            lines=_count_lines(text),
             compaction_block={
                 "performed": True,
                 "before_chars": len(combined),
@@ -437,36 +490,49 @@ Return format (JSON string):
             hint=_AUTO_COMPACTION_HINT,
         )
 
-    def _handle_write(self, content: str) -> str:
+    async def _ahandle_write(self, content: str) -> str:
         text = content if isinstance(content, str) else ""
         text_stripped = text.strip()
         if not text_stripped:
-            return self._err(
+            return await self._aerr(
                 action="write",
                 error_type="empty_content",
                 message="content must be non-empty for write.",
             )
         if len(text_stripped) > self._max_chars:
-            return self._err(
+            return await self._aerr(
                 action="write",
                 error_type="input_too_long",
                 message=(
                     f"content is {len(text_stripped)} chars (> {self._max_chars}). Rewrite more concisely and retry."
                 ),
             )
-        try:
-            info = storage.write(
-                self._path,
-                text_stripped,
-                max_chars=self._max_chars,
-                backup=self._backup,
+        for _attempt in range(2):
+            # Полная перезапись: правка «поверх свежего» — тот же текст.
+            memory = await self._amemory()
+            try:
+                written = await self._store.write_memory(
+                    self._project,
+                    text_stripped,
+                    expected_version=memory.version if memory else None,
+                )
+            except MemoryConflict:
+                continue
+            self._sync_baseline(written.version)
+            return self._ok(
+                action="write",
+                length=len(text_stripped),
+                lines=_count_lines(text_stripped),
             )
-        except ProjectMemoryError as e:
-            return self._err(
-                action="write", error_type=e.code, message=e.message
-            )
-        self._sync_baseline_after_mutation()
-        return self._ok(action="write", length=info.chars, lines=info.lines)
+        return await self._aerr(
+            action="write", error_type="conflict", message=_CONFLICT_MESSAGE
+        )
+
+
+def _count_lines(text: str) -> int:
+    if not text:
+        return 0
+    return text.count("\n") + (0 if text.endswith("\n") else 1)
 
 
 __all__ = ["ProjectMemory"]

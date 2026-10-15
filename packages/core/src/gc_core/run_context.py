@@ -8,8 +8,8 @@ from types import SimpleNamespace
 from typing import Any, Callable, Dict, List, Optional, Set
 
 from gc_core.agent_store import (
-    DEFAULT_AGENT_STORE,
     AgentStore,
+    FileAgentStore,
     check_agent_store,
 )
 from gc_core.attachments.store import ImageStore, image_store_for
@@ -349,7 +349,9 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
         loop=loop,
         os_backend=os_backend,
         log_handlers=log_handlers,
-        agent_store=agent_store or DEFAULT_AGENT_STORE,
+        # Файловое по умолчанию — по настройкам этой сборки (с runtime-слоем
+        # фронтенда: ACP, TUI и chat подменяют special_instructions).
+        agent_store=agent_store or FileAgentStore(source),
     )
     # Пробы возможностей бэкенда (`has_grep`/`has_find`/…) здесь СОЗНАТЕЛЬНО не
     # прогреваются, хотя `awarm_capabilities` для этого есть.
@@ -509,7 +511,7 @@ class _RunContextPrep:
     backend_was_overridden: bool
     #: Настройки сборки (``LoadedSettings``): из них читает и досборка.
     settings: Any = None
-    agent_store: Any = DEFAULT_AGENT_STORE
+    agent_store: Any = None
 
 
 def _prepare_run_context(
@@ -520,7 +522,7 @@ def _prepare_run_context(
     loop: Optional[Any],
     os_backend: Optional[FsBackend],
     log_handlers: Any = None,
-    agent_store: AgentStore = DEFAULT_AGENT_STORE,
+    agent_store: AgentStore | None = None,
 ) -> _RunContextPrep:
     """Бэкенд, реестр скиллов, логгер и токен владельца MCP-сессий.
 
@@ -544,6 +546,8 @@ def _prepare_run_context(
         settings = settings.with_runtime(
             launch_root=auto_workdir, project_root=auto_workdir
         )
+    if agent_store is None:
+        agent_store = FileAgentStore(settings)
     skills_registry = agent_store.skills_registry(settings, backend=backend)
     # Логгер создаётся ДО сборки тулов: она предупреждает о пропущенных файлах
     # сабагентов и нераспознанных именах тулов, и эти варнинги обязаны попасть в

@@ -48,15 +48,12 @@ def touch_project_memory_baseline(
     state: Any,
     ctx: Any,
     *,
-    get_hash_fn: Callable[[Any], str | None] | None = None,
+    get_hash_fn: Callable[[Any], str | None],
 ) -> str | None:
-    """Обновить baseline после read/write/append project_memory tool."""
-    if get_hash_fn is None:
-        from gc_core.project_memory import (
-            get_hash,  # nested: tests monkeypatch project_memory.get_hash; runtime lookup required
-        )
+    """Обновить baseline после read/write/append project_memory tool.
 
-        get_hash_fn = get_hash
+    ``get_hash_fn(ctx)`` — версия памяти, которую тул только что прочитал
+    или записал (читать её здесь заново не нужно)."""
     current = get_hash_fn(ctx)
     state.project_memory_content_hash = current
     return current
@@ -83,18 +80,16 @@ def collect_project_memory_hints(
     ctx: Any,
     settings: Any,
     *,
-    get_hash_fn: Callable[[Any], str | None] | None = None,
+    get_hash_fn: Callable[[Any], str | None],
 ) -> list[str]:
-    """Exists/changed hints на K-тике; пустой список если tool/mode выключены."""
+    """Exists/changed hints на K-тике; пустой список если tool/mode выключены.
+
+    ``get_hash_fn(ctx)`` — текущая версия памяти; её читают заранее,
+    асинхронно (``project_memory.aget_hash``): цепочка подсказок синхронная.
+    """
     settings = settings_of(settings)
     if not project_memory_hints_enabled(settings):
         return []
-    if get_hash_fn is None:
-        from gc_core.project_memory import (
-            get_hash,  # nested: tests monkeypatch project_memory.get_hash; runtime lookup required
-        )
-
-        get_hash_fn = get_hash
 
     interval = settings.project_memory.check_interval_messages
     if get_project_memory_check_cnt(meta) < interval:

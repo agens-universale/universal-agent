@@ -9,13 +9,12 @@ from types import SimpleNamespace
 
 import pytest
 from gc_core.agent_store import (
-    DEFAULT_AGENT_STORE,
-    AgentResource,
     FileAgentStore,
+    ResourceInfo,
     agent_store_of,
 )
-from gc_core.instructions.loader import build_instructions
-from gc_core.run_preparation import PromptPreparationRequest, load_run_prompts
+from gc_core.instructions.loader import abuild_instructions
+from gc_core.run_preparation import PromptPreparationRequest, aload_run_prompts
 from gc_testkit.memory_agent_store import MemoryAgentStore
 from gc_testkit.settings import make_settings
 
@@ -32,85 +31,102 @@ description: Скилл из хранилища агента.
 Делай по шагам."""
 
 
-def test_file_store_reads_like_path_read_text(tmp_path):
-    store = FileAgentStore()
+def _store(**dotted) -> FileAgentStore:
+    return FileAgentStore(make_settings(dotted))
+
+
+async def test_file_store_reads_like_path_read_text(tmp_path):
     prompt = tmp_path / "p.md"
     prompt.write_text("текст", encoding="utf-8")
-    assert store.read_text(AgentResource("prompt", "system", str(prompt))) == (
-        "текст"
+    store = _store(
+        **{"paths.chat_completions_system_prompt_path": str(prompt)}
+    )
+    assert await store.read("prompt", "system") == "текст".encode()
+    assert store.label("prompt", "system") == str(prompt)
+    # Путь не задан — ресурса у файлового хранилища нет.
+    assert await _store().read("prompt", "system") is None
+    missing = _store(
+        **{"paths.chat_completions_system_prompt_path": str(tmp_path / "x")}
     )
     with pytest.raises(FileNotFoundError):
-        store.read_text(AgentResource("prompt", "system", None))
-    with pytest.raises(FileNotFoundError):
-        store.read_text(AgentResource("prompt", "system", str(tmp_path / "x")))
-    broken = tmp_path / "utf16.md"
-    broken.write_bytes("текст".encode("utf-16"))
-    with pytest.raises(UnicodeDecodeError):
-        store.read_text(AgentResource("prompt", "system", str(broken)))
+        await missing.read("prompt", "system")
     (tmp_path / "dir").mkdir()
-    assert store.list_dir(AgentResource("skills", "", str(tmp_path))) == [
-        ("dir", "dir"),
-        ("p.md", "file"),
-        ("utf16.md", "file"),
-    ]
+    listed = await _store(**{"agent.subagents_dir": str(tmp_path)}).list(
+        "subagent"
+    )
+    assert listed == [ResourceInfo("dir", "dir"), ResourceInfo("p.md", "file")]
     with pytest.raises(NotADirectoryError):
-        store.list_dir(AgentResource("skills", "", str(prompt)))
+        await _store(**{"agent.subagents_dir": str(prompt)}).list("subagent")
+    with pytest.raises(FileNotFoundError):
+        await _store().list("subagent")
 
 
 def test_context_without_store_reads_files():
-    assert agent_store_of(SimpleNamespace()) is DEFAULT_AGENT_STORE
-    assert isinstance(DEFAULT_AGENT_STORE, FileAgentStore)
+    assert isinstance(agent_store_of(SimpleNamespace()), FileAgentStore)
 
 
-def test_run_prompts_keep_file_semantics(tmp_path):
+async def test_run_prompts_keep_file_semantics(tmp_path):
     with pytest.raises(FileNotFoundError):
-        load_run_prompts(
-            PromptPreparationRequest(system_prompt_path=str(tmp_path / "x"))
+        await aload_run_prompts(
+            PromptPreparationRequest(),
+            store=_store(
+                **{
+                    "paths.chat_completions_system_prompt_path": str(
+                        tmp_path / "x"
+                    )
+                }
+            ),
         )
-    prepared = load_run_prompts(
-        PromptPreparationRequest(
-            special_instructions_path=str(tmp_path / "missing")
-        )
+    prepared = await aload_run_prompts(
+        PromptPreparationRequest(),
+        store=_store(
+            **{
+                "paths.chat_completions_special_instructions_path": str(
+                    tmp_path / "missing"
+                )
+            }
+        ),
     )
-    assert prepared.system_prompt is None
     assert prepared.special_instructions is None
 
 
-def test_run_prompts_from_own_store_without_paths():
+async def test_run_prompts_from_own_store_without_paths():
     store = MemoryAgentStore(
         prompts={"system": "  SYS  ", "special_instructions": " SI "},
         fallback=None,
     )
-    prepared = load_run_prompts(PromptPreparationRequest(), store=store)
+    prepared = await aload_run_prompts(PromptPreparationRequest(), store=store)
     assert prepared.system_prompt == "SYS"
     assert "SI" in prepared.special_instructions
     assert ("prompt", "system") in store.reads
 
 
-def test_instructions_from_own_store():
+async def test_instructions_from_own_store(tmp_path):
     store = MemoryAgentStore(instructions={"L0": "Роль запуска."})
-    loaded = build_instructions(agent_md_path="", is_tui=False, store=store)
+    loaded = await abuild_instructions(is_tui=False, store=store)
     assert loaded.loaded_ids == ["L0"]
     assert "Роль запуска." in loaded.text
 
-    layers = MemoryAgentStore(
-        instructions={"L1": "Глобально.", "L3": "Проект."}, fallback=None
+    # L1 — из хранилища агента; L2 и L3 — файлы workspace (спека, 6.1).
+    (tmp_path / "AGENTS.md").write_text("Проект.", encoding="utf-8")
+    layers = MemoryAgentStore(instructions={"L1": "Глобально."}, fallback=None)
+    loaded = await abuild_instructions(
+        is_tui=True, store=layers, cwd=str(tmp_path)
     )
-    loaded = build_instructions(agent_md_path="", is_tui=True, store=layers)
     assert loaded.loaded_ids == ["L1", "L3"]
     assert "Глобально." in loaded.text and "Проект." in loaded.text
 
 
-def test_instructions_without_store_content_stay_empty_outside_tui():
-    loaded = build_instructions(
-        agent_md_path="", is_tui=False, store=MemoryAgentStore()
+async def test_instructions_without_store_content_stay_empty_outside_tui():
+    loaded = await abuild_instructions(
+        is_tui=False, store=MemoryAgentStore(fallback=None)
     )
     assert loaded.text == "" and loaded.loaded_ids == []
 
 
-def test_subagents_from_own_store_without_dir():
+async def test_subagents_from_own_store_without_dir():
     from gc_core.tools.subagents.custom.file_definitions import (
-        discover_subagent_definitions,
+        adiscover_subagent_definitions,
     )
 
     source = SimpleNamespace(
@@ -119,7 +135,9 @@ def test_subagents_from_own_store_without_dir():
             subagents={"helper.md": SUBAGENT, "notes.txt": "x"}, fallback=None
         ),
     )
-    definitions = discover_subagent_definitions(source, builtin_names=())
+    definitions = await adiscover_subagent_definitions(
+        source, builtin_names=()
+    )
     assert [d.name for d in definitions] == ["subagent_helper"]
     assert definitions[0].role == "Ты помощник."
 
@@ -144,16 +162,68 @@ async def test_skills_from_own_store():
     assert detail["scripts"] == ["run.sh"]
     reference = await registry.load_reference("demo", "guide")
     assert reference["content"] == "Справка."
-    with pytest.raises(FileNotFoundError, match="не запускаются"):
+    # Без среды исполнения скрипт выложить некуда — понятный отказ.
+    with pytest.raises(FileNotFoundError, match="среды исполнения"):
         await registry.resolve_script("demo", "run.sh")
 
 
-def test_service_prompts_go_through_the_store():
-    from gc_core.intent_guard.final_report_consistency import (
-        _load_guard_prompt,
+class _DictBackend:
+    """Среда исполнения в памяти: что и сколько раз туда записали."""
+
+    def __init__(self) -> None:
+        self.files: dict[str, bytes] = {}
+        self.writes = 0
+
+    async def makedirs(self, path: str) -> None:
+        return None
+
+    async def write_bytes(self, path: str, data: bytes) -> None:
+        self.files[path] = data
+        self.writes += 1
+
+    async def write(self, path: str, text: str) -> None:
+        self.files[path] = text.encode()
+
+    async def read(self, path: str) -> str:
+        if path not in self.files:
+            raise FileNotFoundError(path)
+        return self.files[path].decode()
+
+
+async def test_scripts_of_own_store_skill_are_provisioned_once(tmp_path):
+    from gc_core.tools.skills.store_files import store_skills_registry
+
+    store = MemoryAgentStore(
+        skills={
+            "user/demo/SKILL.md": SKILL,
+            "user/demo/scripts/run.sh": "echo hi",
+        },
+        fallback=None,
     )
-    from gc_core.security.command_moderation import load_command_judge_prompt
-    from gc_core.summarize.prompt_loading import load_prompt_template
+    runtime = _DictBackend()
+    registry = store_skills_registry(
+        store,
+        make_settings({"launch_root": str(tmp_path)}),
+        runtime_backend=runtime,
+    )
+    resolved = await registry.resolve_script("demo", "run.sh")
+    root = f"{tmp_path}/.gc/skills_runtime/user/demo"
+    assert resolved["path"] == f"{root}/scripts/run.sh"
+    assert runtime.files[resolved["path"]] == b"echo hi"
+    assert f"{root}/.manifest.sha256" in runtime.files
+    copied = runtime.writes
+    await registry.resolve_script("demo", "scripts/run.sh")
+    assert runtime.writes == copied, "неизменённый скилл выложен заново"
+
+
+async def test_service_prompts_go_through_the_store():
+    from gc_core.intent_guard.final_report_consistency import (
+        aload_guard_prompt,
+    )
+    from gc_core.security.command_moderation import (
+        aload_command_judge_prompt,
+    )
+    from gc_core.summarize.prompt_loading import aload_summary_prompt
 
     store = MemoryAgentStore(
         prompts={
@@ -162,14 +232,15 @@ def test_service_prompts_go_through_the_store():
             "command_judge_system": "Суди.",
         }
     )
-    assert load_prompt_template("/nowhere.md", store=store) == "Сожми."
-    assert _load_guard_prompt("/nowhere.md", store=store) == "Проверь."
-    assert load_command_judge_prompt("system", store=store) == "Суди."
-    # Чего нет у своего — у файлового: отказ тот же, что раньше.
+    assert await aload_summary_prompt(store) == "Сожми."
+    assert await aload_guard_prompt(store) == "Проверь."
+    assert await aload_command_judge_prompt("system", store=store) == "Суди."
+    # Чего нет ни у своего, ни у файлового — отказ тот же, что раньше.
+    missing = _store(
+        **{"paths.chat_completions_intent_guard_prompt_path": "/nowhere.md"}
+    )
     with pytest.raises(FileNotFoundError, match="Intent guard prompt"):
-        _load_guard_prompt(
-            "/nowhere.md", store=MemoryAgentStore(fallback=FileAgentStore())
-        )
+        await aload_guard_prompt(MemoryAgentStore(fallback=missing))
 
 
 async def test_context_takes_the_store_and_rejects_a_wrong_one():
@@ -180,7 +251,7 @@ async def test_context_takes_the_store_and_rejects_a_wrong_one():
     ctx = await acreate_run_context(cfg, agent_store=store)
     assert ctx.agent_store is store
     default = await acreate_run_context(cfg)
-    assert default.agent_store is DEFAULT_AGENT_STORE
+    assert isinstance(default.agent_store, FileAgentStore)
     with pytest.raises(TypeError, match="AgentStore"):
         await acreate_run_context(cfg, agent_store=object())
 
@@ -261,4 +332,4 @@ async def test_context_finds_subagents_in_its_own_store():
     )
     assert "subagent_helper" in ctx.subagent_definitions
     assert "subagent_helper" in ctx.tools_data
-    assert ("subagents", "helper.md") in store.reads
+    assert ("subagent", "helper.md") in store.reads

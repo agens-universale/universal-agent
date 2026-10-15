@@ -123,17 +123,16 @@ def evaluate_guard_probe(
     elif request.kind == "command_prompts":
         from gc_core.agent_store import agent_store_of
         from gc_core.security.command_moderation import (
-            load_command_judge_prompt,
+            aload_command_judge_prompts,
         )
+        from gc_core.threads.facade import run_sync
 
-        store = agent_store_of(settings)
-        result = replace(
-            result,
-            data={
-                "system": load_command_judge_prompt("system", store=store),
-                "user": load_command_judge_prompt("user", store=store),
-            },
+        # Проба синхронная: файловое хранилище ничего внешнего не ждёт, своё
+        # сетевое здесь откажет громко (run_sync) — до перевода Temporal.
+        prompts = run_sync(
+            aload_command_judge_prompts(agent_store_of(settings))
         )
+        result = replace(result, data=prompts)
     elif request.kind == "command_host":
         result = _command_host(request)
     else:

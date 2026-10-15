@@ -1,21 +1,26 @@
 [Назад к SDK](README.md)
 
-# Хранилище агента: промпты, AGENTS.md, скиллы, субагенты
+# Хранилище агента: промпты, AGENTS.md, скиллы, субагенты, память проекта
 
 Хранилище тредов (`ThreadStore`, см. [thread-store.md](thread-store.md)) держит
-то, что относится к одному треду: историю, meta, картинки. **Хранилище агента**
-(`AgentStore`) — то, что одинаково для всех тредов агента и что ядро только
-читает:
+то, что относится к одному треду: историю, состояние, картинки. **Хранилище
+агента** (`AgentStore`) — то, что одинаково для всех тредов агента:
 
 | вид | что | имена |
 |---|---|---|
-| `prompt` | промпты | `system`, `special_instructions`, `subagent`, `custom_subagent`, `summary`, `memory_patch`, `limit_summary`, `intent_tool`, `intent_final`, `finish_gate`, `project_memory_compaction`, `command_judge_system`, `command_judge_user` |
-| `instructions` | AGENTS.md | `L0` — роль запуска (`paths.agent_md_path`), `L1` — глобальные, `L2` — `.gc/AGENTS.md`, `L3` — `AGENTS.md` проекта |
-| `subagents` | определения кастомных субагентов | `""` — каталог, `<файл>.md` — определение |
-| `skills` | скиллы | `<слой>/<скилл>/…`, слои `system`, `user`, `project` |
+| `prompt` | промпты | `Prompt`: `system`, `special_instructions`, `subagent`, `custom_subagent`, `summary`, `memory_patch`, `limit_summary`, `intent_tool`, `intent_final`, `finish_gate`, `project_memory_compaction`, `command_judge_system`, `command_judge_user`, `init_agents_md` |
+| `instructions` | AGENTS.md | `L0` — роль запуска (`paths.agent_md_path`), `L1` — глобальные |
+| `subagent` | определения кастомных субагентов | `<файл>.md`; каталог — `list("subagent")` |
+| `skill` | скиллы | `<слой>/<скилл>/…`, слои `system`, `user`, `project` |
+
+и **память проекта** — текст с версией, которую агент копит между сессиями.
+
+`L2` (`.gc/AGENTS.md`) и `L3` (`AGENTS.md` проекта) лежат в репозитории
+пользователя и читаются из workspace, не отсюда.
 
 По умолчанию — `FileAgentStore`: файлы по путям конфига и пакета, ровно как
-ядро читало их всегда. Ничего передавать не нужно.
+ядро читало их всегда (пути хранилище вычисляет само по настройкам прогона).
+Ничего передавать не нужно.
 
 Своё хранилище (база, S3, конфиг-сервис) передаётся объектом, как хранилище
 тредов:
@@ -38,32 +43,51 @@ AgentPlugin(agents, thread_store=ts, agent_store={"coder": MyAgentStore()})
 историю Temporal с подготовкой каждого хода: промпт или AGENTS.md больше записи
 истории (около 1 МБ кириллицы) — отказ хода (`TurnFailed`), сессия жива.
 
+Когда читается: там же и тогда же, что до хранилища — системный промпт,
+AGENTS.md и статус памяти на каждый прогон, служебные промпты в момент
+использования, индекс скиллов — живой (скилл, созданный посреди хода, виден
+сразу).
+
 ---
 
 ## Контракт
 
 ```python
-from gc_core.agent_store import AgentResource, AgentStore
+from gc_core.agent_store import AgentStore, ProjectKey, ProjectMemory, ResourceInfo
 
 
 class AgentStore(ABC):
-    def read_text(self, resource: AgentResource) -> str: ...
-    def list_dir(self, resource: AgentResource) -> list[tuple[str, "file" | "dir"]]: ...
+    async def read(self, kind, name) -> bytes | None: ...
+    async def list(self, kind, prefix="") -> list[ResourceInfo]: ...
+    async def read_memory(self, project: ProjectKey) -> ProjectMemory | None: ...
+    async def write_memory(
+        self, project: ProjectKey, text: str, *, expected_version: str | None
+    ) -> ProjectMemory: ...
+    def label(self, kind, name) -> str: ...  # как назвать ресурс в отказе
 ```
 
-`AgentResource(kind, name, path)` — вид, логическое имя из таблицы выше и путь,
-который ядро вычислило по конфигу (или `None`, если путь не задан). Файловое
-хранилище читает по пути, своё отвечает по виду и имени — путь для него
-подсказка.
+Методы асинхронные и без приставки `a`: контракт — публичная поверхность для
+авторов хранилищ (исключение из правила `docs/async.md`).
 
-Отказ — как у `Path.read_text`: нет ресурса — `FileNotFoundError`, есть, но не
-читается — `OSError` / `UnicodeDecodeError`. Ядро отвечает на него так же, как
-раньше на файл: обязательный промпт роняет запуск с понятным текстом,
-необязательный (`special_instructions`, слои AGENTS.md) пропускается, битое
-определение субагента — предупреждение, остальные загружаются.
+- `read`: `None` — ресурса нет (например, путь к нему не настроен); есть, но не
+  читается — `OSError`. Байты, потому что assets скиллов бывают бинарными;
+  тексты декодирует ядро (UTF-8, переводы строк — как `Path.read_text`).
+- `list`: содержимое каталога ресурсов (`ResourceInfo(name, "file" | "dir")`)
+  по алфавиту; нет каталога — `FileNotFoundError` / `NotADirectoryError`.
+- `read_memory` / `write_memory`: память проекта `ProjectKey(id, root)`
+  (`id` — slug каталога проекта, `root` — сам каталог). Версия —
+  `memory_version(text)`: sha256 текста, `None` для пустого. Запись проходит,
+  только если на месте версия `expected_version` (`None` — памяти нет или она
+  пуста); иначе `MemoryConflict(current)`.
 
-Обработка текста (проверка на пустоту, подстановки в шаблоны, тексты отказов)
-остаётся в ядре и одинакова для любого хранилища: хранилище только отдаёт текст.
+Ядро отвечает на отказ так же, как раньше на файл: обязательный промпт роняет
+запуск или ход с понятным текстом, необязательный (`special_instructions`, `L1`)
+пропускается, судья команд выключается, битое определение субагента —
+предупреждение, остальные загружаются. Обработка текста (проверка на пустоту,
+подстановки в шаблоны, тексты отказов) — в ядре и одинакова для любого
+хранилища: хранилище только отдаёт байты.
+
+Конформанс своего хранилища — `gc_testkit.agent_store_conformance.assert_conforms`.
 
 ## Своё хранилище: что переопределить
 
@@ -72,37 +96,48 @@ class AgentStore(ABC):
 раньше:
 
 ```python
-from gc_core.agent_store import AgentResource, FileAgentStore
+from gc_core.agent_store import FileAgentStore
 
 
 class DbAgentStore(FileAgentStore):
-    def __init__(self, db):
+    def __init__(self, settings, db):
+        super().__init__(settings)
         self.db = db
 
-    def read_text(self, resource: AgentResource) -> str:
-        row = self.db.get(resource.kind, resource.name)
+    async def read(self, kind, name):
+        row = await self.db.get(kind, name)
         if row is not None:
-            return row.text
-        return super().read_text(resource)
+            return row.data
+        return await super().read(kind, name)
 ```
 
-Ресурсы без пути: своё хранилище может отдать системный промпт,
-`special_instructions`, роль запуска `L0` и субагентов, даже если пути в
-конфиге не заданы — ядро спрашивает их и тогда.
+Своё хранилище может отдать системный промпт, `special_instructions`, роль
+запуска `L0` и субагентов, даже если пути в конфиге не заданы — ядро
+спрашивает их и тогда.
 
 Образец целиком в памяти — `gc_testkit.memory_agent_store.MemoryAgentStore`:
-словари по видам и `fallback` (по умолчанию файловое).
+словари по видам, память проектов и `fallback` (по умолчанию файловое).
+
+## Память проекта
+
+Тул `project_memory` читает и пишет память через хранилище. Две правки
+одновременно (два инстанса сервера, два окна TUI) не теряют друг друга:
+`append` при конфликте перечитывает память и дописывает свою дельту к свежему
+тексту, повторный конфликт — ошибка тула `conflict` («перечитайте»).
+Файловое хранилище держит память в `<проект>/.gc/project_memory.md` с атомарной
+записью и бэкапом вне дерева проекта; между процессами запись не блокируется —
+для нескольких инстансов на одном проекте нужно хранилище с базой.
 
 ## Скиллы
 
-Реестр скиллов строится по дереву `skills` хранилища: `list_dir` по слоям,
-`read_text` по файлам (`SKILL.md`, `pack.yaml`, `references/…`, `assets/…`).
-Описание, инструкции, references и assets работают как у скиллов на диске.
+Реестр скиллов строится по дереву `skill` хранилища: `list` по слоям, `read` по
+файлам (`SKILL.md`, `pack.yaml`, `references/…`, `assets/…`). Описание,
+инструкции, references и assets работают как у скиллов на диске.
 
-**Скрипты скиллов из своего хранилища не запускаются**: скрипту нужен файл в
-среде исполнения, а хранилище отдаёт текст. `skills_run_script` отвечает
-понятным отказом. Скрипты работают у файлового хранилища — как раньше, в том
-числе с копированием в удалённую среду (docker / ssh).
+Скрипты скиллов своего хранилища запускаются: перед запуском файлы скилла
+выкладываются через `os_backend` в
+`<launch_root>/.gc/skills_runtime/<слой>/<скилл>` с манифестом
+`.manifest.sha256` (неизменённый скилл повторно не копируется).
 
 Файловое хранилище собирает реестр по-прежнему (`get_skills_registry` по
 бэкенду рана). Наследник `FileAgentStore`, у которого скиллы свои, берёт
@@ -118,6 +153,9 @@ class DbAgentStore(FileAgentStore):
 
 | файл | что |
 |---|---|
-| `gc_core/agent_store.py` | `AgentStore`, `FileAgentStore`, `AgentResource`, `agent_store_of` |
-| `gc_core/tools/skills/store_files.py` | реестр скиллов поверх дерева `skills` своего хранилища |
-| `gc_testkit/memory_agent_store.py` | `MemoryAgentStore` — образец в памяти |
+| `gc_core/agent_store/store.py` | `AgentStore` — контракт |
+| `gc_core/agent_store/models.py` | `Prompt`, `ResourceInfo`, `ProjectKey`, `ProjectMemory`, `memory_version` |
+| `gc_core/agent_store/file_store.py`, `file_paths.py` | `FileAgentStore` и правила путей |
+| `gc_core/agent_store/reading.py` | чтение ядром: `aread_text`, `agent_store_of`, `project_key_of` |
+| `gc_core/tools/skills/store_files.py` | реестр скиллов поверх дерева `skill` своего хранилища |
+| `gc_testkit/memory_agent_store.py`, `agent_store_conformance.py` | образец в памяти и конформанс |

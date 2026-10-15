@@ -23,6 +23,11 @@ from gc_testkit.settings import fake_ctx
 _DIRTY_EXTRA = "<think>t</think><redacted_thinking>r</redacted_thinking>"
 
 
+async def _fake_summary_prompt(_store):
+    """Промпт суммаризации без хранилища агента."""
+    return "prompt"
+
+
 def test_fallback_aggregated_keeps_tool_output_as_is():
     ctx = SimpleNamespace(
         intent_scope=SimpleNamespace(
@@ -315,8 +320,8 @@ async def test_summarizer_history_keeps_think_tags_in_assistant_content(
         as_coro(lambda **_k: empty),
     )
     monkeypatch.setattr(
-        "gc_core.summarize.prompt_loading.load_prompt_template",
-        lambda _p, **_kw: "prompt",
+        "gc_core.summarize.prompt_loading.aload_summary_prompt",
+        _fake_summary_prompt,
     )
 
     ctx = fake_ctx(
