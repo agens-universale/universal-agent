@@ -19,6 +19,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import os
 from pathlib import Path
 from typing import Any, Literal
 
@@ -164,6 +165,12 @@ def publish(
     _plain_write(base / CONTROL, _json(control))
     _plain_write(receipt_path(base, receipt["operation_id"]), _json(receipt))
     (base / PENDING).unlink()
+
+
+def move_aside(base: Path, trash: Path) -> None:
+    """Убрать служебный каталог треда с его пути одним переименованием —
+    под его блокировкой (уборка надгробий); удаляется он уже без неё."""
+    os.rename(base, trash)
 
 
 def read_receipt(base: Path, op_id: str) -> dict[str, Any] | None:

@@ -195,34 +195,77 @@ def _physical_read_scope(directory, base):
         raise RuntimeError(
             "Cross-thread file scopes must acquire locks in global order"
         )
-    base.mkdir(parents=True, exist_ok=True)
     with _locks_guard:
         lock = _locks.setdefault(str(base), threading.RLock())
-    with lock, (base / "lock").open("a+b") as stream:
-        if os.name == "nt":
-            import msvcrt
-
-            stream.seek(0)
-            if not stream.read(1):
-                stream.write(b"\0")
-                stream.flush()
-            stream.seek(0)
-            msvcrt.locking(stream.fileno(), msvcrt.LK_LOCK, 1)
-        else:
-            import fcntl
-
-            fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
+    with lock, _locked_file(base):
         token = _held.set((*_held.get(), str(base)))
         try:
             _recover(Path(directory).absolute(), base)
             yield
         finally:
             _held.reset(token)
-            if os.name == "nt":
-                stream.seek(0)
-                msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
-            else:
-                fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+
+
+def _lock_stream(stream) -> None:
+    if os.name == "nt":
+        import msvcrt
+
+        stream.seek(0)
+        if not stream.read(1):
+            stream.write(b"\0")
+            stream.flush()
+        stream.seek(0)
+        msvcrt.locking(stream.fileno(), msvcrt.LK_LOCK, 1)
+    else:
+        import fcntl
+
+        fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
+
+
+def _unlock_stream(stream) -> None:
+    if os.name == "nt":
+        import msvcrt
+
+        stream.seek(0)
+        msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+    else:
+        import fcntl
+
+        fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+
+
+def _still_there(stream, path: Path) -> bool:
+    try:
+        return os.path.samestat(os.fstat(stream.fileno()), os.stat(path))
+    except FileNotFoundError:
+        return False
+
+
+@contextlib.contextmanager
+def _locked_file(base: Path):
+    """Захватить ``base/lock``. Служебный каталог удалённого треда уборка
+    убирает под этой же блокировкой (``FileThreadStore.sweep_tombstones``):
+    дождавшийся её получает файл, которого уже нет по пути, — тогда
+    каталог заводится и блокировка берётся заново."""
+    path = base / "lock"
+    while True:
+        base.mkdir(parents=True, exist_ok=True)
+        try:
+            stream = path.open("a+b")
+        except FileNotFoundError:
+            continue  # каталог убрали между mkdir и open
+        _lock_stream(stream)
+        if _still_there(stream, path):
+            break
+        _unlock_stream(stream)
+        stream.close()
+    try:
+        yield stream
+    finally:
+        try:
+            _unlock_stream(stream)
+        finally:
+            stream.close()
 
 
 def _bind_identity(directory, base, identity):

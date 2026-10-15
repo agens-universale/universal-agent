@@ -21,12 +21,16 @@ import hashlib
 import json
 import logging
 import os
+import shutil
+import time
+import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from gc_core.thread_store_journal import (
+    _STORE_DIR,
     _control,
     _control_path,
     _physical_control_path,
@@ -81,6 +85,20 @@ _SUFFIX_FORMAT = "%Y%m%d_%H%M%S"
 _JSON = ".json"
 
 logger = logging.getLogger(__name__)
+
+#: Окно повтора операции: квитанции моложе него хранятся.
+RECEIPT_TTL = timedelta(days=7)
+#: Тред чистит свои квитанции при записи не чаще раза в это время.
+_PRUNE_EVERY = timedelta(days=1)
+#: Сколько помнится надгробие удалённого треда (эпоха и поколение — для
+#: фенсинга аренды и курсоров ``watch``): аренды со сроком, выданные до
+#: удаления, к этому времени давно истекли.
+TOMBSTONE_TTL = timedelta(days=1)
+_IDENTITY = "identity.json"
+_LOCK = "lock"
+_TRASH = ".trash-"
+#: Отметка последней уборки надгробий (время — по mtime).
+_SWEPT = ".tombstones-swept"
 
 
 def _line(record: JsonObject) -> bytes:
@@ -276,26 +294,42 @@ class FileThreadStore(ThreadStore):
                         "generation": v2["generation"] + 1,
                         "epoch": v2["epoch"],
                         "deleted": True,
+                        "leftovers": self._leftovers(key, v2),
                     }
                 }
             )
         return control, v2
 
     def _deleted_outside(self, key: ThreadKey, v2: JsonObject) -> bool:
-        """У треда были записи, а файлов не осталось — его удалили мимо v2."""
-        if v2.get("deleted") or not (
-            v2["revision"] or any(v2["high"].values())
-        ):
+        """Тред удалили мимо v2 (кодом develop: TUI, уборщик). develop не
+        знает потоков фронтендов и алиасов и оставляет их — поэтому тред,
+        в который был ``commit`` (он всегда пишет meta), удалён, если нет ни
+        meta, ни истории; тред из одних записей сбоку — если нет ни одного
+        его файла."""
+        if v2.get("deleted"):
             return False
         s, t, d = key.system, key.thread, self._dir
-        files = [
-            layout.meta_file(d, s, t),
-            layout.history_file(d, s, t),
-            layout.subagent_trace_path(d, s, t),
-            str(layout.edits_journal_path(d, s, t)),
-            *(layout.stream_path(d, s, t, n) for n in v2["high"]),
-        ]
+        core = [layout.meta_file(d, s, t), layout.history_file(d, s, t)]
+        if v2["revision"]:
+            return not any(os.path.exists(f) for f in core)
+        if not any(v2["high"].values()):
+            return False
+        files = [*core, *(self._stream_file(key, n) for n in v2["high"])]
         return not any(os.path.exists(f) for f in files)
+
+    def _leftovers(self, key: ThreadKey, v2: JsonObject) -> list[str]:
+        """Что осталось от треда, удалённого мимо v2: потоки и алиасы. Их
+        убирает следующая запись под этим ключом (``_created``) или
+        ``delete`` — иначе новый тред дочитал бы чужие записи."""
+        streams = (
+            self._stream_file(key, n) for n in v2["high"] if n != _HISTORY
+        )
+        aliases = (
+            self._alias_path(a)
+            for a in v2["aliases"]
+            if self._alias_owner(a) == key
+        )
+        return [str(p) for p in (*streams, *aliases) if os.path.exists(p)]
 
     def _with_memo(self, key: ThreadKey, v2: JsonObject) -> None:
         """Подмешать кеши из памяти: из двух записей одного файла берётся та,
@@ -509,8 +543,14 @@ class FileThreadStore(ThreadStore):
         path = self._alias_path(alias)
         if not path.exists():
             return None
-        raw = json.loads(path.read_text(encoding="utf-8"))
-        return ThreadKey(system=raw["system"], thread=raw["thread"])
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            return ThreadKey(system=raw["system"], thread=raw["thread"])
+        except (OSError, ValueError, KeyError, TypeError):
+            # Испорченный файл алиаса — алиаса нет (404, а не 500); новая
+            # запись того же алиаса его перезапишет.
+            logger.warning("алиас %r не читается", alias, exc_info=True)
+            return None
 
     def _add_aliases(self, changes, key, v2, aliases) -> None:
         for alias in aliases:
@@ -704,7 +744,7 @@ class FileThreadStore(ThreadStore):
             key = _meta_identity(path, meta)
             if key is not None:
                 keys.add(key)
-        for identity in root.glob(".store/*/identity.json"):
+        for identity in root.glob(f"{_STORE_DIR}/*/{_IDENTITY}"):
             try:
                 raw = json.loads(identity.read_text(encoding="utf-8"))
                 keys.add(
@@ -745,7 +785,14 @@ class FileThreadStore(ThreadStore):
         ]
 
     async def resolve_alias(self, alias: str) -> ThreadKey | None:
-        return self._alias_owner(alias)
+        owner = self._alias_owner(alias)
+        if owner is None:
+            return None
+        # Алиас треда, удалённого мимо v2 (develop не знает алиасов), ведёт
+        # в никуда.
+        with self._read_scope(owner):
+            _control_doc, v2 = self._load(owner)
+            return owner if self._exists(owner, v2) else None
 
     # --- запись ---------------------------------------------------------------------
 
@@ -785,6 +832,13 @@ class FileThreadStore(ThreadStore):
             return self._side(key, control, v2, change)
 
     def _created(self, v2: JsonObject) -> JsonObject:
+        """Секция v2 нового треда (под блокировкой записи). Остатки треда,
+        удалённого мимо v2, уходят до записи: упади процесс между ними —
+        следующая запись найдёт их снова."""
+        leftovers = v2.pop("leftovers", None) or []
+        for path in leftovers:
+            with contextlib.suppress(FileNotFoundError):
+                os.unlink(path)
         return {
             **v2,
             "created_at": self._now(),
@@ -826,6 +880,7 @@ class FileThreadStore(ThreadStore):
             history_version=v2["history_version"],
             max_seq={s: n for s, n in v2["high"].items() if n},
         )
+        self._prune_own_receipts(key, v2)
         file_tx.publish(
             Path(self._dir),
             self._base(key),
@@ -842,9 +897,9 @@ class FileThreadStore(ThreadStore):
     async def claim(self, key: ThreadKey, lease: LeaseRequest) -> ThreadRecord:
         with self._scope(key):
             control, v2 = self._load(key)
+            _check_durable_owner(control, lease.owner)
             if not self._exists(key, v2):
                 v2 = self._created(v2)
-            _check_durable_owner(control, lease.owner)
             granted = granted_lease(
                 self._lease(v2), v2["epoch"], lease, self._clock()
             )
@@ -876,16 +931,17 @@ class FileThreadStore(ThreadStore):
         # служебный каталог.
         with self._read_scope(key):
             _control, v2 = self._load(key)
-            exists = self._exists(key, v2)
+            exists = self._exists(key, v2) or bool(v2.get("leftovers"))
         if exists:
             self._delete_thread(key, op_id)
+            self._sweep_daily()
         self._drop_leftovers(key)
 
     def _delete_thread(self, key: ThreadKey, op_id: str) -> None:
         with self._scope(key):
             base = self._base(key)
             control, v2 = self._load(key)
-            if not self._exists(key, v2):
+            if not (self._exists(key, v2) or v2.get("leftovers")):
                 return
             # Тред, который ведёт durable-исполнитель, не удаляет никто
             # другой (уборщик по TTL, фронтенд) — как в develop.
@@ -894,7 +950,7 @@ class FileThreadStore(ThreadStore):
             for path in self._thread_files(key, v2):
                 changes.put(path, None)
             tomb = {
-                "generation": v2["generation"] + 1,
+                "generation": v2["generation"] + int(not v2["deleted"]),
                 "epoch": v2["epoch"],
                 "deleted": True,
             }
@@ -909,6 +965,10 @@ class FileThreadStore(ThreadStore):
             )
             for receipt in (base / file_tx.RECEIPTS).glob("*.json"):
                 receipt.unlink()
+            # Надгробие не в списке тредов (его ищут по identity) и уходит
+            # при уборке (``sweep_tombstones``); запись под этим ключом
+            # привяжет identity заново.
+            (base / _IDENTITY).unlink(missing_ok=True)
 
     def _drop_leftovers(self, key: ThreadKey) -> None:
         """Картинки и лок журнала правок — по возможности, после удаления
@@ -953,6 +1013,56 @@ class FileThreadStore(ThreadStore):
                 self._drop_archive_cache(meta_path.name, meta)
         return removed_meta, removed_data
 
+    def sweep_tombstones(self, older_than: timedelta = TOMBSTONE_TTL) -> int:
+        """Обслуживание: убрать служебные каталоги ``.store/`` без треда —
+        надгробия удалённых тредов старше ``older_than`` и каталоги, где
+        осталась одна блокировка. Каждый — под его же блокировкой:
+        дождавшийся её процесс заведёт каталог заново (``_locked_file``).
+        Вернуть, сколько убрано."""
+        root = Path(self._dir) / _STORE_DIR
+        if not root.is_dir():
+            return 0
+        cutoff = time.time() - older_than.total_seconds()
+        removed = 0
+        for base in sorted(root.iterdir()):
+            if base.name.startswith(_TRASH):
+                shutil.rmtree(base, ignore_errors=True)  # прерванная уборка
+            elif base.is_dir() and not base.name.startswith("."):
+                removed += self._sweep_one(base, cutoff)
+        return removed
+
+    def _sweep_one(self, base: Path, cutoff: float) -> int:
+        if (base / _IDENTITY).exists():
+            return 0  # живой тред — без блокировки, это дёшево
+        trash = base.with_name(f"{_TRASH}{base.name}-{uuid.uuid4().hex}")
+        try:
+            with _physical_read_scope(self._dir, base):
+                if not _abandoned(base, cutoff):
+                    return 0
+                file_tx.move_aside(base, trash)
+        except (OSError, ValueError):
+            # Windows не переименует каталог с открытым файлом блокировки;
+            # испорченный control.json — не дело уборки.
+            return 0
+        shutil.rmtree(trash, ignore_errors=True)
+        return 1
+
+    def _sweep_daily(self) -> None:
+        """Уборка надгробий с удаления треда — не чаще раза в
+        ``TOMBSTONE_TTL``: без сервера (CLI, TUI, gc-chat) её больше никто
+        не зовёт, а gc-chat заводит и удаляет тред на каждый completions."""
+        mark = Path(self._dir) / _STORE_DIR / _SWEPT
+        period = TOMBSTONE_TTL.total_seconds()
+        with contextlib.suppress(FileNotFoundError):
+            if time.time() - mark.stat().st_mtime < period:
+                return
+        try:
+            mark.parent.mkdir(parents=True, exist_ok=True)
+            mark.touch()
+        except OSError:
+            return
+        self.sweep_tombstones()
+
     def _is_canonical(self, meta_path: Path, meta: JsonObject) -> bool:
         key = _meta_identity(meta_path, meta)
         if key is None:
@@ -995,8 +1105,15 @@ class FileThreadStore(ThreadStore):
         ]
         for suffix in layout.archive_suffixes(d, s, t):
             files.extend(layout.archive_paths(d, s, t, suffix))
+        # Потоки — по точным именам: маска ``stream_*_{stem}`` задела бы
+        # чужой тред (``_`` допустим и в system, и в thread_id).
+        files.extend(
+            self._stream_file(key, n)
+            for n in v2["high"]
+            if n not in (_HISTORY, _SUBAGENTS, _EDITS)
+        )
+        files.extend(v2.get("leftovers") or [])
         root = Path(d)
-        files.extend(root.glob(f"stream_*_{stem}.jsonl"))
         # Архивы журналов старых версий: суммаризация их больше не заводит.
         files.extend(root.glob(f"touched_{stem}__pre_summary__*.json"))
         files.extend(root.glob(f"edits_{stem}__pre_summary__*.jsonl"))
@@ -1022,21 +1139,66 @@ class FileThreadStore(ThreadStore):
         return path.read_bytes()
 
     async def prune_receipts(self, older_than: timedelta) -> int:
+        """Квитанции старше ``older_than``; заодно — надгробия удалённых
+        тредов (уборщик сервера, обслуживание Temporal)."""
         cutoff = self._clock() - older_than
-        removed = 0
-        for path in Path(self._dir).glob(".store/*/receipts/*.json"):
-            try:
-                doc = json.loads(path.read_bytes())
-            except (OSError, ValueError):
-                continue  # убрана параллельно (delete, другой уборщик)
-            if (
-                doc.get("v2")
-                and doc.get("at")
-                and (datetime.fromisoformat(doc["at"]) < cutoff)
-            ):
-                path.unlink(missing_ok=True)
-                removed += 1
+        removed = sum(
+            _prune_receipts_in(base / file_tx.RECEIPTS, cutoff)
+            for base in Path(self._dir).glob(f"{_STORE_DIR}/*")
+        )
+        self.sweep_tombstones()
         return removed
+
+    def _prune_own_receipts(self, key: ThreadKey, v2: JsonObject) -> None:
+        """Тред чистит свои квитанции при записи, не чаще раза в сутки (спека
+        5.3): без уборщика сервера ``.store/`` иначе растёт без предела."""
+        now = self._clock()
+        try:
+            last = datetime.fromisoformat(v2.get("receipts_pruned_at") or "")
+        except (TypeError, ValueError):
+            last = None
+        if last is not None and now - last < _PRUNE_EVERY:
+            return
+        v2["receipts_pruned_at"] = now.isoformat()
+        _prune_receipts_in(
+            self._base(key) / file_tx.RECEIPTS, now - RECEIPT_TTL
+        )
+
+
+def _prune_receipts_in(directory: Path, cutoff: datetime) -> int:
+    removed = 0
+    for path in directory.glob("*.json"):
+        try:
+            doc = json.loads(path.read_bytes())
+            stale = bool(doc.get("v2")) and (
+                datetime.fromisoformat(doc["at"]) < cutoff
+            )
+        except (OSError, ValueError, KeyError, TypeError):
+            continue  # убрана параллельно или не квитанция v2
+        if stale:
+            path.unlink(missing_ok=True)
+            removed += 1
+    return removed
+
+
+def _abandoned(base: Path, cutoff: float) -> bool:
+    """Служебный каталог без треда: надгробие (``control.json`` удалённого
+    треда без identity) или одна блокировка — старше ``cutoff``."""
+    names = {p.name for p in base.iterdir()}
+    receipts = base / file_tx.RECEIPTS
+    if _IDENTITY in names or (receipts.is_dir() and any(receipts.iterdir())):
+        return False
+    rest = names - {_LOCK, file_tx.RECEIPTS}
+    if not rest:
+        return (base / _LOCK).stat().st_mtime < cutoff
+    if rest != {file_tx.CONTROL}:
+        return False
+    control = base / file_tx.CONTROL
+    doc = json.loads(control.read_bytes())
+    if not isinstance(doc, dict):
+        return False
+    tomb = (doc.get("v2") or {}).get("deleted") and not doc.get("owner_id")
+    return bool(tomb) and control.stat().st_mtime < cutoff
 
 
 #: С какого окна с конца файла список ищет последнюю запись (растёт ×4).
@@ -1201,6 +1363,7 @@ class _Commit:
             archive_id=self.archive_id,
             lease=self.store._lease(self.v2),
         )
+        self.store._prune_own_receipts(self.key, self.v2)
         file_tx.publish(
             Path(self.store.threads_dir),
             self.store._base(self.key),
