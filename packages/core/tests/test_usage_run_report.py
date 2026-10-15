@@ -114,7 +114,8 @@ def test_report_and_dict_mark_unknown_cost_without_a_sum():
     run = UsageAccount()
     run.add(CATEGORY_MAIN, 1000, 100, model="m")
     text = build_run_usage_report(run, _PRICING_OTHER, "m")
-    assert "cost" in text and "—?" in text
+    total = next(l for l in text.splitlines() if l.startswith("total"))
+    assert total.rstrip().endswith("?") and "—?" not in text
     assert "? — часть вызовов без цены, итог неполный" in text
     data = build_run_usage_dict(run, _PRICING_OTHER, "m")
     assert data["cost"] == {"by_currency": {}, "unpriced": True}

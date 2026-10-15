@@ -183,7 +183,8 @@ def _total_cost_cell(report: CostReport) -> str:
         # >1 валюты: единого total нет — выводим сабтоталы отдельной секцией ниже.
         return "—" + suffix
     cur, amount = next(iter(report.by_currency.items()), (None, 0.0))
-    return (format_money(amount, cur) if cur else "—") + suffix
+    # Суммы нет совсем — одиночный «?», без «—» («—?» читается странно).
+    return format_money(amount, cur) + suffix if cur else suffix or "—"
 
 
 def _currency_subtotal_lines(report: CostReport) -> list[str]:
