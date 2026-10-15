@@ -692,8 +692,13 @@ def test_summarizer_limits_prefer_explicit_values_over_the_config():
 
 
 @pytest.mark.parametrize("change_live_mode", [False, True])
-@pytest.mark.parametrize("start_mode,important_weak", [("auto", False), ("auto", True), ("default", False)])
-async def test_loop_compacts_for_the_upcoming_model(monkeypatch, tmp_path, change_live_mode, start_mode, important_weak):
+@pytest.mark.parametrize(
+    "start_mode,important_weak",
+    [("auto", False), ("auto", True), ("default", False)],
+)
+async def test_loop_compacts_for_the_upcoming_model(
+    monkeypatch, tmp_path, change_live_mode, start_mode, important_weak
+):
     import asyncio
     import json
     import httpx
@@ -707,17 +712,27 @@ async def test_loop_compacts_for_the_upcoming_model(monkeypatch, tmp_path, chang
     from gc_core.utils import connect_backend
     from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
 
-    cfg = _cfg({
-        "level": start_mode,
-        "backend": {"api_mode": "chat_completions", "vision": False},
-        "logging": {"save_logs": False},
-        "agent": {"auto_routing_safe_level": "default"},
-        "models": {
-            "low": {"url": "http://low/v1/chat/completions", "token": "", "summary_trigger_chars": 2000},
-            "high": {"url": "http://high/v1/chat/completions", "token": "", "summary_trigger_chars": 1_000_000},
-        },
-        "slots": {"light": "low", "default": "high", "max": "high"},
-    })
+    cfg = _cfg(
+        {
+            "level": start_mode,
+            "backend": {"api_mode": "chat_completions", "vision": False},
+            "logging": {"save_logs": False},
+            "agent": {"auto_routing_safe_level": "default"},
+            "models": {
+                "low": {
+                    "url": "http://low/v1/chat/completions",
+                    "token": "",
+                    "summary_trigger_chars": 2000,
+                },
+                "high": {
+                    "url": "http://high/v1/chat/completions",
+                    "token": "",
+                    "summary_trigger_chars": 1_000_000,
+                },
+            },
+            "slots": {"light": "low", "default": "high", "max": "high"},
+        }
+    )
     box = {"value": start_mode}
     ctx = await acreate_run_context(cfg, level_provider=lambda: box["value"])
     state = _chat_state(chars=10000)
@@ -728,24 +743,34 @@ async def test_loop_compacts_for_the_upcoming_model(monkeypatch, tmp_path, chang
     ctx.operations = LocalOperations(ctx)
     first = executor.summary_limits()
     coordinator = RunSummaryCoordinator(
-        ctx=ctx, state=state, thread_session=None,
+        ctx=ctx,
+        state=state,
+        thread_session=None,
         summary_trigger_chars=first.chars_during,
         summary_trigger_tokens=first.tokens_during,
         turn_end_trigger_chars=first.chars_after,
         turn_end_trigger_tokens=first.tokens_after,
-        is_cli_mode=False, pre_backend_trigger_reason="pre_backend",
+        is_cli_mode=False,
+        pre_backend_trigger_reason="pre_backend",
         limits_provider=executor.summary_limits,
     )
     compacted = []
 
     async def summary(**kwargs):
-        compacted.append((len(sent), kwargs["batch_chars"], kwargs["max_dialogue_chars"]))
+        compacted.append(
+            (len(sent), kwargs["batch_chars"], kwargs["max_dialogue_chars"])
+        )
         if change_live_mode:
             await asyncio.sleep(0)
             box["value"] = "max"
-        return {"raw_summary": valid_summary_xml_for_tests(seed="compact"),
-                "last_dialog_steps": "", "num_batches": 1, "trace": {},
-                "memory_append_deltas": {}, "memory_replace_deltas": {}}
+        return {
+            "raw_summary": valid_summary_xml_for_tests(seed="compact"),
+            "last_dialog_steps": "",
+            "num_batches": 1,
+            "trace": {},
+            "memory_append_deltas": {},
+            "memory_replace_deltas": {},
+        }
 
     sent = []
 
@@ -755,28 +780,64 @@ async def test_loop_compacts_for_the_upcoming_model(monkeypatch, tmp_path, chang
         index = len(sent)
         if start_mode == "default" and index == 2:
             box["value"] = "light"
-        function = {"name": "exec_calculator", "arguments": json.dumps({"expression": f"{index}+1"})}
+        function = {
+            "name": "exec_calculator",
+            "arguments": json.dumps({"expression": f"{index}+1"}),
+        }
         if important_weak and index == 3:
-            function = {"name": "fs_write_file", "arguments": json.dumps({
-                "path": str(tmp_path / "discarded.txt"), "content": "must not execute",
-            })}
-        return httpx.Response(200, json={
-            "id": f"r{index}", "choices": [{"finish_reason": "tool_calls", "message": {
-                "role": "assistant", "content": None, "tool_calls": [{
-                    "id": f"c{index}", "type": "function", "function": function,
-                }],
-            }}],
-        })
+            function = {
+                "name": "fs_write_file",
+                "arguments": json.dumps(
+                    {
+                        "path": str(tmp_path / "discarded.txt"),
+                        "content": "must not execute",
+                    }
+                ),
+            }
+        return httpx.Response(
+            200,
+            json={
+                "id": f"r{index}",
+                "choices": [
+                    {
+                        "finish_reason": "tool_calls",
+                        "message": {
+                            "role": "assistant",
+                            "content": None,
+                            "tool_calls": [
+                                {
+                                    "id": f"c{index}",
+                                    "type": "function",
+                                    "function": function,
+                                }
+                            ],
+                        },
+                    }
+                ],
+            },
+        )
 
     transport = httpx.MockTransport(reply)
-    monkeypatch.setattr(connect_backend, "get_async_client", lambda **_: httpx.AsyncClient(transport=transport))
-    monkeypatch.setattr(compaction, "asummarize_dialog_via_chat_completions", summary)
+    monkeypatch.setattr(
+        connect_backend,
+        "get_async_client",
+        lambda **_: httpx.AsyncClient(transport=transport),
+    )
+    monkeypatch.setattr(
+        compaction, "asummarize_dialog_via_chat_completions", summary
+    )
     await pr.arun_agent(
-        [{"role": "user", "content": "Calculate three sums.", "id": "new"}], state, ctx,
+        [{"role": "user", "content": "Calculate three sums.", "id": "new"}],
+        state,
+        ctx,
         pre_backend_compaction_hook=coordinator.apre_backend_compaction_hook,
         check_stop=lambda: len(sent) == (4 if important_weak else 3),
     )
-    assert [payload["model"] for payload in sent] == ["high", "high", "low"] + (["high"] if important_weak else [])
+    assert [payload["model"] for payload in sent] == [
+        "high",
+        "high",
+        "low",
+    ] + (["high"] if important_weak else [])
     assert len(json.dumps(sent[2]["messages"])) < 2000
     assert compacted == [(2, 2400, 10000)]
     assert state.steps_in_turn == 3

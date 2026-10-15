@@ -113,8 +113,9 @@ def _effective_model_name(config) -> str:
     ему знать про `gc_tui`)."""
     from gc_core.auto_routing.levels import effective_level
     from gc_core.config import cli_forces_legacy_model
-    from gc_core.onboarding import MODEL_SENTINEL
     from gc_core.model_router import ModelRouter
+    from gc_core.onboarding import MODEL_SENTINEL
+
     from gc_tui.toggles import auto_available_cfg
 
     settings = settings_of(config)

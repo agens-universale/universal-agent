@@ -5414,10 +5414,14 @@ async def test_level_row_track_is_lit_in_the_colour_of_the_level(
 # --- level: четвёртая позиция `auto` вне шкалы (спека автороутинга §3) ------
 
 # Два разных комплекта вызова: с одной моделью автовыбор недоступен.
-_TWO_KITS_YAML = "models:\n  fast: {}\n  mid: {}\nslots:\n  light: fast\n  default: mid\n"
+_TWO_KITS_YAML = (
+    "models:\n  fast: {}\n  mid: {}\nslots:\n  light: fast\n  default: mid\n"
+)
 
 
-async def test_level_row_shows_auto_off_scale_when_available(tmp_path, monkeypatch):
+async def test_level_row_shows_auto_off_scale_when_available(
+    tmp_path, monkeypatch
+):
     """Четвёртая позиция `auto` — доступна в Настройках тем же составом
     значений, что и в палитре (`effective_toggle_values`, values_provider
     `/level`): `backend.api_mode: chat_completions` + рубильник `auto_routing`
@@ -5426,7 +5430,10 @@ async def test_level_row_shows_auto_off_scale_when_available(tmp_path, monkeypat
 
     monkeypatch.chdir(tmp_path)
     app, _ = _app_with_config(
-        tmp_path, 'level: "default"\nbackend:\n  api_mode: "chat_completions"\n' + _TWO_KITS_YAML)
+        tmp_path,
+        'level: "default"\nbackend:\n  api_mode: "chat_completions"\n'
+        + _TWO_KITS_YAML,
+    )
     async with app.run_test() as pilot:
         scr = await _open_modes_section(pilot)
 
@@ -5443,14 +5450,20 @@ async def test_level_row_cycle_includes_auto(tmp_path, monkeypatch):
 
     monkeypatch.chdir(tmp_path)
     app, cfg_file = _app_with_config(
-        tmp_path, 'level: "max"\nbackend:\n  api_mode: "chat_completions"\n' + _TWO_KITS_YAML)
+        tmp_path,
+        'level: "max"\nbackend:\n  api_mode: "chat_completions"\n'
+        + _TWO_KITS_YAML,
+    )
     async with app.run_test() as pilot:
         scr = await _open_modes_section(pilot)
         scr._modes_idx = modes_row_index("level")
 
-        scr._modes_apply(1)     # max -> auto (4-я позиция сразу за max)
+        scr._modes_apply(1)  # max -> auto (4-я позиция сразу за max)
 
-        assert yaml.safe_load(cfg_file.read_text(encoding="utf-8"))["level"] == "auto"
+        assert (
+            yaml.safe_load(cfg_file.read_text(encoding="utf-8"))["level"]
+            == "auto"
+        )
 
 
 # --- Правило записи секции: куда пишем и что действует ---
@@ -5858,8 +5871,14 @@ async def test_level_cycle_in_settings_never_writes_auto_when_only_the_session_p
         yaml.safe_dump(
             {
                 "models": {
-                    "fast": {"url": "http://fast/v1/chat/completions", "token": ""},
-                    "mid": {"url": "http://mid/v1/chat/completions", "token": ""},
+                    "fast": {
+                        "url": "http://fast/v1/chat/completions",
+                        "token": "",
+                    },
+                    "mid": {
+                        "url": "http://mid/v1/chat/completions",
+                        "token": "",
+                    },
                 },
                 "slots": {"light": "fast", "default": "mid"},
             }
@@ -5868,7 +5887,7 @@ async def test_level_cycle_in_settings_never_writes_auto_when_only_the_session_p
     )
     app, cfg_file = _app_with_config(
         tmp_path,
-        'backend:\n  api_mode: chat_completions\n'
+        "backend:\n  api_mode: chat_completions\n"
         '  completions_url: "http://base/v1/chat/completions"\n'
         'level: "default"\n',
     )
@@ -5884,7 +5903,9 @@ async def test_level_cycle_in_settings_never_writes_auto_when_only_the_session_p
             await pilot.press(key)
             await pilot.pause(0.1)
             written.append(
-                yaml.safe_load(cfg_file.read_text(encoding="utf-8")).get("level")
+                yaml.safe_load(cfg_file.read_text(encoding="utf-8")).get(
+                    "level"
+                )
             )
         assert "auto" not in written
         assert set(written) >= {"light", "default", "max"}

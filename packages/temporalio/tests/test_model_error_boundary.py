@@ -137,7 +137,9 @@ def test_the_honest_main_error_keeps_its_type_across_the_activity_boundary():
     базовое имя RuntimeError на границе activity этот тип теряло."""
     from gc_core.execution.contracts import MainModelUnavailable
 
-    failure = encode_model_failure(MainModelUnavailable("Модель 'mid' недоступна"))
+    failure = encode_model_failure(
+        MainModelUnavailable("Модель 'mid' недоступна")
+    )
     restored = restore_model_failure(failure)
     assert isinstance(restored, MainModelUnavailable)
     assert isinstance(restored, RuntimeError)

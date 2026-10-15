@@ -1230,7 +1230,9 @@ def test_five_value_toggle_works_generically(monkeypatch):
 
     txt = pal._format_toggle_row(reg.lookup("fake")).plain
     assert "○ ○ ● ○ ○" in txt and txt.rstrip().endswith("v2")
-    assert tg.cycle_in(tg.TOGGLES["fake"].names, "v4", 1) == "v0"  # цикл по кругу
+    assert (
+        tg.cycle_in(tg.TOGGLES["fake"].names, "v4", 1) == "v0"
+    )  # цикл по кругу
     hint = pal._toggle_hint(reg.lookup("fake"))
     assert hint.startswith("v2 — подсказка 2")
 

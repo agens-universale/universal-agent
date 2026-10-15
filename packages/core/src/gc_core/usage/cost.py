@@ -85,7 +85,9 @@ class CostReport:
     def unknown_only(self) -> bool:
         """Денег не известно ни копейки, но трата есть — показать «?», а не
         выдавать сессию за бесплатную (спека PR140 Р5)."""
-        return not self.has_cost and self.has_unpriced and self.rates_configured
+        return (
+            not self.has_cost and self.has_unpriced and self.rates_configured
+        )
 
     @property
     def multi_currency(self) -> bool:

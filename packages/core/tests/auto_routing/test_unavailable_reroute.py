@@ -4,6 +4,7 @@
 
 Транспорт замещён на одну попытку (`_arequest_backend_canonical_once`): настоящая
 обёртка сама переводит 503 в честную ошибку и взводит предохранитель."""
+
 import json
 
 import httpx
@@ -28,23 +29,42 @@ RAW = {
     "logging": {"save_logs": False},
 }
 STEPS = {"weak_steps": 10, "strong_steps": 2}
-FINISH = json.dumps({"solution_type": "full_solution", "task": "t",
-                     "task_report": "Готово.", "handoff": "{}"})
+FINISH = json.dumps(
+    {
+        "solution_type": "full_solution",
+        "task": "t",
+        "task_report": "Готово.",
+        "handoff": "{}",
+    }
+)
 
 
 def _ctx(box, registry=None, **agent):
     raw = dict(RAW)
     if registry is not None:
         raw.update(registry)
-    raw["agent"] = {"auto_routing_safe_level": "default",
-                    "auto_routing_two_level": STEPS, **agent}
+    raw["agent"] = {
+        "auto_routing_safe_level": "default",
+        "auto_routing_two_level": STEPS,
+        **agent,
+    }
     cfg = AppConfig.model_validate(raw)
-    return run_coro(rc.acreate_run_context(cfg, level_provider=lambda: box["value"]))
+    return run_coro(
+        rc.acreate_run_context(cfg, level_provider=lambda: box["value"])
+    )
 
 
 def _state(ctx):
-    s = State(verbose=False, model="m", tools_spec=ctx.tools_spec, tools_descr=ctx.tools_description,
-              skills_list=[], max_steps=50, system_prompt_id="v1", use_server_subagents=False)
+    s = State(
+        verbose=False,
+        model="m",
+        tools_spec=ctx.tools_spec,
+        tools_descr=ctx.tools_description,
+        skills_list=[],
+        max_steps=50,
+        system_prompt_id="v1",
+        use_server_subagents=False,
+    )
     s.backend_api_mode = "chat_completions"
     s.messages = [{"role": "system", "content": "SYS", "id": "m_sys"}]
     ctx.attach_state(s)
@@ -53,22 +73,37 @@ def _state(ctx):
 
 
 def _fc(name, call_id, arguments):
-    return {"type": "function_call", "id": f"fc_{call_id}", "status": "completed",
-            "call_id": call_id, "name": name, "arguments": arguments}
+    return {
+        "type": "function_call",
+        "id": f"fc_{call_id}",
+        "status": "completed",
+        "call_id": call_id,
+        "name": name,
+        "arguments": arguments,
+    }
 
 
 def _read(call_id):
-    return _fc("fs_read_file", call_id, json.dumps({"path": f"src/{call_id}.py"}))
+    return _fc(
+        "fs_read_file", call_id, json.dumps({"path": f"src/{call_id}.py"})
+    )
 
 
 def _write(call_id):
-    return _fc("fs_write_file", call_id, json.dumps({"path": "src/a.py", "content": "x = 1\n"}))
+    return _fc(
+        "fs_write_file",
+        call_id,
+        json.dumps({"path": "src/a.py", "content": "x = 1\n"}),
+    )
 
 
 def _unavailable():
     request = httpx.Request("POST", "https://synthetic.invalid")
-    return httpx.HTTPStatusError("provider unavailable", request=request,
-                                 response=httpx.Response(503, request=request))
+    return httpx.HTTPStatusError(
+        "provider unavailable",
+        request=request,
+        response=httpx.Response(503, request=request),
+    )
 
 
 def _transport(monkeypatch, dead=(), reply=None, on_dead=None):
@@ -76,7 +111,15 @@ def _transport(monkeypatch, dead=(), reply=None, on_dead=None):
     `reply(alias, n)` (по умолчанию одно чтение). Возвращает журнал алиасов."""
     sent = []
 
-    async def once(messages, state, ctx, *, resolved, set_previous_response_id=True, mute_answer=False):
+    async def once(
+        messages,
+        state,
+        ctx,
+        *,
+        resolved,
+        set_previous_response_id=True,
+        mute_answer=False,
+    ):
         sent.append(resolved.alias)
         if resolved.alias in dead:
             if on_dead is not None:
@@ -98,7 +141,9 @@ def _ask(s, ctx, times=1):
     return result
 
 
-def test_a_dead_weak_model_mid_turn_is_replaced_by_the_nearest_live_level(monkeypatch):
+def test_a_dead_weak_model_mid_turn_is_replaced_by_the_nearest_live_level(
+    monkeypatch,
+):
     ctx = _ctx({"value": "auto"})
     s = _state(ctx)
     sent = _transport(monkeypatch, dead={"fast"})
@@ -108,7 +153,7 @@ def test_a_dead_weak_model_mid_turn_is_replaced_by_the_nearest_live_level(monkey
     assert ctx.model_router.breaker.is_open("fast")
     assert s.steps_in_turn == 3
     _ask(s, ctx)
-    assert sent[4:] == ["mid"]          # мёртвый алиас больше не пробуется
+    assert sent[4:] == ["mid"]  # мёртвый алиас больше не пробуется
 
 
 def test_a_dead_strong_model_of_the_lower_pair_is_replaced_by_max(monkeypatch):
@@ -120,29 +165,49 @@ def test_a_dead_strong_model_of_the_lower_pair_is_replaced_by_max(monkeypatch):
     assert s._call_level == "max"
     # Причина предохранителя — исходная, а не текст честной ошибки: иначе
     # следующая честная ошибка по этому алиасу вложила бы в себя прежнюю.
-    assert ctx.model_router.breaker.snapshot() == {"mid": "provider unavailable"}
+    assert ctx.model_router.breaker.snapshot() == {
+        "mid": "provider unavailable"
+    }
     # Расход — ровно один успешный вызов: упавшая попытка ничего не списала.
     assert s.usage.totals()["calls"] == 1
     assert s.usage.totals()["input"] == 100
-    assert list(s.usage.by_model) == [ctx.model_router.resolve_level("max").model]
+    assert list(s.usage.by_model) == [
+        ctx.model_router.resolve_level("max").model
+    ]
 
 
 def test_the_replacement_is_logged_as_one_structured_event(monkeypatch):
     ctx = _ctx({"value": "auto"})
     s = _state(ctx)
     events = []
-    monkeypatch.setattr(ctx.logger, "info", lambda msg, *a, **k: events.append(k.get("extra", {})))
+    monkeypatch.setattr(
+        ctx.logger,
+        "info",
+        lambda msg, *a, **k: events.append(k.get("extra", {})),
+    )
     _transport(monkeypatch, dead={"mid"})
     _ask(s, ctx)
-    found = [e for e in events if e.get("event") == "routing_unavailable_reroute"]
+    found = [
+        e for e in events if e.get("event") == "routing_unavailable_reroute"
+    ]
     assert len(found) == 1
-    assert found[0]["from_level"] == "default" and found[0]["to_level"] == "max"
-    assert found[0]["failed_alias"] == "mid" and found[0]["replacement_alias"] == "big"
-    assert found[0]["replacement_model"] == ctx.model_router.resolve_level("max").model
+    assert (
+        found[0]["from_level"] == "default" and found[0]["to_level"] == "max"
+    )
+    assert (
+        found[0]["failed_alias"] == "mid"
+        and found[0]["replacement_alias"] == "big"
+    )
+    assert (
+        found[0]["replacement_model"]
+        == ctx.model_router.resolve_level("max").model
+    )
     assert found[0]["turn"] == 1
 
 
-def test_when_every_level_is_dead_the_turn_fails_with_the_honest_error(monkeypatch):
+def test_when_every_level_is_dead_the_turn_fails_with_the_honest_error(
+    monkeypatch,
+):
     ctx = _ctx({"value": "auto"})
     s = _state(ctx)
     sent = _transport(monkeypatch, dead={"fast", "mid", "big"})
@@ -177,15 +242,19 @@ def test_the_pair_judge_is_not_asked_again_after_a_replacement(monkeypatch):
     assert sent == ["mid", "big"]
 
 
-def test_a_level_switch_during_the_failed_request_waits_for_the_next_tick(monkeypatch):
+def test_a_level_switch_during_the_failed_request_waits_for_the_next_tick(
+    monkeypatch,
+):
     box = {"value": "auto"}
     ctx = _ctx(box)
     s = _state(ctx)
-    sent = _transport(monkeypatch, dead={"fast"}, on_dead=lambda: box.update(value="max"))
+    sent = _transport(
+        monkeypatch, dead={"fast"}, on_dead=lambda: box.update(value="max")
+    )
     _ask(s, ctx, times=3)
     assert sent == ["mid", "mid", "fast", "mid"]
     _ask(s, ctx)
-    assert sent[-1] == "big"            # ручной max — со следующего такта
+    assert sent[-1] == "big"  # ручной max — со следующего такта
 
 
 def test_a_dead_replay_target_moves_the_replay_up(monkeypatch):
@@ -194,36 +263,52 @@ def test_a_dead_replay_target_moves_the_replay_up(monkeypatch):
     ctx = _ctx({"value": "auto"})
     s = _state(ctx)
     dead = set()
-    reply = lambda alias, n: [_write(f"c{n}")] if alias in ("fast", "big") else [_read(f"c{n}")]
+    reply = lambda alias, n: (
+        [_write(f"c{n}")] if alias in ("fast", "big") else [_read(f"c{n}")]
+    )
     sent = _transport(monkeypatch, dead=dead, reply=reply)
-    _ask(s, ctx, times=2)                    # две сильные: mid, mid
-    dead.add("mid")                          # сильная умирает к третьему шагу
-    _ask(s, ctx)                             # fast пишет → пол на mid (мёртв) → big
+    _ask(s, ctx, times=2)  # две сильные: mid, mid
+    dead.add("mid")  # сильная умирает к третьему шагу
+    _ask(s, ctx)  # fast пишет → пол на mid (мёртв) → big
     assert sent == ["mid", "mid", "fast", "mid", "big"]
     assert s._call_level == "max"
 
 
-def test_a_dead_replay_with_nothing_live_above_fails_with_the_honest_error(monkeypatch):
+def test_a_dead_replay_with_nothing_live_above_fails_with_the_honest_error(
+    monkeypatch,
+):
     """Слабая сделала важный вызов, а сильная пары и `max` умерли прямо на
     переигрыше: кандидаты пола исчерпаны — прежнее поведение, честная ошибка."""
     ctx = _ctx({"value": "auto"})
     s = _state(ctx)
     dead = set()
-    reply = lambda alias, n: [_write(f"c{n}")] if alias == "fast" else [_read(f"c{n}")]
+    reply = lambda alias, n: (
+        [_write(f"c{n}")] if alias == "fast" else [_read(f"c{n}")]
+    )
     sent = _transport(monkeypatch, dead=dead, reply=reply)
-    _ask(s, ctx, times=2)                    # две сильные: mid, mid
-    dead.update({"mid", "big"})              # кандидаты пола умирают к третьему шагу
+    _ask(s, ctx, times=2)  # две сильные: mid, mid
+    dead.update({"mid", "big"})  # кандидаты пола умирают к третьему шагу
     with pytest.raises(MainModelUnavailable):
-        _ask(s, ctx)                         # fast пишет → пол: mid (мёртв) → big (мёртв)
+        _ask(s, ctx)  # fast пишет → пол: mid (мёртв) → big (мёртв)
     assert sent == ["mid", "mid", "fast", "mid", "big"]
     assert s.steps_in_turn == 2
 
 
-def test_a_copy_of_the_dead_model_is_tried_and_skipped_without_looping(monkeypatch):
-    entry = {"model": "mid-model", "url": "http://mid/v1/chat/completions", "token": ""}
-    ctx = _ctx({"value": "auto"}, registry={
-        "models": {"fast": {}, "mid": entry, "copy": entry},
-        "slots": {"light": "fast", "default": "mid", "max": "copy"}})
+def test_a_copy_of_the_dead_model_is_tried_and_skipped_without_looping(
+    monkeypatch,
+):
+    entry = {
+        "model": "mid-model",
+        "url": "http://mid/v1/chat/completions",
+        "token": "",
+    }
+    ctx = _ctx(
+        {"value": "auto"},
+        registry={
+            "models": {"fast": {}, "mid": entry, "copy": entry},
+            "slots": {"light": "fast", "default": "mid", "max": "copy"},
+        },
+    )
     s = _state(ctx)
     sent = _transport(monkeypatch, dead={"mid", "copy"})
     _ask(s, ctx)
@@ -240,7 +325,15 @@ def test_a_failed_attempt_leaves_no_trace_in_the_history(monkeypatch):
     s = _state(ctx)
     attempts = []
 
-    async def once(messages, state, ctx, *, resolved, set_previous_response_id=True, mute_answer=False):
+    async def once(
+        messages,
+        state,
+        ctx,
+        *,
+        resolved,
+        set_previous_response_id=True,
+        mute_answer=False,
+    ):
         attempts.append(resolved.alias)
         ctx.on_stream_delta("reset", "")
         ctx.on_stream_delta("answer", f"часть от {resolved.alias}")
@@ -254,8 +347,12 @@ def test_a_failed_attempt_leaves_no_trace_in_the_history(monkeypatch):
     assert s.messages == before
     assert response == [_read("c2")]
     assert attempts == ["mid", "big"]
-    assert deltas == [("reset", ""), ("answer", "часть от mid"),
-                      ("reset", ""), ("answer", "часть от big")]
+    assert deltas == [
+        ("reset", ""),
+        ("answer", "часть от mid"),
+        ("reset", ""),
+        ("answer", "часть от big"),
+    ]
 
 
 def test_old_durable_histories_keep_the_honest_error(monkeypatch):
@@ -291,9 +388,23 @@ def test_tools_of_the_turn_run_once_across_a_replacement(monkeypatch):
 
     sent = _transport(monkeypatch, dead={"fast"}, reply=reply)
     executed = []
-    monkeypatch.setattr(pr, "aapply_tool", as_coro(lambda **kw: executed.append(kw["call_id"]) or '{"ok": true}'))
+    monkeypatch.setattr(
+        pr,
+        "aapply_tool",
+        as_coro(lambda **kw: executed.append(kw["call_id"]) or '{"ok": true}'),
+    )
     monkeypatch.setattr(pr, "FinishGateGuard", _AcceptingGate)
-    monkeypatch.setattr(pr, "amaybe_update_intent_scope_from_tool", as_coro(lambda **kw: None))
-    run_coro(pr.arun_agent([{"role": "user", "content": "сделай", "id": "u1"}], s, ctx))
+    monkeypatch.setattr(
+        pr, "amaybe_update_intent_scope_from_tool", as_coro(lambda **kw: None)
+    )
+    run_coro(
+        pr.arun_agent(
+            [{"role": "user", "content": "сделай", "id": "u1"}], s, ctx
+        )
+    )
     assert sent[:4] == ["mid", "mid", "fast", "mid"]
-    assert executed.count("w") == 1 and executed.count("c1") == 1 and executed.count("c2") == 1
+    assert (
+        executed.count("w") == 1
+        and executed.count("c1") == 1
+        and executed.count("c2") == 1
+    )

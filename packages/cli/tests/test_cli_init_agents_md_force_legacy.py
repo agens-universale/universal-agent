@@ -1,6 +1,7 @@
 """`gc-cli --init` (`_run_init_agents_md`) собирает RunContext тем же
 `force_legacy`, что и основной путь запуска (`cli.main()`), не молчаливым
 дефолтом `False`."""
+
 import sys
 from types import SimpleNamespace
 
@@ -16,7 +17,9 @@ from gc_testkit.settings import make_settings
 def test_init_agents_md_threads_force_legacy_into_run_context(monkeypatch):
     captured = {}
 
-    async def _fake_create_run_context(loaded, *, auth_connector=None, force_legacy=False, **kw):
+    async def _fake_create_run_context(
+        loaded, *, auth_connector=None, force_legacy=False, **kw
+    ):
         captured["force_legacy"] = force_legacy
         # Не голый object(): `--init` вешает на контекст порт `ask_human`
         # (поле RunContext), двойнику нужны атрибуты.
@@ -30,7 +33,8 @@ def test_init_agents_md_threads_force_legacy_into_run_context(monkeypatch):
             return None
 
     monkeypatch.setattr(
-        cli, "load_settings",
+        cli,
+        "load_settings",
         lambda path, **kw: make_settings({"models": {"m": {}}}).with_overrides(
             {"agent.model": "forced-model"}, layer="cli"
         ),
@@ -39,9 +43,12 @@ def test_init_agents_md_threads_force_legacy_into_run_context(monkeypatch):
     monkeypatch.setattr(cli, "acreate_run_context", _fake_create_run_context)
     monkeypatch.setattr(cli, "AgentExecutor", _FakeExecutor)
     monkeypatch.setattr(
-        "gc_core.instructions.init_agents_md.build_init_prompt", lambda **kw: "prompt")
+        "gc_core.instructions.init_agents_md.build_init_prompt",
+        lambda **kw: "prompt",
+    )
     monkeypatch.setattr(
-        "gc_core.security.confirm_port.confirm_available", lambda ctx: True)
+        "gc_core.security.confirm_port.confirm_available", lambda ctx: True
+    )
     monkeypatch.setattr(cli.arg_parser.run_args, "config", None, raising=False)
 
     rc = run_coro(cli._run_init_agents_md())

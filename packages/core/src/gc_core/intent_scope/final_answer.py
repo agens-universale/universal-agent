@@ -25,7 +25,9 @@ def _append(state: Any, content: str, log: Any) -> None:
         )
 
 
-def record_turn_finish_outcome(*, arguments: str, outcome: str, state: Any) -> None:
+def record_turn_finish_outcome(
+    *, arguments: str, outcome: str, state: Any
+) -> None:
     """Разрешённый итог — в журнал до flush/compaction, без служебного запроса."""
     payload = json.loads(arguments)
     kind = str(payload.get("solution_type") or "").strip()

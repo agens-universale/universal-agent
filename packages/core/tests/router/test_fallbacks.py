@@ -426,15 +426,28 @@ def test_main_trace_trips_breaker_and_raises_honest_error_with_hint(
         is_tui=False,
     )
 
-    def _once(messages, state, ctx, *, resolved=None, set_previous_response_id=True, mute_answer=False):
+    def _once(
+        messages,
+        state,
+        ctx,
+        *,
+        resolved=None,
+        set_previous_response_id=True,
+        mute_answer=False,
+    ):
         raise _http_error(500)
 
     monkeypatch.setattr(pr, "_arequest_backend_canonical_once", _once)
 
     with pytest.raises(RuntimeError) as excinfo:
-        run_coro(pr._arequest_backend_canonical(
-            [], object(), ctx, resolved=router.resolve("main", check_breaker=False)
-        ))
+        run_coro(
+            pr._arequest_backend_canonical(
+                [],
+                object(),
+                ctx,
+                resolved=router.resolve("main", check_breaker=False),
+            )
+        )
 
     message = str(excinfo.value)
     assert "/level" in message
@@ -564,7 +577,15 @@ def test_main_trace_open_alias_fails_instantly_without_transport(monkeypatch):
     )
     calls = {"n": 0}
 
-    def _once(messages, state, ctx, *, resolved=None, set_previous_response_id=True, mute_answer=False):
+    def _once(
+        messages,
+        state,
+        ctx,
+        *,
+        resolved=None,
+        set_previous_response_id=True,
+        mute_answer=False,
+    ):
         calls["n"] += 1
         return (["msg"], "rid", {})
 
@@ -590,15 +611,28 @@ def test_main_trace_legacy_breaker_not_tracked_error_unchanged(monkeypatch):
         is_tui=False,
     )
 
-    def _once(messages, state, ctx, *, resolved=None, set_previous_response_id=True, mute_answer=False):
+    def _once(
+        messages,
+        state,
+        ctx,
+        *,
+        resolved=None,
+        set_previous_response_id=True,
+        mute_answer=False,
+    ):
         raise _http_error(500)
 
     monkeypatch.setattr(pr, "_arequest_backend_canonical_once", _once)
 
     with pytest.raises(httpx.HTTPStatusError):
-        run_coro(pr._arequest_backend_canonical(
-            [], object(), ctx, resolved=router.resolve("main", check_breaker=False)
-        ))
+        run_coro(
+            pr._arequest_backend_canonical(
+                [],
+                object(),
+                ctx,
+                resolved=router.resolve("main", check_breaker=False),
+            )
+        )
 
     assert router.breaker.snapshot() == {}
 
@@ -620,15 +654,28 @@ def test_main_trace_context_overflow_not_treated_as_unavailable(monkeypatch):
         is_tui=False,
     )
 
-    def _once(messages, state, ctx, *, resolved=None, set_previous_response_id=True, mute_answer=False):
+    def _once(
+        messages,
+        state,
+        ctx,
+        *,
+        resolved=None,
+        set_previous_response_id=True,
+        mute_answer=False,
+    ):
         raise ValueError("maximum context length exceeded")
 
     monkeypatch.setattr(pr, "_arequest_backend_canonical_once", _once)
 
     with pytest.raises(ValueError, match="maximum context length"):
-        run_coro(pr._arequest_backend_canonical(
-            [], object(), ctx, resolved=router.resolve("main", check_breaker=False)
-        ))
+        run_coro(
+            pr._arequest_backend_canonical(
+                [],
+                object(),
+                ctx,
+                resolved=router.resolve("main", check_breaker=False),
+            )
+        )
 
     assert router.breaker.snapshot() == {}
 
@@ -729,7 +776,8 @@ async def test_subagent_first_call_failure_restarts_on_active_model(tmp_path):
 
 @pytest.mark.parametrize("independent", [True, False])
 async def test_subagent_non_first_call_failure_degrades_without_restart(
-    tmp_path, independent,
+    tmp_path,
+    independent,
 ):
     from gc_core.tools.subagents.runner import SubagentRunner
 
@@ -761,7 +809,9 @@ async def test_subagent_non_first_call_failure_degrades_without_restart(
         # История сохраняется в State; новая версия не выдаёт её за новый batch.
         assert seeded_trace_message in child_state.messages
         if independent:
-            from gc_core.message_policy.user_message_policy import extract_real_user_message_text
+            from gc_core.message_policy.user_message_policy import (
+                extract_real_user_message_text,
+            )
 
             assert len(messages) == 1
             assert extract_real_user_message_text(messages[0]) == ""
@@ -898,7 +948,15 @@ async def test_unpinned_subagent_failure_trips_breaker_and_propagates_to_main(
     # (точка решения), без обращения в транспорт.
     once_calls = {"n": 0}
 
-    def _once(messages, state, ctx, *, resolved=None, set_previous_response_id=True, mute_answer=False):
+    def _once(
+        messages,
+        state,
+        ctx,
+        *,
+        resolved=None,
+        set_previous_response_id=True,
+        mute_answer=False,
+    ):
         once_calls["n"] += 1
         return (["msg"], "rid", {})
 

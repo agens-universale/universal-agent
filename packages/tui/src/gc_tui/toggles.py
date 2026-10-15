@@ -143,7 +143,9 @@ class ToggleSpec:
     # Trackless: чем показать пустое значение (у /profiles «без профиля» —
     # осмысленное состояние, не «не задано», ревизия 2026-07-28).
     empty_value_text: str = "—"
-    values_provider: Optional[Callable[[Any, Any], Tuple[ToggleValue, ...]]] = None
+    values_provider: Optional[
+        Callable[[Any, Any], Tuple[ToggleValue, ...]]
+    ] = None
     hint_provider: Optional[Callable[[Any, str], str]] = None
     # Почему значение сейчас не предлагается (набранное `/level auto` при
     # недоступном автовыборе): `(app, value) -> причина | None`.
@@ -589,7 +591,9 @@ def modes_section_names() -> list:
     ]
 
 
-def _toggle_values_for(app: Any, name: str, settings: Any) -> Tuple[ToggleValue, ...]:
+def _toggle_values_for(
+    app: Any, name: str, settings: Any
+) -> Tuple[ToggleValue, ...]:
     spec = TOGGLES[name]
     if spec.values_provider is not None:
         return spec.values_provider(app, settings)

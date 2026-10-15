@@ -11,6 +11,7 @@
 `auto_routing.reroute` — не `policy`, `levels`, `state_ops`: модуль тянет
 пакет `gc_core.tools`, который сам импортирует `auto_routing.levels`/`policy`,
 и обратный импорт замкнул бы цикл."""
+
 from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
@@ -20,8 +21,14 @@ from gc_core.message_projection import project_assistant_text
 from gc_core.tools.arguments_validation import tool_arguments_valid
 
 
-def _function_calls(messages: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
-    return [message for message in messages or [] if message.get("type") == "function_call"]
+def _function_calls(
+    messages: Optional[List[Dict[str, Any]]],
+) -> List[Dict[str, Any]]:
+    return [
+        message
+        for message in messages or []
+        if message.get("type") == "function_call"
+    ]
 
 
 def important_tool_names(
@@ -49,14 +56,17 @@ def important_tool_names(
 
 
 def has_invalid_call(
-    messages: Optional[List[Dict[str, Any]]], tools_data: Optional[Mapping[str, Any]],
+    messages: Optional[List[Dict[str, Any]]],
+    tools_data: Optional[Mapping[str, Any]],
 ) -> bool:
     """Ответ несёт битый вызов: имени нет в реестре тулов такта либо аргументы не
     прошли бы валидацию `aapply_tool` (невалидный JSON, мимо схемы)."""
     registry = tools_data or {}
     for call in _function_calls(messages):
         name = str(call.get("name") or "")
-        if name not in registry or not tool_arguments_valid(name, call.get("arguments"), registry):
+        if name not in registry or not tool_arguments_valid(
+            name, call.get("arguments"), registry
+        ):
             return True
     return False
 
@@ -76,11 +86,19 @@ def discarded_answer(
     сюда обычно не попадают: канон ответа их отрезает или держит отдельно от
     текста; `<think>` остаётся только у ответа из одних рассуждений. Материал
     сравнения с тем, что сделал уровень пола."""
-    calls = [{"name": str(call.get("name") or ""), "arguments": str(call.get("arguments") or "")}
-             for call in _function_calls(messages)]
+    calls = [
+        {
+            "name": str(call.get("name") or ""),
+            "arguments": str(call.get("arguments") or ""),
+        }
+        for call in _function_calls(messages)
+    ]
     text = "\n".join(
-        project_assistant_text(message.get("content"), strip_think=False).strip()
+        project_assistant_text(
+            message.get("content"), strip_think=False
+        ).strip()
         for message in messages or []
-        if message.get("type") == "message" and message.get("role") == "assistant"
+        if message.get("type") == "message"
+        and message.get("role") == "assistant"
     ).strip()
     return calls, text

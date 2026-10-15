@@ -583,7 +583,8 @@ def _print_startup_notices(
         known_tool_names=getattr(ctx, "registered_tool_names", None),
         deprecated_keys_used=(
             ["backend.stream"]
-            if is_explicit(loaded.settings, "backend.stream") else []
+            if is_explicit(loaded.settings, "backend.stream")
+            else []
         ),
         upgrade_info=upgrade_info,
         compat_notices=list(loaded.runtime.notices),

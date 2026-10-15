@@ -78,9 +78,15 @@ async def test_production_provider_worker_client_and_replay(
     )
     original_patched = workflow.patched
     if old_routing_history:
-        monkeypatch.setattr(workflow, "patched", lambda marker: (
-            False if marker == "routing-request-contract-v2" else original_patched(marker)
-        ))
+        monkeypatch.setattr(
+            workflow,
+            "patched",
+            lambda marker: (
+                False
+                if marker == "routing-request-contract-v2"
+                else original_patched(marker)
+            ),
+        )
     contexts, native, threads = build_runtime(config)
     try:
         async with await WorkflowEnvironment.start_local(
@@ -140,8 +146,13 @@ async def test_production_provider_worker_client_and_replay(
                 ]["knowledge"]
                 == "durable fact"
             )
-            finals = [r["content"] for r in files.load_meta("test", "production-thread")["user_intent_log"]
-                      if r["action"] == "final_answer"]
+            finals = [
+                r["content"]
+                for r in files.load_meta("test", "production-thread")[
+                    "user_intent_log"
+                ]
+                if r["action"] == "final_answer"
+            ]
             if old_routing_history:
                 assert finals == []
             else:

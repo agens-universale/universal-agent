@@ -605,7 +605,9 @@ class GcCliExternal(BaseAgent):
                 for name, bucket in by_model.items()
             }
         except Exception:
-            self.logger.exception("could not report token usage by model to Harbor")
+            self.logger.exception(
+                "could not report token usage by model to Harbor"
+            )
             return None
 
     def _write_trajectory(self, state: Any) -> int:

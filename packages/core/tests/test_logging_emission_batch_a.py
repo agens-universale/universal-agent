@@ -181,7 +181,10 @@ def minimal_config_dict(monkeypatch, tmp_path):
                         "description": "tool_b",
                     },
                 },
-                [{"type": "function", "name": "tool_a"}, {"type": "function", "name": "tool_b"}],
+                [
+                    {"type": "function", "name": "tool_a"},
+                    {"type": "function", "name": "tool_b"},
+                ],
                 ["tool_a", "tool_b"],
                 {},
             )

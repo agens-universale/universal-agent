@@ -95,7 +95,9 @@ def _configured_models(settings: AppConfig) -> List[str]:
     его записи (как ModelRouter: `entry.model or alias`); иначе `agent.model`
     (legacy-путь). Без повторов, в порядке появления."""
     if settings.models:
-        names = [entry.model or alias for alias, entry in settings.models.items()]
+        names = [
+            entry.model or alias for alias, entry in settings.models.items()
+        ]
     else:
         names = [settings.agent.model]
     return [name for name in dict.fromkeys(names) if name]
@@ -116,7 +118,8 @@ def _pricing_no_rates(settings: AppConfig) -> List[Notice]:
             Notice(
                 "info",
                 "pricing_partial_rates",
-                "pricing: нет ставки для моделей: " + ", ".join(unpriced)
+                "pricing: нет ставки для моделей: "
+                + ", ".join(unpriced)
                 + ". Их стоимость будет отмечена «?» — задайте цены в "
                 "pricing.models (см. /config).",
                 highlights=("pricing.models",),
@@ -181,14 +184,20 @@ def auto_routing_unavailable_notice(source: Any) -> Optional[Notice]:
     if str(settings_of(source).level or "").strip() != "auto":
         return None
     loaded = (
-        source if isinstance(source, LoadedSettings)
+        source
+        if isinstance(source, LoadedSettings)
         else LoadedSettings(settings=settings_of(source))
     )
     reason = auto_unavailable_reason(
-        loaded, force_legacy=cli_forces_legacy_model(loaded))
+        loaded, force_legacy=cli_forces_legacy_model(loaded)
+    )
     if reason is None:
         return None
-    return Notice("info", "auto_routing_unavailable", auto_routing_unavailable_message(reason))
+    return Notice(
+        "info",
+        "auto_routing_unavailable",
+        auto_routing_unavailable_message(reason),
+    )
 
 
 def _auto_routing(source: Any) -> List[Notice]:

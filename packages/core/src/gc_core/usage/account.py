@@ -238,7 +238,7 @@ class UsageAccount:
     def _model_bucket(self, model: str) -> Dict[str, int]:
         bucket = self.by_model.get(model)
         if bucket is None:
-            bucket = {field: 0 for field in _MODEL_FIELDS}
+            bucket = dict.fromkeys(_MODEL_FIELDS, 0)
             self.by_model[model] = bucket
         return bucket
 

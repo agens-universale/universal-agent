@@ -5,12 +5,12 @@ from typing import Any, Dict, Type
 
 from jsonschema import Draft7Validator
 
-from gc_core.tools.inject_tool_fields import strip_injected_tool_args
 from gc_core.execution.tool_schema import (
     normalize_optional_empty_as_omit,
     parameters_schema_for_local_validation,
 )
 from gc_core.tools.connect_mcp.validation import _validate_tool_arguments
+from gc_core.tools.inject_tool_fields import strip_injected_tool_args
 
 
 def resolve_tool_arguments_feedback_hint(

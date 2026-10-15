@@ -1610,7 +1610,9 @@ _FIXED_CONSUMERS = (
 )
 
 
-async def test_fixed_consumer_without_binding_shows_the_level_it_really_uses(tmp_path):
+async def test_fixed_consumer_without_binding_shows_the_level_it_really_uses(
+    tmp_path,
+):
     """Судьи финала, текстового ответа и команд, суммаризация и судья
     автовыбора без привязки работают уровнем default (спека PR140 Р1): строка
     и первый пункт пикера говорят это словами пустого слота («не задана →

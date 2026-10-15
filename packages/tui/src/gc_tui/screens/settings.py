@@ -3815,8 +3815,8 @@ class SettingsScreen(Screen):
         from gc_tui.toggles import (
             PRESET_CUSTOM,
             TOGGLES,
-            modes_section_names,
             base_toggle_values,
+            modes_section_names,
         )
 
         names = modes_section_names()
@@ -3855,10 +3855,10 @@ class SettingsScreen(Screen):
         from gc_tui.toggles import (
             PRESET_CUSTOM,
             TOGGLES,
+            base_toggle_values,
             padded_track,
             toggle_state,
             toggle_state_base,
-            base_toggle_values,
         )
 
         spec = TOGGLES[name]
@@ -4155,12 +4155,12 @@ class SettingsScreen(Screen):
         from gc_core.config import _default_config_path, validate_config_text
 
         from gc_tui.toggles import (
-            toggle_state_base,
             PRESETS,
             TOGGLES,
-            modes_section_names,
             base_toggle_names,
             cycle_in,
+            modes_section_names,
+            toggle_state_base,
         )
 
         names = modes_section_names()

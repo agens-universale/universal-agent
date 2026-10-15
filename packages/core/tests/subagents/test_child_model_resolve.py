@@ -166,7 +166,10 @@ class TestChildModelResolve:
         # Таблица `unbound_level`: суммаризация привязанного ребёнка — уровнем
         # default (решение PR140 Р1 1б), прочие непривязанные — пином ребёнка.
         assert child_ctx.model_router.resolve("summary").alias == "flash"
-        assert child_ctx.model_router.resolve("intent_scope").alias == "deepseek-max"
+        assert (
+            child_ctx.model_router.resolve("intent_scope").alias
+            == "deepseek-max"
+        )
 
     def test_unpinned_subagent_falls_back_to_active_level(self, tmp_path):
         raw = {
@@ -312,7 +315,9 @@ class TestChildModelResolve:
         cfg = _make_config(tmp_path, raw)
         ctx = _parent_ctx(cfg, level="default")
         runner = SubagentRunner(ctx, _make_orchestrator_state(), cfg)
-        child_ctx = _await(runner._build_child_ctx(tool_name="subagent_worker"))
+        child_ctx = _await(
+            runner._build_child_ctx(tool_name="subagent_worker")
+        )
         assert child_ctx.model_router.is_subagent_child is True
 
     def test_force_legacy_propagates_to_child_router(self, tmp_path):
@@ -373,28 +378,46 @@ class TestChildModelResolve:
         assert child_ctx.model_router is None
 
     def test_unbound_child_routes_itself_from_default_in_auto(self, tmp_path):
-        raw = {"models": {"fast": {}, "mid": {}, "big": {}},
-               "slots": {"light": "fast", "default": "mid", "max": "big"},
-               "backend": {"api_mode": "chat_completions"}, "level": "auto"}
+        raw = {
+            "models": {"fast": {}, "mid": {}, "big": {}},
+            "slots": {"light": "fast", "default": "mid", "max": "big"},
+            "backend": {"api_mode": "chat_completions"},
+            "level": "auto",
+        }
         cfg = _make_config(tmp_path, raw)
         ctx = _parent_ctx(cfg, level="auto")
         runner = SubagentRunner(ctx, _make_orchestrator_state(), cfg)
-        child_ctx = _await(runner._build_child_ctx(tool_name="subagent_worker"))
-        assert child_ctx.model_router.is_subagent_child and child_ctx.model_router.auto_allowed
+        child_ctx = _await(
+            runner._build_child_ctx(tool_name="subagent_worker")
+        )
+        assert (
+            child_ctx.model_router.is_subagent_child
+            and child_ctx.model_router.auto_allowed
+        )
         assert child_ctx.model_router.live_level() == "auto"
         child_state = _await(runner._build_child_state("worker"))
         child_ctx.attach_state(child_state)
-        assert child_ctx.model_router.resolve("main").alias == "mid"      # старт с default
+        assert (
+            child_ctx.model_router.resolve("main").alias == "mid"
+        )  # старт с default
         child_state.current_level = "light"
-        assert child_ctx.model_router.resolve("main").alias == "fast"     # решения ребёнка меняют модель
+        assert (
+            child_ctx.model_router.resolve("main").alias == "fast"
+        )  # решения ребёнка меняют модель
 
-    def test_unbound_child_in_auto_starts_when_the_start_level_is_dead(self, tmp_path):
+    def test_unbound_child_in_auto_starts_when_the_start_level_is_dead(
+        self, tmp_path
+    ):
         """Алиас стартового уровня в предохранителе: старт ребёнка в auto не
         отказывает — уровень выберет его точка решения, ближайшим живым."""
         from gc_core import processing_responses as pr
-        raw = {"models": {"fast": {}, "mid": {}, "big": {}},
-               "slots": {"light": "fast", "default": "mid", "max": "big"},
-               "backend": {"api_mode": "chat_completions"}, "level": "auto"}
+
+        raw = {
+            "models": {"fast": {}, "mid": {}, "big": {}},
+            "slots": {"light": "fast", "default": "mid", "max": "big"},
+            "backend": {"api_mode": "chat_completions"},
+            "level": "auto",
+        }
         cfg = _make_config(tmp_path, raw)
         ctx = _parent_ctx(cfg, level="auto")
         ctx.model_router.breaker.trip("mid", "5xx после ретраев")
@@ -402,10 +425,18 @@ class TestChildModelResolve:
         routed = []
 
         async def fake_run_agent(messages, child_state, child_ctx, **kwargs):
-            routed.append((await pr.aroute_before_call(child_state, child_ctx))[2])
+            routed.append(
+                (await pr.aroute_before_call(child_state, child_ctx))[2]
+            )
             return "ok"
 
-        _await(runner.arun("subagent_planner", {"task": "plan it", "reason": "r"}, fake_run_agent))
+        _await(
+            runner.arun(
+                "subagent_planner",
+                {"task": "plan it", "reason": "r"},
+                fake_run_agent,
+            )
+        )
 
         assert routed == ["max"]
 
@@ -413,28 +444,39 @@ class TestChildModelResolve:
         """Непривязанный ребёнок наследует сырой режим родителя, а доступность
         считает по своему конфигу той же функцией ядра: одна модель — работает
         default."""
-        raw = {"models": {"only": {}}, "slots": {"default": "only"},
-               "backend": {"api_mode": "chat_completions"}, "level": "auto"}
+        raw = {
+            "models": {"only": {}},
+            "slots": {"default": "only"},
+            "backend": {"api_mode": "chat_completions"},
+            "level": "auto",
+        }
         cfg = _make_config(tmp_path, raw)
         ctx = _parent_ctx(cfg, level="auto")
         runner = SubagentRunner(ctx, _make_orchestrator_state(), cfg)
-        child_ctx = _await(runner._build_child_ctx(tool_name="subagent_worker"))
+        child_ctx = _await(
+            runner._build_child_ctx(tool_name="subagent_worker")
+        )
         assert child_ctx.model_router.live_level() == "auto"
         assert child_ctx.auto_available is False
         child_state = _await(runner._build_child_state("worker"))
         child_ctx.attach_state(child_state)
-        child_state.current_level = "light"                              # даже при чужом решении
+        child_state.current_level = "light"  # даже при чужом решении
         assert child_ctx.model_router.active_level() == "default"
 
     def test_bound_child_has_no_auto(self, tmp_path):
-        raw = {"models": {"fast": {}, "mid": {}, "big": {}},
-               "slots": {"light": "fast", "default": "mid", "max": "big"},
-               "assign": {"subagents": {"subagent_worker": "big"}},
-               "backend": {"api_mode": "chat_completions"}, "level": "auto"}
+        raw = {
+            "models": {"fast": {}, "mid": {}, "big": {}},
+            "slots": {"light": "fast", "default": "mid", "max": "big"},
+            "assign": {"subagents": {"subagent_worker": "big"}},
+            "backend": {"api_mode": "chat_completions"},
+            "level": "auto",
+        }
         cfg = _make_config(tmp_path, raw)
         ctx = _parent_ctx(cfg, level="auto")
         runner = SubagentRunner(ctx, _make_orchestrator_state(), cfg)
-        child_ctx = _await(runner._build_child_ctx(tool_name="subagent_worker"))
+        child_ctx = _await(
+            runner._build_child_ctx(tool_name="subagent_worker")
+        )
         assert child_ctx.model_router.auto_allowed is False
         assert child_ctx.model_router.resolve("main").alias == "big"
 
@@ -491,20 +533,29 @@ class TestChildCtxToolsSurviveModelSelection:
             sent.append((deepcopy(payload), kwargs["url"]))
             return {
                 "id": "child-response",
-                "choices": [{
-                    "message": {"role": "assistant", "content": "ok"},
-                    "finish_reason": "stop",
-                }],
+                "choices": [
+                    {
+                        "message": {"role": "assistant", "content": "ok"},
+                        "finish_reason": "stop",
+                    }
+                ],
             }, payload
 
-        monkeypatch.setattr(pr, "arequest_chat_completions_with_policy", fake_network)
+        monkeypatch.setattr(
+            pr, "arequest_chat_completions_with_policy", fake_network
+        )
         assert child_ctx.tools_data
         assert canonical_state == canonical_context
         for level in ("light", "max"):
             child_state.current_level = level
-            messages, response_id, _headers = await pr._arequest_backend_canonical_once(
+            (
+                messages,
+                response_id,
+                _headers,
+            ) = await pr._arequest_backend_canonical_once(
                 [{"role": "user", "content": "read the project"}],
-                child_state, child_ctx,
+                child_state,
+                child_ctx,
             )
             assert response_id == "child-response"
             assert messages
@@ -519,14 +570,20 @@ class TestChildCtxToolsSurviveModelSelection:
         assert strict_url == "http://strict/v1/chat/completions"
         expected_names = {tool["name"] for tool in canonical_state}
         assert expected_names
-        assert {tool["function"]["name"] for tool in loose["tools"]} == expected_names
-        assert {tool["function"]["name"] for tool in strict["tools"]} == expected_names
+        assert {
+            tool["function"]["name"] for tool in loose["tools"]
+        } == expected_names
+        assert {
+            tool["function"]["name"] for tool in strict["tools"]
+        } == expected_names
         loose_read = next(
-            tool["function"] for tool in loose["tools"]
+            tool["function"]
+            for tool in loose["tools"]
             if tool["function"]["name"] == "fs_read_file"
         )
         strict_read = next(
-            tool["function"] for tool in strict["tools"]
+            tool["function"]
+            for tool in strict["tools"]
             if tool["function"]["name"] == "fs_read_file"
         )
         assert "strict" not in loose_read
@@ -534,10 +591,15 @@ class TestChildCtxToolsSurviveModelSelection:
         loose_params = loose_read["parameters"]
         strict_params = strict_read["parameters"]
         assert set(loose_params["required"]) < set(loose_params["properties"])
-        assert set(strict_params["required"]) == set(strict_params["properties"])
+        assert set(strict_params["required"]) == set(
+            strict_params["properties"]
+        )
         assert strict_params["additionalProperties"] is False
         assert "x-openai-strict" not in loose_params
-        assert "x-openai-strict" not in child_ctx.tools_data["fs_read_file"]["spec"]["parameters"]
+        assert (
+            "x-openai-strict"
+            not in child_ctx.tools_data["fs_read_file"]["spec"]["parameters"]
+        )
 
 
 class TestChildLeavesItsLevelAfterRun:
@@ -548,22 +610,32 @@ class TestChildLeavesItsLevelAfterRun:
     `child_ctx.model_router.active_level()` после возврата показывал бы уровень
     последнего решения ребёнка вместо нейтрального default."""
 
-    RAW = {"models": {"fast": {}, "mid": {}, "big": {}},
-           "slots": {"light": "fast", "default": "mid", "max": "big"},
-           "backend": {"api_mode": "chat_completions"}, "level": "auto"}
+    RAW = {
+        "models": {"fast": {}, "mid": {}, "big": {}},
+        "slots": {"light": "fast", "default": "mid", "max": "big"},
+        "backend": {"api_mode": "chat_completions"},
+        "level": "auto",
+    }
 
     def _run(self, tmp_path, fake_run_agent):
         cfg = _make_config(tmp_path, self.RAW)
         ctx = _parent_ctx(cfg, level="auto")
         runner = SubagentRunner(ctx, _make_orchestrator_state(), cfg)
-        return _await(runner.arun("subagent_planner", {"task": "plan it", "reason": "r"},
-                                  fake_run_agent))
+        return _await(
+            runner.arun(
+                "subagent_planner",
+                {"task": "plan it", "reason": "r"},
+                fake_run_agent,
+            )
+        )
 
     def test_level_is_left_after_the_child_run_completes(self, tmp_path):
         seen = {}
 
         async def fake_run_agent(messages, child_state, child_ctx, **kwargs):
-            child_state.current_level = "light"          # имитация решения к концу прогона
+            child_state.current_level = (
+                "light"  # имитация решения к концу прогона
+            )
             seen.update(state=child_state, ctx=child_ctx)
             return "ok"
 

@@ -1153,7 +1153,9 @@ def test_thread_meta_does_not_persist_loop_window():
     payload = ThreadMetaMapper.merge_state_into_meta({}, state)
     assert "loop_detector_window" not in payload
     assert "loop_detector_pending" not in payload
-    restored = State(**constructor, shared=ThreadMetaMapper.shared_from_meta(payload))
+    restored = State(
+        **constructor, shared=ThreadMetaMapper.shared_from_meta(payload)
+    )
     assert restored.loop_detector_window == []
     assert restored.loop_detector_pending == []
 
@@ -1162,8 +1164,13 @@ def test_execution_snapshot_preserves_loop_window_for_resuming_a_run():
     from gc_core.states import State
 
     state = State(
-        verbose=False, model="CodeChat", tools_spec=[], tools_descr=[],
-        skills_list=[], max_steps=2, system_prompt_id="v1",
+        verbose=False,
+        model="CodeChat",
+        tools_spec=[],
+        tools_descr=[],
+        skills_list=[],
+        max_steps=2,
+        system_prompt_id="v1",
         use_server_subagents=False,
     )
     state.loop_detector_window = ["fp"]

@@ -334,10 +334,6 @@ def _finish_tools_data(
     return tools_data, tools_spec, tools_description, mcp_status
 
 
-
-
-
-
 class _SubagentTool:
     """Вызов субагента, отложенный до диспетчера.
 
@@ -749,8 +745,8 @@ __all__ = [
     "INTERNAL_TOOL_ERROR",
     "WrongFunctionArgumentsException",
     "aapply_tool",
-    "abuild_tools_data",
     "aapply_tool_result",
+    "abuild_tools_data",
     "format_internal_tool_error_output",
     "format_unknown_tool_output",
     "is_internal_tool_error_output",

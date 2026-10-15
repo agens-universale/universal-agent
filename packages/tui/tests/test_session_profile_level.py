@@ -1246,7 +1246,10 @@ def _write_pair_profile(tmp_path: Path) -> Path:
         tmp_path / "profiles" / "pair.yml",
         {
             "models": {
-                "fast": {"url": "http://fast/v1/chat/completions", "token": ""},
+                "fast": {
+                    "url": "http://fast/v1/chat/completions",
+                    "token": "",
+                },
                 "mid": {"url": "http://mid/v1/chat/completions", "token": ""},
             },
             "slots": {"light": "fast", "default": "mid"},

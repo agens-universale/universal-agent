@@ -3,7 +3,9 @@ from __future__ import annotations
 from typing import Any, MutableMapping
 
 from gc_core.auto_routing.policy import (
-    Decision, PairState, START_LEVEL,
+    START_LEVEL,
+    Decision,
+    PairState,
 )
 
 #: `_last_effective_level` — транзиентное служебное поле для сравнения уровня между
@@ -15,11 +17,17 @@ from gc_core.auto_routing.policy import (
 #: изменённых мутацией входов. `_call_level` — эффективный уровень последнего
 #: вызова: `close_tick` читает его через вызывающего вместо `ctx`.
 ROUTING_FIELDS = (
-    "current_level", "steps_in_turn", "steps_on_current_level",
-    "last_routing_reason", "tick_signals", "_last_effective_level",
-    "_tick_decision", "_call_level",
+    "current_level",
+    "steps_in_turn",
+    "steps_on_current_level",
+    "last_routing_reason",
+    "tick_signals",
+    "_last_effective_level",
+    "_tick_decision",
+    "_call_level",
     "turn_safe_level",
-    "pair_window_left", "pair_raises",
+    "pair_window_left",
+    "pair_raises",
 )
 #: Поля пары хода (лестница пар): переживают вход в auto, обнуляются границей хода.
 _PAIR_FIELDS = ("turn_safe_level", "pair_window_left", "pair_raises")
@@ -27,11 +35,17 @@ _PAIR_FIELDS = ("turn_safe_level", "pair_window_left", "pair_raises")
 
 def _defaults() -> dict[str, Any]:
     return {
-        "current_level": None, "steps_in_turn": 0, "steps_on_current_level": 0,
+        "current_level": None,
+        "steps_in_turn": 0,
+        "steps_on_current_level": 0,
         "last_routing_reason": None,
         "tick_signals": set(),
-        "_last_effective_level": None, "_tick_decision": None, "_call_level": None,
-        "turn_safe_level": None, "pair_window_left": None, "pair_raises": 0,
+        "_last_effective_level": None,
+        "_tick_decision": None,
+        "_call_level": None,
+        "turn_safe_level": None,
+        "pair_window_left": None,
+        "pair_raises": 0,
     }
 
 
@@ -46,7 +60,9 @@ def enter(state: Any) -> None:
     Пара хода (`_PAIR_FIELDS`) вход переживает: её выбрал судья этого хода и вела
     лестница, и auto → ручной → auto не зовёт судью второй раз. Обнуляет её только
     граница хода (`reset` из `begin_turn`)."""
-    kept = {name: getattr(state, name, _defaults()[name]) for name in _PAIR_FIELDS}
+    kept = {
+        name: getattr(state, name, _defaults()[name]) for name in _PAIR_FIELDS
+    }
     reset(state)
     state.current_level = START_LEVEL
     for name, value in kept.items():
@@ -62,9 +78,11 @@ def set_pair(state: Any, pair: PairState) -> None:
 
 def read_pair(state: Any) -> PairState:
     """Пара хода из State; пара не выбрана — `PairState(None, None, 0)`."""
-    return PairState(getattr(state, "turn_safe_level", None),
-                     getattr(state, "pair_window_left", None),
-                     int(getattr(state, "pair_raises", 0) or 0))
+    return PairState(
+        getattr(state, "turn_safe_level", None),
+        getattr(state, "pair_window_left", None),
+        int(getattr(state, "pair_raises", 0) or 0),
+    )
 
 
 def leave(state: Any) -> None:
@@ -127,7 +145,9 @@ def close_tick(state: Any, level: str) -> None:
     state.steps_in_turn = int(getattr(state, "steps_in_turn", 0) or 0) + 1
     previous = getattr(state, "_last_effective_level", None)
     if previous == level:
-        state.steps_on_current_level = int(getattr(state, "steps_on_current_level", 0) or 0) + 1
+        state.steps_on_current_level = (
+            int(getattr(state, "steps_on_current_level", 0) or 0) + 1
+        )
     else:
         state.steps_on_current_level = 1
     state._last_effective_level = level
@@ -135,7 +155,10 @@ def close_tick(state: Any, level: str) -> None:
     # Окно верхней пары тратят только шаги, которые решал auto (в ручном режиме
     # `leave` уже снял уровень до вызова).
     window = getattr(state, "pair_window_left", None)
-    if window is not None and getattr(state, "current_level", None) is not None:
+    if (
+        window is not None
+        and getattr(state, "current_level", None) is not None
+    ):
         state.pair_window_left = max(0, int(window) - 1)
     state._tick_decision = None
 

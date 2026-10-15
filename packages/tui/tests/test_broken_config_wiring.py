@@ -698,7 +698,9 @@ def test_the_repair_wizard_is_not_handed_the_level_flag(monkeypatch, tmp_path):
     пользовательский файл, флаги, назвавшие ДРУГОЙ конфиг, там не в счёт."""
     pytest.importorskip("textual")
     _isolate_default_config_at(tmp_path, monkeypatch)
-    (tmp_path / "config.yml").write_text("this is: : : not [valid yaml }\n", encoding="utf-8")
+    (tmp_path / "config.yml").write_text(
+        "this is: : : not [valid yaml }\n", encoding="utf-8"
+    )
 
     captured: dict = {}
     from gc_tui import app as tui_app
@@ -719,12 +721,13 @@ def test_the_repair_wizard_is_not_handed_the_level_flag(monkeypatch, tmp_path):
     monkeypatch.setattr(tui_app, "TuiApp", _FakeApp)
 
     import gc_tui as tui_mod
+
     monkeypatch.setattr(tui_mod, "_interactive", lambda: True, raising=False)
 
     rc = tui_mod.main(argv=["--init-config", "--level", "max"])
     assert rc == 0
-    assert captured.get("ran") is True                # дошли до сборки приложения
-    assert captured.get("level_override") is None      # …и флаг в неё не уехал
+    assert captured.get("ran") is True  # дошли до сборки приложения
+    assert captured.get("level_override") is None  # …и флаг в неё не уехал
 
 
 def test_main_explains_an_unreadable_layer_instead_of_a_traceback(

@@ -297,7 +297,9 @@ def _workflow_state(**fields):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("level_field", ["_call_level", "turn_level"])
-async def test_view_image_worker_probes_the_model_of_the_actual_call(tmp_path, monkeypatch, level_field):
+async def test_view_image_worker_probes_the_model_of_the_actual_call(
+    tmp_path, monkeypatch, level_field
+):
     import httpx
     from gc_core.attachments.store import ImageStore
     from gc_core.model_router import ModelRouter
@@ -308,10 +310,17 @@ async def test_view_image_worker_probes_the_model_of_the_actual_call(tmp_path, m
     project = tmp_path / "project"
     project.mkdir()
     config = {
-        "launch_root": str(project), "level": "default",
+        "launch_root": str(project),
+        "level": "default",
         "backend.api_mode": "chat_completions",
-        "models": {name: {"model": name, "url": f"http://{name}/v1/chat/completions", "token": ""}
-                   for name in ("fast", "mid")},
+        "models": {
+            name: {
+                "model": name,
+                "url": f"http://{name}/v1/chat/completions",
+                "token": "",
+            }
+            for name in ("fast", "mid")
+        },
         "slots": {"light": "fast", "default": "mid"},
     }
     ctx, worker, _ = setup_ports(config, ViewImage)
@@ -327,23 +336,48 @@ async def test_view_image_worker_probes_the_model_of_the_actual_call(tmp_path, m
 
         ctx.tool_effect = legacy_effect
     worker.image_store = ImageStore(str(tmp_path / "images"))
-    worker.model_router = ModelRouter(worker.settings, level_provider=lambda: "default")
+    worker.model_router = ModelRouter(
+        worker.settings, level_provider=lambda: "default"
+    )
     challenge = probe.make_challenge(retry=False)
     monkeypatch.setattr(probe, "make_challenge", lambda **_: challenge)
     sent = []
 
     def serve(request):
         sent.append(json.loads(request.content)["model"])
-        return httpx.Response(200, json={"choices": [{"message": {
-            "role": "assistant", "content": challenge.code}, "finish_reason": "stop"}]})
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": challenge.code,
+                        },
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
 
     transport = httpx.MockTransport(serve)
-    monkeypatch.setattr(connect_backend, "get_async_client", lambda **_: httpx.AsyncClient(transport=transport))
+    monkeypatch.setattr(
+        connect_backend,
+        "get_async_client",
+        lambda **_: httpx.AsyncClient(transport=transport),
+    )
     image = project / "shot.png"
     image.write_bytes(_png_bytes())
     state = _workflow_state(**{level_field: "light"})
-    output = json.loads(await aapply_tool("fs_view_image", {"path": str(image)},
-                                         ctx=ctx, state=state, call_id="view"))
+    output = json.loads(
+        await aapply_tool(
+            "fs_view_image",
+            {"path": str(image)},
+            ctx=ctx,
+            state=state,
+            call_id="view",
+        )
+    )
     assert output["ok"] is True and output["attached"] is True
     assert sent == ["fast"]
 

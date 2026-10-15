@@ -352,10 +352,14 @@ def test_a_profile_with_the_old_auto_judge_still_loads(tmp_path):
     from gc_core.config import load_settings
 
     base = tmp_path / "config.yml"
-    base.write_text("backend:\n  api_mode: chat_completions\n", encoding="utf-8")
+    base.write_text(
+        "backend:\n  api_mode: chat_completions\n", encoding="utf-8"
+    )
     profiles = tmp_path / "profiles"
     profiles.mkdir()
-    (profiles / "old.yml").write_text("assign:\n  auto_judge: max\n", encoding="utf-8")
+    (profiles / "old.yml").write_text(
+        "assign:\n  auto_judge: max\n", encoding="utf-8"
+    )
     loaded = load_settings(str(base), profile_override="old")
     assert loaded.runtime.active_profile == "old"
     assert any("assign.auto_judge" in n for n in loaded.runtime.notices)

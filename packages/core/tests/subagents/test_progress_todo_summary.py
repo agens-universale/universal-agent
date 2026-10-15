@@ -149,6 +149,9 @@ def test_brief_summary_truncates_long_current_item():
 
 
 def test_brief_args_summary_keeps_normal_read_file_arguments():
-    assert brief_args_summary(
-        json.dumps({"path": "a.py", "offset": 9}), tool_name="fs_read_file"
-    ) == "path='a.py', offset=9"
+    assert (
+        brief_args_summary(
+            json.dumps({"path": "a.py", "offset": 9}), tool_name="fs_read_file"
+        )
+        == "path='a.py', offset=9"
+    )

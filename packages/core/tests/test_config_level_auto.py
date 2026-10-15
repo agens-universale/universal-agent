@@ -10,10 +10,13 @@ from gc_core.config_modules.env_vars import EnvVars
 from gc_core.config_modules.root import AppConfig
 from gc_core.startup_notices import auto_routing_unavailable_notice
 
-_ONE_MODEL_MESSAGE = (
-    "автовыбор моделей недоступен: во всех уровнях одна модель — работает уровень default")
-_BASE = {"backend": {"api_mode": "chat_completions",
-                     "completions_url": "http://127.0.0.1:8014/v1/chat/completions"}}
+_ONE_MODEL_MESSAGE = "автовыбор моделей недоступен: во всех уровнях одна модель — работает уровень default"
+_BASE = {
+    "backend": {
+        "api_mode": "chat_completions",
+        "completions_url": "http://127.0.0.1:8014/v1/chat/completions",
+    }
+}
 
 
 def _write_yaml(path: Path, body: dict) -> Path:
@@ -43,7 +46,8 @@ def test_level_auto_with_auto_routing_disabled_loads_and_resolves_default():
     (рубильник не запрещает значение схемы), а эффективный уровень идёт через
     `auto_available` в `effective_level`: рубильник выключен → `False` → `default`."""
     cfg = AppConfig.model_validate(
-        {"level": "auto", "agent": {"auto_routing": False}})
+        {"level": "auto", "agent": {"auto_routing": False}}
+    )
     assert cfg.level == "auto"
     available = auto_available(cfg, force_legacy=False)
     assert available is False
@@ -51,9 +55,12 @@ def test_level_auto_with_auto_routing_disabled_loads_and_resolves_default():
 
 
 def test_level_auto_from_the_project_config_on_a_one_model_registry_names_the_reason(
-        isolated_cwd, tmp_path):
-    base = _write_yaml(tmp_path / "base.yml",
-                       {**_BASE, "models": {"only": {}}, "slots": {"default": "only"}})
+    isolated_cwd, tmp_path
+):
+    base = _write_yaml(
+        tmp_path / "base.yml",
+        {**_BASE, "models": {"only": {}}, "slots": {"default": "only"}},
+    )
     _write_yaml(isolated_cwd / ".gc" / "config.yml", {"level": "auto"})
 
     loaded = load_settings(str(base))
@@ -61,13 +68,23 @@ def test_level_auto_from_the_project_config_on_a_one_model_registry_names_the_re
 
     assert cfg.level == "auto"
     assert auto_available(cfg, force_legacy=False) is False
-    assert auto_routing_unavailable_notice(loaded).message == _ONE_MODEL_MESSAGE
+    assert (
+        auto_routing_unavailable_notice(loaded).message == _ONE_MODEL_MESSAGE
+    )
 
 
-def test_level_auto_from_a_profile_on_a_one_model_registry_names_the_reason(isolated_cwd, tmp_path):
+def test_level_auto_from_a_profile_on_a_one_model_registry_names_the_reason(
+    isolated_cwd, tmp_path
+):
     base = _write_yaml(tmp_path / "base.yml", _BASE)
-    _write_yaml(isolated_cwd / ".gc" / "profiles" / "solo.yml",
-                {"level": "auto", "models": {"only": {}}, "slots": {"default": "only"}})
+    _write_yaml(
+        isolated_cwd / ".gc" / "profiles" / "solo.yml",
+        {
+            "level": "auto",
+            "models": {"only": {}},
+            "slots": {"default": "only"},
+        },
+    )
 
     loaded = load_settings(str(base), profile_override="solo")
     cfg = loaded.settings
@@ -75,4 +92,6 @@ def test_level_auto_from_a_profile_on_a_one_model_registry_names_the_reason(isol
 
     assert meta.active_name == "solo" and cfg.level == "auto"
     assert auto_available(cfg, force_legacy=False) is False
-    assert auto_routing_unavailable_notice(loaded).message == _ONE_MODEL_MESSAGE
+    assert (
+        auto_routing_unavailable_notice(loaded).message == _ONE_MODEL_MESSAGE
+    )

@@ -3,6 +3,7 @@
 Сбой судьи выбирает сложную пару и записывает причину в лог. Нарушения
 контракта durable-рантайма проходят наружу, чтобы не скрывать сбой workflow.
 """
+
 from __future__ import annotations
 
 import logging
@@ -11,18 +12,35 @@ from dataclasses import replace
 from typing import Any, Optional
 
 from gc_core.agent_store import (
-    DEFAULT_AGENT_STORE, AgentResource, AgentStore, agent_store_of, read_required_text,
+    DEFAULT_AGENT_STORE,
+    AgentResource,
+    AgentStore,
+    agent_store_of,
+    read_required_text,
+)
+from gc_core.auto_routing.log_events import log_routing_pair_judge
+from gc_core.auto_routing.pair_judge import (
+    SOURCE_FALLBACK,
+    SOURCE_JUDGE,
+    PairChoice,
+    build_pair_card,
+    default_pair_judge_prompt_path,
+    parse_pair_score,
+)
+from gc_core.auto_routing.pair_judge import (
+    prompt_path as pair_prompt_path,
+)
+from gc_core.auto_routing.policy import (
+    PAIR_FALLBACK_LEVEL,
+    RoutingParams,
+    pair_levels,
+    pair_safe_level,
 )
 from gc_core.execution.contracts import ExecutionFailure
 from gc_core.execution.ports import is_sandbox_violation, port
-from gc_core.execution.resources import PromptResourceRequest, aload_prompt_resource
-from gc_core.auto_routing.log_events import log_routing_pair_judge
-from gc_core.auto_routing.pair_judge import (
-    PairChoice, SOURCE_FALLBACK, SOURCE_JUDGE,
-    build_pair_card, parse_pair_score, prompt_path as pair_prompt_path, default_pair_judge_prompt_path,
-)
-from gc_core.auto_routing.policy import (
-    PAIR_FALLBACK_LEVEL, RoutingParams, pair_levels, pair_safe_level,
+from gc_core.execution.resources import (
+    PromptResourceRequest,
+    aload_prompt_resource,
 )
 from gc_core.runtime_notices import maybe_push_pair_prompt_notice
 from gc_core.settings import settings_of
@@ -45,7 +63,8 @@ def _load_judge_prompt(
 ) -> str:
     path = prompt_path or default_pair_judge_prompt_path()
     prompt = read_required_text(
-        store, AgentResource("prompt", "routing_pair_judge", path),
+        store,
+        AgentResource("prompt", "routing_pair_judge", path),
         missing=f"Routing judge prompt file not found: {path}",
     ).strip()
     if not prompt:
@@ -53,7 +72,9 @@ def _load_judge_prompt(
     return prompt
 
 
-async def arun_pair_judge(state: Any, ctx: Any, *, params: RoutingParams, mid_turn: bool) -> PairChoice:
+async def arun_pair_judge(
+    state: Any, ctx: Any, *, params: RoutingParams, mid_turn: bool
+) -> PairChoice:
     """Один вызов судьи пары. Возвращает выбор пары хода; любой сбой — сложная пара
     (`PAIR_FALLBACK_LEVEL`) с причиной. Исключений наружу не выпускает: ход не имеет
     права падать из-за судьи."""
@@ -64,30 +85,41 @@ async def arun_pair_judge(state: Any, ctx: Any, *, params: RoutingParams, mid_tu
     card = ""
     choice = PairChoice(PAIR_FALLBACK_LEVEL, None, "", SOURCE_FALLBACK, None)
     try:
-        card = build_pair_card(state, legacy=not getattr(ctx, "routing_contract_v2", True))
+        card = build_pair_card(
+            state, legacy=not getattr(ctx, "routing_contract_v2", True)
+        )
         try:
             system_prompt = await aload_prompt_resource(
-                ctx, PromptResourceRequest(
+                ctx,
+                PromptResourceRequest(
                     "routing_pair_judge",
-                    path=settings_of(ctx).paths.chat_completions_routing_pair_judge_prompt_path,
+                    path=settings_of(
+                        ctx
+                    ).paths.chat_completions_routing_pair_judge_prompt_path,
                 ),
                 local=lambda: _load_judge_prompt(
-                    pair_prompt_path(ctx), store=agent_store_of(ctx),
+                    pair_prompt_path(ctx),
+                    store=agent_store_of(ctx),
                 ),
             )
         except (FileNotFoundError, ValueError) as exc:
             path = pair_prompt_path(ctx)
-            logger.warning(f"routing pair judge prompt unusable: {path}: {exc}")
+            logger.warning(
+                f"routing pair judge prompt unusable: {path}: {exc}"
+            )
             maybe_push_pair_prompt_notice(
-                path=path, reason=str(exc), enabled=bool(getattr(ctx, "is_tui", False)),
+                path=path,
+                reason=str(exc),
+                enabled=bool(getattr(ctx, "is_tui", False)),
             )
             raise
         raw = await arequest_auxiliary_completion_text(
             ctx=ctx,
             state=state,
-            messages=[{"role": "system",
-                       "content": system_prompt},
-                      {"role": "user", "content": card}],
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": card},
+            ],
             max_tokens=auxiliary_llm_judge_max_tokens(ctx),
             request_label=PAIR_REQUEST_LABEL,
             consumer=CONSUMER,
@@ -96,11 +128,16 @@ async def arun_pair_judge(state: Any, ctx: Any, *, params: RoutingParams, mid_tu
         if score is None:
             choice = replace(choice, error=error)
         else:
-            choice = PairChoice(pair_safe_level(score, params.pair_threshold), score, reason,
-                                SOURCE_JUDGE, None)
+            choice = PairChoice(
+                pair_safe_level(score, params.pair_threshold),
+                score,
+                reason,
+                SOURCE_JUDGE,
+                None,
+            )
     except ExecutionFailure:
         raise
-    except Exception as exc:                       # судья пары не имеет права ронять ход
+    except Exception as exc:  # судья пары не имеет права ронять ход
         if is_sandbox_violation(exc):
             raise
         choice = replace(choice, error=f"{type(exc).__name__}: {exc}".strip())

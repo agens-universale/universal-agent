@@ -83,7 +83,8 @@ def render_cost_report(
 ) -> str:
     lines: list[str] = [
         f"{title}    models: {', '.join(models)}"
-        if models else _report_header(title, model_name)
+        if models
+        else _report_header(title, model_name)
     ]
     show_cost = report.has_cost or report.unknown_only
     # Одна ширина первой колонки на весь отчёт: длинное имя модели не сдвигает числа.

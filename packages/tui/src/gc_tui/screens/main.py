@@ -799,7 +799,7 @@ class TraceScreen(Screen):
         ref = ref_fn() if callable(ref_fn) else None
         return ref.name if ref is not None else None
 
-    def _footer_running_resolution(self) -> "tuple[str, str, str, bool] | None":
+    def _footer_running_resolution(self) -> tuple[str, str, str, bool] | None:
         """Факт подготовленного вызова через Router работающего executor.
 
         Новый выбор уровня или профиля не подменяет этот комплект. До первого
@@ -828,18 +828,27 @@ class TraceScreen(Screen):
         model = resolved.alias or resolved.model
         if not model or model == MODEL_SENTINEL:
             return None
-        return (level, self._level_color(level), model, prepared_level is not None)
+        return (
+            level,
+            self._level_color(level),
+            model,
+            prepared_level is not None,
+        )
 
     def _footer_head_snapshot(self) -> _FooterHeadSnapshot:
         """Один снимок на кадр: фактический вызов и выбранный следующий режим."""
         profile = self._footer_profile_name()
         running = self._run_in_progress()
         auto_mode_active = getattr(self.app, "auto_mode_active", None)
-        selected_auto = auto_mode_active() if callable(auto_mode_active) else False
+        selected_auto = (
+            auto_mode_active() if callable(auto_mode_active) else False
+        )
         resolution = self._footer_running_resolution()
         next_selection = None
         if resolution is not None:
-            selection = getattr(self.app.active_runner, "next_call_selection", None)
+            selection = getattr(
+                self.app.active_runner, "next_call_selection", None
+            )
             next_selection = selection() if callable(selection) else None
             if next_selection is not None:
                 selected_auto = next_selection[0]
@@ -861,27 +870,35 @@ class TraceScreen(Screen):
                     live_model = str(self._footer_model_name())
                 else:
                     _, live_level, live_model = next_selection
-                if prepared and (model != live_model or level != live_level or actual_mode == "auto"):
+                if prepared and (
+                    model != live_model
+                    or level != live_level
+                    or actual_mode == "auto"
+                ):
                     transition = (
-                        self._level_color(live_level) if level != live_level or mode_auto else None,
+                        self._level_color(live_level)
+                        if level != live_level or mode_auto
+                        else None,
                         live_model,
                     )
         else:
             color = self._level_color(self._footer_live_level())
             model = str(self._footer_model_name())
-        return _FooterHeadSnapshot(profile, mode_auto, color, model, running, transition)
+        return _FooterHeadSnapshot(
+            profile, mode_auto, color, model, running, transition
+        )
 
     def _footer_head(
         self,
         *,
         with_profile: bool,
         profile_name_cols: int = _PROFILE_NAME_MAX_COLS,
-        snapshot: "_FooterHeadSnapshot | None" = None,
+        snapshot: _FooterHeadSnapshot | None = None,
         with_model_name: bool = True,
         with_level_block: bool = True,
         with_transition: bool = True,
-        meter: "Text | None | object" = _UNRESOLVED,
-    ) -> "Text":
+        meter: Text | object | None = _UNRESOLVED,
+    ) -> Text:
         """head = [профиль ] ●[ auto | → ● модель | модель][ · контекст]. Правило
         единое для обоих режимов (спека auto-routing §7.1): нет активного хода —
         точка режима + режим (` auto` в auto, модель в ручном); идёт ход —
@@ -910,7 +927,9 @@ class TraceScreen(Screen):
             snapshot = self._footer_head_snapshot()
         if meter is _UNRESOLVED:
             meter = self._context_meter()
-        profile, mode_auto, level_color, model_name, running, transition = snapshot
+        profile, mode_auto, level_color, model_name, running, transition = (
+            snapshot
+        )
         head = Text()
         if with_profile and profile:
             head.append(
@@ -945,7 +964,7 @@ class TraceScreen(Screen):
             head.append_text(meter)
         return head
 
-    def _compose_footer_right(self) -> "Text":
+    def _compose_footer_right(self) -> Text:
         """Правый край футера: [профиль ]●[ модель] · контекст [+ цены вниз].
 
         Единая лесенка жертв (Task 17, порядок — дословное решение юзера);
@@ -7399,11 +7418,7 @@ class TraceScreen(Screen):
                 "name": active_profile or None,
                 "source": _profile_source_label(ref),
                 "level": level,
-                "routing_policy": (
-                    "two_level"
-                    if level == "auto"
-                    else None
-                ),
+                "routing_policy": ("two_level" if level == "auto" else None),
                 "model": resolved.alias or resolved.model,
                 "circuit_breaker_open": breaker_open,
             },

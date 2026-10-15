@@ -297,10 +297,6 @@ def test_is_subagent_child_is_an_explicit_flag_not_derived_from_override(
 # --- select_tools_for_call: страховка от пустой базы ---------------------------------
 
 
-
-
-
-
 # --- prepare_main_call: резолв + выбор инструментов одним вызовом -------------------
 
 
@@ -465,58 +461,78 @@ def test_auto_turn_does_not_pin_the_manual_level(monkeypatch):
     assert pr.resolve_main_for_call(state, ctx).alias == "smart"
 
 
-async def test_create_run_context_uses_the_virtual_pair_prompt_store(minimal_settings):
+async def test_create_run_context_uses_the_virtual_pair_prompt_store(
+    minimal_settings,
+):
     from gc_testkit.memory_agent_store import MemoryAgentStore
 
-    cfg = minimal_settings.with_overrides({
-        "models": {"fast": {}, "mid": {}, "big": {}},
-        "slots": {"light": "fast", "default": "mid", "max": "big"},
-        "backend.api_mode": "chat_completions",
-        "level": "auto",
-        "paths.chat_completions_routing_pair_judge_prompt_path": "/virtual/pair-prompt.md",
-    }).settings
-    store = MemoryAgentStore(prompts={"routing_pair_judge": "Choose the initial pair."})
+    cfg = minimal_settings.with_overrides(
+        {
+            "models": {"fast": {}, "mid": {}, "big": {}},
+            "slots": {"light": "fast", "default": "mid", "max": "big"},
+            "backend.api_mode": "chat_completions",
+            "level": "auto",
+            "paths.chat_completions_routing_pair_judge_prompt_path": "/virtual/pair-prompt.md",
+        }
+    ).settings
+    store = MemoryAgentStore(
+        prompts={"routing_pair_judge": "Choose the initial pair."}
+    )
     ctx = await rc.acreate_run_context(cfg, agent_store=store)
     assert ctx.agent_store is store
     assert ctx.auto_available is True
     assert ("prompt", "routing_pair_judge") not in store.reads
 
 
-@pytest.mark.parametrize("updates,force_legacy", [
-    ({"agent.auto_routing": False}, False),
-    ({"backend.api_mode": "responses"}, False),
-    ({}, True),
-])
-async def test_create_run_context_skips_irrelevant_bad_pair_prompt(minimal_settings, updates, force_legacy):
-    cfg = minimal_settings.with_overrides({
-        "models": {"fast": {}, "mid": {}, "big": {}},
-        "slots": {"light": "fast", "default": "mid", "max": "big"},
-        "backend.api_mode": "chat_completions",
-        "level": "auto",
-        "paths.chat_completions_routing_pair_judge_prompt_path": "/virtual/no-prompt.md",
-        **updates,
-    }).settings
+@pytest.mark.parametrize(
+    "updates,force_legacy",
+    [
+        ({"agent.auto_routing": False}, False),
+        ({"backend.api_mode": "responses"}, False),
+        ({}, True),
+    ],
+)
+async def test_create_run_context_skips_irrelevant_bad_pair_prompt(
+    minimal_settings, updates, force_legacy
+):
+    cfg = minimal_settings.with_overrides(
+        {
+            "models": {"fast": {}, "mid": {}, "big": {}},
+            "slots": {"light": "fast", "default": "mid", "max": "big"},
+            "backend.api_mode": "chat_completions",
+            "level": "auto",
+            "paths.chat_completions_routing_pair_judge_prompt_path": "/virtual/no-prompt.md",
+            **updates,
+        }
+    ).settings
     ctx = await rc.acreate_run_context(cfg, force_legacy=force_legacy)
     assert ctx.auto_available is False
 
 
-@pytest.mark.parametrize("source_level,selected_level", [
-    ("default", None),
-    ("default", "default"),
-    ("auto", "default"),
-    ("auto", None),
-    ("default", "auto"),
-])
-async def test_a_missing_pair_prompt_never_refuses_the_start(minimal_settings, source_level, selected_level):
+@pytest.mark.parametrize(
+    "source_level,selected_level",
+    [
+        ("default", None),
+        ("default", "default"),
+        ("auto", "default"),
+        ("auto", None),
+        ("default", "auto"),
+    ],
+)
+async def test_a_missing_pair_prompt_never_refuses_the_start(
+    minimal_settings, source_level, selected_level
+):
     from gc_testkit.memory_agent_store import MemoryAgentStore
 
-    cfg = minimal_settings.with_overrides({
-        "models": {"fast": {}, "mid": {}, "big": {}},
-        "slots": {"light": "fast", "default": "mid", "max": "big"},
-        "backend.api_mode": "chat_completions",
-        "level": source_level,
-        "paths.chat_completions_routing_pair_judge_prompt_path": "/virtual/missing-pair-prompt.md",
-    }).settings
+    cfg = minimal_settings.with_overrides(
+        {
+            "models": {"fast": {}, "mid": {}, "big": {}},
+            "slots": {"light": "fast", "default": "mid", "max": "big"},
+            "backend.api_mode": "chat_completions",
+            "level": source_level,
+            "paths.chat_completions_routing_pair_judge_prompt_path": "/virtual/missing-pair-prompt.md",
+        }
+    ).settings
     store = MemoryAgentStore()
     kwargs = {"agent_store": store}
     if selected_level is not None:

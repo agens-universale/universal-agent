@@ -11,7 +11,8 @@ from gc_core.execution.contracts import (
 )
 
 _DOMAIN_ERRORS = {
-    cls.__name__: cls for cls in (ValueError, RuntimeError, MainModelUnavailable)
+    cls.__name__: cls
+    for cls in (ValueError, RuntimeError, MainModelUnavailable)
 }
 _EXECUTION_ERRORS = {
     cls.__name__: cls

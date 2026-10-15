@@ -22,7 +22,6 @@ from gc_core.run_context import assemble_run_context
 from gc_core.tools.connect_mcp.tool_wrapper import MCPToolWrapper
 from gc_core.tools.registry import get_builtin_tools_data
 from gc_core.tools.skills.skills_tools import get_skills_tools_data
-
 from temporalio import workflow
 
 from gc_core_temporalio.child_preparation import (
@@ -80,12 +79,20 @@ class ExternalAgentStore(AgentStore):
 
 
 def assemble_context(
-    prepared, *, operations, store, logger, human_request,
-    request_equivalence=None, require_request_equivalence=False,
+    prepared,
+    *,
+    operations,
+    store,
+    logger,
+    human_request,
+    request_equivalence=None,
+    require_request_equivalence=False,
     subagent_independent_auto=True,
 ):
     if require_request_equivalence and request_equivalence is None:
-        raise ExecutionFailure("Root routing needs prepared request equivalence")
+        raise ExecutionFailure(
+            "Root routing needs prepared request equivalence"
+        )
     resources = ExternalResources(
         is_sandbox=prepared.context.workspace_is_sandbox,
         root=prepared.context.workspace_root,

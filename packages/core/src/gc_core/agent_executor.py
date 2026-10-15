@@ -996,8 +996,9 @@ class AgentExecutor:
         _extend_with_thread_history(state, thread_session, backend_api_mode)
 
         execution_patch = port(self._ctx, "execution_patch")
-        deferred_startup_compaction = execution_patch is None or execution_patch(
-            "startup-compaction-call-kit-v1"
+        deferred_startup_compaction = (
+            execution_patch is None
+            or execution_patch("startup-compaction-call-kit-v1")
         )
         summary = RunSummaryCoordinator(
             ctx=self._ctx,
@@ -1014,7 +1015,10 @@ class AgentExecutor:
             deferred_startup_compaction=deferred_startup_compaction,
             startup_progress_guard=(
                 deferred_startup_compaction
-                and (execution_patch is None or execution_patch("startup-compaction-progress-v1"))
+                and (
+                    execution_patch is None
+                    or execution_patch("startup-compaction-progress-v1")
+                )
             ),
         )
         self._ctx.on_summary_applied = summary.on_summary_applied

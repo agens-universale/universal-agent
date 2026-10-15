@@ -385,13 +385,23 @@ class RunSummaryCoordinator:
         rounds = _PRE_RUN_SUMMARY_MAX_ROUNDS if startup else 1
         guard_progress = startup and self._startup_progress_guard
         for done in range(1, rounds + 1):
-            before_chars = self._history_chars(self._state.messages) if guard_progress else 0
+            before_chars = (
+                self._history_chars(self._state.messages)
+                if guard_progress
+                else 0
+            )
             compacted = await self._acompact_backend_batch(
                 current_messages, mode, reason
             )
-            if not compacted or not startup or self._summary_trigger_chars <= 0:
+            if (
+                not compacted
+                or not startup
+                or self._summary_trigger_chars <= 0
+            ):
                 return
-            if guard_progress and self._startup_stalled(current_messages, before_chars):
+            if guard_progress and self._startup_stalled(
+                current_messages, before_chars
+            ):
                 self._log_startup_stop(done)
                 return
         if self._startup_trigger_exceeded():
@@ -401,7 +411,9 @@ class RunSummaryCoordinator:
                 max_rounds=_PRE_RUN_SUMMARY_MAX_ROUNDS,
             )
 
-    def _startup_stalled(self, current_messages: list[dict], before_chars: int) -> bool:
+    def _startup_stalled(
+        self, current_messages: list[dict], before_chars: int
+    ) -> bool:
         """Нет прогресса: текущий батч сам выше порога или история не сократилась."""
         return (
             self._history_chars(current_messages) > self._summary_trigger_chars
@@ -482,7 +494,9 @@ class RunSummaryCoordinator:
                 msgs, state_tail
             ):
                 if isinstance(msgs, list):
-                    msgs.extend(filter_messages_not_in_state(msgs, preserved_batch))
+                    msgs.extend(
+                        filter_messages_not_in_state(msgs, preserved_batch)
+                    )
                 if self._thread_session is not None and preserved_batch:
                     await self._thread_session.apersist_batch(
                         preserved_batch,

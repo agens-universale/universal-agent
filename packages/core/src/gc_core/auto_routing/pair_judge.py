@@ -1,6 +1,7 @@
 """Судья пары (политика `two_level`, `safe_level: auto`): карточка хода и разбор
 оценки сложности 1–5. Чистые функции над State: ни ctx, ни бэкенда — вызов живёт
 в `judge_runner.arun_pair_judge`. Импортируют модуль только `judge_runner` и тесты."""
+
 from __future__ import annotations
 
 import json
@@ -14,10 +15,12 @@ from gc_core.bundled_assets import bundled_root
 from gc_core.constants.tool_names import FINISH_TOOL_NAME
 from gc_core.intent_log.record import ACTION_FINAL_ANSWER, ACTION_USER_ASK
 from gc_core.intent_log.serialize import deserialize_list
-from gc_core.utils.text_preview import head_tail_preview
 from gc_core.message_policy.user_message_policy import (
-    extract_real_user_message_text, is_dialog_summary_user_message_text, user_content_to_text,
+    extract_real_user_message_text,
+    is_dialog_summary_user_message_text,
+    user_content_to_text,
 )
+from gc_core.utils.text_preview import head_tail_preview
 
 #: Лимиты карточки — константы модуля, не конфиг: судья обязан оставаться дешёвым.
 TASK_MAX_CHARS = 2_000
@@ -26,8 +29,13 @@ PREVIOUS_MAX_CHARS = 1_000
 SOURCE_JUDGE = "judge"
 SOURCE_FALLBACK = "fallback"
 
+
 def default_pair_judge_prompt_path() -> str:
-    return str(bundled_root() / "prompts" / "chat_completions_routing_pair_judge_prompt.md")
+    return str(
+        bundled_root()
+        / "prompts"
+        / "chat_completions_routing_pair_judge_prompt.md"
+    )
 
 
 def __getattr__(name: str):
@@ -40,7 +48,12 @@ def prompt_path(source: Any) -> str:
     """Путь инструкции судьи пары: из конфига (`paths.…`), иначе встроенный."""
     from gc_core.settings import settings_of
 
-    return settings_of(source).paths.chat_completions_routing_pair_judge_prompt_path or default_pair_judge_prompt_path()
+    return (
+        settings_of(
+            source
+        ).paths.chat_completions_routing_pair_judge_prompt_path
+        or default_pair_judge_prompt_path()
+    )
 
 
 _FENCED_OBJECT = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
@@ -50,6 +63,7 @@ _FENCED_OBJECT = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
 class PairChoice:
     """Выбор пары хода: уровень хода (сильный уровень пары), оценка и фраза судьи,
     источник (`judge` | `fallback`) и причина сбоя."""
+
     safe_level: str
     score: Optional[int]
     reason: str
@@ -78,11 +92,16 @@ def _previous_turn(state: Any, *, legacy: bool = False) -> dict:
         return {}
     last_turn = max(turns)
     records = [r for r in log if r.turn == last_turn]
-    asks = [str(r.content).strip() for r in records
-            if r.action == ACTION_USER_ASK and isinstance(r.content, str)]
+    asks = [
+        str(r.content).strip()
+        for r in records
+        if r.action == ACTION_USER_ASK and isinstance(r.content, str)
+    ]
     request = "\n".join(a for a in asks if a)
     block = {"request": _preview(request, legacy=legacy)}
-    outcome = _final_answer(records, legacy=legacy) or _last_finish(state, records=records, legacy=legacy)
+    outcome = _final_answer(records, legacy=legacy) or _last_finish(
+        state, records=records, legacy=legacy
+    )
     if outcome:
         block["outcome"] = outcome
     elif not legacy:
@@ -91,7 +110,11 @@ def _previous_turn(state: Any, *, legacy: bool = False) -> dict:
 
 
 def _preview(text: str, *, legacy: bool) -> str:
-    return text[:PREVIOUS_MAX_CHARS] if legacy else head_tail_preview(text, PREVIOUS_MAX_CHARS)
+    return (
+        text[:PREVIOUS_MAX_CHARS]
+        if legacy
+        else head_tail_preview(text, PREVIOUS_MAX_CHARS)
+    )
 
 
 def _final_answer(records: list, *, legacy: bool = False) -> str:
@@ -100,7 +123,11 @@ def _final_answer(records: list, *, legacy: bool = False) -> str:
         if record.action != ACTION_FINAL_ANSWER:
             continue
         content = record.content
-        text = content if isinstance(content, str) else json.dumps(content, ensure_ascii=False)
+        text = (
+            content
+            if isinstance(content, str)
+            else json.dumps(content, ensure_ascii=False)
+        )
         return _preview(text.strip(), legacy=legacy)
     return ""
 
@@ -112,7 +139,14 @@ def _last_finish(state: Any, *, records: list, legacy: bool = False) -> str:
     # Его отчёт нельзя приписывать последнему закрытому ходу журнала.
     if not legacy and _has_open_ask(state, messages):
         return ""
-    index = next((i for i in range(len(messages) - 1, -1, -1) if _is_finish_call(messages[i])), None)
+    index = next(
+        (
+            i
+            for i in range(len(messages) - 1, -1, -1)
+            if _is_finish_call(messages[i])
+        ),
+        None,
+    )
     if index is None:
         return ""
     gate = {} if legacy else _submitted_finish_gate(messages, index, records)
@@ -125,35 +159,50 @@ def _messages_before_turn(state: Any) -> list:
     messages = list(getattr(state, "messages", None) or [])
     start = getattr(state, "turn_messages_start", None)
     if start is not None and int(start) <= len(messages):
-        messages = messages[:int(start)]
+        messages = messages[: int(start)]
     return messages
 
 
 def _has_open_ask(state: Any, messages: list) -> bool:
-    open_asks = {str(r.content).strip() for r in deserialize_list(
-        getattr(state, "current_user_intent", None) or []
-    ) if r.action == ACTION_USER_ASK}
-    return any(isinstance(m, dict) and extract_real_user_message_text(m).strip() in open_asks
-               for m in messages)
+    open_asks = {
+        str(r.content).strip()
+        for r in deserialize_list(
+            getattr(state, "current_user_intent", None) or []
+        )
+        if r.action == ACTION_USER_ASK
+    }
+    return any(
+        isinstance(m, dict)
+        and extract_real_user_message_text(m).strip() in open_asks
+        for m in messages
+    )
 
 
 def _is_finish_call(message: Any) -> bool:
-    return (isinstance(message, dict) and message.get("type") == "function_call"
-            and message.get("name") == FINISH_TOOL_NAME)
+    return (
+        isinstance(message, dict)
+        and message.get("type") == "function_call"
+        and message.get("name") == FINISH_TOOL_NAME
+    )
 
 
 def _submitted_finish_gate(messages: list, index: int, records: list) -> Any:
     """Решение гейта для turn_finish `messages[index]`, если trace подтверждает его
     приём в закрытом ходе журнала; `None` — подтверждения нет."""
-    closed_asks = {str(r.content).strip() for r in records if r.action == ACTION_USER_ASK}
+    closed_asks = {
+        str(r.content).strip() for r in records if r.action == ACTION_USER_ASK
+    }
     if _preceding_ask(messages[:index]) not in closed_asks:
         return None
     call_id = messages[index].get("call_id")
     if not isinstance(call_id, str) or not call_id:
         return None
-    output = _last_call_output(messages[index + 1:], call_id)
-    if (not isinstance(output, dict) or output.get("ok") is not True
-            or output.get("status") != "submitted"):
+    output = _last_call_output(messages[index + 1 :], call_id)
+    if (
+        not isinstance(output, dict)
+        or output.get("ok") is not True
+        or output.get("status") != "submitted"
+    ):
         return None
     gate = output.get("finish_gate") or {}
     if isinstance(gate, dict) and gate.get("action") == "reject":
@@ -162,14 +211,22 @@ def _submitted_finish_gate(messages: list, index: int, records: list) -> Any:
 
 
 def _preceding_ask(messages: list) -> str:
-    texts = (extract_real_user_message_text(m).strip() for m in reversed(messages) if isinstance(m, dict))
+    texts = (
+        extract_real_user_message_text(m).strip()
+        for m in reversed(messages)
+        if isinstance(m, dict)
+    )
     return next((text for text in texts if text), "")
 
 
 def _last_call_output(messages: list, call_id: str) -> Any:
-    outputs = [m.get("output") for m in messages
-               if isinstance(m, dict) and m.get("type") == "function_call_output"
-               and m.get("call_id") == call_id]
+    outputs = [
+        m.get("output")
+        for m in messages
+        if isinstance(m, dict)
+        and m.get("type") == "function_call_output"
+        and m.get("call_id") == call_id
+    ]
     output = outputs[-1] if outputs else None
     if not isinstance(output, str):
         return output
@@ -193,14 +250,23 @@ def _finish_text(message: dict, gate: Any) -> str:
 
 
 def _fail_open_mark(gate: Any) -> str:
-    runtime_outcome = gate.get("runtime_outcome") if isinstance(gate, dict) else None
-    return f" [{runtime_outcome}]" if runtime_outcome in ("fail_open_error", "fail_open_limit") else ""
+    runtime_outcome = (
+        gate.get("runtime_outcome") if isinstance(gate, dict) else None
+    )
+    return (
+        f" [{runtime_outcome}]"
+        if runtime_outcome in ("fail_open_error", "fail_open_limit")
+        else ""
+    )
 
 
 def _history_compacted(state: Any) -> bool:
     return any(
-        isinstance(m, dict) and str(m.get("role") or "") == "user"
-        and is_dialog_summary_user_message_text(user_content_to_text(m.get("content")))
+        isinstance(m, dict)
+        and str(m.get("role") or "") == "user"
+        and is_dialog_summary_user_message_text(
+            user_content_to_text(m.get("content"))
+        )
         for m in (getattr(state, "messages", None) or [])
     )
 
@@ -238,6 +304,10 @@ def _as_score(value: Any) -> Optional[int]:
         return value
     if isinstance(value, float) and value.is_integer():
         return int(value)
-    if isinstance(value, str) and len(value.strip()) == 1 and value.strip().isdigit():
+    if (
+        isinstance(value, str)
+        and len(value.strip()) == 1
+        and value.strip().isdigit()
+    ):
         return int(value.strip())
     return None

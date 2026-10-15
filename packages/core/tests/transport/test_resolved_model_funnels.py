@@ -1308,13 +1308,31 @@ def test_openai_strict_schema_is_read_per_model_of_the_call(tmp_path):
 
 
 def test_openai_strict_schema_per_model_override_is_ignored_in_responses_mode():
-    tools = [{"name": "read", "type": "function", "description": "read", "parameters": {
-        "type": "object", "properties": {"path": {"type": "string"}, "optional": {"type": "string"}},
-        "required": ["path"]}}]
+    tools = [
+        {
+            "name": "read",
+            "type": "function",
+            "description": "read",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "optional": {"type": "string"},
+                },
+                "required": ["path"],
+            },
+        }
+    ]
     state = _state(tools=tools)
     settings = make_settings({"backend.api_mode": "responses"})
-    data = create_call_data_responses([], state, settings=settings,
-        resolved=_resolved(backend_overrides={"openai_strict_tools_schema": True}))
+    data = create_call_data_responses(
+        [],
+        state,
+        settings=settings,
+        resolved=_resolved(
+            backend_overrides={"openai_strict_tools_schema": True}
+        ),
+    )
     assert data["tools"][0]["parameters"]["required"] == ["path"]
 
 

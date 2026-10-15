@@ -318,11 +318,17 @@ class ModelRouter:
         ребёнка-субагента — её ведёт `SubagentRunner._maybe_pin_fallback`."""
         return self._is_subagent_child
 
-    def with_level_providers(self, effective: Callable[[], str], live: Callable[[], str]) -> ModelRouter:
+    def with_level_providers(
+        self, effective: Callable[[], str], live: Callable[[], str]
+    ) -> ModelRouter:
         return ModelRouter(
-            self._settings, level_provider=effective, live_level_provider=live,
-            breaker=self.breaker, force_legacy=self._force_legacy,
-            unbound_override=self._unbound_override, is_subagent_child=self._is_subagent_child,
+            self._settings,
+            level_provider=effective,
+            live_level_provider=live,
+            breaker=self.breaker,
+            force_legacy=self._force_legacy,
+            unbound_override=self._unbound_override,
+            is_subagent_child=self._is_subagent_child,
         )
 
     def with_override(self, override: ResolvedModel | None) -> ModelRouter:
@@ -404,7 +410,9 @@ class ModelRouter:
             return self._unbound_override
 
         level = (
-            level_override if level_override is not None else self._level_provider()
+            level_override
+            if level_override is not None
+            else self._level_provider()
         )
         return self._resolve_level(
             level, source_prefix="активный ", check_breaker=check_breaker

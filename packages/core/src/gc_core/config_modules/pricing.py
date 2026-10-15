@@ -103,7 +103,9 @@ def pricing_has_rates(pricing: PricingConfig | dict | None) -> bool:
         return False
     if _rates_configured(pricing.input, pricing.output):
         return True
-    return any(_rates_configured(t.input, t.output) for t in pricing.models.values())
+    return any(
+        _rates_configured(t.input, t.output) for t in pricing.models.values()
+    )
 
 
 def resolve_model_tariff(

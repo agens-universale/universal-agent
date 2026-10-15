@@ -438,11 +438,17 @@ class SubagentRunner:
         # батч, на котором упал вызов). Повторный фейл — честная ошибка тула,
         # без ещё одного фоллбэка (fallback_ctx строится максимум один раз).
         child_ctx = fallback_ctx
-        if child_state.steps > 0 and getattr(child_ctx, "subagent_independent_auto", True):
+        if child_state.steps > 0 and getattr(
+            child_ctx, "subagent_independent_auto", True
+        ):
             # История уже в State: повтор передаёт новый батч, а не старые calls.
-            retry_messages = [build_model_fallback_resume_message(child_state.state_id)]
+            retry_messages = [
+                build_model_fallback_resume_message(child_state.state_id)
+            ]
         else:
-            retry_messages = messages if child_state.steps == 0 else child_state.messages
+            retry_messages = (
+                messages if child_state.steps == 0 else child_state.messages
+            )
         try:
             result = await self._arun_child_loop(
                 messages=retry_messages, child_ctx=child_ctx, **loop_kwargs
@@ -1492,7 +1498,9 @@ class SubagentRunner:
             subagent_diagnostics=getattr(
                 self._ctx, "subagent_diagnostics", None
             ),
-            subagent_independent_auto=getattr(self._ctx, "subagent_independent_auto", True),
+            subagent_independent_auto=getattr(
+                self._ctx, "subagent_independent_auto", True
+            ),
         )
         return self._bind_child_context(child_ctx, tool_name)
 
@@ -1500,14 +1508,23 @@ class SubagentRunner:
         """Common routing, parent identity, human frontend and sidecar binding."""
         router = getattr(child_ctx, "model_router", None)
         child_ctx.auto_available = auto_available(
-            child_ctx, force_legacy=bool(getattr(router, "force_legacy", False)),
-            legacy_call_kits=not getattr(child_ctx, "routing_contract_v2", True),
+            child_ctx,
+            force_legacy=bool(getattr(router, "force_legacy", False)),
+            legacy_call_kits=not getattr(
+                child_ctx, "routing_contract_v2", True
+            ),
         )
         params = resolve_routing_params(
-            child_ctx, legacy_call_kits=not getattr(child_ctx, "routing_contract_v2", True),
+            child_ctx,
+            legacy_call_kits=not getattr(
+                child_ctx, "routing_contract_v2", True
+            ),
         )
         if not getattr(child_ctx, "subagent_independent_auto", True):
-            params = turn_params(params, getattr(self._orchestrator_state, "turn_safe_level", None))
+            params = turn_params(
+                params,
+                getattr(self._orchestrator_state, "turn_safe_level", None),
+            )
         child_ctx.routing_params = params
         if router is not None:
             live = router.live_level
@@ -1515,7 +1532,8 @@ class SubagentRunner:
             def effective_provider() -> str:
                 state = getattr(child_ctx, "active_state", None)
                 return effective_level(
-                    live(), getattr(state, "current_level", None),
+                    live(),
+                    getattr(state, "current_level", None),
                     child_ctx.auto_available,
                 )
 

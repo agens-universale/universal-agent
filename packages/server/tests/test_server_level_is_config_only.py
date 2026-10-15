@@ -4,13 +4,18 @@
 Изоляция импорта — тем же приёмом, что test_server_broken_config_wiring.py
 (сброс sys.modules['server'] + патч rest_api.server_config.* ДО импорта).
 """
+
 import sys
 from unittest.mock import patch
 
 import pytest
 
-pytest.importorskip("fastapi", reason="server-side dep, install via server_requirements.txt")
-pytest.importorskip("starlette", reason="server-side dep, install via server_requirements.txt")
+pytest.importorskip(
+    "fastapi", reason="server-side dep, install via server_requirements.txt"
+)
+pytest.importorskip(
+    "starlette", reason="server-side dep, install via server_requirements.txt"
+)
 
 from fastapi.testclient import TestClient
 from gc_testkit import as_coro
@@ -29,8 +34,12 @@ def _reset_server_module():
 
 def _minimal_server_config():
     return {
-        "server": {}, "defaults": {"system": "generic"}, "agent": {},
-        "agent_overrides": {"level": "auto"}, "logging": {}, "swarm": {},
+        "server": {},
+        "defaults": {"system": "generic"},
+        "agent": {},
+        "agent_overrides": {"level": "auto"},
+        "logging": {},
+        "swarm": {},
         "threads_cleanup": {},
     }
 
@@ -38,19 +47,32 @@ def _minimal_server_config():
 def _post_webhook(monkeypatch, config_dict, body):
     """Вебхук на подменённом конфиге; возвращает конфиг, с которым собран RunContext."""
     seen = {}
-    with patch(
-        "gc_server.rest_api.server_config.load_server_config",
-        return_value=_minimal_server_config(),
-    ), patch(
-        "gc_server.rest_api.server_config.build_agent_settings_for_server",
-        return_value=make_settings(config_dict),
+    with (
+        patch(
+            "gc_server.rest_api.server_config.load_server_config",
+            return_value=_minimal_server_config(),
+        ),
+        patch(
+            "gc_server.rest_api.server_config.build_agent_settings_for_server",
+            return_value=make_settings(config_dict),
+        ),
     ):
         from gc_server import server
 
-    monkeypatch.setattr(server, "acreate_run_context", as_coro(lambda cfg, **kw: seen.setdefault("cfg", cfg)))
+    monkeypatch.setattr(
+        server,
+        "acreate_run_context",
+        as_coro(lambda cfg, **kw: seen.setdefault("cfg", cfg)),
+    )
     monkeypatch.setattr(server, "build_auth_connector", lambda cfg: None)
-    monkeypatch.setattr(server.agent_run_registry, "astart_if_absent", as_coro(lambda **kw: True))
-    monkeypatch.setattr(server.agent_run_registry, "add_user_message", lambda **kw: False)
+    monkeypatch.setattr(
+        server.agent_run_registry,
+        "astart_if_absent",
+        as_coro(lambda **kw: True),
+    )
+    monkeypatch.setattr(
+        server.agent_run_registry, "add_user_message", lambda **kw: False
+    )
 
     client = TestClient(server.app)
     resp = client.post("/events/webhook", json=body)
@@ -70,7 +92,9 @@ def test_level_in_the_request_body_is_not_a_level_input(monkeypatch):
         "slots": {"light": "fast", "default": "mid", "max": "big"},
     }
     try:
-        cfg = _post_webhook(monkeypatch, config_dict, {"task_id": "t2", "level": "auto"})
+        cfg = _post_webhook(
+            monkeypatch, config_dict, {"task_id": "t2", "level": "auto"}
+        )
         assert settings_of(cfg).level == "default"
     finally:
         _reset_server_module()

@@ -9,7 +9,7 @@ import json
 import logging
 import time
 from types import SimpleNamespace
-from typing import NoReturn
+from typing import Any, Callable, Dict, List, NoReturn, Optional, Tuple, Union
 
 from gc_core.auto_routing import state_ops
 from gc_core.auto_routing.judge_runner import arun_pair_judge
@@ -21,16 +21,16 @@ from gc_core.auto_routing.log_events import (
     log_unavailable_reroute,
 )
 from gc_core.auto_routing.policy import (
-    Decision,
     FINISH_REJECT,
     LOOP,
     NO_TOOL_BOUNCE,
     PAIR_DESCEND,
     PAIR_LOWER,
     PAIR_START,
-    RoutingParams,
     SAFE_LEVEL_AUTO,
     TOOL_CALL_ERROR,
+    Decision,
+    RoutingParams,
     first_alive,
     floor_levels,
     level_below,
@@ -44,8 +44,6 @@ from gc_core.auto_routing.policy import (
 )
 from gc_core.auto_routing.reroute import floor_verdict
 from gc_core.auto_routing.response import discarded_answer
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
-
 from gc_core.config import parse_chat_completions_max_tokens
 from gc_core.config_modules.gc import gc_force_collect_enabled
 from gc_core.config_modules.images import read_images_config
@@ -66,7 +64,11 @@ from gc_core.execution.constants import (
     _SESSION_COMPACT_RESUME_USER_TEXT,
     _TRUNCATED_ARGUMENTS_HINT,
 )
-from gc_core.execution.contracts import ExecutionFailure, MainModelUnavailable, ModelRequestStopped
+from gc_core.execution.contracts import (
+    ExecutionFailure,
+    MainModelUnavailable,
+    ModelRequestStopped,
+)
 from gc_core.execution.model import arequest_model
 from gc_core.execution.output_wrapping import (
     maybe_store_and_wrap_tool_output,
@@ -86,7 +88,8 @@ from gc_core.intent_guard.turn_finish_emit import (
     get_function_call_output_text,
 )
 from gc_core.intent_scope.final_answer import (
-    amaybe_record_final_answer_intent, record_turn_finish_outcome,
+    amaybe_record_final_answer_intent,
+    record_turn_finish_outcome,
 )
 from gc_core.intent_scope.hook import amaybe_update_intent_scope_from_tool
 from gc_core.loop_detector.detector import clear as clear_loop_detector
@@ -97,8 +100,6 @@ from gc_core.loop_detector.detector import clear as clear_loop_detector
 # короткая — инлайн на loop»).
 from gc_core.loop_detector.detector import flush as flush_loop_detector
 from gc_core.loop_detector.detector import observe as observe_loop_detector
-from gc_core.tools.arguments_validation import arguments_without_service_fields
-from gc_core.utils.chat_completions_stream import without_answer_deltas
 from gc_core.message_policy.attachments_outbound import (
     compute_live_ids,
     count_live_images,
@@ -149,6 +150,7 @@ from gc_core.tools import (
     is_internal_tool_error_output,
     is_unknown_tool_output,
 )
+from gc_core.tools.arguments_validation import arguments_without_service_fields
 from gc_core.tools.subagents.registry import is_subagent_tool
 from gc_core.tools.subagents.sidecar import apersist_subagent_trace
 from gc_core.turn_boundary import begin_turn
@@ -168,6 +170,7 @@ from gc_core.utils.backend_errors import (
     is_model_unavailable_error,
     is_previous_response_cache_miss,
 )
+from gc_core.utils.chat_completions_stream import without_answer_deltas
 from gc_core.utils.connect_backend import (
     NO_BACKEND_OVERRIDE,
     acreate_call_headers,
@@ -568,17 +571,24 @@ def _reroute_level(
     прежнее поведение."""
     if getattr(state, "current_level", None) is None:
         return None
-    if not (isinstance(exc, MainModelUnavailable) or is_model_unavailable_error(exc)):
+    if not (
+        isinstance(exc, MainModelUnavailable)
+        or is_model_unavailable_error(exc)
+    ):
         return None
     router = getattr(ctx, "model_router", None)
     if router is None or failed is None or failed.alias is None:
         return None
     execution_patch = port(ctx, "execution_patch")
-    if execution_patch is not None and not execution_patch(UNAVAILABLE_REROUTE_PATCH):
+    if execution_patch is not None and not execution_patch(
+        UNAVAILABLE_REROUTE_PATCH
+    ):
         return None
     if not router.breaker.is_open(failed.alias):
         # Честная ошибка основного хода уже взвела его с исходной причиной.
-        router.breaker.trip(failed.alias, str(exc).strip()[:300] or type(exc).__name__)
+        router.breaker.trip(
+            failed.alias, str(exc).strip()[:300] or type(exc).__name__
+        )
     level = next_level(getattr(state, "_call_level", None) or "default")
     if level is not None:
         state_ops.reroute_tick(state, level)
@@ -677,8 +687,13 @@ async def aroute_before_call(
             # Такт смены пары: сильная новой пары, серия с нуля (лестница пар).
             decision = pair_entry_decision(pair_cause, signals, params)
         else:
-            decision = two_level_decision(state.current_level, state.steps_in_turn,
-                state.steps_on_current_level, signals, params=params)
+            decision = two_level_decision(
+                state.current_level,
+                state.steps_in_turn,
+                state.steps_on_current_level,
+                signals,
+                params=params,
+            )
         alive = _first_alive_level(router, nearest_levels(decision.level))
         if alive is not None:
             decision = with_fallback(
@@ -846,7 +861,9 @@ async def _arequest_backend_canonical(
             messages,
             state,
             ctx,
-            set_previous_response_id=set_previous_response_id, resolved=resolved, mute_answer=mute_answer,
+            set_previous_response_id=set_previous_response_id,
+            resolved=resolved,
+            mute_answer=mute_answer,
         )
     result = await arequest_model(
         operations,
@@ -1558,7 +1575,11 @@ def _floor_target(
     from gc_core.auto_routing.request_equivalence import same_routing_request
 
     identical = same_routing_request(
-        ctx, candidate, resolved, first_level=level, second_level=from_level,
+        ctx,
+        candidate,
+        resolved,
+        first_level=level,
+        second_level=from_level,
         legacy=not getattr(ctx, "routing_contract_v2", True),
     )
     return None if identical else level
@@ -1609,9 +1630,8 @@ async def _amaybe_reroute_for_floors(
     if verdict is None:
         return resp_messages, response_id, res_headers
     from_level = getattr(state, "_call_level", None) or "default"
-    if (
-        verdict.important_tools
-        and not level_below(from_level, params.safe_level)
+    if verdict.important_tools and not level_below(
+        from_level, params.safe_level
     ):
         # Продление: важный вызов самой сильной — тоже повод, её серия считается
         # от него. Сброс стоит до `close_tick` в `_amain_call`: тот сделает из нуля 1.
@@ -1641,7 +1661,9 @@ async def _amaybe_reroute_for_floors(
         state,
         ctx,
         resolved=target_kit,
-        next_level=lambda _failed: _floor_target(ctx, from_level, resolved, params),
+        next_level=lambda _failed: _floor_target(
+            ctx, from_level, resolved, params
+        ),
         mute=lambda _kit: False,
     )
     return result
@@ -1661,12 +1683,17 @@ async def _amain_call(messages, state: State, ctx: Any):
         else None
     )
     params = _routing_params(ctx, state)
-    (resp_messages, response_id, res_headers), resolved = await _arequest_rerouting(
+    (
+        (resp_messages, response_id, res_headers),
+        resolved,
+    ) = await _arequest_rerouting(
         messages,
         state,
         ctx,
         resolved=resolved,
-        next_level=lambda failed_level: _alive_level(ctx, nearest_levels(failed_level)),
+        next_level=lambda failed_level: _alive_level(
+            ctx, nearest_levels(failed_level)
+        ),
         mute=lambda kit: _answer_stream_muted(state, ctx, kit, params),
     )
     resp_messages, response_id, res_headers = await _amaybe_reroute_for_floors(
@@ -2501,7 +2528,10 @@ class _AgentLoop:
         # Вызовы backend не ловим здесь: после исчерпания transport/adaptive
         # ретраев исключение уходит наверх как есть.
         try:
-            if backend_mode == "chat_completions" and _mode_requires_backend_call(mode):
+            if (
+                backend_mode == "chat_completions"
+                and _mode_requires_backend_call(mode)
+            ):
                 await aprepare_main_call(self.state, self.ctx)
                 await self._apre_backend_compaction(messages, mode)
                 messages = await self._aapply_tool_usage_notice(messages)
@@ -2688,7 +2718,9 @@ class _AgentLoop:
             # Фидбэк не должен закрыть режим батча или разорвать в истории
             # корректный вызов и его будущий output при отправке в API.
             messages = rejected_feedback + [
-                message for message in messages if message not in rejected_feedback
+                message
+                for message in messages
+                if message not in rejected_feedback
             ]
         _post_sanitize_digest = json.dumps(
             messages, ensure_ascii=False, sort_keys=True, default=str
@@ -2957,7 +2989,8 @@ class _AgentLoop:
             state.messages += finish_new
         finish_arguments = arguments_without_service_fields(
             closing_finish.get("arguments"),
-            (getattr(self.ctx, "tools_data", None) or {}).get(FINISH_TOOL_NAME) or {},
+            (getattr(self.ctx, "tools_data", None) or {}).get(FINISH_TOOL_NAME)
+            or {},
         )
         if backend_mode != "chat_completions":
             if finish_new:
@@ -2990,7 +3023,9 @@ class _AgentLoop:
         # все завершают ход одинаково.
         if getattr(self.ctx, "routing_contract_v2", True):
             record_turn_finish_outcome(
-                arguments=finish_arguments, outcome=decision.outcome, state=state,
+                arguments=finish_arguments,
+                outcome=decision.outcome,
+                state=state,
             )
         state.steps += 1
         state.flush_current_user_intent()

@@ -268,7 +268,9 @@ class ExecutionState:
         if memo is not None:
             decision = memo[2]
             if decision is not None:
-                decision = Decision(**{**decision, "heuristics": tuple(decision["heuristics"])})
+                decision = Decision(
+                    **{**decision, "heuristics": tuple(decision["heuristics"])}
+                )
             data["_tick_decision"] = (memo[0], memo[1], decision, memo[3])
         data.setdefault("turn_messages_start", None)
         state.__dict__ = data

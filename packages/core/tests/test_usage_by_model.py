@@ -5,20 +5,39 @@
 (пара с ecs3: слабая Qwen3.6-35B, сильная DeepSeek-V4-Flash)."""
 
 import gc_core.utils.connect_backend as cb
-from gc_core.usage.account import CATEGORY_MAIN, CATEGORY_SUBAGENT, CATEGORY_SUMMARY, UsageAccount
+from gc_core.usage.account import (
+    CATEGORY_MAIN,
+    CATEGORY_SUBAGENT,
+    CATEGORY_SUMMARY,
+    UsageAccount,
+)
 from gc_core.usage.context import record_usage, usage_scope
 from gc_core.usage.report import build_run_usage_dict, build_run_usage_report
 
-from transport_fakes import install_transport, json_response, sse_body, stream_response
+from transport_fakes import (
+    install_transport,
+    json_response,
+    sse_body,
+    stream_response,
+)
 from gc_testkit import run_coro
 
 WEAK = "Qwen3.6-35B"
 STRONG = "dsv4flash-ctx327k-bb"
-WEAK_USAGE = {"prompt_tokens": 26458, "total_tokens": 26623, "completion_tokens": 165}
-STRONG_USAGE = {"prompt_tokens": 20645, "total_tokens": 20807, "completion_tokens": 162}
+WEAK_USAGE = {
+    "prompt_tokens": 26458,
+    "total_tokens": 26623,
+    "completion_tokens": 165,
+}
+STRONG_USAGE = {
+    "prompt_tokens": 20645,
+    "total_tokens": 20807,
+    "completion_tokens": 162,
+}
 
 
 # ---------------- накопитель ----------------
+
 
 def test_add_with_model_counts_tokens_per_model():
     acc = UsageAccount()
@@ -69,7 +88,7 @@ def test_delta_from_isolates_models_of_this_run():
     cumulative = UsageAccount()
     cumulative.add(CATEGORY_MAIN, 100, 20, model=STRONG)  # прошлый прогон
     baseline = UsageAccount.from_meta(cumulative.to_meta())
-    cumulative.add(CATEGORY_MAIN, 50, 10, model=WEAK)     # этот прогон
+    cumulative.add(CATEGORY_MAIN, 50, 10, model=WEAK)  # этот прогон
 
     run = cumulative.delta_from(baseline)
 
@@ -96,23 +115,37 @@ def test_meta_without_models_loads_as_empty():
 
 # ---------------- захват в транспорте ----------------
 
+
 def test_record_usage_writes_model_of_the_call():
     acc = UsageAccount()
     with usage_scope(acc, CATEGORY_MAIN, "chat_completions"):
-        record_usage(WEAK_USAGE, "http://127.0.0.1:6002/v1/chat/completions", model=WEAK)
+        record_usage(
+            WEAK_USAGE, "http://127.0.0.1:6002/v1/chat/completions", model=WEAK
+        )
     assert acc.by_model[WEAK]["input"] == 26458
 
 
 def test_chat_completions_records_model_from_request(monkeypatch):
-    install_transport(monkeypatch, json_response({
-        "model": STRONG, "choices": [{"message": {"content": "ok"}}], "usage": STRONG_USAGE,
-    }))
+    install_transport(
+        monkeypatch,
+        json_response(
+            {
+                "model": STRONG,
+                "choices": [{"message": {"content": "ok"}}],
+                "usage": STRONG_USAGE,
+            }
+        ),
+    )
     acc = UsageAccount()
     with usage_scope(acc, CATEGORY_MAIN, "chat_completions"):
-        run_coro(cb.arequest_backend_chat_completions(
-            {"model": STRONG, "messages": []}, {}, url="http://127.0.0.1:6003/v1/chat/completions",
-            use_retry=False,
-        ))
+        run_coro(
+            cb.arequest_backend_chat_completions(
+                {"model": STRONG, "messages": []},
+                {},
+                url="http://127.0.0.1:6003/v1/chat/completions",
+                use_retry=False,
+            )
+        )
     assert acc.by_model[STRONG]["input"] == 20645
     assert acc.by_model[STRONG]["output"] == 162
 
@@ -120,21 +153,30 @@ def test_chat_completions_records_model_from_request(monkeypatch):
 def test_streaming_records_model_from_request(monkeypatch):
     """Основной цикл в TUI идёт потоком — модель должна доехать и сюда."""
     body = sse_body(
-        {"id": "x", "model": WEAK, "choices": [{"index": 0, "delta": {"content": "hi"}}]},
+        {
+            "id": "x",
+            "model": WEAK,
+            "choices": [{"index": 0, "delta": {"content": "hi"}}],
+        },
         {"id": "x", "model": WEAK, "choices": [], "usage": WEAK_USAGE},
     )
     install_transport(monkeypatch, stream_response(body))
     acc = UsageAccount()
     with usage_scope(acc, CATEGORY_MAIN, "chat_completions"):
-        run_coro(cb.arequest_backend_chat_completions(
-            {"model": WEAK, "messages": []}, {}, url="http://127.0.0.1:6002/v1/chat/completions",
-            on_delta=lambda k, t: None,
-        ))
+        run_coro(
+            cb.arequest_backend_chat_completions(
+                {"model": WEAK, "messages": []},
+                {},
+                url="http://127.0.0.1:6002/v1/chat/completions",
+                on_delta=lambda k, t: None,
+            )
+        )
     assert acc.by_model[WEAK]["input"] == 26458
     assert acc.by_model[WEAK]["calls"] == 1
 
 
 # ---------------- отчёт прогона ----------------
+
 
 def _two_model_run() -> UsageAccount:
     acc = UsageAccount()
@@ -144,7 +186,9 @@ def _two_model_run() -> UsageAccount:
 
 
 def test_run_usage_dict_has_models_section():
-    report = build_run_usage_dict(_two_model_run(), {"enabled": False}, "<ВПИШИТЕ_МОДЕЛЬ>")
+    report = build_run_usage_dict(
+        _two_model_run(), {"enabled": False}, "<ВПИШИТЕ_МОДЕЛЬ>"
+    )
     assert report["models"] == {
         WEAK: {"input": 26458, "output": 165, "calls": 1},
         STRONG: {"input": 20645, "output": 162, "calls": 1},
@@ -154,16 +198,20 @@ def test_run_usage_dict_has_models_section():
 def test_run_usage_text_names_called_models_not_config_placeholder():
     """Заголовок называет модели, которые реально вызывались: верхнее поле
     `model` при реестре моделей для вызовов не читается и врёт."""
-    text = build_run_usage_report(_two_model_run(), {"enabled": False}, "<ВПИШИТЕ_МОДЕЛЬ>")
+    text = build_run_usage_report(
+        _two_model_run(), {"enabled": False}, "<ВПИШИТЕ_МОДЕЛЬ>"
+    )
     header = text.splitlines()[0]
     assert "<ВПИШИТЕ_МОДЕЛЬ>" not in header
     assert WEAK in header and STRONG in header
 
 
 def test_run_usage_text_lists_models_when_more_than_one():
-    lines = build_run_usage_report(_two_model_run(), {"enabled": False}, None).splitlines()
+    lines = build_run_usage_report(
+        _two_model_run(), {"enabled": False}, None
+    ).splitlines()
     assert "by model:" in lines
-    rows = lines[lines.index("by model:") + 1:]
+    rows = lines[lines.index("by model:") + 1 :]
     assert rows[0].split() == [WEAK, "26.5k", "165"]
     assert rows[1].split() == [STRONG, "20.6k", "162"]
 

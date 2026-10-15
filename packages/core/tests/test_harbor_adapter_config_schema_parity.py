@@ -486,11 +486,15 @@ def test_routing_defaults_reach_bench_settings_and_explicit_updates_win():
     assert defaults.auto_routing is True
     assert defaults.auto_routing_safe_level == "auto"
     assert defaults.auto_routing_two_level.model_dump() == {
-        "weak_steps": 10, "strong_steps": 2, "pair_threshold": 3,
+        "weak_steps": 10,
+        "strong_steps": 2,
+        "pair_threshold": 3,
     }
     config = _config({"agent.auto_routing_two_level": {"weak_steps": 6}})
     assert config.agent.auto_routing_two_level.model_dump() == {
-        "weak_steps": 6, "strong_steps": 2, "pair_threshold": 3,
+        "weak_steps": 6,
+        "strong_steps": 2,
+        "pair_threshold": 3,
     }
 
 
@@ -516,7 +520,10 @@ def test_mixed_agent_overrides_preserve_independent_leaves(overrides):
     assert loaded.settings.agent.max_steps == 20
     assert loaded.settings.agent.no_tool_call_max_count == 7
     assert loaded.provenance.source("agent.max_steps").layer == "bench_profile"
-    assert loaded.provenance.source("agent.no_tool_call_max_count").layer == "bench_profile"
+    assert (
+        loaded.provenance.source("agent.no_tool_call_max_count").layer
+        == "bench_profile"
+    )
 
 
 @pytest.mark.parametrize(
@@ -535,14 +542,29 @@ def test_mixed_backend_overrides_preserve_independent_leaves(overrides):
     assert loaded.settings.backend.use_ssl is True
     assert loaded.settings.backend.request_timeout_sec == 17
     assert loaded.provenance.source("backend.use_ssl").layer == "bench_profile"
-    assert loaded.provenance.source("backend.request_timeout_sec").layer == "bench_profile"
+    assert (
+        loaded.provenance.source("backend.request_timeout_sec").layer
+        == "bench_profile"
+    )
 
 
 @pytest.mark.parametrize(
     "overrides, expected_max_steps",
     [
-        ({"agent.max_steps": 20, "agent": {"max_steps": 30, "no_tool_call_max_count": 7}}, 30),
-        ({"agent": {"max_steps": 30, "no_tool_call_max_count": 7}, "agent.max_steps": 20}, 20),
+        (
+            {
+                "agent.max_steps": 20,
+                "agent": {"max_steps": 30, "no_tool_call_max_count": 7},
+            },
+            30,
+        ),
+        (
+            {
+                "agent": {"max_steps": 30, "no_tool_call_max_count": 7},
+                "agent.max_steps": 20,
+            },
+            20,
+        ),
     ],
     ids=["dotted-first", "nested-first"],
 )
@@ -555,12 +577,17 @@ def test_mixed_duplicate_leaf_uses_last_value(overrides, expected_max_steps):
     assert config.agent.no_tool_call_max_count == 7
 
 
-@pytest.mark.parametrize("dotted_first", [True, False], ids=["dotted-first", "nested-first"])
+@pytest.mark.parametrize(
+    "dotted_first", [True, False], ids=["dotted-first", "nested-first"]
+)
 def test_mixed_overrides_replace_list_and_dict_leaves(dotted_first):
     pairs = [
         ("agent.stop_tools", ["fs_read_file", "turn_ask_human"]),
         ("agent", {"stop_tools": ["turn_ask_human"]}),
-        ("backend.chat_completion_kwargs", {"temperature": 0, "tool_choice": "auto"}),
+        (
+            "backend.chat_completion_kwargs",
+            {"temperature": 0, "tool_choice": "auto"},
+        ),
         ("backend", {"chat_completion_kwargs": {"tool_choice": "required"}}),
     ]
     overrides = dict(pairs if dotted_first else reversed(pairs))
@@ -569,20 +596,30 @@ def test_mixed_overrides_replace_list_and_dict_leaves(dotted_first):
 
     assert overrides == before
     assert config.agent.stop_tools == (
-        ["turn_ask_human"] if dotted_first else ["fs_read_file", "turn_ask_human"]
+        ["turn_ask_human"]
+        if dotted_first
+        else ["fs_read_file", "turn_ask_human"]
     )
     assert config.backend.chat_completion_kwargs == (
-        {"tool_choice": "required"} if dotted_first else {"temperature": 0, "tool_choice": "auto"}
+        {"tool_choice": "required"}
+        if dotted_first
+        else {"temperature": 0, "tool_choice": "auto"}
     )
 
 
-@pytest.mark.parametrize("dotted_first", [True, False], ids=["dotted-first", "nested-first"])
+@pytest.mark.parametrize(
+    "dotted_first", [True, False], ids=["dotted-first", "nested-first"]
+)
 def test_mixed_model_overrides_replace_whole_entry(dotted_first):
     pairs = [
-        ("models.weak", {
-            "model": "first-model", "url": "https://first.example/v1/chat/completions",
-            "token": "synthetic-token",
-        }),
+        (
+            "models.weak",
+            {
+                "model": "first-model",
+                "url": "https://first.example/v1/chat/completions",
+                "token": "synthetic-token",
+            },
+        ),
         ("models", {"weak": {"model": "second-model"}}),
     ]
     overrides = dict(pairs if dotted_first else reversed(pairs))
@@ -593,8 +630,13 @@ def test_mixed_model_overrides_replace_whole_entry(dotted_first):
 
     assert overrides == before
     assert (entry.model, entry.url, token) == (
-        ("second-model", None, None) if dotted_first else
-        ("first-model", "https://first.example/v1/chat/completions", "synthetic-token")
+        ("second-model", None, None)
+        if dotted_first
+        else (
+            "first-model",
+            "https://first.example/v1/chat/completions",
+            "synthetic-token",
+        )
     )
 
 
@@ -602,7 +644,12 @@ def test_mixed_overrides_keep_compat_notices_and_runtime_separate():
     overrides = {
         "agent.max_steps": 20,
         "agent": {"no_tool_call_max_count": 7},
-        "models": {"weak": {"model": "test", "backend": {"chat_completion_kwargs": {"temperature": 0}}}},
+        "models": {
+            "weak": {
+                "model": "test",
+                "backend": {"chat_completion_kwargs": {"temperature": 0}},
+            }
+        },
         "os_backend": "local",
         "notices": ("existing notice",),
     }
@@ -614,4 +661,7 @@ def test_mixed_overrides_keep_compat_notices_and_runtime_separate():
     assert loaded.runtime.os_backend == "local"
     assert loaded.settings.os_backend.kind == "harbor"
     assert loaded.runtime.notices[0] == "existing notice"
-    assert any("models.weak.backend.chat_completion_kwargs" in notice for notice in loaded.runtime.notices[1:])
+    assert any(
+        "models.weak.backend.chat_completion_kwargs" in notice
+        for notice in loaded.runtime.notices[1:]
+    )

@@ -3,6 +3,7 @@
 сильнее; судей привязанного ребёнка определяет кодовый уровень, а не его пин.
 Кодовый уровень действует, только когда его слот задан: иначе потребитель идёт
 как вне таблицы (пин ребёнка, затем активный уровень), а не фоллбэком уровня."""
+
 import pytest
 
 from gc_core.config_modules.root import AppConfig
@@ -121,7 +122,9 @@ def test_other_consumers_still_follow_the_active_level(consumer):
 @pytest.mark.parametrize("consumer", FIXED)
 def test_an_explicit_binding_beats_the_fixed_level(consumer):
     assert _router("light", {consumer: "max"}).resolve(consumer).alias == "big"
-    assert _router("light", {consumer: "fast"}).resolve(consumer).alias == "fast"
+    assert (
+        _router("light", {consumer: "fast"}).resolve(consumer).alias == "fast"
+    )
 
 
 @pytest.mark.parametrize("assign", [{}, {"finish_gate": None}])
@@ -131,7 +134,10 @@ def test_explicit_null_binding_is_the_same_as_no_binding(assign):
 
 @pytest.mark.parametrize("consumer", FIXED)
 def test_a_pinned_child_judges_go_default_not_to_the_pin(consumer):
-    assert _router("default", unbound_override=_pin()).resolve(consumer).alias == "mid"
+    assert (
+        _router("default", unbound_override=_pin()).resolve(consumer).alias
+        == "mid"
+    )
 
 
 def test_a_pinned_child_still_runs_main_and_other_consumers_on_the_pin():
@@ -142,7 +148,9 @@ def test_a_pinned_child_still_runs_main_and_other_consumers_on_the_pin():
 
 
 def test_a_pinned_child_with_its_own_judge_binding_uses_the_binding():
-    router = _router("default", {"finish_gate": "max"}, unbound_override=_pin())
+    router = _router(
+        "default", {"finish_gate": "max"}, unbound_override=_pin()
+    )
     assert router.resolve("finish_gate").alias == "big"
 
 

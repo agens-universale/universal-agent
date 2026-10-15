@@ -146,6 +146,7 @@ def test_cycle_in_works_with_value_objects_names():
 
 def test_cycle_in_wraps_around_a_four_name_cycle():
     from gc_tui.toggles import cycle_in
+
     names = ["light", "default", "max", "auto"]
     assert cycle_in(names, "auto", 1) == "light"
     assert cycle_in(names, "light", -1) == "auto"

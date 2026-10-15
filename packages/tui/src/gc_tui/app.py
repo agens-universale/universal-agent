@@ -22,7 +22,11 @@ from gc_core.runtime_notices import (
     unregister_runtime_notices_listener,
 )
 from gc_core.settings import AppConfig, LoadedSettings, settings_of
-from gc_core.startup_notices import Notice, auto_routing_unavailable_notice, collect_startup_notices
+from gc_core.startup_notices import (
+    Notice,
+    auto_routing_unavailable_notice,
+    collect_startup_notices,
+)
 from gc_core.tools.registry import all_builtin_tool_names
 from textual.app import App
 from textual.binding import Binding
@@ -825,7 +829,8 @@ class TuiApp(App):
             apply_cli_overrides(
                 self._load_base_settings(),
                 extra_overrides={"level": self._level_override}
-                if self._level_override else None,
+                if self._level_override
+                else None,
             )
         )
         snap = self._config_snapshot()
@@ -1143,7 +1148,8 @@ class TuiApp(App):
             apply_cli_overrides(
                 loaded,
                 extra_overrides={"level": self._level_override}
-                if self._level_override else None,
+                if self._level_override
+                else None,
             )
         )
 
@@ -1207,7 +1213,9 @@ class TuiApp(App):
                     self.persist_session_overrides()
                 except OSError:
                     pass  # тред недоступен — в памяти уже чисто, персист догонит позже
-                push_runtime_notice(_stale_profile_notice(name, exc, base_name))
+                push_runtime_notice(
+                    _stale_profile_notice(name, exc, base_name)
+                )
                 self.invalidate_runner()
         self._notice_auto_routing_unavailable()
 
@@ -1380,7 +1388,7 @@ class TuiApp(App):
             name, Path(os.getcwd()), Path(self._config_path or "")
         )
 
-    def display_router(self) -> "ModelRouter":
+    def display_router(self) -> ModelRouter:
         """Дешёвый Router для витрин (подсказка `/level`, футер, `/status` — спека
         §12.1/§12.2): резолвит из `effective_settings()` БЕЗ сборки executor —
         `resolve()`/`resolve_level()` не ходят в транспорт, только читают снимок
@@ -1402,6 +1410,7 @@ class TuiApp(App):
         from gc_core.auto_routing.levels import effective_level
         from gc_core.config import cli_forces_legacy_model
         from gc_core.model_router import ModelRouter
+
         from gc_tui.toggles import auto_available_cfg
 
         loaded = self.effective_settings()

@@ -78,6 +78,7 @@ def test_session_compact_output_not_treated_as_final_answer():
 def test_generic_arg_summary_keeps_normal_skill_arguments():
     ev = map_message(
         _fc("skills_load", {"skill_id": "bench", "reason": "inspect"}),
-        no=1, ts="t",
+        no=1,
+        ts="t",
     )
     assert ev.summary == "skills_load(skill_id='bench', reason='inspect')"

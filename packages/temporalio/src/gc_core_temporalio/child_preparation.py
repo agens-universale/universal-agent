@@ -3,6 +3,9 @@
 from copy import copy
 from dataclasses import replace
 
+from gc_core.auto_routing.request_equivalence import (
+    prepare_request_equivalence,
+)
 from gc_core.execution.contracts import ExecutionFailure
 from gc_core.model_router import CircuitBreaker, ModelRouter
 from gc_core.settings import LoadedSettings
@@ -14,8 +17,10 @@ from gc_core.tools.subagents.runner_preparation import (
 )
 from temporalio import activity
 
-from gc_core.auto_routing.request_equivalence import prepare_request_equivalence
-from gc_core_temporalio.child_contracts import PreparedChild, child_independent_auto
+from gc_core_temporalio.child_contracts import (
+    PreparedChild,
+    child_independent_auto,
+)
 from gc_core_temporalio.contracts import ActivityCall
 
 
@@ -85,9 +90,14 @@ class ChildActivities:
         # Настройки ребёнка едут один раз — публичным снимком его контекста
         # (`context.context`); в подготовленном состоянии их нет. Workflow
         # подставляет типизированные настройки собранного из снимка контекста.
-        facts = (prepare_request_equivalence(child_ctx, context_id=child_ctx.run_id)
-                 if child_ctx.subagent_independent_auto else None)
-        return PreparedChild(context, replace(state, settings={}), request_equivalence=facts)
+        facts = (
+            prepare_request_equivalence(child_ctx, context_id=child_ctx.run_id)
+            if child_ctx.subagent_independent_auto
+            else None
+        )
+        return PreparedChild(
+            context, replace(state, settings={}), request_equivalence=facts
+        )
 
 
 class PreparedChildContext:
@@ -95,7 +105,9 @@ class PreparedChildContext:
 
     def __init__(self, prepared, child_context, *, independent_auto=False):
         if independent_auto and prepared.request_equivalence is None:
-            raise ExecutionFailure("Independent child routing needs prepared request equivalence")
+            raise ExecutionFailure(
+                "Independent child routing needs prepared request equivalence"
+            )
         self.prepared, self.ctx = prepared, child_context
         self.independent_auto = independent_auto
 
@@ -116,7 +128,9 @@ class PreparedChildContext:
     async def build_child_context(self, runner, tool_name):
         self.ctx.subagent_independent_auto = self.independent_auto
         self.ctx.prepared_request_equivalence = (
-            self.prepared.request_equivalence if self.independent_auto else None
+            self.prepared.request_equivalence
+            if self.independent_auto
+            else None
         )
         self.ctx.model_router = runner._build_child_model_router(
             tool_name, self._child_settings()

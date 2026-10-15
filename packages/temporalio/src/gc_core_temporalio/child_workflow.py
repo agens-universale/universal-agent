@@ -25,11 +25,11 @@ from gc_core.tools.subagents.sidecar import bind_thread_identity
 from temporalio import workflow
 
 from gc_core_temporalio.child_contracts import (
-    child_independent_auto,
     ChildCheckpoint,
     ChildRequest,
     ChildResult,
     PreparedChild,
+    child_independent_auto,
 )
 from gc_core_temporalio.child_preparation import PreparedChildContext
 from gc_core_temporalio.context import assemble_context
@@ -217,7 +217,8 @@ class UniversalSubagentWorkflow:
                         "frozen_level"
                     ],
                     live_level_provider=lambda: request.child_context.get(
-                        "frozen_live_level", request.child_context["frozen_level"]
+                        "frozen_live_level",
+                        request.child_context["frozen_level"],
                     ),
                     force_legacy=request.child_context["force_legacy"],
                     breaker=CircuitBreaker.restore(
@@ -247,10 +248,14 @@ class UniversalSubagentWorkflow:
                     thread_id=request.start.thread_id,
                 )
                 independent = child_independent_auto(request.child_context)
-                adapter = PreparedChildContext(prepared, None, independent_auto=independent)
+                adapter = PreparedChildContext(
+                    prepared, None, independent_auto=independent
+                )
                 child_ctx = assemble_context(
                     prepared.context,
-                    request_equivalence=prepared.request_equivalence if independent else None,
+                    request_equivalence=prepared.request_equivalence
+                    if independent
+                    else None,
                     subagent_independent_auto=independent,
                     operations=operations,
                     store=store,

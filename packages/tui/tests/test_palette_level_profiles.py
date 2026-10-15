@@ -1294,13 +1294,15 @@ async def test_palette_rebuild_asks_each_values_provider_once_and_skips_trackles
 
     app = TuiApp(
         threads_dir=str(tmp_path / "t"),
-        settings=tui_settings({
-            "level": "default",
-            "backend.api_mode": "chat_completions",
-            "agent.auto_routing": True,
-            "models": {"fast": {}, "mid": {}},
-            "slots": {"light": "fast", "default": "mid"},
-        }),
+        settings=tui_settings(
+            {
+                "level": "default",
+                "backend.api_mode": "chat_completions",
+                "agent.auto_routing": True,
+                "models": {"fast": {}, "mid": {}},
+                "slots": {"light": "fast", "default": "mid"},
+            }
+        ),
     )
     app._config_path = str(tmp_path / "config.yml")
     reg = build_default_registry()
@@ -1315,7 +1317,9 @@ async def test_palette_rebuild_asks_each_values_provider_once_and_skips_trackles
         assert calls == {"level": 1, "profiles": 0}
 
 
-def test_apply_level_toggle_has_no_end_of_task_notice_while_run_is_live(tmp_path):
+def test_apply_level_toggle_has_no_end_of_task_notice_while_run_is_live(
+    tmp_path,
+):
     pytest.importorskip("textual")
     from gc_core.runtime_notices import (
         clear_runtime_notices,
@@ -1340,7 +1344,6 @@ def test_apply_level_toggle_has_no_end_of_task_notice_while_run_is_live(tmp_path
     assert "level_switch_deferred" not in codes
 
 
-
 def test_apply_level_toggle_no_notice_without_active_run(tmp_path):
     pytest.importorskip("textual")
     from gc_core.runtime_notices import (
@@ -1355,7 +1358,6 @@ def test_apply_level_toggle_no_notice_without_active_run(tmp_path):
 
     codes = [n.code for n in collect_runtime_notices()]
     assert "level_switch_deferred" not in codes
-
 
 
 def test_apply_level_toggle_no_notice_after_run_finished(tmp_path):

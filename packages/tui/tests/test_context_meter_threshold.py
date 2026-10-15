@@ -280,7 +280,9 @@ def test_runner_passes_the_executor_limits_through():
 
 
 @pytest.mark.asyncio
-async def test_idle_meter_uses_the_session_profile_global_threshold(tmp_path, monkeypatch):
+async def test_idle_meter_uses_the_session_profile_global_threshold(
+    tmp_path, monkeypatch
+):
     from gc_core.config import load_settings
     from gc_tui.app import TuiApp
 
@@ -303,7 +305,9 @@ async def test_idle_meter_uses_the_session_profile_global_threshold(tmp_path, mo
     threads = tmp_path / "threads"
     threads.mkdir()
     _write_task(threads, tid, "x" * 500)
-    app = TuiApp(settings=load_settings(str(config_path)), threads_dir=str(threads))
+    app = TuiApp(
+        settings=load_settings(str(config_path)), threads_dir=str(threads)
+    )
     app.set_config_path(str(config_path))
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -312,7 +316,10 @@ async def test_idle_meter_uses_the_session_profile_global_threshold(tmp_path, mo
 
         app.switch_session_profile("large")
 
-        assert app.effective_settings().settings.summary.chat_completions_summary_trigger_chars == 2000
+        assert (
+            app.effective_settings().settings.summary.chat_completions_summary_trigger_chars
+            == 2000
+        )
         assert _meter_percent(scr._context_meter()) == 25
 
         app.switch_session_profile(None)
@@ -321,7 +328,9 @@ async def test_idle_meter_uses_the_session_profile_global_threshold(tmp_path, mo
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mode", ["light", "auto"])
-async def test_meter_uses_prepared_call_thresholds_and_next_call_level(tmp_path, monkeypatch, mode):
+async def test_meter_uses_prepared_call_thresholds_and_next_call_level(
+    tmp_path, monkeypatch, mode
+):
     from gc_core.agent_executor import AgentExecutor
     from gc_core.run_context import acreate_run_context
     from gc_core.states import State
@@ -331,15 +340,18 @@ async def test_meter_uses_prepared_call_thresholds_and_next_call_level(tmp_path,
     from gc_tui.app import TuiApp
     from gc_tui.services.agent_runner import AgentRunner
 
-    loaded = tui_settings({
-        "agent.model": "m", "level": mode,
-        "backend.api_mode": "chat_completions",
-        "models": {
-            "fast": {"summary_trigger_chars": 1000},
-            "strong": {"summary_trigger_tokens": 2000},
-        },
-        "slots": {"light": "fast", "default": "strong", "max": "strong"},
-    })
+    loaded = tui_settings(
+        {
+            "agent.model": "m",
+            "level": mode,
+            "backend.api_mode": "chat_completions",
+            "models": {
+                "fast": {"summary_trigger_chars": 1000},
+                "strong": {"summary_trigger_tokens": 2000},
+            },
+            "slots": {"light": "fast", "default": "strong", "max": "strong"},
+        }
+    )
     tid = "ctxm0000000000000000000000000011a"
     _write_task(tmp_path, tid, "x" * 500)
     meta_path = tmp_path / f"meta_cli_{tid}.json"
@@ -347,11 +359,18 @@ async def test_meter_uses_prepared_call_thresholds_and_next_call_level(tmp_path,
     meta["last_main_prompt_tokens"] = 500
     meta_path.write_text(json.dumps(meta), encoding="utf-8")
     app = TuiApp(settings=loaded, threads_dir=str(tmp_path))
-    ctx = await acreate_run_context(loaded, is_tui=True, level_provider=app._level_provider)
+    ctx = await acreate_run_context(
+        loaded, is_tui=True, level_provider=app._level_provider
+    )
     state = State(
-        verbose=False, model="m", tools_spec=ctx.tools_spec,
-        tools_descr=ctx.tools_description, skills_list=[], max_steps=10,
-        system_prompt_id="test", use_server_subagents=False,
+        verbose=False,
+        model="m",
+        tools_spec=ctx.tools_spec,
+        tools_descr=ctx.tools_description,
+        skills_list=[],
+        max_steps=10,
+        system_prompt_id="test",
+        use_server_subagents=False,
     )
     executor = AgentExecutor(ctx)
     executor._bind_state(state, discard_writes_after_stop=False)

@@ -4,8 +4,13 @@ from dataclasses import replace
 from typing import Any, Iterable, Mapping
 
 from gc_core.auto_routing.policy import (
-    LEVEL_ORDER, PAIR_LOWER, PAIR_UPPER, SAFE_LEVEL_AUTO, START_LEVEL,
-    RoutingParams, pair_levels,
+    LEVEL_ORDER,
+    PAIR_LOWER,
+    PAIR_UPPER,
+    SAFE_LEVEL_AUTO,
+    START_LEVEL,
+    RoutingParams,
+    pair_levels,
 )
 
 AUTO = "auto"
@@ -29,11 +34,22 @@ def auto_unavailable_reason(
     return _one_model_reason(source, legacy_call_kits=legacy_call_kits)
 
 
-def auto_available(source: Any, *, force_legacy: bool, legacy_call_kits: bool = False) -> bool:
-    return auto_unavailable_reason(source, force_legacy=force_legacy, legacy_call_kits=legacy_call_kits) is None
+def auto_available(
+    source: Any, *, force_legacy: bool, legacy_call_kits: bool = False
+) -> bool:
+    return (
+        auto_unavailable_reason(
+            source,
+            force_legacy=force_legacy,
+            legacy_call_kits=legacy_call_kits,
+        )
+        is None
+    )
 
 
-def resolve_routing_params(source: Any, *, legacy_call_kits: bool = False) -> RoutingParams:
+def resolve_routing_params(
+    source: Any, *, legacy_call_kits: bool = False
+) -> RoutingParams:
     """Параметры автовыбора конфига — единственная точка их сборки для рантайма.
 
     `safe_level: auto` (пару хода выбирает судья, лестница пар) работает, только когда
@@ -46,14 +62,29 @@ def resolve_routing_params(source: Any, *, legacy_call_kits: bool = False) -> Ro
     if params.safe_level != SAFE_LEVEL_AUTO:
         return params
     kits = _level_kits(source)
-    lower_two = not _one_call_kit(kits, pair_levels(replace(params, safe_level=PAIR_LOWER)), source=source, legacy=legacy_call_kits)
-    upper_two = not _one_call_kit(kits, pair_levels(replace(params, safe_level=PAIR_UPPER)), source=source, legacy=legacy_call_kits)
+    lower_two = not _one_call_kit(
+        kits,
+        pair_levels(replace(params, safe_level=PAIR_LOWER)),
+        source=source,
+        legacy=legacy_call_kits,
+    )
+    upper_two = not _one_call_kit(
+        kits,
+        pair_levels(replace(params, safe_level=PAIR_UPPER)),
+        source=source,
+        legacy=legacy_call_kits,
+    )
     if lower_two and upper_two:
         return params
-    return replace(params, safe_level=PAIR_UPPER if upper_two and not lower_two else PAIR_LOWER)
+    return replace(
+        params,
+        safe_level=PAIR_UPPER if upper_two and not lower_two else PAIR_LOWER,
+    )
 
 
-def _one_model_reason(cfg: Any, *, legacy_call_kits: bool = False) -> str | None:
+def _one_model_reason(
+    cfg: Any, *, legacy_call_kits: bool = False
+) -> str | None:
     """Автовыбор недоступен, когда рабочая пара резолвится в один комплект вызова.
 
     Незаданный слот подменяется соседним. Если другая пара даёт две разные
@@ -67,13 +98,17 @@ def _one_model_reason(cfg: Any, *, legacy_call_kits: bool = False) -> str | None
         # Лестница пар осталась включённой — значит, в обеих парах разные модели.
         return None
     weak, strong = pair_levels(params)
-    if not _one_call_kit(kits, (weak, strong), source=cfg, legacy=legacy_call_kits):
+    if not _one_call_kit(
+        kits, (weak, strong), source=cfg, legacy=legacy_call_kits
+    ):
         return None
     reason = f"в паре {weak}+{strong} одна модель"
     # Сильным бывает любой уровень, у которого есть ступень ниже.
     for other in LEVEL_ORDER[1:]:
         other_pair = pair_levels(replace(params, safe_level=other))
-        if other != strong and not _one_call_kit(kits, other_pair, source=cfg, legacy=legacy_call_kits):
+        if other != strong and not _one_call_kit(
+            kits, other_pair, source=cfg, legacy=legacy_call_kits
+        ):
             return f"{reason}; другая пара — auto_routing_safe_level: {other}"
     return reason
 
@@ -84,14 +119,28 @@ def _level_kits(source: Any) -> dict[str, Any]:
     return resolve_level_requests(source)
 
 
-def _one_call_kit(kits: Mapping[str, Any], levels: Iterable[str], *, source: Any, legacy: bool) -> bool:
+def _one_call_kit(
+    kits: Mapping[str, Any],
+    levels: Iterable[str],
+    *,
+    source: Any,
+    legacy: bool,
+) -> bool:
     """Все резолвящиеся уровни из `levels` дают один комплект вызова."""
     from gc_core.auto_routing.request_equivalence import same_routing_request
 
     found = [(level, kits[level]) for level in levels if level in kits]
-    return all(same_routing_request(
-        source, kit, found[0][1], first_level=level, second_level=found[0][0], legacy=legacy,
-    ) for level, kit in found[1:])
+    return all(
+        same_routing_request(
+            source,
+            kit,
+            found[0][1],
+            first_level=level,
+            second_level=found[0][0],
+            legacy=legacy,
+        )
+        for level, kit in found[1:]
+    )
 
 
 def auto_active(router: Any, live_level: str | None, available: bool) -> bool:
@@ -102,12 +151,16 @@ def auto_active(router: Any, live_level: str | None, available: bool) -> bool:
     только у непривязанного, спека §5.1). Единственное место условия: его читают
     точка решения и граница хода."""
     return bool(
-        router is not None and live_level == AUTO and available
+        router is not None
+        and live_level == AUTO
+        and available
         and getattr(router, "auto_allowed", True)
     )
 
 
-def effective_level(live_level: str | None, current_level: str | None, available: bool) -> str:
+def effective_level(
+    live_level: str | None, current_level: str | None, available: bool
+) -> str:
     """Единственное место перевода литерала `auto` в уровень (спека §3)."""
     live = live_level or START_LEVEL
     if live != AUTO:

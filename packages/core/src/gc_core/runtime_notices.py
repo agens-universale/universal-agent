@@ -259,7 +259,9 @@ def maybe_push_fallback_to_active_notice(
     )
 
 
-def notice_from_level_reroute(*, failed_alias: str, level: str, model: str) -> Notice:
+def notice_from_level_reroute(
+    *, failed_alias: str, level: str, model: str
+) -> Notice:
     """Автовыбор заменил подтверждённо недоступную модель такта ближайшим живым
     уровнем (спека PR140 Р3). Не «выполнено активной»: замена идёт по правилу
     уровней, а не на активную модель."""
@@ -276,18 +278,24 @@ def maybe_push_level_reroute_notice(
     if not enabled:
         return
     push_runtime_notice(
-        notice_from_level_reroute(failed_alias=failed_alias, level=level, model=model)
+        notice_from_level_reroute(
+            failed_alias=failed_alias, level=level, model=model
+        )
     )
 
 
-def maybe_push_pair_prompt_notice(*, path: str, reason: str, enabled: bool = True) -> None:
+def maybe_push_pair_prompt_notice(
+    *, path: str, reason: str, enabled: bool = True
+) -> None:
     """Инструкция судьи пары не читается: ход идёт на верхней паре (спека PR140 Р7)."""
     if not enabled:
         return
-    push_runtime_notice(Notice(
-        "warning",
-        "routing_pair_prompt",
-        f"автовыбор: инструкция судьи пары недоступна ({reason}) — ход на верхней "
-        f"паре. Проверьте paths.chat_completions_routing_pair_judge_prompt_path: {path}",
-        ("paths.chat_completions_routing_pair_judge_prompt_path",),
-    ))
+    push_runtime_notice(
+        Notice(
+            "warning",
+            "routing_pair_prompt",
+            f"автовыбор: инструкция судьи пары недоступна ({reason}) — ход на верхней "
+            f"паре. Проверьте paths.chat_completions_routing_pair_judge_prompt_path: {path}",
+            ("paths.chat_completions_routing_pair_judge_prompt_path",),
+        )
+    )

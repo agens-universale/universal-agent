@@ -26,12 +26,17 @@ def forbidden(*_args, **_kwargs):
     raise AssertionError("Unexpected local resource access")
 
 
-@pytest.mark.parametrize("force_legacy,bound,available", [
-    (False, False, True),
-    (True, False, False),
-    (False, True, False),
-])
-def test_context_assembly_only_consumes_prepared_values(monkeypatch, force_legacy, bound, available):
+@pytest.mark.parametrize(
+    "force_legacy,bound,available",
+    [
+        (False, False, True),
+        (True, False, False),
+        (False, True, False),
+    ],
+)
+def test_context_assembly_only_consumes_prepared_values(
+    monkeypatch, force_legacy, bound, available
+):
     prepared = PreparedRunContext(
         settings={
             "agent": {"model": "test"},
@@ -58,7 +63,8 @@ def test_context_assembly_only_consumes_prepared_values(monkeypatch, force_legac
     )
     router = ModelRouter(
         AppConfig.model_validate(prepared.settings),
-        level_provider=lambda: "auto", force_legacy=force_legacy,
+        level_provider=lambda: "auto",
+        force_legacy=force_legacy,
     )
     if bound:
         router = router.with_override(router.resolve_level("default"))

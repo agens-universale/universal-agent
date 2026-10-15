@@ -192,7 +192,6 @@ class RunContext:
         self.active_state = state
 
 
-
 def _coerce_settings(settings, runtime):
     """``LoadedSettings`` сборки из ``LoadedSettings`` или ``AppConfig``.
 
@@ -284,26 +283,40 @@ def assemble_run_context(
         subagent_independent_auto=bindings.subagent_independent_auto,
     )
     ctx.is_tui = prepared.is_tui
-    ctx.routing_contract_v2 = bindings.execution_patch is None or bindings.execution_patch(
-        "routing-request-contract-v2"
+    ctx.routing_contract_v2 = (
+        bindings.execution_patch is None
+        or bindings.execution_patch("routing-request-contract-v2")
     )
     if ctx.prepared_request_equivalence is not None:
-        from gc_core.auto_routing.request_equivalence import validate_request_equivalence
+        from gc_core.auto_routing.request_equivalence import (
+            validate_request_equivalence,
+        )
 
-        validate_request_equivalence(ctx, ctx.prepared_request_equivalence, context_id=ctx.run_id)
+        validate_request_equivalence(
+            ctx, ctx.prepared_request_equivalence, context_id=ctx.run_id
+        )
     ctx.auto_available = auto_available(
         ctx,
-        force_legacy=(bindings.model_router.force_legacy or not bindings.model_router.auto_allowed),
+        force_legacy=(
+            bindings.model_router.force_legacy
+            or not bindings.model_router.auto_allowed
+        ),
         legacy_call_kits=not ctx.routing_contract_v2,
     )
-    ctx.routing_params = resolve_routing_params(ctx, legacy_call_kits=not ctx.routing_contract_v2)
+    ctx.routing_params = resolve_routing_params(
+        ctx, legacy_call_kits=not ctx.routing_contract_v2
+    )
     live = bindings.model_router.live_level
 
     def effective_provider():
         state = ctx.active_state
-        return effective_level(live(), getattr(state, "current_level", None), ctx.auto_available)
+        return effective_level(
+            live(), getattr(state, "current_level", None), ctx.auto_available
+        )
 
-    ctx.model_router = bindings.model_router.with_level_providers(effective_provider, live)
+    ctx.model_router = bindings.model_router.with_level_providers(
+        effective_provider, live
+    )
     return ctx
 
 

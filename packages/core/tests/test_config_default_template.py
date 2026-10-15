@@ -140,7 +140,10 @@ def test_shipped_templates_carry_no_live_assign():
         assert "assign" not in raw, f"{path.name}: активный assign вернулся"
         loaded = load_settings(str(path))
         notices = collect_startup_notices(
-            loaded, set(), None, is_tui=False,
+            loaded,
+            set(),
+            None,
+            is_tui=False,
             compat_notices=loaded.runtime.notices,
         )
         assert not any(
@@ -222,7 +225,7 @@ def test_demo_config_commented_example_is_valid_when_uncommented():
     грузиться. Проверяется тем же путём, что и правка руками: блок снимается с
     комментария, кладётся поверх остального demo_config и идёт через обе фазы
     (схема + ссылочная целостность на merged), а не только через `safe_load`.
-"""
+    """
     text = DEMO_CONFIG_PATH.read_text(encoding="utf-8")
     example = yaml.safe_load(_uncomment_block(text, "# models:")) or {}
     assert set(example) == {"models", "slots"}, (
@@ -388,11 +391,22 @@ def test_demo_config_covers_the_same_keys_as_the_template():
 
 def test_shipped_templates_carry_only_product_auto_routing_keys():
     defaults = AppConfig().agent
-    for raw in (_template_raw(), yaml.safe_load(DEMO_CONFIG_PATH.read_text(encoding="utf-8"))):
+    for raw in (
+        _template_raw(),
+        yaml.safe_load(DEMO_CONFIG_PATH.read_text(encoding="utf-8")),
+    ):
         agent = raw["agent"]
         assert agent["auto_routing"] is defaults.auto_routing
-        assert agent["auto_routing_safe_level"] == defaults.auto_routing_safe_level
-        assert agent["auto_routing_two_level"] == defaults.auto_routing_two_level.model_dump()
+        assert (
+            agent["auto_routing_safe_level"]
+            == defaults.auto_routing_safe_level
+        )
+        assert (
+            agent["auto_routing_two_level"]
+            == defaults.auto_routing_two_level.model_dump()
+        )
         assert {key for key in agent if key.startswith("auto_routing")} == {
-            "auto_routing", "auto_routing_safe_level", "auto_routing_two_level",
+            "auto_routing",
+            "auto_routing_safe_level",
+            "auto_routing_two_level",
         }

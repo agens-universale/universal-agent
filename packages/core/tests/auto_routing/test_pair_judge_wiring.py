@@ -277,8 +277,6 @@ def test_a_retried_tick_does_not_call_the_judge_twice(monkeypatch):
     assert len(judge) == 1
 
 
-
-
 def test_a_weak_write_on_the_easy_pair_is_replayed_on_default(monkeypatch):
     ctx = _ctx({"value": "auto"})
     s = _state(ctx)

@@ -387,7 +387,6 @@ def test_legacy_and_fresh_sums_merge_into_one_part():
     assert "+" not in text
 
 
-
 def test_footer_prices_legacy_tokens_at_current_model_rate():
     account = UsageAccount()
     account.add(CATEGORY_MAIN, 1000, 0, cost=0.5, billed=True, currency="$")
@@ -407,17 +406,27 @@ _PRICING_OTHER_MODEL = {
 def test_footer_shows_unknown_cost_instead_of_hiding_it():
     """Ставки заданы, но у этой модели цены нет — трата неизвестна, а не ноль
     (спека PR140 Р5)."""
-    text = render_usage_meter(_meta(1000, 100), None, _PRICING_OTHER_MODEL, _MODEL)
+    text = render_usage_meter(
+        _meta(1000, 100), None, _PRICING_OTHER_MODEL, _MODEL
+    )
     assert text.plain.endswith("/?")
 
 
 def test_sessions_show_unknown_cost_instead_of_hiding_it():
-    assert format_nonzero_cost(_meta(1000, 100), _PRICING_OTHER_MODEL, _MODEL) == "?"
+    assert (
+        format_nonzero_cost(_meta(1000, 100), _PRICING_OTHER_MODEL, _MODEL)
+        == "?"
+    )
 
 
 def test_no_rates_at_all_keeps_the_cost_hidden():
     """Шаблон: pricing включён, ставок нет — стартовое уведомление обещает, что
     стоимость скрыта; «?» у каждой сессии был бы шумом."""
-    text = render_usage_meter(_meta(1000, 100), None, _PRICING_NO_RATES, _MODEL)
+    text = render_usage_meter(
+        _meta(1000, 100), None, _PRICING_NO_RATES, _MODEL
+    )
     assert "/" not in text.plain
-    assert format_nonzero_cost(_meta(1000, 100), _PRICING_NO_RATES, _MODEL) is None
+    assert (
+        format_nonzero_cost(_meta(1000, 100), _PRICING_NO_RATES, _MODEL)
+        is None
+    )

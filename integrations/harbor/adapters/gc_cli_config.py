@@ -187,19 +187,28 @@ def build_gc_cli_settings(
         node[parts[-1]] = copy.deepcopy(value)
     raw_profile = copy.deepcopy(profile)
     profile = resolve_env_placeholders(profile)
-    validate_registry_pairs(profile, source="gc_cli_config", raw_source=raw_profile)
+    validate_registry_pairs(
+        profile, source="gc_cli_config", raw_source=raw_profile
+    )
     compat_facts = apply_compat(profile)
-    updates, runtime = profile_updates({
-        **expand_section_updates(profile), **resolve_env_placeholders(runtime_overrides),
-    })
+    updates, runtime = profile_updates(
+        {
+            **expand_section_updates(profile),
+            **resolve_env_placeholders(runtime_overrides),
+        }
+    )
     loaded = loaded.with_overrides(updates, layer="bench_profile")
     if runtime:
         loaded = loaded.with_runtime(**runtime)
     if compat_facts:
         loaded = loaded.with_runtime(
-            notices=(*loaded.runtime.notices, *(
-                f"бенч-профиль: {manual_edit_fact(fact)}" for fact in compat_facts
-            ))
+            notices=(
+                *loaded.runtime.notices,
+                *(
+                    f"бенч-профиль: {manual_edit_fact(fact)}"
+                    for fact in compat_facts
+                ),
+            )
         )
     # Runtime wins: a stale completions_url/model in a profile must not beat what the
     # runner actually passed (api_base / --model).

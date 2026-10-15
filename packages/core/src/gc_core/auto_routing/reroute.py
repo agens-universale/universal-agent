@@ -1,6 +1,7 @@
 """Поводы переигрыша слабого ответа: важный тул, битый вызов или отсутствие вызовов.
 Цель и повтор запроса принадлежат контроллеру; вердикт не меняет State.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -11,13 +12,18 @@ from gc_core.auto_routing.policy import (
     REROUTE_INVALID_CALL,
     REROUTE_NO_TOOL_CALL,
 )
-from gc_core.auto_routing.response import has_invalid_call, has_no_tool_call, important_tool_names
+from gc_core.auto_routing.response import (
+    has_invalid_call,
+    has_no_tool_call,
+    important_tool_names,
+)
 
 
 @dataclass(frozen=True)
 class FloorVerdict:
     """`important_tools` — важные тулы ответа (порядок появления, без дублей);
     `invalid_call` — в ответе битый вызов; `no_tool_call` — в ответе нет вызовов."""
+
     important_tools: Tuple[str, ...]
     invalid_call: bool
     no_tool_call: bool
@@ -57,7 +63,9 @@ def floor_verdict(
     `is_subagent` — предикат тула субагента (реестр субагентов знает контроллер).
     Запуск команд сам по себе важным действием не считается."""
     verdict = FloorVerdict(
-        important_tool_names(resp_messages, tools_data, is_subagent=is_subagent),
+        important_tool_names(
+            resp_messages, tools_data, is_subagent=is_subagent
+        ),
         has_invalid_call(resp_messages, tools_data),
         has_no_tool_call(resp_messages),
     )

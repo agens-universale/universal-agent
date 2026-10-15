@@ -2,6 +2,7 @@
 хода (`● → ● модель`), лесенка ширины (текст → стрелка/точка уровня → голая
 точка режима). Обвязка `TuiApp` — инлайн, как в `test_footer_profile_indicator.py`;
 тестовые файлы друг друга не импортируют."""
+
 import pytest
 
 from gc_testkit.settings import make_settings
@@ -14,7 +15,9 @@ from gc_tui.toggles import AUTO_LEVEL_VALUE
 
 
 def _app(tmp_path, config):
-    app = TuiApp(threads_dir=str(tmp_path / "t"), settings=tui_settings(config))
+    app = TuiApp(
+        threads_dir=str(tmp_path / "t"), settings=tui_settings(config)
+    )
     app._config_path = str(tmp_path / "config.yml")
     return app
 
@@ -27,7 +30,9 @@ def _set_running(app, runner):
     app.active_runner = runner
 
 
-def _running_runner(router, *, current_level=None, usage_snapshot=None, available=True):
+def _running_runner(
+    router, *, current_level=None, usage_snapshot=None, available=True
+):
     """Раннер бегущего хода (образец `_running_runner` из
     `test_footer_profile_indicator.py`, расширенный auto-routing §7.1
     изменяемым `current_level`): `executor_router()` резолвит ЧЕСТНО через
@@ -52,7 +57,9 @@ def _running_runner(router, *, current_level=None, usage_snapshot=None, availabl
 
             class _LevelRouter:
                 def active_level(self):
-                    return effective_level(router.live_level(), runner.level, available)
+                    return effective_level(
+                        router.live_level(), runner.level, available
+                    )
 
                 def __getattr__(self, name):
                     return getattr(router, name)
@@ -65,20 +72,29 @@ def _running_runner(router, *, current_level=None, usage_snapshot=None, availabl
     return _FakeRunner()
 
 
-CFG = {"agent.model": "m", "level": "auto", "backend.api_mode": "chat_completions", "agent.auto_routing": True,
-       "models": {"fast": {}, "mid": {}, "big": {}}, "slots": {"light": "fast", "default": "mid", "max": "big"}}
+CFG = {
+    "agent.model": "m",
+    "level": "auto",
+    "backend.api_mode": "chat_completions",
+    "agent.auto_routing": True,
+    "models": {"fast": {}, "mid": {}, "big": {}},
+    "slots": {"light": "fast", "default": "mid", "max": "big"},
+}
 
 
 @pytest.mark.asyncio
 async def test_footer_idle_auto_shows_mode_only(tmp_path, monkeypatch):
-    app = _app(tmp_path, CFG); app.active_runner = None
+    app = _app(tmp_path, CFG)
+    app.active_runner = None
     async with app.run_test(size=(120, 24)):
         plain = app.screen._compose_footer_right().plain
         assert "● auto" in plain and "→" not in plain and "mid" not in plain
 
 
 @pytest.mark.asyncio
-async def test_footer_running_auto_shows_arrow_level_dot_and_model(tmp_path, monkeypatch):
+async def test_footer_running_auto_shows_arrow_level_dot_and_model(
+    tmp_path, monkeypatch
+):
     app = _app(tmp_path, CFG)
     runner = _running_runner(app.display_router(), current_level="light")
     _set_running(app, runner)
@@ -90,21 +106,28 @@ async def test_footer_running_auto_shows_arrow_level_dot_and_model(tmp_path, mon
 
 
 @pytest.mark.asyncio
-async def test_footer_running_auto_before_first_decision_shows_default(tmp_path, monkeypatch):
+async def test_footer_running_auto_before_first_decision_shows_default(
+    tmp_path, monkeypatch
+):
     app = _app(tmp_path, CFG)
-    _set_running(app, _running_runner(app.display_router(), current_level=None))
+    _set_running(
+        app, _running_runner(app.display_router(), current_level=None)
+    )
     async with app.run_test(size=(120, 24)):
         assert "● → ● mid" in app.screen._compose_footer_right().plain
 
 
 @pytest.mark.asyncio
-async def test_footer_running_auto_before_executor_built_shows_default(tmp_path, monkeypatch):
+async def test_footer_running_auto_before_executor_built_shows_default(
+    tmp_path, monkeypatch
+):
     """Спека §7.1: «идёт ход» — это `runner.is_running()`, а не «резолв Router'а
     executor'а удался». Пока executor строится в worker-потоке
     (`AgentRunner._ensure_executor()` зовётся из `start()`, уже после того как
     `is_running()` стал True), `executor_router()` честно отдаёт None — футер
     обязан остаться в виде факта (стрелка + точка default-слота из живого
     резолва витрины), а не откатиться к виду режима (`● auto`)."""
+
     class _BuildingRunner:
         def is_running(self):
             return True
@@ -122,13 +145,19 @@ async def test_footer_running_auto_before_executor_built_shows_default(tmp_path,
 
 
 @pytest.mark.asyncio
-async def test_footer_running_auto_degraded_resolve_shows_default(tmp_path, monkeypatch):
+async def test_footer_running_auto_degraded_resolve_shows_default(
+    tmp_path, monkeypatch
+):
     """Та же деградация факта (спека §7.1), другой источник: резолв Router'а
     executor'а бросает `ValueError` (реестр не резолвится — больше одной
     модели, ни один слот не назначен) — `_footer_running_resolution()` отдаёт
     None, футер остаётся в виде факта через живой резолв витрины, а не режима."""
     from gc_core.model_router import ModelRouter
-    broken = ModelRouter(make_settings({"models": {"x": {}, "y": {}}, "slots": {}}), level_provider=lambda: "light")
+
+    broken = ModelRouter(
+        make_settings({"models": {"x": {}, "y": {}}, "slots": {}}),
+        level_provider=lambda: "light",
+    )
 
     class _DegradedRunner:
         def is_running(self):
@@ -147,20 +176,27 @@ async def test_footer_running_auto_degraded_resolve_shows_default(tmp_path, monk
 
 
 @pytest.mark.asyncio
-async def test_footer_auto_unavailable_looks_like_manual_default(tmp_path, monkeypatch):
-    app = _app(tmp_path, {**CFG, "agent.auto_routing": False}); app.active_runner = None
+async def test_footer_auto_unavailable_looks_like_manual_default(
+    tmp_path, monkeypatch
+):
+    app = _app(tmp_path, {**CFG, "agent.auto_routing": False})
+    app.active_runner = None
     async with app.run_test(size=(120, 24)):
         plain = app.screen._compose_footer_right().plain
         assert "● mid" in plain and "auto" not in plain and "→" not in plain
 
 
 @pytest.mark.asyncio
-async def test_footer_auto_unavailable_running_looks_like_manual_default(tmp_path, monkeypatch):
+async def test_footer_auto_unavailable_running_looks_like_manual_default(
+    tmp_path, monkeypatch
+):
     """Та же строка таблицы §7.1 («level: auto, фича недоступна» = как ручной
     default), но во время хода: тоже без стрелки, просто модель — auto-режим
     не включает блок перехода, если фича выключена, идёт ход или нет."""
     app = _app(tmp_path, {**CFG, "agent.auto_routing": False})
-    runner = _running_runner(app.display_router(), current_level="light", available=False)
+    runner = _running_runner(
+        app.display_router(), current_level="light", available=False
+    )
     _set_running(app, runner)
     async with app.run_test(size=(120, 24)):
         plain = app.screen._compose_footer_right().plain
@@ -168,9 +204,13 @@ async def test_footer_auto_unavailable_running_looks_like_manual_default(tmp_pat
 
 
 @pytest.mark.asyncio
-async def test_footer_auto_ladder_drops_model_then_level_block_keeps_mode_dot(tmp_path, monkeypatch):
+async def test_footer_auto_ladder_drops_model_then_level_block_keeps_mode_dot(
+    tmp_path, monkeypatch
+):
     app = _app(tmp_path, CFG)
-    _set_running(app, _running_runner(app.display_router(), current_level="light"))
+    _set_running(
+        app, _running_runner(app.display_router(), current_level="light")
+    )
     async with app.run_test(size=(120, 24)):
         scr = app.screen
         # "● → ● fast" = 10 колонок, "● → ●" = 5 колонок — ширина 7 попадает
@@ -187,7 +227,8 @@ async def test_footer_auto_ladder_drops_model_then_level_block_keeps_mode_dot(tm
 
 @pytest.mark.asyncio
 async def test_footer_manual_unchanged(tmp_path, monkeypatch):
-    app = _app(tmp_path, {**CFG, "level": "max"}); app.active_runner = None
+    app = _app(tmp_path, {**CFG, "level": "max"})
+    app.active_runner = None
     async with app.run_test(size=(120, 24)):
         plain = app.screen._compose_footer_right().plain
         assert "● big" in plain and "→" not in plain and "auto" not in plain
@@ -213,14 +254,16 @@ async def test_footer_head_auto_colors_mode_dot_arrow_and_word(tmp_path):
     async with app.run_test(size=(120, 24)):
         scr = app.screen
         idle = scr._footer_head(
-            with_profile=False, meter=None,
+            with_profile=False,
+            meter=None,
             snapshot=_FooterHeadSnapshot(None, True, "#123456", "mid", False),
         )
         assert _span_style(idle, "●") == f"bold {AUTO_LEVEL_VALUE.color}"
         assert _span_style(idle, " auto") == INK
 
         running = scr._footer_head(
-            with_profile=False, meter=None,
+            with_profile=False,
+            meter=None,
             snapshot=_FooterHeadSnapshot(None, True, "#123456", "fast", True),
         )
         assert _span_style(running, "●") == f"bold {AUTO_LEVEL_VALUE.color}"

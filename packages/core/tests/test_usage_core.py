@@ -512,7 +512,9 @@ _PRICING_CACHE = {
 
 def test_compute_cost_with_cache_read():
     acc = UsageAccount()
-    acc.add(CATEGORY_MAIN, 1000, 100, 800, model="deepseek")  # 800 из 1000 input — cached
+    acc.add(
+        CATEGORY_MAIN, 1000, 100, 800, model="deepseek"
+    )  # 800 из 1000 input — cached
     report = compute_cost(acc, _PRICING_CACHE, "deepseek")
     # (1000-800)/1e6*59 + 800/1e6*0.49 + 100/1e6*118
     expected = 200 / 1e6 * 59 + 800 / 1e6 * 0.49 + 100 / 1e6 * 118
@@ -611,7 +613,9 @@ def test_unbilled_category_uses_tariff():
 
 def test_mixed_category_splits_fact_and_tariff():
     acc = UsageAccount()
-    acc.add(CATEGORY_MAIN, 1_000_000, 100_000, 0, cost=7.5, billed=True, model="m")
+    acc.add(
+        CATEGORY_MAIN, 1_000_000, 100_000, 0, cost=7.5, billed=True, model="m"
+    )
     acc.add(CATEGORY_MAIN, 500_000, 50_000, model="m")  # без цены
     r = compute_cost(acc, _PRICING_RUB, "m")
     cat = r.categories[0]
@@ -696,7 +700,15 @@ def test_usage_less_call_does_not_create_phantom_currency():
 def test_tariff_remainder_accounts_for_cached():
     pricing = dict(_PRICING_RUB, cache_read=10)
     acc = UsageAccount()
-    acc.add(CATEGORY_MAIN, 1_000_000, 0, 1_000_000, cost=1.0, billed=True, model="m")
+    acc.add(
+        CATEGORY_MAIN,
+        1_000_000,
+        0,
+        1_000_000,
+        cost=1.0,
+        billed=True,
+        model="m",
+    )
     acc.add(CATEGORY_MAIN, 1_000_000, 0, 400_000, model="m")
     r = compute_cost(acc, pricing, "m")
     # Остаток: input 1M, из них cached 0.4M по 10, остальные 0.6M по 100.
@@ -728,7 +740,9 @@ def test_ru_endpoint_and_rub_tariff_collapse_into_one_currency():
     # Ради этого случая правило и вводилось: факт и тариф сходятся в рублях,
     # а не расходятся на два подытога с маркером неполноты.
     acc = UsageAccount()
-    acc.add(CATEGORY_MAIN, 1_000_000, 100_000, 0, cost=7.5, billed=True, model="m")
+    acc.add(
+        CATEGORY_MAIN, 1_000_000, 100_000, 0, cost=7.5, billed=True, model="m"
+    )
     acc.add(CATEGORY_MAIN, 500_000, 50_000, model="m")
     r = compute_cost(acc, _PRICING_RUB, "m", _RU_URL)
     assert set(r.by_currency) == {"₽"}
@@ -746,7 +760,9 @@ def test_ru_endpoint_with_usd_tariff_still_splits():
         "models": {"m": {"input": 100, "output": 200, "currency": "$"}},
     }
     acc = UsageAccount()
-    acc.add(CATEGORY_MAIN, 1_000_000, 100_000, 0, cost=7.5, billed=True, model="m")
+    acc.add(
+        CATEGORY_MAIN, 1_000_000, 100_000, 0, cost=7.5, billed=True, model="m"
+    )
     acc.add(CATEGORY_MAIN, 500_000, 50_000, model="m")
     r = compute_cost(acc, pricing, "m", _RU_URL)
     assert set(r.by_currency) == {"₽", "$"}
@@ -776,7 +792,9 @@ def test_disabled_pricing_with_ru_endpoint_shows_no_money():
 
 def test_ru_endpoint_report_has_single_total_without_subtotals():
     acc = UsageAccount()
-    acc.add(CATEGORY_MAIN, 1_000_000, 100_000, 0, cost=7.5, billed=True, model="m")
+    acc.add(
+        CATEGORY_MAIN, 1_000_000, 100_000, 0, cost=7.5, billed=True, model="m"
+    )
     acc.add(CATEGORY_MAIN, 500_000, 50_000, model="m")
     text = render_cost_report(
         compute_cost(acc, _PRICING_RUB, "m", _RU_URL), model_name="m"
@@ -832,7 +850,9 @@ def test_report_no_tilde_when_only_tariff():
 def test_report_marks_tariff_part_with_tilde_when_mixed():
     # Реальное смешение (одна категория факт, другая тариф) — тильда нужна и есть.
     acc = UsageAccount()
-    acc.add(CATEGORY_MAIN, 1_000_000, 100_000, 0, cost=7.5, billed=True, model="m")
+    acc.add(
+        CATEGORY_MAIN, 1_000_000, 100_000, 0, cost=7.5, billed=True, model="m"
+    )
     acc.add(CATEGORY_FINISH_GATE, 1_000_000, 100_000, model="m")
     text = render_cost_report(
         compute_cost(acc, _PRICING_RUB, "m"), model_name="m"
@@ -930,8 +950,11 @@ def test_report_joins_currencies_with_plus():
         cost=2.0,
         billed=True,
         currency="$",
-     model="m",)
-    acc.add(CATEGORY_MAIN, 1_000_000, 100_000, model="m")  # остаток по рублёвому тарифу
+        model="m",
+    )
+    acc.add(
+        CATEGORY_MAIN, 1_000_000, 100_000, model="m"
+    )  # остаток по рублёвому тарифу
     text = render_cost_report(
         compute_cost(acc, _PRICING_RUB, "m"), model_name="m"
     )

@@ -397,8 +397,19 @@ def test_usage_by_model_reaches_the_metadata():
     from gc_core.usage.account import CATEGORY_MAIN, UsageAccount
 
     account = UsageAccount()
-    account.add(CATEGORY_MAIN, input_tokens=1000, output_tokens=100, model="vendor/fast")
-    account.add(CATEGORY_MAIN, input_tokens=300, output_tokens=30, cached_tokens=10, model="vendor/big")
+    account.add(
+        CATEGORY_MAIN,
+        input_tokens=1000,
+        output_tokens=100,
+        model="vendor/fast",
+    )
+    account.add(
+        CATEGORY_MAIN,
+        input_tokens=300,
+        output_tokens=30,
+        cached_tokens=10,
+        model="vendor/big",
+    )
     by_model = _agent()._usage_by_model(SimpleNamespace(usage=account))
     assert by_model == {
         "vendor/fast": {"input": 1000, "output": 100, "cached": 0},

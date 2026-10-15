@@ -24,6 +24,7 @@ def without_answer_deltas(on_delta: OnDelta) -> OnDelta:
     """Тот же приёмник без канала `answer`: `reset`, `think` и `tool` проходят как
     есть. Кому глушить текст ответа, решает вызывающий — здесь только фильтр по
     виду дельты."""
+
     def emit(kind: str, text: str) -> None:
         if kind != "answer":
             on_delta(kind, text)

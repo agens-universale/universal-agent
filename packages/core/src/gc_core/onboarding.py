@@ -367,7 +367,8 @@ def effective_model(settings: Any) -> str:
     (`ValueError`), и резолв ушёл бы фоллбэком на плоский ключ вместо модели
     default-слота. Только функции ядра — мастер не импортирует `gc_tui`."""
     source = (
-        settings if isinstance(settings, LoadedSettings)
+        settings
+        if isinstance(settings, LoadedSettings)
         else LoadedSettings(settings=settings_of(settings))
     )
     settings = source.settings

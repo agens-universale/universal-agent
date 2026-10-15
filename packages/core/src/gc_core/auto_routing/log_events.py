@@ -2,6 +2,7 @@
 спеки). Презентер: собирает поля события из State и решения и пишет одну запись
 уровня info. Логгер отдаёт вызывающий (`ctx.logger` или фолбэк контроллера) —
 модуль ни ctx, ни State не пишет. Импортирует его только контроллер."""
+
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
@@ -40,7 +41,9 @@ def log_routing_decision(
         model = getattr(state, "default_model", None)
     # Причина — из State: `state_ops.apply_decision` пишет туда причину итогового
     # решения такта, она же в `decision.reason`; решение — запасной источник.
-    reason = getattr(state, "last_routing_reason", None) if active else "manual"
+    reason = (
+        getattr(state, "last_routing_reason", None) if active else "manual"
+    )
     if reason is None:
         reason = decision.reason if decision is not None else "manual"
     payload: Dict[str, Any] = {
@@ -61,7 +64,9 @@ def log_routing_decision(
             payload["fallback_from"] = decision.fallback_from
     logger.info(
         "routing_decision level=%s reason=%s model=%s",
-        level, reason, model,
+        level,
+        reason,
+        model,
         extra=payload,
     )
 
@@ -97,7 +102,11 @@ def log_routing_pair_judge(
         payload["error"] = choice.error
     logger.info(
         "routing_pair_judge turn=%s score=%s safe_level=%s source=%s",
-        turn, choice.score, choice.safe_level, choice.source, extra=payload,
+        turn,
+        choice.score,
+        choice.safe_level,
+        choice.source,
+        extra=payload,
     )
 
 
@@ -128,8 +137,14 @@ def log_routing_pair(
         payload["score"] = score
     if signals:
         payload["signals"] = list(signals)
-    logger.info("routing_pair turn=%s step=%s cause=%s to=%s", turn, step, cause, after.safe_level,
-                extra=payload)
+    logger.info(
+        "routing_pair turn=%s step=%s cause=%s to=%s",
+        turn,
+        step,
+        cause,
+        after.safe_level,
+        extra=payload,
+    )
 
 
 def log_artifact_reroute(
@@ -172,7 +187,10 @@ def log_artifact_reroute(
             payload["cost"] = cost_by_currency
     logger.info(
         "artifact_reroute from_level=%s to_level=%s triggers=%s tools=%s",
-        from_level, to_level, list(triggers), list(tools),
+        from_level,
+        to_level,
+        list(triggers),
+        list(tools),
         extra=payload,
     )
 
@@ -201,6 +219,10 @@ def log_unavailable_reroute(
     }
     logger.info(
         "routing_unavailable_reroute turn=%s from_level=%s to_level=%s failed=%s replacement=%s",
-        turn, from_level, to_level, failed_alias, replacement_alias,
+        turn,
+        from_level,
+        to_level,
+        failed_alias,
+        replacement_alias,
         extra=payload,
     )

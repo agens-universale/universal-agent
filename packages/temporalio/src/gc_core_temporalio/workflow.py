@@ -630,7 +630,9 @@ class UniversalAgentWorkflow:
         self.operations = WorkflowOperations(
             start, f"{owner}/{chain}/turn-{self.turns + 1}", self.new_id
         )
-        require_equivalence = workflow.patched("root-routing-request-equivalence-v1")
+        require_equivalence = workflow.patched(
+            "root-routing-request-equivalence-v1"
+        )
         prepare_data = {
             "store_id": start.store_id,
             "settings_fingerprint": self.message_fingerprint
@@ -696,7 +698,9 @@ class UniversalAgentWorkflow:
         self.operations.thread_store = store
         ctx = assemble_context(
             prepared,
-            request_equivalence=prepared.request_equivalence if require_equivalence else None,
+            request_equivalence=prepared.request_equivalence
+            if require_equivalence
+            else None,
             require_request_equivalence=require_equivalence,
             operations=self.operations,
             store=store,

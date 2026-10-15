@@ -1,4 +1,5 @@
 """Двухуровневое исполнение, выбор и переключение пары: чистые правила."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
@@ -55,9 +56,12 @@ class RoutingParams:
 
         agent = settings_of(source).agent
         two_level = agent.auto_routing_two_level
-        return cls(safe_level=agent.auto_routing_safe_level,
-                   weak_steps=two_level.weak_steps, strong_steps=two_level.strong_steps,
-                   pair_threshold=two_level.pair_threshold)
+        return cls(
+            safe_level=agent.auto_routing_safe_level,
+            weak_steps=two_level.weak_steps,
+            strong_steps=two_level.strong_steps,
+            pair_threshold=two_level.pair_threshold,
+        )
 
 
 @dataclass(frozen=True)
@@ -89,10 +93,14 @@ def nearest_levels(level: str) -> tuple[str, ...]:
     """Уровни по близости к `level`: он сам, на ступень выше, на ступень ниже,
     оставшийся. Порядок замены мёртвого уровня живым — в решении автовыбора и в
     цели пола."""
-    return tuple(dict.fromkeys((level, bump(level, +1), bump(level, -1)) + LEVEL_ORDER))
+    return tuple(
+        dict.fromkeys((level, bump(level, +1), bump(level, -1)) + LEVEL_ORDER)
+    )
 
 
-def floor_levels(current_level: str, *, params: RoutingParams) -> tuple[str, ...]:
+def floor_levels(
+    current_level: str, *, params: RoutingParams
+) -> tuple[str, ...]:
     """Кандидаты цели пола — уровня, на который переигрывается ответ, — для
     вызова уровня `current_level`, по порядку предпочтения: безопасный уровень
     (`params.safe_level`), затем ближайшие к нему (`nearest_levels`) — только
@@ -102,12 +110,15 @@ def floor_levels(current_level: str, *, params: RoutingParams) -> tuple[str, ...
     if _index(current_level) >= _index(params.safe_level):
         return ()
     return tuple(
-        level for level in nearest_levels(params.safe_level)
+        level
+        for level in nearest_levels(params.safe_level)
         if _index(level) > _index(current_level)
     )
 
 
-def first_alive(levels: Iterable[str], is_alive: Callable[[str], bool]) -> str | None:
+def first_alive(
+    levels: Iterable[str], is_alive: Callable[[str], bool]
+) -> str | None:
     """Первый живой уровень из `levels` в их порядке (`nearest_levels` — замена
     мёртвого уровня решения, `floor_levels` — цель пола); живых нет — None.
     Живость — колбэк вызывающего: судить о ней может только Router. Дальше
@@ -115,15 +126,21 @@ def first_alive(levels: Iterable[str], is_alive: Callable[[str], bool]) -> str |
     return next((level for level in levels if is_alive(level)), None)
 
 
-def with_fallback(decision: Decision, alive_level: str, *, current: str) -> Decision:
+def with_fallback(
+    decision: Decision, alive_level: str, *, current: str
+) -> Decision:
     """Решение, чей уровень мёртв (алиас в предохранителе), с заменой на живой
     `alive_level` (первый живой из `nearest_levels`): причина прежняя,
     `fallback_from` — выбранный уровень; серия сбрасывается, только если живой
     уровень сменил текущий `current`. Замены нет — решение как есть."""
     if alive_level == decision.level:
         return decision
-    return replace(decision, level=alive_level, fallback_from=decision.level,
-                   reset_series=alive_level != current)
+    return replace(
+        decision,
+        level=alive_level,
+        fallback_from=decision.level,
+        reset_series=alive_level != current,
+    )
 
 
 def pair_safe_level(score: int, threshold: int) -> str:
@@ -132,7 +149,9 @@ def pair_safe_level(score: int, threshold: int) -> str:
     return PAIR_UPPER if score >= threshold else PAIR_LOWER
 
 
-def turn_params(params: RoutingParams, turn_safe_level: str | None) -> RoutingParams:
+def turn_params(
+    params: RoutingParams, turn_safe_level: str | None
+) -> RoutingParams:
     """Параметры такта: `safe_level: auto` заменяется уровнем хода, который выбрал
     судья пары; пары ещё нет — `PAIR_FALLBACK_LEVEL`. Фиксированный `safe_level`
     возвращается как есть."""
@@ -146,6 +165,7 @@ class PairState:
     """Пара хода: уровень хода (сильный уровень пары; `None` — пара ещё не выбрана),
     сколько шагов осталось у верхней пары, поднятой сигналом (`None` — окна нет:
     нижняя или верхняя на весь ход) и сколько подъёмов было в ходу."""
+
     safe_level: str | None
     window_left: int | None
     raises: int
@@ -155,13 +175,19 @@ def pair_start(score: int | None, params: RoutingParams) -> PairState:
     """Старт хода по оценке судьи пары: не ниже порога или сбой судьи (`None`) —
     верхняя пара на весь ход, ниже — нижняя. Стартового окна нет: замер с сильной
     max показал, что после спуска с верхней пары задача теряет её качество."""
-    if score is None or pair_safe_level(score, params.pair_threshold) == PAIR_UPPER:
+    if (
+        score is None
+        or pair_safe_level(score, params.pair_threshold) == PAIR_UPPER
+    ):
         return PairState(PAIR_UPPER, None, 0)
     return PairState(PAIR_LOWER, None, 0)
 
 
 def pair_tick(
-    pair: PairState, signals: Iterable[str], strong_lower_last: bool, params: RoutingParams,
+    pair: PairState,
+    signals: Iterable[str],
+    strong_lower_last: bool,
+    params: RoutingParams,
 ) -> tuple[PairState, str | None]:
     """Шаг лестницы на такте. Верхняя пара: окно подъёма истекло — спуск (без окна
     не спускается, сигналы её не трогают). Нижняя: сигнал такта после вызова модели
@@ -179,11 +205,15 @@ def pair_tick(
     return PairState(PAIR_UPPER, params.weak_steps, raises), PAIR_RAISE
 
 
-def pair_entry_decision(cause: str, signals: Iterable[str], params: RoutingParams) -> Decision:
+def pair_entry_decision(
+    cause: str, signals: Iterable[str], params: RoutingParams
+) -> Decision:
     """Решение такта, на котором сменилась пара: сильная модель новой пары, серия с
     нуля. `params` — уже разрешённые (`turn_params`) под новую пару."""
     _weak, strong = pair_levels(params)
-    reason = REASON_PAIR_DESCEND if cause == PAIR_DESCEND else REASON_PAIR_RAISE
+    reason = (
+        REASON_PAIR_DESCEND if cause == PAIR_DESCEND else REASON_PAIR_RAISE
+    )
     codes = () if cause == PAIR_DESCEND else tuple(sorted(set(signals)))
     return Decision(strong, reason, codes, True)
 
