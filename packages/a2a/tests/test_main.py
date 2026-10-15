@@ -133,6 +133,25 @@ def test_auth_rejection_blocks_non_loopback_without_token():
     )
 
 
+async def test_serve_bounds_graceful_shutdown(tmp_path, monkeypatch):
+    captured = {}
+
+    class FakeServer:
+        def __init__(self, config) -> None:
+            captured["timeout"] = config.timeout_graceful_shutdown
+            self.should_exit = False
+
+        async def serve(self) -> None:
+            return None
+
+    monkeypatch.setattr("gc_a2a.main.uvicorn.Server", FakeServer)
+    monkeypatch.setattr("gc_a2a.main._log_routes", lambda *_a, **_k: None)
+    from gc_a2a.main import serve
+
+    await serve(make_settings(**{"paths.threads_data_path": str(tmp_path)}))
+    assert captured["timeout"] not in (None, 0)
+
+
 def test_non_loopback_without_token_exits_before_bind(monkeypatch, capsys):
     def load(path, profile_override=None):
         del path, profile_override

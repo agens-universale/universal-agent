@@ -37,6 +37,10 @@ from gc_a2a.card import http_origin
 from gc_a2a.facade import A2aFacade
 from gc_a2a.http_api import create_app
 
+# Иначе uvicorn ждёт блокирующий SendMessage без предела, и stop() хода
+# не вызывается, пока соединение само не закроется.
+_GRACEFUL_SHUTDOWN_SECONDS = 5
+
 
 def main(argv: list[str] | None = None) -> int:
     """Синхронный вход. Сокет открывается только после конфига и проверки бэкенда."""
@@ -184,13 +188,34 @@ async def serve(loaded: LoadedSettings) -> None:
     _log_routes(app, host, port)
     server = uvicorn.Server(
         uvicorn.Config(
-            app, host=host, port=port, log_level="info", access_log=True
+            app,
+            host=host,
+            port=port,
+            log_level="info",
+            access_log=True,
+            timeout_graceful_shutdown=_GRACEFUL_SHUTDOWN_SECONDS,
         )
     )
+    watcher = asyncio.create_task(stop_turns_on_exit(server, facade))
     try:
         await server.serve()
     finally:
-        await facade.shutdown()
+        server.should_exit = True
+        try:
+            await watcher
+        finally:
+            await facade.shutdown()
+
+
+async def stop_turns_on_exit(server: Any, facade: A2aFacade) -> None:
+    """Остановить ходы, как только сервер начал выходить.
+
+    Lifespan uvicorn зовёт уже после ожидания соединений, а соединения
+    держат блокирующий ``SendMessage``. Флаг ``should_exit`` встаёт раньше.
+    """
+    while not server.should_exit:
+        await asyncio.sleep(0.05)
+    await facade.shutdown()
 
 
 def _log_routes(app: Any, host: str, port: int) -> None:

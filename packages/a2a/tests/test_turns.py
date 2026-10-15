@@ -339,6 +339,34 @@ async def test_cancel_waits_until_the_run_finishes(tmp_path):
     assert hung.peak == 1
 
 
+async def test_server_exit_stops_a_blocking_turn(tmp_path):
+    """should_exit останавливает ход, не дожидаясь конца SendMessage."""
+    from gc_a2a.main import stop_turns_on_exit
+
+    async with session(tmp_path, agents=[SlowAgent()]) as (
+        client,
+        facade,
+        created,
+    ):
+        pending = asyncio.create_task(rpc(client, "SendMessage", message()))
+        for _ in range(50):
+            if created and created[0].calls:
+                break
+            await asyncio.sleep(0.02)
+        assert created[0].calls
+        server = type("Server", (), {"should_exit": False})()
+        watcher = asyncio.create_task(stop_turns_on_exit(server, facade))
+        await asyncio.sleep(0.05)
+        assert pending.done() is False
+        server.should_exit = True
+        response = await asyncio.wait_for(pending, timeout=2)
+        await watcher
+    assert response.json()["result"]["task"]["status"]["state"] == (
+        "TASK_STATE_CANCELED"
+    )
+    assert created[0].stopped is True
+
+
 async def test_get_and_list_and_cancel(tmp_path):
     clock = Clock()
     async with session(

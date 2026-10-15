@@ -74,6 +74,8 @@ class A2aFacade:
         self._live: dict[str, Turn] = {}
         self._gate = asyncio.Lock()
         self._create_lock = asyncio.Lock()
+        self._close_lock = asyncio.Lock()
+        self._closed = False
 
     def card(self) -> dict:
         section = self._settings.settings.a2a
@@ -112,14 +114,18 @@ class A2aFacade:
         return await self._store.view(task_id, None)
 
     async def shutdown(self) -> None:
-        turns = list(self._live.values())
-        for turn in turns:
-            await turn.cancel()
-        for turn in turns:
-            await turn.done.wait()
-        for agent in list(self._agents.values()):
-            await _safe_aclose(agent)
-        self._agents.clear()
+        async with self._close_lock:
+            if self._closed:
+                return
+            turns = list(self._live.values())
+            for turn in turns:
+                await turn.cancel()
+            for turn in turns:
+                await turn.done.wait()
+            for agent in list(self._agents.values()):
+                await _safe_aclose(agent)
+            self._agents.clear()
+            self._closed = True
 
     async def _reserve(self, incoming: Incoming) -> Any:
         async with self._gate:
