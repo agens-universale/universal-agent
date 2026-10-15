@@ -23,16 +23,11 @@ from live_support import (
 )
 
 
-@pytest.mark.parametrize(
-    ("batch_flags", "persist"),
-    [(False, "step"), (True, "step"), (True, "turn")],
-    ids=["legacy-flags", "batched-flags", "turn-persist"],
-)
+@pytest.mark.parametrize("persist", ["step", "turn"])
 async def test_native_executor_uses_real_file_session_and_replays(
     tmp_path,
     provider,  # noqa: F811
     monkeypatch,
-    batch_flags,
     persist,
 ):
     binary = temporal_cli()
@@ -72,15 +67,6 @@ async def test_native_executor_uses_real_file_session_and_replays(
         stores={"files": files},
         public_config=public_config_snapshot,
     )
-    if not batch_flags:
-        prepare = activities._prepare
-
-        async def without_batch(call, ctx):
-            result = await prepare(call, ctx)
-            result.store_capabilities.remove("reset_run_flags")
-            return result
-
-        activities._prepare = without_batch
     thread = ThreadStoreActivities({"files": files})
     registered = [
         activities.prepare,
@@ -137,22 +123,21 @@ async def test_native_executor_uses_real_file_session_and_replays(
             for event in history.events
             if event.HasField("activity_task_failed_event_attributes")
         ]
-        assert not any(
-            "ThreadStoreConflict" in failure for failure in failures
-        )
-        # Before own metadata acknowledgements: 13 commits and 4 loads, one
-        # failed commit and its recovery load caused solely by our own flag.
-        # Optional startup batching removes one metadata read and one commit.
-        # persist: turn — шаги хода одним commit'ом в конце хода.
-        assert (
-            activity_counts["universal_agent.thread.commit"]
-            == ({"step": 11 if batch_flags else 12, "turn": 4}[persist])
-        )
-        assert activity_counts["universal_agent.thread.load"] == (
-            2 if batch_flags else 3
-        )
+        assert not any("ThreadConflict" in failure for failure in failures)
+        # persist: step — шаг одной записью (commit); перед ней сессия
+        # перечитывает meta (get отвечает «не изменилась» — без состояния).
+        # persist: turn — ход одной записью в конце. Аренда — claim в начале,
+        # release в конце; статус хода — append_side.
+        expected = {
+            "step": {"commit": 8, "get": 11, "append_side": 1},
+            "turn": {"commit": 1, "get": 4, "append_side": 1},
+        }[persist]
+        for operation, count in expected.items():
+            name = f"universal_agent.thread.{operation}"
+            assert activity_counts[name] == count, (name, activity_counts)
+        assert activity_counts["universal_agent.thread.claim"] == 1
+        assert activity_counts["universal_agent.thread.release"] == 1
         measurement = {
-            "batch_flags": batch_flags,
             "persist": persist,
             "activities": dict(sorted(activity_counts.items())),
             "activity_total": sum(activity_counts.values()),
@@ -164,6 +149,7 @@ async def test_native_executor_uses_real_file_session_and_replays(
         (tmp_path / "activity-counts.json").write_text(
             json.dumps(measurement, indent=2)
         )
+
         assert "Recovered successfully" in str(result["answer"])
         assert len(requests) == 2
         messages = await thread_messages(files, "test", "native-thread")

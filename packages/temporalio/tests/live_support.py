@@ -189,11 +189,11 @@ def worker_kwargs(config, native, threads, *, queue=None):
 
 
 async def thread_messages(store, system, thread):
-    """История треда хранилища v2 (данные записей потока ``messages``)."""
-    from gc_core.threads.models import ThreadKey
+    """История треда глазами сессии (порт хранилища): у записей без ``id``
+    он синтезирован — как при чтении старым файловым хранилищем."""
+    from gc_core.thread_store_async import athread_store
 
-    key = ThreadKey(system=system, thread=thread)
-    return [entry.data for entry in await store.read_stream(key, "messages")]
+    return await athread_store(store).aload_messages(system, thread)
 
 
 async def thread_meta(store, system, thread):
