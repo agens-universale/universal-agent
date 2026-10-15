@@ -101,6 +101,31 @@ class HungStreamAgent(AnswerAgent):
         self.last_answer = "остановлен"
 
 
+class ConfirmAgent(AnswerAgent):
+    """Ход упирается в подтверждение безопасности, как write/command guard."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.allowed: bool | None = None
+        self.executor._ctx.settings = make_settings()
+
+    async def stream(self, prompt, thread_id=None, system=None):
+        from gc_core.security.confirm_port import request_confirm
+
+        self.calls.append(
+            {"prompt": prompt, "thread_id": thread_id, "system": system}
+        )
+        self.allowed = request_confirm(
+            title="write",
+            question="записать файл?",
+            fields=[("path", "/tmp/x")],
+            ctx=self.executor._ctx,
+        )
+        self.last_answer = "да" if self.allowed else "нет"
+        if False:
+            yield ("answer", "")
+
+
 class FailAgent(AnswerAgent):
     async def stream(self, prompt, thread_id=None, system=None):
         del prompt, thread_id, system

@@ -6,6 +6,7 @@ from harness import (
     AnswerAgent,
     AskAgent,
     Clock,
+    ConfirmAgent,
     FailAgent,
     HungStreamAgent,
     SlowAgent,
@@ -133,6 +134,35 @@ async def test_question_then_reply_continues_the_same_task(tmp_path):
     roles = [item["role"] for item in done["history"]]
     assert roles == ["ROLE_USER", "ROLE_AGENT", "ROLE_USER"]
     assert len(created[0].calls) == 1
+
+
+async def test_confirm_does_not_read_the_server_terminal(
+    tmp_path, monkeypatch
+):
+    """tty на stdin сервера не становится вопросом write/command guard."""
+
+    class Tty:
+        def isatty(self) -> bool:
+            return True
+
+    def terminal(*_args, **_kwargs):
+        raise AssertionError("stdin")
+
+    monkeypatch.setattr("sys.stdin", Tty())
+    monkeypatch.setattr(
+        "gc_core.security.path_policy.prompt_user_confirmation_choice",
+        terminal,
+    )
+    async with session(tmp_path, agents=[ConfirmAgent()]) as (
+        client,
+        _f,
+        created,
+    ):
+        response = await rpc(client, "SendMessage", message())
+    task = response.json()["result"]["task"]
+    assert task["status"]["state"] == "TASK_STATE_COMPLETED"
+    assert created[0].allowed is False
+    assert task["artifacts"][0]["parts"][0]["text"] == "нет"
 
 
 async def test_failed_turn_is_a_task_not_an_rpc_error(tmp_path):
