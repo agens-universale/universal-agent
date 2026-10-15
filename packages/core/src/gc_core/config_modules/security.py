@@ -241,6 +241,35 @@ class ProtectedPathsConfig(BaseModel):
         return reject_blank_paths(value)
 
 
+class PermissionsConfig(BaseModel):
+    """Режим разрешений: единый рычаг автономии агента.
+
+    default_mode — с какого режима стартует сессия; выбор в сессии (Shift+Tab)
+    и флаг запуска ``--permission-mode`` сильнее. readonly_commands дополняет
+    встроенный список команд, исполняемых без подтверждения в любом режиме.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    default_mode: str = "edit"
+    readonly_commands: list[str] = Field(default_factory=list)
+
+    @field_validator("default_mode")
+    @classmethod
+    def validate_default_mode(cls, value: str) -> str:
+        # Lazy: резолвер режимов сам читает настройки (gc_core.settings →
+        # config_modules) — импорт на уровне модуля замкнул бы цикл.
+        from gc_core.security.permission_mode import AVAILABLE_MODES
+
+        mode = str(value or "").strip().lower()
+        allowed = {item.value for item in AVAILABLE_MODES}
+        if mode not in allowed:
+            raise ValueError(
+                "security.permissions.default_mode должен быть одним из: "
+                + ", ".join(sorted(allowed))
+            )
+        return mode
+
+
 class SecurityConfig(BaseModel):
     """
     Независимые слои безопасности. Все on/ask по дефолту (secure-by-default).
@@ -252,6 +281,7 @@ class SecurityConfig(BaseModel):
           url_policy:         {enabled, allowed_schemes, url_blacklist}
           download:           {download_dir, max_bytes}
           protected_paths:    {enabled, extra}
+          permissions:        {default_mode, readonly_commands}
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -267,3 +297,4 @@ class SecurityConfig(BaseModel):
     protected_paths: ProtectedPathsConfig = Field(
         default_factory=ProtectedPathsConfig
     )
+    permissions: PermissionsConfig = Field(default_factory=PermissionsConfig)

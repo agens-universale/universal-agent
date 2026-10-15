@@ -725,6 +725,15 @@ NOT_IN_MATRIX = {
     # test_thread_store_persist_turn.py и native test_native_workflow_live.py.
     "thread_store.persist": "local допускает только step; turn проверяется в test_thread_store_persist_turn и native live",
     "agent.model_steering": "текст подготовленных инструкций; текущий reader и local/port parity покрыты test_run_prompt_preparation",
+    # --- режим разрешений ----------------------------------------------------
+    #
+    # Режим меняет не путь исполнения, а исход решения «звать ли тул» внутри
+    # защит: manual без человека вырождается в отказ, и случай матрицы сравнил
+    # бы два отказа. Покрытие: security/test_permission_mode.py (таблицы и
+    # слои), security/test_guard_profiles.py и test_permission_gate.py (исходы
+    # в защитах и гейте), test_permissions_config.py (схема и флаг запуска).
+    "security.permissions.default_mode": "исход решения, не путь исполнения; покрытие в security/test_permission_mode и test_guard_profiles",
+    "security.permissions.readonly_commands": "дополнение списка только-чтения; покрытие в security/test_readonly_commands и test_guard_profiles",
     # --- os_backend: выбор физического бэкенда (docker/ssh/exec/sandbox) ------
     #
     # Ключи выбирают, ГДЕ исполняется I/O, а не путь async/sync внутри ядра:
