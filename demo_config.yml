@@ -385,6 +385,8 @@ paths:
   # В CLI/server/swarm это единственный источник инструкций; задан → замещает всё.
   agent_md_path: ""
   # chat_completions_system_prompt_path: "prompts/chat_completions_system_prompt.md"
+  # Инструкция судьи начальной пары автовыбора (level: auto). Нет файла или пуст — ход на верхней паре.
+  # chat_completions_routing_pair_judge_prompt_path: "prompts/chat_completions_routing_pair_judge_prompt.md"
 
   # threads_data_path / logs_dump_dir / skills_data_path по умолчанию НЕ заданы —
   # тогда runtime-данные пишутся в кросс-платформенные дефолтные каталоги:

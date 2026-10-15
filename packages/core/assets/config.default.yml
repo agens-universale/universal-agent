@@ -213,6 +213,8 @@ paths:
   # Промпт роли запуска (agent_md). Пусто = ролевого промпта нет.
   # В CLI/server/swarm это единственный источник инструкций; задан → замещает всё.
   agent_md_path: ""
+  # Инструкция судьи начальной пары автовыбора (level: auto). Нет файла или пуст — ход на верхней паре.
+  # chat_completions_routing_pair_judge_prompt_path: "prompts/chat_completions_routing_pair_judge_prompt.md"
 
 summary:
   # ~67–80k токенов истории — рассчитано на контекст моделей ~131k (под меньшие
