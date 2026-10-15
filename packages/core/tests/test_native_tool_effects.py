@@ -169,7 +169,8 @@ async def test_command_judge_human_and_effect_are_separate(
     )
     output = await aapply_tool(
         "exec_command",
-        {"command": "echo native", "cwd": str(tmp_path)},
+        # не `echo`: он в списке безобидных команд и идёт без судьи
+        {"command": "printf native", "cwd": str(tmp_path)},
         ctx=ctx,
         state=SimpleNamespace(shared=SimpleNamespace()),
     )
