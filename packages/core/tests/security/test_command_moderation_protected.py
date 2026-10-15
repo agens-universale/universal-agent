@@ -122,9 +122,10 @@ def test_build_judge_payload_includes_never_touch_paths(monkeypatch, tmp_path):
     assert "never_touch_paths" in payload
     paths_in_payload = payload["never_touch_paths"]
     assert isinstance(paths_in_payload, list)
-    assert len(paths_in_payload) == 2
-    assert str(instr) in paths_in_payload
-    assert str(oper) in paths_in_payload
+    # служебные, файлы инструкций и `.git` проекта
+    assert sorted(paths_in_payload) == sorted(
+        [str(instr), str(oper), str(tmp_path / ".git")]
+    )
 
 
 def test_build_judge_payload_never_touch_paths_empty_on_error(
@@ -237,3 +238,34 @@ def test_command_host_probe_includes_real_protected_snapshot(tmp_path):
     expected = cm.load_never_touch_paths(str(tmp_path))
     assert expected
     assert facts.data["never_touch_paths"] == expected
+
+
+def test_commands_that_only_mention_git_are_not_floored(tmp_path):
+    """`grep --exclude-dir .git`, `find -not -path './.git/*'` — частые команды,
+    которые лишь называют `.git`. Пол их не трогает: запись в `.git` командой
+    и так видят судьи и режим; закрытая дыра — молчаливая запись файловыми
+    тулами."""
+    from gc_core.security.command_guard import scan_command_for_protected
+
+    for cmd in (
+        "grep -r foo . --exclude-dir .git",
+        "find . -type f -not -path './.git/*'",
+        "tree -I .git",
+    ):
+        assert scan_command_for_protected(cmd, cwd=str(tmp_path)) == "allow", (
+            cmd
+        )
+
+
+def test_command_judge_sees_the_project_git_as_never_touch(tmp_path):
+    """Пол команды с `.git` не спрашивает (их много: `grep --exclude-dir .git`),
+    поэтому судья команд edit должен знать, что `.git` защищён: `cp … .git/hooks/`
+    он сочтёт опасным и спросит человека. Судье действий auto `.git` в этот
+    список не идёт — там запись в `.git` оценивается правилами, не запретом."""
+    from gc_core.security.command_moderation import load_never_touch_paths
+
+    git_dir = str(tmp_path / ".git")
+    assert git_dir in load_never_touch_paths(str(tmp_path))
+    assert git_dir not in load_never_touch_paths(
+        str(tmp_path), instructions=False
+    )

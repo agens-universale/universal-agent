@@ -13,6 +13,7 @@ import shlex
 from typing import Any, Callable
 
 from gc_core.execution.ports import port
+from gc_core.security.call_scope import current_call
 from gc_core.security.command_moderation import (
     NO_WORKAROUND_NOTICE,
     effective_command_cwd,
@@ -23,7 +24,14 @@ from gc_core.security.guard_probe import GuardProbeRequest, probe_step
 from gc_core.security.media_roots import media_roots
 from gc_core.security.path_policy import (
     _settings_source,
+    audit_policy_decision,
     resolve_tool_context,
+)
+from gc_core.security.permission_mode import (
+    ALIGN,
+    PASS,
+    exec_decision,
+    floor_question_decision,
 )
 from gc_core.security.protected_paths import (
     classify_path,
@@ -127,6 +135,9 @@ def scan_command_for_protected(
             "skills": "allow",
             "none": "allow",
             "instructions": "ask",
+            # Запись в `.git` командой видят судьи и режим; пол оставался бы
+            # вопросом на каждое `grep --exclude-dir .git`.
+            "vcs": "allow",
             "media": "ask",
             "operational": "deny",
         }[cls]
@@ -164,6 +175,25 @@ def _extract_payload(
     except Exception:
         return None
     return payload if isinstance(payload, str) else None
+
+
+def _floor_defers_to_mode(decision: str, ctx_obj: Any) -> bool:
+    """Вопрос пола о защищённом пути отдаётся режиму: True — команда идёт
+    дальше, решат стадия режима или судья действий."""
+    if decision != "ask":
+        return False
+    answer = floor_question_decision((exec_decision(ctx_obj, readonly=False),))
+    if answer == PASS:
+        return True  # режим запретит команду сам; безобидную — пропустит
+    scope = current_call()
+    if answer == ALIGN and scope is not None:
+        # На вопрос пола здесь отвечает судья действий: стадия режима
+        # проверит команду один раз и целиком. Строгой пометки нет: пол
+        # видит только упоминание пути (`cat AGENTS.md`, `git add …`), а
+        # не запись в него — менять ли файл, судья видит по тексту команды.
+        scope.floor_review = True
+        return True
+    return False
 
 
 def _command_guard_flow(
@@ -224,9 +254,8 @@ def _command_guard_flow(
             media=media_roots(_settings_source(self_obj, ctx_obj)),
         )
 
-    if decision == "allow":
+    if decision == "allow" or _floor_defers_to_mode(decision, ctx_obj):
         return (yield)
-
     if decision == "ask":
         from gc_core.security.confirm_port import request_confirm
 
@@ -239,7 +268,24 @@ def _command_guard_flow(
             decision_key=f"command:{payload}",
         )
         if confirmed:
+            # `confirmed`, а не `executed`: вопрос был про защищённый путь, а
+            # команда может делать и другое — её дальше проверяет модерация
+            # команд, итог исполнения пишет она.
+            audit_policy_decision(
+                context,
+                tool_name=effective_tool_name,
+                decision="confirmed",
+                reason_code="protected_ask_confirmed",
+                risk_flags=["touches_protected_paths"],
+            )
             return (yield)
+        audit_policy_decision(
+            context,
+            tool_name=effective_tool_name,
+            decision="blocked",
+            reason_code="protected_ask_cancelled",
+            error_type="protected_path_denied",
+        )
         # ask not confirmed → instructive blocked result
         err = {
             "type": "protected_path_denied",
@@ -254,6 +300,13 @@ def _command_guard_flow(
         )
 
     # deny → static blocked result
+    audit_policy_decision(
+        context,
+        tool_name=effective_tool_name,
+        decision="blocked",
+        reason_code="protected_deny",
+        error_type="protected_path_denied",
+    )
     err = {
         "type": "protected_path_denied",
         "message": "Command targets a protected path (.gc / config).",
