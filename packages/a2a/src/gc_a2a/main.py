@@ -33,6 +33,7 @@ from gc_core.onboarding import explain_broken_config
 from gc_core.settings import LoadedSettings
 from gc_core.tools.connect_mcp.registry import ToolsCache
 
+from gc_a2a.card import http_origin
 from gc_a2a.facade import A2aFacade
 from gc_a2a.http_api import create_app
 
@@ -193,7 +194,7 @@ async def serve(loaded: LoadedSettings) -> None:
 
 
 def _log_routes(app: Any, host: str, port: int) -> None:
-    origin = _origin(host, port)
+    origin = http_origin(host, port)
     for method, path in _routes(app):
         print(f"gc-a2a: {method} {origin}{path}", file=sys.stderr)
 
@@ -210,13 +211,6 @@ def _routes(app: Any) -> list[tuple[str, str]]:
                 continue
             found.append((method, path))
     return found
-
-
-def _origin(host: str, port: int) -> str:
-    shown = host
-    if ":" in host and not host.startswith("["):
-        shown = "[" + host + "]"
-    return "http://" + shown + ":" + str(port)
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:

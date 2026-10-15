@@ -49,8 +49,7 @@ def _match(task: Task, query: TaskQuery) -> bool:
 
 
 def _stamp(value: str) -> datetime:
-    text = value[:-1] + "+00:00" if value.endswith("Z") else value
-    parsed = datetime.fromisoformat(text)
+    parsed = datetime.fromisoformat(value)
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=UTC)
     return parsed

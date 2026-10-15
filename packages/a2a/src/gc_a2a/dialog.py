@@ -54,8 +54,6 @@ def _resume(store: TaskStore, incoming: Incoming) -> Resume:
         raise DialogError("not_found")
     if incoming.context_id not in (None, task.context_id):
         raise DialogError("invalid")
-    if task.state in TERMINAL or task.state == WORKING:
-        raise DialogError("unsupported")
     if task.state != INPUT_REQUIRED:
         raise DialogError("unsupported")
     dialog = store.dialog(task.context_id)

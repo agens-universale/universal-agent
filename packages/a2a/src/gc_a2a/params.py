@@ -274,9 +274,8 @@ def _after(value: Any) -> datetime | None:
         return None
     if not isinstance(value, str) or value == "":
         raise invalid_params()
-    text = value[:-1] + "+00:00" if value.endswith("Z") else value
     try:
-        parsed = datetime.fromisoformat(text)
+        parsed = datetime.fromisoformat(value)
     except ValueError as exc:
         raise invalid_params() from exc
     if parsed.tzinfo is None:

@@ -5,11 +5,15 @@ from __future__ import annotations
 CARD_VERSION = "0.4.0"
 
 
-def interface_url(host: str, port: int) -> str:
+def http_origin(host: str, port: int) -> str:
     shown = host
     if ":" in host and not host.startswith("["):
         shown = "[" + host + "]"
-    return "http://" + shown + ":" + str(port) + "/rpc"
+    return "http://" + shown + ":" + str(port)
+
+
+def interface_url(host: str, port: int) -> str:
+    return http_origin(host, port) + "/rpc"
 
 
 def agent_card(

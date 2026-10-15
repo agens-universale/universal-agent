@@ -102,8 +102,6 @@ def _bearer_ok(header: str | None, token: str) -> bool:
     if not isinstance(header, str) or not header.startswith("Bearer "):
         return False
     got = header[len("Bearer ") :]
-    if len(got) != len(token):
-        return False
     return secrets.compare_digest(got, token)
 
 
