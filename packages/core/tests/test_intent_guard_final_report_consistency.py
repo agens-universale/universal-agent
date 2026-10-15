@@ -113,7 +113,30 @@ class ValidateFinalReportConsistencyTest(unittest.TestCase):
         ]
         self.assertIn("STRICT RETRY RULES", retry_user)
         self.assertIn("not json", retry_user)
-        self.assertIn("Do NOT reason", retry_user)
+        self.assertIn("Do not reason out loud", retry_user)
+        self.assertIn("trace_gaps", retry_user)
+
+    @patch("gc_core.summarize.llm.arequest_chat_completion_text")
+    def test_broken_json_with_axes_salvages_instead_of_fail_open(
+        self, mock_llm
+    ) -> None:
+        mock_llm.return_value = (
+            "broken {trace_ok: false, report_ok: true, action truncated"
+        )
+        result = run_coro(
+            avalidate_final_report_vs_user_intent(
+                ctx=self.ctx,
+                state=self.state,
+                current_user_requests=["x"],
+                finish_handoff_arguments={},
+                trace_digest=self.digest,
+            )
+        )
+        self.assertEqual(mock_llm.call_count, 2)
+        self.assertFalse(result.ok)
+        self.assertFalse(result.trace_ok)
+        self.assertTrue(result.report_ok)
+        self.assertEqual(result.action, "continue_work")
 
     @patch("gc_core.summarize.llm.arequest_chat_completion_text")
     def test_unparseable_first_reply_retry_recovers(self, mock_llm) -> None:
@@ -160,7 +183,9 @@ class ValidateFinalReportConsistencyTest(unittest.TestCase):
         )
 
     @patch("gc_core.summarize.llm.arequest_chat_completion_text")
-    def test_first_prompt_forbids_reasoning_out_loud(self, mock_llm) -> None:
+    def test_first_prompt_evidence_first_json_no_think_invite(
+        self, mock_llm
+    ) -> None:
         mock_llm.return_value = _validator_json()
         run_coro(
             avalidate_final_report_vs_user_intent(
@@ -172,8 +197,11 @@ class ValidateFinalReportConsistencyTest(unittest.TestCase):
             )
         )
         user_content = mock_llm.call_args.kwargs["messages"][1]["content"]
-        self.assertIn("Do NOT reason out loud", user_content)
-        self.assertIn("Return ONLY a single raw JSON object", user_content)
+        self.assertIn("Do not reason out loud", user_content)
+        self.assertIn("trace_gaps", user_content)
+        self.assertIn("report_mismatches", user_content)
+        self.assertIn("list emptiness", user_content)
+        self.assertNotIn("<think>", user_content)
 
     @patch("gc_core.summarize.llm.arequest_chat_completion_text")
     def test_does_not_prebind_profile_kwargs(self, mock_llm) -> None:
@@ -285,14 +313,16 @@ def test_guard_prompt_accepts_confirmation_before_action():
     )
 
 
-def test_guard_prompt_forbids_reasoning_in_reply():
+def test_guard_prompt_evidence_before_verdict_no_think_invite():
     from gc_core.intent_guard.final_report_consistency import (
         _load_guard_prompt,
     )
 
     prompt = _load_guard_prompt()
     assert "No reasoning in the reply" in prompt
-    assert "Do **not** write chain-of-thought" in prompt
+    assert "Evidence before verdict" in prompt
+    assert "<think>" not in prompt
+    assert "Decide silently" not in prompt
 
 
 if __name__ == "__main__":

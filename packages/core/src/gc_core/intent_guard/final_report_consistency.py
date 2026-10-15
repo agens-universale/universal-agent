@@ -21,6 +21,7 @@ from gc_core.intent_guard.validation_result import (
     ValidationResult,
     fail_open_validation_result,
     parse_validator_response,
+    salvage_validator_axes,
 )
 from gc_core.settings import settings_of
 from gc_core.summarize.llm import (
@@ -136,9 +137,10 @@ def _clip_retry_draft(
 def _build_finish_gate_user_prompt(payload: Dict[str, Any]) -> str:
     return (
         "Run the two-axis finish gate on the input below.\n"
-        "Do NOT reason out loud. Do NOT write <think> or analysis prose.\n"
-        "Return ONLY a single raw JSON object with required keys from the system prompt "
-        "(action, trace_ok, report_ok; lists on reject).\n\n"
+        "Do not reason out loud. Return ONLY a single raw JSON object.\n"
+        "In that JSON: list evidence first (trace_gaps, report_mismatches), then derive "
+        "trace_ok / report_ok from list emptiness, then action from the decision matrix.\n"
+        "Required keys: trace_gaps, report_mismatches, trace_ok, report_ok, action, is_question.\n\n"
         f"Input:\n{json.dumps(payload, ensure_ascii=False, indent=2)}"
     )
 
@@ -152,10 +154,12 @@ def _build_finish_gate_retry_user_prompt(
     draft = _clip_retry_draft(previous_raw)
     return (
         "Your previous finish-gate reply was INVALID: it was not parseable JSON with "
-        "required keys (action, trace_ok, report_ok), or it was truncated mid-reasoning.\n\n"
+        "required keys (trace_ok, report_ok, action), or it was truncated mid-reasoning.\n\n"
         "STRICT RETRY RULES:\n"
-        "- Do NOT reason. Do NOT write <think>…</think>, commentary, or step-by-step text.\n"
-        "- Return ONLY the raw JSON verdict object (no markdown fences, no preamble).\n"
+        "- Do not reason out loud. Return ONLY the raw JSON verdict object "
+        "(no markdown fences, no preamble).\n"
+        "- JSON key order: trace_gaps, report_mismatches first; then trace_ok / report_ok "
+        "from list emptiness; then action from the decision matrix.\n"
         "- You may use your previous incomplete output below as scratch notes, then emit JSON only.\n\n"
         "Previous incomplete output:\n"
         "-----\n"
@@ -186,6 +190,63 @@ async def _arequest_finish_gate_once(
         max_tokens=auxiliary_llm_judge_max_tokens(ctx),
         request_label=request_label,
         consumer=consumer,
+    )
+
+
+def _resolve_after_unparseable_replies(
+    *,
+    raw: str,
+    raw_retry: str,
+    logger: Any,
+) -> ValidationResult:
+    """Retry уже сделан; пробуем salvage осей, иначе fail-open accept."""
+    salvaged = salvage_validator_axes(raw_retry) or salvage_validator_axes(raw)
+    if salvaged is None:
+        return fail_open_validation_result()
+    if logger is not None:
+        logger.warning(
+            "finish_gate both replies unparseable; using salvaged axes "
+            "trace_ok=%s report_ok=%s action=%s",
+            salvaged.trace_ok,
+            salvaged.report_ok,
+            salvaged.action,
+        )
+    return salvaged
+
+
+async def _aretry_finish_gate_after_unparseable(
+    *,
+    ctx: Any,
+    state: Any,
+    system_prompt: str,
+    payload: Dict[str, Any],
+    previous_raw: str,
+    consumer: str,
+) -> ValidationResult:
+    logger = getattr(ctx, "logger", None)
+    if logger is not None:
+        logger.warning(
+            "finish_gate first reply unparseable; retrying with JSON-only prompt previous_chars=%s",
+            len(previous_raw or ""),
+        )
+    raw_retry = await _arequest_finish_gate_once(
+        ctx=ctx,
+        state=state,
+        system_prompt=system_prompt,
+        user_prompt=_build_finish_gate_retry_user_prompt(
+            payload=payload,
+            previous_raw=previous_raw,
+        ),
+        request_label="intent_guard_finish_gate_retry",
+        consumer=consumer,
+    )
+    parsed_retry = parse_validator_response(raw_retry)
+    if parsed_retry is not None:
+        return parsed_retry
+    return _resolve_after_unparseable_replies(
+        raw=previous_raw,
+        raw_retry=raw_retry,
+        logger=logger,
     )
 
 
@@ -261,26 +322,11 @@ async def avalidate_final_report_vs_user_intent(
     parsed = parse_validator_response(raw)
     if parsed is not None:
         return parsed
-
-    logger = getattr(ctx, "logger", None)
-    if logger is not None:
-        logger.warning(
-            "finish_gate first reply unparseable; retrying with JSON-only prompt previous_chars=%s",
-            len(raw or ""),
-        )
-
-    raw_retry = await _arequest_finish_gate_once(
+    return await _aretry_finish_gate_after_unparseable(
         ctx=ctx,
         state=state,
         system_prompt=system_prompt,
-        user_prompt=_build_finish_gate_retry_user_prompt(
-            payload=payload,
-            previous_raw=raw,
-        ),
-        request_label="intent_guard_finish_gate_retry",
+        payload=payload,
+        previous_raw=raw,
         consumer=consumer,
     )
-    parsed_retry = parse_validator_response(raw_retry)
-    if parsed_retry is not None:
-        return parsed_retry
-    return fail_open_validation_result()

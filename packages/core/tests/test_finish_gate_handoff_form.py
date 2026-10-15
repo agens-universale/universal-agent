@@ -492,3 +492,16 @@ def test_guard_prompt_still_rejects_content_contradictions():
     assert "handoff.artifacts" in prompt
     assert "report_mismatches" in prompt
     assert "contradict" in prompt.lower() or "contradiction" in prompt.lower()
+
+
+def test_guard_prompt_evidence_before_verdict():
+    """Списки свидетельств раньше ok/action; think-теги не приглашаем (парсер вырежет сам)."""
+    prompt = _load_guard_prompt()
+    schema_idx = prompt.index("## Output schema")
+    schema = prompt[schema_idx:]
+    assert schema.index('"trace_gaps"') < schema.index('"trace_ok"')
+    assert schema.index('"report_mismatches"') < schema.index('"report_ok"')
+    assert schema.index('"trace_ok"') < schema.index('"action"')
+    assert "Evidence before verdict" in prompt
+    assert "No reasoning in the reply" in prompt
+    assert "<think>" not in prompt
