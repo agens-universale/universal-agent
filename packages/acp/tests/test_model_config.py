@@ -532,3 +532,110 @@ async def test_prompt_skips_the_trace_line_without_a_model_name(tmp_path):
     assert _thoughts(writer) == []
     assert _by_id(writer, 3)["result"]["stopReason"] == "end_turn"
     await facade.shutdown()
+
+
+_CHAT = {"backend.api_mode": "chat_completions"}
+
+
+def _auto_models(**extra):
+    return {**_models(), **_CHAT, **extra}
+
+
+async def _session(facade, writer):
+    await _init(facade)
+    await _new(facade, "/work")
+    created = _by_id(writer, 2)["result"]
+    return created["sessionId"], _option(created)
+
+
+async def test_picker_offers_auto_when_available(tmp_path):
+    facade, writer, _agents = _open(_loaded(tmp_path, _auto_models()))
+    _session_id, option = await _session(facade, writer)
+    assert _values(option) == ["glm-local", "flash", "opus", "auto"]
+    assert option["options"][-1] == {"value": "auto", "name": "auto"}
+    assert option["currentValue"] == "glm-local"
+    await facade.shutdown()
+
+
+async def test_auto_level_is_current_and_named_in_the_trace(tmp_path):
+    loaded = _loaded(tmp_path, _auto_models(level="auto"))
+    facade, writer, agents = _open(loaded)
+    session_id, option = await _session(facade, writer)
+    assert option["currentValue"] == "auto"
+    assert agents[0].factory_kwargs["level_provider"]() == "auto"
+    writer.sent.clear()
+    await facade.handle_line(
+        _line(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "go"}],
+            },
+            3,
+        )
+    )
+    await facade._sessions[session_id].prompt_task
+    assert _thoughts(writer) == ["Модель: auto\n"]
+    await facade.shutdown()
+
+
+async def test_fixed_model_from_auto_leaves_auto(tmp_path):
+    loaded = _loaded(tmp_path, _auto_models(level="auto"))
+    facade, writer, agents = _open(loaded)
+    session_id, _first = await _session(facade, writer)
+    await _set(facade, session_id, "flash", 3)
+    option = _option(_by_id(writer, 3)["result"])
+    assert option["currentValue"] == "flash"
+    assert "auto" in _values(option)
+    assert facade._sessions[session_id].level == "light"
+    await _set(facade, session_id, "auto", 4)
+    await _set(facade, session_id, "glm-local", 5)
+    assert _option(_by_id(writer, 5)["result"])["currentValue"] == "glm-local"
+    assert facade._sessions[session_id].level == "default"
+    assert agents[0].factory_kwargs["level_provider"]() == "default"
+    await facade.shutdown()
+
+
+async def test_choosing_auto_sets_the_auto_level(tmp_path):
+    facade, writer, agents = _open(_loaded(tmp_path, _auto_models()))
+    session_id, _first = await _session(facade, writer)
+    await _set(facade, session_id, "auto", 3)
+    option = _option(_by_id(writer, 3)["result"])
+    assert option["currentValue"] == "auto"
+    assert facade._sessions[session_id].level == "auto"
+    assert agents[0].factory_kwargs["level_provider"]() == "auto"
+    await facade.shutdown()
+
+
+async def test_auto_is_not_offered_when_unavailable(tmp_path):
+    responses = _loaded(tmp_path, _models())
+    same = _loaded(
+        tmp_path,
+        {
+            **_CHAT,
+            "models": {a: {"model": "same"} for a in ("a", "b", "c")},
+            "slots": {"default": "a", "light": "b", "max": "c"},
+        },
+    )
+    for loaded in (responses, same):
+        facade, writer, _agents = _open(loaded)
+        session_id, option = await _session(facade, writer)
+        assert "auto" not in _values(option)
+        await _set(facade, session_id, "auto", 3)
+        assert _by_id(writer, 3)["error"]["code"] == -32602
+        assert facade._sessions[session_id].level is None
+        await facade.shutdown()
+
+
+def test_unavailable_auto_shows_the_level_that_runs(tmp_path):
+    loaded = _loaded(tmp_path, {**_models(), "level": "auto"})
+    option = model_config_option(loaded, "auto")
+    assert option["currentValue"] == "glm-local"
+    assert "auto" not in _values(option)
+    assert active_model_line(loaded, "auto") == "Модель: glm-local"
+
+
+def test_active_model_line_in_auto_names_the_mode(tmp_path):
+    loaded = _loaded(tmp_path, _auto_models())
+    assert active_model_line(loaded, "auto") == "Модель: auto"
+    assert active_model_line(loaded, "default") == "Модель: glm-local"
