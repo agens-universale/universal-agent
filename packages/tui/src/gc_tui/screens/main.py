@@ -486,6 +486,9 @@ class TraceScreen(Screen):
         self._ask_human_child_parent_call_id: Optional[str] = None
         # Spec 2026-05-26: pending user-replies (in-memory dict by client_id, FIFO ordered).
         self._pending_user_widgets: dict[str, UserReplyContainer] = {}
+        # id записей, уже отрисованных в трейсе: запись с таким id не
+        # рисуется повторно ни на одном пути (rebuild, live-тик).
+        self._rendered_ids: set[str] = set()
         # Кэш wire_content для reconciliation — независим от состояния meta-файла,
         # который executor может перезаписывать в своём потоке.
         self._pending_wire_cache: dict[str, str] = {}
@@ -1818,6 +1821,7 @@ class TraceScreen(Screen):
     def _reset_render_state(self) -> None:
         """Clear all per-task rendering state. Called on task switch and stream_reset."""
         self._task_events.clear()
+        self._rendered_ids.clear()
         self._last_agent_summary = None
         self._next_no = 1
         self._stick_bottom = (
@@ -2105,9 +2109,8 @@ class TraceScreen(Screen):
         сегментов в маркер. Маркер сжатия сегмента i = его compacted_by (ставится
         между сегментами, чтобы было видно, где прошла компакция).
 
-        Дедуп по id: preserved-копия (user и пара call/output) лежит в следующем
-        файле с тем же id. Рисуем первое вхождение, чтобы не дублировать строку
-        вокруг маркера. Payload остаётся full, пока этот id есть в окне
+        Дедуп по id — в `_render_record` (общий для всех путей): preserved-копия
+        лежит в следующем файле с тем же id, рисуется первое вхождение. Payload остаётся full, пока этот id есть в окне
         segments[-2:]."""
         from gc_tui.models import TraceEvent
 
@@ -2117,7 +2120,6 @@ class TraceScreen(Screen):
             for rec in seg["messages"]
             if isinstance(rec, dict)
         )
-        seen_ids: set[str] = set()
         window_start = retention_window_start_index(len(segments))
         window_ids = message_ids_in_retention_window(segments)
         for i, seg in enumerate(segments):
@@ -2125,10 +2127,6 @@ class TraceScreen(Screen):
             for rec in seg["messages"]:
                 payload = rec.get("payload")
                 mid = payload.get("id") if isinstance(payload, dict) else None
-                if mid is not None:
-                    if mid in seen_ids:
-                        continue
-                    seen_ids.add(mid)
                 in_window = seg_in_window or (
                     mid is not None and mid in window_ids
                 )
@@ -2168,6 +2166,11 @@ class TraceScreen(Screen):
         payload = rec.get("payload")
         if not isinstance(payload, dict):
             return
+        mid = payload.get("id")
+        if mid is not None:
+            if mid in self._rendered_ids:
+                return
+            self._rendered_ids.add(mid)
         ev = map_message(
             payload,
             no=self._next_no,
