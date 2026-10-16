@@ -48,6 +48,8 @@ def _force_truecolor_if_supported() -> None:
 
 
 def _build_parser() -> argparse.ArgumentParser:
+    from gc_core.config_modules.model_registry import LEVEL_VALUES
+
     parser = argparse.ArgumentParser(
         prog="gc-ua", add_help=False, allow_abbrev=False
     )
@@ -64,7 +66,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--level",
-        choices=["light", "default", "max", "auto"],
+        choices=list(LEVEL_VALUES),
         default=None,
         help=(
             "Активный уровень модели на этот запуск (перекрывает config.yml и профиль); "

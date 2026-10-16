@@ -82,3 +82,13 @@ def test_gc_ua_parser_accepts_level_auto():
 
     args = _parse_args(["--level", "auto"])
     assert args.level == "auto"
+
+
+def test_level_flag_choices_are_the_single_level_values():
+    from gc_core.config_modules.model_registry import LEVEL_VALUES
+    from gc_tui import _build_parser
+
+    action = next(
+        a for a in _build_parser()._actions if "--level" in a.option_strings
+    )
+    assert list(action.choices) == list(LEVEL_VALUES)

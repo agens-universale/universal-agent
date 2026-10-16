@@ -72,3 +72,15 @@ def test_trace_id_underscore_is_not_a_generic_override(monkeypatch):
     importlib.reload(ap_mod)
     assert ap_mod.run_args.trace_id == "00123"  # строка, не 83
     assert "trace_id" not in ap_mod.extra_config_overrides
+
+
+def test_level_flag_choices_are_the_single_level_values(monkeypatch):
+    from gc_core.config_modules.model_registry import LEVEL_VALUES
+
+    _parse(["gc-cli", "-q", "x"], monkeypatch)
+    from gc_cli import arg_parser as ap_mod
+
+    action = next(
+        a for a in ap_mod.parser._actions if "--level" in a.option_strings
+    )
+    assert list(action.choices) == list(LEVEL_VALUES)

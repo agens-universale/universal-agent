@@ -171,11 +171,15 @@ def auto_routing_unavailable_reason_text(reason: str) -> str:
     return f"автовыбор моделей недоступен: {reason}"
 
 
-def auto_routing_unavailable_message(reason: str) -> str:
-    """Текст нотиса: фраза причины и уровень, которым идёт работа. Ответ на
-    набранный `/level auto` берёт одну фразу — набор уровень не меняет, и хвост
-    про default соврал бы на light и max."""
-    return f"{auto_routing_unavailable_reason_text(reason)} — работает уровень default"
+def auto_routing_unavailable_message(
+    reason: str, *, forced_model: bool = False
+) -> str:
+    """Текст нотиса: фраза причины и то, что работает. Ответ на набранный
+    `/level auto` берёт одну фразу — набор уровень не меняет, и хвост про
+    default соврал бы на light и max. При `--model` идёт заданная модель, а не
+    уровень default."""
+    tail = "модель из --model" if forced_model else "уровень default"
+    return f"{auto_routing_unavailable_reason_text(reason)} — работает {tail}"
 
 
 def auto_routing_unavailable_notice(source: Any) -> Optional[Notice]:
@@ -188,15 +192,14 @@ def auto_routing_unavailable_notice(source: Any) -> Optional[Notice]:
         if isinstance(source, LoadedSettings)
         else LoadedSettings(settings=settings_of(source))
     )
-    reason = auto_unavailable_reason(
-        loaded, force_legacy=cli_forces_legacy_model(loaded)
-    )
+    forced_model = cli_forces_legacy_model(loaded)
+    reason = auto_unavailable_reason(loaded, force_legacy=forced_model)
     if reason is None:
         return None
     return Notice(
         "info",
         "auto_routing_unavailable",
-        auto_routing_unavailable_message(reason),
+        auto_routing_unavailable_message(reason, forced_model=forced_model),
     )
 
 

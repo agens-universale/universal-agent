@@ -81,7 +81,7 @@ def test_cli_model_override_provenance_disables_levels():
     notice = auto_routing_unavailable_notice(loaded)
     assert notice.message == (
         "автовыбор моделей недоступен: уровни отключены флагом --model "
-        "— работает уровень default"
+        "— работает модель из --model"
     )
 
 
@@ -129,11 +129,13 @@ def test_collect_includes_one_routing_notice_and_preserves_cli_provenance(
 ):
     loaded = _cfg(**{"agent.auto_routing": False})
     reason = "выключен настройкой auto_routing"
+    tail = "уровень default"
     if force_legacy:
         loaded = loaded.with_overrides(
             {"agent.model": "forced-model"}, layer="cli"
         )
         reason = "уровни отключены флагом --model"
+        tail = "модель из --model"
     notices = collect_startup_notices(loaded, set(), None, is_tui=False)
     routing = [
         notice
@@ -142,5 +144,5 @@ def test_collect_includes_one_routing_notice_and_preserves_cli_provenance(
     ]
     assert len(routing) == 1
     assert routing[0].message == (
-        f"автовыбор моделей недоступен: {reason} — работает уровень default"
+        f"автовыбор моделей недоступен: {reason} — работает {tail}"
     )

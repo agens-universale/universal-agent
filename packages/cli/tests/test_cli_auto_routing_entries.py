@@ -62,23 +62,25 @@ class _Executor:
 
 
 @pytest.mark.parametrize(
-    "body, flags, reason",
+    "body, flags, reason, tail",
     [
         (
             _BACKEND + _ONE_MODEL,
             ["--level", "auto"],
             "во всех уровнях одна модель",
+            "уровень default",
         ),
         (
             _BACKEND + _THREE_MODELS + "level: auto\n",
             ["--agent.model", "other"],
             "уровни отключены флагом --model",
+            "модель из --model",
         ),
     ],
     ids=["level_flag_on_one_model", "model_flag"],
 )
 def test_main_names_the_reason_runs_default_and_exits_0(
-    monkeypatch, tmp_path, capsys, body, flags, reason
+    monkeypatch, tmp_path, capsys, body, flags, reason, tail
 ):
     monkeypatch.chdir(tmp_path)
     base = tmp_path / "base.yml"
@@ -110,7 +112,7 @@ def test_main_names_the_reason_runs_default_and_exits_0(
     assert rc == 0
     assert seen["available"] is False  # RunContext соберётся на default
     assert (
-        f"автовыбор моделей недоступен: {reason} — работает уровень default"
+        f"автовыбор моделей недоступен: {reason} — работает {tail}"
         in capsys.readouterr().err
     )
 
