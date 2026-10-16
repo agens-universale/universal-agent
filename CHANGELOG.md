@@ -39,6 +39,10 @@
 - Файловое хранилище терпит испорченные данные, как develop: meta с `updated_at` не по ISO — тред в конце списка (а не отказ всех списков); пустой `control.json` и недописанный `pending.json` (отключение питания без fsync) тред не закрывают — журнал уходит в `pending.json.corrupt-<pid>`; чужая по форме строка потока пропускается.
 - Тред, удалённый кодом develop после отката, не оживает по оставшимся потокам фронтендов и алиасам; удаление треда сносит потоки по точным именам, не задевая тред с похожим id.
 
+### Исправлено — судья команд при моделях только в реестре
+
+- Судья модерации команд считался ненастроенным, если модели заданы только реестром `models`/`slots`, а `backend.completions_url` пуст: fail-closed политика блокировала модерируемые команды (`exec_python`, `exec_command`), под Temporal — и в субагентах. Доступность судьи теперь — адрес модели, в которую резолвится `command_judge` (`gc_core.model_router.consumer_has_transport`), локально и в снимке настроек воркера Temporal.
+
 ### Feature — limit trace summary (LIMIT_TRACE_SUMMARY_SPEC)
 
 - When the main agent or a subagent hits a limit (`step_limit` / `tool_call_limit` / `token_limit`), the trace is now summarized by a single auxiliary LLM call and returned as a JSON envelope `{ok:false, status, message, raw_trace_summary}` instead of a flat string.

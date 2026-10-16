@@ -301,12 +301,18 @@ def public_config_snapshot(source: Any) -> PublicConfigSnapshot:
     ``AppConfig``. Умолчания не дописываются, функции не выключаются: снимок —
     те же настройки без закрытых полей.
     """
+    # Не на уровне модуля: модуль импортирует код workflow (песочница), а
+    # снимок снимается только на воркере.
+    from gc_core.model_router import consumer_has_transport
+
     settings, runtime = settings_of(source), runtime_of(source)
     url = settings.backend.completions_url
     return PublicConfigSnapshot(
         settings=public_settings(settings),
         runtime=public_runtime(runtime),
-        model_transport_configured=bool(url),
+        model_transport_configured=consumer_has_transport(
+            settings, "command_judge"
+        ),
         provider_currency=provider_currency_for_url(url),
     )
 

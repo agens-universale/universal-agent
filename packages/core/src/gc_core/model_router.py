@@ -456,3 +456,25 @@ class ModelRouter:
             tariff=None,
             source=source,
         )
+
+
+def consumer_has_transport(
+    settings: Any, consumer: str, router: ModelRouter | None = None
+) -> bool:
+    """Есть ли у потребителя адрес модели: легаси ``backend.completions_url``
+    или запись реестра ``models``, в которую он резолвится.
+
+    Конфиг только с реестром (``models``/``slots``) оставляет
+    ``backend.completions_url`` пустым — по одному этому полю потребитель
+    выглядел бы ненастроенным. Открытый предохранитель транспорт не отменяет:
+    алиас настроен, просто временно отказывает.
+    """
+    source = settings_of(settings)
+    if source.backend.completions_url:
+        return True
+    if router is None:
+        router = ModelRouter(source, level_provider=lambda: source.level)
+    try:
+        return bool(router.resolve(consumer, check_breaker=False).url)
+    except (ValueError, LookupError):
+        return False

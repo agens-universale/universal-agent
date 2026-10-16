@@ -747,7 +747,11 @@ def _default_judge_client(
     settings = settings_of(_settings_source(self_obj, ctx))
     configured = getattr(ctx, "model_transport_configured", None)
     if configured is None:
-        configured = bool(settings.backend.completions_url)
+        from gc_core.model_router import consumer_has_transport
+
+        configured = consumer_has_transport(
+            settings, "command_judge", getattr(ctx, "model_router", None)
+        )
     if ctx is None or state is None or not configured:
         raise JudgeUnavailable("chat/completions context is not configured")
 
