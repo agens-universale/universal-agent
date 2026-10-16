@@ -142,6 +142,7 @@ from gc_tui.toggles import (
 from gc_tui.widgets.click_model import focus_target_at
 from gc_tui.widgets.command_input import CommandTextArea
 from gc_tui.widgets.command_palette import CommandPalette
+from gc_tui.widgets.static_content import update_if_changed
 from gc_tui.widgets.thinking_indicator import (
     TERMINAL_INDICATOR_STATES,
     ThinkingIndicator,
@@ -1314,8 +1315,8 @@ class TraceScreen(Screen):
     def _refresh_header(self) -> None:
         left, right = self._compose_header_segments()
         try:
-            self.query_one("#header-left", Static).update(left)
-            self.query_one("#header-right", Static).update(right)
+            update_if_changed(self.query_one("#header-left", Static), left)
+            update_if_changed(self.query_one("#header-right", Static), right)
         except Exception:
             pass
 
@@ -1374,8 +1375,9 @@ class TraceScreen(Screen):
         растёт по ходу прогона.
         """
         try:
-            self.query_one("#footer-right", Static).update(
-                self._compose_footer_right()
+            update_if_changed(
+                self.query_one("#footer-right", Static),
+                self._compose_footer_right(),
             )
         except Exception:
             pass
@@ -1385,7 +1387,7 @@ class TraceScreen(Screen):
             return
         # Голосовая пилюля вытесняет остальной footer-left, пока стадия активна.
         if self._voice is not None and self._voice.state != "idle":
-            left.update(self._voice_footer_render())
+            update_if_changed(left, self._voice_footer_render())
             return
         # Подсказка уступает место запущенному прогону: пока отказ дожёвывает
         # свои 5 секунд, человек мог отправить запрос — футер обязан показать
@@ -1397,7 +1399,7 @@ class TraceScreen(Screen):
         ):
             self._reset_footer_hint_state()
         if not self._footer_hint_active:
-            left.update(self._footer_left_text())
+            update_if_changed(left, self._footer_left_text())
 
     def on_screen_resume(self) -> None:
         """После возврата с под-экрана — освежить карточку и футер уведомлений."""
