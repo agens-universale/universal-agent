@@ -11,11 +11,14 @@
 
 from __future__ import annotations
 
+import json
+import os
 from typing import Any
 
 from gc_core.constants.tool_names import (
     ASK_HUMAN_TOOL_NAME,
     FINISH_TOOL_NAME,
+    FS_READ_FILE_NAME,
     INTERMEDIATE_REPLY_TOOL_NAME,
     SESSION_THINK_TOOL_NAME,
 )
@@ -43,6 +46,8 @@ _HIDDEN = frozenset(
         SESSION_THINK_TOOL_NAME,
     }
 )
+# Потолок строки на карточке: и аргумент, и превью результата.
+_CARD_LIMIT = 5000
 
 
 def report_from_record(
@@ -93,6 +98,8 @@ class ToolFlow:
         self._threads = threads
         self._key = key
         self._cursor: Cursor | None = None
+        # Срез поиска текущего вызова — с создания хода.
+        self._origin: Cursor | None = None
         self._seen: set[str] = set()
         self._finished: set[str] = set()
 
@@ -102,6 +109,7 @@ class ToolFlow:
         flow._cursor = (
             await threads.tail(key, (_HISTORY, _SUBAGENTS), None)
         ).cursor
+        flow._origin = flow._cursor
         return flow
 
     async def poll(self) -> list[dict]:
@@ -120,6 +128,47 @@ class ToolFlow:
                 updates.append(update)
         return updates
 
+    async def current_call_id(self) -> str | None:
+        """Вызов, который исполняется сейчас. Id тот же, что у карточки.
+
+        Срез — с создания хода: незаконченный вызов прошлого prompt не
+        прилипает. Родительский батч уже лежит в истории и идёт с начала,
+        поэтому текущий — первый без output. Вложенный тул дописывается
+        в поток субагента в момент старта, поэтому текущий — последний
+        открытый там. Сжатие истории читает её заново с начала: курсор
+        среза помнит версию истории на старте хода.
+        """
+        if self._origin is None:
+            return None
+        batch = await self._threads.tail(
+            self._key, (_HISTORY, _SUBAGENTS), self._origin
+        )
+        nested = _open_call_ids(batch.entries, _SUBAGENTS)
+        if nested:
+            return nested[-1]
+        parent = _open_call_ids(batch.entries, _HISTORY)
+        if parent:
+            return parent[0]
+        return None
+
+
+def _open_call_ids(
+    entries: list[tuple[str, StreamEntry]], wanted: str
+) -> list[str]:
+    seen: set[str] = set()
+    finished: set[str] = set()
+    order: list[str] = []
+    for stream, entry in entries:
+        if stream != wanted:
+            continue
+        update = _decode(stream, entry, seen, finished)
+        if update is None or update.get("sessionUpdate") != "tool_call":
+            continue
+        call_id = update.get("toolCallId")
+        if isinstance(call_id, str) and call_id != "":
+            order.append(call_id)
+    return [item for item in order if item not in finished]
+
 
 def _call_report(message: dict, seen: set[str]) -> dict | None:
     name = message.get("name")
@@ -129,12 +178,22 @@ def _call_report(message: dict, seen: set[str]) -> dict | None:
     if call_id is None or call_id in seen:
         return None
     seen.add(call_id)
-    return {
+    arguments = message.get("arguments")
+    report: dict[str, Any] = {
         "sessionUpdate": "tool_call",
         "toolCallId": call_id,
-        "title": _title(name, message.get("arguments")),
+        "title": _title(name, arguments),
         "status": _IN_PROGRESS,
+        "name": name,
     }
+    parsed = _argument_object(arguments)
+    if parsed is None:
+        return report
+    report["rawInput"] = _truncate_values(parsed)
+    locations = _locations(name, parsed)
+    if locations is not None:
+        report["locations"] = locations
+    return report
 
 
 def _output_report(
@@ -147,13 +206,23 @@ def _output_report(
         return None
     if finished is not None:
         finished.add(call_id)
-    ok, _brief = parse_tool_result_status(message.get("output"))
+    output = message.get("output")
+    ok, _brief = parse_tool_result_status(output)
     status = _FAILED if ok is False else _COMPLETED
-    return {
+    report: dict[str, Any] = {
         "sessionUpdate": "tool_call_update",
         "toolCallId": call_id,
         "status": status,
     }
+    preview = _preview_text(output)
+    if preview is not None:
+        report["content"] = [
+            {
+                "type": "content",
+                "content": {"type": "text", "text": preview},
+            }
+        ]
+    return report
 
 
 def _scoped_payload(payload: dict, parent: Any) -> dict:
@@ -168,6 +237,73 @@ def _scoped_payload(payload: dict, parent: Any) -> dict:
     scoped = dict(payload)
     scoped["call_id"] = f"{parent}:{call_id}"
     return scoped
+
+
+def _argument_object(arguments: Any) -> dict | None:
+    """Объект аргументов. Необъект и неразборная строка — None."""
+    if isinstance(arguments, dict):
+        return arguments
+    if not isinstance(arguments, str) or arguments == "":
+        return None
+    try:
+        parsed = json.loads(arguments)
+    except json.JSONDecodeError:
+        return None
+    if isinstance(parsed, dict):
+        return parsed
+    return None
+
+
+def _truncate_values(value: Any) -> Any:
+    """Копия для карточки. Исходные аргументы вызова не меняются."""
+    if isinstance(value, str):
+        return value[:_CARD_LIMIT]
+    if isinstance(value, dict):
+        return {key: _truncate_values(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_truncate_values(item) for item in value]
+    return value
+
+
+def _locations(name: str, arguments: dict) -> list[dict] | None:
+    path = arguments.get("path")
+    if not isinstance(path, str) or path == "":
+        return None
+    item: dict[str, Any] = {"path": os.path.abspath(path)}
+    offset = arguments.get("offset")
+    if (
+        name == FS_READ_FILE_NAME
+        and isinstance(offset, int)
+        and not isinstance(offset, bool)
+        and offset >= 1
+    ):
+        item["line"] = offset
+    return [item]
+
+
+def _preview_text(output: Any) -> str | None:
+    """Начало результата, не длиннее потолка карточки."""
+    if output is None:
+        return None
+    value = output
+    if isinstance(output, str):
+        if output == "":
+            return None
+        try:
+            value = json.loads(output)
+        except json.JSONDecodeError:
+            value = output
+    if value is None or value == "":
+        return None
+    if isinstance(value, str):
+        text = value
+    elif isinstance(value, (dict, list, int, float, bool)):
+        text = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    else:
+        text = str(value)
+    if text == "":
+        return None
+    return text[:_CARD_LIMIT]
 
 
 def _title(name: str, arguments: Any) -> str:

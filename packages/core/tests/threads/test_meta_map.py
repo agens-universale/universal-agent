@@ -128,6 +128,20 @@ def test_invalid_legacy_value_passes_through():
     assert _roundtrip(meta) == meta
 
 
+@pytest.mark.parametrize("value", [True, "3", 3.0])
+def test_coercible_legacy_value_is_not_coerced(value):
+    """Не-число в числовом поле develop не становится числом: ``1 == True``,
+    поэтому сравнение — по JSON."""
+    meta = {
+        "system": "cli",
+        "thread_id": "t",
+        "last_main_prompt_tokens": value,
+    }
+    parts = parts_from_meta(meta)
+    assert "last_prompt_tokens" not in parts.state.model_fields_set
+    assert json.dumps(_roundtrip(meta)) == json.dumps(meta)
+
+
 def test_empty_runtime_section_survives():
     meta = {"system": "cli", "thread_id": "t", "runtime": {}}
     assert _roundtrip(meta) == meta

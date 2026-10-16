@@ -1409,71 +1409,101 @@ async def _aexecute_tool_call(
     if persist_tool_trace:
         await apersist_subagent_trace(ctx, kind="call", payload=dict(m))
     was_invalid = False
+    # Исключение мимо WrongFunctionArgumentsException не доходит до записи
+    # result/error ниже. Открытый call в sidecar потом прилипает к confirm.
+    trace_open = persist_tool_trace
     try:
-        # call_id для субагента: чтобы вложенные строки в TUI знали,
-        # под какой корневой subagent_* они относятся.
-        state.tool_calls += 1
-        tool_res_raw, was_invalid = await _ainvoke_tool(
-            tool_name,
-            tool_arguments,
-            state,
-            ctx,
-            run_agent_func,
-            tool_call_id,
-        )
-    except WrongFunctionArgumentsException as exc:
-        # Отказ одного вызова — не отказ хода: невалидные аргументы становятся
-        # output этого вызова (как unknown_tool), остальные вызовы батча
-        # исполняются. Дальше общий путь: tool_end, sidecar, function_call_output.
-        if getattr(exc, "call_id", None) is None:
-            exc.call_id = tool_call_id
-        _attach_truncation_hint(exc, state)
-        was_invalid = True
-        tool_res_raw = exc.to_tool_output()
-    # Live-прогресс: тул закончил — или текст intermediate_reply.
-    # В историю треда это не пишется.
-    elapsed_ms = int((clock() - started_at) * 1000)
-    ok, error_brief = parse_tool_result_status(tool_res_raw)
-    if is_intermediate:
-        await _aemit_intermediate_reply(
-            ctx,
-            state,
-            tool_name,
-            tool_arguments,
-            tool_res_raw,
-            call_id_str=call_id_str,
-            elapsed_ms=elapsed_ms,
-            ok=ok,
-            error_brief=error_brief,
-        )
+        try:
+            # call_id для субагента: чтобы вложенные строки в TUI знали,
+            # под какой корневой subagent_* они относятся.
+            state.tool_calls += 1
+            tool_res_raw, was_invalid = await _ainvoke_tool(
+                tool_name,
+                tool_arguments,
+                state,
+                ctx,
+                run_agent_func,
+                tool_call_id,
+            )
+        except WrongFunctionArgumentsException as exc:
+            # Отказ одного вызова — не отказ хода: невалидные аргументы становятся
+            # output этого вызова (как unknown_tool), остальные вызовы батча
+            # исполняются. Дальше общий путь: tool_end, sidecar, function_call_output.
+            if getattr(exc, "call_id", None) is None:
+                exc.call_id = tool_call_id
+            _attach_truncation_hint(exc, state)
+            was_invalid = True
+            tool_res_raw = exc.to_tool_output()
+        # Live-прогресс: тул закончил — или текст intermediate_reply.
+        # В историю треда это не пишется.
+        elapsed_ms = int((clock() - started_at) * 1000)
+        ok, error_brief = parse_tool_result_status(tool_res_raw)
+        if is_intermediate:
+            await _aemit_intermediate_reply(
+                ctx,
+                state,
+                tool_name,
+                tool_arguments,
+                tool_res_raw,
+                call_id_str=call_id_str,
+                elapsed_ms=elapsed_ms,
+                ok=ok,
+                error_brief=error_brief,
+            )
+            return tool_res_raw, was_invalid, ok
+        if emit_tool_row:
+            emit_progress(
+                ctx,
+                state,
+                "tool_end",
+                elapsed_ms=elapsed_ms,
+                tool_name=tool_name,
+                tool_call_id=call_id_str,
+                ok=ok if ok is not None else True,
+                error_brief=error_brief,
+            )
+        if persist_tool_trace:
+            out_text = (
+                tool_res_raw
+                if isinstance(tool_res_raw, str)
+                else json.dumps(tool_res_raw, ensure_ascii=False)
+            )
+            await apersist_subagent_trace(
+                ctx,
+                kind="error" if ok is False else "result",
+                payload={
+                    "type": "function_call_output",
+                    "call_id": tool_call_id,
+                    "output": out_text,
+                },
+            )
+            trace_open = False
         return tool_res_raw, was_invalid, ok
-    if emit_tool_row:
-        emit_progress(
-            ctx,
-            state,
-            "tool_end",
-            elapsed_ms=elapsed_ms,
-            tool_name=tool_name,
-            tool_call_id=call_id_str,
-            ok=ok if ok is not None else True,
-            error_brief=error_brief,
-        )
-    if persist_tool_trace:
-        out_text = (
-            tool_res_raw
-            if isinstance(tool_res_raw, str)
-            else json.dumps(tool_res_raw, ensure_ascii=False)
-        )
+    finally:
+        await _aclose_sidecar_call(ctx, tool_call_id, trace_open)
+
+
+async def _aclose_sidecar_call(
+    ctx: Any, tool_call_id: Any, trace_open: bool
+) -> None:
+    """Закрыть call, который исключение унесло мимо обычного result/error."""
+    if not trace_open:
+        return
+    try:
         await apersist_subagent_trace(
             ctx,
-            kind="error" if ok is False else "result",
+            kind="error",
             payload={
                 "type": "function_call_output",
                 "call_id": tool_call_id,
-                "output": out_text,
+                "output": json.dumps(
+                    {"ok": False, "error": "tool call failed"},
+                    ensure_ascii=False,
+                ),
             },
         )
-    return tool_res_raw, was_invalid, ok
+    except Exception:
+        _fallback_logger.exception("sidecar error trace")
 
 
 async def _ainvoke_tool(

@@ -15,3 +15,5 @@ acp:
   finish_gate_mode: "off"
   # 0 = выключить technical reminder про session_todo
   todo_reminder_steps: 0
+  # Секунды ожидания session/request_permission (таймаут → отказ операции).
+  confirm_timeout_sec: 600

@@ -17,3 +17,5 @@ class AcpConfig(BaseModel):
     # Каждые N шагов без session_todo — technical reminder. 0 = выкл.
     # В IDE-чате чек-лист чаще толкает к «делай код» вопреки обсуждению.
     todo_reminder_steps: int = Field(default=0, ge=0)
+    # Ожидание ответа IDE на session/request_permission. 0 — сразу deny_once.
+    confirm_timeout_sec: float = Field(default=600, ge=0)

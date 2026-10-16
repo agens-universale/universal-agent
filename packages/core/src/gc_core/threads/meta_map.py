@@ -118,11 +118,16 @@ def _get(meta: JsonObject, path: tuple[str, ...]) -> Any:
 
 
 def _model(cls: type[BaseModel], values: JsonObject, rejected: JsonObject):
-    """Модель с явными полями ровно из ``values``; негодные — в ``rejected``."""
+    """Модель с явными полями ровно из ``values``; негодные — в ``rejected``.
+
+    Проверка строгая: нестрогая привела бы ``True``/``"3"`` в числовом поле к
+    ``1``/``3`` и записала бы обратно уже число. develop такие значения не
+    считал числом (``read_optional_nonneg_int``) — они остаются как лежали.
+    """
     accepted: JsonObject = {}
     for name, value in values.items():
         try:
-            cls.model_validate({name: value})
+            cls.model_validate({name: value}, strict=True)
         except ValidationError:
             rejected[name] = value
             continue

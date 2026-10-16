@@ -241,9 +241,27 @@ class SessionIndex:
             return None
         return {"cwd": raw.get("cwd"), "updated_at": raw.get("updatedAt")}
 
+    async def title(self, session_id: str) -> str | None:
+        """Title сессии: запомненный после хода, иначе — из истории."""
+        try:
+            key = thread_key(session_id)
+        except ValueError:
+            return None
+        thread = await self.threads.get(key)
+        state = None if thread is None else thread.frontend.get(_FRONTEND)
+        if isinstance(state, dict) and isinstance(state.get("title"), str):
+            return state["title"]
+        try:
+            return await self._title(key)
+        except (OSError, ValueError):
+            return None
+
     async def _title(self, key: ThreadKey) -> str | None:
+        """Title = первая строка первой реальной user-реплики."""
         for entry in await self.threads.history(key):
-            line = _first_line(extract_real_user_message_text(entry.data))
+            line = prompt_title_line(
+                extract_real_user_message_text(entry.data)
+            )
             if line is not None:
                 return line
         return None
@@ -259,7 +277,8 @@ def _record(session_id: str, state: JsonObject) -> SessionRecord | None:
     return SessionRecord(session_id, os.path.normpath(cwd), updated)
 
 
-def _first_line(text: str) -> str | None:
+def prompt_title_line(text: str) -> str | None:
+    """Первая непустая строка текста, не длиннее лимита title."""
     stripped = text.strip()
     if stripped == "":
         return None
