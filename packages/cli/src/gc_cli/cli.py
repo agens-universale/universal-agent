@@ -40,7 +40,10 @@ from gc_core.updater import check as updater_check
 from gc_core.updater import runner as updater_runner
 from gc_core.updater import source as updater_source
 from gc_core.utils.json_text import format_json_for_display
-from gc_core.utils.logging_module import human_console_enabled
+from gc_core.utils.logging_module import (
+    RunLogDirUnavailable,
+    human_console_enabled,
+)
 from pydantic import ValidationError
 from recommended_mcp.runtime.daemon_autostart import (
     ensure_mcp_daemons,
@@ -770,6 +773,28 @@ def _load_cli_settings(config_arg, profile_arg):
     return loaded, None
 
 
+async def _acreate_cli_context(
+    loaded: Any,
+    *,
+    auth_connector: Any,
+    force_legacy: bool,
+    image_store: ImageStore,
+    auto_mcp: bool,
+) -> RunContext | None:
+    """RunContext прогона. Каталог логов недоступен на запись — строка в
+    stderr (каталог и что сделать) вместо трейсбека, уборка и ``None``."""
+    try:
+        return await acreate_run_context(
+            loaded, auth_connector=auth_connector, force_legacy=force_legacy
+        )
+    except RunLogDirUnavailable as exc:
+        print(f"[gc] {exc}", file=sys.stderr)
+        image_store.clear_own_staging()
+        if auto_mcp:
+            shutdown_mcp_daemons()
+        return None
+
+
 async def arun_cli() -> int:
     """
     Входная точка CLI: парсинг аргументов, загрузка конфига,
@@ -857,9 +882,15 @@ async def arun_cli() -> int:
     # Асинхронная сборка: мы внутри asyncio.run(arun_cli()), и синхронный
     # create_run_context морозил бы loop на всё MCP-дискавери (замер: 2.01 с
     # против 0.01 с). Сервер и SDK давно ходят через acreate_run_context.
-    ctx = await acreate_run_context(
-        loaded, auth_connector=auth_connector, force_legacy=force_legacy
+    ctx = await _acreate_cli_context(
+        loaded,
+        auth_connector=auth_connector,
+        force_legacy=force_legacy,
+        image_store=image_store,
+        auto_mcp=auto_mcp,
     )
+    if ctx is None:
+        return 1
     # Порт «спросить человека». Без него ядро читает stdin через `to_thread`:
     # поток из пула, который `asyncio.run` ждёт на выходе, и Ctrl+C во время
     # вопроса отменяет прогон целиком вместо штатного «отвечать не стали».
