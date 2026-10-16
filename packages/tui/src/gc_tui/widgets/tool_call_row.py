@@ -139,7 +139,15 @@ class ToolCallRow(ClickModelMixin, Widget):
             yield self._content_static
 
     def on_mount(self) -> None:
-        self._pulse_timer = self.set_interval(0.1, self._pulse_tick)
+        # Строка могла завершиться до mount (рендер истории) — без таймера.
+        if self._result is None and not self._interrupted:
+            self._pulse_timer = self.set_interval(0.1, self._pulse_tick)
+
+    def _stop_pulse(self) -> None:
+        """Остановить таймер дыхания ▸ (идемпотентно)."""
+        if self._pulse_timer is not None:
+            self._pulse_timer.stop()
+            self._pulse_timer = None
 
     def _pulse_tick(self) -> None:
         """Кадр дыхания ▸. Waiting / done / interrupted — не тикаем."""
@@ -195,6 +203,7 @@ class ToolCallRow(ClickModelMixin, Widget):
         self._is_error = error
         self._waiting = False
         self._live_status = None
+        self._stop_pulse()
         self._update()
 
     def mark_interrupted(self) -> None:
@@ -204,6 +213,7 @@ class ToolCallRow(ClickModelMixin, Widget):
         self._interrupted = True
         self._waiting = False
         self._live_status = None
+        self._stop_pulse()
         self._update()
 
     def refresh_running_elapsed(self) -> None:
