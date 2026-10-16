@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import logging
 import os
 import sys
@@ -10,6 +11,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
+from gc_core.constants.tool_names import SESSION_TODO_TOOL_NAME
 from gc_core.thread_store import (
     ThreadSession,
     resolve_threads_dir,
@@ -19,6 +21,31 @@ from gc_core.tools.turn.submit_solution import SubmitSolution
 
 from gc_acp.ask_human import bind_ask_human
 from gc_acp.capabilities import initialize_result
+from gc_acp.confirm import (
+    bind_confirm,
+    broken_reply,
+    cancelled_reply,
+    choice_from_incoming,
+    permission_message,
+    timeout_sec,
+)
+from gc_acp.diffs import DiffBackend, DiffLog, attach_diff
+from gc_acp.model_config import (
+    active_model_line,
+    config_options_payload,
+    level_for_choice,
+    listed,
+    model_config_option,
+    session_level,
+)
+from gc_acp.plan import (
+    plan_update,
+    session_info_update,
+    todos_from_agent,
+    todos_from_meta,
+    usage_from_agent,
+    usage_from_meta,
+)
 from gc_acp.prompt import PromptRejected, flatten_prompt
 from gc_acp.protocol import (
     INTERNAL_ERROR,
@@ -28,19 +55,32 @@ from gc_acp.protocol import (
     PARSE_ERROR,
     SESSION_NOT_FOUND,
     Incoming,
+    PendingOutbound,
     error_message,
     notification,
     parse_line,
     result_message,
 )
-from gc_acp.session_index import ACP_SYSTEM, SessionFile, SessionIndex
+from gc_acp.session_index import (
+    ACP_SYSTEM,
+    SessionFile,
+    SessionIndex,
+    prompt_title_line,
+    session_title,
+)
 from gc_acp.stop_reason import stop_reason
 from gc_acp.tool_flow import ToolFlow
-from gc_acp.updates import ChunkAssembler, history_updates
+from gc_acp.updates import (
+    ChunkAssembler,
+    history_updates,
+    new_message_id,
+    text_chunk,
+)
 
 logger = logging.getLogger(__name__)
 
-_SILENT = frozenset({"session/cancel", "$/cancel_request"})
+_METHOD_CANCEL_REQUEST = "$/cancel_request"
+_SILENT = frozenset({"session/cancel", _METHOD_CANCEL_REQUEST})
 _PARSE_ERROR = "Parse error"
 _INVALID_REQUEST = "Invalid Request"
 _METHOD_NOT_FOUND = "Method not found"
@@ -53,6 +93,11 @@ _CWD_MISMATCH = "cwd mismatch"
 _METHOD_NEW = "session/new"
 _METHOD_DELETE = "session/delete"
 _TOOL_POLL_S = 0.05
+_MODEL_TRACE = "agent_thought_chunk"
+# Запас сверх confirm_timeout: обёртка с потока не должна сработать раньше
+# внутреннего wait_for. Если всё же сработала после отправки запроса,
+# закрытие пикера уходит отдельной задачей.
+_CONFIRM_OUTER_SLACK_SEC = 1.0
 
 
 @dataclass
@@ -66,6 +111,15 @@ class LiveSession:
     prompt_finished: bool = False
     response_sent: bool = False
     failed: bool = False
+    tool_flow: ToolFlow | None = None
+    diffs: DiffLog | None = None
+    # Выбор пикера. None — уровень конфига (``settings.level`` / ``--level``).
+    # close забывает сессию вместе с этим полем; в файл конфига не пишется.
+    level: str | None = None
+    # Title уже ушёл клиенту — повторно с тем же не слать.
+    title_sent: bool = False
+    # Имя тула по toolCallId (родительский ход) — для plan после session_todo.
+    tool_names: dict[str, str] | None = None
 
 
 class AcpFacade:
@@ -93,12 +147,18 @@ class AcpFacade:
         self._releasing: set[asyncio.Task] = set()
         self._initialized = False
         self._create_lock = asyncio.Lock()
+        self._pending = PendingOutbound()
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     async def handle_line(self, line: str) -> None:
+        self._loop = asyncio.get_running_loop()
         incoming = parse_line(line)
         if incoming is None:
             return
         if incoming.parse_error:
+            broken = broken_reply_for(incoming)
+            if incoming.has_id and self._pending.resolve(broken):
+                return
             print("gc-acp: parse error", file=sys.stderr)
             if incoming.has_id:
                 await self._send(
@@ -114,12 +174,30 @@ class AcpFacade:
                     error_message(incoming.id, INTERNAL_ERROR, _RUN_FAILED)
                 )
 
+    def confirm_blocking(self, session_id: str, request: Any) -> str:
+        """Синхронный confirm с потока тула. Таймаут и сбой — отказ без записи."""
+        from gc_core.security.confirm_port import CONFIRM_TIMED_OUT
+
+        loop = self._loop
+        if loop is None or not loop.is_running():
+            return CONFIRM_TIMED_OUT
+        timeout = timeout_sec(self._settings)
+        done, cancel = _schedule_confirm(
+            loop, self._confirm(session_id, request)
+        )
+        try:
+            return done.result(timeout=timeout + _CONFIRM_OUTER_SLACK_SEC)
+        except Exception:
+            loop.call_soon_threadsafe(cancel)
+            return CONFIRM_TIMED_OUT
+
     async def shutdown(self) -> None:
         """Отменить живые ходы и закрыть простаивающих агентов.
 
         Идущий ход не ждём: stop() кооперативный, команда может занять
         весь таймаут, а stdin после выхода уже закрыт.
         """
+        self._pending.cancel_all(cancelled_reply())
         leftover = list(self._sessions.values())
         self._sessions.clear()
         for live in leftover:
@@ -131,6 +209,15 @@ class AcpFacade:
     async def _dispatch(self, incoming: Incoming) -> None:
         if incoming.method in _SILENT:
             await self._on_notification(incoming)
+            return
+        if (
+            incoming.has_id
+            and incoming.method is None
+            and (incoming.has_result or incoming.has_error)
+        ):
+            # Ответ на наш request, не запрос клиента. Поздний selected
+            # после таймаута или отмены решение не меняет и -32600 не шлём.
+            self._pending.resolve(incoming)
             return
         if not incoming.has_id:
             if incoming.not_object or incoming.method is None:
@@ -159,10 +246,10 @@ class AcpFacade:
 
     async def _on_notification(self, incoming: Incoming) -> None:
         if incoming.method == "session/cancel":
-            self._cancel_session(incoming.params)
+            await self._cancel_session(incoming.params)
             return
-        if incoming.method == "$/cancel_request":
-            self._cancel_by_request_id(incoming.params)
+        if incoming.method == _METHOD_CANCEL_REQUEST:
+            await self._cancel_by_request_id(incoming.params)
 
     async def _initialize(self, request_id: Any, _params: Any) -> None:
         self._initialized = True
@@ -177,12 +264,14 @@ class AcpFacade:
             return
         warn_ignored_client_fields(body)
         session_id = validate_thread_id(str(uuid.uuid4()))
+        live = LiveSession(session_id, cwd, None)
         try:
-            agent = await self._open_agent(cwd)
+            agent = await self._open_agent(live)
         except Exception:
             logger.exception(_METHOD_NEW)
             await self._fail(request_id)
             return
+        live.agent = agent
         try:
             self._index.create(session_id, cwd)
         except Exception:
@@ -190,8 +279,13 @@ class AcpFacade:
             await _safe_aclose(agent)
             await self._fail(request_id)
             return
-        self._sessions[session_id] = LiveSession(session_id, cwd, agent)
-        await self._send(result_message(request_id, {"sessionId": session_id}))
+        self._sessions[session_id] = live
+        await self._send(
+            result_message(
+                request_id,
+                {"sessionId": session_id, **self._model_fields(live)},
+            )
+        )
 
     async def _session_prompt(self, request_id: Any, params: Any) -> None:
         body = _object_params(params)
@@ -209,13 +303,15 @@ class AcpFacade:
             return
         try:
             text = flatten_prompt(body.get("prompt"))
-        except PromptRejected:
-            await self._invalid_params(request_id)
+        except PromptRejected as rejected:
+            await self._invalid_params(request_id, str(rejected))
             return
         live.cancel_requested = False
         live.prompt_finished = False
         live.response_sent = False
         live.failed = False
+        live.tool_flow = None
+        live.tool_names = {}
         live.prompt_id = request_id
         live.prompt_task = asyncio.create_task(
             self._run_prompt(live, request_id, text)
@@ -228,7 +324,7 @@ class AcpFacade:
             return
         self._sessions.pop(live.session_id, None)
         if _prompt_running(live):
-            self._release_later(live, drop_thread=False)
+            await self._release_later(live, drop_thread=False)
             await self._send(result_message(request_id, {}))
             return
         await self._release(live, drop_thread=False)
@@ -258,7 +354,8 @@ class AcpFacade:
         if live is None:
             await self._fail(request_id)
             return
-        await self._send(result_message(request_id, {}))
+        await self._emit_session_snapshot(live, replayed=False)
+        await self._send(result_message(request_id, self._model_fields(live)))
 
     async def _session_load(self, request_id: Any, params: Any) -> None:
         record = await self._disk_session(request_id, params, mcp=True)
@@ -274,7 +371,39 @@ class AcpFacade:
             logger.exception("session/load")
             await self._fail(request_id)
             return
-        await self._send(result_message(request_id, {}))
+        await self._emit_session_snapshot(live, replayed=True)
+        await self._send(result_message(request_id, self._model_fields(live)))
+
+    async def _session_set_config_option(
+        self, request_id: Any, params: Any
+    ) -> None:
+        body = _object_params(params)
+        if body is None or _config_type_rejected(body):
+            await self._invalid_params(request_id)
+            return
+        live = self._live_from(params)
+        if (
+            live is None
+            or body.get("configId") != "model"
+            or "value" not in body
+        ):
+            await self._invalid_params(request_id)
+            return
+        value = body.get("value")
+        level = session_level(self._settings, live.level)
+        option = model_config_option(self._settings, level)
+        if not listed(option, value):
+            await self._invalid_params(request_id)
+            return
+        chosen = level_for_choice(self._settings, level, value)
+        if chosen is not None:
+            live.level = chosen
+            option = model_config_option(
+                self._settings, session_level(self._settings, live.level)
+            )
+        await self._send(
+            result_message(request_id, {"configOptions": [option]})
+        )
 
     async def _session_delete(self, request_id: Any, params: Any) -> None:
         session_id = _session_id_of(params)
@@ -291,7 +420,7 @@ class AcpFacade:
                 logger.exception(_METHOD_DELETE)
                 await self._fail(request_id)
                 return
-            self._release_later(live, drop_thread=True)
+            await self._release_later(live, drop_thread=True)
             await self._send(result_message(request_id, {}))
             return
         if live is not None:
@@ -339,12 +468,13 @@ class AcpFacade:
         live = self._sessions.get(record.session_id)
         if live is not None:
             return live
+        live = LiveSession(record.session_id, record.cwd, None)
         try:
-            agent = await self._open_agent(record.cwd)
+            agent = await self._open_agent(live)
         except Exception:
             logger.exception("acp agent")
             return None
-        live = LiveSession(record.session_id, record.cwd, agent)
+        live.agent = agent
         self._sessions[record.session_id] = live
         return live
 
@@ -360,21 +490,128 @@ class AcpFacade:
         ):
             await self._notify(session_id, update)
 
-    async def _open_agent(self, cwd: str) -> Any:
-        settings = self._settings.with_runtime(launch_root=cwd)
+    def _model_fields(self, live: LiveSession) -> dict:
+        return config_options_payload(
+            self._settings, session_level(self._settings, live.level)
+        )
+
+    async def _open_agent(self, live: LiveSession) -> Any:
+        self._loop = asyncio.get_running_loop()
+        settings = self._settings.with_runtime(launch_root=live.cwd)
+
+        def level_provider() -> str:
+            return session_level(self._settings, live.level)
+
         async with self._create_lock:
             agent = await self._agent_factory(
                 settings,
                 auth_connector=self._auth,
                 tools_cache=self._tools_cache,
-                os_backend=self._os_backend,
+                os_backend=self._session_backend(live),
+                level_provider=level_provider,
             )
         try:
             bind_ask_human(agent)
+            bind_confirm(agent, live.session_id, self)
         except Exception:
             await _safe_aclose(agent)
             raise
         return agent
+
+    def _session_backend(self, live: LiveSession) -> Any:
+        """Обёртка диска этой сессии. Чужой бэкенд и журнал ядра не трогаем."""
+        backend = self._os_backend
+        if backend is None:
+            return None
+        live.diffs = DiffLog()
+        return DiffBackend(
+            backend,
+            live.diffs,
+            cwd=live.cwd,
+            call_id=lambda: _open_call_id(live),
+        )
+
+    async def _confirm(self, session_id: str, request: Any) -> str:
+        from gc_core.security.confirm_port import (
+            CONFIRM_DENY_ONCE,
+            CONFIRM_TIMED_OUT,
+        )
+
+        live = self._sessions.get(session_id)
+        if live is None or live.cancel_requested:
+            return CONFIRM_DENY_ONCE
+        request_id = self._pending.next_id()
+        future = asyncio.get_running_loop().create_future()
+        self._pending.add(request_id, session_id, future)
+        delivered = False
+        try:
+            flow = live.tool_flow
+            call_id = None if flow is None else flow.current_call_id()
+            # Пока send ждёт lock писателя, cancel уже мог снять future.
+            # После этого await request не пишем: диалог в IDE нечем закрыть.
+            if not await self._deliver_permission(
+                session_id,
+                future,
+                permission_message(
+                    request_id,
+                    session_id,
+                    request,
+                    call_id,
+                ),
+            ):
+                return CONFIRM_DENY_ONCE
+            delivered = True
+            try:
+                incoming = await asyncio.wait_for(
+                    asyncio.shield(future),
+                    timeout=timeout_sec(self._settings),
+                )
+            except TimeoutError:
+                # Ответ мог лечь в future в тот же тик, что и таймаут.
+                if future.done() and not future.cancelled():
+                    incoming = future.result()
+                else:
+                    await self._send(_cancel_notice(request_id))
+                    return CONFIRM_TIMED_OUT
+        except asyncio.CancelledError:
+            # Обёртка с потока уже вернула timed_out. await здесь отменится
+            # вместе с задачей, поэтому закрытие пикера — отдельная задача.
+            if delivered:
+                self._close_delivered_permission(request_id)
+            raise
+        finally:
+            self._pending.discard(request_id)
+        return choice_from_incoming(incoming)
+
+    def _close_delivered_permission(self, request_id: Any) -> None:
+        """Пикер уже у клиента. Отмена confirm не должна унести `$/cancel_request`."""
+        try:
+            task = asyncio.get_running_loop().create_task(
+                self._send(_cancel_notice(request_id))
+            )
+        except RuntimeError:
+            return
+        self._releasing.add(task)
+        task.add_done_callback(self._forget_release)
+
+    async def _deliver_permission(
+        self, session_id: str, future: asyncio.Future, payload: dict
+    ) -> bool:
+        """False — ожидание уже снято, ``session/request_permission`` не ушёл."""
+        writer = self._writer
+        lock = getattr(writer, "_lock", None)
+        write_locked = getattr(writer, "write_locked", None)
+        if isinstance(lock, asyncio.Lock) and callable(write_locked):
+            await lock.acquire()
+            try:
+                if _permission_dropped(self._sessions, session_id, future):
+                    return False
+                write_locked(payload)
+            finally:
+                lock.release()
+            return True
+        await writer.send(payload)
+        return not _permission_dropped(self._sessions, session_id, future)
 
     async def _run_prompt(
         self, live: LiveSession, request_id: Any, text: str
@@ -385,6 +622,7 @@ class AcpFacade:
             # прошлого прогона, а AsyncAgent.run его сбрасывает: ход шёл бы
             # целиком, клиенту всё равно ушёл бы cancelled. В stream не входим.
             if not live.cancel_requested:
+                await self._maybe_title(live, text)
                 await self._stream_prompt(live, assembler, text)
         except asyncio.CancelledError:
             live.cancel_requested = True
@@ -399,10 +637,12 @@ class AcpFacade:
     async def _stream_prompt(
         self, live: LiveSession, assembler: ChunkAssembler, text: str
     ) -> None:
+        await self._announce_model(live)
         flow = ToolFlow(
             self._index.thread_path(live.session_id),
             sidecar_path=self._index.subagent_path(live.session_id),
         )
+        live.tool_flow = flow
         stop = asyncio.Event()
         watch = asyncio.create_task(self._watch_tools(live, flow, stop))
         try:
@@ -411,6 +651,7 @@ class AcpFacade:
             stop.set()
             await watch
             await self._emit_tools(live, flow)
+            live.tool_flow = None
         if live.cancel_requested:
             return
         final = SubmitSolution.present_result(
@@ -442,7 +683,82 @@ class AcpFacade:
 
     async def _emit_tools(self, live: LiveSession, flow: ToolFlow) -> None:
         for update in flow.poll():
-            await self._notify(live.session_id, update)
+            await self._notify(
+                live.session_id, attach_diff(update, live.diffs)
+            )
+            await self._maybe_plan(live, update)
+
+    async def _maybe_plan(self, live: LiveSession, update: dict) -> None:
+        kind = update.get("sessionUpdate")
+        call_id = update.get("toolCallId")
+        if not isinstance(call_id, str) or call_id == "":
+            return
+        # Субагент: составной id — plan сессии не трогаем.
+        if ":" in call_id:
+            return
+        names = live.tool_names
+        if names is None:
+            names = {}
+            live.tool_names = names
+        if kind == "tool_call":
+            name = update.get("name")
+            if isinstance(name, str) and name != "":
+                names[call_id] = name
+            return
+        if kind != "tool_call_update":
+            return
+        if names.get(call_id) != SESSION_TODO_TOOL_NAME:
+            return
+        if update.get("status") != "completed":
+            return
+        todos = todos_from_agent(live.agent)
+        await self._notify(live.session_id, plan_update(todos))
+
+    async def _announce_model(self, live: LiveSession) -> None:
+        """До дельт модели: плагин без пикера видит модель в трейсе хода.
+
+        В файл треда строка не пишется. Свой messageId, чтобы рассуждение
+        модели не прилипло к этой строке.
+        """
+        text = active_model_line(
+            self._settings, session_level(self._settings, live.level)
+        )
+        if text is None:
+            return
+        await self._notify(
+            live.session_id,
+            text_chunk(_MODEL_TRACE, text + "\n", new_message_id()),
+        )
+
+    async def _maybe_title(self, live: LiveSession, text: str) -> None:
+        if live.title_sent:
+            return
+        title = prompt_title_line(text)
+        if title is None:
+            return
+        await self._notify(live.session_id, session_info_update(title))
+        live.title_sent = True
+
+    async def _emit_session_snapshot(
+        self, live: LiveSession, *, replayed: bool
+    ) -> None:
+        """После load (с replay) или resume — plan, title, usage из meta."""
+        del replayed
+        threads = self._index.threads_dir
+        session_id = live.session_id
+        await self._notify(
+            session_id, plan_update(todos_from_meta(threads, session_id))
+        )
+        title = session_title(threads, session_id)
+        if title is not None:
+            await self._notify(session_id, session_info_update(title))
+            live.title_sent = True
+        level = session_level(self._settings, live.level)
+        usage = usage_from_meta(
+            threads, session_id, settings=self._settings, level=level
+        )
+        if usage is not None:
+            await self._notify(session_id, usage)
 
     async def _close_prompt(self, live: LiveSession, request_id: Any) -> None:
         cancelled = live.cancel_requested
@@ -458,23 +774,44 @@ class AcpFacade:
                 error_message(request_id, INTERNAL_ERROR, _RUN_FAILED)
             )
             return
+        await self._emit_usage(live)
         reason = stop_reason(_outcome(live), cancelled=False)
         await self._send(result_message(request_id, {"stopReason": reason}))
 
-    def _cancel_session(self, params: Any) -> None:
-        live = self._live_from(params)
-        if live is not None:
-            _mark_cancel(live)
+    async def _emit_usage(self, live: LiveSession) -> None:
+        level = session_level(self._settings, live.level)
+        usage = usage_from_agent(
+            live.agent, settings=self._settings, level=level
+        )
+        if usage is not None:
+            await self._notify(live.session_id, usage)
 
-    def _cancel_by_request_id(self, params: Any) -> None:
-        body = _object_params(params)
-        if body is None or "id" not in body:
+    async def _cancel_session(self, params: Any) -> None:
+        live = self._live_from(params)
+        if live is None:
             return
-        target = body.get("id")
+        await self._dismiss_permissions(live.session_id)
+        _mark_cancel(live)
+
+    async def _cancel_by_request_id(self, params: Any) -> None:
+        body = _object_params(params)
+        if body is None or "requestId" not in body:
+            return
+        target = body.get("requestId")
+        if self._pending.cancel_id(target, cancelled_reply()):
+            return
         for live in self._sessions.values():
             if live.prompt_id == target:
+                await self._dismiss_permissions(live.session_id)
                 _mark_cancel(live)
                 return
+
+    async def _dismiss_permissions(self, session_id: str) -> None:
+        """Снять ожидание и закрыть пикер: клиент узнаёт request по requestId."""
+        for request_id in self._pending.cancel_session(
+            session_id, cancelled_reply()
+        ):
+            await self._send(_cancel_notice(request_id))
 
     def _live_from(self, params: Any) -> LiveSession | None:
         session_id = _session_id_of(params)
@@ -482,8 +819,11 @@ class AcpFacade:
             return None
         return self._sessions.get(session_id)
 
-    def _release_later(self, live: LiveSession, *, drop_thread: bool) -> None:
+    async def _release_later(
+        self, live: LiveSession, *, drop_thread: bool
+    ) -> None:
         """Ответ клиенту уже можно слать: ход досматривается отдельно."""
+        await self._dismiss_permissions(live.session_id)
         _mark_cancel(live)
         task = asyncio.create_task(
             self._release(live, drop_thread=drop_thread)
@@ -522,9 +862,13 @@ class AcpFacade:
     async def _send(self, payload: dict) -> None:
         await self._writer.send(payload)
 
-    async def _invalid_params(self, request_id: Any) -> None:
+    async def _invalid_params(
+        self, request_id: Any, message: str = ""
+    ) -> None:
         await self._send(
-            error_message(request_id, INVALID_PARAMS, _INVALID_PARAMS)
+            error_message(
+                request_id, INVALID_PARAMS, message or _INVALID_PARAMS
+            )
         )
 
     async def _missing(self, request_id: Any) -> None:
@@ -547,6 +891,7 @@ def _request_handlers(facade: AcpFacade) -> dict:
         "session/list": facade._session_list,
         "session/resume": facade._session_resume,
         "session/load": facade._session_load,
+        "session/set_config_option": facade._session_set_config_option,
         _METHOD_DELETE: facade._session_delete,
     }
 
@@ -570,6 +915,13 @@ def warn_ignored_client_fields(params: dict) -> None:
             "gc-acp: additionalDirectories не применяются",
             file=sys.stderr,
         )
+
+
+def _config_type_rejected(body: dict) -> bool:
+    """``type`` для select не обязателен. ``boolean`` и прочие — отказ."""
+    if "type" not in body:
+        return False
+    return body.get("type") != "select"
 
 
 def _object_params(params: Any) -> dict | None:
@@ -596,6 +948,14 @@ def _session_id_of(params: Any) -> str | None:
     return _session_id(body.get("sessionId"))
 
 
+def _open_call_id(live: LiveSession) -> str | None:
+    """Карточка, которая исполняется сейчас. До хода её ещё нет."""
+    flow = live.tool_flow
+    if flow is None:
+        return None
+    return flow.current_call_id()
+
+
 def _prompt_running(live: LiveSession) -> bool:
     task = live.prompt_task
     return task is not None and not task.done()
@@ -609,6 +969,71 @@ def _outcome(live: LiveSession) -> str | None:
     if outcome is None or isinstance(outcome, str):
         return outcome
     return None
+
+
+def broken_reply_for(incoming: Incoming) -> Incoming:
+    """Битый JSON с нашим id: закрыть ожидание, не подменяя чужой id."""
+    reply = broken_reply()
+    return Incoming(
+        id=incoming.id,
+        has_id=True,
+        has_error=reply.has_error,
+        error=reply.error,
+        parse_error=True,
+    )
+
+
+def _schedule_confirm(
+    loop: asyncio.AbstractEventLoop, coro: Any
+) -> tuple[concurrent.futures.Future, Any]:
+    """Поставить confirm на loop. ``cancel`` останавливает задачу, не Future."""
+    done: concurrent.futures.Future = concurrent.futures.Future()
+    state: dict[str, Any] = {"task": None, "drop": False}
+
+    def deliver(task: asyncio.Task) -> None:
+        if done.done():
+            return
+        if task.cancelled():
+            done.cancel()
+            return
+        exc = task.exception()
+        if exc is not None:
+            done.set_exception(exc)
+            return
+        done.set_result(task.result())
+
+    def schedule() -> None:
+        if state["drop"]:
+            coro.close()
+            if not done.done():
+                done.cancel()
+            return
+        task = loop.create_task(coro)
+        state["task"] = task
+        task.add_done_callback(deliver)
+
+    def cancel() -> None:
+        state["drop"] = True
+        task = state["task"]
+        if task is not None and not task.done():
+            task.cancel()
+
+    loop.call_soon_threadsafe(schedule)
+    return done, cancel
+
+
+def _cancel_notice(request_id: Any) -> dict:
+    """Отмена своего request. В ACP v1 поле — ``requestId``, не ``id``."""
+    return notification(_METHOD_CANCEL_REQUEST, {"requestId": request_id})
+
+
+def _permission_dropped(
+    sessions: dict[str, LiveSession], session_id: str, future: asyncio.Future
+) -> bool:
+    """Отмена или снятие сессии, пока отправка ждала lock."""
+    if future.done():
+        return True
+    return session_id not in sessions
 
 
 def _mark_cancel(live: LiveSession) -> None:

@@ -1,6 +1,7 @@
 """kind ядра → session/update и досылка last_answer."""
 
 import json
+import os
 
 from gc_acp.updates import ChunkAssembler, history_updates
 
@@ -113,11 +114,27 @@ def test_history_places_a_tool_call_between_prose():
     assert updates[1]["toolCallId"] == "c1"
     assert updates[1]["status"] == "in_progress"
     assert updates[1]["title"] == "fs_read_file(path='src/a.py')"
+    assert updates[1]["name"] == "fs_read_file"
+    assert updates[1]["rawInput"] == {"path": "src/a.py"}
+    assert updates[1]["locations"] == [{"path": os.path.abspath("src/a.py")}]
+    assert "content" not in updates[1]
+    assert "kind" not in updates[1]
     assert updates[2] == {
         "sessionUpdate": "tool_call_update",
         "toolCallId": "c1",
         "status": "failed",
+        "content": [
+            {
+                "type": "content",
+                "content": {
+                    "type": "text",
+                    "text": '{"ok":false,"error":"нет файла"}',
+                },
+            }
+        ],
     }
+    assert "rawOutput" not in updates[2]
+    assert "locations" not in updates[2]
 
 
 def _finish(call_id, report, **extra):
@@ -367,6 +384,13 @@ def test_history_shows_subagent_tools_as_agent_actions():
         ("agent_message_chunk", None, None),
     ]
     assert updates[3]["title"] == "fs_read_file(path='a.py')"
+    assert updates[3]["name"] == "fs_read_file"
+    assert updates[3]["rawInput"] == {"path": "a.py"}
+    assert updates[3]["locations"] == [{"path": os.path.abspath("a.py")}]
+    failed = updates[4]
+    assert failed["content"][0]["content"]["text"] == '{"ok":false}'
+    assert "rawOutput" not in failed
+    assert "locations" not in failed
 
 
 def test_history_drops_subagent_steps_after_compaction():
@@ -428,3 +452,38 @@ def test_history_drops_subagent_steps_after_compaction():
         "ещё раз",
         "готово",
     ]
+
+
+def test_history_replay_does_not_rebuild_a_diff_from_disk(tmp_path):
+    target = tmp_path / "note.txt"
+    target.write_text("уже другой текст\n", encoding="utf-8")
+    updates = history_updates(
+        [
+            {
+                "type": "function_call",
+                "name": "fs_write_file",
+                "call_id": "w1",
+                "arguments": json.dumps({"path": str(target)}),
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "w1",
+                "output": json.dumps({"ok": True}),
+            },
+        ]
+    )
+    assert [item["sessionUpdate"] for item in updates] == [
+        "tool_call",
+        "tool_call_update",
+    ]
+    assert updates[0]["name"] == "fs_write_file"
+    assert updates[0]["rawInput"] == {"path": str(target)}
+    assert updates[0]["locations"] == [{"path": os.path.abspath(str(target))}]
+    assert updates[1]["status"] == "completed"
+    assert updates[1]["content"] == [
+        {
+            "type": "content",
+            "content": {"type": "text", "text": '{"ok":true}'},
+        }
+    ]
+    assert "rawOutput" not in updates[1]
