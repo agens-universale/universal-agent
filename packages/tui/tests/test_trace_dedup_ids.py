@@ -49,7 +49,8 @@ async def test_live_tick_skips_already_rendered_id(tmp_path):
 
         _write(tmp_path, "t1", 2, "m1", "user", "первое")
         _write(tmp_path, "t1", 3, "m2", "assistant", "второе")
-        await pilot.pause(0.4)
+        scr._poll_active()
+        await pilot.pause()
 
         text = _trace_text(pilot)
         assert text.count("первое") == 1

@@ -32,7 +32,8 @@ from gc_tui.models import (
 from gc_tui.services.trace_mapper import _clean_summary
 
 _ARCHIVE_MARK = "__pre_summary__"
-# Сколько тиков подряд ждать завершения шагов сжатия ядра (≈ 2 с).
+# Сколько тиков подряд ждать завершения шагов сжатия ядра: 8 тиков опроса
+# TUI (0,25 с, TraceScreen) ≈ 2 с.
 _COMPACTION_WAIT_TICKS = 8
 
 
@@ -224,7 +225,7 @@ class FileTaskStore:
     def _archive_paths(self, task_id: str, system: str) -> list[Path]:
         """Data-архивы сжатия треда, по имени (= по времени)."""
         return sorted(
-            self._dir.glob(f"data_{system}_{task_id}__pre_summary__*.jsonl"),
+            self._dir.glob(f"data_{system}_{task_id}{_ARCHIVE_MARK}*.jsonl"),
             key=lambda p: p.name,
         )
 
