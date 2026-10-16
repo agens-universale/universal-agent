@@ -112,6 +112,7 @@ from gc_tui.services.trace_render import (
 from gc_tui.services.trace_retention import (
     RETENTION_DETAIL_HINT,
     apply_payload_retention,
+    events_leaving_window,
     filter_sidecar_to_parents,
     is_light_payload,
     message_ids_in_retention_window,
@@ -501,6 +502,8 @@ class TraceScreen(Screen):
         # id записей, уже отрисованных в трейсе: запись с таким id не
         # рисуется повторно ни на одном пути (rebuild, live-тик).
         self._rendered_ids: set[str] = set()
+        # Индекс первого события каждого сегмента в _task_events (retention).
+        self._segment_starts: list[int] = []
         # Кэш wire_content для reconciliation — независим от состояния meta-файла,
         # который executor может перезаписывать в своём потоке.
         self._pending_wire_cache: dict[str, str] = {}
@@ -1834,6 +1837,7 @@ class TraceScreen(Screen):
         """Clear all per-task rendering state. Called on task switch and stream_reset."""
         self._task_events.clear()
         self._rendered_ids.clear()
+        self._segment_starts.clear()
         self._last_agent_summary = None
         self._next_no = 1
         self._stick_bottom = (
@@ -1999,6 +2003,7 @@ class TraceScreen(Screen):
         if compacted:
             self._render_segments(self._store.read_segments(task_id))
         else:
+            self._segment_starts = [0]
             self._render_records(records)
         self._merge_sidecar_nested(task_id)
         self._refresh_header()
@@ -2134,6 +2139,7 @@ class TraceScreen(Screen):
         window_ids = message_ids_in_retention_window(segments)
         for i, seg in enumerate(segments):
             seg_in_window = i >= window_start
+            self._segment_starts.append(len(self._task_events))
             for rec in seg["messages"]:
                 payload = rec.get("payload")
                 mid = payload.get("id") if isinstance(payload, dict) else None
@@ -4467,6 +4473,7 @@ class TraceScreen(Screen):
         if records and self._store.is_compaction_summary(records[0]):
             self._render_segments(self._store.read_segments(tid))
         else:
+            self._segment_starts = [0]
             self._render_records(records)
         self._merge_sidecar_nested(tid)
         # После компакции (stream_reset) баннер мог пере-монтироваться для уже
@@ -4500,8 +4507,23 @@ class TraceScreen(Screen):
         context = _records_context([*step.archive_tail, *step.live_records])
         self._render_records(step.archive_tail, live=True, context=context)
         self._mount_compaction_marker(step)
+        self._segment_starts.append(len(self._task_events))
         self._render_records(step.live_records, live=True, context=context)
+        self._lighten_segment_left_window(step)
         self._drop_answered_ask_human_banner(start)
+
+    def _lighten_segment_left_window(self, step: CompactionStep) -> None:
+        """Retention: сегмент, выпавший из окна, облегчаем как полная
+        перерисовка. Вложенные строки субагентов не трогаем (спека 3.4)."""
+        window_ids = set(step.archive_ids)
+        for rec in step.live_records:
+            payload = rec.get("payload")
+            if isinstance(payload, dict) and payload.get("id") is not None:
+                window_ids.add(payload["id"])
+        for ev in events_leaving_window(
+            self._task_events, self._segment_starts, window_ids
+        ):
+            apply_payload_retention(ev, seg_in_window=False)
 
     def _mount_compaction_marker(self, step: CompactionStep) -> None:
         self._append_and_render(

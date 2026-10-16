@@ -38,6 +38,7 @@ from gc_testkit.tui_support import tui_settings
 from gc_tui.app import TuiApp
 from gc_tui.screens.main import TraceScreen
 from gc_tui.services.stores.file_store import FileTaskStore
+from gc_tui.services.trace_retention import is_light_payload
 from gc_tui.widgets.tool_call_row import ToolCallRow
 from gc_tui.widgets.user_reply import UserReplyContainer
 
@@ -302,8 +303,19 @@ def _base_thread(tmp_path: Path) -> _Thread:
 # ─── эквивалентность и отсутствие перемонтажа ────────────────────────────────
 
 
+def _payloads(scr) -> list:
+    return [
+        (e.call_id, is_light_payload(e))
+        for e in scr._task_events
+        if e.kind in ("call", "result")
+    ]
+
+
+@pytest.mark.parametrize("extra", [0, 2])
 @pytest.mark.asyncio
-async def test_compaction_equivalent_to_fresh_attach(tmp_path, monkeypatch):
+async def test_compaction_equivalent_to_fresh_attach(
+    tmp_path, monkeypatch, extra
+):
     thread = _base_thread(tmp_path)
     # Агент жив: идущий вызов без вывода не финализируется «прервано».
     async with _session(tmp_path, runner=_LiveRunner()) as (app, pilot, scr):
@@ -320,15 +332,24 @@ async def test_compaction_equivalent_to_fresh_attach(tmp_path, monkeypatch):
         )
         thread.append(_agent("a2", "Готово."))
         scr._poll_active()
+        for n in range(extra):
+            thread.append(_call(f"fx{n}", f"cx{n}"), _out(f"ox{n}", f"cx{n}"))
+            scr._poll_active()
+            _compact_ticking(thread, scr, f"X{n}")
         await pilot.pause(0.05)
         live, live_text = _events(scr), _trace_lines(app)
+        live_payloads = _payloads(scr)
 
         fresh, fresh_text = await _fresh(pilot, scr)
+        fresh_payloads = _payloads(scr)
 
     assert rebuilds == []
     assert live == fresh
     assert live_text == fresh_text
-    assert "\n".join(live_text).count(_MARK) == 1
+    assert live_payloads == fresh_payloads
+    assert "\n".join(live_text).count(_MARK) == 1 + extra
+    if extra:
+        assert ("c1", True) in live_payloads
 
 
 @pytest.mark.asyncio

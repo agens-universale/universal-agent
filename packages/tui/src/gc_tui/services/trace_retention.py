@@ -52,6 +52,29 @@ def message_ids_in_retention_window(segments: list, *, keep: int = 2) -> set:
     return ids
 
 
+def events_leaving_window(
+    events: list,
+    segment_starts: list[int],
+    window_ids: set,
+    keep: int = 2,
+) -> list:
+    """События сегментов вне окна `segments[-keep:]`, кроме id окна.
+
+    Берём все сегменты до окна, а не один выпавший: первая строка могла
+    остаться full из-за preserved-копии, а теперь копия сама вышла из окна.
+    Облегчение идемпотентно. Нет сегментов вне окна → [].
+    """
+    outside = len(segment_starts) - keep
+    if outside <= 0:
+        return []
+    end = segment_starts[outside]
+    return [
+        ev
+        for ev in events[:end]
+        if getattr(ev, "message_id", None) not in window_ids
+    ]
+
+
 def payload_mode(kind: str, seg_in_window: bool) -> str:
     """`full` | `light`. Light — только tool call/result/error вне окна."""
     if seg_in_window or kind not in _LIGHT_KINDS:
