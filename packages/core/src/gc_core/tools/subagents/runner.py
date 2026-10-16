@@ -1481,8 +1481,10 @@ class SubagentRunner:
             bind_turn_identity(child_ctx, parent_turn_id)
         else:
             clear_turn_identity(child_ctx)
-        # HITL: тот же confirm-баннер родителя + имя субагента для метки via.
+        # HITL: баннер TUI и порт confirm родителя (ACP: session/request_permission).
+        # Без порта ребёнок при is_tui=False молча отвечает deny_once.
         child_ctx.tui_confirm = getattr(self._ctx, "tui_confirm", None)
+        child_ctx.confirm_request = getattr(self._ctx, "confirm_request", None)
         child_ctx.permission_store = getattr(
             self._ctx, "permission_store", None
         )

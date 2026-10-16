@@ -882,6 +882,7 @@ NOT_IN_MATRIX = {
     "acp.text_answer_mode": "только ACP",
     "acp.finish_gate_mode": "только ACP",
     "acp.todo_reminder_steps": "только ACP",
+    "acp.confirm_timeout_sec": "только ACP: ожидание session/request_permission",
     "tui.finish_gate_mode": "только TUI",
     "chat_api.host": "только процесс gc-chat",
     "chat_api.port": "только процесс gc-chat",
