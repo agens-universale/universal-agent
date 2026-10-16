@@ -2110,8 +2110,8 @@ class TraceScreen(Screen):
         между сегментами, чтобы было видно, где прошла компакция).
 
         Дедуп по id — в `_render_record` (общий для всех путей): preserved-копия
-        лежит в следующем файле с тем же id, рисуется первое вхождение. Payload остаётся full, пока этот id есть в окне
-        segments[-2:]."""
+        лежит в следующем файле с тем же id, рисуется первое вхождение.
+        Payload остаётся full, пока этот id есть в окне segments[-2:]."""
         from gc_tui.models import TraceEvent
 
         context = collect_render_context(
