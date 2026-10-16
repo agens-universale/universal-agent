@@ -1,6 +1,9 @@
 """Таймер дыхания ToolCallRow: есть только у живой строки."""
 
+from types import SimpleNamespace
+
 import pytest
+from gc_tui.widgets import tool_call_row
 from gc_tui.widgets.tool_call_row import ToolCallRow
 from textual.app import App, ComposeResult
 
@@ -82,3 +85,40 @@ async def test_live_row_ticks_coarse():
         row = pilot.app.query_one(_Counting)
         await pilot.pause(0.5)
         assert row.ticks >= 1
+
+
+@pytest.mark.asyncio
+async def test_pulse_frame_does_not_relayout():
+    async with _make_app().run_test() as pilot:
+        row = pilot.app.query_one(ToolCallRow)
+        calls = []
+        original = row._prefix_static.update
+
+        def spy(content, *, layout=True):
+            calls.append(layout)
+            original(content, layout=layout)
+
+        row._prefix_static.update = spy
+        for _ in range(3):
+            row._pulse_tick()
+        assert calls
+        assert all(layout is False for layout in calls)
+
+
+@pytest.mark.asyncio
+async def test_elapsed_updates_content_only_on_change(monkeypatch):
+    clock = [1000.0]
+    monkeypatch.setattr(
+        tool_call_row,
+        "time",
+        SimpleNamespace(monotonic=lambda: clock[0]),
+    )
+    async with _make_app().run_test() as pilot:
+        row = pilot.app.query_one(ToolCallRow)
+        row.refresh_running_elapsed()
+        first = row._content_static.content
+        row.refresh_running_elapsed()
+        assert row._content_static.content is first
+        clock[0] += 1.0
+        row.refresh_running_elapsed()
+        assert row._content_static.content is not first

@@ -32,6 +32,7 @@ from gc_tui.palette import RUN_COLOR as _RUN
 from gc_tui.palette import TOOL_NAME as _TOOL_NAME
 from gc_tui.services.duration_format import format_duration
 from gc_tui.widgets.click_model import ClickModelMixin
+from gc_tui.widgets.static_content import update_if_changed
 
 # Пульс яркости running-глифа ▸: амбер тускло→ярко→тускло (ping-pong, пик —
 # RUN_COLOR). Двигается на собственном 0.1с-тике строки (см. on_mount) → плавное
@@ -161,13 +162,14 @@ class ToolCallRow(ClickModelMixin, Widget):
             return
         self._pulse_frame += 1
         if self._prefix_static is not None:
-            self._prefix_static.update(self._render_prefix())
+            # Меняется только цвет ▸ (ширина глифа постоянна) — без layout.
+            self._prefix_static.update(self._render_prefix(), layout=False)
 
     def _update(self) -> None:
         if self._prefix_static is not None:
-            self._prefix_static.update(self._render_prefix())
+            update_if_changed(self._prefix_static, self._render_prefix())
         if self._content_static is not None:
-            self._content_static.update(self._render_content())
+            update_if_changed(self._content_static, self._render_content())
 
     def set_waiting(self) -> None:
         """Перевести в waiting (·, без elapsed). После result/interrupt — no-op."""
