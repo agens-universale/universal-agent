@@ -425,6 +425,9 @@ class TraceScreen(Screen):
         self._cursor: Optional[TaskCursor] = None
         self._next_no: int = 1
         self._active_task_id: Optional[str] = None
+        # Снимок меты на тик опроса (см. _tick_meta); вне тика — None.
+        self._tick_meta_cache: dict | None = None
+        self._in_poll_tick = False
         self._session_lock_hb_mono: float = 0.0  # throttle heartbeat ≤ 1 Гц
         self._error_shown: bool = False
         self._mcp_status_row = (
@@ -1212,6 +1215,31 @@ class TraceScreen(Screen):
             settings.backend.completions_url,
         )
 
+    def _tick_meta(self) -> dict:
+        """Мета активной задачи — ТОЛЬКО для показа; читатели не мутируют.
+
+        Вне тика опроса — свежее чтение (`{}` без стора или задачи). Внутри
+        тика (`_poll_active`) — одно чтение, дальше тот же словарь: показ
+        за тик видит один снимок. Запись показываемых полей внутри опроса
+        обязана сразу звать `_drop_tick_meta()`, иначе до следующего тика
+        покажется старое. Для read-modify-write снимок не годится — читать
+        хранилище напрямую. `tui.pending_user_messages` через `_tick_meta`
+        не читать.
+        """
+        if self._store is None or self._active_task_id is None:
+            return {}
+        if not self._in_poll_tick:
+            return self._store.get_task_meta(self._active_task_id)
+        if self._tick_meta_cache is None:
+            self._tick_meta_cache = self._store.get_task_meta(
+                self._active_task_id
+            )
+        return self._tick_meta_cache
+
+    def _drop_tick_meta(self) -> None:
+        """Сбросить снимок тика: следующий `_tick_meta()` прочтёт заново."""
+        self._tick_meta_cache = None
+
     def _context_meter(self) -> Text | None:
         """Rich-Text индикатора контекста или None (скрыт)."""
         cfg = self.app.effective_settings()
@@ -1221,7 +1249,7 @@ class TraceScreen(Screen):
         # mid-turn этой шкалы выключен: иначе проактивная уборка показывала бы 100%.
         if self._store is None or self._active_task_id is None:
             return None
-        meta = self._store.get_task_meta(self._active_task_id)
+        meta = self._tick_meta()
         # Знаменатель — mid-turn активной шкалы модели, которая ведёт историю.
         # mid-turn 0 подменяется turn-end той же шкалы.
         limits = self._meter_summary_limits(cfg)
@@ -1294,7 +1322,7 @@ class TraceScreen(Screen):
             return "running"
         # Нет активного runner — статус из meta (tui-owned, затем legacy top-level).
         if self._store is not None and self._active_task_id is not None:
-            meta = self._store.get_task_meta(self._active_task_id)
+            meta = self._tick_meta()
             tui_status = (meta.get("tui") or {}).get("status")
             if tui_status == "running":
                 return "running"
@@ -2607,7 +2635,7 @@ class TraceScreen(Screen):
         if self._store is None or self._active_task_id is None:
             return self._resumed_prompt or ""
         try:
-            meta = self._store.get_task_meta(self._active_task_id) or {}
+            meta = self._tick_meta() or {}
             return display_name(meta.get("tui"))
         except Exception:
             return self._resumed_prompt or ""
@@ -4014,6 +4042,15 @@ class TraceScreen(Screen):
         return bool(getattr(self, "_selecting", False))
 
     def _poll_active(self) -> None:
+        self._tick_meta_cache = None
+        self._in_poll_tick = True
+        try:
+            self._poll_tick()
+        finally:
+            self._in_poll_tick = False
+            self._tick_meta_cache = None
+
+    def _poll_tick(self) -> None:
         # Потолок #trace = экран минус хром. Зависит только от стабильных высот  # noqa: ERA001  # описание формата, не выключенный код
         # (header/indicator-bar[зарезервирован]/input/footer) → пересчёт синхронный и
         # без гонки (на гарде ставит max-height лишь при ресайзе / росте ввода).
@@ -4116,11 +4153,7 @@ class TraceScreen(Screen):
             and getattr(runner, "_last_target", None)
             == (self._active_task_id, self.app._system)
             and self._store is not None
-            and (
-                self._store.get_task_meta(self._active_task_id).get("tui")
-                or {}
-            ).get("status")
-            == "running"
+            and (self._tick_meta().get("tui") or {}).get("status") == "running"
         )
         if (
             (self._was_running or _finished_before_poll)
@@ -4176,6 +4209,7 @@ class TraceScreen(Screen):
                     },
                 },
             )
+            self._drop_tick_meta()
             self.app.last_stop_requested = False
             self._update_terminal_title()
         self._was_running = is_running
@@ -4202,7 +4236,7 @@ class TraceScreen(Screen):
         _tmeta: dict = {}
         if self._store is not None and self._active_task_id is not None:
             try:
-                _tmeta = self._store.get_task_meta(self._active_task_id)
+                _tmeta = self._tick_meta()
                 _rt = _tmeta.get("runtime") or {}
                 summarizing = bool(_rt.get("summarizing"))
                 finalizing = bool(_rt.get("finalizing"))
@@ -4227,6 +4261,7 @@ class TraceScreen(Screen):
                         self._active_task_id,
                         {"last_compact_msg_count": int(live_count)},
                     )
+                    self._drop_tick_meta()
                 except (TypeError, ValueError):
                     pass
         self._was_summarizing = summarizing
@@ -4365,10 +4400,7 @@ class TraceScreen(Screen):
             li_kind = None
             status = None
             if self._store is not None and self._active_task_id is not None:
-                tui = (
-                    self._store.get_task_meta(self._active_task_id).get("tui")
-                    or {}
-                )
+                tui = self._tick_meta().get("tui") or {}
                 li = tui.get("last_indicator")
                 if isinstance(li, dict):
                     li_kind = li.get("kind")

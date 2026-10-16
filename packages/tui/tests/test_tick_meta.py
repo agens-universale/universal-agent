@@ -1,0 +1,136 @@
+"""Показ на экране читает один снимок меты за тик опроса.
+
+Снимок живёт только внутри `_poll_active`; вне тика — свежее чтение;
+запись показываемых полей внутри тика сбрасывает снимок; запись ядра
+в том же тике не теряется при `update_tui_meta`.
+"""
+
+import json
+
+import pytest
+from gc_testkit.tui_support import tui_settings
+
+_TID = "tickmeta0000000000000000000000001"
+
+
+def _write_task(tmp_path, tid=_TID, tui=None):
+    meta = {"thread_id": tid, "system_id": "cli"}
+    if tui is not None:
+        meta["tui"] = tui
+    (tmp_path / f"meta_cli_{tid}.json").write_text(
+        json.dumps(meta), encoding="utf-8"
+    )
+    (tmp_path / f"data_cli_{tid}.jsonl").write_text("", encoding="utf-8")
+
+
+def _app(tmp_path):
+    from gc_tui.app import TuiApp
+
+    return TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
+    )
+
+
+class _Runner:
+    def __init__(self, running):
+        self._running = running
+
+    def is_running(self):
+        return self._running
+
+
+@pytest.mark.asyncio
+async def test_poll_tick_reads_display_meta_once(tmp_path, monkeypatch):
+    pytest.importorskip("textual")
+    _write_task(tmp_path)
+    app = _app(tmp_path)
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(_TID)
+        await pilot.pause()
+        reads = []
+        original = scr._store.get_task_meta
+
+        def counting(*args, **kwargs):
+            reads.append(args)
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(scr._store, "get_task_meta", counting)
+        scr._poll_active()
+        # снимок показа + эпоха в tail_events (_read_epoch)
+        assert len(reads) == 2
+
+
+@pytest.mark.asyncio
+async def test_outside_tick_reads_fresh(tmp_path):
+    pytest.importorskip("textual")
+    _write_task(tmp_path)
+    app = _app(tmp_path)
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(_TID)
+        scr._poll_active()
+        scr._store.update_tui_meta(_TID, {"title": "Новое имя"})
+        assert scr._session_display_name() == "Новое имя"
+
+
+@pytest.mark.asyncio
+async def test_falling_edge_status_visible_same_tick(tmp_path, monkeypatch):
+    pytest.importorskip("textual")
+    _write_task(tmp_path, tui={"status": "running"})
+    app = _app(tmp_path)
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(_TID)
+        await pilot.pause()
+        runner = _Runner(running=False)
+        runner._last_target = (_TID, "cli")
+        pilot.app.active_runner = runner
+        pilot.app.last_stop_requested = False
+        pilot.app.last_runner_error = None
+        scr._was_running = True
+        seen = []
+        original = scr._update_terminal_title
+
+        def recording():
+            seen.append(scr._session_status_word())
+            original()
+
+        monkeypatch.setattr(scr, "_update_terminal_title", recording)
+        scr._poll_active()
+        assert seen
+        assert set(seen) == {"completed"}
+
+
+@pytest.mark.asyncio
+async def test_core_write_survives_tui_write_in_tick(tmp_path, monkeypatch):
+    pytest.importorskip("textual")
+    from gc_core.thread_store import save_thread_meta
+
+    _write_task(tmp_path)
+    app = _app(tmp_path)
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(_TID)
+        await pilot.pause()
+        original = scr._drain_subagent_progress
+
+        def core_then_tui_write():
+            scr._session_display_name()  # снимок показа в этом тике
+            meta = json.loads(
+                (tmp_path / f"meta_cli_{_TID}.json").read_text("utf-8")
+            )
+            meta["core_key"] = "от ядра"
+            save_thread_meta(str(tmp_path), "cli", _TID, meta)
+            scr._store.update_tui_meta(_TID, {"title": "имя"})
+            original()
+
+        monkeypatch.setattr(
+            scr, "_drain_subagent_progress", core_then_tui_write
+        )
+        scr._poll_active()
+        meta = scr._store.get_task_meta(_TID)
+        assert meta["core_key"] == "от ядра"
+        assert meta["tui"]["title"] == "имя"
