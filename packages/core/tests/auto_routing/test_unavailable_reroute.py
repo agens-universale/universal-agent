@@ -483,3 +483,78 @@ def test_old_durable_histories_replace_a_dead_model_despite_a_stop(
     sent = _transport(monkeypatch, dead={"mid"})
     _ask(s, ctx)
     assert sent == ["mid", "big"]
+
+
+def _replay_after_a_stop(monkeypatch, ctx):
+    """Две сильные, затем слабая пишет — повод переиграть; стоп приходит во
+    время запроса слабой. Возвращает журнал алиасов и событий лога."""
+    s = _state(ctx)
+    events = []
+    monkeypatch.setattr(
+        ctx.logger,
+        "info",
+        lambda msg, *a, **k: events.append(k.get("extra", {}).get("event")),
+    )
+
+    def reply(alias, n):
+        if alias != "fast":
+            return [_read(f"c{n}")]
+        s.stop_requested = True
+        return [_write(f"c{n}")]
+
+    sent = _transport(monkeypatch, reply=reply)
+    _ask(s, ctx, times=3)
+    return sent, events
+
+
+def test_a_stopped_turn_keeps_the_weak_answer_without_a_replay(monkeypatch):
+    ctx = _ctx({"value": "auto"})
+    sent, events = _replay_after_a_stop(monkeypatch, ctx)
+    assert sent == ["mid", "mid", "fast"]
+    assert "artifact_reroute" not in events
+
+
+def test_old_durable_histories_replay_despite_a_stop(monkeypatch):
+    ctx = _ctx({"value": "auto"})
+    ctx.execution_patch = lambda patch: patch != pr.STOP_AFTER_ROUTING_PATCH
+    sent, events = _replay_after_a_stop(monkeypatch, ctx)
+    assert sent == ["mid", "mid", "fast", "mid"]
+    assert "artifact_reroute" in events
+
+
+def test_without_a_stop_the_stop_marker_is_never_asked(monkeypatch):
+    """Маркер спрашивается только при стопе: новые истории без стопа не
+    получают лишней записи, и их повтор не расходится со старым кодом."""
+    asked = []
+    ctx = _ctx({"value": "auto"}, auto_routing_safe_level="auto")
+    ctx.execution_patch = lambda patch: asked.append(patch) or True
+    s = _state(ctx)
+    monkeypatch.setattr(
+        pr,
+        "arun_pair_judge",
+        as_coro(
+            lambda *a, **k: PairChoice(
+                "default", 2, "small", SOURCE_JUDGE, None
+            )
+        ),
+    )
+    dead = {"mid"}
+
+    def reply(alias, n):
+        return [_write(f"c{n}")] if alias == "fast" else [_read(f"c{n}")]
+
+    sent = _transport(monkeypatch, dead=dead, reply=reply)
+    # Шаг цикла с заменой мёртвой mid на max; стоп — только у начала цикла.
+    run_coro(
+        pr.arun_agent(
+            [{"role": "user", "content": "сделай", "id": "u1"}],
+            s,
+            ctx,
+            check_stop=lambda: len(sent) >= 2,
+        )
+    )
+    dead.clear()
+    _ask(s, ctx, times=3)  # слабая пишет → переигрыш на живой max
+    assert sent == ["mid", "big", "big", "fast", "big", "big"]
+    assert pr.UNAVAILABLE_REROUTE_PATCH in asked
+    assert pr.STOP_AFTER_ROUTING_PATCH not in asked

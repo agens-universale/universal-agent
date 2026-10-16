@@ -1654,7 +1654,11 @@ async def _amaybe_reroute_for_floors(
         state_ops.restart_series(state)
         return resp_messages, response_id, res_headers
     target = _floor_target(ctx, from_level, resolved, params)
-    if target is None:
+    if target is None or _stop_honored(
+        bool(getattr(state, "stop_requested", False)), ctx
+    ):
+        # Остановленный ход не переигрывается: ответ слабой остаётся, как
+        # при отсутствии живого уровня выше.
         return resp_messages, response_id, res_headers
     logger = getattr(ctx, "logger", None) or _fallback_logger
 
