@@ -1858,7 +1858,10 @@ class TuiApp(App):
         return isinstance(self.screen, TraceScreen)
 
     def _builtin_tool_names(self, settings: LoadedSettings) -> frozenset[str]:
-        """Имена встроенных тулов; пересборка только при новом объекте настроек."""
+        """Имена встроенных тулов.
+
+        Пересборка только при новом объекте настроек.
+        """
         cached = self._builtin_names_cache
         if cached is not None and cached[0] is settings:
             return cached[1]

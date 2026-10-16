@@ -134,3 +134,43 @@ async def test_core_write_survives_tui_write_in_tick(tmp_path, monkeypatch):
         meta = scr._store.get_task_meta(_TID)
         assert meta["core_key"] == "от ядра"
         assert meta["tui"]["title"] == "имя"
+
+
+@pytest.mark.asyncio
+async def test_submit_task_name_visible_same_tick(tmp_path, monkeypatch):
+    pytest.importorskip("textual")
+    from gc_tui.models import TraceEvent
+
+    _write_task(tmp_path, tui={"last_actual": "старое имя"})
+    app = _app(tmp_path)
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(_TID)
+        await pilot.pause()
+        ev = TraceEvent(
+            no=1,
+            event_ts_utc_iso="t",
+            kind="agent",
+            title="",
+            summary="готово",
+            full_payload={
+                "arguments": json.dumps(
+                    {"task": "Новое имя", "task_report": "готово"},
+                    ensure_ascii=False,
+                )
+            },
+            call_id="c1",
+            tool_name="submit_solution",
+        )
+        names = []
+        original = scr._drain_subagent_progress
+
+        def submit_in_tick():
+            names.append(scr._session_display_name())  # снимок тика
+            scr._seed_or_update_task_from_submit(ev)
+            names.append(scr._session_display_name())
+            original()
+
+        monkeypatch.setattr(scr, "_drain_subagent_progress", submit_in_tick)
+        scr._poll_active()
+        assert names == ["старое имя", "Новое имя"]

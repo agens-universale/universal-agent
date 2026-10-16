@@ -31,6 +31,7 @@ import time
 
 from rich.text import Text
 from textual import events
+from textual.timer import Timer
 from textual.widgets import Static
 
 from gc_tui.messages import OpenEditsScreenRequest
@@ -296,7 +297,7 @@ class ThinkingIndicator(Static):
         self._pressed_in_summary = False
         self._rotator = PhraseRotator(THINKING_PHRASES)
         # Таймер анимации; None до монтирования.
-        self._anim_timer = None
+        self._anim_timer: Timer | None = None
         super().__init__(
             self._render_text(), classes="thinking-indicator", markup=False
         )

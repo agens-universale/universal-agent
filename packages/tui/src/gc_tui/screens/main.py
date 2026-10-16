@@ -2607,6 +2607,7 @@ class TraceScreen(Screen):
             self._store.update_tui_meta(self._active_task_id, {"task": task})
         except Exception:
             return
+        self._drop_tick_meta()
         self._update_terminal_title()
 
     def _update_terminal_title(self) -> None:
@@ -2635,8 +2636,7 @@ class TraceScreen(Screen):
         if self._store is None or self._active_task_id is None:
             return self._resumed_prompt or ""
         try:
-            meta = self._tick_meta() or {}
-            return display_name(meta.get("tui"))
+            return display_name(self._tick_meta().get("tui"))
         except Exception:
             return self._resumed_prompt or ""
 
@@ -3948,6 +3948,7 @@ class TraceScreen(Screen):
             self._active_task_id,
             {"status": "running", "last_indicator": None},
         )
+        self._drop_tick_meta()
 
     def _update_mcp_indicator(self) -> None:
         if self._mcp_status_done:
