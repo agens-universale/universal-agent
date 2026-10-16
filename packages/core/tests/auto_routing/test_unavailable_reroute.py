@@ -14,7 +14,10 @@ from gc_core import processing_responses as pr
 from gc_core import run_context as rc
 from gc_core.auto_routing.pair_judge import SOURCE_JUDGE, PairChoice
 from gc_core.config_modules.root import AppConfig
-from gc_core.execution.contracts import MainModelUnavailable
+from gc_core.execution.contracts import (
+    MainModelUnavailable,
+    ModelRequestStopped,
+)
 from gc_core.intent_guard.guard import FinishGateDecision
 from gc_core.states import State
 from gc_core.turn_boundary import begin_turn
@@ -420,13 +423,14 @@ def _judge_that_sees_a_stop(monkeypatch, s):
     monkeypatch.setattr(pr, "arun_pair_judge", pair)
 
 
-def _run_stoppable(s, ctx):
+def _run_stoppable(s, ctx, **hooks):
     return run_coro(
         pr.arun_agent(
             [{"role": "user", "content": "сделай", "id": "u1"}],
             s,
             ctx,
             check_stop=lambda: s.stop_requested,
+            **hooks,
         )
     )
 
@@ -437,6 +441,20 @@ def test_a_stop_during_the_pair_judge_sends_no_main_request(monkeypatch):
     _judge_that_sees_a_stop(monkeypatch, s)
     sent = _transport(monkeypatch)
     assert _run_stoppable(s, ctx) is None
+    assert sent == []
+
+
+def test_a_stop_during_compaction_sends_no_main_request(monkeypatch):
+    ctx = _ctx({"value": "auto"})
+    s = _state(ctx)
+    sent = _transport(monkeypatch)
+
+    def compaction(messages, mode):
+        s.stop_requested = True
+
+    assert (
+        _run_stoppable(s, ctx, pre_backend_compaction_hook=compaction) is None
+    )
     assert sent == []
 
 
@@ -466,11 +484,26 @@ def test_a_stopped_turn_does_not_replace_a_dead_model(monkeypatch):
         dead={"mid"},
         on_dead=lambda: setattr(s, "stop_requested", True),
     )
-    with pytest.raises(MainModelUnavailable):
-        _ask(s, ctx)
+    assert _run_stoppable(s, ctx) is None
     assert sent == ["mid"]
     assert "routing_unavailable_reroute" not in events
     assert s._call_level == "default"
+    assert ctx.model_router.breaker.is_open("mid")
+
+
+def test_a_stopped_reroute_raises_the_clean_stop_from_the_failure(
+    monkeypatch,
+):
+    ctx = _ctx({"value": "auto"})
+    s = _state(ctx)
+    _transport(
+        monkeypatch,
+        dead={"mid"},
+        on_dead=lambda: setattr(s, "stop_requested", True),
+    )
+    with pytest.raises(ModelRequestStopped) as stopped:
+        _ask(s, ctx)
+    assert isinstance(stopped.value.__cause__, MainModelUnavailable)
 
 
 def test_old_durable_histories_replace_a_dead_model_despite_a_stop(
