@@ -408,3 +408,78 @@ def test_tools_of_the_turn_run_once_across_a_replacement(monkeypatch):
         and executed.count("c1") == 1
         and executed.count("c2") == 1
     )
+
+
+def _judge_that_sees_a_stop(monkeypatch, s):
+    """Судья пары, во время которого пользователь нажал стоп."""
+
+    async def pair(*args, **kwargs):
+        s.stop_requested = True
+        return PairChoice("default", 2, "small", SOURCE_JUDGE, None)
+
+    monkeypatch.setattr(pr, "arun_pair_judge", pair)
+
+
+def _run_stoppable(s, ctx):
+    return run_coro(
+        pr.arun_agent(
+            [{"role": "user", "content": "сделай", "id": "u1"}],
+            s,
+            ctx,
+            check_stop=lambda: s.stop_requested,
+        )
+    )
+
+
+def test_a_stop_during_the_pair_judge_sends_no_main_request(monkeypatch):
+    ctx = _ctx({"value": "auto"}, auto_routing_safe_level="auto")
+    s = _state(ctx)
+    _judge_that_sees_a_stop(monkeypatch, s)
+    sent = _transport(monkeypatch)
+    assert _run_stoppable(s, ctx) is None
+    assert sent == []
+
+
+def test_old_durable_histories_send_the_main_request_after_a_judge_stop(
+    monkeypatch,
+):
+    ctx = _ctx({"value": "auto"}, auto_routing_safe_level="auto")
+    ctx.execution_patch = lambda patch: patch != pr.STOP_AFTER_ROUTING_PATCH
+    s = _state(ctx)
+    _judge_that_sees_a_stop(monkeypatch, s)
+    sent = _transport(monkeypatch)
+    assert _run_stoppable(s, ctx) is None
+    assert sent == ["mid"]
+
+
+def test_a_stopped_turn_does_not_replace_a_dead_model(monkeypatch):
+    ctx = _ctx({"value": "auto"})
+    s = _state(ctx)
+    events = []
+    monkeypatch.setattr(
+        ctx.logger,
+        "info",
+        lambda msg, *a, **k: events.append(k.get("extra", {}).get("event")),
+    )
+    sent = _transport(
+        monkeypatch,
+        dead={"mid"},
+        on_dead=lambda: setattr(s, "stop_requested", True),
+    )
+    with pytest.raises(MainModelUnavailable):
+        _ask(s, ctx)
+    assert sent == ["mid"]
+    assert "routing_unavailable_reroute" not in events
+    assert s._call_level == "default"
+
+
+def test_old_durable_histories_replace_a_dead_model_despite_a_stop(
+    monkeypatch,
+):
+    ctx = _ctx({"value": "auto"})
+    ctx.execution_patch = lambda patch: patch != pr.STOP_AFTER_ROUTING_PATCH
+    s = _state(ctx)
+    s.stop_requested = True
+    sent = _transport(monkeypatch, dead={"mid"})
+    _ask(s, ctx)
+    assert sent == ["mid", "big"]

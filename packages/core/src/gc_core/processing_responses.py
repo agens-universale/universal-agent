@@ -547,6 +547,20 @@ def _first_alive_level(
 #: честная ошибка.
 UNAVAILABLE_REROUTE_PATCH = "main-unavailable-reroute-v1"
 
+#: Маркер durable-истории: стоп, пришедший во время выбора модели такта
+#: (судья пары) или отказа основного запроса, не пускает такт дальше — ни к
+#: основному запросу, ни к замене модели. Без маркера — прежнее поведение.
+STOP_AFTER_ROUTING_PATCH = "stop-after-routing-v1"
+
+
+def _stop_honored(stopped: bool, ctx: Any) -> bool:
+    """Стоп пользователя прерывает такт после выбора модели или отказа
+    основного запроса."""
+    if not stopped:
+        return False
+    execution_patch = port(ctx, "execution_patch")
+    return execution_patch is None or execution_patch(STOP_AFTER_ROUTING_PATCH)
+
 
 def _alive_level(ctx: Any, levels: Tuple[str, ...]) -> Optional[str]:
     """Первый живой уровень из `levels` по предохранителю — тем же правилом, что
@@ -567,8 +581,8 @@ def _reroute_level(
     отказом. Заменяется только запрос, который решал AUTO (`current_level`):
     в ручном режиме модель выбрана явно. Отказ — подтверждённая недоступность:
     честная ошибка основного хода или исходное исключение ребёнка (его
-    предохранитель здесь же и взводится). Старые durable-истории без маркера —
-    прежнее поведение."""
+    предохранитель здесь же и взводится). Остановленный ход модель не
+    заменяет. Старые durable-истории без маркера — прежнее поведение."""
     if getattr(state, "current_level", None) is None:
         return None
     if not (
@@ -589,6 +603,8 @@ def _reroute_level(
         router.breaker.trip(
             failed.alias, str(exc).strip()[:300] or type(exc).__name__
         )
+    if _stop_honored(bool(getattr(state, "stop_requested", False)), ctx):
+        return None
     level = next_level(getattr(state, "_call_level", None) or "default")
     if level is not None:
         state_ops.reroute_tick(state, level)
@@ -2533,6 +2549,11 @@ class _AgentLoop:
                 and _mode_requires_backend_call(mode)
             ):
                 await aprepare_main_call(self.state, self.ctx)
+                stopped = self.check_stop is not None and self.check_stop()
+                if _stop_honored(stopped, self.ctx):
+                    # Стоп во время судьи пары — как stop между шагами.
+                    clear_loop_detector(self.state)
+                    return _Outcome(result=None)
                 await self._apre_backend_compaction(messages, mode)
                 messages = await self._aapply_tool_usage_notice(messages)
             outcome = await self._adispatch(mode, messages, backend_mode)
