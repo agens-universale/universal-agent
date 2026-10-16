@@ -353,3 +353,7 @@ def test_abbreviated_own_flags_fail_instead_of_default_config(capsys):
     # Короткие флаги клиента, похожие на начало нашего, — его собственные.
     for flag in ("--c", "--mod", "--lev", "--pro", "--comp"):
         assert _parse_args(["acp", flag]).abbreviated == [], flag
+
+
+def test_parse_args_accepts_auto_level():
+    assert _parse_args(["--level", "auto"]).overrides == {"level": "auto"}
