@@ -207,8 +207,35 @@ class FileTaskStore:
             position_token=offset,
             ordering_key=max_seq,
             storage_epoch=self._read_epoch(task_id, sys_),
+            archives=len(self._archive_paths(task_id, sys_)),
         )
         return records, cursor
+
+    def _archive_paths(self, task_id: str, system: str) -> list[Path]:
+        """Data-архивы сжатия треда, по имени (= по времени)."""
+        return sorted(
+            self._dir.glob(f"data_{system}_{task_id}__pre_summary__*.jsonl"),
+            key=lambda p: p.name,
+        )
+
+    @staticmethod
+    def _compacted_by(seg: list[dict], leading: dict) -> dict:
+        """Сводка сжатия сегмента seg; leading — dialog_summary следующего файла."""
+        payload = leading.get("payload") or {}
+        synthesis = _clean_summary(
+            user_content_to_text(payload.get("content"))
+        )
+        chars_before = sum(
+            len(user_content_to_text((r.get("payload") or {}).get("content")))
+            for r in seg
+        )
+        return {
+            "ts": leading.get("ts", ""),
+            "messages_in_segment": len(seg),
+            "synthesis": synthesis,
+            "chars_before": chars_before,
+            "chars_after": len(synthesis),
+        }
 
     @staticmethod
     def is_compaction_summary(rec: dict) -> bool:
@@ -232,10 +259,7 @@ class FileTaskStore:
         read_segments НЕ отбрасывает лидирующие dialog_summary-строки архивов:
         цель — точная копия того, что на диске."""
         sys_ = system or self._system
-        archives = sorted(
-            self._dir.glob(f"data_{sys_}_{task_id}__pre_summary__*.jsonl"),
-            key=lambda p: p.name,
-        )
+        archives = self._archive_paths(task_id, sys_)
         files = list(archives)
         live = self._data_path(task_id, sys_)
         if live.exists():
@@ -253,10 +277,7 @@ class FileTaskStore:
         лидирующая dialog_summary СЛЕДУЮЩЕГО файла; у последнего (live) — None.
         """
         sys_ = system or self._system
-        archives = sorted(
-            self._dir.glob(f"data_{sys_}_{task_id}__pre_summary__*.jsonl"),
-            key=lambda p: p.name,
-        )
+        archives = self._archive_paths(task_id, sys_)
         files = list(archives)
         live = self._data_path(task_id, sys_)
         if live.exists():
@@ -285,25 +306,7 @@ class FileTaskStore:
             if i + 1 < len(parsed):
                 next_leading = parsed[i + 1][1]
                 if next_leading is not None:
-                    payload = next_leading.get("payload") or {}
-                    synthesis = _clean_summary(
-                        user_content_to_text(payload.get("content"))
-                    )
-                    chars_before = sum(
-                        len(
-                            user_content_to_text(
-                                (r.get("payload") or {}).get("content")
-                            )
-                        )
-                        for r in seg
-                    )
-                    compacted_by = {
-                        "ts": next_leading.get("ts", ""),
-                        "messages_in_segment": len(seg),
-                        "synthesis": synthesis,
-                        "chars_before": chars_before,
-                        "chars_after": len(synthesis),
-                    }
+                    compacted_by = self._compacted_by(seg, next_leading)
             segments.append(
                 {"index": i, "messages": seg, "compacted_by": compacted_by}
             )

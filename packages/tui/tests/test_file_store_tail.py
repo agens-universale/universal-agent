@@ -165,3 +165,25 @@ def test_tail_events_idempotent_with_same_cursor(tmp_path):
     assert t1.new_records == []
     assert t2.new_records == []
     assert t1.next_cursor.position_token == t2.next_cursor.position_token
+
+
+def test_read_all_events_cursor_counts_archives(tmp_path):
+    _append_record(tmp_path / "data_cli_t1.jsonl", 1, "user", "жив")
+    for suffix in ("A", "B"):
+        arch = tmp_path / f"data_cli_t1__pre_summary__{suffix}.jsonl"
+        _append_record(arch, 1, "user", "архив")
+    _write_meta(tmp_path / "meta_cli_t1.json", msgs=1)
+
+    store = FileTaskStore(str(tmp_path), system="cli")
+    _, cur = store.read_all_events("t1")
+    assert cur.archives == 2
+    assert cur.wait_ticks == 0
+
+
+def test_read_all_events_no_archives_zero(tmp_path):
+    _append_record(tmp_path / "data_cli_t1.jsonl", 1, "user", "жив")
+    _write_meta(tmp_path / "meta_cli_t1.json", msgs=1)
+
+    store = FileTaskStore(str(tmp_path), system="cli")
+    _, cur = store.read_all_events("t1")
+    assert cur.archives == 0
