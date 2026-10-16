@@ -295,6 +295,8 @@ class ThinkingIndicator(Static):
         # нажатия до отпускания (см. `on_mouse_down`).
         self._pressed_in_summary = False
         self._rotator = PhraseRotator(THINKING_PHRASES)
+        # Таймер анимации; None до монтирования.
+        self._anim_timer = None
         super().__init__(
             self._render_text(), classes="thinking-indicator", markup=False
         )
@@ -326,13 +328,24 @@ class ThinkingIndicator(Static):
         self._state = state
         if state == _STATE_DONE and self._frozen_elapsed is None:
             self._frozen_elapsed = int(self._clock() - self._started_at)
+        if self._anim_timer is not None:
+            # Итог хода от кадра не зависит — таймер без дела не тикает.
+            if is_terminal_indicator_state(state):
+                self._anim_timer.pause()
+            else:
+                self._anim_timer.resume()
         if self.is_mounted:
             self.refresh()
 
     def on_mount(self) -> None:
         # Перерисовка 10 раз/сек: глиф держится FRAME_HOLD тиков (≈1.2с цикл),
         # свечение «дышит» каждый тик (1.0с на ping-pong рампы).
-        self.set_interval(0.1, self._tick)
+        # Созданный сразу конечным (восстановление) стартует на паузе.
+        self._anim_timer = self.set_interval(
+            0.1,
+            self._tick,
+            pause=is_terminal_indicator_state(self._state),
+        )
 
     def _tick(self) -> None:
         # F4: freeze UI на время app-select — не дёргаем анимацию (Screen._selecting).
