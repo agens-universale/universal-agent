@@ -7,6 +7,7 @@ from gc_acp.facade import AcpFacade
 from gc_acp.model_config import active_model_line, model_config_option
 from gc_core.config import cli_forces_legacy_model
 from gc_core.model_router import CircuitBreaker, ModelRouter
+from gc_core.processing_responses import resolve_main_for_call
 from gc_core.turn_boundary import begin_turn
 from gc_testkit.settings import make_settings
 from test_facade import (
@@ -297,7 +298,7 @@ class _TurningAgent(FakeAgent):
             yield item
 
 
-async def test_mid_turn_switch_applies_on_the_next_prompt(tmp_path):
+async def test_mid_turn_switch_applies_from_the_next_request(tmp_path):
     agents = []
 
     async def factory(config, **kwargs):
@@ -330,11 +331,13 @@ async def test_mid_turn_switch_applies_on_the_next_prompt(tmp_path):
         )
     )
     await agent.started.wait()
+    running = agent.pinned[0]
+    assert running.default_model == "glm-local"
     await _set(facade, session_id, "flash", 4)
     assert _option(_by_id(writer, 4)["result"])["currentValue"] == "flash"
-    pinned = agent.router.resolve_main_at_level(agent.pinned[0].turn_level)
-    assert pinned.alias == "glm-local"
-    assert agent.router.resolve("main").alias == "flash"
+    ctx = SimpleNamespace(model_router=agent.router)
+    assert resolve_main_for_call(running, ctx).alias == "flash"
+    assert running.default_model == "qwen/qwen-2.5-flash"
     agent.release.set()
     await facade._sessions[session_id].prompt_task
     agent.hold = False
@@ -350,7 +353,6 @@ async def test_mid_turn_switch_applies_on_the_next_prompt(tmp_path):
         )
     )
     await facade._sessions[session_id].prompt_task
-    assert agent.pinned[1].turn_level == "light"
     assert agent.pinned[1].default_model == "qwen/qwen-2.5-flash"
     assert len(agents) == 1
     await facade.shutdown()
