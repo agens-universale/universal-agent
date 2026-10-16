@@ -396,10 +396,13 @@ def _row_for(scr, call_id: str) -> list[ToolCallRow]:
 
 
 @pytest.mark.asyncio
-async def test_call_in_archive_tail_gets_output_from_live(tmp_path):
+async def test_call_in_archive_tail_gets_output_from_live(
+    tmp_path, monkeypatch
+):
     thread = _base_thread(tmp_path)
     # Агент жив: идущий вызов без вывода не финализируется «прервано».
     async with _session(tmp_path, runner=_LiveRunner()) as (app, pilot, scr):
+        rebuilds = _count(monkeypatch, scr, "_rebuild_from_store")
         thread.append(_call("fc2", "c2"))
         _compact_ticking(thread, scr, "S1", _call("fc2", "c2"))
         assert len(_row_for(scr, "c2")) == 1
@@ -409,15 +412,17 @@ async def test_call_in_archive_tail_gets_output_from_live(tmp_path):
         rows = _row_for(scr, "c2")
         text = _trace_text(app)
 
+    assert rebuilds == []
     assert len(rows) == 1
     assert rows[0]._result is not None
     assert text.count("второй вывод") == 1
 
 
 @pytest.mark.asyncio
-async def test_result_in_live_records_same_step(tmp_path):
+async def test_result_in_live_records_same_step(tmp_path, monkeypatch):
     thread = _base_thread(tmp_path)
     async with _session(tmp_path) as (app, pilot, scr):
+        rebuilds = _count(monkeypatch, scr, "_rebuild_from_store")
         thread.append(_call("fc2", "c2"))
         _compact_silently(
             thread, "S1", _call("fc2", "c2"), _out("fo2", "c2", "второй")
@@ -429,6 +434,7 @@ async def test_result_in_live_records_same_step(tmp_path):
 
         fresh, fresh_text = await _fresh(pilot, scr)
 
+    assert rebuilds == []
     assert len(rows) == 1
     assert rows[0]._result is not None
     assert live == fresh
@@ -570,18 +576,49 @@ def _ask_thread(tmp_path: Path) -> _Thread:
 
 
 @pytest.mark.asyncio
-async def test_answered_ask_human_banner_absent_after_compaction(tmp_path):
+async def test_answered_ask_human_banner_absent_after_compaction(
+    tmp_path, monkeypatch
+):
     thread = _ask_thread(tmp_path)
     async with _session(tmp_path, runner=_LiveRunner()) as (app, pilot, scr):
         assert scr._ask_human_banner is not None
+        applied = _count(monkeypatch, scr, "_apply_compaction")
+        rebuilds = _count(monkeypatch, scr, "_rebuild_from_store")
         # Продолжение диалога — в том же шаге (новый живой файл).
         _compact_silently(thread, "S1", _agent("a1", "Продолжаю."))
         scr._poll_active()
         await pilot.pause(0.05)
 
+        # Баннер снят правилом шага, а не очисткой полной перерисовки.
+        assert len(applied) == 1
+        assert rebuilds == []
         assert scr._ask_human_banner is None
         assert app.tui_state.ask_human_state is None
         assert "прервано" not in _trace_text(app)
+
+
+@pytest.mark.parametrize(
+    ("after_question", "banner_left"), [(True, False), (False, True)]
+)
+@pytest.mark.asyncio
+async def test_ask_human_inside_step_counts_only_events_after_it(
+    tmp_path, monkeypatch, after_question, banner_left
+):
+    """Вопрос лежит в самом шаге, продолжение диалога есть до него: баннер
+    решают только события после вопроса (один маркер — не продолжение)."""
+    thread = _Thread(tmp_path)
+    thread.append(_user("u1", "запусти"))
+    async with _session(tmp_path, runner=_LiveRunner()) as (app, pilot, scr):
+        rebuilds = _count(monkeypatch, scr, "_rebuild_from_store")
+        thread.append(_agent("a0", "Сначала спрошу."), _ask("ah1", "call_ah"))
+        preserved = (_agent("a1", "Продолжаю."),) if after_question else ()
+        _compact_silently(thread, "S1", *preserved)
+        scr._poll_active()
+        await pilot.pause(0.05)
+
+        assert rebuilds == []
+        assert _trace_text(app).count(_MARK) == 1
+        assert (scr._ask_human_banner is not None) is banner_left
 
 
 @pytest.mark.asyncio
