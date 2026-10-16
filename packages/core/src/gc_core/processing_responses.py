@@ -2554,13 +2554,11 @@ class _AgentLoop:
                 and _mode_requires_backend_call(mode)
             ):
                 await aprepare_main_call(self.state, self.ctx)
+                if self._stopped_before_call():
+                    return _Outcome(result=None)
                 await self._apre_backend_compaction(messages, mode)
                 messages = await self._aapply_tool_usage_notice(messages)
-                stopped = self.check_stop is not None and self.check_stop()
-                if _stop_honored(stopped, self.ctx):
-                    # Стоп во время судьи пары или сжатия — как stop между
-                    # шагами: основной запрос не уходит.
-                    clear_loop_detector(self.state)
+                if self._stopped_before_call():
                     return _Outcome(result=None)
             outcome = await self._adispatch(mode, messages, backend_mode)
         except WrongFunctionArgumentsException as e:
@@ -2580,6 +2578,15 @@ class _AgentLoop:
             outcome = _Outcome(messages, restart=True)
         outcome.mode = mode
         return outcome
+
+    def _stopped_before_call(self) -> bool:
+        """Стоп во время судьи пары или сжатия — как stop между шагами:
+        ни сжатие после судьи, ни основной запрос не начинаются."""
+        stopped = self.check_stop is not None and self.check_stop()
+        if not _stop_honored(stopped, self.ctx):
+            return False
+        clear_loop_detector(self.state)
+        return True
 
     # ----------------------------------------------------------- iteration
     def _poll_pending(self, messages, *, first_poll: bool):

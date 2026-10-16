@@ -440,8 +440,17 @@ def test_a_stop_during_the_pair_judge_sends_no_main_request(monkeypatch):
     s = _state(ctx)
     _judge_that_sees_a_stop(monkeypatch, s)
     sent = _transport(monkeypatch)
-    assert _run_stoppable(s, ctx) is None
+    compactions = []
+    assert (
+        _run_stoppable(
+            s,
+            ctx,
+            pre_backend_compaction_hook=lambda *_: compactions.append(1),
+        )
+        is None
+    )
     assert sent == []
+    assert compactions == []
 
 
 def test_a_stop_during_compaction_sends_no_main_request(monkeypatch):
