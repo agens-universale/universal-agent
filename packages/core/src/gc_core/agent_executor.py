@@ -39,6 +39,7 @@ from gc_core.message_policy.tool_usage_notice.state import (
 from gc_core.message_policy.user_message_policy import (
     extract_real_user_message_text,
 )
+from gc_core.model_router import main_model_identity
 from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
 from gc_core.processing_responses import (
     _acall_blocking_hook,
@@ -804,14 +805,19 @@ class AgentExecutor:
         # ``console=False`` — тот же отчёт только в лог, без таблицы в stdout.
         settings = settings_of(self._ctx)
         try:
+            # Тариф — по имени модели, валюта — по адресу: модель main из
+            # реестра models, а не легаси agent.model/backend.completions_url.
+            model_name, endpoint_url = main_model_identity(
+                settings, self.get_model_router()
+            )
             run_usage = state.usage.delta_from(run_start_usage)
             # Доступно in-memory: get_state().usage (кумулятив) и .last_run_usage (этот прогон).
             state.last_run_usage = run_usage
             usage_text = build_run_usage_report(
                 run_usage,
                 settings.pricing,
-                settings.agent.model,
-                settings.backend.completions_url,
+                model_name,
+                endpoint_url,
                 provider_currency=getattr(
                     self._ctx, "provider_currency", None
                 ),
@@ -827,8 +833,8 @@ class AgentExecutor:
                 usage_dict = build_run_usage_dict(
                     run_usage,
                     settings.pricing,
-                    settings.agent.model,
-                    settings.backend.completions_url,
+                    model_name,
+                    endpoint_url,
                     provider_currency=getattr(
                         self._ctx, "provider_currency", None
                     ),

@@ -478,3 +478,25 @@ def consumer_has_transport(
         return bool(router.resolve(consumer, check_breaker=False).url)
     except (ValueError, LookupError):
         return False
+
+
+def main_model_identity(
+    settings: Any, router: ModelRouter | None
+) -> tuple[str, str]:
+    """Модель и адрес основного потребителя (``main``) — для лога старта и
+    отчёта расхода (тариф ищется по имени модели, валюта — по адресу).
+
+    С реестром ``models`` это запись, в которую резолвится ``main``: легаси
+    ``agent.model``/``backend.completions_url`` у такого конфига пусты или
+    чужие. Без реестра (и без ``router``) — легаси-пара, как раньше.
+    Витринный резолв: открытый предохранитель не мешает.
+    """
+    source = settings_of(settings)
+    if router is not None:
+        try:
+            resolved = router.resolve("main", check_breaker=False)
+        except (ValueError, LookupError):
+            pass
+        else:
+            return resolved.model, resolved.url
+    return source.agent.model, source.backend.completions_url

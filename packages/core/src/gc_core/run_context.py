@@ -38,7 +38,11 @@ from gc_core.execution_workspace import (
     build_execution_workspace,
 )
 from gc_core.mcp_session_owner import new_owner_token, use_owner
-from gc_core.model_router import CircuitBreaker, ModelRouter
+from gc_core.model_router import (
+    CircuitBreaker,
+    ModelRouter,
+    main_model_identity,
+)
 from gc_core.run_preparation import PromptLoader
 from gc_core.state_preparation import StatePreparer
 from gc_core.tools import abuild_tools_data
@@ -622,15 +626,25 @@ def _finish_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING
 
     settings = settings_of(prep.settings)
 
+    configured_level = settings.level or "default"
+    effective_level_provider = level_provider or (lambda: configured_level)
+    model_router = ModelRouter(
+        settings,
+        level_provider=effective_level_provider,
+        breaker=circuit_breaker,
+        force_legacy=force_legacy,
+    )
+    # Модель, в которую резолвится main (реестр models), а не легаси-поля.
+    start_model, start_url = main_model_identity(settings, model_router)
     run_logger.info(
         "agent started: model=%s url=%s mode=%s",
-        settings.agent.model,
-        settings.backend.completions_url,
+        start_model,
+        start_url,
         settings.backend.api_mode,
         extra={
             "event": "agent_start",
-            "model": settings.agent.model,
-            "url": settings.backend.completions_url or None,
+            "model": start_model,
+            "url": start_url or None,
             "backend_api_mode": settings.backend.api_mode,
         },
     )
@@ -660,15 +674,6 @@ def _finish_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING
         )
 
     workspace = build_execution_workspace(backend, prep.settings)
-
-    configured_level = settings.level or "default"
-    effective_level_provider = level_provider or (lambda: configured_level)
-    model_router = ModelRouter(
-        settings,
-        level_provider=effective_level_provider,
-        breaker=circuit_breaker,
-        force_legacy=force_legacy,
-    )
 
     prepared = PreparedRunContext(
         settings=settings,

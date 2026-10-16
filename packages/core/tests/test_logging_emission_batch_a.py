@@ -200,3 +200,34 @@ async def test_agent_start_and_agent_tools_events(minimal_config_dict):
 
     assert events["agent_tools"]["tools"] == ["tool_a", "tool_b"]
     assert events["agent_tools"]["count"] == 2
+
+
+async def test_agent_start_names_the_registry_model(monkeypatch, tmp_path):
+    """Модель старта — та, в которую резолвится main (реестр models), а не
+    легаси agent.model/backend.completions_url: лог не врёт, куда идут ходы."""
+    monkeypatch.setattr(
+        rc,
+        "abuild_tools_data",
+        as_coro(lambda cfg, on_progress=None, **_kwargs: ({}, [], [], {})),
+    )
+    settings = _jsonl_cfg(
+        tmp_path,
+        **{"agent.model": "legacy-model"},
+        **{"backend.completions_url": "http://legacy/v1/chat"},
+        models={
+            "cheap": {
+                "model": "vendor/cheap",
+                "url": "http://registry/v1/chat/completions",
+                "token": "",
+            }
+        },
+        slots={"light": "cheap", "default": "cheap", "max": "cheap"},
+    )
+    ctx = await rc.acreate_run_context(settings, run_id="rc-registry")
+    for h in ctx.logger.handlers:
+        h.flush()
+    events = {e["event"]: e for e in _read_events(ctx.logging_path)}
+    assert events["agent_start"]["model"] == "vendor/cheap"
+    assert (
+        events["agent_start"]["url"] == "http://registry/v1/chat/completions"
+    )

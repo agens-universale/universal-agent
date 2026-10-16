@@ -98,3 +98,75 @@ def test_state_exposes_usage_and_last_run_in_memory():
     assert isinstance(st.usage, UsageAccount)
     assert st.usage.is_empty()
     assert st.last_run_usage is None
+
+
+_REGISTRY = {
+    # Легаси-пара — чужая (routerai, ₽); main резолвится в реестр (OpenRouter).
+    "agent.model": "legacy-model",
+    "backend.completions_url": "https://routerai.ru/api/v1/chat/completions",
+    "models": {
+        "cheap": {
+            "model": "vendor/cheap",
+            "url": "https://openrouter.ai/api/v1/chat/completions",
+            "token": "",
+        }
+    },
+    "slots": {"light": "cheap", "default": "cheap", "max": "cheap"},
+}
+
+
+def _router(loaded):
+    from gc_core.model_router import ModelRouter
+
+    return ModelRouter(loaded, level_provider=lambda: "default")
+
+
+def test_main_model_identity_follows_the_registry():
+    from gc_core.model_router import main_model_identity
+    from gc_testkit.settings import make_settings
+
+    loaded = make_settings(_REGISTRY)
+    assert main_model_identity(loaded, _router(loaded)) == (
+        "vendor/cheap",
+        "https://openrouter.ai/api/v1/chat/completions",
+    )
+    # Без маршрутизатора и без реестра — легаси-пара, как раньше.
+    assert main_model_identity(loaded, None) == (
+        "legacy-model",
+        "https://routerai.ru/api/v1/chat/completions",
+    )
+    legacy = make_settings(
+        {"agent.model": "m", "backend.completions_url": "u"}
+    )
+    assert main_model_identity(legacy, _router(legacy)) == ("m", "u")
+
+
+def test_run_usage_report_names_the_registry_model_and_its_currency():
+    """Отчёт расхода прогона — о модели main из реестра: её имя и валюта её
+    адреса (раньше — легаси agent.model и ₽ по адресу routerai при ходах в
+    OpenRouter)."""
+    from types import SimpleNamespace
+
+    from gc_core.agent_executor import AgentExecutor
+    from gc_testkit.settings import fake_ctx, make_settings
+
+    loaded = make_settings({**_REGISTRY, "pricing.enabled": True})
+    executor = SimpleNamespace(
+        _ctx=fake_ctx(loaded=loaded),
+        get_model_router=lambda: _router(loaded),
+    )
+    state = SimpleNamespace(usage=UsageAccount(), last_run_usage=None)
+    state.usage.add(CATEGORY_MAIN, 250_000, 40_000, 0, cost=0.5, billed=True)
+    lines = []
+    logger = SimpleNamespace(
+        info=lambda msg, *args, **_kw: lines.append(
+            msg % args if args else msg
+        ),
+        warning=lambda msg, *args, **_kw: lines.append(msg % args),
+    )
+    AgentExecutor._report_run_usage(
+        executor, state, UsageAccount(), logger, console=False
+    )
+    report = next(line for line in lines if "Run usage" in line)
+    assert "model: vendor/cheap" in report
+    assert "$" in report and "₽" not in report
