@@ -45,6 +45,7 @@ class LocalOperations:
                     state,
                     self.ctx,
                     set_previous_response_id=request.set_previous_response_id,
+                    mute_answer=request.mute_answer,
                 )
                 # State.set_resp_headers_metadata consumes only x-target. Raw
                 # transport headers (cookies, credentials) must not cross the

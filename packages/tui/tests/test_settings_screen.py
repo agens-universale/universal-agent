@@ -5411,6 +5411,61 @@ async def test_level_row_track_is_lit_in_the_colour_of_the_level(
         )
 
 
+# --- level: четвёртая позиция `auto` вне шкалы (спека автороутинга §3) ------
+
+# Два разных комплекта вызова: с одной моделью автовыбор недоступен.
+_TWO_KITS_YAML = (
+    "models:\n  fast: {}\n  mid: {}\nslots:\n  light: fast\n  default: mid\n"
+)
+
+
+async def test_level_row_shows_auto_off_scale_when_available(
+    tmp_path, monkeypatch
+):
+    """Четвёртая позиция `auto` — доступна в Настройках тем же составом
+    значений, что и в палитре (`effective_toggle_values`, values_provider
+    `/level`): `backend.api_mode: chat_completions` + рубильник `auto_routing`
+    по умолчанию включён + в реестре два разных комплекта вызова."""
+    pytest.importorskip("textual")
+
+    monkeypatch.chdir(tmp_path)
+    app, _ = _app_with_config(
+        tmp_path,
+        'level: "default"\nbackend:\n  api_mode: "chat_completions"\n'
+        + _TWO_KITS_YAML,
+    )
+    async with app.run_test() as pilot:
+        scr = await _open_modes_section(pilot)
+
+        text = scr._mode_row_text("level", selected=False).plain
+        assert "○ ● ○  ○  default" in text
+
+
+async def test_level_row_cycle_includes_auto(tmp_path, monkeypatch):
+    """←/→ на строке `level` ходит по действующему составу
+    (`effective_toggle_names`) — включает `auto`, когда фича доступна, тем же
+    generic путём, каким цикл обычно идёт по трём базовым позициям."""
+    pytest.importorskip("textual")
+    import yaml
+
+    monkeypatch.chdir(tmp_path)
+    app, cfg_file = _app_with_config(
+        tmp_path,
+        'level: "max"\nbackend:\n  api_mode: "chat_completions"\n'
+        + _TWO_KITS_YAML,
+    )
+    async with app.run_test() as pilot:
+        scr = await _open_modes_section(pilot)
+        scr._modes_idx = modes_row_index("level")
+
+        scr._modes_apply(1)  # max -> auto (4-я позиция сразу за max)
+
+        assert (
+            yaml.safe_load(cfg_file.read_text(encoding="utf-8"))["level"]
+            == "auto"
+        )
+
+
 # --- Правило записи секции: куда пишем и что действует ---
 
 
@@ -5798,3 +5853,59 @@ async def test_modes_write_to_the_project_config_survives_a_packaged_base(
         assert 'finish_gate_mode: "off"' in packaged.read_text(
             encoding="utf-8"
         )
+
+
+async def test_level_cycle_in_settings_never_writes_auto_when_only_the_session_profile_allows_it(
+    tmp_path, monkeypatch
+):
+    """Спека PR140 Р4: база без пары моделей, профиль сессии с парой. Палитра
+    видит `auto`, но Settings правит базу: ←/→ по всему кругу не предлагает
+    `auto` и не пишет его в файл."""
+    pytest.importorskip("textual")
+    import yaml
+
+    monkeypatch.chdir(tmp_path)
+    profile = tmp_path / "profiles" / "pair.yml"
+    profile.parent.mkdir(parents=True)
+    profile.write_text(
+        yaml.safe_dump(
+            {
+                "models": {
+                    "fast": {
+                        "url": "http://fast/v1/chat/completions",
+                        "token": "",
+                    },
+                    "mid": {
+                        "url": "http://mid/v1/chat/completions",
+                        "token": "",
+                    },
+                },
+                "slots": {"light": "fast", "default": "mid"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    app, cfg_file = _app_with_config(
+        tmp_path,
+        "backend:\n  api_mode: chat_completions\n"
+        '  completions_url: "http://base/v1/chat/completions"\n'
+        'level: "default"\n',
+    )
+    app.switch_session_profile("pair")
+    from gc_tui.toggles import effective_toggle_names
+
+    assert "auto" in effective_toggle_names(app, "level")  # сессия его видит
+    async with app.run_test() as pilot:
+        scr = await _open_modes_section(pilot)
+        scr._modes_idx = modes_row_index("level")
+        written = []
+        for key in ("right",) * 5 + ("left",) * 5:
+            await pilot.press(key)
+            await pilot.pause(0.1)
+            written.append(
+                yaml.safe_load(cfg_file.read_text(encoding="utf-8")).get(
+                    "level"
+                )
+            )
+        assert "auto" not in written
+        assert set(written) >= {"light", "default", "max"}

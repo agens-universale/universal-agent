@@ -1,14 +1,24 @@
 """Витрина модели ACP: одна select-опция и уровень сессии.
 
 Ядро не хранит выбранную модель отдельно от уровня. Пикер показывает алиас,
-а смена пишет уровень этой сессии: его читает ``level_provider`` следующего
-хода. ``config.yml`` фасад не трогает.
+а смена пишет уровень этой сессии: ``level_provider`` отдаёт его со
+следующего запроса к модели. ``config.yml`` фасад не трогает.
+
+Уровень ``auto`` — строка пикера, только когда ядро считает автовыбор
+доступным этому конфигу (``auto_routing.levels``). Витрина не гадает модель
+режима: пикер и трейс называют сам режим, а при недоступном ``auto``
+показывают уровень, которым ход пойдёт на деле (``effective_level``).
 """
 
 from __future__ import annotations
 
 from typing import Any
 
+from gc_core.auto_routing.levels import (
+    AUTO,
+    auto_available,
+    effective_level,
+)
 from gc_core.config import cli_forces_legacy_model
 from gc_core.model_router import ModelRouter
 
@@ -28,10 +38,14 @@ def active_model_line(loaded: Any, level: str) -> str | None:
     """Строка трейса: модель, которой пойдёт ход.
 
     ``None`` — резолв не дал имени. Открытый предохранитель строку не прячет:
-    это витрина, как футер, а не запрос к транспорту.
+    это витрина, как футер, а не запрос к транспорту. В ``auto`` строка
+    называет режим: модель выбирается на каждый запрос.
     """
+    available = _auto_available(loaded)
+    if level == AUTO and available:
+        return f"Модель: {AUTO}"
     try:
-        resolved = _router(loaded, level, None).resolve(
+        resolved = _router(loaded, _shown(level, available), None).resolve(
             "main", check_breaker=False
         )
     except (ValueError, KeyError):
@@ -53,7 +67,9 @@ def model_config_option(
             return None
         return _select(name, [(name, None)])
 
-    router = _router(loaded, level, breaker)
+    available = _auto_available(loaded)
+    shown = _shown(level, available)
+    router = _router(loaded, shown, breaker)
     rows: list[tuple[str, str | None]] = []
     seen: set[str] = set()
     for item in _PICKER_LEVELS:
@@ -64,7 +80,11 @@ def model_config_option(
         rows.append(found)
     if not rows:
         return None
-    current = _alias_row(router, level)
+    if available:
+        rows.append((AUTO, None))
+        if level == AUTO:
+            return _select(AUTO, rows)
+    current = _alias_row(router, shown)
     if current is None or current[0] not in seen:
         return None
     return _select(current[0], rows)
@@ -88,13 +108,19 @@ def level_for_choice(loaded: Any, level: str, value: str) -> str | None:
     """Уровень, который записать в сессию.
 
     ``None`` — успех без записи: единственная легаси-строка или алиас уже
-    стоит за активным уровнем.
+    стоит за активным уровнем. Из ``auto`` любой алиас пишет свой уровень:
+    это выход из режима.
     """
     if _single_model(loaded):
         return None
-    router = _router(loaded, level, None)
-    current = _alias_row(router, level)
-    if current is not None and current[0] == value:
+    available = _auto_available(loaded)
+    auto_on = level == AUTO and available
+    if value == AUTO:
+        return AUTO if available and not auto_on else None
+    shown = _shown(level, available)
+    router = _router(loaded, shown, None)
+    current = _alias_row(router, shown)
+    if not auto_on and current is not None and current[0] == value:
         return None
     for item in _PICKER_LEVELS:
         found = _alias_row(router, item)
@@ -107,6 +133,15 @@ def _single_model(loaded: Any) -> bool:
     if not loaded.settings.models:
         return True
     return cli_forces_legacy_model(loaded)
+
+
+def _auto_available(loaded: Any) -> bool:
+    return auto_available(loaded, force_legacy=cli_forces_legacy_model(loaded))
+
+
+def _shown(level: str, available: bool) -> str:
+    """Уровень витрины: литерал ``auto`` в Router не попадает."""
+    return effective_level(level, None, available)
 
 
 def _router(loaded: Any, level: str, breaker: Any) -> ModelRouter:

@@ -38,6 +38,7 @@ def materialize_router_identity(identity, ctx):
         level_provider=lambda: identity["level"],
         breaker=ctx.model_router.breaker,
         force_legacy=identity["force_legacy"],
+        is_subagent_child=ctx.model_router.is_subagent_child,
     )
     override = identity["unbound_override"]
     if override is None:

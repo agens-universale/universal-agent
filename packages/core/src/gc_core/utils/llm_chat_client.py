@@ -33,13 +33,7 @@ from gc_core.utils.connect_backend import (
 from gc_core.utils.data_urls import mask_data_urls
 
 # РУССКИЕ ПОДПИСИ служебных потребителей (спека §5.1/§8) для notice деградации
-# «модель привязки недоступна → повтор активной моделью». `auto_judge` в таблице
-# нет намеренно: его фоллбэк-цель другая ("default", а не "активная" — см.
-# model_router.resolve). Но отсутствие здесь даёт ТОЛЬКО подпись: сама деградация
-# ниже применяется ко всем потребителям без разбора, и вызови её auto_judge
-# сегодня — ушёл бы на активную модель вопреки этой цели. Пока безвредно (вызовов
-# auto_judge ещё нет); каким быть его поведению на мёртвой привязке — решает
-# волна C, вместе с появлением самого вызова.
+# «модель привязки недоступна → повтор активной моделью».
 CONSUMER_RU_LABEL = {
     "finish_gate": "судья finish_gate",
     "text_answer_judge": "судья text_answer_judge",
@@ -48,6 +42,7 @@ CONSUMER_RU_LABEL = {
     "intent_scope": "intent scope",
     "memory_compaction": "компакция памяти",
     "vision": "модель для зрения",
+    "routing_judge": "судья автовыбора",
 }
 
 _PROTECTED_CHAT_COMPLETION_KEYS = frozenset(

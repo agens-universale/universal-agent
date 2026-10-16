@@ -480,7 +480,7 @@ async def _arequest_backend_responses_once(
 
     response_obj = result["response"]
     if isinstance(response_obj, dict):
-        record_usage(response_obj.get("usage"), url)
+        record_usage(response_obj.get("usage"), url, data.get("model"))
     _log_backend_response(logger, "responses", response_obj)
     return response_obj, r_headers
 
@@ -547,7 +547,7 @@ async def _astream_chat_completions(
                 status_code=None,
             )
         if isinstance(assembled, dict):
-            record_usage(assembled.get("usage"), url)
+            record_usage(assembled.get("usage"), url, data.get("model"))
         _log_backend_response(logger, "chat_completions", assembled)
         return assembled
 
@@ -681,7 +681,7 @@ async def _arequest_backend_chat_completions_once(
 
     payload = r.json()
     if isinstance(payload, dict):
-        record_usage(payload.get("usage"), url)
+        record_usage(payload.get("usage"), url, data.get("model"))
     _log_backend_response(logger, "chat_completions", payload)
     return payload
 
@@ -1207,6 +1207,65 @@ def create_call_data_completions(
         data = apply_prompt_cache(data)
 
     return data
+
+
+def same_main_request(
+    settings: Any, first: ResolvedModel, second: ResolvedModel
+) -> bool:
+    """Same effective main request, independent of registry and accounting identity.
+
+    No token acquisition or network I/O. Authentication source is compared;
+    per-attempt request/session/trace headers are not part of model identity.
+    """
+    cfg = settings_of(settings)
+
+    def signature(resolved):
+        headers = {}
+        if resolved.authorization:
+            headers["Authorization"] = resolved.authorization
+        _apply_chat_completion_headers(
+            headers,
+            cfg.backend.chat_completion_headers,
+            resolved,
+            resolved.authorization,
+        )
+        headers = {name.lower(): value for name, value in headers.items()}
+        inherited_auth = (
+            resolved.authorization is None and "authorization" not in headers
+        )
+        payload = create_call_data_completions(
+            [{"role": "user", "content": "request identity"}],
+            tools=[],
+            settings=cfg,
+            resolved=resolved,
+        )
+        network = tuple(
+            _config_value(resolved, cfg.backend, name)
+            for name in (
+                "use_ssl",
+                "cert_path",
+                "key_path",
+                "use_retry",
+                "request_timeout_sec",
+                "proxy",
+                "retry_embedded_choice_errors",
+                "chat_completions_min_response_tokens",
+            )
+        )
+        vision_allowed = (
+            _config_value(resolved, cfg.backend, "vision") is not False
+        )
+        return (
+            resolved.url,
+            inherited_auth,
+            headers,
+            payload,
+            _tool_schema_flags(resolved, cfg.backend, honor_alias=True),
+            network,
+            vision_allowed,
+        )
+
+    return signature(first) == signature(second)
 
 
 if __name__ == "__main__":

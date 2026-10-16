@@ -165,3 +165,18 @@ def test_unregistered_listener_is_dropped():
 
     assert seen == []
     assert listener not in runtime_notices._listeners
+
+
+def test_level_reroute_notice_names_the_dead_alias_and_the_replacement():
+    from gc_core.runtime_notices import notice_from_level_reroute
+
+    notice = notice_from_level_reroute(
+        failed_alias="fast", level="default", model="mid-model"
+    )
+    assert notice.level == "warning" and notice.code == "level_reroute"
+    assert (
+        "fast" in notice.message
+        and "default" in notice.message
+        and "mid-model" in notice.message
+    )
+    assert "активной" not in notice.message

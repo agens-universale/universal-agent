@@ -139,9 +139,11 @@ def test_empty_url_with_a_token_is_still_half_a_pair():
         ModelEntry.model_validate({"url": "", "token": "sk-own"})
 
 
-def test_level_auto_friendly_error():
-    with pytest.raises(ValidationError, match="авто-выбора"):
-        AppConfig.model_validate({"level": "auto"})
+def test_level_auto_is_accepted():
+    """`auto` — режим автовыбора (спека auto-routing §5.2 п.6, задача 4): перевод
+    в уровень — `auto_routing.levels.effective_level`, не задача схемы."""
+    cfg = AppConfig.model_validate({"level": "auto"})
+    assert cfg.level == "auto"
 
 
 def test_level_rejects_any_value_outside_the_three_levels():

@@ -17,6 +17,7 @@ class PromptResourceRequest:
         "intent_final",
         "project_memory",
         "finish_gate",
+        "routing_pair_judge",
     ]
     path: str | None = None
     subagent: bool = False

@@ -35,8 +35,10 @@ from gc_core.config_modules.env_interpolation import (
 from gc_core.config_modules.field_meta import SecretText, gc_meta, secret_value
 from gc_core.config_modules.pricing import ModelTariff
 
-RESERVED_WORDS = ("light", "default", "max", "auto")
 LEVELS = ("light", "default", "max")
+#: Допустимые значения `level` и флагов `--level`: уровни и режим автовыбора.
+LEVEL_VALUES = (*LEVELS, "auto")
+RESERVED_WORDS = LEVEL_VALUES
 
 # Транспорт одной модели поверх общего backend. Ключ в поле — переписывает
 # одноимённый дефолт; незаписанный остаётся общим. Сэмплинг сюда не входит.
@@ -231,14 +233,11 @@ def validate_model_alias(alias: str) -> None:
 
 
 def validate_level_value(value: str) -> str:
-    """level ∉ LEVELS — ошибка; auto получает отдельную подсказку (появится в волне C)."""
-    if value == "auto":
+    """level ∉ LEVELS — ошибка; `auto` — режим автовыбора (перевод в уровень —
+    `auto_routing.levels.effective_level`)."""
+    if value not in LEVEL_VALUES:
         raise ValueError(
-            "level: значение 'auto' появится с функцией авто-выбора — пока недоступно"
-        )
-    if value not in LEVELS:
-        raise ValueError(
-            f"level должен быть одним из {LEVELS}, получено '{value}'"
+            f"level должен быть одним из {LEVELS} или 'auto', получено '{value}'"
         )
     return value
 
@@ -579,9 +578,9 @@ class AssignConfig(BaseModel):
     summary: str | None = None
     intent_scope: str | None = None
     memory_compaction: str | None = None
-    auto_judge: str | None = None
     vision: str | None = None
-    subagents: dict[str, str] = {}
+    routing_judge: str | None = None
+    subagents: dict[str, str] = Field(default_factory=dict)
 
     @model_validator(mode="before")
     @classmethod

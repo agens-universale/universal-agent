@@ -10,7 +10,11 @@ import pytest
 
 
 def _wire_palette(app, reg, initial_filter=""):
-    from gc_tui.toggles import dynamic_toggle_hint, toggle_state
+    from gc_tui.toggles import (
+        dynamic_toggle_hint,
+        effective_toggle_values,
+        toggle_state,
+    )
     from gc_tui.widgets.command_palette import CommandPalette
 
     return CommandPalette(
@@ -20,7 +24,19 @@ def _wire_palette(app, reg, initial_filter=""):
         toggle_dynamic_hint=lambda name, value: dynamic_toggle_hint(
             app, name, value
         ),
+        toggle_values=lambda name: effective_toggle_values(app, name),
     )
+
+
+def _level_row_plain(app) -> str:
+    """Строка тоггла `level` из палитры, как её реально видит пользователь:
+    полная обвязка `_wire_palette` (состояние + динамический состав значений) +
+    рендер `_format_toggle_row`, без стилей (`.plain`)."""
+    from gc_tui.commands import build_default_registry
+
+    reg = build_default_registry()
+    pal = _wire_palette(app, reg)
+    return pal._format_toggle_row(reg.lookup("level")).plain
 
 
 # --- Группа «чем работаем» (/level, /profiles) — трек, разделитель, порядок ---
@@ -1091,12 +1107,7 @@ def test_session_removal_overrides_base_pointer(tmp_path, monkeypatch):
     assert eff.runtime.active_profile == ""
 
 
-# --- Task 15: /level посреди хода — уведомление об отложенном применении -----
-#
-# Симметрично `switch_session_profile` (§9.1, `test_session_profile_level.py`):
-# сессионный оверрайд применяется сразу (палитра меняет значение мгновенно),
-# но запросы текущего хода всё ещё идут на прежнем пине — уведомление честно
-# говорит, что новый уровень подхватится СО СЛЕДУЮЩЕГО хода.
+# --- Ручной уровень закрепляется на ход; AUTO не шлёт deferred notice ----
 
 
 def _level_app(tmp_path):
@@ -1111,7 +1122,204 @@ def _level_app(tmp_path):
     return app
 
 
-def test_apply_level_toggle_defers_notice_while_run_is_live(tmp_path):
+def _app_with_live_run(tmp_path):
+    app = _level_app(tmp_path)
+
+    class _LiveRunner:
+        def is_running(self):
+            return True
+
+    app.active_runner = _LiveRunner()
+    return app
+
+
+@pytest.mark.parametrize("running", [True, False, None])
+def test_apply_level_toggle_emits_no_deferred_notice(tmp_path, running):
+    """В ходе AUTO нет ручного пина: переключение не выдаёт notice ручного уровня."""
+    pytest.importorskip("textual")
+    from gc_core.runtime_notices import (
+        clear_runtime_notices,
+        collect_runtime_notices,
+    )
+
+    clear_runtime_notices()
+    app = _app_with_live_run(tmp_path)
+    app.active_runner.call_level = lambda: None
+    app.auto_mode_active = lambda: True
+    if running is None:
+        app.active_runner = None
+    else:
+        app.active_runner.is_running = lambda: running
+    app.apply_session_override("level", "max")
+    assert app.effective_settings().settings.level == "max"
+    assert "level_switch_deferred" not in {
+        n.code for n in collect_runtime_notices()
+    }
+
+
+# --- `/level` — четвёртая позиция `auto` вне шкалы (спека автороутинга §3) ---
+
+
+def _app(tmp_path, config):
+    """TuiApp с переданным конфигом напрямую (по образцу `_level_app`) — без
+    файла на диске: тестам ниже нужен только состав `config`, который видит
+    `effective_settings()`."""
+    from gc_tui.app import TuiApp
+
+    app = TuiApp(settings=tui_settings(config))
+    app._config_path = str(tmp_path / "config.yml")
+    return app
+
+
+# Реестр с двумя разными комплектами вызова — иначе автовыбор недоступен
+# («во всех уровнях одна модель»), и позиции `auto` в треке нет.
+_TWO_KITS = {
+    "models": {"fast": {}, "mid": {}},
+    "slots": {"light": "fast", "default": "mid"},
+}
+
+
+def test_level_track_shows_auto_off_scale_when_available(tmp_path):
+    app = _app(
+        tmp_path,
+        config={
+            "agent.model": "m",
+            "level": "default",
+            "backend.api_mode": "chat_completions",
+            "agent.auto_routing": True,
+            **_TWO_KITS,
+        },
+    )
+    row = _level_row_plain(
+        app
+    )  # хелпер: строка тоггла level из палитры, plain
+    assert "○ ● ○  ○  default" in row  # три позиции + отступ + четвёртая
+
+
+def test_level_track_lights_auto_and_dims_scale(tmp_path):
+    app = _app(
+        tmp_path,
+        config={
+            "agent.model": "m",
+            "level": "auto",
+            "backend.api_mode": "chat_completions",
+            "agent.auto_routing": True,
+            **_TWO_KITS,
+        },
+    )
+    row = _level_row_plain(app)
+    assert "○ ○ ○  ●  auto" in row
+
+
+def test_level_track_hides_auto_when_feature_unavailable(tmp_path):
+    app = _app(
+        tmp_path,
+        config={
+            "agent.model": "m",
+            "level": "auto",
+            "backend.api_mode": "chat_completions",
+            "agent.auto_routing": False,
+        },
+    )
+    row = _level_row_plain(app)
+    assert (
+        "○ ● ○" in row and "auto" not in row
+    )  # горит default, позиции auto нет
+
+
+def test_level_cycle_includes_auto(tmp_path):
+    from gc_tui.toggles import next_toggle_value, apply_toggle, toggle_state
+
+    app = _app(
+        tmp_path,
+        config={
+            "agent.model": "m",
+            "level": "max",
+            "backend.api_mode": "chat_completions",
+            "agent.auto_routing": True,
+            **_TWO_KITS,
+        },
+    )
+    assert next_toggle_value(app, "level", +1) == "auto"
+    apply_toggle(app, "level", "auto")
+    assert toggle_state(app, "level") == "auto"
+    assert next_toggle_value(app, "level", +1) == "light"
+
+
+def test_level_hint_for_auto_does_not_resolve_model(tmp_path):
+    from gc_tui.toggles import level_value_hint
+
+    app = _app(
+        tmp_path,
+        config={
+            "agent.model": "m",
+            "level": "auto",
+            "backend.api_mode": "chat_completions",
+            "agent.auto_routing": True,
+        },
+    )
+    assert (
+        level_value_hint(app, "auto")
+        == "уровень меняется автоматически по ходу работы"
+    )
+
+
+@pytest.mark.asyncio
+async def test_palette_rebuild_asks_each_values_provider_once_and_skips_trackless(
+    tmp_path, monkeypatch
+):
+    """Перерисовка подвала (стрелка, символ фильтра): состав `/level` считается
+    один раз на рендер, а провайдер trackless `/profiles` (скан каталогов
+    профилей) раскладке не нужен вовсе — его значения ширину не задают."""
+    pytest.importorskip("textual")
+    import dataclasses
+    from gc_tui import toggles as tg
+    from gc_tui.app import TuiApp
+    from gc_tui.commands import build_default_registry
+
+    monkeypatch.chdir(tmp_path)
+    calls = {"level": 0, "profiles": 0}
+    for name in ("level", "profiles"):
+        real = tg.TOGGLES[name].values_provider
+
+        def counting(app, settings, _real=real, _name=name):
+            calls[_name] += 1
+            return _real(app, settings)
+
+        monkeypatch.setitem(
+            tg.TOGGLES,
+            name,
+            dataclasses.replace(tg.TOGGLES[name], values_provider=counting),
+        )
+
+    app = TuiApp(
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings(
+            {
+                "level": "default",
+                "backend.api_mode": "chat_completions",
+                "agent.auto_routing": True,
+                "models": {"fast": {}, "mid": {}},
+                "slots": {"light": "fast", "default": "mid"},
+            }
+        ),
+    )
+    app._config_path = str(tmp_path / "config.yml")
+    reg = build_default_registry()
+    async with app.run_test(size=(120, 40)) as pilot:
+        pal = _wire_palette(app, reg)
+        await app.screen.mount(pal)
+        await pilot.pause()
+        calls.update(level=0, profiles=0)
+
+        pal.move_selection(1)  # выделение в верхнем списке, не на /profiles
+
+        assert calls == {"level": 1, "profiles": 0}
+
+
+def test_apply_level_toggle_has_no_end_of_task_notice_while_run_is_live(
+    tmp_path,
+):
     pytest.importorskip("textual")
     from gc_core.runtime_notices import (
         clear_runtime_notices,
@@ -1133,13 +1341,7 @@ def test_apply_level_toggle_defers_notice_while_run_is_live(tmp_path):
         app.effective_settings().settings.level == "max"
     )  # применилось сразу (§ выбор)
     codes = [n.code for n in collect_runtime_notices()]
-    assert "level_switch_deferred" in codes
-    msg = next(
-        n.message
-        for n in collect_runtime_notices()
-        if n.code == "level_switch_deferred"
-    )
-    assert "max" in msg and "завершения текущей задачи" in msg
+    assert "level_switch_deferred" not in codes
 
 
 def test_apply_level_toggle_no_notice_without_active_run(tmp_path):

@@ -95,7 +95,7 @@ def scripted_http():
 
 
 @asynccontextmanager
-async def runtime(tmp_path, url, *, core_extra=None):
+async def runtime(tmp_path, url, *, core_extra=None, legacy_patches=False):
     binary = temporal_cli()
     core = {
         "backend": {
@@ -135,6 +135,8 @@ async def runtime(tmp_path, url, *, core_extra=None):
             dev_server_existing_path=binary
         ) as env:
             options = worker_kwargs(config, native, threads)
+            if legacy_patches:
+                options["patch_activation_callback"] = lambda _patch: False
             async with Worker(
                 env.client,
                 **options,
@@ -710,3 +712,53 @@ async def test_submit_batch_is_all_or_nothing(
         assert state["state"] == "unknown"
         await handle.signal(UniversalAgentWorkflow.close_session)
         await handle.result()
+
+
+@pytest.mark.parametrize(
+    "legacy", [False, True], ids=["recovery", "old_history"]
+)
+async def test_malformed_tool_json_recovery_and_old_history_replay(
+    tmp_path, monkeypatch, scripted_http, legacy
+):
+    """Новое восстановление меняет модель; старая история сохраняет floor replay."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "example.txt").write_text("test")
+    url, requests, script = scripted_http
+    bad = call("bad", "fs_read_file", {"path": "example.txt"})
+    bad["function"]["arguments"] = '{"path": '
+    script.extend(
+        [
+            [call("read", "fs_read_file", {"path": "example.txt"})],
+            [bad],
+            [finish()],
+            [finish()],
+        ]
+    )
+    extra = {
+        "level": "auto",
+        "models": {
+            "fast": {"model": "fast-model", "url": url, "token": ""},
+            "mid": {"model": "mid-model", "url": url, "token": ""},
+        },
+        "slots": {"light": "fast", "default": "mid"},
+    }
+    async with runtime(
+        tmp_path, url, core_extra=extra, legacy_patches=legacy
+    ) as (env, _, _config):
+        async with asyncio.timeout(45):
+            handle = await env.client.start_workflow(
+                UniversalAgentWorkflow.run,
+                request(),
+                id="malformed-tool-replay",
+                task_queue="native-controls",
+            )
+            result = await handle.result()
+            history = await handle.fetch_history()
+    assert "done" in str(result["answer"])
+    assert [r["model"] for r in requests] == (
+        ["mid-model", "mid-model", "fast-model", "mid-model"]
+        if legacy
+        else ["mid-model", "mid-model", "mid-model"]
+    )
+    replayer = Replayer(workflows=[UniversalAgentWorkflow])
+    await replayer.replay_workflow(history)

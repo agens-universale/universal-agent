@@ -1105,7 +1105,10 @@ async def test_profile_previews_count_what_belongs_to_the_profile(
         assert _preview(ed, "entry") == "3 модели · 1 в профиле"
         assert "flash-host" not in _preview(ed, "entry")
         assert _preview(ed, "slot") == "light→opus · default→glm · max→—"
-        assert _preview(ed, "assign") == "16 · в профиле 1"
+        assert (
+            _preview(ed, "assign")
+            == f"{len(m.assign_consumers())} · в профиле 1"
+        )
         # Уровень в превью красится своим цветом — как везде на экране (§12.4).
         assert _value_color(ed._block_preview("slot"), "light") == _rgb(
             value_style("light")
@@ -1124,7 +1127,7 @@ async def test_a_profile_that_owns_nothing_says_only_the_count(
         ed,
     ):
         assert _preview(ed, "entry") == "2 модели"
-        assert _preview(ed, "assign") == "16"
+        assert _preview(ed, "assign") == str(len(m.assign_consumers()))
         assert _preview(ed, "slot") == "light→opus · default→flash · max→—"
 
 
@@ -1154,7 +1157,10 @@ async def test_the_main_section_previews_keep_their_own_grammar(tmp_path):
         ed = _editor(scr)
         assert _preview(ed, "entry") == "2 модели · host"
         assert _preview(ed, "slot") == "light→— · default→flash · max→—"
-        assert _preview(ed, "assign") == "16 · все активная"
+        assert (
+            _preview(ed, "assign")
+            == f"{len(m.assign_consumers())} · все активная"
+        )
 
 
 # --- пустые якоря секций (Task D, §11) ----------------------------------------
@@ -1885,3 +1891,245 @@ async def test_ctrl_arrows_scroll_the_open_profile_when_the_editor_does_not_take
         await pilot.pause()
         assert scroll.scroll_offset.y > top
         assert scr._profiles_open == "work"  # из под-вида не вышли
+
+
+def test_session_profile_auto_activates_runtime_and_level_changes_next_call(
+    tmp_path, monkeypatch
+):
+    from gc_core.config import load_settings
+    from gc_core.run_context import acreate_run_context
+    from gc_core.states import State
+    from gc_core.turn_boundary import begin_turn
+    from gc_core.processing_responses import aprepare_main_call
+    from gc_core.auto_routing.state_ops import close_tick
+    from gc_testkit import run_coro
+    from gc_tui.app import TuiApp
+    from gc_tui.toggles import toggle_state, tui_agent_settings
+
+    monkeypatch.chdir(tmp_path)
+    config_path = tmp_path / "config.yml"
+    config_path.write_text(
+        "level: default\n"
+        "backend:\n  api_mode: chat_completions\n"
+        "  completions_url: http://local/v1/chat/completions\n"
+        "logging:\n  save_logs: false\n"
+        "models:\n  fast: {}\n  mid: {}\n  big: {}\n"
+        "slots:\n  light: fast\n  default: mid\n  max: big\n",
+        encoding="utf-8",
+    )
+    profiles = tmp_path / "profiles"
+    profiles.mkdir()
+    (profiles / "automatic.yml").write_text("level: auto\n", encoding="utf-8")
+    app = TuiApp(settings=load_settings(str(config_path)))
+    app.set_config_path(str(config_path))
+    assert app._level_provider() == "default"
+
+    app.switch_session_profile("automatic")
+
+    assert app._level_provider() == "auto"
+    assert toggle_state(app, "level") == "auto"
+    assert app.auto_mode_active() is True
+    ctx = run_coro(
+        acreate_run_context(
+            tui_agent_settings(app.effective_settings()),
+            is_tui=True,
+            level_provider=app._level_provider,
+        )
+    )
+    assert ctx.model_router.live_level() == "auto"
+    assert ctx.auto_available is True
+    assert ctx.model_router.resolve("main").alias == "mid"
+
+    app.set_session_override("level", "light")
+    assert app._level_provider() == "light"
+    assert toggle_state(app, "level") == "light"
+    assert ctx.model_router.resolve("main").alias == "fast"
+    state = State(
+        verbose=False,
+        model="mid",
+        tools_spec=ctx.tools_spec,
+        tools_descr=ctx.tools_description,
+        skills_list=[],
+        max_steps=10,
+        system_prompt_id="test",
+        use_server_subagents=False,
+    )
+    ctx.attach_state(state)
+    begin_turn(state, ctx)
+    assert state.turn_level is None
+    assert run_coro(aprepare_main_call(state, ctx)).alias == "fast"
+
+    app.set_session_override("level", "max")
+    assert app._level_provider() == "max"
+    assert toggle_state(app, "level") == "max"
+    assert ctx.model_router.live_level() == "max"
+    assert run_coro(aprepare_main_call(state, ctx)).alias == "fast"
+    close_tick(state, state._call_level)
+    assert run_coro(aprepare_main_call(state, ctx)).alias == "big"
+    assert state.turn_level is None
+
+
+@pytest.mark.asyncio
+async def test_session_profile_level_is_live_while_running_registry_stays_a_snapshot(
+    tmp_path, monkeypatch
+):
+    from gc_core.agent_executor import AgentExecutor
+    from gc_core.runtime_notices import (
+        clear_runtime_notices,
+        collect_runtime_notices,
+    )
+    from gc_core.auto_routing.state_ops import close_tick
+    from gc_core.config import load_settings
+    from gc_core.processing_responses import aprepare_main_call
+    from gc_core.run_context import acreate_run_context
+    from gc_core.states import State
+    from gc_core.turn_boundary import begin_turn
+    from gc_tui.app import TuiApp
+    from gc_tui.services.agent_runner import AgentRunner
+
+    monkeypatch.chdir(tmp_path)
+    config_path = tmp_path / "config.yml"
+    config_path.write_text(
+        "level: default\nbackend:\n  api_mode: chat_completions\n"
+        "  completions_url: http://local/v1/chat/completions\n"
+        "logging:\n  save_logs: false\n"
+        "models:\n  fast: {}\n  mid: {}\n"
+        "slots:\n  light: fast\n  default: mid\n  max: mid\n",
+        encoding="utf-8",
+    )
+    profiles = tmp_path / "profiles"
+    profiles.mkdir()
+    (profiles / "automatic.yml").write_text(
+        "level: auto\nmodels:\n  next-model: {}\n"
+        "slots:\n  default: next-model\n  max: next-model\n",
+        encoding="utf-8",
+    )
+    app = TuiApp(settings=load_settings(str(config_path)))
+    app.set_config_path(str(config_path))
+    ctx = await acreate_run_context(
+        app.effective_settings(),
+        is_tui=True,
+        level_provider=app._level_provider,
+    )
+    state = State(
+        verbose=False,
+        model="mid",
+        tools_spec=ctx.tools_spec,
+        tools_descr=ctx.tools_description,
+        skills_list=[],
+        max_steps=10,
+        system_prompt_id="test",
+        use_server_subagents=False,
+    )
+    executor = AgentExecutor(ctx)
+    executor._bind_state(state, discard_writes_after_stop=False)
+    begin_turn(state, ctx)
+    assert (await aprepare_main_call(state, ctx)).alias == "mid"
+    runner = AgentRunner(executor=executor)
+    monkeypatch.setattr(runner, "is_running", lambda: True)
+    app.active_runner = runner
+
+    clear_runtime_notices()
+    app.switch_session_profile("automatic")
+
+    assert app._level_provider() == "auto"
+    assert app.display_router().resolve("main").alias == "next-model"
+    assert "next-model" not in ctx.settings.models
+    assert (
+        await aprepare_main_call(state, ctx)
+    ).alias == "mid"  # current call is unchanged
+    app.tui_state.active_task_id = "live-profile"
+    async with app.run_test(size=(120, 24)):
+        snapshot = app.screen._footer_head_snapshot()
+        assert snapshot.model == "mid"
+        assert snapshot.mode_auto is False
+        assert snapshot.transition[1] == "auto"
+        close_tick(state, state._call_level)
+        assert (
+            await aprepare_main_call(state, ctx)
+        ).alias == "mid"  # next AUTO uses this runner's registry
+        snapshot = app.screen._footer_head_snapshot()
+        assert snapshot.model == "mid"
+        assert snapshot.mode_auto is True
+        assert snapshot.transition is None
+    assert runner.call_mode() == "auto"
+    notice = next(
+        n
+        for n in collect_runtime_notices()
+        if n.code == "profile_switch_deferred"
+    )
+    assert "подключения и реестр моделей" in notice.message
+    clear_runtime_notices()
+    app.active_runner = None
+
+
+@pytest.mark.parametrize("running_available", [True, False])
+@pytest.mark.parametrize("profile_available", [True, False])
+async def test_footer_uses_running_auto_availability_after_profile_switch(
+    tmp_path, monkeypatch, running_available, profile_available
+):
+    from gc_core.agent_executor import AgentExecutor
+    from gc_core.auto_routing.state_ops import close_tick
+    from gc_core.config import load_settings
+    from gc_core.processing_responses import aprepare_main_call
+    from gc_core.run_context import acreate_run_context
+    from gc_core.states import State
+    from gc_core.turn_boundary import begin_turn
+    from gc_tui.app import TuiApp
+    from gc_tui.services.agent_runner import AgentRunner
+
+    monkeypatch.chdir(tmp_path)
+    config = tmp_path / "config.yml"
+    config.write_text(
+        "level: auto\nbackend:\n  api_mode: chat_completions\n  vision: false\n"
+        "logging:\n  save_logs: false\n"
+        "models:\n  fast: {}\n  mid: {}\n"
+        "slots:\n  light: "
+        + ("fast" if running_available else "mid")
+        + "\n  default: mid\n  max: mid\n",
+        encoding="utf-8",
+    )
+    profiles = tmp_path / "profiles"
+    profiles.mkdir()
+    (profiles / "changed.yml").write_text(
+        "level: auto\nslots:\n  light: "
+        + ("fast" if profile_available else "mid")
+        + "\n  default: mid\n  max: mid\n",
+        encoding="utf-8",
+    )
+    app = TuiApp(settings=load_settings(str(config)))
+    app.set_config_path(str(config))
+    ctx = await acreate_run_context(
+        app.effective_settings(),
+        is_tui=True,
+        level_provider=app._level_provider,
+    )
+    state = State(
+        verbose=False,
+        model="mid",
+        tools_spec=ctx.tools_spec,
+        tools_descr=ctx.tools_description,
+        skills_list=[],
+        max_steps=10,
+        system_prompt_id="test",
+        use_server_subagents=False,
+    )
+    executor = AgentExecutor(ctx)
+    executor._bind_state(state, discard_writes_after_stop=False)
+    begin_turn(state, ctx)
+    await aprepare_main_call(state, ctx)
+    runner = AgentRunner(executor=executor)
+    monkeypatch.setattr(runner, "is_running", lambda: True)
+    app.active_runner = runner
+    app.switch_session_profile("changed")
+    app.tui_state.active_task_id = "live-profile"
+    try:
+        async with app.run_test(size=(120, 24)):
+            for _ in range(2):
+                snap = app.screen._footer_head_snapshot()
+                assert snap.mode_auto == running_available
+                assert snap.transition is None
+                close_tick(state, state._call_level)
+                await aprepare_main_call(state, ctx)
+    finally:
+        app.active_runner = None

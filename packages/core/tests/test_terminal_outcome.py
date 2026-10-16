@@ -5,6 +5,7 @@ import json
 import sys
 import types
 
+from gc_core.auto_routing.policy import NO_TOOL_BOUNCE
 from gc_core.states import State
 from gc_testkit import run_coro
 from gc_testkit.paths import module_dir
@@ -79,11 +80,15 @@ def _stub_tools_modules() -> None:
     def _is_unknown_tool_output(_output):
         return False
 
+    def _is_internal_tool_error_output(_output):
+        return False
+
     tools_pkg.aapply_tool = _apply_tool
     tools_pkg.WrongFunctionArgumentsException = (
         _WrongFunctionArgumentsException
     )
     tools_pkg.is_unknown_tool_output = _is_unknown_tool_output
+    tools_pkg.is_internal_tool_error_output = _is_internal_tool_error_output
     tools_dir = module_dir("tools")
     # `processing_responses` импортирует эти имена на уровне модуля. Без них
     # подмена пакета даёт ImportError, и файл падает целиком — но только
@@ -155,6 +160,7 @@ def test_step_limit_sets_terminal_outcome(monkeypatch):
     )
     assert "raw_trace_summary" in _env
     assert state.terminal_outcome == "step_limit"
+    assert NO_TOOL_BOUNCE in state.tick_signals
 
 
 def test_step_limit_still_executes_pending_function_calls(monkeypatch):

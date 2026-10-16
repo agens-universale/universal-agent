@@ -101,16 +101,33 @@ def _effective_model_name(config) -> str:
     быть внутренне согласованной. Резолв не удался (реестр нерезолвим, алиаса нет) —
     честный фоллбэк на плоский ключ, шапка не место для отказа.
 
-    Имя записи (алиас) главнее провайдерского id — язык слотов и привязок (§4)."""
+    Имя записи (алиас) главнее провайдерского id — язык слотов и привязок (§4).
+
+    `level: auto` (спека auto-routing §5.1) переводится через `effective_level`
+    ДО `ModelRouter` — сырой литерал `auto` иначе роняет `_resolve_level`
+    (`ValueError`), и шапка показала бы фоллбэк вместо модели default-слота.
+    Доступность фичи — через `gc_tui.toggles.auto_available_cfg` (единая точка
+    TUI, спека §3), не пересчитывается своим композитом `auto_available` +
+    `cli_forces_legacy_model`; core-аналог с той же логикой — только на
+    core-функциях (`gc_core.onboarding.effective_model`, слой не позволяет
+    ему знать про `gc_tui`)."""
+    from gc_core.auto_routing.levels import effective_level
+    from gc_core.config import cli_forces_legacy_model
     from gc_core.model_router import ModelRouter
     from gc_core.onboarding import MODEL_SENTINEL
+
+    from gc_tui.toggles import auto_available_cfg
 
     settings = settings_of(config)
     name = settings.agent.model
     try:
+        available = auto_available_cfg(config)
         resolved = ModelRouter(
             config,
-            level_provider=lambda: settings.level or "default",
+            level_provider=lambda: effective_level(
+                settings.level, None, available
+            ),
+            force_legacy=cli_forces_legacy_model(config),
         ).resolve("main", check_breaker=False)
         name = resolved.alias or resolved.model
     except Exception:
@@ -119,9 +136,13 @@ def _effective_model_name(config) -> str:
 
 
 def _profile_header_text(config, profile_source: str | None) -> Text:
-    """Спека §12.3a: «профиль: work (проектный) · уровень: default · модель: glm-local»."""
+    """Спека §12.3a: «профиль: work (проектный) · уровень: default · модель: glm-local».
+    Уровень — действующий, тем же правилом, что у палитры `/level`: `auto`, только
+    когда автовыбор доступен, иначе уровень, которым идёт работа."""
+    from gc_tui.toggles import resolve_level_state
+
     profile = runtime_of(config).active_profile or None
-    level = settings_of(config).level or "default"
+    level = resolve_level_state(config)
     model = _effective_model_name(config)
     t = Text()
     t.append("профиль: ", style=DIM)

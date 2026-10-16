@@ -103,3 +103,15 @@ async def test_finally_merge_folds_child_usage_into_parent(monkeypatch):
     assert orch.usage.by_category["subagent"]["output"] == 22
     # Envelope содержит разбивку usage субагента
     assert "usage" in payload["meta"]
+
+
+def test_child_judge_usage_is_merged_once_with_model_identity():
+    runner, parent = _runner_with_orchestrator()
+    child = _FakeChildState()
+    child.usage.add("routing_judge", 40, 5, model="judge-model")
+    runner._push_usage_delta(child)
+    runner._push_usage_delta(child)
+    assert parent.usage.by_category["subagent"]["calls"] == 3
+    assert parent.usage.by_model["judge-model"]["input"] == 40
+    assert parent.usage.by_model["judge-model"]["output"] == 5
+    assert child.usage.by_category["routing_judge"]["calls"] == 1

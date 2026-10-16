@@ -9,8 +9,41 @@ import json
 import logging
 import time
 from types import SimpleNamespace
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, NoReturn, Optional, Tuple, Union
 
+from gc_core.auto_routing import state_ops
+from gc_core.auto_routing.judge_runner import arun_pair_judge
+from gc_core.auto_routing.levels import auto_active, effective_level
+from gc_core.auto_routing.log_events import (
+    log_artifact_reroute,
+    log_routing_decision,
+    log_routing_pair,
+    log_unavailable_reroute,
+)
+from gc_core.auto_routing.policy import (
+    FINISH_REJECT,
+    LOOP,
+    NO_TOOL_BOUNCE,
+    PAIR_DESCEND,
+    PAIR_LOWER,
+    PAIR_START,
+    SAFE_LEVEL_AUTO,
+    TOOL_CALL_ERROR,
+    Decision,
+    RoutingParams,
+    first_alive,
+    floor_levels,
+    level_below,
+    nearest_levels,
+    pair_entry_decision,
+    pair_start,
+    pair_tick,
+    turn_params,
+    two_level_decision,
+    with_fallback,
+)
+from gc_core.auto_routing.reroute import floor_verdict
+from gc_core.auto_routing.response import discarded_answer
 from gc_core.config import parse_chat_completions_max_tokens
 from gc_core.config_modules.gc import gc_force_collect_enabled
 from gc_core.config_modules.images import read_images_config
@@ -31,7 +64,11 @@ from gc_core.execution.constants import (
     _SESSION_COMPACT_RESUME_USER_TEXT,
     _TRUNCATED_ARGUMENTS_HINT,
 )
-from gc_core.execution.contracts import ExecutionFailure, ModelRequestStopped
+from gc_core.execution.contracts import (
+    ExecutionFailure,
+    MainModelUnavailable,
+    ModelRequestStopped,
+)
 from gc_core.execution.model import arequest_model
 from gc_core.execution.output_wrapping import (
     maybe_store_and_wrap_tool_output,
@@ -50,7 +87,10 @@ from gc_core.intent_guard.turn_finish_emit import (
     apply_finish_gate_to_turn_finish_output_in_state,
     get_function_call_output_text,
 )
-from gc_core.intent_scope.final_answer import amaybe_record_final_answer_intent
+from gc_core.intent_scope.final_answer import (
+    amaybe_record_final_answer_intent,
+    record_turn_finish_outcome,
+)
 from gc_core.intent_scope.hook import amaybe_update_intent_scope_from_tool
 from gc_core.loop_detector.detector import clear as clear_loop_detector
 
@@ -97,7 +137,10 @@ from gc_core.run_summary_coordinator import (
     build_preserved_batch,
     filter_messages_not_in_state,
 )
-from gc_core.runtime_notices import maybe_push_llm_failure_notice
+from gc_core.runtime_notices import (
+    maybe_push_level_reroute_notice,
+    maybe_push_llm_failure_notice,
+)
 from gc_core.settings import AppConfig, settings_of
 from gc_core.states import State
 from gc_core.summarize.limit_trace_summary import abuild_limit_envelope
@@ -107,6 +150,8 @@ from gc_core.tools import (
     is_internal_tool_error_output,
     is_unknown_tool_output,
 )
+from gc_core.tools.arguments_validation import arguments_without_service_fields
+from gc_core.tools.subagents.registry import is_subagent_tool
 from gc_core.tools.subagents.sidecar import apersist_subagent_trace
 from gc_core.turn_boundary import begin_turn
 from gc_core.usage.account import CATEGORY_MAIN as USAGE_CATEGORY_MAIN
@@ -125,6 +170,7 @@ from gc_core.utils.backend_errors import (
     is_model_unavailable_error,
     is_previous_response_cache_miss,
 )
+from gc_core.utils.chat_completions_stream import without_answer_deltas
 from gc_core.utils.connect_backend import (
     NO_BACKEND_OVERRIDE,
     acreate_call_headers,
@@ -334,7 +380,7 @@ def _mode_requires_backend_call(mode: str) -> bool:
 
 def _raise_honest_main_unavailable(
     ctx: Any, resolved: Any, reason: str, source_exc: BaseException
-) -> None:
+) -> NoReturn:
     """Класс 2 фоллбэков недоступности (спека §8): исчерпаны существующие ретраи
     (transport/adaptive max_tokens/401-refresh) для активной модели main-трейса.
     Никаких тихих подмен — честная ошибка хода с моделью/endpoint/причиной и
@@ -354,42 +400,376 @@ def _raise_honest_main_unavailable(
     )
     logger = getattr(ctx, "logger", None) or _fallback_logger
     logger.error(message)
-    raise RuntimeError(message) from source_exc
+    raise MainModelUnavailable(message) from source_exc
 
 
-def _resolve_main_for_turn(state: State, ctx: Any) -> Optional[Any]:
-    """Резолв `main` по уровню, ЗАФИКСИРОВАННОМУ на ход (`turn_boundary.begin_turn`).
+def resolve_main_for_call(
+    state: State, ctx: Any, *, level_override: Optional[str] = None
+) -> Optional[Any]:
+    """Единственный резолв модели главного трейса перед LLM-вызовом (спека
+    автороутинга §5.2 п.3): ручной уровень и AUTO используют решение текущего
+    такта; следующий такт читает новый выбор пользователя. Результат (`ResolvedModel`:
+    модель, адрес, токен, квирки) передаётся в воронку целиком, внутри вызова
+    повторных резолвов нет — иначе смена уровня между решением и отправкой давала
+    бы «половинчатую подмену» (лог от одной модели, запрос к другой).
 
-    Контракт §6.4 — «внутри хода модель не перечитывается» — держится не на
-    `state.default_model` (воронка берёт модель из `ResolvedModel`, а не оттуда), а
-    на пине уровня: `/level` меняется без пересборки executor, и живой резолв уводил
-    бы url/токен/модель на другой слот прямо посреди цикла tool-call'ов.
+    `level_override` — зафиксированный уровень из точки решения (`aroute_before_call`):
+    без него `router.resolve("main")` читал бы
+    провайдер уровня ЗАНОВО, независимо от чтения внутри `aroute_before_call` — и
+    `/level` между решением и этим резолвом развёл бы их. `None` (вызовы вне
+    `aprepare_main_call`, напр. существующие тесты) — прежнее поведение, живой
+    провайдер.
 
-    Предохранитель проверяется КАЖДЫЙ раз (алиас мог открыться посреди хода) —
-    `resolve_level` идёт тем же путём `_resolve_alias`, что и `resolve("main")`.
-    Пина нет (ход не начинали через `begin_turn` — легаси/тестовые двойники) или
-    Router дочерний (у субагента уровень уже заморожен в самом Router'е) — обычный
-    резолв. Без `ctx.model_router` — `None`, воронки читают cfg напрямую как раньше."""
+    Открытый алиас активной модели main-трейса — честная ошибка класса 2 до
+    транспорта (`_raise_honest_main_unavailable`); у ребёнка-субагента class-2
+    ведёт `SubagentRunner`, поэтому его `AliasCircuitOpenError` уходит сырым.
+    Без `ctx.model_router` — `None`, воронки читают cfg напрямую как раньше."""
     router = getattr(ctx, "model_router", None)
     if router is None:
         return None
-    return router.resolve_main_at_level(getattr(state, "turn_level", None))
+    try:
+        resolved = router.resolve("main", level_override=level_override)
+    except AliasCircuitOpenError as exc:
+        if getattr(router, "is_subagent_child", False):
+            raise
+        _raise_honest_main_unavailable(ctx, exc.resolved, exc.reason, exc)
+    state.default_model = resolved.model
+    return resolved
+
+
+def _raw_routing_params(ctx: Any) -> RoutingParams:
+    """Параметры политики этого прогона. Обе точки сборки RunContext кладут их на
+    ctx; тестовые двойники ctx поля не имеют — дефолтные параметры и есть
+    продуктовое поведение без экспериментов."""
+    params = getattr(ctx, "routing_params", None)
+    return params if isinstance(params, RoutingParams) else RoutingParams()
+
+
+def _routing_params(ctx: Any, state: Any) -> RoutingParams:
+    """Параметры такта: параметры прогона, где `safe_level: auto` уже заменён
+    уровнем хода (`policy.turn_params`; пары нет — `max`). Все решения и переигрыши
+    контроллера читают `safe_level` только отсюда — литерал `auto` в правила не
+    попадает ни при какой политике."""
+    return turn_params(
+        _raw_routing_params(ctx), getattr(state, "turn_safe_level", None)
+    )
+
+
+def _strong_lower_last(state: State) -> bool:
+    """Последний закрытый вызов сделала сильная модель нижней пары (уровень `default`).
+    Меток уровня хватает: лестница пар работает, только когда в обеих парах разные
+    модели (`levels.resolve_routing_params`), так что `light` и `default` — всегда
+    разные модели."""
+    return getattr(state, "_last_effective_level", None) == PAIR_LOWER
+
+
+async def _aupdate_turn_pair(
+    state: State,
+    ctx: Any,
+    *,
+    mid_turn: bool,
+    signals: Tuple[str, ...],
+) -> Optional[str]:
+    """Пара хода (спеки pair-judge и pair-ladder): политика `two_level`,
+    `safe_level: auto`. Пары нет — судья и старт лестницы (`pair_start`); есть — шаг
+    лестницы (`pair_tick`) по сигналам такта. Каждая смена — событие `routing_pair`.
+    Возвращает причину смены на ЭТОМ такте (`raise` | `lock` | `descend`) — решение
+    такта тогда берётся из `pair_entry_decision`; старт и «без смены» — None."""
+    raw = _raw_routing_params(ctx)
+    if raw.safe_level != SAFE_LEVEL_AUTO:
+        return None
+    logger = getattr(ctx, "logger", None) or _fallback_logger
+    turn = int(getattr(state, "user_turn_seq", 0) or 0) + 1
+    step = int(getattr(state, "steps_in_turn", 0) or 0)
+    if getattr(state, "turn_safe_level", None) is None:
+        choice = await arun_pair_judge(
+            state, ctx, params=raw, mid_turn=mid_turn
+        )
+        pair = pair_start(choice.score, raw)
+        state_ops.set_pair(state, pair)
+        log_routing_pair(
+            logger,
+            turn=turn,
+            step=step,
+            cause=PAIR_START,
+            before=None,
+            after=pair,
+            score=choice.score,
+        )
+        return None
+    before = state_ops.read_pair(state)
+    strong_lower_last = (
+        bool(signals)
+        and before.safe_level == PAIR_LOWER
+        and _strong_lower_last(state)
+    )
+    after, cause = pair_tick(before, signals, strong_lower_last, raw)
+    if cause is None:
+        return None
+    state_ops.set_pair(state, after)
+    log_routing_pair(
+        logger,
+        turn=turn,
+        step=step,
+        cause=cause,
+        before=before,
+        after=after,
+        signals=() if cause == PAIR_DESCEND else signals,
+    )
+    return cause
+
+
+def _first_alive_level(
+    router: Any, levels: Tuple[str, ...]
+) -> Optional[Tuple[str, Any]]:
+    """Первый уровень из `levels` (`first_alive`), чей алиас главного вызова не
+    разомкнут предохранителем, и его комплект вызова — из того же резолва,
+    которым проверялась живость; все мертвы — None: у решения честный отказ
+    дальше, в резолве `resolve_main_for_call`, у пола ответ остаётся в силе.
+    Одно правило живости для замены мёртвого уровня решения и для цели пола:
+    живость спрашивается у Router'а тем же резолвом, каким пойдёт вызов, —
+    привязки и оверрайд деградации учтены сами."""
+    kits: Dict[str, Any] = {}
+
+    def is_alive(level: str) -> bool:
+        try:
+            kits[level] = router.resolve("main", level_override=level)
+        except AliasCircuitOpenError:
+            return False
+        return True
+
+    level = first_alive(levels, is_alive)
+    return None if level is None else (level, kits[level])
+
+
+#: Маркер durable-истории: в AUTO подтверждённо недоступная модель такта
+#: заменяется ближайшим живым уровнем (спека PR140 Р3). Без маркера — прежняя
+#: честная ошибка.
+UNAVAILABLE_REROUTE_PATCH = "main-unavailable-reroute-v1"
+
+#: Маркер durable-истории: стоп, пришедший во время подготовки такта (судья
+#: пары, сжатие) или отказа основного запроса, не пускает такт дальше — ни к
+#: основному запросу, ни к замене модели. Без маркера — прежнее поведение.
+STOP_AFTER_ROUTING_PATCH = "stop-after-routing-v1"
+
+
+def _stop_honored(stopped: bool, ctx: Any) -> bool:
+    """Стоп пользователя прерывает такт перед основным запросом или после
+    его отказа."""
+    if not stopped:
+        return False
+    execution_patch = port(ctx, "execution_patch")
+    return execution_patch is None or execution_patch(STOP_AFTER_ROUTING_PATCH)
+
+
+def _alive_level(ctx: Any, levels: Tuple[str, ...]) -> Optional[str]:
+    """Первый живой уровень из `levels` по предохранителю — тем же правилом, что
+    замена мёртвого уровня в решении такта."""
+    router = getattr(ctx, "model_router", None)
+    alive = _first_alive_level(router, levels) if router is not None else None
+    return None if alive is None else alive[0]
+
+
+def _reroute_level(
+    state: State,
+    ctx: Any,
+    failed: Optional[Any],
+    exc: BaseException,
+    next_level: Callable[[str], Optional[str]],
+) -> Optional[str]:
+    """Уровень замены после отказа запроса такта или None — отказ остаётся
+    отказом. Заменяется только запрос, который решал AUTO (`current_level`):
+    в ручном режиме модель выбрана явно. Отказ — подтверждённая недоступность:
+    честная ошибка основного хода или исходное исключение ребёнка (его
+    предохранитель здесь же и взводится). Остановленный ход модель не
+    заменяет: отказ становится чистым стопом (`ModelRequestStopped`). Старые
+    durable-истории без маркера — прежнее поведение."""
+    if getattr(state, "current_level", None) is None:
+        return None
+    if not (
+        isinstance(exc, MainModelUnavailable)
+        or is_model_unavailable_error(exc)
+    ):
+        return None
+    router = getattr(ctx, "model_router", None)
+    if router is None or failed is None or failed.alias is None:
+        return None
+    execution_patch = port(ctx, "execution_patch")
+    if execution_patch is not None and not execution_patch(
+        UNAVAILABLE_REROUTE_PATCH
+    ):
+        return None
+    if not router.breaker.is_open(failed.alias):
+        # Честная ошибка основного хода уже взвела его с исходной причиной.
+        router.breaker.trip(
+            failed.alias, str(exc).strip()[:300] or type(exc).__name__
+        )
+    if _stop_honored(bool(getattr(state, "stop_requested", False)), ctx):
+        raise ModelRequestStopped("Ход остановлен") from exc
+    level = next_level(getattr(state, "_call_level", None) or "default")
+    if level is not None:
+        state_ops.reroute_tick(state, level)
+    return level
+
+
+async def _arequest_rerouting(
+    messages: List[Dict],
+    state: State,
+    ctx: Any,
+    *,
+    resolved: Optional[Any],
+    next_level: Callable[[str], Optional[str]],
+    mute: Callable[[Optional[Any]], bool],
+) -> Tuple[Tuple[List[Dict], str, Dict], Optional[Any]]:
+    """Запрос такта с заменой подтверждённо недоступной модели (спека PR140 Р3).
+    Повтор того же сообщения, не новый такт. Цикл конечен: каждый отказ выводит
+    алиас из живых. Возвращает ответ и комплект, которым он получен."""
+    while True:
+        muted = mute(resolved)
+        try:
+            result = await _arequest_backend_canonical(
+                messages, state, ctx, resolved=resolved, mute_answer=muted
+            )
+            return result, resolved
+        except Exception as exc:
+            level = _reroute_level(state, ctx, resolved, exc, next_level)
+            if level is None:
+                raise
+            failed = resolved
+            from_level = getattr(state, "_call_level", None) or "default"
+            resolved = _apply_call_kit(state, ctx, level)
+            message = (
+                f"автовыбор: {failed.alias} недоступна — запрос повторён уровнем "
+                f"{level} ({resolved.model})"
+            )
+            logger = getattr(ctx, "logger", None) or _fallback_logger
+            logger.warning(message)
+            log_unavailable_reroute(
+                logger,
+                turn=int(getattr(state, "user_turn_seq", 0) or 0) + 1,
+                from_level=from_level,
+                to_level=level,
+                failed_alias=failed.alias,
+                replacement_alias=resolved.alias,
+                replacement_model=resolved.model,
+            )
+            maybe_push_level_reroute_notice(
+                failed_alias=failed.alias,
+                level=level,
+                model=resolved.model,
+                enabled=bool(getattr(ctx, "is_tui", False)),
+            )
+
+
+async def aroute_before_call(
+    state: State, ctx: Any
+) -> Tuple[bool, Optional[Decision], str, bool]:
+    """Решение AUTO на текущий такт: пара, серия шагов и замена недоступной модели.
+
+    Возвращает (активен, решение, фактический уровень, новое решение).
+    Повтор того же такта читает мемо State, не вызывает судью и не меняет
+    пару повторно. Все режимы читают живой выбор только при новом такте.
+    Решение и счётчики принадлежат State, а не контексту."""
+    cached = getattr(state, "_tick_decision", None)
+    if cached is not None:
+        _, cached_active, cached_decision, cached_effective = cached
+        return cached_active, cached_decision, cached_effective, False
+
+    router = getattr(ctx, "model_router", None)
+    live = router.live_level() if router is not None else "default"
+    available = getattr(ctx, "auto_available", True)
+    active = auto_active(router, live, available)
+
+    decision = None
+    if not active:
+        if getattr(state, "current_level", None) is not None:
+            state_ops.leave(state)
+    else:
+        entering = getattr(state, "current_level", None) is None
+        # Вход в auto обнуляет счётчики хода; сделанные до него шаги — признак
+        # переключения посреди хода (поле `mid_turn` события судьи пары).
+        mid_turn = (
+            entering and int(getattr(state, "steps_in_turn", 0) or 0) > 0
+        )
+        if entering:
+            state_ops.enter(state)
+        signals = tuple(
+            sorted(set(getattr(state, "tick_signals", None) or set()))
+        )
+        pair_cause = await _aupdate_turn_pair(
+            state, ctx, mid_turn=mid_turn, signals=signals
+        )
+        params = _routing_params(ctx, state)
+        if pair_cause is not None:
+            # Такт смены пары: сильная новой пары, серия с нуля (лестница пар).
+            decision = pair_entry_decision(pair_cause, signals, params)
+        else:
+            decision = two_level_decision(
+                state.current_level,
+                state.steps_in_turn,
+                state.steps_on_current_level,
+                signals,
+                params=params,
+            )
+        alive = _first_alive_level(router, nearest_levels(decision.level))
+        if alive is not None:
+            decision = with_fallback(
+                decision, alive[0], current=state.current_level
+            )
+        state_ops.apply_decision(state, decision)
+    effective = effective_level(
+        live, getattr(state, "current_level", None), available
+    )
+    state._tick_decision = (live, active, decision, effective)
+    return active, decision, effective, True
+
+
+def _apply_call_kit(state: State, ctx: Any, level: str) -> Optional[Any]:
+    """Комплект вызова и фактический уровень такта; схемы проецируются транспортом."""
+    resolved = resolve_main_for_call(state, ctx, level_override=level)
+    state._call_level = level
+    return resolved
+
+
+async def aprepare_main_call(state: State, ctx: Any) -> Optional[Any]:
+    """Единая точка выбора модели перед основным запросом.
+
+    Записывает фактический уровень в State и логирует только новое решение
+    такта. Повтор запроса после переполнения контекста получает то же решение.
+    Канонические схемы инструментов проецируются транспортом для выбранной модели."""
+    active, decision, effective, is_new = await aroute_before_call(state, ctx)
+    params = _routing_params(ctx, state)
+    resolved = _apply_call_kit(
+        state,
+        ctx,
+        effective,
+    )
+    if is_new:
+        log_routing_decision(
+            getattr(ctx, "logger", None) or _fallback_logger,
+            state,
+            active=active,
+            decision=decision,
+            level=effective,
+            resolved=resolved,
+            params=params,
+        )
+    return resolved
 
 
 def _maybe_trip_and_raise_main_unavailable(
-    state: State, ctx: Any, exc: Exception
+    ctx: Any, exc: Exception, *, resolved: Optional[Any]
 ) -> None:
     """Классифицирует `exc` (спека §8) и, если это подтверждённая недоступность
     активной модели main-трейса, поднимает честную ошибку (см. выше). Иначе —
     no-op, вызывающий код должен `raise` исходное исключение без изменений.
 
-    Резолв — по модели ХОДА (`_resolve_main_for_turn`), не по живому уровню: и
-    предохранитель, и текст ошибки обязаны назвать тот алиас, которым запрос
-    реально шёл, иначе `/level` посреди хода закрыл бы живую модель вместо мёртвой.
+    `resolved` — комплект того самого вызова, что упал (один резолв на вызов,
+    спека автороутинга §5.2 п.3): предохранитель и текст ошибки называют алиас,
+    которым запрос реально шёл, а не тот, что живой уровень отдал бы сейчас.
 
-    Пропускает ЛЮБОГО ребёнка-субагента (`router.is_subagent_child`, пинованного
-    или нет): его class-1 рестарт/деградацию ведёт `SubagentRunner`, а не главный
-    трейс — осознанно, не только для явно пинованных."""
+    Пропускает ЛЮБОГО ребёнка-субагента (`router.is_subagent_child`): его class-1
+    рестарт/деградацию ведёт `SubagentRunner`, а не главный трейс."""
     if is_context_overflow_error(exc):
         return
     if not is_model_unavailable_error(exc):
@@ -397,32 +777,34 @@ def _maybe_trip_and_raise_main_unavailable(
     router = getattr(ctx, "model_router", None)
     if router is None or getattr(router, "is_subagent_child", False):
         return
-    try:
-        resolved = _resolve_main_for_turn(state, ctx)
-    except AliasCircuitOpenError as open_exc:
-        resolved = open_exc.resolved
-    if resolved.alias is None:
+    if resolved is None or resolved.alias is None:
         return  # легаси — предохранитель не ведётся
     reason = str(exc).strip()[:300] or exc.__class__.__name__
     _raise_honest_main_unavailable(ctx, resolved, reason, exc)
 
 
 def begin_turn_main_trace(state: State, ctx: Any) -> None:
-    """Начало хода ГЛАВНОГО трейса (спека §6.4/§8): фиксирует модель хода
-    (`turn_boundary.begin_turn`) и, если активный алиас уже в предохранителе
-    (trip прошлого хода / персистированный breaker при attach), поднимает честную
-    ошибку класса 2 ДО похода в транспорт — с той же моделью/endpoint/причиной и
-    подсказкой /level //profiles, что и `_request_backend_canonical`.
+    """Начало хода ГЛАВНОГО трейса (спека §6.4/§8): ставит стартовый
+    `default_model` хода (`turn_boundary.begin_turn`) — каждый вызов внутри хода
+    резолвит модель перед отправкой (`resolve_main_for_call`); ручной выбор и
+    AUTO закрепляются только на такт —
+    и, если активный алиас уже в предохранителе (trip прошлого хода /
+    персистированный breaker при attach), поднимает честную ошибку класса 2 ДО
+    похода в транспорт — с той же моделью/endpoint/причиной и подсказкой /level
+    //profiles, что и `_arequest_backend_canonical`.
 
-    `begin_turn` резолвит `main` без `check_breaker=False`, поэтому открытый алиас
-    прилетает сюда сырым `AliasCircuitOpenError`; переводим его в тот же честный
-    класс 2 через `_maybe_trip_and_raise_main_unavailable` (единый текст, без
-    дублирования). Субагентские `begin_turn` идут мимо — их class-1 ведёт
-    `SubagentRunner`, а обёртку зовут только main-трейс call-site'ы."""
+    В ручном режиме `begin_turn` резолвит `main` с проверкой предохранителя,
+    поэтому открытый алиас прилетает сюда сырым `AliasCircuitOpenError`;
+    переводим его в тот же честный класс 2 через
+    `_maybe_trip_and_raise_main_unavailable` (единый текст, без дублирования).
+    При активном auto стартовый резолв предохранитель не проверяет — живость за
+    точкой решения (`aroute_before_call`), и отказ, если мертвы все три уровня,
+    приходит на первом вызове. Субагентские `begin_turn` идут мимо — их class-1
+    ведёт `SubagentRunner`, а обёртку зовут только main-трейс call-site'ы."""
     try:
         begin_turn(state, ctx)
     except AliasCircuitOpenError as exc:
-        _maybe_trip_and_raise_main_unavailable(state, ctx, exc)
+        _maybe_trip_and_raise_main_unavailable(ctx, exc, resolved=exc.resolved)
         raise
 
 
@@ -478,12 +860,17 @@ def _read_once(
     return read
 
 
+_UNRESOLVED_MAIN = object()
+
+
 async def _arequest_backend_canonical(
     messages: List[Dict],
     state: State,
     ctx: Any,
     *,
+    resolved: Any = _UNRESOLVED_MAIN,
     set_previous_response_id: bool = True,
+    mute_answer: bool = False,
 ) -> Tuple[List[Dict], str, Dict]:
     operations = port(ctx, "operations")
     if operations is None:
@@ -492,12 +879,15 @@ async def _arequest_backend_canonical(
             state,
             ctx,
             set_previous_response_id=set_previous_response_id,
+            resolved=resolved,
+            mute_answer=mute_answer,
         )
     result = await arequest_model(
         operations,
         state,
         messages,
         consumer="main",
+        mute_answer=mute_answer,
         set_previous_response_id=set_previous_response_id,
     )
     return result.messages, result.response_id or "", result.response_metadata
@@ -508,6 +898,8 @@ async def _arequest_backend_canonical_local(
     state: State,
     ctx: Any,
     *,
+    resolved: Any = _UNRESOLVED_MAIN,
+    mute_answer: bool = False,
     set_previous_response_id: bool = True,
 ) -> Tuple[List[Dict], str, Dict]:
     """Обёртка над одиночной попыткой: на 401 (истёкший токен доступа) пере-выпускает
@@ -515,23 +907,26 @@ async def _arequest_backend_canonical_local(
     Повторный 401 после свежего токена — настоящий auth-fail, уходит наверх внятно.
     Прочие ошибки — наверх без изменений. Все call-site получают это единообразно.
 
-    Класс 2 фоллбэков недоступности (спека §8): открытый алиас активной модели —
-    мгновенный отказ до похода в транспорт; подтверждённая недоступность после
-    исчерпания ретраев — честная ошибка + предохранитель (см. `_raise_honest_main_unavailable`)."""
-    auth_connector = getattr(ctx, "auth_connector", None)
-    router = getattr(ctx, "model_router", None)
-    if router is not None and not getattr(router, "is_subagent_child", False):
-        try:
-            _resolve_main_for_turn(state, ctx)
-        except AliasCircuitOpenError as exc:
-            _raise_honest_main_unavailable(ctx, exc.resolved, exc.reason, exc)
+    `resolved` — комплект вызова из `resolve_main_for_call` (один резолв на вызов);
+    открытый алиас уже отбит там, здесь предпроверки нет. Подтверждённая
+    недоступность после исчерпания ретраев — честная ошибка + предохранитель
+    (см. `_raise_honest_main_unavailable`).
 
+    `mute_answer` — вызов идёт без дельт `answer` в потоке; решает вызывающий
+    (`_answer_stream_muted`), в повтор после 401 значение едет то же."""
+    if resolved is _UNRESOLVED_MAIN:
+        resolved = resolve_main_for_call(
+            state, ctx, level_override=getattr(state, "_call_level", None)
+        )
+    auth_connector = getattr(ctx, "auth_connector", None)
     try:
         return await _arequest_backend_canonical_once(
             messages,
             state,
             ctx,
+            resolved=resolved,
             set_previous_response_id=set_previous_response_id,
+            mute_answer=mute_answer,
         )
     except Exception as exc:
         if auth_connector is not None and is_auth_error(exc):
@@ -548,12 +943,16 @@ async def _arequest_backend_canonical_local(
                     messages,
                     state,
                     ctx,
+                    resolved=resolved,
                     set_previous_response_id=set_previous_response_id,
+                    mute_answer=mute_answer,
                 )
             except Exception as retry_exc:
-                _maybe_trip_and_raise_main_unavailable(state, ctx, retry_exc)
+                _maybe_trip_and_raise_main_unavailable(
+                    ctx, retry_exc, resolved=resolved
+                )
                 raise
-        _maybe_trip_and_raise_main_unavailable(state, ctx, exc)
+        _maybe_trip_and_raise_main_unavailable(ctx, exc, resolved=resolved)
         raise
 
 
@@ -891,7 +1290,9 @@ async def _arequest_backend_canonical_once(
     state: State,
     ctx: Any,
     *,
+    resolved: Any = _UNRESOLVED_MAIN,
     set_previous_response_id: bool = True,
+    mute_answer: bool = False,
 ) -> Tuple[List[Dict], str, Dict]:
     """
     Унифицированный вызов backend для двух режимов API (одна попытка).
@@ -901,12 +1302,8 @@ async def _arequest_backend_canonical_once(
     - backend response id,
     - backend response headers (может быть пустым dict).
     """
-    # Main-трейс: воронка получает весь ResolvedModel (url/authorization/
-    # backend_overrides), не только id модели (спека §6/§7) — поэтому и резолв идёт
-    # по уровню, зафиксированному на ход (`_resolve_main_for_turn`), а не по живому:
-    # иначе /level посреди хода уводил бы запрос на другой слот. Без ctx.model_router
-    # (легаси/тестовые двойники) — resolved=None, воронки читают настройки напрямую как раньше.
-    resolved = _resolve_main_for_turn(state, ctx)
+    if resolved is _UNRESOLVED_MAIN:
+        resolved = resolve_main_for_call(state, ctx)
     call_headers = await _acreate_vision_call_headers(state, ctx, resolved)
     settings = settings_of(ctx)
     backend_mode = _get_backend_api_mode(ctx)
@@ -969,6 +1366,8 @@ async def _arequest_backend_canonical_once(
 
     _stream_on = _tui_stream_enabled(settings)
     _on_delta = getattr(ctx, "on_stream_delta", None) if _stream_on else None
+    if mute_answer and _on_delta is not None:
+        _on_delta = without_answer_deltas(_on_delta)
     prompt_message_count = len(getattr(state, "messages", []) or [])
 
     send = functools.partial(
@@ -1160,29 +1559,185 @@ def group_messages(messages: List[Dict]) -> Dict[str, List[Dict]]:
     }
 
 
-async def _aask_backend_and_record(messages, state: State, ctx: Any):
-    """Сходить в бэкенд каноническим путём и запомнить заголовки ответа.
+def _usage_snapshot(state: State) -> Optional[UsageAccount]:
+    """Клон `state.usage` для дельты «токены и цена именно этого вызова»:
+    `usage_scope` внутри `_arequest_backend_canonical` пишет в `state.usage`
+    кумулятивно, снимок до вызова плюс `delta_from` после дают вклад одного
+    вызова без отдельного учётного механизма."""
+    usage = getattr(state, "usage", None)
+    if usage is None:
+        return None
+    return UsageAccount.from_meta(usage.to_meta())
 
-    Общее тело `aprocess_user_ask` и `aprocess_tool_outputs`: точки вызова у них
-    разные (вопрос пользователя и выдача тулов), и тесты подменяют каждую по
-    имени, поэтому обе остаются, а повтор тела ушёл сюда.
-    """
-    (
+
+def _floor_target(
+    ctx: Any,
+    from_level: str,
+    resolved: Optional[Any],
+    params: RoutingParams,
+) -> Optional[str]:
+    """Уровень, на который пол переигрывает вызов уровня `from_level`, или None —
+    переигрывать некуда. Кандидаты — `floor_levels` (безопасный уровень, при его
+    мёртвом алиасе — ближайший живой выше `from_level`); берётся первый живой
+    (`_first_alive_level`). Его комплект вызова совпал с комплектом исходного
+    вызова (`resolved`) — та же модель с теми же параметрами ответила бы тем же,
+    переигрыш был бы дублем."""
+    router = getattr(ctx, "model_router", None)
+    if router is None or resolved is None:
+        return None
+    alive = _first_alive_level(router, floor_levels(from_level, params=params))
+    if alive is None:
+        return None
+    level, candidate = alive
+    from gc_core.auto_routing.request_equivalence import same_routing_request
+
+    identical = same_routing_request(
+        ctx,
+        candidate,
+        resolved,
+        first_level=level,
+        second_level=from_level,
+        legacy=not getattr(ctx, "routing_contract_v2", True),
+    )
+    return None if identical else level
+
+
+def _answer_stream_muted(
+    state: State,
+    ctx: Any,
+    resolved: Optional[Any],
+    params: RoutingParams,
+) -> bool:
+    """Глушить ли канал `answer` потока у ЭТОГО вызова. Под `two_level` ответ без
+    вызовов тулов от уровня ниже сильной переигрывается, и пользователь увидел бы
+    готовую прозу, которая исчезает и переписывается. Всё известно до запроса:
+    политика `two_level`, auto решал вызов (`state.current_level`) и у уровня
+    вызова есть цель переигрыша (`_floor_target`). Рассуждение и аргументы тулов
+    идут в поток как обычно; цели нет — прозу слабой не переиграют, поток полный."""
+    if getattr(state, "current_level", None) is None:
+        return False
+    from_level = getattr(state, "_call_level", None) or "default"
+    return _floor_target(ctx, from_level, resolved, params) is not None
+
+
+async def _amaybe_reroute_for_floors(
+    messages: List[Dict],
+    resp_messages: List[Dict],
+    response_id: str,
+    res_headers: Dict,
+    state: State,
+    ctx: Any,
+    *,
+    resolved: Optional[Any],
+    usage_before: Optional[UsageAccount],
+) -> Tuple[List[Dict], str, Dict]:
+    """Переигрыш ответа слабой модели на живой сильной: важный или битый вызов,
+    либо ответ без вызовов инструментов. Отброшенный ответ не исполняется.
+    Один переигрыш на основной запрос; важное действие сильной начинает
+    её серию заново. Расход сохраняется, а мемо такта фиксирует новый уровень."""
+    if getattr(state, "current_level", None) is None:
+        return resp_messages, response_id, res_headers
+    params = _routing_params(ctx, state)
+    source = ctx
+    verdict = floor_verdict(
         resp_messages,
-        response_id,
-        res_headers,
-    ) = await _arequest_backend_canonical(
+        tools_data=getattr(ctx, "tools_data", None),
+        is_subagent=lambda name: is_subagent_tool(name, source),
+    )
+    if verdict is None:
+        return resp_messages, response_id, res_headers
+    from_level = getattr(state, "_call_level", None) or "default"
+    if verdict.important_tools and not level_below(
+        from_level, params.safe_level
+    ):
+        # Продление: важный вызов самой сильной — тоже повод, её серия считается
+        # от него. Сброс стоит до `close_tick` в `_amain_call`: тот сделает из нуля 1.
+        state_ops.restart_series(state)
+        return resp_messages, response_id, res_headers
+    target = _floor_target(ctx, from_level, resolved, params)
+    if target is None or _stop_honored(
+        bool(getattr(state, "stop_requested", False)), ctx
+    ):
+        # Остановленный ход не переигрывается: ответ слабой остаётся, как
+        # при отсутствии живого уровня выше.
+        return resp_messages, response_id, res_headers
+    logger = getattr(ctx, "logger", None) or _fallback_logger
+
+    discarded_calls, discarded_text = discarded_answer(resp_messages)
+    log_artifact_reroute(
+        logger,
+        state,
+        from_level=from_level,
+        to_level=target,
+        tools=verdict.tools,
+        triggers=verdict.triggers,
+        usage_before=usage_before,
+        discarded_calls=discarded_calls,
+        discarded_text=discarded_text,
+    )
+    state_ops.enter_floor(state, target, verdict.reason)
+    target_kit = _apply_call_kit(state, ctx, target)
+    result, _ = await _arequest_rerouting(
         messages,
         state,
         ctx,
+        resolved=target_kit,
+        next_level=lambda _failed: _floor_target(
+            ctx, from_level, resolved, params
+        ),
+        mute=lambda _kit: False,
+    )
+    return result
+
+
+async def _amain_call(messages, state: State, ctx: Any):
+    """Главный вызов такта — одно тело для `aprocess_user_ask` и
+    `aprocess_tool_outputs`: решение и комплект вызова, запрос, пол, закрытие такта.
+    Снимок usage нужен только переигрышу пола (расход отброшенного вызова) —
+    берётся, только когда этот вызов решал auto (`state.current_level`). Вызов,
+    чью прозу заведомо переиграют, идёт с приглушённым каналом `answer` потока
+    (`_answer_stream_muted`); переигранный — с полным."""
+    resolved = await aprepare_main_call(state, ctx)
+    usage_before = (
+        _usage_snapshot(state)
+        if getattr(state, "current_level", None) is not None
+        else None
+    )
+    params = _routing_params(ctx, state)
+    (
+        (resp_messages, response_id, res_headers),
+        resolved,
+    ) = await _arequest_rerouting(
+        messages,
+        state,
+        ctx,
+        resolved=resolved,
+        next_level=lambda failed_level: _alive_level(
+            ctx, nearest_levels(failed_level)
+        ),
+        mute=lambda kit: _answer_stream_muted(state, ctx, kit, params),
+    )
+    resp_messages, response_id, res_headers = await _amaybe_reroute_for_floors(
+        messages,
+        resp_messages,
+        response_id,
+        res_headers,
+        state,
+        ctx,
+        resolved=resolved,
+        usage_before=usage_before,
     )
     state.set_resp_headers_metadata(res_headers or {})
+    # Такт закрывается только успешным возвратом (спека §4): исключение
+    # из `_arequest_backend_canonical` пропускает close_tick, факты такта остаются.
+    state_ops.close_tick(
+        state, getattr(state, "_call_level", None) or "default"
+    )
     return resp_messages, response_id
 
 
 async def aprocess_user_ask(messages, state: State, ctx: Any):
-    """Ход по сообщению пользователя."""
-    return await _aask_backend_and_record(messages, state, ctx)
+    return await _amain_call(messages, state, ctx)
 
 
 def partition_work_then_finish(
@@ -1641,6 +2196,7 @@ async def _afinalize_tool_batch(
 
     notice = flush_loop_detector(state)
     if notice:
+        state.tick_signals.add(LOOP)
         tools_outputs.append(
             _make_technical_feedback_user_message(
                 notice,
@@ -1864,7 +2420,7 @@ async def aprocess_tool_calls(
 
 async def aprocess_tool_outputs(messages, state: State, ctx: Any):
     """Ход по выдаче тулов."""
-    return await _aask_backend_and_record(messages, state, ctx)
+    return await _amain_call(messages, state, ctx)
 
 
 def _pickup_pending_as_new_turn(
@@ -1873,7 +2429,8 @@ def _pickup_pending_as_new_turn(
     ctx: Any,
 ) -> Optional[List[Dict]]:
     """Ход закончен (finish-gate accept / text-response accept, спека §6.4): очередь
-    непуста → фиксируем модель нового хода (``begin_turn``) и возвращаем сообщения,
+    непуста → ставим стартовый ``default_model`` нового хода (``begin_turn``, только
+    для витрин/лога — каждый вызов резолвит модель заново) и возвращаем сообщения,
     которыми продолжится цикл вместо возврата из ``run_agent``. ``None`` — очередь
     пуста, ход завершается как обычно."""
     if get_pending_messages is None:
@@ -1890,7 +2447,8 @@ def _pickup_pending_as_new_turn(
         # Очередь УЖЕ слита (`get_pending_messages` — drain, не peek): уронив ход
         # здесь, мы потеряли бы набранное пользователем сообщение бесследно —
         # вернуть его в очередь некуда. Поэтому ход продолжаем на модели прошлого
-        # хода: тот же честный отказ придёт из `_request_backend_canonical` (единая
+        # хода: тот же честный отказ придёт из резолва модели следующего вызова
+        # (`resolve_main_for_call` → `_raise_honest_main_unavailable`, единая
         # точка текста), но сообщение к тому моменту уже в трейсе и в логе.
         logger = getattr(ctx, "logger", None) or _fallback_logger
         logger.warning(
@@ -1949,6 +2507,9 @@ class _AgentLoop:
     ) -> None:
         self.state = state
         self.ctx = ctx
+        attach = getattr(ctx, "attach_state", None)
+        if callable(attach):
+            attach(state)
         self.get_full_history_messages = get_full_history_messages
         self.persist_messages_callback = persist_messages_callback
         self.pre_backend_compaction_hook = pre_backend_compaction_hook
@@ -2018,6 +2579,17 @@ class _AgentLoop:
         # Вызовы backend не ловим здесь: после исчерпания transport/adaptive
         # ретраев исключение уходит наверх как есть.
         try:
+            if (
+                backend_mode == "chat_completions"
+                and _mode_requires_backend_call(mode)
+            ):
+                await aprepare_main_call(self.state, self.ctx)
+                if self._stopped_before_call():
+                    return _Outcome(result=None)
+                await self._apre_backend_compaction(messages, mode)
+                messages = await self._aapply_tool_usage_notice(messages)
+                if self._stopped_before_call():
+                    return _Outcome(result=None)
             outcome = await self._adispatch(mode, messages, backend_mode)
         except WrongFunctionArgumentsException as e:
             # Аргументы отвалились на exec — ход модели всё равно «закрыт».
@@ -2036,6 +2608,15 @@ class _AgentLoop:
             outcome = _Outcome(messages, restart=True)
         outcome.mode = mode
         return outcome
+
+    def _stopped_before_call(self) -> bool:
+        """Стоп во время судьи пары или сжатия — как stop между шагами:
+        ни сжатие после судьи, ни основной запрос не начинаются."""
+        stopped = self.check_stop is not None and self.check_stop()
+        if not _stop_honored(stopped, self.ctx):
+            return False
+        clear_loop_detector(self.state)
+        return True
 
     # ----------------------------------------------------------- iteration
     def _poll_pending(self, messages, *, first_poll: bool):
@@ -2082,6 +2663,7 @@ class _AgentLoop:
         )
 
     def _bounce_empty_messages(self) -> List[Dict]:
+        self.state.tick_signals.add(NO_TOOL_BOUNCE)
         self.run_logger.error("Empty messages list")
         self.tool_error_cnt += 1
         self.state.steps += 1
@@ -2099,6 +2681,7 @@ class _AgentLoop:
         self.tool_error_cnt += 1
         # Страховка для путей вне батча (finish-аргументы и т.п.): батч
         # свои невалидные вызовы закрывает сам в process_tool_calls.
+        self.state.tick_signals.add(TOOL_CALL_ERROR)
         _attach_truncation_hint(e, self.state)
         return [
             _make_technical_feedback_user_message(
@@ -2176,10 +2759,33 @@ class _AgentLoop:
         _pre_sanitize_digest = json.dumps(
             messages, ensure_ascii=False, sort_keys=True, default=str
         )
+
+        rejected_feedback: List[Dict] = []
+
+        def rejected_tool_call(message: Dict) -> Dict:
+            # Рантайм сохраняет прежнюю последовательность команд при replay;
+            # локально исправленное поведение включено без отдельной настройки.
+            execution_patch = port(self.ctx, "execution_patch")
+            feedback = build_invalid_tool_call_feedback_message(message)
+            if execution_patch is None or execution_patch(
+                "tool-call-rejection-recovery-v1"
+            ):
+                self.state.tick_signals.add(TOOL_CALL_ERROR)
+                rejected_feedback.append(feedback)
+            return feedback
+
         messages = sanitize_messages_for_chat_completions(
             messages,
-            invalid_tool_call_factory=build_invalid_tool_call_feedback_message,
+            invalid_tool_call_factory=rejected_tool_call,
         )
+        if rejected_feedback and _batch_has_pending_function_calls(messages):
+            # Фидбэк не должен закрыть режим батча или разорвать в истории
+            # корректный вызов и его будущий output при отправке в API.
+            messages = rejected_feedback + [
+                message
+                for message in messages
+                if message not in rejected_feedback
+            ]
         _post_sanitize_digest = json.dumps(
             messages, ensure_ascii=False, sort_keys=True, default=str
         )
@@ -2251,6 +2857,7 @@ class _AgentLoop:
             list(messages),
         )
         if new_state_messages:
+            state.mark_turn_start()
             state.messages += new_state_messages
         await _maybe_persist(self.persist_messages_callback, messages, state)
 
@@ -2262,11 +2869,6 @@ class _AgentLoop:
             return messages, None, "Agent tools call errors."
 
         mode = check_mode(messages, self.run_logger)
-        if backend_mode == "chat_completions" and _mode_requires_backend_call(
-            mode
-        ):
-            await self._apre_backend_compaction(messages, mode)
-            messages = await self._aapply_tool_usage_notice(messages)
         return messages, mode, _NO_RETURN
 
     async def _apre_backend_compaction(self, messages, mode) -> None:
@@ -2383,7 +2985,11 @@ class _AgentLoop:
                 full_history_messages,
                 state,
                 ctx,
+                resolved=await aprepare_main_call(state, ctx),
                 set_previous_response_id=False,
+            )
+            state_ops.close_tick(
+                state, getattr(state, "_call_level", None) or "default"
             )
         self._remember_response_id(response_id, backend_mode)
         # Half-turn: ответ модели обработаем на следующей итерации.
@@ -2445,7 +3051,11 @@ class _AgentLoop:
         if finish_new:
             # I3: finish output в state до gate; persist — после apply.
             state.messages += finish_new
-        finish_arguments = closing_finish.get("arguments")
+        finish_arguments = arguments_without_service_fields(
+            closing_finish.get("arguments"),
+            (getattr(self.ctx, "tools_data", None) or {}).get(FINISH_TOOL_NAME)
+            or {},
+        )
         if backend_mode != "chat_completions":
             if finish_new:
                 await _maybe_persist(
@@ -2460,6 +3070,7 @@ class _AgentLoop:
             finish_arguments, finish_call_id
         )
         if decision.outcome == "reject":
+            state.tick_signals.add(FINISH_REJECT)
             if tail_new:
                 state.messages += tail_new
                 await _maybe_persist(
@@ -2474,6 +3085,12 @@ class _AgentLoop:
             return _Outcome(messages, completed_step=True)
         # accept / fail_open_error / fail_open_limit / прочее —
         # все завершают ход одинаково.
+        if getattr(self.ctx, "routing_contract_v2", True):
+            record_turn_finish_outcome(
+                arguments=finish_arguments,
+                outcome=decision.outcome,
+                state=state,
+            )
         state.steps += 1
         state.flush_current_user_intent()
         clear_loop_detector(state)
@@ -2538,6 +3155,7 @@ class _AgentLoop:
             getattr(state, "last_batch_invalid_arguments_count", 0) or 0
         )
         if n_unknown + n_invalid > 0:
+            state.tick_signals.add(TOOL_CALL_ERROR)
             # Бюджет считаем по ходам без нормального вызова, а не
             # по вызовам: один кривой батч стоит одну единицу, иначе
             # он гасит прогон раньше, чем модель увидит фидбэк.
@@ -2653,6 +3271,7 @@ class _AgentLoop:
                     await await_callback(self.mark_finalizing(False))
             return await self._aclose_turn(assistant_text)
         # === reject ===
+        state.tick_signals.add(NO_TOOL_BOUNCE)
         self.tool_error_cnt += 1
         bounce_msg = self._text_reject_bounce_msg(
             decision_reject_feedback, last_finish, bounce_msg

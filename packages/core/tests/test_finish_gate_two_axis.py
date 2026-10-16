@@ -6,6 +6,7 @@ import logging
 import sys
 import types
 
+from gc_core.auto_routing.policy import FINISH_REJECT
 import pytest
 from gc_core.intent_guard import guard as intent_guard_guard
 from gc_core.intent_guard.feedback import build_finish_gate_feedback
@@ -693,3 +694,4 @@ def test_run_agent_reject_continues_from_tool_output_without_technical_user(
         for m in state.messages
         if m.get("role") == "user"
     )
+    assert FINISH_REJECT in state.tick_signals

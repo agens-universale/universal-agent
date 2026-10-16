@@ -13,6 +13,8 @@ from typing import Any, Dict, Iterable, List
 
 import yaml
 
+from gc_core.config_modules.model_registry import LEVEL_VALUES
+
 #: Объявленные флаги-настройки → путь в схеме. Легаси-форс
 #: (``config.cli_forces_legacy_model``) узнаёт ``--model`` и
 #: ``--completions_url`` по слою ``cli`` их путей.
@@ -82,9 +84,12 @@ def add_setting_flags(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--level",
-        choices=["light", "default", "max"],
+        choices=list(LEVEL_VALUES),
         default=None,
-        help="активный уровень модели на этот запуск",
+        help=(
+            "активный уровень модели на этот запуск; auto — уровень "
+            "меняется автоматически по ходу работы"
+        ),
     )
 
 

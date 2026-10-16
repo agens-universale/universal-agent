@@ -708,11 +708,14 @@ async def test_child_guard_asks_same_session_before_recording(tmp_path):
     from types import SimpleNamespace
 
     from gc_core.tools.subagents.runner import SubagentRunner
+    from gc_testkit.settings import make_settings
 
     facade, writer, agent, session_id, store = await _ready(tmp_path)
     parent = agent.executor._ctx
+    loaded = make_settings()
     child = SubagentRunner(parent, None)._bind_child_context(
-        SimpleNamespace(), "subagent_worker"
+        SimpleNamespace(settings=loaded.settings, runtime=loaded.runtime),
+        "subagent_worker",
     )
     key = "read:/etc/hosts"
 

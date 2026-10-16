@@ -110,6 +110,93 @@ async def test_status_without_active_task_shows_idle(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_status_shows_auto_level_literal(tmp_path):
+    """level: auto (спека auto-routing §5.1) — /status показывает режим
+    (при доступном автовыборе — `auto`, правило палитры `toggle_state`), не
+    резолвленный уровень такта: витрина отвечает на «в каком режиме сессия»,
+    футеру нужен факт хода."""
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.viewer import ViewerScreen
+
+    cfg = {
+        "agent.model": "m",
+        "level": "auto",
+        "backend.api_mode": "chat_completions",
+        "agent.auto_routing": True,
+        "models": {"fast": {}, "mid": {}, "big": {}},
+        "slots": {"light": "fast", "default": "mid", "max": "big"},
+    }
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings(cfg)
+    )
+    async with app.run_test() as pilot:
+        inp = pilot.app.query_one("#cmdinput")
+        inp.text = "/status"
+        await pilot.press("enter")
+        await pilot.pause(0.2)
+
+        assert isinstance(pilot.app.screen, ViewerScreen)
+        body = _viewer_body(pilot.app.screen)
+        assert '"level": "auto"' in body
+
+
+@pytest.mark.asyncio
+async def test_status_shows_only_two_level_in_auto_mode(tmp_path):
+    """При доступном level: auto витрина называет единственную политику two_level."""
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.viewer import ViewerScreen
+
+    cfg = {
+        "agent.model": "m",
+        "level": "auto",
+        "backend.api_mode": "chat_completions",
+        "agent.auto_routing": True,
+        "models": {"fast": {}, "mid": {}, "big": {}},
+        "slots": {"light": "fast", "default": "mid", "max": "big"},
+    }
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings(cfg)
+    )
+    async with app.run_test() as pilot:
+        inp = pilot.app.query_one("#cmdinput")
+        inp.text = "/status"
+        await pilot.press("enter")
+        await pilot.pause(0.2)
+
+        assert isinstance(pilot.app.screen, ViewerScreen)
+        assert '"routing_policy": "two_level"' in _viewer_body(
+            pilot.app.screen
+        )
+
+
+@pytest.mark.asyncio
+async def test_status_leaves_routing_policy_empty_in_manual_mode(tmp_path):
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+
+    cfg = {
+        "agent.model": "m",
+        "level": "default",
+        "backend.api_mode": "chat_completions",
+        "agent.auto_routing": True,
+        "models": {"fast": {}, "mid": {}, "big": {}},
+        "slots": {"light": "fast", "default": "mid", "max": "big"},
+    }
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings(cfg)
+    )
+    async with app.run_test() as pilot:
+        inp = pilot.app.query_one("#cmdinput")
+        inp.text = "/status"
+        await pilot.press("enter")
+        await pilot.pause(0.2)
+
+        assert '"routing_policy": null' in _viewer_body(pilot.app.screen)
+
+
+@pytest.mark.asyncio
 async def test_status_dash_dash_raw_accepted_no_crash(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
@@ -126,3 +213,45 @@ async def test_status_dash_dash_raw_accepted_no_crash(tmp_path):
         await pilot.press("enter")
         await pilot.pause(0.2)
         assert isinstance(pilot.app.screen, ViewerScreen)
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"agent.auto_routing": False},
+        {"backend.api_mode": "responses"},
+        {"models": {"only": {}}, "slots": {"default": "only"}},
+    ],
+    ids=["auto_routing_off", "responses", "one_model"],
+)
+@pytest.mark.asyncio
+async def test_status_shows_the_working_level_when_auto_is_unavailable(
+    tmp_path, extra
+):
+    """`level: auto`, а автовыбор недоступен: /status называет уровень, которым
+    идёт работа (`default`, как палитра и футер), и не называет политику."""
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+
+    cfg = {
+        "agent.model": "m",
+        "level": "auto",
+        "backend.api_mode": "chat_completions",
+        "agent.auto_routing": True,
+        "models": {"fast": {}, "mid": {}, "big": {}},
+        "slots": {"light": "fast", "default": "mid", "max": "big"},
+        **extra,
+    }
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings(cfg)
+    )
+    async with app.run_test() as pilot:
+        inp = pilot.app.query_one("#cmdinput")
+        inp.text = "/status"
+        await pilot.press("enter")
+        await pilot.pause(0.2)
+
+        body = _viewer_body(pilot.app.screen)
+        assert (
+            '"level": "default"' in body and '"routing_policy": null' in body
+        )

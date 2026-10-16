@@ -3,6 +3,7 @@
 from dataclasses import dataclass, field
 from typing import Any
 
+from gc_core.auto_routing.request_equivalence import PreparedRequestEquivalence
 from gc_core.context_preparation import PreparedRunContext
 from gc_core.execution.contracts import ModelResult
 from gc_core.execution.guard_contracts import GuardProbeResult
@@ -130,6 +131,8 @@ class PreparedContext:
     #: Есть ли человек, который ответит (``WorkerConfig.human_input``): нет —
     #: запрос к человеку сразу получает отказ, а не вечное ожидание.
     human_input: bool = True
+    #: Отношение main-запросов, вычисленное до публичной проекции настроек.
+    request_equivalence: PreparedRequestEquivalence | None = None
 
 
 @dataclass
