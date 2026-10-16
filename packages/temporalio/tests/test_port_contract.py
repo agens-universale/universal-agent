@@ -271,6 +271,22 @@ def test_custom_thread_store_must_declare_its_paths(tmp_path):
     assert store_paths(Declared()) == [str(tmp_path / "s3-cache")]
 
 
+def test_every_bundled_thread_store_is_accepted_by_the_worker(tmp_path):
+    """Хранилища из коробки, которые документация называет для воркера, —
+    воркер их принимает (Postgres раньше не объявлял protected_paths и
+    валил старт). Подключение к базе не нужно."""
+    from gc_core.threads.file_store import FileThreadStore
+    from gc_core_temporalio.worker import store_paths
+    from gc_stores.postgres import PostgresThreadStore
+    from gc_stores.sqlite import SQLiteThreadStore
+
+    assert store_paths(FileThreadStore(tmp_path / "files"))
+    assert store_paths(SQLiteThreadStore(tmp_path / "t.db"))
+    assert (
+        store_paths(PostgresThreadStore("postgresql://u@db.invalid/x")) == []
+    )
+
+
 async def test_ask_refuses_to_answer_a_dropped_message(monkeypatch):
     """Сообщение, отброшенное остановкой хода: ask не выдаёт ответ прошлого
     хода за ответ на него."""

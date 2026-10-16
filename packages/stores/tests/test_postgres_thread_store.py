@@ -461,3 +461,10 @@ async def test_missing_driver_names_the_extra(monkeypatch):
     store = PostgresThreadStore(f"postgresql://localhost/{uuid.uuid4().hex}")
     with pytest.raises(ImportError, match=r"gc-stores\[postgres\]"):
         await store.get_thread(KEY)
+
+
+def test_declares_no_paths_on_disk():
+    """Воркер Temporal не стартует с хранилищем без ``protected_paths()``;
+    у Postgres на диске машины данных нет. Подключение не нужно."""
+    store = PostgresThreadStore("postgresql://user@db.invalid/ua")
+    assert store.protected_paths() == []

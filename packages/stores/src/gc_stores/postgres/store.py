@@ -191,6 +191,12 @@ class PostgresThreadStore(ThreadStore):
         async with pool.acquire() as conn:
             yield conn
 
+    def protected_paths(self) -> list[str]:
+        """Данных на диске машины нет — всё в базе. Объявление обязательно
+        для воркера Temporal (``gc_core_temporalio.worker.store_paths``):
+        без него воркер не стартует."""
+        return []
+
     async def close(self) -> None:
         """Закрыть свой пул (следующий вызов откроет новый); чужой
         (``pool=``) не трогается."""
