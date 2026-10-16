@@ -4440,7 +4440,9 @@ class TraceScreen(Screen):
         if _frozen:
             self._cursor = tail.next_cursor
             return
-        if tail.stream_reset:
+        # Временный мостик: шаг сжатия пока перерисовывает трейс целиком,
+        # до применения шага без перерисовки.
+        if tail.stream_reset or tail.compaction is not None:
             self._clear_trace()
             self._reset_render_state()
             records, cur = self._store.read_all_events(self._active_task_id)
