@@ -327,6 +327,12 @@ class TuiApp(App):
         # Поколение состояния: растёт на каждой перечитке. Читатель, собравший
         # кэш по снимку ДО неё, не затирает им уже применённый новый.
         self._config_generation = 0
+        # Кеш имён встроенных тулов для уведомлений: (settings, names) по
+        # identity объекта настроек — сборка реестра дорогая, а бейдж
+        # опрашивается каждый тик.
+        self._builtin_names_cache: (
+            tuple[LoadedSettings, frozenset[str]] | None
+        ) = None
         # Профиль, выбранный флагом запуска `--profile` (`""` — «без профиля»), либо
         # None — флага не было. Тот же оверрайд, что main() отдал загрузчику на
         # старте: каждое перечитывание (`reload_config`) обязано отдавать его снова,
@@ -1851,6 +1857,15 @@ class TuiApp(App):
         """Текущий экран — главный (TraceScreen). sessions открываются только отсюда."""
         return isinstance(self.screen, TraceScreen)
 
+    def _builtin_tool_names(self, settings: LoadedSettings) -> frozenset[str]:
+        """Имена встроенных тулов; пересборка только при новом объекте настроек."""
+        cached = self._builtin_names_cache
+        if cached is not None and cached[0] is settings:
+            return cached[1]
+        names = frozenset(all_builtin_tool_names(settings))
+        self._builtin_names_cache = (settings, names)
+        return names
+
     def _startup_notices(self) -> List[Notice]:
         """Стартовые уведомления — единая сборка для полного списка и для бейджей."""
         from gc_core.settings import is_explicit
@@ -1858,7 +1873,7 @@ class TuiApp(App):
         loaded = self.base_settings()
         return collect_startup_notices(
             loaded,
-            all_builtin_tool_names(loaded),
+            self._builtin_tool_names(loaded),
             self._mcp_status,
             is_tui=True,
             known_tool_names=getattr(self, "_registered_tool_names", None),
