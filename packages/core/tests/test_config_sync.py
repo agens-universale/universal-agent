@@ -455,3 +455,14 @@ def test_sync_removed_key_does_not_leave_empty_section_over_template_defaults(
     assert out["update"]["check"] == "auto"
     assert "dump_storage" not in out["logging"]
     assert out["logging"]["level"] == "INFO"
+
+
+def test_strip_removed_drops_emptied_top_level_section_from_text():
+    """Опустевшая секция верхнего уровня уходит и из текста, не только из
+    данных: иначе ``update: {}`` осталось бы в тексте юзера."""
+    text = "update:\n  check_interval_days: 3\nlogging:\n  level: INFO\n"
+    raw = yaml.safe_load(text)
+    out_text, stripped = config_sync._strip_removed_patterns(text, raw)
+    assert stripped == ["update.check_interval_days"]
+    assert out_text == "logging:\n  level: INFO\n"
+    assert raw == {"logging": {"level": "INFO"}}
