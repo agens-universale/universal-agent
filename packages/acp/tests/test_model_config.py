@@ -74,13 +74,11 @@ def _open(loaded, factory=None):
 
 
 def _option(result):
-    options = result["configOptions"]
-    assert len(options) == 1
-    option = options[0]
-    assert option["id"] == "model"
+    options = {item["id"]: item for item in result["configOptions"]}
+    assert set(options) <= {"model", "mode"}
+    option = options["model"]
     assert option["category"] == "model"
     assert option["type"] == "select"
-    assert "modes" not in result
     return option
 
 
@@ -395,7 +393,9 @@ async def test_empty_model_and_unresolved_level_omit_the_option(tmp_path):
     empty, writer, _agents = _open(_loaded(tmp_path, {"agent.model": ""}))
     await _init(empty)
     await _new(empty, "/work")
-    assert "configOptions" not in _by_id(writer, 2)["result"]
+    assert [o["id"] for o in _by_id(writer, 2)["result"]["configOptions"]] == [
+        "mode"
+    ]
     await empty.shutdown()
 
     unresolved = _open(
@@ -405,7 +405,8 @@ async def test_empty_model_and_unresolved_level_omit_the_option(tmp_path):
     await _init(facade)
     await _new(facade, "/work")
     created = _by_id(writer2, 2)["result"]
-    assert set(created) == {"sessionId"}
+    assert set(created) == {"sessionId", "configOptions", "modes"}
+    assert [o["id"] for o in created["configOptions"]] == ["mode"]
     await _set(facade, created["sessionId"], "a", 3)
     assert _by_id(writer2, 3)["error"]["code"] == -32602
     await facade.shutdown()

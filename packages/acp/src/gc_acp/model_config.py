@@ -13,7 +13,7 @@ from gc_core.config import cli_forces_legacy_model
 from gc_core.model_router import ModelRouter
 
 _PICKER_LEVELS = ("default", "light", "max")
-_OPTION_ID = "model"
+MODEL_CONFIG_ID = "model"
 
 
 def session_level(loaded: Any, override: str | None) -> str:
@@ -68,14 +68,6 @@ def model_config_option(
     if current is None or current[0] not in seen:
         return None
     return _select(current[0], rows)
-
-
-def config_options_payload(loaded: Any, level: str) -> dict:
-    """Поле ответа сессии. Пустой список не отдаём."""
-    option = model_config_option(loaded, level)
-    if option is None:
-        return {}
-    return {"configOptions": [option]}
 
 
 def listed(option: dict | None, value: Any) -> bool:
@@ -152,7 +144,7 @@ def _select(current: str, rows: list[tuple[str, str | None]]) -> dict:
             item["description"] = description
         options.append(item)
     return {
-        "id": _OPTION_ID,
+        "id": MODEL_CONFIG_ID,
         "name": "Model",
         "category": "model",
         "type": "select",
