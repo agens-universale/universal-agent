@@ -134,3 +134,15 @@ def test_unknown_mode_is_rejected_at_the_writer():
     with pytest.raises(ValueError):
         ex.set_permission_mode("bypass")
     assert ex.permission_mode() is None
+
+
+def test_cleared_choice_lets_the_session_keep_its_own():
+    """Окно открыло сессию без режима: выбор снят, следующий прогон берёт
+    режим из сессии (там его нет — из конфига), а не прежний выбор окна."""
+    ex = _executor()
+    ex.set_permission_mode("auto")
+    ex.clear_permission_mode()
+    assert ex.permission_mode() is None
+    state = _state(mode=None)
+    ex._bind_state(state, discard_writes_after_stop=False)
+    assert state.shared.permission_mode is None

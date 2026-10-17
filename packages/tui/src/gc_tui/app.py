@@ -1900,8 +1900,9 @@ class TuiApp(App):
     def set_permission_mode(self, mode: str) -> None:
         """Сменить режим сессии и донести до движка.
 
-        ЕДИНСТВЕННЫЙ писатель ``_permission_mode``: пилюля, ``/config`` и движок
-        расходятся ровно тогда, когда кто-то пишет поле мимо этого метода.
+        Писатели ``_permission_mode`` — этот метод и
+        ``clear_permission_mode``: пилюля, ``/config`` и движок расходятся
+        ровно тогда, когда кто-то пишет поле мимо них.
         Раннера может ещё не быть — выбор донесёт ``get_runner`` при создании.
         """
         self._permission_mode = mode
@@ -1914,19 +1915,40 @@ class TuiApp(App):
         self.set_permission_mode(mode)
         self._permission_mode_locked = True
 
-    def adopt_thread_permission_mode(self, meta: dict | None) -> None:
-        """Принять режим, сохранённый в открываемой сессии."""
+    def clear_permission_mode(self) -> None:
+        """Снять выбор окна: действует ``default_mode`` конфига.
+
+        Сброс, а не запись ``default_mode`` в сессию: иначе смена конфига
+        потом не действовала бы на эту сессию.
+        """
+        self._permission_mode = None
+        runner = self.active_runner
+        if runner is not None and hasattr(runner, "clear_permission_mode"):
+            runner.clear_permission_mode()
+
+    def adopt_thread_permission_mode(
+        self, meta: dict | None, *, resumed: bool = False
+    ) -> None:
+        """Принять режим, сохранённый в открываемой сессии.
+
+        ``resumed`` — сессию открыли (пикер), а не создали в этом окне: без
+        сохранённого режима у неё действует ``default_mode`` конфига, а не
+        режим окна. Новый тред окна (первое сообщение, ``/new``) режим окна
+        наследует. Флаг запуска сильнее и того и другого.
+        """
         if self._permission_mode_locked:
             return
         from gc_core.security.permission_mode import coerce_mode
 
-        # Режим из другой сборки или убранный из списка — пропустить: движок
-        # отвергает неизвестный режим исключением.
+        # Режим из другой сборки или убранный из списка — как его нет:
+        # движок отвергает неизвестный режим исключением.
         mode = coerce_mode(
             ((meta or {}).get("shared") or {}).get("permission_mode")
         )
         if mode is not None:
             self.set_permission_mode(mode.value)
+        elif resumed:
+            self.clear_permission_mode()
 
     def action_cycle_permission_mode(self) -> None:
         """Shift+Tab: следующий режим в цикле (гейт — check_action)."""
@@ -2018,6 +2040,9 @@ class TuiApp(App):
         # Справка доступна с любого экрана, КРОМЕ самой справки (без help-на-help).
         if isinstance(self.screen, HelpScreen):
             return
+        main = self._main_screen()
+        if main is not None:
+            main.spend_help_hint()
         self.push_screen(HelpScreen())
 
     def action_sessions(self) -> None:

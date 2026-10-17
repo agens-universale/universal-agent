@@ -250,6 +250,13 @@ class AgentRunner:
         if executor is not None and hasattr(executor, "set_permission_mode"):
             executor.set_permission_mode(mode)
 
+    def clear_permission_mode(self) -> None:
+        """Снять выбор режима у исполнителя (или до его сборки)."""
+        self._permission_mode = None
+        executor = self._executor
+        if executor is not None and hasattr(executor, "clear_permission_mode"):
+            executor.clear_permission_mode()
+
     def accept_plan(self, mode: str, thread_id: Optional[str]) -> None:
         """Донести до исполнителя, что человек принял план (или до его сборки —
         она идёт в рабочем потоке, ждать её здесь нельзя)."""

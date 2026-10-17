@@ -79,14 +79,26 @@ def _parse_table_aligns(sep_line: str, ncols: int) -> list[str]:
     return (aligns + ["left"] * ncols)[:ncols]
 
 
-# Ограда может стоять с отступом: внутри пункта списка модель сдвигает блок
-# кода под текст пункта. Без этого такой блок оставался сырым текстом с
-# видимыми кавычками.
+# Ограда с отступом — только внутри пункта списка: модель сдвигает блок кода
+# под текст пункта, и без этого он оставался сырым текстом с видимыми
+# кавычками. На верхнем уровне сдвинутые кавычки — содержимое (отступной
+# блок кода с примером ограды внутри), как и до этого правила.
 _FENCE_RE = re.compile(r"^[ \t]*(`{3,})(.*)$")
+_LIST_ITEM_RE = re.compile(r"^[ \t]*(?:[-*+]|\d+[.)])[ \t]+\S")
 
 
 def _indent(line: str) -> int:
     return len(line) - len(line.lstrip(" \t"))
+
+
+def _list_context(line: str, in_list: bool) -> bool:
+    """Идёт ли список после строки: пункт его открывает, текст без отступа
+    закрывает, пустые и сдвинутые строки — продолжение пункта."""
+    if _LIST_ITEM_RE.match(line):
+        return True
+    if not line.strip() or _indent(line):
+        return in_list
+    return False
 
 
 def _dedent_fenced(lines: list[str], fence_line: str) -> list[str]:
@@ -97,24 +109,29 @@ def _dedent_fenced(lines: list[str], fence_line: str) -> list[str]:
     return [line[min(indent, _indent(line)) :] for line in lines]
 
 
-def _fence_open(line: str) -> tuple[int, str | None] | None:
-    """Открывающая ограда: (длина, метка языка или None); иначе None."""
+def _fence_open(
+    line: str, in_list: bool = False
+) -> tuple[int, str | None] | None:
+    """Открывающая ограда: (длина, метка языка или None); иначе None.
+    С отступом — только внутри списка."""
     m = _FENCE_RE.match(line)
-    if not m:
+    if not m or (_indent(line) and not in_list):
         return None
     return len(m.group(1)), (m.group(2).strip() or None)
 
 
 def _fence_closes(line: str, opened: int, opened_indent: int = 0) -> bool:
-    """Закрывающая ограда — одни кавычки, не короче открывающей и не глубже её
-    отступа плюс три пробела (CommonMark): сдвинутые кавычки внутри кода
-    (пример в докстроке) блок не закрывают."""
+    """Закрывающая ограда — одни кавычки, не короче открывающей. У ограды
+    верхнего уровня — без отступа (как в develop); у сдвинутой в пункт
+    списка — не глубже её отступа плюс три пробела (CommonMark). Сдвинутые
+    кавычки внутри кода (пример в докстроке) блок не закрывают."""
     m = _FENCE_RE.match(line)
+    limit = opened_indent + 3 if opened_indent else 0
     return (
         bool(m)
         and len(m.group(1)) >= opened
         and not m.group(2).strip()
-        and _indent(line) <= opened_indent + 3
+        and _indent(line) <= limit
     )
 
 
@@ -125,6 +142,7 @@ def segment_answer(text: str) -> list[Block]:
     lines = text.split("\n")
     i = 0
     prose: list[str] = []
+    in_list = False
 
     def _flush() -> None:
         run = prose[:]
@@ -138,7 +156,8 @@ def segment_answer(text: str) -> list[Block]:
 
     while i < len(lines):
         ln = lines[i]
-        opened = _fence_open(ln)
+        in_list = _list_context(ln, in_list)
+        opened = _fence_open(ln, in_list)
         if opened is not None:
             _flush()
             fence_len, lang_tag = opened
@@ -228,6 +247,7 @@ def render_prose(text: str) -> Text:
     out = Text()
     in_fence = 0  # 0 — вне блока, иначе длина открывающей ограды
     fence_indent = 0
+    in_list = False
     for i, line in enumerate(text.split("\n")):
         if i:
             out.append("\n")
@@ -236,7 +256,8 @@ def render_prose(text: str) -> Text:
                 in_fence = 0
             out.append(line, style=_INK)
             continue
-        opened = _fence_open(line)
+        in_list = _list_context(line, in_list)
+        opened = _fence_open(line, in_list)
         if opened is not None:
             in_fence = opened[0]
             fence_indent = _indent(line)

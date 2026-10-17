@@ -3,6 +3,7 @@
 from gc_tui.services.markdown_render import (
     Block,
     build_markdown_table,
+    render_prose,
     segment_answer,
     table_block_to_markdown,
 )
@@ -258,3 +259,42 @@ def test_four_space_backticks_inside_a_docstring_do_not_close_the_block():
 
     text = '```python\ndef f():\n    """Example:\n    ```\n    x = 1\n    ```\n    """\n    return 1\n```\nafter'
     assert [b.kind for b in segment_answer(text)] == ["code-block", "prose"]
+
+
+def test_indented_fence_at_top_level_stays_prose_as_in_develop():
+    """Отступной блок верхнего уровня с примером ограды — не ограждённый
+    код: сдвинутые кавычки — ограда только внутри пункта списка (§10.5)."""
+    text = "Пример:\n\n    ```bash\n    pip install\n    ```\n\nдальше"
+    assert segment_answer(text) == [Block("prose", text)]
+
+
+def test_slightly_indented_backticks_do_not_close_a_top_level_block():
+    """Ограду верхнего уровня закрывает только ограда без отступа, как в
+    develop: строка кода «  ```» — содержимое."""
+    text = "```python\nx = '''\n  ```\n'''\n```\nпосле"
+    segs = segment_answer(text)
+    assert [s.kind for s in segs] == ["code-block", "prose"]
+    assert segs[0].content == "x = '''\n  ```\n'''"
+
+
+def test_indented_fence_after_a_blank_line_in_a_list_is_code():
+    """Пустая строка внутри пункта список не закрывает."""
+    text = "- шаг\n\n  ```sh\n  ls\n  ```\nконец"
+    segs = segment_answer(text)
+    assert [s.kind for s in segs] == ["prose", "code-block", "prose"]
+    assert segs[1].content == "ls"
+    assert segs[1].lang == "sh"
+
+
+def test_prose_render_keeps_a_fence_inside_a_list_item_raw():
+    """Проза стрима ведёт тот же контекст списка, что сегменты финала:
+    строка кода внутри ограды пункта — как есть, не маркер «•»."""
+    plain = render_prose("- шаг\n  ```sh\n  - x\n  ```").plain
+    assert "  - x" in plain
+    assert "• x" not in plain
+
+
+def test_prose_render_keeps_a_top_level_indented_fence_as_prose():
+    """На верхнем уровне сдвинутые кавычки ограду не открывают и в прозе."""
+    plain = render_prose("Пример:\n\n    ```\n- пункт").plain
+    assert "• пункт" in plain

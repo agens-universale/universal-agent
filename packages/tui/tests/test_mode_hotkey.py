@@ -137,6 +137,9 @@ class _FakeExecutor:
     def set_permission_mode(self, mode: str) -> None:
         self.mode = mode
 
+    def clear_permission_mode(self) -> None:
+        self.mode = None
+
 
 def _engine_mode(app) -> str | None:
     runner = app.get_runner()
@@ -180,3 +183,76 @@ async def test_startup_flag_and_thread_meta_reach_engine(tmp_path):
             {"shared": {"permission_mode": "manual"}}
         )
         assert _engine_mode(pilot.app) == "manual"
+
+
+def _save_session(tmp_path, mode=None):
+    from gc_core.execution.state import SharedStateData
+    from gc_core.persistence.schema import serialize_shared_block
+    from gc_core.thread_store import save_thread_meta
+
+    shared = SharedStateData(permission_mode=mode)
+    save_thread_meta(
+        str(tmp_path), "cli", "t1", {"shared": serialize_shared_block(shared)}
+    )
+    (tmp_path / "data_cli_t1.jsonl").touch()
+
+
+async def test_session_without_a_mode_takes_the_config_default(tmp_path):
+    """Окно в auto открывает старую сессию без режима: действует default_mode
+    конфига, и в движке выбора окна больше нет."""
+    app = _app(tmp_path, **{"security.permissions.default_mode": "manual"})
+    app._executor_factory = _FakeExecutor
+    async with app.run_test() as pilot:
+        pilot.app.set_permission_mode("auto")
+        assert _engine_mode(pilot.app) == "auto"
+        pilot.app.adopt_thread_permission_mode({"shared": {}}, resumed=True)
+        assert pilot.app.effective_permission_mode() == "manual"
+        assert pilot.app.permission_mode_source() == "config"
+        assert _engine_mode(pilot.app) is None
+
+
+async def test_unknown_saved_mode_is_treated_as_none(tmp_path):
+    async with _app(tmp_path).run_test() as pilot:
+        pilot.app.set_permission_mode("auto")
+        pilot.app.adopt_thread_permission_mode(
+            {"shared": {"permission_mode": "bypass"}}, resumed=True
+        )
+        assert pilot.app.effective_permission_mode() == "edit"
+        assert pilot.app.permission_mode_source() == "default"
+
+
+async def test_startup_flag_survives_a_session_without_a_mode(tmp_path):
+    app = _app(tmp_path)
+    app.lock_permission_mode("auto")
+    async with app.run_test() as pilot:
+        pilot.app.adopt_thread_permission_mode(None, resumed=True)
+        assert pilot.app.effective_permission_mode() == "auto"
+
+
+async def test_picker_resume_without_a_mode_drops_the_window_mode(tmp_path):
+    _save_session(tmp_path)
+    app = _app(tmp_path, **{"security.permissions.default_mode": "manual"})
+    async with app.run_test() as pilot:
+        pilot.app.set_permission_mode("auto")
+        assert pilot.app.screen.attach_active_task("t1", is_resume=True)
+        await pilot.pause()
+        assert pilot.app.effective_permission_mode() == "manual"
+
+
+async def test_picker_resume_with_a_mode_brings_it(tmp_path):
+    _save_session(tmp_path, mode="plan")
+    async with _app(tmp_path).run_test() as pilot:
+        pilot.app.set_permission_mode("auto")
+        assert pilot.app.screen.attach_active_task("t1", is_resume=True)
+        await pilot.pause()
+        assert pilot.app.effective_permission_mode() == "plan"
+
+
+async def test_auto_created_thread_keeps_the_window_mode(tmp_path):
+    """Первое сообщение создаёт тред окна (как /new): режим окна остаётся."""
+    _save_session(tmp_path)
+    async with _app(tmp_path).run_test() as pilot:
+        pilot.app.set_permission_mode("auto")
+        pilot.app.screen.attach_active_task("t1")
+        await pilot.pause()
+        assert pilot.app.effective_permission_mode() == "auto"

@@ -32,10 +32,11 @@ def _slider_width(n_values: int) -> int:
 
 
 def _hint_for(cmd: Command | None) -> str:
-    """Хинт обычной (не toggle) строки: есть схема args → Enter подставит команду
-    в поле, иначе — базовый hint. Toggle-строки получают свой hint через
+    """Хинт обычной (не toggle) строки: Enter подставит команду в поле — у
+    команды есть что ввести или выбрать (`Command.runs_on_enter`), иначе —
+    базовый hint. Toggle-строки получают свой hint через
     `CommandPalette._toggle_hint` (значение + подсказка из TOGGLES, спека §6)."""
-    if cmd is not None and cmd.args:
+    if cmd is not None and not cmd.runs_on_enter:
         return _HINT_WITH_ARGS
     return _HINT_NO_ARGS
 

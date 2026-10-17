@@ -207,3 +207,64 @@ async def test_stop_key_keeps_its_room_on_narrow_window(
             f"ширина {width}: левой осталось {left_width} колонок, "
             f"а «{floor}» требует {cell_len(floor)}"
         )
+
+
+def test_model_name_is_cut_in_the_middle():
+    """Начало — провайдер, конец — версия: по ним модель и узнают."""
+    pytest.importorskip("textual")
+    from gc_tui.screens.main import _truncate_middle
+
+    name = "gatewayhub/acme-lab/acme-big-coder-4.5"
+    assert _truncate_middle(name, 22) == "gatewayhub/…-coder-4.5"
+    assert _truncate_middle(name, len(name)) == name
+    assert _truncate_middle(name, 10) == "gatew…-4.5"
+
+
+#: Нейтральный длинный ID (38 знаков, как у реальных ID шлюзов).
+_LONG_MODEL = "gatewayhub/acme-lab/acme-big-coder-4.5"
+_METER = "ctx 42%"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("width", "meter_kept"), [(65, True), (50, True), (40, False)]
+)
+async def test_long_model_id_yields_before_the_stop_key(
+    tmp_path, monkeypatch, width, meter_kept
+):
+    """Длинный ID модели в узком окне: «Ctrl+C/stop» цел, имя ужато по
+    середине, на самом узком снята и плашка контекста (спека §10.4)."""
+    pytest.importorskip("textual")
+    monkeypatch.chdir(tmp_path)
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.main import _FOOTER_RUNNING_LEFT
+    from rich.text import Text
+
+    app = TuiApp(
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": _LONG_MODEL}),
+    )
+    app._config_path = str(tmp_path / "config.yml")
+    async with app.run_test(size=(width, 30)) as pilot:
+        scr = pilot.app.screen
+        app.tui_state.active_task_id = "t1"
+        scr._active_task_id = "t1"
+        app.active_runner = _RunningRunner(None, running=True)
+        monkeypatch.setattr(scr, "_context_meter", lambda: Text(_METER))
+        await pilot.pause()
+
+        floor = scr._footer_left_commands(narrow=True)
+        assert floor.endswith(_FOOTER_RUNNING_LEFT)
+        left_width = scr._footer_total_width() - _need(scr) - _CHROME
+        assert left_width >= cell_len(floor), (
+            f"ширина {width}: левой {left_width}, «{floor}» требует "
+            f"{cell_len(floor)}"
+        )
+        top = scr._compose_footer_right().plain.split("\n")[0]
+        model = top.split("● ", 1)[1].split(" · ", 1)[0]
+        head, cut, tail = model.partition("…")
+        assert cut == "…", f"имя не ужато: {top!r}"
+        assert head and tail
+        assert _LONG_MODEL.startswith(head) and _LONG_MODEL.endswith(tail)
+        assert cell_len(model) >= 10
+        assert (_METER in top) is meter_kept

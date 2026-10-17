@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import itertools
 import json
 import logging
 import os
@@ -285,6 +286,9 @@ _MCP_COL_PAD = 6
 # «запрос».
 _FOOTER_RUNNING_LEFT = "Ctrl+C/stop"
 _PLACEHOLDER_READY = "опишите задачу или /команда"
+# Раз за запуск, до первого действия человека: потом справку он уже знает
+# (сообщение, F1, палитра, новая сессия — `spend_help_hint`).
+_PLACEHOLDER_READY_HELP = f"{_PLACEHOLDER_READY} · F1 — справка"
 _PLACEHOLDER_PLAN_REWORK = "что доработать в плане…"
 _PLACEHOLDER_ASK_HUMAN = "ваш ответ агенту…"
 _PLACEHOLDER_PLAN_WAITS = "опишите задачу или /plan — вернуться к плану"
@@ -343,6 +347,10 @@ _IMAGE_PASTE_REFUSALS = {
 # снимается целиком.
 _PROFILE_NAME_MAX_COLS = 14  # потолок: 13 символов + «…»
 _PROFILE_NAME_MIN_COLS = 5  # минимум: 4 символа + «…» (Task 17)
+# Имя модели в футере — пятая жертва лесенки (спека §10.4): режется по
+# середине, начало (провайдер) и конец (версия) остаются; ниже минимума не
+# ужимается — дальше снимается плашка контекста.
+_MODEL_NAME_MIN_COLS = 10
 
 # Хром футера: padding #footer (0 1 → 2) + padding-right #footer-right (1) +
 # зазор между колонками, который держит padding-right у #footer-left (2). На
@@ -374,17 +382,33 @@ def _profile_source_label(ref) -> str | None:
     return "проектный" if ref.root_kind == "project" else "глобальный"
 
 
+def _fit_cells(text: str, cols: int) -> str:
+    """Самое длинное начало `text`, что помещается в `cols` колонок."""
+    out = ""
+    for ch in text:
+        if cell_len(out + ch) > cols:
+            break
+        out += ch
+    return out
+
+
 def _truncate_profile_name(name: str, max_cols: int) -> str:
     """Режет ХВОСТ имени профиля до `max_cols` колонок (cell-width), с «…» на
     конце, если целиком не влезает."""
     if cell_len(name) <= max_cols:
         return name
-    out = ""
-    for ch in name:
-        if cell_len(out + ch) > max_cols - 1:
-            break
-        out += ch
-    return out + "…"
+    return _fit_cells(name, max_cols - 1) + "…"
+
+
+def _truncate_middle(name: str, max_cols: int) -> str:
+    """Режет СЕРЕДИНУ имени до `max_cols` колонок: начало (провайдер) и
+    конец (версия) остаются — `gatewayhub/…-coder-4.5`."""
+    if cell_len(name) <= max_cols:
+        return name
+    budget = max_cols - 1
+    head = _fit_cells(name, budget - budget // 2)
+    tail = _fit_cells(name[::-1], budget // 2)[::-1]
+    return f"{head}…{tail}"
 
 
 class TraceScreen(Screen):
@@ -490,6 +514,9 @@ class TraceScreen(Screen):
         # Выбрано «Обсудить и доработать план»: следующее сообщение человека —
         # замечания к плану, о чём в ленте остаётся строка.
         self._plan_rework_pending = False
+        # Подсказка F1 в поле ввода погашена до конца запуска. Экран главный и
+        # живёт весь запуск — признак принадлежит ему.
+        self._help_hint_spent = False
         # Скрытая трейс-строка вопроса; раскрывается при схлопывании баннера.
         self._ask_human_question_row = None  # type: Optional[TraceRow]
         # Раннер, задавший текущий ask_human (владелец вопроса). None, если плашка
@@ -652,7 +679,7 @@ class TraceScreen(Screen):
             with Horizontal(id="input-row"):
                 yield Static("> ", id="input-prompt", markup=False)
                 yield CommandTextArea(
-                    placeholder=_PLACEHOLDER_READY, id="cmdinput"
+                    placeholder=_PLACEHOLDER_READY_HELP, id="cmdinput"
                 )
             with Horizontal(id="footer"):
                 yield Static("", id="footer-left", markup=False)
@@ -890,6 +917,7 @@ class TraceScreen(Screen):
         snapshot: _FooterHeadSnapshot | None = None,
         with_transition: bool = True,
         meter: Text | object | None = _UNRESOLVED,
+        model_cols: int | None = None,
     ) -> Text:
         """head = [профиль ] ● модель[ → [● ]модель][ · контекст]. Точка —
         жирная, цвет уровня, сама и есть разделитель перед моделью (спека
@@ -909,7 +937,10 @@ class TraceScreen(Screen):
 
         `meter` — готовая плашка контекста (`None` = скрыта); не передана —
         резолвим сами. Как и `snapshot`, это ОДИН резолв на кадр: метр читает
-        meta треда с диска, а лесенка строит голову до 22 раз."""
+        meta треда с диска, а лесенка строит голову до 22 + ~2·len(model) раз.
+
+        `model_cols` — потолок имени модели (ступень 10 лесенки), режется по
+        середине; None — целиком."""
         if snapshot is None:
             snapshot = self._footer_head_snapshot()
         if meter is _UNRESOLVED:
@@ -923,7 +954,12 @@ class TraceScreen(Screen):
             head.append(" ")
         head.append("●", style=f"bold {level_color}")
         head.append(" ")
-        head.append(model_name, style=_INK)
+        shown = (
+            model_name
+            if model_cols is None
+            else _truncate_middle(model_name, model_cols)
+        )
+        head.append(shown, style=_INK)
         if with_transition and transition is not None:
             future_color, future_model = transition
             head.append(" → ", style=_DIM)
@@ -951,7 +987,10 @@ class TraceScreen(Screen):
            хоткея уходят, режим остаётся виден);
         5. имя профиля ужимается `_PROFILE_NAME_MAX_COLS` → `_MIN_COLS`;
         6. имя профиля снимается целиком;
-        7. снимается блок за стрелкой — последняя жертва.
+        7. снимается блок за стрелкой;
+        8-9 (резерв) — «запрос», затем цены целиком;
+        10. имя модели ужимается по середине до `_MODEL_NAME_MIN_COLS`;
+        11. снимается плашка контекста (имя перебирается заново).
 
         Ступени 1-3 ничего не теряют: вторая строка футера (height: 2)
         зарезервирована в ОБЕИХ колонках и так, и перенос левой вниз — то же
@@ -961,7 +1000,10 @@ class TraceScreen(Screen):
         имени живёт ЦЕЛИКОМ в платном проходе, а в бесплатных пробуется только
         потолок — раньше имя ужималось при левой, спокойно стоявшей в один ряд.
 
-        Лесенка МОНОТОННА по СОДЕРЖИМОМУ: при сужении окна цены, имя профиля и
+        Лесенка монотонна — каждая ступень только отнимает — с одним
+        исключением: на ступени 11 имя модели снова растёт (перебирается с
+        полного), потому что снятая плашка освобождает место. Монотонность
+        — по СОДЕРЖИМОМУ: при сужении окна цены, имя профиля и
         переход не возвращаются. Поэтому вариант «всё одной строкой» живёт лишь
         в первом проходе — иначе на границе ступени 3 (левой разрешили 2 ряда,
         места стало больше) цены прыгали бы обратно наверх, а это ровно то
@@ -1001,13 +1043,16 @@ class TraceScreen(Screen):
             with_transition: bool = True,
             with_request: bool = True,
             with_prices: bool = True,
+            model_cols: int | None = None,
+            with_meter: bool = True,
         ) -> Text:
             head = self._footer_head(
                 with_profile=profile_cols is not None,
                 profile_name_cols=profile_cols or _PROFILE_NAME_MAX_COLS,
                 snapshot=snapshot,
                 with_transition=with_transition,
-                meter=meter,
+                meter=meter if with_meter else None,
+                model_cols=model_cols,
             )
             request = request_seg if (with_prices and with_request) else None
             session = session_seg if with_prices else None
@@ -1078,8 +1123,9 @@ class TraceScreen(Screen):
                     return result
 
         # Резерв (ступени 7-9), от богатого к бедному: снимается блок за стрелкой,
-        # затем «запрос» (сессия остаётся), затем цены целиком. Точка уровня,
-        # факт-модель и плашка контекста остаются всегда.
+        # затем «запрос» (сессия остаётся), затем цены целиком. Точка уровня остаётся
+        # всегда; имя модели и плашка контекста — последние жертвы (ступени
+        # 10-11).
         #
         # Почему цены вообще стали жертвой (решение владельца, синк 2026-08-20):
         # раньше последняя ступень возвращалась БЕЗУСЛОВНО, и на узком окне левой
@@ -1112,11 +1158,33 @@ class TraceScreen(Screen):
             for prices in price_ladder
             for cols, transition in head_ladder
         ]
-        for candidate in reserve:
+
+        def squeezed():
+            # Ступени 10-11 (спека §10.4): имя модели по середине до
+            # `_MODEL_NAME_MIN_COLS`, затем без плашки контекста — и имя
+            # перебирается заново с полного: снятая плашка освобождает место.
+            # Лениво: до них доходит только узкое окно.
+            full = cell_len(snapshot.model)
+            least = min(full, _MODEL_NAME_MIN_COLS)
+            for with_meter in (True, False):
+                top = full - 1 if with_meter else full
+                for cols in range(top, least - 1, -1):
+                    yield build(
+                        None,
+                        _RIGHT_PRICES_DOWN,
+                        with_transition=False,
+                        with_prices=False,
+                        model_cols=cols,
+                        with_meter=with_meter,
+                    )
+
+        tried: list[Text] = []
+        for candidate in itertools.chain(reserve, squeezed()):
             if fits(candidate, 2, left_narrow):
                 return candidate
+            tried.append(candidate)
         # Не подошло ничего — и дальше важно, ПОЧЕМУ.
-        affordable = [c for c in reserve if width_of(c) <= available]
+        affordable = [c for c in tried if width_of(c) <= available]
         if affordable:
             # Правая в свою ширину влезает; не хватило ЛЕВОЙ. Её беда снятием
             # имени профиля не лечится — ширину правой диктует строка цен, и
@@ -1124,9 +1192,9 @@ class TraceScreen(Screen):
             # равных по ширине — первый, то есть самый богатый.
             return min(affordable, key=width_of)
         # Правая не влезает даже в отведённую ей ширину: её обрежет терминал, и
-        # действует прежний контракт вёрстки — самый бедный вариант, где переход
-        # снят последним (`test_footer_drops_transition_last_...`).
-        return reserve[-1]
+        # действует прежний контракт вёрстки — самый бедный вариант (имя на
+        # минимуме, без плашки; переход снят раньше всего этого).
+        return tried[-1]
 
     def _footer_total_width(self) -> int:
         """Ширина всего футера — её и делят между собой колонки."""
@@ -1957,9 +2025,9 @@ class TraceScreen(Screen):
         # + notice + пересборка; санация ПОСЛЕ load_session_overrides — проверяет то,
         # что реально стало активным оверрайдом этого треда.
         self.app.sanitize_session_profile()
-        # Режим разрешений — тоже выбор, сохранённый в сессии; флаг запуска
-        # сильнее и им не перебивается.
-        self.app.adopt_thread_permission_mode(task_meta)
+        # Режим разрешений — тоже выбор, сохранённый в сессии; у открытой
+        # пикером сессии без режима — режим конфига. Флаг запуска сильнее.
+        self.app.adopt_thread_permission_mode(task_meta, resumed=is_resume)
         # read_all_events — атомарный снимок live-файла + cursor (как раньше).
         # Была ли компакция, определяем по голове live-снимка (после turn_end
         # первая запись = сводка) — без доп. I/O. Тред без компакции рендерим
@@ -2544,6 +2612,7 @@ class TraceScreen(Screen):
         Картинки (дизайн картинок §12): подписи `[Изображение #N]` в историю ↑ и
         имя сессии не идут — вспомненная подпись без записи в сторе была бы мёртвой
         плашкой; для отката отправки картинки запоминаются рядом с текстом."""
+        self.spend_help_hint()
         plain = strip_image_chips(text, images)
         if self._plan_rework_pending:
             self._plan_rework_pending = False
@@ -3932,7 +4001,8 @@ class TraceScreen(Screen):
 
     def _sync_input_placeholder(self) -> None:
         """Подсказка в пустом поле ввода — одна точка на все состояния:
-        вопрос агента > замечания к плану > план ждёт решения > обычная."""
+        вопрос агента > замечания к плану > план ждёт решения > обычная (с
+        подсказкой F1, пока она не погашена)."""
         try:
             inp = self.query_one(_SEL_CMDINPUT, CommandTextArea)
         except Exception:
@@ -3947,8 +4017,18 @@ class TraceScreen(Screen):
             and plan_awaits_decision(self._session_plan())
         ):
             inp.placeholder = _PLACEHOLDER_PLAN_WAITS
-        else:
+        elif self._help_hint_spent:
             inp.placeholder = _PLACEHOLDER_READY
+        else:
+            inp.placeholder = _PLACEHOLDER_READY_HELP
+
+    def spend_help_hint(self) -> None:
+        """Погасить подсказку F1 в поле ввода до конца запуска: человек
+        отправил сообщение, открыл справку или палитру, начал новую сессию."""
+        if self._help_hint_spent:
+            return
+        self._help_hint_spent = True
+        self._sync_input_placeholder()
 
     def _apply_plan_choice(self, choice: str) -> None:
         """Выбран вариант баннера: режим исполнения либо «Обсудить и доработать»."""
@@ -5638,6 +5718,7 @@ class TraceScreen(Screen):
     def _open_palette(self, *, prefix: str) -> None:
         if self._palette is not None:
             return
+        self.spend_help_hint()
         palette = CommandPalette(
             self._registry,
             initial_filter=prefix,
@@ -6006,8 +6087,10 @@ class TraceScreen(Screen):
 
         # Если открыта палитра — Enter выполняет выбранную/набранную команду
         # (логика перенесена из on_key, т.к. TextArea перехватывает Enter).
-        # Команды со схемой args (`<path>`, `[txt|…]`) подставляются в поле;
-        # выполнение (с дефолтом, если args опциональны) — следующим Enter в поле.
+        # Команда с обязательным аргументом или меню вариантов (`<path>`,
+        # `[txt|…]`) подставляется в поле — выполнение следующим Enter;
+        # необязательный аргумент без меню (`/plan`) выполняется сразу
+        # (`Command.runs_on_enter`).
         if self._palette is not None:
             cmd = self._palette.selected_command()
             if cmd is not None and cmd.is_toggle:
@@ -6031,7 +6114,7 @@ class TraceScreen(Screen):
             typed = event.value.strip()
             has_args = len(typed.split()) > 1
             if cmd is not None and not has_args:
-                if cmd.args:
+                if not cmd.runs_on_enter:
                     inp.text = f"/{cmd.name} "
                     inp.move_cursor(inp.document.end)
                     self._close_palette()
@@ -7168,6 +7251,7 @@ class TraceScreen(Screen):
         # Новая сессия — номера картинок с 1: выданное прежней несозданной — не её.
         self._image_seq_issued.pop(None, None)
         self._renumber_input_images()
+        self.spend_help_hint()
 
     def _renumber_input_images(self) -> None:
         """Смена сессии: image-плашки буфера ввода — в последовательность активного треда
@@ -7426,9 +7510,7 @@ class TraceScreen(Screen):
                 await self._cmd_use_skill(arg.strip(), prompt="")
             return
         if name == "help":
-            from gc_tui.screens.help import HelpScreen
-
-            self.app.push_screen(HelpScreen())
+            self.app.action_help()
             return
         if name == "skills":
             from gc_tui.screens.skills import SkillsScreen

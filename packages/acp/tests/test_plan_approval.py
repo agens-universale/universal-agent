@@ -224,6 +224,47 @@ async def test_silent_client_fails_the_card_and_runs_nothing(tmp_path):
     await facade.shutdown()
 
 
+async def test_choice_racing_a_cancel_fails_the_card_and_runs_nothing(
+    tmp_path,
+):
+    """Выбор пришёл, но отмена сессии уже поднята: карточка сорвана."""
+    facade, writer, agent, session_id = await _ready(tmp_path)
+    await _prompt(facade, session_id)
+    msg = await _wait_permission(writer)
+    facade._sessions[session_id].cancel_requested = True
+    await facade.handle_line(_response(msg["id"], _selected("auto")))
+    await facade._sessions[session_id].prompt_task
+
+    card_id = msg["params"]["toolCall"]["toolCallId"]
+    assert _card_closed(writer, card_id, "failed")
+    assert not _card_closed(writer, card_id, "completed")
+    assert agent.executor.accepted == []
+    assert agent.executor.modes == []
+    await facade.shutdown()
+
+
+async def test_undelivered_question_leaves_no_card_notice(tmp_path):
+    """Вопрос не ушёл клиенту (``_ask_client`` вернул None): карточки у
+    клиента нет, закрывать нечего, ничего не исполнено."""
+    facade, writer, agent, session_id = await _ready(tmp_path)
+
+    async def _not_delivered(*_args):
+        return None
+
+    facade._ask_client = _not_delivered
+    await _prompt(facade, session_id)
+    await facade._sessions[session_id].prompt_task
+
+    assert not any(
+        item["sessionUpdate"] == "tool_call_update"
+        and str(item.get("toolCallId", "")).startswith("plan_approval:")
+        for item in _updates(writer)
+    )
+    assert agent.executor.accepted == []
+    assert _by_id(writer, 3)["result"] == {"stopReason": "end_turn"}
+    await facade.shutdown()
+
+
 async def test_plan_that_is_not_waiting_is_shown_without_a_question(
     tmp_path,
 ):

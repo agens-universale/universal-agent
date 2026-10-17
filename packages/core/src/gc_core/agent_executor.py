@@ -1381,6 +1381,16 @@ class AgentExecutor:
             if self._state is not None:
                 self._state.shared.permission_mode = resolved.value
 
+    def clear_permission_mode(self) -> None:
+        """Снять явный выбор режима: следующий прогон возьмёт режим из
+        сессии, а нет его там — из конфига.
+
+        Живое состояние не трогается: между прогонами оно принадлежит
+        завершённому прогону, а следующий соберёт shared из сессии заново.
+        """
+        with self._lock:
+            self._permission_mode_choice = None
+
     def permission_mode(self) -> Optional[str]:
         """Режим, выбранный явно или сохранённый в сессии; None — действует конфиг."""
         with self._lock:

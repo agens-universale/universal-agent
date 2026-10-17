@@ -37,6 +37,21 @@ class Command:
     arg_options_provider: Optional[Callable[[Any], tuple]] = None
     arg_hint_provider: Optional[Callable[[Any, Optional[str]], str]] = None
 
+    @property
+    def runs_on_enter(self) -> bool:
+        """Enter по строке палитры выполняет команду сразу: аргумента нет либо
+        он необязателен (``[…]``) и меню вариантов у него нет — значение
+        набирается руками (``/plan clear``). Иначе Enter подставляет команду
+        в поле: следом откроется меню или ввод аргумента."""
+        if not self.args:
+            return True
+        has_menu = (
+            bool(self.arg_options)
+            or self.arg_options_provider is not None
+            or self.arg_file
+        )
+        return self.args.startswith("[") and not has_menu
+
 
 class CommandRegistry:
     def __init__(self) -> None:

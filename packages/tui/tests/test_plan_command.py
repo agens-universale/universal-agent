@@ -391,3 +391,22 @@ def test_plan_command_offers_no_argument_menu():
     assert command is not None
     assert command.arg_options == ()
     assert command.arg_options_provider is None
+
+
+async def test_palette_enter_on_plan_shows_the_plan_at_once(tmp_path):
+    """`/plan` из палитры: Enter выполняет сразу, а не подставляет `/plan `
+    в поле (§10.2); `clear` набирается руками."""
+    from gc_tui.widgets.command_palette import CommandPalette
+
+    _save(tmp_path, mode="edit")
+    async with _app(tmp_path).run_test() as pilot:
+        screen = pilot.app.screen
+        await _open(pilot)
+        screen.query_one("#cmdinput").focus()
+        await pilot.press("/", "p", "l")
+        await pilot.press("enter")
+        await pilot.pause()
+        assert not pilot.app.query(CommandPalette)
+        assert screen.query_one("#cmdinput").text == ""
+        assert len(_panels(screen)) == 1
+        assert screen._plan_banner is not None
