@@ -19,12 +19,10 @@ from typing import Any, Dict, Optional, Sequence
 import httpx
 
 from gc_core.backends.async_protocol import aexec_port
-from gc_core.security.url_policy import validate_redirect_hop
 from gc_core.tools.exec.redirect_policy import (
     DEFAULT_MAX_REDIRECTS,
-    RedirectBlocked,
     TooManyRedirects,
-    _next_hop,
+    checked_next_hop,
 )
 
 RESULT_MARKER = "__GC_FETCH__"
@@ -151,18 +149,11 @@ async def afetch_via_backend(
     current = start_url
     for _ in range(max_redirects + 1):
         response = await aone_hop(backend, current, headers, timeout, proxy)
-        next_abs = _next_hop(response, current)
+        next_abs = checked_next_hop(
+            response, current, allowed_schemes, url_blacklist, same_host_only
+        )
         if next_abs is None:
             return response
-        decision = validate_redirect_hop(
-            current,
-            next_abs,
-            allowed_schemes,
-            url_blacklist,
-            same_host_only=same_host_only,
-        )
-        if not decision.allowed:
-            raise RedirectBlocked(decision)
         current = next_abs
     raise TooManyRedirects(current, max_redirects)
 

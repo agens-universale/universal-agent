@@ -86,8 +86,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         choices=[mode.value for mode in AVAILABLE_MODES],
         default=None,
         help=(
-            "Режим разрешений на этот запуск (сильнее режима, сохранённого в "
-            "сессии; по умолчанию — security.permissions.default_mode)"
+            "Режим разрешений сессии (сохраняется в ней; флаг перебивает "
+            "сохранённый режим; по умолчанию — security.permissions.default_mode)"
         ),
     )
     parser.add_argument(

@@ -122,6 +122,12 @@ def test_pair_with_a_flag_as_the_second_word_is_rejected(entry):
         _with_readonly([entry])
 
 
+def test_entry_of_three_or_more_words_is_rejected():
+    """Признаются слово и пара «команда подкоманда»; длиннее — не запись."""
+    with pytest.raises(ValidationError, match="команда подкоманда"):
+        _with_readonly(["git log --oneline"])
+
+
 def test_interpreter_list_is_the_reference_list():
     assert {"python", "bash", "cmd.exe", "Rscript", "env"} <= (
         INTERPRETER_COMMANDS

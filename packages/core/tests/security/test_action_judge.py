@@ -1,6 +1,7 @@
 """Судья действий режима auto: что уходит модели и как читается её ответ."""
 
 import json
+import time
 
 import pytest
 
@@ -348,6 +349,19 @@ def test_when_even_fair_shares_do_not_fit_the_oldest_drop_at_the_start():
     dropped = total - 1 - fits
     assert kept[0] == {"omitted_earlier_entries": dropped}
     assert [entry["user"] for entry in kept[1:]] == texts[dropped:]
+
+
+def test_thousands_of_user_messages_are_trimmed_fast():
+    """Справедливая доля не квадратична по числу сообщений."""
+    conversation = tuple(
+        ConversationEntry.user("ж" * 100) for _ in range(5000)
+    )
+    started = time.perf_counter()
+    kept = build_action_judge_payload(_request(conversation=conversation))[
+        "conversation"
+    ]
+    assert time.perf_counter() - started < 0.5
+    assert kept[-1] == {"user": "ж" * 100}
 
 
 def test_the_marker_stands_where_entries_were_dropped():

@@ -75,6 +75,33 @@ def _next_hop(response: Any, current: str) -> str | None:
     return urljoin(current, location)
 
 
+def checked_next_hop(
+    response: Any,
+    current: str,
+    allowed_schemes: Sequence[str],
+    url_blacklist: Sequence[str],
+    same_host_only: bool,
+) -> str | None:
+    """Следующий переход, прошедший проверку, или ``None``, если его нет.
+
+    Запрещённый переход — ``RedirectBlocked``. Единое правило перехода
+    для всех обходчиков редиректов.
+    """
+    next_abs = _next_hop(response, current)
+    if next_abs is None:
+        return None
+    decision = validate_redirect_hop(
+        current,
+        next_abs,
+        allowed_schemes,
+        url_blacklist,
+        same_host_only=same_host_only,
+    )
+    if not decision.allowed:
+        raise RedirectBlocked(decision)
+    return next_abs
+
+
 def _too_many(current: str, limit: int) -> TooManyRedirects:
     return TooManyRedirects(current, limit)
 
@@ -100,18 +127,11 @@ async def fetch_validating_redirects(
         response = await session.get(
             current, headers=headers, timeout=timeout, follow_redirects=False
         )
-        next_abs = _next_hop(response, current)
+        next_abs = checked_next_hop(
+            response, current, allowed_schemes, url_blacklist, same_host_only
+        )
         if next_abs is None:
             return response
-        decision = validate_redirect_hop(
-            current,
-            next_abs,
-            allowed_schemes,
-            url_blacklist,
-            same_host_only=same_host_only,
-        )
-        if not decision.allowed:
-            raise RedirectBlocked(decision)
         current = next_abs
     raise _too_many(current, max_redirects)
 
@@ -141,23 +161,19 @@ async def stream_validating_redirects(
         response = await session.send(
             request, stream=True, follow_redirects=False
         )
-        next_abs = _next_hop(response, current)
-        if next_abs is None:
-            try:
+        try:
+            next_abs = checked_next_hop(
+                response,
+                current,
+                allowed_schemes,
+                url_blacklist,
+                same_host_only,
+            )
+            if next_abs is None:
                 yield response
-            finally:
-                await response.aclose()
-            return
-        await response.aclose()
-        decision = validate_redirect_hop(
-            current,
-            next_abs,
-            allowed_schemes,
-            url_blacklist,
-            same_host_only=same_host_only,
-        )
-        if not decision.allowed:
-            raise RedirectBlocked(decision)
+                return
+        finally:
+            await response.aclose()
         current = next_abs
     raise _too_many(current, max_redirects)
 
@@ -166,6 +182,7 @@ __all__ = [
     "DEFAULT_MAX_REDIRECTS",
     "RedirectBlocked",
     "TooManyRedirects",
+    "checked_next_hop",
     "fetch_validating_redirects",
     "stream_validating_redirects",
 ]

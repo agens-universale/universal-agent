@@ -207,10 +207,18 @@ def _retained_user_words(
     texts = {index: str(conversation[index].text or "") for index in spoken}
     kept = {freshest: _cut_middle(texts[freshest], MESSAGE_CHARS)}
     budget = MESSAGES_TOTAL_CHARS - len(kept[freshest])
-    cap = _fair_cap([len(texts[index]) for index in older], budget)
-    while cap < MESSAGE_SHARE_MIN_CHARS:
-        older.pop(0)  # не укладываются и так — выпадает самое старое
-        cap = _fair_cap([len(texts[index]) for index in older], budget)
+    lengths = [len(texts[index]) for index in older]
+    # Чем больше старых выпало, тем крупнее доля: ищем наименьшее число
+    # выпавших, при котором доля не меньше порога.
+    low, high = 0, len(older)
+    while low < high:
+        middle = (low + high) // 2
+        if _fair_cap(lengths[middle:], budget) < MESSAGE_SHARE_MIN_CHARS:
+            low = middle + 1
+        else:
+            high = middle
+    older = older[low:]
+    cap = _fair_cap(lengths[low:], budget)
     kept.update({index: _cut_middle(texts[index], cap) for index in older})
     return {
         index: {conversation[index].kind: text} for index, text in kept.items()
