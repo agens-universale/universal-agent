@@ -10,6 +10,10 @@
 у ``fetch_url``, который регистрируется по умолчанию, её не было вовсе:
 он звал ``follow_redirects=True`` и доверял всей цепочке. Две реализации
 одного правила расходятся молча, а третья дырявая — поэтому петля здесь одна.
+
+Переход на другой хост решает режим разрешений: в manual и auto петля его
+не выполняет (``same_host_only``), модель запрашивает адрес отдельно — новый
+запрос проходит вопрос или судью. Признак петля получает готовым.
 """
 
 from __future__ import annotations
@@ -18,7 +22,10 @@ from contextlib import asynccontextmanager
 from typing import Any, Dict, Sequence
 from urllib.parse import urljoin
 
-from gc_core.security.url_policy import UrlPolicyDecision, validate_url_policy
+from gc_core.security.url_policy import (
+    UrlPolicyDecision,
+    validate_redirect_hop,
+)
 
 #: Потолок переходов. Выше — почти наверняка петля, а не навигация.
 #:
@@ -33,7 +40,8 @@ DEFAULT_MAX_REDIRECTS = 20
 
 
 class RedirectBlocked(Exception):
-    """Переход отвергнут ПОЛИТИКОЙ. Несёт решение — его показывают модели."""
+    """Переход отвергнут политикой адресов или режимом (переход на другой
+    хост в manual / auto). Несёт решение — его показывают модели."""
 
     def __init__(self, decision: UrlPolicyDecision) -> None:
         super().__init__(decision.reason or "redirect blocked by policy")
@@ -80,6 +88,7 @@ async def fetch_validating_redirects(
     allowed_schemes: Sequence[str],
     url_blacklist: Sequence[str],
     max_redirects: int = DEFAULT_MAX_REDIRECTS,
+    same_host_only: bool = False,
 ) -> Any:
     """GET с ручным разворотом редиректов; тело читается целиком.
 
@@ -94,8 +103,12 @@ async def fetch_validating_redirects(
         next_abs = _next_hop(response, current)
         if next_abs is None:
             return response
-        decision = validate_url_policy(
-            next_abs, allowed_schemes, url_blacklist
+        decision = validate_redirect_hop(
+            current,
+            next_abs,
+            allowed_schemes,
+            url_blacklist,
+            same_host_only=same_host_only,
         )
         if not decision.allowed:
             raise RedirectBlocked(decision)
@@ -113,6 +126,7 @@ async def stream_validating_redirects(
     allowed_schemes: Sequence[str],
     url_blacklist: Sequence[str],
     max_redirects: int = DEFAULT_MAX_REDIRECTS,
+    same_host_only: bool = False,
 ):
     """То же, но тело НЕ читается: отдаёт открытый потоковый ответ.
 
@@ -135,8 +149,12 @@ async def stream_validating_redirects(
                 await response.aclose()
             return
         await response.aclose()
-        decision = validate_url_policy(
-            next_abs, allowed_schemes, url_blacklist
+        decision = validate_redirect_hop(
+            current,
+            next_abs,
+            allowed_schemes,
+            url_blacklist,
+            same_host_only=same_host_only,
         )
         if not decision.allowed:
             raise RedirectBlocked(decision)

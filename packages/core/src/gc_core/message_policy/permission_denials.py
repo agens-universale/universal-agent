@@ -193,3 +193,17 @@ def format_tool_denied(tool_name: str, error: dict) -> str:
     return json.dumps(
         {"tool": tool_name, "ok": False, "error": error}, ensure_ascii=False
     )
+
+
+OTHER_HOST_REDIRECT_TYPE = "redirect_to_other_host"
+
+
+def other_host_redirect_reason(location: str) -> str:
+    """Переход редиректа на другой хост не выполнен (manual, auto): модели —
+    адрес и что делать. Запрос туда — новый, его проверит режим."""
+    return (
+        f"The server redirected to {location}, which is on another host. In "
+        "the current permission mode a redirect to another host is not "
+        "followed. If you need that page, request this URL with a separate "
+        "call."
+    )

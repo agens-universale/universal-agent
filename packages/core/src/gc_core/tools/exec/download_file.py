@@ -19,6 +19,7 @@ from gc_core.security.path_policy import (
     write_decision_key,
     write_mode_stage,
 )
+from gc_core.security.permission_mode import follows_cross_host_redirects
 from gc_core.security.url_policy import enforce_url_policy
 from gc_core.settings import settings_of
 from gc_core.tools.exec.redirect_policy import (
@@ -356,6 +357,7 @@ class DownloadFile(AbstractSimpleTool):
         *,
         allowed_schemes: list[str],
         url_blacklist: list[str],
+        same_host_only: bool = False,
     ):
         """Общая потоковая петля из ``redirect_policy``.
 
@@ -370,6 +372,7 @@ class DownloadFile(AbstractSimpleTool):
             allowed_schemes=allowed_schemes,
             url_blacklist=url_blacklist,
             max_redirects=DEFAULT_MAX_REDIRECTS,
+            same_host_only=same_host_only,
         )
 
     async def _read_bounded(
@@ -408,6 +411,8 @@ class DownloadFile(AbstractSimpleTool):
             ctx=self._ctx,
             state=self._state,
         )
+        # Переход на другой хост — по режиму сессии; решает слой безопасности.
+        same_host_only = not follows_cross_host_redirects(context.ctx)
         headers = {
             "User-Agent": self.default_user_agent,
             "Accept": "*/*",
@@ -432,6 +437,7 @@ class DownloadFile(AbstractSimpleTool):
                     self.timeout_seconds,
                     allowed_schemes=context.url_allowed_schemes,
                     url_blacklist=context.url_blacklist,
+                    same_host_only=same_host_only,
                 ) as response:
                     if response.status_code >= 400:
                         # Тело ошибки читаем: без него у `raise_for_status`

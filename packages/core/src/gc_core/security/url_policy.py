@@ -7,6 +7,10 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 from urllib.parse import urlsplit
 
+from gc_core.message_policy.permission_denials import (
+    OTHER_HOST_REDIRECT_TYPE,
+    other_host_redirect_reason,
+)
 from gc_core.security.confirm_port import confirmation_step
 from gc_core.security.dual_wrapper import dual_wrap
 from gc_core.security.mode_stage import (
@@ -124,6 +128,35 @@ def validate_url_policy(
             matched_rule=str(matched_rule),
         )
     return UrlPolicyDecision(allowed=True, url=parsed.url)
+
+
+def validate_redirect_hop(
+    current: str,
+    location: str,
+    allowed_schemes: list[str],
+    url_blacklist: list[str],
+    *,
+    same_host_only: bool = False,
+) -> UrlPolicyDecision:
+    """Решение по переходу редиректа: политика адресов, затем хост.
+
+    ``same_host_only`` — режим не пускает переход на другой хост
+    (``permission_mode.follows_cross_host_redirects``): такой переход не
+    выполняется, модель получает адрес и запрашивает его отдельно. Хост —
+    тот же ключ, под которым человек отвечает про сайт (`url_host_key`):
+    смена схемы и порта хоста не меняет.
+    """
+    decision = validate_url_policy(location, allowed_schemes, url_blacklist)
+    if not decision.allowed or not same_host_only:
+        return decision
+    if url_host_key(decision.url) == url_host_key(current):
+        return decision
+    return UrlPolicyDecision(
+        allowed=False,
+        url=decision.url,
+        error_type=OTHER_HOST_REDIRECT_TYPE,
+        reason=other_host_redirect_reason(decision.url),
+    )
 
 
 def _url_policy_flow(func, context, url, args, kwargs, blocked):

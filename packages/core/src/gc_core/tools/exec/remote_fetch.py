@@ -19,7 +19,7 @@ from typing import Any, Dict, Optional, Sequence
 import httpx
 
 from gc_core.backends.async_protocol import aexec_port
-from gc_core.security.url_policy import validate_url_policy
+from gc_core.security.url_policy import validate_redirect_hop
 from gc_core.tools.exec.redirect_policy import (
     DEFAULT_MAX_REDIRECTS,
     RedirectBlocked,
@@ -145,6 +145,7 @@ async def afetch_via_backend(
     allowed_schemes: Sequence[str],
     url_blacklist: Sequence[str],
     max_redirects: int = DEFAULT_MAX_REDIRECTS,
+    same_host_only: bool = False,
 ) -> httpx.Response:
     """Аналог ``fetch_validating_redirects`` с сетью на стороне бэкенда."""
     current = start_url
@@ -153,8 +154,12 @@ async def afetch_via_backend(
         next_abs = _next_hop(response, current)
         if next_abs is None:
             return response
-        decision = validate_url_policy(
-            next_abs, allowed_schemes, url_blacklist
+        decision = validate_redirect_hop(
+            current,
+            next_abs,
+            allowed_schemes,
+            url_blacklist,
+            same_host_only=same_host_only,
         )
         if not decision.allowed:
             raise RedirectBlocked(decision)

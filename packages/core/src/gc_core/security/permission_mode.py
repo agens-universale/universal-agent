@@ -575,6 +575,18 @@ def network_decision(ctx: Any) -> str:
     return _NETWORK_PROFILES[resolve_mode(ctx)]
 
 
+def follows_cross_host_redirects(ctx: Any) -> bool:
+    """Идти ли по редиректу на ДРУГОЙ хост.
+
+    Режим, проверяющий сетевые запросы (вопрос в manual, судья в auto),
+    проверил только названный адрес: переход на другой хост — новый запрос,
+    модель делает его отдельно, и он проходит ту же проверку. Где режим
+    ничего не добавляет (edit, plan), — как раньше. Переходы в пределах
+    хоста идут всегда.
+    """
+    return network_decision(ctx) == PASS
+
+
 def readonly_extra(ctx: Any) -> list[str]:
     """Пользовательское дополнение списка только-чтения из конфига."""
     return list(settings_of(ctx).security.permissions.readonly_commands or [])

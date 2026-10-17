@@ -28,12 +28,23 @@ def test_file_sits_next_to_the_session_files(tmp_path):
 
 def test_file_is_written_for_a_human():
     text = render_plan_file(_plan("approved", "edit"), "t1")
-    assert text.startswith("# План сессии t1\n")
+    assert text.startswith("_План сессии t1 · утверждён в edit mode · ")
     assert "утверждён в edit mode" in text
     assert "2026" in text and "октября" in text  # абсолютная дата
     assert text.rstrip().endswith("1. шаг\n2. проверка")
     assert "approved" not in text and "proposed" not in text
     assert render_plan_file(None, "t1") == ""
+
+
+def test_plan_title_is_the_only_top_level_heading():
+    """Служебная строка — без `#`: заголовок первого уровня в файле один,
+    и это заголовок самого плана."""
+    plan = new_plan_block("# Перенос модуля\n\n1. шаг\n2. проверка")
+    plan["updated_at"] = "2026-10-13T09:12:00+00:00"
+    text = render_plan_file(plan, "t1")
+    headings = [line for line in text.splitlines() if line.startswith("# ")]
+    assert headings == ["# Перенос модуля"]
+    assert text.startswith("_План сессии t1 · ")
 
 
 def test_write_happens_only_when_the_content_differs(tmp_path):

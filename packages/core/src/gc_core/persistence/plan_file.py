@@ -39,7 +39,9 @@ def _absolute_local(iso_utc: str) -> str:
 
 
 def render_plan_file(plan: Mapping[str, Any], thread_id: str) -> str:
-    """Текст файла: заголовок, статус подписью, дата, затем план как есть."""
+    """Текст файла: служебная строка (сессия, статус, дата), затем план как
+    есть. Служебная строка — без `#`: единственный заголовок первого уровня
+    — заголовок самого плана."""
     block = normalize_plan_block(plan)
     if block is None:
         return ""
@@ -49,7 +51,7 @@ def render_plan_file(plan: Mapping[str, Any], thread_id: str) -> str:
         status = f"{status} в {mode_label(mode)}"
     when = _absolute_local(block["updated_at"])
     meta = f"{status} · {when}" if when else status
-    return f"# План сессии {thread_id}\n\n_{meta}_\n\n{block['text']}\n"
+    return f"_План сессии {thread_id} · {meta}_\n\n{block['text']}\n"
 
 
 def write_plan_file(path: str, text: str) -> bool:
