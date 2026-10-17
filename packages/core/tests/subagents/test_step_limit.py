@@ -188,7 +188,7 @@ def test_child_context_gets_the_root_users_words():
         IntentRecord(1, "ts", "user_ask", None, "ничего не пушь")
     ]
     orch.current_user_intent = []
-    child_ctx = SimpleNamespace()
+    child_ctx = fake_ctx()
     runner._bind_child_context(child_ctx, "subagent_worker")
     assert child_ctx.root_user_messages() == ["ничего не пушь", "собери отчёт"]
     # читается в момент проверки: позже сказанное тоже попадёт
@@ -199,6 +199,6 @@ def test_child_context_gets_the_root_users_words():
 def test_nested_child_inherits_the_root_provider():
     runner, _orch = _runner()
     runner._ctx.root_user_messages = lambda: ["слова корня"]
-    child_ctx = SimpleNamespace()
+    child_ctx = fake_ctx()
     runner._bind_child_context(child_ctx, "subagent_worker")
     assert child_ctx.root_user_messages() == ["слова корня"]

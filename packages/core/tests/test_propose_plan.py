@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 
 from gc_core import processing_responses as pr
+from gc_core.auto_routing.pair_judge import build_pair_card
 from gc_core.execution.state import SharedStateData
+from gc_core.intent_log import append_user_ask
 from gc_core.plan_store import PLAN_MAX_CHARS
 from gc_core.processing_responses import arun_agent
 from gc_core.security.permission_store import PermissionStore
@@ -159,6 +161,26 @@ def test_proposed_plan_closes_the_run_and_skips_the_rest_of_the_batch(
     for skipped in ("c3", "c4"):
         assert json.loads(outputs[skipped])["skipped"] is True
     assert {m.get("call_id") for m in persisted} >= {"c1", "c2", "c3", "c4"}
+
+
+def test_plan_is_the_outcome_of_its_turn_for_the_next_pair_judge(
+    monkeypatch,
+):
+    """Ход, закрытый планом, оставляет итог в журнале намерений: судья пары
+    на ходе исполнения видит, какой план пойдёт в работу."""
+    state = _state()
+    state.current_user_intent = append_user_ask(
+        [], "добавь экспорт отчёта", user_turn_seq=0
+    )
+    _patch_apply(monkeypatch, state, [])
+    batch = [_fc("turn_propose_plan", "c1", json.dumps({"plan": "1. шаг"}))]
+    run_coro(arun_agent(batch, state, _ctx(state)))
+
+    previous = json.loads(build_pair_card(state))["previous_turn"]
+    assert previous == {
+        "request": "добавь экспорт отчёта",
+        "outcome": "plan: 1. шаг",
+    }
 
 
 def test_refused_proposal_does_not_close_the_run(monkeypatch):

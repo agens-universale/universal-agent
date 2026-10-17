@@ -211,6 +211,9 @@ class UniversalSubagentWorkflow:
                     logger=workflow.logger,
                     human_request=self.human_request,
                 )
+                root_words = request.child_context.get("root_user_words")
+                if root_words is not None:
+                    parent_ctx.root_user_messages = lambda: list(root_words)
                 parent_ctx.model_router = ModelRouter(
                     parent_ctx,
                     level_provider=lambda: request.child_context[

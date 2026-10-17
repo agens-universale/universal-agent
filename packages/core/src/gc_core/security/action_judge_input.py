@@ -46,6 +46,9 @@ from gc_core.security.permission_mode import (
     CAT_TURN,
     CAT_UNKNOWN,
 )
+from gc_core.tools.arguments_validation import (
+    arguments_without_service_fields,
+)
 
 #: Категории вызовов, которые судья видит как прежние действия агента. Чтение,
 #: поиск и внутренние вызовы (заметки, память) действиями не считаются.
@@ -187,7 +190,11 @@ def _call_entries(
     """Вызов тула глазами судьи: слова агента и ответ человека из тулов хода,
     действие с исходом — из тулов, меняющих мир; прочее не показывается."""
     name = str(item.get("name") or "")
-    arguments = _loads(item.get("arguments"))
+    entry = tools_data.get(name)
+    raw = item.get("arguments")
+    if isinstance(entry, Mapping):
+        raw = arguments_without_service_fields(raw, dict(entry))
+    arguments = _loads(raw)
     category = _category(name, tools_data)
     if category in _ACTION_CATEGORIES:
         return [ConversationEntry.action(name, arguments, _outcome(output))]

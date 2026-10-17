@@ -244,6 +244,17 @@ parser.add_argument(
 )
 
 parser.add_argument(
+    "--external-request",
+    action="store_true",
+    dest="external_request",
+    help=(
+        "Служебный (swarm): запрос пришёл от внешней системы — спросить "
+        "некого, а слова запроса для судьи действий — описание задачи и "
+        "запреты, не разрешение человека"
+    ),
+)
+
+parser.add_argument(
     "--approve-plan",
     type=str.lower,
     choices=[mode.value for mode in PLAN_EXECUTION_MODES],

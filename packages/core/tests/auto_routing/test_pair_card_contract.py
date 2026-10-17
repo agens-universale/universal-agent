@@ -143,6 +143,7 @@ async def test_finish_outcome_survives_compaction_and_meta_reload(
             raw_summary="Previous work was summarized",
             last_dialog_steps="",
             summarized_messages_count=len(state.messages),
+            can_propose_plan=True,
         )
         from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
         from gc_core.intent_log import deserialize_list

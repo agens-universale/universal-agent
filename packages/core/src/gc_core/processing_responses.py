@@ -90,6 +90,7 @@ from gc_core.intent_guard.turn_finish_emit import (
 )
 from gc_core.intent_scope.final_answer import (
     amaybe_record_final_answer_intent,
+    record_plan_outcome,
     record_turn_finish_outcome,
 )
 from gc_core.intent_scope.hook import amaybe_update_intent_scope_from_tool
@@ -3216,10 +3217,14 @@ class _AgentLoop:
                 self.persist_messages_callback, batch_new, state
             )
         state.plan_proposed = False
+        plan = getattr(state.shared, "plan", None) or {}
+        if getattr(self.ctx, "routing_contract_v2", True):
+            record_plan_outcome(
+                plan_text=str(plan.get("text") or ""), state=state
+            )
         state.steps += 1
         state.flush_current_user_intent()
         clear_loop_detector(state)
-        plan = getattr(state.shared, "plan", None) or {}
         outcome = await self._aclose_turn(
             json.dumps(
                 {

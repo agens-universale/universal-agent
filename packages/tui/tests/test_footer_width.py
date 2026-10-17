@@ -227,13 +227,14 @@ _METER = "ctx 42%"
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("width", "meter_kept"), [(65, True), (50, True), (40, False)]
+    ("width", "name_kept"), [(65, True), (50, True), (40, False)]
 )
 async def test_long_model_id_yields_before_the_stop_key(
-    tmp_path, monkeypatch, width, meter_kept
+    tmp_path, monkeypatch, width, name_kept
 ):
-    """Длинный ID модели в узком окне: «Ctrl+C/stop» цел, имя ужато по
-    середине, на самом узком снята и плашка контекста (спека §10.4)."""
+    """Длинный ID модели в узком окне: «Ctrl+C/stop» цел, имя сначала
+    ужато по середине, на самом узком снято целиком; плашка контекста
+    остаётся всегда (спека §10.4, спека автовыбора §7.1)."""
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
     from gc_tui.app import TuiApp
@@ -261,10 +262,13 @@ async def test_long_model_id_yields_before_the_stop_key(
             f"{cell_len(floor)}"
         )
         top = scr._compose_footer_right().plain.split("\n")[0]
+        assert top.endswith(f" · {_METER}")
+        if not name_kept:
+            assert top == f"● · {_METER}"
+            return
         model = top.split("● ", 1)[1].split(" · ", 1)[0]
         head, cut, tail = model.partition("…")
         assert cut == "…", f"имя не ужато: {top!r}"
         assert head and tail
         assert _LONG_MODEL.startswith(head) and _LONG_MODEL.endswith(tail)
         assert cell_len(model) >= 10
-        assert (_METER in top) is meter_kept

@@ -7,7 +7,9 @@
 * стоп во время запроса к судье: вызов получает тело `cancelled_by_user`;
 * запись в скилл и в `.envrc` без человека — отказ;
 * manual: редирект на другой хост на воркере не выполняется —
-  `redirect_to_other_host`.
+  `redirect_to_other_host`;
+* судья действий субагента видит слова человека корневой сессии: они едут
+  во входе дочернего workflow, лёгкий снимок родителя их не несёт.
 """
 
 import asyncio
@@ -68,10 +70,30 @@ def _tool_reply(tool_calls, n):
     }
 
 
+def _verdict_reply(n):
+    verdict = {"crosses_boundary": False, "risky": False, "authorized": True}
+    return {
+        "id": f"verdict-{n}",
+        "object": "chat.completion",
+        "model": "scripted",
+        "choices": [
+            {
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": json.dumps(verdict),
+                },
+                "finish_reason": "stop",
+            }
+        ],
+    }
+
+
 @pytest.fixture
 def judged_http():
     """Модель — по сценарию `script`; запрос судьи (его системное сообщение)
-    — 500, при `judge.hang` — сначала ждёт `judge.release`. GET `/start`
+    — 500 (при `allow` — разрешение), при `judge.hang` — сначала ждёт
+    `judge.release`. GET `/start`
     отвечает 302 на тот же сервер под другим именем хоста (`localhost`)."""
     env = SimpleNamespace(
         main=[],
@@ -79,6 +101,7 @@ def judged_http():
         script=[],
         visited=[],
         hang=False,
+        allow=False,
         seen=threading.Event(),
         release=threading.Event(),
     )
@@ -106,6 +129,9 @@ def judged_http():
                 env.seen.set()
                 if env.hang:
                     env.release.wait(60)
+                if env.allow:
+                    self._send(200, _verdict_reply(len(env.judged)))
+                    return
                 self._send(500, {"error": {"message": "judge is down"}})
                 return
             env.main.append(body)
@@ -134,7 +160,7 @@ def judged_http():
         thread.join()
 
 
-def _settings(url, workspace, *, mode="edit"):
+def _settings(url, workspace, *, mode="edit", subagents=False):
     return LoadedSettings(
         settings=resolve_paths(
             AppConfig.model_validate(
@@ -147,7 +173,7 @@ def _settings(url, workspace, *, mode="edit"):
                     "agent": {
                         "model": "scripted",
                         "max_steps": 30,
-                        "use_local_subagents": False,
+                        "use_local_subagents": subagents,
                         "strict_turn_finish_validation": False,
                     },
                     "security": {
@@ -319,3 +345,36 @@ async def test_manual_redirect_to_another_host_is_not_followed_on_the_worker(
     assert http.visited == ["/start"]
     outputs = _tool_outputs(http.main)
     assert any(OTHER_HOST_REDIRECT_TYPE in out for out in outputs)
+
+
+async def test_child_judge_sees_the_words_of_the_root_user(
+    tmp_path, monkeypatch, judged_http
+):
+    ws = _workspace(tmp_path, monkeypatch)
+    http = judged_http
+    http.allow = True
+    words = "удали каталог build-marker, это можно"
+    http.script.extend(
+        [
+            [
+                call(
+                    "child",
+                    "subagent_worker",
+                    {"task": "почисти сборку", "reason": "delegate"},
+                )
+            ],
+            [call("rm", "exec_command", {"command": "rm -rf build-marker"})],
+            [finish("ребёнок")],
+            [finish("родитель")],
+        ]
+    )
+    settings = _settings(http.url, ws, mode="auto", subagents=True)
+    async with _session(tmp_path, settings) as (session, _store):
+        await asyncio.wait_for(session.ask(words), 120)
+    child = [
+        json.dumps(body, ensure_ascii=False)
+        for body in http.judged
+        if "rm -rf build-marker" in json.dumps(body, ensure_ascii=False)
+    ]
+    assert child, "судья ребёнка не вызывался"
+    assert words in child[0]

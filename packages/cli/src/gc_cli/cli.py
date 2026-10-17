@@ -819,6 +819,12 @@ def _load_cli_settings(config_arg, profile_arg):
         # трейсбека (значения в сообщении нет).
         print(f"[gc] некорректный параметр: {exc}", file=sys.stderr)
         return None, 2
+    if arg_parser.run_args.external_request:
+        # Канал объявляет о себе, как webhook сервера: человека нет, слова
+        # запроса — запрос внешней системы.
+        loaded = loaded.with_runtime(
+            human_channel=False, external_user_words=True
+        )
     return loaded, None
 
 

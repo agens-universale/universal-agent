@@ -2,6 +2,7 @@
 
 import socket
 import ssl
+from dataclasses import asdict
 from types import SimpleNamespace
 
 import httpx
@@ -20,6 +21,7 @@ from gc_core_temporalio.activity_config import (
 from gc_core_temporalio.model_error_encoding import encode_model_failure
 from gc_core_temporalio.provider import WorkerConfig
 from pydantic import ValidationError
+from temporalio.converter import DataConverter, value_to_type
 
 
 def test_levels_merge_and_framework_non_retryable_types_are_kept():
@@ -298,4 +300,34 @@ def test_isolated_model_failure_is_left_to_the_caller_not_to_temporal():
     assert (
         retried_by_temporal(main, request(isolated_timeout_sec=60), failure)
         is False
+    )
+
+
+def test_model_request_fields_survive_the_temporal_boundary():
+    """Запрос к модели едет в activity словарём через конвертер Temporal и
+    собирается обратно `value_to_type` — поля изоляции судьи и немого ответа
+    доезжают; история без этих ключей получает умолчания."""
+    converter = DataConverter.default.payload_converter
+
+    def across(data):
+        (payload,) = converter.to_payloads([data])
+        (back,) = converter.from_payloads([payload], [dict])
+        return value_to_type(ModelRequest, back)
+
+    request = ModelRequest(
+        "model-1",
+        "command_judge",
+        [{"role": "user", "content": "x"}],
+        {},
+        isolated_timeout_sec=60,
+        mute_answer=True,
+    )
+    assert across(asdict(request)) == request
+
+    old = asdict(ModelRequest("model-1", "main", [], {}))
+    del old["isolated_timeout_sec"], old["mute_answer"]
+    restored = across(old)
+    assert (restored.isolated_timeout_sec, restored.mute_answer) == (
+        None,
+        False,
     )

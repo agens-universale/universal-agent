@@ -70,7 +70,7 @@ EXEC_TOOL_NAMES = frozenset(
 ARTIFACT_TOOL_NAMES = FILE_WRITE_TOOL_NAMES | EXEC_TOOL_NAMES
 
 # «Важные» тулы — меняют мир или закрывают ход: запись файлов, память агента,
-# сжатие контекста, финал и вопрос человеку. Запуск команд сюда не входит
+# сжатие контекста, финал, вопрос человеку и предложение плана. Запуск команд сюда не входит
 # (`EXEC_TOOL_NAMES` — отдельный набор); чтение, поиск, `session_think`,
 # `exec_fetch_url` и `turn_intermediate_reply` — тоже. План (`session_todo`) не
 # входит: слабая почти всегда лишь отмечает пункт, а его переигрыш давал половину
@@ -84,5 +84,6 @@ IMPORTANT_TOOL_NAMES = FILE_WRITE_TOOL_NAMES | frozenset(
         SESSION_COMPACT_TOOL_NAME,
         FINISH_TOOL_NAME,
         ASK_HUMAN_TOOL_NAME,
+        PROPOSE_PLAN_TOOL_NAME,
     }
 )

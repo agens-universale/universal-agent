@@ -1092,6 +1092,7 @@ class TraceScreen(Screen):
             with_level_block: bool = True,
             with_request: bool = True,
             with_prices: bool = True,
+            with_transition: bool = True,
             model_cols: int | None = None,
         ) -> Text:
             pending_transition = snapshot.transition is not None
@@ -1101,7 +1102,7 @@ class TraceScreen(Screen):
                 snapshot=snapshot,
                 with_model_name=with_model_name or pending_transition,
                 with_level_block=with_level_block,
-                with_transition=with_model_name and model_cols is None,
+                with_transition=with_model_name and with_transition,
                 meter=meter,
                 model_cols=model_cols,
             )
@@ -1197,16 +1198,22 @@ class TraceScreen(Screen):
         # имя навсегда ради экономии, которой хватило бы и без него.
         # Последняя ступень (`with_level_block=False`) влияет только на auto:
         # в ручном режиме `_footer_head` игнорирует этот флаг вовсе.
-        # Ужатие имени модели по середине — между сохранением имени и его
-        # снятием (спека §10.4): провайдер и версия видны, пока влезают.
+        # Рунг: (имя профиля, имя модели, блок уровня, переход, ширина имени).
+        # Перед снятием имени — снятие перехода при полном имени, затем ужатие
+        # имени по середине (спека §10.4): провайдер и версия видны, пока
+        # влезают. В auto без хода на месте имени слово `auto` — ужимать
+        # нечего.
         full = cell_len(snapshot.model)
         least = min(full, _MODEL_NAME_MIN_COLS)
+        name_shown = snapshot.running or not snapshot.mode_auto
+        squeeze = range(full - 1, least - 1, -1) if name_shown else ()
         head_ladder = (
-            (_PROFILE_NAME_MAX_COLS, True, True, None),
-            (None, True, True, None),
-            *((None, True, True, c) for c in range(full - 1, least - 1, -1)),
-            (None, False, True, None),
-            (None, False, False, None),
+            (_PROFILE_NAME_MAX_COLS, True, True, True, None),
+            (None, True, True, True, None),
+            (None, True, True, False, None),
+            *((None, True, True, False, c) for c in squeeze),
+            (None, False, True, False, None),
+            (None, False, False, False, None),
         )
         # Ценами жертвуем ТОЛЬКО ради пола левой колонки (глиф режима и
         # критичные клавиши).
@@ -1218,11 +1225,12 @@ class TraceScreen(Screen):
                 _RIGHT_PRICES_DOWN,
                 with_model_name=name,
                 with_level_block=level_block,
+                with_transition=transition,
                 model_cols=model_cols,
                 **prices,
             )
             for prices in price_ladder
-            for cols, name, level_block, model_cols in head_ladder
+            for cols, name, level_block, transition, model_cols in head_ladder
         )
         tried: list[Text] = []
         for candidate in reserve:

@@ -432,7 +432,7 @@ async def test_footer_pill_shrinks_to_glyph_when_stop_key_needs_the_room():
 async def test_footer_stop_key_outlives_the_mode_glyph():
     """Места нет даже на глиф рядом с командой остановки — уступает глиф:
     другого способа узнать, чем остановить агента, на экране нет. Шире —
-    плашка контекста снимается раньше (спека §10.4), и глиф остаётся."""
+    раньше снимается имя модели, и глиф остаётся."""
     pytest.importorskip("textual")
     rendered = await _running_footer(32, badge=True)
     assert rendered.split("\n")[0] == "Ctrl+C/stop"

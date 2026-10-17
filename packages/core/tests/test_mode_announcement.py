@@ -181,3 +181,63 @@ def test_the_text_follows_the_tool_set_not_the_role(monkeypatch):
     assert sent[-1]["content"] == wrap_technical_user_content(
         PLAN_RESEARCH_ENTER_MESSAGE
     )
+
+
+def test_a_stop_before_the_request_leaves_no_announcement(monkeypatch):
+    """Стоп во время подготовки запроса (судья пары, сжатие): объявления в
+    истории нет и отметка не сдвинута — следующий прогон скажет о режиме."""
+    shared = SharedStateData(permission_mode="plan")
+    state = _state(shared)
+    stop = {"requested": False}
+
+    async def _request(sent, _state, _ctx):
+        raise AssertionError("основной запрос после стопа")
+
+    monkeypatch.setattr(pr, "aprocess_user_ask", _request)
+
+    def compaction(_messages, _mode):
+        stop["requested"] = True
+
+    result = run_coro(
+        arun_agent(
+            [_user("задача", "u1")],
+            state,
+            _ctx(shared),
+            check_stop=lambda: stop["requested"],
+            pre_backend_compaction_hook=compaction,
+        )
+    )
+    assert result is None
+    notice = wrap_technical_user_content(PLAN_ENTER_MESSAGE)
+    assert all(m.get("content") != notice for m in state.messages)
+    assert shared.mode_announced is None
+
+
+def test_the_announcement_is_the_last_message_before_the_request(
+    monkeypatch,
+):
+    """Объявление режима — последним, после подсказки об инструментах: так
+    его не опередит ни одна вставка подготовки запроса."""
+    shared = SharedStateData(permission_mode="plan")
+    state = _state(shared)
+    hint = {"role": "user", "content": "подсказка об инструментах"}
+
+    def _with_hint(messages, *_args, **_kwargs):
+        return [*messages, hint]
+
+    async def _request(sent, _state, _ctx):
+        raise _Requested(list(sent))
+
+    monkeypatch.setattr(pr, "apply_tool_usage_notice_before_llm", _with_hint)
+    monkeypatch.setattr(pr, "aprocess_user_ask", _request)
+    with pytest.raises(_Requested) as caught:
+        run_coro(
+            arun_agent(
+                [_user("задача", "u1")], state, _ctx(shared), session_meta={}
+            )
+        )
+    sent = caught.value.messages
+    assert sent[-2] == hint
+    assert sent[-1]["content"] == wrap_technical_user_content(
+        PLAN_ENTER_MESSAGE
+    )

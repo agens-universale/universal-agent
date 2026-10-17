@@ -86,7 +86,8 @@ def _transport(monkeypatch, events, *, patched, parent_context):
         ctx, "start", "prepared", store, operations, None
     )
     runner = SimpleNamespace(
-        _orchestrator_state=SimpleNamespace(stop_requested=False)
+        _orchestrator_state=SimpleNamespace(stop_requested=False),
+        _root_user_words=lambda: ["удали build/", "prod не трогай"],
     )
     return transport, runner, captured
 
@@ -116,12 +117,19 @@ async def test_child_context_and_workflow_call_order(
         "circuit_breaker": {"open": []},
     }
     if patched:
-        expected |= {"frozen_live_level": "auto", "independent_auto": True}
+        expected |= {
+            "frozen_live_level": "auto",
+            "independent_auto": True,
+            # Судья действий ребёнка видит слова человека корня: лёгкий
+            # снимок родителя переписки и журнала не несёт.
+            "root_user_words": ["удали build/", "prod не трогай"],
+        }
     assert captured["request"].child_context == expected
     assert events == [
         "new_id",
         "patched:subagent-frozen-live-level-v1",
         "patched:subagent-independent-auto-v1",
+        "patched:subagent-root-user-words-v1",
         "snapshot",
         "check_history_size",
         "start_child_workflow",

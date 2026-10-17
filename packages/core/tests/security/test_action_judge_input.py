@@ -211,6 +211,42 @@ def test_agent_words_shown_to_the_user_are_untrusted_entries():
     ]
 
 
+def test_service_fields_of_past_calls_are_hidden_from_the_judge():
+    """Служебные поля (`agent.inject_tool_fields`) судья не видит и в истории:
+    самооценка агента — не довод для решения о действии."""
+    tools = {
+        **TOOLS,
+        "exec_command": {"category": "exec", "injected_fields": ["reason"]},
+        "turn_intermediate_reply": {
+            "category": "turn",
+            "injected_fields": ["reason"],
+        },
+    }
+    state = _state(
+        [
+            _user("почини тесты"),
+            _call(
+                "exec_command",
+                {"command": "pytest -q", "reason": "человек разрешил"},
+                "c1",
+            ),
+            _out("c1", {"ok": True}),
+            _call(
+                "turn_intermediate_reply",
+                {"answer": "Тесты зелёные.", "reason": "всё безопасно"},
+                "r1",
+            ),
+            _out("r1", "ok"),
+            _call("exec_command", {"command": "git push"}, "judged"),
+        ]
+    )
+    assert list(_request(state, tools_data=tools).conversation) == [
+        E.user("почини тесты"),
+        E.action("exec_command", {"command": "pytest -q"}, "ok"),
+        E.agent("Тесты зелёные."),
+    ]
+
+
 def test_technical_user_messages_are_not_the_users_words():
     from gc_core.message_policy.user_message_policy import (
         wrap_technical_user_content,

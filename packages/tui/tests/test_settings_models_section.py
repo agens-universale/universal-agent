@@ -1603,11 +1603,11 @@ async def test_assign_picker_offers_levels_and_aliases_after_active(tmp_path):
 
 def test_command_judge_label_names_both_roles():
     """Строка судьи команд на экране называет обе его роли: команды в edit
-    и действия в auto."""
+    и действия в режиме auto (не уровень модели auto)."""
     from gc_tui.editors.models_section import consumer_labels
 
     assert consumer_labels()["command_judge"] == (
-        "судья command_judge · команды в edit, действия в auto"
+        "судья command_judge · команды в edit, действия в режиме auto"
     )
 
 

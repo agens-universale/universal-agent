@@ -28,7 +28,7 @@ gc-cli считает токены, потраченные за прогон а�
 | `finish_gate` | LLM-судья качества (валидация `turn_finish`) |
 | `routing_judge` | судья сложности для выбора начальной пары AUTO; при двух моделях не вызывается |
 | `summary` | суммаризация / компакция контекста |
-| `command_moderation` | judge опасных команд (`exec_command`/`exec_python`) |
+| `command_moderation` | judge опасных команд (`exec_command`/`exec_python`) в режиме разрешений `edit` и судья действий в режиме `auto` |
 | `project_memory` | компакция project-памяти |
 | `intent_scope` | post-hook intent-scope |
 | `vision` | «глаза»: описание изображения моделью для зрения (`assign.vision`) |

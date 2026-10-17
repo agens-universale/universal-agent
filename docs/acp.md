@@ -138,7 +138,7 @@ always). Пока ответа нет, тул ждёт. Отмена сесси�
 ## Режимы разрешений и одобрение плана
 
 Режимы `edit`, `manual`, `plan` и `auto` отдаются **двумя способами**: как опция
-сессии `configOptions` (`id: "mode"`, `category: "mode"`, рядом с опцией модели) и как
+сессии `configOptions` (`id: "mode"`, `category: "mode"`, следом за опцией модели) и как
 `modes` (список режимов и текущий) для клиентов без `configOptions`. Сменить режим можно
 обоими методами — `session/set_config_option` с `configId: "mode"` и `session/set_mode`:
 оба ведут в тот же путь ядра, что `Shift+Tab` в TUI и флаг `--permission-mode` в CLI. После
@@ -188,8 +188,8 @@ always). Пока ответа нет, тул ждёт. Отмена сесси�
 проигрывается. Служебные technical / сводки компакции в ленту как
 `user_message_chunk` не попадают. `notice` / `compaction_*` пока не шлём.
 
-`session/new`, `session/load` и `session/resume` отдают опции `configOptions`: режим
-(`id: "mode"`, см. выше) и модель (`id: "model"`): алиасы уровней `default`, `light`, `max`
+`session/new`, `session/load` и `session/resume` отдают опции `configOptions`: модель
+(`id: "model"`) и следом режим (`id: "mode"`, см. выше). Модель — алиасы уровней `default`, `light`, `max`
 без повторов, провайдерский id — только в `description`, если он не совпадает
 с алиасом. `session/set_config_option` пишет уровень этой сессии в память и действует
 со следующего запроса к модели — в том числе внутри уже идущего хода, как во
