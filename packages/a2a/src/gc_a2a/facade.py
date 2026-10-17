@@ -11,7 +11,7 @@ from typing import Any
 from gc_core.settings import LoadedSettings
 
 from gc_a2a.agent_config import prepare_agent_settings
-from gc_a2a.ask_human import bind_ask_human, bind_confirm_deny
+from gc_a2a.ask_human import bind_ask_human
 from gc_a2a.card import agent_card, interface_url
 from gc_a2a.dialog import (
     DialogError,
@@ -195,7 +195,6 @@ class A2aFacade:
                     agent, opened.context_id, task_id, incoming.text
                 )
                 bind_ask_human(agent, turn.ask)
-                bind_confirm_deny(agent)
             except RpcError:
                 raise
             except Exception as exc:

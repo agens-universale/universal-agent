@@ -9,7 +9,7 @@
 
 | вид | что | имена |
 |---|---|---|
-| `prompt` | промпты | `system`, `special_instructions`, `subagent`, `custom_subagent`, `summary`, `memory_patch`, `limit_summary`, `intent_tool`, `intent_final`, `finish_gate`, `project_memory_compaction`, `command_judge_system`, `command_judge_user`, `action_judge_system`, `action_judge_user` |
+| `prompt` | промпты | `system`, `special_instructions`, `subagent`, `custom_subagent`, `summary`, `memory_patch`, `limit_summary`, `intent_tool`, `intent_final`, `finish_gate`, `project_memory_compaction`, `command_judge_system`, `command_judge_user`, `action_judge_system`, `action_judge_user`, `action_judge_external` (правило судьи о запросе внешней системы: читается, только когда канал объявил слова пользователя внешними) |
 | `instructions` | AGENTS.md | `L0` — роль запуска (`paths.agent_md_path`), `L1` — глобальные, `L2` — `.gc/AGENTS.md`, `L3` — `AGENTS.md` проекта |
 | `subagents` | определения кастомных субагентов | `""` — каталог, `<файл>.md` — определение |
 | `skills` | скиллы | `<слой>/<скилл>/…`, слои `system`, `user`, `project` |

@@ -121,7 +121,7 @@ def evaluate_guard_probe(
     elif request.kind == "download_destination":
         result = _download_destination(request, settings)
     elif request.kind in ("command_prompts", "action_prompts"):
-        result = replace(result, data=_judge_prompts(request.kind, settings))
+        result = replace(result, data=_judge_prompts(request, settings))
     elif request.kind == "command_host":
         result = _command_host(request)
     else:
@@ -133,22 +133,28 @@ def evaluate_guard_probe(
     return replace(result, facts_digest=digest)
 
 
-def _judge_prompts(kind: str, settings: Any) -> dict[str, str]:
-    """Тексты инструкций судьи команд или судьи действий из стора агента."""
+def _judge_prompts(
+    request: GuardProbeRequest, settings: Any
+) -> dict[str, str]:
+    """Тексты инструкций судьи команд или судьи действий из стора агента.
+
+    Правило о внешнем запросе судья действий просит значением пробы
+    ``external`` — только когда такие записи есть в его запросе."""
     from gc_core.agent_store import agent_store_of
-    from gc_core.security.action_judge import load_action_judge_prompt
+    from gc_core.security.action_judge import (
+        EXTERNAL_PROMPT,
+        action_judge_prompt_kinds,
+        load_action_judge_prompt,
+    )
     from gc_core.security.command_moderation import load_command_judge_prompt
 
-    load = (
-        load_command_judge_prompt
-        if kind == "command_prompts"
-        else load_action_judge_prompt
-    )
     store = agent_store_of(settings)
-    return {
-        "system": load("system", store=store),
-        "user": load("user", store=store),
-    }
+    if request.kind == "command_prompts":
+        load, kinds = load_command_judge_prompt, ("system", "user")
+    else:
+        load = load_action_judge_prompt
+        kinds = action_judge_prompt_kinds(request.value == EXTERNAL_PROMPT)
+    return {kind: load(kind, store=store) for kind in kinds}
 
 
 def _write_guard_extra_paths(settings: Any) -> list[str]:

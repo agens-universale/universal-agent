@@ -8,6 +8,8 @@ from gc_core.security.action_judge import (
     ACTION_RECORD_CHARS,
     HISTORY_RECORDS,
     JUDGED_ACTION_CHARS,
+    EXTERNAL_PROMPT,
+    KIND_EXTERNAL,
     MESSAGE_CHARS,
     MESSAGE_SHARE_MIN_CHARS,
     MESSAGES_TOTAL_CHARS,
@@ -17,6 +19,7 @@ from gc_core.security.action_judge import (
     action_blocked,
     build_action_judge_messages,
     build_action_judge_payload,
+    load_action_judge_prompt,
     parse_action_verdict,
 )
 
@@ -384,3 +387,83 @@ def test_several_json_blocks_are_not_a_verdict():
     проверки), а не разрешение."""
     with pytest.raises(ActionJudgeMalformed):
         parse_action_verdict(TWO_FENCED_VERDICTS)
+
+
+def test_external_words_are_kept_like_the_users_own():
+    """Запрос внешней системы — те же слова пользователя для бюджета:
+    длинная история действий его не вытесняет (спека §3.7)."""
+    entries = tuple(
+        ConversationEntry.action(
+            "exec_command", {"command": f"step {i}"}, "ok"
+        )
+        for i in range(HISTORY_RECORDS + 5)
+    )
+    task = ConversationEntry(KIND_EXTERNAL, text="почини сборку, не пушь")
+    payload = build_action_judge_payload(
+        _request(conversation=(task, *entries))
+    )
+    conversation = payload["conversation"]
+    assert conversation[0] == {"external": "почини сборку, не пушь"}
+    assert {"omitted_earlier_entries": 5} in conversation
+
+
+def test_external_entries_bring_their_rule_into_the_instruction():
+    payload = build_action_judge_payload(
+        _request(
+            conversation=(
+                ConversationEntry(KIND_EXTERNAL, text="почини тесты"),
+            )
+        )
+    )
+    system, user = build_action_judge_messages(payload)
+    assert system["content"] == (
+        load_action_judge_prompt("system")
+        + "\n\n"
+        + load_action_judge_prompt("external")
+    )
+    assert '"external": "почини тесты"' in user["content"]
+
+
+def test_external_rule_keeps_boundaries_and_never_authorizes():
+    rule = load_action_judge_prompt("external")
+    assert "`external`" in rule
+    assert "crosses_boundary" in rule
+    assert "never authorization" in rule
+
+
+def test_instruction_parts_given_by_the_worker_follow_the_same_rule():
+    """Под durable инструкции приносит проба воркера: правило дописывается
+    тем же способом и только при внешних записях."""
+    prompts = {
+        "system": "S",
+        "user": "U {judge_payload_json}",
+        "external": "E",
+    }
+    external = build_action_judge_payload(
+        _request(conversation=(ConversationEntry(KIND_EXTERNAL, text="x"),))
+    )
+    assert (
+        build_action_judge_messages(external, prompts=prompts)[0]["content"]
+        == "S\n\nE"
+    )
+    plain = build_action_judge_payload(_request())
+    assert (
+        build_action_judge_messages(plain, prompts=prompts)[0]["content"]
+        == "S"
+    )
+
+
+def test_worker_probe_reads_the_external_rule_only_when_asked():
+    from gc_core.execution.guard_contracts import GuardProbeRequest
+    from gc_core.security.guard_probe import evaluate_guard_probe
+    from gc_testkit.settings import fake_ctx
+
+    def parts(value):
+        facts = evaluate_guard_probe(
+            GuardProbeRequest("action_prompts", "exec_command", value, "/p"),
+            settings=fake_ctx(),
+        )
+        return sorted(facts.data)
+
+    assert parts("") == ["system", "user"]
+    assert parts(EXTERNAL_PROMPT) == ["external", "system", "user"]

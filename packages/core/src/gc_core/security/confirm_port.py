@@ -11,22 +11,29 @@ from gc_core.execution.human import HumanRequest, HumanRequestInterrupted
 from gc_core.execution.ports import port
 from gc_core.message_policy.permission_denials import (
     declined_error,
+    timed_out_error,
     unattended_error,
 )
+from gc_core.security.call_scope import current_call
 from gc_core.security.permission_store import remembers_similar
-from gc_core.settings import settings_of
+from gc_core.settings import runtime_of, settings_of
 
 CONFIRM_ALLOW_REMEMBER = (
     "allow_remember"  # Y — exec + session True + few-shot allowed
 )
-CONFIRM_ALLOW_ONCE = "allow_once"  # O — exec + run only
+CONFIRM_ALLOW_ONCE = "allow_once"  # O — разрешить на этот вызов тула
 CONFIRM_DENY_REMEMBER = (
     "deny_remember"  # N — block + session False + few-shot denied
 )
-CONFIRM_DENY_ONCE = "deny_once"  # T — block + run only
-# Таймаут диалога: отказ без записи. Человек reject_once не выбирал,
-# тот же ключ в этом ходе спрашивается снова.
+CONFIRM_DENY_ONCE = "deny_once"  # T — запретить на этот вызов тула
+# Таймаут диалога: отказ без записи. Человек «запретить разово» не выбирал —
+# тот же ключ спрашивается снова при следующей проверке, даже в этом вызове.
 CONFIRM_TIMED_OUT = "timed_out"
+#: Исход вопроса, не давшего «да», — для текста отказа (`unconfirmed_error`):
+#: человек ответил «нет».
+CONFIRM_OUTCOME_DECLINED = "declined"
+#: Ответа нет: таймаут, вопрос отменён или клиент не умеет отвечать.
+CONFIRM_OUTCOME_TIMED_OUT = "timed_out"
 _VALID_CHOICES = {
     CONFIRM_ALLOW_REMEMBER,
     CONFIRM_ALLOW_ONCE,
@@ -144,6 +151,15 @@ def _ask_human_enabled(ctx: Any) -> bool:
 
 
 def confirm_available(ctx: Any) -> bool:
+    """Можно ли спросить человека.
+
+    Объявление канала (`RuntimeEnv.human_channel`) сильнее догадок: ACP —
+    человек в IDE, сервер и A2A — никого. Не объявлено — автопроверка:
+    порт рантайма, TUI, терминал при включённом `turn_ask_human` (`gc-cli`).
+    """
+    declared = runtime_of(ctx).human_channel
+    if declared is not None:
+        return declared
     if callable(port(ctx, "human_request")):
         return True
     if getattr(ctx, "is_tui", False):
@@ -157,12 +173,17 @@ def confirm_available(ctx: Any) -> bool:
 def unconfirmed_error(ctx: Any, **fields: Any) -> dict:
     """Тело отказа после вопроса, на который не ответили «да».
 
-    Причин две, и человеку с моделью нужно знать, какая: человек отказал —
-    или спросить было некого (запуск без человека), и вопрос стал отказом.
+    Причин три, и человеку с моделью нужно знать, какая: спросить было
+    некого (канал без человека — вопрос стал отказом), ответа не пришло
+    вовремя (таймаут, отмена, клиент не умеет отвечать) — или человек
+    отказал. Исход вопроса лежит в привязке вызова (`CallScope`).
     """
-    if confirm_available(ctx):
-        return declined_error(**fields)
-    return unattended_error(**fields)
+    if not confirm_available(ctx):
+        return unattended_error(**fields)
+    scope = current_call()
+    if getattr(scope, "confirm_outcome", None) == CONFIRM_OUTCOME_TIMED_OUT:
+        return timed_out_error(**fields)
+    return declined_error(**fields)
 
 
 def _via_name(ctx: Any) -> str | None:
@@ -252,6 +273,37 @@ def _ask_choice(
     return result
 
 
+def _note_outcome(outcome: str | None) -> None:
+    """Исход вопроса — в привязку вызова: по нему `unconfirmed_error`
+    выбирает текст отказа. Вне диспетчера привязки нет, и текст не нужен."""
+    scope = current_call()
+    if scope is not None:
+        scope.confirm_outcome = outcome
+
+
+def _outcome_of(choice: Any) -> str | None:
+    """Исход ответа на вопрос; «да» — None."""
+    if choice == CONFIRM_TIMED_OUT:
+        return CONFIRM_OUTCOME_TIMED_OUT
+    if coerce_confirm_choice(choice) in (
+        CONFIRM_ALLOW_REMEMBER,
+        CONFIRM_ALLOW_ONCE,
+    ):
+        return None
+    return CONFIRM_OUTCOME_DECLINED
+
+
+def _remembered(store: Any, decision_key: str | None) -> bool | None:
+    """Ответ, уже данный на этот ключ (в сессии или в этом вызове тула);
+    исход у него тот же, что у самого ответа."""
+    if store is None or decision_key is None:
+        return None
+    cached = store.decision_for(decision_key)
+    if cached is not None:
+        _note_outcome(None if cached else CONFIRM_OUTCOME_DECLINED)
+    return cached
+
+
 def request_confirm(
     *,
     title: str,
@@ -264,11 +316,11 @@ def request_confirm(
     from gc_core.tools.connect_mcp.abandonable import current_call_abandoned
 
     store = getattr(ctx, "permission_store", None)
-    if store is not None and decision_key is not None:
-        cached = store.decision_for(decision_key)
-        if cached is not None:
-            return cached
+    cached = _remembered(store, decision_key)
+    if cached is not None:
+        return cached
     if current_call_abandoned():
+        _note_outcome(CONFIRM_OUTCOME_TIMED_OUT)
         return False
     choice = _ask_choice(
         ctx,
@@ -281,7 +333,9 @@ def request_confirm(
         # Вопрос бросили (Ctrl+C), пока человек думал: ответ, если он и пришёл,
         # набран уже для ДРУГОГО вопроса. Записать его — значит выдать
         # разрешение на путь, в котором человек только что отказал.
+        _note_outcome(CONFIRM_OUTCOME_TIMED_OUT)
         return False
+    _note_outcome(_outcome_of(choice))
     return apply_confirm_choice(choice, store=store, decision_key=decision_key)
 
 
@@ -290,7 +344,8 @@ def apply_confirm_choice(
 ) -> bool:
     """Apply the native four-choice policy after a completed human reply."""
     if choice == CONFIRM_TIMED_OUT:
-        # Голый таймаут не выбор человека: run-правило глушит повтор вопроса.
+        # Голый таймаут не выбор человека: ничего не пишем — разовый ответ
+        # заглушил бы повтор вопроса до конца вызова тула.
         return False
     choice = coerce_confirm_choice(choice)
     allow = choice in (CONFIRM_ALLOW_REMEMBER, CONFIRM_ALLOW_ONCE)
@@ -319,14 +374,15 @@ async def aconfirm_via_human_port(request: HumanRequest, *, ctx: Any) -> bool:
     if not callable(port):
         raise ValueError("ctx.human_request port is required")
     store = getattr(ctx, "permission_store", None)
-    if store is not None and request.decision_key is not None:
-        cached = store.decision_for(request.decision_key)
-        if cached is not None:
-            return cached
+    cached = _remembered(store, request.decision_key)
+    if cached is not None:
+        return cached
     try:
         choice = await port(request)
     except HumanRequestInterrupted:
+        _note_outcome(CONFIRM_OUTCOME_TIMED_OUT)
         return False
+    _note_outcome(_outcome_of(choice))
     return apply_confirm_choice(
         choice,
         store=store,

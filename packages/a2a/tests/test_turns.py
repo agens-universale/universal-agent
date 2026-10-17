@@ -2,6 +2,7 @@
 
 import asyncio
 
+import pytest
 from harness import (
     AnswerAgent,
     AskAgent,
@@ -136,32 +137,36 @@ async def test_question_then_reply_continues_the_same_task(tmp_path):
     assert len(created[0].calls) == 1
 
 
+@pytest.mark.parametrize("tty", [True, False])
 async def test_confirm_does_not_read_the_server_terminal(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, tty
 ):
-    """tty на stdin сервера не становится вопросом write/command guard."""
+    """С терминалом и без вопрос подтверждения у A2A одинаково «спросить
+    некого»: канал объявил, что человека нет (спека §7.1)."""
 
-    class Tty:
+    class Stdin:
         def isatty(self) -> bool:
-            return True
+            return tty
 
     def terminal(*_args, **_kwargs):
         raise AssertionError("stdin")
 
-    monkeypatch.setattr("sys.stdin", Tty())
+    monkeypatch.setattr("sys.stdin", Stdin())
     monkeypatch.setattr(
         "gc_core.security.path_policy.prompt_user_confirmation_choice",
         terminal,
     )
-    async with session(tmp_path, agents=[ConfirmAgent()]) as (
+    agent = ConfirmAgent()
+    async with session(tmp_path, agents=[agent]) as (
         client,
         _f,
-        created,
+        _created,
     ):
         response = await rpc(client, "SendMessage", message())
     task = response.json()["result"]["task"]
     assert task["status"]["state"] == "TASK_STATE_COMPLETED"
-    assert created[0].allowed is False
+    assert agent.allowed is False
+    assert agent.error["type"] == "confirmation_unavailable"
     assert task["artifacts"][0]["parts"][0]["text"] == "нет"
 
 

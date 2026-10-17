@@ -108,6 +108,18 @@ UNATTENDED_REASON = (
     "Needs the user's confirmation, and there is no one to ask in this run."
 )
 
+TIMED_OUT_TYPE = "confirmation_timed_out"
+#: На вопрос не ответили: истекло время, вопрос отменён или клиент не умеет
+#: отвечать. Это не решение человека, но и не согласие — инструкция модели
+#: та же, что после отказа.
+TIMED_OUT_REASON = "The user did not answer the confirmation in time."
+TIMED_OUT_GUIDANCE = (
+    "The user did not answer the confirmation for this action. Do NOT retry "
+    "the same call on your own, and do NOT reach the same result another way "
+    "— continue without it, or stop and report that it was not confirmed. "
+    + RETRY_ON_REQUEST
+)
+
 
 def declined_error(**fields: Any) -> dict:
     """Тело отказа: человек ответил «нет» на вопрос подтверждения."""
@@ -119,6 +131,13 @@ def declined_error(**fields: Any) -> dict:
 def unattended_error(**fields: Any) -> dict:
     """Тело отказа: подтверждение нужно, но человека в запуске нет."""
     return mode_denied_error(UNATTENDED_TYPE, UNATTENDED_REASON, **fields)
+
+
+def timed_out_error(**fields: Any) -> dict:
+    """Тело отказа: на вопрос подтверждения не ответили вовремя."""
+    return mode_denied_error(
+        TIMED_OUT_TYPE, TIMED_OUT_REASON, guidance=TIMED_OUT_GUIDANCE, **fields
+    )
 
 
 def session_denied_error(**fields: Any) -> dict:

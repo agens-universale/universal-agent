@@ -4,6 +4,7 @@ import json
 from types import SimpleNamespace
 
 from gc_core.intent_log.record import IntentRecord
+from gc_core.security.action_judge import KIND_EXTERNAL
 from gc_core.security.action_judge import ConversationEntry as E
 from gc_core.security.action_judge_input import build_judge_request
 
@@ -463,3 +464,79 @@ def test_a_pasted_error_does_not_hide_the_users_words_from_the_judge():
         [_user(text), _call("exec_command", {"command": "git push"}, "judged")]
     )
     assert list(_request(state).conversation) == [E.user(text)]
+
+
+def test_external_channel_turns_every_user_word_into_an_external_request():
+    """Сервер и A2A объявили слова внешними: сообщения, ответ на вопрос
+    агента и слова журнала после сжатия — «запрос внешней системы»; слова
+    агента и действия — как были (спека §3.7)."""
+    state = _state(
+        [
+            _user("почини тесты, не пушь"),
+            _call("turn_ask_human", {"question": "Какие тесты?"}, "q1"),
+            _out("q1", {"ok": True, "response": "только unit"}),
+            _call("exec_command", {"command": "pytest -q"}, "c1"),
+            _out("c1", {"ok": True}),
+            _call("exec_command", {"command": "git push"}, "judged"),
+        ],
+        log=["в CI ничего не трогай"],
+    )
+    request = _request(state, external_user_words=True)
+    assert list(request.conversation) == [
+        E(KIND_EXTERNAL, text="в CI ничего не трогай"),
+        E(KIND_EXTERNAL, text="почини тесты, не пушь"),
+        E.agent("Какие тесты?"),
+        E(KIND_EXTERNAL, text="только unit"),
+        E.action("exec_command", {"command": "pytest -q"}, "ok"),
+    ]
+    # CLI и TUI признак не ставят: слова пользователя — свои, как раньше.
+    assert [e.kind for e in _request(state).conversation] == [
+        "user",
+        "user",
+        "agent",
+        "user",
+        "action",
+    ]
+
+
+def test_external_channel_marks_words_recovered_from_the_journal():
+    """После сжатия слова берутся из журнала, где источник не хранится:
+    признак прогона делает внешними и их."""
+    state = _state(
+        [
+            {"role": "system", "content": "s"},
+            {
+                "role": "user",
+                "content": "<summary>сводка</summary>",
+                "display_content": "",
+            },
+            _call("exec_command", {"command": "git push"}, "judged"),
+        ],
+        log=["почини тесты", "не пушь в main"],
+    )
+    request = _request(state, external_user_words=True)
+    assert list(request.conversation) == [
+        E(KIND_EXTERNAL, text="почини тесты"),
+        E(KIND_EXTERNAL, text="не пушь в main"),
+    ]
+
+
+def test_external_channel_marks_the_root_words_given_to_a_subagent():
+    """Слова корня у судьи субагента — тоже внешние; задание родителя
+    остаётся словами агента."""
+    state = _state(
+        [
+            _user("Собери отчёт."),  # задание родителя
+            _call("exec_command", {"command": "git push"}, "judged"),
+        ],
+        current=["Собери отчёт."],
+        parent="root-state",
+    )
+    ctx = SimpleNamespace(
+        root_user_messages=lambda: ["отчёт за квартал, без пуша"]
+    )
+    request = _request(state, ctx=ctx, external_user_words=True)
+    assert request.delegated_task == "Собери отчёт."
+    assert list(request.conversation) == [
+        E(KIND_EXTERNAL, text="отчёт за квартал, без пуша")
+    ]

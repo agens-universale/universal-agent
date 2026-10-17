@@ -12,9 +12,12 @@ from gc_core.execution.progress import (
     child_progress_enabled,
 )
 from gc_testkit.helpers.tool_ctx import CallableTool
+from gc_testkit.settings import make_settings
 
 
 def _child_ctx(sink, *, tool_name="subagent_worker"):
+    # Настройки нужны: `confirm_available` первым читает объявление канала
+    # из рантайма контекста.
     return SimpleNamespace(
         run_id="child_1",
         parent_call_id="parent_fc",
@@ -22,6 +25,7 @@ def _child_ctx(sink, *, tool_name="subagent_worker"):
         subagent_tool_name=tool_name,
         is_tui=True,
         logger=None,
+        settings=make_settings().settings,
     )
 
 

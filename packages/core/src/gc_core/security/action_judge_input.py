@@ -8,6 +8,10 @@
 Порядок задаёт `state.messages`. Слова пользователя, которых там уже нет (ушли
 в сводку при сжатии истории), добавляются из журнала намерений в начало:
 запросы и границы человека сжатие переживают, действия агента — нет.
+
+В канале, объявившем слова пользователя внешними (сервер, A2A), все они идут
+видом `external`: описание задачи и запреты, но не разрешение. Признак — на
+прогоне, а не на сообщении: журнал намерений источник слов не хранит.
 """
 
 from __future__ import annotations
@@ -15,6 +19,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import replace
 from typing import Any
 
 from gc_core.constants.tool_names import ASK_HUMAN_TOOL_NAME
@@ -25,6 +30,8 @@ from gc_core.message_policy.user_message_policy import (
 )
 from gc_core.plan_store import plan_is_accepted
 from gc_core.security.action_judge import (
+    KIND_EXTERNAL,
+    KIND_USER,
     OUTCOME_UNKNOWN,
     ConversationEntry,
     JudgeRequest,
@@ -247,6 +254,14 @@ def _take_delegated_task(
     return seed
 
 
+def _as_external(entry: ConversationEntry) -> ConversationEntry:
+    """Слова пользователя внешнего канала — запрос внешней системы; слова
+    агента и его действия — как были."""
+    if entry.kind != KIND_USER:
+        return entry
+    return replace(entry, kind=KIND_EXTERNAL)
+
+
 def build_judge_request(
     state: Any,
     ctx: Any,
@@ -258,7 +273,15 @@ def build_judge_request(
     tools_data: Mapping[str, Any],
     flags: Iterable[str] = (),
     runtime: Mapping[str, Any] | None = None,
+    external_user_words: bool = False,
 ) -> JudgeRequest:
+    """Запрос судье по проверяемому вызову.
+
+    ``external_user_words`` — канал объявил слова пользователя внешними
+    (``RuntimeEnv.external_user_words``): тогда все они — сообщения,
+    ответы на вопросы агента, слова журнала и слова корня у субагента —
+    идут судье видом ``external``.
+    """
     messages = _cut_at_call(
         list(getattr(state, "messages", None) or ()), call_id
     )
@@ -275,6 +298,8 @@ def build_judge_request(
     spoken = {entry.text for entry in conversation if entry.kind == "user"}
     earlier.extend(text for text in journal if text not in spoken)
     conversation[:0] = [ConversationEntry.user(text) for text in earlier]
+    if external_user_words:
+        conversation = [_as_external(entry) for entry in conversation]
 
     plan = getattr(getattr(state, "shared", None), "plan", None)
     return JudgeRequest(

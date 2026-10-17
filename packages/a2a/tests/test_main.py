@@ -161,3 +161,11 @@ def test_non_loopback_without_token_exits_before_bind(monkeypatch, capsys):
     code = main([])
     assert code == 1
     assert "auth_token" in capsys.readouterr().err
+
+
+def test_a2a_declares_no_human_and_external_words():
+    """Пир — не человек: подтверждение спросить некого, а его слова для
+    судьи действий — запрос внешней системы (спека §7.1, §3.7)."""
+    loaded = apply_a2a_runtime_defaults(make_settings())
+    assert loaded.runtime.human_channel is False
+    assert loaded.runtime.external_user_words is True

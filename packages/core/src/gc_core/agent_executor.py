@@ -329,6 +329,11 @@ class AgentExecutor:
         with self._lock:
             out = self._pending_messages[:]
             self._pending_messages.clear()
+            state = self._state
+        # Сообщение из очереди — такое же новое слово человека, как
+        # стартовое: снимает паузу судьи и посреди прогона.
+        if state is not None:
+            self._lift_judge_pause(state, out)
         # Вне замка: копия картинок в тред — файловая операция, а замок ждут
         # поток TUI и обработчик сервера.
         return self._commit_queued(out)
@@ -721,12 +726,13 @@ class AgentExecutor:
             if self._plan_rework_thread == thread_id:
                 self._plan_rework_thread = None
 
-    def _lift_judge_pause(self, state, new_user_messages) -> None:
-        """Новое сообщение человека — решение о паузе судьи там, где спросить
-        его вопросом нельзя (`lift_pause_on_user_message`). Служебные
-        сообщения человеком не считаются."""
+    @staticmethod
+    def _lift_judge_pause(state, new_user_messages) -> None:
+        """Новое сообщение человека снимает паузу судьи
+        (`lift_pause_on_user_message`). Служебные сообщения человеком не
+        считаются."""
         if any(extract_real_user_message_text(m) for m in new_user_messages):
-            lift_pause_on_user_message(state.shared, self._ctx)
+            lift_pause_on_user_message(state.shared)
 
     def _plan_notices(self, state) -> list[str]:
         """Служебные сообщения в начале прогона, по одному разу каждое: «план

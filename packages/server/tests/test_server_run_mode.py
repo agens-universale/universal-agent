@@ -33,3 +33,17 @@ def test_unknown_logging_key_in_server_config_is_dropped_not_fatal(
         )
     assert loaded.settings.logging.save_logs is False
     assert "logging_format" in caplog.text
+
+
+def test_agent_settings_for_server_declare_the_webhook_channel(monkeypatch):
+    """За вебхуком нет человека: подтверждение спросить некого (и консоль
+    сервера не читается), а слова вебхука для судьи действий — запрос
+    внешней системы (спека §7.1, §3.7)."""
+    monkeypatch.setattr(
+        server_config, "load_settings", lambda *a, **kw: make_settings()
+    )
+
+    loaded = server_config.build_agent_settings_for_server({})
+
+    assert loaded.runtime.human_channel is False
+    assert loaded.runtime.external_user_words is True

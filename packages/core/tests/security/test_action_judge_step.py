@@ -19,6 +19,7 @@ from gc_core.security.call_scope import call_scope
 from gc_core.security.dual_wrapper import AwaitOnCaller, _drive_async
 from gc_core.message_policy.permission_denials import ACTION_BLOCKED_TYPE
 from gc_core.security.permission_store import PermissionStore
+from gc_core.settings import RuntimeEnv
 
 pytestmark = pytest.mark.asyncio
 
@@ -629,3 +630,51 @@ async def test_ten_failed_checks_cost_at_most_twenty_requests(env):
         await _call(e)
     assert e.state.judge_stop_reason is not None
     assert len(e.judge.requests) == 2 * FAILURES_BEFORE_STOP == 20
+
+
+async def test_external_channel_reaches_the_judge_as_external_requests(env):
+    """Канал объявил слова пользователя внешними — шаг судьи передаёт
+    признак прогона, и запрос несёт «запрос внешней системы»."""
+    e = env(ALLOW)
+    e.ctx.runtime = RuntimeEnv(external_user_words=True)
+    assert await _call(e) == (True, None)
+    _system, user = e.judge.requests[0]
+    assert '"external": "почини тесты"' in user["content"]
+    assert '"user": "почини тесты"' not in user["content"]
+
+
+async def test_cli_and_tui_judge_gets_the_base_instruction(env):
+    from gc_core.security.action_judge import load_action_judge_prompt
+
+    e = env(ALLOW)
+    assert await _call(e) == (True, None)
+    system, _user = e.judge.requests[0]
+    assert system["content"] == load_action_judge_prompt("system")
+
+
+async def test_external_words_bring_their_rule_through_the_worker_probe(env):
+    """Под durable правило приносит та же проба, что инструкцию; просит его
+    шаг, только когда в запросе есть внешние записи."""
+    from gc_core.security.action_judge import (
+        EXTERNAL_PROMPT,
+        load_action_judge_prompt,
+    )
+    from gc_core.security.guard_probe import evaluate_guard_probe
+
+    e = env(ALLOW)
+    e.ctx.runtime = RuntimeEnv(external_user_words=True)
+    probed = []
+
+    async def guard_probe(request):
+        probed.append((request.kind, request.value))
+        return evaluate_guard_probe(request, settings=e.ctx)
+
+    e.ctx.guard_probe = guard_probe
+    assert await _call(e) == (True, None)
+    assert probed == [("action_prompts", EXTERNAL_PROMPT)]
+    system, _user = e.judge.requests[0]
+    assert system["content"] == (
+        load_action_judge_prompt("system")
+        + "\n\n"
+        + load_action_judge_prompt("external")
+    )

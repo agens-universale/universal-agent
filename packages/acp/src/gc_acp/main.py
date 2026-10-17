@@ -110,6 +110,11 @@ def apply_acp_runtime_defaults(loaded: LoadedSettings) -> LoadedSettings:
     finish-gate soft, todo-reminder off, свой special_instructions hint.
     turn_ask_human и turn_intermediate_reply в схему не попадают: их текст
     клиенту не уходит (вопрос — пустой порт, промежуточный ответ — stderr).
+
+    Канал объявляет человека (``human_channel``): вопросы подтверждения
+    отвечает человек в IDE (``session/request_permission``), и его отказ —
+    «отклонено», а не «спросить некого». Без объявления автопроверка сочла
+    бы ACP запуском без человека: ``turn_ask_human`` снят, терминала нет.
     """
     from gc_acp.prompt_assets import acp_special_instructions_path
 
@@ -130,6 +135,7 @@ def apply_acp_runtime_defaults(loaded: LoadedSettings) -> LoadedSettings:
     ).with_runtime(
         text_answer_mode=acp.text_answer_mode,
         finish_gate_smart=gate == "smart",
+        human_channel=True,
     )
 
 

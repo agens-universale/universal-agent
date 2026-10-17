@@ -173,7 +173,11 @@ def test_where_no_one_can_be_asked_a_new_user_message_lifts_the_judge_pause():
     assert state.shared.judge_denials_in_a_row == 0
 
 
-def test_where_the_human_can_be_asked_only_a_yes_lifts_the_pause():
+def test_with_a_human_a_new_user_message_lifts_the_pause_too():
+    """С человеком новое сообщение тоже снимает паузу (спека §7.1): в
+    каналах, где «да» не приходит (клиент не умеет отвечать), иначе пауза
+    вечная. Упрётся агент снова — пауза встанет заново."""
     ex, state = _paused_executor(is_tui=True)
     ex._lift_judge_pause(state, [{"role": "user", "content": "продолжай"}])
-    assert state.shared.judge_paused is True
+    assert state.shared.judge_paused is False
+    assert state.shared.judge_denials_in_a_row == 0

@@ -3,6 +3,7 @@ import types
 from gc_core.security import confirm_port as cp
 from gc_core.security.confirm_port import confirm_available, request_confirm
 from gc_core.security.permission_store import PermissionStore
+from gc_core.settings import RuntimeEnv
 from gc_testkit.settings import fake_ctx, make_settings
 
 
@@ -255,3 +256,59 @@ def test_decision_key_reaches_the_tui_presenter():
         decision_key="write:/p/a.py",
     )
     assert seen["decision_key"] == "write:/p/a.py"
+
+
+def test_declared_channel_wins_over_the_autodetection(monkeypatch):
+    """Канал объявил человека — так и есть, что бы ни нашла автопроверка:
+    ACP без терминала и без turn_ask_human — с человеком; сервер и A2A с
+    терминалом, портом или признаком TUI — без."""
+    monkeypatch.setattr(
+        "sys.stdin", types.SimpleNamespace(isatty=lambda: True)
+    )
+    without_human = fake_ctx(
+        runtime=RuntimeEnv(human_channel=False),
+        is_tui=True,
+        human_request=lambda request: None,
+    )
+    assert confirm_available(without_human) is False
+    monkeypatch.setattr(
+        "sys.stdin", types.SimpleNamespace(isatty=lambda: False)
+    )
+    with_human = fake_ctx(
+        {"agent.stop_tools": ["turn_ask_human"]},
+        runtime=RuntimeEnv(human_channel=True),
+    )
+    assert confirm_available(with_human) is True
+
+
+def test_undeclared_channel_keeps_the_autodetection(monkeypatch):
+    """`gc-cli` не объявляет канал: человек есть, только если есть терминал."""
+    monkeypatch.setattr(
+        "sys.stdin", types.SimpleNamespace(isatty=lambda: True)
+    )
+    assert confirm_available(fake_ctx()) is True
+    monkeypatch.setattr(
+        "sys.stdin", types.SimpleNamespace(isatty=lambda: False)
+    )
+    assert confirm_available(fake_ctx()) is False
+
+
+def test_declared_no_human_does_not_read_the_terminal(monkeypatch):
+    """Без человека вопрос сразу отказ: терминал процесса не читается."""
+    monkeypatch.setattr(
+        "sys.stdin", types.SimpleNamespace(isatty=lambda: True)
+    )
+
+    def terminal(**_kwargs):
+        raise AssertionError("stdin")
+
+    monkeypatch.setattr(
+        "gc_core.security.path_policy.prompt_user_confirmation_choice",
+        terminal,
+    )
+    ctx = fake_ctx(
+        runtime=RuntimeEnv(human_channel=False), is_tui=False, tui_confirm=None
+    )
+    assert (
+        request_confirm(title="t", question="q?", fields=[], ctx=ctx) is False
+    )

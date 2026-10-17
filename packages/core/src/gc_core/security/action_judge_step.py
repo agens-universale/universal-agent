@@ -8,9 +8,10 @@
 Предохранитель — как у эталона: 3 отказа подряд или 20 за сессию ставят
 паузу; на паузе спорное действие спрашивается у человека обычным вопросом, а
 спросить некого — отказ без вызова судьи, агент работает дальше. Счёт и пауза
-живут в общем состоянии сессии (у субагентов оно то же) и снимаются только
-«да» человека. Сбои проверки и причина остановки — в состоянии того агента,
-чей это вызов: у субагента они свои, и его остановка не обрывает родителя.
+живут в общем состоянии сессии (у субагентов оно то же) и снимаются «да»
+человека на вопросе паузы или его новым сообщением. Сбои проверки и причина
+остановки — в состоянии того агента, чей это вызов: у субагента они свои, и его
+остановка не обрывает родителя.
 """
 
 from __future__ import annotations
@@ -31,9 +32,11 @@ from gc_core.message_policy.permission_denials import (
 )
 from gc_core.message_policy.user_stop import cancelled_by_user_error
 from gc_core.security.action_judge import (
+    EXTERNAL_PROMPT,
     action_blocked,
     build_action_judge_messages,
     build_action_judge_payload,
+    has_external_words,
     parse_action_verdict,
 )
 from gc_core.security.action_judge_input import build_judge_request
@@ -47,7 +50,7 @@ from gc_core.security.confirm_port import (
 from gc_core.security.dual_wrapper import AwaitOnCaller
 from gc_core.security.guard_probe import GuardProbeRequest, probe_step
 from gc_core.security.path_policy import audit_policy_decision
-from gc_core.settings import settings_of
+from gc_core.settings import runtime_of, settings_of
 from gc_core.summarize.llm import (
     arequest_auxiliary_completion_text,
     auxiliary_llm_judge_max_tokens,
@@ -79,12 +82,13 @@ CHECK_FAILED_GUIDANCE = (
 )
 
 
-def lift_pause_on_user_message(shared: Any, ctx: Any) -> None:
-    """Паузу снимает решение человека. Где его можно спросить — только «да» на
-    вопрос. Где спросить некого (сервер, `gc-cli` без терминала), решение —
-    его новое сообщение: он прочитал «нужно решение человека» и написал
-    дальше. Судья снова проверяет; упрётся агент опять — пауза встанет заново."""
-    if shared.judge_paused and not confirm_available(ctx):
+def lift_pause_on_user_message(shared: Any) -> None:
+    """Паузу снимает решение человека: «да» на вопросе паузы или его новое
+    сообщение. Сообщение снимает её всегда — и где спросить некого (сервер,
+    A2A, `gc-cli` без терминала), и где «да» не придёт (клиент не умеет
+    отвечать): человек прочитал «нужно решение человека» и написал дальше.
+    Судья снова проверяет; упрётся агент опять — пауза встанет заново."""
+    if shared.judge_paused:
         shared.judge_paused = False
         shared.judge_denials_in_a_row = 0
 
@@ -187,6 +191,7 @@ def judged_step(
             runtime=_runtime(
                 context, runtime() if callable(runtime) else runtime
             ),
+            external_user_words=runtime_of(ctx).external_user_words,
         )
     )
     try:
@@ -322,7 +327,8 @@ def _verdict_step(context, state, tool_name, payload):
 
 
 def _judge_messages_step(context, tool_name, payload):
-    """Сообщения судье; под durable инструкции читает хост."""
+    """Сообщения судье; под durable инструкции читает хост. Правило о
+    внешнем запросе проба приносит, только если шаг его попросил."""
     prompts = None
     if _durable(context.ctx):
         facts = yield probe_step(
@@ -330,7 +336,7 @@ def _judge_messages_step(context, tool_name, payload):
             GuardProbeRequest(
                 "action_prompts",
                 tool_name,
-                "",
+                EXTERNAL_PROMPT if has_external_words(payload) else "",
                 str(context.launch_root or ""),
             ),
         )

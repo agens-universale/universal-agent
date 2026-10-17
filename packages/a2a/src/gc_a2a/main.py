@@ -84,6 +84,11 @@ def apply_a2a_runtime_defaults(loaded: LoadedSettings) -> LoadedSettings:
 
     ``turn_ask_human`` остаётся в схеме: его текст — вопрос задачи.
     ``turn_intermediate_reply`` снимается: прогресс пиру не отдаётся.
+
+    Канал объявляет о себе: человека нет (``human_channel=False``) —
+    подтверждение отказывает само, терминал сервера не читается; слова пира
+    внешние (``external_user_words``) — судья действий видит их запросом
+    внешней системы, а не волей пользователя.
     """
     section = loaded.settings.a2a
     gate = section.finish_gate_mode
@@ -99,6 +104,8 @@ def apply_a2a_runtime_defaults(loaded: LoadedSettings) -> LoadedSettings:
     ).with_runtime(
         text_answer_mode=section.text_answer_mode,
         finish_gate_smart=gate == "smart",
+        human_channel=False,
+        external_user_words=True,
     )
 
 

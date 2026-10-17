@@ -42,10 +42,14 @@ HISTORY_RECORDS = 40  # записей истории, кроме сообщен
 JUDGED_ACTION_CHARS = 16_000  # аргументы проверяемого действия
 
 KIND_USER = "user"
+#: Слова пользователя из канала, объявившего их внешними (вебхук сервера,
+#: пир A2A): описание задачи и её запреты, но не разрешение (спека §3.7).
+KIND_EXTERNAL = "external"
 KIND_AGENT = "agent"
 KIND_ACTION = "action"
-#: Виды записей со словами пользователя: у них свой бюджет запроса.
-USER_WORD_KINDS = frozenset({KIND_USER})
+#: Виды записей со словами пользователя: у них свой бюджет запроса, и
+#: история действий их не вытесняет.
+USER_WORD_KINDS = frozenset({KIND_USER, KIND_EXTERNAL})
 
 OUTCOME_UNKNOWN = "unknown"
 
@@ -68,8 +72,9 @@ class ActionJudgeMalformed(ValueError):
 
 @dataclass(frozen=True)
 class ConversationEntry:
-    """Запись переписки для судьи: слова пользователя (доверенные), слова
-    агента или его прежнее действие (недоверенные)."""
+    """Запись переписки для судьи: слова пользователя (доверенные) или
+    запрос внешней системы, слова агента или его прежнее действие
+    (недоверенные)."""
 
     kind: str
     text: str = ""
@@ -282,10 +287,30 @@ def build_action_judge_payload(request: JudgeRequest) -> dict[str, Any]:
     return payload
 
 
+#: Правило о записях внешнего запроса — отдельная часть инструкции судьи.
+EXTERNAL_PROMPT = "external"
+
+
+def action_judge_prompt_kinds(external: bool) -> tuple[str, ...]:
+    """Части инструкции, нужные запросу: правило о внешнем запросе — только
+    когда такие записи в нём есть."""
+    if external:
+        return ("system", "user", EXTERNAL_PROMPT)
+    return ("system", "user")
+
+
+def has_external_words(payload: Mapping[str, Any]) -> bool:
+    """Есть ли в запросе записи внешнего запроса (`KIND_EXTERNAL`)."""
+    return any(
+        isinstance(entry, Mapping) and KIND_EXTERNAL in entry
+        for entry in payload.get("conversation") or ()
+    )
+
+
 def load_action_judge_prompt(
     kind: str, *, store: AgentStore = DEFAULT_AGENT_STORE
 ) -> str:
-    if kind not in ("system", "user"):
+    if kind not in action_judge_prompt_kinds(True):
         raise ValueError("Unknown action judge prompt kind.")
     name = f"action_judge_{kind}"
     path = bundled_root() / "prompts" / "security" / f"{name}.md"
@@ -299,18 +324,25 @@ def build_action_judge_messages(
     prompts: Mapping[str, str] | None = None,
 ) -> list[dict[str, str]]:
     """Сообщения для модели. ``prompts`` — тексты инструкции, уже добытые
-    пробой: под durable-исполнением ядру читать файлы нельзя."""
+    пробой: под durable-исполнением ядру читать файлы нельзя.
+
+    Правило о внешнем запросе дописывается к инструкции, только если такие
+    записи есть: запрос CLI и TUI остаётся побайтно прежним."""
+    external = has_external_words(payload)
     if prompts is None:
         prompts = {
             kind: load_action_judge_prompt(kind, store=store)
-            for kind in ("system", "user")
+            for kind in action_judge_prompt_kinds(external)
         }
+    system = prompts["system"]
+    if external:
+        system = f"{system}\n\n{prompts[EXTERNAL_PROMPT]}"
     user = prompts["user"].replace(
         "{judge_payload_json}",
         json.dumps(payload, ensure_ascii=False, indent=1, default=str),
     )
     return [
-        {"role": "system", "content": prompts["system"]},
+        {"role": "system", "content": system},
         {"role": "user", "content": user},
     ]
 
