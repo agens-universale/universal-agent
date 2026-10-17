@@ -58,16 +58,22 @@ def test_operational_gc_write_denied_even_when_guard_disabled(
     )  # floor blocks even when write_guard disabled
 
 
-def test_skills_write_allowed(tmp_path, monkeypatch):
+def test_skills_write_is_not_silent(tmp_path, monkeypatch):
+    """Скилл — защищённый путь с вопросом: без человека запись не проходит."""
+    import io
+
     from gc_core.config_modules import env_vars
 
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
+    # Без человека: при `pytest -s` вопрос не должен уйти в консоль.
+    monkeypatch.setattr("sys.stdin", io.StringIO(""))
     ctx = _ctx(tmp_path)
     (tmp_path / ".gc" / "skills" / "foo").mkdir(parents=True)
     res = _Tool(ctx).write(
         path=str(tmp_path / ".gc" / "skills" / "foo" / "SKILL.md"), content="x"
     )
-    assert json.loads(res)["ok"] is True
+    assert json.loads(res)["ok"] is False
+    assert json.loads(res)["error"]["type"] == "protected_path_denied"
 
 
 # ---------------------------------------------------------------------------

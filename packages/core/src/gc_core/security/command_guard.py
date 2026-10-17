@@ -138,6 +138,9 @@ def scan_command_for_protected(
             # Запись в `.git` командой видят судьи и режим; пол оставался бы
             # вопросом на каждое `grep --exclude-dir .git`.
             "vcs": "allow",
+            # Так же настройки инструментов: иначе вопрос на каждое
+            # `cat .envrc`. Запись в них командой видят судьи.
+            "tool_config": "allow",
             "media": "ask",
             "operational": "deny",
         }[cls]

@@ -29,6 +29,10 @@ class ProtectedSet:
     # нет, команды — с подтверждением. Пусто — класса нет: так набор собирают
     # вызывающие без конфига (судья команд, diff-TUI).
     media: frozenset[Path] = frozenset()
+    #: Корень проекта набора (`cwd`): настройки инструментов внутри него ищутся
+    #: только в частях пути ниже корня — сам корень может лежать в каталоге из
+    #: списка (рабочая копия в `.claude/worktrees`). None — все части.
+    project: Path | None = None
 
 
 def protected_paths(
@@ -58,6 +62,7 @@ def protected_paths(
     # skills_runtime — копия слоёв скиллов в среде исполнения remote-бэкенда
     # (tools/skills/provision.py): для модели это те же скиллы, что и
     # `.gc/skills`, иначе чтение скрипта скилла ловит protected_path_denied.
+    # Запись в скиллы — вопрос пола (`_ASK_CLASSES`), чтение — свободно.
     skills = {
         project_gc_dir(str(proj)) / "skills",
         project_gc_dir(str(proj)) / "skills_runtime",
@@ -73,6 +78,7 @@ def protected_paths(
         media=frozenset(
             Path(os.path.abspath(os.fspath(root))) for root in media
         ),
+        project=Path(os.path.abspath(proj)),
     )
 
 
@@ -87,6 +93,68 @@ def _is_vcs(p: str) -> bool:
     Маке `.GIT` — тот же каталог; на различающих регистр системах лишняя
     защита одноимённого каталога безвредна."""
     return _VCS_DIR in (part.lower() for part in Path(p).parts)
+
+
+#: Настройки инструментов: их исполняет другая программа мимо агента — хуки
+#: git, профили оболочки, менеджеры пакетов, IDE, другие агенты (их хуки и
+#: MCP-серверы запускаются сами). Состав — список эталона плюс `.codex`
+#: (решение владельца); своих агентов сверх этого не перечисляем — список
+#: неполон по природе. Сравнение — по имени, не только в проекте: каталог —
+#: по подряд идущим компонентам пути, файл — по имени; внутри проекта —
+#: только части ниже его корня, вне — все. Строкой, без диска (стадии
+#: режима исполняются и в коде workflow Temporal).
+TOOL_CONFIG_DIRS: tuple[tuple[str, ...], ...] = (
+    (".config", "git"),
+    (".vscode",),
+    (".idea",),
+    (".husky",),
+    (".cargo",),
+    (".devcontainer",),
+    (".yarn",),
+    (".mvn",),
+    (".claude",),
+    (".codex",),
+)
+TOOL_CONFIG_FILES: frozenset[str] = frozenset(
+    {
+        ".gitconfig", ".gitmodules", ".bashrc", ".bash_profile",
+        ".bash_login", ".bash_aliases", ".bash_logout", ".zshrc",
+        ".zprofile", ".zshenv", ".zlogin", ".zlogout", ".profile",
+        ".envrc", ".npmrc", ".yarnrc", ".yarnrc.yml", ".pnp.cjs",
+        ".pnp.loader.mjs", ".pnpmfile.cjs", "bunfig.toml", ".bunfig.toml",
+        ".bazelrc", ".bazelversion", ".bazeliskrc",
+        ".pre-commit-config.yaml", "lefthook.yml", "lefthook.yaml",
+        ".lefthook.yml", ".lefthook.yaml", "gradle-wrapper.properties",
+        "maven-wrapper.properties", ".devcontainer.json", ".ripgreprc",
+        "pyrightconfig.json", ".mcp.json", ".claude.json",
+    }
+)  # fmt: skip
+
+
+def _is_tool_config(p: str, project: Path | None, ci: bool) -> bool:
+    """Путь — файл настроек инструмента или лежит в их каталоге. В проекте
+    смотрим только части ниже корня, вне проекта — все. Регистр — по
+    правилу файловой системы; имена списка — в нижнем регистре."""
+    parts = Path(p).parts
+    if project is not None and is_within_root(p, project, case_insensitive=ci):
+        parts = parts[len(project.parts) :]
+    if ci:
+        parts = tuple(part.lower() for part in parts)
+    if parts and parts[-1] in TOOL_CONFIG_FILES:
+        return True
+    return any(
+        parts[i : i + len(name)] == name
+        for name in TOOL_CONFIG_DIRS
+        for i in range(len(parts) - len(name) + 1)
+    )
+
+
+def _project_class(p: str, project: Path | None, ci: bool) -> str:
+    """Класс пути вне служебных корней: каталог `.git`, настройки
+    инструментов или обычный путь."""
+    if _is_vcs(p):
+        return "vcs"
+    return "tool_config" if _is_tool_config(p, project, ci) else "none"
 
 
 def _is_media(p: str, roots: frozenset[Path], ci: bool) -> bool:
@@ -137,18 +205,26 @@ def classify_path(path, ps: ProtectedSet) -> str:
     if ps.workspace_exception is not None and is_within_root(
         p, ps.workspace_exception, case_insensitive=ci
     ):
-        return "vcs" if _is_vcs(p) else "none"
+        return _project_class(p, ps.project, ci)
     if any(is_within_root(p, r, case_insensitive=ci) for r in ps.operational):
         return "operational"
-    # После служебных: `.git` под ними остаётся запретом, а не вопросом.
-    return "vcs" if _is_vcs(p) else "none"
+    # После служебных: `.git` и настройки инструментов под ними остаются
+    # запретом, а не вопросом.
+    return _project_class(p, ps.project, ci)
+
+
+#: Классы с вопросом пола: запись в них меняет то, что потом исполнит или
+#: прочтёт как указание кто-то мимо агента. Файлы инструкций и скиллы —
+#: агент в следующих сессиях; `.git` — сам git (конфиг, хуки); настройки
+#: инструментов — оболочка, менеджеры пакетов, IDE, другие агенты.
+_ASK_CLASSES = frozenset({"instructions", "vcs", "skills", "tool_config"})
 
 
 def protected_decision(path, *, cwd=None, extra=None, media=()) -> str:
     cls = classify_path(
         path, protected_paths(cwd=cwd, extra=extra, media=media)
     )
-    if cls in ("instructions", "vcs"):
+    if cls in _ASK_CLASSES:
         return "ask"
     if cls in ("operational", "media"):
         return "deny"
@@ -186,14 +262,11 @@ def _expand_home(raw: str) -> str:
 
 
 def protection_enabled(settings: Any) -> bool:
-    """Включена ли floor-защита системных путей — всегда да.
+    """Включена ли floor-защита системных путей:
+    ``security.protected_paths.enabled`` (по умолчанию да).
 
-    ``security.protected_paths.enabled`` сейчас не действует (см.
-    docs/configuration.md): до гардов этот флаг не доходил никогда — плоский
-    вид настроек секцию не проецировал, — и значение ``false`` защиту не
-    снимает. ``settings`` (то, что принимает ``settings_of``) оставлен ради
-    сигнатуры: включать флаг — отдельное решение, а не побочный эффект
-    перехода на типизированные настройки.
+    ``false`` снимает пол защищённых путей — вопрос и запрет защищённых
+    путей, отказ служебных каталогов, отсечение команд вроде ``rm -rf .gc``.
+    Запреты и вопросы режимов разрешений остаются: это другой слой.
     """
-    del settings
-    return True
+    return bool(settings_of(settings).security.protected_paths.enabled)

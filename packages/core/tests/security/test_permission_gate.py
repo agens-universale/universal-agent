@@ -9,10 +9,13 @@ from gc_core.execution.state import SharedStateData
 from gc_core.security.dual_wrapper import arun_guard_flow
 from gc_core.security.permission_gate import permission_gate_flow
 from gc_core.security.permission_mode import (
+    ACTION_CATEGORIES_KEY,
     CAT_EDIT,
     CAT_MCP,
+    CAT_PERSISTENT_STATE,
     CAT_SKILL,
     CAT_SKILL_EXEC,
+    CAT_STATE,
     CAT_TURN,
 )
 from gc_core.security.permission_store import PermissionStore
@@ -278,3 +281,48 @@ def test_denied_envelope_separates_human_reason_from_model_instruction():
     # инструкция модели — отдельным полем, как у отказов модерации команд
     assert "Do NOT retry" in error["guidance"]
     assert "message" not in error
+
+
+#: Как в реестре (`tools/registry._project_registry`): чтение — состояние,
+#: запись — постоянное состояние.
+_PROJECT_MEMORY = {
+    "category": CAT_STATE,
+    ACTION_CATEGORIES_KEY: {
+        "append": CAT_PERSISTENT_STATE,
+        "write": CAT_PERSISTENT_STATE,
+    },
+}
+
+
+def test_manual_asks_before_writing_project_memory():
+    """Память проекта попадает в промпт следующих сессий: в manual её
+    запись — действие с вопросом, как запись файла."""
+    ctx = _ctx("manual", answers=["deny_once"])
+    out, called = _run(
+        "project_memory", _PROJECT_MEMORY, ctx, {"action": "append"}
+    )
+    assert called is False
+    assert json.loads(out)["error"]["type"] == "declined_by_user"
+    assert ctx.asked[0]["fields"]["Категория"] == CAT_PERSISTENT_STATE
+
+
+def test_session_answer_covers_later_project_memory_writes():
+    ctx = _ctx("manual", answers=["allow_remember"])
+    for action in ("append", "write", "append"):
+        assert _run(
+            "project_memory", _PROJECT_MEMORY, ctx, {"action": action}
+        ) == ("tool result", True), action
+    assert len(ctx.asked) == 1
+
+
+def test_project_memory_reading_and_other_modes_are_not_asked():
+    ctx = _ctx("manual", answers=[])
+    assert _run(
+        "project_memory", _PROJECT_MEMORY, ctx, {"action": "read"}
+    ) == ("tool result", True)
+    for mode in ("edit", "auto"):
+        ctx = _ctx(mode, answers=[])
+        assert _run(
+            "project_memory", _PROJECT_MEMORY, ctx, {"action": "append"}
+        ) == ("tool result", True), mode
+        assert ctx.asked == [], mode

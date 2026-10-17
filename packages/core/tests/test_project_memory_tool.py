@@ -450,11 +450,25 @@ def test_plan_mode_reads_project_memory_but_does_not_change_it(tmp_path):
     assert not (tmp_path / ".gc" / "project_memory.md").exists()
 
 
-def test_project_memory_write_follows_the_mode_table_and_is_audited(tmp_path):
+def test_project_memory_write_follows_the_mode_table_and_is_audited(
+    tmp_path, monkeypatch
+):
     """Правило — строка таблицы режимов (категория действия из реестра), а
-    не ветка в туле; гейт пишет отказ в аудит, как остальные отказы режима."""
-    for mode in ("edit", "manual", "auto"):
+    не ветка в туле; гейт пишет отказ в аудит, как остальные отказы режима.
+    manual спрашивает: без человека запись — отказ, чтение — как было."""
+    import io
+
+    from gc_core.message_policy.permission_denials import UNATTENDED_TYPE
+
+    # Без человека: при `pytest -s` вопрос не должен уйти в консоль.
+    monkeypatch.setattr("sys.stdin", io.StringIO(""))
+
+    for mode in ("edit", "auto"):
         assert _gated_call(tmp_path, mode, "append")["ok"] is True, mode
+    out = _gated_call(tmp_path, "manual", "append")
+    assert out["ok"] is False
+    assert out["error"]["type"] == UNATTENDED_TYPE
+    assert _gated_call(tmp_path, "manual", "read")["ok"] is True
     events = []
     _gated_call(tmp_path, "plan", "write", events)
     assert any('"reason_code": "mode_deny"' in e for e in events)

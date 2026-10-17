@@ -4,7 +4,7 @@ Covers:
 - rm -rf .gc → denied (execute_command)
 - .gc/skills/... → allowed (execute_command)
 - plain command → allowed (execute_command)
-- protection_enabled=False → tripwire skipped, command runs (execute_command)
+- protection_enabled=False → tripwire skipped for a .gc command (execute_command)
 - rm -rf .gc → denied (run_python_code, code containing .gc path reference)
 - ask path → confirmed → allowed; not confirmed → denied (execute_command)
 - обе ветки декоратора отдают один и тот же конверт: message + guidance
@@ -143,23 +143,35 @@ def test_execute_command_plain_command_allowed(tmp_path, monkeypatch):
 def test_execute_command_protection_disabled_skips_tripwire(
     tmp_path, monkeypatch
 ):
-    """When protection_enabled=False the tripwire must not block anything."""
-    import sys
+    """protection_enabled=False: команда, которая трогает `.gc`, не
+    отсекается полом защищённых путей — дальше её решают судья команд и
+    режим. При включённой защите та же команда отсечена."""
+    import io
 
     from gc_core.config_modules import env_vars
 
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
+    # Без человека: при `pytest -s` вопрос не должен уйти в консоль.
+    monkeypatch.setattr("sys.stdin", io.StringIO(""))
+    gc_dir = tmp_path / ".gc"
+    gc_dir.mkdir()
 
     tool = with_local_ctx(ExecuteCommand)
-    # Even a .gc-targeting command passes when protection is disabled.
-    result = json.loads(
+    on = json.loads(
+        tool(command="rm -rf .gc", cwd=str(tmp_path), ctx=_ctx(tmp_path))
+    )
+    assert on["ok"] is False
+    assert on["error"]["type"] == "protected_path_denied"
+    assert gc_dir.exists()
+
+    off = json.loads(
         tool(
-            command=f'"{sys.executable}" -c "print(1)"',
+            command="rm -rf .gc",
             cwd=str(tmp_path),
             ctx=_ctx(tmp_path, protection_enabled=False),
         )
     )
-    assert result["ok"] is True
+    assert (off.get("error") or {}).get("type") != "protected_path_denied"
 
 
 # ---------------------------------------------------------------------------

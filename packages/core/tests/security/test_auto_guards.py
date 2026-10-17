@@ -211,6 +211,36 @@ def test_global_instruction_file_outside_the_project_is_still_one_check(auto):
     assert _flags(auto) == [["outside_project", "protected_path"]]
 
 
+def test_write_into_a_skill_goes_to_the_judge_with_the_strict_flag(auto):
+    """Скилл агент исполняет в следующих сессиях — как файл инструкций:
+    судья пропустит запись, только если пользователь о ней просил."""
+    _do_write(
+        auto, str(auto.root / ".gc" / "skills" / "x" / "SKILL.md"), config={}
+    )
+    _do_write(
+        auto, str(auto.outside / "gc" / "skills" / "x" / "SKILL.md"), config={}
+    )
+    assert _flags(auto) == [
+        ["protected_path"],
+        ["outside_project", "protected_path"],
+    ]
+
+
+def test_write_into_tool_settings_goes_to_the_judge_with_the_strict_flag(
+    auto,
+):
+    """Настройки, которые исполнит другая программа (оболочка, git, IDE,
+    другой агент), — где бы файл ни лежал."""
+    _do_write(auto, str(auto.root / ".envrc"), config={})
+    _do_write(auto, str(auto.root / ".vscode" / "settings.json"), config={})
+    _do_write(auto, str(auto.outside / "user" / ".bashrc"), config={})
+    assert _flags(auto) == [
+        ["protected_path"],
+        ["protected_path"],
+        ["outside_project", "protected_path"],
+    ]
+
+
 def test_instruction_file_is_judged_even_with_explicit_perimeter_allow(auto):
     _do_write(
         auto,

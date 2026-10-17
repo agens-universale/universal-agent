@@ -213,9 +213,14 @@ _CATEGORY_TABLE: dict[str, dict[Mode, str]] = {
         Mode.AUTO: ALIGN,
     },
     CAT_STATE: _ALWAYS_ALLOWED,
-    # Собственная память агента пишется без вопроса (как у эталона), но plan
-    # обещает только чтение: там это изменение.
-    CAT_PERSISTENT_STATE: {**_ALWAYS_ALLOWED, Mode.PLAN: DENY},
+    # Собственная память агента пишется без вопроса в edit и auto (как у
+    # эталона), но она попадает в промпт следующих сессий: manual её
+    # спрашивает, plan обещает только чтение — там это изменение.
+    CAT_PERSISTENT_STATE: {
+        **_ALWAYS_ALLOWED,
+        Mode.MANUAL: ASK,
+        Mode.PLAN: DENY,
+    },
     CAT_TURN: _ALWAYS_ALLOWED,
     # Запуск субагента в auto проверяется: его задание — выбор агента. В
     # остальных режимах спрашиваются действия самого субагента, а не запуск.
