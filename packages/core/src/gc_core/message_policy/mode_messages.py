@@ -8,6 +8,9 @@
 
 Тексты режима plan живут в ``plan_messages``; здесь — тексты auto и само
 правило.
+
+Здесь же — предупреждение человеку о режиме, который в канале без человека
+не работает (ключ режима — ``permission_mode.headless_mode_warning``).
 """
 
 from __future__ import annotations
@@ -93,3 +96,21 @@ def render_mode_block(announced: str | None, *, can_propose_plan: bool) -> str:
         return ""
     text = _enter_message(announced, can_propose_plan)
     return f'<permission_mode name="{announced}">\n{text}\n</permission_mode>'
+
+
+#: Что режим значит в канале без человека — для предупреждения на старте.
+_HEADLESS_CONSEQUENCES = {
+    Mode.PLAN.value: ("план некому одобрить, сессии не выйдут из режима plan"),
+    Mode.MANUAL.value: (
+        "подтверждать некому, всё, что требует подтверждения, получит отказ"
+    ),
+}
+
+
+def headless_mode_warning_text(mode: str, hint: str) -> str:
+    """Предупреждение человеку при старте канала без человека: режим по
+    умолчанию здесь не работает. ``hint`` — как вернуть edit в этом канале."""
+    return (
+        f"режим разрешений по умолчанию — {mode}: без человека "
+        f"{_HEADLESS_CONSEQUENCES[mode]}. Вернуть edit: {hint}"
+    )

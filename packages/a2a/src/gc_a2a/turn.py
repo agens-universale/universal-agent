@@ -7,6 +7,7 @@ import logging
 from typing import Any, Callable
 
 from gc_core.execution.human import HumanRequestInterrupted
+from gc_core.tools.turn.propose_plan import ProposePlan
 from gc_core.tools.turn.submit_solution import SubmitSolution
 
 from gc_a2a.store import TaskStore
@@ -17,7 +18,13 @@ SYSTEM = "a2a"
 
 
 def answer_text(agent: Any) -> str:
-    raw = SubmitSolution.present_result(getattr(agent, "last_answer", None))
+    last = getattr(agent, "last_answer", None)
+    # Ход, закрытый планом: пиру — текст плана. Одобрения в A2A нет:
+    # согласие пира — не согласие пользователя.
+    plan = ProposePlan.present_result(last)
+    if plan is not None:
+        return plan
+    raw = SubmitSolution.present_result(last)
     if raw is None:
         return ""
     if isinstance(raw, str):
@@ -28,16 +35,20 @@ def answer_text(agent: Any) -> str:
 # Пиру в status.message — без путей и текста исключения ядра.
 PEER_FAILURE_TEXT = "Ход не выполнен."
 
-# Остановка по бюджету — не ответ. JSON ``ok: false`` в артефакт не кладём.
-_LIMITS = frozenset({"step_limit", "token_limit", "tool_call_limit"})
+# Досрочная остановка — не ответ: бюджет (шаги, токены, тулы) и недоступная
+# проверка действий судьёй. JSON ``ok: false`` и текст остановки в артефакт
+# не кладём.
+_STOPS = frozenset(
+    {"step_limit", "token_limit", "tool_call_limit", "judge_unavailable"}
+)
 
 
-def limit_outcome(agent: Any) -> str | None:
+def stop_outcome(agent: Any) -> str | None:
     executor = getattr(agent, "executor", None)
     if executor is None:
         return None
     outcome = getattr(executor, "last_terminal_outcome", None)
-    if isinstance(outcome, str) and outcome in _LIMITS:
+    if isinstance(outcome, str) and outcome in _STOPS:
         return outcome
     return None
 
@@ -156,7 +167,7 @@ class Turn:
                 self.task_id, self._new_id(), error_text(failed)
             )
             return
-        if limit_outcome(self.agent) is not None:
+        if stop_outcome(self.agent) is not None:
             await self._store.mark_failed(
                 self.task_id, self._new_id(), PEER_FAILURE_TEXT
             )

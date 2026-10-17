@@ -181,7 +181,7 @@ def apply_summary_state_patch(
     summarized_messages_count: int,
     intent_log_preview_chars: int | None = None,
     kept_messages: Sequence[Mapping[str, Any]] = (),
-    can_propose_plan: bool = True,
+    can_propose_plan: bool,
 ) -> str:
     shared = _ensure_shared(state)
 

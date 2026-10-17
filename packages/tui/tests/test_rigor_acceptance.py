@@ -165,6 +165,7 @@ def test_turn_tool_calls_counter_survives_summary_compaction():
         raw_summary="summary text",
         last_dialog_steps="",
         summarized_messages_count=1,
+        can_propose_plan=True,
     )
     assert state.turn_tool_calls == 3
 

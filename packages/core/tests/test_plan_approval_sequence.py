@@ -91,6 +91,13 @@ def test_user_remark_follows_the_approval_and_blank_adds_nothing():
     ]
 
 
+def test_mode_spelling_is_normalized_before_it_is_stored_and_announced():
+    ex, _ = _executor()
+    assert ex.prepare_accepted_plan("Auto", "t1") == [_approved("auto")]
+    assert ex._permission_mode_choice == "auto"
+    assert ex._plan_transition_pending == ("approved", "auto", "t1")
+
+
 @pytest.mark.parametrize("mode", ["plan", "турбо"])
 def test_not_an_execution_mode_is_refused_before_anything_is_armed(mode):
     """Негодный режим — отказ до любых действий: учёт прошлого прогона

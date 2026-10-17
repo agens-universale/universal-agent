@@ -1,6 +1,7 @@
 """Ход: ответ, вопрос, отмена, список и чтение задачи."""
 
 import asyncio
+import json
 
 import pytest
 from harness import (
@@ -193,6 +194,50 @@ async def test_limit_stop_is_failed_not_completed(tmp_path):
         assert task["status"]["message"]["parts"][0]["text"] == (
             "Ход не выполнен."
         )
+
+
+async def test_judge_stop_is_failed_not_completed(tmp_path):
+    """Проверка действий судьёй недоступна — остановка, а не ответ."""
+
+    class JudgeStopAgent(AnswerAgent):
+        def __init__(self) -> None:
+            super().__init__("Ход остановлен: проверка действий недоступна.")
+            self.executor.last_terminal_outcome = "judge_unavailable"
+
+    async with session(tmp_path, agents=[JudgeStopAgent()]) as (
+        client,
+        _f,
+        _c,
+    ):
+        response = await rpc(client, "SendMessage", message())
+    task = response.json()["result"]["task"]
+    assert task["status"]["state"] == "TASK_STATE_FAILED"
+    assert "artifacts" not in task
+    assert task["status"]["message"]["parts"][0]["text"] == (
+        "Ход не выполнен."
+    )
+
+
+async def test_proposed_plan_is_completed_with_the_plan_text(tmp_path):
+    """Пиру — текст плана, а не служебный JSON итога хода."""
+
+    class PlanAgent(AnswerAgent):
+        def __init__(self) -> None:
+            super().__init__(
+                json.dumps(
+                    {"plan": "1. шаг\n2. проверка", "status": "proposed"},
+                    ensure_ascii=False,
+                )
+            )
+            self.executor.last_terminal_outcome = "plan_proposed"
+
+    async with session(tmp_path, agents=[PlanAgent()]) as (client, _f, _c):
+        response = await rpc(client, "SendMessage", message())
+    task = response.json()["result"]["task"]
+    assert task["status"]["state"] == "TASK_STATE_COMPLETED"
+    assert task["artifacts"][0]["parts"] == [
+        {"text": "1. шаг\n2. проверка", "mediaType": "text/plain"}
+    ]
 
 
 async def test_failed_turn_is_a_task_not_an_rpc_error(tmp_path):

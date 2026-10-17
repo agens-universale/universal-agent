@@ -378,6 +378,11 @@ def test_main_hands_the_permission_mode_flag_to_the_app(monkeypatch, tmp_path):
         == 0
     )
     assert locked == ["manual"]
+    assert (
+        main(argv=["--config", str(cfg_path), "--permission-mode", "AUTO"])
+        == 0
+    )
+    assert locked == ["manual", "auto"]
     with pytest.raises(SystemExit):  # незнакомый режим — отказ разбора
         main(argv=["--config", str(cfg_path), "--permission-mode", "турбо"])
 

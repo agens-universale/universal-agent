@@ -25,6 +25,10 @@ def test_flag_accepts_available_modes_only():
         assert parsed.permission_mode == mode.value
     parsed, _ = arg_parser.parser.parse_known_args(["-q", "x"])
     assert parsed.permission_mode is None
+    parsed, _ = arg_parser.parser.parse_known_args(
+        ["-q", "x", "--permission-mode", "Plan"]
+    )
+    assert parsed.permission_mode == "plan"
     with pytest.raises(SystemExit):
         arg_parser.parser.parse_known_args(
             ["-q", "x", "--permission-mode", "турбо"]

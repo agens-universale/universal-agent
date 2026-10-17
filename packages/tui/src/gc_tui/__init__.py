@@ -82,6 +82,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     )
     parser.add_argument(
         "--permission-mode",
+        type=str.lower,
         choices=[mode.value for mode in AVAILABLE_MODES],
         default=None,
         help=(

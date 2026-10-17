@@ -483,6 +483,24 @@ def resolve_mode(ctx: Any) -> Mode:
     return resolve_mode_with_source(ctx)[0]
 
 
+#: Режимы, которые без человека не работают: в plan план некому одобрить, в
+#: manual подтверждать некому. Каналы без человека (gc-serve, gc-a2a)
+#: предупреждают о них при старте; старт не прерывается.
+_HEADLESS_UNSUPPORTED_MODES = frozenset({Mode.PLAN, Mode.MANUAL})
+
+
+def headless_mode_warning(settings: Any) -> str | None:
+    """Режим по умолчанию, который в канале без человека не работает: его
+    ключ (``plan`` / ``manual``) или None.
+
+    Своего выбора режима у сессий такого канала нет — действует
+    ``security.permissions.default_mode``. Текст —
+    ``message_policy.mode_messages.headless_mode_warning_text``.
+    """
+    mode, _source = mode_with_source(None, settings_of(settings))
+    return mode.value if mode in _HEADLESS_UNSUPPORTED_MODES else None
+
+
 def guard_mode_key(guard: str) -> str:
     """Путь ключа конфига ``security.<защита>.mode``.
 

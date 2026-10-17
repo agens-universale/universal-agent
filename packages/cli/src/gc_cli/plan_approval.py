@@ -7,17 +7,18 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import sys
 from functools import partial
 from typing import Any, Optional
 
-from gc_core.plan_store import PLAN_STATUS_PROPOSED
+from gc_core.plan_store import PLAN_STATUS_PROPOSED, normalize_plan_block
 from gc_core.security.permission_mode import (
     PLAN_EXECUTION_MODES,
     Mode,
     mode_label,
 )
+from gc_core.thread_store_file import FileThreadStore
+from gc_core.tools.turn.propose_plan import ProposePlan
 
 #: Ответ → режим исполнения. Номера и порядок — общие с баннером TUI.
 _APPROVAL_MODES = {
@@ -38,6 +39,31 @@ _PROMPT = (
     )
     + f"[{_REWORK}] доработать план / [N] выйти: "
 )
+_EXECUTION_MODES = [mode.value for mode in PLAN_EXECUTION_MODES]
+
+#: Ход кончился планом, а спросить некого (нет терминала): как исполнить.
+_NO_TERMINAL_HINT = (
+    "План предложен, сессия осталась в plan; исполнить: gc-cli -t "
+    "{thread_id} --approve-plan "
+    f"{_EXECUTION_MODES[0]} (или {', '.join(_EXECUTION_MODES[1:])})."
+)
+
+#: `--approve-plan`, а в сессии нечего одобрять.
+NO_PROPOSED_PLAN = (
+    "В сессии {thread_id} нет предложенного плана — одобрять нечего."
+)
+
+
+def thread_has_proposed_plan(threads_dir: str, thread_id: str) -> bool:
+    """В сохранённой сессии план предложен и ждёт решения.
+
+    `--approve-plan` идёт новым процессом: живого состояния прошлого
+    прогона нет, план читается из меты треда (система `cli` — та же, что
+    ставит исполнитель по умолчанию).
+    """
+    meta = FileThreadStore(threads_dir).load_meta("cli", thread_id)
+    plan = normalize_plan_block((meta.get("shared") or {}).get("plan"))
+    return plan is not None and plan["status"] == PLAN_STATUS_PROPOSED
 
 
 async def _ask(prompt: str) -> Optional[str]:
@@ -46,13 +72,6 @@ async def _ask(prompt: str) -> Optional[str]:
         return (await asyncio.to_thread(input)).strip()
     except (EOFError, KeyboardInterrupt):
         return None
-
-
-def _plan_text(response: Any) -> str:
-    try:
-        return str(json.loads(response).get("plan") or "")
-    except (TypeError, ValueError, AttributeError):
-        return ""
 
 
 async def arun_plan_approval(
@@ -87,7 +106,8 @@ async def arun_plan_approval(
         plan = executor.plan_snapshot(thread_id)
         if not plan or plan.get("status") != PLAN_STATUS_PROPOSED:
             return response
-        print(f"\n{_plan_text(response) or plan['text']}", file=sys.stderr)
+        shown = ProposePlan.present_result(response) or plan["text"]
+        print(f"\n{shown}", file=sys.stderr)
         answer = await _ask(_PROMPT)
         mode = _APPROVAL_MODES.get(answer or "")
         if mode is not None:
@@ -111,16 +131,17 @@ async def arun_plan_approval(
 
 def _approval_available(executor: Any, thread_id: Optional[str]) -> bool:
     """Спрашивать есть кого и о чём: этот прогон кончился планом, есть
-    терминал и сессия."""
+    сессия и терминал. Без терминала — подсказка, как одобрить флагом."""
     if getattr(executor, "last_terminal_outcome", None) != "plan_proposed":
-        return False
-    if not (sys.stdin and sys.stdin.isatty()):
         return False
     if not thread_id:
         print(
             "Утверждение плана доступно только для сессии — перезапустите с -t.",
             file=sys.stderr,
         )
+        return False
+    if not (sys.stdin and sys.stdin.isatty()):
+        print(_NO_TERMINAL_HINT.format(thread_id=thread_id), file=sys.stderr)
         return False
     return True
 

@@ -1,7 +1,6 @@
 """Переходы статуса плана между прогонами: одобрение и доработка."""
 
 import threading
-from types import SimpleNamespace
 
 from gc_core.agent_executor import AgentExecutor
 from gc_core.execution.state import SharedStateData
@@ -10,6 +9,7 @@ from gc_core.message_policy.user_message_policy import (
 )
 from gc_core.plan_store import new_plan_block
 from gc_core.security.permission_store import PermissionStore
+from gc_core.states import State
 from gc_testkit.settings import fake_ctx
 
 
@@ -24,9 +24,18 @@ def _executor(mode="plan", *, thread_id="t1", plan=True):
     ex._ctx = fake_ctx(
         permission_store=PermissionStore(shared.confirm_rules, shared=shared)
     )
-    state = SimpleNamespace(
-        shared=shared, thread_id=thread_id, mode_announced=None
+    state = State(
+        verbose=False,
+        model="m",
+        tools_spec=[],
+        tools_descr=[],
+        skills_list=[],
+        max_steps=5,
+        system_prompt_id="v1",
+        use_server_subagents=False,
+        thread_id=thread_id,
     )
+    state.shared = shared
     ex._state = state
     return ex, state
 
@@ -51,6 +60,7 @@ def test_approval_is_applied_at_the_start_of_the_next_run():
     assert state.shared.plan["approved_mode"] == "edit"
     # выход из plan через одобрение: «план не одобрен» модели не шлётся
     assert state.mode_announced is None
+    assert state.shared.mode_announced is None  # корневая отметка в shared
 
 
 def test_approval_never_lands_on_another_thread_and_does_not_linger():

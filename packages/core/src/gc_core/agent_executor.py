@@ -239,10 +239,14 @@ def _put_attachments(msg: dict, attachments, i: int, commit) -> None:
         ]
 
 
-def _require_plan_execution_mode(mode: str) -> None:
-    """План исполняется только в режиме исполнения (edit, auto, manual)."""
-    if coerce_mode(mode) not in PLAN_EXECUTION_MODES:
+def _require_plan_execution_mode(mode: str) -> str:
+    """План исполняется только в режиме исполнения (edit, auto, manual).
+
+    Возвращает нормализованное имя режима (``"Auto"`` → ``"auto"``)."""
+    resolved = coerce_mode(mode)
+    if resolved not in PLAN_EXECUTION_MODES:
         raise ValueError(f"not a plan execution mode: {mode!r}")
+    return resolved.value
 
 
 def _require_supported_persist_mode(settings: Any, ctx: Any) -> None:
@@ -664,7 +668,7 @@ class AgentExecutor:
         ``extra_text`` — уточнение человека к исполнению, отдельным
         сообщением после служебного «план одобрен».
         """
-        _require_plan_execution_mode(mode)
+        mode = _require_plan_execution_mode(mode)
         self.set_permission_mode(mode)
         self.accept_plan(mode, thread_id)
         return accepted_plan_messages(mode, extra_text=extra_text)

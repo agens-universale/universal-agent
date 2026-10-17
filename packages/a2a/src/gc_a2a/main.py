@@ -29,7 +29,9 @@ from gc_core.config_modules.cli_args import (
 )
 from gc_core.config_modules.path_hints import UnknownSettingError
 from gc_core.constants.tool_names import INTERMEDIATE_REPLY_TOOL_NAME
+from gc_core.message_policy.mode_messages import headless_mode_warning_text
 from gc_core.onboarding import explain_broken_config
+from gc_core.security.permission_mode import headless_mode_warning
 from gc_core.settings import LoadedSettings
 from gc_core.tools.connect_mcp.registry import ToolsCache
 
@@ -40,6 +42,9 @@ from gc_a2a.http_api import create_app
 # Иначе uvicorn ждёт блокирующий SendMessage без предела, и stop() хода
 # не вызывается, пока соединение само не закроется.
 _GRACEFUL_SHUTDOWN_SECONDS = 5
+
+#: Как вернуть edit у gc-a2a — для предупреждения о режиме без человека.
+_EDIT_MODE_HINT = "флаг --security.permissions.default_mode edit или профиль"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -75,6 +80,15 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     if not loaded.settings.a2a.auth_token:
         print("gc-a2a: сервер без авторизации", file=sys.stderr)
+    # Пир — не человек: plan и manual здесь не работают. Предупреждение,
+    # а не отказ — сервер стартует.
+    headless_mode = headless_mode_warning(loaded)
+    if headless_mode is not None:
+        print(
+            "gc-a2a: "
+            + headless_mode_warning_text(headless_mode, _EDIT_MODE_HINT),
+            file=sys.stderr,
+        )
     asyncio.run(serve(loaded))
     return 0
 

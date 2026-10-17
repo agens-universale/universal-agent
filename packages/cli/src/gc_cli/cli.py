@@ -37,6 +37,7 @@ from gc_core.run_context import RunContext, acreate_run_context
 from gc_core.settings import is_explicit
 from gc_core.thread_store import resolve_threads_dir
 from gc_core.thread_store_file import FileThreadStore
+from gc_core.tools.turn.propose_plan import ProposePlan
 from gc_core.updater import check as updater_check
 from gc_core.updater import runner as updater_runner
 from gc_core.updater import source as updater_source
@@ -49,7 +50,11 @@ from recommended_mcp.runtime.daemon_autostart import (
 )
 
 from gc_cli import arg_parser
-from gc_cli.plan_approval import arun_plan_approval
+from gc_cli.plan_approval import (
+    NO_PROPOSED_PLAN,
+    arun_plan_approval,
+    thread_has_proposed_plan,
+)
 from gc_cli.structured_output import (
     StructuredOutputError,
     aemit_structured_result,
@@ -646,8 +651,10 @@ def _load_structured_format() -> tuple[str | None, int | None]:
 def _print_agent_response(
     response: Any, settings: Any, ctx: RunContext
 ) -> None:
-    """``settings`` — всё, что принимает ``settings_of``."""
-    formatted = format_json_for_display(response)
+    """``settings`` — всё, что принимает ``settings_of``. Ход, закрытый
+    планом, печатается текстом плана, а не служебным JSON."""
+    plan = ProposePlan.present_result(response)
+    formatted = plan if plan is not None else format_json_for_display(response)
     if human_console_enabled(settings) and formatted:
         print(formatted)
     if formatted:
@@ -775,6 +782,75 @@ def _load_cli_settings(config_arg, profile_arg):
     return loaded, None
 
 
+def _approve_plan_exit(
+    settings: Any, approve_mode: str | None, thread_id: str | None
+) -> int | None:
+    """`--approve-plan` без предложенного плана в сессии — ошибка, код 1."""
+    if not approve_mode:
+        return None
+    if thread_id and thread_has_proposed_plan(
+        resolve_threads_dir(settings), thread_id
+    ):
+        return None
+    print(NO_PROPOSED_PLAN.format(thread_id=thread_id), file=sys.stderr)
+    return 1
+
+
+def _launch_exit(
+    config_arg: str | None,
+    loaded: Any,
+    *,
+    just_created: bool,
+    format_text: str | None,
+    approve_mode: str | None,
+    thread_id: str | None,
+) -> int | None:
+    """Запуск кончается до агента: неполный конфиг (подсказка и выход)
+    или `--approve-plan` без предложенного плана в сессии."""
+    setup_exit = _unconfigured_setup_exit(
+        config_arg,
+        loaded,
+        just_created=just_created,
+        format_text=format_text,
+    )
+    if setup_exit is not None:
+        return setup_exit
+    return _approve_plan_exit(loaded, approve_mode, thread_id)
+
+
+async def _arun_requested_turn(
+    executor: AgentExecutor,
+    user_parts: list[str],
+    *,
+    approve_mode: str | None,
+    extra_text: str | None,
+    thread_id: str | None,
+    start_new_thread: bool,
+    verbose: bool,
+    attachments: Any,
+    account_run: bool,
+) -> Any:
+    """Ход, о котором просит запуск: одобрение предложенного плана флагом
+    `--approve-plan` (та же последовательность ядра, что у консольного
+    вопроса) либо обычный запрос `-q`."""
+    if approve_mode:
+        return await executor.aexecute_accepted_plan(
+            approve_mode,
+            thread_id,
+            extra_text=extra_text or "",
+            verbose=verbose,
+            account_run=account_run,
+        )
+    return await executor.arun(
+        user_parts,
+        thread_id=thread_id,
+        start_new_thread=start_new_thread,
+        verbose=verbose,
+        attachments=attachments,
+        account_run=account_run,
+    )
+
+
 async def arun_cli() -> int:
     """
     Входная точка CLI: парсинг аргументов, загрузка конфига,
@@ -822,17 +898,20 @@ async def arun_cli() -> int:
 
     # gc-cli больше НЕ запускает визард автоматически — только по --init-config.
     # При неполном конфиге на дефолтном пути — пассивный текстовый хинт и выход.
-    setup_exit = _unconfigured_setup_exit(
+    thread_id = arg_parser.run_args.thread_id
+    start_new_thread = arg_parser.run_args.new
+    approve_mode = getattr(arg_parser.run_args, "approve_plan", None)
+    launch_exit = _launch_exit(
         config_arg,
         loaded,
         just_created=just_created,
         format_text=format_text,
+        approve_mode=approve_mode,
+        thread_id=thread_id,
     )
-    if setup_exit is not None:
-        return setup_exit
+    if launch_exit is not None:
+        return launch_exit
 
-    thread_id = arg_parser.run_args.thread_id
-    start_new_thread = arg_parser.run_args.new
     cli_images = await _aprepare_cli_images(
         loaded,
         getattr(arg_parser.run_args, "images", None) or [],
@@ -918,8 +997,11 @@ async def arun_cli() -> int:
     close_accounting_after = format_text is not None
     ran = False
     try:
-        response = await executor.arun(
+        response = await _arun_requested_turn(
+            executor,
             user_parts,
+            approve_mode=approve_mode,
+            extra_text=arg_parser.run_args.query,
             thread_id=thread_id,
             start_new_thread=start_new_thread,
             verbose=verbose,

@@ -147,3 +147,41 @@ def test_ordinary_run_keeps_its_own_accounting(answers):
     ex = _Executor()
     _approve(ex)
     assert ex.events == [("accepted", True)]
+
+
+def test_without_a_terminal_the_plan_waits_with_a_hint(
+    answers, monkeypatch, capsys
+):
+    monkeypatch.setattr(
+        plan_approval.sys, "stdin", SimpleNamespace(isatty=lambda: False)
+    )
+    assert _approve(_Executor()) == _PLAN
+    err = capsys.readouterr().err
+    assert "сессия осталась в plan" in err
+    assert "gc-cli -t t1 --approve-plan edit (или auto, manual)" in err
+
+
+def test_without_a_session_the_hint_asks_for_one_even_without_a_terminal(
+    answers, monkeypatch, capsys
+):
+    monkeypatch.setattr(
+        plan_approval.sys, "stdin", SimpleNamespace(isatty=lambda: False)
+    )
+    assert _approve(_Executor(), thread_id=None) == _PLAN
+    err = capsys.readouterr().err
+    assert "только для сессии" in err
+    assert "--approve-plan" not in err
+
+
+def test_plan_answer_is_printed_as_plan_text_not_json(capsys):
+    from unittest.mock import MagicMock
+
+    from gc_cli import cli
+    from gc_testkit.settings import make_settings
+
+    cli._print_agent_response(
+        _PLAN,
+        make_settings({"logging.console_trace": True}),
+        SimpleNamespace(logger=MagicMock()),
+    )
+    assert capsys.readouterr().out.strip() == "1. шаг"
