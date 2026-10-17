@@ -5,7 +5,10 @@ from gc_testkit.settings import make_settings
 from pydantic import ValidationError
 
 from gc_core.config_modules.root import AppConfig
-from gc_core.security.permission_mode import AVAILABLE_MODES
+from gc_core.security.permission_mode import (
+    AVAILABLE_MODES,
+    INTERPRETER_COMMANDS,
+)
 from gc_core.settings import is_explicit
 
 
@@ -80,3 +83,47 @@ def test_default_mode_is_not_explicit_until_the_user_sets_it():
         is_explicit(loaded.settings, "security.permissions.default_mode")
         is True
     )
+
+
+def _with_readonly(entries):
+    return AppConfig.model_validate(
+        {"security": {"permissions": {"readonly_commands": entries}}}
+    )
+
+
+def test_readonly_pair_and_plain_command_are_accepted():
+    cfg = _with_readonly(["git log", "tree"])
+    assert cfg.security.permissions.readonly_commands == ["git log", "tree"]
+
+
+def test_single_word_command_with_subcommands_is_rejected():
+    """`git` одним словом — это и `git push`: нужна подкоманда."""
+    with pytest.raises(ValidationError, match="git log"):
+        _with_readonly(["git"])
+
+
+@pytest.mark.parametrize("name", sorted(INTERPRETER_COMMANDS))
+def test_interpreter_cannot_be_a_harmless_command(name):
+    with pytest.raises(ValidationError, match="интерпретатор"):
+        _with_readonly(["tree", name])
+
+
+@pytest.mark.parametrize("entry", ["bash -c", "python -m", "env FOO=1"])
+def test_interpreter_as_the_first_word_of_a_pair_is_rejected(entry):
+    with pytest.raises(ValidationError, match="интерпретатор"):
+        _with_readonly([entry])
+
+
+@pytest.mark.parametrize("entry", ["git -c", "git -C"])
+def test_pair_with_a_flag_as_the_second_word_is_rejected(entry):
+    """`git -c` — флаг, а не подкоманда: пара совпала бы с любой командой
+    git, начинающейся с этого флага (`git -c core.pager=… log`)."""
+    with pytest.raises(ValidationError, match="второе слово флаг"):
+        _with_readonly([entry])
+
+
+def test_interpreter_list_is_the_reference_list():
+    assert {"python", "bash", "cmd.exe", "Rscript", "env"} <= (
+        INTERPRETER_COMMANDS
+    )
+    assert len(INTERPRETER_COMMANDS) == 22

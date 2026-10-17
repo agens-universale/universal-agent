@@ -382,7 +382,9 @@ security:
   #   блокирует опасное, о котором вы не просили. Безопасность не гарантирует.
   # В TUI переключается Shift+Tab; флаг запуска --permission-mode сильнее.
   # readonly_commands дополняет встроенный список команд, которые в любом режиме
-  # идут без подтверждения (ls, pwd, git status…).
+  # идут без подтверждения (ls, pwd, git status…): команда (tree) или пара
+  # «команда подкоманда» (git log). git одним словом, оболочки и интерпретаторы
+  # (bash, python…) отвергаются.
   permissions:
     default_mode: edit
     readonly_commands: []

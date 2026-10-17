@@ -63,6 +63,47 @@ def reject_blank_paths(values: list[str]) -> list[str]:
     return values
 
 
+def reject_broad_readonly_entry(index: int, raw: str) -> None:
+    """Запись `readonly_commands`, открывающая слишком много, — ошибка схемы.
+
+    Отвергаются: однословная команда с подкомандами (`git` — это и
+    `git push`); интерпретатор или оболочка первым словом в любой записи
+    (с ним исполняется любой код: `python`, `bash -c`); пара, у которой
+    второе слово — флаг (`git -c`: пара совпала бы с любой подкомандой)."""
+    # Lazy: модуль режимов читает настройки (gc_core.settings →
+    # config_modules) — импорт на уровне модуля замкнул бы цикл.
+    from gc_core.security.permission_mode import (
+        INTERPRETER_COMMANDS,
+        READONLY_PAIR_HEADS,
+    )
+
+    words = raw.split()
+    if not words:
+        return
+    name = words[0]
+    if len(words) == 1 and name in READONLY_PAIR_HEADS:
+        raise ValueError(
+            f"элемент [{index}] «{name}» — команда с подкомандами: "
+            "однословная запись разрешила бы любую из них; укажите "
+            "подкоманду, например «git log»"
+        )
+    # Интерпретатор первым словом — и в паре («bash -c», «python -m»):
+    # решение владельца при сборке плана.
+    if name in INTERPRETER_COMMANDS:
+        raise ValueError(
+            f"элемент [{index}] «{name}» — интерпретатор не может быть "
+            "безобидной командой: с ним исполняется любой код; уберите "
+            "элемент"
+        )
+    # Пара сравнивается по первым двум словам команды: флаг вторым словом
+    # (`git -c`, `git -C`) открыл бы любую подкоманду после него.
+    if len(words) >= 2 and words[1].startswith("-"):
+        raise ValueError(
+            f"элемент [{index}] «{raw}» — второе слово флаг, а не "
+            "подкоманда; укажите подкоманду"
+        )
+
+
 def validate_binary_read_policy(raw_mode: Any) -> str:
     mode = str(raw_mode if raw_mode is not None else "ask").strip().lower()
     if mode not in ALLOWED_BINARY_READ_MODES:
@@ -246,7 +287,8 @@ class PermissionsConfig(BaseModel):
 
     default_mode — с какого режима стартует сессия; выбор в сессии (Shift+Tab)
     и флаг запуска ``--permission-mode`` сильнее. readonly_commands дополняет
-    встроенный список команд, исполняемых без подтверждения в любом режиме.
+    встроенный список команд, исполняемых без подтверждения в любом режиме:
+    командой (`tree`) или парой «команда подкоманда» (`git log`).
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -268,6 +310,13 @@ class PermissionsConfig(BaseModel):
                 + ", ".join(sorted(allowed))
             )
         return mode
+
+    @field_validator("readonly_commands")
+    @classmethod
+    def validate_readonly_commands(cls, value: list[str]) -> list[str]:
+        for index, raw in enumerate(value):
+            reject_broad_readonly_entry(index, str(raw))
+        return value
 
 
 class SecurityConfig(BaseModel):

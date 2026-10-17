@@ -398,13 +398,16 @@ def test_instruction_files_are_not_never_touch_paths_for_the_action_judge(
     assert any(".gc" in p for p in never_touch)
 
 
-def test_explicit_allow_for_commands_switches_the_judge_off(auto):
+def test_explicit_allow_for_commands_does_not_switch_the_judge_off(auto):
     out, calls = _exec(
-        auto, "git push", config={"security.command_moderation.mode": "allow"}
+        auto,
+        "git push",
+        config={"security.command_moderation.mode": "allow"},
+        answers=[],
     )
-    assert (
-        out == "executed" and auto.requests == [] and calls.command_judge == 0
-    )
+    assert out == "executed"  # судья ответил «не рискованно»
+    assert len(auto.requests) == 1 and calls.command_judge == 0
+    assert auto.asked == []
 
 
 def test_disabled_moderation_does_not_cancel_the_judge(auto):

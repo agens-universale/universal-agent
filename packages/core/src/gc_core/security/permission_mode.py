@@ -92,7 +92,8 @@ GUARD_CATEGORIES = frozenset({CAT_READ, CAT_EDIT, CAT_EXEC, CAT_NETWORK})
 
 #: Команды, исполняемые без судьи и без вопроса в любом режиме. В списке только
 #: то, что НЕ показывает содержимое файлов и НЕ умеет писать: имена, размеры,
-#: состояние. Намеренно исключены:
+#: состояние. У команды, где флаг читает файл (`wc`, `du`), признаются только
+#: флаги из ``_FLAG_RULES``. Намеренно исключены:
 #:   - cat / type / head / tail / grep, git diff / show / log — печатают
 #:     содержимое: через них читается `.env` или ключ в обход защиты чтения,
 #:     и надёжно отсечь это по аргументам нельзя (`cat .env*`, `grep -r KEY .`,
@@ -108,22 +109,110 @@ READONLY_COMMANDS: frozenset[str] = frozenset(
     }
 )  # fmt: skip
 
-#: Пары «команда + подкоманда», безопасные с любыми аргументами. git исполняет
-#: конфиг и хуки репозитория (`core.fsmonitor`), поэтому `.git` — защищённый
-#: путь (запись спрашивается), а git в другом каталоге безобидным не считается.
+#: Пары «команда + подкоманда», безопасные с любыми аргументами, если у пары
+#: нет таблицы флагов (``_FLAG_RULES``). git исполняет конфиг и хуки
+#: репозитория (`core.fsmonitor`), поэтому `.git` — защищённый путь (запись
+#: спрашивается), а git в другом каталоге безобидным не считается.
 READONLY_PAIRS: frozenset[str] = frozenset({"git status", "git rev-parse"})
 
 #: Пары, безопасные ТОЛЬКО без дополнительных аргументов: с аргументом они
 #: мутируют (`git branch <name>` создаёт ветку, `git remote add …` меняет remote).
 READONLY_BARE_PAIRS: frozenset[str] = frozenset({"git branch", "git remote"})
 
-#: Флаги безобидных команд, которые читают файл и выдают его строки (в тексте
-#: ошибки): с ними команда безобидной не считается — как у эталона, команда из
-#: списка с опасным флагом спрашивается. Ключ — команда, значения — префиксы.
-_FILE_READING_FLAGS: dict[str, tuple[str, ...]] = {
-    "wc": ("--files0-from",),
-    "du": ("--files0-from", "--exclude-from", "-X"),
-}
+#: Первые слова пар: однословная запись `readonly_commands` с таким словом —
+#: любая подкоманда (`git` — это и `git push`). Конфиг такую запись отвергает.
+READONLY_PAIR_HEADS: frozenset[str] = frozenset(
+    pair.split()[0] for pair in READONLY_PAIRS | READONLY_BARE_PAIRS
+)
+
+#: Оболочки и интерпретаторы: однословной записью `readonly_commands` они
+#: сделали бы безобидным любой код (`python -c …`). Конфиг такую запись
+#: отвергает. Список — список эталона (22 имени); сравнение точное, как у
+#: эталона.
+INTERPRETER_COMMANDS: frozenset[str] = frozenset(
+    {
+        "sh", "bash", "zsh", "dash", "ksh", "fish", "cmd", "cmd.exe",
+        "powershell", "pwsh", "python", "python3", "node", "bun", "deno",
+        "ruby", "perl", "php", "lua", "julia", "Rscript", "env",
+    }
+)  # fmt: skip
+
+
+@dataclass(frozen=True)
+class FlagRule:
+    """Разрешённые флаги встроенной безобидной команды — как у эталона:
+    «каждый флаг — только чтение». Флаг вне таблицы, в том числе сокращение
+    разрешённого длинного (GNU и git принимают однозначный префикс:
+    `--files0` = `--files0-from`), делает команду «не безобидной» — дальше
+    обычный путь режима. Позиционные аргументы (пути) разрешены; после `--`
+    всё позиционное.
+
+    ``short`` — короткие без значения, в том числе слитно (`-lw`);
+    ``short_value`` — короткие со значением: остаток слитка — значение
+    (`-d1`, `-uno`); ``long`` — полные имена ровно, значение — через `=`.
+    """
+
+    short: str = ""
+    short_value: str = ""
+    long: frozenset[str] = frozenset()
+
+    def allows(self, args: list[str]) -> bool:
+        for arg in args:
+            if arg == "--":
+                return True
+            if not self._allows_one(arg):
+                return False
+        return True
+
+    def _allows_one(self, arg: str) -> bool:
+        if arg.startswith("--"):
+            return arg.partition("=")[0] in self.long
+        if arg == "-" or not arg.startswith("-"):
+            return True  # путь или `-` (стандартный ввод)
+        for flag in arg[1:]:
+            if flag in self.short_value:
+                return True  # остаток слитка — значение флага
+            if flag not in self.short:
+                return False
+        return True
+
+
+#: Таблицы флагов встроенных команд, у которых есть флаг, читающий файл или
+#: печатающий содержимое (аудит — спека §5.4): `wc`/`du --files0-from`,
+#: `du -X/--exclude-from`, `git status -v` (печатает дифф). У остальных
+#: встроенных таких флагов нет — они признаются с любыми аргументами.
+_FLAG_RULES: dict[str, FlagRule] = {
+    "wc": FlagRule(
+        short="lwcmL",
+        long=frozenset(
+            {"--lines", "--words", "--bytes", "--chars", "--max-line-length"}
+        ),
+    ),
+    "du": FlagRule(
+        short="shackmbx",
+        short_value="d",
+        long=frozenset(
+            {
+                "--summarize", "--human-readable", "--all", "--total",
+                "--apparent-size", "--one-file-system", "--max-depth",
+            }
+        ),
+    ),
+    "git status": FlagRule(
+        short="sbz",
+        short_value="uM",
+        long=frozenset(
+            {
+                "--short", "--branch", "--show-stash", "--porcelain",
+                "--long", "--null", "--untracked-files", "--ignored",
+                "--ignore-submodules", "--column", "--no-column",
+                "--ahead-behind", "--no-ahead-behind", "--renames",
+                "--no-renames", "--find-renames",
+            }
+        ),
+    ),
+}  # fmt: skip
+
 
 #: Метасимволы shell: их наличие означает составную команду, а составная
 #: команда read-only не бывает — «ls; rm -rf build» начинается с «ls».
@@ -244,39 +333,52 @@ def mode_label(mode: object) -> str:
     return MODE_LABELS.get(value, value)
 
 
+def _command_tokens(command: str) -> list[str]:
+    """Слова команды для списка безобидных; пусто — не безобидна.
+
+    Fail-closed: пустая строка, ошибка разбора или любой shell-метасимвол.
+    """
+    text = str(command or "").strip()
+    if not text or any(marker in text for marker in _SHELL_METACHARS):
+        return []
+    try:
+        return shlex.split(text)
+    except ValueError:
+        return []
+
+
+def _flags_allowed(command: str, args: list[str]) -> bool:
+    rule = _FLAG_RULES.get(command)
+    return rule is None or rule.allows(args)
+
+
+def _readonly_entries(extra: list[str] | None) -> set[str]:
+    """Записи `readonly_commands`: команда или пара «команда подкоманда»;
+    пробелы внутри записи схлопываются."""
+    return {" ".join(str(item).split()) for item in extra or ()} - {""}
+
+
 def is_readonly_command(command: str, extra: list[str] | None = None) -> bool:
     """Признать команду безобидной: исполнять без судьи и без подтверждения.
 
-    Fail-closed: пустая строка, ошибка разбора или любой shell-метасимвол
-    → False. Дальше решает режим.
+    Встроенная команда — только с флагами своей таблицы (``_FLAG_RULES``);
+    дополнение из конфига её не ослабляет. Дополнение пользователя — с
+    любыми аргументами: это его выбор. Запись дополнения — команда или пара
+    «команда подкоманда» (`git log`), обе — с любыми аргументами. Остальное
+    решает режим.
     """
-    text = str(command or "").strip()
-    if not text:
-        return False
-    if any(marker in text for marker in _SHELL_METACHARS):
-        return False
-    try:
-        tokens = shlex.split(text)
-    except ValueError:
-        return False
+    tokens = _command_tokens(command)
     if not tokens:
         return False
-    allowed = READONLY_COMMANDS | {
-        str(item).strip() for item in (extra or []) if str(item).strip()
-    }
-    head = tokens[0]
-    reading = _FILE_READING_FLAGS.get(head, ())
-    if any(token.startswith(flag) for token in tokens[1:] for flag in reading):
-        return False
-    if head in allowed:
+    head, pair = tokens[0], " ".join(tokens[:2])
+    if head in READONLY_COMMANDS:
+        return _flags_allowed(head, tokens[1:])
+    if pair in READONLY_PAIRS:
+        return _flags_allowed(pair, tokens[2:])
+    if pair in READONLY_BARE_PAIRS and len(tokens) == 2:
         return True
-    if len(tokens) >= 2:
-        pair = f"{head} {tokens[1]}"
-        if pair in READONLY_PAIRS:
-            return True
-        if pair in READONLY_BARE_PAIRS and len(tokens) == 2:
-            return True
-    return False
+    entries = _readonly_entries(extra)
+    return head in entries or pair in entries
 
 
 #: Ключ записи реестра: тул предлагается модели только в названном режиме.
@@ -437,24 +539,17 @@ def read_decision(ctx: Any, *, inside: bool) -> str:
 def exec_decision(ctx: Any, *, readonly: bool) -> str:
     """Исход команды. ``readonly`` — команда из списка только-чтения.
 
-    В отличие от записи и чтения, здесь почти НЕТ ветки явного ключа конфига
-    (исключение — `allow` в auto, см. ниже):
-    ``command_moderation.mode`` — политика эскалации вердикта судьи («зови
-    судью, и если он сказал опасно — спроси человека»), а не готовый исход.
-    Шаблон конфига задаёт этот ключ явно, и подстановка его как исхода
-    перекрывала бы таблицу режимов в каждой реальной установке.
+    Ветки явного ключа конфига здесь нет: ``command_moderation.mode`` —
+    политика эскалации вердикта судьи команд («зови судью, и если он сказал
+    опасно — спроси человека»), а не готовый исход. Шаблон конфига задаёт
+    этот ключ явно, и подстановка его как исхода перекрывала бы таблицу
+    режимов в каждой установке. В auto и явный `allow` судью действий не
+    снимает: как у эталона, широкие правила произвольного исполнения в auto
+    не действуют.
     """
     if readonly:
         return ALLOW
-    decision = _EXEC_PROFILES[resolve_mode(ctx)]
-    if (
-        decision == ALIGN
-        and explicit_guard_mode(ctx, "command_moderation") == ALLOW
-    ):
-        # Единственное значение ключа, читаемое как исход, и только в auto:
-        # явный `allow` — осознанное ослабление, судья действий не зовётся.
-        return ALLOW
-    return decision
+    return _EXEC_PROFILES[resolve_mode(ctx)]
 
 
 def floor_question_decision(outcomes: tuple[str, ...]) -> str:

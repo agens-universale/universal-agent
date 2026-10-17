@@ -95,20 +95,19 @@ def test_explicit_allow_and_deny_are_stronger_than_the_judge(guard):
     )
 
 
-def test_explicit_allow_for_commands_switches_the_judge_off():
-    """Осознанное ослабление — как `write_guard.mode: allow` для записи вне
-    проекта. `ask` и `deny` у команд — политика эскалации судьи команд, а не
-    исход: в auto решает судья действий."""
+def test_command_moderation_value_never_replaces_the_judge_in_auto():
+    """Как у эталона: в auto широкие правила произвольного исполнения не
+    действуют — даже явный `allow` судью действий не снимает."""
+    for value in ("allow", "ask", "deny"):
+        ctx = _ctx(config={"security.command_moderation.mode": value})
+        assert exec_decision(ctx, readonly=False) == ALIGN, value
     assert (
         exec_decision(
             _ctx(config={"security.command_moderation.mode": "allow"}),
-            readonly=False,
+            readonly=True,
         )
         == ALLOW
     )
-    for value in ("ask", "deny"):
-        ctx = _ctx(config={"security.command_moderation.mode": value})
-        assert exec_decision(ctx, readonly=False) == ALIGN
 
 
 def test_command_moderation_allow_changes_nothing_outside_auto():

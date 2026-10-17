@@ -687,7 +687,7 @@ def test_git_in_another_directory_is_not_harmless(tmp_path):
     # модели часто передают cwd, равный корню проекта, — это тот же каталог
     for i, root_cwd in enumerate((str(tmp_path), ".", str(tmp_path) + "/")):
         out = _exec_tool(judge=judge)(
-            command=f"git status -{'abc'[i]}", ctx=ctx, cwd=root_cwd
+            command=f"git status -{'sbz'[i]}", ctx=ctx, cwd=root_cwd
         )
         assert out == "executed", root_cwd
     assert len(ctx.asked) == 4

@@ -8,18 +8,17 @@ import sys
 from pathlib import Path
 
 import pytest
-from gc_testkit.settings import fake_ctx
-
 from gc_core.execution.state import SharedStateData
+from gc_core.security import protected_paths
 from gc_core.security.guard_probe import (
     GuardProbeRequest,
     evaluate_guard_probe,
 )
-from gc_core.security import protected_paths
 from gc_core.security.path_policy import enforce_write_guard
 from gc_core.security.permission_store import PermissionStore
 from gc_core.security.protected_paths import protected_decision
 from gc_core.security.read_guard import enforce_read_guard
+from gc_testkit.settings import fake_ctx
 
 
 @pytest.fixture(autouse=True)
@@ -165,7 +164,7 @@ def test_every_tool_settings_directory_is_protected_anywhere(home, parts):
 
 
 def test_the_list_is_exactly_the_reference_list():
-    """Состав — список эталона плюс `.codex` (решение владельца): своих
+    """Состав — список эталона плюс один каталог (решение владельца): своих
     имён сверх этого не добавляем."""
     assert len(protected_paths.TOOL_CONFIG_DIRS) == 10
     assert len(protected_paths.TOOL_CONFIG_FILES) == 37
@@ -174,8 +173,8 @@ def test_the_list_is_exactly_the_reference_list():
 
 
 def test_inside_the_project_only_parts_below_the_root_count(home):
-    """Корень проекта сам лежит в каталоге из списка (рабочая копия в
-    `.claude/worktrees`): файлы проекта — обычные, его настройки — нет."""
+    """Корень проекта сам лежит в каталоге из списка (рабочая копия
+    другого инструмента): файлы проекта — обычные, его настройки — нет."""
     root = home / ".claude" / "worktrees" / "w"
     root.mkdir(parents=True)
     cwd = str(root)
