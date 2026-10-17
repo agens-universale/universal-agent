@@ -615,7 +615,7 @@ class AcpFacade:
         )
 
     async def _confirm(self, session_id: str, request: Any) -> str:
-        from gc_core.security.confirm_port import CONFIRM_DENY_ONCE
+        from gc_core.security.confirm_port import CONFIRM_TIMED_OUT
 
         reply = await self._ask_client(
             session_id,
@@ -624,7 +624,9 @@ class AcpFacade:
             ),
         )
         if reply is None:
-            return CONFIRM_DENY_ONCE
+            # Вопрос не ушёл (сессии нет, ход отменён): человек его не видел
+            # и не отказывал — исход тот же, что у таймаута.
+            return CONFIRM_TIMED_OUT
         # Таймаут приходит отменой: choice_from_incoming даёт timed_out.
         return choice_from_incoming(reply)
 

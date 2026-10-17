@@ -1884,3 +1884,45 @@ async def test_footer_two_line_auto_drops_profile_before_fact_and_fact_last(
         monkeypatch.setattr(scr, "_footer_right_available_width", lambda: 4)
         plain = scr._compose_footer_right().plain
         assert plain.split("\n")[0] == "●"
+
+
+@pytest.mark.asyncio
+async def test_name_kept_for_a_pending_transition_is_squeezed_not_widened(
+    tmp_path, monkeypatch
+):
+    """Пока ждёт переход, имя модели не снимается. На ступенях «снять имя» оно
+    остаётся ужатым до минимума — иначе последний вариант узкого окна был бы
+    шире ужатых ступеней с полным длинным ID."""
+    pytest.importorskip("textual")
+    monkeypatch.chdir(tmp_path)
+    from gc_core.model_router import ModelRouter
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.main import _MODEL_NAME_MIN_COLS
+
+    long_id = "gatewayhub/acme-lab/acme-big-coder-4.5"
+    app = TuiApp(
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "m"}),
+    )
+    app._config_path = str(tmp_path / "config.yml")
+    async with app.run_test(size=(100, 30)) as pilot:
+        scr = pilot.app.screen
+        snapshot = {
+            "models": {long_id: {}, "opus-4.8": {}},
+            "slots": {"light": long_id, "max": "opus-4.8"},
+        }
+        executor_router = ModelRouter(
+            make_settings(snapshot), level_provider=lambda: "light"
+        )
+        live_router = ModelRouter(
+            make_settings(snapshot), level_provider=lambda: "max"
+        )
+        app.active_runner = _call_runner("light", executor_router)
+        monkeypatch.setattr(app, "display_router", lambda: live_router)
+        monkeypatch.setattr(scr, "_footer_right_available_width", lambda: 4)
+
+        plain = scr._compose_footer_right().plain
+        assert long_id not in plain
+        model = plain.split("● ", 1)[1].split(" ", 1)[0]
+        assert "…" in model
+        assert len(model) <= _MODEL_NAME_MIN_COLS

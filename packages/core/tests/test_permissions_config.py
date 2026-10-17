@@ -114,6 +114,82 @@ def test_interpreter_as_the_first_word_of_a_pair_is_rejected(entry):
         _with_readonly([entry])
 
 
+@pytest.mark.parametrize(
+    "entry",
+    ["python3.12", "/usr/bin/python", "C:\\Tools\\pwsh.exe", "node18 x"],
+)
+def test_interpreter_is_recognised_without_path_and_version(entry):
+    """Путь, хвост версии и `.exe` интерпретатор не прячут."""
+    with pytest.raises(ValidationError, match="интерпретатор"):
+        _with_readonly([entry])
+
+
+@pytest.mark.parametrize(
+    "entry", ["sudo", "xargs", "npx", "uvx", "timeout", "/usr/bin/nohup"]
+)
+def test_command_that_runs_another_command_is_rejected(entry):
+    """Запускатель исполнит любую команду, переданную ему аргументом."""
+    with pytest.raises(ValidationError, match="запускает другую команду"):
+        _with_readonly([entry])
+
+
+@pytest.mark.parametrize("entry", ["/usr/bin/git", "git.exe", "GIT"])
+def test_command_with_subcommands_is_recognised_without_path(entry):
+    """Путь, `.exe` и регистр не прячут команду с подкомандами."""
+    with pytest.raises(ValidationError, match="команда с подкомандами"):
+        _with_readonly([entry])
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        "PWSH.EXE",
+        "Python.exe",
+        "CMD",
+        "python3.13t",
+        "python3.12-dbg",
+        "pythonw",
+        "pypy3",
+        "ipython",
+        "py",
+    ],
+)
+def test_interpreter_hidden_by_case_suffix_or_variant_is_rejected(entry):
+    with pytest.raises(ValidationError, match="интерпретатор"):
+        _with_readonly([entry])
+
+
+@pytest.mark.parametrize(
+    "entry",
+    ["stdbuf", "setsid", "ionice", "busybox", "ssh", "pkexec", "wsl"],
+)
+def test_classic_wrappers_are_launchers(entry):
+    with pytest.raises(ValidationError, match="запускает другую команду"):
+        _with_readonly([entry])
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        "uv run",
+        "npm exec",
+        "pnpm dlx",
+        "poetry run",
+        "docker exec",
+        "yarn dlx",
+    ],
+)
+def test_pair_whose_subcommand_runs_any_code_is_rejected(entry):
+    """Подкомандой `run`/`exec`/`dlx`/`x` исполняется произвольный код."""
+    with pytest.raises(ValidationError, match="произвольный код"):
+        _with_readonly([entry])
+
+
+def test_names_that_merely_end_in_digits_stay_allowed():
+    cfg = _with_readonly(["tree", "md5sum"])
+    assert cfg.security.permissions.readonly_commands == ["tree", "md5sum"]
+
+
 @pytest.mark.parametrize("entry", ["git -c", "git -C"])
 def test_pair_with_a_flag_as_the_second_word_is_rejected(entry):
     """`git -c` — флаг, а не подкоманда: пара совпала бы с любой командой
@@ -128,8 +204,10 @@ def test_entry_of_three_or_more_words_is_rejected():
         _with_readonly(["git log --oneline"])
 
 
-def test_interpreter_list_is_the_reference_list():
+def test_interpreter_list_is_the_reference_list_and_python_variants():
+    """22 имени эталона и четыре варианта Python."""
     assert {"python", "bash", "cmd.exe", "Rscript", "env"} <= (
         INTERPRETER_COMMANDS
     )
-    assert len(INTERPRETER_COMMANDS) == 22
+    assert {"pythonw", "pypy", "ipython", "py"} <= INTERPRETER_COMMANDS
+    assert len(INTERPRETER_COMMANDS) == 26

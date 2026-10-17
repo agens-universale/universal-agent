@@ -140,6 +140,16 @@ def action_blocked(verdict: ActionVerdict, payload: Mapping[str, Any]) -> bool:
     return truncated or not verdict.authorized
 
 
+def words_within_budget(words: Sequence[str]) -> list[str]:
+    """Слова человека, урезанные тем же правилом, что в запросе судьи
+    (``_retained_user_words``): самое свежее — целиком, старые делят остаток
+    бюджета справедливой долей. Для переноса через границу с лимитом
+    размера (вход субагента под Temporal)."""
+    entries = [ConversationEntry.user(str(text)) for text in words]
+    kept = _retained_user_words(entries)
+    return [kept[index][KIND_USER] for index in sorted(kept)]
+
+
 def _cut_middle(text: str, limit: int) -> str:
     """Текст в пределах `limit` знаков вместе с пометкой: начало и конец
     сохраняются, вырезается середина — цель команды и запрет пользователя

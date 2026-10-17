@@ -10,7 +10,7 @@ from gc_acp.confirm import permission_message
 from gc_acp.main import apply_acp_runtime_defaults
 from gc_core.execution.human import HumanRequest
 from gc_core.security.call_scope import call_scope
-from gc_core.security.confirm_port import request_confirm
+from gc_core.security.confirm_port import CONFIRM_TIMED_OUT, request_confirm
 from gc_core.security.dual_wrapper import _drive_async
 from gc_core.security.mode_stage import ModeAction, resolve_by_mode
 from gc_core.security.permission_mode import ASK
@@ -650,6 +650,24 @@ async def test_session_cancel_unblocks_confirm(tmp_path):
         "method": "$/cancel_request",
         "params": {"requestId": msg["id"]},
     } in writer.sent
+    await facade.shutdown()
+
+
+async def test_question_that_never_reached_the_client_is_not_a_refusal(
+    tmp_path,
+):
+    """Вопрос не ушёл клиенту (ход уже отменён): человек его не видел и не
+    отказывал — исход «не ответил вовремя», а не «отказал»."""
+    facade, _writer, _agent, session_id, _store = await _ready(tmp_path)
+    facade._sessions[session_id].cancel_requested = True
+    request = HumanRequest(
+        kind="confirm",
+        title="Проверка команды",
+        question="Разрешить запуск?",
+        fields=[["Команда", "ls"]],
+        decision_key="command:ls",
+    )
+    assert await facade._confirm(session_id, request) == CONFIRM_TIMED_OUT
     await facade.shutdown()
 
 

@@ -20,6 +20,7 @@ import json
 import ntpath
 import os
 import posixpath
+import re
 import shlex
 import sys
 from dataclasses import dataclass
@@ -128,15 +129,64 @@ READONLY_PAIR_HEADS: frozenset[str] = frozenset(
 
 #: Оболочки и интерпретаторы: однословной записью `readonly_commands` они
 #: сделали бы безобидным любой код (`python -c …`). Конфиг такую запись
-#: отвергает. Список — список эталона (22 имени); сравнение точное, как у
-#: эталона.
+#: отвергает. Список эталона (22 имени) и варианты Python (`pythonw`,
+#: `pypy`, `ipython`, лаунчер `py`); имя сравнивается через
+#: ``command_name_variants``.
 INTERPRETER_COMMANDS: frozenset[str] = frozenset(
     {
         "sh", "bash", "zsh", "dash", "ksh", "fish", "cmd", "cmd.exe",
         "powershell", "pwsh", "python", "python3", "node", "bun", "deno",
         "ruby", "perl", "php", "lua", "julia", "Rscript", "env",
+        "pythonw", "pypy", "ipython", "py",
     }
 )  # fmt: skip
+
+#: Запускатели: исполняют команду, переданную им аргументом (`sudo rm …`,
+#: `xargs sh -c …`, `npx пакет`). Однословная запись `readonly_commands` с
+#: ними открыла бы любую команду — конфиг такую запись отвергает. Список
+#: неполон: запись в `readonly_commands` — выбор пользователя.
+COMMAND_LAUNCHERS: frozenset[str] = frozenset(
+    {
+        "sudo", "doas", "su", "xargs", "npx", "pnpx", "bunx", "uvx", "pipx",
+        "timeout", "nice", "nohup", "exec", "eval", "command", "time",
+        "watch", "strace", "stdbuf", "setsid", "ionice", "chroot", "flock",
+        "nsenter", "unshare", "runuser", "pkexec", "busybox", "parallel",
+        "script", "ssh", "runas", "wsl",
+    }
+)  # fmt: skip
+
+#: Подкоманды, исполняющие произвольный код (`uv run`, `npm exec`,
+#: `pnpm dlx`, `docker exec`): пара с ними в `readonly_commands` отвергается.
+RUNNER_SUBCOMMANDS: frozenset[str] = frozenset({"run", "exec", "dlx", "x"})
+
+
+def command_name_variants(word: str) -> set[str]:
+    """Имя команды так, как его сравнивают списки выше (в нижнем регистре):
+    без пути, без `.exe`, без регистра (Windows) и без хвоста версии
+    (`/usr/bin/python3.13t` → `python3.13t`, `python`; `python3.12-dbg` →
+    `python`)."""
+    name = re.split(r"[\\/]", word)[-1].lower()
+    name = name.removesuffix(".exe")
+    return {name, re.sub(r"[\d.]+[a-z]?(-[a-z]+)?$", "", name)}
+
+
+def _lowered(names: frozenset[str]) -> frozenset[str]:
+    return frozenset(name.lower() for name in names)
+
+
+def interpreter_named(word: str) -> bool:
+    """Первое слово записи — оболочка или интерпретатор."""
+    return bool(command_name_variants(word) & _lowered(INTERPRETER_COMMANDS))
+
+
+def launcher_named(word: str) -> bool:
+    """Первое слово записи запускает другую команду."""
+    return bool(command_name_variants(word) & COMMAND_LAUNCHERS)
+
+
+def pair_head_named(word: str) -> bool:
+    """Первое слово — команда с подкомандами из таблицы встроенных пар."""
+    return bool(command_name_variants(word) & READONLY_PAIR_HEADS)
 
 
 @dataclass(frozen=True)

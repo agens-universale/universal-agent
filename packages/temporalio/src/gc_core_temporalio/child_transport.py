@@ -11,6 +11,7 @@ from gc_core.execution.contracts import (
     InfrastructureFailure,
 )
 from gc_core.execution.human import HumanRequest, HumanRequestInterrupted
+from gc_core.security.action_judge import words_within_budget
 from gc_core.tools.subagents.runner_transfer import (
     apply_subagent_transfer,
     capture_subagent_transfer,
@@ -207,9 +208,12 @@ class ChildTransport:
         if workflow.patched("subagent-independent-auto-v1"):
             child_context["independent_auto"] = True
         # Слова человека корня — данными: лёгкий снимок родителя переписки и
-        # журнала не несёт, а судье действий ребёнка они нужны.
+        # журнала не несёт, а судье действий ребёнка они нужны. Урезаны тем
+        # же правилом, что в запросе судьи: вход ребёнка ограничен размером.
         if workflow.patched("subagent-root-user-words-v1"):
-            child_context["root_user_words"] = runner._root_user_words()
+            child_context["root_user_words"] = words_within_budget(
+                runner._root_user_words()
+            )
         return child_context
 
     async def execute(self, runner, tool_name, arguments, *, parent_call_id):

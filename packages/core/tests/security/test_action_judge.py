@@ -18,6 +18,7 @@ from gc_core.security.action_judge import (
     ConversationEntry,
     JudgeRequest,
     action_blocked,
+    words_within_budget,
     build_action_judge_messages,
     build_action_judge_payload,
     load_action_judge_prompt,
@@ -481,3 +482,25 @@ def test_worker_probe_reads_the_external_rule_only_when_asked():
 
     assert parts("") == ["system", "user"]
     assert parts(EXTERNAL_PROMPT) == ["external", "system", "user"]
+
+
+def test_words_within_budget_keep_the_freshest_and_fit_the_judge():
+    """Слова человека для входа субагента: каждое не длиннее сообщения, в
+    сумме не больше бюджета судьи, самое свежее — целиком."""
+    huge = "x" * (MESSAGE_CHARS * 3)
+    kept = words_within_budget([huge] * 6 + ["последнее"])
+    assert kept[-1] == "последнее"
+    assert all(len(text) <= MESSAGE_CHARS for text in kept)
+    assert sum(len(text) for text in kept) <= MESSAGES_TOTAL_CHARS
+    assert words_within_budget(["a", "b"]) == ["a", "b"]
+
+
+def test_words_within_budget_keep_an_old_short_ban_like_the_judge():
+    """Урезание то же, что у судьи: короткий старый запрет не выпадает
+    из-за больших вставок после него — справедливая доля, а не жадный срез."""
+    ban = "задача: почисти сборку, prod не трогай"
+    paste = "y" * 50_000
+    kept = words_within_budget([ban, paste, paste, paste, paste, "дальше"])
+    assert kept[0] == ban
+    assert kept[-1] == "дальше"
+    assert sum(len(text) for text in kept) <= MESSAGES_TOTAL_CHARS

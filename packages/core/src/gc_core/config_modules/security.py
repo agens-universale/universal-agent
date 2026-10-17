@@ -68,46 +68,69 @@ def reject_broad_readonly_entry(index: int, raw: str) -> None:
 
     Отвергаются: однословная команда с подкомандами (`git` — это и
     `git push`); интерпретатор или оболочка первым словом в любой записи
-    (с ним исполняется любой код: `python`, `bash -c`); пара, у которой
-    второе слово — флаг (`git -c`: пара совпала бы с любой подкомандой); запись из трёх слов
-    и больше (признаются только слово или пара)."""
-    # Lazy: модуль режимов читает настройки (gc_core.settings →
-    # config_modules) — импорт на уровне модуля замкнул бы цикл.
-    from gc_core.security.permission_mode import (
-        INTERPRETER_COMMANDS,
-        READONLY_PAIR_HEADS,
-    )
-
+    (с ним исполняется любой код: `python`, `bash -c`); запускатель другой
+    команды (`sudo`, `xargs`, `npx`); пара, у которой второе слово — флаг
+    (`git -c`: пара совпала бы с любой подкомандой) или подкоманда,
+    исполняющая произвольный код (`uv run`, `npm exec`); запись из трёх слов
+    и больше (признаются только слово или пара). Имя сравнивается без пути,
+    `.exe`, регистра и хвоста версии. Списки неполны: запись остаётся
+    выбором пользователя."""
     words = raw.split()
     if not words:
         return
+    reason = _broad_entry_reason(words)
+    if reason:
+        raise ValueError(f"элемент [{index}] «{raw}» — {reason}")
+
+
+def _broad_entry_reason(words: list[str]) -> str:
+    # Lazy: модуль режимов читает настройки (gc_core.settings →
+    # config_modules) — импорт на уровне модуля замкнул бы цикл.
+    from gc_core.security.permission_mode import (
+        RUNNER_SUBCOMMANDS,
+        interpreter_named,
+        launcher_named,
+        pair_head_named,
+    )
+
     name = words[0]
-    if len(words) == 1 and name in READONLY_PAIR_HEADS:
-        raise ValueError(
-            f"элемент [{index}] «{name}» — команда с подкомандами: "
-            "однословная запись разрешила бы любую из них; укажите "
-            "подкоманду, например «git log»"
+    if len(words) == 1 and pair_head_named(name):
+        return (
+            "команда с подкомандами: однословная запись разрешила бы любую "
+            "из них; укажите подкоманду, например «git log»"
         )
     # Интерпретатор первым словом — и в паре («bash -c», «python -m»):
     # решение владельца при сборке плана.
-    if name in INTERPRETER_COMMANDS:
-        raise ValueError(
-            f"элемент [{index}] «{name}» — интерпретатор не может быть "
-            "безобидной командой: с ним исполняется любой код; уберите "
+    if interpreter_named(name):
+        return (
+            "интерпретатор не может быть безобидной командой: с ним "
+            "исполняется любой код; уберите элемент"
+        )
+    if launcher_named(name):
+        return (
+            "запускает другую команду: с ним исполняется любая; уберите "
             "элемент"
         )
+    if len(words) >= 3:
+        return (
+            "три слова и больше; укажите команду или пару «команда подкоманда»"
+        )
+    if len(words) == 2:
+        return _pair_reason(words[1], RUNNER_SUBCOMMANDS)
+    return ""
+
+
+def _pair_reason(second: str, runners: frozenset[str]) -> str:
     # Пара сравнивается по первым двум словам команды: флаг вторым словом
     # (`git -c`, `git -C`) открыл бы любую подкоманду после него.
-    if len(words) >= 2 and words[1].startswith("-"):
-        raise ValueError(
-            f"элемент [{index}] «{raw}» — второе слово флаг, а не "
-            "подкоманда; укажите подкоманду"
+    if second.startswith("-"):
+        return "второе слово флаг, а не подкоманда; укажите подкоманду"
+    if second.lower() in runners:
+        return (
+            "подкоманда исполняет произвольный код; укажите подкоманду, "
+            "которая только читает"
         )
-    if len(words) >= 3:
-        raise ValueError(
-            f"элемент [{index}] «{raw}» — три слова и больше; "
-            "укажите команду или пару «команда подкоманда»"
-        )
+    return ""
 
 
 def validate_binary_read_policy(raw_mode: Any) -> str:

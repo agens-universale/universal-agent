@@ -1207,13 +1207,22 @@ class TraceScreen(Screen):
         least = min(full, _MODEL_NAME_MIN_COLS)
         name_shown = snapshot.running or not snapshot.mode_auto
         squeeze = range(full - 1, least - 1, -1) if name_shown else ()
+        # Имя ждущего перехода не снимается (`build`), поэтому ступеней
+        # «снять имя» тогда нет: последней остаётся самая ужатая.
+        drop_name = (
+            ()
+            if snapshot.transition is not None
+            else (
+                (None, False, True, False, None),
+                (None, False, False, False, None),
+            )
+        )
         head_ladder = (
             (_PROFILE_NAME_MAX_COLS, True, True, True, None),
             (None, True, True, True, None),
             (None, True, True, False, None),
             *((None, True, True, False, c) for c in squeeze),
-            (None, False, True, False, None),
-            (None, False, False, False, None),
+            *drop_name,
         )
         # Ценами жертвуем ТОЛЬКО ради пола левой колонки (глиф режима и
         # критичные клавиши).
