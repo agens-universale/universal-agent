@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 from gc_core.message_policy.user_stop import (
+    cancelled_by_user_error,
     cancelled_by_user_output,
     not_started_due_to_user_stop_output,
 )
@@ -51,3 +52,12 @@ def test_envelope_a_message_customizable():
     data = json.loads(cancelled_by_user_output("x", message="custom stop msg"))
     assert data["message"] == "custom stop msg"
     assert data["error"]["message"] == "custom stop msg"
+
+
+def test_guard_body_for_a_check_cut_by_user_stop():
+    assert cancelled_by_user_error(path="/p/a.txt") == {
+        "type": "cancelled_by_user",
+        "path": "/p/a.txt",
+        "reason": "Tool was interrupted by user stop.",
+        "retryable": True,
+    }

@@ -290,6 +290,118 @@ def test_no_binding_no_degradation_attempt_when_already_active(monkeypatch):
     assert calls["n"] == 1  # ни одной лишней (идентичной) попытки
 
 
+def _judge_text(ctx):
+    return run_coro(
+        llm_chat_client.arequest_chat_completion_text(
+            ctx=ctx,
+            state=_service_state(),
+            messages=[{"role": "user", "content": "hi"}],
+            max_tokens=10,
+            consumer="command_judge",
+            isolated_timeout_sec=60,
+        )
+    )
+
+
+def test_isolated_call_failure_leaves_the_main_model_alive(monkeypatch):
+    """Судья без привязки идёт моделью основного хода. Его 5xx — забота самого
+    судьи: алиас основного не попадает в предохранитель, следующий ход
+    резолвится как обычно; повторов клиента нет, таймаут — свой."""
+    router = _router(
+        {"models": {"glm-local": {}}, "slots": {"default": "glm-local"}},
+        level="default",
+    )
+    ctx = _service_ctx(router)
+    seen = []
+
+    def _fake_policy(*, payload_factory, initial_max_tokens, **kwargs):
+        seen.append(kwargs)
+        raise _http_error(500)
+
+    monkeypatch.setattr(
+        llm_chat_client,
+        "arequest_chat_completions_with_policy",
+        as_coro(_fake_policy),
+    )
+
+    with pytest.raises(httpx.HTTPStatusError):
+        _judge_text(ctx)
+
+    assert router.breaker.is_open("glm-local") is False
+    assert router.resolve("main").alias == "glm-local"
+    assert len(seen) == 1
+    assert seen[0]["use_retry"] is False
+    assert seen[0]["adaptive_retry"] is False
+    assert seen[0]["timeout"] == 60
+
+
+def test_isolated_call_does_not_degrade_on_a_fresh_failure(monkeypatch):
+    """Привязанный судья упал: ни отметки в предохранителе, ни второго
+    запроса активной моделью — повторяет шаг судьи, а не клиент."""
+    router = _router(
+        {
+            "models": {"flash": {}, "glm-local": {}},
+            "slots": {"default": "glm-local"},
+            "assign": {"command_judge": "flash"},
+        },
+        level="default",
+    )
+    ctx = _service_ctx(router)
+    calls = {"n": 0}
+
+    def _fake_policy(*, payload_factory, initial_max_tokens, **kwargs):
+        calls["n"] += 1
+        raise _http_error(500)
+
+    monkeypatch.setattr(
+        llm_chat_client,
+        "arequest_chat_completions_with_policy",
+        as_coro(_fake_policy),
+    )
+
+    with pytest.raises(httpx.HTTPStatusError):
+        _judge_text(ctx)
+
+    assert calls["n"] == 1
+    assert router.breaker.is_open("flash") is False
+    assert router.breaker.is_open("glm-local") is False
+
+
+def test_isolated_call_still_degrades_when_the_alias_is_already_open(
+    monkeypatch,
+):
+    """Деградация на активную модель при уже открытом предохранителе — как
+    раньше: мёртвый алиас не спрашивается, отвечает активная."""
+    router = _router(
+        {
+            "models": {"flash": {}, "glm-local": {}},
+            "slots": {"default": "glm-local"},
+            "assign": {"command_judge": "flash"},
+        },
+        level="default",
+    )
+    router.breaker.trip("flash", "down earlier")
+    ctx = _service_ctx(router)
+    calls = {"n": 0}
+
+    def _fake_policy(*, payload_factory, initial_max_tokens, **kwargs):
+        calls["n"] += 1
+        payload = payload_factory(initial_max_tokens)
+        return {
+            "choices": [{"message": {"content": "active answer"}}]
+        }, payload
+
+    monkeypatch.setattr(
+        llm_chat_client,
+        "arequest_chat_completions_with_policy",
+        as_coro(_fake_policy),
+    )
+
+    assert _judge_text(ctx) == "active answer"
+    assert calls["n"] == 1
+    assert router.breaker.is_open("glm-local") is False
+
+
 # ---------------------------------------------------------------------------
 # finish_gate — двойной отказ → его fail-open семантика; command_judge fail-closed
 # ---------------------------------------------------------------------------

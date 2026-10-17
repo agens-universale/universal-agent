@@ -209,6 +209,19 @@ def is_transient_provider_failure(failure) -> bool:
     return status >= 500 or status in _TRANSIENT_STATUSES
 
 
+def retried_by_temporal(call, request, failure) -> bool:
+    """Повторит ли сбой модели Temporal (политика ``activities.model``):
+    транзиентный сбой провайдера в запросе основного агента. Запрос
+    субагента остаётся данными — его fallback на модель родителя решает
+    workflow; вызов со своим бюджетом повторов (судья действий) — тоже:
+    повторяет и считает сбои он сам."""
+    return (
+        call.child_context is None
+        and request.isolated_timeout_sec is None
+        and is_transient_provider_failure(failure)
+    )
+
+
 class AgentActivities:
     """Dependency injection uses real RunContexts and the selected ThreadStore.
 
@@ -466,13 +479,9 @@ class AgentActivities:
         except ModelOperationError as exc:
             result = exc.result
             result.failure = encode_model_failure(exc.cause)
-            if call.child_context is None and is_transient_provider_failure(
-                result.failure
-            ):
+            if retried_by_temporal(call, request, result.failure):
                 # Обрыв, недоступность, 5xx, 429: повторит Temporal по политике
-                # activities.model — ход ждёт провайдера, а не падает. Запрос
-                # субагента остаётся данными: его fallback на модель родителя
-                # решается в workflow.
+                # activities.model — ход ждёт провайдера, а не падает.
                 raise ApplicationError(
                     result.failure.message,
                     result.failure.error_type,

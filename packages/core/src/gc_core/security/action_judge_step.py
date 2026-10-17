@@ -24,9 +24,12 @@ from gc_core.execution.contracts import ExecutionFailure, ModelRequestStopped
 from gc_core.execution.ports import port
 from gc_core.message_policy.permission_denials import (
     ACTION_PAUSED_REASON,
+    JUDGE_NO_CHANNEL_STOP_TEXT,
     action_blocked_error,
+    judge_failures_stop_text,
     mode_denied_error,
 )
+from gc_core.message_policy.user_stop import cancelled_by_user_error
 from gc_core.security.action_judge import (
     action_blocked,
     build_action_judge_messages,
@@ -58,6 +61,10 @@ PAUSE_QUESTION_FIELD = (
     "проверка действий в режиме auto приостановлена после повторных отказов",
 )
 FAILURES_BEFORE_STOP = 10
+#: Таймаут одного запроса к судье, с. Повторов клиента у судьи нет — только
+#: свой один повтор (`_verdict_step`): до остановки по `FAILURES_BEFORE_STOP`
+#: уходит не больше 20 запросов.
+JUDGE_REQUEST_TIMEOUT_SEC = 60
 
 CHECK_FAILED_TYPE = "action_check_failed"
 #: Сбой проверки — не суждение о действии: модель не должна начать его избегать.
@@ -69,16 +76,6 @@ CHECK_FAILED_GUIDANCE = (
     "You may make this call again. Do not replace it with a riskier way of "
     "doing the same thing; if it fails again, continue with the rest of the "
     "task and report it to the user."
-)
-_STOP_FAILURES = (
-    "The automatic review of actions is unavailable: "
-    f"{FAILURES_BEFORE_STOP} checks in a row did not complete. Run stopped — "
-    "retry later or switch the permission mode."
-)
-_STOP_NO_CHANNEL = (
-    "Permission mode 'auto' is not available in this configuration: there is "
-    "no auxiliary model channel to review actions. Run stopped — switch the "
-    "permission mode."
 )
 
 
@@ -107,6 +104,9 @@ async def _arequest_verdict_text(ctx: Any, state: Any, messages: list) -> str:
         request_label="action_judge",
         # Тот же слот модели, что у судьи команд: отдельного ключа конфига нет.
         consumer="command_judge",
+        # Свой бюджет: сбой судьи не отмечает модель основного хода
+        # недоступной и не повторяется клиентом — повторяет и считает шаг.
+        isolated_timeout_sec=JUDGE_REQUEST_TIMEOUT_SEC,
     )
 
 
@@ -168,7 +168,7 @@ def judged_step(
             )
         )
     if not judge_channel_configured(ctx):
-        state.judge_stop_reason = _STOP_NO_CHANNEL
+        state.judge_stop_reason = JUDGE_NO_CHANNEL_STOP_TEXT
         audit("blocked", "action_judge_no_channel")
         return False, _check_failed(**error_fields)
 
@@ -189,11 +189,20 @@ def judged_step(
             ),
         )
     )
-    verdict = yield from _verdict_step(context, state, tool_name, payload)
+    try:
+        verdict = yield from _verdict_step(context, state, tool_name, payload)
+    except ModelRequestStopped:
+        # Стоп хода во время запроса к судье (durable отменил ожидание
+        # модели): не сбой проверки и не отказ. Вызов закрывается телом
+        # отказа-остановки, остаток батча — циклом по ``stop_requested``.
+        audit("blocked", "action_judge_stopped")
+        return False, cancelled_by_user_error(**error_fields)
     if verdict is None:
         state.judge_failures_in_a_row += 1
         if state.judge_failures_in_a_row >= FAILURES_BEFORE_STOP:
-            state.judge_stop_reason = _STOP_FAILURES
+            state.judge_stop_reason = judge_failures_stop_text(
+                FAILURES_BEFORE_STOP
+            )
         audit("blocked", "action_judge_check_failed")
         return False, _check_failed(**error_fields)
 
@@ -303,8 +312,9 @@ def _verdict_step(context, state, tool_name, payload):
             )
             return parse_action_verdict(raw, tags=tags)
         except (ExecutionFailure, ModelRequestStopped):
-            # Отказ исполнения и остановка хода — не обратная связь модели:
-            # их разбирает цикл, а не шаг проверки.
+            # Отказ исполнения и остановка хода — не обратная связь модели и
+            # не повод для повтора: отказ разбирает цикл, остановку —
+            # ``judged_step`` (тело отказа-остановки).
             raise
         except Exception:  # негодный ответ или сбой запроса — не состоялась
             continue

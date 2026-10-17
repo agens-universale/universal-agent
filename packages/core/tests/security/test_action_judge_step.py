@@ -203,6 +203,18 @@ async def test_unparsable_reply_is_a_failed_check_and_a_retry_can_save_it(env):
     assert error["type"] == CHECK_FAILED_TYPE
 
 
+async def test_several_json_blocks_are_a_failed_check_not_an_allow(env):
+    raw = (
+        "Example:\n```json\n" + json.dumps(ALLOW) + "\n```\n"
+        "Verdict:\n```json\n" + json.dumps(BLOCK) + "\n```"
+    )
+    e = env(raw)
+    allowed, error = await _call(e)
+    assert allowed is False and error["type"] == CHECK_FAILED_TYPE
+    assert len(e.judge.requests) == 2  # свой один повтор
+    assert e.state.judge_failures_in_a_row == 1
+
+
 async def test_three_denials_in_a_row_pause_the_judge_and_ask_the_human(env):
     """Как у эталона: после порога auto приостановлен — спорное действие
     спрашивается обычным вопросом, одобрение возвращает auto."""
@@ -328,7 +340,11 @@ async def test_ten_failed_checks_in_a_row_stop_the_run(env):
         await _call(e)
     assert e.state.judge_stop_reason is None
     await _call(e)
-    assert "unavailable" in e.state.judge_stop_reason
+    assert e.state.judge_stop_reason == (
+        "Автоматическая проверка действий недоступна: 10 проверок подряд "
+        "не состоялись. Прогон остановлен — повторите позже или смените "
+        "режим разрешений."
+    )
 
 
 async def test_a_completed_check_resets_the_failure_streak(env):
@@ -346,7 +362,11 @@ async def test_no_judge_channel_stops_the_run_on_the_first_disputed_action(
     allowed, error = await _call(e)
     assert allowed is False and error["type"] == CHECK_FAILED_TYPE
     assert e.judge.requests == []
-    assert "not available in this configuration" in e.state.judge_stop_reason
+    assert e.state.judge_stop_reason == (
+        "Режим разрешений auto недоступен в этой конфигурации: нет канала "
+        "вспомогательной модели для проверки действий. Прогон остановлен — "
+        "смените режим разрешений."
+    )
 
 
 async def test_a_call_outside_the_dispatcher_is_a_failed_check_not_a_pass(env):
@@ -411,22 +431,35 @@ async def test_human_yes_on_the_pause_covers_the_rest_of_this_call(env):
 
 
 async def test_execution_failure_is_not_turned_into_a_failed_check(env):
-    """Отказ исполнения и остановка хода — не обратная связь модели: их
-    разбирает цикл агента, шаг проверки их не глотает и не повторяет."""
-    from gc_core.execution.contracts import (
-        InfrastructureFailure,
-        ModelRequestStopped,
-    )
+    """Отказ исполнения — не обратная связь модели: его разбирает цикл
+    агента, шаг проверки его не глотает и не повторяет."""
+    from gc_core.execution.contracts import InfrastructureFailure
 
-    for exc in (
-        InfrastructureFailure("transport is gone"),
-        ModelRequestStopped(),
-    ):
-        e = env(exc)
-        with pytest.raises(type(exc)):
-            await _call(e)
-        assert len(e.judge.requests) == 1  # без повтора
-        assert e.state.judge_failures_in_a_row == 0
+    e = env(InfrastructureFailure("transport is gone"))
+    with pytest.raises(InfrastructureFailure):
+        await _call(e)
+    assert len(e.judge.requests) == 1  # без повтора
+    assert e.state.judge_failures_in_a_row == 0
+
+
+async def test_stop_during_the_judge_request_closes_the_call_as_stopped(env):
+    """Стоп хода во время запроса к судье (durable отменяет ожидание модели):
+    вызов получает тело отказа-остановки, а не «внутреннюю ошибку тула»; это
+    не сбой проверки и не отказ судьи, повтора нет."""
+    from gc_core.execution.contracts import ModelRequestStopped
+
+    e = env(ModelRequestStopped("Ход остановлен"))
+    allowed, error = await _call(e)
+    assert allowed is False
+    assert error == {
+        "type": "cancelled_by_user",
+        "reason": "Tool was interrupted by user stop.",
+        "retryable": True,
+    }
+    assert len(e.judge.requests) == 1
+    assert e.state.judge_failures_in_a_row == 0
+    assert e.state.judge_stop_reason is None
+    assert e.state.shared.judge_denials_in_a_row == 0
 
 
 async def test_runtime_facts_are_gathered_only_when_the_judge_is_asked(env):
@@ -558,3 +591,41 @@ async def test_channel_predicate_follows_the_run_configuration():
         judge_channel_configured(fake_ctx(model_transport_configured=False))
         is False
     )
+
+
+async def test_the_judge_request_has_its_own_budget(monkeypatch):
+    """Судья действий сам повторяет и считает сбои: клиенту повторять нельзя,
+    предохранитель моделей он не трогает, запрос ограничен своим таймаутом."""
+    from gc_core.summarize import llm as summary_llm
+
+    seen = {}
+
+    async def request(**kwargs):
+        seen.update(kwargs)
+        return "{}"
+
+    monkeypatch.setattr(summary_llm, "arequest_chat_completion_text", request)
+    monkeypatch.setattr(
+        summary_llm, "log_llm_prompt_and_result", lambda **_kwargs: None
+    )
+    ctx = fake_ctx(
+        logger=None, auxiliary_llm=SimpleNamespace(judge_max_tokens=512)
+    )
+    out = await step_module._arequest_verdict_text(
+        ctx, SimpleNamespace(), [{"role": "user", "content": "q"}]
+    )
+    assert out == "{}"
+    assert step_module.JUDGE_REQUEST_TIMEOUT_SEC == 60
+    assert seen["isolated_timeout_sec"] == 60
+    assert seen["consumer"] == "command_judge"
+    assert seen["max_tokens"] == 512
+
+
+async def test_ten_failed_checks_cost_at_most_twenty_requests(env):
+    """Свой бюджет судьи: одна попытка и один повтор на проверку — до
+    остановки уходит не больше 20 запросов."""
+    e = env(RuntimeError("down"))
+    for _ in range(FAILURES_BEFORE_STOP):
+        await _call(e)
+    assert e.state.judge_stop_reason is not None
+    assert len(e.judge.requests) == 2 * FAILURES_BEFORE_STOP == 20

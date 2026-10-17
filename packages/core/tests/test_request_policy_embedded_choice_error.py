@@ -254,3 +254,12 @@ def test_embedded_504_retried_when_max_equals_min(monkeypatch):
     )
     assert res["choices"][0]["message"]["content"] == "ok"
     assert calls["n"] == 2
+
+
+def test_call_without_adaptive_retry_is_sent_once(monkeypatch):
+    """Вызов со своим бюджетом повторов (судья действий): транзиентный сбой
+    уходит наверх с первой попытки — повторяет и считает сбои вызывающий."""
+    calls = _patch_transport(monkeypatch, lambda _n: _embedded_504_response())
+    with pytest.raises(EmbeddedChoiceError):
+        _run_policy(adaptive_retry=False)
+    assert calls["n"] == 1

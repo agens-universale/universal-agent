@@ -1115,11 +1115,16 @@ def _strip_judge_response_text(
 ) -> str:
     # Aux-парсер: ``<think>`` всегда, extra-теги из конфига; fence/JSON поверх.
     text = project_text_for_model(raw_text, tags=tags, strip_think=True)
-    fence_match = re.search(
+    fences = re.findall(
         r"```(?:json)?\s*\n?(.*?)\n?```", text, flags=re.DOTALL | re.IGNORECASE
     )
-    if fence_match:
-        return fence_match.group(1).strip()
+    if sum(body.lstrip().startswith("{") for body in fences) > 1:
+        # Какой из объектов — вердикт, не решить: пример «allow» перед
+        # настоящим «block» прошёл бы за разрешение. Ответ негодный: у судьи
+        # команд это «судья не ответил», у судьи действий — сбой проверки.
+        raise JudgeUnavailable("judge returned several JSON blocks")
+    if fences:
+        return fences[0].strip()
     if text.startswith("```"):
         text = text.strip("`").strip()
         if text.lower().startswith("json"):

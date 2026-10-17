@@ -63,6 +63,7 @@ class LocalOperations:
                     consumer=request.consumer,
                     request_label=request.request_label,
                     payload_overrides=request.payload_overrides,
+                    isolated_timeout_sec=request.isolated_timeout_sec,
                 )
                 result.text = outcome.text
                 result.finish_reason = outcome.finish_reason

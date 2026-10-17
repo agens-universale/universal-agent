@@ -414,6 +414,59 @@ def test_parse_judge_json_unparseable_response_raises():
         command_moderation._parse_judge_json("I cannot classify this payload.")
 
 
+_TWO_FENCED_VERDICTS = (
+    "Example of a safe answer:\n```json\n"
+    '{"verdict": "safe", "reasons": ["example"], "risk_flags": [], '
+    '"confidence": 1.0}\n```\n'
+    "My verdict:\n```json\n"
+    '{"verdict": "potentially_dangerous", "reasons": ["pushes"], '
+    '"risk_flags": ["data_leaving"], "confidence": 0.9}\n```'
+)
+
+
+def test_parse_judge_json_rejects_several_json_blocks():
+    """Какой из блоков вердикт, не решить: пример «safe» перед настоящим
+    вердиктом прошёл бы за разрешение."""
+    with pytest.raises(JudgeUnavailable, match="several JSON blocks"):
+        command_moderation._parse_judge_json(_TWO_FENCED_VERDICTS)
+
+
+def test_parse_judge_json_accepts_one_fenced_block():
+    parsed = command_moderation._parse_judge_json(
+        '```json\n{"verdict": "safe", "reasons": ["ok"], "risk_flags": [], '
+        '"confidence": 0.9}\n```'
+    )
+    assert parsed["verdict"] == "safe"
+
+
+def test_several_json_blocks_take_the_no_answer_path(tmp_path):
+    """Неоднозначный ответ — путь «судья не ответил»: в deny без человека
+    команда блокируется, а не выполняется по примеру «safe»."""
+    ctx = fake_ctx(
+        {
+            "launch_root": str(tmp_path),
+            "security.command_moderation": {"enabled": True, "mode": "deny"},
+        }
+    )
+
+    @moderate_command_execution(
+        payload_arg="command",
+        tool_name="exec_command",
+        judge_client_extractor=lambda *_args, **_kwargs: (
+            lambda _payload: command_moderation._parse_judge_json(
+                _TWO_FENCED_VERDICTS
+            )
+        ),
+    )
+    def run(command: str, **kwargs) -> str:
+        return json.dumps({"ok": True, "command": command})
+
+    result = json.loads(run("git push origin main", ctx=ctx))
+
+    assert result["ok"] is False
+    assert result["error"]["type"] == "unsafe_command_blocked"
+
+
 def test_parse_judge_json_logs_regex_fallback(tmp_path):
     logger = _Logger()
     raw = 'oops {"verdict":"safe","reasons":["ok"],"risk_flags":[]'

@@ -789,3 +789,18 @@ def test_gate_runs_the_tool_only_when_the_judge_allows(auto, category):
     auto.verdict = BLOCK
     assert json.loads(call())["error"]["type"] == "action_blocked"
     assert _McpTool.ran == ["bug"]  # второй вызов не исполнен
+
+
+def test_stop_during_the_judge_request_is_a_stop_body_not_an_error(
+    auto, monkeypatch
+):
+    from gc_core.execution.contracts import ModelRequestStopped
+
+    async def stopped(ctx, state, messages):
+        raise ModelRequestStopped("Ход остановлен")
+
+    monkeypatch.setattr(action_judge_step, "_arequest_verdict_text", stopped)
+    out = json.loads(_do_write(auto, str(auto.outside / "x.txt"), config={}))
+    assert out["ok"] is False
+    assert out["error"]["type"] == "cancelled_by_user"
+    assert out["error"]["path"].endswith("x.txt")

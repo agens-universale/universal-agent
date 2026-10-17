@@ -156,6 +156,10 @@ class ModelRequest:
     request_label: str = "chat_completion"
     payload_overrides: dict[str, Any] | None = None
     set_previous_response_id: bool = True
+    #: Задан — вызов со своим бюджетом повторов (судья действий): одна
+    #: попытка с этим таймаутом, предохранитель не трогается
+    #: (``llm_chat_client.arequest_chat_completion_outcome``).
+    isolated_timeout_sec: float | None = None
     schema_version: int = 1
 
 
