@@ -79,7 +79,7 @@ async def aensure_view_audience(ctx, state):
         return getattr(state, "vision_audience", None)
     from gc_core.settings import settings_of
 
-    main = router.resolve_main_at_level(getattr(state, "turn_level", None))
+    main = router.resolve_main_at_level(getattr(state, "_call_level", None))
     mode = settings_of(ctx).backend.api_mode
     candidates = [main] if mode == "chat_completions" else []
     eyes = _resolve_eyes(router)

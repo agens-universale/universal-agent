@@ -10,6 +10,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from gc_core.auto_routing.request_equivalence import PreparedRequestEquivalence
+
 
 @dataclass(frozen=True)
 class PreparedRunContext:
@@ -125,3 +127,6 @@ class RunContextBindings:
     project_memory_io: Any = None
     summary_trace_sink: Any = None
     collect_garbage: Any = None
+    execution_patch: Any = None
+    prepared_request_equivalence: PreparedRequestEquivalence | None = None
+    subagent_independent_auto: bool = True

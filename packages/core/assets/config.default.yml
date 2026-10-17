@@ -15,7 +15,7 @@ config_version: 1
 # Профили и уровни моделей: указатели на активный профиль/уровень. "" = профиль не выбран.
 # Секции models/slots/assign (реестр моделей, уровни, привязки) — опциональны.
 profile: ""
-level: default               # light | default | max
+level: default               # light | default | max | auto (уровень меняется автоматически по ходу работы)
 
 # Хотите уровни моделей (light/default/max) и привязки потребителей к ним —
 # раскомментируйте и заполните под свои модели (полный референс — demo_profile.yml,
@@ -28,8 +28,11 @@ level: default               # light | default | max
 #     token: ""                # адрес и токен задаются вместе; "" = «без авторизации»
 # slots:
 #   default: glm-local
-# assign:
-#   finish_gate: light
+
+# assign:                      # привязка служебного вызова к уровню или алиасу
+#   finish_gate: max           # без привязки судьи финала, текстового ответа и
+#                              # команд, суммаризация и судья автовыбора работают уровнем
+#                              # default, если слот default задан; остальные — уровнем шага
 
 backend:
   api_mode: chat_completions
@@ -95,6 +98,22 @@ agent:
   # Аварийная LLM-суммаризация трейса при лимите (step/tool/token limit).
   # Возвращает envelope с raw_trace_summary; false — пустой summary.
   limit_trace_summary: true
+  # Автовыбор уровня модели включается через level: auto.
+  auto_routing: true
+  # Сильная модель пары: default — light+default, max — default+max.
+  # auto — начальную пару выбирает судья (assign.routing_judge), если в обеих
+  # парах разные модели; иначе используется обычная пара из двух разных моделей.
+  # Оценка сложности не ниже pair_threshold или сбой судьи выбирают default+max.
+  auto_routing_safe_level: auto
+  # Изменения файлов и памяти, финал и другие важные вызовы выполняет сильная
+  # модель пары; чтение, поиск и запуск команд доступны слабой.
+  auto_routing_two_level:
+    # Шагов подряд на слабой модели до перехода на сильную.
+    weak_steps: 10
+    # Шагов на сильной после важного вызова, сигнала и в начале хода.
+    strong_steps: 2
+    # Порог выбора сложной пары судьёй; целое от 2 до 5.
+    pair_threshold: 3
   loop_detector:
     enabled: true
   no_tool_call_max_count: 3
@@ -197,6 +216,8 @@ paths:
   # Промпт роли запуска (agent_md). Пусто = ролевого промпта нет.
   # В CLI/server/swarm это единственный источник инструкций; задан → замещает всё.
   agent_md_path: ""
+  # Инструкция судьи начальной пары автовыбора (level: auto). Нет файла или пуст — ход на верхней паре.
+  # chat_completions_routing_pair_judge_prompt_path: "prompts/chat_completions_routing_pair_judge_prompt.md"
 
 summary:
   # ~67–80k токенов истории — рассчитано на контекст моделей ~131k (под меньшие

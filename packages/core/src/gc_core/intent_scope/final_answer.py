@@ -1,7 +1,8 @@
-"""Post-accept intent log append for final prose answer (caller layer, not State)."""
+"""Completed turn outcomes in the intent log (caller layer, not State)."""
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
@@ -11,6 +12,7 @@ from gc_core.intent_scope.agent_logging import (
 )
 from gc_core.intent_scope.append import append_final_answer_to_current
 from gc_core.settings import settings_of
+from gc_core.utils.text_preview import head_tail_preview
 
 _logger = logging.getLogger(__name__)
 _LABEL = "final_answer"
@@ -21,6 +23,21 @@ def _append(state: Any, content: str, log: Any) -> None:
         log_intent_scope_delta_appended(
             log, tool_name=_LABEL, delta_chars=len(content)
         )
+
+
+def record_turn_finish_outcome(
+    *, arguments: str, outcome: str, state: Any
+) -> None:
+    """Разрешённый итог — в журнал до flush/compaction, без служебного запроса."""
+    payload = json.loads(arguments)
+    kind = str(payload.get("solution_type") or "").strip()
+    report = str(payload.get("task_report") or "").strip()
+    prefix = kind
+    if outcome in ("fail_open_error", "fail_open_limit"):
+        prefix += f" [{outcome}]"
+    prefix = f"{prefix}: " if prefix else ""
+    text = prefix + head_tail_preview(report, 1000 - len(prefix))
+    append_final_answer_to_current(state, text)
 
 
 async def amaybe_record_final_answer_intent(

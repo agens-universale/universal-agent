@@ -7,6 +7,7 @@ from gc_core.config_modules.cli_args import (
     parse_override_args,
     setting_flag_overrides,
 )
+from gc_core.config_modules.model_registry import LEVEL_VALUES
 from gc_core.security.permission_mode import (
     AVAILABLE_MODES,
     PLAN_EXECUTION_MODES,
@@ -289,9 +290,12 @@ parser.add_argument(
 
 parser.add_argument(
     "--level",
-    choices=["light", "default", "max"],
+    choices=list(LEVEL_VALUES),
     default=None,
-    help="Активный уровень модели на этот запуск (перекрывает config.yml и профиль)",
+    help=(
+        "Активный уровень модели на этот запуск (перекрывает config.yml и профиль); "
+        "auto — уровень меняется автоматически по ходу работы"
+    ),
 )
 
 parser.add_argument(

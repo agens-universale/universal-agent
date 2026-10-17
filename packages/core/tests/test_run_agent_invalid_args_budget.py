@@ -10,6 +10,7 @@ import json
 
 import pytest
 from gc_core import processing_responses as pr
+from gc_core.auto_routing.policy import TOOL_CALL_ERROR
 from gc_testkit import as_coro, run_coro
 from gc_testkit.settings import fake_ctx
 
@@ -17,6 +18,7 @@ from gc_testkit.settings import fake_ctx
 def _state():
     s = type("S", (), {})()
     s.mode_announced = None
+    s.mark_turn_start = lambda: None
     s.messages = []
     s.steps = 0
     s.max_steps = 100
@@ -26,6 +28,7 @@ def _state():
     s.current_user_intent = []
     s.user_intent_log = []
     s.flush_current_user_intent = lambda: None
+    s.tick_signals = set()
     return s
 
 
@@ -95,6 +98,7 @@ def test_invalid_args_reach_the_model_as_tool_output_and_exhaust_the_budget(
 
     assert result == "Agent tools call errors."
     assert state.terminal_outcome == "tool_errors"
+    assert TOOL_CALL_ERROR in state.tick_signals
     # Модель получила именно function_call_output на упавший вызов, а не user-сообщение.
     assert len(received_by_model) == 1
     outputs = [

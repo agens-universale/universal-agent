@@ -1,4 +1,4 @@
-"""Local runtime must preserve develop's requests, results and persisted state.
+"""Legacy routing execution preserves develop's requests, results and persisted state.
 
 Only model HTTP responses are scripted; the executor, loop, tools, finish gate,
 serialization and thread store run normally. Reference digests are captured by
@@ -243,6 +243,57 @@ def normalize(value, workspace, ids=None):
         "state_id",
     }
     if isinstance(value, dict):
+        if "by_category" in value and "by_model" in value:
+            # Новый разрез по моделям проверяется отдельно от неизменённого
+            # эталона develop: суммарные токены и вызовы обязаны совпадать.
+            fields = (
+                "input",
+                "output",
+                "cached",
+                "calls",
+                "missing_usage_calls",
+            )
+            for field in fields:
+                assert sum(
+                    bucket.get(field, 0)
+                    for bucket in value["by_model"].values()
+                ) == sum(
+                    bucket.get(field, 0)
+                    for bucket in value["by_category"].values()
+                )
+            categories = {}
+            attributed_fields = (
+                *fields,
+                "billed_calls",
+                "billed_input",
+                "billed_output",
+                "billed_cached",
+            )
+            for category, bucket in value["by_category"].items():
+                attributed = bucket.get("by_model")
+                if isinstance(attributed, dict):
+                    assert set(attributed) <= set(value["by_model"])
+                    for field in attributed_fields:
+                        assert sum(
+                            part.get(field, 0) for part in attributed.values()
+                        ) == bucket.get(field, 0)
+                categories[category] = {
+                    key: item
+                    for key, item in bucket.items()
+                    if key != "by_model"
+                }
+            for model, bucket in value["by_model"].items():
+                for field in fields:
+                    assert sum(
+                        category.get("by_model", {})
+                        .get(model, {})
+                        .get(field, 0)
+                        for category in value["by_category"].values()
+                    ) == bucket.get(field, 0)
+            value = {
+                key: item for key, item in value.items() if key != "by_model"
+            }
+            value["by_category"] = categories
         result = {}
         for key, item in value.items():
             if key in volatile:
@@ -269,7 +320,14 @@ def normalize(value, workspace, ids=None):
     return value
 
 
-async def run_scenario(name, workspace, monkeypatch, *, streaming=False):
+async def run_scenario(
+    name,
+    workspace,
+    monkeypatch,
+    *,
+    streaming=False,
+    legacy_routing_contract=False,
+):
     monkeypatch.setattr(
         intent_operations, "utc_now_ts", lambda: "2026-01-01T00:00:00Z"
     )
@@ -298,6 +356,9 @@ async def run_scenario(name, workspace, monkeypatch, *, streaming=False):
     monkeypatch.chdir(workspace)
     backend = install(monkeypatch, ScriptedBackend(scenario["turns"]))
     ctx = await acreate_run_context(cfg)
+    if legacy_routing_contract:
+        # Frozen develop references predate the persisted finish outcome.
+        ctx.routing_contract_v2 = False
     executor = AgentExecutor(ctx)
     deltas = []
     human_questions = []
@@ -482,11 +543,15 @@ async def run_scenario(name, workspace, monkeypatch, *, streaming=False):
 
 @pytest.mark.parametrize("name", list(scenarios()))
 @pytest.mark.parametrize("streaming", [False, True], ids=["json", "sse"])
-async def test_local_runtime_matches_develop(
+async def test_legacy_routing_runtime_matches_develop(
     name, streaming, tmp_path, monkeypatch
 ):
     summary, _ = await run_scenario(
-        name, tmp_path, monkeypatch, streaming=streaming
+        name,
+        tmp_path,
+        monkeypatch,
+        streaming=streaming,
+        legacy_routing_contract=True,
     )
     reference = json.loads(REFERENCE.read_text())
     key = f"{name}:{'sse' if streaming else 'json'}"

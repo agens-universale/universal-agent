@@ -237,6 +237,7 @@ def _add_vision_state(state, vision):
     state.state_id = vision.state_id
     state.x_target = vision.x_target
     state.vision_probe_turn = vision.probe_turn
+    state._call_level = vision.call_level or vision.turn_level
     state.turn_level = vision.turn_level
     state.vision_live_ids = frozenset(vision.live_ids)
     state.vision_audience = None

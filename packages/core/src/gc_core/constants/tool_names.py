@@ -36,3 +36,53 @@ EXEC_COMMAND_NAME = "exec_command"
 EXEC_PYTHON_NAME = "exec_python"
 EXEC_FETCH_URL_NAME = "exec_fetch_url"
 DOWNLOAD_FILE_NAME = "download_file"
+
+# FS (продолжение representative-набора)
+FS_APPLY_FILE_EDITS_NAME = "fs_apply_file_edits"
+FS_SEARCH_AND_REPLACE_NAME = "fs_search_and_replace"
+FS_SAVE_BASE64_FILE_NAME = "fs_save_base64_file"
+
+# Skills
+SKILLS_RUN_SCRIPT_NAME = "skills_run_script"
+
+# Тулы записи файлов — создают или меняют файлы проекта.
+FILE_WRITE_TOOL_NAMES = frozenset(
+    {
+        FS_WRITE_FILE_NAME,
+        FS_APPEND_FILE_NAME,
+        FS_APPLY_FILE_EDITS_NAME,
+        FS_SEARCH_AND_REPLACE_NAME,
+        FS_SAVE_BASE64_FILE_NAME,
+        DOWNLOAD_FILE_NAME,
+    }
+)
+
+# Тулы запуска — исполняют команды и код: два встроенных и тул скиллов.
+EXEC_TOOL_NAMES = frozenset(
+    {
+        EXEC_COMMAND_NAME,
+        EXEC_PYTHON_NAME,
+        SKILLS_RUN_SCRIPT_NAME,
+    }
+)
+
+# Тулы записи файлов и исполнения кода; MCP по имени не классифицируются.
+ARTIFACT_TOOL_NAMES = FILE_WRITE_TOOL_NAMES | EXEC_TOOL_NAMES
+
+# «Важные» тулы — меняют мир или закрывают ход: запись файлов, память агента,
+# сжатие контекста, финал и вопрос человеку. Запуск команд сюда не входит
+# (`EXEC_TOOL_NAMES` — отдельный набор); чтение, поиск, `session_think`,
+# `exec_fetch_url` и `turn_intermediate_reply` — тоже. План (`session_todo`) не
+# входит: слабая почти всегда лишь отмечает пункт, а его переигрыш давал половину
+# переигрышей замера 2026-09-24. Тулы субагентов по имени не перечислить
+# (кастомных заводит пользователь) — их распознаёт
+# `gc_core.tools.subagents.registry.is_subagent_tool`.
+IMPORTANT_TOOL_NAMES = FILE_WRITE_TOOL_NAMES | frozenset(
+    {
+        SESSION_MEMORY_TOOL_NAME,
+        PROJECT_MEMORY_TOOL_NAME,
+        SESSION_COMPACT_TOOL_NAME,
+        FINISH_TOOL_NAME,
+        ASK_HUMAN_TOOL_NAME,
+    }
+)

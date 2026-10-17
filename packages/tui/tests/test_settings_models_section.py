@@ -1587,7 +1587,7 @@ async def test_assign_picker_offers_levels_and_aliases_after_active(tmp_path):
     ИЛИ алиас (жёсткий пин). Первый пункт — «активная» (привязки нет)."""
     async with _section(tmp_path, _REGISTRY) as (pilot, scr, _cfg_file):
         ed = _editor(scr)
-        _goto(ed, "assign", consumer="finish_gate")
+        _goto(ed, "assign", consumer="vision")
         await pilot.pause()
         await pilot.press("enter")
         await pilot.pause()
@@ -1601,28 +1601,72 @@ async def test_assign_picker_offers_levels_and_aliases_after_active(tmp_path):
         ]
 
 
-async def test_judge_without_binding_shows_the_level_it_really_uses(tmp_path):
-    """Судья команд и действий без привязки работает уровнем default, а не
-    активным: строка и первый пункт пикера говорят это словами пустого слота
-    («не задана → default», «действует default → модель»). Остальные
-    потребители без привязки — по-прежнему «активная»."""
+def test_command_judge_label_names_both_roles():
+    """Строка судьи команд на экране называет обе его роли: команды в edit
+    и действия в auto."""
     from gc_tui.editors.models_section import consumer_labels
 
     assert consumer_labels()["command_judge"] == (
         "судья command_judge · команды в edit, действия в auto"
     )
+
+
+_FIXED_CONSUMERS = (
+    "finish_gate",
+    "text_answer_judge",
+    "command_judge",
+    "summary",
+    "routing_judge",
+)
+
+
+async def test_fixed_consumer_without_binding_shows_the_level_it_really_uses(
+    tmp_path,
+):
+    """Судьи финала, текстового ответа и команд, суммаризация и судья
+    автовыбора без привязки работают уровнем default (спека PR140 Р1): строка
+    и первый пункт пикера говорят это словами пустого слота («не задана →
+    default», «действует default → модель»). Остальные потребители без
+    привязки — «активная»."""
     async with _section(tmp_path, _REGISTRY) as (pilot, scr, _cfg_file):
         ed = _editor(scr)
-        assert ed._assign_unset_label("command_judge") == "не задана → default"
-        assert ed._assign_unset_label("auto_judge") == "не задана → default"
-        assert ed._assign_unset_label("finish_gate") == "активная"
-        _goto(ed, "assign", consumer="command_judge")
+        for consumer in _FIXED_CONSUMERS:
+            assert ed._assign_unset_label(consumer) == "не задана → default"
+        assert ed._assign_unset_label("vision") == "активная"
+        _goto(ed, "assign", consumer="finish_gate")
         await pilot.pause()
         await pilot.press("enter")
         await pilot.pause()
         first = ed._picker["rows"][0]
         assert first["value"] is None and first["label"] == "не задана"
         assert str(first["desc"]) == "действует default → flash"
+
+
+async def test_fixed_consumer_without_default_slot_shows_active(tmp_path):
+    """Слот default не задан — кодовый уровень не действует: судьи без привязки
+    идут активным уровнем, как прочие потребители, и экран говорит «активная»,
+    а не «не задана → default» с фоллбэком на max."""
+    registry = (
+        "models:\n"
+        "  flash:\n"
+        '    model: "google/gemini-2.5-flash"\n'
+        "  opus:\n"
+        '    model: "anthropic/claude-opus"\n'
+        "slots:\n"
+        '  light: "flash"\n'
+        '  max: "opus"\n'
+    )
+    async with _section(tmp_path, registry) as (pilot, scr, _cfg_file):
+        ed = _editor(scr)
+        for consumer in _FIXED_CONSUMERS:
+            assert ed._assign_unset_label(consumer) == "активная"
+        _goto(ed, "assign", consumer="finish_gate")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        first = ed._picker["rows"][0]
+        assert first["value"] is None and first["label"] == "активная"
+        assert str(first["desc"]).startswith("работает активным уровнем")
 
 
 async def test_alt_down_opens_the_same_picker(tmp_path):
@@ -1872,7 +1916,7 @@ def test_subagent_rows_come_from_the_code_registry():
 def test_consumer_labels_reuse_the_transport_dictionary():
     """6 готовых подписей берутся ИЗ транспортного словаря, а не копируются в UI
     (копия разошлась бы с ним на первой же правке); свой UI-словарь — только для
-    остальных: `auto_judge`, субагенты поимённо, wildcard."""
+    остальных: субагенты поимённо, wildcard."""
     from gc_core.utils.llm_chat_client import CONSUMER_RU_LABEL
     from gc_tui.editors import models_section
 
@@ -1892,28 +1936,6 @@ def test_vision_row_is_in_the_assign_block():
 
     assert "vision" in assign_consumers()
     assert consumer_labels()["vision"] == "модель для зрения"
-
-
-async def test_auto_judge_row_is_present_and_marked_inert(tmp_path):
-    """`auto_judge` в реестре потребителей есть (строка на месте), но до волны C
-    привязка инертна — это говорит ГОЛОВА строки («имя · описание», построчной
-    подсказки у секции больше нет), а не молчит.
-
-    Что Router его не зовёт и без привязки идёт уровнем default, а не активной
-    моделью, — страж волны A (`tests/router/test_model_router.py::
-    test_auto_judge_without_binding_uses_default_statically_not_active_level`);
-    здесь не дублируется."""
-    from gc_tui.editors.models_section import consumer_labels
-
-    assert (
-        consumer_labels()["auto_judge"]
-        == "судья auto_judge · появится с авто-выбором"
-    )
-    async with _section(tmp_path, _REGISTRY) as (pilot, scr, _cfg_file):
-        ed = _editor(scr)
-        _goto(ed, "assign", consumer="auto_judge")
-        await pilot.pause()
-        assert "появится с авто-выбором" in _texts(scr)
 
 
 async def test_unset_slot_hint_names_the_real_fallback(tmp_path):
@@ -2039,7 +2061,7 @@ async def test_picker_rows_carry_the_same_color_semantics(tmp_path):
 
     async with _section(tmp_path, _REGISTRY) as (pilot, scr, _cfg_file):
         ed = _editor(scr)
-        _goto(ed, "assign", consumer="finish_gate")
+        _goto(ed, "assign", consumer="vision")
         await pilot.pause()
         await pilot.press("enter")
         await pilot.pause()

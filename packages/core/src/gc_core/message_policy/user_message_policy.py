@@ -67,6 +67,17 @@ def wrap_technical_user_content(
     return f'<technical type="{technical_type}">{raw}</technical>'
 
 
+def build_model_fallback_resume_message(state_id: str) -> dict[str, str]:
+    return {
+        "role": "user",
+        "content": wrap_technical_user_content(
+            "Continue the existing task from the recorded history and tool results. "
+            "The failed model request was replaced; do not repeat completed tool calls."
+        ),
+        "id": f"m_model_fallback_{state_id}",
+    }
+
+
 def wrap_skill_resolution_technical_instruction(skill_name: str) -> str:
     """
     Technical-сообщение для CLI: решать запрос через skill с данным именем;

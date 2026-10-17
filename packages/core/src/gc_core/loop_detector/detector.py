@@ -118,29 +118,17 @@ def _parse_stripped_args(
     tools_data: dict[str, Any] | None,
     settings: AppConfig | None = None,
 ) -> dict[str, Any] | None:
+    """Аргументы без служебных полей и с подготовкой фабрики инструмента."""
+    from gc_core.tools.arguments_validation import prepare_tool_arguments
+
     entry = (tools_data or {}).get(tool_name) or {}
-    if isinstance(raw_arguments, dict):
-        parsed: Any = dict(raw_arguments)
-    else:
-        try:
-            parsed = json.loads(raw_arguments or "{}")
-        except (TypeError, ValueError):
-            return None
-    if not isinstance(parsed, dict):
-        return None
-    fabric = entry.get("tool_fabric")
-    prepare = getattr(fabric, "prepare_args_before_strip", None)
-    if callable(prepare):
-        parsed = prepare(parsed)
-        if not isinstance(parsed, dict):
-            return None
-    injected = _injected_field_names(tools_data, settings)
-    if not injected:
-        return parsed
-    stripped = dict(parsed)
-    for field in injected:
-        stripped.pop(field, None)
-    return stripped
+    # Пустая строка — пустой объект, как у отпечатка до помощника: иначе повтор
+    # вызова без аргументов не считался бы вовсе.
+    entry = {
+        **entry,
+        "injected_fields": _injected_field_names(tools_data, settings),
+    }
+    return prepare_tool_arguments(raw_arguments or "{}", entry)[0]
 
 
 def _count_consecutive(window: list[str], fp: str) -> int:

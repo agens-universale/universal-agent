@@ -140,7 +140,10 @@ class TestResilience:
         from gc_core import startup_notices as mod
         from gc_core.tools.subagents import registry as reg
 
+        calls = []
+
         def _boom(*_a, **_kw):
+            calls.append(True)
             raise RuntimeError("дискавери сломался")
 
         # Патчим то, что ``_subagent_definitions`` импортирует по имени из
@@ -157,6 +160,7 @@ class TestResilience:
             )
             == []
         )
+        assert calls == [True]
 
     def test_run_context_keeps_discovery_diagnostics(self, tmp_path):
         # Дискавери на контексте рана запоминается вместе с диагностикой:

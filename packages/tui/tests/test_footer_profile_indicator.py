@@ -344,7 +344,7 @@ async def test_footer_stacks_usage_before_dropping_profile(
 
 # --- Task 15: переход «сейчас → станет» посреди хода -------------------------
 #
-# Пин хода живёт в `state.turn_level` (`turn_boundary.begin_turn`), а Router,
+# Уровень подготовленного вызова живёт в `state._call_level`, а Router,
 # резолвящий модель, зафиксирован при сборке executor'а («снимок» models/slots/
 # assign — не живой `app.display_router()`, который отражает /profiles
 # мгновенно): смена профиля посреди хода не должна подменить «факт» на модель
@@ -353,32 +353,32 @@ async def test_footer_stacks_usage_before_dropping_profile(
 # просто с другим активным уровнем) у живого `display_router()`.
 
 
-def _pinned_runner(level: str, router):
+def _call_runner(level: str, router):
     class _FakeRunner:
         def is_running(self):
             return True
 
-        def pinned_level(self):
+        def call_level(self):
             return level
 
-        def pinned_router(self):
+        def executor_router(self):
             return router
 
     return _FakeRunner()
 
 
-def _pinned_runner_with_usage(level: str, router, usage_snapshot):
-    """Как `_pinned_runner`, но и с активными usage-сегментами (запрос ·
+def _call_runner_with_usage(level: str, router, usage_snapshot):
+    """Как `_call_runner`, но и с активными usage-сегментами (запрос ·
     сессия) — нужно, чтобы вынудить usage-блок на 2-ю строку (Task 16)."""
 
     class _FakeRunner:
         def is_running(self):
             return True
 
-        def pinned_level(self):
+        def call_level(self):
             return level
 
-        def pinned_router(self):
+        def executor_router(self):
             return router
 
         def usage_snapshot(self):
@@ -409,13 +409,13 @@ async def test_footer_shows_transition_with_dot_when_level_changes_mid_turn(
             "models": {"minimax-m3": {}, "opus-4.8": {}},
             "slots": {"light": "minimax-m3", "max": "opus-4.8"},
         }
-        pinned_router = ModelRouter(
+        executor_router = ModelRouter(
             make_settings(snapshot), level_provider=lambda: "light"
         )
         live_router = ModelRouter(
             make_settings(snapshot), level_provider=lambda: "max"
         )
-        app.active_runner = _pinned_runner("light", pinned_router)
+        app.active_runner = _call_runner("light", executor_router)
         monkeypatch.setattr(app, "display_router", lambda: live_router)
 
         plain = scr._compose_footer_right().plain
@@ -451,13 +451,13 @@ async def test_footer_shows_new_profile_name_and_dotted_transition_when_both_cha
             "models": {"opus-4.8": {}},
             "slots": {"max": "opus-4.8"},
         }
-        pinned_router = ModelRouter(
+        executor_router = ModelRouter(
             make_settings(old_snapshot), level_provider=lambda: "light"
         )
         live_router = ModelRouter(
             make_settings(new_snapshot), level_provider=lambda: "max"
         )
-        app.active_runner = _pinned_runner("light", pinned_router)
+        app.active_runner = _call_runner("light", executor_router)
         monkeypatch.setattr(app, "display_router", lambda: live_router)
         ref = ProfileRef(name="other", path=Path("x"), root_kind="project")
         monkeypatch.setattr(app, "active_profile_ref", lambda: ref)
@@ -496,13 +496,13 @@ async def test_footer_shows_transition_without_dot_when_only_profile_changes(
             "models": {"gpt-5.5": {}},
             "slots": {"default": "gpt-5.5"},
         }
-        pinned_router = ModelRouter(
+        executor_router = ModelRouter(
             make_settings(old_snapshot), level_provider=lambda: "default"
         )
         live_router = ModelRouter(
             make_settings(new_snapshot), level_provider=lambda: "default"
         )
-        app.active_runner = _pinned_runner("default", pinned_router)
+        app.active_runner = _call_runner("default", executor_router)
         monkeypatch.setattr(app, "display_router", lambda: live_router)
 
         plain = scr._compose_footer_right().plain
@@ -534,7 +534,7 @@ async def test_footer_no_arrow_when_future_model_matches_fact(
         router = ModelRouter(
             make_settings(snapshot), level_provider=lambda: "default"
         )
-        app.active_runner = _pinned_runner("default", router)
+        app.active_runner = _call_runner("default", router)
         monkeypatch.setattr(app, "display_router", lambda: router)
 
         plain = scr._compose_footer_right().plain
@@ -545,7 +545,7 @@ async def test_footer_no_arrow_when_future_model_matches_fact(
 @pytest.mark.asyncio
 async def test_footer_no_arrow_when_turn_finished(tmp_path, monkeypatch):
     """Ход завершился (раннер больше не бежит) — прежний вид без стрелки, даже
-    если раннер ещё не выброшен и пин формально доступен (спека Task 15)."""
+    если раннер ещё не выброшен и последний уровень вызова доступен (спека Task 15)."""
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
     from gc_core.model_router import ModelRouter
@@ -562,7 +562,7 @@ async def test_footer_no_arrow_when_turn_finished(tmp_path, monkeypatch):
             "models": {"minimax-m3": {}, "opus-4.8": {}},
             "slots": {"light": "minimax-m3", "max": "opus-4.8"},
         }
-        pinned_router = ModelRouter(
+        executor_router = ModelRouter(
             make_settings(snapshot), level_provider=lambda: "light"
         )
         live_router = ModelRouter(
@@ -573,11 +573,11 @@ async def test_footer_no_arrow_when_turn_finished(tmp_path, monkeypatch):
             def is_running(self):
                 return False
 
-            def pinned_level(self):
+            def call_level(self):
                 return "light"
 
-            def pinned_router(self):
-                return pinned_router
+            def executor_router(self):
+                return executor_router
 
         app.active_runner = _FinishedRunner()
         monkeypatch.setattr(app, "display_router", lambda: live_router)
@@ -611,13 +611,13 @@ async def test_footer_drops_profile_name_before_dropping_transition_block(
             "models": {"minimax-m3": {}, "opus-4.8": {}},
             "slots": {"light": "minimax-m3", "max": "opus-4.8"},
         }
-        pinned_router = ModelRouter(
+        executor_router = ModelRouter(
             make_settings(snapshot), level_provider=lambda: "light"
         )
         live_router = ModelRouter(
             make_settings(snapshot), level_provider=lambda: "max"
         )
-        app.active_runner = _pinned_runner("light", pinned_router)
+        app.active_runner = _call_runner("light", executor_router)
         monkeypatch.setattr(app, "display_router", lambda: live_router)
         ref = ProfileRef(
             name="very-long-profile-name", path=Path("x"), root_kind="project"
@@ -658,13 +658,13 @@ async def test_footer_drops_transition_block_when_still_too_narrow_without_profi
             "models": {"minimax-m3": {}, "opus-4.8": {}},
             "slots": {"light": "minimax-m3", "max": "opus-4.8"},
         }
-        pinned_router = ModelRouter(
+        executor_router = ModelRouter(
             make_settings(snapshot), level_provider=lambda: "light"
         )
         live_router = ModelRouter(
             make_settings(snapshot), level_provider=lambda: "max"
         )
-        app.active_runner = _pinned_runner("light", pinned_router)
+        app.active_runner = _call_runner("light", executor_router)
         monkeypatch.setattr(app, "display_router", lambda: live_router)
         ref = ProfileRef(
             name="very-long-profile-name", path=Path("x"), root_kind="project"
@@ -731,14 +731,16 @@ async def test_footer_two_line_layout_keeps_profile_and_transition(
             "models": {"minimax-m3": {}, "opus-4.8": {}},
             "slots": {"light": "minimax-m3", "max": "opus-4.8"},
         }
-        pinned_router = ModelRouter(
+        executor_router = ModelRouter(
             make_settings(snapshot), level_provider=lambda: "light"
         )
         live_router = ModelRouter(
             make_settings(snapshot), level_provider=lambda: "max"
         )
-        app.active_runner = _pinned_runner_with_usage(
-            "light", pinned_router, (_meta(2_000_000, 0), _meta(1_000_000, 0))
+        app.active_runner = _call_runner_with_usage(
+            "light",
+            executor_router,
+            (_meta(2_000_000, 0), _meta(1_000_000, 0)),
         )
         monkeypatch.setattr(app, "display_router", lambda: live_router)
         ref = ProfileRef(name="other", path=Path("x"), root_kind="project")
@@ -813,14 +815,16 @@ async def test_footer_two_line_layout_drops_profile_before_transition(
             "models": {"minimax-m3": {}, "opus-4.8": {}},
             "slots": {"light": "minimax-m3", "max": "opus-4.8"},
         }
-        pinned_router = ModelRouter(
+        executor_router = ModelRouter(
             make_settings(snapshot), level_provider=lambda: "light"
         )
         live_router = ModelRouter(
             make_settings(snapshot), level_provider=lambda: "max"
         )
-        app.active_runner = _pinned_runner_with_usage(
-            "light", pinned_router, (_meta(2_000_000, 0), _meta(1_000_000, 0))
+        app.active_runner = _call_runner_with_usage(
+            "light",
+            executor_router,
+            (_meta(2_000_000, 0), _meta(1_000_000, 0)),
         )
         monkeypatch.setattr(app, "display_router", lambda: live_router)
         ref = ProfileRef(
@@ -902,14 +906,16 @@ async def test_footer_drops_transition_last_when_two_line_still_too_narrow(
             "models": {"minimax-m3": {}, "opus-4.8": {}},
             "slots": {"light": "minimax-m3", "max": "opus-4.8"},
         }
-        pinned_router = ModelRouter(
+        executor_router = ModelRouter(
             make_settings(snapshot), level_provider=lambda: "light"
         )
         live_router = ModelRouter(
             make_settings(snapshot), level_provider=lambda: "max"
         )
-        app.active_runner = _pinned_runner_with_usage(
-            "light", pinned_router, (_meta(2_000_000, 0), _meta(1_000_000, 0))
+        app.active_runner = _call_runner_with_usage(
+            "light",
+            executor_router,
+            (_meta(2_000_000, 0), _meta(1_000_000, 0)),
         )
         monkeypatch.setattr(app, "display_router", lambda: live_router)
 
@@ -968,14 +974,16 @@ async def test_footer_one_line_priority_kept_with_profile_transition_and_usage(
             "models": {"minimax-m3": {}, "opus-4.8": {}},
             "slots": {"light": "minimax-m3", "max": "opus-4.8"},
         }
-        pinned_router = ModelRouter(
+        executor_router = ModelRouter(
             make_settings(snapshot), level_provider=lambda: "light"
         )
         live_router = ModelRouter(
             make_settings(snapshot), level_provider=lambda: "max"
         )
-        app.active_runner = _pinned_runner_with_usage(
-            "light", pinned_router, (_meta(2_000_000, 0), _meta(1_000_000, 0))
+        app.active_runner = _call_runner_with_usage(
+            "light",
+            executor_router,
+            (_meta(2_000_000, 0), _meta(1_000_000, 0)),
         )
         monkeypatch.setattr(app, "display_router", lambda: live_router)
         ref = ProfileRef(name="other", path=Path("x"), root_kind="project")
@@ -1125,9 +1133,9 @@ def _arm_transition(app, monkeypatch, *, profile=None, usage=None):
     )
     live = ModelRouter(make_settings(snapshot), level_provider=lambda: "max")
     app.active_runner = (
-        _pinned_runner_with_usage("light", pinned, usage)
+        _call_runner_with_usage("light", pinned, usage)
         if usage
-        else _pinned_runner("light", pinned)
+        else _call_runner("light", pinned)
     )
     monkeypatch.setattr(app, "display_router", lambda: live)
     monkeypatch.setattr(app, "collect_footer_notices", list)
@@ -1584,3 +1592,295 @@ async def test_footer_resolves_context_meter_once_per_frame(
         assert len(calls) == 1, (
             f"метр контекста резолвился {len(calls)} раз(а) за кадр"
         )
+
+
+def _running_runner(router, usage_snapshot=None):
+    """Раннер бегущего хода: Router, зафиксированный при сборке executor'а
+    (не живой `display_router()`)."""
+
+    class _FakeRunner:
+        def is_running(self):
+            return True
+
+        def executor_router(self):
+            return router
+
+        def usage_snapshot(self):
+            return usage_snapshot
+
+    return _FakeRunner()
+
+
+@pytest.mark.asyncio
+async def test_footer_running_turn_follows_live_level_through_executor_router(
+    tmp_path, monkeypatch
+):
+    """Без ручного пина футер следует уровню Router текущего executor."""
+    pytest.importorskip("textual")
+    monkeypatch.chdir(tmp_path)
+    from gc_core.model_router import ModelRouter
+    from gc_tui.app import TuiApp
+
+    snapshot = {
+        "models": {"minimax-m3": {}, "opus-4.8": {}},
+        "slots": {"light": "minimax-m3", "max": "opus-4.8"},
+    }
+    level = {"value": "light"}
+    executor = ModelRouter(
+        make_settings(snapshot), level_provider=lambda: level["value"]
+    )
+    app = TuiApp(
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "m"}),
+    )
+    app._config_path = str(tmp_path / "config.yml")
+    app.active_runner = _running_runner(executor)
+    monkeypatch.setattr(app, "_level_provider", lambda: level["value"])
+    monkeypatch.setattr(app, "display_router", lambda: executor)
+    monkeypatch.setattr(app, "collect_footer_notices", lambda: [])
+    async with app.run_test(size=(120, 24)) as pilot:
+        scr = app.screen
+        assert "minimax-m3" in scr._compose_footer_right().plain
+        assert "→" not in scr._compose_footer_right().plain
+        level["value"] = "max"
+        assert "opus-4.8" in scr._compose_footer_right().plain
+        assert "→" not in scr._compose_footer_right().plain
+
+
+@pytest.mark.asyncio
+async def test_footer_running_turn_keeps_executor_model_when_profile_switches(
+    tmp_path, monkeypatch
+):
+    """Смена профиля посреди хода: имя модели — из Router'а executor'а (снимок
+    старого профиля), живая витрина нового профиля его не подменяет."""
+    pytest.importorskip("textual")
+    monkeypatch.chdir(tmp_path)
+    from gc_tui.app import TuiApp
+    from gc_core.model_router import ModelRouter
+
+    old = ModelRouter(
+        make_settings(
+            {"models": {"minimax-m3": {}}, "slots": {"light": "minimax-m3"}}
+        ),
+        level_provider=lambda: "light",
+    )
+    new = ModelRouter(
+        make_settings(
+            {"models": {"other-model": {}}, "slots": {"light": "other-model"}}
+        ),
+        level_provider=lambda: "light",
+    )
+    app = TuiApp(
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "m"}),
+    )
+    app._config_path = str(tmp_path / "config.yml")
+    app.active_runner = _running_runner(old)
+    monkeypatch.setattr(app, "_level_provider", lambda: "light")
+    monkeypatch.setattr(app, "display_router", lambda: new)
+    monkeypatch.setattr(app, "collect_footer_notices", lambda: [])
+    async with app.run_test(size=(120, 24)) as pilot:
+        plain = app.screen._compose_footer_right().plain
+        assert "minimax-m3" in plain and "other-model" not in plain
+
+
+@pytest.mark.asyncio
+async def test_footer_idle_uses_display_router(tmp_path, monkeypatch):
+    """Хода нет — футер показывает живой резолв витрины."""
+    pytest.importorskip("textual")
+    monkeypatch.chdir(tmp_path)
+    from gc_tui.app import TuiApp
+    from gc_core.model_router import ModelRouter
+
+    live = ModelRouter(
+        make_settings(
+            {"models": {"other-model": {}}, "slots": {"light": "other-model"}}
+        ),
+        level_provider=lambda: "light",
+    )
+    app = TuiApp(
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "m"}),
+    )
+    app._config_path = str(tmp_path / "config.yml")
+    app.active_runner = None
+    monkeypatch.setattr(app, "display_router", lambda: live)
+    monkeypatch.setattr(app, "collect_footer_notices", lambda: [])
+    async with app.run_test(size=(120, 24)) as pilot:
+        assert "other-model" in app.screen._compose_footer_right().plain
+
+    # Раннер есть (не обнулён после стопа хода), но is_running() -> False:
+    # футер обязан взять живую витрину (display_router), а не Router раннера —
+    # иначе после стопа футер продолжал бы показывать модель прошлого хода.
+    stale = ModelRouter(
+        make_settings(
+            {"models": {"stale-model": {}}, "slots": {"light": "stale-model"}}
+        ),
+        level_provider=lambda: "light",
+    )
+    app2 = TuiApp(
+        threads_dir=str(tmp_path / "t2"),
+        settings=tui_settings({"agent.model": "m"}),
+    )
+    app2._config_path = str(tmp_path / "config.yml")
+    app2.active_runner = _running_runner(stale)
+    app2.active_runner.is_running = lambda: False
+    monkeypatch.setattr(app2, "display_router", lambda: live)
+    monkeypatch.setattr(app2, "collect_footer_notices", lambda: [])
+    async with app2.run_test(size=(120, 24)) as pilot2:
+        plain = app2.screen._compose_footer_right().plain
+        assert "other-model" in plain
+        assert "stale-model" not in plain
+
+
+@pytest.mark.asyncio
+async def test_footer_drops_model_name_after_profile_but_keeps_dot(
+    tmp_path, monkeypatch
+):
+    """Лесенка (спека §7.1): после имени профиля снимается имя модели, точка остаётся."""
+    pytest.importorskip("textual")
+    monkeypatch.chdir(tmp_path)
+    from gc_tui.app import TuiApp
+
+    app = TuiApp(
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "m"}),
+    )
+    app._config_path = str(tmp_path / "config.yml")
+    _arm_unpinned_running(app, monkeypatch, profile="work")
+    async with app.run_test(size=(120, 24)) as pilot:
+        scr = app.screen
+        wide = scr._compose_footer_right().plain
+        assert "work" in wide and "minimax-m3" in wide
+        # сузить до ширины, где имя профиля уже снято, а имя модели ещё нет
+        # (подобрать по существующему образцу `_narrowest_named_variant`), затем ещё уже:
+        monkeypatch.setattr(scr, "_footer_right_available_width", lambda: 4)
+        narrow = scr._compose_footer_right().plain
+        assert "●" in narrow
+        assert "minimax-m3" not in narrow and "work" not in narrow
+
+
+def _arm_unpinned_running(app, monkeypatch, *, profile=None, usage=None):
+    """Бегущий ход на executor-Router (уровень «light» → minimax-m3), живая
+    витрина — на другом уровне («max») + опционально usage-сегменты и активный
+    профиль — общая обвязка ступенчатых тестов."""
+    from gc_core.config_modules.profiles import ProfileRef
+    from gc_core.model_router import ModelRouter
+
+    snapshot = {
+        "models": {"minimax-m3": {}, "opus-4.8": {}},
+        "slots": {"light": "minimax-m3", "max": "opus-4.8"},
+    }
+    executor = ModelRouter(
+        make_settings(snapshot), level_provider=lambda: "light"
+    )
+    live = ModelRouter(make_settings(snapshot), level_provider=lambda: "max")
+    app.active_runner = _running_runner(executor, usage)
+    monkeypatch.setattr(app, "display_router", lambda: live)
+    monkeypatch.setattr(app, "collect_footer_notices", list)
+    if profile is not None:
+        monkeypatch.setattr(
+            app,
+            "active_profile_ref",
+            lambda: ProfileRef(
+                name=profile, path=Path("x"), root_kind="project"
+            ),
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("prices_down", [False, True])
+async def test_footer_auto_fact_keeps_profile_and_usage_on_both_layouts(
+    tmp_path, monkeypatch, prices_down
+):
+    """Перенос цен не теряет профиль и факт auto; широкий футер остаётся однострочным."""
+    from gc_tui.app import TuiApp
+    from gc_tui.services.usage_meter import compose_adaptive_footer_right
+    from rich.cells import cell_len
+
+    app = TuiApp(
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "m", "pricing": _PRICING}),
+    )
+    app._config_path = str(tmp_path / "config.yml")
+    _arm_unpinned_running(
+        app,
+        monkeypatch,
+        profile="other",
+        usage=(_usage_meta(2_000_000, 0), _usage_meta(1_000_000, 0)),
+    )
+    app.tui_state.active_task_id = "t1"
+    monkeypatch.setattr(app, "auto_mode_active", lambda: True)
+    async with app.run_test(size=(200, 30)):
+        scr = app.screen
+        head = scr._footer_head(with_profile=True)
+        request, session = scr._usage_segments()
+        expected = compose_adaptive_footer_right(
+            head,
+            request,
+            session,
+            available_width=0 if prices_down else 10_000,
+        )
+        width = max(cell_len(line) for line in expected.plain.split("\n"))
+        monkeypatch.setattr(
+            scr, "_footer_right_available_width", lambda: width
+        )
+        plain = scr._compose_footer_right().plain
+        assert plain.startswith("other ● → ● minimax-m3")
+        assert "запрос" in plain and "сессия" in plain
+        assert ("\n" in plain) is prices_down
+
+
+@pytest.mark.asyncio
+async def test_footer_two_line_auto_drops_profile_before_fact_and_fact_last(
+    tmp_path, monkeypatch
+):
+    """При дефиците ширины профиль и имя модели уходят раньше стрелки факта auto."""
+    from gc_tui.app import TuiApp
+    from gc_tui.services.usage_meter import compose_adaptive_footer_right
+    from rich.cells import cell_len
+
+    app = TuiApp(
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "m", "pricing": _PRICING}),
+    )
+    app._config_path = str(tmp_path / "config.yml")
+    _arm_unpinned_running(
+        app,
+        monkeypatch,
+        profile="very-long-profile-name",
+        usage=(_usage_meta(2_000_000, 0), _usage_meta(1_000_000, 0)),
+    )
+    from gc_core.model_router import ModelRouter
+
+    model = "very-long-running-model-name-that-exceeds-usage-width"
+    app.active_runner = _running_runner(
+        ModelRouter(
+            make_settings(
+                {"models": {model: {}}, "slots": {"default": model}}
+            ),
+            level_provider=lambda: "default",
+        ),
+        (_usage_meta(2_000_000, 0), _usage_meta(1_000_000, 0)),
+    )
+    app.tui_state.active_task_id = "t1"
+    monkeypatch.setattr(app, "auto_mode_active", lambda: True)
+    async with app.run_test(size=(200, 30)):
+        scr = app.screen
+        request, session = scr._usage_segments()
+        no_profile = compose_adaptive_footer_right(
+            scr._footer_head(with_profile=False),
+            request,
+            session,
+            available_width=0,
+        )
+        width = max(cell_len(line) for line in no_profile.plain.split("\n"))
+        monkeypatch.setattr(
+            scr, "_footer_right_available_width", lambda: width
+        )
+        plain = scr._compose_footer_right().plain
+        assert "\n" in plain
+        assert plain.startswith(f"● → ● {model}")
+        monkeypatch.setattr(scr, "_footer_right_available_width", lambda: 4)
+        plain = scr._compose_footer_right().plain
+        assert plain.split("\n")[0] == "●"

@@ -21,6 +21,7 @@ from typing import Dict
 from gc_core.config_modules.pricing import (
     ResolvedTariff,
     coerce_pricing,
+    pricing_has_rates,
     resolve_model_tariff,
 )
 from gc_core.usage.account import LEGACY_CURRENCY, MONEY_FIELD, UsageAccount
@@ -76,6 +77,17 @@ class CostReport:
     has_unpriced: bool = (
         False  # есть категория с остатком, цену которого узнать нечем
     )
+    # Задана ли хоть одна ставка (`pricing_has_rates`): без ставок неизвестная
+    # трата не показывается — стоимость скрыта, о чём сообщает старт.
+    rates_configured: bool = False
+
+    @property
+    def unknown_only(self) -> bool:
+        """Денег не известно ни копейки, но трата есть — показать «?», а не
+        выдавать сессию за бесплатную (спека PR140 Р5)."""
+        return (
+            not self.has_cost and self.has_unpriced and self.rates_configured
+        )
 
     @property
     def multi_currency(self) -> bool:
@@ -112,36 +124,63 @@ def _billed_parts(bucket: dict, legacy_currency: str) -> list[CostPart]:
     ]
 
 
+def _unbilled_tokens(bucket: dict) -> tuple[int, int, int]:
+    return tuple(
+        max(
+            0,
+            int(bucket.get(field, 0) or 0)
+            - int(bucket.get("billed_" + field, 0) or 0),
+        )
+        for field in ("input", "output", "cached")
+    )
+
+
+def _add_tariff(
+    amounts: Dict[str, float],
+    tariff: ResolvedTariff,
+    tokens: tuple[int, ...] | list[int],
+) -> None:
+    """Прибавить стоимость токенов (input, output, cached) к сумме валюты тарифа."""
+    inp, out, cached = (max(0, value) for value in tokens)
+    cost = _tariff_cost(tariff, inp, out, cached)
+    amounts[tariff.currency] = amounts.get(tariff.currency, 0.0) + cost
+
+
 def _category_parts(
-    bucket: dict, pricing_cfg, tariff, legacy_currency: str
+    bucket: dict, pricing_cfg, legacy_currency: str, model_name: str | None
 ) -> tuple[list[CostPart], bool]:
-    """``(parts, unpriced)`` одной категории; без ``pricing.enabled`` — пусто."""
+    """Факт категории плюс тариф каждой известной модели.
+
+    Остаток без разбивки по моделям (старые meta, вызовы без модели) оценивается
+    тарифом ``model_name``; нет тарифа — остаток неизвестен (`?`).
+    """
     if not pricing_cfg.enabled:
         return [], False
     parts: list[CostPart] = []
     if int(bucket.get("billed_calls", 0) or 0):
         parts.extend(_billed_parts(bucket, legacy_currency))
-    rest_in = int(bucket.get("input", 0) or 0) - int(
-        bucket.get("billed_input", 0) or 0
+    remaining = list(_unbilled_tokens(bucket))
+    priced: list[tuple[str | None, tuple[int, ...] | list[int]]] = []
+    for model, model_bucket in (bucket.get("by_model") or {}).items():
+        tokens = _unbilled_tokens(model_bucket)
+        remaining = [left - used for left, used in zip(remaining, tokens)]
+        priced.append((model, tokens))
+    priced.append((model_name, remaining))  # остаток без разбивки по моделям
+    unpriced = False
+    tariff_amounts: Dict[str, float] = {}
+    for model, tokens in priced:
+        if not (tokens[0] > 0 or tokens[1] > 0):
+            continue
+        tariff = resolve_model_tariff(pricing_cfg, model)
+        if tariff is None:
+            unpriced = True
+            continue
+        _add_tariff(tariff_amounts, tariff, tokens)
+    parts.extend(
+        CostPart(amount, currency, "tariff")
+        for currency, amount in tariff_amounts.items()
     )
-    rest_out = int(bucket.get("output", 0) or 0) - int(
-        bucket.get("billed_output", 0) or 0
-    )
-    rest_cached = int(bucket.get("cached", 0) or 0) - int(
-        bucket.get("billed_cached", 0) or 0
-    )
-    if not (rest_in > 0 or rest_out > 0):
-        return parts, False
-    if tariff is None:
-        return parts, True
-    parts.append(
-        CostPart(
-            _tariff_cost(tariff, rest_in, rest_out, rest_cached),
-            tariff.currency,
-            "tariff",
-        )
-    )
-    return parts, False
+    return parts, unpriced
 
 
 def compute_cost(
@@ -154,8 +193,11 @@ def compute_cost(
 ) -> CostReport:
     """Построить ``CostReport`` по аккаунту и тарифам.
 
-    ``pricing`` — ``PricingConfig`` или сырой dict из config. ``model_name`` —
-    модель прогона. ``endpoint_url`` — адрес бэкенда (плоский ключ
+    ``pricing`` — ``PricingConfig`` или сырой dict из config. Тариф
+    каждого вызова определяется по его модели (``by_model``); ``model_name`` —
+    модель агента, по её ставке оценивается остаток без разбивки по моделям
+    (старые ``meta``, вызовы без модели).
+    ``endpoint_url`` — адрес бэкенда (плоский ключ
     ``completions_url``): нужен только для сумм из старых ``meta``, записанных
     версией без валюты. Токены/вызовы по категориям считаются всегда, независимо
     от ``pricing.enabled`` (счётчик usage не зависит от показа денег). Деньги
@@ -165,7 +207,6 @@ def compute_cost(
     и другого нет — категория помечается ``unpriced``.
     """
     pricing_cfg = coerce_pricing(pricing)
-    tariff = resolve_model_tariff(pricing_cfg, model_name)
     # Валюта для сумм без записанной валюты (старые meta) — по текущему конфигу,
     # то есть ровно как вела себя предыдущая версия. Разбор один на отчёт.
     legacy_currency = provider_currency or provider_currency_for_url(
@@ -191,7 +232,7 @@ def compute_cost(
             continue
 
         parts, unpriced = _category_parts(
-            bucket, pricing_cfg, tariff, legacy_currency
+            bucket, pricing_cfg, legacy_currency, model_name
         )
         for part in parts:
             report.by_currency[part.currency] = (
@@ -218,4 +259,5 @@ def compute_cost(
         report.total_missing_usage_calls += missing
 
     report.has_cost = bool(report.by_currency)
+    report.rates_configured = pricing_has_rates(pricing)
     return report

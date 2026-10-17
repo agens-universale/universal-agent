@@ -29,6 +29,7 @@ from gc_core_temporalio.child_contracts import (
     ChildRequest,
     ChildResult,
     PreparedChild,
+    child_independent_auto,
 )
 from gc_core_temporalio.child_preparation import PreparedChildContext
 from gc_core_temporalio.context import assemble_context
@@ -204,6 +205,7 @@ class UniversalSubagentWorkflow:
                 operations.thread_store = store
                 parent_ctx = assemble_context(
                     request.parent_context,
+                    request_equivalence=request.parent_context.request_equivalence,
                     operations=operations,
                     store=store,
                     logger=workflow.logger,
@@ -214,6 +216,10 @@ class UniversalSubagentWorkflow:
                     level_provider=lambda: request.child_context[
                         "frozen_level"
                     ],
+                    live_level_provider=lambda: request.child_context.get(
+                        "frozen_live_level",
+                        request.child_context["frozen_level"],
+                    ),
                     force_legacy=request.child_context["force_legacy"],
                     breaker=CircuitBreaker.restore(
                         request.parent_transfer.circuit_breaker
@@ -242,19 +248,28 @@ class UniversalSubagentWorkflow:
                     system_id=request.start.system_id,
                     thread_id=request.start.thread_id,
                 )
+                independent = child_independent_auto(request.child_context)
+                adapter = PreparedChildContext(
+                    prepared, None, independent_auto=independent
+                )
                 child_ctx = assemble_context(
                     prepared.context,
+                    request_equivalence=prepared.request_equivalence
+                    if independent
+                    else None,
+                    subagent_independent_auto=independent,
                     operations=operations,
                     store=store,
                     logger=workflow.logger,
                     human_request=self.human_request,
                 )
+                adapter.ctx = child_ctx
                 parent_ctx.subagent_checkpoint = self.checkpoint
                 self.parent_ctx, self.parent_state = parent_ctx, parent_state
                 runner = SubagentRunner(
                     parent_ctx,
                     parent_state,
-                    preparation=PreparedChildContext(prepared, child_ctx),
+                    preparation=adapter,
                     input_scope_factory=self.input_scope,
                 )
                 failed = True

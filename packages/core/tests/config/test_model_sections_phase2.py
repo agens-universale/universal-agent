@@ -157,6 +157,12 @@ def test_empty_registry_assign_level_valid_and_warns():
     )
 
 
+def test_empty_registry_assign_unknown_alias_still_errors():
+    cfg = AppConfig.model_validate({"assign": {"finish_gate": "ghost"}})
+    with pytest.raises(Exception, match=r"assign\.finish_gate.*ghost"):
+        validate_model_sections(cfg)
+
+
 def test_empty_registry_untouched_no_warning():
     cfg = AppConfig.model_validate({})
     assert validate_model_sections(cfg) == []

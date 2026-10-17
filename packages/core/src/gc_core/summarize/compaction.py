@@ -460,7 +460,7 @@ async def arun_summary_compaction(
     limits = resolve_summary_limits_at_level(
         ctx,
         getattr(ctx, "model_router", None),
-        getattr(state, "turn_level", None),
+        getattr(state, "_call_level", None),
     )
     summary_result = await asummarize_dialog_via_chat_completions(
         ctx=ctx,

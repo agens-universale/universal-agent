@@ -22,11 +22,12 @@ from gc_core.tools.arguments_validation import (
     WrongFunctionArgumentsException,
     annotate_output_with_dropped_arguments,
     parse_and_validate_tool_arguments,
+    prepare_tool_arguments,
+    tool_arguments_valid,
 )
 from gc_core.tools.inject_tool_fields import (
     apply_injected_fields_to_spec,
     resolve_inject_tool_fields,
-    strip_injected_tool_args,
 )
 from gc_core.tools.registry import _apply_stop_tools, get_builtin_tools_data
 from gc_core.tools.skills.registry import SkillsRegistry, get_skills_registry
@@ -374,34 +375,6 @@ class _SubagentTool:
         )
 
 
-def tool_arguments_valid(
-    tool_name: str,
-    arguments: Any,
-    tools_data_: Dict[str, Dict[str, Any]],
-) -> bool:
-    """True, если аргументы прошли бы валидацию apply_tool (те же правила и spec).
-
-    Неизвестный тул или запись без spec не судим (True): решать будет сам
-    apply_tool. Исключение ловится здесь же, поэтому результат не зависит от
-    того, какое поколение модуля держит вызывающая сторона.
-    """
-    entry = tools_data_.get(tool_name) or {}
-    spec = entry.get("spec")
-    if not isinstance(spec, dict):
-        return True
-    try:
-        parse_and_validate_tool_arguments(
-            tool_name=tool_name,
-            arguments=arguments,
-            tool_spec=spec,
-            allow_empty_for_empty_schema=True,
-            tool_fabric=entry.get("tool_fabric"),
-        )
-    except WrongFunctionArgumentsException:
-        return False
-    return True
-
-
 def _settings_source_for_call(
     ctx: Optional[Any], kwargs: Dict[str, Any]
 ) -> Any:
@@ -445,22 +418,15 @@ def _prepare_subagent_call(
     entry = tools_data_.get(tool_name) or {}
     tool_spec = entry.get("spec", {}) or {}
     dropped_unknown: list[str] = []
+    prepared, _service = prepare_tool_arguments(arguments, entry)
     parsed_args = parse_and_validate_tool_arguments(
         tool_name=tool_name,
         arguments=arguments,
         tool_spec=tool_spec,
         allow_empty_for_empty_schema=False,
         tool_fabric=entry.get("tool_fabric"),
+        prepared=prepared,
         dropped_unknown=dropped_unknown,
-    )
-    prepare = getattr(
-        entry.get("tool_fabric"), "prepare_args_before_strip", None
-    )
-    if callable(prepare):
-        parsed_args = prepare(parsed_args)
-    parsed_args = strip_injected_tool_args(
-        parsed_args,
-        injected_fields=entry.get("injected_fields") or [],
     )
     runner = SubagentRunner(ctx, orchestrator_state, settings)
     return (
@@ -552,21 +518,16 @@ def _prepare_tool_call(
     # Определяем, ожидает ли инструмент пустую схему (нет параметров)
     spec = tools_data_[tool_name].get("spec", {}) or {}
     dropped_unknown: list[str] = []
+    entry = tools_data_[tool_name]
+    prepared, _service = prepare_tool_arguments(arguments, entry)
     arguments = parse_and_validate_tool_arguments(
         tool_name=tool_name,
         arguments=arguments,
         tool_spec=spec,
         allow_empty_for_empty_schema=True,
         tool_fabric=tool_fabric,
+        prepared=prepared,
         dropped_unknown=dropped_unknown,
-    )
-    entry = tools_data_[tool_name]
-    prepare = getattr(tool_fabric, "prepare_args_before_strip", None)
-    if callable(prepare):
-        arguments = prepare(arguments)
-    arguments = strip_injected_tool_args(
-        arguments,
-        injected_fields=entry.get("injected_fields") or [],
     )
 
     # Пробрасываем ctx в kwargs тула: AbstractSimpleTool.__init__ читает его
@@ -847,6 +808,7 @@ __all__ = [
     "WrongFunctionArgumentsException",
     "aapply_tool",
     "aapply_tool_result",
+    "abuild_tools_data",
     "format_internal_tool_error_output",
     "format_unknown_tool_output",
     "is_internal_tool_error_output",

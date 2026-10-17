@@ -360,3 +360,7 @@ def test_acp_declares_a_human_whose_words_are_his_own():
     loaded = apply_acp_runtime_defaults(make_settings())
     assert loaded.runtime.human_channel is True
     assert loaded.runtime.external_user_words is False
+
+
+def test_parse_args_accepts_auto_level():
+    assert _parse_args(["--level", "auto"]).overrides == {"level": "auto"}

@@ -3,13 +3,17 @@
 from gc_core.execution.contracts import (
     ExecutionFailure,
     InfrastructureFailure,
+    MainModelUnavailable,
     ModelFailure,
     ModelProviderError,
     OutcomeUnknown,
     TurnFailure,
 )
 
-_DOMAIN_ERRORS = {cls.__name__: cls for cls in (ValueError, RuntimeError)}
+_DOMAIN_ERRORS = {
+    cls.__name__: cls
+    for cls in (ValueError, RuntimeError, MainModelUnavailable)
+}
 _EXECUTION_ERRORS = {
     cls.__name__: cls
     for cls in (ExecutionFailure, InfrastructureFailure, OutcomeUnknown)

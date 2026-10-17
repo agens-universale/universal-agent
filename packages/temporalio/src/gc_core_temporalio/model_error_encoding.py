@@ -4,7 +4,11 @@ import socket
 import ssl
 
 import httpx
-from gc_core.execution.contracts import ExecutionFailure, ModelFailure
+from gc_core.execution.contracts import (
+    ExecutionFailure,
+    MainModelUnavailable,
+    ModelFailure,
+)
 from gc_core.model_router import AliasCircuitOpenError
 from gc_core.utils.backend_errors import (
     EmbeddedChoiceError,
@@ -118,6 +122,9 @@ def encode_model_failure(exc: Exception) -> ModelFailure:
                 "reason": exc.reason,
             },
         )
+    if isinstance(exc, MainModelUnavailable):
+        # Тип нужен workflow: по нему AUTO заменяет модель такта (спека PR140 Р3).
+        return ModelFailure("domain", "MainModelUnavailable", str(exc))
     for error_type in (ValueError, RuntimeError):
         if isinstance(exc, error_type):
             return ModelFailure("domain", error_type.__name__, str(exc))

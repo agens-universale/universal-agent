@@ -354,6 +354,11 @@ def resolve_paths(cfg: AppConfig, config_dir: str) -> AppConfig:
     cfg.paths.chat_completions_intent_guard_prompt_path = to_abs(
         cfg.paths.chat_completions_intent_guard_prompt_path
     ) or _prompt_default(config_dir, "chat_completions_intent_guard_prompt.md")
+    cfg.paths.chat_completions_routing_pair_judge_prompt_path = to_abs(
+        cfg.paths.chat_completions_routing_pair_judge_prompt_path
+    ) or _prompt_default(
+        config_dir, "chat_completions_routing_pair_judge_prompt.md"
+    )
     cfg.paths.chat_completions_custom_subagent_system_prompt_path = to_abs(
         cfg.paths.chat_completions_custom_subagent_system_prompt_path
     ) or _prompt_default(
