@@ -24,6 +24,9 @@ CONFIRM_DENY_REMEMBER = (
     "deny_remember"  # N — block + session False + few-shot denied
 )
 CONFIRM_DENY_ONCE = "deny_once"  # T — block + run only
+# Таймаут диалога: отказ без записи. Человек reject_once не выбирал,
+# тот же ключ в этом ходе спрашивается снова.
+CONFIRM_TIMED_OUT = "timed_out"
 _VALID_CHOICES = {
     CONFIRM_ALLOW_REMEMBER,
     CONFIRM_ALLOW_ONCE,
@@ -126,6 +129,8 @@ def normalize_confirm_key(answer: str | None) -> str:
 
 def coerce_confirm_choice(choice: Any) -> str:
     """Normalize UI/port return value to a valid 4-way id."""
+    if choice == CONFIRM_TIMED_OUT:
+        return CONFIRM_TIMED_OUT
     if choice in _VALID_CHOICES:
         return choice  # type: ignore[return-value]
     if isinstance(choice, str) and choice in _ALIAS_MAP:
@@ -284,6 +289,9 @@ def apply_confirm_choice(
     choice: Any, *, store: Any, decision_key: str | None
 ) -> bool:
     """Apply the native four-choice policy after a completed human reply."""
+    if choice == CONFIRM_TIMED_OUT:
+        # Голый таймаут не выбор человека: run-правило глушит повтор вопроса.
+        return False
     choice = coerce_confirm_choice(choice)
     allow = choice in (CONFIRM_ALLOW_REMEMBER, CONFIRM_ALLOW_ONCE)
     if store is not None and decision_key is not None:

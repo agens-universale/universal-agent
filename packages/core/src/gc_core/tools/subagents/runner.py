@@ -1524,8 +1524,10 @@ class SubagentRunner:
             bind_turn_identity(child_ctx, parent_turn_id)
         else:
             clear_turn_identity(child_ctx)
-        # HITL: тот же confirm-баннер родителя + имя субагента для метки via.
+        # HITL: баннер TUI и порт confirm родителя (ACP: session/request_permission).
+        # Без порта ребёнок при is_tui=False молча отвечает deny_once.
         child_ctx.tui_confirm = getattr(self._ctx, "tui_confirm", None)
+        child_ctx.confirm_request = getattr(self._ctx, "confirm_request", None)
         child_ctx.permission_store = getattr(
             self._ctx, "permission_store", None
         )
@@ -1534,6 +1536,10 @@ class SubagentRunner:
         # потоко-локальна: поток читал настоящую консоль, которую держит
         # Textual, и делил с ним нажатия — ход висел, клавиши пропадали.
         child_ctx.ask_human = getattr(self._ctx, "ask_human", None)
+        # Порт подтверждения — туда же. Без него write/command guard ребёнка
+        # при tty читает `input()` процесса: у A2A на родителе стоит отказ,
+        # а дочерний ход снова вешает задачу в WORKING на терминале сервера.
+        child_ctx.confirm_request = getattr(self._ctx, "confirm_request", None)
         # Пометка «изображение не просмотрено» — в ленту родителя: отказ «глаз»
         # внутри субагента иначе ушёл бы только в журнал ребёнка.
         child_ctx.on_trace_note = getattr(self._ctx, "on_trace_note", None)

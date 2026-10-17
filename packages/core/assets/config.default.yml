@@ -156,6 +156,8 @@ acp:
   finish_gate_mode: "off"
   # Каждые N шагов без session_todo — technical reminder. 0 = выкл (дефолт IDE).
   todo_reminder_steps: 0
+  # Секунды ожидания session/request_permission. По таймауту операция отклоняется.
+  confirm_timeout_sec: 600
 
 # Правки агента: запись в журнал и показ на экране /diff (не параметры fs return_diff).
 agent_edits:
