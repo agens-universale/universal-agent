@@ -32,13 +32,7 @@ from gc_core.config_modules.agent_edits import (
 from gc_core.config_modules.images import read_images_config
 from gc_core.intent_log.record import ACTION_USER_ASK
 from gc_core.intent_log.serialize import deserialize_list
-from gc_core.message_policy.plan_messages import (
-    plan_accepted_message,
-    plan_resumed_message,
-)
-from gc_core.message_policy.user_message_policy import (
-    wrap_technical_user_content,
-)
+from gc_core.message_policy.plan_messages import accepted_plan_messages
 from gc_core.plan_store import plan_awaits_decision, plan_is_accepted
 from gc_core.runtime_notices import collect_unread_runtime_notices
 from gc_core.security.permission_mode import Mode, mode_label
@@ -4023,13 +4017,9 @@ class TraceScreen(Screen):
         )
         self._prepare_for_new_run()
         self._reset_thinking_timer()
-        message = (
-            plan_resumed_message(mode)
-            if resumed
-            else plan_accepted_message(mode)
-        )
+        (query,) = accepted_plan_messages(mode, resumed=resumed)
         runner.start(
-            query=wrap_technical_user_content(message),
+            query=query,
             thread_id=thread_id,
             system=self.app._system,
         )

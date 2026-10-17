@@ -1,5 +1,8 @@
 """План режима plan в состоянии сессии: форма блока, сохранение, восстановление."""
 
+from datetime import UTC, datetime
+
+from gc_core.execution.environment import execution_environment
 from gc_core.execution.state import SharedStateData
 from gc_core.persistence.schema import (
     STATE_SCHEMA_VERSION,
@@ -11,6 +14,7 @@ from gc_core.plan_store import (
     PLAN_STATUSES,
     new_plan_block,
     normalize_plan_block,
+    now_stamp,
 )
 
 
@@ -138,3 +142,15 @@ def test_removed_notice_is_written_only_when_armed():
     assert "plan_removed_notice" not in serialize_shared_block(
         SharedStateData()
     )
+
+
+def test_plan_time_comes_from_the_execution_environment():
+    """Под Temporal код плана идёт в workflow: часы — из окружения
+    исполнения, прямое чтение часов песочница запрещает."""
+    fixed = datetime(2026, 10, 16, 12, 30, 45, 123456, tzinfo=UTC)
+    with execution_environment(
+        new_id=lambda prefix: prefix, now=lambda: fixed
+    ):
+        assert now_stamp() == "2026-10-16T12:30:45+00:00"
+        block = new_plan_block("1. шаг")
+    assert block["updated_at"] == "2026-10-16T12:30:45+00:00"

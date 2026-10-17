@@ -12,10 +12,6 @@ import sys
 from functools import partial
 from typing import Any, Optional
 
-from gc_core.message_policy.plan_messages import plan_accepted_message
-from gc_core.message_policy.user_message_policy import (
-    wrap_technical_user_content,
-)
 from gc_core.plan_store import PLAN_STATUS_PROPOSED
 from gc_core.security.permission_mode import (
     PLAN_EXECUTION_MODES,
@@ -70,8 +66,9 @@ async def arun_plan_approval(
     """Спросить человека о предложенном плане; вернуть ответ последнего прогона.
 
     ``account_run=False`` — учёт прогона закрывает вызывающий (после
-    перефраза `--format`). Тогда перед каждым продолжением прежний прогон
-    закрывается здесь, а продолжение оставляет учёт открытым ему.
+    перефраза `--format`). Прежний прогон закрывается до продолжения:
+    при одобрении — последовательностью исполнителя
+    (``aexecute_accepted_plan``), при доработке — здесь.
 
     Срабатывает только когда ИМЕННО этот прогон кончился планом: статус в
     сессии переживает прогоны, и по нему обычный запрос внезапно предложил бы
@@ -94,10 +91,11 @@ async def arun_plan_approval(
         answer = await _ask(_PROMPT)
         mode = _APPROVAL_MODES.get(answer or "")
         if mode is not None:
-            return await run(
+            return await executor.aexecute_accepted_plan(
                 mode,
-                [wrap_technical_user_content(plan_accepted_message(mode))],
-                prepare=partial(executor.accept_plan, mode, thread_id),
+                thread_id,
+                verbose=verbose,
+                account_run=account_run,
             )
         if answer != _REWORK:
             return response

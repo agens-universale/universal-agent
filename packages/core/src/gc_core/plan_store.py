@@ -7,8 +7,9 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from typing import Any, Mapping
+
+from gc_core.execution.environment import utc_now
 
 #: Потолок длины плана. Длиннее — тул просит сократить: план читает человек.
 PLAN_MAX_CHARS = 16_000
@@ -30,7 +31,9 @@ PLAN_STATUS_LABELS = {
 
 
 def now_stamp() -> str:
-    return datetime.now(UTC).isoformat(timespec="seconds")
+    """Штамп времени плана. Часы — из окружения исполнения: под Temporal код
+    плана идёт в workflow, где прямое чтение часов запрещено."""
+    return utc_now().isoformat(timespec="seconds")
 
 
 def new_plan_block(text: str) -> dict[str, Any]:

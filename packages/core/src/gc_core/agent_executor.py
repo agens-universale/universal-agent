@@ -34,6 +34,7 @@ from gc_core.message_policy.chat_completions import repair_tool_call_pairing
 from gc_core.message_policy.mode_messages import mode_boundary_messages
 from gc_core.message_policy.plan_messages import (
     PLAN_REMOVED_MESSAGE,
+    accepted_plan_messages,
 )
 from gc_core.message_policy.stop_persist import is_persist_discarded
 from gc_core.message_policy.tool_usage_notice.state import (
@@ -63,7 +64,12 @@ from gc_core.run_summary_coordinator import (
     aset_tui_finish_gate_checking,
 )
 from gc_core.security.action_judge_step import lift_pause_on_user_message
-from gc_core.security.permission_mode import Mode, coerce_mode, resolve_mode
+from gc_core.security.permission_mode import (
+    PLAN_EXECUTION_MODES,
+    Mode,
+    coerce_mode,
+    resolve_mode,
+)
 from gc_core.security.permission_store import PermissionStore
 from gc_core.settings import settings_of
 from gc_core.states import SharedStateData, State
@@ -232,6 +238,12 @@ def _put_attachments(msg: dict, attachments, i: int, commit) -> None:
         msg["attachments"] = [
             (commit(a) if commit is not None else a).to_dict() for a in atts
         ]
+
+
+def _require_plan_execution_mode(mode: str) -> None:
+    """План исполняется только в режиме исполнения (edit, auto, manual)."""
+    if coerce_mode(mode) not in PLAN_EXECUTION_MODES:
+        raise ValueError(f"not a plan execution mode: {mode!r}")
 
 
 def _require_supported_persist_mode(settings: Any, ctx: Any) -> None:
@@ -640,6 +652,55 @@ class AgentExecutor:
         треде переведёт план в доработку."""
         with self._lock:
             self._plan_rework_thread = thread_id
+
+    def prepare_accepted_plan(
+        self, mode: str, thread_id: Optional[str], *, extra_text: str = ""
+    ) -> list[str]:
+        """Человек одобрил предложенный план: режим исполнения, одобрение и
+        сообщения продолжения — без прогона.
+
+        Для фронтенда, который ведёт прогон своим путём (ACP — потоком дельт
+        ``AsyncAgent.stream``); остальные зовут ``aexecute_accepted_plan``.
+        Не режим исполнения — ``ValueError`` до любых изменений.
+        ``extra_text`` — уточнение человека к исполнению, отдельным
+        сообщением после служебного «план одобрен».
+        """
+        _require_plan_execution_mode(mode)
+        self.set_permission_mode(mode)
+        self.accept_plan(mode, thread_id)
+        return accepted_plan_messages(mode, extra_text=extra_text)
+
+    async def aexecute_accepted_plan(
+        self,
+        mode: str,
+        thread_id: Optional[str],
+        *,
+        extra_text: str = "",
+        verbose: Optional[bool] = None,
+        account_run: bool = True,
+        system: Optional[str] = None,
+    ) -> Any:
+        """Человек одобрил предложенный план: исполнить его в выбранном режиме.
+
+        Одна последовательность на фронтенды — консольный вопрос и
+        ``--approve-plan`` gc-cli (ACP — через ``prepare_accepted_plan``).
+        Негодный режим — ``ValueError`` до любых действий, и учёт прошлого
+        прогона тоже не трогается. Учёт закрывается ДО смены режима: его
+        мета пишется такой, какой была на его конце; закрытый учёт и
+        прогон, которого в этом процессе не было, — no-op.
+        """
+        _require_plan_execution_mode(mode)
+        await self.aclose_run_accounting()
+        messages = self.prepare_accepted_plan(
+            mode, thread_id, extra_text=extra_text
+        )
+        return await self.arun(
+            messages,
+            thread_id=thread_id,
+            system=system,
+            verbose=verbose,
+            account_run=account_run,
+        )
 
     def plan_snapshot(
         self, expected_thread_id: Optional[str]

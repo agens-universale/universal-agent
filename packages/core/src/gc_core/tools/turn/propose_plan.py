@@ -7,12 +7,13 @@
 """
 
 import json
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from gc_core.constants.tool_names import PROPOSE_PLAN_TOOL_NAME
 from gc_core.plan_store import (
     PLAN_MAX_CHARS,
     PLAN_STATUS_REWORKING,
+    PLAN_STATUSES,
     new_plan_block,
     normalize_plan_block,
 )
@@ -70,6 +71,45 @@ class ProposePlan(AbstractSimpleTool):
             message=message,
             error={"type": error_type, "message": message, **fields},
         )
+
+    @staticmethod
+    def present_result(raw: Any) -> Optional[str]:
+        """Текст плана для человека из итога хода, закрытого планом.
+
+        Итог — JSON ``{"plan", "status"}`` (``_aclose_plan_turn``); его
+        показывают текстом все фронтенды: ответ и повтор истории ACP, A2A,
+        CLI. Любой другой итог хода — None: фронтенд показывает его как
+        раньше.
+        """
+        if not isinstance(raw, str):
+            return None
+        try:
+            data = json.loads(raw)
+        except ValueError:
+            return None
+        if not isinstance(data, dict) or set(data) != {"plan", "status"}:
+            return None
+        text = data["plan"]
+        if not isinstance(text, str) or not text.strip():
+            return None
+        return text if data["status"] in PLAN_STATUSES else None
+
+    @staticmethod
+    def plan_from_arguments(arguments: Any) -> Optional[str]:
+        """Текст плана из аргументов вызова ``turn_propose_plan`` (строка
+        JSON или dict). Повторный показ (``show_current`` с пустым планом) и
+        негодные аргументы — None."""
+        if isinstance(arguments, str):
+            try:
+                arguments = json.loads(arguments)
+            except ValueError:
+                return None
+        if not isinstance(arguments, dict):
+            return None
+        text = arguments.get("plan")
+        if not isinstance(text, str) or not text.strip():
+            return None
+        return text
 
     @classmethod
     def tool_description(cls, settings: Any = None) -> Dict[str, Any]:

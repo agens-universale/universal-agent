@@ -95,7 +95,7 @@ def scripted_http():
 
 
 @asynccontextmanager
-async def runtime(tmp_path, url, *, core_extra=None):
+async def runtime(tmp_path, url, *, core_extra=None, workflows=None):
     binary = temporal_cli()
     core = {
         "backend": {
@@ -135,6 +135,9 @@ async def runtime(tmp_path, url, *, core_extra=None):
             dev_server_existing_path=binary
         ) as env:
             options = worker_kwargs(config, native, threads)
+            if workflows is not None:
+                # Свой workflow сессии под тем же именем (фикстура теста).
+                options["workflows"] = workflows
             async with Worker(
                 env.client,
                 **options,

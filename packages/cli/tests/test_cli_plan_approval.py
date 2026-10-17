@@ -22,6 +22,7 @@ class _Executor:
         self.last_terminal_outcome = outcome
         self.status = status
         self.modes, self.transitions, self.rework, self.runs = [], [], [], []
+        self.accepted = []
         self.events = []
 
     def plan_snapshot(self, thread_id):
@@ -45,6 +46,21 @@ class _Executor:
     async def aclose_run_accounting(self):
         self.events.append(("close",))
 
+    async def aexecute_accepted_plan(
+        self,
+        mode,
+        thread_id,
+        *,
+        extra_text="",
+        verbose=None,
+        account_run=True,
+        system=None,
+    ):
+        self.accepted.append((mode, thread_id, extra_text, account_run))
+        self.events.append(("accepted", account_run))
+        self.status = "approved"
+        return f"исполнено в {mode}"
+
 
 @pytest.fixture
 def answers(monkeypatch):
@@ -64,29 +80,30 @@ def _approve(executor, thread_id="t1"):
     )
 
 
-def test_approval_switches_mode_and_continues(answers):
+def test_approval_hands_the_choice_to_the_approval_sequence(answers):
     answers.append("3")
     ex = _Executor()
-    assert _approve(ex) == "ответ 1"
-    assert ex.modes == ["manual"]
-    assert ex.transitions == [("manual", "t1")]
-    assert "approved" in ex.runs[0][0] and "<technical" in ex.runs[0][0]
+    assert _approve(ex) == "исполнено в manual"
+    assert ex.accepted == [("manual", "t1", "", True)]
+    # режим и одобрение ставит последовательность ядра, не CLI
+    assert (ex.modes, ex.transitions, ex.runs) == ([], [], [])
 
 
 def test_rework_sends_feedback_in_plan_mode_and_asks_again(answers):
     answers.extend(["4", "добавь тесты", "1"])
     ex = _Executor()
-    assert _approve(ex) == "ответ 2"
-    assert ex.modes == ["plan", "edit"]
+    assert _approve(ex) == "исполнено в edit"
+    assert ex.modes == ["plan"]
     assert ex.rework == ["t1"]
     assert ex.runs[0] == ["добавь тесты"]
+    assert ex.accepted == [("edit", "t1", "", True)]
 
 
 def test_any_other_answer_leaves_the_plan_as_the_result(answers):
     answers.append("n")
     ex = _Executor()
     assert _approve(ex) == _PLAN
-    assert (ex.modes, ex.transitions, ex.runs) == ([], [], [])
+    assert (ex.modes, ex.accepted, ex.runs) == ([], [], [])
 
 
 def test_nothing_is_asked_without_a_terminal_a_session_or_a_fresh_plan(
@@ -106,15 +123,14 @@ def test_nothing_is_asked_without_a_terminal_a_session_or_a_fresh_plan(
 def test_second_answer_approves_the_plan_for_auto(answers):
     answers.append("2")
     ex = _Executor()
-    assert _approve(ex) == "ответ 1"
-    assert ex.modes == ["auto"]
-    assert ex.transitions == [("auto", "t1")]
+    assert _approve(ex) == "исполнено в auto"
+    assert ex.accepted == [("auto", "t1", "", True)]
 
 
-def test_deferred_accounting_closes_the_first_run_before_continuing(answers):
-    """С `--format` учёт закрывает вызывающий после перефраза. Продолжение
-    после одобрения — новый прогон: первый надо закрыть до него (иначе его
-    мета и отчёт usage теряются), а продолжение оставить открытым."""
+def test_deferred_accounting_is_handed_to_the_approval_sequence(answers):
+    """С `--format` учёт закрывает вызывающий после перефраза. Первый прогон
+    закрывает последовательность ядра (до смены режима), продолжение
+    остаётся открытым вызывающему."""
     answers.append("1")
     ex = _Executor()
     run_coro(
@@ -122,33 +138,12 @@ def test_deferred_accounting_closes_the_first_run_before_continuing(answers):
             ex, _PLAN, thread_id="t1", verbose=False, account_run=False
         )
     )
-    assert ex.events == [("close",), ("run", False)]
+    assert ex.accepted == [("edit", "t1", "", False)]
+    assert ex.events == [("accepted", False)]
 
 
 def test_ordinary_run_keeps_its_own_accounting(answers):
     answers.append("1")
     ex = _Executor()
     _approve(ex)
-    assert ex.events == [("run", True)]
-
-
-def test_deferred_accounting_closes_the_first_run_before_switching_the_mode(
-    answers,
-):
-    """Учёт первого прогона пишет его мету: режим и план там — как на момент
-    его конца, без смены режима от одобрения."""
-    answers.append("1")
-    ex = _Executor()
-    original = ex.set_permission_mode
-
-    def set_mode(mode):
-        ex.events.append(("mode", mode))
-        original(mode)
-
-    ex.set_permission_mode = set_mode
-    run_coro(
-        plan_approval.arun_plan_approval(
-            ex, _PLAN, thread_id="t1", verbose=False, account_run=False
-        )
-    )
-    assert ex.events[:2] == [("close",), ("mode", "edit")]
+    assert ex.events == [("accepted", True)]

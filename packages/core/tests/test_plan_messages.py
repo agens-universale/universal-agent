@@ -8,10 +8,13 @@ from gc_core.execution.state import SharedStateData
 from gc_core.message_policy.plan_messages import (
     plan_cancel_message,
     PLAN_ENTER_MESSAGE,
+    accepted_plan_messages,
     plan_accepted_message,
+    plan_resumed_message,
 )
 from gc_core.message_policy.user_message_policy import (
     extract_real_user_message_text,
+    wrap_technical_user_content,
 )
 from gc_core.security.permission_store import PermissionStore
 from gc_testkit.settings import fake_ctx
@@ -39,6 +42,21 @@ def test_messages_name_the_tools_and_the_mode():
     assert "turn_propose_plan" in PLAN_ENTER_MESSAGE
     assert "turn_ask_human" in PLAN_ENTER_MESSAGE
     assert "'manual'" in plan_accepted_message("manual")
+
+
+def test_continuation_after_approval_is_one_text_for_every_frontend():
+    """Исполнитель, CLI, ACP и TUI шлют одно и то же: служебное «план
+    одобрен» (или «утверждён повторно») и уточнение человека вторым."""
+    approved = wrap_technical_user_content(plan_accepted_message("auto"))
+    assert accepted_plan_messages("auto") == [approved]
+    assert accepted_plan_messages("auto", extra_text="без тестов") == [
+        approved,
+        "без тестов",
+    ]
+    assert accepted_plan_messages("auto", extra_text="  ") == [approved]
+    assert accepted_plan_messages("edit", resumed=True) == [
+        wrap_technical_user_content(plan_resumed_message("edit"))
+    ]
 
 
 def _executor(mode):

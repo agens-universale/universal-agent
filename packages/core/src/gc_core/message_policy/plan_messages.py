@@ -10,6 +10,9 @@ from gc_core.constants.tool_names import (
     ASK_HUMAN_TOOL_NAME,
     PROPOSE_PLAN_TOOL_NAME,
 )
+from gc_core.message_policy.user_message_policy import (
+    wrap_technical_user_content,
+)
 
 #: Вход в plan. Последняя фраза — короткий дубль правила «план уже предложен»:
 #: носитель правила — описание тула, но сообщение шлётся один раз и после
@@ -60,3 +63,19 @@ def plan_accepted_message(mode: str) -> str:
         f"The proposed plan is approved. Permission mode is now '{mode}'. "
         "Proceed with executing the plan."
     )
+
+
+def accepted_plan_messages(
+    mode: str, *, resumed: bool = False, extra_text: str = ""
+) -> list[str]:
+    """Сообщения продолжения после одобрения плана — одни на все
+    фронтенды: служебное «план одобрен» (``resumed`` — «утверждён
+    повторно, мог быть выполнен частично») и уточнение человека к
+    исполнению отдельным сообщением, если оно не пусто."""
+    text = (
+        plan_resumed_message(mode) if resumed else plan_accepted_message(mode)
+    )
+    messages = [wrap_technical_user_content(text)]
+    if extra_text.strip():
+        messages.append(extra_text)
+    return messages

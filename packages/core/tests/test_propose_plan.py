@@ -309,3 +309,63 @@ def test_run_result_carries_the_stored_status(monkeypatch):
     )
     assert json.loads(result) == {"plan": "1. шаг", "status": "approved"}
     assert state.terminal_outcome == "plan_proposed"
+
+
+# --- показ плана фронтендам -------------------------------------------------
+
+
+def test_present_result_is_the_plan_text_of_a_turn_closed_by_a_plan(
+    monkeypatch,
+):
+    """Строка итога — от настоящего цикла, а не её копия в тесте: писатель
+    и читатель формата не разойдутся молча."""
+    state = _state()
+    _patch_apply(monkeypatch, state, [])
+    result = run_coro(
+        arun_agent(
+            [_fc("turn_propose_plan", "c1", json.dumps({"plan": "1. шаг"}))],
+            state,
+            _ctx(state),
+        )
+    )
+    assert ProposePlan.present_result(result) == "1. шаг"
+
+
+def test_present_result_is_none_for_anything_but_a_plan_turn():
+    finish_args = json.dumps(
+        {"solution_type": "full_solution", "task_report": "готово"}
+    )
+    for raw in (
+        None,
+        42,
+        "",
+        "готово",
+        "{не json",
+        json.dumps(["plan"]),
+        finish_args,
+        json.dumps({"plan": "1. шаг"}),
+        json.dumps({"plan": "  ", "status": "proposed"}),
+        json.dumps({"plan": "1. шаг", "status": "что-то"}),
+        json.dumps({"plan": "1. шаг", "status": "proposed", "ok": True}),
+    ):
+        assert ProposePlan.present_result(raw) is None
+
+
+def test_plan_from_arguments_reads_the_tool_call():
+    """Повтор истории (ACP) видит в треде только вызов тула: итог прогона в
+    тред не пишется. Аргументы — строка JSON или dict."""
+    assert (
+        ProposePlan.plan_from_arguments(json.dumps({"plan": "1. шаг"}))
+        == "1. шаг"
+    )
+    assert ProposePlan.plan_from_arguments({"plan": "1. шаг"}) == "1. шаг"
+    for raw in (
+        None,
+        "",
+        "{не json",
+        json.dumps({"plan": "  ", "show_current": True}),
+        {"plan": "", "show_current": True},
+        {"plan": 7},
+        json.dumps(["plan"]),
+    ):
+        assert ProposePlan.plan_from_arguments(raw) is None
