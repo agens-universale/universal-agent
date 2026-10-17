@@ -1,11 +1,9 @@
 """Служебные сообщения модели о режиме: что и когда ей говорится."""
 
 import threading
-from types import SimpleNamespace
 
 import pytest
-from gc_testkit.settings import fake_ctx
-
+from gc_core import processing_responses as pr
 from gc_core.agent_executor import AgentExecutor
 from gc_core.execution.state import SharedStateData
 from gc_core.message_policy.mode_messages import (
@@ -16,11 +14,18 @@ from gc_core.message_policy.mode_messages import (
 )
 from gc_core.message_policy.plan_messages import (
     PLAN_ENTER_MESSAGE,
+    PLAN_RESEARCH_ENTER_MESSAGE,
     plan_cancel_message,
+    plan_research_exit_message,
+)
+from gc_core.message_policy.user_message_policy import (
+    wrap_technical_user_content,
 )
 from gc_core.security import permission_mode
 from gc_core.security.permission_mode import Mode
 from gc_core.security.permission_store import PermissionStore
+from gc_core.tools.registry import get_builtin_tools_data
+from gc_testkit.settings import fake_ctx, make_settings
 
 
 @pytest.mark.parametrize(
@@ -51,9 +56,56 @@ from gc_core.security.permission_store import PermissionStore
 def test_one_rule_for_every_transition(
     announced, current, messages, now_announced
 ):
-    assert mode_boundary_messages(current=current, announced=announced) == (
-        messages,
-        now_announced,
+    assert mode_boundary_messages(
+        current=current, announced=announced, can_propose_plan=True
+    ) == (messages, now_announced)
+
+
+@pytest.mark.parametrize(
+    "announced, current, messages, now_announced",
+    [
+        (None, "plan", [PLAN_RESEARCH_ENTER_MESSAGE], "plan"),
+        ("plan", "plan", [], "plan"),
+        ("plan", "edit", [plan_research_exit_message("edit")], None),
+        (
+            "plan",
+            "auto",
+            [plan_research_exit_message("auto"), AUTO_ENTER_MESSAGE],
+            "auto",
+        ),
+        (None, "auto", [AUTO_ENTER_MESSAGE], "auto"),
+    ],
+)
+def test_agent_without_the_plan_tool_returns_findings_as_text(
+    announced, current, messages, now_announced
+):
+    assert mode_boundary_messages(
+        current=current, announced=announced, can_propose_plan=False
+    ) == (messages, now_announced)
+
+
+def test_texts_without_the_plan_tool_do_not_promise_a_plan():
+    assert "turn_propose_plan" not in PLAN_RESEARCH_ENTER_MESSAGE
+    assert "return your findings as text" in PLAN_RESEARCH_ENTER_MESSAGE
+    assert "not approved" not in plan_research_exit_message("edit")
+    assert "'edit'" in plan_research_exit_message("edit")
+
+
+def test_mode_block_for_the_summary_carries_the_entry_text():
+    """После сжатия истории сообщение о режиме уходит из контекста: правила
+    действующего режима едут в сводке."""
+    assert render_mode_block(None, can_propose_plan=True) == ""
+    assert render_mode_block("edit", can_propose_plan=True) == ""
+    auto = render_mode_block("auto", can_propose_plan=True)
+    assert (
+        auto.startswith('<permission_mode name="auto">')
+        and AUTO_ENTER_MESSAGE in auto
+    )
+    assert PLAN_ENTER_MESSAGE in render_mode_block(
+        "plan", can_propose_plan=True
+    )
+    assert PLAN_RESEARCH_ENTER_MESSAGE in render_mode_block(
+        "plan", can_propose_plan=False
     )
 
 
@@ -65,17 +117,21 @@ def test_messages_name_the_mode_the_model_is_now_in():
     assert "reviewed automatically" in AUTO_ENTER_MESSAGE
 
 
-def test_mode_block_for_the_summary_carries_the_entry_text():
-    """После сжатия истории сообщение о режиме уходит из контекста: правила
-    действующего режима едут в сводке."""
-    assert render_mode_block(None) == ""
-    assert render_mode_block("edit") == ""
-    auto = render_mode_block("auto")
-    assert (
-        auto.startswith('<permission_mode name="auto">')
-        and AUTO_ENTER_MESSAGE in auto
+def _root_state(shared):
+    from gc_core.states import State
+
+    state = State(
+        verbose=False,
+        model="m",
+        tools_spec=[],
+        tools_descr=[],
+        skills_list=[],
+        max_steps=5,
+        system_prompt_id="v1",
+        use_server_subagents=False,
     )
-    assert PLAN_ENTER_MESSAGE in render_mode_block("plan")
+    state.shared = shared
+    return state
 
 
 def _executor(mode, monkeypatch):
@@ -88,18 +144,28 @@ def _executor(mode, monkeypatch):
     ex = AgentExecutor.__new__(AgentExecutor)
     ex._lock = threading.Lock()
     ex._ctx = fake_ctx(
-        permission_store=PermissionStore(shared.confirm_rules, shared=shared)
+        permission_store=PermissionStore(shared.confirm_rules, shared=shared),
+        tools_data=get_builtin_tools_data(make_settings()),
     )
-    return ex, SimpleNamespace(shared=shared)
+    return ex, _root_state(shared)
 
 
-def test_executor_announces_auto_once_and_says_when_it_is_left(monkeypatch):
+def _told(ex, state):
+    """Что агенту скажут о режиме перед ближайшим запросом к модели."""
+    return [m["content"] for m in pr._mode_notices(state, ex._ctx)]
+
+
+def test_agent_is_told_about_auto_once_and_when_it_is_left(monkeypatch):
     ex, state = _executor("auto", monkeypatch)
-    assert ex._plan_notices(state) == [AUTO_ENTER_MESSAGE]
+    assert _told(ex, state) == [
+        wrap_technical_user_content(AUTO_ENTER_MESSAGE)
+    ]
     assert state.shared.mode_announced == "auto"
-    assert ex._plan_notices(state) == []
+    assert _told(ex, state) == []
     state.shared.permission_mode = "manual"
-    assert ex._plan_notices(state) == [auto_exit_message("manual")]
+    assert _told(ex, state) == [
+        wrap_technical_user_content(auto_exit_message("manual"))
+    ]
     assert state.shared.mode_announced is None
 
 
@@ -109,7 +175,7 @@ def test_plan_approved_with_auto_gets_the_auto_entry_and_no_cancel(
     """Утверждение обнуляет объявление plan: «план не утверждён» слать нельзя,
     а вход в auto объявляется."""
     ex, state = _executor("auto", monkeypatch)
-    state.shared.mode_announced = "plan"
+    state.mode_announced = "plan"
     state.shared.plan = {
         "text": "1.",
         "status": "proposed",
@@ -120,14 +186,16 @@ def test_plan_approved_with_auto_gets_the_auto_entry_and_no_cancel(
     ex._plan_rework_thread = None
     ex.accept_plan("auto", "t1")
     ex._apply_plan_changes(state, [])
-    assert ex._plan_notices(state) == [AUTO_ENTER_MESSAGE]
+    assert _told(ex, state) == [
+        wrap_technical_user_content(AUTO_ENTER_MESSAGE)
+    ]
 
 
 def test_deciding_again_on_an_approved_plan_does_not_repeat_the_auto_entry(
     monkeypatch,
 ):
     ex, state = _executor("auto", monkeypatch)
-    state.shared.mode_announced = "auto"
+    state.mode_announced = "auto"
     state.shared.plan = {
         "text": "1.",
         "status": "approved",
@@ -138,11 +206,19 @@ def test_deciding_again_on_an_approved_plan_does_not_repeat_the_auto_entry(
     ex._plan_rework_thread = None
     ex.accept_plan("auto", "t1")
     ex._apply_plan_changes(state, [])
-    assert ex._plan_notices(state) == []
+    assert _told(ex, state) == []
 
 
-def _compacted_summary(*, announced, parent_state_id=None, plan=None):
-    """Тело сводки после настоящего сжатия истории."""
+def _compacted_summary(
+    *,
+    announced,
+    parent_state_id=None,
+    plan=None,
+    root_mark=None,
+    can_propose_plan=True,
+):
+    """Тело сводки после настоящего сжатия истории. ``announced`` — отметка
+    этого агента, ``root_mark`` — отметка корня в общем состоянии."""
     from gc_core.states import State
     from gc_core.summarize.compaction import apply_summary_state_patch
 
@@ -157,7 +233,8 @@ def _compacted_summary(*, announced, parent_state_id=None, plan=None):
         use_server_subagents=False,
         parent_state_id=parent_state_id,
     )
-    state.shared = SharedStateData(mode_announced=announced, plan=plan)
+    state.shared = SharedStateData(mode_announced=root_mark, plan=plan)
+    state.mode_announced = announced
     state.messages = [
         {"role": "system", "content": "sys"},
         {"role": "user", "content": "u1"},
@@ -169,17 +246,24 @@ def _compacted_summary(*, announced, parent_state_id=None, plan=None):
         last_dialog_steps="",
         summarized_messages_count=2,
         intent_log_preview_chars=1000,
+        can_propose_plan=can_propose_plan,
     )
 
 
-def test_compaction_keeps_the_rules_of_the_mode_for_the_root_agent_only():
-    """Сжатие уносит сообщение о входе в режим. Корневому агенту правила
-    возвращает сводка; субагент объявлений о режиме не получает вовсе."""
+def test_compaction_keeps_the_rules_of_the_mode_the_agent_was_told():
+    """Сжатие уносит сообщение о входе в режим — правила возвращает сводка.
+    Отметка у каждого агента своя: субагенту — его объявление, не корня."""
     assert AUTO_ENTER_MESSAGE in _compacted_summary(announced="auto")
     assert PLAN_ENTER_MESSAGE in _compacted_summary(announced="plan")
     assert "<permission_mode" not in _compacted_summary(announced=None)
-    assert "<permission_mode" not in _compacted_summary(
+    assert AUTO_ENTER_MESSAGE in _compacted_summary(
         announced="auto", parent_state_id="root"
+    )
+    assert "<permission_mode" not in _compacted_summary(
+        announced=None, parent_state_id="root", root_mark="auto"
+    )
+    assert PLAN_RESEARCH_ENTER_MESSAGE in _compacted_summary(
+        announced="plan", parent_state_id="root", can_propose_plan=False
     )
 
 

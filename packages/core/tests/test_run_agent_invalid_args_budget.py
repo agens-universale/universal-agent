@@ -16,6 +16,7 @@ from gc_testkit.settings import fake_ctx
 
 def _state():
     s = type("S", (), {})()
+    s.mode_announced = None
     s.messages = []
     s.steps = 0
     s.max_steps = 100

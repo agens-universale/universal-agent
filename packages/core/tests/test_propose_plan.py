@@ -115,7 +115,7 @@ def _patch_apply(monkeypatch, state, applied):
             return await ProposePlan(state=state, ctx=kw["ctx"]).acall(**args)
         return json.dumps({"tool": name, "ok": True}, ensure_ascii=False)
 
-    async def _noop(**kw):
+    async def _noop(**_kw):
         return None
 
     monkeypatch.setattr(pr, "aapply_tool", fake_apply)
@@ -198,6 +198,24 @@ def test_model_sees_the_tool_only_in_plan_mode_and_only_as_the_root_agent():
     for mode in ("edit", "manual"):
         assert names(_state(mode)) == ["fs_read_file"]
     assert names(_state("plan", parent_state_id="p")) == ["fs_read_file"]
+
+
+def test_plan_tool_is_offered_by_the_tool_set_of_the_agent():
+    """Есть ли у агента тул плана в plan — тем же правилом, что набор
+    тулов запроса, в любом текущем режиме."""
+    from gc_core.security.permission_mode import offers_plan_tool
+
+    data = get_builtin_tools_data(make_settings())
+    for state in (_state("edit"), _state("plan")):
+        ctx = _ctx(state)
+        ctx.tools_data = data
+        assert offers_plan_tool(ctx, state) is True
+    child = _state("plan", parent_state_id="p")
+    ctx = _ctx(child)
+    ctx.tools_data = data
+    assert offers_plan_tool(ctx, child) is False
+    ctx.tools_data = {}
+    assert offers_plan_tool(ctx, _state("plan")) is False
 
 
 def test_tool_is_absent_from_the_common_tool_list():
@@ -285,7 +303,7 @@ def test_run_result_carries_the_stored_status(monkeypatch):
             **json.loads(kw["arguments"])
         )
 
-    async def _noop(**kw):
+    async def _noop(**_kw):
         return None
 
     monkeypatch.setattr(pr, "aapply_tool", fake_apply)

@@ -41,14 +41,18 @@ def test_summary_body_carries_the_rules_of_the_announced_mode():
 
     plain = build_dialog_summary_content("итог", "шаги")
     body = build_dialog_summary_content(
-        "итог", "шаги", mode_block=render_mode_block("auto")
+        "итог",
+        "шаги",
+        mode_block=render_mode_block("auto", can_propose_plan=True),
     )
     assert AUTO_ENTER_MESSAGE in body
     assert body.index("<permission_mode") < body.index("<last_dialog_steps>")
     # у edit и manual правил для модели нет — тело сводки прежнее
     assert (
         build_dialog_summary_content(
-            "итог", "шаги", mode_block=render_mode_block(None)
+            "итог",
+            "шаги",
+            mode_block=render_mode_block(None, can_propose_plan=True),
         )
         == plain
     )

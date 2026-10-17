@@ -28,6 +28,7 @@ from gc_core.message_policy.user_message_policy import (
     TECHNICAL_TYPE_DIALOG_SUMMARY,
     wrap_technical_user_content,
 )
+from gc_core.security.permission_mode import offers_plan_tool
 from gc_core.settings import settings_of
 from gc_core.summarize.config import resolve_summary_limits_at_level
 from gc_core.summarize.summary_logging import (
@@ -180,6 +181,7 @@ def apply_summary_state_patch(
     summarized_messages_count: int,
     intent_log_preview_chars: int | None = None,
     kept_messages: Sequence[Mapping[str, Any]] = (),
+    can_propose_plan: bool = True,
 ) -> str:
     shared = _ensure_shared(state)
 
@@ -227,15 +229,15 @@ def apply_summary_state_patch(
             collapsed if isinstance(collapsed, list) else [],
             kept=kept_messages,
         ),
-        # Только корневому агенту: план и объявления о режиме — его дело, а
-        # общее состояние сессии субагент делит с родителем.
+        # План — дело корневого агента: общее состояние сессии субагент
+        # делит с родителем. Объявленный режим у каждого агента свой
+        # (`State.mode_announced`) — его правила едут в сводке любого агента.
         plan_block=(
             render_plan_block(getattr(shared, "plan", None)) if is_root else ""
         ),
-        mode_block=(
-            render_mode_block(getattr(shared, "mode_announced", None))
-            if is_root
-            else ""
+        mode_block=render_mode_block(
+            getattr(state, "mode_announced", None),
+            can_propose_plan=can_propose_plan,
         ),
     )
     prev_offset = int(getattr(state, "dialog_steps_offset", 0) or 0)
@@ -519,6 +521,7 @@ async def arun_summary_compaction(
         summarized_messages_count=len(full_messages),
         intent_log_preview_chars=preview_chars,
         kept_messages=kept_messages,
+        can_propose_plan=offers_plan_tool(ctx, state),
     )
     if isinstance(trace, dict):
         _fill_trace_final_output(

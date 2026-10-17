@@ -14,7 +14,9 @@ from __future__ import annotations
 
 from gc_core.message_policy.plan_messages import (
     PLAN_ENTER_MESSAGE,
+    PLAN_RESEARCH_ENTER_MESSAGE,
     plan_cancel_message,
+    plan_research_exit_message,
 )
 from gc_core.security.permission_mode import Mode
 
@@ -50,31 +52,44 @@ def auto_exit_message(mode: str) -> str:
     )
 
 
+def _enter_message(mode: str, can_propose_plan: bool) -> str:
+    """Текст входа в режим; plan без тула плана — «верни находки текстом»."""
+    if mode == Mode.PLAN.value and not can_propose_plan:
+        return PLAN_RESEARCH_ENTER_MESSAGE
+    return _ENTER_MESSAGES[mode]
+
+
 def mode_boundary_messages(
-    *, current: str, announced: str | None
+    *, current: str, announced: str | None, can_propose_plan: bool
 ) -> tuple[list[str], str | None]:
     """Сообщения о смене режима и то, какой режим теперь считается объявленным.
 
     Сравниваются состояния, а не переключения: несколько смен между прогонами
-    схлопываются в один итог.
+    схлопываются в один итог. ``can_propose_plan`` — есть ли у агента тул
+    плана (``permission_mode.offers_plan_tool``): от набора тулов, а не от
+    роли, зависит, обещает ли текст plan план.
     """
     now_announced = current if current in _ENTER_MESSAGES else None
     if announced == now_announced:
         return [], now_announced
     messages: list[str] = []
     if announced == Mode.PLAN.value and current != Mode.PLAN.value:
-        messages.append(plan_cancel_message(current))
+        messages.append(
+            plan_cancel_message(current)
+            if can_propose_plan
+            else plan_research_exit_message(current)
+        )
     if announced == Mode.AUTO.value and now_announced is None:
         messages.append(auto_exit_message(current))
     if now_announced is not None:
-        messages.append(_ENTER_MESSAGES[now_announced])
+        messages.append(_enter_message(now_announced, can_propose_plan))
     return messages, now_announced
 
 
-def render_mode_block(announced: str | None) -> str:
+def render_mode_block(announced: str | None, *, can_propose_plan: bool) -> str:
     """Правила объявленного режима для тела сводки: после сжатия истории
     сообщение о входе из контекста уходит, а режим продолжает действовать."""
-    text = _ENTER_MESSAGES.get(str(announced or ""))
-    if not text:
+    if announced not in _ENTER_MESSAGES:
         return ""
+    text = _enter_message(announced, can_propose_plan)
     return f'<permission_mode name="{announced}">\n{text}\n</permission_mode>'

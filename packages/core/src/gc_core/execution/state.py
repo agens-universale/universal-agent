@@ -38,9 +38,9 @@ class SharedStateData:
     # План режима plan: {text, status, approved_mode, updated_at}
     # (`gc_core.plan_store`). None — плана нет.
     plan: Optional[Dict[str, Any]] = None
-    # О каком режиме модели уже сказано ("plan" | "auto" | None): техсообщение
-    # о входе и выходе шлётся по факту смены, один раз, а не на каждое
-    # переключение.
+    # Какой режим объявлен КОРНЕВОМУ агенту ("plan" | "auto" | None): здесь
+    # отметка сохраняется в мете треда между прогонами. Читать и писать —
+    # через `State.mode_announced`; у субагента отметка своя, в его State.
     mode_announced: Optional[str] = None
     # Человек убрал план (`/plan clear`): следующий прогон один раз сообщит об
     # этом модели — в истории и в сводке план ещё виден.
@@ -101,6 +101,7 @@ STATE_FIELDS = (
     "state_id",
     "steps",
     "stop_requested",
+    "subagent_mode_announced",
     "subagent_todo",
     "system_prompt_id",
     "terminal_outcome",
@@ -160,6 +161,27 @@ class ExecutionState:
             self.subagent_todo = items
         else:
             self.shared.session_todo = items
+
+    @property
+    def mode_announced(self) -> Optional[str]:
+        """Какой режим ЭТОМУ агенту уже объявлен ("plan" | "auto" | None).
+
+        Режим общий живой, а сообщение о нём каждый агент получает в свою
+        историю — отметка своя у каждого. Корень хранит её в ``shared``: там
+        она переживает прогоны в мете треда. Субагент делит ``shared`` с
+        родителем, поэтому держит свою в собственном поле: его объявление не
+        должно «съесть» объявление корня.
+        """
+        if self.parent_state_id is not None:
+            return self.subagent_mode_announced
+        return self.shared.mode_announced
+
+    @mode_announced.setter
+    def mode_announced(self, value: Optional[str]) -> None:
+        if self.parent_state_id is not None:
+            self.subagent_mode_announced = value
+        else:
+            self.shared.mode_announced = value
 
     def set_resp_headers_metadata(self, headers):
         x_target = headers.get("x-target")

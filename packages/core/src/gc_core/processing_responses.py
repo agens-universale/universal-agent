@@ -68,6 +68,7 @@ from gc_core.message_policy.attachments_outbound import (
     request_carries_images,
 )
 from gc_core.message_policy.chat_completions import is_bridge_echo
+from gc_core.message_policy.mode_messages import mode_boundary_messages
 from gc_core.message_policy.no_tool_call_bounce import (
     NO_TOOL_CALL_BOUNCE_MESSAGE,
     extract_last_assistant_text,
@@ -99,7 +100,11 @@ from gc_core.run_summary_coordinator import (
     filter_messages_not_in_state,
 )
 from gc_core.runtime_notices import maybe_push_llm_failure_notice
-from gc_core.security.permission_mode import tools_for_mode
+from gc_core.security.permission_mode import (
+    offers_plan_tool,
+    resolve_mode,
+    tools_for_mode,
+)
 from gc_core.settings import AppConfig, settings_of
 from gc_core.states import State
 from gc_core.summarize.limit_trace_summary import abuild_limit_envelope
@@ -317,6 +322,18 @@ def _make_technical_feedback_user_message(
     if call_id:
         msg["call_id"] = call_id
     return msg
+
+
+def _mode_notices(state: State, ctx: Any) -> List[Dict]:
+    """Служебные сообщения о границе режима для ЭТОГО агента; сдвигает его
+    отметку (``State.mode_announced``). Пусто — режим уже объявлен. Текст
+    plan — по набору тулов агента (``offers_plan_tool``)."""
+    texts, state.mode_announced = mode_boundary_messages(
+        current=resolve_mode(ctx).value,
+        announced=state.mode_announced,
+        can_propose_plan=offers_plan_tool(ctx, state),
+    )
+    return [_make_technical_feedback_user_message(text) for text in texts]
 
 
 def _is_previous_response_cache_miss(exc: Exception) -> bool:
@@ -2314,11 +2331,12 @@ class _AgentLoop:
             return messages, None, "Agent tools call errors."
 
         mode = check_mode(messages, self.run_logger)
-        if backend_mode == "chat_completions" and _mode_requires_backend_call(
-            mode
-        ):
+        if not _mode_requires_backend_call(mode):
+            return messages, mode, _NO_RETURN
+        if backend_mode == "chat_completions":
             await self._apre_backend_compaction(messages, mode)
             messages = await self._aapply_tool_usage_notice(messages)
+        messages = await self._aannounce_mode(messages)
         return messages, mode, _NO_RETURN
 
     async def _apre_backend_compaction(self, messages, mode) -> None:
@@ -2336,6 +2354,23 @@ class _AgentLoop:
                 pre_backend_exc,
                 exc_info=True,
             )
+
+    async def _aannounce_mode(self, messages) -> List[Dict]:
+        """Сказать агенту о режиме, если он сменился с прошлого объявления.
+
+        Перед каждым запросом к модели: на старте агента и после каждого
+        батча — смена режима посреди хода доходит до модели на ближайшем
+        шаге. Одно правило для корня и любого субагента: отметка своя у
+        каждого, режим — общий живой. Не в хвосте батча: после принятого
+        ``turn_finish`` хвост отбрасывается, а отметка уже была бы сдвинута.
+        """
+        state = self.state
+        notices = _mode_notices(state, self.ctx)
+        if not notices:
+            return messages
+        state.messages += notices
+        await _maybe_persist(self.persist_messages_callback, notices, state)
+        return [*messages, *notices]
 
     async def _aapply_tool_usage_notice(self, messages) -> List[Dict]:
         if not isinstance(self.session_meta, dict):

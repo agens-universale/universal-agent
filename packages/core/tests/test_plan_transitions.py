@@ -24,7 +24,9 @@ def _executor(mode="plan", *, thread_id="t1", plan=True):
     ex._ctx = fake_ctx(
         permission_store=PermissionStore(shared.confirm_rules, shared=shared)
     )
-    state = SimpleNamespace(shared=shared, thread_id=thread_id)
+    state = SimpleNamespace(
+        shared=shared, thread_id=thread_id, mode_announced=None
+    )
     ex._state = state
     return ex, state
 
@@ -41,14 +43,14 @@ def _technical():
 
 def test_approval_is_applied_at_the_start_of_the_next_run():
     ex, state = _executor()
-    state.shared.mode_announced = "plan"
+    state.mode_announced = "plan"
     ex.accept_plan("edit", "t1")
     assert state.shared.plan["status"] == "proposed"  # до прогона — не тронут
     ex._apply_plan_changes(state, _technical())
     assert state.shared.plan["status"] == "approved"
     assert state.shared.plan["approved_mode"] == "edit"
     # выход из plan через одобрение: «план не одобрен» модели не шлётся
-    assert state.shared.mode_announced is None
+    assert state.mode_announced is None
 
 
 def test_approval_never_lands_on_another_thread_and_does_not_linger():

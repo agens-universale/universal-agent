@@ -31,7 +31,6 @@ from gc_core.intent_log.user_turn import (
 )
 from gc_core.mcp_session_owner import reset_owner, set_owner
 from gc_core.message_policy.chat_completions import repair_tool_call_pairing
-from gc_core.message_policy.mode_messages import mode_boundary_messages
 from gc_core.message_policy.plan_messages import (
     PLAN_REMOVED_MESSAGE,
     accepted_plan_messages,
@@ -742,9 +741,9 @@ class AgentExecutor:
             # — продолжение несёт своё «план одобрен».
             if (
                 status == PLAN_STATUS_APPROVED
-                and state.shared.mode_announced == Mode.PLAN.value
+                and state.mode_announced == Mode.PLAN.value
             ):
-                state.shared.mode_announced = None
+                state.mode_announced = None
             return
         # «В доработке» — только по двум шагам сразу: человек нажал «Доработать»
         # И отправил обычное сообщение, оставаясь в plan. Иначе вопрос не по
@@ -796,20 +795,14 @@ class AgentExecutor:
             lift_pause_on_user_message(state.shared)
 
     def _plan_notices(self, state) -> list[str]:
-        """Служебные сообщения в начале прогона, по одному разу каждое: «план
-        убран человеком» и смена режима, о котором модели есть что сказать
-        (`mode_announced` помнит, о чём уже сказано)."""
+        """Служебное сообщение в начале прогона, один раз: «план убран
+        человеком». О режиме агенту говорит цикл перед каждым запросом к
+        модели (``processing_responses._mode_notices``)."""
         shared = state.shared
-        notices: list[str] = []
-        if shared.plan_removed_notice:
-            shared.plan_removed_notice = False
-            notices.append(PLAN_REMOVED_MESSAGE)
-        messages, shared.mode_announced = mode_boundary_messages(
-            current=resolve_mode(self._ctx).value,
-            announced=shared.mode_announced,
-        )
-        notices.extend(messages)
-        return notices
+        if not shared.plan_removed_notice:
+            return []
+        shared.plan_removed_notice = False
+        return [PLAN_REMOVED_MESSAGE]
 
     @staticmethod
     def _seed_current_user_intent(state, new_user_messages) -> None:
@@ -1272,8 +1265,8 @@ class AgentExecutor:
         self._seed_current_user_intent(state, new_user_messages)
         self._apply_plan_changes(state, new_user_messages)
         self._lift_judge_pause(state, new_user_messages)
-        # До сообщений человека: сначала контекст, потом запрос. «План убран»
-        # идёт раньше сообщения о границе режима.
+        # «План убран» — до сообщений человека: сначала контекст, потом
+        # запрос. О режиме цикл скажет перед первым запросом к модели.
         for text in reversed(self._plan_notices(state)):
             new_user_messages.insert(
                 0,

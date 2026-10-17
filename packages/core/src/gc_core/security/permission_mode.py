@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
+from gc_core.constants.tool_names import PROPOSE_PLAN_TOOL_NAME
 from gc_core.settings import is_explicit, settings_of
 
 
@@ -388,6 +389,21 @@ def is_readonly_command(command: str, extra: list[str] | None = None) -> bool:
 OFFERED_IN_MODE_KEY = "offered_in_mode"
 
 
+def _offered_in_mode(ctx: Any, state: Any, mode: str) -> list[dict]:
+    """Схемы тулов, которые предлагаются модели только в ``mode``. Тул
+    режима видит только корневой агент."""
+    if getattr(state, "parent_state_id", None) is not None:
+        return []
+    entries = getattr(ctx, "tools_data", None) or {}
+    return [
+        entry["spec"]
+        for entry in entries.values()
+        if isinstance(entry, dict)
+        and entry.get(OFFERED_IN_MODE_KEY) == mode
+        and isinstance(entry.get("spec"), dict)
+    ]
+
+
 def tools_for_mode(
     tools: list[dict], ctx: Any, state: Any = None
 ) -> list[dict]:
@@ -396,18 +412,17 @@ def tools_for_mode(
     Тул режима (``turn_propose_plan`` в plan) видит только корневой агент. В
     режиме по умолчанию список не меняется — запросы остаются прежними.
     """
-    if getattr(state, "parent_state_id", None) is not None:
-        return list(tools)
-    mode = resolve_mode(ctx).value
-    entries = getattr(ctx, "tools_data", None) or {}
-    extra = [
-        entry["spec"]
-        for entry in entries.values()
-        if isinstance(entry, dict)
-        and entry.get(OFFERED_IN_MODE_KEY) == mode
-        and isinstance(entry.get("spec"), dict)
-    ]
-    return [*tools, *extra]
+    return [*tools, *_offered_in_mode(ctx, state, resolve_mode(ctx).value)]
+
+
+def offers_plan_tool(ctx: Any, state: Any = None) -> bool:
+    """Есть ли у ЭТОГО агента в plan тул плана — по его набору тулов, тем
+    же правилом, что ``tools_for_mode``. От этого зависит, что агенту
+    говорится о plan: «предложи план» или «верни находки текстом»."""
+    return any(
+        spec.get("name") == PROPOSE_PLAN_TOOL_NAME
+        for spec in _offered_in_mode(ctx, state, Mode.PLAN.value)
+    )
 
 
 def coerce_mode(raw: object) -> Mode | None:

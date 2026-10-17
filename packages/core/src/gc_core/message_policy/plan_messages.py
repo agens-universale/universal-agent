@@ -38,6 +38,20 @@ def plan_cancel_message(mode: str) -> str:
     )
 
 
+#: Вход в plan для агента без тула плана (субагент): предложить план ему
+#: нечем — он исследует и возвращает находки текстом в ответе.
+PLAN_RESEARCH_ENTER_MESSAGE = (
+    "Permission mode 'plan' is active: research only; edits, commands that "
+    "change state and network are denied; return your findings as text in "
+    "your answer."
+)
+
+
+def plan_research_exit_message(mode: str) -> str:
+    """Выход из plan у агента без тула плана: о плане ему не говорилось."""
+    return f"Permission mode 'plan' is off; the current mode is '{mode}'."
+
+
 #: Человек убрал план командой. В истории и в сводке сжатия он ещё виден —
 #: без этого сообщения модель продолжала бы считать его действующим.
 PLAN_REMOVED_MESSAGE = (
