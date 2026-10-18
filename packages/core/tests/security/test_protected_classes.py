@@ -91,21 +91,21 @@ def test_edit_asks_before_writing_a_skill(home):
         ctx = _ctx("edit", home / "root", answers=["deny_once"])
         out = json.loads(_write(path=str(path), ctx=ctx))
         assert out["error"]["type"] == "protected_path_denied", path
-        assert ctx.asked == ["Защита записи"], path
+        assert ctx.asked == ["Защищённый путь"], path
 
 
 def test_manual_asks_once_and_writes_a_project_skill_after_yes(home):
     path = _skills(home)[0]
     ctx = _ctx("manual", home / "root", answers=["allow_once"])
     assert _write(path=str(path), ctx=ctx) == "written"
-    assert ctx.asked == ["Защита записи"]
+    assert ctx.asked == ["Защищённый путь"]
 
 
 def test_manual_asks_about_a_global_skill_first(home):
     path = _skills(home)[1]
     ctx = _ctx("manual", home / "root", answers=["allow_once", "allow_once"])
     assert _write(path=str(path), ctx=ctx) == "written"
-    assert ctx.asked[0] == "Защита записи"
+    assert ctx.asked[0] == "Защищённый путь"
 
 
 def test_session_answer_covers_repeated_writes_of_the_same_skill_file(home):
@@ -113,7 +113,7 @@ def test_session_answer_covers_repeated_writes_of_the_same_skill_file(home):
     ctx = _ctx("edit", home / "root", answers=["allow_remember"])
     assert _write(path=path, ctx=ctx) == "written"
     assert _write(path=path, ctx=ctx) == "written"
-    assert ctx.asked == ["Защита записи"]
+    assert ctx.asked == ["Защищённый путь"]
 
 
 def test_plan_denies_a_skill_write_without_asking(home):
@@ -229,7 +229,7 @@ def test_edit_asks_before_writing_tool_settings(home):
         ctx = _ctx("edit", home / "root", answers=["deny_once"])
         out = json.loads(_write(path=str(path), ctx=ctx))
         assert out["error"]["type"] == "protected_path_denied", path
-        assert ctx.asked == ["Защита записи"], path
+        assert ctx.asked == ["Защищённый путь"], path
 
 
 def test_explicit_allow_does_not_lift_the_floor(home):
@@ -248,7 +248,7 @@ def test_manual_asks_once_and_writes_tool_settings_after_yes(home):
     for path in _tool_settings(home)[:2]:
         ctx = _ctx("manual", home / "root", answers=["allow_once"])
         assert _write(path=str(path), ctx=ctx) == "written", path
-        assert ctx.asked == ["Защита записи"], path
+        assert ctx.asked == ["Защищённый путь"], path
 
 
 def test_plan_denies_tool_settings_writes_without_asking(home):
@@ -295,3 +295,52 @@ def test_worker_facts_carry_the_tool_settings_class(home):
     )
     assert write.protected_decision == "ask"
     assert command.protected_decision == "allow"
+
+
+# --- отказ после вопроса пола — исход ответа -----------------------------------
+
+
+def _answered(ctx, call, **kwargs):
+    """Вызов гарда внутри привязки вызова, как в диспетчере тулов: исход
+    вопроса (`confirm_outcome`) кладётся туда."""
+    from gc_core.security.call_scope import call_scope
+
+    with call_scope(state=None, call_id="c1", tool_name="fs_write_file"):
+        return json.loads(call(ctx=ctx, **kwargs))["error"]
+
+
+def test_no_to_a_protected_write_names_its_outcome(home):
+    """Отказ после вопроса о защищённом пути — те же причина и инструкция
+    модели, что у вопросов режима: «в сессии» говорит о себе сразу."""
+    path = str(home / "root" / ".envrc")
+    once = _answered(
+        _ctx("edit", home / "root", answers=["deny_once"]), _write, path=path
+    )
+    session = _answered(
+        _ctx("edit", home / "root", answers=["deny_remember"]),
+        _write,
+        path=path,
+    )
+    assert once["type"] == session["type"] == "protected_path_denied"
+    assert once["reason"] == "Declined by the user."
+    assert session["reason"] == "Denied by the user for this session."
+    assert "new session" in session["guidance"]
+
+
+def test_no_to_a_command_on_a_protected_path_names_its_outcome(home):
+    from gc_core.security.command_guard import enforce_command_guard
+
+    root = home / "root"
+    (root / "AGENTS.md").write_text("# rules", encoding="utf-8")
+
+    @enforce_command_guard(payload_arg="command", tool_name="exec_command")
+    def run(command: str, ctx=None) -> str:
+        return "executed"
+
+    error = _answered(
+        _ctx("edit", root, answers=["deny_remember"]),
+        run,
+        command="echo x >> AGENTS.md",
+    )
+    assert error["type"] == "protected_path_denied"
+    assert error["reason"] == "Denied by the user for this session."

@@ -26,6 +26,7 @@ from gc_core.security.call_scope import current_call
 from gc_core.security.confirm_port import (
     confirm_available,
     confirmation_step,
+    guard_refusal,
     request_confirm,
 )
 from gc_core.security.dual_wrapper import AwaitOnCaller, OffLoop, dual_wrap
@@ -629,6 +630,10 @@ def moderate_command_execution(
                 )
                 return (yield)
             error = make_block_error(decision, moderation_context.mode)
+            if decision.decision == "cancelled":
+                # Человек ответил на вопрос «нет»: причина и инструкция
+                # модели — по исходу вопроса, как у вопросов режима.
+                error.update(guard_refusal(tool_ctx, error["type"]))
             audit_policy_decision(
                 context,
                 tool_name=moderation_context.tool_name,

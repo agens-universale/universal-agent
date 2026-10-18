@@ -13,6 +13,10 @@ from gc_core.instructions.layers import instruction_file_paths
 from gc_core.security.path_policy import is_within_root
 from gc_core.settings import settings_of
 
+#: Заголовок вопроса о защищённом пути — одинаковый для записи и команды:
+#: человек должен видеть, почему спрашивают даже там, где запись свободна.
+PROTECTED_PATH_TITLE = "Защищённый путь"
+
 
 @dataclass(frozen=True)
 class ProtectedSet:

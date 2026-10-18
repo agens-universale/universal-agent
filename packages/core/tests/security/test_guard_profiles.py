@@ -225,7 +225,7 @@ def test_floor_question_declined_is_audited(tmp_path, monkeypatch):
         _fake_write(path=_agents_md(tmp_path, monkeypatch), ctx=ctx)
     )
     assert out["error"]["type"] == "protected_path_denied"
-    assert ctx.asked == ["Защита записи"]
+    assert ctx.asked == ["Защищённый путь"]
     assert audit(ctx) == [("blocked", "protected_ask_cancelled")]
 
 
@@ -254,7 +254,7 @@ def test_floor_yes_is_not_asked_again_by_manual(tmp_path, monkeypatch):
         _fake_write(path=_agents_md(tmp_path, monkeypatch), ctx=ctx)
         == "written"
     )
-    assert ctx.asked == ["Защита записи"]
+    assert ctx.asked == ["Защищённый путь"]
     assert audit(ctx) == [
         ("confirmed", "protected_ask_confirmed"),
         ("executed", "protected_ask_confirmed"),
@@ -268,7 +268,7 @@ def test_floor_yes_covers_the_perimeter_question_in_edit(
     ctx = make_ctx("edit", launch_root=root, answers=["allow_once"])
     ctx.permission_store = None  # без стора «да» запомнить негде
     assert _fake_write(path=target, ctx=ctx) == "written"
-    assert ctx.asked == ["Защита записи"]
+    assert ctx.asked == ["Защищённый путь"]
     assert audit(ctx) == [
         ("confirmed", "protected_ask_confirmed"),
         ("executed", "policy_ask_confirmed"),
@@ -704,7 +704,7 @@ def test_declined_git_write_is_not_called_an_instruction_file(
         _fake_write(path=str(tmp_path / ".git" / "config"), ctx=ctx)
     )
     assert out["error"]["type"] == "protected_path_denied"
-    assert "instruction" not in out["error"]["message"]
+    assert "instruction" not in out["error"]["reason"]
 
 
 def test_floor_decision_follows_the_outcomes_of_its_own_action():

@@ -193,6 +193,13 @@ def unconfirmed_error(ctx: Any, **fields: Any) -> dict:
     return declined_error(**fields)
 
 
+def guard_refusal(ctx: Any, error_type: str, **fields: Any) -> dict:
+    """Отказ гарда после его собственного вопроса: тип — гарда (по нему
+    аудит и тесты различают гарды), причина и инструкция модели — по исходу
+    вопроса, те же, что у вопросов режима (`unconfirmed_error`)."""
+    return {**unconfirmed_error(ctx, **fields), "type": error_type}
+
+
 def _via_name(ctx: Any) -> str | None:
     name = getattr(ctx, "subagent_tool_name", None)
     return name if isinstance(name, str) and name.strip() else None

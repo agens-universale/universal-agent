@@ -161,7 +161,7 @@ def test_disabled_protection_lifts_the_write_floor(tmp_path, monkeypatch):
     on = _guard_ctx(root, enabled=True)
     out = json.loads(_write(path=target, ctx=on))
     assert out["error"]["type"] == "protected_path_denied"
-    assert on.asked == ["Защита записи"]
+    assert on.asked == ["Защищённый путь"]
     off = _guard_ctx(root, enabled=False)
     assert _write(path=target, ctx=off) == "written"
     assert off.asked == []

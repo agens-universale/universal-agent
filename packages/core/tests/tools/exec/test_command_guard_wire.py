@@ -234,7 +234,7 @@ def test_execute_command_ask_path_not_confirmed_blocks(tmp_path, monkeypatch):
 def test_blocked_envelope_form_is_the_same_in_both_branches(
     tmp_path, monkeypatch
 ):
-    """ask-отказ и deny отдают модели один конверт: message + отдельный guidance.
+    """ask-отказ и deny отдают модели один конверт: reason + отдельный guidance.
 
     Раньше ask-ветка приклеивала NO_WORKAROUND_NOTICE к message, а deny клала
     его в guidance — один и тот же гвард говорил с моделью двумя формами.
@@ -267,11 +267,14 @@ def test_blocked_envelope_form_is_the_same_in_both_branches(
         tool(command="echo x", cwd=str(tmp_path), ctx=_ctx(tmp_path))
     )["error"]
 
-    assert set(asked) == set(denied) == {"type", "message", "guidance"}
-    assert asked["guidance"] == denied["guidance"] == NO_WORKAROUND_NOTICE
-    # Приклейка к message — ровно то, что убрали: она обязана НЕ вернуться.
-    assert "Do NOT retry" not in asked["message"]
-    assert "Do NOT retry" not in denied["message"]
+    assert set(asked) == set(denied) == {"type", "reason", "guidance"}
+    # После вопроса инструкция — по его исходу (как у вопросов режима), без
+    # вопроса — запрет на обход; обе отдельным полем.
+    assert denied["guidance"] == NO_WORKAROUND_NOTICE
+    assert "another way" in asked["guidance"]
+    # Приклейка к причине — ровно то, что убрали: она обязана НЕ вернуться.
+    assert "Do NOT retry" not in asked["reason"]
+    assert "Do NOT retry" not in denied["reason"]
 
 
 # ---------------------------------------------------------------------------

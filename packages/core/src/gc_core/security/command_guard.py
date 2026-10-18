@@ -18,7 +18,7 @@ from gc_core.security.command_moderation import (
     NO_WORKAROUND_NOTICE,
     effective_command_cwd,
 )
-from gc_core.security.confirm_port import confirmation_step
+from gc_core.security.confirm_port import confirmation_step, guard_refusal
 from gc_core.security.dual_wrapper import dual_wrap
 from gc_core.security.guard_probe import GuardProbeRequest, probe_step
 from gc_core.security.media_roots import media_roots
@@ -34,6 +34,7 @@ from gc_core.security.permission_mode import (
     floor_question_decision,
 )
 from gc_core.security.protected_paths import (
+    PROTECTED_PATH_TITLE,
     classify_path,
     protected_extra_paths,
     protected_paths,
@@ -264,7 +265,7 @@ def _command_guard_flow(
 
         confirmed = yield confirmation_step(
             local_request=request_confirm,
-            title="Защищённый путь",
+            title=PROTECTED_PATH_TITLE,
             question="Команда затрагивает защищённый путь. Выполнить?",
             fields=[("command", payload)],
             ctx=ctx_obj,
@@ -289,15 +290,9 @@ def _command_guard_flow(
             reason_code="protected_ask_cancelled",
             error_type="protected_path_denied",
         )
-        # ask not confirmed → instructive blocked result
-        err = {
-            "type": "protected_path_denied",
-            "message": "User declined the command.",
-            # Та же форма, что и у ветки deny ниже: запрет на обход —
-            # отдельным полем, а не приклейкой к message. Иначе один и
-            # тот же гвард отдаёт модели два разных конверта.
-            "guidance": NO_WORKAROUND_NOTICE,
-        }
+        # ask not confirmed: причина и инструкция модели — по исходу
+        # вопроса, как у вопросов режима; запрет на обход в ней уже есть.
+        err = guard_refusal(ctx_obj, "protected_path_denied")
         return _blocked_command_result(
             self_obj, effective_tool_name, err, args, kwargs
         )
@@ -312,7 +307,7 @@ def _command_guard_flow(
     )
     err = {
         "type": "protected_path_denied",
-        "message": "Command targets a protected path (.gc / config).",
+        "reason": "Command targets a protected path (.gc / config).",
         # Тот же класс обхода, что и у судьи: заблокированную команду
         # модель переписывает в эквивалент. Запрет — одной формулировкой
         # с модерацией (NO_WORKAROUND_NOTICE).

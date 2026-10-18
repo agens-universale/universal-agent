@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
 
 from gc_core.execution.ports import port
-from gc_core.security.confirm_port import confirmation_step
+from gc_core.security.confirm_port import confirmation_step, guard_refusal
 from gc_core.security.dual_wrapper import dual_wrap
 from gc_core.security.guard_probe import GuardProbeRequest, probe_step
 from gc_core.security.mode_stage import (
@@ -243,6 +243,7 @@ def _protected_write_block(
     from gc_core.security.confirm_port import request_confirm
     from gc_core.security.media_roots import media_roots
     from gc_core.security.protected_paths import (
+        PROTECTED_PATH_TITLE,
         protected_decision,
         protection_enabled,
     )
@@ -270,7 +271,7 @@ def _protected_write_block(
         _err = {
             "type": "protected_path_denied",
             "path": candidate_path,
-            "message": "Path is protected (operational .gc / config).",
+            "reason": "Path is protected (operational .gc / config).",
         }
         audit_policy_decision(
             context,
@@ -311,18 +312,16 @@ def _protected_write_block(
         # keep-alive MCP-сессий. Исполняет драйвер `dual_wrap`.
         _ok = yield confirmation_step(
             local_request=request_confirm,
-            title=_WRITE_GUARD_TITLE,
-            question=f"Разрешить запись в {candidate_path}?",
+            title=PROTECTED_PATH_TITLE,
+            question=f"Разрешить запись в защищённый путь {candidate_path}?",
             fields=[("path", candidate_path)],
             ctx=context.ctx,
             decision_key=_write_key(candidate_path, context),
         )
         if not _ok:
-            _err = {
-                "type": "protected_path_denied",
-                "path": candidate_path,
-                "message": "Write to protected file not confirmed.",
-            }
+            _err = guard_refusal(
+                context.ctx, "protected_path_denied", path=candidate_path
+            )
             audit_policy_decision(
                 context,
                 tool_name=_tool_name(func, args),
@@ -520,11 +519,13 @@ def _resolve_write_violation(
             return True, None
         # cancelled — продолжаем в стандартный blocked-flow ниже,
         # но помечаем error.type для отличимости в логах.
-        exc.error["type"] = "write_guard_cancelled_by_user"
-        exc.error["message"] = (
-            f"User declined the write to '{candidate_path}'. Do NOT retry the same "
-            "write, and do NOT silently write somewhere else — ask the user how to "
-            "proceed, or stop and report that it was declined."
+        exc.error.pop("message", None)
+        exc.error.update(
+            guard_refusal(
+                context.ctx,
+                "write_guard_cancelled_by_user",
+                path=candidate_path,
+            )
         )
     audit_policy_decision(
         context,

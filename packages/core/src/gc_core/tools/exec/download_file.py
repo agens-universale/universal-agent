@@ -298,7 +298,10 @@ class DownloadFile(AbstractSimpleTool):
                 )
                 return None
             if wg_mode == "ask":
-                from gc_core.security.confirm_port import confirmation_step
+                from gc_core.security.confirm_port import (
+                    confirmation_step,
+                    guard_refusal,
+                )
 
                 confirmed = yield confirmation_step(
                     title="Защита записи",
@@ -324,11 +327,13 @@ class DownloadFile(AbstractSimpleTool):
                         risk_flags=["out_of_perimeter"],
                     )
                     return None
-                exc.error["type"] = "write_guard_cancelled_by_user"
-                exc.error["message"] = (
-                    f"User declined the write to '{dest}'. Do NOT retry the same "
-                    "write, and do NOT silently write somewhere else — ask the user how to "
-                    "proceed, or stop and report that it was declined."
+                exc.error.pop("message", None)
+                exc.error.update(
+                    guard_refusal(
+                        context.ctx,
+                        "write_guard_cancelled_by_user",
+                        path=dest,
+                    )
                 )
             audit_policy_decision(
                 context,
