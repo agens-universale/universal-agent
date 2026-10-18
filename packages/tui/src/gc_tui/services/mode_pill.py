@@ -47,6 +47,11 @@ MODE_HINTS = {
 }
 
 
+def mode_color(mode: str) -> str:
+    """Цвет режима — тот же, что у пилюли футера (ползунок Настроек тоже)."""
+    return _STYLES.get(mode, _STYLES[DEFAULT_MODE.value])[1]
+
+
 def render_mode_pill(
     mode: str, *, narrow: bool = False, hint: bool = True
 ) -> Text:

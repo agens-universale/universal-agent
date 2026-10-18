@@ -3477,9 +3477,9 @@ def test_fit_mode_pairs_whole_pairs_only():
 
 
 async def test_modes_section_preview_shows_toggle_pairs():
-    """Превью строки «Режимы работы» в меню — пары label: value в порядке TOGGLES
-    (первая пара — «gate», всегда целиком; вторая — целиком либо усечена в `· …`,
-    смотря по фактической ширине региона в тестовом терминале)."""
+    """Превью строки «Режимы работы» в меню — пары label: value в порядке секции
+    (первая пара — уровень модели, всегда целиком; дальше — целиком либо усечены
+    в `· …`, смотря по фактической ширине региона в тестовом терминале)."""
     from gc_tui import app as app_mod
 
     app = app_mod.TuiApp(settings=tui_settings(_cfg()))
@@ -3488,8 +3488,8 @@ async def test_modes_section_preview_shows_toggle_pairs():
         await pilot.pause()
         rows = _menu_lines(app.screen)
         modes_row = next(r for r in rows if "Режимы работы" in r)
-        assert "самопроверка выполнения задачи: smart" in modes_row
-        assert ("формат ответа: judge" in modes_row) or ("· …" in modes_row)
+        assert "уровень модели: " in modes_row
+        assert ("режим разрешений: edit" in modes_row) or ("· …" in modes_row)
 
 
 async def test_modes_preview_truncated_on_first_frame_of_narrow_menu(tmp_path):
@@ -3518,7 +3518,7 @@ async def test_modes_preview_truncated_on_first_frame_of_narrow_menu(tmp_path):
 
 
 async def test_modes_subscreen_writes_global(tmp_path):
-    """Подэкран «Режимы работы»: строка-пресет первая (head «rigor · строгость
+    """Подэкран «Режимы работы»: строка-пресет (head «rigor · строгость
     завершения хода», без слеша). Ревизия 7 (flat-группы, спека шапка/§4.2):
     дети рисуются БЕЗ ведущего маркера «· » и БЕЗ отступа — «gate ·
     самопроверка выполнения задачи», «answers · формат ответа» — одним левым
@@ -3533,7 +3533,8 @@ async def test_modes_subscreen_writes_global(tmp_path):
         scr = await _open_modes_section(pilot)
         assert not scr.query(".set-modes-save")
 
-        # курсор 0 = пресет rigor (high: on+deny). → пишет ПАРУ следующего пресета.
+        # курсор на пресете rigor (high: on+deny). → пишет ПАРУ следующего пресета.
+        scr._modes_idx = modes_row_index("rigor")
         rows = [str(w.render()) for w in scr.query(".set-row")]
         assert any("rigor · строгость завершения хода" in r for r in rows)
         assert not any("/rigor" in r for r in rows)
@@ -3593,7 +3594,7 @@ async def test_modes_apply_error_flash_keeps_screen(tmp_path, monkeypatch):
 
 async def test_modes_footer_shows_value_hint(tmp_path):
     """Hint выделенного (внутри рамки, без клавиш) меняется при смене выделения.
-    Курсор 0 = /rigor; спускаемся на детальные gate/answers."""
+    Курсор на /rigor; спускаемся на детальные gate/answers."""
     app, cfg_file = _app_with_config(
         tmp_path,
         'tui:\n  finish_gate_mode: "on"\n  text_answer_mode: "deny"\n',
@@ -3606,6 +3607,9 @@ async def test_modes_footer_shows_value_hint(tmp_path):
         assert footer == (
             "↑/↓ — выбор · ←/→/Enter — переключить · PgUp/PgDn — секции · Esc — меню"
         )
+        scr._modes_idx = modes_row_index("rigor")
+        scr._render_view()
+        await pilot.pause(0.1)
         hint0 = str(scr.query_one(".set-modes-hint", Static).render())
         assert hint0.startswith("high —")  # строка пресета, значение high
         assert "Enter" not in hint0
@@ -3726,8 +3730,8 @@ async def test_modes_rows_track_base_left_aligned(tmp_path):
         answers_custom = next(r for r in rows_custom if "формат ответа" in r)
 
     assert (
-        base_w == 5 and extra_w == 3
-    )  # тройки(5) + custom-резерв(3) — общие для всех строк
+        base_w == 7 and extra_w == 3
+    )  # четвёрка режима разрешений (7) + custom-резерв(3) — общие для всех строк
 
     def first_glyph_col(row: str) -> int:
         for i, ch in enumerate(row):
@@ -3803,6 +3807,9 @@ async def test_modes_hint_global_framing_even_with_session_override(tmp_path):
     )
     async with app.run_test(size=(200, 24)) as pilot:
         scr = await _open_modes_section(pilot)
+        scr._modes_idx = modes_row_index("rigor")
+        scr._render_view()
+        await pilot.pause(0.1)
         hint = str(scr.query_one(".set-modes-hint", Static).render())
         assert "ваш дефолт: самопроверка on, формат allow" in hint
         assert "своя пара этой сессии" not in hint
@@ -3871,8 +3878,7 @@ async def test_modes_generic_toggle_appears_and_cycles_without_code_changes(
         open_settings_section(scr, "Режимы работы")
         await pilot.pause()
         assert scr._view == settings_section_index("Режимы работы")
-        names = tg.group_toggle_names("rigor")  # fake — default group="rigor"
-        fake_idx = names.index("fake")
+        fake_idx = tg.modes_section_names().index("fake")
         row_texts = [str(w.render()) for w in scr.query(".set-row")]
         assert any("фиктивный режим" in r and "f0" in r for r in row_texts)
 
@@ -3998,13 +4004,14 @@ async def test_modes_apply_blocked_when_not_writable(tmp_path, monkeypatch):
 async def test_modes_apply_preserves_unrelated_keys(tmp_path):
     """Запись глобала трогает только dotted-ключ переключённого тоггла —
     посторонний ключ config.yml (agent.model) остаётся с прежним значением.
-    Курсор 0 = /rigor (пресет) — спускаемся на детальную gate."""
+    Курсор на /rigor (пресет) — спускаемся на детальную gate."""
     app, cfg_file = _app_with_config(
         tmp_path,
         'tui:\n  finish_gate_mode: "on"\nagent:\n  model: "custom-model-xyz"\n',
     )
     async with app.run_test() as pilot:
         scr = await _open_modes_section(pilot)
+        scr._modes_idx = modes_row_index("rigor")
         await pilot.press("down")  # /rigor -> gate
         await pilot.pause(0.1)
         await pilot.press("right")  # gate on -> off глобально
@@ -4024,7 +4031,7 @@ async def test_modes_apply_does_not_reset_live_session_override(tmp_path):
     глобала) — иначе ассерты не различили бы, откуда взялось эффективное
     значение. Если `_modes_apply` начнёт сбрасывать/перезаписывать сессионные
     переопределения при записи глобала — первым упадёт п.3 (эффективное
-    значение перестанет быть оверрайдом). Курсор 0 = /rigor (пресет) —
+    значение перестанет быть оверрайдом). Курсор на /rigor (пресет) —
     спускаемся на детальную gate; терминал шире (200 колонок) — хвост оверрайда
     в строке не зависит от ширины, здесь важен сам факт его наличия."""
     from gc_tui.toggles import toggle_state
@@ -4036,6 +4043,7 @@ async def test_modes_apply_does_not_reset_live_session_override(tmp_path):
         scr = await _open_modes_section(pilot)
         app.set_session_override("tui.finish_gate_mode", "on")
 
+        scr._modes_idx = modes_row_index("rigor")
         await pilot.press("down")  # /rigor -> gate
         await pilot.pause(0.1)
         await pilot.press("right")  # глобал on -> off; оверрайд не трогаем
@@ -5317,18 +5325,21 @@ def modes_row_index(name: str) -> int:
     return modes_section_names().index(name)
 
 
-def test_modes_section_ends_with_the_level_row():
-    """`level` правит ГЛОБАЛЬНЫЙ `level:` конфига, к профилям он отношения не
-    имеет — его дом здесь, рядом с равными себе ручками «как работаем».
-
-    Снизу, под чертой (решение владельца): сначала «как работаем», потом «чем».
-    Состав секции спрашивается у одной функции — секция больше не равна группе
-    `"rigor"`, и знание о её композиции не размазано по шести местам."""
+def test_modes_section_goes_level_then_permissions_then_rigor():
+    """Порядок блоков — решение владельца: сначала «чем работаем» (уровень
+    модели), потом «что агенту можно» (режим разрешений по умолчанию), потом
+    «как строго закрывать ход» (rigor с детьми). Порядок выровнен с палитрой,
+    где `/level` идёт первым. Состав секции спрашивается у одной функции —
+    знание о её композиции не размазано по местам."""
     from gc_tui.toggles import modes_section_names
 
-    names = modes_section_names()
-    assert names[-1] == "level"
-    assert names[:-1] == ["rigor", "gate", "answers"]
+    assert modes_section_names() == [
+        "level",
+        "mode",
+        "rigor",
+        "gate",
+        "answers",
+    ]
 
 
 async def test_level_row_stands_behind_a_separator(tmp_path):
@@ -5343,9 +5354,11 @@ async def test_level_row_stands_behind_a_separator(tmp_path):
 
         seps = list(scr.query(".set-group-sep"))
         rows = list(scr.query(".set-row"))
-        assert len(seps) == 1
-        assert len(rows) == 4
-        assert rows[2].region.y < seps[0].region.y < rows[3].region.y
+        # Три блока: level | mode | rigor с детьми — две черты.
+        assert len(seps) == 2
+        assert len(rows) == 5
+        assert rows[0].region.y < seps[0].region.y < rows[1].region.y
+        assert rows[1].region.y < seps[1].region.y < rows[2].region.y
 
 
 async def test_level_row_keeps_its_default_wording(tmp_path):
@@ -5438,7 +5451,10 @@ async def test_level_row_shows_auto_off_scale_when_available(
         scr = await _open_modes_section(pilot)
 
         text = scr._mode_row_text("level", selected=False).plain
-        assert "○ ● ○  ○  default" in text
+        # `auto` — через двойной пробел вплотную к своей тройке, даже когда
+        # колонка трека шире (четвёрка режима разрешений).
+        assert "○ ● ○  ○ " in text
+        assert text.rstrip().endswith("default")
 
 
 async def test_level_row_cycle_includes_auto(tmp_path, monkeypatch):
@@ -5909,3 +5925,52 @@ async def test_level_cycle_in_settings_never_writes_auto_when_only_the_session_p
             )
         assert "auto" not in written
         assert set(written) >= {"light", "default", "max"}
+
+
+# --- mode: режим разрешений по умолчанию ------------------------------------
+
+
+async def test_mode_row_writes_the_default_permission_mode(tmp_path):
+    """Строка `mode` пишет `security.permissions.default_mode` в конфиг.
+    Сессия без своего выбора режима сразу следует ему (правило «выбор сессии
+    → конфиг»), сессия с выбором через Shift+Tab свой режим сохраняет."""
+    pytest.importorskip("textual")
+
+    app, cfg_file = _app_with_config(tmp_path, 'level: "default"\n')
+    async with app.run_test() as pilot:
+        scr = await _open_modes_section(pilot)
+        scr._modes_idx = modes_row_index("mode")
+        row = scr._mode_row_text("mode", selected=False).plain
+        assert "mode · режим разрешений по умолчанию" in row
+        assert row.rstrip().endswith("edit")
+
+        await pilot.press("right")  # edit -> manual
+        await pilot.pause(0.1)
+
+        assert 'default_mode: "manual"' in cfg_file.read_text(encoding="utf-8")
+        assert app.effective_permission_mode() == "manual"
+        app.set_permission_mode("plan")  # выбор сессии (Shift+Tab)
+        await pilot.press("right")  # manual -> plan
+        await pilot.pause(0.1)
+        await pilot.press("right")  # plan -> auto
+        await pilot.pause(0.1)
+        assert 'default_mode: "auto"' in cfg_file.read_text(encoding="utf-8")
+        assert app.effective_permission_mode() == "plan"
+
+
+async def test_mode_row_hint_is_the_footer_description_of_the_mode(tmp_path):
+    """Подсказка строки — то же описание режима, что футер показывает при его
+    включении: одно описание режима на весь продукт."""
+    pytest.importorskip("textual")
+    from gc_tui.services.mode_pill import MODE_HINTS
+
+    app, _ = _app_with_config(
+        tmp_path, 'security:\n  permissions:\n    default_mode: "manual"\n'
+    )
+    async with app.run_test(size=(120, 30)) as pilot:
+        scr = await _open_modes_section(pilot)
+        scr._modes_idx = modes_row_index("mode")
+
+        hint = scr._modes_hint_text()
+        assert MODE_HINTS["manual"] in hint
+        assert hint.endswith("· в сессии — Shift+Tab")
