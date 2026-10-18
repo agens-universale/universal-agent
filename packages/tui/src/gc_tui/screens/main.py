@@ -5269,6 +5269,7 @@ class TraceScreen(Screen):
             else:
                 # Same physical-key sets as CLI / confirm_port (QWERTY + ЙЦУКЕН).
                 from gc_core.security.confirm_port import (
+                    CONFIRM_DENY_ONCE,
                     CONFIRM_DENY_REMEMBER,
                     CONFIRM_KEY_N,
                     CONFIRM_KEY_O,
@@ -5277,7 +5278,11 @@ class TraceScreen(Screen):
                     normalize_confirm_key,
                 )
 
-                if key == "escape" or key in CONFIRM_KEY_N:
+                # Esc — отмена, то есть разовый запрет: запрет на сессию
+                # сильнее режима, его выбирают явно (клавишей N).
+                if key == "escape":
+                    self._answer_confirm(CONFIRM_DENY_ONCE)
+                elif key in CONFIRM_KEY_N:
                     self._answer_confirm(CONFIRM_DENY_REMEMBER)
                 elif (
                     key in CONFIRM_KEY_Y

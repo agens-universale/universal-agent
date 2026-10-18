@@ -195,9 +195,10 @@ async def test_confirm_banner_n_answers_deny_remember(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_confirm_banner_escape_answers_deny_remember(tmp_path):
-    """Esc при активном баннере: submit_confirm_reply("deny_remember"), не проваливается
-    в глобальную Esc-лестницу (нет exit-модалки)."""
+async def test_confirm_banner_escape_answers_deny_once(tmp_path):
+    """Esc при активном баннере — отмена: submit_confirm_reply("deny_once"), не
+    запрет на всю сессию (его выбирают явно, клавишей N), и не проваливается в
+    глобальную Esc-лестницу (нет exit-модалки)."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
     from gc_tui.widgets.confirm_banner import ConfirmBanner
@@ -220,7 +221,7 @@ async def test_confirm_banner_escape_answers_deny_remember(tmp_path):
         await pilot.press("escape")
         await pilot.pause(0.1)
 
-        assert runner.replies == ["deny_remember"]
+        assert runner.replies == ["deny_once"]
         assert not scr._confirm_active
         assert len(pilot.app.query(ConfirmBanner)) == 0
         # Не открылась exit-модалка (screen_stack == 1)

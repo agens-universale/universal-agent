@@ -8,8 +8,11 @@ from types import SimpleNamespace
 from gc_core.execution.human import HumanRequestInterrupted
 from gc_core.message_policy.permission_denials import (
     DECLINED_TYPE,
+    RETRY_ON_REQUEST,
+    SESSION_DENIED_TYPE,
     TIMED_OUT_TYPE,
     UNATTENDED_TYPE,
+    session_denied_error,
     timed_out_error,
 )
 from gc_core.security.call_scope import call_scope
@@ -21,7 +24,11 @@ from gc_core.security.confirm_port import (
     CONFIRM_TIMED_OUT,
 )
 from gc_core.security.dual_wrapper import _drive_async
-from gc_core.security.mode_stage import ModeAction, resolve_by_mode
+from gc_core.security.mode_stage import (
+    ModeAction,
+    remembered_denial,
+    resolve_by_mode,
+)
 from gc_core.security.permission_mode import ASK
 from gc_core.security.permission_store import PermissionStore
 from gc_core.settings import RuntimeEnv
@@ -69,11 +76,36 @@ def _durable(human_request, *, human=None):
 
 
 async def test_human_no_through_the_port_is_declined():
-    for answer in (CONFIRM_DENY_ONCE, CONFIRM_DENY_REMEMBER):
-        allowed, error = await _ask(_local(answer))
-        assert allowed is False
-        assert error["type"] == DECLINED_TYPE
-        assert error["path"] == "/p/a.txt"
+    allowed, error = await _ask(_local(CONFIRM_DENY_ONCE))
+    assert allowed is False
+    assert error["type"] == DECLINED_TYPE
+    assert error["path"] == "/p/a.txt"
+
+
+async def test_no_for_the_session_says_so_at_once():
+    """«Запретить в этой сессии» — сразу отказ на сессию: человек и модель
+    узнают, что запрет запомнен, с первого отказа, а не со следующего вызова.
+    Повтор того же действия получает тот же отказ — и из вопроса, и из
+    запомненного запрета, который сильнее режима."""
+    ctx = _local(CONFIRM_DENY_REMEMBER)
+    allowed, first = await _ask(ctx)
+    assert allowed is False
+    assert first == session_denied_error(path="/p/a.txt")
+    assert first["reason"] == "Denied by the user for this session."
+    # Повтор в этой сессии снова получит отказ: модель не обещает человеку
+    # «снять запрет» повтором и не обходит его, а называет то, что его снимает.
+    assert RETRY_ON_REQUEST not in first["guidance"]
+    assert "new session" in first["guidance"]
+    assert "another way" in first["guidance"]
+    _, again = await _ask(ctx)
+    assert again == first
+    remembered = remembered_denial(
+        SimpleNamespace(ctx=ctx, logger=None),
+        "fs_write_file",
+        KEY,
+        path="/p/a.txt",
+    )
+    assert remembered == first
 
 
 async def test_no_answer_in_time_is_its_own_outcome():
@@ -96,6 +128,9 @@ async def test_no_one_to_ask_is_unattended_without_a_question():
 
 async def test_durable_port_reports_the_same_outcomes():
     async def says_no(_request):
+        return CONFIRM_DENY_ONCE
+
+    async def says_no_for_the_session(_request):
         return CONFIRM_DENY_REMEMBER
 
     async def interrupted(_request):
@@ -103,6 +138,8 @@ async def test_durable_port_reports_the_same_outcomes():
 
     _, declined = await _ask(_durable(says_no))
     assert declined["type"] == DECLINED_TYPE
+    _, denied = await _ask(_durable(says_no_for_the_session))
+    assert denied["type"] == SESSION_DENIED_TYPE
     _, timed_out = await _ask(_durable(interrupted))
     assert timed_out["type"] == TIMED_OUT_TYPE
     # Воркер без человека объявил канал: тот же обрыв — «спросить некого».

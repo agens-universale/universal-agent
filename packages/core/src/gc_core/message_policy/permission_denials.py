@@ -67,11 +67,15 @@ SESSION_DENIED_TYPE = "denied_by_user_for_session"
 #: Причина для человека: её показывает лента.
 SESSION_DENIED_REASON = "Denied by the user for this session."
 #: Запрет поставил сам человек — модель обязана ему об этом сказать, а не
-#: молча искать другой путь.
+#: молча искать другой путь. Без `RETRY_ON_REQUEST`: до конца сессии ответ не
+#: изменится, повтор снова получит отказ, а снять запрет модель не может.
 SESSION_DENIED_GUIDANCE = (
-    "Do NOT retry the same call on your own, and do NOT reach the same result "
-    "another way — tell the user it is blocked by their earlier answer and ask "
-    "the user how to proceed. " + RETRY_ON_REQUEST
+    "The user blocked this action for the rest of this session. Do NOT retry "
+    "the same call, and do NOT reach the same result another way: in this "
+    "session it is refused again, without asking. Tell the user it is blocked "
+    "by their earlier answer and only a new session lifts it; do not offer to "
+    "lift it yourself. Continue without this action, or ask the user how to "
+    "proceed."
 )
 
 

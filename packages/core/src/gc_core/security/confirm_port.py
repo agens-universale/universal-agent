@@ -11,6 +11,7 @@ from gc_core.execution.human import HumanRequest, HumanRequestInterrupted
 from gc_core.execution.ports import port
 from gc_core.message_policy.permission_denials import (
     declined_error,
+    session_denied_error,
     timed_out_error,
     unattended_error,
 )
@@ -32,6 +33,9 @@ CONFIRM_TIMED_OUT = "timed_out"
 #: Исход вопроса, не давшего «да», — для текста отказа (`unconfirmed_error`):
 #: человек ответил «нет».
 CONFIRM_OUTCOME_DECLINED = "declined"
+#: Человек запретил действие до конца сессии (ответ N): отказ говорит об
+#: этом сразу, как и все следующие отказы по этому запрету.
+CONFIRM_OUTCOME_SESSION_DENIED = "session_denied"
 #: Ответа нет: таймаут, вопрос отменён или клиент не умеет отвечать.
 CONFIRM_OUTCOME_TIMED_OUT = "timed_out"
 _VALID_CHOICES = {
@@ -173,16 +177,19 @@ def confirm_available(ctx: Any) -> bool:
 def unconfirmed_error(ctx: Any, **fields: Any) -> dict:
     """Тело отказа после вопроса, на который не ответили «да».
 
-    Причин три, и человеку с моделью нужно знать, какая: спросить было
+    Причин четыре, и человеку с моделью нужно знать, какая: спросить было
     некого (канал без человека — вопрос стал отказом), ответа не пришло
-    вовремя (таймаут, отмена, клиент не умеет отвечать) — или человек
-    отказал. Исход вопроса лежит в привязке вызова (`CallScope`).
+    вовремя (таймаут, отмена, клиент не умеет отвечать), человек отказал
+    разово — или запретил до конца сессии. Исход вопроса лежит в привязке
+    вызова (`CallScope`).
     """
     if not confirm_available(ctx):
         return unattended_error(**fields)
-    scope = current_call()
-    if getattr(scope, "confirm_outcome", None) == CONFIRM_OUTCOME_TIMED_OUT:
+    outcome = getattr(current_call(), "confirm_outcome", None)
+    if outcome == CONFIRM_OUTCOME_TIMED_OUT:
         return timed_out_error(**fields)
+    if outcome == CONFIRM_OUTCOME_SESSION_DENIED:
+        return session_denied_error(**fields)
     return declined_error(**fields)
 
 
@@ -285,22 +292,32 @@ def _outcome_of(choice: Any) -> str | None:
     """Исход ответа на вопрос; «да» — None."""
     if choice == CONFIRM_TIMED_OUT:
         return CONFIRM_OUTCOME_TIMED_OUT
-    if coerce_confirm_choice(choice) in (
-        CONFIRM_ALLOW_REMEMBER,
-        CONFIRM_ALLOW_ONCE,
-    ):
+    choice = coerce_confirm_choice(choice)
+    if choice in (CONFIRM_ALLOW_REMEMBER, CONFIRM_ALLOW_ONCE):
         return None
+    if choice == CONFIRM_DENY_REMEMBER:
+        return CONFIRM_OUTCOME_SESSION_DENIED
+    return CONFIRM_OUTCOME_DECLINED
+
+
+def _remembered_outcome(
+    store: Any, decision_key: str, allowed: bool
+) -> str | None:
+    """Исход запомненного ответа — тот же, что у самого ответа."""
+    if allowed:
+        return None
+    if decision_key in store.session_rules():
+        return CONFIRM_OUTCOME_SESSION_DENIED
     return CONFIRM_OUTCOME_DECLINED
 
 
 def _remembered(store: Any, decision_key: str | None) -> bool | None:
-    """Ответ, уже данный на этот ключ (в сессии или в этом вызове тула);
-    исход у него тот же, что у самого ответа."""
+    """Ответ, уже данный на этот ключ (в сессии или в этом вызове тула)."""
     if store is None or decision_key is None:
         return None
     cached = store.decision_for(decision_key)
     if cached is not None:
-        _note_outcome(None if cached else CONFIRM_OUTCOME_DECLINED)
+        _note_outcome(_remembered_outcome(store, decision_key, cached))
     return cached
 
 

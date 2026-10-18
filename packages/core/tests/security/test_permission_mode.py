@@ -288,13 +288,16 @@ def test_session_denied_envelope_names_the_user_as_the_source():
 def test_refusals_forbid_retrying_on_initiative_but_not_on_request():
     """Запрет повтора — про инициативу модели. Человек мог передумать или
     сменить режим: на его прямую просьбу модель обязана вызвать тул снова
-    (живая приёмка: после разового «нет» модель отказывалась сама)."""
+    (живая приёмка: после разового «нет» модель отказывалась сама).
+
+    Запрета «в сессии» здесь нет: до конца сессии повтор снова получит отказ,
+    и обещание «повтори — ответ мог измениться» было бы ложью
+    (test_confirm_outcome::test_no_for_the_session_says_so_at_once)."""
     from gc_core.message_policy import permission_denials as pm
 
     for error in (
         pm.declined_error(),
         pm.unattended_error(),
-        pm.session_denied_error(),
         pm.mode_denied_error("x", "y"),
     ):
         assert "Do NOT retry the same call on your own" in error["guidance"]
