@@ -290,6 +290,21 @@ def validate_judge_result(raw: dict[str, Any]) -> JudgeResult:
 JUDGE_UNAVAILABLE_CONFIRM_REQUIRED = "judge_unavailable_confirm_required"
 
 
+def _declined_by_user(
+    risk_flags: list[str] | None = None,
+) -> ExecutionDecision:
+    """Человек ответил на вопрос о команде «нет». Причину и инструкцию модели
+    гард потом берёт по исходу вопроса (`guard_refusal`)."""
+    return ExecutionDecision(
+        allowed=False,
+        decision="cancelled",
+        reason_code="user_confirmation",
+        reason="User declined the command.",
+        risk_flags=list(risk_flags or []),
+        error_type="unsafe_command_cancelled_by_user",
+    )
+
+
 def _decide_without_judge(
     normalized_mode: str, user_confirmation: bool | None, ctx: Any
 ) -> ExecutionDecision:
@@ -302,13 +317,7 @@ def _decide_without_judge(
                 reason="User confirmed execution after judge was unavailable.",
             )
         if user_confirmation is False:
-            return ExecutionDecision(
-                allowed=False,
-                decision="cancelled",
-                reason_code="user_confirmation",
-                reason="User declined the command.",
-                error_type="unsafe_command_cancelled_by_user",
-            )
+            return _declined_by_user()
         return ExecutionDecision(
             allowed=False,
             decision="asked",
@@ -339,7 +348,11 @@ def _decide_without_judge(
             reason="Judge is unavailable; user confirmation is required.",
             requires_confirmation=True,
         )
-    # Fail-closed: confirm недоступен или пользователь отказал — блокируем.
+    if user_confirmation is False:
+        # Человек ответил «нет» — это его отказ, а не «судья недоступен»:
+        # причина и инструкция модели — по исходу вопроса (как в ask).
+        return _declined_by_user()
+    # Fail-closed: подтверждение недоступно — блокируем.
     return ExecutionDecision(
         allowed=False,
         decision="blocked",
@@ -398,14 +411,7 @@ def decide_command_execution(
             risk_flags=judge_result.risk_flags,
         )
     if user_confirmation is False:
-        return ExecutionDecision(
-            allowed=False,
-            decision="cancelled",
-            reason_code="user_confirmation",
-            reason="User declined the command.",
-            risk_flags=judge_result.risk_flags,
-            error_type="unsafe_command_cancelled_by_user",
-        )
+        return _declined_by_user(judge_result.risk_flags)
     return ExecutionDecision(
         allowed=False,
         decision="asked",

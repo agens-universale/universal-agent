@@ -11,7 +11,11 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
 
 from gc_core.execution.ports import port
-from gc_core.security.confirm_port import confirmation_step, guard_refusal
+from gc_core.security.confirm_port import (
+    confirmation_step,
+    guard_refusal,
+    refuse_in_place,
+)
 from gc_core.security.dual_wrapper import dual_wrap
 from gc_core.security.guard_probe import GuardProbeRequest, probe_step
 from gc_core.security.mode_stage import (
@@ -39,7 +43,7 @@ from gc_core.settings import (
 )
 from gc_core.trace_id import trace_id_from_config
 
-_WRITE_GUARD_TITLE = "Защита записи"
+WRITE_GUARD_TITLE = "Защита записи"
 
 
 @dataclass(frozen=True)
@@ -488,7 +492,7 @@ def _resolve_write_violation(
         # Тот же приём, что и у защищённых путей выше: подтверждение
         # ждётся в потоке, а не на event loop вызывающего.
         confirmed = yield confirmation_step(
-            title=_WRITE_GUARD_TITLE,
+            title=WRITE_GUARD_TITLE,
             question=f"Разрешить запись вне периметра проекта в {candidate_path}?",
             fields=[
                 ("Tool", tool_name),
@@ -519,13 +523,11 @@ def _resolve_write_violation(
             return True, None
         # cancelled — продолжаем в стандартный blocked-flow ниже,
         # но помечаем error.type для отличимости в логах.
-        exc.error.pop("message", None)
-        exc.error.update(
-            guard_refusal(
-                context.ctx,
-                "write_guard_cancelled_by_user",
-                path=candidate_path,
-            )
+        refuse_in_place(
+            exc.error,
+            context.ctx,
+            "write_guard_cancelled_by_user",
+            path=candidate_path,
         )
     audit_policy_decision(
         context,
@@ -833,7 +835,6 @@ def prompt_user_confirmation_choice(
     # Nested import: path_policy ↔ confirm_port cycle if top-level.
     from gc_core.security.confirm_port import (
         CONFIRM_DENY_ONCE,
-        CONFIRM_DENY_REMEMBER,
         confirm_choice_hint,
         normalize_confirm_key,
     )
@@ -874,7 +875,8 @@ def prompt_user_confirmation_choice(
         sys.stderr.flush()
         answer = _read_confirmation_line()
     except EOFError:
-        return CONFIRM_DENY_REMEMBER
+        # Конец ввода — не выбор запрета на сессию: запрет разовый.
+        return CONFIRM_DENY_ONCE
     except KeyboardInterrupt:
         return CONFIRM_DENY_ONCE
     if answer is None:
@@ -1007,7 +1009,7 @@ def _ask_user_confirmation_for_write(
     from gc_core.security.confirm_port import request_confirm
 
     return request_confirm(
-        title=_WRITE_GUARD_TITLE,
+        title=WRITE_GUARD_TITLE,
         question=f"Разрешить запись вне периметра проекта в {path}?",
         fields=[
             ("Tool", tool_name),

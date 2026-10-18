@@ -23,7 +23,7 @@ from gc_core.security import path_policy
 from gc_core.security.confirm_port import (
     CONFIRM_ALLOW_ONCE,
     CONFIRM_ALLOW_REMEMBER,
-    CONFIRM_DENY_REMEMBER,
+    CONFIRM_DENY_ONCE,
 )
 
 _THREAD = "test-windows-confirm"
@@ -184,9 +184,10 @@ def test_the_answer_is_edited_like_a_line(console, ask):
 
 
 def test_ctrl_z_ends_the_input(console, ask):
-    """Ctrl+Z — конец ввода на Windows, как Ctrl+D на POSIX: запрет, а не ожидание."""
+    """Ctrl+Z — конец ввода на Windows, как Ctrl+D на POSIX: запрет, а не
+    ожидание. Разовый: конец ввода — не выбор запрета на всю сессию."""
     answer = ask()
     assert console.reading.wait(5), "вопрос так и не начали читать"
     console.type("\x1a")
 
-    assert answer.result(timeout=5) == CONFIRM_DENY_REMEMBER
+    assert answer.result(timeout=5) == CONFIRM_DENY_ONCE

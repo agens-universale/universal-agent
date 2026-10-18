@@ -11,6 +11,7 @@ from gc_core.config_modules.security import DownloadConfig
 from gc_core.constants.tool_names import DOWNLOAD_FILE_NAME
 from gc_core.execution.ports import port
 from gc_core.security.path_policy import (
+    WRITE_GUARD_TITLE,
     WriteGuardViolation,
     audit_policy_decision,
     check_write_guard_path,
@@ -300,11 +301,11 @@ class DownloadFile(AbstractSimpleTool):
             if wg_mode == "ask":
                 from gc_core.security.confirm_port import (
                     confirmation_step,
-                    guard_refusal,
+                    refuse_in_place,
                 )
 
                 confirmed = yield confirmation_step(
-                    title="Защита записи",
+                    title=WRITE_GUARD_TITLE,
                     question=f"Разрешить запись вне периметра проекта в {dest}?",
                     fields=[
                         ("Tool", self.registered_tool_name()),
@@ -327,13 +328,11 @@ class DownloadFile(AbstractSimpleTool):
                         risk_flags=["out_of_perimeter"],
                     )
                     return None
-                exc.error.pop("message", None)
-                exc.error.update(
-                    guard_refusal(
-                        context.ctx,
-                        "write_guard_cancelled_by_user",
-                        path=dest,
-                    )
+                refuse_in_place(
+                    exc.error,
+                    context.ctx,
+                    "write_guard_cancelled_by_user",
+                    path=dest,
                 )
             audit_policy_decision(
                 context,

@@ -53,11 +53,15 @@ def test_judge_unavailable_deny_mode_blocks_when_no_confirm(monkeypatch):
 
 
 def test_judge_unavailable_deny_mode_blocks_when_confirm_rejected(monkeypatch):
-    """deny + судья недоступен + пользователь отказал → fail-closed."""
+    """deny + судья недоступен + пользователь отказал → блок, и это отказ
+    человека, а не «судья недоступен»: причину и инструкцию модели гард
+    возьмёт по исходу вопроса."""
     monkeypatch.setattr(cm, "confirm_available", lambda ctx: True)
     dec = decide_command_execution("deny", None, False, False, ctx=object())
     assert dec.allowed is False
-    assert dec.reason_code == "judge_unavailable"
+    assert dec.decision == "cancelled"
+    assert dec.reason_code == "user_confirmation"
+    assert dec.error_type == "unsafe_command_cancelled_by_user"
 
 
 def test_decision_never_asks_the_human_itself(monkeypatch):

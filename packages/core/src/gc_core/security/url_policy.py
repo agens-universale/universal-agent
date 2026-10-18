@@ -11,7 +11,7 @@ from gc_core.message_policy.permission_denials import (
     OTHER_HOST_REDIRECT_TYPE,
     other_host_redirect_reason,
 )
-from gc_core.security.confirm_port import confirmation_step
+from gc_core.security.confirm_port import confirmation_step, refuse_in_place
 from gc_core.security.dual_wrapper import dual_wrap
 from gc_core.security.mode_stage import (
     ModeAction,
@@ -221,10 +221,11 @@ def _url_policy_flow(func, context, url, args, kwargs, blocked):
                 error_type=decision.error_type,
             )
             return (yield)
-        error["type"] = "url_blocked_by_policy_cancelled_by_user"
-        error["message"] = (
-            f"User declined the request to '{decision.url}'. Do NOT retry the same "
-            "URL, and do NOT silently fetch a different URL — ask the user or stop."
+        refuse_in_place(
+            error,
+            context.ctx,
+            "url_blocked_by_policy_cancelled_by_user",
+            url=decision.url,
         )
     audit_policy_decision(
         context,

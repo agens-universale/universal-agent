@@ -163,3 +163,16 @@ async def test_a_later_yes_in_the_same_call_clears_the_outcome():
         assert scope.confirm_outcome is None
     assert first[1]["type"] == TIMED_OUT_TYPE
     assert second == (True, None)
+
+
+async def test_no_for_the_session_with_nowhere_to_remember_is_a_plain_no():
+    """Запомнить запрет некуда (нет стора) — модели не говорим «до конца
+    сессии»: повтор спросит снова, и это обычный отказ."""
+    ctx = fake_ctx(
+        runtime=RuntimeEnv(human_channel=True),
+        confirm_request=lambda request: CONFIRM_DENY_REMEMBER,
+        permission_store=None,
+    )
+    allowed, error = await _ask(ctx)
+    assert allowed is False
+    assert error["type"] == DECLINED_TYPE

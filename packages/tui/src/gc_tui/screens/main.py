@@ -5278,7 +5278,7 @@ class TraceScreen(Screen):
                 self._answer_confirm(
                     banner.selected_choice()
                     if banner is not None
-                    else "deny_remember"
+                    else "deny_once"
                 )
             elif banner is not None and banner.scroll_body(key):
                 pass  # прокрутка тела — не ответ на вопрос

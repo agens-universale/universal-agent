@@ -21,6 +21,7 @@ from gc_core.constants.tool_names import FS_VIEW_IMAGE_NAME
 from gc_core.execution.ports import port
 from gc_core.security.confirm_port import (
     confirmation_step,
+    refuse_in_place,
     request_confirm,
 )
 from gc_core.security.dual_wrapper import dual_wrap
@@ -491,10 +492,11 @@ def _resolve_read_violation(
                 risk_flags=["out_of_perimeter"],
             )
             return True, None
-        exc.error["type"] = "read_guard_cancelled_by_user"
-        exc.error["message"] = (
-            f"User declined the read of '{_rg_path}'. Do NOT retry the same "
-            "read, and do NOT silently read a different file — ask the user or stop."
+        refuse_in_place(
+            exc.error,
+            context.ctx,
+            "read_guard_cancelled_by_user",
+            path=_rg_path,
         )
     audit_policy_decision(
         context,

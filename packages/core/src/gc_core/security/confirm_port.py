@@ -117,25 +117,20 @@ def normalize_confirm_key(answer: str | None) -> str:
 
     Accepts Latin/Cyrillic same-key glyphs in either case. Multi-char words
     (yes/no/once) are not accepted — same as TUI single-key handlers.
-    Unknown / empty → deny_remember (explicit-safe).
+    Непонятный ответ (пустой, конец ввода, слово, чужая клавиша) — запрет
+    РАЗОВЫЙ: безопасно, но не запоминается. Запрет на всю сессию сильнее
+    режима, его выбирают только явной клавишей N.
     """
-    if answer is None:
-        return CONFIRM_DENY_REMEMBER
-    token = str(answer).strip()
-    if not token:
-        return CONFIRM_DENY_REMEMBER
-    # Single key only (TUI parity). Full-width / accidental paste → deny_remember.
+    token = "" if answer is None else str(answer).strip()
     if len(token) != 1:
-        return CONFIRM_DENY_REMEMBER
+        return CONFIRM_DENY_ONCE
     if token in CONFIRM_KEY_Y:
         return CONFIRM_ALLOW_REMEMBER
     if token in CONFIRM_KEY_O:
         return CONFIRM_ALLOW_ONCE
     if token in CONFIRM_KEY_N:
         return CONFIRM_DENY_REMEMBER
-    if token in CONFIRM_KEY_T:
-        return CONFIRM_DENY_ONCE
-    return CONFIRM_DENY_REMEMBER
+    return CONFIRM_DENY_ONCE
 
 
 def coerce_confirm_choice(choice: Any) -> str:
@@ -146,7 +141,8 @@ def coerce_confirm_choice(choice: Any) -> str:
         return choice  # type: ignore[return-value]
     if isinstance(choice, str) and choice in _ALIAS_MAP:
         return _ALIAS_MAP[choice]
-    return CONFIRM_DENY_REMEMBER
+    # Неизвестное значение — не выбор человека: запрет разовый.
+    return CONFIRM_DENY_ONCE
 
 
 def _ask_human_enabled(ctx: Any) -> bool:
@@ -196,8 +192,20 @@ def unconfirmed_error(ctx: Any, **fields: Any) -> dict:
 def guard_refusal(ctx: Any, error_type: str, **fields: Any) -> dict:
     """Отказ гарда после его собственного вопроса: тип — гарда (по нему
     аудит и тесты различают гарды), причина и инструкция модели — по исходу
-    вопроса, те же, что у вопросов режима (`unconfirmed_error`)."""
-    return {**unconfirmed_error(ctx, **fields), "type": error_type}
+    вопроса, те же, что у вопросов режима (`unconfirmed_error`); сам исход —
+    машинным полем `outcome`, тем же типом, что у вопросов режима."""
+    body = unconfirmed_error(ctx, **fields)
+    return {**body, "type": error_type, "outcome": body["type"]}
+
+
+def refuse_in_place(
+    error: dict, ctx: Any, error_type: str, **fields: Any
+) -> None:
+    """Переписать словарь отказа гарда (его ошибку периметра) отказом после
+    вопроса: прежняя фраза `message` уступает причине и инструкции по исходу
+    (`guard_refusal`), прочие поля ошибки остаются."""
+    error.pop("message", None)
+    error.update(guard_refusal(ctx, error_type, **fields))
 
 
 def _via_name(ctx: Any) -> str | None:
@@ -295,14 +303,16 @@ def _note_outcome(outcome: str | None) -> None:
         scope.confirm_outcome = outcome
 
 
-def _outcome_of(choice: Any) -> str | None:
-    """Исход ответа на вопрос; «да» — None."""
+def _outcome_of(choice: Any, *, remembered: bool) -> str | None:
+    """Исход ответа на вопрос; «да» — None. Запрет «в сессии» называет себя
+    только если его есть куда запомнить (`remembered`): иначе повтор спросит
+    снова, и это обычный отказ."""
     if choice == CONFIRM_TIMED_OUT:
         return CONFIRM_OUTCOME_TIMED_OUT
     choice = coerce_confirm_choice(choice)
     if choice in (CONFIRM_ALLOW_REMEMBER, CONFIRM_ALLOW_ONCE):
         return None
-    if choice == CONFIRM_DENY_REMEMBER:
+    if choice == CONFIRM_DENY_REMEMBER and remembered:
         return CONFIRM_OUTCOME_SESSION_DENIED
     return CONFIRM_OUTCOME_DECLINED
 
@@ -359,7 +369,11 @@ def request_confirm(
         # разрешение на путь, в котором человек только что отказал.
         _note_outcome(CONFIRM_OUTCOME_TIMED_OUT)
         return False
-    _note_outcome(_outcome_of(choice))
+    _note_outcome(
+        _outcome_of(
+            choice, remembered=store is not None and decision_key is not None
+        )
+    )
     return apply_confirm_choice(choice, store=store, decision_key=decision_key)
 
 
@@ -406,7 +420,12 @@ async def aconfirm_via_human_port(request: HumanRequest, *, ctx: Any) -> bool:
     except HumanRequestInterrupted:
         _note_outcome(CONFIRM_OUTCOME_TIMED_OUT)
         return False
-    _note_outcome(_outcome_of(choice))
+    _note_outcome(
+        _outcome_of(
+            choice,
+            remembered=store is not None and request.decision_key is not None,
+        )
+    )
     return apply_confirm_choice(
         choice,
         store=store,

@@ -43,7 +43,10 @@ def test_four_choice_constants_exist():
 
 
 def test_normalize_confirm_key_matches_tui_sets():
-    """Shared key normalizer: Latin/Cyrillic both cases; multi-char → deny_remember."""
+    """Shared key normalizer: Latin/Cyrillic both cases. Непонятный ответ —
+    пустой (Enter), конец ввода, слово или чужая клавиша — запрет РАЗОВЫЙ:
+    безопасно, но не запоминается. Запрет на всю сессию сильнее режима, его
+    выбирают только явной клавишей N."""
     from gc_core.security.confirm_port import normalize_confirm_key
 
     assert normalize_confirm_key("y") == CONFIRM_ALLOW_REMEMBER
@@ -51,11 +54,18 @@ def test_normalize_confirm_key_matches_tui_sets():
     assert normalize_confirm_key("щ") == CONFIRM_ALLOW_ONCE
     assert normalize_confirm_key("Т") == CONFIRM_DENY_REMEMBER
     assert normalize_confirm_key("е") == CONFIRM_DENY_ONCE
-    assert normalize_confirm_key("yes") == CONFIRM_DENY_REMEMBER
-    assert normalize_confirm_key("once") == CONFIRM_DENY_REMEMBER
-    assert normalize_confirm_key("s") == CONFIRM_DENY_REMEMBER
-    assert normalize_confirm_key("") == CONFIRM_DENY_REMEMBER
-    assert normalize_confirm_key(None) == CONFIRM_DENY_REMEMBER
+    assert normalize_confirm_key("yes") == CONFIRM_DENY_ONCE
+    assert normalize_confirm_key("once") == CONFIRM_DENY_ONCE
+    assert normalize_confirm_key("s") == CONFIRM_DENY_ONCE
+    assert normalize_confirm_key("") == CONFIRM_DENY_ONCE
+    assert normalize_confirm_key(None) == CONFIRM_DENY_ONCE
+
+
+def test_an_unknown_choice_value_is_a_one_time_refusal():
+    from gc_core.security.confirm_port import coerce_confirm_choice
+
+    assert coerce_confirm_choice("whatever") == CONFIRM_DENY_ONCE
+    assert coerce_confirm_choice(None) == CONFIRM_DENY_ONCE
 
 
 # ── record matrix ────────────────────────────────────────────────────────
@@ -152,7 +162,7 @@ def test_t_denies_and_records_run_only():
 # ── invalid choice → deny_remember ──────────────────────────────────────
 
 
-def test_invalid_choice_maps_to_deny_remember():
+def test_invalid_choice_is_a_one_time_refusal():
     store = PermissionStore()
     for bad in ("yes", None, "", "ok", 1, "session_old"):
         ctx, _ = _ctx(bad, store)
@@ -164,8 +174,8 @@ def test_invalid_choice_maps_to_deny_remember():
             decision_key="command:x",
         )
         assert result is False, f"bad {bad!r} must deny"
-    # invalid → deny_remember → session False
-    assert store.session_rules().get("command:x") is False
+    # Непонятный ответ — запрет разовый: в сессии не запоминается.
+    assert "command:x" not in store.session_rules()
 
 
 # ── backward-compat aliases (old tui_confirm returns once/session/deny) ──

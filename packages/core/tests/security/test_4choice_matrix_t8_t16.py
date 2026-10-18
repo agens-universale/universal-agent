@@ -127,17 +127,17 @@ def test_t11c_cli_same_key_matrix_matches_tui(fake_tty, answer, expected):
 
 
 def test_t11c_cli_rejects_legacy_words(fake_tty):
-    """yes/no/once are not TUI keys — invalid → deny_remember (no soft aliases)."""
-    assert _run_prompt(fake_tty, "yes") == "deny_remember"
-    assert _run_prompt(fake_tty, "no") == "deny_remember"
-    assert _run_prompt(fake_tty, "once") == "deny_remember"
-    assert (
-        _run_prompt(fake_tty, "s") == "deny_remember"
-    )  # old session key removed
+    """yes/no/once are not TUI keys — непонятный ответ → разовый запрет (no
+    soft aliases): запрет на всю сессию выбирают только явной клавишей N."""
+    assert _run_prompt(fake_tty, "yes") == "deny_once"
+    assert _run_prompt(fake_tty, "no") == "deny_once"
+    assert _run_prompt(fake_tty, "once") == "deny_once"
+    assert _run_prompt(fake_tty, "s") == "deny_once"  # old session key removed
 
 
-def test_t11c_cli_eof_returns_deny_remember(fake_tty):
-    """EOFError (Ctrl+D) → deny_remember (explicit dismiss)."""
+def test_t11c_cli_eof_returns_deny_once(fake_tty):
+    """EOFError (Ctrl+D) → разовый запрет: конец ввода — не выбор запрета
+    на всю сессию."""
     from gc_core.security.path_policy import prompt_user_confirmation_choice
 
     fake_tty.truncate(0)
@@ -147,7 +147,7 @@ def test_t11c_cli_eof_returns_deny_remember(fake_tty):
         result = prompt_user_confirmation_choice(
             title="T", fields=[], question="Q?"
         )
-    assert result == "deny_remember"
+    assert result == "deny_once"
 
 
 def test_t11c_cli_keyboard_interrupt_returns_deny_once(fake_tty, monkeypatch):
