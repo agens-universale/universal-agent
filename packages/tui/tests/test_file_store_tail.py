@@ -215,3 +215,31 @@ def test_read_all_events_stops_before_partial_line(tmp_path):
     assert [r["payload"]["id"] for r in records] == ["m1"]
     assert cur.position_token == whole
     assert [r["payload"]["id"] for r in tail.new_records] == ["m2"]
+
+
+def test_tail_events_waits_for_partial_line(tmp_path):
+    """Тик посреди записи строки: курсор встаёт до обрывка, и дописанная
+    запись приходит следующим тиком, а не теряется."""
+    data = tmp_path / "data_cli_t1.jsonl"
+    _append_record(data, 1, "user", "целая")
+    _write_meta(tmp_path / "meta_cli_t1.json", msgs=2)
+    store = FileTaskStore(str(tmp_path), system="cli")
+    _, cur = store.read_all_events("t1")
+    line = json.dumps(
+        {
+            "type": "message",
+            "seq": 2,
+            "payload": {"id": "m2", "role": "user", "content": "вторая"},
+        }
+    )
+    with open(data, "a", encoding="utf-8") as f:
+        f.write(line[:10])
+
+    first = store.tail_events("t1", cur)
+    with open(data, "a", encoding="utf-8") as f:
+        f.write(line[10:] + "\n")
+    second = store.tail_events("t1", first.next_cursor)
+
+    assert first.new_records == []
+    assert first.next_cursor.position_token == cur.position_token
+    assert [r["payload"]["id"] for r in second.new_records] == ["m2"]

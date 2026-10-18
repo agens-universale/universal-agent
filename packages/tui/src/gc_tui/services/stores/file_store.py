@@ -36,7 +36,8 @@ _ARCHIVE_MARK = "__pre_summary__"
 # TUI (0,25 с, TraceScreen) ≈ 2 с.
 _COMPACTION_WAIT_TICKS = 8
 # Сколько раз читать живой файл, пока эпоха и архивы не совпадут до и после
-# чтения: шаги сжатия ядра занимают миллисекунды, третьей попытки хватает.
+# чтения. Шаги сжатия ядра занимают миллисекунды; не совпали и после
+# последней попытки — следующий тик опознает сжатие или сбросит трейс.
 _SNAPSHOT_ATTEMPTS = 3
 
 
@@ -382,27 +383,29 @@ class FileTaskStore:
     def _read_after(
         self, data_path: Path, cursor: TaskCursor
     ) -> Optional[tuple[list[dict], int, int]]:
-        """Записи после курсора, новое смещение и макс. seq; None — seq откатился."""
+        """Записи после курсора, новое смещение и макс. seq; None — seq
+        откатился. Недописанная последняя строка остаётся за курсором и
+        придёт следующим тиком."""
         new_records: list[dict] = []
         max_seq: int = (
             int(cursor.ordering_key)
             if isinstance(cursor.ordering_key, int)
             else 0
         )
-        with open(data_path, encoding="utf-8") as f:
-            f.seek(int(cursor.position_token or 0))
-            for line in f:
-                rec = self._parse_line(line.rstrip("\n"))
-                if rec is None:
-                    continue
-                seq = rec.get("seq")
-                if isinstance(seq, int):
-                    if seq < max_seq:
-                        return None
-                    if seq > max_seq:
-                        max_seq = seq
-                new_records.append(rec)
-            return new_records, f.tell(), max_seq
+        offset = int(cursor.position_token or 0)
+        with open(data_path, "rb") as f:
+            f.seek(offset)
+            raw = f.read()
+        end = raw.rfind(b"\n") + 1
+        for rec in self._parse_chunk(raw[:end]):
+            seq = rec.get("seq")
+            if isinstance(seq, int):
+                if seq < max_seq:
+                    return None
+                if seq > max_seq:
+                    max_seq = seq
+            new_records.append(rec)
+        return new_records, offset + end, max_seq
 
     def _reset_unless_compaction(
         self,
