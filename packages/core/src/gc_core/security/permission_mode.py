@@ -129,14 +129,15 @@ READONLY_PAIR_HEADS: frozenset[str] = frozenset(
 
 #: Оболочки и интерпретаторы: однословной записью `readonly_commands` они
 #: сделали бы безобидным любой код (`python -c …`). Конфиг такую запись
-#: отвергает. Список эталона (22 имени) и варианты Python (`pythonw`,
-#: `pypy`, `ipython`, лаунчер `py`); имя сравнивается через
-#: ``command_name_variants``.
+#: отвергает. Список эталона и варианты Python (`pythonw`, `pypy`, `ipython`,
+#: лаунчер `py`). Имена всех списков здесь — в том виде, в каком их
+#: сравнивает ``command_name_variants``: нижний регистр, без `.exe`
+#: (`cmd.exe` эталона — это `cmd`).
 INTERPRETER_COMMANDS: frozenset[str] = frozenset(
     {
-        "sh", "bash", "zsh", "dash", "ksh", "fish", "cmd", "cmd.exe",
+        "sh", "bash", "zsh", "dash", "ksh", "fish", "cmd",
         "powershell", "pwsh", "python", "python3", "node", "bun", "deno",
-        "ruby", "perl", "php", "lua", "julia", "Rscript", "env",
+        "ruby", "perl", "php", "lua", "julia", "rscript", "env",
         "pythonw", "pypy", "ipython", "py",
     }
 )  # fmt: skip
@@ -159,24 +160,31 @@ COMMAND_LAUNCHERS: frozenset[str] = frozenset(
 #: `pnpm dlx`, `docker exec`): пара с ними в `readonly_commands` отвергается.
 RUNNER_SUBCOMMANDS: frozenset[str] = frozenset({"run", "exec", "dlx", "x"})
 
+#: Команды, у которых есть такая подкоманда: одним словом (`uv`) запись
+#: открыла бы и `uv run …` — шире пары, которую конфиг отвергает. Такой
+#: записи нужна подкоманда (`npm ls`, `cargo tree`). Список неполон.
+RUNNER_TOOLS: frozenset[str] = frozenset(
+    {
+        "uv", "npm", "pnpm", "yarn", "docker", "podman", "kubectl", "cargo",
+        "poetry", "pipenv", "pdm", "hatch", "go", "dotnet", "gradle", "mvn",
+    }
+)  # fmt: skip
+
 
 def command_name_variants(word: str) -> set[str]:
     """Имя команды так, как его сравнивают списки выше (в нижнем регистре):
-    без пути, без `.exe`, без регистра (Windows) и без хвоста версии
-    (`/usr/bin/python3.13t` → `python3.13t`, `python`; `python3.12-dbg` →
-    `python`)."""
+    без пути, без `.exe`, без регистра (Windows) и без хвоста версии и
+    варианта сборки (`/usr/bin/python3.13t` → `python3.13t`, `python`;
+    `python3.12-dbg` → `python`). Прочий `-хвост` остаётся: `python3-config`
+    и `php8.2-fpm` — не интерпретаторы."""
     name = re.split(r"[\\/]", word)[-1].lower()
     name = name.removesuffix(".exe")
-    return {name, re.sub(r"[\d.]+[a-z]?(-[a-z]+)?$", "", name)}
-
-
-def _lowered(names: frozenset[str]) -> frozenset[str]:
-    return frozenset(name.lower() for name in names)
+    return {name, re.sub(r"[\d.]+[a-z]?(-dbg|-debug)?$", "", name)}
 
 
 def interpreter_named(word: str) -> bool:
     """Первое слово записи — оболочка или интерпретатор."""
-    return bool(command_name_variants(word) & _lowered(INTERPRETER_COMMANDS))
+    return bool(command_name_variants(word) & INTERPRETER_COMMANDS)
 
 
 def launcher_named(word: str) -> bool:
@@ -185,8 +193,11 @@ def launcher_named(word: str) -> bool:
 
 
 def pair_head_named(word: str) -> bool:
-    """Первое слово — команда с подкомандами из таблицы встроенных пар."""
-    return bool(command_name_variants(word) & READONLY_PAIR_HEADS)
+    """Первое слово — команда, которой нужна подкоманда: из таблицы
+    встроенных пар (`git`) или с подкомандой запуска кода (`uv`, `npm`)."""
+    return bool(
+        command_name_variants(word) & (READONLY_PAIR_HEADS | RUNNER_TOOLS)
+    )
 
 
 @dataclass(frozen=True)

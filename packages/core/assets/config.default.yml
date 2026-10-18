@@ -404,8 +404,9 @@ security:
   # В TUI переключается Shift+Tab; флаг запуска --permission-mode сильнее.
   # readonly_commands дополняет встроенный список команд, которые в любом режиме
   # идут без подтверждения (ls, pwd, git status…): команда (tree) или пара
-  # «команда подкоманда» (git log). git одним словом, оболочки, интерпретаторы
-  # и запускатели других команд (bash, python, sudo, xargs…) отвергаются.
+  # «команда подкоманда» (git log). git, uv, npm и подобные одним словом,
+  # оболочки, интерпретаторы и запускатели других команд (bash, python, sudo,
+  # xargs…) отвергаются.
   permissions:
     default_mode: edit
     readonly_commands: []

@@ -7,7 +7,9 @@ from pydantic import ValidationError
 from gc_core.config_modules.root import AppConfig
 from gc_core.security.permission_mode import (
     AVAILABLE_MODES,
+    COMMAND_LAUNCHERS,
     INTERPRETER_COMMANDS,
+    RUNNER_TOOLS,
 )
 from gc_core.settings import is_explicit
 
@@ -205,9 +207,38 @@ def test_entry_of_three_or_more_words_is_rejected():
 
 
 def test_interpreter_list_is_the_reference_list_and_python_variants():
-    """22 имени эталона и четыре варианта Python."""
-    assert {"python", "bash", "cmd.exe", "Rscript", "env"} <= (
-        INTERPRETER_COMMANDS
-    )
+    """Имена эталона и четыре варианта Python — в том виде, в каком их
+    сравнивают (нижний регистр, без `.exe`): `cmd.exe` эталона — это `cmd`."""
+    assert {"python", "bash", "cmd", "rscript", "env"} <= INTERPRETER_COMMANDS
     assert {"pythonw", "pypy", "ipython", "py"} <= INTERPRETER_COMMANDS
-    assert len(INTERPRETER_COMMANDS) == 26
+    assert len(INTERPRETER_COMMANDS) == 25
+    for names in (INTERPRETER_COMMANDS, COMMAND_LAUNCHERS, RUNNER_TOOLS):
+        assert all(name == name.lower() for name in names)
+
+
+@pytest.mark.parametrize(
+    "entry",
+    ["uv", "npm", "pnpm", "yarn", "docker", "cargo", "poetry", "NPM"],
+)
+def test_tool_with_a_code_running_subcommand_needs_a_subcommand(entry):
+    """Одним словом `uv` — это и `uv run …`: запись шире пары, которую
+    проверка отвергает, поэтому нужна подкоманда."""
+    with pytest.raises(ValidationError, match="команда с подкомандами"):
+        _with_readonly([entry])
+
+
+def test_harmless_pairs_of_such_tools_stay_allowed():
+    cfg = _with_readonly(["npm ls", "cargo tree", "docker ps"])
+    assert cfg.security.permissions.readonly_commands == [
+        "npm ls",
+        "cargo tree",
+        "docker ps",
+    ]
+
+
+@pytest.mark.parametrize("entry", ["python3-config", "php8.2-fpm"])
+def test_names_that_only_start_like_an_interpreter_stay_allowed(entry):
+    """Срезается только хвост версии и варианта сборки (`-dbg`), а не любое
+    `-слово`: `python3-config` и `php8.2-fpm` — не интерпретаторы."""
+    cfg = _with_readonly([entry])
+    assert cfg.security.permissions.readonly_commands == [entry]
