@@ -55,7 +55,7 @@ def message_ids_in_retention_window(segments: list, *, keep: int = 2) -> set:
 def events_leaving_window(
     events: list,
     segment_starts: list[int],
-    window_ids: set,
+    window_ids: set | frozenset,
     keep: int = 2,
 ) -> list:
     """События сегментов вне окна `segments[-keep:]`, кроме id окна.

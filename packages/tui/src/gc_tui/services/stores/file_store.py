@@ -487,7 +487,7 @@ class FileTaskStore:
             archive_tail=tail,
             segment_index=len(archives) - 1,
             compacted_by=self._compacted_by(archive_seg, live_leading),
-            archive_ids=_payload_ids(archived),
+            window_ids=_payload_ids([*archived, *live_records]),
             live_records=live_records,
         )
         next_cursor = TaskCursor(

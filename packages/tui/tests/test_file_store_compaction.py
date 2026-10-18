@@ -139,7 +139,7 @@ def test_compaction_step_after_meta_written(tmp_path):
     assert _ids(step.archive_tail) == ["m4"]
     assert step.segment_index == 0
     assert step.compacted_by == store.read_segments(_TID)[0]["compacted_by"]
-    assert step.archive_ids == frozenset({"m1", "m2", "m3", "m4"})
+    assert step.window_ids == frozenset({"m1", "m2", "m3", "m4"})
     assert step.live_records == []
     live = tmp_path / f"data_{_SYS}_{_TID}.jsonl"
     assert tail.next_cursor == TaskCursor(
@@ -149,6 +149,16 @@ def test_compaction_step_after_meta_written(tmp_path):
         archives=1,
         wait_ticks=0,
     )
+
+
+def test_compaction_window_ids_cover_archive_and_live(tmp_path):
+    thread, store, cur = _attached(tmp_path)
+    thread.compact("S", upto=4)
+    thread.step5(_msg("m4"), _msg("m5"))
+
+    step = store.tail_events(_TID, cur).compaction
+
+    assert step.window_ids == frozenset({"m1", "m2", "m3", "m4", "m5"})
 
 
 def test_compaction_live_records_without_leading_summary(tmp_path):
@@ -254,7 +264,7 @@ def test_second_compaction_is_a_step_not_reset(tmp_path):
     assert step.segment_index == 1
     assert _ids(step.archive_tail) == ["m6"]
     assert step.compacted_by == store.read_segments(_TID)[1]["compacted_by"]
-    assert step.archive_ids == frozenset({"sum_S1", "m4", "m5", "m6"})
+    assert step.window_ids == frozenset({"sum_S1", "m4", "m5", "m6"})
     assert tail.next_cursor.archives == 2
 
 

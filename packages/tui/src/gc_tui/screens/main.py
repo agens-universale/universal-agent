@@ -2129,11 +2129,8 @@ class TraceScreen(Screen):
         Дедуп по id — в `_render_record` (общий для всех путей): preserved-копия
         лежит в следующем файле с тем же id, рисуется первое вхождение.
         Payload остаётся full, пока этот id есть в окне segments[-2:]."""
-        context = collect_render_context(
-            rec.get("payload")
-            for seg in segments
-            for rec in seg["messages"]
-            if isinstance(rec, dict)
+        context = _records_context(
+            [rec for seg in segments for rec in seg["messages"]]
         )
         window_start = retention_window_start_index(len(segments))
         window_ids = message_ids_in_retention_window(segments)
@@ -3721,17 +3718,22 @@ class TraceScreen(Screen):
         осмысленные события (ответ / 'контекст сжат' / продолжение) — значит вопрос
         НЕ висячий (его output мог быть суммаризован при компакции), remnant не нужен.
         False — ask_human реально последнее осмысленное событие (висячий вопрос)."""
-        cid = self._ask_human_call_id
-        ah_idx = None
-        for i, ev in enumerate(self._task_events):
-            if ev.kind == "ask_human" and (not cid or ev.call_id == cid):
-                ah_idx = i
+        ah_idx = self._last_ask_human_index(self._task_events)
         if ah_idx is None:
             return False
         meaningful = _DIALOG_CONTINUATION_KINDS | {"summary"}
         return any(
             ev.kind in meaningful for ev in self._task_events[ah_idx + 1 :]
         )
+
+    def _last_ask_human_index(self, events: list) -> int | None:
+        """Индекс последнего события смонтированного вопроса ask_human."""
+        cid = self._ask_human_call_id
+        ah_idx = None
+        for i, ev in enumerate(events):
+            if ev.kind == "ask_human" and (not cid or ev.call_id == cid):
+                ah_idx = i
+        return ah_idx
 
     def _reconcile_ask_human_after_render(
         self, *, allow_remnant: bool
@@ -4515,13 +4517,8 @@ class TraceScreen(Screen):
     def _lighten_segment_left_window(self, step: CompactionStep) -> None:
         """Retention: сегмент, выпавший из окна, облегчаем как полная
         перерисовка. Вложенные строки субагентов не трогаем (спека 3.4)."""
-        window_ids = set(step.archive_ids)
-        for rec in step.live_records:
-            payload = rec.get("payload")
-            if isinstance(payload, dict) and payload.get("id") is not None:
-                window_ids.add(payload["id"])
         for ev in events_leaving_window(
-            self._task_events, self._segment_starts, window_ids
+            self._task_events, self._segment_starts, step.window_ids
         ):
             apply_payload_retention(ev, seg_in_window=False)
 
@@ -4540,11 +4537,8 @@ class TraceScreen(Screen):
         if self._ask_human_banner is None:
             return
         added = self._task_events[start:]
-        cid = self._ask_human_call_id
-        after = 0
-        for i, ev in enumerate(added):
-            if ev.kind == "ask_human" and (not cid or ev.call_id == cid):
-                after = i + 1
+        ah_idx = self._last_ask_human_index(added)
+        after = 0 if ah_idx is None else ah_idx + 1
         if any(ev.kind in _DIALOG_CONTINUATION_KINDS for ev in added[after:]):
             self._unmount_ask_human_banner()
 

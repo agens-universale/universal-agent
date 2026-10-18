@@ -40,7 +40,8 @@ class CompactionStep:
     archive_tail: list[dict]
     segment_index: int
     compacted_by: dict
-    archive_ids: frozenset[str]
+    # id окна retention после шага: архив и новый живой файл.
+    window_ids: frozenset[str]
     live_records: list[dict]
 
 
