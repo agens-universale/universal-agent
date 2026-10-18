@@ -347,6 +347,29 @@ def test_attach_mid_compaction_resets_once(tmp_path):
     assert tail.next_cursor.wait_ticks == 0
 
 
+def test_attach_during_compaction_reads_consistent_cursor(
+    tmp_path, monkeypatch
+):
+    """Сжатие прошло посреди чтения attach: курсор берётся из перечитанного
+    состояния, а не из смеси старого файла и новой эпохи."""
+    thread, store, _ = _attached(tmp_path)
+    read_epoch = FileTaskStore._read_epoch
+
+    def _compact_once(self, task_id, system):
+        monkeypatch.setattr(FileTaskStore, "_read_epoch", read_epoch)
+        epoch = read_epoch(self, task_id, system)
+        thread.compact("S", upto=4)
+        return epoch
+
+    monkeypatch.setattr(FileTaskStore, "_read_epoch", _compact_once)
+    records, cur = store.read_all_events(_TID)
+    tail = store.tail_events(_TID, cur)
+
+    assert _ids(records) == ["sum_S"]
+    assert tail.stream_reset is False and tail.compaction is None
+    assert cur.storage_epoch == "S" and cur.archives == 1
+
+
 def test_plain_tick_does_not_list_archives(tmp_path, monkeypatch):
     thread = _Thread(tmp_path)
     thread.append(_msg("m1"))

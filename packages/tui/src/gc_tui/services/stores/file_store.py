@@ -35,6 +35,9 @@ _ARCHIVE_MARK = "__pre_summary__"
 # Сколько тиков подряд ждать завершения шагов сжатия ядра: 8 тиков опроса
 # TUI (0,25 с, TraceScreen) ≈ 2 с.
 _COMPACTION_WAIT_TICKS = 8
+# Сколько раз читать живой файл, пока эпоха и архивы не совпадут до и после
+# чтения: шаги сжатия ядра занимают миллисекунды, третьей попытки хватает.
+_SNAPSHOT_ATTEMPTS = 3
 
 
 class FileTaskStore:
@@ -198,29 +201,44 @@ class FileTaskStore:
     def read_all_events(
         self, task_id: str, system: Optional[str] = None
     ) -> tuple[list[dict], TaskCursor]:
+        """Записи живого файла и курсор после последней целой строки.
+
+        Эпоха и число архивов сверяются до и после чтения: сжатие посреди
+        чтения дало бы курсор из старого файла и новой эпохи, и следующий
+        тик сбросил бы трейс. Расхождение — перечитать."""
         sys_ = system or self._system
-        data_path = self._data_path(task_id, sys_)
-        records: list[dict] = []
-        max_seq: int = 0
-        offset: int = 0
-        if data_path.exists():
-            with open(data_path, encoding="utf-8") as f:
-                for line in f:
-                    rec = self._parse_line(line.rstrip("\n"))
-                    if rec is None:
-                        continue
-                    records.append(rec)
-                    seq = rec.get("seq")
-                    if isinstance(seq, int) and seq > max_seq:
-                        max_seq = seq
-            offset = data_path.stat().st_size
+        state = self._storage_state(task_id, sys_)
+        for _ in range(_SNAPSHOT_ATTEMPTS):
+            raw = self._read_live(task_id, sys_)
+            settled = self._storage_state(task_id, sys_)
+            if settled == state:
+                break
+            state = settled
+        end = raw.rfind(b"\n") + 1
+        records = self._parse_chunk(raw[:end])
+        epoch, archives = state
         cursor = TaskCursor(
-            position_token=offset,
-            ordering_key=max_seq,
-            storage_epoch=self._read_epoch(task_id, sys_),
-            archives=len(self._archive_paths(task_id, sys_)),
+            position_token=end,
+            ordering_key=_max_seq(records),
+            storage_epoch=epoch,
+            archives=archives,
         )
         return records, cursor
+
+    def _storage_state(
+        self, task_id: str, system: str
+    ) -> tuple[Optional[str], int]:
+        """(эпоха, число архивов) — то, что меняет сжатие."""
+        return (
+            self._read_epoch(task_id, system),
+            len(self._archive_paths(task_id, system)),
+        )
+
+    def _read_live(self, task_id: str, system: str) -> bytes:
+        try:
+            return self._data_path(task_id, system).read_bytes()
+        except FileNotFoundError:
+            return b""
 
     def _archive_paths(self, task_id: str, system: str) -> list[Path]:
         """Data-архивы сжатия треда, по имени (= по времени)."""

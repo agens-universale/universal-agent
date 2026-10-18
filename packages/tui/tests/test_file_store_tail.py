@@ -187,3 +187,31 @@ def test_read_all_events_no_archives_zero(tmp_path):
     store = FileTaskStore(str(tmp_path), system="cli")
     _, cur = store.read_all_events("t1")
     assert cur.archives == 0
+
+
+def test_read_all_events_stops_before_partial_line(tmp_path):
+    """Недописанная последняя строка не уходит за курсор: дописанная, она
+    придёт следующим тиком."""
+    data = tmp_path / "data_cli_t1.jsonl"
+    _append_record(data, 1, "user", "целая")
+    _write_meta(tmp_path / "meta_cli_t1.json", msgs=2)
+    whole = data.stat().st_size
+    line = json.dumps(
+        {
+            "type": "message",
+            "seq": 2,
+            "payload": {"id": "m2", "role": "user", "content": "вторая"},
+        }
+    )
+    with open(data, "a", encoding="utf-8") as f:
+        f.write(line[:10])
+
+    store = FileTaskStore(str(tmp_path), system="cli")
+    records, cur = store.read_all_events("t1")
+    with open(data, "a", encoding="utf-8") as f:
+        f.write(line[10:] + "\n")
+    tail = store.tail_events("t1", cur)
+
+    assert [r["payload"]["id"] for r in records] == ["m1"]
+    assert cur.position_token == whole
+    assert [r["payload"]["id"] for r in tail.new_records] == ["m2"]
