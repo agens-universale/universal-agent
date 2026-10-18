@@ -106,6 +106,19 @@ async def test_pause_stops_timer_and_resume_restarts():
 
 
 @pytest.mark.asyncio
+async def test_pause_shows_pause_glyph_and_resume_restores():
+    async with _make_app().run_test() as pilot:
+        row = pilot.app.query_one(ToolCallRow)
+        row.pause()
+        await pilot.pause()
+        assert "⏸" in row._prefix_static.content.plain
+        assert "▸" not in row._prefix_static.content.plain
+        row.resume()
+        await pilot.pause()
+        assert "▸" in row._prefix_static.content.plain
+
+
+@pytest.mark.asyncio
 async def test_waiting_then_active_keeps_timer():
     async with _make_app().run_test() as pilot:
         row = pilot.app.query_one(ToolCallRow)
