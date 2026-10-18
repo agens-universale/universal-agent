@@ -63,7 +63,7 @@ class TestChildCtxCopiesTuiConfirm:
                 "auxiliary_llm": {"max_tokens": 128, "completion_kwargs": {}},
             },
         }
-        confirm = MagicMock(return_value="once")
+        confirm = MagicMock(return_value="allow_once")
         from gc_testkit.helpers.tool_ctx import local_ctx
 
         parent = local_ctx(cfg)
@@ -153,7 +153,7 @@ class TestConfirmEmit:
         def tui_confirm(*, title, question, fields, via=None):
             seen["via"] = via
             seen["question"] = question
-            return "once"
+            return "allow_once"
 
         ctx = _child_ctx(sink)
         ctx.tui_confirm = tui_confirm

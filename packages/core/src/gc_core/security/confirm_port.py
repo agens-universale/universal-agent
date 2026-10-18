@@ -98,20 +98,6 @@ def call_with_optional(
     return fn(*args, **{k: v for k, v in optional.items() if k in names})
 
 
-# Backward-compat aliases (optional one release): old tui_confirm returns
-# once|session|deny — маппим в новые 4-choice ids. CLI input() aliases removed.
-_ALIAS_MAP = {
-    "once": CONFIRM_ALLOW_ONCE,
-    "session": CONFIRM_ALLOW_REMEMBER,
-    "deny": CONFIRM_DENY_REMEMBER,
-}
-
-# Old constants kept as aliases for external callers (one release).
-CONFIRM_ONCE = CONFIRM_ALLOW_ONCE
-CONFIRM_SESSION = CONFIRM_ALLOW_REMEMBER
-CONFIRM_DENY = CONFIRM_DENY_REMEMBER
-
-
 def normalize_confirm_key(answer: str | None) -> str:
     """Map a single key / CLI answer to a 4-way choice id (TUI + CLI).
 
@@ -139,8 +125,6 @@ def coerce_confirm_choice(choice: Any) -> str:
         return CONFIRM_TIMED_OUT
     if choice in _VALID_CHOICES:
         return choice  # type: ignore[return-value]
-    if isinstance(choice, str) and choice in _ALIAS_MAP:
-        return _ALIAS_MAP[choice]
     # Неизвестное значение — не выбор человека: запрет разовый.
     return CONFIRM_DENY_ONCE
 
@@ -192,10 +176,8 @@ def unconfirmed_error(ctx: Any, **fields: Any) -> dict:
 def guard_refusal(ctx: Any, error_type: str, **fields: Any) -> dict:
     """Отказ гарда после его собственного вопроса: тип — гарда (по нему
     аудит и тесты различают гарды), причина и инструкция модели — по исходу
-    вопроса, те же, что у вопросов режима (`unconfirmed_error`); сам исход —
-    машинным полем `outcome`, тем же типом, что у вопросов режима."""
-    body = unconfirmed_error(ctx, **fields)
-    return {**body, "type": error_type, "outcome": body["type"]}
+    вопроса, те же, что у вопросов режима (`unconfirmed_error`)."""
+    return {**unconfirmed_error(ctx, **fields), "type": error_type}
 
 
 def refuse_in_place(
@@ -235,7 +217,8 @@ def _ask_choice(
             )
         )
     # Confirm недоступен / AFK-like: block without teaching (deny_once).
-    # Explicit invalid UI choice → deny_remember (fail-closed + few-shot).
+    # Непонятный ответ интерфейса → разовый запрет (`coerce_confirm_choice`):
+    # безопасно, но не запоминается — запрет на сессию только явной клавишей N.
     if not confirm_available(ctx):
         return CONFIRM_DENY_ONCE
 

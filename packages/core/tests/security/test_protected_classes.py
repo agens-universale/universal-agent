@@ -325,9 +325,6 @@ def test_no_to_a_protected_write_names_its_outcome(home):
     assert once["reason"] == "Declined by the user."
     assert session["reason"] == "Denied by the user for this session."
     assert "new session" in session["guidance"]
-    # Исход — и машинным полем, не только английским текстом причины.
-    assert once["outcome"] == "declined_by_user"
-    assert session["outcome"] == "denied_by_user_for_session"
 
 
 def test_no_to_a_command_on_a_protected_path_names_its_outcome(home):

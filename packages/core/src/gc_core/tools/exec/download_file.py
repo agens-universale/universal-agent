@@ -323,7 +323,7 @@ class DownloadFile(AbstractSimpleTool):
                     confirmed,
                     exc.error,
                     "write_guard_cancelled_by_user",
-                    dest,
+                    path=dest,
                 ):
                     return None
             audit_policy_decision(

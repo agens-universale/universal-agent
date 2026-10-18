@@ -66,6 +66,10 @@ def test_an_unknown_choice_value_is_a_one_time_refusal():
 
     assert coerce_confirm_choice("whatever") == CONFIRM_DENY_ONCE
     assert coerce_confirm_choice(None) == CONFIRM_DENY_ONCE
+    # Старые ответы трёхвариантного вопроса (once|session|deny) — больше не
+    # псевдонимы: непонятный ответ, запрет разовый.
+    for legacy in ("once", "session", "deny"):
+        assert coerce_confirm_choice(legacy) == CONFIRM_DENY_ONCE
 
 
 # ── record matrix ────────────────────────────────────────────────────────
@@ -179,54 +183,6 @@ def test_invalid_choice_is_a_one_time_refusal():
 
 
 # ── backward-compat aliases (old tui_confirm returns once/session/deny) ──
-
-
-def test_alias_once_maps_to_allow_once():
-    store = PermissionStore()
-    ctx, _ = _ctx("once", store)
-    assert (
-        request_confirm(
-            title="t",
-            question="q",
-            fields=[],
-            ctx=ctx,
-            decision_key="command:ls",
-        )
-        is True
-    )
-    assert store.session_rules() == {}  # once → allow_once → run only
-
-
-def test_alias_session_maps_to_allow_remember():
-    store = PermissionStore()
-    ctx, _ = _ctx("session", store)
-    assert (
-        request_confirm(
-            title="t",
-            question="q",
-            fields=[],
-            ctx=ctx,
-            decision_key="command:ls",
-        )
-        is True
-    )
-    assert store.session_rules() == {"command:ls": True}
-
-
-def test_alias_deny_maps_to_deny_remember():
-    store = PermissionStore()
-    ctx, _ = _ctx("deny", store)
-    assert (
-        request_confirm(
-            title="t",
-            question="q",
-            fields=[],
-            ctx=ctx,
-            decision_key="command:rm",
-        )
-        is False
-    )
-    assert store.session_rules() == {"command:rm": False}
 
 
 def test_unavailable_confirm_is_deny_once_not_session(monkeypatch):

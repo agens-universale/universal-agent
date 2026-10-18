@@ -267,9 +267,7 @@ def test_blocked_envelope_form_is_the_same_in_both_branches(
         tool(command="echo x", cwd=str(tmp_path), ctx=_ctx(tmp_path))
     )["error"]
 
-    # После вопроса — ещё и машинный исход вопроса (`outcome`).
-    assert set(denied) == {"type", "reason", "guidance"}
-    assert set(asked) == set(denied) | {"outcome"}
+    assert set(asked) == set(denied) == {"type", "reason", "guidance"}
     # После вопроса инструкция — по его исходу (как у вопросов режима), без
     # вопроса — запрет на обход; обе отдельным полем.
     assert denied["guidance"] == NO_WORKAROUND_NOTICE

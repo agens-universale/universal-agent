@@ -109,7 +109,7 @@ def test_instruction_file_confirm_cached_by_decision_key(
 
     def tui_confirm(*, title, question, fields):
         calls.append(question)
-        return "once"
+        return "allow_once"
 
     ctx = fake_ctx(
         config={
@@ -143,9 +143,7 @@ def test_write_guard_ask_tui_confirmed(tmp_path, monkeypatch):
     launch_root = tmp_path / "project"
     launch_root.mkdir()
     recorded = []
-    tui_confirm = lambda **kw: (
-        recorded.append(kw) or "once"
-    )  # 3-значный контракт: once=разрешить
+    tui_confirm = lambda **kw: recorded.append(kw) or "allow_once"
     ctx = _ctx_ask_tui(launch_root, tui_confirm)
 
     out_path = str(tmp_path / "outside.txt")
@@ -167,7 +165,7 @@ def test_write_guard_ask_tui_declined(tmp_path, monkeypatch):
     # launch_root — подкаталог; файл снаружи него → WriteGuardViolation
     launch_root = tmp_path / "project"
     launch_root.mkdir()
-    tui_confirm = lambda **kw: "deny"  # 3-значный контракт: deny=отклонить
+    tui_confirm = lambda **kw: "deny_once"
     ctx = _ctx_ask_tui(launch_root, tui_confirm)
 
     out_path = str(tmp_path / "outside.txt")

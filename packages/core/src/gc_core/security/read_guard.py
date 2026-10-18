@@ -489,7 +489,7 @@ def _resolve_read_violation(
             confirmed,
             exc.error,
             "read_guard_cancelled_by_user",
-            _rg_path,
+            path=_rg_path,
         ):
             return True, None
     audit_policy_decision(

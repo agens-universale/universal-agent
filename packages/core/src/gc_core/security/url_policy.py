@@ -11,7 +11,7 @@ from gc_core.message_policy.permission_denials import (
     OTHER_HOST_REDIRECT_TYPE,
     other_host_redirect_reason,
 )
-from gc_core.security.confirm_port import confirmation_step, refuse_in_place
+from gc_core.security.confirm_port import confirmation_step
 from gc_core.security.dual_wrapper import dual_wrap
 from gc_core.security.mode_stage import (
     ModeAction,
@@ -21,6 +21,7 @@ from gc_core.security.mode_stage import (
 from gc_core.security.path_policy import (
     audit_policy_decision,
     resolve_tool_context,
+    settle_perimeter_answer,
 )
 from gc_core.security.permission_mode import (
     ASK,
@@ -211,22 +212,16 @@ def _url_policy_flow(func, context, url, args, kwargs, blocked):
             ctx=context.ctx,
             decision_key=f"url:{decision.url}",
         )
-        if confirmed:
-            audit_policy_decision(
-                context,
-                tool_name=_tool_name(func, args),
-                decision="executed",
-                reason_code="policy_ask_confirmed",
-                risk_flags=["out_of_perimeter"],
-                error_type=decision.error_type,
-            )
-            return (yield)
-        refuse_in_place(
+        if settle_perimeter_answer(
+            context,
+            _tool_name(func, args),
+            confirmed,
             error,
-            context.ctx,
             "url_blocked_by_policy_cancelled_by_user",
+            audit_error_type=decision.error_type,
             url=decision.url,
-        )
+        ):
+            return (yield)
     audit_policy_decision(
         context,
         tool_name=_tool_name(func, args),

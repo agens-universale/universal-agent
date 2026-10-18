@@ -520,7 +520,7 @@ def _resolve_write_violation(
             confirmed,
             exc.error,
             "write_guard_cancelled_by_user",
-            candidate_path,
+            path=candidate_path,
         ):
             return True, None
     audit_policy_decision(
@@ -824,7 +824,8 @@ def prompt_user_confirmation_choice(
 
     Auto-deny_once if stdin is not a tty (CI/background).
     Keys: Latin/Cyrillic same-key sets from confirm_port (y/н, o/щ, n/т, t/е).
-    EOF (Ctrl+D) → deny_remember; Ctrl+C → deny_once (interrupt ≠ policy seed).
+    EOF (Ctrl+D) and Ctrl+C → deny_once: конец ввода и прерывание — не выбор
+    запрета на всю сессию.
     """
     # Nested import: path_policy ↔ confirm_port cycle if top-level.
     from gc_core.security.confirm_port import (
@@ -997,11 +998,14 @@ def settle_perimeter_answer(
     confirmed: bool,
     error: dict,
     error_type: str,
-    path: str,
+    *,
+    audit_error_type: str | None = None,
+    **fields: Any,
 ) -> bool:
-    """Ответ человека на вопрос гарда о периметре (запись, чтение,
-    загрузка): «да» — в аудит, True; «нет» — `error` переписан отказом по
-    исходу вопроса (`refuse_in_place`), False."""
+    """Ответ человека на вопрос гарда о периметре (запись, чтение, загрузка,
+    адрес): «да» — в аудит, True; «нет» — `error` переписан отказом по
+    исходу вопроса (`refuse_in_place`), False. `fields` — поля отказа (путь
+    или адрес), `audit_error_type` — тип исходной ошибки для аудита «да»."""
     if confirmed:
         audit_policy_decision(
             context,
@@ -1009,9 +1013,10 @@ def settle_perimeter_answer(
             decision="executed",
             reason_code="policy_ask_confirmed",
             risk_flags=["out_of_perimeter"],
+            error_type=audit_error_type,
         )
         return True
-    refuse_in_place(error, context.ctx, error_type, path=path)
+    refuse_in_place(error, context.ctx, error_type, **fields)
     return False
 
 

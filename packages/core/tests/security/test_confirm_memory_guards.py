@@ -410,7 +410,6 @@ def test_read_guard_no_for_the_session_names_its_outcome(
     err = captured["err"]
     assert err["type"] == "read_guard_cancelled_by_user"
     assert err["reason"] == "Denied by the user for this session."
-    assert err["outcome"] == "denied_by_user_for_session"
     assert "message" not in err
 
 
@@ -452,7 +451,6 @@ def test_url_policy_no_for_the_session_names_its_outcome(
     err = captured["err"]
     assert err["type"] == "url_blocked_by_policy_cancelled_by_user"
     assert err["reason"] == "Denied by the user for this session."
-    assert err["outcome"] == "denied_by_user_for_session"
     assert "message" not in err
 
 
@@ -496,4 +494,3 @@ def test_no_to_the_command_question_without_a_judge_is_the_users_refusal(
     err = captured["err"]
     assert err["type"] == "unsafe_command_cancelled_by_user"
     assert err["reason"] == "Declined by the user."
-    assert err["outcome"] == "declined_by_user"

@@ -30,7 +30,7 @@ def test_tui_always_available_and_routes_to_banner():
 
     def banner(**kw):
         answered.update(kw)
-        return "once"
+        return "allow_once"
 
     ctx = _ctx(is_tui=True, tui_confirm=banner)
     assert confirm_available(ctx) is True
@@ -71,7 +71,7 @@ def _tui_ctx(choice, store=None):
 
 def test_choice_once_allows_and_records_run_only():
     store = PermissionStore()
-    ctx, calls = _tui_ctx("once", store)
+    ctx, calls = _tui_ctx("allow_once", store)
     assert (
         cp.request_confirm(
             title="t",
@@ -100,7 +100,7 @@ def test_choice_once_allows_and_records_run_only():
 
 def test_choice_session_allows_and_records_session():
     store = PermissionStore()
-    ctx, calls = _tui_ctx("session", store)
+    ctx, calls = _tui_ctx("allow_remember", store)
     assert (
         cp.request_confirm(
             title="t",
@@ -116,7 +116,7 @@ def test_choice_session_allows_and_records_session():
 
 def test_choice_deny_blocks_and_caches_run():
     store = PermissionStore()
-    ctx, calls = _tui_ctx("deny", store)
+    ctx, calls = _tui_ctx("deny_remember", store)
     assert (
         cp.request_confirm(
             title="t",
@@ -143,7 +143,7 @@ def test_choice_deny_blocks_and_caches_run():
 
 def test_no_decision_key_always_asks():
     store = PermissionStore()
-    ctx, calls = _tui_ctx("once", store)
+    ctx, calls = _tui_ctx("allow_once", store)
     cp.request_confirm(title="t", question="q", fields=[], ctx=ctx)
     cp.request_confirm(title="t", question="q", fields=[], ctx=ctx)
     assert calls["n"] == 2  # без ключа — кэш не работает
