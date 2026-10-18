@@ -17,6 +17,7 @@ from gc_core.security.path_policy import (
     check_write_guard_path,
     normalize_path_for_policy,
     resolve_tool_context,
+    settle_perimeter_answer,
     write_decision_key,
     write_mode_stage,
 )
@@ -299,10 +300,7 @@ class DownloadFile(AbstractSimpleTool):
                 )
                 return None
             if wg_mode == "ask":
-                from gc_core.security.confirm_port import (
-                    confirmation_step,
-                    refuse_in_place,
-                )
+                from gc_core.security.confirm_port import confirmation_step
 
                 confirmed = yield confirmation_step(
                     title=WRITE_GUARD_TITLE,
@@ -319,21 +317,15 @@ class DownloadFile(AbstractSimpleTool):
                     ctx=context.ctx,
                     decision_key=write_decision_key(dest, context),
                 )
-                if confirmed:
-                    audit_policy_decision(
-                        context,
-                        tool_name=self.registered_tool_name(),
-                        decision="executed",
-                        reason_code="policy_ask_confirmed",
-                        risk_flags=["out_of_perimeter"],
-                    )
-                    return None
-                refuse_in_place(
+                if settle_perimeter_answer(
+                    context,
+                    self.registered_tool_name(),
+                    confirmed,
                     exc.error,
-                    context.ctx,
                     "write_guard_cancelled_by_user",
-                    path=dest,
-                )
+                    dest,
+                ):
+                    return None
             audit_policy_decision(
                 context,
                 tool_name=self.registered_tool_name(),

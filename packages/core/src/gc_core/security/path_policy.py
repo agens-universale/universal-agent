@@ -512,23 +512,17 @@ def _resolve_write_violation(
                 decision_key=_write_key(candidate_path, context),
             ),
         )
-        if confirmed:
-            audit_policy_decision(
-                context,
-                tool_name=tool_name,
-                decision="executed",
-                reason_code="policy_ask_confirmed",
-                risk_flags=["out_of_perimeter"],
-            )
-            return True, None
         # cancelled — продолжаем в стандартный blocked-flow ниже,
         # но помечаем error.type для отличимости в логах.
-        refuse_in_place(
+        if settle_perimeter_answer(
+            context,
+            tool_name,
+            confirmed,
             exc.error,
-            context.ctx,
             "write_guard_cancelled_by_user",
-            path=candidate_path,
-        )
+            candidate_path,
+        ):
+            return True, None
     audit_policy_decision(
         context,
         tool_name=tool_name,
@@ -995,6 +989,30 @@ def _apply_console_key(console: Any, key: str, chars: list[str]) -> str | None:
         chars.append(key)
         console.putwch(key)
     return None
+
+
+def settle_perimeter_answer(
+    context: Any,
+    tool_name: str,
+    confirmed: bool,
+    error: dict,
+    error_type: str,
+    path: str,
+) -> bool:
+    """Ответ человека на вопрос гарда о периметре (запись, чтение,
+    загрузка): «да» — в аудит, True; «нет» — `error` переписан отказом по
+    исходу вопроса (`refuse_in_place`), False."""
+    if confirmed:
+        audit_policy_decision(
+            context,
+            tool_name=tool_name,
+            decision="executed",
+            reason_code="policy_ask_confirmed",
+            risk_flags=["out_of_perimeter"],
+        )
+        return True
+    refuse_in_place(error, context.ctx, error_type, path=path)
+    return False
 
 
 def _ask_user_confirmation_for_write(

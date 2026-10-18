@@ -21,7 +21,6 @@ from gc_core.constants.tool_names import FS_VIEW_IMAGE_NAME
 from gc_core.execution.ports import port
 from gc_core.security.confirm_port import (
     confirmation_step,
-    refuse_in_place,
     request_confirm,
 )
 from gc_core.security.dual_wrapper import dual_wrap
@@ -39,6 +38,7 @@ from gc_core.security.path_policy import (
     _tool_name,
     audit_policy_decision,
     resolve_tool_context,
+    settle_perimeter_answer,
 )
 from gc_core.security.permission_mode import ALLOW as MODE_ALLOW
 from gc_core.security.permission_mode import (
@@ -483,21 +483,15 @@ def _resolve_read_violation(
             # режима, иначе ответ на один не закрывал бы другой.
             decision_key=_read_key(candidate_path, context),
         )
-        if confirmed:
-            audit_policy_decision(
-                context,
-                tool_name=tool_name,
-                decision="executed",
-                reason_code="policy_ask_confirmed",
-                risk_flags=["out_of_perimeter"],
-            )
-            return True, None
-        refuse_in_place(
+        if settle_perimeter_answer(
+            context,
+            tool_name,
+            confirmed,
             exc.error,
-            context.ctx,
             "read_guard_cancelled_by_user",
-            path=_rg_path,
-        )
+            _rg_path,
+        ):
+            return True, None
     audit_policy_decision(
         context,
         tool_name=tool_name,
