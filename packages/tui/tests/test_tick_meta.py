@@ -77,7 +77,7 @@ async def test_outside_tick_reads_fresh(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_tick_snapshot_follows_active_task(tmp_path):
+async def test_tick_snapshot_follows_active_task(tmp_path, monkeypatch):
     pytest.importorskip("textual")
     other = "tickmeta0000000000000000000000002"
     _write_task(tmp_path, tui={"title": "Первая"})
@@ -87,14 +87,17 @@ async def test_tick_snapshot_follows_active_task(tmp_path):
         scr = pilot.app.screen
         scr.attach_active_task(_TID)
         await pilot.pause()
-        scr._in_poll_tick = True
-        try:
-            assert scr._session_display_name() == "Первая"
+        names = []
+
+        def switch_in_tick():
+            names.append(scr._session_display_name())
             scr._active_task_id = other
-            assert scr._session_display_name() == "Вторая"
-        finally:
-            scr._in_poll_tick = False
-            scr._drop_tick_meta()
+            names.append(scr._session_display_name())
+
+        monkeypatch.setattr(scr, "_poll_tick", switch_in_tick)
+        scr._poll_active()
+        assert names == ["Первая", "Вторая"]
+        assert scr._tick_meta_cache is None
 
 
 @pytest.mark.asyncio

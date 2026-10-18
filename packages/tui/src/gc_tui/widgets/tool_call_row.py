@@ -144,16 +144,20 @@ class ToolCallRow(ClickModelMixin, Widget):
     def on_mount(self) -> None:
         self._sync_pulse()
 
-    def _sync_pulse(self) -> None:
-        """Таймер дыхания ▸ есть только у смонтированной running-строки.
-
-        Waiting, результат, прерывание или виджет ещё не запущен (рендер
-        истории) — без таймера. Идемпотентно.
-        """
-        running = not (
+    @property
+    def _is_live(self) -> bool:
+        """Running-строка: не waiting, без результата, не прервана."""
+        return not (
             self._waiting or self._result is not None or self._interrupted
         )
-        if running and self.is_running:
+
+    def _sync_pulse(self) -> None:
+        """Таймер дыхания ▸ есть только у запущенной running-строки.
+
+        Waiting, результат, прерывание, пауза на человеко-ожидании или
+        виджет ещё не запущен (рендер истории) — без таймера. Идемпотентно.
+        """
+        if self._is_live and self._paused_at is None and self.is_running:
             if self._pulse_timer is None:
                 self._pulse_timer = self.set_interval(0.1, self._pulse_tick)
         elif self._pulse_timer is not None:
@@ -168,7 +172,7 @@ class ToolCallRow(ClickModelMixin, Widget):
                 return
         except Exception:
             pass
-        if self._waiting or self._result is not None or self._interrupted:
+        if not self._is_live:
             return
         self._pulse_frame += 1
         if self._prefix_static is not None:
@@ -207,7 +211,7 @@ class ToolCallRow(ClickModelMixin, Widget):
 
     def set_live_status(self, text: Optional[str]) -> None:
         """Хвост running-строки (step/last). None — только `· Ns`."""
-        if self._result is not None or self._interrupted or self._waiting:
+        if not self._is_live:
             return
         self._live_status = text
         self._update()
@@ -232,24 +236,21 @@ class ToolCallRow(ClickModelMixin, Widget):
 
     def refresh_running_elapsed(self) -> None:
         """Тик elapsed (~0.25с). Waiting / done / interrupted — no-op."""
-        if self._waiting or self._result is not None or self._interrupted:
+        if not self._is_live:
             return
         self._update()
 
     def pause(self) -> None:
         """Заморозить elapsed на человеко-ожидании. Waiting/done — no-op."""
-        if (
-            self._paused_at is None
-            and self._result is None
-            and not self._interrupted
-            and not self._waiting
-        ):
+        if self._paused_at is None and self._is_live:
             self._paused_at = time.monotonic()
+        self._sync_pulse()
 
     def resume(self) -> None:
         if self._paused_at is not None:
             self._paused_total += time.monotonic() - self._paused_at
             self._paused_at = None
+        self._sync_pulse()
 
     def _elapsed_s(self) -> int:
         now = (

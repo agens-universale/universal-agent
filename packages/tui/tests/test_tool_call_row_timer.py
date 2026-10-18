@@ -94,6 +94,18 @@ async def test_set_waiting_stops_timer():
 
 
 @pytest.mark.asyncio
+async def test_pause_stops_timer_and_resume_restarts():
+    async with _make_app().run_test() as pilot:
+        row = pilot.app.query_one(ToolCallRow)
+        row.pause()
+        await pilot.pause()
+        assert row._pulse_timer is None
+        row.resume()
+        await pilot.pause()
+        assert row._pulse_timer is not None
+
+
+@pytest.mark.asyncio
 async def test_waiting_then_active_keeps_timer():
     async with _make_app().run_test() as pilot:
         row = pilot.app.query_one(ToolCallRow)
