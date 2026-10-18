@@ -5974,3 +5974,23 @@ async def test_mode_row_hint_is_the_footer_description_of_the_mode(tmp_path):
         hint = scr._modes_hint_text()
         assert MODE_HINTS["manual"] in hint
         assert hint.endswith("· в сессии — Shift+Tab")
+
+
+async def test_mode_row_shows_the_mode_chosen_in_this_session(tmp_path):
+    """Выбор режима в сессии (Shift+Tab) живёт не в переопределениях конфига,
+    но строка показывает его тем же хвостом «в текущей сессии», что у
+    соседей: иначе Настройки молчали бы о режиме, который реально в силе."""
+    pytest.importorskip("textual")
+
+    app, _ = _app_with_config(tmp_path, 'level: "default"\n')
+    async with app.run_test(size=(140, 30)) as pilot:
+        scr = await _open_modes_section(pilot)
+        assert (
+            "в текущей сессии" not in scr._mode_row_text("mode", False).plain
+        )
+
+        app.set_permission_mode("plan")
+        row = scr._mode_row_text("mode", selected=False).plain
+
+        assert "edit" in row
+        assert row.rstrip().endswith("в текущей сессии: plan")

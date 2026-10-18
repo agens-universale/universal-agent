@@ -154,6 +154,10 @@ class ToggleSpec:
     unavailable_hint: Optional[Callable[[Any, str], Optional[str]]] = None
     session_switch_profile: bool = False
     rebuild_on_apply: bool = True
+    # Значение, действующее в сессии, когда оно живёт не в переопределениях
+    # конфига (режим разрешений: Shift+Tab, флаг запуска): `(app) -> значение`.
+    # Без него действующее значение читается по настройкам окна.
+    session_state: Optional[Callable[[Any], str]] = None
 
     @property
     def names(self) -> Tuple[str, ...]:
@@ -678,6 +682,7 @@ TOGGLES: Dict[str, ToggleSpec] = {
         group="permissions",
         settings_label="режим разрешений по умолчанию",
         palette_default=False,
+        session_state=lambda app: app.effective_permission_mode(),
     ),
     "rigor": ToggleSpec(
         values=(
@@ -898,8 +903,12 @@ def padded_track(
 def toggle_state(app: Any, name: str) -> str:
     """Текущее эффективное значение тоггла `name` (`gate` — через правило
     коллизии, `answers` — сырое значение). Источник — действующие настройки
-    (база + сессионные переопределения), не база окна."""
-    return TOGGLES[name].state(_effective_settings(app))
+    (база + сессионные переопределения), не база окна; у тоггла с
+    `session_state` — оно (выбор сессии живёт вне конфига)."""
+    spec = TOGGLES[name]
+    if spec.session_state is not None:
+        return spec.session_state(app)
+    return spec.state(_effective_settings(app))
 
 
 def toggle_state_base(app: Any, name: str) -> str:
