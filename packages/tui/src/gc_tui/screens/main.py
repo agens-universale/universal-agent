@@ -3831,12 +3831,22 @@ class TraceScreen(Screen):
     def _hide_confirm_banner(self) -> None:
         """Снять ConfirmBanner и восстановить поле ввода."""
         self._confirm_active = False
+        self._return_focus_to_input()
         if self._confirm_banner is not None:
             try:
                 self._confirm_banner.remove()
             except Exception:
                 pass
             self._confirm_banner = None
+        self._settle_trace_after_banner()
+
+    def _return_focus_to_input(self) -> None:
+        """Вернуть поле ввода и фокус в него — ДО снятия баннера. Фокус стоит
+        на баннере: удалённый первым, он отдал бы фокус Textual, а тот перевёл
+        бы его на фокусируемую строку ленты и прокрутил ленту к ней — человек,
+        ушедший читать вверх, улетал бы в конец. Поэтому `set_focus` экрана
+        (сразу), а не `focus()` (отложенный: к удалению баннера фокус был бы
+        ещё на нём)."""
         try:
             self.query_one(_SEL_INPUT_ROW, Horizontal).remove_class("hidden")
         except Exception:
@@ -3846,9 +3856,23 @@ class TraceScreen(Screen):
             inp.disabled = (
                 False  # снять disable ДО focus (фокус не идёт на disabled)
             )
-            inp.focus()
+            self.set_focus(inp)
         except Exception:
             pass
+
+    def _settle_trace_after_banner(self) -> None:
+        """Баннер снят: место под ним отдаётся ленте, и её низ сдвигается на
+        высоту баннера. Опрос принял бы сдвиг за уход человека вверх и снял
+        бы липкость — лента, прижатая к низу до снятия, туда и возвращается."""
+        sticky = self._stick_bottom
+
+        def _settle() -> None:
+            self._sync_trace_max_height()
+            if sticky:
+                self._stick_bottom = True
+                self._scroll_trace_end()
+
+        self.call_after_refresh(_settle)
 
     # ───────────────────────────── одобрение плана ─────────────────────────────
 
@@ -3879,25 +3903,17 @@ class TraceScreen(Screen):
         путей снятия (выбор варианта, Esc, смена сессии)."""
         if self._plan_banner is None:
             return
+        self._return_focus_to_input()
         try:
             self._plan_banner.remove()
         except Exception:
             pass
         self._plan_banner = None
         try:
-            self.query_one(_SEL_INPUT_ROW, Horizontal).remove_class("hidden")
-        except Exception:
-            pass
-        try:
-            inp = self.query_one(_SEL_CMDINPUT, CommandTextArea)
-            inp.disabled = False  # снять disable ДО focus
-            inp.focus()
-        except Exception:
-            pass
-        try:
             self._sync_input_placeholder()
         except Exception:
             pass
+        self._settle_trace_after_banner()
 
     def _session_plan(self) -> Optional[dict]:
         """План открытой сессии из её меты — то, что загрузит следующий прогон

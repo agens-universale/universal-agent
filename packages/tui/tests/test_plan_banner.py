@@ -370,3 +370,62 @@ async def test_second_option_approves_the_plan_for_auto(tmp_path):
         await pilot.pause()
         assert pilot.app.effective_permission_mode() == "auto"
         assert runner.transitions == [("auto", "t1")]
+
+
+async def test_closing_the_banner_returns_a_following_trace_to_the_bottom(
+    tmp_path,
+):
+    """Баннер снят — место под ним отдаётся ленте, и её низ сдвигается на
+    высоту баннера. Опрос экрана принял бы сдвиг за уход человека вверх и
+    перестал бы прижимать: ход уже кончился, новых строк не будет, и конец
+    плана остался бы под краем экрана. Лента, прижатая к низу до снятия,
+    возвращается вниз; ушедшая вверх — не дёргается."""
+    async with _app(tmp_path).run_test() as pilot:
+        await _with_banner(pilot)
+        screen = pilot.app.screen
+        scrolled = []
+        screen._scroll_trace_end = lambda: scrolled.append(True)
+
+        screen._stick_bottom = True
+        screen._hide_plan_banner()
+        screen._stick_bottom = False  # опрос увидел сдвиг низа
+        await pilot.pause()
+        assert scrolled  # опрос потом может прижать ещё раз
+        assert screen._stick_bottom is True
+
+        screen._show_plan_banner()
+        await pilot.pause()
+        scrolled.clear()
+        screen._stick_bottom = False
+        screen._hide_plan_banner()
+        await pilot.pause()
+        assert scrolled == []
+
+
+async def test_closing_the_banner_keeps_a_trace_scrolled_up_in_place(
+    tmp_path,
+):
+    """Фокус стоит на баннере. Удали баннер первым — Textual сам переведёт
+    фокус на фокусируемую строку ленты и прокрутит ленту к ней, в конец:
+    человек, ушедший читать план вверх, улетал вниз (живая приёмка). Фокус
+    уходит в поле ввода до снятия баннера, и лента остаётся на месте."""
+    from textual.containers import VerticalScroll
+    from textual.widgets import Static
+
+    class _Focusable(Static):
+        can_focus = True
+
+    async with _app(tmp_path).run_test(size=(100, 30)) as pilot:
+        screen = pilot.app.screen
+        for i in range(80):
+            screen._trace_mount(Static(f"строка плана {i}"))
+        screen._trace_mount(_Focusable("строка с кнопкой"))
+        await _with_banner(pilot)
+        trace = screen.query_one("#trace", VerticalScroll)
+        trace.scroll_to(y=10, animate=False)
+        await pilot.pause(0.5)
+
+        await pilot.press("escape")
+        await pilot.pause(0.5)
+
+        assert trace.scroll_offset.y == 10
