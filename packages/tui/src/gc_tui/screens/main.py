@@ -1207,10 +1207,12 @@ class TraceScreen(Screen):
         least = min(full, _MODEL_NAME_MIN_COLS)
         name_shown = snapshot.running or not snapshot.mode_auto
         squeeze = range(full - 1, least - 1, -1) if name_shown else ()
-        # Имя ждущего перехода не снимается (`build`), поэтому ступеней
-        # «снять имя» тогда нет: последней остаётся самая ужатая.
+        # Имя ждущего перехода не снимается (`build`), поэтому ступени
+        # «снять имя» тогда — одна: имя ужато до минимума, снят блок уровня
+        # (в auto это «→ ●»). Без неё самой узкой осталась бы ступень с
+        # блоком, и на узком окне правая поджимала бы левую.
         drop_name = (
-            ()
+            ((None, False, False, False, least),)
             if snapshot.transition is not None
             else (
                 (None, False, True, False, None),
