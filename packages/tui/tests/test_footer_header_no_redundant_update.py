@@ -129,6 +129,27 @@ async def test_notice_badge_reaches_footer(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_repeat_notices_refresh_keeps_same_object(tmp_path):
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+
+    clear_runtime_notices()
+    push_runtime_notice(Notice("warning", "w1", "тест"))
+    app = TuiApp(
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "M"}),
+    )
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr._refresh_notices_footer()
+        before = scr.query_one("#footer-left").content
+        assert f"{WARN_GLYPH} 1" in _plain(scr, "#footer-left")
+        scr._refresh_notices_footer()
+        assert scr.query_one("#footer-left").content is before
+    clear_runtime_notices()
+
+
+@pytest.mark.asyncio
 async def test_hint_expiry_restores_commands(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp

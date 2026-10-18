@@ -58,6 +58,42 @@ async def test_finished_before_mount_has_no_timer():
 
 
 @pytest.mark.asyncio
+async def test_waiting_row_has_no_timer():
+    def factory():
+        return ToolCallRow(
+            call_id="c1", tool_name="t", args_summary="", waiting=True
+        )
+
+    async with _make_app(factory).run_test() as pilot:
+        await pilot.pause()
+        row = pilot.app.query_one(ToolCallRow)
+        assert row._pulse_timer is None
+
+
+@pytest.mark.asyncio
+async def test_set_active_starts_timer():
+    def factory():
+        return ToolCallRow(
+            call_id="c1", tool_name="t", args_summary="", waiting=True
+        )
+
+    async with _make_app(factory).run_test() as pilot:
+        row = pilot.app.query_one(ToolCallRow)
+        row.set_active()
+        await pilot.pause()
+        assert row._pulse_timer is not None
+
+
+@pytest.mark.asyncio
+async def test_set_waiting_stops_timer():
+    async with _make_app().run_test() as pilot:
+        row = pilot.app.query_one(ToolCallRow)
+        row.set_waiting()
+        await pilot.pause()
+        assert row._pulse_timer is None
+
+
+@pytest.mark.asyncio
 async def test_waiting_then_active_keeps_timer():
     async with _make_app().run_test() as pilot:
         row = pilot.app.query_one(ToolCallRow)

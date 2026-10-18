@@ -30,11 +30,7 @@ def same_content(old: object, new: object) -> bool:
     return False
 
 
-def update_if_changed(
-    widget: Static, content: object, *, layout: bool = True
-) -> bool:
+def update_if_changed(widget: Static, content: object) -> None:
     """Обновить ``widget``, если содержимое отличается от текущего."""
-    if same_content(widget.content, content):
-        return False
-    widget.update(content, layout=layout)
-    return True
+    if not same_content(widget.content, content):
+        widget.update(content)

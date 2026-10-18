@@ -115,7 +115,9 @@ class ToolCallRow(ClickModelMixin, Widget):
         self._content_static: Optional[Static] = None
         self._prefix_static: Optional[Static] = None
         self._pulse_frame: int = 0
-        self._pulse_timer = None  # собственный 0.1с-тик дыхания ▸ (on_mount)
+        self._pulse_timer = (
+            None  # собственный 0.1с-тик дыхания ▸ (_sync_pulse)
+        )
         # line-tool на самом widget'е — color: $dim каскадится в prefix-Static.
         self.add_class("line-tool")
         if self._nested:
@@ -140,13 +142,21 @@ class ToolCallRow(ClickModelMixin, Widget):
             yield self._content_static
 
     def on_mount(self) -> None:
-        # Строка могла завершиться до mount (рендер истории) — без таймера.
-        if self._result is None and not self._interrupted:
-            self._pulse_timer = self.set_interval(0.1, self._pulse_tick)
+        self._sync_pulse()
 
-    def _stop_pulse(self) -> None:
-        """Остановить таймер дыхания ▸ (идемпотентно)."""
-        if self._pulse_timer is not None:
+    def _sync_pulse(self) -> None:
+        """Таймер дыхания ▸ есть только у смонтированной running-строки.
+
+        Waiting, результат, прерывание или виджет ещё не запущен (рендер
+        истории) — без таймера. Идемпотентно.
+        """
+        running = not (
+            self._waiting or self._result is not None or self._interrupted
+        )
+        if running and self.is_running:
+            if self._pulse_timer is None:
+                self._pulse_timer = self.set_interval(0.1, self._pulse_tick)
+        elif self._pulse_timer is not None:
             self._pulse_timer.stop()
             self._pulse_timer = None
 
@@ -179,6 +189,7 @@ class ToolCallRow(ClickModelMixin, Widget):
             return
         self._waiting = True
         self._live_status = None
+        self._sync_pulse()
         self._update()
 
     def set_active(self) -> None:
@@ -191,6 +202,7 @@ class ToolCallRow(ClickModelMixin, Widget):
         self._start_monotonic = time.monotonic()
         self._paused_at = None
         self._paused_total = 0.0
+        self._sync_pulse()
         self._update()
 
     def set_live_status(self, text: Optional[str]) -> None:
@@ -205,7 +217,7 @@ class ToolCallRow(ClickModelMixin, Widget):
         self._is_error = error
         self._waiting = False
         self._live_status = None
-        self._stop_pulse()
+        self._sync_pulse()
         self._update()
 
     def mark_interrupted(self) -> None:
@@ -215,7 +227,7 @@ class ToolCallRow(ClickModelMixin, Widget):
         self._interrupted = True
         self._waiting = False
         self._live_status = None
-        self._stop_pulse()
+        self._sync_pulse()
         self._update()
 
     def refresh_running_elapsed(self) -> None:

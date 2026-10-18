@@ -52,7 +52,7 @@ async def test_update_if_changed_skips_equal_and_applies_new():
         s = pilot.app.query_one("#s", Static)
         s.update(Text("a"))
         first = s.content
-        assert update_if_changed(s, Text("a")) is False
+        update_if_changed(s, Text("a"))
         assert s.content is first
-        assert update_if_changed(s, Text("b")) is True
+        update_if_changed(s, Text("b"))
         assert s.content.plain == "b"

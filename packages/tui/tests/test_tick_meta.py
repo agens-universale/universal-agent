@@ -77,6 +77,27 @@ async def test_outside_tick_reads_fresh(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_tick_snapshot_follows_active_task(tmp_path):
+    pytest.importorskip("textual")
+    other = "tickmeta0000000000000000000000002"
+    _write_task(tmp_path, tui={"title": "Первая"})
+    _write_task(tmp_path, tid=other, tui={"title": "Вторая"})
+    app = _app(tmp_path)
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(_TID)
+        await pilot.pause()
+        scr._in_poll_tick = True
+        try:
+            assert scr._session_display_name() == "Первая"
+            scr._active_task_id = other
+            assert scr._session_display_name() == "Вторая"
+        finally:
+            scr._in_poll_tick = False
+            scr._drop_tick_meta()
+
+
+@pytest.mark.asyncio
 async def test_falling_edge_status_visible_same_tick(tmp_path, monkeypatch):
     pytest.importorskip("textual")
     _write_task(tmp_path, tui={"status": "running"})

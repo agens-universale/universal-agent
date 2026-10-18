@@ -426,7 +426,7 @@ class TraceScreen(Screen):
         self._next_no: int = 1
         self._active_task_id: Optional[str] = None
         # Снимок меты на тик опроса (см. _tick_meta); вне тика — None.
-        self._tick_meta_cache: dict | None = None
+        self._tick_meta_cache: tuple[str, dict] | None = None
         self._in_poll_tick = False
         self._session_lock_hb_mono: float = 0.0  # throttle heartbeat ≤ 1 Гц
         self._error_shown: bool = False
@@ -1219,22 +1219,21 @@ class TraceScreen(Screen):
         """Мета активной задачи — ТОЛЬКО для показа; читатели не мутируют.
 
         Вне тика опроса — свежее чтение (`{}` без стора или задачи). Внутри
-        тика (`_poll_active`) — одно чтение, дальше тот же словарь: показ
-        за тик видит один снимок. Запись показываемых полей внутри опроса
-        обязана сразу звать `_drop_tick_meta()`, иначе до следующего тика
-        покажется старое. Для read-modify-write снимок не годится — читать
-        хранилище напрямую. `tui.pending_user_messages` через `_tick_meta`
-        не читать.
+        тика (`_poll_active`) — одно чтение на задачу, дальше тот же
+        словарь: показ за тик видит один снимок. Запись показываемых полей
+        внутри опроса обязана сразу звать `_drop_tick_meta()`, иначе до
+        следующего тика покажется старое. Для read-modify-write снимок не
+        годится — читать хранилище напрямую. `tui.pending_user_messages`
+        через `_tick_meta` не читать.
         """
         if self._store is None or self._active_task_id is None:
             return {}
         if not self._in_poll_tick:
             return self._store.get_task_meta(self._active_task_id)
-        if self._tick_meta_cache is None:
-            self._tick_meta_cache = self._store.get_task_meta(
-                self._active_task_id
-            )
-        return self._tick_meta_cache
+        tid = self._active_task_id
+        if self._tick_meta_cache is None or self._tick_meta_cache[0] != tid:
+            self._tick_meta_cache = (tid, self._store.get_task_meta(tid))
+        return self._tick_meta_cache[1]
 
     def _drop_tick_meta(self) -> None:
         """Сбросить снимок тика: следующий `_tick_meta()` прочтёт заново."""
@@ -1388,8 +1387,9 @@ class TraceScreen(Screen):
         if self._voice is not None and self._voice.state != "idle":
             return
         try:
-            self.query_one(_SEL_FOOTER_LEFT, Static).update(
-                self._footer_left_text()
+            update_if_changed(
+                self.query_one(_SEL_FOOTER_LEFT, Static),
+                self._footer_left_text(),
             )
         except Exception:
             pass
@@ -4043,7 +4043,6 @@ class TraceScreen(Screen):
         return bool(getattr(self, "_selecting", False))
 
     def _poll_active(self) -> None:
-        self._tick_meta_cache = None
         self._in_poll_tick = True
         try:
             self._poll_tick()
