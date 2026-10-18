@@ -3645,8 +3645,9 @@ async def test_modes_preset_row_shows_custom_when_global_nonstandard(tmp_path):
 
 
 async def test_modes_preset_row_shows_session_override_tail(tmp_path):
-    """Хвост «· в текущей сессии: X» на строке пресета (§6.2): X = резолв сессионной
-    пары. Глобал medium, сессия -> high."""
+    """Значение сессии на строке пресета (§6.2): X = резолв сессионной пары —
+    второй строкой «в текущей сессии: X» ровно под именем ключа. Глобал
+    medium, сессия -> high."""
     app, cfg_file = _app_with_config(
         tmp_path,
         'tui:\n  finish_gate_mode: "smart"\n  text_answer_mode: "judge"\n',
@@ -3660,7 +3661,7 @@ async def test_modes_preset_row_shows_session_override_tail(tmp_path):
         scr = await _open_modes_section(pilot)
         rows = [str(w.render()) for w in scr.query(".set-row")]
         rigor_row = next(r for r in rows if "rigor ·" in r)
-        assert "в текущей сессии: high" in rigor_row
+        assert _session_line(rigor_row) == "  в текущей сессии: high"
 
 
 async def test_modes_preset_track_width_reserved_regardless_of_global(
@@ -3753,12 +3754,10 @@ async def test_modes_rows_track_base_left_aligned(tmp_path):
     assert answers_std.rindex("judge") == answers_custom.rindex("allow")
 
 
-async def test_modes_value_column_fixed_width_aligns_session_tail(tmp_path):
-    """Ревизия 6, п.3 (спека шапка): колонка подписи значения — фиксированной
-    ширины (`value_w`, max по ВСЕМ именам значений секции + custom, докстрин
-    `_modes_columns`) — хвост «· в текущей сессии: X» стартует в ОДНОЙ колонке
-    у всех строк секции, даже когда глобальные значения разной длины (custom=6,
-    judge=5, off=3) и сессионные X — тоже разной длины (high=4, deny=4, on=2)."""
+async def test_modes_session_line_stands_under_the_key_name(tmp_path):
+    """Значение сессии — второй строкой ровно под именем ключа, у всех строк
+    одинаково: первая строка его не несёт, и длина строки не растёт (хвост в
+    той же строке на узком окне терминал переносил куда попало)."""
     app, cfg_file = _app_with_config(
         tmp_path,
         'tui:\n  finish_gate_mode: "off"\n  text_answer_mode: "judge"\n',
@@ -3777,16 +3776,11 @@ async def test_modes_value_column_fixed_width_aligns_session_tail(tmp_path):
         gate_row = next(r for r in rows if "самопроверка" in r)
         answers_row = next(r for r in rows if "формат ответа" in r)
 
-        assert "в текущей сессии: high" in rigor_row
-        assert "в текущей сессии: on" in gate_row
-        assert "в текущей сессии: deny" in answers_row
-
-        tail = "· в текущей сессии:"
-        assert (
-            rigor_row.index(tail)
-            == gate_row.index(tail)
-            == answers_row.index(tail)
-        )
+        assert _session_line(rigor_row) == "  в текущей сессии: high"
+        assert _session_line(gate_row) == "  в текущей сессии: on"
+        assert _session_line(answers_row) == "  в текущей сессии: deny"
+        for row in (rigor_row, gate_row, answers_row):
+            assert "в текущей сессии" not in row.split("\n")[0]
 
 
 async def test_modes_hint_global_framing_even_with_session_override(tmp_path):
@@ -4063,19 +4057,18 @@ async def test_modes_apply_does_not_reset_live_session_override(tmp_path):
         rows = [str(w.render()) for w in scr.query(".set-row")]
         gate_row = next(r for r in rows if "самопроверка" in r)
         assert (
-            "· в текущей сессии: on" in gate_row
+            _session_line(gate_row) == "  в текущей сессии: on"
         )  # (4) пометка отражает пару слоёв
 
 
 async def test_modes_row_shows_session_override_note(tmp_path):
-    """§6.2 (ревизия 2026-07-21 вечер): когда сессия перекрывает глобальный дефолт
-    режима, хвостом В СТРОКЕ тоггла (сразу после значения) появляется «· в текущей
-    сессии: Y» — привязка к параметру однозначна, отдельной строки больше нет;
-    без оверрайда хвоста нет ни у одной строки; слова «глобально» нигде нет
-    (значение в строке — это и есть глобал); трек/значение строки по-прежнему
-    показывают ГЛОБАЛ (секция правит его), не эффективное. Терминал шире (200
-    колонок) — общие колонки секции выросли (глиф дерева + возможная 4-я позиция
-    трека /rigor), хвост оверрайда проверяется независимо от ширины."""
+    """§6.2: когда сессия перекрывает глобальный дефолт режима, у строки тоггла
+    второй строкой ровно под именем ключа появляется «в текущей сессии: Y»
+    (решение владельца 2026-10-18: хвост в той же строке на узком окне
+    переносился куда попало, а строка под именем однозначно относится к
+    ключу); без оверрайда её нет ни у одной строки; слова «глобально» нигде
+    нет; трек/значение строки по-прежнему показывают ГЛОБАЛ (секция правит
+    его), не эффективное."""
     from gc_tui.toggles import modes_section_names
 
     app, cfg_file = _app_with_config(
@@ -4095,18 +4088,17 @@ async def test_modes_row_shows_session_override_note(tmp_path):
         rows = [str(w.render()) for w in scr.query(".set-row")]
         assert len(rows) == len(
             modes_section_names()
-        )  # пометка не добавляет строк
+        )  # пометка — часть строки тоггла, не отдельный виджет
 
         gate_row = next(r for r in rows if "самопроверка" in r)
         answers_row = next(r for r in rows if "формат ответа" in r)
-        assert "· в текущей сессии: off" in gate_row
+        assert _session_line(gate_row) == "  в текущей сессии: off"
         assert "глобально" not in gate_row
         assert (
             "в текущей сессии" not in answers_row
-        )  # неразошедшийся — без хвоста
-        # значение в строке — глобал, не сессия (сплит по самому хвосту: head ребёнка
-        # тоже несёт маркер «· » ревизии 3, поэтому голый split("·") больше не годится)
-        assert gate_row.split("· в текущей сессии:")[0].rstrip().endswith("on")
+        )  # неразошедшийся — без пометки
+        # значение в строке — глобал, не сессия
+        assert gate_row.split("\n")[0].rstrip().endswith("on")
 
 
 async def test_modes_no_override_note_from_legacy_key_alone(tmp_path):
@@ -4133,46 +4125,59 @@ async def test_modes_no_override_note_from_legacy_key_alone(tmp_path):
         )
 
 
-async def test_modes_row_hides_session_override_note_when_narrow(tmp_path):
-    """Important-1 (ревью): ветка «хвост не влез» `_mode_row_text` (§6.2, all-or-
-    nothing по `_modes_row_width`) не была исполнена ни одним из существующих
-    тестов — все на широком терминале, где хвост всегда помещается. На узком
-    терминале (60 колонок → `_modes_row_width()` == 50) ядро строки gate (курсор +
-    label + трек + значение, 44 символа) ещё влезает, а ядро + хвост
-    "   · в текущей сессии: off" (44 + 23 = 67 символов) — уже нет: хвост уходит
-    ЦЕЛИКОМ (не обрезком/многоточием — в отличие от hint-строки у него нет
-    механики усечения), ядро остаётся видимым полностью. На широком терминале
-    (100 колонок → row_width == 90) тот же оверрайд даёт хвост целиком."""
+async def test_modes_session_line_survives_a_narrow_window(tmp_path):
+    """Строка «в текущей сессии: …» короткая и стоит отдельно: на узком окне
+    она остаётся целиком, а строка тоггла не переносится."""
     app, cfg_file = _app_with_config(
         tmp_path, 'tui:\n  finish_gate_mode: "on"\n'
     )
-    async with app.run_test(size=(60, 24)) as pilot:
+    async with app.run_test(size=(72, 24)) as pilot:
         scr = await _open_modes_section(pilot)
         app.set_session_override("tui.finish_gate_mode", "off")
         scr._render_view()
-        await pilot.pause(0.1)  # carry-fix _refresh_modes_rows после layout
+        await pilot.pause(0.1)
 
-        rows = [str(w.render()) for w in scr.query(".set-row")]
-        gate_row = next(r for r in rows if "самопроверка" in r)
-        assert "в текущей сессии" not in gate_row  # хвост ушёл целиком
-        assert "· в тек" not in gate_row  # не обрезком/многоточием
-        assert "самопроверка выполнения задачи" in gate_row  # ядро: label цел
-        assert gate_row.rstrip().endswith("on")  # ядро: значение (глобал) цело
+        rows = list(scr.query(".set-row"))
+        gate = next(w for w in rows if "самопроверка" in str(w.render()))
+        gate_row = str(gate.render())
+        assert _session_line(gate_row) == "  в текущей сессии: off"
+        assert gate_row.split("\n")[0].rstrip().endswith("on")
+        assert gate.region.height == 2  # две строки, без переноса
 
-    app2, _cfg_file2 = _app_with_config(
-        tmp_path, 'tui:\n  finish_gate_mode: "on"\n'
-    )
-    async with app2.run_test(size=(100, 24)) as pilot2:
-        scr2 = await _open_modes_section(pilot2)
-        app2.set_session_override("tui.finish_gate_mode", "off")
-        scr2._render_view()
-        await pilot2.pause(0.1)
 
-        rows2 = [str(w.render()) for w in scr2.query(".set-row")]
-        gate_row2 = next(r for r in rows2 if "самопроверка" in r)
-        assert (
-            "· в текущей сессии: off" in gate_row2
-        )  # на широком — хвост есть
+def _session_line(row: str):
+    """Вторая строка строки тоггла — значение текущей сессии — или None."""
+    lines = row.split("\n")
+    return lines[1].rstrip() if len(lines) > 1 else None
+
+
+async def test_session_line_label_is_dim_italic_and_value_has_its_track_colour(
+    tmp_path,
+):
+    """Пометка сессии отличается от дочерних строк (gate, answers — DIM):
+    подпись самым тусклым цветом и курсивом, значение — цветом своей позиции
+    трека, тем же, каким она горит на ползунке."""
+    from gc_tui.palette import DEEP_DIM
+    from gc_tui.toggles import TOGGLES
+
+    app, _ = _app_with_config(tmp_path, 'level: "default"\n')
+    async with app.run_test(size=(140, 30)) as pilot:
+        scr = await _open_modes_section(pilot)
+        app.set_permission_mode("plan")
+        text = scr._mode_row_text("mode", selected=False)
+
+        def style_at(idx):
+            return " ".join(
+                str(s.style) for s in text.spans if s.start <= idx < s.end
+            ).lower()
+
+        label = style_at(text.plain.index("в текущей сессии:"))
+        assert "italic" in label and DEEP_DIM.lower() in label
+        plan_colour = next(
+            v.color for v in TOGGLES["mode"].values if v.value == "plan"
+        )
+        assert text.plain.split("\n")[1].endswith("plan")
+        assert plan_colour.lower() in style_at(text.plain.rindex("plan"))
 
 
 async def test_connection_section_mounts_connection_editor(tmp_path):
@@ -5992,5 +5997,5 @@ async def test_mode_row_shows_the_mode_chosen_in_this_session(tmp_path):
         app.set_permission_mode("plan")
         row = scr._mode_row_text("mode", selected=False).plain
 
-        assert "edit" in row
-        assert row.rstrip().endswith("в текущей сессии: plan")
+        assert row.split("\n")[0].rstrip().endswith("edit")
+        assert _session_line(row) == "  в текущей сессии: plan"

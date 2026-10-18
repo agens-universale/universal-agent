@@ -453,7 +453,7 @@ class CommandPalette(VerticalScroll):
             text = Text(head.ljust(col))
             text.append(value_text)
             if is_child:
-                text.stylize(_pal.DIM)
+                text.stylize(_pal.SUB_INK)
             return text
 
         track_w = base_w + extra_w
@@ -480,7 +480,7 @@ class CommandPalette(VerticalScroll):
 
         text = Text(head.ljust(col))
         if is_child:
-            text.stylize(_pal.DIM, 0, len(head))
+            text.stylize(_pal.SUB_INK, 0, len(head))
         extra = (
             self._toggle_extra(cmd.name)
             if self._toggle_extra is not None
@@ -501,7 +501,7 @@ class CommandPalette(VerticalScroll):
         value_start = len(text)
         text.append(current)
         if is_child:
-            text.stylize(_pal.DIM, value_start, len(text))
+            text.stylize(_pal.SUB_INK, value_start, len(text))
         return text
 
     def _visible_rows(self) -> list[Command]:
