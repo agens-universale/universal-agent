@@ -63,7 +63,7 @@ from gc_core.threads.store import ThreadStore
 
 from gc_stores.common import EXTENSIONS, apply_sets, apply_side
 from gc_stores.kv import keys
-from gc_stores.kv.base import KV, ensure_format, read_format
+from gc_stores.kv.base import KV, Versioned, ensure_format, read_format
 from gc_stores.kv.head import Chunk, Head
 from gc_stores.rows import HISTORY, dumps, id_key, message_key, stamp
 
@@ -200,10 +200,14 @@ class KvThreadStore(ThreadStore):
     async def _replayed(
         self, key: ThreadKey, head: Head | None, op_id: str, digest: str
     ) -> Receipt | None:
-        for item in head.pending if head is not None else ():
+        if head is None:
+            return None
+        for item in head.pending:
             if item["op_id"] == op_id:
                 return _receipt_of(item, op_id, digest)
-        found = await self._kv.get(keys.receipt_key(key, op_id))
+        found = await self._kv.get(
+            keys.receipt_key(key, head.incarnation, op_id)
+        )
         if found is None:
             return None
         return _receipt_of(json.loads(found.data), op_id, digest)
@@ -220,7 +224,7 @@ class KvThreadStore(ThreadStore):
         зафиксированы), текущая — в заголовок; ключ индекса — по времени."""
         for item in old.pending if old is not None else ():
             await self._kv.put_any(
-                keys.receipt_key(key, item["op_id"]),
+                keys.receipt_key(key, old.incarnation, item["op_id"]),
                 json.dumps(item, ensure_ascii=False).encode("utf-8"),
             )
         new.pending = [receipt_item]
@@ -243,9 +247,26 @@ class KvThreadStore(ThreadStore):
         head = _live((await self._head(owner))[0])
         return head is not None and alias in head.aliases
 
+    async def _check_takeover(
+        self, key: ThreadKey, alias: str, found: Versioned, now: datetime
+    ) -> None:
+        """Писать поверх резерва ``found`` можно, если он свой (время
+        обновится) или чужая сирота (старый, без подтверждения); чужой
+        свежий или подтверждённый — ``ValueError``."""
+        owner, at = _reservation(found.data)
+        if owner == key:
+            return
+        if now - at < ALIAS_HOLD or await self._listed(owner, alias):
+            raise ValueError(
+                f"алиас {alias!r} принадлежит треду "
+                f"{owner.system}/{owner.thread}"
+            )
+
     async def _reserve(
         self, key: ThreadKey, alias: str, now: datetime
     ) -> None:
+        """Резерв алиаса за тредом; свой — с обновлённым временем, иначе
+        старый резерв прерванной записи перехватили бы до нашей фиксации."""
         record = json.dumps(
             {
                 "system": key.system,
@@ -257,15 +278,7 @@ class KvThreadStore(ThreadStore):
         for _ in range(self._attempts):
             found = await self._kv.get(name)
             if found is not None:
-                owner, at = _reservation(found.data)
-                if owner == key:
-                    return
-                held = now - at < ALIAS_HOLD
-                if held or await self._listed(owner, alias):
-                    raise ValueError(
-                        f"алиас {alias!r} принадлежит треду "
-                        f"{owner.system}/{owner.thread}"
-                    )
+                await self._check_takeover(key, alias, found, now)
             version = None if found is None else found.version
             if await self._kv.put(name, record, if_version=version):
                 return
@@ -273,11 +286,40 @@ class KvThreadStore(ThreadStore):
 
     async def _reserve_aliases(
         self, key: ThreadKey, head: Head, aliases: list[str], now: datetime
-    ) -> None:
+    ) -> list[str]:
+        """Зарезервировать новые алиасы треда; вернуть зарезервированные."""
+        reserved = []
         for alias in sorted(set(aliases)):
             if alias not in head.aliases:
                 await self._reserve(key, alias, now)
                 head.aliases.append(alias)
+                reserved.append(alias)
+        return reserved
+
+    async def _confirm(self, key: ThreadKey, reserved: list[str]) -> None:
+        """Перед фиксацией — резервы всё ещё наши: медленная запись (куски
+        в мегабайты) не перечислит алиас, который успели перехватить."""
+        for alias in reserved:
+            found = await self._kv.get(keys.alias_key(alias))
+            owner = None if found is None else _reservation(found.data)[0]
+            if owner != key:
+                where = f"{owner.system}/{owner.thread}" if owner else "никому"
+                raise ValueError(
+                    f"алиас {alias!r} принадлежит треду {where}: резерв "
+                    "перехвачен до фиксации"
+                )
+
+    async def _drop_aliases(self, key: ThreadKey, aliases: list[str]) -> None:
+        """Снять резервы удалённого треда — только свои: резерв, который
+        успел перейти к другому треду, остаётся ему."""
+        for alias in aliases:
+            name = keys.alias_key(alias)
+            try:
+                found = await self._kv.get(name)
+                if found is not None and _reservation(found.data)[0] == key:
+                    await self._kv.delete(name)
+            except Exception:  # уборка не отменяет удаление
+                _log.warning("kv: не снят резерв %s", name, exc_info=True)
 
     # --- потоки ----------------------------------------------------------------
 
@@ -412,7 +454,9 @@ class KvThreadStore(ThreadStore):
         after: list[str],
     ) -> str | None:
         """Изменения ``commit`` в порядке контракта; вернуть id архива."""
-        await self._reserve_aliases(key, head, change.add_aliases, now)
+        reserved = await self._reserve_aliases(
+            key, head, change.add_aliases, now
+        )
         if change.reset_history:
             after.extend(self._drop_history(key, head))
             head.row.history_version += 1
@@ -427,6 +471,7 @@ class KvThreadStore(ThreadStore):
         await self._append(key, head, HISTORY, change.append_messages, now)
         apply_sets(head.row, change)
         await self._merge(key, head, now, after)
+        await self._confirm(key, reserved)
         return archive_id
 
     # --- чтение ----------------------------------------------------------------
@@ -566,10 +611,13 @@ class KvThreadStore(ThreadStore):
             now = self._clock()
             new = live.copy() if live else Head.fresh(key, now, head)
             check_side_writer(new.row.lease, change)
-            await self._reserve_aliases(key, new, change.add_aliases, now)
+            reserved = await self._reserve_aliases(
+                key, new, change.add_aliases, now
+            )
             apply_side(new.row, change)
             for stream, items in change.append:
                 await self._append(key, new, stream, items, now)
+            await self._confirm(key, reserved)
             receipt = new.row.receipt(change.op_id)
             item = _receipt_item(change.op_id, digest, receipt, now)
             after: list[str] = []
@@ -613,7 +661,6 @@ class KvThreadStore(ThreadStore):
             )
             for c in chunks
         ]
-        found += [keys.alias_key(a) for a in head.aliases]
         if head.index is not None:
             found.append(head.index)
         for prefix in (
@@ -629,11 +676,11 @@ class KvThreadStore(ThreadStore):
         async def step(head: Head | None) -> _Done | _Write:
             live = _live(head)
             if live is None:
-                return _Done(None)
+                return _Done([])
             after = await self._thread_keys(key, live)
-            return _Write(live.tombstone(), None, after)
+            return _Write(live.tombstone(), list(live.aliases), after)
 
-        await self._mutate(key, step)
+        await self._drop_aliases(key, await self._mutate(key, step))
 
     # --- вложения и обслуживание ------------------------------------------------
 

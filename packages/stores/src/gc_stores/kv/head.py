@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import copy
 import json
+import secrets
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from typing import Any
@@ -39,6 +40,10 @@ class Head:
     #: ``{op_id, digest, receipt, at}``.
     pending: list[dict[str, Any]] = field(default_factory=list)
     index: str | None = None
+    #: Воплощение треда: новое у треда, созданного заново под тем же ключом.
+    #: Квитанции ключуются им — остатки удалённого треда (уборка не прошла)
+    #: новый не видит.
+    incarnation: str = field(default_factory=lambda: secrets.token_hex(8))
     #: Надгробие: тред удалён; ``row.generation`` и ``row.lease_epoch`` —
     #: для треда, созданного заново под тем же ключом.
     deleted: bool = False
@@ -93,6 +98,7 @@ class Head:
             "aliases": self.aliases,
             "pending": self.pending,
             "index": self.index,
+            "incarnation": self.incarnation,
             "deleted": self.deleted,
         }
         return json.dumps(
@@ -119,5 +125,6 @@ class Head:
             aliases=list(document["aliases"]),
             pending=list(document["pending"]),
             index=document["index"],
+            incarnation=document["incarnation"],
             deleted=bool(document["deleted"]),
         )

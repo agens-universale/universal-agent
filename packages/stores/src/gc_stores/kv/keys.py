@@ -52,9 +52,10 @@ def receipt_prefix(key: ThreadKey) -> str:
     return f"{RECEIPTS}{enc(key.system)}/{enc(key.thread)}/"
 
 
-def receipt_key(key: ThreadKey, op_id: str) -> str:
+def receipt_key(key: ThreadKey, incarnation: str, op_id: str) -> str:
+    """Квитанция записи ``op_id`` воплощения треда ``incarnation``."""
     digest = hashlib.sha256(op_id.encode("utf-8", "surrogatepass")).hexdigest()
-    return receipt_prefix(key) + digest
+    return f"{receipt_prefix(key)}{incarnation}/{digest}"
 
 
 def alias_key(alias: str) -> str:
