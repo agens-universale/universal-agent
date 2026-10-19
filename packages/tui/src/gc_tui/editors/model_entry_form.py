@@ -2909,11 +2909,23 @@ class ModelEntryForm(Vertical):
         self._write_yaml("mef-main", main)
         self._write_yaml("mef-auxiliary", auxiliary)
         # Прокси остаётся в поле карточки, не дублируется в YAML backend.
+        # Строку из блока кладём в поле сразу: ниже сохранение ещё может
+        # сорваться (порог, отмена ${ENV:…}, ошибка записи), и следующий
+        # submit читает форму заново. Иначе ключа нет ни в блоке, ни в поле,
+        # и повторное сохранение пишет модель без прокси.
         shown_backend = backend
-        if isinstance(backend, dict) and "proxy" in backend:
-            shown_backend = {
-                key: value for key, value in backend.items() if key != "proxy"
-            } or None
+        if isinstance(backend, dict):
+            raw = backend.get("proxy")
+            if isinstance(raw, str) and raw.strip():
+                shown_backend = {
+                    key: value
+                    for key, value in backend.items()
+                    if key != "proxy"
+                } or None
+                if not self._proxy_value():
+                    write_field(
+                        self.query_one(_SEL_MEF_PROXY, Input), raw.strip()
+                    )
         self._write_yaml("mef-backend", shown_backend)
         fields: dict = {}
         if values["model"]:

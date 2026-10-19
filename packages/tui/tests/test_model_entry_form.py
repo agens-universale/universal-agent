@@ -4110,6 +4110,34 @@ async def test_typed_proxy_is_saved_for_this_endpoint():
         assert fields["backend"]["proxy"] == "socks5h://proxy:1080"
 
 
+async def test_yaml_proxy_lands_in_the_field_when_save_fails():
+    """`proxy:` в блоке backend переносится в поле до срыва сохранения.
+
+    Вырезание идёт раньше отказа (здесь — плохой порог). Без переноса
+    в поле следующий submit читает пустой блок и пустое поле и пишет
+    модель без прокси.
+    """
+    from textual.widgets import TextArea
+
+    form = _paired_form()
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        area = form.query_one("#mef-backend", TextArea)
+        area.load_text("proxy: http://proxy:8080\nrequest_timeout_sec: 90\n")
+        form.query_one("#mef-summary-chars", Input).value = "много"
+        ok, _alias, fields = form.submit()
+        assert ok is False and fields is None
+        assert form.query_one("#mef-proxy", Input).value == "http://proxy:8080"
+        assert "proxy" not in area.text
+        assert "request_timeout_sec: 90" in area.text
+
+        form.query_one("#mef-summary-chars", Input).value = ""
+        ok, _alias, fields = form.submit()
+        assert ok is True
+        assert fields["backend"]["proxy"] == "http://proxy:8080"
+        assert fields["backend"]["request_timeout_sec"] == 90
+
+
 async def test_proxy_saves_without_its_own_token_or_address():
     """Прокси — строка эндпоинта. Общий адрес и токен при этом не трогаются."""
     form = _form(
