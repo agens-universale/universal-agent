@@ -177,3 +177,31 @@ def test_cli_sync_prints_the_report(tmp_path, capsys):
     assert "записано: 1" in capsys.readouterr().out
     assert main([*args, "--dry-run"]) == 0
     assert "без изменений: 1" in capsys.readouterr().out
+
+
+async def test_symlinks_are_refused(tmp_path):
+    """Находка проверки безопасности: ссылка в каталоге агента на файл вне
+    его (ключи, секреты) не уходит в хранилище — отказ, а не чтение."""
+    from gc_testkit.helpers.crossplatform import require_symlinks
+
+    require_symlinks(tmp_path)
+    secret = tmp_path / "secret.txt"
+    secret.write_text("ключ", encoding="utf-8")
+    root = _layout(tmp_path / "agent", {"prompts/system.md": "S"})
+    (root / "prompts" / "summary.md").symlink_to(secret)
+    store = _store(tmp_path)
+    with pytest.raises(ValueError, match="ссылк"):
+        await sync_directory(store, root)
+    assert await store.list_resources() == []
+
+
+async def test_symlinked_directory_is_refused(tmp_path):
+    from gc_testkit.helpers.crossplatform import require_symlinks
+
+    require_symlinks(tmp_path)
+    outside = _layout(tmp_path / "outside", {"s/SKILL.md": "чужое"})
+    root = _layout(tmp_path / "agent", {"prompts/system.md": "S"})
+    (root / "skills").mkdir()
+    (root / "skills" / "user").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(ValueError, match="ссылк"):
+        await sync_directory(_store(tmp_path), root)

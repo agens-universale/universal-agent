@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -183,20 +184,34 @@ _PARSERS = {
 }
 
 
+def _files(root: Path) -> Iterator[tuple[str, ...]]:
+    """Файлы каталога по порядку, без перехода по ссылкам: ссылка на файл
+    или каталог вне каталога агента (ключи, секреты) ушла бы в хранилище,
+    а оно бывает общим, — отказ. Скрытые (``.DS_Store``, ``.git``) — мимо."""
+    for top, dirs, names in os.walk(root, followlinks=False):
+        base = Path(top).relative_to(root).parts
+        dirs[:] = sorted(d for d in dirs if not d.startswith("."))
+        for name in [*dirs, *names]:
+            if (Path(top) / name).is_symlink():
+                raise ValueError(
+                    f"{'/'.join((*base, name))}: символическая ссылка — sync "
+                    "не идёт по ссылкам, положите файл в каталог агента"
+                )
+        for name in sorted(n for n in names if not n.startswith(".")):
+            yield (*base, name)
+
+
 def _layout(root: Path, project: str | None) -> Iterator[Item]:
-    """Ресурсы каталога в раскладке ``gc-stores sync``; скрытые файлы
-    (``.DS_Store``, ``.git``) пропускаются, чужое — ``ValueError``."""
-    for path in sorted(root.rglob("*")):
-        rel = path.relative_to(root).parts
-        if any(part.startswith(".") for part in rel) or not path.is_file():
-            continue
+    """Ресурсы каталога в раскладке ``gc-stores sync``; чужое —
+    ``ValueError``."""
+    for rel in _files(root):
         parser = _PARSERS.get(rel[0])
         if parser is None:
             raise ValueError(
                 f"{'/'.join(rel)}: в каталоге агента — только "
                 + ", ".join(f"{s}/" for s in _SECTIONS)
             )
-        yield parser(rel, path.read_bytes(), project)
+        yield parser(rel, root.joinpath(*rel).read_bytes(), project)
 
 
 def _merge(report: SyncReport, other: SyncReport) -> None:
