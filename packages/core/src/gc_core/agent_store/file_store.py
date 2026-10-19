@@ -45,9 +45,19 @@ def memory_path(project: ProjectKey) -> Path:
 
 
 def memory_backup_path(project: ProjectKey) -> Path:
-    """Бэкап памяти вне дерева проекта: переживает ``rm -rf .gc``."""
+    """Бэкап памяти вне дерева проекта: переживает ``rm -rf .gc``.
+
+    id проекта — имя каталога: с разделителем или ``..`` он вывел бы бэкап за
+    каталог состояния (id из SDK встраивающего не проходит проверку
+    конфига) — ``ValueError``."""
     from gc_core.config_modules.env_vars import gc_paths
 
+    if (
+        not project.id
+        or project.id in (".", "..")
+        or any(sep in project.id for sep in ("/", "\\", "\0"))
+    ):
+        raise ValueError(f"id проекта {project.id!r} — не имя каталога")
     return gc_paths()["state"] / "projects" / project.id / _BACKUP_FILE
 
 
