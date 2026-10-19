@@ -92,3 +92,12 @@ def numbered(template: str) -> Callable[[], Callable[[], str]]:
         return lambda: template.format(next(counter))
 
     return params
+
+
+def positional(mark: str) -> Callable[[], Callable[[], str]]:
+    """Генератор одинаковых позиционных плейсхолдеров: ``?`` или ``%s``."""
+
+    def params() -> Callable[[], str]:
+        return lambda: mark
+
+    return params

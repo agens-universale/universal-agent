@@ -55,17 +55,6 @@ THREAD_COLUMNS: tuple[str, ...] = (
     "updated_at",
 )
 
-#: Таблицы схемы (``schema.sql``): все на месте — DDL не нужен.
-TABLES: tuple[str, ...] = (
-    "gc_threads",
-    "gc_stream_entries",
-    "gc_archives",
-    "gc_blobs",
-    "gc_aliases",
-    "gc_receipts",
-    "gc_tombstones",
-)
-
 
 def dumps(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
