@@ -96,8 +96,13 @@ class SqlThreadStore(ThreadStore):
         """Перед первой операцией — сверка версии схемы с кодом."""
         if self._checked or not self._migrations:
             return
-        await schema.check(self._db, self._d, self._migrations)
+        await self.check_schema()
         self._checked = True
+
+    async def check_schema(self) -> None:
+        """Сверить версию схемы базы с кодом; расхождение —
+        ``SchemaMismatch`` с тем, что сделать."""
+        await schema.check(self._db, self._d, self._migrations)
 
     async def ensure_schema(self) -> None:
         """Применить недостающие миграции схемы; повторный вызов безвреден.
