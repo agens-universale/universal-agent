@@ -99,7 +99,7 @@ async def test_banner_offers_three_modes_and_rework(tmp_path):
         lines = text.split("\n")
         # пояснение — только у выделенного варианта, в его же строке
         assert lines[0].strip() == (
-            "▸ [1] Да, в edit mode — правки в проекте без подтверждения"
+            "▸ [1] Да, в edit mode — агент редактирует файлы, опасные команды через подтверждение"
         )
         assert lines[1].strip() == "[2] Да, в auto mode"
         assert lines[2].strip() == "[3] Да, в manual mode"
