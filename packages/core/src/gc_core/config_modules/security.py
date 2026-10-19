@@ -317,7 +317,8 @@ class PermissionsConfig(BaseModel):
     default_mode — с какого режима стартует сессия; выбор в сессии (Shift+Tab)
     и флаг запуска ``--permission-mode`` сильнее. readonly_commands дополняет
     встроенный список команд, исполняемых без подтверждения в любом режиме:
-    командой (`tree`) или парой «команда подкоманда» (`git log`).
+    командой (`tree`) или парой «команда подкоманда» (`git log`). Из слоёв
+    папки проекта он не берётся (`layers._without_user_only_key`).
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
