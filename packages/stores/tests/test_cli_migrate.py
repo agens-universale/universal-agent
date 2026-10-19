@@ -43,3 +43,20 @@ def test_migrate_mysql(mysql_databases, capsys):
     assert main(["migrate", "--check", "--store", "mysql", "--dsn", dsn]) == 1
     assert main(["migrate", "--store", "mysql", "--dsn", dsn]) == 0
     assert "версия схемы: 2" in capsys.readouterr().out
+
+
+def test_migrate_redis_writes_the_key_format(
+    redis_url, redis_prefixes, capsys
+):
+    args = [
+        "--store",
+        "redis",
+        "--url",
+        redis_url,
+        "--prefix",
+        redis_prefixes.new(),
+    ]
+    assert main(["migrate", "--check", *args]) == 1
+    assert main(["migrate", *args]) == 0
+    assert "версия схемы: 1" in capsys.readouterr().out
+    assert main(["migrate", "--check", *args]) == 0

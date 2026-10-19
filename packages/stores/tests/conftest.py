@@ -171,3 +171,50 @@ def requests_seen(monkeypatch):
     import scripted_model
 
     return scripted_model.install(monkeypatch)
+
+
+REDIS_ENV = "GC_TEST_REDIS_URL"
+
+
+@pytest.fixture(scope="session")
+def redis_url() -> str:
+    url = os.environ.get(REDIS_ENV, "")
+    if url:
+        return url
+    if os.environ.get("REQUIRE_REDIS") == "1":
+        pytest.fail(f"REQUIRE_REDIS=1, но {REDIS_ENV} не задан")
+    pytest.skip(f"{REDIS_ENV} не задан: тесты Redis пропущены")
+
+
+class RedisPrefixes:
+    """Префикс ключей на хранилище теста; ``drop_all`` удаляет ключи."""
+
+    def __init__(self, url: str) -> None:
+        self.url = url
+        self.made: list[str] = []
+
+    def new(self) -> str:
+        prefix = f"gc_test_{uuid.uuid4().hex[:12]}:"
+        self.made.append(prefix)
+        return prefix
+
+    def drop_all(self) -> None:
+        async def drop():
+            import redis.asyncio as aioredis
+
+            client = aioredis.Redis.from_url(self.url)
+            try:
+                for prefix in self.made:
+                    async for key in client.scan_iter(match=f"{prefix}*"):
+                        await client.delete(key)
+            finally:
+                await client.aclose()
+
+        asyncio.run(drop())
+
+
+@pytest.fixture
+def redis_prefixes(redis_url):
+    made = RedisPrefixes(redis_url)
+    yield made
+    made.drop_all()

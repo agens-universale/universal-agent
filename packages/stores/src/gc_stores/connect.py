@@ -47,6 +47,14 @@ def _mysql(args: argparse.Namespace) -> Any:
     return MySQLThreadStore(_value(args, "--dsn", "GC_STORES_DSN"))
 
 
+def _redis(args: argparse.Namespace) -> Any:
+    from gc_stores.redis import RedisThreadStore
+
+    return RedisThreadStore(
+        _value(args, "--url", "GC_STORES_REDIS_URL"), prefix=args.prefix
+    )
+
+
 def _sqlite(args: argparse.Namespace) -> Any:
     from gc_stores.sqlite import SQLiteThreadStore
 
@@ -56,6 +64,7 @@ def _sqlite(args: argparse.Namespace) -> Any:
 STORES: dict[str, StoreKind] = {
     "mysql": StoreKind(threads=_mysql),
     "postgres": StoreKind(threads=_postgres),
+    "redis": StoreKind(threads=_redis),
     "sqlite": StoreKind(threads=_sqlite),
 }
 
@@ -68,6 +77,10 @@ def add_connection_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--path", help="файл SQLite (или GC_STORES_SQLITE_PATH)"
+    )
+    parser.add_argument("--url", help="адрес Redis (или GC_STORES_REDIS_URL)")
+    parser.add_argument(
+        "--prefix", default="gc:", help="префикс ключей Redis/S3 (gc:)"
     )
 
 
