@@ -32,14 +32,25 @@ from gc_core.intent_log.user_turn import (
 )
 from gc_core.mcp_session_owner import reset_owner, set_owner
 from gc_core.message_policy.chat_completions import repair_tool_call_pairing
+from gc_core.message_policy.plan_messages import (
+    PLAN_REMOVED_MESSAGE,
+    accepted_plan_messages,
+)
 from gc_core.message_policy.stop_persist import is_persist_discarded
 from gc_core.message_policy.tool_usage_notice.state import (
     persist_tool_usage_notice_state,
 )
 from gc_core.message_policy.user_message_policy import (
     extract_real_user_message_text,
+    wrap_technical_user_content,
 )
 from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
+from gc_core.plan_store import (
+    PLAN_STATUS_APPROVED,
+    PLAN_STATUS_REWORKING,
+    normalize_plan_block,
+    now_stamp,
+)
 from gc_core.processing_responses import (
     _acall_blocking_hook,
     arun_agent,
@@ -51,6 +62,13 @@ from gc_core.run_summary_coordinator import (
     areset_run_flags,
     aset_tui_finalizing,
     aset_tui_finish_gate_checking,
+)
+from gc_core.security.action_judge_step import lift_pause_on_user_message
+from gc_core.security.permission_mode import (
+    PLAN_EXECUTION_MODES,
+    Mode,
+    coerce_mode,
+    resolve_mode,
 )
 from gc_core.security.permission_store import PermissionStore
 from gc_core.settings import settings_of
@@ -222,6 +240,16 @@ def _put_attachments(msg: dict, attachments, i: int, commit) -> None:
         ]
 
 
+def _require_plan_execution_mode(mode: str) -> str:
+    """План исполняется только в режиме исполнения (edit, auto, manual).
+
+    Возвращает нормализованное имя режима (``"Auto"`` → ``"auto"``)."""
+    resolved = coerce_mode(mode)
+    if resolved not in PLAN_EXECUTION_MODES:
+        raise ValueError(f"not a plan execution mode: {mode!r}")
+    return resolved.value
+
+
 def _require_supported_persist_mode(settings: Any, ctx: Any) -> None:
     """``persist: turn`` — только у durable-исполнителя (Temporal).
 
@@ -277,6 +305,19 @@ class AgentExecutor:
         # stop_run() до создания state (run() ещё в setup-фазе): запоминаем, и
         # run() применит флаг сразу при создании state, до первого persist.
         self._stop_pending: bool = False
+        # Явный выбор режима разрешений (хоткей фронтенда, флаг запуска). Живёт
+        # весь срок исполнителя и ложится на состояние каждого прогона: выбор
+        # человека сильнее и сохранённого в сессии, и конфига.
+        self._permission_mode_choice: Optional[str] = None
+        # Отложенный переход статуса плана (одобрение из фронтенда):
+        # (статус, режим, тред). Применяется в начале следующего прогона и
+        # только к своему треду — см. _apply_plan_changes.
+        self._plan_transition_pending: Optional[
+            tuple[str, Optional[str], Optional[str]]
+        ] = None
+        # Человек нажал «Доработать план» в этом треде: статус сменится, когда
+        # он реально отправит сообщение.
+        self._plan_rework_thread: Optional[str] = None
         self.last_terminal_outcome: Optional[str] = None
 
     def take_undelivered_messages(self) -> list[dict]:
@@ -304,6 +345,11 @@ class AgentExecutor:
         with self._lock:
             out = self._pending_messages[:]
             self._pending_messages.clear()
+            state = self._state
+        # Сообщение из очереди — такое же новое слово человека, как
+        # стартовое: снимает паузу судьи и посреди прогона.
+        if state is not None:
+            self._lift_judge_pause(state, out)
         # Вне замка: копия картинок в тред — файловая операция, а замок ждут
         # поток TUI и обработчик сервера.
         return self._commit_queued(out)
@@ -569,6 +615,14 @@ class AgentExecutor:
             if self._stop_pending:
                 self._state.stop_requested = True
                 self._stop_pending = False
+            # В shared уже лежит выбор, восстановленный из сессии; явный выбор
+            # этого запуска — поверх. Под тем же замком, что публикует state:
+            # иначе между публикацией и наложением вклинился бы
+            # set_permission_mode и его значение было бы затёрто.
+            if self._permission_mode_choice is not None:
+                self._state.shared.permission_mode = (
+                    self._permission_mode_choice
+                )
             # Очередь здесь НЕ сбрасываем. Сброс стоял тут с тех пор, когда до
             # него не было setup-фазы и класть сообщения заранее было некому.
             # Теперь кладут: сервер, пока прогон ещё не дошёл до цикла,
@@ -580,6 +634,179 @@ class AgentExecutor:
             # доигрывает отдельным ходом. Не забранное из очереди уходит этому
             # прогону вслед за его собственными сообщениями (см. ниже), а
             # отложенное `finally` прошлого прогона ждёт владельца.
+
+    def accept_plan(self, mode: str, thread_id: Optional[str]) -> None:
+        """Человек принял план и выбрал режим исполнения.
+
+        Фронтенд зовёт это ДО запуска продолжения; статус плана сменится в
+        начале следующего прогона. Переход одноразовый и привязан к треду:
+        если продолжение не стартовало, он не должен примениться к прогону
+        другой сессии.
+        """
+        with self._lock:
+            self._plan_transition_pending = (
+                PLAN_STATUS_APPROVED,
+                mode,
+                thread_id,
+            )
+
+    def arm_plan_rework(self, thread_id: Optional[str]) -> None:
+        """Человек выбрал «Доработать план»: следующее его сообщение в этом
+        треде переведёт план в доработку."""
+        with self._lock:
+            self._plan_rework_thread = thread_id
+
+    def prepare_accepted_plan(
+        self, mode: str, thread_id: Optional[str], *, extra_text: str = ""
+    ) -> list[str]:
+        """Человек одобрил предложенный план: режим исполнения, одобрение и
+        сообщения продолжения — без прогона.
+
+        Для фронтенда, который ведёт прогон своим путём (ACP — потоком дельт
+        ``AsyncAgent.stream``); остальные зовут ``aexecute_accepted_plan``.
+        Не режим исполнения — ``ValueError`` до любых изменений.
+        ``extra_text`` — уточнение человека к исполнению, отдельным
+        сообщением после служебного «план одобрен».
+        """
+        mode = _require_plan_execution_mode(mode)
+        self.set_permission_mode(mode)
+        self.accept_plan(mode, thread_id)
+        return accepted_plan_messages(mode, extra_text=extra_text)
+
+    async def aexecute_accepted_plan(
+        self,
+        mode: str,
+        thread_id: Optional[str],
+        *,
+        extra_text: str = "",
+        verbose: Optional[bool] = None,
+        account_run: bool = True,
+        system: Optional[str] = None,
+    ) -> Any:
+        """Человек одобрил предложенный план: исполнить его в выбранном режиме.
+
+        Одна последовательность на фронтенды — консольный вопрос и
+        ``--approve-plan`` gc-cli (ACP — через ``prepare_accepted_plan``).
+        Негодный режим — ``ValueError`` до любых действий, и учёт прошлого
+        прогона тоже не трогается. Учёт закрывается ДО смены режима: его
+        мета пишется такой, какой была на его конце; закрытый учёт и
+        прогон, которого в этом процессе не было, — no-op.
+        """
+        _require_plan_execution_mode(mode)
+        await self.aclose_run_accounting()
+        messages = self.prepare_accepted_plan(
+            mode, thread_id, extra_text=extra_text
+        )
+        return await self.arun(
+            messages,
+            thread_id=thread_id,
+            system=system,
+            verbose=verbose,
+            account_run=account_run,
+        )
+
+    def plan_snapshot(
+        self, expected_thread_id: Optional[str]
+    ) -> Optional[dict]:
+        """План указанного треда из живого состояния; None — другой тред,
+        состояния нет или плана нет. Пустой id — всегда несовпадение."""
+        with self._lock:
+            state = self._state
+            if (
+                state is None
+                or not expected_thread_id
+                or getattr(state, "thread_id", None) != expected_thread_id
+            ):
+                return None
+            return normalize_plan_block(getattr(state.shared, "plan", None))
+
+    def _apply_plan_changes(self, state, new_user_messages) -> None:
+        """Применить к плану то, что человек решил между прогонами.
+
+        Оба намерения гасятся в начале ЛЮБОГО прогона и действуют только на
+        свой тред: невидимое взведённое состояние не должно пережить момент,
+        когда его создали, и выстрелить в чужой сессии.
+        """
+        with self._lock:
+            pending = self._plan_transition_pending
+            rework_thread = self._plan_rework_thread
+            self._plan_transition_pending = None
+            self._plan_rework_thread = None
+        thread_id = getattr(state, "thread_id", None)
+        plan = getattr(state.shared, "plan", None)
+        if not thread_id or not isinstance(plan, dict):
+            return
+        if pending is not None and pending[2] == thread_id:
+            status, approved_mode, _thread = pending
+            plan["status"] = status
+            plan["approved_mode"] = approved_mode
+            plan["updated_at"] = now_stamp()
+            # Выход из plan через одобрение: «план не одобрен» слать нельзя
+            # — продолжение несёт своё «план одобрен».
+            if (
+                status == PLAN_STATUS_APPROVED
+                and state.mode_announced == Mode.PLAN.value
+            ):
+                state.mode_announced = None
+            return
+        # «В доработке» — только по двум шагам сразу: человек нажал «Доработать»
+        # И отправил обычное сообщение, оставаясь в plan. Иначе вопрос не по
+        # теме после закрытого баннера уводил бы план в доработку.
+        first = new_user_messages[0] if new_user_messages else None
+        if (
+            rework_thread == thread_id
+            and first is not None
+            and extract_real_user_message_text(first)
+            and resolve_mode(self._ctx) is Mode.PLAN
+        ):
+            plan["status"] = PLAN_STATUS_REWORKING
+            plan["approved_mode"] = None
+            plan["updated_at"] = now_stamp()
+
+    def _export_plan_file(self, state, logger) -> None:
+        """Файл плана для человека — раз в конце прогона, рядом с записью меты.
+
+        Пишет хранилище, если умеет (файловый стор); сбой экспорта прогон не
+        роняет: файл — удобство, канон плана уже сохранён в мете.
+        """
+        session = self._thread_session
+        save = getattr(getattr(session, "store", None), "save_plan_file", None)
+        plan = getattr(state.shared, "plan", None)
+        if not callable(save) or not plan:
+            return
+        try:
+            save(session.system_id, session.thread_id, plan)
+        except Exception as exc:
+            if logger is not None:
+                logger.warning("plan file export failed: %s", exc)
+
+    def clear_plan(self, thread_id: Optional[str]) -> None:
+        """Человек убрал план этой сессии: взведённые решения по нему (утвердить,
+        доработать) больше не к чему применять."""
+        with self._lock:
+            pending = self._plan_transition_pending
+            if pending is not None and pending[2] == thread_id:
+                self._plan_transition_pending = None
+            if self._plan_rework_thread == thread_id:
+                self._plan_rework_thread = None
+
+    @staticmethod
+    def _lift_judge_pause(state, new_user_messages) -> None:
+        """Новое сообщение человека снимает паузу судьи
+        (`lift_pause_on_user_message`). Служебные сообщения человеком не
+        считаются."""
+        if any(extract_real_user_message_text(m) for m in new_user_messages):
+            lift_pause_on_user_message(state.shared)
+
+    def _plan_notices(self, state) -> list[str]:
+        """Служебное сообщение в начале прогона, один раз: «план убран
+        человеком». О режиме агенту говорит цикл перед каждым запросом к
+        модели (``processing_responses._mode_notices``)."""
+        shared = state.shared
+        if not shared.plan_removed_notice:
+            return []
+        shared.plan_removed_notice = False
+        return [PLAN_REMOVED_MESSAGE]
 
     @staticmethod
     def _seed_current_user_intent(state, new_user_messages) -> None:
@@ -806,6 +1033,7 @@ class AgentExecutor:
         logger = getattr(self._ctx, "logger", None)
         await self._afinalize_thread(self._thread_session, state, logger)
         self._accounting_closed = True
+        self._export_plan_file(state, logger)
         try:
             baseline = UsageAccount.from_meta(
                 getattr(state, "run_start_usage_meta", None)
@@ -991,7 +1219,7 @@ class AgentExecutor:
         # Permission memory: store оборачивает state.shared.confirm_rules ПО ССЫЛКЕ —
         # session-правила пишутся прямо в shared и сохраняются обычной персистентностью.
         self._ctx.permission_store = PermissionStore(
-            session_rules=state.shared.confirm_rules
+            session_rules=state.shared.confirm_rules, shared=state.shared
         )
         _extend_with_thread_history(state, thread_session, backend_api_mode)
 
@@ -1052,6 +1280,19 @@ class AgentExecutor:
             commit=commit_attachment,
         )
         self._seed_current_user_intent(state, new_user_messages)
+        self._apply_plan_changes(state, new_user_messages)
+        self._lift_judge_pause(state, new_user_messages)
+        # «План убран» — до сообщений человека: сначала контекст, потом
+        # запрос. О режиме цикл скажет перед первым запросом к модели.
+        for text in reversed(self._plan_notices(state)):
+            new_user_messages.insert(
+                0,
+                {
+                    "role": "user",
+                    "content": wrap_technical_user_content(text),
+                    "id": generate_message_id_func("m"),
+                },
+            )
 
         messages, persist_messages_callback, get_full_history_messages = (
             self._persistence_for_run(
@@ -1137,6 +1378,44 @@ class AgentExecutor:
 
         self._report_log_path(logger)
         return response
+
+    def set_permission_mode(self, mode: str) -> None:
+        """Сменить режим разрешений сессии (хоткей фронтенда, флаг запуска).
+
+        Резолвер читает режим на каждом решении, поэтому следующий вызов тула
+        пойдёт уже по новому режиму — и посреди прогона. Выбор запоминается
+        ВСЕГДА, а не только при живом state: между прогонами ``self._state``
+        принадлежит завершённому прогону, запись в него никуда не поедет, а
+        следующий прогон соберёт shared заново из сессии.
+        """
+        resolved = coerce_mode(mode)
+        if resolved is None:
+            raise ValueError(f"unknown permission mode: {mode!r}")
+        with self._lock:
+            self._permission_mode_choice = resolved.value
+            if self._state is not None:
+                self._state.shared.permission_mode = resolved.value
+
+    def clear_permission_mode(self) -> None:
+        """Снять явный выбор режима: следующий прогон возьмёт режим из
+        сессии, а нет его там — из конфига.
+
+        Живое состояние не трогается: между прогонами оно принадлежит
+        завершённому прогону, а следующий соберёт shared из сессии заново.
+        До следующего прогона ``permission_mode()`` может вернуть выбор
+        прошлого прогона.
+        """
+        with self._lock:
+            self._permission_mode_choice = None
+
+    def permission_mode(self) -> Optional[str]:
+        """Режим, выбранный явно или сохранённый в сессии; None — действует конфиг."""
+        with self._lock:
+            if self._permission_mode_choice is not None:
+                return self._permission_mode_choice
+            if self._state is not None:
+                return getattr(self._state.shared, "permission_mode", None)
+            return None
 
     def add_message(self, message: dict) -> None:
         """Потокобезопасно добавляет сообщение в очередь активного скоупа.

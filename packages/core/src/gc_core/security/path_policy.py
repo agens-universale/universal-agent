@@ -11,9 +11,30 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
 
 from gc_core.execution.ports import port
-from gc_core.security.confirm_port import confirmation_step
+from gc_core.security.confirm_port import (
+    confirmation_step,
+    guard_refusal,
+    refuse_in_place,
+)
 from gc_core.security.dual_wrapper import dual_wrap
 from gc_core.security.guard_probe import GuardProbeRequest, probe_step
+from gc_core.security.mode_stage import (
+    ModeAction,
+    remembered_denial,
+    resolve_by_mode,
+)
+from gc_core.security.permission_mode import (
+    ALIGN,
+    ASK,
+    CAT_EDIT,
+    DENY,
+    PASS,
+    decision_path_key,
+    floor_question_decision,
+    write_decision,
+    write_profile,
+)
+from gc_core.security.permission_mode import ALLOW as MODE_ALLOW
 from gc_core.settings import (
     AppConfig,
     LoadedSettings,
@@ -22,7 +43,7 @@ from gc_core.settings import (
 )
 from gc_core.trace_id import trace_id_from_config
 
-_WRITE_GUARD_TITLE = "Защита записи"
+WRITE_GUARD_TITLE = "Защита записи"
 
 
 @dataclass(frozen=True)
@@ -210,7 +231,15 @@ def resolve_tool_context(*args: Any, **kwargs: Any) -> ToolSecurityContext:
 def _protected_write_block(
     candidate_path, context, func, args, kwargs, blocked_result_factory
 ):
-    """Floor carve-out (Spec B §6): блок записи в защищённый путь или None (можно писать).
+    """Floor carve-out (Spec B §6): ``(blocked, confirmed, flags)``.
+
+    ``blocked`` — готовый отказ записи в защищённый путь либо None (можно
+    писать). ``confirmed`` — человек ответил «да» на вопрос пола про ЭТОТ
+    вызов: вопрос описывает запись целиком (путь), поэтому ниже её не
+    переспрашивают; сильнее остаётся только явный ``write_guard.mode: deny``.
+    ``flags`` — пометки для судьи действий: там, где на вопрос пола отвечает
+    он, пол сам никого не спрашивает и передаёт пометку стадии режима — на
+    запись приходится одна проверка, а не две.
 
     Генератор, как и тело гарда: подтверждение человека идёт запросом
     `yield OffLoop(...)` драйверу, поэтому звать — через `yield from`.
@@ -218,12 +247,13 @@ def _protected_write_block(
     from gc_core.security.confirm_port import request_confirm
     from gc_core.security.media_roots import media_roots
     from gc_core.security.protected_paths import (
+        PROTECTED_PATH_TITLE,
         protected_decision,
         protection_enabled,
     )
 
     if not protection_enabled(_settings_source(None, context.ctx)):
-        return None
+        return None, False, ()
     if callable(port(context.ctx, "guard_probe")):
         facts = yield probe_step(
             context.ctx,
@@ -245,7 +275,7 @@ def _protected_write_block(
         _err = {
             "type": "protected_path_denied",
             "path": candidate_path,
-            "message": "Path is protected (operational .gc / config).",
+            "reason": "Path is protected (operational .gc / config).",
         }
         audit_policy_decision(
             context,
@@ -253,40 +283,169 @@ def _protected_write_block(
             decision="blocked",
             reason_code="protected_deny",
         )
-        return _blocked_result(
-            func,
-            _err,
-            args,
-            kwargs,
-            blocked_result_factory=blocked_result_factory,
+        return (
+            _blocked_result(
+                func,
+                _err,
+                args,
+                kwargs,
+                blocked_result_factory=blocked_result_factory,
+            ),
+            False,
+            (),
         )
+    floor_answer = (
+        floor_question_decision(
+            (
+                write_profile(context.ctx).inside,
+                write_profile(context.ctx).outside,
+            )
+        )
+        if _decision == "ask"
+        else None
+    )
+    if floor_answer == ALIGN:
+        from gc_core.security.action_judge import FLAG_PROTECTED_PATH
+
+        return None, False, (FLAG_PROTECTED_PATH,)
+    if floor_answer == PASS:
+        return None, False, ()  # режим запретит запись сам, без вопроса
     if _decision == "ask":
         # Ожидание человека уходит в поток: в TUI это до 600 с, и
         # на event loop вместе с ним встали бы субагенты и
         # keep-alive MCP-сессий. Исполняет драйвер `dual_wrap`.
         _ok = yield confirmation_step(
             local_request=request_confirm,
-            title=_WRITE_GUARD_TITLE,
-            question=f"Разрешить запись в {candidate_path}?",
+            title=PROTECTED_PATH_TITLE,
+            question=f"Разрешить запись в защищённый путь {candidate_path}?",
             fields=[("path", candidate_path)],
             ctx=context.ctx,
-            decision_key=f"write:{candidate_path}",
+            decision_key=_write_key(candidate_path, context),
         )
         if not _ok:
-            _err = {
-                "type": "protected_path_denied",
-                "path": candidate_path,
-                "message": "Write to instruction file not confirmed.",
-            }
-            return _blocked_result(
-                func,
-                _err,
-                args,
-                kwargs,
-                blocked_result_factory=blocked_result_factory,
+            _err = guard_refusal(
+                context.ctx, "protected_path_denied", path=candidate_path
             )
-        # confirmed → fall through
-    return None
+            audit_policy_decision(
+                context,
+                tool_name=_tool_name(func, args),
+                decision="blocked",
+                reason_code="protected_ask_cancelled",
+                error_type=_err["type"],
+            )
+            return (
+                _blocked_result(
+                    func,
+                    _err,
+                    args,
+                    kwargs,
+                    blocked_result_factory=blocked_result_factory,
+                ),
+                False,
+                (),
+            )
+        # confirmed → fall through. `confirmed`, а не `executed`: запись ещё не
+        # выполнена — явный `mode: deny` ниже сильнее; итог пишет следующая
+        # строка аудита.
+        audit_policy_decision(
+            context,
+            tool_name=_tool_name(func, args),
+            decision="confirmed",
+            reason_code="protected_ask_confirmed",
+            risk_flags=["touches_protected_paths"],
+        )
+        return None, True, ()
+    return None, False, ()
+
+
+def write_decision_key(candidate_path, context) -> str:
+    """Ключ решения про запись в путь — один на вопрос пола, вопрос режима и
+    вопрос нарушения периметра: ответ на любой закрывает остальные."""
+    return decision_path_key("write", candidate_path, context.launch_root)
+
+
+_write_key = write_decision_key
+
+
+def write_mode_stage(
+    candidate_path,
+    context,
+    tool_name,
+    operation,
+    *,
+    floor_confirmed=False,
+    floor_flags=(),
+):
+    """Стадия режима разрешений для записи: ``(call_now, error)``.
+
+    ``error`` — тело отказа; ``call_now`` — запись разрешена здесь и сейчас,
+    дальнейшие проверки периметра не нужны; оба пусты — режим ничего не
+    добавил, решает обычный ход защиты.
+
+    Стоит после пола защищённых путей и ДО ``write_guard.enabled``: выключенная
+    в конфиге защита режим не отменяет. Общая для декоратора и для тула,
+    который зовёт защиту записи сам (``download_file``).
+    """
+    key = write_decision_key(candidate_path, context)
+    denied = remembered_denial(context, tool_name, key, path=candidate_path)
+    if denied is not None:
+        return False, denied
+    if write_profile(context.ctx).adds_nothing:
+        return False, None
+    try:
+        yield from check_write_guard_path(
+            candidate_path, context, tool_name, operation
+        )
+        inside = True
+    except WriteGuardViolation:
+        inside = False
+    except (ValueError, OSError):
+        # Путь не поддаётся классификации (пустой, неразрешимый префикс) —
+        # дело валидации самого тула: он вернёт свой конверт. Но если пол
+        # уже отдал вопрос судье, уйти отсюда без проверки нельзя.
+        if not floor_flags:
+            return False, None
+        inside = True
+    decision = write_decision(context.ctx, inside=inside)
+    if floor_flags and decision != DENY:
+        # Пол пометил путь (файл инструкций): решает судья, где бы путь ни
+        # лежал и что бы ни разрешал явный ключ периметра.
+        decision = ALIGN
+    if decision in (MODE_ALLOW, PASS):
+        return False, None
+    if decision == ASK and floor_confirmed:
+        # Пол уже спросил человека про этот путь — второй вопрос не нужен.
+        audit_policy_decision(
+            context,
+            tool_name=tool_name,
+            decision="executed",
+            reason_code="protected_ask_confirmed",
+        )
+        return True, None
+    from gc_core.security.action_judge import FLAG_OUTSIDE_PROJECT
+
+    allowed, error = yield from resolve_by_mode(
+        decision,
+        ModeAction(
+            context=context,
+            tool_name=tool_name,
+            category=CAT_EDIT,
+            decision_key=key,
+            question=(
+                "Запись в файл",
+                f"Разрешить запись в {candidate_path}?",
+                [("Путь", candidate_path), ("Операция", operation)],
+            ),
+            flags=(
+                *floor_flags,
+                *(() if inside else (FLAG_OUTSIDE_PROJECT,)),
+            ),
+            error_fields={"path": candidate_path},
+            deny_type="write_denied_by_mode",
+            deny_reason="Write not permitted in the current permission mode.",
+        ),
+    )
+    return (True, None) if allowed else (False, error)
 
 
 def _resolve_write_violation(
@@ -298,6 +457,7 @@ def _resolve_write_violation(
     args,
     kwargs,
     blocked_result_factory,
+    floor_confirmed=False,
 ):
     """Нарушение периметра по режиму: (True, None) — писать можно; (False, blocked) — отказ.
 
@@ -317,11 +477,22 @@ def _resolve_write_violation(
             risk_flags=["out_of_perimeter"],
         )
         return True, None
+    if wg_mode == "ask" and floor_confirmed:
+        # Человек уже разрешил этот вызов на вопросе пола — второй вопрос про
+        # тот же путь не задаётся.
+        audit_policy_decision(
+            context,
+            tool_name=tool_name,
+            decision="executed",
+            reason_code="policy_ask_confirmed",
+            risk_flags=["out_of_perimeter"],
+        )
+        return True, None
     if wg_mode == "ask":
         # Тот же приём, что и у защищённых путей выше: подтверждение
         # ждётся в потоке, а не на event loop вызывающего.
         confirmed = yield confirmation_step(
-            title=_WRITE_GUARD_TITLE,
+            title=WRITE_GUARD_TITLE,
             question=f"Разрешить запись вне периметра проекта в {candidate_path}?",
             fields=[
                 ("Tool", tool_name),
@@ -330,7 +501,7 @@ def _resolve_write_violation(
                 ("Allowed roots", exc.error.get("allowed_write_roots") or []),
             ],
             ctx=context.ctx,
-            decision_key=f"write:{candidate_path}",
+            decision_key=_write_key(candidate_path, context),
             local_wait=functools.partial(
                 _ask_user_confirmation_for_write,
                 tool_name=tool_name,
@@ -338,26 +509,20 @@ def _resolve_write_violation(
                 operation=operation,
                 error=exc.error,
                 ctx=context.ctx,
-                decision_key=f"write:{candidate_path}",
+                decision_key=_write_key(candidate_path, context),
             ),
         )
-        if confirmed:
-            audit_policy_decision(
-                context,
-                tool_name=tool_name,
-                decision="executed",
-                reason_code="policy_ask_confirmed",
-                risk_flags=["out_of_perimeter"],
-            )
-            return True, None
         # cancelled — продолжаем в стандартный blocked-flow ниже,
         # но помечаем error.type для отличимости в логах.
-        exc.error["type"] = "write_guard_cancelled_by_user"
-        exc.error["message"] = (
-            f"User declined the write to '{candidate_path}'. Do NOT retry the same "
-            "write, and do NOT silently write somewhere else — ask the user how to "
-            "proceed, or stop and report that it was declined."
-        )
+        if settle_perimeter_answer(
+            context,
+            tool_name,
+            confirmed,
+            exc.error,
+            "write_guard_cancelled_by_user",
+            path=candidate_path,
+        ):
+            return True, None
     audit_policy_decision(
         context,
         tool_name=tool_name,
@@ -423,8 +588,14 @@ def _write_guard_flow(
     _, candidate_path = _guard_path_argument(
         func, args, kwargs, path_arg, path_extractor
     )
+    floor_confirmed = False
+    floor_flags: tuple = ()
     if candidate_path is not None:
-        blocked = yield from _protected_write_block(
+        (
+            blocked,
+            floor_confirmed,
+            floor_flags,
+        ) = yield from _protected_write_block(
             candidate_path,
             context,
             func,
@@ -434,6 +605,24 @@ def _write_guard_flow(
         )
         if blocked is not None:
             return blocked
+        call_now, error = yield from write_mode_stage(
+            candidate_path,
+            context,
+            _tool_name(func, args),
+            operation,
+            floor_confirmed=floor_confirmed,
+            floor_flags=floor_flags,
+        )
+        if error is not None:
+            return _blocked_result(
+                func,
+                error,
+                args,
+                kwargs,
+                blocked_result_factory=blocked_result_factory,
+            )
+        if call_now:
+            return (yield)
     if not context.write_guard.enabled:
         audit_policy_decision(
             context,
@@ -462,6 +651,7 @@ def _write_guard_flow(
             args,
             kwargs,
             blocked_result_factory,
+            floor_confirmed=floor_confirmed,
         )
         if allowed:
             return (yield)
@@ -508,6 +698,8 @@ def audit_policy_decision(
     reason_code: str,
     risk_flags: list[str] | None = None,
     error_type: str | None = None,
+    reason: str | None = None,
+    call_id: str | None = None,
 ) -> None:
     logger = context.logger
     if logger is None or not hasattr(logger, "info"):
@@ -521,6 +713,12 @@ def audit_policy_decision(
     }
     if error_type:
         event["error_type"] = error_type
+    # Слова судьи действий и вызов, к которому они относятся: по ним
+    # разбирают ложные отказы и пропуски на реальной работе.
+    if reason:
+        event["reason"] = reason
+    if call_id:
+        event["call_id"] = call_id
     # Внутрь payload, а не в extra=: событие сериализуется в текст сообщения,
     # поэтому только так аудит-объект остаётся самодостаточным. В jsonl фильтр
     # логгера дополнительно ставит trace_id верхним полем записи.
@@ -615,6 +813,8 @@ def prompt_user_confirmation_choice(
     title: str,
     fields: list[tuple[str, Any]],
     question: str,
+    decision_key: str | None = None,
+    permission_mode: str = "edit",
 ) -> str:
     """Non-TUI fallback confirm (2×2), same key matrix as TUI banner.
 
@@ -624,13 +824,13 @@ def prompt_user_confirmation_choice(
 
     Auto-deny_once if stdin is not a tty (CI/background).
     Keys: Latin/Cyrillic same-key sets from confirm_port (y/н, o/щ, n/т, t/е).
-    EOF (Ctrl+D) → deny_remember; Ctrl+C → deny_once (interrupt ≠ policy seed).
+    EOF (Ctrl+D) and Ctrl+C → deny_once: конец ввода и прерывание — не выбор
+    запрета на всю сессию.
     """
     # Nested import: path_policy ↔ confirm_port cycle if top-level.
     from gc_core.security.confirm_port import (
-        CONFIRM_CHOICE_HINT,
         CONFIRM_DENY_ONCE,
-        CONFIRM_DENY_REMEMBER,
+        confirm_choice_hint,
         normalize_confirm_key,
     )
 
@@ -663,14 +863,15 @@ def prompt_user_confirmation_choice(
             lines.append(f"{label}: {value}")
     lines.append(question)
     # Same mnemonic as TUI; Esc/timeout only exist in TUI runner — omit here.
-    lines.append(f"{CONFIRM_CHOICE_HINT}: ")
+    lines.append(f"{confirm_choice_hint(decision_key, permission_mode)}: ")
     try:
         _drop_typed_ahead()
         print("\n".join(lines), file=sys.stderr, end="")
         sys.stderr.flush()
         answer = _read_confirmation_line()
     except EOFError:
-        return CONFIRM_DENY_REMEMBER
+        # Конец ввода — не выбор запрета на сессию: запрет разовый.
+        return CONFIRM_DENY_ONCE
     except KeyboardInterrupt:
         return CONFIRM_DENY_ONCE
     if answer is None:
@@ -791,6 +992,34 @@ def _apply_console_key(console: Any, key: str, chars: list[str]) -> str | None:
     return None
 
 
+def settle_perimeter_answer(
+    context: Any,
+    tool_name: str,
+    confirmed: bool,
+    error: dict,
+    error_type: str,
+    *,
+    audit_error_type: str | None = None,
+    **fields: Any,
+) -> bool:
+    """Ответ человека на вопрос гарда о периметре (запись, чтение, загрузка,
+    адрес): «да» — в аудит, True; «нет» — `error` переписан отказом по
+    исходу вопроса (`refuse_in_place`), False. `fields` — поля отказа (путь
+    или адрес), `audit_error_type` — тип исходной ошибки для аудита «да»."""
+    if confirmed:
+        audit_policy_decision(
+            context,
+            tool_name=tool_name,
+            decision="executed",
+            reason_code="policy_ask_confirmed",
+            risk_flags=["out_of_perimeter"],
+            error_type=audit_error_type,
+        )
+        return True
+    refuse_in_place(error, context.ctx, error_type, **fields)
+    return False
+
+
 def _ask_user_confirmation_for_write(
     *,
     tool_name: str,
@@ -803,7 +1032,7 @@ def _ask_user_confirmation_for_write(
     from gc_core.security.confirm_port import request_confirm
 
     return request_confirm(
-        title=_WRITE_GUARD_TITLE,
+        title=WRITE_GUARD_TITLE,
         question=f"Разрешить запись вне периметра проекта в {path}?",
         fields=[
             ("Tool", tool_name),

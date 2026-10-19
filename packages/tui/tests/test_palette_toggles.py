@@ -837,14 +837,17 @@ def test_child_rows_always_dim_flat_and_track_aligned_with_parent():
         == answers_plain.rindex("deny")
     )
 
-    # Имя+описание ребёнка — стилем DIM (весь head, включая слеш).
+    # Имя+описание ребёнка — стилем SUB_INK (весь head, включая слеш):
+    # на ступень светлее подсказок (DIM), но тише основных ключей (INK).
     dim_spans_gate = [
-        s for s in gate_row.spans if p.DIM.lower() in str(s.style).lower()
+        s for s in gate_row.spans if p.SUB_INK.lower() in str(s.style).lower()
     ]
     assert dim_spans_gate and dim_spans_gate[0].start == 0
     assert dim_spans_gate[0].end >= len(" /gate")
     dim_spans_answers = [
-        s for s in answers_row.spans if p.DIM.lower() in str(s.style).lower()
+        s
+        for s in answers_row.spans
+        if p.SUB_INK.lower() in str(s.style).lower()
     ]
     assert dim_spans_answers and dim_spans_answers[0].start == 0
 
@@ -853,20 +856,20 @@ def test_child_rows_always_dim_flat_and_track_aligned_with_parent():
     # не задет).
     gate_value_start = gate_plain.rindex("on")
     assert any(
-        p.DIM.lower() in str(s.style).lower()
+        p.SUB_INK.lower() in str(s.style).lower()
         and s.start <= gate_value_start < s.end
         for s in gate_row.spans
     )
     answers_value_start = answers_plain.rindex("deny")
     assert any(
-        p.DIM.lower() in str(s.style).lower()
+        p.SUB_INK.lower() in str(s.style).lower()
         and s.start <= answers_value_start < s.end
         for s in answers_row.spans
     )
 
     # Родитель /rigor НЕ дымится DIM-ом (обычный toggle-стиль строки).
     assert not any(
-        p.DIM.lower() in str(s.style).lower() for s in rigor_row.spans
+        p.SUB_INK.lower() in str(s.style).lower() for s in rigor_row.spans
     )
 
 

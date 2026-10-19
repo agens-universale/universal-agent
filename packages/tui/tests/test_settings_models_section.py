@@ -1601,6 +1601,16 @@ async def test_assign_picker_offers_levels_and_aliases_after_active(tmp_path):
         ]
 
 
+def test_command_judge_label_names_both_roles():
+    """Строка судьи команд на экране называет обе его роли: команды в edit
+    и действия в режиме auto (не уровень модели auto)."""
+    from gc_tui.editors.models_section import consumer_labels
+
+    assert consumer_labels()["command_judge"] == (
+        "судья command_judge · команды в edit, действия в режиме auto"
+    )
+
+
 _FIXED_CONSUMERS = (
     "finish_gate",
     "text_answer_judge",
@@ -1912,7 +1922,8 @@ def test_consumer_labels_reuse_the_transport_dictionary():
 
     labels = models_section.consumer_labels()
     for consumer, label in CONSUMER_RU_LABEL.items():
-        assert labels[consumer] == label
+        role = models_section._CONSUMER_ROLE.get(consumer)
+        assert labels[consumer] == (f"{label} · {role}" if role else label)
     assert not set(models_section._UI_CONSUMER_LABEL) & set(CONSUMER_RU_LABEL)
     assert set(labels) == set(models_section.assign_consumers())
 

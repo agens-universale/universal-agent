@@ -165,6 +165,7 @@ def test_turn_tool_calls_counter_survives_summary_compaction():
         raw_summary="summary text",
         last_dialog_steps="",
         summarized_messages_count=1,
+        can_propose_plan=True,
     )
     assert state.turn_tool_calls == 3
 
@@ -206,15 +207,18 @@ async def test_settings_rigor_row_flat_children_dim(tmp_path):
             for s in rigor_text.spans
         )
         assert not any(
-            p.DIM.lower() in str(s.style).lower() for s in rigor_text.spans
+            p.SUB_INK.lower() in str(s.style).lower() for s in rigor_text.spans
         )
 
         gate_text = scr._mode_row_text("gate", selected=False)
 
-        # Имя+описание ребёнка (head, включая имя команды) — DIM.
+        # Имя+описание ребёнка (head, включая имя команды) — SUB_INK: на ступень
+        # светлее подсказок (DIM), но тише основных ключей (INK).
         gate_plain = gate_text.plain
         dim_spans = [
-            s for s in gate_text.spans if p.DIM.lower() in str(s.style).lower()
+            s
+            for s in gate_text.spans
+            if p.SUB_INK.lower() in str(s.style).lower()
         ]
         assert (
             dim_spans and dim_spans[0].start == 2
@@ -227,7 +231,7 @@ async def test_settings_rigor_row_flat_children_dim(tmp_path):
         # подписью — семантические цвета, не задет).
         value_start = gate_plain.rindex("on")
         assert any(
-            p.DIM.lower() in str(s.style).lower()
+            p.SUB_INK.lower() in str(s.style).lower()
             and s.start <= value_start < s.end
             for s in gate_text.spans
         )

@@ -8,15 +8,18 @@ import logging
 import os
 import sys
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
 from gc_core.constants.tool_names import SESSION_TODO_TOOL_NAME
+from gc_core.security.permission_mode import Mode
 from gc_core.thread_store import (
     ThreadSession,
     resolve_threads_dir,
     validate_thread_id,
 )
+from gc_core.tools.turn.propose_plan import ProposePlan
 from gc_core.tools.turn.submit_solution import SubmitSolution
 
 from gc_acp.ask_human import bind_ask_human
@@ -31,12 +34,20 @@ from gc_acp.confirm import (
 )
 from gc_acp.diffs import DiffBackend, DiffLog, attach_diff
 from gc_acp.model_config import (
+    MODEL_CONFIG_ID,
     active_model_line,
-    config_options_payload,
     level_for_choice,
     listed,
     model_config_option,
     session_level,
+)
+from gc_acp.modes import (
+    MODE_CONFIG_ID,
+    current_mode,
+    mode_choice,
+    mode_config_option,
+    mode_updates,
+    session_modes,
 )
 from gc_acp.plan import (
     plan_update,
@@ -45,6 +56,15 @@ from gc_acp.plan import (
     todos_from_meta,
     usage_from_agent,
     usage_from_meta,
+)
+from gc_acp.plan_approval import (
+    PLAN_REWORK,
+    REWORK_HINT,
+    plan_awaits_approval,
+    plan_card_closed,
+    plan_card_id,
+    plan_choice_from_incoming,
+    plan_permission_message,
 )
 from gc_acp.prompt import PromptRejected, flatten_prompt
 from gc_acp.protocol import (
@@ -94,6 +114,7 @@ _METHOD_NEW = "session/new"
 _METHOD_DELETE = "session/delete"
 _TOOL_POLL_S = 0.05
 _MODEL_TRACE = "agent_thought_chunk"
+_ANSWER_CHUNK = "agent_message_chunk"
 # Запас сверх confirm_timeout: обёртка с потока не должна сработать раньше
 # внутреннего wait_for. Если всё же сработала после отправки запроса,
 # закрытие пикера уходит отдельной задачей.
@@ -283,7 +304,7 @@ class AcpFacade:
         await self._send(
             result_message(
                 request_id,
-                {"sessionId": session_id, **self._model_fields(live)},
+                {"sessionId": session_id, **self._session_fields(live)},
             )
         )
 
@@ -355,7 +376,9 @@ class AcpFacade:
             await self._fail(request_id)
             return
         await self._emit_session_snapshot(live, replayed=False)
-        await self._send(result_message(request_id, self._model_fields(live)))
+        await self._send(
+            result_message(request_id, self._session_fields(live))
+        )
 
     async def _session_load(self, request_id: Any, params: Any) -> None:
         record = await self._disk_session(request_id, params, mcp=True)
@@ -372,38 +395,79 @@ class AcpFacade:
             await self._fail(request_id)
             return
         await self._emit_session_snapshot(live, replayed=True)
-        await self._send(result_message(request_id, self._model_fields(live)))
+        await self._send(
+            result_message(request_id, self._session_fields(live))
+        )
 
     async def _session_set_config_option(
         self, request_id: Any, params: Any
     ) -> None:
         body = _object_params(params)
-        if body is None or _config_type_rejected(body):
-            await self._invalid_params(request_id)
-            return
         live = self._live_from(params)
         if (
-            live is None
-            or body.get("configId") != "model"
+            body is None
+            or _config_type_rejected(body)
+            or live is None
             or "value" not in body
         ):
             await self._invalid_params(request_id)
             return
-        value = body.get("value")
-        level = session_level(self._settings, live.level)
-        option = model_config_option(self._settings, level)
-        if not listed(option, value):
+        applied = await self._apply_config_value(
+            live, body.get("configId"), body.get("value")
+        )
+        if not applied:
             await self._invalid_params(request_id)
             return
+        options = self._config_options(live, self._mode(live))
+        await self._send(
+            result_message(request_id, {"configOptions": options})
+        )
+
+    async def _session_set_mode(self, request_id: Any, params: Any) -> None:
+        """Старый вид смены режима — тот же путь, что опция ``mode``."""
+        body = _object_params(params)
+        live = self._live_from(params)
+        mode = None if body is None else mode_choice(body.get("modeId"))
+        if live is None or mode is None:
+            await self._invalid_params(request_id)
+            return
+        await self._apply_mode(live, mode)
+        await self._send(result_message(request_id, {}))
+
+    async def _apply_config_value(
+        self, live: LiveSession, config_id: Any, value: Any
+    ) -> bool:
+        """Значение опции. False — нет такой опции или значения в списке."""
+        if config_id == MODEL_CONFIG_ID:
+            return self._choose_model(live, value)
+        if config_id != MODE_CONFIG_ID:
+            return False
+        mode = mode_choice(value)
+        if mode is None:
+            return False
+        await self._apply_mode(live, mode)
+        return True
+
+    def _choose_model(self, live: LiveSession, value: Any) -> bool:
+        level = session_level(self._settings, live.level)
+        if not listed(model_config_option(self._settings, level), value):
+            return False
         chosen = level_for_choice(self._settings, level, value)
         if chosen is not None:
             live.level = chosen
-            option = model_config_option(
-                self._settings, session_level(self._settings, live.level)
-            )
-        await self._send(
-            result_message(request_id, {"configOptions": [option]})
-        )
+        return True
+
+    async def _apply_mode(self, live: LiveSession, mode: str) -> None:
+        """Смена режима из IDE — ``set_permission_mode``, как у TUI и CLI.
+
+        Выбор едет в мету треда с ближайшим прогоном этой сессии.
+        """
+        live.agent.executor.set_permission_mode(mode)
+        await self._notify_mode(live, mode)
+
+    async def _notify_mode(self, live: LiveSession, mode: str) -> None:
+        for update in mode_updates(mode, self._config_options(live, mode)):
+            await self._notify(live.session_id, update)
 
     async def _session_delete(self, request_id: Any, params: Any) -> None:
         session_id = _session_id_of(params)
@@ -490,9 +554,28 @@ class AcpFacade:
         ):
             await self._notify(session_id, update)
 
-    def _model_fields(self, live: LiveSession) -> dict:
-        return config_options_payload(
+    def _session_fields(self, live: LiveSession) -> dict:
+        """Опции сессии для new / load / resume: модель, режим и ``modes``."""
+        mode = self._mode(live)
+        return {
+            "configOptions": self._config_options(live, mode),
+            "modes": session_modes(mode),
+        }
+
+    def _config_options(self, live: LiveSession, mode: str) -> list[dict]:
+        """Весь список опций: модель (если есть из чего выбрать) и режим."""
+        model = model_config_option(
             self._settings, session_level(self._settings, live.level)
+        )
+        options = [] if model is None else [model]
+        return [*options, mode_config_option(mode)]
+
+    def _mode(self, live: LiveSession) -> str:
+        return current_mode(
+            live.agent,
+            self._settings,
+            threads_dir=self._index.threads_dir,
+            session_id=live.session_id,
         )
 
     async def _open_agent(self, live: LiveSession) -> Any:
@@ -532,47 +615,59 @@ class AcpFacade:
         )
 
     async def _confirm(self, session_id: str, request: Any) -> str:
-        from gc_core.security.confirm_port import (
-            CONFIRM_DENY_ONCE,
-            CONFIRM_TIMED_OUT,
-        )
+        from gc_core.security.confirm_port import CONFIRM_TIMED_OUT
 
+        reply = await self._ask_client(
+            session_id,
+            lambda live, request_id: permission_message(
+                request_id, session_id, request, _open_call_id(live)
+            ),
+        )
+        if reply is None:
+            # Вопрос не ушёл (сессии нет, ход отменён): человек его не видел
+            # и не отказывал — исход тот же, что у таймаута.
+            return CONFIRM_TIMED_OUT
+        # Таймаут приходит отменой: choice_from_incoming даёт timed_out.
+        return choice_from_incoming(reply)
+
+    async def _ask_client(
+        self,
+        session_id: str,
+        build: Callable[[LiveSession, Any], dict],
+    ) -> Incoming | None:
+        """Свой request клиенту (``session/request_permission``) и его ответ.
+
+        ``build(live, request_id)`` собирает сообщение. None — запрос не
+        ушёл: сессии нет, ход отменён, ожидание сняли, пока отправка ждала
+        писателя. Без ответа за ``confirm_timeout_sec`` пикер у клиента
+        закрывается, а ответом считается отмена (``cancelled_reply``).
+        """
         live = self._sessions.get(session_id)
         if live is None or live.cancel_requested:
-            return CONFIRM_DENY_ONCE
+            return None
         request_id = self._pending.next_id()
         future = asyncio.get_running_loop().create_future()
         self._pending.add(request_id, session_id, future)
         delivered = False
         try:
-            flow = live.tool_flow
-            call_id = None if flow is None else flow.current_call_id()
             # Пока send ждёт lock писателя, cancel уже мог снять future.
             # После этого await request не пишем: диалог в IDE нечем закрыть.
             if not await self._deliver_permission(
-                session_id,
-                future,
-                permission_message(
-                    request_id,
-                    session_id,
-                    request,
-                    call_id,
-                ),
+                session_id, future, build(live, request_id)
             ):
-                return CONFIRM_DENY_ONCE
+                return None
             delivered = True
             try:
-                incoming = await asyncio.wait_for(
+                return await asyncio.wait_for(
                     asyncio.shield(future),
                     timeout=timeout_sec(self._settings),
                 )
             except TimeoutError:
                 # Ответ мог лечь в future в тот же тик, что и таймаут.
                 if future.done() and not future.cancelled():
-                    incoming = future.result()
-                else:
-                    await self._send(_cancel_notice(request_id))
-                    return CONFIRM_TIMED_OUT
+                    return future.result()
+                await self._send(_cancel_notice(request_id))
+                return cancelled_reply()
         except asyncio.CancelledError:
             # Обёртка с потока уже вернула timed_out. await здесь отменится
             # вместе с задачей, поэтому закрытие пикера — отдельная задача.
@@ -581,7 +676,6 @@ class AcpFacade:
             raise
         finally:
             self._pending.discard(request_id)
-        return choice_from_incoming(incoming)
 
     def _close_delivered_permission(self, request_id: Any) -> None:
         """Пикер уже у клиента. Отмена confirm не должна унести `$/cancel_request`."""
@@ -637,6 +731,23 @@ class AcpFacade:
     async def _stream_prompt(
         self, live: LiveSession, assembler: ChunkAssembler, text: str
     ) -> None:
+        await self._stream_run(
+            live,
+            assembler,
+            lambda: live.agent.stream(
+                text, thread_id=live.session_id, system=ACP_SYSTEM
+            ),
+        )
+        if not live.cancel_requested:
+            await self._approve_plan(live)
+
+    async def _stream_run(
+        self, live: LiveSession, assembler: ChunkAssembler, deltas: Any
+    ) -> None:
+        """Один прогон: строка модели, дельты, карточки тулов, итог.
+
+        ``deltas`` — фабрика async-итератора ``(kind, text)`` этого прогона.
+        """
         await self._announce_model(live)
         flow = ToolFlow(
             self._index.thread_path(live.session_id),
@@ -646,7 +757,7 @@ class AcpFacade:
         stop = asyncio.Event()
         watch = asyncio.create_task(self._watch_tools(live, flow, stop))
         try:
-            await self._forward_deltas(live, assembler, text)
+            await self._forward_deltas(live, assembler, deltas())
         finally:
             stop.set()
             await watch
@@ -654,21 +765,67 @@ class AcpFacade:
             live.tool_flow = None
         if live.cancel_requested:
             return
-        final = SubmitSolution.present_result(
-            getattr(live.agent, "last_answer", None),
-            shown=assembler.answer,
-        )
-        for update in assembler.flush_answer(final):
+        for update in assembler.flush_answer(_turn_text(live, assembler)):
             await self._notify(live.session_id, update)
 
     async def _forward_deltas(
-        self, live: LiveSession, assembler: ChunkAssembler, text: str
+        self, live: LiveSession, assembler: ChunkAssembler, deltas: Any
     ) -> None:
-        async for kind, chunk in live.agent.stream(
-            text, thread_id=live.session_id, system=ACP_SYSTEM
-        ):
+        async for kind, chunk in deltas:
             for update in assembler.feed(kind, chunk):
                 await self._notify(live.session_id, update)
+
+    async def _approve_plan(self, live: LiveSession) -> None:
+        """Ход кончился предложенным планом: спросить IDE и исполнить выбор.
+
+        Текст плана уже ушёл ответом прогона; вопрос — свой, не порт
+        подтверждения. Исполнение — продолжение того же ``session/prompt``.
+        """
+        if not plan_awaits_approval(live.agent, live.session_id):
+            return
+        card_id = plan_card_id()
+        reply = await self._ask_client(
+            live.session_id,
+            lambda _live, request_id: plan_permission_message(
+                request_id, live.session_id, card_id
+            ),
+        )
+        if reply is None:
+            # Запрос не ушёл клиенту: карточки у него нет, закрывать нечего.
+            return
+        choice = plan_choice_from_incoming(reply)
+        # Выбор, гонявшийся с session/cancel, карточку закрывает как сорванную.
+        decided = choice is not None and not live.cancel_requested
+        await self._notify(
+            live.session_id, plan_card_closed(card_id, decided=decided)
+        )
+        if not decided:
+            return
+        if choice == PLAN_REWORK:
+            await self._rework_plan(live)
+            return
+        # Режим и одобрение ставит ядро первым шагом; IDE узнаёт режим до
+        # дельт продолжения, продолжение — обычный прогон потоком.
+        messages = live.agent.executor.prepare_accepted_plan(
+            choice, live.session_id
+        )
+        await self._notify_mode(live, choice)
+        await self._stream_run(
+            live,
+            ChunkAssembler(),
+            lambda: live.agent.stream(
+                messages, thread_id=live.session_id, system=ACP_SYSTEM
+            ),
+        )
+
+    async def _rework_plan(self, live: LiveSession) -> None:
+        """«Доработать»: следующий запрос человека — замечания к плану."""
+        live.agent.executor.arm_plan_rework(live.session_id)
+        await self._apply_mode(live, Mode.PLAN.value)
+        await self._notify(
+            live.session_id,
+            text_chunk(_ANSWER_CHUNK, REWORK_HINT, new_message_id()),
+        )
 
     async def _watch_tools(
         self, live: LiveSession, flow: ToolFlow, stop: asyncio.Event
@@ -892,6 +1049,7 @@ def _request_handlers(facade: AcpFacade) -> dict:
         "session/resume": facade._session_resume,
         "session/load": facade._session_load,
         "session/set_config_option": facade._session_set_config_option,
+        "session/set_mode": facade._session_set_mode,
         _METHOD_DELETE: facade._session_delete,
     }
 
@@ -959,6 +1117,16 @@ def _open_call_id(live: LiveSession) -> str | None:
 def _prompt_running(live: LiveSession) -> bool:
     task = live.prompt_task
     return task is not None and not task.done()
+
+
+def _turn_text(live: LiveSession, assembler: ChunkAssembler) -> Any:
+    """Итог прогона для ленты: план — текстом плана, ``turn_finish`` —
+    отчётом, проза — как есть."""
+    answer = getattr(live.agent, "last_answer", None)
+    plan = ProposePlan.present_result(answer)
+    if plan is not None:
+        return plan
+    return SubmitSolution.present_result(answer, shown=assembler.answer)
 
 
 def _outcome(live: LiveSession) -> str | None:

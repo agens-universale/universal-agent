@@ -521,6 +521,22 @@ def test_unbound_override_none_by_default_keeps_level_path():
     assert router.resolve("main").alias == "flash"
 
 
+def test_command_judge_without_binding_uses_default_not_the_active_level():
+    """Судья команд (edit) и действий (auto) без привязки — уровнем default:
+    как классификатор у эталона, не моделью, которую человек выбрал для хода.
+    На max каждая проверка иначе шла бы в самую тяжёлую модель."""
+    router = _router(
+        {
+            "models": {"a": {}, "b": {}, "c": {}},
+            "slots": {"light": "a", "default": "b", "max": "c"},
+        },
+        level="max",
+    )
+    resolved = router.resolve("command_judge")
+    assert resolved.alias == "b"
+    assert "command_judge" in resolved.source and "default" in resolved.source
+
+
 def test_same_call_kit_ignores_only_the_source():
     """Комплект вызова — всё, кроме витринного `source`: фоллбэк незаданного слота
     и сам слот дают тот же запрос; одна модель с разными параметрами — нет."""

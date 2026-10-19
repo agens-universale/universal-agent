@@ -39,27 +39,57 @@ def capture_subagent_transfer(state, ctx) -> SubagentTransferState:
 
 _MISSING = object()
 
+#: Счётчики общей сессии, которые параллельные агенты меняют одновременно:
+#: складываются по приросту, как `tool_calls`, а не конфликтуют.
+_ADDITIVE_COUNTERS = frozenset(
+    {"shared.judge_denials_in_a_row", "shared.judge_denials_total"}
+)
+
 
 def _merge_changes(before, after, current, path):
     if before == after:
         return deepcopy(current) if current is not _MISSING else _MISSING
-    if current in (before, after):
+    if path in _ADDITIVE_COUNTERS and all(
+        isinstance(value, int) for value in (before, after, current)
+    ):
+        return _merge_counter(before, after, current)
+    # Словари — поключево: совпадение целиком скрыло бы счётчики, случайно
+    # сравнявшиеся у двух агентов.
+    dicts = all(isinstance(value, dict) for value in (before, after, current))
+    if not dicts and current in (before, after):
         return deepcopy(after) if after is not _MISSING else _MISSING
-    if all(isinstance(value, dict) for value in (before, after, current)):
-        result = deepcopy(current)
-        for key in dict.fromkeys([*before, *after]):
-            merged = _merge_changes(
-                before.get(key, _MISSING),
-                after.get(key, _MISSING),
-                current.get(key, _MISSING),
-                f"{path}.{key}",
-            )
-            if merged is _MISSING:
-                result.pop(key, None)
-            else:
-                result[key] = merged
-        return result
+    if dicts:
+        return _merge_dicts(before, after, current, path)
     raise ExecutionFailure(f"Concurrent subagent state change: {path}")
+
+
+def _merge_dicts(before: dict, after: dict, current: dict, path: str) -> dict:
+    result = deepcopy(current)
+    for key in dict.fromkeys([*before, *after]):
+        merged = _merge_changes(
+            before.get(key, _MISSING),
+            after.get(key, _MISSING),
+            current.get(key, _MISSING),
+            f"{path}.{key}",
+        )
+        if merged is _MISSING:
+            result.pop(key, None)
+        else:
+            result[key] = merged
+    return result
+
+
+def _merge_counter(before: int, after: int, current: int) -> int:
+    """Прирост ребёнка прибавляется к текущему счёту — и при равных значениях
+    (0→1 у двоих — это 2). Счёт у ребёнка упал — значит, был сброс (судья
+    разрешил, общий порог сработал): сброс побеждает, берётся счёт ребёнка.
+
+    Счёт при параллельных детях приблизителен (решение владельца): события
+    разных детей не упорядочены, и отказы соседа рядом со сбросом теряются.
+    Признак паузы сливается точно — он и защищает."""
+    if after < before:
+        return after
+    return current + (after - before)
 
 
 def apply_subagent_transfer(state, ctx, before, after) -> None:

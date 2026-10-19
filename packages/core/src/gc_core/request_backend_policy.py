@@ -127,6 +127,12 @@ def _raise_if_image_failure(
         raise exc
 
 
+def _adaptive_retry_allowed(exc: BaseException, enabled: bool) -> bool:
+    """Повторять ли с пониженным max_tokens: вызов это разрешает, и сбой из
+    тех, что такой повтор чинит."""
+    return enabled and is_retriable_backend_error(exc)
+
+
 async def arequest_chat_completions_with_policy(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING.md
     *,
     payload_factory: Callable[[int], Dict[str, Any]],
@@ -146,6 +152,7 @@ async def arequest_chat_completions_with_policy(  # noqa: PLR0913  # S107: won't
     notice_url: Optional[str] = None,
     timeout: float = DEFAULT_REQUEST_TIMEOUT_SEC,
     config_proxy: Optional[str] = None,
+    adaptive_retry: bool = True,
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """
     Execute chat/completions request with the minimal adaptive max_tokens policy.
@@ -154,6 +161,9 @@ async def arequest_chat_completions_with_policy(  # noqa: PLR0913  # S107: won't
     first call uses transport retries (network); on HTTP 4xx/5xx only, up to
     `_CHAT_COMPLETIONS_ADAPTIVE_MAX_TOKEN_STEPS` lower-max_tokens retries without
     transport retries. Connection errors/timeouts are not retried here.
+
+    ``adaptive_retry=False`` — без шагов с пониженным max_tokens: вызов со
+    своим бюджетом повторов (судья действий) повторяет и считает сбои сам.
     """
 
     last_payload: Dict[str, Any] = {}
@@ -188,7 +198,7 @@ async def arequest_chat_completions_with_policy(  # noqa: PLR0913  # S107: won't
         )
     except Exception as first_exc:
         _raise_if_image_failure(first_exc, last_payload)
-        if not is_retriable_backend_error(first_exc):
+        if not _adaptive_retry_allowed(first_exc, adaptive_retry):
             maybe_push_llm_failure_notice(
                 first_exc,
                 request_label=request_label,

@@ -476,6 +476,11 @@ _SLOT_DEAD_HINT = "уровень не резолвится: задайте хо
 _UI_CONSUMER_LABEL = {
     "*": "* · кастомные и будущие субагенты",
 }
+# Роль служебного потребителя к подписи из транспортного словаря — только на
+# экране: в уведомлениях о деградации подпись остаётся короткой.
+_CONSUMER_ROLE = {
+    "command_judge": "команды в edit, действия в режиме auto",
+}
 # Роль субагента рядом с его именем — грамматика «имя · описание» канона
 # `_mode_row_text`: имя ключа в файле человеку нужно (он его там и увидит),
 # описание отвечает «а это кто».
@@ -514,6 +519,8 @@ def consumer_labels() -> dict:
 
     labels = dict(CONSUMER_RU_LABEL)
     labels.update(_UI_CONSUMER_LABEL)
+    for consumer, role in _CONSUMER_ROLE.items():
+        labels[consumer] = f"{labels[consumer]} · {role}"
     for name in SUBAGENT_NAMES:
         # `.get`, а не индекс: новый субагент в коде появляется строкой сам — пусть
         # витрина деградирует до общей подписи, а не роняет секцию `KeyError`.

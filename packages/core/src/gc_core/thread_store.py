@@ -40,6 +40,7 @@ from gc_core.persistence.thread_meta_mapper import (
     ThreadMetaMapper,
     read_optional_nonneg_int,
 )
+from gc_core.plan_store import normalize_plan_block
 from gc_core.settings import settings_of
 from gc_core.thread_paths import (
     resolve_threads_dir,
@@ -119,6 +120,17 @@ def _thread_paths(
 def thread_meta_path(threads_dir: str, system_id: str, thread_id: str) -> str:
     """Путь канонической meta треда: meta_{system}_{thread_id}.json."""
     return _thread_paths(threads_dir, system_id, thread_id)[1]
+
+
+def plan_file_path(threads_dir: str, system_id: str, thread_id: str) -> str:
+    """Файл плана сессии для человека: plans/plan_{system}_{thread_id}.md.
+
+    Лежит под каталогом сессий, а не в отдельной папке проекта: удалители
+    сессии знают только этот каталог, и иначе файл осиротел бы.
+    """
+    sys_norm = sanitize_system_id(system_id)
+    tid = validate_thread_id(thread_id)
+    return os.path.join(threads_dir, "plans", f"plan_{sys_norm}_{tid}.md")
 
 
 def subagent_trace_path(
@@ -222,6 +234,9 @@ def reset_thread_files(
     # его не видит.
     paths.append(edits_path + ".lock")
     paths.append(_lock_path(threads_dir, sys_norm, normalized_thread_id))
+    # Файл плана уходит вместе с тредом — тот же довод, что у картинок ниже:
+    # компакция файлового стора сюда не заходит.
+    paths.append(plan_file_path(threads_dir, sys_norm, normalized_thread_id))
 
     deleted = _remove_existing(paths)
 
@@ -293,6 +308,7 @@ def delete_thread(
     # сам по себе он не сносится удалением журнала.
     paths.append(edits_path + ".lock")
     paths.append(_lock_path(threads_dir, system_id, thread_id))
+    paths.append(plan_file_path(threads_dir, system_id, thread_id))
 
     deleted = _remove_existing(paths)
     # Сброс process-local счётчика sidecar seq, иначе recreate получит «дырявый» seq (S5).
@@ -535,6 +551,34 @@ def update_tui_meta(
     tui_meta.update(patch)
     meta["tui"] = tui_meta
     save_thread_meta(threads_dir, sys_norm, thread_id, meta)
+
+
+def clear_plan_meta(threads_dir: str, system_id: str, thread_id: str) -> bool:
+    """Убрать план из сессии по решению человека; True — план был.
+
+    Единственная запись фронтенда в ``shared`` — осознанное исключение из
+    правила «shared пишет исполнитель»: команда приходит, когда прогона нет, и
+    исполнитель её исполнить не может. Вызывающий обязан убедиться, что
+    исполнитель не занят: у ``save_thread_meta`` лока нет, два писателя одного
+    треда недопустимы. Вместе с планом взводится признак для модели — следующий
+    прогон один раз сообщит ей, что плана больше нет.
+    """
+    sys_norm = sanitize_system_id(system_id)
+    meta = load_thread_meta(threads_dir, sys_norm, thread_id)
+    shared = dict(meta.get("shared") or {})
+    if not normalize_plan_block(shared.get("plan")):
+        return False
+    shared.pop("plan", None)
+    shared["plan_removed_notice"] = True
+    meta["shared"] = shared
+    save_thread_meta(threads_dir, sys_norm, thread_id, meta)
+    # Файл плана для человека снятый план не переживает: иначе он выглядит
+    # действующим планом сессии.
+    try:
+        os.remove(plan_file_path(threads_dir, sys_norm, thread_id))
+    except FileNotFoundError:
+        pass
+    return True
 
 
 def update_runtime_meta(

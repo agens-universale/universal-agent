@@ -8,6 +8,10 @@ from gc_core.config_modules.cli_args import (
     setting_flag_overrides,
 )
 from gc_core.config_modules.model_registry import LEVEL_VALUES
+from gc_core.security.permission_mode import (
+    AVAILABLE_MODES,
+    PLAN_EXECUTION_MODES,
+)
 
 run_args = dict()
 extra_config_overrides: Dict[str, Any] = {}
@@ -195,7 +199,10 @@ parser.add_argument(
     "--command-moderation",
     choices=["allow", "ask", "deny"],
     help=(
-        "Режим exec_command/exec_python: allow без judge, ask с подтверждением опасного, deny блокирует опасное"
+        "Режим exec_command/exec_python: allow без judge, ask с подтверждением "
+        "опасного, deny блокирует опасное. В режиме разрешений auto команды "
+        "вне списка безобидных всегда проверяет судья действий — allow его "
+        "не отключает"
     ),
 )
 
@@ -222,6 +229,40 @@ parser.add_argument(
     help=(
         "Режим read_guard: allow выполняет без проверок, "
         "ask запрашивает подтверждение для подозрительного, deny блокирует"
+    ),
+)
+
+parser.add_argument(
+    "--permission-mode",
+    type=str.lower,
+    choices=[mode.value for mode in AVAILABLE_MODES],
+    default=None,
+    help=(
+        "Режим разрешений сессии (сохраняется в ней; флаг перебивает "
+        "сохранённый режим; по умолчанию — security.permissions.default_mode)"
+    ),
+)
+
+parser.add_argument(
+    "--external-request",
+    action="store_true",
+    dest="external_request",
+    help=(
+        "Служебный (swarm): запрос пришёл от внешней системы — спросить "
+        "некого, а слова запроса для судьи действий — описание задачи и "
+        "запреты, не разрешение человека"
+    ),
+)
+
+parser.add_argument(
+    "--approve-plan",
+    type=str.lower,
+    choices=[mode.value for mode in PLAN_EXECUTION_MODES],
+    default=None,
+    dest="approve_plan",
+    help=(
+        "Одобрить предложенный план сессии (только с -t) и исполнить его в "
+        "выбранном режиме; -q — необязательное уточнение к исполнению"
     ),
 )
 
@@ -328,6 +369,7 @@ _STANDALONE_ACTIONS = (
     "reset_config",
     "check_update",
     "update",
+    "approve_plan",
     "query",
 )
 
@@ -378,6 +420,31 @@ _CONFLICTS = (
         "check_update",
         "--update и --check-update нельзя вместе: используйте одно из двух.",
     ),
+    (
+        "approve_plan",
+        "new",
+        "--approve-plan и -n/--new нельзя вместе: -n удаляет тред вместе с планом.",
+    ),
+    (
+        "approve_plan",
+        "permission_mode",
+        "--approve-plan и --permission-mode нельзя вместе: режим исполнения задаёт --approve-plan.",
+    ),
+    (
+        "approve_plan",
+        "images",
+        "--approve-plan и --image нельзя вместе: к исполнению плана картинки не прикладываются.",
+    ),
+    (
+        "approve_plan",
+        "skill",
+        "--approve-plan и -s/--skill нельзя вместе: план исполняется как одобрен.",
+    ),
+    (
+        "approve_plan",
+        "wrap_technical",
+        "--approve-plan и -T/--technical нельзя вместе: -q здесь — уточнение человека.",
+    ),
 )
 
 
@@ -389,6 +456,7 @@ def _check_combinations(parsed_args: argparse.Namespace) -> None:
             "Нужен -q/--query "
             "(или --init-config для конфига, --sync-config для обновления конфига, "
             "--reset-config для сброса конфига, --init для AGENTS.md, "
+            "--approve-plan для исполнения предложенного плана, "
             "--check-update/--update для обновления агента)."
         )
     for first, second, message in _CONFLICTS:
@@ -397,6 +465,10 @@ def _check_combinations(parsed_args: argparse.Namespace) -> None:
     if parsed_args.new and not parsed_args.thread_id:
         parser.error(
             "Аргумент -n/--new можно использовать только вместе с -t/--thread-id."
+        )
+    if parsed_args.approve_plan and not parsed_args.thread_id:
+        parser.error(
+            "--approve-plan можно использовать только вместе с -t/--thread-id."
         )
 
 

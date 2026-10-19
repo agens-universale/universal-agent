@@ -176,7 +176,10 @@ def category_for_request_label(request_label: str | None) -> str:
         return CATEGORY_SUMMARY
     if "finish_gate" in label or "intent_guard" in label:
         return CATEGORY_FINISH_GATE
-    if "command_moderation" in label or "command_judge" in label:
+    if any(
+        name in label
+        for name in ("command_moderation", "command_judge", "action_judge")
+    ):
         return CATEGORY_COMMAND_MODERATION
     if "project_memory" in label:
         return CATEGORY_PROJECT_MEMORY

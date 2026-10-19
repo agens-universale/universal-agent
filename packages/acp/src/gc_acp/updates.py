@@ -7,11 +7,15 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
-from gc_core.constants.tool_names import FINISH_TOOL_NAME
+from gc_core.constants.tool_names import (
+    FINISH_TOOL_NAME,
+    PROPOSE_PLAN_TOOL_NAME,
+)
 from gc_core.message_policy.user_message_policy import (
     extract_real_user_message_text,
 )
 from gc_core.message_projection import project_assistant_text
+from gc_core.tools.turn.propose_plan import ProposePlan
 from gc_core.tools.turn.submit_solution import SubmitSolution
 
 from gc_acp.tool_flow import report_from_record, report_from_sidecar
@@ -28,6 +32,9 @@ _SKIP_TYPES = frozenset(
     }
 )
 _ROLE_KIND = {"user": _USER, "assistant": _ANSWER}
+# Вызовы, закрывающие ход текстом для человека: отклонённая попытка в ленту
+# не идёт.
+_CLOSING_CALLS = frozenset({FINISH_TOOL_NAME, PROPOSE_PLAN_TOOL_NAME})
 
 
 def new_message_id() -> str:
@@ -126,6 +133,8 @@ def history_updates(
     function_call встаёт карточкой между прозой. Результат тула — смена
     статуса той же карточки, не текст ответа. Принятый turn_finish
     становится отчётом; отклонённая попытка и вердикт судьи не показываются.
+    Принятый план (``turn_propose_plan``) — текстом целиком, карточкой не
+    показывается.
     Служебные user-сообщения ядра (сводка, чек-лист, technical) в ленту
     не идут — та же ручка, что у заголовка сессии.
 
@@ -138,7 +147,7 @@ def history_updates(
     replay = _Replay(
         seen=set(),
         grouped=_records_by_parent(records),
-        rejected=_rejected_finish_ids(messages),
+        rejected=_rejected_call_ids(messages),
     )
     for message in messages:
         _append_history_message(replay, message)
@@ -161,8 +170,11 @@ def _append_history_message(replay: _Replay, message: Any) -> None:
     if tool is not None:
         _append_tool(replay, tool)
         return
-    if _is_finish_call(message):
+    if _is_call(message, FINISH_TOOL_NAME):
         _append_finish(replay, message)
+        return
+    if _is_call(message, PROPOSE_PLAN_TOOL_NAME):
+        _append_plan(replay, message)
         return
     _append_prose(replay, message)
 
@@ -193,6 +205,18 @@ def _append_finish(replay: _Replay, message: Any) -> None:
     replay.last_agent = text
 
 
+def _append_plan(replay: _Replay, message: dict) -> None:
+    """Принятый план — текстом целиком: карточка тула скрыта (её потолок
+    5000 знаков меньше плана)."""
+    if message.get("call_id") in replay.rejected:
+        return
+    text = ProposePlan.plan_from_arguments(message.get("arguments"))
+    if text is None or text.strip() == replay.last_agent.strip():
+        return
+    replay.rendered.append(text_chunk(_ANSWER, text, new_message_id()))
+    replay.last_agent = text
+
+
 def _append_prose(replay: _Replay, message: Any) -> None:
     chunk = _history_chunk(message)
     if chunk is None:
@@ -202,35 +226,31 @@ def _append_prose(replay: _Replay, message: Any) -> None:
         replay.last_agent = chunk["content"]["text"]
 
 
-def _is_finish_call(message: Any) -> bool:
+def _is_call(message: Any, name: str) -> bool:
     return (
         isinstance(message, dict)
         and message.get("type") == "function_call"
-        and message.get("name") == FINISH_TOOL_NAME
+        and message.get("name") == name
     )
 
 
-def _rejected_finish_ids(messages: list[Any]) -> set[str]:
-    """Попытки, которые тул или судья отклонили. Их отчёт в ленту не идёт."""
-    finish_ids: set[str] = set()
-    for message in messages:
-        if not _is_finish_call(message):
-            continue
-        call_id = message.get("call_id")
-        if isinstance(call_id, str) and call_id != "":
-            finish_ids.add(call_id)
-    rejected: set[str] = set()
-    for message in messages:
-        if not isinstance(message, dict):
-            continue
-        if message.get("type") != "function_call_output":
-            continue
-        call_id = message.get("call_id")
-        failed = _output_failed(message.get("output"))
-        if call_id not in finish_ids or not failed:
-            continue
-        rejected.add(call_id)
-    return rejected
+def _rejected_call_ids(messages: list[Any]) -> set[str]:
+    """Финалы и планы, которые тул или судья отклонили: в ленту не идут."""
+    closing_ids = {
+        message.get("call_id")
+        for message in messages
+        if any(_is_call(message, name) for name in _CLOSING_CALLS)
+        and isinstance(message.get("call_id"), str)
+        and message["call_id"] != ""
+    }
+    return {
+        message["call_id"]
+        for message in messages
+        if isinstance(message, dict)
+        and message.get("type") == "function_call_output"
+        and message.get("call_id") in closing_ids
+        and _output_failed(message.get("output"))
+    }
 
 
 def _output_failed(output: Any) -> bool:

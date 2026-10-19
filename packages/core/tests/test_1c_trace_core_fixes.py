@@ -54,6 +54,7 @@ def test_compaction_emits_dropped_messages_via_callback():
         memory_replace_touched=None,
         summarized_messages_count=2,
         intent_log_preview_chars=1000,
+        can_propose_plan=True,
     )
 
     assert archived == [step1, step2]
@@ -71,6 +72,7 @@ def test_compaction_emits_dropped_messages_via_callback():
         memory_replace_touched=None,
         summarized_messages_count=2,
         intent_log_preview_chars=1000,
+        can_propose_plan=True,
     )
     assert archived[:2] == [step1, step2]
     assert step3 in archived
@@ -94,6 +96,7 @@ def test_compaction_without_callback_does_not_retain_dropped():
         memory_replace_touched=None,
         summarized_messages_count=1,
         intent_log_preview_chars=1000,
+        can_propose_plan=True,
     )
 
     assert not hasattr(state, "archived_messages")
@@ -123,6 +126,7 @@ def test_compaction_callback_errors_do_not_fail_patch():
         memory_replace_touched=None,
         summarized_messages_count=1,
         intent_log_preview_chars=1000,
+        can_propose_plan=True,
     )
     assert state.messages[0] is system
     assert len(state.messages) == 2

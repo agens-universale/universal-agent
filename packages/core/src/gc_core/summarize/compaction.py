@@ -20,6 +20,7 @@ from gc_core.message_format.serialization import (
     calc_history_chars_for_trigger,
     calc_messages_chars_total,
 )
+from gc_core.message_policy.mode_messages import render_mode_block
 from gc_core.message_policy.todo_context import (
     render_todo_for_persistent_state,
 )
@@ -27,6 +28,7 @@ from gc_core.message_policy.user_message_policy import (
     TECHNICAL_TYPE_DIALOG_SUMMARY,
     wrap_technical_user_content,
 )
+from gc_core.security.permission_mode import offers_plan_tool
 from gc_core.settings import settings_of
 from gc_core.summarize.config import resolve_summary_limits_at_level
 from gc_core.summarize.summary_logging import (
@@ -40,6 +42,7 @@ from gc_core.summarize.summary_logging import (
 )
 from gc_core.summarize.summary_message_body import (
     build_dialog_summary_content,
+    render_plan_block,
     render_summary_images_block,
     resolve_intent_log_preview_chars,
 )
@@ -178,6 +181,7 @@ def apply_summary_state_patch(
     summarized_messages_count: int,
     intent_log_preview_chars: int | None = None,
     kept_messages: Sequence[Mapping[str, Any]] = (),
+    can_propose_plan: bool,
 ) -> str:
     shared = _ensure_shared(state)
 
@@ -213,6 +217,7 @@ def apply_summary_state_patch(
     # из него переезжают в тело сводки блоком <images> — указателем на файлы; кроме
     # сообщений, которые вернутся как есть (`kept_messages`).
     collapsed = getattr(state, "messages", None)
+    is_root = getattr(state, "parent_state_id", None) is None
     summary_message_content = build_dialog_summary_content(
         summary_text=str(raw_summary or ""),
         last_dialog_steps=str(last_dialog_steps or ""),
@@ -223,6 +228,16 @@ def apply_summary_state_patch(
         images_block=render_summary_images_block(
             collapsed if isinstance(collapsed, list) else [],
             kept=kept_messages,
+        ),
+        # План — дело корневого агента: общее состояние сессии субагент
+        # делит с родителем. Объявленный режим у каждого агента свой
+        # (`State.mode_announced`) — его правила едут в сводке любого агента.
+        plan_block=(
+            render_plan_block(getattr(shared, "plan", None)) if is_root else ""
+        ),
+        mode_block=render_mode_block(
+            getattr(state, "mode_announced", None),
+            can_propose_plan=can_propose_plan,
         ),
     )
     prev_offset = int(getattr(state, "dialog_steps_offset", 0) or 0)
@@ -506,6 +521,7 @@ async def arun_summary_compaction(
         summarized_messages_count=len(full_messages),
         intent_log_preview_chars=preview_chars,
         kept_messages=kept_messages,
+        can_propose_plan=offers_plan_tool(ctx, state),
     )
     if isinstance(trace, dict):
         _fill_trace_final_output(
