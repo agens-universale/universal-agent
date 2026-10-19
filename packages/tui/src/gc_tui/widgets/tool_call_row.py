@@ -4,12 +4,12 @@ Layout: Horizontal(prefix-Static, content-Static) — wrap длинных args/r
 происходит внутри content-колонки = hanging indent (continuation выравнивается
 под началом имени тула, col 5 относительно левого края строки).
 
-Статус-глиф живёт в prefix-Static (▸/⏸/✓/✗/·), content-Static несёт имя/args/хвост.
+Статус-глиф живёт в prefix-Static (▸/‖/✓/✗/·), content-Static несёт имя/args/хвост.
 
 Фазы:
 - waiting  — call уже нарисован, execute ещё не начался: · dim, без elapsed;
 - running  — сейчас исполняется: ▸ + elapsed (+ опциональный live_status);
-  на человеко-ожидании (pause) — ⏸ без дыхания, elapsed заморожен;
+  на человеко-ожидании (pause) — ‖ без дыхания, elapsed заморожен;
 - done     — есть result: ✓/✗;
 - interrupted — стоп/обрыв до output: · + «прервано».
 """
@@ -36,8 +36,9 @@ from gc_tui.widgets.click_model import ClickModelMixin
 from gc_tui.widgets.static_content import update_if_changed
 
 # Running-строка на человеко-ожидании (confirm / ask_human): статичный глиф
-# паузы в базовом амбере, без дыхания; elapsed заморожен.
-_PAUSE_GLYPH = "⏸"
+# паузы в базовом амбере, без дыхания; elapsed заморожен. Не ⏸: тот числится
+# эмодзи, и часть терминалов (Windows Terminal) рисует его в две клетки.
+_PAUSE_GLYPH = "‖"
 # Пульс яркости running-глифа ▸: амбер тускло→ярко→тускло (ping-pong, пик —
 # RUN_COLOR). Двигается на собственном 0.1с-тике строки (см. _sync_pulse) → плавное
 # дыхание 10fps; 10 кадров → цикл ≈1.0с.
@@ -271,7 +272,7 @@ class ToolCallRow(ClickModelMixin, Widget):
             if self._interrupted or self._waiting:
                 return "·", _DIM
             if self._paused_at is not None:
-                return _PAUSE_GLYPH, _PULSE_SHADES[0]
+                return _PAUSE_GLYPH, _RUN
             return "▸", _PULSE_SHADES[self._pulse_frame % len(_PULSE_SHADES)]
         if self._is_error:
             return "✗", _ERR

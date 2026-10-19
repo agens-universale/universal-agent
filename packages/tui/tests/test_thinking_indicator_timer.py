@@ -1,4 +1,4 @@
-"""ThinkingIndicator — таймер анимации стоит на паузе в конечном состоянии."""
+"""ThinkingIndicator — таймер анимации стоит в конечном состоянии и скрытым."""
 
 from gc_tui.widgets.thinking_indicator import ThinkingIndicator
 from textual.app import App
@@ -88,3 +88,24 @@ async def test_live_ticks_coarse():
     async with _Host(w).run_test() as pilot:
         await pilot.pause(0.5)
         assert len(ticks) >= 1
+
+
+async def test_hidden_pauses_and_show_resumes():
+    w = ThinkingIndicator()
+    async with _Host(w).run_test() as pilot:
+        await pilot.pause()
+        w.hide()
+        assert w.has_class("hidden")
+        assert w._anim_timer._active.is_set() is False
+        w.show("thinking")
+        assert not w.has_class("hidden")
+        assert w._anim_timer._active.is_set() is True
+
+
+async def test_live_state_change_while_hidden_keeps_paused():
+    w = ThinkingIndicator()
+    async with _Host(w).run_test() as pilot:
+        await pilot.pause()
+        w.hide()
+        w.set_state("validating")
+        assert w._anim_timer._active.is_set() is False

@@ -1220,11 +1220,10 @@ class TraceScreen(Screen):
 
         Вне тика опроса — свежее чтение (`{}` без стора или задачи). Внутри
         тика (`_poll_active`) — одно чтение на задачу, дальше тот же
-        словарь: показ за тик видит один снимок. Запись показываемых полей
-        внутри опроса обязана сразу звать `_drop_tick_meta()`, иначе до
-        следующего тика покажется старое. Для read-modify-write снимок не
-        годится — читать хранилище напрямую. `tui.pending_user_messages`
-        через `_tick_meta` не читать.
+        словарь: показ за тик видит один снимок. Любая запись `tui`-меты
+        экрана идёт через `_write_tui_meta`, он сам сбрасывает снимок. Для
+        read-modify-write снимок не годится — читать хранилище напрямую.
+        `tui.pending_user_messages` через `_tick_meta` не читать.
         """
         if self._store is None or self._active_task_id is None:
             return {}
@@ -1235,8 +1234,9 @@ class TraceScreen(Screen):
             self._tick_meta_cache = (tid, self._store.get_task_meta(tid))
         return self._tick_meta_cache[1]
 
-    def _drop_tick_meta(self) -> None:
-        """Сбросить снимок тика: следующий `_tick_meta()` прочтёт заново."""
+    def _write_tui_meta(self, task_id: str, patch: dict) -> None:
+        """Записать `tui`-мету задачи; снимок тика после записи устарел."""
+        self._store.update_tui_meta(task_id, patch)
         self._tick_meta_cache = None
 
     def _context_meter(self) -> Text | None:
@@ -2096,7 +2096,7 @@ class TraceScreen(Screen):
         if len(kept_records) != len(records) or any(
             r.get("status") == "pending" for r in records
         ):
-            self._store.update_tui_meta(
+            self._write_tui_meta(
                 task_id, {"pending_user_messages": kept_records}
             )
 
@@ -2222,8 +2222,7 @@ class TraceScreen(Screen):
         if self._thinking is not None:
             # Индикатор живёт в фиксированной #indicator-bar (вне скролла) —
             # unhide/смена state не двигают вид трейса.
-            self._thinking.remove_class("hidden")
-            self._thinking.set_state(state)
+            self._thinking.show(state)
             return
         stream_display = self.app.base_settings().settings.tui.stream_display
         indicator = ThinkingIndicator(
@@ -2283,10 +2282,10 @@ class TraceScreen(Screen):
         self.query_one(_SEL_INDICATOR_BAR, Vertical).mount(ind)
 
     def _hide_thinking_indicator(self) -> None:
-        """Скрыть индикатор (CSS `.hidden`), не удаляя — анимация продолжает идти."""
+        """Скрыть индикатор (CSS `.hidden`), не удаляя; анимация на паузе."""
         if self._thinking is None:
             return
-        self._thinking.add_class("hidden")
+        self._thinking.hide()
 
     def _destroy_thinking_indicator(self) -> None:
         """Полностью убрать индикатор. Вызывается когда run завершён."""
@@ -2569,12 +2568,12 @@ class TraceScreen(Screen):
             if isinstance(current, str) and current.strip():
                 # уже задано — обновляем только содержательным промптом
                 if len(norm) > LAST_ACTUAL_MIN:
-                    self._store.update_tui_meta(
+                    self._write_tui_meta(
                         self._active_task_id, {"last_actual": norm}
                     )
             else:
                 # seed: первый промпт безусловно
-                self._store.update_tui_meta(
+                self._write_tui_meta(
                     self._active_task_id, {"last_actual": norm}
                 )
         except Exception:
@@ -2604,10 +2603,9 @@ class TraceScreen(Screen):
         if task_title(tui_meta) == task:
             return
         try:
-            self._store.update_tui_meta(self._active_task_id, {"task": task})
+            self._write_tui_meta(self._active_task_id, {"task": task})
         except Exception:
             return
-        self._drop_tick_meta()
         self._update_terminal_title()
 
     def _update_terminal_title(self) -> None:
@@ -2668,7 +2666,7 @@ class TraceScreen(Screen):
         if self._active_task_id is None or self._store is None:
             return
         try:
-            self._store.update_tui_meta(self._active_task_id, {"title": value})
+            self._write_tui_meta(self._active_task_id, {"title": value})
         except Exception:
             return
         self._update_terminal_title()
@@ -3854,7 +3852,7 @@ class TraceScreen(Screen):
             "pending_user_messages", []
         )
         new_list = (existing + [record])[-self._PENDING_CAP :]
-        self._store.update_tui_meta(tid, {"pending_user_messages": new_list})
+        self._write_tui_meta(tid, {"pending_user_messages": new_list})
         # In-memory кэш для reconciliation: meta может быть перетёрт executor'ом.
         self._pending_wire_cache[client_id] = wire_content
         self._last_pending_client_id = client_id
@@ -3875,9 +3873,7 @@ class TraceScreen(Screen):
         )
         new_list = [r for r in existing if r.get("client_id") != client_id]
         if len(new_list) != len(existing):
-            self._store.update_tui_meta(
-                tid, {"pending_user_messages": new_list}
-            )
+            self._write_tui_meta(tid, {"pending_user_messages": new_list})
 
     def _mark_pending_failed(self) -> None:
         """При фейле run'а: все текущие pending-виджеты → state=failed,
@@ -3899,9 +3895,7 @@ class TraceScreen(Screen):
                 else r
                 for r in records
             ]
-            self._store.update_tui_meta(
-                tid, {"pending_user_messages": new_list}
-            )
+            self._write_tui_meta(tid, {"pending_user_messages": new_list})
         self._pending_user_widgets.clear()
 
     def _begin_auto_created_task(self) -> str:
@@ -3944,11 +3938,10 @@ class TraceScreen(Screen):
         self._capture_edits_baseline()
         if self._store is None or self._active_task_id is None:
             return
-        self._store.update_tui_meta(
+        self._write_tui_meta(
             self._active_task_id,
             {"status": "running", "last_indicator": None},
         )
-        self._drop_tick_meta()
 
     def _update_mcp_indicator(self) -> None:
         if self._mcp_status_done:
@@ -4049,6 +4042,18 @@ class TraceScreen(Screen):
         finally:
             self._in_poll_tick = False
             self._tick_meta_cache = None
+
+    def _apply_human_wait(self, human_wait: bool) -> None:
+        """Пауза running-строк на человеко-ожидании и тик их elapsed.
+
+        Вложенные строки субагента тоже: тул субагента может стоять на
+        подтверждении, пока корень ждёт. Завершённые строки — no-op.
+        """
+        for row in self._active_calls.values():
+            row.pause() if human_wait else row.resume()
+            row.refresh_running_elapsed()
+        for row in self._nested_tool_rows.values():
+            row.pause() if human_wait else row.resume()
 
     def _poll_tick(self) -> None:
         # Потолок #trace = экран минус хром. Зависит только от стабильных высот  # noqa: ERA001  # описание формата, не выключенный код
@@ -4198,7 +4203,7 @@ class TraceScreen(Screen):
                 and self._thinking_started_at is not None
             ):
                 _elapsed = int(time.monotonic() - self._thinking_started_at)
-            self._store.update_tui_meta(
+            self._write_tui_meta(
                 self._active_task_id,
                 {
                     "status": _STATUS[outcome],
@@ -4209,7 +4214,6 @@ class TraceScreen(Screen):
                     },
                 },
             )
-            self._drop_tick_meta()
             self.app.last_stop_requested = False
             self._update_terminal_title()
         self._was_running = is_running
@@ -4224,10 +4228,7 @@ class TraceScreen(Screen):
         # Тикающий elapsed на running tool-строках (running · Nс). Во время
         # человеко-ожидания (confirm / ask_human) агент заблокирован на решении
         # юзера — это не работа тула: замораживаем тикер и исключаем простой.
-        human_wait = self._confirm_active or ask_human_active
-        for row in self._active_calls.values():
-            row.pause() if human_wait else row.resume()
-            row.refresh_running_elapsed()
+        self._apply_human_wait(self._confirm_active or ask_human_active)
         # Nested progress субагента: drain runtime-очереди → строки под parent.
         self._drain_subagent_progress()
         summarizing = False
@@ -4257,11 +4258,10 @@ class TraceScreen(Screen):
             live_count = (_tmeta.get("runtime") or {}).get("live_msg_count")
             if live_count is not None:
                 try:
-                    self._store.update_tui_meta(
+                    self._write_tui_meta(
                         self._active_task_id,
                         {"last_compact_msg_count": int(live_count)},
                     )
-                    self._drop_tick_meta()
                 except (TypeError, ValueError):
                     pass
         self._was_summarizing = summarizing
@@ -4390,7 +4390,7 @@ class TraceScreen(Screen):
                 self._clear_stream_block()
         elif _indicator_mode == "hide":
             # Агент заблокирован — ждёт ответа пользователя. Скрываем (не destroy),
-            # анимация вернётся когда агент продолжит.
+            # анимация стоит и вернётся, когда агент продолжит.
             self._hide_thinking_indicator()
         else:  # terminal
             # Idle. Терминальный исход прогона держим как строку-итог индикатора
@@ -5768,10 +5768,10 @@ class TraceScreen(Screen):
             )
             self.attach_active_task(tid)
             if patch:
-                self._store.update_tui_meta(tid, patch)
+                self._write_tui_meta(tid, patch)
             branch = current_branch(self._current_cwd())
             if branch:
-                self._store.update_tui_meta(tid, {"branch": branch})
+                self._write_tui_meta(tid, {"branch": branch})
             # Абсолютный путь проекта на момент создания сессии (исторический,
             # не живой cwd). Безусловно — путь есть даже в не-git папке.
             try:
@@ -5779,7 +5779,7 @@ class TraceScreen(Screen):
             except Exception:
                 ppath = ""
             if ppath:
-                self._store.update_tui_meta(tid, {"project_path": ppath})
+                self._write_tui_meta(tid, {"project_path": ppath})
             # _track_pending — после attach_active_task (которое чистит
             # _pending_user_widgets через _reset_render_state) и после
             # потенциальной первой записи meta исполнителем.
@@ -5818,9 +5818,7 @@ class TraceScreen(Screen):
         full_query, patch = await self._consume_pending_prefix(text)
         display_query, skill_loaded = self._skill_display_args(text)
         if patch and self._store is not None:
-            self._store.update_tui_meta(
-                self.app.tui_state.active_task_id, patch
-            )
+            self._write_tui_meta(self.app.tui_state.active_task_id, patch)
         client_id = self._track_pending(
             display_text=text, wire_content=full_query, images=images
         )
@@ -6763,9 +6761,7 @@ class TraceScreen(Screen):
                 "skills", []
             )
             if skill_id not in current:
-                self._store.update_tui_meta(
-                    tid, {"skills": current + [skill_id]}
-                )
+                self._write_tui_meta(tid, {"skills": current + [skill_id]})
 
     def _switch_to_empty_state(self) -> None:
         """Очистить trace и перейти в empty-state. pending_skill_id/cwd сохраняются."""

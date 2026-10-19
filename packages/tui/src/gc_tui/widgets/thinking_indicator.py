@@ -329,14 +329,34 @@ class ThinkingIndicator(Static):
         self._state = state
         if state == _STATE_DONE and self._frozen_elapsed is None:
             self._frozen_elapsed = int(self._clock() - self._started_at)
-        if self._anim_timer is not None:
-            # Итог хода от кадра не зависит — таймер без дела не тикает.
-            if is_terminal_indicator_state(state):
-                self._anim_timer.pause()
-            else:
-                self._anim_timer.resume()
+        self._sync_anim()
         if self.is_mounted:
             self.refresh()
+
+    def hide(self) -> None:
+        """Скрыть строку (агент ждёт ответа человека); анимация стоит."""
+        self.add_class("hidden")
+        self._sync_anim()
+
+    def show(self, state: str) -> None:
+        """Вернуть скрытую строку в состоянии ``state``."""
+        self.remove_class("hidden")
+        self.set_state(state)
+        self._sync_anim()
+
+    def _sync_anim(self) -> None:
+        """Таймер тикает, только пока кадр виден и нужен.
+
+        Итог хода от кадра не зависит, скрытую строку никто не видит.
+        """
+        if self._anim_timer is None:
+            return
+        if self.has_class("hidden") or is_terminal_indicator_state(
+            self._state
+        ):
+            self._anim_timer.pause()
+        else:
+            self._anim_timer.resume()
 
     def on_mount(self) -> None:
         # Перерисовка 10 раз/сек: глиф держится FRAME_HOLD тиков (≈1.2с цикл),

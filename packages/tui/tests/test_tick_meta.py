@@ -198,3 +198,33 @@ async def test_submit_task_name_visible_same_tick(tmp_path, monkeypatch):
         monkeypatch.setattr(scr, "_drain_subagent_progress", submit_in_tick)
         scr._poll_active()
         assert names == ["старое имя", "Новое имя"]
+
+
+@pytest.mark.asyncio
+async def test_screen_write_visible_same_tick(tmp_path, monkeypatch):
+    pytest.importorskip("textual")
+    _write_task(tmp_path, tui={"title": "Старое"})
+    app = _app(tmp_path)
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(_TID)
+        await pilot.pause()
+        names = []
+
+        def rename_in_tick():
+            names.append(scr._session_display_name())
+            scr._write_tui_meta(_TID, {"title": "Новое"})
+            names.append(scr._session_display_name())
+
+        monkeypatch.setattr(scr, "_poll_tick", rename_in_tick)
+        scr._poll_active()
+        assert names == ["Старое", "Новое"]
+
+
+def test_screen_writes_tui_meta_only_through_helper():
+    import inspect
+
+    from gc_tui.screens import main
+
+    source = inspect.getsource(main)
+    assert source.count("_store.update_tui_meta(") == 1

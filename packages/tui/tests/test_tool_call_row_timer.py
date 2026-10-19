@@ -3,6 +3,7 @@
 from types import SimpleNamespace
 
 import pytest
+from gc_tui.palette import RUN_COLOR
 from gc_tui.widgets import tool_call_row
 from gc_tui.widgets.tool_call_row import ToolCallRow
 from textual.app import App, ComposeResult
@@ -111,8 +112,14 @@ async def test_pause_shows_pause_glyph_and_resume_restores():
         row = pilot.app.query_one(ToolCallRow)
         row.pause()
         await pilot.pause()
-        assert "⏸" in row._prefix_static.content.plain
-        assert "▸" not in row._prefix_static.content.plain
+        prefix = row._prefix_static.content
+        assert "‖" in prefix.plain
+        assert "▸" not in prefix.plain
+        at = prefix.plain.index("‖")
+        glyph_styles = [
+            str(sp.style) for sp in prefix.spans if sp.start <= at < sp.end
+        ]
+        assert glyph_styles == [RUN_COLOR]
         row.resume()
         await pilot.pause()
         assert "▸" in row._prefix_static.content.plain
