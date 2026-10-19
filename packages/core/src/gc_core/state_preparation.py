@@ -49,15 +49,19 @@ async def aload_state_metadata(
     """
     variables: dict[str, Any] = {}
     store = store if store is not None else agent_store_of(metadata_config)
+    # Проект рана: каталог контекста и agent.project_id (без контекста —
+    # текущий каталог).
+    project = project_of(metadata_config)
     await aattach_status_to_prompt_vars(
         variables,
         store=store,
-        project=project_of(None),
+        project=project,
         settings=metadata_config,
     )
     instructions = await abuild_instructions(
         is_tui=request.is_tui,
         agentsmd_override=request.agentsmd_override,
+        project=project,
         logger=logger,
         verbose=request.verbose,
         store=store,

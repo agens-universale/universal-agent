@@ -43,14 +43,12 @@ def project_of(ctx: Any | None = None):
     """Проект памяти: каталог ``ctx.project_gc_dir`` или текущий каталог."""
     import os
 
-    from gc_core.agent_store import ProjectKey, project_key_of
-    from gc_core.config_modules.env_vars import project_slug
+    from gc_core.agent_store import project_key_for, project_key_of
 
     key = project_key_of(ctx) if ctx is not None else None
     if key is not None:
         return key
-    root = os.getcwd()
-    return ProjectKey(id=project_slug(root), root=root)
+    return project_key_for(os.getcwd(), ctx)
 
 
 async def aget_hash(ctx: Any | None = None) -> str | None:

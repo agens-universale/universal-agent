@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Any
 
-from gc_core.agent_store import AgentStore, aread_or_none, decode_text
+from gc_core.agent_store import (
+    AgentStore,
+    ProjectKey,
+    aread_or_none,
+    decode_text,
+    project_key_for,
+)
 from gc_core.instructions.layers import instruction_layer_specs
-from gc_core.utils.user_text import read_user_text_or_none
 
 _PREAMBLE = (
     "Precedence: when instructions conflict, more specific instructions override "
@@ -24,12 +30,13 @@ class LoadedInstructions:
     warnings: list[str] = field(default_factory=list)
 
 
-async def _aread_layer(store: AgentStore, spec) -> str | None:
-    """L1 — из хранилища агента; L2 и L3 — файлы workspace."""
-    # Файл человека (AGENTS.md и слои инструкций) может лежать в любой кодировке.
+async def _aread_layer(
+    store: AgentStore, spec, project: ProjectKey
+) -> str | None:
+    """L1 — ресурс агента; L2 и L3 — ресурсы проекта рана."""
     if spec.id == "L1":
         return await aread_or_none(store, "instructions", "L1")
-    return read_user_text_or_none(spec.path)
+    return await aread_or_none(store, "instructions", spec.id, project=project)
 
 
 async def _aread_l0(store: AgentStore) -> tuple[bool, str | None]:
@@ -80,11 +87,13 @@ def _load_l0(
     return LoadedInstructions(text=text, loaded_ids=["L0"], warnings=warnings)
 
 
-async def _aload_layers(specs, store: AgentStore) -> LoadedInstructions:
+async def _aload_layers(
+    specs, store: AgentStore, project: ProjectKey
+) -> LoadedInstructions:
     sections: list[str] = []
     loaded: list[str] = []
     for spec in specs:
-        body = await _aread_layer(store, spec)
+        body = await _aread_layer(store, spec, project)
         if body is None:
             continue
         loaded.append(spec.id)
@@ -102,9 +111,12 @@ async def abuild_instructions(
     store: AgentStore,
     agentsmd_override: bool = False,
     cwd: str | None = None,
+    project: ProjectKey | None = None,
     logger: Any | None = None,
     verbose: bool = False,
 ) -> LoadedInstructions:
+    """Инструкции рана. ``project`` — проект для L2 и L3 (у файлового
+    хранилища — каталог); не задан — каталог ``cwd`` (текущий)."""
     # 1. Роль запуска (L0) задана → ТОЛЬКО L0 (замена), в любом режиме. Путь >
     # флаг. У файлового хранилища она задана путём ``paths.agent_md_path``;
     # своё хранилище может отдать её и без пути.
@@ -124,7 +136,9 @@ async def abuild_instructions(
         specs = instruction_layer_specs(cwd=cwd)
         if agentsmd_override:
             specs = [s for s in specs if s.id == "L3"]
-        return await _aload_layers(specs, store)
+        if project is None:
+            project = project_key_for(cwd or os.getcwd())
+        return await _aload_layers(specs, store, project)
 
     # 3. CLI/server/swarm без L0 → пусто.
     return LoadedInstructions(text="", loaded_ids=[], warnings=[])

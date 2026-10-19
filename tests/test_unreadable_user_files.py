@@ -101,8 +101,11 @@ def _cases() -> list[_Case]:
         from gc_core.instructions import loader
         from gc_testkit import run_coro
 
+        from gc_core.agent_store import ProjectKey
+
         layer = SimpleNamespace(id="L3", path=Path(path))
-        return run_coro(loader._aread_layer(FileAgentStore(), layer))
+        project = ProjectKey("p", str(Path(path).parent))
+        return run_coro(loader._aread_layer(FileAgentStore(), layer, project))
 
     cases += [
         _Case(

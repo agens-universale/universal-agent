@@ -80,3 +80,34 @@ async def test_file_store_reads_project_resources_from_project_root(tmp_path):
         await store.read("instructions", "L3")
     with pytest.raises(ValueError, match="проект"):
         await store.list("skill", "project")
+
+
+async def test_run_context_gives_its_project_to_the_skills_registry(
+    tmp_path, monkeypatch
+):
+    """Реестр скиллов своего хранилища строится с проектом рана (слой
+    ``project``), до появления контекста; id — ``agent.project_id``."""
+    import os
+
+    from gc_core.run_context import acreate_run_context
+    from gc_testkit.memory_agent_store import MemoryAgentStore
+
+    seen = []
+
+    class Recording(MemoryAgentStore):
+        def skills_registry(self, settings, *, backend, project=None):
+            seen.append(project)
+            return super().skills_registry(
+                settings, backend=backend, project=project
+            )
+
+    monkeypatch.chdir(tmp_path)
+    cfg = make_settings(
+        {
+            "agent.model": "M",
+            "agent.project_id": "p1",
+            "logging.save_logs": False,
+        }
+    )
+    await acreate_run_context(cfg, agent_store=Recording())
+    assert seen and seen[0] == ProjectKey("p1", os.getcwd())

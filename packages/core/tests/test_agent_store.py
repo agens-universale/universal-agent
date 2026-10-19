@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 from gc_core.agent_store import (
+    ProjectKey,
     FileAgentStore,
     ResourceInfo,
     agent_store_of,
@@ -107,14 +108,21 @@ async def test_instructions_from_own_store(tmp_path):
     assert loaded.loaded_ids == ["L0"]
     assert "Роль запуска." in loaded.text
 
-    # L1 — из хранилища агента; L2 и L3 — файлы workspace (спека, 6.1).
-    (tmp_path / "AGENTS.md").write_text("Проект.", encoding="utf-8")
-    layers = MemoryAgentStore(instructions={"L1": "Глобально."}, fallback=None)
+    # Все слои — из хранилища агента: L2 и L3 — ресурсы проекта, файл
+    # AGENTS.md в каталоге своему хранилищу не источник (задача 3).
+    (tmp_path / "AGENTS.md").write_text("Проект с диска.", encoding="utf-8")
+    project = ProjectKey("p", str(tmp_path))
+    layers = MemoryAgentStore(
+        instructions={"L1": "Глобально."},
+        projects={"p": {"instructions": {"L3": "Проект из хранилища."}}},
+        fallback=None,
+    )
     loaded = await abuild_instructions(
-        is_tui=True, store=layers, cwd=str(tmp_path)
+        is_tui=True, store=layers, cwd=str(tmp_path), project=project
     )
     assert loaded.loaded_ids == ["L1", "L3"]
-    assert "Глобально." in loaded.text and "Проект." in loaded.text
+    assert "Проект из хранилища." in loaded.text
+    assert "Проект с диска." not in loaded.text
 
 
 async def test_instructions_without_store_content_stay_empty_outside_tui():

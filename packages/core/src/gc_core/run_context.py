@@ -11,6 +11,7 @@ from gc_core.agent_store import (
     AgentStore,
     FileAgentStore,
     check_agent_store,
+    project_key_for,
 )
 from gc_core.attachments.store import ImageStore, image_store_for
 from gc_core.auto_routing.levels import (
@@ -461,7 +462,10 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
         # Скиллы, которые надо доставить в среду исполнения (файловое
         # хранилище и remote-бэкенд), — реестр по доставленной копии.
         provisioned = await prep.agent_store.aprovision_skills(
-            prep.backend, source, run_logger=prep.run_logger
+            prep.backend,
+            source,
+            run_logger=prep.run_logger,
+            project=prep.project,
         )
         if provisioned is not None:
             prep.skills_registry = provisioned
@@ -585,6 +589,9 @@ class _RunContextPrep:
     #: Настройки сборки (``LoadedSettings``): из них читает и досборка.
     settings: Any = None
     agent_store: Any = None
+    #: Проект рана (``ProjectKey``): слой скиллов ``project`` и ресурсы
+    #: проекта своего хранилища агента.
+    project: Any = None
 
 
 def _prepare_run_context(
@@ -621,7 +628,11 @@ def _prepare_run_context(
         )
     if agent_store is None:
         agent_store = FileAgentStore(settings)
-    skills_registry = agent_store.skills_registry(settings, backend=backend)
+    # Проект рана строится до контекста: реестр скиллов нужен раньше.
+    project = project_key_for(str(_resolve_project_gc_dir().parent), settings)
+    skills_registry = agent_store.skills_registry(
+        settings, backend=backend, project=project
+    )
     # Логгер создаётся ДО сборки тулов: она предупреждает о пропущенных файлах
     # сабагентов и нераспознанных именах тулов, и эти варнинги обязаны попасть в
     # лог-файл рана, а не только в stderr модульного логгера. Создание логгера
@@ -647,6 +658,7 @@ def _prepare_run_context(
         backend_was_overridden=os_backend is not None,
         settings=settings,
         agent_store=agent_store,
+        project=project,
     )
 
 
