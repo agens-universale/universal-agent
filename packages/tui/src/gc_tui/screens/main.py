@@ -4054,6 +4054,7 @@ class TraceScreen(Screen):
             row.refresh_running_elapsed()
         for row in self._nested_tool_rows.values():
             row.pause() if human_wait else row.resume()
+            row.refresh_running_elapsed()
 
     def _poll_tick(self) -> None:
         # Потолок #trace = экран минус хром. Зависит только от стабильных высот  # noqa: ERA001  # описание формата, не выключенный код
@@ -4411,7 +4412,9 @@ class TraceScreen(Screen):
                 stop_requested=getattr(runner, "_stop_requested", False),
             )
             if term_state is not None and self._thinking is not None:
-                self._thinking.set_state(term_state)
+                # show, не set_state: стоп мог прийти, пока строка была
+                # скрыта на человеко-ожидании.
+                self._thinking.show(term_state)
             else:
                 self._destroy_thinking_indicator()
             if not _frozen:

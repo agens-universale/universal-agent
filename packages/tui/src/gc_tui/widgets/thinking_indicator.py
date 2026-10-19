@@ -351,21 +351,23 @@ class ThinkingIndicator(Static):
         """
         if self._anim_timer is None:
             return
-        if self.has_class("hidden") or is_terminal_indicator_state(
-            self._state
-        ):
+        if self._anim_idle():
             self._anim_timer.pause()
         else:
             self._anim_timer.resume()
 
+    def _anim_idle(self) -> bool:
+        return self.has_class("hidden") or is_terminal_indicator_state(
+            self._state
+        )
+
     def on_mount(self) -> None:
         # Перерисовка 10 раз/сек: глиф держится FRAME_HOLD тиков (≈1.2с цикл),
         # свечение «дышит» каждый тик (1.0с на ping-pong рампы).
-        # Созданный сразу конечным (восстановление) стартует на паузе.
+        # Созданный сразу конечным (восстановление) или скрытым стартует
+        # на паузе.
         self._anim_timer = self.set_interval(
-            0.1,
-            self._tick,
-            pause=is_terminal_indicator_state(self._state),
+            0.1, self._tick, pause=self._anim_idle()
         )
 
     def _tick(self) -> None:

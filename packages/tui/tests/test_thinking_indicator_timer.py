@@ -109,3 +109,11 @@ async def test_live_state_change_while_hidden_keeps_paused():
         w.hide()
         w.set_state("validating")
         assert w._anim_timer._active.is_set() is False
+
+
+async def test_hidden_before_mount_starts_paused():
+    w = ThinkingIndicator()
+    w.hide()
+    async with _Host(w).run_test() as pilot:
+        await pilot.pause()
+        assert w._anim_timer._active.is_set() is False
