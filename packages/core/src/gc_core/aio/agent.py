@@ -10,6 +10,7 @@ from typing import Any, AsyncIterator
 from gc_core.agent_executor import AgentExecutor, undelivered_as_arun_args
 from gc_core.attachments.model import Attachment
 from gc_core.run_context import acreate_run_context
+from gc_core.stores import Stores
 from gc_core.utils.async_http import acquire_clients, release_clients
 
 logger = logging.getLogger(__name__)
@@ -27,6 +28,17 @@ def _take_tail(executor: Any) -> list:
     """
     take = getattr(executor, "take_undelivered_messages", None)
     return list(take()) if take is not None else []
+
+
+def _unpack_stores(stores: Stores | None, context_kwargs: dict) -> None:
+    """``stores=`` → ``thread_store``/``agent_store`` сборки контекста."""
+    if stores is None:
+        return
+    for name in ("thread_store", "agent_store"):
+        if context_kwargs.get(name) is not None:
+            raise ValueError(f"stores= и {name}= вместе: выберите одно")
+    context_kwargs["thread_store"] = stores.threads
+    context_kwargs["agent_store"] = stores.agent
 
 
 class AsyncAgent:
@@ -69,9 +81,14 @@ class AsyncAgent:
         auth_connector: Any = None,
         on_stream_delta: Any = None,
         durable: Any = None,
+        stores: Stores | None = None,
         **context_kwargs: Any,
     ) -> AsyncAgent:
         """Собрать агента, не блокируя loop.
+
+        ``stores`` — связка хранилищ (``gc_core.stores.Stores``): треды и
+        ресурсы агента одним объектом; вместе с ``thread_store=`` или
+        ``agent_store=`` — ``ValueError``.
 
         ``settings`` — ``AppConfig`` (``default_settings(...)``) или
         ``LoadedSettings`` (``load_settings(path)``): провалидированные и
@@ -102,6 +119,8 @@ class AsyncAgent:
         """
         from gc_core.config_modules.root import AppConfig
         from gc_core.settings import LoadedSettings
+
+        _unpack_stores(stores, context_kwargs)
 
         if not isinstance(settings, (AppConfig, LoadedSettings)):
             raise TypeError(

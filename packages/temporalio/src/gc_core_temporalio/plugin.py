@@ -79,9 +79,14 @@ class AgentPlugin(SimplePlugin):
     ``agent_store`` — хранилище агента (``gc_core.agent_store``): промпты,
     AGENTS.md, скиллы и субагенты. Одно на всех агентов или словарь
     «агент → хранилище»; не задано — файлы по путям конфига, как раньше.
+
+    ``stores`` — связка ``gc_core.stores.Stores``: то же, что
+    ``thread_store=stores.threads, agent_store=stores.agent`` (одно
+    хранилище агента на всех — один ``agent_id``); вместе с ними —
+    ``ValueError``.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING.md
         self,
         agents: Mapping[str, Any],
         *,
@@ -97,16 +102,24 @@ class AgentPlugin(SimplePlugin):
         log_handlers: Any = (),
         human_input: bool = False,
         agent_store: Any = None,
+        stores: Any = None,
         _activities: ActivitiesConfig | None = None,
     ) -> None:
-        stores = dict(thread_stores or {})
+        if stores is not None:
+            if thread_store is not None or agent_store is not None:
+                raise ValueError(
+                    "AgentPlugin: stores= вместе с thread_store= или "
+                    "agent_store= — выберите одно"
+                )
+            thread_store, agent_store = stores.threads, stores.agent
+        named_stores = dict(thread_stores or {})
         if thread_store is not None:
-            if DEFAULT_STORE in stores:
+            if DEFAULT_STORE in named_stores:
                 raise ValueError(
                     f"thread_store и thread_stores[{DEFAULT_STORE!r}] заданы оба"
                 )
-            stores[DEFAULT_STORE] = thread_store
-        if not stores:
+            named_stores[DEFAULT_STORE] = thread_store
+        if not named_stores:
             raise ValueError(
                 "AgentPlugin: нужен thread_store (хранилище тредов)"
             )
@@ -114,7 +127,9 @@ class AgentPlugin(SimplePlugin):
             raise ValueError("AgentPlugin: нужен хотя бы один агент")
         root = str(Path(workspace or os.getcwd()).resolve())
         default_store = (
-            DEFAULT_STORE if DEFAULT_STORE in stores else next(iter(stores))
+            DEFAULT_STORE
+            if DEFAULT_STORE in named_stores
+            else next(iter(named_stores))
         )
         self.config = WorkerConfig(
             worker_id=worker_id or f"{socket.gethostname()}-{os.getpid()}",
@@ -139,7 +154,7 @@ class AgentPlugin(SimplePlugin):
         self.provider, self.activities_host, self.thread_activities = (
             build_runtime(
                 self.config,
-                stores=stores,
+                stores=named_stores,
                 log_handlers=log_handlers,
                 agent_store=agent_store,
             )
