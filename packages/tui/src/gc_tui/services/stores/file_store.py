@@ -36,9 +36,10 @@ _ARCHIVE_MARK = "__pre_summary__"
 # TUI (0,25 с, TraceScreen) ≈ 2 с.
 _COMPACTION_WAIT_TICKS = 8
 # Сколько раз читать живой файл, пока эпоха и архивы не совпадут до и после
-# чтения. Шаги сжатия ядра занимают миллисекунды; не совпали и после
-# последней попытки — следующий тик опознает сжатие или сбросит трейс.
-_SNAPSHOT_ATTEMPTS = 3
+# чтения. Сжатие меняет их не больше трёх раз (новый архив, мета в архив,
+# новая мета), каждое изменение рушит не больше одной попытки — четвёртая
+# согласована. Следующее сжатие требует вызова модели и в чтение не попадёт.
+_SNAPSHOT_ATTEMPTS = 4
 
 
 class FileTaskStore:
@@ -366,7 +367,7 @@ class FileTaskStore:
         read = self._read_after(data_path, cursor)
         if read is None:
             return self._reset_unless_compaction(
-                task_id, sys_, cursor, current_epoch, "ordering rollback"
+                task_id, sys_, cursor, current_epoch, "not a continuation"
             )
         new_records, new_offset, max_seq = read
         return TailResult(
@@ -383,9 +384,10 @@ class FileTaskStore:
     def _read_after(
         self, data_path: Path, cursor: TaskCursor
     ) -> Optional[tuple[list[dict], int, int]]:
-        """Записи после курсора, новое смещение и макс. seq; None — seq
-        откатился. Недописанная последняя строка остаётся за курсором и
-        придёт следующим тиком."""
+        """Записи после курсора, новое смещение и макс. seq; None — файл не
+        продолжение прочитанного: курсор не на границе строки (файл подменён
+        сжатием) или seq откатился. Недописанная последняя строка остаётся
+        за курсором и придёт следующим тиком."""
         new_records: list[dict] = []
         max_seq: int = (
             int(cursor.ordering_key)
@@ -394,7 +396,10 @@ class FileTaskStore:
         )
         offset = int(cursor.position_token or 0)
         with open(data_path, "rb") as f:
-            f.seek(offset)
+            # В JSONL перевод строки — только конец записи.
+            f.seek(max(offset - 1, 0))
+            if offset and f.read(1) != b"\n":
+                return None
             raw = f.read()
         end = raw.rfind(b"\n") + 1
         for rec in self._parse_chunk(raw[:end]):

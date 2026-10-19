@@ -268,22 +268,24 @@ def test_second_compaction_is_a_step_not_reset(tmp_path):
     assert tail.next_cursor.archives == 2
 
 
-def test_cursor_not_on_archive_boundary_resets(tmp_path):
+def test_first_compaction_long_summary_waits_then_steps(tmp_path):
     thread = _Thread(tmp_path)
     big = "y" * 1000
     thread.append(_msg("m1", big), _msg("m2", big), _msg("m3", big))
     store = _store(thread)
     _, cur = store.read_all_events(_TID)
-    # Сводка длиннее смещения курсора: тик после шага 3 не видит укорочения
-    # и сдвигает курсор по новому файлу.
+    # Эпохи ещё нет, сводка длиннее смещения курсора: укорочения не видно,
+    # курсор посреди строки нового файла — это ожидание шага, не хвост.
     thread.compact("S", upto=3, summary=_summary("sum", "s" * 4000))
     tick = store.tail_events(_TID, cur)
-    assert tick.stream_reset is False
+    assert tick.stream_reset is False and tick.new_records == []
+    assert tick.next_cursor.position_token == cur.position_token
     thread.step4("S")
 
     tail = store.tail_events(_TID, tick.next_cursor)
 
-    assert tail.stream_reset is True and tail.compaction is None
+    assert tail.stream_reset is False
+    assert tail.compaction.archive_tail == []
 
 
 def test_archive_tail_from_zero_drops_leading_summary(tmp_path):
@@ -378,6 +380,40 @@ def test_attach_during_compaction_reads_consistent_cursor(
     assert _ids(records) == ["sum_S"]
     assert tail.stream_reset is False and tail.compaction is None
     assert cur.storage_epoch == "S" and cur.archives == 1
+
+
+def test_attach_snapshot_settles_after_three_compaction_changes(
+    tmp_path, monkeypatch
+):
+    """Второе сжатие меняет эпоху и архивы трижды, по разу на каждое
+    чтение живого файла: наружу всё равно уходит согласованная пара."""
+    thread, store, _ = _attached(tmp_path)
+    thread.compact("S1")
+    read_live = FileTaskStore._read_live
+
+    def _summary_and_meta():
+        thread.step3("S2", _summary("sum_S2"))
+        thread.step4("S2")
+
+    changes = [
+        lambda: thread.step1("S2"),
+        lambda: thread.step2("S2"),
+        _summary_and_meta,
+    ]
+
+    def _change_after_read(self, task_id, system):
+        raw = read_live(self, task_id, system)
+        if changes:
+            changes.pop(0)()
+        return raw
+
+    monkeypatch.setattr(FileTaskStore, "_read_live", _change_after_read)
+    records, cur = store.read_all_events(_TID)
+    tail = store.tail_events(_TID, cur)
+
+    assert _ids(records) == ["sum_S2"]
+    assert cur.storage_epoch == "S2" and cur.archives == 2
+    assert tail.stream_reset is False and tail.compaction is None
 
 
 def test_plain_tick_does_not_list_archives(tmp_path, monkeypatch):

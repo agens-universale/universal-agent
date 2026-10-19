@@ -126,7 +126,7 @@ def test_tail_events_stream_reset_on_ordering_rollback(tmp_path):
 
     tail = store.tail_events("t1", cur)
     assert tail.stream_reset is True
-    assert tail.reason == "ordering rollback"
+    assert tail.reason == "not a continuation"
     assert tail.new_records == []
     assert tail.next_cursor.position_token == 0
     assert tail.next_cursor.ordering_key == 0
