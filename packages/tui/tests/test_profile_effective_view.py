@@ -365,9 +365,10 @@ async def test_a_partial_backend_overlay_still_inherits_the_base_address(
             ed._entry_address("flash")
             == "http://flash-host/v1/chat/completions"
         )
-        assert "из основного" not in ed._address_cell(
-            "flash"
-        )  # адрес — не общий
+        assert (
+            ed._address_cell("flash")
+            == "flash-host · адрес из основного конфига"
+        )
 
 
 async def test_an_own_address_keeps_the_inherited_model_id(

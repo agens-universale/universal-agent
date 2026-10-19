@@ -336,10 +336,10 @@ vLLM — `thinking: false` и `reasoning_effort: none`, для OpenAI —
 «Диалекты thinking».
 
 Поле `backend` — транспорт этой модели поверх общего подключения, не тело
-запроса. Прокси этого эндпоинта — поле «Прокси» выше: пустое оставляет
-прокси общего подключения, заполненное пишет `backend.proxy`. Свой прокси
-считается своим подключением и требует свой токен. Пустое поле backend
-оставляет общий таймаут, SSL и лимит.
+запроса. Прокси этого эндпоинта — поле «Прокси» выше: пустое берёт прокси
+из общего конфига, заполненное пишет `backend.proxy` и применяется
+само по себе, без своего токена и адреса. Пустое поле backend оставляет
+общий таймаут, SSL и лимит.
 Записанный ключ переписывает только себя, остальные ключи берутся с конфига.
 
 Можно ставить:
@@ -549,17 +549,11 @@ _PAIR_OWN = "Адрес и токен: свои"
 _PAIR_OWN_BACKEND = "Адрес и токен: свои — заданы полем backend, правятся там"
 # Поля пары — те, на которых работает «вернуть наследование» (§5). Галка в набор не входит:
 # она не поле, и её собственная клавиша (Space) на этой строке уже занята.
-# Прокси — часть того же подключения: свой `backend.proxy` уводит запрос с общим
-# токеном, поэтому Ctrl+U снимает его вместе с адресом и токеном.
-_PAIR_FIELDS = ("mef-url", "mef-token", "mef-proxy")
+# Прокси в набор не входит: это отдельная строка транспорта, Ctrl+U её не снимает.
+_PAIR_FIELDS = ("mef-url", "mef-token")
 _PROXY_LABEL = "Прокси (необязательно)"
-_PROXY_HINT = (
-    "пусто — прокси общего подключения; свой прокси требует свой токен"
-)
+_PROXY_HINT = "пустое поле — прокси из общего конфига"
 _PROXY_PLACEHOLDER = "напр. http://proxy:8080  или  socks5h://…"
-_PAIR_PROXY_NEEDS_TOKEN = (
-    "задан свой прокси, но не задан токен — укажите токен или очистите прокси"
-)
 _TOKEN_SHARED_HINT = "токен приходит из раздела «Подключение»"
 # Тот же источник, что у шапки пары (`_PAIR_SHARED_BASE`): две подписи одного состояния
 # не имеют права называть два разных источника.
@@ -624,7 +618,7 @@ def _inherited(value: str) -> str:
 def entry_has_own_connection(entry) -> bool:
     """Несёт ли СЫРАЯ запись реестра своё подключение — ядровым определением §2
     (`connection_parts`) по обоим написаниям пары: `url`/`token` и
-    `backend.completions_url`/`proxy`/`chat_completion_headers.Authorization`. По
+    `backend.completions_url`/`chat_completion_headers.Authorization`. По
     совокупности, как `own_connection` формы: правило пары половин не пропускает.
 
     ОДИН предикат на всех, кто судит ЗАСЛОНЁННУЮ запись основного конфига под тёзкой:
@@ -646,7 +640,6 @@ def entry_has_own_connection(entry) -> bool:
             url=entry.get("url"),
             token=entry.get("token"),
             completions_url=backend.get("completions_url"),
-            proxy=backend.get("proxy"),
             authorization=headers.get("Authorization"),
         )
     )
@@ -1216,7 +1209,6 @@ class ModelEntryForm(Vertical):
             completions_url=self._as_validator_sees(
                 backend.get("completions_url")
             ),
-            proxy=self._as_validator_sees(self._effective_proxy(backend)),
             authorization=self._as_validator_sees(
                 headers.get("Authorization")
             ),
@@ -1225,7 +1217,7 @@ class ModelEntryForm(Vertical):
     def _pair_env_missing(self) -> list[str]:
         """Имена переменных, из-за которых половина пары окажется пустой.
 
-        Спрашивается по ДОРЕЗОЛВНЫМ значениям тех же пяти полей, что судит
+        Спрашивается по ДОРЕЗОЛВНЫМ значениям тех же полей, что судит
         `_pair_parts`: после подстановки от ссылки не остаётся ничего, кроме пустой
         строки, и назвать причину уже нечем."""
         from gc_core.config_raw import missing_env_refs
@@ -1238,7 +1230,6 @@ class ModelEntryForm(Vertical):
             self._token_value(),
             self._token_current,
             backend.get("completions_url"),
-            self._effective_proxy(backend),
             headers.get("Authorization"),
         ):
             for name in missing_env_refs(value):
@@ -1261,7 +1252,6 @@ class ModelEntryForm(Vertical):
                 completions_url=self._as_validator_sees(
                     backend.get("completions_url")
                 ),
-                proxy=self._as_validator_sees(backend.get("proxy")),
                 authorization=self._as_validator_sees(
                     headers.get("Authorization")
                 ),
@@ -1967,7 +1957,6 @@ class ModelEntryForm(Vertical):
         (форма показала бы «изменено» там, где менять нечего)."""
         write_field(self.query_one(_SEL_MEF_URL, Input), "")
         write_field(self.query_one(_SEL_MEF_TOKEN, Input), "")
-        write_field(self.query_one(_SEL_MEF_PROXY, Input), "")
         self._no_auth = False
         self._token_cleared = self._token_current is not None
         self.query_one(_SEL_MEF_NOAUTH, Static).update(self._noauth_text())
@@ -2342,9 +2331,9 @@ class ModelEntryForm(Vertical):
             # работает, и молчать о нём нельзя.
             self._token_cleared = False
             self._sync_token_label()
-        if event.input.id in ("mef-url", "mef-token", "mef-proxy"):
-            # Печать в паре меняет её состояние: адрес и свой прокси — вход в «своё»
-            # и выход из него, набранный токен — вторая половина.
+        if event.input.id in ("mef-url", "mef-token"):
+            # Печать в паре меняет её состояние: адрес — вход в «своё» и выход из него,
+            # набранный токен — вторая половина. Прокси в пару не входит.
             self._sync_pair_state()
         if event.input.id in (
             "mef-url",
@@ -2872,18 +2861,9 @@ class ModelEntryForm(Vertical):
                 return self._fail(
                     _PAIR_ENV_MISSING.format(names=", ".join(names))
                 )
-            proxy_only = (
-                has_address
-                and not self._url_value()
-                and not (backend or {}).get("completions_url")
+            return self._fail(
+                _PAIR_NEEDS_TOKEN if has_address else _PAIR_NEEDS_URL
             )
-            if proxy_only:
-                pair_error = _PAIR_PROXY_NEEDS_TOKEN
-            elif has_address:
-                pair_error = _PAIR_NEEDS_TOKEN
-            else:
-                pair_error = _PAIR_NEEDS_URL
-            return self._fail(pair_error)
         try:
             main = parse_completion_kwargs_text(values["main"])
         except ValueError as exc:

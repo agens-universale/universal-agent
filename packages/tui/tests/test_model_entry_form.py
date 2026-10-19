@@ -4110,8 +4110,8 @@ async def test_typed_proxy_is_saved_for_this_endpoint():
         assert fields["backend"]["proxy"] == "socks5h://proxy:1080"
 
 
-async def test_proxy_without_a_token_is_refused():
-    """Свой прокси — своё подключение: общий токен через него не уезжает."""
+async def test_proxy_saves_without_its_own_token_or_address():
+    """Прокси — строка эндпоинта. Общий адрес и токен при этом не трогаются."""
     form = _form(
         initial={"alias": "flash", "model": "google/gemini-2.5-flash"},
         existing_aliases={"flash"},
@@ -4122,9 +4122,11 @@ async def test_proxy_without_a_token_is_refused():
         await pilot.pause()
         form.query_one("#mef-proxy", Input).value = "http://proxy:8080"
         await pilot.pause()
+        assert form.own_connection() is False
         ok, _alias, fields = form.submit()
-        assert ok is False and fields is None
-        assert "прокси" in str(form.query_one("#mef-error", Static).render())
+        assert ok is True
+        assert fields["backend"]["proxy"] == "http://proxy:8080"
+        assert "url" not in fields and "token" not in fields
 
 
 async def test_empty_proxy_field_names_the_inherited_proxy():
@@ -4143,19 +4145,23 @@ async def test_empty_proxy_field_names_the_inherited_proxy():
         )
 
 
-async def test_ctrl_u_clears_the_endpoint_proxy_with_the_pair():
+async def test_ctrl_u_leaves_the_endpoint_proxy():
+    """Возврат пары к наследованию снимает адрес и токен, прокси остаётся."""
     form = _paired_form(
         initial={"backend": {"proxy": "http://own-proxy:8080"}}
     )
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
-        _land(form, "mef-proxy")
+        _land(form, "mef-url")
         assert form.clear_token() is True
-        assert form.query_one("#mef-proxy", Input).value == ""
+        assert (
+            form.query_one("#mef-proxy", Input).value
+            == "http://own-proxy:8080"
+        )
         ok, _alias, fields = form.submit()
         assert ok is True
         assert fields["url"] is None
-        assert fields["backend"] is None
+        assert fields["backend"]["proxy"] == "http://own-proxy:8080"
 
 
 @pytest.mark.parametrize("field", ["main", "auxiliary", "backend"])
