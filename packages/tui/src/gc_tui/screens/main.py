@@ -4446,13 +4446,10 @@ class TraceScreen(Screen):
             return
         tail = self._store.tail_events(self._active_task_id, self._cursor)
         # F3: при freeze НЕ перерисовываем трейс (wipe/clear_trace/render_records
-        # дрожали бы экраном под выделением). Обычный хвост: курсор двигаем,
-        # чтобы не копить. Сброс и шаг сжатия: курсор НЕ трогаем — следующий
-        # тик после MouseUp опознает их заново (иначе хвост архива и маркер
-        # потерялись бы, а после сброса живой файл нарисовался бы дважды).
+        # дрожали бы экраном под выделением) и курсор НЕ трогаем: первый тик
+        # после MouseUp дочитает накопленный хвост, сброс или шаг сжатия
+        # (иначе записи этих тиков на экран бы уже не попали).
         if _frozen:
-            if not tail.stream_reset and tail.compaction is None:
-                self._cursor = tail.next_cursor
             return
         if tail.compaction is not None:
             self._apply_compaction(tail.compaction, tail.next_cursor)
