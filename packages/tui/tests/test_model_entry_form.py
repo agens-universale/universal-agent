@@ -4129,8 +4129,32 @@ async def test_proxy_saves_without_its_own_token_or_address():
         assert "url" not in fields and "token" not in fields
 
 
+async def test_proxy_field_strips_whitespace():
+    """Пробелы по краям снимаются, строка из одних пробелов — пустое поле.
+
+    Пустое поле ключ не пишет: иначе `"   "` стало бы явным `backend.proxy`
+    и перекрыло бы прокси общего конфига."""
+    form = _paired_form()
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        field = form.query_one("#mef-proxy", Input)
+        field.value = "   "
+        await pilot.pause()
+        assert form.is_dirty() is False
+        ok, _alias, fields = form.submit()
+        assert ok is True
+        assert "proxy" not in (fields.get("backend") or {})
+
+        field.value = "  http://proxy:8080  "
+        await pilot.pause()
+        ok, _alias, fields = form.submit()
+        assert ok is True
+        assert fields["backend"]["proxy"] == "http://proxy:8080"
+
+
 async def test_empty_proxy_field_names_the_inherited_proxy():
     from gc_core.onboarding import display_secret
+    from textual.widgets import Static
 
     form = _form(
         initial={"alias": "flash", "model": "m"},
@@ -4143,6 +4167,8 @@ async def test_empty_proxy_field_names_the_inherited_proxy():
             form.query_one("#mef-proxy", Input).placeholder
             == f"наследуется: {display_secret('http://corp-proxy:8080')}"
         )
+        text = " ".join(str(w.render()) for w in form.query(Static))
+        assert "прокси из общего конфига" not in text
 
 
 async def test_ctrl_u_leaves_the_endpoint_proxy():
