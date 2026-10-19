@@ -20,9 +20,10 @@ class UsageError(ValueError):
 
 @dataclass(frozen=True)
 class StoreKind:
-    """Как открыть хранилище тредов (для схемы) и хранилище агента."""
+    """Как открыть хранилище тредов (схема) и хранилище агента."""
 
     threads: Callable[[argparse.Namespace], Any]
+    agent: Callable[[argparse.Namespace], Any]
 
 
 def _value(args: argparse.Namespace, flag: str, env: str) -> str:
@@ -33,6 +34,13 @@ def _value(args: argparse.Namespace, flag: str, env: str) -> str:
     return value
 
 
+def _agent_id(args: argparse.Namespace) -> str:
+    agent_id = getattr(args, "agent_id", None)
+    if not agent_id:
+        raise UsageError("нужен --agent-id: ресурсы агента в базе по нему")
+    return agent_id
+
+
 def _postgres(args: argparse.Namespace) -> Any:
     from gc_stores.postgres import PostgresThreadStore
 
@@ -41,10 +49,28 @@ def _postgres(args: argparse.Namespace) -> Any:
     )
 
 
+def _postgres_agent(args: argparse.Namespace) -> Any:
+    from gc_stores.postgres import PostgresAgentStore
+
+    return PostgresAgentStore(
+        _value(args, "--dsn", "GC_STORES_DSN"),
+        schema=args.schema,
+        agent_id=_agent_id(args),
+    )
+
+
 def _mysql(args: argparse.Namespace) -> Any:
     from gc_stores.mysql import MySQLThreadStore
 
     return MySQLThreadStore(_value(args, "--dsn", "GC_STORES_DSN"))
+
+
+def _mysql_agent(args: argparse.Namespace) -> Any:
+    from gc_stores.mysql import MySQLAgentStore
+
+    return MySQLAgentStore(
+        _value(args, "--dsn", "GC_STORES_DSN"), agent_id=_agent_id(args)
+    )
 
 
 def _redis(args: argparse.Namespace) -> Any:
@@ -55,16 +81,41 @@ def _redis(args: argparse.Namespace) -> Any:
     )
 
 
+def _redis_agent(args: argparse.Namespace) -> Any:
+    from gc_stores.redis import RedisAgentStore
+
+    return RedisAgentStore(
+        _value(args, "--url", "GC_STORES_REDIS_URL"),
+        prefix=args.prefix,
+        agent_id=_agent_id(args),
+    )
+
+
+def _s3_options(args: argparse.Namespace) -> dict[str, Any]:
+    return {
+        "prefix": "" if args.prefix == "gc:" else args.prefix,
+        "endpoint_url": args.endpoint_url
+        or os.environ.get("GC_STORES_S3_ENDPOINT")
+        or None,
+        "region": args.region,
+    }
+
+
 def _s3(args: argparse.Namespace) -> Any:
     from gc_stores.s3 import S3ThreadStore
 
     return S3ThreadStore(
+        _value(args, "--bucket", "GC_STORES_S3_BUCKET"), **_s3_options(args)
+    )
+
+
+def _s3_agent(args: argparse.Namespace) -> Any:
+    from gc_stores.s3 import S3AgentStore
+
+    return S3AgentStore(
         _value(args, "--bucket", "GC_STORES_S3_BUCKET"),
-        prefix="" if args.prefix == "gc:" else args.prefix,
-        endpoint_url=args.endpoint_url
-        or os.environ.get("GC_STORES_S3_ENDPOINT")
-        or None,
-        region=args.region,
+        agent_id=_agent_id(args),
+        **_s3_options(args),
     )
 
 
@@ -74,12 +125,21 @@ def _sqlite(args: argparse.Namespace) -> Any:
     return SQLiteThreadStore(_value(args, "--path", "GC_STORES_SQLITE_PATH"))
 
 
+def _sqlite_agent(args: argparse.Namespace) -> Any:
+    from gc_stores.sqlite import SQLiteAgentStore
+
+    return SQLiteAgentStore(
+        _value(args, "--path", "GC_STORES_SQLITE_PATH"),
+        agent_id=_agent_id(args),
+    )
+
+
 STORES: dict[str, StoreKind] = {
-    "mysql": StoreKind(threads=_mysql),
-    "postgres": StoreKind(threads=_postgres),
-    "redis": StoreKind(threads=_redis),
-    "s3": StoreKind(threads=_s3),
-    "sqlite": StoreKind(threads=_sqlite),
+    "mysql": StoreKind(threads=_mysql, agent=_mysql_agent),
+    "postgres": StoreKind(threads=_postgres, agent=_postgres_agent),
+    "redis": StoreKind(threads=_redis, agent=_redis_agent),
+    "s3": StoreKind(threads=_s3, agent=_s3_agent),
+    "sqlite": StoreKind(threads=_sqlite, agent=_sqlite_agent),
 }
 
 
@@ -107,3 +167,7 @@ def add_connection_args(parser: argparse.ArgumentParser) -> None:
 
 def open_thread_store(args: argparse.Namespace) -> Any:
     return STORES[args.store].threads(args)
+
+
+def open_agent_store(args: argparse.Namespace) -> Any:
+    return STORES[args.store].agent(args)

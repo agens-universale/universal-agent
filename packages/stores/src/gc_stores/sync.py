@@ -10,8 +10,9 @@
 from __future__ import annotations
 
 import hashlib
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from gc_core.agent_store import FileAgentStore, Prompt, ResourceKind
 
@@ -111,4 +112,163 @@ async def copy_defaults(
     return report
 
 
-__all__ = ["SyncReport", "copy_defaults"]
+#: Слои AGENTS.md и их область: L2, L3 — ресурсы проекта.
+_INSTRUCTIONS = {"L0": False, "L1": False, "L2": True, "L3": True}
+_SKILL_LAYERS = {"system": False, "user": False, "project": True}
+_PROMPTS = frozenset(p.value for p in Prompt)
+_SECTIONS = ("prompts", "instructions", "subagents", "skills")
+
+Item = tuple[ResourceKind, str, bytes, str | None]
+
+
+def _project_only(what: str, project: str | None) -> str:
+    if project is None:
+        raise ValueError(f"{what} — ресурс проекта: укажите --project")
+    return project
+
+
+def _single(rel: tuple[str, ...], section: str) -> str:
+    if len(rel) != 2 or not rel[1].endswith(".md"):
+        raise ValueError(
+            f"{'/'.join(rel)}: в {section}/ — файлы <имя>.md без подкаталогов"
+        )
+    return rel[1][: -len(".md")]
+
+
+def _prompt(rel: tuple[str, ...], data: bytes, _project: str | None) -> Item:
+    name = _single(rel, "prompts")
+    if name not in _PROMPTS:
+        raise ValueError(
+            f"{'/'.join(rel)}: неизвестный промпт {name!r}; допустимы: "
+            + ", ".join(sorted(_PROMPTS))
+        )
+    return "prompt", name, data, None
+
+
+def _instructions(
+    rel: tuple[str, ...], data: bytes, project: str | None
+) -> Item:
+    name = _single(rel, "instructions")
+    if name not in _INSTRUCTIONS:
+        raise ValueError(
+            f"{'/'.join(rel)}: слой инструкций — L0, L1, L2 или L3"
+        )
+    owner = _project_only(name, project) if _INSTRUCTIONS[name] else None
+    return "instructions", name, data, owner
+
+
+def _subagent(rel: tuple[str, ...], data: bytes, _project: str | None) -> Item:
+    return "subagent", f"{_single(rel, 'subagents')}.md", data, None
+
+
+def _skill(rel: tuple[str, ...], data: bytes, project: str | None) -> Item:
+    layer = rel[1] if len(rel) > 2 else ""
+    if layer not in _SKILL_LAYERS:
+        raise ValueError(
+            f"{'/'.join(rel)}: слой скиллов — system, user или project"
+        )
+    owner = (
+        _project_only("слой скиллов project", project)
+        if _SKILL_LAYERS[layer]
+        else None
+    )
+    return "skill", "/".join(rel[1:]), data, owner
+
+
+_PARSERS = {
+    "prompts": _prompt,
+    "instructions": _instructions,
+    "subagents": _subagent,
+    "skills": _skill,
+}
+
+
+def _layout(root: Path, project: str | None) -> Iterator[Item]:
+    """Ресурсы каталога в раскладке ``gc-stores sync``; скрытые файлы
+    (``.DS_Store``, ``.git``) пропускаются, чужое — ``ValueError``."""
+    for path in sorted(root.rglob("*")):
+        rel = path.relative_to(root).parts
+        if any(part.startswith(".") for part in rel) or not path.is_file():
+            continue
+        parser = _PARSERS.get(rel[0])
+        if parser is None:
+            raise ValueError(
+                f"{'/'.join(rel)}: в каталоге агента — только "
+                + ", ".join(f"{s}/" for s in _SECTIONS)
+            )
+        yield parser(rel, path.read_bytes(), project)
+
+
+def _merge(report: SyncReport, other: SyncReport) -> None:
+    report.written += other.written
+    report.unchanged += other.unchanged
+    report.deleted += other.deleted
+
+
+async def _prune(
+    writer: ResourceWriter,
+    existing: dict[tuple[str, str, str | None], StoredResource],
+    present: set[tuple[str, str, str | None]],
+    report: SyncReport,
+    *,
+    project: str | None,
+    dry_run: bool,
+) -> None:
+    """Удалить загруженное человеком, чего нет в каталоге, — только в той
+    же области (ресурсы агента или ресурсы проекта ``project``);
+    умолчаний пакета не трогать."""
+    for (kind, name, owner), stored in sorted(existing.items()):
+        if (kind, name, owner) in present or stored.source is not None:
+            continue
+        if owner != project:
+            continue
+        if not dry_run:
+            await writer.delete_resource(kind, name, project=owner)
+        report.deleted.append(_label(kind, name, owner))
+
+
+async def sync_directory(
+    writer: ResourceWriter,
+    root: Path,
+    *,
+    project: str | None = None,
+    with_defaults: bool = False,
+    prune: bool = False,
+    dry_run: bool = False,
+) -> SyncReport:
+    """Разложить каталог агента ``root`` в хранилище.
+
+    Раскладка: ``prompts/<имя Prompt>.md``, ``instructions/L0.md…L3.md``,
+    ``subagents/<имя>.md``, ``skills/<слой>/<скилл>/…``; ``L2``, ``L3`` и
+    слой ``project`` — только с ``project``. ``with_defaults`` — сначала
+    умолчания пакета (файлы каталога их перекрывают); ``prune`` — убрать
+    своё, чего в каталоге нет; ``dry_run`` — только отчёт.
+    """
+    items = list(_layout(Path(root), project))
+    report = SyncReport()
+    if with_defaults:
+        _merge(report, await copy_defaults(writer, dry_run=dry_run))
+    existing = await _existing(writer, project)
+    present = set()
+    for kind, name, data, owner in items:
+        present.add((kind, name, owner))
+        await _put(
+            writer,
+            existing,
+            report,
+            (kind, name, data, owner, None),
+            dry_run=dry_run,
+        )
+    if prune:
+        await _prune(
+            writer,
+            existing,
+            present,
+            report,
+            project=project,
+            dry_run=dry_run,
+        )
+    return report
+
+
+__all__ = ["SyncReport", "copy_defaults", "sync_directory"]
