@@ -1,6 +1,6 @@
 """Footer-left контекстно зависит от наличия задачи и активного run.
 
-Idle: пилюля режима разрешений («⏵⏵ edit mode (Shift+Tab)») и счётчик уведомлений.
+Idle: пилюля режима разрешений («▸▸ edit mode (Shift+Tab)») и счётчик уведомлений.
 Running: пилюля + Ctrl+C/stop. F-подсказок в футере нет ни в каком состоянии
 (решение владельца): постоянный индикатор режима важнее списка клавиш, клавиши
 перечислены в справке (F1), а место нужно правой колонке — там живут стрелка
@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-_PILL = "⏵⏵ edit mode (Shift+Tab)"
+_PILL = "▸▸ edit mode (Shift+Tab)"
 _F_KEYS = (
     "F1/help",
     "F2/sessions",
@@ -143,7 +143,7 @@ async def test_footer_left_task_running_shows_only_stop_at_any_width(tmp_path):
             )
             assert "Ctrl+C/stop" in rendered, width
             assert "F4/notices" in rendered, width  # бейдж виден всегда
-            assert rendered.startswith("⏵⏵"), width  # режим виден всегда
+            assert rendered.startswith("▸▸"), width  # режим виден всегда
             for key in _F_KEYS:
                 assert key not in rendered, (width, key)
             assert "/mcp" not in rendered
@@ -422,9 +422,9 @@ async def test_footer_pill_shrinks_to_glyph_when_stop_key_needs_the_room():
     команда остановки остаются в одном ряду."""
     pytest.importorskip("textual")
     assert await _running_footer(70, badge=False) == f"{_PILL}  Ctrl+C/stop"
-    assert await _running_footer(44, badge=False) == "⏵⏵  Ctrl+C/stop"
+    assert await _running_footer(44, badge=False) == "▸▸  Ctrl+C/stop"
     assert await _running_footer(44, badge=True) == (
-        "⏵⏵  Ctrl+C/stop\nℹ 1 · F4/notices"
+        "▸▸  Ctrl+C/stop\nℹ 1 · F4/notices"
     )
 
 
@@ -437,7 +437,7 @@ async def test_footer_stop_key_outlives_the_mode_glyph():
     pytest.importorskip("textual")
     rendered = await _running_footer(20, badge=True)
     assert rendered.split("\n")[0] == "Ctrl+C/stop"
-    assert "⏵" not in rendered
+    assert "▸" not in rendered
     for width in (22, 32, 36):
         wider = await _running_footer(width, badge=True)
-        assert wider.split("\n")[0] == "⏵⏵  Ctrl+C/stop", width
+        assert wider.split("\n")[0] == "▸▸  Ctrl+C/stop", width

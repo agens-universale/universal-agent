@@ -41,7 +41,7 @@ async def test_shift_tab_cycles_modes_and_the_pill_follows(tmp_path):
         await pilot.press("shift+tab")
         await pilot.pause()
         assert pilot.app.effective_permission_mode() == "edit"
-        assert _footer(pilot).startswith("⏵⏵ edit mode")
+        assert _footer(pilot).startswith("▸▸ edit mode")
 
 
 async def test_mode_hint_sits_right_after_the_pill(tmp_path):
