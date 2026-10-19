@@ -9,10 +9,11 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
+from contextlib import AbstractAsyncContextManager
 from datetime import datetime
 from typing import Any
 
-from gc_stores.sql.database import Conn
+from gc_stores.sql.database import Conn, Database
 
 
 class Dialect(ABC):
@@ -65,6 +66,17 @@ class Dialect(ABC):
         self, table: str, columns: Sequence[str], keys: Sequence[str]
     ) -> str:
         """``INSERT``; ключ занят — обновить остальные колонки."""
+
+    @abstractmethod
+    async def table_exists(self, conn: Conn, name: str) -> bool:
+        """Есть ли таблица ``name`` (без префикса) в схеме хранилища."""
+
+    @abstractmethod
+    def migration_session(
+        self, db: Database
+    ) -> AbstractAsyncContextManager[Conn]:
+        """Соединение для миграций под блокировкой между инстансами (и
+        созданной схемой Postgres)."""
 
     def check_ids(self, *values: str) -> None:
         """Ключи (id треда, алиас, op_id) влезают в колонки базы; иначе —

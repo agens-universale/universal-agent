@@ -1,6 +1,6 @@
 -- Схема PostgresThreadStore (контракт ThreadStore v2, gc_core/threads/store.py).
 --
--- Выполняет PostgresThreadStore.ensure_schema() под SET LOCAL search_path,
+-- Миграция 1: таблицы хранилища тредов. Выполняет ensure_schema() под SET LOCAL search_path,
 -- поэтому имена здесь без схемы. Повторный запуск ничего не меняет.
 --
 -- Документы — текст JSON ровно как записан (тип text): jsonb не хранит

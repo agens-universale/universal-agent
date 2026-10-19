@@ -13,29 +13,24 @@
     ...
     await store.close()
 
-Схема (таблицы) создаётся только ``ensure_schema()``; сама запись таблицы не
-создаёт.
+Схема (таблицы) — миграции ``postgres/migrations``: их применяет
+``ensure_schema()`` или ``gc-stores migrate``; перед первой операцией
+хранилище сверяет версию схемы (``gc_stores.migrations``).
 """
 
 from __future__ import annotations
 
-import hashlib
 from collections.abc import Callable
 from datetime import datetime
-from importlib import resources
 from typing import Any
 
+from gc_stores import migrations
 from gc_stores.postgres.database import PostgresDatabase
 from gc_stores.postgres.dialect import PostgresDialect
-from gc_stores.rows import TABLES
 from gc_stores.sql.thread_store import SqlThreadStore
 
-
-def _schema_lock_id(schema: str) -> int:
-    """Номер advisory-блокировки создания схемы: два инстанса, стартующие
-    одновременно, не создают таблицы наперегонки."""
-    digest = hashlib.sha256(f"gc-stores:{schema}".encode()).digest()
-    return int.from_bytes(digest[:8], "big", signed=True)
+#: Миграции схемы Postgres (``postgres/migrations``).
+MIGRATIONS = migrations.load("gc_stores.postgres")
 
 
 class PostgresThreadStore(SqlThreadStore):
@@ -65,41 +60,11 @@ class PostgresThreadStore(SqlThreadStore):
             raise ValueError("нужен ровно один из dsn, pool и database")
         self._database = database
         super().__init__(
-            database, PostgresDialect(database.schema), clock=clock
+            database,
+            PostgresDialect(database.schema),
+            migrations=MIGRATIONS,
+            clock=clock,
         )
-
-    async def ensure_schema(self) -> None:
-        """Создать схему и таблицы, если их нет; повторный вызов безвреден.
-
-        Всё на месте — DDL не выполняется: Postgres проверяет право
-        ``CREATE`` раньше, чем ``IF NOT EXISTS``, и пользователь приложения
-        без этого права (таблицы создал администратор) иначе упал бы.
-        """
-        schema = self._database.schema
-        ddl = (
-            resources.files("gc_stores.postgres")
-            .joinpath("schema.sql")
-            .read_text(encoding="utf-8")
-        )
-        async with self._database.transaction() as conn:
-            present = await conn.fetchval(
-                "SELECT count(*) FROM pg_tables "
-                "WHERE schemaname = $1 AND tablename = ANY($2::text[])",
-                schema,
-                list(TABLES),
-            )
-            if present == len(TABLES):
-                return
-            await conn.execute(
-                "SELECT pg_advisory_xact_lock($1)", _schema_lock_id(schema)
-            )
-            exists = await conn.fetchval(
-                "SELECT 1 FROM pg_namespace WHERE nspname = $1", schema
-            )
-            if not exists:
-                await conn.execute(f'CREATE SCHEMA "{schema}"')
-            await conn.execute(f'SET LOCAL search_path TO "{schema}"')
-            await conn.execute(ddl)
 
 
 __all__ = ["PostgresThreadStore"]

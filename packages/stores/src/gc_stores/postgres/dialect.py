@@ -2,12 +2,21 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+import hashlib
+from collections.abc import AsyncIterator, Sequence
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import Any
 
-from gc_stores.sql.database import Conn
+from gc_stores.sql.database import Conn, Database
 from gc_stores.sql.dialect import Dialect, numbered
+
+
+def _schema_lock_id(schema: str) -> int:
+    """Номер advisory-блокировки миграций схемы: два инстанса, стартующие
+    одновременно, не применяют миграцию наперегонки."""
+    digest = hashlib.sha256(f"gc-stores:{schema}".encode()).digest()
+    return int.from_bytes(digest[:8], "big", signed=True)
 
 
 class PostgresDialect(Dialect):
@@ -18,6 +27,32 @@ class PostgresDialect(Dialect):
 
     def __init__(self, schema: str) -> None:
         super().__init__(f'"{schema}".')
+        self.schema = schema
+
+    async def table_exists(self, conn: Conn, name: str) -> bool:
+        return bool(
+            await conn.fetchval(
+                "SELECT to_regclass($1::text) IS NOT NULL",
+                f'"{self.schema}".{name}',
+            )
+        )
+
+    @asynccontextmanager
+    async def migration_session(self, db: Database) -> AsyncIterator[Conn]:
+        """Транзакция миграций (DDL Postgres транзакционный) под
+        advisory-блокировкой схемы; схема создана, ``search_path`` — она."""
+        async with db.transaction() as conn:
+            await conn.execute(
+                "SELECT pg_advisory_xact_lock($1)",
+                _schema_lock_id(self.schema),
+            )
+            exists = await conn.fetchval(
+                "SELECT 1 FROM pg_namespace WHERE nspname = $1", self.schema
+            )
+            if not exists:
+                await conn.execute(f'CREATE SCHEMA "{self.schema}"')
+            await conn.execute(f'SET LOCAL search_path TO "{self.schema}"')
+            yield conn
 
     def cast_text(self, placeholder: str) -> str:
         return f"{placeholder}::text"

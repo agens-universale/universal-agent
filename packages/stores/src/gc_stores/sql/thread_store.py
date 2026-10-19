@@ -48,6 +48,7 @@ from gc_core.threads.rules import (
 )
 from gc_core.threads.store import ThreadStore
 
+from gc_stores import migrations as schema
 from gc_stores.common import EXTENSIONS, apply_sets, apply_side
 from gc_stores.rows import (
     HISTORY,
@@ -79,17 +80,36 @@ class SqlThreadStore(ThreadStore):
         database: Database,
         dialect: Dialect,
         *,
+        migrations: list[schema.Migration] | None = None,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
         self._db = database
         self._d = dialect
         self._q = SqlQueries(dialect)
         self._clock = clock
+        self._migrations = migrations or []
+        self._checked = False
 
-    # --- подключение -------------------------------------------------------
+    # --- схема и подключение ----------------------------------------------
 
     async def _ready(self) -> None:
-        """Перед первой операцией (сверка версии схемы — у наследников)."""
+        """Перед первой операцией — сверка версии схемы с кодом."""
+        if self._checked or not self._migrations:
+            return
+        await schema.check(self._db, self._d, self._migrations)
+        self._checked = True
+
+    async def ensure_schema(self) -> None:
+        """Применить недостающие миграции схемы; повторный вызов безвреден.
+        Всё на месте — DDL не выполняется (пользователь без права CREATE
+        проходит)."""
+        await schema.ensure(self._db, self._d, self._migrations)
+        self._checked = True
+
+    async def schema_version(self) -> int:
+        """Применённая версия схемы базы (0 — схемы нет)."""
+        async with self._db.connection() as conn:
+            return await schema.applied_version(conn, self._d)
 
     async def _write(self, work: Callable[[Conn], Awaitable[T]]) -> T:
         await self._ready()
