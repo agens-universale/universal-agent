@@ -22,8 +22,14 @@ AGENTS.md, скиллы, субагенты и память проекта — �
 | `FileThreadStore` | `gc_core.threads.file_store` | по умолчанию в SDK, CLI, TUI, сервере, gc-chat, gc-acp: файлы `data_*.jsonl` и `meta_*.json` в `paths.threads_data_path` (формат прежний) плюс служебный каталог `.store/`; под Temporal — `durability="fsync"` |
 | `SQLiteThreadStore` | `gc_stores.sqlite` (дистрибутив `gc-stores`) | один файл базы; файлы треда (картинки) — в ней же |
 | `PostgresThreadStore` | `gc_stores.postgres` (`gc-stores[postgres]`) | несколько инстансов на одной базе — [ниже](#postgres-несколько-инстансов-на-одной-базе) |
+| `MySQLThreadStore` | `gc_stores.mysql` (`gc-stores[mysql]`) | то же на MySQL 8 — [хранилища на базах](stores.md#mysql) |
+| `RedisThreadStore` | `gc_stores.redis` (`gc-stores[redis]`) | быстрое хранилище для простых задач, долговечность не гарантирована — [ограничения](stores.md#redis) |
+| `S3ThreadStore` | `gc_stores.s3` (`gc-stores[s3]`) | только S3 с условной записью — [ограничения](stores.md#s3) |
 | `MemoryThreadStore` | `gc_testkit.memory_thread_store_v2` | тесты; самый короткий образец своего хранилища |
-| своё | ваш код | база, S3, Redis — по [контракту](thread-store-contract.md) |
+| своё | ваш код | своя база — по [контракту](thread-store-contract.md) |
+
+Выбор хранилища, сочетание с хранилищем агента (`Stores`, `open_stores`),
+миграции схемы и ограничения Redis и S3 — [хранилища на базах](stores.md).
 
 Хранилище прежнего контракта (`ThreadStoreBase` — одиннадцать методов
 `load_messages`, `save_meta`…) по-прежнему принимается: ядро заворачивает его
@@ -168,9 +174,13 @@ agent = await AsyncAgent.create(settings, thread_store=store)
 await store.close()              # или `async with PostgresThreadStore(...)`
 ```
 
-- **Таблицы** создаёт только `ensure_schema()` (SQL — `gc_stores/postgres/schema.sql`);
-  два инстанса, стартующие одновременно, не мешают друг другу. Уже созданные
-  таблицы пользователю без права `CREATE` не мешают: DDL не выполняется.
+- **Схема** — миграции `gc_stores/postgres/migrations/`: их применяет
+  `ensure_schema()` или `gc-stores migrate` (под advisory-блокировкой — два
+  инстанса, стартующие одновременно, не мешают друг другу); всё на месте —
+  DDL не выполняется, пользователю без права `CREATE` это не мешает. Перед
+  первой операцией хранилище сверяет версию схемы с кодом — [подробно](stores.md#схема-и-миграции).
+- **Вместе с хранилищем агента** — `gc_stores.postgres.open_stores(dsn,
+  agent_id=…)`: оба на одном пуле.
 - **Схема базы** — параметр `schema` (по умолчанию `public`): несколько
   независимых наборов тредов в одной базе.
 - **Пул** — свой (создаётся при первом вызове, параметры — `pool_options` →
@@ -218,7 +228,8 @@ await store.close()              # или `async with PostgresThreadStore(...)`
 | `gc_core/threads/facade.py` | `Threads` — фасад для фронтендов и приложений |
 | `gc_core/threads/session_port.py` | `SessionPort` — сессия агента поверх хранилища v2 |
 | `gc_core/threads/file_store.py` | `FileThreadStore` |
-| `gc_stores/sqlite/`, `gc_stores/postgres/` | `SQLiteThreadStore`, `PostgresThreadStore` и их схемы |
+| `gc_stores/sql/`, `gc_stores/kv/` | общие движки: SQL (Postgres, MySQL, SQLite) и KV (Redis, S3) |
+| `gc_stores/<база>/` | хранилища базы, её миграции, `open_stores` |
 | `gc_testkit/memory_thread_store_v2.py` | `MemoryThreadStore` |
 | `gc_testkit/thread_store_conformance_v2.py` | проверка своей реализации |
 | `gc_core/thread_store_base.py`, `thread_store_async.py` | прежний контракт и адаптер к нему |

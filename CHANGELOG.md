@@ -13,8 +13,28 @@
 
 ### Добавлено — `PostgresThreadStore` (дистрибутив `gc-stores`)
 
-- Новый дистрибутив `gc-stores` (библиотека, в `gc-ua` не входит): хранилища тредов на базах. `gc_stores.postgres.PostgresThreadStore` — контракт `ThreadStore` v2 на Postgres для нескольких инстансов на одной базе; драйвер — extra `gc-stores[postgres]` (asyncpg). Таблицы создаёт `await store.ensure_schema()`; подключение — `AsyncAgent.create(settings, thread_store=store)`. Подходит и воркеру Temporal (`AgentPlugin(thread_store=…)`): объявляет `protected_paths() == []` — данных на диске воркера нет.
+- Новый дистрибутив `gc-stores` (библиотека, в `gc-ua` не входит): хранилища тредов на базах. `gc_stores.postgres.PostgresThreadStore` — контракт `ThreadStore` v2 на Postgres для нескольких инстансов на одной базе; драйвер — extra `gc-stores[postgres]` (asyncpg). Схему (миграции) применяет `await store.ensure_schema()` или `gc-stores migrate`; подключение — `AsyncAgent.create(settings, thread_store=store)`. Подходит и воркеру Temporal (`AgentPlugin(thread_store=…)`): объявляет `protected_paths() == []` — данных на диске воркера нет.
 - Конформанс-наборы хранилищ тредов (`thread_store_conformance_v2.assert_conforms`, `thread_store_conformance.assert_conforms_async`) закрывают хранилище после каждой проверки (`await store.close()`, если метод есть) — для хранилищ с пулом соединений. Новые проверки: явно заданные поля моделей (`model_fields_set`) переживают хранилище — по ним строится meta; `NaN`/`Infinity` в данных пишутся и читаются, как у файлового хранилища.
+
+### Добавлено — хранилища на базах: MySQL, SQLite, Redis, S3 и хранилище агента (`gc-stores`)
+
+- Каждое хранилище `gc-stores` реализует оба контракта — треды (`ThreadStore`) и агента (`AgentStore`): `PostgresThreadStore`/`PostgresAgentStore`, `MySQLThreadStore`/`MySQLAgentStore` (MySQL ≥ 8.0.19, extra `[mysql]` — asyncmy), `SQLiteThreadStore`/`SQLiteAgentStore`, `RedisThreadStore`/`RedisAgentStore` (extra `[redis]`), `S3ThreadStore`/`S3AgentStore` (extra `[s3]` — aiobotocore); `[all]` — все драйверы. Выбор, сочетания и ограничения — `docs/sdk/stores.md`.
+- Сочетания любые: связка `gc_core.stores.Stores(threads=…, agent=…)` — `AsyncAgent.create(settings, stores=…)` и `AgentPlugin(…, stores=…)`; `open_stores(…, agent_id=…)` каждой базы — оба хранилища на одном подключении.
+- Два общих движка: SQL (Postgres, MySQL, SQLite — транзакция с блокировкой строки треда) и KV (Redis, S3 — точка фиксации записи в тред — условная запись его заголовка; прерванная запись следов не оставляет, `sweep()` убирает сирот).
+- Redis — «быстрое хранилище для простых задач»: атомарность записи гарантирована, долговечность — как настроен Redis; Cluster не поддерживается. S3 — только с условной записью (`If-Match`/`If-None-Match`): проверяется при первом обращении, без неё — `ConditionalWritesUnsupported`.
+- Схема SQL-баз — пронумерованные миграции и таблица `gc_schema_version` (у Postgres вместо `schema.sql`): `ensure_schema()` применяет недостающие под блокировкой, перед первой операцией хранилище сверяет версию и называет, что сделать.
+- Утилита `gc-stores`: `migrate [--check]` — схема базы (формат ключей у Redis/S3); `sync <каталог> --agent-id … [--project …] [--with-defaults] [--prune] [--dry-run]` — промпты, AGENTS.md, субагенты и скиллы в хранилище агента (умолчания пакета — с меткой `bundled@<версия>`; после обновления gc-ua хранилище предупреждает о старых). Адрес базы — флагом или `GC_STORES_*`.
+- Конформанс `ThreadStore` проверяет конкурентную запись (два писателя одновременно), конформанс `AgentStore` — ресурсы проекта, изоляцию проектов и память по проекту; `gc_testkit.agent_store_conformance.seed_store` — засеять хранилище с записью ресурсов.
+
+### Breaking v2 — ресурсы проекта в `AgentStore`
+
+- `AgentStore.read`, `list` и `label` получают `project=ProjectKey(…)`: `L2` (`.gc/AGENTS.md`), `L3` (`AGENTS.md` проекта) и слой скиллов `project` — ресурсы проекта и читаются только с ним (без — `ValueError`, `require_project`; `needs_project` их называет). `skills_registry` и `aprovision_skills` получают `project`. Ядро берёт эти слои у хранилища агента, а не файлом из workspace: у `FileAgentStore` это те же файлы.
+- Настройка `agent.project_id` — имя проекта для хранилищ в базе (без неё — slug пути, как раньше); только `[A-Za-z0-9._-]`, не с точки.
+- Шаблон `/init` (`init_agents_md`) читается через хранилище агента: `abuild_init_prompt(store=…, cwd=…, can_ask=…)` вместо `build_init_prompt`.
+
+### Исправлено — промпты судьи команд под Temporal со своим хранилищем агента
+
+- Проба воркера `command_prompts` и перепроверка фактов перед эффектом читали промпты судьи команд синхронно (`run_sync`): со своим сетевым хранилищем агента (база) модерация команд под Temporal падала. Теперь — `aevaluate_guard_probes` на loop.
 
 ### Breaking — хранилище агента v2 (`AgentStore`)
 

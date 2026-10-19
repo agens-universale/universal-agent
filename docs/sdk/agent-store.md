@@ -9,18 +9,20 @@
 | вид | что | имена |
 |---|---|---|
 | `prompt` | промпты | `Prompt`: `system`, `special_instructions`, `subagent`, `custom_subagent`, `summary`, `memory_patch`, `limit_summary`, `intent_tool`, `intent_final`, `finish_gate`, `routing_pair_judge`, `project_memory_compaction`, `command_judge_system`, `command_judge_user`, `init_agents_md` |
-| `instructions` | AGENTS.md | `L0` — роль запуска (`paths.agent_md_path`), `L1` — глобальные |
+| `instructions` | AGENTS.md | `L0` — роль запуска (`paths.agent_md_path`), `L1` — глобальные; `L2` (`.gc/AGENTS.md`) и `L3` (`AGENTS.md` проекта) — ресурсы проекта |
 | `subagent` | определения кастомных субагентов | `<файл>.md`; каталог — `list("subagent")` |
-| `skill` | скиллы | `<слой>/<скилл>/…`, слои `system`, `user`, `project` |
+| `skill` | скиллы | `<слой>/<скилл>/…`, слои `system`, `user`, `project` (ресурсы проекта) |
 
 и **память проекта** — текст с версией, которую агент копит между сессиями.
 
-`L2` (`.gc/AGENTS.md`) и `L3` (`AGENTS.md` проекта) лежат в репозитории
-пользователя и читаются из workspace, не отсюда.
+Всё это ядро берёт из хранилища, без исключений: и `L2`/`L3`, и скиллы
+`project`. Ресурсы проекта читаются с проектом (`project=ProjectKey(…)`).
 
 По умолчанию — `FileAgentStore`: файлы по путям конфига и пакета, ровно как
-ядро читало их всегда (пути хранилище вычисляет само по настройкам прогона).
-Ничего передавать не нужно.
+ядро читало их всегда (пути хранилище вычисляет само по настройкам прогона);
+`L2`, `L3` и скиллы `project` — файлы каталога проекта. Ничего передавать не
+нужно. Хранилища агента на базах (Postgres, MySQL, SQLite, Redis, S3) и
+заливка в них ресурсов (`gc-stores sync`) — [хранилища на базах](stores.md).
 
 Своё хранилище (база, S3, конфиг-сервис) передаётся объектом, как хранилище
 тредов:
@@ -57,14 +59,14 @@ from gc_core.agent_store import AgentStore, ProjectKey, ProjectMemory, ResourceI
 
 
 class AgentStore(ABC):
-    async def read(self, kind, name) -> bytes | None: ...
-    async def list(self, kind, prefix="") -> list[ResourceInfo]: ...
+    async def read(self, kind, name, *, project=None) -> bytes | None: ...
+    async def list(self, kind, prefix="", *, project=None) -> list[ResourceInfo]: ...
     async def read_memory(self, project: ProjectKey) -> ProjectMemory | None: ...
     async def write_memory(
         self, project: ProjectKey, text: str, *, expected_version: str | None
     ) -> ProjectMemory: ...
     async def restore_memory(self, project: ProjectKey) -> None: ...  # необяз.
-    def label(self, kind, name) -> str: ...  # как назвать ресурс в отказе
+    def label(self, kind, name, *, project=None) -> str: ...  # как назвать ресурс в отказе
     def memory_label(self, project) -> str: ...  # как назвать память в отказе
 ```
 
@@ -76,8 +78,12 @@ class AgentStore(ABC):
   тексты декодирует ядро (UTF-8, переводы строк — как `Path.read_text`).
 - `list`: содержимое каталога ресурсов (`ResourceInfo(name, "file" | "dir")`)
   по алфавиту; нет каталога — `FileNotFoundError` / `NotADirectoryError`.
+- `project`: ресурсы проекта (`L2`, `L3`, слой скиллов `project`) читаются
+  только с ним, без него — `ValueError` (`require_project`; ошибка ядра, а не
+  «ресурса нет»). `needs_project(kind, name)` называет такие ресурсы.
 - `read_memory` / `write_memory`: память проекта `ProjectKey(id, root)`
-  (`id` — slug каталога проекта, `root` — сам каталог). Версия —
+  (`id` — настройка `agent.project_id`, без неё — slug каталога проекта;
+  `root` — сам каталог, нужен файловому хранилищу). Версия —
   `memory_version(text)`: sha256 текста, `None` для пустого. Запись проходит,
   только если на месте версия `expected_version` (`None` — памяти нет или она
   пуста); иначе `MemoryConflict(current)`.
@@ -93,7 +99,9 @@ class AgentStore(ABC):
 подстановки в шаблоны, тексты отказов) — в ядре и одинакова для любого
 хранилища: хранилище только отдаёт байты.
 
-Конформанс своего хранилища — `gc_testkit.agent_store_conformance.assert_conforms`.
+Конформанс своего хранилища — `gc_testkit.agent_store_conformance.assert_conforms`
+(ресурсы агента и проекта, изоляция проектов, память); хранилище с записью
+ресурсов засевается помощником `seed_store`.
 
 ## Своё хранилище: что переопределить
 
@@ -110,11 +118,11 @@ class DbAgentStore(FileAgentStore):
         super().__init__(settings)
         self.db = db
 
-    async def read(self, kind, name):
-        row = await self.db.get(kind, name)
+    async def read(self, kind, name, *, project=None):
+        row = await self.db.get(kind, name, project)
         if row is not None:
             return row.data
-        return await super().read(kind, name)
+        return await super().read(kind, name, project=project)
 ```
 
 Своё хранилище может отдать системный промпт, `special_instructions`, роль
@@ -172,6 +180,7 @@ class DbAgentStore(FileAgentStore):
 | `gc_core/agent_store/store.py` | `AgentStore` — контракт |
 | `gc_core/agent_store/models.py` | `Prompt`, `ResourceInfo`, `ProjectKey`, `ProjectMemory`, `memory_version` |
 | `gc_core/agent_store/file_store.py`, `file_paths.py` | `FileAgentStore` и правила путей |
-| `gc_core/agent_store/reading.py` | чтение ядром: `aread_text`, `agent_store_of`, `project_key_of` |
+| `gc_core/agent_store/reading.py` | чтение ядром: `aread_text`, `agent_store_of`, `project_key_of`, `project_key_for`, `require_project` |
+| `gc_stores/sql/agent_store.py`, `gc_stores/kv/agent_store.py` | хранилища агента на базах — [хранилища на базах](stores.md) |
 | `gc_core/tools/skills/store_files.py` | реестр скиллов поверх дерева `skill` своего хранилища |
 | `gc_testkit/memory_agent_store.py`, `agent_store_conformance.py` | образец в памяти и конформанс |
