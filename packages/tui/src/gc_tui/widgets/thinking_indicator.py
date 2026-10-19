@@ -31,6 +31,7 @@ import time
 
 from rich.text import Text
 from textual import events
+from textual.timer import Timer
 from textual.widgets import Static
 
 from gc_tui.messages import OpenEditsScreenRequest
@@ -295,6 +296,8 @@ class ThinkingIndicator(Static):
         # нажатия до отпускания (см. `on_mouse_down`).
         self._pressed_in_summary = False
         self._rotator = PhraseRotator(THINKING_PHRASES)
+        # Таймер анимации; None до монтирования.
+        self._anim_timer: Timer | None = None
         super().__init__(
             self._render_text(), classes="thinking-indicator", markup=False
         )
@@ -326,13 +329,46 @@ class ThinkingIndicator(Static):
         self._state = state
         if state == _STATE_DONE and self._frozen_elapsed is None:
             self._frozen_elapsed = int(self._clock() - self._started_at)
+        self._sync_anim()
         if self.is_mounted:
             self.refresh()
+
+    def hide(self) -> None:
+        """Скрыть строку (агент ждёт ответа человека); анимация стоит."""
+        self.add_class("hidden")
+        self._sync_anim()
+
+    def show(self, state: str) -> None:
+        """Вернуть скрытую строку в состоянии ``state``."""
+        self.remove_class("hidden")
+        self.set_state(state)
+        self._sync_anim()
+
+    def _sync_anim(self) -> None:
+        """Таймер тикает, только пока кадр виден и нужен.
+
+        Итог хода от кадра не зависит, скрытую строку никто не видит.
+        """
+        if self._anim_timer is None:
+            return
+        if self._anim_idle():
+            self._anim_timer.pause()
+        else:
+            self._anim_timer.resume()
+
+    def _anim_idle(self) -> bool:
+        return self.has_class("hidden") or is_terminal_indicator_state(
+            self._state
+        )
 
     def on_mount(self) -> None:
         # Перерисовка 10 раз/сек: глиф держится FRAME_HOLD тиков (≈1.2с цикл),
         # свечение «дышит» каждый тик (1.0с на ping-pong рампы).
-        self.set_interval(0.1, self._tick)
+        # Созданный сразу конечным (восстановление) или скрытым стартует
+        # на паузе.
+        self._anim_timer = self.set_interval(
+            0.1, self._tick, pause=self._anim_idle()
+        )
 
     def _tick(self) -> None:
         # F4: freeze UI на время app-select — не дёргаем анимацию (Screen._selecting).
