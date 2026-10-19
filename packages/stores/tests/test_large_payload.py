@@ -1,5 +1,5 @@
 """Большой вывод тула (сообщение в мегабайты) пишется и читается целиком
-каждым хранилищем на SQL-движке."""
+каждым хранилищем тредов на базах."""
 
 from datetime import timedelta
 
@@ -13,10 +13,26 @@ KEY = ThreadKey(system="s", thread="big")
 BIG = {"role": "tool", "content": "я" * (5 * 1024 * 1024 // 2)}
 
 
-@pytest.fixture(params=["sqlite", "postgres", "mysql"])
+@pytest.fixture(params=["sqlite", "postgres", "mysql", "redis", "s3"])
 async def store(request, tmp_path):
     if request.param == "sqlite":
         made = SQLiteThreadStore(tmp_path / "big.db")
+    elif request.param == "redis":
+        from gc_stores.redis import RedisThreadStore
+
+        url = request.getfixturevalue("redis_url")
+        prefix = request.getfixturevalue("redis_prefixes").new()
+        made = RedisThreadStore(url, prefix=prefix)
+    elif request.param == "s3":
+        from gc_stores.s3 import S3ThreadStore
+
+        config = request.getfixturevalue("s3_config")
+        made = S3ThreadStore(
+            config["bucket"],
+            prefix=request.getfixturevalue("s3_prefixes").new(),
+            endpoint_url=config["endpoint_url"],
+            region=config["region"],
+        )
     elif request.param == "mysql":
         from gc_stores.mysql import MySQLThreadStore
 
