@@ -286,7 +286,7 @@ async def test_plan_stands_in_a_titled_frame_and_feedback_leaves_a_trace_line(
         screen._render_event(map_message(call, no=1, ts=""))
         await pilot.pause()
         panel = screen.query_one(".plan-panel")
-        assert str(panel.border_title) == "☰ предложенный план"
+        assert str(panel.border_title) == "§ предложенный план"
         assert "1. шаг" in "".join(
             str(w.render()) for w in panel.query("Static")
         )
@@ -327,14 +327,14 @@ async def test_plan_frame_changes_colour_once_the_plan_is_accepted(tmp_path):
         await pilot.pause()
         panel = screen.query_one(".plan-panel")
         assert not panel.has_class("plan-accepted")
-        assert str(panel.border_title) == "☰ предложенный план"
+        assert str(panel.border_title) == "§ предложенный план"
         await pilot.press("1")
         await pilot.pause()
         assert panel.has_class("plan-accepted")
-        assert str(panel.border_title) == "☰ утверждённый план"
+        assert str(panel.border_title) == "§ утверждённый план"
         screen._rework_plan()
         assert not panel.has_class("plan-accepted")
-        assert str(panel.border_title) == "☰ предложенный план"
+        assert str(panel.border_title) == "§ предложенный план"
 
 
 def test_only_the_current_accepted_plan_counts_as_accepted():

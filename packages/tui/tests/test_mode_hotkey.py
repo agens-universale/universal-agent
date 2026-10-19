@@ -29,19 +29,19 @@ async def test_shift_tab_cycles_modes_and_the_pill_follows(tmp_path):
         await pilot.pause()
         assert pilot.app.effective_permission_mode() == "manual"
         assert pilot.app.permission_mode_source() == "session"
-        assert _footer(pilot).startswith("⏸ manual mode")
+        assert _footer(pilot).startswith("║ manual mode")
         await pilot.press("shift+tab")
         await pilot.pause()
         assert pilot.app.effective_permission_mode() == "plan"
-        assert _footer(pilot).startswith("☰ plan mode")
+        assert _footer(pilot).startswith("§ plan mode")
         await pilot.press("shift+tab")
         await pilot.pause()
         assert pilot.app.effective_permission_mode() == "auto"
-        assert _footer(pilot).startswith("⚡ auto mode")
+        assert _footer(pilot).startswith("∞ auto mode")
         await pilot.press("shift+tab")
         await pilot.pause()
         assert pilot.app.effective_permission_mode() == "edit"
-        assert _footer(pilot).startswith("⏵⏵ edit mode")
+        assert _footer(pilot).startswith("»» edit mode")
 
 
 async def test_mode_hint_sits_right_after_the_pill(tmp_path):
@@ -51,7 +51,7 @@ async def test_mode_hint_sits_right_after_the_pill(tmp_path):
         await pilot.pause()
         assert (
             _footer(pilot)
-            == "⏸ manual mode — подтверждение всех действий, кроме чтения"
+            == "║ manual mode — подтверждение всех действий, кроме чтения"
         )
 
 
@@ -91,7 +91,7 @@ async def test_config_default_mode_used_when_no_session_choice(tmp_path):
     async with app.run_test() as pilot:
         assert pilot.app.effective_permission_mode() == "manual"
         assert pilot.app.permission_mode_source() == "config"
-        assert _footer(pilot).startswith("⏸ manual mode")
+        assert _footer(pilot).startswith("║ manual mode")
 
 
 async def test_thread_meta_mode_adopted(tmp_path):

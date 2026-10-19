@@ -110,7 +110,7 @@ async def test_footer_switches_to_main_text_on_attach_active_task(tmp_path):
         footer_left = pilot.app.query_one("#footer-left")
         rendered = str(footer_left.render())
         # слева — пилюля режима; F-клавиши перечислены в справке, не в футере
-        assert rendered == "⏵⏵ edit mode (Shift+Tab)"
+        assert rendered == "»» edit mode (Shift+Tab)"
         assert "/mcp" not in rendered
         assert "/skills" not in rendered
         assert "/stop" not in rendered
@@ -129,7 +129,7 @@ async def test_footer_switches_to_main_text_on_attach_active_task(tmp_path):
         footer_left = pilot.app.query_one("#footer-left")
         rendered = str(footer_left.render())
         # слева — пилюля режима; F-клавиши перечислены в справке, не в футере
-        assert rendered == "⏵⏵ edit mode (Shift+Tab)"
+        assert rendered == "»» edit mode (Shift+Tab)"
         assert "/mcp" not in rendered
         assert "/skills" not in rendered
         assert "/export" not in rendered
