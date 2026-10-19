@@ -65,17 +65,20 @@ def plan_resumed_message(mode: str) -> str:
     """План утверждён повторно: он мог быть выполнен частично."""
     return (
         f"The plan was approved earlier and may be partially done. Permission "
-        f"mode is now '{mode}'. First check the current state of the project, "
-        "then finish the remaining steps. If everything is already done, "
-        "report that instead of redoing the work."
+        f"mode is now '{mode}'. First check the current state of what the "
+        "plan touches, then finish the remaining steps. If everything is "
+        "already done, report that instead of redoing the work."
     )
 
 
 def plan_accepted_message(mode: str) -> str:
-    """План одобрен: режим сменён, можно исполнять."""
+    """План одобрен: режим сменён, можно исполнять. С составления плана
+    затронутое им могло измениться — сначала сверка, без догадок о том,
+    исполнялся ли план."""
     return (
-        f"The proposed plan is approved. Permission mode is now '{mode}'. "
-        "Proceed with executing the plan."
+        f"The plan is approved. Permission mode is now '{mode}'. Before "
+        "executing, check the current state of what the plan touches, then "
+        "carry out the plan."
     )
 
 

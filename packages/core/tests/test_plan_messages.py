@@ -53,6 +53,23 @@ def test_messages_name_the_tools_and_the_mode():
     assert "'manual'" in plan_accepted_message("manual")
 
 
+def test_approval_asks_to_check_what_the_plan_touches_first():
+    """С составления плана проект мог измениться, а при повторном одобрении
+    часть шагов уже сделана: перед исполнением модель сверяется с тем, что
+    план затрагивает, — не со всем проектом."""
+    assert plan_accepted_message("edit") == (
+        "The plan is approved. Permission mode is now 'edit'. Before "
+        "executing, check the current state of what the plan touches, then "
+        "carry out the plan."
+    )
+    assert plan_resumed_message("edit") == (
+        "The plan was approved earlier and may be partially done. Permission "
+        "mode is now 'edit'. First check the current state of what the plan "
+        "touches, then finish the remaining steps. If everything is already "
+        "done, report that instead of redoing the work."
+    )
+
+
 def test_continuation_after_approval_is_one_text_for_every_frontend():
     """Исполнитель, CLI, ACP и TUI шлют одно и то же: служебное «план
     одобрен» (или «утверждён повторно») и уточнение человека вторым."""
