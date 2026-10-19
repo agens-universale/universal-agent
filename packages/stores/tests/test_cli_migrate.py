@@ -60,3 +60,21 @@ def test_migrate_redis_writes_the_key_format(
     assert main(["migrate", *args]) == 0
     assert "версия схемы: 1" in capsys.readouterr().out
     assert main(["migrate", "--check", *args]) == 0
+
+
+def test_migrate_s3_writes_the_key_format(s3_config, s3_prefixes, capsys):
+    args = [
+        "--store",
+        "s3",
+        "--bucket",
+        s3_config["bucket"],
+        "--prefix",
+        s3_prefixes.new(),
+        "--endpoint-url",
+        s3_config["endpoint_url"],
+        "--region",
+        s3_config["region"],
+    ]
+    assert main(["migrate", "--check", *args]) == 1
+    assert main(["migrate", *args]) == 0
+    assert "версия схемы: 1" in capsys.readouterr().out

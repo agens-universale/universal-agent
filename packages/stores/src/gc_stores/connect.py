@@ -55,6 +55,19 @@ def _redis(args: argparse.Namespace) -> Any:
     )
 
 
+def _s3(args: argparse.Namespace) -> Any:
+    from gc_stores.s3 import S3ThreadStore
+
+    return S3ThreadStore(
+        _value(args, "--bucket", "GC_STORES_S3_BUCKET"),
+        prefix="" if args.prefix == "gc:" else args.prefix,
+        endpoint_url=args.endpoint_url
+        or os.environ.get("GC_STORES_S3_ENDPOINT")
+        or None,
+        region=args.region,
+    )
+
+
 def _sqlite(args: argparse.Namespace) -> Any:
     from gc_stores.sqlite import SQLiteThreadStore
 
@@ -65,6 +78,7 @@ STORES: dict[str, StoreKind] = {
     "mysql": StoreKind(threads=_mysql),
     "postgres": StoreKind(threads=_postgres),
     "redis": StoreKind(threads=_redis),
+    "s3": StoreKind(threads=_s3),
     "sqlite": StoreKind(threads=_sqlite),
 }
 
@@ -80,8 +94,15 @@ def add_connection_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--url", help="адрес Redis (или GC_STORES_REDIS_URL)")
     parser.add_argument(
-        "--prefix", default="gc:", help="префикс ключей Redis/S3 (gc:)"
+        "--prefix",
+        default="gc:",
+        help="префикс ключей: Redis (gc:), S3 (без префикса)",
     )
+    parser.add_argument("--bucket", help="бакет S3 (или GC_STORES_S3_BUCKET)")
+    parser.add_argument(
+        "--endpoint-url", help="S3-совместимое (или GC_STORES_S3_ENDPOINT)"
+    )
+    parser.add_argument("--region", help="регион S3")
 
 
 def open_thread_store(args: argparse.Namespace) -> Any:

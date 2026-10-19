@@ -62,7 +62,7 @@ test = [
 
     "gc-testkit",
     "gc-core-temporalio==0.4.0",
-    "gc-stores[postgres,mysql,redis]",
+    "gc-stores[all]",
     "pytest>=9.0.3",
     "pytest-asyncio>=0.23",
     "office-mcp",

@@ -218,3 +218,62 @@ def redis_prefixes(redis_url):
     made = RedisPrefixes(redis_url)
     yield made
     made.drop_all()
+
+
+S3_ENV = "GC_TEST_S3_ENDPOINT"
+
+
+@pytest.fixture(scope="session")
+def s3_config() -> dict:
+    """Бакет S3 для тестов: ``GC_TEST_S3_ENDPOINT``, ``GC_TEST_S3_BUCKET``,
+    ключи — стандартные переменные AWS (``AWS_ACCESS_KEY_ID``…)."""
+    endpoint = os.environ.get(S3_ENV, "")
+    if not endpoint:
+        if os.environ.get("REQUIRE_S3") == "1":
+            pytest.fail(f"REQUIRE_S3=1, но {S3_ENV} не задан")
+        pytest.skip(f"{S3_ENV} не задан: тесты S3 пропущены")
+    return {
+        "endpoint_url": endpoint,
+        "bucket": os.environ.get("GC_TEST_S3_BUCKET", "gc-test"),
+        "region": os.environ.get("AWS_DEFAULT_REGION", "us-east-1"),
+    }
+
+
+class S3Prefixes:
+    """Префикс ключей на хранилище теста; ``drop_all`` удаляет объекты."""
+
+    def __init__(self, config: dict) -> None:
+        self.config = config
+        self.made: list[str] = []
+
+    def new(self) -> str:
+        prefix = f"gc_test_{uuid.uuid4().hex[:12]}/"
+        self.made.append(prefix)
+        return prefix
+
+    def drop_all(self) -> None:
+        async def drop():
+            from aiobotocore.session import get_session
+
+            async with get_session().create_client(
+                "s3",
+                endpoint_url=self.config["endpoint_url"],
+                region_name=self.config["region"],
+            ) as s3:
+                for prefix in self.made:
+                    listed = await s3.list_objects_v2(
+                        Bucket=self.config["bucket"], Prefix=prefix
+                    )
+                    for item in listed.get("Contents", []):
+                        await s3.delete_object(
+                            Bucket=self.config["bucket"], Key=item["Key"]
+                        )
+
+        asyncio.run(drop())
+
+
+@pytest.fixture
+def s3_prefixes(s3_config):
+    made = S3Prefixes(s3_config)
+    yield made
+    made.drop_all()

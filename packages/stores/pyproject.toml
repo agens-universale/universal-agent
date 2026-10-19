@@ -16,6 +16,8 @@ gc-stores = "gc_stores.cli:main"
 postgres = ["asyncpg>=0.29"]
 mysql = ["asyncmy>=0.2.9"]
 redis = ["redis>=5.0"]
+s3 = ["aiobotocore>=2.13"]
+all = ["gc-stores[postgres,mysql,redis,s3]"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/gc_stores"]
