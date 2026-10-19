@@ -135,6 +135,11 @@ class ToolEffectRequest:
     #: Адрес треда хода ``[system_id, thread_id]``: файлы треда (снимки
     #: ``fs_view_image``, медиа MCP) инструмент на воркере кладёт в него.
     thread: list[str] | None = None
+    #: Действующий режим разрешений на момент одобрения (значение `Mode`).
+    #: Защиты отработали в ядре; тело на воркере, где стора режима нет,
+    #: решает по нему то, что зависит от режима (переход редиректа на другой
+    #: хост). None — запрос старой истории: воркер берёт режим из конфига.
+    permission_mode: str | None = None
     schema_version: int = 1
 
 
@@ -158,6 +163,10 @@ class ModelRequest:
     request_label: str = "chat_completion"
     payload_overrides: dict[str, Any] | None = None
     set_previous_response_id: bool = True
+    #: Задан — вызов со своим бюджетом повторов (судья действий): одна
+    #: попытка с этим таймаутом, предохранитель не трогается
+    #: (``llm_chat_client.arequest_chat_completion_outcome``).
+    isolated_timeout_sec: float | None = None
     mute_answer: bool = False
     schema_version: int = 1
 

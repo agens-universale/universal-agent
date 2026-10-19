@@ -21,6 +21,7 @@ from gc_core.runtime_notices import (
     register_runtime_notices_listener,
     unregister_runtime_notices_listener,
 )
+from gc_core.security.confirm_port import call_with_optional
 from gc_core.settings import AppConfig, LoadedSettings, settings_of
 from gc_core.startup_notices import (
     Notice,
@@ -274,6 +275,14 @@ class TuiApp(App):
         Binding(
             "ctrl+c", "interrupt", "копировать/стоп", show=False, priority=True
         ),
+        # priority: без него Textual забирает Shift+Tab под focus_previous.
+        Binding(
+            "shift+tab",
+            "cycle_permission_mode",
+            "режим",
+            show=False,
+            priority=True,
+        ),
         # Страховка: терминал часто съедает хоткей — основной UX = copy-on-select.
         Binding(
             "ctrl+shift+c",
@@ -374,6 +383,11 @@ class TuiApp(App):
         )
         self.active_runner = None  # AgentRunner | None
         self._runner_stale = False  # конфиг изменился при живом run → пересборка после завершения
+        # Режим разрешений, выбранный в сессии (Shift+Tab, флаг запуска, сохранённый
+        # в сессии). None — выбора не было, действует конфиг. Единственный
+        # писатель — set_permission_mode.
+        self._permission_mode: Optional[str] = None
+        self._permission_mode_locked = False  # режим задан флагом запуска
         self.last_runner_error: Optional[str] = None
         self._session_log_path: Optional[str] = None
         self.last_terminal_outcome: Optional[str] = None
@@ -1706,6 +1720,10 @@ class TuiApp(App):
         )
         runner_ref.append(self.active_runner)
         self._runner_stale = False
+        # Раннер пересоздаётся (смена настроек сессии, /stop): выбранный режим
+        # принадлежит окну, а не раннеру, и едет в каждый новый.
+        if self._permission_mode is not None:
+            self.active_runner.set_permission_mode(self._permission_mode)
         return self.active_runner
 
     def _build_real_executor(self):
@@ -1817,6 +1835,7 @@ class TuiApp(App):
         question: str,
         fields: list,
         via: str | None = None,
+        decision_key: str | None = None,
     ) -> bool:
         """Агент-поток → UI: баннер на TraceScreen. True = mounted, False = fail.
 
@@ -1832,10 +1851,14 @@ class TuiApp(App):
             if not callable(fn):
                 return False
             try:
-                try:
-                    fn(title, question, fields, via=via)
-                except TypeError:
-                    fn(title, question, fields)
+                call_with_optional(
+                    fn,
+                    title,
+                    question,
+                    fields,
+                    via=via,
+                    decision_key=decision_key,
+                )
             except Exception:
                 return False
             return True
@@ -1926,6 +1949,95 @@ class TuiApp(App):
         вместе с карточкой, как только трейс уедет вверх, и до перезапуска не вернулся."""
         return self._update_notice() + self.collect_unread_notices()
 
+    # --- режим разрешений -------------------------------------------------
+
+    def _permission_mode_and_source(self):
+        """Действующий режим и его источник: выбор сессии → конфиг → встроенный.
+
+        Правило — ядра (``mode_with_source``), с выбором этого окна: оно живёт
+        и до первого прогона, когда контекста рана со стором ещё нет.
+        """
+        from gc_core.security.permission_mode import mode_with_source
+
+        return mode_with_source(
+            self._permission_mode, self.effective_settings().settings
+        )
+
+    def effective_permission_mode(self) -> str:
+        return self._permission_mode_and_source()[0].value
+
+    def permission_mode_source(self) -> str:
+        """Откуда взят действующий режим: session | config | default."""
+        return self._permission_mode_and_source()[1]
+
+    def set_permission_mode(self, mode: str) -> None:
+        """Сменить режим сессии и донести до движка.
+
+        Писатели ``_permission_mode`` — этот метод и
+        ``clear_permission_mode``: пилюля, ``/config`` и движок расходятся
+        ровно тогда, когда кто-то пишет поле мимо них.
+        Раннера может ещё не быть — выбор донесёт ``get_runner`` при создании.
+        """
+        self._permission_mode = mode
+        runner = self.active_runner
+        if runner is not None and hasattr(runner, "set_permission_mode"):
+            runner.set_permission_mode(mode)
+
+    def lock_permission_mode(self, mode: str) -> None:
+        """Режим из флага запуска: сохранённый в сессии его не перебивает."""
+        self.set_permission_mode(mode)
+        self._permission_mode_locked = True
+
+    def clear_permission_mode(self) -> None:
+        """Снять выбор окна: действует ``default_mode`` конфига.
+
+        Сброс, а не запись ``default_mode`` в сессию: иначе смена конфига
+        потом не действовала бы на эту сессию.
+        """
+        self._permission_mode = None
+        runner = self.active_runner
+        if runner is not None and hasattr(runner, "clear_permission_mode"):
+            runner.clear_permission_mode()
+
+    def adopt_thread_permission_mode(
+        self, meta: dict | None, *, resumed: bool = False
+    ) -> None:
+        """Принять режим, сохранённый в открываемой сессии.
+
+        ``resumed`` — сессию открыли (пикер), а не создали в этом окне: без
+        сохранённого режима у неё действует ``default_mode`` конфига, а не
+        режим окна. Новый тред окна (первое сообщение, ``/new``) режим окна
+        наследует. Флаг запуска сильнее и того и другого.
+        """
+        if self._permission_mode_locked:
+            return
+        from gc_core.security.permission_mode import coerce_mode
+
+        # Режим из другой сборки или убранный из списка — как его нет:
+        # движок отвергает неизвестный режим исключением.
+        mode = coerce_mode(
+            ((meta or {}).get("shared") or {}).get("permission_mode")
+        )
+        if mode is not None:
+            self.set_permission_mode(mode.value)
+        elif resumed:
+            self.clear_permission_mode()
+
+    def action_cycle_permission_mode(self) -> None:
+        """Shift+Tab: следующий режим в цикле (гейт — check_action)."""
+        from gc_core.security.permission_mode import coerce_mode, next_mode
+
+        current = coerce_mode(self.effective_permission_mode())
+        if current is None:
+            return
+        new = next_mode(current)
+        self.set_permission_mode(new.value)
+        screen = self._main_screen()
+        if screen is not None and hasattr(
+            screen, "on_permission_mode_changed"
+        ):
+            screen.on_permission_mode_changed(new.value)
+
     def _main_screen(self):
         """Базовый (главный) экран — низ стека; None если это не TraceScreen."""
         base = self.screen_stack[0] if self.screen_stack else None
@@ -1977,6 +2089,22 @@ class TuiApp(App):
             return self._can_open_tool() or isinstance(
                 self.screen, SessionsScreen
             )
+        if action == "cycle_permission_mode":
+            # Пилюля режима видна только на главном экране: на прочих хоткей
+            # выключен (иначе режим менялся бы молча, без индикатора), и
+            # Shift+Tab остаётся их собственной навигацией по формам.
+            screen = self._main_screen()
+            if screen is None or self.screen is not screen:
+                return False
+            # На вопросе подтверждения — тоже выключен: смысл вопроса зависит от
+            # режима, сменить режим посреди него — ответить на вопрос, которого
+            # уже нет. Вопрос агента (ask_human) режима не касается, там хоткей
+            # работает намеренно: человек ужесточает режим ПЕРЕД ответом.
+            if getattr(screen, "_confirm_active", False):
+                return False
+            # Баннер одобрения плана — тот же случай: его варианты читаются в
+            # терминах режима.
+            return getattr(screen, "_plan_banner", None) is None
         return True
 
     def action_help(self) -> None:
@@ -1985,6 +2113,9 @@ class TuiApp(App):
         # Справка доступна с любого экрана, КРОМЕ самой справки (без help-на-help).
         if isinstance(self.screen, HelpScreen):
             return
+        main = self._main_screen()
+        if main is not None:
+            main.spend_help_hint()
         self.push_screen(HelpScreen())
 
     def action_sessions(self) -> None:

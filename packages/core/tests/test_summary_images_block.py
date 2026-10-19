@@ -181,6 +181,7 @@ def test_compaction_summary_lists_user_images_of_the_collapsed_history():
         raw_summary="S",
         last_dialog_steps="",
         summarized_messages_count=3,
+        can_propose_plan=True,
     )
 
     assert (
@@ -223,6 +224,7 @@ def test_compaction_leaves_images_of_the_kept_batch_out_of_the_block():
         last_dialog_steps="",
         summarized_messages_count=2,
         kept_messages=[kept],
+        can_propose_plan=True,
     )
 
     assert _line(old) in content

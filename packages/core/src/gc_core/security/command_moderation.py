@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import hashlib
 import inspect
 import json
 import os
 import re
+import shlex
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Sequence
@@ -20,19 +22,37 @@ from gc_core.constants.tool_names import EXEC_PYTHON_NAME
 from gc_core.execution.contracts import ExecutionFailure
 from gc_core.execution.ports import port
 from gc_core.message_projection import project_text_for_model
+from gc_core.security.call_scope import current_call
 from gc_core.security.confirm_port import (
     confirm_available,
     confirmation_step,
+    guard_refusal,
     request_confirm,
 )
 from gc_core.security.dual_wrapper import AwaitOnCaller, OffLoop, dual_wrap
 from gc_core.security.guard_probe import GuardProbeRequest, probe_step
+from gc_core.security.mode_stage import (
+    ModeAction,
+    remembered_denial,
+    resolve_by_mode,
+)
 from gc_core.security.path_policy import (
     ToolSecurityContext,
     _settings_source,
     audit_policy_decision,
     resolve_tool_context,
 )
+from gc_core.security.permission_mode import ALIGN as MODE_ALIGN
+from gc_core.security.permission_mode import ALLOW as MODE_ALLOW
+from gc_core.security.permission_mode import (
+    CAT_EXEC,
+    PATHS,
+    exec_decision,
+    is_readonly_command,
+    readonly_extra,
+)
+from gc_core.security.permission_mode import JUDGE as MODE_JUDGE
+from gc_core.security.permission_store import COMMAND_KEY_PREFIX
 from gc_core.security.protected_paths import protected_paths
 from gc_core.settings import settings_of
 from gc_core.summarize.llm import (
@@ -136,13 +156,24 @@ def _get_protected_paths(cwd: str | None):
     return protected_paths(cwd=cwd)
 
 
-def load_never_touch_paths(cwd: str | None) -> list[str]:
-    """Snapshot host paths with the command judge's existing local fallback."""
+def load_never_touch_paths(
+    cwd: str | None, *, instructions: bool = True
+) -> list[str]:
+    """Snapshot host paths with the command judge's existing local fallback.
+
+    ``instructions=False`` — без файлов инструкций и `.git`: судья действий
+    оценивает их своими правилами (по просьбе — можно), а неприкосновенный
+    путь не снимается ничьей просьбой. Судье команд `.git` проекта нужен:
+    пол команды с `.git` не спрашивает (`grep --exclude-dir .git`), и
+    `cp … .git/hooks/` иначе выглядел бы обычной записью в проекте.
+    """
     try:
         paths = _get_protected_paths(cwd)
-        return sorted(
-            str(path) for path in paths.instructions | paths.operational
-        )
+        chosen = set(paths.operational)
+        if instructions:
+            chosen |= paths.instructions
+            chosen.add(Path(cwd or os.getcwd()) / ".git")
+        return sorted(str(path) for path in chosen)
     except Exception:
         return []
 
@@ -259,6 +290,21 @@ def validate_judge_result(raw: dict[str, Any]) -> JudgeResult:
 JUDGE_UNAVAILABLE_CONFIRM_REQUIRED = "judge_unavailable_confirm_required"
 
 
+def _declined_by_user(
+    risk_flags: list[str] | None = None,
+) -> ExecutionDecision:
+    """Человек ответил на вопрос о команде «нет». Причину и инструкцию модели
+    гард потом берёт по исходу вопроса (`guard_refusal`)."""
+    return ExecutionDecision(
+        allowed=False,
+        decision="cancelled",
+        reason_code="user_confirmation",
+        reason="User declined the command.",
+        risk_flags=list(risk_flags or []),
+        error_type="unsafe_command_cancelled_by_user",
+    )
+
+
 def _decide_without_judge(
     normalized_mode: str, user_confirmation: bool | None, ctx: Any
 ) -> ExecutionDecision:
@@ -271,13 +317,7 @@ def _decide_without_judge(
                 reason="User confirmed execution after judge was unavailable.",
             )
         if user_confirmation is False:
-            return ExecutionDecision(
-                allowed=False,
-                decision="cancelled",
-                reason_code="user_confirmation",
-                reason="User declined the command.",
-                error_type="unsafe_command_cancelled_by_user",
-            )
+            return _declined_by_user()
         return ExecutionDecision(
             allowed=False,
             decision="asked",
@@ -308,7 +348,11 @@ def _decide_without_judge(
             reason="Judge is unavailable; user confirmation is required.",
             requires_confirmation=True,
         )
-    # Fail-closed: confirm недоступен или пользователь отказал — блокируем.
+    if user_confirmation is False:
+        # Человек ответил «нет» — это его отказ, а не «судья недоступен»:
+        # причина и инструкция модели — по исходу вопроса (как в ask).
+        return _declined_by_user()
+    # Fail-closed: подтверждение недоступно — блокируем.
     return ExecutionDecision(
         allowed=False,
         decision="blocked",
@@ -367,14 +411,7 @@ def decide_command_execution(
             risk_flags=judge_result.risk_flags,
         )
     if user_confirmation is False:
-        return ExecutionDecision(
-            allowed=False,
-            decision="cancelled",
-            reason_code="user_confirmation",
-            reason="User declined the command.",
-            risk_flags=judge_result.risk_flags,
-            error_type="unsafe_command_cancelled_by_user",
-        )
+        return _declined_by_user(judge_result.risk_flags)
     return ExecutionDecision(
         allowed=False,
         decision="asked",
@@ -412,6 +449,41 @@ def make_block_error(
     return {key: value for key, value in error.items() if value is not None}
 
 
+def _command_blocked_result(
+    tool_name: str, blocked_result_factory, error: dict[str, Any], args, kwargs
+) -> str:
+    """Ответ тула на заблокированную команду: фабрика декоратора, своя форма
+    тула или общий конверт."""
+    if blocked_result_factory is not None:
+        return blocked_result_factory(error)
+    tool_blocked_result = _tool_blocked_result(args)
+    if callable(tool_blocked_result):
+        return tool_blocked_result(error, *args[1:], **kwargs)
+    return json.dumps(
+        {"tool": tool_name, "ok": False, "error": error}, ensure_ascii=False
+    )
+
+
+def _mode_exec_gate(
+    payload, context, tool_name, shell_payload, kwargs, source, blocked
+):
+    """Стадия режима и выключатель модерации — ``(решено, ответ)``.
+
+    Стадия режима идёт ДО ``command_moderation.enabled``: выключенная в
+    конфиге модерация режим не отменяет."""
+    call_now, error = yield from _mode_exec_stage(
+        payload, context, tool_name, shell_payload, kwargs
+    )
+    if error is not None:
+        return True, blocked(error)
+    if call_now or not settings_of(source).security.command_moderation.enabled:
+        return True, (yield)
+    return False, None
+
+
+# Модерация исполнения. ``shell_payload`` — payload это shell-команда: только
+# к ней применим список безобидных команд (к исходнику на Python он не
+# относится — там нет «команды», которую можно сверить со списком).
 def moderate_command_execution(
     payload_arg: str | None = None,
     payload_extractor: Callable[..., str] | None = None,
@@ -419,6 +491,7 @@ def moderate_command_execution(
     judge_client_extractor: Callable[..., Any] | None = None,
     user_confirmation_extractor: Callable[..., bool | None] | None = None,
     blocked_result_factory: Callable[[dict[str, Any]], str] | None = None,
+    shell_payload: bool = False,
 ) -> Callable[[Callable[..., str]], Callable[..., str]]:
     def decorator(func: Callable[..., str]) -> Callable[..., str]:
         # Тело — ГЕНЕРАТОР: `dual_wrap` строит по нему обе обёртки. Обычный
@@ -439,14 +512,33 @@ def moderate_command_execution(
             _source = _settings_source(
                 args[0] if args else None, getattr(context, "ctx", None)
             )
-            if not settings_of(_source).security.command_moderation.enabled:
-                return (yield)
             try:
                 payload = _extract_payload(
                     func, args, kwargs, payload_arg, payload_extractor
                 )
             except ValueError:
                 return (yield)
+
+            def _blocked(error: dict[str, Any]) -> str:
+                return _command_blocked_result(
+                    tool_name or func.__name__,
+                    blocked_result_factory,
+                    error,
+                    args,
+                    kwargs,
+                )
+
+            handled, result = yield from _mode_exec_gate(
+                payload,
+                context,
+                tool_name or func.__name__,
+                shell_payload,
+                kwargs,
+                _source,
+                _blocked,
+            )
+            if handled:
+                return result
             host_facts = None
             if callable(port(context.ctx, "guard_probe")):
                 host_facts = yield probe_step(
@@ -544,6 +636,10 @@ def moderate_command_execution(
                 )
                 return (yield)
             error = make_block_error(decision, moderation_context.mode)
+            if decision.decision == "cancelled":
+                # Человек ответил на вопрос «нет»: причина и инструкция
+                # модели — по исходу вопроса, как у вопросов режима.
+                error.update(guard_refusal(tool_ctx, error["type"]))
             audit_policy_decision(
                 context,
                 tool_name=moderation_context.tool_name,
@@ -552,23 +648,178 @@ def moderate_command_execution(
                 risk_flags=decision.risk_flags,
                 error_type=error.get("type"),
             )
-            if blocked_result_factory is not None:
-                return blocked_result_factory(error)
-            tool_blocked_result = _tool_blocked_result(args)
-            if callable(tool_blocked_result):
-                return tool_blocked_result(error, *args[1:], **kwargs)
-            return json.dumps(
-                {
-                    "tool": moderation_context.tool_name,
-                    "ok": False,
-                    "error": error,
-                },
-                ensure_ascii=False,
-            )
+            return _blocked(error)
 
         return dual_wrap(func, _flow)
 
     return decorator
+
+
+#: Строка вопроса о фоновом запуске: команда та же, но переживёт ответ агента.
+_BACKGROUND_FIELD = (
+    "Запуск",
+    "в фоне — продолжит работать после ответа агента",
+)
+
+
+def command_call_identity(
+    payload: str, kwargs: dict[str, Any], launch_root: Any
+) -> tuple[str, list[tuple[str, str]]]:
+    """Ключ запомненного ответа о команде и строки вопроса сверх самой команды.
+
+    Ответ «в сессии» покрывает то действие, что видел человек. Каталог вне
+    проекта и переменные окружения меняют исполняемое — они входят в ключ;
+    окружение — именами и хешем значений: значения бывают токенами, а ключи
+    «в сессии» пишутся в мету треда. Каталог внутри проекта и фоновый запуск —
+    та же команда: только строка в вопросе. Пометки ключа — по-английски: эти
+    ключи уходят судье команд примерами.
+    """
+    key = f"{COMMAND_KEY_PREFIX}{payload}"
+    fields: list[tuple[str, str]] = []
+    cwd = kwargs.get("cwd")
+    if isinstance(cwd, str) and cwd.strip():
+        fields.append(("Каталог", cwd.strip()))
+        outside = _outside_project(cwd.strip(), launch_root)
+        if outside:
+            key += f" [outside project: {outside}]"
+    env = _env_pairs(kwargs.get("env_vars"))
+    if env:
+        names = ", ".join(name for name, _ in env)
+        digest = hashlib.sha256(
+            json.dumps(env, ensure_ascii=False).encode("utf-8")
+        ).hexdigest()[:8]
+        fields.append(("Окружение", names))
+        key += f" [env: {names} #{digest}]"
+    if kwargs.get("run_in_background"):
+        fields.append(_BACKGROUND_FIELD)
+    return key, fields
+
+
+def _outside_project(cwd: str, launch_root: Any) -> str:
+    """Каталог исполнения вне корня проекта — его нормализованный путь, иначе
+    пусто. Сравнение строковое, как у `_git_elsewhere`: под durable файловую
+    систему не трогаем."""
+    root = PATHS.normpath(str(launch_root or ""))
+    target = PATHS.normpath(PATHS.join(root, cwd))
+    inside = PATHS.normcase(target) == PATHS.normcase(root) or PATHS.normcase(
+        target
+    ).startswith(PATHS.normcase(root).rstrip(PATHS.sep) + PATHS.sep)
+    return "" if inside else target
+
+
+def _env_pairs(raw: Any) -> list[tuple[str, str]]:
+    """Переменные окружения вызова как отсортированные пары (имя, значение)."""
+    if isinstance(raw, dict):
+        items = list(raw.items())
+    elif isinstance(raw, list):
+        items = [
+            (item.get("name"), item.get("value"))
+            for item in raw
+            if isinstance(item, dict)
+        ]
+    else:
+        return []
+    return sorted((str(name), str(value)) for name, value in items if name)
+
+
+def _git_elsewhere(payload: str, cwd: Any, launch_root: Any) -> bool:
+    """git с явным каталогом исполнения: он исполнит конфиг и хуки того
+    репозитория (как у эталона: `cd` с git спрашивается). Команду узнаём по
+    первому слову разбора, как список безобидных, а не по началу строки:
+    `'git' status` — тоже git. `cwd`, равный корню проекта (модели часто
+    передают его явно), — тот же каталог. Сравнение строковое: файловую
+    систему не трогаем — под durable это песочница."""
+    if not (isinstance(cwd, str) and cwd.strip()):
+        return False
+    root = PATHS.normpath(str(launch_root or ""))
+    if PATHS.normpath(PATHS.join(root, cwd.strip())) == root:
+        return False
+    try:
+        tokens = shlex.split(str(payload))
+    except ValueError:
+        return True
+    return bool(tokens) and tokens[0] == "git"
+
+
+def _mode_exec_stage(payload, context, tool_name, shell_payload, kwargs):
+    """Стадия режима разрешений для исполнения: ``(call_now, error)``.
+
+    Переменные окружения вызова меняют то, что исполнит команда
+    (`LD_PRELOAD`, `GIT_CONFIG_*`, `BASH_ENV`), — безобидной она уже не
+    считается. Каталог исполнения из вызова: git там исполнит конфиг и хуки
+    другого репозитория.
+
+    ``error`` — тело отказа; ``call_now`` — исполнять сразу, без судьи; оба
+    пусты — решает обычный путь модерации (судья команд).
+    """
+    key, extra_fields = command_call_identity(
+        payload, kwargs, context.launch_root
+    )
+    denied = remembered_denial(context, tool_name, key, command=payload)
+    if denied is not None:
+        return False, denied
+    readonly = (
+        shell_payload
+        and not kwargs.get("env_vars")
+        and not _git_elsewhere(payload, kwargs.get("cwd"), context.launch_root)
+        and is_readonly_command(payload, readonly_extra(context.ctx))
+    )
+    decision = exec_decision(context.ctx, readonly=readonly)
+    scope = current_call()
+    if scope is not None and scope.floor_review:
+        # Пол отдал команду судье (упоминает защищённый путь): решает он,
+        # даже если сама команда из списка безобидных.
+        decision = MODE_ALIGN
+    if decision == MODE_ALLOW:
+        audit_policy_decision(
+            context,
+            tool_name=tool_name,
+            decision="executed",
+            reason_code="mode_readonly_command" if readonly else "mode_allow",
+        )
+        return True, None
+    if decision == MODE_JUDGE:
+        return False, None
+    allowed, error = yield from resolve_by_mode(
+        decision,
+        ModeAction(
+            context=context,
+            tool_name=tool_name,
+            category=CAT_EXEC,
+            decision_key=key,
+            question=(
+                "Выполнение команды",
+                f"Разрешить запуск? ({tool_name})",
+                [(_primary_payload_label(tool_name), payload), *extra_fields],
+            ),
+            runtime=lambda: _judge_runtime(context),
+            error_fields={"command": payload},
+            deny_type="exec_denied_by_mode",
+            deny_reason=(
+                "Command execution not permitted in the current permission mode."
+            ),
+        ),
+    )
+    return (True, None) if allowed else (False, error)
+
+
+def _judge_runtime(context: ToolSecurityContext) -> dict[str, Any]:
+    """Что судья действий получает о командах сверх общего: запреты и примеры
+    из конфига — то же, чем пользуется судья команд. Пустое не передаётся.
+
+    Ответы человека «и подобные в сессии» сюда не идут: это тексты команд,
+    написанные агентом, а блок `runtime` объявлен судье доверенным. Под
+    durable-исполнением пути хоста ядро не читает.
+    """
+    facts = {
+        "denied_command_examples": list(context.denied_command_examples),
+        "allowed_command_examples": list(context.allowed_command_examples),
+    }
+    if not callable(port(context.ctx, "guard_probe")):
+        facts["never_touch_paths"] = load_never_touch_paths(
+            context.launch_root, instructions=False
+        )
+    return {name: value for name, value in facts.items() if value}
 
 
 def _obtain_user_confirmation(
@@ -589,6 +840,9 @@ def _obtain_user_confirmation(
         and decision.reason_code != JUDGE_UNAVAILABLE_CONFIRM_REQUIRED
     ):
         return user_confirmation_extractor(*args, **kwargs)
+    key, extra_fields = command_call_identity(
+        payload, kwargs, moderation_context.launch_root
+    )
     return (
         yield confirmation_step(
             title="Проверка команды",
@@ -598,16 +852,19 @@ def _obtain_user_confirmation(
                     _primary_payload_label(moderation_context.tool_name),
                     payload,
                 ),
+                *extra_fields,
                 ("Причина", decision.reason),
                 ("Риски", ", ".join(decision.risk_flags) or "-"),
             ],
             ctx=tool_ctx,
-            decision_key=f"command:{payload}",
+            decision_key=key,
             local_wait=lambda: _ask_user_confirmation(
                 payload,
                 moderation_context,
                 decision,
                 tool_ctx,
+                decision_key=key,
+                extra_fields=extra_fields,
             ),
         )
     )
@@ -736,6 +993,15 @@ def _join_reasons(reasons: list[str], *, default: str) -> str:
     return "; ".join(reason for reason in reasons if reason) or default
 
 
+def judge_transport_configured(ctx: Any) -> bool:
+    """Есть ли у прогона канал вспомогательной модели для судьи. Это свойство
+    конфигурации, известное до запроса, — не временный сбой."""
+    configured = getattr(ctx, "model_transport_configured", None)
+    if configured is None:
+        configured = bool(settings_of(ctx).backend.completions_url)
+    return bool(configured)
+
+
 def _default_judge_client(
     args: tuple[Any, ...], kwargs: dict[str, Any]
 ) -> Callable[[dict[str, Any]], Any]:
@@ -752,10 +1018,7 @@ def _default_judge_client(
     ctx = kwargs.get("ctx") or getattr(self_obj, "_ctx", None)
     state = kwargs.get("state") or getattr(self_obj, "_state", None)
     settings = settings_of(_settings_source(self_obj, ctx))
-    configured = getattr(ctx, "model_transport_configured", None)
-    if configured is None:
-        configured = bool(settings.backend.completions_url)
-    if ctx is None or state is None or not configured:
+    if ctx is None or state is None or not judge_transport_configured(ctx):
         raise JudgeUnavailable("chat/completions context is not configured")
 
     async def ajudge(judge_payload: dict[str, Any]) -> dict[str, Any]:
@@ -863,11 +1126,16 @@ def _strip_judge_response_text(
 ) -> str:
     # Aux-парсер: ``<think>`` всегда, extra-теги из конфига; fence/JSON поверх.
     text = project_text_for_model(raw_text, tags=tags, strip_think=True)
-    fence_match = re.search(
+    fences = re.findall(
         r"```(?:json)?\s*\n?(.*?)\n?```", text, flags=re.DOTALL | re.IGNORECASE
     )
-    if fence_match:
-        return fence_match.group(1).strip()
+    if sum(body.lstrip().startswith("{") for body in fences) > 1:
+        # Какой из объектов — вердикт, не решить: пример «allow» перед
+        # настоящим «block» прошёл бы за разрешение. Ответ негодный: у судьи
+        # команд это «судья не ответил», у судьи действий — сбой проверки.
+        raise JudgeUnavailable("judge returned several JSON blocks")
+    if fences:
+        return fences[0].strip()
     if text.startswith("```"):
         text = text.strip("`").strip()
         if text.lower().startswith("json"):
@@ -959,6 +1227,9 @@ def _ask_user_confirmation(
     context: ModerationContext,
     decision: ExecutionDecision,
     ctx: Any = None,
+    *,
+    decision_key: str | None = None,
+    extra_fields: Sequence[tuple[str, str]] = (),
 ) -> bool:
     """Ожидание человека. Зовётся драйвером гварда в отдельном потоке."""
     primary_label = _primary_payload_label(context.tool_name)
@@ -968,11 +1239,12 @@ def _ask_user_confirmation(
         question=f"Разрешить запуск? ({context.tool_name})",
         fields=[
             (primary_label, payload),
+            *extra_fields,
             ("Причина", decision.reason),
             ("Риски", ", ".join(decision.risk_flags) or "-"),
         ],
         ctx=ctx,
-        decision_key=f"command:{payload}",
+        decision_key=decision_key or f"{COMMAND_KEY_PREFIX}{payload}",
     )
 
 

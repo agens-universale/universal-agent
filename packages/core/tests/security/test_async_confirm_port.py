@@ -17,7 +17,7 @@ from gc_core.security.permission_store import PermissionStore
         ("allow_once", True, False),
         ("deny_remember", False, True),
         ("deny_once", False, False),
-        ("invalid", False, True),
+        ("invalid", False, False),  # непонятный ответ — запрет разовый
     ],
 )
 async def test_async_choice_and_cached_reply(choice, allow, session):

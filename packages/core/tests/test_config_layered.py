@@ -449,3 +449,62 @@ def test_pointing_the_managed_overlay_works_from_its_home_module(
     assert (
         settings.agent.max_steps == 777
     )  # патч действует: оверлей взят отсюда
+
+
+_READONLY_MAKE = "security:\n  permissions:\n    readonly_commands: [make]\n"
+
+
+def test_project_config_does_not_extend_readonly_commands(
+    global_config_file, isolated_cwd
+):
+    """Список безобидных команд проходит без вопроса и в plan, и в manual:
+    расширять его — доверие пользователя, а не настройка проекта. Конфиг
+    чужого репозитория дописал бы себе `make` — произвольный код Makefile."""
+    from gc_core.config import load_settings
+
+    global_config_file.write_text(
+        _MINIMAL_GLOBAL_CONFIG
+        + "security:\n  permissions:\n    readonly_commands: [tree]\n",
+        encoding="utf-8",
+    )
+    _write_project_config(isolated_cwd, _READONLY_MAKE)
+
+    loaded = load_settings(str(global_config_file))
+
+    assert loaded.settings.security.permissions.readonly_commands == ["tree"]
+    assert any(
+        "readonly_commands" in notice for notice in loaded.runtime.notices
+    )
+
+
+def test_project_profile_does_not_extend_readonly_commands(
+    global_config_file, isolated_cwd
+):
+    """Профиль из папки проекта — тот же репозиторий: ключ не действует."""
+    from gc_core.config import load_settings
+
+    profiles = isolated_cwd / ".gc" / "profiles"
+    profiles.mkdir(parents=True)
+    (profiles / "work.yml").write_text(_READONLY_MAKE, encoding="utf-8")
+    _write_project_config(isolated_cwd, "profile: work\n")
+
+    loaded = load_settings(str(global_config_file))
+
+    assert loaded.settings.security.permissions.readonly_commands == []
+    assert any(
+        "readonly_commands" in notice for notice in loaded.runtime.notices
+    )
+
+
+@pytest.mark.usefixtures("isolated_cwd")
+def test_user_profile_extends_readonly_commands(global_config_file):
+    """Профиль рядом со своим config.yml — выбор пользователя: действует."""
+    from gc_core.config import load_settings
+
+    profiles = global_config_file.parent / "profiles"
+    profiles.mkdir()
+    (profiles / "work.yml").write_text(_READONLY_MAKE, encoding="utf-8")
+
+    loaded = load_settings(str(global_config_file), profile_override="work")
+
+    assert loaded.settings.security.permissions.readonly_commands == ["make"]

@@ -32,7 +32,7 @@ from gc_tui.form_frame import (
     reveal_focus,
     scroll_body,
 )
-from gc_tui.palette import ACCENT, DEEP_DIM, DIM, ERR, INK, OK, WARN
+from gc_tui.palette import ACCENT, DEEP_DIM, DIM, ERR, INK, OK, SUB_INK, WARN
 from gc_tui.services.probe_presentation import connection_line_text
 from gc_tui.widgets.loading_wave import WAVE_INTERVAL, WAVE_SEQ, wave_glyph
 
@@ -1497,7 +1497,6 @@ class SettingsScreen(Screen):
             self._update_dirty()
             if self._view == _MODES:
                 self.call_after_refresh(self._refresh_modes_hint)
-                self.call_after_refresh(self._refresh_modes_rows)
             elif self._view == _PROFILES and self._profiles_open is not None:
                 self.call_after_refresh(self._refresh_profile_overlay)
             elif self._view == _PROFILES:
@@ -3839,18 +3838,6 @@ class SettingsScreen(Screen):
         value_w = max(len(v) for v in value_names)
         return label_w, base_w, extra_w, value_w
 
-    def _modes_row_width(self) -> int:
-        """Ширина строки тоггла внутри рамки (padding 0 1 — минус 2), тот же приём,
-        что и `_modes_hint_width`: при монтировании региона ещё нет (0 → хвост
-        оверрайда попадает в текст целиком), carry-fix `_refresh_modes_rows`
-        досчитывает all-or-nothing усечение после layout-прохода. Последний матч
-        по классу — свежесмонтированная строка (на случай транзиентного двойного
-        комплекта, как в `_refresh_menu_rows`)."""
-        widgets = list(self.query(".set-row"))
-        if not widgets:
-            return 0
-        return max(0, widgets[-1].region.width - 2)
-
     def _mode_row_text(self, name: str, selected: bool) -> Text:
         from gc_tui.toggles import (
             PRESET_CUSTOM,
@@ -3884,11 +3871,11 @@ class SettingsScreen(Screen):
         )  # курсор — конвенция меню/«Обновления»
         # Ревизия 7 (спека §4.2): пресет — head целиком bold INK (без слеша);
         # ребёнок — flat, БЕЗ маркера и БЕЗ отступа (тот же левый край, что и
-        # родитель) — имя+описание целиком DIM, иерархия только цветом.
+        # родитель) — имя+описание целиком SUB_INK, иерархия только цветом.
         if spec.preset_keys:
             t.append(head.ljust(label_w - 2), style=f"bold {INK}")
         elif is_child:
-            t.append(head.ljust(label_w - 2), style=DIM)
+            t.append(head.ljust(label_w - 2), style=SUB_INK)
         else:
             t.append(head.ljust(label_w - 2), style=INK)
         # Выравнивание ревизия 5 (спека §6): базовые треки — по ЛЕВОМУ краю
@@ -3900,23 +3887,21 @@ class SettingsScreen(Screen):
         # Ревизия 6 п.3: фикс-ширина колонки подписи значения (`value_w`) —
         # хвост «в текущей сессии» ниже стартует в одной колонке у всех строк
         # секции, независимо от длины САМОГО значения этой строки. Ревизия 7:
-        # подпись значения ребёнка — тоже DIM (трек между head и подписью —
+        # подпись значения ребёнка — тоже SUB_INK (трек между head и подписью —
         # семантические цвета, не задет), мирроринг
         # `command_palette.py::_format_toggle_row`.
-        t.append(current.ljust(value_w), style=DIM if is_child else INK)
-        # §6.2 (ревизия 2026-07-21 вечер): сессионный оверрайд — хвостом В ЭТОЙ ЖЕ
-        # строке, не отдельной (живая примерка: отдельная строка не читалась —
-        # непонятно, к какому тогглу относится). Слова «глобально» нет: значение
-        # выше — уже глобал (секция его редактор). All-or-nothing по ширине (тот
-        # же канон, что и scope-хвост палитры §6.1): не влезло — хвост уходит
-        # целиком, ядро строки (курсор+label+трек+значение) видимо всегда.
-        # На пресете effective = резолв сессионной пары (low/medium/high/custom).
+        t.append(current.ljust(value_w), style=SUB_INK if is_child else INK)
+        # §6.2: значение, действующее в сессии, если оно не совпадает с
+        # файловым, — второй строкой ровно под именем ключа (решение владельца
+        # 2026-10-18: хвост в той же строке на узком окне переносился куда
+        # попало). Подпись — самым тусклым цветом и курсивом (не спутать с
+        # дочерними строками), значение — цветом своей позиции трека.
         effective = toggle_state(self.app, name)
         if effective != current:
-            tail = f"   · в текущей сессии: {effective}"
-            width = self._modes_row_width()
-            if width <= 0 or len(t.plain) + len(tail) <= width:
-                t.append(tail, style=DEEP_DIM)
+            t.append("\n  ")
+            t.append("в текущей сессии: ", style=f"italic {DEEP_DIM}")
+            colours = {v.value: v.color for v in values}
+            t.append(effective, style=colours.get(effective, DIM))
         return t
 
     def _mount_modes_section(self, frame: Vertical) -> None:
@@ -4018,24 +4003,6 @@ class SettingsScreen(Screen):
         widgets = list(self.query(".set-modes-hint"))
         if widgets:
             widgets[-1].update(self._modes_hint_text())
-
-    def _refresh_modes_rows(self) -> None:
-        """Carry-fix (тот же приём, что и `_refresh_modes_hint`/`_refresh_menu_rows`):
-        досчитать all-or-nothing усечение хвоста «· в текущей сессии: …» (§6.2) ПОСЛЕ
-        layout-прохода, когда регион строки уже известен. Последние `len(names)`
-        матчей по классу — свежесмонтированный комплект (то же соглашение
-        «последний = свежий», что у `_modes_row_width`/`_modes_hint_width`/
-        `_refresh_modes_hint`: в транзиентном двойном комплекте старые строки
-        смонтированы раньше и ещё не отсоединены, новые — смонтированы позже и
-        идут последними)."""
-        if self._view != _MODES:
-            return
-        from gc_tui.toggles import modes_section_names
-
-        names = modes_section_names()
-        widgets = list(self.query(".set-row"))
-        for i, row in enumerate(widgets[-len(names) :]):
-            row.update(self._mode_row_text(names[i], i == self._modes_idx))
 
     def _file_snapshot(self, target):
         """Текст файла до записи — или None, если его ещё нет либо он не читается
@@ -5290,7 +5257,7 @@ class SettingsScreen(Screen):
 
     def _profiles_row_width(self) -> int:
         """Ширина строки внутри рамки (padding 0 1 — минус 2) — carry-fix того же
-        рода, что `_modes_row_width`: региона нет до layout-прохода при монтировании."""
+        рода, что `_modes_hint_width`: региона нет до layout-прохода при монтировании."""
         widgets = list(self.query(".set-profiles-row"))
         if not widgets:
             return 0
@@ -5545,7 +5512,7 @@ class SettingsScreen(Screen):
         inp.focus()
 
     def _refresh_profiles_rows(self) -> None:
-        """Carry-fix (тот же приём, что `_refresh_modes_rows`): досчитать усечение
+        """Carry-fix (тот же приём, что `_refresh_modes_hint`): досчитать усечение
         суффикса секций-оверлеев ПОСЛЕ layout-прохода, когда регион уже известен."""
         if self._view != _PROFILES:
             return

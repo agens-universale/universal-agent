@@ -49,6 +49,7 @@ def _force_truecolor_if_supported() -> None:
 
 def _build_parser() -> argparse.ArgumentParser:
     from gc_core.config_modules.model_registry import LEVEL_VALUES
+    from gc_core.security.permission_mode import AVAILABLE_MODES
 
     parser = argparse.ArgumentParser(
         prog="gc-ua", add_help=False, allow_abbrev=False
@@ -71,6 +72,16 @@ def _build_parser() -> argparse.ArgumentParser:
         help=(
             "Активный уровень модели на этот запуск (перекрывает config.yml и профиль); "
             "auto — уровень меняется автоматически по ходу работы"
+        ),
+    )
+    parser.add_argument(
+        "--permission-mode",
+        type=str.lower,
+        choices=[mode.value for mode in AVAILABLE_MODES],
+        default=None,
+        help=(
+            "Режим разрешений сессии (сохраняется в ней; флаг перебивает "
+            "сохранённый режим; по умолчанию — security.permissions.default_mode)"
         ),
     )
     parser.add_argument(
@@ -137,8 +148,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.unknown:
         print(
             f"gc-ua: неизвестные аргументы: {' '.join(args.unknown)} (флаги не "
-            "сокращаются: --config, --profile, --level, --init-config, --task-root, "
-            "--no-auto-mcp; справка — gc-ua --help)",
+            "сокращаются: --config, --profile, --level, --permission-mode, "
+            "--init-config, --task-root, --no-auto-mcp; справка — gc-ua --help)",
             file=sys.stderr,
         )
         return 2
@@ -342,6 +353,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     app.set_config_path(
         onb_write_path if onboarding_mode else resolve_config_path(args.config)
     )
+    if args.permission_mode:
+        app.lock_permission_mode(args.permission_mode)
     app._config_project_local = project_local_config_path()  # str | None
     # Подъём (`ensure_voice_service`: spawn + ожидание готовности, до 90 с на холодном
     # старте) идёт ЦЕЛИКОМ фоном: TuiApp запускает его после первого кадра

@@ -169,7 +169,8 @@ async def test_command_judge_human_and_effect_are_separate(
     )
     output = await aapply_tool(
         "exec_command",
-        {"command": "echo native", "cwd": str(tmp_path)},
+        # не `echo`: он в списке безобидных команд и идёт без судьи
+        {"command": "printf native", "cwd": str(tmp_path)},
         ctx=ctx,
         state=SimpleNamespace(shared=SimpleNamespace()),
     )
@@ -466,3 +467,94 @@ async def test_view_image_names_an_image_already_live_in_the_request(
     assert output.get("already_in_context") is True
     assert "Изображение #3" in output["message"]
     assert state.pending_tool_attachments == []
+
+
+@pytest.mark.asyncio
+async def test_worker_follows_redirects_by_the_session_mode(
+    tmp_path, monkeypatch
+):
+    """Тело тула исполняет воркер, у которого нет стора режима: режим сессии
+    приезжает в запросе эффекта. Иначе воркер видел бы режим конфига (edit)
+    и пошёл бы по редиректу на другой хост."""
+    import inspect
+    from collections import OrderedDict
+
+    import httpx
+    from gc_core.execution.state import SharedStateData
+    from gc_core.tools.exec.simple_fetch_url import SimpleFetchUrl
+
+    visited = []
+
+    def dispatch(request):
+        visited.append(str(request.url))
+        if request.url.host == "a.example":
+            return httpx.Response(
+                302, headers={"Location": "https://b.example/page"}
+            )
+        return httpx.Response(
+            200, text="page", headers={"Content-Type": "text/plain"}
+        )
+
+    def factory(**_kwargs):
+        return httpx.AsyncClient(transport=httpx.MockTransport(dispatch))
+
+    monkeypatch.setitem(
+        inspect.unwrap(SimpleFetchUrl.acall).__globals__,
+        "get_async_client",
+        factory,
+    )
+    ctx, _, events = setup_ports(
+        {"launch_root": str(tmp_path)}, SimpleFetchUrl
+    )
+    shared = SharedStateData(permission_mode="manual")
+    ctx.permission_store = PermissionStore(shared.confirm_rules, shared=shared)
+    state = SimpleNamespace(
+        shared=SimpleNamespace(fetch_url_cache=OrderedDict())
+    )
+    output = await aapply_tool(
+        "exec_fetch_url",
+        {"url": "https://a.example/start"},
+        ctx=ctx,
+        state=state,
+    )
+    assert visited == ["https://a.example/start"]
+    assert json.loads(output)["error"]["type"] == "redirect_to_other_host"
+    assert ("human", "host:a.example") in events
+
+
+@pytest.mark.asyncio
+async def test_download_effect_sees_the_session_mode(tmp_path, monkeypatch):
+    from gc_core.execution.state import SharedStateData
+    from gc_core.security.permission_mode import follows_cross_host_redirects
+
+    seen = []
+
+    async def http_get(self, _url, _max_bytes):
+        seen.append(follows_cross_host_redirects(self._ctx))
+        return b"%PDF-1.4 fake", None
+
+    monkeypatch.setattr(DownloadFile, "_http_get_bytes", http_get)
+    ctx, _, _ = setup_ports(
+        {
+            "launch_root": str(tmp_path),
+            "security.download": {"download_dir": str(tmp_path / "d")},
+        },
+        DownloadFile,
+    )
+    shared = SharedStateData(permission_mode="manual")
+    ctx.permission_store = PermissionStore(shared.confirm_rules, shared=shared)
+    await aapply_tool(
+        "download_file",
+        {"url": "https://example.org/a.pdf", "filename": "a.pdf"},
+        ctx=ctx,
+    )
+    assert seen == [False]
+
+
+def test_request_without_mode_keeps_the_config_mode():
+    from gc_core.execution.tool_effects import _with_session_mode
+    from gc_core.security.permission_mode import resolve_mode
+
+    ctx = local_ctx({"security.permissions": {"default_mode": "manual"}})
+    assert resolve_mode(_with_session_mode(ctx, None)).value == "manual"
+    assert resolve_mode(_with_session_mode(ctx, "edit")).value == "edit"

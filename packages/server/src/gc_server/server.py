@@ -14,7 +14,9 @@ from gc_core.config import (
     cli_forces_legacy_model,
 )
 from gc_core.config_modules.auth import build_auth_connector
+from gc_core.message_policy.mode_messages import headless_mode_warning_text
 from gc_core.run_context import acreate_run_context
+from gc_core.security.permission_mode import headless_mode_warning
 from gc_core.thread_store import (
     load_thread_messages,
     load_thread_meta,
@@ -994,6 +996,13 @@ async def healthcheck():
     return {"status": "ok"}
 
 
+#: Как вернуть edit на сервере — для предупреждения о режиме без человека.
+_EDIT_MODE_HINT = (
+    "в config_server.yml — agent_overrides: "
+    "security.permissions.default_mode: edit"
+)
+
+
 #: Уровни, которые понимает uvicorn. `logging` знает и другие написания
 #: (`WARN`, `FATAL`), а uvicorn делает по значению прямой `LOG_LEVELS[level]` и
 #: падает KeyError. До этой ветки `server.log_level` читался и НИКУДА не
@@ -1070,6 +1079,14 @@ def serve() -> int:
             SERVER_CONFIG.get("config_path") or "минимальный дефолт",
             host,
             port,
+        )
+
+    # Режим, который без человека не работает: на сервере спросить некого.
+    # Предупреждение, а не отказ — сервер стартует.
+    headless_mode = headless_mode_warning(BASE_AGENT_SETTINGS)
+    if headless_mode is not None:
+        logger.warning(
+            "%s", headless_mode_warning_text(headless_mode, _EDIT_MODE_HINT)
         )
 
     # Было "src.server:app": под установленным колесом (sources = ["src"]) модуль

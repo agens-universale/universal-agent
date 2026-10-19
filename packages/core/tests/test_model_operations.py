@@ -142,6 +142,95 @@ async def test_text_wrapper_uses_the_same_outcome_path(monkeypatch, with_port):
     assert policy.await_count == 1
 
 
+@pytest.mark.parametrize("with_port", [False, True])
+async def test_isolated_call_has_one_attempt_and_its_own_timeout(
+    monkeypatch, with_port
+):
+    """Признак вызова со своим бюджетом повторов доходит до политики и через
+    границу операции (``ModelRequest``): ни повторов транспорта, ни шагов с
+    пониженным max_tokens, таймаут — свой."""
+    captured = []
+
+    async def policy(*, payload_factory, initial_max_tokens, **kwargs):
+        captured.append(kwargs)
+        payload = payload_factory(initial_max_tokens)
+        return {"choices": [{"message": {"content": "ok"}}]}, payload
+
+    monkeypatch.setattr(llm, "arequest_chat_completions_with_policy", policy)
+    state = _state()
+    outcome = await llm.arequest_chat_completion_outcome(
+        ctx=_ctx(with_port),
+        state=state,
+        messages=state.messages,
+        max_tokens=42,
+        consumer="command_judge",
+        request_label="action_judge",
+        isolated_timeout_sec=60,
+    )
+    assert outcome.text == "ok"
+    (kwargs,) = captured
+    assert kwargs["use_retry"] is False
+    assert kwargs["adaptive_retry"] is False
+    assert kwargs["timeout"] == 60
+
+
+@pytest.mark.parametrize("with_port", [False, True])
+async def test_regular_aux_call_keeps_the_configured_retries(
+    monkeypatch, with_port
+):
+    captured = []
+
+    async def policy(*, payload_factory, initial_max_tokens, **kwargs):
+        captured.append(kwargs)
+        payload = payload_factory(initial_max_tokens)
+        return {"choices": [{"message": {"content": "ok"}}]}, payload
+
+    monkeypatch.setattr(llm, "arequest_chat_completions_with_policy", policy)
+    state = _state()
+    ctx = _ctx(with_port)
+    await llm.arequest_chat_completion_outcome(
+        ctx=ctx,
+        state=state,
+        messages=state.messages,
+        max_tokens=42,
+        consumer="summary",
+    )
+    (kwargs,) = captured
+    assert kwargs["use_retry"] == ctx.settings.backend.use_retry
+    assert kwargs["adaptive_retry"] is True
+    assert kwargs["timeout"] == 600
+
+
+async def test_isolated_timeout_never_exceeds_the_configured_one(monkeypatch):
+    """Потолок судьи — «не больше 60 с», а не «ровно 60»: настроенный
+    таймаут короче — действует он (решение владельца при сборке плана)."""
+    captured = []
+
+    async def policy(*, payload_factory, initial_max_tokens, **kwargs):
+        captured.append(kwargs)
+        payload = payload_factory(initial_max_tokens)
+        return {"choices": [{"message": {"content": "ok"}}]}, payload
+
+    monkeypatch.setattr(llm, "arequest_chat_completions_with_policy", policy)
+    monkeypatch.setattr(
+        llm,
+        "resolve_network_params",
+        lambda settings, resolved: (True, None, True, 30.0, None, False),
+    )
+    state = _state()
+    await llm.arequest_chat_completion_outcome(
+        ctx=_ctx(False),
+        state=state,
+        messages=state.messages,
+        max_tokens=42,
+        consumer="command_judge",
+        request_label="action_judge",
+        isolated_timeout_sec=60,
+    )
+    (kwargs,) = captured
+    assert kwargs["timeout"] == 30
+
+
 @pytest.mark.parametrize(
     "consumer",
     [

@@ -40,6 +40,15 @@ def record_turn_finish_outcome(
     append_final_answer_to_current(state, text)
 
 
+def record_plan_outcome(*, plan_text: str, state: Any) -> None:
+    """Предложенный план — итог хода в журнал до flush: судья пары хода
+    исполнения видит, что пойдёт в работу. Префикс отличает план от отчёта о
+    сделанном."""
+    prefix = "plan: "
+    text = prefix + head_tail_preview(plan_text.strip(), 1000 - len(prefix))
+    append_final_answer_to_current(state, text)
+
+
 async def amaybe_record_final_answer_intent(
     *, assistant_text: str, state: Any, ctx: Any
 ) -> None:

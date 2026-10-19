@@ -6,6 +6,10 @@ from types import SimpleNamespace
 import pytest
 
 import gc_core_temporalio.child_transport as transport_module
+from gc_core.security.action_judge import (
+    MESSAGE_CHARS,
+    MESSAGES_TOTAL_CHARS,
+)
 from gc_core_temporalio.child_transport import ChildTransport
 
 
@@ -86,7 +90,8 @@ def _transport(monkeypatch, events, *, patched, parent_context):
         ctx, "start", "prepared", store, operations, None
     )
     runner = SimpleNamespace(
-        _orchestrator_state=SimpleNamespace(stop_requested=False)
+        _orchestrator_state=SimpleNamespace(stop_requested=False),
+        _root_user_words=lambda: ["удали build/", "prod не трогай"],
     )
     return transport, runner, captured
 
@@ -116,14 +121,39 @@ async def test_child_context_and_workflow_call_order(
         "circuit_breaker": {"open": []},
     }
     if patched:
-        expected |= {"frozen_live_level": "auto", "independent_auto": True}
+        expected |= {
+            "frozen_live_level": "auto",
+            "independent_auto": True,
+            # Судья действий ребёнка видит слова человека корня: лёгкий
+            # снимок родителя переписки и журнала не несёт.
+            "root_user_words": ["удали build/", "prod не трогай"],
+        }
     assert captured["request"].child_context == expected
     assert events == [
         "new_id",
         "patched:subagent-frozen-live-level-v1",
         "patched:subagent-independent-auto-v1",
+        "patched:subagent-root-user-words-v1",
         "snapshot",
         "check_history_size",
         "start_child_workflow",
     ]
     assert transport.active_child is None
+
+
+async def test_root_words_in_the_child_input_fit_the_judge_budget(monkeypatch):
+    """Большой вставленный лог в корне не раздувает вход ребёнка: слова
+    урезаны до бюджета судьи, свежие сохранены."""
+    events = []
+    transport, runner, captured = _transport(
+        monkeypatch, events, patched=True, parent_context=None
+    )
+    huge = "x" * (MESSAGE_CHARS * 3)
+    runner._root_user_words = lambda: [huge] * 50 + ["последнее"]
+    with pytest.raises(_Stop):
+        await transport.execute(
+            runner, "subagent_worker", "{}", parent_call_id="call"
+        )
+    words = captured["request"].child_context["root_user_words"]
+    assert words[-1] == "последнее"
+    assert sum(len(text) for text in words) <= MESSAGES_TOTAL_CHARS

@@ -205,9 +205,12 @@ if [[ "${CLI_FOUND}" -ne 1 ]]; then
   exit 127
 fi
 
+# --external-request: swarm-ран — запрос внешней системы, как webhook сервера:
+# человека нет, слова запроса для судьи действий — не разрешение человека.
 CLI_CMD=(
   "${CLI_BIN}"
   --config "/work/.gc/config.yml"
+  --external-request
   -q "${SWARM_PAYLOAD_JSON:-}"
 )
 

@@ -142,6 +142,18 @@ class FileTaskStore:
                 json.dumps(meta, ensure_ascii=False), encoding="utf-8"
             )
 
+    def clear_plan(self, task_id: str, system: Optional[str] = None) -> bool:
+        """Убрать план из сессии (`/plan clear`); True — план был. Решение и
+        запись — в ядре, здесь только делегирование под блокировкой записи."""
+        from gc_core.thread_store import clear_plan_meta
+        from gc_core.thread_store_journal import local_write_scope
+
+        sys_ = system or self._system
+        with local_write_scope(
+            str(self._dir), sys_, task_id, forbid_owned=False
+        ):
+            return clear_plan_meta(str(self._dir), sys_, task_id)
+
     def delete_task(self, task_id: str, system: Optional[str] = None) -> None:
         """Полностью удалить тред (все формы файлов). Делегирует в thread_store."""
         sys_ = system or self._system

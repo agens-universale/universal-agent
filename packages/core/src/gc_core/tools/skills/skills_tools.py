@@ -25,6 +25,7 @@ from gc_core.loop_detector.constants import (
     copy_loop_warn,
     loop_warn_on_repeat,
 )
+from gc_core.security.permission_mode import CAT_SKILL, CAT_SKILL_EXEC
 from gc_core.tools.exec.exec_envelope import (
     as_captured_stream,
     exec_channels_json,
@@ -433,6 +434,7 @@ def get_skills_tools_data(
 
     tools: Dict[str, Dict[str, Any]] = {
         "skills_list": {
+            "category": CAT_SKILL,
             "tool_fabric": _make_fabric(SkillsListTool),
             "spec": {
                 "type": "function",
@@ -474,6 +476,7 @@ def get_skills_tools_data(
             ),
         },
         "skills_load": {
+            "category": CAT_SKILL,
             "tool_fabric": _make_fabric(LoadSkillTool),
             "spec": {
                 "type": "function",
@@ -510,6 +513,13 @@ def get_skills_tools_data(
             ),
         },
         "skills_run_script": {
+            # Исполнение, а не чтение: скрипт запускается мимо модерации
+            # команд, поэтому решает гейт режима по строке действия.
+            "category": CAT_SKILL_EXEC,
+            # Что исполняется, задаёт пара «скилл + имя скрипта»: гейт кладёт
+            # её в вопрос и в ключ решения. argv — данные для уже
+            # одобренного кода, в ключ не входит.
+            "decision_args": ("skill_id", "script_name"),
             "tool_fabric": _make_fabric(RunSkillScriptTool),
             "spec": {
                 "type": "function",
@@ -580,6 +590,7 @@ def get_skills_tools_data(
             ),
         },
         "skills_read_reference": {
+            "category": CAT_SKILL,
             "tool_fabric": _make_fabric(LoadReferenceTool),
             "spec": {
                 "type": "function",
@@ -630,6 +641,7 @@ def get_skills_tools_data(
             ),
         },
         "skills_read_asset": {
+            "category": CAT_SKILL,
             "tool_fabric": _make_fabric(LoadAssetTool),
             "spec": {
                 "type": "function",

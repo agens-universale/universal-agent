@@ -410,6 +410,19 @@ def _with_durable_logging(settings, profile):
     )
 
 
+def _worker_runtime(profile, workspace, *, human_input):
+    """Рантайм профиля под воркером: каталог старта — workspace; без
+    человека (``human_input: false``) канал объявляет «человека нет», и
+    вопрос подтверждения — «спросить некого», а не обрыв ожидания."""
+    runtime = replace(
+        profile.runtime or RuntimeEnv(),
+        launch_root=str(workspace.resolve()),
+    )
+    if human_input:
+        return runtime
+    return replace(runtime, human_channel=False)
+
+
 def _worker_settings(name, profile, store, *, state_paths, human_input):
     """Настройки профиля под воркером Temporal (поверх ``profile.core``)."""
     settings = _with_turn_persist(profile.core, profile)
@@ -484,9 +497,8 @@ class ContextProvider:
             )
             loaded = LoadedSettings(
                 settings=settings,
-                runtime=replace(
-                    profile.runtime or RuntimeEnv(),
-                    launch_root=str(workspace.resolve()),
+                runtime=_worker_runtime(
+                    profile, workspace, human_input=human_input
                 ),
             )
             self._profiles[name] = (profile.store_id, loaded)

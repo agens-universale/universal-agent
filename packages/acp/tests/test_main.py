@@ -355,5 +355,12 @@ def test_abbreviated_own_flags_fail_instead_of_default_config(capsys):
         assert _parse_args(["acp", flag]).abbreviated == [], flag
 
 
+def test_acp_declares_a_human_whose_words_are_his_own():
+    """Вопросы подтверждения в ACP задаёт человек в IDE; его слова — свои."""
+    loaded = apply_acp_runtime_defaults(make_settings())
+    assert loaded.runtime.human_channel is True
+    assert loaded.runtime.external_user_words is False
+
+
 def test_parse_args_accepts_auto_level():
     assert _parse_args(["--level", "auto"]).overrides == {"level": "auto"}

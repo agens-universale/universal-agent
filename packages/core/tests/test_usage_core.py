@@ -406,6 +406,7 @@ def test_label_to_category():
         category_for_request_label("command_moderation_judge")
         == "command_moderation"
     )
+    assert category_for_request_label("action_judge") == "command_moderation"
     assert (
         category_for_request_label("project_memory_compaction")
         == "project_memory"

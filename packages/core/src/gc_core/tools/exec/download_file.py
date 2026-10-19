@@ -11,12 +11,17 @@ from gc_core.config_modules.security import DownloadConfig
 from gc_core.constants.tool_names import DOWNLOAD_FILE_NAME
 from gc_core.execution.ports import port
 from gc_core.security.path_policy import (
+    WRITE_GUARD_TITLE,
     WriteGuardViolation,
     audit_policy_decision,
     check_write_guard_path,
     normalize_path_for_policy,
     resolve_tool_context,
+    settle_perimeter_answer,
+    write_decision_key,
+    write_mode_stage,
 )
+from gc_core.security.permission_mode import follows_cross_host_redirects
 from gc_core.security.url_policy import enforce_url_policy
 from gc_core.settings import settings_of
 from gc_core.tools.exec.redirect_policy import (
@@ -268,6 +273,15 @@ class DownloadFile(AbstractSimpleTool):
             ctx=self._ctx,
             state=self._state,
         )
+        # Стадия режима разрешений — до `write_guard.enabled`, как у декоратора:
+        # выключенная защита режим не отменяет.
+        call_now, error = yield from write_mode_stage(
+            dest, context, self.registered_tool_name(), "write"
+        )
+        if error is not None:
+            return error
+        if call_now:
+            return None
         if not context.write_guard.enabled:
             return None
         try:
@@ -289,7 +303,7 @@ class DownloadFile(AbstractSimpleTool):
                 from gc_core.security.confirm_port import confirmation_step
 
                 confirmed = yield confirmation_step(
-                    title="Защита записи",
+                    title=WRITE_GUARD_TITLE,
                     question=f"Разрешить запись вне периметра проекта в {dest}?",
                     fields=[
                         ("Tool", self.registered_tool_name()),
@@ -301,23 +315,17 @@ class DownloadFile(AbstractSimpleTool):
                         ),
                     ],
                     ctx=context.ctx,
-                    decision_key=f"write:{dest}",
+                    decision_key=write_decision_key(dest, context),
                 )
-                if confirmed:
-                    audit_policy_decision(
-                        context,
-                        tool_name=self.registered_tool_name(),
-                        decision="executed",
-                        reason_code="policy_ask_confirmed",
-                        risk_flags=["out_of_perimeter"],
-                    )
+                if settle_perimeter_answer(
+                    context,
+                    self.registered_tool_name(),
+                    confirmed,
+                    exc.error,
+                    "write_guard_cancelled_by_user",
+                    path=dest,
+                ):
                     return None
-                exc.error["type"] = "write_guard_cancelled_by_user"
-                exc.error["message"] = (
-                    f"User declined the write to '{dest}'. Do NOT retry the same "
-                    "write, and do NOT silently write somewhere else — ask the user how to "
-                    "proceed, or stop and report that it was declined."
-                )
             audit_policy_decision(
                 context,
                 tool_name=self.registered_tool_name(),
@@ -345,6 +353,7 @@ class DownloadFile(AbstractSimpleTool):
         *,
         allowed_schemes: list[str],
         url_blacklist: list[str],
+        same_host_only: bool = False,
     ):
         """Общая потоковая петля из ``redirect_policy``.
 
@@ -359,6 +368,7 @@ class DownloadFile(AbstractSimpleTool):
             allowed_schemes=allowed_schemes,
             url_blacklist=url_blacklist,
             max_redirects=DEFAULT_MAX_REDIRECTS,
+            same_host_only=same_host_only,
         )
 
     async def _read_bounded(
@@ -397,6 +407,8 @@ class DownloadFile(AbstractSimpleTool):
             ctx=self._ctx,
             state=self._state,
         )
+        # Переход на другой хост — по режиму сессии; решает слой безопасности.
+        same_host_only = not follows_cross_host_redirects(context.ctx)
         headers = {
             "User-Agent": self.default_user_agent,
             "Accept": "*/*",
@@ -421,6 +433,7 @@ class DownloadFile(AbstractSimpleTool):
                     self.timeout_seconds,
                     allowed_schemes=context.url_allowed_schemes,
                     url_blacklist=context.url_blacklist,
+                    same_host_only=same_host_only,
                 ) as response:
                     if response.status_code >= 400:
                         # Тело ошибки читаем: без него у `raise_for_status`

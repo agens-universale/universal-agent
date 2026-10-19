@@ -153,8 +153,17 @@ class State(ExecutionState):
             0  # вызовов инструментов за текущий ход (smart-гейт, спека §3)
         )
         self.terminal_outcome: Optional[str] = (
-            None  # None | "step_limit" | "tool_errors"
+            None  # None | "step_limit" | "tool_errors" | "plan_proposed" | "judge_unavailable"
         )
+        # Успешный turn_propose_plan в текущем батче: по этому флагу цикл
+        # агента закрывает ход. Транзиентный, в мету не пишется.
+        self.plan_proposed: bool = False
+        # Судья действий режима auto: сбои проверки подряд у ЭТОГО агента (у
+        # субагента свои) и причина, по которой прогон надо остановить. В мету
+        # треда не пишутся: состояние новое на каждый прогон. Отказы судьи
+        # считаются на сессию — в `SharedStateData`.
+        self.judge_failures_in_a_row: int = 0
+        self.judge_stop_reason: Optional[str] = None
         self.last_unknown_tool_name: Optional[str] = None
         self.unknown_tool_repeat_count: int = 0
         self.last_batch_unknown_tool_count: int = 0
@@ -192,6 +201,9 @@ class State(ExecutionState):
         self.run_start_usage_meta: Optional[dict] = None
         # Чек-лист субагента: собственный, эфемерный (см. property session_todo).
         self.subagent_todo: List[Dict[str, str]] = []
+        # Объявленный режим субагента (см. property mode_announced): у корня
+        # отметка в shared, у ребёнка — своя, эфемерная.
+        self.subagent_mode_announced: Optional[str] = None
         # Картинки тулов текущего батча (спека §7.1): словари `Attachment`, уходят
         # одним техническим сообщением после батча. Сериализуемы и попадают в
         # снимок, как `session_compact_applied`.
