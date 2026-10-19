@@ -132,7 +132,7 @@ class MySQLDatabases:
         self.created.append(name)
         await self._admin(
             f"CREATE DATABASE `{name}` CHARACTER SET utf8mb4 "
-            "COLLATE utf8mb4_bin"
+            "COLLATE utf8mb4_0900_bin"
         )
         if migrate:
             async with MySQLThreadStore(self.dsn_of(name)) as store:

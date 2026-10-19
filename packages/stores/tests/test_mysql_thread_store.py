@@ -34,7 +34,7 @@ async def test_long_thread_id_is_a_clear_error(mysql_store):
 
 
 async def test_list_orders_by_codepoints(mysql_databases):
-    """utf8mb4_bin: «-» < «B» < «_» < «a» < «b» — порядок кодов, как у
+    """utf8mb4_0900_bin: «-» < «B» < «_» < «a» < «b» — порядок кодов, как у
     остальных хранилищ (коллация по умолчанию сочла бы «B» и «b» равными).
     Часы общие: при равном ``updated_at`` порядок задают ключи."""
     moment = datetime(2026, 1, 1, tzinfo=UTC)
@@ -87,3 +87,19 @@ def test_missing_driver_names_the_extra(monkeypatch):
 def test_dsn_requires_a_database():
     with pytest.raises(ValueError, match="mysql://"):
         MySQLThreadStore("mysql://root@127.0.0.1:3306")
+
+
+async def test_trailing_spaces_are_different_keys(mysql_store):
+    """Находка проверки безопасности: коллация с PAD SPACE считала «a» и
+    «a » одним ключом — чужой алиас с хвостовым пробелом занимал алиас
+    треда, а op_id с пробелом выдавал себя за другую операцию."""
+    first = ThreadKey(system="s", thread="one")
+    second = ThreadKey(system="s", thread="two")
+    await mysql_store.append_side(
+        first, SideChange(op_id="op", add_aliases=["dup"])
+    )
+    await mysql_store.append_side(
+        second, SideChange(op_id="op ", add_aliases=["dup "])
+    )
+    assert await mysql_store.resolve_alias("dup") == first
+    assert await mysql_store.resolve_alias("dup ") == second
