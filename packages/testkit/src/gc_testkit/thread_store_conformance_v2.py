@@ -1017,6 +1017,109 @@ async def check_watch_across_delete(store, _clock: FakeClock) -> None:
     _expect(seen == ["n1"], "после удаления тред читается с начала")
 
 
+# --- конкурентная запись ---------------------------------------------------
+#
+# Два писателя на одном хранилище одновременно (``asyncio.gather``): у
+# хранилищ с пулом соединений — настоящая гонка в базе, у файлового и
+# in-memory — чередование на точках ожидания.
+
+
+async def check_concurrent_same_revision(
+    store: ThreadStore, _clock: FakeClock
+) -> None:
+    lease = (await store.claim(KEY, LeaseRequest(owner="w", ttl=MINUTE))).lease
+    outcomes = await asyncio.gather(
+        *(
+            store.commit(
+                KEY,
+                ThreadChange(
+                    op_id=f"c{i}",
+                    expected_revision=0,
+                    lease=lease,
+                    append_messages=[{"content": str(i)}],
+                ),
+            )
+            for i in range(2)
+        ),
+        return_exceptions=True,
+    )
+    conflicts = [o for o in outcomes if isinstance(o, ThreadConflict)]
+    _expect(
+        len(conflicts) == 1,
+        f"две записи по ревизии 0: ровно одна — ThreadConflict, а {outcomes!r}",
+    )
+    entries = await store.read_stream(KEY, "messages")
+    _expect(len(entries) == 1, f"записалось не одно сообщение: {entries!r}")
+
+
+async def check_concurrent_same_op_id(
+    store: ThreadStore, _clock: FakeClock
+) -> None:
+    lease = (await store.claim(KEY, LeaseRequest(owner="w", ttl=MINUTE))).lease
+    change = ThreadChange(
+        op_id="same",
+        expected_revision=0,
+        lease=lease,
+        append_messages=[{"content": "x"}],
+    )
+    first, second = await asyncio.gather(
+        store.commit(KEY, change), store.commit(KEY, change)
+    )
+    _expect(first == second, "один op_id одновременно — разные квитанции")
+    entries = await store.read_stream(KEY, "messages")
+    _expect(len(entries) == 1, "один op_id одновременно записан дважды")
+
+
+async def check_concurrent_alias_race(
+    store: ThreadStore, _clock: FakeClock
+) -> None:
+    other = ThreadKey(system="cli", thread="other")
+
+    async def take(key):
+        record = await store.claim(
+            key, LeaseRequest(owner=key.thread, ttl=MINUTE)
+        )
+        return await store.commit(
+            key,
+            ThreadChange(
+                op_id=f"a-{key.thread}",
+                expected_revision=0,
+                lease=record.lease,
+                add_aliases=["shared"],
+            ),
+        )
+
+    outcomes = await asyncio.gather(
+        take(KEY), take(other), return_exceptions=True
+    )
+    refused = [o for o in outcomes if isinstance(o, ValueError)]
+    _expect(
+        len(refused) == 1,
+        f"общий алиас достался обоим тредам или никому: {outcomes!r}",
+    )
+    owner = await store.resolve_alias("shared")
+    winner = KEY if not isinstance(outcomes[0], ValueError) else other
+    _expect(owner == winner, f"алиас разрешается в {owner}, а не {winner}")
+
+
+async def check_concurrent_create(
+    store: ThreadStore, _clock: FakeClock
+) -> None:
+    await asyncio.gather(
+        store.append_side(
+            KEY, SideChange(op_id="s1", set_frontend=("a", {"x": 1}))
+        ),
+        store.append_side(
+            KEY, SideChange(op_id="s2", set_frontend=("b", {"y": 2}))
+        ),
+    )
+    record = await store.get_thread(KEY)
+    _expect(
+        record is not None and set(record.frontend) == {"a", "b"},
+        "одновременное создание треда потеряло запись сбоку",
+    )
+
+
 CHECKS: tuple[Callable[..., Awaitable[None]], ...] = (
     check_missing_thread,
     check_claim_creates_thread,
@@ -1070,6 +1173,10 @@ CHECKS: tuple[Callable[..., Awaitable[None]], ...] = (
     check_set_info_replaces,
     check_updated_at_only_on_commit,
     check_stored_data_is_isolated,
+    check_concurrent_same_revision,
+    check_concurrent_same_op_id,
+    check_concurrent_alias_race,
+    check_concurrent_create,
 )
 
 
