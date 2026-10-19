@@ -103,6 +103,10 @@ def _chunk_bytes(now: datetime, entries: list[list[Any]]) -> bytes:
     return json.dumps(document, ensure_ascii=False).encode("utf-8")
 
 
+class _FenceRaced(RuntimeError):
+    """Фенсинг заголовка владельца опередили — перехват повторяется."""
+
+
 class _ChunkLost(LookupError):
     """Кусок из прочитанного заголовка уже убран (сжатие истории) —
     перечитать заголовок."""
@@ -165,7 +169,9 @@ class KvThreadStore(ThreadStore):
         found = await self._kv.get(keys.head_key(key))
         if found is None:
             return None, None
-        return Head.loads(found.data), found.version
+        head = Head.loads(found.data)
+        head.loaded_version = found.version
+        return head, found.version
 
     async def _mutate(
         self, key: ThreadKey, step: Callable[[Head | None], Awaitable[Any]]
@@ -247,51 +253,90 @@ class KvThreadStore(ThreadStore):
         head = _live((await self._head(owner))[0])
         return head is not None and alias in head.aliases
 
+    async def _fence(
+        self, owner: ThreadKey, head: Head | None, version: str | None
+    ) -> None:
+        """Условно переписать заголовок владельца (или поставить метку на
+        место несозданного): его запоздавшая фиксация по ``version`` не
+        пройдёт. Успел кто-то другой — ``_FenceRaced`` (повторить)."""
+        if head is None:
+            marker = Head.placeholder(owner, self._clock())
+        else:
+            marker = head.copy()
+            marker.fence += 1
+        written = await self._kv.put(
+            keys.head_key(owner), marker.dumps(), if_version=version
+        )
+        if written is None:
+            raise _FenceRaced(owner)
+
     async def _check_takeover(
         self, key: ThreadKey, alias: str, found: Versioned, now: datetime
     ) -> None:
         """Писать поверх резерва ``found`` можно, если он свой (время
-        обновится) или чужая сирота (старый, без подтверждения); чужой
-        свежий или подтверждённый — ``ValueError``."""
-        owner, at = _reservation(found.data)
+        обновится) или чужая сирота; чужой свежий или подтверждённый —
+        ``ValueError``.
+
+        Сирота — резерв старше ``ALIAS_HOLD``, которого заголовок владельца
+        не перечисляет. Запись владельца могла быть ещё «в полёте»: если его
+        заголовок с тех пор не менялся, перехват сначала переписывает его
+        (фенсинг) — фиксация владельца по старой версии провалится."""
+        owner, at, base = _reservation(found.data)
         if owner == key:
             return
-        if now - at < ALIAS_HOLD or await self._listed(owner, alias):
+        head, current = await self._head(owner)
+        live = _live(head)
+        if now - at < ALIAS_HOLD or (
+            live is not None and alias in live.aliases
+        ):
             raise ValueError(
                 f"алиас {alias!r} принадлежит треду "
                 f"{owner.system}/{owner.thread}"
             )
+        if current == base:
+            await self._fence(owner, head, current)
 
     async def _reserve(
-        self, key: ThreadKey, alias: str, now: datetime
+        self, key: ThreadKey, alias: str, now: datetime, base: str | None
     ) -> None:
-        """Резерв алиаса за тредом; свой — с обновлённым временем, иначе
-        старый резерв прерванной записи перехватили бы до нашей фиксации."""
+        """Резерв алиаса за тредом; ``base`` — версия заголовка, на которую
+        рассчитана фиксация этой записи (по ней перехват ставит фенсинг).
+        Свой резерв — с обновлённым временем, иначе старый резерв
+        прерванной записи перехватили бы до нашей фиксации."""
         record = json.dumps(
             {
                 "system": key.system,
                 "thread": key.thread,
                 "at": now.isoformat(),
+                "head": base,
             }
         ).encode("utf-8")
         name = keys.alias_key(alias)
         for _ in range(self._attempts):
             found = await self._kv.get(name)
             if found is not None:
-                await self._check_takeover(key, alias, found, now)
+                try:
+                    await self._check_takeover(key, alias, found, now)
+                except _FenceRaced:
+                    continue
             version = None if found is None else found.version
             if await self._kv.put(name, record, if_version=version):
                 return
         raise ThreadConflict(f"алиас {alias!r} перехватывают наперегонки")
 
     async def _reserve_aliases(
-        self, key: ThreadKey, head: Head, aliases: list[str], now: datetime
+        self,
+        key: ThreadKey,
+        head: Head,
+        aliases: list[str],
+        now: datetime,
+        base: str | None,
     ) -> list[str]:
         """Зарезервировать новые алиасы треда; вернуть зарезервированные."""
         reserved = []
         for alias in sorted(set(aliases)):
             if alias not in head.aliases:
-                await self._reserve(key, alias, now)
+                await self._reserve(key, alias, now, base)
                 head.aliases.append(alias)
                 reserved.append(alias)
         return reserved
@@ -455,7 +500,7 @@ class KvThreadStore(ThreadStore):
     ) -> str | None:
         """Изменения ``commit`` в порядке контракта; вернуть id архива."""
         reserved = await self._reserve_aliases(
-            key, head, change.add_aliases, now
+            key, head, change.add_aliases, now, head.loaded_version
         )
         if change.reset_history:
             after.extend(self._drop_history(key, head))
@@ -552,7 +597,7 @@ class KvThreadStore(ThreadStore):
         found = await self._kv.get(keys.alias_key(alias))
         if found is None:
             return None
-        owner, _at = _reservation(found.data)
+        owner = _reservation(found.data)[0]
         return owner if await self._listed(owner, alias) else None
 
     async def list_threads(self, query: ThreadQuery) -> Page[ThreadRecord]:
@@ -611,8 +656,9 @@ class KvThreadStore(ThreadStore):
             now = self._clock()
             new = live.copy() if live else Head.fresh(key, now, head)
             check_side_writer(new.row.lease, change)
+            base = None if head is None else head.loaded_version
             reserved = await self._reserve_aliases(
-                key, new, change.add_aliases, now
+                key, new, change.add_aliases, now, base
             )
             apply_side(new.row, change)
             for stream, items in change.append:
@@ -750,10 +796,12 @@ def _receipt_of(item: dict[str, Any], op_id: str, digest: str) -> Receipt:
     return Receipt.model_validate_json(item["receipt"])
 
 
-def _reservation(data: bytes) -> tuple[ThreadKey, datetime]:
+def _reservation(data: bytes) -> tuple[ThreadKey, datetime, str | None]:
+    """Владелец резерва алиаса, время и версия заголовка, на которую
+    рассчитана его фиксация."""
     record = json.loads(data)
     owner = ThreadKey(system=record["system"], thread=record["thread"])
-    return owner, datetime.fromisoformat(record["at"])
+    return owner, datetime.fromisoformat(record["at"]), record.get("head")
 
 
 async def _scan_all(kv: KV, prefix: str) -> list[str]:
@@ -882,7 +930,7 @@ class _Sweeper:
             found = await self._kv.get(name)
             if found is None:
                 continue
-            owner, at = _reservation(found.data)
+            owner, at, _base = _reservation(found.data)
             alias = keys.dec(name[len(keys.ALIASES) :])
             if at < self._cutoff and not await self._store._listed(
                 owner, alias

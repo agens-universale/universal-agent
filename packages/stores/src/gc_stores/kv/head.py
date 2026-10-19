@@ -44,6 +44,12 @@ class Head:
     #: Квитанции ключуются им — остатки удалённого треда (уборка не прошла)
     #: новый не видит.
     incarnation: str = field(default_factory=lambda: secrets.token_hex(8))
+    #: Счётчик фенсинга: перехват алиаса переписывает заголовок владельца
+    #: (новое содержимое — новая версия, ETag у S3 тоже), и запоздавшая
+    #: фиксация владельца по старой версии не проходит.
+    fence: int = 0
+    #: Версия, с которой заголовок прочитан (не хранится).
+    loaded_version: str | None = field(default=None, compare=False, repr=False)
     #: Надгробие: тред удалён; ``row.generation`` и ``row.lease_epoch`` —
     #: для треда, созданного заново под тем же ключом.
     deleted: bool = False
@@ -57,6 +63,15 @@ class Head:
             row.generation = tomb.row.generation
             row.lease_epoch = tomb.row.lease_epoch
         return cls(row=row)
+
+    @classmethod
+    def placeholder(cls, key: ThreadKey, now: datetime) -> Head:
+        """Метка на месте заголовка треда, которого ещё нет (фенсинг его
+        создания): тред потом создаётся с нуля — поколение и эпоха 0."""
+        return cls(
+            row=ThreadRow(key=key, created_at=now, updated_at=now),
+            deleted=True,
+        )
 
     def tombstone(self) -> Head:
         row = ThreadRow(
@@ -99,6 +114,7 @@ class Head:
             "pending": self.pending,
             "index": self.index,
             "incarnation": self.incarnation,
+            "fence": self.fence,
             "deleted": self.deleted,
         }
         return json.dumps(
@@ -126,5 +142,6 @@ class Head:
             pending=list(document["pending"]),
             index=document["index"],
             incarnation=document["incarnation"],
+            fence=int(document["fence"]),
             deleted=bool(document["deleted"]),
         )

@@ -138,3 +138,55 @@ async def test_alias_lost_during_a_slow_commit_is_not_listed():
         )
     head = json.loads((await kv.get(keys.head_key(KEY))).data)
     assert "al" not in head["aliases"]
+
+
+async def test_takeover_fences_the_owners_late_commit():
+    """Находка проверки безопасности (TOCTOU): старый резерв перехвачен,
+    пока запись владельца «в полёте». Перехват сначала условно переписывает
+    заголовок владельца — его запоздавшая фиксация проваливается, и алиас
+    не достаётся двум тредам."""
+    clock = Clock()
+    kv = MemoryKV()
+    store = KvThreadStore(kv, clock=clock)
+    await store.append_side(KEY, SideChange(op_id="base"))
+    before = await kv.get(keys.head_key(KEY))
+    kv.fail_on = lambda op, key: op == "put" and key == keys.head_key(KEY)
+    with contextlib.suppress(KvFault):
+        await store.append_side(
+            KEY, SideChange(op_id="late", add_aliases=["al"])
+        )
+    kv.fail_on = None
+    clock.now += ALIAS_HOLD * 2
+    await store.append_side(
+        OTHER, SideChange(op_id="take", add_aliases=["al"])
+    )
+    late = await kv.put(
+        keys.head_key(KEY), before.data, if_version=before.version
+    )
+    assert late is None, (
+        "запоздавшая фиксация владельца прошла после перехвата"
+    )
+    assert await store.resolve_alias("al") == OTHER
+
+
+async def test_takeover_of_a_new_threads_reservation_fences_creation():
+    """Резерв треда, которого ещё нет (append_side создаёт его): перехват
+    ставит на место заголовка метку — создание с запозданием не пройдёт, а
+    сам тред потом создаётся с нуля."""
+    clock = Clock()
+    kv = MemoryKV()
+    store = KvThreadStore(kv, clock=clock)
+    kv.fail_on = lambda op, key: op == "put" and key == keys.head_key(KEY)
+    with contextlib.suppress(KvFault):
+        await store.append_side(
+            KEY, SideChange(op_id="late", add_aliases=["al"])
+        )
+    kv.fail_on = None
+    clock.now += ALIAS_HOLD * 2
+    await store.append_side(
+        OTHER, SideChange(op_id="take", add_aliases=["al"])
+    )
+    assert await kv.put(keys.head_key(KEY), b"{}", if_version=None) is None
+    assert await store.get_thread(KEY) is None
+    record = await store.claim(KEY, LeaseRequest(owner="w", ttl=TTL))
+    assert record.generation == 0 and record.lease.epoch == 1
