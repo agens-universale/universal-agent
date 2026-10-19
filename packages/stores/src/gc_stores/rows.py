@@ -23,7 +23,6 @@ from gc_core.threads.models import (
     Receipt,
     RuntimeStatus,
     SessionState,
-    StreamEntry,
     ThreadInfo,
     ThreadKey,
     ThreadRecord,
@@ -81,12 +80,6 @@ def _model(model: BaseModel) -> str:
     """Только явно заданные поля: по ``model_fields_set`` фасад строит meta
     (ключ есть ⇔ поле задано), и после чтения набор обязан быть тем же."""
     return dumps(model.model_dump(mode="json", exclude_unset=True))
-
-
-def entry_of(row: Any) -> StreamEntry:
-    return StreamEntry(
-        seq=row["seq"], ts=stamp(row["ts"]), data=json.loads(row["data"])
-    )
 
 
 def id_key(message_id: str) -> str:

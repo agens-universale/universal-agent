@@ -227,7 +227,7 @@ async def test_thread_deleted_between_create_and_lock_is_created_again(
         await tx.start()
         now = await holder.fetchval("SELECT clock_timestamp()")
         row = ThreadRow(key=KEY, created_at=now, updated_at=now)
-        await holder.execute(pg_store._sql.insert_thread, *row.values())
+        await holder.execute(pg_store._q.insert_thread, *row.values())
         claim = asyncio.create_task(
             racer.claim(KEY, LeaseRequest(owner="b", ttl=TTL))
         )
