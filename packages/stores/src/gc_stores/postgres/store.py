@@ -24,6 +24,8 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 
+from gc_core.stores import Stores
+
 from gc_stores import migrations
 from gc_stores.postgres.database import PostgresDatabase
 from gc_stores.postgres.dialect import PostgresDialect
@@ -99,4 +101,21 @@ class PostgresAgentStore(SqlAgentStore):
         )
 
 
-__all__ = ["PostgresAgentStore", "PostgresThreadStore"]
+def open_stores(
+    dsn: str,
+    *,
+    agent_id: str,
+    schema: str = "public",
+    clock: Callable[[], datetime] | None = None,
+    pool_options: dict[str, Any] | None = None,
+) -> Stores:
+    """Треды и хранилище агента ``agent_id`` на одном пуле Postgres;
+    ``await stores.aclose()`` закрывает пул."""
+    database = PostgresDatabase(dsn, schema=schema, pool_options=pool_options)
+    return Stores(
+        threads=PostgresThreadStore(database=database, clock=clock),
+        agent=PostgresAgentStore(database=database, agent_id=agent_id),
+    )
+
+
+__all__ = ["PostgresAgentStore", "PostgresThreadStore", "open_stores"]

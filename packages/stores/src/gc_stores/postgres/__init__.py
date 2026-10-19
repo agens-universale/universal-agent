@@ -4,6 +4,10 @@
 требует, отказ без драйвера — при первом подключении.
 """
 
-from gc_stores.postgres.store import PostgresAgentStore, PostgresThreadStore
+from gc_stores.postgres.store import (
+    PostgresAgentStore,
+    PostgresThreadStore,
+    open_stores,
+)
 
-__all__ = ["PostgresAgentStore", "PostgresThreadStore"]
+__all__ = ["PostgresAgentStore", "PostgresThreadStore", "open_stores"]

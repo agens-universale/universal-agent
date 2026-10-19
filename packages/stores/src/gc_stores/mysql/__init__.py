@@ -4,6 +4,10 @@
 требует, отказ без драйвера — при первом подключении.
 """
 
-from gc_stores.mysql.store import MySQLAgentStore, MySQLThreadStore
+from gc_stores.mysql.store import (
+    MySQLAgentStore,
+    MySQLThreadStore,
+    open_stores,
+)
 
-__all__ = ["MySQLAgentStore", "MySQLThreadStore"]
+__all__ = ["MySQLAgentStore", "MySQLThreadStore", "open_stores"]

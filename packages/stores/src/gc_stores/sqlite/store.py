@@ -17,6 +17,7 @@ from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 
+from gc_core.stores import Stores
 from gc_core.thread_files import check_name
 from gc_core.threads.models import ThreadKey
 
@@ -121,4 +122,22 @@ class SQLiteAgentStore(SqlAgentStore):
         self._checked = True  # схема применена при открытии базы
 
 
-__all__ = ["SQLiteAgentStore", "SQLiteThreadStore"]
+def open_stores(
+    path: str | Path,
+    *,
+    agent_id: str,
+    clock: Callable[[], datetime] | None = None,
+) -> Stores:
+    """Треды и хранилище агента ``agent_id`` в одном файле SQLite (схема —
+    при открытии)."""
+    database = SqliteDatabase(path)
+    database.ensure_sync(MIGRATIONS)
+    return Stores(
+        threads=SQLiteThreadStore(database=database, clock=clock),
+        agent=SQLiteAgentStore(
+            database=database, agent_id=agent_id, clock=clock
+        ),
+    )
+
+
+__all__ = ["SQLiteAgentStore", "SQLiteThreadStore", "open_stores"]

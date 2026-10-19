@@ -18,6 +18,8 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 
+from gc_core.stores import Stores
+
 from gc_stores import migrations
 from gc_stores.mysql.database import MySQLDatabase
 from gc_stores.mysql.dialect import MySQLDialect
@@ -76,4 +78,20 @@ class MySQLAgentStore(SqlAgentStore):
         )
 
 
-__all__ = ["MySQLAgentStore", "MySQLThreadStore"]
+def open_stores(
+    dsn: str,
+    *,
+    agent_id: str,
+    clock: Callable[[], datetime] | None = None,
+    pool_options: dict[str, Any] | None = None,
+) -> Stores:
+    """Треды и хранилище агента ``agent_id`` на одном пуле MySQL;
+    ``await stores.aclose()`` закрывает пул."""
+    database = MySQLDatabase(dsn, pool_options=pool_options)
+    return Stores(
+        threads=MySQLThreadStore(database=database, clock=clock),
+        agent=MySQLAgentStore(database=database, agent_id=agent_id),
+    )
+
+
+__all__ = ["MySQLAgentStore", "MySQLThreadStore", "open_stores"]
