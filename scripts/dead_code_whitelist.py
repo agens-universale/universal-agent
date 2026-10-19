@@ -69,3 +69,9 @@ seed_store
 ResourceWriter
 _.delete_resource
 _.list_resources
+
+# KV-движок gc-stores: MemoryKV — KV в памяти для проверки движка (тесты, свои
+# реализации встраивающих), sweep — уборка сирот прерванных записей, которую
+# зовёт оператор. packages/stores/src/gc_stores/kv/.
+MemoryKV
+_.sweep
