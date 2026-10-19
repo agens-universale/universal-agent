@@ -34,3 +34,12 @@ def test_missing_connection_is_a_usage_error(capsys, monkeypatch):
     monkeypatch.delenv("GC_STORES_DSN", raising=False)
     assert main(["migrate", "--store", "postgres"]) == 2
     assert "--dsn" in capsys.readouterr().err
+
+
+def test_migrate_mysql(mysql_databases, capsys):
+    import asyncio
+
+    dsn = asyncio.run(mysql_databases.acreate(migrate=False))
+    assert main(["migrate", "--check", "--store", "mysql", "--dsn", dsn]) == 1
+    assert main(["migrate", "--store", "mysql", "--dsn", dsn]) == 0
+    assert "версия схемы: 1" in capsys.readouterr().out

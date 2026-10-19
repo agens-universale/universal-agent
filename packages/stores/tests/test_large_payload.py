@@ -13,10 +13,15 @@ KEY = ThreadKey(system="s", thread="big")
 BIG = {"role": "tool", "content": "я" * (5 * 1024 * 1024 // 2)}
 
 
-@pytest.fixture(params=["sqlite", "postgres"])
+@pytest.fixture(params=["sqlite", "postgres", "mysql"])
 async def store(request, tmp_path):
     if request.param == "sqlite":
         made = SQLiteThreadStore(tmp_path / "big.db")
+    elif request.param == "mysql":
+        from gc_stores.mysql import MySQLThreadStore
+
+        databases = request.getfixturevalue("mysql_databases")
+        made = MySQLThreadStore(await databases.acreate())
     else:
         dsn = request.getfixturevalue("postgres_dsn")
         schema = await request.getfixturevalue("schemas").acreate()

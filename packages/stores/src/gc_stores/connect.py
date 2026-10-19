@@ -41,6 +41,12 @@ def _postgres(args: argparse.Namespace) -> Any:
     )
 
 
+def _mysql(args: argparse.Namespace) -> Any:
+    from gc_stores.mysql import MySQLThreadStore
+
+    return MySQLThreadStore(_value(args, "--dsn", "GC_STORES_DSN"))
+
+
 def _sqlite(args: argparse.Namespace) -> Any:
     from gc_stores.sqlite import SQLiteThreadStore
 
@@ -48,6 +54,7 @@ def _sqlite(args: argparse.Namespace) -> Any:
 
 
 STORES: dict[str, StoreKind] = {
+    "mysql": StoreKind(threads=_mysql),
     "postgres": StoreKind(threads=_postgres),
     "sqlite": StoreKind(threads=_sqlite),
 }
