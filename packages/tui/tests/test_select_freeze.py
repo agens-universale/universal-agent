@@ -316,7 +316,7 @@ async def test_poll_freeze_does_not_cut_footer_and_tail(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_tail_under_selection_drawn_after_release(tmp_path, monkeypatch):
     """F3: записи, пришедшие во время выделения, рисуются первым тиком после
-    отпускания мыши — курсор под заморозкой их не переступает."""
+    отпускания мыши — под заморозкой хвост не читается, курсор стоит."""
     import json
 
     from gc_core.thread_store import append_new_thread_messages
@@ -356,6 +356,14 @@ async def test_tail_under_selection_drawn_after_release(tmp_path, monkeypatch):
                 "output": "ok",
             },
         )
+        tail_events = scr._store.tail_events
+        reads = []
+
+        def _counted(*args, **kwargs):
+            reads.append(frozen[0])
+            return tail_events(*args, **kwargs)
+
+        monkeypatch.setattr(scr._store, "tail_events", _counted)
         scr._poll_active()
         scr._poll_active()
         frozen[0] = False
@@ -364,6 +372,7 @@ async def test_tail_under_selection_drawn_after_release(tmp_path, monkeypatch):
         ids = [e.message_id for e in scr._task_events]
         size = (tmp_path / "data_cli_t1.jsonl").stat().st_size
 
+    assert True not in reads
     assert {"u2", "fc1", "fo1"} <= set(ids)
     assert ids.count("u2") == 1
     assert scr._cursor.position_token == size

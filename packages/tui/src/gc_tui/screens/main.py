@@ -4438,19 +4438,18 @@ class TraceScreen(Screen):
         # случилась до ответа модели на повтор. При заморозке выделения ждут в очереди.
         if not _frozen:
             self._drain_trace_notes()
+        # F3: при freeze хвост не читаем и трейс НЕ перерисовываем
+        # (wipe/clear_trace/render_records дрожали бы экраном под выделением):
+        # курсор стоит, первый тик после MouseUp дочитает накопленный хвост,
+        # сброс или шаг сжатия.
         if (
-            self._store is None
+            _frozen
+            or self._store is None
             or self._active_task_id is None
             or self._cursor is None
         ):
             return
         tail = self._store.tail_events(self._active_task_id, self._cursor)
-        # F3: при freeze НЕ перерисовываем трейс (wipe/clear_trace/render_records
-        # дрожали бы экраном под выделением) и курсор НЕ трогаем: первый тик
-        # после MouseUp дочитает накопленный хвост, сброс или шаг сжатия
-        # (иначе записи этих тиков на экран бы уже не попали).
-        if _frozen:
-            return
         if tail.compaction is not None:
             self._apply_compaction(tail.compaction, tail.next_cursor)
             return
