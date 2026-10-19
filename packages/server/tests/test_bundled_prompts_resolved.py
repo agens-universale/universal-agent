@@ -72,14 +72,18 @@ def test_command_judge_prompts_under_bundled_root(
 ):
     from gc_core.execution.guard_contracts import GuardProbeRequest
     from gc_core.security.command_moderation import aload_command_judge_prompt
-    from gc_core.security.guard_probe import evaluate_guard_probe
+    from gc_core.security.guard_probe import aevaluate_guard_probes
     from gc_testkit import run_coro
 
-    facts = evaluate_guard_probe(
-        GuardProbeRequest(
-            "command_prompts", "exec_command", "", cwd=str(tmp_path)
-        ),
-        settings=foreign_prompt_workspace,
+    (facts,) = run_coro(
+        aevaluate_guard_probes(
+            [
+                GuardProbeRequest(
+                    "command_prompts", "exec_command", "", cwd=str(tmp_path)
+                )
+            ],
+            settings=foreign_prompt_workspace,
+        )
     )
     store = _store(foreign_prompt_workspace)
     for kind in ("system", "user"):

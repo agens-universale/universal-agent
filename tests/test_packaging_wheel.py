@@ -254,15 +254,17 @@ def test_server_wheel_contents(wheels):
 
 
 def test_stores_wheel_ships_the_schema(wheels):
-    """SQL схемы лежит файлом рядом с кодом: без него ``ensure_schema()``
-    установленного колеса падает на первом старте."""
+    """Миграции схемы лежат файлами рядом с кодом: без них ``ensure_schema()``
+    установленного колеса падает на первом старте (а SQLite — при открытии)."""
     names = wheels["gc_stores"]
     assert {n.split("/")[0] for n in names} == {"gc_stores"}, sorted(names)
-    for m in (
-        "gc_stores/postgres/store.py",
-        "gc_stores/postgres/schema.sql",
-    ):
-        assert m in names, m
+    for base in ("postgres", "mysql", "sqlite"):
+        for m in (
+            f"gc_stores/{base}/store.py",
+            f"gc_stores/{base}/migrations/0001_threads.sql",
+            f"gc_stores/{base}/migrations/0002_agent.sql",
+        ):
+            assert m in names, m
 
 
 def test_vendored_ddgs_ships_without_build_junk(wheels):
@@ -354,6 +356,9 @@ OWN_COMMANDS = {
     "gc_acp": {"gc-acp"},
     "gc_chat": {"gc-chat"},
     "gc_a2a": {"gc-a2a"},
+    # Утилита обслуживания хранилищ (migrate, sync). gc-stores в мету gc-ua не
+    # входит и ставится отдельно, как Temporal: с командами меты не пересекается.
+    "gc_stores": {"gc-stores"},
 }
 
 
@@ -392,15 +397,15 @@ def test_each_distribution_declares_only_its_own_commands():
         )
         got = set(man["project"].get("scripts", {}))
 
-        if name in ("gc_core", "gc_stores"):
-            # gc-core и gc-stores — БИБЛИОТЕКИ: команды в PATH не кладут.
+        if name == "gc_core":
+            # gc-core — БИБЛИОТЕКА: команды в PATH не кладёт.
             assert not got, f"{sub} — библиотека, точек входа быть не должно"
         elif name == "gc_ua":
             expected = set().union(
                 *(
                     commands
                     for leaf, commands in OWN_COMMANDS.items()
-                    if leaf != "gc_core_temporalio"
+                    if leaf not in ("gc_core_temporalio", "gc_stores")
                 )
             )
             assert got == expected, sub

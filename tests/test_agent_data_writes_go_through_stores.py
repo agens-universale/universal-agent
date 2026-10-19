@@ -64,8 +64,8 @@ _ROLLBACK = (
 ALLOWED: dict[str, str] = {
     # Реализации хранилищ.
     _CORE + "threads/file_tx.py": "файловое хранилище тредов v2",
-    "packages/stores/src/gc_stores/sqlite/store.py": (
-        "хранилище тредов SQLite: файл базы создаётся с правами 0600"
+    "packages/stores/src/gc_stores/sqlite/database.py": (
+        "хранилища SQLite: файл базы создаётся с правами 0600"
     ),
     _CORE + "attachments/store.py": "файлы вложений тредов (картинки)",
     # Совместимость отката: файлы develop пишутся вместе с хранилищем.
