@@ -163,3 +163,11 @@ async def mysql_store(mysql_databases):
 
     async with MySQLThreadStore(await mysql_databases.acreate()) as store:
         yield store
+
+
+@pytest.fixture
+def requests_seen(monkeypatch):
+    """Скриптованная модель (``scripted_model``): запросы к ней по порядку."""
+    import scripted_model
+
+    return scripted_model.install(monkeypatch)
