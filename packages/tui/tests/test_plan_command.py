@@ -189,6 +189,21 @@ async def test_no_plan_enters_plan_mode_or_just_answers(tmp_path):
         assert screen._plan_banner is None and _panels(screen) == []
 
 
+async def test_no_plan_enters_plan_mode_while_the_agent_works(tmp_path):
+    """Плана нет, агент занят (работает или ждёт ответа на вопрос): `/plan`
+    включает plan, как Shift+Tab, — ответом служит подсказка смены режима
+    в футере, строки в ленте нет. Уже в plan — уведомление «плана пока нет»."""
+    _save(tmp_path, plan=None, mode="edit")
+    async with _app(tmp_path).run_test() as pilot:
+        screen = pilot.app.screen
+        await _open(pilot, running=True)
+        screen._cmd_plan()
+        await pilot.pause()
+        assert pilot.app.effective_permission_mode() == "plan"
+        assert "plan mode включён" not in _trace_text(screen)
+        assert screen._plan_banner is None and _panels(screen) == []
+
+
 async def test_approved_plan_is_resumed_with_its_own_question_and_message(
     tmp_path,
 ):

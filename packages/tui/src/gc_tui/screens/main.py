@@ -4015,7 +4015,7 @@ class TraceScreen(Screen):
         программа, а не модель: та пересказала бы план по памяти.
 
         Режим не трогается, когда план есть: его меняет выбор в баннере.
-        Плана нет и исполнитель свободен — команда включает plan.
+        Плана нет — команда включает plan, и при занятом исполнителе.
         """
         arg = (arg or "").strip()
         if arg == "clear":
@@ -4034,13 +4034,16 @@ class TraceScreen(Screen):
         busy = runner is not None and runner.is_running()
         plan = self._session_plan()
         if plan is None:
-            if busy:
-                self.app.notify(_PLAN_CMD_NO_PLAN_BUSY)
-                return
             already = self.app.effective_permission_mode() == Mode.PLAN.value
             if not already:
+                # Как Shift+Tab — и посреди хода: смену объявят модели.
                 self.app.set_permission_mode(Mode.PLAN.value)
                 self.on_permission_mode_changed(Mode.PLAN.value)
+            if busy:
+                # Следов в ленте нет: ответ — подсказка смены режима в футере.
+                if already:
+                    self.app.notify(_PLAN_CMD_NO_PLAN_BUSY)
+                return
             self._mount_trace_row(
                 prefix="· ",
                 content=_PLAN_CMD_NO_PLAN if already else _PLAN_CMD_ENTERED,
@@ -6211,20 +6214,25 @@ class TraceScreen(Screen):
                 inp.text = ""
                 await self._handle_command(cmd.name)
                 return
-            # Свободный ввод с / — выполнить (например, /view path/to/file)
-            if typed.startswith("/"):
-                self._close_palette()
-                inp.text = ""
-                await self._handle_command(typed[1:])
-                return
-            # Всё остальное — закрыть палитру и очистить ввод
             self._close_palette()
-            inp.text = ""
-            return
+            # Свободный ввод с / (например, /view path/to/file) — общим путём
+            # ниже: там решается, команда это или ответ на вопрос агента.
+            if not typed.startswith("/"):
+                inp.text = ""
+                return
 
         text = event.value.strip()
         inp.text = ""
         if not text:
+            return
+
+        # Известная команда выполняется всегда, и пока висит вопрос агента: поле
+        # одно на ответ и команды. Прочее с «/» (путь и т.п.) во время вопроса —
+        # ответ агенту, вне вопроса — ошибка «нет такой команды» ниже.
+        if text.startswith("/") and self._registry.lookup(
+            (text[1:].split(None, 1) or [""])[0]
+        ):
+            await self._handle_command(text[1:])
             return
 
         # Ask-human mode: input is the answer to the agent's question.
