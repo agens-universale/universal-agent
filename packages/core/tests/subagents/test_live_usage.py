@@ -159,3 +159,37 @@ async def test_parent_messages_untouched_by_usage_push(monkeypatch):
         "subagent_worker", subagent_cls, {"task": "t"}, _fake_run_agent
     )
     assert orch.messages == [{"role": "user", "content": "parent only"}]
+
+
+async def test_result_usage_is_compact_for_parent_model(monkeypatch):
+    runner, _orch = _runner_with_orchestrator()
+    child = _FakeChildState()
+    subagent_cls = _wire_runner(monkeypatch, runner, child)
+
+    async def _fake_run_agent(messages, child_state, child_ctx, **kwargs):
+        child_state.usage.add(
+            CATEGORY_MAIN,
+            100,
+            20,
+            cost=0.1,
+            billed=True,
+            currency="USD",
+            model="m1",
+        )
+        return "done"
+
+    out = await runner._arun_internal(
+        "subagent_worker", subagent_cls, {"task": "t"}, _fake_run_agent
+    )
+    assert json.loads(out)["meta"]["usage"] == {
+        "by_category": {
+            "main": {
+                "input": 100,
+                "output": 20,
+                "cached": 0,
+                "calls": 1,
+                "missing_usage_calls": 0,
+                "cost_by_currency": {"USD": 0.1},
+            }
+        }
+    }

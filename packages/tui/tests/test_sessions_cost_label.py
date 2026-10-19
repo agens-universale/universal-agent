@@ -62,7 +62,7 @@ def test_card_cost_without_fact_uses_tariff():
     pytest.importorskip("textual")
     acc = UsageAccount()
     acc.add(
-        CATEGORY_MAIN, 1_000_000, 100_000
+        CATEGORY_MAIN, 1_000_000, 100_000, model="m"
     )  # факта нет — считается по тарифу
     config = {
         "agent.model": "m",
@@ -75,3 +75,20 @@ def test_card_cost_without_fact_uses_tariff():
 def test_card_without_usage_gives_none():
     pytest.importorskip("textual")
     assert _cost_label({"agent.model": "m", "pricing": _PRICING}, None) is None
+
+
+def test_card_prices_legacy_usage_at_agent_model_rate():
+    pytest.importorskip("textual")
+    acc = UsageAccount()
+    acc.add(CATEGORY_MAIN, 1_000_000, 100_000)  # модель вызова не записана
+    config = {"agent.model": "m", "pricing": _PRICING}
+    assert _cost_label(config, acc.to_meta()) == "120.0 ₽"
+
+
+def test_card_shows_unknown_for_legacy_usage_without_agent_tariff():
+    pytest.importorskip("textual")
+    acc = UsageAccount()
+    acc.add(CATEGORY_MAIN, 1_000_000, 100_000)
+    pricing = {"enabled": True, "models": {"other": {"input": 1, "output": 1}}}
+    config = {"agent.model": "m", "pricing": pricing}
+    assert _cost_label(config, acc.to_meta()) == "?"

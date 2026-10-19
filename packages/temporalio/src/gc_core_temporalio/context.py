@@ -22,6 +22,7 @@ from gc_core.run_context import assemble_run_context
 from gc_core.tools.connect_mcp.tool_wrapper import MCPToolWrapper
 from gc_core.tools.registry import get_builtin_tools_data
 from gc_core.tools.skills.skills_tools import get_skills_tools_data
+from temporalio import workflow
 
 from gc_core_temporalio.child_preparation import (
     prepared_subagent_factories,
@@ -86,7 +87,21 @@ class ExternalAgentStore(AgentStore):
         raise self._external(f"memory:{project.id}")
 
 
-def assemble_context(prepared, *, operations, store, logger, human_request):
+def assemble_context(
+    prepared,
+    *,
+    operations,
+    store,
+    logger,
+    human_request,
+    request_equivalence=None,
+    require_request_equivalence=False,
+    subagent_independent_auto=True,
+):
+    if require_request_equivalence and request_equivalence is None:
+        raise ExecutionFailure(
+            "Root routing needs prepared request equivalence"
+        )
     resources = ExternalResources(
         is_sandbox=prepared.context.workspace_is_sandbox,
         root=prepared.context.workspace_root,
@@ -118,31 +133,39 @@ def assemble_context(prepared, *, operations, store, logger, human_request):
         loaded, level_provider=lambda: loaded.settings.level or "default"
     )
     operations.router = router
-    ctx = assemble_run_context(
-        prepared.context,
-        RunContextBindings(
-            os_backend=resources,
-            skills_registry=resources,
-            logger=logger,
-            tools_data=tools,
-            model_router=router,
-            thread_store=store,
-            agent_store=ExternalAgentStore(),
-            operations=operations,
-            lock_factory=nullcontext,
-            prompt_loader=operations.prompt_loader,
-            state_preparer=operations.state_preparer,
-            human_request=human_request,
-            guard_probe=operations.guard_probe,
-            tool_effect=operations.tool_effect,
-            skills_loader=operations.skills_loader,
-            mcp_cleanup=operations.mcp_cleanup,
-            prompt_resource=operations.prompt_resource,
-            summary_trace_sink=operations.summary_trace_sink,
-            project_memory_io=operations.project_memory_io,
-            collect_garbage=lambda: None,
-        ),
-    )
+    try:
+        ctx = assemble_run_context(
+            prepared.context,
+            RunContextBindings(
+                os_backend=resources,
+                skills_registry=resources,
+                logger=logger,
+                tools_data=tools,
+                model_router=router,
+                thread_store=store,
+                agent_store=ExternalAgentStore(),
+                operations=operations,
+                execution_patch=workflow.patched,
+                prepared_request_equivalence=request_equivalence,
+                subagent_independent_auto=subagent_independent_auto,
+                lock_factory=nullcontext,
+                prompt_loader=operations.prompt_loader,
+                state_preparer=operations.state_preparer,
+                human_request=human_request,
+                guard_probe=operations.guard_probe,
+                tool_effect=operations.tool_effect,
+                skills_loader=operations.skills_loader,
+                mcp_cleanup=operations.mcp_cleanup,
+                prompt_resource=operations.prompt_resource,
+                summary_trace_sink=operations.summary_trace_sink,
+                project_memory_io=operations.project_memory_io,
+                collect_garbage=lambda: None,
+            ),
+        )
+    except ValueError as exc:
+        if request_equivalence is None:
+            raise
+        raise ExecutionFailure("Invalid prepared routing context") from exc
 
     seed_prepared_subagent_definitions(ctx, prepared.subagent_definitions)
     operations.router_provider = lambda: ctx.model_router

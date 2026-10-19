@@ -73,3 +73,12 @@ def test_session_compact_output_not_treated_as_final_answer():
     ev = map_message(out, no=2, ts="t")
     assert ev is not None
     assert ev.kind != "agent"
+
+
+def test_generic_arg_summary_keeps_normal_skill_arguments():
+    ev = map_message(
+        _fc("skills_load", {"skill_id": "bench", "reason": "inspect"}),
+        no=1,
+        ts="t",
+    )
+    assert ev.summary == "skills_load(skill_id='bench', reason='inspect')"

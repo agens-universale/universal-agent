@@ -25,6 +25,7 @@ class Prompt(StrEnum):
     INTENT_TOOL = "intent_tool"
     INTENT_FINAL = "intent_final"
     FINISH_GATE = "finish_gate"
+    ROUTING_PAIR_JUDGE = "routing_pair_judge"
     PROJECT_MEMORY_COMPACTION = "project_memory_compaction"
     COMMAND_JUDGE_SYSTEM = "command_judge_system"
     COMMAND_JUDGE_USER = "command_judge_user"

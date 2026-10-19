@@ -93,6 +93,7 @@ class ToolVisionView:
     """
 
     probe_turn: str | None = None
+    # Уровень из прежних снимков; новые отправители передают call_level.
     turn_level: str | None = None
     live_ids: list[str] = field(default_factory=list)
     step_attachments: list[dict[str, Any]] = field(default_factory=list)
@@ -103,6 +104,7 @@ class ToolVisionView:
     state_id: str | None = None
     x_target: str | None = None
     schema_version: int = 1
+    call_level: str | None = None
 
 
 @dataclass
@@ -156,6 +158,7 @@ class ModelRequest:
     request_label: str = "chat_completion"
     payload_overrides: dict[str, Any] | None = None
     set_previous_response_id: bool = True
+    mute_answer: bool = False
     schema_version: int = 1
 
 
@@ -194,6 +197,13 @@ class ModelProviderError(TurnFailure, RuntimeError):
     def __init__(self, failure: ModelFailure):
         super().__init__(failure.message)
         self.failure = failure
+
+
+class MainModelUnavailable(RuntimeError):
+    """Подтверждённая недоступность модели основного запроса после всех ретраев —
+    честная ошибка хода. Отдельный тип, чтобы AUTO отличал её от прочих
+    RuntimeError без разбора текста и заменял модель такта (спека PR140 Р3);
+    для всех остальных это по-прежнему RuntimeError."""
 
 
 @dataclass

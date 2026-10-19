@@ -14,7 +14,7 @@ from urllib.parse import urlparse
 
 from gc_core import config_raw
 from gc_core.app_version import REPO_GIT_URL
-from gc_core.settings import settings_of
+from gc_core.settings import LoadedSettings, settings_of
 
 
 def _mcp_hint() -> str:
@@ -360,15 +360,33 @@ def effective_model(settings: Any) -> str:
     Резолв не удался (полусырой конфиг: пустой реестр без плоского ключа, слот
     на несуществующий алиас) — фоллбэк на плоский ключ: мастер обязан
     открываться на любом конфиге. Сентинел шаблона — «ещё не задано», а не
-    значение: отдаём пусто, как и на конфиге без модели вовсе."""
-    settings = settings_of(settings)
+    значение: отдаём пусто, как и на конфиге без модели вовсе.
+
+    `level: auto` (спека auto-routing §5.1) переводится через `effective_level`
+    ДО `ModelRouter` — сырой литерал `auto` роняет `_resolve_level`
+    (`ValueError`), и резолв ушёл бы фоллбэком на плоский ключ вместо модели
+    default-слота. Только функции ядра — мастер не импортирует `gc_tui`."""
+    source = (
+        settings
+        if isinstance(settings, LoadedSettings)
+        else LoadedSettings(settings=settings_of(settings))
+    )
+    settings = source.settings
     name = settings.agent.model
     try:
+        from gc_core.auto_routing.levels import auto_available, effective_level
+        from gc_core.config import cli_forces_legacy_model
         from gc_core.model_router import ModelRouter
 
+        available = auto_available(
+            source, force_legacy=cli_forces_legacy_model(source)
+        )
         resolved = ModelRouter(
-            settings,
-            level_provider=lambda: settings.level or "default",
+            source,
+            level_provider=lambda: effective_level(
+                settings.level, None, available
+            ),
+            force_legacy=cli_forces_legacy_model(source),
         ).resolve("main", check_breaker=False)
         name = resolved.model
     except Exception:

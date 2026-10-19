@@ -7,6 +7,7 @@ from gc_core.config_modules.cli_args import (
     parse_override_args,
     setting_flag_overrides,
 )
+from gc_core.config_modules.model_registry import LEVEL_VALUES
 
 run_args = dict()
 extra_config_overrides: Dict[str, Any] = {}
@@ -259,9 +260,12 @@ parser.add_argument(
 
 parser.add_argument(
     "--level",
-    choices=["light", "default", "max"],
+    choices=list(LEVEL_VALUES),
     default=None,
-    help="Активный уровень модели на этот запуск (перекрывает config.yml и профиль)",
+    help=(
+        "Активный уровень модели на этот запуск (перекрывает config.yml и профиль); "
+        "auto — уровень меняется автоматически по ходу работы"
+    ),
 )
 
 parser.add_argument(

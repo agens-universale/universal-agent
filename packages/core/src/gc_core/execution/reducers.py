@@ -26,6 +26,7 @@ def tool_vision_view(state: Any) -> ToolVisionView:
     ]
     return ToolVisionView(
         probe_turn=getattr(state, "vision_probe_turn", None),
+        call_level=getattr(state, "_call_level", None),
         turn_level=getattr(state, "turn_level", None),
         live_ids=sorted(getattr(state, "vision_live_ids", None) or ()),
         step_attachments=deepcopy(

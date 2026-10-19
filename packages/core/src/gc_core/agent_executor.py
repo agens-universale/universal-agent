@@ -20,6 +20,7 @@ from gc_core.attachments.store import (
     commit_to_run_thread,
     with_committed_attachments,
 )
+from gc_core.auto_routing import state_ops
 from gc_core.config_modules.stored_outputs import (
     get_stored_tool_outputs_max_entries,
 )
@@ -562,11 +563,10 @@ class AgentExecutor:
                 )
             )
             state = State.from_prepared(prepared, **state_data)
-        # Старт рана — первая из двух точек начала хода (спека §6.4): фиксируем
-        # модель этого хода через Router, дальше внутри хода не перечитываем.
-        # Открытый активный алиас (trip прошлого хода / персист breaker при attach)
-        # → честная ошибка класса 2 ДО транспорта (спека §8), не сырой
-        # AliasCircuitOpenError на старте рана.
+        attach = getattr(self._ctx, "attach_state", None)
+        if callable(attach):
+            attach(state)
+        # Граница хода сбрасывает счётчики; модель выбирается перед вызовом.
         begin_turn_main_trace(state, self._ctx)
         state.tool_call_outputs_store.set_max_entries(
             get_stored_tool_outputs_max_entries(settings)
@@ -1018,9 +1018,8 @@ class AgentExecutor:
         await areset_run_flags(thread_session)
         await self._amcp_snapshot(thread_session, thread_id, system_id)
 
-        # Стартовый снимок — модель хода ещё не зафиксирована (резолв main).
-        # limits_provider перечитывает пороги на каждой проверке: по уровню,
-        # который begin_turn записал в state, а не по глобальному summary.
+        # Начальные значения для координатора; проверка истории перечитывает
+        # пороги подготовленного вызова через limits_provider.
         limits_provider = self._history_summary_limits
         initial_limits = limits_provider()
         summary_trigger_chars = initial_limits.chars_during
@@ -1061,6 +1060,11 @@ class AgentExecutor:
         )
         _extend_with_thread_history(state, thread_session, backend_api_mode)
 
+        execution_patch = port(self._ctx, "execution_patch")
+        deferred_startup_compaction = (
+            execution_patch is None
+            or execution_patch("startup-compaction-call-kit-v1")
+        )
         summary = RunSummaryCoordinator(
             ctx=self._ctx,
             state=state,
@@ -1073,15 +1077,24 @@ class AgentExecutor:
             pre_backend_trigger_reason="pre_backend",
             logger=logger,
             limits_provider=limits_provider,
+            deferred_startup_compaction=deferred_startup_compaction,
+            startup_progress_guard=(
+                deferred_startup_compaction
+                and (
+                    execution_patch is None
+                    or execution_patch("startup-compaction-progress-v1")
+                )
+            ),
         )
         self._ctx.on_summary_applied = summary.on_summary_applied
         self._ctx.is_cli_mode = is_cli_mode
 
-        # Хук компакции ждём тем же способом, что и три остальных
-        # (_acall_blocking_hook): корутину — нативно, обычную функцию — в потоке.
-        await _acall_blocking_hook(
-            summary.apre_run_compact_if_needed, trigger_reason="pre_run"
-        )
+        # Старые истории сохраняют порядок команд. Новые исполнения проверяют
+        # стартовую историю в цикле после выбора первого комплекта модели.
+        if not deferred_startup_compaction:
+            await _acall_blocking_hook(
+                summary.apre_run_compact_if_needed, trigger_reason="pre_run"
+            )
 
         if not messages:
             raise ValueError(
@@ -1173,6 +1186,8 @@ class AgentExecutor:
             )
         finally:
             await _stop_lease_keeper(keeper)
+            state_ops.leave(state)
+            state.turn_level = None
             teardown_cancel = await self._ateardown_run(_owner_reset)
             if not loop_finished:
                 # Ход упал — учёт не закроется, аренду не держать до срока.
@@ -1237,27 +1252,28 @@ class AgentExecutor:
         см. ``src/run_context.py``) — снимок ``models``/``slots``/``assign`` неизменен всю
         его жизнь (пересборка — только следующим ``get_runner()`` после ``invalidate_runner``).
 
-        Футеру TUI (Task 15) нужен именно этот Router для резолва уровня, зафиксированного
-        на ход (``state.turn_level``): живой ``display_router()`` TUI отражает /profiles
-        мгновенно и подменил бы «факт» на модель уже переключившегося профиля раньше, чем
-        ход её реально увидит. ``None`` — у ``ctx`` нет ``model_router`` (тестовые двойники).
+        Футеру TUI нужен именно этот Router для резолва подготовленного вызова по
+        его уровню: живой ``display_router()`` отражает /profiles мгновенно и подменил бы
+        факт моделью уже переключившегося профиля (резолв — перед каждым вызовом по
+        живому уровню, ``processing_responses.resolve_main_for_call``). ``None`` — у
+        ``ctx`` нет ``model_router`` (тестовые двойники).
         """
         return getattr(self._ctx, "model_router", None)
 
     def _history_summary_limits(self):
-        """Пороги сжатия модели ХОДА на момент проверки (не снимок старта run):
-        по уровню, зафиксированному `begin_turn`, — тому же, по которому идут
+        """Пороги сжатия модели текущего вызова (не снимок старта run):
+        по уровню, выбранному перед подготовкой запроса, — тому же, по которому идут
         запросы. До сборки state уровня ещё нет — обычный резолв `main`."""
         return resolve_summary_limits_at_level(
             self._ctx,
             self.get_model_router(),
-            getattr(self._state, "turn_level", None),
+            getattr(self._state, "_call_level", None),
         )
 
     def summary_limits(self):
         """Пороги сжатия, по которым работает ЭТОТ executor: его снимок конфига,
-        его Router, уровень текущего хода. Читает индикатор контекста TUI — живой
-        конфиг экрана и живой `/level` меняются раньше, чем их увидит ход."""
+        его Router, уровень текущего вызова. Читает индикатор контекста TUI — новый
+        выбор пользователя не меняет уже подготовленный вызов."""
         return self._history_summary_limits()
 
     def usage_meta_snapshot(self) -> Optional[tuple[dict, Optional[dict]]]:

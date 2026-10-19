@@ -183,6 +183,31 @@ class ChildTransport:
         if self._handle is not None:
             await self._handle.signal("stop")
 
+    def _child_context(self, tool_name):
+        """Контекст входа ребёнка. Зовёт ``workflow.patched``: место вызова в
+        ``execute`` (до снимка родителя и старта child workflow) не менять."""
+        router = self.ctx.model_router
+        parent = self.operations.child_context or {}
+        child_context = {
+            # Корневая сессия (workflow ID верхнего workflow, стабилен через
+            # Continue-As-New): субагенты делят с ней кэш страниц воркера.
+            "session_id": parent.get("session_id")
+            or workflow.info().workflow_id,
+            "parent_owner_id": self.operations.owner_id,
+            "parent_context": self.operations.child_context,
+            "tool_name": tool_name,
+            "frozen_level": router.active_level(),
+            "force_legacy": router.force_legacy,
+            "circuit_breaker": router.breaker.snapshot(),
+        }
+        # Старые истории сохраняют прежний вход child workflow; новые
+        # передают AUTO отдельно от уровня уже выбранного вызова родителя.
+        if workflow.patched("subagent-frozen-live-level-v1"):
+            child_context["frozen_live_level"] = router.live_level()
+        if workflow.patched("subagent-independent-auto-v1"):
+            child_context["independent_auto"] = True
+        return child_context
+
     async def execute(self, runner, tool_name, arguments, *, parent_call_id):
         if self.active_child is not None:
             raise ExecutionFailure(
@@ -206,20 +231,7 @@ class ChildTransport:
             ),
             resource_owner=self.operations.resource_owner,
         )
-        router = self.ctx.model_router
-        parent = self.operations.child_context or {}
-        child_context = {
-            # Корневая сессия (workflow ID верхнего workflow, стабилен через
-            # Continue-As-New): субагенты делят с ней кэш страниц воркера.
-            "session_id": parent.get("session_id")
-            or workflow.info().workflow_id,
-            "parent_owner_id": self.operations.owner_id,
-            "parent_context": self.operations.child_context,
-            "tool_name": tool_name,
-            "frozen_level": router.active_level(),
-            "force_legacy": router.force_legacy,
-            "circuit_breaker": router.breaker.snapshot(),
-        }
+        child_context = self._child_context(tool_name)
         try:
             parent_snapshot = _light_parent_snapshot(self._state)
         except ValueError as exc:

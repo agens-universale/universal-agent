@@ -17,6 +17,7 @@ class PromptResourceRequest:
         "intent_final",
         "project_memory",
         "finish_gate",
+        "routing_pair_judge",
     ]
     subagent: bool = False
     schema_version: int = 1

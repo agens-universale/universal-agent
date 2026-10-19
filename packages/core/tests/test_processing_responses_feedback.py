@@ -173,6 +173,7 @@ def test_request_backend_canonical_sanitizes_state_history_for_chat_completions(
             [{"role": "user", "content": "next", "id": "m_1"}],
             state,
             ctx,
+            resolved=None,
         )
     )
 

@@ -109,6 +109,7 @@ def _ptc_state():
         turn_tool_calls=0,
         loop_detector_window=[],
         loop_detector_pending=[],
+        tick_signals=set(),
         last_unknown_tool_name=None,
         unknown_tool_repeat_count=0,
         last_internal_error_tool_name=None,

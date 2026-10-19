@@ -17,6 +17,7 @@ async def aload_prompt_resource_here(
         "intent_final": _intent_final,
         "project_memory": _project_memory,
         "finish_gate": _finish_gate,
+        "routing_pair_judge": _routing_pair_judge,
     }
     try:
         reader = readers[request.kind]
@@ -71,3 +72,9 @@ async def _finish_gate(_request, ctx):
     )
 
     return await aload_guard_prompt(agent_store_of(ctx))
+
+
+async def _routing_pair_judge(_request, ctx):
+    from gc_core.auto_routing.judge_runner import aload_judge_prompt
+
+    return await aload_judge_prompt(agent_store_of(ctx))

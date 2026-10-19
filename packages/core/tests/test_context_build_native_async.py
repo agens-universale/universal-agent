@@ -166,11 +166,15 @@ def test_context_assembly_has_exactly_one_form():
     }
     for helper in ("_prepare_run_context", "_finish_run_context"):
         assert helper in calls, f"acreate_run_context не зовёт {helper}"
+    # Контекст собирает БАЗОВЫЙ реестр (`abuild_tools_data`) и декорирует его
+    # сам по модели вызова (`install_base_tools` / `tools_for`, автовыбор
+    # §5.2 п.4) — дискавери при этом ждётся тем же корутинным путём.
     assert "abuild_tools_data" in calls, "дискавери снова не ждётся"
     # Синхронной сборки тулов больше нет вовсе (шаг A2), но гейт остаётся:
     # он сторожит, чтобы она не вернулась. Слепое переименование однажды уже
     # превратило его в проверку наоборот.
     assert "build_tools_data" not in calls
+    assert "collect_tools_data" not in calls
 
 
 def test_subagent_builds_use_the_async_form():

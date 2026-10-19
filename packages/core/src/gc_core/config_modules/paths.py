@@ -12,6 +12,11 @@ class PathsConfig(BaseModel):
     chat_completions_intent_guard_prompt_path: str | None = Field(
         default=None, json_schema_extra=gc_meta(expert=True)
     )
+    # Инструкция судьи пары (auto_routing_safe_level: auto). None →
+    # prompts/chat_completions_routing_pair_judge_prompt.md рядом с конфигом либо bundled.
+    chat_completions_routing_pair_judge_prompt_path: str | None = Field(
+        default=None, json_schema_extra=gc_meta(expert=True)
+    )
     # Промпт для кастомных (файловых) сабагентов. None → prompts/
     # chat_completions_custom_subagent_system_prompt.md рядом с конфигом либо bundled.
     chat_completions_custom_subagent_system_prompt_path: str | None = Field(

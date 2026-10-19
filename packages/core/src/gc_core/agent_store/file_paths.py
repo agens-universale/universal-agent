@@ -94,6 +94,13 @@ def _finish_gate(s) -> list[str]:
     ]
 
 
+def _routing_pair_judge(s) -> list[str]:
+    return [
+        s.paths.chat_completions_routing_pair_judge_prompt_path
+        or _bundled_prompt("chat_completions_routing_pair_judge_prompt.md")
+    ]
+
+
 def _bundled(*parts: str) -> Callable[[Any], list[str]]:
     return lambda _s: [_bundled_prompt(*parts)]
 
@@ -115,6 +122,7 @@ _PROMPTS: dict[str, Callable[[Any], list[str]]] = {
         "intent_scope_final_answer_summary_prompt.md",
     ),
     Prompt.FINISH_GATE: _finish_gate,
+    Prompt.ROUTING_PAIR_JUDGE: _routing_pair_judge,
     Prompt.PROJECT_MEMORY_COMPACTION: _bundled(
         "project_memory_compaction_prompt.md"
     ),

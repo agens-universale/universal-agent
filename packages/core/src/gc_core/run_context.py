@@ -13,6 +13,13 @@ from gc_core.agent_store import (
     check_agent_store,
 )
 from gc_core.attachments.store import ImageStore, image_store_for
+from gc_core.auto_routing.levels import (
+    auto_available,
+    effective_level,
+    resolve_routing_params,
+)
+from gc_core.auto_routing.policy import RoutingParams
+from gc_core.auto_routing.request_equivalence import PreparedRequestEquivalence
 from gc_core.backends.factory import resolve_os_backend
 from gc_core.backends.protocol import FsBackend
 from gc_core.config_modules.chat_completions import (
@@ -44,6 +51,7 @@ from gc_core.model_router import (
     main_model_identity,
 )
 from gc_core.run_preparation import PromptLoader
+from gc_core.startup_notices import auto_routing_unavailable_notice
 from gc_core.state_preparation import StatePreparer
 from gc_core.tools import abuild_tools_data
 from gc_core.tools.skills.registry import SkillsRegistry
@@ -163,6 +171,30 @@ class RunContext:
     # «файл недоступен», а файловых операций в workflow нет.
     image_store: Optional[ImageStore] = None
 
+    active_state: Any = field(default=None, repr=False)
+    # Доступна ли фича auto этому запуску (спека §5.1) — считается ОДИН раз при
+    # сборке ctx (`acreate_run_context`, конфиг рана не меняется) и кладётся сюда;
+    # `aroute_before_call` читает готовое значение вместо повторного вычисления из
+    # `config_dict` на каждый вызов (единая точка предиката, без отдельной ветки
+    # на случай отсутствия поля).
+    auto_available: bool = True
+    # Параметры двухуровневого автовыбора: безопасный уровень, длины серий
+    # и порог пары. Считаются один раз при сборке ctx, как
+    # `auto_available`; обе точки сборки RunContext кладут их сами.
+    routing_params: RoutingParams = field(default_factory=RoutingParams)
+    # Старые durable-истории сохраняют прежнюю карточку и сравнение комплектов.
+    routing_contract_v2: bool = True
+    prepared_request_equivalence: PreparedRequestEquivalence | None = None
+    subagent_independent_auto: bool = True
+    # Версия поведения исполнения: durable-рантайм выбирает ветку по истории;
+    # локально отсутствие порта означает текущее поведение.
+    execution_patch: Optional[Callable[[str], bool]] = None
+
+    def attach_state(self, state: Any) -> None:
+        """Привязать State рана к контексту — единственная точка записи
+        `active_state` (спека auto-routing §5.1)."""
+        self.active_state = state
+
 
 def _coerce_settings(settings, runtime):
     """``LoadedSettings`` сборки из ``LoadedSettings`` или ``AppConfig``.
@@ -238,6 +270,7 @@ def assemble_run_context(
         thread_store=bindings.thread_store,
         agent_store=bindings.agent_store,
         operations=bindings.operations,
+        execution_patch=bindings.execution_patch,
         prompt_loader=bindings.prompt_loader,
         state_preparer=bindings.state_preparer,
         human_request=bindings.human_request,
@@ -250,8 +283,44 @@ def assemble_run_context(
         project_memory_io=bindings.project_memory_io,
         summary_trace_sink=bindings.summary_trace_sink,
         collect_garbage=bindings.collect_garbage,
+        prepared_request_equivalence=bindings.prepared_request_equivalence,
+        subagent_independent_auto=bindings.subagent_independent_auto,
     )
     ctx.is_tui = prepared.is_tui
+    ctx.routing_contract_v2 = (
+        bindings.execution_patch is None
+        or bindings.execution_patch("routing-request-contract-v2")
+    )
+    if ctx.prepared_request_equivalence is not None:
+        from gc_core.auto_routing.request_equivalence import (
+            validate_request_equivalence,
+        )
+
+        validate_request_equivalence(
+            ctx, ctx.prepared_request_equivalence, context_id=ctx.run_id
+        )
+    ctx.auto_available = auto_available(
+        ctx,
+        force_legacy=(
+            bindings.model_router.force_legacy
+            or not bindings.model_router.auto_allowed
+        ),
+        legacy_call_kits=not ctx.routing_contract_v2,
+    )
+    ctx.routing_params = resolve_routing_params(
+        ctx, legacy_call_kits=not ctx.routing_contract_v2
+    )
+    live = bindings.model_router.live_level
+
+    def effective_provider():
+        state = ctx.active_state
+        return effective_level(
+            live(), getattr(state, "current_level", None), ctx.auto_available
+        )
+
+    ctx.model_router = bindings.model_router.with_level_providers(
+        effective_provider, live
+    )
     return ctx
 
 
@@ -648,6 +717,10 @@ def _finish_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING
             "backend_api_mode": settings.backend.api_mode,
         },
     )
+
+    notice = auto_routing_unavailable_notice(prep.settings)
+    if notice is not None:
+        run_logger.warning(notice.message)
 
     run_logger.debug(
         "agent_tools",

@@ -720,7 +720,7 @@ def _arg_summary(name: str, args: dict) -> str:
         a = args.get("action")
         return f"action={a!r}"
 
-    # default: name + 1-3 short scalars
+    # default: name + 1-3 short scalars.
     pairs = []
     for k, v in list(args.items())[:3]:
         shown = (

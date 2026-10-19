@@ -16,6 +16,7 @@ Layering under test: schema defaults < bench defaults < profile overrides < runt
 """
 
 import sys
+from copy import deepcopy
 
 import pytest
 import yaml
@@ -45,6 +46,7 @@ def _loaded(overrides: dict | None = None) -> LoadedSettings:
         model="test-model",
         prompts_dir=_PROMPTS,
         skills_dir=_SKILLS,
+        logs_dir=_HARBOR_DIR / "logs",
         config_dir=str(_HARBOR_DIR),
         overrides=overrides,
     )
@@ -95,6 +97,7 @@ def test_only_intended_fields_differ_from_schema_defaults():
     intended = set(bench_defaults(_PROMPTS, _SKILLS)) | {
         "backend.completions_url",
         "agent.model",
+        "paths.logs_dump_dir",
     }
 
     assert changed <= intended, sorted(changed - intended)
@@ -378,7 +381,12 @@ async def test_stock_profiles_and_children_make_no_probe_with_attachment(
             ],
         )
         state.vision_probe_turn = "bench-root"
-        await pr._arequest_backend_canonical([message], state, ctx)
+        await pr._arequest_backend_canonical(
+            [message],
+            state,
+            ctx,
+            resolved=pr.resolve_main_for_call(state, ctx),
+        )
     assert len(spy.requests) == 2  # exactly the two working text calls
     assert all(
         b'"image_url"' not in r.content and b'"fs_view_image"' not in r.content
@@ -430,9 +438,230 @@ async def test_custom_image_bench_requires_successful_probe(
         ],
     )
     state.vision_probe_turn = "custom-image-bench"
-    await pr._arequest_backend_canonical([message], state, ctx)
+    await pr._arequest_backend_canonical(
+        [message], state, ctx, resolved=pr.resolve_main_for_call(state, ctx)
+    )
     assert len(spy.requests) == 2
     assert pngs(spy.requests[0]) == [challenge.png]
     assert pngs(spy.requests[1]) == [ctx.image_store.read_for_send(att)]
     assert state.vision_audience.native is not None
     assert b'"fs_view_image"' in spy.requests[1].content
+
+
+def test_two_level_numbers_reach_the_bench_config_and_a_profile_overrides_one_of_them():
+    """Конфиг бенча растёт из типизированной схемы: подключ `two_level` обязан в
+    нём быть, а профиль, назвавший одно число, второе не теряет."""
+    from gc_core.auto_routing.policy import RoutingParams
+
+    assert _config().agent.auto_routing_two_level.model_dump() == {
+        "weak_steps": 10,
+        "strong_steps": 2,
+        "pair_threshold": 3,
+    }
+    config = _config(
+        {
+            "agent.auto_routing_two_level": {"strong_steps": 4},
+        }
+    )
+    assert config.agent.auto_routing_two_level.model_dump() == {
+        "weak_steps": 10,
+        "strong_steps": 4,
+        "pair_threshold": 3,
+    }
+    params = RoutingParams.from_config(config)
+    assert (params.policy, params.weak_steps, params.strong_steps) == (
+        "two_level",
+        10,
+        4,
+    )
+
+
+def test_runtime_logs_directory_wins_over_profile():
+    config = _config({"paths.logs_dump_dir": "/tmp/unrelated-profile-logs"})
+    assert config.paths.logs_dump_dir == str(_HARBOR_DIR / "logs")
+
+
+def test_routing_defaults_reach_bench_settings_and_explicit_updates_win():
+    defaults = _config().agent
+    assert defaults.auto_routing is True
+    assert defaults.auto_routing_safe_level == "auto"
+    assert defaults.auto_routing_two_level.model_dump() == {
+        "weak_steps": 10,
+        "strong_steps": 2,
+        "pair_threshold": 3,
+    }
+    config = _config({"agent.auto_routing_two_level": {"weak_steps": 6}})
+    assert config.agent.auto_routing_two_level.model_dump() == {
+        "weak_steps": 6,
+        "strong_steps": 2,
+        "pair_threshold": 3,
+    }
+
+
+def test_setting_os_backend_kind_stays_separate_from_runtime_backend():
+    loaded = _loaded({"os_backend.kind": "local"})
+    assert loaded.settings.os_backend.kind == "local"
+    assert loaded.runtime.os_backend == "harbor"
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"agent.max_steps": 20, "agent": {"no_tool_call_max_count": 7}},
+        {"agent": {"no_tool_call_max_count": 7}, "agent.max_steps": 20},
+    ],
+    ids=["dotted-first", "nested-first"],
+)
+def test_mixed_agent_overrides_preserve_independent_leaves(overrides):
+    before = deepcopy(overrides)
+    loaded = _loaded(overrides)
+
+    assert overrides == before
+    assert loaded.settings.agent.max_steps == 20
+    assert loaded.settings.agent.no_tool_call_max_count == 7
+    assert loaded.provenance.source("agent.max_steps").layer == "bench_profile"
+    assert (
+        loaded.provenance.source("agent.no_tool_call_max_count").layer
+        == "bench_profile"
+    )
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"backend.use_ssl": True, "backend": {"request_timeout_sec": 17}},
+        {"backend": {"request_timeout_sec": 17}, "backend.use_ssl": True},
+    ],
+    ids=["dotted-first", "nested-first"],
+)
+def test_mixed_backend_overrides_preserve_independent_leaves(overrides):
+    before = deepcopy(overrides)
+    loaded = _loaded(overrides)
+
+    assert overrides == before
+    assert loaded.settings.backend.use_ssl is True
+    assert loaded.settings.backend.request_timeout_sec == 17
+    assert loaded.provenance.source("backend.use_ssl").layer == "bench_profile"
+    assert (
+        loaded.provenance.source("backend.request_timeout_sec").layer
+        == "bench_profile"
+    )
+
+
+@pytest.mark.parametrize(
+    "overrides, expected_max_steps",
+    [
+        (
+            {
+                "agent.max_steps": 20,
+                "agent": {"max_steps": 30, "no_tool_call_max_count": 7},
+            },
+            30,
+        ),
+        (
+            {
+                "agent": {"max_steps": 30, "no_tool_call_max_count": 7},
+                "agent.max_steps": 20,
+            },
+            20,
+        ),
+    ],
+    ids=["dotted-first", "nested-first"],
+)
+def test_mixed_duplicate_leaf_uses_last_value(overrides, expected_max_steps):
+    before = deepcopy(overrides)
+    config = _config(overrides)
+
+    assert overrides == before
+    assert config.agent.max_steps == expected_max_steps
+    assert config.agent.no_tool_call_max_count == 7
+
+
+@pytest.mark.parametrize(
+    "dotted_first", [True, False], ids=["dotted-first", "nested-first"]
+)
+def test_mixed_overrides_replace_list_and_dict_leaves(dotted_first):
+    pairs = [
+        ("agent.stop_tools", ["fs_read_file", "turn_ask_human"]),
+        ("agent", {"stop_tools": ["turn_ask_human"]}),
+        (
+            "backend.chat_completion_kwargs",
+            {"temperature": 0, "tool_choice": "auto"},
+        ),
+        ("backend", {"chat_completion_kwargs": {"tool_choice": "required"}}),
+    ]
+    overrides = dict(pairs if dotted_first else reversed(pairs))
+    before = deepcopy(overrides)
+    config = _config(overrides)
+
+    assert overrides == before
+    assert config.agent.stop_tools == (
+        ["turn_ask_human"]
+        if dotted_first
+        else ["fs_read_file", "turn_ask_human"]
+    )
+    assert config.backend.chat_completion_kwargs == (
+        {"tool_choice": "required"}
+        if dotted_first
+        else {"temperature": 0, "tool_choice": "auto"}
+    )
+
+
+@pytest.mark.parametrize(
+    "dotted_first", [True, False], ids=["dotted-first", "nested-first"]
+)
+def test_mixed_model_overrides_replace_whole_entry(dotted_first):
+    pairs = [
+        (
+            "models.weak",
+            {
+                "model": "first-model",
+                "url": "https://first.example/v1/chat/completions",
+                "token": "synthetic-token",
+            },
+        ),
+        ("models", {"weak": {"model": "second-model"}}),
+    ]
+    overrides = dict(pairs if dotted_first else reversed(pairs))
+    before = deepcopy(overrides)
+    config = _config(overrides)
+    entry = config.models["weak"]
+    token = entry.token.get_secret_value() if entry.token is not None else None
+
+    assert overrides == before
+    assert (entry.model, entry.url, token) == (
+        ("second-model", None, None)
+        if dotted_first
+        else (
+            "first-model",
+            "https://first.example/v1/chat/completions",
+            "synthetic-token",
+        )
+    )
+
+
+def test_mixed_overrides_keep_compat_notices_and_runtime_separate():
+    overrides = {
+        "agent.max_steps": 20,
+        "agent": {"no_tool_call_max_count": 7},
+        "models": {
+            "weak": {
+                "model": "test",
+                "backend": {"chat_completion_kwargs": {"temperature": 0}},
+            }
+        },
+        "os_backend": "local",
+        "notices": ("existing notice",),
+    }
+    before = deepcopy(overrides)
+    loaded = _loaded(overrides)
+
+    assert overrides == before
+    assert loaded.settings.models["weak"].main == {"temperature": 0}
+    assert loaded.runtime.os_backend == "local"
+    assert loaded.settings.os_backend.kind == "harbor"
+    assert loaded.runtime.notices[0] == "existing notice"
+    assert any(
+        "models.weak.backend.chat_completion_kwargs" in notice
+        for notice in loaded.runtime.notices[1:]
+    )

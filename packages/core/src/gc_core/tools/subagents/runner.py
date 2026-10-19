@@ -9,6 +9,13 @@ from typing import Any, Callable, Dict, List, Optional
 
 from gc_core.agent_store import Prompt, agent_store_of, aread_or_none
 from gc_core.attachments.store import with_committed_attachments
+from gc_core.auto_routing import state_ops
+from gc_core.auto_routing.levels import (
+    auto_available,
+    effective_level,
+    resolve_routing_params,
+)
+from gc_core.auto_routing.policy import turn_params
 from gc_core.config_modules.agent import (
     merge_special_instructions_with_model_steering,
 )
@@ -40,6 +47,7 @@ from gc_core.message_policy.tool_usage_notice.state import (
     persist_tool_usage_notice_state,
 )
 from gc_core.message_policy.user_message_policy import (
+    build_model_fallback_resume_message,
     extract_real_user_message_text,
 )
 from gc_core.message_policy.user_stop import cancelled_by_user_output
@@ -64,9 +72,7 @@ from gc_core.states import State
 from gc_core.summarize.config import (
     resolve_summary_limits_at_level,
 )
-from gc_core.tools import (
-    abuild_tools_data,
-)
+from gc_core.tools import abuild_tools_data
 from gc_core.tools.skills.registry import get_skills_registry
 from gc_core.tools.subagents.active_scope import activate_child_input
 from gc_core.tools.subagents.registry import (
@@ -302,7 +308,7 @@ class SubagentRunner:
             return resolve_summary_limits_at_level(
                 self._parent_source(),
                 getattr(child_ctx, "model_router", None),
-                getattr(child_state, "turn_level", None),
+                getattr(child_state, "_call_level", None),
             )
 
         # Хук для chat_completions: порог читается на проверке (смена алиаса).
@@ -430,9 +436,17 @@ class SubagentRunner:
         # батч, на котором упал вызов). Повторный фейл — честная ошибка тула,
         # без ещё одного фоллбэка (fallback_ctx строится максимум один раз).
         child_ctx = fallback_ctx
-        retry_messages = (
-            messages if child_state.steps == 0 else child_state.messages
-        )
+        if child_state.steps > 0 and getattr(
+            child_ctx, "subagent_independent_auto", True
+        ):
+            # История уже в State: повтор передаёт новый батч, а не старые calls.
+            retry_messages = [
+                build_model_fallback_resume_message(child_state.state_id)
+            ]
+        else:
+            retry_messages = (
+                messages if child_state.steps == 0 else child_state.messages
+            )
         try:
             result = await self._arun_child_loop(
                 messages=retry_messages, child_ctx=child_ctx, **loop_kwargs
@@ -559,7 +573,25 @@ class SubagentRunner:
         # child_ctx.model_router — свой Router ребёнка (спека §7 п.4): фиксирует
         # default_model на модель субагента, как begin_turn фиксирует его на
         # активную модель в обычном ходе (turn_boundary.begin_turn).
-        begin_turn(child_state, child_ctx)
+        attach = getattr(child_ctx, "attach_state", None)
+        if callable(attach):
+            attach(child_state)
+        try:
+            begin_turn(child_state, child_ctx)
+        except AliasCircuitOpenError as exc:
+            return (
+                None,
+                None,
+                self._error_response(
+                    tool_name=tool_name,
+                    code="subagent_ctx_build_failed",
+                    message=(
+                        f"субагент {tool_name}: {exc.alias} недоступна: "
+                        f"{exc.reason}. Переключите уровень /level или профиль /profiles."
+                    ),
+                    retryable=True,
+                ),
+            )
 
         user_message = {
             "role": "user",
@@ -684,6 +716,12 @@ class SubagentRunner:
                 # (иначе double-count уже запушенных токенов).
                 self._push_usage_delta(child_state, child_ctx)
                 self._push_tool_calls_delta(child_state)
+                # Снять уровень решения auto по концу дочернего прогона (симметрично
+                # AgentExecutor.arun) — child_ctx
+                # обычно выбрасывается вместе с этим вызовом, но если что-то ещё
+                # читает child_ctx.model_router.active_level() после возврата
+                # (лог/диагностика), не должно видеть уровень последнего решения.
+                state_ops.leave(child_state)
             if error_response is not None:
                 return error_response
 
@@ -730,7 +768,7 @@ class SubagentRunner:
                 result=result_payload,
                 steps=child_state.steps,
                 finish_reason="completed",
-                usage=child_state.usage.to_meta(),
+                usage=child_state.usage.to_compact_meta(),
                 child_run_id=str(getattr(child_ctx, "run_id", "") or ""),
             )
         finally:
@@ -942,8 +980,12 @@ class SubagentRunner:
             mode=kind,
             enabled=bool(getattr(self._ctx, "is_tui", False)),
         )
+        # Деградация заменяет упавший комплект, поэтому его AUTO-мемо больше
+        # не относится к повтору. Пара и факты хода сохраняются без begin_turn.
+        # Старые durable-входы оставляют прежнюю последовательность команд.
         child_ctx.model_router = router.with_override(active_resolved)
-        begin_turn(child_state, child_ctx)
+        if getattr(child_ctx, "subagent_independent_auto", True):
+            state_ops.leave(child_state)
         return child_ctx
 
     def _check_stop_requested(self) -> bool:
@@ -1098,24 +1140,33 @@ class SubagentRunner:
     def _build_child_model_router(
         self, tool_name: str, child_config: Any
     ) -> Optional[ModelRouter]:
-        """Свой Router ребёнка (спека §7 п.4): `subagent:<tool_name>` родительского
-        Router становится «main» ребёнка и наследуется любым служебным вызовом БЕЗ
-        более точной assign-привязки — через `unbound_override` (спека §5.2:
-        явные привязки, и уровнем, и алиасом, продолжают резолвиться по
-        нетронутым слотам/реестру ребёнка — override их не перекрывает).
+        """Свой Router ребёнка, одним правилом «auto только у непривязанного»
+        (спека автороутинга §5.1):
 
-        `level_provider` ребёнка — константа (уровень хода родителя на момент
-        вызова), не живой TUI-провайдер: используется Router'ом только если
-        `unbound_override` не задан (сюда с непустым родительским Router'ом не
-        доходим — оставлено для полноты resolve-логики).
+        - привязанный (`assign.subagents.<tool_name>` или `"*"`,
+          `parent_router.has_binding`): `subagent:<tool_name>` родительского Router
+          становится override «main» ребёнка — наследуется любым служебным вызовом
+          БЕЗ более точной assign-привязки (явные привязки, и уровнем, и алиасом,
+          продолжают резолвиться по нетронутым слотам/реестру ребёнка — override
+          их не перекрывает); `auto_allowed` для такого Router'а False — auto у
+          привязанного субагента не активен (поле/блок не ставятся, лог
+          `mode: manual`).
+        - непривязанный: override не ставится, ребёнок ведёт СВОЙ роутинг со
+          `START_LEVEL` (`aroute_before_call` внутри его собственного цикла);
+          `level_provider` привязывается к дочернему State в `_bind_child_context`
+          тем же механизмом, что и провайдер `acreate_run_context`, с
+          сырым режимом родителя, замороженным на момент сборки
+          (`parent_router.live_level()`), — живой `/level` родителя посреди
+          работы ребёнка не уводит его модель (см.
+          `test_child_router_level_provider_is_frozen_not_live`).
 
         None, если у родителя нет Router (легаси тестовые двойники ctx) — вызывающий
         код и так устойчив к `model_router=None` (turn_boundary/воронки не падают).
 
-        Класс 1 фоллбэков недоступности (спека §8): если пин этого субагента уже
-        открыт в предохранителе (прошлый вызов этой же сессии его уронил) — ребёнок
-        сразу собирается на активной модели + notice, без повторной попытки на
-        заведомо мёртвом пине.
+        Класс 1 фоллбэков недоступности (спека §8), только для ПРИВЯЗАННОГО
+        случая: если пин этого субагента уже открыт в предохранителе (прошлый
+        вызов этой же сессии его уронил) — ребёнок сразу собирается на активной
+        модели + notice, без повторной попытки на заведомо мёртвом пине.
 
         `force_legacy` родителя (CLI `--model`/`--completions_url` поверх непустого
         реестра, спека §2) наследуется ребёнком (Task 10) — иначе собственная
@@ -1125,10 +1176,27 @@ class SubagentRunner:
         parent_router = getattr(self._ctx, "model_router", None)
         if parent_router is None:
             return None
-        try:
-            resolved = parent_router.resolve(
-                f"{SUBAGENT_CONSUMER_PREFIX}{tool_name}"
+        consumer = f"{SUBAGENT_CONSUMER_PREFIX}{tool_name}"
+        if not parent_router.has_binding(consumer):
+            frozen_live = parent_router.live_level()
+
+            available = auto_available(
+                child_config, force_legacy=parent_router.force_legacy
             )
+
+            def _child_level_provider() -> str:
+                return effective_level(frozen_live, None, available)
+
+            return ModelRouter(
+                child_config,
+                level_provider=_child_level_provider,
+                live_level_provider=lambda: frozen_live,
+                breaker=parent_router.breaker,
+                force_legacy=parent_router.force_legacy,
+                is_subagent_child=True,
+            )
+        try:
+            resolved = parent_router.resolve(consumer)
         except AliasCircuitOpenError as exc:
             try:
                 resolved = parent_router.resolve("main")
@@ -1158,9 +1226,11 @@ class SubagentRunner:
         return ModelRouter(
             child_config,
             level_provider=lambda: frozen_level,
+            live_level_provider=lambda: frozen_level,
             breaker=parent_router.breaker,
             force_legacy=parent_router.force_legacy,
             unbound_override=resolved,
+            is_subagent_child=True,
         )
 
     async def _prepare_local_child_state(self) -> PreparedChildState:
@@ -1389,11 +1459,48 @@ class SubagentRunner:
             subagent_diagnostics=getattr(
                 self._ctx, "subagent_diagnostics", None
             ),
+            subagent_independent_auto=getattr(
+                self._ctx, "subagent_independent_auto", True
+            ),
         )
         return self._bind_child_context(child_ctx, tool_name)
 
     def _bind_child_context(self, child_ctx: Any, tool_name: str) -> Any:
-        """Common parent identity, shared human frontend and sidecar binding."""
+        """Common routing, parent identity, human frontend and sidecar binding."""
+        router = getattr(child_ctx, "model_router", None)
+        child_ctx.auto_available = auto_available(
+            child_ctx,
+            force_legacy=bool(getattr(router, "force_legacy", False)),
+            legacy_call_kits=not getattr(
+                child_ctx, "routing_contract_v2", True
+            ),
+        )
+        params = resolve_routing_params(
+            child_ctx,
+            legacy_call_kits=not getattr(
+                child_ctx, "routing_contract_v2", True
+            ),
+        )
+        if not getattr(child_ctx, "subagent_independent_auto", True):
+            params = turn_params(
+                params,
+                getattr(self._orchestrator_state, "turn_safe_level", None),
+            )
+        child_ctx.routing_params = params
+        if router is not None:
+            live = router.live_level
+
+            def effective_provider() -> str:
+                state = getattr(child_ctx, "active_state", None)
+                return effective_level(
+                    live(),
+                    getattr(state, "current_level", None),
+                    child_ctx.auto_available,
+                )
+
+            child_ctx.model_router = router.with_level_providers(
+                effective_provider, live
+            )
         # Режим родителя (C3 gc.force_collect default on CLI/TUI) — наследуем,
         # иначе child process_tool_calls видит оба флага False и collect выключается.
         child_ctx.is_tui = bool(getattr(self._ctx, "is_tui", False))

@@ -6,12 +6,14 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from gc_core.config_modules.root import AppConfig
 from gc_core.context_preparation import PreparedRunContext, RunContextBindings
 from gc_core.execution.contracts import InfrastructureFailure
 from gc_core.execution.resources import (
     PromptResourceRequest,
     aload_prompt_resource,
 )
+from gc_core.model_router import ModelRouter
 from gc_core.project_memory import compaction
 from gc_core.project_memory.operations import ProjectMemoryReply
 from gc_core.run_context import assemble_run_context
@@ -24,11 +26,24 @@ def forbidden(*_args, **_kwargs):
     raise AssertionError("Unexpected local resource access")
 
 
-def test_context_assembly_only_consumes_prepared_values(monkeypatch):
+@pytest.mark.parametrize(
+    "force_legacy,bound,available",
+    [
+        (False, False, True),
+        (True, False, False),
+        (False, True, False),
+    ],
+)
+def test_context_assembly_only_consumes_prepared_values(
+    monkeypatch, force_legacy, bound, available
+):
     prepared = PreparedRunContext(
         settings={
             "agent": {"model": "test"},
             "backend": {"api_mode": "chat_completions"},
+            "models": {"fast": {}, "mid": {}, "big": {}},
+            "slots": {"light": "fast", "default": "mid", "max": "big"},
+            "level": "auto",
         },
         runtime={},
         run_id="recorded-run",
@@ -46,29 +61,40 @@ def test_context_assembly_only_consumes_prepared_values(monkeypatch):
         registered_tool_names=["project_memory"],
         mcp_session_owner="owner",
     )
+    router = ModelRouter(
+        AppConfig.model_validate(prepared.settings),
+        level_provider=lambda: "auto",
+        force_legacy=force_legacy,
+    )
+    if bound:
+        router = router.with_override(router.resolve_level("default"))
     port = object()
     bindings = RunContextBindings(
         os_backend=port,
         skills_registry=port,
         logger=port,
         tools_data={},
-        model_router=port,
+        model_router=router,
         thread_store=port,
         prompt_resource=port,
         project_memory_io=port,
         lock_factory=port,
     )
-    monkeypatch.setattr("builtins.open", forbidden)
-    monkeypatch.setattr("os.getcwd", forbidden)
-    monkeypatch.setattr("uuid.uuid4", forbidden)
-    monkeypatch.setattr("pathlib.Path.resolve", forbidden)
-    ctx = assemble_run_context(prepared, bindings)
+    with monkeypatch.context() as guarded:
+        guarded.setattr("builtins.open", forbidden)
+        guarded.setattr("os.getcwd", forbidden)
+        guarded.setattr("uuid.uuid4", forbidden)
+        guarded.setattr("pathlib.Path.resolve", forbidden)
+        ctx = assemble_run_context(prepared, bindings)
     assert ctx.workspace.root == "/worker/project"
     assert ctx.prompt_resource is ctx.thread_store is ctx.os_backend is port
     assert ctx.project_memory_io is ctx.lock_factory is port
     assert ctx.registered_tool_names == {"project_memory"}
     assert ctx.settings.agent.model == "test"
     assert ctx.settings.backend.api_mode == "chat_completions"
+    assert ctx.auto_available is available
+    assert ctx.model_router.force_legacy is force_legacy
+    assert ctx.model_router.auto_allowed is (not bound)
 
 
 async def test_resource_port_failure_never_falls_back_to_files():

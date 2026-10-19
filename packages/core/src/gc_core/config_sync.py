@@ -192,27 +192,52 @@ def _validate_subtree(top_key: str, subtree: Any) -> bool:
         return False
 
 
+def _prune_empty_ancestors(
+    user_text: str, user_raw: Any, parent: tuple[str, ...]
+) -> str:
+    """Убрать родителей, опустевших после вырезания ключа: пустой ``update: {}``
+    перекрыл бы умолчания секции из шаблона как значение юзера."""
+    while parent:
+        node: Any = user_raw
+        for part in parent:
+            node = node.get(part) if isinstance(node, dict) else None
+        if node != {}:
+            return user_text
+        compat.pop_parts(user_raw, parent)
+        user_text = _remove_entry(user_text, parent)
+        parent = parent[:-1]
+    return user_text
+
+
+def _remove_entry(user_text: str, parts: tuple[str, ...]) -> str:
+    """Убрать запись `parts` из текста; у секции верхнего уровня родителя нет —
+    её блок вырезается целиком."""
+    if len(parts) > 1:
+        return remove_mapping_entry(user_text, ".".join(parts[:-1]), parts[-1])
+    span = _top_block_span(user_text, parts[0])
+    if span is None:
+        return user_text
+    return user_text[: span[0]] + user_text[span[1] :]
+
+
 def _strip_removed_patterns(
     user_text: str, user_raw: Any
 ) -> tuple[str, List[str]]:
-    """Вырезать записи ``REMOVED`` с ``*`` (``models.*.backend.stream``) из текста
-    и данных юзера до переноса.
+    """Вырезать записи ``REMOVED`` (точные и с ``*``, ``models.*.backend.stream``)
+    из текста и данных юзера до переноса.
 
-    Секцию вне шаблона (``models``) перенос копирует текстом целиком, и без
-    этого устаревший лист уехал бы в новый файл, а при строгой проверке
+    Секцию вне шаблона (``models``, ``assign``) перенос копирует текстом целиком,
+    и без этого устаревший лист уехал бы в новый файл, а при строгой проверке
     поддерева вся секция — в бэкап. Возвращает текст и снятые пути.
     """
     stripped: List[str] = []
     for pattern in compat.REMOVED:
-        if "*" not in pattern:
-            continue  # точные пути — прежним порядком в _sync_path
         for parts in compat.expand_path(user_raw, pattern):
             dotted = ".".join(parts)
             compat.pop_parts(user_raw, parts)
-            user_text = remove_mapping_entry(
-                user_text, ".".join(parts[:-1]), parts[-1]
-            )
+            user_text = _remove_entry(user_text, parts)
             stripped.append(dotted)
+            user_text = _prune_empty_ancestors(user_text, user_raw, parts[:-1])
     return user_text, stripped
 
 
@@ -221,12 +246,17 @@ def _verbatim_block(user_text: str, top_key: str) -> Optional[str]:
 
     Возвращает None если ключ не найден.
     """
+    span = _top_block_span(user_text, top_key)
+    return None if span is None else user_text[span[0] : span[1]]
+
+
+def _top_block_span(user_text: str, top_key: str) -> Optional[tuple]:
+    """(начало, конец) блока top_key в user_text или None, если ключа нет."""
     try:
         start, end, indent, _ = find_anchor(user_text, top_key)
-        block_end = section_end(user_text, end, indent)
-        return user_text[start:block_end]
     except KeyError:
         return None
+    return start, section_end(user_text, end, indent)
 
 
 def prune_backups(backup_dir: Path, name: str, *, keep: int = 10) -> None:

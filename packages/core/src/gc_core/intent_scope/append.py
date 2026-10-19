@@ -121,7 +121,7 @@ def _current_has_final_answer(current: list[Any], content: str) -> bool:
 
 
 def append_final_answer_to_current(state: Any, content: str) -> bool:
-    """Append final prose answer to ``state.current_user_intent``. Returns True if appended."""
+    """Append completed turn outcome to ``state.current_user_intent``. Returns True if appended."""
     body = str(content or "").strip()
     if not body:
         return False

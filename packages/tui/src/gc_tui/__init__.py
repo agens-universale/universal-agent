@@ -47,22 +47,8 @@ def _force_truecolor_if_supported() -> None:
         os.environ.setdefault("TEXTUAL_COLOR_SYSTEM", "truecolor")
 
 
-def main(argv: Optional[Sequence[str]] = None) -> int:
-    """Entrypoint для `gc-ua = "tui:main"`."""
-    args_list = list(argv) if argv is not None else sys.argv[1:]
-    # `gc-ua config …` — до TUI: без textual, агента, MCP и сети.
-    if args_list[:1] == ["config"]:
-        from gc_core.config_command import main as config_main
-
-        return config_main(args_list[1:], program="gc-ua")
-    _force_truecolor_if_supported()
-    try:
-        # importlib.import_module goes through sys.modules, not the package
-        # attribute cache, so evicting tui.app in tests forces a real re-import.
-        _app_mod = importlib.import_module("gc_tui.app")
-    except ImportError:
-        print(_missing_textual_msg(), file=sys.stderr)
-        return 1
+def _build_parser() -> argparse.ArgumentParser:
+    from gc_core.config_modules.model_registry import LEVEL_VALUES
 
     parser = argparse.ArgumentParser(
         prog="gc-ua", add_help=False, allow_abbrev=False
@@ -76,6 +62,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         help=(
             "Активировать профиль <имя> поверх указателя profile: из config.yml "
             "(~/.gc/profiles/ или <project>/.gc/profiles/)"
+        ),
+    )
+    parser.add_argument(
+        "--level",
+        choices=list(LEVEL_VALUES),
+        default=None,
+        help=(
+            "Активный уровень модели на этот запуск (перекрывает config.yml и профиль); "
+            "auto — уровень меняется автоматически по ходу работы"
         ),
     )
     parser.add_argument(
@@ -107,16 +102,42 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument(
         "-h", "--help", action="store_true", help="Показать справку и выйти"
     )
-    args, unknown = parser.parse_known_args(args_list)
+    return parser
+
+
+def _parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
+    parser = _build_parser()
+    args, unknown = parser.parse_known_args(
+        list(argv) if argv is not None else sys.argv[1:]
+    )
+    args.unknown = unknown
+    return args
+
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    """Entrypoint для `gc-ua = "tui:main"`."""
+    args_list = list(argv) if argv is not None else sys.argv[1:]
+    if args_list[:1] == ["config"]:
+        from gc_core.config_command import main as config_main
+
+        return config_main(args_list[1:], program="gc-ua")
+    _force_truecolor_if_supported()
+    try:
+        # importlib.import_module goes through sys.modules, not the package
+        # attribute cache, so evicting tui.app in tests forces a real re-import.
+        _app_mod = importlib.import_module("gc_tui.app")
+    except ImportError:
+        print(_missing_textual_msg(), file=sys.stderr)
+        return 1
+
+    args = _parse_args(args_list)
     if args.help:
-        print(parser.format_help())
+        print(_build_parser().format_help())
         return 0
-    if unknown:
-        # Как gc-cli: незнакомый или сокращённый флаг — ошибка, а не тихий
-        # запуск на другом конфиге (`--conf my.yml` → ~/.gc/config.yml).
+    if args.unknown:
         print(
-            f"gc-ua: неизвестные аргументы: {' '.join(unknown)} (флаги не "
-            "сокращаются: --config, --profile, --init-config, --task-root, "
+            f"gc-ua: неизвестные аргументы: {' '.join(args.unknown)} (флаги не "
+            "сокращаются: --config, --profile, --level, --init-config, --task-root, "
             "--no-auto-mcp; справка — gc-ua --help)",
             file=sys.stderr,
         )
@@ -248,7 +269,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 file=sys.stderr,
             )
             return 1
-        settings = apply_cli_overrides(settings)
+        settings = apply_cli_overrides(
+            settings,
+            extra_overrides={"level": args.level} if args.level else None,
+        )
         profile_meta = settings.profile_meta
 
         if args.config is None and onboarding.is_unconfigured(settings):
@@ -313,6 +337,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         system="cli",
         settings=settings,
         profile_override=None if args.init_config else args.profile,
+        level_override=None if args.init_config else args.level,
     )
     app.set_config_path(
         onb_write_path if onboarding_mode else resolve_config_path(args.config)

@@ -8,7 +8,7 @@
 
 | вид | что | имена |
 |---|---|---|
-| `prompt` | промпты | `Prompt`: `system`, `special_instructions`, `subagent`, `custom_subagent`, `summary`, `memory_patch`, `limit_summary`, `intent_tool`, `intent_final`, `finish_gate`, `project_memory_compaction`, `command_judge_system`, `command_judge_user`, `init_agents_md` |
+| `prompt` | промпты | `Prompt`: `system`, `special_instructions`, `subagent`, `custom_subagent`, `summary`, `memory_patch`, `limit_summary`, `intent_tool`, `intent_final`, `finish_gate`, `routing_pair_judge`, `project_memory_compaction`, `command_judge_system`, `command_judge_user`, `init_agents_md` |
 | `instructions` | AGENTS.md | `L0` — роль запуска (`paths.agent_md_path`), `L1` — глобальные |
 | `subagent` | определения кастомных субагентов | `<файл>.md`; каталог — `list("subagent")` |
 | `skill` | скиллы | `<слой>/<скилл>/…`, слои `system`, `user`, `project` |
