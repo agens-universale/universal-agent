@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
+from collections.abc import Sequence
 from contextvars import ContextVar
 from dataclasses import asdict, replace
 from typing import Any
@@ -14,6 +16,8 @@ from gc_core.execution.guard_contracts import (
     GuardProbeRequest,
     GuardProbeResult,
 )
+
+_COMMAND_PROMPTS = "command_prompts"
 
 active_guard_checks: ContextVar[list[GuardProbeCheck] | None] = ContextVar(
     "active_guard_checks",
@@ -120,28 +124,61 @@ def evaluate_guard_probe(
         )
     elif request.kind == "download_destination":
         result = _download_destination(request, settings)
-    elif request.kind == "command_prompts":
-        from gc_core.agent_store import agent_store_of
-        from gc_core.security.command_moderation import (
-            aload_command_judge_prompts,
+    elif request.kind == _COMMAND_PROMPTS:
+        raise ValueError(
+            "command_prompts читает хранилище агента — только "
+            "aevaluate_guard_probes (на loop)"
         )
-        from gc_core.threads.facade import run_sync
-
-        # Проба синхронная: файловое хранилище ничего внешнего не ждёт, своё
-        # сетевое здесь откажет громко (run_sync) — до перевода Temporal.
-        prompts = run_sync(
-            aload_command_judge_prompts(agent_store_of(settings))
-        )
-        result = replace(result, data=prompts)
     elif request.kind == "command_host":
         result = _command_host(request)
     else:
         raise ValueError(f"Unknown guard probe kind: {request.kind}")
+    return _with_digest(request, result)
+
+
+def _with_digest(
+    request: GuardProbeRequest, result: GuardProbeResult
+) -> GuardProbeResult:
     payload = {"request": asdict(request), "result": asdict(result)}
     digest = hashlib.sha256(
         json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()
     ).hexdigest()
     return replace(result, facts_digest=digest)
+
+
+async def _acommand_prompts(
+    request: GuardProbeRequest, settings: Any
+) -> GuardProbeResult:
+    from gc_core.agent_store import agent_store_of
+    from gc_core.security.command_moderation import (
+        aload_command_judge_prompts,
+    )
+
+    if request.schema_version != 1 or not request.cwd:
+        raise ValueError("Guard probe requires schema 1 and an explicit cwd")
+    prompts = await aload_command_judge_prompts(agent_store_of(settings))
+    return _with_digest(request, GuardProbeResult(data=prompts))
+
+
+async def aevaluate_guard_probes(
+    requests: Sequence[GuardProbeRequest], *, settings: Any
+) -> list[GuardProbeResult]:
+    """Пробы воркера по порядку запросов: промпты судьи — на loop (хранилище
+    агента бывает сетевым, синхронный мост его не дождётся), остальное —
+    синхронными проверками политик в потоке."""
+    results: dict[int, GuardProbeResult] = {}
+    for index, request in enumerate(requests):
+        if request.kind == _COMMAND_PROMPTS:
+            results[index] = await _acommand_prompts(request, settings)
+    rest = [(i, r) for i, r in enumerate(requests) if i not in results]
+
+    def evaluate() -> list[GuardProbeResult]:
+        return [evaluate_guard_probe(r, settings=settings) for _i, r in rest]
+
+    if rest:
+        done = await asyncio.to_thread(evaluate)
+        results.update(zip((i for i, _r in rest), done, strict=True))
+    return [results[i] for i in range(len(requests))]
 
 
 def _write_guard_extra_paths(settings: Any) -> list[str]:

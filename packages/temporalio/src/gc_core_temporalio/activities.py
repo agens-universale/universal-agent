@@ -558,7 +558,7 @@ class AgentActivities:
         return await self._recorded(call, GuardProbes, self._guard)
 
     async def _guard(self, call, ctx):
-        from gc_core.security.guard_probe import evaluate_guard_probe
+        from gc_core.security.guard_probe import aevaluate_guard_probes
 
         requests = [
             value_to_type(GuardProbeRequest, value)
@@ -567,14 +567,9 @@ class AgentActivities:
                 *call.data.get("companions", []),
             )
         ]
-
-        def evaluate():
-            return [
-                evaluate_guard_probe(request, settings=ctx)
-                for request in requests
-            ]
-
-        primary, *companions = await asyncio.to_thread(evaluate)
+        primary, *companions = await aevaluate_guard_probes(
+            requests, settings=ctx
+        )
         return GuardProbes(primary, companions)
 
     @activity.defn(name="universal_agent.summary.trace")

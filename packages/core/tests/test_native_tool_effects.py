@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 from gc_core.execution.tool_effects import execute_native_tool_effect
-from gc_core.security.guard_probe import evaluate_guard_probe
+from gc_core.security.guard_probe import aevaluate_guard_probes
 from gc_core.security.permission_store import PermissionStore
 from gc_core.tools import aapply_tool
 from gc_core.tools.exec.download_file import DownloadFile
@@ -29,7 +29,8 @@ def setup_ports(config, tool_class):
 
     async def probe(request):
         events.append(("probe", request.kind))
-        return evaluate_guard_probe(request, settings=worker)
+        (result,) = await aevaluate_guard_probes([request], settings=worker)
+        return result
 
     async def human(request):
         events.append(("human", request.decision_key))

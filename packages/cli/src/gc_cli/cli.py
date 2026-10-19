@@ -598,7 +598,8 @@ async def _run_init_agents_md() -> int:
     Корутина, потому что зовётся из-под ``asyncio.run(arun_cli())``, а
     синхронного входа у ядра нет вовсе.
     """
-    from gc_core.instructions.init_agents_md import build_init_prompt
+    from gc_core.agent_store import agent_store_of
+    from gc_core.instructions.init_agents_md import abuild_init_prompt
     from gc_core.security.confirm_port import confirm_available
 
     # Тот же режим запуска, что у основного входа: правило одно для всех
@@ -630,7 +631,11 @@ async def _run_init_agents_md() -> int:
 
     from gc_core.utils.async_http import aclose_clients
 
-    prompt = build_init_prompt(cwd=os.getcwd(), can_ask=confirm_available(ctx))
+    prompt = await abuild_init_prompt(
+        store=agent_store_of(ctx),
+        cwd=os.getcwd(),
+        can_ask=confirm_available(ctx),
+    )
     try:
         await AgentExecutor(ctx).arun([prompt])  # агент пишет AGENTS.md сам
     finally:

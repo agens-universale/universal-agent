@@ -21,7 +21,7 @@ from gc_core.execution.contracts import (
 from gc_core.security.dual_wrapper import arun_guard_chain, guard_wrapper
 from gc_core.security.guard_probe import (
     active_guard_checks,
-    evaluate_guard_probe,
+    aevaluate_guard_probes,
 )
 from gc_core.thread_paths import thread_address
 
@@ -120,7 +120,7 @@ async def execute_native_tool_effect(
         raise GuardPreconditionChanged(
             "Tool arguments changed after guard evaluation"
         )
-    _revalidate_guard_checks(request, ctx)
+    await _arevalidate_guard_checks(request, ctx)
     state = SimpleNamespace(
         shared=SimpleNamespace(
             working_memory=deepcopy(request.state.working_memory),
@@ -232,11 +232,15 @@ def _add_vision_state(state, vision):
     )
 
 
-def _revalidate_guard_checks(request, settings):
-    """``settings`` — всё, что принимает ``settings_of`` (контекст эффекта)."""
-    for check in request.guard_checks:
-        current = evaluate_guard_probe(check.request, settings=settings)
-        if current.facts_digest != check.result.facts_digest:
+async def _arevalidate_guard_checks(request, settings):
+    """``settings`` — всё, что принимает ``settings_of`` (контекст эффекта).
+    Пробы — тем же путём, что activity проб: промпты судьи читаются на loop."""
+    checks = list(request.guard_checks)
+    current = await aevaluate_guard_probes(
+        [check.request for check in checks], settings=settings
+    )
+    for check, fresh in zip(checks, current, strict=True):
+        if fresh.facts_digest != check.result.facts_digest:
             raise GuardPreconditionChanged(
                 "Guard facts changed after approval"
             )

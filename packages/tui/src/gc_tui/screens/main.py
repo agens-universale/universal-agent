@@ -7476,9 +7476,18 @@ class TraceScreen(Screen):
             )
             return
 
-        from gc_core.instructions.init_agents_md import build_init_prompt
+        from gc_core.agent_store import FileAgentStore
+        from gc_core.instructions.init_agents_md import abuild_init_prompt
+        from gc_core.threads.facade import run_sync
 
-        wire = build_init_prompt(cwd=os.getcwd(), can_ask=True)
+        # Хранилище агента TUI — файловое: шаблон читается за один шаг.
+        wire = run_sync(
+            abuild_init_prompt(
+                store=FileAgentStore(self.app.effective_settings()),
+                cwd=os.getcwd(),
+                can_ask=True,
+            )
+        )
         display = "/init"
         msg_id = "m_" + uuid.uuid4().hex
         self._last_user_message_id = msg_id
