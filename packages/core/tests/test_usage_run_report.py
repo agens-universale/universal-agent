@@ -141,6 +141,33 @@ def test_main_model_identity_follows_the_registry():
     assert main_model_identity(legacy, _router(legacy)) == ("m", "u")
 
 
+def test_main_model_identity_in_auto_is_the_start_level_model():
+    """Уровень ``auto`` до выбора пары — модель стартового уровня AUTO, а не
+    легаси-пара (её ходы не используют)."""
+    from gc_core.model_router import ModelRouter, main_model_identity
+    from gc_testkit.settings import make_settings
+
+    loaded = make_settings(
+        {
+            **_REGISTRY,
+            "models": {
+                **_REGISTRY["models"],
+                "big": {
+                    "model": "vendor/big",
+                    "url": "https://openrouter.ai/api/v1/chat/completions",
+                    "token": "",
+                },
+            },
+            "slots": {"light": "cheap", "default": "cheap", "max": "big"},
+        }
+    )
+    router = ModelRouter(loaded, level_provider=lambda: "auto")
+    assert main_model_identity(loaded, router) == (
+        "vendor/cheap",
+        "https://openrouter.ai/api/v1/chat/completions",
+    )
+
+
 def test_run_usage_report_names_the_registry_model_and_its_currency():
     """Отчёт расхода прогона — о модели main из реестра: её имя и валюта её
     адреса (раньше — легаси agent.model и ₽ по адресу routerai при ходах в

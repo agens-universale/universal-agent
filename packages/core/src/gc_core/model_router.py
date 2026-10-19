@@ -598,14 +598,28 @@ def main_model_identity(
     С реестром ``models`` это запись, в которую резолвится ``main``: легаси
     ``agent.model``/``backend.completions_url`` у такого конфига пусты или
     чужие. Без реестра (и без ``router``) — легаси-пара, как раньше.
-    Витринный резолв: открытый предохранитель не мешает.
+    Витринный резолв: открытый предохранитель не мешает. Режим ``auto`` до
+    выбора пары — модель стартового уровня AUTO.
     """
     source = settings_of(settings)
-    if router is not None:
-        try:
-            resolved = router.resolve("main", check_breaker=False)
-        except (ValueError, LookupError):
-            pass
-        else:
-            return resolved.model, resolved.url
+    resolved = None if router is None else _main_for_display(router)
+    if resolved is not None:
+        return resolved.model, resolved.url
     return source.agent.model, source.backend.completions_url
+
+
+def _main_for_display(router: ModelRouter) -> ResolvedModel | None:
+    from gc_core.auto_routing.levels import AUTO
+    from gc_core.auto_routing.policy import START_LEVEL
+
+    try:
+        return router.resolve("main", check_breaker=False)
+    except (ValueError, LookupError):
+        if router.live_level() != AUTO:
+            return None
+    try:
+        return router.resolve(
+            "main", check_breaker=False, level_override=START_LEVEL
+        )
+    except (ValueError, LookupError):
+        return None
