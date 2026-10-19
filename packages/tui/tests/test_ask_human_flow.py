@@ -554,6 +554,7 @@ async def test_ask_human_table_renders():
         ("/plan ", False, "plan", None),
         ("/plan clear", False, "edit", "агент работает"),
         ("/Users/me/project", True, "edit", None),
+        ("!git status", True, "edit", None),
     ],
 )
 async def test_question_input_runs_known_commands_and_answers_the_rest(
@@ -609,3 +610,49 @@ def _ask_human_record():
         "seq": 1,
         "ts": "2026-06-08T00:00:00+00:00",
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("typed", ["/Users/me/project", "!git status"])
+async def test_answer_without_a_live_owner_goes_to_the_agent_as_a_new_turn(
+    tmp_path, typed
+):
+    """Вопрос висит, а его владелец уже не активный раннер: ответ уходит
+    агенту новым ходом, а не становится командой или shell — решение
+    «команда или ответ» принято до того, как ветка вопроса его снимет."""
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+
+    starts = []
+
+    class _IdleRunner:
+        def is_running(self):
+            return False
+
+        def set_permission_mode(self, mode):
+            pass
+
+        def start(self, **kwargs):
+            starts.append(kwargs["query"])
+            return True
+
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
+    )
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        app.active_runner = _StubLiveRunner()
+        scr._render_records([_ask_human_record()], live=True)
+        await pilot.pause()
+        app.active_runner = _IdleRunner()
+        scr._handle_bang_shell = lambda text: pytest.fail("ушло в shell")
+
+        inp = pilot.app.query_one("#cmdinput")
+        inp.text = typed
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert starts == [typed]

@@ -6300,7 +6300,7 @@ class TraceScreen(Screen):
                 self._stop_and_replace_runner()
             # fall-through ↓ к "continue thread": тот же active_task_id, start(answer).
 
-        if is_command:
+        if is_command and text.startswith("!"):
             self._handle_bang_shell(text)
             return
 
