@@ -27,6 +27,7 @@ from typing import Any
 from gc_stores import migrations
 from gc_stores.postgres.database import PostgresDatabase
 from gc_stores.postgres.dialect import PostgresDialect
+from gc_stores.sql.agent_store import SqlAgentStore
 from gc_stores.sql.thread_store import SqlThreadStore
 
 #: Миграции схемы Postgres (``postgres/migrations``).
@@ -67,4 +68,35 @@ class PostgresThreadStore(SqlThreadStore):
         )
 
 
-__all__ = ["PostgresThreadStore"]
+class PostgresAgentStore(SqlAgentStore):
+    """Хранилище агента ``agent_id`` в Postgres (промпты, AGENTS.md,
+    скиллы, субагенты, память проекта); подключение — как у
+    ``PostgresThreadStore``. Схема — те же миграции: ``ensure_schema()``
+    или ``gc-stores migrate``."""
+
+    def __init__(
+        self,
+        dsn: str | None = None,
+        *,
+        agent_id: str,
+        pool: Any = None,
+        database: PostgresDatabase | None = None,
+        schema: str = "public",
+        pool_options: dict[str, Any] | None = None,
+    ) -> None:
+        if database is None:
+            database = PostgresDatabase(
+                dsn, pool=pool, schema=schema, pool_options=pool_options
+            )
+        elif dsn is not None or pool is not None:
+            raise ValueError("нужен ровно один из dsn, pool и database")
+        super().__init__(
+            database,
+            PostgresDialect(database.schema),
+            agent_id=agent_id,
+            backend="postgres",
+            migrations=MIGRATIONS,
+        )
+
+
+__all__ = ["PostgresAgentStore", "PostgresThreadStore"]

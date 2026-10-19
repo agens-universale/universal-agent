@@ -78,6 +78,13 @@ class Dialect(ABC):
         """Соединение для миграций под блокировкой между инстансами (и
         созданной схемой Postgres)."""
 
+    def check_resource(
+        self, *, agent_id: str = "", project_id: str = "", path: str = ""
+    ) -> None:
+        """Ключ ресурса агента влезает в колонки базы; иначе —
+        ``ValueError``."""
+        del agent_id, project_id, path
+
     def check_ids(self, *values: str) -> None:
         """Ключи (id треда, алиас, op_id) влезают в колонки базы; иначе —
         ``ValueError``, а не обрезка."""

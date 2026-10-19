@@ -18,6 +18,9 @@ from gc_stores.sql.dialect import Dialect, positional
 
 #: Длина ключевых колонок (id треда, системы, алиас, op_id).
 KEY_CHARS = 255
+#: Ключ ресурса агента (agent_id, project_id, путь): первичный ключ InnoDB
+#: — до 3072 байт, utf8mb4 — 4 байта на символ.
+RESOURCE_LIMITS = {"agent_id": 128, "project_id": 128, "path": 400}
 _LOCK_SECONDS = 60
 
 
@@ -99,4 +102,16 @@ class MySQLDialect(Dialect):
                     f"ключ длиннее {KEY_CHARS} символов ({len(value)}): "
                     "в MySQL-хранилище id треда, системы, алиас и op_id — "
                     f"до {KEY_CHARS} символов"
+                )
+
+    def check_resource(
+        self, *, agent_id: str = "", project_id: str = "", path: str = ""
+    ) -> None:
+        values = {"agent_id": agent_id, "project_id": project_id, "path": path}
+        for name, value in values.items():
+            limit = RESOURCE_LIMITS[name]
+            if len(value) > limit:
+                raise ValueError(
+                    f"{name} длиннее {limit} символов ({len(value)}): "
+                    "ограничение ключа MySQL-хранилища агента"
                 )

@@ -1,9 +1,9 @@
-"""Хранилища на MySQL 8: ``MySQLThreadStore``.
+"""Хранилища на MySQL 8: ``MySQLThreadStore``, ``MySQLAgentStore``.
 
 Драйвер — asyncmy (extra ``gc-stores[mysql]``); импорт модуля его не
 требует, отказ без драйвера — при первом подключении.
 """
 
-from gc_stores.mysql.store import MySQLThreadStore
+from gc_stores.mysql.store import MySQLAgentStore, MySQLThreadStore
 
-__all__ = ["MySQLThreadStore"]
+__all__ = ["MySQLAgentStore", "MySQLThreadStore"]

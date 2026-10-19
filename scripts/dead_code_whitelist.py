@@ -62,3 +62,10 @@ _.ensure_schema
 # запись ресурсов (ResourceWriter хранилищ gc-stores). Зовут тесты gc-stores.
 # packages/testkit/src/gc_testkit/agent_store_conformance.py.
 seed_store
+
+# Интерфейс записи ресурсов хранилищ агента gc-stores (ResourceWriter): его зовут
+# gc-stores sync и встраивающие, которые кладут промпты и скиллы в базу сами.
+# packages/stores/src/gc_stores/admin.py, sql/agent_store.py.
+ResourceWriter
+_.delete_resource
+_.list_resources

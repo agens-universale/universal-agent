@@ -42,4 +42,4 @@ def test_migrate_mysql(mysql_databases, capsys):
     dsn = asyncio.run(mysql_databases.acreate(migrate=False))
     assert main(["migrate", "--check", "--store", "mysql", "--dsn", dsn]) == 1
     assert main(["migrate", "--store", "mysql", "--dsn", dsn]) == 0
-    assert "версия схемы: 1" in capsys.readouterr().out
+    assert "версия схемы: 2" in capsys.readouterr().out

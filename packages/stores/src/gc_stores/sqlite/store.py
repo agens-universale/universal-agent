@@ -21,6 +21,7 @@ from gc_core.thread_files import check_name
 from gc_core.threads.models import ThreadKey
 
 from gc_stores import migrations
+from gc_stores.sql.agent_store import SqlAgentStore
 from gc_stores.sql.thread_store import SqlThreadStore
 from gc_stores.sqlite.database import SqliteDatabase, connect
 from gc_stores.sqlite.dialect import SqliteDialect, stamp
@@ -92,4 +93,32 @@ class SQLiteThreadStore(SqlThreadStore):
         return None if found is None else bytes(found[0])
 
 
-__all__ = ["SQLiteThreadStore"]
+class SQLiteAgentStore(SqlAgentStore):
+    """Хранилище агента ``agent_id`` в файле SQLite ``path`` (схема —
+    при открытии) или на общем подключении ``database``."""
+
+    def __init__(
+        self,
+        path: str | Path | None = None,
+        *,
+        agent_id: str,
+        database: SqliteDatabase | None = None,
+        clock: Callable[[], datetime] | None = None,
+    ) -> None:
+        if (path is None) == (database is None):
+            raise ValueError("нужен ровно один из path и database")
+        if database is None:
+            database = SqliteDatabase(path)
+            database.ensure_sync(MIGRATIONS)
+        super().__init__(
+            database,
+            SqliteDialect(),
+            agent_id=agent_id,
+            backend="sqlite",
+            migrations=MIGRATIONS,
+            clock=clock or (lambda: datetime.now(UTC)),
+        )
+        self._checked = True  # схема применена при открытии базы
+
+
+__all__ = ["SQLiteAgentStore", "SQLiteThreadStore"]

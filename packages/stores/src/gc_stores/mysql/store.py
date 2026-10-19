@@ -21,6 +21,7 @@ from typing import Any
 from gc_stores import migrations
 from gc_stores.mysql.database import MySQLDatabase
 from gc_stores.mysql.dialect import MySQLDialect
+from gc_stores.sql.agent_store import SqlAgentStore
 from gc_stores.sql.thread_store import SqlThreadStore
 
 #: Миграции схемы MySQL (``mysql/migrations``).
@@ -49,4 +50,30 @@ class MySQLThreadStore(SqlThreadStore):
         )
 
 
-__all__ = ["MySQLThreadStore"]
+class MySQLAgentStore(SqlAgentStore):
+    """Хранилище агента ``agent_id`` в MySQL; подключение — как у
+    ``MySQLThreadStore``, схема — те же миграции."""
+
+    def __init__(
+        self,
+        dsn: str | None = None,
+        *,
+        agent_id: str,
+        pool: Any = None,
+        database: MySQLDatabase | None = None,
+        pool_options: dict[str, Any] | None = None,
+    ) -> None:
+        if database is None:
+            database = MySQLDatabase(dsn, pool=pool, pool_options=pool_options)
+        elif dsn is not None or pool is not None:
+            raise ValueError("нужен ровно один из dsn, pool и database")
+        super().__init__(
+            database,
+            MySQLDialect(),
+            agent_id=agent_id,
+            backend="mysql",
+            migrations=MIGRATIONS,
+        )
+
+
+__all__ = ["MySQLAgentStore", "MySQLThreadStore"]
