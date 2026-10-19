@@ -7,9 +7,24 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Literal
 
-#: Вид ресурса агента. ``instructions`` — слои AGENTS.md ``L0`` и ``L1``
-#: (``L2``, ``L3`` и скиллы проекта читаются из workspace, не отсюда).
+#: Вид ресурса агента. ``instructions`` — слои AGENTS.md ``L0``–``L3``;
+#: ``L2``, ``L3`` и слой скиллов ``project`` — ресурсы проекта.
 ResourceKind = Literal["prompt", "instructions", "subagent", "skill"]
+
+#: Слои AGENTS.md, которые принадлежат проекту.
+PROJECT_INSTRUCTIONS = frozenset({"L2", "L3"})
+#: Слой скиллов проекта.
+PROJECT_SKILL_LAYER = "project"
+
+
+def needs_project(kind: ResourceKind, name: str) -> bool:
+    """Ресурс проекта (L2, L3, скиллы слоя ``project``): без проекта его не
+    прочитать."""
+    if kind == "instructions":
+        return name in PROJECT_INSTRUCTIONS
+    if kind == "skill":
+        return name.strip("/").split("/", 1)[0] == PROJECT_SKILL_LAYER
+    return False
 
 
 class Prompt(StrEnum):

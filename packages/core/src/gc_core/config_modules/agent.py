@@ -80,6 +80,11 @@ class AgentConfig(BaseModel):
     subagents_dir: str | None = Field(
         default=None, json_schema_extra=gc_meta(expert=True)
     )
+    # Устойчивое имя проекта для хранилищ агента в базе: без него — slug пути,
+    # а у того же репозитория в контейнере или на другом хосте путь другой.
+    project_id: str | None = Field(
+        default=None, json_schema_extra=gc_meta(expert=True)
+    )
     # Предел числа подхватываемых кастомных сабагентов. ge=1: ноль означал бы
     # «папка задана, но агентов нет» — тихая и необъяснимая для оператора ситуация.
     subagents_max_count: int = Field(

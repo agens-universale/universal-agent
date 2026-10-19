@@ -14,6 +14,7 @@ from gc_core.agent_store.models import (
     ResourceInfo,
     ResourceKind,
     memory_version,
+    needs_project,
 )
 from gc_core.agent_store.reading import (
     agent_store_of,
@@ -22,6 +23,7 @@ from gc_core.agent_store.reading import (
     aread_text,
     check_agent_store,
     decode_text,
+    project_key_for,
     project_key_of,
 )
 from gc_core.agent_store.store import AgentStore
@@ -42,5 +44,7 @@ __all__ = [
     "check_agent_store",
     "decode_text",
     "memory_version",
+    "needs_project",
+    "project_key_for",
     "project_key_of",
 ]

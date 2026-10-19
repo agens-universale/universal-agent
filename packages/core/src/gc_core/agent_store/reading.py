@@ -39,15 +39,34 @@ def check_agent_store(store: Any) -> AgentStore:
     return store
 
 
+def _configured_project_id(settings: Any) -> str | None:
+    if settings is None:
+        return None
+    from gc_core.settings import settings_of
+
+    try:
+        return settings_of(settings).agent.project_id
+    except TypeError:
+        # Источник без настроек (заглушка контекста) — имя по пути.
+        return None
+
+
+def project_key_for(root: str, settings: Any = None) -> ProjectKey:
+    """Проект каталога ``root``: id — ``agent.project_id`` из ``settings``,
+    иначе slug пути (у того же репозитория на другом хосте он другой)."""
+    from gc_core.config_modules.env_vars import project_slug
+
+    configured = _configured_project_id(settings)
+    return ProjectKey(id=configured or project_slug(root), root=root)
+
+
 def project_key_of(source: Any) -> ProjectKey | None:
     """Проект контекста: каталог, чей ``.gc/`` держит его память."""
     gc_dir = getattr(source, "project_gc_dir", None)
     if gc_dir is None:
         return None
-    from gc_core.config_modules.env_vars import project_slug
-
     root = os.path.dirname(os.path.abspath(str(gc_dir)))
-    return ProjectKey(id=project_slug(root), root=root)
+    return project_key_for(root, source)
 
 
 def decode_text(data: bytes) -> str:

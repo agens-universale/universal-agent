@@ -749,6 +749,9 @@ NOT_IN_MATRIX = {
     "os_backend.sandbox.extra_ro": "выбор бэкенда, не путь исполнения; покрытие в os_backends/",
     "os_backend.fetch_url_execute_on": "где качает exec_fetch_url; покрытие в tools/exec/test_remote_fetch.py и test_fetch_url.py",
     "os_backend.provision_skills": "копия скиллов в среду исполнения; покрытие в skills/test_remote_skills_provision.py",
+    # Имя проекта для хранилищ агента в базе: файловое хранилище им не
+    # пользуется (память — в .gc проекта), поведение рана не меняется.
+    "agent.project_id": "имя проекта для хранилищ в базе; покрытие в test_agent_store_project",
     # Токенный порог автосжатия. Эталон матрицы снят на develop и случаев
     # с этим рычагом не содержит: новый случай нельзя сверить, не пересняв
     # эталон на этой же ветке. Паритет async/sync того же координатора уже
