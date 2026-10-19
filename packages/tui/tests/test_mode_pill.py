@@ -8,8 +8,8 @@ _MODES = [mode.value for mode in AVAILABLE_MODES]
 
 
 def test_pill_shows_glyph_and_name():
-    assert render_mode_pill("edit").plain == "»» edit mode (Shift+Tab)"
-    assert render_mode_pill("manual").plain == "║ manual mode (Shift+Tab)"
+    assert render_mode_pill("edit").plain == "⏵⏵ edit mode (Shift+Tab)"
+    assert render_mode_pill("manual").plain == "⏸ manual mode (Shift+Tab)"
 
 
 def test_every_available_mode_has_a_unique_glyph_a_name_and_a_hint():
@@ -37,7 +37,7 @@ def test_pill_width_follows_its_content():
 
 def test_narrow_pill_is_glyph_only():
     narrow = render_mode_pill("edit", narrow=True)
-    assert narrow.plain == "»»"
+    assert narrow.plain == "⏵⏵"
 
 
 def test_hotkey_hint_touches_the_mode_name_and_can_be_suppressed():
