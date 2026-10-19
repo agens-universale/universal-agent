@@ -456,7 +456,7 @@ def _cases() -> list[_Case]:
         class _OneFile(FileAgentStore):
             """Судья — пакетный ассет; здесь на его месте файл человека."""
 
-            def _paths(self, kind, name):
+            def _paths(self, kind, name, project):
                 return [str(path)]
 
         return run_coro(

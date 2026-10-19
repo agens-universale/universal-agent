@@ -57,3 +57,8 @@ _.setup
 # создаёт встраивающий при старте, ядро хранилище не создаёт и не зовёт.
 # packages/stores/src/gc_stores/postgres/store.py.
 _.ensure_schema
+
+# Публичный API gc_testkit для авторов хранилищ: засеять Seed конформанса через
+# запись ресурсов (ResourceWriter хранилищ gc-stores). Зовут тесты gc-stores.
+# packages/testkit/src/gc_testkit/agent_store_conformance.py.
+seed_store

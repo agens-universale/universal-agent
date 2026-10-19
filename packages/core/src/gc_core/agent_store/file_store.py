@@ -23,6 +23,7 @@ from gc_core.agent_store.models import (
     ResourceInfo,
     ResourceKind,
     memory_version,
+    needs_project,
 )
 from gc_core.agent_store.store import AgentStore
 
@@ -74,18 +75,32 @@ class FileAgentStore(AgentStore):
 
     # --- ресурсы --------------------------------------------------------------
 
-    def _paths(self, kind: ResourceKind, name: str) -> list[str]:
-        return resource_paths(self._settings, kind, name)
+    def _paths(
+        self, kind: ResourceKind, name: str, project: ProjectKey | None
+    ) -> list[str]:
+        return resource_paths(self._settings, kind, name, project)
 
-    def label(self, kind: ResourceKind, name: str) -> str:
-        paths = self._paths(kind, name)
+    def label(
+        self,
+        kind: ResourceKind,
+        name: str,
+        *,
+        project: ProjectKey | None = None,
+    ) -> str:
+        paths = self._paths(kind, name, project)
         return paths[0] if paths else f"{kind}:{name}"
 
     def memory_label(self, project: ProjectKey) -> str:
         return str(memory_path(project))
 
-    async def read(self, kind: ResourceKind, name: str) -> bytes | None:
-        paths = self._paths(kind, name)
+    async def read(
+        self,
+        kind: ResourceKind,
+        name: str,
+        *,
+        project: ProjectKey | None = None,
+    ) -> bytes | None:
+        paths = self._paths(kind, name, project)
         if not paths:
             return None
         *fallbacks, last = paths
@@ -93,12 +108,19 @@ class FileAgentStore(AgentStore):
             data = _candidate(path, kind, name)
             if data is not None:
                 return data
+        if needs_project(kind, name) and not os.path.isfile(last):
+            # Слой проекта — необязательный файл репозитория: нет — нет.
+            return None
         return Path(last).read_bytes()
 
     async def list(
-        self, kind: ResourceKind, prefix: str = ""
+        self,
+        kind: ResourceKind,
+        prefix: str = "",
+        *,
+        project: ProjectKey | None = None,
     ) -> list[ResourceInfo]:
-        paths = self._paths(kind, prefix)
+        paths = self._paths(kind, prefix, project)
         if not paths:
             raise FileNotFoundError(f"{kind}:{prefix}")
         directory = paths[0]
@@ -160,15 +182,28 @@ class FileAgentStore(AgentStore):
     # --- скиллы ---------------------------------------------------------------
 
     def skills_registry(
-        self, settings: Any, *, backend: Any
+        self,
+        settings: Any,
+        *,
+        backend: Any,
+        project: ProjectKey | None = None,
     ) -> SkillsRegistry:
+        # Корень слоя project у файлового реестра — <cwd>/.gc/skills, а
+        # проект рана строится из того же cwd: project не нужен.
+        del project
         from gc_core.tools.skills.registry import get_skills_registry
 
         return get_skills_registry(settings, backend=backend)
 
     async def aprovision_skills(
-        self, backend: Any, settings: Any, *, run_logger: Any = None
+        self,
+        backend: Any,
+        settings: Any,
+        *,
+        run_logger: Any = None,
+        project: ProjectKey | None = None,
     ) -> SkillsRegistry | None:
+        del project
         # Remote-бэкенд: скиллы лежат на хосте, а реестр читает через бэкенд —
         # набор копируется «туда», реестр собирается по удалённым корням.
         from gc_core.tools.skills.provision import aprovision_remote_skills

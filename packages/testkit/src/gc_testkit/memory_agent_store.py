@@ -8,7 +8,9 @@
 ``subagents`` — имя файла → текст определения, ``skills`` — путь
 ``<слой>/<скилл>/…`` → текст. Чего в словарях нет, читается у ``fallback``
 (по умолчанию — файловое хранилище: пакетные промпты сжатия, finish gate…).
-Память проектов — в словаре по ``ProjectKey.id``.
+Ресурсы проекта (``L2``, ``L3``, скиллы слоя ``project``) — ``projects``:
+``{id проекта: {"instructions": {...}, "skill": {...}}}``. Память проектов —
+в словаре по ``ProjectKey.id``.
 """
 
 from __future__ import annotations
@@ -23,6 +25,8 @@ from gc_core.agent_store import (
     ProjectMemory,
     ResourceInfo,
     memory_version,
+    needs_project,
+    require_project,
 )
 
 _DEFAULT = object()
@@ -37,6 +41,7 @@ class MemoryAgentStore(AgentStore):
         subagents: Mapping[str, str] | None = None,
         skills: Mapping[str, str] | None = None,
         memory: Mapping[str, str] | None = None,
+        projects: Mapping[str, Mapping[str, Mapping[str, str]]] | None = None,
         fallback: AgentStore | object | None = _DEFAULT,
     ) -> None:
         self._data = {
@@ -45,29 +50,47 @@ class MemoryAgentStore(AgentStore):
             "subagent": dict(subagents or {}),
             "skill": dict(skills or {}),
         }
+        self._projects = {
+            pid: {kind: dict(texts) for kind, texts in data.items()}
+            for pid, data in (projects or {}).items()
+        }
         self._memory: dict[str, str] = dict(memory or {})
         self._fallback = FileAgentStore() if fallback is _DEFAULT else fallback
         #: Что читали: ``(вид, имя)`` — тесты проверяют, что шло через хранилище.
         self.reads: list[tuple[str, str]] = []
 
-    def label(self, kind, name: str) -> str:
-        if name in self._data[kind] or self._fallback is None:
-            return super().label(kind, name)
+    def _texts(self, kind, name: str, project) -> dict[str, str] | None:
+        """Словарь ресурсов для имени; ``None`` — ресурс проекта без
+        ресурсов этого проекта (фолбэк не спрашивается)."""
+        require_project(kind, name, project)
+        if needs_project(kind, name):
+            return self._projects.get(project.id, {}).get(kind, {})
+        return self._data[kind]
+
+    def label(self, kind, name: str, *, project=None) -> str:
+        if (
+            needs_project(kind, name)
+            or name in self._data[kind]
+            or self._fallback is None
+        ):
+            return super().label(kind, name, project=project)
         return self._fallback.label(kind, name)
 
-    async def read(self, kind, name: str) -> bytes | None:
+    async def read(self, kind, name: str, *, project=None) -> bytes | None:
         self.reads.append((kind, name))
-        texts = self._data[kind]
+        texts = self._texts(kind, name, project)
         if name in texts:
             return texts[name].encode("utf-8")
-        if self._fallback is not None:
+        if self._fallback is not None and not needs_project(kind, name):
             return await self._fallback.read(kind, name)
         return None
 
-    async def list(self, kind, prefix: str = "") -> list[ResourceInfo]:
-        texts = self._data[kind]
+    async def list(
+        self, kind, prefix: str = "", *, project=None
+    ) -> list[ResourceInfo]:
+        texts = self._texts(kind, prefix, project)
         if not texts:
-            if self._fallback is not None:
+            if self._fallback is not None and not needs_project(kind, prefix):
                 return await self._fallback.list(kind, prefix)
             raise FileNotFoundError(f"{kind}:{prefix}")
         head = prefix.strip("/")

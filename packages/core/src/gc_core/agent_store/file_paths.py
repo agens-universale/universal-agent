@@ -13,7 +13,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from gc_core.agent_store.models import Prompt, ResourceKind
+from gc_core.agent_store.models import ProjectKey, Prompt, ResourceKind
 from gc_core.bundled_assets import bundled_root
 
 _AGENTS_MD = "AGENTS.md"
@@ -134,14 +134,22 @@ _PROMPTS: dict[str, Callable[[Any], list[str]]] = {
 }
 
 
-def _instructions(settings, name: str) -> list[str]:
+def _project_root(project: ProjectKey) -> Path:
+    """Каталог проекта; у ключа без каталога — текущий (как ядро до v2)."""
+    return Path(project.root) if project.root else Path(os.getcwd())
+
+
+def _instructions(
+    settings, name: str, project: ProjectKey | None
+) -> list[str]:
     if name == "L0":
         own = settings.paths.agent_md_path
         return [str(Path(own))] if own else []
-    if name == "L1":
+    if name in ("L1", "L2", "L3"):
         from gc_core.instructions.layers import instruction_file_paths
 
-        return [str(instruction_file_paths()["L1"])]
+        cwd = None if project is None else str(_project_root(project))
+        return [str(instruction_file_paths(cwd=cwd)[name])]
     raise ValueError(f"неизвестный слой инструкций {name!r}")
 
 
@@ -168,16 +176,27 @@ def skill_roots() -> dict[str, str]:
     }
 
 
-def _skill(name: str) -> list[str]:
+def _skill(name: str, project: ProjectKey | None) -> list[str]:
     layer, _, rest = name.strip("/").partition("/")
-    root = skill_roots().get(layer)
+    if layer == "project" and project is not None:
+        root = str(_project_root(project) / ".gc" / "skills")
+    else:
+        root = skill_roots().get(layer)
     if root is None:
         return []
     return [os.path.join(root, *rest.split("/")) if rest else root]
 
 
-def resource_paths(settings: Any, kind: ResourceKind, name: str) -> list[str]:
+def resource_paths(
+    settings: Any,
+    kind: ResourceKind,
+    name: str,
+    project: ProjectKey | None = None,
+) -> list[str]:
     """Пути ресурса по порядку; пусто — у файлового хранилища его нет."""
+    from gc_core.agent_store.reading import require_project
+
+    require_project(kind, name, project)
     if kind == "prompt":
         try:
             rule = _PROMPTS[Prompt(name)]
@@ -185,9 +204,9 @@ def resource_paths(settings: Any, kind: ResourceKind, name: str) -> list[str]:
             raise ValueError(f"неизвестный промпт {name!r}") from None
         return rule(settings)
     if kind == "instructions":
-        return _instructions(settings, name)
+        return _instructions(settings, name, project)
     if kind == "subagent":
         return _subagent_definition(settings, name)
     if kind == "skill":
-        return _skill(name)
+        return _skill(name, project)
     raise ValueError(f"неизвестный вид ресурса {kind!r}")

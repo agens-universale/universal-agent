@@ -50,3 +50,33 @@ def test_project_key_of_context_reads_setting(tmp_path):
     )
     key = project_key_of(ctx)
     assert key == ProjectKey("p1", str(tmp_path))
+
+
+async def test_file_store_reads_project_resources_from_project_root(tmp_path):
+    import pytest
+    from gc_core.agent_store import FileAgentStore
+
+    root = tmp_path / "repo"
+    (root / ".gc" / "skills" / "s").mkdir(parents=True)
+    (root / ".gc" / "AGENTS.md").write_text("L2 текст", encoding="utf-8")
+    (root / "AGENTS.md").write_text("L3 текст", encoding="utf-8")
+    (root / ".gc" / "skills" / "s" / "SKILL.md").write_text(
+        "---\nname: s\n---\n", encoding="utf-8"
+    )
+    store = FileAgentStore(make_settings({}))
+    project = ProjectKey("p", str(root))
+    assert await store.read("instructions", "L2", project=project) == (
+        "L2 текст".encode()
+    )
+    assert await store.read("instructions", "L3", project=project) == (
+        "L3 текст".encode()
+    )
+    listed = await store.list("skill", "project", project=project)
+    assert [e.name for e in listed] == ["s"]
+    assert store.label("instructions", "L3", project=project) == str(
+        root / "AGENTS.md"
+    )
+    with pytest.raises(ValueError, match="проект"):
+        await store.read("instructions", "L3")
+    with pytest.raises(ValueError, match="проект"):
+        await store.list("skill", "project")

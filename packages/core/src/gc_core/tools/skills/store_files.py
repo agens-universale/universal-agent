@@ -26,7 +26,13 @@ import logging
 import posixpath
 from typing import Any, AsyncIterator, Dict
 
-from gc_core.agent_store import AgentStore, ResourceInfo, decode_text
+from gc_core.agent_store import (
+    AgentStore,
+    ProjectKey,
+    ResourceInfo,
+    decode_text,
+    needs_project,
+)
 from gc_core.tools.skills.registry import (
     SkillsRegistry,
     disabled_skills_from_config,
@@ -48,15 +54,34 @@ def relative_inside(path: str) -> str:
     return normalized
 
 
-class StoreSkillFiles:
-    """Дерево ``skills`` хранилища агента как бэкенд для реестра скиллов."""
+#: Слой ``project`` без проекта рана: такого слоя нет.
+_NO_LAYER = object()
 
-    def __init__(self, store: AgentStore) -> None:
+
+class StoreSkillFiles:
+    """Дерево ``skills`` хранилища агента как бэкенд для реестра скиллов;
+    слой ``project`` — скиллы проекта ``project`` (без него слоя нет)."""
+
+    def __init__(
+        self, store: AgentStore, project: ProjectKey | None = None
+    ) -> None:
         self._store = store
+        self._project = project
+
+    def scope(self, path: str) -> ProjectKey | object | None:
+        """Проект для пути дерева; ``_NO_LAYER`` — слой проекта без
+        проекта."""
+        if not needs_project("skill", path):
+            return None
+        return self._project if self._project is not None else _NO_LAYER
 
     async def _entries(self, path: str) -> list[ResourceInfo] | None:
+        name = path.strip("/")
+        project = self.scope(name)
+        if project is _NO_LAYER:
+            return None
         try:
-            return await self._store.list("skill", path.strip("/"))
+            return await self._store.list("skill", name, project=project)
         except (FileNotFoundError, NotADirectoryError):
             return None
 
@@ -94,13 +119,26 @@ class StoreSkillFiles:
                 else:
                     yield child
 
+    async def read_bytes(self, path: str) -> bytes:
+        """Байты файла; нет — ``FileNotFoundError``, как у файлового
+        бэкенда."""
+        name = path.strip("/")
+        project = self.scope(name)
+        data = None
+        if project is not _NO_LAYER:
+            data = await self._store.read("skill", name, project=project)
+        if data is None:
+            label = self._store.label(
+                "skill",
+                name,
+                project=None if project is _NO_LAYER else project,
+            )
+            raise FileNotFoundError(label)
+        return data
+
     async def read(self, path: str) -> str:
         """Текст файла; нет — ``FileNotFoundError``, как у файлового бэкенда."""
-        name = path.strip("/")
-        data = await self._store.read("skill", name)
-        if data is None:
-            raise FileNotFoundError(self._store.label("skill", name))
-        return decode_text(data)
+        return decode_text(await self.read_bytes(path))
 
 
 class StoreSkillsRegistry(SkillsRegistry):
@@ -113,9 +151,11 @@ class StoreSkillsRegistry(SkillsRegistry):
         store: AgentStore,
         settings: Any = None,
         runtime_backend: Any = None,
+        project: ProjectKey | None = None,
         **kwargs: Any,
     ) -> None:
-        super().__init__(backend=StoreSkillFiles(store), **kwargs)
+        self._files = StoreSkillFiles(store, project)
+        super().__init__(backend=self._files, **kwargs)
         self._store = store
         self._settings = settings
         self._runtime = runtime_backend
@@ -210,19 +250,21 @@ class StoreSkillsRegistry(SkillsRegistry):
         return changed
 
     async def _abytes(self, name: str) -> bytes:
-        data = await self._store.read("skill", name.strip("/"))
-        if data is None:
-            raise FileNotFoundError(self._store.label("skill", name))
-        return data
+        return await self._files.read_bytes(name)
 
 
 def store_skills_registry(
-    store: AgentStore, settings: Any, *, runtime_backend: Any = None
+    store: AgentStore,
+    settings: Any,
+    *,
+    runtime_backend: Any = None,
+    project: ProjectKey | None = None,
 ) -> SkillsRegistry:
     return StoreSkillsRegistry(
         store=store,
         settings=settings,
         runtime_backend=runtime_backend,
+        project=project,
         system_root="system",
         user_root="user",
         project_root="project",

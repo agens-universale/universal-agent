@@ -36,6 +36,7 @@ from gc_core.agent_store.models import (
     ProjectMemory,
     ResourceInfo,
     ResourceKind,
+    needs_project,
 )
 
 if TYPE_CHECKING:
@@ -46,16 +47,29 @@ class AgentStore(ABC):
     """Ресурсы и память агента."""
 
     @abstractmethod
-    async def read(self, kind: ResourceKind, name: str) -> bytes | None:
-        """Байты ресурса; ``None`` — ресурса нет."""
+    async def read(
+        self,
+        kind: ResourceKind,
+        name: str,
+        *,
+        project: ProjectKey | None = None,
+    ) -> bytes | None:
+        """Байты ресурса; ``None`` — ресурса нет. Ресурс проекта (``L2``,
+        ``L3``, слой скиллов ``project``) читается только с ``project``,
+        без него — ``ValueError`` (``require_project``)."""
 
     @abstractmethod
     async def list(
-        self, kind: ResourceKind, prefix: str = ""
+        self,
+        kind: ResourceKind,
+        prefix: str = "",
+        *,
+        project: ProjectKey | None = None,
     ) -> list[ResourceInfo]:
         """Содержимое каталога ресурсов ``prefix`` (субагенты, скиллы):
         имена внутри каталога по алфавиту. Нет каталога —
-        ``FileNotFoundError`` или ``NotADirectoryError``."""
+        ``FileNotFoundError`` или ``NotADirectoryError``. Слой скиллов
+        ``project`` — только с ``project``."""
 
     @abstractmethod
     async def read_memory(self, project: ProjectKey) -> ProjectMemory | None:
@@ -79,8 +93,16 @@ class AgentStore(ABC):
         удалённое пользователем не возвращают). Без копий — ничего."""
         del project
 
-    def label(self, kind: ResourceKind, name: str) -> str:
+    def label(
+        self,
+        kind: ResourceKind,
+        name: str,
+        *,
+        project: ProjectKey | None = None,
+    ) -> str:
         """Как назвать ресурс в тексте отказа (файловое — путь)."""
+        if project is not None and needs_project(kind, name):
+            return f"{kind}:{project.id}:{name}"
         return f"{kind}:{name}"
 
     def memory_label(self, project: ProjectKey) -> str:
@@ -88,15 +110,27 @@ class AgentStore(ABC):
         return f"project memory {project.id}"
 
     def skills_registry(
-        self, settings: Any, *, backend: Any
+        self,
+        settings: Any,
+        *,
+        backend: Any,
+        project: ProjectKey | None = None,
     ) -> SkillsRegistry:
-        """Реестр скиллов по дереву ``skill`` этого хранилища."""
+        """Реестр скиллов по дереву ``skill`` этого хранилища; слой
+        ``project`` — скиллы проекта ``project`` (без него слоя нет)."""
         from gc_core.tools.skills.store_files import store_skills_registry
 
-        return store_skills_registry(self, settings, runtime_backend=backend)
+        return store_skills_registry(
+            self, settings, runtime_backend=backend, project=project
+        )
 
     async def aprovision_skills(
-        self, backend: Any, settings: Any, *, run_logger: Any = None
+        self,
+        backend: Any,
+        settings: Any,
+        *,
+        run_logger: Any = None,
+        project: ProjectKey | None = None,
     ) -> SkillsRegistry | None:
         """Реестр для среды исполнения; ``None`` — реестр из
         ``skills_registry`` годится как есть.
@@ -105,4 +139,5 @@ class AgentStore(ABC):
         сверенные): ``skills_registry`` строился раньше, на корне хоста, а
         скрипты своего хранилища выкладываются от корня среды исполнения.
         """
-        return self.skills_registry(settings, backend=backend)
+        del run_logger
+        return self.skills_registry(settings, backend=backend, project=project)

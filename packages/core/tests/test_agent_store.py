@@ -315,13 +315,13 @@ async def test_responses_mode_tool_call_does_not_wait_on_store_synchronously():
     from gc_core.tools.subagents.registry import is_subagent_tool
 
     class _NetStore(MemoryAgentStore):
-        async def list(self, kind, prefix=""):
+        async def list(self, kind, prefix="", *, project=None):
             await asyncio.sleep(0)
-            return await super().list(kind, prefix)
+            return await super().list(kind, prefix, project=project)
 
-        async def read(self, kind, name):
+        async def read(self, kind, name, *, project=None):
             await asyncio.sleep(0)
-            return await super().read(kind, name)
+            return await super().read(kind, name, project=project)
 
     store = _NetStore(subagents={"helper.md": SUBAGENT})
     ctx = await acreate_run_context(

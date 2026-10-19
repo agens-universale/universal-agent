@@ -25,6 +25,7 @@ from gc_core.agent_store.reading import (
     decode_text,
     project_key_for,
     project_key_of,
+    require_project,
 )
 from gc_core.agent_store.store import AgentStore
 
@@ -47,4 +48,5 @@ __all__ = [
     "needs_project",
     "project_key_for",
     "project_key_of",
+    "require_project",
 ]

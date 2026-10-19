@@ -74,10 +74,12 @@ class ExternalAgentStore(AgentStore):
             f"Agent resource {what} requires an external operation"
         )
 
-    async def read(self, kind, name):
+    async def read(self, kind, name, *, project=None):
+        del project
         raise self._external(f"{kind}:{name}")
 
-    async def list(self, kind, prefix=""):
+    async def list(self, kind, prefix="", *, project=None):
+        del project
         raise self._external(f"{kind}:{prefix}")
 
     async def read_memory(self, project):

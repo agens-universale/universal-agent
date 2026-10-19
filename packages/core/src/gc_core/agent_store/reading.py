@@ -10,7 +10,11 @@ import errno
 import os
 from typing import Any
 
-from gc_core.agent_store.models import ProjectKey, ResourceKind
+from gc_core.agent_store.models import (
+    ProjectKey,
+    ResourceKind,
+    needs_project,
+)
 from gc_core.agent_store.store import AgentStore
 from gc_core.utils.user_text import unreadable_reason
 
@@ -76,48 +80,77 @@ def decode_text(data: bytes) -> str:
     return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
+def require_project(
+    kind: ResourceKind, name: str, project: ProjectKey | None
+) -> None:
+    """Ресурс проекта без проекта — ошибка вызывающего (ядра), а не «ресурса
+    нет»: молча пустой AGENTS.md проекта спрятал бы потерянный проект."""
+    if project is None and needs_project(kind, name):
+        raise ValueError(f"{kind}:{name} — ресурс проекта: нужен project")
+
+
 def _absent(label: str) -> FileNotFoundError:
     return FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), label)
 
 
-async def _aread(store: AgentStore, kind: ResourceKind, name: str) -> str:
-    data = await store.read(kind, name)
+async def _aread(
+    store: AgentStore,
+    kind: ResourceKind,
+    name: str,
+    project: ProjectKey | None,
+) -> str:
+    data = await store.read(kind, name, project=project)
     if data is None:
-        raise _absent(store.label(kind, name))
+        raise _absent(store.label(kind, name, project=project))
     return decode_text(data)
 
 
-async def aread_text(store: AgentStore, kind: ResourceKind, name: str) -> str:
+async def aread_text(
+    store: AgentStore,
+    kind: ResourceKind,
+    name: str,
+    *,
+    project: ProjectKey | None = None,
+) -> str:
     """Текст ресурса либо ``ValueError`` с его именем — как
     ``read_user_text``."""
     try:
-        return await _aread(store, kind, name)
+        return await _aread(store, kind, name, project)
     except (OSError, UnicodeDecodeError) as exc:
         raise ValueError(
-            unreadable_reason(store.label(kind, name), exc)
+            unreadable_reason(store.label(kind, name, project=project), exc)
         ) from exc
 
 
 async def aread_or_none(
-    store: AgentStore, kind: ResourceKind, name: str
+    store: AgentStore,
+    kind: ResourceKind,
+    name: str,
+    *,
+    project: ProjectKey | None = None,
 ) -> str | None:
     """Текст ресурса либо ``None`` — как ``read_user_text_or_none``."""
     try:
-        return await _aread(store, kind, name)
+        return await _aread(store, kind, name, project)
     except (OSError, UnicodeDecodeError):
         return None
 
 
 async def aread_required(
-    store: AgentStore, kind: ResourceKind, name: str, *, missing: str
+    store: AgentStore,
+    kind: ResourceKind,
+    name: str,
+    *,
+    missing: str,
+    project: ProjectKey | None = None,
 ) -> str:
     """Обязательный ресурс: нет — ``FileNotFoundError(missing)``, не
     читается — ``ValueError`` с его именем."""
     try:
-        return await _aread(store, kind, name)
+        return await _aread(store, kind, name, project)
     except FileNotFoundError:
         raise FileNotFoundError(missing) from None
     except (OSError, UnicodeDecodeError) as exc:
         raise ValueError(
-            unreadable_reason(store.label(kind, name), exc)
+            unreadable_reason(store.label(kind, name, project=project), exc)
         ) from exc
