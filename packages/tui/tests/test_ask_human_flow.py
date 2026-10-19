@@ -549,15 +549,15 @@ async def test_ask_human_table_renders():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("typed", "answered"),
+    ("typed", "answered", "mode", "notice"),
     [
-        ("/plan ", False),
-        ("/plan clear", False),
-        ("/Users/me/project", True),
+        ("/plan ", False, "plan", None),
+        ("/plan clear", False, "edit", "агент работает"),
+        ("/Users/me/project", True, "edit", None),
     ],
 )
 async def test_question_input_runs_known_commands_and_answers_the_rest(
-    tmp_path, typed, answered
+    tmp_path, typed, answered, mode, notice
 ):
     """Пока висит вопрос агента, поле — и ответ, и команды: известная команда
     выполняется так же, как из палитры, остальное (путь и т.п.) уходит ответом.
@@ -576,7 +576,9 @@ async def test_question_input_runs_known_commands_and_answers_the_rest(
         system="cli",
         settings=tui_settings({"agent.model": "M"}),
     )
+    notices = []
     async with app.run_test() as pilot:
+        app.notify = lambda message, **_: notices.append(message)
         scr = pilot.app.screen
         app.active_runner = _Runner()
         scr._render_records([_ask_human_record()], live=True)
@@ -590,6 +592,9 @@ async def test_question_input_runs_known_commands_and_answers_the_rest(
         await pilot.pause()
 
         assert replies == ([typed] if answered else [])
+        # Команда не просто не ушла ответом — она выполнилась.
+        assert app.effective_permission_mode() == mode
+        assert any(notice in n for n in notices) if notice else True
 
 
 def _ask_human_record():

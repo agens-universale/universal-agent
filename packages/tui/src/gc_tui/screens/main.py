@@ -6099,6 +6099,20 @@ class TraceScreen(Screen):
         else:
             self._close_file_picker()
 
+    def _is_command_input(self, text: str) -> bool:
+        """Набранное — команда (`/…`, `!…`), а не текст агенту.
+
+        Поле одно на ответ и команды. Пока висит вопрос агента, командой
+        считается только известная `/команда`; прочее с «/» (путь и т.п.) и с
+        «!» — ответ. Вне вопроса любое `/…` — команда (неизвестная получит
+        «нет такой команды»), `!…` — shell.
+        """
+        asking = self.app.tui_state.ask_human_state is not None
+        if text.startswith("/"):
+            name = (text[1:].split(None, 1) or [""])[0]
+            return not asking or self._registry.lookup(name) is not None
+        return text.startswith("!") and not asking
+
     async def on_command_text_area_submitted(
         self, event: CommandTextArea.Submitted
     ) -> None:
@@ -6118,7 +6132,7 @@ class TraceScreen(Screen):
         # отказ раньше пикеров и палитры — они очищают ввод, а набранное с
         # плашками должно остаться в поле.
         images = event.attachments
-        if images and event.value.strip().startswith(("/", "!")):
+        if images and self._is_command_input(event.value.strip()):
             self._show_footer_refusal(_IMAGES_WITH_COMMAND_REFUSAL)
             return
 
@@ -6226,12 +6240,10 @@ class TraceScreen(Screen):
         if not text:
             return
 
-        # Известная команда выполняется всегда, и пока висит вопрос агента: поле
-        # одно на ответ и команды. Прочее с «/» (путь и т.п.) во время вопроса —
-        # ответ агенту, вне вопроса — ошибка «нет такой команды» ниже.
-        if text.startswith("/") and self._registry.lookup(
-            (text[1:].split(None, 1) or [""])[0]
-        ):
+        # Команда или текст агенту — решается до ветки вопроса: она снимает
+        # вопрос и при пропавшем владельце пропускает ответ дальше.
+        is_command = self._is_command_input(text)
+        if is_command and text.startswith("/"):
             await self._handle_command(text[1:])
             return
 
@@ -6288,11 +6300,7 @@ class TraceScreen(Screen):
                 self._stop_and_replace_runner()
             # fall-through ↓ к "continue thread": тот же active_task_id, start(answer).
 
-        if text.startswith("/"):
-            await self._handle_command(text[1:])
-            return
-
-        if text.startswith("!"):
+        if is_command:
             self._handle_bang_shell(text)
             return
 
