@@ -87,6 +87,7 @@ from gc_tui.widgets.paste_input import PasteInput
 _CLS_ONB_HINT_ONB_DYN = "onb-hint onb-dyn"
 _CLS_ONB_HINT_ONB_DYN_SET_GROUP_GAP = "onb-hint onb-dyn set-group-gap"
 _SEL_MEF_NOAUTH = "#mef-noauth"
+_SEL_MEF_PROXY = "#mef-proxy"
 _SEL_MEF_TOKEN = "#mef-token"
 _SEL_MEF_URL = "#mef-url"
 
@@ -335,8 +336,10 @@ vLLM — `thinking: false` и `reasoning_effort: none`, для OpenAI —
 «Диалекты thinking».
 
 Поле `backend` — транспорт этой модели поверх общего подключения, не тело
-запроса. Пустое поле означает использование дефолтов конфига:
-действуют общий таймаут, SSL, прокси и лимит.
+запроса. Прокси этого эндпоинта — поле «Прокси» выше: пустое оставляет
+прокси общего подключения, заполненное пишет `backend.proxy`. Свой прокси
+считается своим подключением и требует свой токен. Пустое поле backend
+оставляет общий таймаут, SSL и лимит.
 Записанный ключ переписывает только себя, остальные ключи берутся с конфига.
 
 Можно ставить:
@@ -507,6 +510,20 @@ def _completion_field_text(value) -> str:
     return safe_yaml_dump(value).rstrip("\n")
 
 
+def _split_proxy(backend) -> tuple[str, object]:
+    """Вынуть `backend.proxy` в отдельное поле карточки.
+
+    В YAML-поле транспорта ключ не остаётся: иначе прокси правился бы в двух
+    местах. Пустой остаток секции — ``None`` (поля нет), не ``{}``."""
+    if not isinstance(backend, dict):
+        return "", backend
+    raw = backend.get("proxy")
+    if not isinstance(raw, str) or not raw.strip():
+        return "", backend
+    rest = {key: value for key, value in backend.items() if key != "proxy"}
+    return raw.strip(), rest or None
+
+
 _MODEL_PLACEHOLDER = "если не указать — id модели равен алиасу"
 # Тёзка — своя запись профиля под именем записи основного конфига: пустое поле id у
 # неё значит не «равен алиасу», а `model` ЗАСЛОНЁННОЙ записи (так сливает запись
@@ -532,7 +549,17 @@ _PAIR_OWN = "Адрес и токен: свои"
 _PAIR_OWN_BACKEND = "Адрес и токен: свои — заданы полем backend, правятся там"
 # Поля пары — те, на которых работает «вернуть наследование» (§5). Галка в набор не входит:
 # она не поле, и её собственная клавиша (Space) на этой строке уже занята.
-_PAIR_FIELDS = ("mef-url", "mef-token")
+# Прокси — часть того же подключения: свой `backend.proxy` уводит запрос с общим
+# токеном, поэтому Ctrl+U снимает его вместе с адресом и токеном.
+_PAIR_FIELDS = ("mef-url", "mef-token", "mef-proxy")
+_PROXY_LABEL = "Прокси (необязательно)"
+_PROXY_HINT = (
+    "пусто — прокси общего подключения; свой прокси требует свой токен"
+)
+_PROXY_PLACEHOLDER = "напр. http://proxy:8080  или  socks5h://…"
+_PAIR_PROXY_NEEDS_TOKEN = (
+    "задан свой прокси, но не задан токен — укажите токен или очистите прокси"
+)
 _TOKEN_SHARED_HINT = "токен приходит из раздела «Подключение»"
 # Тот же источник, что у шапки пары (`_PAIR_SHARED_BASE`): две подписи одного состояния
 # не имеют права называть два разных источника.
@@ -743,7 +770,8 @@ class ModelEntryForm(Vertical):
             if "auxiliary" in initial and initial["auxiliary"] is None
             else initial.get("auxiliary")
         )
-        self._backend_text = _completion_field_text(initial.get("backend"))
+        self._proxy0, backend_rest = _split_proxy(initial.get("backend"))
+        self._backend_text = _completion_field_text(backend_rest)
         self._strip_think = _strip_choice(initial.get("strip_think"))
         self._summary_chars0 = _summary_trigger_initial(
             initial,
@@ -808,6 +836,7 @@ class ModelEntryForm(Vertical):
             "mef-url",
             "mef-token",
             None,
+            "mef-proxy",
             "mef-model",
             "mef-alias",
             "mef-model-meta",
@@ -927,6 +956,7 @@ class ModelEntryForm(Vertical):
             "main": self._main_text,
             "auxiliary": self._aux_text,
             "backend": self._backend_text,
+            "proxy": self._proxy0,
             "strip_think": self._strip_think,
         }
 
@@ -1005,6 +1035,31 @@ class ModelEntryForm(Vertical):
             "Authorization"
         )
 
+    def _inherited_proxy(self) -> str:
+        """Прокси, который уйдёт, если поле пустое.
+
+        Свой ключ модели сильнее общего: у тёзки это `backend.proxy` заслонённой
+        записи, иначе — `backend.proxy` эффективного конфига (`config_proxy`).
+        Пусто — ни того, ни другого, запрос пойдёт напрямую или через env."""
+        base = self._base_entry_now()
+        backend = base.get("backend")
+        backend = backend if isinstance(backend, dict) else {}
+        own = backend.get("proxy")
+        if isinstance(own, str) and own.strip():
+            return own.strip()
+        shared = self._config_proxy
+        if isinstance(shared, str) and shared.strip():
+            return shared.strip()
+        return ""
+
+    def _proxy_placeholder(self) -> str:
+        """Пустое поле — наследование. Текст называет прокси, который начнёт
+        действовать; своего значения в placeholder нет — оно стоит в поле."""
+        inherited = self._inherited_proxy()
+        if inherited:
+            return _inherited(onboarding.display_secret(inherited))
+        return _PROXY_PLACEHOLDER
+
     def _model_placeholder(self) -> str:
         """Пустое поле id: провайдерским id служит алиас — либо, у тёзки, `model`
         заслонённой записи (так сливает запись загрузчик). Источник id судится
@@ -1078,6 +1133,61 @@ class ModelEntryForm(Vertical):
             return dict(self._backend0)
         return parsed if isinstance(parsed, dict) else {}
 
+    def _proxy_value(self) -> str:
+        """Свой прокси записи. До монтирования поля его знает только `initial`."""
+        try:
+            return self._field_value("mef-proxy")
+        except NoMatches:
+            return self._proxy0
+
+    def _effective_proxy(self, backend: dict) -> str | None:
+        """Прокси, который уедет в файл: поле карточки, иначе ключ в YAML backend.
+
+        Поле — основное место правки. Ключ в YAML остаётся для того, кто дописал
+        `proxy:` в поле backend, не трогая карточку."""
+        field = self._proxy_value()
+        if field:
+            return field
+        raw = backend.get("proxy")
+        if isinstance(raw, str) and raw.strip():
+            return raw.strip()
+        return None
+
+    def _backend_for_request(self, backend: dict) -> dict:
+        """Снимок backend для пробы и списка: свой прокси поля побеждает YAML."""
+        data = dict(backend)
+        proxy = self._proxy_value()
+        if proxy:
+            data["proxy"] = proxy
+        return data
+
+    def _backend_with_proxy(self, backend: dict | None) -> dict | None:
+        """Секция backend, какой она уедет в файл.
+
+        Поле прокси — источник ключа `proxy`. Пустое поле снимает свой прокси,
+        который был при открытии. Явный пустой mapping (`{}`) не схлопывается
+        в отсутствие секции. Два разных прокси — поле и YAML — отказ."""
+        proxy = self._proxy_value()
+        data = dict(backend) if isinstance(backend, dict) else {}
+        yaml_proxy = data.get("proxy")
+        if (
+            proxy
+            and isinstance(yaml_proxy, str)
+            and yaml_proxy.strip()
+            and yaml_proxy.strip() != proxy
+        ):
+            raise ValueError(
+                "прокси задан и в поле, и в backend — оставьте что-то одно"
+            )
+        if proxy:
+            data["proxy"] = proxy
+            return data
+        if self._proxy0:
+            data.pop("proxy", None)
+        if not data:
+            return None if backend is None else data
+        return data
+
     def _pair_parts(self) -> tuple[bool, bool]:
         """Что запись задаёт СВОЕГО — (адрес, токен) — ядровым определением §2
         (`model_registry.connection_parts`), тем же, каким судит валидатор конфига.
@@ -1106,7 +1216,7 @@ class ModelEntryForm(Vertical):
             completions_url=self._as_validator_sees(
                 backend.get("completions_url")
             ),
-            proxy=self._as_validator_sees(backend.get("proxy")),
+            proxy=self._as_validator_sees(self._effective_proxy(backend)),
             authorization=self._as_validator_sees(
                 headers.get("Authorization")
             ),
@@ -1128,7 +1238,7 @@ class ModelEntryForm(Vertical):
             self._token_value(),
             self._token_current,
             backend.get("completions_url"),
-            backend.get("proxy"),
+            self._effective_proxy(backend),
             headers.get("Authorization"),
         ):
             for name in missing_env_refs(value):
@@ -1307,7 +1417,7 @@ class ModelEntryForm(Vertical):
     def compose(self) -> ComposeResult:
         # Рамка одна и она всегда (канон §3.2.1): у поля со списком её рисует
         # группа, у одинокого поля — класс set-framed. Порядок полей — как в
-        # `_positions`: адрес → токен → id → алиас.
+        # `_positions`: адрес → токен → прокси → id → алиас.
         icls = "onb-dyn set-framed"
         # Строка состояния пары — НАД парой полей (§4): она про оба сразу, и пометки у
         # каждого поля разнесли бы одно состояние по двум подписям.
@@ -1341,6 +1451,14 @@ class ModelEntryForm(Vertical):
         yield Static(
             self._noauth_text(), id="mef-noauth", classes=self._noauth_cls()
         )
+        yield Static(_PROXY_LABEL, classes=_CLS_ONB_HINT_ONB_DYN_SET_GROUP_GAP)
+        yield PasteInput(
+            value="",
+            placeholder=self._proxy_placeholder(),
+            id="mef-proxy",
+            classes=icls,
+        )
+        yield Static(_PROXY_HINT, classes=_CLS_ONB_HINT_ONB_DYN)
         yield Static(_MODEL_LABEL, classes=_CLS_ONB_HINT_ONB_DYN_SET_GROUP_GAP)
         # Поле id — со списком моделей (автоподгрузка при входе, Alt+↓ — перечитать),
         # значит внутри рамки-группы: рамка одна на поле и его список (спека §3.1).
@@ -1492,6 +1610,7 @@ class ModelEntryForm(Vertical):
         # (живой смок 2026-08-04 «Подключения»). Состояние пары считаем ПОСЛЕ него —
         # оно выводится из поля.
         write_field(self._url_input, self._url0)
+        write_field(self.query_one(_SEL_MEF_PROXY, Input), self._proxy0)
         self._sync_pair_state()
         self._focus_position()
         # Строка «Alt+↓ — перечитать список» — с ПЕРВОГО кадра (канон
@@ -1848,6 +1967,7 @@ class ModelEntryForm(Vertical):
         (форма показала бы «изменено» там, где менять нечего)."""
         write_field(self.query_one(_SEL_MEF_URL, Input), "")
         write_field(self.query_one(_SEL_MEF_TOKEN, Input), "")
+        write_field(self.query_one(_SEL_MEF_PROXY, Input), "")
         self._no_auth = False
         self._token_cleared = self._token_current is not None
         self.query_one(_SEL_MEF_NOAUTH, Static).update(self._noauth_text())
@@ -1936,7 +2056,7 @@ class ModelEntryForm(Vertical):
         не ушёл, виден по неизменному ``_list_gen``."""
         say = (lambda _text: None) if quiet else self._set_status
         try:
-            backend = (
+            backend = self._backend_for_request(
                 parse_model_backend_text(self._yaml_text("mef-backend")) or {}
             )
         except ValueError as exc:
@@ -2222,12 +2342,16 @@ class ModelEntryForm(Vertical):
             # работает, и молчать о нём нельзя.
             self._token_cleared = False
             self._sync_token_label()
-        if event.input.id in ("mef-url", "mef-token"):
-            # Печать в паре меняет её состояние: адрес — вход в «своё» и выход из него,
-            # набранный токен — вторая половина. Пересчитываем здесь же, как призрак
-            # алиаса в ветке поля id: своя правка — свой пересчёт.
+        if event.input.id in ("mef-url", "mef-token", "mef-proxy"):
+            # Печать в паре меняет её состояние: адрес и свой прокси — вход в «своё»
+            # и выход из него, набранный токен — вторая половина.
             self._sync_pair_state()
-        if event.input.id in ("mef-url", "mef-token", "mef-model"):
+        if event.input.id in (
+            "mef-url",
+            "mef-token",
+            "mef-model",
+            "mef-proxy",
+        ):
             self._invalidate_probe()
 
     def _invalidate_probe(self) -> None:
@@ -2253,7 +2377,7 @@ class ModelEntryForm(Vertical):
         own_url = self._url_value() or backend.get("completions_url")
         if own_url:
             return own_url
-        if backend.get("proxy"):
+        if self._effective_proxy(backend):
             return self._inherited_url()
         return "" if self.own_connection() else self._inherited_url()
 
@@ -2329,7 +2453,7 @@ class ModelEntryForm(Vertical):
         без канарейки, то есть врала ровно там, где канон 2026-08-17 научился
         молчать. Текст вердикта — общий `connection_line_text`."""
         try:
-            backend = (
+            backend = self._backend_for_request(
                 parse_model_backend_text(self._yaml_text("mef-backend")) or {}
             )
         except ValueError as exc:
@@ -2530,6 +2654,7 @@ class ModelEntryForm(Vertical):
             "main": self._yaml_text("mef-main"),
             "auxiliary": self._yaml_text("mef-auxiliary"),
             "backend": self._yaml_text("mef-backend"),
+            "proxy": self._field_value("mef-proxy"),
             "strip_think": self._strip_think,
         }
 
@@ -2730,6 +2855,10 @@ class ModelEntryForm(Vertical):
             backend = parse_model_backend_text(values["backend"])
         except ValueError as exc:
             return self._fail(f"backend: {exc}")
+        try:
+            backend = self._backend_with_proxy(backend)
+        except ValueError as exc:
+            return self._fail(str(exc))
         # §2: своё подключение задаётся ЦЕЛИКОМ — половину пары форма не сохраняет.
         # Иначе отказ пришёл бы от валидатора конфига, когда правка уже сделана.
         has_address, has_token = self._pair_parts()
@@ -2743,9 +2872,18 @@ class ModelEntryForm(Vertical):
                 return self._fail(
                     _PAIR_ENV_MISSING.format(names=", ".join(names))
                 )
-            return self._fail(
-                _PAIR_NEEDS_TOKEN if has_address else _PAIR_NEEDS_URL
+            proxy_only = (
+                has_address
+                and not self._url_value()
+                and not (backend or {}).get("completions_url")
             )
+            if proxy_only:
+                pair_error = _PAIR_PROXY_NEEDS_TOKEN
+            elif has_address:
+                pair_error = _PAIR_NEEDS_TOKEN
+            else:
+                pair_error = _PAIR_NEEDS_URL
+            return self._fail(pair_error)
         try:
             main = parse_completion_kwargs_text(values["main"])
         except ValueError as exc:
@@ -2791,7 +2929,13 @@ class ModelEntryForm(Vertical):
         self._clear_error()
         self._write_yaml("mef-main", main)
         self._write_yaml("mef-auxiliary", auxiliary)
-        self._write_yaml("mef-backend", backend)
+        # Прокси остаётся в поле карточки, не дублируется в YAML backend.
+        shown_backend = backend
+        if isinstance(backend, dict) and "proxy" in backend:
+            shown_backend = {
+                key: value for key, value in backend.items() if key != "proxy"
+            } or None
+        self._write_yaml("mef-backend", shown_backend)
         fields: dict = {}
         if values["model"]:
             fields["model"] = values["model"]

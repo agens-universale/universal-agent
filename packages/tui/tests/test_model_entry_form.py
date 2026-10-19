@@ -215,6 +215,7 @@ async def test_field_order_is_model_then_alias_then_thresholds():
             "mef-url",
             "mef-token",
             None,
+            "mef-proxy",
             "mef-model",
             "mef-alias",
             "mef-model-meta",
@@ -2947,9 +2948,7 @@ async def test_the_model_list_opens_when_only_the_bare_token_is_accepted():
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
         form.escape()
-        form.move(1)
-        form.move(1)
-        form.move(1)
+        _land(form, "mef-model")
         for _ in range(4):
             await pilot.pause()
         assert calls == ["sk-live"], calls
@@ -2999,8 +2998,7 @@ async def test_changed_credentials_retry_the_autoload(tmp_path):
         form.move(1)  # адрес → токен
         form.query_one("#mef-token", Input).value = "sk-NEW"
         await pilot.pause()
-        form.move(1)
-        form.move(1)  # токен → галка → id модели
+        _land(form, "mef-model")
         for _ in range(3):
             await pilot.pause()
         assert len(calls) == 2, "изменённый токен не перечитал список"
@@ -3887,9 +3885,7 @@ async def test_typing_in_the_id_field_reopens_the_fetched_list_with_a_filter():
     )
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
-        form.move(1)
-        form.move(1)
-        form.move(1)  # адрес -> токен -> галка -> id
+        _land(form, "mef-model")
         await pilot.pause()
         assert form._positions[form._idx] == "mef-model"
         assert form._list.is_open  # автоподгрузка раскрыла
@@ -4065,6 +4061,101 @@ async def test_backend_field_round_trip_and_hint_lists_overlay_keys():
         area.load_text("")
         ok, _, fields = form.submit()
         assert ok is True and fields["backend"] is None
+
+
+async def test_proxy_field_shows_the_endpoint_proxy_and_writes_it_back():
+    """Свой прокси эндпоинта — поле карточки, не строка в YAML backend.
+    Не тронутое поле сохраняет ключ; стёртое — снимает только его."""
+    from textual.widgets import TextArea
+
+    form = _paired_form(
+        initial={
+            "backend": {
+                "proxy": "http://own-proxy:8080",
+                "request_timeout_sec": 90,
+            }
+        }
+    )
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        field = form.query_one("#mef-proxy", Input)
+        area = form.query_one("#mef-backend", TextArea)
+        assert field.value == "http://own-proxy:8080"
+        assert "proxy" not in area.text
+        assert "request_timeout_sec: 90" in area.text
+        assert form.is_dirty() is False
+        text = " ".join(str(w.render()) for w in form.query(Static))
+        assert "Прокси (необязательно)" in text
+        ok, _alias, fields = form.submit()
+        assert ok is True
+        assert fields["backend"]["proxy"] == "http://own-proxy:8080"
+        assert fields["backend"]["request_timeout_sec"] == 90
+
+        field.value = ""
+        await pilot.pause()
+        ok, _alias, fields = form.submit()
+        assert ok is True
+        assert "proxy" not in fields["backend"]
+        assert fields["backend"]["request_timeout_sec"] == 90
+
+
+async def test_typed_proxy_is_saved_for_this_endpoint():
+    form = _paired_form()
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        form.query_one("#mef-proxy", Input).value = "socks5h://proxy:1080"
+        await pilot.pause()
+        ok, _alias, fields = form.submit()
+        assert ok is True
+        assert fields["backend"]["proxy"] == "socks5h://proxy:1080"
+
+
+async def test_proxy_without_a_token_is_refused():
+    """Свой прокси — своё подключение: общий токен через него не уезжает."""
+    form = _form(
+        initial={"alias": "flash", "model": "google/gemini-2.5-flash"},
+        existing_aliases={"flash"},
+        effective_url="https://openrouter.ai/api/v1/chat/completions",
+        effective_auth="Bearer sk-COMMON",
+    )
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        form.query_one("#mef-proxy", Input).value = "http://proxy:8080"
+        await pilot.pause()
+        ok, _alias, fields = form.submit()
+        assert ok is False and fields is None
+        assert "прокси" in str(form.query_one("#mef-error", Static).render())
+
+
+async def test_empty_proxy_field_names_the_inherited_proxy():
+    from gc_core.onboarding import display_secret
+
+    form = _form(
+        initial={"alias": "flash", "model": "m"},
+        existing_aliases={"flash"},
+        config_proxy="http://corp-proxy:8080",
+    )
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        assert (
+            form.query_one("#mef-proxy", Input).placeholder
+            == f"наследуется: {display_secret('http://corp-proxy:8080')}"
+        )
+
+
+async def test_ctrl_u_clears_the_endpoint_proxy_with_the_pair():
+    form = _paired_form(
+        initial={"backend": {"proxy": "http://own-proxy:8080"}}
+    )
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        _land(form, "mef-proxy")
+        assert form.clear_token() is True
+        assert form.query_one("#mef-proxy", Input).value == ""
+        ok, _alias, fields = form.submit()
+        assert ok is True
+        assert fields["url"] is None
+        assert fields["backend"] is None
 
 
 @pytest.mark.parametrize("field", ["main", "auxiliary", "backend"])
