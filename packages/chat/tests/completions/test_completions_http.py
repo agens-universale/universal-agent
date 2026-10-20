@@ -161,3 +161,86 @@ def test_models_and_missing_user(tmp_path):
     )
     assert rejected.status_code == 400
     assert rejected.json()["error"]["code"] == "invalid_request"
+
+
+class _FinishAgent(_Agent):
+    def __init__(self, threads: str) -> None:
+        super().__init__(threads)
+        self.executor.last_closing_reply = ""
+        self.chunks: list[tuple[str, str]] = []
+
+    async def stream(self, prompt, thread_id=None, system=None):
+        for kind, text in self.chunks:
+            yield (kind, text)
+
+
+def _finish_app(tmp_path, agent_class=_FinishAgent):
+    threads = tmp_path / "threads"
+    threads.mkdir()
+    agent = agent_class(str(threads))
+
+    async def factory(settings, **kwargs):
+        del settings, kwargs
+        return agent
+
+    facade = CompletionsFacade(
+        settings=make_settings(
+            **{"agent.model": "agent-model"},
+            **{"paths.threads_data_path": str(threads)},
+        ),
+        agent_factory=factory,
+    )
+    return TestClient(create_app(facade), base_url=LOOPBACK), agent
+
+
+def _finish_args(report: str) -> str:
+    return json.dumps(
+        {
+            "solution_type": "direct_answer",
+            "task": "t",
+            "task_report": report,
+            "handoff": "{}",
+        },
+        ensure_ascii=False,
+    )
+
+
+def _ask(client) -> str:
+    response = client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "GC-UA",
+            "messages": [{"role": "user", "content": "вопрос"}],
+        },
+    )
+    return response.json()["choices"][0]["message"]["content"]
+
+
+def test_final_content_keeps_reply_and_record(tmp_path):
+    client, agent = _finish_app(tmp_path)
+    agent.chunks = [("think", "мысль"), ("answer", "Пока!")]
+    agent.executor.last_closing_reply = "Пока!"
+    agent.last = _finish_args("Прочитал README.")
+    content = _ask(client)
+    assert content == (
+        "<think>\nмысль\n</think>\nПока!\n\n* **итог:**\n\n  Прочитал README."
+    )
+
+
+def test_report_only_turn_unchanged(tmp_path):
+    client, agent = _finish_app(tmp_path)
+    agent.chunks = [("think", "мысль")]
+    agent.last = _finish_args("Прочитал README.")
+    content = _ask(client)
+    assert content == "<think>\nмысль\n</think>\nПрочитал README."
+
+
+def test_final_content_after_reset_keeps_closing_reply(tmp_path):
+    client, agent = _finish_app(tmp_path)
+    agent.chunks = [("answer", "до"), ("reset", ""), ("answer", "Пока!")]
+    agent.executor.last_closing_reply = "Пока!"
+    agent.last = _finish_args("Прочитал README.")
+    content = _ask(client)
+    assert content == (
+        "<think>\nдо\n</think>\nПока!\n\n* **итог:**\n\n  Прочитал README."
+    )

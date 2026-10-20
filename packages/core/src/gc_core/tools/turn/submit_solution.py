@@ -32,11 +32,6 @@ class TurnFinishView:
     report: str
     comment: str
 
-    def render(self) -> str:
-        if self.comment == "":
-            return self.report
-        return f"{self.report}\n\n* заметка: {self.comment}"
-
 
 def _json_object(value: Any) -> dict | None:
     if isinstance(value, dict):
@@ -247,25 +242,6 @@ Validation failure return format: {"tool":"turn_finish","ok":false,"status":"rej
             report.strip() if isinstance(report, str) else "",
             comment.strip() if isinstance(comment, str) else "",
         )
-
-    @classmethod
-    def present_result(cls, result: Any, *, shown: str = "") -> Any:
-        """Текст хода для фасада.
-
-        Аргументы ``turn_finish`` становятся отчётом и строкой заметки.
-        Проза и прочие значения возвращаются как есть. Если тот же отчёт
-        уже есть в ``shown``, возвращается ``shown``: заметка повторно
-        не дописывается. Пустой отчёт — пустая строка, сырой JSON и
-        вердикт судьи наружу не идут.
-        """
-        view = cls.finish_view(result)
-        if view is None:
-            return result
-        if view.report == "":
-            return ""
-        if shown.strip() == view.report:
-            return shown
-        return view.render()
 
     async def acall(
         self,
