@@ -9,8 +9,8 @@ from gc_testkit.tui_support import tui_settings
 import json
 
 import pytest
+from gc_tui.services.footer_slot import RETENTION_DETAIL_HINT
 from gc_tui.services.trace_retention import (
-    RETENTION_DETAIL_HINT,
     events_leaving_window,
     filter_sidecar_to_parents,
     message_ids_in_retention_window,

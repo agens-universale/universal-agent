@@ -22,7 +22,6 @@ if TYPE_CHECKING:
 
 from gc_core.agent_edits.ctx import section_limit
 from gc_core.attachments.model import Attachment, attachments_of
-from gc_core.attachments.normalize import REASON_NOT_AN_IMAGE, REASON_TOO_LARGE
 from gc_core.attachments.numbering import read_image_seq
 from gc_core.config_modules.agent_edits import (
     DEFAULT_REPLAY_EXPANDED_TURNS,
@@ -60,6 +59,20 @@ from gc_tui.services import image_hints, image_paste, os_ops
 from gc_tui.services.clipboard_ops import copy_out
 from gc_tui.services.context_meter import render_context_meter
 from gc_tui.services.export import export_thread
+from gc_tui.services.footer_slot import (
+    HINT_TEXT,
+    IMAGE_OPEN_TIP,
+    IMAGE_PASTE_BUSY_HINT,
+    IMAGE_PASTE_OWN_HINTS,
+    IMAGE_PASTE_REFUSALS,
+    IMAGE_PASTE_WAIT_HINT,
+    IMAGE_REFUSAL_EMPTY_CLIPBOARD,
+    IMAGES_WITH_COMMAND_REFUSAL,
+    NESTED_NO_DETAIL,
+    PASTE_HINT_TEXT,
+    RETENTION_DETAIL_HINT,
+    toggle_info_line,
+)
 from gc_tui.services.git_info import current_branch
 from gc_tui.services.image_chips import strip_image_chips
 from gc_tui.services.image_open import open_image
@@ -119,7 +132,6 @@ from gc_tui.services.trace_render import (
     build_compaction_marker_event,
 )
 from gc_tui.services.trace_retention import (
-    RETENTION_DETAIL_HINT,
     apply_payload_retention,
     events_leaving_window,
     filter_sidecar_to_parents,
@@ -308,45 +320,16 @@ _PLAN_CMD_ENTERED = (
 _PLAN_CMD_NO_PLAN = "плана пока нет — опишите задачу, и агент предложит план"
 _PLAN_CMD_NO_PLAN_BUSY = "плана пока нет"
 _PLAN_CLEAR_HINT = "/plan clear — убрать план из сессии"
-_HINT_TEXT = {
-    "clear": "Esc ещё раз, чтобы очистить",
-    "stop": "Esc ещё раз, чтобы остановить",
-    "paste": "Esc ещё раз, чтобы отменить вставку",
-}
-_PASTE_HINT_TEXT = "вставьте ещё раз, чтобы развернуть"
-# Отказы картинок, которые ставит отправка и Ctrl+клик (визуальный контракт
-# картинок §2–§3); отказы вставки — рядом, у источников вставки.
-_IMAGES_WITH_COMMAND_REFUSAL = (
-    "✗ изображения нельзя отправить вместе с командой"
-)
 # Серая строка «изображение не просмотрено» — идиома маркера [skill] (дизайн §10).
 _IMAGE_NOTE_PREFIX = "[изображение] "
 # Вставка изображения (спека §12, визуальный контракт §2). «Вставка…» держится до
 # результата: погасшая поверх неё подсказка и её собственный таймер возвращают её же
 # (`_clear_footer_hint`), снимает её конец вставки; саму вставку ограничивает
 # `image_paste.PASTE_TIMEOUT_SECONDS`.
-_IMAGE_PASTE_BUSY_HINT = "Вставка…"
-_IMAGE_PASTE_WAIT_HINT = "дождитесь окончания вставки"
 _IMAGE_PASTE_HINT_SECONDS = 30.0
-_IMAGE_REFUSAL_EMPTY_CLIPBOARD = "✗ в буфере обмена нет изображения"
-# Подсказки самой вставки: их (и только их) снимает конец вставки.
-_IMAGE_PASTE_OWN_HINTS = (
-    _IMAGE_PASTE_BUSY_HINT,
-    _IMAGE_PASTE_WAIT_HINT,
-    _HINT_TEXT["paste"],
-)
 # «Изображения нет» у вставки: текст вместо картинки (путь, текст ОС) или свой буфер
 # приложения; Alt+V читает текст ОС вне UI-потока — корутиной.
 _OnMiss = Callable[[], Optional[Awaitable[None]]]
-# Отказы вставки по причине `image_paste.PasteRefusal`; `{n}` — `images.max_per_message`.
-_IMAGE_PASTE_REFUSALS = {
-    image_paste.REFUSE_LIMIT: "✗ не больше {n} изображений в одном сообщении",
-    REASON_NOT_AN_IMAGE: "✗ это не изображение",
-    REASON_TOO_LARGE: "✗ изображение слишком большое",
-    image_paste.REFUSE_NO_TOOL: "✗ для вставки изображений нужен wl-paste или xclip",
-    image_paste.REFUSE_SAVE_FAILED: "✗ не удалось сохранить изображение",
-    image_paste.REFUSE_TIMEOUT: "✗ вставка не удалась: истекло время ожидания",
-}
 # Модель и backend-режим показываются в шапке экрана (_compose_header_segments).
 
 # Лесенка усечения имени профиля в футере (Task 9, docs
@@ -1675,7 +1658,7 @@ class TraceScreen(Screen):
     def _show_esc_hint(self, kind: str) -> None:
         """Esc-confirm hint: запоминает kind (для 2-го Esc) + показывает подсказку."""
         self._esc_confirm_kind = kind
-        self._show_footer_hint(_HINT_TEXT[kind])
+        self._show_footer_hint(HINT_TEXT[kind])
 
     def _reset_footer_hint_state(self) -> None:
         """Снять hint-state без перерисовки — для вызова ИЗ `_refresh_footer`
@@ -1697,7 +1680,7 @@ class TraceScreen(Screen):
         self._reset_footer_hint_state()
         if self._image_paste_busy:
             self._show_footer_hint(
-                _IMAGE_PASTE_BUSY_HINT, seconds=_IMAGE_PASTE_HINT_SECONDS
+                IMAGE_PASTE_BUSY_HINT, seconds=_IMAGE_PASTE_HINT_SECONDS
             )
             return
         self._refresh_footer()
@@ -6236,7 +6219,7 @@ class TraceScreen(Screen):
         # Идёт вставка изображения: Enter не отправляет — сообщение ушло бы без
         # картинки; текст остаётся в поле (контракт §2).
         if self._image_paste_busy:
-            self._show_footer_hint(_IMAGE_PASTE_WAIT_HINT)
+            self._show_footer_hint(IMAGE_PASTE_WAIT_HINT)
             return
 
         # Картинки с командой не отправляются (визуальный контракт картинок §2):
@@ -6244,7 +6227,7 @@ class TraceScreen(Screen):
         # плашками должно остаться в поле.
         images = event.attachments
         if images and self._is_command_input(event.value.strip()):
-            self._show_footer_refusal(_IMAGES_WITH_COMMAND_REFUSAL)
+            self._show_footer_refusal(IMAGES_WITH_COMMAND_REFUSAL)
             return
 
         # Skill picker открыт → выполнить выбранный skill (или ввод как есть)
@@ -6520,7 +6503,7 @@ class TraceScreen(Screen):
     def on_command_text_area_paste_collapsed(
         self, event: CommandTextArea.PasteCollapsed
     ) -> None:
-        self._show_footer_hint(_PASTE_HINT_TEXT, seconds=5.0)
+        self._show_footer_hint(PASTE_HINT_TEXT, seconds=5.0)
 
     def on_command_text_area_image_paste_requested(
         self, event: CommandTextArea.ImagePasteRequested
@@ -6554,11 +6537,11 @@ class TraceScreen(Screen):
                 # проскочат).
                 self._image_paste_queue.append((path, on_miss, files_only))
             else:
-                self._show_footer_hint(_IMAGE_PASTE_WAIT_HINT)
+                self._show_footer_hint(IMAGE_PASTE_WAIT_HINT)
             return
         self._image_paste_busy = True
         self._show_footer_hint(
-            _IMAGE_PASTE_BUSY_HINT, seconds=_IMAGE_PASTE_HINT_SECONDS
+            IMAGE_PASTE_BUSY_HINT, seconds=_IMAGE_PASTE_HINT_SECONDS
         )
         self._image_paste_worker = self.run_worker(
             self._image_paste(
@@ -6643,7 +6626,7 @@ class TraceScreen(Screen):
                     if inspect.isawaitable(missed):
                         await missed
                 self._show_footer_refusal(
-                    _IMAGE_PASTE_REFUSALS[outcome.reason].format(n=limit)
+                    IMAGE_PASTE_REFUSALS[outcome.reason].format(n=limit)
                 )
             elif outcome:
                 # Номер — после чтения: пока оно шло, могла смениться сессия.
@@ -6655,7 +6638,7 @@ class TraceScreen(Screen):
                     )
                 return True
             elif on_miss is None:
-                self._show_footer_refusal(_IMAGE_REFUSAL_EMPTY_CLIPBOARD)
+                self._show_footer_refusal(IMAGE_REFUSAL_EMPTY_CLIPBOARD)
             else:
                 missed = on_miss()
                 if inspect.isawaitable(missed):
@@ -6671,7 +6654,7 @@ class TraceScreen(Screen):
         self._clipboard_tip_stamp = self._clipboard_stamp
         if not self._image_open_tip_shown and self._footer_tip_fits():
             self._image_open_tip_shown = True
-            self._show_footer_tip(image_hints.IMAGE_OPEN_TIP)
+            self._show_footer_tip(IMAGE_OPEN_TIP)
 
     def _on_terminal_focus(self, focused: bool) -> None:
         if focused:
@@ -6727,7 +6710,7 @@ class TraceScreen(Screen):
         своему канону."""
         if (
             self._footer_hint_active
-            and self._footer_hint_text in _IMAGE_PASTE_OWN_HINTS
+            and self._footer_hint_text in IMAGE_PASTE_OWN_HINTS
         ):
             self._clear_footer_hint()
 
@@ -6738,7 +6721,7 @@ class TraceScreen(Screen):
         if text:
             inp._handle_paste(text)
         else:
-            self._show_footer_refusal(_IMAGE_REFUSAL_EMPTY_CLIPBOARD)
+            self._show_footer_refusal(IMAGE_REFUSAL_EMPTY_CLIPBOARD)
 
     async def _consume_pending_prefix(self, text: str) -> tuple[str, dict]:
         """Встроить отложенный skill в сообщение; вернуть (query, meta-patch).
@@ -7823,8 +7806,7 @@ class TraceScreen(Screen):
         стрелки палитры — у toggle-команд нет args-схемы, поэтому пробел после
         имени закрывает палитру и Enter доходит сюда как обычная команда):
         ничего не меняет (иначе набор команды был бы неочевидным side-effect'ом) —
-        показывает текущее значение и как переключать (←/→ и Enter в открытой
-        палитре). Набранное значение, которого тоггл сейчас не предлагает
+        показывает текущее значение и как менять (←/→ в открытой палитре). Набранное значение, которого тоггл сейчас не предлагает
         (`/level auto` при недоступном автовыборе), получает ответ с причиной, а не
         молчаливое игнорирование."""
         unavailable = (
@@ -7835,10 +7817,8 @@ class TraceScreen(Screen):
                 f"/{name} {arg} — {unavailable}", seconds=5.0
             )
             return
-        current = toggle_state(self.app, name)
         self._show_footer_hint(
-            f"/{name} — текущее значение: {current} · для переключения: ←/→ и Enter в меню команд",
-            seconds=5.0,
+            toggle_info_line(name, toggle_state(self.app, name)), seconds=5.0
         )
 
     def _open_event_by_no(self, no: int) -> None:
@@ -7937,9 +7917,7 @@ class TraceScreen(Screen):
             )
         if call_ev is None:
             if message.call_id and message.call_id in self._nested_tool_rows:
-                self._show_footer_hint(
-                    "нет args/output для этого nested-тула", seconds=3.0
-                )
+                self._show_footer_hint(NESTED_NO_DETAIL, seconds=3.0)
             return
         self.app.push_screen(
             ToolCallDetailScreen(

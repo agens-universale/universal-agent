@@ -538,7 +538,7 @@ async def test_typed_gate_command_shows_info_without_changing_value(tmp_path):
         )
         footer = pilot.app.query_one("#footer-left")
         footer_text = str(footer.render())
-        assert "/gate" in footer_text and "текущее значение: on" in footer_text
+        assert "/gate: on" in footer_text
         assert "←/→" in footer_text
 
 
@@ -567,10 +567,7 @@ async def test_typed_answers_command_shows_info_without_changing_value(
         )
         footer = pilot.app.query_one("#footer-left")
         footer_text = str(footer.render())
-        assert (
-            "/answers" in footer_text
-            and "текущее значение: judge" in footer_text
-        )
+        assert "/answers: judge" in footer_text
         assert "←/→" in footer_text
 
 
@@ -596,9 +593,7 @@ async def test_typed_rigor_command_shows_info_without_changing_value(tmp_path):
         assert cfg_file.read_text(encoding="utf-8") == original
         footer = pilot.app.query_one("#footer-left")
         footer_text = str(footer.render())
-        assert (
-            "/rigor" in footer_text and "текущее значение: high" in footer_text
-        )
+        assert "/rigor: high" in footer_text
         assert "←/→" in footer_text
 
 
