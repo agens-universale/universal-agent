@@ -178,9 +178,11 @@ def test_late_reply_is_flushed_from_input(pty_pair, monkeypatch):
     master, slave = pty_pair
     _emulate(master, b"")
     real_select = select.select
+    fired = []
 
     def select_then_late_reply(rlist, wlist, xlist, timeout):
         ready = real_select(rlist, wlist, xlist, timeout)
+        fired.append(ready)
         if not ready[0]:  # проба дождалась таймаута — тут приходит ответ
             os.write(master, TERMINAL_APP + DA1_TERMINAL_APP)
             assert real_select([slave], [], [], 2.0)[0] == [slave]
@@ -193,4 +195,68 @@ def test_late_reply_is_flushed_from_input(pty_pair, monkeypatch):
     rgb = query_background(timeout=0.1, stdin=_tty(slave), stdout=_tty(slave))
 
     assert rgb is None
+    assert any(not ready[0] for ready in fired)
     assert real_select([slave], [], [], 0.05)[0] == []
+
+
+def test_mode_restored_after_error_in_exchange(pty_pair, monkeypatch):
+    import termios
+
+    _, slave = pty_pair
+    saved = termios.tcgetattr(slave)
+    calls = []
+    real_tcsetattr = termios.tcsetattr
+
+    def spy(fd, when, attrs):
+        calls.append((when, attrs))
+        real_tcsetattr(fd, when, attrs)
+
+    def broken_write(fd, data):
+        raise OSError("write failed")
+
+    monkeypatch.setattr(termios, "tcsetattr", spy)
+    monkeypatch.setattr(terminal_caps.os, "write", broken_write)
+
+    rgb = query_background(stdin=_tty(slave), stdout=_tty(slave))
+
+    assert rgb is None
+    assert calls[-1] == (termios.TCSAFLUSH, saved)
+
+
+def test_restore_failure_does_not_raise(pty_pair, monkeypatch):
+    import termios
+
+    master, slave = pty_pair
+    _emulate(master, TERMINAL_APP + DA1_TERMINAL_APP)
+    real_tcsetattr = termios.tcsetattr
+
+    def failing_restore(fd, when, attrs):
+        if when == termios.TCSAFLUSH:
+            raise termios.error(5, "Input/output error")
+        real_tcsetattr(fd, when, attrs)
+
+    monkeypatch.setattr(termios, "tcsetattr", failing_restore)
+
+    rgb = query_background(timeout=2.0, stdin=_tty(slave), stdout=_tty(slave))
+
+    assert rgb == (0x21, 0x27, 0x33)
+
+
+def test_reply_split_across_reads(pty_pair):
+    master, slave = pty_pair
+    parts = [TERMINAL_APP[:9], TERMINAL_APP[9:] + DA1_TERMINAL_APP[:3]]
+    parts.append(DA1_TERMINAL_APP[3:])
+
+    def run() -> None:
+        seen = b""
+        while b"\x1b[c" not in seen:
+            seen += os.read(master, 1024)
+        for part in parts:
+            os.write(master, part)
+            time.sleep(0.05)
+
+    threading.Thread(target=run, daemon=True).start()
+
+    rgb = query_background(timeout=2.0, stdin=_tty(slave), stdout=_tty(slave))
+
+    assert rgb == (0x21, 0x27, 0x33)
