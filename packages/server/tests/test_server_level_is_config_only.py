@@ -1,6 +1,8 @@
 """Уровень модели на сервере — только из конфига (`agent_overrides`): поле
 `level` в теле вебхука — часть сообщения модели, а не настройка."""
 
+from types import SimpleNamespace
+
 from fastapi.testclient import TestClient
 from gc_core.settings import settings_of
 from gc_server.webhook import surface as webhook_module
@@ -10,6 +12,7 @@ from server_harness import make_webhook
 
 def test_level_in_the_request_body_is_not_a_level_input(monkeypatch, tmp_path):
     seen = {}
+    ctx = SimpleNamespace()
     surface = make_webhook(
         tmp_path,
         **{
@@ -23,7 +26,7 @@ def test_level_in_the_request_body_is_not_a_level_input(monkeypatch, tmp_path):
     monkeypatch.setattr(
         webhook_module,
         "acreate_run_context",
-        as_coro(lambda cfg, **kw: seen.setdefault("cfg", cfg)),
+        as_coro(lambda cfg, **kw: seen.setdefault("cfg", cfg) and ctx),
     )
     monkeypatch.setattr(webhook_module, "build_auth_connector", lambda c: None)
     monkeypatch.setattr(surface.registry, "astart", as_coro(lambda **kw: True))

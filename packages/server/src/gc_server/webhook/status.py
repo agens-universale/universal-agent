@@ -17,7 +17,6 @@ from gc_core.threads.facade import Threads
 from gc_core.threads.models import ThreadKey, ThreadRecord
 
 FRONTEND = "webhook"
-_FIELDS = ("started_at", "finished_at", "result", "error", "run_id")
 
 
 async def aset_status(threads: Threads, key: ThreadKey, **fields: Any) -> None:
@@ -52,14 +51,6 @@ def status_body(status: dict, record: ThreadRecord, base: dict) -> dict:
     if status["status"] == "failed":
         body["error"] = status.get("error")
     return body
-
-
-def restorable(status: dict | None) -> dict:
-    """Статус, который вернуть, если наш прогон тред не взял: прежний
-    целиком (поля, которых в нём нет, — пустые)."""
-    if status is None:
-        return {}
-    return {name: status.get(name) for name in ("status", *_FIELDS)}
 
 
 def _last_activity(status: dict, record: ThreadRecord) -> Any:

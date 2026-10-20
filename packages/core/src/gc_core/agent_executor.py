@@ -351,6 +351,27 @@ def _take_inbox_marks(messages: list[dict], state: Any) -> list[dict]:
     return out
 
 
+async def _amark_turn(
+    ctx: Any, thread_session: Any, *, running: bool, logger: Any
+) -> None:
+    """Отметка хода в треде (для восстановления после падения процесса).
+    Под Temporal не ставится: там ход защищён историей workflow. Сбой —
+    предупреждение: ход от отметки не зависит."""
+    if thread_session is None or getattr(ctx, "durable_execution", False):
+        return
+    mark = getattr(thread_session.port, "amark_turn", None)
+    if mark is None:
+        return
+    try:
+        await mark(
+            thread_session.system_id, thread_session.thread_id, running=running
+        )
+    except Exception:
+        (logger or logging.getLogger(__name__)).warning(
+            "thread turn mark failed", exc_info=True
+        )
+
+
 def _require_plan_execution_mode(mode: str) -> str:
     """План исполняется только в режиме исполнения (edit, auto, manual).
 
@@ -548,6 +569,7 @@ class AgentExecutor:
             # до любой работы, а прочитанное не устареет под чужой записью.
             claim=True,
         )
+        await self._aon_thread_claimed(thread_session, logger)
         if logger is not None:
             # Единственная связка «этот лог-файл ↔ этот тред»: на момент
             # создания логгера тред ещё не разрешён, поэтому в agent_start
@@ -586,6 +608,22 @@ class AgentExecutor:
             thread_id=thread_session.thread_id,
         )
         return thread_session, thread_shared, previous_response_id, system_id
+
+    async def _aon_thread_claimed(self, thread_session, logger) -> None:
+        """Тред взят: отметить ход и сказать фронтенду (статус задачи
+        вебхука пишет только взявший тред ход). Сбой хука — предупреждение."""
+        await _amark_turn(
+            self._ctx, thread_session, running=True, logger=logger
+        )
+        hook = getattr(self._ctx, "on_thread_claimed", None)
+        if hook is None:
+            return
+        try:
+            await hook(thread_session.system_id, thread_session.thread_id)
+        except Exception:
+            (logger or logging.getLogger(__name__)).warning(
+                "on_thread_claimed hook failed", exc_info=True
+            )
 
     async def _amcp_snapshot(
         self, thread_session, thread_id, system_id: str
@@ -1176,6 +1214,9 @@ class AgentExecutor:
         self._accounting_closed = True
         await self._aexport_plan_file(state, logger)
         # Последняя запись хода — тред свободен для другого инстанса.
+        await _amark_turn(
+            self._ctx, self._thread_session, running=False, logger=logger
+        )
         await _arelease_lease(self._thread_session, logger)
         try:
             baseline = UsageAccount.from_meta(
@@ -1376,9 +1417,18 @@ class AgentExecutor:
         )
         try:
             return await self._arun_on_thread(opened, request)
+        except Exception:
+            # Отказ хода — не падение процесса: восстанавливать нечего.
+            await _amark_turn(
+                self._ctx, opened[0], running=False, logger=logger
+            )
+            await _arelease_lease(opened[0], logger)
+            raise
         except BaseException:
             # Тред взят в начале хода; ход, не дошедший до учёта, не держит
-            # его до срока аренды (повторное отпускание безвредно).
+            # его до срока аренды (повторное отпускание безвредно). Снятая
+            # задача (остановка сервера) оставляет отметку хода: его
+            # продолжит восстановление после перезапуска.
             await _arelease_lease(opened[0], logger)
             raise
 

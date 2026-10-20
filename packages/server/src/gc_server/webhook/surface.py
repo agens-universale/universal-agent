@@ -10,9 +10,11 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import logging
 import time
+import uuid
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any, Dict
 
@@ -136,10 +138,15 @@ class WebhookSurface:
         self.settings = webhook_settings(runtime)
         self.registry = AgentRunRegistry()
         self._pruner: asyncio.Task | None = None
+        self.recovery_task: asyncio.Task | None = None
 
     # --- жизненный цикл ----------------------------------------------------
 
     async def astart(self) -> None:
+        if self.config.recovery.enabled:
+            from gc_server.webhook.recovery import arecover_forever
+
+            self.recovery_task = asyncio.create_task(arecover_forever(self))
         cleanup = self.config.threads_cleanup
         if not cleanup.enabled:
             return
@@ -169,10 +176,11 @@ class WebhookSurface:
         tasks = self.registry.cancel_all()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
-        pruner, self._pruner = self._pruner, None
-        if pruner is not None:
-            pruner.cancel()
-            await asyncio.gather(pruner, return_exceptions=True)
+        background = [t for t in (self._pruner, self.recovery_task) if t]
+        self._pruner = self.recovery_task = None
+        for task in background:
+            task.cancel()
+        await asyncio.gather(*background, return_exceptions=True)
 
     async def aprune_once(self, *, older_than: timedelta) -> int:
         """Удалить треды вебхука, не менявшиеся дольше ``older_than``;
@@ -247,6 +255,19 @@ class WebhookSurface:
             ThreadKey(system=sys_norm, thread=task_norm)
         )
         status = task_status.status_of(record)
+        run = self.registry.run_of(system=sys_norm, task_id=task_norm)
+        if run is not None and (status or {}).get("run_id") != run.notes.get(
+            "run_id"
+        ):
+            # Свой прогон ещё не взял тред (статус пишет взявший): в
+            # хранилище — прошлый итог или ничего.
+            return {
+                "status": "running",
+                **base,
+                "thread_id": task_norm,
+                "started_at": run.started_at,
+                "last_activity_at": run.started_at,
+            }
         if status is None:
             raise HTTPException(
                 status_code=404, detail={"status": "not_found"}
@@ -284,6 +305,25 @@ class WebhookSurface:
             return False
         return self.registry.reserve(system=system, task_id=task_id)
 
+    async def astart_recovered(self, system: str, task_id: str) -> bool:
+        """Продолжить бесхозную задачу (восстановление после падения):
+        ``False`` — её уже ведёт или строит этот процесс, или сборка упала."""
+        if not self.registry.reserve(system=system, task_id=task_id):
+            return False
+        try:
+            await self._start_run(system, task_id, None)
+        except Exception:
+            logger.warning(
+                "recovery: прогон %s/%s не собран",
+                system,
+                task_id,
+                exc_info=True,
+            )
+            return False
+        finally:
+            self.registry.release_reservation(system=system, task_id=task_id)
+        return True
+
     async def _start_run(
         self, system: str, task_id: str, trace_id: str | None
     ) -> None:
@@ -303,45 +343,46 @@ class WebhookSurface:
             force_legacy=force_legacy,
             **self.runtime.store_kwargs(),
         )
+        run_id = f"{instance_id()}:{uuid.uuid4().hex[:12]}"
+        started_at = time.time()
+        # Статус «running» пишет только ход, взявший тред: прогон, чей тред
+        # перехватил другой инстанс, статус не трогает.
+        ctx.on_thread_claimed = functools.partial(
+            self._amark_running, run_id, started_at
+        )
         await self.registry.astart(
             system=system,
             task_id=task_id,
             executor=AgentExecutor(ctx),
             ctx=ctx,
-            on_start=self._amark_running,
             on_finish=self._amark_finished,
+            notes={"run_id": run_id},
         )
 
-    async def _amark_running(self, run: ActiveRun) -> None:
-        key = ThreadKey(system=run.system, thread=run.task_id)
-        threads = self.threads()
-        run.notes["previous"] = task_status.status_of(await threads.get(key))
-        run.notes["run_id"] = run_id = f"{instance_id()}:{id(run):x}"
+    async def _amark_running(
+        self, run_id: str, started_at: float, system: str, thread_id: str
+    ) -> None:
         await task_status.aset_status(
-            threads,
-            key,
+            self.threads(),
+            ThreadKey(system=system, thread=thread_id),
             status="running",
             run_id=run_id,
             instance=instance_id(),
-            started_at=run.started_at,
+            started_at=started_at,
             finished_at=None,
             result=None,
             error=None,
         )
 
     async def _amark_finished(self, run: ActiveRun) -> None:
-        """Итог прогона — в статус задачи, если статус всё ещё наш: тред,
-        перехваченный другим инстансом, ведёт его статус он."""
+        """Итог прогона — в статус задачи, если статус всё ещё его: тред
+        мог уже взять следующий прогон (на любом инстансе)."""
+        if run.ending == "handed_off" and run.result is None:
+            return  # тред так и не взяли — статус ведёт взявший
         key = ThreadKey(system=run.system, thread=run.task_id)
         threads = self.threads()
         current = task_status.status_of(await threads.get(key))
         if current is None or current.get("run_id") != run.notes["run_id"]:
-            return
-        if run.ending == "handed_off" and run.result is None:
-            # Наш прогон тред так и не взял: вернуть прежний статус.
-            await task_status.aset_status(
-                threads, key, **task_status.restorable(run.notes["previous"])
-            )
             return
         await task_status.aset_status(threads, key, **_final_fields(run))
 

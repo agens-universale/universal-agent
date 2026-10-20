@@ -100,3 +100,90 @@ async def test_facade_write_does_not_block_the_next_run(monkeypatch, tmp_path):
     )
     await ex.arun(["сделай"], thread_id=KEY.thread, system=KEY.system)
     assert len(calls) == 1
+
+
+async def _turn(tmp_path):
+    record = await FileThreadStore(tmp_path).get_thread(KEY)
+    return record.runtime.turn if record else None
+
+
+async def test_turn_is_marked_running_while_the_run_goes(
+    monkeypatch, tmp_path
+):
+    """Отметка хода — для восстановления после падения: пока ход идёт,
+    ``runtime.turn == "running"``; после штатного конца отметки нет (meta
+    треда — как раньше)."""
+    seen: list = []
+    ex = await _executor(monkeypatch, tmp_path, seen)
+    import gc_core.agent_executor as ae
+
+    real_loop = ae.arun_agent
+
+    async def peek(messages, state, ctx, **kw):
+        seen.append(await _turn(tmp_path))
+        return await real_loop(messages, state, ctx, **kw)
+
+    monkeypatch.setattr(ae, "arun_agent", peek)
+    await ex.arun(["сделай"], thread_id=KEY.thread, system=KEY.system)
+    assert seen[0] == "running"
+    assert await _turn(tmp_path) is None
+
+
+async def test_failed_run_clears_the_mark(monkeypatch, tmp_path):
+    calls: list = []
+    ex = await _executor(monkeypatch, tmp_path, calls)
+    import gc_core.agent_executor as ae
+
+    async def broken(*_a, **_kw):
+        raise RuntimeError("модель недоступна")
+
+    monkeypatch.setattr(ae, "arun_agent", broken)
+    with pytest.raises(RuntimeError):
+        await ex.arun(["сделай"], thread_id=KEY.thread, system=KEY.system)
+    assert await _turn(tmp_path) is None
+
+
+async def test_cancelled_run_keeps_the_mark_for_recovery(
+    monkeypatch, tmp_path
+):
+    """Снятая задача (остановка сервера) — не отказ: отметка остаётся, и
+    восстановление продолжит ход после перезапуска."""
+    import asyncio
+
+    calls: list = []
+    ex = await _executor(monkeypatch, tmp_path, calls)
+    import gc_core.agent_executor as ae
+
+    started = asyncio.Event()
+
+    async def hang(*_a, **_kw):
+        started.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(ae, "arun_agent", hang)
+    task = asyncio.create_task(
+        ex.arun(["сделай"], thread_id=KEY.thread, system=KEY.system)
+    )
+    await started.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert await _turn(tmp_path) == "running"
+
+
+async def test_claim_hook_runs_after_the_thread_is_taken(
+    monkeypatch, tmp_path
+):
+    """Фронтенд узнаёт, что ход взял тред (статус задачи вебхука пишет только
+    взявший), — до чтения истории и цикла."""
+    calls: list = []
+    ex = await _executor(monkeypatch, tmp_path, calls)
+    claimed: list = []
+
+    async def on_claimed(system_id, thread_id):
+        owner = await Threads(FileThreadStore(tmp_path)).busy_owner(KEY)
+        claimed.append((system_id, thread_id, owner is not None))
+
+    ex._ctx.on_thread_claimed = on_claimed
+    await ex.arun(["сделай"], thread_id=KEY.thread, system=KEY.system)
+    assert claimed == [(KEY.system, KEY.thread, True)]

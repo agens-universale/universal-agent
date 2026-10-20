@@ -103,6 +103,16 @@ class ThreadsCleanupConfig(BaseModel):
     ttl_days: float = Field(default=7, gt=0)
 
 
+class RecoveryConfig(BaseModel):
+    """Восстановление прерванных задач вебхука после падения инстанса."""
+
+    model_config = _STRICT
+
+    enabled: bool = True
+    interval_seconds: float = Field(default=30, gt=0, allow_inf_nan=False)
+    lookback_hours: float = Field(default=24, gt=0, allow_inf_nan=False)
+
+
 class WebhookConfig(SurfaceConfig):
     port: int = Field(default=8000, ge=1, le=65535)
     default_system: str = "generic"
@@ -112,6 +122,7 @@ class WebhookConfig(SurfaceConfig):
     threads_cleanup: ThreadsCleanupConfig = Field(
         default_factory=ThreadsCleanupConfig
     )
+    recovery: RecoveryConfig = Field(default_factory=RecoveryConfig)
 
 
 class _ChannelModes(SurfaceConfig):

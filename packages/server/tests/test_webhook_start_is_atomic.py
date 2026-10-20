@@ -35,6 +35,7 @@ class _Agent:
 
     def __init__(self, threads, ctx):
         self.threads = threads
+        self.ctx = ctx
         self.hold = getattr(ctx, "hold", None)
         self.delivered: list = []
         self._seen = 0
@@ -49,6 +50,8 @@ class _Agent:
 
     async def arun(self, messages, **kwargs):
         assert messages == []  # ход вебхука — из входящего потока
+        # Как настоящий исполнитель: тред взят — сказать поверхности.
+        await self.ctx.on_thread_claimed(KEY.system, KEY.thread)
         await self._pick_up()
         if self.hold is not None:
             await self.hold.wait()

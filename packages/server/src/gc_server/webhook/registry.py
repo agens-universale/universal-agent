@@ -74,9 +74,12 @@ class AgentRunRegistry:
             return self._reservations.get(key)
 
     def is_running(self, *, system: str, task_id: str) -> bool:
+        return self.run_of(system=system, task_id=task_id) is not None
+
+    def run_of(self, *, system: str, task_id: str) -> ActiveRun | None:
         key = _make_registry_key(system, task_id)
         with self._lock:
-            return key in self._runs
+            return self._runs.get(key)
 
     def reserve(self, *, system: str, task_id: str) -> bool:
         """Занять ключ задачи до сборки контекста; ``False`` — его уже ведёт
@@ -101,8 +104,8 @@ class AgentRunRegistry:
         task_id: str,
         executor: Any,
         ctx: Any,
-        on_start: Hook,
         on_finish: Hook,
+        notes: dict | None = None,
         verbose: bool | None = None,
     ) -> ActiveRun:
         """Запустить прогон задачи: ход из входящего потока треда."""
@@ -113,10 +116,10 @@ class AgentRunRegistry:
             task_id=task_id,
             executor=executor,
             started_at=time.time(),
+            notes=dict(notes or {}),
         )
         with self._lock:
             self._runs[key] = run
-        await on_start(run)
         run.task = asyncio.get_running_loop().create_task(
             self._arun(run, ctx, on_finish, verbose), name=f"agent-run:{key}"
         )

@@ -1,4 +1,5 @@
 import json
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -15,7 +16,7 @@ def client(monkeypatch, tmp_path):
     async def _fake_create_run_context(loaded, **kwargs):
         # Сервер отдаёт контексту LoadedSettings; его рантайм — то, что увидит ран.
         captured["loaded"] = loaded
-        return object()
+        return SimpleNamespace()
 
     async def _fake_start(**kwargs):
         captured["start_kwargs"] = kwargs

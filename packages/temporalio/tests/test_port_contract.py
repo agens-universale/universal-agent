@@ -58,6 +58,8 @@ CORE_CONTEXT_ATTRIBUTES = {
     "guard_probe": BOUND,
     "human_request": BOUND + " (updates/signals workflow)",
     "image_store": WORKER + ": байты картинок читает activity модели",
+    "on_thread_claimed": FRONTEND
+    + ": статус задачи вебхука после захвата треда; в Temporal ход ведёт workflow",
     "intent_scope": DATA,
     "is_cli_mode": DATA,
     "is_tui": DATA,

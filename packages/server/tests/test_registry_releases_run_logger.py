@@ -51,7 +51,6 @@ async def test_finished_run_releases_its_logger(tmp_path, executor_cls):
         task_id="t",
         executor=executor_cls(ctx),
         ctx=ctx,
-        on_start=_noop,
         on_finish=_noop,
     )
     await run.task

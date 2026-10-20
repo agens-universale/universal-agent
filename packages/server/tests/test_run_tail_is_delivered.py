@@ -83,9 +83,6 @@ async def _play(env):
     """Прогон задачи из входящего потока; дождаться его конца."""
     finished: list = []
 
-    async def on_start(_run):
-        return None
-
     async def on_finish(run):
         finished.append(run)
 
@@ -94,7 +91,6 @@ async def _play(env):
         task_id=KEY.thread,
         executor=env.ae.AgentExecutor(env.ctx),
         ctx=env.ctx,
-        on_start=on_start,
         on_finish=on_finish,
     )
     await asyncio.wait_for(

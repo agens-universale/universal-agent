@@ -383,6 +383,30 @@ class SessionPort:
             set_runtime=parts_from_meta(meta).runtime,
         )
 
+    async def amark_turn(
+        self, system_id: str, thread_id: str, *, running: bool
+    ) -> None:
+        """Отметка хода для восстановления после падения: ``running`` — ход
+        идёт (``runtime.turn``); снятие — штатный конец, meta возвращается к
+        прежнему виду. Без изменения — без записи."""
+        meta = await self.aload_meta(system_id, thread_id)
+        runtime = dict(meta.get("runtime") or {})
+        before = runtime.get("turn")
+        if running:
+            runtime["turn"] = "running"
+        else:
+            runtime.pop("turn", None)
+        if runtime.get("turn") == before:
+            return
+        if runtime:
+            meta["runtime"] = runtime
+        else:
+            meta.pop("runtime", None)
+        await self._side(
+            _key(system_id, thread_id),
+            set_runtime=parts_from_meta(meta).runtime,
+        )
+
     async def apatch_runtime_flag(
         self,
         system_id: str,
