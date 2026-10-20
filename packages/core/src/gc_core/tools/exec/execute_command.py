@@ -20,6 +20,7 @@ from gc_core.tools.exec.exec_envelope import (
     build_exec_envelope,
 )
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
+from gc_core.user_stop import UserStopInterrupt
 
 _ENV_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
@@ -405,6 +406,8 @@ Important Usage Rules:
             )
         except RuntimeUnavailable as exc:
             return self._runtime_unavailable(plan, exc)
+        except UserStopInterrupt:
+            raise
         except Exception as exc:
             return self._exec_failed(plan, exc)
         return self._finish(res, plan)

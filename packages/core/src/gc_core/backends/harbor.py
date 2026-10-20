@@ -13,7 +13,6 @@ import contextlib
 import re
 import shlex
 import tempfile
-import uuid
 from pathlib import Path
 from typing import Any, ContextManager, Optional
 
@@ -32,22 +31,7 @@ from gc_core.backends.runtime_probe import (
     RuntimeProbeCache,
 )
 from gc_core.backends.walk_util import FlatWalkMixin
-from gc_core.user_stop import (
-    UserStopInterrupt,
-    current_user_stop,
-    interrupted_code,
-)
-
-
-def _harbor_stop_wrap(command: str, stop_file: str) -> str:
-    """Группа в контейнере: второй ``env.exec`` снимает её, как таймаут."""
-    path = shlex.quote(stop_file)
-    quoted = shlex.quote(command)
-    return (
-        f"exec 3<&0; setsid sh -c {quoted} <&3 3<&- & p=$!; "
-        f"echo $p > {path}; wait $p; rc=$?; rm -f {path}; exit $rc"
-    )
-
+from gc_core.user_stop import current_user_stop
 
 # Встроенная политика ``harbor_exec_init: bashrc``. Неинтерактивный ``bash -c``
 # иначе пропускает bashrc (``[ -z "$PS1" ] && return``). Потоки профиля
@@ -237,42 +221,39 @@ class HarborBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
         return scope(on_output), accumulators
 
     # --- shell ---
-    @staticmethod
-    def _stopped_result(streamed: dict, cap: int) -> ExecResult:
-        """Стоп в среде: тот же частичный вывод, что у таймаута, но это не таймаут."""
-        result = HarborBackend._timed_out_result(streamed, cap)
-        result.timed_out = False
-        result.stopped_by_user = True
-        result.return_code = interrupted_code(None)
-        return result
+    async def _aexec_watching(self, full, *, timeout):
+        """Дождаться ``env.exec``. Его ``timeout_sec`` и есть срок жизни команды.
 
-    async def _aexec_watching(self, full, *, timeout, stop, stop_file):
-        """Дождаться ``env.exec``. Стоп шлёт в среду ту же смерть, что таймаут."""
+        Стоп хода посреди этого ожидания команду не снимает и строку не
+        переписывает. Регистрация без записи в лог нужна, чтобы отмена тула
+        не оборвала уже идущий ``env.exec``: жест остаётся здесь, пока команда
+        сама не выйдет.
+        """
 
         async def _drive():
             return await self._aawait(
                 self._env.exec(full, timeout_sec=timeout)
             )
 
-        if stop is None or not stop_file:
+        stop = current_user_stop()
+        if stop is None:
             return await _drive()
 
-        async def _release() -> None:
-            from gc_core.backends.remote_shell import remote_kill_command
+        finished = asyncio.Event()
 
-            await self._aexec_impl(
-                remote_kill_command(stop_file),
-                timeout=5,
-                probe=False,
-                arm_stop=False,
-            )
+        async def _release() -> None:
+            await finished.wait()
 
         async with stop.arm(
             kind="exec",
             backend=type(self).__name__,
             release=_release,
+            log_event=False,
         ):
-            return await _drive()
+            try:
+                return await _drive()
+            finally:
+                finished.set()
 
     @staticmethod
     def _timed_out_result(streamed: dict, cap: int) -> ExecResult:
@@ -317,7 +298,6 @@ class HarborBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
         capture_max_chars: Optional[int] = None,
         exec_init: Optional[str] = None,
         probe: bool = True,
-        arm_stop: bool = True,
     ) -> ExecResult:
         """Транспорт. ``exec_init`` — только для канала модели (``aexec``).
 
@@ -332,33 +312,13 @@ class HarborBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
         )
         cap = self._capture_cap(capture_max_chars)
         scope, streamed = self._output_capture(cap)
-        stop = current_user_stop() if arm_stop and probe else None
-        stop_file = (
-            f"/tmp/gc-user-stop-{uuid.uuid4().hex}"
-            if stop is not None
-            else None
-        )
-        if stop_file is not None:
-            full = _harbor_stop_wrap(full, stop_file)
         try:
             with scope:
-                res = await self._aexec_watching(
-                    full, timeout=timeout, stop=stop, stop_file=stop_file
-                )
-        except UserStopInterrupt:
-            return self._stopped_result(streamed, cap)
+                res = await self._aexec_watching(full, timeout=timeout)
         except Exception as exc:
-            if stop is not None and stop.requested:
-                return self._stopped_result(streamed, cap)
             if not self._is_exec_timeout(exc):
                 raise
             return self._timed_out_result(streamed, cap)
-        if stop is not None and stop.requested:
-            done = self._completed_result(res, cap)
-            done.stopped_by_user = True
-            done.timed_out = False
-            done.return_code = interrupted_code(done.return_code)
-            return done
         return self._completed_result(res, cap)
 
     @staticmethod

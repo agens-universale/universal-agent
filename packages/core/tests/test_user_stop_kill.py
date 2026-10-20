@@ -257,9 +257,12 @@ async def test_remote_without_watchdog_aborts_and_logs_unkillable(monkeypatch):
     assert log.events("user_stop_killed") == []
 
 
-async def test_harbor_stop_kills_inside_the_environment():
-    import asyncio as _asyncio
+async def test_harbor_exec_is_not_cut_by_stop():
+    """Стоп посреди тула Harbor команду не переписывает и не обрывает.
 
+    Внешняя отмена тула здесь есть, как у ``_acall_under_stop``. Жест забирает
+    сам ``env.exec`` и держит его, пока команда не выйдет сама.
+    """
     from gc_core.backends.harbor import HarborBackend
     from gc_testkit.runtime_probe import probe_total_in_command
 
@@ -271,33 +274,61 @@ async def test_harbor_stop_kills_inside_the_environment():
 
     class _Env:
         def __init__(self) -> None:
-            self.killed = _asyncio.Event()
+            self.started = asyncio.Event()
+            self.finish = asyncio.Event()
             self.commands: list[str] = []
+            self.timeouts: list[object] = []
 
         async def exec(self, command, **kwargs):
-            del kwargs
             total = probe_total_in_command(str(command))
             if total is not None:
                 return _Res(f"{total}\n")
-            text = str(command)
-            if "kill -TERM" in text:
-                self.killed.set()
-                return _Res("")
-            self.commands.append(text)
-            await self.killed.wait()
+            self.commands.append(str(command))
+            self.timeouts.append(kwargs.get("timeout_sec"))
+            self.started.set()
+            await self.finish.wait()
             return _Res("HI\n", return_code=0)
 
     log = _Log()
+    gate = _stop(log)
     env = _Env()
     backend = HarborBackend(env, asyncio.get_running_loop(), exec_init=None)
-    result, elapsed = await _stopped_exec(backend, "echo HI; sleep 30", log)
-    assert elapsed < 8
-    assert result.stopped_by_user is True
+
+    async def _body():
+        return await backend.aexec("echo HI; sleep 30", timeout=30)
+
+    async def _work():
+        with bind_user_stop(gate):
+            task = asyncio.create_task(_body())
+
+            async def _release() -> None:
+                if not task.done():
+                    task.cancel()
+
+            async with gate.arm(
+                kind="tool",
+                tool="exec_command",
+                call_id="c1",
+                release=_release,
+            ):
+                return await task
+
+    task = asyncio.create_task(_work())
+    await asyncio.wait_for(env.started.wait(), timeout=2)
+    gate.request(log)
+    await asyncio.sleep(0.05)
+    assert not task.done()
+    assert env.commands == ["echo HI; sleep 30"]
+    assert "setsid" not in env.commands[0]
+    env.finish.set()
+    result = await asyncio.wait_for(task, timeout=2)
+    assert result.stopped_by_user is False
     assert result.timed_out is False
+    assert result.return_code == 0
     assert "HI" in result.stdout
-    assert env.commands
-    assert "gc-user-stop-" in env.commands[0]
-    assert log.events("user_stop_killed")[0]["backend"] == "HarborBackend"
+    assert env.timeouts == [30]
+    assert log.events("user_stop_killed") == []
+    assert log.events("user_stop_unkillable") == []
 
 
 async def test_foreign_sync_without_kill_aborts_the_wait():

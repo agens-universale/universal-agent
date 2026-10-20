@@ -25,6 +25,7 @@ from gc_core.tools.exec.exec_envelope import (
     build_exec_envelope,
 )
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
+from gc_core.user_stop import UserStopInterrupt
 from gc_core.utils.directory_write_access import directory_allows_probe_write
 
 
@@ -253,6 +254,8 @@ Usage:
             )
         except RuntimeUnavailable as exc:
             return self._runtime_unavailable(exc)
+        except UserStopInterrupt:
+            raise
         except Exception as exc:
             return self._exec_failed(exc)
         return self._finish(res, plan)

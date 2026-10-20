@@ -42,6 +42,7 @@ class _Arm:
         "call_id",
         "fired",
         "kind",
+        "log_event",
         "mcp_server",
         "observed",
         "release",
@@ -59,6 +60,7 @@ class _Arm:
         mcp_server: str,
         release: Optional[Callable[[], Any]],
         unkillable: bool,
+        log_event: bool = True,
     ) -> None:
         self.kind = kind
         self.tool = tool
@@ -67,6 +69,7 @@ class _Arm:
         self.mcp_server = mcp_server
         self.release = release
         self.unkillable = unkillable
+        self.log_event = log_event
         self.fired = False
         self.observed = asyncio.Event()
 
@@ -165,10 +168,13 @@ class UserStop:
         call_id: str = "",
         backend: str = "",
         mcp_server: str = "",
+        log_event: bool = True,
     ) -> AsyncIterator[_Arm]:
         """Пока блок открыт, ``request`` снимает именно эту работу.
 
         Стоп уже запрошен на входе — работа не началась, в лог ничего не пишем.
+        ``log_event=False`` — жест принят, но работа не снята и в лог не пишется.
+        Так Harbor дожидается уже идущего ``env.exec`` и не отдаёт отмену тулу.
         """
         if not tool and not call_id:
             tool, call_id = _CALL.get()
@@ -180,6 +186,7 @@ class UserStop:
             mcp_server=mcp_server or "",
             release=release,
             unkillable=unkillable,
+            log_event=log_event,
         )
         loop = asyncio.get_running_loop()
         self.bind(loop)
@@ -222,7 +229,7 @@ class UserStop:
 
 def _log_stop(run_logger: Any, arm: _Arm) -> None:
     """Одна запись. Тело запроса, аргументы и вывод команды сюда не входят."""
-    if run_logger is None:
+    if run_logger is None or not arm.log_event:
         return
     if arm.unkillable:
         run_logger.info(
