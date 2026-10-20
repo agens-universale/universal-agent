@@ -193,7 +193,8 @@ async def test_cancel_with_undo_removes_pending_record(tmp_path):
 @pytest.mark.asyncio
 async def test_cancel_with_undo_removes_orphan_from_thread(tmp_path):
     """Быстрая отмена ставит заявку, а poll (когда тред idle) удаляет осиротевшую
-    реплику из data_*.jsonl по её id."""
+    реплику из data_*.jsonl по её id — после того, как остановленный ход
+    отпустит тред."""
     pytest.importorskip("textual")
     from gc_core.thread_store import ThreadSession, load_thread_messages
     from gc_tui.app import TuiApp
@@ -248,11 +249,17 @@ async def test_cancel_with_undo_removes_orphan_from_thread(tmp_path):
         scr._cmd_stop()  # 0 событий + пустой input → cancel-with-undo
         await pilot.pause()
 
-        # Немедленное удаление: реплики в треде уже нет (не ждём остановки worker'а).
+        # Тред ещё держит остановленный ход (аренда его сессии): сразу
+        # удалить нельзя — запись в чужой ход дала бы ThreadBusy. Заявка
+        # остаётся, реплика пока на месте.
         msgs, _, _ = load_thread_messages(str(tmp_path), "cli", tid)
-        assert all(
-            m.get("id") != msg_id for m in msgs
-        )  # осиротевшая удалена сразу
+        assert any(m.get("id") == msg_id for m in msgs)
+
+        # Ход закончился и отпустил тред — опрос удаляет осиротевшую.
+        await ts.port.arelease_lease("cli", tid)
+        scr._run_orphan_cleanups()
+        msgs, _, _ = load_thread_messages(str(tmp_path), "cli", tid)
+        assert all(m.get("id") != msg_id for m in msgs)
 
 
 @pytest.mark.asyncio
