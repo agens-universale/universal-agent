@@ -126,7 +126,7 @@ def test_tail_events_stream_reset_on_ordering_rollback(tmp_path):
 
     tail = store.tail_events("t1", cur)
     assert tail.stream_reset is True
-    assert tail.reason == "ordering rollback"
+    assert tail.reason == "not a continuation"
     assert tail.new_records == []
     assert tail.next_cursor.position_token == 0
     assert tail.next_cursor.ordering_key == 0
@@ -165,3 +165,81 @@ def test_tail_events_idempotent_with_same_cursor(tmp_path):
     assert t1.new_records == []
     assert t2.new_records == []
     assert t1.next_cursor.position_token == t2.next_cursor.position_token
+
+
+def test_read_all_events_cursor_counts_archives(tmp_path):
+    _append_record(tmp_path / "data_cli_t1.jsonl", 1, "user", "жив")
+    for suffix in ("A", "B"):
+        arch = tmp_path / f"data_cli_t1__pre_summary__{suffix}.jsonl"
+        _append_record(arch, 1, "user", "архив")
+    _write_meta(tmp_path / "meta_cli_t1.json", msgs=1)
+
+    store = FileTaskStore(str(tmp_path), system="cli")
+    _, cur = store.read_all_events("t1")
+    assert cur.archives == 2
+    assert cur.wait_ticks == 0
+
+
+def test_read_all_events_no_archives_zero(tmp_path):
+    _append_record(tmp_path / "data_cli_t1.jsonl", 1, "user", "жив")
+    _write_meta(tmp_path / "meta_cli_t1.json", msgs=1)
+
+    store = FileTaskStore(str(tmp_path), system="cli")
+    _, cur = store.read_all_events("t1")
+    assert cur.archives == 0
+
+
+def test_read_all_events_stops_before_partial_line(tmp_path):
+    """Недописанная последняя строка не уходит за курсор: дописанная, она
+    придёт следующим тиком."""
+    data = tmp_path / "data_cli_t1.jsonl"
+    _append_record(data, 1, "user", "целая")
+    _write_meta(tmp_path / "meta_cli_t1.json", msgs=2)
+    whole = data.stat().st_size
+    line = json.dumps(
+        {
+            "type": "message",
+            "seq": 2,
+            "payload": {"id": "m2", "role": "user", "content": "вторая"},
+        }
+    )
+    with open(data, "a", encoding="utf-8") as f:
+        f.write(line[:10])
+
+    store = FileTaskStore(str(tmp_path), system="cli")
+    records, cur = store.read_all_events("t1")
+    with open(data, "a", encoding="utf-8") as f:
+        f.write(line[10:] + "\n")
+    tail = store.tail_events("t1", cur)
+
+    assert [r["payload"]["id"] for r in records] == ["m1"]
+    assert cur.position_token == whole
+    assert [r["payload"]["id"] for r in tail.new_records] == ["m2"]
+
+
+def test_tail_events_waits_for_partial_line(tmp_path):
+    """Тик посреди записи строки: курсор встаёт до обрывка, и дописанная
+    запись приходит следующим тиком, а не теряется."""
+    data = tmp_path / "data_cli_t1.jsonl"
+    _append_record(data, 1, "user", "целая")
+    _write_meta(tmp_path / "meta_cli_t1.json", msgs=2)
+    store = FileTaskStore(str(tmp_path), system="cli")
+    _, cur = store.read_all_events("t1")
+    line = json.dumps(
+        {
+            "type": "message",
+            "seq": 2,
+            "payload": {"id": "m2", "role": "user", "content": "вторая"},
+        }
+    )
+    with open(data, "a", encoding="utf-8") as f:
+        f.write(line[:10])
+
+    first = store.tail_events("t1", cur)
+    with open(data, "a", encoding="utf-8") as f:
+        f.write(line[10:] + "\n")
+    second = store.tail_events("t1", first.next_cursor)
+
+    assert first.new_records == []
+    assert first.next_cursor.position_token == cur.position_token
+    assert [r["payload"]["id"] for r in second.new_records] == ["m2"]

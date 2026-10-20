@@ -49,7 +49,7 @@ from textual.widgets import Static, TextArea
 from gc_tui import branding
 from gc_tui.commands import build_default_registry, closest_command
 from gc_tui.messages import CopyBlockRequest, OpenImageRequest
-from gc_tui.models import TaskCursor
+from gc_tui.models import CompactionStep, TaskCursor
 from gc_tui.palette import ACCENT as _ACCENT
 from gc_tui.palette import DEEP_DIM as _DEEP_DIM
 from gc_tui.palette import DIM as _DIM
@@ -116,11 +116,12 @@ from gc_tui.services.trace_render import (
     LINE_INTERMEDIATE_CLASS,
     NESTED_PREFIX,
     NESTED_PROSE_PREFIX,
-    build_compaction_label,
+    build_compaction_marker_event,
 )
 from gc_tui.services.trace_retention import (
     RETENTION_DETAIL_HINT,
     apply_payload_retention,
+    events_leaving_window,
     filter_sidecar_to_parents,
     is_light_payload,
     message_ids_in_retention_window,
@@ -174,6 +175,11 @@ _SEL_TRACE = "#trace"
 
 
 _log = logging.getLogger(__name__)
+
+# События, которыми диалог продолжается после вопроса ask_human.
+_DIALOG_CONTINUATION_KINDS = frozenset(
+    {"user", "agent", "call", "result", "error", "error_msg"}
+)
 
 
 def resolve_terminal_outcome(
@@ -381,6 +387,13 @@ _FooterHeadSnapshot = namedtuple(
 )
 
 
+def _records_context(records: list[dict]) -> RenderContext:
+    """Контекст рендера порции записей треда (по их payload)."""
+    return collect_render_context(
+        rec.get("payload") for rec in records if isinstance(rec, dict)
+    )
+
+
 def _profile_source_label(ref) -> str | None:
     """Откуда пришёл активный профиль: проектный указатель, глобальный или его нет."""
     if ref is None:
@@ -536,6 +549,11 @@ class TraceScreen(Screen):
         self._ask_human_child_parent_call_id: Optional[str] = None
         # Spec 2026-05-26: pending user-replies (in-memory dict by client_id, FIFO ordered).
         self._pending_user_widgets: dict[str, UserReplyContainer] = {}
+        # id записей, уже отрисованных в трейсе: запись с таким id не
+        # рисуется повторно ни на одном пути (rebuild, live-тик).
+        self._rendered_ids: set[str] = set()
+        # Индекс первого события каждого сегмента в _task_events (retention).
+        self._segment_starts: list[int] = []
         # Кэш wire_content для reconciliation — независим от состояния meta-файла,
         # который executor может перезаписывать в своём потоке.
         self._pending_wire_cache: dict[str, str] = {}
@@ -1968,6 +1986,8 @@ class TraceScreen(Screen):
     def _reset_render_state(self) -> None:
         """Clear all per-task rendering state. Called on task switch and stream_reset."""
         self._task_events.clear()
+        self._rendered_ids.clear()
+        self._segment_starts.clear()
         self._last_agent_summary = None
         self._next_no = 1
         self._stick_bottom = (
@@ -2141,6 +2161,7 @@ class TraceScreen(Screen):
         if compacted:
             self._render_segments(self._store.read_segments(task_id))
         else:
+            self._segment_starts = [0]
             self._render_records(records)
         self._merge_sidecar_nested(task_id)
         self._refresh_header()
@@ -2267,55 +2288,45 @@ class TraceScreen(Screen):
         сегментов в маркер. Маркер сжатия сегмента i = его compacted_by (ставится
         между сегментами, чтобы было видно, где прошла компакция).
 
-        Дедуп по id: preserved-копия (user и пара call/output) лежит в следующем
-        файле с тем же id. Рисуем первое вхождение, чтобы не дублировать строку
-        вокруг маркера. Payload остаётся full, пока этот id есть в окне
-        segments[-2:]."""
-        from gc_tui.models import TraceEvent
-
-        context = collect_render_context(
-            rec.get("payload")
-            for seg in segments
-            for rec in seg["messages"]
-            if isinstance(rec, dict)
+        Дедуп по id — в `_render_record` (общий для всех путей): preserved-копия
+        лежит в следующем файле с тем же id, рисуется первое вхождение.
+        Payload остаётся full, пока этот id есть в окне segments[-2:]."""
+        context = _records_context(
+            [rec for seg in segments for rec in seg["messages"]]
         )
-        seen_ids: set[str] = set()
         window_start = retention_window_start_index(len(segments))
         window_ids = message_ids_in_retention_window(segments)
         for i, seg in enumerate(segments):
             seg_in_window = i >= window_start
+            self._segment_starts.append(len(self._task_events))
             for rec in seg["messages"]:
                 payload = rec.get("payload")
                 mid = payload.get("id") if isinstance(payload, dict) else None
-                if mid is not None:
-                    if mid in seen_ids:
-                        continue
-                    seen_ids.add(mid)
                 in_window = seg_in_window or (
                     mid is not None and mid in window_ids
                 )
                 self._render_record(rec, context=context, in_window=in_window)
             comp = seg["compacted_by"]
             if comp is not None:
-                ev = TraceEvent(
-                    no=self._next_no,
-                    event_ts_utc_iso=comp.get("ts", ""),
-                    kind="summary",
-                    title="summary",
-                    summary=build_compaction_label(i + 1, comp),
-                    summary_content=comp["synthesis"],
-                    full_payload={},
+                self._append_and_render(
+                    build_compaction_marker_event(self._next_no, i, comp)
                 )
-                self._next_no += 1
-                self._task_events.append(ev)
-                self._render_event(ev)
+
+    def _append_and_render(self, ev, *, live: bool = False) -> None:
+        """Событие с номером _next_no — в _task_events и на экран."""
+        self._next_no += 1
+        self._task_events.append(ev)
+        self._render_event(ev, live=live)
 
     def _render_records(
-        self, records: list[dict], *, live: bool = False
+        self,
+        records: list[dict],
+        *,
+        live: bool = False,
+        context: RenderContext | None = None,
     ) -> None:
-        context = collect_render_context(
-            rec.get("payload") for rec in records if isinstance(rec, dict)
-        )
+        if context is None:
+            context = _records_context(records)
         for rec in records:
             self._render_record(rec, live=live, context=context)
 
@@ -2330,6 +2341,11 @@ class TraceScreen(Screen):
         payload = rec.get("payload")
         if not isinstance(payload, dict):
             return
+        mid = payload.get("id")
+        if mid is not None:
+            if mid in self._rendered_ids:
+                return
+            self._rendered_ids.add(mid)
         ev = map_message(
             payload,
             no=self._next_no,
@@ -2347,9 +2363,7 @@ class TraceScreen(Screen):
                     sk, True
                 )  # mid-run доставка: на resume только маркер
             return
-        self._next_no += 1
-        self._task_events.append(ev)
-        self._render_event(ev, live=live)
+        self._append_and_render(ev, live=live)
         # После реплики монтируем [skill]-маркер (если payload несёт skill_loaded).
         # На live-пути маркер уже смонтирован delivery-флоу (_mount_user_reply →
         # _flush_skill_marker → _mount_skill_marker), поэтому только на rebuild.
@@ -4240,25 +4254,22 @@ class TraceScreen(Screen):
         осмысленные события (ответ / 'контекст сжат' / продолжение) — значит вопрос
         НЕ висячий (его output мог быть суммаризован при компакции), remnant не нужен.
         False — ask_human реально последнее осмысленное событие (висячий вопрос)."""
-        cid = self._ask_human_call_id
-        ah_idx = None
-        for i, ev in enumerate(self._task_events):
-            if ev.kind == "ask_human" and (not cid or ev.call_id == cid):
-                ah_idx = i
+        ah_idx = self._last_ask_human_index(self._task_events)
         if ah_idx is None:
             return False
-        meaningful = {
-            "user",
-            "agent",
-            "call",
-            "result",
-            "error",
-            "error_msg",
-            "summary",
-        }
+        meaningful = _DIALOG_CONTINUATION_KINDS | {"summary"}
         return any(
             ev.kind in meaningful for ev in self._task_events[ah_idx + 1 :]
         )
+
+    def _last_ask_human_index(self, events: list) -> int | None:
+        """Индекс последнего события смонтированного вопроса ask_human."""
+        cid = self._ask_human_call_id
+        ah_idx = None
+        for i, ev in enumerate(events):
+            if ev.kind == "ask_human" and (not cid or ev.call_id == cid):
+                ah_idx = i
+        return ah_idx
 
     def _reconcile_ask_human_after_render(
         self, *, allow_remnant: bool
@@ -4983,45 +4994,108 @@ class TraceScreen(Screen):
         # случилась до ответа модели на повтор. При заморозке выделения ждут в очереди.
         if not _frozen:
             self._drain_trace_notes()
+        # F3: при freeze хвост не читаем и трейс НЕ перерисовываем
+        # (wipe/clear_trace/render_records дрожали бы экраном под выделением):
+        # курсор стоит, первый тик после MouseUp дочитает накопленный хвост,
+        # сброс или шаг сжатия.
         if (
-            self._store is None
+            _frozen
+            or self._store is None
             or self._active_task_id is None
             or self._cursor is None
         ):
             return
         tail = self._store.tail_events(self._active_task_id, self._cursor)
-        # F3: при freeze НЕ перерисовываем трейс (wipe/clear_trace/render_records
-        # дрожали бы экраном под выделением). Курсор двигаем, чтобы не копить
-        # хвост — отрисовка догонит на следующем тике после MouseUp.
-        if _frozen:
-            self._cursor = tail.next_cursor
+        if tail.compaction is not None:
+            self._apply_compaction(tail.compaction, tail.next_cursor)
             return
         if tail.stream_reset:
-            self._clear_trace()
-            self._reset_render_state()
-            records, cur = self._store.read_all_events(self._active_task_id)
-            self._cursor = cur
-            if records and self._store.is_compaction_summary(records[0]):
-                self._render_segments(
-                    self._store.read_segments(self._active_task_id)
-                )
-            else:
-                self._render_records(records)
-            self._merge_sidecar_nested(self._active_task_id)
-            # После компакции (stream_reset) баннер мог пере-монтироваться для уже
-            # отвеченного вопроса — снять, иначе ввод уйдёт в stdin «вникуда».
-            self._reconcile_ask_human_after_render(allow_remnant=False)
-            # I1/A: GC pending симметрично attach — delivered drop, orphan → failed.
-            self._mount_failed_from_meta(self._active_task_id)
-            # Лента перерисована посреди хода (сжатие истории): рамки плана
-            # новые, их состояние берётся из сессии заново.
-            self._sync_plan_panel_with_session()
-            self._refresh_header()
-            self._refresh_footer()
+            self._rebuild_from_store()
             return
         self._cursor = tail.next_cursor
         self._render_records(tail.new_records, live=True)
         self._refresh_header()
+
+    def _rebuild_from_store(self) -> None:
+        """Полная перерисовка трейса из хранилища: сброс потока и откат
+        неудавшегося шага сжатия."""
+        tid = self._active_task_id
+        self._clear_trace()
+        self._reset_render_state()
+        records, cur = self._store.read_all_events(tid)
+        self._cursor = cur
+        if records and self._store.is_compaction_summary(records[0]):
+            self._render_segments(self._store.read_segments(tid))
+        else:
+            self._segment_starts = [0]
+            self._render_records(records)
+        self._merge_sidecar_nested(tid)
+        # После компакции (stream_reset) баннер мог пере-монтироваться для уже
+        # отвеченного вопроса — снять, иначе ввод уйдёт в stdin «вникуда».
+        self._reconcile_ask_human_after_render(allow_remnant=False)
+        # I1/A: GC pending симметрично attach — delivered drop, orphan → failed.
+        self._mount_failed_from_meta(tid)
+        # Лента перерисована посреди хода: рамки плана новые, их состояние
+        # берётся из сессии заново.
+        self._sync_plan_panel_with_session()
+        self._refresh_header()
+        self._refresh_footer()
+
+    def _apply_compaction(
+        self, step: CompactionStep, next_cursor: TaskCursor
+    ) -> None:
+        """Шаг сжатия — обычная порция записей плюс маркер (спека 3.2).
+
+        Строки до сжатия, карты экрана, индикатор, баннер подтверждения и
+        прокрутка остаются. Сбой — откат полной перерисовкой."""
+        try:
+            self._append_compaction_step(step)
+        except Exception:
+            _log.exception("шаг сжатия не применён, трейс перерисован")
+            self._rebuild_from_store()
+            return
+        self._cursor = next_cursor
+        self._refresh_header()
+
+    def _append_compaction_step(self, step: CompactionStep) -> None:
+        """Хвост архива, маркер, новый живой файл — живым путём, одним
+        контекстом рендера (вызов в хвосте сводится с выводом в живом)."""
+        start = len(self._task_events)
+        context = _records_context([*step.archive_tail, *step.live_records])
+        self._render_records(step.archive_tail, live=True, context=context)
+        self._mount_compaction_marker(step)
+        self._segment_starts.append(len(self._task_events))
+        self._render_records(step.live_records, live=True, context=context)
+        self._lighten_segment_left_window(step)
+        self._drop_answered_ask_human_banner(start)
+
+    def _lighten_segment_left_window(self, step: CompactionStep) -> None:
+        """Retention: сегмент, выпавший из окна, облегчаем как полная
+        перерисовка. Вложенные строки субагентов не трогаем (спека 3.4)."""
+        for ev in events_leaving_window(
+            self._task_events, self._segment_starts, step.window_ids
+        ):
+            apply_payload_retention(ev, seg_in_window=False)
+
+    def _mount_compaction_marker(self, step: CompactionStep) -> None:
+        self._append_and_render(
+            build_compaction_marker_event(
+                self._next_no, step.segment_index, step.compacted_by
+            )
+        )
+
+    def _drop_answered_ask_human_banner(self, start: int) -> None:
+        """Снять баннер ask_human, если среди событий шага (с индекса start)
+        после вопроса диалог продолжился: ответ ушёл в сводку и отдельной
+        записью не придёт. Маркер сжатия — не продолжение: агент, который
+        реально ждёт ответа, баннер сохраняет."""
+        if self._ask_human_banner is None:
+            return
+        added = self._task_events[start:]
+        ah_idx = self._last_ask_human_index(added)
+        after = 0 if ah_idx is None else ah_idx + 1
+        if any(ev.kind in _DIALOG_CONTINUATION_KINDS for ev in added[after:]):
+            self._unmount_ask_human_banner()
 
     # Ширина хрома вокруг колонки статусов. Порог узости считается по факту
     # (`_brand_fits_beside`), а не константой: длина строк статусов зависит от MCP и
