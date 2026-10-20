@@ -6,6 +6,7 @@
 """
 
 import asyncio
+import os
 import sys
 import uuid
 from types import SimpleNamespace
@@ -393,3 +394,22 @@ def test_without_the_sdk_the_surface_refuses(tmp_path, monkeypatch):
     with pytest.raises(ServerConfigError) as err:
         A2aSurface(runtime)
     assert "gc-server[a2a]" in str(err.value)
+
+
+async def test_turn_root_is_the_resolved_path(tmp_path, stores):
+    """Ходу отдаётся раскрытый путь: подмена компонента симлинком после
+    проверки не уведёт корень хода за периметр."""
+    root = tmp_path / "root"
+    (root / "proj").mkdir(parents=True)
+    (root / "alias").symlink_to(root / "proj")
+    agent = FakeAgent()
+    surface = _surface(
+        tmp_path, stores, [agent], section={"launch_root": str(root)}
+    )
+    message = _message("сделай")
+    message.metadata.update({"cwd": str(root / "alias")})
+    task = await _send(_client(surface), message)
+    assert task.status.state == pb.TASK_STATE_COMPLETED
+    assert agent.settings.runtime.launch_root == os.path.realpath(
+        root / "proj"
+    )

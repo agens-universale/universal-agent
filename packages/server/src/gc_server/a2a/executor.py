@@ -268,7 +268,7 @@ class GcAgentExecutor(AgentExecutor):
         sent = _sent_cwd(context)
         known = await self._dialog_cwd(context.context_id)
         if known is not None:
-            if sent is not None and os.path.normpath(sent) != known:
+            if sent is not None and os.path.realpath(sent) != known:
                 raise _CwdError(sent)
             return known
         root = self._root()
@@ -277,13 +277,14 @@ class GcAgentExecutor(AgentExecutor):
         if not os.path.isabs(sent):
             raise _CwdError(sent)
         # Корень хода — периметр записи агента: пир выбирает его только
-        # внутри корня поверхности (симлинки и «..» раскрыты).
+        # внутри корня поверхности. Проверяется и отдаётся ходу раскрытый
+        # путь (симлинки и «..»): подмена компонента после проверки не
+        # уведёт ход за периметр.
         cwd = os.path.realpath(sent)
-        if os.path.commonpath([os.path.realpath(root), cwd]) != (
-            os.path.realpath(root)
-        ):
+        boundary = os.path.realpath(root)
+        if os.path.commonpath([boundary, cwd]) != boundary:
             raise _CwdError(sent)
-        return os.path.normpath(sent)
+        return cwd
 
     def _root(self) -> str:
         """Корень поверхности: a2a.launch_root или каталог процесса."""
