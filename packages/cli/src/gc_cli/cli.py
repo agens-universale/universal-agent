@@ -35,6 +35,7 @@ from gc_core.message_policy.user_message_policy import (
 from gc_core.run_context import RunContext, acreate_run_context
 from gc_core.settings import is_explicit
 from gc_core.stores import Stores, run_store_kwargs
+from gc_core.threads.errors import ThreadBusy
 from gc_core.threads.facade import Threads
 from gc_core.threads.models import ThreadKey
 from gc_core.tools.turn.propose_plan import ProposePlan
@@ -996,6 +997,10 @@ async def arun_cli() -> int:
             just_created=just_created,
             format_text=format_text,
         )
+    except ThreadBusy as exc:
+        # Тред ведёт другой процесс (окно gc-ua, другой gc-cli, сервер).
+        print(f"[gc] {exc}", file=sys.stderr)
+        return 1
     finally:
         if stores is not None:
             await stores.aclose()

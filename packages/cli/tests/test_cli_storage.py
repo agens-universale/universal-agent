@@ -126,3 +126,22 @@ async def test_system_flag_names_the_thread(run_cli, monkeypatch, tmp_path):
             "SELECT system, thread_id FROM gc_threads"
         ).fetchall()
     assert rows == [("generic", "t1")]
+
+
+async def test_thread_run_elsewhere_is_a_clear_refusal(
+    run_cli, monkeypatch, tmp_path, capsys
+):
+    """Тред ведёт другой процесс (окно gc-ua, другой gc-cli): отказ «тред
+    занят» и код 1, а не трейсбек."""
+    from gc_core.threads.file_store import FileThreadStore
+    from gc_core.threads.session_port import SessionPort
+
+    scripted_model.install(monkeypatch)
+    config = _config(tmp_path, {})
+    other = SessionPort(
+        FileThreadStore(str(tmp_path / "threads")), owner="tui/1/abcd1234"
+    )
+    await other.aclaim("cli", "t1")
+    assert await run_cli(config, "-t", "t1") == 1
+    err = capsys.readouterr().err
+    assert "занят" in err and "tui/1/abcd1234" in err
