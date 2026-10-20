@@ -111,7 +111,8 @@ DIFF_ADD_GUTTER = OK
 DIFF_DEL_GUTTER = ERR
 
 
-USER_PENDING_EDGE = _mix(BG, ACCENT, 0.64)  # кромка неотправленной реплики
+# Кромка неотправленной реплики; в теме auto значение считается от фона (Задача 6).
+USER_PENDING_EDGE = "#3a7a72"
 
 
 def css_variables() -> dict[str, str]:
