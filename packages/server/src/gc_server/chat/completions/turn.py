@@ -10,35 +10,26 @@ from gc_core.threads.facade import Threads
 from gc_core.tools.turn.submit_solution import SubmitSolution
 
 from gc_server.chat.completions.content import ContentMap
-from gc_server.chat.completions.errors import ApiError, error_payload
 from gc_server.chat.completions.history import SYSTEM, forget_thread
 from gc_server.chat.completions.status import finish_reason
-from gc_server.chat.completions.tool_flow import ToolFlow
+from gc_server.chat.errors import ApiError, error_payload
+from gc_server.chat.tool_flow import ToolFlow
+from gc_server.chat.turn_common import (
+    TurnLifecycle,
+    error_message,
+    outcome_of,
+    stop_agent,
+)
 
 logger = logging.getLogger(__name__)
 
 _TOOL_POLL_S = 0.05
 
 
-def outcome_of(agent: Any) -> str | None:
-    executor = getattr(agent, "executor", None)
-    if executor is None:
-        return None
-    outcome = getattr(executor, "last_terminal_outcome", None)
-    if outcome is None or isinstance(outcome, str):
-        return outcome
-    return None
-
-
-def error_message(exc: BaseException) -> str:
-    text = str(exc).strip()
-    if text:
-        return text
-    return exc.__class__.__name__
-
-
-class TurnRun:
+class TurnRun(TurnLifecycle):
     """Ход одного запроса. После терминального статуса тред удаляется."""
+
+    label = "completions"
 
     def __init__(
         self,
@@ -70,9 +61,6 @@ class TurnRun:
         self.cancel_requested = False
         self._task: asyncio.Task | None = None
 
-    def start(self) -> None:
-        self._task = asyncio.create_task(self._run())
-
     async def pull(self, timeout: float) -> tuple | None:
         try:
             return await asyncio.wait_for(self._queue.get(), timeout)
@@ -84,39 +72,12 @@ class TurnRun:
             if self.sealed:
                 return
             self.cancel_requested = True
-        _stop_agent(self.agent)
+        stop_agent(self.agent)
 
     def stop_if_open(self) -> None:
         if self.sealed or self.cancel_requested:
             return
         asyncio.get_running_loop().create_task(self.request_stop())
-
-    async def _run(self) -> None:
-        failed: BaseException | None = None
-        stop = asyncio.Event()
-        watch = asyncio.create_task(self._watch(stop))
-        try:
-            await self._forward()
-        except asyncio.CancelledError:
-            self.cancel_requested = True
-        except Exception as exc:
-            failed = exc
-            logger.exception("completions turn failed")
-        stop.set()
-        late_cancel = False
-        try:
-            await _join(watch)
-            await self._after_stream(failed)
-        except asyncio.CancelledError:
-            self.cancel_requested = True
-            late_cancel = True
-        except Exception as exc:
-            if failed is None:
-                failed = exc
-                logger.exception("completions turn failed")
-        await self._seal(failed)
-        if late_cancel:
-            raise asyncio.CancelledError
 
     async def _forward(self) -> None:
         if self.cancel_requested:
@@ -184,21 +145,6 @@ def _terminal(
         exc = ApiError(500, "server_error", error_message(failed))
         return ("error", error_payload(exc))
     return ("finish", finish_reason(outcome_of(agent)))
-
-
-async def _join(task: asyncio.Task) -> None:
-    try:
-        await task
-    except asyncio.CancelledError:
-        raise
-    except Exception:
-        logger.exception("completions tool watch")
-
-
-def _stop_agent(agent: Any) -> None:
-    stop = getattr(agent, "stop", None)
-    if stop is not None:
-        stop()
 
 
 async def _safe_aclose(agent: Any) -> None:

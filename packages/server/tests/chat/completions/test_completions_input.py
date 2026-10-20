@@ -1,7 +1,7 @@
 """Вход: ``<think>`` вырезается, последний элемент — user."""
 
 import pytest
-from gc_server.chat.completions.errors import ApiError
+from gc_server.chat.errors import ApiError
 from gc_server.chat.completions.input_text import parse_turn
 
 

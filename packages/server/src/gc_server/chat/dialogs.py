@@ -31,7 +31,7 @@ from gc_core.message_policy.user_message_policy import (
 )
 from gc_core.threads.models import ThreadKey, ThreadRecord
 
-from gc_server.chat.responses.errors import ApiError
+from gc_server.chat.errors import ApiError
 from gc_server.chat.responses.index_store import (
     SYSTEM,
     ResponseIndex,

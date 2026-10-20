@@ -3,7 +3,7 @@
 import json
 
 from gc_server.chat.completions.content import ContentMap
-from gc_server.chat.completions.tool_flow import ToolFlow
+from gc_server.chat.tool_flow import ToolFlow
 from gc_core.threads.facade import Threads
 from gc_core.threads.models import ThreadKey
 from gc_testkit.memory_thread_store_v2 import MemoryThreadStore

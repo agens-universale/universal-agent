@@ -6,7 +6,8 @@ import os
 from dataclasses import dataclass
 from typing import Any
 
-from gc_server.chat.responses.errors import ApiError
+from gc_server.chat.cwd import metadata_cwd
+from gc_server.chat.errors import ApiError
 
 _INVALID = "invalid_request"
 
@@ -65,23 +66,6 @@ def response_metadata(value: Any) -> dict:
     ):
         return {}
     return dict(value)
-
-
-def metadata_cwd(value: Any) -> str | None:
-    if not isinstance(value, dict):
-        return None
-    cwd = value.get("cwd")
-    if not isinstance(cwd, str) or cwd == "":
-        return None
-    return cwd
-
-
-def cwd_for_new(sent: str | None, launch_root: Any) -> str:
-    if isinstance(sent, str) and os.path.isabs(sent):
-        return os.path.normpath(sent)
-    if isinstance(launch_root, str) and os.path.isabs(launch_root):
-        return os.path.normpath(launch_root)
-    return os.path.normpath(os.getcwd())
 
 
 def cwd_for_continue(sent: str | None, recorded: str) -> str:

@@ -2,20 +2,21 @@
 
 from __future__ import annotations
 
-import json
-import secrets
 from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.responses import Response, StreamingResponse
 
+from gc_server.chat.errors import ApiError, error_payload
+from gc_server.chat.http_common import (
+    authorized_body,
+    json_response,
+    unauthorized,
+)
 from gc_server.chat.http_guard import install_http_guard
 from gc_server.chat.model_route import AGENT_ID, models_body
-from gc_server.chat.responses.errors import ApiError, error_payload
 from gc_server.chat.responses.facade import ResponsesFacade
 from gc_server.chat.responses.turn import TurnRun
-
-_JSON = "application/json"
 
 
 def create_app(facade: ResponsesFacade) -> FastAPI:
@@ -49,23 +50,20 @@ def _facade(request: Request) -> ResponsesFacade:
 
 async def models(request: Request) -> Response:
     facade = _facade(request)
-    denied = _unauthorized(request, facade.auth_token)
+    denied = unauthorized(request, facade.auth_token)
     if denied is not None:
         return denied
-    return _json(models_body(facade.model_id))
+    return json_response(models_body(facade.model_id))
 
 
 async def create_response(request: Request) -> Response:
     facade = _facade(request)
-    denied = _unauthorized(request, facade.auth_token)
-    if denied is not None:
-        return denied
-    body, rejected = await _object_body(request)
+    body, rejected = await authorized_body(request, facade.auth_token)
     if rejected is not None:
         return rejected
     if body.get("model") != AGENT_ID:
         exc = ApiError(400, "invalid_request", "unknown model")
-        return _json(error_payload(exc), 400)
+        return json_response(error_payload(exc), 400)
     opened = await _open_turn(facade, body)
     if isinstance(opened, Response):
         return opened
@@ -80,34 +78,34 @@ async def create_response(request: Request) -> Response:
 
 async def read_response(response_id: str, request: Request) -> Response:
     facade = _facade(request)
-    denied = _unauthorized(request, facade.auth_token)
+    denied = unauthorized(request, facade.auth_token)
     if denied is not None:
         return denied
     try:
-        return _json(await facade.get(response_id))
+        return json_response(await facade.get(response_id))
     except ApiError as exc:
-        return _json(error_payload(exc), exc.status)
+        return json_response(error_payload(exc), exc.status)
 
 
 async def cancel_response(response_id: str, request: Request) -> Response:
     facade = _facade(request)
-    denied = _unauthorized(request, facade.auth_token)
+    denied = unauthorized(request, facade.auth_token)
     if denied is not None:
         return denied
     try:
-        return _json(await facade.cancel(response_id))
+        return json_response(await facade.cancel(response_id))
     except ApiError as exc:
-        return _json(error_payload(exc), exc.status)
+        return json_response(error_payload(exc), exc.status)
 
 
 async def _open_turn(facade: ResponsesFacade, body: Any) -> TurnRun | Response:
     try:
         return await facade.open(body)
     except ApiError as exc:
-        return _json(error_payload(exc), exc.status)
+        return json_response(error_payload(exc), exc.status)
     except Exception as exc:
         err = ApiError(500, "server_error", str(exc) or "server error")
-        return _json(error_payload(err), 500)
+        return json_response(error_payload(err), 500)
 
 
 async def _finished_body(run: TurnRun, request: Request) -> Response:
@@ -117,44 +115,4 @@ async def _finished_body(run: TurnRun, request: Request) -> Response:
         await run.request_stop()
         raise
     code = 500 if payload.get("status") == "failed" else 200
-    return _json(payload, code)
-
-
-def _unauthorized(request: Request, token: str) -> Response | None:
-    if token == "":
-        return None
-    header = request.headers.get("authorization")
-    if _bearer_ok(header, token):
-        return None
-    exc = ApiError(401, "invalid_api_key", "invalid api key")
-    return _json(error_payload(exc), 401)
-
-
-def _bearer_ok(header: str | None, token: str) -> bool:
-    if not isinstance(header, str) or not header.startswith("Bearer "):
-        return False
-    got = header[len("Bearer ") :]
-    if len(got) != len(token):
-        return False
-    return secrets.compare_digest(got, token)
-
-
-async def _object_body(request: Request) -> tuple[Any, Response | None]:
-    try:
-        body = await request.json()
-    except ValueError:
-        exc = ApiError(
-            400, "invalid_request", "request body must be an object"
-        )
-        return None, _json(error_payload(exc), 400)
-    if not isinstance(body, dict):
-        exc = ApiError(
-            400, "invalid_request", "request body must be an object"
-        )
-        return None, _json(error_payload(exc), 400)
-    return body, None
-
-
-def _json(payload: dict, status_code: int = 200) -> Response:
-    raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    return Response(content=raw, status_code=status_code, media_type=_JSON)
+    return json_response(payload, code)

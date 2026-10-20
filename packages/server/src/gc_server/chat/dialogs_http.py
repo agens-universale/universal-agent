@@ -20,8 +20,8 @@ from gc_server.chat.dialogs import (
     read_file,
     remove_entry,
 )
-from gc_server.chat.responses.errors import ApiError, error_payload
-from gc_server.chat.responses.http_api import _unauthorized
+from gc_server.chat.errors import ApiError, error_payload
+from gc_server.chat.http_common import unauthorized
 from gc_server.chat.responses.index_store import ResponseIndex
 
 _JSON = "application/json"
@@ -60,7 +60,7 @@ def _index(request: Request) -> ResponseIndex:
 
 def _guard(request: Request) -> Response | None:
     token = request.app.state.responses_facade.auth_token
-    return _unauthorized(request, token)
+    return unauthorized(request, token)
 
 
 async def list_dialogs(request: Request) -> Response:

@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
-import json
-import secrets
 from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.responses import Response, StreamingResponse
 
-from gc_server.chat.completions.errors import ApiError, error_payload
 from gc_server.chat.completions.facade import CompletionsFacade
 from gc_server.chat.completions.sse import (
     ChunkEncoder,
@@ -19,10 +16,16 @@ from gc_server.chat.completions.sse import (
 )
 from gc_server.chat.completions.turn import TurnRun
 from gc_server.chat.direct_completions import DirectCompletions
+from gc_server.chat.errors import ApiError, error_payload
+from gc_server.chat.http_common import (
+    authorized_body,
+    disconnected,
+    json_response,
+    unauthorized,
+)
 from gc_server.chat.http_guard import install_http_guard
 from gc_server.chat.model_route import completions_route, models_body
 
-_JSON = "application/json"
 _POLL_S = 0.05
 
 
@@ -51,24 +54,21 @@ def _facade(request: Request) -> CompletionsFacade:
 
 async def models(request: Request) -> Response:
     facade = _facade(request)
-    denied = _unauthorized(request, facade.auth_token)
+    denied = unauthorized(request, facade.auth_token)
     if denied is not None:
         return denied
-    return _json(models_body(facade.model_id))
+    return json_response(models_body(facade.model_id))
 
 
 async def create_completion(request: Request) -> Response:
     facade = _facade(request)
-    denied = _unauthorized(request, facade.auth_token)
-    if denied is not None:
-        return denied
-    body, rejected = await _object_body(request)
+    body, rejected = await authorized_body(request, facade.auth_token)
     if rejected is not None:
         return rejected
     route = completions_route(body.get("model"), facade.model_id)
     if route is None:
         exc = ApiError(400, "invalid_request", "unknown model")
-        return _json(error_payload(exc), 400)
+        return json_response(error_payload(exc), 400)
     if route == "direct":
         direct = DirectCompletions(
             settings=facade._settings, auth_connector=facade._auth
@@ -88,10 +88,10 @@ async def _open_turn(
     try:
         return await facade.open(body)
     except ApiError as exc:
-        return _json(error_payload(exc), exc.status)
+        return json_response(error_payload(exc), exc.status)
     except Exception as exc:
         err = ApiError(500, "server_error", str(exc) or "server error")
-        return _json(error_payload(err), 500)
+        return json_response(error_payload(err), 500)
 
 
 async def _stream_response(run: TurnRun, request: Request) -> Response:
@@ -100,7 +100,7 @@ async def _stream_response(run: TurnRun, request: Request) -> Response:
         return Response(status_code=204)
     kind, payload = first
     if kind == "error":
-        return _json(payload, 500)
+        return json_response(payload, 500)
     if kind == "cancelled":
         return Response(status_code=204)
     return StreamingResponse(
@@ -121,7 +121,7 @@ async def _finished_body(run: TurnRun, request: Request) -> Response:
             parts.append(payload)
             continue
         if kind == "error":
-            return _json(payload, 500)
+            return json_response(payload, 500)
         if kind == "cancelled":
             return Response(status_code=204)
         body = completion_object(
@@ -131,7 +131,7 @@ async def _finished_body(run: TurnRun, request: Request) -> Response:
             content="".join(parts),
             reason=payload,
         )
-        return _json(body)
+        return json_response(body)
 
 
 async def _iter_sse(run: TurnRun, first: tuple):
@@ -180,56 +180,6 @@ async def _pull_until(run: TurnRun, request: Request) -> tuple | None:
         item = await run.pull(_POLL_S)
         if item is not None:
             return item
-        if await _disconnected(request):
+        if await disconnected(request):
             await run.request_stop()
             return None
-
-
-def _unauthorized(request: Request, token: str) -> Response | None:
-    if token == "":
-        return None
-    header = request.headers.get("authorization")
-    if _bearer_ok(header, token):
-        return None
-    exc = ApiError(401, "invalid_api_key", "invalid api key")
-    return _json(error_payload(exc), 401)
-
-
-def _bearer_ok(header: str | None, token: str) -> bool:
-    if not isinstance(header, str) or not header.startswith("Bearer "):
-        return False
-    got = header[len("Bearer ") :]
-    if len(got) != len(token):
-        return False
-    return secrets.compare_digest(got, token)
-
-
-async def _object_body(request: Request) -> tuple[Any, Response | None]:
-    try:
-        body = await request.json()
-    except ValueError:
-        exc = ApiError(
-            400, "invalid_request", "request body must be an object"
-        )
-        return None, _json(error_payload(exc), 400)
-    if not isinstance(body, dict):
-        exc = ApiError(
-            400, "invalid_request", "request body must be an object"
-        )
-        return None, _json(error_payload(exc), 400)
-    return body, None
-
-
-def _json(payload: dict, status_code: int = 200) -> Response:
-    raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    return Response(content=raw, status_code=status_code, media_type=_JSON)
-
-
-async def _disconnected(request: Any) -> bool:
-    probe = getattr(request, "is_disconnected", None)
-    if probe is None:
-        return False
-    try:
-        return bool(await probe())
-    except Exception:
-        return False

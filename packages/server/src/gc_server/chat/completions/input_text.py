@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 
 from gc_core.message_projection.projectors.strip_tagged_blocks import (
     strip_think_blocks,
 )
 
-from gc_server.chat.completions.errors import ApiError
+from gc_server.chat.cwd import metadata_cwd
+from gc_server.chat.errors import ApiError
 
 _INVALID = "invalid_request"
 _USER = "user"
@@ -43,23 +43,6 @@ def parse_turn(body: object) -> IncomingTurn:
         cwd_sent=metadata_cwd(body.get("metadata")),
         stream=body.get("stream") is True,
     )
-
-
-def metadata_cwd(value: object) -> str | None:
-    if not isinstance(value, dict):
-        return None
-    cwd = value.get("cwd")
-    if not isinstance(cwd, str) or cwd == "":
-        return None
-    return cwd
-
-
-def cwd_for_turn(sent: str | None, launch_root: object) -> str:
-    if isinstance(sent, str) and os.path.isabs(sent):
-        return os.path.normpath(sent)
-    if isinstance(launch_root, str) and os.path.isabs(launch_root):
-        return os.path.normpath(launch_root)
-    return os.path.normpath(os.getcwd())
 
 
 def _dialog(messages: list) -> tuple[str, list[tuple[str, str]]]:

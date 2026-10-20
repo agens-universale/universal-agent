@@ -22,14 +22,14 @@ from gc_server.chat.completions.history import (
 )
 from gc_server.chat.completions.input_text import (
     IncomingTurn,
-    cwd_for_turn,
     parse_turn,
 )
 from gc_server.chat.completions.prompt_assets import (
     completions_special_instructions_path,
 )
-from gc_server.chat.completions.tool_flow import ToolFlow
 from gc_server.chat.completions.turn import TurnRun, _safe_aclose
+from gc_server.chat.cwd import cwd_for_new
+from gc_server.chat.tool_flow import ToolFlow
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +60,7 @@ class CompletionsFacade:
     async def open(self, body: Any) -> TurnRun:
         incoming = parse_turn(body)
         thread_id = validate_thread_id(str(uuid.uuid4()))
-        cwd = cwd_for_turn(
+        cwd = cwd_for_new(
             incoming.cwd_sent, self._settings.settings.chat_api.launch_root
         )
         agent = await self._agent_for(thread_id, cwd)

@@ -2,7 +2,7 @@
 
 import json
 
-from gc_server.chat.responses.tool_flow import ToolFlow
+from gc_server.chat.tool_flow import ToolFlow
 from gc_core.threads.facade import Threads
 from gc_core.threads.models import ThreadKey
 from gc_core.threads.session_port import SessionPort

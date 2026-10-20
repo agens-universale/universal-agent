@@ -19,7 +19,7 @@ from gc_core.utils.connect_backend import (
 )
 from gc_core.utils.http_proxy import resolve_proxies
 
-from gc_server.chat.completions.errors import ApiError, error_payload
+from gc_server.chat.errors import ApiError, error_payload
 
 logger = logging.getLogger(__name__)
 

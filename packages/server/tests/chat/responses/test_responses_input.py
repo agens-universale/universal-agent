@@ -1,7 +1,7 @@
 """Разбор input: последний элемент, пустой текст, чужие части."""
 
 import pytest
-from gc_server.chat.responses.errors import ApiError
+from gc_server.chat.errors import ApiError
 from gc_server.chat.responses.input_text import parse_turn, turn_text
 
 

@@ -8,11 +8,18 @@ from typing import Any
 
 from gc_core.tools.turn.submit_solution import SubmitSolution
 
+from gc_server.chat.http_common import disconnected
 from gc_server.chat.responses.index_store import ResponseIndex, ResponseRecord
 from gc_server.chat.responses.sse import encode_sse, is_terminal
 from gc_server.chat.responses.status import incomplete_details, turn_status
 from gc_server.chat.responses.stream_map import StreamMap
-from gc_server.chat.responses.tool_flow import ToolFlow
+from gc_server.chat.tool_flow import ToolFlow
+from gc_server.chat.turn_common import (
+    TurnLifecycle,
+    error_message,
+    outcome_of,
+    stop_agent,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -20,25 +27,10 @@ _TOOL_POLL_S = 0.05
 SYSTEM = "responses"
 
 
-def outcome_of(agent: Any) -> str | None:
-    executor = getattr(agent, "executor", None)
-    if executor is None:
-        return None
-    outcome = getattr(executor, "last_terminal_outcome", None)
-    if outcome is None or isinstance(outcome, str):
-        return outcome
-    return None
-
-
-def error_message(exc: BaseException) -> str:
-    text = str(exc).strip()
-    if text:
-        return text
-    return exc.__class__.__name__
-
-
-class TurnRun:
+class TurnRun(TurnLifecycle):
     """Ход, который живёт отдельно от HTTP-запроса."""
+
+    label = "responses"
 
     def __init__(
         self,
@@ -69,12 +61,9 @@ class TurnRun:
         self.response_id = record.response_id
         self._task: asyncio.Task | None = None
 
-    def start(self) -> None:
-        self._task = asyncio.create_task(self._run())
-
     async def wait_client(self, request: Any) -> dict:
         while not self.done.is_set():
-            if await _disconnected(request):
+            if await disconnected(request):
                 await self.request_stop()
             try:
                 await asyncio.wait_for(self.done.wait(), _TOOL_POLL_S)
@@ -106,41 +95,16 @@ class TurnRun:
         async with self._seal_lock:
             if self.sealed:
                 return
-        _stop_agent(self.agent)
+        stop_agent(self.agent)
 
     def _stop_if_open(self) -> None:
         if self.sealed or self.cancel_requested:
             return
         asyncio.get_running_loop().create_task(self.request_stop())
 
-    async def _run(self) -> None:
-        failed: BaseException | None = None
-        stop = asyncio.Event()
-        watch = asyncio.create_task(self._watch(stop))
-        try:
-            async with self._emit_lock:
-                _put(self._queue, self._mapper.opening_events())
-            await self._forward()
-        except asyncio.CancelledError:
-            self.cancel_requested = True
-        except Exception as exc:
-            failed = exc
-            logger.exception("responses turn failed")
-        stop.set()
-        late_cancel = False
-        try:
-            await _join(watch)
-            await self._after_stream(failed)
-        except asyncio.CancelledError:
-            self.cancel_requested = True
-            late_cancel = True
-        except Exception as exc:
-            if failed is None:
-                failed = exc
-                logger.exception("responses turn failed")
-        await self._seal(failed)
-        if late_cancel:
-            raise asyncio.CancelledError
+    async def _open(self) -> None:
+        async with self._emit_lock:
+            _put(self._queue, self._mapper.opening_events())
 
     async def _forward(self) -> None:
         # Отмена до stream() пишет stop в state прошлого прогона, а
@@ -223,28 +187,3 @@ def _decision(
 def _put(queue: asyncio.Queue, events: list[dict]) -> None:
     for event in events:
         queue.put_nowait(event)
-
-
-async def _join(task: asyncio.Task) -> None:
-    try:
-        await task
-    except asyncio.CancelledError:
-        raise
-    except Exception:
-        logger.exception("responses tool watch")
-
-
-def _stop_agent(agent: Any) -> None:
-    stop = getattr(agent, "stop", None)
-    if stop is not None:
-        stop()
-
-
-async def _disconnected(request: Any) -> bool:
-    probe = getattr(request, "is_disconnected", None)
-    if probe is None:
-        return False
-    try:
-        return bool(await probe())
-    except Exception:
-        return False

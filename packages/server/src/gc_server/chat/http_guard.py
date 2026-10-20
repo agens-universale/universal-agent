@@ -23,7 +23,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from gc_server.chat.responses.errors import ApiError, error_payload
+from gc_server.chat.errors import ApiError, error_payload
 
 # ponytail: IPv6-loopback (`::1`) не в списке — TrustedHostMiddleware режет
 # порт по первому ":". При бинде на `::1` проверка Host выключается.

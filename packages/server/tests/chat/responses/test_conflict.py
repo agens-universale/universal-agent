@@ -4,7 +4,7 @@ import asyncio
 import json
 
 import pytest
-from gc_server.chat.responses.errors import ApiError
+from gc_server.chat.errors import ApiError
 from gc_server.chat.responses.facade import ResponsesFacade
 from gc_server.chat.responses.index_store import ResponseIndex
 from gc_server.chat.responses.turn import TurnRun
