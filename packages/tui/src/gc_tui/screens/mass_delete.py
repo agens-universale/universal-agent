@@ -16,7 +16,7 @@ from textual.containers import Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Input, Static
 
-from gc_tui.palette import ACCENT, BRIGHT, DIM, INK
+from gc_tui.palette import ACCENT, BG, BRIGHT, DIM, INK, OVERLAY_BG
 from gc_tui.services.session_delete_select import select_for_deletion
 
 _MODES = ("keep_last", "older_than_days")
@@ -30,7 +30,7 @@ class MassDeleteScreen(ModalScreen[Optional[dict]]):
     DEFAULT_CSS = f"""
     MassDeleteScreen {{ align: center middle; }}
     #mass-dialog {{
-        background: #161A23;
+        background: {OVERLAY_BG};
         border: round {ACCENT};
         border-title-color: {BRIGHT};
         border-title-style: bold;
@@ -39,7 +39,7 @@ class MassDeleteScreen(ModalScreen[Optional[dict]]):
         height: auto;
     }}
     #mass-modes {{ color: {INK}; }}
-    #mass-n {{ border: none; background: #0E1119; color: {INK}; }}
+    #mass-n {{ border: none; background: {BG}; color: {INK}; }}
     #mass-count {{ color: {ACCENT}; margin-top: 1; }}
     #mass-hint {{ color: {DIM}; margin-top: 1; }}
     """
