@@ -316,7 +316,7 @@ def _inbox_reader(ctx: Any, thread_session: Any) -> Any:
     workflow). Тот же признак включает и управляющий поток."""
     if thread_session is None or getattr(ctx, "durable_execution", False):
         return None
-    read = getattr(thread_session.port, "aread_inbox", None)
+    read = getattr(getattr(thread_session, "port", None), "aread_inbox", None)
     if read is None:
         return None
     return functools.partial(
@@ -360,7 +360,7 @@ async def _amark_turn(
     предупреждение: ход от отметки не зависит."""
     if thread_session is None or getattr(ctx, "durable_execution", False):
         return
-    mark = getattr(thread_session.port, "amark_turn", None)
+    mark = getattr(getattr(thread_session, "port", None), "amark_turn", None)
     if mark is None:
         return
     try:
