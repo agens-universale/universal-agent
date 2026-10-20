@@ -19,7 +19,7 @@ AGENTS.md, скиллы, субагенты и память проекта — �
 
 | Хранилище | Где | Когда |
 |---|---|---|
-| `FileThreadStore` | `gc_core.threads.file_store` | по умолчанию в SDK, CLI, TUI, сервере, gc-chat, gc-acp: файлы `data_*.jsonl` и `meta_*.json` в `paths.threads_data_path` (формат прежний) плюс служебный каталог `.store/`; под Temporal — `durability="fsync"` |
+| `FileThreadStore` | `gc_core.threads.file_store` | по умолчанию в SDK, CLI, TUI, сервере (все поверхности), gc-acp: файлы `data_*.jsonl` и `meta_*.json` в `paths.threads_data_path` (формат прежний) плюс служебный каталог `.store/`; под Temporal — `durability="fsync"` |
 | `SQLiteThreadStore` | `gc_stores.sqlite` (дистрибутив `gc-stores`) | один файл базы; файлы треда (картинки) — в ней же |
 | `PostgresThreadStore` | `gc_stores.postgres` (`gc-stores[postgres]`) | несколько инстансов на одной базе — [ниже](#postgres-несколько-инстансов-на-одной-базе) |
 | `MySQLThreadStore` | `gc_stores.mysql` (`gc-stores[mysql]`) | то же на MySQL 8 — [хранилища на базах](stores.md#mysql) |
@@ -86,7 +86,7 @@ session = AgentSession(client, agent="support", thread_id="T-1",
 `append_side`, с ходом они не конфликтуют. Аренда (`claim`) — кто сейчас
 ведёт тред: ход SDK/CLI/сервера — со сроком (по умолчанию 60 с, продлевается),
 сессия Temporal — бессрочно. Алиасы — внешние идентификаторы треда
-(`response_id` gc-chat), по ним тред находится с любого инстанса.
+(`response_id` поверхности chat), по ним тред находится с любого инстанса.
 
 Файловое хранилище раскладывает всё это в прежние ключи `meta_*.json`:
 старые треды открываются, формат файлов не изменился.

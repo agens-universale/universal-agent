@@ -53,17 +53,14 @@ universal-agent/
     pyproject.toml               # gc-tui   → gc-core, gc-mcp
     src/gc_tui/                  # экраны, редакторы, голос
   packages/server/
-    pyproject.toml               # gc-server → gc-core, gc-mcp
-    src/gc_server/               # server.py, rest_api/, swarm/
+    pyproject.toml               # gc-server → gc-core, gc-mcp, gc-cli, gc-stores
+    src/gc_server/               # cli.py (gc-serve), app.py; webhook/, swarm/, chat/, a2a/
   packages/mcp/
     pyproject.toml               # gc-mcp   → gc-core
     src/recommended_mcp/         # рецепты MCP + runtime: cli, установка, автозапуск
   packages/acp/
     pyproject.toml               # gc-acp   → gc-core
     src/gc_acp/                  # ACP JSON-RPC фасад для IDE
-  packages/chat/
-    pyproject.toml               # gc-chat  → gc-core, FastAPI, uvicorn
-    src/gc_chat/                 # HTTP Responses + Chat Completions
   packages/stores/
     pyproject.toml               # gc-stores → gc-core; extra [postgres] = asyncpg
     src/gc_stores/               # хранилища тредов на базах: postgres/
@@ -88,15 +85,14 @@ universal-agent/
 | `gc-core` | `gc_core` | — | **нет** |
 | `gc-cli` | `gc_cli` | `gc-core`, `gc-mcp` | `gc-cli` |
 | `gc-tui` | `gc_tui` | `gc-core`, `gc-mcp` | `gc-ua`, `gc-voice` |
-| `gc-server` | `gc_server` | `gc-core`, `gc-mcp` | `gc-serve` |
+| `gc-server` | `gc_server` | `gc-core`, `gc-mcp`, `gc-cli`, `gc-stores` | `gc-serve` |
 | `gc-mcp` | `recommended_mcp` | `gc-core` | `gc-mcp`, `gc-mcp-install` |
 | `gc-acp` | `gc_acp` | `gc-core` | `gc-acp` |
-| `gc-chat` | `gc_chat` | `gc-core`, FastAPI, uvicorn | `gc-chat` |
 | `gc-ua` (мета) | — | все листовые | все листовые команды |
 
 Каждый профиль объявляет ТОЛЬКО свою команду: имя команды принадлежит одному
 дистрибутиву, иначе два профиля не ставятся рядом. Подробности и цена ошибки —
-`docs/packaging.md`. Гайды фасадов: [acp.md](acp.md), [chat.md](chat.md).
+`docs/packaging.md`. Гайды фасадов: [acp.md](acp.md), [server.md](server.md) (chat, a2a, swarm — поверхности `gc-serve`).
 
 `gc-core` — библиотека, поэтому **не объявляет точек входа** и ставится иначе:
 
@@ -115,7 +111,7 @@ uv tool install "gc-cli @ git+URL#subdirectory=packages/cli"    # как инс�
 | `gc_core` | 287 | 45 имён верхнего уровня: конфиг, тулы, память, безопасность, MCP-клиент, журнал правок (`agent_edits`, переехал из `gc_tui/diff_tui`) |
 | `gc_cli` | 4 | `cli`, `arg_parser`, `onboarding_wizard` |
 | `gc_tui` | 137 | экраны, редакторы, `voice`, `voice_runtime` |
-| `gc_server` | 15 | `server`, `server_cleanup_threads`, `rest_api`, `swarm` |
+| `gc_server` | 15 | на момент разбиения: `server`, `server_cleanup_threads`, `rest_api`, `swarm` (сейчас — поверхности `webhook`, `swarm`, `chat`, `a2a` под `gc-serve`) |
 | `recommended_mcp` | 14 | рецепты и `runtime/`: cli, установка, автозапуск daemon'ов |
 
 ### Изображения: `gc_core.attachments`

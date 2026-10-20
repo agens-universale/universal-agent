@@ -734,8 +734,8 @@ Makefile без вопроса в plan и manual.
 **Без человека** спросить некого, и вопрос становится отказом «спросить некого»: в
 `manual` запись, команды вне списка только-чтения и сетевые запросы запрещены, а запись в
 каталог `.git`, скиллы и настройки инструментов — отказ и в `edit`. Это `gc-cli` без
-терминала (и бенчмарк), сервер `gc-serve`, A2A, `gc-chat` (у HTTP-процесса терминала
-нет), swarm и воркер Temporal без канала ответа человека. Канал объявляет это о себе сам:
+терминала (и бенчмарк), сервер `gc-serve` — вебхук, A2A, chat (у HTTP-поверхности
+терминала нет), swarm и воркер Temporal без канала ответа человека. Канал объявляет это о себе сам:
 сервер, swarm (обёртка запускает `gc-cli --external-request`) и A2A — «человека нет», ACP —
 «человек есть» (вопросы уходят в IDE), TUI и `gc-cli` без этого флага не объявляют, и ядро проверяет порт ответа, TUI или терминал при включённом
 `turn_ask_human`. Если человек есть, но ответа не пришло (таймаут, отмена, клиент не умеет
@@ -1267,11 +1267,11 @@ raw/Bearer или обновление токена при 401 допустим�
 `--security.read_guard.mode ask`). Путь — тот же, что в `config.yml` и в
 `gc-cli config explain`.
 
-Тот же контракт у `gc-cli`, `gc-acp` и `gc-chat`: путь через точку и флаги
-`--model`, `--completions_url`, `--level`. Свои флаги ACP и chat — ещё
-`--config` и `--profile`. `gc-acp` пропускает чужие флаги клиентов без точки
-(JetBrains — позиционный `acp`, `--experimental`) с пометкой в stderr;
-`gc-chat` на них отвечает ошибкой.
+Тот же контракт у `gc-cli`, `gc-acp` и `gc-serve`: путь через точку и флаги
+`--model`, `--completions_url`, `--level`. Свои флаги ACP и сервера — ещё
+`--config` и `--profile` (у сервера и `--server-config`). `gc-acp` пропускает
+чужие флаги клиентов без точки (JetBrains — позиционный `acp`,
+`--experimental`) с пометкой в stderr; `gc-serve` на них отвечает ошибкой.
 
 - Прежние плоские имена (`--max_steps`, `--summary_params`) **не принимаются**:
   это ошибка при старте. Если у схемы есть настройка с тем же последним сегментом
@@ -1682,11 +1682,56 @@ ddgs-mcp --http
 Удалённой стороне нужны GNU `stat`/`find`, `sh`, `cat`, `base64`, `sha256sum`; `python3` — для `run_python_code`, MCP `execute_on: os_backend` и `fetch_url_execute_on: os_backend`; `bash` — для фоновых команд (`run_in_background`), как и в Harbor.
 Правило разделения: хост — панель управления агента (конфиг, AGENTS.md, `project_memory`, треды и логи, MCP с `execute_on: agent`); среда исполнения — всё, с чем работает модель (`fs_*`, `exec_*`, фон, скиллы, MCP с `execute_on: os_backend`, при `fetch_url_execute_on: os_backend` — и сеть `exec_fetch_url`). `download_file` для remote-kind снят: он писал бы на хост.
 Чистка `sandboxes/`: `python -m gc_server.swarm.cleanup … --core-sandboxes-dir ~/.local/state/gc/sandboxes`.
-## HTTP-процесс gc-chat
+## Хранилище (`storage`)
 
-Секция `chat_api` живёт в том же `config.yml`, что и агент. Читает её только процесс `gc-chat`: и `POST /v1/responses`, и `POST /v1/chat/completions` на одном порту. В шаблон CLI и в `demo_config.yml` она не входит: без секции схема подставляет дефолты (`127.0.0.1:8090`, без токена, любой origin, проза `allow`, finish-gate `off`, напоминания `session_todo` выключены).
+Где лежат треды и ресурсы агента (промпты, AGENTS.md, скиллы, память). Без
+секции — файлы, как раньше. Две части выбираются независимо:
 
-Аннотированный образец для копирования в свой конфиг — [`demo_config_chat.yml`](../demo_config_chat.yml). Обзор процесса — [chat.md](chat.md); детальный контракт Responses — [responses.md](responses.md).
+```yaml
+storage:
+  threads:                       # история, состояние сессий, вложения
+    type: postgres
+    dsn: "${FILE:/run/secrets/pg_dsn}"
+  agent:                         # промпты, скиллы, память
+    type: postgres
+    dsn: "${FILE:/run/secrets/pg_dsn}"
+    agent_id: coder              # обязателен для агента в базе
+  ensure_schema: false           # true — накатить схему при открытии
+```
+
+| `type` | Параметры | Драйвер |
+|---|---|---|
+| `files` (умолчание) | — (каталоги из `paths.*`) | — |
+| `postgres` | `dsn`, `schema`, `pool_options` | `gc-stores[postgres]` |
+| `mysql` | `dsn`, `pool_options` | `gc-stores[mysql]` |
+| `sqlite` | `path` | — |
+| `redis` | `url`, `prefix` | `gc-stores[redis]` |
+| `s3` | `bucket`, `prefix`, `endpoint_url`, `region` (ключи — переменные AWS) | `gc-stores[s3]` |
+| `пакет.модуль:функция` | любые — функция получает их словарём (часть `agent` — и `agent_id`) | своё |
+
+- **Кто открывает.** Ядро знает только схему секции; открывают хранилище
+  `gc-serve` (один раз на процесс, до открытия портов) и `gc-cli` (на запуск).
+  Нужен пакет `gc-stores` (в `gc-server` он есть; к голому `gc-cli` — поставить
+  с драйвером), без него — код 1 и подсказка. TUI и `gc-acp` хранят только в
+  файлах: нефайловая часть — отказ при старте. SDK —
+  `gc_stores.configured.aopen_configured(settings)` и
+  `AsyncAgent.create(settings, stores=…)` ([sdk/stores.md](sdk/stores.md)).
+- **Одна база на обе части** (тот же `type` и те же параметры) — одно
+  подключение.
+- **Схема** сверяется при открытии: не накатана или старая — отказ с подсказкой
+  `gc-stores migrate --config <config.yml>`; `ensure_schema: true` накатывает
+  недостающее сама (нужно право `CREATE`). Ресурсы агента в базу кладёт
+  `gc-stores sync <каталог> --config <config.yml>`.
+- **Секреты.** Подключение — через `${FILE:…}` / `${ENV:…}`. В выводе
+  `config explain` `dsn` скрыт целиком, у остальных параметров — пароль в URL
+  (`redis://:***@host`).
+- **Только свой конфиг.** Слой проекта (`<repo>/.gc/config.yml` и профили из
+  него) `storage` не задаёт — выбрасывается с уведомлением: чужой репозиторий
+  увёл бы историю в свою базу или запустил бы свою фабрику.
+
+Секции `chat_api` и `a2a` из config.yml переехали в config_server.yml (секции
+`chat` и `a2a`, [server.md](server.md#config_serveryml)); здесь они больше не
+читаются — уведомление при загрузке.
 
 ## Где gc-cli хранит runtime-данные
 
@@ -1715,6 +1760,7 @@ Override через переменные окружения: `GC_HOME` (корн
 - **scalar** (число, строка, bool) — project переопределяет global.
 - **dict** — рекурсивный deep merge: project расширяет/переопределяет ключи внутри.
 - **list / array** — конкатенация + dedup: project только **расширяет** список, не сбрасывает (важно для security-полей вроде `agent.stop_tools` или `command_moderation.url_policy.url_blacklist`).
+- **только свой конфиг** — `security.permissions.readonly_commands` и `storage` из проектного слоя не действуют (уведомление при загрузке): это доверие пользователя, а не настройка репозитория.
 
 Пример проектного `<your-repo>/.gc/config.yml`:
 

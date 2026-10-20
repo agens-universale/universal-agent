@@ -60,6 +60,7 @@ def test_host_and_token_are_inherited_and_overridable(tmp_path):
         ({"threads_cleanup": {"enabled": True}}, "webhook.threads_cleanup"),
         ({"swarm": {"enabled": True}}, "server.apis"),
         ({"logging": {"save_logs": False}}, "server.logging"),
+        ({"server": {"port": 9000}}, "webhook.port"),
     ],
 )
 def test_old_keys_name_their_new_place(tmp_path, doc, new_place):

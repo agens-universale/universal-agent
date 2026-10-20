@@ -55,6 +55,7 @@ _MOVED_NESTED = {
         "webhook.context_build_wait_seconds"
     ),
     ("swarm", "enabled"): "server.apis",
+    ("server", "port"): "webhook.port (у каждой поверхности свой порт)",
 }
 
 _STRICT = ConfigDict(extra="forbid", frozen=True)

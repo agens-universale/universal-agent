@@ -37,7 +37,8 @@ agent_overrides:
 webhook:
   port: 8000
   # system по умолчанию, если во входном JSON его нет. Занятые другими
-  # поверхностями (a2a, responses, completions, acp) — 400.
+  # поверхностями и интерактивными сессиями (a2a, responses, completions,
+  # acp, cli, tui) — 400.
   default_system: "generic"
   # Роль агента вебхука. Абсолютный путь — как есть; относительный ищется
   # сначала рядом с ЭТИМ файлом, потом среди bundled-ассетов (в репозитории

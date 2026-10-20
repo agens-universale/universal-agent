@@ -26,8 +26,23 @@ uv pip install "gc-stores[postgres] @ git+https://gitverse.ru/gigacode-ai/univer
 # все драйверы — gc-stores[all]
 ```
 
-Конфигом (`storage:` в YAML) хранилище пока не выбирается — только из кода:
-SDK и плагин Temporal. Выбор конфигом появится с серверным режимом.
+Из конфига — секция `storage` в config.yml
+([configuration.md](../configuration.md#хранилище-storage)); её открывают
+`gc-serve` и `gc-cli`, а в своём коде — `aopen_configured`:
+
+```python
+from gc_stores.configured import aopen_configured
+
+stores = await aopen_configured(settings)   # по storage: настроек
+agent = await AsyncAgent.create(settings, stores=stores)
+...
+await stores.aclose()
+```
+
+Схема при этом сверяется сразу (`ensure_schema: true` — накатывается), а
+неизвестный параметр, нет `agent_id` или драйвера — `StorageConfigError` с
+подсказкой. Утилита берёт подключение из того же файла:
+`gc-stores migrate --config config.yml`, `gc-stores sync ./my-agent --config config.yml`.
 
 ## Подключить
 
