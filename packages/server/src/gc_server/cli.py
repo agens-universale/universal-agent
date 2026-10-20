@@ -33,6 +33,7 @@ from gc_server.config import (
     ServerConfigError,
     load_server_config,
 )
+from gc_server.stores import aopen_process_stores
 from gc_server.surface import say
 
 #: Уровни, которые понимает uvicorn; синонимы logging — к ним.
@@ -92,13 +93,31 @@ def main(argv: list[str] | None = None) -> int:
 
 
 async def _amain(loaded, cfg: ServerConfig, names, log_level: str) -> int:
-    runtime = ServerRuntime(base=loaded, config=cfg)
+    from gc_stores.configured import StorageConfigError
+
+    try:
+        stores = await aopen_process_stores(loaded)
+    except StorageConfigError as exc:
+        say(str(exc))
+        return 1
+    try:
+        return await _aserve_surfaces(
+            ServerRuntime(base=loaded, config=cfg, stores=stores),
+            names,
+            log_level,
+        )
+    finally:
+        if stores is not None:
+            await stores.aclose()
+
+
+async def _aserve_surfaces(runtime: ServerRuntime, names, log_level) -> int:
     try:
         surfaces = [build_surface(runtime, name) for name in names]
     except ServerConfigError as exc:
         say(str(exc))
         return 1
-    _warn(cfg, surfaces)
+    _warn(runtime.config, surfaces)
     try:
         await aserve(runtime, surfaces, log_level=log_level)
     except AddressConflict as exc:

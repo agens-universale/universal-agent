@@ -29,7 +29,7 @@ from gc_core.agent_store import (
 from gc_stores.admin import StoredResource
 from gc_stores.defaults import StaleDefaults
 from gc_stores.kv import keys
-from gc_stores.kv.base import KV, ensure_format
+from gc_stores.kv.base import KV, ensure_format, read_format
 
 _AGENT_LEVEL = "_"
 _ATTEMPTS = 16
@@ -68,6 +68,15 @@ class KvAgentStore(AgentStore):
         await self._kv.check()
         await ensure_format(self._kv)
         self._ready_done = True
+
+    async def ensure_schema(self) -> None:
+        """Записать номер формата ключей, если его нет; иной — отказ."""
+        self._ready_done = False
+        await self._ready()
+
+    async def check_schema(self) -> None:
+        await self._kv.check()
+        await read_format(self._kv, required=True)
 
     async def close(self) -> None:
         await self._kv.close()

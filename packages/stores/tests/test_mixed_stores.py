@@ -11,7 +11,7 @@ from gc_core.stores import Stores
 from gc_core.threads.file_store import FileThreadStore
 from gc_core.threads.models import ThreadKey
 from gc_stores.sync import copy_defaults
-from scripted_model import scripted_settings
+from gc_testkit.scripted_model import scripted_settings
 
 KEY = ThreadKey(system="cli", thread="demo")
 OWN = "Системный промпт из хранилища агента в базе."

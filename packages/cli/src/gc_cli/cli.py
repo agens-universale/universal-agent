@@ -34,6 +34,7 @@ from gc_core.message_policy.user_message_policy import (
 )
 from gc_core.run_context import RunContext, acreate_run_context
 from gc_core.settings import is_explicit
+from gc_core.stores import Stores, run_store_kwargs
 from gc_core.threads.facade import Threads
 from gc_core.threads.models import ThreadKey
 from gc_core.tools.turn.propose_plan import ProposePlan
@@ -57,6 +58,7 @@ from gc_cli.plan_approval import (
     arun_plan_approval,
     athread_has_proposed_plan,
 )
+from gc_cli.stores import aopen_cli_stores, cli_threads
 from gc_cli.structured_output import (
     StructuredOutputError,
     aemit_structured_result,
@@ -231,6 +233,7 @@ class _CliImages(NamedTuple):
 
 async def _aprepare_cli_images(
     settings: Any,
+    stores: Stores | None,
     image_paths: list[str],
     *,
     thread_id: str | None,
@@ -250,7 +253,7 @@ async def _aprepare_cli_images(
     if not image_paths:
         return _CliImages(store, [], 1)
     first_n = await _afirst_image_number(
-        Threads.from_settings(settings), thread_id, start_new_thread
+        cli_threads(settings, stores), thread_id, start_new_thread
     )
     try:
         images = await _astage_cli_images(
@@ -604,10 +607,6 @@ async def _run_init_agents_md() -> int:
     Корутина, потому что зовётся из-под ``asyncio.run(arun_cli())``, а
     синхронного входа у ядра нет вовсе.
     """
-    from gc_core.agent_store import agent_store_of
-    from gc_core.instructions.init_agents_md import abuild_init_prompt
-    from gc_core.security.confirm_port import confirm_available
-
     # Тот же режим запуска, что у основного входа: правило одно для всех
     # контекстов gc-cli (запись журнала правок — `agent_edits.record.cli`).
     loaded, settings_exit = _load_cli_settings(
@@ -617,6 +616,22 @@ async def _run_init_agents_md() -> int:
     if settings_exit is not None:
         return settings_exit
     loaded = loaded.with_runtime(run_mode=RUN_MODE_CLI)
+    stores, stores_exit = await aopen_cli_stores(loaded)
+    if stores_exit is not None:
+        return stores_exit
+    try:
+        return await _arun_init_with(loaded, stores)
+    finally:
+        if stores is not None:
+            await stores.aclose()
+
+
+async def _arun_init_with(loaded: Any, stores: Stores | None) -> int:
+    """``--init`` после загрузки настроек и открытия хранилищ."""
+    from gc_core.agent_store import agent_store_of
+    from gc_core.instructions.init_agents_md import abuild_init_prompt
+    from gc_core.security.confirm_port import confirm_available
+
     auth_connector = build_auth_connector(loaded)
     force_legacy = cli_forces_legacy_model(loaded)
     # Асинхронная сборка: мы уже внутри работающего loop. Синхронный
@@ -624,7 +639,10 @@ async def _run_init_agents_md() -> int:
     # зависшем сервере с дедлайном 2 с: 2.01 с заморозки и 9 тиков хартбита
     # против 0.01 с и 365 тиков у асинхронного двойника.
     ctx = await acreate_run_context(
-        loaded, auth_connector=auth_connector, force_legacy=force_legacy
+        loaded,
+        auth_connector=auth_connector,
+        force_legacy=force_legacy,
+        **run_store_kwargs(loaded, stores),
     )
     # Тот же порт, что и в `arun_cli`. Без него вопрос агента в этом режиме шёл
     # старым путём — `input()` в потоке пула: Ctrl+C обрывал прогон, а выход
@@ -835,6 +853,7 @@ def _load_cli_settings(config_arg, profile_arg):
 async def _acreate_cli_context(
     loaded: Any,
     *,
+    store_kwargs: dict[str, Any],
     auth_connector: Any,
     force_legacy: bool,
     image_store: ImageStore,
@@ -844,7 +863,10 @@ async def _acreate_cli_context(
     stderr (каталог и что сделать) вместо трейсбека, уборка и ``None``."""
     try:
         return await acreate_run_context(
-            loaded, auth_connector=auth_connector, force_legacy=force_legacy
+            loaded,
+            auth_connector=auth_connector,
+            force_legacy=force_legacy,
+            **store_kwargs,
         )
     except RunLogDirUnavailable as exc:
         print(f"[gc] {exc}", file=sys.stderr)
@@ -855,13 +877,16 @@ async def _acreate_cli_context(
 
 
 async def _aapprove_plan_exit(
-    settings: Any, approve_mode: str | None, thread_id: str | None
+    settings: Any,
+    approve_mode: str | None,
+    thread_id: str | None,
+    stores: Stores | None = None,
 ) -> int | None:
     """`--approve-plan` без предложенного плана в сессии — ошибка, код 1."""
     if not approve_mode:
         return None
     if thread_id and await athread_has_proposed_plan(
-        Threads.from_settings(settings), thread_id
+        cli_threads(settings, stores), thread_id
     ):
         return None
     print(NO_PROPOSED_PLAN.format(thread_id=thread_id), file=sys.stderr)
@@ -871,6 +896,7 @@ async def _aapprove_plan_exit(
 async def _alaunch_exit(
     config_arg: str | None,
     loaded: Any,
+    stores: Stores | None,
     *,
     just_created: bool,
     format_text: str | None,
@@ -887,7 +913,7 @@ async def _alaunch_exit(
     )
     if setup_exit is not None:
         return setup_exit
-    return await _aapprove_plan_exit(loaded, approve_mode, thread_id)
+    return await _aapprove_plan_exit(loaded, approve_mode, thread_id, stores)
 
 
 async def _arun_requested_turn(
@@ -951,6 +977,33 @@ async def arun_cli() -> int:
     loaded, settings_exit = _load_cli_settings(config_arg, profile_arg)
     if settings_exit is not None:
         return settings_exit
+    # Хранилище в базе (storage: config.yml) — одно на запуск: открыть до
+    # всего, что читает треды, закрыть после хода.
+    stores, stores_exit = await aopen_cli_stores(loaded)
+    if stores_exit is not None:
+        return stores_exit
+    try:
+        return await _arun_loaded(
+            loaded,
+            stores,
+            config_arg=config_arg,
+            just_created=just_created,
+            format_text=format_text,
+        )
+    finally:
+        if stores is not None:
+            await stores.aclose()
+
+
+async def _arun_loaded(
+    loaded: Any,
+    stores: Stores | None,
+    *,
+    config_arg: str | None,
+    just_created: bool,
+    format_text: str | None,
+) -> int:
+    """Запуск после загрузки настроек и открытия хранилищ ``storage:``."""
     # Режим запуска для ядра: от него зависит запись журнала правок
     # (`agent_edits.record.cli`, по умолчанию выключена — журнал здесь не смотрят).
     loaded = loaded.with_runtime(run_mode=RUN_MODE_CLI)
@@ -976,6 +1029,7 @@ async def arun_cli() -> int:
     launch_exit = await _alaunch_exit(
         config_arg,
         loaded,
+        stores,
         just_created=just_created,
         format_text=format_text,
         approve_mode=approve_mode,
@@ -986,6 +1040,7 @@ async def arun_cli() -> int:
 
     cli_images = await _aprepare_cli_images(
         loaded,
+        stores,
         getattr(arg_parser.run_args, "images", None) or [],
         thread_id=thread_id,
         start_new_thread=start_new_thread,
@@ -1015,6 +1070,7 @@ async def arun_cli() -> int:
     # против 0.01 с). Сервер и SDK давно ходят через acreate_run_context.
     ctx = await _acreate_cli_context(
         loaded,
+        store_kwargs=run_store_kwargs(loaded, stores),
         auth_connector=auth_connector,
         force_legacy=force_legacy,
         image_store=image_store,

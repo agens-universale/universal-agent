@@ -168,7 +168,7 @@ async def mysql_store(mysql_databases):
 @pytest.fixture
 def requests_seen(monkeypatch):
     """Скриптованная модель (``scripted_model``): запросы к ней по порядку."""
-    import scripted_model
+    from gc_testkit import scripted_model
 
     return scripted_model.install(monkeypatch)
 

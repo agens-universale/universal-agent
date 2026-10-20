@@ -364,3 +364,13 @@ def test_acp_declares_a_human_whose_words_are_his_own():
 
 def test_parse_args_accepts_auto_level():
     assert _parse_args(["--level", "auto"]).overrides == {"level": "auto"}
+
+
+def test_backend_rejection_refuses_database_storage():
+    """ACP хранит только в файлах: storage в базе — отказ до протокола."""
+    text = backend_rejection(
+        make_settings(
+            {"storage": {"threads": {"type": "sqlite", "path": "t.db"}}}
+        )
+    )
+    assert text is not None and "storage.threads" in text

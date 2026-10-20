@@ -160,6 +160,7 @@ def _materialize_runtime_config(
            agent.use_server_subagents = False
          (Опц.) paths.agent_md_path / paths.skills_data_path — на внутренние
          пути после копирования файлов из swarm_cfg.
+      6. Секция ``storage`` хоста убирается: тред песочницы — в её файлах.
 
     Возвращает путь к материализованному файлу на хосте (для логирования/тестов).
     """
@@ -232,6 +233,9 @@ def _materialize_runtime_config(
     _copy_swarm_assets(sandbox_path, swarm_cfg, swarm_overrides)
 
     merged = merge_config_layers(raw, swarm_overrides)
+    # Тред песочницы — в её файлах (/work/.gc/threads): подключение хоста к
+    # базе внутрь не уходит — ни как хранилище, ни как секрет в файле.
+    merged.pop("storage", None)
 
     gc_dir = os.path.join(sandbox_path, ".gc")
     os.makedirs(gc_dir, exist_ok=True)

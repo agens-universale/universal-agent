@@ -407,6 +407,14 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
     # токеном владельца, а `AsyncAgent.create` на ошибке закрывает только пул
     # httpx — persistent stdio (браузер) и логгер с открытым файлом доживали до
     # конца процесса.
+    # Нефайловый storage: без открытого хранилища — отказ до всего.
+    from gc_core.stores import require_opened_storage
+
+    require_opened_storage(
+        _coerce_settings(settings, runtime),
+        thread_store=thread_store,
+        agent_store=agent_store,
+    )
     if thread_store is not None:
         from gc_core.thread_store_async import athread_store
 

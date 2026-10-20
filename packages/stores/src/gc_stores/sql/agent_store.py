@@ -147,6 +147,12 @@ class SqlAgentStore(AgentStore):
         await schema.ensure(self._db, self._d, self._migrations)
         self._checked = True
 
+    async def check_schema(self) -> None:
+        """Сверить версию схемы базы с кодом; расхождение —
+        ``SchemaMismatch`` с тем, что сделать."""
+        self._checked = False
+        await self._ready()
+
     async def _read(self, work: Callable[[Conn], Awaitable[T]]) -> T:
         await self._ready()
         async with self._db.connection() as conn:

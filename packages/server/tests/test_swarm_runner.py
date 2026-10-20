@@ -509,6 +509,25 @@ def test_materialize_overrides_use_server_subagents_false(tmp_path):
     assert written["agent"]["use_server_subagents"] is False
 
 
+def test_materialize_drops_host_storage(tmp_path):
+    """Песочница хранит тред в своих файлах (/work/.gc/threads): секция
+    storage хоста с подключением к базе внутрь не попадает."""
+    import yaml as _yaml
+
+    host_cfg = tmp_path / "host.yml"
+    host_cfg.write_text(
+        "storage:\n  threads:\n    type: postgres\n"
+        "    dsn: postgresql://u:secret@db/agent\n"
+    )
+    sandbox = tmp_path / "sb"
+    sandbox.mkdir()
+
+    runner._materialize_runtime_config(str(host_cfg), str(sandbox), {})
+    text = (sandbox / ".gc" / "config.yml").read_text()
+    assert "storage" not in _yaml.safe_load(text)
+    assert "secret" not in text
+
+
 def test_materialize_preserves_host_backend(tmp_path):
     """Хостовые поля backend.* должны сохраниться — sandbox юзает тот же LLM."""
     import yaml as _yaml

@@ -31,7 +31,8 @@ ALLOWED = {
     "temporalio": {"gc_core", "gc_core_temporalio", "gc_stores"},
     "mcp": {"gc_core", "recommended_mcp"},
     "cli": {"gc_core", "gc_cli", "recommended_mcp"},
-    "server": {"gc_core", "gc_server", "recommended_mcp"},
+    # gc-server зависит от gc-stores (хранилища из storage: config.yml).
+    "server": {"gc_core", "gc_server", "recommended_mcp", "gc_stores"},
     "tui": {"gc_core", "gc_tui", "recommended_mcp"},
     "stores": {"gc_core", "gc_stores"},
 }

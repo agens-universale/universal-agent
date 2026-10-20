@@ -10,7 +10,7 @@ from gc_core.threads.file_store import FileThreadStore
 from gc_core.threads.models import ThreadKey
 from gc_stores import sqlite
 from gc_stores.sync import copy_defaults
-from scripted_model import scripted_settings
+from gc_testkit.scripted_model import scripted_settings
 
 
 async def _first_request(settings, requests_seen, **stores):

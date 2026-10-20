@@ -53,23 +53,22 @@ class ServerRuntime:
         return surface_settings(self.base, self.config, name)
 
     def store_kwargs(self) -> dict[str, Any]:
-        """Хранилища для ``acreate_run_context``; пусто — файловые."""
-        if self.stores is None:
-            return {}
-        return {
-            "thread_store": self.stores.threads,
-            "agent_store": self.stores.agent,
-        }
+        """Хранилища для ``acreate_run_context`` и ``AsyncAgent.create`` —
+        только нефайловые части ``storage:``; файловые строит сам прогон."""
+        from gc_core.stores import run_store_kwargs
+
+        return run_store_kwargs(self.base, self.stores)
 
     def threads(self) -> Threads:
-        if self.stores is not None:
-            return Threads(self.stores.threads)
+        store = self.store_kwargs().get("thread_store")
+        if store is not None:
+            return Threads(store)
         return Threads.from_settings(self.base)
 
     def response_index(self) -> Any:
         """Индекс ответов chat в хранилище процесса; ``None`` — файловый по
-        умолчанию фасада."""
-        if self.stores is None:
+        умолчанию фасада (с файлами develop для отката)."""
+        if "thread_store" not in self.store_kwargs():
             return None
         from gc_server.chat.responses.index_store import ResponseIndex
 
@@ -94,7 +93,7 @@ class ServerRuntime:
                     tools_cache=tools_cache,
                     os_backend=os_backend,
                     force_legacy=force_legacy,
-                    stores=self.stores,
+                    **self.store_kwargs(),
                 )
 
         return factory

@@ -13,10 +13,19 @@ dependencies = [
 
     "gc-cli==0.4.0",
     "gc-mcp==0.4.0",
+    "gc-stores==0.4.0",
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.31.1",
     "psutil>=5.9,<7",
 ]
+
+[project.optional-dependencies]
+# Драйверы хранилищ из storage: config.yml (gc-stores без них — только код).
+postgres = ["gc-stores[postgres]==0.4.0"]
+mysql = ["gc-stores[mysql]==0.4.0"]
+redis = ["gc-stores[redis]==0.4.0"]
+s3 = ["gc-stores[s3]==0.4.0"]
+all = ["gc-stores[all]==0.4.0"]
 
 [project.scripts]
 

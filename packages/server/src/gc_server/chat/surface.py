@@ -110,7 +110,14 @@ class ChatSurface:
         self.responses = ResponsesFacade(
             **shared, index=runtime.response_index()
         )
-        self.completions = CompletionsFacade(**shared)
+        self.completions = CompletionsFacade(
+            **shared,
+            threads=(
+                runtime.threads()
+                if "thread_store" in runtime.store_kwargs()
+                else None
+            ),
+        )
 
     def app(self) -> FastAPI:
         return create_app(self.responses, self.completions)

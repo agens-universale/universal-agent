@@ -144,7 +144,12 @@ STORES: dict[str, StoreKind] = {
 
 
 def add_connection_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--store", required=True, choices=sorted(STORES))
+    parser.add_argument("--store", choices=sorted(STORES))
+    parser.add_argument(
+        "--config",
+        help="config.yml агента: подключение — из его секции storage",
+    )
+    parser.add_argument("--profile", help="профиль config.yml")
     parser.add_argument("--dsn", help="адрес базы (или GC_STORES_DSN)")
     parser.add_argument(
         "--schema", default="public", help="схема Postgres (public)"
@@ -165,9 +170,33 @@ def add_connection_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--region", help="регион S3")
 
 
+def _configured(args: argparse.Namespace) -> Any:
+    from gc_core.config import load_settings
+
+    return load_settings(args.config, profile_override=args.profile)
+
+
+def _need_store(args: argparse.Namespace) -> str:
+    if not args.store:
+        raise UsageError("нужен --store или --config (секция storage)")
+    return args.store
+
+
 def open_thread_store(args: argparse.Namespace) -> Any:
-    return STORES[args.store].threads(args)
+    if args.config:
+        from gc_stores.configured import open_part
+
+        return open_part(_configured(args), "threads")
+    return STORES[_need_store(args)].threads(args)
 
 
 def open_agent_store(args: argparse.Namespace) -> Any:
-    return STORES[args.store].agent(args)
+    if args.config:
+        from gc_stores.configured import open_part
+
+        return open_part(
+            _configured(args),
+            "agent",
+            agent_id=getattr(args, "agent_id", None),
+        )
+    return STORES[_need_store(args)].agent(args)

@@ -57,6 +57,7 @@ from gc_core.config_modules.quality_gate import (
     normalize_quality_gate_config,
 )
 from gc_core.config_modules.security import SecurityConfig
+from gc_core.config_modules.storage import StorageConfig
 from gc_core.config_modules.stored_outputs import normalize_tool_output_limits
 from gc_core.config_modules.strip_tags_projection import (
     StripTagsProjectionConfig,
@@ -138,6 +139,11 @@ class AppConfig(BaseModel):
     acp: AcpConfig = Field(default_factory=AcpConfig)
     voice: VoiceConfig = Field(
         default_factory=VoiceConfig,
+        json_schema_extra=gc_meta(expert=True, worker_only=True),
+    )
+    #: Где живут треды и ресурсы агента; открывает фронтенд (gc-serve, gc-cli).
+    storage: StorageConfig = Field(
+        default_factory=StorageConfig,
         json_schema_extra=gc_meta(expert=True, worker_only=True),
     )
     endpoint_presets: list[EndpointPreset] = Field(

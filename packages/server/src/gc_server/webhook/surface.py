@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from datetime import timedelta
 from typing import TYPE_CHECKING, Any, Dict
 
 from fastapi import FastAPI, HTTPException, Request
@@ -17,6 +18,7 @@ from gc_core.agent_edits.ctx import RUN_MODE_SERVER
 from gc_core.agent_executor import AgentExecutor
 from gc_core.config import cli_forces_legacy_model
 from gc_core.config_modules.auth import build_auth_connector
+from gc_core.execution.environment import utc_now
 from gc_core.run_context import acreate_run_context
 from gc_core.thread_store import validate_thread_id
 from gc_core.threads.facade import Threads
@@ -128,24 +130,67 @@ class WebhookSurface:
         self.section = runtime.config.surface("webhook")
         self.settings = webhook_settings(runtime)
         self.registry = AgentRunRegistry()
+        self._pruner: asyncio.Task | None = None
 
     # --- жизненный цикл ----------------------------------------------------
 
     async def astart(self) -> None:
         cleanup = self.config.threads_cleanup
-        if cleanup.enabled:
-            from gc_core.thread_store import resolve_threads_dir
-
-            start_threads_cleanup(
-                enabled=True,
-                interval_seconds=cleanup.interval_seconds,
-                ttl_days=cleanup.ttl_days,
-                threads_dir=resolve_threads_dir(self.settings),
-                logger=logger,
+        if not cleanup.enabled:
+            return
+        if "thread_store" in self.runtime.store_kwargs():
+            # Треды в базе: чистка — через фасад и только треды вебхука.
+            logger.info(
+                "чистка тредов включена (хранилище storage.threads): ttl %g "
+                "дн., интервал %d с",
+                cleanup.ttl_days,
+                cleanup.interval_seconds,
             )
+            self._pruner = asyncio.create_task(self._aprune_loop())
+            return
+        from gc_core.thread_store import resolve_threads_dir
+
+        start_threads_cleanup(
+            enabled=True,
+            interval_seconds=cleanup.interval_seconds,
+            ttl_days=cleanup.ttl_days,
+            threads_dir=resolve_threads_dir(self.settings),
+            logger=logger,
+        )
 
     async def astop(self) -> None:
         self.registry.cancel_all()
+        pruner, self._pruner = self._pruner, None
+        if pruner is not None:
+            pruner.cancel()
+            await asyncio.gather(pruner, return_exceptions=True)
+
+    async def aprune_once(self, *, older_than: timedelta) -> int:
+        """Удалить треды вебхука, не менявшиеся дольше ``older_than``;
+        треды других поверхностей и интерактивных сессий не трогаются."""
+        cutoff = (utc_now() - older_than).isoformat()
+        threads = self.threads()
+        stale = [
+            record.key
+            async for record in threads.iter_threads(updated_before=cutoff)
+            if record.key.system not in RESERVED_SYSTEMS
+        ]
+        for key in stale:
+            await threads.delete(key)
+        return len(stale)
+
+    async def _aprune_loop(self) -> None:
+        cleanup = self.config.threads_cleanup
+        while True:
+            try:
+                removed = await self.aprune_once(
+                    older_than=timedelta(days=cleanup.ttl_days)
+                )
+                if removed:
+                    logger.info("чистка тредов: удалено %d", removed)
+            except Exception:
+                logger.warning("чистка тредов не удалась", exc_info=True)
+            await asyncio.sleep(cleanup.interval_seconds)
 
     # --- приложение -------------------------------------------------------
 

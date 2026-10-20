@@ -18,6 +18,7 @@ import sys
 from pathlib import Path
 
 from gc_stores import migrations
+from gc_stores.configured import StorageConfigError
 from gc_stores.connect import (
     UsageError,
     add_connection_args,
@@ -121,3 +122,6 @@ def main(argv: list[str] | None = None) -> int:
     except UsageError as exc:
         print(f"gc-stores: {exc}", file=sys.stderr)
         return 2
+    except StorageConfigError as exc:
+        print(f"gc-stores: {exc}", file=sys.stderr)
+        return 1

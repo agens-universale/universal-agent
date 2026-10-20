@@ -45,6 +45,7 @@ class CompletionsFacade:
         tools_cache: Any = None,
         os_backend: Any = None,
         section: ChatConfig | None = None,
+        threads: Threads | None = None,
     ) -> None:
         section = section or ChatConfig(host=LOOPBACK)
         self._settings = settings
@@ -52,7 +53,7 @@ class CompletionsFacade:
         self._auth = auth_connector
         self._tools_cache = tools_cache
         self._os_backend = os_backend
-        self._threads = Threads.from_settings(settings)
+        self._threads = threads or Threads.from_settings(settings)
         self.auth_token = section.auth_token or ""
         self.cors_origins = _cors_origins(section.cors_origins)
         self.bind_host = section.host or LOOPBACK

@@ -1321,8 +1321,26 @@ dependencies = [
     { name = "gc-cli" },
     { name = "gc-core" },
     { name = "gc-mcp" },
+    { name = "gc-stores" },
     { name = "psutil" },
     { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.optional-dependencies]
+all = [
+    { name = "gc-stores", extra = ["all"] },
+]
+mysql = [
+    { name = "gc-stores", extra = ["mysql"] },
+]
+postgres = [
+    { name = "gc-stores", extra = ["postgres"] },
+]
+redis = [
+    { name = "gc-stores", extra = ["redis"] },
+]
+s3 = [
+    { name = "gc-stores", extra = ["s3"] },
 ]
 
 [package.metadata]
@@ -1331,9 +1349,16 @@ requires-dist = [
     { name = "gc-cli", editable = "packages/cli" },
     { name = "gc-core", editable = "packages/core" },
     { name = "gc-mcp", editable = "packages/mcp" },
+    { name = "gc-stores", editable = "packages/stores" },
+    { name = "gc-stores", extras = ["all"], marker = "extra == 'all'", editable = "packages/stores" },
+    { name = "gc-stores", extras = ["mysql"], marker = "extra == 'mysql'", editable = "packages/stores" },
+    { name = "gc-stores", extras = ["postgres"], marker = "extra == 'postgres'", editable = "packages/stores" },
+    { name = "gc-stores", extras = ["redis"], marker = "extra == 'redis'", editable = "packages/stores" },
+    { name = "gc-stores", extras = ["s3"], marker = "extra == 's3'", editable = "packages/stores" },
     { name = "psutil", specifier = ">=5.9,<7" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.31.1" },
 ]
+provides-extras = ["postgres", "mysql", "redis", "s3", "all"]
 
 [[package]]
 name = "gc-stores"

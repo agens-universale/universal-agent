@@ -306,6 +306,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     settings = apply_tui_runtime(settings)
 
+    from gc_core.stores import files_only_rejection
+
+    storage_rejection = files_only_rejection(settings, program="gc-ua")
+    if storage_rejection is not None:
+        print(storage_rejection, file=sys.stderr)
+        return 1
+
     from gc_core.thread_store import resolve_threads_dir
 
     threads_dir = resolve_threads_dir(settings)
