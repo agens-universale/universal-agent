@@ -65,12 +65,20 @@ ZEBRA_BG = "#232836"  # чётная строка зебры (справка)
 SKILL = "#afd7ff"  # имя скилла
 
 
+def _rgb(hex_color: str) -> tuple[int, ...]:
+    value = hex_color.lstrip("#")
+    return tuple(int(value[i : i + 2], 16) for i in (0, 2, 4))
+
+
+def _hex(channels) -> str:
+    clamped = (min(255, max(0, round(c))) for c in channels)
+    return "#" + "".join(f"{c:02x}" for c in clamped)
+
+
 def _mix(base: str, accent: str, t: float) -> str:
     """Смешивает accent с base в пропорции t∈[0,1] → hex (base при t=0, accent при t=1)."""
-    b = [int(base.lstrip("#")[i : i + 2], 16) for i in (0, 2, 4)]
-    a = [int(accent.lstrip("#")[i : i + 2], 16) for i in (0, 2, 4)]
-    mixed = (round(bc + (ac - bc) * t) for bc, ac in zip(b, a))
-    return "#" + "".join(f"{c:02x}" for c in mixed)
+    mixed = (bc + (ac - bc) * t for bc, ac in zip(_rgb(base), _rgb(accent)))
+    return _hex(mixed)
 
 
 # Диффы правок агента: фоны строк — примесь OK/ERR к BG (не «чистые» red/green,
@@ -111,7 +119,7 @@ DIFF_ADD_GUTTER = OK
 DIFF_DEL_GUTTER = ERR
 
 
-# Кромка неотправленной реплики; в теме auto значение считается от фона (Задача 6).
+# Кромка неотправленной реплики; в теме auto — _mix(BG, ACCENT, 0.64).
 USER_PENDING_EDGE = "#3a7a72"
 
 
@@ -120,7 +128,7 @@ _AMBER = (
 )
 
 # Рампы анимаций (ping-pong, пик — токен палитры); значения те же, что были
-# литералами в виджетах. В теме auto формулу от фона даст Задача 6.
+# литералами в виджетах. В теме auto их пересчитывает apply_background.
 # Дыхание «думаю»: gold, пик #f0c896.
 GLOW_SHADES = [
     "#9c7a4a",
@@ -173,6 +181,110 @@ PULSE_SHADES = [
     "#a47f55",
     "#977448",
 ]
+
+
+# ── Тема auto: палитра от фона терминала ───────────────────────────────────
+# Всё выше — тема fixed (литералы, снапшоты неизменны). apply_background
+# подменяет фон и зависящие от него токены; reset возвращает литералы.
+
+# Тон синеватых поверхностей (фокус, карточки, оверлеи, трек метра). Один
+# параметр: "#ffffff" даёт нейтральные поверхности той же светлоты. Подобран
+# так, что при фоне fixed каждая поверхность расходится с литералом <= 2.
+SURFACE_TINT = "#78829b"
+_TINTED = (
+    "FOCUS_BG",
+    "CARD_SELECT_BG",
+    "USER_BAND_BG",
+    "OVERLAY_BG",
+    "ZEBRA_BG",
+    "TRACK",
+)
+# Фоны диффа едут вместе с фоном на тот же сдвиг: их взаимные дистанции
+# (стражи различимости add/del, акцент/строка, строка/фон) не зависят от
+# фона. Примесь _mix(bg, OK, 0.29) на светлом фоне теряла их ниже порога.
+_DIFF = ("DIFF_ADD_BG", "DIFF_DEL_BG", "DIFF_ADD_HL", "DIFF_DEL_HL")
+# Рампа → её пик (сам пик от фона не зависит).
+_RAMP_PEAKS = {
+    "GLOW_SHADES": "#f0c896",
+    "PROCESSING_SHADES": DEEP_DIM,
+    "VALIDATING_SHADES": CODE_BLOCK,
+    "PULSE_SHADES": RUN_COLOR,
+}
+_FIXED = {
+    name: globals()[name]
+    for name in (
+        "BG",
+        "BAND_BG",
+        "BLOCK_BG",
+        "USER_PENDING_EDGE",
+        *_DIFF,
+        *_TINTED,
+        *_RAMP_PEAKS,
+    )
+}
+
+
+def _weight(color: str, anchor: str) -> float:
+    """Доля anchor в color при фоне fixed: проекция color−BG на anchor−BG."""
+    bg = _rgb(_FIXED["BG"])
+    to_anchor = [a - b for a, b in zip(_rgb(anchor), bg)]
+    to_color = [c - b for c, b in zip(_rgb(color), bg)]
+    dot = sum(x * y for x, y in zip(to_anchor, to_color))
+    return dot / sum(x * x for x in to_anchor)
+
+
+def _shift(color: str, bg: str, share: float = 1.0) -> str:
+    """Сдвигает color на share сдвига фона от fixed к bg."""
+    old, new = _rgb(_FIXED["BG"]), _rgb(bg)
+    moved = (c + share * (n - o) for c, n, o in zip(_rgb(color), new, old))
+    return _hex(moved)
+
+
+def _rebase(stops: list[str], peak: str, bg: str) -> list[str]:
+    """Стопы рампы на новом фоне: доля фона в стопе (1 − вес пика) едет
+    вместе с фоном, остальное остаётся. При фоне fixed — ровно литералы."""
+    return [_shift(stop, bg, 1 - _weight(stop, peak)) for stop in stops]
+
+
+def _derived(bg: str) -> dict[str, object]:
+    tinted = {
+        name: _mix(bg, SURFACE_TINT, _weight(_FIXED[name], SURFACE_TINT))
+        for name in _TINTED
+    }
+    ramps = {
+        name: _rebase(_FIXED[name], peak, bg)
+        for name, peak in _RAMP_PEAKS.items()
+    }
+    return {
+        "BG": bg,
+        "BAND_BG": _mix(bg, INK, 0.075),
+        "BLOCK_BG": _mix(bg, INK, 0.042),
+        "USER_PENDING_EDGE": _mix(bg, ACCENT, 0.64),
+        **{name: _shift(_FIXED[name], bg) for name in _DIFF},
+        **tinted,
+        **ramps,
+    }
+
+
+def apply_background(rgb: tuple[int, int, int]) -> None:
+    """Тема auto: фон терминала → BG и зависящие от него токены. Вызывается
+    до импорта модулей, берущих токены через `from gc_tui.palette import`."""
+    globals().update(_derived(_hex(rgb)))
+
+
+def reset() -> None:
+    """Возврат к теме fixed (литералы)."""
+    globals().update(_FIXED)
+
+
+def is_light(rgb: tuple[int, int, int]) -> bool:
+    """Светлый фон: относительная яркость по WCAG больше 0,5."""
+    linear = [
+        c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+        for c in (channel / 255 for channel in rgb)
+    ]
+    luminance = 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+    return luminance > 0.5
 
 
 def css_variables() -> dict[str, str]:
