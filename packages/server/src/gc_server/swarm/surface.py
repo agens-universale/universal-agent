@@ -16,7 +16,6 @@ from typing import TYPE_CHECKING, Any, Dict
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
-from gc_core.thread_store import sanitize_system_id
 
 from gc_server.surface import http_error, install_bearer, read_json_object
 from gc_server.swarm import lifecycle as swarm_lifecycle
@@ -178,10 +177,7 @@ class SwarmSurface:
     async def start_task(self, request: Request):
         payload = await read_json_object(request)
         task_id, trace_id = request_task_identifiers(payload)
-        system = sanitize_system_id(
-            request_system(payload, self.config.webhook.default_system)
-        )
-        payload["system"] = system
+        system = request_system(payload, self.config.webhook.default_system)
         sid = swarm_id(system, task_id)
         with self._start_lock:
             existing = swarm_storage.load_swarm_meta(self.threads_dir, sid)
@@ -290,8 +286,7 @@ class SwarmSurface:
 
     @staticmethod
     def _key(system: str, task_id: str) -> tuple[str, str]:
-        sys_norm, task_norm = path_key(system, task_id)
-        return sanitize_system_id(sys_norm), task_norm
+        return path_key(system, task_id)
 
 
 def _swarm_meta(meta: Dict[str, Any]) -> Dict[str, Any]:

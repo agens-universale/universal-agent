@@ -28,7 +28,7 @@ from gc_core.utils.generate_message_id import (
 
 from gc_server.config import RESERVED_SYSTEMS
 from gc_server.surface import (
-    check_system_allowed,
+    allowed_system,
     http_error,
     install_bearer,
     read_json_object,
@@ -80,7 +80,7 @@ def request_system(payload: dict, default_system: str) -> str:
         )
     except ValueError as exc:
         raise http_error(400, str(exc)) from None
-    check_system_allowed(system)
+    system = allowed_system(system)
     payload["system"] = system
     return system
 
@@ -95,8 +95,7 @@ def path_key(system: str, task_id: str) -> tuple[str, str]:
         task_norm = validate_thread_id(task_norm)
     except ValueError as e:
         raise http_error(400, str(e)) from None
-    check_system_allowed(sys_norm)
-    return sys_norm, task_norm
+    return allowed_system(sys_norm), task_norm
 
 
 def _log_ignored_trace_id(trace_id, system, task_id):

@@ -13,6 +13,7 @@ from typing import Any, Protocol
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
+from gc_core.thread_store import sanitize_system_id
 
 from gc_server.config import RESERVED_SYSTEMS
 
@@ -59,15 +60,24 @@ def http_error(status: int, payload: str, **extra: Any) -> HTTPException:
     )
 
 
-def check_system_allowed(system: str) -> None:
-    """``system`` другой поверхности — 400: вебхук и swarm не пишут в её
-    треды."""
-    if system in RESERVED_SYSTEMS:
+def allowed_system(system: str) -> str:
+    """``system`` в той форме, в какой его хранит хранилище
+    (``sanitize_system_id``), если он не чужой; иначе — 400.
+
+    Проверять сырую строку нельзя: хранилище нормализует её само, и «cli!» или
+    «.cli» стали бы тредом «cli» в обход проверки."""
+    try:
+        normalized = sanitize_system_id(system)
+    except ValueError as exc:
+        raise http_error(400, str(exc)) from None
+    if normalized in RESERVED_SYSTEMS:
         raise http_error(
             400,
-            f"system {system!r} занят другой поверхностью сервера "
-            f"(занятые: {', '.join(sorted(RESERVED_SYSTEMS))})",
+            f"system {normalized!r} занят другой поверхностью сервера или "
+            f"интерактивными сессиями (занятые: "
+            f"{', '.join(sorted(RESERVED_SYSTEMS))})",
         )
+    return normalized
 
 
 async def read_json_object(request: Request) -> dict:

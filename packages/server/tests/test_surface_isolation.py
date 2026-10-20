@@ -81,3 +81,19 @@ def test_webhook_does_not_write_into_interactive_sessions(client):
         "/events/webhook", json={"system": "cli", "task_id": "t"}
     )
     assert resp.status_code == 400
+
+
+@pytest.mark.parametrize(
+    "system", ["cli!", "CLI.", ".cli", "cli_", "Cli​", "a2a!", "responses."]
+)
+def test_reserved_check_sees_the_normalized_system(client, system):
+    """Хранилище нормализует system (``sanitize_system_id``): «cli!» и
+    «.cli» — это тред «cli». Проверка обязана видеть то же, что хранилище."""
+    from urllib.parse import quote
+
+    assert client.get(f"/logs/{quote(system)}/t1").status_code == 400
+    assert client.get(f"/runs/{quote(system)}/t1").status_code == 400
+    resp = client.post(
+        "/events/webhook", json={"system": system, "task_id": "x"}
+    )
+    assert resp.status_code == 400
