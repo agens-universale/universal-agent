@@ -79,11 +79,11 @@ from gc_tui.services.image_open import open_image
 from gc_tui.services.mode_pill import (
     MODE_HINTS,
     PILL_GAP,
+    mode_hint_rows,
     render_mode_pill,
 )
 from gc_tui.services.notices_ui import (
     footer_left_rows,
-    footer_left_with_badge,
     format_notices_badge,
 )
 from gc_tui.services.path_display import truncate_path
@@ -179,7 +179,8 @@ from gc_tui.widgets.trace_row import TraceRow
 # Константы вместо повторяющихся литералов (Sonar S1192).
 _PREFIX_EXPORTED = "[exported] "
 _SEL_CMDINPUT = "#cmdinput"
-_SEL_FOOTER_LEFT = "#footer-left"
+_SEL_FOOTER_MODE = "#footer-mode"
+_SEL_FOOTER_SLOT = "#footer-slot"
 _SEL_INDICATOR_BAR = "#indicator-bar"
 _SEL_INPUT_ROW = "#input-row"
 _SEL_ROOT = "#root"
@@ -622,7 +623,8 @@ class TraceScreen(Screen):
         # дважды (подготовка и страховочная сетка), и вторая не вправе её
         # двигать. Снимается на спадающем фронте.
         self._edits_baseline_taken = False
-        # Транзиентная подсказка в footer-left (esc-confirm и paste-hint делят слот).
+        # Транзиентная подсказка в слоте футера (строка 2: esc-confirm,
+        # paste-hint, отказы и советы делят его).
         self._esc_confirm_kind: Optional[str] = (
             None  # "clear" | "stop" | "paste" | None
         )
@@ -631,6 +633,10 @@ class TraceScreen(Screen):
         self._footer_hint_text: Optional[str] = (
             None  # текст активной подсказки
         )
+        # Активная подсказка — пояснение режима: занимает обе строки левой
+        # части. Shift+Tab во время записи откладывает пояснение до её конца.
+        self._footer_mode_hint: Optional[str] = None
+        self._mode_hint_after_voice: Optional[str] = None
         self._footer_refusal_active: bool = False
         self._refusal_run_id = None  # прогон, ШЕДШИЙ при постановке отказа
         self._refusal_input_text = ""  # текст поля ввода при постановке отказа
@@ -692,7 +698,9 @@ class TraceScreen(Screen):
                     placeholder=_PLACEHOLDER_READY_HELP, id="cmdinput"
                 )
             with Horizontal(id="footer"):
-                yield Static("", id="footer-left", markup=False)
+                with Vertical(id="footer-left"):
+                    yield Static("", id="footer-mode", markup=False)
+                    yield Static("", id="footer-slot", markup=False)
                 yield Static(
                     self._compose_footer_right(),
                     id="footer-right",
@@ -1471,69 +1479,83 @@ class TraceScreen(Screen):
             return "Esc/stop  Enter/ответить"
         return _FOOTER_RUNNING_LEFT if self._run_in_progress() else ""
 
-    def _footer_left_text(self) -> Text:
-        """Пилюля режима + команды + счётчик уведомлений, собранные по фактической ширине.
+    def _voice_busy(self) -> bool:
+        """Идёт голосовая стадия (запись или распознавание)."""
+        return self._voice is not None and self._voice.state != "idle"
 
-        Сборку делает footer_left_with_badge: блок уведомлений либо стоит в строке с
-        командами (тогда перед ним разделитель-точка), либо уходит вниз целиком и без
-        точки. Ширина — контентная ширина самого #footer-left; до первого layout она
-        нулевая, и сборка оптимистична — resize/refresh пересоберут по месту (канон
-        бренд-карточки: раскладку выбирает фактическая ширина, а не момент сборки)."""
-        badge = format_notices_badge(self._collect_footer_notices())
+    def _footer_row_width(self) -> int:
+        """Контентная ширина строк левой части; до первого layout — 0."""
         try:
-            width = self.query_one(_SEL_FOOTER_LEFT, Static).content_size.width
+            return self.query_one(_SEL_FOOTER_MODE, Static).content_size.width
         except Exception:
-            width = 0
-        # Пилюля — в самой богатой форме, с которой левая укладывается в свои
-        # два ряда (то же условие, по которому правая колонка оставляла ей
-        # место): полная, затем один глиф. Если рядом с критичной командой не
-        # встаёт и глиф, уступает он: команду остановки терять нельзя ни на
-        # какой ширине.
+            return 0
+
+    def _footer_mode_line(self) -> Text:
+        """Строка 1: пилюля режима + хвост команд; во время записи — пилюля
+        голоса.
+
+        Пилюля — в самой богатой форме, что встаёт в строку целиком: полная,
+        затем один глиф. Не встаёт и глиф — уступает он: хвост (команда
+        остановки, ответ агенту) не теряется ни на какой ширине. Ширина 0
+        (layout ещё не прошёл) — полная форма; resize пересоберёт по месту."""
+        if self._voice_busy():
+            return self._voice_footer_render()
         tail = self._footer_tail_commands()
-        forms = [
-            (pill, f"{pill.plain}{PILL_GAP}{tail}" if tail else pill.plain)
-            for pill in (self._mode_pill(), self._mode_pill(narrow=True))
-        ]
-        if tail:
-            forms.append((Text(), tail))
-        # Первая форма, что укладывается; не уложилась ни одна — последняя.
-        pill, commands = next(
-            (
-                form
-                for form in forms
-                if width <= 0
-                or footer_left_rows(form[1], badge, width=width) <= 2
-            ),
-            forms[-1],
-        )
-        # Сборка работает со строками; цвет пилюли возвращается поверх: она
-        # стоит в начале текста, и её разметка ложится по тем же позициям.
-        out = Text(footer_left_with_badge(commands, badge, width=width))
-        for span in pill.spans:
-            out.stylize(span.style, span.start, span.end)
+        width = self._footer_row_width()
+        for pill in (self._mode_pill(), self._mode_pill(narrow=True)):
+            line = pill.copy()
+            if tail:
+                line.append(f"{PILL_GAP}{tail}")
+            if width <= 0 or line.cell_len <= width:
+                return line
+        return Text(tail) if tail else self._mode_pill(narrow=True)
+
+    def _footer_slot_line(self) -> Text:
+        """Строка 2 (слот): подсказка/отказ/совет, иначе бейдж уведомлений.
+
+        Во время записи первым стоит глиф режима его цветом: строку 1 заняла
+        пилюля голоса, а режим должен оставаться виден."""
+        out = Text()
+        if self._voice_busy():
+            out.append_text(self._mode_pill(narrow=True))
+        if self._footer_hint_active and self._footer_mode_hint is None:
+            body = Text(self._footer_hint_text or "")
+        else:
+            body = Text(format_notices_badge(self._collect_footer_notices()))
+        if out and body:
+            out.append(PILL_GAP)
+        out.append_text(body)
         return out
 
-    def _refresh_notices_footer(self) -> None:
-        """Обновить счётчик уведомлений в footer-left (без затрагивания footer-right)."""
-        if self._footer_hint_active:
-            return
-        # Во время голосовой стадии footer-left занят пилюлей — событийный
-        # runtime-notice не должен её затирать (тик записи восстановит счётчик).
-        if self._voice is not None and self._voice.state != "idle":
-            return
+    def _render_footer_left(self) -> None:
+        """Перерисовать обе строки левой части по текущему состоянию.
+
+        Пояснение режима — исключение: «пилюля — пояснение» переносится на
+        обе строки, хвост и бейдж на это время скрыты. Во время записи оно
+        не рисуется — строка 1 отдана пилюле голоса."""
         try:
-            update_if_changed(
-                self.query_one(_SEL_FOOTER_LEFT, Static),
-                self._footer_left_text(),
-            )
+            mode = self.query_one(_SEL_FOOTER_MODE, Static)
+            slot = self.query_one(_SEL_FOOTER_SLOT, Static)
         except Exception:
-            pass
+            return
+        if self._footer_mode_hint is not None and not self._voice_busy():
+            first, second = mode_hint_rows(
+                self._footer_mode_hint, self._footer_row_width()
+            )
+        else:
+            first, second = self._footer_mode_line(), self._footer_slot_line()
+        update_if_changed(mode, first)
+        update_if_changed(slot, second)
+
+    def _refresh_notices_footer(self) -> None:
+        """Обновить левую часть футера (бейдж уведомлений) без footer-right."""
+        self._render_footer_left()
 
     def _refresh_footer(self) -> None:
         """Switch footer text between empty-state and main-screen based on active task.
 
-        Left-side update пропускается, если активен Esc-confirm hint — иначе
-        тиковый poll затирал бы подсказку до её 2-секундного таймера.
+        Левая часть пересобирается из состояния: активная подсказка держит
+        слот до своего таймера, строка режима живёт по тику.
         Right-side (модель·контекст) обновляется каждый тик — метр контекста
         растёт по ходу прогона.
         """
@@ -1544,14 +1566,6 @@ class TraceScreen(Screen):
             )
         except Exception:
             pass
-        try:
-            left = self.query_one(_SEL_FOOTER_LEFT, Static)
-        except Exception:
-            return
-        # Голосовая пилюля вытесняет остальной footer-left, пока стадия активна.
-        if self._voice is not None and self._voice.state != "idle":
-            update_if_changed(left, self._voice_footer_render())
-            return
         # Подсказка уступает место запущенному прогону: пока отказ дожёвывает
         # свои 5 секунд, человек мог отправить запрос — футер обязан показать
         # «Ctrl+C/stop», а не устаревший текст (живой смок владельца 2026-09-04).
@@ -1561,8 +1575,7 @@ class TraceScreen(Screen):
             and self.app.tui_state.active_task_id != self._refusal_run_id
         ):
             self._reset_footer_hint_state()
-        if not self._footer_hint_active:
-            update_if_changed(left, self._footer_left_text())
+        self._render_footer_left()
 
     def on_screen_resume(self) -> None:
         """После возврата с под-экрана — освежить карточку и футер уведомлений."""
@@ -1574,7 +1587,7 @@ class TraceScreen(Screen):
         return str(Path.cwd())
 
     def _show_footer_refusal(self, text: str) -> None:
-        """Содержательный отказ («✗ не сохранено: <причина>») в footer-left.
+        """Содержательный отказ («✗ не сохранено: <причина>») в слоте футера.
 
         Отдельно от `_show_footer_hint`: у отказа есть причина с координатой
         («slots.default: алиас "ghost" не найден…»), и 2-секундного дефолта
@@ -1607,8 +1620,8 @@ class TraceScreen(Screen):
             self._refusal_input_text = ""
 
     def _show_footer_tip(self, text: str) -> None:
-        """Совет в footer-left (подсказки картинок) — по канону отказа: 5 с, следующее
-        действие человека гасит его раньше."""
+        """Совет в слоте футера (подсказки картинок) — по канону отказа: 5 с,
+        следующее действие человека гасит его раньше."""
         self._show_footer_refusal(text)
 
     def _footer_tip_fits(self) -> bool:
@@ -1624,15 +1637,16 @@ class TraceScreen(Screen):
             return False
 
     def _show_footer_hint(self, text: str, seconds: float = 2.0) -> None:
-        """Короткая подсказка в footer-left (esc-confirm — 2с, paste-hint — 5с,
-        содержательные отказы — `_show_footer_refusal`)."""
+        """Короткая подсказка в слоте футера (esc-confirm — 2с, paste-hint —
+        5с, содержательные отказы — `_show_footer_refusal`)."""
         # Новая подсказка снимает режим отказа: иначе paste-hint, показанный
         # ПОСЛЕ отказа, гасился бы первой печатью — не по своему канону
         # (`_show_footer_refusal` ставит флаг заново, после этого вызова).
         self._footer_refusal_active = False
         self._footer_hint_active = True
         self._footer_hint_text = text
-        self.query_one(_SEL_FOOTER_LEFT).update(text)
+        self._footer_mode_hint = None
+        self._render_footer_left()
         if self._footer_hint_timer is not None:
             self._footer_hint_timer.stop()
         self._footer_hint_timer = self.set_timer(
@@ -1643,17 +1657,20 @@ class TraceScreen(Screen):
         """Смена режима: пилюля перерисовывается сразу, плюс короткое пояснение.
 
         Пояснение склеивается с пилюлей в одну фразу («⏸ manual mode —
-        подтверждение всех действий, кроме чтения»): имя стоит в пилюле, текст
-        его не повторяет.
+        подтверждение всех действий, кроме чтения») и занимает обе строки
+        левой части на 2,5 с: имя стоит в пилюле, текст его не повторяет.
+        Во время записи режим меняется сразу (глиф в слоте), а пояснение
+        ждёт её конца — строка 1 занята пилюлей голоса.
         """
         self._refresh_footer()
-        hint = MODE_HINTS.get(mode)
-        if not hint:
+        if mode not in MODE_HINTS:
             return
-        text = Text()
-        text.append_text(render_mode_pill(mode, hint=False))
-        text.append(f" — {hint}")
-        self._show_footer_hint(text, seconds=2.5)
+        if self._voice_busy():
+            self._mode_hint_after_voice = mode
+            return
+        self._show_footer_hint(MODE_HINTS[mode], seconds=2.5)
+        self._footer_mode_hint = mode
+        self._render_footer_left()
 
     def _show_esc_hint(self, kind: str) -> None:
         """Esc-confirm hint: запоминает kind (для 2-го Esc) + показывает подсказку."""
@@ -1666,6 +1683,7 @@ class TraceScreen(Screen):
         self._esc_confirm_kind = None
         self._footer_hint_active = False
         self._footer_hint_text = None
+        self._footer_mode_hint = None
         self._footer_refusal_active = False
         self._refusal_run_id = None
         if self._footer_hint_timer is not None:
@@ -1673,7 +1691,7 @@ class TraceScreen(Screen):
             self._footer_hint_timer = None
 
     def _clear_footer_hint(self) -> None:
-        """Сбросить hint-state (esc + paste) + восстановить footer-left (команды).
+        """Сбросить hint-state (esc + paste) и вернуть слоту бейдж.
 
         Пока идёт вставка изображения, покой футера — «Вставка…» (контракт картинок §2):
         отказ, «дождитесь…» и Esc-подсказка гаснут обратно в неё, а не в команды."""
@@ -1687,7 +1705,7 @@ class TraceScreen(Screen):
 
     def _run_in_progress(self) -> bool:
         """Прогон реально идёт: активная задача + живой раннер. Один предикат на
-        выбор `Ctrl+C/stop` в footer-left и на уступку подсказки прогону."""
+        выбор `Ctrl+C/stop` в строке режима и на уступку подсказки прогону."""
         runner = getattr(self.app, "active_runner", None)
         return (
             self.app.tui_state.active_task_id is not None
@@ -1902,6 +1920,13 @@ class TraceScreen(Screen):
                 # Конфиг перечитали, пока шла запись: рвать её было нельзя, а теперь
                 # можно — следующая диктовка соберётся на свежей voice-секции.
                 self._drop_voice_flow()
+            pending, self._mode_hint_after_voice = (
+                self._mode_hint_after_voice,
+                None,
+            )
+            if pending is not None:
+                self.on_permission_mode_changed(pending)
+                return
         elif self._voice_timer is None:
             self._voice_frame = 0
             # 0.08 с (было 0.15): эквалайзер обязан успевать за голосом, а звук теперь

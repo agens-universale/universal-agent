@@ -536,7 +536,7 @@ async def test_typed_gate_command_shows_info_without_changing_value(tmp_path):
             cfg_file.read_text(encoding="utf-8")
             == 'tui:\n  finish_gate_mode: "on"\n'
         )
-        footer = pilot.app.query_one("#footer-left")
+        footer = pilot.app.query_one("#footer-slot")
         footer_text = str(footer.render())
         assert "/gate: on" in footer_text
         assert "←/→" in footer_text
@@ -565,7 +565,7 @@ async def test_typed_answers_command_shows_info_without_changing_value(
             cfg_file.read_text(encoding="utf-8")
             == 'tui:\n  text_answer_mode: "judge"\n'
         )
-        footer = pilot.app.query_one("#footer-left")
+        footer = pilot.app.query_one("#footer-slot")
         footer_text = str(footer.render())
         assert "/answers: judge" in footer_text
         assert "←/→" in footer_text
@@ -591,7 +591,7 @@ async def test_typed_rigor_command_shows_info_without_changing_value(tmp_path):
         await pilot.pause(0.05)
 
         assert cfg_file.read_text(encoding="utf-8") == original
-        footer = pilot.app.query_one("#footer-left")
+        footer = pilot.app.query_one("#footer-slot")
         footer_text = str(footer.render())
         assert "/rigor: high" in footer_text
         assert "←/→" in footer_text
@@ -1279,7 +1279,7 @@ async def test_palette_toggle_apply_failure_shows_flash_keeps_palette_and_value(
         await pilot.press("left")
         await pilot.pause(0.05)
 
-        footer_text = str(pilot.app.query_one("#footer-left").render())
+        footer_text = str(pilot.app.query_one("#footer-slot").render())
         assert "не сохранено" in footer_text
         assert pilot.app.query(".palette")
         assert (
@@ -1290,7 +1290,7 @@ async def test_palette_toggle_apply_failure_shows_flash_keeps_palette_and_value(
         await pilot.press("enter")
         await pilot.pause(0.05)
 
-        footer_text = str(pilot.app.query_one("#footer-left").render())
+        footer_text = str(pilot.app.query_one("#footer-slot").render())
         assert "не сохранено" in footer_text
         assert pilot.app.query(".palette")
         assert (

@@ -1045,7 +1045,7 @@ def _rows(text: str, width: int) -> int:
 def _left_rows_beside(scr, total: int, right_plain: str) -> int:
     """Сколько рядов займёт левая колонка, когда правая забрала своё."""
     from gc_tui.services.notices_ui import (
-        footer_left_with_badge,
+        footer_left_rows,
         format_notices_badge,
     )
     from rich.cells import cell_len
@@ -1054,13 +1054,14 @@ def _left_rows_beside(scr, total: int, right_plain: str) -> int:
     width = total - need - _FOOTER_CHROME
     if width <= 0:
         return 99
-    return _rows(
-        footer_left_with_badge(
+    # Левой больше двух строк не бывает: высота футера — 2.
+    return min(
+        2,
+        footer_left_rows(
             scr._footer_left_commands(),
             format_notices_badge(scr._collect_footer_notices()),
             width=width,
         ),
-        width,
     )
 
 

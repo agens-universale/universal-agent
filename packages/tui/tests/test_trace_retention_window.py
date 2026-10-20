@@ -410,7 +410,7 @@ async def test_tool_detail_hint_outside_window_opens_inside(tmp_path):
         )
         await pilot.pause()
         assert not isinstance(pilot.app.screen, ToolCallDetailScreen)
-        footer = str(pilot.app.query_one("#footer-left").render())
+        footer = str(pilot.app.query_one("#footer-slot").render())
         assert RETENTION_DETAIL_HINT in footer
 
         scr.on_open_tool_call_detail_request(

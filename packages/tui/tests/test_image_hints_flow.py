@@ -52,7 +52,7 @@ class _Clipboard:
 
 
 def _footer(pilot) -> str:
-    return str(pilot.app.screen.query_one("#footer-left", Static).render())
+    return str(pilot.app.screen.query_one("#footer-slot", Static).render())
 
 
 def _input(pilot) -> CommandTextArea:

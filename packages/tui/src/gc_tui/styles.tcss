@@ -32,9 +32,12 @@ TraceScreen #footer { height: 2; }
    двух столбцов её текст упирался в имя модели вплотную (живая приёмка). Арифметика
    `_footer_right_available_width` про «≥1 пробел» решала только, сворачивать ли правую
    часть на вторую строку, и на раскладку колонок не влияла вовсе.
-   Что не влезло — левая переносит сама (футер height:2): счётчики уведомлений в её
-   хвосте важнее ровной одной строки, и терять их на многоточии нельзя. */
-#footer-left  { width: 1fr; color: $dim; padding-right: 2; }
+   Левая — две строки: режим и хвост команд (#footer-mode), под ними слот
+   временного и бейджа (#footer-slot). Переноса нет: лишнее — многоточие. */
+#footer-left  { width: 1fr; height: 2; color: $dim; padding-right: 2; }
+#footer-mode, #footer-slot {
+    height: 1; text-wrap: nowrap; text-overflow: ellipsis;
+}
 #footer-right { width: auto; color: $deep-dim; text-align: right; padding-right: 1; }
 
 /* Контентная зона трейса. Разделитель снизу даёт border-top у #input-row —

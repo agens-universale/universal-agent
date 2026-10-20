@@ -36,6 +36,14 @@ def _left_rows(scr, total: int, need: int) -> int:
     )
 
 
+def _left_width(scr) -> int:
+    """Ширина левой части — по более длинной из двух её строк."""
+    return max(
+        cell_len(scr._footer_mode_line().plain),
+        cell_len(scr._footer_slot_line().plain),
+    )
+
+
 @pytest.mark.asyncio
 async def test_right_column_leaves_room_for_notices_suffix():
     """Правая колонка + фактическая левая ≤ ширины окна, и левой хватает ОДНОГО
@@ -57,7 +65,7 @@ async def test_right_column_leaves_room_for_notices_suffix():
         ]
         await pilot.pause()
         need = _need(scr)
-        left = cell_len(scr._footer_left_text().plain)
+        left = _left_width(scr)
         assert need + left + _CHROME <= 120, (
             f"правая часть {need} + левая {left} > ширины окна 120: правая часть налезет на счётчик уведомлений"
         )
@@ -80,7 +88,7 @@ async def test_right_column_without_notices_is_unchanged():
         app.collect_footer_notices = list
         await pilot.pause()
         need = _need(scr)
-        assert need + cell_len(scr._footer_left_text().plain) + _CHROME <= 120
+        assert need + _left_width(scr) + _CHROME <= 120
         assert _left_rows(scr, 120, need) == 1
 
 

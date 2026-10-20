@@ -1,6 +1,7 @@
 """TUI-клей: Ctrl+T → запись (бордер+пилюля), Enter → стоп+вставка, Esc → отмена."""
 
 from gc_testkit.tui_support import tui_settings
+from footer_text import footer_rows
 import pytest
 
 
@@ -57,7 +58,6 @@ async def test_ctrl_t_records_enter_inserts(monkeypatch):
     from gc_tui.app import TuiApp
     from gc_tui.widgets.command_input import CommandTextArea
     from textual.containers import Horizontal
-    from textual.widgets import Static
 
     monkeypatch.setattr("gc_tui.voice.recorder.available", lambda: True)
     app = TuiApp(
@@ -74,8 +74,9 @@ async def test_ctrl_t_records_enter_inserts(monkeypatch):
         assert pilot.app.query_one("#input-row", Horizontal).has_class(
             "recording"
         )
-        footer = str(pilot.app.query_one("#footer-left", Static).render())
-        assert "стоп" in footer  # dim-хвост подсказки при записи
+        mode, slot = footer_rows(pilot.app)
+        assert "стоп" in mode  # dim-хвост подсказки при записи
+        assert slot == "▸▸"  # режим виден глифом во второй строке
 
         rec.elapsed = 2.0
         await pilot.press("enter")
@@ -86,6 +87,75 @@ async def test_ctrl_t_records_enter_inserts(monkeypatch):
         assert not pilot.app.query_one("#input-row", Horizontal).has_class(
             "recording"
         )
+
+
+def _voice_app():
+    from gc_tui.app import TuiApp
+
+    return TuiApp(
+        settings=tui_settings({"agent.model": "M", "voice": dict(VOICE_CFG)})
+    )
+
+
+@pytest.mark.asyncio
+async def test_voice_pill_replaces_mode_row_and_glyph_leads_the_slot(
+    monkeypatch,
+):
+    """Запись: пилюля голоса в строке 1 вместо режима; в строке 2 первым —
+    глиф режима его цветом, за ним бейдж. Shift+Tab меняет режим сразу
+    (глиф следует), пояснение режима — только после записи."""
+    pytest.importorskip("textual")
+    from gc_tui.palette import DEEP_DIM
+
+    monkeypatch.setattr("gc_tui.voice.recorder.available", lambda: True)
+    async with _voice_app().run_test(size=(100, 24)) as pilot:
+        pilot.app._update_available = True
+        screen = pilot.app.screen
+        _wire_fake_voice(screen, FakeRecorder(), lambda pcm, cfg: "x")
+        await pilot.press("ctrl+t")
+        await pilot.pause()
+        mode, slot = footer_rows(pilot.app)
+        assert "REC" in mode and "mode" not in mode
+        assert slot == "▸▸  ℹ 1 · F4/notices"
+
+        await pilot.press("shift+tab")
+        await pilot.pause()
+        assert pilot.app.effective_permission_mode() == "manual"
+        mode, slot = footer_rows(pilot.app)
+        assert "REC" in mode and "manual mode" not in mode + slot
+        assert slot.startswith("⏸  ")
+        glyph = screen._footer_slot_line().spans[0]
+        assert (glyph.end, glyph.style) == (1, DEEP_DIM)  # цвет режима
+
+        await pilot.press("escape")  # запись кончилась
+        await pilot.pause()
+        mode, slot = footer_rows(pilot.app)
+        assert mode.startswith("⏸ manual mode — ")
+
+
+@pytest.mark.asyncio
+async def test_voice_during_ask_human_returns_answer_tail(monkeypatch):
+    """Голос во время вопроса агента: после записи строка 1 снова держит
+    хвост «Esc/stop  Enter/ответить»."""
+    pytest.importorskip("textual")
+    from gc_tui.state import AskHumanState
+
+    monkeypatch.setattr("gc_tui.voice.recorder.available", lambda: True)
+    async with _voice_app().run_test(size=(100, 24)) as pilot:
+        screen = pilot.app.screen
+        pilot.app.tui_state.ask_human_state = AskHumanState(
+            call_id="c1", question="Q?"
+        )
+        rec = FakeRecorder()
+        _wire_fake_voice(screen, rec, lambda pcm, cfg: "ответ")
+        await pilot.press("ctrl+t")
+        await pilot.pause()
+        assert "Esc/stop" not in footer_rows(pilot.app)[0]
+        rec.elapsed = 2.0
+        await pilot.press("enter")
+        await pilot.pause()
+        assert screen._voice.state == "idle"
+        assert footer_rows(pilot.app)[0].endswith("Esc/stop  Enter/ответить")
 
 
 @pytest.mark.asyncio

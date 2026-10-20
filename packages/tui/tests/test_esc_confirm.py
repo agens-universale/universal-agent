@@ -1,11 +1,11 @@
-"""TraceScreen Esc confirm-hint в footer-left (clear / stop); выход — модалка."""
+"""TraceScreen Esc confirm-hint в слоте футера (clear / stop); выход — модалка."""
 
 import pytest
 
 
 @pytest.mark.asyncio
-async def test_show_esc_hint_clear_swaps_footer_left():
-    """_show_esc_hint('clear') пишет в footer-left текст подсказки."""
+async def test_show_esc_hint_clear_swaps_footer_slot():
+    """_show_esc_hint('clear') пишет в слоте футера текст подсказки."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
@@ -13,13 +13,13 @@ async def test_show_esc_hint_clear_swaps_footer_left():
         scr = pilot.app.screen
         scr._show_esc_hint("clear")
         await pilot.pause()
-        text = str(pilot.app.query_one("#footer-left").render())
+        text = str(pilot.app.query_one("#footer-slot").render())
         assert "Esc ещё раз, чтобы очистить" in text
         assert scr._esc_confirm_kind == "clear"
 
 
 @pytest.mark.asyncio
-async def test_show_esc_hint_stop_swaps_footer_left():
+async def test_show_esc_hint_stop_swaps_footer_slot():
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
@@ -28,14 +28,14 @@ async def test_show_esc_hint_stop_swaps_footer_left():
         scr._show_esc_hint("stop")
         await pilot.pause()
         assert "Esc ещё раз, чтобы остановить" in str(
-            pilot.app.query_one("#footer-left").render()
+            pilot.app.query_one("#footer-slot").render()
         )
         assert scr._esc_confirm_kind == "stop"
 
 
 @pytest.mark.asyncio
-async def test_clear_footer_hint_restores_footer_left():
-    """_clear_footer_hint возвращает команды в footer-left и обнуляет state."""
+async def test_clear_footer_hint_restores_footer_slot():
+    """_clear_footer_hint возвращает команды в слоте футера и обнуляет state."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
@@ -45,7 +45,7 @@ async def test_clear_footer_hint_restores_footer_left():
         await pilot.pause()
         scr._clear_footer_hint()
         await pilot.pause()
-        text = str(pilot.app.query_one("#footer-left").render())
+        text = str(pilot.app.query_one("#footer-slot").render())
         assert "Esc ещё раз" not in text
         assert scr._esc_confirm_kind is None
 

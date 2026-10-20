@@ -121,7 +121,7 @@ async def test_images_with_a_command_are_refused_and_the_input_is_kept(
             CommandTextArea.Submitted(value=inp.text, attachments=(att,))
         )
         await pilot.pause()
-        assert str(scr.query_one("#footer-left").render()) == (
+        assert str(scr.query_one("#footer-slot").render()) == (
             "✗ изображения нельзя отправить вместе с командой"
         )
         assert inp.text == f"{typed} {chip_text(1)}"
