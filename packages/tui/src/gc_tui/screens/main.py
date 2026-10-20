@@ -646,6 +646,8 @@ class TraceScreen(Screen):
         self._refusal_input_text = ""  # текст поля ввода при постановке отказа
         # Ключ последней сборки футера (`_footer_inputs`); None — не собран.
         self._footer_key: Optional[tuple] = None
+        # Части футера, чей сбой уже в логе: пишем раз на эпизод, не каждый тик.
+        self._footer_faults: set[str] = set()
         # Input history: per-project ↑/↓ навигация.
         # _history создаётся в on_mount (project_dir = threads_dir.parent).
         self._history = None  # type: Optional["InputHistory"]
@@ -1513,13 +1515,35 @@ class TraceScreen(Screen):
         self._refresh_footer()
 
     def _footer_frame(self) -> _FooterFrame:
-        """Данные кадра футера: каждое резолвится один раз на обе колонки."""
+        """Данные кадра футера: каждое резолвится один раз на обе колонки.
+
+        Части независимы: сбой одной (Router, мета треда, уведомления)
+        гасит только её, остальной футер живёт. Снимок шапки None — правая
+        колонка на этот кадр не собирается."""
+        part = self._footer_part
         return _FooterFrame(
-            badge=format_notices_badge(self._collect_footer_notices()),
-            snapshot=self._footer_head_snapshot(),
-            meter=self._context_meter(),
-            usage=self._usage_segments(),
+            badge=part(
+                "badge",
+                lambda: format_notices_badge(self._collect_footer_notices()),
+                "",
+            ),
+            snapshot=part("snapshot", self._footer_head_snapshot, None),
+            meter=part("meter", self._context_meter, None),
+            usage=part("usage", self._usage_segments, (None, None)),
         )
+
+    def _footer_part(self, kind: str, resolve, fallback):
+        """`resolve()` или `fallback` при сбое; сбой пишется в лог один раз
+        на эпизод — до первого успешного резолва этой части."""
+        try:
+            value = resolve()
+        except Exception:
+            if kind not in self._footer_faults:
+                self._footer_faults.add(kind)
+                _log.exception("футер: сбой части %s", kind)
+            return fallback
+        self._footer_faults.discard(kind)
+        return value
 
     def _footer_inputs(self, frame: _FooterFrame) -> tuple:
         """Ключ сборки футера: всё, от чего зависит его вид.
@@ -1567,20 +1591,32 @@ class TraceScreen(Screen):
             and self.app.tui_state.active_task_id != self._refusal_run_id
         ):
             self._reset_footer_hint_state()
-        # Футер не роняет экран: не резолвятся данные (Router, мета треда) —
-        # остаётся прежний вид до следующего тика.
-        try:
-            frame = self._footer_frame()
-        except Exception:
-            return
+        frame = self._footer_frame()
         key = self._footer_inputs(frame)
         if key == self._footer_key:
             return
-        self._footer_key = key
-        update_if_changed(right, self._compose_footer_right(frame))
+        right_built = self._build_footer_right(right, frame)
         first, second = self._footer_left_rows(frame.badge)
         update_if_changed(mode, first)
         update_if_changed(slot, second)
+        # Ключ — только за собранный футер: сбой сборки правой не входит в
+        # ключ, и следующий тик обязан попробовать снова.
+        self._footer_key = key if right_built else None
+
+    def _build_footer_right(self, widget: Static, frame: _FooterFrame) -> bool:
+        """Собрать правую колонку; False — сборка упала (левая живёт).
+
+        Без снимка шапки колонка держит прежний вид: снимок в ключе, его
+        возврат пересоберёт футер."""
+        if frame.snapshot is None:
+            return True
+        content = self._footer_part(
+            "right", lambda: self._compose_footer_right(frame), None
+        )
+        if content is None:
+            return False
+        update_if_changed(widget, content)
+        return True
 
     def on_screen_resume(self) -> None:
         """После возврата с под-экрана — освежить карточку и футер уведомлений."""

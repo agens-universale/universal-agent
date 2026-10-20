@@ -183,19 +183,18 @@ async def test_slot_texts_one_row_or_ellipsis_at_min_width():
                 assert shown == text
 
 
-def _narrowest_right_cols(scr) -> int:
+def _narrowest_right(scr):
     """Пол лесенки правой колонки: точка режима и плашка контекста — их
     лесенка не снимает никогда."""
     from gc_tui.services.context_meter import render_context_meter
 
-    head = scr._footer_head(
+    return scr._footer_head(
         with_profile=False,
         with_model_name=False,
         with_level_block=False,
         with_transition=False,
         meter=render_context_meter(999, 1000),
     )
-    return head.cell_len
 
 
 # Пояснение edit (75 колонок) не встаёт в 2 × 34 рядом с полом правой
@@ -214,17 +213,98 @@ _EDIT_HINT_TOO_LONG = pytest.mark.xfail(
     ],
 )
 @pytest.mark.asyncio
-async def test_mode_hint_fits_two_rows_beside_narrowest_right(mode):
+async def test_mode_hint_fits_two_rows_beside_narrowest_right(
+    mode, monkeypatch
+):
+    """Реальная раскладка: правая колонка на полу лесенки, ширину строк
+    левой даёт layout, пояснение показано так же, как после Shift+Tab."""
     from gc_tui.app import TuiApp
-    from gc_tui.screens.main import _FOOTER_CHROME_COLS
+    from gc_tui.services.mode_pill import render_mode_pill
 
     app = TuiApp(settings=_meter_settings())
     async with app.run_test(size=(MAIN_FOOTER_MIN_COLS, 24)) as pilot:
-        right = _narrowest_right_cols(pilot.app.screen)
-    left = MAIN_FOOTER_MIN_COLS - _FOOTER_CHROME_COLS - right
-    first, second = mode_hint_rows(mode, left)
-    # Всё, что не встало в строку 1, уходит во вторую одной строкой.
-    assert second.cell_len <= left, (mode, first.plain, second.plain)
+        scr = pilot.app.screen
+        floor = _narrowest_right(scr)
+        monkeypatch.setattr(scr, "_compose_footer_right", lambda *_: floor)
+        scr._footer_key = None
+        scr._refresh_footer()
+        await pilot.pause()
+        scr.on_permission_mode_changed(mode)
+        await pilot.pause()
+        first, second = (
+            _shown(scr, "#footer-mode"),
+            _shown(scr, "#footer-slot"),
+        )
+    full = f"{render_mode_pill(mode, hint=False).plain} — {MODE_HINTS[mode]}"
+    assert f"{first} {second}".split() == full.split(), (first, second)
+
+
+def _fault_app(tmp_path):
+    from gc_tui.app import TuiApp
+
+    tid = "ctxm0000000000000000000000000009d"
+    _write_meta(tmp_path, tid, 500)
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=_meter_settings()
+    )
+    return app, tid
+
+
+def _boom(*_args, **_kwargs):
+    raise RuntimeError("сбой данных футера")
+
+
+def _footer_errors(caplog) -> int:
+    return sum(
+        1
+        for r in caplog.records
+        if r.name == "gc_tui.screens.main" and "футер" in r.getMessage()
+    )
+
+
+@pytest.mark.asyncio
+async def test_meter_fault_keeps_left_alive_and_logs_once(
+    tmp_path, monkeypatch, caplog
+):
+    app, tid = _fault_app(tmp_path)
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(tid)
+        caplog.clear()
+        with monkeypatch.context() as patch:
+            patch.setattr(scr, "_context_meter", _boom)
+            scr._show_footer_hint("ПОДСКАЗКА", seconds=60)
+            for _ in range(3):
+                scr._refresh_footer()
+            assert footer_rows(scr)[1] == "ПОДСКАЗКА"
+            assert "50%" not in str(scr.query_one("#footer-right").render())
+            assert _footer_errors(caplog) == 1
+        scr._refresh_footer()
+        assert "50%" in str(scr.query_one("#footer-right").render())
+
+
+@pytest.mark.asyncio
+async def test_right_fault_keeps_left_alive_and_retries(
+    tmp_path, monkeypatch, caplog
+):
+    app, tid = _fault_app(tmp_path)
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(tid)
+        scr._refresh_footer()
+        caplog.clear()
+        with monkeypatch.context() as patch:
+            patch.setattr(scr, "_compose_footer_right", _boom)
+            scr._show_footer_hint("ПОДСКАЗКА", seconds=60)
+            for _ in range(3):
+                scr._refresh_footer()
+            assert footer_rows(scr)[1] == "ПОДСКАЗКА"
+            assert _footer_errors(caplog) == 1
+        builds = _count_calls(monkeypatch, scr, "_compose_footer_right")
+        scr._refresh_footer()
+        assert builds[0] == 1
+        scr._refresh_footer()
+        assert builds[0] == 1
 
 
 @pytest.mark.parametrize(
