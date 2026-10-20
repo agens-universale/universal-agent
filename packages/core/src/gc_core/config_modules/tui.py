@@ -47,6 +47,9 @@ class TuiConfig(BaseModel):
     stream_display: Literal["minimal", "answer", "answer_reasoning"] = (
         "minimal"
     )
+    # Тема TUI: auto — фон от терминала (при отсутствии ответа на запрос
+    # или светлом фоне — fixed); fixed — собственная тёмная палитра.
+    theme: Literal["auto", "fixed"] = "auto"
     # adaptive bounce: как поступать с текст-ответом без тула.
     # deny — всегда bounce (как CLI); judge — судья intent_guard решает;
     # allow — всегда принять текст (ни bounce, ни судьи).
