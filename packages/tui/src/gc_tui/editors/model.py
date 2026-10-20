@@ -419,9 +419,9 @@ class ModelEditor(Vertical):
             id=self._input_id,
             classes="onb-dyn group-field",
         )
-        # Без set-framed: рамку рисует группа, а класс поля перебил бы её по
-        # специфичности (#onb-model.set-framed — id+класс) и дал бы вторую рамку
-        # внутри первой. Воздух внутри рамки — margin по .group-field.
+        # Без set-framed: рамку рисует группа, а правило .form-field.set-framed
+        # дало бы вторую рамку внутри первой. Воздух внутри рамки — margin
+        # по .group-field.
         group = Vertical(
             id=f"{self._input_id}-group", classes="field-group onb-dyn"
         )

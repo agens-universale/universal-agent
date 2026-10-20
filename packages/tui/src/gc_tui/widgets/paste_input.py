@@ -24,9 +24,10 @@ class PasteInput(Input):
 
         Своей рамки у поля внутри `.field-group` нет — класс `set-framed` оно
         теряет, иначе рамок было бы две, — поэтому правило одинокого поля
-        (`.form-field.set-framed.set-muted:disabled`) сюда не достаёт. Селектора `:has`
-        в Textual 8.2.7 нет, так что признак ставим отсюда: это единственное
-        место, через которое проходит любое изменение `disabled` у поля формы.
+        (`.form-field.set-framed.set-muted:disabled`) сюда не достаёт.
+        Селектора `:has` в Textual 8.2.7 нет, так что признак ставим отсюда:
+        это единственное место, через которое проходит любое изменение
+        `disabled` у поля формы.
         Поле вне группы — no-op: у него своя рамка и своё правило."""
         parent = self.parent
         if parent is not None and parent.has_class("field-group"):

@@ -231,9 +231,8 @@ class ConnectionEditor(Vertical):
             classes="onb-dyn group-field",
         )
         with Vertical(classes="field-group onb-dyn", id="conn-url-group"):
-            # Без set-framed: рамку рисует группа, а класс поля перебил бы её по
-            # специфичности (#conn-url.set-framed — id+класс) и дал бы вторую
-            # рамку внутри первой.
+            # Без set-framed: рамку рисует группа, а правило
+            # .form-field.set-framed дало бы вторую рамку внутри первой.
             yield self._url_input
         yield Static(
             self._token_label(),
