@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections import OrderedDict
-from copy import deepcopy
+from copy import copy, deepcopy
 from types import SimpleNamespace
 from typing import Any
 
@@ -23,6 +23,8 @@ from gc_core.security.guard_probe import (
     active_guard_checks,
     aevaluate_guard_probes,
 )
+from gc_core.security.permission_mode import resolve_mode
+from gc_core.security.permission_store import PermissionStore
 from gc_core.thread_paths import thread_address
 
 
@@ -79,6 +81,7 @@ async def invoke_native_tool(
             effect_step="download" if effect_data is not None else "body",
             effect_data=effect_data or {},
             thread=list(address) if address is not None else None,
+            permission_mode=resolve_mode(ctx).value,
         )
         result = await ctx.tool_effect(request)
         if result.schema_version != 1:
@@ -108,6 +111,23 @@ async def invoke_native_tool(
         active_guard_checks.reset(token)
 
 
+def _with_session_mode(ctx: Any, mode: str | None) -> Any:
+    """Контекст тела на воркере с режимом сессии на момент одобрения.
+
+    Защиты и стадии режима отработали в ядре; на воркере — только тело, а
+    стора режима у воркера нет: без этого тело видело бы режим из конфига,
+    а не выбранный в сессии (``follows_cross_host_redirects``). Копия, а не
+    правка: контекст воркера общий для вызовов владельца. Подмена идёт в
+    общем обработчике, поэтому действует и на пути ``resource_host``, и на
+    шаге ``download``.
+    """
+    view = copy(ctx)
+    view.permission_store = PermissionStore(
+        shared=SimpleNamespace(permission_mode=mode)
+    )
+    return view
+
+
 async def execute_native_tool_effect(
     request: ToolEffectRequest, *, ctx: Any
 ) -> ToolResult:
@@ -121,6 +141,11 @@ async def execute_native_tool_effect(
             "Tool arguments changed after guard evaluation"
         )
     await _arevalidate_guard_checks(request, ctx)
+    if request.thread is not None and thread_address(ctx) is None:
+        # Контекст воркера — на владельца хода, а владелец ведёт один тред:
+        # адрес из запроса делает снимки и медиа файлами этого треда.
+        ctx.system_id, ctx.thread_id = request.thread
+    ctx = _with_session_mode(ctx, request.permission_mode)
     state = SimpleNamespace(
         shared=SimpleNamespace(
             working_memory=deepcopy(request.state.working_memory),
@@ -145,10 +170,6 @@ async def execute_native_tool_effect(
             "Tool preparation changed after approval"
         )
     tool, arguments, dropped = prepared
-    if request.thread is not None and thread_address(ctx) is None:
-        # Контекст воркера — на владельца хода, а владелец ведёт один тред:
-        # адрес из запроса делает снимки и медиа файлами этого треда.
-        ctx.system_id, ctx.thread_id = request.thread
     if dropped or arguments_digest(arguments) != request.arguments_digest:
         raise GuardPreconditionChanged("Tool schema changed after approval")
     if request.effect_step == "download":

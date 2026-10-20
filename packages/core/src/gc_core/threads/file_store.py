@@ -1170,6 +1170,9 @@ class FileThreadStore(ThreadStore):
             *layout.legacy_thread_paths(d, t),
             layout.subagent_trace_path(d, s, t),
             layout.edits_journal_path(d, s, t),
+            # Файл плана для человека уходит вместе с тредом: иначе он
+            # выглядит действующим планом сессии, которой больше нет.
+            layout.plan_file_path(d, s, t),
             os.path.join(d, f"touched_{stem}.json"),
             os.path.join(d, "locks", f"lock_{stem}.json"),
         ]
@@ -1189,6 +1192,32 @@ class FileThreadStore(ThreadStore):
         files.extend(root.glob(f"edits_{stem}__pre_summary__*.jsonl"))
         files.extend(self._alias_path(a) for a in v2["aliases"])
         return [Path(f) for f in files if Path(f).exists()]
+
+    # --- файл плана для человека -----------------------------------------------
+
+    async def save_plan_file(
+        self, key: ThreadKey, plan: JsonObject | None
+    ) -> str | None:
+        """Экспорт плана сессии в ``plans/plan_{system}_{thread}.md``; путь
+        либо None, если плана нет. Возможность именно файлового хранилища:
+        исполнитель ищет её по имени и файловую систему сам не трогает.
+        Канон плана — ``shared.plan`` в состоянии треда, файл — копия."""
+        from gc_core.persistence.plan_file import (
+            render_plan_file,
+            write_plan_file,
+        )
+
+        text = render_plan_file(plan, key.thread)
+        if not text:
+            return None
+        path = layout.plan_file_path(self._dir, key.system, key.thread)
+        write_plan_file(path, text)
+        return path
+
+    async def delete_plan_file(self, key: ThreadKey) -> None:
+        """Убрать файл плана (план снят человеком)."""
+        path = layout.plan_file_path(self._dir, key.system, key.thread)
+        Path(path).unlink(missing_ok=True)
 
     # --- вложения и обслуживание ----------------------------------------------------
 

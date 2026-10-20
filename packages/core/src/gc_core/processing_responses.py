@@ -55,6 +55,7 @@ from gc_core.constants.tool_names import (
     ASK_HUMAN_TOOL_NAME,
     FINISH_TOOL_NAME,
     INTERMEDIATE_REPLY_TOOL_NAME,
+    PROPOSE_PLAN_TOOL_NAME,
     SESSION_COMPACT_TOOL_NAME,
     SESSION_TODO_TOOL_NAME,
     TURN_FINALIZING_TOOLS,
@@ -89,6 +90,7 @@ from gc_core.intent_guard.turn_finish_emit import (
 )
 from gc_core.intent_scope.final_answer import (
     amaybe_record_final_answer_intent,
+    record_plan_outcome,
     record_turn_finish_outcome,
 )
 from gc_core.intent_scope.hook import amaybe_update_intent_scope_from_tool
@@ -107,6 +109,7 @@ from gc_core.message_policy.attachments_outbound import (
     request_carries_images,
 )
 from gc_core.message_policy.chat_completions import is_bridge_echo
+from gc_core.message_policy.mode_messages import mode_boundary_messages
 from gc_core.message_policy.no_tool_call_bounce import (
     NO_TOOL_CALL_BOUNCE_MESSAGE,
     extract_last_assistant_text,
@@ -140,6 +143,11 @@ from gc_core.run_summary_coordinator import (
 from gc_core.runtime_notices import (
     maybe_push_level_reroute_notice,
     maybe_push_llm_failure_notice,
+)
+from gc_core.security.permission_mode import (
+    offers_plan_tool,
+    resolve_mode,
+    tools_for_mode,
 )
 from gc_core.settings import AppConfig, settings_of
 from gc_core.states import State
@@ -371,6 +379,18 @@ def _make_technical_feedback_user_message(
     if call_id:
         msg["call_id"] = call_id
     return msg
+
+
+def _mode_notices(state: State, ctx: Any) -> List[Dict]:
+    """Служебные сообщения о границе режима для ЭТОГО агента; сдвигает его
+    отметку (``State.mode_announced``). Пусто — режим уже объявлен. Текст
+    plan — по набору тулов агента (``offers_plan_tool``)."""
+    texts, state.mode_announced = mode_boundary_messages(
+        current=resolve_mode(ctx).value,
+        announced=state.mode_announced,
+        can_propose_plan=offers_plan_tool(ctx, state),
+    )
+    return [_make_technical_feedback_user_message(text) for text in texts]
 
 
 def _is_previous_response_cache_miss(exc: Exception) -> bool:
@@ -1000,7 +1020,11 @@ async def _arequest_responses_once(
             read_bytes=_image_bytes_reader(ctx),
         ),
         state,
-        tools=tools_for_request(getattr(state, "tools", None) or [], audience),
+        tools=tools_for_mode(
+            tools_for_request(getattr(state, "tools", None) or [], audience),
+            ctx,
+            state,
+        ),
         set_previous_response_id=set_previous_response_id,
         resolved=resolved,
         settings=settings,
@@ -1076,6 +1100,7 @@ async def _asend_chat_completions(
     sanitized_messages: List[Dict],
     sanitized_state_messages: List[Dict],
     read_bytes: Callable[[Any], Optional[bytes]],
+    ctx: Any,
     settings: AppConfig,
     resolved: Any,
     request_kwargs: Dict[str, Any],
@@ -1106,8 +1131,10 @@ async def _asend_chat_completions(
         api_mode=backend_mode,
         read_bytes=read_bytes,
     )
-    request_tools = tools_for_request(
-        getattr(state, "tools", None) or [], audience
+    request_tools = tools_for_mode(
+        tools_for_request(getattr(state, "tools", None) or [], audience),
+        ctx,
+        state,
     )
 
     def _create_payload(max_tokens: int) -> Dict[str, Any]:
@@ -1386,6 +1413,7 @@ async def _arequest_backend_canonical_once(
         sanitized_messages=sanitized_messages,
         sanitized_state_messages=sanitized_state_messages,
         read_bytes=_image_bytes_reader(ctx),
+        ctx=ctx,
         settings=settings,
         resolved=resolved,
         request_kwargs={
@@ -1898,6 +1926,44 @@ def _after_ask_human_skip_output(call_id: Any) -> Dict[str, Any]:
     }
 
 
+def _after_plan_proposed_skip_output(call_id: Any) -> Dict[str, Any]:
+    return {
+        "id": generate_message_id_func("fco"),
+        "type": "function_call_output",
+        "call_id": call_id,
+        "output": (
+            f'{{"ok": false, "skipped": true, "message": '
+            f'"Skipped: {PROPOSE_PLAN_TOOL_NAME} ended the turn; the plan '
+            f'waits for user approval."}}'
+        ),
+    }
+
+
+def _after_judge_stop_skip_output(call_id: Any) -> Dict[str, Any]:
+    return {
+        "id": generate_message_id_func("fco"),
+        "type": "function_call_output",
+        "call_id": call_id,
+        "output": (
+            '{"ok": false, "skipped": true, "message": '
+            '"Skipped: the automatic review of actions is unavailable and '
+            'the run was stopped."}'
+        ),
+    }
+
+
+def _batch_ended_skip_output(
+    state: Any, call_id: Any
+) -> Dict[str, Any] | None:
+    """Пропуск остатка батча, когда ход уже кончился: план предложен — ждёт
+    одобрения; проверка действий недоступна — прогон останавливается."""
+    if getattr(state, "plan_proposed", False):
+        return _after_plan_proposed_skip_output(call_id)
+    if getattr(state, "judge_stop_reason", None):
+        return _after_judge_stop_skip_output(call_id)
+    return None
+
+
 def _not_started_outputs(
     remaining: List[Dict], state: State, ctx: Any
 ) -> List[Dict]:
@@ -2373,6 +2439,10 @@ async def aprocess_tool_calls(
         if successful_ask_human:
             tools_outputs.append(_after_ask_human_skip_output(m["call_id"]))
             continue
+        skipped = _batch_ended_skip_output(state, m["call_id"])
+        if skipped is not None:
+            tools_outputs.append(skipped)
+            continue
         # smart-гейт: считаем КАЖДЫЙ исполняемый вызов, кроме завершителя хода.
         # До try — упавший вызов (неверные аргументы) тоже считается.
         await _abefore_tool_call(
@@ -2589,17 +2659,12 @@ class _AgentLoop:
         # Вызовы backend не ловим здесь: после исчерпания transport/adaptive
         # ретраев исключение уходит наверх как есть.
         try:
-            if (
-                backend_mode == "chat_completions"
-                and _mode_requires_backend_call(mode)
-            ):
-                await aprepare_main_call(self.state, self.ctx)
-                if self._stopped_before_call():
-                    return _Outcome(result=None)
-                await self._apre_backend_compaction(messages, mode)
-                messages = await self._aapply_tool_usage_notice(messages)
-                if self._stopped_before_call():
-                    return _Outcome(result=None)
+            prepared = await self._aprepare_main_request(
+                messages, mode, backend_mode
+            )
+            if prepared is None:
+                return _Outcome(result=None)
+            messages = prepared
             outcome = await self._adispatch(mode, messages, backend_mode)
         except WrongFunctionArgumentsException as e:
             # Аргументы отвалились на exec — ход модели всё равно «закрыт».
@@ -2618,6 +2683,24 @@ class _AgentLoop:
             outcome = _Outcome(messages, restart=True)
         outcome.mode = mode
         return outcome
+
+    async def _aprepare_main_request(
+        self, messages, mode, backend_mode: str
+    ) -> Optional[List[Dict]]:
+        """Всё, что идёт перед основным запросом: судья пары, сжатие,
+        подсказка об инструментах, объявление режима. None — стоп до
+        запроса."""
+        if not _mode_requires_backend_call(mode):
+            return messages
+        if backend_mode == "chat_completions":
+            await aprepare_main_call(self.state, self.ctx)
+            if self._stopped_before_call():
+                return None
+            await self._apre_backend_compaction(messages, mode)
+            messages = await self._aapply_tool_usage_notice(messages)
+            if self._stopped_before_call():
+                return None
+        return await self._aannounce_mode(messages)
 
     def _stopped_before_call(self) -> bool:
         """Стоп во время судьи пары или сжатия — как stop между шагами:
@@ -2897,6 +2980,23 @@ class _AgentLoop:
                 exc_info=True,
             )
 
+    async def _aannounce_mode(self, messages) -> List[Dict]:
+        """Сказать агенту о режиме, если он сменился с прошлого объявления.
+
+        Перед каждым запросом к модели: на старте агента и после каждого
+        батча — смена режима посреди хода доходит до модели на ближайшем
+        шаге. Одно правило для корня и любого субагента: отметка своя у
+        каждого, режим — общий живой. Не в хвосте батча: после принятого
+        ``turn_finish`` хвост отбрасывается, а отметка уже была бы сдвинута.
+        """
+        state = self.state
+        notices = _mode_notices(state, self.ctx)
+        if not notices:
+            return messages
+        state.messages += notices
+        await _maybe_persist(self.persist_messages_callback, notices, state)
+        return [*messages, *notices]
+
     async def _aapply_tool_usage_notice(self, messages) -> List[Dict]:
         if not isinstance(self.session_meta, dict):
             return messages
@@ -3028,6 +3128,10 @@ class _AgentLoop:
             run_agent_func=arun_agent,
             persist_messages_callback=self.persist_messages_callback,
         )
+        if getattr(state, "plan_proposed", False):
+            return await self._aclose_plan_turn(messages)
+        if getattr(state, "judge_stop_reason", None):
+            return await self._astop_on_judge_unavailable(messages)
         closing_finish = _closing_finish_after_batch(
             pending_tool_calls,
             messages,
@@ -3108,6 +3212,69 @@ class _AgentLoop:
         state.flush_current_user_intent()
         clear_loop_detector(state)
         return await self._aclose_turn(finish_arguments)
+
+    async def _aclose_plan_turn(self, messages) -> _Outcome:
+        """Ход закрыт предложенным планом (``turn_propose_plan``).
+
+        Отдельная ветка, а не путь ``turn_finish``: судья финала к плану не
+        применяется — план не ответ на запрос. Батч вливается в состояние ДО
+        компакции конца хода, иначе она увидела бы непарный вызов тула.
+        """
+        state = self.state
+        batch_new = filter_messages_not_in_state(
+            list(getattr(state, "messages", []) or []), messages
+        )
+        if batch_new:
+            state.messages += batch_new
+            await _maybe_persist(
+                self.persist_messages_callback, batch_new, state
+            )
+        state.plan_proposed = False
+        plan = getattr(state.shared, "plan", None) or {}
+        if getattr(self.ctx, "routing_contract_v2", True):
+            record_plan_outcome(
+                plan_text=str(plan.get("text") or ""), state=state
+            )
+        state.steps += 1
+        state.flush_current_user_intent()
+        clear_loop_detector(state)
+        outcome = await self._aclose_turn(
+            json.dumps(
+                {
+                    "plan": str(plan.get("text") or ""),
+                    "status": str(plan.get("status") or ""),
+                },
+                ensure_ascii=False,
+            )
+        )
+        if not outcome.restart:
+            # Человек дослал сообщение во время хода — ход продолжается, и
+            # признак «прогон кончился планом» ставить нельзя: баннер одобрения
+            # показывается только по нему.
+            state.terminal_outcome = "plan_proposed"
+        return outcome
+
+    async def _astop_on_judge_unavailable(self, messages) -> _Outcome:
+        """Проверка действий судьёй недоступна — прогон завершается.
+
+        Батч вливается в состояние и сохраняется: отказ проверки и пропуски
+        остатка — часть истории, и следующий прогон не должен увидеть
+        непарный вызов тула. Ход журнала намерений не закрывается: задача не
+        выполнена, человек продолжит её в том же ходе.
+        """
+        state = self.state
+        batch_new = filter_messages_not_in_state(
+            list(getattr(state, "messages", []) or []), messages
+        )
+        if batch_new:
+            state.messages += batch_new
+            await _maybe_persist(
+                self.persist_messages_callback, batch_new, state
+            )
+        reason = str(state.judge_stop_reason)
+        state.judge_stop_reason = None
+        state.terminal_outcome = "judge_unavailable"
+        return _Outcome(result=reason)
 
     async def _aevaluate_finish_gate(self, finish_arguments, finish_call_id):
         state, ctx = self.state, self.ctx

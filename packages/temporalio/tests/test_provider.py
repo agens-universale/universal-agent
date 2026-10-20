@@ -582,3 +582,24 @@ async def test_agent_store_reaches_the_worker_context(tmp_path, monkeypatch):
             resource_host=WorkerResourceHost("test"),
             agent_store=object(),
         )
+
+
+async def test_worker_without_human_declares_the_channel(
+    tmp_path, monkeypatch
+):
+    """Без человека (``human_input: false``) воркер объявляет канал: вопрос
+    подтверждения — «спросить некого», а не «не ответил вовремя». С
+    человеком — объявления нет, автопроверка видит порт вопроса."""
+    monkeypatch.chdir(tmp_path)
+    store = FileThreadStore(str(tmp_path / "threads"))
+    for human_input, declared in ((False, False), (True, None)):
+        provider = ContextProvider(
+            profiles={"test": profile(tmp_path)},
+            stores={"files": store},
+            resource_host=WorkerResourceHost("test"),
+            human_input=human_input,
+        )
+        runtime = provider._profiles["test"][1].runtime
+        assert runtime.human_channel is declared
+        assert runtime.launch_root == str(tmp_path.resolve())
+        await provider.aclose()

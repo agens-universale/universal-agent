@@ -9,10 +9,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Optional, Tuple
 
+from gc_core.security.permission_mode import AVAILABLE_MODES
 from gc_core.settings import runtime_of, settings_of
 from rich.text import Text
 
 from gc_tui import palette as _pal
+from gc_tui.services.mode_pill import MODE_HINTS, mode_color
 from gc_tui.session_settings import (
     SESSION_KEYS,
     finish_gate_mode_of,
@@ -152,6 +154,10 @@ class ToggleSpec:
     unavailable_hint: Optional[Callable[[Any, str], Optional[str]]] = None
     session_switch_profile: bool = False
     rebuild_on_apply: bool = True
+    # Значение, действующее в сессии, когда оно живёт не в переопределениях
+    # конфига (режим разрешений: Shift+Tab, флаг запуска): `(app) -> значение`.
+    # Без него действующее значение читается по настройкам окна.
+    session_state: Optional[Callable[[Any], str]] = None
 
     @property
     def names(self) -> Tuple[str, ...]:
@@ -574,9 +580,11 @@ def group_toggle_names(group: str) -> list:
 
 
 # Состав секции «Режимы работы» — упорядоченный список ГРУПП, а не одна группа.
-# Порядок блоков читается сверху вниз: сначала «как работаем» (строгость,
-# самопроверка, формат ответа), потом «чем» (уровень модели) — решение владельца.
-MODES_SECTION_GROUPS: Tuple[str, ...] = ("rigor", "level")
+# Порядок блоков сверху вниз — решение владельца: «чем работаем» (уровень
+# модели), «что агенту можно» (режим разрешений по умолчанию), «как строго
+# закрывать ход» (строгость, самопроверка, формат ответа). Выровнен с палитрой,
+# где `/level` идёт первым.
+MODES_SECTION_GROUPS: Tuple[str, ...] = ("level", "permissions", "rigor")
 
 
 def modes_section_names() -> list:
@@ -652,6 +660,29 @@ TOGGLES: Dict[str, ToggleSpec] = {
         hint_provider=profile_value_hint,
         session_switch_profile=True,
         palette_default=True,
+    ),
+    # Только Настройки: команды палитры нет — режим ТЕКУЩЕЙ сессии переключает
+    # Shift+Tab. Строка правит конфиг; сессия без своего выбора следует ему
+    # сразу (правило «выбор сессии → конфиг», `mode_with_source`).
+    "mode": ToggleSpec(
+        dotted="security.permissions.default_mode",
+        values=tuple(
+            ToggleValue(
+                mode.value,
+                f"{MODE_HINTS[mode.value]} · в сессии — Shift+Tab",
+                mode_color(mode.value),
+            )
+            for mode in AVAILABLE_MODES
+        ),
+        state=lambda settings: str(
+            settings_of(settings).security.permissions.default_mode
+        ),
+        label="режим разрешений",
+        summary="что агенту можно без вопроса",
+        group="permissions",
+        settings_label="режим разрешений по умолчанию",
+        palette_default=False,
+        session_state=lambda app: app.effective_permission_mode(),
     ),
     "rigor": ToggleSpec(
         values=(
@@ -855,31 +886,29 @@ def padded_track(
     """Трек тоггла, выровненный по ЛЕВОМУ краю общего поля (ревизия 5, спека §6:
     системный контракт, владелец здесь — переиспользуют палитра и Settings).
     `render_track` остаётся ЕДИНСТВЕННЫМ рендером — эта функция только паддит
-    его результат пробелами СПРАВА (не слева, как было): базовый трек — до
-    `base_w` (тройки друг под другом по левому краю), затем extra-зона
-    (двойной пробел + глифы вне-шкальных значений/custom-резерва, если
-    `extra_w` > 0) — до `extra_w`, пустая целиком у строк без своего резерва
-    (`extra_lit=None`, дети пресета) — место общее для всех видимых строк
-    подвала. `values` (спека автороутинга §3) — состав для `render_track`;
-    `base_len` считается только по on-scale части переданного состава."""
+    его результат пробелами СПРАВА до общей ширины поля `base_w + extra_w`.
+    Вне-шкальная зона (двойной пробел + глифы `auto`/custom-резерва) стоит
+    вплотную к СВОЕЙ базе, а не в колонке после самой длинной базы секции:
+    базы разной длины (тройки и четвёрка режима разрешений) не отрывают
+    `auto` от его тройки (решение владельца). `values` (спека автороутинга
+    §3) — состав для `render_track`."""
     values = values or spec.values
-    base_len = 2 * sum(1 for v in values if not v.off_scale) - 1
     full = render_track(spec, current, extra_lit=extra_lit, values=values)
     t = Text()
-    t.append_text(full[:base_len])
-    t.append(" " * (base_w - base_len))
-    if extra_w:
-        extra_part = full[base_len:]
-        t.append_text(extra_part)
-        t.append(" " * (extra_w - len(extra_part.plain)))
+    t.append_text(full)
+    t.append(" " * (base_w + extra_w - len(full.plain)))
     return t
 
 
 def toggle_state(app: Any, name: str) -> str:
     """Текущее эффективное значение тоггла `name` (`gate` — через правило
     коллизии, `answers` — сырое значение). Источник — действующие настройки
-    (база + сессионные переопределения), не база окна."""
-    return TOGGLES[name].state(_effective_settings(app))
+    (база + сессионные переопределения), не база окна; у тоггла с
+    `session_state` — оно (выбор сессии живёт вне конфига)."""
+    spec = TOGGLES[name]
+    if spec.session_state is not None:
+        return spec.session_state(app)
+    return spec.state(_effective_settings(app))
 
 
 def toggle_state_base(app: Any, name: str) -> str:

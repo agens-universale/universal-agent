@@ -44,6 +44,9 @@ class Prompt(StrEnum):
     PROJECT_MEMORY_COMPACTION = "project_memory_compaction"
     COMMAND_JUDGE_SYSTEM = "command_judge_system"
     COMMAND_JUDGE_USER = "command_judge_user"
+    ACTION_JUDGE_SYSTEM = "action_judge_system"
+    ACTION_JUDGE_USER = "action_judge_user"
+    ACTION_JUDGE_EXTERNAL = "action_judge_external"
     INIT_AGENTS_MD = "init_agents_md"
 
 

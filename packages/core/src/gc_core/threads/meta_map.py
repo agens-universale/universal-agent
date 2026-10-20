@@ -56,6 +56,18 @@ _STATE_KEYS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("project_memory_check_count", ("project_memory_check_cnt",)),
     ("last_backend_response_id", ("last_backend_response_id",)),
     ("last_summarized_at", ("last_summarized_at",)),
+    ("permission_mode", ("shared", "permission_mode")),
+    ("plan", ("shared", "plan")),
+    ("mode_announced", ("shared", "mode_announced")),
+    ("plan_removed_notice", ("shared", "plan_removed_notice")),
+    ("judge_denials_in_a_row", ("shared", "judge_denials_in_a_row")),
+    ("judge_denials_total", ("shared", "judge_denials_total")),
+    ("judge_paused", ("shared", "judge_paused")),
+)
+#: Ключи ``shared``, у которых есть поле модели; прочие (поле ядра новее
+#: модели) возвращаются на место как есть — см. ``_state``.
+_SHARED_KEYS = frozenset(
+    path[1] for _, path in _STATE_KEYS if path[0] == "shared"
 )
 
 _INFO_KEYS: tuple[tuple[str, tuple[str, ...]], ...] = (
@@ -172,6 +184,11 @@ def _state(meta: JsonObject, rejected: dict) -> SessionState:
     state = _model(SessionState, values, bad)
     for field in bad:
         rejected[paths[field]] = bad[field]
+    shared = meta.get("shared")
+    if isinstance(shared, dict):
+        for key, value in shared.items():
+            if key not in _SHARED_KEYS:
+                rejected[("shared", key)] = value
     return state
 
 

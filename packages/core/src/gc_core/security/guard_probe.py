@@ -18,6 +18,7 @@ from gc_core.execution.guard_contracts import (
 )
 
 _COMMAND_PROMPTS = "command_prompts"
+_PROMPT_KINDS = frozenset({_COMMAND_PROMPTS, "action_prompts"})
 
 active_guard_checks: ContextVar[list[GuardProbeCheck] | None] = ContextVar(
     "active_guard_checks",
@@ -124,9 +125,9 @@ def evaluate_guard_probe(
         )
     elif request.kind == "download_destination":
         result = _download_destination(request, settings)
-    elif request.kind == _COMMAND_PROMPTS:
+    elif request.kind in _PROMPT_KINDS:
         raise ValueError(
-            "command_prompts читает хранилище агента — только "
+            f"{request.kind} читает хранилище агента — только "
             "aevaluate_guard_probes (на loop)"
         )
     elif request.kind == "command_host":
@@ -146,30 +147,44 @@ def _with_digest(
     return replace(result, facts_digest=digest)
 
 
-async def _acommand_prompts(
+async def _ajudge_prompts(
     request: GuardProbeRequest, settings: Any
 ) -> GuardProbeResult:
+    """Тексты инструкций судьи команд или судьи действий из хранилища агента.
+
+    Правило о внешнем запросе судья действий просит значением пробы
+    ``external`` — только когда такие записи есть в его запросе."""
     from gc_core.agent_store import agent_store_of
+    from gc_core.security.action_judge import (
+        EXTERNAL_PROMPT,
+        aload_action_judge_prompts,
+    )
     from gc_core.security.command_moderation import (
         aload_command_judge_prompts,
     )
 
     if request.schema_version != 1 or not request.cwd:
         raise ValueError("Guard probe requires schema 1 and an explicit cwd")
-    prompts = await aload_command_judge_prompts(agent_store_of(settings))
+    store = agent_store_of(settings)
+    if request.kind == _COMMAND_PROMPTS:
+        prompts = await aload_command_judge_prompts(store)
+    else:
+        prompts = await aload_action_judge_prompts(
+            store, external=request.value == EXTERNAL_PROMPT
+        )
     return _with_digest(request, GuardProbeResult(data=prompts))
 
 
 async def aevaluate_guard_probes(
     requests: Sequence[GuardProbeRequest], *, settings: Any
 ) -> list[GuardProbeResult]:
-    """Пробы воркера по порядку запросов: промпты судьи — на loop (хранилище
+    """Пробы воркера по порядку запросов: промпты судей — на loop (хранилище
     агента бывает сетевым, синхронный мост его не дождётся), остальное —
     синхронными проверками политик в потоке."""
     results: dict[int, GuardProbeResult] = {}
     for index, request in enumerate(requests):
-        if request.kind == _COMMAND_PROMPTS:
-            results[index] = await _acommand_prompts(request, settings)
+        if request.kind in _PROMPT_KINDS:
+            results[index] = await _ajudge_prompts(request, settings)
     rest = [(i, r) for i, r in enumerate(requests) if i not in results]
 
     def evaluate() -> list[GuardProbeResult]:

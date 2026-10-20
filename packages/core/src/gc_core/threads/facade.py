@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import Any
 
+from gc_core.plan_store import normalize_plan_block
 from gc_core.threads.meta_map import meta_from_record
 from gc_core.threads.models import (
     JsonObject,
@@ -245,6 +246,35 @@ class Threads:
                 key, SideChange(op_id=_op_id("runtime"), set_runtime=runtime)
             )
         return removed
+
+    async def clear_plan(self, key: ThreadKey) -> bool:
+        """Убрать план сессии по решению человека (``/plan clear``); True —
+        план был.
+
+        Единственная запись фронтенда в ``shared`` — осознанное исключение
+        из правила «shared пишет исполнитель»: команда приходит, когда
+        прогона нет. Запись — под арендой треда, как запись истории: тред,
+        занятый ходом другого владельца, даёт ``OwnershipError``, а не гонку.
+        Вместе с планом взводится признак для модели — следующий прогон
+        один раз сообщит ей, что плана больше нет; файл плана для человека
+        (возможность файлового хранилища) удаляется.
+        """
+        meta = await self._port.aload_meta(key.system, key.thread)
+        shared = dict(meta.get("shared") or {})
+        if not normalize_plan_block(shared.get("plan")):
+            return False
+        shared.pop("plan", None)
+        shared["plan_removed_notice"] = True
+        try:
+            await self._port.asave_meta(
+                key.system, key.thread, {**meta, "shared": shared}
+            )
+        finally:
+            await self._port.arelease_lease(key.system, key.thread)
+        drop = getattr(self.store, "delete_plan_file", None)
+        if callable(drop):
+            await drop(key)
+        return True
 
     async def delete(self, key: ThreadKey) -> None:
         await self.store.delete(key, op_id=_op_id("delete"))

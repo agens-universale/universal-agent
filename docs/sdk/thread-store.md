@@ -109,11 +109,17 @@ history = await threads.history(key)         # записи потока message
 parts = await threads.parts(key)             # архивы по порядку, затем живая история
 await threads.update_frontend(key, "myapp", {"pinned": True})
 found = await threads.resolve("resp_123")    # тред по алиасу
+await threads.clear_plan(key)                # `/plan clear`: True — план был
 await threads.delete(key)
 ```
 
 `Threads.legacy_meta(record)` отдаёт запись в прежней форме meta (ключи
 `shared`, `runtime`, `tui`…) — для кода, который читал `meta_*.json`.
+
+Файл плана для человека (`plans/plan_<system>_<thread>.md`) — возможность
+файлового хранилища (`FileThreadStore.save_plan_file`): исполнитель пишет
+его в конце прогона, если хранилище умеет; у хранилищ на базах файла нет,
+план живёт только в состоянии треда (`record.state.plan`).
 
 ## Своё хранилище
 

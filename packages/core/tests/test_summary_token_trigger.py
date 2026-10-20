@@ -257,6 +257,7 @@ def test_compaction_clears_prompt_fields_in_state_and_meta():
         raw_summary="short",
         last_dialog_steps="",
         summarized_messages_count=1,
+        can_propose_plan=True,
     )
     assert state.last_main_prompt_tokens is None
     assert state.last_main_prompt_message_count is None
@@ -429,6 +430,7 @@ def test_compaction_outside_coordinator_does_not_fake_missing_usage(caplog):
         raw_summary="short",
         last_dialog_steps="",
         summarized_messages_count=1,
+        can_propose_plan=True,
     )
     assert state.last_main_prompt_tokens is None
     _step(coord, state, 1, prompt_tokens=50)

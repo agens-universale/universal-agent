@@ -68,6 +68,10 @@ ALLOWED: dict[str, str] = {
         "хранилища SQLite: файл базы создаётся с правами 0600"
     ),
     _CORE + "attachments/store.py": "файлы вложений тредов (картинки)",
+    _CORE + "persistence/plan_file.py": (
+        "файл плана для человека — пишут только файловые хранилища тредов "
+        "(save_plan_file)"
+    ),
     # Совместимость отката: файлы develop пишутся вместе с хранилищем.
     "packages/acp/src/gc_acp/session_index.py": _ROLLBACK,
     "packages/chat/src/gc_chat/responses/index_store.py": _ROLLBACK,

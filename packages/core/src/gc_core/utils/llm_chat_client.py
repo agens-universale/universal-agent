@@ -347,6 +347,24 @@ async def arequest_chat_completion_once(
     return _completion_text_and_finish(res)
 
 
+def _network_params(
+    settings: Any,
+    resolved: Optional[ResolvedModel],
+    isolated_timeout_sec: Optional[float],
+) -> tuple:
+    """Сетевые параметры запроса. Вызов со своим бюджетом повторов — одна
+    попытка (без повторов транспорта) и таймаут не больше своего потолка:
+    настроенный короче — действует он."""
+    params = resolve_network_params(settings, resolved)
+    if isolated_timeout_sec is None:
+        return params
+    verify, cert, _use_retry, timeout, proxy, embedded = params
+    limit = float(isolated_timeout_sec)
+    if timeout:
+        limit = min(limit, float(timeout))
+    return verify, cert, False, limit, proxy, embedded
+
+
 async def _asend_chat_completion_text(
     *,
     ctx: Any,
@@ -358,6 +376,7 @@ async def _asend_chat_completion_text(
     resolved: Optional[ResolvedModel],
     before_send: Callable[[PreparedChatCompletion], Awaitable[None]]
     | None = None,
+    isolated_timeout_sec: Optional[float] = None,
 ) -> ChatCompletionText:
     settings = settings_of(ctx)
     full_log_backend = bool(settings.logging.full_log_backend)
@@ -418,7 +437,7 @@ async def _asend_chat_completion_text(
         timeout,
         config_proxy,
         retry_embedded_choice_errors,
-    ) = resolve_network_params(settings, resolved)
+    ) = _network_params(settings, resolved, isolated_timeout_sec)
 
     if prepared is not None:
 
@@ -458,6 +477,7 @@ async def _asend_chat_completion_text(
             notice_url=url,
             timeout=timeout,
             config_proxy=config_proxy,
+            adaptive_retry=isolated_timeout_sec is None,
         )
     logger = getattr(ctx, "logger", None)
     if logger is not None and full_log_backend:
@@ -518,8 +538,15 @@ async def arequest_chat_completion_outcome(
     allow_images: bool = False,
     before_send: Callable[[PreparedChatCompletion], Awaitable[None]]
     | None = None,
+    isolated_timeout_sec: Optional[float] = None,
 ) -> ChatCompletionText:
-    """Request text and finish reason through the configured model boundary."""
+    """Request text and finish reason through the configured model boundary.
+
+    ``isolated_timeout_sec`` задан — вызов со своим бюджетом повторов (судья
+    действий): одна попытка с этим таймаутом, без повторов транспорта и
+    понижения max_tokens, предохранитель моделей не трогается. Повторы и счёт
+    сбоев — у вызывающего; через durable-границу признак едет в
+    ``ModelRequest``."""
     from gc_core.execution.model import arequest_model
 
     if max_tokens < 1:
@@ -536,6 +563,7 @@ async def arequest_chat_completion_outcome(
             payload_overrides=payload_overrides,
             allow_images=allow_images,
             before_send=before_send,
+            isolated_timeout_sec=isolated_timeout_sec,
         )
     if allow_images or before_send is not None:
         # Картинки и проверка маршрута до отправки — только там, где есть
@@ -553,6 +581,7 @@ async def arequest_chat_completion_outcome(
         max_tokens=max_tokens,
         request_label=request_label,
         payload_overrides=payload_overrides,
+        isolated_timeout_sec=isolated_timeout_sec,
     )
     return ChatCompletionText(result.text or "", result.finish_reason)
 
@@ -569,6 +598,7 @@ async def _arequest_chat_completion_outcome_local(
     allow_images: bool = False,
     before_send: Callable[[PreparedChatCompletion], Awaitable[None]]
     | None = None,
+    isolated_timeout_sec: Optional[float] = None,
 ) -> ChatCompletionText:
     """Текст choice и ``finish_reason``. ``consumer`` — canonical id из
     ``ModelRouter.CONSUMERS`` (спека §5.1); резолвится
@@ -581,6 +611,11 @@ async def _arequest_chat_completion_outcome_local(
     падает — исключение уходит наверх без изменений (существующая per-consumer
     fail-семантика: finish_gate/text_answer_judge fail-open, summary — пропуск
     цикла, command_judge — fail-closed).
+
+    Вызов со своим бюджетом повторов (``isolated_timeout_sec``, судья действий)
+    предохранитель не трогает и на свежем сбое не деградирует: его сбой — не
+    знание о модели основного хода, повторяет и считает он сам. Деградация при
+    уже открытом предохранителе — как у всех.
 
     ``allow_images=True`` — вызов несёт картинки (``content`` списком частей): так
     зовут только «глаза» (``vision/eyes``). Без флага картинки — ``ValueError``."""
@@ -599,9 +634,11 @@ async def _arequest_chat_completion_outcome_local(
         request_label=request_label,
         payload_overrides=payload_overrides,
         before_send=before_send,
+        isolated_timeout_sec=isolated_timeout_sec,
     )
     if router is None:
         return await send(resolved=None)
+    isolated = isolated_timeout_sec is not None
 
     failed_alias: Optional[str] = None
     primary_exc: Optional[Exception] = None
@@ -616,7 +653,7 @@ async def _arequest_chat_completion_outcome_local(
         try:
             return await send(resolved=resolved)
         except Exception as exc:
-            if resolved.alias is None or not is_model_unavailable_error(exc):
+            if not _trips_breaker(exc, resolved.alias, isolated=isolated):
                 raise
             failed_alias = resolved.alias
             newly_failed_alias = (
@@ -650,9 +687,7 @@ async def _arequest_chat_completion_outcome_local(
     try:
         return await send(resolved=active_resolved)
     except Exception as exc:
-        if active_resolved.alias is not None and is_model_unavailable_error(
-            exc
-        ):
+        if _trips_breaker(exc, active_resolved.alias, isolated=isolated):
             router.breaker.trip(active_resolved.alias, _breaker_reason(exc))
         raise
 
@@ -669,6 +704,7 @@ async def arequest_chat_completion_text(
     allow_images: bool = False,
     before_send: Callable[[PreparedChatCompletion], Awaitable[None]]
     | None = None,
+    isolated_timeout_sec: Optional[float] = None,
 ) -> str:
     """Текст choice. Причина остановки — в ``arequest_chat_completion_outcome``."""
     outcome = await arequest_chat_completion_outcome(
@@ -681,6 +717,7 @@ async def arequest_chat_completion_text(
         payload_overrides=payload_overrides,
         allow_images=allow_images,
         before_send=before_send,
+        isolated_timeout_sec=isolated_timeout_sec,
     )
     return outcome.text
 
@@ -694,3 +731,13 @@ def _resolve_active_model(router: Any):
 
 def _breaker_reason(exc: BaseException) -> str:
     return str(exc).strip()[:300] or exc.__class__.__name__
+
+
+def _trips_breaker(
+    exc: BaseException, alias: Optional[str], *, isolated: bool
+) -> bool:
+    """Отмечает ли сбой вызова модель в предохранителе: недоступность модели
+    с алиасом — да, кроме вызова со своим бюджетом повторов."""
+    return (
+        not isolated and alias is not None and is_model_unavailable_error(exc)
+    )

@@ -191,6 +191,8 @@ def test_snapshot_contains_no_worker_only_or_secret_field():
         "subagent_tools_stop",
         "os_backend",
         "run_mode",
+        "human_channel",
+        "external_user_words",
     }
     # Исходные настройки не тронуты.
     assert loaded.settings.agent_auth.model_dump() == {"token": "SECRET_AUTH"}
@@ -509,3 +511,21 @@ def test_fingerprint_of_yaml_and_plain_settings_match(tmp_path):
     assert fingerprint_mismatch(
         settings_fingerprint(yaml), settings_fingerprint(plain(60000))
     ) == ["summary"]
+
+
+def test_channel_declarations_reach_the_workflow():
+    """Объявления канала — публичная часть рантайма: workflow и дети под
+    Temporal видят «человека нет» и «слова внешние» так же, как воркер."""
+    loaded = LoadedSettings(
+        settings=AppConfig(),
+        runtime=RuntimeEnv(human_channel=False, external_user_words=True),
+    )
+    snapshot = public_config_snapshot(loaded)
+    assert snapshot.runtime["human_channel"] is False
+    assert snapshot.runtime["external_user_words"] is True
+    rebuilt = settings_from_snapshot(
+        json.loads(json.dumps(snapshot.settings)),
+        json.loads(json.dumps(snapshot.runtime)),
+    )
+    assert rebuilt.runtime.human_channel is False
+    assert rebuilt.runtime.external_user_words is True

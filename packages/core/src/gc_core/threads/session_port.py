@@ -295,6 +295,18 @@ class SessionPort:
         if record is not None and "tui" not in record.frontend:
             await self._side(key, set_frontend=("tui", {}))
 
+    # --- файл плана --------------------------------------------------------------
+
+    async def asave_plan_file(
+        self, system_id: str, thread_id: str, plan: dict | None
+    ) -> str | None:
+        """Файл плана для человека — возможность хранилища (файлового); у
+        хранилищ без каталога (память, базы) её нет — None."""
+        save = getattr(self._store, "save_plan_file", None)
+        if not callable(save):
+            return None
+        return await save(_key(system_id, thread_id), plan)
+
     # --- meta ------------------------------------------------------------------
 
     async def asave_meta(

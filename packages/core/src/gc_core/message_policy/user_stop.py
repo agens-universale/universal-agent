@@ -5,12 +5,15 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, Optional
 
+#: Причина для модели — одна на конверт A и тело отказа защиты.
+CANCELLED_BY_USER_MESSAGE = "Tool was interrupted by user stop."
+
 
 def cancelled_by_user_output(
     tool_name: str,
     *,
     meta: Optional[Dict[str, Any]] = None,
-    message: str = "Tool was interrupted by user stop.",
+    message: str = CANCELLED_BY_USER_MESSAGE,
 ) -> str:
     """Envelope A: тул уже запущен, прерван user-stop."""
     payload: Dict[str, Any] = {
@@ -29,6 +32,18 @@ def cancelled_by_user_output(
     return json.dumps(payload, ensure_ascii=False)
 
 
+def cancelled_by_user_error(**fields: Any) -> dict:
+    """Тело отказа защиты, прерванной user-stop до решения (стоп во время
+    запроса к судье действий): действие не выполнялось. Форма — как у тел
+    отказа режима (``type`` и поля защиты), смысл — как у конверта A."""
+    return {
+        "type": "cancelled_by_user",
+        **fields,
+        "reason": CANCELLED_BY_USER_MESSAGE,
+        "retryable": True,
+    }
+
+
 def not_started_due_to_user_stop_output(tool_name: str) -> str:
     """Envelope B: call в batch был, apply_tool не вызывали из‑за stop."""
     payload = {
@@ -43,6 +58,7 @@ def not_started_due_to_user_stop_output(tool_name: str) -> str:
 
 
 __all__ = [
+    "cancelled_by_user_error",
     "cancelled_by_user_output",
     "not_started_due_to_user_stop_output",
 ]

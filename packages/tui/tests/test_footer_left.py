@@ -1,9 +1,10 @@
 """Footer-left контекстно зависит от наличия задачи и активного run.
 
-Idle: F1/help  F2/sessions  F3/diff  F5/config  F6/settings  F7/buffer
-Running: Ctrl+C/stop — и больше ничего (Task 17, решение юзера): F-подсказки во
-время хода не показываются никогда, место нужно правой колонке — там живут
-стрелка перехода и сегмент «запрос».
+Idle: пилюля режима разрешений («▸▸ edit mode (Shift+Tab)») и счётчик уведомлений.
+Running: пилюля + Ctrl+C/stop. F-подсказок в футере нет ни в каком состоянии
+(решение владельца): постоянный индикатор режима важнее списка клавиш, клавиши
+перечислены в справке (F1), а место нужно правой колонке — там живут стрелка
+перехода и сегмент «запрос».
 (/skills и /export из футера убраны — доступны через палитру; /mcp не дублируем —
 подсказка /mcp в бренд-карточке.)
 
@@ -16,6 +17,16 @@ import json
 from pathlib import Path
 
 import pytest
+
+_PILL = "▸▸ edit mode (Shift+Tab)"
+_F_KEYS = (
+    "F1/help",
+    "F2/sessions",
+    "F3/diff",
+    "F5/config",
+    "F6/settings",
+    "F7/buffer",
+)
 
 
 def _notices(*, warnings=0, infos=0):
@@ -50,12 +61,7 @@ async def test_footer_left_empty_state_no_back_no_stop_no_export():
 
     async with TuiApp().run_test() as pilot:
         rendered = str(pilot.app.query_one("#footer-left", Static).render())
-        assert "F1/help" in rendered
-        assert "F2/sessions" in rendered
-        assert "F3/diff" in rendered
-        assert "F5/config" in rendered
-        assert "F6/settings" in rendered
-        assert "F7/buffer" in rendered
+        assert rendered == _PILL
         assert "[F1]" not in rendered
         assert "/mcp" not in rendered
         assert "/skills" not in rendered
@@ -87,12 +93,7 @@ async def test_footer_left_task_idle_no_stop(tmp_path):
         await pilot.pause()
 
         rendered = str(pilot.app.query_one("#footer-left", Static).render())
-        assert "F2/sessions" in rendered
-        assert "F1/help" in rendered
-        assert "F5/config" in rendered
-        assert "F3/diff" in rendered
-        assert "F6/settings" in rendered
-        assert "F7/buffer" in rendered
+        assert rendered == _PILL
         assert "/mcp" not in rendered
         assert "/skills" not in rendered
         assert "/export" not in rendered
@@ -142,14 +143,8 @@ async def test_footer_left_task_running_shows_only_stop_at_any_width(tmp_path):
             )
             assert "Ctrl+C/stop" in rendered, width
             assert "F4/notices" in rendered, width  # бейдж виден всегда
-            for key in (
-                "F1/help",
-                "F2/sessions",
-                "F3/diff",
-                "F5/config",
-                "F6/settings",
-                "F7/buffer",
-            ):
+            assert rendered.startswith("▸▸"), width  # режим виден всегда
+            for key in _F_KEYS:
                 assert key not in rendered, (width, key)
             assert "/mcp" not in rendered
             assert "/skills" not in rendered
@@ -194,9 +189,7 @@ async def test_footer_left_drops_stop_after_runner_finishes(tmp_path):
         await pilot.pause(0.4)
         rendered = str(pilot.app.query_one("#footer-left", Static).render())
         assert "/stop" not in rendered
-        assert "/sessions" in rendered
-        assert "F5/config" in rendered
-        assert "F7/buffer" in rendered
+        assert rendered == _PILL
         assert "Ctrl+a" not in rendered
 
 
@@ -221,12 +214,9 @@ async def test_footer_badge_counts_update_notice():
 
 
 @pytest.mark.asyncio
-async def test_footer_shows_notices_badge_and_buffer_key_together():
-    """Суффикс уведомлений и F7/buffer живут в одной строке одновременно.
-
-    Синк 2026-08-06: суффикс — наша сторона, F7/buffer пришёл из develop, и до этого
-    теста ни один прогон не проверял их ВМЕСТЕ. Рефакторинг любой из половин мог
-    незаметно вытеснить вторую."""
+async def test_footer_shows_mode_pill_and_notices_badge_together():
+    """Пилюля режима и счётчик уведомлений живут в одной строке одновременно,
+    через точку-разделитель: ни один не вытесняет другой."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
     from textual.widgets import Static
@@ -237,8 +227,9 @@ async def test_footer_shows_notices_badge_and_buffer_key_together():
         screen._refresh_notices_footer()
         await pilot.pause()
         footer = str(pilot.app.query_one("#footer-left", Static).render())
-        assert "F7/buffer" in footer  # клавиша develop не вытеснена
-        assert "F4/notices" in footer  # наш суффикс на месте
+        assert footer.startswith(f"{_PILL}  ·  ")
+        assert footer.endswith("F4/notices")
+        assert "\n" not in footer
         # счётчики парой, без точки между собой (решение владельца против варианта develop)
         from gc_tui.services.notices_ui import INFO_GLYPH, WARN_GLYPH
 
@@ -250,7 +241,8 @@ async def test_footer_badge_wraps_whole_and_dotless_on_narrow():
     """Узкое окно: блок уведомлений уходит вниз ЦЕЛИКОМ и без ведущей точки.
 
     Частичный перенос (счётчик наверху, «F4/notices» внизу) читался как два обрывка,
-    а точка в начале строки ничего не разделяет (живая приёмка 2026-08-07)."""
+    а точка в начале строки ничего не разделяет (живая приёмка 2026-08-07). Имя
+    режима при этом не сжимается: пилюля остаётся полной в первой строке."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
     from textual.widgets import Static
@@ -265,6 +257,7 @@ async def test_footer_badge_wraps_whole_and_dotless_on_narrow():
         lines = text.split("\n")
         assert len(lines) == 2, f"блок не уехал вниз целиком: {text!r}"
         assert "F4/notices" in lines[1] and "notices" not in lines[0]
+        assert lines[0] == _PILL
         assert not lines[1].lstrip().startswith("·"), (
             "ведущая точка на строке без соседа"
         )
@@ -296,6 +289,9 @@ async def test_footer_columns_never_touch_and_left_wraps_instead():
     for width in (140, 110, 96, 90, 84):
         app = TuiApp(settings=tui_settings({"agent.model": model}))
         async with app.run_test(size=(width, 30)) as pilot:
+            # счётчик уведомлений — то, что левой колонке есть куда переносить
+            pilot.app._update_available = True
+            pilot.app.screen._refresh_notices_footer()
             await pilot.pause()
             foot = pilot.app.screen.query_one("#footer")
             right = pilot.app.screen.query_one("#footer-right")
@@ -397,3 +393,51 @@ def test_footer_left_guard_keeps_stop_key_at_any_width():
             f"ширина {width}: стоп-клавиша потеряна: {text!r}"
         )
         assert _rendered_rows(text, width) <= 2, f"ширина {width}: {text!r}"
+
+
+class _RunningRunner:
+    def is_running(self) -> bool:
+        return True
+
+    def stop(self) -> None:
+        pass
+
+
+async def _running_footer(width: int, *, badge: bool) -> str:
+    from gc_tui.app import TuiApp
+    from textual.widgets import Static
+
+    app = TuiApp(settings=tui_settings({"agent.model": "some-model-name"}))
+    async with app.run_test(size=(width, 30)) as pilot:
+        pilot.app._update_available = badge
+        pilot.app.tui_state.active_task_id = "t"
+        pilot.app.active_runner = _RunningRunner()
+        await pilot.pause(0.6)  # тик опроса пересобирает футер по месту
+        return str(pilot.app.query_one("#footer-left", Static).render())
+
+
+@pytest.mark.asyncio
+async def test_footer_pill_shrinks_to_glyph_when_stop_key_needs_the_room():
+    """Узкое окно во время хода: имя режима и подпись хоткея уходят, глиф и
+    команда остановки остаются в одном ряду."""
+    pytest.importorskip("textual")
+    assert await _running_footer(70, badge=False) == f"{_PILL}  Ctrl+C/stop"
+    assert await _running_footer(44, badge=False) == "▸▸  Ctrl+C/stop"
+    assert await _running_footer(44, badge=True) == (
+        "▸▸  Ctrl+C/stop\nℹ 1 · F4/notices"
+    )
+
+
+@pytest.mark.asyncio
+async def test_footer_stop_key_outlives_the_mode_glyph():
+    """Места нет даже на глиф рядом с командой остановки — уступает глиф:
+    другого способа узнать, чем остановить агента, на экране нет. Шире —
+    раньше снимается имя модели (справа остаётся точка уровня), и глиф
+    остаётся."""
+    pytest.importorskip("textual")
+    rendered = await _running_footer(20, badge=True)
+    assert rendered.split("\n")[0] == "Ctrl+C/stop"
+    assert "▸" not in rendered
+    for width in (22, 32, 36):
+        wider = await _running_footer(width, badge=True)
+        assert wider.split("\n")[0] == "▸▸  Ctrl+C/stop", width

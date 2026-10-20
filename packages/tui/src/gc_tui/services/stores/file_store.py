@@ -83,6 +83,11 @@ class FileTaskStore:
             self._threads.append_messages(self._key(task_id, system), messages)
         )
 
+    def clear_plan(self, task_id: str, system: Optional[str] = None) -> bool:
+        """Убрать план из сессии (`/plan clear`); True — план был. Решение и
+        запись — в фасаде ``Threads`` (под арендой треда)."""
+        return run_sync(self._threads.clear_plan(self._key(task_id, system)))
+
     def delete_task(self, task_id: str, system: Optional[str] = None) -> None:
         """Полностью удалить тред: историю, архивы, трассу, картинки."""
         run_sync(self._threads.delete(self._key(task_id, system)))

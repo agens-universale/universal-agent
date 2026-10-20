@@ -2,6 +2,7 @@ import logging
 from collections.abc import Mapping
 from typing import Any, Dict, List, Type
 
+from gc_core.security.permission_mode import CAT_SUBAGENT
 from gc_core.settings import AppConfig, LoadedSettings, settings_of
 from gc_core.tools.subagents.abstract_subagent import AbstractSubagent
 from gc_core.tools.subagents.code_planner import CodePlanner
@@ -311,6 +312,7 @@ def get_subagents_tools_data(
             "spec": spec,
             "description": spec.get("description", ""),
             "tool_fabric": None,
+            "category": CAT_SUBAGENT,
         }
 
     for name, definition in resolve_subagent_definitions(
@@ -322,5 +324,6 @@ def get_subagents_tools_data(
             "spec": spec,
             "description": definition.description,
             "tool_fabric": None,
+            "category": CAT_SUBAGENT,
         }
     return result

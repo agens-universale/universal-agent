@@ -228,6 +228,16 @@ async def seed_messages(store, system, thread, messages):
         await store.release(key, record.lease)
 
 
+async def seed_meta(store, system, thread, meta):
+    """Засеять meta треда (режим, план — до первого хода) и отпустить
+    аренду: сессия Temporal возьмёт тред без захвата."""
+    from gc_core.threads.session_port import SessionPort
+
+    port = SessionPort(store, owner="seed")
+    await port.asave_meta(system, thread, meta)
+    await port.arelease_lease(system, thread)
+
+
 async def thread_trace(store, system, thread):
     """Трасса субагентов треда в прежней форме записей (порт сессии)."""
     from gc_core.thread_store_async import athread_store

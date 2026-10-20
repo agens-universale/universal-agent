@@ -160,3 +160,48 @@ def test_valid_field_overrides_rejected_legacy_value():
 def test_todo_items_with_extra_fields_stay_in_state():
     parts = parts_from_meta(SYNTHETIC)
     assert parts.state.todo == SYNTHETIC["shared"]["session_todo"]
+
+
+#: Ключи ``shared`` режимов разрешений, плана и предохранителя судьи
+#: (develop пишет их условно: только когда значение есть).
+MODE_SHARED = {
+    "permission_mode": "auto",
+    "plan": {
+        "text": "1. шаг",
+        "status": "approved",
+        "approved_mode": "edit",
+        "updated_at": "2026-10-13T09:12:00+00:00",
+    },
+    "mode_announced": "auto",
+    "plan_removed_notice": True,
+    "judge_denials_in_a_row": 2,
+    "judge_denials_total": 5,
+    "judge_paused": True,
+}
+
+
+def test_mode_plan_and_judge_keys_are_state_fields():
+    """Режим, план и предохранитель судьи — поля состояния сессии: базы
+    хранят их тем же полем, что и файл, а не теряют."""
+    meta = {**SYNTHETIC, "shared": {**SYNTHETIC["shared"], **MODE_SHARED}}
+    parts = parts_from_meta(meta)
+    state = parts.state
+    assert state.permission_mode == "auto"
+    assert state.plan["status"] == "approved"
+    assert state.mode_announced == "auto"
+    assert state.plan_removed_notice is True
+    assert (state.judge_denials_in_a_row, state.judge_denials_total) == (2, 5)
+    assert state.judge_paused is True
+    assert _roundtrip(meta) == meta
+
+
+def test_absent_mode_keys_stay_absent():
+    out = _roundtrip(SYNTHETIC)
+    assert set(out["shared"]) == set(SYNTHETIC["shared"])
+
+
+def test_unknown_shared_key_is_not_lost():
+    """Ключ ``shared``, которого модель не знает (поле нового ядра),
+    возвращается на место, а не пропадает при записи."""
+    meta = {**SYNTHETIC, "shared": {**SYNTHETIC["shared"], "future": [1]}}
+    assert _roundtrip(meta) == meta

@@ -129,3 +129,29 @@ async def test_the_tail_does_not_leak_into_the_next_run(monkeypatch, tmp_path):
     assert [m["content"] for m in ex.take_undelivered_messages()] == [
         "не съедено"
     ], "несъеденное пропало молча — а клиенту на него уже ответили «принято»"
+
+
+async def test_a_message_queued_during_the_run_lifts_the_judge_pause(
+    monkeypatch, tmp_path
+):
+    """Сообщение из очереди — такое же новое слово человека: снимает паузу
+    судьи посреди прогона (вебхук в идущую задачу, реплика TUI)."""
+    holder: dict = {}
+    seen: dict = {}
+
+    async def _on_call(_messages, poll):
+        ex = holder["ex"]
+        shared = ex._state.shared
+        shared.judge_paused = True
+        shared.judge_denials_in_a_row = 3
+        ex.add_message({"role": "user", "content": "продолжай"})
+        poll()
+        seen["paused"] = shared.judge_paused
+        seen["in_a_row"] = shared.judge_denials_in_a_row
+
+    ex = await _executor(monkeypatch, tmp_path, _on_call)
+    holder["ex"] = ex
+    await ex.arun(
+        ["стартовое"], thread_id="t", start_new_thread=True, system="cli"
+    )
+    assert seen == {"paused": False, "in_a_row": 0}

@@ -422,3 +422,80 @@ def test_memory_read_outside_the_tool_does_not_restore(tmp_path):
     memory = asyncio.run(agent_store_of(ctx).read_memory(project_of(ctx)))
     assert memory is None
     assert not (tmp_path / ".gc" / "project_memory.md").exists()
+
+
+def _gated_call(tmp_path, mode, action, events=None):
+    """Через настоящий диспетчер с гейтом режима: категорию записи тул
+    получает из реестра, решение — из таблицы режимов."""
+    from gc_core.execution.state import SharedStateData
+    from gc_core.security.permission_store import PermissionStore
+    from gc_core.tools import aapply_tool
+    from gc_core.tools.registry import _project_registry
+    from gc_testkit import run_coro
+
+    shared = SharedStateData(permission_mode=mode)
+    logger = None
+    if events is not None:
+        logger = type(
+            "L", (), {"info": lambda self, m, *a: events.append(m % a)}
+        )()
+    ctx = fake_ctx(
+        project_gc_dir=tmp_path / ".gc",
+        config={
+            "backend.api_mode": "chat_completions",
+            "agent.model": "test-model",
+        },
+        auth_connector=None,
+        logger=logger,
+        permission_store=PermissionStore(shared.confirm_rules, shared=shared),
+    )
+    data = _project_registry(ctx.settings)
+    args = {"action": action, "content": "" if action == "read" else "x"}
+    return json.loads(
+        run_coro(
+            aapply_tool(
+                "project_memory",
+                json.dumps(args),
+                data,
+                ctx=ctx,
+                state=SimpleNamespace(),
+                call_id="c1",
+            )
+        )
+    )
+
+
+def test_plan_mode_reads_project_memory_but_does_not_change_it(tmp_path):
+    """Память проекта переживает сессию и попадает в промпт следующих: запись
+    в неё — изменение, а plan обещает только чтение (как у эталона: в plan
+    файлы не пишутся вовсе). Чтение остаётся."""
+    for action in ("append", "write"):
+        out = _gated_call(tmp_path, "plan", action)
+        assert out["ok"] is False, action
+        assert out["error"]["type"] == "permission_denied_by_mode"
+    assert _gated_call(tmp_path, "plan", "read")["ok"] is True
+    assert not (tmp_path / ".gc" / "project_memory.md").exists()
+
+
+def test_project_memory_write_follows_the_mode_table_and_is_audited(
+    tmp_path, monkeypatch
+):
+    """Правило — строка таблицы режимов (категория действия из реестра), а
+    не ветка в туле; гейт пишет отказ в аудит, как остальные отказы режима.
+    manual спрашивает: без человека запись — отказ, чтение — как было."""
+    import io
+
+    from gc_core.message_policy.permission_denials import UNATTENDED_TYPE
+
+    # Без человека: при `pytest -s` вопрос не должен уйти в консоль.
+    monkeypatch.setattr("sys.stdin", io.StringIO(""))
+
+    for mode in ("edit", "auto"):
+        assert _gated_call(tmp_path, mode, "append")["ok"] is True, mode
+    out = _gated_call(tmp_path, "manual", "append")
+    assert out["ok"] is False
+    assert out["error"]["type"] == UNATTENDED_TYPE
+    assert _gated_call(tmp_path, "manual", "read")["ok"] is True
+    events = []
+    _gated_call(tmp_path, "plan", "write", events)
+    assert any('"reason_code": "mode_deny"' in e for e in events)

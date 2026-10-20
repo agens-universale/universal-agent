@@ -71,6 +71,7 @@ def test_default_registry_is_exactly_keep_set():
         [
             "sessions",
             "new",
+            "plan",
             "stop",
             "skill",
             "skills",
@@ -177,6 +178,7 @@ def test_default_registry_frequency_order():
         "view",
         "notices",
         "new",
+        "plan",
         "config",
         "settings",
         "voice",

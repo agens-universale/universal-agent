@@ -31,6 +31,7 @@ import time
 
 from rich.text import Text
 from textual import events
+from textual.timer import Timer
 from textual.widgets import Static
 
 from gc_tui.messages import OpenEditsScreenRequest
@@ -167,6 +168,8 @@ _STATE_STOPPED_STEPS = "stopped_steps"
 _STATE_STOPPED_ERRORS = "stopped_errors"
 _STATE_STOPPED_TOKENS = "stopped_tokens"
 _STATE_STOPPED_TOOL_CALLS = "stopped_tool_calls"
+# Режим auto: проверка действий недоступна, спорные действия выполнить нельзя.
+_STATE_STOPPED_JUDGE = "stopped_judge"
 
 # Исходы, которые персистентны как строка-итог (done / cancelled / …) до
 # следующего user-send. Единый список для poll, resume и meta.last_indicator.
@@ -179,6 +182,7 @@ TERMINAL_INDICATOR_STATES = frozenset(
         _STATE_STOPPED_ERRORS,
         _STATE_STOPPED_TOKENS,
         _STATE_STOPPED_TOOL_CALLS,
+        _STATE_STOPPED_JUDGE,
     }
 )
 
@@ -237,6 +241,11 @@ def compose_status_line(
     return out, (head.cell_len + gap, out.cell_len)
 
 
+#: Подпись успешного исхода хода. Ход, кончившийся предложенным планом,
+#: работой не является: «Выполнил» под планом читалось бы как «сделано».
+DONE_LABEL = "Выполнил"
+DONE_LABEL_PLAN = "План готов"
+
 # Исходы хода, кроме «Выполнил» (у него своя голова — время хода): глиф и слова.
 _TERMINAL_ENDINGS = {
     _STATE_CANCELLED: ("■", "Отменено"),
@@ -247,6 +256,11 @@ _TERMINAL_ENDINGS = {
     _STATE_STOPPED_TOOL_CALLS: (
         "⏹",
         "Остановлено: превышен лимит вызовов инструментов",
+    ),
+    _STATE_STOPPED_JUDGE: (
+        "⏹",
+        "Остановлено: проверка действий недоступна — повторите позже "
+        "или смените режим",
     ),
 }
 
@@ -273,8 +287,10 @@ class ThinkingIndicator(Static):
         reasoning_clock=None,
         frozen_elapsed: int | None = None,
         turn_summary: tuple[int, int, int] | None = None,
+        done_label: str = DONE_LABEL,
     ) -> None:
         self._clock = clock
+        self._done_label = done_label
         self._sink = sink
         self._reasoning_tag = reasoning_tag
         self._reasoning_clock = reasoning_clock
@@ -295,9 +311,17 @@ class ThinkingIndicator(Static):
         # нажатия до отпускания (см. `on_mouse_down`).
         self._pressed_in_summary = False
         self._rotator = PhraseRotator(THINKING_PHRASES)
+        # Таймер анимации; None до монтирования.
+        self._anim_timer: Timer | None = None
         super().__init__(
             self._render_text(), classes="thinking-indicator", markup=False
         )
+
+    def set_done_label(self, label: str) -> None:
+        """Подпись успешного исхода хода: «Выполнил» либо «План готов»."""
+        self._done_label = label
+        if self.is_mounted:
+            self.refresh()
 
     def set_turn_summary(self, summary: tuple[int, int, int] | None) -> None:
         """Сводка правок завершившегося хода — правый сегмент строки-итога."""
@@ -319,6 +343,7 @@ class ThinkingIndicator(Static):
             _STATE_STOPPED_ERRORS,
             _STATE_STOPPED_TOKENS,
             _STATE_STOPPED_TOOL_CALLS,
+            _STATE_STOPPED_JUDGE,
         ):
             return
         if self._state == state:
@@ -326,13 +351,46 @@ class ThinkingIndicator(Static):
         self._state = state
         if state == _STATE_DONE and self._frozen_elapsed is None:
             self._frozen_elapsed = int(self._clock() - self._started_at)
+        self._sync_anim()
         if self.is_mounted:
             self.refresh()
+
+    def hide(self) -> None:
+        """Скрыть строку (агент ждёт ответа человека); анимация стоит."""
+        self.add_class("hidden")
+        self._sync_anim()
+
+    def show(self, state: str) -> None:
+        """Вернуть скрытую строку в состоянии ``state``."""
+        self.remove_class("hidden")
+        self.set_state(state)
+        self._sync_anim()
+
+    def _sync_anim(self) -> None:
+        """Таймер тикает, только пока кадр виден и нужен.
+
+        Итог хода от кадра не зависит, скрытую строку никто не видит.
+        """
+        if self._anim_timer is None:
+            return
+        if self._anim_idle():
+            self._anim_timer.pause()
+        else:
+            self._anim_timer.resume()
+
+    def _anim_idle(self) -> bool:
+        return self.has_class("hidden") or is_terminal_indicator_state(
+            self._state
+        )
 
     def on_mount(self) -> None:
         # Перерисовка 10 раз/сек: глиф держится FRAME_HOLD тиков (≈1.2с цикл),
         # свечение «дышит» каждый тик (1.0с на ping-pong рампы).
-        self.set_interval(0.1, self._tick)
+        # Созданный сразу конечным (восстановление) или скрытым стартует
+        # на паузе.
+        self._anim_timer = self.set_interval(
+            0.1, self._tick, pause=self._anim_idle()
+        )
 
     def _tick(self) -> None:
         # F4: freeze UI на время app-select — не дёргаем анимацию (Screen._selecting).
@@ -466,11 +524,12 @@ class ThinkingIndicator(Static):
             # времени → «Выполнил» без «за N» (не выдумываем 0с).
             if self._frozen_elapsed is not None:
                 text.append(
-                    f"Выполнил за {format_duration(self._frozen_elapsed)}",
+                    f"{self._done_label} за "
+                    f"{format_duration(self._frozen_elapsed)}",
                     style=_DIM,
                 )
             else:
-                text.append("Выполнил", style=_DIM)
+                text.append(self._done_label, style=_DIM)
             line, self._summary_span = compose_status_line(
                 text,
                 self._turn_summary,

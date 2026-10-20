@@ -197,3 +197,32 @@ def test_command_moderation_asks_when_judge_unavailable_in_ask(
 
     assert result["ok"] is True
     assert marker.read_text(encoding="utf-8") == "ok"
+
+
+def test_no_for_the_session_to_the_command_question_says_so(tmp_path):
+    """Вопрос модерации идёт через порт подтверждения: ответ «запретить в
+    сессии» сразу даёт тот же отказ, что у вопросов режима."""
+    from gc_core.security.call_scope import call_scope
+    from gc_core.security.permission_store import PermissionStore
+    from gc_testkit.helpers.tool_ctx import local_ctx
+
+    ctx = local_ctx(_config(tmp_path, "ask"))
+    ctx.is_tui = True
+    ctx.tui_confirm = lambda **_kwargs: "deny_remember"
+    ctx.permission_store = PermissionStore()
+    tool = with_local_ctx(ExecuteCommand, ctx=ctx)
+    guarded_call = command_moderation.moderate_command_execution(
+        payload_arg="command",
+        tool_name="exec_command",
+        judge_client_extractor=lambda *_args, **_kwargs: _judge(
+            "potentially_dangerous", ["writes_outside_launch_root"]
+        ),
+    )(tool.acall.__wrapped__)
+
+    with call_scope(state=None, call_id="c1", tool_name="exec_command"):
+        result = json.loads(
+            run_coro(guarded_call(tool, command="rm -rf build"))
+        )
+
+    assert result["error"]["type"] == "unsafe_command_cancelled_by_user"
+    assert result["error"]["reason"] == "Denied by the user for this session."

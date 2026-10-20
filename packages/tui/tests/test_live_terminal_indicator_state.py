@@ -65,3 +65,35 @@ def test_legacy_no_last_indicator_uses_status():
         R(last_indicator_kind=None, status="stopped", stop_requested=False)
         == "cancelled"
     )
+
+
+def test_judge_unavailable_has_its_own_ending():
+    """Проверка действий недоступна — не «превышен лимит ошибок»: человеку
+    нужно знать, что дело в проверке и что помогает смена режима."""
+    from gc_tui.screens.main import (
+        resolve_live_terminal_indicator_state,
+        resolve_terminal_outcome,
+    )
+    from gc_tui.widgets.thinking_indicator import (
+        _TERMINAL_ENDINGS,
+        TERMINAL_INDICATOR_STATES,
+    )
+
+    outcome = resolve_terminal_outcome(
+        runner_error=None,
+        stop_requested=False,
+        terminal_outcome="judge_unavailable",
+    )
+    assert outcome == "stopped_judge"
+    assert outcome in TERMINAL_INDICATOR_STATES
+    assert "проверка действий недоступна" in _TERMINAL_ENDINGS[outcome][1]
+    assert "лимит" not in _TERMINAL_ENDINGS[outcome][1]
+    # после перезапуска исход восстанавливается по сохранённому виду индикатора
+    assert (
+        resolve_live_terminal_indicator_state(
+            last_indicator_kind="stopped_judge",
+            status="stopped",
+            stop_requested=False,
+        )
+        == "stopped_judge"
+    )

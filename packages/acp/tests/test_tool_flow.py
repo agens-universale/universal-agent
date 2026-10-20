@@ -467,6 +467,7 @@ def test_hidden_tools_do_not_open_or_close_a_card():
         "turn_ask_human",
         "turn_intermediate_reply",
         "session_think",
+        "turn_propose_plan",
     ):
         assert (
             report_from_record(_raw_call(name, name, {"note": "x"}), seen)

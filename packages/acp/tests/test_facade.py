@@ -7,6 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from gc_acp.facade import AcpFacade
+from gc_core.message_policy.plan_messages import accepted_plan_messages
 from gc_core.threads.facade import Threads, run_sync
 from gc_core.threads.file_store import FileThreadStore
 from gc_core.threads.models import ThreadKey
@@ -39,12 +40,49 @@ class GatedWriter(MemoryWriter):
         await super().send(payload)
 
 
+class FakeExecutor:
+    """Исполнитель под FakeAgent: режим — тем же API, что у AgentExecutor.
+
+    ``shared`` — живое состояние прогона (сквозные тесты): смена режима
+    пишет туда, как ``AgentExecutor.set_permission_mode`` посреди хода.
+    """
+
+    def __init__(self):
+        self._ctx = SimpleNamespace()
+        self.last_terminal_outcome = None
+        self.mode = None
+        self.modes = []
+        self.shared = None
+        self.plan = None
+        self.reworked = []
+        self.accepted = []
+
+    def set_permission_mode(self, mode):
+        self.modes.append(mode)
+        self.mode = mode
+        if self.shared is not None:
+            self.shared.permission_mode = mode
+
+    def permission_mode(self):
+        return self.mode
+
+    def plan_snapshot(self, thread_id):
+        return self.plan
+
+    def arm_plan_rework(self, thread_id):
+        self.reworked.append(thread_id)
+
+    def prepare_accepted_plan(self, mode, thread_id, *, extra_text=""):
+        """Двойник AgentExecutor.prepare_accepted_plan: режим ставит ядро,
+        сообщения продолжения — общая функция политики (как у ядра)."""
+        self.accepted.append((mode, thread_id, extra_text))
+        self.set_permission_mode(mode)
+        return accepted_plan_messages(mode, extra_text=extra_text)
+
+
 class FakeAgent:
     def __init__(self):
-        self.executor = SimpleNamespace(
-            _ctx=SimpleNamespace(),
-            last_terminal_outcome=None,
-        )
+        self.executor = FakeExecutor()
         self.last_answer = None
         self.calls = []
         self.started = asyncio.Event()
@@ -61,9 +99,13 @@ class FakeAgent:
         self.outcome = None
         self.error = None
         self.cancel_raises = False
+        self.next_runs = []
 
     async def stream(self, prompt, **kwargs):
         self.calls.append((prompt, dict(kwargs)))
+        if len(self.calls) > 1 and self.next_runs:
+            # Следующий прогон той же сессии (продолжение после одобрения).
+            self.deltas, self.answer, self.outcome = self.next_runs.pop(0)
         self.started.set()
         for item in self.lead:
             yield item
@@ -362,6 +404,41 @@ async def test_prompt_renders_finish_arguments_as_the_report(tmp_path):
     ]
     assert texts == ["В README одна фраза.\n\n* заметка: файл короткий"]
     assert all("Finish gate" not in text for text in texts)
+    await facade.shutdown()
+
+
+async def test_prompt_shows_a_proposed_plan_as_text(tmp_path):
+    """Ход кончился планом: в ленте — текст плана, не сырой JSON итога."""
+    facade, writer, agents = _open(tmp_path)
+    await _init(facade)
+    await _new(facade, "/work/app")
+    session_id = _by_id(writer, 2)["result"]["sessionId"]
+    agent = agents[0]
+    plan = "# План\n1. Добавить тест\n2. Починить"
+    agent.deltas = []
+    agent.answer = json.dumps(
+        {"plan": plan, "status": "proposed"}, ensure_ascii=False
+    )
+    agent.outcome = "plan_proposed"
+    await facade.handle_line(
+        _line(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "спланируй"}],
+            },
+            3,
+        )
+    )
+    await facade._sessions[session_id].prompt_task
+    texts = [
+        item["content"]["text"]
+        for item in _updates(writer)
+        if item["sessionUpdate"] == "agent_message_chunk"
+    ]
+    assert texts == [plan]
+    assert all(item["sessionUpdate"] != "plan" for item in _updates(writer))
+    assert _by_id(writer, 3)["result"] == {"stopReason": "end_turn"}
     await facade.shutdown()
 
 
@@ -883,7 +960,7 @@ async def test_list_resume_load_after_restart(tmp_path):
             5,
         )
     )
-    assert set(_by_id(writer2, 5)["result"]) <= {"configOptions"}
+    assert set(_by_id(writer2, 5)["result"]) <= {"configOptions", "modes"}
     assert len(agents2) == 1
     await restored.handle_line(
         _line(
@@ -916,7 +993,7 @@ async def test_list_resume_load_after_restart(tmp_path):
     assert updates[0]["content"]["text"] == "привет"
     assert updates[2] == {"sessionUpdate": "plan", "entries": []}
     assert updates[3]["title"] == "привет"
-    assert set(_by_id(writer2, 7)["result"]) <= {"configOptions"}
+    assert set(_by_id(writer2, 7)["result"]) <= {"configOptions", "modes"}
     # Проигрыш кончился до ответа load.
     load_at = next(
         index

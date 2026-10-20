@@ -120,6 +120,23 @@ def test_existing_cli_is_not_blocked_by_the_preflight(tmp_path):
     assert completion["error_type"] == ""
 
 
+def test_cli_is_started_as_an_external_request(tmp_path):
+    """Swarm-ран — запрос внешней системы, как webhook: обёртка всегда
+    передаёт CLI `--external-request` (человека нет, слова — внешние)."""
+    venv = tmp_path / "venv"
+    (venv / "bin").mkdir(parents=True)
+    argv_file = tmp_path / "argv.txt"
+    cli = venv / "bin" / "gc-cli"
+    cli.write_text(f'#!/bin/sh\nprintf "%s\\n" "$@" > "{argv_file}"\n')
+    cli.chmod(0o755)
+    proc, completion = _run(
+        tmp_path, SWARM_CLI_COMMAND="gc-cli", SWARM_CLI_VENV_ROOT=str(venv)
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    assert "--external-request" in argv_file.read_text().splitlines()
+
+
 @pytest.mark.parametrize(
     "venv_name",
     ['ve"nv', "ve\\nv", 've"nv\\back'],

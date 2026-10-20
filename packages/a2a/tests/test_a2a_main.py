@@ -161,3 +161,42 @@ def test_non_loopback_without_token_exits_before_bind(monkeypatch, capsys):
     code = main([])
     assert code == 1
     assert "auth_token" in capsys.readouterr().err
+
+
+def test_a2a_declares_no_human_and_external_words():
+    """Пир — не человек: подтверждение спросить некого, а его слова для
+    судьи действий — запрос внешней системы (спека §7.1, §3.7)."""
+    loaded = apply_a2a_runtime_defaults(make_settings())
+    assert loaded.runtime.human_channel is False
+    assert loaded.runtime.external_user_words is True
+
+
+def _start(monkeypatch, mode):
+    served = []
+
+    def load(path, profile_override=None):
+        del path, profile_override
+        return make_settings({"security.permissions.default_mode": mode})
+
+    async def fake_serve(loaded):
+        served.append(loaded)
+
+    monkeypatch.setattr("gc_a2a.main.load_settings", load)
+    monkeypatch.setattr("gc_a2a.main.serve", fake_serve)
+    assert main([]) == 0
+    assert served  # старт не прерван
+    return served
+
+
+def test_plan_mode_is_warned_about_and_the_server_still_starts(
+    monkeypatch, capsys
+):
+    _start(monkeypatch, "plan")
+    err = capsys.readouterr().err
+    assert "gc-a2a: режим разрешений по умолчанию — plan" in err
+    assert "--security.permissions.default_mode edit" in err
+
+
+def test_edit_mode_starts_without_the_warning(monkeypatch, capsys):
+    _start(monkeypatch, "edit")
+    assert "режим разрешений" not in capsys.readouterr().err

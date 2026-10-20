@@ -101,7 +101,9 @@ def scripted_http():
 
 
 @asynccontextmanager
-async def runtime(tmp_path, url, *, core_extra=None, legacy_patches=False):
+async def runtime(
+    tmp_path, url, *, core_extra=None, workflows=None, legacy_patches=False
+):
     binary = temporal_cli()
     core = {
         "backend": {
@@ -141,6 +143,9 @@ async def runtime(tmp_path, url, *, core_extra=None, legacy_patches=False):
             dev_server_existing_path=binary
         ) as env:
             options = worker_kwargs(config, native, threads)
+            if workflows is not None:
+                # Свой workflow сессии под тем же именем (фикстура теста).
+                options["workflows"] = workflows
             if legacy_patches:
                 options["patch_activation_callback"] = lambda _patch: False
             async with Worker(

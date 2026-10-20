@@ -130,6 +130,11 @@ _PROMPTS: dict[str, Callable[[Any], list[str]]] = {
         "security", "command_judge_system.md"
     ),
     Prompt.COMMAND_JUDGE_USER: _bundled("security", "command_judge_user.md"),
+    Prompt.ACTION_JUDGE_SYSTEM: _bundled("security", "action_judge_system.md"),
+    Prompt.ACTION_JUDGE_USER: _bundled("security", "action_judge_user.md"),
+    Prompt.ACTION_JUDGE_EXTERNAL: _bundled(
+        "security", "action_judge_external.md"
+    ),
     Prompt.INIT_AGENTS_MD: _bundled("init_agents_md_prompt.md"),
 }
 

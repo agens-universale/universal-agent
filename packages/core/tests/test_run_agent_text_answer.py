@@ -323,6 +323,7 @@ def test_empty_text_bounces_in_all_modes(monkeypatch):
 
 def _state():
     s = type("S", (), {})()
+    s.mode_announced = None
     s.mark_turn_start = lambda: None
     s.tick_signals = set()
     s.messages = []

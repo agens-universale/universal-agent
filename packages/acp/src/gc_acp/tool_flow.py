@@ -16,11 +16,10 @@ import os
 from typing import Any
 
 from gc_core.constants.tool_names import (
-    ASK_HUMAN_TOOL_NAME,
-    FINISH_TOOL_NAME,
     FS_READ_FILE_NAME,
     INTERMEDIATE_REPLY_TOOL_NAME,
     SESSION_THINK_TOOL_NAME,
+    TURN_FINALIZING_TOOLS,
 )
 from gc_core.execution.progress import (
     brief_args_summary,
@@ -38,14 +37,13 @@ _SIDECAR_DONE = frozenset({"result", "error"})
 _IN_PROGRESS = "in_progress"
 _COMPLETED = "completed"
 _FAILED = "failed"
-_HIDDEN = frozenset(
-    {
-        FINISH_TOOL_NAME,
-        ASK_HUMAN_TOOL_NAME,
-        INTERMEDIATE_REPLY_TOOL_NAME,
-        SESSION_THINK_TOOL_NAME,
-    }
-)
+# Завершающие ход тулы (финал, вопрос, план) и служебные: их текст клиенту
+# показывает фасад сам, карточкой они только дублировали бы его. Новый
+# завершающий тул скрывается здесь без правки списка.
+_HIDDEN = TURN_FINALIZING_TOOLS | {
+    INTERMEDIATE_REPLY_TOOL_NAME,
+    SESSION_THINK_TOOL_NAME,
+}
 # Потолок строки на карточке: и аргумент, и превью результата.
 _CARD_LIMIT = 5000
 

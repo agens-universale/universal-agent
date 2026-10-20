@@ -2,11 +2,16 @@
 
 import socket
 import ssl
+from dataclasses import asdict
+from types import SimpleNamespace
 
 import httpx
 import pytest
-from gc_core.execution.contracts import ModelFailure
-from gc_core_temporalio.activities import is_transient_provider_failure
+from gc_core.execution.contracts import ModelFailure, ModelRequest
+from gc_core_temporalio.activities import (
+    is_transient_provider_failure,
+    retried_by_temporal,
+)
 from gc_core_temporalio.activity_config import (
     NON_RETRYABLE_ERROR_TYPES,
     ActivitiesConfig,
@@ -16,6 +21,7 @@ from gc_core_temporalio.activity_config import (
 from gc_core_temporalio.model_error_encoding import encode_model_failure
 from gc_core_temporalio.provider import WorkerConfig
 from pydantic import ValidationError
+from temporalio.converter import DataConverter, value_to_type
 
 
 def test_levels_merge_and_framework_non_retryable_types_are_kept():
@@ -276,3 +282,52 @@ async def test_retried_effect_with_changed_guard_facts_is_outcome_unknown(
         )
         with pytest.raises(expected):
             await activities._effect_attempt(call, None, None)
+
+
+def test_isolated_model_failure_is_left_to_the_caller_not_to_temporal():
+    """Вызов со своим бюджетом повторов (судья действий) повторяет и считает
+    сбои сам: его транзиентный сбой уходит в workflow данными, а не
+    бесконечным повтором activity. Прочие запросы — как раньше."""
+    failure = ModelFailure("provider", "E", "m", {"status_code": 503})
+    main = SimpleNamespace(child_context=None)
+    child = SimpleNamespace(child_context={"parent": "p"})
+
+    def request(**extra):
+        return ModelRequest("model-1", "command_judge", [], {}, **extra)
+
+    assert retried_by_temporal(main, request(), failure) is True
+    assert retried_by_temporal(child, request(), failure) is False
+    assert (
+        retried_by_temporal(main, request(isolated_timeout_sec=60), failure)
+        is False
+    )
+
+
+def test_model_request_fields_survive_the_temporal_boundary():
+    """Запрос к модели едет в activity словарём через конвертер Temporal и
+    собирается обратно `value_to_type` — поля изоляции судьи и немого ответа
+    доезжают; история без этих ключей получает умолчания."""
+    converter = DataConverter.default.payload_converter
+
+    def across(data):
+        (payload,) = converter.to_payloads([data])
+        (back,) = converter.from_payloads([payload], [dict])
+        return value_to_type(ModelRequest, back)
+
+    request = ModelRequest(
+        "model-1",
+        "command_judge",
+        [{"role": "user", "content": "x"}],
+        {},
+        isolated_timeout_sec=60,
+        mute_answer=True,
+    )
+    assert across(asdict(request)) == request
+
+    old = asdict(ModelRequest("model-1", "main", [], {}))
+    del old["isolated_timeout_sec"], old["mute_answer"]
+    restored = across(old)
+    assert (restored.isolated_timeout_sec, restored.mute_answer) == (
+        None,
+        False,
+    )

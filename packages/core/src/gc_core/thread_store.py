@@ -94,6 +94,7 @@ _thread_paths = file_layout.thread_paths
 
 
 subagent_trace_path = file_layout.subagent_trace_path
+plan_file_path = file_layout.plan_file_path
 
 
 def touched_journal_path(
@@ -182,6 +183,9 @@ def reset_thread_files(
     # его не видит.
     paths.append(edits_path + ".lock")
     paths.append(_lock_path(threads_dir, sys_norm, normalized_thread_id))
+    # Файл плана уходит вместе с тредом — тот же довод, что у картинок ниже:
+    # компакция файлового стора сюда не заходит.
+    paths.append(plan_file_path(threads_dir, sys_norm, normalized_thread_id))
 
     deleted = _remove_existing(paths)
 

@@ -219,6 +219,9 @@ class UniversalSubagentWorkflow:
                     logger=workflow.logger,
                     human_request=self.human_request,
                 )
+                root_words = request.child_context.get("root_user_words")
+                if root_words is not None:
+                    parent_ctx.root_user_messages = lambda: list(root_words)
                 parent_ctx.model_router = ModelRouter(
                     parent_ctx,
                     level_provider=lambda: request.child_context[
@@ -244,7 +247,8 @@ class UniversalSubagentWorkflow:
                     parent_state.stop_requested or self.stopped
                 )
                 parent_ctx.permission_store = PermissionStore(
-                    parent_state.shared.confirm_rules
+                    parent_state.shared.confirm_rules,
+                    shared=parent_state.shared,
                 )
                 parent_ctx.permission_store.replace_run_rules(
                     request.parent_transfer.run_permissions

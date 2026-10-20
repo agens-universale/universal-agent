@@ -60,6 +60,17 @@ def subagent_trace_path(
     return os.path.join(threads_dir, f"data_subagents_{stem}.jsonl")
 
 
+def plan_file_path(threads_dir: str, system_id: str, thread_id: str) -> str:
+    """Файл плана сессии для человека: plans/plan_{system}_{thread_id}.md.
+
+    Лежит под каталогом сессий, а не в отдельной папке проекта: удаление
+    треда знает только этот каталог, и иначе файл осиротел бы.
+    """
+    return os.path.join(
+        threads_dir, "plans", f"plan_{_stem(system_id, thread_id)}.md"
+    )
+
+
 def edits_journal_path(
     threads_dir: str, system_id: str, thread_id: str
 ) -> Path:

@@ -114,6 +114,17 @@ class SessionState(_Model):
     last_prompt_message_count: int | None = None
     rendered_system_prompt: str | None = None
     last_summarized_at: str | None = None
+    #: Режим разрешений сессии (``None`` — не выбран), план режима plan и
+    #: объявленный модели режим.
+    permission_mode: str | None = None
+    plan: JsonObject | None = None
+    mode_announced: str | None = None
+    #: План убран человеком: следующий прогон один раз сообщит модели.
+    plan_removed_notice: bool = False
+    #: Предохранитель судьи действий: отказы подряд, за сессию, пауза.
+    judge_denials_in_a_row: int = 0
+    judge_denials_total: int = 0
+    judge_paused: bool = False
 
 
 class Usage(_OpenModel):

@@ -487,3 +487,61 @@ def test_history_replay_does_not_rebuild_a_diff_from_disk(tmp_path):
         }
     ]
     assert "rawOutput" not in updates[1]
+
+
+def _propose(call_id, plan, **extra):
+    return {
+        "type": "function_call",
+        "name": "turn_propose_plan",
+        "call_id": call_id,
+        "arguments": json.dumps({"plan": plan, **extra}, ensure_ascii=False),
+    }
+
+
+def _plan_output(call_id, *, ok):
+    return {
+        "type": "function_call_output",
+        "call_id": call_id,
+        "output": json.dumps(
+            {
+                "tool": "turn_propose_plan",
+                "ok": ok,
+                "status": "proposed" if ok else "rejected",
+            }
+        ),
+    }
+
+
+def test_history_shows_the_whole_plan_as_text():
+    """Карточка тула урезала бы план до 5000 знаков; план до 16000 —
+    показывается целиком, текстом, один раз."""
+    plan = "# План\n" + "\n".join(
+        f"{n}. шаг {'x' * 80}" for n in range(1, 120)
+    )
+    assert len(plan) > 5000
+    updates = history_updates(
+        [
+            {"role": "user", "content": "спланируй"},
+            _propose("p1", plan),
+            _plan_output("p1", ok=True),
+        ]
+    )
+    assert [item["sessionUpdate"] for item in updates] == [
+        "user_message_chunk",
+        "agent_message_chunk",
+    ]
+    assert updates[1]["content"]["text"] == plan
+
+
+def test_history_skips_a_rejected_plan_and_a_repeat_show():
+    """Отклонённый тулом план и повторный показ (show_current) в ленту не
+    идут: первый не был предложен, второй уже стоит в истории."""
+    updates = history_updates(
+        [
+            _propose("bad", "слишком рано"),
+            _plan_output("bad", ok=False),
+            _propose("again", "", show_current=True),
+            _plan_output("again", ok=True),
+        ]
+    )
+    assert updates == []
