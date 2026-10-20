@@ -38,6 +38,13 @@ def test_subagent_builtin_and_custom(name):
     assert shown.primary_arg == "task"
 
 
+def test_special_agent_shows_role():
+    shown = tool_display("subagent_special_agent")
+    assert shown.category == DisplayCategory.AGENT
+    assert shown.label == "Agent"
+    assert shown.primary_arg == "role"
+
+
 def test_legacy_names():
     assert tool_display("read_file") == tool_display("fs_read_file")
     assert tool_display("fs_search_files").category == DisplayCategory.SEARCH

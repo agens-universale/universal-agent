@@ -35,7 +35,6 @@ from gc_core.constants.tool_names import (
     SESSION_TODO_TOOL_NAME,
     SKILLS_READ_ASSET_NAME,
     SKILLS_READ_REFERENCE_NAME,
-    SUBAGENT_SPECIAL_AGENT_NAME,
 )
 from gc_core.utils.path_truncate import truncate_path
 
@@ -248,7 +247,7 @@ def _primary_summary(name: str, data: Dict[str, Any], limit: int) -> str:
     shown = tool_display(name)
     if shown.category is DisplayCategory.MCP:
         return _first_scalar(data)
-    key = "role" if name == SUBAGENT_SPECIAL_AGENT_NAME else shown.primary_arg
+    key = shown.primary_arg
     value = data.get(key) if key else None
     if not isinstance(value, str) or not value.strip():
         return ""

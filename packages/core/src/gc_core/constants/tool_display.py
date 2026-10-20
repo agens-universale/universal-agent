@@ -45,6 +45,7 @@ from gc_core.constants.tool_names import (
     SKILLS_READ_ASSET_NAME,
     SKILLS_READ_REFERENCE_NAME,
     SKILLS_RUN_SCRIPT_NAME,
+    SUBAGENT_SPECIAL_AGENT_NAME,
 )
 
 _SUBAGENT_PREFIX = "subagent_"
@@ -119,6 +120,7 @@ TOOL_DISPLAY: Mapping[str, ToolDisplay] = {
     SKILLS_LOAD_NAME: _d(_C.SKILL, "skill_id"),
     EXEC_CALCULATOR_NAME: _d(_C.CALC, "expression"),
     EXEC_SLEEP_NAME: _d(_C.WAIT, "seconds"),
+    SUBAGENT_SPECIAL_AGENT_NAME: _d(_C.AGENT, "role"),
     FINISH_TOOL_NAME: _d(_C.HIDDEN, None),
     ASK_HUMAN_TOOL_NAME: _d(_C.HIDDEN, None),
     INTERMEDIATE_REPLY_TOOL_NAME: _d(_C.HIDDEN, None),
