@@ -59,6 +59,7 @@ test = [
     "gc-testkit",
     "gc-core-temporalio==0.4.0",
     "gc-stores[all]",
+    "gc-server[a2a]",
     "pytest>=9.0.3",
     "pytest-asyncio>=0.23",
     "office-mcp",

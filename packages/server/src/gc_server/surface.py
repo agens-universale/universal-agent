@@ -28,14 +28,19 @@ class Surface(Protocol):
     async def astop(self) -> None: ...
 
 
-def install_bearer(app: FastAPI, token: str | None) -> None:
-    """Пустой токен — без проверки; иначе ``Authorization: Bearer`` или 403."""
+def install_bearer(
+    app: FastAPI, token: str | None, *, public_paths: tuple[str, ...] = ()
+) -> None:
+    """Пустой токен — без проверки; иначе ``Authorization: Bearer`` или 403.
+    ``public_paths`` — без токена (карточка агента A2A)."""
     if not token:
         return
     expected = str(token)
 
     @app.middleware("http")
     async def _bearer(request: Request, call_next):
+        if request.url.path in public_paths:
+            return await call_next(request)
         scheme, _, got = request.headers.get("Authorization", "").partition(
             " "
         )

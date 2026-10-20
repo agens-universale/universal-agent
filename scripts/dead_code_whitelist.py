@@ -85,3 +85,10 @@ _.capture_signals
 # встраивающие, ручка отмены задачи сервера и отмена задачи A2A.
 # packages/core/src/gc_core/threads/facade.py.
 _.request_cancel
+
+# Хранилище настроек push A2A — реализация PushNotificationConfigStore
+# a2a-sdk: эти методы зовёт обработчик запросов и отправитель push SDK.
+# packages/server/src/gc_server/a2a/task_store.py.
+_.get_info
+_.get_info_for_dispatch
+_.delete_info

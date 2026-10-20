@@ -122,21 +122,26 @@ def test_a2a_declares_no_human_and_external_words():
     assert loaded.runtime.external_user_words is True
 
 
-def _surface(mode: str) -> A2aSurface:
+def _surface(mode: str, tmp_path) -> A2aSurface:
     runtime = ServerRuntime(
-        base=make_settings({"security.permissions.default_mode": mode}),
+        base=make_settings(
+            {
+                "security.permissions.default_mode": mode,
+                "paths.threads_data_path": str(tmp_path),
+            }
+        ),
         config=ServerConfig(),
     )
     return A2aSurface(runtime)
 
 
-def test_plan_mode_is_warned_about(capsys):
-    cli._warn(ServerConfig(), [_surface("plan")])
+def test_plan_mode_is_warned_about(capsys, tmp_path):
+    cli._warn(ServerConfig(), [_surface("plan", tmp_path)])
     err = capsys.readouterr().err
     assert "a2a: режим разрешений по умолчанию — plan" in err
     assert "security.permissions.default_mode: edit" in err
 
 
-def test_edit_mode_has_no_mode_warning(capsys):
-    cli._warn(ServerConfig(), [_surface("edit")])
+def test_edit_mode_has_no_mode_warning(capsys, tmp_path):
+    cli._warn(ServerConfig(), [_surface("edit", tmp_path)])
     assert "режим разрешений" not in capsys.readouterr().err

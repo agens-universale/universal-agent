@@ -26,6 +26,8 @@ mysql = ["gc-stores[mysql]==0.4.0"]
 redis = ["gc-stores[redis]==0.4.0"]
 s3 = ["gc-stores[s3]==0.4.0"]
 all = ["gc-stores[all]==0.4.0"]
+# Поверхность a2a (gc-serve a2a) — на официальном a2a-sdk.
+a2a = ["a2a-sdk[http-server]>=1.2,<2"]
 
 [project.scripts]
 
