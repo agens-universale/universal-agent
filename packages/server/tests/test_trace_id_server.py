@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
+from server_harness import LOOPBACK_URL
 
 
 @pytest.fixture()
@@ -34,7 +35,7 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setattr(surface.registry, "astart", _fake_start)
     monkeypatch.setattr(surface.registry, "is_running", _fake_is_running)
     captured["surface"] = surface
-    return TestClient(surface.app()), captured
+    return TestClient(surface.app(), base_url=LOOPBACK_URL), captured
 
 
 def test_trace_id_reaches_run_config(client):

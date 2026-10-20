@@ -171,11 +171,18 @@ class SwarmSurface:
     # --- приложение -------------------------------------------------------
 
     def app(self) -> FastAPI:
+        from gc_server.chat.http_guard import install_http_guard
         from gc_server.webhook.api_v1 import build_v1_routes
 
         app = FastAPI()
         install_bearer(app, self.section.auth_token)
         build_v1_routes(app, self)
+        # POST — только JSON (браузер не шлёт такой без preflight: CSRF со
+        # страницы в браузере пользователя), на loopback-бинде Host — только
+        # loopback-имя (DNS rebinding).
+        install_http_guard(
+            app, cors_origins=[], bind_host=str(self.section.host)
+        )
         app.add_api_route(
             "/v1/tasks/{system}/{task_id}/output",
             self.get_output,
@@ -209,6 +216,7 @@ class SwarmSurface:
         if callback_url is not None:
             raise http_error(400, "callback_url is not supported by swarm")
         sid = swarm_id(key.system, key.thread)
+        await self._reject_foreign_thread(key)
         if self._in_store and self._active(sid):
             # Тред задачи в общей базе: сообщение — во входящий поток, его
             # заберёт ход gc-cli в песочнице (опросом ядра).
@@ -347,6 +355,20 @@ class SwarmSurface:
             key, "messages", after_seq=after, limit=limit
         )
         return [{"seq": e.seq, "ts": e.ts, "message": e.data} for e in entries]
+
+    async def _reject_foreign_thread(self, key: ThreadKey) -> None:
+        """Тред с тем же (system, task_id) без пометки swarm — задача
+        вебхука: песочница читала бы и дописывала чужую историю."""
+        if not self._in_store:
+            return
+        record = await self.runtime.threads().get(key)
+        if record is not None and "swarm" not in record.frontend:
+            raise http_error(
+                409,
+                "task belongs to the webhook surface",
+                system=key.system,
+                task_id=key.thread,
+            )
 
     async def _pending(self, key: ThreadKey) -> int:
         if not self._in_store:

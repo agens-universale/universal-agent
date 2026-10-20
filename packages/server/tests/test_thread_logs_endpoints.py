@@ -6,6 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 from gc_server.config import RESERVED_SYSTEMS
 from gc_testkit.legacy_threads import LEGACY_THREADS, install_legacy_threads
+from server_harness import LOOPBACK_URL
 
 
 @pytest.fixture()
@@ -18,7 +19,7 @@ def client(threads_dir):
     from server_harness import make_webhook
 
     surface = make_webhook(**{"paths.threads_data_path": str(threads_dir)})
-    return TestClient(surface.app())
+    return TestClient(surface.app(), base_url=LOOPBACK_URL)
 
 
 def _files(root):

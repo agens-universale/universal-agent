@@ -15,7 +15,7 @@ import pytest
 from gc_server.webhook.callbacks import CallbackSender, allowed_callback
 from gc_server.webhook.signatures import verify
 from gc_testkit import scripted_model
-from server_harness import make_webhook
+from server_harness import LOOPBACK_URL, make_webhook
 
 SECRET = "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw"
 SETTINGS = {
@@ -61,7 +61,7 @@ def _webhook(tmp_path, monkeypatch, callbacks, codes=(200,)):
 async def _run(surface, body):
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=surface.app()),
-        base_url="http://test",
+        base_url=LOOPBACK_URL,
     ) as client:
         resp = await client.post("/v1/tasks", json=body)
         if resp.status_code != 202:
@@ -223,7 +223,7 @@ async def test_callback_of_a_running_task_cannot_be_redirected(
     )
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=surface.app()),
-        base_url="http://test",
+        base_url=LOOPBACK_URL,
     ) as client:
         resp = await client.post(
             "/v1/tasks",
@@ -277,7 +277,7 @@ async def test_queued_request_cannot_set_a_callback(tmp_path, monkeypatch):
     )
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=surface.app()),
-        base_url="http://test",
+        base_url=LOOPBACK_URL,
     ) as client:
         resp = await client.post(
             "/v1/tasks",

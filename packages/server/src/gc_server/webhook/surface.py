@@ -226,11 +226,18 @@ class WebhookSurface:
     # --- приложение -------------------------------------------------------
 
     def app(self) -> FastAPI:
+        from gc_server.chat.http_guard import install_http_guard
         from gc_server.webhook.api_v1 import build_v1_routes
 
         app = FastAPI()
         install_bearer(app, self.section.auth_token)
         build_v1_routes(app, self)
+        # POST — только JSON (браузер не шлёт такой без preflight: CSRF со
+        # страницы в браузере пользователя), на loopback-бинде Host — только
+        # loopback-имя (DNS rebinding).
+        install_http_guard(
+            app, cors_origins=[], bind_host=str(self.section.host)
+        )
         app.add_api_route("/healthcheck", healthcheck, methods=["GET"])
         return app
 

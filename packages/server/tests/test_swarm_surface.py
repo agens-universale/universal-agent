@@ -14,7 +14,7 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi.testclient import TestClient
 from gc_server.swarm import storage
-from server_harness import make_swarm, make_webhook
+from server_harness import LOOPBACK_URL, make_swarm, make_webhook
 
 pytestmark = pytest.mark.skipif(
     os.name != "posix",
@@ -49,7 +49,7 @@ def swarm(tmp_path):
 
 
 def _client(surface) -> TestClient:
-    return TestClient(surface.app())
+    return TestClient(surface.app(), base_url=LOOPBACK_URL)
 
 
 def _sid(system: str, task_id: str) -> str:
@@ -185,7 +185,11 @@ def test_status_unregisters_from_monitor_when_finalized(swarm):
 
 
 def test_start_400_invalid_json(swarm):
-    resp = _client(swarm).post("/v1/tasks", content="not json")
+    resp = _client(swarm).post(
+        "/v1/tasks",
+        content="not json",
+        headers={"content-type": "application/json"},
+    )
     assert resp.status_code == 400
 
 
@@ -374,7 +378,7 @@ def test_same_requests_get_answers_of_the_same_shape(
         self.registry.reserve(system=system, task_id=task_id)
 
     monkeypatch.setattr(type(webhook), "_start_run", fake_start)
-    hook, sw = TestClient(webhook.app()), _client(swarm)
+    hook, sw = TestClient(webhook.app(), base_url=LOOPBACK_URL), _client(swarm)
     body = {"task_id": "p1", "system": "s"}
     a, b = (
         hook.post("/v1/tasks", json=body),

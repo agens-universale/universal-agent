@@ -17,6 +17,7 @@ from gc_server.swarm import storage
 from gc_server.swarm.surface import SwarmSurface
 from gc_testkit.memory_thread_store_v2 import MemoryThreadStore
 from gc_testkit.settings import make_settings
+from server_harness import LOOPBACK_URL
 
 KEY = ThreadKey(system="g", thread="t1")
 
@@ -139,12 +140,14 @@ def test_logs_do_not_read_threads_of_other_tasks(surface):
             [{"id": "s1", "role": "user", "content": "секрет вебхука"}],
         )
     )
-    resp = TestClient(surface.app()).get("/v1/tasks/g/hook/messages")
+    resp = TestClient(surface.app(), base_url=LOOPBACK_URL).get(
+        "/v1/tasks/g/hook/messages"
+    )
     assert resp.status_code == 404
 
 
 def test_message_into_a_running_task_is_queued_into_the_inbox(surface):
-    client = TestClient(surface.app())
+    client = TestClient(surface.app(), base_url=LOOPBACK_URL)
     first = client.post("/v1/tasks", json={"system": "g", "task_id": "t1"})
     assert first.json()["status"] == "started"
     again = client.post(
@@ -160,7 +163,7 @@ def test_message_into_a_running_task_is_queued_into_the_inbox(surface):
 
 def test_task_thread_is_marked_as_swarm(surface):
     """Восстановление вебхука такой тред не берёт: его ведёт песочница."""
-    TestClient(surface.app()).post(
+    TestClient(surface.app(), base_url=LOOPBACK_URL).post(
         "/v1/tasks", json={"system": "g", "task_id": "t1"}
     )
     record = run_sync(surface.store.get_thread(KEY))
@@ -168,7 +171,7 @@ def test_task_thread_is_marked_as_swarm(surface):
 
 
 def test_logs_come_from_the_store(surface):
-    client = TestClient(surface.app())
+    client = TestClient(surface.app(), base_url=LOOPBACK_URL)
     client.post("/v1/tasks", json={"system": "g", "task_id": "t1"})
     run_sync(
         Threads(surface.store).append_messages(
@@ -199,3 +202,21 @@ def test_sqlite_stays_on_the_sandbox_files(tmp_path):
         },
     )
     assert "thread_store" not in surface.swarm
+
+
+def test_swarm_does_not_take_over_a_webhook_thread(surface):
+    """Тред вебхука с тем же (system, task_id) — чужой: swarm не помечает
+    его своим и не запускает на нём песочницу (она читала бы и писала
+    чужую историю)."""
+    run_sync(
+        Threads(surface.store).append_messages(
+            KEY, [{"id": "w1", "role": "user", "content": "задача вебхука"}]
+        )
+    )
+    resp = TestClient(surface.app(), base_url=LOOPBACK_URL).post(
+        "/v1/tasks", json={"system": "g", "task_id": "t1", "message": "x"}
+    )
+    assert resp.status_code == 409
+    assert surface.started == []
+    record = run_sync(surface.store.get_thread(KEY))
+    assert "swarm" not in record.frontend

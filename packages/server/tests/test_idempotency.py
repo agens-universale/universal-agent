@@ -12,7 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 from gc_core.threads.facade import run_sync
 from gc_core.threads.models import ThreadKey
-from server_harness import make_webhook
+from server_harness import LOOPBACK_URL, make_webhook
 
 KEY = ThreadKey(system="generic", thread="t1")
 
@@ -36,7 +36,7 @@ def _inbox(surface) -> list:
 
 @pytest.mark.parametrize("header", ["Idempotency-Key", "webhook-id"])
 def test_repeat_with_the_same_key_is_one_message(surface, header):
-    client = TestClient(surface.app())
+    client = TestClient(surface.app(), base_url=LOOPBACK_URL)
     body = {"task_id": "t1", "message": "сделай"}
     first = client.post("/v1/tasks", json=body, headers={header: "k-1"})
     again = client.post("/v1/tasks", json=body, headers={header: "k-1"})
@@ -46,7 +46,7 @@ def test_repeat_with_the_same_key_is_one_message(surface, header):
 
 
 def test_same_key_with_another_body_is_422(surface):
-    client = TestClient(surface.app())
+    client = TestClient(surface.app(), base_url=LOOPBACK_URL)
     headers = {"Idempotency-Key": "k-2"}
     client.post(
         "/v1/tasks", json={"task_id": "t1", "message": "а"}, headers=headers
@@ -59,7 +59,7 @@ def test_same_key_with_another_body_is_422(surface):
 
 
 def test_without_a_key_each_request_is_a_message(surface):
-    client = TestClient(surface.app())
+    client = TestClient(surface.app(), base_url=LOOPBACK_URL)
     body = {"task_id": "t1", "message": "сделай"}
     client.post("/v1/tasks", json=body)
     client.post("/v1/tasks", json=body)
@@ -68,7 +68,7 @@ def test_without_a_key_each_request_is_a_message(surface):
 
 def test_delivered_repeat_does_not_start_a_run(surface):
     """Повтор уже доставленного сообщения — без нового прогона."""
-    client = TestClient(surface.app())
+    client = TestClient(surface.app(), base_url=LOOPBACK_URL)
     body = {"task_id": "t1", "message": "сделай"}
     headers = {"Idempotency-Key": "k-3"}
     client.post("/v1/tasks", json=body, headers=headers)
@@ -84,7 +84,7 @@ def test_delivered_repeat_does_not_start_a_run(surface):
 
 
 def test_window_is_the_receipt_lifetime(surface):
-    client = TestClient(surface.app())
+    client = TestClient(surface.app(), base_url=LOOPBACK_URL)
     body = {"task_id": "t1", "message": "сделай"}
     headers = {"Idempotency-Key": "k-4"}
     client.post("/v1/tasks", json=body, headers=headers)

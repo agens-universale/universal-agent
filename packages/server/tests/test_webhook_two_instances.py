@@ -16,6 +16,7 @@ from gc_server.stores import aopen_process_stores
 from gc_server.webhook.surface import WebhookSurface
 from gc_testkit import scripted_model
 from gc_testkit.settings import make_settings
+from server_harness import LOOPBACK_URL
 
 THINK = {
     **scripted_model.FINISH,
@@ -87,7 +88,7 @@ def _install(monkeypatch, plan):
 def _client(surface) -> httpx.AsyncClient:
     return httpx.AsyncClient(
         transport=httpx.ASGITransport(app=surface.app()),
-        base_url="http://test",
+        base_url=LOOPBACK_URL,
     )
 
 

@@ -18,7 +18,7 @@ import httpx
 import pytest
 from gc_core.threads.models import ThreadKey
 from gc_server.webhook import surface as server
-from server_harness import make_webhook
+from server_harness import LOOPBACK_URL, make_webhook
 
 KEY = ThreadKey(system="s", thread="t")
 #: Потолок любого ожидания: сломанная бронь даёт красный тест, а не вечный сон.
@@ -103,7 +103,7 @@ def _client(surface) -> httpx.AsyncClient:
     transport = httpx.ASGITransport(
         app=surface.app(), raise_app_exceptions=False
     )
-    return httpx.AsyncClient(transport=transport, base_url="http://test")
+    return httpx.AsyncClient(transport=transport, base_url=LOOPBACK_URL)
 
 
 async def _post(client: httpx.AsyncClient, text: str) -> httpx.Response:

@@ -10,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 from gc_server.config import ServerConfigError, WebhookConfig
 from gc_server.webhook.signatures import SignatureError, sign, verify
-from server_harness import make_webhook
+from server_harness import LOOPBACK_URL, make_webhook
 
 SECRET = "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw"
 MSG_ID = "msg_p5jXN8AQM9LWM0D4loKWxJek"
@@ -97,7 +97,7 @@ def test_surface_requires_a_signature_when_a_secret_is_set(
         return None
 
     monkeypatch.setattr(type(surface), "_start_run", fake_start)
-    client = TestClient(surface.app())
+    client = TestClient(surface.app(), base_url=LOOPBACK_URL)
     body = b'{"task_id": "t1", "message": "x"}'
     unsigned = client.post(
         "/v1/tasks", content=body, headers={"content-type": "application/json"}
@@ -119,7 +119,7 @@ def test_without_a_secret_nothing_is_checked(tmp_path, monkeypatch):
         return None
 
     monkeypatch.setattr(type(surface), "_start_run", fake_start)
-    resp = TestClient(surface.app()).post(
+    resp = TestClient(surface.app(), base_url=LOOPBACK_URL).post(
         "/v1/tasks", json={"task_id": "t1", "message": "x"}
     )
     assert resp.status_code == 202
@@ -158,7 +158,7 @@ def test_signed_replay_with_another_idempotency_key_is_one_message(
     from gc_core.threads.models import ThreadKey
 
     surface = _signed_surface(tmp_path, monkeypatch)
-    client = TestClient(surface.app())
+    client = TestClient(surface.app(), base_url=LOOPBACK_URL)
     body = b'{"task_id": "t1", "message": "x"}'
     headers = _signed(body, int(time.time()))
     client.post("/v1/tasks", content=body, headers=headers)
@@ -182,7 +182,7 @@ def test_duplicate_json_keys_are_refused(tmp_path, monkeypatch):
 
     surface = _signed_surface(tmp_path, monkeypatch)
     body = b'{"task_id": "t1", "message": "a", "message": "b"}'
-    resp = TestClient(surface.app()).post(
+    resp = TestClient(surface.app(), base_url=LOOPBACK_URL).post(
         "/v1/tasks", content=body, headers=_signed(body, int(time.time()))
     )
     assert resp.status_code == 400

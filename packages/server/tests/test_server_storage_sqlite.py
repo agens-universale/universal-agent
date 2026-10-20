@@ -15,6 +15,7 @@ from gc_server.stores import aopen_process_stores
 from gc_stores.sqlite import SQLiteThreadStore
 from gc_testkit import scripted_model
 from gc_testkit.settings import make_settings
+from server_harness import LOOPBACK_URL
 
 
 def _settings(tmp_path):
@@ -58,7 +59,7 @@ async def test_webhook_thread_lives_in_the_configured_database(
     transport = httpx.ASGITransport(app=surface.app())
     try:
         async with httpx.AsyncClient(
-            transport=transport, base_url="http://test"
+            transport=transport, base_url=LOOPBACK_URL
         ) as client:
             started = await client.post(
                 "/v1/tasks", json={"task_id": "t-db", "text": "сделай"}

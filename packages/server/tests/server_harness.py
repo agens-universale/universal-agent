@@ -33,3 +33,8 @@ def make_swarm(swarm: dict, tmp_path=None, *, config: dict | None = None):
     from gc_server.swarm.surface import SwarmSurface
 
     return SwarmSurface(runtime(tmp_path, config=config), swarm=swarm)
+
+
+#: Адрес тестового клиента: поверхности на loopback-бинде пускают только
+#: loopback-имя в Host (защита от DNS rebinding).
+LOOPBACK_URL = "http://127.0.0.1"

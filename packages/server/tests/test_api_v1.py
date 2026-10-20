@@ -17,7 +17,7 @@ from gc_server.swarm import storage as swarm_storage
 from gc_server.webhook.surface import WebhookSurface
 from gc_testkit import scripted_model
 from gc_testkit.settings import make_settings
-from server_harness import make_swarm
+from server_harness import LOOPBACK_URL, make_swarm
 
 
 def _settings(tmp_path):
@@ -72,7 +72,7 @@ async def webhook(tmp_path):
     )
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=surface.app()),
-        base_url="http://test",
+        base_url=LOOPBACK_URL,
     ) as client:
         client.surface = surface
         yield client
@@ -194,7 +194,7 @@ async def test_cancel_stops_the_running_task(webhook, monkeypatch):
     _install(monkeypatch, plan)
     await webhook.post("/v1/tasks", json={"task_id": "c", "message": "x"})
     await _done(webhook, "generic", "c", status="running")
-    resp = await webhook.post("/v1/tasks/generic/c/cancel")
+    resp = await webhook.post("/v1/tasks/generic/c/cancel", json={})
     assert resp.status_code == 202
     hold.set()
     await _done(webhook, "generic", "c", status="cancelled")
@@ -223,7 +223,8 @@ async def test_events_stream_messages_and_status(webhook, monkeypatch):
     ],
 )
 async def test_old_paths_are_gone(webhook, method, path):
-    assert (await webhook.request(method, path)).status_code == 404
+    body = {"json": {}} if method == "POST" else {}
+    assert (await webhook.request(method, path, **body)).status_code == 404
 
 
 def test_swarm_has_the_same_handles(tmp_path, monkeypatch):
@@ -265,7 +266,7 @@ def test_swarm_has_the_same_handles(tmp_path, monkeypatch):
     )
     monkeypatch.setattr("os.kill", lambda pid, sig: None)
     monkeypatch.setattr("os.killpg", lambda pid, sig: None)
-    client = TestClient(surface.app())
+    client = TestClient(surface.app(), base_url=LOOPBACK_URL)
     resp = client.post("/v1/tasks", json={"task_id": "s1", "message": "x"})
     assert resp.status_code == 202
     assert resp.json()["status"] == "started"
@@ -275,7 +276,7 @@ def test_swarm_has_the_same_handles(tmp_path, monkeypatch):
         "s1"
     ]
     assert client.get("/v1/tasks/generic/s1/messages").status_code == 200
-    cancel = client.post("/v1/tasks/generic/s1/cancel")
+    cancel = client.post("/v1/tasks/generic/s1/cancel", json={})
     assert cancel.status_code == 202, cancel.json()
     assert client.get("/v1/tasks/generic/s1").json()["status"] == "cancelled"
     assert client.post("/events/webhook", json={}).status_code == 404

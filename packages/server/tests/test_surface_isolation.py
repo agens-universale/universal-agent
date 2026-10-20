@@ -11,7 +11,7 @@ from gc_server.a2a.surface import A2aSurface
 from gc_server.app import ServerRuntime
 from gc_server.chat.surface import ChatSurface
 from gc_server.config import ServerConfig, ServerConfigError
-from server_harness import make_webhook
+from server_harness import LOOPBACK_URL, make_webhook
 
 
 @pytest.mark.parametrize(
@@ -57,7 +57,7 @@ def client(tmp_path):
         "tui",
     ):
         _seed(threads, system, "t1")
-    return TestClient(make_webhook(tmp_path).app())
+    return TestClient(make_webhook(tmp_path).app(), base_url=LOOPBACK_URL)
 
 
 @pytest.mark.parametrize(
@@ -110,11 +110,42 @@ def test_webhook_does_not_touch_swarm_task_threads(tmp_path):
         )
     )
     run_sync(threads.update_frontend(key, "swarm", {"swarm_id": "swarm_x"}))
-    client = TestClient(make_webhook(tmp_path).app())
+    client = TestClient(make_webhook(tmp_path).app(), base_url=LOOPBACK_URL)
     assert client.get("/v1/tasks/generic/sw/messages").status_code == 404
     assert client.get("/v1/tasks/generic/sw").status_code == 404
-    assert client.post("/v1/tasks/generic/sw/cancel").status_code == 404
+    assert (
+        client.post("/v1/tasks/generic/sw/cancel", json={}).status_code == 404
+    )
     resp = client.post("/v1/tasks", json={"task_id": "sw", "message": "x"})
     assert resp.status_code == 409
     assert run_sync(store.read_stream(key, "inbox")) == []
     assert run_sync(store.read_stream(key, "control")) == []
+
+
+@pytest.mark.parametrize("surface_kind", ["webhook", "swarm"])
+def test_browser_cannot_start_a_task(tmp_path, surface_kind):
+    """POST без ``Content-Type: application/json`` браузер шлёт без
+    preflight — такой запрос (CSRF со страницы в браузере пользователя) не
+    принимается; на loopback чужой Host (DNS rebinding) — тоже."""
+    from server_harness import make_swarm
+
+    if surface_kind == "webhook":
+        surface = make_webhook(tmp_path)
+    else:
+        surface = make_swarm(
+            {"threads_dir": str(tmp_path), "sandbox_root_dir": str(tmp_path)},
+            tmp_path,
+        )
+    client = TestClient(surface.app(), base_url="http://127.0.0.1:8000")
+    resp = client.post(
+        "/v1/tasks",
+        content=b'{"task_id": "t", "message": "x"}',
+        headers={"content-type": "text/plain"},
+    )
+    assert resp.status_code == 415
+    rebound = client.post(
+        "/v1/tasks",
+        json={"task_id": "t", "message": "x"},
+        headers={"host": "evil.example"},
+    )
+    assert rebound.status_code == 400
