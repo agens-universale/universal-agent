@@ -54,10 +54,15 @@ FOCUS_BG = "#363b47"  # подсветка строки трассы в фоку
 # Почему не светлее: комментарии в подсветке кода тёмные, и на более светлом
 # фоне их контраст падает ниже читаемого. Пара «этот фон + комментарии на $dim»
 # (см. services/code_render) подобрана так, чтобы читаемым осталось всё.
-# Границы закреплены тестами в tests/tui/test_palette_sync.py.
+# Границы закреплены тестами в packages/tui/tests/test_palette_sync.py.
 SCREEN_SELECTION_BACKGROUND = "#1e416c"
 CARD_SELECT_BG = "#2e323d"  # выбранная карточка (/sessions, /skills, /mcp) — мягче focus-bg, светлее band-bg
 FRAME_ARCHIVE = "#4b525d"  # серая рамка «архив/история» (отвеченный вопрос)
+NOTE_INK = "#a5adb8"  # ремарка: чуть светлее DIM
+USER_BAND_BG = "#282c36"  # подложка реплики: светлее BAND_BG, темнее FOCUS_BG
+OVERLAY_BG = "#161A23"  # фон оверлеев (палитра, сессии, предпросмотр)
+ZEBRA_BG = "#232836"  # чётная строка зебры (справка)
+SKILL = "#afd7ff"  # имя скилла
 
 
 def _mix(base: str, accent: str, t: float) -> str:
@@ -106,6 +111,9 @@ DIFF_ADD_GUTTER = OK
 DIFF_DEL_GUTTER = ERR
 
 
+USER_PENDING_EDGE = _mix(BG, ACCENT, 0.64)  # кромка неотправленной реплики
+
+
 def css_variables() -> dict[str, str]:
     """Токены → CSS-переменные (kebab-имена как в TCSS). Инжектится в
     `TuiApp.get_css_variables()`; TCSS ссылается на них через `$name`."""
@@ -134,6 +142,12 @@ def css_variables() -> dict[str, str]:
         "screen-selection-background": SCREEN_SELECTION_BACKGROUND,
         "card-select-bg": CARD_SELECT_BG,
         "frame-archive": FRAME_ARCHIVE,
+        "note-ink": NOTE_INK,
+        "user-band-bg": USER_BAND_BG,
+        "user-pending-edge": USER_PENDING_EDGE,
+        "overlay-bg": OVERLAY_BG,
+        "zebra-bg": ZEBRA_BG,
+        "skill": SKILL,
         "diff-add-bg": DIFF_ADD_BG,
         "diff-del-bg": DIFF_DEL_BG,
         "diff-add-hl": DIFF_ADD_HL,

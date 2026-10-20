@@ -251,14 +251,14 @@ ToolCallRow.tool-group-start { margin-top: 1; }
 .line-bang-out  { color: $dim; }
 .line-bang-fail { color: $err; }
 .skill-marker   { margin: 1 0; }  /* top И bottom: margin-bottom один перетирал margin-top от .line-meta → не было зазора над [skill] */
-.line-note      { color: #a5adb8; margin-top: 1; }  /* чуть светлее $dim; пустая строка сверху — отделяет ремарку; курсив — только на тексте ремарки (см. note_text), ярлык прямой */
+.line-note      { color: $note-ink; margin-top: 1; }  /* чуть светлее $dim; пустая строка сверху — отделяет ремарку; курсив — только на тексте ремарки (см. note_text), ярлык прямой */
 .summary-marker { color: $deep-dim; margin: 1 0; }  /* пустая строка сверху И снизу — маркер обособлен */
 .summary-body   { color: $dim; margin-bottom: 1; }
 .summary-body.hidden { display: none; }
 
 /* Подложка реплики пользователя (§2.6) */
 .user-band {
-    background: #282c36;   /* чуть светлее $band-bg — реплика контрастнее в трейсе; темнее $focus-bg (фокус различим) */
+    background: $user-band-bg;   /* чуть светлее $band-bg — реплика контрастнее в трейсе; темнее $focus-bg (фокус различим) */
     border-left: outer $accent;
     padding: 0 1 0 1;
     /* Только верхний отступ — общая конвенция трейса (разделение «через margin-top
@@ -272,12 +272,12 @@ ToolCallRow.tool-group-start { margin-top: 1; }
 
 /* Pending: приглушённая teal-кромка (spec 2026-05-26) */
 .user-band.user-reply-pending {
-    border-left: outer #3a7a72;
+    border-left: outer $user-pending-edge;
 }
 
 /* Failed: красная кромка + инлайн [!] (spec 2026-05-26) */
 .user-band.user-reply-failed {
-    border-left: outer #C75C54;
+    border-left: outer $err;
 }
 
 /* Бренд-блок пустого состояния (§2.8) */
@@ -307,7 +307,7 @@ ToolCallRow.tool-group-start { margin-top: 1; }
 .stream-block-think { color: $muted; text-style: italic; }
 
 /* Палитра команд (overlay, Task 3.3) */
-.palette       { background: #161A23; border: round $run-color; height: auto; max-height: 80%; }
+.palette       { background: $overlay-bg; border: round $run-color; height: auto; max-height: 80%; }
 /* nowrap+ellipsis — канон .onb-mcp-row/.set-rowtext и одновременно инвариант
    геометрии: desired_height палитры считает ОДНУ строку на команду, и перенос
    длинного описания на вторую строку делал фактическую высоту больше заявленной —
@@ -338,7 +338,7 @@ ToolCallRow.tool-group-start { margin-top: 1; }
 }
 /* Зебра: полоса заметно светлее фона ($bg #0E1119) — на #181c26 разница почти
    не читалась; светлее $band-bg, но темнее выделения строки. */
-.help-row.help-row-alt { background: #232836; }
+.help-row.help-row-alt { background: $zebra-bg; }
 /* Фиксированная левая колонка — глаза не бегают через весь терминал */
 .help-row-cmd {
     width: 18;
@@ -469,7 +469,7 @@ RevertConfirmScreen #trace > .tree-gap  { height: 1; margin: 0; padding: 0; }
  * max-height: длинный вопрос скроллится внутри (VerticalScroll), не выдавливает
  * input/footer. Точный потолок дополнительно ставит _sync_trace_max_height. */
 .ask-human-banner {
-    background: #161A23;
+    background: $overlay-bg;
     border: round $run-color;
     padding: 0 1;
     margin: 0 1;
@@ -487,7 +487,7 @@ TextArea.ask-human-mode { border: solid $run-color; }
  * При cap main.py ставит height=cap (needs_height_when_capped): одного max_height
  * мало — Textual клипает box, а undocked-дети layout'ятся полной высотой. */
 .confirm-banner {
-    background: #161A23;
+    background: $overlay-bg;
     border: round $accent;
     padding: 0 1;
     margin: 0 1;
@@ -511,7 +511,7 @@ TextArea.ask-human-mode { border: solid $run-color; }
     height: auto;
     min-height: 5;       /* padding-top + 4 choice rows */
     padding-top: 1;
-    background: #161A23;
+    background: $overlay-bg;
     width: 100%;
 }
 
@@ -520,7 +520,7 @@ TextArea.ask-human-mode { border: solid $run-color; }
 
 /* SessionsScreen — picker недавних задач (Task 4.1) */
 #sessions-root { height: 100%; }
-#sessions-header { height: 2; background: #161A23; color: $deep-dim;
+#sessions-header { height: 2; background: $overlay-bg; color: $deep-dim;
                  border-bottom: solid $deep-dim; padding: 0 1; }
 #sessions-header-left  { width: 1fr; color: $deep-dim; }
 #sessions-header-right { width: auto; color: $deep-dim; text-align: right; padding-right: 1; }
@@ -535,7 +535,7 @@ TextArea.ask-human-mode { border: solid $run-color; }
 #sessions-list .card.selected { background: $card-select-bg; border-left: outer $accent; }
 
 /* PreviewScreen — read-only превью сессии (футер с линией-разделителем) */
-#preview-footer { height: 2; background: #161A23; color: $dim;
+#preview-footer { height: 2; background: $overlay-bg; color: $dim;
                   border-top: solid $deep-dim; padding: 0 1; }
 
 /* SkillsScreen — picker, двустрочные карточки (2026-06-02) */

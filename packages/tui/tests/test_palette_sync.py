@@ -100,3 +100,17 @@ def test_selection_does_not_swallow_syntax_colors():
     """Самый тёмный токен подсветки остаётся различим на фоне выделения."""
     darkest_token = "#ae81ff"  # фиолетовый monokai — числа
     assert _contrast(darkest_token, palette.SCREEN_SELECTION_BACKGROUND) >= 3.0
+
+
+_HEX_RE = re.compile(r"#[0-9a-fA-F]{6}\b")
+_CSS_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
+
+
+def test_no_hex_in_tcss():
+    """Цвета в *.tcss — только `$var` палитры; hex-литералы вне комментариев
+    запрещены (комментарии вырезаются перед поиском)."""
+    violations = []
+    for path in sorted(TUI_PKG.rglob("*.tcss")):
+        text = _CSS_COMMENT_RE.sub("", path.read_text(encoding="utf-8"))
+        violations += [f"{path.name}: {h}" for h in _HEX_RE.findall(text)]
+    assert violations == []
