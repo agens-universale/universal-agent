@@ -225,3 +225,41 @@ async def test_webhook_into_a_queued_task_after_the_turn_is_played(
         await surface.astop()
         await stores.aclose()
     assert any("поздно" in _user_texts(p) for p in seen)
+
+
+async def test_cancel_from_another_instance_cancels_the_task(
+    monkeypatch, tmp_path
+):
+    """Отмена — запись в поток control треда с любого инстанса: ход
+    владельца останавливается, статус задачи — cancelled."""
+    from gc_core.threads.models import ThreadKey
+
+    loaded = _settings(tmp_path)
+    stores = await aopen_process_stores(loaded)
+    first = WebhookSurface(
+        ServerRuntime(base=loaded, config=ServerConfig(), stores=stores)
+    )
+    second = WebhookSurface(
+        ServerRuntime(base=loaded, config=ServerConfig(), stores=stores)
+    )
+
+    async def plan(index):
+        if index == 0:
+            await second.threads().request_cancel(
+                ThreadKey(system="generic", thread="t")
+            )
+            await asyncio.sleep(0.2)  # опрос владельца видит отмену
+            return THINK
+        return scripted_model.FINISH
+
+    seen = _install(monkeypatch, plan)
+    try:
+        async with _client(first) as a, _client(second) as b:
+            await a.post("/events/webhook", json={"task_id": "t", "x": 1})
+            done = await _wait(b, "/runs/generic/t", "cancelled")
+    finally:
+        await first.astop()
+        await second.astop()
+        await stores.aclose()
+    assert done["finished_at"] is not None
+    assert len(seen) == 1

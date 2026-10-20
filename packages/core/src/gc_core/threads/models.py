@@ -29,7 +29,9 @@ from gc_core.thread_paths import sanitize_system_id, validate_thread_id
 
 JsonObject = dict[str, Any]
 
-CoreStream = Literal["messages", "subagent_events", "edits", "inbox"]
+CoreStream = Literal[
+    "messages", "subagent_events", "edits", "inbox", "control"
+]
 CORE_STREAMS: frozenset[str] = frozenset(get_args(CoreStream))
 RunFlag = Literal["summarizing", "finalizing", "finish_gate_checking"]
 TurnState = Literal["idle", "running", "interrupted"]

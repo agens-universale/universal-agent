@@ -311,8 +311,9 @@ class InboxDrained(ValueError):
 
 def _inbox_reader(ctx: Any, thread_session: Any) -> Any:
     """Чтение входящего потока треда хода или ``None``: треда нет, хранилище
-    потока не знает, или ход durable (Temporal: сообщения приходят
-    сигналами, а опрос через activity засорял бы историю workflow)."""
+    потоков не знает, или ход durable (Temporal: сообщения и отмена
+    приходят сигналами, а опрос через activity засорял бы историю
+    workflow). Тот же признак включает и управляющий поток."""
     if thread_session is None or getattr(ctx, "durable_execution", False):
         return None
     read = getattr(thread_session.port, "aread_inbox", None)
@@ -450,6 +451,9 @@ class AgentExecutor:
         self._undelivered_messages: list[dict] = []
         #: Последний ``seq`` входящего потока, уже положенный в очередь хода.
         self._inbox_seen = 0
+        #: Последний ``seq`` управляющего потока на старте хода: отмены до
+        #: него к этому ходу не относятся.
+        self._control_seen = 0
         self._state: State | None = None
         # Сессия последнего arun. Её мету пишет aclose_run_accounting, один раз.
         self._thread_session: Any = None
@@ -1708,6 +1712,10 @@ class AgentExecutor:
         if entries:
             state.inbox_seq = entries[-1].seq
         self._inbox_seen = int(state.inbox_seq or 0)
+        control = await thread_session.port.aread_control(
+            thread_session.system_id, thread_session.thread_id, after=0
+        )
+        self._control_seen = control[-1].seq if control else 0
         return [_inbox_message(entry) for entry in entries]
 
     def _start_inbox_poller(self, thread_session) -> asyncio.Task | None:
@@ -1717,20 +1725,35 @@ class AgentExecutor:
         if read is None:
             return None
         interval = settings_of(self._ctx).thread_store.inbox_poll_seconds
+        read_control = functools.partial(
+            thread_session.port.aread_control,
+            thread_session.system_id,
+            thread_session.thread_id,
+        )
 
         async def poll() -> None:
             while True:
                 await asyncio.sleep(interval)
                 try:
                     entries = await read(after=self._inbox_seen)
+                    control = await read_control(after=self._control_seen)
                 except Exception:
                     logging.getLogger(__name__).warning(
                         "thread inbox poll failed", exc_info=True
                     )
                     continue
                 self._enqueue_inbox(entries)
+                self._apply_control(control)
 
         return asyncio.create_task(poll())
+
+    def _apply_control(self, entries: list) -> None:
+        """Отмена из управляющего потока — остановка хода на следующем шаге."""
+        if not entries:
+            return
+        self._control_seen = entries[-1].seq
+        if any(entry.data.get("type") == "cancel" for entry in entries):
+            self.stop_run()
 
     def _enqueue_inbox(self, entries: list) -> None:
         """Записи потока — прямо в очередь хода (не субагенту: отметку

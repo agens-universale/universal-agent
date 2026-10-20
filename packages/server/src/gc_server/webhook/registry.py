@@ -58,6 +58,14 @@ class ActiveRun:
 Hook = Callable[[ActiveRun], Awaitable[None]]
 
 
+def _stopped(executor: Any) -> bool:
+    """Ход остановили (отмена через поток control или ``stop``): итог —
+    cancelled, а не completed."""
+    get_state = getattr(executor, "get_state", None)
+    state = get_state() if get_state is not None else None
+    return bool(getattr(state, "stop_requested", False))
+
+
 class AgentRunRegistry:
     """Брони сборки контекста и свои живые прогоны по ключу задачи."""
 
@@ -160,9 +168,11 @@ class AgentRunRegistry:
             run.result = await run.executor.arun(
                 [], thread_id=run.task_id, system=run.system, verbose=verbose
             )
-            run.ending = "completed"
+            run.ending = "cancelled" if _stopped(run.executor) else "completed"
             with self._lock:
                 self._runs.pop(run.key, None)
+            if run.ending == "cancelled":
+                return  # остановленный прогон хвост не доигрывает
             if not await run.executor.ainbox_left():
                 return
             with self._lock:

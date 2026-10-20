@@ -44,6 +44,9 @@ _SUBAGENTS = "subagent_events"
 #: Входящий поток треда: сообщения в идущий или следующий ход с любого
 #: процесса (``Threads.submit``).
 INBOX = "inbox"
+#: Управляющий поток треда: отмена хода с любого процесса
+#: (``Threads.request_cancel``).
+CONTROL = "control"
 _RETRIES = 3
 #: Срок аренды сессии: процесс, упавший посреди хода, держит тред не дольше.
 LEASE_TTL = timedelta(seconds=60)
@@ -235,6 +238,14 @@ class SessionPort:
         """Записи входящего потока после ``after`` (``StreamEntry``)."""
         return await self._store.read_stream(
             _key(system_id, thread_id), INBOX, after_seq=after, limit=limit
+        )
+
+    async def aread_control(
+        self, system_id: str, thread_id: str, *, after: int
+    ) -> list:
+        """Записи управляющего потока после ``after`` (``StreamEntry``)."""
+        return await self._store.read_stream(
+            _key(system_id, thread_id), CONTROL, after_seq=after
         )
 
     async def aread_subagent_trace(

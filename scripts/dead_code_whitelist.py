@@ -80,3 +80,8 @@ _.sweep
 # Наш вариант не ставит обработчики сигналов — несколько серверов процесса
 # гасятся общим. packages/server/src/gc_server/app.py.
 _.capture_signals
+
+# Отмена хода с любого процесса — метод фасада Threads (SDK): его зовут
+# встраивающие, ручка отмены задачи сервера и отмена задачи A2A.
+# packages/core/src/gc_core/threads/facade.py.
+_.request_cancel

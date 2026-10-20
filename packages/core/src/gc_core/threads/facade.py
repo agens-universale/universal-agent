@@ -28,7 +28,7 @@ from gc_core.threads.models import (
     ThreadQuery,
     ThreadRecord,
 )
-from gc_core.threads.session_port import INBOX, SessionPort
+from gc_core.threads.session_port import CONTROL, INBOX, SessionPort
 from gc_core.threads.store import ThreadStore
 
 _HISTORY = "messages"
@@ -252,6 +252,22 @@ class Threads:
             key,
             SideChange(
                 op_id=op_id or _op_id(INBOX), append=[(INBOX, [entry])]
+            ),
+        )
+
+    async def request_cancel(
+        self, key: ThreadKey, *, op_id: str | None = None
+    ) -> Receipt:
+        """Отменить идущий ход треда с любого процесса: запись в поток
+        ``control``. Ход увидит её опросом и остановится на следующем шаге;
+        следующих ходов она не касается."""
+        from gc_core.execution.environment import utc_now
+
+        entry = {"type": "cancel", "at": utc_now().isoformat()}
+        return await self.store.append_side(
+            key,
+            SideChange(
+                op_id=op_id or _op_id(CONTROL), append=[(CONTROL, [entry])]
             ),
         )
 
