@@ -278,7 +278,7 @@ class WebhookSurface:
         payload = await read_json_object(request)
         task_id, trace_id = request_task_identifiers(payload)
         system = request_system(payload, self.config.default_system)
-        message = _make_user_message(json.dumps(payload, ensure_ascii=False))
+        message = make_user_message(json.dumps(payload, ensure_ascii=False))
         await self.threads().submit(
             ThreadKey(system=system, thread=task_id), message, source="webhook"
         )
@@ -428,7 +428,7 @@ def _final_fields(run: ActiveRun) -> Dict[str, Any]:
     return {"status": "completed", **fields, "result": run.result}
 
 
-def _make_user_message(content: str) -> Dict[str, Any]:
+def make_user_message(content: str) -> Dict[str, Any]:
     return {
         "role": "user",
         "content": content,

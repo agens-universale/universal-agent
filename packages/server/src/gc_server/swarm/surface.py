@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import signal
@@ -16,6 +17,7 @@ from typing import TYPE_CHECKING, Any, Dict
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
+from gc_core.threads.models import ThreadKey
 
 from gc_server.surface import http_error, install_bearer, read_json_object
 from gc_server.swarm import lifecycle as swarm_lifecycle
@@ -26,6 +28,7 @@ from gc_server.swarm.monitor import SwarmMonitor
 from gc_server.webhook.janitor import start_swarm_cleanup
 from gc_server.webhook.surface import (
     healthcheck,
+    make_user_message,
     path_key,
     request_system,
     request_task_identifiers,
@@ -67,6 +70,9 @@ class SwarmSurface:
             if swarm is not None
             else build_swarm_config(runtime.config.swarm_section())
         )
+        thread_store = _sandbox_thread_store(runtime)
+        if thread_store is not None:
+            self.swarm = {**self.swarm, "thread_store": thread_store}
         self.monitor: SwarmMonitor | None = None
         # Чтение meta → решение «отказ или старт» → запись meta и Popen —
         # одним куском: два одинаковых запроса не запускают две песочницы.
@@ -179,6 +185,16 @@ class SwarmSurface:
         task_id, trace_id = request_task_identifiers(payload)
         system = request_system(payload, self.config.webhook.default_system)
         sid = swarm_id(system, task_id)
+        if self._in_store and self._active(sid):
+            # Тред задачи в общей базе: сообщение — во входящий поток, его
+            # заберёт ход gc-cli в песочнице (опросом ядра).
+            await self._aqueue(system, task_id, payload)
+            return {
+                "status": "queued",
+                "payload": payload,
+                "system": system,
+                "task_id": task_id,
+            }
         with self._start_lock:
             existing = swarm_storage.load_swarm_meta(self.threads_dir, sid)
             rejection = _reject_existing(existing, system, task_id)
@@ -199,12 +215,36 @@ class SwarmSurface:
                 raise http_error(500, f"swarm_start_failed: {e!r}") from None
             if self.monitor is not None:
                 self.monitor.register_active(sid)
+        if self._in_store:
+            await self.runtime.threads().update_frontend(
+                ThreadKey(system=system, thread=task_id),
+                "swarm",
+                {"swarm_id": sid},
+            )
         return {
             "status": "started",
             "payload": payload,
             "system": system,
             "task_id": task_id,
         }
+
+    @property
+    def _in_store(self) -> bool:
+        """Тред задачи — в общей базе (песочница ведёт его там)."""
+        return "thread_store" in self.swarm
+
+    def _active(self, sid: str) -> bool:
+        meta = swarm_storage.load_swarm_meta(self.threads_dir, sid)
+        return bool(meta) and _status_of(meta) in _ACTIVE
+
+    async def _aqueue(
+        self, system: str, task_id: str, payload: Dict[str, Any]
+    ) -> None:
+        await self.runtime.threads().submit(
+            ThreadKey(system=system, thread=task_id),
+            make_user_message(json.dumps(payload, ensure_ascii=False)),
+            source="swarm",
+        )
 
     def _overloaded(self, system: str, task_id: str) -> JSONResponse | None:
         limit = int(self.swarm.get("max_concurrent", 10))
@@ -243,10 +283,7 @@ class SwarmSurface:
         sys_norm, task_norm = self._key(system, task_id)
         sid = swarm_id(sys_norm, task_norm)
         meta = swarm_storage.load_swarm_meta(self.threads_dir, sid)
-        # Канал E: messages.jsonl лежит внутри каталога песочницы.
-        messages = swarm_storage.load_swarm_messages(
-            self.threads_dir, sid, self.sandbox_root_dir
-        )
+        messages = await self._messages(sys_norm, task_norm, sid)
         stdout, stderr = swarm_storage.load_swarm_stdout_stderr(
             self.threads_dir, sid
         )
@@ -263,6 +300,17 @@ class SwarmSurface:
             "stdout": stdout,
             "stderr": stderr,
         }
+
+    async def _messages(self, system: str, task_id: str, sid: str) -> list:
+        if self._in_store:
+            entries = await self.runtime.threads().history(
+                ThreadKey(system=system, thread=task_id)
+            )
+            return [entry.data for entry in entries]
+        # Канал E: messages.jsonl лежит внутри каталога песочницы.
+        return swarm_storage.load_swarm_messages(
+            self.threads_dir, sid, self.sandbox_root_dir
+        )
 
     async def get_all_logs(self):
         out = []
@@ -287,6 +335,24 @@ class SwarmSurface:
     @staticmethod
     def _key(system: str, task_id: str) -> tuple[str, str]:
         return path_key(system, task_id)
+
+
+def _sandbox_thread_store(runtime: ServerRuntime) -> Dict[str, Any] | None:
+    """Хранилище тредов хоста для песочницы: сетевая база — она же; SQLite
+    и своя фабрика песочнице недоступны — тред в её файлах, как раньше."""
+    from gc_core.config_modules.storage import FILES
+    from gc_core.settings import settings_of
+
+    kind, params = settings_of(runtime.base).storage.part("threads")
+    if kind in swarm_runner.SANDBOX_STORES:
+        return {"type": kind, **params}
+    if kind != FILES:
+        logger.warning(
+            "swarm: storage.threads.type=%s песочнице недоступен — тред "
+            "задачи остаётся в её файлах",
+            kind,
+        )
+    return None
 
 
 def _swarm_meta(meta: Dict[str, Any]) -> Dict[str, Any]:

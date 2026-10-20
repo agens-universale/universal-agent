@@ -233,9 +233,13 @@ def _materialize_runtime_config(
     _copy_swarm_assets(sandbox_path, swarm_cfg, swarm_overrides)
 
     merged = merge_config_layers(raw, swarm_overrides)
-    # Тред песочницы — в её файлах (/work/.gc/threads): подключение хоста к
-    # базе внутрь не уходит — ни как хранилище, ни как секрет в файле.
+    # Хранилище хоста внутрь не уходит: тред песочницы — в её файлах
+    # (/work/.gc/threads) или в общей базе (thread_store) — секцией без
+    # секретов, их значения — окружением процесса.
     merged.pop("storage", None)
+    section, _env = sandbox_storage(swarm_cfg.get("thread_store"))
+    if section:
+        merged["storage"] = section
 
     gc_dir = os.path.join(sandbox_path, ".gc")
     os.makedirs(gc_dir, exist_ok=True)
@@ -243,6 +247,37 @@ def _materialize_runtime_config(
     with open(out_path, "w", encoding="utf-8") as f:
         yaml.safe_dump(merged, f, default_flow_style=False, sort_keys=False)
     return out_path
+
+
+#: Типы хранилища тредов, до которых песочница достаёт по сети. SQLite —
+#: файл хоста: внутри песочницы его нет, тред остаётся в её файлах.
+SANDBOX_STORES = frozenset({"postgres", "mysql", "redis", "s3"})
+_ENV_PREFIX = "GC_SWARM_DB_"
+
+
+def sandbox_storage(
+    part: Optional[Dict[str, Any]],
+) -> Tuple[Dict[str, Any], Dict[str, str]]:
+    """Секция ``storage`` для config.yml песочницы и её секреты окружением.
+
+    ``part`` — часть ``threads`` хоста с раскрытыми значениями. Подключение
+    (``dsn``, ``url``) и прочие секретные параметры уходят в файл
+    подстановкой ``${ENV:GC_SWARM_DB_<ИМЯ>}``, а значения — окружением
+    процесса песочницы: на диске песочницы секрета нет."""
+    from gc_core.config_modules.field_meta import is_secret_name
+
+    if not part or part.get("type") not in SANDBOX_STORES:
+        return {}, {}
+    threads: Dict[str, Any] = {}
+    env: Dict[str, str] = {}
+    for name, value in part.items():
+        if name != "type" and (name in ("dsn", "url") or is_secret_name(name)):
+            variable = _ENV_PREFIX + name.upper()
+            env[variable] = str(value)
+            threads[name] = "${ENV:" + variable + "}"
+        else:
+            threads[name] = value
+    return {"threads": threads}, env
 
 
 def _resolve_host_config_path(swarm_cfg: Dict[str, Any]) -> Optional[str]:
@@ -424,6 +459,12 @@ def start_swarm_process(
                 "SWARM_EXTRA_MOUNTS": extra_mounts_env,
             }
         )
+        # Тред задачи в общей базе: CLI ведёт его (-t, --system), секреты
+        # подключения — окружением.
+        _section, store_env = sandbox_storage(swarm_cfg.get("thread_store"))
+        if store_env:
+            env.update(store_env)
+            env["SWARM_THREAD_IN_STORE"] = "1"
 
         # wrapper_path проверен в начале функции; остальные ошибки запуска
         # прокидываем выше — за собой убирает finally ниже.

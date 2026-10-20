@@ -110,3 +110,19 @@ async def test_bad_storage_is_refused_with_the_reason(
     assert await run_cli(config) == 1
     err = capsys.readouterr().err
     assert "storage.threads" in err and "path" in err
+
+
+async def test_system_flag_names_the_thread(run_cli, monkeypatch, tmp_path):
+    """Песочница swarm ведёт тред задачи вебхука: ``--system`` задаёт его
+    system (по умолчанию — cli)."""
+    scripted_model.install(monkeypatch)
+    db = tmp_path / "t.db"
+    config = _config(
+        tmp_path, {"threads": {"type": "sqlite", "path": str(db)}}
+    )
+    assert await run_cli(config, "-t", "t1", "--system", "generic") == 0
+    with sqlite3.connect(db) as conn:
+        rows = conn.execute(
+            "SELECT system, thread_id FROM gc_threads"
+        ).fetchall()
+    assert rows == [("generic", "t1")]

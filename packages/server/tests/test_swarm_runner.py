@@ -1079,3 +1079,52 @@ def test_materialize_migrates_legacy_kwargs_before_overlay(
     runner._materialize_runtime_config(str(host), str(sandbox), {})
     written = yaml.safe_load((sandbox / ".gc" / "config.yml").read_text())
     assert written["models"]["sample"]["main"] == {"top_p": 0.2}
+
+
+def test_sandbox_storage_keeps_secrets_out_of_the_config():
+    section, env = runner.sandbox_storage(
+        {"type": "postgres", "dsn": "postgresql://u:pw@db/a", "schema": "s"}
+    )
+    assert section == {
+        "threads": {
+            "type": "postgres",
+            "dsn": "${ENV:GC_SWARM_DB_DSN}",
+            "schema": "s",
+        }
+    }
+    assert env == {"GC_SWARM_DB_DSN": "postgresql://u:pw@db/a"}
+
+
+def test_materialized_config_carries_the_store_without_the_secret(tmp_path):
+    import yaml as _yaml
+
+    host_cfg = tmp_path / "host.yml"
+    host_cfg.write_text("agent:\n  max_steps: 3\n")
+    sandbox = tmp_path / "sb"
+    sandbox.mkdir()
+    store = {
+        "type": "redis",
+        "url": "redis://:pw@cache:6379/0",
+        "prefix": "gc",
+    }
+    runner._materialize_runtime_config(
+        str(host_cfg), str(sandbox), {"thread_store": store}
+    )
+    text = (sandbox / ".gc" / "config.yml").read_text()
+    written = _yaml.safe_load(text)
+    assert written["storage"]["threads"]["url"] == "${ENV:GC_SWARM_DB_URL}"
+    assert written["storage"]["threads"]["prefix"] == "gc"
+    assert "pw" not in text
+
+
+def test_start_swarm_passes_the_store_secret_by_environment(
+    base_swarm_cfg, mock_popen
+):
+    cfg = {
+        **base_swarm_cfg,
+        "thread_store": {"type": "postgres", "dsn": "postgresql://u:pw@db/a"},
+    }
+    runner.start_swarm_process(cfg, system="g", task_id="t", payload={})
+    env = mock_popen.call_args.kwargs["env"]
+    assert env["GC_SWARM_DB_DSN"] == "postgresql://u:pw@db/a"
+    assert env["SWARM_THREAD_IN_STORE"] == "1"

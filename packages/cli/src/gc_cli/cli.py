@@ -931,6 +931,10 @@ async def _arun_requested_turn(
     """Ход, о котором просит запуск: одобрение предложенного плана флагом
     `--approve-plan` (та же последовательность ядра, что у консольного
     вопроса) либо обычный запрос `-q`."""
+    # Свой system треда — только у песочницы swarm (--system); обычный
+    # запуск зовёт исполнитель как раньше (system по умолчанию — cli).
+    system = getattr(arg_parser.run_args, "system", None) or "cli"
+    thread_system = {} if system == "cli" else {"system": system}
     if approve_mode:
         return await executor.aexecute_accepted_plan(
             approve_mode,
@@ -938,6 +942,7 @@ async def _arun_requested_turn(
             extra_text=extra_text or "",
             verbose=verbose,
             account_run=account_run,
+            **thread_system,
         )
     return await executor.arun(
         user_parts,
@@ -946,6 +951,7 @@ async def _arun_requested_turn(
         verbose=verbose,
         attachments=attachments,
         account_run=account_run,
+        **thread_system,
     )
 
 

@@ -244,6 +244,15 @@ parser.add_argument(
 )
 
 parser.add_argument(
+    "--system",
+    default="cli",
+    help=(
+        "Служебный (swarm): system треда -t — песочница ведёт тред задачи "
+        "вебхука (system, task_id) в общем хранилище; по умолчанию cli"
+    ),
+)
+
+parser.add_argument(
     "--external-request",
     action="store_true",
     dest="external_request",

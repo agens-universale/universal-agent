@@ -172,3 +172,34 @@ def test_completion_json_survives_quotes_in_user_paths(tmp_path, venv_name):
     # Путь обязан не только сохранить валидность файла, но и доехать целиком:
     # экранирование не должно превратиться в потерю символов.
     assert str(venv / "bin" / "gc-cli") in completion["error_message"]
+
+
+def _argv(tmp_path, **env):
+    venv = tmp_path / "venv"
+    (venv / "bin").mkdir(parents=True)
+    argv_file = tmp_path / "argv.txt"
+    cli = venv / "bin" / "gc-cli"
+    cli.write_text(f'#!/bin/sh\nprintf "%s\\n" "$@" > "{argv_file}"\n')
+    cli.chmod(0o755)
+    proc, _ = _run(
+        tmp_path,
+        SWARM_CLI_COMMAND="gc-cli",
+        SWARM_CLI_VENV_ROOT=str(venv),
+        SWARM_SYSTEM="g",
+        SWARM_TASK_ID="t1",
+        **env,
+    )
+    assert proc.returncode == 0, proc.stderr
+    return argv_file.read_text().splitlines()
+
+
+def test_thread_in_the_store_is_the_task_thread(tmp_path):
+    """Тред задачи в общей базе: CLI ведёт тред (system, task_id) — тот,
+    что читает /logs и в который вебхук кладёт сообщения."""
+    argv = _argv(tmp_path, SWARM_THREAD_IN_STORE="1")
+    assert argv[argv.index("-t") + 1] == "t1"
+    assert argv[argv.index("--system") + 1] == "g"
+
+
+def test_files_mode_runs_without_a_thread(tmp_path):
+    assert "-t" not in _argv(tmp_path)

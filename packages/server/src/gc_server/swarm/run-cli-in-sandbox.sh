@@ -222,6 +222,13 @@ if [[ -n "${SWARM_TRACE_ID:-}" ]]; then
   CLI_CMD+=(--trace-id "${SWARM_TRACE_ID}")
 fi
 
+# Тред задачи в общей базе (storage в config.yml песочницы): CLI ведёт тред
+# (system, task_id) — тот, что читает /logs сервера и куда ложатся сообщения
+# в идущую задачу. На файлах — без треда, как раньше.
+if [[ "${SWARM_THREAD_IN_STORE:-}" == "1" ]]; then
+  CLI_CMD+=(-t "${SWARM_TASK_ID}" --system "${SWARM_SYSTEM}")
+fi
+
 # --- Таймаут через GNU timeout (если есть) ---
 
 if command -v timeout >/dev/null 2>&1; then
