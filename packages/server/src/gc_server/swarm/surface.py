@@ -19,6 +19,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from gc_core.threads.models import ThreadKey
 
+from gc_server.config import ServerConfigError
 from gc_server.surface import http_error, install_bearer, read_json_object
 from gc_server.swarm import lifecycle as swarm_lifecycle
 from gc_server.swarm import runner as swarm_runner
@@ -303,10 +304,14 @@ class SwarmSurface:
 
     async def _messages(self, system: str, task_id: str, sid: str) -> list:
         if self._in_store:
-            entries = await self.runtime.threads().history(
-                ThreadKey(system=system, thread=task_id)
-            )
-            return [entry.data for entry in entries]
+            # Только тред задачи swarm: тот же (system, task_id) у вебхука —
+            # чужая задача.
+            key = ThreadKey(system=system, thread=task_id)
+            threads = self.runtime.threads()
+            record = await threads.get(key)
+            if record is None or "swarm" not in record.frontend:
+                return []
+            return [entry.data for entry in await threads.history(key)]
         # Канал E: messages.jsonl лежит внутри каталога песочницы.
         return swarm_storage.load_swarm_messages(
             self.threads_dir, sid, self.sandbox_root_dir
@@ -338,21 +343,31 @@ class SwarmSurface:
 
 
 def _sandbox_thread_store(runtime: ServerRuntime) -> Dict[str, Any] | None:
-    """Хранилище тредов хоста для песочницы: сетевая база — она же; SQLite
-    и своя фабрика песочнице недоступны — тред в её файлах, как раньше."""
-    from gc_core.config_modules.storage import FILES
+    """Подключение песочницы к общей базе — только явная секция
+    ``swarm.storage`` (свои, урезанные права): агент в песочнице может
+    прочитать своё окружение, учётные данные сервера туда не уходят. Без
+    секции — тред в файлах песочницы, как раньше."""
     from gc_core.settings import settings_of
 
-    kind, params = settings_of(runtime.base).storage.part("threads")
-    if kind in swarm_runner.SANDBOX_STORES:
-        return {"type": kind, **params}
-    if kind != FILES:
+    part = (runtime.config.swarm.model_extra or {}).get("storage")
+    if not part:
+        return None
+    if not isinstance(part, dict) or (
+        part.get("type") not in swarm_runner.SANDBOX_STORES
+    ):
+        raise ServerConfigError(
+            "swarm.storage: нужна сетевая база песочницы — type: "
+            + ", ".join(sorted(swarm_runner.SANDBOX_STORES))
+        )
+    kind, _params = settings_of(runtime.base).storage.part("threads")
+    if kind not in swarm_runner.SANDBOX_STORES:
         logger.warning(
-            "swarm: storage.threads.type=%s песочнице недоступен — тред "
-            "задачи остаётся в её файлах",
+            "swarm.storage задан, а треды сервера — %s: /logs не увидит "
+            "тред песочницы; песочница остаётся на своих файлах",
             kind,
         )
-    return None
+        return None
+    return dict(part)
 
 
 def _swarm_meta(meta: Dict[str, Any]) -> Dict[str, Any]:

@@ -256,6 +256,8 @@ class ServerConfig(BaseModel):
         """Секция swarm в форме, которую читает ``build_swarm_config``:
         правки агента — общие, затем свои."""
         raw = self.swarm.model_dump(exclude={"host", "port", "auth_token"})
+        # Подключение песочницы к базе читает поверхность swarm сама.
+        raw.pop("storage", None)
         own = raw.pop("agent_overrides", {}) or {}
         raw.pop("agent_md_path", None)
         return {

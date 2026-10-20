@@ -42,7 +42,16 @@ def surface(tmp_path, monkeypatch):
 
     runtime = ServerRuntime(
         base=loaded,
-        config=ServerConfig(),
+        config=ServerConfig.model_validate(
+            {
+                "swarm": {
+                    "storage": {
+                        "type": "postgres",
+                        "dsn": "postgresql://sandbox:pw@db/a",
+                    }
+                }
+            }
+        ),
         stores=Stores(threads=store, agent=object()),
     )
     surface = SwarmSurface(
@@ -82,11 +91,54 @@ def surface(tmp_path, monkeypatch):
     return surface
 
 
-def test_sandbox_gets_the_hosts_thread_store(surface):
+def test_sandbox_gets_its_own_connection(surface):
+    """Песочнице — подключение из swarm.storage (свои урезанные права), а не
+    учётные данные сервера: агент в песочнице может их прочитать."""
     assert surface.swarm["thread_store"] == {
         "type": "postgres",
-        "dsn": "postgresql://u:pw@db/a",
+        "dsn": "postgresql://sandbox:pw@db/a",
     }
+
+
+def test_without_swarm_storage_the_sandbox_stays_on_files(tmp_path):
+    loaded = make_settings(
+        {
+            "paths.threads_data_path": str(tmp_path / "files"),
+            "storage": {
+                "threads": {
+                    "type": "postgres",
+                    "dsn": "postgresql://u:pw@db/a",
+                }
+            },
+        }
+    )
+    from gc_core.stores import Stores
+
+    surface = SwarmSurface(
+        ServerRuntime(
+            base=loaded,
+            config=ServerConfig(),
+            stores=Stores(threads=MemoryThreadStore(), agent=object()),
+        ),
+        swarm={
+            "threads_dir": str(tmp_path),
+            "sandbox_root_dir": str(tmp_path),
+        },
+    )
+    assert "thread_store" not in surface.swarm
+
+
+def test_logs_do_not_read_threads_of_other_tasks(surface):
+    """Тред вебхука с тем же (system, task_id) — не задача swarm: /logs
+    swarm-порта его не отдаёт."""
+    run_sync(
+        Threads(surface.store).append_messages(
+            ThreadKey(system="g", thread="hook"),
+            [{"id": "s1", "role": "user", "content": "секрет вебхука"}],
+        )
+    )
+    resp = TestClient(surface.app()).get("/logs/g/hook")
+    assert resp.status_code == 404
 
 
 def test_message_into_a_running_task_is_queued_into_the_inbox(surface):
