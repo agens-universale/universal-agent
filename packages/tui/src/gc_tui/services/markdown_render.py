@@ -206,8 +206,9 @@ _BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
 _INLINE_CODE_RE = re.compile(r"`([^`\n]+)`")
 
 
-def _apply_inline_styles(text: Text, line: str) -> None:
-    """Apply **bold** и `code` спаны к одной строке."""
+def _apply_inline_styles(text: Text, line: str, ink: str = _INK) -> None:
+    """Apply **bold** и `code` спаны к одной строке; ``ink`` — стиль
+    простого текста."""
     matches: list[tuple[int, int, str, str]] = []
     for m in _BOLD_RE.finditer(line):
         matches.append((m.start(), m.end(), "bold", m.group(1)))
@@ -226,24 +227,31 @@ def _apply_inline_styles(text: Text, line: str) -> None:
     pos = 0
     for start, end, kind, content in final:
         if start > pos:
-            text.append(line[pos:start], style=_INK)
+            text.append(line[pos:start], style=ink)
         if kind == "bold":
-            text.append(content, style=f"{_ACC} bold")
+            text.append(content, style=_bold_style(ink))
         else:  # code
             text.append(content, style=_CODE)
         pos = end
     if pos < len(line):
-        text.append(line[pos:], style=_INK)
+        text.append(line[pos:], style=ink)
+
+
+def _bold_style(ink: str) -> str:
+    """Жирный и заголовок: акцент; при ``ink=""`` (приглушённая запись,
+    цвет задаёт CSS строки) — просто bold, без своего цвета."""
+    return f"{_ACC} bold" if ink else "bold"
 
 
 _PROSE_HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
 _PROSE_BULLET_RE = re.compile(r"^\s*[-*]\s+")
 
 
-def render_prose(text: str) -> Text:
+def render_prose(text: str, *, ink: str = _INK) -> Text:
     """Прозовый рендер (стрим и финал): построчно inline-стили (**bold**, `code`) + line-стили
     heading/bullet; fenced-блоки и таблицы — plain (рамки/сетка только на финале).
-    Возвращает rich.Text в нормальном цвете (INK)."""
+    Возвращает rich.Text в нормальном цвете (INK); ``ink=""`` — простой текст
+    без своего цвета, его цвет и начертание задаёт CSS строки."""
     out = Text()
     in_fence = 0  # 0 — вне блока, иначе длина открывающей ограды
     fence_indent = 0
@@ -254,24 +262,24 @@ def render_prose(text: str) -> Text:
         if in_fence:
             if _fence_closes(line, in_fence, fence_indent):
                 in_fence = 0
-            out.append(line, style=_INK)
+            out.append(line, style=ink)
             continue
         in_list = _list_context(line, in_list)
         opened = _fence_open(line, in_list)
         if opened is not None:
             in_fence = opened[0]
             fence_indent = _indent(line)
-            out.append(line, style=_INK)
+            out.append(line, style=ink)
             continue
         m = _PROSE_HEADING_RE.match(line)
         if m:
-            out.append(m.group(2).strip(), style=f"{_ACC} bold")
+            out.append(m.group(2).strip(), style=_bold_style(ink))
             continue
         if _PROSE_BULLET_RE.match(line):
-            out.append("• ", style=_INK)
-            _apply_inline_styles(out, _PROSE_BULLET_RE.sub("", line))
+            out.append("• ", style=ink)
+            _apply_inline_styles(out, _PROSE_BULLET_RE.sub("", line), ink)
             continue
-        _apply_inline_styles(out, line)
+        _apply_inline_styles(out, line, ink)
     return out
 
 
