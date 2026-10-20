@@ -57,6 +57,9 @@ FS_FIND_IN_FILES_NAME = "fs_find_in_files"
 EXEC_CALCULATOR_NAME = "exec_calculator"
 EXEC_SLEEP_NAME = "exec_sleep"
 
+# Субагент с ролью от модели: в сводке вызова главный аргумент — `role`.
+SUBAGENT_SPECIAL_AGENT_NAME = "subagent_special_agent"
+
 # Тулы записи файлов — создают или меняют файлы проекта.
 FILE_WRITE_TOOL_NAMES = frozenset(
     {
