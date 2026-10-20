@@ -179,6 +179,6 @@ def test_guards_hold_on_terminal_background(bg, guard):
     getattr(module, name)()
 
 
-def test_is_light():
-    assert palette.is_light((255, 255, 255)) is True
-    assert palette.is_light((0x21, 0x27, 0x33)) is False
+def test_contrast_is_wcag_ratio():
+    assert palette.contrast((0, 0, 0), (255, 255, 255)) == pytest.approx(21)
+    assert palette.contrast((9, 9, 9), (9, 9, 9)) == pytest.approx(1)

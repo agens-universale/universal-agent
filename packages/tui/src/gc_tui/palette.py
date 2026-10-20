@@ -265,6 +265,12 @@ def _derived(bg: str) -> dict[str, object]:
     }
 
 
+# Фон терминала годится, если на нём читается текст палитры (основной и
+# серый) с контрастом WCAG не ниже 3; светлые и цветные средней яркости → fixed.
+_TEXT = (INK, DIM)
+MIN_TEXT_CONTRAST = 3.0
+
+
 def apply_background(rgb: tuple[int, int, int]) -> None:
     """Тема auto: фон терминала → BG и зависящие от него токены. Вызывается
     до импорта модулей, берущих токены через `from gc_tui.palette import`."""
@@ -276,14 +282,20 @@ def reset() -> None:
     globals().update(_FIXED)
 
 
-def is_light(rgb: tuple[int, int, int]) -> bool:
-    """Светлый фон: относительная яркость по WCAG больше 0,5."""
+def _luminance(rgb: tuple[int, int, int]) -> float:
     linear = [
         c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
         for c in (channel / 255 for channel in rgb)
     ]
-    luminance = 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
-    return luminance > 0.5
+    return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+
+
+def contrast(
+    first: tuple[int, int, int], second: tuple[int, int, int]
+) -> float:
+    """Контраст двух цветов по WCAG: от 1 до 21."""
+    high, low = sorted((_luminance(first), _luminance(second)), reverse=True)
+    return (high + 0.05) / (low + 0.05)
 
 
 def select_palette(
@@ -292,12 +304,14 @@ def select_palette(
     """Фон, от которого строить палитру, или None — тема fixed.
 
     `probe` спрашивает фон терминала и зовётся только в теме auto. Нет
-    ответа или фон светлый — fixed: палитра рассчитана на тёмный фон.
+    ответа или на фоне нечитаем текст палитры — fixed.
     """
     if theme != "auto":
         return None
     rgb = probe()
-    if rgb is None or is_light(rgb):
+    if rgb is None:
+        return None
+    if any(contrast(_rgb(ink), rgb) < MIN_TEXT_CONTRAST for ink in _TEXT):
         return None
     return rgb
 

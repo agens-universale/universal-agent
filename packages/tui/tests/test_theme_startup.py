@@ -12,6 +12,8 @@ import subprocess
 import sys
 import textwrap
 
+import pytest
+
 from gc_tui.palette import select_palette
 
 DARK = (0x21, 0x27, 0x33)
@@ -98,8 +100,34 @@ def test_auto_without_answer_is_fixed():
     assert select_palette("auto", lambda: None) is None
 
 
-def test_auto_light_background_is_fixed():
-    assert select_palette("auto", lambda: (0xFF, 0xFF, 0xFF)) is None
+def _rgb(hex_color):
+    return tuple(int(hex_color[i : i + 2], 16) for i in (1, 3, 5))
+
+
+@pytest.mark.parametrize(
+    "bg", ["#224fbc", "#13773d", "#929292", "#ffffff", "#b0b0b0"]
+)
+def test_auto_background_unreadable_for_text_is_fixed(bg):
+    assert select_palette("auto", lambda: _rgb(bg)) is None
+
+
+@pytest.mark.parametrize(
+    "bg",
+    [
+        "#2e3440",
+        "#3b4252",
+        "#7a251e",
+        "#212733",
+        "#16191e",
+        "#000000",
+        "#282c34",
+        "#002b36",
+        "#0E1119",
+        "#1e1e1e",
+    ],
+)
+def test_auto_background_readable_for_text_is_applied(bg):
+    assert select_palette("auto", lambda: _rgb(bg)) == _rgb(bg)
 
 
 def test_auto_dark_background_is_applied():
