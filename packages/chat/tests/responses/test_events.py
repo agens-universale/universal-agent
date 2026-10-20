@@ -97,7 +97,7 @@ def test_tool_card_sits_between_messages_without_bodies():
             "op": "open",
             "call_id": "c1",
             "name": "read_file",
-            "title": "read_file(path='src/app.py')",
+            "title": "read_file(src/app.py)",
         }
     )
     assert opened[-1]["type"] == "response.output_item.added"
