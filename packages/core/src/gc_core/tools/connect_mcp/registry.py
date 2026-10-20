@@ -32,6 +32,15 @@ def _humanize_discovery_error(exc: BaseException, server_cfg: dict) -> str:
     return (msg[:120] + "…") if len(msg) > 121 else (msg or name)
 
 
+def _tool_title(tool: Dict[str, Any]) -> str | None:
+    """Человекочитаемое имя тула: `title`, затем `annotations.title`."""
+    annotations = tool.get("annotations")
+    candidates = [tool.get("title")]
+    if isinstance(annotations, dict):
+        candidates.append(annotations.get("title"))
+    return next((c for c in candidates if isinstance(c, str) and c), None)
+
+
 def _normalize_tool(
     server_name: str,
     tool: Dict[str, Any],
@@ -88,8 +97,7 @@ def _normalize_tool(
     metadata: Dict[str, Any] = {
         "mcp_server_key": server_name,
         "mcp_tool_name": base_name,
-        "mcp_tool_title": tool.get("title")
-        or (tool.get("annotations") or {}).get("title"),
+        "mcp_tool_title": _tool_title(tool),
         "server_display_name": server_display_name,
         "server_description": server_description,
         "server_url": server_url,

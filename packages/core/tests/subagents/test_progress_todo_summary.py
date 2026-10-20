@@ -110,19 +110,19 @@ def test_parse_valid_empty_returns_empty_list():
     assert todo_items_from_arguments('{"todos": []}') == []
 
 
-def test_brief_summary_garbage_args_fall_back_to_generic():
+def test_tool_args_summary_garbage_args_fall_back_to_generic():
     """Битые аргументы session_todo не должны рендериться «чек-лист очищен»."""
     out = tool_args_summary(SESSION_TODO_TOOL_NAME, {"other": 1})
     assert "очищен" not in out
     assert out == "other=1"
 
 
-def test_brief_summary_valid_empty_stays_cleared():
+def test_tool_args_summary_valid_empty_stays_cleared():
     out = tool_args_summary(SESSION_TODO_TOOL_NAME, {"todos": []})
     assert out == "чек-лист очищен"
 
 
-def test_brief_summary_partially_broken_list_falls_back_to_generic():
+def test_tool_args_summary_partially_broken_list_falls_back_to_generic():
     """Частично битый список — не «очищен», а обычное превью аргументов."""
     raw = {"todos": [{"content": "Шаг", "status": "нетакой"}]}
     out = tool_args_summary(SESSION_TODO_TOOL_NAME, raw)
@@ -130,14 +130,14 @@ def test_brief_summary_partially_broken_list_falls_back_to_generic():
     assert out == "todos=<list 1>"
 
 
-def test_brief_summary_truncates_long_current_item():
+def test_tool_args_summary_truncates_long_current_item():
     """Однострочная сводка обязана соблюдать общий лимит, как все прочие тулы."""
     long_item = {
         "content": "Пройти по всем файлам сервиса и " + "деталь " * 40,
         "status": "in_progress",
     }
     out = tool_args_summary(SESSION_TODO_TOOL_NAME, {"todos": [long_item]})
-    assert len(out) <= 81, f"сводка длиной {len(out)}: {out[:120]}"
+    assert len(out) <= 80, f"сводка длиной {len(out)}: {out[:120]}"
     assert out.startswith("чек-лист 0/1 · ")
     assert out.endswith("…")
 

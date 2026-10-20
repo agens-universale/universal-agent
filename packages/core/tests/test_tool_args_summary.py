@@ -42,6 +42,23 @@ def test_list_files_shows_glob():
     )
 
 
+def test_list_files_trailing_separator_adds_only_star():
+    assert tool_args_summary("fs_list_files", {"path": "packages/"}) == (
+        "packages/*"
+    )
+
+
+def test_list_files_root_is_slash_star():
+    assert tool_args_summary("fs_list_files", {"path": "/"}) == "/*"
+
+
+def test_skill_read_without_slug_shows_only_skill_id():
+    out = tool_args_summary(
+        "skills_read_reference", {"skill_id": "brainstorming"}
+    )
+    assert out == "brainstorming"
+
+
 def test_file_info_marks_info():
     assert tool_args_summary("fs_file_info", {"path": "x.py"}) == "x.py · info"
 

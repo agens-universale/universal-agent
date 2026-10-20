@@ -29,7 +29,7 @@ def test_tail_longer_than_max_truncates_tail():
 
 def test_tail_longer_than_max_keeps_leading_ellipsis():
     """Хвост длиннее лимита сам по себе — ведущее … должно сохраниться
-    (обрезка — это `…` + конец хвоста, а не тупо последние max_cols символов)."""
+    (обрезка — это `…` + конец хвоста, а не последние max_cols символов)."""
     p = "D:\\" + "x" * 70
     out = truncate_path(p, 60)
     assert out.startswith("…")

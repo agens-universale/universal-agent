@@ -276,7 +276,9 @@ def _find_in_files(pattern: str, data: Dict[str, Any], limit: int) -> str:
 
 
 def _list_files(path: str, _data: Dict[str, Any], limit: int) -> str:
-    return truncate_path(path.rstrip("/\\") or path, limit - 2) + "/*"
+    if path.endswith(("/", "\\")):
+        return truncate_path(path, limit - 1) + "*"
+    return truncate_path(path, limit - 2) + "/*"
 
 
 def _file_info(path: str, _data: Dict[str, Any], limit: int) -> str:

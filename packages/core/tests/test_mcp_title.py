@@ -1,4 +1,8 @@
-from gc_core.tools.connect_mcp.registry import _normalize_tool
+from gc_core.tools.connect_mcp.agent_tools import _assemble_mcp_tools_data
+from gc_core.tools.connect_mcp.registry import (
+    _normalize_tool,
+    _registry_entry,
+)
 from gc_core.tools.mcp_snapshot import build_mcp_tools_snapshot
 from gc_testkit.settings import make_settings
 
@@ -63,3 +67,30 @@ def test_snapshot_does_not_mix_prefix_servers():
             "title": "Click",
         }
     ]
+
+
+def test_annotations_not_dict_does_not_break_normalization():
+    for bad in (["x"], "title", 5):
+        res = _norm({"name": "t", "annotations": bad})
+        assert res["_metadata"]["mcp_tool_title"] is None
+
+
+def test_non_string_title_is_none():
+    res = _norm({"name": "t", "title": 5, "annotations": {"title": ["a"]}})
+    assert res["_metadata"]["mcp_tool_title"] is None
+
+
+def test_registry_title_reaches_snapshot_and_not_spec():
+    settings = make_settings(
+        {"mcp.servers": {"office": {"transport": "sse", "url": "http://x"}}}
+    )
+    raw = _norm({"name": "read_docx", "title": "Read Word"})
+    entry = _registry_entry("office", server_cfg={}, tool=raw)
+    registry = {"mcp_office_read_docx": entry}
+    tools_data, _ = _assemble_mcp_tools_data(
+        registry, {}, settings, {"office": {}}
+    )
+    data = tools_data["mcp_office_read_docx"]
+    assert "title" not in data["spec"]
+    snap = build_mcp_tools_snapshot(settings, tools_data)
+    assert snap["office"]["tools"][0]["title"] == "Read Word"

@@ -10,7 +10,10 @@ def build_mcp_tools_snapshot(
     tools_data: Dict[str, Dict[str, Any]],
     mcp_status: Dict[str, Dict[str, Any]] | None = None,
 ) -> Dict[str, Dict[str, Any]]:
-    """server_name → {status, reason, description, tools:[{name,description,tool,title}]}."""
+    """server_name → {status, reason, description, tools}.
+
+    tool: {name, description, tool, title}.
+    """
     servers = settings_of(settings).mcp.servers
     status_map = mcp_status or {}
     snapshot: Dict[str, Dict[str, Any]] = {}
