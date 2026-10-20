@@ -40,8 +40,10 @@ class _Arm:
     __slots__ = (
         "backend",
         "call_id",
+        "fire",
         "fired",
         "kind",
+        "left",
         "log_event",
         "mcp_server",
         "observed",
@@ -72,6 +74,9 @@ class _Arm:
         self.log_event = log_event
         self.fired = False
         self.observed = asyncio.Event()
+        #: Исходное ожидание вышло из ``arm``.
+        self.left = asyncio.Event()
+        self.fire: Optional[asyncio.Task] = None
 
 
 class UserStop:
@@ -199,24 +204,44 @@ class UserStop:
         try:
             yield arm
         finally:
+            # Сначала «вышли», потом ждём ``_fire``: на ошибке release он
+            # стоит на ``left`` и без этого шага не отпустит ``_settled``.
+            arm.left.set()
             with self._lock:
                 try:
                     self._stack.remove(arm)
                 except ValueError:
                     pass
+            if arm.fired and arm.fire is None:
+                await asyncio.sleep(0)
+            if arm.fire is not None:
+                await _await_fire(arm.fire)
 
     def _schedule(self, arm: _Arm, run_logger: Any) -> None:
-        self._inflight = asyncio.create_task(self._fire(arm, run_logger))
+        task = asyncio.create_task(self._fire(arm, run_logger))
+        arm.fire = task
+        self._inflight = task
+        task.add_done_callback(_retrieve_task_error)
 
     async def _fire(self, arm: _Arm, run_logger: Any) -> None:
+        """Снять работу. ``killed`` — только после успешного ``release``.
+
+        Ошибка ``release`` процессом не считается: в лог идёт другое событие,
+        ``_settled`` открывается, когда исходное ожидание само вышло.
+        """
         try:
-            _log_stop(run_logger, arm)
             if arm.release is not None:
                 result = arm.release()
                 if hasattr(result, "__await__"):
                     await result
             else:
                 arm.observed.set()
+            _log_stop(run_logger, arm)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            _log_release_failed(run_logger, arm, exc)
+            await arm.left.wait()
         finally:
             arm.observed.set()
             self._settled.set()
@@ -225,6 +250,52 @@ class UserStop:
         _log_stop(run_logger, arm)
         arm.observed.set()
         self._settled.set()
+
+
+def _retrieve_task_error(task: asyncio.Task) -> None:
+    """Забрать исключение задачи, которую никто больше не ждёт."""
+    if task.cancelled():
+        return
+    task.exception()
+
+
+async def _await_fire(task: asyncio.Task) -> None:
+    """Дождаться ``_fire`` и забрать его исключение.
+
+    Отмена самого ``arm`` пробрасывается дальше. Ошибка release уже записана
+    в лог внутри ``_fire``.
+    """
+    try:
+        await task
+    except asyncio.CancelledError:
+        current = asyncio.current_task()
+        if current is not None and current.cancelling():
+            raise
+    except Exception:
+        return
+
+
+def _log_release_failed(
+    run_logger: Any, arm: _Arm, exc: BaseException
+) -> None:
+    """``release`` не снял работу. Это не ``user_stop_killed``."""
+    if run_logger is None:
+        return
+    run_logger.info(
+        "user stop release failed kind=%s tool=%s error=%s",
+        arm.kind,
+        arm.tool,
+        type(exc).__name__,
+        extra={
+            "event": "user_stop_release_failed",
+            "kind": arm.kind,
+            "tool": arm.tool,
+            "call_id": arm.call_id,
+            "backend": arm.backend,
+            "mcp_server": arm.mcp_server,
+            "error": type(exc).__name__,
+        },
+    )
 
 
 def _log_stop(run_logger: Any, arm: _Arm) -> None:

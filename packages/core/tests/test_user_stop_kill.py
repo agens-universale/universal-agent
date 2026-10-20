@@ -822,6 +822,52 @@ def test_cli_sigint_stops_the_run_and_ask_human_stays_a_refusal():
         restore_run_sigint(previous)
 
 
+async def test_release_error_is_not_a_kill_and_settles_when_the_wait_exits():
+    """Сбой release не пишет killed и не открывает _settled, пока ожидание живо."""
+    log = _Log()
+    gate = _stop(log)
+    started = asyncio.Event()
+    finish = asyncio.Event()
+
+    async def _release() -> None:
+        raise RuntimeError("kill failed")
+
+    async def _work():
+        with bind_user_stop(gate):
+            async with gate.arm(
+                kind="exec",
+                tool="exec_command",
+                call_id="c1",
+                backend="RemoteShellBackend",
+                release=_release,
+            ):
+                started.set()
+                await finish.wait()
+                return "out"
+
+    task = asyncio.create_task(_work())
+    await asyncio.wait_for(started.wait(), timeout=2)
+    gate.request(log)
+    await asyncio.sleep(0.05)
+    assert not task.done()
+    assert not gate._settled.is_set()
+    assert log.events("user_stop_killed") == []
+    failed = log.events("user_stop_release_failed")
+    assert len(failed) == 1
+    assert failed[0]["kind"] == "exec"
+    assert failed[0]["tool"] == "exec_command"
+    assert failed[0]["call_id"] == "c1"
+    assert failed[0]["backend"] == "RemoteShellBackend"
+    assert failed[0]["error"] == "RuntimeError"
+    assert "kill failed" not in str(failed[0])
+    finish.set()
+    assert await asyncio.wait_for(task, timeout=2) == "out"
+    assert gate._settled.is_set()
+    assert log.events("user_stop_killed") == []
+    assert gate._inflight is not None and gate._inflight.done()
+    assert gate._inflight.exception() is None
+
+
 async def test_chat_and_acp_stop_wait_until_settled():
     from gc_acp.facade import _await_live_stop
     from gc_core.user_stop import await_agent_stop
