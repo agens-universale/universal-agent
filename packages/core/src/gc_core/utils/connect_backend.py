@@ -29,7 +29,11 @@ from gc_core.trace_id import (
     trace_id_from_config,
 )
 from gc_core.usage.context import record_usage
-from gc_core.user_stop import UserStopInterrupt, current_user_stop
+from gc_core.user_stop import (
+    UserStopInterrupt,
+    await_cancelled,
+    current_user_stop,
+)
 from gc_core.utils.aretry import retry_with_backoff_async
 from gc_core.utils.backend_errors import (
     http_status_code,
@@ -410,6 +414,8 @@ async def _aguard_model_call(factory):
     stop = current_user_stop()
     if stop is None:
         return await factory()
+    if stop.requested:
+        raise ModelRequestStopped(_MODEL_REQUEST_STOPPED)
     task = asyncio.create_task(factory())
 
     async def _release() -> None:
@@ -419,7 +425,9 @@ async def _aguard_model_call(factory):
     try:
         async with stop.arm(kind="model", release=_release):
             return await task
-    except UserStopInterrupt:
+    except UserStopInterrupt as exc:
+        if not exc.started:
+            await await_cancelled(task)
         raise ModelRequestStopped(_MODEL_REQUEST_STOPPED) from None
     except asyncio.CancelledError:
         if stop.requested:

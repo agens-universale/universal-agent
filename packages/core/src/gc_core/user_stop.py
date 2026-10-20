@@ -289,6 +289,25 @@ async def await_agent_stop(agent: Any) -> None:
         plain()
 
 
+async def await_cancelled(task: asyncio.Task) -> None:
+    """Отменить задачу, которую ход не принял, и дождаться её выхода.
+
+    Пока между постановкой в очередь и ``arm`` нет ожидания, тело ещё не
+    шагнуло: отмена не даёт ему начаться. Исключение забирается здесь.
+    Отмена самого вызывающего пробрасывается дальше.
+    """
+    if not task.done():
+        task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        current = asyncio.current_task()
+        if current is not None and current.cancelling():
+            raise
+    except Exception:
+        return
+
+
 def interrupted_code(return_code: Any) -> int:
     """Прерванный код: успешный выход и «кода нет» стопом не остаются."""
     if return_code in (None, 0):
@@ -304,6 +323,7 @@ __all__ = [
     "UserStop",
     "UserStopInterrupt",
     "await_agent_stop",
+    "await_cancelled",
     "bind_tool_call",
     "bind_user_stop",
     "current_tool_call",

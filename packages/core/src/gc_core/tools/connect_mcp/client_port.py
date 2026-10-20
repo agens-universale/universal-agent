@@ -47,6 +47,7 @@ async def _mcp_call_under_stop(client: Any, tool_name: str, body) -> Any:
 
     from gc_core.user_stop import (
         UserStopInterrupt,
+        await_cancelled,
         current_tool_call,
         current_user_stop,
     )
@@ -54,6 +55,8 @@ async def _mcp_call_under_stop(client: Any, tool_name: str, body) -> Any:
     stop = current_user_stop()
     if stop is None:
         return await body()
+    if stop.requested:
+        raise UserStopInterrupt(kind="mcp", started=False)
     _, call_id = current_tool_call()
     task = asyncio.create_task(body())
 
@@ -71,6 +74,10 @@ async def _mcp_call_under_stop(client: Any, tool_name: str, body) -> Any:
             release=_release,
         ):
             return await task
+    except UserStopInterrupt as exc:
+        if not exc.started:
+            await await_cancelled(task)
+        raise
     except asyncio.CancelledError:
         if stop.requested:
             raise UserStopInterrupt(kind="mcp", started=True)

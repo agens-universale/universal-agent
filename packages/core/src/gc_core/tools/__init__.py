@@ -34,6 +34,7 @@ from gc_core.tools.subagents.registry import is_subagent_tool
 from gc_core.tools.subagents.selection import subagents_enabled
 from gc_core.user_stop import (
     UserStopInterrupt,
+    await_cancelled,
     bind_tool_call,
     current_user_stop,
 )
@@ -606,6 +607,8 @@ async def _acall_under_stop(tool_name: str, call_id: str, fn, args):
 
     if stop is None:
         return await _body()
+    if stop.requested:
+        raise UserStopInterrupt(kind="tool", started=False)
     task = asyncio.create_task(_body())
 
     async def _release() -> None:
@@ -620,6 +623,10 @@ async def _acall_under_stop(tool_name: str, call_id: str, fn, args):
             release=_release,
         ):
             return await task
+    except UserStopInterrupt as exc:
+        if not exc.started:
+            await await_cancelled(task)
+        raise
     except asyncio.CancelledError:
         if stop.requested:
             raise UserStopInterrupt(kind="tool", started=True)

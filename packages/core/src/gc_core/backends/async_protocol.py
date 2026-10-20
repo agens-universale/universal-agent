@@ -24,6 +24,7 @@ from typing import Any, Optional, Protocol, runtime_checkable
 from gc_core.backends.protocol import ExecResult
 from gc_core.user_stop import (
     UserStopInterrupt,
+    await_cancelled,
     current_user_stop,
     interrupted_code,
 )
@@ -143,45 +144,27 @@ class SyncExecAdapter:
         stop = current_user_stop()
         if stop is None:
             return await self._off_loop(fn, *args, **kwargs)
+        if stop.requested:
+            return _stopped_before_start()
         killer = self._killer()
         task = asyncio.create_task(self._off_loop(fn, *args, **kwargs))
-
-        async def _release() -> None:
-            if killer is not None:
-                result = killer()
-                if inspect.isawaitable(result):
-                    await result
-            if not task.done():
-                task.cancel()
 
         try:
             async with stop.arm(
                 kind="exec",
                 backend=type(self._backend).__name__,
-                release=_release,
+                release=lambda: _release_sync_exec(task, killer),
                 unkillable=killer is None,
             ) as armed:
                 result = await task
-            if armed.fired and not getattr(result, "stopped_by_user", False):
-                result.stopped_by_user = True
-                result.timed_out = False
-                result.return_code = interrupted_code(result.return_code)
+            _mark_user_stop(result, armed.fired)
             return result
         except UserStopInterrupt:
-            return ExecResult(
-                return_code=interrupted_code(None),
-                stdout="",
-                stderr="",
-                stopped_by_user=True,
-            )
+            await await_cancelled(task)
+            return _stopped_before_start()
         except asyncio.CancelledError:
             if stop.requested:
-                return ExecResult(
-                    return_code=interrupted_code(None),
-                    stdout="",
-                    stderr="",
-                    stopped_by_user=True,
-                )
+                return _stopped_before_start()
             raise
 
     @staticmethod
@@ -191,6 +174,32 @@ class SyncExecAdapter:
         return await run_abandonable_in(
             _EXEC_SLOTS, fn, *args, _thread_name="sync-exec", **kwargs
         )
+
+
+async def _release_sync_exec(task: asyncio.Task, killer: Any) -> None:
+    if killer is not None:
+        result = killer()
+        if inspect.isawaitable(result):
+            await result
+    if not task.done():
+        task.cancel()
+
+
+def _mark_user_stop(result: ExecResult, fired: bool) -> None:
+    if fired and not getattr(result, "stopped_by_user", False):
+        result.stopped_by_user = True
+        result.timed_out = False
+        result.return_code = interrupted_code(result.return_code)
+
+
+def _stopped_before_start() -> ExecResult:
+    """Вызов не стартовал: пустой вывод, в лог ничего не пишем."""
+    return ExecResult(
+        return_code=interrupted_code(None),
+        stdout="",
+        stderr="",
+        stopped_by_user=True,
+    )
 
 
 def aexec_port(backend: Any) -> AsyncExecPort:

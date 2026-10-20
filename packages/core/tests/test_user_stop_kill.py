@@ -28,6 +28,7 @@ from gc_core.execution.contracts import ModelRequestStopped
 from gc_core.tools.connect_mcp.client_port import _mcp_call_under_stop
 from gc_core.tools.connect_mcp.transport import _LineReader
 from gc_core.user_stop import (
+    INTERRUPTED_CODE,
     UserStop,
     UserStopInterrupt,
     bind_tool_call,
@@ -370,6 +371,104 @@ async def test_foreign_sync_with_stop_is_killed():
     assert result.stopped_by_user is True
     assert log.events("user_stop_killed")[0]["kind"] == "exec"
     assert log.events("user_stop_unkillable") == []
+
+
+async def test_foreign_sync_already_stopped_does_not_run():
+    """Стоп уже взведён: чужой exec не стартует и не досиживает sleep."""
+    log = _Log()
+    gate = _stop(log)
+    gate.request(log)
+    entered = threading.Event()
+    finished = threading.Event()
+
+    class _Foreign:
+        def exec(self, command, **kwargs):
+            del command, kwargs
+            entered.set()
+            time.sleep(0.3)
+            finished.set()
+            return ExecResult(return_code=0, stdout="late")
+
+    t0 = time.monotonic()
+    with bind_user_stop(gate):
+        result = await SyncExecAdapter(_Foreign()).aexec(
+            "sleep 30", timeout=30
+        )
+    assert time.monotonic() - t0 < 1
+    assert result.stopped_by_user is True
+    assert result.stdout == ""
+    assert result.return_code == INTERRUPTED_CODE
+    await asyncio.sleep(0.05)
+    assert not entered.is_set()
+    await asyncio.sleep(0.45)
+    assert not finished.is_set()
+    assert log.records == []
+
+
+async def test_tool_already_stopped_does_not_start():
+    from gc_core.tools import _acall_under_stop
+
+    log = _Log()
+    gate = _stop(log)
+    gate.request(log)
+    ran = asyncio.Event()
+
+    async def _body():
+        ran.set()
+        await asyncio.sleep(30)
+        return "no"
+
+    with bind_user_stop(gate):
+        with pytest.raises(UserStopInterrupt) as caught:
+            await _acall_under_stop("search", "c1", _body, None)
+    assert caught.value.started is False
+    await asyncio.sleep(0.05)
+    assert not ran.is_set()
+    assert log.records == []
+
+
+async def test_mcp_already_stopped_does_not_start():
+    log = _Log()
+    gate = _stop(log)
+    gate.request(log)
+    ran = asyncio.Event()
+
+    async def _body():
+        ran.set()
+        await asyncio.sleep(30)
+        return {"ok": True}
+
+    with bind_user_stop(gate):
+        with pytest.raises(UserStopInterrupt) as caught:
+            await _mcp_call_under_stop(
+                SimpleNamespace(server_name="docs"), "lookup", _body
+            )
+    assert caught.value.started is False
+    assert caught.value.kind == "mcp"
+    await asyncio.sleep(0.05)
+    assert not ran.is_set()
+    assert log.records == []
+
+
+async def test_model_post_already_stopped_does_not_send():
+    from gc_core.utils.connect_backend import _aguard_model_call
+
+    log = _Log()
+    gate = _stop(log)
+    gate.request(log)
+    sent = asyncio.Event()
+
+    async def _post():
+        sent.set()
+        await asyncio.sleep(30)
+        return "ok"
+
+    with bind_user_stop(gate):
+        with pytest.raises(ModelRequestStopped):
+            await _aguard_model_call(_post)
+    await asyncio.sleep(0.05)
+    assert not sent.is_set()
+    assert log.records == []
 
 
 async def test_native_grep_does_not_sit_out_its_budget(tmp_path, monkeypatch):
