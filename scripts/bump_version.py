@@ -37,13 +37,11 @@ MANIFESTS = [
     ROOT / "packages" / "server" / _MANIFEST_NAME,
     ROOT / "packages" / "mcp" / _MANIFEST_NAME,
     ROOT / "packages" / "acp" / _MANIFEST_NAME,
-    ROOT / "packages" / "chat" / _MANIFEST_NAME,
     ROOT / "packages" / "stores" / _MANIFEST_NAME,
-    ROOT / "packages" / "a2a" / _MANIFEST_NAME,
     ROOT / "packages" / "testkit" / _MANIFEST_NAME,
 ]
 
-# Цифра в имени нужна для gc-a2a: `[a-z]+` его пин не видит.
+# Цифры в имени дистрибутива допустимы: `[a-z]+` пин вроде gc-a2a не видел.
 PIN_RE = re.compile(r'"(gc-[a-z0-9]+)==\d+\.\d+\.\d+"')
 VERSION_RE = re.compile(
     r'^(\s*version\s*=\s*")(\d+\.\d+\.\d+)("\s*)$', re.MULTILINE

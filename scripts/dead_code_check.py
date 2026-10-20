@@ -48,7 +48,6 @@ PROD_PATHS = [
     "packages/tui/src",
     "packages/temporalio/src",
     "packages/acp/src",
-    "packages/chat/src",
     "packages/stores/src",
     "packages/core/assets/skills",
     "scripts",
@@ -65,7 +64,6 @@ USAGE_PATHS = [
     "packages/tui/tests",
     "packages/temporalio/tests",
     "packages/acp/tests",
-    "packages/chat/tests",
     "packages/stores/tests",
     "tests",
 ]

@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "gc-server"
 version = "0.4.0"
-description = "GigaCode Universal Agent — FastAPI-режим и swarm (gc-serve)"
+description = "GigaCode Universal Agent — серверные поверхности: webhook, swarm, chat, a2a (gc-serve)"
 requires-python = ">=3.11"
 dependencies = [
 
@@ -21,6 +21,8 @@ dependencies = [
 [project.scripts]
 
 gc-serve = "gc_server.server:serve"
+gc-chat = "gc_server.chat.main:main"
+gc-a2a = "gc_server.a2a.main:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/gc_server"]

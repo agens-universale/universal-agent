@@ -74,7 +74,7 @@ ALLOWED: dict[str, str] = {
     ),
     # Совместимость отката: файлы develop пишутся вместе с хранилищем.
     "packages/acp/src/gc_acp/session_index.py": _ROLLBACK,
-    "packages/chat/src/gc_chat/responses/index_store.py": _ROLLBACK,
+    "packages/server/src/gc_server/chat/responses/index_store.py": _ROLLBACK,
     _CORE + "thread_store.py": _OLD_FILE_STORE,
     _CORE + "thread_store_journal.py": (
         "примитивы атомарной записи и блокировки файлов тредов (file_tx v2, "

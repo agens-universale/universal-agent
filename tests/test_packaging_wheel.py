@@ -48,9 +48,7 @@ MANIFESTS = {
     "gc_mcp": "packages/mcp",
     "gc_core_temporalio": "packages/temporalio",
     "gc_acp": "packages/acp",
-    "gc_chat": "packages/chat",
     "gc_stores": "packages/stores",
-    "gc_a2a": "packages/a2a",
 }
 
 
@@ -347,15 +345,13 @@ def test_cli_wheel_contents(wheels):
 OWN_COMMANDS = {
     "gc_cli": {"gc-cli"},
     "gc_tui": {"gc-ua", "gc-voice"},
-    "gc_server": {"gc-serve"},
+    "gc_server": {"gc-serve", "gc-chat", "gc-a2a"},
     "gc_mcp": {"gc-mcp", "gc-mcp-install"},
     "gc_core_temporalio": {
         "gc-temporal",
         "gc-temporal-worker",
     },
     "gc_acp": {"gc-acp"},
-    "gc_chat": {"gc-chat"},
-    "gc_a2a": {"gc-a2a"},
     # Утилита обслуживания хранилищ (migrate, sync). gc-stores в мету gc-ua не
     # входит и ставится отдельно, как Temporal: с командами меты не пересекается.
     "gc_stores": {"gc-stores"},
@@ -449,8 +445,6 @@ def test_meta_pulls_every_profile():
         f"gc-server=={ver}",
         f"gc-mcp=={ver}",
         f"gc-acp=={ver}",
-        f"gc-chat=={ver}",
-        f"gc-a2a=={ver}",
     }
     assert root["project"]["optional-dependencies"]["temporal"] == [
         f"gc-core-temporalio=={ver}"
@@ -481,9 +475,7 @@ def test_versions_are_pinned_together():
         "packages/server",
         "packages/mcp",
         "packages/acp",
-        "packages/chat",
         "packages/stores",
-        "packages/a2a",
     ):
         leaf = tomllib.loads(
             (REPO / sub / "pyproject.toml").read_text(encoding="utf-8")
@@ -495,9 +487,7 @@ def test_versions_are_pinned_together():
         "packages/server",
         "packages/mcp",
         "packages/acp",
-        "packages/chat",
         "packages/stores",
-        "packages/a2a",
     ):
         leaf = tomllib.loads(
             (REPO / sub / "pyproject.toml").read_text(encoding="utf-8")
