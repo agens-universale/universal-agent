@@ -11,6 +11,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 # Базовые
 BG = "#0E1119"
 INK = "#ebe9e6"
@@ -285,6 +287,22 @@ def is_light(rgb: tuple[int, int, int]) -> bool:
     ]
     luminance = 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
     return luminance > 0.5
+
+
+def select_palette(
+    theme: str, probe: Callable[[], tuple[int, int, int] | None]
+) -> tuple[int, int, int] | None:
+    """Фон, от которого строить палитру, или None — тема fixed.
+
+    `probe` спрашивает фон терминала и зовётся только в теме auto. Нет
+    ответа или фон светлый — fixed: палитра рассчитана на тёмный фон.
+    """
+    if theme != "auto":
+        return None
+    rgb = probe()
+    if rgb is None or is_light(rgb):
+        return None
+    return rgb
 
 
 def css_variables() -> dict[str, str]:

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import importlib.util
 import os
 import sys
 from typing import Optional, Sequence
@@ -45,6 +46,22 @@ def _force_truecolor_if_supported() -> None:
         or os.environ.get("COLORTERM") in ("truecolor", "24bit")
     ):
         os.environ.setdefault("TEXTUAL_COLOR_SYSTEM", "truecolor")
+
+
+def _select_theme(settings) -> None:
+    """Тема auto: палитра от фона терминала. Строго до импорта gc_tui.app —
+    модули берут токены через `from gc_tui.palette import X`, и значение
+    фиксируется при их импорте. Проба — до захвата терминала Textual."""
+    from gc_core.settings import settings_of
+
+    from gc_tui import palette
+    from gc_tui.services import terminal_caps
+
+    rgb = palette.select_palette(
+        settings_of(settings).tui.theme, terminal_caps.query_background
+    )
+    if rgb is not None:
+        palette.apply_background(rgb)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -133,11 +150,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
         return config_main(args_list[1:], program="gc-ua")
     _force_truecolor_if_supported()
-    try:
-        # importlib.import_module goes through sys.modules, not the package
-        # attribute cache, so evicting tui.app in tests forces a real re-import.
-        _app_mod = importlib.import_module("gc_tui.app")
-    except ImportError:
+    # Только проверка: импорт gc_tui.app ждёт выбора палитры (_select_theme).
+    if importlib.util.find_spec("textual") is None:
         print(_missing_textual_msg(), file=sys.stderr)
         return 1
 
@@ -305,6 +319,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     from gc_tui.runtime_config import apply_tui_runtime
 
     settings = apply_tui_runtime(settings)
+    _select_theme(settings)
+    # importlib.import_module goes through sys.modules, not the package
+    # attribute cache, so evicting tui.app in tests forces a real re-import.
+    _app_mod = importlib.import_module("gc_tui.app")
 
     from gc_core.thread_store import resolve_threads_dir
 
