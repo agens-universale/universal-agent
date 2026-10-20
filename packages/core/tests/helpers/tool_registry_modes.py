@@ -18,9 +18,9 @@ from gc_core.tools import abuild_tools_data
 API_MODES = ("chat_completions", "responses")
 
 
-async def builtin_tools_union() -> dict[str, dict[str, Any]]:
-    """Имя тула -> его `spec` в объединении сборок по режимам."""
-    union: dict[str, dict[str, Any]] = {}
+async def builtin_tools_by_mode() -> dict[str, dict[str, dict[str, Any]]]:
+    """Ключ `<api_mode>/<subagents on|off>` -> имя тула -> его `spec`."""
+    by_mode: dict[str, dict[str, dict[str, Any]]] = {}
     for api_mode in API_MODES:
         for subagents in (False, True):
             settings = make_settings(
@@ -31,6 +31,17 @@ async def builtin_tools_union() -> dict[str, dict[str, Any]]:
                 }
             )
             tools_data, _, _, _ = await abuild_tools_data(settings)
-            for name, data in tools_data.items():
-                union.setdefault(name, data["spec"])
+            key = f"{api_mode}/subagents {'on' if subagents else 'off'}"
+            by_mode[key] = {
+                name: data["spec"] for name, data in tools_data.items()
+            }
+    return by_mode
+
+
+async def builtin_tools_union() -> dict[str, dict[str, Any]]:
+    """Имя тула -> его `spec` в объединении сборок по режимам."""
+    union: dict[str, dict[str, Any]] = {}
+    for tools in (await builtin_tools_by_mode()).values():
+        for name, spec in tools.items():
+            union.setdefault(name, spec)
     return union
