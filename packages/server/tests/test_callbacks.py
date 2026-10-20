@@ -172,6 +172,10 @@ async def test_events_filter(tmp_path, monkeypatch):
         ("http://hooks.example/a2a/x", False),
         ("https://hooks.example:8443/a2a/x", False),
         ("https://user@hooks.example/a2a/x", False),
+        ("https://hooks.example/a2a/../admin", False),
+        ("https://hooks.example/a2a/%2e%2e/admin", False),
+        ("https://hooks.example/a2a/x/%2E%2E/%2E%2E/admin", False),
+        ("https://hooks.example/a2a/x?y=1", True),
     ],
 )
 def test_allowed_callback_compares_origin_and_path(url, ok):
@@ -193,3 +197,57 @@ async def test_sender_gives_up_after_max_attempts():
     assert not await sender.adeliver("https://h.example/x", {"id": "evt_1"})
     assert len(got) == 6
     assert pauses == [1, 2, 4, 8, 16]
+
+
+async def test_callback_of_a_running_task_cannot_be_redirected(
+    tmp_path, monkeypatch
+):
+    """Сообщение в идущую задачу не меняет её адрес обратного вызова:
+    иначе итог чужой задачи ушёл бы на другой адрес."""
+    from gc_core.threads.models import ThreadKey
+    from gc_server.webhook import status as task_status
+
+    surface, _got, _ = _webhook(
+        tmp_path, monkeypatch, {"allowed_urls": ["https://hooks.example/"]}
+    )
+    key = ThreadKey(system="generic", thread="t6")
+    await task_status.aset_status(
+        surface.threads(),
+        key,
+        status="running",
+        run_id="other:1",
+        callback_url="https://hooks.example/first",
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=surface.app()),
+        base_url="http://test",
+    ) as client:
+        resp = await client.post(
+            "/v1/tasks",
+            json={
+                "task_id": "t6",
+                "message": "x",
+                "callback_url": "https://hooks.example/second",
+            },
+        )
+    assert resp.status_code == 409
+    record = await surface.threads().get(key)
+    assert task_status.status_of(record)["callback_url"] == (
+        "https://hooks.example/first"
+    )
+
+
+async def test_stored_callback_is_rechecked_before_sending(
+    tmp_path, monkeypatch
+):
+    """Список allowed_urls сменили после приёма запроса: адрес, которого
+    в нём больше нет, событие не получает."""
+    from gc_core.threads.models import ThreadKey
+
+    surface, got, _ = _webhook(tmp_path, monkeypatch, {"allowed_urls": []})
+    surface.notify(
+        ThreadKey(system="generic", thread="t7"),
+        {"status": "completed", "callback_url": "https://old.example/x"},
+    )
+    await surface.callbacks.adrain()
+    assert got == []

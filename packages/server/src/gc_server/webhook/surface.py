@@ -300,12 +300,8 @@ class WebhookSurface:
     ) -> Dict[str, Any]:
         """Сообщение — во входящий поток треда; тред уже ведут — ``queued``,
         иначе этот запрос строит прогон (``started``)."""
-        if callback_url is not None and not allowed_callback(
-            callback_url, self.config.callbacks.allowed_urls
-        ):
-            raise http_error(
-                400, "callback_url is not under webhook.callbacks.allowed_urls"
-            )
+        if callback_url is not None:
+            await self._check_callback(key, callback_url)
         if _foreign(await self.threads().get(key)):
             raise http_error(
                 409,
@@ -336,6 +332,21 @@ class WebhookSurface:
                 system=key.system, task_id=key.thread
             )
         return {"status": "started", "message_seq": seq}
+
+    async def _check_callback(self, key: ThreadKey, url: str) -> None:
+        """``callback_url`` — только под allowed_urls и не в обход адреса
+        идущей задачи: её итог принадлежит тому, кто её поставил."""
+        if not allowed_callback(url, self.config.callbacks.allowed_urls):
+            raise http_error(
+                400, "callback_url is not under webhook.callbacks.allowed_urls"
+            )
+        status = task_status.status_of(await self.threads().get(key)) or {}
+        current = status.get("callback_url")
+        live = status.get("status") in ("running", "interrupted")
+        if live and current and current != url:
+            raise http_error(
+                409, "callback_url of a running task cannot be changed"
+            )
 
     async def _delivered(self, key: ThreadKey, seq: int | None) -> bool:
         record = await self.threads().get(key)
@@ -497,7 +508,14 @@ class WebhookSurface:
     def notify(self, key: ThreadKey, status: Dict[str, Any]) -> None:
         """Событие о смене статуса задачи — обратным вызовом, если он
         настроен (``webhook.callbacks.url`` или ``callback_url`` задачи)."""
-        url = status.get("callback_url") or self.config.callbacks.url
+        url = status.get("callback_url")
+        if url and not allowed_callback(
+            url, self.config.callbacks.allowed_urls
+        ):
+            # Список сменили после приёма запроса: адреса в нём больше нет.
+            logger.warning("callback: %s больше не в allowed_urls", url)
+            return
+        url = url or self.config.callbacks.url
         if url:
             self.callbacks.send(
                 url, make_event(status["status"], key, jsonable(status))

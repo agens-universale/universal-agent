@@ -18,7 +18,7 @@ import time
 import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 import httpx
 from gc_core.execution.environment import utc_now
@@ -33,9 +33,13 @@ _MAX_PAUSE = 16
 
 def allowed_callback(url: str, allowed: list[str]) -> bool:
     """``url`` под одним из префиксов: схема, хост и порт — точно, путь —
-    началом; логина в адресе быть не должно."""
+    началом; логина в адресе, сегментов «.» и «..» (в том числе
+    закодированных) и обратных слешей быть не должно — получатель
+    нормализует путь, и префикс обходился бы."""
     target = urlsplit(url)
     if target.username or target.password or not target.hostname:
+        return False
+    if not _plain_path(target.path):
         return False
     for prefix in allowed:
         base = urlsplit(prefix)
@@ -44,6 +48,17 @@ def allowed_callback(url: str, allowed: list[str]) -> bool:
         if target.path.startswith(base.path or "/"):
             return True
     return False
+
+
+def _plain_path(path: str) -> bool:
+    for _ in range(3):  # %252e → %2e → .
+        decoded = unquote(path)
+        if decoded == path:
+            break
+        path = decoded
+    if "\\" in path or "%" in path:
+        return False
+    return not any(seg in (".", "..") for seg in path.split("/"))
 
 
 def make_event(kind: str, key: ThreadKey, status: dict) -> dict:
