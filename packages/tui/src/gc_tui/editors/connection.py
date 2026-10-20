@@ -243,7 +243,11 @@ class ConnectionEditor(Vertical):
         # has-saved: placeholder говорит одно из двух (маска сохранённого /
         # подсказка-объяснение), и различать их надо не вчитываясь — маркер красит
         # маску цветом значения (спека §3.4).
-        tcls = icls + (" has-saved" if self._token_is_mask() else "")
+        tcls = (
+            icls
+            + " set-muted"
+            + (" has-saved" if self._token_is_mask() else "")
+        )
         yield PasteInput(
             value="",
             placeholder=self._token_placeholder(),

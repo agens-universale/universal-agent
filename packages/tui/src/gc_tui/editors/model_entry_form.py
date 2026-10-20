@@ -1330,7 +1330,11 @@ class ModelEntryForm(Vertical):
         )
         # has-saved: placeholder говорит одно из двух (маска действующего значения /
         # подсказка-объяснение), и различать их надо не вчитываясь (спека §3.4).
-        tcls = icls + (" has-saved" if self._token_is_mask() else "")
+        tcls = (
+            icls
+            + " set-muted"
+            + (" has-saved" if self._token_is_mask() else "")
+        )
         yield PasteInput(
             value="",
             placeholder=self._token_placeholder(),

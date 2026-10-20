@@ -623,12 +623,8 @@ TextArea.ask-human-mode { border: solid $run-color; }
 #onb-degraded-warn { height: auto; margin-bottom: 1; }
 #onb-body { height: auto; padding: 0; margin-bottom: 1; }   /* воздух под заголовком шага (как #set-title) */
 /* Поля ввода — плоские, как #config-filter (без дефолтной рамки Input, что мусорит box-символами). */
-#onb-model, #onb-level-model, #conn-url, #conn-token, #conn-proxy, #mef-alias, #mef-model, #mef-url, #mef-token, #mef-summary-chars, #mef-summary-tokens, #set-profile-name, #voice-url, #voice-token, #voice-model, #voice-lang { height: 1; width: 1fr; border: none; padding: 0; background: $bg; color: $ink; }
-#onb-model:focus, #onb-level-model:focus, #conn-url:focus, #conn-token:focus, #conn-proxy:focus,
-#mef-alias:focus, #mef-model:focus, #mef-url:focus, #mef-token:focus,
-#mef-summary-chars:focus, #mef-summary-tokens:focus,
-#set-profile-name:focus, #voice-url:focus, #voice-token:focus, #voice-model:focus,
-#voice-lang:focus { border: none; background: $band-bg; }
+.form-field { height: 1; width: 1fr; border: none; padding: 0; background: $bg; color: $ink; }
+.form-field:focus { border: none; background: $band-bg; }
 .onb-option { height: auto; padding: 0 1; width: 1fr; }
 /* Выбор — только фон, БЕЗ border-left: полоса сдвигала контент на 1 колонку,
    отчего кружки ●/○ в /settings-секциях съезжали друг относительно друга. */
@@ -723,35 +719,21 @@ TextArea.ask-human-mode { border: solid $run-color; }
 /* Обёртка слота-синглтона (_singleton): нужна, чтобы новая плашка не столкнулась id'ом
    с ещё не отсоединённой старой. Собственной высоты не имеет — только содержимое. */
 .set-slot { height: auto; width: 1fr; }
-/* Поле ввода в /settings — скруглённая amber-рамка (id+class специфичнее flat
-   #onb-* → онбординг остаётся без рамки, как принят). */
-#onb-model.set-framed, #onb-level-model.set-framed,
-#conn-url.set-framed, #conn-token.set-framed, #conn-proxy.set-framed,
-#mef-alias.set-framed, #mef-model.set-framed, #mef-url.set-framed, #mef-token.set-framed,
-#mef-summary-chars.set-framed, #mef-summary-tokens.set-framed,
-#set-profile-name.set-framed,
-#voice-url.set-framed, #voice-token.set-framed, #voice-model.set-framed, #voice-lang.set-framed {
-    border: round $run-color; height: 3; width: 1fr; padding: 0 1; background: $bg;
-}
-#onb-model.set-framed:focus, #onb-level-model.set-framed:focus,
-#conn-url.set-framed:focus, #conn-token.set-framed:focus, #conn-proxy.set-framed:focus,
-#mef-alias.set-framed:focus, #mef-model.set-framed:focus,
-#mef-url.set-framed:focus, #mef-token.set-framed:focus, #set-profile-name.set-framed:focus,
-#mef-summary-chars.set-framed:focus, #mef-summary-tokens.set-framed:focus,
-#voice-url.set-framed:focus, #voice-token.set-framed:focus, #voice-model.set-framed:focus,
-#voice-lang.set-framed:focus {
-    border: round $run-color; background: $band-bg;
-}
+/* Поле ввода в /settings — скруглённая amber-рамка (.form-field.set-framed
+   специфичнее плоского .form-field → онбординг остаётся без рамки, как принят). */
+.form-field.set-framed { border: round $run-color; height: 3; width: 1fr; padding: 0 1; background: $bg; }
+.form-field.set-framed:focus { border: round $run-color; background: $band-bg; }
 /* Замороженное поле токена при «● без авторизации»: поле на месте, но disabled —
-   рамка приглушается, чтобы читалось «не участвует». Оба поля — одной строкой:
-   страж (`test_disabled_token_border_is_dimmed`) читает правило построчно. */
-#conn-token.set-framed:disabled, #mef-token.set-framed:disabled { border: round $deep-dim; }
+   рамка приглушается, чтобы читалось «не участвует». Только поля токена
+   (set-muted): поля-факты голоса тоже disabled, но рамку держат прежней. Правило одной строкой:
+   страж (`test_disabled_token_border_is_dimmed`) читает его построчно. */
+.form-field.set-framed.set-muted:disabled { border: round $deep-dim; }
 /* Placeholder говорит одно из двух, и это должно быть видно, не читая текст
    (спека 2026-08-03 §3.4): подсказка-объяснение приглушена, маска сохранённого
    значения — цветом значения. Своего правила на placeholder у нас не было вовсе,
    поэтому базовый случай тоже задан явно — иначе остался бы на дефолте Textual.
    Базовое — по ТИПУ поля, а не по классу: поле, переехавшее в группу, теряет
-   set-framed (у #conn-url так и вышло) и молча проваливалось бы на дефолт, а
+   set-framed (у поля адреса так и вышло) и молча проваливалось бы на дефолт, а
    «тускло» обязано быть одним токеном, иначе оппозиция с маской не читается.
    PasteInput — поля форм; фильтры вне форм (config/sessions/skills) на голом
    Input, их правило не задевает. Заодно честнеет спор: .has-saved (0,2,0)
@@ -783,10 +765,8 @@ PasteInput > .input--placeholder { color: $deep-dim; }
    строки (.onb-option.selected) не доходила до рамки — щель в колонку с каждой
    стороны. Своё padding: 0 1 у строк остаётся, поэтому текст поля и текст строк
    встают вровень, как в макете спеки §3.1.
-   Воздух отмерен margin'ом, а не padding'ом: padding этих полей задан ПО ID
-   (`#conn-url, … { padding: 0 }` выше), и правило по двум классам проиграло бы
-   ему по специфичности — поле прилипло бы к рамке. У margin спора нет вовсе, а
-   выглядит так же: фон у группы и у поля один и тот же.
+   Воздух отмерен margin'ом, а не padding'ом: padding поля (`.form-field`) равен
+   нулю, а выглядит так же: фон у группы и у поля один и тот же.
    background-tint: Input на фокусе осветляет себя сам (foreground 5%), и внутри
    одной рамки выходили две полосы разного оттенка — края от группы, середина от
    поля. По §3.3 цвет сфокусированной группы — ровно $band-bg, поэтому гасим тинт
@@ -797,9 +777,8 @@ PasteInput > .input--placeholder { color: $deep-dim; }
 .field-group > .dropdown-scroll { border: none; max-height: 12; }
 
 /* Поле-факт (локальный режим: адрес/токен/модель сервиса) — не правится и выглядит
-   приглушённо. Через id: цвет поля задан id-селектором выше, класс его не перебил бы. */
-#voice-url.set-readonly, #voice-token.set-readonly,
-#voice-model.set-readonly, #voice-lang.set-readonly { color: $deep-dim; }
+   приглушённо. (0,2,0) перебивает цвет плоского .form-field. */
+.form-field.set-readonly { color: $deep-dim; }
 
 /* Редакторы полей — Vertical по дефолту height:1fr и растягивают рамку;
    принудительно height:auto, чтобы рамка (#onb-frame/#set-frame) обнимала контент. */
