@@ -88,7 +88,7 @@ def _fixed_snapshot() -> dict[str, object]:
     snapshot: dict[str, object] = dict(palette.css_variables())
     snapshot["TRACK"] = palette.TRACK
     for name in _RAMPS:
-        snapshot[name] = getattr(palette, name)
+        snapshot[name] = [c.lower() for c in getattr(palette, name)]
     return snapshot
 
 

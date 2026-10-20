@@ -212,4 +212,5 @@ _PREVIOUS_RAMPS = {
 def test_ramps_equal_previous_literals():
     """Рампы анимаций переехали в палитру без изменения значений."""
     for name, expected in _PREVIOUS_RAMPS.items():
-        assert getattr(palette, name) == expected, name
+        actual = [color.lower() for color in getattr(palette, name)]
+        assert actual == expected, name

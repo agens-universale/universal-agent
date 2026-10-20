@@ -126,23 +126,19 @@ DIFF_DEL_GUTTER = ERR
 USER_PENDING_EDGE = "#3a7a72"
 
 
-_AMBER = (
-    "#d4a574"  # пик пульса и середина свечения (= RUN_COLOR в нижнем регистре)
-)
-
 # Рампы анимаций (ping-pong, пик — токен палитры); значения те же, что были
 # литералами в виджетах. В теме auto их пересчитывает apply_background.
 # Дыхание «думаю»: gold, пик #f0c896.
 GLOW_SHADES = [
     "#9c7a4a",
     "#b8915c",
-    _AMBER,
+    RUN_COLOR,
     "#e0b585",
     "#ecc596",
     "#f0c896",
     "#ecc596",
     "#e0b585",
-    _AMBER,
+    RUN_COLOR,
     "#b8915c",
 ]
 # Точка «сверяюсь…»: тёмно-серая, пик DEEP_DIM.
@@ -178,7 +174,7 @@ PULSE_SHADES = [
     "#a47f55",
     "#b18a62",
     "#c4986b",
-    _AMBER,
+    RUN_COLOR,
     "#c4986b",
     "#b18a62",
     "#a47f55",
