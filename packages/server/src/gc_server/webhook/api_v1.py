@@ -24,9 +24,15 @@ from typing import Any, Protocol
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
+from gc_core.threads.errors import OperationMismatch
 from gc_core.threads.models import ThreadKey
 
 from gc_server.surface import http_error, read_json_object
+from gc_server.webhook.idempotency import (
+    idempotency_key,
+    message_id,
+    operation_id,
+)
 
 #: Статусы, после которых у задачи ничего не меняется без нового сообщения.
 FINAL = frozenset({"completed", "failed", "cancelled"})
@@ -102,21 +108,47 @@ def parse_task_request(payload: dict, default_system: str) -> TaskRequest:
 
 
 def build_v1_routes(app: FastAPI, backend: TaskBackend) -> None:
-    from gc_server.webhook.surface import path_key
+    routes = _Routes(backend)
+    app.add_api_route("/v1/tasks", routes.create_task, methods=["POST"])
+    app.add_api_route("/v1/tasks", routes.list_tasks, methods=["GET"])
+    base = "/v1/tasks/{system}/{task_id}"
+    app.add_api_route(base, routes.get_task, methods=["GET"])
+    app.add_api_route(base + "/messages", routes.get_messages, methods=["GET"])
+    app.add_api_route(base + "/cancel", routes.cancel_task, methods=["POST"])
+    app.add_api_route(base + "/events", routes.task_events, methods=["GET"])
 
+
+class _Routes:
+    """Ручки ``/v1`` поверх исполнителя задач поверхности."""
+
+    def __init__(self, backend: TaskBackend) -> None:
+        self.backend = backend
+
+    @staticmethod
     def key_of(system: str, task_id: str) -> ThreadKey:
+        from gc_server.webhook.surface import path_key
+
         sys_norm, task_norm = path_key(system, task_id)
         return ThreadKey(system=sys_norm, thread=task_norm)
 
-    async def create_task(request: Request):
+    async def create_task(self, request: Request):
         payload = await read_json_object(request)
-        task = parse_task_request(payload, backend.default_system)
-        submitted = await backend.asubmit(
-            task.key,
-            _user_message(task.content),
-            op_id=getattr(request.state, "op_id", None),
-            trace_id=task.trace_id,
-        )
+        task = parse_task_request(payload, self.backend.default_system)
+        message = _user_message(task.content)
+        key = idempotency_key(request.headers)
+        if key is not None:
+            message["id"] = message_id(key)
+        try:
+            submitted = await self.backend.asubmit(
+                task.key,
+                message,
+                op_id=operation_id(key) if key is not None else None,
+                trace_id=task.trace_id,
+            )
+        except OperationMismatch:
+            raise http_error(
+                422, "idempotency key reused with another request body"
+            ) from None
         return JSONResponse(
             status_code=202,
             content={
@@ -127,57 +159,52 @@ def build_v1_routes(app: FastAPI, backend: TaskBackend) -> None:
         )
 
     async def list_tasks(
-        system: str | None = None, limit: int = 100, cursor: str | None = None
+        self,
+        system: str | None = None,
+        limit: int = 100,
+        cursor: str | None = None,
     ):
         if system is not None:
-            system = key_of(system, "x").system
-        tasks, next_cursor = await backend.alist(
+            system = self.key_of(system, "x").system
+        tasks, next_cursor = await self.backend.alist(
             system=system, limit=_bounded(limit), cursor=cursor
         )
         return {"tasks": tasks, "next_cursor": next_cursor}
 
-    async def get_task(system: str, task_id: str):
-        status = await backend.astatus(key_of(system, task_id))
+    async def get_task(self, system: str, task_id: str):
+        status = await self.backend.astatus(self.key_of(system, task_id))
         if status is None:
             raise HTTPException(status_code=404, detail=_NOT_FOUND)
         return status
 
     async def get_messages(
-        system: str, task_id: str, after: int = 0, limit: int = 100
+        self, system: str, task_id: str, after: int = 0, limit: int = 100
     ):
         limit = _bounded(limit)
-        entries = await backend.amessages(
-            key_of(system, task_id), after=max(0, after), limit=limit
+        entries = await self.backend.amessages(
+            self.key_of(system, task_id), after=max(0, after), limit=limit
         )
         if entries is None:
             raise HTTPException(status_code=404, detail=_NOT_FOUND)
         next_after = entries[-1]["seq"] if len(entries) == limit else None
         return {"messages": entries, "next_after": next_after}
 
-    async def cancel_task(system: str, task_id: str):
-        cancelled = await backend.acancel(key_of(system, task_id))
+    async def cancel_task(self, system: str, task_id: str):
+        cancelled = await self.backend.acancel(self.key_of(system, task_id))
         if cancelled is None:
             raise HTTPException(status_code=404, detail=_NOT_FOUND)
         return JSONResponse(status_code=202, content=cancelled)
 
     async def task_events(
-        request: Request, system: str, task_id: str, after: int = 0
+        self, request: Request, system: str, task_id: str, after: int = 0
     ):
-        key = key_of(system, task_id)
-        if await backend.astatus(key) is None:
+        key = self.key_of(system, task_id)
+        if await self.backend.astatus(key) is None:
             raise HTTPException(status_code=404, detail=_NOT_FOUND)
         return StreamingResponse(
-            _events(backend, key, request, after=max(0, after)),
+            _events(self.backend, key, request, after=max(0, after)),
             media_type="text/event-stream",
         )
-
-    app.add_api_route("/v1/tasks", create_task, methods=["POST"])
-    app.add_api_route("/v1/tasks", list_tasks, methods=["GET"])
-    base = "/v1/tasks/{system}/{task_id}"
-    app.add_api_route(base, get_task, methods=["GET"])
-    app.add_api_route(base + "/messages", get_messages, methods=["GET"])
-    app.add_api_route(base + "/cancel", cancel_task, methods=["POST"])
-    app.add_api_route(base + "/events", task_events, methods=["GET"])
 
 
 async def _events(

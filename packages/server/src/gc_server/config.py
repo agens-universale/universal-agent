@@ -123,6 +123,9 @@ class WebhookConfig(SurfaceConfig):
         default_factory=ThreadsCleanupConfig
     )
     recovery: RecoveryConfig = Field(default_factory=RecoveryConfig)
+    #: Окно идемпотентности (Idempotency-Key, webhook-id): сколько часов
+    #: помнится квитанция записи.
+    idempotency_ttl_hours: float = Field(default=24, gt=0, allow_inf_nan=False)
 
 
 class _ChannelModes(SurfaceConfig):

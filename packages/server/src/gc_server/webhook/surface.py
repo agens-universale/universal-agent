@@ -50,6 +50,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _ERR_SYSTEM_AND_TASK_ID = "system and task_id are required"
+#: Как часто забывать квитанции старше окна идемпотентности.
+_RECEIPTS_PRUNE_SECONDS = 3600
 
 
 def webhook_settings(runtime: ServerRuntime, name: str = "webhook"):
@@ -137,10 +139,12 @@ class WebhookSurface:
         self.registry = AgentRunRegistry()
         self._pruner: asyncio.Task | None = None
         self.recovery_task: asyncio.Task | None = None
+        self._receipts: asyncio.Task | None = None
 
     # --- жизненный цикл ----------------------------------------------------
 
     async def astart(self) -> None:
+        self._receipts = asyncio.create_task(self._areceipts_loop())
         if self.config.recovery.enabled:
             from gc_server.webhook.recovery import arecover_forever
 
@@ -174,8 +178,10 @@ class WebhookSurface:
         tasks = self.registry.cancel_all()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
-        background = [t for t in (self._pruner, self.recovery_task) if t]
-        self._pruner = self.recovery_task = None
+        background = [
+            t for t in (self._pruner, self.recovery_task, self._receipts) if t
+        ]
+        self._pruner = self.recovery_task = self._receipts = None
         for task in background:
             task.cancel()
         await asyncio.gather(*background, return_exceptions=True)
@@ -239,6 +245,8 @@ class WebhookSurface:
         доставки во входящем потоке."""
         base = {"system": key.system, "task_id": key.thread}
         record = await self.threads().get(key)
+        if _foreign(record):
+            return None
         pending = {"pending_messages": _pending(record)}
         # Контекст задачи строит этот процесс: прогона ещё нет, а статус в
         # хранилище — прошлого прогона.
@@ -278,10 +286,21 @@ class WebhookSurface:
     ) -> Dict[str, Any]:
         """Сообщение — во входящий поток треда; тред уже ведут — ``queued``,
         иначе этот запрос строит прогон (``started``)."""
+        if _foreign(await self.threads().get(key)):
+            raise http_error(
+                409,
+                "task belongs to the swarm surface",
+                system=key.system,
+                task_id=key.thread,
+            )
         receipt = await self.threads().submit(
             key, message, op_id=op_id, source="webhook"
         )
         seq = receipt.max_seq.get("inbox")
+        if op_id is not None and await self._delivered(key, seq):
+            # Повтор по ключу идемпотентности: сообщение уже доставлено —
+            # нового хода не нужно.
+            return {"status": "duplicate", "message_seq": seq}
         if not await self._take_start(key.system, key.thread):
             _log_ignored_trace_id(trace_id, key.system, key.thread)
             return {"status": "queued", "message_seq": seq}
@@ -292,6 +311,27 @@ class WebhookSurface:
                 system=key.system, task_id=key.thread
             )
         return {"status": "started", "message_seq": seq}
+
+    async def _delivered(self, key: ThreadKey, seq: int | None) -> bool:
+        record = await self.threads().get(key)
+        return (
+            bool(seq)
+            and record is not None
+            and (record.state.inbox_seq >= seq)
+        )
+
+    async def aprune_receipts(self, *, older_than: timedelta) -> int:
+        """Забыть квитанции старше окна идемпотентности."""
+        return await self.threads().prune(older_than)
+
+    async def _areceipts_loop(self) -> None:
+        window = timedelta(hours=self.config.idempotency_ttl_hours)
+        while True:
+            try:
+                await self.aprune_receipts(older_than=window)
+            except Exception:
+                logger.warning("чистка квитанций не удалась", exc_info=True)
+            await asyncio.sleep(_RECEIPTS_PRUNE_SECONDS)
 
     async def acancel(self, key: ThreadKey) -> Dict[str, Any] | None:
         """Отменить ход задачи с любого инстанса: поток ``control`` треда
@@ -317,7 +357,7 @@ class WebhookSurface:
             _task_entry(record)
             for record in page.items
             if record.key.system not in RESERVED_SYSTEMS
-            and "swarm" not in record.frontend
+            and not _foreign(record)
         ]
         return tasks, page.next_cursor
 
@@ -325,7 +365,8 @@ class WebhookSurface:
         self, key: ThreadKey, *, after: int, limit: int
     ) -> list[Dict[str, Any]] | None:
         threads = self.threads()
-        if await threads.get(key) is None:
+        record = await threads.get(key)
+        if record is None or _foreign(record):
             return None
         entries = await threads.store.read_stream(
             key, "messages", after_seq=after, limit=limit
@@ -454,6 +495,11 @@ def _task_entry(record: ThreadRecord) -> dict:
         "status": status.get("status"),
         "updated_at": record.info.updated_at or record.info.created_at,
     }
+
+
+def _foreign(record: ThreadRecord | None) -> bool:
+    """Тред задачи swarm в общей базе — его ведёт песочница, а не вебхук."""
+    return record is not None and "swarm" in record.frontend
 
 
 def _pending(record: ThreadRecord | None) -> int:

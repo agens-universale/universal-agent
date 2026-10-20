@@ -95,3 +95,26 @@ def test_reserved_check_sees_the_normalized_system(client, system):
     assert client.get(f"/v1/tasks/{quote(system)}/t1").status_code == 400
     resp = client.post("/v1/tasks", json={"system": system, "task_id": "x"})
     assert resp.status_code == 400
+
+
+def test_webhook_does_not_touch_swarm_task_threads(tmp_path):
+    """Тред задачи swarm в общей базе (помечен ``swarm``) вебхуку чужой: не
+    читается, не отменяется и не получает сообщений — иначе вебхук
+    вмешивался бы в песочницу."""
+    store = FileThreadStore(str(tmp_path / "threads"))
+    key = ThreadKey(system="generic", thread="sw")
+    threads = Threads(store)
+    run_sync(
+        threads.append_messages(
+            key, [{"role": "user", "content": "песочница", "id": "m1"}]
+        )
+    )
+    run_sync(threads.update_frontend(key, "swarm", {"swarm_id": "swarm_x"}))
+    client = TestClient(make_webhook(tmp_path).app())
+    assert client.get("/v1/tasks/generic/sw/messages").status_code == 404
+    assert client.get("/v1/tasks/generic/sw").status_code == 404
+    assert client.post("/v1/tasks/generic/sw/cancel").status_code == 404
+    resp = client.post("/v1/tasks", json={"task_id": "sw", "message": "x"})
+    assert resp.status_code == 409
+    assert run_sync(store.read_stream(key, "inbox")) == []
+    assert run_sync(store.read_stream(key, "control")) == []
