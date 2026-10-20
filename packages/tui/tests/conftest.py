@@ -223,6 +223,20 @@ def _no_clipboard_probe(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_terminal_probe(monkeypatch):
+    """Тесты не опрашивают настоящий терминал (OSC 11 при старте `main()`) и
+    после себя возвращают палитру к теме fixed: apply_background меняет
+    глобалы модуля. Тесты пробы держат ссылку на настоящую функцию,
+    взятую при импорте, поэтому подмена атрибута модуля им не мешает."""
+    from gc_tui import palette
+    from gc_tui.services import terminal_caps
+
+    monkeypatch.setattr(terminal_caps, "query_background", lambda: None)
+    yield
+    palette.reset()
+
+
+@pytest.fixture(autouse=True)
 def _no_network_model_fetch(monkeypatch):
     """По умолчанию TUI-тесты не ходят в сеть за списком моделей.
 
