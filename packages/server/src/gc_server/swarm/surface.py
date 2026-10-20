@@ -204,7 +204,10 @@ class SwarmSurface:
         *,
         op_id: str | None,
         trace_id: str | None,
+        callback_url: str | None = None,
     ) -> Dict[str, Any]:
+        if callback_url is not None:
+            raise http_error(400, "callback_url is not supported by swarm")
         sid = swarm_id(key.system, key.thread)
         if self._in_store and self._active(sid):
             # Тред задачи в общей базе: сообщение — во входящий поток, его

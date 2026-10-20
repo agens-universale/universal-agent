@@ -93,6 +93,9 @@ async def _acontinue(
     key = record.key
     if record.runtime.turn == "running":
         await _anote_interruption(threads, record)
+        status = task_status.status_of(record)
+        if status is not None and status.get("status") == "running":
+            surface.notify(key, {**status, "status": "interrupted"})
     return await surface.astart_recovered(key.system, key.thread)
 
 

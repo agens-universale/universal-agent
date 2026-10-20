@@ -229,3 +229,29 @@ async def test_recovery_switch(tmp_path):
         await on.astop()
         await stores.aclose()
     assert on.recovery_task is None
+
+
+async def test_interruption_is_reported_by_callback(monkeypatch, tmp_path):
+    _install(monkeypatch)
+    stores = await aopen_process_stores(_settings(tmp_path))
+    surface = await _surface(tmp_path, stores)
+    got: list = []
+    surface.callbacks.config = surface.config.callbacks.model_copy(
+        update={"url": "https://hooks.example/done"}
+    )
+    surface.config = surface.config.model_copy(
+        update={"callbacks": surface.callbacks.config}
+    )
+    surface.callbacks.client = httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda r: got.append(json.loads(r.content)) or httpx.Response(200)
+        )
+    )
+    try:
+        await _crashed_run(stores.threads)
+        await arecover_once(surface, now=utc_now())
+        await _settled(surface)
+        await surface.callbacks.adrain()
+    finally:
+        await stores.aclose()
+    assert [e["type"] for e in got] == ["task.interrupted", "task.completed"]

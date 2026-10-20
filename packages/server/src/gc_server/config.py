@@ -113,6 +113,48 @@ class RecoveryConfig(BaseModel):
     lookback_hours: float = Field(default=24, gt=0, allow_inf_nan=False)
 
 
+CallbackEvent = Literal[
+    "task.completed", "task.failed", "task.cancelled", "task.interrupted"
+]
+
+
+class CallbacksConfig(BaseModel):
+    """Обратные вызовы о завершении задачи вебхука."""
+
+    model_config = _STRICT
+
+    #: Куда слать события по умолчанию; пусто — только ``callback_url``
+    #: запросов.
+    url: str | None = None
+    #: Секрет подписи событий (Standard Webhooks) — ``whsec_…`` или список.
+    signing_secret: str | list[str] | None = None
+    events: list[CallbackEvent] = Field(
+        default_factory=lambda: [
+            "task.completed",
+            "task.failed",
+            "task.cancelled",
+            "task.interrupted",
+        ]
+    )
+    max_attempts: int = Field(default=5, ge=1, le=20)
+    #: Префиксы, под которыми разрешён ``callback_url`` в теле запроса:
+    #: схема и хост — точно, путь — началом. Пусто — ``callback_url`` не
+    #: принимается.
+    allowed_urls: list[str] = Field(default_factory=list)
+
+    @field_validator("signing_secret")
+    @classmethod
+    def _secret(cls, value):
+        from gc_server.webhook.signatures import secret_key
+
+        if value is None:
+            return None
+        secrets = [value] if isinstance(value, str) else list(value)
+        for secret in secrets:
+            secret_key(secret)
+        return secrets or None
+
+
 class WebhookConfig(SurfaceConfig):
     port: int = Field(default=8000, ge=1, le=65535)
     default_system: str = "generic"
@@ -130,6 +172,7 @@ class WebhookConfig(SurfaceConfig):
     #: (смена секрета). Задан — неподписанный запрос к /v1/tasks — 401.
     signing_secret: str | list[str] | None = None
     signature_tolerance_seconds: int = Field(default=300, gt=0)
+    callbacks: CallbacksConfig = Field(default_factory=CallbacksConfig)
 
     @field_validator("signing_secret")
     @classmethod

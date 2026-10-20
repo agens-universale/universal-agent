@@ -18,6 +18,7 @@ from datetime import timedelta
 from typing import TYPE_CHECKING, Any, Dict
 
 from fastapi import FastAPI
+from fastapi.encoders import jsonable_encoder as jsonable
 from gc_core.agent_edits.ctx import RUN_MODE_SERVER
 from gc_core.agent_executor import AgentExecutor
 from gc_core.config import cli_forces_legacy_model
@@ -40,6 +41,11 @@ from gc_server.surface import (
     install_bearer,
 )
 from gc_server.webhook import status as task_status
+from gc_server.webhook.callbacks import (
+    CallbackSender,
+    allowed_callback,
+    make_event,
+)
 from gc_server.webhook.janitor import start_threads_cleanup
 from gc_server.webhook.registry import ActiveRun, AgentRunRegistry
 from gc_server.webhook.request import ensure_task_id, normalize_system
@@ -140,6 +146,7 @@ class WebhookSurface:
         self._pruner: asyncio.Task | None = None
         self.recovery_task: asyncio.Task | None = None
         self._receipts: asyncio.Task | None = None
+        self.callbacks = CallbackSender(self.config.callbacks)
 
     # --- жизненный цикл ----------------------------------------------------
 
@@ -178,6 +185,7 @@ class WebhookSurface:
         tasks = self.registry.cancel_all()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
+        await self.callbacks.aclose()
         background = [
             t for t in (self._pruner, self.recovery_task, self._receipts) if t
         ]
@@ -288,9 +296,16 @@ class WebhookSurface:
         *,
         op_id: str | None,
         trace_id: str | None,
+        callback_url: str | None = None,
     ) -> Dict[str, Any]:
         """Сообщение — во входящий поток треда; тред уже ведут — ``queued``,
         иначе этот запрос строит прогон (``started``)."""
+        if callback_url is not None and not allowed_callback(
+            callback_url, self.config.callbacks.allowed_urls
+        ):
+            raise http_error(
+                400, "callback_url is not under webhook.callbacks.allowed_urls"
+            )
         if _foreign(await self.threads().get(key)):
             raise http_error(
                 409,
@@ -301,6 +316,11 @@ class WebhookSurface:
         receipt = await self.threads().submit(
             key, message, op_id=op_id, source="webhook"
         )
+        if callback_url is not None:
+            # Адрес — в статусе задачи: событие шлёт инстанс, доведший ход.
+            await task_status.aset_status(
+                self.threads(), key, callback_url=callback_url
+            )
         seq = receipt.max_seq.get("inbox")
         if op_id is not None and await self._delivered(key, seq):
             # Повтор по ключу идемпотентности: сообщение уже доставлено —
@@ -470,7 +490,18 @@ class WebhookSurface:
         current = task_status.status_of(await threads.get(key))
         if current is None or current.get("run_id") != run.notes["run_id"]:
             return
-        await task_status.aset_status(threads, key, **_final_fields(run))
+        final = _final_fields(run)
+        await task_status.aset_status(threads, key, **final)
+        self.notify(key, {**current, **final})
+
+    def notify(self, key: ThreadKey, status: Dict[str, Any]) -> None:
+        """Событие о смене статуса задачи — обратным вызовом, если он
+        настроен (``webhook.callbacks.url`` или ``callback_url`` задачи)."""
+        url = status.get("callback_url") or self.config.callbacks.url
+        if url:
+            self.callbacks.send(
+                url, make_event(status["status"], key, jsonable(status))
+            )
 
 
 def _final_fields(run: ActiveRun) -> Dict[str, Any]:

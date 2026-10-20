@@ -58,6 +58,7 @@ class TaskBackend(Protocol):
         *,
         op_id: str | None,
         trace_id: str | None,
+        callback_url: str | None = None,
     ) -> dict: ...
 
     async def astatus(self, key: ThreadKey) -> dict | None: ...
@@ -79,6 +80,7 @@ class TaskRequest:
     content: str
     trace_id: str | None
     body: dict
+    callback_url: str | None = None
 
 
 def parse_task_request(payload: dict, default_system: str) -> TaskRequest:
@@ -89,6 +91,10 @@ def parse_task_request(payload: dict, default_system: str) -> TaskRequest:
         request_task_identifiers,
     )
 
+    # Адрес обратного вызова — поле запроса, а не слова задачи.
+    callback_url = payload.pop("callback_url", None)
+    if callback_url is not None and not isinstance(callback_url, str):
+        raise http_error(400, "callback_url must be a string")
     message = payload.get("message")
     if message is not None and (not isinstance(message, str) or not message):
         raise http_error(400, "message must be a non-empty string")
@@ -108,7 +114,11 @@ def parse_task_request(payload: dict, default_system: str) -> TaskRequest:
     else:
         content = message
     return TaskRequest(
-        ThreadKey(system=system, thread=task_id), content, trace_id, payload
+        ThreadKey(system=system, thread=task_id),
+        content,
+        trace_id,
+        payload,
+        callback_url,
     )
 
 
@@ -150,6 +160,7 @@ class _Routes:
                 message,
                 op_id=operation_id(key) if key is not None else None,
                 trace_id=task.trace_id,
+                callback_url=task.callback_url,
             )
         except OperationMismatch:
             raise http_error(
