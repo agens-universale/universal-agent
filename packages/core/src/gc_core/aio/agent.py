@@ -384,13 +384,23 @@ class AsyncAgent:
     def stop(self) -> None:
         """Кооперативная остановка: ход завершит текущую итерацию и выйдет.
 
-        Хвост остановленного `run` не доигрывается.
+        Хвост остановленного `run` не доигрывается. Идущее ожидание снимается
+        сразу — см. ``UserStop``.
         """
         self._stop_requested = True
         if self._durable is not None:
             self._durable.stop()
             return
         self._executor.stop_run()
+
+    async def astop(self) -> None:
+        """Стоп и ожидание, пока текущая работа снята."""
+        self.stop()
+        if self._durable is not None:
+            return
+        gate = getattr(self._executor, "user_stop", None)
+        if gate is not None:
+            await gate.await_settled()
 
     async def aclose(self) -> None:
         """Отпустить сетевой пул. Идемпотентно.

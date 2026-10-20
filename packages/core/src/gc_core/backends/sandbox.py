@@ -235,6 +235,7 @@ class SandboxBackend(LocalFsBackend):
             env=_sanitize_env(env),
             stdin_text=None,
             capture_max_chars=self._exec_capture_max_chars(capture_max_chars),
+            backend_name=type(self).__name__,
         )
 
     async def aexec_argv(
@@ -256,6 +257,7 @@ class SandboxBackend(LocalFsBackend):
             env=_sanitize_env(env),
             stdin_text=stdin,
             capture_max_chars=self._exec_capture_max_chars(capture_max_chars),
+            backend_name=type(self).__name__,
         )
 
     async def arun_python(
@@ -271,6 +273,7 @@ class SandboxBackend(LocalFsBackend):
             env=_sanitize_env(env),
             stdin_text=code,
             capture_max_chars=self._exec_capture_max_chars(capture_max_chars),
+            backend_name=type(self).__name__,
         )
 
     async def aspawn_background(self, command, *, cwd=None, env=None):

@@ -83,7 +83,9 @@ class TurnRun:
             if self.sealed:
                 return
             self.cancel_requested = True
-        _stop_agent(self.agent)
+        from gc_core.user_stop import await_agent_stop
+
+        await await_agent_stop(self.agent)
 
     def stop_if_open(self) -> None:
         if self.sealed or self.cancel_requested:
@@ -192,12 +194,6 @@ async def _join(task: asyncio.Task) -> None:
         raise
     except Exception:
         logger.exception("completions tool watch")
-
-
-def _stop_agent(agent: Any) -> None:
-    stop = getattr(agent, "stop", None)
-    if stop is not None:
-        stop()
 
 
 async def _safe_aclose(agent: Any) -> None:

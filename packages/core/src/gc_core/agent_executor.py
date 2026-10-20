@@ -278,6 +278,9 @@ class AgentExecutor:
         # run() применит флаг сразу при создании state, до первого persist.
         self._stop_pending: bool = False
         self.last_terminal_outcome: Optional[str] = None
+        from gc_core.user_stop import UserStop
+
+        self.user_stop = UserStop()
 
     def take_undelivered_messages(self) -> list[dict]:
         """Забрать всё, что отдано прогону, но до агента не дошло, — в порядке прихода.
@@ -922,6 +925,9 @@ class AgentExecutor:
             # молча погасил бы следующий запрос человека.
             self._state = None
             self._accounting_closed = False
+        self.user_stop.prepare_run(
+            asyncio.get_running_loop(), getattr(self._ctx, "logger", None)
+        )
         settings = settings_of(self._ctx)
         _require_supported_persist_mode(settings, self._ctx)
         logger = getattr(self._ctx, "logger", None)
@@ -1085,6 +1091,10 @@ class AgentExecutor:
         queued_before_loop = self._take_pending_messages()
         if queued_before_loop:
             messages = [*messages, *queued_before_loop]
+        from gc_core.user_stop import bind_user_stop
+
+        _stop_bound = bind_user_stop(self.user_stop)
+        _stop_bound.__enter__()
         try:
             response = await arun_agent(
                 messages,
@@ -1119,6 +1129,7 @@ class AgentExecutor:
                 state, "terminal_outcome", None
             )
         finally:
+            _stop_bound.__exit__(None, None, None)
             state_ops.leave(state)
             state.turn_level = None
             teardown_cancel = await self._ateardown_run(_owner_reset)
@@ -1297,6 +1308,8 @@ class AgentExecutor:
                 self._state.stop_requested = True
             else:
                 self._stop_pending = True
+            run_logger = getattr(self._ctx, "logger", None)
+        self.user_stop.request(run_logger)
 
     async def acompact_thread(
         self, thread_id: str, system: str | None = None

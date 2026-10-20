@@ -597,6 +597,9 @@ class AgentRunner:
         ex = self._executor
         if ex is not None:
             ex.stop_run()
+            gate = getattr(ex, "user_stop", None)
+            if gate is not None:
+                gate.wait_if_other_thread()
         self.cancel_confirm()
         # И ask_human тоже. Без этого поток оставался в `queue.get()` навсегда,
         # `arun` не доходил до своего `finally`, и не выполнялись ни закрытие

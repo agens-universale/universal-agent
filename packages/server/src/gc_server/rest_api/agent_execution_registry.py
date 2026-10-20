@@ -419,6 +419,11 @@ class AgentRunRegistry:
                 return False
             run.stop_requested = True
         run.executor.stop_run()
+        gate = getattr(run.executor, "user_stop", None)
+        if gate is not None:
+            # С другого потока ждём снятие. С потока loop ждать нельзя:
+            # снятие исполняется на нём же.
+            gate.wait_if_other_thread()
         return True
 
 

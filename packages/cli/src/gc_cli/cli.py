@@ -923,7 +923,10 @@ async def arun_cli() -> int:
 
     verbose = arg_parser.run_args.verbose
 
+    from gc_cli.run_stop import install_run_sigint, restore_run_sigint
+
     executor = AgentExecutor(ctx)
+    _sigint_previous = install_run_sigint(executor)
     structured_exit: int | None = None
     # Учёт закрывается один раз, после всего, что ещё прибавится к прогону.
     # Сейчас это перефраз. Следующий такой шаг встаёт перед той же точкой.
@@ -947,6 +950,7 @@ async def arun_cli() -> int:
             executor=executor,
         )
     finally:
+        restore_run_sigint(_sigint_previous)
         # Запись меты может бросить исключение. Если она стоит первой
         # строкой finally, клиенты и демоны `-a` этого запуска не гасятся.
         # Учёт — в своём try, уборка — во внутреннем finally.

@@ -15,6 +15,7 @@ import logging
 import os
 import re
 import shlex
+import uuid
 from pathlib import Path
 from typing import Optional, Sequence
 
@@ -34,6 +35,7 @@ from gc_core.backends.runtime_probe import (
     RuntimeUnavailable,
 )
 from gc_core.backends.walk_util import FlatWalkMixin
+from gc_core.user_stop import current_user_stop
 
 #: Потолок на одну файловую операцию (stat, upload, download): зависший
 #: транспорт — пауза контейнера, мёртвый хост — иначе вешал бы цикл агента.
@@ -74,20 +76,74 @@ FS_OP_TIMEOUT_SEC = 300
 
 
 def watchdog_wrap(
-    body: str, timeout: Optional[int], tool: Optional[str]
+    body: str,
+    timeout: Optional[int],
+    tool: Optional[str],
+    *,
+    stop_file: Optional[str] = None,
 ) -> str:
-    """Обернуть тело `sh -c` в сторож той стороны (GNU timeout / gtimeout / setsid / perl)."""
+    """Обернуть тело `sh -c` в сторож той стороны (GNU timeout / gtimeout / setsid / perl).
+
+    ``stop_file`` — куда записать pid/pgid сторожа, чтобы второй канал снял
+    команду тем же сигналом, не обрывая только локальный SSH.
+    """
     if not timeout or not tool:
-        return body
+        # Сторожа нет — оборачивать нечем. Вызывающий оборвёт только ожидание.
+        if not tool:
+            return body
+        return _stop_only_wrap(body, stop_file) if stop_file else body
     limit = int(timeout) + _WATCHDOG_SLACK_SEC
     inner = f"sh -c {shlex.quote(body)}"
     if tool in ("timeout", "gtimeout"):
-        return f"{tool} {limit} {inner}"
+        wrapped = f"{tool} {limit} {inner}"
+        return _record_pid(wrapped, stop_file)
     if tool == "setsid":
-        return _SETSID_WATCHDOG.format(body=shlex.quote(body), limit=limit)
+        wrapped = _SETSID_WATCHDOG.format(body=shlex.quote(body), limit=limit)
+        return _record_setsid_pgid(wrapped, stop_file)
     if tool == "perl":
-        return f"perl -e {shlex.quote(_PERL_WATCHDOG)} {limit} {inner}"
-    return body
+        wrapped = f"perl -e {shlex.quote(_PERL_WATCHDOG)} {limit} {inner}"
+        return _record_pid(wrapped, stop_file)
+    return _stop_only_wrap(body, stop_file) if stop_file else body
+
+
+def _record_pid(wrapped: str, stop_file: Optional[str]) -> str:
+    """``exec`` сохраняет pid оболочки: в файле оказывается pid сторожа."""
+    if not stop_file:
+        return wrapped
+    return f"echo $$ > {shlex.quote(stop_file)}; exec {wrapped}"
+
+
+def _record_setsid_pgid(wrapped: str, stop_file: Optional[str]) -> str:
+    if not stop_file:
+        return wrapped
+    return wrapped.replace(
+        "p=$!; ", f"p=$!; echo $p > {shlex.quote(stop_file)}; ", 1
+    )
+
+
+def _stop_only_wrap(body: str, stop_file: Optional[str]) -> str:
+    """Группа без дедлайна: стоп бьёт по ней, таймаут конфига не появляется."""
+    if not stop_file:
+        return body
+    quoted = shlex.quote(body)
+    path = shlex.quote(stop_file)
+    return (
+        f"exec 3<&0; setsid sh -c {quoted} <&3 3<&- & p=$!; "
+        f"echo $p > {path}; wait $p"
+    )
+
+
+def remote_kill_command(stop_file: str) -> str:
+    """Снять сторож: и сам pid (GNU timeout ловит TERM), и его группу."""
+    path = shlex.quote(stop_file)
+    return (
+        f"pg=$(cat {path} 2>/dev/null); "
+        'if [ -n "$pg" ]; then '
+        'kill -TERM "$pg" 2>/dev/null; kill -TERM -- -"$pg" 2>/dev/null; '
+        "sleep 0.5; "
+        'kill -KILL "$pg" 2>/dev/null; kill -KILL -- -"$pg" 2>/dev/null; '
+        "fi; true"
+    )
 
 
 class RemoteShellBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
@@ -142,12 +198,25 @@ class RemoteShellBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
         timeout: Optional[int] = None,
         capture_max_chars: int,
         probe: bool = True,
+        stop_file: Optional[str] = None,
     ) -> ExecResult:
         if probe:
             await self._runtime_probe.ensure(self._aprobe)
         remote = ["sh", "-c", shell_command]
         if self.joins_argv:
             remote = [shlex.join(remote)]
+
+        async def _release(proc) -> None:
+            if stop_file:
+                await self._akill_remote(proc, stop_file)
+                return
+            from gc_core.backends.local import _astop_process
+
+            await _astop_process(proc)
+
+        can_kill = bool(stop_file) and bool(
+            getattr(self, "_last_watchdog", None)
+        )
         return await _arun_bounded_process(
             [*self.argv_prefix, *remote],
             shell=False,
@@ -156,6 +225,9 @@ class RemoteShellBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
             env=None,
             stdin_text=stdin_text,
             capture_max_chars=capture_max_chars,
+            backend_name=type(self).__name__,
+            stop_release=_release if stop_file else None,
+            stop_unkillable=bool(stop_file) and not can_kill,
         )
 
     def _capture_cap(self, capture_max_chars: Optional[int]) -> int:
@@ -285,10 +357,44 @@ class RemoteShellBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
         self._watchdog_tool = tool
         return tool
 
-    async def _aguarded(self, body: str, timeout: Optional[int]) -> str:
-        if not timeout:
+    async def _aguarded(
+        self,
+        body: str,
+        timeout: Optional[int],
+        *,
+        stop_file: Optional[str] = None,
+    ) -> str:
+        if not timeout and not stop_file:
+            self._last_watchdog = None
             return body
-        return watchdog_wrap(body, timeout, await self._awatchdog())
+        tool = await self._awatchdog()
+        self._last_watchdog = tool
+        return watchdog_wrap(body, timeout, tool, stop_file=stop_file)
+
+    def _stop_file(self) -> Optional[str]:
+        if current_user_stop() is None:
+            return None
+        return f"/tmp/gc-user-stop-{uuid.uuid4().hex}"
+
+    async def _akill_remote(self, proc, stop_file: str) -> None:
+        """Второй канал дёргает сторож. Потом гасим локальное ожидание."""
+        from gc_core.backends.local import _astop_process
+
+        remote = ["sh", "-c", remote_kill_command(stop_file)]
+        if self.joins_argv:
+            remote = [shlex.join(remote)]
+        await _arun_bounded_process(
+            [*self.argv_prefix, *remote],
+            shell=False,
+            cwd=None,
+            timeout=5,
+            env=None,
+            stdin_text=None,
+            capture_max_chars=1000,
+            backend_name=type(self).__name__,
+            arm_stop=False,
+        )
+        await _astop_process(proc)
 
     async def aexec(
         self,
@@ -300,10 +406,12 @@ class RemoteShellBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
         capture_max_chars=None,
     ):
         body = self._shell(command, cwd=cwd, env=env, exec_init=self.exec_init)
+        stop_file = self._stop_file()
         return await self._run(
-            await self._aguarded(body, timeout),
+            await self._aguarded(body, timeout, stop_file=stop_file),
             timeout=timeout,
             capture_max_chars=self._capture_cap(capture_max_chars),
+            stop_file=stop_file,
         )
 
     async def aexec_raw(
@@ -316,10 +424,12 @@ class RemoteShellBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
         capture_max_chars=None,
     ):
         body = self._shell(command, cwd=cwd, env=env)
+        stop_file = self._stop_file()
         return await self._run(
-            await self._aguarded(body, timeout),
+            await self._aguarded(body, timeout, stop_file=stop_file),
             timeout=timeout,
             capture_max_chars=self._capture_cap(capture_max_chars),
+            stop_file=stop_file,
         )
 
     async def aexec_argv(
@@ -345,11 +455,13 @@ class RemoteShellBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
     ):
         # Код — на stdin, не heredoc: нет коллизии с маркером и лимита длины аргумента.
         body = self._shell("python3 -", cwd=cwd, env=env)
+        stop_file = self._stop_file()
         return await self._run(
-            await self._aguarded(body, timeout),
+            await self._aguarded(body, timeout, stop_file=stop_file),
             stdin_text=code,
             timeout=timeout,
             capture_max_chars=self._capture_cap(capture_max_chars),
+            stop_file=stop_file,
         )
 
     def default_cwd(self) -> Optional[str]:

@@ -333,10 +333,23 @@ class _LineReader:
             self._queue.put(None)
 
     def readline(self, timeout: float) -> "str | None":
-        try:
-            return self._queue.get(timeout=timeout)
-        except queue.Empty:
-            return None
+        import time as _time
+
+        from gc_core.user_stop import UserStopInterrupt, current_user_stop
+
+        deadline = _time.monotonic() + timeout
+        while True:
+            stop = current_user_stop()
+            if stop is not None and stop.requested:
+                stop.notify_observed()
+                raise UserStopInterrupt(kind="mcp", started=True)
+            remaining = deadline - _time.monotonic()
+            if remaining <= 0:
+                return None
+            try:
+                return self._queue.get(timeout=min(0.02, remaining))
+            except queue.Empty:
+                continue
 
     async def areadline(self, timeout: float) -> "str | None":
         """То же, но ожиданием очереди не занимает ни поток, ни loop.
@@ -350,8 +363,14 @@ class _LineReader:
         import asyncio
         import time as _time
 
+        from gc_core.user_stop import UserStopInterrupt, current_user_stop
+
         deadline = _time.monotonic() + timeout
         while True:
+            stop = current_user_stop()
+            if stop is not None and stop.requested:
+                stop.notify_observed()
+                raise UserStopInterrupt(kind="mcp", started=True)
             try:
                 return self._queue.get_nowait()
             except queue.Empty:

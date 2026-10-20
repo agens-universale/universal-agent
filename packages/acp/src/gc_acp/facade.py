@@ -792,6 +792,7 @@ class AcpFacade:
             return
         await self._dismiss_permissions(live.session_id)
         _mark_cancel(live)
+        await _await_live_stop(live)
 
     async def _cancel_by_request_id(self, params: Any) -> None:
         body = _object_params(params)
@@ -804,6 +805,7 @@ class AcpFacade:
             if live.prompt_id == target:
                 await self._dismiss_permissions(live.session_id)
                 _mark_cancel(live)
+                await _await_live_stop(live)
                 return
 
     async def _dismiss_permissions(self, session_id: str) -> None:
@@ -1034,6 +1036,13 @@ def _permission_dropped(
     if future.done():
         return True
     return session_id not in sessions
+
+
+async def _await_live_stop(live: LiveSession) -> None:
+    """Не отвечать, пока идущий стрим или тул ещё не сняты."""
+    gate = getattr(getattr(live.agent, "_executor", None), "user_stop", None)
+    if gate is not None:
+        await gate.await_settled()
 
 
 def _mark_cancel(live: LiveSession) -> None:

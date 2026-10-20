@@ -41,6 +41,42 @@ _SUPPORTED_TRANSPORTS = (
 )
 
 
+async def _mcp_call_under_stop(client: Any, tool_name: str, body) -> Any:
+    """Снять текущий вызов. Процесс сервера сессии не трогаем."""
+    import asyncio
+
+    from gc_core.user_stop import (
+        UserStopInterrupt,
+        current_tool_call,
+        current_user_stop,
+    )
+
+    stop = current_user_stop()
+    if stop is None:
+        return await body()
+    _, call_id = current_tool_call()
+    task = asyncio.create_task(body())
+
+    async def _release() -> None:
+        # Отмена ожидания, не сессии: процесс сервера остаётся следующему ходу.
+        if not task.done():
+            task.cancel()
+
+    try:
+        async with stop.arm(
+            kind="mcp",
+            tool=tool_name,
+            call_id=call_id,
+            mcp_server=str(getattr(client, "server_name", "") or ""),
+            release=_release,
+        ):
+            return await task
+    except asyncio.CancelledError:
+        if stop.requested:
+            raise UserStopInterrupt(kind="mcp", started=True)
+        raise
+
+
 class McpClientPort(ABC):
     """Один MCP-сервер, две операции. Обе корутинные.
 
@@ -226,6 +262,23 @@ class AgentRuntimeClient(McpClientPort):
             )
 
     async def acall_tool(
+        self, tool_name: str, arguments: Dict[str, Any], *, timeout: float
+    ) -> Any:
+        from gc_core.user_stop import current_user_stop
+
+        if current_user_stop() is None:
+            return await self._acall_tool_unstopped(
+                tool_name, arguments, timeout=timeout
+            )
+        return await _mcp_call_under_stop(
+            self,
+            tool_name,
+            lambda: self._acall_tool_unstopped(
+                tool_name, arguments, timeout=timeout
+            ),
+        )
+
+    async def _acall_tool_unstopped(
         self, tool_name: str, arguments: Dict[str, Any], *, timeout: float
     ) -> Any:
         transport = self._require_transport()
