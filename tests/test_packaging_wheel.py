@@ -244,8 +244,13 @@ def test_server_wheel_contents(wheels):
         :10
     ]
     for m in (
-        "gc_server/server.py",
-        "gc_server/rest_api/__init__.py",
+        "gc_server/cli.py",
+        "gc_server/app.py",
+        "gc_server/config.py",
+        "gc_server/webhook/surface.py",
+        "gc_server/chat/surface.py",
+        "gc_server/a2a/surface.py",
+        "gc_server/swarm/surface.py",
         "gc_server/swarm/runner.py",
     ):
         assert m in names, m
@@ -345,7 +350,7 @@ def test_cli_wheel_contents(wheels):
 OWN_COMMANDS = {
     "gc_cli": {"gc-cli"},
     "gc_tui": {"gc-ua", "gc-voice"},
-    "gc_server": {"gc-serve", "gc-chat", "gc-a2a"},
+    "gc_server": {"gc-serve"},
     "gc_mcp": {"gc-mcp", "gc-mcp-install"},
     "gc_core_temporalio": {
         "gc-temporal",

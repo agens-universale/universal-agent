@@ -415,9 +415,8 @@ async def test_cancel_waits_until_the_run_finishes(tmp_path):
 
 
 async def test_server_exit_stops_a_blocking_turn(tmp_path):
-    """should_exit останавливает ход, не дожидаясь конца SendMessage."""
-    from gc_server.a2a.main import stop_turns_on_exit
-
+    """Остановка поверхности (её зовёт процесс сразу после сигнала, не
+    дожидаясь закрытия соединений) снимает ход посреди SendMessage."""
     async with session(tmp_path, agents=[SlowAgent()]) as (
         client,
         facade,
@@ -429,13 +428,10 @@ async def test_server_exit_stops_a_blocking_turn(tmp_path):
                 break
             await asyncio.sleep(0.02)
         assert created[0].calls
-        server = type("Server", (), {"should_exit": False})()
-        watcher = asyncio.create_task(stop_turns_on_exit(server, facade))
         await asyncio.sleep(0.05)
         assert pending.done() is False
-        server.should_exit = True
+        await facade.shutdown()
         response = await asyncio.wait_for(pending, timeout=2)
-        await watcher
     assert response.json()["result"]["task"]["status"]["state"] == (
         "TASK_STATE_CANCELED"
     )

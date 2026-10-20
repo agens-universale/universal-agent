@@ -26,13 +26,11 @@ all = []
 [project.scripts]
 gc-cli = "gc_cli.cli:main"
 gc-ua = "gc_tui:main"
-gc-serve = "gc_server.server:serve"
+gc-serve = "gc_server.cli:main"
 gc-mcp = "recommended_mcp.runtime.cli:main"
 gc-mcp-install = "recommended_mcp.runtime.install_cli:main"
 gc-voice = "gc_tui.voice_runtime.cli:main"
 gc-acp = "gc_acp.main:main"
-gc-chat = "gc_server.chat.main:main"
-gc-a2a = "gc_server.a2a.main:main"
 
 [tool.hatch.build.targets.wheel]
 bypass-selection = true
@@ -219,10 +217,6 @@ ignore-paths = [
     ".*/conftest\\.py$",
     "^external/.*",
     ".*/external/.*",
-    # ВРЕМЕННО: a2a до переезда в gc-server на дублирование не проверялся;
-    # его main повторяет main chat — оба уходят в gc-serve (план сервера,
-    # задача 1.4), остальной a2a переписывается на a2a-sdk (задача 2.6).
-    ".*/gc_server/a2a/.*",
 ]
 
 [tool.pylint.similarities]

@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 from gc_core.utils.logging_module import create_run_logger
-from gc_server.rest_api.agent_execution_registry import AgentRunRegistry
+from gc_server.webhook.registry import AgentRunRegistry
 from gc_testkit.settings import make_settings
 
 

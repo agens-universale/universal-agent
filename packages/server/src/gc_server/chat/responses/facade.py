@@ -34,6 +34,7 @@ from gc_server.chat.responses.prompt_assets import (
 from gc_server.chat.responses.stream_map import StreamMap
 from gc_server.chat.responses.turn import TurnRun
 from gc_server.chat.tool_flow import ToolFlow
+from gc_server.config import LOOPBACK, ChatConfig
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +57,9 @@ class ResponsesFacade:
         tools_cache: Any = None,
         os_backend: Any = None,
         index: ResponseIndex | None = None,
+        section: ChatConfig | None = None,
     ) -> None:
+        section = section or ChatConfig(host=LOOPBACK)
         self._settings = settings
         self._agent_factory = agent_factory
         self._auth = auth_connector
@@ -65,10 +68,10 @@ class ResponsesFacade:
         self._index = index or ResponseIndex.for_threads_dir(
             resolve_threads_dir(settings)
         )
-        chat_api = settings.settings.chat_api
-        self.auth_token = chat_api.auth_token
-        self.cors_origins = _cors_origins(chat_api.cors_origins)
-        self.bind_host = chat_api.host
+        self.auth_token = section.auth_token or ""
+        self.cors_origins = _cors_origins(section.cors_origins)
+        self.bind_host = section.host or LOOPBACK
+        self._launch_root = section.launch_root
         self.model_id = str(settings.settings.agent.model or "")
         self._agents: OrderedDict[str, Any] = OrderedDict()
         self._busy: set[str] = set()
@@ -89,7 +92,7 @@ class ResponsesFacade:
 
     def new_dialog_cwd(self, sent: str | None = None) -> str:
         """Корень нового хода: абсолютный путь или launch_root."""
-        return cwd_for_new(sent, self._settings.settings.chat_api.launch_root)
+        return cwd_for_new(sent, self._launch_root)
 
     async def get(self, response_id: str) -> dict:
         record = await self._index.load(response_id)

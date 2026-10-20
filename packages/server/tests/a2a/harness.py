@@ -8,7 +8,8 @@ from contextlib import asynccontextmanager
 import httpx
 from gc_server.a2a.facade import A2aFacade
 from gc_server.a2a.http_api import create_app
-from gc_server.a2a.main import apply_a2a_runtime_defaults
+from gc_server.a2a.surface import apply_a2a_runtime_defaults
+from gc_server.config import A2aConfig
 from gc_testkit.settings import make_settings
 
 
@@ -105,7 +106,7 @@ class HungStreamAgent(AnswerAgent):
 class ConfirmAgent(AnswerAgent):
     """Ход упирается в подтверждение безопасности, как write/command guard.
 
-    Настройки контекста — те, что ``gc_server.a2a.main`` отдаёт фасаду: с
+    Настройки контекста — те, что поверхность a2a отдаёт фасаду: с
     объявлением канала A2A.
     """
 
@@ -174,13 +175,24 @@ async def session(
         created.append(agent)
         return agent
 
-    overrides = {"paths.threads_data_path": str(tmp_path), **settings}
+    # Ключи "a2a.*" — секция поверхности (config_server.yml), прочие —
+    # настройки агента.
+    section = {
+        key.removeprefix("a2a."): value
+        for key, value in settings.items()
+        if key.startswith("a2a.")
+    }
+    overrides = {
+        "paths.threads_data_path": str(tmp_path),
+        **{k: v for k, v in settings.items() if not k.startswith("a2a.")},
+    }
     if token:
-        overrides["a2a.auth_token"] = token
+        section["auth_token"] = token
     facade = A2aFacade(
         settings=make_settings(overrides),
         agent_factory=factory,
         clock=clock,
+        section=A2aConfig(**{"host": "127.0.0.1", **section}),
     )
     transport = httpx.ASGITransport(app=create_app(facade))
     async with httpx.AsyncClient(

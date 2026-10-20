@@ -122,15 +122,13 @@ def _default_threads_dir() -> str:
     ``python -m gc_server.cleanup_threads`` и без разбора конфига, если каталог
     задан явно.
     """
+    from gc_core.config import load_settings
     from gc_core.thread_store import resolve_threads_dir
 
-    from gc_server.rest_api.server_config import (
-        build_agent_settings_for_server,
-        load_server_config,
-    )
+    from gc_server.config import load_server_config, surface_settings
 
     return resolve_threads_dir(
-        build_agent_settings_for_server(load_server_config())
+        surface_settings(load_settings(), load_server_config(), "webhook")
     )
 
 
@@ -138,7 +136,7 @@ def main() -> int:
     """CLI-обёртка: `python -m gc_server.cleanup_threads`.
 
     Дефолт ``--threads-dir`` берётся ОТТУДА ЖЕ, откуда его берёт фоновый janitor
-    (``server_cleanup_threads.register_cleanup_threads_on_startup``) — из
+    (``webhook.janitor.start_threads_cleanup``) — из
     серверного конфига через ``resolve_threads_dir``. Иначе одна и та же чистка
     имела бы два разных представления о том, что чистит.
 

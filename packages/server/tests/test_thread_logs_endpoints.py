@@ -4,27 +4,20 @@
 
 import pytest
 from fastapi.testclient import TestClient
-from gc_core.threads.facade import Threads
-from gc_core.threads.file_store import FileThreadStore
 from gc_testkit.legacy_threads import LEGACY_THREADS, install_legacy_threads
 
 
 @pytest.fixture()
-def threads_dir(monkeypatch, tmp_path):
-    from gc_server import server
-
-    root = install_legacy_threads(tmp_path)
-    monkeypatch.setattr(
-        server, "_threads", lambda: Threads(FileThreadStore(root))
-    )
-    return root
+def threads_dir(tmp_path):
+    return install_legacy_threads(tmp_path)
 
 
 @pytest.fixture()
 def client(threads_dir):
-    from gc_server import server
+    from server_harness import make_webhook
 
-    return TestClient(server.app)
+    surface = make_webhook(**{"paths.threads_data_path": str(threads_dir)})
+    return TestClient(surface.app())
 
 
 def _files(root):

@@ -1,10 +1,11 @@
 """HTTP: модели, авторизация, SSE, harbor до bind."""
 
+import pytest
 from fastapi.testclient import TestClient
-from gc_server.chat.main import main
 from gc_server.chat.responses.facade import ResponsesFacade
 from gc_server.chat.responses.http_api import create_app
 from gc_server.chat.responses.index_store import ResponseIndex
+from gc_server.config import ChatConfig
 from gc_testkit.settings import make_settings
 
 # Host-guard пускает только loopback (gc_server.chat.http_guard).
@@ -46,12 +47,11 @@ def _app(tmp_path, *, token: str = "", origins: list[str] | None = None):
         return agent
 
     facade = ResponsesFacade(
-        settings=make_settings(
-            {
-                "agent.model": "agent-model",
-                "chat_api.auth_token": token,
-                "chat_api.cors_origins": list(origins or []),
-            }
+        settings=make_settings({"agent.model": "agent-model"}),
+        section=ChatConfig(
+            host="127.0.0.1",
+            auth_token=token,
+            cors_origins=list(origins or []),
         ),
         agent_factory=factory,
         index=ResponseIndex.for_threads_dir(str(threads)),
@@ -163,29 +163,28 @@ def test_non_stream_failure_is_500(tmp_path):
     assert body["error"]["message"] == "boom"
 
 
-def test_harbor_exits_before_bind(monkeypatch, capsys):
-    def load(path, profile_override=None):
-        del path, profile_override
-        return make_settings(os_backend="harbor")
+def test_harbor_is_refused_before_bind():
+    from gc_server.app import ServerRuntime
+    from gc_server.chat.surface import ChatSurface
+    from gc_server.config import ServerConfig, ServerConfigError
 
-    def run(coro):
-        coro.close()
-        raise AssertionError("bind")
-
-    monkeypatch.setattr("gc_server.chat.main.load_settings", load)
-    monkeypatch.setattr("gc_server.chat.main.asyncio.run", run)
-    assert main(["--config", "c.yml"]) == 1
-    captured = capsys.readouterr()
-    assert captured.out == ""
-    assert "harbor" in captured.err
+    runtime = ServerRuntime(
+        base=make_settings(os_backend="harbor"), config=ServerConfig()
+    )
+    with pytest.raises(ServerConfigError) as err:
+        ChatSurface(runtime)
+    assert "harbor" in str(err.value)
 
 
-def test_local_bind_uses_loopback_and_warns(monkeypatch, capsys, tmp_path):
-    captured = {}
+def test_local_bind_uses_loopback_and_warns(capsys, tmp_path):
+    from gc_server import cli
+    from gc_server.app import ServerRuntime, _announce
+    from gc_server.chat.surface import ChatSurface
+    from gc_server.config import ServerConfig
 
-    def load(path, profile_override=None):
-        del path, profile_override
-        return make_settings(
+    cfg = ServerConfig()
+    runtime = ServerRuntime(
+        base=make_settings(
             {
                 "os_backend": "local",
                 "paths.threads_data_path": str(tmp_path),
@@ -193,27 +192,15 @@ def test_local_bind_uses_loopback_and_warns(monkeypatch, capsys, tmp_path):
                 "agent.strict_turn_finish_validation": True,
                 "todo.reminder_steps": 9,
             }
-        )
-
-    class FakeServer:
-        def __init__(self, config) -> None:
-            captured["host"] = config.host
-            captured["port"] = config.port
-            captured["app"] = config.app
-
-        async def serve(self) -> None:
-            return None
-
-    monkeypatch.setattr("gc_server.chat.main.load_settings", load)
-    monkeypatch.setattr("gc_server.chat.main.uvicorn.Server", FakeServer)
-    assert main(["--config", "c.yml"]) == 0
-    assert captured["host"] == "127.0.0.1"
-    assert captured["port"] == 8090
-    paths = {getattr(route, "path", None) for route in captured["app"].routes}
-    assert "/v1/responses" in paths
-    assert "/v1/chat/completions" in paths
-    assert "/v1/models" in paths
-    preflight = TestClient(captured["app"], base_url=LOOPBACK).options(
+        ),
+        config=cfg,
+    )
+    surface = ChatSurface(runtime)
+    assert cfg.address("chat") == ("127.0.0.1", 8090)
+    app = surface.app()
+    paths = {getattr(route, "path", None) for route in app.routes}
+    assert {"/v1/responses", "/v1/chat/completions", "/v1/models"} <= paths
+    preflight = TestClient(app, base_url=LOOPBACK).options(
         "/v1/models",
         headers={
             "Origin": "http://localhost:3000",
@@ -222,6 +209,8 @@ def test_local_bind_uses_loopback_and_warns(monkeypatch, capsys, tmp_path):
         },
     )
     assert "access-control-allow-origin" not in preflight.headers
+    cli._warn(cfg, [surface])
+    _announce(app, *cfg.address("chat"))
     out = capsys.readouterr()
     assert out.out == ""
     assert "без авторизации" in out.err
@@ -241,7 +230,7 @@ def test_local_bind_uses_loopback_and_warns(monkeypatch, capsys, tmp_path):
         "GET " + origin + "/v1/workspace/artifacts",
         "GET " + origin + "/v1/workspace/artifacts/download",
     ):
-        assert "gc-chat: " + line in out.err
+        assert "gc-serve: " + line in out.err
 
 
 def test_foreign_site_cannot_start_turn(tmp_path):
@@ -285,9 +274,8 @@ def test_wide_bind_skips_host_check(tmp_path):
         return _Agent()
 
     facade = ResponsesFacade(
-        settings=make_settings(
-            **{"agent.model": "m", "chat_api.host": "0.0.0.0"}
-        ),
+        settings=make_settings(**{"agent.model": "m"}),
+        section=ChatConfig(host="0.0.0.0"),
         agent_factory=factory,
         index=ResponseIndex.for_threads_dir(str(threads)),
     )

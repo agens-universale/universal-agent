@@ -8,6 +8,7 @@ from gc_server.chat.errors import ApiError
 from gc_server.chat.responses.facade import ResponsesFacade
 from gc_server.chat.responses.index_store import ResponseIndex
 from gc_server.chat.responses.turn import TurnRun
+from gc_server.config import ChatConfig
 from gc_testkit.settings import make_settings
 
 
@@ -67,9 +68,8 @@ def _facade(tmp_path, agent: FakeAgent) -> ResponsesFacade:
         return agent
 
     return ResponsesFacade(
-        settings=make_settings(
-            **{"agent.model": "from-config", "chat_api.launch_root": None}
-        ),
+        settings=make_settings(**{"agent.model": "from-config"}),
+        section=ChatConfig(host="127.0.0.1", launch_root=None),
         agent_factory=factory,
         index=ResponseIndex.for_threads_dir(str(threads)),
     )

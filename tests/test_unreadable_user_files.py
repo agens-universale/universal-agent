@@ -327,7 +327,7 @@ def _cases() -> list[_Case]:
     def _server_config(path, *, monkeypatch, **_):
         from gc_core.config_modules import env_vars
         from gc_core.config_modules.env_vars import EnvVars
-        from gc_server.rest_api import server_config as server_config
+        from gc_server import config as server_config
 
         monkeypatch.setattr(
             env_vars, "env", EnvVars(server_config_path=Path(path))

@@ -39,6 +39,7 @@ from gc_server.a2a.params import (
 )
 from gc_server.a2a.store import CANCELED, TERMINAL, WORKING, TaskStore
 from gc_server.a2a.turn import PEER_FAILURE_TEXT, Turn
+from gc_server.config import LOOPBACK, A2aConfig
 
 logger = logging.getLogger(__name__)
 
@@ -57,15 +58,17 @@ class A2aFacade:
         tools_cache: Any = None,
         os_backend: Any = None,
         clock: Any = None,
+        section: A2aConfig | None = None,
     ) -> None:
+        section = section or A2aConfig(host=LOOPBACK)
+        self._section = section
         self._settings = settings
         self._agent_factory = agent_factory
         self._auth = auth_connector
         self._tools_cache = tools_cache
         self._os_backend = os_backend
-        section = settings.settings.a2a
-        self.auth_token = section.auth_token
-        self.bind_host = section.host
+        self.auth_token = section.auth_token or ""
+        self.bind_host = section.host or LOOPBACK
         self.bind_port = section.port
         self._launch_root = section.launch_root
         self._store = TaskStore(clock)
@@ -78,13 +81,13 @@ class A2aFacade:
         self._closed = False
 
     def card(self) -> dict:
-        section = self._settings.settings.a2a
-        url = section.public_url or interface_url(section.host, section.port)
+        section = self._section
+        url = section.public_url or interface_url(self.bind_host, section.port)
         return agent_card(
             name=section.name,
             description=section.description,
             url=url,
-            secured=section.auth_token != "",
+            secured=self.auth_token != "",
         )
 
     async def send_message(self, params: Any) -> dict:

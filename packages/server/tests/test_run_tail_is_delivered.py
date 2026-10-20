@@ -19,9 +19,9 @@ import types
 
 import httpx
 import pytest
-from gc_server import server
-from gc_server.rest_api import agent_execution_registry as registry_module
-from gc_server.rest_api.agent_execution_registry import AgentRunRegistry
+from server_harness import make_webhook
+from gc_server.webhook import registry as registry_module
+from gc_server.webhook.registry import AgentRunRegistry
 from gc_testkit.settings import make_settings
 
 #: Потолок любого ожидания: зависший прогон должен дать красный тест, а не
@@ -283,7 +283,8 @@ async def test_tail_turn_moves_last_activity(env, monkeypatch):
     monkeypatch.setattr(
         registry_module, "time", types.SimpleNamespace(time=lambda: clock.now)
     )
-    monkeypatch.setattr(server, "agent_run_registry", env.registry)
+    surface = make_webhook()
+    surface.registry = env.registry
     in_tail, release_tail = asyncio.Event(), asyncio.Event()
 
     async def _message_then_teardown_goes_on():
@@ -299,7 +300,7 @@ async def test_tail_turn_moves_last_activity(env, monkeypatch):
 
     env.teardown_steps.append(_message_then_teardown_goes_on)
     env.turn_steps[2] = _tail_turn
-    transport = httpx.ASGITransport(app=server.app)
+    transport = httpx.ASGITransport(app=surface.app())
     async with httpx.AsyncClient(
         transport=transport, base_url="http://test"
     ) as client:

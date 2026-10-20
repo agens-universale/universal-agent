@@ -75,3 +75,8 @@ _.list_resources
 # зовёт оператор. packages/stores/src/gc_stores/kv/.
 MemoryKV
 _.sweep
+
+# Переопределение метода uvicorn.Server: его зовёт сам uvicorn (Server.serve).
+# Наш вариант не ставит обработчики сигналов — несколько серверов процесса
+# гасятся общим. packages/server/src/gc_server/app.py.
+_.capture_signals

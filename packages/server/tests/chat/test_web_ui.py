@@ -22,6 +22,7 @@ from gc_core.threads.models import (
     ThreadChange,
     ThreadKey,
 )
+from gc_server.config import ChatConfig
 from gc_testkit.settings import make_settings
 
 # Host-guard пускает только loopback (gc_server.chat.http_guard).
@@ -37,24 +38,25 @@ def _rid(n: int) -> str:
 def _joint(tmp_path, *, token: str = "", launch_root: str | None = None):
     threads = tmp_path / "threads"
     threads.mkdir(exist_ok=True)
-    settings = make_settings(
-        {
-            "agent.model": "agent-model",
-            "chat_api.auth_token": token,
-            "chat_api.launch_root": launch_root,
-            "paths.threads_data_path": str(threads),
-        }
-    )
+    kwargs = {
+        "settings": make_settings(
+            {
+                "agent.model": "agent-model",
+                "paths.threads_data_path": str(threads),
+            }
+        ),
+        "section": ChatConfig(
+            host="127.0.0.1", auth_token=token, launch_root=launch_root
+        ),
+    }
 
     async def factory(settings, **kwargs):
         del settings, kwargs
         raise AssertionError("agent")
 
     index = ResponseIndex.for_threads_dir(str(threads))
-    responses = ResponsesFacade(
-        settings=settings, agent_factory=factory, index=index
-    )
-    completions = CompletionsFacade(settings=settings, agent_factory=factory)
+    responses = ResponsesFacade(**kwargs, agent_factory=factory, index=index)
+    completions = CompletionsFacade(**kwargs, agent_factory=factory)
     return create_app(responses, completions), index, threads
 
 

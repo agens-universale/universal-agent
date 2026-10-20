@@ -6,8 +6,10 @@ from fastapi.testclient import TestClient
 
 @pytest.fixture()
 def client(monkeypatch, tmp_path):
-    from gc_server import server
+    from gc_server.webhook import surface as server
+    from server_harness import make_webhook
 
+    surface = make_webhook(tmp_path)
     captured = {}
 
     async def _fake_create_run_context(loaded, **kwargs):
@@ -30,12 +32,12 @@ def client(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(server, "build_auth_connector", lambda settings: None)
     monkeypatch.setattr(
-        server.agent_run_registry, "astart_if_absent", _fake_start_if_absent
+        surface.registry, "astart_if_absent", _fake_start_if_absent
     )
     monkeypatch.setattr(
-        server.agent_run_registry, "add_user_message", _fake_add_user_message
+        surface.registry, "add_user_message", _fake_add_user_message
     )
-    return TestClient(server.app), captured
+    return TestClient(surface.app()), captured
 
 
 def test_trace_id_reaches_run_config(client):

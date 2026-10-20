@@ -12,11 +12,11 @@ from gc_server.chat.completions.facade import CompletionsFacade
 from gc_server.chat.completions.http_api import (
     create_app as create_completions,
 )
-from gc_server.chat.main import main
 from gc_server.chat.responses.facade import ResponsesFacade
 from gc_server.chat.responses.http_api import create_app as create_responses
 from gc_server.chat.responses.index_store import ResponseIndex
 from gc_core.settings import LoadedSettings
+from gc_server.config import ChatConfig
 from gc_testkit.settings import make_settings
 
 # Host-guard пускает только loopback (gc_server.chat.http_guard).
@@ -85,7 +85,6 @@ def _settings(
         "backend.proxy": "http://proxy.test:8080",
         "backend.api_mode": "chat_completions",
         "backend.chat_completion_headers": {"X-Corp": "yes"},
-        "chat_api.auth_token": "client-secret",
     }
     return make_settings({**config, **extra})
 
@@ -104,6 +103,7 @@ def _completions(
 
     facade = CompletionsFacade(
         settings=_settings(tmp_path, model, **extra),
+        section=ChatConfig(host="127.0.0.1", auth_token="client-secret"),
         agent_factory=factory,
         auth_connector=auth,
     )
@@ -159,7 +159,7 @@ def test_models_list_order_and_empty_config(tmp_path):
 def test_joint_and_responses_list_the_same_ids(tmp_path):
     threads = tmp_path / "threads"
     threads.mkdir()
-    settings = _settings(tmp_path, **{"chat_api.auth_token": ""})
+    settings = _settings(tmp_path)
 
     async def factory(settings, **kwargs):
         del settings, kwargs
@@ -183,21 +183,18 @@ def test_joint_and_responses_list_the_same_ids(tmp_path):
     ]
 
 
-def test_config_model_gc_ua_exits_before_bind(monkeypatch, capsys):
-    def load(path, profile_override=None):
-        del path, profile_override
-        return make_settings(os_backend="local", **{"agent.model": "GC-UA"})
+def test_config_model_gc_ua_is_refused_before_bind():
+    from gc_server.app import ServerRuntime
+    from gc_server.chat.surface import ChatSurface
+    from gc_server.config import ServerConfig, ServerConfigError
 
-    def run(coro):
-        coro.close()
-        raise AssertionError("bind")
-
-    monkeypatch.setattr("gc_server.chat.main.load_settings", load)
-    monkeypatch.setattr("gc_server.chat.main.asyncio.run", run)
-    assert main(["--config", "c.yml"]) == 1
-    captured = capsys.readouterr()
-    assert captured.out == ""
-    assert "GC-UA" in captured.err
+    runtime = ServerRuntime(
+        base=make_settings(os_backend="local", **{"agent.model": "GC-UA"}),
+        config=ServerConfig(),
+    )
+    with pytest.raises(ServerConfigError) as err:
+        ChatSurface(runtime)
+    assert "GC-UA" in str(err.value)
 
 
 def test_spaced_and_lower_model_is_not_the_agent(tmp_path, monkeypatch):

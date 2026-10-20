@@ -4,7 +4,7 @@
 import importlib
 import types
 
-from gc_server.a2a.main import apply_a2a_runtime_defaults
+from gc_server.a2a.surface import apply_a2a_runtime_defaults
 from gc_core.execution.state import SharedStateData
 from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
 from gc_core.security.confirm_port import confirm_available

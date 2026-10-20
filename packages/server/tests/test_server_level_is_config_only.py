@@ -1,100 +1,38 @@
 """Уровень модели на сервере — только из конфига (`agent_overrides`): поле
-`level` в теле вебхука — часть сообщения модели, а не настройка.
-
-Изоляция импорта — тем же приёмом, что test_server_broken_config_wiring.py
-(сброс sys.modules['server'] + патч rest_api.server_config.* ДО импорта).
-"""
-
-import sys
-from unittest.mock import patch
-
-import pytest
-
-pytest.importorskip(
-    "fastapi", reason="server-side dep, install via server_requirements.txt"
-)
-pytest.importorskip(
-    "starlette", reason="server-side dep, install via server_requirements.txt"
-)
+`level` в теле вебхука — часть сообщения модели, а не настройка."""
 
 from fastapi.testclient import TestClient
-from gc_testkit import as_coro
-from gc_testkit.settings import make_settings
 from gc_core.settings import settings_of
-
-
-def _reset_server_module():
-    for mod in list(sys.modules):
-        if mod == "gc_server.server" or mod.startswith("gc_server.server."):
-            sys.modules.pop(mod, None)
-    parent = sys.modules.get("gc_server")
-    if parent is not None and hasattr(parent, "server"):
-        delattr(parent, "server")
-
-
-def _minimal_server_config():
-    return {
-        "server": {},
-        "defaults": {"system": "generic"},
-        "agent": {},
-        "agent_overrides": {"level": "auto"},
-        "logging": {},
-        "swarm": {},
-        "threads_cleanup": {},
-    }
-
-
-def _post_webhook(monkeypatch, config_dict, body):
-    """Вебхук на подменённом конфиге; возвращает конфиг, с которым собран RunContext."""
-    seen = {}
-    with (
-        patch(
-            "gc_server.rest_api.server_config.load_server_config",
-            return_value=_minimal_server_config(),
-        ),
-        patch(
-            "gc_server.rest_api.server_config.build_agent_settings_for_server",
-            return_value=make_settings(config_dict),
-        ),
-    ):
-        from gc_server import server
-
-    monkeypatch.setattr(
-        server,
-        "acreate_run_context",
-        as_coro(lambda cfg, **kw: seen.setdefault("cfg", cfg)),
-    )
-    monkeypatch.setattr(server, "build_auth_connector", lambda cfg: None)
-    monkeypatch.setattr(
-        server.agent_run_registry,
-        "astart_if_absent",
-        as_coro(lambda **kw: True),
-    )
-    monkeypatch.setattr(
-        server.agent_run_registry, "add_user_message", lambda **kw: False
-    )
-
-    client = TestClient(server.app)
-    resp = client.post("/events/webhook", json=body)
-    assert resp.status_code == 200
-    return seen["cfg"]
+from gc_server.webhook import surface as webhook_module
+from gc_testkit import as_coro
+from server_harness import make_webhook
 
 
 def test_level_in_the_request_body_is_not_a_level_input(monkeypatch):
-    """Поле `level` в теле вебхука — часть сообщения модели, а не настройка:
-    уровень берётся только из конфига сервера (`agent_overrides`)."""
-    _reset_server_module()
-    config_dict = {
-        "level": "default",
-        "agent.auto_routing": True,
-        "backend.api_mode": "chat_completions",
-        "models": {"fast": {}, "mid": {}, "big": {}},
-        "slots": {"light": "fast", "default": "mid", "max": "big"},
-    }
-    try:
-        cfg = _post_webhook(
-            monkeypatch, config_dict, {"task_id": "t2", "level": "auto"}
-        )
-        assert settings_of(cfg).level == "default"
-    finally:
-        _reset_server_module()
+    seen = {}
+    surface = make_webhook(
+        **{
+            "level": "default",
+            "agent.auto_routing": True,
+            "backend.api_mode": "chat_completions",
+            "models": {"fast": {}, "mid": {}, "big": {}},
+            "slots": {"light": "fast", "default": "mid", "max": "big"},
+        }
+    )
+    monkeypatch.setattr(
+        webhook_module,
+        "acreate_run_context",
+        as_coro(lambda cfg, **kw: seen.setdefault("cfg", cfg)),
+    )
+    monkeypatch.setattr(webhook_module, "build_auth_connector", lambda c: None)
+    monkeypatch.setattr(
+        surface.registry, "astart_if_absent", as_coro(lambda **kw: True)
+    )
+    monkeypatch.setattr(
+        surface.registry, "add_user_message", lambda **kw: False
+    )
+    resp = TestClient(surface.app()).post(
+        "/events/webhook", json={"task_id": "t2", "level": "auto"}
+    )
+    assert resp.status_code == 200
+    assert settings_of(seen["cfg"]).level == "default"

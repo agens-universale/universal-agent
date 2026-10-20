@@ -7,7 +7,7 @@ from typing import Any, Dict
 from gc_core.bundled_assets import bundled_root
 from gc_core.config_modules import env_vars
 
-# Корень bundled-ассетов. Раньше брался из rest_api.server_config — это была
+# Корень bundled-ассетов. Раньше брался из загрузчика конфига сервера — это была
 # единственная зависимость swarm → server, причём там PROJECT_ROOT объявлен как
 # тот же str(bundled_root()) над ядром. Импортируем напрямую, чтобы swarm
 # зависел только от core.
@@ -126,7 +126,7 @@ def _user_config_dir(server_cfg: Dict[str, Any], explicit: str | None) -> str:
     Приоритет: явный аргумент `config_dir` → каталог прочитанного
     config_server.yml (ключ `config_path`, его кладёт `load_server_config`) →
     CWD. CWD в хвосте не наугад: это первый кандидат в поиске самого
-    config_server.yml (см. `rest_api.server_config._server_config_candidates`),
+    config_server.yml (см. `gc_server.config._candidates`),
     так что при «файла нет вовсе» относительный путь смотрит туда же, куда
     смотрел поиск.
     """

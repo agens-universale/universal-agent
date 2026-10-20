@@ -7,11 +7,14 @@ from gc_server.chat.agent_config import prepare_agent_settings
 from gc_server.chat.completions.prompt_assets import (
     completions_special_instructions_path,
 )
-from gc_server.chat.main import apply_chat_runtime_defaults, backend_rejection
+from gc_server.chat.surface import (
+    apply_chat_runtime_defaults,
+    backend_rejection,
+)
+from gc_server.config import ChatConfig, load_server_config
 from gc_server.chat.responses.prompt_assets import (
     responses_special_instructions_path,
 )
-from gc_core.config_modules.chat_api import ChatApiConfig
 from gc_core.constants.tool_names import (
     ASK_HUMAN_TOOL_NAME,
     INTERMEDIATE_REPLY_TOOL_NAME,
@@ -49,14 +52,12 @@ def test_defaults_allow_and_finish_gate_off():
 
 def test_channel_keys_win():
     loaded = apply_chat_runtime_defaults(
-        make_settings(
-            **{
-                "chat_api.text_answer_mode": "judge",
-                "chat_api.finish_gate_mode": "smart",
-                "chat_api.todo_reminder_steps": 3,
-                "agent.strict_turn_finish_validation": False,
-            }
-        )
+        make_settings(**{"agent.strict_turn_finish_validation": False}),
+        ChatConfig(
+            text_answer_mode="judge",
+            finish_gate_mode="smart",
+            todo_reminder_steps=3,
+        ),
     )
     assert loaded.runtime.text_answer_mode == "judge"
     assert loaded.settings.agent.strict_turn_finish_validation is True
@@ -68,21 +69,21 @@ def test_finish_gate_on_overrides_agent_false():
     loaded = apply_chat_runtime_defaults(
         make_settings(
             **{
-                "chat_api.finish_gate_mode": "on",
                 "agent.strict_turn_finish_validation": False,
                 "todo.reminder_steps": 2,
             }
-        )
+        ),
+        ChatConfig(finish_gate_mode="on"),
     )
     assert loaded.settings.agent.strict_turn_finish_validation is True
     assert loaded.runtime.finish_gate_smart is False
     assert loaded.settings.todo.reminder_steps == 0
 
 
-def test_yaml_section_forbids_unknown_and_loads(tmp_path):
+def test_section_forbids_unknown_and_loads(tmp_path):
     with pytest.raises(Exception):
-        ChatApiConfig(todo_nudge=1)
-    cfg = ChatApiConfig(
+        ChatConfig(todo_nudge=1)
+    cfg = ChatConfig(
         todo_reminder_steps=5,
         text_answer_mode="deny",
         finish_gate_mode="off",
@@ -91,28 +92,24 @@ def test_yaml_section_forbids_unknown_and_loads(tmp_path):
     assert cfg.text_answer_mode == "deny"
     assert cfg.todo_reminder_steps == 5
     assert cfg.cors_origins == ["http://ui"]
-    from gc_core.config import load_settings
-
-    path = tmp_path / "config.yml"
+    path = tmp_path / "config_server.yml"
     path.write_text(
-        "agent:\n"
-        "  strict_turn_finish_validation: true\n"
-        "chat_api:\n"
+        "chat:\n"
         "  text_answer_mode: allow\n"
         '  finish_gate_mode: "off"\n'
         "  todo_reminder_steps: 0\n",
         encoding="utf-8",
     )
-    loaded = load_settings(str(path))
-    assert loaded.settings.chat_api.todo_reminder_steps == 0
-    assert loaded.settings.agent.strict_turn_finish_validation is True
-    loaded = apply_chat_runtime_defaults(loaded)
+    server = load_server_config(str(path))
+    assert server.address("chat") == ("127.0.0.1", 8090)
+    loaded = apply_chat_runtime_defaults(
+        make_settings(**{"agent.strict_turn_finish_validation": True}),
+        server.surface("chat"),
+    )
     assert loaded.runtime.text_answer_mode == "allow"
     assert loaded.settings.agent.strict_turn_finish_validation is False
     assert loaded.runtime.finish_gate_smart is False
     assert loaded.settings.todo.reminder_steps == 0
-    assert loaded.settings.chat_api.host == "127.0.0.1"
-    assert loaded.settings.chat_api.port == 8090
 
 
 def test_ask_human_is_stopped_without_stamping_the_prompt():
@@ -195,11 +192,11 @@ def test_ask_human_stop_does_not_require_prior_list():
 
 
 def test_harbor_and_local_backend():
-    assert backend_rejection(make_settings()) is None
-    assert backend_rejection(make_settings(os_backend="local")) is None
-    text = backend_rejection(make_settings(os_backend="harbor"))
+    assert backend_rejection(make_settings(), "chat") is None
+    assert backend_rejection(make_settings(os_backend="local"), "chat") is None
+    text = backend_rejection(make_settings(os_backend="harbor"), "chat")
     assert text is not None
     assert "harbor" in text
-    rejected = backend_rejection(make_settings(os_backend="docker"))
+    rejected = backend_rejection(make_settings(os_backend="docker"), "chat")
     assert rejected is not None
     assert "docker" in rejected

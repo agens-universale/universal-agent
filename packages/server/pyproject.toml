@@ -20,9 +20,7 @@ dependencies = [
 
 [project.scripts]
 
-gc-serve = "gc_server.server:serve"
-gc-chat = "gc_server.chat.main:main"
-gc-a2a = "gc_server.a2a.main:main"
+gc-serve = "gc_server.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/gc_server"]

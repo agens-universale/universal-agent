@@ -23,9 +23,10 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
-from gc_server import server
-from gc_server.rest_api import agent_execution_registry as registry_module
-from gc_server.rest_api.agent_execution_registry import AgentRunRegistry
+from gc_server.webhook import surface as server
+from server_harness import make_webhook
+from gc_server.webhook import registry as registry_module
+from gc_server.webhook.registry import AgentRunRegistry
 
 #: Потолок любого ожидания в тестах. Сломанная бронь даёт не красный тест, а
 #: вечный сон ждущего вебхука — без потолка набор просто зависнет.
@@ -100,17 +101,25 @@ def harness(monkeypatch):
         h.agents.append(agent)
         return agent
 
-    monkeypatch.setattr(server, "agent_run_registry", registry)
+    global _SURFACE
+    _SURFACE = make_webhook()
+    _SURFACE.registry = registry
+    h.surface = _SURFACE
     monkeypatch.setattr(server, "acreate_run_context", _build)
     monkeypatch.setattr(server, "AgentExecutor", _executor)
     monkeypatch.setattr(server, "build_auth_connector", lambda cfg: None)
     return h
 
 
+_SURFACE = None
+
+
 def _client() -> httpx.AsyncClient:
     # Запросы идут в приложение на loop теста: два вебхука живут одновременно.
     # Упавший эндпоинт даёт 500, как у uvicorn, а не исключение в тесте.
-    transport = httpx.ASGITransport(app=server.app, raise_app_exceptions=False)
+    transport = httpx.ASGITransport(
+        app=_SURFACE.app(), raise_app_exceptions=False
+    )
     return httpx.AsyncClient(transport=transport, base_url="http://test")
 
 
@@ -326,9 +335,10 @@ _CEILING_SEC = 0.3
 
 
 def _set_ceiling(monkeypatch, value) -> None:
-    server_cfg = dict(server.SERVER_CONFIG.get("server") or {})
-    server_cfg["context_build_wait_seconds"] = value
-    monkeypatch.setitem(server.SERVER_CONFIG, "server", server_cfg)
+    del monkeypatch
+    _SURFACE.config = _SURFACE.config.model_copy(
+        update={"context_build_wait_seconds": value}
+    )
 
 
 async def test_waiting_webhook_gets_503_at_the_ceiling_and_the_build_goes_on(
@@ -452,7 +462,6 @@ async def test_ceiling_covers_the_whole_request_not_each_foreign_build(
 @pytest.mark.parametrize(
     "raw, expected",
     [
-        (None, 120.0),
         (30, 30.0),
         (0.5, 0.5),
         # Из `${ENV:...}` значение приезжает строкой.
@@ -460,14 +469,25 @@ async def test_ceiling_covers_the_whole_request_not_each_foreign_build(
     ],
 )
 def test_ceiling_is_read_from_the_server_config(raw, expected):
-    assert server._context_build_wait_s(raw) == expected
+    from gc_server.config import WebhookConfig
+
+    assert WebhookConfig().context_build_wait_seconds == 120.0
+    assert (
+        WebhookConfig(
+            context_build_wait_seconds=raw
+        ).context_build_wait_seconds
+        == expected
+    )
 
 
 @pytest.mark.parametrize(
     "raw", ["минута", 0, -5, True, float("inf"), float("nan")]
 )
-def test_broken_ceiling_falls_back_to_the_default_loudly(raw, caplog):
-    """Мусор в ключе не отключает потолок и не роняет старт, но и не молчит."""
-    with caplog.at_level(logging.WARNING, logger=server.__name__):
-        assert server._context_build_wait_s(raw) == 120.0
-    assert "context_build_wait_seconds" in caplog.text
+def test_broken_ceiling_is_a_config_error(raw):
+    """Мусор в ключе — отказ старта с координатой ключа, а не тихий потолок."""
+    from gc_server.config import WebhookConfig
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError) as err:
+        WebhookConfig(context_build_wait_seconds=raw)
+    assert "context_build_wait_seconds" in str(err.value)

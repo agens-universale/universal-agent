@@ -155,15 +155,17 @@ def test_subagent_system_prompt_asset_present():
     ).is_file()
 
 
-def test_server_agent_prompt_under_bundled_root():
-    # server_agentmd_path по умолчанию "./prompts/server_agent.md" резолвится
-    # относительно PROJECT_ROOT → должен указывать на bundled-промпт.
-    import os
+def test_server_agent_prompt_under_bundled_root(tmp_path):
+    """Роль вебхука по умолчанию — ``./prompts/server_agent.md``: рядом с
+    config_server.yml его нет, значит — bundled-промпт gc-core."""
+    from gc_server.config import ServerConfig, surface_settings
+    from gc_testkit.settings import make_settings
 
-    from gc_server.rest_api import server_config
-
-    resolved = os.path.join(
-        server_config.PROJECT_ROOT, "prompts", "server_agent.md"
+    cfg = ServerConfig().model_copy(
+        update={"config_path": str(tmp_path / "config_server.yml")}
     )
+    resolved = surface_settings(
+        make_settings({}), cfg, "webhook"
+    ).settings.paths.agent_md_path
     assert Path(resolved) == _bp("prompts", "server_agent.md")
     assert Path(resolved).is_file()

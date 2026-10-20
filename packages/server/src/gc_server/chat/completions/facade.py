@@ -30,6 +30,7 @@ from gc_server.chat.completions.prompt_assets import (
 from gc_server.chat.completions.turn import TurnRun, _safe_aclose
 from gc_server.chat.cwd import cwd_for_new
 from gc_server.chat.tool_flow import ToolFlow
+from gc_server.config import LOOPBACK, ChatConfig
 
 logger = logging.getLogger(__name__)
 
@@ -43,26 +44,26 @@ class CompletionsFacade:
         auth_connector: Any = None,
         tools_cache: Any = None,
         os_backend: Any = None,
+        section: ChatConfig | None = None,
     ) -> None:
+        section = section or ChatConfig(host=LOOPBACK)
         self._settings = settings
         self._agent_factory = agent_factory
         self._auth = auth_connector
         self._tools_cache = tools_cache
         self._os_backend = os_backend
         self._threads = Threads.from_settings(settings)
-        chat_api = settings.settings.chat_api
-        self.auth_token = chat_api.auth_token
-        self.cors_origins = _cors_origins(chat_api.cors_origins)
-        self.bind_host = chat_api.host
+        self.auth_token = section.auth_token or ""
+        self.cors_origins = _cors_origins(section.cors_origins)
+        self.bind_host = section.host or LOOPBACK
+        self._launch_root = section.launch_root
         self.model_id = str(settings.settings.agent.model or "")
         self._create_lock = asyncio.Lock()
 
     async def open(self, body: Any) -> TurnRun:
         incoming = parse_turn(body)
         thread_id = validate_thread_id(str(uuid.uuid4()))
-        cwd = cwd_for_new(
-            incoming.cwd_sent, self._settings.settings.chat_api.launch_root
-        )
+        cwd = cwd_for_new(incoming.cwd_sent, self._launch_root)
         agent = await self._agent_for(thread_id, cwd)
         try:
             bind_ask_human(agent)

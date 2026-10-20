@@ -411,6 +411,17 @@ class AgentRunRegistry:
             run.executor.add_message(make_message(content))
         return True
 
+    def cancel_all(self) -> None:
+        """Снять идущие прогоны (остановка сервера): статус — cancelled."""
+        with self._lock:
+            tasks = [
+                run.thread
+                for run in self._runs.values()
+                if not run.done and isinstance(run.thread, asyncio.Task)
+            ]
+        for task in tasks:
+            task.cancel()
+
     def stop(self, *, system: str, task_id: str) -> bool:
         key = _make_registry_key(system, task_id)
         with self._lock:
@@ -420,6 +431,3 @@ class AgentRunRegistry:
             run.stop_requested = True
         run.executor.stop_run()
         return True
-
-
-agent_run_registry = AgentRunRegistry()
