@@ -41,7 +41,10 @@ from gc_core.utils.data_urls import mask_data_urls
 from gc_core.utils.format_messages import (
     format_message_chat_completions_to_send_backend,
 )
-from gc_core.utils.http_auth import authorization_attempts
+from gc_core.utils.http_auth import (
+    remember_accepted_authorization,
+    server_authorization_attempts,
+)
 from gc_core.utils.http_proxy import resolve_proxies
 from gc_core.utils.prompt_cache import apply_prompt_cache, prompt_cache_enabled
 from gc_core.utils.schema_markers import schema_without_internal_markers
@@ -394,6 +397,8 @@ async def arequest_backend_responses(
             config_proxy=config_proxy,
         ),
         headers,
+        url=url,
+        model=data.get("model"),
         use_retry=use_retry,
         logger=logger,
     )
@@ -579,6 +584,8 @@ async def arequest_backend_chat_completions(
             config_proxy=config_proxy,
         ),
         headers,
+        url=url,
+        model=data.get("model"),
         allow_auth_retry=allow_auth_retry,
         use_retry=use_retry,
         logger=logger,
@@ -601,32 +608,44 @@ async def _arequest_authorized(
     request,
     headers: Dict,
     *,
+    url: str,
+    model: Optional[str],
     allow_auth_retry: bool = True,
     use_retry: bool = True,
     logger=None,
 ):
-    """Одна альтернатива Authorization после реального HTTP 401."""
+    """Одна альтернатива Authorization после реального HTTP 401.
+
+    Форму, с которой запрос прошёл успешно, следующие запросы к той же модели
+    на тот же URL со значением, заданным в той же форме, шлют первой.
+    Однократный клиент шлёт заданную форму как есть."""
     auth_key = next(
         (key for key in headers if key.lower() == "authorization"), None
     )
-    candidates = (
-        authorization_attempts(headers.get(auth_key)) if auth_key else []
-    )
+    raw = headers.get(auth_key) if auth_key else None
+    candidates = server_authorization_attempts(url, model, raw)
     attempts = candidates if allow_auth_retry and candidates else [None]
     for index, authorization in enumerate(attempts):
-        call_headers = dict(headers)
-        if auth_key and authorization is not None:
-            call_headers[auth_key] = authorization
         try:
-            return await _arequest_with_backoff(
+            response = await _arequest_with_backoff(
                 request,
-                headers=call_headers,
+                headers=_with_authorization(headers, auth_key, authorization),
                 use_retry=use_retry,
                 logger=logger,
             )
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code != 401 or index + 1 == len(attempts):
                 raise
+            continue
+        remember_accepted_authorization(url, model, raw, authorization)
+        return response
+
+
+def _with_authorization(headers: Dict, auth_key, authorization) -> Dict:
+    call_headers = dict(headers)
+    if authorization is not None:
+        call_headers[auth_key] = authorization
+    return call_headers
 
 
 async def _arequest_backend_chat_completions_once(
