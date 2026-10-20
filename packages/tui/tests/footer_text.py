@@ -18,3 +18,21 @@ def footer_left(scr) -> str:
     """Обе строки через перенос; пустой слот не добавляет строки."""
     mode, slot = footer_rows(scr)
     return f"{mode}\n{slot}" if slot else mode
+
+
+def slot_texts() -> list[str]:
+    """Все тексты реестра `footer_slot`: строки, значения словарей и
+    кортежей (шаблоны — как есть, без подстановки)."""
+    from gc_tui.services import footer_slot
+
+    texts: list[str] = []
+    for name, value in vars(footer_slot).items():
+        if name.startswith("_") or not name.isupper():
+            continue
+        if isinstance(value, str):
+            texts.append(value)
+        elif isinstance(value, dict):
+            texts.extend(v for v in value.values() if isinstance(v, str))
+        elif isinstance(value, tuple):
+            texts.extend(v for v in value if isinstance(v, str))
+    return texts

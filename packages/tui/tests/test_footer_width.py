@@ -53,7 +53,8 @@ async def test_right_column_leaves_room_for_notices_badge():
         room = _left_room(scr)
         assert cell_len(scr._footer_mode_line().plain) <= room
         assert _badge_cols(scr) <= room
-        assert scr._footer_slot_line().plain.startswith("⚠ 3")
+        badge = scr._footer_frame().badge
+        assert scr._footer_slot_line(badge).plain.startswith("⚠ 3")
         # Односторонние assert'ы выше не ловят излишне зажатую правую часть —
         # имя модели на этой ширине обязано быть целым.
         assert "anthropic/claude-opus-5" in scr._compose_footer_right().plain

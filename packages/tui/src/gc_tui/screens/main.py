@@ -162,7 +162,7 @@ from gc_tui.widgets.click_model import focus_target_at
 from gc_tui.widgets.command_input import CommandTextArea
 from gc_tui.widgets.command_palette import CommandPalette
 from gc_tui.widgets.plan_panel import PlanPanel
-from gc_tui.widgets.static_content import update_if_changed
+from gc_tui.widgets.static_content import text_key, update_if_changed
 from gc_tui.widgets.thinking_indicator import (
     DONE_LABEL,
     DONE_LABEL_PLAN,
@@ -365,6 +365,13 @@ _FooterHeadSnapshot = namedtuple(
     "_FooterHeadSnapshot",
     ("profile", "mode_auto", "level_color", "model", "running", "transition"),
     defaults=(None,),
+)
+
+# Данные одной сборки футера, резолвятся ОДИН раз на кадр и идут в обе
+# колонки: бейдж уведомлений (строка 2 левой и резерв лесенки правой),
+# снимок шапки, плашка контекста и сегменты цен («запрос», «сессия»).
+_FooterFrame = namedtuple(
+    "_FooterFrame", ("badge", "snapshot", "meter", "usage")
 )
 
 
@@ -637,6 +644,8 @@ class TraceScreen(Screen):
         self._footer_refusal_active: bool = False
         self._refusal_run_id = None  # прогон, ШЕДШИЙ при постановке отказа
         self._refusal_input_text = ""  # текст поля ввода при постановке отказа
+        # Ключ последней сборки футера (`_footer_inputs`); None — не собран.
+        self._footer_key: Optional[tuple] = None
         # Input history: per-project ↑/↓ навигация.
         # _history создаётся в on_mount (project_dir = threads_dir.parent).
         self._history = None  # type: Optional["InputHistory"]
@@ -1033,7 +1042,7 @@ class TraceScreen(Screen):
             head.append_text(meter)
         return head
 
-    def _compose_footer_right(self) -> Text:
+    def _compose_footer_right(self, frame: _FooterFrame | None = None) -> Text:
         """Правый край футера: [профиль ]●[ модель] · контекст [+ цены вниз].
 
         Единая лесенка жертв; первое подошедшее и есть ответ:
@@ -1064,13 +1073,16 @@ class TraceScreen(Screen):
         имя модели не возвращаются. Поэтому «всё одной строкой» пробуется лишь
         рядом с полной пилюлей, а перебор имени начинается с потолка.
 
-        `snapshot` резолвится ОДИН раз на кадр (perf) — лесенка получает его
-        готовым и заново не резолвит."""
-        request_seg, session_seg = self._usage_segments()
+        Данные кадра (`frame`, `_footer_frame`) резолвятся ОДИН раз (perf) —
+        лесенка получает их готовыми и заново не резолвит. Не передан —
+        резолвим сами (одиночный вызов вне сборки футера)."""
+        if frame is None:
+            frame = self._footer_frame()
+        request_seg, session_seg = frame.usage
         available = self._footer_right_available_width()
         total = self._footer_total_width()
-        snapshot = self._footer_head_snapshot()
-        meter = self._context_meter()
+        snapshot = frame.snapshot
+        meter = frame.meter
 
         def build(
             profile_cols: int | None,
@@ -1109,7 +1121,7 @@ class TraceScreen(Screen):
         # ступеней, глиф — платных и пол: «Ctrl+C/stop» и ответ агенту урезать
         # нечем. Пол и бейдж резервируются, дальше жертвует правая.
         full_line, glyph_line = self._footer_mode_variants()
-        badge_cols = self._footer_badge_line().cell_len
+        badge_cols = self._footer_badge_line(frame.badge).cell_len
 
         def fits(result: Text, mode_line: Text) -> bool:
             need = width_of(result)
@@ -1462,15 +1474,14 @@ class TraceScreen(Screen):
         tail = self._footer_tail_commands()
         return Text(tail) if tail else variants[1]
 
-    def _footer_slot_line(self) -> Text:
+    def _footer_slot_line(self, badge: str) -> Text:
         """Строка 2 (слот): подсказка/отказ/совет, иначе бейдж уведомлений."""
         if self._footer_hint_active and self._footer_mode_hint is None:
             return self._footer_slot_with(Text(self._footer_hint_text or ""))
-        return self._footer_badge_line()
+        return self._footer_badge_line(badge)
 
-    def _footer_badge_line(self) -> Text:
+    def _footer_badge_line(self, badge: str) -> Text:
         """Слот с бейджем уведомлений — его ширину резервирует лесенка."""
-        badge = format_notices_badge(self._collect_footer_notices())
         return self._footer_slot_with(Text(badge))
 
     def _footer_slot_with(self, body: Text) -> Text:
@@ -1484,45 +1495,69 @@ class TraceScreen(Screen):
         out.append_text(body)
         return out
 
-    def _render_footer_left(self) -> None:
-        """Перерисовать обе строки левой части по текущему состоянию.
+    def _footer_left_rows(self, badge: str) -> tuple[Text, Text]:
+        """Обе строки левой части по текущему состоянию.
 
         Пояснение режима — исключение: «пилюля — пояснение» переносится на
         обе строки, хвост и бейдж на это время скрыты. Во время записи оно
         не рисуется — строка 1 отдана пилюле голоса."""
+        if self._footer_mode_hint is not None and not self._voice_busy():
+            return mode_hint_rows(
+                self._footer_mode_hint, self._footer_row_width()
+            )
+        return self._footer_mode_line(), self._footer_slot_line(badge)
+
+    def _refresh_notices_footer(self) -> None:
+        """Событие уведомлений: та же сборка — бейдж влияет и на правую
+        колонку (её лесенка резервирует его ширину)."""
+        self._refresh_footer()
+
+    def _footer_frame(self) -> _FooterFrame:
+        """Данные кадра футера: каждое резолвится один раз на обе колонки."""
+        return _FooterFrame(
+            badge=format_notices_badge(self._collect_footer_notices()),
+            snapshot=self._footer_head_snapshot(),
+            meter=self._context_meter(),
+            usage=self._usage_segments(),
+        )
+
+    def _footer_inputs(self, frame: _FooterFrame) -> tuple:
+        """Ключ сборки футера: всё, от чего зависит его вид.
+
+        Неизменяемый кортеж примитивов; Rich `Text` — по `text_key` (текст
+        и стили), не по identity. Вход, не попавший сюда, футер не увидит
+        до смены другого входа."""
+        voice = self._voice_footer_render() if self._voice_busy() else None
+        return (
+            self._footer_total_width(),
+            self._footer_row_width(),
+            self.app.effective_permission_mode(),
+            self._run_in_progress(),
+            self.app.tui_state.ask_human_state is not None,
+            frame.badge,
+            frame.snapshot,
+            text_key(frame.meter),
+            tuple(text_key(seg) for seg in frame.usage),
+            text_key(voice),
+            self._footer_hint_active,
+            self._footer_hint_text,
+            self._footer_mode_hint,
+        )
+
+    def _refresh_footer(self) -> None:
+        """Пересобрать футер, если изменились его входные данные.
+
+        Тик опроса зовёт его каждые 250 мс, поэтому без изменений он дёшев:
+        данные кадра резолвятся, лесенка правой колонки и строки левой — нет.
+        Все пути перерисовки (тик, подсказки, режим, голос, уведомления,
+        resize) идут сюда: изменение одного входа пересобирает обе колонки.
+        """
         try:
+            right = self.query_one("#footer-right", Static)
             mode = self.query_one(_SEL_FOOTER_MODE, Static)
             slot = self.query_one(_SEL_FOOTER_SLOT, Static)
         except Exception:
             return
-        if self._footer_mode_hint is not None and not self._voice_busy():
-            first, second = mode_hint_rows(
-                self._footer_mode_hint, self._footer_row_width()
-            )
-        else:
-            first, second = self._footer_mode_line(), self._footer_slot_line()
-        update_if_changed(mode, first)
-        update_if_changed(slot, second)
-
-    def _refresh_notices_footer(self) -> None:
-        """Обновить левую часть футера (бейдж уведомлений) без footer-right."""
-        self._render_footer_left()
-
-    def _refresh_footer(self) -> None:
-        """Switch footer text between empty-state and main-screen based on active task.
-
-        Левая часть пересобирается из состояния: активная подсказка держит
-        слот до своего таймера, строка режима живёт по тику.
-        Right-side (модель·контекст) обновляется каждый тик — метр контекста
-        растёт по ходу прогона.
-        """
-        try:
-            update_if_changed(
-                self.query_one("#footer-right", Static),
-                self._compose_footer_right(),
-            )
-        except Exception:
-            pass
         # Подсказка уступает место запущенному прогону: пока отказ дожёвывает
         # свои 5 секунд, человек мог отправить запрос — футер обязан показать
         # «Ctrl+C/stop», а не устаревший текст (живой смок владельца 2026-09-04).
@@ -1532,7 +1567,20 @@ class TraceScreen(Screen):
             and self.app.tui_state.active_task_id != self._refusal_run_id
         ):
             self._reset_footer_hint_state()
-        self._render_footer_left()
+        # Футер не роняет экран: не резолвятся данные (Router, мета треда) —
+        # остаётся прежний вид до следующего тика.
+        try:
+            frame = self._footer_frame()
+        except Exception:
+            return
+        key = self._footer_inputs(frame)
+        if key == self._footer_key:
+            return
+        self._footer_key = key
+        update_if_changed(right, self._compose_footer_right(frame))
+        first, second = self._footer_left_rows(frame.badge)
+        update_if_changed(mode, first)
+        update_if_changed(slot, second)
 
     def on_screen_resume(self) -> None:
         """После возврата с под-экрана — освежить карточку и футер уведомлений."""
@@ -1603,7 +1651,7 @@ class TraceScreen(Screen):
         self._footer_hint_active = True
         self._footer_hint_text = text
         self._footer_mode_hint = None
-        self._render_footer_left()
+        self._refresh_footer()
         if self._footer_hint_timer is not None:
             self._footer_hint_timer.stop()
         self._footer_hint_timer = self.set_timer(
@@ -1627,7 +1675,7 @@ class TraceScreen(Screen):
             return
         self._show_footer_hint(MODE_HINTS[mode], seconds=2.5)
         self._footer_mode_hint = mode
-        self._render_footer_left()
+        self._refresh_footer()
 
     def _show_esc_hint(self, kind: str) -> None:
         """Esc-confirm hint: запоминает kind (для 2-го Esc) + показывает подсказку."""

@@ -124,7 +124,7 @@ async def test_voice_pill_replaces_mode_row_and_glyph_leads_the_slot(
         mode, slot = footer_rows(pilot.app)
         assert "REC" in mode and "manual mode" not in mode + slot
         assert slot.startswith("⏸  ")
-        glyph = screen._footer_slot_line().spans[0]
+        glyph = screen._footer_slot_line(screen._footer_frame().badge).spans[0]
         assert (glyph.end, glyph.style) == (1, DEEP_DIM)  # цвет режима
 
         await pilot.press("escape")  # запись кончилась
