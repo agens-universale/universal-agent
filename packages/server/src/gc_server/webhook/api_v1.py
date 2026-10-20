@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -33,6 +34,7 @@ from gc_server.webhook.idempotency import (
     message_id,
     operation_id,
 )
+from gc_server.webhook.signatures import SignatureError, verify
 
 #: Статусы, после которых у задачи ничего не меняется без нового сообщения.
 FINAL = frozenset({"completed", "failed", "cancelled"})
@@ -45,6 +47,9 @@ class TaskBackend(Protocol):
 
     default_system: str
     events_poll_seconds: float
+    #: Ключи подписи тела (``signing_secrets()``,
+    #: ``signature_tolerance_seconds``) — секция webhook config_server.yml.
+    signing: Any
 
     async def asubmit(
         self,
@@ -132,6 +137,7 @@ class _Routes:
         return ThreadKey(system=sys_norm, thread=task_norm)
 
     async def create_task(self, request: Request):
+        await self._verify(request)
         payload = await read_json_object(request)
         task = parse_task_request(payload, self.backend.default_system)
         message = _user_message(task.content)
@@ -157,6 +163,22 @@ class _Routes:
                 "task_id": task.key.thread,
             },
         )
+
+    async def _verify(self, request: Request) -> None:
+        """Подпись тела, если у поверхности задан секрет; иначе — ничего."""
+        secrets = self.backend.signing.signing_secrets()
+        if not secrets:
+            return
+        try:
+            verify(
+                secrets,
+                request.headers,
+                await request.body(),
+                now=int(time.time()),
+                tolerance=self.backend.signing.signature_tolerance_seconds,
+            )
+        except SignatureError as exc:
+            raise http_error(401, str(exc)) from None
 
     async def list_tasks(
         self,

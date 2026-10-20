@@ -126,6 +126,28 @@ class WebhookConfig(SurfaceConfig):
     #: Окно идемпотентности (Idempotency-Key, webhook-id): сколько часов
     #: помнится квитанция записи.
     idempotency_ttl_hours: float = Field(default=24, gt=0, allow_inf_nan=False)
+    #: Подпись тела по Standard Webhooks: секрет ``whsec_…`` или список
+    #: (смена секрета). Задан — неподписанный запрос к /v1/tasks — 401.
+    signing_secret: str | list[str] | None = None
+    signature_tolerance_seconds: int = Field(default=300, gt=0)
+
+    @field_validator("signing_secret")
+    @classmethod
+    def _signing_secret(cls, value):
+        from gc_server.webhook.signatures import secret_key
+
+        if value is None:
+            return None
+        secrets = [value] if isinstance(value, str) else list(value)
+        for secret in secrets:
+            secret_key(secret)
+        return secrets or None
+
+    def signing_secrets(self) -> list[str]:
+        value = self.signing_secret
+        if value is None:
+            return []
+        return [value] if isinstance(value, str) else list(value)
 
 
 class _ChannelModes(SurfaceConfig):

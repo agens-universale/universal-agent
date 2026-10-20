@@ -189,6 +189,11 @@ class SwarmSurface:
         return self.config.webhook.default_system
 
     @property
+    def signing(self) -> Any:
+        """Подпись тела запросов — секция webhook (общая с swarm)."""
+        return self.runtime.config.webhook
+
+    @property
     def events_poll_seconds(self) -> float:
         return 1.0
 

@@ -229,6 +229,11 @@ class WebhookSurface:
         return self.config.default_system
 
     @property
+    def signing(self) -> Any:
+        """Подпись тела запросов — секция webhook (общая с swarm)."""
+        return self.runtime.config.webhook
+
+    @property
     def events_poll_seconds(self) -> float:
         from gc_core.settings import settings_of
 
