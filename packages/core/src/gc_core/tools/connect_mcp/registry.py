@@ -88,6 +88,8 @@ def _normalize_tool(
     metadata: Dict[str, Any] = {
         "mcp_server_key": server_name,
         "mcp_tool_name": base_name,
+        "mcp_tool_title": tool.get("title")
+        or (tool.get("annotations") or {}).get("title"),
         "server_display_name": server_display_name,
         "server_description": server_description,
         "server_url": server_url,

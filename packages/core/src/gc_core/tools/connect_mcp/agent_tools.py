@@ -640,17 +640,15 @@ def _assemble_mcp_tools_data(
             continue
 
         normalized_spec = normalize_tool_spec_for_agent(tool_entry)
-        server_key = (
-            metadata.get("mcp_server_key")
-            if isinstance(metadata, dict)
-            else None
-        )
+        meta = metadata if isinstance(metadata, dict) else {}
+        server_key = meta.get("mcp_server_key")
         server_cfg = servers_cfg.get(server_key) if server_key else None
+        base_name = _mcp_base_tool_name(
+            full_name, entry if isinstance(entry, dict) else {}
+        )
         loop_warn = _loop_warn_for_mcp_tool(
             server_cfg if isinstance(server_cfg, dict) else None,
-            _mcp_base_tool_name(
-                full_name, entry if isinstance(entry, dict) else {}
-            ),
+            base_name,
         )
 
         tool_data: Dict[str, Any] = {
@@ -659,6 +657,8 @@ def _assemble_mcp_tools_data(
             # Режим разрешений: зона и сервер — по ним строится ключ решения.
             "category": CAT_MCP,
             "mcp_server": server_key,
+            "mcp_tool": base_name,
+            "mcp_title": meta.get("mcp_tool_title"),
             "spec": normalized_spec,
             "description": normalized_spec.get("description", ""),
         }
