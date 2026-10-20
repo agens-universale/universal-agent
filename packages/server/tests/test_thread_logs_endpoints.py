@@ -1,5 +1,4 @@
-"""Эндпоинты журнала тредов ``/logs/...`` читают треды через фасад
-``Threads``: старые треды develop отдаются как раньше, треды других
+"""Ручки задач ``/v1/tasks…`` читают треды через фасад ``Threads``: старые треды develop отдаются как раньше, треды других
 поверхностей и интерактивных сессий — нет, а запрос по чужому id ничего не
 создаёт на диске."""
 
@@ -29,12 +28,12 @@ def _files(root):
 @pytest.mark.parametrize("name", ["sdk_image"])
 def test_thread_log_of_develop_thread(client, name):
     fixture = LEGACY_THREADS[name]
-    response = client.get(f"/logs/{fixture.system}/{fixture.thread_id}")
+    response = client.get(
+        f"/v1/tasks/{fixture.system}/{fixture.thread_id}/messages",
+        params={"limit": 1000},
+    )
     assert response.status_code == 200
-    body = response.json()
-    assert body["task_id"] == fixture.thread_id
-    assert body["meta"]["thread_id"] == fixture.thread_id
-    assert len(body["messages"]) == fixture.messages
+    assert len(response.json()["messages"]) == fixture.messages
 
 
 @pytest.mark.parametrize(
@@ -42,21 +41,24 @@ def test_thread_log_of_develop_thread(client, name):
 )
 def test_foreign_develop_thread_is_not_served(client, name):
     fixture = LEGACY_THREADS[name]
-    response = client.get(f"/logs/{fixture.system}/{fixture.thread_id}")
+    response = client.get(
+        f"/v1/tasks/{fixture.system}/{fixture.thread_id}/messages"
+    )
     assert response.status_code == 400
 
 
 def test_unknown_thread_is_404_and_writes_nothing(client, threads_dir):
     before = _files(threads_dir)
-    response = client.get("/logs/generic/no-such-thread")
-    assert response.status_code == 404
+    for path in ("", "/messages"):
+        response = client.get(f"/v1/tasks/generic/no-such-thread{path}")
+        assert response.status_code == 404
     assert _files(threads_dir) == before
 
 
 def test_all_logs_list_every_thread_newest_first(client):
-    response = client.get("/logs/all")
+    response = client.get("/v1/tasks", params={"limit": 1000})
     assert response.status_code == 200
-    logs = response.json()["logs"]
+    logs = response.json()["tasks"]
     found = {(entry["system"], entry["task_id"]) for entry in logs}
     assert found == {
         (fixture.system, fixture.thread_id)
@@ -65,5 +67,3 @@ def test_all_logs_list_every_thread_newest_first(client):
     }
     stamps = [str(entry["updated_at"] or "") for entry in logs]
     assert stamps == sorted(stamps, reverse=True)
-    entry = logs[0]
-    assert entry["logs_url"] == f"/logs/{entry['system']}/{entry['task_id']}"

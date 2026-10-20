@@ -328,6 +328,7 @@ def start_swarm_process(
     task_id: str,
     payload: Dict[str, Any],
     trace_id: Optional[str] = None,
+    query: Optional[str] = None,
 ) -> Tuple[str, int]:
     """
     Запустить обёрточный скрипт для сворм-процесса.
@@ -446,7 +447,13 @@ def start_swarm_process(
                     limits.get("timeout_seconds", "")
                 ),
                 # Полный payload запроса можем передать в окружение как JSON-строку.
-                "SWARM_PAYLOAD_JSON": json.dumps(payload, ensure_ascii=False),
+                # Текст задачи для gc-cli -q: ``query`` (API /v1), иначе
+                # JSON всего запроса.
+                "SWARM_PAYLOAD_JSON": (
+                    query
+                    if query is not None
+                    else json.dumps(payload, ensure_ascii=False)
+                ),
                 # Внешний трейс. Пусто = не задан: обёртка тогда не добавляет флаг,
                 # и ран в песочнице ведёт себя как раньше (ничего не меняется).
                 "SWARM_TRACE_ID": str(trace_id or ""),

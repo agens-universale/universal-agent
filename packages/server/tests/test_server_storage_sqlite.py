@@ -61,16 +61,16 @@ async def test_webhook_thread_lives_in_the_configured_database(
             transport=transport, base_url="http://test"
         ) as client:
             started = await client.post(
-                "/events/webhook", json={"task_id": "t-db", "text": "сделай"}
+                "/v1/tasks", json={"task_id": "t-db", "text": "сделай"}
             )
             assert started.json()["status"] == "started"
-            done = await _wait_done(client, "/runs/generic/t-db")
+            done = await _wait_done(client, "/v1/tasks/generic/t-db")
             assert done["status"] == "completed", done
-            logs = (await client.get("/logs/generic/t-db")).json()
+            logs = (await client.get("/v1/tasks/generic/t-db/messages")).json()
     finally:
         await surface.astop()
         await stores.aclose()
-    assert logs["status"] == "ok" and logs["messages"]
+    assert logs["messages"]
     async with SQLiteThreadStore(str(tmp_path / "t.db")) as store:
         record = await store.get_thread(
             ThreadKey(system="generic", thread="t-db")

@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 
 FINAL_STATUSES = frozenset(
-    {"completed", "failed", "timeout", "unknown_failed"}
+    {"completed", "failed", "timeout", "unknown_failed", "cancelled"}
 )
 
 # Grace-период между SIGTERM и SIGKILL для CLI-процесса (см. swarm_spec.md §6

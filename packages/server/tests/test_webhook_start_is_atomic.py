@@ -108,7 +108,7 @@ def _client(surface) -> httpx.AsyncClient:
 
 async def _post(client: httpx.AsyncClient, text: str) -> httpx.Response:
     return await client.post(
-        "/events/webhook", json={"task_id": "t", "system": "s", "text": text}
+        "/v1/tasks", json={"task_id": "t", "system": "s", "text": text}
     )
 
 
@@ -172,14 +172,14 @@ async def test_status_during_the_build_is_running_not_the_previous_result(
     async with _client(harness.surface) as client:
         await _within(_post(client, "первый"))
         await _settle(harness.surface)
-        done = (await client.get("/runs/s/t")).json()
+        done = (await client.get("/v1/tasks/s/t")).json()
         assert done["status"] == "completed"
 
         gate, entered = asyncio.Event(), asyncio.Event()
         harness.plan[:] = [{"entered": entered, "gate": gate}]
         second = asyncio.create_task(_post(client, "второй"))
         await _within(entered.wait())
-        building = (await client.get("/runs/s/t")).json()
+        building = (await client.get("/v1/tasks/s/t")).json()
         assert building["status"] == "running"
         assert "result" not in building
         assert building["started_at"] == building["last_activity_at"]

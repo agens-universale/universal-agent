@@ -8,19 +8,17 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import os
 import signal
 import threading
 from typing import TYPE_CHECKING, Any, Dict
 
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, HTTPException
 from gc_core.threads.models import ThreadKey
 
 from gc_server.config import ServerConfigError
-from gc_server.surface import http_error, install_bearer, read_json_object
+from gc_server.surface import http_error, install_bearer
 from gc_server.swarm import lifecycle as swarm_lifecycle
 from gc_server.swarm import runner as swarm_runner
 from gc_server.swarm import storage as swarm_storage
@@ -29,10 +27,7 @@ from gc_server.swarm.monitor import SwarmMonitor
 from gc_server.webhook.janitor import start_swarm_cleanup
 from gc_server.webhook.surface import (
     healthcheck,
-    make_user_message,
     path_key,
-    request_system,
-    request_task_identifiers,
 )
 
 if TYPE_CHECKING:
@@ -44,6 +39,7 @@ logger = logging.getLogger(__name__)
 _COMMON_STATUS = {
     "queued": "running",
     "running": "running",
+    "cancelled": "cancelled",
     "completed": "completed",
     "failed": "failed",
     "timeout": "failed",
@@ -119,7 +115,12 @@ class SwarmSurface:
                         os.killpg(pid, signal.SIGKILL)
                     except OSError:
                         pass
-                self._mark_shutdown(sid)
+                self._mark_final(
+                    sid,
+                    "unknown_failed",
+                    "server_shutdown",
+                    "Killed during server shutdown",
+                )
                 monitor.unregister_active(sid)
         monitor.stop()
         self.monitor = None
@@ -139,13 +140,15 @@ class SwarmSurface:
                     pass
         return killed
 
-    def _mark_shutdown(self, sid: str) -> None:
+    def _mark_final(
+        self, sid: str, status: str, error_type: str, error_message: str
+    ) -> None:
+        """Записать песочнице финальный статус, если его ещё нет."""
         try:
             existing = swarm_storage.load_swarm_meta(self.threads_dir, sid)
             if not existing:
                 return
-            status = _status_of(existing)
-            if status in swarm_lifecycle.FINAL_STATUSES:
+            if _status_of(existing) in swarm_lifecycle.FINAL_STATUSES:
                 return
             swarm_storage.save_swarm_meta(
                 self.threads_dir,
@@ -155,62 +158,71 @@ class SwarmSurface:
                     "task_id": existing.get("task_id"),
                 },
                 swarm_meta_patch={
-                    "status": "unknown_failed",
+                    "status": status,
                     "finished_at": swarm_storage._utc_now_iso(),
-                    "error_type": "server_shutdown",
-                    "error_message": "Killed during server shutdown",
+                    "error_type": error_type,
+                    "error_message": error_message,
                     "sandbox_status": "completed",
                 },
             )
         except Exception:
-            logger.exception("shutdown: failed to update meta for %s", sid)
+            logger.exception("swarm: failed to update meta for %s", sid)
 
     # --- приложение -------------------------------------------------------
 
     def app(self) -> FastAPI:
+        from gc_server.webhook.api_v1 import build_v1_routes
+
         app = FastAPI()
         install_bearer(app, self.section.auth_token)
-        app.add_api_route("/events/webhook", self.start_task, methods=["POST"])
+        build_v1_routes(app, self)
         app.add_api_route(
-            "/runs/{system}/{task_id}", self.get_run_status, methods=["GET"]
-        )
-        app.add_api_route("/logs/all", self.get_all_logs, methods=["GET"])
-        app.add_api_route(
-            "/logs/{system}/{task_id}", self.get_logs, methods=["GET"]
+            "/v1/tasks/{system}/{task_id}/output",
+            self.get_output,
+            methods=["GET"],
         )
         app.add_api_route("/healthcheck", healthcheck, methods=["GET"])
         return app
 
-    async def start_task(self, request: Request):
-        payload = await read_json_object(request)
-        task_id, trace_id = request_task_identifiers(payload)
-        system = request_system(payload, self.config.webhook.default_system)
-        sid = swarm_id(system, task_id)
+    @property
+    def default_system(self) -> str:
+        return self.config.webhook.default_system
+
+    @property
+    def events_poll_seconds(self) -> float:
+        return 1.0
+
+    async def asubmit(
+        self,
+        key: ThreadKey,
+        message: Dict[str, Any],
+        *,
+        op_id: str | None,
+        trace_id: str | None,
+    ) -> Dict[str, Any]:
+        sid = swarm_id(key.system, key.thread)
         if self._in_store and self._active(sid):
             # Тред задачи в общей базе: сообщение — во входящий поток, его
             # заберёт ход gc-cli в песочнице (опросом ядра).
-            await self._aqueue(system, task_id, payload)
+            receipt = await self.runtime.threads().submit(
+                key, message, op_id=op_id, source="swarm"
+            )
             return {
                 "status": "queued",
-                "payload": payload,
-                "system": system,
-                "task_id": task_id,
+                "message_seq": receipt.max_seq.get("inbox"),
             }
         with self._start_lock:
             existing = swarm_storage.load_swarm_meta(self.threads_dir, sid)
-            rejection = _reject_existing(existing, system, task_id)
-            if rejection is not None:
-                return rejection
-            overloaded = self._overloaded(system, task_id)
-            if overloaded is not None:
-                return overloaded
+            _reject_existing(existing, key.system, key.thread)
+            self._reject_overload(key.system, key.thread)
             try:
                 sid, _pid = swarm_runner.start_swarm_process(
                     self.swarm,
-                    system=system,
-                    task_id=task_id,
-                    payload=payload,
+                    system=key.system,
+                    task_id=key.thread,
+                    payload={},
                     trace_id=trace_id,
+                    query=message["content"],
                 )
             except Exception as e:
                 raise http_error(500, f"swarm_start_failed: {e!r}") from None
@@ -218,54 +230,15 @@ class SwarmSurface:
                 self.monitor.register_active(sid)
         if self._in_store:
             await self.runtime.threads().update_frontend(
-                ThreadKey(system=system, thread=task_id),
-                "swarm",
-                {"swarm_id": sid},
+                key, "swarm", {"swarm_id": sid}
             )
-        return {
-            "status": "started",
-            "payload": payload,
-            "system": system,
-            "task_id": task_id,
-        }
+        return {"status": "started", "message_seq": None}
 
-    @property
-    def _in_store(self) -> bool:
-        """Тред задачи — в общей базе (песочница ведёт его там)."""
-        return "thread_store" in self.swarm
-
-    def _active(self, sid: str) -> bool:
-        meta = swarm_storage.load_swarm_meta(self.threads_dir, sid)
-        return bool(meta) and _status_of(meta) in _ACTIVE
-
-    async def _aqueue(
-        self, system: str, task_id: str, payload: Dict[str, Any]
-    ) -> None:
-        await self.runtime.threads().submit(
-            ThreadKey(system=system, thread=task_id),
-            make_user_message(json.dumps(payload, ensure_ascii=False)),
-            source="swarm",
-        )
-
-    def _overloaded(self, system: str, task_id: str) -> JSONResponse | None:
-        limit = int(self.swarm.get("max_concurrent", 10))
-        if self.monitor is None or self.monitor.get_active_count() < limit:
-            return None
-        return _error_response(
-            503,
-            "too many concurrent swarm processes, retry later",
-            system,
-            task_id,
-        )
-
-    async def get_run_status(self, system: str, task_id: str):
-        sys_norm, task_norm = self._key(system, task_id)
-        sid = swarm_id(sys_norm, task_norm)
+    async def astatus(self, key: ThreadKey) -> Dict[str, Any] | None:
+        sid = swarm_id(key.system, key.thread)
         pre = swarm_storage.load_swarm_meta(self.threads_dir, sid)
         if not pre:
-            raise HTTPException(
-                status_code=404, detail={"status": "not_found"}
-            )
+            return None
         meta = (
             swarm_lifecycle.check_and_finalize(
                 self.threads_dir,
@@ -275,71 +248,145 @@ class SwarmSurface:
             )
             or pre
         )
-        status = _status_of(meta)
-        if status in swarm_lifecycle.FINAL_STATUSES and self.monitor:
+        if _status_of(meta) in swarm_lifecycle.FINAL_STATUSES and self.monitor:
             self.monitor.unregister_active(sid)
-        return _status_body(meta, sys_norm, task_norm)
+        body = _status_body(meta, key.system, key.thread)
+        body["pending_messages"] = await self._pending(key)
+        return body
 
-    async def get_logs(self, system: str, task_id: str):
-        sys_norm, task_norm = self._key(system, task_id)
-        sid = swarm_id(sys_norm, task_norm)
-        meta = swarm_storage.load_swarm_meta(self.threads_dir, sid)
-        messages = await self._messages(sys_norm, task_norm, sid)
-        stdout, stderr = swarm_storage.load_swarm_stdout_stderr(
-            self.threads_dir, sid
+    async def acancel(self, key: ThreadKey) -> Dict[str, Any] | None:
+        """Отмена задачи: SIGTERM группе процессов песочницы (затем SIGKILL)
+        и статус ``cancelled``."""
+        status = await self.astatus(key)
+        if status is None:
+            return None
+        if status["status"] != "running":
+            return {"status": status["status"]}
+        sid = swarm_id(key.system, key.thread)
+        killed = self._terminate_groups([sid])
+        self._mark_final(sid, "cancelled", "cancelled", "Cancelled by request")
+        if self.monitor is not None:
+            self.monitor.unregister_active(sid)
+        if killed:
+            asyncio.get_running_loop().create_task(self._akill_later(killed))
+        return {"status": "cancelling"}
+
+    async def alist(
+        self, *, system: str | None, limit: int, cursor: str | None
+    ) -> tuple[list[Dict[str, Any]], str | None]:
+        tasks = [
+            entry
+            for entry in self._task_entries()
+            if system is None or entry["system"] == system
+        ]
+        start = int(cursor) if cursor and cursor.isdigit() else 0
+        page = tasks[start : start + limit]
+        more = start + limit < len(tasks)
+        return page, str(start + limit) if more else None
+
+    async def amessages(
+        self, key: ThreadKey, *, after: int, limit: int
+    ) -> list[Dict[str, Any]] | None:
+        sid = swarm_id(key.system, key.thread)
+        if not swarm_storage.load_swarm_meta(self.threads_dir, sid):
+            return None
+        if self._in_store:
+            return await self._store_messages(key, after=after, limit=limit)
+        # Канал E: messages.jsonl лежит внутри каталога песочницы.
+        messages = swarm_storage.load_swarm_messages(
+            self.threads_dir, sid, self.sandbox_root_dir
         )
-        if not (meta or messages or stdout or stderr):
+        entries = [
+            {"seq": seq, "ts": None, "message": message}
+            for seq, message in enumerate(messages, start=1)
+        ]
+        return [e for e in entries if e["seq"] > after][:limit]
+
+    def _reject_overload(self, system: str, task_id: str) -> None:
+        limit = int(self.swarm.get("max_concurrent", 10))
+        if self.monitor is None or self.monitor.get_active_count() < limit:
+            return
+        raise http_error(
+            503,
+            "too many concurrent swarm processes, retry later",
+            system=system,
+            task_id=task_id,
+        )
+
+    async def get_output(self, system: str, task_id: str):
+        """stdout и stderr процесса песочницы."""
+        sys_norm, task_norm = path_key(system, task_id)
+        sid = swarm_id(sys_norm, task_norm)
+        if not swarm_storage.load_swarm_meta(self.threads_dir, sid):
             raise HTTPException(
                 status_code=404, detail={"status": "not_found"}
             )
-        return {
-            "status": "ok",
-            "system": sys_norm,
-            "task_id": task_norm,
-            "meta": meta,
-            "messages": messages,
-            "stdout": stdout,
-            "stderr": stderr,
-        }
-
-    async def _messages(self, system: str, task_id: str, sid: str) -> list:
-        if self._in_store:
-            # Только тред задачи swarm: тот же (system, task_id) у вебхука —
-            # чужая задача.
-            key = ThreadKey(system=system, thread=task_id)
-            threads = self.runtime.threads()
-            record = await threads.get(key)
-            if record is None or "swarm" not in record.frontend:
-                return []
-            return [entry.data for entry in await threads.history(key)]
-        # Канал E: messages.jsonl лежит внутри каталога песочницы.
-        return swarm_storage.load_swarm_messages(
-            self.threads_dir, sid, self.sandbox_root_dir
+        stdout, stderr = swarm_storage.load_swarm_stdout_stderr(
+            self.threads_dir, sid
         )
+        return {"stdout": stdout, "stderr": stderr}
 
-    async def get_all_logs(self):
+    async def _store_messages(
+        self, key: ThreadKey, *, after: int, limit: int
+    ) -> list[Dict[str, Any]]:
+        # Только тред задачи swarm: тот же (system, task_id) у вебхука —
+        # чужая задача.
+        threads = self.runtime.threads()
+        record = await threads.get(key)
+        if record is None or "swarm" not in record.frontend:
+            return []
+        entries = await threads.store.read_stream(
+            key, "messages", after_seq=after, limit=limit
+        )
+        return [{"seq": e.seq, "ts": e.ts, "message": e.data} for e in entries]
+
+    async def _pending(self, key: ThreadKey) -> int:
+        if not self._in_store:
+            return 0
+        record = await self.runtime.threads().get(key)
+        if record is None:
+            return 0
+        return max(0, record.max_seq.get("inbox", 0) - record.state.inbox_seq)
+
+    def _task_entries(self) -> list[Dict[str, Any]]:
         out = []
         if os.path.isdir(self.threads_dir):
             for name in sorted(os.listdir(self.threads_dir)):
                 meta = swarm_storage.load_swarm_meta(self.threads_dir, name)
                 if not meta or not name.startswith("swarm_"):
                     continue
-                system, task_id = meta.get("system"), meta.get("task_id")
+                sm = _swarm_meta(meta)
                 out.append(
                     {
-                        "system": system,
-                        "task_id": task_id,
-                        "updated_at": _swarm_meta(meta).get("finished_at")
-                        or _swarm_meta(meta).get("started_at"),
-                        "logs_url": f"/logs/{system}/{task_id}",
+                        "system": meta.get("system"),
+                        "task_id": meta.get("task_id"),
+                        "status": _COMMON_STATUS.get(
+                            _status_of(meta), "running"
+                        ),
+                        "updated_at": sm.get("finished_at")
+                        or sm.get("started_at"),
                     }
                 )
         out.sort(key=lambda x: str(x.get("updated_at") or ""), reverse=True)
-        return {"status": "ok", "logs": out}
+        return out
 
-    @staticmethod
-    def _key(system: str, task_id: str) -> tuple[str, str]:
-        return path_key(system, task_id)
+    async def _akill_later(self, killed: list[tuple[str, int]]) -> None:
+        await asyncio.sleep(_KILL_GRACE_S)
+        for _sid, pid in killed:
+            if swarm_lifecycle._is_pid_alive(pid):
+                try:
+                    os.killpg(pid, signal.SIGKILL)
+                except OSError:
+                    pass
+
+    @property
+    def _in_store(self) -> bool:
+        """Тред задачи — в общей базе (песочница ведёт его там)."""
+        return "thread_store" in self.swarm
+
+    def _active(self, sid: str) -> bool:
+        meta = swarm_storage.load_swarm_meta(self.threads_dir, sid)
+        return bool(meta) and _status_of(meta) in _ACTIVE
 
 
 def _sandbox_thread_store(runtime: ServerRuntime) -> Dict[str, Any] | None:
@@ -402,42 +449,26 @@ def _status_body(
     return body
 
 
-def _error_response(
-    status: int, payload: str, system: str, task_id: str, **extra: Any
-) -> JSONResponse:
-    return JSONResponse(
-        status_code=status,
-        content={
-            "detail": {
-                "status": "error",
-                "payload": payload,
-                "system": system,
-                "task_id": task_id,
-                **extra,
-            }
-        },
-    )
-
-
 def _reject_existing(
     existing: Dict[str, Any] | None, system: str, task_id: str
-) -> JSONResponse | None:
+) -> None:
     """Задача уже идёт — 409 «занято»; уже завершена — 409: песочница
-    задачи одноразовая, новой задаче нужен новый ``task_id``."""
-    if not existing:
-        return None
-    status = _status_of(existing)
+    задачи одноразовая, новой задаче нужен новый ``task_id``. Неизвестный
+    или повреждённый статус — как новая задача."""
+    status = _status_of(existing) if existing else ""
     if status in _ACTIVE:
-        return _error_response(
-            409, "task is running", system, task_id, current_status=status
-        )
-    if status in swarm_lifecycle.FINAL_STATUSES:
-        return _error_response(
+        raise http_error(
             409,
-            "task already finished — use a new task_id",
-            system,
-            task_id,
+            "task is running",
+            system=system,
+            task_id=task_id,
             current_status=status,
         )
-    # Неизвестный или повреждённый статус — как новая задача.
-    return None
+    if status in swarm_lifecycle.FINAL_STATUSES:
+        raise http_error(
+            409,
+            "task already finished — use a new task_id",
+            system=system,
+            task_id=task_id,
+            current_status=status,
+        )

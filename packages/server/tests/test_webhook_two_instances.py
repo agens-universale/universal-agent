@@ -146,19 +146,19 @@ async def test_second_instance_queues_into_the_owners_turn(
     try:
         async with _client(first) as a, _client(second) as b:
             started = await a.post(
-                "/events/webhook", json={"task_id": "t", "text": "начни"}
+                "/v1/tasks", json={"task_id": "t", "text": "начни"}
             )
             assert started.json()["status"] == "started"
-            await _wait(b, "/runs/generic/t", "running")
+            await _wait(b, "/v1/tasks/generic/t", "running")
             await _wait_lease(second, "generic", "t")
             queued = await b.post(
-                "/events/webhook", json={"task_id": "t", "text": "и тесты"}
+                "/v1/tasks", json={"task_id": "t", "text": "и тесты"}
             )
             assert queued.json()["status"] == "queued"
             go.set()
-            done = await _wait(b, "/runs/generic/t", "completed")
+            done = await _wait(b, "/v1/tasks/generic/t", "completed")
             assert done["result"] is not None
-            assert (await a.get("/runs/generic/t")).json()["status"] == (
+            assert (await a.get("/v1/tasks/generic/t")).json()["status"] == (
                 "completed"
             )
     finally:
@@ -177,7 +177,9 @@ async def test_runs_of_an_unknown_task_is_404(tmp_path):
     )
     try:
         async with _client(surface) as client:
-            assert (await client.get("/runs/generic/nope")).status_code == 404
+            assert (
+                await client.get("/v1/tasks/generic/nope")
+            ).status_code == 404
     finally:
         await stores.aclose()
 
@@ -199,7 +201,7 @@ async def test_webhook_into_a_queued_task_after_the_turn_is_played(
             # Последний шаг хода: сообщение ляжет после его забора.
             holder["late"] = asyncio.ensure_future(
                 holder["client"].post(
-                    "/events/webhook", json={"task_id": "t", "text": "поздно"}
+                    "/v1/tasks", json={"task_id": "t", "text": "поздно"}
                 )
             )
             await asyncio.sleep(0)
@@ -210,9 +212,9 @@ async def test_webhook_into_a_queued_task_after_the_turn_is_played(
         async with _client(surface) as client:
             holder["client"] = client
             await client.post(
-                "/events/webhook", json={"task_id": "t", "text": "начни"}
+                "/v1/tasks", json={"task_id": "t", "text": "начни"}
             )
-            await _wait(client, "/runs/generic/t", "completed")
+            await _wait(client, "/v1/tasks/generic/t", "completed")
             assert (await holder["late"]).json()["status"] in {
                 "queued",
                 "started",
@@ -255,8 +257,8 @@ async def test_cancel_from_another_instance_cancels_the_task(
     seen = _install(monkeypatch, plan)
     try:
         async with _client(first) as a, _client(second) as b:
-            await a.post("/events/webhook", json={"task_id": "t", "x": 1})
-            done = await _wait(b, "/runs/generic/t", "cancelled")
+            await a.post("/v1/tasks", json={"task_id": "t", "x": 1})
+            done = await _wait(b, "/v1/tasks/generic/t", "cancelled")
     finally:
         await first.astop()
         await second.astop()

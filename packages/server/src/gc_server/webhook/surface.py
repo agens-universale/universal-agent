@@ -11,14 +11,13 @@ from __future__ import annotations
 
 import asyncio
 import functools
-import json
 import logging
 import time
 import uuid
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any, Dict
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI
 from gc_core.agent_edits.ctx import RUN_MODE_SERVER
 from gc_core.agent_executor import AgentExecutor
 from gc_core.config import cli_forces_legacy_model
@@ -28,7 +27,7 @@ from gc_core.run_context import acreate_run_context
 from gc_core.thread_store import validate_thread_id
 from gc_core.threads.facade import Threads
 from gc_core.threads.instance import instance_id
-from gc_core.threads.models import ThreadKey, ThreadRecord
+from gc_core.threads.models import ThreadKey, ThreadQuery, ThreadRecord
 from gc_core.trace_id import normalize_trace_id
 from gc_core.utils.generate_message_id import (
     generate_msg_id_sha256 as generate_message_id_func,
@@ -39,7 +38,6 @@ from gc_server.surface import (
     allowed_system,
     http_error,
     install_bearer,
-    read_json_object,
 )
 from gc_server.webhook import status as task_status
 from gc_server.webhook.janitor import start_threads_cleanup
@@ -212,22 +210,23 @@ class WebhookSurface:
     # --- приложение -------------------------------------------------------
 
     def app(self) -> FastAPI:
+        from gc_server.webhook.api_v1 import build_v1_routes
+
         app = FastAPI()
         install_bearer(app, self.section.auth_token)
-        app.add_api_route(
-            "/events/webhook", self.events_webhook, methods=["POST"]
-        )
-        app.add_api_route(
-            "/runs/{system}/{task_id}", self.get_run_status, methods=["GET"]
-        )
-        app.add_api_route(
-            "/logs/all", self.get_all_thread_logs, methods=["GET"]
-        )
-        app.add_api_route(
-            "/logs/{system}/{task_id}", self.get_thread_logs, methods=["GET"]
-        )
+        build_v1_routes(app, self)
         app.add_api_route("/healthcheck", healthcheck, methods=["GET"])
         return app
+
+    @property
+    def default_system(self) -> str:
+        return self.config.default_system
+
+    @property
+    def events_poll_seconds(self) -> float:
+        from gc_core.settings import settings_of
+
+        return settings_of(self.settings).thread_store.inbox_poll_seconds
 
     def threads(self) -> Threads:
         """Треды сервера — через фасад."""
@@ -235,62 +234,103 @@ class WebhookSurface:
 
     # --- ручки ------------------------------------------------------------
 
-    async def get_run_status(self, system: str, task_id: str):
-        sys_norm, task_norm = path_key(system, task_id)
-        base = {"system": sys_norm, "task_id": task_norm}
+    async def astatus(self, key: ThreadKey) -> Dict[str, Any] | None:
+        """Статус задачи (``None`` — задачи нет) и сколько сообщений ждёт
+        доставки во входящем потоке."""
+        base = {"system": key.system, "task_id": key.thread}
+        record = await self.threads().get(key)
+        pending = {"pending_messages": _pending(record)}
         # Контекст задачи строит этот процесс: прогона ещё нет, а статус в
         # хранилище — прошлого прогона.
         building_since = self.registry.building_since(
-            system=sys_norm, task_id=task_norm
+            system=key.system, task_id=key.thread
         )
-        if building_since is not None:
-            return {
-                "status": "running",
-                **base,
-                "thread_id": task_norm,
-                "started_at": building_since,
-                "last_activity_at": building_since,
-            }
-        record = await self.threads().get(
-            ThreadKey(system=sys_norm, thread=task_norm)
-        )
+        run = self.registry.run_of(system=key.system, task_id=key.thread)
         status = task_status.status_of(record)
-        run = self.registry.run_of(system=sys_norm, task_id=task_norm)
-        if run is not None and (status or {}).get("run_id") != run.notes.get(
-            "run_id"
+        since = building_since
+        if (
+            since is None
+            and run is not None
+            and (status or {}).get("run_id") != run.notes.get("run_id")
         ):
-            # Свой прогон ещё не взял тред (статус пишет взявший): в
-            # хранилище — прошлый итог или ничего.
+            # Свой прогон ещё не взял тред (статус пишет взявший).
+            since = run.started_at
+        if since is not None:
             return {
                 "status": "running",
                 **base,
-                "thread_id": task_norm,
-                "started_at": run.started_at,
-                "last_activity_at": run.started_at,
+                "thread_id": key.thread,
+                "started_at": since,
+                "last_activity_at": since,
+                **pending,
             }
         if status is None:
-            raise HTTPException(
-                status_code=404, detail={"status": "not_found"}
-            )
-        return task_status.status_body(status, record, base)
+            return None
+        return {**task_status.status_body(status, record, base), **pending}
 
-    async def events_webhook(self, request: Request):
-        payload = await read_json_object(request)
-        task_id, trace_id = request_task_identifiers(payload)
-        system = request_system(payload, self.config.default_system)
-        message = make_user_message(json.dumps(payload, ensure_ascii=False))
-        await self.threads().submit(
-            ThreadKey(system=system, thread=task_id), message, source="webhook"
+    async def asubmit(
+        self,
+        key: ThreadKey,
+        message: Dict[str, Any],
+        *,
+        op_id: str | None,
+        trace_id: str | None,
+    ) -> Dict[str, Any]:
+        """Сообщение — во входящий поток треда; тред уже ведут — ``queued``,
+        иначе этот запрос строит прогон (``started``)."""
+        receipt = await self.threads().submit(
+            key, message, op_id=op_id, source="webhook"
         )
-        reply = {"payload": payload, "system": system, "task_id": task_id}
-        if not await self._take_start(system, task_id):
-            _log_ignored_trace_id(trace_id, system, task_id)
-            return {"status": "queued", **reply}
+        seq = receipt.max_seq.get("inbox")
+        if not await self._take_start(key.system, key.thread):
+            _log_ignored_trace_id(trace_id, key.system, key.thread)
+            return {"status": "queued", "message_seq": seq}
         try:
-            await self._start_run(system, task_id, trace_id)
+            await self._start_run(key.system, key.thread, trace_id)
         finally:
-            self.registry.release_reservation(system=system, task_id=task_id)
-        return {"status": "started", **reply}
+            self.registry.release_reservation(
+                system=key.system, task_id=key.thread
+            )
+        return {"status": "started", "message_seq": seq}
+
+    async def acancel(self, key: ThreadKey) -> Dict[str, Any] | None:
+        """Отменить ход задачи с любого инстанса: поток ``control`` треда
+        (свой прогон — ещё и сразу)."""
+        from gc_server.webhook.api_v1 import FINAL
+
+        status = await self.astatus(key)
+        if status is None:
+            return None
+        if status["status"] in FINAL:
+            return {"status": status["status"]}
+        self.registry.stop(system=key.system, task_id=key.thread)
+        await self.threads().request_cancel(key)
+        return {"status": "cancelling"}
+
+    async def alist(
+        self, *, system: str | None, limit: int, cursor: str | None
+    ) -> tuple[list[Dict[str, Any]], str | None]:
+        page = await self.threads().store.list_threads(
+            ThreadQuery(system=system, limit=limit, cursor=cursor)
+        )
+        tasks = [
+            _task_entry(record)
+            for record in page.items
+            if record.key.system not in RESERVED_SYSTEMS
+            and "swarm" not in record.frontend
+        ]
+        return tasks, page.next_cursor
+
+    async def amessages(
+        self, key: ThreadKey, *, after: int, limit: int
+    ) -> list[Dict[str, Any]] | None:
+        threads = self.threads()
+        if await threads.get(key) is None:
+            return None
+        entries = await threads.store.read_stream(
+            key, "messages", after_seq=after, limit=limit
+        )
+        return [{"seq": e.seq, "ts": e.ts, "message": e.data} for e in entries]
 
     async def _take_start(self, system: str, task_id: str) -> bool:
         """Строить ли прогон этому запросу. Нет — тред уже ведут: свой
@@ -386,36 +426,6 @@ class WebhookSurface:
             return
         await task_status.aset_status(threads, key, **_final_fields(run))
 
-    async def get_thread_logs(self, system: str, task_id: str):
-        """Логи по ``(system, task_id)``: meta треда в прежней форме и
-        сообщения истории."""
-        sys_norm, task_norm = path_key(system, task_id)
-        threads = self.threads()
-        key = ThreadKey(system=sys_norm, thread=task_norm)
-        record = await threads.get(key)
-        if record is None:
-            raise HTTPException(
-                status_code=404, detail={"status": "not_found"}
-            )
-        return {
-            "status": "ok",
-            "system": sys_norm,
-            "task_id": task_norm,
-            "meta": threads.legacy_meta(record),
-            "messages": [entry.data for entry in await threads.history(key)],
-        }
-
-    async def get_all_thread_logs(self):
-        """Список тредов (system + task_id), свежие первыми."""
-        threads = self.threads()
-        out = [
-            _thread_log_entry(r)
-            async for r in threads.iter_threads()
-            if r.key.system not in RESERVED_SYSTEMS
-        ]
-        out.sort(key=lambda x: str(x.get("updated_at") or ""), reverse=True)
-        return {"status": "ok", "logs": out}
-
 
 def _final_fields(run: ActiveRun) -> Dict[str, Any]:
     """Поля статуса завершённого прогона."""
@@ -436,15 +446,21 @@ def make_user_message(content: str) -> Dict[str, Any]:
     }
 
 
-def _thread_log_entry(record: ThreadRecord) -> dict:
-    system, task_id = record.key.system, record.key.thread
+def _task_entry(record: ThreadRecord) -> dict:
+    status = task_status.status_of(record) or {}
     return {
-        "system": system,
-        "task_id": task_id,
+        "system": record.key.system,
+        "task_id": record.key.thread,
+        "status": status.get("status"),
         "updated_at": record.info.updated_at or record.info.created_at,
-        "messages_count": record.info.messages_count,
-        "logs_url": f"/logs/{system}/{task_id}",
     }
+
+
+def _pending(record: ThreadRecord | None) -> int:
+    """Сообщения входящего потока, ещё не доставленные в историю."""
+    if record is None:
+        return 0
+    return max(0, record.max_seq.get("inbox", 0) - record.state.inbox_seq)
 
 
 async def healthcheck():

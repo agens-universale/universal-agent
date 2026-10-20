@@ -118,8 +118,11 @@ def test_determine_status_non_int_exit_code_failed():
 
 
 def test_final_statuses_contains_expected():
+    # cancelled — отмена задачи через API /v1 (POST …/cancel).
     assert (
-        frozenset({"completed", "failed", "timeout", "unknown_failed"})
+        frozenset(
+            {"completed", "failed", "timeout", "unknown_failed", "cancelled"}
+        )
         == lc.FINAL_STATUSES
     )
 

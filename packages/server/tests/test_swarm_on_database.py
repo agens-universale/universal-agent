@@ -71,7 +71,9 @@ def surface(tmp_path, monkeypatch):
     )
     started: list = []
 
-    def fake_start(swarm_cfg, *, system, task_id, payload, trace_id=None):
+    def fake_start(
+        swarm_cfg, *, system, task_id, payload, trace_id=None, query=None
+    ):
         sid = f"swarm_{system}_{task_id}"
         started.append(swarm_cfg)
         storage.save_swarm_meta(
@@ -137,21 +139,19 @@ def test_logs_do_not_read_threads_of_other_tasks(surface):
             [{"id": "s1", "role": "user", "content": "секрет вебхука"}],
         )
     )
-    resp = TestClient(surface.app()).get("/logs/g/hook")
+    resp = TestClient(surface.app()).get("/v1/tasks/g/hook/messages")
     assert resp.status_code == 404
 
 
 def test_message_into_a_running_task_is_queued_into_the_inbox(surface):
     client = TestClient(surface.app())
-    first = client.post(
-        "/events/webhook", json={"system": "g", "task_id": "t1"}
-    )
+    first = client.post("/v1/tasks", json={"system": "g", "task_id": "t1"})
     assert first.json()["status"] == "started"
     again = client.post(
-        "/events/webhook",
+        "/v1/tasks",
         json={"system": "g", "task_id": "t1", "text": "и тесты"},
     )
-    assert again.status_code == 200
+    assert again.status_code == 202
     assert again.json()["status"] == "queued"
     entries = run_sync(surface.store.read_stream(KEY, "inbox"))
     assert "и тесты" in entries[-1].data["content"]
@@ -161,7 +161,7 @@ def test_message_into_a_running_task_is_queued_into_the_inbox(surface):
 def test_task_thread_is_marked_as_swarm(surface):
     """Восстановление вебхука такой тред не берёт: его ведёт песочница."""
     TestClient(surface.app()).post(
-        "/events/webhook", json={"system": "g", "task_id": "t1"}
+        "/v1/tasks", json={"system": "g", "task_id": "t1"}
     )
     record = run_sync(surface.store.get_thread(KEY))
     assert "swarm" in record.frontend
@@ -169,15 +169,17 @@ def test_task_thread_is_marked_as_swarm(surface):
 
 def test_logs_come_from_the_store(surface):
     client = TestClient(surface.app())
-    client.post("/events/webhook", json={"system": "g", "task_id": "t1"})
+    client.post("/v1/tasks", json={"system": "g", "task_id": "t1"})
     run_sync(
         Threads(surface.store).append_messages(
             KEY, [{"id": "u1", "role": "user", "content": "из песочницы"}]
         )
     )
-    body = client.get("/logs/g/t1").json()
-    assert [m["content"] for m in body["messages"]] == ["из песочницы"]
-    assert body["meta"]["swarm_meta"]["status"] == "running"
+    body = client.get("/v1/tasks/g/t1/messages").json()
+    assert [m["message"]["content"] for m in body["messages"]] == [
+        "из песочницы"
+    ]
+    assert client.get("/v1/tasks/g/t1").json()["swarm"]["status"] == "running"
 
 
 def test_sqlite_stays_on_the_sandbox_files(tmp_path):

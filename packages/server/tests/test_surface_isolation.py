@@ -64,22 +64,20 @@ def client(tmp_path):
     "system", ["responses", "a2a", "completions", "acp", "cli", "tui"]
 )
 def test_webhook_does_not_read_foreign_threads(client, system):
-    assert client.get(f"/logs/{system}/t1").status_code == 400
-    assert client.get(f"/runs/{system}/t1").status_code == 400
+    assert client.get(f"/v1/tasks/{system}/t1/messages").status_code == 400
+    assert client.get(f"/v1/tasks/{system}/t1").status_code == 400
 
 
 def test_webhook_lists_only_its_own_threads(client):
     systems = {
-        entry["system"] for entry in client.get("/logs/all").json()["logs"]
+        entry["system"] for entry in client.get("/v1/tasks").json()["tasks"]
     }
     assert systems == {"generic"}
-    assert client.get("/logs/generic/t1").status_code == 200
+    assert client.get("/v1/tasks/generic/t1/messages").status_code == 200
 
 
 def test_webhook_does_not_write_into_interactive_sessions(client):
-    resp = client.post(
-        "/events/webhook", json={"system": "cli", "task_id": "t"}
-    )
+    resp = client.post("/v1/tasks", json={"system": "cli", "task_id": "t"})
     assert resp.status_code == 400
 
 
@@ -91,9 +89,9 @@ def test_reserved_check_sees_the_normalized_system(client, system):
     «.cli» — это тред «cli». Проверка обязана видеть то же, что хранилище."""
     from urllib.parse import quote
 
-    assert client.get(f"/logs/{quote(system)}/t1").status_code == 400
-    assert client.get(f"/runs/{quote(system)}/t1").status_code == 400
-    resp = client.post(
-        "/events/webhook", json={"system": system, "task_id": "x"}
+    assert (
+        client.get(f"/v1/tasks/{quote(system)}/t1/messages").status_code == 400
     )
+    assert client.get(f"/v1/tasks/{quote(system)}/t1").status_code == 400
+    resp = client.post("/v1/tasks", json={"system": system, "task_id": "x"})
     assert resp.status_code == 400

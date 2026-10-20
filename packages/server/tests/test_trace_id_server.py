@@ -39,18 +39,14 @@ def client(monkeypatch, tmp_path):
 
 def test_trace_id_reaches_run_config(client):
     api, captured = client
-    resp = api.post(
-        "/events/webhook", json={"task_id": "t1", "trace_id": "wf-42"}
-    )
-    assert resp.status_code == 200
+    resp = api.post("/v1/tasks", json={"task_id": "t1", "trace_id": "wf-42"})
+    assert resp.status_code == 202
     assert captured["loaded"].runtime.trace_id == "wf-42"
 
 
 def test_trace_id_is_removed_from_the_prompt(client):
     api, captured = client
-    api.post(
-        "/events/webhook", json={"task_id": "t1", "trace_id": "wf-42", "x": 1}
-    )
+    api.post("/v1/tasks", json={"task_id": "t1", "trace_id": "wf-42", "x": 1})
     # Сообщение задачи — во входящем потоке треда: его и прочитает ход.
     from gc_core.threads.facade import run_sync
     from gc_core.threads.models import ThreadKey
@@ -66,15 +62,13 @@ def test_trace_id_is_removed_from_the_prompt(client):
 
 def test_absent_trace_id_leaves_no_key(client):
     api, captured = client
-    api.post("/events/webhook", json={"task_id": "t1"})
+    api.post("/v1/tasks", json={"task_id": "t1"})
     assert captured["loaded"].runtime.trace_id is None
 
 
 def test_invalid_trace_id_is_rejected(client):
     api, _ = client
-    resp = api.post(
-        "/events/webhook", json={"task_id": "t1", "trace_id": "wf\n42"}
-    )
+    resp = api.post("/v1/tasks", json={"task_id": "t1", "trace_id": "wf\n42"})
     assert resp.status_code == 400
 
 
@@ -83,7 +77,7 @@ def test_second_webhook_into_live_run_drops_trace_and_logs_it(client, caplog):
     captured["live_run"] = True
     with caplog.at_level("WARNING"):
         resp = api.post(
-            "/events/webhook", json={"task_id": "t1", "trace_id": "wf-99"}
+            "/v1/tasks", json={"task_id": "t1", "trace_id": "wf-99"}
         )
     assert resp.json()["status"] == "queued"
     assert "trace_id_ignored" in caplog.text

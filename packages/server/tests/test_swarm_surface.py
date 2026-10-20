@@ -80,9 +80,11 @@ def stub_runner(monkeypatch):
     """Запуск песочницы без Popen: пишет meta, как настоящий runner."""
     calls = []
 
-    def fake_start(swarm_cfg, *, system, task_id, payload, trace_id=None):
+    def fake_start(
+        swarm_cfg, *, system, task_id, payload, trace_id=None, query=None
+    ):
         sid = _sid(system, task_id)
-        calls.append((sid, payload, trace_id))
+        calls.append((sid, query, trace_id))
         storage.save_swarm_meta(
             swarm_cfg["threads_dir"],
             sid,
@@ -101,18 +103,18 @@ def stub_runner(monkeypatch):
 
 
 def test_status_404_when_meta_missing(swarm):
-    assert _client(swarm).get("/runs/g/no_such").status_code == 404
+    assert _client(swarm).get("/v1/tasks/g/no_such").status_code == 404
 
 
 def test_status_400_when_system_empty(swarm):
-    assert _client(swarm).get("/runs/%20/t1").status_code == 400
+    assert _client(swarm).get("/v1/tasks/%20/t1").status_code == 400
 
 
 def test_status_running_when_pid_alive(swarm, monkeypatch):
     threads, _ = swarm.paths
     _seed(threads, _sid("g", "t1"), "running", pid=99999)
     monkeypatch.setattr("os.kill", lambda pid, sig: None)
-    body = _client(swarm).get("/runs/g/t1").json()
+    body = _client(swarm).get("/v1/tasks/g/t1").json()
     assert body["status"] == "running"
     assert (body["system"], body["task_id"]) == ("g", "t1")
     assert body["swarm"]["status"] == "running"
@@ -132,7 +134,7 @@ def test_status_finalizes_via_completion_json(swarm):
             "error_message": "",
         },
     )
-    body = _client(swarm).get("/runs/g/t2").json()
+    body = _client(swarm).get("/v1/tasks/g/t2").json()
     assert body["status"] == "completed"
     assert body["finished_at"] == "2026-06-04T12:00:00Z"
     assert body["swarm"]["exit_code"] == 0
@@ -147,7 +149,7 @@ def test_status_dead_pid_is_failed(swarm, monkeypatch):
         raise ProcessLookupError
 
     monkeypatch.setattr("os.kill", kill_dead)
-    body = _client(swarm).get("/runs/g/t3").json()
+    body = _client(swarm).get("/v1/tasks/g/t3").json()
     assert body["status"] == "failed"
     assert body["swarm"]["status"] == "unknown_failed"
     assert body["swarm"]["error_type"] == "process_crash"
@@ -157,7 +159,7 @@ def test_status_normalizes_system_lowercase(swarm, monkeypatch):
     threads, _ = swarm.paths
     _seed(threads, _sid("ci", "build"), "running", pid=99999)
     monkeypatch.setattr("os.kill", lambda pid, sig: None)
-    assert _client(swarm).get("/runs/CI/build").json()["system"] == "ci"
+    assert _client(swarm).get("/v1/tasks/CI/build").json()["system"] == "ci"
 
 
 def test_status_unregisters_from_monitor_when_finalized(swarm):
@@ -175,7 +177,7 @@ def test_status_unregisters_from_monitor_when_finalized(swarm):
         },
     )
     swarm.monitor = MagicMock()
-    assert _client(swarm).get("/runs/g/t5").json()["status"] == "completed"
+    assert _client(swarm).get("/v1/tasks/g/t5").json()["status"] == "completed"
     swarm.monitor.unregister_active.assert_called_once_with(sid)
 
 
@@ -183,18 +185,18 @@ def test_status_unregisters_from_monitor_when_finalized(swarm):
 
 
 def test_start_400_invalid_json(swarm):
-    resp = _client(swarm).post("/events/webhook", content="not json")
+    resp = _client(swarm).post("/v1/tasks", content="not json")
     assert resp.status_code == 400
 
 
 def test_start_400_body_not_object(swarm):
-    resp = _client(swarm).post("/events/webhook", json=["a", "b"])
+    resp = _client(swarm).post("/v1/tasks", json=["a", "b"])
     assert resp.status_code == 400
 
 
 def test_start_returns_started(swarm, stub_runner):
-    resp = _client(swarm).post("/events/webhook", json={"task_id": "build-42"})
-    assert resp.status_code == 200
+    resp = _client(swarm).post("/v1/tasks", json={"task_id": "build-42"})
+    assert resp.status_code == 202
     body = resp.json()
     assert body["status"] == "started"
     assert body["task_id"] == "build-42"
@@ -205,17 +207,17 @@ def test_start_forwards_trace_id_and_strips_it_from_payload(
     swarm, stub_runner
 ):
     resp = _client(swarm).post(
-        "/events/webhook", json={"task_id": "t-tr", "trace_id": "abc-1"}
+        "/v1/tasks", json={"task_id": "t-tr", "trace_id": "abc-1"}
     )
-    assert resp.status_code == 200
-    _sid_, payload, trace_id = stub_runner[0]
+    assert resp.status_code == 202
+    _sid_, query, trace_id = stub_runner[0]
     assert trace_id == "abc-1"
-    assert "trace_id" not in payload
+    assert "trace_id" not in query
 
 
 def test_start_400_on_invalid_trace_id(swarm, stub_runner):
     resp = _client(swarm).post(
-        "/events/webhook", json={"task_id": "t-bad", "trace_id": "wf\n42"}
+        "/v1/tasks", json={"task_id": "t-bad", "trace_id": "wf\n42"}
     )
     assert resp.status_code == 400
     assert "invalid trace_id" in resp.json()["detail"]["payload"]
@@ -226,7 +228,7 @@ def test_start_400_on_invalid_trace_id(swarm, stub_runner):
 def test_start_409_when_task_is_running(swarm, stub_runner, status):
     threads, _ = swarm.paths
     _seed(threads, _sid("generic", "t1"), status, pid=99999)
-    resp = _client(swarm).post("/events/webhook", json={"task_id": "t1"})
+    resp = _client(swarm).post("/v1/tasks", json={"task_id": "t1"})
     assert resp.status_code == 409
     detail = resp.json()["detail"]
     assert detail["status"] == "error"
@@ -238,7 +240,7 @@ def test_start_409_when_task_is_running(swarm, stub_runner, status):
 def test_start_409_when_task_finished(swarm, stub_runner):
     threads, _ = swarm.paths
     _seed(threads, _sid("generic", "t3"), "completed", exit_code=0)
-    resp = _client(swarm).post("/events/webhook", json={"task_id": "t3"})
+    resp = _client(swarm).post("/v1/tasks", json={"task_id": "t3"})
     assert resp.status_code == 409
     assert "new task_id" in resp.json()["detail"]["payload"]
 
@@ -246,7 +248,7 @@ def test_start_409_when_task_finished(swarm, stub_runner):
 def test_start_503_when_max_concurrent_reached(swarm, stub_runner):
     swarm.monitor = MagicMock()
     swarm.monitor.get_active_count.return_value = 10
-    resp = _client(swarm).post("/events/webhook", json={"task_id": "newone"})
+    resp = _client(swarm).post("/v1/tasks", json={"task_id": "newone"})
     assert resp.status_code == 503
     detail = resp.json()["detail"]
     assert detail["status"] == "error"
@@ -256,7 +258,7 @@ def test_start_503_when_max_concurrent_reached(swarm, stub_runner):
 
 def test_reserved_system_is_400(swarm, stub_runner):
     resp = _client(swarm).post(
-        "/events/webhook", json={"task_id": "t", "system": "a2a"}
+        "/v1/tasks", json={"task_id": "t", "system": "a2a"}
     )
     assert resp.status_code == 400
     assert stub_runner == []
@@ -268,7 +270,9 @@ def test_concurrent_posts_start_only_once(swarm, monkeypatch):
     started = [0]
     block, entered = threading.Event(), threading.Event()
 
-    def fake_start(swarm_cfg, *, system, task_id, payload, trace_id=None):
+    def fake_start(
+        swarm_cfg, *, system, task_id, payload, trace_id=None, query=None
+    ):
         sid = _sid(system, task_id)
         storage.save_swarm_meta(
             swarm_cfg["threads_dir"],
@@ -288,7 +292,7 @@ def test_concurrent_posts_start_only_once(swarm, monkeypatch):
     results = []
 
     def post():
-        resp = client.post("/events/webhook", json={"task_id": "concurrent"})
+        resp = client.post("/v1/tasks", json={"task_id": "concurrent"})
         results.append(resp.status_code)
 
     first = threading.Thread(target=post)
@@ -299,20 +303,20 @@ def test_concurrent_posts_start_only_once(swarm, monkeypatch):
     first.join(timeout=2.0)
     post()
     assert started[0] == 1
-    assert sorted(results) == [200, 409]
+    assert sorted(results) == [202, 409]
 
 
 def test_new_task_id_when_none_sent(swarm, stub_runner):
     client = _client(swarm)
-    one = client.post("/events/webhook", json={}).json()
-    two = client.post("/events/webhook", json={}).json()
+    one = client.post("/v1/tasks", json={}).json()
+    two = client.post("/v1/tasks", json={}).json()
     assert one["task_id"] != two["task_id"]
     assert len(stub_runner) == 2
 
 
 def test_start_normalizes_system_lowercase(swarm, stub_runner):
     resp = _client(swarm).post(
-        "/events/webhook", json={"system": "CI", "task_id": "t"}
+        "/v1/tasks", json={"system": "CI", "task_id": "t"}
     )
     assert resp.json()["system"] == "ci"
     assert stub_runner[0][0] == _sid("ci", "t")
@@ -321,7 +325,7 @@ def test_start_normalizes_system_lowercase(swarm, stub_runner):
 def test_start_registers_with_monitor(swarm, stub_runner):
     swarm.monitor = MagicMock()
     swarm.monitor.get_active_count.return_value = 0
-    _client(swarm).post("/events/webhook", json={"task_id": "x"})
+    _client(swarm).post("/v1/tasks", json={"task_id": "x"})
     swarm.monitor.register_active.assert_called_once_with(_sid("generic", "x"))
 
 
@@ -332,24 +336,27 @@ def test_logs_read_messages_from_sandbox(swarm):
     threads, sandbox = swarm.paths
     sid = _sid("g", "t")
     _seed(threads, sid, "completed", exit_code=0)
-    work = os.path.join(sandbox, sid, ".gc", "threads")
+    work = os.path.join(sandbox, sid, ".gc", "threads", sid)
     os.makedirs(work, exist_ok=True)
-    with open(os.path.join(sandbox, sid, "messages.jsonl"), "w") as f:
+    with open(os.path.join(work, "messages.jsonl"), "w") as f:
         f.write(json.dumps({"role": "assistant", "content": "ok"}) + "\n")
-    body = _client(swarm).get("/logs/g/t").json()
-    assert body["status"] == "ok"
-    assert set(body) >= {"status", "system", "task_id", "meta", "messages"}
+    body = _client(swarm).get("/v1/tasks/g/t/messages").json()
+    assert [m["message"]["content"] for m in body["messages"]] == ["ok"]
+    output = _client(swarm).get("/v1/tasks/g/t/output").json()
+    assert set(output) == {"stdout", "stderr"}
 
 
 def test_logs_404_when_no_data(swarm):
-    assert _client(swarm).get("/logs/g/no_such").status_code == 404
+    assert (
+        _client(swarm).get("/v1/tasks/g/no_such/messages").status_code == 404
+    )
 
 
 def test_logs_all_lists_swarm_tasks(swarm):
     threads, _ = swarm.paths
     _seed(threads, _sid("g", "a"), "completed", exit_code=0)
-    logs = _client(swarm).get("/logs/all").json()["logs"]
-    assert [(e["system"], e["task_id"]) for e in logs] == [("g", "a")]
+    tasks = _client(swarm).get("/v1/tasks").json()["tasks"]
+    assert [(e["system"], e["task_id"]) for e in tasks] == [("g", "a")]
 
 
 # --- паритет с вебхуком -----------------------------------------------------
@@ -370,17 +377,17 @@ def test_same_requests_get_answers_of_the_same_shape(
     hook, sw = TestClient(webhook.app()), _client(swarm)
     body = {"task_id": "p1", "system": "s"}
     a, b = (
-        hook.post("/events/webhook", json=body),
-        sw.post("/events/webhook", json=body),
+        hook.post("/v1/tasks", json=body),
+        sw.post("/v1/tasks", json=body),
     )
-    assert (a.status_code, b.status_code) == (200, 200)
+    assert (a.status_code, b.status_code) == (202, 202)
     assert set(a.json()) == set(b.json())
-    for path in ("/runs/s/none", "/logs/s/none"):
+    for path in ("/v1/tasks/s/none", "/v1/tasks/s/none/messages"):
         assert hook.get(path).status_code == sw.get(path).status_code == 404
     reserved = {"task_id": "p2", "system": "acp"}
     assert (
-        hook.post("/events/webhook", json=reserved).json()["detail"]["status"]
-        == sw.post("/events/webhook", json=reserved).json()["detail"]["status"]
+        hook.post("/v1/tasks", json=reserved).json()["detail"]["status"]
+        == sw.post("/v1/tasks", json=reserved).json()["detail"]["status"]
         == "error"
     )
     assert hook.get("/healthcheck").json() == sw.get("/healthcheck").json()

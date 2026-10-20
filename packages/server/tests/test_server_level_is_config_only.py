@@ -31,7 +31,7 @@ def test_level_in_the_request_body_is_not_a_level_input(monkeypatch, tmp_path):
     monkeypatch.setattr(webhook_module, "build_auth_connector", lambda c: None)
     monkeypatch.setattr(surface.registry, "astart", as_coro(lambda **kw: True))
     resp = TestClient(surface.app()).post(
-        "/events/webhook", json={"task_id": "t2", "level": "auto"}
+        "/v1/tasks", json={"task_id": "t2", "level": "auto"}
     )
-    assert resp.status_code == 200
+    assert resp.status_code == 202
     assert settings_of(seen["cfg"]).level == "default"
