@@ -36,6 +36,7 @@ from gc_core.message_policy.plan_messages import accepted_plan_messages
 from gc_core.plan_store import plan_awaits_decision, plan_is_accepted
 from gc_core.runtime_notices import collect_unread_runtime_notices
 from gc_core.security.permission_mode import Mode, mode_label
+from gc_core.utils.path_truncate import truncate_path
 from rich.cells import cell_len
 from rich.text import Text
 from textual import events
@@ -73,7 +74,6 @@ from gc_tui.services.notices_ui import (
     footer_left_with_badge,
     format_notices_badge,
 )
-from gc_tui.services.path_display import truncate_path
 from gc_tui.services.reasoning_clock import COGNITIVE_TOOLS, ReasoningClock
 from gc_tui.services.session_lock import (
     BUSY_MESSAGE,
