@@ -18,7 +18,7 @@ import time
 import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any
-from urllib.parse import unquote, urlsplit
+from urllib.parse import unquote
 
 import httpx
 from gc_core.execution.environment import utc_now
@@ -35,19 +35,34 @@ def allowed_callback(url: str, allowed: list[str]) -> bool:
     """``url`` под одним из префиксов: схема, хост и порт — точно, путь —
     началом; логина в адресе, сегментов «.» и «..» (в том числе
     закодированных) и обратных слешей быть не должно — получатель
-    нормализует путь, и префикс обходился бы."""
-    target = urlsplit(url)
-    if target.username or target.password or not target.hostname:
+    нормализует путь, и префикс обходился бы. Разбор — ``httpx.URL``, тем
+    же, что потом отправит запрос: другой парсер видел бы другой адрес."""
+    target = _parse(url)
+    if target is None or target.userinfo or not target.host:
         return False
-    if not _plain_path(target.path):
+    if not _plain_path(target.raw_path.split(b"?", 1)[0].decode("ascii")):
         return False
     for prefix in allowed:
-        base = urlsplit(prefix)
-        if (target.scheme, target.netloc) != (base.scheme, base.netloc):
+        base = _parse(prefix)
+        if base is None:
+            continue
+        if (target.scheme, target.host, target.port) != (
+            base.scheme,
+            base.host,
+            base.port,
+        ):
             continue
         if target.path.startswith(base.path or "/"):
             return True
     return False
+
+
+def _parse(url: str) -> httpx.URL | None:
+    try:
+        parsed = httpx.URL(url)
+    except Exception:
+        return None
+    return parsed if parsed.scheme in ("http", "https") else None
 
 
 def _plain_path(path: str) -> bool:

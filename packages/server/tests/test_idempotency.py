@@ -22,7 +22,7 @@ def surface(tmp_path, monkeypatch):
     surface = make_webhook(tmp_path)
     starts: list = []
 
-    async def fake_start(self, system, task_id, trace_id):
+    async def fake_start(self, system, task_id, trace_id, **_kw):
         starts.append(task_id)
 
     monkeypatch.setattr(type(surface), "_start_run", fake_start)

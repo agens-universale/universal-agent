@@ -56,6 +56,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _ERR_SYSTEM_AND_TASK_ID = "system and task_id are required"
+#: Прогон восстановления: адрес обратного вызова задачи остаётся прежним.
+KEEP_CALLBACK = object()
 #: Как часто забывать квитанции старше окна идемпотентности.
 _RECEIPTS_PRUNE_SECONDS = 3600
 
@@ -312,11 +314,6 @@ class WebhookSurface:
         receipt = await self.threads().submit(
             key, message, op_id=op_id, source="webhook"
         )
-        if callback_url is not None:
-            # Адрес — в статусе задачи: событие шлёт инстанс, доведший ход.
-            await task_status.aset_status(
-                self.threads(), key, callback_url=callback_url
-            )
         seq = receipt.max_seq.get("inbox")
         if op_id is not None and await self._delivered(key, seq):
             # Повтор по ключу идемпотентности: сообщение уже доставлено —
@@ -326,7 +323,9 @@ class WebhookSurface:
             _log_ignored_trace_id(trace_id, key.system, key.thread)
             return {"status": "queued", "message_seq": seq}
         try:
-            await self._start_run(key.system, key.thread, trace_id)
+            await self._start_run(
+                key.system, key.thread, trace_id, callback_url=callback_url
+            )
         finally:
             self.registry.release_reservation(
                 system=key.system, task_id=key.thread
@@ -334,18 +333,29 @@ class WebhookSurface:
         return {"status": "started", "message_seq": seq}
 
     async def _check_callback(self, key: ThreadKey, url: str) -> None:
-        """``callback_url`` — только под allowed_urls и не в обход адреса
-        идущей задачи: её итог принадлежит тому, кто её поставил."""
+        """``callback_url`` — только под allowed_urls. Адрес задаёт запрос,
+        запускающий прогон (его пишет взявший тред ход): в идущую задачу —
+        только тот же адрес, иначе 409 до любой записи — итог принадлежит
+        тому, кто задачу поставил."""
         if not allowed_callback(url, self.config.callbacks.allowed_urls):
             raise http_error(
                 400, "callback_url is not under webhook.callbacks.allowed_urls"
             )
-        status = task_status.status_of(await self.threads().get(key)) or {}
-        current = status.get("callback_url")
-        live = status.get("status") in ("running", "interrupted")
-        if live and current and current != url:
+        record = await self.threads().get(key)
+        status = task_status.status_of(record) or {}
+        busy = (
+            self.registry.is_running(system=key.system, task_id=key.thread)
+            or self.registry.building_since(
+                system=key.system, task_id=key.thread
+            )
+            is not None
+            or await self.threads().busy_owner(key) is not None
+            or status.get("status") in ("running", "interrupted")
+        )
+        if busy and status.get("callback_url") != url:
             raise http_error(
-                409, "callback_url of a running task cannot be changed"
+                409,
+                "callback_url is set by the request that starts the task",
             )
 
     async def _delivered(self, key: ThreadKey, seq: int | None) -> bool:
@@ -442,7 +452,12 @@ class WebhookSurface:
         return True
 
     async def _start_run(
-        self, system: str, task_id: str, trace_id: str | None
+        self,
+        system: str,
+        task_id: str,
+        trace_id: str | None,
+        *,
+        callback_url: Any = KEEP_CALLBACK,
     ) -> None:
         loaded = (
             self.settings.with_runtime(trace_id=trace_id)
@@ -465,7 +480,7 @@ class WebhookSurface:
         # Статус «running» пишет только ход, взявший тред: прогон, чей тред
         # перехватил другой инстанс, статус не трогает.
         ctx.on_thread_claimed = functools.partial(
-            self._amark_running, run_id, started_at
+            self._amark_running, run_id, started_at, callback_url
         )
         await self.registry.astart(
             system=system,
@@ -477,18 +492,31 @@ class WebhookSurface:
         )
 
     async def _amark_running(
-        self, run_id: str, started_at: float, system: str, thread_id: str
+        self,
+        run_id: str,
+        started_at: float,
+        callback_url: Any,
+        system: str,
+        thread_id: str,
     ) -> None:
+        """Ход взял тред: статус running и адрес обратного вызова прогона
+        (запрос без адреса стирает адрес прошлого прогона; восстановление
+        сохраняет адрес задачи)."""
+        fields: Dict[str, Any] = {
+            "status": "running",
+            "run_id": run_id,
+            "instance": instance_id(),
+            "started_at": started_at,
+            "finished_at": None,
+            "result": None,
+            "error": None,
+        }
+        if callback_url is not KEEP_CALLBACK:
+            fields["callback_url"] = callback_url
         await task_status.aset_status(
             self.threads(),
             ThreadKey(system=system, thread=thread_id),
-            status="running",
-            run_id=run_id,
-            instance=instance_id(),
-            started_at=started_at,
-            finished_at=None,
-            result=None,
-            error=None,
+            **fields,
         )
 
     async def _amark_finished(self, run: ActiveRun) -> None:

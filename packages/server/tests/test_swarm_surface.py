@@ -369,7 +369,7 @@ def test_same_requests_get_answers_of_the_same_shape(
     ответов и коды на общих ручках совпадают."""
     webhook = make_webhook(tmp_path)
 
-    async def fake_start(self, system, task_id, trace_id):
+    async def fake_start(self, system, task_id, trace_id, **_kw):
         del trace_id
         self.registry.reserve(system=system, task_id=task_id)
 

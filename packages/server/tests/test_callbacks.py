@@ -176,6 +176,9 @@ async def test_events_filter(tmp_path, monkeypatch):
         ("https://hooks.example/a2a/%2e%2e/admin", False),
         ("https://hooks.example/a2a/x/%2E%2E/%2E%2E/admin", False),
         ("https://hooks.example/a2a/x?y=1", True),
+        ("https://hooks.example\\@evil.example/a2a/x", False),
+        ("https://hooks.example%2f@evil.example/a2a/x", False),
+        ("https://HOOKS.example/a2a/x", True),
     ],
 )
 def test_allowed_callback_compares_origin_and_path(url, ok):
@@ -251,3 +254,63 @@ async def test_stored_callback_is_rechecked_before_sending(
     )
     await surface.callbacks.adrain()
     assert got == []
+
+
+async def test_queued_request_cannot_set_a_callback(tmp_path, monkeypatch):
+    """Адрес задаёт только запрос, запускающий прогон: сообщение в идущую
+    задачу без адреса не может его назначить — иначе чужой итог ушёл бы на
+    его адрес."""
+    from gc_core.threads.models import ThreadKey
+    from gc_server.webhook import status as task_status
+
+    surface, _got, _ = _webhook(
+        tmp_path, monkeypatch, {"allowed_urls": ["https://hooks.example/"]}
+    )
+    key = ThreadKey(system="generic", thread="t8")
+    await task_status.aset_status(
+        surface.threads(), key, status="running", run_id="other:1"
+    )
+    from gc_core.threads.session_port import SessionPort
+
+    await SessionPort(surface.threads().store, owner="runner").aclaim(
+        key.system, key.thread
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=surface.app()),
+        base_url="http://test",
+    ) as client:
+        resp = await client.post(
+            "/v1/tasks",
+            json={
+                "task_id": "t8",
+                "message": "x",
+                "callback_url": "https://hooks.example/steal",
+            },
+        )
+    assert resp.status_code == 409
+    record = await surface.threads().get(key)
+    assert "callback_url" not in (task_status.status_of(record) or {}) or (
+        task_status.status_of(record)["callback_url"] is None
+    )
+
+
+async def test_new_run_drops_the_previous_runs_callback(tmp_path, monkeypatch):
+    """Адрес — свойство прогона: следующий прогон без callback_url не шлёт
+    итог на адрес прошлого."""
+    surface, got, _ = _webhook(
+        tmp_path, monkeypatch, {"allowed_urls": ["https://hooks.example/"]}
+    )
+    await _run(
+        surface,
+        {
+            "task_id": "t9",
+            "message": "x",
+            "callback_url": "https://hooks.example/first",
+        },
+    )
+    surface2, got2, _ = _webhook(
+        tmp_path, monkeypatch, {"allowed_urls": ["https://hooks.example/"]}
+    )
+    await _run(surface2, {"task_id": "t9", "message": "ещё"})
+    assert [str(r.url) for r in got] == ["https://hooks.example/first"]
+    assert got2 == []

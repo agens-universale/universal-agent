@@ -93,7 +93,7 @@ def test_surface_requires_a_signature_when_a_secret_is_set(
         tmp_path, config={"webhook": {"signing_secret": SECRET}}
     )
 
-    async def fake_start(self, system, task_id, trace_id):
+    async def fake_start(self, system, task_id, trace_id, **_kw):
         return None
 
     monkeypatch.setattr(type(surface), "_start_run", fake_start)
@@ -115,7 +115,7 @@ def test_surface_requires_a_signature_when_a_secret_is_set(
 def test_without_a_secret_nothing_is_checked(tmp_path, monkeypatch):
     surface = make_webhook(tmp_path)
 
-    async def fake_start(self, system, task_id, trace_id):
+    async def fake_start(self, system, task_id, trace_id, **_kw):
         return None
 
     monkeypatch.setattr(type(surface), "_start_run", fake_start)
@@ -139,7 +139,7 @@ def _signed_surface(tmp_path, monkeypatch):
         tmp_path, config={"webhook": {"signing_secret": SECRET}}
     )
 
-    async def fake_start(self, system, task_id, trace_id):
+    async def fake_start(self, system, task_id, trace_id, **_kw):
         return None
 
     monkeypatch.setattr(type(surface), "_start_run", fake_start)
