@@ -82,10 +82,7 @@ from gc_tui.services.mode_pill import (
     mode_hint_rows,
     render_mode_pill,
 )
-from gc_tui.services.notices_ui import (
-    footer_left_rows,
-    format_notices_badge,
-)
+from gc_tui.services.notices_ui import format_notices_badge
 from gc_tui.services.path_display import truncate_path
 from gc_tui.services.reasoning_clock import COGNITIVE_TOOLS, ReasoningClock
 from gc_tui.services.session_lock import (
@@ -1039,63 +1036,41 @@ class TraceScreen(Screen):
     def _compose_footer_right(self) -> Text:
         """Правый край футера: [профиль ]●[ модель] · контекст [+ цены вниз].
 
-        Единая лесенка жертв (Task 17, порядок — дословное решение юзера);
-        первое подошедшее и есть ответ:
+        Единая лесенка жертв; первое подошедшее и есть ответ:
 
-        1. всё одной строкой справа, левая в одну строку, имя профиля в потолке;
+        1. всё одной строкой справа, пилюля режима слева полная, имя профиля
+           в потолке;
         2. цены («запрос · сессия») уезжают на 2-ю строку справа, контекст
-           остаётся наверху; левая ещё в одну строку, имя в потолке;
-        3. левая занимает свою 2-ю строку (туда уходит счётчик уведомлений,
-           перенос делает Rich-wrap); имя профиля ВСЁ ЕЩЁ в потолке;
-        4. пилюля режима слева сжимается до глифа (имя режима и подпись
-           хоткея уходят, режим остаётся виден);
-        5. имя профиля ужимается `_PROFILE_NAME_MAX_COLS` → `_MIN_COLS`;
-        6. имя профиля снимается целиком;
-        7. имя модели ужимается по середине до `_MODEL_NAME_MIN_COLS`;
-        8. снимается имя модели (или слово `auto`), затем у auto — стрелка с
-           точкой уровня; точка режима/уровня и плашка контекста остаются
-           всегда.
+           остаётся наверху;
+        3. пилюля режима слева сжимается до глифа (режим остаётся виден);
+        4. имя профиля ужимается `_PROFILE_NAME_MAX_COLS` → `_MIN_COLS`;
+        5. имя профиля снимается целиком;
+        6. имя модели ужимается по середине до `_MODEL_NAME_MIN_COLS`;
+        7. снимается имя модели (или слово `auto`), затем у auto — стрелка с
+           точкой уровня; затем цены — «запрос», потом целиком. Точка
+           режима/уровня и плашка контекста остаются всегда.
 
-        Ступени 1-3 ничего не теряют: вторая строка футера (height: 2)
-        зарезервирована в ОБЕИХ колонках и так, и перенос левой вниз — то же
-        перекладывание в уже оплаченное место, что и перенос цен. Потеря
-        информации начинается с 4-й. Отсюда и порядок (живой смок юзера,
-        фикс-раунд 3): бесплатные ходы идут раньше платных, поэтому перебор
-        имени живёт ЦЕЛИКОМ в платном проходе, а в бесплатных пробуется только
-        потолок — раньше имя ужималось при левой, спокойно стоявшей в один ряд.
+        Ступени 1-2 ничего не теряют: вторая строка правой колонки оплачена
+        высотой футера. Потеря начинается с 3-й, поэтому перебор имени живёт
+        целиком в проходе с глифом.
 
-        Лесенка МОНОТОННА по СОДЕРЖИМОМУ: при сужении окна цены, имя профиля и
-        имя модели не возвращаются. Поэтому вариант «всё одной строкой» живёт лишь
-        в первом проходе — иначе на границе ступени 3 (левой разрешили 2 ряда,
-        места стало больше) цены прыгали бы обратно наверх, а это ровно то
-        дёрганье, против которого задача и заведена. Уехали вниз — остались
-        внизу. По той же причине в платном проходе перебор имени начинается с
-        потолка: имя, ужатое раньше, иначе «подросло» бы обратно.
+        Ширину правая колонка ЗАЯВЛЯЕТ: #footer-right — width: auto,
+        #footer-left — 1fr, остаток достаётся левой. Вариант подходит, если в
+        остатке целиком встаёт строка 1 левой (режим + хвост команд — теми же
+        `_footer_mode_variants`, что её рисуют) и бейдж уведомлений строки 2.
+        Подсказки слота в отбор не входят: длинные гаснут многоточием.
 
-        Число рядов ЛЕВОЙ монотонности не подчиняется, и запирать его не надо
-        (решение по ревью): на ступенях 6-7 освободившаяся ширина может вернуть
-        левую в один ряд. Это зеркало того же обмена «ряд слева ↔ сегмент
-        справа», информации при этом не теряется, а искусственный запрет
-        тратил бы место впустую.
+        Лесенка монотонна по содержимому: при сужении окна цены, имя профиля и
+        имя модели не возвращаются. Поэтому «всё одной строкой» пробуется лишь
+        рядом с полной пилюлей, а перебор имени начинается с потолка.
 
-        Ширину правая колонка не «получает», а ЗАЯВЛЯЕТ: #footer-right —
-        width: auto, #footer-left — 1fr, остаток достаётся левой. Поэтому
-        лесенка перебирает варианты правой с предикатом «сколько рядов при
-        этом остатке занимает левая», а не считает бюджет от левой (так было
-        до Task 17: левая не отдавала ни колонки никогда, и правая заранее
-        теряла имя профиля и имя модели — живой смок).
-
-        «Рядов левой» считает `footer_left_rows` — то же ядро, что её и
-        рисует: параллельный оценщик разъехался бы с отрисовкой.
-
-        `snapshot` резолвится ОДИН раз на кадр (perf, cfccade9) — лесенка
-        получает его готовым и заново не резолвит."""
+        `snapshot` резолвится ОДИН раз на кадр (perf) — лесенка получает его
+        готовым и заново не резолвит."""
         request_seg, session_seg = self._usage_segments()
         available = self._footer_right_available_width()
         total = self._footer_total_width()
         snapshot = self._footer_head_snapshot()
         meter = self._context_meter()
-        left_badge = format_notices_badge(self._collect_footer_notices())
 
         def build(
             profile_cols: int | None,
@@ -1130,61 +1105,41 @@ class TraceScreen(Screen):
         def width_of(result: Text) -> int:
             return max(cell_len(line) for line in result.plain.split("\n"))
 
-        # Левая колонка меряется в двух формах пилюли режима. Полная (имя и
-        # подпись хоткея) — мерка бесплатных ступеней. Узкая (один глиф) —
-        # мерка платных и пол: режим должен быть виден всегда, а «Ctrl+C/stop»
-        # и ответ на ask_human урезать нечем — другого способа остановить
-        # агента или ответить ему нет. Ширина пола резервируется, и жертвует
-        # дальше правая.
-        left_full = self._footer_left_commands()
-        left_narrow = self._footer_left_commands(narrow=True)
-        left_floor = cell_len(left_narrow)
+        # Строка 1 меряется в двух формах пилюли: полная — мерка бесплатных
+        # ступеней, глиф — платных и пол: «Ctrl+C/stop» и ответ агенту урезать
+        # нечем. Пол и бейдж резервируются, дальше жертвует правая.
+        full_line, glyph_line = self._footer_mode_variants()
+        badge_cols = self._footer_badge_line().cell_len
 
-        def fits(
-            result: Text, allowed_left_rows: int, left_commands: str
-        ) -> bool:
-            lines = result.plain.split("\n")
+        def fits(result: Text, mode_line: Text) -> bool:
             need = width_of(result)
-            if len(lines) > 2 or need > available:
+            if result.plain.count("\n") > 1 or need > available:
                 return False
-            left_width = total - need - _FOOTER_CHROME_COLS
-            if left_width < left_floor:
-                return False
-            return (
-                left_width > 0
-                and footer_left_rows(
-                    left_commands, left_badge, width=left_width
-                )
-                <= allowed_left_rows
-            )
+            left = total - need - _FOOTER_CHROME_COLS
+            return left >= max(mode_line.cell_len, badge_cols, 1)
 
-        # Первый проход (левая в один ряд) — только бесплатные ступени 1-2, имя
-        # всегда в потолке. Второй (левая в два ряда, пилюля режима полная) —
-        # бесплатная ступень 3. Всё платное живёт в третьем (пилюля — глиф):
-        # перебор имени 14 → 5 и его снятие. «Одной строкой» дальше первого
-        # прохода не переходит — монотонность, см. докстринг.
         prices_down = [
             (cols, _RIGHT_PRICES_DOWN)
             for cols in range(
                 _PROFILE_NAME_MAX_COLS, _PROFILE_NAME_MIN_COLS - 1, -1
             )
         ]
+        # Бесплатный проход — ступени 1-2 рядом с полной пилюлей; платный —
+        # рядом с глифом: перебор имени 14 → 5 и его снятие.
         passes = (
             (
-                1,
-                left_full,
+                full_line,
                 [
                     (_PROFILE_NAME_MAX_COLS, _RIGHT_ONE_LINE),
                     (_PROFILE_NAME_MAX_COLS, _RIGHT_PRICES_DOWN),
                 ],
             ),
-            (2, left_full, [(_PROFILE_NAME_MAX_COLS, _RIGHT_PRICES_DOWN)]),
-            (2, left_narrow, [*prices_down, (None, _RIGHT_PRICES_DOWN)]),
+            (glyph_line, [*prices_down, (None, _RIGHT_PRICES_DOWN)]),
         )
-        for allowed_left_rows, left_commands, variants in passes:
+        for mode_line, variants in passes:
             for cols, layout_width in variants:
                 result = build(cols, layout_width)
-                if fits(result, allowed_left_rows, left_commands):
+                if fits(result, mode_line):
                     return result
 
         # Резерв (рунги шапки × до 3 уровней цен), от богатого к бедному:
@@ -1239,8 +1194,8 @@ class TraceScreen(Screen):
             *((None, True, True, False, c) for c in squeeze),
             *drop_name,
         )
-        # Ценами жертвуем ТОЛЬКО ради пола левой колонки (глиф режима и
-        # критичные клавиши).
+        # Ценами жертвуем ТОЛЬКО ради пола левой колонки (глиф режима,
+        # критичные клавиши и бейдж уведомлений).
         price_ladder = ({}, {"with_request": False}, {"with_prices": False})
         # Лениво: до хвоста резерва доходит только узкое окно.
         reserve = (
@@ -1258,7 +1213,7 @@ class TraceScreen(Screen):
         )
         tried: list[Text] = []
         for candidate in reserve:
-            if fits(candidate, 2, left_narrow):
+            if fits(candidate, glyph_line):
                 return candidate
             tried.append(candidate)
         # Не подошло ничего — и дальше важно, ПОЧЕМУ.
@@ -1286,7 +1241,7 @@ class TraceScreen(Screen):
 
         Не «остаток от левой» (так было до Task 17): #footer-right (width:auto)
         заявляет потребность первым, а сколько при этом останется левой — решает
-        лесенка `_compose_footer_right` по числу её рядов."""
+        лесенка `_compose_footer_right`."""
         return max(10, self._footer_total_width() - _FOOTER_CHROME_COLS)
 
     def _usage_segments(self) -> tuple[Text | None, Text | None]:
@@ -1449,22 +1404,6 @@ class TraceScreen(Screen):
         except Exception:
             pass
 
-    def _footer_left_commands(self, *, narrow: bool = False) -> str:
-        """Строка-мерка footer-left без суффикса уведомлений.
-
-        `narrow` — с пилюлей режима в один глиф: по этой форме считается пол
-        левой колонки, в ней же она рисуется, когда полная не укладывается."""
-        if self._voice is not None and self._voice.state != "idle":
-            # Во время записи слева не команды, а пилюля с таймером и эквалайзером
-            # (её рисует `_voice_footer_render`). Лесенка правой колонки меряет левую
-            # через `footer_left_rows`, а «пол» ширины считает по этой же строке —
-            # значит и то и другое обязано видеть пилюлю: иначе правая колонка мерит
-            # команды, которых на экране нет, и выдавливает пилюлю на второй ряд.
-            return self._voice_footer_render().plain
-        tail = self._footer_tail_commands()
-        head = self._mode_pill(narrow=narrow).plain
-        return f"{head}{PILL_GAP}{tail}" if tail else head
-
     def _mode_pill(self, *, narrow: bool = False) -> Text:
         return render_mode_pill(
             self.app.effective_permission_mode(), narrow=narrow
@@ -1490,6 +1429,21 @@ class TraceScreen(Screen):
         except Exception:
             return 0
 
+    def _footer_mode_variants(self) -> tuple[Text, Text]:
+        """Строка 1 в двух формах пилюли режима: полной и глифом (+ хвост).
+
+        Во время записи обе формы — пилюля голоса. Ими же меряет строку 1
+        лесенка правой колонки: отдельный оценщик разошёлся бы с отрисовкой."""
+        if self._voice_busy():
+            voice = self._voice_footer_render()
+            return voice, voice
+        tail = self._footer_tail_commands()
+        full, glyph = self._mode_pill(), self._mode_pill(narrow=True)
+        if tail:
+            full.append(f"{PILL_GAP}{tail}")
+            glyph.append(f"{PILL_GAP}{tail}")
+        return full, glyph
+
     def _footer_mode_line(self) -> Text:
         """Строка 1: пилюля режима + хвост команд; во время записи — пилюля
         голоса.
@@ -1498,30 +1452,33 @@ class TraceScreen(Screen):
         затем один глиф. Не встаёт и глиф — уступает он: хвост (команда
         остановки, ответ агенту) не теряется ни на какой ширине. Ширина 0
         (layout ещё не прошёл) — полная форма; resize пересоберёт по месту."""
+        variants = self._footer_mode_variants()
         if self._voice_busy():
-            return self._voice_footer_render()
-        tail = self._footer_tail_commands()
+            return variants[0]
         width = self._footer_row_width()
-        for pill in (self._mode_pill(), self._mode_pill(narrow=True)):
-            line = pill.copy()
-            if tail:
-                line.append(f"{PILL_GAP}{tail}")
+        for line in variants:
             if width <= 0 or line.cell_len <= width:
                 return line
-        return Text(tail) if tail else self._mode_pill(narrow=True)
+        tail = self._footer_tail_commands()
+        return Text(tail) if tail else variants[1]
 
     def _footer_slot_line(self) -> Text:
-        """Строка 2 (слот): подсказка/отказ/совет, иначе бейдж уведомлений.
+        """Строка 2 (слот): подсказка/отказ/совет, иначе бейдж уведомлений."""
+        if self._footer_hint_active and self._footer_mode_hint is None:
+            return self._footer_slot_with(Text(self._footer_hint_text or ""))
+        return self._footer_badge_line()
 
-        Во время записи первым стоит глиф режима его цветом: строку 1 заняла
-        пилюля голоса, а режим должен оставаться виден."""
+    def _footer_badge_line(self) -> Text:
+        """Слот с бейджем уведомлений — его ширину резервирует лесенка."""
+        badge = format_notices_badge(self._collect_footer_notices())
+        return self._footer_slot_with(Text(badge))
+
+    def _footer_slot_with(self, body: Text) -> Text:
+        """Слот с телом `body`. Во время записи первым стоит глиф режима его
+        цветом: строку 1 заняла пилюля голоса, а режим должен быть виден."""
         out = Text()
         if self._voice_busy():
             out.append_text(self._mode_pill(narrow=True))
-        if self._footer_hint_active and self._footer_mode_hint is None:
-            body = Text(self._footer_hint_text or "")
-        else:
-            body = Text(format_notices_badge(self._collect_footer_notices()))
         if out and body:
             out.append(PILL_GAP)
         out.append_text(body)

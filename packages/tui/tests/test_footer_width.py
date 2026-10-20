@@ -1,12 +1,10 @@
-"""Правая часть футера не должна отбирать место у левой: при уведомлениях левая
-вырастает на суффикс «  ·  ⚠N · F4/notices», и без учёта этого счётчик наезжает
-на имя модели (смок 2026-08-02).
-
-Task 17 переставил механику: правая колонка (#footer-right, width:auto)
-ЗАЯВЛЯЕТ потребность, левая (1fr) получает остаток — а лесенка
-`_compose_footer_right` заявляет ровно столько, чтобы левой хватило её рядов.
-Поэтому сторожим не промежуточный «бюджет», а ИТОГ этого решения: фактическую
-композицию правой рядом с фактической левой."""
+"""Правая часть футера не должна отбирать место у левой. Левая — две строки:
+режим с хвостом команд (строка 1) и слот с бейджем уведомлений (строка 2);
+правая колонка (#footer-right, width:auto) ЗАЯВЛЯЕТ потребность, левая (1fr)
+получает остаток. Лесенка `_compose_footer_right` заявляет ровно столько, чтобы
+строка 1 встала целиком, а бейдж — без обрезки. Поэтому сторожим не
+промежуточный «бюджет», а ИТОГ: фактическую композицию правой рядом с
+фактической левой."""
 
 from gc_testkit.tui_support import tui_settings
 import pytest
@@ -23,32 +21,21 @@ def _need(scr) -> int:
     )
 
 
-def _left_rows(scr, total: int, need: int) -> int:
-    from gc_tui.services.notices_ui import (
-        footer_left_rows,
-        format_notices_badge,
-    )
-
-    return footer_left_rows(
-        scr._footer_left_commands(),
-        format_notices_badge(scr._collect_footer_notices()),
-        width=total - need - _CHROME,
-    )
+def _left_room(scr) -> int:
+    """Сколько колонок остаётся строкам левой рядом с правой."""
+    return scr._footer_total_width() - _need(scr) - _CHROME
 
 
-def _left_width(scr) -> int:
-    """Ширина левой части — по более длинной из двух её строк."""
-    return max(
-        cell_len(scr._footer_mode_line().plain),
-        cell_len(scr._footer_slot_line().plain),
-    )
+def _badge_cols(scr) -> int:
+    from gc_tui.services.notices_ui import format_notices_badge
+
+    return cell_len(format_notices_badge(scr._collect_footer_notices()))
 
 
 @pytest.mark.asyncio
-async def test_right_column_leaves_room_for_notices_suffix():
-    """Правая колонка + фактическая левая ≤ ширины окна, и левой хватает ОДНОГО
-    ряда: суффикс уведомлений стоит рядом с командами, а не выдавлен и не наехал
-    на имя модели."""
+async def test_right_column_leaves_room_for_notices_badge():
+    """Строка 1 левой целиком и бейдж уведомлений в строке 2 без обрезки —
+    рядом с правой колонкой, которой при этом ничего не урезали зря."""
     from gc_core.startup_notices import Notice
     from gc_tui.app import TuiApp
     from gc_tui.screens.main import TraceScreen
@@ -59,27 +46,22 @@ async def test_right_column_leaves_room_for_notices_suffix():
     async with app.run_test(size=(120, 30)) as pilot:
         scr = app.screen_stack[0]
         assert isinstance(scr, TraceScreen)
-        # три предупреждения — суффикс «  ·  ⚠3 · F4/notices»
         app.collect_footer_notices = lambda: [
             Notice("warning", f"c{i}", f"msg{i}") for i in range(3)
         ]
         await pilot.pause()
-        need = _need(scr)
-        left = _left_width(scr)
-        assert need + left + _CHROME <= 120, (
-            f"правая часть {need} + левая {left} > ширины окна 120: правая часть налезет на счётчик уведомлений"
-        )
-        assert _left_rows(scr, 120, need) == 1, (
-            "левую загнали в два ряда там, где места хватало на один"
-        )
+        room = _left_room(scr)
+        assert cell_len(scr._footer_mode_line().plain) <= room
+        assert _badge_cols(scr) <= room
+        assert scr._footer_slot_line().plain.startswith("⚠ 3")
         # Односторонние assert'ы выше не ловят излишне зажатую правую часть —
-        # она тогда режется без нужды; имя модели на этой ширине обязано быть целым.
+        # имя модели на этой ширине обязано быть целым.
         assert "anthropic/claude-opus-5" in scr._compose_footer_right().plain
 
 
 @pytest.mark.asyncio
 async def test_right_column_without_notices_is_unchanged():
-    """Без уведомлений суффикса нет — та же проверка на голой левой части."""
+    """Без уведомлений — та же проверка на голой левой части."""
     from gc_tui.app import TuiApp
 
     app = TuiApp(settings=tui_settings({"agent.model": "m"}))
@@ -87,9 +69,7 @@ async def test_right_column_without_notices_is_unchanged():
         scr = app.screen_stack[0]
         app.collect_footer_notices = list
         await pilot.pause()
-        need = _need(scr)
-        assert need + _left_width(scr) + _CHROME <= 120
-        assert _left_rows(scr, 120, need) == 1
+        assert cell_len(scr._footer_mode_line().plain) <= _left_room(scr)
 
 
 # --- Лесенка жертв: жертва обязана что-то давать, а стоп-клавиша неприкосновенна ---
@@ -208,13 +188,106 @@ async def test_stop_key_keeps_its_room_on_narrow_window(
 
         assert scr._footer_tail_commands() == _FOOTER_RUNNING_LEFT
         # пол левой — режим хотя бы глифом и стоп-клавиша за ним
-        floor = scr._footer_left_commands(narrow=True)
+        floor = scr._footer_mode_variants()[1].plain
         assert floor.endswith(_FOOTER_RUNNING_LEFT)
-        left_width = scr._footer_total_width() - _need(scr) - _CHROME
+        left_width = _left_room(scr)
         assert left_width >= cell_len(floor), (
             f"ширина {width}: левой осталось {left_width} колонок, "
             f"а «{floor}» требует {cell_len(floor)}"
         )
+
+
+def _work_profile(app, monkeypatch):
+    from pathlib import Path as _P
+
+    from gc_core.config_modules.profiles import ProfileRef
+
+    monkeypatch.setattr(
+        app,
+        "active_profile_ref",
+        lambda: ProfileRef(name="work", path=_P("x"), root_kind="project"),
+    )
+
+
+def _warnings(n):
+    from gc_core.startup_notices import Notice
+
+    return lambda: [Notice("warning", f"c{i}", f"m{i}") for i in range(n)]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("width", [64, 80, 100, 140])
+async def test_right_column_beside_two_row_left(tmp_path, monkeypatch, width):
+    """На любой ширине правая колонка — не больше двух строк, строка 1 левой
+    целиком (режим хотя бы глифом и стоп-клавиша), бейдж в строке 2 не
+    режется. Цены жертвуются позже имени профиля."""
+    pytest.importorskip("textual")
+    monkeypatch.chdir(tmp_path)
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.main import _FOOTER_RUNNING_LEFT
+    from textual.widgets import Static
+
+    app = TuiApp(
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "m"}),
+    )
+    app._config_path = str(tmp_path / "config.yml")
+    async with app.run_test(size=(width, 30)) as pilot:
+        scr = pilot.app.screen
+        _work_profile(app, monkeypatch)
+        _with_prices(app, scr, running=True)
+        monkeypatch.setattr(app, "collect_footer_notices", _warnings(3))
+        scr._refresh_footer()
+        await pilot.pause()
+
+        right = scr._compose_footer_right().plain
+        assert len(right.split("\n")) <= 2
+        room = _left_room(scr)
+        mode = scr.query_one("#footer-mode", Static)
+        assert mode.content_size.width == room  # расчёт совпал с раскладкой
+        line = scr._footer_mode_line().plain
+        assert line.endswith(_FOOTER_RUNNING_LEFT)
+        assert cell_len(line) <= room
+        assert _badge_cols(scr) <= room
+        if "сессия" not in right:
+            assert "work" not in right, f"цены сняты раньше имени: {right!r}"
+
+
+@pytest.mark.asyncio
+async def test_notices_badge_does_not_push_prices_down(tmp_path, monkeypatch):
+    """Бейдж живёт в строке 2, а не рядом с командами: правой хватает места
+    «всё одной строкой», если строка 1 и бейдж встают каждая сама по себе —
+    их сумма в один ряд не нужна."""
+    pytest.importorskip("textual")
+    monkeypatch.chdir(tmp_path)
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.main import _PROFILE_NAME_MAX_COLS, _RIGHT_ONE_LINE
+    from gc_tui.services.usage_meter import compose_adaptive_footer_right
+
+    app = TuiApp(
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "m"}),
+    )
+    app._config_path = str(tmp_path / "config.yml")
+    async with app.run_test(size=(200, 30)) as pilot:
+        scr = pilot.app.screen
+        _work_profile(app, monkeypatch)
+        _with_prices(app, scr)
+        monkeypatch.setattr(app, "collect_footer_notices", _warnings(3))
+        head = scr._footer_head(
+            with_profile=True,
+            profile_name_cols=_PROFILE_NAME_MAX_COLS,
+            snapshot=scr._footer_head_snapshot(),
+        )
+        one_line = compose_adaptive_footer_right(
+            head, *scr._usage_segments(), _RIGHT_ONE_LINE
+        ).plain
+        assert "\n" not in one_line
+        full = cell_len(scr._footer_mode_variants()[0].plain)
+        total = cell_len(one_line) + _CHROME + max(full, _badge_cols(scr))
+
+        await pilot.resize_terminal(total, 30)
+        assert scr._compose_footer_right().plain == one_line
 
 
 def test_model_name_is_cut_in_the_middle():
@@ -262,9 +335,9 @@ async def test_long_model_id_yields_before_the_stop_key(
         monkeypatch.setattr(scr, "_context_meter", lambda: Text(_METER))
         await pilot.pause()
 
-        floor = scr._footer_left_commands(narrow=True)
+        floor = scr._footer_mode_variants()[1].plain
         assert floor.endswith(_FOOTER_RUNNING_LEFT)
-        left_width = scr._footer_total_width() - _need(scr) - _CHROME
+        left_width = _left_room(scr)
         assert left_width >= cell_len(floor), (
             f"ширина {width}: левой {left_width}, «{floor}» требует "
             f"{cell_len(floor)}"

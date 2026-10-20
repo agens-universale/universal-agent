@@ -280,10 +280,10 @@ async def test_footer_right_width_accounts_for_voice_pill(monkeypatch):
 
     Модель ширины сменилась вместе с профилями (develop, Task 17): правая колонка
     больше не «остаток от левой» — она заявляет свой потолок, а сколько останется
-    левой, решает перебор с предикатом «сколько рядов займёт левая». Предикат берёт
-    текст у `_footer_left_commands()`, поэтому проверяем именно его: там должна быть
-    пилюля целиком, с таймером и лентой эквалайзера, иначе правая колонка посчитает
-    место по F-подсказкам и выдавит пилюлю на второй ряд."""
+    левой, решает перебор с предикатом «встаёт ли строка 1». Предикат берёт
+    строку у `_footer_mode_variants()`, поэтому проверяем именно её: там должна
+    быть пилюля целиком, с таймером и лентой эквалайзера, иначе правая колонка
+    посчитает место по командам и обрежет пилюлю."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
@@ -295,15 +295,15 @@ async def test_footer_right_width_accounts_for_voice_pill(monkeypatch):
         screen = pilot.app.screen
         rec = FakeRecorder()
         _wire_fake_voice(screen, rec, lambda pcm, cfg: "x")
-        idle_commands = screen._footer_left_commands()
+        idle_commands = screen._footer_mode_variants()[1].plain
         await pilot.press("ctrl+t")
         await pilot.pause()
         assert screen._voice.state == "recording"
         pill = screen._voice_footer_render().plain
         assert pill.strip()
-        measured = screen._footer_left_commands()
-        assert measured == pill  # мерим пилюлю, а не команды
-        assert measured != idle_commands
+        measured = [line.plain for line in screen._footer_mode_variants()]
+        assert measured == [pill, pill]  # мерим пилюлю, а не команды
+        assert pill != idle_commands
 
 
 @pytest.mark.asyncio
