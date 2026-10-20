@@ -1,5 +1,8 @@
-"""Каждый Input с id обязан быть перечислен в CSS — иначе Textual рисует дефолтную
-рамку глифами, которых нет в консольных шрифтах (баг поля «Прокси», смок 2026-08-02)."""
+"""Вид полей формы задаёт класс, а не id: плоское правило `.form-field` и
+его состояния (`:focus`, `.set-framed`, `.set-readonly`) лежат в styles.tcss,
+id полей в селекторах не перечисляются. Без плоского правила Input рисует
+дефолтную рамку глифами, которых нет в консольных шрифтах (баг поля
+«Прокси», смок 2026-08-02)."""
 
 # Путь — из gc_testkit.paths: исходники TUI лежат в packages/tui/src/gc_tui,
 # и арифметика уровней от __file__ здесь уже ломалась.
@@ -46,10 +49,10 @@ def test_form_field_flat_rule():
 
 def test_form_field_state_rules_exist():
     for sel in (
-        ".form-field:focus",
-        ".form-field.set-framed",
-        ".form-field.set-framed:focus",
-        ".form-field.set-readonly",
+        ".form-field:focus {",
+        ".form-field.set-framed {",
+        ".form-field.set-framed:focus {",
+        ".form-field.set-readonly {",
     ):
         assert _rule_lines(sel), f"нет правила {sel}"
 
