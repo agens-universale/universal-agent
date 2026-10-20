@@ -19,7 +19,11 @@ from gc_core.tools.connect_mcp.registry import ToolsCache
 from gc_server.a2a.facade import A2aFacade
 from gc_server.a2a.http_api import create_app
 from gc_server.chat.surface import backend_rejection, stop_channel_tools
-from gc_server.config import A2aConfig, ServerConfigError
+from gc_server.config import (
+    A2aConfig,
+    ServerConfigError,
+    reject_moved_section,
+)
 
 if TYPE_CHECKING:
     from gc_server.app import ServerRuntime
@@ -70,6 +74,7 @@ class A2aSurface:
     def __init__(self, runtime: ServerRuntime) -> None:
         self.runtime = runtime
         self.section = runtime.config.surface("a2a")
+        reject_moved_section(runtime.base, "a2a")
         loaded = runtime.surface_settings("a2a")
         for rejection in (
             backend_rejection(loaded, "a2a"),

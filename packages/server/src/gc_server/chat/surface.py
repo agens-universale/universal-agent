@@ -23,7 +23,11 @@ from gc_server.chat.app import create_app
 from gc_server.chat.completions.facade import CompletionsFacade
 from gc_server.chat.model_route import reserved_model_reason
 from gc_server.chat.responses.facade import ResponsesFacade
-from gc_server.config import ChatConfig, ServerConfigError
+from gc_server.config import (
+    ChatConfig,
+    ServerConfigError,
+    reject_moved_section,
+)
 
 if TYPE_CHECKING:
     from gc_server.app import ServerRuntime
@@ -82,6 +86,7 @@ class ChatSurface:
     def __init__(self, runtime: ServerRuntime) -> None:
         self.runtime = runtime
         self.section = runtime.config.surface("chat")
+        reject_moved_section(runtime.base, "chat")
         loaded = runtime.surface_settings("chat")
         rejection = backend_rejection(loaded, "chat")
         if rejection is not None:

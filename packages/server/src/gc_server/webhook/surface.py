@@ -26,6 +26,7 @@ from gc_core.utils.generate_message_id import (
     generate_msg_id_sha256 as generate_message_id_func,
 )
 
+from gc_server.config import RESERVED_SYSTEMS
 from gc_server.surface import (
     check_system_allowed,
     http_error,
@@ -94,6 +95,7 @@ def path_key(system: str, task_id: str) -> tuple[str, str]:
         task_norm = validate_thread_id(task_norm)
     except ValueError as e:
         raise http_error(400, str(e)) from None
+    check_system_allowed(sys_norm)
     return sys_norm, task_norm
 
 
@@ -328,7 +330,11 @@ class WebhookSurface:
     async def get_all_thread_logs(self):
         """Список тредов (system + task_id), свежие первыми."""
         threads = self.threads()
-        out = [_thread_log_entry(r) async for r in threads.iter_threads()]
+        out = [
+            _thread_log_entry(r)
+            async for r in threads.iter_threads()
+            if r.key.system not in RESERVED_SYSTEMS
+        ]
         out.sort(key=lambda x: str(x.get("updated_at") or ""), reverse=True)
         return {"status": "ok", "logs": out}
 

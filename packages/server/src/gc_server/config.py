@@ -35,8 +35,11 @@ logger = logging.getLogger(__name__)
 CONFIG_NAME = "config_server.yml"
 SURFACES = ("webhook", "chat", "a2a", "swarm")
 SurfaceName = Literal["webhook", "chat", "a2a", "swarm"]
-#: system других поверхностей: вебхук и swarm в их треды не пишут.
-RESERVED_SYSTEMS = frozenset({"a2a", "responses", "completions", "acp"})
+#: system других поверхностей и интерактивных сессий (gc-cli, TUI): вебхук и
+#: swarm их треды не читают и в них не пишут.
+RESERVED_SYSTEMS = frozenset(
+    {"a2a", "responses", "completions", "acp", "cli", "tui"}
+)
 #: Адрес по умолчанию у фасадов, собранных без конфига (тесты, встраивание).
 LOOPBACK = "127.0.0.1"
 
@@ -330,6 +333,24 @@ def _reject_moved_keys(raw: dict[str, Any], cfg_path: str) -> None:
 # --- настройки агента поверхности -------------------------------------------
 
 
+#: Секции config.yml, переехавшие в config_server.yml: поверхность → секция.
+_MOVED_SECTIONS = {"chat": "chat_api", "a2a": "a2a"}
+
+
+def reject_moved_section(base: LoadedSettings, name: str) -> None:
+    """Старая секция поверхности в config.yml больше не читается: молча
+    подняться без неё значило бы подняться без её ``auth_token`` — отказ."""
+    section = _MOVED_SECTIONS.get(name)
+    if section is None or not base.provenance.explicit(section):
+        return
+    where = base.provenance.source(section).path or "config.yml"
+    raise ServerConfigError(
+        f"{where}: секция {section} больше не читается (в том числе её "
+        f"auth_token) — перенесите её в {CONFIG_NAME}, секция {name}, и "
+        "удалите из config.yml"
+    )
+
+
 def surface_settings(
     base: LoadedSettings, cfg: ServerConfig, name: str
 ) -> LoadedSettings:
@@ -427,5 +448,6 @@ __all__ = [
     "SwarmConfig",
     "WebhookConfig",
     "load_server_config",
+    "reject_moved_section",
     "surface_settings",
 ]
