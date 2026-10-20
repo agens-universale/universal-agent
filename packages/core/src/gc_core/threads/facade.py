@@ -28,7 +28,7 @@ from gc_core.threads.models import (
     ThreadQuery,
     ThreadRecord,
 )
-from gc_core.threads.session_port import SessionPort
+from gc_core.threads.session_port import INBOX, SessionPort
 from gc_core.threads.store import ThreadStore
 
 _HISTORY = "messages"
@@ -218,6 +218,29 @@ class Threads:
                 append=[(stream, items)],
                 add_aliases=list(aliases),
                 patch_frontend=patch,
+            ),
+        )
+
+    async def submit(
+        self,
+        key: ThreadKey,
+        message: JsonObject,
+        *,
+        op_id: str | None = None,
+        source: str = "api",
+    ) -> Receipt:
+        """Сообщение пользователя во входящий поток треда — без аренды:
+        идущий ход заберёт его опросом, следующий — в начале. ``id`` нет —
+        выдаётся здесь, чтобы повторное чтение потока давало то же сообщение.
+        ``max_seq["inbox"]`` квитанции — номер сообщения в потоке."""
+        entry = {**message, "source": source}
+        entry.setdefault("role", "user")
+        if not entry.get("id"):
+            entry["id"] = f"m_{uuid.uuid4().hex}"
+        return await self.store.append_side(
+            key,
+            SideChange(
+                op_id=op_id or _op_id(INBOX), append=[(INBOX, [entry])]
             ),
         )
 

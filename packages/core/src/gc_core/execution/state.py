@@ -71,6 +71,7 @@ STATE_FIELDS = ROUTING_FIELDS + (
     "dialog_steps_offset",
     "model_breaker",
     "finish_gate_rejection_count",
+    "inbox_seq",
     "initial_project_data",
     "instruction_warnings",
     "internal_error_repeat_count",

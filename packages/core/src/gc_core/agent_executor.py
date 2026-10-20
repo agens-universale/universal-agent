@@ -84,6 +84,7 @@ from gc_core.thread_store import (
     make_message_key,
     resolve_threads_dir,
 )
+from gc_core.threads.errors import ThreadBusy
 from gc_core.threads.session_port import LEASE_TTL
 from gc_core.tools.connect_mcp.persistent_stdio import PersistentStdioRegistry
 from gc_core.tools.connect_mcp.stream_client import (
@@ -300,6 +301,56 @@ async def _arelease_lease(thread_session: Any, logger: Any) -> None:
             logger.warning("thread lease release failed", exc_info=True)
 
 
+#: Метка сообщения входящего потока в очереди хода: его ``seq`` в потоке.
+_INBOX_MARK = "_inbox_seq"
+
+
+class InboxDrained(ValueError):
+    """Ход без своих сообщений, а входящий поток пуст: играть нечего."""
+
+
+def _inbox_reader(ctx: Any, thread_session: Any) -> Any:
+    """Чтение входящего потока треда хода или ``None``: треда нет, хранилище
+    потока не знает, или ход durable (Temporal: сообщения приходят
+    сигналами, а опрос через activity засорял бы историю workflow)."""
+    if thread_session is None or getattr(ctx, "durable_execution", False):
+        return None
+    read = getattr(thread_session.port, "aread_inbox", None)
+    if read is None:
+        return None
+    return functools.partial(
+        read, thread_session.system_id, thread_session.thread_id
+    )
+
+
+def _inbox_message(entry: Any) -> dict:
+    """Запись входящего потока → сообщение пользователя для хода."""
+    message = {
+        key: value
+        for key, value in entry.data.items()
+        if key in ("role", "content", "id", "display_content")
+    }
+    message.setdefault("role", "user")
+    message.setdefault("id", f"m_inbox_{entry.seq}")
+    return message
+
+
+def _take_inbox_marks(messages: list[dict], state: Any) -> list[dict]:
+    """Снять метки входящего потока с забранных ходом сообщений и поднять
+    ``state.inbox_seq``: следующая запись шага унесёт отметку вместе с ними."""
+    out = []
+    for message in messages:
+        seq = message.get(_INBOX_MARK)
+        if seq is None:
+            out.append(message)
+            continue
+        message = {k: v for k, v in message.items() if k != _INBOX_MARK}
+        if state is not None:
+            state.inbox_seq = max(int(state.inbox_seq or 0), int(seq))
+        out.append(message)
+    return out
+
+
 def _require_plan_execution_mode(mode: str) -> str:
     """План исполняется только в режиме исполнения (edit, auto, manual).
 
@@ -376,6 +427,8 @@ class AgentExecutor:
         #: ответили «принято», и молча терять их нельзя. Забирает владелец —
         #: `take_undelivered_messages`, вместе с пришедшим после.
         self._undelivered_messages: list[dict] = []
+        #: Последний ``seq`` входящего потока, уже положенный в очередь хода.
+        self._inbox_seen = 0
         self._state: State | None = None
         # Сессия последнего arun. Её мету пишет aclose_run_accounting, один раз.
         self._thread_session: Any = None
@@ -424,6 +477,7 @@ class AgentExecutor:
             out = self._pending_messages[:]
             self._pending_messages.clear()
             state = self._state
+        out = _take_inbox_marks(out, state)
         # Сообщение из очереди — такое же новое слово человека, как
         # стартовое: снимает паузу судьи и посреди прогона.
         if state is not None:
@@ -654,6 +708,7 @@ class AgentExecutor:
             state.dialog_steps_offset = int(
                 meta.get("dialog_steps_offset", 0) or 0
             )
+            state.inbox_seq = int(meta.get("inbox_seq", 0) or 0)
             (
                 state.last_main_prompt_tokens,
                 state.last_main_prompt_message_count,
@@ -1154,7 +1209,11 @@ class AgentExecutor:
         # Keep the unconsumed queue before the await; messages arriving during
         # MCP cleanup remain pending and are returned by take_undelivered_messages.
         with self._lock:
-            self._undelivered_messages.extend(self._pending_messages)
+            # Сообщения входящего потока остаются в потоке: их доиграет
+            # рукопожатие или следующий ход, отметка доставки их не покрыла.
+            self._undelivered_messages.extend(
+                m for m in self._pending_messages if _INBOX_MARK not in m
+            )
             self._pending_messages = []
         try:
             cleanup = port(self._ctx, "mcp_cleanup")
@@ -1206,7 +1265,9 @@ class AgentExecutor:
         """Прогон агента, не блокирующий вызывающий loop.
 
         При каждом вызове state создаётся заново. messages — непустой список
-        текстов, каждый уходит отдельным user-сообщением.
+        текстов, каждый уходит отдельным user-сообщением. Пустой — ход из
+        входящего потока треда (``Threads.submit``); пуст и он —
+        ``InboxDrained`` (``ValueError``).
 
         attachments — вложения по сообщениям, параллельно messages (как
         display_contents): элемент — картинки своего сообщения из кармана
@@ -1223,6 +1284,52 @@ class AgentExecutor:
         Отмена закрытия MCP после уже завершённого цикла учёт всё равно
         записывает и затем пробрасывается: дополнительного шага уже не будет.
         """
+        _require_supported_persist_mode(settings_of(self._ctx), self._ctx)
+        response = await self._arun_turn(
+            messages,
+            thread_id=thread_id,
+            start_new_thread=start_new_thread,
+            system=system,
+            verbose=verbose,
+            discard_writes_after_stop=discard_writes_after_stop,
+            message_ids=message_ids,
+            display_contents=display_contents,
+            skills_loaded=skills_loaded,
+            attachments=attachments,
+            account_run=account_run,
+        )
+        # Рукопожатие: тред отпущен, а во входящий поток успело лечь
+        # сообщение после последнего забора — ещё ход тем же исполнителем.
+        # Не взяли тред — его уже ведёт другой, он и заберёт.
+        while account_run and await self._ainbox_left():
+            try:
+                response = await self._arun_turn(
+                    [],
+                    thread_id=thread_id,
+                    system=system,
+                    verbose=verbose,
+                    discard_writes_after_stop=discard_writes_after_stop,
+                )
+            except (ThreadBusy, InboxDrained):
+                break
+        return response
+
+    async def _arun_turn(
+        self,
+        messages: list[str],
+        *,
+        thread_id: str | None = None,
+        start_new_thread: bool = False,
+        system: str | None = None,
+        verbose: bool | None = None,
+        discard_writes_after_stop: bool = False,
+        message_ids: list[str] | None = None,
+        display_contents: list[str | None] | None = None,
+        skills_loaded: list[str | None] | None = None,
+        attachments: list[list[Attachment] | None] | None = None,
+        account_run: bool = True,
+    ) -> Any:
+        """Один ход ``arun``: тред, подготовка, цикл, учёт."""
         with self._lock:
             # State прошлого хода снимаем ПЕРВЫМ делом. Пока он жил до конца
             # объекта, `stop_run` в сетапе этого хода (чтение треда, сборка
@@ -1239,7 +1346,6 @@ class AgentExecutor:
             self._state = None
             self._accounting_closed = False
         settings = settings_of(self._ctx)
-        _require_supported_persist_mode(settings, self._ctx)
         logger = getattr(self._ctx, "logger", None)
         effective_verbose = (
             verbose if verbose is not None else settings.agent.verbose
@@ -1375,8 +1481,9 @@ class AgentExecutor:
                 summary.apre_run_compact_if_needed, trigger_reason="pre_run"
             )
 
-        if not messages:
-            raise ValueError(
+        inbox_tail = await self._aread_inbox_tail(thread_session, state)
+        if not messages and not inbox_tail:
+            raise InboxDrained(
                 "Список пользовательских сообщений не должен быть пустым."
             )
         user_bodies = [str(x) for x in messages]
@@ -1395,6 +1502,7 @@ class AgentExecutor:
             attachments=request.attachments,
             commit=commit_attachment,
         )
+        new_user_messages.extend(inbox_tail)
         self._seed_current_user_intent(state, new_user_messages)
         self._apply_plan_changes(state, new_user_messages)
         self._lift_judge_pause(state, new_user_messages)
@@ -1437,6 +1545,7 @@ class AgentExecutor:
         loop_finished = False
         teardown_cancel: BaseException | None = None
         keeper = _start_lease_keeper(thread_session)
+        poller = self._start_inbox_poller(thread_session)
         # Накопленное ДО старта уходит в ПЕРВЫЙ батч, после собственных
         # сообщений прогона: клиент, которому ответили `queued`, должен попасть
         # к модели в том же запросе, а не ждать следующего хода.
@@ -1477,6 +1586,7 @@ class AgentExecutor:
                 state, "terminal_outcome", None
             )
         finally:
+            await _stop_lease_keeper(poller)
             await _stop_lease_keeper(keeper)
             state_ops.leave(state)
             state.turn_level = None
@@ -1537,6 +1647,69 @@ class AgentExecutor:
             if self._state is not None:
                 return getattr(self._state.shared, "permission_mode", None)
             return None
+
+    async def _aread_inbox_tail(self, thread_session, state) -> list[dict]:
+        """Недоставленный хвост входящего потока — в стартовые сообщения хода
+        (отметку доставки унесёт первая запись шага)."""
+        read = _inbox_reader(self._ctx, thread_session)
+        if read is None:
+            return []
+        entries = await read(after=int(state.inbox_seq or 0))
+        if entries:
+            state.inbox_seq = entries[-1].seq
+        self._inbox_seen = int(state.inbox_seq or 0)
+        return [_inbox_message(entry) for entry in entries]
+
+    def _start_inbox_poller(self, thread_session) -> asyncio.Task | None:
+        """Фоновый опрос входящего потока, пока идёт цикл: новое — в очередь
+        хода с меткой ``seq``; цикл заберёт его на следующем шаге."""
+        read = _inbox_reader(self._ctx, thread_session)
+        if read is None:
+            return None
+        interval = settings_of(self._ctx).thread_store.inbox_poll_seconds
+
+        async def poll() -> None:
+            while True:
+                await asyncio.sleep(interval)
+                try:
+                    entries = await read(after=self._inbox_seen)
+                except Exception:
+                    logging.getLogger(__name__).warning(
+                        "thread inbox poll failed", exc_info=True
+                    )
+                    continue
+                self._enqueue_inbox(entries)
+
+        return asyncio.create_task(poll())
+
+    def _enqueue_inbox(self, entries: list) -> None:
+        """Записи потока — прямо в очередь хода (не субагенту: отметку
+        доставки ведёт ход)."""
+        with self._lock:
+            for entry in entries:
+                if entry.seq <= self._inbox_seen:
+                    continue
+                self._pending_messages.append(
+                    {**_inbox_message(entry), _INBOX_MARK: entry.seq}
+                )
+                self._inbox_seen = entry.seq
+
+    async def _ainbox_left(self) -> bool:
+        """Во входящем потоке есть недоставленное, а ход кончился не
+        остановкой — рукопожатие: ещё ход."""
+        thread_session = self._thread_session
+        state = self.get_state()
+        if state is None or state.stop_requested:
+            return False
+        if _inbox_reader(self._ctx, thread_session) is None:
+            return False
+        entries = await thread_session.port.aread_inbox(
+            thread_session.system_id,
+            thread_session.thread_id,
+            after=int(state.inbox_seq or 0),
+            limit=1,
+        )
+        return bool(entries)
 
     def add_message(self, message: dict) -> None:
         """Потокобезопасно добавляет сообщение в очередь активного скоупа.

@@ -101,6 +101,8 @@ class SessionState(_Model):
     current_intent: list[JsonObject] = Field(default_factory=list)
     user_turn_seq: int = 0
     dialog_steps_offset: int = 0
+    #: Последний ``seq`` потока ``inbox``, доставленный в историю.
+    inbox_seq: int = 0
     todo_reminder_count: int = 0
     #: Сколько раз показана подсказка об инструменте — по имени инструмента.
     tool_usage_notice: dict[str, int] = Field(default_factory=dict)

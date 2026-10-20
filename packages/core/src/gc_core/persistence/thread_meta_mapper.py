@@ -93,6 +93,10 @@ class ThreadMetaMapper:
         out["dialog_steps_offset"] = int(
             getattr(state, "dialog_steps_offset", 0) or 0
         )
+        # Только у тредов с входящим потоком: meta остальных — как раньше.
+        inbox_seq = int(getattr(state, "inbox_seq", 0) or 0)
+        if inbox_seq:
+            out["inbox_seq"] = inbox_seq
         out["last_main_prompt_tokens"] = read_optional_nonneg_int(
             getattr(state, "last_main_prompt_tokens", None)
         )

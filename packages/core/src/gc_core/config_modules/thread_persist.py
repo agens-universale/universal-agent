@@ -21,3 +21,8 @@ class ThreadStoreSettings(BaseModel):
     persist: Literal["step", "turn"] = Field(
         default="step", json_schema_extra=gc_meta(expert=True)
     )
+    #: Как часто идущий ход смотрит входящий поток треда (сообщения с других
+    #: процессов и инстансов), секунды.
+    inbox_poll_seconds: float = Field(
+        default=1.0, gt=0, json_schema_extra=gc_meta(expert=True)
+    )

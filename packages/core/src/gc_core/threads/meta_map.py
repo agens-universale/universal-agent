@@ -47,6 +47,7 @@ _STATE_KEYS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("current_intent", ("current_user_intent",)),
     ("user_turn_seq", ("user_turn_seq",)),
     ("dialog_steps_offset", ("dialog_steps_offset",)),
+    ("inbox_seq", ("inbox_seq",)),
     ("last_prompt_tokens", ("last_main_prompt_tokens",)),
     ("last_prompt_message_count", ("last_main_prompt_message_count",)),
     ("rendered_system_prompt", ("chat_completions_system_prompt_rendered",)),

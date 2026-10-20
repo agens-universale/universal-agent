@@ -1051,10 +1051,9 @@ class ThreadSession:
             base_meta["user_turn_seq"] = int(
                 self.meta.get("user_turn_seq") or 0
             )
-        if "dialog_steps_offset" in self.meta:
-            base_meta["dialog_steps_offset"] = int(
-                self.meta.get("dialog_steps_offset") or 0
-            )
+        for counter in ("dialog_steps_offset", "inbox_seq"):
+            if counter in self.meta:
+                base_meta[counter] = int(self.meta.get(counter) or 0)
         for prompt_key in (
             "last_main_prompt_tokens",
             "last_main_prompt_message_count",

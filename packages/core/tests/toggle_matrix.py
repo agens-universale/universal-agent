@@ -734,6 +734,7 @@ NOT_IN_MATRIX = {
     # исполнителе и отклоняется локальным прогоном. Покрыто
     # test_thread_store_persist_turn.py и native test_native_workflow_live.py.
     "thread_store.persist": "local допускает только step; turn проверяется в test_thread_store_persist_turn и native live",
+    "thread_store.inbox_poll_seconds": "частота опроса входящего потока треда, не путь исполнения; покрытие в test_inbox",
     "agent.model_steering": "текст подготовленных инструкций; текущий reader и local/port parity покрыты test_run_prompt_preparation",
     # --- режим разрешений ----------------------------------------------------
     #

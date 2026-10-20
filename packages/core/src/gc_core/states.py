@@ -149,6 +149,9 @@ class State(ExecutionState):
         self.user_intent_log: list[IntentRecord] = []
         self.current_user_intent: list[IntentRecord] = []
         self.user_turn_seq: int = 0
+        #: Последний ``seq`` входящего потока треда, доставленный в историю:
+        #: пишется той же записью, что и сообщения, — доставка ровно один раз.
+        self.inbox_seq: int = 0
         self.finish_gate_rejection_count: int = 0
         self.turn_tool_calls: int = (
             0  # вызовов инструментов за текущий ход (smart-гейт, спека §3)

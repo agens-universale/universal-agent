@@ -41,6 +41,9 @@ from gc_core.utils.generate_message_id import generate_msg_id_sha256
 
 _HISTORY = "messages"
 _SUBAGENTS = "subagent_events"
+#: Входящий поток треда: сообщения в идущий или следующий ход с любого
+#: процесса (``Threads.submit``).
+INBOX = "inbox"
 _RETRIES = 3
 #: Срок аренды сессии: процесс, упавший посреди хода, держит тред не дольше.
 LEASE_TTL = timedelta(seconds=60)
@@ -220,6 +223,19 @@ class SessionPort:
 
     async def aload_messages(self, system_id: str, thread_id: str) -> list:
         return (await self.aload_thread_state(system_id, thread_id)).messages
+
+    async def aread_inbox(
+        self,
+        system_id: str,
+        thread_id: str,
+        *,
+        after: int,
+        limit: int | None = None,
+    ) -> list:
+        """Записи входящего потока после ``after`` (``StreamEntry``)."""
+        return await self._store.read_stream(
+            _key(system_id, thread_id), INBOX, after_seq=after, limit=limit
+        )
 
     async def aread_subagent_trace(
         self, system_id: str, thread_id: str
