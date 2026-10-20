@@ -8,7 +8,9 @@ or a Failed (the caller — cli.py — decides process exit).
 from __future__ import annotations
 
 import difflib
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
+from typing import Any
 
 # A single-character typo in a ~10-char id yields a SequenceMatcher ratio of
 # roughly 0.9-0.95 (e.g. "suprcoder"/"supercoder"); unrelated input falls well
@@ -38,6 +40,25 @@ class Failed:
 ResolveResult = Resolved | Failed
 
 
+def catalog_from_entries(entries: Iterable[Mapping[str, Any]]) -> SkillCatalog:
+    """Build a SkillCatalog from ``list_skills`` entries."""
+    entries = list(entries)
+    bare: dict[str, list[str]] = {}
+    for e in entries:
+        sid = e["id"]
+        tail = sid.split(":", 1)[1] if ":" in sid else sid
+        bare.setdefault(tail, []).append(sid)
+    return SkillCatalog(
+        canonical_ids=frozenset(e["id"] for e in entries),
+        bare_to_canonical={k: tuple(sorted(v)) for k, v in bare.items()},
+        pack_bootstrap={
+            e["pack_id"]: e["id"]
+            for e in entries
+            if e.get("is_pack_bootstrap") and e.get("pack_id")
+        },
+    )
+
+
 def _norm(s: str) -> str:
     # Input-side '_'->'-' tolerance only. Catalog ids are kebab-case (pack ids
     # are kebab by convention), so this intentionally does NOT replicate
@@ -63,21 +84,45 @@ def _resolve_exact(name: str, catalog: SkillCatalog) -> ResolveResult | None:
     return None
 
 
-def resolve_skill_arg(raw: str, catalog: SkillCatalog) -> ResolveResult:
+def resolve_skill_exact(raw: str, catalog: SkillCatalog) -> ResolveResult:
+    """Exact tiers only (full id, pack -> bootstrap, short name).
+
+    No fuzzy search: a typo yields Failed('not_found'), never a skill.
+    """
     name = _norm(raw or "")
     if not name:
         return Failed("empty", [])
-
     exact = _resolve_exact(name, catalog)
     if exact is not None:
         return exact
+    return Failed("not_found", [])
 
-    pool = sorted(
+
+def _fuzzy_pool(catalog: SkillCatalog) -> list[str]:
+    return sorted(
         set(catalog.canonical_ids)
         | set(catalog.bare_to_canonical)
         | set(catalog.pack_bootstrap)
     )
-    matches = difflib.get_close_matches(name, pool, n=5, cutoff=FUZZY_CUTOFF)
+
+
+def suggest_skills(raw: str, catalog: SkillCatalog, n: int = 5) -> list[str]:
+    """Fuzzy candidates for a hint only; never use them to run a skill."""
+    name = _norm(raw or "")
+    if not name:
+        return []
+    return difflib.get_close_matches(
+        name, _fuzzy_pool(catalog), n=n, cutoff=FUZZY_CUTOFF
+    )
+
+
+def resolve_skill_arg(raw: str, catalog: SkillCatalog) -> ResolveResult:
+    exact = resolve_skill_exact(raw, catalog)
+    if isinstance(exact, Resolved) or exact.reason != "not_found":
+        return exact
+
+    name = _norm(raw)
+    matches = suggest_skills(raw, catalog)
     if not matches:
         return Failed("not_found", [])
 
