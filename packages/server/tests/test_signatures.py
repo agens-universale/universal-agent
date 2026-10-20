@@ -132,3 +132,57 @@ def test_bad_secret_in_config_server_is_a_start_error(tmp_path):
     path.write_text("webhook:\n  signing_secret: 'whsec_%%%'\n")
     with pytest.raises(ServerConfigError):
         load_server_config(str(path))
+
+
+def _signed_surface(tmp_path, monkeypatch):
+    surface = make_webhook(
+        tmp_path, config={"webhook": {"signing_secret": SECRET}}
+    )
+
+    async def fake_start(self, system, task_id, trace_id):
+        return None
+
+    monkeypatch.setattr(type(surface), "_start_run", fake_start)
+    return surface
+
+
+def test_signed_replay_with_another_idempotency_key_is_one_message(
+    tmp_path, monkeypatch
+):
+    """Подписан только webhook-id: при включённой подписи ключ
+    идемпотентности — он, а не неподписанный Idempotency-Key. Иначе
+    перехваченный запрос повторялся бы в окне со свежим ключом."""
+    import time
+
+    from gc_core.threads.facade import run_sync
+    from gc_core.threads.models import ThreadKey
+
+    surface = _signed_surface(tmp_path, monkeypatch)
+    client = TestClient(surface.app())
+    body = b'{"task_id": "t1", "message": "x"}'
+    headers = _signed(body, int(time.time()))
+    client.post("/v1/tasks", content=body, headers=headers)
+    client.post(
+        "/v1/tasks",
+        content=body,
+        headers={**headers, "Idempotency-Key": "fresh"},
+    )
+    entries = run_sync(
+        surface.threads().store.read_stream(
+            ThreadKey(system="generic", thread="t1"), "inbox"
+        )
+    )
+    assert len(entries) == 1
+
+
+def test_duplicate_json_keys_are_refused(tmp_path, monkeypatch):
+    """Повтор ключа в JSON разные парсеры читают по-разному: подписали одно,
+    исполнили бы другое. Такое тело — 400."""
+    import time
+
+    surface = _signed_surface(tmp_path, monkeypatch)
+    body = b'{"task_id": "t1", "message": "a", "message": "b"}'
+    resp = TestClient(surface.app()).post(
+        "/v1/tasks", content=body, headers=_signed(body, int(time.time()))
+    )
+    assert resp.status_code == 400

@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import json
 import secrets
 import sys
 from typing import Any, Protocol
@@ -85,9 +86,20 @@ def allowed_system(system: str) -> str:
     return normalized
 
 
+def _no_duplicate_keys(pairs: list) -> dict:
+    keys = [key for key, _value in pairs]
+    if len(set(keys)) != len(keys):
+        raise ValueError("duplicate keys in JSON object")
+    return dict(pairs)
+
+
 async def read_json_object(request: Request) -> dict:
+    """Тело — JSON-объект без повторов ключей: повтор разные парсеры читают
+    по-разному (подписано одно — исполнено бы другое)."""
     try:
-        payload = await request.json()
+        payload = json.loads(
+            await request.body(), object_pairs_hook=_no_duplicate_keys
+        )
     except Exception:
         raise http_error(400, "invalid JSON body") from None
     if not isinstance(payload, dict):

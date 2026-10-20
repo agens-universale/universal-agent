@@ -151,7 +151,7 @@ class _Routes:
         payload = await read_json_object(request)
         task = parse_task_request(payload, self.backend.default_system)
         message = _user_message(task.content)
-        key = idempotency_key(request.headers)
+        key = self._idempotency_key(request)
         if key is not None:
             message["id"] = message_id(key)
         try:
@@ -174,6 +174,13 @@ class _Routes:
                 "task_id": task.key.thread,
             },
         )
+
+    def _idempotency_key(self, request: Request) -> str | None:
+        """С подписью ключ — подписанный ``webhook-id``: неподписанный
+        ``Idempotency-Key`` позволил бы повторить перехваченный запрос."""
+        if self.backend.signing.signing_secrets():
+            return request.headers.get("webhook-id")
+        return idempotency_key(request.headers)
 
     async def _verify(self, request: Request) -> None:
         """Подпись тела, если у поверхности задан секрет; иначе — ничего."""
