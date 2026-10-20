@@ -1682,6 +1682,13 @@ ddgs-mcp --http
 Удалённой стороне нужны GNU `stat`/`find`, `sh`, `cat`, `base64`, `sha256sum`; `python3` — для `run_python_code`, MCP `execute_on: os_backend` и `fetch_url_execute_on: os_backend`; `bash` — для фоновых команд (`run_in_background`), как и в Harbor.
 Правило разделения: хост — панель управления агента (конфиг, AGENTS.md, `project_memory`, треды и логи, MCP с `execute_on: agent`); среда исполнения — всё, с чем работает модель (`fs_*`, `exec_*`, фон, скиллы, MCP с `execute_on: os_backend`, при `fetch_url_execute_on: os_backend` — и сеть `exec_fetch_url`). `download_file` для remote-kind снят: он писал бы на хост.
 Чистка `sandboxes/`: `python -m gc_server.swarm.cleanup … --core-sandboxes-dir ~/.local/state/gc/sandboxes`.
+### Входящий поток треда (`thread_store.inbox_poll_seconds`)
+
+Сообщения в идущий ход с другого процесса или инстанса (вебхук сервера, swarm,
+`Threads.submit` в SDK) лежат в потоке `inbox` треда. Ход опрашивает поток раз
+в `thread_store.inbox_poll_seconds` секунд (по умолчанию `1.0`) — тем же
+опросом он видит и отмену из потока `control`. Под Temporal опроса нет.
+
 ## Хранилище (`storage`)
 
 Где лежат треды и ресурсы агента (промпты, AGENTS.md, скиллы, память). Без
