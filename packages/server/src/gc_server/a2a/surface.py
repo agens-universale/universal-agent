@@ -76,6 +76,19 @@ def auth_rejection(section: Any) -> str | None:
     return f"a2a: host {section.host} не loopback — нужен непустой auth_token"
 
 
+def allowed_push_url(hosts: list[str], validator: Any) -> Any:
+    """Проверка адреса push: хост из списка и проверка SDK."""
+    from urllib.parse import urlparse
+
+    allowed = frozenset(hosts)
+
+    async def check(url: str) -> bool:
+        host = (urlparse(url).hostname or "").lower().rstrip(".")
+        return host in allowed and await validator(url)
+
+    return check
+
+
 def _require_sdk() -> None:
     try:
         import a2a.server.request_handlers  # noqa: F401  # проверка extra
@@ -136,6 +149,7 @@ class A2aSurface:
                 self.section.port,
             ),
             secured=bool(self.section.auth_token),
+            push=bool(self.section.push_allowed_hosts),
         )
 
     def app(self) -> FastAPI:
@@ -163,24 +177,33 @@ class A2aSurface:
 
         threads = self.runtime.threads()
         card = self.card()
-        push_store = ThreadPushConfigStore(threads)
-        if self._push_client is None:
-            self._push_client = httpx.AsyncClient(timeout=10.0)
-            self._own_push_client = True
-        # Адреса push проверяются: агент не ходит по просьбе пира во
-        # внутреннюю сеть (метаданные облака, локальные сервисы).
-        validator = self._push_url_validator or validate_push_notification_url
+        push: dict = {}
+        if self.section.push_allowed_hosts:
+            push_store = ThreadPushConfigStore(threads)
+            if self._push_client is None:
+                self._push_client = httpx.AsyncClient(timeout=10.0)
+                self._own_push_client = True
+            # Адрес push задаёт пир, а ходит по нему сервер: только хосты из
+            # a2a.push_allowed_hosts, и те не во внутреннюю сеть (проверка
+            # SDK: метаданные облака, локальные сервисы).
+            validator = allowed_push_url(
+                self.section.push_allowed_hosts,
+                self._push_url_validator or validate_push_notification_url,
+            )
+            push = {
+                "push_config_store": push_store,
+                "push_sender": BasePushNotificationSender(
+                    self._push_client,
+                    push_store,
+                    push_url_validator=validator,
+                ),
+                "push_url_validator": validator,
+            }
         handler = DefaultRequestHandlerV2(
             agent_executor=self.executor,
             task_store=ThreadTaskStore(threads),
             agent_card=card,
-            push_config_store=push_store,
-            push_sender=BasePushNotificationSender(
-                self._push_client,
-                push_store,
-                push_url_validator=validator,
-            ),
-            push_url_validator=validator,
+            **push,
         )
         app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
         add_a2a_routes_to_fastapi(

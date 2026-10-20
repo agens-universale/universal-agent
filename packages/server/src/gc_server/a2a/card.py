@@ -25,7 +25,12 @@ def interface_urls(public_url: str | None, host: str, port: int) -> tuple:
 
 
 def agent_card(
-    *, name: str, description: str, urls: tuple, secured: bool
+    *,
+    name: str,
+    description: str,
+    urls: tuple,
+    secured: bool,
+    push: bool = False,
 ) -> pb.AgentCard:
     rpc_url, rest_url = urls
     card = pb.AgentCard(
@@ -43,7 +48,7 @@ def agent_card(
             ),
         ],
         capabilities=pb.AgentCapabilities(
-            streaming=True, push_notifications=True
+            streaming=True, push_notifications=push
         ),
         default_input_modes=["text/plain"],
         default_output_modes=["text/plain"],

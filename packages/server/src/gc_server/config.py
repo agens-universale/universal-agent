@@ -158,6 +158,19 @@ class A2aConfig(_ChannelModes):
     public_url: str | None = None
     name: str = "GigaCode"
     description: str = "Универсальный агент GigaCode"
+    #: Хосты, на которые разрешены push-уведомления задач. Адрес push задаёт
+    #: пир, и сервер ходит по нему сам: пустой список — push выключен.
+    push_allowed_hosts: list[str] = Field(default_factory=list)
+
+    @field_validator("push_allowed_hosts")
+    @classmethod
+    def _push_hosts(cls, value: list[str]) -> list[str]:
+        hosts = [str(h).strip().lower().rstrip(".") for h in value]
+        if any(not h or "/" in h or ":" in h for h in hosts):
+            raise ValueError(
+                "push_allowed_hosts — имена хостов без схемы, порта и пути"
+            )
+        return hosts
 
     @field_validator("public_url", mode="before")
     @classmethod

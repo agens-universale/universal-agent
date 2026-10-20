@@ -113,7 +113,13 @@ a2a:
   public_url: null
   name: "GigaCode"
   description: "Универсальный агент GigaCode"
+  # Корень хода; metadata.cwd пира принимается только внутри него (без
+  # launch_root — внутри каталога процесса): это периметр записи агента.
   launch_root: null
+  # Push-уведомления задач: адрес задаёт пир, а ходит по нему сервер.
+  # Пустой список — push выключен; иначе только эти хосты (и не во
+  # внутреннюю сеть).
+  push_allowed_hosts: []
   text_answer_mode: "allow"
   finish_gate_mode: "off"
   todo_reminder_steps: 0

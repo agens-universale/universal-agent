@@ -84,10 +84,18 @@ def _settings(tmp_path):
     )
 
 
+#: Поверхности теста: их ходы и задачи SDK гасятся до закрытия хранилища —
+#: операция с закрытой SQLite не завершается, и цикл событий не закрылся бы.
+_LIVE: list = []
+
+
 @pytest.fixture()
 async def stores(tmp_path):
     opened = await aopen_process_stores(_settings(tmp_path))
     yield opened
+    while _LIVE:
+        await _LIVE.pop().astop()
+    await asyncio.sleep(0.05)
     await opened.aclose()
 
 
@@ -113,6 +121,7 @@ def _surface(tmp_path, stores, agents=None, *, section=None, push=None):
 
         surface.executor._agent_factory = factory
     surface.http_app = surface.app()
+    _LIVE.append(surface)
     return surface
 
 
@@ -150,7 +159,12 @@ def _text(message) -> str:
 
 async def test_card_declares_streaming_push_and_public_url(tmp_path, stores):
     surface = _surface(
-        tmp_path, stores, section={"public_url": "https://agent.example/rpc"}
+        tmp_path,
+        stores,
+        section={
+            "public_url": "https://agent.example/rpc",
+            "push_allowed_hosts": ["hooks.example"],
+        },
     )
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=surface.http_app), base_url=BASE
@@ -167,6 +181,56 @@ async def test_card_declares_streaming_push_and_public_url(tmp_path, stores):
     }
 
 
+async def test_push_is_off_without_allowed_hosts(tmp_path, stores):
+    """Адрес push задаёт пир — сервер ходил бы по нему. Без явного списка
+    хостов push выключен: в карточке его нет, настройка в запросе не
+    действует — наружу ничего не уходит."""
+    sent: list = []
+    push = httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda r: sent.append(r) or httpx.Response(200)
+        )
+    )
+    surface = _surface(tmp_path, stores, [FakeAgent()], push=push)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=surface.http_app), base_url=BASE
+    ) as http:
+        card = (await http.get("/.well-known/agent-card.json")).json()
+    assert card["capabilities"].get("pushNotifications") is not True
+    request = pb.SendMessageRequest(message=_message("сделай"))
+    request.configuration.task_push_notification_config.url = (
+        "https://hooks.example/a2a"
+    )
+    async for _event in _client(surface).send_message(request):
+        pass
+    await asyncio.sleep(0.05)
+    assert sent == []
+
+
+async def test_push_to_a_host_outside_the_list_is_refused(tmp_path, stores):
+    sent: list = []
+    push = httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda r: sent.append(r) or httpx.Response(200)
+        )
+    )
+    surface = _surface(
+        tmp_path,
+        stores,
+        [FakeAgent()],
+        section={"push_allowed_hosts": ["hooks.example"]},
+        push=push,
+    )
+    request = pb.SendMessageRequest(message=_message("сделай"))
+    request.configuration.task_push_notification_config.url = (
+        "https://internal.corp/steal"
+    )
+    with pytest.raises(Exception):
+        async for _event in _client(surface).send_message(request):
+            pass
+    assert sent == []
+
+
 async def test_send_message_completes_with_the_answer(tmp_path, stores):
     agent = FakeAgent()
     surface = _surface(tmp_path, stores, [agent])
@@ -177,18 +241,42 @@ async def test_send_message_completes_with_the_answer(tmp_path, stores):
 
 
 async def test_metadata_cwd_is_the_turn_root(tmp_path, stores):
+    root = tmp_path / "root"
+    (root / "proj").mkdir(parents=True)
     agent = FakeAgent()
-    surface = _surface(tmp_path, stores, [agent, FakeAgent()])
+    surface = _surface(
+        tmp_path,
+        stores,
+        [agent, FakeAgent(), FakeAgent()],
+        section={"launch_root": str(root)},
+    )
     message = _message("сделай")
-    message.metadata.update({"cwd": str(tmp_path)})
+    message.metadata.update({"cwd": str(root / "proj")})
     task = await _send(_client(surface), message)
     assert task.status.state == pb.TASK_STATE_COMPLETED
-    assert agent.settings.runtime.launch_root == str(tmp_path)
+    assert agent.settings.runtime.launch_root == str(root / "proj")
 
     relative = _message("сделай")
     relative.metadata.update({"cwd": "relative/dir"})
     failed = await _send(_client(surface), relative)
     assert failed.status.state == pb.TASK_STATE_FAILED
+
+
+@pytest.mark.parametrize("outside", ["/", "/etc", "{root}/../elsewhere"])
+async def test_peer_cannot_root_the_turn_outside_the_surface_root(
+    tmp_path, stores, outside
+):
+    """Корень хода — периметр записи: пир выбирает его только внутри
+    a2a.launch_root (без него — внутри каталога процесса)."""
+    root = tmp_path / "root"
+    root.mkdir()
+    surface = _surface(
+        tmp_path, stores, [FakeAgent()], section={"launch_root": str(root)}
+    )
+    message = _message("сделай")
+    message.metadata.update({"cwd": outside.format(root=root)})
+    task = await _send(_client(surface), message)
+    assert task.status.state == pb.TASK_STATE_FAILED
 
 
 async def test_question_then_reply_continues_the_same_task(tmp_path, stores):
@@ -248,7 +336,13 @@ async def test_push_notification_reaches_the_receiver(tmp_path, stores):
         return httpx.Response(200)
 
     push = httpx.AsyncClient(transport=httpx.MockTransport(receiver))
-    surface = _surface(tmp_path, stores, [FakeAgent()], push=push)
+    surface = _surface(
+        tmp_path,
+        stores,
+        [FakeAgent()],
+        section={"push_allowed_hosts": ["hooks.example"]},
+        push=push,
+    )
     request = pb.SendMessageRequest(message=_message("сделай"))
     request.configuration.task_push_notification_config.url = (
         "https://hooks.example/a2a"
@@ -276,6 +370,12 @@ async def test_busy_context_fails_the_new_task(tmp_path, stores):
     assert second.status.state == pb.TASK_STATE_FAILED
     assert _text(second.status.message) == BUSY_TEXT
     hold.set()
+    for _ in range(200):
+        done = await client.get_task(pb.GetTaskRequest(id=first.id))
+        if done.status.state == pb.TASK_STATE_COMPLETED:
+            break
+        await asyncio.sleep(0.01)
+    assert done.status.state == pb.TASK_STATE_COMPLETED
 
 
 async def test_real_agent_answers_through_a2a(tmp_path, stores, monkeypatch):

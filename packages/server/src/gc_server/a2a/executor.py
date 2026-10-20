@@ -42,7 +42,10 @@ ELSEWHERE_TEXT = (
     "Ход этой задачи идёт на другом инстансе или прерван: ответ на вопрос "
     "принять некому."
 )
-CWD_TEXT = "metadata.cwd должен быть абсолютным путём и совпадать с диалогом."
+CWD_TEXT = (
+    "metadata.cwd должен быть абсолютным путём внутри корня агента и "
+    "совпадать с диалогом."
+)
 # Досрочная остановка — не ответ: бюджет (шаги, токены, тулы) и недоступная
 # проверка действий судьёй. JSON ``ok: false`` в артефакт не кладём.
 _STOPS = frozenset(
@@ -268,10 +271,22 @@ class GcAgentExecutor(AgentExecutor):
             if sent is not None and os.path.normpath(sent) != known:
                 raise _CwdError(sent)
             return known
-        if sent is not None:
-            if not os.path.isabs(sent):
-                raise _CwdError(sent)
-            return os.path.normpath(sent)
+        root = self._root()
+        if sent is None:
+            return root
+        if not os.path.isabs(sent):
+            raise _CwdError(sent)
+        # Корень хода — периметр записи агента: пир выбирает его только
+        # внутри корня поверхности (симлинки и «..» раскрыты).
+        cwd = os.path.realpath(sent)
+        if os.path.commonpath([os.path.realpath(root), cwd]) != (
+            os.path.realpath(root)
+        ):
+            raise _CwdError(sent)
+        return os.path.normpath(sent)
+
+    def _root(self) -> str:
+        """Корень поверхности: a2a.launch_root или каталог процесса."""
         root = self._launch_root
         if isinstance(root, str) and os.path.isabs(root):
             return os.path.normpath(root)
