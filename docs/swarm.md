@@ -4,7 +4,7 @@
 
 > ⚠️ **Только Linux.** Swarm-режим требует `bubblewrap` (`bwrap`) для изоляции и `timeout` из GNU coreutils для ограничения времени выполнения. На macOS/Windows эти инструменты недоступны.
 
-Swarm — поверхность `swarm` сервера `gc-serve` ([server.md](server.md)): те же ручки, что у вебхука, на своём порту (8092), но каждая задача (`POST /events/webhook`) исполняется `gc-cli` в **изолированной bubblewrap-песочнице**. Каждая задача:
+Swarm — поверхность `swarm` сервера `gc-serve` ([server.md](server.md)): тот же API `/v1`, что у вебхука, на своём порту (8092), но каждая задача (`POST /v1/tasks`) исполняется `gc-cli` в **изолированной bubblewrap-песочнице**. Каждая задача:
 
 - работает в собственных mount/pid/user/uts/ipc/cgroup namespaces (network — общий с хостом, см. AR-8 ниже);
 - видит только writable `/work` (+ эфемерный `/tmp` через tmpfs) и read-only биндинги системных директорий + venv с `gc-cli`;
@@ -175,7 +175,7 @@ swarm:
 ```
 client                 server                   wrapper.sh             bwrap + gc-cli
   │                       │                          │                       │
-  │  POST /events/webhook►│                          │                       │
+  │  POST /v1/tasks ─────►│                          │                       │
   │                       ├─ idempotency check       │                       │
   │                       ├─ materialize config      │                       │
   │                       │  → sandbox/.gc/config.yml│                       │
@@ -191,13 +191,13 @@ client                 server                   wrapper.sh             bwrap + g
   │                       │                          │◄── exit_code ─────────┤
   │                       │                          ├─ write completion.json│
   │                       │ monitor (60s tick)       │                       │
-  │  GET /runs/… ────────►├─ check_and_finalize ◄────┘                       │
+  │  GET /v1/tasks/… ────►├─ check_and_finalize ◄────┘                       │
   │  {status: completed} ◄┤                                                  │
 ```
 
 **Этапы по шагам:**
 
-1. **HTTP-вход.** `POST /events/webhook` приходит в `SwarmSurface.start_task`. Парсится JSON, нормализуются `task_id` и `system` (как у вебхука: `system` по умолчанию — `webhook.default_system`, занятые другими поверхностями — `400`), формируется `swarm_id = "swarm_<system>_<task_id>"` (префикс `swarm_` — чтобы каталоги отличались от обычных тредов вебхука).
+1. **HTTP-вход.** `POST /v1/tasks` приходит в `SwarmSurface.asubmit`. Парсится JSON, нормализуются `task_id` и `system` (как у вебхука: `system` по умолчанию — `webhook.default_system`, занятые другими поверхностями — `400`), формируется `swarm_id = "swarm_<system>_<task_id>"` (префикс `swarm_` — чтобы каталоги отличались от обычных тредов вебхука).
 2. **Одна задача — одна песочница (AR-3).** Под замком поверхности читается `meta.json`:
    - exist & `status ∈ {queued, running}` → **409 `task is running`**
      (`queued` на диск больше не пишется: `runner.start_swarm_process` сохраняет meta ровно один раз, уже после успешного `Popen`, сразу в `running`; в проверке имя оставлено ради meta, написанных прежними версиями);
@@ -212,10 +212,10 @@ client                 server                   wrapper.sh             bwrap + g
 
    Итог пишется атомарно в `sandbox/.gc/config.yml`.
 5. **Spawn wrapper.** `Popen([wrapper_path], env=..., start_new_session=True, stdout=DEVNULL, stderr=DEVNULL)`. `start_new_session` критичен: благодаря ему PID становится главой новой process group, и `os.killpg(pid, SIGTERM)` укладывает всё дерево (wrapper → bwrap → CLI → дочерние tool-процессы).
-6. **wrapper.sh.** Динамически собирает `--ro-bind` для `/lib`, `/lib64`, `/bin`, `/sbin`, `/etc`, `cli_venv_root`, `agent_dep_dir`, каждого `extra_mounts`, плюс `--bind ${SANDBOX_PATH} /work --chdir /work --unshare-all --share-net --setenv HOME /work --tmpfs /tmp`. `--tmpfs /tmp` даёт эфемерный writable `/tmp` внутри песочницы (нужен тулзам, пишущим во временные файлы — например playwright-mcp создаёт `/tmp/playwright-artifacts-*`); исчезает вместе с песочницей, изоляцию не ослабляет. CLI запускается как `gc-cli --config /work/.gc/config.yml --external-request -q "${SWARM_PAYLOAD_JSON}"` — запрос передаётся прямо в `-q` (payload как JSON-строка, симметрично webhook-режиму, где `json.dumps(payload)` уходит user-сообщением). `--external-request` объявляет канал так же, как webhook: человека нет, а слова задачи для судьи действий — запрос внешней системы (см. «Режимы разрешений на сервере» в `server.md`). Файл `payload.json` не пишется. Если задан внешний трейс, обёртка дополнительно добавляет `--trace-id "${SWARM_TRACE_ID}"` — только при непустом значении, иначе командная строка не меняется. Само поле `trace_id` из payload снято ещё в хендлере `POST /events/webhook`, чтобы не уехать в промпт модели текстом задачи.
+6. **wrapper.sh.** Динамически собирает `--ro-bind` для `/lib`, `/lib64`, `/bin`, `/sbin`, `/etc`, `cli_venv_root`, `agent_dep_dir`, каждого `extra_mounts`, плюс `--bind ${SANDBOX_PATH} /work --chdir /work --unshare-all --share-net --setenv HOME /work --tmpfs /tmp`. `--tmpfs /tmp` даёт эфемерный writable `/tmp` внутри песочницы (нужен тулзам, пишущим во временные файлы — например playwright-mcp создаёт `/tmp/playwright-artifacts-*`); исчезает вместе с песочницей, изоляцию не ослабляет. CLI запускается как `gc-cli --config /work/.gc/config.yml --external-request -q "${SWARM_PAYLOAD_JSON}"` — запрос передаётся прямо в `-q` (payload как JSON-строка, симметрично webhook-режиму, где `json.dumps(payload)` уходит user-сообщением). `--external-request` объявляет канал так же, как webhook: человека нет, а слова задачи для судьи действий — запрос внешней системы (см. «Режимы разрешений на сервере» в `server.md`). Файл `payload.json` не пишется. Если задан внешний трейс, обёртка дополнительно добавляет `--trace-id "${SWARM_TRACE_ID}"` — только при непустом значении, иначе командная строка не меняется. Поля `trace_id` и `callback_url` сняты ещё при разборе `POST /v1/tasks`, чтобы не уехать в промпт модели текстом задачи; текст для `-q` — `message` запроса или всё тело JSON.
 7. **bwrap + CLI.** Команда оборачивается в `timeout --kill-after=30 --signal=TERM ${TIMEOUT_SEC}`, stdout/stderr пишутся в `swarm_threads_dir/<swarm_id>/{stdout,stderr}.log`. CLI читает `/work/.gc/config.yml`, получает запрос из `-q`, работает с LLM/MCP через расшаренный network namespace.
 8. **Completion.** После выхода CLI wrapper маппит exit_code → `error_type` (`0`=success, `124/137`=timeout, `125-127`=wrapper_setup_error, остальное=cli_error) и атомарно пишет `completion.json`.
-9. **Финализация.** Фоновый `SwarmMonitor` каждые 60 секунд (или lazy в момент `GET /runs/{system}/{task_id}`) зовёт `lifecycle.check_and_finalize`: проверяет deadline, ресурсные лимиты, читает `completion.json`, обновляет `meta.json` и снимает sworm с `active`-списка.
+9. **Финализация.** Фоновый `SwarmMonitor` каждые 60 секунд (или lazy в момент `GET /v1/tasks/{system}/{task_id}`) зовёт `lifecycle.check_and_finalize`: проверяет deadline, ресурсные лимиты, читает `completion.json`, обновляет `meta.json` и снимает sworm с `active`-списка.
 10. **Cleanup.** Janitor-тред (интервал = `ttl_seconds/10`, зажат в 60–3600с) чистит `swarm_threads_dir` и `sandbox_root_dir` **независимо** (расцеплено, как обычная чистка тредов по возрасту): `threads/<id>` удаляется по timestamp из `meta.json`, `sandboxes/<id>` — по собственному `mtime`; всё старше `ttl_seconds` сносится. Агентские логи (`swarm_logs_dir` или дефолт `swarm_threads_dir/<id>/agent_logs`) уходят вместе со своим каталогом.
 
 ## Тред задачи в общей базе (`swarm.storage`)
@@ -253,51 +253,53 @@ swarm:
 
 ## Эндпоинты
 
-Ручки и формы ответа — как у вебхука ([server.md](server.md#вебхук)); токен —
-`swarm.auth_token` (по умолчанию `server.auth_token`).
+API `/v1` — как у вебхука ([server.md](server.md#api-v1)), подпись тела и
+идемпотентность — тоже; токен — `swarm.auth_token` (по умолчанию
+`server.auth_token`).
 
-### `POST /events/webhook`
+### `POST /v1/tasks`
 
-Запуск задачи.
-
-```json
-{
-  "task_id": "abc123",                    // опц.; если нет — UUID4
-  "system": "generic",                    // опц.; дефолт — webhook.default_system
-  "query": "..."                          // весь JSON уходит агенту как запрос
-}
-```
+Запуск задачи: текст `message` (или всё тело JSON) уходит `gc-cli` в
+песочнице через `-q`.
 
 **Ответы:**
-- `200` — `{"status": "started", "payload", "system", "task_id"}`; с
-  `swarm.storage` и идущей задачей — `{"status": "queued", …}`.
-- `400` — `invalid JSON body` / `JSON body must be an object` / занятый `system` /
-  невалидный `trace_id`.
+- `202` — `{"status": "started", "system", "task_id", "message_seq": null}`; с
+  `swarm.storage` и идущей задачей — `{"status": "queued", "message_seq": N}`.
+- `400` — негодное тело, занятый `system`, невалидный `trace_id`, `callback_url`
+  (обратных вызовов у swarm нет).
 - `409` — `task is running` или `task already finished — use a new task_id`.
 - `503` — `too many concurrent swarm processes, retry later`.
 
-### `GET /runs/{system}/{task_id}`
+### `GET /v1/tasks/{system}/{task_id}`
 
-Статус задачи — общая форма статуса прогона вебхука: `status` ∈ `{running,
-completed, failed}`, `started_at`, `finished_at`, `error` (для `failed`). Поля
-песочницы — в `swarm` (`status` песочницы, `pid`, `deadline_at`, `exit_code`,
-`error_type`…): там различаются `timeout` и `unknown_failed`, которые в общей
-форме — `failed`. Зовёт `check_and_finalize` с `heavy_checks=False` (без
-`du`/`psutil`-проверок — быстро для HTTP).
+Статус — общая форма статуса задачи вебхука: `status` ∈ `{running, completed,
+failed, cancelled}`, `started_at`, `finished_at`, `error` (для `failed`),
+`pending_messages`. Поля песочницы — в `swarm` (`status` песочницы, `pid`,
+`deadline_at`, `exit_code`, `error_type`…): там различаются `timeout` и
+`unknown_failed`, которые в общей форме — `failed`. Зовёт `check_and_finalize`
+с `heavy_checks=False` (без `du`/`psutil`-проверок — быстро для HTTP). Нет
+`meta.json` — `404`.
 
-Если `meta.json` отсутствует — `404`.
+### `GET /v1/tasks/{system}/{task_id}/messages`
 
-### `GET /logs/{system}/{task_id}`
+История страницами (`after`, `limit`): с `swarm.storage` — тред задачи из
+хранилища, иначе `messages.jsonl` песочницы (канал E —
+`sandbox/.gc/threads/<id>/`, с фоллбэком в `swarm_threads_dir/<id>/`; `seq` —
+номер строки).
 
-`{status: "ok", system, task_id, meta, messages, stdout, stderr}`. `messages`
-читается из `messages.jsonl` (канал E — лежит внутри
-`sandbox/.gc/threads/<id>/`), с фоллбэком в `swarm_threads_dir/<id>/`.
-`stdout`/`stderr` — построчно из `stdout.log`/`stderr.log`. Ничего не найдено —
-`404`.
+### `GET /v1/tasks/{system}/{task_id}/output`
 
-### `GET /logs/all`
+`{stdout, stderr}` — построчно из `stdout.log`/`stderr.log`.
 
-Задачи swarm (свежие первыми) со ссылкой `logs_url` на логи каждой.
+### `POST /v1/tasks/{system}/{task_id}/cancel`
+
+SIGTERM группе процессов песочницы (через 3 с — SIGKILL), статус
+`cancelled`. `202`.
+
+### `GET /v1/tasks` и `…/events`
+
+Список задач swarm (свежие первыми, `limit`, `cursor`) и SSE событий задачи —
+как у вебхука.
 
 ## Файлы и куда смотреть
 
@@ -373,7 +375,7 @@ awk '{print $5}' /proc/<bwrap_pid>/mountinfo | sort -u
 
 | Симптом | Причина | Лечение |
 |---|---|---|
-| `404` на `/events/webhook` порта 8092 | Поверхность swarm не поднята | `gc-serve swarm` или `server.apis: [swarm]` |
+| `404` на `/v1/tasks` порта 8092 | Поверхность swarm не поднята | `gc-serve swarm` или `server.apis: [swarm]` |
 | `503 too many concurrent swarm processes` | Лимит `max_concurrent` | Подожди или увеличь лимит |
 | `409 task is running` | Дубль `task_id` для живой песочницы | Подожди или используй другой `task_id` |
 | `409 task already finished — use a new task_id` | Дубль `task_id` для завершённой | `task_id` одноразовые — генерируй новый |

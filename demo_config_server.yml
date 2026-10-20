@@ -53,6 +53,22 @@ webhook:
     enabled: true
     interval_seconds: 30
     lookback_hours: 24
+  # Идемпотентность POST /v1/tasks (Idempotency-Key, webhook-id): сколько
+  # часов помнится квитанция записи.
+  idempotency_ttl_hours: 24
+  # Подпись тела по Standard Webhooks: задан секрет whsec_… (или список для
+  # смены) — неподписанный POST /v1/tasks получает 401. Общий с swarm.
+  #signing_secret: "${FILE:/run/secrets/webhook_signing_secret}"
+  signature_tolerance_seconds: 300
+  # Обратные вызовы о завершении задачи (task.completed | failed | cancelled
+  # | interrupted), подпись — Standard Webhooks.
+  callbacks:
+    url: null
+    #signing_secret: "${FILE:/run/secrets/callback_signing_secret}"
+    max_attempts: 5
+    # Где разрешён callback_url из тела запроса (схема и хост — точно, путь —
+    # началом). Пусто — callback_url не принимается.
+    allowed_urls: []
   threads_cleanup:
     # Периодическая чистка истории тредов в фоне процесса. Каталог тредов
     # общий с gc-cli и TUI: сервер, поднятый в каталоге проекта, удалял бы
