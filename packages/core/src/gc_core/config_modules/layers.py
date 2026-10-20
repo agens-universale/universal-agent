@@ -204,30 +204,41 @@ def _compat_layer(
     return doc
 
 
-#: Ключ, который слои из папки проекта (её `.gc/config.yml` и профили) не
-#: задают. Список безобидных команд проходит без вопроса и в plan, и в manual:
-#: расширить его — выдать доверие, а выдаёт его пользователь, не репозиторий.
-#: Склейка списков «проект только расширяет» рассчитана на запреты; этот
-#: список разрешающий.
-_USER_ONLY_KEY = ("security", "permissions", "readonly_commands")
+#: Ключи, которые слои из папки проекта (её `.gc/config.yml` и профили) не
+#: задают: это доверие пользователя, а не настройка репозитория.
+#: - Список безобидных команд проходит без вопроса и в plan, и в manual:
+#:   расширить его — выдать доверие. Склейка списков «проект только
+#:   расширяет» рассчитана на запреты; этот список разрешающий.
+#: - Хранилище (`storage`): конфиг чужого репозитория увёл бы историю тредов
+#:   в свою базу или запустил бы свою фабрику на открытии хранилища.
+_USER_ONLY_KEYS: tuple[tuple[str, ...], ...] = (
+    ("security", "permissions", "readonly_commands"),
+    ("storage",),
+)
 
 
 def _without_user_only_key(
     doc: Dict[str, Any], source: Any, notices: Optional[list[str]]
 ) -> Dict[str, Any]:
-    """Документ слоя проекта без `_USER_ONLY_KEY`; о выброшенном — уведомление."""
-    security, permissions, key = _USER_ONLY_KEY
-    section = doc.get(security)
-    section = section.get(permissions) if isinstance(section, dict) else None
-    if not isinstance(section, dict) or key not in section:
-        return doc
-    doc = copy.deepcopy(doc)
-    del doc[security][permissions][key]
-    if notices is not None:
-        notices.append(
-            f"{source}: {'.'.join(_USER_ONLY_KEY)} в конфиге проекта не "
-            "действует — безобидные команды задаются в своём config.yml"
-        )
+    """Документ слоя проекта без `_USER_ONLY_KEYS`; о выброшенном —
+    уведомление."""
+    for path in _USER_ONLY_KEYS:
+        *parents, key = path
+        section: Any = doc
+        for name in parents:
+            section = section.get(name) if isinstance(section, dict) else None
+        if not isinstance(section, dict) or key not in section:
+            continue
+        doc = copy.deepcopy(doc)
+        owner = doc
+        for name in parents:
+            owner = owner[name]
+        del owner[key]
+        if notices is not None:
+            notices.append(
+                f"{source}: {'.'.join(path)} в конфиге проекта не действует "
+                "— задаётся в своём config.yml"
+            )
     return doc
 
 
