@@ -48,7 +48,31 @@ async def acompact_thread(
         thread_id=thread_id,
         # Хранилище встраивающего, если он его передал.
         store=getattr(ctx, "thread_store", None),
+        # Сжатие переписывает историю: тред, который ведёт ход, — ThreadBusy.
+        claim=True,
     )
+    try:
+        return await _acompact_session(
+            ctx, thread_session, _lock=_lock, self_state=self_state
+        )
+    finally:
+        port = getattr(thread_session, "port", None)
+        release = getattr(port, "arelease_lease", None)
+        if release is not None:
+            await release(system_id, thread_session.thread_id)
+
+
+async def _acompact_session(
+    ctx: Any,
+    thread_session: ThreadSession,
+    *,
+    _lock: Lock | None,
+    self_state: State | None,
+) -> bool:
+    """Сжатие загруженного и взятого треда."""
+    settings = settings_of(ctx)
+    system_id = thread_session.system_id
+    thread_id = thread_session.thread_id
     thread_session.history_messages = repair_tool_call_pairing(
         thread_session.history_messages,
         keep_latest_unanswered=False,

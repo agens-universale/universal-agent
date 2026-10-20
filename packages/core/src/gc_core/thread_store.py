@@ -710,6 +710,19 @@ def _batches_by_bytes(messages, limit):
     return batches
 
 
+def _session_port_of(store: Any) -> Any:
+    """Порт сессии: у хранилища v2 — свой на сессию (свой владелец аренды:
+    два хода одного треда не «свои» друг другу), у старых — общий адаптер."""
+    from gc_core.thread_store_async import athread_store
+    from gc_core.threads.store import ThreadStore as ThreadStoreV2
+
+    if isinstance(store, ThreadStoreV2):
+        from gc_core.threads.session_port import own_session_port
+
+        return own_session_port(store)
+    return athread_store(store)
+
+
 class ThreadSession:
     def __init__(
         self,
@@ -770,9 +783,7 @@ class ThreadSession:
         передаёт своё хранилище.
         """
         if self._port is None:
-            from gc_core.thread_store_async import athread_store
-
-            self._port = athread_store(self.store)
+            self._port = _session_port_of(self.store)
         return self._port
 
     @classmethod
@@ -783,8 +794,12 @@ class ThreadSession:
         system_id: str,
         thread_id: str,
         store: Any = None,
+        claim: bool = False,
     ) -> "ThreadSession":
         """Загрузить тред. ``store`` не передан — файловое хранилище, как раньше.
+
+        ``claim`` — взять тред для хода до чтения (аренда сессии): чужая
+        живая аренда — ``ThreadBusy``. Чтение упало — аренда отпускается.
 
         ``settings`` — всё, что принимает ``settings_of`` (контекст, настройки);
         ``None`` — умолчания модели.
@@ -799,18 +814,26 @@ class ThreadSession:
         мимо порта, то есть мимо адаптера, который и решает, синхронное
         хранилище или нет.
         """
-        from gc_core.thread_store_async import athread_store
-
         sys_norm = sanitize_system_id(system_id)
         normalized_thread_id = validate_thread_id(thread_id)
         store, threads_dir = cls._resolve_store(settings, store)
 
-        port = athread_store(store)
+        port = _session_port_of(store)
         cls._check_file_owner(
             store, threads_dir, sys_norm, normalized_thread_id
         )
-        meta = await port.aload_meta(sys_norm, normalized_thread_id)
-        state = await port.aload_thread_state(sys_norm, normalized_thread_id)
+        aclaim = getattr(port, "aclaim", None) if claim else None
+        if aclaim is not None:
+            await aclaim(sys_norm, normalized_thread_id)
+        try:
+            meta = await port.aload_meta(sys_norm, normalized_thread_id)
+            state = await port.aload_thread_state(
+                sys_norm, normalized_thread_id
+            )
+        except BaseException:
+            if aclaim is not None:
+                await port.arelease_lease(sys_norm, normalized_thread_id)
+            raise
         session = cls._build(
             settings=settings,
             threads_dir=threads_dir,

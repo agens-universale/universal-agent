@@ -7,8 +7,8 @@
 прежним, а пишет он в любое хранилище нового контракта. Этап 3 заменит
 сессию фасадом и уберёт порт.
 
-Аренда берётся лениво, на первой записи, и продлевается, когда до истечения
-остаётся меньше половины срока; бессрочная (``ttl=None`` — владелец workflow
+Аренда берётся явно в начале хода (``aclaim``) или лениво, на первой
+записи, и продлевается, когда до истечения остаётся меньше половины срока; бессрочная (``ttl=None`` — владелец workflow
 Temporal) берётся один раз. Ревизия перечитывается прямо перед каждой
 записью: гонку двух писателей решает повтор, как и раньше.
 
@@ -24,8 +24,8 @@ from typing import Any
 
 from gc_core.execution.environment import utc_now
 from gc_core.execution.message_keys import make_message_key
-from gc_core.threads.errors import OwnershipError, ThreadConflict
-from gc_core.threads.instance import instance_id
+from gc_core.threads.errors import OwnershipError, ThreadBusy, ThreadConflict
+from gc_core.threads.instance import instance_id, session_owner
 from gc_core.threads.meta_map import meta_from_record, parts_from_meta
 from gc_core.threads.models import (
     Compaction,
@@ -72,6 +72,10 @@ class SessionPort:
     def threads_dir(self) -> str:
         return getattr(self._store, "threads_dir", "") or ""
 
+    @property
+    def owner(self) -> str:
+        return self._owner
+
     # --- аренда и запись -------------------------------------------------------
 
     def adopt_lease(self, key: ThreadKey, lease: Lease) -> None:
@@ -114,6 +118,11 @@ class SessionPort:
         self._revisions.pop(key, None)
         await self._store.release(key, lease)
 
+    async def aclaim(self, system_id: str, thread_id: str) -> Lease:
+        """Взять тред для хода. Чужая живая аренда — ``ThreadBusy`` до любой
+        работы; своя (бессрочная аренда workflow, уже взятая) — как есть."""
+        return await self._lease(_key(system_id, thread_id))
+
     async def _lease(self, key: ThreadKey) -> Lease:
         lease = self._leases.get(key)
         if lease is not None and (
@@ -121,11 +130,23 @@ class SessionPort:
             or lease.expires_at - utc_now() > self._ttl / 2
         ):
             return lease
-        record = await self._store.claim(
-            key, LeaseRequest(owner=self._owner, ttl=self._ttl)
-        )
+        try:
+            record = await self._store.claim(
+                key, LeaseRequest(owner=self._owner, ttl=self._ttl)
+            )
+        except OwnershipError as exc:
+            raise await self._busy(key, exc) from None
         self._leases[key] = record.lease
         return record.lease
+
+    async def _busy(self, key: ThreadKey, exc: OwnershipError) -> ThreadBusy:
+        record = await self._store.get_thread(key)
+        owner = record.lease.owner if record and record.lease else None
+        return ThreadBusy(
+            f"тред {key.system}/{key.thread} занят: его ведёт "
+            f"{owner or 'другая сессия'} ({exc})",
+            owner=owner,
+        )
 
     async def _commit(self, key: ThreadKey, **fields: Any) -> Receipt:
         for attempt in range(_RETRIES):
@@ -449,16 +470,31 @@ def _key(system_id: str, thread_id: str) -> ThreadKey:
 
 #: Порт на одно хранилище один — как у адаптера синхронных хранилищ.
 _PORT_ATTR = "_gc_session_port"
+#: Порт, который задал владелец хранилища (workflow Temporal).
+_ATTACHED_ATTR = "_gc_attached_session_port"
 
 
 def attach_session_port(store: ThreadStore, port: SessionPort) -> None:
     """Порт сессии, заданный владельцем хранилища (workflow Temporal: свой
-    владелец аренды, бессрочно), — его и отдаст ``session_port``."""
+    владелец аренды, бессрочно), — его и отдают ``session_port`` и
+    ``own_session_port``."""
     setattr(store, _PORT_ATTR, port)
+    setattr(store, _ATTACHED_ATTR, port)
+
+
+def own_session_port(store: ThreadStore) -> SessionPort:
+    """Порт одной сессии треда: свой владелец аренды
+    (``session_owner``). Хранилище с прикреплённым портом (workflow
+    Temporal) — его порт: владелец там один на сессию workflow."""
+    attached = getattr(store, _ATTACHED_ATTR, None)
+    if attached is not None:
+        return attached
+    return SessionPort(store, owner=session_owner())
 
 
 def session_port(store: ThreadStore) -> SessionPort:
-    """Порт сессии для хранилища v2 (один на объект хранилища)."""
+    """Порт хранилища v2 для чтения и записей сбоку (один на объект
+    хранилища); ход пишет через свой порт — ``own_session_port``."""
     port = getattr(store, _PORT_ATTR, None)
     if port is None:
         port = SessionPort(store)

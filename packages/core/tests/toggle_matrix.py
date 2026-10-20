@@ -720,6 +720,16 @@ UNREPRESENTABLE = {
 #: и «покрывать нечем» — разные вещи, и отличать их должен читатель, а не
 #: тот, кто однажды пересчитает покрытие и решит, что про них забыли.
 NOT_IN_MATRIX = {
+    # --- хранилище (storage) ---------------------------------------------------
+    #
+    # Ядро хранилище по конфигу не открывает: открывают фронтенды (gc-serve,
+    # gc-cli) через gc-stores и передают его прогону. Случай матрицы с базой
+    # сравнил бы файлы с файлами. Покрытие: test_storage_config.py (схема,
+    # отказ без открытого хранилища), stores/tests/test_open_configured.py,
+    # server/tests/test_server_storage_sqlite.py, cli/tests/test_cli_storage.py.
+    "storage.threads": "выбирает хранилище фронтенд; покрытие в test_storage_config и наборах stores/server/cli",
+    "storage.agent": "выбирает хранилище фронтенд; покрытие в test_storage_config и наборах stores/server/cli",
+    "storage.ensure_schema": "накат схемы при открытии в gc-stores; покрытие в stores/tests/test_open_configured",
     # Локально допустимо только step (как develop); turn — только в durable-
     # исполнителе и отклоняется локальным прогоном. Покрыто
     # test_thread_store_persist_turn.py и native test_native_workflow_live.py.

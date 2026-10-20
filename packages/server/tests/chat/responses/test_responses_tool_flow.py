@@ -21,6 +21,14 @@ async def _write(threads, payloads: list[dict]) -> None:
         await threads.append_messages(KEY, [payload])
 
 
+async def _compact_history(threads, messages):
+    """Сжатие истории ходом агента: его сессия пишет и в конце хода отпускает
+    тред (иначе следующая запись получила бы ThreadBusy)."""
+    port = SessionPort(threads.store)
+    await port.aarchive_and_replace(KEY.system, KEY.thread, messages)
+    await port.arelease_lease(KEY.system, KEY.thread)
+
+
 async def _sidecar(threads, records: list[dict]) -> None:
     port = SessionPort(threads.store)
     for record in records:
@@ -181,9 +189,7 @@ async def test_poll_after_compaction_reads_the_new_history():
         "content": '<technical type="dialog_summary">сводка</technical>',
         "id": "summary",
     }
-    await SessionPort(threads.store).aarchive_and_replace(
-        KEY.system, KEY.thread, [summary]
-    )
+    await _compact_history(threads, [summary])
     await _write(
         threads,
         [_call("exec_command", "after", json.dumps({"command": "ls"}))],

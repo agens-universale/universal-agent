@@ -12,6 +12,7 @@ import gc
 import logging
 import threading
 from copy import copy as _shallow_copy_msg
+from dataclasses import dataclass
 from typing import Any, Optional
 
 from gc_core.agent_edits.snapshots import purge_thread_snapshots
@@ -341,6 +342,24 @@ def _extend_with_thread_history(
         )
 
 
+@dataclass(frozen=True)
+class _RunRequest:
+    """Аргументы хода ``arun`` для его части на взятом треде."""
+
+    messages: list[str]
+    thread_id: str | None
+    verbose: bool
+    skills_list: Any
+    backend_api_mode: str
+    logger: Any
+    discard_writes_after_stop: bool
+    message_ids: list[str] | None
+    display_contents: list[str | None] | None
+    skills_loaded: list[str | None] | None
+    attachments: list[list[Attachment] | None] | None
+    account_run: bool
+
+
 class AgentExecutor:
     """
     Потокобезопасный запуск агента с возможностью добавлять сообщения во время run
@@ -471,6 +490,9 @@ class AgentExecutor:
             # Хранилище встраивающего, если он его передал. None — файловое
             # по умолчанию, ровно прежнее поведение.
             store=getattr(self._ctx, "thread_store", None),
+            # Тред берётся до чтения истории: чужой живой ход — ThreadBusy
+            # до любой работы, а прочитанное не устареет под чужой записью.
+            claim=True,
         )
         if logger is not None:
             # Единственная связка «этот лог-файл ↔ этот тред»: на момент
@@ -1224,19 +1246,47 @@ class AgentExecutor:
         )
         skills_list = await self._alist_skills()
         backend_api_mode = str(settings.backend.api_mode).strip().lower()
-        (
-            thread_session,
-            thread_shared,
-            previous_response_id,
-            system_id,
-        ) = await self._aopen_thread_session(
+        opened = await self._aopen_thread_session(
             thread_id,
             start_new_thread=start_new_thread,
             system=system,
             backend_api_mode=backend_api_mode,
             logger=logger,
         )
-        self._thread_session = thread_session
+        self._thread_session = opened[0]
+        request = _RunRequest(
+            messages=messages,
+            thread_id=thread_id,
+            verbose=effective_verbose,
+            skills_list=skills_list,
+            backend_api_mode=backend_api_mode,
+            logger=logger,
+            discard_writes_after_stop=discard_writes_after_stop,
+            message_ids=message_ids,
+            display_contents=display_contents,
+            skills_loaded=skills_loaded,
+            attachments=attachments,
+            account_run=account_run,
+        )
+        try:
+            return await self._arun_on_thread(opened, request)
+        except BaseException:
+            # Тред взят в начале хода; ход, не дошедший до учёта, не держит
+            # его до срока аренды (повторное отпускание безвредно).
+            await _arelease_lease(opened[0], logger)
+            raise
+
+    async def _arun_on_thread(
+        self, opened: tuple, request: _RunRequest
+    ) -> Any:
+        """Ход на взятом треде: подготовка состояния, цикл агента, учёт."""
+        thread_session, thread_shared, previous_response_id, system_id = opened
+        messages = request.messages
+        thread_id = request.thread_id
+        effective_verbose = request.verbose
+        skills_list = request.skills_list
+        backend_api_mode = request.backend_api_mode
+        logger = request.logger
         # Turn identity: свежий id на каждый run(), независимо от треда — без
         # него нечем будет пометить записи журнала правок текущего хода.
         bind_turn_identity(self._ctx, mint_turn_id())
@@ -1279,7 +1329,7 @@ class AgentExecutor:
             logger=logger,
         )
         self._bind_state(
-            state, discard_writes_after_stop=discard_writes_after_stop
+            state, discard_writes_after_stop=request.discard_writes_after_stop
         )
 
         # Permission memory: store оборачивает state.shared.confirm_rules ПО ССЫЛКЕ —
@@ -1338,11 +1388,11 @@ class AgentExecutor:
         # откатить осиротевшую реплику при быстрой отмене); иначе генерим.
         new_user_messages = self._build_user_messages(
             user_bodies,
-            message_ids=message_ids,
-            display_contents=display_contents,
-            skills_loaded=skills_loaded,
+            message_ids=request.message_ids,
+            display_contents=request.display_contents,
+            skills_loaded=request.skills_loaded,
             gen_id=generate_message_id_func,
-            attachments=attachments,
+            attachments=request.attachments,
             commit=commit_attachment,
         )
         self._seed_current_user_intent(state, new_user_messages)
@@ -1444,7 +1494,7 @@ class AgentExecutor:
 
         # Учёт — одна точка. Кто продолжит прогон после возврата, закроет её сам.
         # Отмена уборки сюда не доходит: завершённый цикл уже записан выше.
-        if account_run:
+        if request.account_run:
             await self.aclose_run_accounting()
 
         self._report_log_path(logger)

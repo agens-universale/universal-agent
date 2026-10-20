@@ -17,6 +17,7 @@ from datetime import timedelta
 from typing import Any
 
 from gc_core.plan_store import normalize_plan_block
+from gc_core.threads.instance import session_owner
 from gc_core.threads.meta_map import meta_from_record
 from gc_core.threads.models import (
     JsonObject,
@@ -60,11 +61,13 @@ def _op_id(prefix: str) -> str:
 
 class Threads:
     """Треды одного хранилища. ``owner`` — владелец аренды для записи
-    истории (по умолчанию — имя машины, как у сессии агента)."""
+    истории (по умолчанию — своя сессия, ``session_owner``). Аренда берётся
+    на запись и сразу отпускается: следующий ход не ждёт её срока, а тред,
+    занятый ходом, даёт ``ThreadBusy``."""
 
     def __init__(self, store: ThreadStore, *, owner: str | None = None):
         self.store = store
-        self._port = SessionPort(store, owner=owner)
+        self._port = SessionPort(store, owner=owner or session_owner())
 
     @classmethod
     def from_settings(cls, settings: Any) -> Threads:
@@ -221,9 +224,12 @@ class Threads:
     async def append_messages(self, key: ThreadKey, messages) -> int:
         """Дописать сообщения в историю (аренда и повторы — как у сессии);
         уже сохранённые не повторяются. Возвращает, сколько записано."""
-        return await self._port.aappend_messages(
-            key.system, key.thread, list(messages)
-        )
+        try:
+            return await self._port.aappend_messages(
+                key.system, key.thread, list(messages)
+            )
+        finally:
+            await self._port.arelease_lease(key.system, key.thread)
 
     async def discard_message(
         self,
@@ -235,9 +241,12 @@ class Threads:
         """Удалить сообщение. ``recount(история) -> {"live_…": …}`` —
         пересчитать объём живой истории в ``runtime`` (остальное в нём —
         как было)."""
-        removed = await self._port.adiscard_message(
-            key.system, key.thread, message_id
-        )
+        try:
+            removed = await self._port.adiscard_message(
+                key.system, key.thread, message_id
+            )
+        finally:
+            await self._port.arelease_lease(key.system, key.thread)
         record = await self.store.get_thread(key) if removed else None
         if record is not None and recount is not None:
             messages = [entry.data for entry in await self.history(key)]

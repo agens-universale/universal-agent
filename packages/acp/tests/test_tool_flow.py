@@ -40,6 +40,14 @@ async def _write(threads, *messages):
         await threads.append_messages(KEY, [message])
 
 
+async def _compact_history(threads, messages):
+    """Сжатие истории ходом агента: его сессия пишет и в конце хода отпускает
+    тред (иначе следующая запись получила бы ThreadBusy)."""
+    port = SessionPort(threads.store)
+    await port.aarchive_and_replace(KEY.system, KEY.thread, messages)
+    await port.arelease_lease(KEY.system, KEY.thread)
+
+
 async def _subagent(threads, kind, payload):
     await SessionPort(threads.store).aappend_subagent_trace(
         KEY.system,
@@ -89,9 +97,7 @@ async def test_poll_after_compaction_reads_the_new_history():
         "content": '<technical type="dialog_summary">сводка</technical>',
         "id": "summary",
     }
-    await SessionPort(threads.store).aarchive_and_replace(
-        KEY.system, KEY.thread, [summary]
-    )
+    await _compact_history(threads, [summary])
     await _write(threads, _call("exec_command", "after", {"command": "ls"}))
     assert await flow.poll() == [
         {
@@ -222,9 +228,7 @@ async def _compact(threads):
         "content": '<technical type="dialog_summary">сводка</technical>',
         "id": "summary",
     }
-    await SessionPort(threads.store).aarchive_and_replace(
-        KEY.system, KEY.thread, [summary]
-    )
+    await _compact_history(threads, [summary])
 
 
 async def _grow(threads):
