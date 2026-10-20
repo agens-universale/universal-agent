@@ -8,16 +8,17 @@ from gc_testkit import as_coro
 from server_harness import make_webhook
 
 
-def test_level_in_the_request_body_is_not_a_level_input(monkeypatch):
+def test_level_in_the_request_body_is_not_a_level_input(monkeypatch, tmp_path):
     seen = {}
     surface = make_webhook(
+        tmp_path,
         **{
             "level": "default",
             "agent.auto_routing": True,
             "backend.api_mode": "chat_completions",
             "models": {"fast": {}, "mid": {}, "big": {}},
             "slots": {"light": "fast", "default": "mid", "max": "big"},
-        }
+        },
     )
     monkeypatch.setattr(
         webhook_module,
@@ -25,12 +26,7 @@ def test_level_in_the_request_body_is_not_a_level_input(monkeypatch):
         as_coro(lambda cfg, **kw: seen.setdefault("cfg", cfg)),
     )
     monkeypatch.setattr(webhook_module, "build_auth_connector", lambda c: None)
-    monkeypatch.setattr(
-        surface.registry, "astart_if_absent", as_coro(lambda **kw: True)
-    )
-    monkeypatch.setattr(
-        surface.registry, "add_user_message", lambda **kw: False
-    )
+    monkeypatch.setattr(surface.registry, "astart", as_coro(lambda **kw: True))
     resp = TestClient(surface.app()).post(
         "/events/webhook", json={"task_id": "t2", "level": "auto"}
     )

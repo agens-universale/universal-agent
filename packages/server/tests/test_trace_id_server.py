@@ -17,12 +17,11 @@ def client(monkeypatch, tmp_path):
         captured["loaded"] = loaded
         return object()
 
-    async def _fake_start_if_absent(**kwargs):
+    async def _fake_start(**kwargs):
         captured["start_kwargs"] = kwargs
         return True
 
-    def _fake_add_user_message(**kwargs):
-        captured.setdefault("add_calls", []).append(kwargs)
+    def _fake_is_running(**kwargs):
         return captured.get("live_run", False)
 
     # Эндпоинт собирает контекст асинхронно: сборка включает MCP-дискавери
@@ -31,12 +30,9 @@ def client(monkeypatch, tmp_path):
         server, "acreate_run_context", _fake_create_run_context
     )
     monkeypatch.setattr(server, "build_auth_connector", lambda settings: None)
-    monkeypatch.setattr(
-        surface.registry, "astart_if_absent", _fake_start_if_absent
-    )
-    monkeypatch.setattr(
-        surface.registry, "add_user_message", _fake_add_user_message
-    )
+    monkeypatch.setattr(surface.registry, "astart", _fake_start)
+    monkeypatch.setattr(surface.registry, "is_running", _fake_is_running)
+    captured["surface"] = surface
     return TestClient(surface.app()), captured
 
 
@@ -54,7 +50,15 @@ def test_trace_id_is_removed_from_the_prompt(client):
     api.post(
         "/events/webhook", json={"task_id": "t1", "trace_id": "wf-42", "x": 1}
     )
-    message = captured["start_kwargs"]["initial_user_message"]
+    # Сообщение задачи — во входящем потоке треда: его и прочитает ход.
+    from gc_core.threads.facade import run_sync
+    from gc_core.threads.models import ThreadKey
+
+    store = captured["surface"].threads().store
+    entries = run_sync(
+        store.read_stream(ThreadKey(system="generic", thread="t1"), "inbox")
+    )
+    message = entries[-1].data["content"]
     assert "wf-42" not in message
     assert "trace_id" not in json.loads(message)
 

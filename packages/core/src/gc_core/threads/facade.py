@@ -141,6 +141,17 @@ class Threads:
         """Поток фронтенда ``<фронтенд>.<имя>`` целиком."""
         return await self.store.read_stream(key, stream)
 
+    async def busy_owner(self, key: ThreadKey) -> str | None:
+        """Кто ведёт тред сейчас (живая аренда) или ``None`` — тред свободен."""
+        from gc_core.execution.environment import utc_now
+        from gc_core.threads.rules import lease_expired
+
+        record = await self.store.get_thread(key)
+        lease = record.lease if record is not None else None
+        if lease is None or lease_expired(lease, utc_now()):
+            return None
+        return lease.owner
+
     async def resolve(self, alias: str) -> ThreadKey | None:
         return await self.store.resolve_alias(alias)
 

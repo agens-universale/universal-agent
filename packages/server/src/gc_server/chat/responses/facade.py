@@ -137,8 +137,19 @@ class ResponsesFacade:
                 cwd = cwd_for_continue(incoming.cwd_sent, record.cwd)
             if thread_id in self._busy:
                 raise ApiError(409, _CONFLICT, "turn already running")
+            if incoming.previous_response_id is not None:
+                await self._refuse_foreign_turn(thread_id)
             self._busy.add(thread_id)
             return thread_id, cwd
+
+    async def _refuse_foreign_turn(self, thread_id: str) -> None:
+        """Тред диалога ведёт другой инстанс (его аренда жива) — 409:
+        ответ здесь — продолжение того же хода, ставить в очередь некуда."""
+        owner = await self._index.threads.busy_owner(thread_key(thread_id))
+        if owner is not None:
+            raise ApiError(
+                409, _CONFLICT, "turn already running on another instance"
+            )
 
     async def _agent_for(self, thread_id: str, cwd: str) -> Any:
         cached = self._agents.get(thread_id)

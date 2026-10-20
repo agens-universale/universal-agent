@@ -1,8 +1,10 @@
 """Поверхность webhook: задача внешней системы → прогон агента в процессе.
 
-Пара ``(system, task_id)`` — тред; в каждый момент у неё не больше одного
-прогона. Сообщение в идущий прогон ложится в его очередь (``queued``), пока
-строится контекст — ждёт чужую сборку, иначе строит сам (``started``).
+Пара ``(system, task_id)`` — тред; в каждый момент у него не больше одного
+хода — на любом инстансе (аренда треда в хранилище). Сообщение сначала
+ложится во входящий поток треда. Тред уже ведут (свой прогон, своя сборка
+контекста или чужая живая аренда) — ``queued``: ход заберёт сообщение сам.
+Иначе этот запрос строит прогон (``started``). Статус задачи — в хранилище.
 """
 
 from __future__ import annotations
@@ -10,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any, Dict
 
@@ -22,6 +25,7 @@ from gc_core.execution.environment import utc_now
 from gc_core.run_context import acreate_run_context
 from gc_core.thread_store import validate_thread_id
 from gc_core.threads.facade import Threads
+from gc_core.threads.instance import instance_id
 from gc_core.threads.models import ThreadKey, ThreadRecord
 from gc_core.trace_id import normalize_trace_id
 from gc_core.utils.generate_message_id import (
@@ -35,8 +39,9 @@ from gc_server.surface import (
     install_bearer,
     read_json_object,
 )
+from gc_server.webhook import status as task_status
 from gc_server.webhook.janitor import start_threads_cleanup
-from gc_server.webhook.registry import AgentRunRegistry
+from gc_server.webhook.registry import ActiveRun, AgentRunRegistry
 from gc_server.webhook.request import ensure_task_id, normalize_system
 
 if TYPE_CHECKING:
@@ -159,7 +164,11 @@ class WebhookSurface:
         )
 
     async def astop(self) -> None:
-        self.registry.cancel_all()
+        # Снятые прогоны пишут статус cancelled — дождаться их до закрытия
+        # хранилища процессом.
+        tasks = self.registry.cancel_all()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
         pruner, self._pruner = self._pruner, None
         if pruner is not None:
             pruner.cancel()
@@ -220,13 +229,12 @@ class WebhookSurface:
 
     async def get_run_status(self, system: str, task_id: str):
         sys_norm, task_norm = path_key(system, task_id)
-        # Бронь и прогон — одним снимком реестра, бронь первой: пока строится
-        # контекст, нового прогона ещё нет, а под тем же ключом лежит прошлый
-        # завершённый с TTL 15 минут.
-        building_since, run = self.registry.get_status_snapshot(
+        base = {"system": sys_norm, "task_id": task_norm}
+        # Контекст задачи строит этот процесс: прогона ещё нет, а статус в
+        # хранилище — прошлого прогона.
+        building_since = self.registry.building_since(
             system=sys_norm, task_id=task_norm
         )
-        base = {"system": sys_norm, "task_id": task_norm}
         if building_since is not None:
             return {
                 "status": "running",
@@ -235,96 +243,49 @@ class WebhookSurface:
                 "started_at": building_since,
                 "last_activity_at": building_since,
             }
-        if run is None:
+        record = await self.threads().get(
+            ThreadKey(system=sys_norm, thread=task_norm)
+        )
+        status = task_status.status_of(record)
+        if status is None:
             raise HTTPException(
                 status_code=404, detail={"status": "not_found"}
             )
-        return run_status_body(run, base)
+        return task_status.status_body(status, record, base)
 
     async def events_webhook(self, request: Request):
         payload = await read_json_object(request)
         task_id, trace_id = request_task_identifiers(payload)
         system = request_system(payload, self.config.default_system)
-        message_str = json.dumps(payload, ensure_ascii=False)
-        queued = await self._deliver_or_reserve(
-            system, task_id, message_str, trace_id
+        message = _make_user_message(json.dumps(payload, ensure_ascii=False))
+        await self.threads().submit(
+            ThreadKey(system=system, thread=task_id), message, source="webhook"
         )
-        if queued:
-            return {
-                "status": "queued",
-                "payload": payload,
-                "system": system,
-                "task_id": task_id,
-            }
+        reply = {"payload": payload, "system": system, "task_id": task_id}
+        if not await self._take_start(system, task_id):
+            _log_ignored_trace_id(trace_id, system, task_id)
+            return {"status": "queued", **reply}
         try:
-            await self._start_run(system, task_id, message_str, trace_id)
+            await self._start_run(system, task_id, trace_id)
         finally:
             self.registry.release_reservation(system=system, task_id=task_id)
-        return {
-            "status": "started",
-            "payload": payload,
-            "system": system,
-            "task_id": task_id,
-        }
+        return {"status": "started", **reply}
 
-    async def _deliver_or_reserve(
-        self, system: str, task_id: str, message: str, trace_id: str | None
-    ) -> bool:
-        """``True`` — сообщение легло в идущий прогон; ``False`` — ключ
-        забронирован за этим запросом, прогон строить ему.
-
-        Путь проходится заново после каждой чужой сборки контекста: пока она
-        шла, прогон мог стартовать — тогда сообщение уходит в него, — а мог и
-        не стартовать, если сборка упала; тогда строим сами. Ждём не дольше
-        ``webhook.context_build_wait_seconds`` в сумме за запрос.
-        """
-        deadline: float | None = None
-        while True:
-            if self.registry.add_user_message(
-                system=system,
-                task_id=task_id,
-                make_message=_make_user_message,
-                content=message,
-            ):
-                _log_ignored_trace_id(trace_id, system, task_id)
-                return True
-            if self.registry.reserve(system=system, task_id=task_id):
-                return False
-            loop = asyncio.get_running_loop()
-            if deadline is None:
-                deadline = loop.time() + self.config.context_build_wait_seconds
-            await self._await_foreign_build(system, task_id, deadline)
-
-    async def _await_foreign_build(
-        self, system: str, task_id: str, deadline: float
-    ) -> None:
-        try:
-            async with asyncio.timeout_at(deadline):
-                await self.registry.await_build(system=system, task_id=task_id)
-        except TimeoutError:
-            ceiling = self.config.context_build_wait_seconds
-            logger.warning(
-                "context_build_wait_timeout system=%s task_id=%s ceiling_s=%g",
-                system,
-                task_id,
-                ceiling,
-                extra={
-                    "event": "context_build_wait_timeout",
-                    "system": system,
-                    "task_id": task_id,
-                    "ceiling_s": ceiling,
-                },
-            )
-            raise HTTPException(
-                status_code=503,
-                detail={
-                    "status": "error",
-                    "payload": "task context is still being built, retry later",
-                },
-            ) from None
+    async def _take_start(self, system: str, task_id: str) -> bool:
+        """Строить ли прогон этому запросу. Нет — тред уже ведут: свой
+        прогон или сборка (ход заберёт сообщение опросом или в начале) либо
+        другой инстанс (его аренда жива)."""
+        if self.registry.is_running(system=system, task_id=task_id):
+            return False
+        owner = await self.threads().busy_owner(
+            ThreadKey(system=system, thread=task_id)
+        )
+        if owner is not None:
+            return False
+        return self.registry.reserve(system=system, task_id=task_id)
 
     async def _start_run(
-        self, system: str, task_id: str, message: str, trace_id: str | None
+        self, system: str, task_id: str, trace_id: str | None
     ) -> None:
         loaded = (
             self.settings.with_runtime(trace_id=trace_id)
@@ -342,15 +303,47 @@ class WebhookSurface:
             force_legacy=force_legacy,
             **self.runtime.store_kwargs(),
         )
-        await self.registry.astart_if_absent(
+        await self.registry.astart(
             system=system,
             task_id=task_id,
-            executor_factory=AgentExecutor,
+            executor=AgentExecutor(ctx),
             ctx=ctx,
-            initial_user_message=message,
-            thread_id=task_id,
-            verbose=None,
+            on_start=self._amark_running,
+            on_finish=self._amark_finished,
         )
+
+    async def _amark_running(self, run: ActiveRun) -> None:
+        key = ThreadKey(system=run.system, thread=run.task_id)
+        threads = self.threads()
+        run.notes["previous"] = task_status.status_of(await threads.get(key))
+        run.notes["run_id"] = run_id = f"{instance_id()}:{id(run):x}"
+        await task_status.aset_status(
+            threads,
+            key,
+            status="running",
+            run_id=run_id,
+            instance=instance_id(),
+            started_at=run.started_at,
+            finished_at=None,
+            result=None,
+            error=None,
+        )
+
+    async def _amark_finished(self, run: ActiveRun) -> None:
+        """Итог прогона — в статус задачи, если статус всё ещё наш: тред,
+        перехваченный другим инстансом, ведёт его статус он."""
+        key = ThreadKey(system=run.system, thread=run.task_id)
+        threads = self.threads()
+        current = task_status.status_of(await threads.get(key))
+        if current is None or current.get("run_id") != run.notes["run_id"]:
+            return
+        if run.ending == "handed_off" and run.result is None:
+            # Наш прогон тред так и не взял: вернуть прежний статус.
+            await task_status.aset_status(
+                threads, key, **task_status.restorable(run.notes["previous"])
+            )
+            return
+        await task_status.aset_status(threads, key, **_final_fields(run))
 
     async def get_thread_logs(self, system: str, task_id: str):
         """Логи по ``(system, task_id)``: meta треда в прежней форме и
@@ -383,22 +376,15 @@ class WebhookSurface:
         return {"status": "ok", "logs": out}
 
 
-def run_status_body(run: Any, base: Dict[str, Any]) -> Dict[str, Any]:
-    """Статус завершённого или идущего прогона реестра."""
-    body = {**base, "thread_id": run.thread_id, "started_at": run.started_at}
-    if not run.done:
-        return {
-            "status": "running",
-            **body,
-            "last_activity_at": run.last_activity_at,
-        }
-    body["finished_at"] = run.finished_at
-    if run.cancelled:
+def _final_fields(run: ActiveRun) -> Dict[str, Any]:
+    """Поля статуса завершённого прогона."""
+    fields: Dict[str, Any] = {"finished_at": time.time()}
+    if run.ending == "cancelled":
         # Снятый прогон — не упавший: остановка сервера, явная отмена.
-        return {"status": "cancelled", **body}
-    if run.error is not None:
-        return {"status": "failed", **body, "error": repr(run.error)}
-    return {"status": "completed", **body, "result": run.result}
+        return {"status": "cancelled", **fields}
+    if run.ending == "failed":
+        return {"status": "failed", **fields, "error": repr(run.error)}
+    return {"status": "completed", **fields, "result": run.result}
 
 
 def _make_user_message(content: str) -> Dict[str, Any]:

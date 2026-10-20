@@ -51,11 +51,18 @@ _MOVED_TOP = {
     "logging": "server.logging",
 }
 _MOVED_NESTED = {
-    ("server", "context_build_wait_seconds"): (
-        "webhook.context_build_wait_seconds"
-    ),
     ("swarm", "enabled"): "server.apis",
     ("server", "port"): "webhook.port (у каждой поверхности свой порт)",
+}
+
+_NO_BUILD_WAIT = (
+    "сообщение задачи сразу ложится во входящий поток треда — ждать чужую "
+    "сборку контекста больше не нужно"
+)
+#: Ключи, которые больше ничего не делают: снимаются с предупреждением.
+_OBSOLETE = {
+    ("server", "context_build_wait_seconds"): _NO_BUILD_WAIT,
+    ("webhook", "context_build_wait_seconds"): _NO_BUILD_WAIT,
 }
 
 _STRICT = ConfigDict(extra="forbid", frozen=True)
@@ -102,20 +109,9 @@ class WebhookConfig(SurfaceConfig):
     #: Роль агента вебхука: относительный путь — рядом с этим файлом, затем
     #: среди ассетов gc-core.
     agent_md_path: str | None = "./prompts/server_agent.md"
-    context_build_wait_seconds: float = Field(
-        default=120, gt=0, allow_inf_nan=False
-    )
     threads_cleanup: ThreadsCleanupConfig = Field(
         default_factory=ThreadsCleanupConfig
     )
-
-    @field_validator("context_build_wait_seconds", mode="before")
-    @classmethod
-    def _wait(cls, value: object) -> object:
-        # `true` в YAML иначе стал бы потолком в секунду.
-        if isinstance(value, bool):
-            raise ValueError("нужно положительное конечное число секунд")
-        return value
 
 
 class _ChannelModes(SurfaceConfig):
@@ -308,6 +304,7 @@ def load_server_config(path: str | None = None) -> ServerConfig:
     if not isinstance(raw, dict):
         raise ServerConfigError(f"{cfg_path}: ожидался YAML-словарь")
     _reject_moved_keys(raw, cfg_path)
+    _drop_obsolete_keys(raw, cfg_path)
     try:
         cfg = ServerConfig.model_validate(raw)
     except ValidationError as exc:
@@ -315,6 +312,20 @@ def load_server_config(path: str | None = None) -> ServerConfig:
             f"{cfg_path}: {schema_error_details(exc)}"
         ) from None
     return cfg.model_copy(update={"config_path": cfg_path})
+
+
+def _drop_obsolete_keys(raw: dict[str, Any], cfg_path: str) -> None:
+    for (section, key), why in _OBSOLETE.items():
+        block = raw.get(section)
+        if isinstance(block, dict) and key in block:
+            block.pop(key)
+            logger.warning(
+                "%s: ключ «%s.%s» больше не используется: %s",
+                cfg_path,
+                section,
+                key,
+                why,
+            )
 
 
 def _reject_moved_keys(raw: dict[str, Any], cfg_path: str) -> None:

@@ -93,3 +93,14 @@ async def test_facade_write_into_a_busy_thread_is_thread_busy(tmp_path):
     await SessionPort(store, owner="runner").aclaim(KEY.system, KEY.thread)
     with pytest.raises(ThreadBusy):
         await Threads(store).append_messages(KEY, [_msg(1)])
+
+
+async def test_busy_owner_names_a_live_foreign_lease(tmp_path):
+    store = FileThreadStore(tmp_path)
+    threads = Threads(store)
+    assert await threads.busy_owner(KEY) is None
+    runner = SessionPort(store, owner="runner")
+    await runner.aclaim(KEY.system, KEY.thread)
+    assert await threads.busy_owner(KEY) == "runner"
+    await runner.arelease_lease(KEY.system, KEY.thread)
+    assert await threads.busy_owner(KEY) is None

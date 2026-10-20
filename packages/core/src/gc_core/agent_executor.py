@@ -1301,7 +1301,7 @@ class AgentExecutor:
         # Рукопожатие: тред отпущен, а во входящий поток успело лечь
         # сообщение после последнего забора — ещё ход тем же исполнителем.
         # Не взяли тред — его уже ведёт другой, он и заберёт.
-        while account_run and await self._ainbox_left():
+        while account_run and await self.ainbox_left():
             try:
                 response = await self._arun_turn(
                     [],
@@ -1694,9 +1694,10 @@ class AgentExecutor:
                 )
                 self._inbox_seen = entry.seq
 
-    async def _ainbox_left(self) -> bool:
-        """Во входящем потоке есть недоставленное, а ход кончился не
-        остановкой — рукопожатие: ещё ход."""
+    async def ainbox_left(self) -> bool:
+        """После хода: во входящем потоке треда есть недоставленное, а ход
+        кончился не остановкой — значит нужен ещё ход (рукопожатие ``arun``
+        и реестр сервера, закрывший прогон)."""
         thread_session = self._thread_session
         state = self.get_state()
         if state is None or state.stop_requested:

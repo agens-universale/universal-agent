@@ -24,7 +24,6 @@ def test_defaults_without_file_sections(tmp_path):
     assert cfg.address("a2a") == ("127.0.0.1", 8091)
     assert cfg.address("swarm") == ("127.0.0.1", 8092)
     assert cfg.webhook.default_system == "generic"
-    assert cfg.webhook.context_build_wait_seconds == 120
     assert cfg.webhook.threads_cleanup.enabled is False
     assert cfg.config_path.endswith("config_server.yml")
 
@@ -53,10 +52,6 @@ def test_host_and_token_are_inherited_and_overridable(tmp_path):
             {"agent": {"server_agentmd_path": "./a.md"}},
             "webhook.agent_md_path",
         ),
-        (
-            {"server": {"context_build_wait_seconds": 5}},
-            "webhook.context_build_wait_seconds",
-        ),
         ({"threads_cleanup": {"enabled": True}}, "webhook.threads_cleanup"),
         ({"swarm": {"enabled": True}}, "server.apis"),
         ({"logging": {"save_logs": False}}, "server.logging"),
@@ -67,6 +62,22 @@ def test_old_keys_name_their_new_place(tmp_path, doc, new_place):
     with pytest.raises(ServerConfigError) as err:
         load_server_config(_write(tmp_path, doc))
     assert new_place in str(err.value)
+
+
+@pytest.mark.parametrize(
+    "doc",
+    [
+        {"webhook": {"context_build_wait_seconds": 5}},
+        {"server": {"context_build_wait_seconds": 5}},
+    ],
+)
+def test_build_wait_ceiling_is_obsolete_but_not_fatal(tmp_path, doc, caplog):
+    """Сообщение сразу ложится во входящий поток треда — ждать чужую сборку
+    контекста больше не нужно. Старый ключ не роняет сервер: предупреждение."""
+    with caplog.at_level("WARNING"):
+        cfg = load_server_config(_write(tmp_path, doc))
+    assert not hasattr(cfg.webhook, "context_build_wait_seconds")
+    assert "context_build_wait_seconds" in caplog.text
 
 
 def test_unknown_key_is_an_error(tmp_path):

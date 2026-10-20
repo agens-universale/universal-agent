@@ -252,3 +252,18 @@ class _ProcessDied(BaseException):
 
 async def _finish(_index, _payload):
     return scripted_model.FINISH
+
+
+async def test_inbox_left_sees_what_the_run_did_not_take(
+    monkeypatch, tmp_path
+):
+    """Вызывающий (реестр сервера) спрашивает исполнителя после хода: осталось
+    ли во входящем потоке недоставленное."""
+    _install(monkeypatch, _finish)
+    ex = await _executor(tmp_path)
+    await ex.arun(["сделай"], thread_id=KEY.thread, system=KEY.system)
+    assert not await ex.ainbox_left()
+    await Threads(FileThreadStore(tmp_path)).submit(
+        KEY, {"role": "user", "content": "после хода"}
+    )
+    assert await ex.ainbox_left()
