@@ -3605,7 +3605,7 @@ async def test_modes_footer_shows_value_hint(tmp_path):
             FOOTER_SCROLL, ""
         )
         assert footer == (
-            "↑/↓ — выбор · ←/→/Enter — переключить · PgUp/PgDn — секции · Esc — меню"
+            "↑/↓ — выбор · ←/→ — изменить · PgUp/PgDn — секции · Esc — меню"
         )
         scr._modes_idx = modes_row_index("rigor")
         scr._render_view()
@@ -3993,6 +3993,25 @@ async def test_modes_apply_blocked_when_not_writable(tmp_path, monkeypatch):
         assert cfg_file.read_text(encoding="utf-8") == original
         notice = " ".join(str(w.render()) for w in scr.query(Static))
         assert "недоступен для записи" in notice
+
+
+async def test_modes_enter_on_toggle_row_does_nothing(tmp_path):
+    """Enter на строке ручки в «Режимах работы» значение не меняет и
+    ничего не пишет; меняют ←/→."""
+    app, cfg_file = _app_with_config(
+        tmp_path, 'tui:\n  finish_gate_mode: "on"\n'
+    )
+    original = cfg_file.read_text(encoding="utf-8")
+    async with app.run_test() as pilot:
+        scr = await _open_modes_section(pilot)
+        scr._modes_idx = modes_row_index("gate")
+        await pilot.press("enter")
+        await pilot.pause(0.1)
+        assert cfg_file.read_text(encoding="utf-8") == original
+
+        await pilot.press("right")
+        await pilot.pause(0.1)
+        assert cfg_file.read_text(encoding="utf-8") != original
 
 
 async def test_modes_apply_preserves_unrelated_keys(tmp_path):

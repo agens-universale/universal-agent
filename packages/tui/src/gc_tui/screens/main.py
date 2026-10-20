@@ -6363,17 +6363,10 @@ class TraceScreen(Screen):
                     # /profiles: Enter раскрывает пикер (спека §12.1, ревизия).
                     self._open_profiles_picker(cmd.name)
                     return
-                # Toggle-строка: Enter не сабмитит текст — циклит (+1) и
-                # применяет мгновенно, тот же путь, что ←/→ (спека 2026-07-18
-                # §1). custom не выбирается (ревизия 4) — тот же роутинг, что
-                # и ←/→ выше. Палитра остаётся открытой.
-                new_value = next_toggle_value(self.app, cmd.name, 1)
-                try:
-                    apply_toggle(self.app, cmd.name, new_value)
-                except (ValueError, OSError) as exc:
-                    self._show_footer_refusal(f"✗ не сохранено: {exc}")
-                else:
-                    self._palette.refresh_toggle_state()
+                # Toggle-строка: Enter значение не трогает — «готово»: закрыть
+                # палитру и очистить поле, как Esc. Меняют значение ←/→.
+                self._close_palette()
+                inp.text = ""
                 return
             typed = event.value.strip()
             has_args = len(typed.split()) > 1

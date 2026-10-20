@@ -28,8 +28,9 @@ class Command:
     # Аргумент — путь к файлу: при вводе `/<cmd> ` открывается файловый пикер
     # (fuzzy по проекту, как @-аттач). Папки в нём — только навигация.
     arg_file: bool = False
-    # Тоггл палитры (/gate, /answers): Enter циклит значение вместо запуска
-    # команды; состояние живёт в tui/toggles.py, не здесь (§ CLAUDE.md Architecture).
+    # Тоггл палитры (/gate, /answers): ←/→ меняют значение, Enter закрывает
+    # палитру вместо запуска команды; состояние живёт в tui/toggles.py,
+    # не здесь (§ CLAUDE.md Architecture).
     is_toggle: bool = False
     # Динамические варианты аргумента (app -> [(value, описание)]): ArgPicker для
     # команд, чей список известен только в рантайме (/profiles — файлы профилей).
@@ -189,7 +190,7 @@ def build_default_registry() -> CommandRegistry:
             hotkey="F7",
         ),
         Command("quit", (), "", "Выход", hotkey="Esc"),
-        # Переключатели палитры «чем работаем» (←/→/Enter, спека §12.1):
+        # Переключатели палитры «чем работаем» (←/→, спека §12.1):
         # уровень модели и профиль — над группой строгости завершения хода.
         Command(
             "level",
@@ -209,7 +210,7 @@ def build_default_registry() -> CommandRegistry:
             arg_options_provider=profile_picker_options,
             arg_hint_provider=profile_picker_hint,
         ),
-        # Переключатели палитры (←/→/Enter): самопроверка хода и формат финала.
+        # Переключатели палитры (←/→): самопроверка хода и формат финала.
         Command(
             "rigor",
             (),
