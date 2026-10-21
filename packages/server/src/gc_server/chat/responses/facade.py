@@ -40,6 +40,7 @@ logger = logging.getLogger(__name__)
 
 _NOT_FOUND = "not_found"
 _RESPONSE_NOT_FOUND = "response not found"
+_IN_PROGRESS = "in_progress"
 _CONFLICT = "conflict"
 # Живых агентов на процесс: у каждого открыт run-лог и MCP-сессии. Вытесняется
 # самый давний простаивающий; продолжение диалога поднимет его из файла треда.
@@ -107,6 +108,12 @@ class ResponsesFacade:
         if record is None and live is None:
             raise ApiError(404, _NOT_FOUND, _RESPONSE_NOT_FOUND)
         if live is None:
+            if record is not None and record.status == _IN_PROGRESS:
+                # Ход ведёт другой инстанс: отмена — в поток ``control``
+                # треда диалога, тот ход увидит её опросом.
+                await self._index.threads.request_cancel(
+                    thread_key(record.thread_id)
+                )
             return record.response if record is not None else {}
         await live.request_stop()
         await live.done.wait()
@@ -207,7 +214,7 @@ class ResponsesFacade:
             cwd,
             incoming.previous_response_id,
             created_at,
-            "in_progress",
+            _IN_PROGRESS,
             mapper.snapshot(),
         )
         try:

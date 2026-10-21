@@ -289,6 +289,20 @@ class InboxDrained(ValueError):
     """Ход без своих сообщений, а входящий поток пуст: играть нечего."""
 
 
+def _cancel_boundary(control: list, *, first: int) -> int | None:
+    """Граница отмены, касающейся хода, который доставляет входящие с номера
+    ``first``: наибольший ``upto_inbox_seq`` отмен не раньше ``first``.
+    Отмена прошлого хода (граница меньше ``first``) и запись без границы
+    ход не касаются."""
+    bounds = [
+        entry.data.get("upto_inbox_seq")
+        for entry in control
+        if entry.data.get("type") == "cancel"
+    ]
+    applicable = [b for b in bounds if type(b) is int and b >= first]
+    return max(applicable) if applicable else None
+
+
 def _inbox_reader(ctx: Any, thread_session: Any) -> Any:
     """Чтение входящего потока треда хода или ``None``: треда нет, хранилище
     потоков не знает, или ход durable (Temporal: сообщения и отмена
@@ -1502,7 +1516,7 @@ class AgentExecutor:
             )
 
         inbox_tail = await self._aread_inbox_tail(thread_session, state)
-        if not messages and not inbox_tail:
+        if not messages and not inbox_tail and not state.stop_requested:
             raise InboxDrained(
                 "Список пользовательских сообщений не должен быть пустым."
             )
@@ -1676,12 +1690,23 @@ class AgentExecutor:
         read = _inbox_reader(self._ctx, thread_session)
         if read is None:
             return []
-        entries = await read(after=int(state.inbox_seq or 0))
+        delivered = int(state.inbox_seq or 0)
+        entries = await read(after=delivered)
+        control = await thread_session.aread_control(after=0)
+        self._control_seen = control[-1].seq if control else 0
+        cut = _cancel_boundary(control, first=delivered + 1)
+        if cut is not None:
+            # Отмена пришла, пока ход собирался: сообщения до её границы
+            # сняты (в историю не идут), ход останавливается до первого
+            # запроса к модели; отметку доставки унесёт запись остановки.
+            state.inbox_seq = cut
+            self._inbox_seen = cut
+            state.stop_requested = True
+            self.stop_run()
+            return []
         if entries:
             state.inbox_seq = entries[-1].seq
         self._inbox_seen = int(state.inbox_seq or 0)
-        control = await thread_session.aread_control(after=0)
-        self._control_seen = control[-1].seq if control else 0
         return [_inbox_message(entry) for entry in entries]
 
     def _start_inbox_poller(self, thread_session) -> asyncio.Task | None:
