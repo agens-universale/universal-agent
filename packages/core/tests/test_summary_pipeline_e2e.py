@@ -7,9 +7,9 @@ from gc_core.intent_log import deserialize_list
 from gc_core.summarize.compaction import arun_summary_compaction
 from gc_core.thread_store import (
     ThreadSession,
-    append_new_thread_messages,
     load_thread_meta,
 )
+from gc_testkit.develop_writer import append_new_thread_messages
 from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
 from gc_testkit.intent_fixtures import intent_user_ask_texts
 from gc_testkit.settings import fake_ctx, make_settings
@@ -100,7 +100,6 @@ async def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_
             system_id=system_id,
             thread_id=thread_id,
         )
-        session.meta["backend_api_mode"] = "chat_completions"
         session.backend_api_mode = "chat_completions"
         state = _state()
         state.thread_id = thread_id
@@ -247,7 +246,6 @@ async def test_e2e_user_log_skips_technical_and_tool_messages(monkeypatch):
             system_id=system_id,
             thread_id=thread_id,
         )
-        session.meta["backend_api_mode"] = "chat_completions"
         session.backend_api_mode = "chat_completions"
         state = _state()
         state.thread_id = thread_id

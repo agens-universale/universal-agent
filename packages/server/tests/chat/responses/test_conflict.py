@@ -321,7 +321,8 @@ async def test_cancel_before_second_turn_skips_the_model(tmp_path):
 async def test_dialog_run_by_another_instance_is_409(tmp_path):
     """Тред диалога ведёт другой инстанс (его аренда жива): продолжение —
     409, ход не начинается."""
-    from gc_core.threads.session_port import SessionPort
+    from gc_core.threads.models import ThreadKey
+    from gc_core.threads.session_writer import SessionWriter
 
     agent = FakeAgent(asyncio.Event())
     agent._hold = False
@@ -329,8 +330,12 @@ async def test_dialog_run_by_another_instance_is_409(tmp_path):
     first = await facade.open({"model": "m", "input": "первый"})
     await _finished(first)
     thread_id = agent.calls[0]["thread_id"]
-    other = SessionPort(facade._index.threads.store, owner="other/1/abcd1234")
-    await other.aclaim("responses", thread_id)
+    other = SessionWriter(
+        facade._index.threads.store,
+        ThreadKey(system="responses", thread=thread_id),
+        owner="other/1/abcd1234",
+    )
+    await other.aclaim()
     with pytest.raises(ApiError) as caught:
         await facade.open(
             {
@@ -341,4 +346,4 @@ async def test_dialog_run_by_another_instance_is_409(tmp_path):
         )
     assert caught.value.status == 409
     assert len(agent.calls) == 1
-    await other.arelease_lease("responses", thread_id)
+    await other.arelease()

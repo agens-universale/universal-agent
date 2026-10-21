@@ -38,10 +38,12 @@ def test_mcp_media_goes_to_thread_files_when_the_store_keeps_them(
 
     from gc_core.attachments.store import StoreImageStore
     from gc_core.thread_files import parse_thread_file_uri
-    from gc_testkit.memory_thread_store import MemoryThreadStore
+    from gc_testkit.memory_thread_store_v2 import (
+        MemoryThreadStoreWithFiles,
+    )
 
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
-    store = MemoryThreadStore()
+    store = MemoryThreadStoreWithFiles()
     image_store = StoreImageStore(store)
     ctx = SimpleNamespace(
         image_store=image_store, system_id="sys", thread_id="t1"

@@ -11,7 +11,7 @@ import pytest
 from gc_core.agent_executor import AgentExecutor
 from gc_core.settings import LoadedSettings, RuntimeEnv
 from gc_core.run_context import acreate_run_context
-from gc_core.thread_store_file import FileThreadStore
+from gc_core.threads.file_store import FileThreadStore
 from gc_core.utils.logging_module import release_run_logger
 from gc_core_temporalio.contracts import RunRequest
 from gc_core_temporalio.provider import WorkerConfig

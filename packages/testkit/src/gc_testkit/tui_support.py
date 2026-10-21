@@ -113,7 +113,11 @@ def compact_thread(
     """
     from gc_core.threads.facade import run_sync
     from gc_core.threads.file_store import FileThreadStore
-    from gc_core.threads.session_port import SessionPort
+    from gc_core.threads.models import ThreadKey
 
-    port = SessionPort(FileThreadStore(threads_dir))
-    run_sync(port.aarchive_and_replace(system, thread, list(messages)))
+    from gc_testkit.thread_writes import acompact
+
+    key = ThreadKey(system=system, thread=thread)
+    run_sync(
+        acompact(FileThreadStore(threads_dir), key, messages, owner="tui-test")
+    )

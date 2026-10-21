@@ -6,7 +6,7 @@ import types
 
 from gc_server.a2a.surface import apply_a2a_runtime_defaults
 from gc_core.execution.state import SharedStateData
-from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
+from gc_testkit.session_meta import merge_shared_into_meta
 from gc_core.security.confirm_port import confirm_available
 from gc_core.thread_store import save_thread_meta
 from gc_testkit.settings import make_settings
@@ -35,7 +35,7 @@ async def test_a_peer_message_lifts_the_judge_pause(monkeypatch, tmp_path):
         str(tmp_path),
         "a2a",
         "t",
-        ThreadMetaMapper.merge_shared_into_meta(
+        merge_shared_into_meta(
             {},
             SharedStateData(judge_paused=True, judge_denials_in_a_row=3),
         ),

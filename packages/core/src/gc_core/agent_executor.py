@@ -39,15 +39,17 @@ from gc_core.message_policy.plan_messages import (
     accepted_plan_messages,
 )
 from gc_core.message_policy.stop_persist import is_persist_discarded
-from gc_core.message_policy.tool_usage_notice.state import (
-    persist_tool_usage_notice_state,
-)
 from gc_core.message_policy.user_message_policy import (
     extract_real_user_message_text,
     wrap_technical_user_content,
 )
 from gc_core.model_router import main_model_identity
-from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
+from gc_core.persistence.session_state import (
+    hydrate_state,
+    session_from_state,
+    shared_from_session,
+    usage_from_state,
+)
 from gc_core.plan_store import (
     PLAN_STATUS_APPROVED,
     PLAN_STATUS_REWORKING,
@@ -75,7 +77,7 @@ from gc_core.security.permission_mode import (
 )
 from gc_core.security.permission_store import PermissionStore
 from gc_core.settings import settings_of
-from gc_core.states import SharedStateData, State
+from gc_core.states import State
 from gc_core.summarize.config import (
     resolve_summary_limits_at_level,
 )
@@ -85,7 +87,7 @@ from gc_core.thread_store import (
     resolve_threads_dir,
 )
 from gc_core.threads.errors import ThreadBusy
-from gc_core.threads.session_port import LEASE_TTL
+from gc_core.threads.session_writer import LEASE_TTL
 from gc_core.tools.connect_mcp.persistent_stdio import PersistentStdioRegistry
 from gc_core.tools.connect_mcp.stream_client import (
     _SESSION_MANAGER as _STREAM_SESSION_MANAGER,
@@ -125,43 +127,19 @@ ORCHESTRATOR_SPECIFIC_ROLE = (
 async def _aappend_trace_id_to_meta(
     thread_session: Any, trace_id: str, logger: Any | None = None
 ) -> None:
-    """Дописать trace_id в ``meta.runtime.trace_ids`` (append + дедуп).
-
-    Через ``update_runtime_meta`` (read-merge-write по диску), а НЕ через
-    ``thread_session.meta``: ``persist_batch`` пересобирает base_meta с диска и
-    переносит из ``self.meta`` только whitelist ключей, в который ``runtime`` не
-    входит — запись в память была бы потеряна.
+    """Дописать trace_id в ``runtime.trace_ids`` треда (без дубля).
 
     Отвечает на вопрос аудита «какие шаги оркестратора трогали этот тред».
-    Ошибки бухгалтерии меты не должны ронять ран, но раз это единственный путь
-    записи trace_id в мету — молчаливый swallow оставляем, а факт и причину
-    ошибки пишем в debug (``logger`` опционален, чтобы не менять контракт
-    вызывающих сторон).
+    Ошибки бухгалтерии не должны ронять ран: факт и причину пишем в debug.
     """
-    from gc_core.persistence.meta_ownership import runtime_section
-    from gc_core.thread_store import sanitize_system_id
-
-    # Хранилище берём у самой сессии: у неё оно уже своё — файловое по
-    # умолчанию или переданное встраивающим. Прямой вызов модульных функций
-    # уводил бы записи на диск даже тогда, когда история лежит в базе.
-    store = getattr(thread_session, "store", None)
-    port = getattr(thread_session, "port", None)
-    system_id = getattr(thread_session, "system_id", None)
-    thread_id = getattr(thread_session, "thread_id", None)
-    if store is None or port is None or not system_id or not thread_id:
+    add = getattr(thread_session, "aadd_trace_id", None)
+    if add is None:
         return
     try:
-        sys_norm = sanitize_system_id(system_id)
-        meta = await port.aload_meta(sys_norm, thread_id) or {}
-        existing = runtime_section(meta).get("trace_ids")
-        ids = [str(x) for x in existing] if isinstance(existing, list) else []
-        if trace_id in ids:
-            return
-        ids.append(trace_id)
-        await port.aupdate_runtime_meta(
-            sys_norm, thread_id, {"trace_ids": ids}
-        )
+        await add(trace_id)
     except ExecutionFailure:
+        raise
+    except ThreadBusy:
         raise
     except Exception as exc:
         if logger is not None:
@@ -171,7 +149,6 @@ async def _aappend_trace_id_to_meta(
                 )
             except Exception:
                 pass
-        return
 
 
 async def _aclose_mcp_and_release(owner_reset: Any) -> None:
@@ -250,28 +227,33 @@ def _put_attachments(msg: dict, attachments, i: int, commit) -> None:
 LEASE_RENEW_SECONDS = LEASE_TTL.total_seconds() / 3
 
 
-def _thread_port(thread_session: Any) -> Any:
-    port = getattr(thread_session, "port", None) if thread_session else None
-    return port if callable(getattr(port, "arenew_lease", None)) else None
-
-
-def _start_lease_keeper(thread_session: Any) -> asyncio.Task | None:
-    """Фоновое продление аренды треда, пока идёт цикл (порт хранилища v2).
-    Нет порта или аренда бессрочная (workflow) — ``None``."""
-    port = _thread_port(thread_session)
-    if port is None or not getattr(port, "renews_lease", False):
+def _start_lease_keeper(
+    thread_session: Any, on_lost: Any = None
+) -> asyncio.Task | None:
+    """Фоновое продление аренды треда, пока идёт цикл. Аренда бессрочная
+    (workflow) или треда нет — ``None``. Аренду перехватили — ход
+    останавливается сразу (``on_lost``), не дожидаясь следующей записи."""
+    if thread_session is None or not getattr(
+        thread_session, "renews_lease", False
+    ):
         return None
 
     async def keep() -> None:
         while True:
             await asyncio.sleep(LEASE_RENEW_SECONDS)
             try:
-                await port.arenew_lease(
-                    thread_session.system_id, thread_session.thread_id
+                await thread_session.arenew_lease()
+            except ThreadBusy:
+                logging.getLogger(__name__).warning(
+                    "thread_lease_lost: тред ведёт другой процесс, ход "
+                    "останавливается",
+                    exc_info=True,
                 )
+                if on_lost is not None:
+                    on_lost()
+                return
             except Exception:
-                # Продлить не удалось — следующая запись хода получит отказ
-                # хранилища сама; здесь только предупреждение.
+                # Временный сбой продления: следующая попытка — по таймеру.
                 logging.getLogger(__name__).warning(
                     "thread lease renewal failed", exc_info=True
                 )
@@ -289,13 +271,11 @@ async def _stop_lease_keeper(keeper: asyncio.Task | None) -> None:
 async def _arelease_lease(thread_session: Any, logger: Any) -> None:
     """Отпустить аренду треда после хода; сбой — предупреждение (аренда
     истечёт сама)."""
-    port = _thread_port(thread_session)
-    if port is None:
+    release = getattr(thread_session, "arelease_lease", None)
+    if release is None:
         return
     try:
-        await port.arelease_lease(
-            thread_session.system_id, thread_session.thread_id
-        )
+        await release()
     except Exception:
         if logger is not None:
             logger.warning("thread lease release failed", exc_info=True)
@@ -316,12 +296,7 @@ def _inbox_reader(ctx: Any, thread_session: Any) -> Any:
     workflow). Тот же признак включает и управляющий поток."""
     if thread_session is None or getattr(ctx, "durable_execution", False):
         return None
-    read = getattr(getattr(thread_session, "port", None), "aread_inbox", None)
-    if read is None:
-        return None
-    return functools.partial(
-        read, thread_session.system_id, thread_session.thread_id
-    )
+    return getattr(thread_session, "aread_inbox", None)
 
 
 def _inbox_message(entry: Any) -> dict:
@@ -360,17 +335,42 @@ async def _amark_turn(
     предупреждение: ход от отметки не зависит."""
     if thread_session is None or getattr(ctx, "durable_execution", False):
         return
-    mark = getattr(getattr(thread_session, "port", None), "amark_turn", None)
+    mark = getattr(thread_session, "amark_turn", None)
     if mark is None:
         return
     try:
-        await mark(
-            thread_session.system_id, thread_session.thread_id, running=running
-        )
+        await mark(running=running)
+    except ThreadBusy:
+        raise
     except Exception:
         (logger or logging.getLogger(__name__)).warning(
             "thread turn mark failed", exc_info=True
         )
+
+
+async def _apersist_state(
+    thread_session: Any,
+    state: Any,
+    step_messages: list,
+    *,
+    rendered_system_prompt: str | None,
+) -> None:
+    """Шаг в тред: сообщения и состояние хода (части записи v2)."""
+    thread_session.backend_api_mode = state.backend_api_mode
+    session = session_from_state(
+        thread_session.state,
+        state,
+        notice=thread_session.notice,
+        rendered_system_prompt=rendered_system_prompt,
+        backend_api_mode=state.backend_api_mode,
+        previous_response_id=state.previous_response_id,
+    )
+    await thread_session.apersist_batch(
+        step_messages,
+        previous_response_id=state.previous_response_id,
+        session=session,
+        usage=usage_from_state(state),
+    )
 
 
 def _require_plan_execution_mode(mode: str) -> str:
@@ -547,9 +547,18 @@ class AgentExecutor:
                 from gc_core.threads.file_store import FileThreadStore
 
                 _reset_store = FileThreadStore(resolve_threads_dir(self._ctx))
-            from gc_core.thread_store_async import athread_store
+            from gc_core.thread_paths import sanitize_system_id
+            from gc_core.threads.models import ThreadKey
+            from gc_core.utils.generate_message_id import (
+                generate_msg_id_sha256,
+            )
 
-            await athread_store(_reset_store).areset(system_id, thread_id)
+            await _reset_store.delete(
+                ThreadKey(
+                    system=sanitize_system_id(system_id), thread=thread_id
+                ),
+                op_id=generate_msg_id_sha256("reset"),
+            )
             # Снимки баз — не забота хранилища: тем же ``reset`` ходит
             # запасной путь компакции, где сносить базы отката нельзя.
             # Пользовательский сброс знает, что чистит, и чистит здесь.
@@ -602,8 +611,9 @@ class AgentExecutor:
             )
         if backend_api_mode == "responses":
             previous_response_id = thread_session.previous_response_id
-        meta = getattr(thread_session, "meta", None) or {}
-        thread_shared = ThreadMetaMapper.shared_from_meta(meta)
+        thread_shared = shared_from_session(
+            thread_session.state, thread_session.extra
+        )
         # Sidecar nested-trace: identity для child ctx (независимо от TUI sink).
         bind_thread_identity(
             self._ctx,
@@ -641,11 +651,7 @@ class AgentExecutor:
             snap = build_mcp_tools_snapshot(
                 self._ctx, self._ctx.tools_data, self._ctx.mcp_status
             )
-            await thread_session.port.aupdate_runtime_meta(
-                system_id,
-                thread_id,
-                {"mcp_tools": snap},
-            )
+            await thread_session.aset_mcp_tools(snap)
         except Exception:
             pass
 
@@ -741,21 +747,12 @@ class AgentExecutor:
         )
         state.dialog_steps_offset = 0
         if thread_session is not None:
-            meta = getattr(thread_session, "meta", None) or {}
-            state.init_user_intent_log(meta.get("user_intent_log"))
-            state.init_current_user_intent(meta.get("current_user_intent"))
-            state.init_user_turn_seq(meta.get("user_turn_seq"))
-            state.infer_user_turn_seq_if_missing()
-            state.init_tool_usage_notice_from_meta(meta)
-            state.dialog_steps_offset = int(
-                meta.get("dialog_steps_offset", 0) or 0
+            hydrate_state(
+                state,
+                thread_session.state,
+                thread_session.usage,
+                thread_session.notice,
             )
-            state.inbox_seq = int(meta.get("inbox_seq", 0) or 0)
-            (
-                state.last_main_prompt_tokens,
-                state.last_main_prompt_message_count,
-            ) = ThreadMetaMapper.read_prompt_token_fields(meta)
-            state.usage = UsageAccount.from_meta(meta.get("token_usage"))
         rendered_system_prompt: str | None = None
         if (
             backend_api_mode == "chat_completions"
@@ -947,13 +944,11 @@ class AgentExecutor:
         роняет: файл — удобство, канон плана уже сохранён в состоянии треда.
         """
         session = self._thread_session
-        port = getattr(session, "port", None) if session else None
-        save = getattr(port, "asave_plan_file", None)
         plan = getattr(state.shared, "plan", None)
-        if not callable(save) or not plan:
+        if session is None or not plan:
             return
         try:
-            await save(session.system_id, session.thread_id, plan)
+            await session.asave_plan_file(plan)
         except Exception as exc:
             if logger is not None:
                 logger.warning("plan file export failed: %s", exc)
@@ -1012,21 +1007,6 @@ class AgentExecutor:
         async def _persist_thread_batch(step_messages: list[dict]) -> None:
             if is_persist_discarded(state):
                 return
-            # Persist notes from in-memory state into thread meta.
-            # Tools mutate state, but ThreadSession writes self.meta to disk.
-            if (
-                backend_api_mode == "chat_completions"
-                and isinstance(rendered_system_prompt, str)
-                and rendered_system_prompt.strip()
-            ):
-                thread_session.meta[
-                    "chat_completions_system_prompt_rendered"
-                ] = rendered_system_prompt
-            _shared = getattr(state, "shared", None)
-            if isinstance(_shared, SharedStateData):
-                thread_session.meta = ThreadMetaMapper.merge_shared_into_meta(
-                    thread_session.meta, _shared
-                )
             known_before = set(thread_session.known_message_keys)
             step_messages_for_user_scope = [
                 m
@@ -1038,24 +1018,15 @@ class AgentExecutor:
                 step_messages_for_user_scope,
                 user_turn_seq=state.user_turn_seq,
             )
-            thread_session.meta = ThreadMetaMapper.merge_state_into_meta(
-                thread_session.meta, state
-            )
-            thread_session.meta["backend_api_mode"] = state.backend_api_mode
-            thread_session.backend_api_mode = state.backend_api_mode
-            persist_tool_usage_notice_state(state, thread_session.meta)
-            last_backend_response_id = getattr(
-                state, "last_backend_response_id", None
-            )
-            if (
-                isinstance(last_backend_response_id, str)
-                and last_backend_response_id
-            ):
-                thread_session.meta["last_backend_response_id"] = (
-                    last_backend_response_id
-                )
-            await thread_session.apersist_batch(
-                step_messages, previous_response_id=state.previous_response_id
+            await _apersist_state(
+                thread_session,
+                state,
+                step_messages,
+                rendered_system_prompt=(
+                    rendered_system_prompt
+                    if backend_api_mode == "chat_completions"
+                    else None
+                ),
             )
 
         return _persist_thread_batch
@@ -1125,13 +1096,8 @@ class AgentExecutor:
             state.discard_writes_after_stop and state.stop_requested
         ):
             return
-        thread_session.meta = ThreadMetaMapper.merge_state_into_meta(
-            thread_session.meta, state
-        )
-        thread_session.meta["backend_api_mode"] = state.backend_api_mode
-        persist_tool_usage_notice_state(state, thread_session.meta)
-        await thread_session.apersist_batch(
-            [], previous_response_id=state.previous_response_id
+        await _apersist_state(
+            thread_session, state, [], rendered_system_prompt=None
         )
         # persist: turn — конец хода и есть точка сброса.
         flush = getattr(thread_session, "aflush_deferred", None)
@@ -1598,7 +1564,7 @@ class AgentExecutor:
         )
         loop_finished = False
         teardown_cancel: BaseException | None = None
-        keeper = _start_lease_keeper(thread_session)
+        keeper = _start_lease_keeper(thread_session, on_lost=self.stop_run)
         poller = self._start_inbox_poller(thread_session)
         # Накопленное ДО старта уходит в ПЕРВЫЙ батч, после собственных
         # сообщений прогона: клиент, которому ответили `queued`, должен попасть
@@ -1624,7 +1590,9 @@ class AgentExecutor:
                 get_pending_messages=self._take_pending_messages,
                 check_stop=self._is_stop_requested,
                 session_meta=(
-                    thread_session.meta if thread_session is not None else None
+                    thread_session.notice
+                    if thread_session is not None
+                    else None
                 ),
                 mark_finalizing=(
                     lambda active: aset_tui_finalizing(thread_session, active)
@@ -1712,9 +1680,7 @@ class AgentExecutor:
         if entries:
             state.inbox_seq = entries[-1].seq
         self._inbox_seen = int(state.inbox_seq or 0)
-        control = await thread_session.port.aread_control(
-            thread_session.system_id, thread_session.thread_id, after=0
-        )
+        control = await thread_session.aread_control(after=0)
         self._control_seen = control[-1].seq if control else 0
         return [_inbox_message(entry) for entry in entries]
 
@@ -1725,11 +1691,7 @@ class AgentExecutor:
         if read is None:
             return None
         interval = settings_of(self._ctx).thread_store.inbox_poll_seconds
-        read_control = functools.partial(
-            thread_session.port.aread_control,
-            thread_session.system_id,
-            thread_session.thread_id,
-        )
+        read_control = thread_session.aread_control
 
         async def poll() -> None:
             while True:
@@ -1777,11 +1739,8 @@ class AgentExecutor:
             return False
         if _inbox_reader(self._ctx, thread_session) is None:
             return False
-        entries = await thread_session.port.aread_inbox(
-            thread_session.system_id,
-            thread_session.thread_id,
-            after=int(state.inbox_seq or 0),
-            limit=1,
+        entries = await thread_session.aread_inbox(
+            after=int(state.inbox_seq or 0), limit=1
         )
         return bool(entries)
 

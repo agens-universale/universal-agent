@@ -4,6 +4,19 @@ from gc_testkit.tui_support import tui_settings
 import pytest
 
 
+async def _worker_session(tmp_path, tid):
+    """Сессия хода воркера над файловым тредом (берёт аренду на записи)."""
+    from gc_core.thread_store import ThreadSession
+    from gc_core.threads.file_store import FileThreadStore
+
+    return await ThreadSession.afrom_config(
+        settings=None,
+        system_id="cli",
+        thread_id=tid,
+        store=FileThreadStore(str(tmp_path)),
+    )
+
+
 @pytest.mark.asyncio
 async def test_counter_resets_on_user_send():
     """_events_since_last_user_send обнуляется при user-send."""
@@ -196,7 +209,7 @@ async def test_cancel_with_undo_removes_orphan_from_thread(tmp_path):
     реплику из data_*.jsonl по её id — после того, как остановленный ход
     отпустит тред."""
     pytest.importorskip("textual")
-    from gc_core.thread_store import ThreadSession, load_thread_messages
+    from gc_core.thread_store import load_thread_messages
     from gc_tui.app import TuiApp
     from gc_tui.services.stores.file_store import FileTaskStore
     from gc_tui.widgets.user_reply import UserReplyContainer
@@ -224,17 +237,7 @@ async def test_cancel_with_undo_removes_orphan_from_thread(tmp_path):
         scr._store = FileTaskStore(threads_dir=str(tmp_path), system="cli")
 
         # Симулируем, что worker уже записал реплику в тред (persist до ответа).
-        ts = ThreadSession(
-            threads_dir=str(tmp_path),
-            system_id="cli",
-            thread_id=tid,
-            history_messages=[],
-            known_message_keys=set(),
-            persisted_messages_count=0,
-            meta={},
-            previous_response_id=None,
-            backend_api_mode="chat_completions",
-        )
+        ts = await _worker_session(tmp_path, tid)
         await ts.apersist_batch(
             [{"role": "user", "content": "отменяю", "id": msg_id}],
             previous_response_id=None,
@@ -256,7 +259,7 @@ async def test_cancel_with_undo_removes_orphan_from_thread(tmp_path):
         assert any(m.get("id") == msg_id for m in msgs)
 
         # Ход закончился и отпустил тред — опрос удаляет осиротевшую.
-        await ts.port.arelease_lease("cli", tid)
+        await ts.arelease_lease()
         scr._run_orphan_cleanups()
         msgs, _, _ = load_thread_messages(str(tmp_path), "cli", tid)
         assert all(m.get("id") != msg_id for m in msgs)
@@ -268,7 +271,6 @@ async def test_cancel_with_undo_no_stream_reset_flicker(tmp_path):
     tail_events НЕ репортит stream_reset (иначе была бы полная перерисовка =
     моргание)."""
     pytest.importorskip("textual")
-    from gc_core.thread_store import ThreadSession
     from gc_tui.app import TuiApp
     from gc_tui.services.stores.file_store import FileTaskStore
     from gc_tui.widgets.user_reply import UserReplyContainer
@@ -294,17 +296,7 @@ async def test_cancel_with_undo_no_stream_reset_flicker(tmp_path):
         app.tui_state.active_task_id = tid
         scr._active_task_id = tid
         scr._store = FileTaskStore(threads_dir=str(tmp_path), system="cli")
-        await ThreadSession(
-            threads_dir=str(tmp_path),
-            system_id="cli",
-            thread_id=tid,
-            history_messages=[],
-            known_message_keys=set(),
-            persisted_messages_count=0,
-            meta={},
-            previous_response_id=None,
-            backend_api_mode="chat_completions",
-        ).apersist_batch(
+        await (await _worker_session(tmp_path, tid)).apersist_batch(
             [{"role": "user", "content": "ты тут?", "id": msg_id}],
             previous_response_id=None,
         )
@@ -331,7 +323,7 @@ async def test_cancel_with_undo_no_stream_reset_flicker(tmp_path):
 async def test_orphan_cleanup_deferred_while_thread_busy(tmp_path):
     """Пока на треде активен run — удаление откладывается (нет гонки с дозаписью)."""
     pytest.importorskip("textual")
-    from gc_core.thread_store import ThreadSession, load_thread_messages
+    from gc_core.thread_store import load_thread_messages
     from gc_tui.app import TuiApp
     from gc_tui.services.stores.file_store import FileTaskStore
 
@@ -351,17 +343,7 @@ async def test_orphan_cleanup_deferred_while_thread_busy(tmp_path):
         scr = pilot.app.screen
         tid, msg_id = "t1", "m_orphan"
         scr._store = FileTaskStore(threads_dir=str(tmp_path), system="cli")
-        await ThreadSession(
-            threads_dir=str(tmp_path),
-            system_id="cli",
-            thread_id=tid,
-            history_messages=[],
-            known_message_keys=set(),
-            persisted_messages_count=0,
-            meta={},
-            previous_response_id=None,
-            backend_api_mode="chat_completions",
-        ).apersist_batch(
+        await (await _worker_session(tmp_path, tid)).apersist_batch(
             [{"role": "user", "content": "x", "id": msg_id}],
             previous_response_id=None,
         )

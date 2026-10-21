@@ -13,7 +13,7 @@ from gc_core.threads.errors import ThreadBusy
 from gc_core.threads.facade import Threads
 from gc_core.threads.file_store import FileThreadStore
 from gc_core.threads.models import ThreadKey
-from gc_core.threads.session_port import SessionPort
+from gc_core.threads.session_writer import SessionWriter
 from gc_testkit.settings import make_settings
 
 KEY = ThreadKey(system="cli", thread="t")
@@ -48,9 +48,11 @@ async def _executor(monkeypatch, tmp_path, calls: list):
     return ae.AgentExecutor(ctx)
 
 
-async def _other_takes(tmp_path) -> SessionPort:
-    other = SessionPort(FileThreadStore(tmp_path), owner="other/1/abcdef12")
-    await other.aclaim(KEY.system, KEY.thread)
+async def _other_takes(tmp_path) -> SessionWriter:
+    other = SessionWriter(
+        FileThreadStore(tmp_path), KEY, owner="other/1/abcdef12"
+    )
+    await other.aclaim()
     return other
 
 
@@ -70,7 +72,7 @@ async def test_run_after_release_goes_and_frees_the_thread(
     calls: list = []
     ex = await _executor(monkeypatch, tmp_path, calls)
     other = await _other_takes(tmp_path)
-    await other.arelease_lease(KEY.system, KEY.thread)
+    await other.arelease()
     await ex.arun(["сделай"], thread_id=KEY.thread, system=KEY.system)
     assert len(calls) == 1
     # Ход кончился — тред свободен для другого владельца.

@@ -32,8 +32,8 @@ AGENTS.md, скиллы, субагенты и память проекта — �
 миграции схемы и ограничения Redis и S3 — [хранилища на базах](stores.md).
 
 Хранилище прежнего контракта (`ThreadStoreBase` — одиннадцать методов
-`load_messages`, `save_meta`…) по-прежнему принимается: ядро заворачивает его
-в адаптер. Новое пишите на v2 — см. [контракт](thread-store-contract.md#прежний-контракт-threadstorebase).
+`load_messages`, `save_meta`…) ядро больше не принимает — см.
+[контракт](thread-store-contract.md#прежний-контракт-удалён).
 
 ## Как передать агенту
 
@@ -255,10 +255,10 @@ await store.close()              # или `async with PostgresThreadStore(...)`
 | `gc_core/threads/store.py`, `models.py`, `errors.py` | `ThreadStore` — контракт v2, модели, отказы |
 | `gc_core/threads/rules.py` | правила, общие для реализаций (аренда, список, запись сбоку) |
 | `gc_core/threads/facade.py` | `Threads` — фасад для фронтендов и приложений |
-| `gc_core/threads/session_port.py` | `SessionPort` — сессия агента поверх хранилища v2 |
+| `gc_core/thread_store.py`, `threads/session_writer.py` | `ThreadSession` — сессия агента поверх хранилища v2; `SessionWriter` — её аренда, ревизия и повторы |
 | `gc_core/threads/file_store.py` | `FileThreadStore` |
 | `gc_stores/sql/`, `gc_stores/kv/` | общие движки: SQL (Postgres, MySQL, SQLite) и KV (Redis, S3) |
 | `gc_stores/<база>/` | хранилища базы, её миграции, `open_stores` |
 | `gc_testkit/memory_thread_store_v2.py` | `MemoryThreadStore` |
 | `gc_testkit/thread_store_conformance_v2.py` | проверка своей реализации |
-| `gc_core/thread_store_base.py`, `thread_store_async.py` | прежний контракт и адаптер к нему |
+| `gc_testkit/session_checks.py` | путь хода (сессия агента) поверх своей реализации |

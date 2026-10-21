@@ -12,7 +12,8 @@ from gc_core.threads.file_store import FileThreadStore
 from gc_core.threads.models import LeaseRequest, SessionState, ThreadKey
 from gc_testkit.memory_thread_store_v2 import MemoryThreadStore
 from gc_testkit.settings import make_settings
-from gc_testkit.thread_store_conformance import assert_conforms_async
+from gc_testkit.session_checks import CHECKS as SESSION_CHECKS
+from gc_testkit.session_checks import aassert_session_works
 from gc_core_temporalio import thread_store_activities
 from gc_core_temporalio.thread_store_activities import ThreadStoreActivities
 from gc_core_temporalio.thread_store_contracts import (
@@ -81,11 +82,12 @@ def proxy_for(store, owner="wf"):
     return TemporalThreadStore("main", transport, owner=owner), transport
 
 
-def test_session_port_over_the_wire_keeps_old_contract():
-    def factory():
-        return proxy_for(MemoryThreadStore())[0].port
-
-    assert len(assert_conforms_async(factory)) == 18
+async def test_session_over_the_wire_works():
+    """Набор пути хода — сессия агента поверх прокси workflow."""
+    passed = await aassert_session_works(
+        lambda: proxy_for(MemoryThreadStore())[0]
+    )
+    assert passed == [check.__name__ for check in SESSION_CHECKS]
 
 
 async def _session(proxy):
@@ -110,11 +112,8 @@ async def test_a_step_is_one_commit_activity():
     transport.calls.clear()
     for n in range(3):
         await session.apersist_batch([_message(n)], previous_response_id=None)
-    # Сессия перечитывает meta перед шагом (сливает чужие секции): после
-    # своей записи прокси знает запись треда, и ответ — «не изменилась».
-    assert transport.ops() == ["get", "commit"] * 3
-    gets = [reply for op, reply in transport.replies if op == "get"]
-    assert all(reply.unchanged for reply in gets[1:]), gets
+    # Сессия пишет из своего снимка частей: перед шагом тред не читается.
+    assert transport.ops() == ["commit"] * 3
     assert [
         e.data["id"] for e in await store.read_stream(KEY, "messages")
     ] == [
@@ -247,7 +246,7 @@ async def test_fetch_cache_stays_on_the_worker():
     proxy, transport = proxy_for(store)
     proxy.adopt(KEY, lease)
     session = await _session(proxy)
-    assert session.meta.get("shared", {}).get("fetch_url_cache") in (None, {})
+    assert not session.state.fetch_url_cache
     await session.apersist_batch([_message(0)], previous_response_id=None)
     assert "страница" not in str([call.args for _op, call in transport.calls])
     assert (await store.get_thread(KEY)).state.fetch_url_cache == cache

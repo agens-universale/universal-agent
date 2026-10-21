@@ -237,3 +237,15 @@ def _changed(mark: tuple, current: tuple | None) -> bool:
 CONTRACT_METHODS: tuple[str, ...] = tuple(
     sorted(ThreadStore.__abstractmethods__)
 )
+
+
+def require_thread_store(store: object) -> ThreadStore:
+    """Хранилище тредов для ядра — только контракт v2 (``ThreadStore``);
+    иное — ``TypeError`` при проводке, а не посреди хода."""
+    if isinstance(store, ThreadStore):
+        return store
+    raise TypeError(
+        f"{type(store).__name__}: thread_store должен реализовывать "
+        "gc_core.threads.store.ThreadStore (контракт v2, "
+        "docs/sdk/thread-store-contract.md); прежний ThreadStoreBase удалён"
+    )

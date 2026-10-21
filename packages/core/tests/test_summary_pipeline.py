@@ -5,10 +5,10 @@ from gc_core.intent_log import append_user_ask
 from gc_core.summarize.compaction import arun_summary_compaction
 from gc_core.thread_store import (
     ThreadSession,
-    append_new_thread_messages,
     save_thread_meta,
 )
 from gc_testkit import run_coro
+from gc_testkit.develop_writer import append_new_thread_messages
 from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
 from gc_testkit.intent_fixtures import (
     intent_user_ask_texts,
@@ -223,16 +223,19 @@ async def test_persist_batch_writes_user_intent_log_to_meta():
             system_id=system_id,
             thread_id=thread_id,
         )
-        session.meta["user_intent_log"] = meta_intent_log(
-            "first request", "second request"
-        )
-        session.meta["state_schema_version"] = "v2"
         await session.apersist_batch(
             [
                 {"role": "user", "content": "first request"},
                 {"role": "assistant", "content": "first reply"},
             ],
             previous_response_id=None,
+            session=session.state.model_copy(
+                update={
+                    "intent_log": meta_intent_log(
+                        "first request", "second request"
+                    )
+                }
+            ),
         )
 
         reloaded = await ThreadSession.afrom_config(
@@ -240,7 +243,7 @@ async def test_persist_batch_writes_user_intent_log_to_meta():
             system_id=system_id,
             thread_id=thread_id,
         )
-        assert reloaded.meta.get("user_intent_log") == meta_intent_log(
+        assert reloaded.state.intent_log == meta_intent_log(
             "first request",
             "second request",
         )

@@ -124,13 +124,14 @@ async def test_native_executor_uses_real_file_session_and_replays(
             if event.HasField("activity_task_failed_event_attributes")
         ]
         assert not any("ThreadConflict" in failure for failure in failures)
-        # persist: step — шаг одной записью (commit); перед ней сессия
-        # перечитывает meta (get отвечает «не изменилась» — без состояния).
-        # persist: turn — ход одной записью в конце. Аренда — claim в начале,
-        # release в конце; статус хода — append_side.
+        # persist: step — шаг одной записью (commit) без чтения перед ней;
+        # persist: turn — ход одной записью в конце. Тред читается один раз —
+        # при открытии сессии. Аренда — claim в начале, release в конце.
+        # Записей сбоку нет: отметку хода под Temporal не ставят, а сброс
+        # флагов хода без залипших флагов ничего не пишет.
         expected = {
-            "step": {"commit": 8, "get": 11, "append_side": 1},
-            "turn": {"commit": 1, "get": 4, "append_side": 1},
+            "step": {"commit": 8, "get": 1, "append_side": 0},
+            "turn": {"commit": 1, "get": 1, "append_side": 0},
         }[persist]
         for operation, count in expected.items():
             name = f"universal_agent.thread.{operation}"

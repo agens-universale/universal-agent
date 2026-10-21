@@ -1,9 +1,9 @@
-"""``PostgresThreadStore`` проходит конформанс контракта v2 целиком, а порт
-сессии поверх него (путь, которым ходит агент) — старый асинхронный набор."""
+"""``PostgresThreadStore`` проходит конформанс контракта v2 целиком и набор
+пути хода (сессия агента поверх него)."""
 
-from gc_core.threads.session_port import SessionPort
 from gc_stores.postgres import PostgresThreadStore
-from gc_testkit.thread_store_conformance import assert_conforms_async
+from gc_testkit.session_checks import CHECKS as SESSION_CHECKS
+from gc_testkit.session_checks import aassert_session_works
 from gc_testkit.thread_store_conformance_v2 import CHECKS, assert_conforms
 
 
@@ -15,16 +15,9 @@ def test_postgres_store_conforms(postgres_dsn, schemas):
     assert assert_conforms(make) == [check.__name__ for check in CHECKS]
 
 
-class _ClosingPort(SessionPort):
-    """Порт, который набор может закрыть: пул базы живёт в loop набора."""
+async def test_session_over_postgres_works(postgres_dsn, schemas):
+    def make():
+        return PostgresThreadStore(postgres_dsn, schema=schemas.create())
 
-    async def close(self) -> None:
-        await self._store.close()
-
-
-def test_session_port_over_postgres_keeps_old_contract(postgres_dsn, schemas):
-    def factory():
-        schema = schemas.create()
-        return _ClosingPort(PostgresThreadStore(postgres_dsn, schema=schema))
-
-    assert len(assert_conforms_async(factory)) == 18
+    passed = await aassert_session_works(make)
+    assert passed == [check.__name__ for check in SESSION_CHECKS]

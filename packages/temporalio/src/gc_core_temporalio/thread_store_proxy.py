@@ -1,7 +1,8 @@
 """Хранилище тредов v2 в коде workflow: операции — activities воркера.
 
 ``TemporalThreadStore`` реализует ``ThreadStore`` v2; ядро говорит с ним
-через ``SessionPort`` — так же, как локально с файловым хранилищем. Каждая
+через сессию треда (``ThreadSession``) — так же, как локально с файловым
+хранилищем; политику аренды сессии задаёт ``session_lease_policy``. Каждая
 операция — activity ``universal_agent.thread.<операция>`` (транспорт —
 ``ThreadStoreTransport``), хранилище на воркере — любое v2.
 
@@ -40,7 +41,6 @@ from gc_core.threads.models import (
     ThreadRecord,
     check_stream_name,
 )
-from gc_core.threads.session_port import SessionPort, attach_session_port
 from gc_core.threads.store import ThreadStore
 
 from gc_core_temporalio.message_refs import message_hash
@@ -113,8 +113,6 @@ class TemporalThreadStore(ThreadStore):
         self._records: dict[ThreadKey, tuple[str, dict]] = {}
         #: тред → ключи истории хранилища из последнего чтения.
         self._keys: dict[ThreadKey, set[str] | None] = {}
-        self.port = SessionPort(self, owner=owner, ttl=None)
-        attach_session_port(self, self.port)
 
     # --- провод -----------------------------------------------------------
 
@@ -158,7 +156,12 @@ class TemporalThreadStore(ThreadStore):
         """Аренда, взятая раньше (прошлый run до Continue-As-New, родитель
         субагента): запись идёт по ней без нового ``claim``."""
         self.lease = lease
-        self.port.adopt_lease(key, lease)
+        del key  # аренда одна на сессию workflow — тред сессии
+
+    def session_lease_policy(self) -> tuple[str, None, Lease | None]:
+        """Политика аренды сессии ядра: владелец — workflow, бессрочно,
+        аренда — та, что взял (или унаследовал) workflow."""
+        return self.owner, None, self.lease
 
     # --- чтение ----------------------------------------------------------
 
@@ -226,8 +229,8 @@ class TemporalThreadStore(ThreadStore):
         return entries
 
     def history_keys(self, key: ThreadKey) -> set[str] | None:
-        """Ключи истории хранилища из последнего чтения (``SessionPort``
-        сверяет по ним дубли, как у файлового хранилища локально);
+        """Ключи истории хранилища из последнего чтения (сессия сверяет
+        по ним дубли, как у файлового хранилища локально);
         ``None`` — хранилище их не ведёт."""
         return self._keys.get(key)
 

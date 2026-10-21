@@ -6,7 +6,14 @@ import asyncio
 import pytest
 from gc_core.threads.facade import Threads, run_sync
 from gc_core.threads.file_store import FileThreadStore
-from gc_core.threads.models import RuntimeStatus, SideChange, ThreadKey
+from gc_core.threads.models import (
+    Compaction,
+    RuntimeStatus,
+    SessionState,
+    SideChange,
+    ThreadKey,
+)
+from gc_core.threads.session_writer import SessionWriter
 from gc_testkit.legacy_threads import LEGACY_THREADS, install_legacy_threads
 from gc_testkit.memory_thread_store_v2 import MemoryThreadStore
 
@@ -57,8 +64,12 @@ def test_tail_resets_after_compaction_and_recreation(threads):
     async def scenario():
         await threads.append_messages(KEY, _msgs("a", "b"))
         cursor = (await threads.tail(KEY, ["messages"], None)).cursor
-        port = threads._port
-        await port.aarchive_and_replace("cli", "t1", _msgs("summary"))
+        writer = SessionWriter(threads.store, KEY, owner="compactor")
+        await writer.aclaim()
+        await writer.acommit(
+            replace_history=Compaction(messages=_msgs("summary"))
+        )
+        await writer.arelease()
         batch = await threads.tail(KEY, ["messages"], cursor)
         assert batch.reset
         assert [e.data["id"] for _s, e in batch.entries] == ["summary"]
@@ -75,9 +86,13 @@ def test_frontend_patches_merge_and_survive_agent_step(threads):
     async def scenario():
         await threads.update_frontend(KEY, "tui", {"status": "running"})
         await threads.update_frontend(KEY, "tui", {"branch": "main"})
-        port = threads._port
-        meta = await port.aload_meta("cli", "t1")
-        await port.apersist_step("cli", "t1", _msgs("a"), meta)
+        # Шаг хода: сессия пишет историю и своё состояние, фронтенд не трогает.
+        writer = SessionWriter(threads.store, KEY, owner="agent")
+        await writer.aclaim()
+        await writer.acommit(
+            append_messages=_msgs("a"), set_state=SessionState(notes="шаг")
+        )
+        await writer.arelease()
         record = await threads.get(KEY)
         assert record.frontend["tui"] == {
             "status": "running",
@@ -101,6 +116,34 @@ def test_frontend_stream_alias_and_summary_in_one_write(threads):
         assert [e.data for e in entries] == [{"response_id": "resp_1"}]
         record = await threads.get(KEY)
         assert record.frontend["chat"] == {"latest_response_id": "resp_1"}
+
+    asyncio.run(scenario())
+
+
+def test_discard_matches_by_id_not_by_text(threads):
+    """Откат осиротевшей реплики (быстрая отмена): удаляется запись с этим
+    ``id``, повтор того же текста и вывод тула целы."""
+
+    async def scenario():
+        same = "одинаковый"
+        await threads.append_messages(
+            KEY,
+            [
+                {"role": "user", "content": same, "id": "m_orphan"},
+                {
+                    "type": "function_call",
+                    "call_id": "c1",
+                    "name": "x",
+                    "arguments": "{}",
+                    "id": "a1",
+                },
+                {"role": "user", "content": same, "id": "m_resend"},
+            ],
+        )
+        assert await threads.discard_message(KEY, "m_orphan")
+        ids = [e.data["id"] for e in await threads.history(KEY)]
+        assert ids == ["a1", "m_resend"]
+        assert (await threads.get(KEY)).info.messages_count == 2
 
     asyncio.run(scenario())
 

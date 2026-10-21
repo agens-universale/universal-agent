@@ -27,7 +27,7 @@ from gc_core.message_policy.permission_denials import (
     OTHER_HOST_REDIRECT_TYPE,
     judge_failures_stop_text,
 )
-from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
+from gc_testkit.session_meta import merge_shared_into_meta
 from gc_core.security.action_judge import aload_action_judge_prompt
 from gc_core.security.action_judge_step import FAILURES_BEFORE_STOP
 from gc_core.security.url_policy import url_host_key
@@ -210,7 +210,7 @@ async def _session(tmp_path, settings, *, shared=None):
             store,
             "sdk",
             "t1",
-            ThreadMetaMapper.merge_shared_into_meta({}, shared),
+            merge_shared_into_meta({}, shared),
         )
     plugin = AgentPlugin(
         {"a": settings}, thread_store=store, workspace=tmp_path / "ws"

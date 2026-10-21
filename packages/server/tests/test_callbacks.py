@@ -270,11 +270,9 @@ async def test_queued_request_cannot_set_a_callback(tmp_path, monkeypatch):
     await task_status.aset_status(
         surface.threads(), key, status="running", run_id="other:1"
     )
-    from gc_core.threads.session_port import SessionPort
+    from gc_core.threads.session_writer import SessionWriter
 
-    await SessionPort(surface.threads().store, owner="runner").aclaim(
-        key.system, key.thread
-    )
+    await SessionWriter(surface.threads().store, key, owner="runner").aclaim()
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=surface.app()),
         base_url=LOOPBACK_URL,

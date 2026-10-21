@@ -14,7 +14,7 @@ from gc_core.message_policy.plan_messages import (
     PLAN_ENTER_MESSAGE,
     PLAN_RESEARCH_ENTER_MESSAGE,
 )
-from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
+from gc_testkit.session_meta import merge_shared_into_meta
 from gc_core.settings import LoadedSettings, RuntimeEnv
 from gc_core_temporalio import AgentPlugin, AgentSession
 from gc_stores.sqlite import SQLiteThreadStore
@@ -90,9 +90,7 @@ async def test_child_is_told_the_mode_of_the_session(
         store,
         "sdk",
         "t1",
-        ThreadMetaMapper.merge_shared_into_meta(
-            {}, SharedStateData(permission_mode="plan")
-        ),
+        merge_shared_into_meta({}, SharedStateData(permission_mode="plan")),
     )
     plugin = AgentPlugin(
         {"a": _settings(url, ws)}, thread_store=store, workspace=ws

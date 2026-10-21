@@ -9,10 +9,13 @@ sys.argv = ["gc-cli", "-q", "x"]
 
 from gc_cli import arg_parser, cli  # noqa: E402
 from gc_cli.plan_approval import athread_has_proposed_plan  # noqa: E402
+from gc_core.execution.state import SharedStateData  # noqa: E402
+from gc_core.persistence.session_state import session_with_shared  # noqa: E402
 from gc_core.plan_store import new_plan_block  # noqa: E402
 from gc_core.threads.facade import Threads  # noqa: E402
 from gc_core.threads.file_store import FileThreadStore  # noqa: E402
-from gc_core.threads.session_port import SessionPort  # noqa: E402
+from gc_core.threads.models import ThreadKey  # noqa: E402
+from gc_core.threads.session_writer import SessionWriter  # noqa: E402
 from gc_testkit import run_coro  # noqa: E402
 from gc_testkit.settings import make_settings  # noqa: E402
 
@@ -50,9 +53,15 @@ def test_flag_refuses_options_it_would_ignore(extra):
 
 async def _save_plan(threads_dir, status):
     plan = {**new_plan_block("1. шаг"), "status": status}
-    port = SessionPort(FileThreadStore(threads_dir))
-    await port.asave_meta("cli", "s1", {"shared": {"plan": plan}})
-    await port.arelease_lease("cli", "s1")
+    writer = SessionWriter(
+        FileThreadStore(threads_dir),
+        ThreadKey(system="cli", thread="s1"),
+        owner="seed",
+    )
+    record = await writer.aclaim()
+    shared = SharedStateData(plan=plan)
+    await writer.acommit(set_state=session_with_shared(record.state, shared))
+    await writer.arelease()
 
 
 async def test_only_a_proposed_plan_of_the_saved_session_counts(tmp_path):

@@ -4,10 +4,9 @@ import os
 
 from gc_core.persistence.plan_file import render_plan_file, write_plan_file
 from gc_core.plan_store import new_plan_block
-from gc_core.thread_store import plan_file_path, reset_thread_files
+from gc_core.thread_store import ThreadSession, plan_file_path
 from gc_core.threads.file_store import FileThreadStore
 from gc_core.threads.models import SideChange, ThreadKey
-from gc_core.threads.session_port import SessionPort
 from gc_testkit.memory_thread_store_v2 import MemoryThreadStore
 
 KEY = ThreadKey(system="cli", thread="t1")
@@ -78,11 +77,15 @@ async def test_file_goes_away_with_the_session(tmp_path):
     await store.delete(KEY, op_id="d")
     assert not os.path.exists(path)
     assert os.path.exists(other)  # чужая сессия цела
-    reset_thread_files(str(tmp_path), "cli", "t2")
-    assert not os.path.exists(other)
 
 
-async def test_executor_exports_through_the_store_and_survives_a_failure(
+async def _session(store):
+    return await ThreadSession.afrom_config(
+        settings=None, system_id="cli", thread_id="t1", store=store
+    )
+
+
+async def test_executor_exports_through_the_session_and_survives_a_failure(
     tmp_path,
 ):
     import threading
@@ -93,41 +96,46 @@ async def test_executor_exports_through_the_store_and_survives_a_failure(
 
     ex = AgentExecutor.__new__(AgentExecutor)
     ex._lock = threading.Lock()
-    store = FileThreadStore(str(tmp_path))
-    ex._thread_session = SimpleNamespace(
-        port=SessionPort(store), system_id="cli", thread_id="t1"
-    )
+    ex._thread_session = await _session(FileThreadStore(str(tmp_path)))
     state = SimpleNamespace(shared=SharedStateData(plan=_plan()))
     await ex._aexport_plan_file(state, None)
     assert os.path.exists(plan_file_path(str(tmp_path), "cli", "t1"))
 
-    class _Broken:
+    class _Broken(MemoryThreadStore):
         async def save_plan_file(self, *a):
             raise OSError("диск полон")
 
-    ex._thread_session = SimpleNamespace(
-        port=SessionPort(_Broken()), system_id="cli", thread_id="t1"
-    )
+    ex._thread_session = await _session(_Broken())
     await ex._aexport_plan_file(state, None)  # не падает
-    ex._thread_session = SimpleNamespace(
-        port=SessionPort(MemoryThreadStore()), system_id="cli", thread_id="t1"
-    )
+    ex._thread_session = await _session(MemoryThreadStore())
     await ex._aexport_plan_file(state, None)  # хранилище не умеет — молча
 
 
 async def test_clearing_the_plan_drops_it_and_tells_the_model(tmp_path):
     """``/plan clear`` (фасад ``Threads``): план убран из сессии, следующий
     прогон один раз сообщит модели, файл плана удалён."""
+    from gc_core.execution.state import SharedStateData
+    from gc_core.persistence.session_state import (
+        session_with_shared,
+        shared_from_session,
+    )
     from gc_core.threads.facade import Threads
+    from gc_core.threads.models import SessionState
+    from gc_core.threads.session_writer import SessionWriter
 
     store = FileThreadStore(str(tmp_path))
     threads = Threads(store)
-    port = SessionPort(store, owner="w")
-    await port.asave_meta("cli", "t1", {"shared": {"plan": _plan()}})
-    await port.arelease_lease("cli", "t1")
+    writer = SessionWriter(store, KEY, owner="w")
+    await writer.acommit(
+        set_state=session_with_shared(
+            SessionState(), SharedStateData(plan=_plan())
+        )
+    )
+    await writer.arelease()
     path = await store.save_plan_file(KEY, _plan())
     assert await threads.clear_plan(KEY) is True
-    shared = Threads.legacy_meta(await threads.get(KEY))["shared"]
-    assert "plan" not in shared and shared["plan_removed_notice"] is True
+    record = await threads.get(KEY)
+    shared = shared_from_session(record.state, record.extra)
+    assert shared.plan is None and shared.plan_removed_notice is True
     assert not os.path.exists(path)
     assert await threads.clear_plan(KEY) is False  # плана уже нет

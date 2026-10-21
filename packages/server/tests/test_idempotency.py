@@ -95,9 +95,13 @@ def test_window_is_the_receipt_lifetime(surface):
 
 def _mark_delivered(surface) -> None:
     """Ход забрал сообщение: отметка доставки — его запись."""
-    from gc_core.threads.session_port import SessionPort
+    from gc_core.threads.session_writer import SessionWriter
 
-    port = SessionPort(surface.threads().store, owner="runner")
-    meta = run_sync(port.aload_meta(KEY.system, KEY.thread))
-    run_sync(port.asave_meta(KEY.system, KEY.thread, {**meta, "inbox_seq": 1}))
-    run_sync(port.arelease_lease(KEY.system, KEY.thread))
+    async def mark() -> None:
+        writer = SessionWriter(surface.threads().store, KEY, owner="runner")
+        record = await writer.aclaim()
+        delivered = record.state.model_copy(update={"inbox_seq": 1})
+        await writer.acommit(set_state=delivered)
+        await writer.arelease()
+
+    run_sync(mark())

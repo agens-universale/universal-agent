@@ -12,8 +12,8 @@ import json
 import httpx
 from gc_core.execution.environment import utc_now
 from gc_core.threads.facade import Threads
-from gc_core.threads.models import ThreadKey
-from gc_core.threads.session_port import SessionPort
+from gc_core.threads.models import RuntimeStatus, ThreadKey
+from gc_core.threads.session_writer import SessionWriter
 from gc_server.app import ServerRuntime
 from gc_server.config import ServerConfig
 from gc_server.stores import aopen_process_stores
@@ -79,15 +79,13 @@ async def _surface(tmp_path, stores, recovery=None):
 async def _crashed_run(store, key=KEY):
     """Ход умер посреди работы: история записана, отметка хода стоит,
     аренды нет (истекла), статус задачи — running прежнего инстанса."""
-    dead = SessionPort(store, owner="dead/1/deadbeef")
-    await dead.aappend_messages(
-        key.system,
-        key.thread,
-        [{"id": "u1", "role": "user", "content": "задача"}],
-        known_keys=set(),
+    dead = SessionWriter(store, key, owner="dead/1/deadbeef")
+    await dead.aclaim()
+    await dead.acommit(
+        append_messages=[{"id": "u1", "role": "user", "content": "задача"}]
     )
-    await dead.amark_turn(key.system, key.thread, running=True)
-    await dead.arelease_lease(key.system, key.thread)
+    await dead.aside(set_runtime=RuntimeStatus(turn="running"))
+    await dead.arelease()
     await task_status.aset_status(
         Threads(store), key, status="running", run_id="dead:1", started_at=1.0
     )
@@ -146,9 +144,7 @@ async def test_live_foreign_lease_is_left_alone(monkeypatch, tmp_path):
     surface = await _surface(tmp_path, stores)
     try:
         await _crashed_run(stores.threads)
-        await SessionPort(stores.threads, owner="alive").aclaim(
-            KEY.system, KEY.thread
-        )
+        await SessionWriter(stores.threads, KEY, owner="alive").aclaim()
         taken = await arecover_once(surface, now=utc_now())
     finally:
         await stores.aclose()

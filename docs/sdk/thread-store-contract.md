@@ -230,44 +230,21 @@ paths:
 
 ---
 
-## Прежний контракт: `ThreadStoreBase`
+## Прежний контракт удалён
 
-Хранилище прежнего контракта — одиннадцать методов `load_messages`,
-`load_thread_state`, `load_meta`, `append_messages`, `save_meta`,
-`patch_runtime_flag`, `update_runtime_meta`, `discard_message`, `reset`,
-`append_subagent_trace`, `read_subagent_trace` (`gc_core.thread_store_base`;
-асинхронная форма `AsyncThreadStoreBase` с приставкой `a`) — по-прежнему
-принимается: ядро заворачивает его в адаптер (`gc_core.thread_store_async`).
-Аренды, квитанций и алиасов у него нет, поэтому несколько инстансов на одном
-треде и Temporal (воркер принимает только v2) ему недоступны. Новое
-хранилище пишите на v2.
-
-Что легко нарушить в прежнем контракте:
-
-- `append_messages` идемпотентен (батч персистится дважды), а `known_keys`
-  пополняется **на месте** и только записанным;
-- третий элемент `load_thread_state` — номер последнего `seq`, а не число
-  записей;
-- `id` у сообщений проставляется на чтении (`ensure_message_id`);
-- meta штампуется при записи (`state_schema_version`, `created_at`,
-  `updated_at`), снятие последнего флага убирает секцию `runtime` целиком,
-  форма meta открытая;
-- синхронное **сетевое** хранилище адаптер зовёт инлайн — цикл агента стоит на
-  каждом обращении (худший разрыв ≈ 16 × RTT + 20 мс); для `asyncpg` /
-  `redis.asyncio` — асинхронная форма. Адаптер меряет первые обращения и
-  предупреждает `thread_store_blocking_loop`.
-
-Проверка — `gc_testkit.thread_store_conformance.assert_conforms` /
-`assert_conforms_async`.
+Хранилище прежнего контракта (`ThreadStoreBase`, одиннадцать методов
+`load_messages` … `read_subagent_trace`) ядро больше не принимает: проводка
+отвергает его сразу (`TypeError` из `gc_core.threads.store.require_thread_store`).
+Перенос — реализовать двенадцать методов v2; файлы треда формата develop
+читает и пишет `FileThreadStore` v2.
 
 ## Что проверяет автоматический набор
 
 | | где |
 |---|---|
 | конформанс v2: память, файлы, SQLite, Postgres (при `GC_TEST_POSTGRES_DSN`) | `packages/core/tests/threads/`, `packages/stores/tests/` |
-| сессия агента поверх v2 держит прежний асинхронный набор | `test_session_port.py`, `test_postgres_conformance.py`, `test_sqlite_thread_store.py` |
+| путь хода (сессия агента): чужие секции, сжатие, повторное открытие — на каждом хранилище | `gc_testkit.session_checks`, `threads/test_session_v2.py`, `packages/stores/tests/` |
 | два инстанса на одном хранилище | `test_two_instances.py`, `test_postgres_thread_store.py` |
-| SDK на хранилище v2 не пишет файлы и не морозит цикл | `test_acceptance_sdk_thread_store_v2.py` |
+| SDK на хранилище v2 не пишет файлы и не морозит цикл | `test_acceptance_sdk_thread_store.py` |
 | провод Temporal (разницы, куски, повторы) | `packages/temporalio/tests/test_thread_store.py` |
 | запись данных агента — только через хранилища | `tests/test_agent_data_writes_go_through_stores.py` |
-| прежний контракт и адаптер | `test_thread_store_contract.py`, `test_thread_store_async.py` |

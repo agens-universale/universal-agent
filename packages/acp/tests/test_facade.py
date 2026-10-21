@@ -8,10 +8,10 @@ from types import SimpleNamespace
 
 from gc_acp.facade import AcpFacade
 from gc_core.message_policy.plan_messages import accepted_plan_messages
+from gc_core.thread_store import append_subagent_record
 from gc_core.threads.facade import Threads, run_sync
 from gc_core.threads.file_store import FileThreadStore
 from gc_core.threads.models import ThreadKey
-from gc_core.threads.session_port import SessionPort
 from gc_testkit.settings import make_settings
 
 
@@ -205,9 +205,9 @@ class Thread:
 
     def subagent(self, kind, payload):
         run_sync(
-            SessionPort(self.threads.store).aappend_subagent_trace(
-                self.key.system,
-                self.key.thread,
+            append_subagent_record(
+                self.threads.store,
+                self.key,
                 parent_call_id="sub",
                 child_run_id="child",
                 kind=kind,

@@ -131,6 +131,7 @@ ALLOWED: dict[str, str] = {
     _SWARM + "runner.py": "swarm: рабочие каталоги участников",
     _SWARM + "storage.py": "swarm: своё хранилище состояния роя",
     # Тестовый инструментарий.
+    _TESTKIT + "develop_writer.py": _TESTKIT_REASON,
     _TESTKIT + "helpers/crossplatform.py": _TESTKIT_REASON,
     _TESTKIT + "legacy_threads.py": _TESTKIT_REASON,
     _TESTKIT + "tui_fixtures/stub_executor.py": _TESTKIT_REASON,

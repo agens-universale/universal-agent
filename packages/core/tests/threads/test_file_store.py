@@ -7,7 +7,7 @@ from datetime import timedelta
 
 import pytest
 from gc_core import thread_store as develop
-from gc_core.thread_store_file import FileThreadStore as DevelopFileStore
+from gc_testkit import develop_writer
 from gc_core.threads import file_tx
 from gc_core.threads.file_store import FileThreadStore
 from gc_core.threads.models import (
@@ -85,7 +85,7 @@ def _normalized_lines(path):
 def test_history_lines_match_develop_writer(tmp_path):
     messages = _msgs("a", "b") + [{"role": "user", "content": "без id"}]
     old_dir = tmp_path / "old"
-    develop.append_new_thread_messages(
+    develop_writer.append_new_thread_messages(
         str(old_dir), "cli", "t1", messages, set()
     )
     store = FileThreadStore(tmp_path / "new")
@@ -124,8 +124,9 @@ def test_develop_reads_and_writes_v2_thread(tmp_path):
     assert meta["messages_count"] == 1
     assert meta["system"] == "cli"
     # Откат: аренда v2 не выставляет owner_id, писатель develop не отказывает.
-    old = DevelopFileStore(str(tmp_path))
-    old.append_messages("cli", "t1", _msgs("b"), known_keys=set(), start_seq=1)
+    develop_writer.append_new_thread_messages(
+        str(tmp_path), "cli", "t1", _msgs("b"), set(), start_seq=1
+    )
     messages, _keys, _seq = develop.load_thread_messages(
         str(tmp_path), "cli", "t1"
     )

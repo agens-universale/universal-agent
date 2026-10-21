@@ -2425,7 +2425,7 @@ async def aprocess_tool_calls(
     # посчитанные output'ы предыдущих тулов + skip'ы (I2), чтобы TUI не держал
     # их в running на время wait. Полный батч персистится ещё раз на выходе
     # process_tool_calls (run_agent → _maybe_persist); уже записанные id
-    # пропускаются в append_new_thread_messages по make_message_key.
+    # сессия пропускает по make_message_key.
     for i, m in enumerate(executed):
         # Между тулами / до старта — если stop, remaining не apply_tool → envelope B.
         if getattr(state, "stop_requested", False):
