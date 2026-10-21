@@ -308,6 +308,7 @@ def select_active_substate(
     since_last,
     soft_hide_kinds,
     finish_gate_checking=False,
+    saw_visible_event=True,
 ):
     """Под-состояние индикатора в режиме "active". Порядок = приоритет.
 
@@ -317,9 +318,14 @@ def select_active_substate(
       «завершаю» перебивает и судья работает невидимо;
     - finalizing (принят финальный ответ — turn_finish ИЛИ финальная проза —
       идёт запись/саммари/flush/cleanup) → "validating" (завершаю…);
-    - последнее событие скрыто (agent/system) и висит ≥1.5с (finish-gate сверяет
-      ответ / bounce / доделка) → "processing" (сверяюсь…);
+    - последнее событие скрыто (agent/system), висит ≥1.5с И в прогоне уже
+      было видимое событие (finish-gate сверяет ответ / bounce / доделка) →
+      "processing" (сверяюсь…);
     - иначе → "thinking" (думаю…).
+
+    saw_visible_event гейтит только эвристическую ветку: «сверяюсь…» не
+    может быть первым состоянием прогона (континуация одобрения плана
+    стартует скрытым техсообщением). Явный флаг судьи от гейта не зависит.
     """
     if summarizing:
         return "compressing"
@@ -327,7 +333,11 @@ def select_active_substate(
         return "processing"
     if finalizing or last_event_kind == "_finalized":
         return "validating"
-    if last_event_kind in soft_hide_kinds and since_last >= 1.5:
+    if (
+        last_event_kind in soft_hide_kinds
+        and since_last >= 1.5
+        and saw_visible_event
+    ):
         return "processing"
     return "thinking"
 
@@ -640,6 +650,8 @@ class TraceScreen(Screen):
 
         self._last_event_at: float = _time.monotonic()
         self._last_event_kind: Optional[str] = None
+        # Гейт «сверяюсь…»: в этом прогоне уже было видимое событие?
+        self._saw_visible_event: bool = False
         # Cancel-with-undo: счётчик не-user trace-событий с момента последнего user-send.
         # Если == 0 при Esc-stop → агент ещё ничего не сгенерировал → rollback.
         self._events_since_last_user_send: int = 0
@@ -2198,6 +2210,7 @@ class TraceScreen(Screen):
 
         self._last_event_at = _time.monotonic()
         self._last_event_kind = None
+        self._saw_visible_event = False
 
     def _session_lock_acquire(self, task_id: str) -> bool:
         """Exclusive attach: True если стали holder, иначе notify и False."""
@@ -2572,6 +2585,10 @@ class TraceScreen(Screen):
             self._last_event_kind = "_finalized"
         else:
             self._last_event_kind = ev.kind
+        # Видимость - по TraceEvent.hidden, не по kind: agent-ответ видим,
+        # скрытая техграница старта континуации (system) - нет.
+        if not ev.hidden:
+            self._saw_visible_event = True
 
     def _show_thinking_indicator(self, *, state: str = "thinking") -> None:
         """Показать индикатор: смонтировать (если ещё нет) или снять `.hidden`.
@@ -3275,6 +3292,7 @@ class TraceScreen(Screen):
         self._thinking_started_at = now
         self._last_event_at = now
         self._last_event_kind = None
+        self._saw_visible_event = False
         self._reasoning_clock.reset()
         self._destroy_thinking_indicator()
 
@@ -5386,6 +5404,7 @@ class TraceScreen(Screen):
                 last_event_kind=self._last_event_kind,
                 since_last=since_last,
                 soft_hide_kinds=_SOFT_HIDE_KINDS,
+                saw_visible_event=self._saw_visible_event,
             )
             self._show_thinking_indicator(state=substate)
             # Эфемерный StreamBlock — live-вывод текущего шага. Источник —
