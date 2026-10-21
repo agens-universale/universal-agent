@@ -286,11 +286,11 @@ def _write_thread_dangling_ask_human(
 
 
 @pytest.mark.asyncio
-async def test_attach_with_dangling_ask_human_unmounts_banner_with_meta_line(
+async def test_attach_dangling_ask_human_notes_interrupted_question(
     tmp_path,
 ):
     """Attach старого треда с dangling ask_human-call → banner НЕ остаётся
-    на экране, в трассе есть meta-строка про прерванный вопрос."""
+    на экране, под вопросом — строка «прервано» в его рамке."""
     thread_id = "ahdangling000000000000000000000a"
     threads_dir = _write_thread_dangling_ask_human(
         tmp_path, thread_id=thread_id
@@ -306,20 +306,19 @@ async def test_attach_with_dangling_ask_human_unmounts_banner_with_meta_line(
         await pilot.pause()
         assert screen._ask_human_banner is None
         assert app.tui_state.ask_human_state is None
-        # Проверка meta-строки: смотрим TraceRow widgets (как в Task 2 tests).
-        from gc_tui.widgets.trace_row import TraceRow
+        # «прервано» — строкой `└` в рамке вопроса (спека P3 §3), вопрос —
+        # полным текстом из persisted ask_human-call payload (Фикс F).
+        from gc_tui.widgets.trace_row import QuestionRow, TraceRow
 
+        (question,) = screen.query(QuestionRow)
+        assert str(question._content) == (
+            "? Подтверждаете?\n  └ прервано — продолжите сообщением или Esc"
+        )
         trace_text = " ".join(
             f"{getattr(w, '_prefix', '')}{getattr(w, '_content', '')}"
             for w in screen.query(TraceRow)
         )
-        assert "спрашивал" in trace_text
-        assert "прерван" in trace_text
-        # Фикс F: meta-строка должна содержать полный текст вопроса.
-        # Без обрезок, как был задан в persisted ask_human-call payload.
-        assert "Подтверждаете?" in trace_text, (
-            f"полный текст вопроса должен быть в meta-строке, got: {trace_text!r}"
-        )
+        assert "спрашивал" not in trace_text
 
 
 # --- компакция: ask_human-плашка не висит для уже отвеченного вопроса ---

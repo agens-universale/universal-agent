@@ -21,6 +21,7 @@ from gc_core.vision.errors import (
 
 from gc_tui.models import TraceEvent
 from gc_tui.services.image_chips import images_mentioned
+from gc_tui.services.plural import plural_form
 from gc_tui.services.tool_identity import tool_id
 
 #: Сводки строки fs_view_image в ленте (визуальный контракт картинок §4): модель
@@ -771,39 +772,48 @@ def _summarize_output(output: Any, *, error: bool) -> str:
             err = data["message"]
         return _truncate_word_boundary(str(err), 160)
 
+    bits = _result_bits(data)
+    if bits:
+        return " · ".join(bits)
+    # Fallback — пустой summary; ToolCallRow отрендерит строку без хвоста.
+    return ""
+
+
+def _counted(value: Any, one: str, few: str, many: str) -> str:
+    """`N слово` по-русски; нечисловое значение — с формой «много»."""
+    n = value if isinstance(value, int) else None
+    word = plural_form(n, one, few, many) if n is not None else many
+    return f"{value} {word}"
+
+
+def _result_bits(data: dict) -> list[str]:
+    """Хвост успешного результата по-русски: `40 строк · 6 совпадений`."""
     bits: list[str] = []
     # Порядок важен — сначала более конкретные ключи.
-    if "total_lines" in data:
-        bits.append(f"{data['total_lines']} строк")
-    elif "lines" in data:
-        bits.append(f"{data['lines']} строк")
+    lines = data.get("total_lines", data.get("lines"))
+    if lines is not None:
+        bits.append(_counted(lines, "строка", "строки", "строк"))
     if "chars" in data:
-        bits.append(f"{data['chars']} chars")
+        bits.append(_counted(data["chars"], "символ", "символа", "символов"))
     if "matches" in data:
         # matches может быть либо count (int), либо list (для search_files —
         # массив объектов с file/line). Без len() мы бы вкладывали str(list).
         mv = data["matches"]
         mcount = len(mv) if isinstance(mv, (list, tuple)) else mv
-        bits.append(f"{mcount} matches")
-    if "entries" in data:
-        entries = data["entries"]
-        entries_count = data.get(
-            "count",
-            len(entries) if isinstance(entries, list) else "?",
-        )
-        bits.append(f"{entries_count} entries")
-    elif "count" in data:
-        bits.append(f"count={data['count']}")
+        bits.append(_counted(mcount, "совпадение", "совпадения", "совпадений"))
+    entries = data.get("entries")
+    count = data.get("count")
+    if count is None and "entries" in data:
+        count = len(entries) if isinstance(entries, list) else "?"
+    if count is not None:
+        bits.append(_counted(count, "запись", "записи", "записей"))
     if "bytes" in data:
-        bits.append(f"{data['bytes']} bytes")
+        bits.append(_counted(data["bytes"], "байт", "байта", "байт"))
     if "exit" in data:
-        bits.append(f"exit={data['exit']}")
+        bits.append(f"код выхода {data['exit']}")
     if "source" in data:
-        bits.append(f"source={data['source']}")
-    if bits:
-        return " · ".join(bits)
-    # Fallback — пустой summary; ToolCallRow отрендерит без `-> ...`.
-    return ""
+        bits.append(f"источник {data['source']}")
+    return bits
 
 
 def _map_function_event(

@@ -308,9 +308,11 @@ async def test_replay_renders_ask_human_dialog(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_replay_empty_response_shows_meta_and_unmounts_banner(tmp_path):
-    """Replay output-а с пустым ответом → banner снят, в трассе есть meta-строка
-    'Агент спрашивал (без ответа)'. User-реплика НЕ появляется."""
+async def test_replay_empty_response_notes_question_and_unmounts_banner(
+    tmp_path,
+):
+    """Replay output-а с пустым ответом → banner снят, под вопросом в его
+    рамке — строка `└ без ответа` (спека P3 §3). User-реплика НЕ появляется."""
     thread_id = "ahreplay00000000000000000000000b"
     records = [
         {
@@ -335,14 +337,15 @@ async def test_replay_empty_response_shows_meta_and_unmounts_banner(tmp_path):
         from gc_tui.widgets.user_reply import UserReplyContainer
 
         assert not list(screen.query(UserReplyContainer))
-        # Meta-строка отрендерилась как обычный TraceRow с меткой.
-        from gc_tui.widgets.trace_row import TraceRow
+        # Следствие — внутри рамки вопроса, отдельной meta-строки нет.
+        from gc_tui.widgets.trace_row import QuestionRow, TraceRow
 
+        (question,) = screen.query(QuestionRow)
+        assert str(question._content) == "? Подтвердите?\n  └ без ответа"
         trace_text = " ".join(
             f"{w._prefix}{w._content}" for w in screen.query(TraceRow)
         )
-        assert "спрашивал" in trace_text
-        assert "без ответа" in trace_text
+        assert "спрашивал" not in trace_text
 
 
 @pytest.mark.asyncio

@@ -6,6 +6,16 @@
 from __future__ import annotations
 
 
+def _duration_parts(seconds: float) -> tuple[tuple[int, str], ...]:
+    """(число, единица) длительности: до двух старших разрядов."""
+    total = int(seconds) if seconds > 0 else 0
+    if total < 60:
+        return ((total, "с"),)
+    if total < 3600:
+        return ((total // 60, "м"), (total % 60, "с"))
+    return ((total // 3600, "ч"), ((total % 3600) // 60, "м"))
+
+
 def format_duration(seconds: float) -> str:
     """Человекочитаемая длительность.
 
@@ -15,12 +25,14 @@ def format_duration(seconds: float) -> str:
 
     Отрицательное трактуется как 0; дробные секунды усекаются к int.
     """
-    total = int(seconds) if seconds > 0 else 0
-    if total < 60:
-        return f"{total}с"
-    if total < 3600:
-        return f"{total // 60}м {total % 60}с"
-    return f"{total // 3600}ч {(total % 3600) // 60}м"
+    return " ".join(f"{n}{unit}" for n, unit in _duration_parts(seconds))
+
+
+def format_trace_duration(seconds: float) -> str:
+    """Длительность в строке ленты — канон ленты с пробелом перед единицей:
+    "4 с", "1 м 5 с", "1 ч 2 м" (спека P3 §2.1). Разряды — как у
+    `format_duration`; индикатор и футер пока пишут слитно."""
+    return " ".join(f"{n} {unit}" for n, unit in _duration_parts(seconds))
 
 
 def format_compact_int(n: int) -> str:

@@ -53,6 +53,25 @@ LINE_INTERMEDIATE_CLASS = "line-intermediate"
 NESTED_PROSE_CLASS = f"{LINE_INTERMEDIATE_CLASS} nested-prose"
 LINE_USER_CLASS = "line-user"
 
+# Следствия вопроса ask_human — строкой `└` внутри его рамки (спека P3 §3).
+QUESTION_UNANSWERED = "без ответа"
+QUESTION_INTERRUPTED = "прервано — продолжите сообщением или Esc"
+
+
+def consequence_text(level: int, body: Text) -> Text:
+    """Строка следствия события уровня ``level``: `└` на +2 от его глифа.
+
+    Общий вид для вызова, реплики и вопроса — следствие рисуется внутри
+    виджета своего события (спека P3 §3), здесь только сама строка."""
+    from rich.text import Text
+
+    from gc_tui.palette import DIM
+
+    line = Text(level_prefix(level + 1))
+    line.append("└ ", style=DIM)
+    line.append_text(body)
+    return line
+
 
 def build_compaction_label(num: int, comp: dict) -> str:
     """Метка маркера сжатия: «контекст сжат #N · M→1 · 12.3k→3.1k симв».
@@ -154,11 +173,16 @@ def build_block_widgets(
 
 
 def build_answered_question_widget(
-    question, *, event_no: int = 0, extra_classes: str = ""
+    question,
+    *,
+    event_no: int = 0,
+    extra_classes: str = "",
+    call_id: Optional[str] = None,
 ):
     """Отвеченный вопрос ask_human как строка истории: серая round-рамка
     (CSS .answered-question) + янтарный маркер '?'. Тех-префикс 'ask_human:'
     не добавляем. Общий для live (main) и readonly (preview) путей.
+    Следствия (`└ без ответа`, `└ прервано …`) — `QuestionRow.add_consequence`.
 
     Цвет рамки — токен $frame-archive (серый). Альтернатива (живое сравнение
     после релиза) — янтарная рамка: сменить border в .answered-question на
@@ -166,19 +190,29 @@ def build_answered_question_widget(
     from rich.text import Text
 
     from gc_tui.palette import DIM, RUN_COLOR
-    from gc_tui.widgets.trace_row import TraceRow
+    from gc_tui.widgets.trace_row import QuestionRow
 
     content = Text()
     content.append("? ", style=RUN_COLOR)
     content.append(question, style=DIM)
     cls = ("answered-question " + extra_classes).strip()
-    return TraceRow(
+    return QuestionRow(
+        call_id=call_id,
         prefix="",
         content=content,
         kind_class=cls,
         event_no=event_no,
         focusable=True,
     )
+
+
+def note_question(question, note: str) -> None:
+    """Следствие вопроса `└ note` серым — один вид для ленты и превью."""
+    from rich.text import Text
+
+    from gc_tui.palette import DIM
+
+    question.add_consequence(Text(note, style=DIM))
 
 
 def build_agent_widgets(summary: str, *, event_no: int) -> list:
@@ -307,8 +341,12 @@ def _dispatch_readonly(
     *,
     mcp_tools: Mapping[str, McpToolInfo] | None = None,
     mcp_servers: Iterable[str] = (),
+    questions: dict | None = None,
 ) -> None:
-    """Смонтировать виджеты одного события (read-only паритет с _render_event)."""
+    """Смонтировать виджеты одного события (read-only паритет с _render_event).
+
+    ``questions`` — `{call_id: QuestionRow}` вопросов превью: ответ «без
+    ответа» дописывается под свой вопрос, а не отдельной строкой."""
     from gc_tui.widgets.trace_row import TraceRow
     from gc_tui.widgets.user_reply import UserReplyContainer
 
@@ -393,9 +431,12 @@ def _dispatch_readonly(
                 )
             )
     elif ev.kind == "ask_human":
-        mount_target.mount(
-            build_answered_question_widget(ev.summary, event_no=ev.no)
+        question = build_answered_question_widget(
+            ev.summary, event_no=ev.no, call_id=ev.call_id
         )
+        if questions is not None and ev.call_id:
+            questions[ev.call_id] = question
+        mount_target.mount(question)
     elif ev.kind == "todo":
         # Канон spec 2026-07-31 §2: строки собирает общий билдер (он же у
         # живого канала в main.py), здесь только монтируем.
@@ -410,6 +451,14 @@ def _dispatch_readonly(
             build_todo_block(items, subagent=False, indent="", event_no=ev.no)
         )
     else:
+        question = (
+            (questions or {}).get(ev.call_id)
+            if ev.tool_name == "ask_human"
+            else None
+        )
+        if question is not None:
+            note_question(question, QUESTION_UNANSWERED)
+            return
         m = TAG_RE.match(ev.summary or "")
         if m:
             mount_target.mount(
@@ -459,6 +508,7 @@ def _render_record_readonly(
     in_window: bool = True,
     mcp_tools: Mapping[str, McpToolInfo] | None = None,
     mcp_servers: Iterable[str] = (),
+    questions: dict | None = None,
 ) -> int:
     """Одна envelope-запись → виджеты. Возвращает следующий no.
     hidden-события (policy/bounce/context) считаем, но в трейс не рендерим —
@@ -489,6 +539,7 @@ def _render_record_readonly(
         calls,
         mcp_tools=mcp_tools,
         mcp_servers=mcp_servers,
+        questions=questions,
     )
     if sk:
         _mount_skill_marker_readonly(mount_target, sk, no)  # после реплики
@@ -511,6 +562,7 @@ def render_segments_readonly(
 
     no = 1
     calls: dict = {}
+    questions: dict = {}
     context = collect_render_context(
         rec.get("payload")
         for seg in segments
@@ -544,6 +596,7 @@ def render_segments_readonly(
                 in_window=in_window,
                 mcp_tools=mcp_tools,
                 mcp_servers=mcp_servers,
+                questions=questions,
             )
         comp = seg.get("compacted_by")
         if comp:

@@ -152,3 +152,24 @@ class SummaryMarker(TraceRow):
             from gc_tui.messages import SummaryToggleRequest
 
             self.post_message(SummaryToggleRequest(self._event_no))
+
+
+class QuestionRow(TraceRow):
+    """Вопрос ask_human в ленте (серая рамка `? …`) со своими следствиями.
+
+    `call_id` — по нему ответ «без ответа» находит свой вопрос. Следствие
+    (`└ без ответа`, `└ прервано …`) — строкой внутри рамки: виджет события
+    один (спека P3 §3, решение плана 2)."""
+
+    def __init__(self, *, call_id: Optional[str] = None, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.call_id = call_id
+
+    def add_consequence(self, body) -> None:
+        """Дописать строку `└ body` под текстом вопроса, внутри рамки."""
+        from gc_tui.services.trace_render import consequence_text
+
+        content = self._content.copy()
+        content.append("\n")
+        content.append_text(consequence_text(0, body))
+        self.set_content(content)

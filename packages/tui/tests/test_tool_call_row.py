@@ -77,13 +77,14 @@ async def test_tool_call_row_mutate_to_error():
         await pilot.pause()
         content = str(row.query_one(".trace-content").render())
         prefix = str(row.query_one(".trace-prefix").render())
+        line = str(row.query_one(".trace-consequence").render())
         assert "✗" in prefix
-        assert "ENOENT" in content
-        assert "-> ENOENT: нет файла" in content  # симметрично ok
+        assert "ENOENT" not in content  # у ошибки хвоста нет
+        assert line == "  └ ENOENT: нет файла"  # строкой под вызовом
 
 
 @pytest.mark.asyncio
-async def test_tool_call_row_error_text_is_dim():
+async def test_tool_call_row_error_text_is_err_line():
     pytest.importorskip("textual")
     from gc_tui.palette import DIM, ERR
     from gc_tui.widgets.tool_call_row import ToolCallRow
@@ -97,8 +98,8 @@ async def test_tool_call_row_error_text_is_dim():
         row = pilot.app.query_one(ToolCallRow)
         row.set_result(summary="permission denied", error=True)
         await pilot.pause()
-        rendered = row._render_content()
-        # Сегмент с текстом ошибки покрашен DIM, не ERR.
+        rendered = row._render_consequence()
+        # Текст ошибки — строкой `└` (сам `└` DIM) цветом ERR (спека P3 §3).
         plain = rendered.plain
         dim_segs = [
             plain[s.start : s.end]
@@ -110,8 +111,9 @@ async def test_tool_call_row_error_text_is_dim():
             for s in rendered.spans
             if str(s.style).lower() == ERR.lower()
         ]
-        assert any("permission denied" in seg for seg in dim_segs)
-        assert not any("permission denied" in seg for seg in err_segs)
+        assert any("└" in seg for seg in dim_segs)
+        assert any("permission denied" in seg for seg in err_segs)
+        assert "permission denied" not in row._render_content().plain
 
 
 @pytest.mark.asyncio
@@ -166,7 +168,7 @@ async def test_tool_call_row_ok_with_empty_summary_omits_arrow():
         content = str(row.query_one(".trace-content").render())
         prefix = str(row.query_one(".trace-prefix").render())
         assert "✓" in prefix
-        assert "-> " not in content  # стрелки нет при пустом summary
+        assert " · " not in content  # хвоста нет при пустом summary
         assert "skills_load" in content
 
 
@@ -255,7 +257,8 @@ async def test_tool_call_row_set_result_twice_overwrites():
         await pilot.pause()
         content = str(row.query_one(".trace-content").render())
         prefix = str(row.query_one(".trace-prefix").render())
-        assert "updated" in content
+        line = str(row.query_one(".trace-consequence").render())
+        assert "updated" in line
         assert "✗" in prefix
         assert "initial" not in content
         assert "✓" not in prefix
@@ -380,7 +383,7 @@ def test_running_row_shows_elapsed_seconds():
     row = ToolCallRow(call_id="c1", label="subagent_planner", target="task=x")
     row._start_monotonic = time.monotonic() - 47.0
     r = str(row._render_content())
-    assert "· 47с" in r
+    assert "· 47 с" in r
     assert "running" not in r
 
 
@@ -391,7 +394,7 @@ def test_running_row_elapsed_same_for_any_tool():
 
     row = ToolCallRow(call_id="c2", label="read_file", target="path=a")
     row._start_monotonic = time.monotonic() - 3.0
-    assert "· 3с" in str(row._render_content())
+    assert "· 3 с" in str(row._render_content())
 
 
 def test_running_row_elapsed_minutes_format():
@@ -400,8 +403,8 @@ def test_running_row_elapsed_minutes_format():
     from gc_tui.widgets.tool_call_row import ToolCallRow
 
     row = ToolCallRow(call_id="c1", label="t", target="")
-    row._start_monotonic = time.monotonic() - 125  # 2м 5с
-    assert "· 2м 5с" in str(row._render_content())
+    row._start_monotonic = time.monotonic() - 125  # 2 м 5 с
+    assert "· 2 м 5 с" in str(row._render_content())
 
 
 def test_elapsed_excludes_paused_interval(monkeypatch):
@@ -557,7 +560,7 @@ async def test_poll_active_ticks_running_rows():
         row._start_monotonic = time.monotonic() - 5.0
         scr._poll_active()  # должен дёрнуть refresh у running-строк
         await pilot.pause()
-        assert "· 5с" in str(row._content_static.render())
+        assert "· 5 с" in str(row._content_static.render())
 
 
 # ---- mark_interrupted: терминальное состояние «прервано» (spec 2026-06-10) ----
@@ -616,7 +619,7 @@ def test_edit_counts_follow_the_object():
     row = _edit_row()
     row.set_edit_counts(12, 3, copy_text="diff")
     content = row._render_content()
-    assert content.plain == "Edit  a.py +12 −3 -> ok"
+    assert content.plain == "Edit  a.py +12 −3 · ok"
     styles = {
         content.plain[s.start : s.end]: str(s.style) for s in content.spans
     }

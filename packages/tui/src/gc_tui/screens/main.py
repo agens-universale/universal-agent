@@ -2982,7 +2982,7 @@ class TraceScreen(Screen):
         # (непустой response), либо kind='system' (пустой/cancel/broken). В обоих
         # случаях снимаем banner ДО передачи в kind-handler, чтобы kind='user'
         # затем нормально реконсилил pending через _pending_wire_match,
-        # а kind='system' прошёл в meta-ветку и отрисовал "[ask_human] (без ответа)".
+        # а kind='system' дошёл до default-ветки: «└ без ответа» под вопросом.
         if (
             self._ask_human_call_id is not None
             and ev.tool_name == "ask_human"
@@ -3252,6 +3252,8 @@ class TraceScreen(Screen):
             self._render_error_msg(ev)
             return
 
+        if ev.tool_name == "ask_human" and self._note_unanswered(ev.call_id):
+            return
         # default: meta. summary вида "[tag] описание" — отрезаем prefix для TraceRow.
         from gc_tui.services.trace_render import TAG_RE
 
@@ -3270,6 +3272,24 @@ class TraceScreen(Screen):
                 kind_class="line-meta",
                 event_no=ev.no,
             )
+
+    def _note_unanswered(self, call_id: str | None) -> bool:
+        """«└ без ответа» под вопросом `call_id` в его рамке. Вопроса в ленте
+        нет (ушёл в сжатие) — False: событие рисуется строкой, как было."""
+        from gc_tui.services.trace_render import (
+            QUESTION_UNANSWERED,
+            note_question,
+        )
+        from gc_tui.widgets.trace_row import QuestionRow
+
+        if not call_id:
+            return False
+        trace = self.query_one(_SEL_TRACE, VerticalScroll)
+        for question in trace.query(QuestionRow):
+            if question.call_id == call_id:
+                note_question(question, QUESTION_UNANSWERED)
+                return True
+        return False
 
     def _render_error_msg(self, ev) -> None:
         """error_msg с известным call_id финализирует соответствующую строку-вызов
@@ -3839,6 +3859,7 @@ class TraceScreen(Screen):
             ev.summary,
             event_no=ev.no,
             extra_classes="ask-human-question hidden",
+            call_id=ev.call_id,
         )
         self._trace_mount(self._ask_human_question_row, scroll=False)
         banner = AskHumanBanner(question=ev.summary)
@@ -4359,15 +4380,17 @@ class TraceScreen(Screen):
         runner = getattr(self.app, "active_runner", None)
         if runner is not None and runner.is_running():
             return  # живой агент действительно ждёт ответа
+        question = self._ask_human_question_row
         self._unmount_ask_human_banner()
-        if allow_remnant:
-            # Текст вопроса не дублируем: он уже в трейсе серой рамкой «? …»
-            # (её монтирует _on_ask_human_event через build_answered_question_widget).
-            self._mount_trace_row(
-                prefix="Агент спрашивал (прервано) — ",
-                content="продолжите сообщением или Esc для выхода",
-                kind_class="line-meta",
+        if allow_remnant and question is not None:
+            # Следствие — строкой `└` в рамке вопроса «? …» (её монтирует
+            # _on_ask_human_event), не отдельной строкой ленты.
+            from gc_tui.services.trace_render import (
+                QUESTION_INTERRUPTED,
+                note_question,
             )
+
+            note_question(question, QUESTION_INTERRUPTED)
 
     def _mount_user_reply(
         self,

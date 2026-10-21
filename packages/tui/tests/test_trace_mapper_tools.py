@@ -474,7 +474,7 @@ def test_summarize_output_total_lines():
 
 
 def test_summarize_output_entries_uses_count():
-    """list_files: entries list with explicit count → 'N entries'."""
+    """list_files: entries list with explicit count → 'N записей'."""
     msg = {
         "type": "function_call_output",
         "call_id": "c1",
@@ -489,11 +489,11 @@ def test_summarize_output_entries_uses_count():
     }
     ev = map_message(msg, no=5, ts="2026-05-21T12:00:00+00:00")
     assert ev is not None
-    assert "7 entries" in ev.summary
+    assert "7 записей" in ev.summary
 
 
 def test_summarize_output_empty_when_no_known_keys():
-    """Если нет распознаваемых ключей — summary пустой (widget уберёт `-> ...`)."""
+    """Если нет распознаваемых ключей — summary пустой (строка без хвоста)."""
     msg = {
         "type": "function_call_output",
         "call_id": "c1",
