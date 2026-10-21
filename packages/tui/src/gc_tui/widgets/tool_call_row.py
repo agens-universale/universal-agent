@@ -73,7 +73,8 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
             Horizontal
                 Static(<rich Text>, classes="trace-prefix")  — ведущий статус-глиф ▸/✓/✗/·
                 Static(<rich Text>, classes="trace-content line-tool")  — подпись/объект/хвост
-                _CopyButton(classes="block-copy")  — ❐, видна у строки правки
+                _CopyButton(classes="block-copy trace-action")  — ❐, видна
+                    у строки правки
             Static(<rich Text>, classes="trace-consequence")  — строки `└`
 
     Цветовые зоны через rich.Text:
@@ -179,7 +180,9 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
                 markup=False,
             )
             yield self._content_static
-            yield _CopyButton(copy_glyph(), classes="block-copy", markup=False)
+            yield _CopyButton(
+                copy_glyph(), classes="block-copy trace-action", markup=False
+            )
         self._consequence_static = Static(
             self._render_consequence(),
             classes="trace-consequence",

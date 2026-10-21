@@ -135,7 +135,9 @@ class DiffBlock(CopyFeedbackMixin, ClickModelMixin, Vertical):
             yield Static(collapsed.text, classes="block-body", markup=False)
         if collapsed.truncated:
             yield NoSelectStatic(
-                self._tail_label(), classes="diff-more", markup=False
+                self._tail_label(),
+                classes="diff-more trace-action",
+                markup=False,
             )
 
     def on_mount(self) -> None:
@@ -225,7 +227,9 @@ class DiffBlock(CopyFeedbackMixin, ClickModelMixin, Vertical):
             else:
                 self.mount(
                     NoSelectStatic(
-                        self._tail_label(), classes="diff-more", markup=False
+                        self._tail_label(),
+                        classes="diff-more trace-action",
+                        markup=False,
                     )
                 )
         elif tail:

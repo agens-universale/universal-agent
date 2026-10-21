@@ -38,7 +38,6 @@ _FIXED_CSS = {
     "frame-archive": "#4b525d",
     "note-ink": "#a5adb8",
     "user-band-bg": "#282c36",
-    "user-pending-edge": "#3a7a72",
     "overlay-bg": "#161A23",
     "zebra-bg": "#232836",
     "skill": "#afd7ff",
@@ -140,11 +139,6 @@ def test_tinted_surfaces_close_at_fixed_background(name):
     fixed = getattr(palette, name)
     palette.apply_background(_FIXED_BG)
     assert _channel_gap(getattr(palette, name), fixed) <= 3
-
-
-def test_pending_edge_close_at_fixed_background():
-    palette.apply_background(_FIXED_BG)
-    assert _channel_gap(palette.USER_PENDING_EDGE, "#3a7a72") <= 3
 
 
 @pytest.mark.parametrize("name", _RAMPS)

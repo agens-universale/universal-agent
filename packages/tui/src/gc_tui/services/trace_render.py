@@ -46,8 +46,12 @@ def level_prefix(level: int) -> str:
     return LEVEL_INDENT * level
 
 
-NESTED_PROSE_PREFIX = level_prefix(1) + "● "
-NESTED_USER_PREFIX = level_prefix(1) + "› "
+# Глифы колонки `●`: реплика агента (итоговая — белым, промежуточная —
+# серым по классу `line-intermediate`) и реплика пользователя.
+PROSE_BULLET = "● "
+USER_PREFIX = "› "
+NESTED_PROSE_PREFIX = level_prefix(1) + PROSE_BULLET
+NESTED_USER_PREFIX = level_prefix(1) + USER_PREFIX
 LINE_INTERMEDIATE_CLASS = "line-intermediate"
 # Вложенная реплика субагента: глиф `●` серым (CSS по классу).
 NESTED_PROSE_CLASS = f"{LINE_INTERMEDIATE_CLASS} nested-prose"
@@ -111,13 +115,13 @@ def build_block_widgets(
     *,
     prose_bullet: bool,
     event_no: int,
-    bullet: str = "● ",
     kind_class_base: str = "line-agent",
 ) -> list:
-    """Markdown → виджеты трейса. `prose_bullet` — префикс `bullet` на прозе (трейс/превью);
-    False — без него (баннер ask_human). `bullet`/`kind_class_base` переопределяют маркер и
-    класс прозовых строк (intermediate_reply → «· »/line-intermediate). Код и таблицы —
-    BlockPanel. focusable=True только у первого виджета события."""
+    """Markdown → виджеты трейса. `prose_bullet` — префикс `● ` на прозе
+    (трейс/превью); False — без него (баннер ask_human). `kind_class_base` —
+    класс прозовых строк (intermediate_reply → line-intermediate, глиф
+    серым). Код и таблицы — BlockPanel. focusable=True только у первого
+    виджета события."""
     from gc_tui.services.markdown_render import render_prose, segment_answer
     from gc_tui.widgets.block_panel import BlockPanel
     from gc_tui.widgets.trace_row import TraceRow
@@ -156,7 +160,7 @@ def build_block_widgets(
             if not first_prose_seen
             else f"{kind_class_base} line-agent-cont"
         )
-        marker = bullet if not first_prose_seen else "  "
+        marker = PROSE_BULLET if not first_prose_seen else "  "
         prefix = marker if prose_bullet else ""
         first_prose_seen = True
         widgets.append(
@@ -221,14 +225,14 @@ def build_agent_widgets(summary: str, *, event_no: int) -> list:
 
 
 def build_intermediate_widgets(summary: str, *, event_no: int) -> list:
-    """·-реплика intermediate_reply: тот же markdown/код-пайплайн, что и проза
-    (build_agent_widgets), но маркер «· » и класс line-intermediate."""
+    """Промежуточная реплика intermediate_reply: тот же markdown/код-пайплайн,
+    что и проза (build_agent_widgets), но класс line-intermediate — глиф `●`
+    серым (спека P3 §10)."""
     return build_block_widgets(
         summary,
         prose_bullet=True,
         event_no=event_no,
-        bullet="· ",
-        kind_class_base="line-intermediate",
+        kind_class_base=LINE_INTERMEDIATE_CLASS,
     )
 
 

@@ -714,7 +714,7 @@ class TraceScreen(Screen):
             yield VerticalScroll(id="trace")
             yield Vertical(id="indicator-bar")
             with Horizontal(id="input-row"):
-                yield Static("> ", id="input-prompt", markup=False)
+                yield Static("› ", id="input-prompt", markup=False)
                 yield CommandTextArea(
                     placeholder=_PLACEHOLDER_READY_HELP, id="cmdinput"
                 )

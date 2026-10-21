@@ -1,4 +1,4 @@
-"""UserReplyContainer — реплика пользователя с band-фоном и 2px teal кромкой слева."""
+"""UserReplyContainer — реплика пользователя: маркер `› ` на подложке ленты."""
 
 from __future__ import annotations
 
@@ -19,7 +19,12 @@ from gc_tui.palette import DIM as _DIM
 from gc_tui.palette import ERR as _ERR_RED
 from gc_tui.services.image_chips import chip_of, chip_spans
 from gc_tui.services.path_display import display_path, fit_path
-from gc_tui.services.trace_render import LINE_USER_CLASS, NESTED_USER_PREFIX
+from gc_tui.services.trace_render import (
+    LINE_USER_CLASS,
+    NESTED_USER_PREFIX,
+    USER_PREFIX,
+    consequence_text,
+)
 from gc_tui.widgets.click_model import ClickModelMixin, confirm_is_active
 from gc_tui.widgets.no_select import NoSelectStatic
 from gc_tui.widgets.reply_layout import LineSpec, ReplyLayout
@@ -255,25 +260,43 @@ class _ImageLinksMixin:
 _State = Literal["normal", "pending", "failed"]
 
 
-class UserReplyContainer(
-    _WrappedReply, _ImageLinksMixin, ClickModelMixin, Widget
-):
-    """Контейнер реплики пользователя.
+class _ReplyBand(_WrappedReply, Widget):
+    """Подложка реплики (`.user-band`): текст, картинки и подсветка — у
+    реплики-владельца."""
 
-    Визуал: фон `$band-bg`, 2px кромка `$accent` слева на всю высоту хода
-    (стили — `.user-band` в `src/tui/styles.tcss`, §2.6 спеки).
+    def __init__(self, owner: UserReplyContainer) -> None:
+        super().__init__(classes="user-band")
+        self._owner = owner
 
-    Состояния (spec 2026-05-26):
-    - `normal`  — обычная (зелёная) кромка, без маркеров.
-    - `pending` — приглушённая teal-кромка (`.user-reply-pending`), без маркеров.
-    - `failed`  — красная кромка (`.user-reply-failed`) + инлайн `[!] ` перед `> `.
+    @property
+    def _images(self) -> tuple[Attachment, ...]:
+        return self._owner._images
 
-    Маркер `> ` — только на первой строке; продолжение многострочной реплики
-    выравнивается без повтора маркера (blockquote-стиль) — под текстом, в том числе
-    при переносе длинной строки (`_WrappedReply`).
+    def _reply_lines(self, width: int) -> list[_ReplyLine]:
+        return self._owner._reply_lines(width)
+
+
+class UserReplyContainer(_ImageLinksMixin, ClickModelMixin, Widget):
+    """Реплика пользователя (спека P3 §2.2): подложка `.user-band` с текстом
+    и строками картинок, под ней — строки следствий `└` на фоне ленты
+    (`add_consequence`).
+
+    Маркер `› ` — в колонке `●` реплики агента, только на первой строке;
+    продолжение — под текстом, в том числе при переносе (`_WrappedReply`).
+    Состояния `normal` / `pending` выглядят одинаково; `failed` — маркер
+    цветом ошибки.
     """
 
-    DEFAULT_CSS = ""  # стили — .user-band / .user-reply-pending / .user-reply-failed в styles.tcss
+    DEFAULT_CSS = """
+    UserReplyContainer .reply-consequence {
+        display: none;
+        width: 1fr;
+        height: auto;
+    }
+    UserReplyContainer.has-consequence .reply-consequence {
+        display: block;
+    }
+    """
     can_focus = True
 
     def __init__(
@@ -285,33 +308,41 @@ class UserReplyContainer(
         images: tuple[Attachment, ...] = (),
         **kwargs,
     ) -> None:
-        classes = kwargs.pop("classes", "")
-        merged = f"user-band {classes}".strip()
-        if state == "pending":
-            merged += " user-reply-pending"
-        elif state == "failed":
-            merged += " user-reply-failed"
-        super().__init__(classes=merged, **kwargs)
+        super().__init__(**kwargs)
         self._text = text
         self._event_no = event_no
         self._state: _State = state
         # Картинки реплики: плашки в тексте и подстроки под ним (визуальный контракт §3).
         self._images: tuple[Attachment, ...] = tuple(images)
+        self._consequences: list[Text] = []
+        self._band = _ReplyBand(self)
+
+    def compose(self):
+        yield self._band
+        yield NoSelectStatic(
+            self._consequence_text(), classes="reply-consequence", markup=False
+        )
+
+    def _consequence_text(self) -> Text:
+        return Text("\n").join(self._consequences)
 
     @property
     def state(self) -> _State:
         return self._state
 
     def set_state(self, new_state: _State) -> None:
-        """Переключить визуальное состояние реплики."""
-        self.remove_class("user-reply-pending")
-        self.remove_class("user-reply-failed")
-        if new_state == "pending":
-            self.add_class("user-reply-pending")
-        elif new_state == "failed":
-            self.add_class("user-reply-failed")
+        """Переключить состояние реплики: меняется только цвет маркера."""
         self._state = new_state
-        self.refresh(layout=True)  # ширина `[!] > ` меняет перенос и высоту
+        self._band.refresh()
+
+    def add_consequence(self, body: Text) -> None:
+        """Дописать строку `└ body` под подложкой реплики (на фоне ленты).
+        В копию выделения строка не идёт."""
+        self._consequences.append(consequence_text(0, body))
+        self.add_class("has-consequence")
+        # До compose строки рисует compose; после — обновляем надпись.
+        for line in self.query(".reply-consequence").results(NoSelectStatic):
+            line.update(self._consequence_text())
 
     def set_event_no(self, event_no: int) -> None:
         """Номер события треда: живая реплика получает его при сверке с записью треда —
@@ -322,19 +353,17 @@ class UserReplyContainer(
         """Заменить картинки реплики: pending-реплика при сверке получает копии из
         треда вместо файлов кармана (дизайн картинок §3)."""
         self._images = tuple(images)
-        self.refresh(layout=True)
+        self._band.refresh(layout=True)
 
     def _reply_lines(self, width: int) -> list[_ReplyLine]:
-        lead = Text()
-        if self._state == "failed":
-            lead.append("[!] ", style=_ERR_RED)
-        lead.append("> ")
+        color = _ERR_RED if self._state == "failed" else _ACCENT
+        lead = Text(USER_PREFIX, style=Style(color=color))
         return _build_lines(
             self._text, self._images, self._hover_image_id, lead, width
         )
 
     def _repaint_images(self) -> None:
-        self.refresh()
+        self._band.refresh()
 
     def _image_path(self, image_id: str) -> Optional[str]:
         return _image_path(self._images, image_id)

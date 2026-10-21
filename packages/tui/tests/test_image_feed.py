@@ -298,17 +298,19 @@ def test_reply_render_keeps_chips_in_the_text_colour_and_adds_sub_lines(
     """Плашки — цвета текста реплики (как ссылка до наведения), подстроки приглушены,
     источник тоже; каждый спан картинки несёт `image_id` для наведения и клика."""
     reply, text, a8, a9 = _reply_with_two_images(tmp_path)
-    rendered = reply.render()
+    rendered = reply._band.render()
     assert rendered.plain == "\n".join(
         [
-            f"> {text}",
+            f"› {text}",
             f"  └ {chip_text(8)} · скрин.png",
             f"  └ {chip_text(9)} · из буфера",
         ]
     )
     assert [
-        s for s in rendered.spans if s.style.color == Color.parse(ACCENT)
-    ] == []
+        rendered.plain[s.start : s.end]
+        for s in rendered.spans
+        if s.style.color == Color.parse(ACCENT)
+    ] == ["› "]  # акцентом — только маркер реплики
     chips = [
         (
             rendered.plain[s.start : s.end],
@@ -337,13 +339,14 @@ def test_hovering_an_image_highlights_all_its_places(tmp_path):
     тексте и её строку под репликой целиком; другая картинка не меняется."""
     reply, _text, a8, _a9 = _reply_with_two_images(tmp_path)
     reply._set_image_hover(a8.id)
-    rendered = reply.render()
+    rendered = reply._band.render()
     accent = [
         rendered.plain[s.start : s.end]
         for s in rendered.spans
         if s.style.color == Color.parse(ACCENT)
     ]
     assert accent == [
+        "› ",
         chip_text(8),
         "└ ",
         chip_text(8),
@@ -354,8 +357,8 @@ def test_hovering_an_image_highlights_all_its_places(tmp_path):
 
 def test_reply_without_images_renders_as_before():
     assert (
-        UserReplyContainer("первая\nвторая").render().plain
-        == "> первая\n  вторая"
+        UserReplyContainer("первая\nвторая")._band.render().plain
+        == "› первая\n  вторая"
     )
 
 

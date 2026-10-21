@@ -213,7 +213,8 @@ def _seg(payloads, synthesis=None, n=0, index=0):
 @pytest.mark.asyncio
 async def test_render_segments_readonly_parity():
     """Превью из сегментов = паритет с основным трейсом: hidden(policy) скрыт,
-    маркер сжатия #K + синтез, intermediate_reply как ·, error_msg красным."""
+    маркер сжатия #K + синтез, intermediate_reply серым ●, error_msg
+    красным."""
     pytest.importorskip("textual")
     from gc_tui.services.trace_render import render_segments_readonly
     from gc_tui.widgets.trace_row import TraceRow
@@ -288,7 +289,8 @@ async def test_render_segments_readonly_parity():
         assert len(markers) == 1
         assert "контекст сжат #1" in body
         assert "СИНТЕЗ-X" in body
-        # intermediate_reply — отдельная line-intermediate (·), не обычная реплика
+        # intermediate_reply — отдельная line-intermediate (серый ●),
+        # не обычная реплика
         assert "промежуточный" in body
         assert (
             len(
@@ -318,15 +320,15 @@ def test_build_agent_widgets_has_bullet_prefix():
 
 
 def test_build_intermediate_widgets_renders_code_block():
-    """·-реплика проходит тот же markdown/код-пайплайн, что и проза: код-фенс
-    становится панелью, а не сырой строкой с литеральными ```. Маркер «· »
-    и класс line-intermediate сохранены."""
+    """Промежуточная реплика проходит тот же markdown/код-пайплайн, что и
+    проза: код-фенс становится панелью, а не сырой строкой с литеральными ```.
+    Глиф `● ` (серый по классу line-intermediate)."""
     pytest.importorskip("textual")
     from gc_tui.services.trace_render import build_intermediate_widgets
 
     md = "вступление\n\n```python\nprint(1)\n```"
     ws = build_intermediate_widgets(md, event_no=9)
-    assert ws[0]._prefix == "· "
+    assert ws[0]._prefix == "● "
     assert ws[0].has_class("line-intermediate")
     assert any(w.has_class("code-block-panel") for w in ws)
 
@@ -340,7 +342,7 @@ def test_build_intermediate_widgets_plain_text_single_row():
 
     ws = build_intermediate_widgets("промежуточный ответ", event_no=1)
     assert len(ws) == 1 and isinstance(ws[0], TraceRow)
-    assert ws[0]._prefix == "· " and ws[0].has_class("line-intermediate")
+    assert ws[0]._prefix == "● " and ws[0].has_class("line-intermediate")
 
 
 def test_build_block_widgets_no_bullet_prefix():
@@ -511,7 +513,7 @@ def test_event_no_bound_to_every_widget():
 
 @pytest.mark.asyncio
 async def test_intermediate_reply_row_has_top_margin(tmp_path):
-    """`·`-реплика (intermediate_reply) — фаза хода, как ●-проза:
+    """Промежуточная реплика (intermediate_reply) — фаза хода, как ●-проза:
     пустая строка сверху (margin-top: 1), не прилипает к предыдущей строке."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
@@ -526,7 +528,7 @@ async def test_intermediate_reply_row_has_top_margin(tmp_path):
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         row = TraceRow(
-            prefix="· ",
+            prefix="● ",
             content="промежуточный ответ",
             kind_class="line-intermediate",
         )

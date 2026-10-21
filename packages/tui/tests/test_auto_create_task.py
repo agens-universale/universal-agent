@@ -265,4 +265,4 @@ async def test_no_duplicate_user_reply(tmp_path):
         )
         replies = pilot.app.query(UserReplyContainer)
         assert len(replies) == 1
-        assert "привет" in str(replies[0].render())
+        assert "привет" in str(replies[0]._band.render())

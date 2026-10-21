@@ -37,7 +37,7 @@ from textual.widgets import Static
 from gc_tui.messages import OpenEditsScreenRequest
 
 # `_HOVER` — ровно тот `$accent`, которым база красит наведение на служебные
-# элементы блоков (`.diff-more:hover` / `.block-copy:hover` в styles.tcss).
+# элементы ленты (`.trace-action:hover` в styles.tcss).
 # `_ACCENT` здесь занят янтарным цветом РАБОТЫ (RUN_COLOR) — это другой смысл.
 from gc_tui.palette import ACCENT as _HOVER
 from gc_tui.palette import DEEP_DIM as _DIM
@@ -180,8 +180,8 @@ def compose_status_line(
     цельному `Text` координаты его первой клетки не восстановить.
 
     `hover` — курсор стоит на сегменте: текст берёт АКЦЕНТ. Это единственный
-    язык наведения, который база знает: `.diff-more:hover` и `.block-copy:hover`
-    красят `$accent`, других hover-правил в проекте нет. Сегмент — такой же
+    язык наведения, который база знает: `.trace-action:hover` красит
+    `$accent`, других hover-правил в проекте нет. Сегмент — такой же
     кликабельный элемент, и отвечать руке он обязан тем же цветом.
     """
     if not summary:

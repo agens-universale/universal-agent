@@ -122,10 +122,6 @@ DIFF_ADD_GUTTER = OK
 DIFF_DEL_GUTTER = ERR
 
 
-# Кромка неотправленной реплики; в теме auto — _mix(BG, ACCENT, 0.64).
-USER_PENDING_EDGE = "#3a7a72"
-
-
 # Рампы анимаций (ping-pong, пик — токен палитры); значения те же, что были
 # литералами в виджетах. В теме auto их пересчитывает apply_background.
 # Дыхание «думаю»: gold, пик #f0c896.
@@ -215,7 +211,6 @@ _FIXED = {
         "BG",
         "BAND_BG",
         "BLOCK_BG",
-        "USER_PENDING_EDGE",
         *_DIFF,
         *_TINTED,
         *_RAMP_PEAKS,
@@ -258,7 +253,6 @@ def _derived(bg: str) -> dict[str, object]:
         "BG": bg,
         "BAND_BG": _mix(bg, INK, 0.075),
         "BLOCK_BG": _mix(bg, INK, 0.042),
-        "USER_PENDING_EDGE": _mix(bg, ACCENT, 0.64),
         **{name: _shift(_FIXED[name], bg) for name in _DIFF},
         **tinted,
         **ramps,
@@ -347,7 +341,6 @@ def css_variables() -> dict[str, str]:
         "frame-archive": FRAME_ARCHIVE,
         "note-ink": NOTE_INK,
         "user-band-bg": USER_BAND_BG,
-        "user-pending-edge": USER_PENDING_EDGE,
         "overlay-bg": OVERLAY_BG,
         "zebra-bg": ZEBRA_BG,
         "skill": SKILL,

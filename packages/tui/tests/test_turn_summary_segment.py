@@ -178,8 +178,8 @@ def test_hover_speaks_the_same_color_as_every_hover_rule_of_the_base():
     """Сегмент и hover-правила `styles.tcss` — ОДИН цвет, а не «похожий».
 
     Токен сверяется с самим CSS, а не с константой рядом: разъехаться эта пара
-    может только здесь — в базе всего два hover-правила, и оба про наведение на
-    кликабельный элемент блока.
+    может только здесь — в базе одно hover-правило, `.trace-action:hover`, про
+    наведение на действие ленты.
     """
 
     from gc_tui.palette import css_variables
@@ -188,7 +188,7 @@ def test_hover_speaks_the_same_color_as_every_hover_rule_of_the_base():
     tcss = tcss_path.read_text(encoding="utf-8")
     tokens = set(
         re.findall(
-            r"\.(?:block-copy|diff-more):hover\s*\{\s*color:\s*\$([\w-]+)",
+            r"\.trace-action:hover\s*\{\s*color:\s*\$([\w-]+)",
             tcss,
         )
     )

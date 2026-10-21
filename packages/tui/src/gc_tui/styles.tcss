@@ -196,13 +196,13 @@ BlockPanel:focus, TodoBlock:focus {
 .diff-block .block-body,
 .diff-block .diff-more { background: $block-bg; }
 .diff-more { color: $dim; }
-.diff-more:hover { color: $accent; }
 
 /* Шапка блока: метка языка слева, кнопка копирования справа; та же кнопка ❐
    — в конце строки вызова с правкой (ToolCallRow). */
 .block-label { color: $dim; }
 .block-copy  { color: $dim; }
-.block-copy:hover { color: $accent; }
+/* Наведение на действие ленты (❐, «… ещё N строк») — одно правило. */
+.trace-action:hover { color: $accent; }
 
 /* spec 2026-05-27 / tool-output-detail */
 .detail-section-header {
@@ -224,7 +224,7 @@ BlockPanel:focus, TodoBlock:focus {
 
 /* чек-лист session_todo — маркер фазы хода, как ● и ·: обособлен пустой строкой
    сверху. Только margin-top (общая конвенция трейса — разделение через отступ
-   СЛЕДУЮЩЕГО элемента, см. .user-band); нижний дал бы двойной зазор перед тулами. */
+   СЛЕДУЮЩЕГО элемента, см. UserReplyContainer); нижний дал бы двойной зазор перед тулами. */
 .line-todo      { color: $ink; }        /* заголовок; воздух — на .todo-block */
 .line-todo-nested { color: $dim; }      /* заголовок чек-листа субагента */
 /* Воздух вокруг чек-листа — на блоке-контейнере: у основного только сверху
@@ -236,9 +236,10 @@ BlockPanel:focus, TodoBlock:focus {
 /* Пустая строка перед каждым вызовом — верхним и вложенным (спека P3 §2.1). */
 ToolCallRow { margin-top: 1; }
 .line-think     { color: $muted; text-style: italic; margin-top: 1; }
-.line-intermediate { color: $ink; margin-top: 1; }  /* ·-реплика — фаза хода, как ● */
-/* Промежуточная реплика субагента: глиф `●` своего уровня — серым. */
-.line-intermediate.nested-prose .trace-prefix { color: $dim; }
+.line-intermediate { color: $ink; margin-top: 1; }  /* промежуточная реплика — фаза хода */
+/* Промежуточная реплика (основного агента и субагента): глиф `●` своего
+   уровня — серым; белый `●` — у итогового ответа (спека P3 §10). */
+.line-intermediate .trace-prefix { color: $dim; }
 .ask-human-question.hidden { display: none; }  /* вопрос скрыт, пока виден баннер */
 .answered-question { border: round $frame-archive; color: $dim; padding: 0 1; margin: 1 0; width: 1fr; }
 .answered-question.hidden { display: none; }
@@ -260,11 +261,9 @@ ToolCallRow { margin-top: 1; }
 .summary-body   { color: $dim; margin-bottom: 1; }
 .summary-body.hidden { display: none; }
 
-/* Подложка реплики пользователя (§2.6) */
-.user-band {
-    background: $user-band-bg;   /* чуть светлее $band-bg — реплика контрастнее в трейсе; темнее $focus-bg (фокус различим) */
-    border-left: outer $accent;
-    padding: 0 1 0 1;
+/* Реплика пользователя (спека P3 §2.2): маркер `›` в колонке `●`, подложка
+   во всю ширину ленты без кромки; строки следствий `└` — под подложкой. */
+UserReplyContainer {
     /* Только верхний отступ — общая конвенция трейса (разделение «через margin-top
      * следующего элемента»). Нижний отступ убран: он складывался с margin-top
      * индикатора через границу контейнеров (#trace ↔ #indicator-bar, где margin
@@ -273,16 +272,13 @@ ToolCallRow { margin-top: 1; }
     height: auto;
     width: 1fr;
 }
-
-/* Pending: приглушённая teal-кромка (spec 2026-05-26) */
-.user-band.user-reply-pending {
-    border-left: outer $user-pending-edge;
+.user-band {
+    background: $user-band-bg;   /* чуть светлее $band-bg — реплика контрастнее в трейсе; темнее $focus-bg (фокус различим) */
+    padding: 0 1 0 0;
+    height: auto;
+    width: 1fr;
 }
-
-/* Failed: красная кромка + инлайн [!] (spec 2026-05-26) */
-.user-band.user-reply-failed {
-    border-left: outer $err;
-}
+UserReplyContainer:focus > .user-band { background: $focus-bg; }
 
 /* Бренд-блок пустого состояния (§2.8) */
 .brand-logo { color: $brand; text-style: bold; width: auto; height: auto; }

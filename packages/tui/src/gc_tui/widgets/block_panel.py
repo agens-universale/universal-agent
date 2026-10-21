@@ -201,7 +201,7 @@ class BlockPanel(CopyFeedbackMixin, ClickModelMixin, Vertical):
                 self._label, classes="block-label", markup=False
             )
             yield NoSelectStatic(
-                copy_glyph(), classes="block-copy", markup=False
+                copy_glyph(), classes="block-copy trace-action", markup=False
             )
         yield Static("", classes="block-body", markup=False)
 
