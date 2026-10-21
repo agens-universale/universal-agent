@@ -10,6 +10,13 @@ TUI работает с локальным файловым хранилищем
                     ``None`` — треда ещё не было
   ordering_key    → последний прочитанный seq
   storage_epoch   → «поколение:версия истории»
+  archives        → число архивов сжатия треда
+
+Сжатие (новая версия истории того же поколения и ровно один новый архив)
+хвост отдаёт шагом (``CompactionStep``): трейс дописывает хвост архива,
+маркер и новую живую историю, а не перерисовывается. Остальная замена
+истории и пересоздание треда — сброс показа. Сжатие в хранилище — одна
+запись: промежуточных состояний читатель не видит.
 """
 
 from __future__ import annotations
@@ -22,17 +29,21 @@ from gc_core.message_policy.user_message_policy import (
     user_content_to_text,
 )
 from gc_core.persistence.live_volume import live_volume_from_messages
-from gc_core.threads.facade import Cursor, Threads, run_sync
+from gc_core.threads.facade import Cursor, TailBatch, Threads, run_sync
 from gc_core.threads.file_store import FileThreadStore
 from gc_core.threads.models import StreamEntry, ThreadKey, ThreadRecord
 
-from gc_tui.models import TailResult, TaskCursor, TaskSummary
+from gc_tui.models import CompactionStep, TailResult, TaskCursor, TaskSummary
 from gc_tui.services.trace_mapper import _clean_summary
 
 logger = logging.getLogger(__name__)
 
 _HISTORY = "messages"
 _TUI = "tui"
+# Сколько раз перечитать снимок, пока тред не перестанет меняться между
+# чтением записи треда и его истории: каждое сжатие рушит одну попытку, а
+# следующее требует вызова модели.
+_SNAPSHOT_ATTEMPTS = 3
 
 
 class FileTaskStore:
@@ -146,13 +157,15 @@ class FileTaskStore:
     def read_all_events(
         self, task_id: str, system: Optional[str] = None
     ) -> tuple[list[dict], TaskCursor]:
-        """Вся живая история и курсор сразу за ней — одним снимком."""
+        """Вся живая история и курсор сразу за ней — одним снимком; в
+        курсоре и число архивов: по нему тик узнает шаг сжатия."""
         key = self._key(task_id, system)
-        snapshot = run_sync(self._threads.snapshot(key, [_HISTORY]))
-        if snapshot is None:
+        view = run_sync(_aview(self._threads, key))
+        if view is None:
             return [], TaskCursor(None, 0, None)
-        records = [_envelope(key, entry) for _s, entry in snapshot.entries]
-        return records, _task_cursor(snapshot.cursor)
+        batch, archives = view
+        records = [_envelope(key, entry) for _s, entry in batch.entries]
+        return records, _task_cursor(batch.cursor, archives)
 
     def read_raw_thread_jsonl(
         self, task_id: str, system: Optional[str] = None
@@ -185,13 +198,7 @@ class FileTaskStore:
         # parsed[i] = (seg_records, leading_summary_record_or_None)  # noqa: ERA001  # описание формата, не выключенный код
         parsed: list[tuple[list[dict], Optional[dict]]] = []
         for part in parts:
-            recs = [_envelope(key, entry) for entry in part]
-            leading = (
-                recs[0]
-                if (recs and self.is_compaction_summary(recs[0]))
-                else None
-            )
-            seg = recs[1:] if leading is not None else recs
+            leading, seg = _split_leading([_envelope(key, e) for e in part])
             parsed.append((seg, leading))
 
         segments: list[dict] = []
@@ -226,26 +233,30 @@ class FileTaskStore:
         if cursor.position_token is None:
             # Треда при прошлом чтении не было: появился — читаем с начала,
             # как дописанный файл, без сброса показа.
-            snapshot = run_sync(self._threads.snapshot(key, [_HISTORY]))
-            if snapshot is None:
+            view = run_sync(_aview(self._threads, key))
+            if view is None:
                 return TailResult(new_records=[], next_cursor=cursor)
+            batch, archives = view
             return TailResult(
-                new_records=[_envelope(key, e) for _s, e in snapshot.entries],
-                next_cursor=_task_cursor(snapshot.cursor),
+                new_records=[_envelope(key, e) for _s, e in batch.entries],
+                next_cursor=_task_cursor(batch.cursor, archives),
             )
         batch = run_sync(
             self._threads.tail(key, [_HISTORY], cursor.position_token)
         )
         if batch.reset:
+            step = run_sync(_acompaction_step(self._threads, key, cursor))
+            if step is not None:
+                return step
             return TailResult(
                 new_records=[],
-                next_cursor=_task_cursor(batch.cursor),
+                next_cursor=_task_cursor(batch.cursor, cursor.archives),
                 stream_reset=True,
                 reason=_reset_reason(cursor.position_token, batch.cursor),
             )
         return TailResult(
             new_records=[_envelope(key, e) for _s, e in batch.entries],
-            next_cursor=_task_cursor(batch.cursor),
+            next_cursor=_task_cursor(batch.cursor, cursor.archives),
         )
 
     def _record(
@@ -259,6 +270,80 @@ class FileTaskStore:
 
 async def _collect(threads: Threads, system: str) -> list[ThreadRecord]:
     return [record async for record in threads.iter_threads(system=system)]
+
+
+async def _aview(
+    threads: Threads, key: ThreadKey
+) -> Optional[tuple[TailBatch, int]]:
+    """Живая история, курсор за ней и число архивов — согласованные: тред,
+    сжатый между чтением его записи и истории, читается заново (иначе
+    курсор новой версии истории нёс бы прежнее число архивов, и следующее
+    сжатие стало бы сбросом). Треда нет — ``None``."""
+    for _ in range(_SNAPSHOT_ATTEMPTS):
+        record = await threads.store.get_thread(key)
+        if record is None:
+            return None
+        start = Cursor(record.generation, record.history_version)
+        batch = await threads.tail(key, [_HISTORY], start)
+        if not batch.reset:
+            break
+    return batch, len(record.archives)
+
+
+async def _acompaction_step(
+    threads: Threads, key: ThreadKey, cursor: TaskCursor
+) -> Optional[TailResult]:
+    """Замена истории — шаг сжатия? ``None`` — нет, сброс показа.
+
+    Шаг — то же поколение, версия истории на одну дальше и ровно один новый
+    архив, в котором курсор стоит на прочитанной записи, а живая история
+    начинается сводкой. Шаг несёт хвост архива за курсором, сводку сжатия и
+    новую живую историю."""
+    seen: Cursor = cursor.position_token
+    record = await threads.store.get_thread(key)
+    if (
+        record is None
+        or record.generation != seen.generation
+        or record.history_version != seen.history_version + 1
+        or len(record.archives) != cursor.archives + 1
+    ):
+        return None
+    archived = [
+        _envelope(key, e)
+        for e in await threads.store.read_archive(key, record.archives[-1].id)
+    ]
+    live = await threads.store.read_stream(key, _HISTORY)
+    after = await threads.store.get_thread(key)
+    if after is None or after.history_version != record.history_version:
+        return None
+    last = seen.seq.get(_HISTORY, 0)
+    if last > _max_seq(archived):
+        return None
+    archive_leading, archive_seg = _split_leading(archived)
+    live_leading, live_records = _split_leading(
+        [_envelope(key, e) for e in live]
+    )
+    if live_leading is None:
+        return None
+    step = CompactionStep(
+        archive_tail=[
+            r for r in archived if r["seq"] > last and r is not archive_leading
+        ],
+        segment_index=len(record.archives) - 1,
+        compacted_by=_compaction(archive_seg, live_leading),
+        window_ids=_payload_ids([*archived, *live_records]),
+        live_records=live_records,
+    )
+    next_cursor = Cursor(
+        record.generation,
+        record.history_version,
+        {_HISTORY: live[-1].seq},
+    )
+    return TailResult(
+        new_records=[],
+        next_cursor=_task_cursor(next_cursor, len(record.archives)),
+        compaction=step,
+    )
 
 
 def _summary(record: ThreadRecord) -> TaskSummary:
@@ -294,11 +379,12 @@ def _envelope(key: ThreadKey, entry: StreamEntry) -> dict:
     }
 
 
-def _task_cursor(cursor: Cursor) -> TaskCursor:
+def _task_cursor(cursor: Cursor, archives: int) -> TaskCursor:
     return TaskCursor(
         position_token=cursor,
         ordering_key=cursor.seq.get(_HISTORY, 0),
         storage_epoch=f"{cursor.generation}:{cursor.history_version}",
+        archives=archives,
     )
 
 
@@ -322,3 +408,24 @@ def _compaction(seg: list[dict], leading: dict) -> dict:
         "chars_before": chars_before,
         "chars_after": len(synthesis),
     }
+
+
+def _split_leading(recs: list[dict]) -> tuple[Optional[dict], list[dict]]:
+    """(лидирующая dialog_summary или None, записи без неё)."""
+    if recs and FileTaskStore.is_compaction_summary(recs[0]):
+        return recs[0], recs[1:]
+    return None, recs
+
+
+def _payload_ids(records: list[dict]) -> frozenset[str]:
+    ids: set[str] = set()
+    for rec in records:
+        payload = rec.get("payload")
+        if isinstance(payload, dict) and isinstance(payload.get("id"), str):
+            ids.add(payload["id"])
+    return frozenset(ids)
+
+
+def _max_seq(records: list[dict]) -> int:
+    seqs = [r.get("seq") for r in records]
+    return max((s for s in seqs if isinstance(s, int)), default=0)

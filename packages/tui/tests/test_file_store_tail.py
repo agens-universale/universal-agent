@@ -173,3 +173,80 @@ def test_tail_tick_survives_a_lock_timeout(tmp_path, monkeypatch):
         tail = store.tail_events("t1", cur)
     assert tail.new_records == [] and tail.next_cursor == cur
     assert len(store.tail_events("t1", cur).new_records) == 1
+
+
+def test_read_all_events_cursor_counts_archives(tmp_path):
+    _append_record(tmp_path / "data_cli_t1.jsonl", 1, "user", "жив")
+    for suffix in ("A", "B"):
+        arch = tmp_path / f"data_cli_t1__pre_summary__{suffix}.jsonl"
+        _append_record(arch, 1, "user", "архив")
+    _write_meta(tmp_path / "meta_cli_t1.json", msgs=1)
+
+    store = FileTaskStore(str(tmp_path), system="cli")
+    _, cur = store.read_all_events("t1")
+    assert cur.archives == 2
+    assert cur.wait_ticks == 0
+
+
+def test_read_all_events_no_archives_zero(tmp_path):
+    _append_record(tmp_path / "data_cli_t1.jsonl", 1, "user", "жив")
+    _write_meta(tmp_path / "meta_cli_t1.json", msgs=1)
+
+    store = FileTaskStore(str(tmp_path), system="cli")
+    _, cur = store.read_all_events("t1")
+    assert cur.archives == 0
+
+
+def test_read_all_events_stops_before_partial_line(tmp_path):
+    """Недописанная последняя строка не уходит за курсор: дописанная, она
+    придёт следующим тиком."""
+    data = tmp_path / "data_cli_t1.jsonl"
+    _append_record(data, 1, "user", "целая")
+    _write_meta(tmp_path / "meta_cli_t1.json", msgs=2)
+    line = json.dumps(
+        {
+            "type": "message",
+            "seq": 2,
+            "payload": {"id": "m2", "role": "user", "content": "вторая"},
+        }
+    )
+    with open(data, "a", encoding="utf-8") as f:
+        f.write(line[:10])
+
+    store = FileTaskStore(str(tmp_path), system="cli")
+    records, cur = store.read_all_events("t1")
+    with open(data, "a", encoding="utf-8") as f:
+        f.write(line[10:] + "\n")
+    tail = store.tail_events("t1", cur)
+
+    assert [r["payload"]["id"] for r in records] == ["m1"]
+    assert cur.ordering_key == 1
+    assert [r["payload"]["id"] for r in tail.new_records] == ["m2"]
+
+
+def test_tail_events_waits_for_partial_line(tmp_path):
+    """Тик посреди записи строки: курсор встаёт до обрывка, и дописанная
+    запись приходит следующим тиком, а не теряется."""
+    data = tmp_path / "data_cli_t1.jsonl"
+    _append_record(data, 1, "user", "целая")
+    _write_meta(tmp_path / "meta_cli_t1.json", msgs=2)
+    store = FileTaskStore(str(tmp_path), system="cli")
+    _, cur = store.read_all_events("t1")
+    line = json.dumps(
+        {
+            "type": "message",
+            "seq": 2,
+            "payload": {"id": "m2", "role": "user", "content": "вторая"},
+        }
+    )
+    with open(data, "a", encoding="utf-8") as f:
+        f.write(line[:10])
+
+    first = store.tail_events("t1", cur)
+    with open(data, "a", encoding="utf-8") as f:
+        f.write(line[10:] + "\n")
+    second = store.tail_events("t1", first.next_cursor)
+
+    assert first.new_records == []
+    assert first.next_cursor == cur
+    assert [r["payload"]["id"] for r in second.new_records] == ["m2"]

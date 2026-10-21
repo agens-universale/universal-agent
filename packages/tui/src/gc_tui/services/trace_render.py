@@ -9,6 +9,7 @@ import json
 import re
 from typing import TYPE_CHECKING, Optional
 
+from gc_tui.models import TraceEvent
 from gc_tui.services.duration_format import format_compact_int
 from gc_tui.services.trace_retention import (
     apply_payload_retention,
@@ -48,6 +49,24 @@ def build_compaction_label(num: int, comp: dict) -> str:
     if cb and ca:
         label += f" · {format_compact_int(cb)}→{format_compact_int(ca)} симв"
     return label
+
+
+def build_compaction_marker_event(
+    no: int, segment_index: int, comp: dict
+) -> TraceEvent:
+    """Событие-маркер сжатия сегмента ``segment_index`` (его ``compacted_by``).
+
+    Одно на полную перерисовку и шаг сжатия: оба пути строят маркер одинаково.
+    """
+    return TraceEvent(
+        no=no,
+        event_ts_utc_iso=comp.get("ts", ""),
+        kind="summary",
+        title="summary",
+        summary=build_compaction_label(segment_index + 1, comp),
+        summary_content=comp["synthesis"],
+        full_payload={},
+    )
 
 
 def build_block_widgets(

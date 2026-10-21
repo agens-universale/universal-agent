@@ -134,7 +134,8 @@ async def test_file_store_read_all_events_reads_core_data(tmp_path):
 
 
 async def test_file_store_epoch_changes_with_compaction(tmp_path):
-    """Сжатие истории меняет storage_epoch: экран начинает показ заново."""
+    """Сжатие истории ядром меняет storage_epoch, а хвост отдаёт его шагом
+    сжатия: экран дописывает трейс, а не начинает показ заново."""
     threads_dir = str(tmp_path)
     session = _make_session(threads_dir)
 
@@ -155,7 +156,11 @@ async def test_file_store_epoch_changes_with_compaction(tmp_path):
     # После компакции живая история начинается со сводки
     assert len(records) >= 1
     assert after.storage_epoch != before.storage_epoch
-    assert store.tail_events(_TID, before).stream_reset is True
+    tail = store.tail_events(_TID, before)
+    assert tail.stream_reset is False
+    assert tail.compaction is not None
+    assert tail.compaction.segment_index == 0
+    assert tail.next_cursor == after
 
 
 # ---------------------------------------------------------------------------
