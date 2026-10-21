@@ -729,9 +729,11 @@ class TraceScreen(Screen):
             yield Vertical(id="indicator-bar")
             with Horizontal(id="input-row"):
                 yield Static("› ", id="input-prompt", markup=False)
-                yield CommandTextArea(
+                inp = CommandTextArea(
                     placeholder=_PLACEHOLDER_READY_HELP, id="cmdinput"
                 )
+                inp.is_known_command = self._is_known_command
+                yield inp
             with Horizontal(id="footer"):
                 with Vertical(id="footer-left"):
                     yield Static("", id="footer-mode", markup=False)
@@ -6381,12 +6383,15 @@ class TraceScreen(Screen):
         asking = self.app.tui_state.ask_human_state is not None
         if text.startswith("/"):
             name = (text[1:].split(None, 1) or [""])[0]
-            return (
-                not asking
-                or self._registry.lookup(name) is not None
-                or isinstance(self._resolve_cached_skill(name), Resolved)
-            )
+            return not asking or self._is_known_command(name)
         return text.startswith("!") and not asking
+
+    def _is_known_command(self, name: str) -> bool:
+        """`/имя` запустит команду (или алиас) или скилл — точный разбор
+        по прогретому кэшу, как при запуске; команда сильнее скилла."""
+        return self._registry.lookup(name) is not None or isinstance(
+            self._resolve_cached_skill(name), Resolved
+        )
 
     async def on_command_text_area_submitted(
         self, event: CommandTextArea.Submitted
