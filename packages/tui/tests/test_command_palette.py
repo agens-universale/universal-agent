@@ -577,7 +577,7 @@ def test_long_skill_id_does_not_widen_command_columns():
     assert with_skill._hotkey_col_w() == plain._hotkey_col_w()
 
 
-def test_skill_row_text_short_name_then_pack_and_description():
+def test_skill_row_text_has_name_and_description_without_pack():
     pytest.importorskip("textual")
     from gc_tui import palette as _pal
 
@@ -585,9 +585,19 @@ def test_skill_row_text_short_name_then_pack_and_description():
     palette = _skill_palette("b", [skill])
     head = f" {'/bzz'.ljust(len('/bzz') + 3)}"
     text = palette._format_skill_row(skill)
-    assert text.plain == head + "superpowers · мозговой штурм"
+    assert text.plain == head + "мозговой штурм"
+    assert "superpowers" not in text.plain
+    assert "·" not in text.plain
     assert {str(s.style) for s in text.spans} == {_pal.DIM}
     assert text.spans[0].start == len(head)
+
+
+def test_skill_row_shows_runnable_name_from_provider():
+    pytest.importorskip("textual")
+    skill = {"id": "a:dup", "input_name": "a:dup", "description": "d"}
+    palette = _skill_palette("d", [skill])
+    text = palette._format_skill_row(skill)
+    assert text.plain == " /a:dup   d"
 
 
 def test_skill_rows_show_full_names_in_own_column():
@@ -607,13 +617,21 @@ def test_skill_rows_show_full_names_in_own_column():
     assert rows[0].index("Ж1") == rows[1].index("Ж2")
 
 
-def test_skill_row_name_capped_with_ellipsis():
+def test_skill_row_name_30_chars_shown_fully():
     pytest.importorskip("textual")
-    skill = {"id": "p:b" + "x" * 29, "pack_id": "p", "description": "d"}
+    skill = {"id": "p:b" + "x" * 28, "description": "d"}  # "/b…" = 30
     palette = _skill_palette("b", [skill])
     text = palette._format_skill_row(skill)
-    assert text.plain == " /b" + "x" * 21 + "…" + "   " + "p · d"
-    assert palette._skill_col_w() == 24 + 3
+    assert text.plain == " /b" + "x" * 28 + "   d"
+
+
+def test_skill_row_name_40_chars_capped_at_32_with_ellipsis():
+    pytest.importorskip("textual")
+    skill = {"id": "p:b" + "x" * 38, "description": "d"}  # "/b…" = 40
+    palette = _skill_palette("b", [skill])
+    text = palette._format_skill_row(skill)
+    assert text.plain == " /b" + "x" * 29 + "…" + "   d"
+    assert palette._skill_col_w() == 32 + 3
 
 
 def test_skill_row_selection_and_toggle_offset():
@@ -766,10 +784,13 @@ async def _enter_on_skill_row(tmp_path, skills, typed):
         inp = pilot.app.query_one("#cmdinput")
         inp.text = typed
         await pilot.pause(0.1)
-        assert scr._palette.selected_skill() == skills[0]
+        sel = scr._palette.selected_skill()
+        assert sel["id"] == skills[0]["id"]
+        shown = scr._palette._format_skill_row(sel).plain.split()[0]
         await pilot.press("enter")
         await pilot.pause(0.1)
         assert scr._palette is None
+        assert inp.text == f"{shown} "  # показано == вставлено
         assert app.tui_state.pending_skill_id is None
         assert not _running(app)
         return inp.text, inp.cursor_location

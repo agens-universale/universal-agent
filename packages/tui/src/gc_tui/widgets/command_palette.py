@@ -29,7 +29,7 @@ _HINT_WITH_ARGS = "↑↓ выбрать · Enter ввести аргумент 
 # Enter на строке скилла вставляет `/имя ` — текст дописывают (спека P5 §3.2).
 _HINT_SKILL = "↑↓ выбрать · Enter ввести запрос · Esc закрыть"
 _SKILL_ROWS_MAX = 5
-_SKILL_NAME_MAX = 24  # потолок колонки имён скиллов, клетки
+_SKILL_NAME_MAX = 32  # потолок колонки имён скиллов, клетки
 
 
 def _slider_width(n_values: int) -> int:
@@ -63,6 +63,11 @@ def _matches(cmd: Command, prefix: str) -> bool:
 def _skill_short(skill: dict) -> str:
     """Короткое имя скилла — часть id после `:` (у плоского — весь id)."""
     return str(skill.get("id", "")).rpartition(":")[2]
+
+
+def _skill_label(skill: dict) -> str:
+    """`/имя` для колонки: запускаемый вид от провайдера (`input_name`)."""
+    return "/" + str(skill.get("input_name") or _skill_short(skill))
 
 
 def _skill_matches(skill: dict, prefix: str) -> bool:
@@ -391,25 +396,22 @@ class CommandPalette(VerticalScroll):
     def _skill_col_w(self) -> int:
         """Ширина колонки имён скиллов: самое длинное видимое `/имя`, не
         больше `_SKILL_NAME_MAX`, + 3 пробела. С колонкой команд не связана."""
-        names = [f"/{_skill_short(s)}" for s in self._visible_skill_rows()]
+        names = [_skill_label(s) for s in self._visible_skill_rows()]
         if not names:
             return 0
         return min(max(map(len, names)), _SKILL_NAME_MAX) + 3
 
     def _format_skill_row(self, skill: dict) -> Text:
-        """Строка скилла: `/короткое имя` в своей колонке (цвет — классом
+        """Строка скилла: запускаемое `/имя` в своей колонке (цвет — классом
         `.palette-skill-row`), длиннее `_SKILL_NAME_MAX` обрезается
-        многоточием; затем серым `пак · описание`. В расчёт колонок команд
-        не входит."""
-        name = f"/{_skill_short(skill)}"
+        многоточием; затем серым описание. В расчёт колонок команд не
+        входит."""
+        name = _skill_label(skill)
         if len(name) > _SKILL_NAME_MAX:
             name = name[: _SKILL_NAME_MAX - 1] + "…"
         name_w = self._skill_col_w()
-        pack = skill.get("pack_id") or ""
-        desc = str(skill.get("description") or "")
-        tail = " · ".join(part for part in (pack, desc) if part)
         text = Text(f" {name.ljust(name_w)}")
-        text.append(tail, style=_pal.DIM)
+        text.append(str(skill.get("description") or ""), style=_pal.DIM)
         return text
 
     def _skill_widgets(

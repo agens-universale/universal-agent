@@ -5991,7 +5991,7 @@ class TraceScreen(Screen):
                 self.app, name, value
             ),
             toggle_values=lambda name: effective_toggle_values(self.app, name),
-            skills=lambda: self._skills_cache or [],
+            skills=self._palette_skills,
         )
         self._palette = palette
         self._mount_input_overlay(palette)
@@ -7385,6 +7385,14 @@ class TraceScreen(Screen):
         self._close_palette()
         inp.focus()
         return True
+
+    def _palette_skills(self) -> list[dict]:
+        """Скиллы для палитры: запись + запускаемое имя (`input_name`) —
+        то же, что вставит Enter."""
+        return [
+            {**s, "input_name": self._skill_input_name(s)}
+            for s in self._skills_cache or []
+        ]
 
     def _skill_input_name(self, skill: dict) -> str:
         """Запускаемый вид скилла в поле: короткое имя, если оно ведёт
