@@ -45,6 +45,15 @@ def memory_path(project: ProjectKey) -> Path:
     return Path(project.root) / ".gc" / _MEMORY_FILE
 
 
+def _memory_lock(project: ProjectKey):
+    """Замок памяти проекта между процессами (TUI и gc-cli в одном
+    репозитории): сверка версии и запись — под ним. Файл замка — рядом с
+    бэкапом, в каталоге состояния, а не в ``.gc`` репозитория."""
+    from gc_core.utils.file_lock import file_lock
+
+    return file_lock(memory_backup_path(project))
+
+
 def memory_backup_path(project: ProjectKey) -> Path:
     """Бэкап памяти вне дерева проекта: переживает ``rm -rf .gc``.
 
@@ -146,7 +155,7 @@ class FileAgentStore(AgentStore):
     async def restore_memory(self, project: ProjectKey) -> None:
         from gc_core.project_memory import storage
 
-        with storage._lock:
+        with storage._lock, _memory_lock(project):
             storage.restore_from_backup(
                 memory_path(project), memory_backup_path(project)
             )
@@ -161,7 +170,7 @@ class FileAgentStore(AgentStore):
         from gc_core.project_memory import storage
 
         path = memory_path(project)
-        with storage._lock:
+        with storage._lock, _memory_lock(project):
             # Нечитаемую память (чужая кодировка) полная запись заменяет — как
             # и раньше: её версии нет.
             try:
