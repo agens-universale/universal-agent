@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import signal
 import threading
 from typing import Any
@@ -12,12 +13,17 @@ def install_run_sigint(executor: Any):
 
     На вопросе ``ask_human`` перехват вопроса стоит выше и остаётся отказом
     отвечать: он подменяет этот обработчик на время вопроса.
+
+    Из сигнала только очередь на цикл. ``stop_run`` берёт замок исполнителя,
+    и вызов из обработчика на том же потоке встал бы навсегда, если замок
+    уже держит ход.
     """
     if threading.current_thread() is not threading.main_thread():
         return None
     try:
         previous = signal.getsignal(signal.SIGINT)
-    except (ValueError, OSError):
+        loop = asyncio.get_running_loop()
+    except (ValueError, OSError, RuntimeError):
         return None
     hits = {"n": 0}
 
@@ -27,7 +33,7 @@ def install_run_sigint(executor: Any):
         if hits["n"] > 1:
             signal.signal(signal.SIGINT, signal.default_int_handler)
             raise KeyboardInterrupt
-        executor.stop_run()
+        loop.call_soon_threadsafe(executor.stop_run)
 
     try:
         signal.signal(signal.SIGINT, _handler)

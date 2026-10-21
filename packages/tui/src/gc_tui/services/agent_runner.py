@@ -590,6 +590,9 @@ class AgentRunner:
     def stop(self) -> None:
         """Кооперативная остановка — флаг на executor; run сам выйдет.
 
+        Отрисовку не держим: снятие идёт на цикле агента, этот вызов
+        возвращается сразу, и экран рисует отмену в том же кадре.
+
         Если executor ещё строится (фабрика не отработала) — ставим флаг, и
         worker-поток не запустит run после сборки.
         Также разблокирует агент-поток, зависший в confirm (fail-closed → False)."""
@@ -597,9 +600,6 @@ class AgentRunner:
         ex = self._executor
         if ex is not None:
             ex.stop_run()
-            gate = getattr(ex, "user_stop", None)
-            if gate is not None:
-                gate.wait_if_other_thread()
         self.cancel_confirm()
         # И ask_human тоже. Без этого поток оставался в `queue.get()` навсегда,
         # `arun` не доходил до своего `finally`, и не выполнялись ни закрытие

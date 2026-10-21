@@ -772,28 +772,30 @@ async def test_server_stop_returns_when_the_command_is_dead():
 
     task = asyncio.create_task(_work())
     await asyncio.sleep(0.3)
-    returned = threading.Event()
+    yielded = False
 
-    def _call() -> None:
-        assert registry.stop(system="sys", task_id="task") is True
-        returned.set()
+    async def _other() -> None:
+        nonlocal yielded
+        yielded = True
 
-    worker = threading.Thread(target=_call)
-    worker.start()
+    other = asyncio.create_task(_other())
+    assert await registry.stop(system="sys", task_id="task") is True
+    assert yielded is True
+    await other
     result = await task
-    worker.join(5)
-    assert returned.is_set()
     assert dead.is_set()
     assert result.stopped_by_user is True
     assert log.events("user_stop_killed")
 
 
-def test_tui_stop_waits_off_the_loop():
+def test_tui_stop_returns_before_the_worker_settles():
+    """Esc не ждёт снятие: кадр уходит, команда умирает на потоке воркера."""
     from gc_tui.services.agent_runner import AgentRunner
 
     log = _Log()
     loop = asyncio.new_event_loop()
     gate = UserStop()
+    release_done = threading.Event()
 
     class _Executor:
         user_stop = gate
@@ -803,25 +805,36 @@ def test_tui_stop_waits_off_the_loop():
 
     async def _arm() -> None:
         gate.prepare_run(asyncio.get_running_loop(), log)
+        finish = asyncio.Event()
+
+        async def _release() -> None:
+            await asyncio.sleep(0.3)
+            release_done.set()
+            finish.set()
+
         with bind_user_stop(gate):
-            await LocalFsBackend().aexec("sleep 30", timeout=30)
+            async with gate.arm(kind="exec", release=_release):
+                await finish.wait()
 
     def _run() -> None:
         asyncio.set_event_loop(loop)
         loop.run_until_complete(_arm())
 
-    thread = threading.Thread(target=_run)
+    thread = threading.Thread(target=_run, daemon=True)
     thread.start()
     for _ in range(50):
         if gate._stack:
             break
         time.sleep(0.02)
+    assert gate._stack
     runner = AgentRunner(_Executor())
-    t0 = time.monotonic()
+    started = time.monotonic()
     runner.stop()
-    assert time.monotonic() - t0 < 8
+    assert time.monotonic() - started < 0.1
+    assert not release_done.is_set()
     thread.join(5)
     assert not thread.is_alive()
+    assert release_done.is_set()
     assert log.events("user_stop_killed")
     loop.close()
 
@@ -831,24 +844,38 @@ def test_cli_sigint_stops_the_run_and_ask_human_stays_a_refusal():
     from gc_core.utils.sigint_waits import intercept_sigint
 
     calls = {"stop": 0}
+    held = threading.Lock()
 
     class _Executor:
         def stop_run(self) -> None:
-            calls["stop"] += 1
+            with held:
+                calls["stop"] += 1
 
-    previous = install_run_sigint(_Executor())
+    loop = asyncio.new_event_loop()
+
+    async def _body() -> None:
+        previous = install_run_sigint(_Executor())
+        try:
+            refused = {"n": 0}
+            with intercept_sigint(lambda: refused.__setitem__("n", 1)):
+                signal.getsignal(signal.SIGINT)(signal.SIGINT, None)
+            assert calls["stop"] == 0
+            assert refused["n"] == 1
+            held.acquire()
+            signal.getsignal(signal.SIGINT)(signal.SIGINT, None)
+            assert calls["stop"] == 0
+            held.release()
+            await asyncio.sleep(0)
+            assert calls["stop"] == 1
+            with pytest.raises(KeyboardInterrupt):
+                signal.getsignal(signal.SIGINT)(signal.SIGINT, None)
+        finally:
+            restore_run_sigint(previous)
+
     try:
-        refused = {"n": 0}
-        with intercept_sigint(lambda: refused.__setitem__("n", 1)):
-            signal.getsignal(signal.SIGINT)(signal.SIGINT, None)
-        assert calls["stop"] == 0
-        assert refused["n"] == 1
-        signal.getsignal(signal.SIGINT)(signal.SIGINT, None)
-        assert calls["stop"] == 1
-        with pytest.raises(KeyboardInterrupt):
-            signal.getsignal(signal.SIGINT)(signal.SIGINT, None)
+        loop.run_until_complete(_body())
     finally:
-        restore_run_sigint(previous)
+        loop.close()
 
 
 async def test_release_error_is_not_a_kill_and_settles_when_the_wait_exits():
@@ -956,16 +983,15 @@ async def test_chat_and_acp_stop_wait_until_settled():
     await held_task
 
 
-def test_same_loop_registry_stop_does_not_block():
-    """Стоп с потока loop не ждёт: иначе реестр встал бы на собственном цикле."""
+async def test_registry_stop_timeout_is_not_success(monkeypatch):
+    """Потолок ожидания не выглядит как снятый прогон."""
     from gc_server.rest_api.agent_execution_registry import (
         ActiveRun,
         AgentRunRegistry,
     )
 
-    loop = asyncio.new_event_loop()
+    monkeypatch.setattr("gc_core.user_stop._SETTLE_SEC", 0.05)
     gate = UserStop()
-    gate._loop = loop
     gate._settled.clear()
 
     class _Executor:
@@ -986,17 +1012,8 @@ def test_same_loop_registry_stop_does_not_block():
         thread_id=None,
         last_activity_at=time.time(),
     )
-
-    def _on_loop() -> None:
-        started = time.monotonic()
-        assert registry.stop(system="sys", task_id="task") is True
-        assert time.monotonic() - started < 1
-
-    try:
-        loop.call_soon_threadsafe(_on_loop)
-        loop.run_until_complete(asyncio.sleep(0.05))
-    finally:
-        loop.close()
+    with pytest.raises(TimeoutError):
+        await registry.stop(system="sys", task_id="task")
 
 
 def test_run_logger_accepts_the_stop_event():

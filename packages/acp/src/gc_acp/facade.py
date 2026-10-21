@@ -1039,7 +1039,10 @@ def _permission_dropped(
 
 
 async def _await_live_stop(live: LiveSession) -> None:
-    """Не отвечать, пока идущий стрим или тул ещё не сняты."""
+    """Не отвечать, пока идущий стрим или тул ещё не сняты.
+
+    Потолок ожидания — ошибка: ``cancelled`` по таймауту не считается снятием.
+    """
     gate = getattr(getattr(live.agent, "_executor", None), "user_stop", None)
     if gate is not None:
         await gate.await_settled()

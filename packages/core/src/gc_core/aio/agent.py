@@ -394,7 +394,10 @@ class AsyncAgent:
         self._executor.stop_run()
 
     async def astop(self) -> None:
-        """Стоп и ожидание, пока текущая работа снята."""
+        """Стоп и ожидание, пока текущая работа снята.
+
+        Потолок ожидания — ошибка, не успешный стоп.
+        """
         self.stop()
         if self._durable is not None:
             return

@@ -24,7 +24,9 @@ _CALL: contextvars.ContextVar[tuple[str, str]] = contextvars.ContextVar(
     "gc_user_stop_call", default=("", "")
 )
 
-_SETTLE_SEC = 8.0
+#: Потолок ответа «работа снята»: допустимые 20 с удалённого шелла.
+#: Уложились — успех, зависший release — ошибка.
+_SETTLE_SEC = 20.0
 
 
 class _StopWaitOnly:
@@ -136,22 +138,18 @@ class UserStop:
             return
         loop.call_soon_threadsafe(self._schedule, arm, log)
 
-    def wait_if_other_thread(self, timeout: float = _SETTLE_SEC) -> None:
-        """Подождать снятие, если мы не на потоке loop: иначе loop встанет насовсем."""
-        loop = self._loop
-        if (
-            loop is not None
-            and getattr(loop, "_thread_id", None) == threading.get_ident()
-        ):
-            return
-        self._settled.wait(timeout)
+    async def await_settled(self, timeout: Optional[float] = None) -> None:
+        """Дождаться снятия, отдавая loop. Уже снято — возврат сразу.
 
-    async def await_settled(self, timeout: float = _SETTLE_SEC) -> None:
-        """Дождаться снятия, отдавая loop. Уже снято — возврат сразу."""
+        Потолок — ``TimeoutError``, не тихий успех: ответ «снято» значит,
+        что работа снята.
+        """
+        if timeout is None:
+            timeout = _SETTLE_SEC
         deadline = time.monotonic() + timeout
         while not self._settled.is_set():
             if time.monotonic() >= deadline:
-                return
+                raise TimeoutError("user stop did not settle")
             await asyncio.sleep(0.01)
 
     def notify_observed(self) -> None:
