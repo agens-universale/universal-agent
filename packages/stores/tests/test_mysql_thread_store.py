@@ -28,11 +28,14 @@ def test_mysql_store_conforms(mysql_databases):
     assert assert_conforms(make) == [check.__name__ for check in CHECKS]
 
 
-async def test_session_over_mysql_works(mysql_databases):
-    def make():
-        return MySQLThreadStore(mysql_databases.create())
+def test_session_over_mysql_works(mysql_databases):
+    # Базы — до цикла набора: фикстура создаёт их своим asyncio.run.
+    dsns = iter([mysql_databases.create() for _ in SESSION_CHECKS])
 
-    passed = await aassert_session_works(make)
+    def make():
+        return MySQLThreadStore(next(dsns))
+
+    passed = asyncio.run(aassert_session_works(make))
     assert passed == [check.__name__ for check in SESSION_CHECKS]
 
 
