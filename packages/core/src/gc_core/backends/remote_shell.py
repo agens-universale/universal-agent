@@ -45,7 +45,8 @@ _ENV_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 #: Сторож на той стороне: таймаут убивает только локальный клиент
 #: (`docker exec` / `ssh`), команда в контейнере или на хосте жила бы дальше.
-#: Проба один раз на бэкенд; порядок — по надёжности.
+#: Найденный инструмент запоминается. «Нет» — нет: следующий вызов спросит снова.
+#: Порядок — по надёжности.
 _WATCHDOG_PROBE = (
     "if timeout --version >/dev/null 2>&1; then echo timeout; "
     "elif command -v gtimeout >/dev/null 2>&1; then echo gtimeout; "
@@ -327,10 +328,11 @@ class RemoteShellBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
 
     # --- exec-семейство ---
     async def _awatchdog(self) -> Optional[str]:
-        """Какой сторож есть на той стороне; `None` — никакого (одна проба).
+        """Какой сторож есть на той стороне.
 
-        ``RuntimeUnavailable`` не запоминается: мёртвая оболочка — не «сторожа
-        нет». Следующий вызов спросит снова и снова обернёт команду.
+        Найденный инструмент запоминается. ``None`` не кэш: мёртвая оболочка,
+        стоп посреди пробы и честный ``none`` спросятся снова, и следующая
+        команда сможет обернуться.
         """
         cached = getattr(self, "_watchdog_tool", _MISSING)
         if cached is not _MISSING:
@@ -350,10 +352,13 @@ class RemoteShellBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
         except Exception:
             tool = None
         if tool is None:
-            logger.warning(
-                "remote backend has no GNU timeout/gtimeout/setsid/perl: a "
-                "timed-out command keeps running on the remote side"
-            )
+            if not getattr(self, "_watchdog_miss_logged", False):
+                logger.warning(
+                    "remote backend has no GNU timeout/gtimeout/setsid/perl: a "
+                    "timed-out command keeps running on the remote side"
+                )
+                self._watchdog_miss_logged = True
+            return None
         self._watchdog_tool = tool
         return tool
 
