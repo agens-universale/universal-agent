@@ -20,12 +20,8 @@ async def test_human_wait_pauses_nested_rows(tmp_path):
     app = _app(tmp_path)
     async with app.run_test() as pilot:
         scr = pilot.app.screen
-        root = ToolCallRow(
-            call_id="r", tool_name="subagent_x", args_summary=""
-        )
-        nested = ToolCallRow(
-            call_id="n", tool_name="exec_run", args_summary="", level=1
-        )
+        root = ToolCallRow(call_id="r", label="subagent_x", target="")
+        nested = ToolCallRow(call_id="n", label="exec_run", target="", level=1)
         await scr.mount(root)
         await scr.mount(nested)
         # Дальше без await: живой тик опроса без раннера чистит строки.
@@ -47,9 +43,7 @@ async def test_human_wait_ticks_nested_elapsed(tmp_path, monkeypatch):
     app = _app(tmp_path)
     async with app.run_test() as pilot:
         scr = pilot.app.screen
-        nested = ToolCallRow(
-            call_id="n", tool_name="exec_run", args_summary="", level=1
-        )
+        nested = ToolCallRow(call_id="n", label="exec_run", target="", level=1)
         await scr.mount(nested)
         ticks = []
         monkeypatch.setattr(

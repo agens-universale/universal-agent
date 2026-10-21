@@ -120,12 +120,9 @@ class ToolCallDetailScreen(Screen):
 
     def _header_text(self) -> str:
         ev = self._call_event
-        tool = ev.tool_name or "<tool>"
-        # short_args: то что mapper вычислил для row (summary без 'name(')
-        short_args = ev.summary or ""
-        if "(" in short_args:
-            short_args = short_args.split("(", 1)[1].rstrip(")")
-        return f"Viewer: {tool}({short_args}) · #{ev.no}"
+        # Экран вызова — место сырого wire-имени (в ленте — подпись).
+        tool = ev.wire_name or ev.tool_name or "<tool>"
+        return f"Viewer: {tool}({ev.args_summary}) · #{ev.no}"
 
     def _output_widget(self):
         if self._result_event is None:

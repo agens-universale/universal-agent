@@ -133,6 +133,7 @@ from gc_tui.services.trace_mapper import (
 from gc_tui.services.trace_render import (
     NESTED_PROSE_CLASS,
     NESTED_PROSE_PREFIX,
+    build_call_row,
     build_compaction_marker_event,
     level_prefix,
 )
@@ -506,6 +507,9 @@ class TraceScreen(Screen):
         ] = {}  # parent_call_id → last mounted nested
         # Durable parent rows for subagent_* (survive pop from _active_calls on result).
         self._subagent_parent_rows: dict[str, ToolCallRow] = {}
+        # Подписи MCP для строк вызовов: (снимок, wire→инфо, серверы) —
+        # пересчёт только при смене объекта снимка (`_mcp_tool_info`).
+        self._mcp_info_cache: Optional[tuple[object, dict, tuple]] = None
         self._reasoning_clock = ReasoningClock()
         # Журнал правок текущего треда для инлайн-диффов: один EditsLookup на
         # тред (внутри — кэш индекса), пересоздаётся при смене идентичности.
@@ -3168,16 +3172,16 @@ class TraceScreen(Screen):
             elif ev.tool_name:
                 # Не-когнитивный тул = действие в мире → рвёт эпизод раздумья.
                 self._reasoning_clock.interrupt()
-            from gc_tui.services.trace_render import args_portion
-
-            row = ToolCallRow(
+            mcp_tools, mcp_servers = self._mcp_tool_info()
+            row = build_call_row(
                 call_id=ev.call_id or f"_anon_{ev.no}",
-                # Показ — wire-имя реестра (Д11/R3); tool_name(канонический id) —
-                # только фолбэк на случай, если wire_name не заполнен.
-                tool_name=ev.wire_name or ev.tool_name or "<tool>",
-                args_summary=args_portion(ev.summary),
+                wire_name=ev.wire_name or ev.tool_name or "<tool>",
+                args_summary=ev.args_summary,
+                level=0,
                 event_no=ev.no,
                 waiting=True,  # batch: · пока очередь execute не дошла
+                mcp_tools=mcp_tools,
+                mcp_servers=mcp_servers,
             )
             self._active_calls[row.call_id] = row
             # Durable anchor for nested (reopen / after parent result pop).
@@ -3397,12 +3401,14 @@ class TraceScreen(Screen):
         # Поэтому третьего wire/canonical-разделения (TraceEvent.wire_name,
         # Д11/R3) здесь не нужно. Если один из этих путей начнёт канонизировать
         # имя — этот сайт молча воспроизведёт тот же баг несогласованных имён.
-        row = ToolCallRow(
+        mcp_tools, mcp_servers = self._mcp_tool_info()
+        row = build_call_row(
             call_id=tool_call_id or f"_nested_{tool_name}_{step}",
-            tool_name=tool_name,
+            wire_name=tool_name,
             args_summary=args_summary or "",
-            level=1,
-            waiting=False,  # tool_start = уже execute
+            level=1,  # tool_start = уже execute, не waiting
+            mcp_tools=mcp_tools,
+            mcp_servers=mcp_servers,
         )
         if tool_call_id:
             self._nested_tool_rows[tool_call_id] = row
@@ -4599,6 +4605,27 @@ class TraceScreen(Screen):
             meta = self._store.get_task_meta(self._active_task_id)
             return (meta.get("runtime") or {}).get("mcp_tools")
         return None
+
+    def _mcp_tool_info(self) -> tuple[dict, tuple]:
+        """Подписи MCP из снимка рантайма: (wire→McpToolInfo, серверы).
+
+        Кэш по объекту снимка: новый снимок (переподключение, другой тред)
+        — новый объект, и подписи пересчитываются."""
+        from gc_core.constants.tool_display import (
+            mcp_servers_of,
+            mcp_tools_from_snapshot,
+        )
+
+        snap = self._mcp_screen_snapshot()
+        cache = self._mcp_info_cache
+        if cache is None or cache[0] is not snap:
+            cache = (
+                snap,
+                mcp_tools_from_snapshot(snap),
+                mcp_servers_of(snap),
+            )
+            self._mcp_info_cache = cache
+        return cache[1], cache[2]
 
     def _pending_wire_match(self, client_id: str, polled_content: str) -> bool:
         """Проверить, что pending-запись с этим client_id имеет wire_content,

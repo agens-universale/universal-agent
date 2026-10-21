@@ -372,9 +372,9 @@ async def test_render_segments_keeps_prose_and_lights_tools_outside_window(
         assert "arguments" in live_parent.full_payload
 
         rows = {r.call_id: r for r in scr.query(ToolCallRow) if not r._level}
-        assert rows["call_old"]._tool_name == "read_file"
-        assert rows["call_sub_old"]._tool_name == "subagent_worker"
-        assert "потому что" in rows["call_sub_old"]._args
+        assert rows["call_old"].wire_name == "read_file"
+        assert rows["call_sub_old"].wire_name == "subagent_worker"
+        assert "старая задача" in rows["call_sub_old"]._target
         assert "call_live" in rows
 
         nested = {r.call_id for r in scr.query(ToolCallRow) if r._level}

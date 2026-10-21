@@ -210,7 +210,7 @@ async def test_edit_counts_live_in_call_row(tmp_path):
 
     async with _screen(tmp_path, tid) as scr:
         content = _row_content(scr.query_one(ToolCallRow))
-        assert "src/app.py') +12 −3" in content.plain
+        assert content.plain == "Edit  src/app.py +12 −3"
         assert _span_color(content, "+12") == OK
         assert _span_color(content, "−3") == ERR
         assert not any("изменено:" in s for s in _screen_lines(scr))
@@ -300,13 +300,9 @@ async def test_body_right_under_tool_row(tmp_path):
 
     async with _screen(tmp_path, tid) as scr:
         lines = _screen_lines(scr)
-        tool = next(
-            i for i, s in enumerate(lines) if "fs_apply_file_edits" in s
-        )
+        tool = next(i for i, s in enumerate(lines) if "Edit  src/app.py" in s)
         body = next(i for i, s in enumerate(lines) if "def f():" in s)
-        next_tool = next(
-            i for i, s in enumerate(lines) if "run_python_code" in s
-        )
+        next_tool = next(i for i, s in enumerate(lines) if "Run  python" in s)
 
         assert body == tool + 1
         assert _indent(lines[body]) - _indent(lines[tool]) == 2

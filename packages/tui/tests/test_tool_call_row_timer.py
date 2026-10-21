@@ -15,7 +15,7 @@ def _make_app(row_factory=None):
             if row_factory is not None:
                 yield row_factory()
             else:
-                yield ToolCallRow(call_id="c1", tool_name="t", args_summary="")
+                yield ToolCallRow(call_id="c1", label="t", target="")
 
     return _App()
 
@@ -48,7 +48,7 @@ async def test_interrupt_stops_timer():
 @pytest.mark.asyncio
 async def test_finished_before_mount_has_no_timer():
     def factory():
-        row = ToolCallRow(call_id="c1", tool_name="t", args_summary="")
+        row = ToolCallRow(call_id="c1", label="t", target="")
         row.set_result(summary="ok", error=False)
         return row
 
@@ -61,9 +61,7 @@ async def test_finished_before_mount_has_no_timer():
 @pytest.mark.asyncio
 async def test_waiting_row_has_no_timer():
     def factory():
-        return ToolCallRow(
-            call_id="c1", tool_name="t", args_summary="", waiting=True
-        )
+        return ToolCallRow(call_id="c1", label="t", target="", waiting=True)
 
     async with _make_app(factory).run_test() as pilot:
         await pilot.pause()
@@ -74,9 +72,7 @@ async def test_waiting_row_has_no_timer():
 @pytest.mark.asyncio
 async def test_set_active_starts_timer():
     def factory():
-        return ToolCallRow(
-            call_id="c1", tool_name="t", args_summary="", waiting=True
-        )
+        return ToolCallRow(call_id="c1", label="t", target="", waiting=True)
 
     async with _make_app(factory).run_test() as pilot:
         row = pilot.app.query_one(ToolCallRow)
@@ -147,7 +143,7 @@ async def test_live_row_ticks_coarse():
             super()._pulse_tick()
 
     def factory():
-        return _Counting(call_id="c1", tool_name="t", args_summary="")
+        return _Counting(call_id="c1", label="t", target="")
 
     async with _make_app(factory).run_test() as pilot:
         row = pilot.app.query_one(_Counting)

@@ -25,15 +25,9 @@ async def test_batch_calls_first_active_rest_waiting():
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         trace = scr.query_one("#trace", VerticalScroll)
-        a = ToolCallRow(
-            call_id="a", tool_name="t1", args_summary="", waiting=True
-        )
-        b = ToolCallRow(
-            call_id="b", tool_name="t2", args_summary="", waiting=True
-        )
-        c = ToolCallRow(
-            call_id="c", tool_name="t3", args_summary="", waiting=True
-        )
+        a = ToolCallRow(call_id="a", label="t1", target="", waiting=True)
+        b = ToolCallRow(call_id="b", label="t2", target="", waiting=True)
+        c = ToolCallRow(call_id="c", label="t3", target="", waiting=True)
         for row in (a, b, c):
             trace.mount(row)
             scr._active_calls[row.call_id] = row
@@ -66,8 +60,8 @@ async def test_drain_mounts_nested_under_parent():
         trace = scr.query_one("#trace", VerticalScroll)
         parent = ToolCallRow(
             call_id="parent_1",
-            tool_name="subagent_worker",
-            args_summary="task=x",
+            label="subagent_worker",
+            target="task=x",
         )
         trace.mount(parent)
         scr._active_calls["parent_1"] = parent
@@ -92,7 +86,9 @@ async def test_drain_mounts_nested_under_parent():
         nested = scr._nested_tool_rows.get("tc_nested")
         assert nested is not None
         assert nested._level == 1
-        assert "fs_read_file" in str(nested._render_content())
+        content = str(nested._render_content())
+        assert content.startswith("Read  path='a.py'")
+        assert "fs_read_file" not in content
         # heartbeat на корне
         assert "step 2/50" in str(parent._render_content())
 
@@ -119,8 +115,8 @@ async def test_nested_stays_after_parent_result():
         trace = scr.query_one("#trace", VerticalScroll)
         parent = ToolCallRow(
             call_id="parent_1",
-            tool_name="subagent_worker",
-            args_summary="task=x",
+            label="subagent_worker",
+            target="task=x",
         )
         trace.mount(parent)
         scr._active_calls["parent_1"] = parent

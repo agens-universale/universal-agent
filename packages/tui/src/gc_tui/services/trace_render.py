@@ -7,7 +7,14 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING, Optional
+
+from gc_core.constants.tool_display import (
+    DisplayCategory,
+    McpToolInfo,
+    tool_display,
+)
 
 from gc_tui.models import TraceEvent
 from gc_tui.services.duration_format import format_compact_int
@@ -22,6 +29,7 @@ if TYPE_CHECKING:
     from rich.text import Text
 
     from gc_tui.services.trace_mapper import RenderContext
+    from gc_tui.widgets.tool_call_row import ToolCallRow
 
 # Парсер `[tag] rest` для default meta-кейса (трейс и read-only превью).
 TAG_RE = re.compile(r"^\[(?P<tag>[^\]]+)\]\s*(?P<rest>.*)$")
@@ -200,11 +208,53 @@ def note_text(comment: str) -> Text:
     return t
 
 
-def args_portion(summary: str) -> str:
-    """Аргументы из summary вида "name(args)" — содержимое скобок."""
-    if summary and "(" in summary:
-        return summary.split("(", 1)[1].rstrip(")")
-    return ""
+def _call_caption(
+    wire_name: str,
+    args_summary: str,
+    mcp_tools: Mapping[str, McpToolInfo] | None,
+    mcp_servers: Iterable[str],
+) -> tuple[str, str]:
+    """(подпись, объект) строки вызова по отображению ядра (спека P3 §2.1).
+
+    MCP — `сервер · тул`; тул без подписи (неизвестный или скрытый политикой,
+    но всё же дошедший до ленты) — `Called` и сырое имя в объекте."""
+    shown = tool_display(
+        wire_name, mcp_tools=mcp_tools, mcp_servers=mcp_servers
+    )
+    if shown.category is DisplayCategory.MCP:
+        return f"{shown.label} · {shown.detail}", args_summary
+    if shown.category in (DisplayCategory.CALLED, DisplayCategory.HIDDEN):
+        target = " ".join(p for p in (wire_name, args_summary) if p)
+        return DisplayCategory.CALLED.value, target
+    return shown.label, args_summary
+
+
+def build_call_row(
+    *,
+    call_id: str,
+    wire_name: str,
+    args_summary: str,
+    level: int,
+    event_no: int = 0,
+    waiting: bool = False,
+    mcp_tools: Mapping[str, McpToolInfo] | None = None,
+    mcp_servers: Iterable[str] = (),
+) -> ToolCallRow:
+    """Строка вызова — один билдер для живой ленты, превью и вложенных."""
+    from gc_tui.widgets.tool_call_row import ToolCallRow
+
+    label, target = _call_caption(
+        wire_name, args_summary, mcp_tools, mcp_servers
+    )
+    return ToolCallRow(
+        call_id=call_id,
+        label=label,
+        target=target,
+        wire_name=wire_name,
+        event_no=event_no,
+        waiting=waiting,
+        level=level,
+    )
 
 
 def raw_output(ev) -> Optional[str]:
@@ -250,9 +300,15 @@ def _mount_summary_widgets(
         )
 
 
-def _dispatch_readonly(mount_target, ev, calls: dict) -> None:
+def _dispatch_readonly(
+    mount_target,
+    ev,
+    calls: dict,
+    *,
+    mcp_tools: Mapping[str, McpToolInfo] | None = None,
+    mcp_servers: Iterable[str] = (),
+) -> None:
     """Смонтировать виджеты одного события (read-only паритет с _render_event)."""
-    from gc_tui.widgets.tool_call_row import ToolCallRow
     from gc_tui.widgets.trace_row import TraceRow
     from gc_tui.widgets.user_reply import UserReplyContainer
 
@@ -285,13 +341,14 @@ def _dispatch_readonly(mount_target, ev, calls: dict) -> None:
                 )
             )
     elif ev.kind == "call":
-        row = ToolCallRow(
+        row = build_call_row(
             call_id=ev.call_id or f"_anon_{ev.no}",
-            # Показ — wire-имя реестра (Д11/R3); tool_name(канонический id) —
-            # только фолбэк на случай, если wire_name не заполнен.
-            tool_name=ev.wire_name or ev.tool_name or "<tool>",
-            args_summary=args_portion(ev.summary),
+            wire_name=ev.wire_name or ev.tool_name or "<tool>",
+            args_summary=ev.args_summary,
+            level=0,
             event_no=ev.no,
+            mcp_tools=mcp_tools,
+            mcp_servers=mcp_servers,
         )
         calls[row.call_id] = row
         mount_target.mount(row)
@@ -400,6 +457,8 @@ def _render_record_readonly(
     context: RenderContext | None = None,
     *,
     in_window: bool = True,
+    mcp_tools: Mapping[str, McpToolInfo] | None = None,
+    mcp_servers: Iterable[str] = (),
 ) -> int:
     """Одна envelope-запись → виджеты. Возвращает следующий no.
     hidden-события (policy/bounce/context) считаем, но в трейс не рендерим —
@@ -424,13 +483,25 @@ def _render_record_readonly(
     no += 1
     if ev.hidden:
         return no
-    _dispatch_readonly(mount_target, ev, calls)
+    _dispatch_readonly(
+        mount_target,
+        ev,
+        calls,
+        mcp_tools=mcp_tools,
+        mcp_servers=mcp_servers,
+    )
     if sk:
         _mount_skill_marker_readonly(mount_target, sk, no)  # после реплики
     return no
 
 
-def render_segments_readonly(mount_target, segments: list) -> dict:
+def render_segments_readonly(
+    mount_target,
+    segments: list,
+    *,
+    mcp_tools: Mapping[str, McpToolInfo] | None = None,
+    mcp_servers: Iterable[str] = (),
+) -> dict:
     """Read-only превью из сегментов: полная история (все сегменты сырьём) +
     нумерованные маркеры сжатий #K между ними. Паритет рендера с основным
     трейсом (hidden/policy скрыто, summary/error_msg/intermediate как там).
@@ -471,6 +542,8 @@ def render_segments_readonly(mount_target, segments: list) -> dict:
                 calls,
                 context,
                 in_window=in_window,
+                mcp_tools=mcp_tools,
+                mcp_servers=mcp_servers,
             )
         comp = seg.get("compacted_by")
         if comp:
@@ -488,6 +561,8 @@ def merge_nested_readonly(
     calls: dict,
     *,
     allowed_parent_ids: set[str] | None = None,
+    mcp_tools: Mapping[str, McpToolInfo] | None = None,
+    mcp_servers: Iterable[str] = (),
 ) -> None:
     """Read-only домонтирование вложенного трейса субагентов из sidecar-records
     (превью). Паритет с MainScreen._merge_sidecar_nested: те же plan/apply,
@@ -504,7 +579,6 @@ def merge_nested_readonly(
         plan_sidecar_nested_actions,
     )
     from gc_tui.services.todo_render import build_todo_block
-    from gc_tui.widgets.tool_call_row import ToolCallRow
     from gc_tui.widgets.trace_row import TraceRow
     from gc_tui.widgets.user_reply import NestedUserReply
 
@@ -523,12 +597,13 @@ def merge_nested_readonly(
         anchors[pid] = widget
 
     def _tool(*, parent_call_id, tool_name, tool_call_id, args_summary, **_kw):
-        row = ToolCallRow(
+        row = build_call_row(
             call_id=tool_call_id or f"_nested_{tool_name}",
-            tool_name=tool_name,
+            wire_name=tool_name,
             args_summary=args_summary or "",
             level=1,
-            waiting=False,
+            mcp_tools=mcp_tools,
+            mcp_servers=mcp_servers,
         )
         if tool_call_id:
             nested_rows[tool_call_id] = row

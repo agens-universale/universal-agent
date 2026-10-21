@@ -93,6 +93,9 @@ class TraceEvent:
     # tool_name остаётся каноническим id — на нём завязана логика маппера/экрана
     # (COGNITIVE_TOOLS, "intermediate_reply"/"submit_solution"/"subagent_*" и т.д.).
     wire_name: Optional[str] = None
+    # Сводка аргументов вызова от ядра (`tool_args_summary`) — объект строки
+    # вызова; заполняется только у kind="call".
+    args_summary: str = ""
     hidden: bool = False  # True → не рендерить в трейс (но kind учитывается polling-логикой)
     summary_content: str = (
         ""  # очищенный текст сводки (только для kind="summary")

@@ -37,12 +37,15 @@ class PreviewScreen(Screen[bool]):
         thread_id: str = "",
         project_path: str = "",
         subagent_records: list | None = None,
+        mcp_snapshot: dict | None = None,
     ) -> None:
         super().__init__()
         self._segments = segments
         self._thread_id = thread_id
         self._project_path = project_path
         self._subagent_records = subagent_records
+        # Снимок MCP треда (meta.runtime.mcp_tools) — подписи MCP-вызовов.
+        self._mcp_snapshot = mcp_snapshot
 
     def compose(self) -> ComposeResult:
         with Vertical(id="root"):
@@ -65,6 +68,11 @@ class PreviewScreen(Screen[bool]):
             )
 
     def on_mount(self) -> None:
+        from gc_core.constants.tool_display import (
+            mcp_servers_of,
+            mcp_tools_from_snapshot,
+        )
+
         from gc_tui.services.trace_render import (
             merge_nested_readonly,
             render_segments_readonly,
@@ -73,13 +81,18 @@ class PreviewScreen(Screen[bool]):
         trace = self.query_one("#trace", VerticalScroll)
         segments = self._segments
         records = self._subagent_records
-        calls = render_segments_readonly(trace, segments)
+        mcp = {
+            "mcp_tools": mcp_tools_from_snapshot(self._mcp_snapshot),
+            "mcp_servers": mcp_servers_of(self._mcp_snapshot),
+        }
+        calls = render_segments_readonly(trace, segments, **mcp)
         if records:
             merge_nested_readonly(
                 trace,
                 records,
                 calls,
                 allowed_parent_ids=subagent_parent_ids_in_window(segments),
+                **mcp,
             )
         # Сырьё сегментов и sidecar после монтажа не держим: в виджетах уже
         # короткий трейс, тяжёлые tool output / nested вне окна не нужны.

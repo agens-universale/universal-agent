@@ -335,8 +335,8 @@ async def test_confirm_enter_not_open_tool_detail_when_row_focused(tmp_path):
         scr._task_events = [call_ev]
         row = ToolCallRow(
             call_id="c1",
-            tool_name="exec_command",
-            args_summary="curl",
+            label="exec_command",
+            target="curl",
         )
         await scr.query_one("#trace").mount(row)
         await pilot.pause(0.05)
@@ -390,9 +390,7 @@ async def test_confirm_ctrl_click_not_open_tool_detail(tmp_path):
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._task_events = _tool_call_events()
-        row = ToolCallRow(
-            call_id="c1", tool_name="exec_command", args_summary="curl"
-        )
+        row = ToolCallRow(call_id="c1", label="exec_command", target="curl")
         await scr.query_one("#trace").mount(row)
         row.set_result(summary="ok", error=False)
         await pilot.pause(0.05)
@@ -438,9 +436,7 @@ async def test_ctrl_click_opens_tool_detail_without_confirm(tmp_path):
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._task_events = _tool_call_events()
-        row = ToolCallRow(
-            call_id="c1", tool_name="exec_command", args_summary="curl"
-        )
+        row = ToolCallRow(call_id="c1", label="exec_command", target="curl")
         await scr.query_one("#trace").mount(row)
         row.set_result(summary="ok", error=False)
         await pilot.pause(0.05)
@@ -627,9 +623,7 @@ async def test_confirm_banner_receives_focus_on_show(tmp_path):
 
     async with app.run_test() as pilot:
         scr = pilot.app.screen
-        row = ToolCallRow(
-            call_id="c1", tool_name="exec_command", args_summary="x"
-        )
+        row = ToolCallRow(call_id="c1", label="exec_command", target="x")
         await scr.query_one("#trace").mount(row)
         row.focus()
         await pilot.pause(0.05)

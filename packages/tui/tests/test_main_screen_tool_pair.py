@@ -69,8 +69,9 @@ async def test_call_then_output_mutates_in_place(tmp_path):
 
         rows = pilot.app.query(ToolCallRow)
         assert len(rows) == 1
-        # running: глиф ▸ в prefix, content несёт имя + elapsed (без "[..]")
-        assert "read_file" in str(rows[0].query_one(".trace-content").render())
+        # running: глиф ▸ в prefix, content несёт подпись + объект + elapsed
+        content = str(rows[0].query_one(".trace-content").render())
+        assert content.startswith("Read  src/x.py · ")
         assert "▸" in str(rows[0].query_one(".trace-prefix").render())
 
         # 2) добавляем output, ждём polling (>= 1s)
@@ -352,8 +353,8 @@ async def test_local_stop_finalizes_running_rows(tmp_path):
         scr = pilot.app.screen
         row = ToolCallRow(
             call_id="c1",
-            tool_name="subagent_code_reviewer",
-            args_summary="task=анализ",
+            label="subagent_code_reviewer",
+            target="task=анализ",
         )
         scr.query_one("#trace", VerticalScroll).mount(row)
         await pilot.pause()

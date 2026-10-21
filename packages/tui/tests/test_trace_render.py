@@ -159,9 +159,9 @@ async def test_render_thread_readonly_kinds():
 
 
 @pytest.mark.asyncio
-async def test_render_thread_readonly_call_row_uses_wire_tool_name():
-    """Д11/R3: readonly-превью показывает wire-имя тула (как в реестре), не
-    канонический id маппера — fs_append_file, не append_to_file."""
+async def test_render_thread_readonly_call_row_shows_label():
+    """Спека P3 §2.1: превью рисует подпись ядра (`Write  x.py`), как живая
+    лента; wire-имя остаётся в строке только для отладки."""
     pytest.importorskip("textual")
     from textual.app import App
     from textual.containers import VerticalScroll
@@ -191,7 +191,10 @@ async def test_render_thread_readonly_call_row_uses_wire_tool_name():
 
     async with _A().run_test() as pilot:
         row = pilot.app.screen.query_one(ToolCallRow)
-        assert row._tool_name == "fs_append_file"
+        content = row._render_content().plain
+        assert content.startswith("Write  x.py")
+        assert "append" not in content
+        assert row.wire_name == "fs_append_file"
 
 
 def _seg(payloads, synthesis=None, n=0, index=0):

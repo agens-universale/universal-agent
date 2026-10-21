@@ -1,10 +1,11 @@
 """ToolCallRow — единый виджет на один tool-вызов; мутирует waiting → running → ok/err.
 
-Layout: Horizontal(prefix-Static, content-Static) — wrap длинных args/result
-происходит внутри content-колонки = hanging indent (continuation выравнивается
-под началом имени тула: отступ уровня + глиф + пробел).
+Layout: Horizontal(prefix-Static, content-Static) — wrap длинного объекта/
+результата происходит внутри content-колонки = hanging indent (continuation
+выравнивается под началом подписи: отступ уровня + глиф + пробел).
 
-Статус-глиф живёт в prefix-Static (▸/‖/✓/✗/·), content-Static несёт имя/args/хвост.
+Статус-глиф живёт в prefix-Static (▸/‖/✓/✗/·), content-Static несёт
+`Подпись  объект` и хвост.
 У строки правки (`set_edit_counts`) после объекта — счётчики `+N −M`, а в конце
 строки справа — кнопка ❐ копирования её диффа (спека P3 §10).
 
@@ -69,12 +70,12 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         ToolCallRow
             Horizontal
                 Static(<rich Text>, classes="trace-prefix")  — ведущий статус-глиф ▸/✓/✗/·
-                Static(<rich Text>, classes="trace-content line-tool")  — имя/args/хвост
+                Static(<rich Text>, classes="trace-content line-tool")  — подпись/объект/хвост
                 _CopyButton(classes="block-copy")  — ❐, видна у строки правки
 
     Цветовые зоны через rich.Text:
     - prefix: статус-глиф — RUN (пульс) / OK / ERR / DIM.
-    - content: name → TOOL_NAME, скобки/args/хвост → DIM, elapsed → RUN.
+    - content: подпись → TOOL_NAME, объект/хвост → DIM, elapsed → RUN.
 
     Контракт focus-handler: если в `_on_focus`/`_on_blur` synchronously читаешь
     `self.has_focus` — вызови `super()` ПЕРВЫМ, иначе прочитаешь stale Reactive-
@@ -106,8 +107,9 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         self,
         *,
         call_id: str,
-        tool_name: str,
-        args_summary: str,
+        label: str,
+        target: str,
+        wire_name: str = "",
         event_no: int = 0,
         waiting: bool = False,
         level: int = 0,
@@ -115,8 +117,11 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
     ) -> None:
         super().__init__(**kwargs)
         self.call_id = call_id
-        self._tool_name = tool_name
-        self._args = args_summary
+        # Подпись и объект — из ядра (trace_render.build_call_row); wire-имя
+        # в строку не попадает, хранится для отладки и тестов.
+        self._label = label
+        self._target = target
+        self.wire_name = wire_name
         self._event_no = event_no
         self._result: Optional[str] = None
         self._is_error: bool = False
@@ -317,24 +322,12 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
 
     def _render_content(self) -> Text:
         text = Text()
-        text.append(self._tool_name, style=_TOOL_NAME)
-        text.append("(", style=_DIM)
-        text.append(self._args, style=_DIM)
+        text.append(self._label, style=_TOOL_NAME)
+        if self._target:
+            text.append(f"  {self._target}", style=_DIM)
         if self._result is None:
-            text.append(") ", style=_DIM)
-            if self._interrupted:
-                text.append("прервано", style=_DIM)
-            elif self._waiting:
-                pass  # только имя(args), без elapsed
-            elif self._live_status:
-                text.append(f"· {self._live_status} · ", style=_DIM)
-                text.append(format_duration(self._elapsed_s()), style=_RUN)
-            else:
-                text.append(
-                    f"· {format_duration(self._elapsed_s())}", style=_RUN
-                )
+            self._append_pending_tail(text)
             return text
-        text.append(")", style=_DIM)
         if self._edit_counts is not None:
             add, removed = self._edit_counts
             text.append(" ")
@@ -344,6 +337,18 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         if self._is_error or self._result:
             text.append(f" -> {self._result}", style=_DIM)
         return text
+
+    def _append_pending_tail(self, text: Text) -> None:
+        """Хвост строки без результата: прервано / elapsed (+ step/last)."""
+        if self._interrupted:
+            text.append(" · прервано", style=_DIM)
+        elif self._waiting:
+            pass  # только подпись и объект, без elapsed
+        else:
+            if self._live_status:
+                text.append(f" · {self._live_status}", style=_DIM)
+            text.append(" · ", style=_DIM)
+            text.append(format_duration(self._elapsed_s()), style=_RUN)
 
     def on_click(self, event: events.Click) -> None:
         """Клик по ❐ копирует дифф правки и строку не выделяет.

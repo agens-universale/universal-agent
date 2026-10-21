@@ -217,7 +217,7 @@ async def test_nested_edit_gets_block_under_its_own_row(tmp_path):
         assert seq[1].call_id == "call_child_9" and seq[1]._level
         assert _path(seq[2]) == "a.py"
         assert not seq[2].query(".block-label")  # ветки нет
-        assert "a.py) +1 −1" in seq[1]._render_content().plain
+        assert "a.py +1 −1" in seq[1]._render_content().plain
         assert seq[1].query_one(".block-copy", Static).display
         assert seq[1]._copy_text == copyable_hunks(SHORT_HUNKS, path="a.py")
 
@@ -327,7 +327,7 @@ async def test_nested_block_keeps_nested_indent_and_tie(tmp_path):
             for strip in scr.app.screen._compositor.render_strips()
         ]
         indent = lambda s: len(s) - len(s.lstrip(" "))
-        row = next(i for i, s in enumerate(lines) if "fs_write_file" in s)
+        row = next(i for i, s in enumerate(lines) if "Write  a.py" in s)
         body = next(i for i, s in enumerate(lines) if "def f():" in s)
         assert body == row + 1
         assert indent(lines[body]) - indent(lines[row]) == 2

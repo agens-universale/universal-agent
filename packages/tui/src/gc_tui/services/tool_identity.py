@@ -6,11 +6,10 @@ namespaced ИЛИ старое голое, для чтения старых тр
 id, равный старому голому имени, на которое завязан trace_mapper. Тонкий слой:
 только имя→id. Без Textual, без бизнес-логики.
 
-Маппим ТОЛЬКО тулы, на имена которых завязан trace_mapper: 3 control-тула
-(детект баннера/финала/мьюта) + тулы со своей веткой в _arg_summary. Остальные
-(session_memory/session_think/project_memory/file_info/…) trace_mapper по имени
-не сравнивает → рендерятся generic-веткой по текущему имени (как любой неизвестный
-тул, так было и раньше)."""
+Маппим ТОЛЬКО тулы, на имена которых завязан trace_mapper и экран: 3 control-
+тула (детект баннера/финала/мьюта) и исторический набор переименованных. Подпись
+строки и сводку аргументов даёт ядро (`tool_display`, `tool_args_summary`) по
+wire-имени — канонический id для показа не нужен."""
 
 from __future__ import annotations
 
@@ -41,9 +40,8 @@ _NEW_TO_CANONICAL: dict[str, str] = {
     "fs_append_file": "append_to_file",
     "fs_list_files": "list_files",
     "fs_find_files_by_name": "find_files_by_name",
-    # Ветка search_files в _arg_summary читает `query or pattern` — новый тул
-    # ложится в неё как есть. Без записи строка трейса печатала сырое wire-имя
-    # и теряла pattern в generic-ветке «первые 3 скаляра».
+    # Канонический id поиска — тот же, что у старого имени ниже: старые и
+    # новые треды маппятся одинаково (подпись и сводку даёт ядро).
     "fs_find_in_files": "search_files",
     # Старое wire-имя: нужно для чтения тредов, записанных до переименования.
     "fs_search_files": "search_files",

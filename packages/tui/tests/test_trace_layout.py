@@ -107,7 +107,7 @@ async def test_tool_call_row_has_two_column_layout():
     class _App(App):
         def compose(self) -> ComposeResult:
             yield ToolCallRow(
-                call_id="c1", tool_name="read_file", args_summary="path='x'"
+                call_id="c1", label="read_file", target="path='x'"
             )
 
     async with _App().run_test() as pilot:
@@ -138,8 +138,8 @@ async def test_long_tool_args_wrap_inside_content_column():
         def compose(self) -> ComposeResult:
             yield ToolCallRow(
                 call_id="c1",
-                tool_name="execute_command",
-                args_summary=long_args,
+                label="execute_command",
+                target=long_args,
             )
 
     async with _App().run_test(size=(80, 24)) as pilot:
@@ -159,9 +159,9 @@ async def test_long_tool_args_wrap_inside_content_column():
 
 
 @pytest.mark.asyncio
-async def test_call_row_shows_wire_tool_name_not_canonical_id():
-    """Д11/R3: живая строка тула в ленте показывает wire-имя (как в реестре),
-    не канонический id маппера — fs_append_file, не append_to_file."""
+async def test_call_row_shows_label_not_wire_name():
+    """Спека P3 §2.1: живая строка вызова — подпись ядра по wire-имени
+    (`Write  x.py`); ни wire-имени, ни канонического id в строке нет."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
     from gc_tui.models import TraceEvent
@@ -174,7 +174,8 @@ async def test_call_row_shows_wire_tool_name_not_canonical_id():
             event_ts_utc_iso="2026-05-28T00:00:00Z",
             kind="call",
             title="append_to_file",
-            summary="append_to_file(path='x.py')",
+            summary="x.py",
+            args_summary="x.py",
             tool_name="append_to_file",
             wire_name="fs_append_file",
             call_id="c1",
@@ -183,7 +184,10 @@ async def test_call_row_shows_wire_tool_name_not_canonical_id():
         scr._render_event(ev)
         await pilot.pause()
         row = scr.query_one(ToolCallRow)
-        assert row._tool_name == "fs_append_file"
+        content = row._render_content().plain
+        assert content.startswith("Write  x.py")
+        assert "append" not in content
+        assert row.wire_name == "fs_append_file"
 
 
 @pytest.mark.asyncio

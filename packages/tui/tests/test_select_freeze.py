@@ -172,7 +172,7 @@ async def test_tool_call_row_pulse_gated_by_selecting(tmp_path, monkeypatch):
         settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
-        row = ToolCallRow(call_id="c1", tool_name="tool", args_summary="x=1")
+        row = ToolCallRow(call_id="c1", label="tool", target="x=1")
         await pilot.app.mount(row)
         updated = {"n": 0}
         if row._prefix_static is not None:

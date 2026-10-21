@@ -200,7 +200,7 @@ def test_nested_prefixes_come_from_level():
 @pytest.mark.parametrize("level", [0, 1, 2])
 def test_tool_call_row_prefix_is_level_plus_glyph(level):
     row = ToolCallRow(
-        call_id="c", tool_name="fs_read_file", args_summary="", level=level
+        call_id="c", label="fs_read_file", target="", level=level
     )
     row.set_result(summary="", error=False)
     assert row._render_prefix().plain == level_prefix(level) + "✓ "
@@ -316,8 +316,8 @@ async def test_blank_line_before_every_call_on_both_paths(tmp_path):
             "".join(seg.text for seg in strip).rstrip()
             for strip in pilot.app.screen._compositor.render_strips()
         ]
-        read = next(i for i, s in enumerate(lines) if "fs_read_file" in s)
-        sub = next(i for i, s in enumerate(lines) if "subagent_worker" in s)
+        read = next(i for i, s in enumerate(lines) if "Read  " in s)
+        sub = next(i for i, s in enumerate(lines) if "Agent  " in s)
         assert sub == read + 2 and lines[read + 1] == ""
 
     class _Preview(App):

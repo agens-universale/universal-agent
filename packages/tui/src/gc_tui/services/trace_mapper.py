@@ -9,7 +9,7 @@ from typing import Any, Iterable, Mapping, Optional
 
 from gc_core.attachments.model import ORIGIN_USER, Attachment, attachments_of
 from gc_core.constants.tool_names import PROPOSE_PLAN_TOOL_NAME
-from gc_core.utils.path_truncate import truncate_path
+from gc_core.execution.progress import tool_args_summary
 from gc_core.vision.errors import (
     ERR_NO_IMAGE_STORE,
     ERR_NO_VISION_MODEL,
@@ -629,61 +629,6 @@ def _extract_ask_human_response(output: Any) -> Optional[str]:
     return stripped
 
 
-# Аргумент с таким именем — путь (Е6 батча 3): показывается всегда; свёртка
-# `<N chars>` — только для содержимого.
-_PATH_KEYS = frozenset(
-    {"path", "file", "file_path", "dir", "directory", "cwd", "src", "dst"}
-)
-
-# Путь показывается ЦЕЛИКОМ (Ж2 батча 4): строка ленты переносится по ширине,
-# как это уже происходит с длинным текстом ошибки, и фиксированный бюджет
-# прятал каталог и начало имени там, где на экране хватало места. Потолок —
-# страховка от патологии (глубокое дерево, генерированные имена), не бюджет.
-# Величина — со смоука 5: обрезка сегментная и имя файла держит при любом
-# потолке, платят за него только промежуточные каталоги. 100 оставляет корень,
-# первый каталог и имя, укладывая строку вызова в две строки ленты; 160 отдавал
-# третью строку за один каталог сверху.
-_PATH_LIMIT = 100
-
-
-def _path_preview(value: str) -> str:
-    """Путь под потолком — целиком, за потолком — со схлопнутой серединой.
-
-    Режем именно `truncate_path`, а НЕ прозаическим `_truncate_word_boundary`:
-    пробел в пути — не граница слова, а часть имени каталога (`C:\\Program
-    Files`, `C:\\Users\\Имя Фамилия`, `OneDrive - Company`). Прозаическое
-    правило на таком пути отрезало бы всё после первого же пробела, и от
-    длинного пути осталось бы `'C:\\Program…'` — без каталога и без имени файла.
-    `truncate_path` схлопывает середину и всегда сохраняет имя файла — ровно то,
-    ради чего путь и показывают в строке вызова.
-    """
-    return repr(truncate_path(value, _PATH_LIMIT))
-
-
-def _scalar_preview(v: Any) -> str:
-    if isinstance(v, str):
-        if len(v) > 60:
-            return f"<{len(v)} chars>"
-        return repr(v)
-    if isinstance(v, (int, float, bool)) or v is None:
-        return repr(v)
-    if isinstance(v, list):
-        return f"<list {len(v)}>"
-    if isinstance(v, dict):
-        return "<object>"
-    return "<?>"
-
-
-def _text_preview(v: Any, limit: int) -> str:
-    """Обрезать длинную строку до ~limit символов с «…», без `<N chars>`."""
-    if not isinstance(v, str):
-        return _scalar_preview(v)
-    text = " ".join(v.split())
-    if len(text) > limit:
-        text = text[:limit].rstrip() + "…"
-    return repr(text)
-
-
 _TODO_GLYPHS = {"completed": "✓", "in_progress": "→", "pending": "○"}
 
 
@@ -704,70 +649,6 @@ def _todo_checklist_summary(todos: list) -> str:
     if not lines:
         return "чек-лист очищен"
     return "\n".join([f"чек-лист {done}/{len(lines)}", *lines])
-
-
-def _arg_summary(name: str, args: dict) -> str:
-    if name.startswith("subagent_"):
-        # Спека: reason ~80, task ~60 — текст, не <N chars>.
-        pairs: list[str] = []
-        if "reason" in args:
-            pairs.append(f"reason={_text_preview(args.get('reason'), 80)}")
-        if "task" in args:
-            pairs.append(f"task={_text_preview(args.get('task'), 60)}")
-        return ", ".join(pairs)
-    if name in ("read_file", "list_files"):
-        p = args.get("path")
-        return f"path={_path_preview(p)}" if isinstance(p, str) else ""
-    if name in ("write_to_file", "append_to_file"):
-        p = args.get("path")
-        c = args.get("content", "")
-        clen = len(c) if isinstance(c, str) else 0
-        return (
-            f"path={_path_preview(p)}, content=<{clen} chars>"
-            if isinstance(p, str)
-            else ""
-        )
-    if name == "search_and_replace":
-        # Имена — как в схеме тула (`search`/`replace`), а не `old`/`new`:
-        # схема запрещает лишние ключи, поэтому по старым именам подпись
-        # ВСЕГДА показывала `<0 chars>` — при любом вызове.
-        p = args.get("path")
-        o = args.get("search", "")
-        n = args.get("replace", "")
-        path_shown = (
-            _path_preview(p) if isinstance(p, str) else _scalar_preview(p)
-        )
-        return (
-            f"path={path_shown}, "
-            f"search=<{len(o) if isinstance(o, str) else 0} chars>, "
-            f"replace=<{len(n) if isinstance(n, str) else 0} chars>"
-        )
-    if name == "search_files":
-        q = args.get("query") or args.get("pattern")
-        return f"query={q!r}" if isinstance(q, str) else ""
-    if name == "execute_command":
-        c = args.get("command")
-        return f"command={c!r}" if isinstance(c, str) else ""
-    if name == "run_python_code":
-        code = args.get("code", "")
-        return f"code=<{len(code) if isinstance(code, str) else 0} chars>"
-    if name == "fetch_url":
-        u = args.get("url")
-        return f"url={u!r}" if isinstance(u, str) else ""
-    if name == "thread_notes":
-        a = args.get("action")
-        return f"action={a!r}"
-
-    # default: name + 1-3 short scalars.
-    pairs = []
-    for k, v in list(args.items())[:3]:
-        shown = (
-            _path_preview(v)
-            if (k in _PATH_KEYS and isinstance(v, str))
-            else _scalar_preview(v)
-        )
-        pairs.append(f"{k}={shown}")
-    return ", ".join(pairs)
 
 
 def _looks_like_error(output: Any) -> bool:
@@ -829,9 +710,9 @@ def _truncate_word_boundary(text: str, limit: int) -> str:
     Правило «резать по пробелу» верно ТОЛЬКО для прозы — сводки результата,
     текста ошибки, технической врезки. Структурированную строку, где пробел не
     граница слова, оно калечит: у пути после раннего пробела (`C:\\Program
-    Files\\…`) отрезается всё, включая имя файла. Путь режет `_path_preview`
-    через `path_display.truncate_path`; третьему вызывающему со структурой, а не
-    прозой, сюда тоже нельзя."""
+    Files\\…`) отрезается всё, включая имя файла. Путь режет
+    `path_truncate.truncate_path`; вызывающему со структурой, а не прозой, сюда
+    нельзя."""
     if len(text) <= limit:
         return text
     cut = text[:limit]
@@ -936,14 +817,14 @@ def _map_function_event(
     )
 
     if typ == "function_call":
-        args = coerce_args(msg.get("arguments"))
-        summary = f"{name or '<tool>'}({_arg_summary(name or '', args)})"
+        args_summary = tool_args_summary(wire_name, msg.get("arguments"))
         return TraceEvent(
             no=no,
             event_ts_utc_iso=ts,
             kind="call",
             title=name or "",
-            summary=summary,
+            summary=args_summary,
+            args_summary=args_summary,
             full_payload=msg,
             message_id=mid,
             call_id=call_id,

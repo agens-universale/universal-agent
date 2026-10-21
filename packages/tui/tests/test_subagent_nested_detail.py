@@ -265,13 +265,13 @@ async def test_ctrl_click_nested_from_persisted_sidecar(tmp_path):
         trace = scr.query_one("#trace", VerticalScroll)
         parent = ToolCallRow(
             call_id="call_sub_1",
-            tool_name="subagent_worker",
-            args_summary="task=x",
+            label="subagent_worker",
+            target="task=x",
         )
         nested = ToolCallRow(
             call_id="live_child",
-            tool_name="shell",
-            args_summary="cmd='pwd'",
+            label="shell",
+            target="cmd='pwd'",
             level=1,
         )
         trace.mount(parent)

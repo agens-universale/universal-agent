@@ -567,8 +567,8 @@ async def test_preview_nested_reply_to_a_subagent_shows_its_images(tmp_path):
             t = self.query_one("#t", VerticalScroll)
             parent = ToolCallRow(
                 call_id="call_sub",
-                tool_name="subagent_worker",
-                args_summary="task",
+                label="subagent_worker",
+                target="task",
             )
             t.mount(parent)
             merge_nested_readonly(t, records, {"call_sub": parent})

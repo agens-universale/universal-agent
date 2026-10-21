@@ -544,6 +544,7 @@ class SessionsScreen(Screen):
         tid = task.thread_id
         segments = self._store.read_segments(tid)
         subagent_records = self._store.read_subagent_trace(tid)
+        runtime = self._store.get_task_meta(tid).get("runtime") or {}
         from gc_tui.screens.preview import PreviewScreen
 
         def _on_result(resume: bool) -> None:
@@ -556,6 +557,7 @@ class SessionsScreen(Screen):
                 thread_id=tid,
                 project_path=self._project_path(),
                 subagent_records=subagent_records,
+                mcp_snapshot=runtime.get("mcp_tools"),
             ),
             _on_result,
         )

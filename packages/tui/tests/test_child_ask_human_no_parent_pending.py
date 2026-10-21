@@ -49,8 +49,8 @@ async def test_child_ask_human_answer_no_parent_pending(tmp_path):
 
         parent = ToolCallRow(
             call_id="call_sub_1",
-            tool_name="subagent_worker",
-            args_summary="task",
+            label="subagent_worker",
+            target="task",
         )
         scr._active_calls["call_sub_1"] = parent
         scr._subagent_parent_rows["call_sub_1"] = parent
@@ -184,8 +184,8 @@ async def test_child_ask_human_answer_with_images_renders_like_a_reply(
         app.active_runner = runner
         parent = ToolCallRow(
             call_id="call_sub_1",
-            tool_name="subagent_worker",
-            args_summary="task",
+            label="subagent_worker",
+            target="task",
         )
         scr._active_calls["call_sub_1"] = parent
         scr._subagent_parent_rows["call_sub_1"] = parent

@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Any, Callable, Optional, Sequence
 
 from gc_core.attachments.model import attachments_of
+from gc_core.constants.tool_display import tool_display
 from gc_core.constants.tool_names import SESSION_TODO_TOOL_NAME
 from gc_core.execution.progress import SubagentProgressEvent
 
@@ -187,8 +188,10 @@ class SubagentProgressConsumer:
 def format_parent_live_status(
     *, step: int, max_steps: int, last_tool: Optional[str]
 ) -> str:
-    """Хвост корневой строки субагента: `step 4/100 · last=fs_read_file`."""
+    """Хвост корневой строки субагента: `step 4/100 · last=Read`.
+
+    `last` — подпись тула из ядра, не wire-имя (спека P3 §2.1)."""
     parts = [f"step {step}/{max_steps}" if max_steps else f"step {step}"]
     if last_tool:
-        parts.append(f"last={last_tool}")
+        parts.append(f"last={tool_display(last_tool).label}")
     return " · ".join(parts)

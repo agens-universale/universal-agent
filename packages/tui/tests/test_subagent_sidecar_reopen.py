@@ -251,7 +251,7 @@ async def test_reopen_merges_nested_under_archived_subagent(tmp_path):
         nested = scr._nested_tool_rows.get("child_arch_1")
         assert nested is not None
         assert nested._level == 1
-        assert "fs_list_files" in str(nested._render_content())
+        assert str(nested._render_content()).startswith("Find  ")
 
 
 @pytest.mark.asyncio
@@ -280,7 +280,7 @@ async def test_reopen_merges_nested_under_finished_subagent(tmp_path):
         nested = scr._nested_tool_rows.get("call_child_9")
         assert nested is not None
         assert nested._level == 1
-        assert "fs_read_file" in str(nested._render_content())
+        assert str(nested._render_content()).startswith("Read  a.py")
         assert nested._result is not None
 
         widgets = scr._nested_widgets_by_parent.get("call_sub_1", [])
