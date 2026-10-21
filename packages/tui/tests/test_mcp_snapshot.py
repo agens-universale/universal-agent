@@ -7,7 +7,11 @@ def test_build_mcp_tools_snapshot_groups_by_server():
     }
     # Реальная форма tools_data: ключ тула = mcp_<server>_<base>; значение содержит "description".
     tools_data = {
-        "mcp_search_web": {"description": "web search", "spec": {}},
+        "mcp_search_web": {
+            "description": "web search",
+            "mcp_server": "search",
+            "spec": {},
+        },
         "read_file": {
             "description": "builtin",
             "spec": {},
@@ -56,7 +60,12 @@ def test_snapshot_includes_status_and_description():
             },
         }
     }
-    tools_data = {"mcp_office_read": {"description": "read a doc"}}
+    tools_data = {
+        "mcp_office_read": {
+            "description": "read a doc",
+            "mcp_server": "office",
+        }
+    }
     mcp_status = {
         "office": {
             "status": "connected",
@@ -77,7 +86,12 @@ def test_snapshot_includes_status_and_description():
     assert snap["office"]["status"] == "connected"
     assert snap["office"]["description"] == "Read office docs"
     assert snap["office"]["tools"] == [
-        {"name": "mcp_office_read", "description": "read a doc"}
+        {
+            "name": "mcp_office_read",
+            "description": "read a doc",
+            "tool": None,
+            "title": None,
+        }
     ]
     assert snap["computer"]["status"] == "failed"
     assert snap["computer"]["reason"] == "команда 'computer-mcp' не найдена"

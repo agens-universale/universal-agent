@@ -1,6 +1,6 @@
 """Строка чек-листа в блоке субагента: `todos=<list 6>` → `чек-лист 1/3 · …`.
 
-Одностроч. сводка живёт в brief_args_summary — она общая для всех трёх путей
+Одностроч. сводка живёт в tool_args_summary — она общая для всех трёх путей
 (живой прогресс, переоткрытие из sidecar, экран деталей).
 """
 
@@ -10,8 +10,8 @@ import json
 
 from gc_core.constants.tool_names import SESSION_TODO_TOOL_NAME
 from gc_core.execution.progress import (
-    brief_args_summary,
     todo_items_from_arguments,
+    tool_args_summary,
 )
 
 ITEMS = [
@@ -22,41 +22,37 @@ ITEMS = [
 
 
 def test_todo_summary_shows_progress_and_current_step():
-    out = brief_args_summary(
-        {"todos": ITEMS}, tool_name=SESSION_TODO_TOOL_NAME
-    )
+    out = tool_args_summary(SESSION_TODO_TOOL_NAME, {"todos": ITEMS})
     assert out == "чек-лист 1/3 · Написать ревью"
 
 
 def test_todo_summary_without_current_step():
     items = [{"content": "Готово", "status": "completed"}]
-    out = brief_args_summary(
-        {"todos": items}, tool_name=SESSION_TODO_TOOL_NAME
-    )
+    out = tool_args_summary(SESSION_TODO_TOOL_NAME, {"todos": items})
     assert out == "чек-лист 1/1"
 
 
 def test_todo_summary_empty_list_means_cleared():
     assert (
-        brief_args_summary({"todos": []}, tool_name=SESSION_TODO_TOOL_NAME)
+        tool_args_summary(SESSION_TODO_TOOL_NAME, {"todos": []})
         == "чек-лист очищен"
     )
 
 
 def test_todo_summary_accepts_json_string_arguments():
-    out = brief_args_summary(
-        json.dumps({"todos": ITEMS}), tool_name=SESSION_TODO_TOOL_NAME
+    out = tool_args_summary(
+        SESSION_TODO_TOOL_NAME, json.dumps({"todos": ITEMS})
     )
     assert out == "чек-лист 1/3 · Написать ревью"
 
 
-def test_other_tools_keep_generic_summary():
-    out = brief_args_summary({"path": "a.py"}, tool_name="fs_read_file")
-    assert out == "path='a.py'"
+def test_other_tools_keep_their_own_summary():
+    out = tool_args_summary("fs_read_file", {"path": "a.py"})
+    assert out == "a.py"
 
 
 def test_todo_arguments_without_tool_name_stay_generic():
-    out = brief_args_summary({"todos": ITEMS})
+    out = tool_args_summary(None, {"todos": ITEMS})
     assert out == "todos=<list 3>"
 
 
@@ -114,44 +110,42 @@ def test_parse_valid_empty_returns_empty_list():
     assert todo_items_from_arguments('{"todos": []}') == []
 
 
-def test_brief_summary_garbage_args_fall_back_to_generic():
+def test_tool_args_summary_garbage_args_fall_back_to_generic():
     """Битые аргументы session_todo не должны рендериться «чек-лист очищен»."""
-    out = brief_args_summary({"other": 1}, tool_name=SESSION_TODO_TOOL_NAME)
+    out = tool_args_summary(SESSION_TODO_TOOL_NAME, {"other": 1})
     assert "очищен" not in out
     assert out == "other=1"
 
 
-def test_brief_summary_valid_empty_stays_cleared():
-    out = brief_args_summary({"todos": []}, tool_name=SESSION_TODO_TOOL_NAME)
+def test_tool_args_summary_valid_empty_stays_cleared():
+    out = tool_args_summary(SESSION_TODO_TOOL_NAME, {"todos": []})
     assert out == "чек-лист очищен"
 
 
-def test_brief_summary_partially_broken_list_falls_back_to_generic():
+def test_tool_args_summary_partially_broken_list_falls_back_to_generic():
     """Частично битый список — не «очищен», а обычное превью аргументов."""
     raw = {"todos": [{"content": "Шаг", "status": "нетакой"}]}
-    out = brief_args_summary(raw, tool_name=SESSION_TODO_TOOL_NAME)
+    out = tool_args_summary(SESSION_TODO_TOOL_NAME, raw)
     assert "очищен" not in out
     assert out == "todos=<list 1>"
 
 
-def test_brief_summary_truncates_long_current_item():
+def test_tool_args_summary_truncates_long_current_item():
     """Однострочная сводка обязана соблюдать общий лимит, как все прочие тулы."""
     long_item = {
         "content": "Пройти по всем файлам сервиса и " + "деталь " * 40,
         "status": "in_progress",
     }
-    out = brief_args_summary(
-        {"todos": [long_item]}, tool_name=SESSION_TODO_TOOL_NAME
-    )
-    assert len(out) <= 81, f"сводка длиной {len(out)}: {out[:120]}"
+    out = tool_args_summary(SESSION_TODO_TOOL_NAME, {"todos": [long_item]})
+    assert len(out) <= 80, f"сводка длиной {len(out)}: {out[:120]}"
     assert out.startswith("чек-лист 0/1 · ")
     assert out.endswith("…")
 
 
-def test_brief_args_summary_keeps_normal_read_file_arguments():
+def test_tool_args_summary_read_file_shows_path():
     assert (
-        brief_args_summary(
-            json.dumps({"path": "a.py", "offset": 9}), tool_name="fs_read_file"
+        tool_args_summary(
+            "fs_read_file", json.dumps({"path": "a.py", "offset": 9})
         )
-        == "path='a.py', offset=9"
+        == "a.py"
     )

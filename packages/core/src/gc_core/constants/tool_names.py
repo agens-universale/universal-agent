@@ -43,7 +43,22 @@ FS_SEARCH_AND_REPLACE_NAME = "fs_search_and_replace"
 FS_SAVE_BASE64_FILE_NAME = "fs_save_base64_file"
 
 # Skills
+SKILLS_LIST_NAME = "skills_list"
+SKILLS_LOAD_NAME = "skills_load"
 SKILLS_RUN_SCRIPT_NAME = "skills_run_script"
+SKILLS_READ_REFERENCE_NAME = "skills_read_reference"
+SKILLS_READ_ASSET_NAME = "skills_read_asset"
+
+# Остальные встроенные тулы fs / exec (имена для таблицы отображения)
+FS_FILE_INFO_NAME = "fs_file_info"
+FS_LIST_FILES_NAME = "fs_list_files"
+FS_FIND_FILES_BY_NAME_NAME = "fs_find_files_by_name"
+FS_FIND_IN_FILES_NAME = "fs_find_in_files"
+EXEC_CALCULATOR_NAME = "exec_calculator"
+EXEC_SLEEP_NAME = "exec_sleep"
+
+# Субагент с ролью от модели: в сводке вызова главный аргумент — `role`.
+SUBAGENT_SPECIAL_AGENT_NAME = "subagent_special_agent"
 
 # Тулы записи файлов — создают или меняют файлы проекта.
 FILE_WRITE_TOOL_NAMES = frozenset(

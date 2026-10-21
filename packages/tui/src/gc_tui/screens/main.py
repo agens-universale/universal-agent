@@ -43,6 +43,7 @@ from gc_core.tools.skills.skill_arg_resolver import (
     resolve_skill_exact,
     suggest_skills,
 )
+from gc_core.utils.path_truncate import truncate_path
 from rich.cells import cell_len
 from rich.text import Text
 from textual import events
@@ -91,7 +92,6 @@ from gc_tui.services.mode_pill import (
     render_mode_pill,
 )
 from gc_tui.services.notices_ui import format_notices_badge
-from gc_tui.services.path_display import truncate_path
 from gc_tui.services.reasoning_clock import COGNITIVE_TOOLS, ReasoningClock
 from gc_tui.services.session_lock import (
     BUSY_MESSAGE,

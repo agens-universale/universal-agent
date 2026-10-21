@@ -76,11 +76,11 @@ from gc_core.execution.output_wrapping import (
 )
 from gc_core.execution.ports import port
 from gc_core.execution.progress import (
-    brief_args_summary,
     emit_progress,
     extract_intermediate_prose,
     parse_tool_result_status,
     todo_items_from_arguments,
+    tool_args_summary,
 )
 from gc_core.intent_guard.guard import FinishGateGuard
 from gc_core.intent_guard.text_answer_judge import ashould_return_text_answer
@@ -2012,9 +2012,7 @@ async def _aexecute_tool_call(
             "tool_start",
             tool_name=tool_name,
             tool_call_id=call_id_str,
-            args_summary=brief_args_summary(
-                tool_arguments, tool_name=tool_name
-            ),
+            args_summary=tool_args_summary(tool_name, tool_arguments),
             todo_items=_todo_items,
         )
     if persist_tool_trace:
