@@ -303,7 +303,7 @@ def test_running_tail_timer_has_space_before_unit():
 
     row = ToolCallRow(call_id="c1", label="Agent", target="")
     row._start_monotonic = time.monotonic() - 4.0
-    assert row._render_content().plain.endswith(" · 4 с")
+    assert row._render_content().plain.endswith(" · 4с")
 
 
 # --- превью: ошибка вызова и вложенные ---------------------------------------

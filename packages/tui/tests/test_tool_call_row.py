@@ -391,7 +391,7 @@ def test_running_row_shows_elapsed_seconds():
     row = ToolCallRow(call_id="c1", label="subagent_planner", target="task=x")
     row._start_monotonic = time.monotonic() - 47.0
     r = str(row._render_content())
-    assert "· 47 с" in r
+    assert "· 47с" in r
     assert "running" not in r
 
 
@@ -402,7 +402,7 @@ def test_running_row_elapsed_same_for_any_tool():
 
     row = ToolCallRow(call_id="c2", label="read_file", target="path=a")
     row._start_monotonic = time.monotonic() - 3.0
-    assert "· 3 с" in str(row._render_content())
+    assert "· 3с" in str(row._render_content())
 
 
 def test_running_row_elapsed_minutes_format():
@@ -412,7 +412,7 @@ def test_running_row_elapsed_minutes_format():
 
     row = ToolCallRow(call_id="c1", label="t", target="")
     row._start_monotonic = time.monotonic() - 125  # 2 м 5 с
-    assert "· 2 м 5 с" in str(row._render_content())
+    assert "· 2м 5с" in str(row._render_content())
 
 
 def test_elapsed_excludes_paused_interval(monkeypatch):
@@ -460,24 +460,46 @@ def _glyph_color(row, frame: int) -> str:
     )
 
 
-def test_running_glyph_blinks_between_run_and_muted():
-    """● мигает: ровно два состояния RUN_COLOR <-> MUTED, без полутонов."""
-    from gc_tui.palette import MUTED, RUN_COLOR
+def _glyph_at(row, frame: int) -> tuple[str, int]:
+    """Клетка глифа в кадре мигания и ширина префикса."""
+    from rich.cells import cell_len
+
+    row._pulse_frame = frame
+    p = row._render_prefix()
+    return p.plain.rstrip(" ")[-1:] or " ", cell_len(p.plain)
+
+
+def test_running_glyph_blinks_by_disappearing():
+    """● мигает исчезая: в кадре «вкл» — ● цветом RUN_COLOR, в кадре «выкл»
+    клетка пустая (не серый кружок); ширина префикса не меняется."""
+    from gc_tui.palette import RUN_COLOR
     from gc_tui.widgets.tool_call_row import ToolCallRow
 
     row = ToolCallRow(call_id="c1", label="t", target="")
-    assert {_glyph_color(row, f) for f in range(40)} == {RUN_COLOR, MUTED}
+    assert _glyph_color(row, 0) == RUN_COLOR
+    on_glyph, on_width = _glyph_at(row, 0)
+    off_glyph, off_width = _glyph_at(row, 8)
+    assert (on_glyph, off_glyph) == ("●", " ")
+    assert on_width == off_width
 
 
-def test_blink_half_period_is_500ms_on_100ms_tick():
-    """Полупериод 5 кадров по 0.1с = 0.5с: включён, выключен, снова."""
-    from gc_tui.palette import MUTED, RUN_COLOR
+def test_blink_rhythm_visible_700ms_hidden_300ms():
+    """Ритм на 0.1с-тике: 0.7с виден, 0.3с скрыт — кружок большую часть
+    времени на месте, мигание читается как «живое», а не как пропадание."""
     from gc_tui.widgets.tool_call_row import ToolCallRow
 
     row = ToolCallRow(call_id="c1", label="t", target="")
-    assert [_glyph_color(row, f) for f in (0, 4)] == [RUN_COLOR] * 2
-    assert [_glyph_color(row, f) for f in (5, 9)] == [MUTED] * 2
-    assert [_glyph_color(row, f) for f in (10, 14)] == [RUN_COLOR] * 2
+    seen = [_glyph_at(row, f)[0] for f in range(20)]
+    assert seen == (["●"] * 7 + [" "] * 3) * 2
+
+
+def test_trace_timer_tail_has_no_space_before_unit():
+    """Хвост идущего вызова — слитно, как в индикаторе хода: ` · 2с`."""
+    from gc_tui.widgets.tool_call_row import ToolCallRow
+
+    row = ToolCallRow(call_id="c1", label="t", target="")
+    row._elapsed_s = lambda: 2
+    assert row._render_content().plain.endswith("· 2с")
 
 
 def test_pulse_tick_advances_pulse_while_running():
@@ -564,7 +586,7 @@ async def test_poll_active_ticks_running_rows():
         row._start_monotonic = time.monotonic() - 5.0
         scr._poll_active()  # должен дёрнуть refresh у running-строк
         await pilot.pause()
-        assert "· 5 с" in str(row._content_static.render())
+        assert "· 5с" in str(row._content_static.render())
 
 
 # ---- mark_interrupted: терминальное состояние «прервано» (spec 2026-06-10) ----
