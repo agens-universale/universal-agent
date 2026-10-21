@@ -33,6 +33,7 @@ from gc_tui.form_frame import (
     scroll_body,
 )
 from gc_tui.palette import ACCENT, DEEP_DIM, DIM, ERR, INK, OK, SUB_INK, WARN
+from gc_tui.services.footer_slot import MAIN_FOOTER_MIN_COLS
 from gc_tui.services.probe_presentation import connection_line_text
 from gc_tui.widgets.loading_wave import WAVE_INTERVAL, WAVE_SEQ, wave_glyph
 
@@ -379,7 +380,7 @@ _PROFILE_NONE_NOTHING_TO_OPEN = "открывать нечего — это не
 # словам, и длинный сегмент («Ctrl+Space — проверить связь») роняет строку раньше, чем
 # счётчик символов это заметит. 64 — самое узкое окно из тех, на которых гоняются
 # экраны форм (сторож test_all_footers_fit_the_two_line_budget).
-_FOOTER_MIN_COLS = 64
+_FOOTER_MIN_COLS = MAIN_FOOTER_MIN_COLS
 _TITLE_NOTE_SEC = 3.0  # «ничего не изменено» у заголовка гаснет само
 
 
