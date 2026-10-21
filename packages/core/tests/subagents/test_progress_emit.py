@@ -340,3 +340,74 @@ class TestEmitIntermediateReply:
         assert events[0].prose == answer
         assert events[0].tool_name == "turn_intermediate_reply"
         assert events[0].ok is True
+
+
+class TestToolEndResultFacts:
+    def _run(self, monkeypatch, output):
+        pr = _patch_process(monkeypatch, apply_return=output)
+        sink = QueueSubagentProgressSink()
+        run_coro(
+            pr.aprocess_tool_calls(
+                messages=[_fc("fs_read_file", "c1")],
+                state=_state(),
+                ctx=_child_ctx(sink),
+                run_agent_func=None,
+            )
+        )
+        return sink.drain()[-1]
+
+    def test_status_of_failed_call(self, monkeypatch):
+        end = self._run(
+            monkeypatch, json.dumps({"ok": False, "status": "step_limit"})
+        )
+        assert end.kind == "tool_end"
+        assert end.result_status == "step_limit"
+
+    def test_mode_denial_error_fields(self, monkeypatch):
+        end = self._run(
+            monkeypatch,
+            json.dumps(
+                {
+                    "ok": False,
+                    "error": {
+                        "type": "write_denied_by_mode",
+                        "mode": "plan",
+                        "reason": "r" * 300,
+                    },
+                }
+            ),
+        )
+        assert end.result_error["type"] == "write_denied_by_mode"
+        assert end.result_error["mode"] == "plan"
+        assert len(end.result_error["reason"]) <= 121
+
+    def test_success_has_no_facts(self, monkeypatch):
+        end = self._run(monkeypatch, json.dumps({"ok": True}))
+        assert end.result_status is None
+        assert end.result_error is None
+
+    def test_failed_intermediate_reply_event_keeps_brief(self, monkeypatch):
+        pr = _patch_process(
+            monkeypatch,
+            apply_return=json.dumps(
+                {"ok": False, "error": {"reason": "не принят"}}
+            ),
+        )
+        sink = QueueSubagentProgressSink()
+        run_coro(
+            pr.aprocess_tool_calls(
+                messages=[
+                    _fc(
+                        "turn_intermediate_reply",
+                        "ir1",
+                        json.dumps({"answer": "текст"}),
+                    )
+                ],
+                state=_state(),
+                ctx=_child_ctx(sink),
+                run_agent_func=None,
+            )
+        )
+        (event,) = sink.drain()
+        assert event.ok is False
+        assert event.error_brief == "не принят"

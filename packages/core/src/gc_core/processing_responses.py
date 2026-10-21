@@ -80,6 +80,7 @@ from gc_core.execution.progress import (
     emit_progress,
     extract_intermediate_prose,
     parse_tool_result_status,
+    result_facts,
     todo_items_from_arguments,
     tool_args_summary,
 )
@@ -2075,6 +2076,9 @@ async def _aexecute_tool_call(
             )
             return tool_res_raw, was_invalid, ok
         if emit_tool_row:
+            status, fields = (
+                result_facts(tool_res_raw) if ok is False else (None, None)
+            )
             emit_progress(
                 ctx,
                 state,
@@ -2084,6 +2088,8 @@ async def _aexecute_tool_call(
                 tool_call_id=call_id_str,
                 ok=ok if ok is not None else True,
                 error_brief=error_brief,
+                result_status=status,
+                result_error=fields,
             )
         if persist_tool_trace:
             out_text = (
@@ -2181,6 +2187,10 @@ async def _aemit_intermediate_reply(
     ir_payload: Dict[str, Any] = {"prose": prose or ""}
     if call_id_str:
         ir_payload["call_id"] = call_id_str
+    if ok is False:
+        ir_payload["ok"] = False
+        if error_brief:
+            ir_payload["error_brief"] = error_brief
     await apersist_subagent_trace(
         ctx, kind="intermediate_reply", payload=ir_payload
     )

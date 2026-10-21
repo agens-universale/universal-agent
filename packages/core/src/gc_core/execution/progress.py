@@ -89,6 +89,10 @@ class SubagentProgressEvent:
     # Картинки реплики человека ребёнку (``user_message``) — словари вложений в
     # треде, как в записях треда.
     attachments: Optional[List[Dict[str, Any]]] = None
+    # Сырые факты исхода упавшего вызова (``tool_end``): ``status`` вывода
+    # как есть и скалярные поля ``error``. Отказ или ошибка — решает потребитель.
+    result_status: Optional[str] = None
+    result_error: Optional[Dict[str, str]] = None
 
 
 @runtime_checkable
@@ -388,23 +392,50 @@ def _truncate_error_brief(message: str) -> str:
     return text[:_ERROR_BRIEF_MAX].rstrip() + "…"
 
 
-def parse_tool_result_status(
-    output: Any,
-) -> tuple[Optional[bool], Optional[str]]:
-    """Extract (ok, error_brief) from a tool result payload string/dict."""
+def _result_payload(output: Any) -> Optional[Dict[str, Any]]:
+    """Вывод тула (строка JSON или dict) как dict; иначе ``None``."""
     data: Any = output
     if isinstance(output, str):
         try:
             data = json.loads(output)
         except json.JSONDecodeError:
-            return None, None
-    if not isinstance(data, dict):
+            return None
+    return data if isinstance(data, dict) else None
+
+
+def parse_tool_result_status(
+    output: Any,
+) -> tuple[Optional[bool], Optional[str]]:
+    """Extract (ok, error_brief) from a tool result payload string/dict."""
+    data = _result_payload(output)
+    if data is None:
         return None, None
     ok = data.get("ok")
     if not isinstance(ok, bool):
         ok = None
     brief = _error_brief_from_payload(data) if ok is False else None
     return ok, brief
+
+
+def result_facts(
+    output: Any,
+) -> tuple[Optional[str], Optional[Dict[str, str]]]:
+    """Сырые факты исхода вывода тула: ``(status, скаляры error)``.
+
+    Разбор тот же, что у ``parse_tool_result_status``. Ядро не решает,
+    отказ это или ошибка, — классификация у потребителя."""
+    data = _result_payload(output)
+    if data is None:
+        return None, None
+    status = data.get("status")
+    status = status if isinstance(status, str) and status else None
+    err = data.get("error")
+    fields = {
+        key: _truncate_error_brief(value)
+        for key, value in (err.items() if isinstance(err, dict) else ())
+        if isinstance(key, str) and isinstance(value, str) and value.strip()
+    }
+    return status, fields or None
 
 
 def _error_brief_from_payload(data: Dict[str, Any]) -> Optional[str]:
@@ -437,7 +468,7 @@ def extract_intermediate_prose(arguments: Any, output: Any) -> Optional[str]:
     return None
 
 
-def emit_progress(
+def emit_progress(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING.md
     ctx: Any,
     state: Any,
     kind: ProgressKind,
@@ -452,6 +483,8 @@ def emit_progress(
     usage_delta: Optional[Dict[str, Any]] = None,
     todo_items: Optional[List[Dict[str, str]]] = None,
     attachments: Optional[List[Dict[str, Any]]] = None,
+    result_status: Optional[str] = None,
+    result_error: Optional[Dict[str, str]] = None,
 ) -> None:
     """Emit a progress event when running as a child with a sink; else no-op."""
     if not child_progress_enabled(ctx):
@@ -476,6 +509,8 @@ def emit_progress(
             usage_delta=usage_delta,
             todo_items=todo_items,
             attachments=attachments,
+            result_status=result_status,
+            result_error=result_error,
         )
     )
 
@@ -492,5 +527,6 @@ __all__ = [
     "extract_intermediate_prose",
     "parse_tool_result_status",
     "resolve_progress_sink",
+    "result_facts",
     "tool_args_summary",
 ]
