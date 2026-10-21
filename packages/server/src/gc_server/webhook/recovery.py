@@ -41,6 +41,10 @@ RECOVERY_MESSAGE = (
 )
 #: Состояние фронтенда swarm: задачу ведёт песочница, а не процесс сервера.
 _SWARM = "swarm"
+#: Попыток восстановления подряд (ход падает вместе с процессом), после
+#: которых задача — ``failed`` с причиной ``recovery_exhausted``.
+MAX_RECOVERY_ATTEMPTS = 3
+_FINAL = frozenset({"completed", "failed", "cancelled"})
 
 
 async def arecover_once(
@@ -83,20 +87,75 @@ def _orphaned(record: ThreadRecord, now: datetime) -> bool:
         return False
     if record.lease is not None and not lease_expired(record.lease, now):
         return False
-    pending = record.max_seq.get("inbox", 0) > record.state.inbox_seq
+    done = max(record.state.inbox_seq, _abandoned_upto(record))
+    pending = record.max_seq.get("inbox", 0) > done
     return record.runtime.turn == "running" or pending
+
+
+def _abandoned_upto(record: ThreadRecord) -> int:
+    """Граница входящих, на которых задача сдалась (финальный статус):
+    такие не поднимаются, более поздние — поднимаются."""
+    status = task_status.status_of(record) or {}
+    upto = status.get("inbox_upto")
+    if status.get("status") in _FINAL and type(upto) is int:
+        return upto
+    return 0
 
 
 async def _acontinue(
     surface: WebhookSurface, threads: Threads, record: ThreadRecord
 ) -> bool:
+    """Продолжить задачу ходом. Записи о прерванном ходе и счётчик
+    попыток — только под бронью этого процесса: задачу, которую он же
+    ведёт или строит, обход не трогает."""
     key = record.key
-    if record.runtime.turn == "running":
-        await _anote_interruption(threads, record)
-        status = task_status.status_of(record)
-        if status is not None and status.get("status") == "running":
-            surface.notify(key, {**status, "status": "interrupted"})
-    return await surface.astart_recovered(key.system, key.thread)
+    status = task_status.status_of(record) or {}
+    attempts = status.get("recovery_attempts")
+    attempts = attempts if type(attempts) is int else 0
+
+    async def prepare() -> bool:
+        if attempts >= MAX_RECOVERY_ATTEMPTS:
+            await _agive_up(surface, threads, record)
+            return False
+        if record.runtime.turn == "running":
+            await _anote_interruption(threads, record)
+            if status.get("status") == "running":
+                surface.notify(key, {**status, "status": "interrupted"})
+        await task_status.aset_status(
+            threads, key, recovery_attempts=attempts + 1
+        )
+        return True
+
+    return await surface.astart_recovered(
+        key.system, key.thread, prepare=prepare
+    )
+
+
+async def _agive_up(
+    surface: WebhookSurface, threads: Threads, record: ThreadRecord
+) -> None:
+    """Ход падал вместе с процессом раз за разом: задача — ``failed``,
+    недоставленные входящие брошены, отметка хода снята."""
+    from gc_core.threads import runtime_rules
+    from gc_core.threads.models import SideChange
+
+    key = record.key
+    final = {
+        "status": "failed",
+        "error": "recovery_exhausted",
+        "inbox_upto": record.max_seq.get("inbox", 0),
+    }
+    await task_status.aset_status(threads, key, **final)
+    runtime = runtime_rules.with_turn(record.runtime, running=False)
+    await threads.store.append_side(
+        key,
+        SideChange(
+            op_id=f"recovery-exhausted:{key.system}:{key.thread}:"
+            f"{record.revision}",
+            set_runtime=runtime,
+        ),
+    )
+    surface.notify(key, {**(task_status.status_of(record) or {}), **final})
 
 
 async def _anote_interruption(threads: Threads, record: ThreadRecord) -> None:

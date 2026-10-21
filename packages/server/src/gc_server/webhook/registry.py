@@ -53,6 +53,8 @@ class ActiveRun:
     error: BaseException | None = None
     #: Что поверхность хочет помнить о прогоне (прежний статус задачи).
     notes: dict = field(default_factory=dict)
+    #: Прогон снят остановкой сервера — прерывание, а не отмена.
+    shutdown: bool = False
 
 
 Hook = Callable[[ActiveRun], Awaitable[None]]
@@ -139,8 +141,8 @@ class AgentRunRegistry:
         try:
             await self._aplay(run, verbose)
         except asyncio.CancelledError:
-            # Снятие — не отказ: остановка сервера, явная отмена.
-            run.ending = "cancelled"
+            # Снятие — не отказ: остановка сервера (прерывание) или отмена.
+            run.ending = "interrupted" if run.shutdown else "cancelled"
             raise
         except (ThreadBusy, InboxDrained):
             # Тред взял другой инстанс (или он уже всё забрал): доведёт он.
@@ -196,8 +198,12 @@ class AgentRunRegistry:
             return [run.task for run in self._runs.values() if run.task]
 
     def cancel_all(self) -> list[asyncio.Task]:
-        """Снять идущие прогоны (остановка сервера): статус — cancelled.
+        """Прервать идущие прогоны (остановка сервера): статус не меняется,
+        отметка хода остаётся — задачу продолжит восстановление.
         Возвращает снятые задачи — их дожидаются до закрытия хранилища."""
+        with self._lock:
+            for run in self._runs.values():
+                run.shutdown = True
         tasks = self.live_tasks()
         for task in tasks:
             task.cancel()

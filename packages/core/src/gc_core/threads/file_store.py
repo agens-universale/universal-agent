@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import copy
 import hashlib
@@ -782,8 +783,12 @@ class FileThreadStore(ThreadStore):
             return self._record(key, v2)
 
     async def list_threads(self, query: ThreadQuery) -> Page[ThreadRecord]:
+        # Обход каталога (glob, stat, имена тредов) — в потоке: каталог
+        # сервера — тысячи файлов. Треды, чьи файлы не менялись с
+        # ``updated_after``, отсеиваются по mtime до чтения meta.
+        since = _mtime_floor(query.updated_after)
         records = []
-        for key in self._known_keys():
+        for key in await asyncio.to_thread(self._known_keys, since):
             try:
                 record = self._listed(key)
             except (OSError, ValueError):
@@ -802,28 +807,11 @@ class FileThreadStore(ThreadStore):
                 return None
             return self._record(key, v2, listing=True)
 
-    def _known_keys(self) -> set[ThreadKey]:
-        keys: set[ThreadKey] = set()
+    def _known_keys(self, since: float | None = None) -> set[ThreadKey]:
         root = Path(self._dir)
-        for path in root.glob("meta_*.json") if root.is_dir() else ():
-            if layout.ARCHIVE_MARK in path.name:
-                continue
-            try:
-                meta = layout.read_meta_file(str(path))
-            except (OSError, ValueError):
-                continue  # тред найдётся по identity, если он v2
-            key = _meta_identity(path, meta)
-            if key is not None:
-                keys.add(key)
-        for identity in root.glob(f"{_STORE_DIR}/*/{_IDENTITY}"):
-            try:
-                raw = json.loads(identity.read_text(encoding="utf-8"))
-                keys.add(
-                    ThreadKey(system=raw["system_id"], thread=raw["thread_id"])
-                )
-            except (OSError, ValueError, KeyError, TypeError):
-                continue  # один испорченный служебный файл — не весь список
-        return keys
+        if not root.is_dir():
+            return set()
+        return _meta_keys(root, since) | _identity_keys(root, since)
 
     async def read_stream(
         self,
@@ -1350,6 +1338,78 @@ def _archive_created(suffix: str, data_path: str) -> str:
             os.path.getmtime(data_path) if os.path.exists(data_path) else 0
         )
         return datetime.fromtimestamp(moment, UTC).isoformat()
+
+
+#: Запас на расхождение часов записи ``updated_at`` и mtime файла.
+_MTIME_SLACK = 60.0
+
+
+def _mtime_floor(updated_after: str | None) -> float | None:
+    """Порог mtime для ``updated_after`` (с запасом); не дата — ``None``."""
+    if not updated_after:
+        return None
+    try:
+        moment = datetime.fromisoformat(updated_after)
+    except ValueError:
+        return None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=UTC)
+    return moment.timestamp() - _MTIME_SLACK
+
+
+def _latest_mtime(directory: Path) -> float:
+    """Последнее изменение служебного каталога треда; нет — 0."""
+    try:
+        stamps = [directory.stat().st_mtime]
+        stamps += [entry.stat().st_mtime for entry in directory.iterdir()]
+    except OSError:
+        return 0.0
+    return max(stamps)
+
+
+def _touched_before(root: Path, meta: Path, since: float) -> bool:
+    """Файлы треда (meta и служебный каталог) не менялись с ``since``."""
+    stem = meta.name[len("meta_") : -len(".json")]
+    try:
+        latest = meta.stat().st_mtime
+    except OSError:
+        return False
+    store = _physical_control_path(root, stem)
+    return max(latest, _latest_mtime(store)) < since
+
+
+def _meta_keys(root: Path, since: float | None) -> set[ThreadKey]:
+    """Треды по файлам meta (формат develop)."""
+    keys: set[ThreadKey] = set()
+    for path in root.glob("meta_*.json"):
+        if layout.ARCHIVE_MARK in path.name:
+            continue
+        if since is not None and _touched_before(root, path, since):
+            continue
+        try:
+            meta = layout.read_meta_file(str(path))
+        except (OSError, ValueError):
+            continue  # тред найдётся по identity, если он v2
+        key = _meta_identity(path, meta)
+        if key is not None:
+            keys.add(key)
+    return keys
+
+
+def _identity_keys(root: Path, since: float | None) -> set[ThreadKey]:
+    """Треды по служебным каталогам v2."""
+    keys: set[ThreadKey] = set()
+    for identity in root.glob(f"{_STORE_DIR}/*/{_IDENTITY}"):
+        if since is not None and _latest_mtime(identity.parent) < since:
+            continue
+        try:
+            raw = json.loads(identity.read_text(encoding="utf-8"))
+            keys.add(
+                ThreadKey(system=raw["system_id"], thread=raw["thread_id"])
+            )
+        except (OSError, ValueError, KeyError, TypeError):
+            continue  # один испорченный служебный файл — не весь список
+    return keys
 
 
 def _meta_identity(path: Path, meta: JsonObject) -> ThreadKey | None:

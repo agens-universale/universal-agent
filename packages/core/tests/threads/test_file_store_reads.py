@@ -148,3 +148,52 @@ def test_last_line_without_newline_counts_when_it_is_whole(tmp_path):
         )
     tail = run(store.read_stream(KEY, "messages", after_seq=2))
     assert [e.data["id"] for e in tail] == ["m3"]
+
+
+def test_list_since_skips_stale_threads_before_reading_meta(
+    tmp_path, monkeypatch
+):
+    """Находка ревью №14: восстановление обходит треды, обновлённые за
+    окно; тред, чьи файлы старше окна, отсеивается по mtime — его meta не
+    читается."""
+    import os
+    import time
+    from datetime import UTC, datetime, timedelta
+
+    from gc_core.threads import file_layout
+    from gc_core.threads.facade import Threads
+    from gc_core.threads.models import ThreadQuery
+
+    store = FileThreadStore(tmp_path)
+    old = ThreadKey(system="cli", thread="old")
+    fresh = ThreadKey(system="cli", thread="fresh")
+    for key in (old, fresh):
+        run(Threads(store).append_messages(key, _msgs(0, 1)))
+    two_days_ago = time.time() - 2 * 86400
+    for path in tmp_path.glob("*_old*"):
+        os.utime(path, (two_days_ago, two_days_ago))
+    store_dir = file_layout_store_dir(tmp_path, old)
+    for path in [store_dir, *store_dir.iterdir()]:
+        os.utime(path, (two_days_ago, two_days_ago))
+    read: list = []
+    real = file_layout.read_meta_file
+    monkeypatch.setattr(
+        file_layout,
+        "read_meta_file",
+        lambda path: read.append(os.path.basename(path)) or real(path),
+    )
+    since = (datetime.now(UTC) - timedelta(days=1)).isoformat()
+    page = run(
+        FileThreadStore(tmp_path).list_threads(
+            ThreadQuery(updated_after=since)
+        )
+    )
+    assert [r.key for r in page.items] == [fresh]
+    assert "meta_cli_old.json" not in read
+
+
+def file_layout_store_dir(root, key):
+    import hashlib
+
+    stem = f"{key.system}_{key.thread}"
+    return root / ".store" / hashlib.sha256(stem.encode()).hexdigest()
