@@ -1,7 +1,7 @@
 """trace_render — общие строители виджетов трейса (Spec B / A+)."""
 
-from gc_testkit.tui_support import tui_settings
 import pytest
+from gc_testkit.tui_support import tui_settings
 
 
 def test_block_panel_for_code_with_lang():
@@ -75,11 +75,11 @@ def _env(payload, ts="2026-05-30T10:00:00Z"):
 @pytest.mark.asyncio
 async def test_render_thread_readonly_kinds():
     pytest.importorskip("textual")
-    from trace_readonly import render_thread_readonly
     from gc_tui.widgets.tool_call_row import ToolCallRow
     from gc_tui.widgets.user_reply import UserReplyContainer
     from textual.app import App
     from textual.containers import VerticalScroll
+    from trace_readonly import render_thread_readonly
 
     records = [
         _env({"role": "user", "content": "привет", "id": "m1"}),
@@ -141,10 +141,10 @@ async def test_render_thread_readonly_call_row_shows_label():
     """Спека P3 §2.1: превью рисует подпись ядра (`Write  x.py`), как живая
     лента; wire-имя остаётся в строке только для отладки."""
     pytest.importorskip("textual")
+    from gc_tui.widgets.tool_call_row import ToolCallRow
     from textual.app import App
     from textual.containers import VerticalScroll
     from trace_readonly import render_thread_readonly
-    from gc_tui.widgets.tool_call_row import ToolCallRow
 
     records = [
         _env(
@@ -773,3 +773,188 @@ def test_readonly_orphan_error_is_standalone_bang_err(kind):
     (row,) = _readonly_orphan(kind)
     assert (row._prefix, row._content) == ("! ", "ENOENT")
     assert row.has_class("line-error")
+
+
+def test_note_text_label_bold_text_italic():
+    from gc_tui.services.trace_render import note_text
+
+    t = note_text("проверь X")
+
+    assert t.plain == "заметка: проверь X"
+    assert [(t.plain[s.start : s.end], str(s.style)) for s in t.spans] == [
+        ("заметка:", "bold not italic"),
+        ("проверь X", "italic"),
+    ]
+
+
+def test_summary_widgets_keep_code_block():
+    pytest.importorskip("textual")
+    from gc_tui.services.trace_render import build_summary_widgets
+    from gc_tui.widgets.block_panel import BlockPanel
+
+    ws = build_summary_widgets(
+        "Сделал:\n\n```python\nx = 1\n```\nНе проверял.", event_no=3
+    )
+
+    assert [type(w).__name__ for w in ws] == [
+        "TraceRow",
+        "BlockPanel",
+        "TraceRow",
+    ]
+    assert isinstance(ws[1], BlockPanel)
+    assert ws[0]._prefix == "* "
+    assert ws[0]._content.plain == "итог: Сделал:"
+    assert ws[2]._content.plain == "Не проверял."
+    assert ws[0].has_class("line-summary")
+    assert ws[2].has_class("line-summary")
+    label = ws[0]._content.spans[0]
+    assert (label.start, label.end, str(label.style)) == (
+        0,
+        5,
+        "bold not italic",
+    )
+    # Цвет текста — от CSS-класса записи (приглушённый), не цвет ответа.
+    assert all(
+        str(s.style) in ("", "bold not italic")
+        for w in (ws[0], ws[2])
+        for s in w._content.spans
+    )
+
+
+def test_dispatch_readonly_finish_after_reply_is_summary():
+    """Превью: отчёт после текста того же ответа — запись «итог», не
+    второй ответ; comment — отдельной строкой записи."""
+    pytest.importorskip("textual")
+    import json
+
+    from gc_tui.services.trace_mapper import (
+        collect_render_context,
+        map_message,
+    )
+    from gc_tui.services.trace_render import _dispatch_readonly
+
+    finish = {
+        "type": "function_call",
+        "name": "turn_finish",
+        "call_id": "f1",
+        "arguments": json.dumps(
+            {"task_report": "Попрощался.", "comment": "Без тулов."}
+        ),
+    }
+    reply = {"type": "message", "role": "assistant", "content": "Пока!"}
+    ev = map_message(
+        finish,
+        no=2,
+        ts="t",
+        context=collect_render_context([reply, finish]),
+    )
+    mounted = []
+
+    class _Target:
+        def mount(self, w):
+            mounted.append(w)
+
+    _dispatch_readonly(_Target(), ev, {})
+
+    assert [w._content.plain for w in mounted] == [
+        "итог: Попрощался.",
+        "Без тулов.",
+    ]
+    assert all(w.has_class("line-summary") for w in mounted)
+
+
+@pytest.mark.asyncio
+async def test_summary_row_styled_like_note_in_italic(tmp_path):
+    """Запись «итог»: цвет и отступ строки заметки, текст курсивом."""
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+    from gc_tui.services.trace_render import build_summary_widgets
+    from gc_tui.widgets.trace_row import TraceRow
+    from textual.containers import VerticalScroll
+
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
+    )
+    async with app.run_test() as pilot:
+        trace = pilot.app.screen.query_one("#trace", VerticalScroll)
+        note = TraceRow(prefix="* ", content="x", kind_class="line-note")
+        (row,) = build_summary_widgets("Попрощался.", event_no=1)
+        trace.mount(note)
+        trace.mount(row)
+        await pilot.pause()
+
+        assert row.styles.color == note.styles.color
+        assert row.styles.margin.top == 1
+        assert row.styles.text_style.italic
+        # Маркер «* » прямой, как у строки заметки; курсив — только текст.
+        bullet = row.query_one(".trace-prefix")
+        assert not bullet.rich_style.italic
+        assert not note.query_one(".trace-prefix").rich_style.italic
+
+
+def test_summary_bold_and_heading_have_no_accent_colour():
+    pytest.importorskip("textual")
+    from gc_tui.palette import ACCENT
+    from gc_tui.services.trace_render import (
+        build_agent_widgets,
+        build_summary_widgets,
+    )
+
+    text = "# Заголовок\n\nЭто **важно**."
+    (summary,) = build_summary_widgets(text, event_no=1)
+    styles = {str(sp.style) for sp in summary._content.spans}
+    assert "bold" in styles
+    assert not any(ACCENT in st for st in styles)
+    (agent,) = build_agent_widgets(text, event_no=1)
+    agent_styles = {str(sp.style) for sp in agent._content.spans}
+    assert f"{ACCENT} bold" in agent_styles
+
+
+def _summary_rows(note: str, comment: str) -> list:
+    pytest.importorskip("textual")
+    from gc_core.tools.turn.turn_close import LABEL_SUMMARY, TurnClose
+    from gc_tui.services.trace_render import build_finish_widgets
+
+    close = TurnClose(
+        reply="Текст.",
+        body="",
+        label=LABEL_SUMMARY,
+        note=note,
+        comment=comment,
+    )
+    return build_finish_widgets(close, event_no=1)
+
+
+def test_finish_comment_after_list_is_own_row():
+    ws = _summary_rows("Сделал:\n\n- один\n- два", "Не проверял.")
+
+    assert [type(w).__name__ for w in ws] == ["TraceRow", "TraceRow"]
+    assert "два" in ws[0]._content.plain
+    assert "Не проверял." not in ws[0]._content.plain
+    assert ws[1]._content.plain == "Не проверял."
+    assert ws[1].has_class("line-summary")
+
+
+def test_finish_comment_after_code_block_is_own_row():
+    from gc_tui.widgets.block_panel import BlockPanel
+
+    ws = _summary_rows("Сделал:\n\n```python\nx = 1\n```", "Не проверял.")
+
+    assert [type(w).__name__ for w in ws] == [
+        "TraceRow",
+        "BlockPanel",
+        "TraceRow",
+    ]
+    assert isinstance(ws[1], BlockPanel)
+    assert ws[2]._content.plain == "Не проверял."
+
+
+def test_finish_comment_after_table_is_own_row():
+    ws = _summary_rows("Сделал:\n\n| a | b |\n|---|---|\n| 1 | 2 |", "Нет.")
+
+    assert [type(w).__name__ for w in ws][-1] == "TraceRow"
+    assert ws[-1]._content.plain == "Нет."
+    assert len(ws) == 3
+    assert type(ws[1]).__name__ != "TraceRow"

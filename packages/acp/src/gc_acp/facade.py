@@ -19,8 +19,11 @@ from gc_core.thread_store import (
     resolve_threads_dir,
     validate_thread_id,
 )
-from gc_core.tools.turn.propose_plan import ProposePlan
-from gc_core.tools.turn.submit_solution import SubmitSolution
+from gc_core.tools.turn.turn_close import (
+    close_view,
+    closing_reply_of,
+    without_repeated_body,
+)
 
 from gc_acp.ask_human import bind_ask_human
 from gc_acp.capabilities import initialize_result
@@ -114,7 +117,6 @@ _METHOD_NEW = "session/new"
 _METHOD_DELETE = "session/delete"
 _TOOL_POLL_S = 0.05
 _MODEL_TRACE = "agent_thought_chunk"
-_ANSWER_CHUNK = "agent_message_chunk"
 # Запас сверх confirm_timeout: обёртка с потока не должна сработать раньше
 # внутреннего wait_for. Если всё же сработала после отправки запроса,
 # закрытие пикера уходит отдельной задачей.
@@ -740,7 +742,7 @@ class AcpFacade:
             ),
         )
         if not live.cancel_requested:
-            await self._approve_plan(live)
+            await self._approve_plan(live, assembler)
 
     async def _stream_run(
         self, live: LiveSession, assembler: ChunkAssembler, deltas: Any
@@ -767,7 +769,7 @@ class AcpFacade:
             live.tool_flow = None
         if live.cancel_requested:
             return
-        for update in assembler.flush_answer(_turn_text(live, assembler)):
+        for update in _closing_updates(live, assembler):
             await self._notify(live.session_id, update)
 
     async def _forward_deltas(
@@ -777,7 +779,9 @@ class AcpFacade:
             for update in assembler.feed(kind, chunk):
                 await self._notify(live.session_id, update)
 
-    async def _approve_plan(self, live: LiveSession) -> None:
+    async def _approve_plan(
+        self, live: LiveSession, assembler: ChunkAssembler
+    ) -> None:
         """Ход кончился предложенным планом: спросить IDE и исполнить выбор.
 
         Текст плана уже ушёл ответом прогона; вопрос — свой, не порт
@@ -804,7 +808,7 @@ class AcpFacade:
         if not decided:
             return
         if choice == PLAN_REWORK:
-            await self._rework_plan(live)
+            await self._rework_plan(live, assembler)
             return
         # Режим и одобрение ставит ядро первым шагом; IDE узнаёт режим до
         # дельт продолжения, продолжение — обычный прогон потоком.
@@ -814,20 +818,20 @@ class AcpFacade:
         await self._notify_mode(live, choice)
         await self._stream_run(
             live,
-            ChunkAssembler(),
+            ChunkAssembler(prose_sent=assembler.prose_sent),
             lambda: live.agent.stream(
                 messages, thread_id=live.session_id, system=ACP_SYSTEM
             ),
         )
 
-    async def _rework_plan(self, live: LiveSession) -> None:
+    async def _rework_plan(
+        self, live: LiveSession, assembler: ChunkAssembler
+    ) -> None:
         """«Доработать»: следующий запрос человека — замечания к плану."""
         live.agent.executor.arm_plan_rework(live.session_id)
         await self._apply_mode(live, Mode.PLAN.value)
-        await self._notify(
-            live.session_id,
-            text_chunk(_ANSWER_CHUNK, REWORK_HINT, new_message_id()),
-        )
+        for update in assembler.append_answer(REWORK_HINT):
+            await self._notify(live.session_id, update)
 
     async def _watch_tools(
         self, live: LiveSession, flow: ToolFlow, stop: asyncio.Event
@@ -1121,14 +1125,20 @@ def _prompt_running(live: LiveSession) -> bool:
     return task is not None and not task.done()
 
 
-def _turn_text(live: LiveSession, assembler: ChunkAssembler) -> Any:
-    """Итог прогона для ленты: план — текстом плана, ``turn_finish`` —
-    отчётом, проза — как есть."""
+def _closing_updates(
+    live: LiveSession, assembler: ChunkAssembler
+) -> list[dict]:
+    """Конец хода для ленты: проза досылается хвостом; ``turn_finish`` и
+    план — отдельным сообщением (ответ модели, если он ушёл стримом, не
+    повторяется)."""
     answer = getattr(live.agent, "last_answer", None)
-    plan = ProposePlan.present_result(answer)
-    if plan is not None:
-        return plan
-    return SubmitSolution.present_result(answer, shown=assembler.answer)
+    close = close_view(answer, closing_reply_of(live.agent))
+    if close is None:
+        return assembler.flush_answer(answer)
+    close = without_repeated_body(close, assembler.last_answer_text)
+    return assembler.append_answer(
+        close.render(markdown=True, after_shown_reply=assembler.reply_shown)
+    )
 
 
 def _outcome(live: LiveSession) -> str | None:

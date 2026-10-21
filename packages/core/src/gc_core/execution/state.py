@@ -135,6 +135,7 @@ STATE_FIELDS = ROUTING_FIELDS + (
 #: Транзиентные кэши зрения: считаются на каждый запрос (спека изображений
 #: §9) и в снимок не идут — после восстановления берут эти умолчания.
 TRANSIENT_STATE_DEFAULTS = {
+    "closing_reply": str,
     "vision_audience": lambda: None,
     "vision_live_ids": frozenset,
     "vision_request_limit": lambda: None,

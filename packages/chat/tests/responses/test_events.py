@@ -89,6 +89,24 @@ def test_unseen_answer_does_not_repeat_the_prefix():
     assert events[-1]["delta"] == "lo"
 
 
+def test_append_answer_separates_from_shown_text():
+    mapper = _map()
+    mapper.feed("answer", "Пока!")
+    events = mapper.append_answer("* итог:\n  x")
+    assert events[-1]["delta"] == "\n\n* итог:\n  x"
+    mapper = _map()
+    mapper.feed("answer", "Пока!")
+    events = mapper.append_answer("\n\n* итог:\n  x")
+    assert events[-1]["delta"] == "\n\n* итог:\n  x"
+
+
+def test_append_answer_without_shown_text_is_plain():
+    mapper = _map()
+    assert mapper.append_answer("") == []
+    events = mapper.append_answer("* итог:\n  x")
+    assert events[-1]["delta"] == "* итог:\n  x"
+
+
 def test_tool_card_sits_between_messages_without_bodies():
     mapper = _map()
     mapper.feed("answer", "до")

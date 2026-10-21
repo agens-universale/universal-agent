@@ -17,6 +17,13 @@ from gc_core.message_policy.user_message_policy import (
 from gc_core.message_projection import project_assistant_text
 from gc_core.tools.turn.propose_plan import ProposePlan
 from gc_core.tools.turn.submit_solution import SubmitSolution
+from gc_core.tools.turn.turn_close import (
+    TurnClose,
+    closing_replies,
+    finish_close,
+    plan_close,
+    without_repeated_body,
+)
 
 from gc_acp.tool_flow import report_from_record, report_from_sidecar
 
@@ -50,32 +57,49 @@ def text_chunk(session_update: str, text: str, message_id: str) -> dict:
 
 
 class ChunkAssembler:
-    """Один messageId на непрерывную серию чанков одного вида."""
+    """Один messageId на непрерывную серию чанков одного вида.
 
-    def __init__(self) -> None:
+    ``prose_sent`` — ход клиента уже показал прозу до этого прогона
+    (продолжение после одобрения плана): первая реплика — абзацем.
+    """
+
+    def __init__(self, *, prose_sent: bool = False) -> None:
         self._kind: str | None = None
         self._message_id: str | None = None
         self._answer = ""
         self._last = ""
+        self._reply_shown = False
+        self._prose_sent = prose_sent
 
     @property
-    def answer(self) -> str:
-        return self._answer
+    def prose_sent(self) -> bool:
+        """Ход клиента уже показал прозу: следующая реплика — абзацем."""
+        return self._prose_sent or self._answer != ""
+
+    @property
+    def reply_shown(self) -> bool:
+        """Были ``answer``-дельты после последнего ``reset``."""
+        return self._reply_shown
+
+    @property
+    def last_answer_text(self) -> str:
+        """Текст ответа последнего запроса модели с answer-дельтами
+        (после ``reset`` — до первой новой дельты тоже)."""
+        return self._last
 
     def feed(self, kind: str, text: str) -> list[dict]:
         if kind == "reset":
             self._kind = None
             self._message_id = None
+            self._reply_shown = False
             return []
         if kind not in ("answer", "think"):
             return []
         if not isinstance(text, str) or text == "":
             return []
-        fresh = kind != self._kind or self._message_id is None
         self._continue(kind)
         if kind == "answer":
-            self._last = text if fresh else self._last + text
-            self._answer += text
+            text = self._take_answer(text)
         update = _ANSWER if kind == "answer" else _THINK
         return [text_chunk(update, text, self._message_id or "")]
 
@@ -99,14 +123,48 @@ class ChunkAssembler:
             self._kind = "answer"
             self._message_id = new_message_id()
             self._last = extra
+            extra = _separated(extra, after_answer=self.prose_sent)
         self._answer += extra
         return [text_chunk(_ANSWER, extra, self._message_id or "")]
+
+    def append_answer(self, text: str) -> list[dict]:
+        """Текст конца хода отдельным сообщением: свой ``messageId``.
+
+        Если прогон уже отдал ответ, текст идёт с ведущей пустой строкой:
+        клиент склеивает подряд идущие сообщения агента.
+        """
+        if text == "":
+            return []
+        text = _separated(text, after_answer=self.prose_sent)
+        self._answer += text
+        return [text_chunk(_ANSWER, text, new_message_id())]
+
+    def _take_answer(self, text: str) -> str:
+        """Учесть answer-дельту. Первый текст нового ответа модели (после
+        ``reset``) после уже отданной прозы — с ведущей пустой строкой:
+        клиент склеивает прозу хода в один блок. Мысль внутри того же
+        ответа его текст не разрывает.
+        """
+        if self._reply_shown:
+            self._last += text
+        else:
+            self._last = text
+            text = _separated(text, after_answer=self.prose_sent)
+        self._answer += text
+        self._reply_shown = True
+        return text
 
     def _continue(self, kind: str) -> None:
         if kind == self._kind and self._message_id is not None:
             return
         self._kind = kind
         self._message_id = new_message_id()
+
+
+def _separated(text: str, *, after_answer: bool) -> str:
+    if after_answer and not text.startswith("\n"):
+        return "\n\n" + text
+    return text
 
 
 def unseen_answer(sent: str, final: Any) -> str:
@@ -133,9 +191,10 @@ def history_updates(
 
     function_call встаёт карточкой между прозой. Результат тула — смена
     статуса той же карточки, не текст ответа. Принятый turn_finish
-    становится отчётом; отклонённая попытка и вердикт судьи не показываются.
-    Принятый план (``turn_propose_plan``) — текстом целиком, карточкой не
-    показывается.
+    становится отчётом или записью после ответа модели (правило —
+    ``gc_core.tools.turn.turn_close``); отклонённая попытка и вердикт судьи
+    не показываются. Принятый план (``turn_propose_plan``) — текстом
+    целиком, карточкой не показывается.
     Служебные user-сообщения ядра (сводка, чек-лист, technical) в ленту
     не идут — та же ручка, что у заголовка сессии.
 
@@ -150,6 +209,7 @@ def history_updates(
         seen=set(),
         grouped=_records_by_parent(records),
         rejected=_rejected_call_ids(messages),
+        replies=closing_replies(messages),
         root=root,
     )
     for message in messages:
@@ -162,11 +222,13 @@ class _Replay:
     seen: set[str]
     grouped: dict[str, list[dict]]
     rejected: set[str]
+    replies: dict[str, str]
     root: str | None = None
     consumed: set[int] = field(default_factory=set)
     stack: set[str] = field(default_factory=set)
     rendered: list[dict] = field(default_factory=list)
-    last_agent: str = ""
+    answered: bool = False
+    last_prose: str = ""
 
 
 def _append_history_message(replay: _Replay, message: Any) -> None:
@@ -193,33 +255,56 @@ def _append_tool(replay: _Replay, tool: dict) -> None:
     replay.rendered.extend(_nested_tool_updates(call_id, replay))
 
 
-def _append_finish(replay: _Replay, message: Any) -> None:
-    text = _accepted_finish_text(message, replay.rejected, replay.last_agent)
-    if text == "":
+def _append_finish(replay: _Replay, message: dict) -> None:
+    """Принятый turn_finish: ответ модели уже показан прозой выше, поэтому
+    дописывается только отчёт или запись."""
+    call_id = message.get("call_id")
+    if call_id in replay.rejected:
         return
-    replay.rendered.append(text_chunk(_ANSWER, text, new_message_id()))
-    replay.last_agent = text
+    view = SubmitSolution.finish_view(message.get("arguments"))
+    if view is None:
+        return
+    close = finish_close(view, replay.replies.get(call_id, ""))
+    _append_close(replay, close)
 
 
 def _append_plan(replay: _Replay, message: dict) -> None:
     """Принятый план — текстом целиком: карточка тула скрыта (её потолок
     5000 знаков меньше плана)."""
-    if message.get("call_id") in replay.rejected:
+    call_id = message.get("call_id")
+    if call_id in replay.rejected:
         return
-    text = ProposePlan.plan_from_arguments(message.get("arguments"))
-    if text is None or text.strip() == replay.last_agent.strip():
+    plan = ProposePlan.plan_from_arguments(message.get("arguments"))
+    if plan is None:
         return
+    close = plan_close(plan, replay.replies.get(call_id, ""))
+    _append_close(replay, close)
+
+
+def _append_close(replay: _Replay, close: TurnClose) -> None:
+    close = without_repeated_body(close, replay.last_prose)
+    text = close.render(markdown=True, after_shown_reply=True)
+    if text == "":
+        return
+    text = _separated(text, after_answer=replay.answered)
     replay.rendered.append(text_chunk(_ANSWER, text, new_message_id()))
-    replay.last_agent = text
+    replay.answered = True
 
 
 def _append_prose(replay: _Replay, message: Any) -> None:
     chunk = _history_chunk(message)
     if chunk is None:
         return
+    is_user = chunk["sessionUpdate"] == _USER
+    text = chunk["content"]["text"]
+    if not is_user:
+        # Как в живом ходе: реплика после прозы того же хода — абзацем.
+        chunk["content"]["text"] = _separated(
+            text, after_answer=replay.answered
+        )
     replay.rendered.append(chunk)
-    if chunk["sessionUpdate"] == _ANSWER:
-        replay.last_agent = chunk["content"]["text"]
+    replay.answered = not is_user
+    replay.last_prose = "" if is_user else text
 
 
 def _is_call(message: Any, name: str) -> bool:
@@ -262,20 +347,6 @@ def _output_failed(output: Any) -> bool:
     if not isinstance(payload, dict):
         return False
     return payload.get("ok") is False
-
-
-def _accepted_finish_text(
-    message: dict, rejected: set[str], last_agent: str
-) -> str:
-    call_id = message.get("call_id")
-    if isinstance(call_id, str) and call_id in rejected:
-        return ""
-    view = SubmitSolution.finish_view(message.get("arguments"))
-    if view is None or view.report == "":
-        return ""
-    if last_agent.strip() == view.report:
-        return ""
-    return view.render()
 
 
 def _tool_report(
