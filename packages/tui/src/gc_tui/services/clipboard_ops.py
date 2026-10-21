@@ -89,7 +89,7 @@ def copy_out(
     blocking=False — native в ``run_worker``; UI не ждёт запись (O9).
     При окончательной неудаче — warning раз за сессию (текст зависит от среды).
     quiet=True — без уведомлений приложения: говорит только вызывающий.
-    on_done(ok) — итог записи, в UI-потоке (при blocking=False — когда
+    on_done(ok or osc_sent) — итог доставки, в UI-потоке (при blocking=False — когда
     фоновая запись закончилась).
     Пустой text — no-op, False.
     """
@@ -113,29 +113,41 @@ def copy_out(
 
     if blocking or not callable(getattr(app, "run_worker", None)):
         ok = write_clipboard(text)
-        if not ok and not osc_sent:
-            _send_osc52(app, text)
-        if not quiet:
-            _feedback(app, ok, toast=toast)
-        if on_done is not None:
-            on_done(ok)
+        _finish_write(app, text, ok, osc_sent, toast, quiet, on_done)
         return ok
 
     def _work() -> None:
         ok = write_clipboard(text)
         try:
-            if not ok and not osc_sent:
-                app.call_from_thread(_send_osc52, app, text)
-            if not quiet:
-                app.call_from_thread(_feedback, app, ok, toast=toast)
-            if on_done is not None:
-                app.call_from_thread(on_done, ok)
+            app.call_from_thread(
+                _finish_write, app, text, ok, osc_sent, toast, quiet, on_done
+            )
         except RuntimeError:
             # App уже останавливается — feedback не нужен.
             pass
 
     app.run_worker(_work, thread=True, name="clipboard-write")
     return True
+
+
+def _finish_write(
+    app: Any,
+    text: str,
+    ok: bool,
+    osc_sent: bool,
+    toast: bool,
+    quiet: bool,
+    on_done: Callable[[bool], None] | None,
+) -> None:
+    """После нативной записи (UI-поток): запасной OSC 52, уведомление
+    (если не quiet), итог вызывающему."""
+    if not ok and not osc_sent:
+        _send_osc52(app, text)
+    if not quiet:
+        _feedback(app, ok, toast=toast)
+    if on_done is not None:
+        # Для вызывающего текст дошёл, если сработал любой из путей.
+        on_done(ok or osc_sent)
 
 
 def _feedback(app: Any, ok: bool, *, toast: bool) -> None:

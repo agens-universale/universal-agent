@@ -506,6 +506,7 @@ class TraceScreen(Screen):
         # A1: правило показа ответов (дедуп, попытки turn_finish) — то же,
         # что у /copy.
         self._answer_flow = AnswerFlow()
+        self._copy_seq = 0  # номер последнего /copy: старые итоги глохнут
         self._live_turn_tool_calls: int = (
             0  # живые call-события текущего хода (эвристика имени)
         )
@@ -8809,6 +8810,7 @@ class TraceScreen(Screen):
     def _cmd_copy(self, arg: str) -> None:
         """/copy [N]: N-й с конца ответ агента — в буфер обмена; итог — в
         слоте футера."""
+        self._copy_seq += 1
         answers = []
         if self._store is not None and self._active_task_id:
             answers = agent_answers(
@@ -8832,14 +8834,17 @@ class TraceScreen(Screen):
                 else COPY_DONE_NTH.format(n=n, total=total)
             )
             # Запись идёт в фоне: слот молчит, пока не пришёл её итог.
+            # Итог прошлого /copy, пришедший позже нового, слот не трогает.
+            seq = self._copy_seq
+
+            def show(ok: bool) -> None:
+                if seq == self._copy_seq:
+                    self._show_footer_outcome(
+                        done if ok else COPY_REFUSAL_FAILED, ok=ok
+                    )
+
             copy_out(
-                self.app,
-                answers[-n],
-                blocking=False,
-                quiet=True,
-                on_done=lambda ok: self._show_footer_outcome(
-                    done if ok else COPY_REFUSAL_FAILED, ok=ok
-                ),
+                self.app, answers[-n], blocking=False, quiet=True, on_done=show
             )
 
     def _export_log_txt(self, tid: str, stamp: str) -> None:

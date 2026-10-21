@@ -148,6 +148,9 @@ class _Store:
     def read_segments(self, task_id, system=None):
         return self._segments
 
+    def get_task_meta(self, task_id, system=None):
+        return {}
+
 
 async def _run_copy(tmp_path, monkeypatch, arg, segments):
     from gc_tui.app import TuiApp
@@ -241,10 +244,17 @@ async def test_copy_without_task(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_copy_clipboard_failure_is_reported(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
     from gc_tui.app import TuiApp
     from gc_tui.services import clipboard_ops
 
     monkeypatch.setattr(clipboard_ops, "write_clipboard", lambda t: False)
+    # ни нативной записи, ни OSC 52 (не Linux и не SSH)
+    monkeypatch.setattr(clipboard_ops, "is_ssh_session", lambda: False)
+    monkeypatch.setattr(
+        clipboard_ops, "sys", SimpleNamespace(platform="darwin")
+    )
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
@@ -320,3 +330,122 @@ async def test_copy_outcome_colours(tmp_path):
         assert [(sp.start, sp.end, sp.style) for sp in spans] == [
             (0, 12, WARN)
         ]
+
+
+def test_empty_summaries_skipped():
+    body = [_assistant("   "), _call("turn_propose_plan", {"plan": " "}, "p")]
+    assert agent_answers(_turns(body)) == []
+
+
+@pytest.mark.asyncio
+async def test_copy_answers_match_what_trace_mounts(tmp_path, monkeypatch):
+    from gc_tui.app import TuiApp
+    from gc_tui.services import trace_render
+
+    built: list = []
+    for name in ("build_agent_widgets", "build_block_widgets"):
+        orig = getattr(trace_render, name)
+
+        def wrap(*a, _orig=orig, _name=name, **kw):
+            widgets = _orig(*a, **kw)
+            plan = _name == "build_block_widgets" and not kw.get(
+                "prose_bullet", True
+            )
+            if _name == "build_agent_widgets" or plan:
+                built.append(widgets)
+            return widgets
+
+        monkeypatch.setattr(trace_render, name, wrap)
+
+    thread = [
+        _assistant("X"),
+        _call("turn_intermediate_reply", {"answer": "X"}, "i1"),
+        _out("i1", "turn_intermediate_reply"),
+        _finish("плохой", "f1"),
+        _finish("хороший", "f2"),
+        {"role": "user", "content": "ещё"},
+        _assistant("да"),
+        {"role": "user", "content": "и ещё"},
+        _assistant("да"),
+        _call("turn_propose_plan", {"plan": "план"}, "p1"),
+    ]
+    segs = [_segment(thread)]
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
+    )
+    async with app.run_test() as pilot:
+        pilot.app.screen._render_segments(segs)
+        await pilot.pause()
+        await pilot.pause()
+        mounted = [ws for ws in built if all(w.is_attached for w in ws)]
+        assert len(mounted) == len(agent_answers(segs))
+
+
+@pytest.mark.asyncio
+async def test_stale_copy_result_is_ignored(tmp_path, monkeypatch):
+    import threading
+
+    from gc_tui.app import TuiApp
+    from gc_tui.services import clipboard_ops
+
+    first_gate, second_gate = threading.Event(), threading.Event()
+    gates = iter([first_gate, second_gate])
+    calls: list[str] = []
+
+    def write(text):
+        gate = next(gates)
+        calls.append(text)
+        gate.wait(5)
+        return True
+
+    monkeypatch.setattr(clipboard_ops, "write_clipboard", write)
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
+    )
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        store = _Store([_segment(_thread())])
+        monkeypatch.setattr(scr, "_store", store, raising=False)
+        monkeypatch.setattr(scr, "_active_task_id", "TID", raising=False)
+        await scr._handle_command("copy")
+        await wait_until(pilot, lambda: len(calls) == 1, "первая запись")
+        await scr._handle_command("copy 2")
+        await wait_until(pilot, lambda: len(calls) == 2, "вторая запись")
+        second_gate.set()
+        await wait_until(
+            pilot, lambda: footer_rows(scr)[1] != "", "итог второго /copy"
+        )
+        assert footer_rows(scr)[1] == "✓ скопирован ответ 2 из 3"
+        first_gate.set()
+        await pilot.pause(0.3)
+        assert footer_rows(scr)[1] == "✓ скопирован ответ 2 из 3"
+
+
+@pytest.mark.asyncio
+async def test_copy_native_fails_but_osc52_sent_is_success(
+    tmp_path, monkeypatch
+):
+    from gc_tui.app import TuiApp
+    from gc_tui.services import clipboard_ops
+
+    monkeypatch.setattr(clipboard_ops, "write_clipboard", lambda t: False)
+    monkeypatch.setattr(clipboard_ops, "is_ssh_session", lambda: True)
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
+    )
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        store = _Store([_segment(_thread())])
+        monkeypatch.setattr(scr, "_store", store, raising=False)
+        monkeypatch.setattr(scr, "_active_task_id", "TID", raising=False)
+        await scr._handle_command("copy")
+        await wait_until(
+            pilot, lambda: footer_rows(scr)[1] != "", "отклик в слоте"
+        )
+        assert footer_rows(scr)[1] == "✓ скопирован последний ответ"

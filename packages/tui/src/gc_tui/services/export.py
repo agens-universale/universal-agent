@@ -283,6 +283,8 @@ def _take_agent(flow, ev, answers: list[str], attempt: Optional[int]):
             if ev.call_id:
                 attempt = len(answers) - 1
         return attempt
+    if not (ev.summary or "").strip():
+        return attempt
     intermediate = ev.tool_name == "intermediate_reply"
     verdict = flow.agent((ev.summary or "").strip(), intermediate=intermediate)
     if verdict.drop_attempt:

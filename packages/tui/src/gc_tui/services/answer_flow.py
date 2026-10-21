@@ -12,9 +12,10 @@
 
 from __future__ import annotations
 
-from typing import NamedTuple, Optional
+from typing import TYPE_CHECKING, NamedTuple, Optional
 
-from gc_core.tools.turn.turn_close import TurnClose, without_repeated_body
+if TYPE_CHECKING:
+    from gc_core.tools.turn.turn_close import TurnClose
 
 
 class AgentVerdict(NamedTuple):
@@ -55,7 +56,11 @@ class AnswerFlow:
         """Конец хода turn_finish: отчёт без повтора прозы. `tracked` —
         у вызова есть call_id, попытку можно свернуть позже; она заменяет
         прошлую."""
-        shown = close.body.strip() == (self.last or "")
+        # Ленивый импорт: пакет тулов тянет всё ядро, сервис грузится без него.
+        from gc_core.tools.turn.turn_close import without_repeated_body
+
+        body = close.body.strip()
+        shown = bool(body) and body == (self.last or "")
         # как и у ответа: отчёт, повторивший промежуточный, — итог хода
         self.report_of_intermediate = shown and self._last_intermediate
         if self.report_of_intermediate:
