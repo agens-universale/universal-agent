@@ -36,3 +36,11 @@ class OperationMismatch(ThreadStoreError):
 class StoreUnavailable(ThreadStoreError):
     """Хранилище временно недоступно (соединение, таймаут): запись можно
     повторить с тем же ``op_id`` — квитанция не даст её задвоить."""
+
+    @classmethod
+    def from_error(cls, exc: BaseException) -> StoreUnavailable:
+        """Сообщение — только тип исходной ошибки: её текст бывает с хостом,
+        пользователем или куском DSN, а сообщение уходит в статус задачи и
+        колбэк. Исходная ошибка — в ``__cause__`` (для логов): ставит её
+        ``raise … from exc`` вызывающего."""
+        return cls(f"хранилище тредов недоступно ({type(exc).__name__})")
