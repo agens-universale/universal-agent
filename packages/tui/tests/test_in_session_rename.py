@@ -842,7 +842,7 @@ async def test_submit_task_is_saved_when_report_is_visual_duplicate(
         store = _FakeStore({"tui": {"last_actual": "реализуй спеку"}})
         monkeypatch.setattr(scr, "_store", store)
         monkeypatch.setattr(scr, "_update_terminal_title", lambda: None)
-        scr._last_agent_summary = "одинаковый отчёт"
+        scr._answer_flow.last = "одинаковый отчёт"
 
         ev = TraceEvent(
             no=2,

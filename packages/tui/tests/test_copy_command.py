@@ -6,7 +6,7 @@ import json
 
 import pytest
 from footer_text import footer_rows
-from gc_testkit.tui_support import tui_settings
+from gc_testkit.tui_support import tui_settings, wait_until
 
 from gc_tui.services.export import agent_answers
 
@@ -76,6 +76,71 @@ def test_agent_answers_empty_thread():
     assert agent_answers([_segment([{"role": "user", "content": "x"}])]) == []
 
 
+def _turns(*turns):
+    """Ходы: реплика пользователя + записи хода."""
+    out = []
+    for body in turns:
+        out.append({"role": "user", "content": "вопрос"})
+        out.extend(body)
+    return [_segment(out)]
+
+
+def _finish(report, call_id, comment=""):
+    args = {"task_report": report}
+    if comment:
+        args["comment"] = comment
+    return _call("turn_finish", args, call_id)
+
+
+def test_same_answer_in_two_turns_counts_twice():
+    segs = _turns([_assistant("да")], [_assistant("да")])
+    assert agent_answers(segs) == ["да", "да"]
+
+
+def test_intermediate_then_same_final_is_one():
+    body = [
+        _call("turn_intermediate_reply", {"answer": "X"}, "i1"),
+        _out("i1", "turn_intermediate_reply"),
+        _assistant("X"),
+    ]
+    assert agent_answers(_turns(body)) == ["X"]
+
+
+def test_intermediate_then_same_report_is_one():
+    body = [
+        _call("turn_intermediate_reply", {"answer": "X"}, "i1"),
+        _out("i1", "turn_intermediate_reply"),
+        _finish("X", "f1"),
+    ]
+    assert agent_answers(_turns(body)) == ["X"]
+
+
+def test_prose_intermediate_prose_as_trace_shows():
+    body = [
+        _assistant("X"),
+        _call("turn_intermediate_reply", {"answer": "Y"}, "i1"),
+        _out("i1", "turn_intermediate_reply"),
+        _assistant("X"),
+    ]
+    # промежуточный ответ стал базой дедупа: повтор прозы показан
+    assert agent_answers(_turns(body)) == ["X", "X"]
+
+
+def test_repeated_report_after_prose_is_one():
+    body = [_assistant("итог"), _finish("итог", "f1")]
+    assert agent_answers(_turns(body)) == ["итог"]
+
+
+def test_rejected_finish_attempt_not_counted():
+    body = [_finish("плохой", "f1"), _finish("хороший", "f2")]
+    assert agent_answers(_turns(body)) == ["хороший"]
+
+
+def test_finish_attempt_repeated_by_prose_counted_once():
+    body = [_finish("отчёт", "f1"), _assistant("отчёт")]
+    assert agent_answers(_turns(body)) == ["отчёт"]
+
+
 class _Store:
     def __init__(self, segments):
         self._segments = segments
@@ -104,7 +169,9 @@ async def _run_copy(tmp_path, monkeypatch, arg, segments):
         monkeypatch.setattr(scr, "_store", _Store(segments), raising=False)
         monkeypatch.setattr(scr, "_active_task_id", "TID", raising=False)
         await scr._handle_command(f"copy {arg}".strip())
-        await pilot.pause()
+        await wait_until(
+            pilot, lambda: footer_rows(scr)[1] != "", "отклик в слоте"
+        )
         return copied, footer_rows(scr)[1]
 
 
@@ -188,11 +255,49 @@ async def test_copy_clipboard_failure_is_reported(tmp_path, monkeypatch):
         store = _Store([_segment(_thread())])
         monkeypatch.setattr(scr, "_store", store, raising=False)
         monkeypatch.setattr(scr, "_active_task_id", "TID", raising=False)
+        notified: list = []
+        monkeypatch.setattr(
+            pilot.app, "notify", lambda *a, **k: notified.append(a)
+        )
         await scr._handle_command("copy")
-        await pilot.pause()
+        await wait_until(
+            pilot, lambda: footer_rows(scr)[1] != "", "отклик в слоте"
+        )
         assert footer_rows(scr)[1] == (
             "/copy: не удалось записать в буфер обмена"
         )
+        assert notified == []
+
+
+@pytest.mark.asyncio
+async def test_copy_slot_waits_for_write_result(tmp_path, monkeypatch):
+    import threading
+
+    from gc_tui.app import TuiApp
+    from gc_tui.services import clipboard_ops
+
+    gate = threading.Event()
+    monkeypatch.setattr(
+        clipboard_ops, "write_clipboard", lambda t: gate.wait(5) or True
+    )
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
+    )
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        store = _Store([_segment(_thread())])
+        monkeypatch.setattr(scr, "_store", store, raising=False)
+        monkeypatch.setattr(scr, "_active_task_id", "TID", raising=False)
+        await scr._handle_command("copy")
+        await pilot.pause()
+        assert footer_rows(scr)[1] == ""
+        gate.set()
+        await wait_until(
+            pilot, lambda: footer_rows(scr)[1] != "", "итог записи"
+        )
+        assert footer_rows(scr)[1] == "✓ скопирован последний ответ"
 
 
 @pytest.mark.asyncio

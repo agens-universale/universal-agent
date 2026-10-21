@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import os
 import sys
-from typing import Any
+from typing import Any, Callable
 
 from gc_tui.services.os_ops import write_clipboard
 
@@ -74,6 +74,8 @@ def copy_out(
     *,
     toast: bool = False,
     blocking: bool = True,
+    quiet: bool = False,
+    on_done: Callable[[bool], None] | None = None,
 ) -> bool:
     """Скопировать text наружу, выбрав ОДИН путь доставки.
 
@@ -86,6 +88,9 @@ def copy_out(
     blocking=True — ждать write_clipboard (тесты / простой API).
     blocking=False — native в ``run_worker``; UI не ждёт запись (O9).
     При окончательной неудаче — warning раз за сессию (текст зависит от среды).
+    quiet=True — без уведомлений приложения: говорит только вызывающий.
+    on_done(ok) — итог записи, в UI-потоке (при blocking=False — когда
+    фоновая запись закончилась).
     Пустой text — no-op, False.
     """
     if not text:
@@ -110,7 +115,10 @@ def copy_out(
         ok = write_clipboard(text)
         if not ok and not osc_sent:
             _send_osc52(app, text)
-        _feedback(app, ok, toast=toast)
+        if not quiet:
+            _feedback(app, ok, toast=toast)
+        if on_done is not None:
+            on_done(ok)
         return ok
 
     def _work() -> None:
@@ -118,7 +126,10 @@ def copy_out(
         try:
             if not ok and not osc_sent:
                 app.call_from_thread(_send_osc52, app, text)
-            app.call_from_thread(_feedback, app, ok, toast=toast)
+            if not quiet:
+                app.call_from_thread(_feedback, app, ok, toast=toast)
+            if on_done is not None:
+                app.call_from_thread(on_done, ok)
         except RuntimeError:
             # App уже останавливается — feedback не нужен.
             pass

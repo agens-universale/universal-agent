@@ -75,6 +75,7 @@ from gc_tui.palette import OK as _OK
 from gc_tui.palette import WARN as _WARN
 from gc_tui.screens.tool_call_detail import ToolCallDetailScreen
 from gc_tui.services import image_hints, image_paste, os_ops
+from gc_tui.services.answer_flow import AnswerFlow
 from gc_tui.services.clipboard_ops import copy_out
 from gc_tui.services.context_meter import render_context_meter
 from gc_tui.services.export import agent_answers, export_thread
@@ -502,9 +503,9 @@ class TraceScreen(Screen):
         )
         self._brand_row = None  # контейнер карточки (ссылка, не запрос)
         self._task_events: list = []  # list[TraceEvent]; пополняется в _render_record/_render_segments
-        self._last_agent_summary: Optional[str] = (
-            None  # A1: дедуп равных user-facing рядов
-        )
+        # A1: правило показа ответов (дедуп, попытки turn_finish) — то же,
+        # что у /copy.
+        self._answer_flow = AnswerFlow()
         self._live_turn_tool_calls: int = (
             0  # живые call-события текущего хода (эвристика имени)
         )
@@ -556,9 +557,6 @@ class TraceScreen(Screen):
         # Виджеты последней попытки turn_finish хода (ответ, код, итог,
         # заметка) — при повторе свернуть предыдущую.
         self._submit_solution_widgets: list[list[Widget]] = []
-        # Отчёт последней попытки turn_finish, нарисованный ответом: база
-        # дедупа A1, пока попытку не убрала свёртка.
-        self._finish_summary: Optional[str] = None
         # Записи незаконченного ответа модели из прошлой пачки опроса.
         self._response_tail: list = []
         # event_no → тело сводки (скрыто; раскрывается кликом/Enter метки).
@@ -1702,7 +1700,9 @@ class TraceScreen(Screen):
         """Рабочая папка сессии — фиксирована = папка запуска процесса."""
         return str(Path.cwd())
 
-    def _show_footer_refusal(self, text: str) -> None:
+    def _show_footer_refusal(
+        self, text: str, tone: Optional[str] = None
+    ) -> None:
         """Содержательный отказ («✗ не сохранено: <причина>») в слоте футера.
 
         Отдельно от `_show_footer_hint`: у отказа есть причина с координатой
@@ -1713,7 +1713,7 @@ class TraceScreen(Screen):
         прогона) гасит его раньше — `_footer_refusal_active` сужает это правило
         до отказов (и советов картинок, `_show_footer_tip`), esc-confirm и paste-hint
         живут по своим канонам."""
-        self._show_footer_hint(text, seconds=5.0)
+        self._show_footer_hint(text, seconds=5.0, tone=tone)
         self._footer_refusal_active = True
         # Снимок прогона НА МОМЕНТ постановки: «прогон вытесняет отказ» — только
         # про прогон, начавшийся ПОСЛЕ. Отказ, поставленный во время работы
@@ -1738,9 +1738,7 @@ class TraceScreen(Screen):
     def _show_footer_outcome(self, text: str, *, ok: bool) -> None:
         """Итог команды в слоте футера по канону отказа (5 с, гасится
         следующим действием), с цветом: отказ — WARN, успех — ✓ цветом OK."""
-        self._show_footer_refusal(text)
-        self._footer_hint_tone = "ok" if ok else "warn"
-        self._refresh_footer()
+        self._show_footer_refusal(text, tone="ok" if ok else "warn")
 
     def _show_footer_tip(self, text: str) -> None:
         """Совет в слоте футера (подсказки картинок) — по канону отказа: 5 с,
@@ -1759,14 +1757,16 @@ class TraceScreen(Screen):
         except Exception:
             return False
 
-    def _show_footer_hint(self, text: str, seconds: float = 2.0) -> None:
+    def _show_footer_hint(
+        self, text: str, seconds: float = 2.0, tone: Optional[str] = None
+    ) -> None:
         """Короткая подсказка в слоте футера (esc-confirm — 2с, paste-hint —
         5с, содержательные отказы — `_show_footer_refusal`)."""
         # Новая подсказка снимает режим отказа: иначе paste-hint, показанный
         # ПОСЛЕ отказа, гасился бы первой печатью — не по своему канону
         # (`_show_footer_refusal` ставит флаг заново, после этого вызова).
         self._footer_refusal_active = False
-        self._footer_hint_tone = None
+        self._footer_hint_tone = tone
         self._footer_hint_active = True
         self._footer_hint_text = text
         self._footer_mode_hint = None
@@ -2129,7 +2129,7 @@ class TraceScreen(Screen):
         self._task_events.clear()
         self._rendered_ids.clear()
         self._segment_starts.clear()
-        self._last_agent_summary = None
+        self._answer_flow.new_turn()
         self._next_no = 1
         self._stick_bottom = (
             True  # новый/переключённый трейс → показываем низ (latest)
@@ -2143,7 +2143,6 @@ class TraceScreen(Screen):
         self._subagent_parent_rows.clear()
         self._submit_solution_call_ids.clear()
         self._submit_solution_widgets.clear()
-        self._finish_summary = None
         self._response_tail = []
         self._summary_body_widgets.clear()
         self._summary_marker_widgets.clear()
@@ -2493,8 +2492,6 @@ class TraceScreen(Screen):
     def _render_finish(self, ev) -> None:
         """Конец хода turn_finish: отчёт ответом, запись «итог» или строка
         «заметка» (правило — turn_close.finish_close)."""
-        from gc_core.tools.turn.turn_close import without_repeated_body
-
         from gc_tui.services.trace_render import (
             build_finish_widgets,
             finish_close_of,
@@ -2502,10 +2499,9 @@ class TraceScreen(Screen):
 
         # A1: отчёт, уже показанный прозой, вторым блоком не рисуем. База
         # дедупа — только проза: попытки хода убирает свёртка ниже.
-        close = without_repeated_body(
-            finish_close_of(ev), self._last_agent_summary or ""
+        close = self._answer_flow.finish(
+            finish_close_of(ev), tracked=bool(ev.call_id)
         )
-        body = close.body.strip()
         following = self._stick_bottom
         widgets = build_finish_widgets(close, event_no=ev.no)
         for w in widgets:
@@ -2517,7 +2513,6 @@ class TraceScreen(Screen):
         self._submit_solution_call_ids.add(ev.call_id)
         self._drop_finish_attempts()
         self._submit_solution_widgets.append(widgets)
-        self._finish_summary = body or None
         # Финальный ответ виден — переключаем индикатор в режим
         # «✓ завершаю…» немедленно (без 250мс лага на следующий тик
         # _poll_active). Sticky-маркер sentinel выставляется в
@@ -2538,16 +2533,6 @@ class TraceScreen(Screen):
             for w in prev_widgets:
                 w.remove()
         self._submit_solution_widgets.clear()
-        self._finish_summary = None
-
-    def _shown_by_finish_attempt(self, text: Optional[str]) -> bool:
-        """Текст виден только отчётом попытки turn_finish, которую уберёт
-        свёртка."""
-        return (
-            bool(self._submit_solution_widgets)
-            and text is not None
-            and text == self._finish_summary
-        )
 
     def _render_record(
         self,
@@ -3327,10 +3312,9 @@ class TraceScreen(Screen):
             # Previous submit_solutions are now considered completed answers,
             # not retry candidates for collapse.
             self._submit_solution_widgets.clear()
-            self._finish_summary = None
             # Дедуп A1 действует внутри хода: проза прошлого хода не
             # глушит такой же ответ этого.
-            self._last_agent_summary = None
+            self._answer_flow.new_turn()
             if live:
                 # Граница хода для эвристики имени — именно user-запись ядра:
                 # она есть и при обычном старте, и при подхвате очереди бегущим
@@ -3380,14 +3364,16 @@ class TraceScreen(Screen):
             # A1: дубль контента (проза → тот же финализатор / повтор) — молча
             # опускаем второй ряд (контент уже показан первым). Exact-match (strip),
             # без маркера: завершение хода и так видно по готовому инпуту.
-            norm = (ev.summary or "").strip()
-            if norm and norm == self._last_agent_summary:
+            verdict = self._answer_flow.agent(
+                (ev.summary or "").strip(),
+                intermediate=ev.tool_name == "intermediate_reply",
+            )
+            if not verdict.show:
                 return
-            if self._shown_by_finish_attempt(norm):
+            if verdict.drop_attempt:
                 # Ответ модели повторил отчёт отклонённой попытки: попытка
                 # уходит, текст остаётся ответом — свёртка не унесёт его.
                 self._drop_finish_attempts()
-            self._last_agent_summary = norm
             if ev.tool_name == "intermediate_reply":
                 from gc_tui.services.trace_render import (
                     build_intermediate_widgets,
@@ -8839,13 +8825,21 @@ class TraceScreen(Screen):
             self._show_footer_outcome(
                 COPY_REFUSAL_TOO_BIG.format(n=n, total=total), ok=False
             )
-        elif not copy_out(self.app, answers[-n], blocking=True):
-            self._show_footer_outcome(COPY_REFUSAL_FAILED, ok=False)
-        elif n == 1:
-            self._show_footer_outcome(COPY_DONE_LAST, ok=True)
         else:
-            self._show_footer_outcome(
-                COPY_DONE_NTH.format(n=n, total=total), ok=True
+            done = (
+                COPY_DONE_LAST
+                if n == 1
+                else COPY_DONE_NTH.format(n=n, total=total)
+            )
+            # Запись идёт в фоне: слот молчит, пока не пришёл её итог.
+            copy_out(
+                self.app,
+                answers[-n],
+                blocking=False,
+                quiet=True,
+                on_done=lambda ok: self._show_footer_outcome(
+                    done if ok else COPY_REFUSAL_FAILED, ok=ok
+                ),
             )
 
     def _export_log_txt(self, tid: str, stamp: str) -> None:
