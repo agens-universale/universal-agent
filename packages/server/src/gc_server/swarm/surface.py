@@ -24,6 +24,11 @@ from gc_server.swarm import runner as swarm_runner
 from gc_server.swarm import storage as swarm_storage
 from gc_server.swarm.config import build_swarm_config
 from gc_server.swarm.monitor import SwarmMonitor
+from gc_server.webhook.history_page import (
+    HistoryPage,
+    Position,
+    ahistory_page,
+)
 from gc_server.webhook.janitor import start_swarm_cleanup
 from gc_server.webhook.surface import (
     healthcheck,
@@ -304,22 +309,28 @@ class SwarmSurface:
         return page, str(start + limit) if more else None
 
     async def amessages(
-        self, key: ThreadKey, *, after: int, limit: int
-    ) -> list[Dict[str, Any]] | None:
+        self, key: ThreadKey, *, position: Position | None, limit: int
+    ) -> HistoryPage | None:
         sid = swarm_id(key.system, key.thread)
         if not swarm_storage.load_swarm_meta(self.threads_dir, sid):
             return None
         if self._in_store:
-            return await self._store_messages(key, after=after, limit=limit)
-        # Канал E: messages.jsonl лежит внутри каталога песочницы.
+            return await self._store_messages(
+                key, position=position, limit=limit
+            )
+        # Канал E: messages.jsonl лежит внутри каталога песочницы; истории
+        # не заменяются — поколение и версия всегда нулевые.
         messages = swarm_storage.load_swarm_messages(
             self.threads_dir, sid, self.sandbox_root_dir
         )
+        after = position.seq if position is not None else 0
         entries = [
             {"seq": seq, "ts": None, "message": message}
             for seq, message in enumerate(messages, start=1)
-        ]
-        return [e for e in entries if e["seq"] > after][:limit]
+            if seq > after
+        ][:limit]
+        last = entries[-1]["seq"] if entries else after
+        return HistoryPage(entries, Position(0, 0, last))
 
     def _reject_overload(self, system: str, task_id: str) -> None:
         limit = int(self.swarm.get("max_concurrent", 10))
@@ -346,18 +357,15 @@ class SwarmSurface:
         return {"stdout": stdout, "stderr": stderr}
 
     async def _store_messages(
-        self, key: ThreadKey, *, after: int, limit: int
-    ) -> list[Dict[str, Any]]:
+        self, key: ThreadKey, *, position: Position | None, limit: int
+    ) -> HistoryPage:
         # Только тред задачи swarm: тот же (system, task_id) у вебхука —
         # чужая задача.
         threads = self.runtime.threads("swarm")
         record = await threads.get(key)
         if record is None or "swarm" not in record.frontend:
-            return []
-        entries = await threads.store.read_stream(
-            key, "messages", after_seq=after, limit=limit
-        )
-        return [{"seq": e.seq, "ts": e.ts, "message": e.data} for e in entries]
+            return HistoryPage([], position or Position(0, 0, 0))
+        return await ahistory_page(threads.store, record, position, limit)
 
     async def _reject_foreign_thread(self, key: ThreadKey) -> None:
         """Тред с тем же (system, task_id) без пометки swarm — задача

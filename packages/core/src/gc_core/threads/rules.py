@@ -10,7 +10,7 @@ import copy
 from collections.abc import Iterable
 from datetime import UTC, datetime
 
-from gc_core.threads.errors import OwnershipError
+from gc_core.threads.errors import InvalidCursor, OwnershipError
 from gc_core.threads.models import (
     INBOX,
     JsonObject,
@@ -153,23 +153,31 @@ def _matches(record: ThreadRecord, query: ThreadQuery) -> bool:
     return all(checks)
 
 
-def _after_cursor(record: ThreadRecord, cursor: str) -> bool:
+def parse_list_cursor(cursor: str) -> tuple[datetime, str, str]:
+    """Курсор списка тредов (``updated_at|system|thread``, его пишут
+    ``page_of`` и хранилища) → момент, система, тред; чужой или испорченный —
+    ``InvalidCursor``."""
+    try:
+        updated, system, thread = cursor.split("|", 2)
+        moment = datetime.fromisoformat(updated.replace("Z", "+00:00"))
+    except ValueError:
+        raise InvalidCursor(f"негодный курсор списка: {cursor!r}") from None
+    if not system or not thread:
+        raise InvalidCursor(f"негодный курсор списка: {cursor!r}")
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=UTC)
+    return moment, system, thread
+
+
+def _after_cursor(
+    record: ThreadRecord, cursor: tuple[datetime, str, str]
+) -> bool:
     """Идёт ли запись после курсора в порядке (updated_at ↓, system, thread)."""
-    updated, system, thread = cursor.split("|", 2)
-    mine, theirs = _updated(record), _cursor_instant(updated)
+    theirs, system, thread = cursor
+    mine = _updated(record)
     if mine != theirs:
         return mine < theirs
     return (record.key.system, record.key.thread) > (system, thread)
-
-
-def _cursor_instant(stamp: str) -> datetime:
-    """Время из курсора (``page_of`` пишет его в ISO); чужой курсор — самое
-    раннее."""
-    try:
-        moment = instant(stamp)
-    except ValueError:
-        return _EARLIEST
-    return moment if moment.tzinfo else moment.replace(tzinfo=UTC)
 
 
 def page_of(
@@ -181,14 +189,19 @@ def page_of(
     chosen.sort(key=lambda r: (r.key.system, r.key.thread))
     chosen.sort(key=_updated, reverse=True)
     if query.cursor:
-        chosen = [r for r in chosen if _after_cursor(r, query.cursor)]
+        position = parse_list_cursor(query.cursor)
+        chosen = [r for r in chosen if _after_cursor(r, position)]
     page = chosen[: query.limit]
-    cursor = None
-    if len(chosen) > query.limit:
-        last = page[-1]
-        stamp = _updated(last).isoformat()
-        cursor = f"{stamp}|{last.key.system}|{last.key.thread}"
+    more = len(chosen) > query.limit
+    cursor = list_cursor_of(page[-1]) if more else None
     return Page[ThreadRecord](items=page, next_cursor=cursor)
+
+
+def list_cursor_of(record: ThreadRecord) -> str:
+    """Курсор списка тредов «после этой записи»: тот же формат у всех
+    хранилищ (его разбирает ``parse_list_cursor``)."""
+    stamp = _updated(record).isoformat()
+    return f"{stamp}|{record.key.system}|{record.key.thread}"
 
 
 def patched_frontend(

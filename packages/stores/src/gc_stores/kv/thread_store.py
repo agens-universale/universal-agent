@@ -58,6 +58,8 @@ from gc_core.threads.rules import (
     check_writer,
     granted_lease,
     instant,
+    list_cursor_of,
+    parse_list_cursor,
     same_lease,
 )
 from gc_core.threads.store import ThreadStore
@@ -613,10 +615,7 @@ class KvThreadStore(ThreadStore):
         page = records[: query.limit]
         cursor = None
         if len(records) > query.limit:
-            last = page[-1]
-            cursor = (
-                f"{last.info.updated_at}|{last.key.system}|{last.key.thread}"
-            )
+            cursor = list_cursor_of(page[-1])
         return Page[ThreadRecord](items=page, next_cursor=cursor)
 
     # --- запись ----------------------------------------------------------------
@@ -839,9 +838,9 @@ class _Listing:
         )
         self._start = ""
         if query.cursor:
-            at, system, thread = query.cursor.split("|", 2)
+            at, system, thread = parse_list_cursor(query.cursor)
             self._start = keys.index_key(
-                instant(at), ThreadKey(system=system, thread=thread)
+                at, ThreadKey(system=system, thread=thread)
             )
 
     def _wanted_by_key(self, moment: datetime, owner: ThreadKey) -> bool:

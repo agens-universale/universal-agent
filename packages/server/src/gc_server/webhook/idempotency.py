@@ -34,3 +34,9 @@ def operation_id(key: str) -> str:
 
 def message_id(key: str) -> str:
     return "m_idem_" + _digest(key)[:32]
+
+
+def task_id_for_key(key: str) -> str:
+    """Задача запроса с ключом идемпотентности, но без ``task_id``: повтор
+    попадает в ту же задачу."""
+    return "idem-" + hashlib.sha256(key.encode("utf-8")).hexdigest()[:32]

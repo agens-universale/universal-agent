@@ -213,10 +213,17 @@ storage:
 | `POST /v1/tasks` | сообщение задаче → `202 {status, system, task_id, message_seq}` |
 | `GET /v1/tasks` | список задач: `system`, `limit` (до 1000), `cursor` → `{tasks, next_cursor}` |
 | `GET /v1/tasks/{system}/{task_id}` | статус задачи и `pending_messages` |
-| `GET /v1/tasks/{system}/{task_id}/messages` | история страницами: `after`, `limit` → `{messages: [{seq, ts, message}], next_after}` |
+| `GET /v1/tasks/{system}/{task_id}/messages` | история страницами: `cursor`, `limit` → `{messages: [{seq, ts, message}], next_cursor, has_more, reset}` |
 | `POST /v1/tasks/{system}/{task_id}/cancel` | отмена хода → `202` |
-| `GET /v1/tasks/{system}/{task_id}/events` | SSE: `event: message` (новые записи истории) и `event: status` (смена статуса); поток кончается на финальном статусе |
+| `GET /v1/tasks/{system}/{task_id}/events` | SSE: `event: message` (новые записи истории, `id:` — курсор после записи), `event: reset` (история заменена — дальше с начала новой версии) и `event: status` (смена статуса); `cursor` или `Last-Event-ID` — продолжить; поток кончается на финальном статусе |
 | `GET /healthcheck` | `{"status": "ok"}` |
+
+Курсор истории непрозрачен: поколение треда, версия истории и последний
+отданный `seq`. После сжатия история перенумерована, после пересоздания
+задачи — новое поколение: ответ со старым курсором несёт `reset: true` и
+историю новой версии с начала. Числовой `after` не принимается (`400`), как и
+негодный курсор. `Idempotency-Key` без `task_id` даёт задачу
+`idem-<sha256(ключ)[:32]>`: повтор попадает в неё же.
 
 Прежние `/events/webhook`, `/runs/…`, `/logs/…`, `/logs/all` удалены.
 

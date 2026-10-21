@@ -9,9 +9,12 @@
 | ``POST /v1/tasks`` | сообщение задаче; ``202 {status, system, task_id, message_seq}`` |
 | ``GET /v1/tasks`` | список задач (``system``, ``limit``, ``cursor``) |
 | ``GET /v1/tasks/{system}/{task_id}`` | статус и ``pending_messages`` |
-| ``GET …/messages`` | история страницами (``after``, ``limit``) |
+| ``GET …/messages`` | история страницами (``cursor``, ``limit``) |
 | ``POST …/cancel`` | отмена хода, ``202`` |
-| ``GET …/events`` | SSE: новые записи истории и смена статуса |
+| ``GET …/events`` | SSE: новые записи истории и смена статуса (``cursor``) |
+
+Курсор истории непрозрачен (``history_page``): после сжатия или пересоздания
+треда ответ несёт ``reset`` и историю новой версии с начала.
 """
 
 from __future__ import annotations
@@ -25,14 +28,21 @@ from typing import Any, Protocol
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
-from gc_core.threads.errors import OperationMismatch
+from gc_core.threads.errors import InvalidCursor, OperationMismatch
 from gc_core.threads.models import ThreadKey
 
 from gc_server.surface import http_error, read_json_object
+from gc_server.webhook.history_page import (
+    HistoryPage,
+    Position,
+    decode_cursor,
+    encode_cursor,
+)
 from gc_server.webhook.idempotency import (
     idempotency_key,
     message_id,
     operation_id,
+    task_id_for_key,
 )
 from gc_server.webhook.signatures import SignatureError, verify
 
@@ -70,8 +80,8 @@ class TaskBackend(Protocol):
     ) -> tuple[list[dict], str | None]: ...
 
     async def amessages(
-        self, key: ThreadKey, *, after: int, limit: int
-    ) -> list[dict] | None: ...
+        self, key: ThreadKey, *, position: Position | None, limit: int
+    ) -> HistoryPage | None: ...
 
 
 @dataclass(frozen=True)
@@ -149,9 +159,12 @@ class _Routes:
     async def create_task(self, request: Request):
         await self._verify(request)
         payload = await read_json_object(request)
+        key = self._idempotency_key(request)
+        if key is not None and payload.get("task_id") is None:
+            # Повтор по ключу без task_id — в ту же задачу, а не в новую.
+            payload["task_id"] = task_id_for_key(key)
         task = parse_task_request(payload, self.backend.default_system)
         message = _user_message(task.content)
-        key = self._idempotency_key(request)
         if key is not None:
             message["id"] = message_id(key)
         try:
@@ -206,9 +219,12 @@ class _Routes:
     ):
         if system is not None:
             system = self.key_of(system, "x").system
-        tasks, next_cursor = await self.backend.alist(
-            system=system, limit=_bounded(limit), cursor=cursor
-        )
+        try:
+            tasks, next_cursor = await self.backend.alist(
+                system=system, limit=_bounded(limit), cursor=cursor
+            )
+        except InvalidCursor:
+            raise http_error(400, "invalid cursor") from None
         return {"tasks": tasks, "next_cursor": next_cursor}
 
     async def get_task(self, system: str, task_id: str):
@@ -218,16 +234,27 @@ class _Routes:
         return status
 
     async def get_messages(
-        self, system: str, task_id: str, after: int = 0, limit: int = 100
+        self,
+        system: str,
+        task_id: str,
+        cursor: str | None = None,
+        limit: int = 100,
+        after: str | None = None,
     ):
         limit = _bounded(limit)
-        entries = await self.backend.amessages(
-            self.key_of(system, task_id), after=max(0, after), limit=limit
+        page = await self.backend.amessages(
+            self.key_of(system, task_id),
+            position=_position(cursor, after),
+            limit=limit,
         )
-        if entries is None:
+        if page is None:
             raise HTTPException(status_code=404, detail=_NOT_FOUND)
-        next_after = entries[-1]["seq"] if len(entries) == limit else None
-        return {"messages": entries, "next_after": next_after}
+        return {
+            "messages": page.entries,
+            "next_cursor": encode_cursor(page.position),
+            "has_more": len(page.entries) == limit,
+            "reset": page.reset,
+        }
 
     async def cancel_task(self, system: str, task_id: str):
         cancelled = await self.backend.acancel(self.key_of(system, task_id))
@@ -236,28 +263,52 @@ class _Routes:
         return JSONResponse(status_code=202, content=cancelled)
 
     async def task_events(
-        self, request: Request, system: str, task_id: str, after: int = 0
+        self,
+        request: Request,
+        system: str,
+        task_id: str,
+        cursor: str | None = None,
+        after: str | None = None,
     ):
         key = self.key_of(system, task_id)
+        # Переподключение EventSource присылает id последнего события.
+        cursor = cursor or request.headers.get("last-event-id") or None
+        position = _position(cursor, after)
         if await self.backend.astatus(key) is None:
             raise HTTPException(status_code=404, detail=_NOT_FOUND)
         return StreamingResponse(
-            _events(self.backend, key, request, after=max(0, after)),
+            _events(self.backend, key, request, position=position),
             media_type="text/event-stream",
         )
 
 
 async def _events(
-    backend: TaskBackend, key: ThreadKey, request: Request, *, after: int
+    backend: TaskBackend,
+    key: ThreadKey,
+    request: Request,
+    *,
+    position: Position | None,
 ) -> AsyncIterator[str]:
-    """Новые записи истории (``message``) и смена статуса (``status``)
-    опросом хранилища; поток кончается на финальном статусе."""
+    """Новые записи истории (``message``, ``id`` — курсор после неё),
+    замена истории (``reset``: дальше — история новой версии с начала) и
+    смена статуса (``status``) опросом хранилища; поток кончается на
+    финальном статусе."""
     seen_status: Any = None
     while not await request.is_disconnected():
-        entries = await backend.amessages(key, after=after, limit=_LIMIT_MAX)
-        for entry in entries or []:
-            after = entry["seq"]
-            yield _sse("message", entry)
+        page = await backend.amessages(
+            key, position=position, limit=_LIMIT_MAX
+        )
+        if page is not None:
+            if page.reset:
+                yield _sse("reset", {})
+            for entry in page.entries:
+                position = Position(
+                    page.position.generation,
+                    page.position.history_version,
+                    entry["seq"],
+                )
+                yield _sse("message", entry, event_id=encode_cursor(position))
+            position = page.position
         status = await backend.astatus(key)
         state = (status or {}).get("status")
         if status is not None and state != seen_status:
@@ -268,8 +319,23 @@ async def _events(
         await asyncio.sleep(backend.events_poll_seconds)
 
 
-def _sse(event: str, data: Any) -> str:
-    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+def _sse(event: str, data: Any, *, event_id: str | None = None) -> str:
+    head = f"id: {event_id}\n" if event_id is not None else ""
+    body = json.dumps(data, ensure_ascii=False)
+    return f"{head}event: {event}\ndata: {body}\n\n"
+
+
+def _position(cursor: str | None, after: str | None) -> Position | None:
+    """Позиция истории из курсора; числовой ``after`` прежней формы и
+    негодный курсор — 400."""
+    if after is not None:
+        raise http_error(400, "after is not supported: use cursor")
+    if cursor is None:
+        return None
+    try:
+        return decode_cursor(cursor)
+    except ValueError:
+        raise http_error(400, "invalid cursor") from None
 
 
 def _bounded(limit: int) -> int:

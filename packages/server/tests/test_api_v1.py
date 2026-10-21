@@ -167,21 +167,57 @@ async def test_history_pages(webhook, monkeypatch):
     _install(monkeypatch)
     await webhook.post("/v1/tasks", json={"task_id": "h", "message": "x"})
     await _done(webhook, "generic", "h")
-    first = (
-        await webhook.get("/v1/tasks/generic/h/messages", params={"limit": 1})
-    ).json()
-    assert len(first["messages"]) == 1
-    assert first["next_after"] == first["messages"][0]["seq"]
+    url = "/v1/tasks/generic/h/messages"
+    first = (await webhook.get(url, params={"limit": 1})).json()
+    assert len(first["messages"]) == 1 and first["has_more"]
+    assert first["reset"] is False and first["next_cursor"]
     rest = (
-        await webhook.get(
-            "/v1/tasks/generic/h/messages",
-            params={"after": first["next_after"]},
-        )
+        await webhook.get(url, params={"cursor": first["next_cursor"]})
     ).json()
-    assert (
-        rest["messages"] and rest["messages"][0]["seq"] > first["next_after"]
-    )
+    assert rest["messages"]
+    assert rest["messages"][0]["seq"] > first["messages"][0]["seq"]
     assert (await webhook.get("/v1/tasks/generic/nope")).status_code == 404
+
+
+async def test_history_cursor_resets_after_compaction(webhook, monkeypatch):
+    """Находка ревью №6: после сжатия история перенумерована — старый
+    курсор не теряет новые сообщения и не отдаёт чужие: ответ несёт
+    ``reset`` и историю новой версии с начала."""
+    from gc_core.threads.models import ThreadKey
+    from gc_testkit.thread_writes import acompact
+
+    _install(monkeypatch)
+    await webhook.post("/v1/tasks", json={"task_id": "k", "message": "x"})
+    await _done(webhook, "generic", "k")
+    url = "/v1/tasks/generic/k/messages"
+    before = (await webhook.get(url)).json()
+    summary = {"id": "sum", "role": "user", "content": "сводка"}
+    await acompact(
+        webhook.surface.threads().store,
+        ThreadKey(system="generic", thread="k"),
+        [summary],
+    )
+    after = (
+        await webhook.get(url, params={"cursor": before["next_cursor"]})
+    ).json()
+    assert after["reset"] is True
+    assert [m["message"]["id"] for m in after["messages"]] == ["sum"]
+
+
+async def test_history_refuses_numeric_after_and_broken_cursor(
+    webhook, monkeypatch
+):
+    _install(monkeypatch)
+    await webhook.post("/v1/tasks", json={"task_id": "b", "message": "x"})
+    await _done(webhook, "generic", "b")
+    url = "/v1/tasks/generic/b/messages"
+    assert (await webhook.get(url, params={"after": 1})).status_code == 400
+    broken = await webhook.get(url, params={"cursor": "не-курсор"})
+    assert broken.status_code == 400
+    events = await webhook.get(
+        "/v1/tasks/generic/b/events", params={"cursor": "%%%"}
+    )
+    assert events.status_code == 400
 
 
 async def test_cancel_stops_the_running_task(webhook, monkeypatch):
@@ -280,3 +316,27 @@ def test_swarm_has_the_same_handles(tmp_path, monkeypatch):
     assert cancel.status_code == 202, cancel.json()
     assert client.get("/v1/tasks/generic/s1").json()["status"] == "cancelled"
     assert client.post("/events/webhook", json={}).status_code == 404
+
+
+async def test_task_list_refuses_a_broken_cursor(webhook):
+    resp = await webhook.get("/v1/tasks", params={"cursor": "не-курсор"})
+    assert resp.status_code == 400
+
+
+async def test_task_list_pages_are_full(webhook, monkeypatch):
+    """Свежие треды других поверхностей не съедают страницу: сервер
+    дочитывает список, пока не наберёт ``limit`` задач."""
+    from gc_core.threads.models import ThreadKey
+
+    _install(monkeypatch)
+    for task in ("a", "b"):
+        await webhook.post("/v1/tasks", json={"task_id": task, "message": "x"})
+        await _done(webhook, "generic", task)
+    threads = webhook.surface.threads()
+    for n in range(3):
+        await threads.append_messages(
+            ThreadKey(system="responses", thread=f"chat{n}"),
+            [{"id": f"m{n}", "role": "user", "content": "чат"}],
+        )
+    page = (await webhook.get("/v1/tasks", params={"limit": 2})).json()
+    assert {t["task_id"] for t in page["tasks"]} == {"a", "b"}

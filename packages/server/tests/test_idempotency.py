@@ -105,3 +105,18 @@ def _mark_delivered(surface) -> None:
         await writer.arelease()
 
     run_sync(mark())
+
+
+def test_key_without_task_id_lands_in_the_same_task(surface):
+    """Находка ревью №5: без ``task_id`` сервер выдавал новый на каждый
+    запрос, и повтор по ключу создавал вторую задачу. Задача по ключу —
+    ``idem-`` + sha256(ключ)[:32]: повтор попадает в неё же."""
+    import hashlib
+
+    client = TestClient(surface.app(), base_url=LOOPBACK_URL)
+    headers = {"Idempotency-Key": "k-no-task"}
+    first = client.post("/v1/tasks", json={"message": "x"}, headers=headers)
+    again = client.post("/v1/tasks", json={"message": "x"}, headers=headers)
+    expected = "idem-" + hashlib.sha256(b"k-no-task").hexdigest()[:32]
+    assert first.json()["task_id"] == again.json()["task_id"] == expected
+    assert again.json()["message_seq"] == 1

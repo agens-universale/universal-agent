@@ -933,6 +933,23 @@ async def check_list_pagination_is_stable(store, _clock: FakeClock) -> None:
     _expect(len(seen) == 5 and set(seen) == keys, "без потерь и повторов")
 
 
+async def check_list_rejects_broken_cursor(store, _clock: FakeClock):
+    """Чужой или испорченный курсор списка — ``InvalidCursor`` (у API —
+    400), а не падение разбора и не тихая первая страница."""
+    from gc_core.threads.errors import InvalidCursor
+
+    lease = await _claim(store)
+    await store.commit(
+        KEY, _change("op", 0, lease, append_messages=_msgs("a"))
+    )
+    for broken in ("не-курсор", "нет|даты|x", "2026-01-01T00:00:00Z"):
+        await _raises(
+            InvalidCursor,
+            store.list_threads(ThreadQuery(cursor=broken)),
+            f"курсор {broken!r}",
+        )
+
+
 async def check_delete(store: ThreadStore, _clock: FakeClock) -> None:
     lease = await _claim(store)
     await store.commit(
@@ -1210,6 +1227,7 @@ CHECKS: tuple[Callable[..., Awaitable[None]], ...] = (
     check_blobs,
     check_list_threads_filters,
     check_list_pagination_is_stable,
+    check_list_rejects_broken_cursor,
     check_delete,
     check_prune_receipts,
     check_watch_default,

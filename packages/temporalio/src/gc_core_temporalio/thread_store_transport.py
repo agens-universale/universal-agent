@@ -5,6 +5,7 @@ import dataclasses
 
 from gc_core.execution.contracts import ExecutionFailure, InfrastructureFailure
 from gc_core.threads.errors import (
+    InvalidCursor,
     OperationMismatch,
     OwnershipError,
     ThreadConflict,
@@ -40,6 +41,7 @@ _STORE_ERRORS = {
         OperationMismatch,
         BaseMismatch,
         ThreadChanged,
+        InvalidCursor,
         ValueError,
     )
 }
