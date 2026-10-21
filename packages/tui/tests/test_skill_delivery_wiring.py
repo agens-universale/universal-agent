@@ -242,14 +242,23 @@ async def test_skill_only_reply_to_subagent_is_not_drawn(
     pytest.importorskip("textual")
     from gc_tui.widgets.user_reply import UserReplyContainer
 
+    from gc_core.tools.skills import skill_delivery as sd
+
     app = _child_input_app(tmp_path, monkeypatch, available=True)
     async with app.run_test() as pilot:
         scr = pilot.app.screen
-        scr._mount_skill_only_reply("coder", "DLV", True)
+        await scr._cmd_use_skill("coder")
         await pilot.pause()
         assert list(scr.query(UserReplyContainer)) == []
         assert scr._pending_skill_marker is None
-        scr._mount_skill_only_reply("nope", "DLV", False)
+        monkeypatch.setattr(
+            sd, "skill_is_available", _as_coro(lambda skill_id, reg: False)
+        )
+        await scr._cmd_use_skill("nope")
         await pilot.pause()
         (reply,) = scr.query(UserReplyContainer)
         assert reply._skill_error is True
+        assert [m["content"] for m in app.active_runner.added] == [
+            "DLV",
+            "DLV",
+        ]

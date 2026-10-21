@@ -671,7 +671,9 @@ class _BlockingExecutor:
         pass
 
 
-async def _send(pilot, tmp_path: Path, text: str) -> UserReplyContainer:
+async def _send(
+    pilot, tmp_path: Path, text: str, state: str = "pending"
+) -> UserReplyContainer:
     inp = pilot.app.query_one("#cmdinput")
     inp.text = text
     await pilot.press("enter")
@@ -683,7 +685,7 @@ async def _send(pilot, tmp_path: Path, text: str) -> UserReplyContainer:
     widgets = [
         w for w in pilot.app.query(UserReplyContainer) if w._text == text
     ]
-    assert len(widgets) == 1 and widgets[0].state == "pending"
+    assert len(widgets) == 1 and widgets[0].state == state
     return widgets[0]
 
 
@@ -715,7 +717,7 @@ async def test_pending_delivered_during_compaction_becomes_normal(
 
 @pytest.mark.parametrize("when", ["mid_turn", "turn_end"])
 @pytest.mark.asyncio
-async def test_queued_pending_stays_pending_after_compaction(tmp_path, when):
+async def test_queued_reply_stays_queued_after_compaction(tmp_path, when):
     thread = _base_thread(tmp_path)
     fake = _BlockingExecutor()
     async with _session(tmp_path, executor=fake) as (app, pilot, scr):
@@ -725,7 +727,7 @@ async def test_queued_pending_stays_pending_after_compaction(tmp_path, when):
         await _wait_until(
             pilot, lambda: first.state == "normal", "первое доставлено"
         )
-        widget = await _send(pilot, tmp_path, "в очереди")
+        widget = await _send(pilot, tmp_path, "в очереди", "queued")
         if when == "mid_turn":
             thread.append(_call("fc2", "c2"), _out("fo2", "c2", "вывод"))
         else:
@@ -742,7 +744,7 @@ async def test_queued_pending_stays_pending_after_compaction(tmp_path, when):
         fake.stop_run()
 
     assert queued == [widget]
-    assert widget.state == "pending"
+    assert widget.state == "queued"
     assert [r["status"] for r in pending] == ["pending"]
     assert failed == []
 

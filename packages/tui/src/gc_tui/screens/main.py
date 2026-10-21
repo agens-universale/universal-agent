@@ -2761,13 +2761,43 @@ class TraceScreen(Screen):
 
         scroll=True: прокрутить вниз, но только если юзер уже внизу
         (`_trace_is_at_bottom`) — иначе не дёргаем его прокрутку. force_scroll=True
-        прокручивает безусловно (отправка своего сообщения = re-engage)."""
+        прокручивает безусловно (отправка своего сообщения = re-engage).
+
+        Очередь прижата к низу (спека P3 §2.4): всё новое встаёт перед первой
+        репликой в очереди, сама такая реплика — в конец. Единственное место
+        этого правила: всё, что монтируется в конец ленты, идёт сюда."""
+        from gc_tui.widgets.user_reply import is_queued
+
         trace = self.query_one(_SEL_TRACE, VerticalScroll)
         if force_scroll:
             self._stick_bottom = True  # отправка своего сообщения = re-engage
-        trace.mount(widget)
+        first = None if is_queued(widget) else self._first_queued(trace)
+        if first is None:
+            trace.mount(widget)
+        else:
+            trace.mount(widget, before=first)
         if scroll and self._stick_bottom:
             self._scroll_trace_end()
+
+    @staticmethod
+    def _first_queued(trace):
+        """Первая реплика очереди в ленте или None."""
+        from gc_tui.widgets.user_reply import is_queued
+
+        return next((w for w in trace.children if is_queued(w)), None)
+
+    def _refresh_queue_hint(self) -> None:
+        """Подсказка очереди — только под последней ожидающей репликой
+        (спека P3 §10)."""
+        from gc_tui.widgets.user_reply import UserReplyContainer, is_queued
+
+        trace = self.query_one(_SEL_TRACE, VerticalScroll)
+        replies = [
+            w for w in trace.children if isinstance(w, UserReplyContainer)
+        ]
+        last = next((w for w in reversed(replies) if is_queued(w)), None)
+        for reply in replies:
+            reply.set_queue_hint(reply is last)
 
     def _on_user_text_submitted(
         self, text: str, images: tuple[Attachment, ...] = ()
@@ -3028,6 +3058,7 @@ class TraceScreen(Screen):
                         widget.set_images(ev.attachments)
                     self._pending_user_widgets.pop(cid, None)
                     self._remove_pending_record(cid)
+                    self._refresh_queue_hint()
                     return
             # Без pending-матча — обычный mount (используем display_content = ev.summary).
             self._mount_user_reply(
@@ -3379,7 +3410,8 @@ class TraceScreen(Screen):
         try:
             trace.mount(widget, after=anchor)
         except Exception:
-            trace.mount(widget)
+            # Якоря нет в ленте — в конец, но над очередью.
+            self._trace_mount(widget, scroll=False)
         if anchor is tail:
             self._nested_anchor[parent_call_id] = widget
         self._nested_widgets_by_parent.setdefault(parent_call_id, []).append(
@@ -4071,13 +4103,17 @@ class TraceScreen(Screen):
             panel.set_accepted(plan_is_accepted(plan, panel.plan_text))
 
     def _ensure_plan_panel_last(self, plan: dict) -> None:
-        """Рамка плана сессии стоит последней в ленте: если нет — показать
-        копию. Копия — локальный рендер, в историю не пишется."""
+        """Рамка плана сессии стоит последней в ленте (над очередью): если
+        нет — показать копию. Копия — локальный рендер, в историю не
+        пишется."""
         from gc_tui.services.trace_render import build_block_widgets
 
         text = str(plan.get("text") or "")
+        from gc_tui.widgets.user_reply import is_queued
+
         trace = self.query_one(_SEL_TRACE, VerticalScroll)
-        children = list(trace.children)
+        # Последний — без очереди: она прижата к низу и рамку не хоронит.
+        children = [w for w in trace.children if not is_queued(w)]
         last = children[-1] if children else None
         if isinstance(last, PlanPanel) and last.shows(text):
             return
@@ -4400,14 +4436,17 @@ class TraceScreen(Screen):
         images: tuple[Attachment, ...] = (),
         skill: str | None = None,
         skill_error: bool = False,
+        message_id: str | None = None,
+        restore_text: str = "",
     ):
         """Смонтировать реплику; ``skill`` — id скилла (имя первым словом).
 
-        Pending-реплика без явного скилла забирает итог доставки
-        `_pending_skill_marker` (спека P3 §2.3)."""
+        Свежая отправка (`pending` / `queued`) без явного скилла забирает итог
+        доставки `_pending_skill_marker` (спека P3 §2.3)."""
         from gc_tui.widgets.user_reply import UserReplyContainer
 
-        if state == "pending" and skill is None:
+        fresh = state in ("pending", "queued")
+        if fresh and skill is None:
             marker, self._pending_skill_marker = (
                 self._pending_skill_marker,
                 None,
@@ -4421,11 +4460,15 @@ class TraceScreen(Screen):
             images=images,
             skill=self._skill_input_name({"id": skill}) if skill else None,
             skill_error=skill_error,
+            message_id=message_id,
+            client_id=client_id,
+            restore_text=restore_text,
         )
-        # pending = свежая отправка юзера → форсим скролл вниз (re-engage);
-        # normal/failed = воспроизведение из истории → обычное прилипание.
-        self._trace_mount(widget, force_scroll=(state == "pending"))
-        if state == "pending" and client_id is not None:
+        # pending/queued = свежая отправка юзера → форсим скролл вниз
+        # (re-engage); normal/failed = воспроизведение из истории → обычное
+        # прилипание.
+        self._trace_mount(widget, force_scroll=fresh)
+        if fresh and client_id is not None:
             self._record_pending_widget(client_id, widget)
         return widget
 
@@ -4567,6 +4610,7 @@ class TraceScreen(Screen):
             ]
             self._write_tui_meta(tid, {"pending_user_messages": new_list})
         self._pending_user_widgets.clear()
+        self._refresh_queue_hint()
 
     def _begin_auto_created_task(self) -> str:
         """Автосоздание треда под первое сообщение: id, store, наследование
@@ -6634,25 +6678,19 @@ class TraceScreen(Screen):
             return
 
         if runner.is_running():
-            self._reset_thinking_timer()
             self._on_user_text_submitted(text, images)
-            # Active subagent → nested under subagent_* (progress/sidecar); иначе
-            # parent pending + обычная user-строка в трейсе.
-            if not runner.is_child_input_active():
-                client_id = self._track_pending(
-                    display_text=text, wire_content=text, images=images
-                )
-                self._mount_user_reply(
-                    text, state="pending", client_id=client_id, images=images
-                )
             message = {"role": "user", "content": text, "id": msg_id}
             if images:
                 # В тред картинки копирует ядро при приёме реплики (дизайн картинок §3).
                 message["attachments"] = [att.to_dict() for att in images]
-            runner.add_message(message)
-            technical = self._build_attachment_technical(text)
-            if technical is not None:
-                runner.add_message({"role": "user", "content": technical})
+            self._queue_user_message(
+                message,
+                display_text=text,
+                wire=text,
+                images=images,
+                restore_text=text,
+                technical=self._build_attachment_technical(text),
+            )
             return
 
         # Задача есть, но run завершился (или открыта через /sessions) — продолжаем тот же
@@ -7591,13 +7629,13 @@ class TraceScreen(Screen):
             msg = {
                 "role": "user",
                 "content": await build_skill_delivery(skill_id, reg),
+                "id": "m_" + uuid.uuid4().hex,
                 "display_content": "",
             }
             if loaded:
                 msg["skill_loaded"] = skill_id
-            runner.add_message(msg)
             self._record_skill_meta(skill_id)
-            self._mount_skill_only_reply(skill_id, msg["content"], loaded)
+            self._send_skill_only(skill_id, msg, loaded)
             return
         # Run не идёт (нет задачи / завершена / открыта через /sessions) — отложенно
         # к следующему сообщению.
@@ -7610,23 +7648,71 @@ class TraceScreen(Screen):
             kind_class="line-meta",
         )
 
-    def _mount_skill_only_reply(
-        self, skill_id: str, wire: str, loaded: bool
-    ) -> None:
+    def _send_skill_only(self, skill_id: str, msg: dict, loaded: bool) -> None:
         """Mid-run `/skill X` без текста — реплика из одного имени скилла
-        (спека P3 §10 ответ 3). Загруженный сверяется с записью треда по
-        wire, как реплика с текстом; ненайденный в тред репликой не
-        попадает — без сверки, с ошибкой под ней. Ввод субагенту реплику
-        родителя не рисует (как у реплики с текстом)."""
+        (спека P3 §10 ответ 3). Загруженный встаёт в очередь, как реплика
+        с текстом; ненайденный в тред репликой не попадает — без очереди
+        и сверки, с ошибкой под ней."""
         if not loaded:
+            self.app.active_runner.add_message(msg)
             self._mount_user_reply("", skill=skill_id, skill_error=True)
             return
-        if self.app.active_runner.is_child_input_active():
-            return
-        client_id = self._track_pending(display_text="", wire_content=wire)
-        self._mount_user_reply(
-            "", state="pending", client_id=client_id, skill=skill_id
+        name = self._skill_input_name({"id": skill_id})
+        self._queue_user_message(
+            msg,
+            display_text="",
+            wire=msg["content"],
+            skill=skill_id,
+            restore_text=f"/{name}",
         )
+
+    def _queue_user_message(
+        self,
+        message: dict,
+        *,
+        display_text: str,
+        wire: str,
+        images: tuple[Attachment, ...] = (),
+        skill: str | None = None,
+        restore_text: str,
+        technical: Optional[str] = None,
+    ) -> None:
+        """Отправка во время хода (спека P3 §2.4) — единый путь реплики,
+        `/skill X текст` и `/skill X`: сообщение (и его техспутник `@`-
+        вложений с производным `id`) уходит в очередь раннера, реплика —
+        в состоянии `queued` у низа ленты. Ввод субагенту реплику родителя
+        не рисует. Таймер хода не сбрасывается: индикатор считает от
+        начала хода."""
+        from gc_core.execution.message_keys import companion_message_id
+
+        runner = self.app.active_runner
+        to_child = runner.is_child_input_active()
+        runner.add_message(message)
+        if technical is not None:
+            runner.add_message(
+                {
+                    "role": "user",
+                    "content": technical,
+                    "id": companion_message_id(message["id"]),
+                }
+            )
+        if to_child:
+            # Реплики родителя нет — итог доставки не ждёт следующую.
+            self._pending_skill_marker = None
+            return
+        client_id = self._track_pending(
+            display_text=display_text, wire_content=wire, images=images
+        )
+        self._mount_user_reply(
+            display_text,
+            state="queued",
+            client_id=client_id,
+            images=images,
+            skill=skill,
+            message_id=message["id"],
+            restore_text=restore_text,
+        )
+        self._refresh_queue_hint()
 
     async def _deliver_skill_with_prompt(
         self, skill_id: str, prompt: str
@@ -7652,18 +7738,13 @@ class TraceScreen(Screen):
             }
             if skill_loaded:
                 msg["skill_loaded"] = skill_loaded
-            runner.add_message(msg)
-            if not runner.is_child_input_active():
-                client_id = self._track_pending(
-                    display_text=prompt, wire_content=full_query
-                )
-                self._mount_user_reply(
-                    prompt, state="pending", client_id=client_id
-                )
-            else:
-                # Реплики родителя нет — итог доставки не ждёт следующую.
-                self._pending_skill_marker = None
-            self._reset_thinking_timer()
+            name = self._skill_input_name({"id": skill_id})
+            self._queue_user_message(
+                msg,
+                display_text=prompt,
+                wire=full_query,
+                restore_text=f"/{name} {prompt}",
+            )
             self._on_user_text_submitted(prompt)
             self._record_skill_meta(skill_id)
             return

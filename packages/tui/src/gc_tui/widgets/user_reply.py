@@ -18,6 +18,7 @@ from textual.widget import Widget
 from gc_tui.palette import ACCENT as _ACCENT
 from gc_tui.palette import DIM as _DIM
 from gc_tui.palette import ERR as _ERR_RED
+from gc_tui.palette import MUTED as _MUTED
 from gc_tui.palette import SKILL as _SKILL
 from gc_tui.services.image_chips import chip_of, chip_spans
 from gc_tui.services.path_display import fit_path
@@ -37,6 +38,9 @@ _FROM_CLIPBOARD = "из буфера"
 
 #: Следствие реплики: скилл не найден, сообщение ушло без него (P3 §2.3).
 _SKILL_MISSING = "скилл {name} не найден — отправлено без него"
+
+#: Подсказка под последней репликой в очереди (P3 §2.4, §10 ответ 2).
+QUEUE_HINT = "в очереди · ↑ — изменить до отправки"
 
 
 def _image_style(color: Optional[str], att: Attachment) -> Style:
@@ -262,7 +266,10 @@ class _ImageLinksMixin:
         return _image_path(self._images, image_id)
 
 
-_State = Literal["normal", "pending", "failed"]
+_State = Literal["normal", "pending", "queued", "failed"]
+
+#: Цвет маркера `› ` по состоянию; не названное — ACCENT.
+_MARKER_COLOR = {"failed": _ERR_RED, "queued": _MUTED}
 
 
 class _ReplyBand(_WrappedReply, Widget):
@@ -289,7 +296,11 @@ class UserReplyContainer(_ImageLinksMixin, ClickModelMixin, Widget):
     Маркер `› ` — в колонке `●` реплики агента, только на первой строке;
     продолжение — под текстом, в том числе при переносе (`_WrappedReply`).
     Состояния `normal` / `pending` выглядят одинаково; `failed` — маркер
-    цветом ошибки.
+    цветом ошибки; `queued` — отправлена во время хода и ждёт впуска
+    ядром (спека P3 §2.4): класс `-queued` (тише подложка и текст), маркер
+    `MUTED`, под подложкой — подсказка `QUEUE_HINT` (`set_queue_hint`).
+    ``message_id`` / ``client_id`` / ``restore_text`` — что снять из
+    очереди и что вернуть в поле ввода.
 
     ``skill`` — запускаемое имя скилла (`skill_input_name`): первым словом
     после маркера, `/имя` цветом `SKILL`; ``skill_error`` — скилл не найден:
@@ -317,18 +328,28 @@ class UserReplyContainer(_ImageLinksMixin, ClickModelMixin, Widget):
         images: tuple[Attachment, ...] = (),
         skill: str | None = None,
         skill_error: bool = False,
+        message_id: str | None = None,
+        client_id: str | None = None,
+        restore_text: str = "",
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
         self._text = text
+        self.message_id = message_id
+        self.client_id = client_id
+        self.restore_text = restore_text
         self._skill = skill
         self._skill_error = skill_error
         self._event_no = event_no
         self._state: _State = state
+        self.set_class(state == "queued", "-queued")
         # Картинки реплики: плашки в тексте и подстроки под ним (визуальный контракт §3).
         self._images: tuple[Attachment, ...] = tuple(images)
         self._consequences: list[Text] = []
         self._band = _ReplyBand(self)
+        self._queue_hint = NoSelectStatic(
+            QUEUE_HINT, classes="queue-hint", markup=False
+        )
         # Следствие реплики в копию выделения не идёт.
         self._consequence_slot = ConsequenceSlot(
             0, selectable=False, classes="reply-consequence"
@@ -340,6 +361,7 @@ class UserReplyContainer(_ImageLinksMixin, ClickModelMixin, Widget):
 
     def compose(self):
         yield self._band
+        yield self._queue_hint
         yield self._consequence_slot
 
     @property
@@ -351,9 +373,17 @@ class UserReplyContainer(_ImageLinksMixin, ClickModelMixin, Widget):
         return bool(self._images)
 
     def set_state(self, new_state: _State) -> None:
-        """Переключить состояние реплики: меняется только цвет маркера."""
+        """Переключить состояние реплики: цвет маркера и вид очереди."""
         self._state = new_state
+        self.set_class(new_state == "queued", "-queued")
+        if new_state != "queued":
+            self.set_queue_hint(False)
         self._band.refresh()
+
+    def set_queue_hint(self, shown: bool) -> None:
+        """Показать или скрыть подсказку очереди под подложкой (на фоне
+        ленты, в колонке текста). В копию выделения она не идёт."""
+        self.set_class(shown, "-queue-hint")
 
     def add_consequence(self, body: Text) -> None:
         """Дописать строку `└ body` под подложкой реплики (на фоне ленты).
@@ -374,7 +404,7 @@ class UserReplyContainer(_ImageLinksMixin, ClickModelMixin, Widget):
         self._band.refresh(layout=True)
 
     def _reply_lines(self, width: int) -> list[_ReplyLine]:
-        color = _ERR_RED if self._state == "failed" else _ACCENT
+        color = _MARKER_COLOR.get(self._state, _ACCENT)
         lead = Text(USER_PREFIX, style=Style(color=color))
         lines = _build_lines(
             self._text, self._images, self._hover_image_id, lead, width
@@ -408,6 +438,11 @@ class UserReplyContainer(_ImageLinksMixin, ClickModelMixin, Widget):
         from gc_tui.messages import OpenEventRequest
 
         return OpenEventRequest(self._event_no)
+
+
+def is_queued(widget: object) -> bool:
+    """Реплика ждёт впуска ядром: ленте — прижать к низу (P3 §2.4)."""
+    return isinstance(widget, UserReplyContainer) and widget.state == "queued"
 
 
 def _nested_lines(

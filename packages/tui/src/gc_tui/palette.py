@@ -126,6 +126,11 @@ DIFF_DEL_GUTTER = ERR
 _REFUSED_SHARE = 0.55
 REFUSED = _mix(BG, WARN, _REFUSED_SHARE)
 
+# Реплика в очереди (ждёт впуска ядром): подложка тише обычной — между фоном
+# ленты и USER_BAND_BG. В теме auto — от пересчитанных фона и USER_BAND_BG.
+_QUEUE_SHARE = 0.55
+QUEUE_BG = _mix(BG, USER_BAND_BG, _QUEUE_SHARE)
+
 
 # Рампы анимаций (ping-pong, пик — токен палитры); значения те же, что были
 # литералами в виджетах. В теме auto их пересчитывает apply_background.
@@ -203,6 +208,7 @@ _FIXED = {
         "BAND_BG",
         "BLOCK_BG",
         "REFUSED",
+        "QUEUE_BG",
         *_DIFF,
         *_TINTED,
         *_RAMP_PEAKS,
@@ -248,6 +254,7 @@ def _derived(bg: str) -> dict[str, object]:
         "REFUSED": _mix(bg, WARN, _REFUSED_SHARE),
         **{name: _shift(_FIXED[name], bg) for name in _DIFF},
         **tinted,
+        "QUEUE_BG": _mix(bg, tinted["USER_BAND_BG"], _QUEUE_SHARE),
         **ramps,
     }
 
@@ -335,6 +342,7 @@ def css_variables() -> dict[str, str]:
         "frame-archive": FRAME_ARCHIVE,
         "note-ink": NOTE_INK,
         "user-band-bg": USER_BAND_BG,
+        "queue-bg": QUEUE_BG,
         "overlay-bg": OVERLAY_BG,
         "zebra-bg": ZEBRA_BG,
         "skill": SKILL,

@@ -285,7 +285,16 @@ UserReplyContainer {
     height: auto;
     width: 1fr;
 }
+/* Реплика в очереди (P3 §2.4): тише подложка и текст; подсказка — под
+   подложкой на фоне ленты, в колонке текста после `› `. Правило очереди —
+   до правила фокуса: фокус его перекрывает. */
+UserReplyContainer.-queued > .user-band {
+    background: $queue-bg;
+    color: $dim;
+}
 UserReplyContainer:focus > .user-band { background: $focus-bg; }
+.queue-hint { display: none; height: auto; padding-left: 2; color: $muted; }
+UserReplyContainer.-queue-hint > .queue-hint { display: block; }
 
 /* Бренд-блок пустого состояния (§2.8) */
 .brand-logo { color: $brand; text-style: bold; width: auto; height: auto; }

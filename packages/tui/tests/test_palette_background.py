@@ -39,6 +39,7 @@ _FIXED_CSS = {
     "frame-archive": "#4b525d",
     "note-ink": "#a5adb8",
     "user-band-bg": "#282c36",
+    "queue-bg": "#1c2029",
     "overlay-bg": "#161A23",
     "zebra-bg": "#232836",
     "skill": "#afd7ff",
