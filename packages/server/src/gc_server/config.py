@@ -53,6 +53,11 @@ _MOVED_TOP = {
 _MOVED_NESTED = {
     ("swarm", "enabled"): "server.apis",
     ("server", "port"): "webhook.port (у каждой поверхности свой порт)",
+    ("swarm", "storage"): (
+        "swarm.thread_in_store: true — тред задачи в хранилище тредов "
+        "сервера через прокси одного треда; учётные данные базы в "
+        "песочницу больше не передаются"
+    ),
 }
 
 _NO_BUILD_WAIT = (
@@ -277,6 +282,9 @@ class SwarmConfig(SurfaceConfig):
     model_config = ConfigDict(extra="allow", frozen=True)
 
     port: int = Field(default=8092, ge=1, le=65535)
+    #: Тред задачи — в хранилище тредов сервера (``/logs`` и сообщения в
+    #: идущую задачу); песочница ходит в него через прокси одного треда.
+    thread_in_store: bool = False
 
 
 class ServerSection(BaseModel):
@@ -335,8 +343,6 @@ class ServerConfig(BaseModel):
         """Секция swarm в форме, которую читает ``build_swarm_config``:
         правки агента — общие, затем свои."""
         raw = self.swarm.model_dump(exclude={"host", "port", "auth_token"})
-        # Подключение песочницы к базе читает поверхность swarm сама.
-        raw.pop("storage", None)
         own = raw.pop("agent_overrides", {}) or {}
         raw.pop("agent_md_path", None)
         return {

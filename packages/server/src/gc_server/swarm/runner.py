@@ -4,6 +4,7 @@ import logging
 import os
 import shutil
 import subprocess
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Dict, Optional, Tuple
 
@@ -135,6 +136,8 @@ def _materialize_runtime_config(
     host_config_path: str,
     sandbox_path: str,
     swarm_cfg: Dict[str, Any],
+    *,
+    in_store: bool = False,
 ) -> str:
     """Сгенерировать ${sandbox_path}/.gc/config.yml для CLI внутри bwrap.
 
@@ -160,7 +163,8 @@ def _materialize_runtime_config(
            agent.use_server_subagents = False
          (Опц.) paths.agent_md_path / paths.skills_data_path — на внутренние
          пути после копирования файлов из swarm_cfg.
-      6. Секция ``storage`` хоста убирается: тред песочницы — в её файлах.
+      6. Секция ``storage`` хоста убирается: тред песочницы — в её файлах
+         или (``in_store``) в хранилище сервера через прокси одного треда.
 
     Возвращает путь к материализованному файлу на хосте (для логирования/тестов).
     """
@@ -234,12 +238,10 @@ def _materialize_runtime_config(
 
     merged = merge_config_layers(raw, swarm_overrides)
     # Хранилище хоста внутрь не уходит: тред песочницы — в её файлах
-    # (/work/.gc/threads) или в общей базе (thread_store) — секцией без
-    # секретов, их значения — окружением процесса.
+    # (/work/.gc/threads) или в хранилище сервера через прокси треда.
     merged.pop("storage", None)
-    section, _env = sandbox_storage(swarm_cfg.get("thread_store"))
-    if section:
-        merged["storage"] = section
+    if in_store:
+        merged["storage"] = {"threads": dict(REMOTE_THREADS)}
 
     gc_dir = os.path.join(sandbox_path, ".gc")
     os.makedirs(gc_dir, exist_ok=True)
@@ -249,35 +251,22 @@ def _materialize_runtime_config(
     return out_path
 
 
-#: Типы хранилища тредов, до которых песочница достаёт по сети. SQLite —
-#: файл хоста: внутри песочницы его нет, тред остаётся в её файлах.
-SANDBOX_STORES = frozenset({"postgres", "mysql", "redis", "s3"})
-_ENV_PREFIX = "GC_SWARM_DB_"
+#: Тред задачи в хранилище сервера: ``gc-cli`` песочницы ходит в прокси
+#: одного треда. В файле — только подстановки: сокет ставит обёртка (путь
+#: внутри песочницы), токен задачи — окружением процесса.
+REMOTE_THREADS = {
+    "type": "gc_stores.remote:open",
+    "socket": "${ENV:GC_THREAD_SOCKET}",
+    "token": "${ENV:GC_THREAD_TOKEN}",
+}
 
 
-def sandbox_storage(
-    part: Optional[Dict[str, Any]],
-) -> Tuple[Dict[str, Any], Dict[str, str]]:
-    """Секция ``storage`` для config.yml песочницы и её секреты окружением.
+@dataclass(frozen=True)
+class ThreadAccess:
+    """Доступ песочницы к треду задачи: каталог сокета прокси и токен."""
 
-    ``part`` — часть ``threads`` хоста с раскрытыми значениями. Подключение
-    (``dsn``, ``url``) и прочие секретные параметры уходят в файл
-    подстановкой ``${ENV:GC_SWARM_DB_<ИМЯ>}``, а значения — окружением
-    процесса песочницы: на диске песочницы секрета нет."""
-    from gc_core.config_modules.field_meta import is_secret_name
-
-    if not part or part.get("type") not in SANDBOX_STORES:
-        return {}, {}
-    threads: Dict[str, Any] = {}
-    env: Dict[str, str] = {}
-    for name, value in part.items():
-        if name != "type" and (name in ("dsn", "url") or is_secret_name(name)):
-            variable = _ENV_PREFIX + name.upper()
-            env[variable] = str(value)
-            threads[name] = "${ENV:" + variable + "}"
-        else:
-            threads[name] = value
-    return {"threads": threads}, env
+    socket_dir: str
+    token: str
 
 
 def _resolve_host_config_path(swarm_cfg: Dict[str, Any]) -> Optional[str]:
@@ -305,14 +294,35 @@ def _make_swarm_id(system: str, task_id: str) -> str:
     return f"swarm_{system_norm}_{task_norm}"
 
 
+def _apply_thread_env(
+    env: Dict[str, str],
+    swarm_cfg: Dict[str, Any],
+    thread: Optional[ThreadAccess],
+) -> None:
+    """Окружение песочницы для треда задачи. Подключение хранилища сервера и
+    переменные его драйвера агенту не достаются: он может прочитать своё
+    окружение. Тред в хранилище сервера CLI ведёт (``-t``, ``--system``)
+    через прокси; каталог сокета обёртка монтирует в песочницу."""
+    for name in swarm_cfg.get("hidden_env") or ():
+        env.pop(name, None)
+    if thread is not None:
+        env["SWARM_THREAD_IN_STORE"] = "1"
+        env["SWARM_THREAD_SOCKET_DIR"] = thread.socket_dir
+        env["GC_THREAD_TOKEN"] = thread.token
+
+
 def _try_materialize_runtime_config(
-    swarm_cfg: Dict[str, Any], sandbox_dir: str, swarm_id: str
+    swarm_cfg: Dict[str, Any],
+    sandbox_dir: str,
+    swarm_id: str,
+    *,
+    in_store: bool,
 ) -> None:
     host_config_path = _resolve_host_config_path(swarm_cfg)
     if host_config_path:
         try:
             _materialize_runtime_config(
-                host_config_path, sandbox_dir, swarm_cfg
+                host_config_path, sandbox_dir, swarm_cfg, in_store=in_store
             )
         except Exception:
             logger.exception(
@@ -329,6 +339,7 @@ def start_swarm_process(
     payload: Dict[str, Any],
     trace_id: Optional[str] = None,
     query: Optional[str] = None,
+    thread: Optional[ThreadAccess] = None,
 ) -> Tuple[str, int]:
     """
     Запустить обёрточный скрипт для сворм-процесса.
@@ -338,6 +349,10 @@ def start_swarm_process(
     ``--trace-id`` в командную строку CLI, только если значение непустое.
     Через конфиг его передать нельзя — ребёнку материализуется сырой YAML, а
     неизвестный верхнеуровневый ключ отвергнет ``extra="forbid"``.
+
+    ``thread`` — прокси треда задачи (``swarm.thread_in_store``): CLI ведёт
+    тред ``(system, task_id)`` в хранилище сервера. Без него — тред в файлах
+    песочницы.
 
     Возвращает (swarm_id, pid).
 
@@ -397,7 +412,9 @@ def start_swarm_process(
         # Шаг 1.10 (AR-1): материализуем runtime config.yml для CLI.
         # CLI внутри bwrap не сможет резолвить дефолтные пути config'а — нужно
         # положить его в /work/.gc/config.yml явно. Wrapper передаст --config.
-        _try_materialize_runtime_config(swarm_cfg, sandbox_dir, swarm_id)
+        _try_materialize_runtime_config(
+            swarm_cfg, sandbox_dir, swarm_id, in_store=thread is not None
+        )
 
         # Базовая метадата (совместимая с обычным meta.json) + swarm_meta.
         base_meta: Dict[str, Any] = {
@@ -466,12 +483,7 @@ def start_swarm_process(
                 "SWARM_EXTRA_MOUNTS": extra_mounts_env,
             }
         )
-        # Тред задачи в общей базе: CLI ведёт его (-t, --system), секреты
-        # подключения — окружением.
-        _section, store_env = sandbox_storage(swarm_cfg.get("thread_store"))
-        if store_env:
-            env.update(store_env)
-            env["SWARM_THREAD_IN_STORE"] = "1"
+        _apply_thread_env(env, swarm_cfg, thread)
 
         # wrapper_path проверен в начале функции; остальные ошибки запуска
         # прокидываем выше — за собой убирает finally ниже.
@@ -533,4 +545,4 @@ def start_swarm_process(
     return swarm_id, int(proc.pid)
 
 
-__all__ = ["start_swarm_process"]
+__all__ = ["REMOTE_THREADS", "ThreadAccess", "start_swarm_process"]

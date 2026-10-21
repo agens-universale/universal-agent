@@ -203,3 +203,69 @@ def test_thread_in_the_store_is_the_task_thread(tmp_path):
 
 def test_files_mode_runs_without_a_thread(tmp_path):
     assert "-t" not in _argv(tmp_path)
+
+
+def _fake_cli(tmp_path, body: str):
+    venv = tmp_path / "venv"
+    (venv / "bin").mkdir(parents=True)
+    cli = venv / "bin" / "gc-cli"
+    cli.write_text("#!/bin/sh\n" + body)
+    cli.chmod(0o755)
+    return {"SWARM_CLI_COMMAND": "gc-cli", "SWARM_CLI_VENV_ROOT": str(venv)}
+
+
+def _bwrap_args(tmp_path, **env):
+    """Аргументы bwrap: подставной bwrap записывает их и выходит."""
+    fake = tmp_path / "fakebin"
+    fake.mkdir()
+    out = tmp_path / "bwrap.txt"
+    bwrap = fake / "bwrap"
+    bwrap.write_text(f'#!/bin/sh\nprintf "%s\\n" "$@" > "{out}"\n')
+    bwrap.chmod(0o755)
+    proc, _ = _run(
+        tmp_path,
+        SWARM_SANDBOX_TOOL="bubblewrap",
+        PATH=f"{fake}{os.pathsep}{os.environ['PATH']}",
+        **_fake_cli(tmp_path, ""),
+        **env,
+    )
+    assert proc.returncode == 0, proc.stderr
+    args = out.read_text().splitlines()
+    return [args[i : i + 3] for i in range(len(args))]
+
+
+def test_sandbox_mounts_the_thread_socket(tmp_path):
+    """Каталог сокета прокси — в песочнице по известному пути; CLI находит
+    сокет через GC_THREAD_SOCKET."""
+    sockets = tmp_path / "gct"
+    sockets.mkdir()
+    triples = _bwrap_args(
+        tmp_path,
+        SWARM_THREAD_IN_STORE="1",
+        SWARM_THREAD_SOCKET_DIR=str(sockets),
+    )
+    assert ["--bind", str(sockets), "/run/gc-thread"] in triples
+    assert [
+        "--setenv",
+        "GC_THREAD_SOCKET",
+        "/run/gc-thread/thread.sock",
+    ] in triples
+
+
+def test_files_mode_mounts_no_socket(tmp_path):
+    triples = _bwrap_args(tmp_path)
+    assert not any("/run/gc-thread" in t for t in triples)
+
+
+def test_without_sandbox_the_cli_gets_the_host_socket(tmp_path):
+    sockets = tmp_path / "gct"
+    sockets.mkdir()
+    seen = tmp_path / "socket.txt"
+    proc, _ = _run(
+        tmp_path,
+        SWARM_THREAD_IN_STORE="1",
+        SWARM_THREAD_SOCKET_DIR=str(sockets),
+        **_fake_cli(tmp_path, f'printf "%s" "$GC_THREAD_SOCKET" > "{seen}"\n'),
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert seen.read_text() == str(sockets / "thread.sock")

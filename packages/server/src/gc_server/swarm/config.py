@@ -163,6 +163,7 @@ def build_swarm_config(
       - agentmd_path: str (абсолютный путь)
       - skills_dir: str (абсолютный путь)
       - skills_dir_configured: bool — путь назван человеком, а не взят дефолтом
+      - thread_in_store: bool — тред задачи в хранилище тредов сервера
     """
     raw_swarm = server_cfg.get("swarm") or {}
 
@@ -316,6 +317,7 @@ def build_swarm_config(
         "agent_dep_dir": agent_dep_dir,
         "extra_mounts": extra_mounts,
         "agent_overrides": agent_overrides,
+        "thread_in_store": bool(raw_swarm.get("thread_in_store", False)),
     }
 
 

@@ -56,12 +56,24 @@ def test_host_and_token_are_inherited_and_overridable(tmp_path):
         ({"swarm": {"enabled": True}}, "server.apis"),
         ({"logging": {"save_logs": False}}, "server.logging"),
         ({"server": {"port": 9000}}, "webhook.port"),
+        (
+            {
+                "swarm": {
+                    "storage": {
+                        "type": "postgres",
+                        "dsn": "postgresql://box:s3cret@db/a",
+                    }
+                }
+            },
+            "swarm.thread_in_store",
+        ),
     ],
 )
 def test_old_keys_name_their_new_place(tmp_path, doc, new_place):
     with pytest.raises(ServerConfigError) as err:
         load_server_config(_write(tmp_path, doc))
     assert new_place in str(err.value)
+    assert "s3cret" not in str(err.value)
 
 
 @pytest.mark.parametrize(

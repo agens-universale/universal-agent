@@ -285,7 +285,14 @@ def test_swarm_has_the_same_handles(tmp_path, monkeypatch):
     started: list = []
 
     def fake_start(
-        swarm_cfg, *, system, task_id, payload, trace_id=None, query=None
+        swarm_cfg,
+        *,
+        system,
+        task_id,
+        payload,
+        trace_id=None,
+        query=None,
+        thread=None,
     ):
         sid = f"swarm_{system}_{task_id}"
         started.append(query)
