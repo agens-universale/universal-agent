@@ -2025,6 +2025,7 @@ class TraceScreen(Screen):
         warm = getattr(runner, "warm", None)
         if callable(warm):
             warm()
+        self._warm_skills_cache()
         self._sync_indicator_reserve()  # пустой старт → резерв бара 2 (без лишней строки)
         # Совет вставить картинку из буфера: на старте и при возвращении в окно
         # терминала — буфер меняется только снаружи; переходы внутри приложения его не
@@ -4735,11 +4736,12 @@ class TraceScreen(Screen):
         if (not self._was_running) and is_running and _kind != "compact":
             self._stamp_tui_running()
         # Спадающий фронт: агент мог создать скилл в прогоне → инвалидируем
-        # TUI-кэш скиллов (/skill picker/inline); ленивый релоад при следующем
-        # /skill. Открытие пикера/набор по клавишам диск не трогают.
+        # TUI-кэш скиллов (/skill picker/inline, строки скиллов палитры) и
+        # тихо прогреваем заново в фоне. Набор по клавишам диск не трогает.
         _turn_edits = None
         if self._was_running and not is_running:
             self._skills_cache = None
+            self._warm_skills_cache()
             # Прогон кончился — следующий снимет свою границу хода заново.
             self._edits_baseline_taken = False
             # Сводка правок хода — тихий правый сегмент строки-итога (compact
@@ -5978,6 +5980,7 @@ class TraceScreen(Screen):
                 self.app, name, value
             ),
             toggle_values=lambda name: effective_toggle_values(self.app, name),
+            skills=lambda: self._skills_cache or [],
         )
         self._palette = palette
         self._mount_input_overlay(palette)
@@ -8018,14 +8021,35 @@ class TraceScreen(Screen):
             return None, None
         return trace_events_from_nested_detail(call_id, detail)
 
+    async def _fetch_skills(self) -> list[dict]:
+        """Список скиллов из core-реестра; ошибки — вызывающему."""
+        from gc_core.tools.skills.registry import get_skills_registry
+
+        reg = get_skills_registry(self.app.base_settings())
+        # include_all=True — и внутренние скиллы паков, не только bootstrap.
+        return await reg.list_skills(include_all=True)
+
+    def _warm_skills_cache(self) -> None:
+        """Тихий фоновый прогрев `_skills_cache` (спека P5 §3.1): палитре
+        скиллы нужны с первой буквы, без I/O на нажатие. Ошибка — только в
+        лог: кэш остаётся холодным, явный /skill загрузит и покажет её сам."""
+        self.run_worker(
+            self._warm_skills(), group="skills-warm", exclusive=True
+        )
+
+    async def _warm_skills(self) -> None:
+        try:
+            skills = await self._fetch_skills()
+        except Exception:
+            _log.warning("прогрев кэша скиллов не удался", exc_info=True)
+            return
+        if self._skills_cache is None:
+            self._skills_cache = skills
+
     async def _load_skills_safe(self) -> list[dict]:
         """Загрузить список скиллов из core-реестра; на ошибке вернуть []."""
         try:
-            from gc_core.tools.skills.registry import get_skills_registry
-
-            reg = get_skills_registry(self.app.base_settings())
-            # include_all=True — показываем и внутренние скиллы паков, не только bootstrap.
-            return await reg.list_skills(include_all=True)
+            return await self._fetch_skills()
         except Exception as exc:
             self._mount_trace_row(
                 prefix="[!] ",

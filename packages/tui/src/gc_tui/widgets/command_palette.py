@@ -4,6 +4,10 @@ Toggle-подвал (/gate, /answers — спека 2026-07-16-palette-toggles-g
 §4): докнутый вне скролла блок toggle-строк внизу списка, перед ним разделитель.
 Состояние тоггла палитра не знает сама — получает инъекцией через `toggle_state`
 (провайдер `name -> str`, отсутствует — если тоггл не инъецирован); запись/reload — вне палитры (tui/toggles.py).
+
+Строки скиллов (спека P5 §3.1): после команд, с первой буквы фильтра,
+не больше `_SKILL_ROWS_MAX` + невыбираемая строка «… ещё N». Список скиллов —
+инъекция `skills` (провайдер без I/O, в проде — прогретый кэш экрана).
 """
 
 from __future__ import annotations
@@ -22,6 +26,7 @@ from gc_tui.toggles import _HINT_KEYS_TOGGLE, TOGGLES, _fit_hint, padded_track
 
 _HINT_NO_ARGS = "↑↓ выбрать · Enter выполнить · Esc закрыть"
 _HINT_WITH_ARGS = "↑↓ выбрать · Enter ввести аргумент · Esc закрыть"
+_SKILL_ROWS_MAX = 5
 
 
 def _slider_width(n_values: int) -> int:
@@ -52,6 +57,17 @@ def _matches(cmd: Command, prefix: str) -> bool:
     return any(alias.startswith(prefix) for alias in cmd.aliases)
 
 
+def _skill_short(skill: dict) -> str:
+    """Короткое имя скилла — часть id после `:` (у плоского — весь id)."""
+    return str(skill.get("id", "")).rpartition(":")[2]
+
+
+def _skill_matches(skill: dict, prefix: str) -> bool:
+    """Начало полного id или начало короткого имени (спека P5 §3.1)."""
+    sid = str(skill.get("id", ""))
+    return sid.startswith(prefix) or _skill_short(skill).startswith(prefix)
+
+
 class CommandPalette(VerticalScroll):
     """Filtered overlay-список команд из реестра (§2.7) + toggle-подвал (§4)."""
 
@@ -66,6 +82,7 @@ class CommandPalette(VerticalScroll):
         toggle_custom_hint: Optional[Callable[[str], str]] = None,
         toggle_dynamic_hint: Optional[Callable[[str, str], str]] = None,
         toggle_values: Optional[Callable[[str], tuple]] = None,
+        skills: Optional[Callable[[], list[dict]]] = None,
     ) -> None:
         super().__init__(classes="palette")
         self._registry = registry
@@ -81,6 +98,7 @@ class CommandPalette(VerticalScroll):
         # name -> ToggleValue-кортеж; не инъецирован (юнит-тесты без app) →
         # `_values_for` берёт статический `TOGGLES[name].values`.
         self._toggle_values = toggle_values
+        self._skills = skills
         # Состав значений тогглов на время ОДНОГО рендера подвала (`_build_footer`):
         # раскладка и строки спрашивают его много раз, провайдер (/level) должен
         # отработать один. None — вне рендера, кэша нет.
@@ -134,7 +152,10 @@ class CommandPalette(VerticalScroll):
                 else "palette-row"
             )
             yield Static(self._format_row(cmd), classes=classes, markup=False)
-        footer, _ = self._build_footer(offset=len(rows))
+        skill_widgets, _ = self._skill_widgets(offset=len(rows))
+        yield from skill_widgets
+        offset = len(rows) + len(self._visible_skill_rows())
+        footer, _ = self._build_footer(offset=offset)
         yield footer
 
     def _group_sep_count(self, toggles: list[Command]) -> int:
@@ -194,7 +215,15 @@ class CommandPalette(VerticalScroll):
         эвристика недосчитывает высоту подвала и main.py отдаёт трейсу лишнее
         место, выдавливая нижнюю рамку палитры за экран."""
         rows_count = len(self._visible_rows())
-        return rows_count + self._footer_reserved_height() + 2  # +2 — рамка
+        skills_count = len(self._visible_skill_rows())
+        more = 1 if self._skill_more_count() else 0
+        return (
+            rows_count
+            + skills_count
+            + more
+            + self._footer_reserved_height()
+            + 2  # рамка
+        )
 
     def _build_footer(self, offset: int) -> tuple[Vertical, Optional[Static]]:
         """Докнутый подвал: разделитель + toggle-строки (только если есть toggle-команды
@@ -350,6 +379,48 @@ class CommandPalette(VerticalScroll):
                 head  # колонку держит паддинг соседей, пустой хвост не нужен
             )
         return head + " " * (col - len(cmd.description)) + cmd.hotkey
+
+    def _format_skill_row(self, skill: dict) -> Text:
+        """Строка скилла: `/короткое имя` в колонке имён команд (цвет —
+        классом `.palette-skill-row`), длинное обрезается многоточием; затем
+        серым `пак · описание`. В расчёт колонок команд не входит."""
+        name = f"/{_skill_short(skill)}"
+        name_w = self._name_col_w() or len(name) + 3
+        if len(name) >= name_w:
+            name = name[: name_w - 2] + "…"
+        pack = skill.get("pack_id") or ""
+        desc = str(skill.get("description") or "")
+        tail = " · ".join(part for part in (pack, desc) if part)
+        text = Text(f" {name.ljust(name_w)}")
+        text.append(tail, style=_pal.DIM)
+        return text
+
+    def _skill_widgets(
+        self, offset: int
+    ) -> tuple[list[Static], Optional[Static]]:
+        """Виджеты строк скиллов (+ «ещё N») и выделенная строка или None."""
+        widgets: list[Static] = []
+        selected: Optional[Static] = None
+        for j, skill in enumerate(self._visible_skill_rows()):
+            is_sel = offset + j == self._selected
+            classes = "palette-row palette-skill-row"
+            row = Static(
+                self._format_skill_row(skill),
+                classes=f"{classes} selected" if is_sel else classes,
+                markup=False,
+            )
+            if is_sel:
+                selected = row
+            widgets.append(row)
+        if self._skill_more_count():
+            widgets.append(
+                Static(
+                    self._skill_more_text(),
+                    classes="palette-skill-more",
+                    markup=False,
+                )
+            )
+        return widgets, selected
 
     def _my_base_w(self, name: str) -> int:
         """Собственная ширина БАЗОВОГО трека тоггла `name` (без extra-резерва),
@@ -512,6 +583,30 @@ class CommandPalette(VerticalScroll):
         """Toggle-подвал: только is_toggle-команды."""
         return self._filtered(toggle=True)
 
+    def _matched_skills(self) -> list[dict]:
+        """Все скиллы под фильтр (голый `/` — ни одного); скилл, чьё короткое
+        имя занято командой или алиасом, не показывается."""
+        f = self._filter.lower()
+        if not f or self._skills is None:
+            return []
+        return [
+            s
+            for s in self._skills()
+            if _skill_matches(s, f)
+            and self._registry.lookup(_skill_short(s)) is None
+        ]
+
+    def _visible_skill_rows(self) -> list[dict]:
+        """Строки скиллов после команд — не больше `_SKILL_ROWS_MAX`."""
+        return self._matched_skills()[:_SKILL_ROWS_MAX]
+
+    def _skill_more_count(self) -> int:
+        return max(0, len(self._matched_skills()) - _SKILL_ROWS_MAX)
+
+    def _skill_more_text(self) -> str:
+        n = self._skill_more_count()
+        return f"… ещё {n} — /skill {self._filter}"
+
     def _filtered(self, *, toggle: bool) -> list[Command]:
         f = self._filter.lower()
         cmds = [
@@ -570,10 +665,20 @@ class CommandPalette(VerticalScroll):
                 injected.add(child_name)
         return result
 
-    def _selectable_rows(self) -> list[Command]:
-        """Сквозной список для навигации/выбора: команды, затем тогглы (разделитель
-        не участвует — он не выбираем)."""
-        return self._visible_rows() + self._visible_toggle_rows()
+    def _selectable_rows(self) -> list[Command | dict]:
+        """Сквозной список для навигации/выбора: команды, скиллы, затем тогглы
+        (разделитель и «ещё N» не участвуют — они не выбираемы)."""
+        return (
+            self._visible_rows()
+            + self._visible_skill_rows()
+            + self._visible_toggle_rows()
+        )
+
+    def _selected_row(self) -> Command | dict | None:
+        rows = self._selectable_rows()
+        if not rows:
+            return None
+        return rows[max(0, min(self._selected, len(rows) - 1))]
 
     def set_filter(self, prefix: str) -> None:
         self._filter = prefix
@@ -588,11 +693,14 @@ class CommandPalette(VerticalScroll):
         self._rebuild()
 
     def selected_command(self) -> Optional[Command]:
-        rows = self._selectable_rows()
-        if not rows:
-            return None
-        idx = max(0, min(self._selected, len(rows) - 1))
-        return rows[idx]
+        """Выбранная команда; на строке скилла — None."""
+        row = self._selected_row()
+        return row if isinstance(row, Command) else None
+
+    def selected_skill(self) -> Optional[dict]:
+        """Запись выбранного скилла; на строке команды — None."""
+        row = self._selected_row()
+        return row if isinstance(row, dict) else None
 
     def refresh_toggle_state(self) -> None:
         """Перерисовать строки после мгновенного применения тоггла (§1): конфиг
@@ -617,10 +725,14 @@ class CommandPalette(VerticalScroll):
             if i == self._selected:
                 selected_widget = w
             new_widgets.append(w)
-        footer, footer_selected = self._build_footer(offset=len(rows))
+        skill_widgets, skill_selected = self._skill_widgets(offset=len(rows))
+        new_widgets.extend(skill_widgets)
+        offset = len(rows) + len(self._visible_skill_rows())
+        footer, footer_selected = self._build_footer(offset=offset)
         new_widgets.append(footer)
-        if footer_selected is not None:
-            selected_widget = footer_selected
+        for candidate in (skill_selected, footer_selected):
+            if candidate is not None:
+                selected_widget = candidate
         self._apply_size()
         self.remove_children()
         self.mount_all(new_widgets)

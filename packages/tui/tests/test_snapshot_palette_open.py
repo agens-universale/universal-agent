@@ -7,8 +7,31 @@ pytest.importorskip("textual")
 pytest.importorskip("pytest_textual_snapshot")
 
 
-def test_palette_open_snapshot(snap_compare, tmp_path):
+# Скиллы фиксированы тестом (спека P5 §5.6): палитра показывает их строками
+# после команд; `pack:status` скрыт — имя занято командой /status.
+_SKILLS = [
+    {
+        "id": "superpowers:systematic-debugging",
+        "pack_id": "superpowers",
+        "description": "Поиск причины ошибки по шагам",
+    },
+    {"id": "skill-creator", "description": "Создать новый скилл"},
+    {"id": "pack:status", "pack_id": "pack", "description": "скрыт"},
+]
+
+
+class _Reg:
+    async def list_skills(self, *, pack=None, include_all=False):
+        return list(_SKILLS)
+
+
+def test_palette_open_snapshot(snap_compare, tmp_path, monkeypatch):
+    from gc_core.tools.skills import registry as reg_mod
     from gc_tui.app import TuiApp
+
+    monkeypatch.setattr(
+        reg_mod, "get_skills_registry", lambda cfg=None: _Reg()
+    )
 
     app = TuiApp(
         threads_dir=str(tmp_path),

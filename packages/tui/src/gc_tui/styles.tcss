@@ -319,6 +319,10 @@ ToolCallRow.tool-group-start { margin-top: 1; }
 /* $focus-bg, не $band-bg: фон оверлея (#161A23) почти совпадает с $band-bg —
    выделение было слепым; focus-bg = подсветка фокуса в трейсе, заметно светлее. */
 .palette-row.selected { background: $focus-bg; color: $bright; }
+/* Строки скиллов (P5 §3.1): имя голубым и на выделении; хвост «пак · описание»
+   серым — стилем текста строки. «… ещё N» — невыбираемая серая строка. */
+.palette-row.palette-skill-row { color: $skill; }
+.palette-skill-more { color: $dim; padding: 0 1; text-wrap: nowrap; text-overflow: ellipsis; }
 .palette-hint  { color: $deep-dim; padding: 0 1; }
 .palette-keys  { margin-top: 1; }   /* воздух перед строкой клавиш — как .set-hint */
 

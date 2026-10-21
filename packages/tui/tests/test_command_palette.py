@@ -489,3 +489,235 @@ def test_enter_runs_a_command_whose_argument_is_optional_without_a_menu():
         command = reg.lookup(name)
         assert command.runs_on_enter is False
         assert _hint_for(command) == _HINT_WITH_ARGS
+
+
+# --- Строки скиллов (спека P5 §3.1) ---------------------------------------
+
+
+def _skill_palette(filter_, skills, commands=("branch", "status")):
+    from gc_tui.commands import Command, CommandRegistry
+    from gc_tui.widgets.command_palette import CommandPalette
+
+    reg = CommandRegistry()
+    for name in commands:
+        reg.register(Command(name, (), "", f"команда {name}"))
+    return CommandPalette(
+        reg, initial_filter=filter_, skills=lambda: list(skills)
+    )
+
+
+_BRAIN = {
+    "id": "superpowers:brainstorming",
+    "pack_id": "superpowers",
+    "description": "мозговой штурм",
+}
+
+
+def test_bare_slash_shows_no_skills():
+    pytest.importorskip("textual")
+    palette = _skill_palette("", [_BRAIN])
+    assert palette._visible_skill_rows() == []
+    assert palette._skill_more_count() == 0
+
+
+def test_skill_matches_short_name_prefix():
+    pytest.importorskip("textual")
+    palette = _skill_palette("brai", [_BRAIN, {"id": "other:x"}])
+    assert palette._visible_skill_rows() == [_BRAIN]
+
+
+def test_skill_matches_full_id_prefix():
+    pytest.importorskip("textual")
+    skills = [{"id": "supercoder:planner"}, {"id": "supercoder:coder"}]
+    palette = _skill_palette("super", skills)
+    assert palette._visible_skill_rows() == skills
+
+
+def test_skill_match_lowercases_filter_like_commands():
+    pytest.importorskip("textual")
+    palette = _skill_palette("BRAI", [_BRAIN])
+    assert palette._visible_skill_rows() == [_BRAIN]
+
+
+def test_skill_rows_capped_at_five_with_more_line():
+    pytest.importorskip("textual")
+    skills = [{"id": f"p:brai-{i}"} for i in range(7)]
+    palette = _skill_palette("brai", skills)
+    assert palette._visible_skill_rows() == skills[:5]
+    assert palette._skill_more_count() == 2
+    assert palette._skill_more_text() == "… ещё 2 — /skill brai"
+
+
+def test_skill_shadowed_by_command_or_alias_is_hidden():
+    pytest.importorskip("textual")
+    from gc_tui.commands import Command, CommandRegistry
+    from gc_tui.widgets.command_palette import CommandPalette
+
+    reg = CommandRegistry()
+    reg.register(Command("status", (), "", "статус"))
+    reg.register(Command("level", ("models",), "", "уровень"))
+    skills = [
+        {"id": "status"},
+        {"id": "pack:status"},
+        {"id": "pack:models"},
+        {"id": "pack:statusline"},
+    ]
+    palette = CommandPalette(reg, initial_filter="s", skills=lambda: skills)
+    assert palette._visible_skill_rows() == [{"id": "pack:statusline"}]
+    palette.set_filter("m")
+    assert palette._visible_skill_rows() == []
+
+
+def test_long_skill_id_does_not_widen_command_columns():
+    pytest.importorskip("textual")
+    long_skill = {"id": "pack:b" + "x" * 60, "description": "d" * 80}
+    plain = _skill_palette("b", [])
+    with_skill = _skill_palette("b", [long_skill])
+    assert with_skill._name_col_w() == plain._name_col_w()
+    assert with_skill._hotkey_col_w() == plain._hotkey_col_w()
+
+
+def test_skill_row_text_short_name_then_pack_and_description():
+    pytest.importorskip("textual")
+    from gc_tui import palette as _pal
+
+    skill = dict(_BRAIN, id="superpowers:bzz")
+    palette = _skill_palette("b", [skill])
+    name_w = palette._name_col_w()
+    text = palette._format_skill_row(skill)
+    head = f" {'/bzz'.ljust(name_w)}"
+    assert text.plain == head + "superpowers · мозговой штурм"
+    assert {str(s.style) for s in text.spans} == {_pal.DIM}
+    assert text.spans[0].start == len(head)
+
+
+def test_skill_row_name_truncated_by_command_column():
+    pytest.importorskip("textual")
+    skill = {"id": "p:b" + "x" * 30, "pack_id": "p", "description": "d"}
+    palette = _skill_palette("b", [skill])
+    name_w = palette._name_col_w()
+    text = palette._format_skill_row(skill)
+    assert text.plain[1 : 1 + name_w].endswith("… ")
+    assert text.plain[1 + name_w :] == "p · d"
+
+
+def test_skill_row_selection_and_toggle_offset():
+    pytest.importorskip("textual")
+    from gc_tui.commands import build_default_registry
+    from gc_tui.widgets.command_palette import CommandPalette
+
+    reg = build_default_registry()
+    skills = [{"id": "p:gzz-a"}, {"id": "p:gzz-b"}]
+    palette = CommandPalette(reg, initial_filter="g", skills=lambda: skills)
+    commands = palette._visible_rows()
+    toggles = palette._visible_toggle_rows()
+    assert toggles  # /gate — тоггл, проверяем смещение подвала
+    palette._selected = len(commands)
+    assert palette.selected_command() is None
+    assert palette.selected_skill() == skills[0]
+    palette._selected = len(commands) + len(skills)
+    assert palette.selected_command() == toggles[0]
+    assert palette.selected_skill() is None
+
+
+def test_desired_height_counts_skill_rows_and_more_line():
+    pytest.importorskip("textual")
+    skills = [{"id": f"p:brai-{i}"} for i in range(7)]
+    plain = _skill_palette("brai", [])
+    palette = _skill_palette("brai", skills)
+    assert palette.desired_height == plain.desired_height + 5 + 1
+
+
+def test_cold_skills_cache_shows_no_skills():
+    pytest.importorskip("textual")
+    from gc_tui.commands import build_default_registry
+    from gc_tui.widgets.command_palette import CommandPalette
+
+    palette = CommandPalette(build_default_registry(), initial_filter="b")
+    assert palette._visible_skill_rows() == []
+
+
+@pytest.mark.asyncio
+async def test_skill_rows_rendered_after_commands_in_skill_color(tmp_path):
+    pytest.importorskip("textual")
+    from textual.color import Color
+
+    from gc_tui import palette as _pal
+    from gc_tui.app import TuiApp
+
+    app = TuiApp(
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "M"}),
+    )
+    async with app.run_test(size=(100, 40)) as pilot:
+        palette = _skill_palette("b", [_BRAIN, {"id": "p:bzz"}])
+        await app.screen.mount(palette)
+        await pilot.pause()
+        kinds = [
+            "skill" if w.has_class("palette-skill-row") else "cmd"
+            for w in palette.children
+            if w.has_class("palette-row")
+        ]
+        assert kinds == ["cmd", "skill", "skill"]
+        skill_rows = list(palette.query(".palette-skill-row"))
+        assert not skill_rows[1].has_class("selected")
+        assert skill_rows[1].styles.color == Color.parse(_pal.SKILL)
+        assert palette.region.height == palette.desired_height
+
+
+@pytest.mark.asyncio
+async def test_skill_more_line_rendered_not_selectable(tmp_path):
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+
+    app = TuiApp(
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "M"}),
+    )
+    skills = [{"id": f"p:brai-{i}"} for i in range(7)]
+    async with app.run_test(size=(100, 40)) as pilot:
+        palette = _skill_palette("brai", skills)
+        await app.screen.mount(palette)
+        await pilot.pause()
+        more = palette.query_one(".palette-skill-more")
+        assert str(more.render()) == "… ещё 2 — /skill brai"
+        assert len(palette._selectable_rows()) == 5
+        assert palette.region.height == palette.desired_height
+
+
+def test_command_row_selected_has_no_skill():
+    pytest.importorskip("textual")
+    palette = _skill_palette("b", [_BRAIN])
+    assert palette.selected_command().name == "branch"
+    assert palette.selected_skill() is None
+
+
+@pytest.mark.asyncio
+async def test_palette_shows_skills_from_warmed_screen_cache(
+    tmp_path, monkeypatch
+):
+    """Прод-провайдер: палитра берёт скиллы из прогретого кэша экрана."""
+    pytest.importorskip("textual")
+    from gc_core.tools.skills import registry as reg_mod
+
+    class _Reg:
+        async def list_skills(self, *, pack=None, include_all=False):
+            return [_BRAIN]
+
+    monkeypatch.setattr(
+        reg_mod, "get_skills_registry", lambda cfg=None: _Reg()
+    )
+    from gc_tui.app import TuiApp
+
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
+    )
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        inp = pilot.app.query_one("#cmdinput")
+        inp.text = "/brai"
+        await pilot.pause(0.1)
+        rows = pilot.app.query(".palette-skill-row")
+        assert ["/brainstorming" in str(r.render()) for r in rows] == [True]
