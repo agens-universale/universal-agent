@@ -27,13 +27,19 @@ from textual.widgets import Rule, Static
 from gc_tui import palette as _pal
 from gc_tui.commands import Command, CommandRegistry
 from gc_tui.toggles import _HINT_KEYS_TOGGLE, TOGGLES, _fit_hint, padded_track
+from gc_tui.widgets.palette_layout import (
+    fit_name,
+    fit_text,
+    name_col_w,
+    overlay_content_width,
+    skill_short,
+)
 
 _HINT_NO_ARGS = "↑↓ выбрать · Enter выполнить · Esc закрыть"
 _HINT_WITH_ARGS = "↑↓ выбрать · Enter ввести аргумент · Esc закрыть"
 # Enter на строке скилла вставляет `/имя ` — текст дописывают (спека P5 §3.2).
 _HINT_SKILL = "↑↓ выбрать · Enter ввести запрос · Esc закрыть"
 _SKILL_ROWS_MIN = 5  # пол строк скиллов, даже когда команды заняли всё
-_SKILL_NAME_MAX = 32  # потолок общей колонки имён, клетки
 
 
 def _slider_width(n_values: int) -> int:
@@ -64,28 +70,16 @@ def _matches(cmd: Command, prefix: str) -> bool:
     return any(alias.startswith(prefix) for alias in cmd.aliases)
 
 
-def _skill_short(skill: dict) -> str:
-    """Короткое имя скилла — часть id после `:` (у плоского — весь id)."""
-    return str(skill.get("id", "")).rpartition(":")[2]
-
-
 def _skill_label(skill: dict) -> str:
     """`/имя` для колонки: запускаемый вид от провайдера (`input_name`)."""
-    return "/" + str(skill.get("input_name") or _skill_short(skill))
-
-
-def _fit_name(label: str) -> str:
-    """Имя длиннее `_SKILL_NAME_MAX` клеток — с многоточием в конце."""
-    if len(label) <= _SKILL_NAME_MAX:
-        return label
-    return label[: _SKILL_NAME_MAX - 1] + "…"
+    return "/" + str(skill.get("input_name") or skill_short(skill))
 
 
 def _skill_matches(skill: dict, prefix: str) -> bool:
     """Начало короткого имени; полного id — только при `:` в фильтре."""
     if ":" in prefix:
         return str(skill.get("id", "")).startswith(prefix)
-    return _skill_short(skill).startswith(prefix)
+    return skill_short(skill).startswith(prefix)
 
 
 class CommandPalette(VerticalScroll):
@@ -304,29 +298,11 @@ class CommandPalette(VerticalScroll):
         return _hint_for(sel)
 
     def _content_width(self) -> int:
-        """Ширина контента `.palette` (за вычетом рамки и колонки полосы
-        прокрутки), известная ДО первого layout-прохода: `self.size` у ещё
-        не смонтированного/не уложенного виджета — Size(0, 0) (Textual
-        резолвит его только после arrange), поэтому усечение по
-        `self.size.width` на первом `compose()` молчит (avail=0 → guard
-        пропускает усечение) и toggle-строка рендерится нетронутой длины —
-        переносится на 2 строки в реальном рендере, а `desired_height`/
-        `_footer_reserved_height()` считали 1 строку на тоггл → подвал
-        недосчитан, палитра/футер уезжают за экран (регрессия).
-        `.palette` всегда занимает всю ширину `#root` (= ширина экрана,
-        см. `_mount_input_overlay`), поэтому ширина известна заранее из
-        `self.app.size`, а не из собственного ещё не уложенного `self.size`.
-        Юнит-тесты собирают `CommandPalette` без монтирования в приложение
-        (нет активного `App`) — тогда ширина неизвестна, как и раньше у
-        `self.size.width` на несмонтированном виджете (0)."""
-        try:
-            app_width = self.app.size.width
-        except NoActiveAppError:
-            return 0
-        # -2 — рамка .palette (round border); минус колонка вертикальной
-        # полосы прокрутки — всегда, есть полоса или нет: появится она после
-        # раскладки, и строка, посчитанная без неё, срезалась бы на хвосте.
-        return app_width - 2 - self.styles.scrollbar_size_vertical
+        """Ширина контента `.palette` до первой раскладки (см.
+        `overlay_content_width`): усечение по `self.size.width` на первом
+        `compose()` молчало бы (Size(0, 0)), toggle-строка переносилась на
+        2 строки, а `desired_height` считал одну — подвал уезжал за экран."""
+        return overlay_content_width(self)
 
     def _toggle_hint(self, cmd: Command) -> str:
         """Hint выделенной toggle-строки (спека §6): значение + его смысл из
@@ -365,14 +341,12 @@ class CommandPalette(VerticalScroll):
     def _name_col_w(self) -> int:
         """Ширина имени-колонки, ОБЩЕЙ для команд, тогглов и скиллов (спека
         2026-07-18 §4): самое длинное видимое имя (`/имя`; у скилла — его
-        запускаемый вид), не шире `_SKILL_NAME_MAX`, + 3 пробела. Описания
+        запускаемый вид), не шире `SKILL_NAME_MAX`, + 3 пробела. Описания
         всех строк начинаются в одной колонке."""
         labels = [f"/{c.name}" for c in self._visible_rows()]
         labels += [f"/{c.name}" for c in self._visible_toggle_rows()]
         labels += [_skill_label(s) for s in self._visible_skill_rows()]
-        if not labels:
-            return 0
-        return min(max(map(len, labels)), _SKILL_NAME_MAX) + 3
+        return name_col_w(labels)
 
     def _row_head(self, cmd: Command, name_w: Optional[int] = None) -> str:
         """Строка "имя-колонка + описание" с общей шириной имени-колонки (§4).
@@ -417,12 +391,10 @@ class CommandPalette(VerticalScroll):
         """Описание, обрезанное «…» до места между колонкой имён и правым
         краем строки с хвостом шириной `tail`."""
         width = max(1, self._line_width() - self._desc_start() - tail)
-        if len(text) <= width:
-            return text
-        return text[: width - 1] + "…"
+        return fit_text(text, width)
 
     def _format_row(self, cmd: Command) -> str:
-        head = f" {_fit_name(f'/{cmd.name}').ljust(self._name_col_w())}"
+        head = f" {fit_name(f'/{cmd.name}').ljust(self._name_col_w())}"
         tail = self._hotkey_tail()
         desc = self._fit_desc(cmd.description, tail)
         if not tail or not cmd.hotkey:
@@ -432,9 +404,9 @@ class CommandPalette(VerticalScroll):
 
     def _format_skill_row(self, skill: dict) -> Text:
         """Строка скилла: запускаемое `/имя` в общей колонке имён (цвет —
-        классом `.palette-skill-row`), длиннее `_SKILL_NAME_MAX` — с
+        классом `.palette-skill-row`), длиннее `SKILL_NAME_MAX` — с
         многоточием; затем серым описание."""
-        name = _fit_name(_skill_label(skill))
+        name = fit_name(_skill_label(skill))
         text = Text(f" {name.ljust(self._name_col_w())}")
         desc = self._fit_desc(
             str(skill.get("description") or ""), self._hotkey_tail()
@@ -646,7 +618,7 @@ class CommandPalette(VerticalScroll):
             s
             for s in self._skills()
             if _skill_matches(s, f)
-            and self._registry.lookup(_skill_short(s)) is None
+            and self._registry.lookup(skill_short(s)) is None
         ]
 
     def _list_rows_cap(self) -> int:

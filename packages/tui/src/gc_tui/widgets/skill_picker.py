@@ -3,25 +3,61 @@
 Зеркало `CommandPalette`: те же CSS-классы (.palette / .palette-row / .palette-hint),
 та же модель состояния (filter + selected index). Принимает готовый `list[dict]` —
 загрузку из реестра делает вызывающий код (TraceScreen).
+
+Скиллы сгруппированы по пакету (часть id до `:`): серая невыбираемая шапка
+пакета, под ней с отступом короткие имена цветом скилла и серым описание в
+общей колонке (геометрия — `palette_layout`, как у палитры). Скиллы без
+пакета — последней группой «без пакета». Выбор и вставка — по скиллам,
+шапки стрелки проходят мимо; вставляется по-прежнему полный id.
 """
 
 from __future__ import annotations
 
 from typing import Optional
 
+from rich.text import Text
 from textual.containers import Vertical, VerticalScroll
 from textual.widgets import Static
 
+from gc_tui import palette as _pal
+from gc_tui.widgets.palette_layout import (
+    fit_name,
+    fit_text,
+    name_col_w,
+    overlay_content_width,
+    skill_short,
+)
 from gc_tui.widgets.palette_rows import PaletteRowsMixin
 
 _HINT = "↑↓ выбрать · Tab дополнить · Enter выполнить · Esc закрыть"
+_NO_PACK = "без пакета"
+_INDENT = "   "  # ведущий пробел строки + отступ скилла под шапкой (2)
+
+
+def _pack_of(skill: dict) -> str:
+    """Пакет скилла — часть id до `:`; у плоского — пусто."""
+    return str(skill.get("id", "")).rpartition(":")[0]
+
+
+def _grouped(skills: list[dict]) -> list[tuple[str, list[dict]]]:
+    """Группы (пакет, скиллы) в порядке первого появления; без пакета —
+    последней группой «без пакета»."""
+    groups: dict[str, list[dict]] = {}
+    for skill in skills:
+        groups.setdefault(_pack_of(skill), []).append(skill)
+    flat = groups.pop("", None)
+    result = list(groups.items())
+    if flat:
+        result.append((_NO_PACK, flat))
+    return result
 
 
 class SkillPicker(PaletteRowsMixin, VerticalScroll):
     """Filtered overlay-список скиллов.
 
     Навигация (`set_filter` / `move_selection`), `compose` и `_rebuild` — общие
-    с `ArgPicker`, в `PaletteRowsMixin`."""
+    с `ArgPicker`, в `PaletteRowsMixin`; `_row_widgets` свой — вставляет
+    шапки пакетов, которых нет среди выбираемых `_visible_rows`."""
 
     DEFAULT_CSS = (
         ""  # стили — .palette / .palette-row / .palette-hint в styles.tcss
@@ -48,14 +84,64 @@ class SkillPicker(PaletteRowsMixin, VerticalScroll):
             classes="palette-footer",
         )
 
-    def _format_row(self, skill: dict) -> str:
-        return f" {skill.get('id', '?')}"
+    def _format_row(self, skill: dict) -> Text:
+        """Короткое имя (цвет — классом `.palette-skill-row`) с отступом под
+        шапкой пакета, затем серым описание до правого края строки."""
+        name_w = self._name_col_w()
+        text = Text(_INDENT + fit_name(skill_short(skill)).ljust(name_w))
+        desc = str(skill.get("description") or "")
+        width = self._line_width()
+        if width:
+            desc = fit_text(desc, max(1, width - len(_INDENT) - name_w))
+        text.append(desc, style=_pal.DIM)
+        return text
+
+    def _matched(self) -> list[dict]:
+        f = self._filter.lower()
+        return [s for s in self._skills if f in str(s.get("id", "")).lower()]
+
+    def _visible_groups(self) -> list[tuple[str, list[dict]]]:
+        """Группы с совпадениями: пустая группа не показывает и шапку."""
+        return _grouped(self._matched())
 
     def _visible_rows(self) -> list[dict]:
-        f = self._filter.lower()
-        if not f:
-            return list(self._skills)
-        return [s for s in self._skills if f in str(s.get("id", "")).lower()]
+        """Выбираемые строки — только скиллы, в порядке групп."""
+        return [s for _, group in self._visible_groups() for s in group]
+
+    def _name_col_w(self) -> int:
+        return name_col_w([skill_short(s) for s in self._visible_rows()])
+
+    def _content_width(self) -> int:
+        return overlay_content_width(self)
+
+    def _line_width(self) -> int:
+        """Ширина текста строки (внутри рамки и паддинга); вне приложения
+        неизвестна — 0, описание не усекается."""
+        width = self._content_width()
+        return width - 2 if width else 0  # -2 — padding строки
+
+    def _row_widgets(self) -> tuple[list[Static], Optional[Static]]:
+        """Шапки пакетов (невыбираемые) и строки скиллов под ними."""
+        groups = self._visible_groups()
+        if not groups:
+            return super()._row_widgets()
+        widgets: list[Static] = []
+        selected: Optional[Static] = None
+        idx = 0
+        for pack, group in groups:
+            widgets.append(
+                Static(f" {pack}", classes="palette-pack-head", markup=False)
+            )
+            for skill in group:
+                classes = "palette-row palette-skill-row"
+                if idx == self._selected:
+                    classes += " selected"
+                row = Static(self._format_row(skill), classes=classes)
+                if idx == self._selected:
+                    selected = row
+                widgets.append(row)
+                idx += 1
+        return widgets, selected
 
     def _apply_size(self) -> None:
         """Textual не учитывает докнутых детей (`.palette-footer`, `dock: bottom`)
@@ -67,12 +153,13 @@ class SkillPicker(PaletteRowsMixin, VerticalScroll):
 
     @property
     def desired_height(self) -> int:
-        """Честная желаемая высота: строки списка (или одна no-match-строка) +
-        докнутый footer (margin-top hint'а(1) + строка hint'а(1)) + рамка .palette(2).
+        """Честная желаемая высота: строки списка с шапками пакетов (или одна
+        no-match-строка) + докнутый footer (margin-top hint'а(1) + строка
+        hint'а(1)) + рамка .palette(2).
         main.py::_sync_trace_max_height берёт это значение напрямую — недосчёт
         выдавливал бы нижнюю рамку пикера за экран."""
-        rows = self._visible_rows()
-        flow = len(rows) if rows else 1
+        groups = self._visible_groups()
+        flow = sum(1 + len(g) for _, g in groups) if groups else 1
         return flow + 2 + 2
 
     def selected_skill(self) -> Optional[dict]:

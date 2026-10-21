@@ -61,9 +61,37 @@ async def test_picker_filters_by_id_substring(tmp_path, monkeypatch):
         rows_text = "\n".join(
             str(s.render()) for s in picker.query(".palette-row")
         )
-        assert "supercoder:planner" in rows_text
-        assert "supercoder:coder" in rows_text
-        assert "codebase:using-codebase" not in rows_text
+        heads = [str(s.render()) for s in picker.query(".palette-pack-head")]
+        # строки — короткие имена под шапкой пакета, полный id не нужен
+        assert [h.strip() for h in heads] == ["supercoder"]
+        assert "planner" in rows_text
+        assert "coder" in rows_text
+        assert "supercoder:" not in rows_text
+        assert "using-codebase" not in rows_text
+
+
+@pytest.mark.asyncio
+async def test_tab_after_arrows_inserts_full_id_of_flat_skill(
+    tmp_path, monkeypatch
+):
+    """Стрелки идут по скиллам мимо шапок пакетов; Tab вставляет полный id."""
+    pytest.importorskip("textual")
+    _patch_registry(monkeypatch)
+    from gc_tui.app import TuiApp
+
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
+    )
+    async with app.run_test() as pilot:
+        inp = pilot.app.query_one("#cmdinput")
+        inp.text = "/skill "
+        await pilot.pause(0.1)
+        await pilot.press("down", "down")
+        await pilot.press("tab")
+        await pilot.pause(0.1)
+        assert inp.text == "/skill codebase:using-codebase"
 
 
 @pytest.mark.asyncio
