@@ -734,9 +734,16 @@ def _truncate_word_boundary(text: str, limit: int) -> str:
     return cut.rstrip() + "…"
 
 
+#: `gc_core.security.action_judge_step.CHECK_FAILED_TYPE`: модуль судьи тянет
+#: всё ядро, а лента грузит только лёгкие константы (страж в
+#: `test_image_feed`); совпадение держит `test_trace_refusals`.
+CHECK_FAILED_TYPE = "action_check_failed"
+
 # Стоп пользователя и лимиты — не сбой тула (K4: стоп `■`, ошибка `✕`):
 # короткий статус вместо длинного error.message, строка вызова — «halted».
+# Несостоявшаяся проверка судьи — не отказ: действие не оценено.
 _HALT_SUMMARIES = {
+    CHECK_FAILED_TYPE: "проверка не прошла — агент может повторить",
     "cancelled_by_user": "отменено",
     "not_started_due_to_user_stop": "не запущено (стоп)",
     "step_limit": "лимит шагов",

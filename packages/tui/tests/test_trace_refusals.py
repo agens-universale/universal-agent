@@ -1,9 +1,10 @@
 """Отказ вызова в ленте — не ошибка (спека P3 §10, смоук P3a).
 
-Отказ политики, режима, судьи или человека: глиф `⦸` цветом `WARN` и
-строка `└` (`WARN`), которая начинается с того, кто отказал. Ошибка —
-`✕` и `ERR`, стоп и лимит — `■` серым. Каждый путь одинаково: вживую,
-превью, вложенный вызов из записи субагента."""
+Отказ политики, режима, судьи или человека: цветом `WARN` только глиф
+`⦸`, строка `└` серым (`DIM`) и начинается с того, кто отказал. Ошибка —
+`✕` и `ERR`, стоп и лимит — `■` серым; несостоявшаяся проверка судьи —
+не отказ, а остановка `■`. Каждый путь одинаково: вживую, превью,
+вложенный вызов из записи субагента."""
 
 from __future__ import annotations
 
@@ -41,10 +42,6 @@ _REFUSALS = [
     (session_denied_error(), "вы запретили в этой сессии"),
     (unattended_error(), "нужно подтверждение — спросить некого"),
     (timed_out_error(), "нет ответа на подтверждение"),
-    (
-        {"type": "action_check_failed", "reason": "x"},
-        "проверка не прошла — агент может повторить",
-    ),
     (
         {"type": "write_denied_by_mode", "mode": "plan", "reason": "x"},
         "режим plan: запись запрещена",
@@ -162,7 +159,7 @@ def _assert_refused_row(row: ToolCallRow, text: str, indent: str) -> None:
     assert "✕" not in prefix.plain
     line = _lines(row)
     assert line.plain == f"{indent}└ {text}"
-    assert _styles_of(line, text) == [WARN]
+    assert _styles_of(line, text) == [DIM]
 
 
 # --- маппер: классификация в одном месте ------------------------------------
@@ -194,9 +191,15 @@ def test_guard_refusal_after_question_names_the_answer(
 
 
 def test_check_failed_type_matches_core():
-    from gc_tui.services import tool_refusal
+    from gc_tui.services import trace_mapper
 
-    assert tool_refusal.CHECK_FAILED_TYPE == CHECK_FAILED_TYPE
+    assert trace_mapper.CHECK_FAILED_TYPE == CHECK_FAILED_TYPE
+
+
+def test_check_failed_is_halted_not_refused():
+    ev = _output_event({"type": CHECK_FAILED_TYPE, "reason": "x"})
+    assert ev.result_outcome == "halted"
+    assert ev.summary == "проверка не прошла — агент может повторить"
 
 
 def test_mapper_real_error_stays_error():
@@ -218,7 +221,7 @@ def test_mapper_stop_stays_halted():
 # --- строка вызова -----------------------------------------------------------
 
 
-def test_refused_row_is_circled_glyph_and_warn_line():
+def test_refused_row_is_warn_glyph_and_dim_line():
     row = ToolCallRow(call_id="c1", label="Write", target="a.txt")
     row.set_result(summary="вы отклонили", outcome="refused")
     assert row._render_content().plain == "Write  a.txt"

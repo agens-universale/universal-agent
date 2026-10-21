@@ -19,7 +19,7 @@ Layout: Horizontal(prefix-Static, content-Static) — wrap длинного об
 - running  — сейчас исполняется: ▸ + elapsed (+ опциональный live_status);
   на человеко-ожидании (pause) — ‖ без дыхания, elapsed заморожен;
 - done     — есть result: ✓/✕; стоп или лимит (`halted`) — ■ серым,
-  отказ (`refused`) — ⦸ цветом WARN;
+  отказ (`refused`) — ⦸ цветом WARN, строка `└` серым;
 - interrupted — стоп/обрыв до output: · + «прервано».
 """
 
@@ -62,13 +62,14 @@ from gc_tui.widgets.static_content import update_if_changed
 # эмодзи, и часть терминалов (Windows Terminal) рисует его в две клетки.
 _PAUSE_GLYPH = "‖"
 
-#: Глиф и цвет итога вызова; цвет — и у строки `└` итога. Стоп и лимит —
-#: не сбой (K4), отказ — не сбой, а решение политики или человека.
-_OUTCOME_LOOK: dict[str, tuple[str, str]] = {
-    "ok": ("✓", _OK),
-    "error": (ERROR_GLYPH, _ERR),
-    "halted": ("■", _DIM),
-    "refused": (REFUSED_GLYPH, _WARN),
+#: Итог вызова: глиф, его цвет и цвет строки `└` итога. Стоп и лимит —
+#: не сбой (K4), отказ — не сбой, а решение политики или человека: цветом
+#: только глиф, строка серая.
+_OUTCOME_LOOK: dict[str, tuple[str, str, str]] = {
+    "ok": ("✓", _OK, _OK),
+    "error": (ERROR_GLYPH, _ERR, _ERR),
+    "halted": ("■", _DIM, _DIM),
+    "refused": (REFUSED_GLYPH, _WARN, _DIM),
 }
 
 
@@ -366,7 +367,8 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
             if self._paused_at is not None:
                 return _PAUSE_GLYPH, _RUN
             return "▸", _PULSE_SHADES[self._pulse_frame % len(_PULSE_SHADES)]
-        return _OUTCOME_LOOK[self._outcome]
+        glyph, style, _line_style = _OUTCOME_LOOK[self._outcome]
+        return glyph, style
 
     def _render_prefix(self) -> Text:
         text = Text()
@@ -423,11 +425,11 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         return self._outcome != "ok"
 
     def _consequence_bodies(self) -> list[Text]:
-        """Тела строк `└` под вызовом: ошибка (`ERR`) или стоп/лимит
-        (`DIM`), затем пометки."""
+        """Тела строк `└` под вызовом: ошибка (`ERR`), стоп/лимит или
+        отказ (`DIM`), затем пометки."""
         bodies = list(self._consequences)
         if self._ends_with_line and self._result:
-            style = _OUTCOME_LOOK[self._outcome][1]
+            style = _OUTCOME_LOOK[self._outcome][2]
             bodies.insert(0, Text(self._result, style=style))
         return bodies
 

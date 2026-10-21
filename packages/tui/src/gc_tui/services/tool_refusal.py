@@ -24,11 +24,6 @@ from gc_core.message_policy.permission_denials import (
     UNATTENDED_TYPE,
 )
 
-#: `gc_core.security.action_judge_step.CHECK_FAILED_TYPE`: модуль судьи тянет
-#: всё ядро, а лента грузит только лёгкие константы (страж в
-#: `test_image_feed`); совпадение держит `test_trace_refusals`.
-CHECK_FAILED_TYPE = "action_check_failed"
-
 _DECLINED = "вы отклонили"
 _SESSION_DENIED = "вы запретили в этой сессии"
 _UNATTENDED = "нужно подтверждение — спросить некого"
@@ -49,7 +44,6 @@ _FIXED = {
     SESSION_DENIED_TYPE: _SESSION_DENIED,
     UNATTENDED_TYPE: _UNATTENDED,
     TIMED_OUT_TYPE: _TIMED_OUT,
-    CHECK_FAILED_TYPE: "проверка не прошла — агент может повторить",
 }
 
 #: Запрет режима разрешений: что запрещено.
