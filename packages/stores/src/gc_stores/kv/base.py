@@ -12,6 +12,8 @@ import json
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
+from gc_core.threads.errors import StoreUnavailable
+
 from gc_stores.kv.keys import SCHEMA
 
 
@@ -57,6 +59,68 @@ class KV(ABC):
 
     async def close(self) -> None:  # noqa: B027  # хук: у MemoryKV закрывать нечего
         """Закрыть подключение; повтор безвреден."""
+
+    def unavailable(self, exc: BaseException) -> bool:
+        """Соединения нет или оно оборвалось — запись повторит вызывающий
+        (``StoreUnavailable``)."""
+        return isinstance(exc, (ConnectionError, TimeoutError))
+
+
+class GuardedKV(KV):
+    """KV, у которого обрыв соединения драйвера — ``StoreUnavailable``.
+    Остальные атрибуты — как у обёрнутого."""
+
+    def __init__(self, inner: KV) -> None:
+        self.inner = inner
+
+    def __getattr__(self, name: str):
+        return getattr(self.inner, name)
+
+    async def _call(self, call):
+        try:
+            return await call
+        except Exception as exc:
+            if self.inner.unavailable(exc):
+                message = str(exc) or type(exc).__name__
+                raise StoreUnavailable(message) from exc
+            raise
+
+    async def get(self, key: str) -> Versioned | None:
+        return await self._call(self.inner.get(key))
+
+    async def put(
+        self, key: str, data: bytes, *, if_version: str | None
+    ) -> str | None:
+        return await self._call(
+            self.inner.put(key, data, if_version=if_version)
+        )
+
+    async def put_any(self, key: str, data: bytes) -> str:
+        return await self._call(self.inner.put_any(key, data))
+
+    async def delete(self, key: str) -> None:
+        await self._call(self.inner.delete(key))
+
+    async def scan(
+        self, prefix: str, *, start_after: str = "", limit: int = 1000
+    ) -> list[str]:
+        return await self._call(
+            self.inner.scan(prefix, start_after=start_after, limit=limit)
+        )
+
+    async def check(self) -> None:
+        await self._call(self.inner.check())
+
+    async def close(self) -> None:
+        await self.inner.close()
+
+    def unavailable(self, exc: BaseException) -> bool:
+        return self.inner.unavailable(exc)
+
+
+def guarded(kv: KV) -> KV:
+    """Обернуть один раз: обёрнутый возвращается как есть."""
+    return kv if isinstance(kv, GuardedKV) else GuardedKV(kv)
 
 
 #: Формат раскладки ключей KV (``kv/keys.py``): меняется — новый номер.

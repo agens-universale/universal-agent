@@ -788,6 +788,24 @@ async def check_set_info_replaces(store, _clock: FakeClock) -> None:
     _expect(info.workspace is None, "set_* заменяет целиком, а не сливает")
 
 
+async def check_set_info_keeps_title(store, _clock: FakeClock) -> None:
+    """Заголовок ставит фронтенд; запись хода без ``title`` (поле не задано
+    явно) его не трогает — иначе шаг стирал бы переименование треда."""
+    lease = await _claim(store)
+    await store.commit(
+        KEY, _change("op1", 0, lease, set_info=ThreadInfo(title="Мой тред"))
+    )
+    await store.commit(
+        KEY,
+        _change(
+            "op2", 1, lease, set_info=ThreadInfo(api_mode="chat_completions")
+        ),
+    )
+    info = (await store.get_thread(KEY)).info
+    _expect(info.title == "Мой тред", "set_info без title не стирает его")
+    _expect(info.api_mode == "chat_completions", "остальное — заменено")
+
+
 async def check_updated_at_only_on_commit(store, clock: FakeClock) -> None:
     lease = await _claim(store)
     await store.commit(
@@ -1171,6 +1189,7 @@ CHECKS: tuple[Callable[..., Awaitable[None]], ...] = (
     check_commit_receipt_carries_lease,
     check_side_writes_to_durable_thread,
     check_set_info_replaces,
+    check_set_info_keeps_title,
     check_updated_at_only_on_commit,
     check_stored_data_is_isolated,
     check_concurrent_same_revision,

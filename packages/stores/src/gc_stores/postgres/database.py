@@ -144,3 +144,16 @@ class PostgresDatabase(Database):
 
     def retryable(self, exc: BaseException) -> bool:
         return type(exc).__name__ in _RETRYABLE
+
+    def unavailable(self, exc: BaseException) -> bool:
+        """Сеть до базы (``OSError``: отказ, DNS, таймаут) или соединение,
+        которое драйвер счёл потерянным."""
+        if isinstance(exc, (OSError, TimeoutError)):
+            return True
+        try:
+            errors = driver().exceptions
+        except ImportError:  # драйвера нет — это не обрыв соединения
+            return False
+        return isinstance(
+            exc, (errors.PostgresConnectionError, errors.InterfaceError)
+        )

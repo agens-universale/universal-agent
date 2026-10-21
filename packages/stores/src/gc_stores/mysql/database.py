@@ -21,6 +21,9 @@ _PACKET = 64 * 1024 * 1024
 _POOL_DEFAULTS = {"minsize": 1, "maxsize": 10}
 #: Дедлок (1213) и ожидание блокировки (1205): транзакцию можно повторить.
 _RETRYABLE = frozenset({1205, 1213})
+#: Коды клиента MySQL «нет соединения»: не подключиться (2002, 2003),
+#: сервер ушёл (2006), соединение потеряно (2013, 2055).
+_UNAVAILABLE = frozenset({2002, 2003, 2006, 2013, 2055})
 
 
 def driver() -> Any:
@@ -161,3 +164,9 @@ class MySQLDatabase(Database):
     def retryable(self, exc: BaseException) -> bool:
         code = exc.args[0] if exc.args else None
         return isinstance(code, int) and code in _RETRYABLE
+
+    def unavailable(self, exc: BaseException) -> bool:
+        if isinstance(exc, (OSError, TimeoutError)):
+            return True
+        code = exc.args[0] if exc.args else None
+        return isinstance(code, int) and code in _UNAVAILABLE

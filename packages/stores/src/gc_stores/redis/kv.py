@@ -125,6 +125,15 @@ class RedisKV(KV):
         )
         return [name.decode("utf-8") for name in found]
 
+    def unavailable(self, exc: BaseException) -> bool:
+        if isinstance(exc, (OSError, TimeoutError)):
+            return True
+        try:
+            import redis.exceptions as errors
+        except ImportError:  # драйвера нет — это не обрыв соединения
+            return False
+        return isinstance(exc, (errors.ConnectionError, errors.TimeoutError))
+
     async def close(self) -> None:
         """Закрыть свой клиент; чужой не трогается; повтор безвреден."""
         if not self._owns or self._client is None:

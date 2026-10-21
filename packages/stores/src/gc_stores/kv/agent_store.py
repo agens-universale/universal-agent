@@ -29,7 +29,7 @@ from gc_core.agent_store import (
 from gc_stores.admin import StoredResource
 from gc_stores.defaults import StaleDefaults
 from gc_stores.kv import keys
-from gc_stores.kv.base import KV, ensure_format, read_format
+from gc_stores.kv.base import KV, ensure_format, guarded, read_format
 
 _AGENT_LEVEL = "_"
 _ATTEMPTS = 16
@@ -53,7 +53,7 @@ class KvAgentStore(AgentStore):
                 "нужен agent_id: ресурсы агента в хранилище по нему"
             )
         self.agent_id = agent_id
-        self._kv = kv
+        self._kv = guarded(kv)
         self._backend = backend
         self._agent = f"res/{keys.enc(agent_id)}/"
         self._ready_done = False

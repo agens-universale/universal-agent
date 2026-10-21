@@ -17,6 +17,7 @@ from gc_core.threads.models import (
     LeaseRequest,
     Page,
     SideChange,
+    ThreadInfo,
     ThreadQuery,
     ThreadRecord,
 )
@@ -47,6 +48,19 @@ def _updated(record: ThreadRecord) -> datetime:
 
 def lease_expired(lease: Lease, now: datetime) -> bool:
     return lease.expires_at is not None and lease.expires_at <= now
+
+
+def info_after_set(current: ThreadInfo, new: ThreadInfo) -> ThreadInfo:
+    """``set_info`` заменяет карточку целиком, кроме заголовка: его ставит
+    фронтенд, и запись хода без ``title`` (поле не задано явно) не стирает
+    переименование треда."""
+    if "title" in new.model_fields_set or "title" not in (
+        current.model_fields_set
+    ):
+        return new
+    kept = new.model_copy(update={"title": current.title})
+    kept.__pydantic_fields_set__.add("title")
+    return kept
 
 
 def granted_lease(

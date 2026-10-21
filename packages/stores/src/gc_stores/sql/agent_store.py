@@ -33,7 +33,13 @@ from gc_core.agent_store import (
 from gc_stores import migrations as schema
 from gc_stores.admin import StoredResource
 from gc_stores.defaults import StaleDefaults
-from gc_stores.sql.database import Conn, Database, in_transaction
+from gc_stores.sql.database import (
+    Conn,
+    Database,
+    guarded,
+    in_transaction,
+    read_on,
+)
 from gc_stores.sql.dialect import Dialect
 
 T = TypeVar("T")
@@ -154,12 +160,11 @@ class SqlAgentStore(AgentStore):
         await self._ready()
 
     async def _read(self, work: Callable[[Conn], Awaitable[T]]) -> T:
-        await self._ready()
-        async with self._db.connection() as conn:
-            return await work(conn)
+        await guarded(self._db, self._ready())
+        return await read_on(self._db, work)
 
     async def _write(self, work: Callable[[Conn], Awaitable[T]]) -> T:
-        await self._ready()
+        await guarded(self._db, self._ready())
         return await in_transaction(self._db, work)
 
     async def _now(self, conn: Conn) -> Any:
