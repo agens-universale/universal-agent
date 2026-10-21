@@ -57,7 +57,7 @@ from textual.screen import Screen
 from textual.widget import Widget
 from textual.widgets import Static, TextArea
 
-from gc_tui import branding
+from gc_tui import branding, textual_compat
 from gc_tui.commands import build_default_registry, closest_command
 from gc_tui.messages import (
     CopyBlockRequest,
@@ -617,8 +617,8 @@ class TraceScreen(Screen):
         # Кэш реплик ленты для липкой реплики (_trace_replies).
         self._trace_replies_key: Optional[tuple] = None
         self._trace_replies_cache: list = []
-        # Freeze UI на время app-select (§3.2 F1): time.monotonic() первого тика,
-        # где увидели Screen._selecting; None когда не selecting.
+        # Freeze UI на время app-select (§3.2 F1): time.monotonic() последней
+        # активности выделения (сторож F5); None когда не selecting.
         self._select_freeze_since: Optional[float] = None
         # Эфемерный StreamBlock — live-вывод текущего chat_completions-шага;
         # снимается, когда приходит каноничная assistant-строка / run завершён.
@@ -2939,7 +2939,7 @@ class TraceScreen(Screen):
         тянем; законные прижатия ставят флаг до заказа."""
 
         def _trace() -> Optional[VerticalScroll]:
-            if not self._stick_bottom:
+            if not self._stick_bottom or self._ui_frozen_for_select():
                 return None
             try:
                 return self.query_one(_SEL_TRACE, VerticalScroll)
@@ -5030,7 +5030,56 @@ class TraceScreen(Screen):
 
     def _ui_frozen_for_select(self) -> bool:
         """F1: заморожен ли UI из-за app-select. Сигнал — Screen._selecting."""
-        return bool(getattr(self, "_selecting", False))
+        return textual_compat.is_selecting(self)
+
+    def _check_auto_scroll(
+        self, select_widget, mouse_coordinate, delta_y
+    ) -> None:
+        """Автопрокрутка выделения Textual плюс протяжка ниже ленты (спека
+        P3 §2.7): над накладками, полем ввода и футером лента едет вниз,
+        конец выделения остаётся в ленте."""
+        super()._check_auto_scroll(select_widget, mouse_coordinate, delta_y)
+        try:
+            trace = self.query_one(_SEL_TRACE, VerticalScroll)
+        except NoMatches:
+            return
+        textual_compat.keep_select_end_in(self, trace, mouse_coordinate)
+        textual_compat.auto_scroll_below(self, trace, mouse_coordinate[1])
+
+    def on_mouse_move(self, _event: events.MouseMove) -> None:
+        """F5: движение мыши при выделении — активность, сторож ждёт."""
+        if self._ui_frozen_for_select():
+            self._select_freeze_since = time.monotonic()
+
+    def _select_auto_scrolling(self) -> bool:
+        """Идёт автопрокрутка выделения и ленте ещё есть куда ехать."""
+        if not textual_compat.auto_scroll_running(self):
+            return False
+        try:
+            trace = self.query_one(_SEL_TRACE, VerticalScroll)
+        except NoMatches:
+            return False
+        return 0 < trace.scroll_y < trace.max_scroll_y
+
+    def _select_watchdog(self) -> bool:
+        """F5: выделение без активности 5 с снимается (runner не стопаем).
+        Активность — движение мыши и тик идущей автопрокрутки. `True` —
+        выделение живо, UI заморожен."""
+        if not self._ui_frozen_for_select():
+            self._select_freeze_since = None
+            return False
+        now = time.monotonic()
+        if self._select_freeze_since is None or self._select_auto_scrolling():
+            self._select_freeze_since = now
+        if now - self._select_freeze_since <= 5.0:
+            return True
+        try:
+            self.clear_selection()
+        except Exception:
+            pass
+        self._select_freeze_since = None
+        textual_compat.stop_selecting(self)
+        return False
 
     def _poll_active(self) -> None:
         self._in_poll_tick = True
@@ -5062,21 +5111,7 @@ class TraceScreen(Screen):
         # точечно глушим UI-мутации трейса (stick/scroll/stream paint/wipe),
         # но НЕ весь poll: footer/OSC/title/runner-логика/orphan/tail-события
         # без мутаций экрана продолжаются (F6 — runner жив, UI не тупеет целиком).
-        _frozen = self._ui_frozen_for_select()
-        if _frozen:
-            if self._select_freeze_since is None:
-                self._select_freeze_since = time.monotonic()
-            # F5: timeout ~5с → снять выделение принудительно (runner не стопаем).
-            if time.monotonic() - self._select_freeze_since > 5.0:
-                try:
-                    self.clear_selection()
-                except Exception:
-                    pass
-                self._select_freeze_since = None
-                self._selecting = False
-                _frozen = False
-        else:
-            self._select_freeze_since = None
+        _frozen = self._select_watchdog()
         # Липкость к низу: детект ручного скролла + повторное прижатие.
         # F2: при freeze — не обновляем stick и не прижимаем (текст стоит на месте).
         if not _frozen:

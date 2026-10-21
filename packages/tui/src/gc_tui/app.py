@@ -33,12 +33,14 @@ from textual.app import App
 from textual.binding import Binding
 from textual.screen import Screen
 
-from gc_tui import branding, palette
+from gc_tui import branding, palette, textual_compat
 from gc_tui.screens.main import TraceScreen
 from gc_tui.services.clipboard_ops import copy_out, with_source_cite
 from gc_tui.services.stream_sink import StreamSink
 from gc_tui.services.trace_note_sink import TraceNoteSink
 from gc_tui.services.voice_notices import voice_notices
+
+textual_compat.apply_textual_patches()
 
 _AUTO_UPDATE_NOTICE = "Доступна новая версия — /settings → Обновление"
 
