@@ -614,9 +614,9 @@ class TraceScreen(Screen):
             True  # автоскролл-намерение «липнуть к низу» трейса
         )
         self._last_auto_y = 0  # куда мы в прошлый раз программно прижали трейс
-        # Кэш верхних строк реплик для липкой реплики (_reply_tops).
-        self._reply_tops_key: Optional[tuple] = None
-        self._reply_tops_cache: list = []
+        # Кэш реплик ленты для липкой реплики (_trace_replies).
+        self._trace_replies_key: Optional[int] = None
+        self._trace_replies_cache: list = []
         # Freeze UI на время app-select (§3.2 F1): time.monotonic() первого тика,
         # где увидели Screen._selecting; None когда не selecting.
         self._select_freeze_since: Optional[float] = None
@@ -745,7 +745,8 @@ class TraceScreen(Screen):
             with Horizontal(id="header"):
                 yield Static(left_text, id="header-left", markup=False)
                 yield Static(right_text, id="header-right", markup=False)
-            yield VerticalScroll(id="trace")
+            trace = VerticalScroll(id="trace")
+            yield trace
             yield Vertical(id="indicator-bar")
             with Horizontal(id="input-row"):
                 yield Static("› ", id="input-prompt", markup=False)
@@ -763,8 +764,8 @@ class TraceScreen(Screen):
                     id="footer-right",
                     markup=False,
                 )
-        yield StickyReply(id="trace-sticky-reply")
-        yield ScrollEndPill(id="trace-end-pill", classes="trace-action")
+        yield StickyReply(trace, id="trace-sticky-reply")
+        yield ScrollEndPill(trace, id="trace-end-pill", classes="trace-action")
 
     def _compose_header_segments(self) -> tuple[str, str]:
         """Return (left_text, right_text) for header.
@@ -2841,7 +2842,10 @@ class TraceScreen(Screen):
         except Exception:
             return
         if self._stick_bottom:
-            if trace.scroll_offset.y < self._last_auto_y - self._STICK_TOL:
+            # Низ поднялся (лента выросла в высоту) — offset прижат к нему,
+            # это не уход вверх: порог — не выше нынешнего низа.
+            pinned = min(self._last_auto_y, trace.max_scroll_y)
+            if trace.scroll_offset.y < pinned - self._STICK_TOL:
                 self._stick_bottom = False
         elif self._trace_is_at_bottom():
             self._stick_bottom = True
@@ -2859,7 +2863,7 @@ class TraceScreen(Screen):
         """Накладки над лентой (спека P3 §2.6): «не внизу» — липкая реплика
         (ближайшая выше края) и плашка «в конец»; внизу — обе скрыты.
         Зовётся на каждый шаг прокрутки: реплики ищутся по кэшу верхних
-        строк (`_reply_tops`), без обхода ленты."""
+        реплик (`_trace_replies`), без обхода ленты."""
         try:
             trace = self.query_one(_SEL_TRACE, VerticalScroll)
             sticky = self.query_one("#trace-sticky-reply", StickyReply)
@@ -2871,25 +2875,28 @@ class TraceScreen(Screen):
             sticky.show(None, box)
             pill.show(None, box)
             return
-        tops = self._reply_tops(trace)
-        sticky.show(reply_above(tops, round(trace.scroll_y)), box)
+        replies = self._trace_replies(trace)
+        reply = reply_above(
+            replies, round(trace.scroll_y), lambda r: r.virtual_region.y
+        )
+        sticky.show(reply, box)
         pill.show(self._end_pill_label(), box)
 
-    def _reply_tops(self, trace: VerticalScroll) -> list:
-        """Пары `(virtual_region.y, реплика)` верхнего уровня ленты. Кэш
-        живёт, пока не меняются число детей и размер содержимого ленты —
-        монтирование, удаление и перераскладка его сбрасывают."""
+    def _trace_replies(self, trace: VerticalScroll) -> list:
+        """Реплики верхнего уровня ленты по порядку. Кэшируется только
+        состав (ключ — число детей); верх каждой читается живым при
+        поиске, поэтому сдвиг реплик кэш не портит."""
         from gc_tui.widgets.user_reply import UserReplyContainer
 
-        key = (len(trace.children), trace.virtual_size)
-        if key != self._reply_tops_key:
-            self._reply_tops_key = key
-            self._reply_tops_cache = [
-                (child.virtual_region.y, child)
+        key = len(trace.children)
+        if key != self._trace_replies_key:
+            self._trace_replies_key = key
+            self._trace_replies_cache = [
+                child
                 for child in trace.children
                 if isinstance(child, UserReplyContainer)
             ]
-        return self._reply_tops_cache
+        return self._trace_replies_cache
 
     def _end_pill_label(self) -> str:
         """`· клик или Enter` — только когда курсор в пустом поле ввода."""
@@ -2905,6 +2912,8 @@ class TraceScreen(Screen):
 
     def on_scroll_to_reply(self, message: ScrollToReply) -> None:
         """Клик по липкой реплике — она наверху видимой области."""
+        if not message.reply.is_attached:
+            return  # реплику успели снять
         trace = self.query_one(_SEL_TRACE, VerticalScroll)
         trace.scroll_to_widget(message.reply, animate=False, top=True)
 
@@ -2919,15 +2928,31 @@ class TraceScreen(Screen):
 
     def _scroll_trace_end(self) -> None:
         """Прижать трейс к низу ПОСЛЕ раскладки (height:auto → scroll_end сразу после
-        mount() не достаёт до нового низа) и запомнить позицию для _update_stick_state."""
+        mount() не достаёт до нового низа) и запомнить позицию для _update_stick_state.
+
+        Отсрочки две: экрана и самой ленты (та же, что у `scroll_end`
+        Textual, — новый низ готов только после неё). Флаг проверяется
+        перед каждой: ушедшего вверх между заказом и прокруткой назад не
+        тянем; законные прижатия ставят флаг до заказа."""
+
+        def _trace() -> Optional[VerticalScroll]:
+            if not self._stick_bottom:
+                return None
+            try:
+                return self.query_one(_SEL_TRACE, VerticalScroll)
+            except Exception:
+                return None
+
+        def _end() -> None:
+            trace = _trace()
+            if trace is not None:
+                self._last_auto_y = trace.max_scroll_y
+                trace.scroll_end(animate=False, immediate=True)
 
         def _do() -> None:
-            try:
-                trace = self.query_one(_SEL_TRACE, VerticalScroll)
-            except Exception:
-                return
-            self._last_auto_y = trace.max_scroll_y
-            trace.scroll_end(animate=False)
+            trace = _trace()
+            if trace is not None:
+                trace.call_after_refresh(_end)
 
         self.call_after_refresh(_do)
 

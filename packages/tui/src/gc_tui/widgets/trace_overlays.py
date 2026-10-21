@@ -28,10 +28,30 @@ PILL_ENTER = "↓ в конец · клик или Enter"
 
 
 class _Overlay(Widget):
-    """Общее накладок: не в фокусе, не в выделении, клик — сообщение."""
+    """Общее накладок: не в фокусе, не в выделении, клик — сообщение,
+    колесо — прокрутка ленты `scroll_target` под накладкой."""
 
     ALLOW_SELECT = False
     FOCUS_ON_CLICK = False
+
+    def __init__(self, scroll_target: Widget, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._scroll_target = scroll_target
+
+    def _scroll_by(self, event: events.MouseEvent, step: int) -> None:
+        # Как колесо над самой лентой: шаг — чувствительность приложения.
+        event.stop()
+        target = self._scroll_target
+        target.scroll_to(
+            y=target.scroll_target_y + step * self.app.scroll_sensitivity_y,
+            animate=False,
+        )
+
+    def on_mouse_scroll_up(self, event: events.MouseScrollUp) -> None:
+        self._scroll_by(event, -1)
+
+    def on_mouse_scroll_down(self, event: events.MouseScrollDown) -> None:
+        self._scroll_by(event, 1)
 
     def _place(self, x: int, y: int, width: int) -> None:
         self.styles.offset = (x, y)
@@ -53,8 +73,8 @@ class _Overlay(Widget):
 class StickyReply(_Overlay):
     """`› текст…` ближайшей реплики выше края; клик — к реплике."""
 
-    def __init__(self, **kwargs) -> None:
-        super().__init__(**kwargs)
+    def __init__(self, scroll_target: Widget, **kwargs) -> None:
+        super().__init__(scroll_target, **kwargs)
         self.reply: Optional[Widget] = None
 
     def show(self, reply: Optional[Widget], box: Region) -> None:
@@ -83,8 +103,8 @@ class StickyReply(_Overlay):
 class ScrollEndPill(_Overlay, Static):
     """`↓ в конец · …` по центру последней строки; клик — к низу."""
 
-    def __init__(self, **kwargs) -> None:
-        super().__init__("", markup=False, **kwargs)
+    def __init__(self, scroll_target: Widget, **kwargs) -> None:
+        super().__init__(scroll_target, "", markup=False, **kwargs)
         self.label = ""
 
     def show(self, label: Optional[str], box: Region) -> None:

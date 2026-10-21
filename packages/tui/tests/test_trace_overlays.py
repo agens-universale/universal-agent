@@ -78,15 +78,10 @@ def _replies(scr):
 
 
 async def _scroll(pilot, scr, y):
-    """Прокрутка «рукой». Отложенный `scroll_end` опроса, заказанный, пока
-    лента липла к низу, может вернуть её вниз один раз — тогда повтор."""
-    trace = _trace(scr)
-    for _ in range(3):
-        trace.scroll_to(y=y, animate=False)
-        await pilot.pause()
-        await pilot.pause()
-        if trace.scroll_offset.y == y and not scr._stick_bottom:
-            return
+    """Прокрутка «рукой»: позднее прижатие опроса её не перебивает."""
+    _trace(scr).scroll_to(y=y, animate=False)
+    await pilot.pause()
+    await pilot.pause()
 
 
 def _line(widget):
@@ -296,3 +291,75 @@ async def test_drag_across_pill_row_skips_overlays(tmp_path):
         selected = scr.get_selected_text() or ""
         assert "строка" in selected
         assert "в конец" not in selected
+
+
+def _blocks_around(scr, reply):
+    """Самые высокие дети ленты над репликой (до предыдущей) и под ней."""
+    from gc_tui.widgets.user_reply import UserReplyContainer
+
+    children = list(_trace(scr).children)
+    at = children.index(reply)
+    before = []
+    for child in reversed(children[:at]):
+        if isinstance(child, UserReplyContainer):
+            break
+        before.append(child)
+
+    def tallest(widgets):
+        return max(widgets, key=lambda w: w.region.height)
+
+    return tallest(before), tallest(children[at + 1 :])
+
+
+@pytest.mark.asyncio
+async def test_sticky_follows_moved_reply(tmp_path):
+    """Реплика сдвинулась без смены числа детей и высоты ленты — липкая
+    строка считает по живому верху, не по старому."""
+    _write_task(tmp_path, "o13")
+    async with _app(tmp_path).run_test(size=(100, 30)) as pilot:
+        scr = await _tall(pilot, "o13")
+        sticky, _ = _overlays(scr)
+        first, second = _replies(scr)
+        old_top = second.virtual_region.y
+        await _scroll(pilot, scr, old_top + 2)
+        assert sticky.reply is second
+        above, below = _blocks_around(scr, second)
+        above.styles.height = above.region.height + 10
+        below.styles.height = below.region.height - 10
+        await pilot.pause()
+        await pilot.pause()
+        assert second.virtual_region.y == old_top + 10
+        await _scroll(pilot, scr, old_top + 4)
+        assert sticky.reply is first
+
+
+@pytest.mark.asyncio
+async def test_wheel_over_overlays_scrolls_trace(tmp_path):
+    from textual import events
+
+    _write_task(tmp_path, "o14")
+    async with _app(tmp_path).run_test(size=(100, 30)) as pilot:
+        scr = await _tall(pilot, "o14")
+        sticky, pill = _overlays(scr)
+        trace = _trace(scr)
+        await _scroll(pilot, scr, 40)
+        await pilot._post_mouse_events([events.MouseScrollUp], pill)
+        assert trace.scroll_offset.y < 40
+        y = trace.scroll_offset.y
+        await pilot._post_mouse_events([events.MouseScrollDown], sticky)
+        assert trace.scroll_offset.y > y
+
+
+@pytest.mark.asyncio
+async def test_click_on_detached_reply_is_ignored(tmp_path):
+    from gc_tui.messages import ScrollToReply
+
+    _write_task(tmp_path, "o15")
+    async with _app(tmp_path).run_test(size=(100, 30)) as pilot:
+        scr = await _tall(pilot, "o15")
+        first, _ = _replies(scr)
+        await _scroll(pilot, scr, 30)
+        await first.remove()
+        scr.on_scroll_to_reply(ScrollToReply(first))
+        await pilot.pause()
+        assert _trace(scr).scroll_offset.y == 30

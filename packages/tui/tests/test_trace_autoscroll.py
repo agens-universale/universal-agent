@@ -170,6 +170,7 @@ async def test_thinking_indicator_reshow_visible_does_not_scroll(tmp_path):
         scr = pilot.app.screen
         scr._show_thinking_indicator(state="thinking")  # видим, не скрыт
         await pilot.pause()
+        await pilot.pause()  # прижатие первого показа — две отсрочки
         trace = scr.query_one("#trace", VerticalScroll)
         calls = []
         trace.scroll_end = lambda **kw: calls.append(kw)

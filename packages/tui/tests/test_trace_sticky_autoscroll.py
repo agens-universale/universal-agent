@@ -196,6 +196,39 @@ async def test_own_scroll_end_keeps_sticky(tmp_path):
         assert trace.scroll_offset.y == trace.max_scroll_y
 
 
+@pytest.mark.asyncio
+async def test_user_scroll_beats_pending_scroll_end(tmp_path):
+    """Прижатие заказано, пока лента липла; человек ушёл вверх до его
+    исполнения — позднее прижатие ленту не возвращает."""
+    pytest.importorskip("textual")
+    _write_task(tmp_path, "ev4")
+    async with _app(tmp_path).run_test(size=(80, 24)) as pilot:
+        scr, trace = await _setup_scrolled(pilot, "ev4")
+        scr._poll_tick = lambda: None
+        scr._scroll_trace_end()
+        # Колесо прокручивает сразу, до исполнения заказанного прижатия.
+        trace.scroll_to(y=0, animate=False, immediate=True)
+        await pilot.pause(0.2)
+        assert scr._stick_bottom is False
+        assert trace.scroll_offset.y == 0
+
+
+@pytest.mark.asyncio
+async def test_bottom_moving_up_keeps_sticky(tmp_path):
+    """Лента выросла в высоту (снят баннер) — низ поднялся, offset прижат
+    к новому низу. Это не уход человека вверх: липкость остаётся."""
+    pytest.importorskip("textual")
+    _write_task(tmp_path, "ev5")
+    async with _app(tmp_path).run_test(size=(80, 24)) as pilot:
+        scr, trace = await _setup_scrolled(pilot, "ev5")
+        scr._poll_tick = lambda: None
+        trace.scroll_end(animate=False, immediate=True)
+        scr._last_auto_y = trace.max_scroll_y + 8  # прижали до роста
+        scr._stick_bottom = True
+        scr._update_stick_state()
+        assert scr._stick_bottom is True
+
+
 async def _enter(scr, text=""):
     from gc_tui.screens.main import _SEL_CMDINPUT
     from gc_tui.widgets.command_input import CommandTextArea
