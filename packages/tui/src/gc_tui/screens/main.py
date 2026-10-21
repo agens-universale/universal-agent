@@ -2804,11 +2804,12 @@ class TraceScreen(Screen):
         inp = self.query_one(_SEL_CMDINPUT, CommandTextArea)
         if not (inp.has_focus and inp.is_blank()):
             return False
+        runner = self.app.active_runner
         tail = self._queued_tail(self.query_one(_SEL_TRACE, VerticalScroll))
-        if not tail:
+        if runner is None or not tail:
             return False
         reply = tail[-1]
-        if not self.app.active_runner.withdraw_message(reply.message_id):
+        if not runner.withdraw_message(reply.message_id):
             self._show_footer_hint(QUEUE_ADMITTED_HINT)
             return True
         self._pending_user_widgets.pop(reply.client_id, None)
@@ -2816,6 +2817,29 @@ class TraceScreen(Screen):
         self._restore_input(reply.restore_text, reply.images)
         self.call_next(self._drop_queued_reply, reply)
         return True
+
+    def _return_queue_to_input(self) -> None:
+        """Очередь, которую ядро уже не впустит (стоп, конец хода), — назад
+        в поле: тексты по порядку очереди через пустую строку (`/имя` —
+        как в реплике), с картинками; набранное в поле остаётся впереди.
+        Реплики снимаются из ленты и `meta.tui.pending_user_messages`."""
+        from gc_tui.widgets.user_reply import is_queued
+
+        queued = [
+            w for w in self._pending_user_widgets.values() if is_queued(w)
+        ]
+        if not queued:
+            return
+        inp = self.query_one(_SEL_CMDINPUT, CommandTextArea)
+        parts = [inp.text] if inp.text else []
+        images: list[Attachment] = []
+        for reply in queued:
+            parts.append(reply.restore_text)
+            images.extend(reply.images)
+            self._pending_user_widgets.pop(reply.client_id, None)
+            self._remove_pending_record(reply.client_id)
+            reply.remove()
+        self._restore_input("\n\n".join(parts), tuple(images))
 
     async def _drop_queued_reply(self, reply) -> None:
         """Снять забранную реплику; подсказка — новой последней. Удаление
@@ -5229,6 +5253,9 @@ class TraceScreen(Screen):
         if not _frozen:
             self._poll_trace_tail()
             self._drain_trace_notes()
+            # Хвост дочитан: впущенное уже сверено, остальное ядро не возьмёт.
+            if not is_running:
+                self._return_queue_to_input()
 
     def _poll_trace_tail(self) -> None:
         """Дочитать и отрисовать хвост записей активного треда."""
@@ -7307,12 +7334,7 @@ class TraceScreen(Screen):
             return
 
         # Cancel-with-undo (агент не успел ничего выдать + input пустой) — отдельно.
-        input_text = ""
-        try:
-            input_text = self.query_one(_SEL_CMDINPUT).text
-        except Exception:
-            pass
-        if self._events_since_last_user_send == 0 and not input_text:
+        if self._can_cancel_with_undo():
             self._cancel_with_undo()
             return
 
@@ -7321,6 +7343,23 @@ class TraceScreen(Screen):
         if self._thinking is not None:
             self._thinking.set_state("cancelled")
         self._stop_and_replace_runner()
+
+    def _can_cancel_with_undo(self) -> bool:
+        """Откат отправки: агент ничего не выдал, поле пустое, очереди нет.
+        С очередью откатывать нечего: последняя отправка — в очереди, её
+        с остальными вернёт в поле стоп (`_return_queue_to_input`)."""
+        input_text = ""
+        try:
+            input_text = self.query_one(_SEL_CMDINPUT).text
+        except Exception:
+            pass
+        return (
+            self._events_since_last_user_send == 0
+            and not input_text
+            and not self._queued_tail(
+                self.query_one(_SEL_TRACE, VerticalScroll)
+            )
+        )
 
     def _stop_and_replace_runner(self) -> None:
         """Кооперативный stop + mark + обнуление active_runner.
@@ -7343,6 +7382,7 @@ class TraceScreen(Screen):
             if callable(release):
                 release()
         self.app.active_runner = None
+        self._return_queue_to_input()
 
     def _stop_for_ask_human(self) -> None:
         """Esc в live ask_human → clean stop треда.

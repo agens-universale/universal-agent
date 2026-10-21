@@ -12,6 +12,7 @@ pytest.importorskip("textual")
 from gc_core.attachments.model import chip_text
 from gc_testkit.tui_support import tui_settings
 from gc_tui.app import TuiApp
+from gc_tui.models import TraceEvent
 from gc_tui.services.footer_slot import QUEUE_ADMITTED_HINT
 from gc_tui.services.stores.file_store import FileTaskStore
 from gc_tui.widgets.command_input import CommandTextArea
@@ -28,9 +29,13 @@ class _BusyRunner:
         self.added: list[dict] = []
         self.withdrawn: list[str] = []
         self._admitted = admitted
+        self.running = True
 
     def is_running(self) -> bool:
-        return True
+        return self.running
+
+    def stop(self) -> None:
+        self.running = False
 
     def is_child_input_active(self) -> bool:
         return False
@@ -296,3 +301,105 @@ async def test_skill_reply_returns_slash_name_and_text(tmp_path, _skills):
         assert runner.withdrawn == [runner.added[0]["id"]]
         assert _inp(pilot).text == "/coder почини тест"
         assert _queued(pilot) == []
+
+
+# --- очередь при остановке и в конце хода -----------------------------------
+
+
+@pytest.mark.asyncio
+async def test_up_without_runner_does_not_crash(tmp_path):
+    async with _app(tmp_path / "threads").run_test() as pilot:
+        await _two_queued(pilot, tmp_path)
+        pilot.app.active_runner = None
+        assert pilot.app.screen._withdraw_last_queued() is False
+
+
+@pytest.mark.asyncio
+async def test_stop_returns_queue_to_input_in_order(tmp_path):
+    async with _app(tmp_path / "threads").run_test() as pilot:
+        runner = _busy(pilot, tmp_path)
+        att = make_attachment_file(1, tmp_path)
+        first = f"глянь {chip_text(1)}"
+        await _send(pilot, first, attachments=(att,))
+        await _send(pilot, "второе")
+        _inp(pilot).focus()
+        pilot.app.screen._cmd_stop()
+        await pilot.pause()
+        inp = _inp(pilot)
+        assert runner.running is False
+        assert inp.text == f"{first}\n\nвторое"
+        assert inp.images_in_buffer() == (att,)
+        assert inp.cursor_location == inp.document.end
+        assert _queued(pilot) == []
+        assert _pending_records(tmp_path) == []
+        assert pilot.app.screen._pending_user_widgets == {}
+        await _up(pilot)
+        assert runner.withdrawn == []
+
+
+@pytest.mark.asyncio
+async def test_stop_appends_queue_after_typed_text(tmp_path):
+    async with _app(tmp_path / "threads").run_test() as pilot:
+        await _two_queued(pilot, tmp_path)
+        _inp(pilot).text = "черновик"
+        await pilot.pause()
+        pilot.app.screen._cmd_stop()
+        await pilot.pause()
+        assert _inp(pilot).text == "черновик\n\nпервое\n\nвторое"
+        assert _queued(pilot) == []
+
+
+@pytest.mark.asyncio
+async def test_skill_reply_returns_on_stop_with_slash_name(tmp_path, _skills):
+    async with _app(tmp_path / "threads").run_test() as pilot:
+        scr = pilot.app.screen
+        scr._skills_cache = [{"id": "coder"}]
+        _busy(pilot, tmp_path)
+        await scr._cmd_use_skill("coder", prompt="почини тест")
+        await pilot.pause()
+        scr._cmd_stop()
+        await pilot.pause()
+        assert _inp(pilot).text == "/coder почини тест"
+
+
+def _admit(scr, wire: str, no: int) -> None:
+    scr._render_event(
+        TraceEvent(
+            no=no,
+            event_ts_utc_iso="2026-10-21T10:00:00+00:00",
+            kind="user",
+            title="user",
+            summary=wire,
+            full_payload={"role": "user", "content": wire},
+        )
+    )
+
+
+@pytest.mark.asyncio
+async def test_turn_end_with_all_admitted_restores_nothing(tmp_path):
+    async with _app(tmp_path / "threads").run_test() as pilot:
+        scr = pilot.app.screen
+        runner = await _two_queued(pilot, tmp_path)
+        _admit(scr, "первое", 5)
+        _admit(scr, "второе", 6)
+        runner.running = False
+        scr._poll_active()
+        await pilot.pause()
+        assert _inp(pilot).text == ""
+        trace = scr.query_one("#trace")
+        states = [r.state for r in trace.query(UserReplyContainer)]
+        assert states == ["normal", "normal"]
+
+
+@pytest.mark.asyncio
+async def test_turn_end_returns_unadmitted_queue_to_input(tmp_path):
+    async with _app(tmp_path / "threads").run_test() as pilot:
+        scr = pilot.app.screen
+        runner = await _two_queued(pilot, tmp_path)
+        _admit(scr, "первое", 5)
+        runner.running = False
+        scr._poll_active()
+        await pilot.pause()
+        assert _inp(pilot).text == "второе"
+        assert _queued(pilot) == []
+        assert _pending_records(tmp_path) == []
