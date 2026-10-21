@@ -5,8 +5,11 @@ Toggle-подвал (/gate, /answers — спека 2026-07-16-palette-toggles-g
 Состояние тоггла палитра не знает сама — получает инъекцией через `toggle_state`
 (провайдер `name -> str`, отсутствует — если тоггл не инъецирован); запись/reload — вне палитры (tui/toggles.py).
 
-Строки скиллов (спека P5 §3.1): после команд, с первой буквы фильтра,
-не больше `_SKILL_ROWS_MAX` + невыбираемая строка «… ещё N». Список скиллов —
+Строки скиллов (спека P5 §3.1): после команд, с первой буквы фильтра;
+совпадение — по короткому имени (по полному id — только если в фильтре есть
+`:`). Бюджет строк общий: скиллам достаются строки, не занятые командами и
+подвалом, но не меньше `_SKILL_ROWS_MIN`; остаток — невыбираемая строка
+«… ещё N» (N >= 2: единственный скрытый скилл показывается). Список скиллов —
 инъекция `skills` (провайдер без I/O, в проде — прогретый кэш экрана).
 """
 
@@ -18,6 +21,7 @@ from rich.text import Text
 from textual._context import NoActiveAppError
 from textual.app import ComposeResult
 from textual.containers import Vertical, VerticalScroll
+from textual.css.scalar import Unit
 from textual.widgets import Rule, Static
 
 from gc_tui import palette as _pal
@@ -28,7 +32,7 @@ _HINT_NO_ARGS = "↑↓ выбрать · Enter выполнить · Esc зак
 _HINT_WITH_ARGS = "↑↓ выбрать · Enter ввести аргумент · Esc закрыть"
 # Enter на строке скилла вставляет `/имя ` — текст дописывают (спека P5 §3.2).
 _HINT_SKILL = "↑↓ выбрать · Enter ввести запрос · Esc закрыть"
-_SKILL_ROWS_MAX = 5
+_SKILL_ROWS_MIN = 5  # пол строк скиллов, даже когда команды заняли всё
 _SKILL_NAME_MAX = 32  # потолок общей колонки имён, клетки
 
 
@@ -78,9 +82,10 @@ def _fit_name(label: str) -> str:
 
 
 def _skill_matches(skill: dict, prefix: str) -> bool:
-    """Начало полного id или начало короткого имени (спека P5 §3.1)."""
-    sid = str(skill.get("id", ""))
-    return sid.startswith(prefix) or _skill_short(skill).startswith(prefix)
+    """Начало короткого имени; полного id — только при `:` в фильтре."""
+    if ":" in prefix:
+        return str(skill.get("id", "")).startswith(prefix)
+    return _skill_short(skill).startswith(prefix)
 
 
 class CommandPalette(VerticalScroll):
@@ -644,12 +649,36 @@ class CommandPalette(VerticalScroll):
             and self._registry.lookup(_skill_short(s)) is None
         ]
 
+    def _list_rows_cap(self) -> int:
+        """Сколько строк списка палитра показывает без прокрутки: потолок
+        высоты (`styles.max_height` в клетках — его выставляет main.py под
+        экран; до этого — половина экрана, как там) минус рамка и подвал."""
+        cap = self.styles.max_height
+        if cap is not None and cap.unit == Unit.CELLS:
+            height = int(cap.value)
+        else:
+            try:
+                height = self.app.size.height // 2
+            except NoActiveAppError:
+                height = 0
+        return height - 2 - self._footer_reserved_height()
+
+    def _skill_budget(self) -> int:
+        """Строки скиллов: свободные после команд, но не меньше пола."""
+        free = self._list_rows_cap() - len(self._visible_rows())
+        return max(_SKILL_ROWS_MIN, free)
+
     def _visible_skill_rows(self) -> list[dict]:
-        """Строки скиллов после команд — не больше `_SKILL_ROWS_MAX`."""
-        return self._matched_skills()[:_SKILL_ROWS_MAX]
+        """Строки скиллов после команд в рамках общего бюджета; единственный
+        скрытый скилл показывается вместо строки «ещё 1»."""
+        matched = self._matched_skills()
+        budget = self._skill_budget()
+        if len(matched) - budget == 1:
+            return matched
+        return matched[:budget]
 
     def _skill_more_count(self) -> int:
-        return max(0, len(self._matched_skills()) - _SKILL_ROWS_MAX)
+        return len(self._matched_skills()) - len(self._visible_skill_rows())
 
     def _skill_more_text(self) -> str:
         n = self._skill_more_count()

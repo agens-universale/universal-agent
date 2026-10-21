@@ -520,11 +520,55 @@ def test_skill_matches_short_name_prefix():
     assert palette._visible_skill_rows() == [_BRAIN]
 
 
-def test_skill_matches_full_id_prefix():
+def test_skill_does_not_match_by_pack_prefix():
     pytest.importorskip("textual")
-    skills = [{"id": "supercoder:planner"}, {"id": "supercoder:coder"}]
-    palette = _skill_palette("super", skills)
+    skills = [
+        {"id": "default-coworker:background-business"},
+        {"id": "x:deliverables-evidence"},
+    ]
+    palette = _skill_palette("d", skills)
+    assert palette._visible_skill_rows() == [skills[1]]
+
+
+def test_skill_full_id_prefix_only_with_colon():
+    pytest.importorskip("textual")
+    skills = [
+        {"id": "default-coworker:background-business"},
+        {"id": "default-coworker:handoff-autonomy"},
+        {"id": "x:deliverables-evidence"},
+    ]
+    palette = _skill_palette("default-coworker:", skills)
+    assert palette._visible_skill_rows() == skills[:2]
+
+
+def _budget_palette(filter_, n_skills, cap, commands=("zzz",)):
+    skills = [{"id": f"p:brai-{i}"} for i in range(n_skills)]
+    palette = _skill_palette(filter_, skills, commands=commands)
+    palette.styles.max_height = cap
+    return palette, skills
+
+
+def test_skills_use_rows_left_by_commands():
+    pytest.importorskip("textual")
+    # cap 20 - рамка 2 - подвал 2 - 1 команда = 15 свободных строк
+    palette, skills = _budget_palette("brai", 9, 20, commands=("brai",))
     assert palette._visible_skill_rows() == skills
+    assert palette._skill_more_count() == 0
+
+
+def test_single_hidden_skill_is_shown_instead_of_more_line():
+    pytest.importorskip("textual")
+    palette, skills = _budget_palette("brai", 6, 0)
+    assert palette._visible_skill_rows() == skills
+    assert palette._skill_more_count() == 0
+
+
+def test_floor_five_skills_when_commands_fill_budget():
+    pytest.importorskip("textual")
+    cmds = tuple(f"braic{i}" for i in range(30))
+    palette, skills = _budget_palette("brai", 8, 12, commands=cmds)
+    assert palette._visible_skill_rows() == skills[:5]
+    assert palette._skill_more_count() == 3
 
 
 def test_skill_match_lowercases_filter_like_commands():
@@ -537,6 +581,7 @@ def test_skill_rows_capped_at_five_with_more_line():
     pytest.importorskip("textual")
     skills = [{"id": f"p:brai-{i}"} for i in range(7)]
     palette = _skill_palette("brai", skills)
+    palette.styles.max_height = 0
     assert palette._visible_skill_rows() == skills[:5]
     assert palette._skill_more_count() == 2
     assert palette._skill_more_text() == "… ещё 2 — /skill brai"
@@ -702,15 +747,16 @@ async def test_skill_more_line_rendered_not_selectable(tmp_path):
         threads_dir=str(tmp_path / "t"),
         settings=tui_settings({"agent.model": "M"}),
     )
-    skills = [{"id": f"p:brai-{i}"} for i in range(7)]
+    skills = [{"id": f"p:brai-{i}"} for i in range(9)]
     async with app.run_test(size=(100, 40)) as pilot:
         palette = _skill_palette("brai", skills)
+        palette.styles.max_height = 10  # бюджет мал — пол в 5 скиллов
         await app.screen.mount(palette)
         await pilot.pause()
         more = palette.query_one(".palette-skill-more")
-        assert str(more.render()) == "… ещё 2 — /skill brai"
-        assert len(palette._selectable_rows()) == 5
-        assert palette.region.height == palette.desired_height
+        assert str(more.render()) == "… ещё 3 — /skill brai"
+        assert len(palette._selectable_rows()) == 6
+        assert palette.region.height == 10  # потолок, дальше прокрутка
 
 
 def test_command_row_selected_has_no_skill():
