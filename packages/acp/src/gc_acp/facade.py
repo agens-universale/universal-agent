@@ -47,6 +47,7 @@ from gc_acp.modes import (
     mode_choice,
     mode_config_option,
     mode_updates,
+    session_modes,
 )
 from gc_acp.plan import (
     plan_update,
@@ -554,9 +555,11 @@ class AcpFacade:
             await self._notify(session_id, update)
 
     def _session_fields(self, live: LiveSession) -> dict:
-        """Опции сессии для new / load / resume: модель и режим."""
+        """Опции сессии для new / load / resume: модель, режим и ``modes``."""
+        mode = self._mode(live)
         return {
-            "configOptions": self._config_options(live, self._mode(live)),
+            "configOptions": self._config_options(live, mode),
+            "modes": session_modes(mode),
         }
 
     def _config_options(self, live: LiveSession, mode: str) -> list[dict]:

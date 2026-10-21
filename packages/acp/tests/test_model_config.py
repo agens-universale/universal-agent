@@ -407,7 +407,7 @@ async def test_empty_model_and_unresolved_level_omit_the_option(tmp_path):
     await _init(facade)
     await _new(facade, "/work")
     created = _by_id(writer2, 2)["result"]
-    assert set(created) == {"sessionId", "configOptions"}
+    assert set(created) == {"sessionId", "configOptions", "modes"}
     assert [o["id"] for o in created["configOptions"]] == ["mode"]
     await _set(facade, created["sessionId"], "a", 3)
     assert _by_id(writer2, 3)["error"]["code"] == -32602

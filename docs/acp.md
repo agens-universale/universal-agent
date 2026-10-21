@@ -138,12 +138,14 @@ always). Пока ответа нет, тул ждёт. Отмена сесси�
 
 ## Режимы разрешений и одобрение плана
 
-Режимы `edit`, `manual`, `plan` и `auto` отдаются одной опцией сессии
-`configOptions` (`id: "mode"`, `category: "mode"`, следом за опцией модели). Поле
-`modes` и уведомление `current_mode_update` не шлём: плагин рисует режим тем же
-списком, что и модель. Сменить режим можно `session/set_config_option` с
+Режимы `edit`, `manual`, `plan` и `auto` отдаются двумя видами одного списка.
+`configOptions` (`id: "mode"`, `category: "mode"`, следом за опцией модели) — для
+клиента, который рисует каждую select-опцию: он показывает и модель, и режим.
+Поле `modes` (`currentModeId`, `availableModes`) — для клиента, который режим
+берёт только оттуда, а из `configOptions` рисует модель. Уведомление
+`current_mode_update` не шлём. Сменить режим можно `session/set_config_option` с
 `configId: "mode"`. `session/set_mode` тоже принимается и ведёт в тот же путь ядра,
-что `Shift+Tab` в TUI и флаг `--permission-mode` в CLI; в ответ уходит тот же
+что `Shift+Tab` в TUI и флаг `--permission-mode` в CLI; в ответ уходит
 `config_option_update` со всем списком опций. На `session/load` и
 `session/resume` режим берётся из сохранённого выбора сессии, а нет его — из
 `security.permissions.default_mode`. Выбор режима из IDE попадает в мету треда с

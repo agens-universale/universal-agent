@@ -5,6 +5,7 @@ from gc_acp.modes import (
     mode_choice,
     mode_config_option,
     mode_updates,
+    session_modes,
 )
 from gc_core.thread_store import (
     append_new_thread_messages,
@@ -43,6 +44,12 @@ def test_mode_option_lists_every_mode_in_cycle_order():
             {"value": value, "name": name} for value, name in _LABELS.items()
         ],
     }
+    assert session_modes("plan") == {
+        "currentModeId": "plan",
+        "availableModes": [
+            {"id": value, "name": name} for value, name in _LABELS.items()
+        ],
+    }
 
 
 @pytest.mark.parametrize(
@@ -77,7 +84,7 @@ async def test_new_session_offers_mode_next_to_model(tmp_path):
         "mode",
     ]
     assert _mode_option(created)["currentValue"] == "edit"
-    assert "modes" not in created
+    assert created["modes"]["currentModeId"] == "edit"
     await facade.shutdown()
 
 
@@ -89,7 +96,7 @@ async def test_config_default_mode_is_the_current_one(tmp_path):
     await _session(facade, writer)
     created = _by_id(writer, 2)["result"]
     assert _mode_option(created)["currentValue"] == "manual"
-    assert "modes" not in created
+    assert created["modes"]["currentModeId"] == "manual"
     await facade.shutdown()
 
 
@@ -202,7 +209,7 @@ async def test_load_and_resume_take_the_mode_saved_in_the_session(tmp_path):
         )
     )
     loaded = _by_id(writer2, 3)["result"]
-    assert "modes" not in loaded
+    assert loaded["modes"]["currentModeId"] == "plan"
     assert _mode_option(loaded)["currentValue"] == "plan"
     assert agents2[0].executor.modes == []  # прочитали, а не выбрали
     await restored.handle_line(
@@ -213,7 +220,7 @@ async def test_load_and_resume_take_the_mode_saved_in_the_session(tmp_path):
         )
     )
     resumed = _by_id(writer2, 4)["result"]
-    assert "modes" not in resumed
+    assert resumed["modes"]["currentModeId"] == "plan"
     assert _mode_option(resumed)["currentValue"] == "plan"
     await restored.shutdown()
 

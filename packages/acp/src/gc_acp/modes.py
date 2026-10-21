@@ -1,11 +1,12 @@
-"""Режим разрешений сессии ACP: одна select-опция ``mode``.
+"""Режим разрешений сессии ACP: опция ``mode`` и поле ``modes``.
 
 Режим — выбор сессии ядра (``executor.set_permission_mode``), тот же путь,
-что у TUI и CLI. На проводе он стоит рядом с моделью в ``configOptions``
-(``category: "mode"``). Поле ``modes`` и ``current_mode_update`` клиенту
-не уходят: часть плагинов рисует режим из опций и спотыкается о второй
-канал. ``session/set_mode`` по-прежнему принимается и отвечает тем же
-``config_option_update``.
+что у TUI и CLI. ``configOptions`` (``category: "mode"``) стоит рядом с
+моделью: так рисует клиент, который показывает каждую select-опцию.
+Поле ``modes`` — тот же список для клиента, который режим берёт только
+оттуда. ``current_mode_update`` не шлём: такой клиент читает в нём
+``modeId`` и затирает текущий режим. ``session/set_mode`` принимается и
+отвечает ``config_option_update``.
 """
 
 from __future__ import annotations
@@ -37,6 +38,17 @@ def mode_config_option(mode: str) -> dict:
         "currentValue": mode,
         "options": [
             {"value": item.value, "name": mode_label(item)}
+            for item in AVAILABLE_MODES
+        ],
+    }
+
+
+def session_modes(mode: str) -> dict:
+    """Поле ``modes`` ответа сессии: текущий режим и весь список."""
+    return {
+        "currentModeId": mode,
+        "availableModes": [
+            {"id": item.value, "name": mode_label(item)}
             for item in AVAILABLE_MODES
         ],
     }
