@@ -271,14 +271,18 @@ class QuestionRow(TraceRow):
     один (спека P3 §3, решение плана 2)."""
 
     def __init__(self, *, call_id: Optional[str] = None, **kwargs) -> None:
+        from gc_tui.widgets.consequence_line import ConsequenceSlot
+
         super().__init__(**kwargs)
         self.call_id = call_id
+        self._consequences: list = []
+        self._consequence_slot = ConsequenceSlot(0)
+
+    def compose(self) -> ComposeResult:
+        yield from super().compose()
+        yield self._consequence_slot
 
     def add_consequence(self, body) -> None:
         """Дописать строку `└ body` под текстом вопроса, внутри рамки."""
-        from gc_tui.services.trace_render import consequence_text
-
-        content = self._content.copy()
-        content.append("\n")
-        content.append_text(consequence_text(0, body))
-        self.set_content(content)
+        self._consequences.append(body)
+        self._consequence_slot.set_bodies(self._consequences)

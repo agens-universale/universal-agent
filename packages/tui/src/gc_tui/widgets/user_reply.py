@@ -24,9 +24,9 @@ from gc_tui.services.trace_render import (
     LINE_USER_CLASS,
     NESTED_USER_PREFIX,
     USER_PREFIX,
-    consequence_text,
 )
 from gc_tui.widgets.click_model import ClickModelMixin, confirm_is_active
+from gc_tui.widgets.consequence_line import ConsequenceSlot
 from gc_tui.widgets.no_select import NoSelectStatic
 from gc_tui.widgets.reply_layout import LineSpec, ReplyLayout
 from gc_tui.widgets.trace_row import TraceRow
@@ -328,6 +328,10 @@ class UserReplyContainer(_ImageLinksMixin, ClickModelMixin, Widget):
         self._images: tuple[Attachment, ...] = tuple(images)
         self._consequences: list[Text] = []
         self._band = _ReplyBand(self)
+        # Следствие реплики в копию выделения не идёт.
+        self._consequence_slot = ConsequenceSlot(
+            0, selectable=False, classes="reply-consequence"
+        )
         if skill is not None and skill_error:
             self.add_consequence(
                 Text(_SKILL_MISSING.format(name=skill), style=_ERR_RED)
@@ -335,12 +339,7 @@ class UserReplyContainer(_ImageLinksMixin, ClickModelMixin, Widget):
 
     def compose(self):
         yield self._band
-        yield NoSelectStatic(
-            self._consequence_text(), classes="reply-consequence", markup=False
-        )
-
-    def _consequence_text(self) -> Text:
-        return Text("\n").join(self._consequences)
+        yield self._consequence_slot
 
     @property
     def state(self) -> _State:
@@ -358,11 +357,9 @@ class UserReplyContainer(_ImageLinksMixin, ClickModelMixin, Widget):
     def add_consequence(self, body: Text) -> None:
         """Дописать строку `└ body` под подложкой реплики (на фоне ленты).
         В копию выделения строка не идёт."""
-        self._consequences.append(consequence_text(0, body))
+        self._consequences.append(body)
         self.add_class("has-consequence")
-        # До compose строки рисует compose; после — обновляем надпись.
-        for line in self.query(".reply-consequence").results(NoSelectStatic):
-            line.update(self._consequence_text())
+        self._consequence_slot.set_bodies(self._consequences)
 
     def set_event_no(self, event_no: int) -> None:
         """Номер события треда: живая реплика получает его при сверке с записью треда —

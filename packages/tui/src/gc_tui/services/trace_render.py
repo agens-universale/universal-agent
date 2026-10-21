@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from rich.text import Text
 
     from gc_tui.services.trace_mapper import RenderContext
+    from gc_tui.widgets.consequence_line import ConsequenceLine
     from gc_tui.widgets.tool_call_row import ToolCallRow
     from gc_tui.widgets.trace_row import (
         CompactionBody,
@@ -68,19 +69,31 @@ QUESTION_UNANSWERED = "без ответа"
 QUESTION_INTERRUPTED = "прервано — продолжите сообщением или Esc"
 
 
-def consequence_text(level: int, body: Text) -> Text:
-    """Строка следствия события уровня ``level``: `└` на +2 от его глифа.
-
-    Общий вид для вызова, реплики и вопроса — следствие рисуется внутри
-    виджета своего события (спека P3 §3), здесь только сама строка."""
+def consequence_lead(level: int) -> Text:
+    """Начало строки следствия события уровня ``level``: `└ ` на +2 от
+    его глифа."""
     from rich.text import Text
 
     from gc_tui.palette import DIM
 
-    line = Text(level_prefix(level + 1))
-    line.append("└ ", style=DIM)
-    line.append_text(body)
-    return line
+    lead = Text(level_prefix(level + 1))
+    lead.append("└ ", style=DIM)
+    return lead
+
+
+def build_consequence_line(
+    level: int, body: Text, *, selectable: bool = True
+) -> ConsequenceLine:
+    """Строка следствия `└ body` события уровня ``level``.
+
+    Общий вид для вызова, реплики и вопроса — следствие рисуется внутри
+    виджета своего события (спека P3 §3); перенос тела — под текстом
+    после `└ `. ``selectable=False`` — тело вне выделения мышью."""
+    from gc_tui.widgets.consequence_line import ConsequenceLine
+
+    return ConsequenceLine(
+        consequence_lead(level), body, selectable=selectable
+    )
 
 
 # Строка без владельца (спека P3 §10, ответ 5): глиф `!` в колонке `●`,

@@ -311,9 +311,10 @@ async def test_attach_dangling_ask_human_notes_interrupted_question(
         from gc_tui.widgets.trace_row import QuestionRow, TraceRow
 
         (question,) = screen.query(QuestionRow)
-        assert str(question._content) == (
-            "? Подтверждаете?\n  └ прервано — продолжите сообщением или Esc"
-        )
+        assert str(question._content) == "? Подтверждаете?"
+        assert [b.plain for b in question._consequences] == [
+            "прервано — продолжите сообщением или Esc"
+        ]
         trace_text = " ".join(
             f"{getattr(w, '_prefix', '')}{getattr(w, '_content', '')}"
             for w in screen.query(TraceRow)

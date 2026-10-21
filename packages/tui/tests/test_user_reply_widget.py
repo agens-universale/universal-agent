@@ -13,6 +13,7 @@ from textual.color import Color
 from gc_core.attachments.model import chip_text
 from gc_testkit.tui_support import tui_settings
 from gc_tui.palette import ACCENT, BG, DIM, ERR, FOCUS_BG, USER_BAND_BG
+from gc_tui.widgets.consequence_line import ConsequenceLine
 from gc_tui.widgets.trace_row import TraceRow
 from gc_tui.widgets.user_reply import UserReplyContainer
 from image_helpers import make_attachment_file
@@ -130,9 +131,26 @@ async def test_consequence_line_sits_under_the_band(tmp_path):
         assert pilot.app.query_one("#trace").styles.background == Color.parse(
             BG
         )
-        shown = line.content
-        assert shown.plain == "  └ до монтирования\n  └ скилл не найден"
-        assert _color_at(shown, 2) == {RichColor.parse(DIM)}
+        shown = [ln.text for ln in reply.query(ConsequenceLine)]
+        assert [t.plain for t in shown] == [
+            "  └ до монтирования",
+            "  └ скилл не найден",
+        ]
+        assert _color_at(shown[0], 2) == {RichColor.parse(DIM)}
+
+
+@pytest.mark.asyncio
+async def test_long_consequence_wraps_under_body_column(tmp_path):
+    """Перенос следствия реплики — под текстом после `└ `."""
+    reply = UserReplyContainer("привет")
+    long = "длинная пометка под репликой пользователя не влезает в строку"
+    async with _app(tmp_path).run_test(size=(40, 30)) as pilot:
+        await _mount(pilot, reply)
+        reply.add_consequence(Text(long))
+        await pilot.pause()
+        body = reply.query_one(".consequence-body")
+        assert body.region.x - reply.region.x == len("  └ ")
+        assert body.region.height > 1
 
 
 @pytest.mark.asyncio

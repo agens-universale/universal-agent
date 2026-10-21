@@ -8,6 +8,13 @@ _TOOL_NAME_HEX = TOOL_NAME[
 ].lower()  # '#XXXXXX' → 'xxxxxx' для substring-проверок в span.style
 
 
+def _shown_lines(row) -> str:
+    """Смонтированные строки `└` вызова — как их видно в ленте."""
+    from gc_tui.widgets.consequence_line import ConsequenceLine
+
+    return "\n".join(ln.text.plain for ln in row.query(ConsequenceLine))
+
+
 @pytest.mark.asyncio
 async def test_tool_call_row_initial_state():
     pytest.importorskip("textual")
@@ -77,7 +84,7 @@ async def test_tool_call_row_mutate_to_error():
         await pilot.pause()
         content = str(row.query_one(".trace-content").render())
         prefix = str(row.query_one(".trace-prefix").render())
-        line = str(row.query_one(".trace-consequence").render())
+        line = _shown_lines(row)
         assert "✗" in prefix
         assert "ENOENT" not in content  # у ошибки хвоста нет
         assert line == "  └ ENOENT: нет файла"  # строкой под вызовом
@@ -98,7 +105,9 @@ async def test_tool_call_row_error_text_is_err_line():
         row = pilot.app.query_one(ToolCallRow)
         row.set_result(summary="permission denied", error=True)
         await pilot.pause()
-        rendered = row._render_consequence()
+        from gc_tui.widgets.consequence_line import ConsequenceLine
+
+        rendered = row.query_one(ConsequenceLine).text
         # Текст ошибки — строкой `└` (сам `└` DIM) цветом ERR (спека P3 §3).
         plain = rendered.plain
         dim_segs = [
@@ -257,7 +266,7 @@ async def test_tool_call_row_set_result_twice_overwrites():
         await pilot.pause()
         content = str(row.query_one(".trace-content").render())
         prefix = str(row.query_one(".trace-prefix").render())
-        line = str(row.query_one(".trace-consequence").render())
+        line = _shown_lines(row)
         assert "updated" in line
         assert "✗" in prefix
         assert "initial" not in content

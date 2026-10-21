@@ -3,8 +3,8 @@
 Layout: Horizontal(prefix-Static, content-Static) — wrap длинного объекта/
 результата происходит внутри content-колонки = hanging indent (continuation
 выравнивается под началом подписи: отступ уровня + глиф + пробел). Под ней —
-строка следствий `└` (Static.trace-consequence) на +2 от глифа: текст ошибки
-и пометки вызова (спека P3 §3); пустая — скрыта.
+слот следствий `└` (ConsequenceSlot.trace-consequence) на +2 от глифа: текст
+ошибки и пометки вызова (спека P3 §3); пустой — скрыт.
 
 Статус-глиф живёт в prefix-Static (▸/‖/✓/✗/·), content-Static несёт
 `Подпись  объект` и хвост ` · сводка` успеха; у ошибки хвоста нет.
@@ -39,13 +39,14 @@ from gc_tui.palette import PULSE_SHADES as _PULSE_SHADES
 from gc_tui.palette import RUN_COLOR as _RUN
 from gc_tui.palette import TOOL_NAME as _TOOL_NAME
 from gc_tui.services.duration_format import format_trace_duration
-from gc_tui.services.trace_render import consequence_text, level_prefix
+from gc_tui.services.trace_render import level_prefix
 from gc_tui.widgets.block_panel import (
     CopyFeedbackMixin,
     _copy_request,
     copy_glyph,
 )
 from gc_tui.widgets.click_model import ClickModelMixin
+from gc_tui.widgets.consequence_line import ConsequenceSlot
 from gc_tui.widgets.no_select import NoSelectStatic
 from gc_tui.widgets.static_content import update_if_changed
 
@@ -75,7 +76,7 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
                 Static(<rich Text>, classes="trace-content line-tool")  — подпись/объект/хвост
                 _CopyButton(classes="block-copy trace-action")  — ❐, видна
                     у строки правки
-            Static(<rich Text>, classes="trace-consequence")  — строки `└`
+            ConsequenceSlot(classes="trace-consequence")  — строки `└`
 
     Цветовые зоны через rich.Text:
     - prefix: статус-глиф — RUN (пульс) / OK / ERR / DIM.
@@ -147,7 +148,9 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         )
         self._content_static: Optional[Static] = None
         self._prefix_static: Optional[Static] = None
-        self._consequence_static: Optional[Static] = None
+        self._consequence_slot = ConsequenceSlot(
+            level, classes="trace-consequence"
+        )
         # Следствия вызова сверх ошибки (пометки) — тела строк `└`.
         self._consequences: list[Text] = []
         # Правка вызова: (+N, −M) и что копирует ❐; None — не правка.
@@ -183,12 +186,7 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
             yield _CopyButton(
                 copy_glyph(), classes="block-copy trace-action", markup=False
             )
-        self._consequence_static = Static(
-            self._render_consequence(),
-            classes="trace-consequence",
-            markup=False,
-        )
-        yield self._consequence_static
+        yield self._consequence_slot
 
     def on_mount(self) -> None:
         self._sync_pulse()
@@ -233,10 +231,9 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
             update_if_changed(self._prefix_static, self._render_prefix())
         if self._content_static is not None:
             update_if_changed(self._content_static, self._render_content())
-        consequence = self._render_consequence()
-        self.set_class(bool(consequence.plain), "has-consequence")
-        if self._consequence_static is not None:
-            update_if_changed(self._consequence_static, consequence)
+        bodies = self._consequence_bodies()
+        self.set_class(bool(bodies), "has-consequence")
+        self._consequence_slot.set_bodies(bodies)
 
     def set_waiting(self) -> None:
         """Перевести в waiting (·, без elapsed). После result/interrupt — no-op."""
@@ -381,16 +378,14 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         """Итог строкой `└` под вызовом, не хвостом: ошибка, стоп, лимит."""
         return self._is_error or self._halted
 
-    def _render_consequence(self) -> Text:
-        """Строки `└` под вызовом: ошибка (`ERR`) или стоп/лимит (`DIM`),
-        затем пометки."""
+    def _consequence_bodies(self) -> list[Text]:
+        """Тела строк `└` под вызовом: ошибка (`ERR`) или стоп/лимит
+        (`DIM`), затем пометки."""
         bodies = list(self._consequences)
         if self._ends_with_line and self._result:
             style = _DIM if self._halted else _ERR
             bodies.insert(0, Text(self._result, style=style))
-        return Text("\n").join(
-            consequence_text(self._level, body) for body in bodies
-        )
+        return bodies
 
     def _append_pending_tail(self, text: Text) -> None:
         """Хвост строки без результата: прервано / elapsed (+ step/last).

@@ -14,7 +14,7 @@ from gc_tui.palette import DIM, ERR
 from gc_tui.services.trace_mapper import map_message
 from gc_tui.services.trace_render import (
     _dispatch_readonly,
-    consequence_text,
+    build_consequence_line,
     merge_nested_readonly,
 )
 from gc_tui.widgets.tool_call_row import ToolCallRow
@@ -30,17 +30,61 @@ def _styles_of(text: Text, fragment: str) -> list[str]:
     ]
 
 
-# --- consequence_text --------------------------------------------------------
+# --- build_consequence_line --------------------------------------------------
 
 
-def test_consequence_text_sits_two_columns_right_of_glyph():
-    line = consequence_text(0, Text("тело"))
-    assert line.plain == "  └ тело"
-    assert _styles_of(line, "└") == [DIM]
+def test_consequence_line_sits_two_columns_right_of_glyph():
+    line = build_consequence_line(0, Text("тело"))
+    assert line.text.plain == "  └ тело"
+    assert _styles_of(line.text, "└") == [DIM]
 
 
-def test_consequence_text_nested_level_is_two_deeper():
-    assert consequence_text(1, Text("x")).plain == "    └ x"
+def test_consequence_line_nested_level_is_two_deeper():
+    assert build_consequence_line(1, Text("x")).text.plain == "    └ x"
+
+
+_LONG = "очень длинный текст ошибки вложенного вызова не влезает"
+
+
+@pytest.mark.asyncio
+async def test_long_nested_error_wraps_under_body_column():
+    """Перенос следствия — под текстом после `└ `, не с первой колонки."""
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+    from textual.containers import VerticalScroll
+
+    app = TuiApp()
+    async with app.run_test(size=(40, 20)) as pilot:
+        trace = pilot.app.screen.query_one("#trace", VerticalScroll)
+        row = ToolCallRow(call_id="c1", label="Edit", target="x", level=1)
+        trace.mount(row)
+        row.set_result(summary=_LONG, error=True)
+        await pilot.pause()
+        body = row.query_one(".consequence-body")
+        assert body.region.x - row.region.x == len("    └ ")
+        assert body.region.height > 1
+
+
+@pytest.mark.asyncio
+async def test_running_row_pulse_keeps_consequence_widgets():
+    """Пульс и тик elapsed строки не пересобирают её строки `└`."""
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.consequence_line import ConsequenceLine
+    from textual.containers import VerticalScroll
+
+    app = TuiApp()
+    async with app.run_test(size=(80, 20)) as pilot:
+        trace = pilot.app.screen.query_one("#trace", VerticalScroll)
+        row = ToolCallRow(call_id="c1", label="Agent", target="")
+        trace.mount(row)
+        row.add_consequence(Text("! пометка"))
+        await pilot.pause()
+        (first,) = row.query(ConsequenceLine)
+        row.refresh_running_elapsed()
+        row._pulse_tick()
+        await pilot.pause(0.3)
+        assert list(row.query(ConsequenceLine)) == [first]
 
 
 # --- хвосты результата -------------------------------------------------------
@@ -94,8 +138,16 @@ def test_result_tail_bits_joined_with_middle_dot():
 # --- строка вызова: хвост и ошибка -------------------------------------------
 
 
+def _lines(row: ToolCallRow) -> Text:
+    """Строки `└` вызова текстом — как их рисует слот следствий."""
+    return Text("\n").join(
+        build_consequence_line(row._level, body).text
+        for body in row._consequence_bodies()
+    )
+
+
 def _consequence(row: ToolCallRow) -> str:
-    return row._render_consequence().plain
+    return _lines(row).plain
 
 
 def test_ok_row_tail_is_middle_dot_summary():
@@ -113,7 +165,7 @@ def test_error_row_has_no_tail_and_error_line_below():
     row.set_result(summary="search не найден в файле", error=True)
     assert row._render_content().plain == "Edit  x"
     assert "✗" in row._render_prefix().plain
-    line = row._render_consequence()
+    line = _lines(row)
     assert line.plain == "  └ search не найден в файле"
     assert _styles_of(line, "search не найден") == [ERR]
     assert row.has_class("has-consequence")
@@ -134,7 +186,7 @@ def test_halted_row_is_stop_not_failure(summary):
     assert "■" in prefix.plain and "✗" not in prefix.plain
     assert _styles_of(prefix, "■") == [DIM]
     assert row._render_content().plain == "Read  x"
-    line = row._render_consequence()
+    line = _lines(row)
     assert line.plain == f"  └ {summary}"
     assert _styles_of(line, summary) == [DIM]
 
@@ -144,7 +196,7 @@ def test_real_error_keeps_cross_and_err_line():
     row.set_result(summary="нет файла", error=True)
     prefix = row._render_prefix()
     assert _styles_of(prefix, "✗") == [ERR]
-    assert _styles_of(row._render_consequence(), "нет файла") == [ERR]
+    assert _styles_of(_lines(row), "нет файла") == [ERR]
 
 
 def _output_event(data: dict) -> TraceEvent:
@@ -194,7 +246,7 @@ def test_preview_halted_result_is_stop_row():
     _dispatch_readonly(target, ev, calls)
     (row,) = target.children
     assert "■" in row._render_prefix().plain
-    assert _styles_of(row._render_consequence(), "отменено") == [DIM]
+    assert _styles_of(_lines(row), "отменено") == [DIM]
 
 
 def test_preview_nested_halted_is_stop_row():
@@ -236,7 +288,7 @@ async def test_consequence_line_renders_below_row_and_copy_stays_right():
         row.set_edit_counts(1, 1, copy_text="d")
         row.set_result(summary="boom", error=True)
         await pilot.pause()
-        line = row.query_one(".trace-consequence", Static)
+        line = row.query_one(".trace-consequence")
         copy = row.query_one(".block-copy", Static)
         content = row.query_one(".trace-content", Static)
         assert line.display
@@ -413,7 +465,8 @@ def test_preview_unanswered_question_one_frame_with_line():
     )
     (question,) = target.children
     assert isinstance(question, QuestionRow)
-    assert str(question._content) == "? Подтвердите?\n  └ без ответа"
+    assert str(question._content) == "? Подтвердите?"
+    assert [b.plain for b in question._consequences] == ["без ответа"]
 
 
 @pytest.mark.asyncio
@@ -429,6 +482,10 @@ async def test_live_unanswered_question_one_frame_with_line(tmp_path):
         await pilot.pause()
         questions = list(scr.query(QuestionRow))
         assert len(questions) == 1
-        assert str(questions[0]._content) == ("? Подтвердите?\n  └ без ответа")
+        (question,) = questions
+        assert str(question._content) == "? Подтвердите?"
+        line = question.query_one(".consequence-body")
+        assert line.content.plain == "без ответа"
+        assert question.content_region.contains_region(line.region)
         texts = [str(w._content) for w in scr.query(TraceRow)]
         assert not any("спрашивал" in t for t in texts)

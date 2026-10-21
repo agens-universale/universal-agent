@@ -341,7 +341,8 @@ async def test_replay_empty_response_notes_question_and_unmounts_banner(
         from gc_tui.widgets.trace_row import QuestionRow, TraceRow
 
         (question,) = screen.query(QuestionRow)
-        assert str(question._content) == "? Подтвердите?\n  └ без ответа"
+        assert str(question._content) == "? Подтвердите?"
+        assert [b.plain for b in question._consequences] == ["без ответа"]
         trace_text = " ".join(
             f"{w._prefix}{w._content}" for w in screen.query(TraceRow)
         )

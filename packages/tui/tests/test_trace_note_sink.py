@@ -154,6 +154,15 @@ async def _drained(pilot, *notes: TraceNote) -> None:
     await pilot.pause(0.7)  # тик опроса — 250 мс
 
 
+def _bodies(bodies) -> str:
+    """Тела строк `└` события (без отступа и `└ `)."""
+    return "\n".join(b.plain for b in bodies)
+
+
+def _call_bodies(row) -> str:
+    return _bodies(row._consequence_bodies())
+
+
 def _app(tmp_path):
     from gc_tui.app import TuiApp
 
@@ -193,21 +202,18 @@ async def test_reply_note_sits_under_the_reply_with_images_and_only_live(
         await _drained(pilot, TraceNote(note, "reply"))
         replies = list(scr.query(UserReplyContainer))
         # «глянь» из треда, «вот» с картинкой, «и ещё» — последняя.
-        assert [r._consequence_text().plain for r in replies] == [
+        assert [_bodies(r._consequences) for r in replies] == [
             "",
-            f"  └ ! {note}",
+            f"! {note}",
             "",
         ]
         assert WARN in {
-            str(s.style) for s in with_image._consequence_text().spans
+            str(s.style) for b in with_image._consequences for s in b.spans
         }
         assert _standalone(scr) == []
         scr.attach_active_task(_TID, is_resume=True)
         await pilot.pause()
-        assert all(
-            not r._consequence_text().plain
-            for r in scr.query(UserReplyContainer)
-        )
+        assert all(not r._consequences for r in scr.query(UserReplyContainer))
 
 
 @pytest.mark.asyncio
@@ -224,7 +230,7 @@ async def test_reply_note_without_images_goes_under_the_latest_reply(
         scr._trace_mount(UserReplyContainer("последняя"))
         await _drained(pilot, _note("не просмотрено"))
         last = list(scr.query(UserReplyContainer))[-1]
-        assert last._consequence_text().plain == "  └ ! не просмотрено"
+        assert _bodies(last._consequences) == "! не просмотрено"
 
 
 @pytest.mark.asyncio
@@ -257,9 +263,10 @@ async def test_call_note_sits_under_its_call_row_top_level_and_nested(
             TraceNote("субагент", "call", "sa"),
         )
         rows = {r.call_id: r for r in scr.query(ToolCallRow)}
-        assert rows["top"]._render_consequence().plain == "  └ ! сверху"
-        assert rows["kid"]._render_consequence().plain == "    └ ! внутри"
-        assert rows["sa"]._render_consequence().plain == "  └ ! субагент"
+        assert _call_bodies(rows["top"]) == "! сверху"
+        assert _call_bodies(rows["kid"]) == "! внутри"
+        assert rows["kid"]._level == 1
+        assert _call_bodies(rows["sa"]) == "! субагент"
         assert _standalone(scr) == []
 
 
@@ -297,9 +304,7 @@ async def test_call_note_arriving_with_its_call_record_lands_under_the_row(
         _append_call_record(tmp_path, "c9")
         await _drained(pilot, TraceNote("не просмотрено", "call", "c9"))
         rows = {r.call_id: r for r in scr.query(ToolCallRow)}
-        assert rows["c9"]._render_consequence().plain == (
-            "  └ ! не просмотрено"
-        )
+        assert _call_bodies(rows["c9"]) == "! не просмотрено"
         assert _standalone(scr) == []
 
 
@@ -326,5 +331,5 @@ async def test_call_note_waits_for_its_row_then_falls_back(tmp_path):
             if _standalone(scr):
                 break
         rows = {r.call_id: r for r in scr.query(ToolCallRow)}
-        assert rows["late"]._render_consequence().plain == "  └ ! дождалась"
+        assert _call_bodies(rows["late"]) == "! дождалась"
         assert _standalone(scr) == [("потерялась", True)]
