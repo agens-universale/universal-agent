@@ -2,25 +2,21 @@
 
 Устройство:
     DiffBlock.diff-block
-        Horizontal.block-header  — ВНЕ подложки, на фоне ленты
-            Static.block-label   — ветка «└ изменено: +N −M»
-            Static.block-copy    — кнопка ❐ / ✓ после копирования
         Static.block-body        — rich.Text движка render_hunks, на подложке
         Static.diff-more         — «… ещё N строк» / «свернуть», на подложке
 
-Лесенка отступов (правила `.diff-block` в styles.tcss + `.block-body` ниже):
-строка инструмента → ветка на +2 → тело диффа ещё на +2. Ветка `└` и есть связка
-блока со своей строкой, поэтому вертикальной линии-поводка у него нет, а имени
-файла в ветке нет: оно уже стоит в аргументах строки инструмента над блоком.
+Блок — следствие своей строки инструмента: стоит сразу под ней, на +2 от её
+глифа (правила `.diff-block` в styles.tcss), тело — с колонки блока. Счётчики
+`+N −M` и кнопка ❐ живут в самой строке вызова (`ToolCallRow.set_edit_counts`,
+спека P3 §10): имя файла там уже есть, второй строки-ветки блоку не нужно.
 
 Тело монтируется, только если в свёрнутом состоянии есть что показать: у
 компактного блока (`compact=True` — старый ход при реплее) его нет вовсе,
-остаются ветка и хвост-разворот; у записи без диффа (бинарь/удаление) нет и
-хвоста — одна ветка со счётчиками.
+остаётся хвост-разворот; у записи без диффа (бинарь/удаление) нет и хвоста —
+блок пуст, счётчики только в строке вызова.
 
-Ветка и хвост невидимы для выделения (класс `NoSelectStatic` ветки копирования:
-ALLOW_SELECT=False + get_selection()->None) — иначе в буфер попадали бы счётчики
-и глиф кнопки.
+Хвост невидим для выделения (`NoSelectStatic`: ALLOW_SELECT=False +
+get_selection()->None) — иначе в буфер попадала бы его подпись.
 
 Чем отличается от BlockPanel, устройство которого повторяет:
 
@@ -43,7 +39,7 @@ from typing import Optional
 from gc_core.agent_edits.journal import EditRecord
 from textual import events
 from textual.app import ComposeResult
-from textual.containers import Horizontal, Vertical
+from textual.containers import Vertical
 from textual.widgets import Static
 
 from gc_tui.services.diff_render import (
@@ -52,23 +48,15 @@ from gc_tui.services.diff_render import (
     render_hunks,
 )
 from gc_tui.services.plural import lines_word
-from gc_tui.widgets.block_panel import (
-    CopyFeedbackMixin,
-    _copy_request,
-    copy_glyph,
-)
+from gc_tui.widgets.block_panel import CopyFeedbackMixin, _copy_request
 from gc_tui.widgets.click_model import ClickModelMixin
 from gc_tui.widgets.no_select import NoSelectStatic
 
 COLLAPSE_LABEL = "свернуть"
-BRANCH_PREFIX = "└ изменено:"
-# Отступ тела от ветки — вторая ступень лесенки; он же задаёт левый край
-# подложки, поэтому нужен и в CSS, и при расчёте ширины заливки.
-BODY_INDENT = 2
 
 
 class DiffBlock(CopyFeedbackMixin, ClickModelMixin, Vertical):
-    """Блок правки: ветка с кнопкой, свёрнутое тело диффа и хвост-тогл."""
+    """Блок правки: свёрнутое тело диффа и хвост-тогл."""
 
     ALLOW_SELECT = False  # выделяется тело, а не блок целиком
     # Блок НЕ участвует в Tab-обходе и вообще не принимает фокус (живая правка
@@ -84,17 +72,14 @@ class DiffBlock(CopyFeedbackMixin, ClickModelMixin, Vertical):
     # `TraceScreen.get_focusable_widget_at` → `click_model.focus_target_at`.
     FOCUS_ON_CLICK = False
 
-    # Отступы — ОДНИМ shorthand-правилом на селектор: Textual не мёржит
-    # margin-*/padding-* из разных правил, второе затирает весь box.
-    # `.block-body` / `.diff-more` — вторая ступень лесенки (BODY_INDENT);
-    # ветка остаётся на своём отступе, поэтому сдвигаются только они.
+    # Отступ следствия задаёт сам блок (`.diff-block` в styles.tcss); тело и
+    # хвост — с его колонки.
     DEFAULT_CSS = """
     DiffBlock { height: auto; width: 1fr; }
-    DiffBlock .block-header { height: 1; width: 1fr; margin: 0; }
-    DiffBlock .block-label { width: 1fr; height: 1; }
-    DiffBlock .block-copy { width: auto; height: 1; padding: 0 1 0 0; }
-    DiffBlock .block-body { width: 1fr; height: auto; margin: 0 0 0 2; text-wrap: nowrap; text-overflow: clip; }
-    DiffBlock .diff-more { width: 1fr; height: 1; margin: 0 0 0 2; }
+    DiffBlock .block-body {
+        width: 1fr; height: auto; text-wrap: nowrap; text-overflow: clip;
+    }
+    DiffBlock .diff-more { width: 1fr; height: 1; }
     """
 
     def __init__(
@@ -143,19 +128,9 @@ class DiffBlock(CopyFeedbackMixin, ClickModelMixin, Vertical):
     # --- сборка ------------------------------------------------------------
 
     def compose(self) -> ComposeResult:
-        record = self._record
-        with Horizontal(classes="block-header"):
-            yield NoSelectStatic(
-                f"{BRANCH_PREFIX} +{record.add} −{record.del_}",
-                classes="block-label",
-                markup=False,
-            )
-            yield NoSelectStatic(
-                copy_glyph(), classes="block-copy", markup=False
-            )
         collapsed = self._diff_render(expanded=False)
         if collapsed.total_lines == 0:
-            return  # binary / delete / no_diff — только ветка, без пустой рамки
+            return  # binary / delete / no_diff — пустой блок, без рамки
         if collapsed.shown_lines:
             yield Static(collapsed.text, classes="block-body", markup=False)
         if collapsed.truncated:
@@ -184,7 +159,7 @@ class DiffBlock(CopyFeedbackMixin, ClickModelMixin, Vertical):
 
         None — ширина ещё не известна (compose до раскладки): тогда движок
         заливает по содержимому, а первый же on_mount/on_resize пересоберёт."""
-        width = self.size.width - BODY_INDENT
+        width = self.size.width
         return width if width > 0 else None
 
     def _diff_render(self, *, expanded: bool) -> DiffRender:
@@ -273,37 +248,34 @@ class DiffBlock(CopyFeedbackMixin, ClickModelMixin, Vertical):
     # --- взаимодействие ----------------------------------------------------
 
     def on_click(self, event: events.Click) -> None:
-        """Кнопка ❐ копирует, хвост переключает свёртку, двойной клик копирует.
+        """Хвост переключает свёртку, двойной клик копирует дифф.
 
-        Ctrl+клик пропускает обе ветки: спека §2 обещает открытие события с
+        Ctrl+клик пропускает ветку хвоста: спека §2 обещает открытие события с
         любой точки блока.
 
         `prevent_default()` на входе — по той же причине, что и в on_key:
         Textual вызывает ВСЕ одноимённые хэндлеры по MRO, и без него
         ClickModelMixin.on_click отработал бы вторым — выделял бы блок за клик
-        по кнопке/хвосту и постил бы ВТОРОЙ запрос открытия по Ctrl+клику.
+        по хвосту и постил бы ВТОРОЙ запрос открытия по Ctrl+клику.
         Миксин зовём сами, явным super() там, где он нужен.
         """
         event.prevent_default()
         widget = getattr(event, "widget", None)
-        if not event.ctrl and widget is not None:
-            if widget.has_class("block-copy"):
-                event.stop()
-                self._copy_block()
-                return
-            if widget.has_class("diff-more"):
-                # Ветка ПОГЛОЩАЕТ клик по хвосту при любом chain, а переключает
-                # только по первому: двойной клик приходит дважды (chain 1, затем
-                # 2), и второй раз переключил бы состояние обратно. Фильтр по
-                # chain на входе в ветку не годится — тогда второй клик проваливался
-                # бы в ветку копирования ниже (она смотрит только на payload
-                # записи, не на цель клика) и молча клал в буфер весь дифф.
-                event.stop()
-                if event.chain == 1:
-                    self._toggle()
-                return
-        # Условие — по payload записи, а не по наличию тела: у компактного блока
-        # тела в DOM нет, но копировать ему есть что (кнопка ❐ так и работает).
+        if (
+            not event.ctrl
+            and widget is not None
+            and widget.has_class("diff-more")
+        ):
+            # Ветка ПОГЛОЩАЕТ клик по хвосту при любом chain, а переключает
+            # только по первому: двойной клик приходит дважды (chain 1, затем
+            # 2), и второй раз переключил бы состояние обратно. Фильтр по
+            # chain на входе в ветку не годится — тогда второй клик проваливался
+            # бы в ветку копирования ниже (она смотрит только на payload
+            # записи, не на цель клика) и молча клал в буфер весь дифф.
+            event.stop()
+            if event.chain == 1:
+                self._toggle()
+            return
         if event.chain == 2 and self._record.hunks:
             event.stop()
             body = self.query(".block-body")
@@ -329,9 +301,9 @@ class DiffBlock(CopyFeedbackMixin, ClickModelMixin, Vertical):
         self._sync_body()  # хвост обновляет `_sync_tail` внутри
 
     def _copy_block(self) -> None:
+        # Отклика ✓ здесь нет: кнопка ❐ — в строке вызова, у неё свой.
         self.post_message(
             _copy_request(
                 copyable_hunks(self._record.hunks, path=self._record.path)
             )
         )
-        self._flash_copied()

@@ -47,8 +47,9 @@ def copy_glyph() -> str:
 
 
 class CopyFeedbackMixin:
-    """Отклик кнопки ❐ и открытие события по Ctrl+клику — общие у панели и
-    блока правки. Хозяин держит ``_restore_timer`` и ``_event_no``."""
+    """Отклик кнопки ❐ и открытие события по Ctrl+клику — общие у панели,
+    блока правки и строки вызова с правкой. Хозяин держит ``_restore_timer``
+    и ``_event_no``."""
 
     def _flash_copied(self) -> None:
         self.query_one(".block-copy", Static).update(DONE_GLYPH)

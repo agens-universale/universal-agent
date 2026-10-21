@@ -21,6 +21,7 @@ from gc_core.thread_store import (
 )
 from gc_testkit.tui_support import tui_settings
 from gc_tui.app import TuiApp
+from gc_tui.services.diff_render import copyable_hunks
 from gc_tui.widgets.diff_block import DiffBlock
 from gc_tui.widgets.tool_call_row import ToolCallRow
 from textual.containers import VerticalScroll
@@ -191,10 +192,6 @@ def _rows_and_blocks(scr) -> list:
     ]
 
 
-def _label(block: DiffBlock) -> str:
-    return block.query_one(".block-label", Static).visual.plain
-
-
 def _path(block: DiffBlock) -> str:
     """Файл блока — из записи журнала: в шапке его больше нет (он в строке тула)."""
     return block._record.path
@@ -219,7 +216,10 @@ async def test_nested_edit_gets_block_under_its_own_row(tmp_path):
         assert seq[0].call_id == PARENT_CALL and not seq[0]._level
         assert seq[1].call_id == "call_child_9" and seq[1]._level
         assert _path(seq[2]) == "a.py"
-        assert _label(seq[2]) == "└ изменено: +1 −1"
+        assert not seq[2].query(".block-label")  # ветки нет
+        assert "a.py) +1 −1" in seq[1]._render_content().plain
+        assert seq[1].query_one(".block-copy", Static).display
+        assert seq[1]._copy_text == copyable_hunks(SHORT_HUNKS, path="a.py")
 
 
 @pytest.mark.asyncio
@@ -308,9 +308,8 @@ async def test_nested_batch_blocks_land_under_own_rows(tmp_path):
 
 @pytest.mark.asyncio
 async def test_nested_block_keeps_nested_indent_and_tie(tmp_path):
-    """У вложенного блока та же лесенка, но от отступа иерархии: ветка на +2 от
-    СВОЕЙ nested-строки, тело — ещё на +2. Привязка к строке та же, что у
-    обычного: без верхнего отступа, с пустой строкой снизу."""
+    """У вложенного блока тело — сразу под СВОЕЙ nested-строкой, на +2 от её
+    глифа; прижат к ней без отступов, как и обычный."""
     tid = "nested_indent"
     _delegating_thread(tmp_path, tid)
     _write_sidecar_edit(tmp_path, tid, "call_child_9", "a.py")
@@ -320,8 +319,8 @@ async def test_nested_block_keeps_nested_indent_and_tie(tmp_path):
         block = scr.query_one(DiffBlock)
         assert block.has_class("diff-nested")
         assert block.styles.margin.top == 0
-        assert block.styles.margin.bottom == 1
-        assert block.styles.border_left[0] == ""  # линии-поводка больше нет
+        assert block.styles.margin.bottom == 0
+        assert block.styles.border_left[0] == ""  # линии-поводка нет
 
         lines = [
             "".join(seg.text for seg in strip).rstrip()
@@ -329,10 +328,9 @@ async def test_nested_block_keeps_nested_indent_and_tie(tmp_path):
         ]
         indent = lambda s: len(s) - len(s.lstrip(" "))
         row = next(i for i, s in enumerate(lines) if "fs_write_file" in s)
-        branch = next(i for i, s in enumerate(lines) if "изменено:" in s)
         body = next(i for i, s in enumerate(lines) if "def f():" in s)
-        assert indent(lines[branch]) - indent(lines[row]) == 2
-        assert indent(lines[body]) - indent(lines[branch]) == 2
+        assert body == row + 1
+        assert indent(lines[body]) - indent(lines[row]) == 2
 
 
 @pytest.mark.asyncio

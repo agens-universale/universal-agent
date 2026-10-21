@@ -652,8 +652,6 @@ def test_readonly_error_msg_finalizes_its_call_row():
     mounted = []
 
     class _Target:
-        children = ()  # is_tool_group_start смотрит на потомков контейнера
-
         def mount(self, w, **kw):
             mounted.append(w)
 

@@ -157,7 +157,7 @@ _FALLBACK_WIDTH = 80
 def format_turn_summary(files: int, add: int, del_: int) -> str | None:
     """«изменено 3 файла · +120 −15»; ход без правок → None.
 
-    Знаки счётчиков — те же, что в шапке DiffBlock (`+N −M`, U+2212)."""
+    Знаки счётчиков — те же, что в строке вызова с правкой (`+N −M`, U+2212)."""
     if files <= 0:
         return None
     return f"изменено {files} {files_word(files)} · +{add} −{del_}"

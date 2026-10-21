@@ -275,3 +275,64 @@ async def test_turn_line_sits_in_agent_bullet_column(tmp_path):
         agent = next(w for w in trace.children if isinstance(w, TraceRow))
         col = _glyph_x(agent.query_one(".trace-prefix"), "● ")
         assert indicator.content_region.x == col
+
+
+def _styled(app_cls):
+    """Хост превью с настоящими стилями приложения (как `tui_app_factory`)."""
+    from gc_testkit.paths import TUI_PKG
+    from gc_tui import palette
+
+    class _Styled(app_cls):
+        CSS_PATH = str(TUI_PKG / "styles.tcss")
+
+        def get_css_variables(self) -> dict:
+            variables = super().get_css_variables()
+            variables.update(palette.css_variables())
+            return variables
+
+    return _Styled
+
+
+@pytest.mark.asyncio
+async def test_blank_line_before_every_call_on_both_paths(tmp_path):
+    """Интервал (§2.1): пустая строка перед каждым вызовом — верхним и
+    вложенным, подряд идущим тоже; класса `tool-group-start` нет ни вживую,
+    ни в превью."""
+    from textual.app import App
+    from textual.containers import VerticalScroll
+
+    from gc_tui.services.trace_render import (
+        merge_nested_readonly,
+        render_segments_readonly,
+    )
+
+    async with _app(tmp_path).run_test(size=(120, 40)) as pilot:
+        trace = await _live_trace(pilot)
+        rows = list(trace.query(ToolCallRow))
+        assert {r._level for r in rows} == {0, 1}
+        assert [r.styles.margin.top for r in rows] == [1] * len(rows)
+        assert not trace.query(".tool-group-start")
+        lines = [
+            "".join(seg.text for seg in strip).rstrip()
+            for strip in pilot.app.screen._compositor.render_strips()
+        ]
+        read = next(i for i, s in enumerate(lines) if "fs_read_file" in s)
+        sub = next(i for i, s in enumerate(lines) if "subagent_worker" in s)
+        assert sub == read + 2 and lines[read + 1] == ""
+
+    class _Preview(App):
+        def compose(self):
+            yield VerticalScroll(id="t")
+
+        def on_mount(self):
+            t = self.query_one("#t", VerticalScroll)
+            calls = render_segments_readonly(t, _SEGMENTS)
+            merge_nested_readonly(t, _SIDECAR, calls)
+
+    async with _styled(_Preview)().run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        trace = pilot.app.query_one("#t", VerticalScroll)
+        rows = list(trace.query(ToolCallRow))
+        assert {r._level for r in rows} == {0, 1}
+        assert [r.styles.margin.top for r in rows] == [1] * len(rows)
+        assert not trace.query(".tool-group-start")

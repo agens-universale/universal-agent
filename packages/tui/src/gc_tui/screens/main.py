@@ -3168,10 +3168,7 @@ class TraceScreen(Screen):
             elif ev.tool_name:
                 # Не-когнитивный тул = действие в мире → рвёт эпизод раздумья.
                 self._reasoning_clock.interrupt()
-            from gc_tui.services.trace_render import (
-                args_portion,
-                is_tool_group_start,
-            )
+            from gc_tui.services.trace_render import args_portion
 
             row = ToolCallRow(
                 call_id=ev.call_id or f"_anon_{ev.no}",
@@ -3182,10 +3179,6 @@ class TraceScreen(Screen):
                 event_no=ev.no,
                 waiting=True,  # batch: · пока очередь execute не дошла
             )
-            # Первый tool в группе (предыдущий ряд — не tool) получает верхний
-            # отступ; подряд идущие tool-строки остаются компактными.
-            if is_tool_group_start(self.query_one(_SEL_TRACE, VerticalScroll)):
-                row.add_class("tool-group-start")
             self._active_calls[row.call_id] = row
             # Durable anchor for nested (reopen / after parent result pop).
             if (ev.tool_name or "").startswith("subagent_") and row.call_id:
@@ -3443,7 +3436,7 @@ class TraceScreen(Screen):
         `by_call_id`, а блок собирается общим хелпером — отличается только
         монтирование: в иерархию под своей nested-строкой."""
         try:
-            block = self._inline_diff_block(tool_call_id, event_no=0)
+            block = self._inline_diff_block(tool_call_id, row, event_no=0)
             if block is None:
                 return
             block.add_class("diff-nested")
@@ -3771,11 +3764,15 @@ class TraceScreen(Screen):
         recent = lookup.turn_ids()[-window:]
         return turn_id not in recent
 
-    def _inline_diff_block(self, call_id: str, *, event_no: int):
+    def _inline_diff_block(
+        self, call_id: str, row: ToolCallRow, *, event_no: int
+    ):
         """Готовый `DiffBlock` по call_id или None — общее тело обеих точек.
 
-        None — монтировать нечего: нет call_id, журнала или записи по нему (не
-        файловый тул). Исключения не гасит: их ловят вызывающие."""
+        Та же запись журнала даёт строке вызова счётчики `+N −M` и payload
+        кнопки ❐ (спека P3 §10). None — монтировать нечего: нет call_id,
+        журнала или записи по нему (не файловый тул). Исключения не гасит:
+        их ловят вызывающие."""
         if not call_id:
             return None
         lookup = self._edits_lookup_for_thread()
@@ -3784,8 +3781,14 @@ class TraceScreen(Screen):
         record = lookup.by_call_id(call_id)
         if record is None:
             return None
+        from gc_tui.services.diff_render import copyable_hunks
         from gc_tui.widgets.diff_block import DiffBlock
 
+        row.set_edit_counts(
+            record.add,
+            record.del_,
+            copy_text=copyable_hunks(record.hunks, path=record.path),
+        )
         return DiffBlock.for_record(
             record,
             event_no=event_no,
@@ -3800,7 +3803,7 @@ class TraceScreen(Screen):
         строкой уже стоят соседние вызовы. Записи нет (не файловый тул, журнала
         нет) — молча ничего не монтируем; любой сбой гасим: лента важнее диффа."""
         try:
-            block = self._inline_diff_block(ev.call_id, event_no=ev.no)
+            block = self._inline_diff_block(ev.call_id, row, event_no=ev.no)
             if block is None:
                 return
             self.query_one(_SEL_TRACE, VerticalScroll).mount(block, after=row)

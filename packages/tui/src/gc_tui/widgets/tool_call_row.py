@@ -5,6 +5,8 @@ Layout: Horizontal(prefix-Static, content-Static) — wrap длинных args/r
 под началом имени тула: отступ уровня + глиф + пробел).
 
 Статус-глиф живёт в prefix-Static (▸/‖/✓/✗/·), content-Static несёт имя/args/хвост.
+У строки правки (`set_edit_counts`) после объекта — счётчики `+N −M`, а в конце
+строки справа — кнопка ❐ копирования её диффа (спека P3 §10).
 
 Фазы:
 - waiting  — call уже нарисован, execute ещё не начался: · dim, без elapsed;
@@ -20,6 +22,7 @@ import time
 from typing import Optional
 
 from rich.text import Text
+from textual import events
 from textual.app import ComposeResult
 from textual.containers import Horizontal
 from textual.message import Message
@@ -34,7 +37,13 @@ from gc_tui.palette import RUN_COLOR as _RUN
 from gc_tui.palette import TOOL_NAME as _TOOL_NAME
 from gc_tui.services.duration_format import format_duration
 from gc_tui.services.trace_render import level_prefix
+from gc_tui.widgets.block_panel import (
+    CopyFeedbackMixin,
+    _copy_request,
+    copy_glyph,
+)
 from gc_tui.widgets.click_model import ClickModelMixin
+from gc_tui.widgets.no_select import NoSelectStatic
 from gc_tui.widgets.static_content import update_if_changed
 
 # Running-строка на человеко-ожидании (confirm / ask_human): статичный глиф
@@ -43,7 +52,17 @@ from gc_tui.widgets.static_content import update_if_changed
 _PAUSE_GLYPH = "‖"
 
 
-class ToolCallRow(ClickModelMixin, Widget):
+class _CopyButton(NoSelectStatic):
+    """Кнопка ❐ строки: служебный элемент — клик по ней строку не выделяет.
+
+    `FOCUS_ON_CLICK = False` предъявляет экран ленты
+    (`click_model.focus_target_at`), иначе фокус на MouseDown взяла бы
+    сама строка."""
+
+    FOCUS_ON_CLICK = False
+
+
+class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
     """Строка одного tool-вызова: waiting / running / ok / error / interrupted.
 
     DOM:
@@ -51,6 +70,7 @@ class ToolCallRow(ClickModelMixin, Widget):
             Horizontal
                 Static(<rich Text>, classes="trace-prefix")  — ведущий статус-глиф ▸/✓/✗/·
                 Static(<rich Text>, classes="trace-content line-tool")  — имя/args/хвост
+                _CopyButton(classes="block-copy")  — ❐, видна у строки правки
 
     Цветовые зоны через rich.Text:
     - prefix: статус-глиф — RUN (пульс) / OK / ERR / DIM.
@@ -72,6 +92,13 @@ class ToolCallRow(ClickModelMixin, Widget):
         height: auto;
         width: 1fr;
     }
+    ToolCallRow .block-copy {
+        display: none;
+        width: auto;
+        height: 1;
+        padding: 0 1 0 0;
+    }
+    ToolCallRow.edited .block-copy { display: block; }
     """
     can_focus = True
 
@@ -104,6 +131,10 @@ class ToolCallRow(ClickModelMixin, Widget):
         )
         self._content_static: Optional[Static] = None
         self._prefix_static: Optional[Static] = None
+        # Правка вызова: (+N, −M) и что копирует ❐; None — не правка.
+        self._edit_counts: Optional[tuple[int, int]] = None
+        self._copy_text: str = ""
+        self._restore_timer = None  # откат ✓ → ❐ (CopyFeedbackMixin)
         self._pulse_frame: int = 0
         self._pulse_timer = (
             None  # собственный 0.1с-тик дыхания ▸ (_sync_pulse)
@@ -130,6 +161,7 @@ class ToolCallRow(ClickModelMixin, Widget):
                 markup=False,
             )
             yield self._content_static
+            yield _CopyButton(copy_glyph(), classes="block-copy", markup=False)
 
     def on_mount(self) -> None:
         self._sync_pulse()
@@ -214,6 +246,18 @@ class ToolCallRow(ClickModelMixin, Widget):
         self._sync_pulse()
         self._update()
 
+    def set_edit_counts(
+        self, add: int, removed: int, *, copy_text: str
+    ) -> None:
+        """Строка правки: ` +N −M` после объекта и ❐ в конце строки.
+
+        `copy_text` — что кладёт в буфер ❐: весь дифф правки, как и двойной
+        клик по телу блока под строкой."""
+        self._edit_counts = (add, removed)
+        self._copy_text = copy_text
+        self.add_class("edited")
+        self._update()
+
     def mark_interrupted(self) -> None:
         """Терминальное «прервано». После результата — no-op; повтор — no-op."""
         if self._result is not None or self._interrupted:
@@ -291,9 +335,34 @@ class ToolCallRow(ClickModelMixin, Widget):
                 )
             return text
         text.append(")", style=_DIM)
+        if self._edit_counts is not None:
+            add, removed = self._edit_counts
+            text.append(" ")
+            text.append(f"+{add}", style=_OK)
+            text.append(" ")
+            text.append(f"−{removed}", style=_ERR)
         if self._is_error or self._result:
             text.append(f" -> {self._result}", style=_DIM)
         return text
+
+    def on_click(self, event: events.Click) -> None:
+        """Клик по ❐ копирует дифф правки и строку не выделяет.
+
+        Остальные клики — клик-модель строки; Ctrl+клик по кнопке открывает
+        событие, как с любой точки строки. `prevent_default()` на входе и
+        явный super(): иначе Textual по MRO вызвал бы миксин вторым."""
+        event.prevent_default()
+        widget = getattr(event, "widget", None)
+        if (
+            not event.ctrl
+            and widget is not None
+            and widget.has_class("block-copy")
+        ):
+            event.stop()
+            self.post_message(_copy_request(self._copy_text))
+            self._flash_copied()
+            return
+        super().on_click(event)
 
     def _open_request(self) -> Optional[Message]:
         # Клик/Enter → детальный экран call + output.

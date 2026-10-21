@@ -611,3 +611,136 @@ def test_refresh_running_elapsed_noop_after_interrupted():
     row.refresh_running_elapsed()  # не возвращает в running
     content = str(row._render_content())
     assert "прервано" in content and "running" not in content
+
+
+# ---- счётчики правки и кнопка ❐ (спека P3 §10, решение плана 1) ----
+
+
+def _edit_row():
+    from gc_tui.widgets.tool_call_row import ToolCallRow
+
+    row = ToolCallRow(
+        call_id="e1", tool_name="fs_apply_file_edits", args_summary="a.py"
+    )
+    row.set_result(summary="ok", error=False)
+    return row
+
+
+def test_edit_counts_follow_the_object():
+    """` +N −M` — сразу после объекта, до хвоста результата; `+N` — OK,
+    `−M` — ERR."""
+    from gc_tui.palette import ERR, OK
+
+    row = _edit_row()
+    row.set_edit_counts(12, 3, copy_text="diff")
+    content = row._render_content()
+    assert content.plain == "fs_apply_file_edits(a.py) +12 −3 -> ok"
+    styles = {
+        content.plain[s.start : s.end]: str(s.style) for s in content.spans
+    }
+    assert styles["+12"] == OK
+    assert styles["−3"] == ERR
+
+
+def test_row_without_edit_has_no_counts():
+    assert "+" not in _edit_row()._render_content().plain
+
+
+class _RowHost:
+    """Хост строки со стилями приложения и захватом запросов копирования."""
+
+    @staticmethod
+    def make(row):
+        from textual.app import App, ComposeResult
+
+        from gc_testkit.paths import TUI_PKG
+        from gc_tui import palette
+        from gc_tui.messages import CopyBlockRequest
+
+        class _Host(App):
+            CSS_PATH = str(TUI_PKG / "styles.tcss")
+
+            def get_css_variables(self) -> dict:
+                variables = super().get_css_variables()
+                variables.update(palette.css_variables())
+                return variables
+
+            def __init__(self) -> None:
+                super().__init__()
+                self.copied: list[str] = []
+
+            def compose(self) -> ComposeResult:
+                yield row
+
+            def on_copy_block_request(self, event: CopyBlockRequest) -> None:
+                self.copied.append(event.payload)
+
+        return _Host()
+
+
+@pytest.mark.asyncio
+async def test_copy_button_hidden_until_edit_counts():
+    """❐ есть только у строки с правкой: появляется вместе со счётчиками."""
+    from textual.widgets import Static
+
+    row = _edit_row()
+    app = _RowHost.make(row)
+    async with app.run_test(size=(80, 5)) as pilot:
+        button = row.query_one(".block-copy", Static)
+        assert not button.display
+        row.set_edit_counts(1, 1, copy_text="diff")
+        await pilot.pause()
+        assert button.display
+        assert button.region.right == row.region.right
+        assert button.region.y == row.region.y
+
+
+@pytest.mark.asyncio
+async def test_copy_button_copies_diff_and_flashes():
+    """Клик по ❐ шлёт весь дифф и на время показывает ✓."""
+    from textual.widgets import Static
+
+    from gc_tui.widgets.block_panel import DONE_GLYPH, copy_glyph
+
+    row = _edit_row()
+    row.set_edit_counts(1, 1, copy_text="--- a/a.py\n+++ b/a.py\n")
+    app = _RowHost.make(row)
+    async with app.run_test(size=(80, 5)) as pilot:
+        button = row.query_one(".block-copy", Static)
+        assert button.visual.plain == copy_glyph()
+        await pilot.click(".block-copy")
+        await pilot.pause()
+        assert app.copied == ["--- a/a.py\n+++ b/a.py\n"]
+        assert button.visual.plain == DONE_GLYPH
+
+
+@pytest.mark.asyncio
+async def test_copy_button_excluded_from_selection_and_focus_click():
+    """❐ — служебный элемент: вне выделения текста и фокус по клику не
+    берёт (экран ленты спрашивает `focus_on_click` у него, а не у строки)."""
+    row = _edit_row()
+    app = _RowHost.make(row)
+    async with app.run_test(size=(80, 5)):
+        button = row.query_one(".block-copy")
+        assert type(button).ALLOW_SELECT is False
+        assert button.get_selection(None) is None
+        assert button.focus_on_click() is False
+
+
+@pytest.mark.asyncio
+async def test_copy_button_keeps_hover_canon(tui_app_factory):
+    """Наведение на ❐ красит его акцентом — канон `.block-copy:hover`."""
+    from textual.widgets import Static
+
+    from gc_tui import palette
+
+    row = _edit_row()
+    row.set_edit_counts(1, 1, copy_text="diff")
+    app = tui_app_factory(row)
+    async with app.run_test(size=(80, 5)) as pilot:
+        await pilot.hover(".block-copy")
+        await pilot.pause()
+        assert (
+            app.query_one(".block-copy", Static).styles.color.hex
+            == palette.ACCENT.upper()
+        )
