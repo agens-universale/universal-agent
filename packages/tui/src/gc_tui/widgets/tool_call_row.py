@@ -44,6 +44,7 @@ from gc_tui.palette import OK as _OK
 from gc_tui.palette import PULSE_SHADES as _PULSE_SHADES
 from gc_tui.palette import REFUSED as _REFUSED
 from gc_tui.palette import RUN_COLOR as _RUN
+from gc_tui.palette import SKILL as _SKILL
 from gc_tui.palette import TOOL_NAME as _TOOL_NAME
 from gc_tui.services.duration_format import format_trace_duration
 from gc_tui.services.trace_glyphs import (
@@ -148,6 +149,7 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         waiting: bool = False,
         level: int = 0,
         path_target: bool = False,
+        skill_target: bool = False,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -158,6 +160,8 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         self._target = target
         # Объект — путь: сокращается серединой, иначе с конца.
         self._path_target = path_target
+        # Объект — имя скилла: цветом скилла, как в палитре и реплике.
+        self._skill_target = skill_target
         # Последнее сокращение объекта: (ширина, текст) — без пересчёта на
         # тиках таймера, пока ширина под объект та же.
         self._fitted: tuple[int, str] = (-1, target)
@@ -392,7 +396,10 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         text.append(self._label, style=_TOOL_NAME)
         target = self._fit_target(text.cell_len + tail.cell_len + 2)
         if target:
+            start = len(text.plain) + 2
             text.append(f"  {target}", style=_DIM)
+            if self._skill_target:
+                text.stylize(_SKILL, start, start + len(target))
         text.append_text(tail)
         return text
 

@@ -456,6 +456,7 @@ def build_call_row(
         label=label,
         target=target,
         path_target=shown.primary_arg == "path",
+        skill_target=shown.primary_arg == "skill_id",
         wire_name=wire_name,
         event_no=event_no,
         waiting=waiting,

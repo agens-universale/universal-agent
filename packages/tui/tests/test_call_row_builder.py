@@ -523,3 +523,38 @@ def test_run_row_hides_cd_into_the_project_root():
         "Run  ls .superpowers/sdd/2026-10-21-p3a-trace-look"
     )
     assert ev.full_payload["arguments"] == json.dumps({"command": command})
+
+
+def _target_styles(row, fragment: str) -> list[str]:
+    text = row._render_content()
+    return [
+        str(s.style)
+        for s in text.spans
+        if text.plain[s.start : s.end] == fragment
+    ]
+
+
+def test_skill_name_target_uses_skill_colour():
+    from gc_tui.palette import SKILL
+    from gc_tui.services.trace_render import build_call_row
+
+    row = build_call_row(
+        call_id="c1",
+        wire_name="skills_load",
+        args_summary="brainstorming",
+        level=0,
+    )
+    assert _target_styles(row, "brainstorming") == [SKILL]
+
+
+def test_skills_list_pack_target_keeps_usual_colour():
+    from gc_tui.palette import DIM
+    from gc_tui.services.trace_render import build_call_row
+
+    row = build_call_row(
+        call_id="c1",
+        wire_name="skills_list",
+        args_summary="core",
+        level=0,
+    )
+    assert _target_styles(row, "  core") == [DIM]
