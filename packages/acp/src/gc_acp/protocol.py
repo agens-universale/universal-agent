@@ -133,6 +133,20 @@ class StdoutWriter:
         self._stream.flush()
 
 
+def _read_available(stream: BinaryIO) -> bytes:
+    """Один кусок из канала: сколько уже есть, без добора до размера.
+
+    ``BufferedReader.read(n)`` на пайпе (это не tty) повторяет чтение,
+    пока не наберёт n байт или EOF. Редактор пишет одну строку и stdin
+    не закрывает — такой read ждёт 64 КиБ, и ответ на ``initialize``
+    не уходит. ``read1`` делает не больше одного системного вызова.
+    """
+    read1 = getattr(stream, "read1", None)
+    reader = read1 if read1 is not None else stream.read
+    chunk = reader(_STDIN_READ_CHUNK)
+    return chunk or b""
+
+
 def _discard_through_newline(stream: BinaryIO, pending: bytearray) -> bool:
     """Выбросить байты до ближайшего \\n включительно.
 
@@ -144,7 +158,7 @@ def _discard_through_newline(stream: BinaryIO, pending: bytearray) -> bool:
         return True
     pending.clear()
     while True:
-        chunk = stream.read(_STDIN_READ_CHUNK)
+        chunk = _read_available(stream)
         if not chunk:
             return False
         newline_at = chunk.find(b"\n")
@@ -180,7 +194,7 @@ def _pop_pending_line(pending: bytearray) -> tuple[bytes, bool] | None:
 
 def _read_chunk(stream: BinaryIO, pending: bytearray) -> bool:
     """Дописать кусок в буфер. False — EOF, новых байт нет."""
-    chunk = stream.read(_STDIN_READ_CHUNK)
+    chunk = _read_available(stream)
     if not chunk:
         return False
     pending.extend(chunk)

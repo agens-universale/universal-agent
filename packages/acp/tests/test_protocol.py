@@ -176,6 +176,46 @@ async def test_initialize_line_arrives_from_pipe(monkeypatch):
     assert incoming.id == 1
 
 
+async def test_line_arrives_while_stdin_stays_open(monkeypatch):
+    """Редактор пишет строку и не закрывает stdin, пока ждёт ответ."""
+    read_fd, write_fd = os.pipe()
+    stream = os.fdopen(read_fd, "rb")
+    monkeypatch.setattr(sys, "stdin", _Stdin(stream))
+    _forbid_connect_read_pipe(monkeypatch)
+    agen = stdin_lines()
+    first = asyncio.create_task(anext(agen))
+    second: asyncio.Task | None = None
+    try:
+        await asyncio.sleep(0)
+        if first.done():
+            await first
+        os.write(
+            write_fd,
+            b'{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}\n',
+        )
+        line = await asyncio.wait_for(first, timeout=1)
+        assert line == (
+            '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
+        )
+        second = asyncio.create_task(anext(agen))
+        await asyncio.sleep(0.05)
+        assert not second.done()
+        os.write(write_fd, b'{"id":2}\n')
+        assert await asyncio.wait_for(second, timeout=1) == '{"id":2}'
+    finally:
+        os.close(write_fd)
+        for task in (first, second):
+            if task is not None and not task.done():
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+        # Поток ещё может стоять в read. Закрытый write-конец будит его,
+        # и только потом можно закрывать сам поток.
+        await asyncio.sleep(0.05)
+        await agen.aclose()
+        stream.close()
+
+
 async def test_crlf_matches_lf(monkeypatch):
     lf = await _lines_from_stdin(monkeypatch, b'{"id":1}\n')
     crlf = await _lines_from_stdin(monkeypatch, b'{"id":1}\r\n')
