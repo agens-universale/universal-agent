@@ -40,7 +40,6 @@ from textual.widgets import Static
 from gc_tui.models import ResultOutcome
 from gc_tui.palette import DIM as _DIM
 from gc_tui.palette import ERR as _ERR
-from gc_tui.palette import MUTED as _MUTED
 from gc_tui.palette import OK as _OK
 from gc_tui.palette import REFUSED as _REFUSED
 from gc_tui.palette import RUN_COLOR as _RUN
@@ -381,7 +380,8 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
             if self._paused_at is not None:
                 return _PAUSE_GLYPH, _RUN
             on = self._pulse_frame // _BLINK_HALF_PERIOD_TICKS % 2 == 0
-            return CALL_GLYPH, _RUN if on else _MUTED
+            # Мигает исчезая: в паузе — пустая клетка той же ширины.
+            return (CALL_GLYPH if on else " "), _RUN
         glyph, style, _line_style = _OUTCOME_LOOK[self._outcome]
         return glyph, style
 
