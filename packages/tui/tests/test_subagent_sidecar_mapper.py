@@ -313,3 +313,54 @@ def test_session_todo_garbage_arguments_plan_generic_tool_row():
     actions = plan_sidecar_nested_actions([rec])
     assert [a.kind for a in actions] == ["mount_nested_tool"]
     assert "очищен" not in (actions[0].args_summary or "")
+
+
+def _reply(payload: dict) -> list:
+    return plan_sidecar_nested_actions(
+        [
+            {
+                "seq": 1,
+                "parent_call_id": "p1",
+                "kind": "intermediate_reply",
+                "payload": payload,
+            }
+        ]
+    )
+
+
+def test_rejected_reply_plans_its_reason():
+    (act,) = _reply({"prose": "проверю", "ok": False, "error_brief": "нет"})
+    assert (act.prose, act.ok, act.error_brief) == ("проверю", False, "нет")
+
+
+def test_rejected_reply_without_reason():
+    (act,) = _reply({"prose": "проверю", "ok": False})
+    assert (act.ok, act.error_brief) == (False, None)
+
+
+def test_accepted_reply_is_ok():
+    (act,) = _reply({"prose": "проверю"})
+    assert (act.ok, act.error_brief) == (True, None)
+
+
+def test_empty_rejected_reply_is_not_shown():
+    """Решение владельца P3b, 3: пустой не принятый ответ не показывается."""
+    assert _reply({"prose": "", "ok": False, "error_brief": "нет"}) == []
+
+
+def test_apply_passes_reply_outcome_to_prose_hook():
+    prose: list[dict] = []
+    apply_sidecar_nested_actions(
+        _reply({"prose": "проверю", "ok": False, "error_brief": "нет"}),
+        mount_nested_tool=lambda **kw: None,
+        finish_nested_tool=lambda **kw: None,
+        mount_nested_prose=lambda **kw: prose.append(kw),
+    )
+    assert prose == [
+        {
+            "parent_call_id": "p1",
+            "prose": "проверю",
+            "ok": False,
+            "error_brief": "нет",
+        }
+    ]

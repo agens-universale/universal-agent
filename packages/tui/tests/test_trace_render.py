@@ -958,3 +958,38 @@ def test_finish_comment_after_table_is_own_row():
     assert ws[-1]._content.plain == "Нет."
     assert len(ws) == 3
     assert type(ws[1]).__name__ != "TraceRow"
+
+
+def test_nested_prose_row_accepted_has_no_consequence():
+    from gc_tui.services.trace_render import (
+        NESTED_PROSE_CLASS,
+        NESTED_PROSE_PREFIX,
+        build_nested_prose_row,
+    )
+
+    row = build_nested_prose_row("проверю")
+    assert (row._prefix, row._content, row._consequences) == (
+        NESTED_PROSE_PREFIX,
+        "проверю",
+        [],
+    )
+    assert all(row.has_class(c) for c in NESTED_PROSE_CLASS.split())
+
+
+def test_nested_prose_row_rejected_is_dim_consequence():
+    """Решение владельца P3b, 3: `└ · не принят — причина` серым."""
+    from gc_tui.palette import DIM
+    from gc_tui.services.trace_render import build_nested_prose_row
+    from rich.text import Text
+
+    row = build_nested_prose_row("проверю", ok=False, error_brief="нет")
+    assert row._consequences == [Text("· не принят — нет", style=DIM)]
+
+
+def test_nested_prose_row_rejected_without_reason():
+    from gc_tui.palette import DIM
+    from gc_tui.services.trace_render import build_nested_prose_row
+    from rich.text import Text
+
+    row = build_nested_prose_row("проверю", ok=False)
+    assert row._consequences == [Text("· не принят", style=DIM)]

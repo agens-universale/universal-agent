@@ -13,7 +13,7 @@ Textual wrap'ит его внутри этой колонки. Wrapped-стро�
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Optional
 
 from rich.cells import cell_len
@@ -251,7 +251,38 @@ def _compaction_head(messages: Optional[int]) -> str:
     return f"Контекст сохранён: {messages} {word} → сводка"
 
 
-class QuestionRow(TraceRow):
+class ConsequenceTraceRow(TraceRow):
+    """Строка ленты со слотом следствий `└` под текстом (спека P3 §3).
+
+    Следствие — строка внутри виджета события, на +2 от его глифа
+    уровня ``consequence_level``; слот — `ConsequenceSlot`, как у строки
+    вызова. Наследники: вопрос и промежуточная реплика субагента."""
+
+    def __init__(
+        self,
+        *,
+        consequence_level: int = 0,
+        consequences: Sequence = (),
+        **kwargs,
+    ) -> None:
+        from gc_tui.widgets.consequence_line import ConsequenceSlot
+
+        super().__init__(**kwargs)
+        self._consequences: list = list(consequences)
+        self._consequence_slot = ConsequenceSlot(consequence_level)
+        self._consequence_slot.set_bodies(self._consequences)
+
+    def compose(self) -> ComposeResult:
+        yield from super().compose()
+        yield self._consequence_slot
+
+    def add_consequence(self, body) -> None:
+        """Дописать строку `└ body` под текстом события."""
+        self._consequences.append(body)
+        self._consequence_slot.set_bodies(self._consequences)
+
+
+class QuestionRow(ConsequenceTraceRow):
     """Вопрос ask_human в ленте (серая рамка `? …`) со своими следствиями.
 
     `call_id` — по нему ответ «без ответа» находит свой вопрос. Следствие
@@ -259,18 +290,5 @@ class QuestionRow(TraceRow):
     один (спека P3 §3, решение плана 2)."""
 
     def __init__(self, *, call_id: Optional[str] = None, **kwargs) -> None:
-        from gc_tui.widgets.consequence_line import ConsequenceSlot
-
         super().__init__(**kwargs)
         self.call_id = call_id
-        self._consequences: list = []
-        self._consequence_slot = ConsequenceSlot(0)
-
-    def compose(self) -> ComposeResult:
-        yield from super().compose()
-        yield self._consequence_slot
-
-    def add_consequence(self, body) -> None:
-        """Дописать строку `└ body` под текстом вопроса, внутри рамки."""
-        self._consequences.append(body)
-        self._consequence_slot.set_bodies(self._consequences)

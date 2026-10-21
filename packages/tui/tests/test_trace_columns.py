@@ -122,7 +122,7 @@ _EXPECTED = [
     ("TodoBlock", ""),
     ("ToolCallRow", "● "),
     ("ToolCallRow", "● "),
-    ("TraceRow", "  ● "),
+    ("ConsequenceTraceRow", "  ● "),
     ("ToolCallRow", "  ● "),
     ("NestedUserReply", "  › "),
     ("TodoBlock", "  "),

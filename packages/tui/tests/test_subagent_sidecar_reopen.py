@@ -292,3 +292,60 @@ async def test_reopen_merges_nested_under_finished_subagent(tmp_path):
         assert CHILD_SUMMARY_LABEL in prose_texts
         assert "проверю дальше" in prose_texts
         assert any(isinstance(w, ToolCallRow) and w._level for w in widgets)
+
+
+@pytest.mark.asyncio
+async def test_reopen_shows_rejected_reply_and_stopped_call(tmp_path):
+    """Возврат в сессию: не принятый ответ субагента — `└ · не принят — …`,
+    вложенный вызов на лимите — серый `○` и `└ лимит шагов`."""
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.trace_row import ConsequenceTraceRow
+
+    tid = "reopen_b1"
+    _write_parent_thread(tmp_path, tid)
+    d = str(tmp_path)
+    for kind, payload in (
+        (
+            "intermediate_reply",
+            {"prose": "проверю", "ok": False, "error_brief": "нет плана"},
+        ),
+        ("intermediate_reply", {"prose": "", "ok": False}),
+        (
+            "call",
+            {"name": "fs_read_file", "arguments": "{}", "call_id": "n1"},
+        ),
+        (
+            "error",
+            {
+                "call_id": "n1",
+                "output": json.dumps({"ok": False, "status": "step_limit"}),
+            },
+        ),
+    ):
+        append_subagent_trace_record(
+            d,
+            "cli",
+            tid,
+            parent_call_id="call_sub_1",
+            child_run_id="run_c1",
+            kind=kind,
+            payload=payload,
+        )
+    app = TuiApp(
+        threads_dir=d,
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
+    )
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        assert scr.attach_active_task(tid, is_resume=True) is True
+        await pilot.pause(0.3)
+
+        prose, call = scr._nested_widgets_by_parent["call_sub_1"]
+        assert isinstance(prose, ConsequenceTraceRow)
+        assert [b.plain for b in prose._consequences] == [
+            "· не принят — нет плана"
+        ]
+        assert "○" in call._render_prefix().plain
+        assert [b.plain for b in call._consequence_bodies()] == ["лимит шагов"]

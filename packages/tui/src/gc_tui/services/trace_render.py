@@ -38,6 +38,7 @@ if TYPE_CHECKING:
     from gc_tui.widgets.trace_row import (
         CompactionBody,
         CompactionRule,
+        ConsequenceTraceRow,
         TraceRow,
     )
 
@@ -385,6 +386,40 @@ def note_question(question, note: str) -> None:
     from gc_tui.palette import DIM
 
     question.add_consequence(Text(note, style=DIM))
+
+
+# Промежуточный ответ субагента, который ядро не приняло (решение
+# владельца P3b, 3): следствие серым, не ошибка.
+NESTED_PROSE_REJECTED = "· не принят"
+
+
+def build_nested_prose_row(
+    prose: str, *, ok: bool = True, error_brief: Optional[str] = None
+) -> ConsequenceTraceRow:
+    """Промежуточная реплика субагента: серый `●` на уровне 1.
+
+    Не принятая ядром — со следствием `└ · не принят — причина` (`DIM`)
+    внутри виджета. Один билдер для живой ленты и превью."""
+    from rich.text import Text
+
+    from gc_tui.palette import DIM
+    from gc_tui.widgets.trace_row import ConsequenceTraceRow
+
+    consequences = []
+    if not ok:
+        note = NESTED_PROSE_REJECTED
+        if error_brief:
+            note = f"{note} — {error_brief}"
+        consequences.append(Text(note, style=DIM))
+    return ConsequenceTraceRow(
+        prefix=NESTED_PROSE_PREFIX,
+        content=prose,
+        kind_class=NESTED_PROSE_CLASS,
+        event_no=0,
+        focusable=False,
+        consequence_level=1,
+        consequences=consequences,
+    )
 
 
 def build_agent_widgets(summary: str, *, event_no: int) -> list:
@@ -857,7 +892,6 @@ def merge_nested_readonly(
         plan_sidecar_nested_actions,
     )
     from gc_tui.services.todo_render import build_todo_block
-    from gc_tui.widgets.trace_row import TraceRow
     from gc_tui.widgets.user_reply import NestedUserReply
 
     anchors: dict = {}  # parent_call_id -> последний смонтированный nested
@@ -903,19 +937,13 @@ def merge_nested_readonly(
                 outcome=outcome or ("ok" if ok else "error"),
             )
 
-    def _prose(*, parent_call_id, prose, **_kw):
+    def _prose(*, parent_call_id, prose, ok=True, error_brief=None, **_kw):
         text = (prose or "").strip()
         if not text:
             return
         _mount_after(
             parent_call_id,
-            TraceRow(
-                prefix=NESTED_PROSE_PREFIX,
-                content=text,
-                kind_class=NESTED_PROSE_CLASS,
-                event_no=0,
-                focusable=False,
-            ),
+            build_nested_prose_row(text, ok=ok, error_brief=error_brief),
         )
 
     def _user(*, parent_call_id, prose, images=(), **_kw):

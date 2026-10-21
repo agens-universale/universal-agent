@@ -155,11 +155,16 @@ def plan_sidecar_nested_actions(
             elif kind == "intermediate_reply":
                 prose = payload.get("prose")
                 if isinstance(prose, str) and prose.strip():
+                    brief = payload.get("error_brief")
                     actions.append(
                         SidecarNestedAction(
                             kind="mount_nested_prose",
                             parent_call_id=pid,
                             prose=prose.strip(),
+                            ok=payload.get("ok") is not False,
+                            error_brief=brief
+                            if isinstance(brief, str)
+                            else None,
                             tool_call_id=(
                                 str(payload["call_id"])
                                 if isinstance(payload.get("call_id"), str)
@@ -220,6 +225,8 @@ def apply_sidecar_nested_actions(
             mount_nested_prose(
                 parent_call_id=act.parent_call_id,
                 prose=act.prose or "",
+                ok=act.ok is not False,
+                error_brief=act.error_brief,
             )
         elif act.kind == "mount_nested_user":
             if mount_nested_user is not None:

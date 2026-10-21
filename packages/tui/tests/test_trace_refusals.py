@@ -219,6 +219,32 @@ def test_mapper_stop_stays_halted():
     assert map_message(msg, no=2, ts="").result_outcome == "halted"
 
 
+# --- живые факты исхода ------------------------------------------------------
+
+_STOPS = [
+    json.dumps({"ok": False, "status": "step_limit"}),
+    json.dumps({"ok": False, "status": "cancelled_by_user"}),
+    json.dumps({"ok": False, "error": {"type": CHECK_FAILED_TYPE}}),
+    _output({"type": "not_found", "message": "нет файла"}),
+] + [_output(error) for error, _text in _REFUSALS + _GUARD_AFTER_QUESTION]
+
+
+@pytest.mark.parametrize("output", _STOPS)
+def test_live_facts_classify_as_output(output):
+    """Факты события прогресса ядра (`result_facts`) и разбор вывода при
+    перерисовке дают один исход: классификатор один."""
+    from gc_core.execution.progress import result_facts
+    from gc_tui.services.trace_mapper import classify_stop, result_stop
+
+    assert classify_stop(*result_facts(output)) == result_stop(output)
+
+
+def test_classify_stop_without_facts_is_plain_error():
+    from gc_tui.services.trace_mapper import classify_stop
+
+    assert classify_stop(None, None) is None
+
+
 # --- строка вызова -----------------------------------------------------------
 
 

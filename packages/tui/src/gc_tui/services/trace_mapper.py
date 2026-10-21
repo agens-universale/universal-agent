@@ -805,13 +805,21 @@ def result_stop(output: Any) -> Optional[tuple[ResultOutcome, str]]:
     data = unwrap_tool_output_dict(output)
     if not isinstance(data, dict):
         return None
-    error = data.get("error")
+    return classify_stop(data.get("status"), data.get("error"))
+
+
+def classify_stop(
+    status: Any, error: Any
+) -> Optional[tuple[ResultOutcome, str]]:
+    """Ядро `result_stop` по готовым фактам вывода: ``status`` и ``error``.
+
+    Живой путь вложенных вызовов получает факты событием прогресса ядра
+    (`result_status`, `result_error`), перерисовка — разбором вывода;
+    решение одно."""
     # Стоп во время проверки стражем — тело отказа с ``type`` вместо
     # ``status`` (``cancelled_by_user_error``): тоже остановка пользователем.
     kind = error.get("type") if isinstance(error, dict) else None
-    halted = _HALT_SUMMARIES.get(data.get("status")) or _HALT_SUMMARIES.get(
-        kind
-    )
+    halted = _HALT_SUMMARIES.get(status) or _HALT_SUMMARIES.get(kind)
     if halted:
         return "halted", halted
     refused = refusal_text(error)

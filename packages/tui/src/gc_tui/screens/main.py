@@ -152,11 +152,10 @@ from gc_tui.services.trace_mapper import (
     with_closing_replies,
 )
 from gc_tui.services.trace_render import (
-    NESTED_PROSE_CLASS,
-    NESTED_PROSE_PREFIX,
     build_call_row,
     build_compaction_marker_event,
     build_compaction_widgets,
+    build_nested_prose_row,
     level_prefix,
 )
 from gc_tui.services.trace_retention import (
@@ -3745,6 +3744,8 @@ class TraceScreen(Screen):
         *,
         parent_call_id: str,
         prose: str,
+        ok: bool = True,
+        error_brief: str | None = None,
         **_kw,
     ) -> None:
         """Read-only счёт-в-счёт с merge_nested_readonly._prose (trace_render.py)."""
@@ -3753,14 +3754,10 @@ class TraceScreen(Screen):
         text = (prose or "").strip()
         if not text:
             return
-        row = TraceRow(
-            prefix=NESTED_PROSE_PREFIX,
-            content=text,
-            kind_class=NESTED_PROSE_CLASS,
-            event_no=0,
-            focusable=False,
+        self._nested_mount_after(
+            parent_call_id,
+            build_nested_prose_row(text, ok=ok, error_brief=error_brief),
         )
-        self._nested_mount_after(parent_call_id, row)
 
     def _mount_nested_todo(
         self,
