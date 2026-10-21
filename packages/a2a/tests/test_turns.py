@@ -531,3 +531,55 @@ async def test_history_length_and_filters(tmp_path):
     assert tail.json()["result"]["totalSize"] == 1
     assert tasks[0]["history"][0]["messageId"] == "b"
     assert wide.json()["error"]["code"] == -32602
+
+
+def test_answer_text_reply_and_summary():
+    """turn_finish: ответ модели и итог в одном рендере."""
+    from gc_a2a.turn import answer_text
+
+    agent = type("Agent", (), {})()
+    agent.executor = type("E", (), {})()
+    agent.executor.last_closing_reply = "Результат готов."
+    agent.last_answer = json.dumps(
+        {
+            "solution_type": "full_solution",
+            "task": "Подсчитать файлы",
+            "task_report": "Найдено 42 файла",
+            "handoff": "{}",
+        }
+    )
+    text = answer_text(agent)
+    assert text == "Результат готов.\n\n* итог:\n\n  Найдено 42 файла"
+
+
+def test_answer_text_plan_after_reply():
+    """turn_propose_plan: план показывается вместе с ответом модели."""
+    from gc_a2a.turn import answer_text
+
+    agent = type("Agent", (), {})()
+    agent.executor = type("E", (), {})()
+    agent.executor.last_closing_reply = "Вот план:"
+    agent.last_answer = json.dumps(
+        {"plan": "1. шаг\n2. проверка", "status": "proposed"}
+    )
+    text = answer_text(agent)
+    assert text == "Вот план:\n\n1. шаг\n2. проверка"
+
+
+def test_answer_text_report_only():
+    """turn_finish без ответа модели: только отчёт без ярлыка."""
+    from gc_a2a.turn import answer_text
+
+    agent = type("Agent", (), {})()
+    agent.executor = type("E", (), {})()
+    agent.executor.last_closing_reply = ""
+    agent.last_answer = json.dumps(
+        {
+            "solution_type": "full_solution",
+            "task": "Задача",
+            "task_report": "Выполнено",
+            "handoff": "{}",
+        }
+    )
+    text = answer_text(agent)
+    assert text == "Выполнено"

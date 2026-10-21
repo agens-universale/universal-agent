@@ -858,3 +858,76 @@ async def test_nested_subagent_rows_unchanged_by_compaction(tmp_path):
 
         assert after == nested
         assert all(w in trace.children for ws in after.values() for w in ws)
+
+
+# ─── конец хода: ответ модели и turn_finish разными тиками ──────────────────
+
+
+def _prose(mid: str, text: str) -> dict:
+    return {
+        "id": mid,
+        "type": "message",
+        "role": "assistant",
+        "content": [{"type": "output_text", "text": text}],
+    }
+
+
+def _finish(mid: str, cid: str, report: str) -> dict:
+    return {
+        "id": mid,
+        "type": "function_call",
+        "name": "turn_finish",
+        "call_id": cid,
+        "arguments": json.dumps(
+            {"solution_type": "answer_question", "task_report": report},
+            ensure_ascii=False,
+        ),
+    }
+
+
+def _summary_rows(scr) -> list[str]:
+    from gc_tui.widgets.trace_row import TraceRow
+
+    return [
+        r._content if isinstance(r._content, str) else r._content.plain
+        for r in scr.query(TraceRow)
+        if r.has_class("line-summary")
+    ]
+
+
+@pytest.mark.asyncio
+async def test_finish_via_compaction_step_after_prose_tick(tmp_path):
+    """Текст ответа прочитан тиком раньше, turn_finish пришёл шагом
+    сжатия: отчёт — итог, как при attach с нуля."""
+    thread = _base_thread(tmp_path)
+    async with _session(tmp_path, runner=_LiveRunner()) as (app, pilot, scr):
+        thread.append(_user("u2", "пока"), _prose("a2", "Пока! 👋"))
+        scr._poll_active()
+        thread.append(_finish("ff", "f1", "Попрощался."), _out("fo", "f1"))
+        _compact_ticking(thread, scr, "S1")
+        await pilot.pause(0.05)
+        live_rows, live = _summary_rows(scr), _trace_lines(app)
+        await _fresh(pilot, scr)
+        fresh = _trace_lines(app)
+
+    assert live_rows == ["итог: Попрощался."]
+    assert live == fresh
+
+
+@pytest.mark.asyncio
+async def test_attach_compacted_mid_response_then_finish(tmp_path):
+    """Attach сжатого треда посреди ответа: turn_finish следующего тика
+    видит текст ответа и становится итогом."""
+    thread = _base_thread(tmp_path)
+    _compact_silently(thread, "S0")
+    thread.append(_user("u2", "пока"), _prose("a2", "Пока! 👋"))
+    async with _session(tmp_path, runner=_LiveRunner()) as (app, pilot, scr):
+        thread.append(_finish("ff", "f1", "Попрощался."), _out("fo", "f1"))
+        scr._poll_active()
+        await pilot.pause(0.05)
+        live_rows, live = _summary_rows(scr), _trace_lines(app)
+        await _fresh(pilot, scr)
+        fresh = _trace_lines(app)
+
+    assert live_rows == ["итог: Попрощался."]
+    assert live == fresh
