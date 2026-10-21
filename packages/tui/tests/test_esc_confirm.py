@@ -1,4 +1,5 @@
-"""TraceScreen Esc confirm-hint в слоте футера (clear / stop); выход — модалка."""
+"""TraceScreen Esc confirm-hint в слоте футера (clear / stop); выход —
+модалка."""
 
 import pytest
 
@@ -35,7 +36,8 @@ async def test_show_esc_hint_stop_swaps_footer_slot():
 
 @pytest.mark.asyncio
 async def test_clear_footer_hint_restores_footer_slot():
-    """_clear_footer_hint возвращает команды в слоте футера и обнуляет state."""
+    """_clear_footer_hint возвращает бейдж в слоте футера и обнуляет
+    state."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 

@@ -1298,7 +1298,7 @@ async def test_footer_shrinks_profile_on_the_glyph_pass(tmp_path, monkeypatch):
 async def test_footer_ladder_order_holds_across_terminal_widths(
     tmp_path, monkeypatch
 ):
-    """Ступени 5 и 6 как порядок, а не как одна ширина: перебор реальных ширин
+    """Ступени 5 и 7 как порядок, а не как одна ширина: перебор реальных ширин
     терминала сверху вниз.
 
     - имя профиля снимается, только когда с ним не прошёл ни один вариант:

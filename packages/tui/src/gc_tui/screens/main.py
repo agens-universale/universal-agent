@@ -654,7 +654,8 @@ class TraceScreen(Screen):
         self._refusal_input_text = ""  # текст поля ввода при постановке отказа
         # Ключ последней сборки футера (`_footer_inputs`); None — не собран.
         self._footer_key: Optional[tuple] = None
-        # Части футера, чей сбой уже в логе: пишем раз на эпизод, не каждый тик.
+        # Части футера, чей сбой уже в логе: пишем раз на эпизод,
+        # не каждый тик.
         self._footer_faults: set[str] = set()
         # Input history: per-project ↑/↓ навигация.
         # _history создаётся в on_mount (project_dir = threads_dir.parent).
