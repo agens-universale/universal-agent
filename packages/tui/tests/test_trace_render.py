@@ -712,6 +712,28 @@ def test_standalone_row_bang_in_bullet_column(severity, cls):
     assert row._event_no == 3
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("severity", ["error", "warn"])
+async def test_standalone_row_has_blank_line_above(tmp_path, severity):
+    """Строка без владельца — своё событие ленты: пустая строка сверху
+    (§2.1), не прилипает к предыдущему событию."""
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+    from gc_tui.services.trace_render import build_standalone_row
+    from textual.containers import VerticalScroll
+
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
+    )
+    async with app.run_test() as pilot:
+        row = build_standalone_row("сломалось", severity=severity)
+        pilot.app.screen.query_one("#trace", VerticalScroll).mount(row)
+        await pilot.pause()
+        assert row.styles.margin.top == 1
+
+
 def test_note_consequence_is_bang_text_in_warn():
     from gc_tui.palette import WARN
     from gc_tui.services.trace_render import note_consequence

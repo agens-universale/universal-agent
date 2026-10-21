@@ -94,13 +94,14 @@ def build_standalone_row(
     severity: Literal["error", "warn"],
     event_no: int = 0,
 ) -> TraceRow:
-    """Строка ленты без владельца: `! текст`, `ERR` или `WARN` классом."""
+    """Строка ленты без владельца: `! текст`, `ERR` или `WARN` классом;
+    `line-standalone` — пустая строка сверху, как у любого события (§2.1)."""
     from gc_tui.widgets.trace_row import TraceRow
 
     return TraceRow(
         prefix=STANDALONE_PREFIX,
         content=text,
-        kind_class=f"line-{severity}",
+        kind_class=f"line-{severity} line-standalone",
         event_no=event_no,
     )
 

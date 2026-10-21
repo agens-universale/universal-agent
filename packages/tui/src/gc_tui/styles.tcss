@@ -245,6 +245,7 @@ ToolCallRow { margin-top: 1; }
 .answered-question.hidden { display: none; }
 .line-error     { color: $err; }
 .line-warn      { color: $warn; }   /* строка `!` без владельца — предупреждение */
+.line-standalone { margin-top: 1; }  /* строка `!` без владельца — своё событие */
 .line-code      { color: $code; }      /* inline-код/путь */
 .line-bold      { color: $accent; text-style: bold; }
 .line-heading-1 { color: $accent; text-style: bold; }
