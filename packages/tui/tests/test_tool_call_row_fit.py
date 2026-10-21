@@ -189,3 +189,37 @@ async def test_preview_row_fits_one_line(width):
         assert line.startswith("Run  cd /Users/")
         assert line.endswith("… · 188 строк")
         assert _line_height(row) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("width", _WIDTHS)
+@pytest.mark.parametrize("elapsed", (0, 6, 3725))
+async def test_running_tail_not_under_scrollbar(tmp_path, width, elapsed):
+    """С полосой прокрутки хвост ` · N с` виден целиком левее полосы:
+    ширина под объект считается от content-колонки, полоса в неё не входит."""
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+    from gc_tui.services.duration_format import format_trace_duration
+    from textual.containers import VerticalScroll
+
+    app = TuiApp(threads_dir=str(tmp_path))
+    async with app.run_test(size=(width, 24)) as pilot:
+        trace = pilot.app.screen.query_one("#trace", VerticalScroll)
+        for i in range(40):
+            done = _row("exec_command", f"ls {i}")
+            done.set_result(summary="1 строка", outcome="ok")
+            trace.mount(done)
+        row = _row("exec_command", _CMD)
+        trace.mount(row)
+        await pilot.pause()
+        row._start_monotonic -= elapsed
+        row._update()
+        trace.scroll_end(animate=False)
+        await pilot.pause()
+        assert trace.show_vertical_scrollbar
+        visible = trace.scrollable_content_region
+        content = row.query_one(".trace-content").region
+        assert content.right <= visible.right
+        strip = pilot.app.screen._compositor.render_strips()[content.y]
+        on_screen = strip.text[visible.x : visible.right].rstrip()
+        assert on_screen.endswith(f"… · {format_trace_duration(elapsed)}")
