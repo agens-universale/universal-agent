@@ -186,3 +186,23 @@ async def test_skills_list_fills_screen_height():
         # Список должен растягиваться почти на всю высоту (экран − шапка − фильтр − футер),
         # а не схлопываться по контенту (3 скилла) / занимать половину.
         assert listview.size.height >= pilot.app.size.height - 8
+
+
+def test_card_name_in_skill_colour_and_layer_in_sub_ink():
+    pytest.importorskip("textual")
+    from gc_tui.palette import SKILL, SUB_INK
+    from gc_tui.screens.skills import SkillsScreen
+
+    scr = SkillsScreen(skills=_SKILLS)
+    text = scr._card_text(_SKILLS[0], maxlen=80)
+    styles = {text.plain[s.start : s.end]: str(s.style) for s in text.spans}
+    assert styles["articles:article-creator"] == SKILL
+    assert styles["системный"] == SUB_INK
+
+
+def test_footer_says_back_in_russian():
+    pytest.importorskip("textual")
+    from gc_tui.screens import skills
+
+    assert "[Esc] назад" in skills._FOOTER
+    assert "back" not in skills._FOOTER
