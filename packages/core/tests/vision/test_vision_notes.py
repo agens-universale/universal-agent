@@ -256,3 +256,127 @@ async def test_admitted_request_failure_notes_the_probe_in_the_tool_call(
             )
 
     assert _call_ids(notes) == [("call", "c1")]
+
+
+class _ChildState:
+    def __init__(self):
+        from gc_core.usage.account import UsageAccount
+
+        self.state_id = "child-state"
+        self.steps = 1
+        self.shared = None
+        self.backend_api_mode = "chat_completions"
+        self.messages = []
+        self.usage = UsageAccount()
+
+
+class _ProbeTool:
+    """Тул ребёнка: пометка изнутри его вызова, через контекст ребёнка."""
+
+    def __init__(self, ctx=None, **kw):
+        self._ctx = ctx
+
+    async def acall(self) -> str:
+        emit_trace_note(self._ctx, "отказ глаз ребёнка")
+        return "{}"
+
+
+def _isolate_child_run(monkeypatch):
+    """Тяжёлые шаги прогона ребёнка — заглушками; контекст ребёнка и
+    диспетчер вызовов — настоящие."""
+    from gc_core.summarize.config import resolve_summary_limits
+    from gc_core.tools.subagents import runner as runner_mod
+
+    class _Inst:
+        async def afinalize_role(self, ctx, state):
+            return None
+
+        def get_initial_data(self):
+            return "role", "assignment"
+
+    async def _create(*a, **k):
+        return _Inst()
+
+    monkeypatch.setattr(
+        SubagentRunner,
+        "_build_child_state",
+        as_coro(lambda self, role: _ChildState()),
+    )
+    monkeypatch.setattr(
+        SubagentRunner, "_build_initial_messages", lambda *a, **k: []
+    )
+    monkeypatch.setattr(SubagentRunner, "_log_lifecycle", lambda *a, **k: None)
+    monkeypatch.setattr(
+        runner_mod,
+        "get_subagent_class",
+        lambda name, source: SimpleNamespace(create_instance=_create),
+    )
+    monkeypatch.setattr(
+        runner_mod, "init_subagent_open_turn", lambda *a, **k: None
+    )
+    monkeypatch.setattr(
+        runner_mod, "get_thread_memory_registers_from_shared", lambda s: {}
+    )
+    monkeypatch.setattr(
+        runner_mod, "subagent_thread_memory_bootstrap_text", lambda c, m: ""
+    )
+    monkeypatch.setattr(
+        runner_mod,
+        "resolve_summary_limits_at_level",
+        lambda cfg, router, level: resolve_summary_limits(None),
+    )
+
+
+async def test_subagent_notes_owner_through_the_real_dispatcher(
+    tmp_path, monkeypatch
+):
+    """Настоящий путь: диспетчер родителя запускает субагента (вызов
+    `launch`), ребёнок через свой контекст пишет пометку вне тулов и
+    зовёт свой тул (`child`) тем же диспетчером. Пометка вне тулов
+    принадлежит запуску, пометка тула — вызову ребёнка."""
+    from gc_core.tools import aapply_tool_result
+    from gc_core.usage.account import UsageAccount
+
+    _isolate_child_run(monkeypatch)
+    config = {
+        "paths.logs_dump_dir": str(tmp_path),
+        "logging.save_logs": True,
+        "logging.format": "jsonl",
+        "logging.console_trace": False,
+        "backend.api_mode": "chat_completions",
+        "backend.completions_url": "http://localhost:1/v1/chat/completions",
+        "agent.model": "test-model",
+        "launch_root": str(tmp_path),
+        "agent.use_local_subagents": True,
+    }
+    notes: list = []
+    ctx = await rc.acreate_run_context(
+        make_settings(config), on_trace_note=notes.append
+    )
+    orch = SimpleNamespace(
+        usage=UsageAccount(),
+        default_model="test-model",
+        stop_requested=False,
+        state_id="orch",
+        discard_writes_after_stop=False,
+    )
+    probe = {"probe": {"tool_fabric": _ProbeTool, "spec": {}}}
+
+    async def child_run(messages, child_state, child_ctx, **kwargs):
+        emit_trace_note(child_ctx, "отказ модели ребёнка")
+        await aapply_tool_result(
+            "probe", {}, probe, child_ctx, call_id="child"
+        )
+        return "done"
+
+    await aapply_tool_result(
+        "subagent_worker",
+        {"reason": "r", "task": "t"},
+        None,
+        ctx,
+        state=orch,
+        run_agent_func=child_run,
+        call_id="launch",
+    )
+
+    assert _call_ids(notes) == [("call", "launch"), ("call", "child")]

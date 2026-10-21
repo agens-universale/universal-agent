@@ -171,3 +171,85 @@ async def test_inline_skill_display_stays_clean(tmp_path, monkeypatch):
         assert len(replies) == 1
         assert "чистый промпт" in replies[0]._text
         assert "DELIVERY" not in replies[0]._text
+
+
+class _ChildInputRunner:
+    """Идущий прогон, ввод которого сейчас уходит субагенту."""
+
+    def __init__(self):
+        self.added: list[dict] = []
+
+    def is_running(self) -> bool:
+        return True
+
+    def is_child_input_active(self) -> bool:
+        return True
+
+    def add_message(self, message: dict) -> None:
+        self.added.append(message)
+
+
+def _child_input_app(tmp_path, monkeypatch, *, available: bool):
+    from gc_core.tools.skills import registry as sreg
+    from gc_core.tools.skills import skill_delivery as sd
+    from gc_tui.app import TuiApp
+
+    monkeypatch.setattr(sreg, "get_skills_registry", lambda cfg: object())
+    monkeypatch.setattr(
+        sd, "build_skill_delivery", _as_coro(lambda skill_id, reg: "DLV")
+    )
+    monkeypatch.setattr(
+        sd, "skill_is_available", _as_coro(lambda skill_id, reg: available)
+    )
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
+    )
+    app.active_runner = _ChildInputRunner()
+    return app
+
+
+@pytest.mark.asyncio
+async def test_skill_prompt_to_subagent_resets_delivery_marker(
+    tmp_path, monkeypatch
+):
+    """`/skill X текст` ушёл субагенту: реплики родителя нет, и итог
+    доставки не прилипает к следующей реплике родителя."""
+    pytest.importorskip("textual")
+    from gc_tui.widgets.user_reply import UserReplyContainer
+
+    app = _child_input_app(tmp_path, monkeypatch, available=True)
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        await scr._deliver_skill_with_prompt("coder", "сделай")
+        await pilot.pause()
+        assert app.active_runner.added[0]["skill_loaded"] == "coder"
+        assert scr._pending_skill_marker is None
+        assert list(scr.query(UserReplyContainer)) == []
+        scr._mount_user_reply("потом", state="pending")
+        await pilot.pause()
+        (reply,) = scr.query(UserReplyContainer)
+        assert reply._skill is None
+
+
+@pytest.mark.asyncio
+async def test_skill_only_reply_to_subagent_is_not_drawn(
+    tmp_path, monkeypatch
+):
+    """`/skill X` без текста субагенту: загруженный — без реплики
+    родителя; ненайденный — реплика с ошибкой (в тред она не идёт)."""
+    pytest.importorskip("textual")
+    from gc_tui.widgets.user_reply import UserReplyContainer
+
+    app = _child_input_app(tmp_path, monkeypatch, available=True)
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr._mount_skill_only_reply("coder", "DLV", True)
+        await pilot.pause()
+        assert list(scr.query(UserReplyContainer)) == []
+        assert scr._pending_skill_marker is None
+        scr._mount_skill_only_reply("nope", "DLV", False)
+        await pilot.pause()
+        (reply,) = scr.query(UserReplyContainer)
+        assert reply._skill_error is True

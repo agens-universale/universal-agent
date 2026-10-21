@@ -333,3 +333,28 @@ async def test_call_note_waits_for_its_row_then_falls_back(tmp_path):
         rows = {r.call_id: r for r in scr.query(ToolCallRow)}
         assert _call_bodies(rows["late"]) == "! дождалась"
         assert _standalone(scr) == [("потерялась", True)]
+
+
+@pytest.mark.asyncio
+async def test_waiting_note_of_another_thread_is_dropped(tmp_path):
+    """Пометка ждала строку вызова в треде A, сессию сменили на B: в ленту B
+    она не попадает — ни под строкой с тем же call_id, ни строкой `!`."""
+    pytest.importorskip("textual")
+    from gc_tui.widgets.tool_call_row import ToolCallRow
+
+    other = "c" * 32
+    async with _app(tmp_path).run_test() as pilot:
+        _write_thread(tmp_path / "threads", other)
+        scr = pilot.app.screen
+        scr.attach_active_task(_TID)
+        await pilot.pause()
+        await _drained(pilot, TraceNote("из A", "call", "late"))
+        assert scr._waiting_notes
+        scr.attach_active_task(other)
+        await pilot.pause()
+        scr._render_event(_call_event(10, "late", "fs_view_image"))
+        await pilot.pause(0.7)
+        assert scr._waiting_notes == []
+        (row,) = [r for r in scr.query(ToolCallRow) if r.call_id == "late"]
+        assert row._consequence_bodies() == []
+        assert _standalone(scr) == []
