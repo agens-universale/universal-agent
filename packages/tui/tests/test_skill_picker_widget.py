@@ -2,12 +2,12 @@
 
 import pytest
 
-_SKILLS = [
+_SKILLS = [  # порядок показа: без пакета первыми, затем пакеты
+    {"id": "skill-creator"},
     {"id": "supercoder:planner"},
     {"id": "supercoder:coder"},
     {"id": "supercoder:critic"},
     {"id": "codebase:using-codebase"},
-    {"id": "skill-creator"},
 ]
 
 
@@ -56,9 +56,9 @@ def test_move_selection_wraps_around():
     from gc_tui.widgets.skill_picker import SkillPicker
 
     p = SkillPicker(_SKILLS, initial_filter="")
-    assert p.selected_skill()["id"] == "supercoder:planner"
+    assert p.selected_skill()["id"] == "skill-creator"
     p.move_selection(1)
-    assert p.selected_skill()["id"] == "supercoder:coder"
+    assert p.selected_skill()["id"] == "supercoder:planner"
     p.move_selection(-2)
     # wrap: 1 -> -1 -> last index (len(_SKILLS) - 1)
     assert p.selected_skill()["id"] == _SKILLS[-1]["id"]
@@ -70,7 +70,7 @@ def test_set_filter_resets_selection_to_zero():
 
     p = SkillPicker(_SKILLS, initial_filter="")
     p.move_selection(2)
-    assert p.selected_skill()["id"] == "supercoder:critic"
+    assert p.selected_skill()["id"] == "supercoder:coder"
     p.set_filter("code")
     # фильтр сменился: selected должен сброситься на индекс 0 текущей выборки
     assert p.selected_skill()["id"] == p._visible_rows()[0]["id"]
@@ -95,7 +95,7 @@ def _plain(widget):
     return str(widget.content)
 
 
-def test_rows_grouped_by_pack_with_headers_and_flat_last():
+def test_flat_skills_first_without_header_then_pack_groups():
     pytest.importorskip("textual")
     from gc_tui.widgets.skill_picker import SkillPicker
 
@@ -104,12 +104,13 @@ def test_rows_grouped_by_pack_with_headers_and_flat_last():
     heads = [
         _plain(w).strip() for w in rows if w.has_class("palette-pack-head")
     ]
-    assert heads == ["articles", "default-coworker", "без пакета"]
+    assert heads == ["articles", "default-coworker"]
+    assert not rows[0].has_class("palette-pack-head")
     assert [s["id"] for s in p._visible_rows()] == [
+        "skill-creator",
         "articles:article-creator",
         "articles:editor",
         "default-coworker:research",
-        "skill-creator",
     ]
     assert not any(
         w.has_class("palette-row")
@@ -118,13 +119,25 @@ def test_rows_grouped_by_pack_with_headers_and_flat_last():
     )
 
 
+def test_flat_skill_name_at_header_x_description_column_shared():
+    pytest.importorskip("textual")
+    from gc_tui.widgets.skill_picker import SkillPicker
+
+    p = SkillPicker(_PACKED)
+    rows = _rows(p)
+    flat = rows[0].content.plain
+    assert flat.startswith(" skill-creator ")
+    head = _plain(rows[1])
+    assert head.index("articles") == flat.index("skill-creator")
+
+
 def test_skill_row_short_name_indented_with_grey_description():
     pytest.importorskip("textual")
     from gc_tui import palette as _pal
     from gc_tui.widgets.skill_picker import SkillPicker
 
     p = SkillPicker(_PACKED)
-    row = _rows(p)[1]  # первая строка под шапкой articles
+    row = _rows(p)[2]  # первая строка под шапкой articles
     assert row.has_class("palette-skill-row")
     text = row.content
     name_w = len("article-creator") + 3  # самое длинное видимое короткое имя
@@ -177,7 +190,7 @@ def test_arrows_skip_pack_headers():
         p.move_selection(1)
     assert seen == [s["id"] for s in p._visible_rows()]
     p.move_selection(-1)
-    assert p.selected_skill()["id"] == "skill-creator"
+    assert p.selected_skill()["id"] == "default-coworker:research"
     _, selected = p._row_widgets()
     assert selected.has_class("palette-skill-row")
     assert not selected.has_class("palette-pack-head")
@@ -200,4 +213,4 @@ def test_desired_height_counts_pack_headers():
     from gc_tui.widgets.skill_picker import SkillPicker
 
     p = SkillPicker(_PACKED)
-    assert p.desired_height == len(_PACKED) + 3 + 2 + 2
+    assert p.desired_height == len(_PACKED) + 2 + 2 + 2

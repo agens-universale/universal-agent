@@ -4,11 +4,13 @@
 та же модель состояния (filter + selected index). Принимает готовый `list[dict]` —
 загрузку из реестра делает вызывающий код (TraceScreen).
 
-Скиллы сгруппированы по пакету (часть id до `:`): серая невыбираемая шапка
-пакета, под ней с отступом короткие имена цветом скилла и серым описание в
-общей колонке (геометрия — `palette_layout`, как у палитры). Скиллы без
-пакета — последней группой «без пакета». Выбор и вставка — по скиллам,
-шапки стрелки проходят мимо; вставляется по-прежнему полный id.
+Скиллы без пакета идут первыми, без шапки; затем группы по пакету (часть
+id до `:`): светло-серая невыбираемая шапка, под ней с отступом короткие
+имена цветом скилла. Имя скилла без пакета стоит на месте шапки, описания
+всех строк — серым в одной колонке (геометрия — `palette_layout`, как у
+палитры). Выбор и вставка — по скиллам, шапки стрелки проходят мимо;
+вставляется по-прежнему полный id. Шапка над выбранным первым скиллом
+группы докручивается в видимую область вместе с ним.
 """
 
 from __future__ import annotations
@@ -30,8 +32,8 @@ from gc_tui.widgets.palette_layout import (
 from gc_tui.widgets.palette_rows import PaletteRowsMixin
 
 _HINT = "↑↓ выбрать · Tab дополнить · Enter выполнить · Esc закрыть"
-_NO_PACK = "без пакета"
-_INDENT = "   "  # ведущий пробел строки + отступ скилла под шапкой (2)
+_HEAD = " "  # ведущий пробел строки: здесь шапка и скилл без пакета
+_INDENT = "   "  # ведущий пробел + отступ скилла под шапкой (2)
 
 
 def _pack_of(skill: dict) -> str:
@@ -40,16 +42,12 @@ def _pack_of(skill: dict) -> str:
 
 
 def _grouped(skills: list[dict]) -> list[tuple[str, list[dict]]]:
-    """Группы (пакет, скиллы) в порядке первого появления; без пакета —
-    последней группой «без пакета»."""
-    groups: dict[str, list[dict]] = {}
+    """Группы (пакет, скиллы): без пакета (пакет "") — первой, затем
+    пакеты в порядке первого появления."""
+    groups: dict[str, list[dict]] = {"": []}
     for skill in skills:
         groups.setdefault(_pack_of(skill), []).append(skill)
-    flat = groups.pop("", None)
-    result = list(groups.items())
-    if flat:
-        result.append((_NO_PACK, flat))
-    return result
+    return [(pack, group) for pack, group in groups.items() if group]
 
 
 class SkillPicker(PaletteRowsMixin, VerticalScroll):
@@ -85,14 +83,17 @@ class SkillPicker(PaletteRowsMixin, VerticalScroll):
         )
 
     def _format_row(self, skill: dict) -> Text:
-        """Короткое имя (цвет — классом `.palette-skill-row`) с отступом под
-        шапкой пакета, затем серым описание до правого края строки."""
-        name_w = self._name_col_w()
-        text = Text(_INDENT + fit_name(skill_short(skill)).ljust(name_w))
+        """Короткое имя (цвет — классом `.palette-skill-row`): под шапкой
+        пакета — с отступом, без пакета — на месте шапки; затем серым
+        описание с общей для всех строк позиции до правого края."""
+        desc_x = len(_INDENT) + self._name_col_w()
+        lead = _INDENT if _pack_of(skill) else _HEAD
+        name = fit_name(skill_short(skill)).ljust(desc_x - len(lead))
+        text = Text(lead + name)
         desc = str(skill.get("description") or "")
         width = self._line_width()
         if width:
-            desc = fit_text(desc, max(1, width - len(_INDENT) - name_w))
+            desc = fit_text(desc, max(1, width - desc_x))
         text.append(desc, style=_pal.DIM)
         return text
 
@@ -121,7 +122,8 @@ class SkillPicker(PaletteRowsMixin, VerticalScroll):
         return width - 2 if width else 0  # -2 — padding строки
 
     def _row_widgets(self) -> tuple[list[Static], Optional[Static]]:
-        """Шапки пакетов (невыбираемые) и строки скиллов под ними."""
+        """Шапки пакетов (невыбираемые) и строки скиллов под ними; у
+        группы без пакета шапки нет."""
         groups = self._visible_groups()
         if not groups:
             return super()._row_widgets()
@@ -129,9 +131,12 @@ class SkillPicker(PaletteRowsMixin, VerticalScroll):
         selected: Optional[Static] = None
         idx = 0
         for pack, group in groups:
-            widgets.append(
-                Static(f" {pack}", classes="palette-pack-head", markup=False)
-            )
+            if pack:
+                widgets.append(
+                    Static(
+                        _HEAD + pack, classes="palette-pack-head", markup=False
+                    )
+                )
             for skill in group:
                 classes = "palette-row palette-skill-row"
                 if idx == self._selected:
@@ -142,6 +147,20 @@ class SkillPicker(PaletteRowsMixin, VerticalScroll):
                 widgets.append(row)
                 idx += 1
         return widgets, selected
+
+    def _reveal(self, row: Static) -> None:
+        """Выбранная строка в видимой области; первая строка списка — с
+        самого верха, первый скилл группы — вместе с шапкой над ним
+        (иначе при подъёме шапка остаётся за краем прокрутки)."""
+        if row.parent is not self:  # строки уже пересобраны новым нажатием
+            return
+        if self._selected == 0:
+            self.scroll_home(animate=False, immediate=True)
+            return
+        row.scroll_visible(animate=False, immediate=True)
+        above = self.children[self.children.index(row) - 1]
+        if above.has_class("palette-pack-head"):
+            above.scroll_visible(animate=False, immediate=True)
 
     def _apply_size(self) -> None:
         """Textual не учитывает докнутых детей (`.palette-footer`, `dock: bottom`)
@@ -159,7 +178,7 @@ class SkillPicker(PaletteRowsMixin, VerticalScroll):
         main.py::_sync_trace_max_height берёт это значение напрямую — недосчёт
         выдавливал бы нижнюю рамку пикера за экран."""
         groups = self._visible_groups()
-        flow = sum(1 + len(g) for _, g in groups) if groups else 1
+        flow = sum(bool(p) + len(g) for p, g in groups) if groups else 1
         return flow + 2 + 2
 
     def selected_skill(self) -> Optional[dict]:
