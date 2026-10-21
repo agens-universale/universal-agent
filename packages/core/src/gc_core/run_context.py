@@ -45,6 +45,7 @@ from gc_core.execution_workspace import (
     aprime_backend_cwd,
     areconcile_remote_root,
     build_execution_workspace,
+    launch_root_from_config,
 )
 from gc_core.mcp_session_owner import new_owner_token, use_owner
 from gc_core.model_router import (
@@ -623,6 +624,10 @@ def _prepare_run_context(
     всё, что принимают ``settings_of``/``runtime_of`` (``LoadedSettings``).
     """
     effective_run_id = run_id or generate_run_id()
+    # Проект рана — каталог хода (``launch_root`` фронтенда: chat и A2A ведут
+    # ход в своём каталоге), а не каталог процесса; без корня — текущий.
+    # До подмены корня песочницей (workdir=auto): её каталог — не проект.
+    project_root = launch_root_from_config(settings)
     backend = resolve_os_backend(
         settings,
         environment=environment,
@@ -641,7 +646,7 @@ def _prepare_run_context(
     if agent_store is None:
         agent_store = FileAgentStore(settings)
     # Проект рана строится до контекста: реестр скиллов нужен раньше.
-    project = project_key_for(str(_resolve_project_gc_dir().parent), settings)
+    project = project_key_for(project_root, settings)
     skills_registry = agent_store.skills_registry(
         settings, backend=backend, project=project
     )
@@ -783,7 +788,7 @@ def _finish_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING
         tools_description=tools_description,
         mcp_status=mcp_status,
         registered_tool_names=list(registered_names or []),
-        project_gc_dir=str(_resolve_project_gc_dir()),
+        project_gc_dir=str(_resolve_project_gc_dir(prep.project.root)),
         workspace_root=workspace.root,
         workspace_shell=workspace.shell,
         workspace_os_name=workspace.os_name,
