@@ -66,10 +66,12 @@ from gc_tui.widgets.static_content import update_if_changed
 # паузы в базовом амбере, без дыхания; elapsed заморожен. Не ⏸: тот числится
 # эмодзи, и часть терминалов (Windows Terminal) рисует его в две клетки.
 _PAUSE_GLYPH = "‖"
-# Ритм мигания ● в кадрах 0.1с-тика (решение владельца): 0.4с виден,
-# 0.6с скрыт.
-_BLINK_ON_TICKS = 4
-_BLINK_PERIOD_TICKS = 10
+# Ритм мигания ● в кадрах 0.1с-тика (решение владельца): 0.5с виден,
+# 0.7с скрыт.
+_BLINK_ON_TICKS = 5
+_BLINK_PERIOD_TICKS = 12
+# Пустая клетка справа у полной строки: хвост не прижат к полосе прокрутки.
+_RIGHT_GUTTER = 1
 
 #: Итог вызова: глиф, его цвет и цвет строки `└` итога. Стоп и лимит —
 #: не сбой (K4), отказ — не сбой, а решение политики или человека: цветом
@@ -398,7 +400,9 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         tail = self._render_tail()
         text = Text()
         text.append(self._label, style=_TOOL_NAME)
-        target = self._fit_target(text.cell_len + tail.cell_len + 2)
+        target = self._fit_target(
+            text.cell_len + tail.cell_len + 2 + _RIGHT_GUTTER
+        )
         if target:
             start = len(text.plain) + 2
             text.append(f"  {target}", style=_DIM)

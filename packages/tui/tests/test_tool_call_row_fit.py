@@ -221,5 +221,7 @@ async def test_running_tail_not_under_scrollbar(tmp_path, width, elapsed):
         content = row.query_one(".trace-content").region
         assert content.right <= visible.right
         strip = pilot.app.screen._compositor.render_strips()[content.y]
-        on_screen = strip.text[visible.x : visible.right].rstrip()
-        assert on_screen.endswith(f"… · {format_duration(elapsed)}")
+        line = strip.text[visible.x : visible.right]
+        assert line.rstrip().endswith(f"… · {format_duration(elapsed)}")
+        # Полная строка не прижата к полосе: справа есть хотя бы одна клетка.
+        assert line.endswith(" ")

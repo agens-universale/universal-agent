@@ -483,13 +483,13 @@ def test_running_glyph_blinks_by_disappearing():
     assert on_width == off_width
 
 
-def test_blink_rhythm_visible_400ms_hidden_600ms():
-    """Ритм на 0.1с-тике (решение владельца): 0.4с виден, 0.6с скрыт."""
+def test_blink_rhythm_visible_500ms_hidden_700ms():
+    """Ритм на 0.1с-тике (решение владельца): 0.5с виден, 0.7с скрыт."""
     from gc_tui.widgets.tool_call_row import ToolCallRow
 
     row = ToolCallRow(call_id="c1", label="t", target="")
-    seen = [_glyph_at(row, f)[0] for f in range(20)]
-    assert seen == (["●"] * 4 + [" "] * 6) * 2
+    seen = [_glyph_at(row, f)[0] for f in range(24)]
+    assert seen == (["●"] * 5 + [" "] * 7) * 2
 
 
 def test_trace_timer_tail_has_no_space_before_unit():
