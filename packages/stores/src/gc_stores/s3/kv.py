@@ -166,6 +166,17 @@ class S3KV(KV):
             )
         self._checked = True
 
+    def unavailable(self, exc: BaseException) -> bool:
+        if isinstance(exc, (OSError, TimeoutError)):
+            return True
+        try:
+            import botocore.exceptions as errors
+        except ImportError:  # драйвера нет — это не обрыв соединения
+            return False
+        return isinstance(
+            exc, (errors.ConnectionError, errors.HTTPClientError)
+        )
+
     async def close(self) -> None:
         """Закрыть клиент; повтор безвреден."""
         if self._stack is None:

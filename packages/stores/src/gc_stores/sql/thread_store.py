@@ -58,7 +58,13 @@ from gc_stores.rows import (
     message_key,
     stamp,
 )
-from gc_stores.sql.database import Conn, Database, in_transaction
+from gc_stores.sql.database import (
+    Conn,
+    Database,
+    guarded,
+    in_transaction,
+    read_on,
+)
 from gc_stores.sql.dialect import Dialect
 from gc_stores.sql.listing import list_query
 from gc_stores.sql.queries import SqlQueries
@@ -117,13 +123,12 @@ class SqlThreadStore(ThreadStore):
             return await schema.applied_version(conn, self._d)
 
     async def _write(self, work: Callable[[Conn], Awaitable[T]]) -> T:
-        await self._ready()
+        await guarded(self._db, self._ready())
         return await in_transaction(self._db, work)
 
     async def _read(self, work: Callable[[Conn], Awaitable[T]]) -> T:
-        await self._ready()
-        async with self._db.connection() as conn:
-            return await work(conn)
+        await guarded(self._db, self._ready())
+        return await read_on(self._db, work)
 
     def protected_paths(self) -> list[str]:
         """Файлы базы на диске машины (у сетевых баз — нет). Объявление

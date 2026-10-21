@@ -46,6 +46,7 @@ from gc_core.threads.rules import (
     check_side_writer,
     check_writer,
     granted_lease,
+    info_after_set,
     page_of,
     patched_frontend,
     same_lease,
@@ -227,7 +228,8 @@ class MemoryThreadStore(ThreadStore):
         if change.set_usage is not None:
             thread.usage = change.set_usage.model_copy(deep=True)
         if change.set_info is not None:
-            thread.info = change.set_info.model_copy(deep=True)
+            thread.info = info_after_set(thread.info, change.set_info)
+            thread.info = thread.info.model_copy(deep=True)
         if change.set_runtime is not None:
             thread.runtime = change.set_runtime.model_copy(deep=True)
         if change.set_extra is not None:

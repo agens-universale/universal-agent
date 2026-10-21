@@ -70,6 +70,7 @@ from gc_core.threads.rules import (
     check_side_writer,
     check_writer,
     granted_lease,
+    info_after_set,
     page_of,
     patched_frontend,
     same_lease,
@@ -1613,8 +1614,9 @@ class _Commit:
         meta = self.store._meta(key)
         parts = parts_from_meta(meta)
         updates: dict[str, Any] = {}
+        if change.set_info is not None:
+            updates["info"] = info_after_set(parts.info, change.set_info)
         for field, value in (
-            ("info", change.set_info),
             ("state", change.set_state),
             ("usage", change.set_usage),
             ("runtime", change.set_runtime),

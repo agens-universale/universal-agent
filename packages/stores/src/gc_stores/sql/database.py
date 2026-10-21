@@ -13,6 +13,8 @@ from collections.abc import Awaitable, Callable, Mapping
 from contextlib import AbstractAsyncContextManager
 from typing import Any, Protocol, TypeVar
 
+from gc_core.threads.errors import StoreUnavailable
+
 T = TypeVar("T")
 
 #: Сколько раз повторить транзакцию, которую база отменила из-за дедлока
@@ -62,6 +64,11 @@ class Database(ABC):
         del exc
         return False
 
+    def unavailable(self, exc: BaseException) -> bool:
+        """Соединения с базой нет или оно оборвалось — запись повторит
+        вызывающий (``StoreUnavailable``)."""
+        return isinstance(exc, (ConnectionError, TimeoutError))
+
     def protected_paths(self) -> list[str]:
         """Файлы базы на диске машины (SQLite); у сетевых — нет."""
         return []
@@ -73,15 +80,40 @@ async def in_transaction(
     *,
     attempts: int = ATTEMPTS,
 ) -> T:
-    """``work`` в транзакции; дедлок или сериализация — повтор целиком."""
+    """``work`` в транзакции; дедлок или сериализация — повтор целиком,
+    обрыв соединения — ``StoreUnavailable``."""
     for attempt in range(attempts):
         try:
             async with db.transaction() as conn:
                 return await work(conn)
         except Exception as exc:
+            if db.unavailable(exc):
+                raise StoreUnavailable(str(exc) or type(exc).__name__) from exc
             if attempt + 1 >= attempts or not db.retryable(exc):
                 raise
     raise AssertionError("unreachable")
+
+
+async def guarded(db: Database, call: Awaitable[T]) -> T:
+    """Вызов к базе вне ``in_transaction``/``read_on`` (сверка схемы):
+    обрыв соединения — ``StoreUnavailable``."""
+    try:
+        return await call
+    except Exception as exc:
+        if db.unavailable(exc):
+            raise StoreUnavailable(str(exc) or type(exc).__name__) from exc
+        raise
+
+
+async def read_on(db: Database, work: Callable[[Conn], Awaitable[T]]) -> T:
+    """``work`` на соединении без транзакции; обрыв — ``StoreUnavailable``."""
+    try:
+        async with db.connection() as conn:
+            return await work(conn)
+    except Exception as exc:
+        if db.unavailable(exc):
+            raise StoreUnavailable(str(exc) or type(exc).__name__) from exc
+        raise
 
 
 class LoopBound:

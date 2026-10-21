@@ -63,7 +63,13 @@ from gc_core.threads.store import ThreadStore
 
 from gc_stores.common import EXTENSIONS, apply_sets, apply_side
 from gc_stores.kv import keys
-from gc_stores.kv.base import KV, Versioned, ensure_format, read_format
+from gc_stores.kv.base import (
+    KV,
+    Versioned,
+    ensure_format,
+    guarded,
+    read_format,
+)
 from gc_stores.kv.head import Chunk, Head
 from gc_stores.rows import HISTORY, dumps, id_key, message_key, stamp
 
@@ -123,7 +129,7 @@ class KvThreadStore(ThreadStore):
         clock: Callable[[], datetime] | None = None,
         attempts: int = ATTEMPTS,
     ) -> None:
-        self._kv = kv
+        self._kv = guarded(kv)
         self._clock = clock or (lambda: datetime.now(UTC))
         self._attempts = attempts
         self._ready_done = False

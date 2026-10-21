@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from gc_core.threads.models import SideChange, ThreadChange
-from gc_core.threads.rules import patched_frontend
+from gc_core.threads.rules import info_after_set, patched_frontend
 
 from gc_stores.rows import ThreadRow
 
@@ -22,7 +22,7 @@ def apply_sets(row: ThreadRow, change: ThreadChange) -> None:
     if change.set_usage is not None:
         row.usage = change.set_usage
     if change.set_info is not None:
-        row.info = change.set_info
+        row.info = info_after_set(row.info, change.set_info)
     if change.set_runtime is not None:
         row.runtime = change.set_runtime
     if change.set_extra is not None:
