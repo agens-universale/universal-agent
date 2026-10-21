@@ -190,6 +190,32 @@ def open_thread_store(args: argparse.Namespace) -> Any:
     return STORES[_need_store(args)].threads(args)
 
 
+def open_schema_parts(args: argparse.Namespace) -> list[tuple[str, Any]]:
+    """Хранилища со схемой из ``storage`` config.yml (``--config``): части
+    ``threads`` и ``agent`` в базах, одна база на две части — один раз.
+    Обе части — файлы: ``StorageConfigError``."""
+    from gc_core.config_modules.storage import FILES
+    from gc_core.settings import settings_of
+
+    from gc_stores.configured import StorageConfigError, open_part
+
+    settings = _configured(args)
+    storage = settings_of(settings).storage
+    threads = storage.part("threads")
+    kind, params = storage.part("agent")
+    params.pop("agent_id", None)
+    wanted = []
+    if threads[0] != FILES:
+        wanted.append("threads")
+    if kind != FILES and (kind, params) != threads:
+        wanted.append("agent")
+    if not wanted:
+        raise StorageConfigError(
+            "в storage config.yml обе части — files: схемы у файлов нет"
+        )
+    return [(part, open_part(settings, part)) for part in wanted]
+
+
 def open_agent_store(args: argparse.Namespace) -> Any:
     if args.config:
         from gc_stores.configured import open_part
