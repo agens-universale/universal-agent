@@ -1,6 +1,7 @@
 """Проект в хранилище агента: какие ресурсы его требуют и как называется сам
 проект (``agent.project_id`` или slug пути)."""
 
+from pathlib import Path
 from types import SimpleNamespace
 
 from gc_core.agent_store import (
@@ -111,3 +112,21 @@ async def test_run_context_gives_its_project_to_the_skills_registry(
     )
     await acreate_run_context(cfg, agent_store=Recording())
     assert seen and seen[0] == ProjectKey("p1", os.getcwd())
+
+
+async def test_run_project_follows_the_turn_directory(tmp_path, monkeypatch):
+    """Ход chat и A2A идёт в своём каталоге (``launch_root``): проект рана,
+    его память и ``.gc`` — оттуда, а не из каталога процесса сервера."""
+    from gc_core.agent_store import project_key_of
+    from gc_core.run_context import acreate_run_context
+
+    server_cwd, turn = tmp_path / "server", tmp_path / "turn"
+    server_cwd.mkdir()
+    turn.mkdir()
+    monkeypatch.chdir(server_cwd)
+    cfg = make_settings(
+        {"agent.model": "M", "logging.save_logs": False}
+    ).with_runtime(launch_root=str(turn))
+    ctx = await acreate_run_context(cfg)
+    assert Path(ctx.project_gc_dir) == turn / ".gc"
+    assert project_key_of(ctx).root == str(turn)
