@@ -18,6 +18,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Awaitable, Callable, Literal, Optional
 
 if TYPE_CHECKING:
+    from gc_core.vision.notes import TraceNote
+
     from gc_tui.widgets.user_reply import UserReplyContainer
 
 from gc_core.agent_edits.ctx import section_limit
@@ -328,6 +330,9 @@ _PLAN_CMD_ENTERED = (
 _PLAN_CMD_NO_PLAN = "плана пока нет — опишите задачу, и агент предложит план"
 _PLAN_CMD_NO_PLAN_BUSY = "плана пока нет"
 _PLAN_CLEAR_HINT = "/plan clear — убрать план из сессии"
+# Сколько тиков опроса (по 250 мс) пометка вызова ждёт его строку в ленте,
+# прежде чем встать отдельной строкой `!`.
+_NOTE_OWNER_WAIT_TICKS = 8
 # Вставка изображения (спека §12, визуальный контракт §2). «Вставка…» держится до
 # результата: погасшая поверх неё подсказка и её собственный таймер возвращают её же
 # (`_clear_footer_hint`), снимает её конец вставки; саму вставку ограничивает
@@ -482,6 +487,9 @@ class TraceScreen(Screen):
         self._in_poll_tick = False
         self._session_lock_hb_mono: float = 0.0  # throttle heartbeat ≤ 1 Гц
         self._error_shown: bool = False
+        # Пометки вызова, чья строка ещё не в ленте: (тред, пометка, тиков
+        # ожидания осталось) — см. _drain_trace_notes.
+        self._waiting_notes: list[tuple[str | None, TraceNote, int]] = []
         self._mcp_status_row = (
             None  # Optional[Static] — live MCP-loading индикатор
         )
@@ -4438,12 +4446,19 @@ class TraceScreen(Screen):
         sink = getattr(self.app, "_trace_note_sink", None)
         if sink is None:
             return
-        for note in sink.drain(self._active_task_id):
+        tid = self._active_task_id
+        waiting = [(n, t) for t_id, n, t in self._waiting_notes if t_id == tid]
+        fresh = [(n, _NOTE_OWNER_WAIT_TICKS) for n in sink.drain(tid)]
+        self._waiting_notes = []
+        for note, ticks in waiting + fresh:
             owner = self._trace_note_owner(note)
-            if owner is None:
-                self._mount_standalone(note.text, "warn")
-            else:
+            if owner is not None:
                 owner.add_consequence(note_consequence(note.text))
+            elif note.owner == "call" and ticks > 0:
+                # Строка вызова ещё не в ленте — ждём её несколько тиков.
+                self._waiting_notes.append((tid, note, ticks - 1))
+            else:
+                self._mount_standalone(note.text, "warn")
 
     def _trace_note_owner(self, note):
         """Владелец пометки в ленте: строка вызова `call_id` (верхняя или
@@ -5134,17 +5149,19 @@ class TraceScreen(Screen):
         # /stop появлялся/исчезал без отдельных вызовов из start/stop путей.
         self._refresh_footer()
         self._update_terminal_title()  # статус живой в табе: [running]→[completed] и т.д.
-        # Пометки «изображение не просмотрено» — раньше хвоста записей тика: пометка
-        # случилась до ответа модели на повтор. При заморозке выделения ждут в очереди.
-        if not _frozen:
-            self._drain_trace_notes()
         # F3: при freeze хвост не читаем и трейс НЕ перерисовываем
         # (wipe/clear_trace/render_records дрожали бы экраном под выделением):
         # курсор стоит, первый тик после MouseUp дочитает накопленный хвост,
-        # сброс или шаг сжатия.
+        # сброс или шаг сжатия. Пометки ленты — после записей тика: строка
+        # вызова-владельца могла прийти в этом же хвосте.
+        if not _frozen:
+            self._poll_trace_tail()
+            self._drain_trace_notes()
+
+    def _poll_trace_tail(self) -> None:
+        """Дочитать и отрисовать хвост записей активного треда."""
         if (
-            _frozen
-            or self._store is None
+            self._store is None
             or self._active_task_id is None
             or self._cursor is None
         ):

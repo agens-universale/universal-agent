@@ -263,16 +263,68 @@ async def test_call_note_sits_under_its_call_row_top_level_and_nested(
         assert _standalone(scr) == []
 
 
+def _append_call_record(tmp_path, call_id: str) -> None:
+    path = tmp_path / "threads" / f"data_cli_{_TID}.jsonl"
+    record = {
+        "type": "message",
+        "seq": 2,
+        "ts": "2026-09-24T10:00:01+00:00",
+        "payload": {
+            "type": "function_call",
+            "id": f"fc_{call_id}",
+            "call_id": call_id,
+            "name": "fs_view_image",
+            "arguments": "{}",
+        },
+    }
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
 @pytest.mark.asyncio
-async def test_note_without_owner_on_screen_is_a_standalone_warn_line(
+async def test_call_note_arriving_with_its_call_record_lands_under_the_row(
     tmp_path,
 ):
-    """Владельца нет на экране — строка `! …` `WARN` в колонке `●`."""
+    """Пометка и запись её вызова пришли в один тик: пометка — под строкой
+    вызова, не отдельной строкой (записи тика рисуются раньше пометок)."""
     pytest.importorskip("textual")
+    from gc_tui.widgets.tool_call_row import ToolCallRow
 
     async with _app(tmp_path).run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(_TID)
         await pilot.pause()
-        await _drained(pilot, TraceNote("потерялась", "call", "нет-такого"))
+        _append_call_record(tmp_path, "c9")
+        await _drained(pilot, TraceNote("не просмотрено", "call", "c9"))
+        rows = {r.call_id: r for r in scr.query(ToolCallRow)}
+        assert rows["c9"]._render_consequence().plain == (
+            "  └ ! не просмотрено"
+        )
+        assert _standalone(scr) == []
+
+
+@pytest.mark.asyncio
+async def test_call_note_waits_for_its_row_then_falls_back(tmp_path):
+    """Строки вызова ещё нет — пометка ждёт несколько тиков; строка
+    появилась — пометка под ней; не появилась — строка `! …` `WARN`."""
+    pytest.importorskip("textual")
+    from gc_tui.widgets.tool_call_row import ToolCallRow
+
+    async with _app(tmp_path).run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(_TID)
+        await pilot.pause()
+        await _drained(
+            pilot,
+            TraceNote("дождалась", "call", "late"),
+            TraceNote("потерялась", "call", "нет-такого"),
+        )
+        assert _standalone(scr) == []
+        _append_call_record(tmp_path, "late")
+        for _ in range(40):  # предел ожидания — несколько тиков по 250 мс
+            await pilot.pause(0.25)
+            if _standalone(scr):
+                break
+        rows = {r.call_id: r for r in scr.query(ToolCallRow)}
+        assert rows["late"]._render_consequence().plain == "  └ ! дождалась"
         assert _standalone(scr) == [("потерялась", True)]
