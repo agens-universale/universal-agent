@@ -111,7 +111,7 @@ async def test_preview_summary_marker_collapsed_then_toggles():
             for w in scr.query(SummaryMarker)
             if w.has_class("summary-marker")
         )
-        prefix = lambda: str(marker.query_one(".trace-prefix").render())
+        prefix = lambda: marker.rule_text().plain
         # свёрнут по умолчанию — стрелка вправо
         assert body.has_class("hidden")
         assert "▸" in prefix() and "▾" not in prefix()

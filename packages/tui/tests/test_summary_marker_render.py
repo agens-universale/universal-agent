@@ -110,7 +110,7 @@ async def test_summary_marker_arrow_flips_on_toggle(tmp_path):
         marker = next(
             w for w in screen.query(TraceRow) if w.has_class("summary-marker")
         )
-        prefix = lambda: str(marker.query_one(".trace-prefix").render())
+        prefix = lambda: marker.rule_text().plain
         assert "▸" in prefix() and "▾" not in prefix()  # свёрнут → вправо
         screen.on_summary_toggle_request(SummaryToggleRequest(3))
         await pilot.pause()

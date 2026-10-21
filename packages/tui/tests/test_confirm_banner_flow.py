@@ -508,11 +508,14 @@ async def test_confirm_ctrl_click_not_open_viewer_for_trace_row(tmp_path):
 
 @pytest.mark.asyncio
 async def test_confirm_click_does_not_toggle_summary_body(tmp_path):
-    """SummaryMarker: клик при активном confirm не раскрывает тело сводки
+    """Метка сжатия: клик при активном confirm не раскрывает тело сводки
     (симметрия с уже стоящим гейтом на Enter)."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
-    from gc_tui.widgets.trace_row import SummaryMarker
+    from gc_tui.services.trace_render import (
+        build_compaction_marker_event,
+        build_compaction_widgets,
+    )
 
     runner = _StubRunner()
     app = TuiApp(
@@ -526,18 +529,9 @@ async def test_confirm_click_does_not_toggle_summary_body(tmp_path):
 
     async with app.run_test() as pilot:
         scr = pilot.app.screen
-        marker = SummaryMarker(
-            prefix="▸ ",
-            content="──── контекст сжат ────",
-            kind_class="summary-marker",
-            event_no=9,
-        )
-        body = SummaryMarker(
-            prefix="   ",
-            content="Контекст сохранён:\nтекст",
-            kind_class="summary-body hidden",
-            event_no=9,
-            focusable=False,
+        marker, body = build_compaction_widgets(
+            build_compaction_marker_event(9, 0, {"synthesis": "текст"}),
+            focusable=True,
         )
         trace = scr.query_one("#trace")
         await trace.mount(marker)
@@ -567,7 +561,10 @@ async def test_click_toggles_summary_body_without_confirm(tmp_path):
     """Контроль: без confirm клик по маркеру по-прежнему раскрывает сводку."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
-    from gc_tui.widgets.trace_row import SummaryMarker
+    from gc_tui.services.trace_render import (
+        build_compaction_marker_event,
+        build_compaction_widgets,
+    )
 
     app = TuiApp(
         threads_dir=str(tmp_path),
@@ -579,18 +576,9 @@ async def test_click_toggles_summary_body_without_confirm(tmp_path):
 
     async with app.run_test() as pilot:
         scr = pilot.app.screen
-        marker = SummaryMarker(
-            prefix="▸ ",
-            content="──── контекст сжат ────",
-            kind_class="summary-marker",
-            event_no=9,
-        )
-        body = SummaryMarker(
-            prefix="   ",
-            content="Контекст сохранён:\nтекст",
-            kind_class="summary-body hidden",
-            event_no=9,
-            focusable=False,
+        marker, body = build_compaction_widgets(
+            build_compaction_marker_event(9, 0, {"synthesis": "текст"}),
+            focusable=True,
         )
         trace = scr.query_one("#trace")
         await trace.mount(marker)

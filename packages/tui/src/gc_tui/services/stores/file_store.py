@@ -13,6 +13,9 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Optional, Sequence
 
+from gc_core.message_format.serialization import (
+    calc_history_chars_for_trigger,
+)
 from gc_core.message_policy.user_message_policy import (
     is_dialog_summary_user_message_text,
     user_content_to_text,
@@ -283,9 +286,9 @@ class FileTaskStore:
         synthesis = _clean_summary(
             user_content_to_text(payload.get("content"))
         )
-        chars_before = sum(
-            len(user_content_to_text((r.get("payload") or {}).get("content")))
-            for r in seg
+        # Мера триггера ядра: аргументы вызовов и вывод тулов тоже объём.
+        chars_before = calc_history_chars_for_trigger(
+            [r.get("payload") or {} for r in seg]
         )
         return {
             "ts": leading.get("ts", ""),

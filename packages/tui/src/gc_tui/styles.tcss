@@ -257,9 +257,15 @@ ToolCallRow { margin-top: 1; }
 .line-bang-out  { color: $dim; }
 .line-bang-fail { color: $err; }
 .line-note      { color: $note-ink; margin-top: 1; }  /* чуть светлее $dim; пустая строка сверху — отделяет ремарку; курсив — только на тексте ремарки (см. note_text), ярлык прямой */
-.summary-marker { color: $deep-dim; margin: 1 0; }  /* пустая строка сверху И снизу — маркер обособлен */
+/* Метка сжатия (спека P3 §2.5): цвета полос и подписи — в самой строке
+   (`compaction_rule`); пустая строка сверху и снизу, у раскрытой — снизу
+   отделяет уже тело. */
+.summary-marker { margin: 1 0; }
+.summary-marker.expanded { margin-bottom: 0; }
 .summary-body   { color: $dim; margin-bottom: 1; }
 .summary-body.hidden { display: none; }
+.summary-body .compaction-content { width: 1fr; height: auto; }
+.summary-body .compaction-head { color: $sub-ink; }
 
 /* Реплика пользователя (спека P3 §2.2): маркер `›` в колонке `●`, подложка
    во всю ширину ленты без кромки; строки следствий `└` — под подложкой. */

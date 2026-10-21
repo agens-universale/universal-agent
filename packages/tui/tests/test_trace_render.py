@@ -4,28 +4,6 @@ from gc_testkit.tui_support import tui_settings
 import pytest
 
 
-def test_compaction_label_with_chars():
-    comp = {
-        "messages_in_segment": 8,
-        "chars_before": 12300,
-        "chars_after": 3100,
-        "synthesis": "x",
-    }
-    from gc_tui.services.trace_render import build_compaction_label
-
-    assert (
-        build_compaction_label(1, comp)
-        == "контекст сжат #1 · 8→1 · 12.3k→3.1k симв"
-    )
-
-
-def test_compaction_label_legacy_no_chars():
-    comp = {"messages_in_segment": 5, "synthesis": "x"}
-    from gc_tui.services.trace_render import build_compaction_label
-
-    assert build_compaction_label(2, comp) == "контекст сжат #2 · 5→1"
-
-
 def test_block_panel_for_code_with_lang():
     pytest.importorskip("textual")
     from gc_tui.widgets.block_panel import BlockPanel
@@ -277,6 +255,7 @@ async def test_render_segments_readonly_parity():
             )
 
     async with _A().run_test() as pilot:
+        await pilot.pause()  # метка сжатия собирается под ширину раскладки
         scr = pilot.app.screen
         body = "\n".join(str(w.render()) for w in scr.query())
         # policy/technical — скрыто (hidden), как на основном экране

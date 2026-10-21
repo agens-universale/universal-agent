@@ -17,7 +17,7 @@ from gc_core.constants.tool_display import (
 )
 
 from gc_tui.models import TraceEvent
-from gc_tui.services.duration_format import format_compact_int
+from gc_tui.services.duration_format import format_round_int
 from gc_tui.services.skill_view import skill_input_name
 from gc_tui.services.trace_retention import (
     apply_payload_retention,
@@ -31,7 +31,11 @@ if TYPE_CHECKING:
 
     from gc_tui.services.trace_mapper import RenderContext
     from gc_tui.widgets.tool_call_row import ToolCallRow
-    from gc_tui.widgets.trace_row import TraceRow
+    from gc_tui.widgets.trace_row import (
+        CompactionBody,
+        CompactionRule,
+        TraceRow,
+    )
 
 # Парсер `[tag] rest` для default meta-кейса (трейс и read-only превью).
 TAG_RE = re.compile(r"^\[(?P<tag>[^\]]+)\]\s*(?P<rest>.*)$")
@@ -113,19 +117,71 @@ def note_consequence(text: str) -> Text:
     return body
 
 
-def build_compaction_label(num: int, comp: dict) -> str:
-    """Метка маркера сжатия: «контекст сжат #N · M→1 · 12.3k→3.1k симв».
+# Лестница подписи метки сжатия (макеты p3_compaction_*): первая, что
+# влезла между полосами. Подпись без недостающих полей (сводка вне
+# сегментов — без номера, тред без счёта — без чисел) пропускается.
+COMPACTION_LABELS = (
+    "контекст сжат #{num} · {before} → {after} символов",
+    "контекст сжат #{num} · {before} → {after}",
+    "сжат #{num} · {before} → {after}",
+    "контекст сжат #{num}",
+    "сжат #{num}",
+    "контекст сжат",
+    "сжат",
+)
+_RULE = "─"
+_RULE_MIN = 2  # полоса с каждой стороны не короче
 
-    Суффикс символов опускается, если chars_before/after отсутствуют (legacy).
-    """
-    label = f"контекст сжат #{num}"
-    msgs = comp.get("messages_in_segment")
-    if msgs:
-        label += f" · {msgs}→1"
-    cb, ca = comp.get("chars_before"), comp.get("chars_after")
-    if cb and ca:
-        label += f" · {format_compact_int(cb)}→{format_compact_int(ca)} симв"
-    return label
+
+def _compaction_label_values(num: Optional[int], comp: Mapping) -> dict:
+    values: dict = {} if num is None else {"num": num}
+    before, after = comp.get("chars_before"), comp.get("chars_after")
+    if before and after:
+        values["before"] = format_round_int(before)
+        values["after"] = format_round_int(after)
+    return values
+
+
+def compaction_labels(num: Optional[int], comp: Mapping) -> list[str]:
+    """Ступени подписи метки от полной к короткой — по данным сжатия."""
+    values = _compaction_label_values(num, comp)
+    labels = []
+    for template in COMPACTION_LABELS:
+        try:
+            labels.append(template.format_map(values))
+        except KeyError:
+            continue
+    return labels
+
+
+def compaction_rule(
+    num: Optional[int], comp: Mapping, width: int, *, expanded: bool
+) -> Text:
+    """Метка сжатия во всю ширину ``width``: `──── ▸ подпись ────`.
+
+    Полосы — `FRAME_ARCHIVE`, подпись — `DIM` (спека P3 §2.5, §10 B).
+    Подпись — первая ступень лестницы, при которой полосы не короче
+    `_RULE_MIN`; не влезла и последняя — она обрезается с `…`."""
+    from rich.cells import cell_len
+    from rich.text import Text
+
+    from gc_tui.palette import DIM, FRAME_ARCHIVE
+
+    arrow = "▾" if expanded else "▸"
+    budget = width - 2 * _RULE_MIN - len(f" {arrow}  ")
+    labels = compaction_labels(num, comp)
+    label = next((x for x in labels if cell_len(x) <= budget), None)
+    if label is None:
+        label = Text(labels[-1])
+        label.truncate(max(budget, 1), overflow="ellipsis")
+        label = label.plain
+    middle = f" {arrow} {label} "
+    bars = max(width - cell_len(middle), 2 * _RULE_MIN)
+    text = Text()
+    text.append(_RULE * (bars // 2), style=FRAME_ARCHIVE)
+    text.append(middle, style=DIM)
+    text.append(_RULE * (bars - bars // 2), style=FRAME_ARCHIVE)
+    return text
 
 
 def build_compaction_marker_event(
@@ -134,16 +190,47 @@ def build_compaction_marker_event(
     """Событие-маркер сжатия сегмента ``segment_index`` (его ``compacted_by``).
 
     Одно на полную перерисовку и шаг сжатия: оба пути строят маркер одинаково.
-    """
+    Номер и данные сжатия — в ``full_payload``: по ним метка пересобирается
+    под ширину ленты."""
+    num = segment_index + 1
     return TraceEvent(
         no=no,
         event_ts_utc_iso=comp.get("ts", ""),
         kind="summary",
         title="summary",
-        summary=build_compaction_label(segment_index + 1, comp),
+        summary=compaction_labels(num, comp)[0],
         summary_content=comp["synthesis"],
-        full_payload={},
+        full_payload={"num": num, "comp": comp},
     )
+
+
+def build_compaction_widgets(
+    ev: TraceEvent, *, focusable: bool
+) -> tuple[CompactionRule, Optional[CompactionBody]]:
+    """Метка сжатия и свёрнутое тело сводки — для живой ленты и превью.
+
+    ``focusable=False`` — превью: Enter там открывает тред, а не сводку.
+    Событие сводки вне сегментов (``dialog_summary`` маппера) номера и
+    счёта не несёт — метка без чисел. Тела нет без текста сводки."""
+    from gc_tui.widgets.trace_row import CompactionBody, CompactionRule
+
+    payload = ev.full_payload if isinstance(ev.full_payload, dict) else {}
+    comp = payload.get("comp") or {}
+    rule = CompactionRule(
+        num=payload.get("num"),
+        comp=comp,
+        event_no=ev.no,
+        focusable=focusable,
+    )
+    text = (ev.summary_content or "").strip()
+    if not text:
+        return rule, None
+    body = CompactionBody(
+        messages=comp.get("messages_in_segment"),
+        text=text,
+        event_no=ev.no,
+    )
+    return rule, body
 
 
 def build_block_widgets(
@@ -343,35 +430,14 @@ def raw_output(ev) -> Optional[str]:
     return None
 
 
-def _mount_summary_widgets(
-    mount_target, label: str, body_text: str, event_no: int
-) -> None:
-    """Маркер сжатия (свёрнут) + тело (.hidden) для read-only превью.
-    Toggle — ТОЛЬКО по клику мышью (on_click постит SummaryToggleRequest;
-    обработчик — PreviewScreen.on_summary_toggle_request). Маркер НЕ focusable:
-    иначе он перехватывал бы Enter (toggle), а в превью Enter = открыть тред.
-    Маркер и тело делят event_no, чтобы toggle находил тело по нему."""
-    from gc_tui.widgets.trace_row import SummaryMarker
-
-    mount_target.mount(
-        SummaryMarker(
-            prefix="▸ ",
-            content=f"──── {label} ────",
-            kind_class="summary-marker",
-            event_no=event_no,
-            focusable=False,
-        )
-    )
-    if body_text:
-        mount_target.mount(
-            SummaryMarker(
-                prefix="   ",
-                content=f"Контекст сохранён:\n{body_text}",
-                kind_class="summary-body hidden",
-                event_no=event_no,
-                focusable=False,
-            )
-        )
+def _mount_compaction(mount_target, ev: TraceEvent) -> None:
+    """Метка сжатия и тело в read-only превью. Метка не focusable: иначе
+    перехватывала бы Enter (в превью Enter — открыть тред); раскрытие —
+    кликом (`PreviewScreen.on_summary_toggle_request`)."""
+    rule, body = build_compaction_widgets(ev, focusable=False)
+    mount_target.mount(rule)
+    if body is not None:
+        mount_target.mount(body)
 
 
 def _dispatch_readonly(
@@ -458,12 +524,7 @@ def _dispatch_readonly(
                 )
             )
     elif ev.kind == "summary":
-        _mount_summary_widgets(
-            mount_target,
-            ev.summary or "контекст сжат",
-            (ev.summary_content or "").strip(),
-            ev.no,
-        )
+        _mount_compaction(mount_target, ev)
     elif ev.kind == "error_msg":
         # Паритет с живым путём (TraceScreen._render_error_msg): ошибка с известным
         # call_id финализирует свою строку-вызов ✗ и не дублируется строкой `!`.
@@ -621,9 +682,9 @@ def render_segments_readonly(
             )
         comp = seg.get("compacted_by")
         if comp:
-            label = build_compaction_label(seg.get("index", 0) + 1, comp)
-            _mount_summary_widgets(
-                mount_target, label, (comp.get("synthesis") or "").strip(), no
+            _mount_compaction(
+                mount_target,
+                build_compaction_marker_event(no, seg.get("index", 0), comp),
             )
             no += 1
     return calls

@@ -138,6 +138,7 @@ from gc_tui.services.trace_render import (
     NESTED_PROSE_PREFIX,
     build_call_row,
     build_compaction_marker_event,
+    build_compaction_widgets,
     level_prefix,
 )
 from gc_tui.services.trace_retention import (
@@ -183,7 +184,11 @@ from gc_tui.widgets.thinking_indicator import (
     is_terminal_indicator_state,
 )
 from gc_tui.widgets.tool_call_row import ToolCallRow
-from gc_tui.widgets.trace_row import TraceRow
+from gc_tui.widgets.trace_row import (
+    CompactionBody,
+    CompactionRule,
+    TraceRow,
+)
 
 # Константы вместо повторяющихся литералов (Sonar S1192).
 _PREFIX_EXPORTED = "[exported] "
@@ -530,9 +535,9 @@ class TraceScreen(Screen):
         self._submit_solution_widgets: list[
             tuple[list[Widget], Optional[TraceRow]]
         ] = []
-        # Mapping event_no → summary-body TraceRow (скрыт; раскрывается при фокусе маркера).
-        self._summary_body_widgets: dict[int, TraceRow] = {}
-        self._summary_marker_widgets: dict[int, TraceRow] = {}
+        # event_no → тело сводки (скрыто; раскрывается кликом/Enter метки).
+        self._summary_body_widgets: dict[int, CompactionBody] = {}
+        self._summary_marker_widgets: dict[int, CompactionRule] = {}
         # Phase 5: ask_human banner state
         self._ask_human_banner = None  # type: Optional[AskHumanBanner]
         self._ask_human_call_id: Optional[str] = None
@@ -3220,28 +3225,11 @@ class TraceScreen(Screen):
             return
 
         if ev.kind == "summary":
-            from gc_tui.widgets.trace_row import SummaryMarker
-
-            marker_label = ev.summary or "контекст сжат"
-            marker = SummaryMarker(
-                prefix="▸ ",
-                content=f"──── {marker_label} ────",
-                kind_class="summary-marker",
-                event_no=ev.no,
-                focusable=True,
-            )
+            marker, body = build_compaction_widgets(ev, focusable=True)
             self._trace_mount(marker)
             self._summary_marker_widgets[ev.no] = marker
-            body_text = (ev.summary_content or "").strip()
-            if body_text:
-                # Свёрнут по умолчанию (.hidden); toggle по клику маркера ИЛИ тела.
-                body = SummaryMarker(
-                    prefix="   ",
-                    content=f"Контекст сохранён:\n{body_text}",
-                    kind_class="summary-body hidden",
-                    event_no=ev.no,
-                    focusable=False,
-                )
+            if body is not None:
+                # Свёрнуто по умолчанию; toggle по клику метки ИЛИ тела.
                 self._trace_mount(body)
                 self._summary_body_widgets[ev.no] = body
             return
@@ -8156,16 +8144,13 @@ class TraceScreen(Screen):
         if body is None:
             return
         marker = self._summary_marker_widgets.get(message.event_no)
-        if body.has_class("hidden"):
-            body.remove_class("hidden")
-            if marker is not None:
-                marker.set_prefix("▾ ")
+        expand = body.has_class("hidden")
+        body.set_class(not expand, "hidden")
+        if marker is not None:
+            marker.set_expanded(expand)
+        if expand:
             # Раскрыли — подвести тело в зону видимости после reflow.
             self.call_after_refresh(body.scroll_visible, animate=False)
-        else:
-            body.add_class("hidden")
-            if marker is not None:
-                marker.set_prefix("▸ ")
 
     def on_copy_block_request(self, event: CopyBlockRequest) -> None:
         """Кнопка ❐ или двойной клик по блоку: копия наружу + в буфер сессии.

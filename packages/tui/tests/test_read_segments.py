@@ -104,3 +104,39 @@ def test_segments_expose_chars_before_after(tmp_path):
     assert segs[0]["compacted_by"]["chars_after"] == 5
     # live-сегмент без сжатия — полей нет (compacted_by is None)
     assert segs[1]["compacted_by"] is None
+
+
+def test_chars_before_is_trigger_measure(tmp_path):
+    """chars_before — мера триггера ядра: с аргументами вызовов и выводом
+    тулов, а не только `content` реплик (спека P3 §2.5)."""
+    from gc_core.message_format.serialization import (
+        calc_history_chars_for_trigger,
+    )
+
+    seg = [
+        {"role": "user", "content": "прочитай файл"},
+        {
+            "type": "function_call",
+            "name": "fs_read_file",
+            "call_id": "c1",
+            "arguments": json.dumps({"path": "client.py"}),
+        },
+        {"type": "function_call_output", "call_id": "c1", "output": "x" * 500},
+        {"role": "assistant", "content": "прочитал"},
+    ]
+    _write_file(
+        tmp_path, f"data_cli_{_TID}__pre_summary__20260603_100000.jsonl", seg
+    )
+    _write_file(
+        tmp_path,
+        f"data_cli_{_TID}.jsonl",
+        [_sum_msg("abcde"), {"role": "user", "content": "вопрос-2"}],
+    )
+
+    segs = FileTaskStore(
+        threads_dir=str(tmp_path), system="cli"
+    ).read_segments(_TID)
+
+    expected = calc_history_chars_for_trigger(seg)
+    assert expected > 500 + len("прочитай файл")
+    assert segs[0]["compacted_by"]["chars_before"] == expected

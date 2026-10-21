@@ -40,3 +40,14 @@ def format_compact_int(n: int) -> str:
     if n >= 1000:
         return f"{n / 1000:.1f}k"
     return str(n)
+
+
+def format_round_int(n: int) -> str:
+    """Круглое целое для меток ленты: 999 → "999", 128300 → "128k",
+    1234567 → "1.2M". Тысячи — целыми, с отбрасыванием остатка: 999999 —
+    это "999k", а не "1000k"."""
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.1f}M"
+    if n >= 1000:
+        return f"{n // 1000}k"
+    return str(n)

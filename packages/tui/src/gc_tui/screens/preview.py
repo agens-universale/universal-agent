@@ -120,15 +120,12 @@ class PreviewScreen(Screen[bool]):
                 marker = w
         if body is None:
             return
-        if body.has_class("hidden"):
-            body.remove_class("hidden")
-            if marker is not None:
-                marker.set_prefix("▾ ")
+        expand = body.has_class("hidden")
+        body.set_class(not expand, "hidden")
+        if marker is not None:
+            marker.set_expanded(expand)
+        if expand:
             self.call_after_refresh(body.scroll_visible, animate=False)
-        else:
-            body.add_class("hidden")
-            if marker is not None:
-                marker.set_prefix("▸ ")
 
     def on_open_image_request(self, message: OpenImageRequest) -> None:
         """Клик по картинке в реплике превью — как на главном экране; футера нет, поэтому
