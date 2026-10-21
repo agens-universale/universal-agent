@@ -209,7 +209,7 @@ async def test_cancel_with_undo_removes_orphan_from_thread(tmp_path):
     реплику из data_*.jsonl по её id — после того, как остановленный ход
     отпустит тред."""
     pytest.importorskip("textual")
-    from gc_core.thread_store import load_thread_messages
+    from gc_testkit.develop_files import load_thread_messages
     from gc_tui.app import TuiApp
     from gc_tui.services.stores.file_store import FileTaskStore
     from gc_tui.widgets.user_reply import UserReplyContainer
@@ -323,7 +323,7 @@ async def test_cancel_with_undo_no_stream_reset_flicker(tmp_path):
 async def test_orphan_cleanup_deferred_while_thread_busy(tmp_path):
     """Пока на треде активен run — удаление откладывается (нет гонки с дозаписью)."""
     pytest.importorskip("textual")
-    from gc_core.thread_store import load_thread_messages
+    from gc_testkit.develop_files import load_thread_messages
     from gc_tui.app import TuiApp
     from gc_tui.services.stores.file_store import FileTaskStore
 

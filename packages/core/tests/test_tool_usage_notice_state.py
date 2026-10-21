@@ -119,7 +119,8 @@ async def test_thread_session_persist_batch_writes_memory_meta(tmp_path):
     """Счётчики напоминаний хода (их ведёт политика в словаре сессии)
     доходят до meta треда на диске."""
     from gc_core.persistence.session_state import session_from_state
-    from gc_core.thread_store import ThreadSession, load_thread_meta
+    from gc_core.thread_store import ThreadSession
+    from gc_testkit.develop_files import load_thread_meta
     from gc_core.threads.file_store import FileThreadStore
 
     threads_dir = tmp_path / "threads"

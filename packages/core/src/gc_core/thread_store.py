@@ -1,8 +1,6 @@
 import json
-import os
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
-from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Set
 
 from gc_core.config_modules.strip_tags_projection import (
     projection_tags_from_config,
@@ -40,14 +38,9 @@ from gc_core.threads.models import (
     Usage,
 )
 from gc_core.threads.session_writer import RetryPolicy, SessionWriter
-from gc_core.utils.atomic_io import atomic_replace
 from gc_core.utils.generate_message_id import (
     generate_msg_id_sha256 as generate_message_id_func,
 )
-
-
-def _utc_now_iso() -> str:
-    return datetime.now(UTC).isoformat()
 
 
 def ensure_message_id(
@@ -78,81 +71,6 @@ plan_file_path = file_layout.plan_file_path
 edits_journal_path = file_layout.edits_journal_path
 
 
-def ensure_threads_dir(threads_dir: str) -> None:
-    os.makedirs(threads_dir, exist_ok=True)
-    os.makedirs(os.path.join(threads_dir, "locks"), exist_ok=True)
-
-
-def read_subagent_trace(
-    threads_dir: str, system_id: str, thread_id: str
-) -> List[Dict[str, Any]]:
-    """Прочитать все записи sidecar в порядке файла. Нет файла → []."""
-    path = subagent_trace_path(threads_dir, system_id, thread_id)
-    if not os.path.exists(path):
-        return []
-    records: List[Dict[str, Any]] = []
-    with open(path, encoding="utf-8") as f:
-        for line in f:
-            row = line.strip()
-            if not row:
-                continue
-            try:
-                record = json.loads(row)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(record, dict):
-                records.append(record)
-    return records
-
-
-def load_thread_messages(
-    threads_dir: str, system_id: str, thread_id: str
-) -> Tuple[List[Dict[str, Any]], Set[str], int]:
-    records, message_keys, max_seq = file_layout.read_history_file(
-        file_layout.history_file(threads_dir, system_id, thread_id),
-        system_id,
-        thread_id,
-    )
-    return [payload for _seq, _ts, payload in records], message_keys, max_seq
-
-
-def load_thread_meta(
-    threads_dir: str, system_id: str, thread_id: str
-) -> Dict[str, Any]:
-    return file_layout.read_meta_file(
-        file_layout.meta_file(threads_dir, system_id, thread_id)
-    )
-
-
-def save_thread_meta(
-    threads_dir: str, system_id: str, thread_id: str, meta: Dict[str, Any]
-) -> None:
-    sys_norm = sanitize_system_id(system_id)
-    _, meta_path = _thread_paths(threads_dir, sys_norm, thread_id)
-    ensure_threads_dir(threads_dir)
-
-    to_save = file_layout.stamp_meta(meta, sys_norm, thread_id, _utc_now_iso())
-    tmp_path = f"{meta_path}.tmp"
-    with open(tmp_path, "w", encoding="utf-8") as f:
-        f.write(file_layout.meta_text(to_save))
-    atomic_replace(tmp_path, meta_path)
-
-
-def update_tui_meta(
-    threads_dir: str, system_id: str, thread_id: str, patch: Dict[str, Any]
-) -> None:
-    """Слить patch в meta.tui (read-merge-write). Только TUI-owned ключи."""
-    sys_norm = sanitize_system_id(system_id)
-    meta = load_thread_meta(threads_dir, sys_norm, thread_id) or {
-        "thread_id": thread_id,
-        "system_id": sys_norm,
-    }
-    tui_meta = dict(meta.get("tui") or {})
-    tui_meta.update(patch)
-    meta["tui"] = tui_meta
-    save_thread_meta(threads_dir, sys_norm, thread_id, meta)
-
-
 def _batches_by_bytes(messages, limit):
     """Сообщения частями не больше ``limit`` байт JSON (хотя бы по одному);
     без потолка или без сообщений — одной частью (запись меты тоже нужна).
@@ -162,7 +80,6 @@ def _batches_by_bytes(messages, limit):
     запасом для любого другого хранилища."""
     if not limit or not messages:
         return [messages]
-    import json
 
     batches, batch, size = [], [], 0
     for message in messages:

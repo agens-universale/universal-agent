@@ -1317,7 +1317,8 @@ async def run_case(
     result["backend_calls"] = len(getattr(backend, "calls", []))
 
     try:
-        from gc_core.thread_store import load_thread_meta, resolve_threads_dir
+        from gc_core.thread_store import resolve_threads_dir
+        from gc_testkit.develop_files import load_thread_meta
 
         meta = load_thread_meta(resolve_threads_dir(base), SYS, TID) or {}
         result["meta"] = strip_volatile(

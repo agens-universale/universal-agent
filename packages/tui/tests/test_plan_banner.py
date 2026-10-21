@@ -50,7 +50,7 @@ def _save_plan(tmp_path, text="1. шаг", status="proposed", mode=None):
     from gc_core.execution.state import SharedStateData
     from gc_core.persistence.schema import serialize_shared_block
     from gc_core.plan_store import new_plan_block
-    from gc_core.thread_store import save_thread_meta
+    from gc_testkit.develop_files import save_thread_meta
 
     plan = new_plan_block(text)
     plan.update(status=status, approved_mode=mode)

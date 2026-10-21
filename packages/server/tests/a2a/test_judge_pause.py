@@ -8,7 +8,7 @@ from gc_server.a2a.surface import apply_a2a_runtime_defaults
 from gc_core.execution.state import SharedStateData
 from gc_testkit.session_meta import merge_shared_into_meta
 from gc_core.security.confirm_port import confirm_available
-from gc_core.thread_store import save_thread_meta
+from gc_testkit.develop_files import save_thread_meta
 from gc_testkit.settings import make_settings
 
 

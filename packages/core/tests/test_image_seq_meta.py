@@ -12,7 +12,8 @@ from gc_core.attachments.model import (
     user_label,
 )
 from gc_core.attachments.numbering import IMAGE_SEQ_KEY, read_image_seq
-from gc_core.thread_store import ThreadSession, load_thread_meta
+from gc_core.thread_store import ThreadSession
+from gc_testkit.develop_files import load_thread_meta
 from gc_core.threads.file_store import FileThreadStore
 
 

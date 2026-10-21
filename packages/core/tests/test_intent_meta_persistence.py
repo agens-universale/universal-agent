@@ -10,7 +10,10 @@ from gc_core.intent_log.serialize import LEGACY_LOAD_TS
 from gc_core.persistence.schema import STATE_SCHEMA_VERSION
 from gc_testkit.session_meta import merge_state_into_meta, shared_from_meta
 from gc_core.states import State
-from gc_core.thread_store import load_thread_meta, save_thread_meta
+from gc_testkit.develop_files import (
+    load_thread_meta,
+    save_thread_meta,
+)
 
 FIXED_TS = "2026-05-30T11:35:08Z"
 

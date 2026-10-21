@@ -188,7 +188,7 @@ async def test_startup_flag_and_thread_meta_reach_engine(tmp_path):
 def _save_session(tmp_path, mode=None):
     from gc_core.execution.state import SharedStateData
     from gc_core.persistence.schema import serialize_shared_block
-    from gc_core.thread_store import save_thread_meta
+    from gc_testkit.develop_files import save_thread_meta
 
     shared = SharedStateData(permission_mode=mode)
     save_thread_meta(

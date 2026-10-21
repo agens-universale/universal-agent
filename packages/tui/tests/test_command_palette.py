@@ -159,7 +159,7 @@ async def test_palette_enter_inserts_export_then_field_enter_runs(
     """Из палитры Enter только подставляет `/export `; выполнение — следующим Enter в поле."""
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
-    from gc_testkit.develop_writer import append_new_thread_messages
+    from gc_testkit.develop_files import append_new_thread_messages
     from gc_tui.app import TuiApp
     from gc_tui.services.stores.file_store import FileTaskStore
     from gc_tui.widgets.arg_picker import ArgPicker

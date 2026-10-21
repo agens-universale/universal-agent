@@ -35,7 +35,7 @@ from gc_core.message_policy.user_message_policy import (
     wrap_skill_resolution_technical_instruction,
     wrap_technical_user_content,
 )
-from gc_core.thread_store import save_thread_meta
+from gc_testkit.develop_files import save_thread_meta
 from gc_core.threads.facade import Threads
 from gc_core.threads.file_store import FileThreadStore
 from gc_core.utils.format_messages import format_message_responses

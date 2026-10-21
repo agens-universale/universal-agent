@@ -3,12 +3,10 @@ import types
 
 from gc_core.intent_log import append_user_ask
 from gc_core.summarize.compaction import arun_summary_compaction
-from gc_core.thread_store import (
-    ThreadSession,
-    save_thread_meta,
-)
+from gc_core.thread_store import ThreadSession
+from gc_testkit.develop_files import save_thread_meta
 from gc_testkit import run_coro
-from gc_testkit.develop_writer import append_new_thread_messages
+from gc_testkit.develop_files import append_new_thread_messages
 from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
 from gc_testkit.intent_fixtures import (
     intent_user_ask_texts,

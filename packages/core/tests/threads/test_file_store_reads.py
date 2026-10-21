@@ -8,7 +8,7 @@ from datetime import timedelta
 from gc_core.threads import file_store as file_store_module
 from gc_core.threads.file_store import FileThreadStore
 from gc_core.threads.models import LeaseRequest, ThreadChange, ThreadKey
-from gc_testkit import develop_writer
+from gc_testkit import develop_files
 from gc_testkit.legacy_threads import LEGACY_THREADS, install_legacy_threads
 
 KEY = ThreadKey(system="cli", thread="t1")
@@ -84,7 +84,7 @@ def test_tail_sees_external_append_and_waits_for_whole_line(tmp_path):
     store = FileThreadStore(tmp_path)
     run(_append(store, _msgs(0, 3), "op1"))
     last = run(store.read_stream(KEY, "messages"))[-1].seq
-    develop_writer.append_new_thread_messages(
+    develop_files.append_new_thread_messages(
         str(tmp_path), "cli", "t1", _msgs(3, 1), set(), start_seq=last
     )
     data = tmp_path / "data_cli_t1.jsonl"
@@ -105,7 +105,7 @@ def test_rewritten_file_is_read_whole_again(tmp_path):
     store = FileThreadStore(tmp_path)
     run(_append(store, _msgs(0, 3), "op1"))
     run(store.read_stream(KEY, "messages"))
-    develop_writer.discard_message_by_id(str(tmp_path), "cli", "t1", "m1")
+    develop_files.discard_message_by_id(str(tmp_path), "cli", "t1", "m1")
     entries = run(store.read_stream(KEY, "messages"))
     assert [e.data["id"] for e in entries] == ["m0", "m2"]
 

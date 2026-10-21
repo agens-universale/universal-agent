@@ -7,8 +7,8 @@ from gc_acp.modes import (
     mode_updates,
     session_modes,
 )
-from gc_core.thread_store import save_thread_meta
-from gc_testkit.develop_writer import append_new_thread_messages
+from gc_testkit.develop_files import save_thread_meta
+from gc_testkit.develop_files import append_new_thread_messages
 from test_facade import _by_id, _init, _line, _new, _open, _updates
 
 _LABELS = {

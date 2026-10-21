@@ -132,7 +132,7 @@ async def test_falling_edge_status_visible_same_tick(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_core_write_survives_tui_write_in_tick(tmp_path, monkeypatch):
     pytest.importorskip("textual")
-    from gc_core.thread_store import save_thread_meta
+    from gc_testkit.develop_files import save_thread_meta
 
     _write_task(tmp_path)
     app = _app(tmp_path)
