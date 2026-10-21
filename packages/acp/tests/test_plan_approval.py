@@ -118,6 +118,22 @@ async def test_question_is_its_own_permission_after_the_plan_text(tmp_path):
     await facade.shutdown()
 
 
+async def test_plan_turn_reply_then_plan(tmp_path):
+    """Ответ модели при плане ушёл стримом; план — отдельным абзацем."""
+    facade, writer, agent, session_id = await _ready(tmp_path)
+    agent.deltas = [("reset", ""), ("answer", "Вот план.")]
+    agent.executor.last_closing_reply = "Вот план."
+    await _prompt(facade, session_id)
+    msg = await _wait_permission(writer)
+    assert _answers(writer) == ["Вот план.", "\n\n" + _PLAN]
+    await facade.handle_line(
+        _response(msg["id"], {"outcome": {"outcome": "cancelled"}})
+    )
+    await facade._sessions[session_id].prompt_task
+    assert _by_id(writer, 3)["result"] == {"stopReason": "end_turn"}
+    await facade.shutdown()
+
+
 @pytest.mark.parametrize("mode", ["edit", "auto", "manual"])
 async def test_execution_mode_runs_the_plan_in_the_same_prompt(tmp_path, mode):
     facade, writer, agent, session_id = await _ready(tmp_path)
@@ -135,7 +151,8 @@ async def test_execution_mode_runs_the_plan_in_the_same_prompt(tmp_path, mode):
     )
     card_id = msg["params"]["toolCall"]["toolCallId"]
     assert _card_closed(writer, card_id, "completed")
-    assert _answers(writer) == [_PLAN, "Готово."]
+    # Продолжение — тот же ход клиента: ответ отдельным абзацем.
+    assert _answers(writer) == [_PLAN, "\n\nГотово."]
     updates = _updates(writer)
     assert all(item["sessionUpdate"] != "plan" for item in updates)
     mode_at = updates.index(
@@ -151,7 +168,7 @@ async def test_execution_mode_runs_the_plan_in_the_same_prompt(tmp_path, mode):
     )
     assert mode_option["currentValue"] == mode
     done_at = next(
-        i for i, item in enumerate(updates) if _text(item) == "Готово."
+        i for i, item in enumerate(updates) if _text(item) == "\n\nГотово."
     )
     assert mode_at < done_at  # IDE узнаёт режим до работы продолжения
     assert _by_id(writer, 3)["result"] == {"stopReason": "end_turn"}
@@ -176,7 +193,7 @@ async def test_rework_keeps_plan_mode_and_waits_for_remarks(tmp_path):
         "sessionUpdate": "current_mode_update",
         "currentModeId": "plan",
     } in _updates(writer)
-    assert _answers(writer) == [_PLAN, REWORK_HINT]
+    assert _answers(writer) == [_PLAN, "\n\n" + REWORK_HINT]
     assert _by_id(writer, 3)["result"] == {"stopReason": "end_turn"}
     await facade.shutdown()
 

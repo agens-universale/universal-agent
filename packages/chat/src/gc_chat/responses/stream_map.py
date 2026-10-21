@@ -63,6 +63,14 @@ class StreamMap:
         """Проза answer, уже отданная после последнего reset."""
         return self._answer_since_reset
 
+    @property
+    def last_message_text(self) -> str:
+        """Текст последнего элемента-ответа, уже отданного клиенту."""
+        for item in reversed(self._seq):
+            if item.get("type") == _MESSAGE:
+                return item["content"][0]["text"]
+        return ""
+
     def opening_events(self) -> list[dict]:
         return [
             {"type": "response.created", "response": self.snapshot()},
@@ -93,6 +101,18 @@ class StreamMap:
         if extra == "":
             return []
         return self.feed(_ANSWER, extra)
+
+    def append_answer(self, text: str) -> list[dict]:
+        """Текст конца хода; после уже отданной прозы — с пустой строкой.
+
+        Клиенты склеивают текст сообщений ответа подряд, поэтому текст
+        не должен прилипнуть к прозе, отданной раньше в этом ответе.
+        """
+        if text == "":
+            return []
+        if self.last_message_text and not text.startswith("\n"):
+            text = "\n\n" + text
+        return self.feed(_ANSWER, text)
 
     def seal_events(
         self,

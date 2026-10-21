@@ -252,6 +252,10 @@ ToolCallRow.tool-group-start { margin-top: 1; }
 .line-bang-fail { color: $err; }
 .skill-marker   { margin: 1 0; }  /* top И bottom: margin-bottom один перетирал margin-top от .line-meta → не было зазора над [skill] */
 .line-note      { color: #a5adb8; margin-top: 1; }  /* чуть светлее $dim; пустая строка сверху — отделяет ремарку; курсив — только на тексте ремарки (см. note_text), ярлык прямой */
+/* Запись «* итог:» после ответа модели — цвет и отступ как у .line-note, текст курсивом (метка прямая — см. build_summary_widgets); проза после блока кода — без отступа сверху. Маркер «* » прямой, как у заметки. */
+.line-summary   { color: #a5adb8; margin-top: 1; text-style: italic; }
+.line-summary .trace-prefix { text-style: not italic; }
+.line-summary.line-agent-cont { margin-top: 0; }
 .summary-marker { color: $deep-dim; margin: 1 0; }  /* пустая строка сверху И снизу — маркер обособлен */
 .summary-body   { color: $dim; margin-bottom: 1; }
 .summary-body.hidden { display: none; }
