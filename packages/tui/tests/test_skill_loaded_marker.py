@@ -122,7 +122,7 @@ async def test_missing_skill_is_consequence_under_reply(tmp_path, monkeypatch):
         assert reply._reply_lines(80)[0].body.spans == []
         (cons,) = reply._consequences
         assert cons.plain == (
-            "✗ скилл brainstorm не найден — отправлено без него"
+            "✕ скилл brainstorm не найден — отправлено без него"
         )
         assert cons.style == ERR
 

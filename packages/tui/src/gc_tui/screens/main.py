@@ -261,7 +261,7 @@ def select_indicator_mode(*, err, is_running, ask_human, confirm):
     """Режим строки-индикатора в _poll_active. Порядок важен.
 
     Human-wait (ask_human/confirm) выше err: агент ждёт ответ юзера — баннер
-    уже говорит об этом; ✗ Ошибка поверх «АГЕНТ СПРАШИВАЕТ» путает (в т.ч. когда
+    уже говорит об этом; ✕ Ошибка поверх «АГЕНТ СПРАШИВАЕТ» путает (в т.ч. когда
     stale last_runner_error от заменённого runner ещё не сброшен).
 
     Иначе err (краш текущего раннера) → "failed" сразу, не дожидаясь reaping /
@@ -3208,7 +3208,7 @@ class TraceScreen(Screen):
                     halted=ev.halted,
                 )
                 self._mount_inline_diff(ev, row)
-                # Nested под subagent_* оставляем в живой сессии (иерархия под ✓/✗).
+                # Nested под subagent_* оставляем в живой сессии (иерархия под ✓/✕).
                 self._active_calls.pop(ev.call_id, None)
                 self._reconcile_active_tool_phases()
                 return
@@ -3279,12 +3279,12 @@ class TraceScreen(Screen):
 
     def _render_error_msg(self, ev) -> None:
         """error_msg с известным call_id финализирует соответствующую строку-вызов
-        (✗ inline, таймер стоп) и подавляет дублирующую строку. Иначе — строка
+        (✕ inline, таймер стоп) и подавляет дублирующую строку. Иначе — строка
         `!` без владельца."""
         row = self._active_calls.get(ev.call_id) if ev.call_id else None
         if row is not None:
             row.set_result(summary=ev.summary, error=True)
-            # Nested под subagent_* оставляем в живой сессии (иерархия под ✓/✗).
+            # Nested под subagent_* оставляем в живой сессии (иерархия под ✓/✕).
             self._active_calls.pop(ev.call_id, None)
             self._reconcile_active_tool_phases()
             return
@@ -5016,7 +5016,7 @@ class TraceScreen(Screen):
             confirm=self._confirm_active,
         )
         if _indicator_mode == "failed":
-            # Краш раннера → ✗ Ошибка сразу и персистентно: не ждём
+            # Краш раннера → ✕ Ошибка сразу и персистентно: не ждём
             # falling-edge/idle и не зависим от reaping воркера. _show создаёт
             # индикатор, если его нет.
             self._show_thinking_indicator(state="failed")
@@ -5113,7 +5113,7 @@ class TraceScreen(Screen):
         else:  # terminal
             # Idle. Терминальный исход прогона держим как строку-итог индикатора
             # (done → «✓ Выполнил за N», cancelled → «■ Отменено», failed →
-            # «✗ Ошибка») — персистентно до следующего user-send (его _reset
+            # «✕ Ошибка») — персистентно до следующего user-send (его _reset
             # уничтожит индикатор). Свежий/неизвестный исход → уничтожаем.
             li_kind = None
             status = None
@@ -7720,7 +7720,7 @@ class TraceScreen(Screen):
     def _switch_to_empty_state(self) -> None:
         """Очистить trace и перейти в empty-state. pending_skill_id/cwd сохраняются."""
         # Сбросить терминальные error/stop-флаги app-уровня (last_runner_error и пр.):
-        # иначе poll видит протухшую ошибку и репейнтит «✗ Ошибка» поверх пустой сессии.
+        # иначе poll видит протухшую ошибку и репейнтит «✕ Ошибка» поверх пустой сессии.
         self._session_lock_release()
         self._prepare_for_new_run()
         self._active_task_id = None

@@ -47,6 +47,7 @@ from gc_tui.palette import RUN_COLOR as _ACCENT
 from gc_tui.palette import VALIDATING_SHADES as _VALIDATING_SHADES
 from gc_tui.services.duration_format import format_compact_int, format_duration
 from gc_tui.services.plural import files_word
+from gc_tui.services.trace_glyphs import ERROR_GLYPH
 
 THINKING_PHRASES = [
     "думаю",
@@ -206,7 +207,7 @@ DONE_LABEL_PLAN = "План готов"
 # Исходы хода, кроме «Выполнил» (у него своя голова — время хода): глиф и слова.
 _TERMINAL_ENDINGS = {
     _STATE_CANCELLED: ("■", "Отменено"),
-    _STATE_FAILED: ("✗", "Ошибка"),
+    _STATE_FAILED: (ERROR_GLYPH, "Ошибка"),
     _STATE_STOPPED_STEPS: ("⏹", "Остановлено: превышен лимит шагов"),
     _STATE_STOPPED_ERRORS: ("⏹", "Остановлено: превышен лимит ошибок"),
     _STATE_STOPPED_TOKENS: ("⏹", "Остановлено: превышен лимит токенов"),

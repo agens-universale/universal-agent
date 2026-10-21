@@ -20,6 +20,7 @@ from gc_tui.palette import ERR as _ERR_RED
 from gc_tui.palette import SKILL as _SKILL
 from gc_tui.services.image_chips import chip_of, chip_spans
 from gc_tui.services.path_display import display_path, fit_path
+from gc_tui.services.trace_glyphs import ERROR_GLYPH
 from gc_tui.services.trace_render import (
     LINE_USER_CLASS,
     NESTED_USER_PREFIX,
@@ -35,7 +36,7 @@ from gc_tui.widgets.trace_row import TraceRow
 _FROM_CLIPBOARD = "из буфера"
 
 #: Следствие реплики: скилл не найден, сообщение ушло без него (P3 §2.3).
-_SKILL_MISSING = "✗ скилл {name} не найден — отправлено без него"
+_SKILL_MISSING = ERROR_GLYPH + " скилл {name} не найден — отправлено без него"
 
 
 def _image_style(color: Optional[str], att: Attachment) -> Style:
@@ -292,7 +293,7 @@ class UserReplyContainer(_ImageLinksMixin, ClickModelMixin, Widget):
 
     ``skill`` — запускаемое имя скилла (`skill_input_name`): первым словом
     после маркера, `/имя` цветом `SKILL`; ``skill_error`` — скилл не найден:
-    имя цветом текста и следствие `└ ✗ скилл … не найден …` (спека P3 §2.3).
+    имя цветом текста и следствие `└ ✕ скилл … не найден …` (спека P3 §2.3).
     """
 
     DEFAULT_CSS = """

@@ -85,7 +85,7 @@ async def test_tool_call_row_mutate_to_error():
         content = str(row.query_one(".trace-content").render())
         prefix = str(row.query_one(".trace-prefix").render())
         line = _shown_lines(row)
-        assert "✗" in prefix
+        assert "✕" in prefix
         assert "ENOENT" not in content  # у ошибки хвоста нет
         assert line == "  └ ENOENT: нет файла"  # строкой под вызовом
 
@@ -268,7 +268,7 @@ async def test_tool_call_row_set_result_twice_overwrites():
         prefix = str(row.query_one(".trace-prefix").render())
         line = _shown_lines(row)
         assert "updated" in line
-        assert "✗" in prefix
+        assert "✕" in prefix
         assert "initial" not in content
         assert "✓" not in prefix
 
@@ -530,7 +530,7 @@ def test_completed_error_row_has_no_elapsed():
 
     row = ToolCallRow(call_id="c4", label="subagent_planner", target="x")
     row.set_result(summary="boom", error=True)
-    assert "✗" in str(row._render_prefix())
+    assert "✕" in str(row._render_prefix())
     assert "running" not in str(row._render_content())
 
 

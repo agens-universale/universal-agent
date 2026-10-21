@@ -6,7 +6,7 @@ Layout: Horizontal(prefix-Static, content-Static) — wrap длинного об
 слот следствий `└` (ConsequenceSlot.trace-consequence) на +2 от глифа: текст
 ошибки и пометки вызова (спека P3 §3); пустой — скрыт.
 
-Статус-глиф живёт в prefix-Static (▸/‖/✓/✗/·), content-Static несёт
+Статус-глиф живёт в prefix-Static (▸/‖/✓/✕/·), content-Static несёт
 `Подпись  объект` и хвост ` · сводка` успеха; у ошибки хвоста нет.
 У строки правки (`set_edit_counts`) после объекта — счётчики `+N −M`, а в конце
 строки справа — кнопка ❐ копирования её диффа (спека P3 §10).
@@ -15,7 +15,7 @@ Layout: Horizontal(prefix-Static, content-Static) — wrap длинного об
 - waiting  — call уже нарисован, execute ещё не начался: · dim, без elapsed;
 - running  — сейчас исполняется: ▸ + elapsed (+ опциональный live_status);
   на человеко-ожидании (pause) — ‖ без дыхания, elapsed заморожен;
-- done     — есть result: ✓/✗; стоп или лимит (`halted`) — ■ серым;
+- done     — есть result: ✓/✕; стоп или лимит (`halted`) — ■ серым;
 - interrupted — стоп/обрыв до output: · + «прервано».
 """
 
@@ -39,6 +39,7 @@ from gc_tui.palette import PULSE_SHADES as _PULSE_SHADES
 from gc_tui.palette import RUN_COLOR as _RUN
 from gc_tui.palette import TOOL_NAME as _TOOL_NAME
 from gc_tui.services.duration_format import format_trace_duration
+from gc_tui.services.trace_glyphs import ERROR_GLYPH
 from gc_tui.services.trace_render import level_prefix
 from gc_tui.widgets.block_panel import (
     CopyFeedbackMixin,
@@ -72,7 +73,7 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
     DOM:
         ToolCallRow
             Horizontal
-                Static(classes="trace-prefix")  — статус-глиф ▸/✓/✗/·
+                Static(classes="trace-prefix")  — статус-глиф ▸/✓/✕/·
                 Static(classes="trace-content line-tool")  — подпись,
                     объект, хвост
                 _CopyButton(classes="block-copy trace-action")  — ❐, видна
@@ -137,7 +138,7 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         self._event_no = event_no
         self._result: Optional[str] = None
         self._is_error: bool = False
-        self._halted: bool = False  # стоп/лимит: ■ и серое `└`, не ✗
+        self._halted: bool = False  # стоп/лимит: ■ и серое `└`, не ✕
         self._interrupted: bool = (
             False  # терминальное «прервано» (стоп/обрыв run)
         )
@@ -271,7 +272,7 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         self, *, summary: str, error: bool, halted: bool = False
     ) -> None:
         """Итог вызова. `halted` — стоп пользователя или лимит: не сбой,
-        глиф ■ и строка `└` серым (K4); иначе ошибка — ✗ и `└` цветом ERR."""
+        глиф ■ и строка `└` серым (K4); иначе ошибка — ✕ и `└` цветом ERR."""
         self._result = summary
         self._is_error = error
         self._halted = halted
@@ -345,7 +346,7 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         if self._halted:
             return "■", _DIM
         if self._is_error:
-            return "✗", _ERR
+            return ERROR_GLYPH, _ERR
         return "✓", _OK
 
     def _render_prefix(self) -> Text:

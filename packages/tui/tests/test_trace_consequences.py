@@ -164,7 +164,7 @@ def test_error_row_has_no_tail_and_error_line_below():
     row = ToolCallRow(call_id="c1", label="Edit", target="x")
     row.set_result(summary="search не найден в файле", error=True)
     assert row._render_content().plain == "Edit  x"
-    assert "✗" in row._render_prefix().plain
+    assert "✕" in row._render_prefix().plain
     line = _lines(row)
     assert line.plain == "  └ search не найден в файле"
     assert _styles_of(line, "search не найден") == [ERR]
@@ -183,7 +183,7 @@ def test_halted_row_is_stop_not_failure(summary):
     row = ToolCallRow(call_id="c1", label="Read", target="x")
     row.set_result(summary=summary, error=True, halted=True)
     prefix = row._render_prefix()
-    assert "■" in prefix.plain and "✗" not in prefix.plain
+    assert "■" in prefix.plain and "✕" not in prefix.plain
     assert _styles_of(prefix, "■") == [DIM]
     assert row._render_content().plain == "Read  x"
     line = _lines(row)
@@ -195,7 +195,7 @@ def test_real_error_keeps_cross_and_err_line():
     row = ToolCallRow(call_id="c1", label="Read", target="x")
     row.set_result(summary="нет файла", error=True)
     prefix = row._render_prefix()
-    assert _styles_of(prefix, "✗") == [ERR]
+    assert _styles_of(prefix, "✕") == [ERR]
     assert _styles_of(_lines(row), "нет файла") == [ERR]
 
 

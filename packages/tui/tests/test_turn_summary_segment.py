@@ -239,7 +239,7 @@ def test_indicator_done_with_summary_shows_segment():
 @pytest.mark.parametrize(
     "state, head",
     [
-        ("failed", "✗ Ошибка"),
+        ("failed", "✕ Ошибка"),
         ("cancelled", "■ Отменено"),
         ("stopped_steps", "⏹ Остановлено: превышен лимит шагов"),
         ("stopped_errors", "⏹ Остановлено: превышен лимит ошибок"),

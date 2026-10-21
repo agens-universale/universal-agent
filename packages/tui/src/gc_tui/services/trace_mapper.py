@@ -726,7 +726,7 @@ def _truncate_word_boundary(text: str, limit: int) -> str:
     return cut.rstrip() + "…"
 
 
-# Стоп пользователя и лимиты — не сбой тула (K4: стоп `■`, ошибка `✗`):
+# Стоп пользователя и лимиты — не сбой тула (K4: стоп `■`, ошибка `✕`):
 # короткий статус вместо длинного error.message, строка вызова — «halted».
 _HALT_SUMMARIES = {
     "cancelled_by_user": "отменено",
