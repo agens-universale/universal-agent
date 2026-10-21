@@ -72,8 +72,9 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
     DOM:
         ToolCallRow
             Horizontal
-                Static(<rich Text>, classes="trace-prefix")  — ведущий статус-глиф ▸/✓/✗/·
-                Static(<rich Text>, classes="trace-content line-tool")  — подпись/объект/хвост
+                Static(classes="trace-prefix")  — статус-глиф ▸/✓/✗/·
+                Static(classes="trace-content line-tool")  — подпись,
+                    объект, хвост
                 _CopyButton(classes="block-copy trace-action")  — ❐, видна
                     у строки правки
             ConsequenceSlot(classes="trace-consequence")  — строки `└`

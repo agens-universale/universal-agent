@@ -554,10 +554,11 @@ def _dispatch_readonly(
     elif ev.kind == "summary":
         _mount_compaction(mount_target, ev)
     elif ev.kind == "error_msg":
-        # Паритет с живым путём (TraceScreen._render_error_msg): ошибка с известным
-        # call_id финализирует свою строку-вызов ✗ и не дублируется строкой `!`.
-        # Иначе строка навсегда осталась бы «выполняется»: схемные ошибки приходят
-        # техническим error_message с call_id, а не function_call_output.
+        # Паритет с живым путём (TraceScreen._render_error_msg): ошибка с
+        # известным call_id финализирует свою строку-вызов ✗ и не дублируется
+        # строкой `!`. Иначе строка навсегда осталась бы «выполняется»:
+        # схемные ошибки приходят техническим error_message с call_id, а не
+        # function_call_output.
         err_row = calls.get(ev.call_id) if ev.call_id else None
         if err_row is not None:
             err_row.set_result(summary=ev.summary, error=True)

@@ -415,7 +415,7 @@ def _nested_lines(
     hover_id: Optional[str],
     width: int,
 ) -> list[_ReplyLine]:
-    """Строки вложенного ответа: колонка текста уже стоит под `> ` — префиксов нет."""
+    """Строки вложенного ответа: колонка текста уже стоит под `› ` — префиксов нет."""
     return _build_lines(text, images, hover_id, Text(), width)
 
 
@@ -474,7 +474,7 @@ class NestedUserReply(_ImageLinksMixin, TraceRow):
         self._images = tuple(images)
 
     def _make_prefix(self) -> Widget:
-        # Маркер `> ` — не текст ответа: в копию не идёт.
+        # Маркер `› ` — не текст ответа: в копию не идёт.
         return NoSelectStatic(
             self._prefix, classes="trace-prefix", markup=False
         )

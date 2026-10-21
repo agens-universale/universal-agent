@@ -37,7 +37,8 @@ async def test_command_error_suggestion_is_meta():
 
 @pytest.mark.asyncio
 async def test_runtime_error_is_standalone_bang_err():
-    """`runtime:` без владельца (до P1b) — `!` в колонке `●`, ERR, без `[!]`."""
+    """`runtime:` без владельца (до P1b) — `!` в колонке `●`, ERR,
+    без `[!]`."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
     from gc_tui.widgets.trace_row import TraceRow
