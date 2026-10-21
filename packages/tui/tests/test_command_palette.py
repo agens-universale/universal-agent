@@ -583,22 +583,37 @@ def test_skill_row_text_short_name_then_pack_and_description():
 
     skill = dict(_BRAIN, id="superpowers:bzz")
     palette = _skill_palette("b", [skill])
-    name_w = palette._name_col_w()
+    head = f" {'/bzz'.ljust(len('/bzz') + 3)}"
     text = palette._format_skill_row(skill)
-    head = f" {'/bzz'.ljust(name_w)}"
     assert text.plain == head + "superpowers · мозговой штурм"
     assert {str(s.style) for s in text.spans} == {_pal.DIM}
     assert text.spans[0].start == len(head)
 
 
-def test_skill_row_name_truncated_by_command_column():
+def test_skill_rows_show_full_names_in_own_column():
     pytest.importorskip("textual")
-    skill = {"id": "p:b" + "x" * 30, "pack_id": "p", "description": "d"}
+    skills = [
+        {"id": "p:brainstorming", "description": "Ж1"},
+        {"id": "p:background", "description": "Ж2"},
+    ]
+    palette = _skill_palette("b", skills, commands=("buffer",))
+    plain = _skill_palette("b", [], commands=("buffer",))
+    assert palette._name_col_w() == plain._name_col_w()
+    assert palette._hotkey_col_w() == plain._hotkey_col_w()
+    rows = [palette._format_skill_row(s).plain for s in skills]
+    assert rows[0].startswith(" /brainstorming   ")
+    assert rows[1].startswith(" /background      ")
+    # описания скиллов выровнены между собой
+    assert rows[0].index("Ж1") == rows[1].index("Ж2")
+
+
+def test_skill_row_name_capped_with_ellipsis():
+    pytest.importorskip("textual")
+    skill = {"id": "p:b" + "x" * 29, "pack_id": "p", "description": "d"}
     palette = _skill_palette("b", [skill])
-    name_w = palette._name_col_w()
     text = palette._format_skill_row(skill)
-    assert text.plain[1 : 1 + name_w].endswith("… ")
-    assert text.plain[1 + name_w :] == "p · d"
+    assert text.plain == " /b" + "x" * 21 + "…" + "   " + "p · d"
+    assert palette._skill_col_w() == 24 + 3
 
 
 def test_skill_row_selection_and_toggle_offset():
