@@ -148,9 +148,10 @@ async def test_long_tool_args_wrap_inside_content_column():
         await pilot.pause()
         prefix = row.query_one(".trace-prefix")
         content = row.query_one(".trace-content")
-        # prefix — ровный отступ-индент + статус-глиф (без «лесенки»), не зависит от длины content
+        # prefix — статус-глиф в колонке `●` (уровень 0 — без отступа, без
+        # «лесенки»), не зависит от длины content
         assert "|-" not in str(prefix.render())
-        assert str(prefix.render()).startswith("   ")
+        assert str(prefix.render()) == "▸ "
         # content содержит все длинные args (wrap'нутые, но в одном Static)
         rendered_content = str(content.render())
         assert "execute_command" in rendered_content

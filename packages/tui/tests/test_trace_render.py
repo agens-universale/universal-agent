@@ -629,9 +629,9 @@ def test_todo_event_renders_rich_text_with_glyph_colors():
     assert header.plain == "session_todo   чек-лист 1/2"
     # Текст пункта — в content-колонке, отступ+глиф — в prefix: перенос
     # длинного пункта выравнивается под началом текста.
-    assert rows[1]._prefix.plain == "     ✓ "
+    assert rows[1]._prefix.plain == "  ✓ "
     assert rows[1]._content.plain == "Шаг раз"
-    assert rows[2]._prefix.plain == "     → "
+    assert rows[2]._prefix.plain == "  → "
     assert rows[2]._content.plain == "Шаг два"
     # Tab-стоп один — сам блок; строки внутри не фокусируются.
     assert mounted[0].can_focus and not any(r.can_focus for r in rows)

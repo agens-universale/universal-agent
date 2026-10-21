@@ -272,7 +272,7 @@ async def test_ctrl_click_nested_from_persisted_sidecar(tmp_path):
             call_id="live_child",
             tool_name="shell",
             args_summary="cmd='pwd'",
-            nested=True,
+            level=1,
         )
         trace.mount(parent)
         scr._subagent_parent_rows["call_sub_1"] = parent

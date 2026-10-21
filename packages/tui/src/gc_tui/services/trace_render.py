@@ -26,13 +26,23 @@ if TYPE_CHECKING:
 # Парсер `[tag] rest` для default meta-кейса (трейс и read-only превью).
 TAG_RE = re.compile(r"^\[(?P<tag>[^\]]+)\]\s*(?P<rest>.*)$")
 
-# Общие литералы вложенных (nested) строк под subagent_* — одинаковы в живом
-# трейсе (TraceScreen._mount_nested_*, main.py) и read-only превью
-# (merge_nested_readonly ниже).
-NESTED_PREFIX = "       "  # nested под subagent: +4 пробела к _PREFIX тула
-NESTED_PROSE_PREFIX = "       · "
-NESTED_USER_PREFIX = "       > "
+# Уровень вложенности события — единственный источник отступа ленты: глиф
+# события уровня n стоит в колонке `●` реплики агента плюс 2n. Живой трейс
+# (TraceScreen._mount_nested_*, main.py) и read-only превью
+# (merge_nested_readonly ниже) берут отступ отсюда.
+LEVEL_INDENT = "  "
+
+
+def level_prefix(level: int) -> str:
+    """Отступ события уровня ``level`` (0 — верхний уровень, без отступа)."""
+    return LEVEL_INDENT * level
+
+
+NESTED_PROSE_PREFIX = level_prefix(1) + "● "
+NESTED_USER_PREFIX = level_prefix(1) + "› "
 LINE_INTERMEDIATE_CLASS = "line-intermediate"
+# Вложенная реплика субагента: глиф `●` серым (CSS по классу).
+NESTED_PROSE_CLASS = f"{LINE_INTERMEDIATE_CLASS} nested-prose"
 LINE_USER_CLASS = "line-user"
 
 
@@ -361,9 +371,7 @@ def _dispatch_readonly(mount_target, ev, calls: dict) -> None:
             (ev.full_payload or {}).get("arguments")
         )
         mount_target.mount(
-            build_todo_block(
-                items, subagent=False, indent="   ", event_no=ev.no
-            )
+            build_todo_block(items, subagent=False, indent="", event_no=ev.no)
         )
     else:
         m = TAG_RE.match(ev.summary or "")
@@ -540,7 +548,7 @@ def merge_nested_readonly(
             call_id=tool_call_id or f"_nested_{tool_name}",
             tool_name=tool_name,
             args_summary=args_summary or "",
-            nested=True,
+            level=1,
             waiting=False,
         )
         if tool_call_id:
@@ -570,7 +578,7 @@ def merge_nested_readonly(
             TraceRow(
                 prefix=NESTED_PROSE_PREFIX,
                 content=text,
-                kind_class=LINE_INTERMEDIATE_CLASS,
+                kind_class=NESTED_PROSE_CLASS,
                 event_no=0,
                 focusable=False,
             ),
@@ -591,7 +599,7 @@ def merge_nested_readonly(
         _mount_after(
             parent_call_id,
             build_todo_block(
-                todo_items or [], subagent=True, indent=NESTED_PREFIX
+                todo_items or [], subagent=True, indent=level_prefix(1)
             ),
         )
 

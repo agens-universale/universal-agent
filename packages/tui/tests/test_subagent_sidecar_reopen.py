@@ -250,7 +250,7 @@ async def test_reopen_merges_nested_under_archived_subagent(tmp_path):
         assert "call_sub_arch" in scr._subagent_parent_rows
         nested = scr._nested_tool_rows.get("child_arch_1")
         assert nested is not None
-        assert nested._nested is True
+        assert nested._level == 1
         assert "fs_list_files" in str(nested._render_content())
 
 
@@ -279,7 +279,7 @@ async def test_reopen_merges_nested_under_finished_subagent(tmp_path):
 
         nested = scr._nested_tool_rows.get("call_child_9")
         assert nested is not None
-        assert nested._nested is True
+        assert nested._level == 1
         assert "fs_read_file" in str(nested._render_content())
         assert nested._result is not None
 
@@ -291,4 +291,4 @@ async def test_reopen_merges_nested_under_finished_subagent(tmp_path):
         ]
         assert CHILD_SUMMARY_LABEL in prose_texts
         assert "проверю дальше" in prose_texts
-        assert any(isinstance(w, ToolCallRow) and w._nested for w in widgets)
+        assert any(isinstance(w, ToolCallRow) and w._level for w in widgets)

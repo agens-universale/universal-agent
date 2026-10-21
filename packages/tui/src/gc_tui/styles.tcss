@@ -180,19 +180,20 @@ BlockPanel:focus, TodoBlock:focus {
 
 /* Инлайн-дифф правки агента (раскладка — в DiffBlock.DEFAULT_CSS, здесь тема).
    Отступы — одним shorthand-правилом, как у панелей выше.
-   В отличие от панелей блок НЕ карточка рядом, а продолжение своей строки
+   В отличие от панелей блок НЕ карточка рядом, а следствие своей строки
    инструмента: нулевой верхний отступ (примыкает к ней) и ветка `└` вместо
-   вертикального «поводка». Левый отступ 5 — вторая ступень лесенки: строка
-   инструмента идёт от колонки 4 (padding #trace + ToolCallRow._PREFIX), ветка —
-   на +2 от неё, тело диффа — ещё на +2 (margin в DiffBlock.DEFAULT_CSS).
+   вертикального «поводка». Колонки ленты (trace_render.level_prefix): глиф
+   события уровня n — в колонке `●` плюс 2n; следствие — на +2 от глифа своего
+   события: левый отступ 2 у вызова агента, 4 — у вызова субагента (уровень 1);
+   тело диффа — ещё на +2 (margin в DiffBlock.DEFAULT_CSS).
    Нижний отступ — пустая строка перед следующим инструментом. Подложки на самом
    блоке нет: ветка со счётчиками читается на фоне ленты, тёмный фон несут только
    тело и хвост. */
 .diff-block {
     padding: 0;
-    margin: 0 0 1 5;
+    margin: 0 0 1 2;
 }
-.diff-block.diff-nested { margin: 0 0 1 9; }  /* правка субагента: та же лесенка от её отступа иерархии (+4) */
+.diff-block.diff-nested { margin: 0 0 1 4; }  /* правка субагента (уровень 1) */
 .diff-block .block-body,
 .diff-block .diff-more { background: $block-bg; }
 .diff-more { color: $dim; }
@@ -238,6 +239,8 @@ BlockPanel:focus, TodoBlock:focus {
 ToolCallRow.tool-group-start { margin-top: 1; }
 .line-think     { color: $muted; text-style: italic; margin-top: 1; }
 .line-intermediate { color: $ink; margin-top: 1; }  /* ·-реплика — фаза хода, как ● */
+/* Промежуточная реплика субагента: глиф `●` своего уровня — серым. */
+.line-intermediate.nested-prose .trace-prefix { color: $dim; }
 .ask-human-question.hidden { display: none; }  /* вопрос скрыт, пока виден баннер */
 .answered-question { border: round $frame-archive; color: $dim; padding: 0 1; margin: 1 0; width: 1fr; }
 .answered-question.hidden { display: none; }

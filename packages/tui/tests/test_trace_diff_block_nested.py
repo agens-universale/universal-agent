@@ -216,8 +216,8 @@ async def test_nested_edit_gets_block_under_its_own_row(tmp_path):
             "ToolCallRow",
             "DiffBlock",
         ]
-        assert seq[0].call_id == PARENT_CALL and not seq[0]._nested
-        assert seq[1].call_id == "call_child_9" and seq[1]._nested
+        assert seq[0].call_id == PARENT_CALL and not seq[0]._level
+        assert seq[1].call_id == "call_child_9" and seq[1]._level
         assert _path(seq[2]) == "a.py"
         assert _label(seq[2]) == "└ изменено: +1 −1"
 

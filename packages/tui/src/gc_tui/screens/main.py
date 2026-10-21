@@ -131,10 +131,10 @@ from gc_tui.services.trace_mapper import (
     map_message,
 )
 from gc_tui.services.trace_render import (
-    LINE_INTERMEDIATE_CLASS,
-    NESTED_PREFIX,
+    NESTED_PROSE_CLASS,
     NESTED_PROSE_PREFIX,
     build_compaction_marker_event,
+    level_prefix,
 )
 from gc_tui.services.trace_retention import (
     apply_payload_retention,
@@ -3149,7 +3149,7 @@ class TraceScreen(Screen):
             )
             self._trace_mount(
                 build_todo_block(
-                    items, subagent=False, indent="   ", event_no=ev.no
+                    items, subagent=False, indent="", event_no=ev.no
                 )
             )
             return
@@ -3408,7 +3408,7 @@ class TraceScreen(Screen):
             call_id=tool_call_id or f"_nested_{tool_name}_{step}",
             tool_name=tool_name,
             args_summary=args_summary or "",
-            nested=True,
+            level=1,
             waiting=False,  # tool_start = уже execute
         )
         if tool_call_id:
@@ -3469,7 +3469,7 @@ class TraceScreen(Screen):
         row = TraceRow(
             prefix=NESTED_PROSE_PREFIX,
             content=text,
-            kind_class=LINE_INTERMEDIATE_CLASS,
+            kind_class=NESTED_PROSE_CLASS,
             event_no=0,
             focusable=False,
         )
@@ -3495,7 +3495,7 @@ class TraceScreen(Screen):
         self._nested_mount_after(
             parent_call_id,
             build_todo_block(
-                todo_items or [], subagent=True, indent=NESTED_PREFIX
+                todo_items or [], subagent=True, indent=level_prefix(1)
             ),
         )
 

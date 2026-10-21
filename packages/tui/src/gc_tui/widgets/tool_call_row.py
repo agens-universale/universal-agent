@@ -2,7 +2,7 @@
 
 Layout: Horizontal(prefix-Static, content-Static) — wrap длинных args/result
 происходит внутри content-колонки = hanging indent (continuation выравнивается
-под началом имени тула, col 5 относительно левого края строки).
+под началом имени тула: отступ уровня + глиф + пробел).
 
 Статус-глиф живёт в prefix-Static (▸/‖/✓/✗/·), content-Static несёт имя/args/хвост.
 
@@ -33,6 +33,7 @@ from gc_tui.palette import PULSE_SHADES as _PULSE_SHADES
 from gc_tui.palette import RUN_COLOR as _RUN
 from gc_tui.palette import TOOL_NAME as _TOOL_NAME
 from gc_tui.services.duration_format import format_duration
+from gc_tui.services.trace_render import level_prefix
 from gc_tui.widgets.click_model import ClickModelMixin
 from gc_tui.widgets.static_content import update_if_changed
 
@@ -74,9 +75,6 @@ class ToolCallRow(ClickModelMixin, Widget):
     """
     can_focus = True
 
-    _PREFIX = "   "  # отступ-индент тула (без «лесенки» |-); статус-глиф ✓/✗/▸ — следом
-    _NESTED_PREFIX = "       "  # nested под subagent: +4 пробела
-
     def __init__(
         self,
         *,
@@ -85,7 +83,7 @@ class ToolCallRow(ClickModelMixin, Widget):
         args_summary: str,
         event_no: int = 0,
         waiting: bool = False,
-        nested: bool = False,
+        level: int = 0,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -99,7 +97,8 @@ class ToolCallRow(ClickModelMixin, Widget):
             False  # терминальное «прервано» (стоп/обрыв run)
         )
         self._waiting: bool = bool(waiting)
-        self._nested: bool = bool(nested)
+        # Уровень вложенности: 0 — вызов агента, 1 — вызов его субагента.
+        self._level: int = level
         self._live_status: Optional[str] = (
             None  # step/last для корневого субагента
         )
@@ -111,7 +110,7 @@ class ToolCallRow(ClickModelMixin, Widget):
         )
         # line-tool на самом widget'е — color: $dim каскадится в prefix-Static.
         self.add_class("line-tool")
-        if self._nested:
+        if self._level > 0:
             self.add_class("nested-tool")
         # Момент создания / активации — для тикающего elapsed в running.
         self._start_monotonic = time.monotonic()
@@ -264,12 +263,9 @@ class ToolCallRow(ClickModelMixin, Widget):
             return "✗", _ERR
         return "✓", _OK
 
-    def _indent_prefix(self) -> str:
-        return self._NESTED_PREFIX if self._nested else self._PREFIX
-
     def _render_prefix(self) -> Text:
         text = Text()
-        text.append(self._indent_prefix(), style=_DIM)
+        text.append(level_prefix(self._level), style=_DIM)
         glyph, color = self._status_glyph()
         text.append(glyph, style=color)
         text.append(" ")

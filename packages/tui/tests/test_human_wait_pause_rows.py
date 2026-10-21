@@ -24,7 +24,7 @@ async def test_human_wait_pauses_nested_rows(tmp_path):
             call_id="r", tool_name="subagent_x", args_summary=""
         )
         nested = ToolCallRow(
-            call_id="n", tool_name="exec_run", args_summary="", nested=True
+            call_id="n", tool_name="exec_run", args_summary="", level=1
         )
         await scr.mount(root)
         await scr.mount(nested)
@@ -48,7 +48,7 @@ async def test_human_wait_ticks_nested_elapsed(tmp_path, monkeypatch):
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         nested = ToolCallRow(
-            call_id="n", tool_name="exec_run", args_summary="", nested=True
+            call_id="n", tool_name="exec_run", args_summary="", level=1
         )
         await scr.mount(nested)
         ticks = []

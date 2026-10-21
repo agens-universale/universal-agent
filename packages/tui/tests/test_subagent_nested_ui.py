@@ -91,7 +91,7 @@ async def test_drain_mounts_nested_under_parent():
 
         nested = scr._nested_tool_rows.get("tc_nested")
         assert nested is not None
-        assert nested._nested is True
+        assert nested._level == 1
         assert "fs_read_file" in str(nested._render_content())
         # heartbeat на корне
         assert "step 2/50" in str(parent._render_content())
