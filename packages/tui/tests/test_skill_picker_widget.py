@@ -245,3 +245,12 @@ def test_order_is_alphabetical_not_registry_layers():
         _plain(w).strip() for w in _rows(p) if w.has_class("palette-pack-head")
     ]
     assert heads == ["alpha", "zeta"]
+
+
+@pytest.mark.parametrize("filter_", ["bz", "BZ", "p:bz"])
+def test_filter_case_insensitive_on_both_sides(filter_):
+    pytest.importorskip("textual")
+    from gc_tui.widgets.skill_picker import SkillPicker
+
+    p = SkillPicker([{"id": "P:Bz-a"}], initial_filter=filter_)
+    assert [s["id"] for s in p._visible_rows()] == ["P:Bz-a"]

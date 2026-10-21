@@ -1042,3 +1042,12 @@ def test_skill_rows_alphabetical_by_short_name():
         "bz-c",
         "bz-d",
     ]
+
+
+@pytest.mark.parametrize("filter_", ["bz", "BZ", "p:bz", "P:BZ"])
+def test_skill_match_case_insensitive_on_both_sides(filter_):
+    """Имя `Bz-a` находится и по `/bz`, и по `/BZ`; полный id — тоже."""
+    pytest.importorskip("textual")
+    skill = {"id": "P:Bz-a"}
+    palette = _skill_palette(filter_, [skill])
+    assert palette._visible_skill_rows() == [skill]

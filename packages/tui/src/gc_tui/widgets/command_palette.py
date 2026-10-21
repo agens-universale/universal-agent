@@ -30,6 +30,7 @@ from gc_tui.toggles import _HINT_KEYS_TOGGLE, TOGGLES, _fit_hint, padded_track
 from gc_tui.widgets.palette_layout import (
     fit_name,
     fit_text,
+    fold,
     name_col_w,
     overlay_content_width,
     skill_name_key,
@@ -77,10 +78,12 @@ def _skill_label(skill: dict) -> str:
 
 
 def _skill_matches(skill: dict, prefix: str) -> bool:
-    """Начало короткого имени; полного id — только при `:` в фильтре."""
+    """Начало короткого имени; полного id — только при `:` в фильтре.
+    Регистр не важен ни у фильтра, ни у имени (`fold` с обеих сторон)."""
+    prefix = fold(prefix)
     if ":" in prefix:
-        return str(skill.get("id", "")).startswith(prefix)
-    return skill_short(skill).startswith(prefix)
+        return fold(str(skill.get("id", ""))).startswith(prefix)
+    return fold(skill_short(skill)).startswith(prefix)
 
 
 class CommandPalette(VerticalScroll):

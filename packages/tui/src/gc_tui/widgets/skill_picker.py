@@ -25,6 +25,7 @@ from gc_tui import palette as _pal
 from gc_tui.widgets.palette_layout import (
     fit_name,
     fit_text,
+    fold,
     name_col_w,
     overlay_content_width,
     skill_name_key,
@@ -100,8 +101,8 @@ class SkillPicker(PaletteRowsMixin, VerticalScroll):
         return text
 
     def _matched(self) -> list[dict]:
-        f = self._filter.lower()
-        return [s for s in self._skills if f in str(s.get("id", "")).lower()]
+        f = fold(self._filter)
+        return [s for s in self._skills if f in fold(str(s.get("id", "")))]
 
     def _visible_groups(self) -> list[tuple[str, list[dict]]]:
         """Группы с совпадениями: пустая группа не показывает и шапку."""

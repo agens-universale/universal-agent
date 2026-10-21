@@ -17,11 +17,17 @@ def skill_short(skill: dict) -> str:
     return str(skill.get("id", "")).rpartition(":")[2]
 
 
+def fold(text: str) -> str:
+    """Единая нормализация регистра для поиска и порядка скиллов: фильтр
+    и имя/id сравниваются только после неё, с обеих сторон."""
+    return text.lower()
+
+
 def skill_name_key(skill: dict) -> tuple[str, str]:
     """Ключ алфавитного порядка скиллов: короткое имя без регистра, при
     равенстве — полный id. Порядок реестра (слои) в оверлее не виден и
     выглядел бы случайным."""
-    return skill_short(skill).lower(), str(skill.get("id", ""))
+    return fold(skill_short(skill)), str(skill.get("id", ""))
 
 
 def fit_text(text: str, width: int) -> str:
