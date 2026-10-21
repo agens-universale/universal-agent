@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 from collections import deque
 from dataclasses import dataclass
@@ -60,6 +61,13 @@ ProgressKind = Literal[
 
 _ERROR_BRIEF_MAX = 120
 _ARGS_SUMMARY_MAX = 80
+
+# Приставка `cd <каталог> && ` / `cd <каталог>; ` в начале команды: каталог
+# в двойных, одинарных кавычках или без них.
+_CD_PREFIX = re.compile(
+    r"""cd\s+(?:"(?P<dq>[^"]+)"|'(?P<sq>[^']+)'|(?P<bare>[^\s;&]+))"""
+    r"\s*(?:&&|;)\s*"
+)
 
 
 @dataclass(frozen=True)
@@ -218,8 +226,9 @@ def tool_args_summary(
 
     Главный аргумент — по таблице отображения ядра; его нет — до трёх пар
     ``key=preview``. Длина сводки не превышает ``limit``. ``root`` — корень
-    проекта: путь тула ядра показывается от него (``display_path``); без
-    корня — как записан."""
+    проекта: путь тула ядра показывается от него (``display_path``),
+    у команды снята приставка ``cd <корень> &&``; без корня — как записаны.
+    Только показ: аргументы вызова не меняются."""
     data: Any = arguments
     if isinstance(arguments, str):
         try:
@@ -235,7 +244,7 @@ def tool_args_summary(
     if not isinstance(data, dict) or not data:
         return ""
     if root is not None and name in TOOL_DISPLAY:
-        data = _rooted_path(data, root)
+        data = _rooted_command(name, _rooted_path(data, root), root)
     primary = _primary_summary(name, data, limit) if name else None
     if primary:
         return _clip(primary, limit)
@@ -249,6 +258,33 @@ def _rooted_path(data: Dict[str, Any], root: str) -> Dict[str, Any]:
         return data
     home = os.path.expanduser("~")
     return {**data, "path": display_path(path, root, home)}
+
+
+def _rooted_command(
+    name: str, data: Dict[str, Any], root: str
+) -> Dict[str, Any]:
+    """Команда Run-тула — для показа: без `cd <корень проекта> &&` в начале.
+
+    Переход в любой другой каталог остаётся: он что-то говорит о команде."""
+    shown = TOOL_DISPLAY[name]
+    command = data.get("command")
+    if shown.category is not DisplayCategory.RUN or not isinstance(
+        command, str
+    ):
+        return data
+    flat = command.strip()
+    match = _CD_PREFIX.match(flat)
+    rest = flat[match.end() :] if match else ""
+    if not rest or not _same_dir(match.group("dq", "sq", "bare"), root):
+        return data
+    return {**data, "command": rest}
+
+
+def _same_dir(groups: tuple[Optional[str], ...], root: str) -> bool:
+    """Каталог `cd` (абсолютный или через `~`) — это корень проекта."""
+    target = next(g for g in groups if g)
+    expanded = os.path.expanduser(target)
+    return os.path.normpath(expanded) == os.path.normpath(root)
 
 
 def _clip(text: str, limit: int) -> str:

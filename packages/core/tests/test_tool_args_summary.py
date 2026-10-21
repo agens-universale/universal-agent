@@ -248,3 +248,61 @@ def test_without_root_the_path_is_shown_as_is():
     assert tool_args_summary("fs_read_file", {"path": f"{ROOT}/a.py"}) == (
         f"{ROOT}/a.py"
     )
+
+
+# ---- команда без приставки `cd <корень проекта>` (решение владельца) ----
+
+
+def _run(command: str) -> str:
+    return tool_args_summary("exec_command", {"command": command}, root=ROOT)
+
+
+@pytest.mark.usefixtures("home")
+@pytest.mark.parametrize(
+    "prefix",
+    [
+        f"cd {ROOT} && ",
+        f"cd {ROOT}/ && ",
+        f"cd {ROOT}; ",
+        f"cd {ROOT};",
+        f'cd "{ROOT}" && ',
+        f"cd '{ROOT}' && ",
+        f"  cd  {ROOT}  &&  ",
+    ],
+)
+def test_cd_into_the_project_root_is_dropped(prefix):
+    assert _run(f"{prefix}ls -la") == "ls -la"
+
+
+@pytest.mark.usefixtures("home")
+def test_cd_into_the_root_in_tilde_form_is_dropped():
+    assert _run("cd ~/work/project && make test") == "make test"
+
+
+@pytest.mark.usefixtures("home")
+@pytest.mark.parametrize(
+    "command",
+    [
+        f"cd {ROOT}/packages && ls",
+        "cd /tmp && ls",
+        f"cd {ROOT}",
+        f"cd {ROOT} && ",
+        f"echo cd {ROOT} && ls",
+        f"cd {ROOT} || ls",
+    ],
+)
+def test_other_commands_are_shown_as_written(command):
+    assert _run(command) == " ".join(command.split())
+
+
+@pytest.mark.usefixtures("home")
+def test_cd_prefix_is_kept_without_root():
+    out = tool_args_summary("exec_command", {"command": f"cd {ROOT} && ls"})
+    assert out == f"cd {ROOT} && ls"
+
+
+@pytest.mark.usefixtures("home")
+def test_real_arguments_are_not_changed():
+    args = {"command": f"cd {ROOT} && ls"}
+    tool_args_summary("exec_command", args, root=ROOT)
+    assert args == {"command": f"cd {ROOT} && ls"}

@@ -494,3 +494,32 @@ async def test_preview_shows_path_from_the_project_root(tmp_path):
         await pilot.pause()
         texts = [_content(r) for r in screen.query(ToolCallRow)]
         assert texts[0].startswith("Read  README.md")
+
+
+def test_run_row_hides_cd_into_the_project_root():
+    from gc_tui.services.trace_mapper import (
+        collect_render_context,
+        map_message,
+    )
+    from gc_tui.services.trace_render import build_call_row
+
+    command = f"cd {_ROOT} && ls .superpowers/sdd/2026-10-21-p3a-trace-look"
+    call = {
+        "type": "function_call",
+        "id": "fc_c1",
+        "name": "exec_command",
+        "call_id": "c1",
+        "arguments": json.dumps({"command": command}),
+    }
+    context = collect_render_context([call], root=_ROOT)
+    ev = map_message(call, no=1, ts="", context=context)
+    row = build_call_row(
+        call_id="c1",
+        wire_name=ev.wire_name,
+        args_summary=ev.args_summary,
+        level=0,
+    )
+    assert _content(row).startswith(
+        "Run  ls .superpowers/sdd/2026-10-21-p3a-trace-look"
+    )
+    assert ev.full_payload["arguments"] == json.dumps({"command": command})
