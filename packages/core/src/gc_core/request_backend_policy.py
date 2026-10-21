@@ -5,8 +5,7 @@ from typing import Any, Callable, Dict, Optional, Tuple
 from gc_core.config_modules.backend import DEFAULT_REQUEST_TIMEOUT_SEC
 from gc_core.runtime_notices import maybe_push_llm_failure_notice
 from gc_core.utils.backend_errors import (
-    EmbeddedChoiceError,
-    has_payload,
+    embedded_choice_error,
     is_image_rejection_error,
     is_image_request_error,
     is_retriable_backend_error,
@@ -20,75 +19,21 @@ _CHAT_COMPLETIONS_HTTP_RETRY_FACTOR = 0.5
 _CHAT_COMPLETIONS_ADAPTIVE_MAX_TOKEN_STEPS = 5
 
 
-def _raise_embedded_from_error_dict(err: Dict[str, Any]) -> None:
-    code = err.get("code")
-    try:
-        status = int(code) if code is not None else None
-    except (TypeError, ValueError):
-        status = None
-    raise EmbeddedChoiceError(
-        f"provider returned embedded choice error: code={code!r} message={err.get('message')!r}",
-        status_code=status,
-        metadata=err.get("metadata"),
-        raw_code=code,
-    )
-
-
-def _raise_on_first_choice_error(
-    ch0: Dict[str, Any], *, salvage_reasoning: bool
-) -> None:
-    """Ошибка внутри ``choices[0]``: поле ``error`` или ``finish_reason="error"`` без payload."""
-    err = ch0.get("error")
-    if isinstance(err, dict):
-        _raise_embedded_from_error_dict(err)
-    fr = ch0.get("finish_reason")
-    if not (isinstance(fr, str) and fr.lower() == "error"):
-        return
-    msg = ch0.get("message") or {}
-    usable = (
-        has_payload(msg)
-        if salvage_reasoning
-        else bool(msg.get("content") or msg.get("tool_calls"))
-    )
-    if not usable:
-        raise EmbeddedChoiceError(
-            "provider returned finish_reason='error' with empty choice"
-        )
-
-
 def _raise_on_embedded_choice_error(
     response: Dict[str, Any], *, salvage_reasoning: bool = False
 ) -> None:
-    """Поднять EmbeddedChoiceError, если провайдер зашил ошибку внутрь HTTP-200:
-    choices[0].error = {code, message, metadata} (стиль OpenRouter, напр. 504
-    "Upstream idle timeout"), top-level {"error": {...}} без choices, или
-    finish_reason="error" с пустым выбором. Иначе такая ошибка «успешно»
-    проходит транспорт и фаталит позже в конвертации, уже за retry-границей;
+    """Поднять ошибку, зашитую провайдером внутрь HTTP-200
+    (`embedded_choice_error`). Иначе такая ошибка «успешно» проходит
+    транспорт и фаталит позже в конвертации, уже за retry-границей;
     вызывается до выхода из неё, поэтому получает тот же ретрай-цикл, что и
-    HTTP-ошибки.
-    finish_reason="error" С видимым content/tool_calls не трогаем: его принимает
-    permissive-путь normalize_finish_reason (с warning).
-
-    ``salvage_reasoning`` — только агентский цикл: reasoning-only при
-    finish_reason="error" не ошибка (salvage в ``<think>``). Служебная воронка
-    читает только content; обрывок мысли там — пустая строка без исключения,
-    поэтому reasoning payload'ом не считается.
-
-    Top-level форма ({"error": {...}} без choices) иначе падает KeyError'ом в
-    get_output_list (dct['choices']) за retry-границей; в стриме она уже
-    обрабатывается (chat_completions_stream.py)."""
-    if not isinstance(response, dict):
-        return
-    choices = response.get("choices")
-    if isinstance(choices, list) and choices and isinstance(choices[0], dict):
-        _raise_on_first_choice_error(
-            choices[0], salvage_reasoning=salvage_reasoning
-        )
-        return
-    # Нет валидного choices — проверяем top-level error (вторая типовая форма).
-    top_err = response.get("error")
-    if isinstance(top_err, dict):
-        _raise_embedded_from_error_dict(top_err)
+    HTTP-ошибки. Top-level форма иначе падает KeyError'ом в get_output_list
+    (dct['choices']); в стриме она уже обрабатывается
+    (chat_completions_stream.py)."""
+    error = embedded_choice_error(
+        response, salvage_reasoning=salvage_reasoning
+    )
+    if error is not None:
+        raise error
 
 
 def _reduced_chat_completions_max_tokens(
