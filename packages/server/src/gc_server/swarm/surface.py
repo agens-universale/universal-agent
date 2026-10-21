@@ -436,7 +436,7 @@ def _sandbox_thread_store(runtime: ServerRuntime) -> Dict[str, Any] | None:
             "swarm.storage: нужна сетевая база песочницы — type: "
             + ", ".join(sorted(swarm_runner.SANDBOX_STORES))
         )
-    kind, _params = settings_of(runtime.base).storage.part("threads")
+    kind, params = settings_of(runtime.base).storage.part("threads")
     if kind not in swarm_runner.SANDBOX_STORES:
         logger.warning(
             "swarm.storage задан, а треды сервера — %s: /logs не увидит "
@@ -444,7 +444,29 @@ def _sandbox_thread_store(runtime: ServerRuntime) -> Dict[str, Any] | None:
             kind,
         )
         return None
+    _require_server_database((kind, params), part)
     return dict(part)
+
+
+def _require_server_database(
+    server: tuple[str, Dict[str, Any]], part: Dict[str, Any]
+) -> None:
+    """Песочница пишет тред туда, откуда его читают /logs и очередь
+    сообщений сервера: тот же тип и то же место данных, учётная запись —
+    своя. Иначе — ошибка конфигурации при старте."""
+    from gc_server.swarm import store_location
+
+    params = {k: v for k, v in part.items() if k != "type"}
+    sandbox = store_location.location(str(part["type"]), params)
+    threads = store_location.location(*server)
+    if sandbox != threads:
+        raise ServerConfigError(
+            "swarm.storage указывает не на базу тредов сервера "
+            f"(storage.threads: {store_location.describe(threads)}; "
+            f"swarm.storage: {store_location.describe(sandbox)}): /logs и "
+            "очередь сообщений не увидели бы тред песочницы. Нужны тот же "
+            "type и та же база, учётная запись — своя"
+        )
 
 
 def _swarm_meta(meta: Dict[str, Any]) -> Dict[str, Any]:

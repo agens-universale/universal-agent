@@ -220,3 +220,121 @@ def test_swarm_does_not_take_over_a_webhook_thread(surface):
     assert surface.started == []
     record = run_sync(surface.store.get_thread(KEY))
     assert "swarm" not in record.frontend
+
+
+def _swarm_with(tmp_path, threads: dict, sandbox: dict) -> SwarmSurface:
+    from gc_core.stores import Stores
+
+    loaded = make_settings(
+        {
+            "paths.threads_data_path": str(tmp_path / "files"),
+            "storage": {"threads": threads},
+        }
+    )
+    return SwarmSurface(
+        ServerRuntime(
+            base=loaded,
+            config=ServerConfig.model_validate(
+                {"swarm": {"storage": sandbox}}
+            ),
+            stores=Stores(threads=MemoryThreadStore(), agent=object()),
+        ),
+        swarm={
+            "threads_dir": str(tmp_path),
+            "sandbox_root_dir": str(tmp_path),
+        },
+    )
+
+
+SERVER_PG = {"type": "postgres", "dsn": "postgresql://srv:s3cret@db/gc"}
+
+
+@pytest.mark.parametrize(
+    "sandbox",
+    [
+        {"type": "postgres", "dsn": "postgresql://box:other@db/gc"},
+        {"type": "postgres", "dsn": "postgresql://box:other@DB:5432/gc"},
+        {
+            "type": "postgres",
+            "dsn": "postgresql://box:other@db/gc",
+            "schema": "public",
+        },
+    ],
+    ids=["другая учётка", "порт по умолчанию", "схема по умолчанию"],
+)
+def test_sandbox_store_is_the_server_database(tmp_path, sandbox):
+    surface = _swarm_with(tmp_path, SERVER_PG, sandbox)
+    assert surface.swarm["thread_store"] == sandbox
+
+
+@pytest.mark.parametrize(
+    "sandbox",
+    [
+        {"type": "redis", "url": "redis://db:6379/0"},
+        {"type": "postgres", "dsn": "postgresql://box:other@db/other"},
+        {"type": "postgres", "dsn": "postgresql://box:other@db2/gc"},
+        {"type": "postgres", "dsn": "postgresql://box:other@db:6432/gc"},
+        {
+            "type": "postgres",
+            "dsn": "postgresql://box:other@db/gc",
+            "schema": "sandbox",
+        },
+    ],
+    ids=["другой тип", "другая база", "другой хост", "другой порт", "схема"],
+)
+def test_sandbox_store_elsewhere_is_a_start_error(tmp_path, sandbox):
+    """Песочница писала бы тред не туда, откуда его читают /logs и очередь
+    сообщений сервера. Учётные данные в тексте ошибки не показываются."""
+    from gc_server.config import ServerConfigError
+
+    with pytest.raises(ServerConfigError) as err:
+        _swarm_with(tmp_path, SERVER_PG, sandbox)
+    assert "s3cret" not in str(err.value)
+    assert "other@" not in str(err.value)
+
+
+@pytest.mark.parametrize(
+    ("server", "sandbox", "same"),
+    [
+        (
+            {"type": "redis", "url": "redis://:pw@cache:6379"},
+            {"type": "redis", "url": "redis://:box@cache/0", "prefix": "gc:"},
+            True,
+        ),
+        (
+            {"type": "redis", "url": "redis://cache/0"},
+            {"type": "redis", "url": "redis://cache/1"},
+            False,
+        ),
+        (
+            {"type": "s3", "bucket": "b", "endpoint_url": "http://s3:9000"},
+            {"type": "s3", "bucket": "b", "endpoint_url": "http://s3:9000"},
+            True,
+        ),
+        (
+            {"type": "s3", "bucket": "b"},
+            {"type": "s3", "bucket": "b", "prefix": "box/"},
+            False,
+        ),
+        (
+            {"type": "mysql", "dsn": "mysql://srv:pw@my/gc"},
+            {"type": "mysql", "dsn": "mysql://box:pw@my:3306/gc"},
+            True,
+        ),
+    ],
+    ids=[
+        "redis: префикс и номер по умолчанию",
+        "redis: другой номер базы",
+        "s3: тот же бакет",
+        "s3: другой префикс",
+        "mysql: порт по умолчанию",
+    ],
+)
+def test_sandbox_store_location_per_type(tmp_path, server, sandbox, same):
+    from gc_server.config import ServerConfigError
+
+    if same:
+        assert _swarm_with(tmp_path, server, sandbox).swarm["thread_store"]
+    else:
+        with pytest.raises(ServerConfigError):
+            _swarm_with(tmp_path, server, sandbox)
