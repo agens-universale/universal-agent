@@ -82,6 +82,7 @@ from gc_tui.services.footer_slot import (
     IMAGES_WITH_COMMAND_REFUSAL,
     NESTED_NO_DETAIL,
     PASTE_HINT_TEXT,
+    QUEUE_ADMITTED_HINT,
     RETENTION_DETAIL_HINT,
     toggle_info_line,
 )
@@ -2791,6 +2792,36 @@ class TraceScreen(Screen):
                 break
             tail.append(widget)
         return tail[::-1]
+
+    def _withdraw_last_queued(self) -> bool:
+        """↑ забирает последнюю реплику очереди в поле (спека P3 §2.4, §10
+        ответ 2): поле в фокусе и пустое, палитра и пикеры закрыты, история
+        не листается, очередь есть. Иначе `False` — ↑ как раньше. Впущенное
+        ядром не забирается: подсказка в футере, реплика остаётся (сверка
+        сделает её `normal`). Клавиша съедена в обоих случаях."""
+        if self._any_picker_open or self._history_index is not None:
+            return False
+        inp = self.query_one(_SEL_CMDINPUT, CommandTextArea)
+        if not (inp.has_focus and inp.is_blank()):
+            return False
+        tail = self._queued_tail(self.query_one(_SEL_TRACE, VerticalScroll))
+        if not tail:
+            return False
+        reply = tail[-1]
+        if not self.app.active_runner.withdraw_message(reply.message_id):
+            self._show_footer_hint(QUEUE_ADMITTED_HINT)
+            return True
+        self._pending_user_widgets.pop(reply.client_id, None)
+        self._remove_pending_record(reply.client_id)
+        self._restore_input(reply.restore_text, reply.images)
+        self.call_next(self._drop_queued_reply, reply)
+        return True
+
+    async def _drop_queued_reply(self, reply) -> None:
+        """Снять забранную реплику; подсказка — новой последней. Удаление
+        в Textual отложенное: до его конца реплика ещё в хвосте очереди."""
+        await reply.remove()
+        self._refresh_queue_hint()
 
     def _refresh_queue_hint(self) -> None:
         """Подсказка очереди — только под последней ожидающей репликой
@@ -5659,6 +5690,12 @@ class TraceScreen(Screen):
         # Без него ↑/↓ всплывают в Screen.on_key от любого сфокусированного
         # виджета (Tab по трейсу) и ложно листают историю; в PyCharm-терминале
         # колесо мыши шлётся как ↑/↓ — гейт ограничивает его влияние полем ввода.
+        # ↑ из очереди — раньше истории (спека P3 §2.4): в пустом поле.
+        if event.key == "up" and self._withdraw_last_queued():
+            event.stop()
+            event.prevent_default()
+            return
+
         if event.key == "up" and not self._any_picker_open:
             try:
                 input_field = self.query_one(_SEL_CMDINPUT, CommandTextArea)
@@ -7371,17 +7408,9 @@ class TraceScreen(Screen):
             self._pending_user_widgets.pop(cid, None)
             self._last_pending_client_id = None
 
-        # Восстановить текст в input + поставить курсор в конец, чтобы
-        # юзер мог сразу продолжить печатать (а не правил с начала строки).
-        try:
-            input_field = self.query_one(_SEL_CMDINPUT)
-            input_field.text = self._last_user_send_text
-            # Плашки картинок возвращаются вместе с текстом: подписи уже в нём,
-            # записи стора сброшены отправкой (дизайн картинок §12).
-            input_field.restore_images(self._last_user_send_images)
-            input_field.cursor_location = input_field.document.end
-        except Exception:
-            pass
+        self._restore_input(
+            self._last_user_send_text, self._last_user_send_images
+        )
 
         # Убить индикатор + заменить runner — как в normal stop
         self._destroy_thinking_indicator()
@@ -7396,6 +7425,21 @@ class TraceScreen(Screen):
         if tid is not None and msg_id:
             self._discard_orphan_and_resync(tid, msg_id)
         # НЕ монтируем [stopped] — это и есть "undo".
+
+    def _restore_input(
+        self, text: str, images: tuple[Attachment, ...] = ()
+    ) -> None:
+        """Вернуть отправленное в поле (откат отправки, ↑ из очереди):
+        курсор в конец, чтобы сразу продолжить печатать."""
+        try:
+            input_field = self.query_one(_SEL_CMDINPUT)
+            input_field.text = text
+            # Плашки картинок возвращаются вместе с текстом: подписи уже в нём,
+            # записи стора сброшены отправкой (дизайн картинок §12).
+            input_field.restore_images(images)
+            input_field.cursor_location = input_field.document.end
+        except Exception:
+            pass
 
     def _discard_orphan_and_resync(self, tid: str, msg_id: str) -> bool:
         """Удалить запись реплики по id и пересинхронизировать курсор трейса.

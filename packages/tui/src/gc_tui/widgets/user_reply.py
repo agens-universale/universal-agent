@@ -372,6 +372,10 @@ class UserReplyContainer(_ImageLinksMixin, ClickModelMixin, Widget):
     def has_images(self) -> bool:
         return bool(self._images)
 
+    @property
+    def images(self) -> tuple[Attachment, ...]:
+        return self._images
+
     def set_state(self, new_state: _State) -> None:
         """Переключить состояние реплики: цвет маркера и вид очереди."""
         self._state = new_state

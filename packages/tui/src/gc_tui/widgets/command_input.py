@@ -297,6 +297,14 @@ class CommandTextArea(TextArea):
         self._close_expand_window()
         return used
 
+    def is_blank(self) -> bool:
+        """Поле пустое: нет текста и нет видимой подсказки реплики.
+
+        Шов `feat/prompt-suggestions`: подсказка живёт в `TextArea.suggestion`
+        (реактив Textual), и поле с ней — не пустое. Единственный предикат
+        «поле пустое» для ↑, плашки «в конец» и Enter (спека P3 §2.4)."""
+        return not self.text and not self.suggestion
+
     def images_in_buffer(self) -> tuple[Attachment, ...]:
         """Вложения сообщения: image-плашки буфера, первое вхождение каждого id, по порядку."""
         return tuple(self._chips.images_in_text(self.text))

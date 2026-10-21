@@ -48,6 +48,9 @@ IMAGE_PASTE_REFUSALS = {
     ),
 }
 
+# ↑ в пустом поле: реплику из очереди ядро уже впустило (спека P3 §2.4).
+QUEUE_ADMITTED_HINT = "сообщение уже у агента — изменить нельзя"
+
 RETENTION_DETAIL_HINT = "детали вне окна retention; /export или архив"
 NESTED_NO_DETAIL = "нет args/output для этого nested-тула"
 
