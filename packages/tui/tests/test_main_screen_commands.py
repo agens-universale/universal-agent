@@ -162,3 +162,80 @@ async def test_ask_human_slash_skill_is_command_only_with_warm_cache():
 def _running(app) -> bool:
     runner = app.active_runner
     return runner is not None and runner.is_running()
+
+
+@pytest.mark.asyncio
+async def test_typo_on_ambiguous_short_name_suggests_full_ids_only():
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+
+    async with TuiApp().run_test() as pilot:
+        pilot.app.screen._skills_cache = list(_SKILLS)
+        cands = pilot.app.screen._command_candidates("revie")
+        assert "review" not in cands
+        assert cands[-2:] == ["a:review", "b:review"]
+
+
+@pytest.mark.asyncio
+async def test_typo_suggests_skill_shadowed_by_command_as_full_id():
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+
+    async with TuiApp().run_test() as pilot:
+        pilot.app.screen._skills_cache = list(_SKILLS)
+        cands = pilot.app.screen._command_candidates("statsu")
+        assert cands[0] == "status"
+        assert "p:status" in cands
+        assert cands.count("status") == 1
+
+
+@pytest.mark.asyncio
+async def test_skill_command_with_pack_name_pends_bootstrap():
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+
+    async with TuiApp().run_test() as pilot:
+        pilot.app.screen._skills_cache = [
+            {
+                "id": "codebase:entry",
+                "pack_id": "codebase",
+                "is_pack_bootstrap": True,
+            },
+            {"id": "codebase:other", "pack_id": "codebase"},
+        ]
+        await pilot.app.screen._handle_command("skill codebase")
+        await pilot.pause(0.1)
+        assert pilot.app.tui_state.pending_skill_id == "codebase:entry"
+
+
+@pytest.mark.asyncio
+async def test_ask_human_path_like_input_is_not_command():
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+    from gc_tui.state import AskHumanState
+
+    async with TuiApp().run_test() as pilot:
+        scr = pilot.app.screen
+        pilot.app.tui_state.ask_human_state = AskHumanState(
+            call_id="c1", question="Q?"
+        )
+        scr._skills_cache = list(_SKILLS)
+        assert not scr._is_command_input("/path/to/file")
+
+
+@pytest.mark.asyncio
+async def test_cold_cache_slash_skill_name_is_unknown_command():
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+
+    async with TuiApp().run_test() as pilot:
+        scr = pilot.app.screen
+        scr._skills_cache = None
+        inp = pilot.app.query_one("#cmdinput")
+        inp.text = "/brainstorming x"
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause(0.1)
+        assert "неизвестная команда: /brainstorming" in _trace_text(pilot)
+        assert pilot.app.tui_state.pending_skill_id is None
+        assert not _running(pilot.app)

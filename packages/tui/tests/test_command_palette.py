@@ -779,3 +779,26 @@ async def test_enter_on_ambiguous_skill_row_inserts_full_id(tmp_path):
 def _running(app) -> bool:
     runner = app.active_runner
     return runner is not None and runner.is_running()
+
+
+@pytest.mark.asyncio
+async def test_tab_on_skill_row_inserts_runnable_form(tmp_path):
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
+    )
+    async with app.run_test() as pilot:
+        scr = app.screen
+        scr._skills_cache = [_BRAIN]
+        inp = pilot.app.query_one("#cmdinput")
+        inp.text = "/brai"
+        await pilot.pause(0.1)
+        await pilot.press("tab")
+        await pilot.pause(0.1)
+        assert scr._palette is None
+        assert inp.text == "/brainstorming "
+        assert app.tui_state.pending_skill_id is None

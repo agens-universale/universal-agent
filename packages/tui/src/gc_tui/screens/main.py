@@ -5775,11 +5775,13 @@ class TraceScreen(Screen):
             # иначе — обычная строка: не перехватываем, ←/→ уходит в TextArea (каретка)
         elif event.key == "tab":
             cmd = self._palette.selected_command()
+            inp = self.query_one(_SEL_CMDINPUT, CommandTextArea)
             if cmd is not None:
-                inp = self.query_one(_SEL_CMDINPUT, CommandTextArea)
                 inp.text = f"/{cmd.name} "
                 inp.move_cursor(inp.document.end)
                 self._close_palette()
+            else:
+                self._insert_palette_skill(inp, inp.text)
             event.stop()
             event.prevent_default()
 
@@ -5848,8 +5850,8 @@ class TraceScreen(Screen):
                 if self._skills_cache is None:
                     self._skills_cache = await self._load_skills_safe()
                 skill_first, _, skill_rest = rest.partition(" ")
-                if skill_rest.strip() and any(
-                    str(s.get("id")) == skill_first for s in self._skills_cache
+                if skill_rest.strip() and isinstance(
+                    self._resolve_cached_skill(skill_first), Resolved
                 ):
                     if self._skill_picker is not None:
                         self._close_skill_picker()
@@ -7384,10 +7386,13 @@ class TraceScreen(Screen):
         return True
 
     def _skill_input_name(self, skill: dict) -> str:
-        """Имя для `/имя` в поле: короткое, если оно однозначно ведёт к
-        этому скиллу, иначе полный id."""
+        """Запускаемый вид скилла в поле: короткое имя, если оно ведёт
+        ровно к этому скиллу и не занято командой или алиасом, иначе
+        полный id."""
         sid = str(skill.get("id", ""))
         short = sid.rpartition(":")[2]
+        if self._registry.lookup(short) is not None:
+            return sid
         res = self._resolve_cached_skill(short)
         if isinstance(res, Resolved) and res.canonical_id == sid:
             return short
@@ -7426,10 +7431,28 @@ class TraceScreen(Screen):
         """«Вы имели в виду»: ближайшая команда, затем нечёткие скиллы."""
         found = closest_command(name, self._registry)
         out = [found] if found else []
-        if self._skills_cache:
-            catalog = catalog_from_entries(self._skills_cache)
-            out += [s for s in suggest_skills(name, catalog, 3) if s != found]
+        for sid in self._fuzzy_skill_ids(name):
+            runnable = "/" + self._skill_input_name({"id": sid})
+            if runnable[1:] not in out:
+                out.append(runnable[1:])
         return out
+
+    def _fuzzy_skill_ids(self, name: str) -> list[str]:
+        """Полные id скиллов, близких к `name`: короткое неоднозначное
+        имя раскрывается во все свои id."""
+        if not self._skills_cache:
+            return []
+        catalog = catalog_from_entries(self._skills_cache)
+        ids: list[str] = []
+        for cand in suggest_skills(name, catalog, 3):
+            res = resolve_skill_exact(cand, catalog)
+            found = (
+                [res.canonical_id]
+                if isinstance(res, Resolved)
+                else list(res.suggestions)
+            )
+            ids += [i for i in found if i not in ids]
+        return ids
 
     async def _cmd_use_skill(self, skill_id: str, *, prompt: str = "") -> None:
         if not skill_id:

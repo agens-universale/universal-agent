@@ -158,6 +158,30 @@ async def test_picker_closes_when_id_plus_prompt(tmp_path):
         assert scr._skill_picker is None
 
 
+@pytest.mark.asyncio
+async def test_picker_closes_when_short_name_plus_prompt(tmp_path):
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
+    )
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr._skills_cache = [{"id": "supercoder:brainstorming"}]
+        inp = pilot.app.query_one("#cmdinput")
+
+        inp.text = "/skill brainstorming"
+        await pilot.pause(0.1)
+        assert scr._skill_picker is not None
+
+        inp.text = "/skill brainstorming почини"
+        await pilot.pause(0.1)
+        assert scr._skill_picker is None
+
+
 _BRAIN_CACHE = [{"id": "supercoder:brainstorming", "pack_id": "supercoder"}]
 
 
