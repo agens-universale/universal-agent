@@ -47,17 +47,25 @@ class ServerRuntime:
     config: ServerConfig
     #: Связка хранилищ из ``storage:``; ``None`` — файловые из настроек.
     stores: Any = None
+    #: Свои агенты поверхностей (``<поверхность>.agent_id``): имя → хранилище.
+    surface_agents: dict[str, Any] = field(default_factory=dict)
     _create_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     def surface_settings(self, name: str) -> LoadedSettings:
         return surface_settings(self.base, self.config, name)
 
-    def store_kwargs(self) -> dict[str, Any]:
+    def store_kwargs(self, surface: str | None = None) -> dict[str, Any]:
         """Хранилища для ``acreate_run_context`` и ``AsyncAgent.create`` —
-        только нефайловые части ``storage:``; файловые строит сам прогон."""
+        только нефайловые части ``storage:``; файловые строит сам прогон.
+        ``surface`` со своим агентом (``<поверхность>.agent_id``) получает
+        его хранилище агента."""
         from gc_core.stores import run_store_kwargs
 
-        return run_store_kwargs(self.base, self.stores)
+        kwargs = run_store_kwargs(self.base, self.stores)
+        own = self.surface_agents.get(surface) if surface else None
+        if own is not None:
+            kwargs["agent_store"] = own
+        return kwargs
 
     def threads(self, surface: str | None = None) -> Threads:
         """Треды процесса: хранилище в базе — общее; на файлах — каталог из
@@ -79,9 +87,12 @@ class ServerRuntime:
 
         return ResponseIndex(self.threads())
 
-    def agent_factory(self, settings: LoadedSettings) -> Callable[..., Any]:
+    def agent_factory(
+        self, settings: LoadedSettings, *, surface: str | None = None
+    ) -> Callable[..., Any]:
         """Фабрика агентов фасадов chat и a2a: создание — по одному (MCP-
-        дискавери не размножается), хранилища — процесса."""
+        дискавери не размножается), хранилища — процесса (свой агент
+        поверхности ``surface``, если задан)."""
         force_legacy = cli_forces_legacy_model(settings)
 
         async def factory(
@@ -98,7 +109,7 @@ class ServerRuntime:
                     tools_cache=tools_cache,
                     os_backend=os_backend,
                     force_legacy=force_legacy,
-                    **self.store_kwargs(),
+                    **self.store_kwargs(surface),
                 )
 
         return factory

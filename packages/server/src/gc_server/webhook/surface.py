@@ -515,7 +515,7 @@ class WebhookSurface:
             loaded,
             auth_connector=build_auth_connector(loaded),
             force_legacy=force_legacy,
-            **self.runtime.store_kwargs(),
+            **self.runtime.store_kwargs("webhook"),
         )
         run_id = f"{instance_id()}:{uuid.uuid4().hex[:12]}"
         started_at = time.time()

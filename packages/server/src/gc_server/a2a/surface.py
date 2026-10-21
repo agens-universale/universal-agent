@@ -129,7 +129,9 @@ class A2aSurface:
         backend = resolve_os_backend(self.settings)
         return GcAgentExecutor(
             settings=self.settings,
-            agent_factory=self.runtime.agent_factory(self.settings),
+            agent_factory=self.runtime.agent_factory(
+                self.settings, surface="a2a"
+            ),
             threads=self.runtime.threads("a2a"),
             launch_root=self.section.launch_root,
             auth_connector=build_auth_connector(self.settings),

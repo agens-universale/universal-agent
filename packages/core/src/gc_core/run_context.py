@@ -13,6 +13,7 @@ from gc_core.agent_store import (
     check_agent_store,
     project_key_for,
 )
+from gc_core.agent_store.roles import with_role
 from gc_core.attachments.store import ImageStore, image_store_for
 from gc_core.auto_routing.levels import (
     auto_available,
@@ -424,6 +425,9 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
         check_agent_store(agent_store)
 
     source = _coerce_settings(settings, runtime)
+    if agent_store is not None:
+        # Роль поверхности (agent.role): свои L0 и специнструкции агента.
+        agent_store = with_role(agent_store, source)
     prep = _prepare_run_context(
         source,
         run_id=run_id,

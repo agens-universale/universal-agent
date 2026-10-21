@@ -205,3 +205,72 @@ async def test_symlinked_directory_is_refused(tmp_path):
     (root / "skills" / "user").symlink_to(outside, target_is_directory=True)
     with pytest.raises(ValueError, match="ссылк"):
         await sync_directory(_store(tmp_path), root)
+
+
+async def test_roles_land_as_role_variants(tmp_path):
+    """``roles/<роль>/L0.md`` и ``special_instructions.md`` — варианты
+    роли внутри агента: их читает поверхность сервера с этой ролью."""
+    from gc_core.agent_store.roles import RoleAgentStore
+
+    store = _store(tmp_path)
+    root = _layout(
+        tmp_path / "agent",
+        {
+            "roles/webhook/L0.md": "роль вебхука",
+            "roles/chat.completions/special_instructions.md": "вставка",
+        },
+    )
+    report = await sync_directory(store, root)
+    assert sorted(report.written) == [
+        "instructions:L0@webhook",
+        "prompt:special_instructions@chat.completions",
+    ]
+    webhook = RoleAgentStore(store, role="webhook")
+    assert await webhook.read("instructions", "L0") == "роль вебхука".encode()
+    completions = RoleAgentStore(
+        store, role="chat", special_role="chat.completions"
+    )
+    assert (
+        await completions.read("prompt", Prompt.SPECIAL_INSTRUCTIONS)
+        == "вставка".encode()
+    )
+
+
+@pytest.mark.parametrize(
+    "rel",
+    [
+        "roles/webhook/L1.md",
+        "roles/webhook/summary.md",
+        "roles/L0.md",
+        "roles/web hook/L0.md",
+        "roles/webhook/x/L0.md",
+    ],
+)
+async def test_unknown_role_files_are_refused(tmp_path, rel):
+    root = _layout(tmp_path / "agent", {rel: "x"})
+    with pytest.raises(ValueError, match="roles/"):
+        await sync_directory(_store(tmp_path), root)
+
+
+async def test_defaults_carry_the_server_roles(tmp_path):
+    """Умолчания пакета — и роли поверхностей сервера: тексты те же, что у
+    сервера на файлах."""
+    from gc_core.bundled_assets import bundled_root
+
+    store = _store(tmp_path)
+    report = await copy_defaults(store)
+    prompts = bundled_root() / "prompts"
+    expected = {
+        ("instructions", "L0@webhook"): "server_agent.md",
+        (
+            "prompt",
+            "special_instructions@chat",
+        ): "chat_completions_responses_special_instructions.md",
+        (
+            "prompt",
+            "special_instructions@chat.completions",
+        ): "chat_completions_completions_special_instructions.md",
+    }
+    for (kind, name), file in expected.items():
+        assert await store.read(kind, name) == (prompts / file).read_bytes()
+        assert f"{kind}:{name}" in report.written

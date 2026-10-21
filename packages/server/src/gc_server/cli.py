@@ -26,6 +26,7 @@ from gc_core.message_policy.mode_messages import headless_mode_warning_text
 from gc_core.onboarding import explain_broken_config
 from gc_core.security.permission_mode import headless_mode_warning
 
+from gc_server.agent_roles import acheck_roles, aopen_surface_agents
 from gc_server.app import AddressConflict, ServerRuntime, aserve, build_surface
 from gc_server.config import (
     SURFACES,
@@ -100,13 +101,17 @@ async def _amain(loaded, cfg: ServerConfig, names, log_level: str) -> int:
     except StorageConfigError as exc:
         say(str(exc))
         return 1
+    runtime = ServerRuntime(base=loaded, config=cfg, stores=stores)
     try:
-        return await _aserve_surfaces(
-            ServerRuntime(base=loaded, config=cfg, stores=stores),
-            names,
-            log_level,
-        )
+        runtime.surface_agents = await aopen_surface_agents(loaded, cfg, names)
+        await acheck_roles(runtime, names)
+        return await _aserve_surfaces(runtime, names, log_level)
+    except (StorageConfigError, ServerConfigError) as exc:
+        say(str(exc))
+        return 1
     finally:
+        for store in runtime.surface_agents.values():
+            await store.close()
         if stores is not None:
             await stores.aclose()
 

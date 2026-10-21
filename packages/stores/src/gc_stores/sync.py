@@ -11,11 +11,14 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from gc_core.agent_store import FileAgentStore, Prompt, ResourceKind
+from gc_core.agent_store.roles import DEFAULT_ROLES, ROLE_PATTERN, role_variant
+from gc_core.bundled_assets import bundled_root
 
 from gc_stores.admin import ResourceWriter, StoredResource
 from gc_stores.defaults import bundled_source
@@ -35,7 +38,8 @@ def _label(kind: str, name: str, project: str | None) -> str:
 
 
 async def _bundled() -> AsyncIterator[tuple[ResourceKind, str, bytes]]:
-    """Промпты и скиллы слоя ``system`` из пакета gc-core."""
+    """Промпты, роли поверхностей сервера и скиллы слоя ``system`` из
+    пакета gc-core."""
     source = FileAgentStore()
     for name in Prompt:
         try:
@@ -44,6 +48,9 @@ async def _bundled() -> AsyncIterator[tuple[ResourceKind, str, bytes]]:
             data = None
         if data is not None:
             yield "prompt", name.value, data
+    prompts = bundled_root() / "prompts"
+    for (kind, name), file in DEFAULT_ROLES.items():
+        yield kind, name, (prompts / file).read_bytes()
     pending = ["system"]
     while pending:
         prefix = pending.pop()
@@ -117,7 +124,12 @@ async def copy_defaults(
 _INSTRUCTIONS = {"L0": False, "L1": False, "L2": True, "L3": True}
 _SKILL_LAYERS = {"system": False, "user": False, "project": True}
 _PROMPTS = frozenset(p.value for p in Prompt)
-_SECTIONS = ("prompts", "instructions", "subagents", "skills")
+_SECTIONS = ("prompts", "instructions", "subagents", "skills", "roles")
+#: Файлы роли: ``roles/<роль>/<файл>`` → ресурс, чей вариант роли он задаёт.
+_ROLE_FILES: dict[str, tuple[ResourceKind, str]] = {
+    "L0.md": ("instructions", "L0"),
+    "special_instructions.md": ("prompt", Prompt.SPECIAL_INSTRUCTIONS.value),
+}
 
 Item = tuple[ResourceKind, str, bytes, str | None]
 
@@ -176,11 +188,26 @@ def _skill(rel: tuple[str, ...], data: bytes, project: str | None) -> Item:
     return "skill", "/".join(rel[1:]), data, owner
 
 
+def _role(rel: tuple[str, ...], data: bytes, _project: str | None) -> Item:
+    if (
+        len(rel) != 3
+        or not re.fullmatch(ROLE_PATTERN, rel[1])
+        or rel[2] not in _ROLE_FILES
+    ):
+        raise ValueError(
+            f"{'/'.join(rel)}: в roles/ — <роль>/L0.md и "
+            "<роль>/special_instructions.md; роль — [A-Za-z0-9._-]"
+        )
+    kind, name = _ROLE_FILES[rel[2]]
+    return kind, role_variant(name, rel[1]), data, None
+
+
 _PARSERS = {
     "prompts": _prompt,
     "instructions": _instructions,
     "subagents": _subagent,
     "skills": _skill,
+    "roles": _role,
 }
 
 
@@ -254,7 +281,10 @@ async def sync_directory(
     """Разложить каталог агента ``root`` в хранилище.
 
     Раскладка: ``prompts/<имя Prompt>.md``, ``instructions/L0.md…L3.md``,
-    ``subagents/<имя>.md``, ``skills/<слой>/<скилл>/…``; ``L2``, ``L3`` и
+    ``subagents/<имя>.md``, ``skills/<слой>/<скилл>/…``,
+    ``roles/<роль>/L0.md`` и ``roles/<роль>/special_instructions.md``
+    (варианты роли поверхности: ``L0@<роль>``, ``special_instructions@<роль>``);
+    ``L2``, ``L3`` и
     слой ``project`` — только с ``project``. ``with_defaults`` — сначала
     умолчания пакета (файлы каталога их перекрывают); ``prune`` — убрать
     своё, чего в каталоге нет; ``dry_run`` — только отчёт.

@@ -101,7 +101,9 @@ class ChatSurface:
         backend = resolve_os_backend(self.settings)
         shared = {
             "settings": self.settings,
-            "agent_factory": runtime.agent_factory(self.settings),
+            "agent_factory": runtime.agent_factory(
+                self.settings, surface="chat"
+            ),
             "auth_connector": auth,
             "tools_cache": ToolsCache(os_backend=backend),
             "os_backend": backend,

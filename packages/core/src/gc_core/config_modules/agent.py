@@ -66,6 +66,11 @@ class AutoRoutingTwoLevelConfig(BaseModel):
         return value
 
 
+#: Имя для ключей хранилищ (проект, роль): только [A-Za-z0-9._-], не с
+#: точки — разделители и «..» вывели бы запись за каталог или ключ.
+NAME_PATTERN = r"^[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}$"
+
+
 class AgentConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     model: str = "MiniMax-M2.7"
@@ -86,7 +91,23 @@ class AgentConfig(BaseModel):
     # ключи базы — разделители и «..» вывели бы запись за каталог состояния.
     project_id: str | None = Field(
         default=None,
-        pattern=r"^[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}$",
+        pattern=NAME_PATTERN,
+        json_schema_extra=gc_meta(expert=True),
+    )
+    # Роль запуска в хранилище агента в базе: вариант L0 и специнструкций
+    # внутри агента (L0@<роль>, special_instructions@<роль>); ставит сервер
+    # по поверхности. Файловое хранилище роль не использует — у него роль
+    # задаёт paths.agent_md_path. Имя роли — как project_id.
+    role: str | None = Field(
+        default=None,
+        pattern=NAME_PATTERN,
+        json_schema_extra=gc_meta(expert=True),
+    )
+    # Своя роль специнструкций (фасад Chat Completions — <роль>.completions);
+    # не задана — agent.role.
+    special_instructions_role: str | None = Field(
+        default=None,
+        pattern=NAME_PATTERN,
         json_schema_extra=gc_meta(expert=True),
     )
     # Предел числа подхватываемых кастомных сабагентов. ge=1: ноль означал бы
