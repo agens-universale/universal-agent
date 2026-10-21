@@ -301,15 +301,20 @@ def trace_events_from_nested_detail(
     if not isinstance(call_payload, dict):
         raise ValueError("detail.call required")
     name = str(call_payload.get("name") or "")
+    args_summary = tool_args_summary(
+        name or None, call_payload.get("arguments")
+    )
     call_ev = TraceEvent(
         no=0,
         event_ts_utc_iso="",
         kind="call",
         title=name,
-        summary=tool_args_summary(name or None, call_payload.get("arguments")),
+        summary=args_summary,
+        args_summary=args_summary,
         full_payload=call_payload,
         call_id=call_id,
         tool_name=name,
+        wire_name=name or None,
     )
     result_ev: Optional[TraceEvent] = None
     result_payload = detail.get("result")

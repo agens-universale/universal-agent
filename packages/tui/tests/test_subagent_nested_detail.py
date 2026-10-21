@@ -49,6 +49,24 @@ def test_detail_from_sidecar_records_pairs_call_result():
     assert result_ev.full_payload["output"] == "a.txt\n"
 
 
+def test_nested_detail_header_shows_wire_name_and_args():
+    from gc_tui.screens.tool_call_detail import ToolCallDetailScreen
+
+    detail = {
+        "call": {
+            "type": "function_call",
+            "name": "fs_read_file",
+            "arguments": '{"path":"src/a.py"}',
+            "call_id": "c9",
+        }
+    }
+    call_ev, _ = trace_events_from_nested_detail("c9", detail)
+    assert call_ev.args_summary == "src/a.py"
+    assert call_ev.wire_name == "fs_read_file"
+    scr = ToolCallDetailScreen(call_event=call_ev, result_event=None)
+    assert scr._header_text() == "Viewer: fs_read_file(src/a.py) · #0"
+
+
 def test_resolve_uses_sidecar_records():
     records = [
         {

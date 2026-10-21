@@ -339,16 +339,18 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         return text
 
     def _append_pending_tail(self, text: Text) -> None:
-        """Хвост строки без результата: прервано / elapsed (+ step/last)."""
+        """Хвост строки без результата: прервано / elapsed (+ step/last).
+
+        Waiting — без хвоста: только подпись и объект."""
         if self._interrupted:
             text.append(" · прервано", style=_DIM)
-        elif self._waiting:
-            pass  # только подпись и объект, без elapsed
-        else:
-            if self._live_status:
-                text.append(f" · {self._live_status}", style=_DIM)
-            text.append(" · ", style=_DIM)
-            text.append(format_duration(self._elapsed_s()), style=_RUN)
+            return
+        if self._waiting:
+            return
+        if self._live_status:
+            text.append(f" · {self._live_status}", style=_DIM)
+        text.append(" · ", style=_DIM)
+        text.append(format_duration(self._elapsed_s()), style=_RUN)
 
     def on_click(self, event: events.Click) -> None:
         """Клик по ❐ копирует дифф правки и строку не выделяет.

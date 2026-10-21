@@ -115,6 +115,21 @@ class FileTaskStore:
             return {}
         return raw if isinstance(raw, dict) else {}
 
+    def meta_mtime(
+        self, task_id: str, system: Optional[str] = None
+    ) -> Optional[int]:
+        """Метка изменения meta треда (нс) — ключ кэшей, читающих meta.
+
+        None — файла нет."""
+        try:
+            return (
+                self._meta_path(task_id, system or self._system)
+                .stat()
+                .st_mtime_ns
+            )
+        except OSError:
+            return None
+
     def update_tui_meta(
         self, task_id: str, patch: dict, system: Optional[str] = None
     ) -> None:

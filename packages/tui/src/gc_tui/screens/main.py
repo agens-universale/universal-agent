@@ -507,9 +507,9 @@ class TraceScreen(Screen):
         ] = {}  # parent_call_id → last mounted nested
         # Durable parent rows for subagent_* (survive pop from _active_calls on result).
         self._subagent_parent_rows: dict[str, ToolCallRow] = {}
-        # Подписи MCP для строк вызовов: (снимок, wire→инфо, серверы) —
-        # пересчёт только при смене объекта снимка (`_mcp_tool_info`).
-        self._mcp_info_cache: Optional[tuple[object, dict, tuple]] = None
+        # Подписи MCP для строк вызовов: (ключ источника, wire→инфо,
+        # серверы) — пересчёт только при смене источника (`_mcp_tool_info`).
+        self._mcp_info_cache: Optional[tuple[tuple, dict, tuple]] = None
         self._reasoning_clock = ReasoningClock()
         # Журнал правок текущего треда для инлайн-диффов: один EditsLookup на
         # тред (внутри — кэш индекса), пересоздаётся при смене идентичности.
@@ -4609,23 +4609,37 @@ class TraceScreen(Screen):
     def _mcp_tool_info(self) -> tuple[dict, tuple]:
         """Подписи MCP из снимка рантайма: (wire→McpToolInfo, серверы).
 
-        Кэш по объекту снимка: новый снимок (переподключение, другой тред)
-        — новый объект, и подписи пересчитываются."""
+        Пересчёт — только при смене источника (`_mcp_snapshot_key`): строки
+        вызова одной перерисовки не перечитывают meta треда."""
         from gc_core.constants.tool_display import (
             mcp_servers_of,
             mcp_tools_from_snapshot,
         )
 
-        snap = self._mcp_screen_snapshot()
+        key = self._mcp_snapshot_key()
         cache = self._mcp_info_cache
-        if cache is None or cache[0] is not snap:
+        if cache is None or cache[0] != key:
+            snap = self._mcp_screen_snapshot()
             cache = (
-                snap,
+                key,
                 mcp_tools_from_snapshot(snap),
                 mcp_servers_of(snap),
             )
             self._mcp_info_cache = cache
         return cache[1], cache[2]
+
+    def _mcp_snapshot_key(self) -> tuple:
+        """Ключ источника снимка MCP — без чтения самого снимка.
+
+        Boot-снимок — сам объект (в ключе он и жив, id не переиспользуется);
+        иначе — тред и метка изменения его meta."""
+        snap = getattr(self.app, "_mcp_snapshot", None)
+        if snap is not None:
+            return ("app", id(snap), snap)
+        tid = self._active_task_id
+        if self._store is None or tid is None:
+            return ("none",)
+        return ("meta", tid, self._store.meta_mtime(tid))
 
     def _pending_wire_match(self, client_id: str, polled_content: str) -> bool:
         """Проверить, что pending-запись с этим client_id имеет wire_content,

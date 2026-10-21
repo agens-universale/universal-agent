@@ -293,3 +293,63 @@ def test_detail_screen_header_keeps_wire_name_and_args():
     )
     scr = ToolCallDetailScreen(call_event=ev, result_event=None)
     assert scr._header_text() == "Viewer: exec_command(echo f(x)) · #3"
+
+
+def _jira_meta(title: str) -> dict:
+    return {
+        "runtime": {
+            "mcp_tools": {
+                "jira": {
+                    "tools": [
+                        {
+                            "name": "mcp_jira_create_issue",
+                            "tool": "create_issue",
+                            "title": title,
+                        }
+                    ]
+                }
+            }
+        }
+    }
+
+
+@pytest.mark.asyncio
+async def test_meta_mcp_snapshot_read_once_until_meta_changes(
+    tmp_path, monkeypatch
+):
+    """Без boot-снимка подписи MCP берутся из meta треда: файл читается
+    один раз на серию строк и заново — только после изменения meta."""
+    import os
+
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+    from gc_tui.services.stores.file_store import FileTaskStore
+
+    meta = tmp_path / "meta_cli_t1.json"
+    meta.write_text(json.dumps(_jira_meta("Создать задачу")), "utf-8")
+    store = FileTaskStore(threads_dir=str(tmp_path), system="cli")
+    reads = []
+    real_get = store.get_task_meta
+
+    def _counting_get(task_id, system=None):
+        reads.append(task_id)
+        return real_get(task_id, system=system)
+
+    monkeypatch.setattr(store, "get_task_meta", _counting_get)
+    app = TuiApp()
+    async with app.run_test() as pilot:
+        app._mcp_snapshot = None
+        scr = pilot.app.screen
+        scr._store = store
+        scr._active_task_id = "t1"
+        for _ in range(5):
+            tools, _servers = scr._mcp_tool_info()
+        assert len(reads) == 1
+        assert tools["mcp_jira_create_issue"]["title"] == "Создать задачу"
+
+        meta.write_text(json.dumps(_jira_meta("Новая задача")), "utf-8")
+        st = meta.stat()
+        os.utime(meta, ns=(st.st_atime_ns, st.st_mtime_ns + 10**9))
+        tools, _servers = scr._mcp_tool_info()
+        assert len(reads) == 2
+        assert tools["mcp_jira_create_issue"]["title"] == "Новая задача"
