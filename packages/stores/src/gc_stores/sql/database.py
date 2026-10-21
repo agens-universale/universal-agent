@@ -88,7 +88,7 @@ async def in_transaction(
                 return await work(conn)
         except Exception as exc:
             if db.unavailable(exc):
-                raise StoreUnavailable(str(exc) or type(exc).__name__) from exc
+                raise StoreUnavailable.from_error(exc) from exc
             if attempt + 1 >= attempts or not db.retryable(exc):
                 raise
     raise AssertionError("unreachable")
@@ -101,7 +101,7 @@ async def guarded(db: Database, call: Awaitable[T]) -> T:
         return await call
     except Exception as exc:
         if db.unavailable(exc):
-            raise StoreUnavailable(str(exc) or type(exc).__name__) from exc
+            raise StoreUnavailable.from_error(exc) from exc
         raise
 
 
@@ -112,7 +112,7 @@ async def read_on(db: Database, work: Callable[[Conn], Awaitable[T]]) -> T:
             return await work(conn)
     except Exception as exc:
         if db.unavailable(exc):
-            raise StoreUnavailable(str(exc) or type(exc).__name__) from exc
+            raise StoreUnavailable.from_error(exc) from exc
         raise
 
 

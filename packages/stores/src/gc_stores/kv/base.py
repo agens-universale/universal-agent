@@ -81,8 +81,7 @@ class GuardedKV(KV):
             return await call
         except Exception as exc:
             if self.inner.unavailable(exc):
-                message = str(exc) or type(exc).__name__
-                raise StoreUnavailable(message) from exc
+                raise StoreUnavailable.from_error(exc) from exc
             raise
 
     async def get(self, key: str) -> Versioned | None:

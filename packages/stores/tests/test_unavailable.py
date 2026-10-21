@@ -87,3 +87,39 @@ def test_s3_connection_errors_are_unavailable():
     lost = errors.EndpointConnectionError(endpoint_url="http://x")
     assert kv.unavailable(lost)
     assert not kv.unavailable(ValueError("x"))
+
+
+async def test_unavailable_message_does_not_leak_driver_text(
+    tmp_path, monkeypatch
+):
+    """Текст ошибки драйвера (хост, пользователь, кусок DSN) не попадает в
+    сообщение: оно уходит в статус задачи и колбэк. Исходная ошибка — только
+    в цепочке исключения, для логов."""
+    secret = "postgresql://admin:hunter2@db.internal:5432/gc"
+    store = SQLiteThreadStore(str(tmp_path / "t.db"))
+    await store.get_thread(KEY)
+
+    @asynccontextmanager
+    async def broken():
+        raise ConnectionRefusedError(f"connect to {secret} refused")
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(store._db, "connection", broken)
+    with pytest.raises(StoreUnavailable) as err:
+        await store.get_thread(KEY)
+    assert "hunter2" not in str(err.value)
+    assert "db.internal" not in str(err.value)
+    assert "ConnectionRefusedError" in str(err.value)
+    assert isinstance(err.value.__cause__, ConnectionRefusedError)
+
+    kv = MemoryKV()
+    kv_store = KvThreadStore(kv)
+
+    async def kv_broken(*_a, **_k):
+        raise TimeoutError(f"timeout to {secret}")
+
+    monkeypatch.setattr(kv, "get", kv_broken)
+    with pytest.raises(StoreUnavailable) as err:
+        await kv_store.get_thread(KEY)
+    assert "hunter2" not in str(err.value)
+    await store.close()
