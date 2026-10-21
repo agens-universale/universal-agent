@@ -27,6 +27,15 @@ _CALL: contextvars.ContextVar[tuple[str, str]] = contextvars.ContextVar(
 _SETTLE_SEC = 8.0
 
 
+class _StopWaitOnly:
+    """``release`` оборвал ожидание, до самой работы сигнал отмены не дошёл."""
+
+
+#: Вернуть из ``release``, если ждать перестали, а снять вызов нельзя.
+#: В лог тогда пишется ``user_stop_unkillable``, не ``user_stop_killed``.
+STOP_WAIT_ONLY = _StopWaitOnly()
+
+
 class UserStopInterrupt(Exception):
     """Ожидание оборвано стопом. Не транспортная ошибка и не повод повторять запрос."""
 
@@ -233,7 +242,9 @@ class UserStop:
             if arm.release is not None:
                 result = arm.release()
                 if hasattr(result, "__await__"):
-                    await result
+                    result = await result
+                if result is STOP_WAIT_ONLY:
+                    arm.unkillable = True
             else:
                 arm.observed.set()
             _log_stop(run_logger, arm)

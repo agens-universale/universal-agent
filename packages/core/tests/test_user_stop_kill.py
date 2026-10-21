@@ -584,6 +584,35 @@ async def test_mcp_call_returns_and_the_server_process_stays():
             await proc.wait()
 
 
+async def test_mcp_cancel_that_cannot_be_signalled_is_not_a_kill():
+    """Запрос был, уведомление не ушло — в логе оборванное ожидание, не снятие."""
+    log = _Log()
+    gate = _stop(log)
+    client = SimpleNamespace(
+        server_name="docs",
+        cancel_inflight_request=lambda: False,
+    )
+
+    async def _hang():
+        await asyncio.sleep(30)
+
+    async def _work():
+        with bind_user_stop(gate):
+            with bind_tool_call("lookup", "call-1"):
+                return await _mcp_call_under_stop(client, "lookup", _hang)
+
+    task = asyncio.create_task(_work())
+    await asyncio.sleep(0.05)
+    gate.request(log)
+    with pytest.raises(UserStopInterrupt):
+        await task
+    unknown = log.events("user_stop_unkillable")
+    assert len(unknown) == 1
+    assert unknown[0]["tool"] == "lookup"
+    assert unknown[0]["call_id"] == "call-1"
+    assert log.events("user_stop_killed") == []
+
+
 async def test_stdio_readline_notices_stop_without_closing_the_process():
     log = _Log()
     gate = _stop(log)

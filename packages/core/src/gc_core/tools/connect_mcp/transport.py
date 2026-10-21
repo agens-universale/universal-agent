@@ -282,6 +282,22 @@ _INITIALIZED_PAYLOAD: Dict[str, Any] = {
 }
 
 
+def _cancelled_notification(request_id: Any) -> Dict[str, Any]:
+    """Уведомление MCP, которым клиент снимает уже отправленный запрос.
+
+    Для stdio это и есть сигнал отмены: отдельного потока на вызов нет.
+    ``initialize`` сюда не передавать — спека запрещает отменять его.
+    """
+    return {
+        "jsonrpc": "2.0",
+        "method": "notifications/cancelled",
+        "params": {
+            "requestId": request_id,
+            "reason": "User requested cancellation",
+        },
+    }
+
+
 class _LineReader:
     """Один читающий поток на ПРОЦЕСС, а не на строку.
 
