@@ -32,6 +32,7 @@ from gc_core.utils.aretry import retry_with_backoff_async
 from gc_core.utils.backend_errors import (
     embedded_choice_error,
     http_status_code,
+    is_auth_error,
     is_empty_completion,
     is_http_status_error,
     is_http_transport_error,
@@ -218,9 +219,10 @@ def _default_should_retry_backend_exception(exc: Exception) -> bool:
 
     Картиночная ошибка запроса (модель не принимает картинки или не столько) не
     ретраится ни в какой форме: тот же запрос её не лечит, а OpenRouter отвечает на
-    картинку 404-м, SSE-ошибкой — vLLM в стриме.
+    картинку 404-м, SSE-ошибкой — vLLM в стриме. Отказ авторизации (401, в том
+    числе событием стрима) тоже: его лечит другая форма токена или перевыпуск.
     """
-    if is_image_request_error(exc):
+    if is_image_request_error(exc) or is_auth_error(exc):
         return False
     if is_http_status_error(exc):
         status_code = http_status_code(exc)
@@ -613,7 +615,7 @@ async def _arequest_authorized(
     logger=None,
 ):
     """Одна альтернатива Authorization после HTTP 401 — настоящего или
-    завёрнутого прокси в HTTP-200.
+    завёрнутого прокси в HTTP-200 (в теле ответа или событием стрима).
 
     Форму, с которой запрос прошёл успешно (2xx без вложенной ошибки
     провайдера), следующие запросы к той же модели на тот же URL со
@@ -632,8 +634,8 @@ async def _arequest_authorized(
                 use_retry=use_retry,
                 logger=logger,
             )
-        except httpx.HTTPStatusError as exc:
-            if exc.response.status_code != 401 or index + 1 == len(attempts):
+        except (httpx.HTTPStatusError, BackendStreamError) as exc:
+            if not is_auth_error(exc) or index + 1 == len(attempts):
                 raise
             continue
         error = embedded_choice_error(response)

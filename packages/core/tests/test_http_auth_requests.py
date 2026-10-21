@@ -291,12 +291,12 @@ def _bearer_only(request):
     )
 
 
-async def _chat(url, *, token="secret", model="m", **kwargs):
+async def _chat(url, *, token="secret", model="m", use_retry=False, **kwargs):
     return await arequest_backend_chat_completions(
         {"model": model},
         {"Authorization": token},
         url,
-        use_retry=False,
+        use_retry=use_retry,
         **kwargs,
     )
 
@@ -490,6 +490,52 @@ async def test_embedded_401_switches_form_like_real_401(monkeypatch, embedded):
     spy = install_transport(monkeypatch, handler)
     result = await _chat("https://example.test/chat")
     await _chat("https://example.test/chat")
+    assert result["choices"][0]["message"]["content"] == "ok"
+    assert [r.headers["Authorization"] for r in spy.requests] == [
+        "secret",
+        "Bearer secret",
+        "Bearer secret",
+    ]
+
+
+async def test_stream_embedded_401_switches_form_like_real_401(
+    monkeypatch,
+):
+    from gc_core.utils import aretry
+
+    async def no_sleep(_delay):
+        pass
+
+    monkeypatch.setattr(aretry.asyncio, "sleep", no_sleep)
+
+    def handler(request):
+        if request.headers["Authorization"] != "Bearer secret":
+            return httpx.Response(
+                200,
+                text=sse_body({"error": {"code": 401, "message": "bad form"}}),
+            )
+        return httpx.Response(
+            200,
+            text=sse_body(
+                {
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {"content": "ok"},
+                            "finish_reason": "stop",
+                        }
+                    ]
+                }
+            ),
+        )
+
+    spy = install_transport(monkeypatch, handler)
+    for _ in range(2):
+        result = await _chat(
+            "https://example.test/chat",
+            use_retry=True,
+            on_delta=lambda *args: None,
+        )
     assert result["choices"][0]["message"]["content"] == "ok"
     assert [r.headers["Authorization"] for r in spy.requests] == [
         "secret",
