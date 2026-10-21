@@ -2062,6 +2062,12 @@ class TraceScreen(Screen):
         # терминала — буфер меняется только снаружи; переходы внутри приложения его не
         # проверяют. Без сообщений терминала о фокусе окна — только на старте.
         self.watch(self.app, "app_focus", self._on_terminal_focus, init=False)
+        self.watch(
+            self.query_one(_SEL_TRACE, VerticalScroll),
+            "scroll_y",
+            self._on_trace_scrolled,
+            init=False,
+        )
         self._check_clipboard_tip()
 
     def _reset_render_state(self) -> None:
@@ -2741,6 +2747,23 @@ class TraceScreen(Screen):
         elif self._trace_is_at_bottom():
             self._stick_bottom = True
 
+    def _on_trace_scrolled(self, _value: float) -> None:
+        """Отклик на прокрутку ленты по событию, не по опросу. Прижатие остаётся
+        в _poll_tick; наш scroll_end липкость не снимает (offset не меньше
+        _last_auto_y). Во время выделения (F2) — ни детекта, ни прижатия."""
+        if self._ui_frozen_for_select():
+            return
+        self._update_stick_state()
+        self._refresh_trace_overlays()
+
+    def _refresh_trace_overlays(self) -> None:
+        """Крючок для плашки «в конец» (Task 5)."""
+
+    def _scroll_to_bottom(self) -> None:
+        """Одно действие «к низу» для Enter в пустом поле и клика по плашке."""
+        self._stick_bottom = True
+        self._scroll_trace_end()
+
     def _scroll_trace_end(self) -> None:
         """Прижать трейс к низу ПОСЛЕ раскладки (height:auto → scroll_end сразу после
         mount() не достаёт до нового низа) и запомнить позицию для _update_stick_state."""
@@ -2750,8 +2773,8 @@ class TraceScreen(Screen):
                 trace = self.query_one(_SEL_TRACE, VerticalScroll)
             except Exception:
                 return
-            trace.scroll_end(animate=False)
             self._last_auto_y = trace.max_scroll_y
+            trace.scroll_end(animate=False)
 
         self.call_after_refresh(_do)
 
@@ -6626,8 +6649,12 @@ class TraceScreen(Screen):
                 return
 
         text = event.value.strip()
+        was_blank = inp.is_blank()
         inp.text = ""
         if not text:
+            # Enter в пустом поле не внизу ленты — к низу (не отправка).
+            if was_blank and not self._stick_bottom:
+                self._scroll_to_bottom()
             return
 
         # Команда или текст агенту — решается до ветки вопроса: она снимает
