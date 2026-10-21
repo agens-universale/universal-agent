@@ -111,10 +111,8 @@ class BackendModeSwitchTest(unittest.IsolatedAsyncioTestCase):
         try:
             from gc_core import agent_executor as agent_executor_module
             from gc_core import processing_responses as processing_module
-            from gc_core.thread_store import (
-                load_thread_meta,
-                resolve_threads_dir,
-            )
+            from gc_core.thread_store import resolve_threads_dir
+            from gc_testkit.develop_files import load_thread_meta
         except Exception:
             _restore_tools_and_dependents()
             raise

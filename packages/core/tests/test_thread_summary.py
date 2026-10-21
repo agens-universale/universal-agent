@@ -9,12 +9,12 @@ from gc_core.message_format.serialization import (
     calc_messages_chars_total,
     message_text_for_summary,
 )
-from gc_core.thread_store import (
-    ThreadSession,
+from gc_core.thread_store import ThreadSession
+from gc_testkit.develop_files import (
     load_thread_meta,
     save_thread_meta,
 )
-from gc_testkit.develop_writer import append_new_thread_messages
+from gc_testkit.develop_files import append_new_thread_messages
 from gc_testkit.intent_fixtures import intent_user_ask_texts
 from gc_testkit.settings import make_settings
 

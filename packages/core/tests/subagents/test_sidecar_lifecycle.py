@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from gc_core.states import SharedStateData, State
-from gc_core.thread_store import read_subagent_trace
+from gc_testkit.develop_files import read_subagent_trace
 from gc_core.tools.subagents.sidecar import apersist_subagent_trace
 from gc_testkit import run_coro
 from gc_testkit.settings import fake_ctx

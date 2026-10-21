@@ -49,7 +49,7 @@ def _sync_dir(path: Path) -> None:
 
 
 def _write(path: Path, data: bytes) -> None:
-    from gc_core.thread_store import atomic_replace
+    from gc_core.utils.atomic_io import atomic_replace
 
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(path.name + ".durable-tmp")

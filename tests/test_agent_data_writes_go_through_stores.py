@@ -45,10 +45,6 @@ _TESTKIT = "packages/testkit/src/gc_testkit/"
 
 _OS_BACKEND = "запись workspace через os_backend"
 _CONFIG = "конфиги пользователя и проекта"
-_OLD_FILE_STORE = (
-    "старое файловое хранилище тредов (контракт ThreadStoreBase у "
-    "встраивающих): запись через блокировку журнала"
-)
 _EDITS = (
     "журнал и снимки правок workspace — до перевода журнала на append_side"
 )
@@ -75,7 +71,6 @@ ALLOWED: dict[str, str] = {
     # Совместимость отката: файлы develop пишутся вместе с хранилищем.
     "packages/acp/src/gc_acp/session_index.py": _ROLLBACK,
     "packages/server/src/gc_server/chat/responses/index_store.py": _ROLLBACK,
-    _CORE + "thread_store.py": _OLD_FILE_STORE,
     _CORE + "thread_store_journal.py": (
         "примитивы атомарной записи и блокировки файлов тредов (file_tx v2, "
         "старое файловое хранилище)"
@@ -131,7 +126,7 @@ ALLOWED: dict[str, str] = {
     _SWARM + "runner.py": "swarm: рабочие каталоги участников",
     _SWARM + "storage.py": "swarm: своё хранилище состояния роя",
     # Тестовый инструментарий.
-    _TESTKIT + "develop_writer.py": _TESTKIT_REASON,
+    _TESTKIT + "develop_files.py": _TESTKIT_REASON,
     _TESTKIT + "helpers/crossplatform.py": _TESTKIT_REASON,
     _TESTKIT + "legacy_threads.py": _TESTKIT_REASON,
     _TESTKIT + "tui_fixtures/stub_executor.py": _TESTKIT_REASON,

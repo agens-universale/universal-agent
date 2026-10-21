@@ -4,7 +4,7 @@ import threading
 
 import gc_core.agent_executor as ae
 import gc_core.manual_compaction as mc
-from gc_core.thread_store import load_thread_meta
+from gc_testkit.develop_files import load_thread_meta
 from gc_core.threads.file_store import FileThreadStore
 from gc_core.threads.models import ThreadKey, Usage
 from gc_core.threads.session_writer import SessionWriter

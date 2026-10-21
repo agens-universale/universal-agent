@@ -12,7 +12,7 @@ from gc_core.message_policy.user_message_policy import (
     wrap_technical_user_content,
 )
 from gc_core.states import SharedStateData, State
-from gc_core.thread_store import read_subagent_trace
+from gc_testkit.develop_files import read_subagent_trace
 from gc_core.tools.subagents.active_scope import (
     activate_child_input,
     active_parent_call_id,

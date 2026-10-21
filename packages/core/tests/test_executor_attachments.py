@@ -372,7 +372,7 @@ async def test_executor_persist_raises_image_seq_of_the_thread(
     monkeypatch, tmp_path
 ):
     from gc_core.attachments.numbering import read_image_seq
-    from gc_core.thread_store import load_thread_meta
+    from gc_testkit.develop_files import load_thread_meta
 
     async def _on_call(messages, kw):
         await kw["persist_messages_callback"](messages)

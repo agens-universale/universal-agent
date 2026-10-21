@@ -49,7 +49,7 @@ def _save(tmp_path, *, plan="1. шаг", status="proposed", mode="plan"):
     from gc_core.execution.state import SharedStateData
     from gc_core.persistence.schema import serialize_shared_block
     from gc_core.plan_store import new_plan_block
-    from gc_core.thread_store import save_thread_meta
+    from gc_testkit.develop_files import save_thread_meta
 
     block = None
     if plan:
@@ -243,7 +243,7 @@ async def test_approved_plan_is_resumed_with_its_own_question_and_message(
 
 
 async def test_clear_removes_the_plan_and_disarms_everything(tmp_path):
-    from gc_core.thread_store import load_thread_meta
+    from gc_testkit.develop_files import load_thread_meta
 
     _save(tmp_path, status="approved")
     async with _app(tmp_path).run_test() as pilot:
@@ -272,7 +272,7 @@ async def test_clear_removes_the_plan_and_disarms_everything(tmp_path):
 
 
 async def test_clear_is_refused_while_the_agent_works(tmp_path):
-    from gc_core.thread_store import load_thread_meta
+    from gc_testkit.develop_files import load_thread_meta
 
     _save(tmp_path)
     async with _app(tmp_path).run_test() as pilot:
@@ -288,7 +288,7 @@ async def test_clear_of_a_session_held_by_another_process_warns(tmp_path):
     TUI предупреждает, а не падает."""
     from datetime import timedelta
 
-    from gc_core.thread_store import load_thread_meta
+    from gc_testkit.develop_files import load_thread_meta
     from gc_core.threads.file_store import FileThreadStore
     from gc_core.threads.models import LeaseRequest, ThreadKey
 

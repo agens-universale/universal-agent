@@ -6,7 +6,8 @@
 
 from __future__ import annotations
 
-from gc_core.thread_store import ThreadSession, save_thread_meta
+from gc_core.thread_store import ThreadSession
+from gc_testkit.develop_files import save_thread_meta
 from gc_core.threads.file_store import FileThreadStore
 from gc_tui.services.stores.file_store import FileTaskStore
 

@@ -18,7 +18,7 @@ from gc_acp.plan import (
 )
 from gc_acp.session_index import ACP_SYSTEM, prompt_title_line
 from gc_core.persistence.schema import normalize_session_todo
-from gc_core.thread_store import save_thread_meta
+from gc_testkit.develop_files import save_thread_meta
 from gc_core.threads.facade import Threads
 from gc_core.threads.file_store import FileThreadStore
 from gc_core.threads.models import ThreadKey

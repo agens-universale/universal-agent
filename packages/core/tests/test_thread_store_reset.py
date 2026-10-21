@@ -6,7 +6,8 @@ import asyncio
 import json
 from pathlib import Path
 
-from gc_core.thread_store import edits_journal_path, load_thread_messages
+from gc_core.thread_store import edits_journal_path
+from gc_testkit.develop_files import load_thread_messages
 from gc_core.threads.file_store import FileThreadStore
 from gc_core.threads.models import ThreadKey
 

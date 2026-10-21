@@ -9,9 +9,9 @@ from pathlib import Path
 
 from gc_core.thread_store import (
     append_subagent_record,
-    read_subagent_trace,
     subagent_trace_path,
 )
+from gc_testkit.develop_files import read_subagent_trace
 from gc_core.threads.file_store import FileThreadStore
 from gc_core.threads.models import ThreadKey
 
