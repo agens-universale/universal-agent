@@ -89,14 +89,6 @@ class TraceRow(ClickModelMixin, Widget):
         # code-block-панели после первой — focusable=False.
         self.can_focus = focusable
 
-    def set_prefix(self, prefix: str) -> None:
-        """Обновить prefix-колонку после монтирования (напр. стрелка ▸/▾)."""
-        self._prefix = prefix
-        try:
-            self.query_one(".trace-prefix", Static).update(prefix)
-        except Exception:
-            pass
-
     def set_content(self, content, *, layout: bool = True) -> None:
         """Обновить content-колонку после монтирования (пер-тик апдейт стрим-прозы).
         `layout=False` — размер не меняется (перекраска), ленту не перекомпоновывать."""
@@ -193,10 +185,6 @@ class CompactionRule(SummaryMarker):
         return compaction_rule(
             self._num, self._comp, width, expanded=self._expanded
         )
-
-    def rule_text(self):
-        """Текущая строка метки (rich Text)."""
-        return self._content
 
     def _sync(self) -> None:
         self.set_content(self._rule(self.size.width), layout=False)

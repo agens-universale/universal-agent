@@ -111,12 +111,12 @@ async def test_widgets_in_trace_fill_width_and_resize():
     async with _A().run_test(size=(60, 20)) as pilot:
         await pilot.pause()
         rule = pilot.app.query_one(".summary-marker")
-        plain = rule.rule_text().plain
+        plain = rule._content.plain
         assert cell_len(plain) == rule.size.width
         assert "символов" in plain
         await pilot.resize_terminal(40, 20)
         await pilot.pause()
-        plain = rule.rule_text().plain
+        plain = rule._content.plain
         assert cell_len(plain) == rule.size.width
         assert "символов" not in plain and "128k → 6k" in plain
 
@@ -142,7 +142,7 @@ async def test_body_lines_and_collapse_click(tmp_path):
         scr.on_summary_toggle_request(SummaryToggleRequest(3))
         await pilot.pause()
         assert body.display is True
-        assert "▾ контекст сжат #2" in rule.rule_text().plain
+        assert "▾ контекст сжат #2" in rule._content.plain
         head = body.query_one(".compaction-head")
         assert str(head.render()) == (
             "Контекст сохранён: 34 сообщения → сводка"
@@ -162,7 +162,7 @@ async def test_body_lines_and_collapse_click(tmp_path):
         await pilot.click(action)
         await pilot.pause()
         assert body.display is False
-        assert "▸ контекст сжат #2" in rule.rule_text().plain
+        assert "▸ контекст сжат #2" in rule._content.plain
 
 
 def _widget_shape(rule, body) -> tuple:
