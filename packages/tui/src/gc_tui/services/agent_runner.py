@@ -15,6 +15,7 @@ import threading
 import time
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
+from gc_core.execution.message_keys import withdraw_from_queue
 from gc_core.security.confirm_port import call_with_optional
 
 from gc_tui.services.stdin_bridge import redirect_stdin
@@ -734,6 +735,19 @@ class AgentRunner:
                 system=system,
             )
         t.start()
+
+    def withdraw_message(self, msg_id: str) -> bool:
+        """Забрать реплику из очереди, пока агент её не впустил.
+
+        Сначала буфер сборки, затем очередь исполнителя. Замки — в том же
+        порядке, что у `add_message` (раннер → исполнитель): под `_lock`
+        воркер не перельёт буфер и не заведёт ход хвоста между проверками.
+        """
+        with self._lock:
+            if withdraw_from_queue(self._prebuild_messages, msg_id):
+                return True
+            ex = self._executor
+            return ex is not None and ex.withdraw_message(msg_id)
 
     def is_child_input_active(self) -> bool:
         """Ждёт ли ввод субагент ЭТОГО прогона.

@@ -10,6 +10,29 @@ def make_message_key(message: Dict[str, Any]) -> str:
     return f"payload:{payload}"
 
 
+def companion_message_id(msg_id: str) -> str:
+    """``id`` технического спутника реплики (подвал ``@path``).
+
+    Спутник связан с репликой производным ``id``, а не своим ключом
+    сообщения: лишний ключ ушёл бы провайдеру. Один формат для фронтенда,
+    который ставит пару в очередь, и исполнителя, который её снимает.
+    """
+    return f"{msg_id}_t"
+
+
+def withdraw_from_queue(queue: list[dict], msg_id: str) -> bool:
+    """Снять из ``queue`` сообщение ``msg_id`` вместе с его спутником.
+
+    Правка на месте; замок очереди держит вызывающий. Нет сообщения —
+    очередь не тронута, ``False``.
+    """
+    if not any(m.get("id") == msg_id for m in queue):
+        return False
+    gone = {msg_id, companion_message_id(msg_id)}
+    queue[:] = [m for m in queue if m.get("id") not in gone]
+    return True
+
+
 def filter_messages_not_in_state(
     state_messages: list[dict],
     batch: list[dict],

@@ -24,6 +24,7 @@ from gc_core.config_modules.stored_outputs import (
     get_stored_tool_outputs_max_entries,
 )
 from gc_core.execution.contracts import ExecutionFailure
+from gc_core.execution.message_keys import withdraw_from_queue
 from gc_core.execution.ports import port
 from gc_core.execution_workspace import launch_root_from_config
 from gc_core.intent_log.user_turn import (
@@ -1428,6 +1429,19 @@ class AgentExecutor:
             return
         with self._lock:
             self._pending_messages.append(message)
+
+    def withdraw_message(self, msg_id: str) -> bool:
+        """Забрать из очереди сообщение, которое агент ещё не впустил.
+
+        Вместе с ним уходит его технический спутник
+        (`companion_message_id`). Под замком очереди сообщение либо снято
+        здесь, либо уже впущено (`_take_pending_messages`) — третьего нет.
+        Очередь субагента не смотрим: ввод ребёнку в очередь не ставят.
+        """
+        with self._lock:
+            return withdraw_from_queue(
+                self._pending_messages, msg_id
+            ) or withdraw_from_queue(self._undelivered_messages, msg_id)
 
     def is_child_input_active(self) -> bool:
         """Работает ли сейчас субагент, которому уйдёт ввод пользователя.
