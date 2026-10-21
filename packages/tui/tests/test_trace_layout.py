@@ -31,12 +31,12 @@ async def test_think_not_rendered_via_trace_row():
 
 
 @pytest.mark.asyncio
-async def test_submit_solution_note_renders_via_trace_row():
-    """* note: <comment> монтируется как TraceRow с prefix='  * '."""
+async def test_submit_solution_note_renders_as_consequence():
+    """comment turn_finish — следствие ответа `  └ заметка: <comment>`."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
     from gc_tui.models import TraceEvent
-    from gc_tui.widgets.trace_row import TraceRow
+    from gc_tui.widgets.consequence_line import ConsequenceLine
     from rich.style import Style
 
     async with TuiApp().run_test() as pilot:
@@ -54,15 +54,16 @@ async def test_submit_solution_note_renders_via_trace_row():
         scr._render_event(ev)
         await pilot.pause()
         note_rows = [
-            r for r in scr.query(TraceRow) if r.has_class("line-note")
+            r for r in scr.query(ConsequenceLine) if r.has_class("line-note")
         ]
         assert len(note_rows) == 1
-        assert note_rows[0]._prefix == "* "
-        content = note_rows[0]._content
+        assert note_rows[0].lead.plain == "  └ "
+        content = note_rows[0].body
         assert content.plain == "заметка: проверь корнер-кейсы"
-        # ярлык «заметка:» прямой, текст ремарки — курсивом
-        italic = [s for s in content.spans if Style.parse(str(s.style)).italic]
-        assert italic and all(s.start >= len("заметка: ") for s in italic)
+        # ярлык «заметка:» прямой; курсив текста — от CSS записи
+        label = content.spans[0]
+        assert label.end == len("заметка:")
+        assert Style.parse(str(label.style)).italic is False
 
 
 @pytest.mark.asyncio

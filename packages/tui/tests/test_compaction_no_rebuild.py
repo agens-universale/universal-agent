@@ -886,11 +886,11 @@ def _finish(mid: str, cid: str, report: str) -> dict:
 
 
 def _summary_rows(scr) -> list[str]:
-    from gc_tui.widgets.trace_row import TraceRow
+    from gc_tui.widgets.consequence_line import ConsequenceLine
 
     return [
-        r._content if isinstance(r._content, str) else r._content.plain
-        for r in scr.query(TraceRow)
+        r.body.plain
+        for r in scr.query(ConsequenceLine)
         if r.has_class("line-summary")
     ]
 

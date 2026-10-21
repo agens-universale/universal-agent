@@ -257,11 +257,11 @@ ToolCallRow { margin-top: 1; }
 .line-bang      { color: $run-color; margin-top: 1; }
 .line-bang-out  { color: $dim; }
 .line-bang-fail { color: $err; }
-.line-note      { color: $note-ink; margin-top: 1; }  /* чуть светлее $dim; пустая строка сверху — отделяет ремарку; курсив — только на тексте ремарки (см. note_text), ярлык прямой */
-/* Запись «* итог:» после ответа модели — цвет и отступ как у .line-note, текст курсивом (метка прямая — см. build_summary_widgets); проза после блока кода — без отступа сверху. Маркер «* » прямой, как у заметки. */
-.line-summary   { color: $note-ink; margin-top: 1; text-style: italic; }
-.line-summary .trace-prefix { text-style: not italic; }
-.line-summary.line-agent-cont { margin-top: 0; }
+/* Записи конца хода `└ итог:` / `└ заметка:` — следствия ответа (спека P3
+   §3): прижаты к нему, текст курсивом цветом ремарки, метка прямая (см.
+   build_record_widgets). Код и таблицы записи — на колонке её текста. */
+.line-summary, .line-note { color: $note-ink; text-style: italic; }
+.code-block-panel.record-block, .table-block.record-block { margin: 1 0 1 4; }
 /* Метка сжатия (спека P3 §2.5): цвета полос и подписи — в самой строке
    (`compaction_rule`); пустая строка сверху и снизу, у раскрытой — снизу
    отделяет уже тело. */
