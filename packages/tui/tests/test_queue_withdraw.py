@@ -28,13 +28,16 @@ class _BusyRunner:
     def __init__(self, *, admitted: bool = False):
         self.added: list[dict] = []
         self.withdrawn: list[str] = []
+        self.events: list[str] = []
         self._admitted = admitted
+        self.admitted_ids: set[str] = set()
         self.running = True
 
     def is_running(self) -> bool:
         return self.running
 
     def stop(self) -> None:
+        self.events.append("stop")
         self.running = False
 
     def is_child_input_active(self) -> bool:
@@ -44,8 +47,9 @@ class _BusyRunner:
         self.added.append(message)
 
     def withdraw_message(self, msg_id: str) -> bool:
+        self.events.append("withdraw")
         self.withdrawn.append(msg_id)
-        return not self._admitted
+        return not (self._admitted or msg_id in self.admitted_ids)
 
 
 def _app(threads: Path) -> TuiApp:
@@ -334,7 +338,22 @@ async def test_stop_returns_queue_to_input_in_order(tmp_path):
         assert _pending_records(tmp_path) == []
         assert pilot.app.screen._pending_user_widgets == {}
         await _up(pilot)
-        assert runner.withdrawn == []
+        assert runner.events == ["withdraw", "withdraw", "stop"]
+
+
+@pytest.mark.asyncio
+async def test_stop_returns_only_withdrawn_admitted_stays(tmp_path):
+    async with _app(tmp_path / "threads").run_test() as pilot:
+        runner = await _two_queued(pilot, tmp_path)
+        runner.admitted_ids = {runner.added[1]["id"]}
+        pilot.app.screen._cmd_stop()
+        await pilot.pause()
+        pilot.app.screen._poll_active()
+        await pilot.pause()
+        assert _inp(pilot).text == "первое"
+        assert _texts(pilot) == ["второе"]
+        records = _pending_records(tmp_path)
+        assert [r["content"] for r in records] == ["второе"]
 
 
 @pytest.mark.asyncio

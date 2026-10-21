@@ -2818,22 +2818,25 @@ class TraceScreen(Screen):
         self.call_next(self._drop_queued_reply, reply)
         return True
 
-    def _return_queue_to_input(self) -> None:
-        """Очередь, которую ядро уже не впустит (стоп, конец хода), — назад
-        в поле: тексты по порядку очереди через пустую строку (`/имя` —
-        как в реплике), с картинками; набранное в поле остаётся впереди.
-        Реплики снимаются из ленты и `meta.tui.pending_user_messages`."""
+    def _queued_replies(self) -> list:
+        """Реплики очереди по порядку отправки (словарь pending хранит
+        порядок вставки; забранная ↑ из него уже вынута)."""
         from gc_tui.widgets.user_reply import is_queued
 
-        queued = [
-            w for w in self._pending_user_widgets.values() if is_queued(w)
-        ]
-        if not queued:
+        return [w for w in self._pending_user_widgets.values() if is_queued(w)]
+
+    def _return_queue_to_input(self, replies: list) -> None:
+        """Реплики, которые ядро уже не впустит (снятые при стопе, остаток
+        в конце хода), — назад в поле: тексты по порядку очереди через
+        пустую строку (`/имя` — как в реплике), с картинками; набранное в
+        поле остаётся впереди. Реплики снимаются из ленты и
+        `meta.tui.pending_user_messages`."""
+        if not replies:
             return
         inp = self.query_one(_SEL_CMDINPUT, CommandTextArea)
         parts = [inp.text] if inp.text else []
         images: list[Attachment] = []
-        for reply in queued:
+        for reply in replies:
             parts.append(reply.restore_text)
             images.extend(reply.images)
             self._pending_user_widgets.pop(reply.client_id, None)
@@ -5253,9 +5256,11 @@ class TraceScreen(Screen):
         if not _frozen:
             self._poll_trace_tail()
             self._drain_trace_notes()
-            # Хвост дочитан: впущенное уже сверено, остальное ядро не возьмёт.
-            if not is_running:
-                self._return_queue_to_input()
+            # Ход кончился, хвост дочитан: впущенное уже сверено, остальное
+            # ядро не возьмёт. После стопа раннера нет: снятое вернул стоп,
+            # впущенное ждёт своей сверки.
+            if runner is not None and not is_running:
+                self._return_queue_to_input(self._queued_replies())
 
     def _poll_trace_tail(self) -> None:
         """Дочитать и отрисовать хвост записей активного треда."""
@@ -7347,7 +7352,7 @@ class TraceScreen(Screen):
     def _can_cancel_with_undo(self) -> bool:
         """Откат отправки: агент ничего не выдал, поле пустое, очереди нет.
         С очередью откатывать нечего: последняя отправка — в очереди, её
-        с остальными вернёт в поле стоп (`_return_queue_to_input`)."""
+        с остальными вернёт в поле стоп (`_stop_and_replace_runner`)."""
         input_text = ""
         try:
             input_text = self.query_one(_SEL_CMDINPUT).text
@@ -7369,7 +7374,15 @@ class TraceScreen(Screen):
         благодаря discard_writes_after_stop его output в thread_store не уйдёт.
         """
         runner = self.app.active_runner
+        withdrawn = []
         if runner is not None:
+            # До стопа: снять очередь под замком ядра. Впущенное остаётся
+            # репликой и сверится по треду — его текст в поле не идёт.
+            withdrawn = [
+                r
+                for r in self._queued_replies()
+                if runner.withdraw_message(r.message_id)
+            ]
             # Стоп ЖИВОГО прогона → терминальный статус «stopped». Флаг app-уровня
             # (не runner.stop_requested): ниже active_runner обнуляется, и
             # спадающий фронт в _poll_active уже не увидит этот runner.
@@ -7382,7 +7395,7 @@ class TraceScreen(Screen):
             if callable(release):
                 release()
         self.app.active_runner = None
-        self._return_queue_to_input()
+        self._return_queue_to_input(withdrawn)
 
     def _stop_for_ask_human(self) -> None:
         """Esc в live ask_human → clean stop треда.

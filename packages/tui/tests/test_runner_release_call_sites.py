@@ -114,7 +114,8 @@ def test_stop_and_replace_releases_after_stop():
     runner = _Runner(running=True)
     screen = SimpleNamespace(
         app=SimpleNamespace(active_runner=runner, last_stop_requested=False),
-        _return_queue_to_input=lambda: None,
+        _queued_replies=lambda: [],
+        _return_queue_to_input=lambda replies: None,
     )
 
     TraceScreen._stop_and_replace_runner(screen)
