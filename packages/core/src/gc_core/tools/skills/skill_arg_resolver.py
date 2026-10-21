@@ -1,8 +1,14 @@
-"""Deterministic, pack-aware resolver for the CLI -s/--skill flag.
+"""Deterministic, pack-aware skill-name resolver (CLI -s/--skill, TUI).
 
 Pure: no I/O, no dependency on the registry or cli. Takes a SkillCatalog
-snapshot + the raw flag value, returns a Resolved (exact canonical skill id)
-or a Failed (the caller — cli.py — decides process exit).
+snapshot + the raw name, returns a Resolved (exact canonical skill id) or a
+Failed (the caller decides: cli.py exits, the TUI renders a hint).
+
+Public API: ``catalog_from_entries`` builds the catalog from ``list_skills``
+entries; ``resolve_skill_exact`` resolves a full id, pack or short name with
+no fuzzy search (the TUI runs a skill only on this); ``suggest_skills`` gives
+fuzzy candidates for a hint, never for running; ``resolve_skill_arg`` adds
+the fuzzy tier for the CLI flag.
 """
 
 from __future__ import annotations
