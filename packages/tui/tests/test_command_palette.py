@@ -316,15 +316,11 @@ def test_hotkeys_align_to_a_common_column():
     palette = CommandPalette(reg, initial_filter="")
 
     rows = {n: palette._format_row(reg.lookup(n)) for n in ("a", "b", "c")}
-    assert rows["a"].index("F1") == rows["b"].index("Ctrl+T")
+    assert len(rows["a"]) == len(rows["b"])  # правые края совпадают
     assert rows["c"] == rows["c"].rstrip()  # без хоткея — без пустого хвоста
-    # Ровно 3 пробела после самого длинного описания — столько же, сколько после самого
-    # длинного имени. Было 2, и на одной строке рядом оказывались разные зазоры.
-    assert (
-        rows["b"]
-        == rows["b"].split("описание подлиннее")[0]
-        + "описание подлиннее   Ctrl+T"
-    )
+    # Вне приложения ширина — естественная: зазор 3 после длинного описания.
+    assert rows["b"].endswith("описание подлиннее   Ctrl+T")
+    assert rows["a"].endswith("F1".rjust(len("Ctrl+T")))
 
 
 def test_hotkey_column_counts_rows_without_hotkeys_too():
@@ -343,9 +339,7 @@ def test_hotkey_column_counts_rows_without_hotkeys_too():
 
     row_a = palette._format_row(reg.lookup("a"))
     row_b = palette._format_row(reg.lookup("b"))
-    assert (
-        row_a.index("F1") == len(row_b) + 3
-    )  # хоткей правее длинной строки, зазор 3
+    assert row_a.index("F1") == len(row_b) + 3  # правее длинной, зазор 3
 
 
 def test_palette_has_no_hotkey_column_when_nobody_has_one():
@@ -568,13 +562,13 @@ def test_skill_shadowed_by_command_or_alias_is_hidden():
     assert palette._visible_skill_rows() == []
 
 
-def test_long_skill_id_does_not_widen_command_columns():
+def test_long_skill_id_widens_name_column_only_up_to_cap():
     pytest.importorskip("textual")
     long_skill = {"id": "pack:b" + "x" * 60, "description": "d" * 80}
     plain = _skill_palette("b", [])
     with_skill = _skill_palette("b", [long_skill])
-    assert with_skill._name_col_w() == plain._name_col_w()
     assert with_skill._hotkey_col_w() == plain._hotkey_col_w()
+    assert with_skill._name_col_w() == 32 + 3  # потолок общей колонки
 
 
 def test_skill_row_text_has_name_and_description_without_pack():
@@ -585,6 +579,8 @@ def test_skill_row_text_has_name_and_description_without_pack():
     palette = _skill_palette("b", [skill])
     head = f" {'/bzz'.ljust(len('/bzz') + 3)}"
     text = palette._format_skill_row(skill)
+    # колонка общая: самое длинное имя — команда `/status`
+    head = f" {'/bzz'.ljust(len('/status') + 3)}"
     assert text.plain == head + "мозговой штурм"
     assert "superpowers" not in text.plain
     assert "·" not in text.plain
@@ -600,7 +596,7 @@ def test_skill_row_shows_runnable_name_from_provider():
     assert text.plain == " /a:dup   d"
 
 
-def test_skill_rows_show_full_names_in_own_column():
+def test_skill_rows_show_full_names_in_shared_column():
     pytest.importorskip("textual")
     skills = [
         {"id": "p:brainstorming", "description": "Ж1"},
@@ -608,7 +604,6 @@ def test_skill_rows_show_full_names_in_own_column():
     ]
     palette = _skill_palette("b", skills, commands=("buffer",))
     plain = _skill_palette("b", [], commands=("buffer",))
-    assert palette._name_col_w() == plain._name_col_w()
     assert palette._hotkey_col_w() == plain._hotkey_col_w()
     rows = [palette._format_skill_row(s).plain for s in skills]
     assert rows[0].startswith(" /brainstorming   ")
@@ -631,7 +626,7 @@ def test_skill_row_name_40_chars_capped_at_32_with_ellipsis():
     palette = _skill_palette("b", [skill])
     text = palette._format_skill_row(skill)
     assert text.plain == " /b" + "x" * 29 + "…" + "   d"
-    assert palette._skill_col_w() == 32 + 3
+    assert palette._name_col_w() == 32 + 3
 
 
 def test_skill_row_selection_and_toggle_offset():
@@ -838,3 +833,79 @@ async def test_tab_on_skill_row_inserts_runnable_form(tmp_path):
         assert scr._palette is None
         assert inp.text == "/brainstorming "
         assert app.tui_state.pending_skill_id is None
+
+
+_LONG_SKILL = {"id": "p:s" + "y" * 40, "description": "Скилл с длинным именем"}
+
+
+def _wide_palette(tmp_path):
+    from gc_tui.app import TuiApp
+    from gc_tui.commands import Command, CommandRegistry
+    from gc_tui.widgets.command_palette import CommandPalette
+
+    reg = CommandRegistry()
+    reg.register(
+        Command(
+            "sessions",
+            (),
+            "",
+            "Подключение, модели, профили, MCP, голос, режимы и прочее",
+            hotkey="F2 · Ctrl+S",
+        )
+    )
+    reg.register(Command("stop", (), "", "Остановить задачу", hotkey="Ctrl+C"))
+    reg.register(Command("status", (), "", "Состояние"))
+    skills = [_LONG_SKILL, {"id": "p:sho", "description": "Короткий скилл"}]
+    app = TuiApp(
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "M"}),
+    )
+    pal = CommandPalette(reg, initial_filter="s", skills=lambda: skills)
+    return app, pal
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("width", [80, 100, 140])
+async def test_palette_layout_hotkeys_whole_one_shared_description_column(
+    tmp_path, width
+):
+    pytest.importorskip("textual")
+    app, pal = _wide_palette(tmp_path)
+    async with app.run_test(size=(width, 40)) as pilot:
+        await app.screen.mount(pal)
+        await pilot.pause()
+        lines = [
+            str(r.render())
+            for r in pal.query(".palette-row")
+            if not r.has_class("palette-toggle-row")
+        ]
+        assert len(lines) == 5
+        for r in pal.query(".palette-row"):
+            assert r.region.height == 1
+        joined = "\n".join(lines)
+        assert "F2 · Ctrl+S" in joined and "Ctrl+C" in joined
+        # хоткеи у правого края: одинаковый правый конец у строк с ними
+        ends = {
+            len(ln.rstrip())
+            for ln in lines
+            if ln.rstrip().endswith(("Ctrl+S", "Ctrl+C"))
+        }
+        assert len(ends) == 1
+        # описания всех строк (команд и скиллов) — с одной колонки
+        starts = set()
+        for ln in lines:
+            rest = ln[1 + len(ln.split()[0]) :]
+            starts.add(len(ln) - len(rest.lstrip()))
+        assert len(starts) == 1
+        long_row = next(ln for ln in lines if "/sy" in ln)
+        name = long_row.split()[0]
+        assert len(name) == 32 and name.endswith("…")
+
+
+def test_settings_description_is_short():
+    from gc_tui.commands import build_default_registry
+
+    cmd = build_default_registry().lookup("settings")
+    assert (
+        cmd.description == "Подключение, модели, профили, MCP, голос, режимы"
+    )

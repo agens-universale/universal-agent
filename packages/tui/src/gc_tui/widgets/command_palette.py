@@ -29,7 +29,7 @@ _HINT_WITH_ARGS = "↑↓ выбрать · Enter ввести аргумент 
 # Enter на строке скилла вставляет `/имя ` — текст дописывают (спека P5 §3.2).
 _HINT_SKILL = "↑↓ выбрать · Enter ввести запрос · Esc закрыть"
 _SKILL_ROWS_MAX = 5
-_SKILL_NAME_MAX = 32  # потолок колонки имён скиллов, клетки
+_SKILL_NAME_MAX = 32  # потолок общей колонки имён, клетки
 
 
 def _slider_width(n_values: int) -> int:
@@ -68,6 +68,13 @@ def _skill_short(skill: dict) -> str:
 def _skill_label(skill: dict) -> str:
     """`/имя` для колонки: запускаемый вид от провайдера (`input_name`)."""
     return "/" + str(skill.get("input_name") or _skill_short(skill))
+
+
+def _fit_name(label: str) -> str:
+    """Имя длиннее `_SKILL_NAME_MAX` клеток — с многоточием в конце."""
+    if len(label) <= _SKILL_NAME_MAX:
+        return label
+    return label[: _SKILL_NAME_MAX - 1] + "…"
 
 
 def _skill_matches(skill: dict, prefix: str) -> bool:
@@ -350,14 +357,16 @@ class CommandPalette(VerticalScroll):
         return _fit_hint(current, hint, _HINT_KEYS_TOGGLE, width)
 
     def _name_col_w(self) -> int:
-        """Ширина имени-колонки (спека 2026-07-18 §4): описания ВСЕХ строк
-        палитры (обычных и тоггловых) начинаются в общей колонке — имя
-        `/{cmd.name}` паддируется до самого длинного имени среди видимых
-        строк ОБЕИХ зон (обычные команды + тогглы) + 3 пробела."""
-        cmds = self._visible_rows() + self._visible_toggle_rows()
-        if not cmds:
+        """Ширина имени-колонки, ОБЩЕЙ для команд, тогглов и скиллов (спека
+        2026-07-18 §4): самое длинное видимое имя (`/имя`; у скилла — его
+        запускаемый вид), не шире `_SKILL_NAME_MAX`, + 3 пробела. Описания
+        всех строк начинаются в одной колонке."""
+        labels = [f"/{c.name}" for c in self._visible_rows()]
+        labels += [f"/{c.name}" for c in self._visible_toggle_rows()]
+        labels += [_skill_label(s) for s in self._visible_skill_rows()]
+        if not labels:
             return 0
-        return max(len(f"/{c.name}") for c in cmds) + 3
+        return min(max(map(len, labels)), _SKILL_NAME_MAX) + 3
 
     def _row_head(self, cmd: Command, name_w: Optional[int] = None) -> str:
         """Строка "имя-колонка + описание" с общей шириной имени-колонки (§4).
@@ -370,48 +379,61 @@ class CommandPalette(VerticalScroll):
         return f" {f'/{cmd.name}'.ljust(name_w)}{cmd.description}"
 
     def _hotkey_col_w(self) -> int:
-        """Колонка, с которой начинаются хоткеи, или 0 — их нет ни у одной видимой
-        строки. Считается по самому длинному видимому описанию (тот же приём, что у
-        имени): иначе хоткеи вставали бы в хвост строк разной длины лесенкой.
+        """Ширина колонки хоткеев — самый длинный видимый хоткей, или 0, если
+        их нет ни у одной видимой строки. Колонка прижата к правому краю
+        строки (`_line_width`), хоткей не обрезается никогда."""
+        return max((len(c.hotkey) for c in self._visible_rows()), default=0)
 
-        Зазор +3, как и у колонки описаний (§4): было +2, и на строке с самым длинным
-        описанием рядом оказывались два разных зазора — 3 слева от описания и 2 справа.
-        На одной строке это видно глазом (находка живой приёмки)."""
-        rows = list(self._visible_rows())
-        if not any(c.hotkey for c in rows):
-            return 0
-        # По ВСЕМ видимым описаниям, а не только по строкам с хоткеем: у длинного
-        # описания без клавиши иначе не осталось бы зазора вовсе.
-        return max(len(c.description) for c in rows) + 3
+    def _line_width(self) -> int:
+        """Ширина текста строки (внутри рамки и паддинга). Палитра вне
+        приложения (юнит-тесты) её не знает — тогда берётся естественная
+        ширина: самое длинное описание без усечения."""
+        if self._content_width():
+            return self._content_width() - 2  # -2 — padding строки
+        rows = self._visible_rows()
+        skills = self._visible_skill_rows()
+        longest = max(
+            [len(c.description) for c in rows]
+            + [len(str(s.get("description") or "")) for s in skills],
+            default=0,
+        )
+        return self._desc_start() + longest + self._hotkey_tail()
+
+    def _desc_start(self) -> int:
+        return 1 + self._name_col_w()  # ведущий пробел + имя-колонка
+
+    def _hotkey_tail(self) -> int:
+        """Ширина правого края строки: зазор 3 + колонка хоткеев (или 0)."""
+        col = self._hotkey_col_w()
+        return col + 3 if col else 0
+
+    def _fit_desc(self, text: str, tail: int) -> str:
+        """Описание, обрезанное «…» до места между колонкой имён и правым
+        краем строки с хвостом шириной `tail`."""
+        width = max(1, self._line_width() - self._desc_start() - tail)
+        if len(text) <= width:
+            return text
+        return text[: width - 1] + "…"
 
     def _format_row(self, cmd: Command) -> str:
-        head = self._row_head(cmd)
-        col = self._hotkey_col_w()
-        if not col or not cmd.hotkey:
-            return (
-                head  # колонку держит паддинг соседей, пустой хвост не нужен
-            )
-        return head + " " * (col - len(cmd.description)) + cmd.hotkey
-
-    def _skill_col_w(self) -> int:
-        """Ширина колонки имён скиллов: самое длинное видимое `/имя`, не
-        больше `_SKILL_NAME_MAX`, + 3 пробела. С колонкой команд не связана."""
-        names = [_skill_label(s) for s in self._visible_skill_rows()]
-        if not names:
-            return 0
-        return min(max(map(len, names)), _SKILL_NAME_MAX) + 3
+        head = f" {_fit_name(f'/{cmd.name}').ljust(self._name_col_w())}"
+        tail = self._hotkey_tail()
+        desc = self._fit_desc(cmd.description, tail)
+        if not tail or not cmd.hotkey:
+            return head + desc  # хвост не нужен, колонку держат соседи
+        gap = self._line_width() - len(head) - len(desc) - self._hotkey_col_w()
+        return head + desc + " " * gap + cmd.hotkey.rjust(self._hotkey_col_w())
 
     def _format_skill_row(self, skill: dict) -> Text:
-        """Строка скилла: запускаемое `/имя` в своей колонке (цвет — классом
-        `.palette-skill-row`), длиннее `_SKILL_NAME_MAX` обрезается
-        многоточием; затем серым описание. В расчёт колонок команд не
-        входит."""
-        name = _skill_label(skill)
-        if len(name) > _SKILL_NAME_MAX:
-            name = name[: _SKILL_NAME_MAX - 1] + "…"
-        name_w = self._skill_col_w()
-        text = Text(f" {name.ljust(name_w)}")
-        text.append(str(skill.get("description") or ""), style=_pal.DIM)
+        """Строка скилла: запускаемое `/имя` в общей колонке имён (цвет —
+        классом `.palette-skill-row`), длиннее `_SKILL_NAME_MAX` — с
+        многоточием; затем серым описание."""
+        name = _fit_name(_skill_label(skill))
+        text = Text(f" {name.ljust(self._name_col_w())}")
+        desc = self._fit_desc(
+            str(skill.get("description") or ""), self._hotkey_tail()
+        )
+        text.append(desc, style=_pal.DIM)
         return text
 
     def _skill_widgets(

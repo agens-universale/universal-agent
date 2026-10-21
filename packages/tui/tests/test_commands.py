@@ -239,8 +239,10 @@ def test_settings_command_description_lists_all_sections():
     description = (
         build_default_registry().lookup("settings").description.lower()
     )
-    for section in SECTIONS:
-        head = section.lower().split()[0].split("-")[0]
+    # «Обновление» не вмещается в ширину палитры и осознанно опущено
+    # (решение владельца); остальные названы основой слова.
+    for section in set(SECTIONS) - {"Обновление"}:
+        head = section.lower().split()[0].split("-")[0][:5]
         assert head in description, (
             f"секция «{section}» не названа в: {description}"
         )
