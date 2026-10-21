@@ -8022,17 +8022,18 @@ class TraceScreen(Screen):
         return trace_events_from_nested_detail(call_id, detail)
 
     async def _fetch_skills(self) -> list[dict]:
-        """Список скиллов из core-реестра; ошибки — вызывающему."""
-        from gc_core.tools.skills.registry import get_skills_registry
+        """Список скиллов из core-реестра (обход диска — вне цикла
+        интерфейса); ошибки — вызывающему."""
+        from gc_tui.services.skills_scan import list_skills_off_loop
 
-        reg = get_skills_registry(self.app.base_settings())
-        # include_all=True — и внутренние скиллы паков, не только bootstrap.
-        return await reg.list_skills(include_all=True)
+        return await list_skills_off_loop(self.app.base_settings())
 
     def _warm_skills_cache(self) -> None:
         """Тихий фоновый прогрев `_skills_cache` (спека P5 §3.1): палитре
         скиллы нужны с первой буквы, без I/O на нажатие. Ошибка — только в
-        лог: кэш остаётся холодным, явный /skill загрузит и покажет её сам."""
+        лог: кэш остаётся холодным, явный /skill загрузит и покажет её сам.
+        `exclusive` отменяет прежний прогрев: его устаревший снимок в кэш не
+        попадёт; воркер экрана отменяется и при его снятии."""
         self.run_worker(
             self._warm_skills(), group="skills-warm", exclusive=True
         )

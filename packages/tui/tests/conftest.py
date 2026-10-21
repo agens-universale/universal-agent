@@ -223,6 +223,28 @@ def _no_clipboard_probe(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_skills_warm(monkeypatch):
+    """Главный экран прогревает кэш скиллов в фоне на старте и после каждого
+    прогона — по умолчанию тесты настоящий реестр не обходят. Тест, которому
+    прогрев нужен, просит фикстуру `skills_warm` и сам подменяет реестр.
+    Возвращает настоящий метод прогрева."""
+    from gc_tui.screens.main import TraceScreen
+
+    real = TraceScreen._warm_skills_cache
+    monkeypatch.setattr(TraceScreen, "_warm_skills_cache", lambda self: None)
+    return real
+
+
+@pytest.fixture
+def skills_warm(_no_skills_warm, monkeypatch):
+    """Вернуть настоящий фоновый прогрев кэша скиллов
+    (см. `_no_skills_warm`)."""
+    from gc_tui.screens.main import TraceScreen
+
+    monkeypatch.setattr(TraceScreen, "_warm_skills_cache", _no_skills_warm)
+
+
+@pytest.fixture(autouse=True)
 def _no_terminal_probe(monkeypatch):
     """Тесты не опрашивают настоящий терминал (OSC 11 при старте `main()`) и
     после себя возвращают палитру к теме fixed: apply_background меняет

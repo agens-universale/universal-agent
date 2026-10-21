@@ -1,6 +1,6 @@
 """Палитра команд: фильтрация, ↑↓, Tab/Enter/Esc."""
 
-from gc_testkit.tui_support import tui_settings
+from gc_testkit.tui_support import tui_settings, wait_until
 import pytest
 
 
@@ -694,7 +694,7 @@ def test_command_row_selected_has_no_skill():
 
 @pytest.mark.asyncio
 async def test_palette_shows_skills_from_warmed_screen_cache(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, skills_warm
 ):
     """Прод-провайдер: палитра берёт скиллы из прогретого кэша экрана."""
     pytest.importorskip("textual")
@@ -715,7 +715,9 @@ async def test_palette_shows_skills_from_warmed_screen_cache(
         settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
-        await pilot.pause()
+        await wait_until(
+            pilot, lambda: app.screen._skills_cache, "прогрев скиллов"
+        )
         inp = pilot.app.query_one("#cmdinput")
         inp.text = "/brai"
         await pilot.pause(0.1)

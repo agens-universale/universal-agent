@@ -1,6 +1,6 @@
 """Command palette overlay renders correctly when typing a slash command."""
 
-from gc_testkit.tui_support import tui_settings
+from gc_testkit.tui_support import tui_settings, wait_until
 import pytest
 
 pytest.importorskip("textual")
@@ -25,7 +25,9 @@ class _Reg:
         return list(_SKILLS)
 
 
-def test_palette_open_snapshot(snap_compare, tmp_path, monkeypatch):
+def test_palette_open_snapshot(
+    snap_compare, tmp_path, monkeypatch, skills_warm
+):
     from gc_core.tools.skills import registry as reg_mod
     from gc_tui.app import TuiApp
 
@@ -45,7 +47,9 @@ def test_palette_open_snapshot(snap_compare, tmp_path, monkeypatch):
     )
 
     async def setup(pilot):
-        await pilot.pause()
+        await wait_until(
+            pilot, lambda: pilot.app.screen._skills_cache, "прогрев скиллов"
+        )
         # Фиксируем cwd для детерминированного футера в snapshot'е.
         pilot.app.tui_state.pending_cwd = "/work/project"
         pilot.app.screen._refresh_footer()
