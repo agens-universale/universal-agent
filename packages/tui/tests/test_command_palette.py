@@ -754,9 +754,30 @@ async def test_skill_more_line_rendered_not_selectable(tmp_path):
         await app.screen.mount(palette)
         await pilot.pause()
         more = palette.query_one(".palette-skill-more")
-        assert str(more.render()) == "… ещё 3 — /skill brai"
-        assert len(palette._selectable_rows()) == 6
-        assert palette.region.height == 10  # потолок, дальше прокрутка
+        assert str(more.render()) == "… ещё 4 — /skill brai"
+        assert len(palette._selectable_rows()) == 5
+        assert palette.region.height == palette.desired_height
+
+
+@pytest.mark.asyncio
+async def test_more_line_fits_inside_budget_without_scroll(tmp_path):
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+
+    app = TuiApp(
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "M"}),
+    )
+    async with app.run_test(size=(100, 40)) as pilot:
+        # 14 = 10 строк списка + рамка(2) + подвал(2)
+        palette, _ = _budget_palette("brai", 12, 14, commands=("brai",))
+        await app.screen.mount(palette)
+        await pilot.pause()
+        assert len(palette.query(".palette-skill-row")) == 8
+        more = palette.query_one(".palette-skill-more")
+        assert str(more.render()) == "… ещё 4 — /skill brai"
+        assert palette.region.height == palette.desired_height == 14
+        assert not palette.show_vertical_scrollbar
 
 
 def test_command_row_selected_has_no_skill():

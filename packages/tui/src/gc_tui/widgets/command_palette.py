@@ -663,19 +663,18 @@ class CommandPalette(VerticalScroll):
                 height = 0
         return height - 2 - self._footer_reserved_height()
 
-    def _skill_budget(self) -> int:
-        """Строки скиллов: свободные после команд, но не меньше пола."""
-        free = self._list_rows_cap() - len(self._visible_rows())
-        return max(_SKILL_ROWS_MIN, free)
-
     def _visible_skill_rows(self) -> list[dict]:
-        """Строки скиллов после команд в рамках общего бюджета; единственный
-        скрытый скилл показывается вместо строки «ещё 1»."""
+        """Строки скиллов после команд в рамках общего бюджета. При
+        переполнении одна строка бюджета отдана под «ещё N», но не меньше
+        пола; единственный скрытый скилл показывается вместо «ещё 1»."""
         matched = self._matched_skills()
-        budget = self._skill_budget()
-        if len(matched) - budget == 1:
+        free = self._list_rows_cap() - len(self._visible_rows())
+        if len(matched) <= free:
             return matched
-        return matched[:budget]
+        shown = max(_SKILL_ROWS_MIN, free - 1)
+        if len(matched) - shown == 1:
+            return matched
+        return matched[:shown]
 
     def _skill_more_count(self) -> int:
         return len(self._matched_skills()) - len(self._visible_skill_rows())
