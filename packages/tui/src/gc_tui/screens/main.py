@@ -52,6 +52,7 @@ from textual import events
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.css.query import NoMatches
 from textual.screen import Screen
 from textual.widget import Widget
 from textual.widgets import Static, TextArea
@@ -586,7 +587,7 @@ class TraceScreen(Screen):
             None  # для какого query показан список
         )
         self._file_search = None  # file_search.FileSearchSession | None
-        self._skills_cache: Optional[list[dict]] = None
+        self._skills_cache_value: Optional[list[dict]] = None
         # После Tab-completion в skill picker гасим один Changed-цикл, чтобы
         # on_text_area_changed не переоткрыл только что закрытый picker.
         self._suppress_picker_reopen: bool = False
@@ -8251,6 +8252,21 @@ class TraceScreen(Screen):
         from gc_tui.services.skills_scan import list_skills_off_loop
 
         return await list_skills_off_loop(self.app.base_settings())
+
+    @property
+    def _skills_cache(self) -> Optional[list[dict]]:
+        return self._skills_cache_value
+
+    @_skills_cache.setter
+    def _skills_cache(self, value: Optional[list[dict]]) -> None:
+        """Кэш скиллов; смена перерисовывает поле ввода: подсветка `/имени`
+        зависит от кэша (холодный — не подсвечивает)."""
+        self._skills_cache_value = value
+        try:
+            inp = self.query_one(_SEL_CMDINPUT, CommandTextArea)
+        except NoMatches:
+            return
+        inp.refresh_command_highlight()
 
     def _warm_skills_cache(self) -> None:
         """Тихий фоновый прогрев `_skills_cache` (спека P5 §3.1): палитре

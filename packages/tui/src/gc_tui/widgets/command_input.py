@@ -199,6 +199,21 @@ class CommandTextArea(TextArea):
         self.navigator = DocumentNavigator(self.wrapped_document)
         self._rewrap_and_refresh_virtual_size()
 
+    def get_component_rich_style(self, *names: str, **kwargs) -> Style:
+        """Подложка строки курсора — только фон. Штатный стиль несёт и цвет
+        текста: `_render_line` кладёт его поверх `get_line` и гасит `SKILL`
+        у `/имени` на строке с курсором (а это почти всегда она)."""
+        if names == ("text-area--cursor-line",):
+            full = super().get_component_rich_style(*names, **kwargs)
+            return Style(bgcolor=full.bgcolor)
+        return super().get_component_rich_style(*names, **kwargs)
+
+    def refresh_command_highlight(self) -> None:
+        """Перерисовать поле после смены ответа `is_known_command` (кэш
+        скиллов прогрет или сброшен): кэш строк TextArea ключуется без него."""
+        self._line_cache.clear()
+        self.refresh()
+
     def get_line(self, line_index: int) -> Text:
         """Строка поля; у первой — `/имя` цветом `SKILL`, если экран знает
         это имя (рисование Textual зовёт этот метод на каждую строку)."""
