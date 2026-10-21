@@ -245,27 +245,43 @@ def agent_answers(segments: list[dict]) -> list[str]:
     """Ответы агента треда по порядку (по сегментам сжатия): проза, отчёт
     финала и план ровно так, как их показывает лента (`AnswerFlow`):
     повторы внутри хода и отклонённые попытки turn_finish не считаются.
-    Реплики, вывод тулов и промежуточные ответы не входят."""
+    Реплики, вывод тулов и промежуточные ответы не входят. Как в ленте:
+    контекст рендера — по всем сегментам, сохранённая при сжатии копия
+    записи (тот же `id` в следующем файле) не считается второй раз."""
+    payloads = [
+        r["payload"]
+        for seg in segments
+        for r in seg["messages"]
+        if isinstance(r.get("payload"), dict)
+    ]
+    context = collect_render_context(payloads)
     flow = AnswerFlow()
     answers: list[str] = []
     attempt: Optional[int] = None  # индекс отчёта попытки в answers
-    for seg in segments:
-        payloads = [
-            r["payload"]
-            for r in seg["messages"]
-            if isinstance(r.get("payload"), dict)
-        ]
-        context = collect_render_context(payloads)
-        for no, payload in enumerate(payloads):
-            ev = map_message(payload, no=no, ts="", context=context)
-            if ev is None:
-                continue
-            if ev.kind == "user":
-                flow.new_turn()
-                attempt = None
-            elif ev.kind == "agent":
-                attempt = _take_agent(flow, ev, answers, attempt)
+    for no, payload in enumerate(_first_by_id(payloads)):
+        ev = map_message(payload, no=no, ts="", context=context)
+        if ev is None:
+            continue
+        if ev.kind == "user":
+            flow.new_turn()
+            attempt = None
+        elif ev.kind == "agent":
+            attempt = _take_agent(flow, ev, answers, attempt)
     return answers
+
+
+def _first_by_id(payloads: list[dict]) -> list[dict]:
+    """Записи без повторов `id`: первое вхождение (правило ленты)."""
+    seen: set = set()
+    out = []
+    for payload in payloads:
+        mid = payload.get("id")
+        if mid is not None:
+            if mid in seen:
+                continue
+            seen.add(mid)
+        out.append(payload)
+    return out
 
 
 def _take_agent(flow, ev, answers: list[str], attempt: Optional[int]):

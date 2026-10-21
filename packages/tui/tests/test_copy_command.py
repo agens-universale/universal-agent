@@ -337,8 +337,51 @@ def test_empty_summaries_skipped():
     assert agent_answers(_turns(body)) == []
 
 
+def _with_id(payload, mid):
+    return {**payload, "id": mid}
+
+
+def _compacted_with_preserved_copy():
+    """Архив: реплика + A; живой файл после сжатия: те же реплика и A
+    (сохранённые копии с теми же `id`) + B."""
+    user = _with_id({"role": "user", "content": "вопрос"}, "u1")
+    answer = _with_id(_assistant("A"), "a1")
+    archive = _segment([user, answer], index=0)
+    live = _segment([user, answer, _with_id(_assistant("B"), "b1")], 1)
+    return [archive, live]
+
+
+def test_agent_answers_skip_preserved_copies():
+    assert agent_answers(_compacted_with_preserved_copy()) == ["A", "B"]
+
+
+def _single_segment_thread():
+    return [
+        _segment(
+            [
+                _assistant("X"),
+                _call("turn_intermediate_reply", {"answer": "X"}, "i1"),
+                _out("i1", "turn_intermediate_reply"),
+                _finish("плохой", "f1"),
+                _finish("хороший", "f2"),
+                {"role": "user", "content": "ещё"},
+                _assistant("да"),
+                {"role": "user", "content": "и ещё"},
+                _assistant("да"),
+                _call("turn_propose_plan", {"plan": "план"}, "p1"),
+            ]
+        )
+    ]
+
+
 @pytest.mark.asyncio
-async def test_copy_answers_match_what_trace_mounts(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    "make_segments",
+    [_single_segment_thread, _compacted_with_preserved_copy],
+)
+async def test_copy_answers_match_what_trace_mounts(
+    tmp_path, monkeypatch, make_segments
+):
     from gc_tui.app import TuiApp
     from gc_tui.services import trace_render
 
@@ -357,19 +400,7 @@ async def test_copy_answers_match_what_trace_mounts(tmp_path, monkeypatch):
 
         monkeypatch.setattr(trace_render, name, wrap)
 
-    thread = [
-        _assistant("X"),
-        _call("turn_intermediate_reply", {"answer": "X"}, "i1"),
-        _out("i1", "turn_intermediate_reply"),
-        _finish("плохой", "f1"),
-        _finish("хороший", "f2"),
-        {"role": "user", "content": "ещё"},
-        _assistant("да"),
-        {"role": "user", "content": "и ещё"},
-        _assistant("да"),
-        _call("turn_propose_plan", {"plan": "план"}, "p1"),
-    ]
-    segs = [_segment(thread)]
+    segs = make_segments()
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
