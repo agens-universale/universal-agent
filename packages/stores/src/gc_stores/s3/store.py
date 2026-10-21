@@ -15,6 +15,7 @@ from typing import Any
 from gc_core.stores import Stores
 
 from gc_stores.kv.agent_store import KvAgentStore
+from gc_stores.kv.base import guarded
 from gc_stores.kv.thread_store import KvThreadStore
 from gc_stores.s3.kv import S3KV
 
@@ -88,7 +89,9 @@ def open_stores(
     clock: Callable[[], datetime] | None = None,
 ) -> Stores:
     """Треды и хранилище агента ``agent_id`` на одном клиенте S3."""
-    kv = S3KV(bucket, prefix=prefix, endpoint_url=endpoint_url, region=region)
+    kv = guarded(
+        S3KV(bucket, prefix=prefix, endpoint_url=endpoint_url, region=region)
+    )
     return Stores(
         threads=S3ThreadStore(kv=kv, clock=clock),
         agent=S3AgentStore(kv=kv, agent_id=agent_id),
