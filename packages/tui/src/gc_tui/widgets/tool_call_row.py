@@ -19,7 +19,7 @@ Layout: Horizontal(prefix-Static, content-Static) — wrap длинного об
 - running  — сейчас исполняется: ▸ + elapsed (+ опциональный live_status);
   на человеко-ожидании (pause) — ‖ без дыхания, elapsed заморожен;
 - done     — есть result: ✓/✕; стоп или лимит (`halted`) — ■ серым,
-  отказ (`refused`) — ⦸ цветом WARN, строка `└` серым;
+  отказ (`refused`) — ○ цветом WARN, строка `└` серым;
 - interrupted — стоп/обрыв до output: · + «прервано».
 """
 

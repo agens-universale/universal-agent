@@ -1,7 +1,7 @@
 """Отказ вызова в ленте — не ошибка (спека P3 §10, смоук P3a).
 
 Отказ политики, режима, судьи или человека: цветом `WARN` только глиф
-`⦸`, строка `└` серым (`DIM`) и начинается с того, кто отказал. Ошибка —
+`○`, строка `└` серым (`DIM`) и начинается с того, кто отказал. Ошибка —
 `✕` и `ERR`, стоп и лимит — `■` серым; несостоявшаяся проверка судьи —
 не отказ, а остановка `■`. Каждый путь одинаково: вживую, превью,
 вложенный вызов из записи субагента."""
@@ -155,7 +155,7 @@ def _output_event(error: dict) -> TraceEvent:
 
 def _assert_refused_row(row: ToolCallRow, text: str, indent: str) -> None:
     prefix = row._render_prefix()
-    assert _styles_of(prefix, "⦸") == [WARN]
+    assert _styles_of(prefix, "○") == [WARN]
     assert "✕" not in prefix.plain
     line = _lines(row)
     assert line.plain == f"{indent}└ {text}"
@@ -337,7 +337,7 @@ async def test_live_refusal_row(tmp_path):
 
 @pytest.mark.asyncio
 async def test_live_nested_refusal_from_subagent_record():
-    """Переоткрытие идущего субагента: вложенный отказ из записи — `⦸`."""
+    """Переоткрытие идущего субагента: вложенный отказ из записи — `○`."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
     from gc_tui.services.subagent_sidecar_mapper import (

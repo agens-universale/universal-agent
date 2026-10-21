@@ -49,7 +49,7 @@ class SidecarNestedAction:
     prose: Optional[str] = None
     ok: Optional[bool] = None
     error_brief: Optional[str] = None
-    # Не-сбой ребёнка: стоп или лимит (`■`), отказ (`⦸`); None — по `ok`.
+    # Не-сбой ребёнка: стоп или лимит (`■`), отказ (`○`); None — по `ok`.
     outcome: Optional[ResultOutcome] = None
     todo_items: Optional[List[Dict[str, str]]] = None
     # Картинки реплики человека ребёнку (``mount_nested_user``).

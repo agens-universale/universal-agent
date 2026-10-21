@@ -21,7 +21,7 @@ Kind = Literal[
 ]
 Status = Literal["running", "stopped", "completed", "failed"]
 #: Итог вызова в ленте: успех `✓`, сбой `✕`, стоп или лимит `■`, отказ
-#: политики, режима, судьи или человека `⦸` (спека P3 §10).
+#: политики, режима, судьи или человека `○` (спека P3 §10).
 ResultOutcome = Literal["ok", "error", "halted", "refused"]
 
 
