@@ -492,6 +492,24 @@ def test_summarize_output_entries_uses_count():
     assert "7 записей" in ev.summary
 
 
+def _tail(data: dict) -> str:
+    msg = {
+        "type": "function_call_output",
+        "call_id": "c1",
+        "output": json.dumps({"ok": True, **data}),
+    }
+    return map_message(msg, no=5, ts="").summary
+
+
+def test_search_count_is_not_repeated_as_entries():
+    """`count` поиска — число совпадений, второй раз записями не идёт."""
+    assert _tail({"matches": [1, 2, 3], "count": 3}) == "3 совпадения"
+
+
+def test_entries_with_count_stay_entries():
+    assert _tail({"entries": ["a", "b"], "count": 2}) == "2 записи"
+
+
 def test_summarize_output_empty_when_no_known_keys():
     """Если нет распознаваемых ключей — summary пустой (строка без хвоста)."""
     msg = {

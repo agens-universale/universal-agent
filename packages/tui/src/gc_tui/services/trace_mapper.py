@@ -819,7 +819,8 @@ def _result_bits(data: dict) -> list[str]:
         mcount = len(mv) if isinstance(mv, (list, tuple)) else mv
         bits.append(_counted(mcount, "совпадение", "совпадения", "совпадений"))
     entries = data.get("entries")
-    count = data.get("count")
+    # У поиска `count` — то же число совпадений: второй раз не пишем.
+    count = None if "matches" in data else data.get("count")
     if count is None and "entries" in data:
         count = len(entries) if isinstance(entries, list) else "?"
     if count is not None:
