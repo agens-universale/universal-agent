@@ -2,6 +2,8 @@
 циклят и применяют значение МГНОВЕННО (спека 2026-07-18 §1 — черновик
 отменён); Enter текстом (палитра уже закрыта) — только инфо-флеш."""
 
+from gc_testkit.develop_files import meta_of
+
 from gc_testkit.tui_support import tui_settings
 import pytest
 
@@ -287,7 +289,7 @@ def test_apply_toggle_writes_session_and_invalidates_runner(tmp_path):
     from gc_tui.services.stores.file_store import FileTaskStore
 
     store = FileTaskStore(threads_dir=app._threads_dir, system=app._system)
-    saved = (store.get_task_meta("t1").get("tui") or {}).get(
+    saved = (meta_of(store.get_record("t1")).get("tui") or {}).get(
         "session_settings"
     )
     assert saved == {"tui.finish_gate_mode": "off"}

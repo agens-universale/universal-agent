@@ -96,9 +96,7 @@ async def test_config_default_mode_used_when_no_session_choice(tmp_path):
 
 async def test_thread_meta_mode_adopted(tmp_path):
     async with _app(tmp_path).run_test() as pilot:
-        pilot.app.adopt_thread_permission_mode(
-            {"shared": {"permission_mode": "manual"}}
-        )
+        pilot.app.adopt_thread_permission_mode("manual")
         assert pilot.app.effective_permission_mode() == "manual"
 
 
@@ -108,13 +106,9 @@ async def test_unknown_mode_in_thread_meta_is_ignored(tmp_path):
     async with _app(tmp_path).run_test() as pilot:
         sent = []
         pilot.app.set_permission_mode = sent.append
-        pilot.app.adopt_thread_permission_mode(
-            {"shared": {"permission_mode": "bypass"}}
-        )
+        pilot.app.adopt_thread_permission_mode("bypass")
         assert sent == []
-        pilot.app.adopt_thread_permission_mode(
-            {"shared": {"permission_mode": " Manual "}}
-        )
+        pilot.app.adopt_thread_permission_mode(" Manual ")
         assert sent == ["manual"]
 
 
@@ -122,9 +116,7 @@ async def test_startup_flag_wins_over_thread_meta(tmp_path):
     app = _app(tmp_path)
     app.lock_permission_mode("manual")  # эквивалент --permission-mode
     async with app.run_test() as pilot:
-        pilot.app.adopt_thread_permission_mode(
-            {"shared": {"permission_mode": "edit"}}
-        )
+        pilot.app.adopt_thread_permission_mode("edit")
         assert pilot.app.effective_permission_mode() == "manual"
 
 
@@ -179,9 +171,7 @@ async def test_startup_flag_and_thread_meta_reach_engine(tmp_path):
     app = _app(tmp_path)
     app._executor_factory = _FakeExecutor
     async with app.run_test() as pilot:
-        pilot.app.adopt_thread_permission_mode(
-            {"shared": {"permission_mode": "manual"}}
-        )
+        pilot.app.adopt_thread_permission_mode("manual")
         assert _engine_mode(pilot.app) == "manual"
 
 
@@ -205,7 +195,7 @@ async def test_session_without_a_mode_takes_the_config_default(tmp_path):
     async with app.run_test() as pilot:
         pilot.app.set_permission_mode("auto")
         assert _engine_mode(pilot.app) == "auto"
-        pilot.app.adopt_thread_permission_mode({"shared": {}}, resumed=True)
+        pilot.app.adopt_thread_permission_mode(None, resumed=True)
         assert pilot.app.effective_permission_mode() == "manual"
         assert pilot.app.permission_mode_source() == "config"
         assert _engine_mode(pilot.app) is None
@@ -214,9 +204,7 @@ async def test_session_without_a_mode_takes_the_config_default(tmp_path):
 async def test_unknown_saved_mode_is_treated_as_none(tmp_path):
     async with _app(tmp_path).run_test() as pilot:
         pilot.app.set_permission_mode("auto")
-        pilot.app.adopt_thread_permission_mode(
-            {"shared": {"permission_mode": "bypass"}}, resumed=True
-        )
+        pilot.app.adopt_thread_permission_mode("bypass", resumed=True)
         assert pilot.app.effective_permission_mode() == "edit"
         assert pilot.app.permission_mode_source() == "default"
 

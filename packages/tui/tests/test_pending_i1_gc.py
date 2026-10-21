@@ -23,19 +23,23 @@ def test_wire_match_falls_back_to_meta_wire_content():
     from gc_tui.screens.main import TraceScreen
 
     tid = "wire-meta-fallback"
+    from gc_testkit.develop_files import record_from_meta
+
     store = SimpleNamespace(
-        get_task_meta=lambda _tid: {
-            "tui": {
-                "pending_user_messages": [
-                    {
-                        "client_id": "c1",
-                        "content": "hello",
-                        "wire_content": "wire-hello\n",
-                        "status": "pending",
-                    }
-                ]
+        get_record=lambda _tid: record_from_meta(
+            {
+                "tui": {
+                    "pending_user_messages": [
+                        {
+                            "client_id": "c1",
+                            "content": "hello",
+                            "wire_content": "wire-hello\n",
+                            "status": "pending",
+                        }
+                    ]
+                }
             }
-        }
+        )
     )
     scr = TraceScreen()
     scr._active_task_id = tid

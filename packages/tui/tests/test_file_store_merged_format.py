@@ -232,3 +232,21 @@ async def test_file_store_delete_task_removes_all_files(tmp_path):
 
     files_after = list(tmp_path.glob(f"*{_TID}*"))
     assert files_after == [], f"Остались файлы: {files_after}"
+
+
+async def test_get_record_returns_the_typed_thread_record(tmp_path):
+    """Экраны читают типизированную запись треда, а не meta develop."""
+    from gc_core.threads.models import ThreadRecord
+
+    threads_dir = str(tmp_path)
+    store = FileTaskStore(threads_dir=threads_dir, system=_SYSTEM)
+    assert store.get_record(_TID) is None
+    session = await _make_session(threads_dir)
+    await session.apersist_batch(
+        [{"role": "user", "content": "m0", "id": "m0"}],
+        previous_response_id=None,
+    )
+    record = store.get_record(_TID)
+    assert isinstance(record, ThreadRecord)
+    assert record.info.messages_count == 1
+    assert record.info.api_mode == "responses"

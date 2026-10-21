@@ -23,14 +23,18 @@ def test_txt_uses_display_content():
             }
         ]
     )
-    out = export_thread(seg, fmt="txt", meta={}, thread_id="t", system="cli")
+    out = export_thread(
+        seg, fmt="txt", api_mode="", thread_id="t", system="cli"
+    )
     assert "давай обсудим" in out
     assert "<skill>" not in out  # портянка не попала
 
 
 def test_txt_skips_empty_display():
     seg = _seg([{"role": "user", "content": "<skill>", "display_content": ""}])
-    out = export_thread(seg, fmt="txt", meta={}, thread_id="t", system="cli")
+    out = export_thread(
+        seg, fmt="txt", api_mode="", thread_id="t", system="cli"
+    )
     assert "<skill>" not in out  # mid-run доставка не выводится как USER
 
 
@@ -44,6 +48,8 @@ def test_json_keeps_wire():
             }
         ]
     )
-    out = export_thread(seg, fmt="json", meta={}, thread_id="t", system="cli")
+    out = export_thread(
+        seg, fmt="json", api_mode="", thread_id="t", system="cli"
+    )
     assert "<skill>" in out  # JSON faithful: content=wire присутствует
     assert "давай" in out  # display_content рядом метаданными

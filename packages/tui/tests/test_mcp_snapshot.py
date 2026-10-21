@@ -1,3 +1,6 @@
+from gc_testkit.develop_files import meta_of
+
+
 def test_build_mcp_tools_snapshot_groups_by_server():
     from gc_core.tools.mcp_snapshot import build_mcp_tools_snapshot
     from gc_testkit.settings import make_settings
@@ -113,7 +116,7 @@ async def test_session_mcp_tools_visible_to_filestore(tmp_path):
     )
     await session.aset_mcp_tools(snap)
     store = FileTaskStore(str(tmp_path), system="cli")
-    meta = store.get_task_meta("t1")
+    meta = meta_of(store.get_record("t1"))
     assert (
         meta.get("runtime", {}).get("mcp_tools", {}).get("search")[0]["name"]
         == "mcp_search_web"

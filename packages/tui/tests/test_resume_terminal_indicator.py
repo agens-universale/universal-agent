@@ -1,10 +1,11 @@
+from gc_testkit.develop_files import record_from_meta
 import pytest
 
 
 def _store_with_last_indicator(last):
     class _Store:
-        def get_task_meta(self, tid):
-            return {"tui": {"last_indicator": last}}
+        def get_record(self, tid):
+            return record_from_meta({"tui": {"last_indicator": last}})
 
     return _Store()
 
@@ -13,8 +14,8 @@ def _store_with_tui_status(status):
     """Старая сессия: есть meta.tui.status, но НЕТ last_indicator."""
 
     class _Store:
-        def get_task_meta(self, tid):
-            return {"tui": {"status": status}}
+        def get_record(self, tid):
+            return record_from_meta({"tui": {"status": status}})
 
     return _Store()
 
@@ -69,8 +70,8 @@ async def test_resume_unrecorded_outcome_no_line(tmp_path):
     from gc_tui.app import TuiApp
 
     class _Store:
-        def get_task_meta(self, tid):
-            return {"tui": {}}  # исход нигде не записан
+        def get_record(self, tid):
+            return record_from_meta({"tui": {}})  # исход нигде не записан
 
     async with TuiApp(
         threads_dir=str(tmp_path / "threads")

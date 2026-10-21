@@ -105,6 +105,7 @@ async def test_clearing_the_plan_in_session_meta(tmp_path):
     from gc_core.threads.facade import Threads
     from gc_core.threads.file_store import FileThreadStore
     from gc_core.threads.models import ThreadKey
+    from gc_testkit.develop_files import meta_of
 
     store = FileThreadStore(str(tmp_path))
     threads, key = Threads(store), ThreadKey(system="cli", thread="t1")
@@ -113,7 +114,7 @@ async def test_clearing_the_plan_in_session_meta(tmp_path):
         SharedStateData(plan=new_plan_block("1. шаг"), permission_mode="plan"),
     )
     assert await threads.clear_plan(key) is True
-    saved = Threads.legacy_meta(await threads.get(key))["shared"]
+    saved = meta_of(await threads.get(key))["shared"]
     assert "plan" not in saved
     assert saved["plan_removed_notice"] is True
     assert saved["permission_mode"] == "plan"  # остальное состояние цело
