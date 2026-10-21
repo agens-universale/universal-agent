@@ -831,6 +831,45 @@ async def check_updated_at_only_on_commit(store, clock: FakeClock) -> None:
     )
 
 
+async def check_inbox_moves_updated_at(store, clock: FakeClock) -> None:
+    """Сообщение во входящий поток — активность треда: задачу, простоявшую
+    дольше окна восстановления и чистки, новое сообщение снова делает
+    свежей (иначе обход «обновлённых за окно» её не увидит, а чистка по
+    сроку удалит вместе с недоставленным)."""
+    lease = await _claim(store)
+    await store.commit(
+        KEY, _change("op1", 0, lease, append_messages=_msgs("a"))
+    )
+    stamp = (await store.get_thread(KEY)).info.updated_at
+    clock.advance(timedelta(seconds=5))
+    await store.append_side(
+        KEY,
+        SideChange(op_id="in", append=[("inbox", [{"text": "новое"}])]),
+    )
+    _expect(
+        (await store.get_thread(KEY)).info.updated_at != stamp,
+        "запись во inbox двигает updated_at",
+    )
+
+
+async def check_delete_spares_a_durable_thread(store, _clock: FakeClock):
+    """Тред, который ведёт durable-исполнитель (бессрочная аренда), не
+    удаляет никто другой — ни уборщик по сроку, ни фронтенд."""
+    lease = await _claim(store, ttl=None)
+    await store.commit(
+        KEY, _change("op", 0, lease, append_messages=_msgs("a"))
+    )
+    await _raises(
+        OwnershipError,
+        store.delete(KEY, op_id="d"),
+        "delete треда под бессрочной арендой",
+    )
+    _expect(await store.get_thread(KEY) is not None, "тред на месте")
+    await store.release(KEY, lease)
+    await store.delete(KEY, op_id="d2")
+    _expect(await store.get_thread(KEY) is None, "после release — удалён")
+
+
 async def check_stored_data_is_isolated(store, _clock: FakeClock) -> None:
     lease = await _claim(store)
     sent = _msgs("a")
@@ -1191,6 +1230,8 @@ CHECKS: tuple[Callable[..., Awaitable[None]], ...] = (
     check_set_info_replaces,
     check_set_info_keeps_title,
     check_updated_at_only_on_commit,
+    check_inbox_moves_updated_at,
+    check_delete_spares_a_durable_thread,
     check_stored_data_is_isolated,
     check_concurrent_same_revision,
     check_concurrent_same_op_id,
@@ -1224,3 +1265,27 @@ def assert_conforms(factory: Callable[[FakeClock], ThreadStore]) -> list[str]:
             raise ConformanceError(f"{check.__name__}: {exc}") from exc
         passed.append(check.__name__)
     return passed
+
+
+async def acheck_prune_drops_old_tombstones(
+    store: ThreadStore, clock: FakeClock
+) -> None:
+    """Надгробие удалённого треда (поколение и эпоха для фенсинга) живёт
+    сутки: ``prune_receipts`` убирает старые, и тред с тем же ключом
+    заводится с нуля. Свежее надгробие остаётся. Проверка не входит в
+    общий набор: файловое хранилище чистит надгробия по mtime, а не по
+    часам контракта."""
+    lease = await _claim(store)
+    await store.commit(
+        KEY, _change("op", 0, lease, append_messages=_msgs("a"))
+    )
+    await store.delete(KEY, op_id="d")
+    await store.prune_receipts(timedelta(days=7))
+    fresh = await store.claim(KEY, LeaseRequest(owner="a", ttl=MINUTE))
+    _expect(fresh.generation == 1, "свежее надгробие держит поколение")
+    await store.release(KEY, fresh.lease)
+    await store.delete(KEY, op_id="d2")
+    clock.advance(timedelta(days=2))
+    await store.prune_receipts(timedelta(days=7))
+    reborn = await store.claim(KEY, LeaseRequest(owner="a", ttl=MINUTE))
+    _expect(reborn.generation == 0, "старое надгробие убрано")

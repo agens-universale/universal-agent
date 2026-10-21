@@ -189,3 +189,27 @@ async def test_claim_hook_runs_after_the_thread_is_taken(
     ex._ctx.on_thread_claimed = on_claimed
     await ex.arun(["сделай"], thread_id=KEY.thread, system=KEY.system)
     assert claimed == [(KEY.system, KEY.thread, True)]
+
+
+async def test_new_thread_does_not_wipe_a_thread_run_elsewhere(
+    monkeypatch, tmp_path
+):
+    """``-n`` (сброс треда) при живой чужой аренде — ``ThreadBusy``: удалить
+    тред, который сейчас ведёт другой процесс, значило бы стереть его ход."""
+    calls: list = []
+    ex = await _executor(monkeypatch, tmp_path, calls)
+    threads = Threads(FileThreadStore(tmp_path))
+    await threads.append_messages(
+        KEY, [{"id": "keep", "role": "user", "content": "чужой ход"}]
+    )
+    await _other_takes(tmp_path)
+    with pytest.raises(ThreadBusy) as busy:
+        await ex.arun(
+            ["сделай"],
+            thread_id=KEY.thread,
+            system=KEY.system,
+            start_new_thread=True,
+        )
+    assert busy.value.owner == "other/1/abcdef12"
+    assert calls == []
+    assert [e.data["id"] for e in await threads.history(KEY)] == ["keep"]

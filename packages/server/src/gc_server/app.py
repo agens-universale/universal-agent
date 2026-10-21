@@ -59,11 +59,16 @@ class ServerRuntime:
 
         return run_store_kwargs(self.base, self.stores)
 
-    def threads(self) -> Threads:
+    def threads(self, surface: str | None = None) -> Threads:
+        """Треды процесса: хранилище в базе — общее; на файлах — каталог из
+        итоговых настроек поверхности ``surface`` (её ``agent_overrides``
+        могут сменить ``paths.threads_data_path``): статус, список и
+        восстановление читают тот же каталог, куда пишет её ход."""
         store = self.store_kwargs().get("thread_store")
         if store is not None:
             return Threads(store)
-        return Threads.from_settings(self.base)
+        settings = self.surface_settings(surface) if surface else self.base
+        return Threads.from_settings(settings)
 
     def response_index(self) -> Any:
         """Индекс ответов chat в хранилище процесса; ``None`` — файловый по

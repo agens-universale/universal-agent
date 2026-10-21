@@ -113,7 +113,7 @@ class ChatSurface:
         self.completions = CompletionsFacade(
             **shared,
             threads=(
-                runtime.threads()
+                runtime.threads("chat")
                 if "thread_store" in runtime.store_kwargs()
                 else None
             ),

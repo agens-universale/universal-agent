@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 
 from gc_core.threads.errors import OwnershipError
 from gc_core.threads.models import (
+    INBOX,
     JsonObject,
     Lease,
     LeaseRequest,
@@ -48,6 +49,22 @@ def _updated(record: ThreadRecord) -> datetime:
 
 def lease_expired(lease: Lease, now: datetime) -> bool:
     return lease.expires_at is not None and lease.expires_at <= now
+
+
+def check_deletable(lease: Lease | None) -> None:
+    """Тред, который ведёт durable-исполнитель (бессрочная аренда), не
+    удаляет никто другой: ни уборщик по сроку, ни фронтенд."""
+    if lease is not None and lease.expires_at is None:
+        raise OwnershipError(
+            f"тред ведёт durable-исполнитель {lease.owner!r}: удалить нельзя"
+        )
+
+
+def side_is_activity(change: SideChange) -> bool:
+    """Запись сбоку, которая двигает ``updated_at``: сообщение во входящий
+    поток — новая работа для треда (обход «обновлённых за окно» и чистка
+    по сроку должны его видеть)."""
+    return any(stream == INBOX for stream, _items in change.append)
 
 
 def info_after_set(current: ThreadInfo, new: ThreadInfo) -> ThreadInfo:

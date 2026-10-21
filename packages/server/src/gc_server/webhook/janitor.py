@@ -1,4 +1,5 @@
-"""Фоновые чистки сервера: треды вебхука и каталоги swarm.
+"""Фоновая чистка каталогов swarm (треды вебхука чистит сама поверхность —
+через фасад тредов, ``WebhookSurface.aprune_once``).
 
 Чистки — обычные функции пакета, а не внешние скрипты. Раньше их искали
 файлом в scripts/ репозитория: путь считался от bundled_root(), который до
@@ -11,82 +12,6 @@ import logging
 import threading
 import time
 from typing import Any, Dict
-
-
-def _cleanup_threads_loop(
-    *,
-    interval_seconds: int,
-    ttl_days: int,
-    threads_dir: str,
-    logger: logging.Logger,
-) -> None:
-    """Фоновая периодическая чистка устаревших тредов.
-
-    Поток в рамках текущего процесса, чтобы не блокировать async event loop.
-    """
-    from gc_server.cleanup_threads import cleanup_threads
-
-    while True:
-        try:
-            stats = cleanup_threads(threads_dir, ttl_days)
-            if stats.get("missing_dir"):
-                logger.warning("каталог тредов не найден: %s", threads_dir)
-            elif stats["errors"]:
-                logger.error(
-                    "чистка тредов: %s ошибок, %s", stats["errors"], stats
-                )
-            elif stats.get("removed_meta"):
-                # Удаление обязано оставлять след. Прежде молчал именно успешный
-                # проход: «каталога нет» кричало предупреждением, а снос десятка
-                # тредов не печатал ничего — громкость была устроена наоборот.
-                logger.info(
-                    "чистка тредов: удалено %d старше %d дн. из %s",
-                    stats["removed_meta"],
-                    ttl_days,
-                    threads_dir,
-                )
-        except Exception as e:
-            logger.warning("threads cleanup failed: %r", e)
-
-        time.sleep(interval_seconds)
-
-
-def start_threads_cleanup(
-    *,
-    enabled: bool,
-    interval_seconds: int,
-    ttl_days: float,
-    threads_dir: str,
-    logger: logging.Logger,
-) -> bool:
-    """Поток чистки тредов; ``False`` — выключена (умолчание).
-
-    Дефолт ВЫКЛЮЧЕН: каталог тредов общий с ``gc-cli`` и TUI, и сервер,
-    поднятый в каталоге проекта, сносил бы историю интерактивной работы.
-    Когда разрушающее действие затрагивает чужие данные, включать его обязан
-    человек.
-    """
-    if not enabled:
-        return False
-    # Каталог общий с CLI и TUI, поэтому человек обязан видеть, что именно
-    # чистится и с каким сроком.
-    logger.info(
-        "чистка тредов включена: каталог %s, ttl %g дн., интервал %d с",
-        threads_dir,
-        ttl_days,
-        interval_seconds,
-    )
-    threading.Thread(
-        target=_cleanup_threads_loop,
-        kwargs={
-            "interval_seconds": interval_seconds,
-            "ttl_days": ttl_days,
-            "threads_dir": threads_dir,
-            "logger": logger,
-        },
-        daemon=True,
-    ).start()
-    return True
 
 
 def _swarm_cleanup_loop(

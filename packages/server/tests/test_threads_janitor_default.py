@@ -23,7 +23,6 @@ import asyncio
 import json
 import logging
 import os
-import time
 
 import pytest
 from server_harness import make_webhook
@@ -33,8 +32,17 @@ def _store_with_old_thread(tmp_path) -> tuple[str, str]:
     threads = tmp_path / "threads"
     threads.mkdir()
     meta = threads / "meta_generic_old.json"
+    # Задача вебхука (статус вебхука в секции фронтенда): фоновая чистка
+    # трогает только такие треды.
     meta.write_text(
-        json.dumps({"updated_at": "2026-07-01T00:00:00+00:00"}),
+        json.dumps(
+            {
+                "system": "generic",
+                "thread_id": "old",
+                "updated_at": "2026-07-01T00:00:00+00:00",
+                "frontends": {"webhook": {"status": "completed"}},
+            }
+        ),
         encoding="utf-8",
     )
     (threads / "data_generic_old.jsonl").write_text("", encoding="utf-8")
@@ -45,10 +53,15 @@ def _run(server_config, threads_dir, caplog):
     surface = make_webhook(
         config=server_config, **{"paths.threads_data_path": threads_dir}
     )
+
+    async def scenario() -> None:
+        await surface.astart()
+        # Чистка проходит сразу при старте, затем спит интервал.
+        await asyncio.sleep(0.4)
+        await surface.astop()
+
     with caplog.at_level(logging.INFO, logger="gc_server.webhook"):
-        asyncio.run(surface.astart())
-        # Поток чистит ДО первого sleep; ждём, пока он отработает.
-        time.sleep(0.4)
+        asyncio.run(scenario())
     return caplog.text
 
 

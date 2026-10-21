@@ -198,3 +198,23 @@ def test_body_limit_defaults_to_ten_mib():
     )
     assert own.surface("webhook").max_body_bytes == 100
     assert own.surface("chat").max_body_bytes == 5
+
+
+async def test_task_threads_live_where_the_surface_runs_them(tmp_path):
+    """Находка ревью №12: каталог тредов вебхука переопределён в
+    ``webhook.agent_overrides`` — статус, список, отмена, восстановление и
+    чистка читают тот же каталог, куда пишет ход, а не каталог базовых
+    настроек."""
+    own = tmp_path / "own-threads"
+    surface = make_webhook(
+        tmp_path,
+        config={
+            "webhook": {
+                "agent_overrides": {"paths.threads_data_path": str(own)}
+            }
+        },
+    )
+    assert surface.threads().store.threads_dir == str(own)
+    key = ThreadKey(system="generic", thread="t1")
+    await surface.threads().submit(key, {"role": "user", "content": "x"})
+    assert (await Threads(FileThreadStore(own)).get(key)) is not None

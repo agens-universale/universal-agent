@@ -53,6 +53,7 @@ from gc_core.threads.models import (
     check_stream_name,
 )
 from gc_core.threads.rules import (
+    check_deletable,
     check_side_writer,
     check_writer,
     granted_lease,
@@ -666,7 +667,7 @@ class KvThreadStore(ThreadStore):
             reserved = await self._reserve_aliases(
                 key, new, change.add_aliases, now, base
             )
-            apply_side(new.row, change)
+            apply_side(new.row, change, now)
             for stream, items in change.append:
                 await self._append(key, new, stream, items, now)
             await self._confirm(key, reserved)
@@ -729,6 +730,7 @@ class KvThreadStore(ThreadStore):
             live = _live(head)
             if live is None:
                 return _Done([])
+            check_deletable(live.row.lease)
             after = await self._thread_keys(key, live)
             return _Write(live.tombstone(), list(live.aliases), after)
 

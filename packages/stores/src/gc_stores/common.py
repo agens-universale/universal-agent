@@ -6,8 +6,14 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from gc_core.threads.models import SideChange, ThreadChange
-from gc_core.threads.rules import info_after_set, patched_frontend
+from gc_core.threads.rules import (
+    info_after_set,
+    patched_frontend,
+    side_is_activity,
+)
 
 from gc_stores.rows import ThreadRow
 
@@ -29,7 +35,11 @@ def apply_sets(row: ThreadRow, change: ThreadChange) -> None:
         row.extra = change.set_extra
 
 
-def apply_side(row: ThreadRow, change: SideChange) -> None:
+def apply_side(row: ThreadRow, change: SideChange, now: datetime) -> None:
+    """Запись сбоку; сообщение во входящий поток двигает ``updated_at``
+    (не назад — часы могли отступить)."""
+    if side_is_activity(change):
+        row.updated_at = max(now, row.updated_at)
     if change.set_runtime is not None:
         row.runtime = change.set_runtime
     if change.set_frontend is not None:

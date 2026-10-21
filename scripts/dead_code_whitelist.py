@@ -71,8 +71,9 @@ _.delete_resource
 _.list_resources
 
 # KV-движок gc-stores: MemoryKV — KV в памяти для проверки движка (тесты, свои
-# реализации встраивающих), sweep — уборка сирот прерванных записей, которую
-# зовёт оператор. packages/stores/src/gc_stores/kv/.
+# реализации встраивающих), sweep — уборка сирот прерванных записей: её
+# зовёт обслуживание вебхука по имени (getattr — у хранилищ, которые её
+# умеют) и оператор. packages/stores/src/gc_stores/kv/.
 MemoryKV
 _.sweep
 

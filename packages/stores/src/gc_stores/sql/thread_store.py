@@ -42,6 +42,7 @@ from gc_core.threads.models import (
     check_stream_name,
 )
 from gc_core.threads.rules import (
+    check_deletable,
     check_side_writer,
     check_writer,
     granted_lease,
@@ -73,7 +74,9 @@ T = TypeVar("T")
 
 #: Колонки, которые пишут append_side и claim: статус хода и продление
 #: аренды не переписывают состояние сессии.
-SIDE_COLUMNS = ("runtime", "frontend", "max_seq")
+SIDE_COLUMNS = ("runtime", "frontend", "max_seq", "updated_at")
+#: Сколько живёт надгробие удалённого треда.
+TOMBSTONE_TTL = timedelta(days=1)
 LEASE_COLUMNS = ("lease_owner", "lease_epoch", "lease_expires_at")
 _TIME_COLUMNS = ("created_at", "updated_at", "lease_expires_at")
 
@@ -495,7 +498,7 @@ class SqlThreadStore(ThreadStore):
             check_side_writer(row.lease, change)
             now = await self._now(conn)
             await self._add_aliases(conn, key, change.add_aliases)
-            apply_side(row, change)
+            apply_side(row, change, now)
             for stream, items in change.append:
                 await self._append(conn, row, stream, items, now)
             await self._save(conn, row, SIDE_COLUMNS)
@@ -537,12 +540,14 @@ class SqlThreadStore(ThreadStore):
             row = await self._lock(conn, key)
             if row is None:
                 return
+            check_deletable(row.lease)
             await conn.execute(
                 self._q.save_tombstone,
                 key.system,
                 key.thread,
                 row.generation + 1,
                 row.lease_epoch,
+                self._d.time_in(await self._now(conn)),
             )
             for statement in self._q.delete_thread_rows:
                 await conn.execute(statement, key.system, key.thread)
@@ -581,10 +586,17 @@ class SqlThreadStore(ThreadStore):
         return bytes(data)
 
     async def prune_receipts(self, older_than: timedelta) -> int:
+        """Квитанции старше ``older_than`` и надгробия старше суток
+        (фенсинг удалённого треда: аренды со сроком к этому времени
+        истекли). Возвращает число убранных квитанций."""
+
         async def work(conn: Conn) -> int:
-            cutoff = await self._now(conn) - older_than
+            now = await self._now(conn)
+            await conn.execute(
+                self._q.prune_tombstones, self._d.time_in(now - TOMBSTONE_TTL)
+            )
             return await conn.execute(
-                self._q.prune_receipts, self._d.time_in(cutoff)
+                self._q.prune_receipts, self._d.time_in(now - older_than)
             )
 
         return await self._write(work)

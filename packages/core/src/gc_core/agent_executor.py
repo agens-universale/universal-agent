@@ -86,7 +86,7 @@ from gc_core.thread_store import (
     make_message_key,
     resolve_threads_dir,
 )
-from gc_core.threads.errors import ThreadBusy
+from gc_core.threads.errors import OwnershipError, ThreadBusy
 from gc_core.threads.session_writer import LEASE_TTL
 from gc_core.tools.connect_mcp.persistent_stdio import PersistentStdioRegistry
 from gc_core.tools.connect_mcp.stream_client import (
@@ -287,6 +287,22 @@ _INBOX_MARK = "_inbox_seq"
 
 class InboxDrained(ValueError):
     """Ход без своих сообщений, а входящий поток пуст: играть нечего."""
+
+
+async def _arefuse_reset_of_a_busy_thread(store: Any, key: Any) -> None:
+    """Сброс треда (``-n``) при живой чужой аренде — ``ThreadBusy``:
+    удалить тред, который ведёт другой процесс, значило бы стереть его ход."""
+    from gc_core.execution.environment import utc_now
+    from gc_core.threads.rules import lease_expired
+
+    record = await store.get_thread(key)
+    lease = record.lease if record is not None else None
+    if lease is not None and not lease_expired(lease, utc_now()):
+        raise ThreadBusy(
+            f"тред {key.system}/{key.thread} занят: его ведёт {lease.owner}"
+            " — сброс невозможен",
+            owner=lease.owner,
+        )
 
 
 def _cancel_boundary(control: list, *, first: int) -> int | None:
@@ -567,12 +583,17 @@ class AgentExecutor:
                 generate_msg_id_sha256,
             )
 
-            await _reset_store.delete(
-                ThreadKey(
-                    system=sanitize_system_id(system_id), thread=thread_id
-                ),
-                op_id=generate_msg_id_sha256("reset"),
+            reset_key = ThreadKey(
+                system=sanitize_system_id(system_id), thread=thread_id
             )
+            await _arefuse_reset_of_a_busy_thread(_reset_store, reset_key)
+            try:
+                await _reset_store.delete(
+                    reset_key, op_id=generate_msg_id_sha256("reset")
+                )
+            except OwnershipError as exc:
+                # Тред ведёт durable-исполнитель — не сбрасывается.
+                raise ThreadBusy(str(exc)) from exc
             # Снимки баз — не забота хранилища: тем же ``reset`` ходит
             # запасной путь компакции, где сносить базы отката нельзя.
             # Пользовательский сброс знает, что чистит, и чистит здесь.
