@@ -15,6 +15,11 @@
 #     SWARM_AGENT_DEP_DIR — путь к Node.js + npm-кэш для npx MCP (read-only).
 #     SWARM_EXTRA_MOUNTS  — multi-line (newline-separated) список путей для
 #                           дополнительных read-only bind-mount'ов.
+#     SWARM_THREAD_IN_STORE=1 и SWARM_THREAD_SOCKET_DIR — тред задачи в
+#                           хранилище сервера: каталог сокета прокси треда
+#                           монтируется в /run/gc-thread, путь сокета — в
+#                           GC_THREAD_SOCKET (токен GC_THREAD_TOKEN — из
+#                           окружения сервера).
 #
 # По завершении пишет ${SWARM_THREADS_DIR}/${SWARM_ID}/completion.json
 # с полями exit_code, finished_at, error_type (см. swarm_spec.md шаг 1.1).
@@ -35,6 +40,9 @@ SWARM_LIMIT_TIMEOUT_SECONDS="${SWARM_LIMIT_TIMEOUT_SECONDS:-1800}"
 SWARM_CLI_VENV_ROOT="${SWARM_CLI_VENV_ROOT:-}"
 SWARM_AGENT_DEP_DIR="${SWARM_AGENT_DEP_DIR:-}"
 SWARM_EXTRA_MOUNTS="${SWARM_EXTRA_MOUNTS:-}"
+SWARM_THREAD_SOCKET_DIR="${SWARM_THREAD_SOCKET_DIR:-}"
+# Каталог сокета прокси треда внутри песочницы.
+THREAD_SOCKET_MOUNT="/run/gc-thread"
 
 # --- Подготовка лог-директории (канал B в spec §6.1) ---
 
@@ -165,9 +173,18 @@ if [[ "${SWARM_SANDBOX_TOOL}" == "bubblewrap" ]]; then
     --bind "${SWARM_SANDBOX_PATH}" /work
     --chdir /work
   )
+  if [[ "${SWARM_THREAD_IN_STORE:-}" == "1" && -n "${SWARM_THREAD_SOCKET_DIR}" ]]; then
+    BWRAP_CMD+=(
+      --bind "${SWARM_THREAD_SOCKET_DIR}" "${THREAD_SOCKET_MOUNT}"
+      --setenv GC_THREAD_SOCKET "${THREAD_SOCKET_MOUNT}/thread.sock"
+    )
+  fi
 else
   # Fallback: запуск без песочницы (только для dev/debug).
   BWRAP_CMD=(bash -lc "cd \"${SWARM_SANDBOX_PATH}\" && exec \"${SWARM_CLI_COMMAND}\"")
+  if [[ -n "${SWARM_THREAD_SOCKET_DIR}" ]]; then
+    export GC_THREAD_SOCKET="${SWARM_THREAD_SOCKET_DIR}/thread.sock"
+  fi
 fi
 
 # --- Сборка CLI-команды (AR-1, AR-5) ---
@@ -222,7 +239,7 @@ if [[ -n "${SWARM_TRACE_ID:-}" ]]; then
   CLI_CMD+=(--trace-id "${SWARM_TRACE_ID}")
 fi
 
-# Тред задачи в общей базе (storage в config.yml песочницы): CLI ведёт тред
+# Тред задачи в хранилище сервера (через прокси треда): CLI ведёт тред
 # (system, task_id) — тот, что читает /logs сервера и куда ложатся сообщения
 # в идущую задачу. На файлах — без треда, как раньше.
 if [[ "${SWARM_THREAD_IN_STORE:-}" == "1" ]]; then

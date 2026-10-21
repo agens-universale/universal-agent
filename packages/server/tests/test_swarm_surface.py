@@ -81,7 +81,14 @@ def stub_runner(monkeypatch):
     calls = []
 
     def fake_start(
-        swarm_cfg, *, system, task_id, payload, trace_id=None, query=None
+        swarm_cfg,
+        *,
+        system,
+        task_id,
+        payload,
+        trace_id=None,
+        query=None,
+        thread=None,
     ):
         sid = _sid(system, task_id)
         calls.append((sid, query, trace_id))
@@ -275,7 +282,14 @@ def test_concurrent_posts_start_only_once(swarm, monkeypatch):
     block, entered = threading.Event(), threading.Event()
 
     def fake_start(
-        swarm_cfg, *, system, task_id, payload, trace_id=None, query=None
+        swarm_cfg,
+        *,
+        system,
+        task_id,
+        payload,
+        trace_id=None,
+        query=None,
+        thread=None,
     ):
         sid = _sid(system, task_id)
         storage.save_swarm_meta(

@@ -16,8 +16,8 @@ from typing import TYPE_CHECKING, Any, Dict
 
 from fastapi import FastAPI, HTTPException
 from gc_core.threads.models import ThreadKey
+from gc_stores.remote.server import ThreadProxy
 
-from gc_server.config import ServerConfigError
 from gc_server.surface import http_error, install_bearer
 from gc_server.swarm import lifecycle as swarm_lifecycle
 from gc_server.swarm import runner as swarm_runner
@@ -52,6 +52,15 @@ _COMMON_STATUS = {
 }
 _ACTIVE = frozenset({"queued", "running"})
 _KILL_GRACE_S = 3.0
+#: Как часто закрываются прокси тредов закончившихся задач.
+_PROXY_POLL_S = 1.0
+#: Учётные переменные драйверов хранилищ: в песочницу не уходят.
+_DRIVER_ENV = {
+    "postgres": ("PGPASSWORD", "PGPASSFILE", "PGSERVICEFILE"),
+    "mysql": ("MYSQL_PWD",),
+    "redis": ("REDISCLI_AUTH",),
+    "s3": ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"),
+}
 
 
 def swarm_id(system: str, task_id: str) -> str:
@@ -72,10 +81,11 @@ class SwarmSurface:
             if swarm is not None
             else build_swarm_config(runtime.config.swarm_section())
         )
-        thread_store = _sandbox_thread_store(runtime)
-        if thread_store is not None:
-            self.swarm = {**self.swarm, "thread_store": thread_store}
+        self.swarm = {**self.swarm, "hidden_env": _hidden_env(runtime)}
         self.monitor: SwarmMonitor | None = None
+        #: Прокси треда идущих задач (``thread_in_store``): sid → прокси.
+        self._proxies: Dict[str, ThreadProxy] = {}
+        self._proxy_watch: asyncio.Task | None = None
         # Чтение meta → решение «отказ или старт» → запись meta и Popen —
         # одним куском: два одинаковых запроса не запускают две песочницы.
         self._start_lock = threading.Lock()
@@ -99,11 +109,24 @@ class SwarmSurface:
         monitor.start_in_background()
         self.monitor = monitor
         start_swarm_cleanup(self.swarm, logger)
+        self._proxy_watch = asyncio.get_running_loop().create_task(
+            self._awatch_proxies()
+        )
 
     async def astop(self) -> None:
         """Остановка сервера: SIGTERM группам живых песочниц, пауза, затем
         SIGKILL оставшимся; meta — ``unknown_failed`` / ``server_shutdown``.
-        Без этого живые процессы становятся сиротами."""
+        Без этого живые процессы становятся сиротами. Прокси тредов
+        закрываются последними: умирающий CLI успевает дописать ход."""
+        watch, self._proxy_watch = self._proxy_watch, None
+        if watch is not None:
+            watch.cancel()
+        try:
+            await self._astop_sandboxes()
+        finally:
+            await self._aclose_proxies(list(self._proxies))
+
+    async def _astop_sandboxes(self) -> None:
         monitor = self.monitor
         if monitor is None:
             return
@@ -226,7 +249,7 @@ class SwarmSurface:
         sid = swarm_id(key.system, key.thread)
         await self._reject_foreign_thread(key)
         if self._in_store and self._active(sid):
-            # Тред задачи в общей базе: сообщение — во входящий поток, его
+            # Тред задачи в хранилище сервера: сообщение — во входящий поток, его
             # заберёт ход gc-cli в песочнице (опросом ядра).
             receipt = await self.runtime.threads("swarm").submit(
                 key, message, op_id=op_id, source="swarm"
@@ -235,6 +258,38 @@ class SwarmSurface:
                 "status": "queued",
                 "message_seq": receipt.max_seq.get("inbox"),
             }
+        proxy = (
+            await ThreadProxy.astart(self.runtime.threads("swarm").store, key)
+            if self._in_store
+            else None
+        )
+        try:
+            self._start(key, message, trace_id, proxy)
+        except BaseException:
+            if proxy is not None:
+                await proxy.aclose()
+            raise
+        if proxy is not None:
+            await self._aclose_proxies([sid])  # прокси прошлой задачи
+            self._proxies[sid] = proxy
+            await self.runtime.threads("swarm").update_frontend(
+                key, "swarm", {"swarm_id": sid}
+            )
+        return {"status": "started", "message_seq": None}
+
+    def _start(
+        self,
+        key: ThreadKey,
+        message: Dict[str, Any],
+        trace_id: str | None,
+        proxy: ThreadProxy | None,
+    ) -> None:
+        sid = swarm_id(key.system, key.thread)
+        thread = (
+            None
+            if proxy is None
+            else swarm_runner.ThreadAccess(proxy.directory, proxy.token)
+        )
         with self._start_lock:
             existing = swarm_storage.load_swarm_meta(self.threads_dir, sid)
             _reject_existing(existing, key.system, key.thread)
@@ -247,16 +302,32 @@ class SwarmSurface:
                     payload={},
                     trace_id=trace_id,
                     query=message["content"],
+                    thread=thread,
                 )
             except Exception as e:
                 raise http_error(500, f"swarm_start_failed: {e!r}") from None
             if self.monitor is not None:
                 self.monitor.register_active(sid)
-        if self._in_store:
-            await self.runtime.threads("swarm").update_frontend(
-                key, "swarm", {"swarm_id": sid}
-            )
-        return {"status": "started", "message_seq": None}
+
+    async def _awatch_proxies(self) -> None:
+        while True:
+            await asyncio.sleep(_PROXY_POLL_S)
+            try:
+                await self._aclose_finished_proxies()
+            except Exception:
+                logger.exception("swarm: не закрылись прокси тредов")
+
+    async def _aclose_finished_proxies(self) -> None:
+        """Песочница задачи закончилась — прокси её треда закрывается."""
+        await self._aclose_proxies(
+            [sid for sid in self._proxies if not self._active(sid)]
+        )
+
+    async def _aclose_proxies(self, sids: list[str]) -> None:
+        for sid in sids:
+            proxy = self._proxies.pop(sid, None)
+            if proxy is not None:
+                await proxy.aclose()
 
     async def astatus(self, key: ThreadKey) -> Dict[str, Any] | None:
         sid = swarm_id(key.system, key.thread)
@@ -422,62 +493,35 @@ class SwarmSurface:
 
     @property
     def _in_store(self) -> bool:
-        """Тред задачи — в общей базе (песочница ведёт его там)."""
-        return "thread_store" in self.swarm
+        """Тред задачи — в хранилище тредов сервера (песочница ведёт его
+        через прокси одного треда)."""
+        return bool(self.swarm.get("thread_in_store"))
 
     def _active(self, sid: str) -> bool:
         meta = swarm_storage.load_swarm_meta(self.threads_dir, sid)
         return bool(meta) and _status_of(meta) in _ACTIVE
 
 
-def _sandbox_thread_store(runtime: ServerRuntime) -> Dict[str, Any] | None:
-    """Подключение песочницы к общей базе — только явная секция
-    ``swarm.storage`` (свои, урезанные права): агент в песочнице может
-    прочитать своё окружение, учётные данные сервера туда не уходят. Без
-    секции — тред в файлах песочницы, как раньше."""
+def _hidden_env(runtime: ServerRuntime) -> list[str]:
+    """Окружение хранилищ сервера, которого не должно быть в песочнице:
+    переменные подстановок подключения (``storage.*.dsn`` и т. п.) и учётные
+    переменные драйверов. Агент в песочнице читает своё окружение, а
+    процесс песочницы наследует окружение сервера."""
+    from gc_core.config_modules.field_meta import is_secret_name
     from gc_core.settings import settings_of
 
-    part = (runtime.config.swarm.model_extra or {}).get("storage")
-    if not part:
-        return None
-    if not isinstance(part, dict) or (
-        part.get("type") not in swarm_runner.SANDBOX_STORES
-    ):
-        raise ServerConfigError(
-            "swarm.storage: нужна сетевая база песочницы — type: "
-            + ", ".join(sorted(swarm_runner.SANDBOX_STORES))
-        )
-    kind, params = settings_of(runtime.base).storage.part("threads")
-    if kind not in swarm_runner.SANDBOX_STORES:
-        logger.warning(
-            "swarm.storage задан, а треды сервера — %s: /logs не увидит "
-            "тред песочницы; песочница остаётся на своих файлах",
-            kind,
-        )
-        return None
-    _require_server_database((kind, params), part)
-    return dict(part)
-
-
-def _require_server_database(
-    server: tuple[str, Dict[str, Any]], part: Dict[str, Any]
-) -> None:
-    """Песочница пишет тред туда, откуда его читают /logs и очередь
-    сообщений сервера: тот же тип и то же место данных, учётная запись —
-    своя. Иначе — ошибка конфигурации при старте."""
-    from gc_server.swarm import store_location
-
-    params = {k: v for k, v in part.items() if k != "type"}
-    sandbox = store_location.location(str(part["type"]), params)
-    threads = store_location.location(*server)
-    if sandbox != threads:
-        raise ServerConfigError(
-            "swarm.storage указывает не на базу тредов сервера "
-            f"(storage.threads: {store_location.describe(threads)}; "
-            f"swarm.storage: {store_location.describe(sandbox)}): /logs и "
-            "очередь сообщений не увидели бы тред песочницы. Нужны тот же "
-            "type и та же база, учётная запись — своя"
-        )
+    names: set[str] = set()
+    for dotted, source in runtime.base.provenance.items():
+        part = dotted.split(".")
+        if part[0] == "storage" and (
+            part[-1] in ("dsn", "url") or is_secret_name(part[-1])
+        ):
+            names.update(source.env)
+    storage = settings_of(runtime.base).storage
+    for part_name in ("threads", "agent"):
+        kind, _params = storage.part(part_name)
+        names.update(_DRIVER_ENV.get(kind, ()))
+    return sorted(names)
 
 
 def _swarm_meta(meta: Dict[str, Any]) -> Dict[str, Any]:

@@ -1081,50 +1081,77 @@ def test_materialize_migrates_legacy_kwargs_before_overlay(
     assert written["models"]["sample"]["main"] == {"top_p": 0.2}
 
 
-def test_sandbox_storage_keeps_secrets_out_of_the_config():
-    section, env = runner.sandbox_storage(
-        {"type": "postgres", "dsn": "postgresql://u:pw@db/a", "schema": "s"}
-    )
-    assert section == {
-        "threads": {
-            "type": "postgres",
-            "dsn": "${ENV:GC_SWARM_DB_DSN}",
-            "schema": "s",
-        }
-    }
-    assert env == {"GC_SWARM_DB_DSN": "postgresql://u:pw@db/a"}
-
-
-def test_materialized_config_carries_the_store_without_the_secret(tmp_path):
-    import yaml as _yaml
-
+def _host_with_storage(tmp_path):
     host_cfg = tmp_path / "host.yml"
-    host_cfg.write_text("agent:\n  max_steps: 3\n")
+    host_cfg.write_text(
+        "agent:\n  max_steps: 3\n"
+        "storage:\n  threads:\n    type: postgres\n"
+        "    dsn: postgresql://srv:pw@db/a\n"
+    )
     sandbox = tmp_path / "sb"
     sandbox.mkdir()
-    store = {
-        "type": "redis",
-        "url": "redis://:pw@cache:6379/0",
-        "prefix": "gc",
-    }
+    return host_cfg, sandbox
+
+
+def test_thread_in_store_config_points_at_the_proxy(tmp_path):
+    """Тред задачи в хранилище сервера — через прокси одного треда: в
+    файле песочницы только подстановки, хранилища хоста там нет."""
+    import yaml as _yaml
+
+    host_cfg, sandbox = _host_with_storage(tmp_path)
     runner._materialize_runtime_config(
-        str(host_cfg), str(sandbox), {"thread_store": store}
+        str(host_cfg), str(sandbox), {}, in_store=True
     )
     text = (sandbox / ".gc" / "config.yml").read_text()
-    written = _yaml.safe_load(text)
-    assert written["storage"]["threads"]["url"] == "${ENV:GC_SWARM_DB_URL}"
-    assert written["storage"]["threads"]["prefix"] == "gc"
-    assert "pw" not in text
+    assert _yaml.safe_load(text)["storage"] == {
+        "threads": {
+            "type": "gc_stores.remote:open",
+            "socket": "${ENV:GC_THREAD_SOCKET}",
+            "token": "${ENV:GC_THREAD_TOKEN}",
+        }
+    }
+    assert "pw@" not in text
 
 
-def test_start_swarm_passes_the_store_secret_by_environment(
+def test_files_mode_config_carries_no_storage(tmp_path):
+    import yaml as _yaml
+
+    host_cfg, sandbox = _host_with_storage(tmp_path)
+    runner._materialize_runtime_config(str(host_cfg), str(sandbox), {})
+    text = (sandbox / ".gc" / "config.yml").read_text()
+    assert "storage" not in _yaml.safe_load(text)
+
+
+def test_start_swarm_passes_the_proxy_by_environment(
     base_swarm_cfg, mock_popen
 ):
-    cfg = {
-        **base_swarm_cfg,
-        "thread_store": {"type": "postgres", "dsn": "postgresql://u:pw@db/a"},
-    }
-    runner.start_swarm_process(cfg, system="g", task_id="t", payload={})
+    access = runner.ThreadAccess(socket_dir="/tmp/gct-x", token="t" * 64)
+    runner.start_swarm_process(
+        base_swarm_cfg, system="g", task_id="t", payload={}, thread=access
+    )
     env = mock_popen.call_args.kwargs["env"]
-    assert env["GC_SWARM_DB_DSN"] == "postgresql://u:pw@db/a"
     assert env["SWARM_THREAD_IN_STORE"] == "1"
+    assert env["SWARM_THREAD_SOCKET_DIR"] == "/tmp/gct-x"
+    assert env["GC_THREAD_TOKEN"] == "t" * 64
+
+
+def test_files_mode_passes_no_thread(base_swarm_cfg, mock_popen):
+    runner.start_swarm_process(
+        base_swarm_cfg, system="g", task_id="t", payload={}
+    )
+    env = mock_popen.call_args.kwargs["env"]
+    assert "SWARM_THREAD_IN_STORE" not in env
+    assert "GC_THREAD_TOKEN" not in env
+
+
+def test_start_swarm_hides_the_server_storage_environment(
+    base_swarm_cfg, mock_popen, monkeypatch
+):
+    monkeypatch.setenv("SRV_PG_DSN", "postgresql://srv:s3cret@db/gc")
+    runner.start_swarm_process(
+        {**base_swarm_cfg, "hidden_env": ["SRV_PG_DSN"]},
+        system="g",
+        task_id="t",
+        payload={},
+    )
+    assert "SRV_PG_DSN" not in mock_popen.call_args.kwargs["env"]
