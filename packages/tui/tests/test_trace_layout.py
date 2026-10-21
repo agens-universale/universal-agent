@@ -37,6 +37,7 @@ async def test_submit_solution_note_renders_via_trace_row():
     from gc_tui.app import TuiApp
     from gc_tui.models import TraceEvent
     from gc_tui.widgets.trace_row import TraceRow
+    from rich.style import Style
 
     async with TuiApp().run_test() as pilot:
         scr = pilot.app.screen
@@ -60,7 +61,7 @@ async def test_submit_solution_note_renders_via_trace_row():
         content = note_rows[0]._content
         assert content.plain == "заметка: проверь корнер-кейсы"
         # ярлык «заметка:» прямой, текст ремарки — курсивом
-        italic = [s for s in content.spans if "italic" in str(s.style).lower()]
+        italic = [s for s in content.spans if Style.parse(str(s.style)).italic]
         assert italic and all(s.start >= len("заметка: ") for s in italic)
 
 

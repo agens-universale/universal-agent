@@ -161,6 +161,7 @@ from gc_core.tools import (
 from gc_core.tools.arguments_validation import arguments_without_service_fields
 from gc_core.tools.subagents.registry import is_subagent_tool
 from gc_core.tools.subagents.sidecar import apersist_subagent_trace
+from gc_core.tools.turn.turn_close import assistant_reply_text
 from gc_core.turn_boundary import begin_turn
 from gc_core.usage.account import CATEGORY_MAIN as USAGE_CATEGORY_MAIN
 from gc_core.usage.account import UsageAccount
@@ -3105,6 +3106,11 @@ class _AgentLoop:
 
     async def _afunction_call(self, messages, backend_mode: str) -> _Outcome:
         state = self.state
+        # До исполнения тулов: `messages` ещё ответ модели. Значение после
+        # хода — от батча, закрывшего его.
+        state.closing_reply = assistant_reply_text(
+            messages, tags=self.proj_tags
+        )
         pending_tool_calls = group_messages(messages).get("tool_calls", [])
         messages = await aprocess_tool_calls(
             messages,
