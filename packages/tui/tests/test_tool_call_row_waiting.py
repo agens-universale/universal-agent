@@ -1,6 +1,6 @@
 """ToolCallRow waiting phase (D9): • without elapsed until execute starts."""
 
-from gc_tui.palette import DIM, PULSE_SHADES
+from gc_tui.palette import DIM, RUN_COLOR
 from gc_tui.widgets.tool_call_row import ToolCallRow
 
 
@@ -17,7 +17,7 @@ def test_waiting_glyph_is_dim_bullet():
 
 def test_running_glyph_is_amber_circle():
     row = ToolCallRow(call_id="c1", label="t", target="x")
-    assert _glyph_style(row) == ("●", PULSE_SHADES[0])
+    assert _glyph_style(row) == ("●", RUN_COLOR)
 
 
 def test_interrupted_glyph_is_grey_hollow_circle():

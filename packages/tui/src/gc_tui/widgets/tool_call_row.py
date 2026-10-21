@@ -40,8 +40,8 @@ from textual.widgets import Static
 from gc_tui.models import ResultOutcome
 from gc_tui.palette import DIM as _DIM
 from gc_tui.palette import ERR as _ERR
+from gc_tui.palette import MUTED as _MUTED
 from gc_tui.palette import OK as _OK
-from gc_tui.palette import PULSE_SHADES as _PULSE_SHADES
 from gc_tui.palette import REFUSED as _REFUSED
 from gc_tui.palette import RUN_COLOR as _RUN
 from gc_tui.palette import SKILL as _SKILL
@@ -67,6 +67,9 @@ from gc_tui.widgets.static_content import update_if_changed
 # паузы в базовом амбере, без дыхания; elapsed заморожен. Не ⏸: тот числится
 # эмодзи, и часть терминалов (Windows Terminal) рисует его в две клетки.
 _PAUSE_GLYPH = "‖"
+# Полупериод мигания ● в кадрах 0.1с-тика: 5 кадров = 0.5с, как у привычного
+# мигания курсора терминала (~500 мс) — заметно, но не дёргает взгляд.
+_BLINK_HALF_PERIOD_TICKS = 5
 
 #: Итог вызова: глиф, его цвет и цвет строки `└` итога. Стоп и лимит —
 #: не сбой (K4), отказ — не сбой, а решение политики или человека: цветом
@@ -192,7 +195,7 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         self._restore_timer = None  # откат ✓ → ❐ (CopyFeedbackMixin)
         self._pulse_frame: int = 0
         self._pulse_timer = (
-            None  # собственный 0.1с-тик дыхания ● (_sync_pulse)
+            None  # собственный 0.1с-тик мигания ● (_sync_pulse)
         )
         # line-tool на самом widget'е — color: $dim каскадится в prefix-Static.
         self.add_class("line-tool")
@@ -237,7 +240,7 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         )
 
     def _sync_pulse(self) -> None:
-        """Таймер дыхания ● есть только у запущенной running-строки.
+        """Таймер мигания ● есть только у запущенной running-строки.
 
         Waiting, результат, прерывание, пауза на человеко-ожидании или
         виджет ещё не запущен (рендер истории) — без таймера. Идемпотентно.
@@ -250,7 +253,7 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
             self._pulse_timer = None
 
     def _pulse_tick(self) -> None:
-        """Кадр дыхания ●. Waiting / done / interrupted — не тикаем."""
+        """Кадр мигания ●. Waiting / done / interrupted — не тикаем."""
         # F4: freeze UI на время app-select — не тикаем анимацию (Screen._selecting).
         try:
             if getattr(self.screen, "_selecting", False):
@@ -377,8 +380,8 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
                 return CALL_WAITING_GLYPH, _DIM
             if self._paused_at is not None:
                 return _PAUSE_GLYPH, _RUN
-            pulse = _PULSE_SHADES[self._pulse_frame % len(_PULSE_SHADES)]
-            return CALL_GLYPH, pulse
+            on = self._pulse_frame // _BLINK_HALF_PERIOD_TICKS % 2 == 0
+            return CALL_GLYPH, _RUN if on else _MUTED
         glyph, style, _line_style = _OUTCOME_LOOK[self._outcome]
         return glyph, style
 

@@ -168,19 +168,6 @@ VALIDATING_SHADES = [
     "#747e8b",
     "#69727f",
 ]
-# Пульс running-глифа ●: амбер, пик RUN_COLOR.
-PULSE_SHADES = [
-    "#8a6a3a",
-    "#977448",
-    "#a47f55",
-    "#b18a62",
-    "#c4986b",
-    RUN_COLOR,
-    "#c4986b",
-    "#b18a62",
-    "#a47f55",
-    "#977448",
-]
 
 
 # ── Тема auto: палитра от фона терминала ───────────────────────────────────
@@ -208,7 +195,6 @@ _RAMP_PEAKS = {
     "GLOW_SHADES": "#f0c896",
     "PROCESSING_SHADES": DEEP_DIM,
     "VALIDATING_SHADES": CODE_BLOCK,
-    "PULSE_SHADES": RUN_COLOR,
 }
 _FIXED = {
     name: globals()[name]

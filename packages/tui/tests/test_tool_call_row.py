@@ -452,36 +452,32 @@ def test_pause_resume_idempotent(monkeypatch):
     assert row._elapsed_s() == 10
 
 
-def test_running_glyph_pulses_color():
-    """● статичен по форме, но цвет глифа в prefix меняется между кадрами пульса."""
+def _glyph_color(row, frame: int) -> str:
+    row._pulse_frame = frame
+    p = row._render_prefix()
+    return next(
+        str(s.style) for s in p.spans if "●" in p.plain[s.start : s.end]
+    )
+
+
+def test_running_glyph_blinks_between_run_and_muted():
+    """● мигает: ровно два состояния RUN_COLOR <-> MUTED, без полутонов."""
+    from gc_tui.palette import MUTED, RUN_COLOR
     from gc_tui.widgets.tool_call_row import ToolCallRow
 
     row = ToolCallRow(call_id="c1", label="t", target="")
-    row._pulse_frame = 0
-    p0 = row._render_prefix()
-    row._pulse_frame = 3
-    p3 = row._render_prefix()
-    assert "●" in p0.plain and "●" in p3.plain
-    assert [str(s.style) for s in p0.spans] != [str(s.style) for s in p3.spans]
+    assert {_glyph_color(row, f) for f in range(40)} == {RUN_COLOR, MUTED}
 
 
-def test_pulse_cycle_length_is_ten():
-    """Цикл пульса ● = 10 кадров на 0.1с-тике (плавное дыхание ≈1.0с, 10fps):
-    frame10 возвращается к frame0, frame5 (пик) внутри цикла отличается."""
+def test_blink_half_period_is_500ms_on_100ms_tick():
+    """Полупериод 5 кадров по 0.1с = 0.5с: включён, выключен, снова."""
+    from gc_tui.palette import MUTED, RUN_COLOR
     from gc_tui.widgets.tool_call_row import ToolCallRow
 
     row = ToolCallRow(call_id="c1", label="t", target="")
-
-    def glyph_color(frame: int) -> str:
-        row._pulse_frame = frame
-        p = row._render_prefix()
-        return next(
-            str(s.style) for s in p.spans if "●" in p.plain[s.start : s.end]
-        )
-
-    c0 = glyph_color(0)
-    assert glyph_color(10) == c0  # цикл = 10 → frame10 == frame0
-    assert glyph_color(5) != c0  # пик цикла отличается
+    assert [_glyph_color(row, f) for f in (0, 4)] == [RUN_COLOR] * 2
+    assert [_glyph_color(row, f) for f in (5, 9)] == [MUTED] * 2
+    assert [_glyph_color(row, f) for f in (10, 14)] == [RUN_COLOR] * 2
 
 
 def test_pulse_tick_advances_pulse_while_running():

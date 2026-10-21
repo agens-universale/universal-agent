@@ -55,7 +55,6 @@ _RAMPS = (
     "GLOW_SHADES",
     "PROCESSING_SHADES",
     "VALIDATING_SHADES",
-    "PULSE_SHADES",
 )
 _TINTED = (
     "FOCUS_BG",
@@ -119,11 +118,10 @@ def test_apply_background_sets_bg_everywhere():
 
 def test_apply_background_recomputes_surfaces():
     palette.apply_background((0x21, 0x27, 0x33))
-    from gc_tui.palette import BAND_BG, DIFF_ADD_BG, PULSE_SHADES
+    from gc_tui.palette import BAND_BG, DIFF_ADD_BG
 
     assert BAND_BG == palette._mix("#212733", palette.INK, 0.075)
     assert DIFF_ADD_BG == "#385551"  # #253f37 + (#212733 − #0E1119)
-    assert PULSE_SHADES != sync_guards._PREVIOUS_RAMPS["PULSE_SHADES"]
     assert palette.css_variables()["band-bg"] == BAND_BG
 
 
