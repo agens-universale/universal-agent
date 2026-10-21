@@ -114,7 +114,7 @@ def test_stop_and_replace_releases_after_stop():
     runner = _Runner(running=True)
     screen = SimpleNamespace(
         app=SimpleNamespace(active_runner=runner, last_stop_requested=False),
-        _queued_replies=lambda: [],
+        _withdraw_queue=lambda runner: [],
         _return_queue_to_input=lambda replies: None,
     )
 

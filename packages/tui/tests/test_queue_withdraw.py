@@ -351,7 +351,9 @@ async def test_stop_returns_only_withdrawn_admitted_stays(tmp_path):
         pilot.app.screen._poll_active()
         await pilot.pause()
         assert _inp(pilot).text == "первое"
-        assert _texts(pilot) == ["второе"]
+        trace = pilot.app.screen.query_one("#trace")
+        (left,) = trace.query(UserReplyContainer)
+        assert (left._text, left.state) == ("второе", "pending")
         records = _pending_records(tmp_path)
         assert [r["content"] for r in records] == ["второе"]
 
@@ -422,3 +424,39 @@ async def test_turn_end_returns_unadmitted_queue_to_input(tmp_path):
         assert _inp(pilot).text == "второе"
         assert _queued(pilot) == []
         assert _pending_records(tmp_path) == []
+
+
+@pytest.mark.asyncio
+async def test_turn_end_withdraws_from_core_before_returning(tmp_path):
+    """Сообщение во время `/compact` ядро держит и после хода: в поле
+    оно идёт, только если снято у ядра — иначе уйдёт и следующим
+    прогоном."""
+    async with _app(tmp_path / "threads").run_test() as pilot:
+        scr = pilot.app.screen
+        runner = await _two_queued(pilot, tmp_path)
+        runner.running = False
+        scr._poll_active()
+        await pilot.pause()
+        assert runner.withdrawn == [m["id"] for m in runner.added]
+        assert _inp(pilot).text == "первое\n\nвторое"
+        assert _queued(pilot) == []
+        assert _pending_records(tmp_path) == []
+
+
+@pytest.mark.asyncio
+async def test_turn_end_not_withdrawn_becomes_pending(tmp_path):
+    async with _app(tmp_path / "threads").run_test() as pilot:
+        scr = pilot.app.screen
+        runner = await _two_queued(pilot, tmp_path, admitted=True)
+        runner.running = False
+        scr._poll_active()
+        await pilot.pause()
+        assert _inp(pilot).text == ""
+        trace = scr.query_one("#trace")
+        replies = list(trace.query(UserReplyContainer))
+        assert [r.state for r in replies] == ["pending", "pending"]
+        assert not any(_hint_shown(r) for r in replies)
+        assert len(_pending_records(tmp_path)) == 2
+        scr._poll_active()
+        await pilot.pause()
+        assert len(runner.withdrawn) == 2

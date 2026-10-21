@@ -3062,6 +3062,18 @@ class TraceScreen(Screen):
 
         return [w for w in self._pending_user_widgets.values() if is_queued(w)]
 
+    def _withdraw_queue(self, runner) -> list:
+        """Снять очередь у ядра (стоп, конец хода): снятые — вернуть в
+        поле (`_return_queue_to_input`); не снятое ядро уже взяло или
+        возьмёт — реплика `pending`, без вида очереди, её сверит тред."""
+        withdrawn = []
+        for reply in self._queued_replies():
+            if runner.withdraw_message(reply.message_id):
+                withdrawn.append(reply)
+            else:
+                reply.set_state("pending")
+        return withdrawn
+
     def _return_queue_to_input(self, replies: list) -> None:
         """Реплики, которые ядро уже не впустит (снятые при стопе, остаток
         в конце хода), — назад в поле: тексты по порядку очереди через
@@ -5513,11 +5525,12 @@ class TraceScreen(Screen):
         if not _frozen:
             self._poll_trace_tail()
             self._drain_trace_notes()
-            # Ход кончился, хвост дочитан: впущенное уже сверено, остальное
-            # ядро не возьмёт. После стопа раннера нет: снятое вернул стоп,
-            # впущенное ждёт своей сверки.
+            # Ход кончился, хвост дочитан: впущенное уже сверено. Остальное
+            # ядро может держать до следующего прогона (сообщение во время
+            # `/compact`) — в поле только снятое у него. После стопа
+            # раннера нет: очередь разобрал стоп.
             if runner is not None and not is_running:
-                self._return_queue_to_input(self._queued_replies())
+                self._return_queue_to_input(self._withdraw_queue(runner))
 
     def _poll_trace_tail(self) -> None:
         """Дочитать и отрисовать хвост записей активного треда."""
@@ -7641,11 +7654,7 @@ class TraceScreen(Screen):
         if runner is not None:
             # До стопа: снять очередь под замком ядра. Впущенное остаётся
             # репликой и сверится по треду — его текст в поле не идёт.
-            withdrawn = [
-                r
-                for r in self._queued_replies()
-                if runner.withdraw_message(r.message_id)
-            ]
+            withdrawn = self._withdraw_queue(runner)
             # Стоп ЖИВОГО прогона → терминальный статус «stopped». Флаг app-уровня
             # (не runner.stop_requested): ниже active_runner обнуляется, и
             # спадающий фронт в _poll_active уже не увидит этот runner.
