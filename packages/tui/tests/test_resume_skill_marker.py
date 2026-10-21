@@ -1,21 +1,21 @@
-"""Проверяет, что [skill]-маркер монтируется ровно один раз:
-- на resume/rebuild пути (live=False) — _render_record монтирует маркер;
-- на live-пути (live=True)  — _render_record НЕ монтирует маркер
-  (он уже смонтирован delivery-флоу через _mount_user_reply → _flush_skill_marker);
-- mid-run доставка (display_content="", live=False) — только маркер, без реплики юзера.
+"""Резюм треда: скилл — именем в реплике (спека P3 §2.3, §10 п. 5).
+
+Имя — запускаемый вид, как в палитре: короткое, если ведёт ровно к этому
+скиллу и не занято командой, иначе полный id; холодный кэш — короткое.
+Строки `[skill]` нет ни на резюме, ни вживую.
 """
 
 from gc_testkit.tui_support import tui_settings
 import pytest
 
 
-def _user_rec_with_skill(skill_id: str = "qa-x") -> dict:
+def _user_rec_with_skill(skill_id: str, text: str = "просто запрос") -> dict:
     """Запись-пользователь с skill_loaded — как сохраняется в .jsonl."""
     return {
         "payload": {
             "role": "user",
-            "content": "просто запрос",
-            "display_content": "просто запрос",
+            "content": "<skill>\n" + text,
+            "display_content": text,
             "skill_loaded": skill_id,
         },
         "seq": 1,
@@ -23,112 +23,71 @@ def _user_rec_with_skill(skill_id: str = "qa-x") -> dict:
     }
 
 
-def _midrun_delivery_rec(skill_id: str = "qa-x") -> dict:
-    """Mid-run доставка: display_content="" — реплику не рисуем, только маркер."""
-    return {
-        "payload": {
-            "role": "user",
-            "content": "<skill>\nинструкция",
-            "display_content": "",
-            "skill_loaded": skill_id,
-        },
-        "seq": 1,
-        "ts": "2026-06-26T00:00:00+00:00",
-    }
+def _replies(scr) -> list[str]:
+    out = []
+    for w in scr.query("#trace UserReplyContainer"):
+        line = w._reply_lines(80)[0]
+        out.append((line.prefix + line.body).plain)
+    return out
 
 
-def _count_skill_markers(scr) -> int:
-    """Считает [skill]-маркеры в #trace (line-meta-строки с 'загружен')."""
-    texts = [str(w.render()) for w in scr.query("#trace Static")]
-    return sum(1 for t in texts if "загружен" in t)
+def _trace_has(scr, needle: str) -> bool:
+    return any(needle in str(w.render()) for w in scr.query("#trace Static"))
 
 
-def _count_user_replies(scr) -> int:
-    """Считает UserReplyContainer в #trace."""
-    return len(list(scr.query("#trace UserReplyContainer")))
-
-
-@pytest.mark.asyncio
-async def test_resume_path_mounts_exactly_one_marker(tmp_path):
-    """На rebuild (live=False) _render_record монтирует [skill]-маркер."""
-    pytest.importorskip("textual")
+def _app(tmp_path):
     from gc_tui.app import TuiApp
 
-    app = TuiApp(
+    return TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
         settings=tui_settings({"agent.model": "M"}),
     )
-    async with app.run_test() as pilot:
-        scr = pilot.app.screen
-        scr._render_records([_user_rec_with_skill("qa-x")], live=False)
-        await pilot.pause()
-        assert _count_skill_markers(scr) == 1, (
-            "На resume-пути должен быть ровно один [skill]-маркер"
-        )
 
 
 @pytest.mark.asyncio
-async def test_live_path_mounts_no_marker(tmp_path):
-    """На live-пути (live=True) _render_record НЕ монтирует [skill]-маркер
-    (delivery-флоу уже смонтировал его сам)."""
+@pytest.mark.parametrize("live", [False, True])
+async def test_skill_reply_uses_short_name(tmp_path, live):
     pytest.importorskip("textual")
-    from gc_tui.app import TuiApp
-
-    app = TuiApp(
-        threads_dir=str(tmp_path),
-        system="cli",
-        settings=tui_settings({"agent.model": "M"}),
-    )
-    async with app.run_test() as pilot:
+    async with _app(tmp_path).run_test() as pilot:
         scr = pilot.app.screen
-        scr._render_records([_user_rec_with_skill("qa-x")], live=True)
+        scr._skills_cache = [{"id": "supercoder:brainstorming"}]
+        rec = _user_rec_with_skill("supercoder:brainstorming", "придумай")
+        scr._render_records([rec], live=live)
         await pilot.pause()
-        assert _count_skill_markers(scr) == 0, (
-            "На live-пути _render_record не должен монтировать [skill]-маркер"
-        )
+        assert _replies(scr) == ["› /brainstorming придумай"]
+        assert not _trace_has(scr, "загружен")
 
 
 @pytest.mark.asyncio
-async def test_midrun_delivery_resume_marker_only(tmp_path):
-    """Mid-run доставка (display_content="", live=False):
-    на resume — ровно один [skill]-маркер и ни одной UserReplyContainer."""
+async def test_ambiguous_short_name_shows_full_id(tmp_path):
     pytest.importorskip("textual")
-    from gc_tui.app import TuiApp
-
-    app = TuiApp(
-        threads_dir=str(tmp_path),
-        system="cli",
-        settings=tui_settings({"agent.model": "M"}),
-    )
-    async with app.run_test() as pilot:
+    async with _app(tmp_path).run_test() as pilot:
         scr = pilot.app.screen
-        scr._render_records([_midrun_delivery_rec("qa-x")], live=False)
+        scr._skills_cache = [{"id": "a:dup"}, {"id": "b:dup"}]
+        scr._render_records([_user_rec_with_skill("a:dup", "x")])
         await pilot.pause()
-        assert _count_skill_markers(scr) == 1, (
-            "Mid-run доставка на resume: должен быть ровно один [skill]-маркер"
-        )
-        assert _count_user_replies(scr) == 0, (
-            "Mid-run доставка на resume: UserReplyContainer не должен монтироваться"
-        )
+        assert _replies(scr) == ["› /a:dup x"]
 
 
 @pytest.mark.asyncio
-async def test_midrun_delivery_live_no_marker(tmp_path):
-    """Mid-run доставка (display_content="", live=True):
-    на live-пути _render_record НЕ монтирует [skill]-маркер."""
+async def test_cold_cache_shows_short_name(tmp_path):
     pytest.importorskip("textual")
-    from gc_tui.app import TuiApp
-
-    app = TuiApp(
-        threads_dir=str(tmp_path),
-        system="cli",
-        settings=tui_settings({"agent.model": "M"}),
-    )
-    async with app.run_test() as pilot:
+    async with _app(tmp_path).run_test() as pilot:
         scr = pilot.app.screen
-        scr._render_records([_midrun_delivery_rec("qa-x")], live=True)
+        scr._skills_cache = None
+        scr._render_records([_user_rec_with_skill("a:dup", "x")])
         await pilot.pause()
-        assert _count_skill_markers(scr) == 0, (
-            "Mid-run доставка на live-пути: [skill]-маркер не должен монтироваться"
-        )
+        assert _replies(scr) == ["› /dup x"]
+
+
+@pytest.mark.asyncio
+async def test_midrun_delivery_resume_is_skill_only_reply(tmp_path):
+    pytest.importorskip("textual")
+    async with _app(tmp_path).run_test() as pilot:
+        scr = pilot.app.screen
+        scr._skills_cache = [{"id": "qa-x"}]
+        scr._render_records([_user_rec_with_skill("qa-x", "")])
+        await pilot.pause()
+        assert _replies(scr) == ["› /qa-x"]
+        assert not _trace_has(scr, "загружен")

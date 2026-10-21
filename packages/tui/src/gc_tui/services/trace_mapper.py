@@ -225,8 +225,10 @@ def map_message(
         # технического разбора: скилл-сообщения не technical.
         if "display_content" in msg:
             disp = (msg.get("display_content") or "").strip()
-            if not disp:
-                return None  # mid-run доставка → реплику не рисуем
+            skill = _str_or_none(msg.get("skill_loaded")) or None
+            if not disp and skill is None:
+                return None  # пустая реплика без скилла — не рисуем
+            # Mid-run доставка скилла без текста — реплика из одного имени.
             return TraceEvent(
                 no=no,
                 event_ts_utc_iso=ts,
@@ -236,6 +238,7 @@ def map_message(
                 full_payload=msg,
                 message_id=mid,
                 attachments=tuple(attachments_of(msg)),
+                skill=skill,
             )
         content = msg.get("content")
         if isinstance(content, str) and content.strip():

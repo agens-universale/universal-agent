@@ -17,6 +17,7 @@ from textual.widget import Widget
 from gc_tui.palette import ACCENT as _ACCENT
 from gc_tui.palette import DIM as _DIM
 from gc_tui.palette import ERR as _ERR_RED
+from gc_tui.palette import SKILL as _SKILL
 from gc_tui.services.image_chips import chip_of, chip_spans
 from gc_tui.services.path_display import display_path, fit_path
 from gc_tui.services.trace_render import (
@@ -32,6 +33,9 @@ from gc_tui.widgets.trace_row import TraceRow
 
 #: Источник картинки из буфера обмена (`Attachment.source`) и его подпись в ленте.
 _FROM_CLIPBOARD = "из буфера"
+
+#: Следствие реплики: скилл не найден, сообщение ушло без него (P3 §2.3).
+_SKILL_MISSING = "✗ скилл {name} не найден — отправлено без него"
 
 
 def _image_style(color: Optional[str], att: Attachment) -> Style:
@@ -285,6 +289,10 @@ class UserReplyContainer(_ImageLinksMixin, ClickModelMixin, Widget):
     продолжение — под текстом, в том числе при переносе (`_WrappedReply`).
     Состояния `normal` / `pending` выглядят одинаково; `failed` — маркер
     цветом ошибки.
+
+    ``skill`` — запускаемое имя скилла (`skill_input_name`): первым словом
+    после маркера, `/имя` цветом `SKILL`; ``skill_error`` — скилл не найден:
+    имя цветом текста и следствие `└ ✗ скилл … не найден …` (спека P3 §2.3).
     """
 
     DEFAULT_CSS = """
@@ -306,16 +314,24 @@ class UserReplyContainer(_ImageLinksMixin, ClickModelMixin, Widget):
         event_no: int = 0,
         state: _State = "normal",
         images: tuple[Attachment, ...] = (),
+        skill: str | None = None,
+        skill_error: bool = False,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
         self._text = text
+        self._skill = skill
+        self._skill_error = skill_error
         self._event_no = event_no
         self._state: _State = state
         # Картинки реплики: плашки в тексте и подстроки под ним (визуальный контракт §3).
         self._images: tuple[Attachment, ...] = tuple(images)
         self._consequences: list[Text] = []
         self._band = _ReplyBand(self)
+        if skill is not None and skill_error:
+            self.add_consequence(
+                Text(_SKILL_MISSING.format(name=skill), style=_ERR_RED)
+            )
 
     def compose(self):
         yield self._band
@@ -358,9 +374,25 @@ class UserReplyContainer(_ImageLinksMixin, ClickModelMixin, Widget):
     def _reply_lines(self, width: int) -> list[_ReplyLine]:
         color = _ERR_RED if self._state == "failed" else _ACCENT
         lead = Text(USER_PREFIX, style=Style(color=color))
-        return _build_lines(
+        lines = _build_lines(
             self._text, self._images, self._hover_image_id, lead, width
         )
+        if self._skill is None:
+            return lines
+        first = lines[0]
+        body = self._skill_head().append_text(first.body)
+        return [first._replace(body=body), *lines[1:]]
+
+    def _skill_head(self) -> Text:
+        """`/имя ` перед текстом первой строки; без текста — только имя."""
+        head = Text()
+        head.append(
+            "/" + self._skill,
+            style="" if self._skill_error else Style(color=_SKILL),
+        )
+        if self._text:
+            head.append(" ")
+        return head
 
     def _repaint_images(self) -> None:
         self._band.refresh()

@@ -18,6 +18,7 @@ from gc_core.constants.tool_display import (
 
 from gc_tui.models import TraceEvent
 from gc_tui.services.duration_format import format_compact_int
+from gc_tui.services.skill_view import skill_input_name
 from gc_tui.services.trace_retention import (
     apply_payload_retention,
     filter_sidecar_to_parents,
@@ -357,7 +358,11 @@ def _dispatch_readonly(
     if ev.kind == "user":
         mount_target.mount(
             UserReplyContainer(
-                ev.summary, event_no=ev.no, images=ev.attachments
+                ev.summary,
+                event_no=ev.no,
+                images=ev.attachments,
+                # Каталога у превью нет — короткое имя (спека P3 §2.3).
+                skill=skill_input_name(ev.skill) if ev.skill else None,
             )
         )
     elif ev.kind == "agent":
@@ -488,24 +493,6 @@ def _dispatch_readonly(
             )
 
 
-def _mount_skill_marker_readonly(
-    mount_target, skill_id: str, event_no: int
-) -> None:
-    """[skill] <id> загружен — паритет с MainScreen._mount_skill_marker (read-only).
-    skill_loaded ставится только когда скилл реально загрузился → всегда «загружен»."""
-    from gc_tui.widgets.trace_row import TraceRow
-
-    row = TraceRow(
-        prefix="[skill] ",
-        content=f"`{skill_id}` загружен",
-        kind_class="line-meta",
-        event_no=event_no,
-        focusable=False,
-    )
-    row.add_class("skill-marker")
-    mount_target.mount(row)
-
-
 def _render_record_readonly(
     mount_target,
     rec: dict,
@@ -527,17 +514,9 @@ def _render_record_readonly(
     if not isinstance(payload, dict):
         return no
     ev = map_message(payload, no=no, ts=rec.get("ts", ""), context=context)
-    if ev is not None:
-        apply_payload_retention(ev, seg_in_window=in_window)
-    # skill_loaded извлекаем ДО early-return: mid-run доставка (display_content="")
-    # даёт ev=None, но маркер [skill] всё равно нужен в превью.
-    sk = payload.get("skill_loaded")
     if ev is None:
-        if sk:
-            _mount_skill_marker_readonly(
-                mount_target, sk, no
-            )  # mid-run: только маркер
         return no
+    apply_payload_retention(ev, seg_in_window=in_window)
     no += 1
     if ev.hidden:
         return no
@@ -549,8 +528,6 @@ def _render_record_readonly(
         mcp_servers=mcp_servers,
         questions=questions,
     )
-    if sk:
-        _mount_skill_marker_readonly(mount_target, sk, no)  # после реплики
     return no
 
 
