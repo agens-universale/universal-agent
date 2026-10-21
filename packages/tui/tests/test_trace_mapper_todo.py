@@ -31,7 +31,7 @@ def test_call_maps_to_todo_kind_with_checklist():
     assert ev.kind == "todo"
     assert ev.title == "session_todo"
     lines = ev.summary.splitlines()
-    assert lines[0] == "чек-лист 1/3"
+    assert lines[0] == "Чек-лист 1/3"
     assert lines[1] == "  ✓ Изучить код"
     assert lines[2] == "  → Написать тест"
     assert lines[3] == "  ○ Прогнать pytest"
@@ -42,7 +42,7 @@ def test_call_maps_to_todo_kind_with_checklist():
 def test_empty_list_maps_to_cleared():
     ev = map_message(_call({"todos": []}), no=1, ts="t")
     assert ev.kind == "todo"
-    assert ev.summary == "чек-лист очищен"
+    assert ev.summary == "Чек-лист очищен"
 
 
 def test_partially_broken_list_is_not_a_checklist():
@@ -96,11 +96,14 @@ def test_output_suppressed_by_tool_key_chat_completions():
     assert ev is None
 
 
-def test_render_content_first_line_combines_title_and_summary():
-    # Контракт main.py: content = f"{title}   {summary}".
+def test_header_has_no_wire_name():
+    # Шапка чек-листа — без имени тула (смоук P3a): «Чек-лист K/M».
+    from gc_tui.services.todo_render import build_main_todo_lines
+
     ev = map_message(_call(ARGS), no=1, ts="t")
-    content = f"{ev.title}   {ev.summary}"
-    assert content.splitlines()[0] == "session_todo   чек-лист 1/3"
+    header = build_main_todo_lines(ARGS["todos"])[0]
+    assert header.content.plain == ev.summary.splitlines()[0]
+    assert "session_todo" not in header.content.plain
 
 
 def test_garbage_arguments_do_not_map_to_todo_kind():

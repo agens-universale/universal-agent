@@ -592,7 +592,7 @@ def test_todo_event_renders_rich_text_with_glyph_colors():
         event_ts_utc_iso="",
         kind="todo",
         title="session_todo",
-        summary="чек-лист 1/2",
+        summary="Чек-лист 1/2",
         full_payload=payload,
         call_id="c1",
         tool_name="session_todo",
@@ -610,7 +610,7 @@ def test_todo_event_renders_rich_text_with_glyph_colors():
     rows = mounted[0]._rows
     header = rows[0]._content
     assert isinstance(header, RichText)
-    assert header.plain == "session_todo   чек-лист 1/2"
+    assert header.plain == "Чек-лист 1/2"
     # Текст пункта — в content-колонке, отступ+глиф — в prefix: перенос
     # длинного пункта выравнивается под началом текста.
     assert rows[1]._prefix.plain == "  ✓ "

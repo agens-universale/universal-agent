@@ -645,7 +645,7 @@ _TODO_GLYPHS = {"completed": "✓", "in_progress": "→", "pending": "○"}
 
 
 def _todo_checklist_summary(todos: list) -> str:
-    """Первая строка `чек-лист K/M`, далее пункты ✓/→/○. Пустой список — «очищен»."""
+    """Первая строка `Чек-лист K/M`, далее пункты ✓/→/○. Пустой список — «очищен»."""
     lines: list[str] = []
     done = 0
     for item in todos:
@@ -659,8 +659,8 @@ def _todo_checklist_summary(todos: list) -> str:
             done += 1
         lines.append(f"  {glyph} {content}")
     if not lines:
-        return "чек-лист очищен"
-    return "\n".join([f"чек-лист {done}/{len(lines)}", *lines])
+        return "Чек-лист очищен"
+    return "\n".join([f"Чек-лист {done}/{len(lines)}", *lines])
 
 
 def _looks_like_error(output: Any) -> bool:
