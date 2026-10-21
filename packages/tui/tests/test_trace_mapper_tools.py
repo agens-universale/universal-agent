@@ -231,9 +231,10 @@ def test_function_call_output_command_moderation_block_is_error_not_agent():
         ts="t",
     )
     assert ev.kind == "error"
-    assert (
-        ev.summary
-        == "Judge is unavailable; fail-closed policy blocks execution."
+    assert ev.result_outcome == "refused"
+    assert ev.summary == (
+        "модерация команд: "
+        "Judge is unavailable; fail-closed policy blocks execution."
     )
 
 
@@ -264,7 +265,8 @@ def test_function_call_output_read_guard_block_is_error():
         ts="t",
     )
     assert ev.kind == "error"
-    assert ev.summary == "path is within denied root: /etc"
+    assert ev.result_outcome == "refused"
+    assert ev.summary == "защита путей: path is within denied root: /etc"
 
 
 def _error_summary(error: dict) -> str:
@@ -294,7 +296,7 @@ def test_error_summary_prefers_human_reason_over_model_instruction():
                 "guidance": "Do NOT retry the same call.",
             }
         )
-        == "Write not permitted in the current permission mode."
+        == "режим: запись запрещена"
     )
     assert (
         _error_summary(

@@ -531,11 +531,7 @@ def _dispatch_readonly(
     elif ev.kind in ("result", "error"):
         row = calls.get(ev.call_id) if ev.call_id else None
         if row is not None:
-            row.set_result(
-                summary=ev.summary,
-                error=(ev.kind == "error"),
-                halted=ev.halted,
-            )
+            row.set_result(summary=ev.summary, outcome=ev.result_outcome)
         elif ev.kind == "error":
             mount_target.mount(
                 build_standalone_row(
@@ -561,7 +557,7 @@ def _dispatch_readonly(
         # function_call_output.
         err_row = calls.get(ev.call_id) if ev.call_id else None
         if err_row is not None:
-            err_row.set_result(summary=ev.summary, error=True)
+            err_row.set_result(summary=ev.summary, outcome="error")
             calls.pop(ev.call_id, None)
         else:
             mount_target.mount(
@@ -779,15 +775,14 @@ def merge_nested_readonly(
         tool_call_id="",
         ok=True,
         error_brief=None,
-        halted=False,
+        outcome=None,
         **_kw,
     ):
         row = nested_rows.get(tool_call_id)
         if row is not None:
             row.set_result(
                 summary="" if ok else (error_brief or "error"),
-                error=not ok,
-                halted=halted,
+                outcome=outcome or ("ok" if ok else "error"),
             )
 
     def _prose(*, parent_call_id, prose, **_kw):

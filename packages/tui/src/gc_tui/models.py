@@ -20,6 +20,9 @@ Kind = Literal[
     "todo",
 ]
 Status = Literal["running", "stopped", "completed", "failed"]
+#: Итог вызова в ленте: успех `✓`, сбой `✕`, стоп или лимит `■`, отказ
+#: политики, режима, судьи или человека `⦸` (спека P3 §10).
+ResultOutcome = Literal["ok", "error", "halted", "refused"]
 
 
 @dataclass
@@ -103,9 +106,16 @@ class TraceEvent:
     # Картинки реплики (kind="user"): вложения сообщения, а у ответа на
     # turn_ask_human — из следующего технического сообщения (дизайн картинок §20.3).
     attachments: tuple[Attachment, ...] = ()
-    # Результат вызова — стоп пользователя или лимит, а не сбой тула: строка
-    # вызова `■` и серое `└` (K4), не `✕` (только у kind="error").
-    halted: bool = False
+    # Не-сбой среди kind="error": стоп или лимит (`halted`), отказ
+    # (`refused`). Ставит маппер; None — по kind (`result_outcome`).
+    outcome: Optional[ResultOutcome] = None
     # Скилл реплики (kind="user"): id из `skill_loaded` записи — рисуется
     # именем первым словом реплики (спека P3 §2.3).
     skill: Optional[str] = None
+
+    @property
+    def result_outcome(self) -> ResultOutcome:
+        """Итог вызова для строки ленты (у результата и ошибки)."""
+        if self.outcome is not None:
+            return self.outcome
+        return "error" if self.kind == "error" else "ok"

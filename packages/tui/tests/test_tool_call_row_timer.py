@@ -31,7 +31,7 @@ async def test_live_row_has_timer():
 async def test_result_stops_timer():
     async with _make_app().run_test() as pilot:
         row = pilot.app.query_one(ToolCallRow)
-        row.set_result(summary="ok", error=False)
+        row.set_result(summary="ok", outcome="ok")
         await pilot.pause()
         assert row._pulse_timer is None
 
@@ -49,7 +49,7 @@ async def test_interrupt_stops_timer():
 async def test_finished_before_mount_has_no_timer():
     def factory():
         row = ToolCallRow(call_id="c1", label="t", target="")
-        row.set_result(summary="ok", error=False)
+        row.set_result(summary="ok", outcome="ok")
         return row
 
     async with _make_app(factory).run_test() as pilot:

@@ -392,7 +392,7 @@ async def test_confirm_ctrl_click_not_open_tool_detail(tmp_path):
         scr._task_events = _tool_call_events()
         row = ToolCallRow(call_id="c1", label="exec_command", target="curl")
         await scr.query_one("#trace").mount(row)
-        row.set_result(summary="ok", error=False)
+        row.set_result(summary="ok", outcome="ok")
         await pilot.pause(0.05)
 
         scr.show_confirm_banner("Команда", "Разрешить?", [("Command", "curl")])
@@ -438,7 +438,7 @@ async def test_ctrl_click_opens_tool_detail_without_confirm(tmp_path):
         scr._task_events = _tool_call_events()
         row = ToolCallRow(call_id="c1", label="exec_command", target="curl")
         await scr.query_one("#trace").mount(row)
-        row.set_result(summary="ok", error=False)
+        row.set_result(summary="ok", outcome="ok")
         await pilot.pause(0.05)
 
         assert not scr._confirm_active

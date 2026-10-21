@@ -665,7 +665,7 @@ def test_readonly_error_msg_finalizes_its_call_row():
     assert len(mounted) == 1, "ошибка не должна добавлять отдельную [!]-строку"
     row = mounted[0]
     assert isinstance(row, ToolCallRow)
-    assert row._is_error is True and row._result is not None
+    assert row._outcome == "error" and row._result is not None
 
 
 def test_readonly_error_msg_without_call_row_still_shown():

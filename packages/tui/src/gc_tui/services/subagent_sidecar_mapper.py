@@ -24,8 +24,8 @@ from gc_core.execution.progress import (
     tool_args_summary,
 )
 
-from gc_tui.models import TraceEvent
-from gc_tui.services.trace_mapper import halt_summary
+from gc_tui.models import ResultOutcome, TraceEvent
+from gc_tui.services.trace_mapper import result_stop
 
 CHILD_SUMMARY_LABEL = "контекст субагента сжат"
 
@@ -49,8 +49,8 @@ class SidecarNestedAction:
     prose: Optional[str] = None
     ok: Optional[bool] = None
     error_brief: Optional[str] = None
-    # Стоп пользователя или лимит ребёнка — не сбой: строка `■` (K4).
-    halted: bool = False
+    # Не-сбой ребёнка: стоп или лимит (`■`), отказ (`⦸`); None — по `ok`.
+    outcome: Optional[ResultOutcome] = None
     todo_items: Optional[List[Dict[str, str]]] = None
     # Картинки реплики человека ребёнку (``mount_nested_user``).
     images: tuple[Attachment, ...] = ()
@@ -133,7 +133,7 @@ def plan_sidecar_nested_actions(
                 )
             elif kind == "error":
                 call_id = payload.get("call_id")
-                halted = halt_summary(payload.get("output"))
+                stop = result_stop(payload.get("output"))
                 _ok, brief = parse_tool_result_status(payload.get("output"))
                 if brief is None and isinstance(payload.get("output"), str):
                     brief = payload["output"].strip()[:120] or None
@@ -143,8 +143,8 @@ def plan_sidecar_nested_actions(
                         parent_call_id=pid,
                         tool_call_id=str(call_id) if call_id else "",
                         ok=False,
-                        error_brief=halted or brief,
-                        halted=halted is not None,
+                        error_brief=stop[1] if stop else brief,
+                        outcome=stop[0] if stop else None,
                     )
                 )
             elif kind == "intermediate_reply":
@@ -209,7 +209,7 @@ def apply_sidecar_nested_actions(
                 tool_call_id=act.tool_call_id or "",
                 ok=bool(act.ok) if act.ok is not None else True,
                 error_brief=act.error_brief,
-                halted=act.halted,
+                outcome=act.outcome,
             )
         elif act.kind == "mount_nested_prose":
             mount_nested_prose(

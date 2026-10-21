@@ -52,7 +52,7 @@ def test_refresh_elapsed_noop_while_waiting():
 
 def test_set_waiting_noop_after_result():
     row = ToolCallRow(call_id="c1", label="t", target="x")
-    row.set_result(summary="ok", error=False)
+    row.set_result(summary="ok", outcome="ok")
     row.set_waiting()
     assert "✓" in str(row._render_prefix())
 
@@ -87,6 +87,6 @@ def test_reconcile_after_first_done_promotes_second():
     a = ToolCallRow(call_id="a", label="t1", target="", waiting=True)
     b = ToolCallRow(call_id="b", label="t2", target="", waiting=True)
     reconcile_batch_phases([a, b])
-    a.set_result(summary="ok", error=False)
+    a.set_result(summary="ok", outcome="ok")
     reconcile_batch_phases([b])  # a already done / removed from active
     assert "▸" in str(b._render_prefix())

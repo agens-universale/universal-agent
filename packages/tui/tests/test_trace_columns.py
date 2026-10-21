@@ -202,7 +202,7 @@ def test_tool_call_row_prefix_is_level_plus_glyph(level):
     row = ToolCallRow(
         call_id="c", label="fs_read_file", target="", level=level
     )
-    row.set_result(summary="", error=False)
+    row.set_result(summary="", outcome="ok")
     assert row._render_prefix().plain == level_prefix(level) + "✓ "
     assert row.has_class("nested-tool") == (level > 0)
 

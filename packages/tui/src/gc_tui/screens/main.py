@@ -59,7 +59,7 @@ from textual.widgets import Static, TextArea
 from gc_tui import branding
 from gc_tui.commands import build_default_registry, closest_command
 from gc_tui.messages import CopyBlockRequest, OpenImageRequest
-from gc_tui.models import CompactionStep, TaskCursor
+from gc_tui.models import CompactionStep, ResultOutcome, TaskCursor
 from gc_tui.palette import ACCENT as _ACCENT
 from gc_tui.palette import DEEP_DIM as _DEEP_DIM
 from gc_tui.palette import DIM as _DIM
@@ -3202,11 +3202,7 @@ class TraceScreen(Screen):
             # Mutate existing row in place
             row = self._active_calls.get(ev.call_id) if ev.call_id else None
             if row is not None:
-                row.set_result(
-                    summary=ev.summary,
-                    error=(ev.kind == "error"),
-                    halted=ev.halted,
-                )
+                row.set_result(summary=ev.summary, outcome=ev.result_outcome)
                 self._mount_inline_diff(ev, row)
                 # Nested под subagent_* оставляем в живой сессии (иерархия под ✓/✕).
                 self._active_calls.pop(ev.call_id, None)
@@ -3283,7 +3279,7 @@ class TraceScreen(Screen):
         `!` без владельца."""
         row = self._active_calls.get(ev.call_id) if ev.call_id else None
         if row is not None:
-            row.set_result(summary=ev.summary, error=True)
+            row.set_result(summary=ev.summary, outcome="error")
             # Nested под subagent_* оставляем в живой сессии (иерархия под ✓/✕).
             self._active_calls.pop(ev.call_id, None)
             self._reconcile_active_tool_phases()
@@ -3423,7 +3419,7 @@ class TraceScreen(Screen):
         tool_call_id: str = "",
         ok: bool = True,
         error_brief: str | None = None,
-        halted: bool = False,
+        outcome: ResultOutcome | None = None,
         **_kw,
     ) -> None:
         row = (
@@ -3432,7 +3428,9 @@ class TraceScreen(Screen):
         if row is None:
             return
         summary = "" if ok else (error_brief or "error")
-        row.set_result(summary=summary, error=not ok, halted=halted)
+        row.set_result(
+            summary=summary, outcome=outcome or ("ok" if ok else "error")
+        )
         self._mount_nested_inline_diff(parent_call_id, tool_call_id, row)
 
     def _mount_nested_inline_diff(

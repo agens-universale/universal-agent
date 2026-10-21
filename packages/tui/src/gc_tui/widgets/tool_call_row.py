@@ -15,7 +15,8 @@ Layout: Horizontal(prefix-Static, content-Static) — wrap длинного об
 - waiting  — call уже нарисован, execute ещё не начался: · dim, без elapsed;
 - running  — сейчас исполняется: ▸ + elapsed (+ опциональный live_status);
   на человеко-ожидании (pause) — ‖ без дыхания, elapsed заморожен;
-- done     — есть result: ✓/✕; стоп или лимит (`halted`) — ■ серым;
+- done     — есть result: ✓/✕; стоп или лимит (`halted`) — ■ серым,
+  отказ (`refused`) — ⦸ цветом WARN;
 - interrupted — стоп/обрыв до output: · + «прервано».
 """
 
@@ -32,14 +33,16 @@ from textual.message import Message
 from textual.widget import Widget
 from textual.widgets import Static
 
+from gc_tui.models import ResultOutcome
 from gc_tui.palette import DIM as _DIM
 from gc_tui.palette import ERR as _ERR
 from gc_tui.palette import OK as _OK
 from gc_tui.palette import PULSE_SHADES as _PULSE_SHADES
 from gc_tui.palette import RUN_COLOR as _RUN
 from gc_tui.palette import TOOL_NAME as _TOOL_NAME
+from gc_tui.palette import WARN as _WARN
 from gc_tui.services.duration_format import format_trace_duration
-from gc_tui.services.trace_glyphs import ERROR_GLYPH
+from gc_tui.services.trace_glyphs import ERROR_GLYPH, REFUSED_GLYPH
 from gc_tui.services.trace_render import level_prefix
 from gc_tui.widgets.block_panel import (
     CopyFeedbackMixin,
@@ -55,6 +58,15 @@ from gc_tui.widgets.static_content import update_if_changed
 # паузы в базовом амбере, без дыхания; elapsed заморожен. Не ⏸: тот числится
 # эмодзи, и часть терминалов (Windows Terminal) рисует его в две клетки.
 _PAUSE_GLYPH = "‖"
+
+#: Глиф и цвет итога вызова; цвет — и у строки `└` итога. Стоп и лимит —
+#: не сбой (K4), отказ — не сбой, а решение политики или человека.
+_OUTCOME_LOOK: dict[str, tuple[str, str]] = {
+    "ok": ("✓", _OK),
+    "error": (ERROR_GLYPH, _ERR),
+    "halted": ("■", _DIM),
+    "refused": (REFUSED_GLYPH, _WARN),
+}
 
 
 class _CopyButton(NoSelectStatic):
@@ -137,8 +149,8 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         self.wire_name = wire_name
         self._event_no = event_no
         self._result: Optional[str] = None
-        self._is_error: bool = False
-        self._halted: bool = False  # стоп/лимит: ■ и серое `└`, не ✕
+        # Итог вызова: глиф и цвет строки `└` (`_OUTCOME_LOOK`).
+        self._outcome: ResultOutcome = "ok"
         self._interrupted: bool = (
             False  # терминальное «прервано» (стоп/обрыв run)
         )
@@ -268,14 +280,11 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         self._live_status = text
         self._update()
 
-    def set_result(
-        self, *, summary: str, error: bool, halted: bool = False
-    ) -> None:
-        """Итог вызова. `halted` — стоп пользователя или лимит: не сбой,
-        глиф ■ и строка `└` серым (K4); иначе ошибка — ✕ и `└` цветом ERR."""
+    def set_result(self, *, summary: str, outcome: ResultOutcome) -> None:
+        """Итог вызова: успех — хвост ` · summary`; ошибка, стоп или лимит
+        и отказ — глиф исхода и строка `└ summary` его цветом."""
         self._result = summary
-        self._is_error = error
-        self._halted = halted
+        self._outcome = outcome
         self._waiting = False
         self._live_status = None
         self._sync_pulse()
@@ -343,11 +352,7 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
             if self._paused_at is not None:
                 return _PAUSE_GLYPH, _RUN
             return "▸", _PULSE_SHADES[self._pulse_frame % len(_PULSE_SHADES)]
-        if self._halted:
-            return "■", _DIM
-        if self._is_error:
-            return ERROR_GLYPH, _ERR
-        return "✓", _OK
+        return _OUTCOME_LOOK[self._outcome]
 
     def _render_prefix(self) -> Text:
         text = Text()
@@ -377,15 +382,15 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
 
     @property
     def _ends_with_line(self) -> bool:
-        """Итог строкой `└` под вызовом, не хвостом: ошибка, стоп, лимит."""
-        return self._is_error or self._halted
+        """Итог строкой `└` под вызовом, не хвостом: всё, кроме успеха."""
+        return self._outcome != "ok"
 
     def _consequence_bodies(self) -> list[Text]:
         """Тела строк `└` под вызовом: ошибка (`ERR`) или стоп/лимит
         (`DIM`), затем пометки."""
         bodies = list(self._consequences)
         if self._ends_with_line and self._result:
-            style = _DIM if self._halted else _ERR
+            style = _OUTCOME_LOOK[self._outcome][1]
             bodies.insert(0, Text(self._result, style=style))
         return bodies
 

@@ -55,7 +55,7 @@ async def test_tool_call_row_mutate_to_ok():
 
     async with _App().run_test() as pilot:
         row = pilot.app.query_one(ToolCallRow)
-        row.set_result(summary="312 строк", error=False)
+        row.set_result(summary="312 строк", outcome="ok")
         await pilot.pause()
         content = str(row.query_one(".trace-content").render())
         prefix = str(row.query_one(".trace-prefix").render())
@@ -80,7 +80,7 @@ async def test_tool_call_row_mutate_to_error():
 
     async with _App().run_test() as pilot:
         row = pilot.app.query_one(ToolCallRow)
-        row.set_result(summary="ENOENT: нет файла", error=True)
+        row.set_result(summary="ENOENT: нет файла", outcome="error")
         await pilot.pause()
         content = str(row.query_one(".trace-content").render())
         prefix = str(row.query_one(".trace-prefix").render())
@@ -103,7 +103,7 @@ async def test_tool_call_row_error_text_is_err_line():
 
     async with _App().run_test() as pilot:
         row = pilot.app.query_one(ToolCallRow)
-        row.set_result(summary="permission denied", error=True)
+        row.set_result(summary="permission denied", outcome="error")
         await pilot.pause()
         from gc_tui.widgets.consequence_line import ConsequenceLine
 
@@ -172,7 +172,7 @@ async def test_tool_call_row_ok_with_empty_summary_omits_arrow():
 
     async with _App().run_test() as pilot:
         row = pilot.app.query_one(ToolCallRow)
-        row.set_result(summary="", error=False)
+        row.set_result(summary="", outcome="ok")
         await pilot.pause()
         content = str(row.query_one(".trace-content").render())
         prefix = str(row.query_one(".trace-prefix").render())
@@ -197,7 +197,7 @@ async def test_tool_call_row_ok_state_uses_styled_text():
 
     async with _App().run_test() as pilot:
         row = pilot.app.query_one(ToolCallRow)
-        row.set_result(summary="100 строк", error=False)
+        row.set_result(summary="100 строк", outcome="ok")
         await pilot.pause()
         prefix = row._render_prefix()
         assert isinstance(prefix, Text)
@@ -229,7 +229,7 @@ async def test_tool_call_row_tool_name_uses_tool_name_color():
 
     async with _App().run_test() as pilot:
         row = pilot.app.query_one(ToolCallRow)
-        row.set_result(summary="312 строк", error=False)
+        row.set_result(summary="312 строк", outcome="ok")
         await pilot.pause()
         rendered = row._render_content()
         assert isinstance(rendered, Text)
@@ -260,9 +260,9 @@ async def test_tool_call_row_set_result_twice_overwrites():
 
     async with _App().run_test() as pilot:
         row = pilot.app.query_one(ToolCallRow)
-        row.set_result(summary="initial", error=False)
+        row.set_result(summary="initial", outcome="ok")
         await pilot.pause()
-        row.set_result(summary="updated", error=True)
+        row.set_result(summary="updated", outcome="error")
         await pilot.pause()
         content = str(row.query_one(".trace-content").render())
         prefix = str(row.query_one(".trace-prefix").render())
@@ -500,7 +500,7 @@ def test_pulse_tick_noop_after_completion():
     from gc_tui.widgets.tool_call_row import ToolCallRow
 
     row = ToolCallRow(call_id="c1", label="t", target="")
-    row.set_result(summary="ok", error=False)
+    row.set_result(summary="ok", outcome="ok")
     f = row._pulse_frame
     row._pulse_tick()
     assert row._pulse_frame == f
@@ -520,7 +520,7 @@ def test_completed_ok_row_has_no_elapsed():
     from gc_tui.widgets.tool_call_row import ToolCallRow
 
     row = ToolCallRow(call_id="c3", label="subagent_planner", target="x")
-    row.set_result(summary="ok", error=False)
+    row.set_result(summary="ok", outcome="ok")
     assert "✓" in str(row._render_prefix())
     assert "running" not in str(row._render_content())
 
@@ -529,7 +529,7 @@ def test_completed_error_row_has_no_elapsed():
     from gc_tui.widgets.tool_call_row import ToolCallRow
 
     row = ToolCallRow(call_id="c4", label="subagent_planner", target="x")
-    row.set_result(summary="boom", error=True)
+    row.set_result(summary="boom", outcome="error")
     assert "✕" in str(row._render_prefix())
     assert "running" not in str(row._render_content())
 
@@ -538,7 +538,7 @@ def test_refresh_running_elapsed_noop_after_completion():
     from gc_tui.widgets.tool_call_row import ToolCallRow
 
     row = ToolCallRow(call_id="c5", label="subagent_planner", target="x")
-    row.set_result(summary="ok", error=False)
+    row.set_result(summary="ok", outcome="ok")
     row.refresh_running_elapsed()  # не возвращает в running
     assert "✓" in str(row._render_prefix())
 
@@ -590,7 +590,7 @@ def test_mark_interrupted_noop_after_result_and_idempotent():
     from gc_tui.widgets.tool_call_row import ToolCallRow
 
     row = ToolCallRow(call_id="c7", label="read_file", target="p")
-    row.set_result(summary="312 строк", error=False)
+    row.set_result(summary="312 строк", outcome="ok")
     row.mark_interrupted()  # после результата — no-op
     assert "✓" in str(row._render_prefix())
     row2 = ToolCallRow(call_id="c8", label="read_file", target="p")
@@ -616,7 +616,7 @@ def _edit_row():
     from gc_tui.widgets.tool_call_row import ToolCallRow
 
     row = ToolCallRow(call_id="e1", label="Edit", target="a.py")
-    row.set_result(summary="ok", error=False)
+    row.set_result(summary="ok", outcome="ok")
     return row
 
 

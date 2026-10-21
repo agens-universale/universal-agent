@@ -9,8 +9,8 @@ class _FakeRow:
     def __init__(self):
         self.finalized = None
 
-    def set_result(self, *, summary, error):
-        self.finalized = (summary, error)
+    def set_result(self, *, summary, outcome):
+        self.finalized = (summary, outcome)
 
 
 def _ev(call_id):
@@ -32,7 +32,7 @@ def test_error_msg_with_call_id_finalizes_row():
     mounted = []
     screen._trace_mount = lambda w, **kw: mounted.append(w)
     screen._render_error_msg(_ev("call_7"))
-    assert row.finalized == ("Wrong arguments for `x`", True)
+    assert row.finalized == ("Wrong arguments for `x`", "error")
     assert mounted == []  # строка `!` подавлена
     assert "call_7" not in screen._active_calls
 

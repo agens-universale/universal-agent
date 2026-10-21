@@ -58,7 +58,7 @@ async def test_long_nested_error_wraps_under_body_column():
         trace = pilot.app.screen.query_one("#trace", VerticalScroll)
         row = ToolCallRow(call_id="c1", label="Edit", target="x", level=1)
         trace.mount(row)
-        row.set_result(summary=_LONG, error=True)
+        row.set_result(summary=_LONG, outcome="error")
         await pilot.pause()
         body = row.query_one(".consequence-body")
         assert body.region.x - row.region.x == len("    └ ")
@@ -152,7 +152,7 @@ def _consequence(row: ToolCallRow) -> str:
 
 def test_ok_row_tail_is_middle_dot_summary():
     row = ToolCallRow(call_id="c1", label="Read", target="x")
-    row.set_result(summary="40 строк", error=False)
+    row.set_result(summary="40 строк", outcome="ok")
     content = row._render_content()
     assert content.plain == "Read  x · 40 строк"
     assert _styles_of(content, "40 строк") == [DIM]
@@ -162,7 +162,7 @@ def test_ok_row_tail_is_middle_dot_summary():
 
 def test_error_row_has_no_tail_and_error_line_below():
     row = ToolCallRow(call_id="c1", label="Edit", target="x")
-    row.set_result(summary="search не найден в файле", error=True)
+    row.set_result(summary="search не найден в файле", outcome="error")
     assert row._render_content().plain == "Edit  x"
     assert "✕" in row._render_prefix().plain
     line = _lines(row)
@@ -173,7 +173,7 @@ def test_error_row_has_no_tail_and_error_line_below():
 
 def test_nested_error_line_two_deeper():
     row = ToolCallRow(call_id="c1", label="Edit", target="x", level=1)
-    row.set_result(summary="нет файла", error=True)
+    row.set_result(summary="нет файла", outcome="error")
     assert _consequence(row) == "    └ нет файла"
 
 
@@ -181,7 +181,7 @@ def test_nested_error_line_two_deeper():
 def test_halted_row_is_stop_not_failure(summary):
     """Стоп и лимит — не ошибка (K4): глиф `■` серым, строка `└` серым."""
     row = ToolCallRow(call_id="c1", label="Read", target="x")
-    row.set_result(summary=summary, error=True, halted=True)
+    row.set_result(summary=summary, outcome="halted")
     prefix = row._render_prefix()
     assert "■" in prefix.plain and "✕" not in prefix.plain
     assert _styles_of(prefix, "■") == [DIM]
@@ -193,7 +193,7 @@ def test_halted_row_is_stop_not_failure(summary):
 
 def test_real_error_keeps_cross_and_err_line():
     row = ToolCallRow(call_id="c1", label="Read", target="x")
-    row.set_result(summary="нет файла", error=True)
+    row.set_result(summary="нет файла", outcome="error")
     prefix = row._render_prefix()
     assert _styles_of(prefix, "✕") == [ERR]
     assert _styles_of(_lines(row), "нет файла") == [ERR]
@@ -221,12 +221,12 @@ def _output_event(data: dict) -> TraceEvent:
 )
 def test_mapper_marks_stop_and_limits_halted(status):
     ev = _output_event({"ok": False, "status": status, "error": "x"})
-    assert ev.halted is True
+    assert ev.result_outcome == "halted"
 
 
 def test_mapper_real_error_not_halted():
     ev = _output_event({"ok": False, "error": "нет файла"})
-    assert ev.kind == "error" and ev.halted is False
+    assert ev.kind == "error" and ev.result_outcome == "error"
 
 
 def test_preview_halted_result_is_stop_row():
@@ -267,7 +267,7 @@ def test_preview_nested_halted_is_stop_row():
 
 def test_add_consequence_appends_line_under_row():
     row = ToolCallRow(call_id="c1", label="View", target="a.png")
-    row.set_result(summary="", error=False)
+    row.set_result(summary="", outcome="ok")
     row.add_consequence(Text("! пометка"))
     assert _consequence(row) == "  └ ! пометка"
     assert row.has_class("has-consequence")
@@ -286,7 +286,7 @@ async def test_consequence_line_renders_below_row_and_copy_stays_right():
         row = ToolCallRow(call_id="c1", label="Edit", target="x")
         trace.mount(row)
         row.set_edit_counts(1, 1, copy_text="d")
-        row.set_result(summary="boom", error=True)
+        row.set_result(summary="boom", outcome="error")
         await pilot.pause()
         line = row.query_one(".trace-consequence")
         copy = row.query_one(".block-copy", Static)

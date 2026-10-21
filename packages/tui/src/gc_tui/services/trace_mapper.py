@@ -19,10 +19,11 @@ from gc_core.vision.errors import (
     REASON_HTTP,
 )
 
-from gc_tui.models import TraceEvent
+from gc_tui.models import ResultOutcome, TraceEvent
 from gc_tui.services.image_chips import images_mentioned
 from gc_tui.services.plural import plural_form
 from gc_tui.services.tool_identity import tool_id
+from gc_tui.services.tool_refusal import refusal_text
 
 #: Сводки строки fs_view_image в ленте (визуальный контракт картинок §4): модель
 #: получает английский текст ошибки, человек — русский по типу ошибки.
@@ -737,8 +738,11 @@ _HALT_SUMMARIES = {
 }
 
 
-def halt_summary(output: Any) -> Optional[str]:
-    """Сводка стопа/лимита из output тула; None — это не стоп и не лимит."""
+def result_stop(output: Any) -> Optional[tuple[ResultOutcome, str]]:
+    """Не-сбой среди ошибок тула — один классификатор для всех путей ленты.
+
+    Стоп или лимит — `("halted", сводка)`, отказ политики, режима, судьи
+    или человека — `("refused", кто: почему)`; None — обычный итог."""
     if not isinstance(output, str):
         return None
     from gc_tui.services.tool_preview import unwrap_tool_output_dict
@@ -746,7 +750,13 @@ def halt_summary(output: Any) -> Optional[str]:
     data = unwrap_tool_output_dict(output)
     if not isinstance(data, dict):
         return None
-    return _HALT_SUMMARIES.get(data.get("status"))
+    halted = _HALT_SUMMARIES.get(data.get("status"))
+    if halted:
+        return "halted", halted
+    refused = refusal_text(data.get("error"))
+    if refused:
+        return "refused", refused
+    return None
 
 
 def _summarize_output(output: Any, *, error: bool) -> str:
@@ -762,10 +772,6 @@ def _summarize_output(output: Any, *, error: bool) -> str:
         return _truncate_word_boundary(output.replace("\n", " "), 80)
     if not isinstance(data, dict):
         return str(data)[:80]
-
-    halted = _HALT_SUMMARIES.get(data.get("status"))
-    if halted:
-        return halted
 
     if error:
         err = data.get("error") or data.get("message") or ""
@@ -864,7 +870,8 @@ def _map_function_event(
         output = msg.get("output")
         is_err = _looks_like_error(output)
         kind = "error" if is_err else "result"
-        summary = _summarize_output(output, error=is_err)
+        stop = result_stop(output) if is_err else None
+        summary = stop[1] if stop else _summarize_output(output, error=is_err)
         return TraceEvent(
             no=no,
             event_ts_utc_iso=ts,
@@ -875,7 +882,7 @@ def _map_function_event(
             message_id=mid,
             call_id=call_id,
             tool_name=name,
-            halted=halt_summary(output) is not None,
+            outcome=stop[0] if stop else None,
         )
 
     return None

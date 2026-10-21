@@ -75,3 +75,13 @@ def test_download_mode_denial_is_a_tool_answer(tmp_path, mode, error_type):
     assert out["ok"] is False
     assert out["error"]["type"] == error_type
     assert not (tmp_path / "downloads" / "a.pdf").exists()
+
+
+def test_mode_denial_names_the_mode(tmp_path):
+    """Запрет режима называет режим: лента пишет «режим <имя>: …»."""
+    target = tmp_path / "a.txt"
+    target.write_text("a", encoding="utf-8")
+    tool = with_local_ctx(WriteToFile, ctx=_ctx("plan", tmp_path))
+    out = json.loads(tool(path=str(target), content="x"))
+    assert out["error"]["type"] == "write_denied_by_mode"
+    assert out["error"]["mode"] == "plan"
