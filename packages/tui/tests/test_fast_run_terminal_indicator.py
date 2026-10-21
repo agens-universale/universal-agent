@@ -205,23 +205,3 @@ async def test_fast_run_finish_keeps_done_state(tmp_path):
         scr._poll_active()
 
         assert scr._thinking._state == "done"
-
-
-@pytest.mark.asyncio
-async def test_fast_run_done_line_sits_in_agent_bullet_column(tmp_path):
-    """Строка «Выполнил» быстрого хода — на месте строки хода (спека P3
-    §2.9): глиф в колонке `●` реплики агента."""
-    from gc_tui.services.trace_render import build_agent_widgets
-    from textual.containers import VerticalScroll
-
-    async with _app(tmp_path).run_test(size=(120, 40)) as pilot:
-        scr = await _fast_turn(pilot, tmp_path)
-        trace = scr.query_one("#trace", VerticalScroll)
-        (agent,) = build_agent_widgets("Ответ.", event_no=1)
-        trace.mount(agent)
-        await pilot.pause()
-
-        (ind,) = _indicators(pilot)
-        assert ind._state == "done"
-        bullet = agent.query_one(".trace-prefix").content_region.x
-        assert ind.content_region.x == bullet

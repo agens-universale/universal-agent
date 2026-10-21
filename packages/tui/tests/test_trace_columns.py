@@ -7,6 +7,8 @@ from __future__ import annotations
 import json
 
 import pytest
+from textual.color import Color
+
 from gc_testkit.tui_support import tui_settings
 from gc_tui.palette import DIM
 from gc_tui.services.trace_render import (
@@ -18,8 +20,7 @@ from gc_tui.services.trace_render import (
 from gc_tui.widgets.todo_block import TodoBlock
 from gc_tui.widgets.tool_call_row import ToolCallRow
 from gc_tui.widgets.trace_row import TraceRow
-from gc_tui.widgets.user_reply import UserReplyContainer
-from textual.color import Color
+from gc_tui.widgets.user_reply import NestedUserReply, UserReplyContainer
 
 _TODO_ARGS = json.dumps(
     {"todos": [{"content": "шаг", "status": "pending"}]}, ensure_ascii=False
@@ -130,7 +131,7 @@ _EXPECTED = [
 
 
 class _Store:
-    def read_subagent_trace(self, task_id):
+    def read_subagent_trace(self, task_id):  # noqa: ARG002
         return _SIDECAR
 
 
@@ -209,12 +210,13 @@ def test_tool_call_row_prefix_is_level_plus_glyph(level):
 @pytest.mark.asyncio
 async def test_live_and_preview_share_layout(tmp_path):
     """Одни и те же записи живой лентой и превью — одна раскладка."""
+    from textual.app import App
+    from textual.containers import VerticalScroll
+
     from gc_tui.services.trace_render import (
         merge_nested_readonly,
         render_segments_readonly,
     )
-    from textual.app import App
-    from textual.containers import VerticalScroll
 
     async with _app(tmp_path).run_test(size=(120, 40)) as pilot:
         live = _layout(await _live_trace(pilot))
@@ -296,12 +298,13 @@ async def test_blank_line_before_every_call_on_both_paths(tmp_path):
     """Интервал (§2.1): пустая строка перед каждым вызовом — верхним и
     вложенным, подряд идущим тоже; класса `tool-group-start` нет ни вживую,
     ни в превью."""
+    from textual.app import App
+    from textual.containers import VerticalScroll
+
     from gc_tui.services.trace_render import (
         merge_nested_readonly,
         render_segments_readonly,
     )
-    from textual.app import App
-    from textual.containers import VerticalScroll
 
     async with _app(tmp_path).run_test(size=(120, 40)) as pilot:
         trace = await _live_trace(pilot)
@@ -333,80 +336,3 @@ async def test_blank_line_before_every_call_on_both_paths(tmp_path):
         assert {r._level for r in rows} == {0, 1}
         assert [r.styles.margin.top for r in rows] == [1] * len(rows)
         assert not trace.query(".tool-group-start")
-
-
-def _finish_segments() -> list[dict]:
-    """Ответ с текстом и turn_finish с иным отчётом и оговоркой."""
-    payloads = [
-        {"id": "u1", "role": "user", "content": "пока"},
-        {
-            "id": "a1",
-            "type": "message",
-            "role": "assistant",
-            "content": [{"type": "output_text", "text": "Пока!"}],
-        },
-        {
-            "id": "f1",
-            "type": "function_call",
-            "name": "turn_finish",
-            "call_id": "fin1",
-            "arguments": json.dumps(
-                {"task_report": "Попрощался.", "comment": "Без тулов."},
-                ensure_ascii=False,
-            ),
-        },
-    ]
-    return [
-        {
-            "index": 0,
-            "messages": [{"ts": "", "payload": p} for p in payloads],
-            "compacted_by": None,
-        }
-    ]
-
-
-def _lines_from(app, first: str) -> list[str]:
-    lines = [
-        "".join(seg.text for seg in strip).rstrip()
-        for strip in app.screen._compositor.render_strips()
-    ]
-    start = next(i for i, s in enumerate(lines) if first in s)
-    return lines[start : start + 3]
-
-
-@pytest.mark.asyncio
-async def test_finish_record_is_consequence_of_answer_on_both_paths(tmp_path):
-    """Запись конца хода (§3): `└` на +2 от `●` ответа, прижата к нему,
-    оговорка — на колонке текста после `└ `; живая лента и превью — одна
-    раскладка."""
-    from gc_tui.services.trace_render import render_segments_readonly
-    from textual.app import App
-    from textual.containers import VerticalScroll
-
-    expected = [
-        " ● Пока!",
-        "   └ итог: Попрощался.",
-        "     Без тулов.",
-    ]
-    async with _app(tmp_path).run_test(size=(120, 40)) as pilot:
-        pilot.app.screen._render_segments(_finish_segments())
-        await pilot.pause()
-        live = _lines_from(pilot.app, "Пока!")
-
-    class _Preview(App):
-        def compose(self):
-            yield VerticalScroll(id="t")
-
-        def on_mount(self):
-            t = self.query_one("#t", VerticalScroll)
-            render_segments_readonly(t, _finish_segments())
-
-    async with _styled(_Preview)().run_test(size=(120, 40)) as pilot:
-        await pilot.pause()
-        preview = _lines_from(pilot.app, "Пока!")
-
-    assert live == expected
-    assert [s.lstrip() for s in preview] == [s.lstrip() for s in expected]
-    assert [len(s) - len(s.lstrip()) for s in preview] == [
-        len(s) - len(s.lstrip()) - 1 for s in expected
-    ]

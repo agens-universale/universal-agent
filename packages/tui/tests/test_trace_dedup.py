@@ -92,13 +92,13 @@ def _finish(call_id, report, comment=""):
 
 
 def _rows(scr, cls):
-    """Тексты строк класса: строки ленты и строки записей `└`."""
-    from gc_tui.widgets.consequence_line import ConsequenceLine
     from gc_tui.widgets.trace_row import TraceRow
 
-    rows = [r._content for r in scr.query(TraceRow) if r.has_class(cls)]
-    rows += [r.body for r in scr.query(ConsequenceLine) if r.has_class(cls)]
-    return [r if isinstance(r, str) else r.plain for r in rows]
+    return [
+        r._content if isinstance(r._content, str) else r._content.plain
+        for r in scr.query(TraceRow)
+        if r.has_class(cls)
+    ]
 
 
 def _app(tmp_path):
