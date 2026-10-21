@@ -690,6 +690,20 @@ async def test_copy_button_hidden_until_edit_counts():
 
 
 @pytest.mark.asyncio
+async def test_no_copy_button_without_diff_text():
+    """Нечего копировать — нет ❐; счётчики при этом видны."""
+    from textual.widgets import Static
+
+    row = _edit_row()
+    app = _RowHost.make(row)
+    async with app.run_test(size=(80, 5)) as pilot:
+        row.set_edit_counts(2, 0, copy_text="")
+        await pilot.pause()
+        assert not row.query_one(".block-copy", Static).display
+        assert "+2 −0" in row._render_content().plain
+
+
+@pytest.mark.asyncio
 async def test_copy_button_copies_diff_and_flashes():
     """Клик по ❐ шлёт весь дифф и на время показывает ✓."""
     from textual.widgets import Static

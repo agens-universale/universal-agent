@@ -290,10 +290,10 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         """Строка правки: ` +N −M` после объекта и ❐ в конце строки.
 
         `copy_text` — что кладёт в буфер ❐: весь дифф правки, как и двойной
-        клик по телу блока под строкой."""
+        клик по телу блока под строкой; пусто — ❐ нет, счётчики есть."""
         self._edit_counts = (add, removed)
         self._copy_text = copy_text
-        self.add_class("edited")
+        self.set_class(bool(copy_text), "edited")
         self._update()
 
     def mark_interrupted(self) -> None:
