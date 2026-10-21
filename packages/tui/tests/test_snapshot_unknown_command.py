@@ -5,8 +5,14 @@ pytest.importorskip("textual")
 pytest.importorskip("pytest_textual_snapshot")
 
 
-def test_unknown_command_snapshot(snap_compare, tmp_path):
+def test_unknown_command_snapshot(snap_compare, tmp_path, monkeypatch):
     from gc_tui.app import TuiApp
+    from gc_tui.screens.main import TraceScreen
+
+    # Папку в шапке фиксируем — иначе снапшот стал бы машинно-зависимым.
+    monkeypatch.setattr(
+        TraceScreen, "_current_cwd", lambda self: "/work/demo-project"
+    )
 
     app = TuiApp(
         threads_dir=str(tmp_path),
@@ -20,9 +26,6 @@ def test_unknown_command_snapshot(snap_compare, tmp_path):
     )
 
     async def setup(pilot):
-        # Фиксируем cwd для детерминированного футера в snapshot'е.
-        pilot.app.tui_state.pending_cwd = "/work/project"
-        pilot.app.screen._refresh_footer()
         inp = pilot.app.query_one("#cmdinput")
         inp.text = "/tst"
         await pilot.press("enter")

@@ -49,6 +49,9 @@ def test_image_reply_snapshot(snap_compare, tmp_path, monkeypatch):
     async def setup(pilot):
         await pilot.pause()
         pilot.app.screen.attach_active_task(tid)
+        # Мигание курсора поля — таймер 0.5 с, фаза в кадре от нагрузки;
+        # без мигания курсор виден всегда (приём `test_snapshot_forms`).
+        pilot.app.screen.query_one("#cmdinput").cursor_blink = False
         pilot.app._trace_note_sink.push(
             tid, TraceNote(NOTE_MAIN_BLIND.format(alias="glm"), "reply")
         )
@@ -72,6 +75,9 @@ def test_image_reply_narrow_snapshot(snap_compare, tmp_path, monkeypatch):
     async def setup(pilot):
         await pilot.pause()
         pilot.app.screen.attach_active_task(tid)
+        # Мигание курсора поля — таймер 0.5 с, фаза в кадре от нагрузки;
+        # без мигания курсор виден всегда (приём `test_snapshot_forms`).
+        pilot.app.screen.query_one("#cmdinput").cursor_blink = False
         await pilot.pause(0.5)
 
     assert snap_compare(app, terminal_size=(50, 32), run_before=setup)
@@ -90,6 +96,9 @@ def test_ask_human_image_answer_snapshot(snap_compare, tmp_path, monkeypatch):
     async def setup(pilot):
         await pilot.pause()
         pilot.app.screen.attach_active_task(tid)
+        # Мигание курсора поля — таймер 0.5 с, фаза в кадре от нагрузки;
+        # без мигания курсор виден всегда (приём `test_snapshot_forms`).
+        pilot.app.screen.query_one("#cmdinput").cursor_blink = False
         await pilot.pause(0.5)
 
     assert snap_compare(app, terminal_size=(120, 32), run_before=setup)

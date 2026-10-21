@@ -9,9 +9,15 @@ pytest.importorskip("pytest_textual_snapshot")
 from gc_testkit.tui_fixtures.stub_executor import StubExecutor
 
 
-def test_main_full_dialog_snapshot(snap_compare, tmp_path):
+def test_main_full_dialog_snapshot(snap_compare, tmp_path, monkeypatch):
     from gc_tui.app import TuiApp
+    from gc_tui.screens.main import TraceScreen
     from gc_tui.services.stores.file_store import FileTaskStore
+
+    # Папку в шапке фиксируем — иначе снапшот стал бы машинно-зависимым.
+    monkeypatch.setattr(
+        TraceScreen, "_current_cwd", lambda self: "/work/demo-project"
+    )
 
     tid = "7f3a9b1c"
     fake = StubExecutor(
@@ -37,6 +43,9 @@ def test_main_full_dialog_snapshot(snap_compare, tmp_path):
     async def setup(pilot):
         await pilot.pause()
         pilot.app.screen.attach_active_task(tid)
+        # Мигание курсора поля — таймер 0.5 с, фаза в кадре от нагрузки;
+        # без мигания курсор виден всегда (приём `test_snapshot_forms`).
+        pilot.app.screen.query_one("#cmdinput").cursor_blink = False
         await pilot.pause(0.5)
 
     assert snap_compare(app, terminal_size=(120, 40), run_before=setup)
