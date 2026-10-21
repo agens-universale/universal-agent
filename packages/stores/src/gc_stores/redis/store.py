@@ -17,6 +17,7 @@ from typing import Any
 from gc_core.stores import Stores
 
 from gc_stores.kv.agent_store import KvAgentStore
+from gc_stores.kv.base import guarded
 from gc_stores.kv.thread_store import KvThreadStore
 from gc_stores.redis.kv import RedisKV
 
@@ -68,7 +69,7 @@ def open_stores(
     clock: Callable[[], datetime] | None = None,
 ) -> Stores:
     """Треды и хранилище агента ``agent_id`` на одном клиенте Redis."""
-    kv = RedisKV(url, prefix=prefix)
+    kv = guarded(RedisKV(url, prefix=prefix))
     return Stores(
         threads=RedisThreadStore(kv=kv, clock=clock),
         agent=RedisAgentStore(kv=kv, agent_id=agent_id),
