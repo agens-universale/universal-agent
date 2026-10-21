@@ -34,6 +34,7 @@ from gc_core.threads.file_store import FileThreadStore
 from gc_core.threads.models import StreamEntry, ThreadKey, ThreadRecord
 
 from gc_tui.models import CompactionStep, TailResult, TaskCursor, TaskSummary
+from gc_tui.services.stores.record_view import outcome_status, tui_section
 from gc_tui.services.trace_mapper import _clean_summary
 
 logger = logging.getLogger(__name__)
@@ -68,12 +69,15 @@ class FileTaskStore:
 
     # ---- per-task -----------------------------------------------------
 
-    def get_task_meta(
+    def get_record(
         self, task_id: str, system: Optional[str] = None
-    ) -> dict:
-        """Meta треда в форме develop; нет треда или он не читается — {}."""
-        record = self._record(task_id, system)
-        return {} if record is None else Threads.legacy_meta(record)
+    ) -> Optional[ThreadRecord]:
+        """Запись треда (части: ``info``, ``state``, ``usage``, ``runtime``,
+        ``frontend``, ``extra``); нет треда или он не читается — ``None``."""
+        try:
+            return run_sync(self._threads.get(self._key(task_id, system)))
+        except (OSError, ValueError):
+            return None
 
     def update_tui_meta(
         self, task_id: str, patch: dict, system: Optional[str] = None
@@ -259,14 +263,6 @@ class FileTaskStore:
             next_cursor=_task_cursor(batch.cursor, cursor.archives),
         )
 
-    def _record(
-        self, task_id: str, system: Optional[str]
-    ) -> Optional[ThreadRecord]:
-        try:
-            return run_sync(self._threads.get(self._key(task_id, system)))
-        except (OSError, ValueError):
-            return None
-
 
 async def _collect(threads: Threads, system: str) -> list[ThreadRecord]:
     return [record async for record in threads.iter_threads(system=system)]
@@ -347,23 +343,22 @@ async def _acompaction_step(
 
 
 def _summary(record: ThreadRecord) -> TaskSummary:
-    meta = Threads.legacy_meta(record)
-    tui_meta = meta.get("tui") or {}
-    # Исход сессии: TUI-владелец пишет в meta.tui.status (completed/stopped/
-    # failed); верхний meta.status — для CLI/server-потоков. Нет ни того, ни
-    # другого → None (исход не записан; список не выдумывает «stopped»).
-    status = tui_meta.get("status") or meta.get("status")
-    token_usage = meta.get("token_usage")
+    tui_meta = tui_section(record)
+    # Исход сессии не записан → None: список не выдумывает «stopped».
+    usage = record.usage
+    written = bool(usage.model_fields_set or usage.model_extra)
+    unread = record.extra.get("unread_count", 0)
+    last_error = record.extra.get("last_error")
     return TaskSummary(
         thread_id=record.key.thread,
-        status=status,
-        updated_at=meta.get("updated_at", ""),
-        messages_count=int(meta.get("messages_count", 0)),
+        status=outcome_status(record),
+        updated_at=record.info.updated_at or "",
+        messages_count=record.info.messages_count,
         skill_id=tui_meta.get("skill_id"),
-        unread_count=int(meta.get("unread_count", 0)),
-        last_error=meta.get("last_error"),
+        unread_count=unread if type(unread) is int else 0,
+        last_error=last_error if isinstance(last_error, str) else None,
         tui_meta=tui_meta,
-        token_usage=token_usage if isinstance(token_usage, dict) else None,
+        token_usage=usage.model_dump() if written else None,
     )
 
 

@@ -49,11 +49,11 @@ from gc_acp.modes import (
 from gc_acp.plan import (
     plan_update,
     session_info_update,
-    thread_meta,
+    thread_record,
     todos_from_agent,
-    todos_from_meta,
+    todos_from_record,
     usage_from_agent,
-    usage_from_meta,
+    usage_from_record,
 )
 from gc_acp.plan_approval import (
     PLAN_REWORK,
@@ -899,14 +899,16 @@ class AcpFacade:
         """После load (с replay) или resume — plan, title, usage из треда."""
         del replayed
         session_id = live.session_id
-        meta = await thread_meta(self._index.threads, thread_key(session_id))
-        await self._notify(session_id, plan_update(todos_from_meta(meta)))
+        record = await thread_record(
+            self._index.threads, thread_key(session_id)
+        )
+        await self._notify(session_id, plan_update(todos_from_record(record)))
         title = await self._index.title(session_id)
         if title is not None:
             await self._notify(session_id, session_info_update(title))
             live.title_sent = True
         level = session_level(self._settings, live.level)
-        usage = usage_from_meta(meta, settings=self._settings, level=level)
+        usage = usage_from_record(record, settings=self._settings, level=level)
         if usage is not None:
             await self._notify(session_id, usage)
 

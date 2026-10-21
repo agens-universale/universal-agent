@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from gc_core.attachments.numbering import bumped_image_seq, read_image_seq
+from gc_core.attachments.numbering import label_numbers
 from gc_core.persistence.live_volume import live_volume_from_messages
 from gc_core.persistence.meta_ownership import resolve_runtime_flag_name
 from gc_core.message_format.serialization import calc_history_chars_for_trigger
@@ -15,6 +15,15 @@ def runtime_section(meta):
         return {}
     rt = meta.get("runtime") or {}
     return dict(rt) if isinstance(rt, dict) else {}
+
+
+def read_image_seq(meta):
+    value = runtime_section(meta).get("image_seq")
+    return value if type(value) is int and value > 0 else 0
+
+
+def bumped_image_seq(meta, messages):
+    return max([read_image_seq(meta), *label_numbers(messages)])
 
 
 def merge_runtime_into_meta(meta, patch) -> None:

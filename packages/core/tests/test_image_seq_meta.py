@@ -11,7 +11,7 @@ from gc_core.attachments.model import (
     Attachment,
     user_label,
 )
-from gc_core.attachments.numbering import IMAGE_SEQ_KEY, read_image_seq
+from gc_testkit.develop_files import read_image_seq
 from gc_core.thread_store import ThreadSession
 from gc_testkit.develop_files import load_thread_meta
 from gc_core.threads.file_store import FileThreadStore
@@ -89,7 +89,7 @@ async def test_tool_images_do_not_move_the_counter(tmp_path):
         previous_response_id=None,
     )
 
-    assert IMAGE_SEQ_KEY not in _runtime(tmp_path)
+    assert "image_seq" not in _runtime(tmp_path)
 
 
 async def test_thread_without_images_gets_no_counter(tmp_path):
@@ -99,7 +99,7 @@ async def test_thread_without_images_gets_no_counter(tmp_path):
         previous_response_id=None,
     )
 
-    assert IMAGE_SEQ_KEY not in _runtime(tmp_path)
+    assert "image_seq" not in _runtime(tmp_path)
 
 
 async def test_compaction_does_not_lower_image_seq(tmp_path):

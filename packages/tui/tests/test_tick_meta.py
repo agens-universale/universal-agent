@@ -5,6 +5,8 @@
 в том же тике не теряется при `update_tui_meta`.
 """
 
+from gc_testkit.develop_files import meta_of
+
 import json
 
 import pytest
@@ -51,16 +53,16 @@ async def test_poll_tick_reads_display_meta_once(tmp_path, monkeypatch):
         scr.attach_active_task(_TID)
         await pilot.pause()
         reads = []
-        original = scr._store.get_task_meta
+        original = scr._store.get_record
 
         def counting(*args, **kwargs):
             reads.append(args)
             return original(*args, **kwargs)
 
-        monkeypatch.setattr(scr._store, "get_task_meta", counting)
+        monkeypatch.setattr(scr._store, "get_record", counting)
         scr._poll_active()
         # Только снимок показа: эпоху хвоста фасад ``Threads`` берёт из
-        # курсора (поколение и версия истории), meta для неё не читается.
+        # курсора (поколение и версия истории), запись для неё не читается.
         assert len(reads) == 1
 
 
@@ -98,7 +100,7 @@ async def test_tick_snapshot_follows_active_task(tmp_path, monkeypatch):
         monkeypatch.setattr(scr, "_poll_tick", switch_in_tick)
         scr._poll_active()
         assert names == ["Первая", "Вторая"]
-        assert scr._tick_meta_cache is None
+        assert scr._tick_record_cache is None
 
 
 @pytest.mark.asyncio
@@ -156,7 +158,7 @@ async def test_core_write_survives_tui_write_in_tick(tmp_path, monkeypatch):
             scr, "_drain_subagent_progress", core_then_tui_write
         )
         scr._poll_active()
-        meta = scr._store.get_task_meta(_TID)
+        meta = meta_of(scr._store.get_record(_TID))
         assert meta["core_key"] == "от ядра"
         assert meta["tui"]["title"] == "имя"
 

@@ -152,3 +152,37 @@ def read_subagent_trace(
             if isinstance(record, dict):
                 records.append(record)
     return records
+
+
+def meta_of(record: Any) -> dict[str, Any]:
+    """Meta develop записи треда (``None`` — ``{}``): так тесты сверяют
+    поля по их месту в файле."""
+    from gc_core.threads.meta_map import meta_from_record
+
+    return {} if record is None else meta_from_record(record)
+
+
+def record_from_meta(
+    meta: dict[str, Any], *, system: str = "cli", thread: str = "t"
+) -> Any:
+    """Запись треда из meta develop — для фейковых хранилищ экранов."""
+    from gc_core.threads.meta_map import parts_from_meta
+    from gc_core.threads.models import ThreadKey, ThreadRecord
+
+    parts = parts_from_meta(meta)
+    return ThreadRecord(
+        key=ThreadKey(system=system, thread=thread),
+        info=parts.info,
+        state=parts.state,
+        usage=parts.usage,
+        runtime=parts.runtime,
+        frontend=parts.frontend,
+        extra=parts.extra,
+    )
+
+
+def read_image_seq(meta: dict[str, Any] | None) -> int:
+    """Счётчик картинок треда в meta develop; нет или битый — 0."""
+    runtime = (meta or {}).get("runtime")
+    value = runtime.get("image_seq") if isinstance(runtime, dict) else None
+    return value if type(value) is int and value > 0 else 0

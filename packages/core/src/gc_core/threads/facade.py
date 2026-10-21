@@ -19,7 +19,6 @@ from typing import Any
 from gc_core.plan_store import normalize_plan_block
 from gc_core.threads.history import messages_and_keys
 from gc_core.threads.instance import session_owner
-from gc_core.threads.meta_map import meta_from_record
 from gc_core.threads.models import (
     CONTROL,
     INBOX,
@@ -94,11 +93,6 @@ class Threads:
 
     async def get(self, key: ThreadKey) -> ThreadRecord | None:
         return await self.store.get_thread(key)
-
-    @staticmethod
-    def legacy_meta(record: ThreadRecord) -> JsonObject:
-        """Meta в форме develop — для вывода целиком (``/status``, ``/logs``)."""
-        return meta_from_record(record)
 
     async def iter_threads(
         self,

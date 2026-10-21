@@ -1,5 +1,7 @@
 """TraceScreen счётчик _events_since_last_user_send + _last_user_send_text для cancel-with-undo."""
 
+from gc_testkit.develop_files import meta_of
+
 from gc_testkit.tui_support import tui_settings
 import pytest
 
@@ -186,7 +188,7 @@ async def test_cancel_with_undo_removes_pending_record(tmp_path):
         )
         scr._trace_mount(UserReplyContainer("исходный запрос", event_no=0))
         await pilot.pause()
-        pum = (scr._store.get_task_meta(tid).get("tui") or {}).get(
+        pum = (meta_of(scr._store.get_record(tid)).get("tui") or {}).get(
             "pending_user_messages", []
         )
         assert len(pum) == 1  # запись записана
@@ -195,7 +197,7 @@ async def test_cancel_with_undo_removes_pending_record(tmp_path):
         scr._cmd_stop()
         await pilot.pause()
 
-        pum2 = (scr._store.get_task_meta(tid).get("tui") or {}).get(
+        pum2 = (meta_of(scr._store.get_record(tid)).get("tui") or {}).get(
             "pending_user_messages", []
         )
         assert pum2 == [], (

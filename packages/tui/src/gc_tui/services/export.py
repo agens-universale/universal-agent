@@ -28,14 +28,14 @@ def _env_ts(rec: dict) -> str:
 
 
 def _build_header(
-    segments: list[dict], *, meta: dict, thread_id: str, system: str
+    segments: list[dict], *, api_mode: str, thread_id: str, system: str
 ) -> dict:
     all_recs = [r for seg in segments for r in seg["messages"]]
     n_sum = sum(1 for seg in segments if seg.get("compacted_by"))
     return {
         "thread_id": thread_id,
         "system": system,
-        "backend_api_mode": meta.get("backend_api_mode", ""),
+        "backend_api_mode": api_mode,
         "messages_count": len(all_recs),
         "ts_first": _env_ts(all_recs[0]) if all_recs else "",
         "ts_last": _env_ts(all_recs[-1]) if all_recs else "",
@@ -237,10 +237,15 @@ def _render_txt(segments: list[dict], header: dict) -> str:
 
 
 def export_thread(
-    segments: list[dict], *, fmt: str, meta: dict, thread_id: str, system: str
+    segments: list[dict],
+    *,
+    fmt: str,
+    api_mode: str,
+    thread_id: str,
+    system: str,
 ) -> str:
     header = _build_header(
-        segments, meta=meta, thread_id=thread_id, system=system
+        segments, api_mode=api_mode, thread_id=thread_id, system=system
     )
     if fmt == "json":
         return _render_json(segments, header)
