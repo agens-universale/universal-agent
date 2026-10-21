@@ -3,7 +3,6 @@
 import json
 
 import pytest
-
 from gc_tui.services.trace_mapper import map_message
 
 
@@ -801,3 +800,30 @@ def test_search_and_replace_summary_is_the_path():
         ts="t",
     )
     assert ev.summary == "src/mod.py"
+
+
+def test_finish_event_carries_reply_of_same_response():
+    from gc_tui.services.trace_mapper import collect_render_context
+
+    reply = {
+        "type": "message",
+        "role": "assistant",
+        "content": [{"type": "output_text", "text": "Пока! 👋"}],
+    }
+    finish = {
+        "type": "function_call",
+        "name": "turn_finish",
+        "call_id": "f1",
+        "arguments": json.dumps(
+            {
+                "solution_type": "answer_question",
+                "task_report": "Попрощался с пользователем.",
+            }
+        ),
+    }
+    context = collect_render_context([reply, finish])
+
+    ev = map_message(finish, no=2, ts="t", context=context)
+
+    assert context.closing_replies == {"f1": "Пока! 👋"}
+    assert ev.full_payload["_submit_reply"] == "Пока! 👋"

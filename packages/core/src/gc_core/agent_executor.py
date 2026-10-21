@@ -320,6 +320,7 @@ class AgentExecutor:
         # он реально отправит сообщение.
         self._plan_rework_thread: Optional[str] = None
         self.last_terminal_outcome: Optional[str] = None
+        self.last_closing_reply: str = ""
 
     def take_undelivered_messages(self) -> list[dict]:
         """Забрать всё, что отдано прогону, но до агента не дошло, — в порядке прихода.
@@ -1360,6 +1361,7 @@ class AgentExecutor:
             self.last_terminal_outcome = getattr(
                 state, "terminal_outcome", None
             )
+            self.last_closing_reply = getattr(state, "closing_reply", "")
         finally:
             state_ops.leave(state)
             state.turn_level = None

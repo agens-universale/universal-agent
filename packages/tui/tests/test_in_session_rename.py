@@ -373,6 +373,10 @@ class _FakeStore:
     def get_task_meta(self, task_id, system=None):
         return self.base
 
+    def meta_mtime(self, task_id, system=None):
+        """Как у FileTaskStore: момент правки meta (ключ кэша снимка MCP)."""
+        return None
+
     def update_tui_meta(self, task_id, patch, system=None):
         self.patches.append(dict(patch))
         tui = dict(self.base.get("tui") or {})

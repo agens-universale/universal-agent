@@ -139,6 +139,8 @@ from gc_tui.services.trace_mapper import (
     coerce_args,
     collect_render_context,
     map_message,
+    response_tail,
+    with_closing_replies,
 )
 from gc_tui.services.trace_render import (
     NESTED_PROSE_CLASS,
@@ -543,13 +545,14 @@ class TraceScreen(Screen):
         self._edits_lookup = None  # Optional[EditsLookup]
         self._edits_lookup_key: Optional[tuple] = None
         self._submit_solution_call_ids: set[str] = set()
-        # Track submit_solution agent-line widgets, чтобы при повторе свернуть предыдущие.
-        # list of (event_no, main_static, note_widget_or_None)
-        # spec 2026-05-26 (code-block-highlight): теперь храним СПИСОК виджетов
-        # предыдущей submit_solution (multi-widget рендер: prose + code-panels).
-        self._submit_solution_widgets: list[
-            tuple[list[Widget], Optional[TraceRow]]
-        ] = []
+        # Виджеты последней попытки turn_finish хода (ответ, код, итог,
+        # заметка) — при повторе свернуть предыдущую.
+        self._submit_solution_widgets: list[list[Widget]] = []
+        # Отчёт последней попытки turn_finish, нарисованный ответом: база
+        # дедупа A1, пока попытку не убрала свёртка.
+        self._finish_summary: Optional[str] = None
+        # Записи незаконченного ответа модели из прошлой пачки опроса.
+        self._response_tail: list = []
         # event_no → тело сводки (скрыто; раскрывается кликом/Enter метки).
         self._summary_body_widgets: dict[int, CompactionBody] = {}
         self._summary_marker_widgets: dict[int, CompactionRule] = {}
@@ -2108,6 +2111,8 @@ class TraceScreen(Screen):
         self._subagent_parent_rows.clear()
         self._submit_solution_call_ids.clear()
         self._submit_solution_widgets.clear()
+        self._finish_summary = None
+        self._response_tail = []
         self._summary_body_widgets.clear()
         self._summary_marker_widgets.clear()
         self._pending_user_widgets.clear()  # spec 2026-05-26
@@ -2397,9 +2402,11 @@ class TraceScreen(Screen):
         Дедуп по id — в `_render_record` (общий для всех путей): preserved-копия
         лежит в следующем файле с тем же id, рисуется первое вхождение.
         Payload остаётся full, пока этот id есть в окне segments[-2:]."""
-        context = _records_context(
-            [rec for seg in segments for rec in seg["messages"]],
-            self._current_cwd(),
+        records = [rec for seg in segments for rec in seg["messages"]]
+        context = _records_context(records, self._current_cwd())
+        # Ответ модели, начатый в конце ленты, нужен вызову следующего тика.
+        self._response_tail = response_tail(
+            [rec.get("payload") for rec in records if isinstance(rec, dict)]
         )
         window_start = retention_window_start_index(len(segments))
         window_ids = message_ids_in_retention_window(segments)
@@ -2432,10 +2439,83 @@ class TraceScreen(Screen):
         live: bool = False,
         context: RenderContext | None = None,
     ) -> None:
+        payloads = [
+            rec.get("payload") for rec in records if isinstance(rec, dict)
+        ]
+        if live:
+            # Ответ модели мог начаться в прошлой пачке опроса: его текст
+            # нужен вызову turn_finish, пришедшему сейчас.
+            payloads = [*self._response_tail, *payloads]
+        self._response_tail = response_tail(payloads)
         if context is None:
-            context = _records_context(records, self._current_cwd())
+            context = collect_render_context(
+                payloads, root=self._current_cwd()
+            )
+        elif live:
+            # Общий контекст шага сжатия не видит текста ответа из прошлой
+            # пачки опроса.
+            context = with_closing_replies(context, payloads)
         for rec in records:
             self._render_record(rec, live=live, context=context)
+
+    def _render_finish(self, ev) -> None:
+        """Конец хода turn_finish: отчёт ответом, запись «итог» или строка
+        «заметка» (правило — turn_close.finish_close)."""
+        from gc_core.tools.turn.turn_close import without_repeated_body
+
+        from gc_tui.services.trace_render import (
+            build_finish_widgets,
+            finish_close_of,
+        )
+
+        # A1: отчёт, уже показанный прозой, вторым блоком не рисуем. База
+        # дедупа — только проза: попытки хода убирает свёртка ниже.
+        close = without_repeated_body(
+            finish_close_of(ev), self._last_agent_summary or ""
+        )
+        body = close.body.strip()
+        following = self._stick_bottom
+        widgets = build_finish_widgets(close, event_no=ev.no)
+        for w in widgets:
+            self._trace_mount(w, scroll=False)
+        if following:
+            self._scroll_trace_end()
+        if not ev.call_id:
+            return
+        self._submit_solution_call_ids.add(ev.call_id)
+        self._drop_finish_attempts()
+        self._submit_solution_widgets.append(widgets)
+        self._finish_summary = body or None
+        # Финальный ответ виден — переключаем индикатор в режим
+        # «✓ завершаю…» немедленно (без 250мс лага на следующий тик
+        # _poll_active). Sticky-маркер sentinel выставляется в
+        # _render_records, чтобы пережить _last_event_kind = ev.kind.
+        # Ход, закрытый в этом же тике, уже показал строку-итог.
+        if self._thinking is not None and not is_terminal_indicator_state(
+            self._thinking._state
+        ):
+            self._thinking.set_state("validating")
+
+    def _drop_finish_attempts(self) -> None:
+        """Убрать прошлые попытки turn_finish хода.
+
+        Отклонённые intent_guard'ом попытки убираем молча (как regenerate
+        в чатах): внутренняя кухня качества юзеру не показывается, обе
+        попытки сохранены в jsonl треда."""
+        for prev_widgets in self._submit_solution_widgets:
+            for w in prev_widgets:
+                w.remove()
+        self._submit_solution_widgets.clear()
+        self._finish_summary = None
+
+    def _shown_by_finish_attempt(self, text: Optional[str]) -> bool:
+        """Текст виден только отчётом попытки turn_finish, которую уберёт
+        свёртка."""
+        return (
+            bool(self._submit_solution_widgets)
+            and text is not None
+            and text == self._finish_summary
+        )
 
     def _render_record(
         self,
@@ -3188,6 +3268,10 @@ class TraceScreen(Screen):
             # Previous submit_solutions are now considered completed answers,
             # not retry candidates for collapse.
             self._submit_solution_widgets.clear()
+            self._finish_summary = None
+            # Дедуп A1 действует внутри хода: проза прошлого хода не
+            # глушит такой же ответ этого.
+            self._last_agent_summary = None
             if live:
                 # Граница хода для эвристики имени — именно user-запись ядра:
                 # она есть и при обычном старте, и при подхвате очереди бегущим
@@ -3232,12 +3316,18 @@ class TraceScreen(Screen):
             # от записей на реплее защищает should_update_task (счётчик live-only).
             if ev.tool_name == "submit_solution":
                 self._seed_or_update_task_from_submit(ev)
+                self._render_finish(ev)
+                return
             # A1: дубль контента (проза → тот же финализатор / повтор) — молча
             # опускаем второй ряд (контент уже показан первым). Exact-match (strip),
             # без маркера: завершение хода и так видно по готовому инпуту.
             norm = (ev.summary or "").strip()
             if norm and norm == self._last_agent_summary:
                 return
+            if self._shown_by_finish_attempt(norm):
+                # Ответ модели повторил отчёт отклонённой попытки: попытка
+                # уходит, текст остаётся ответом — свёртка не унесёт его.
+                self._drop_finish_attempts()
             self._last_agent_summary = norm
             if ev.tool_name == "intermediate_reply":
                 from gc_tui.services.trace_render import (
@@ -3278,51 +3368,8 @@ class TraceScreen(Screen):
             else:
                 for w in mounted_widgets:
                     self._trace_mount(w, scroll=False)
-
-            # Submit_solution comment как note — после всех виджетов.
-            note_widget: Optional[TraceRow] = None
-            if isinstance(ev.full_payload, dict) and ev.full_payload.get(
-                "_submit_comment"
-            ):
-                from gc_tui.services.trace_render import note_text
-                from gc_tui.widgets.trace_row import TraceRow
-
-                note_widget = TraceRow(
-                    prefix="* ",
-                    content=note_text(ev.full_payload["_submit_comment"]),
-                    kind_class="line-note",
-                    event_no=ev.no,
-                    focusable=False,
-                )
-                self._trace_mount(note_widget, scroll=False)
             if following:
                 self._scroll_trace_end()
-
-            if ev.tool_name == "submit_solution" and ev.call_id:
-                self._submit_solution_call_ids.add(ev.call_id)
-                if self._submit_solution_widgets:
-                    # Отклонённые intent_guard'ом попытки убираем молча (как
-                    # regenerate в чатах): внутренняя кухня качества юзеру не
-                    # показывается, обе попытки сохранены в jsonl треда.
-                    for (
-                        prev_widgets,
-                        prev_note,
-                    ) in self._submit_solution_widgets:
-                        for w in prev_widgets:
-                            w.remove()
-                        if prev_note is not None:
-                            prev_note.remove()
-                # Трекаем ВСЕ смонтированные виджеты этой submit_solution
-                # (prose-блоки + code-block-panels) — нужно для коллапса при retry.
-                self._submit_solution_widgets.append(
-                    (list(mounted_widgets), note_widget)
-                )
-                # Финальный ответ виден — переключаем индикатор в режим
-                # «✓ завершаю…» немедленно (без 250мс лага на следующий тик
-                # _poll_active). Sticky-маркер sentinel выставляется в
-                # _render_records, чтобы пережить _last_event_kind = ev.kind ниже.
-                if self._thinking is not None:
-                    self._thinking.set_state("validating")
             return
 
         if ev.kind == "ask_human":
@@ -3913,6 +3960,24 @@ class TraceScreen(Screen):
             lookup.last_turn_id() if lookup is not None else None
         )
         self._edits_baseline_taken = True
+
+    def _close_turn_edits(self, kind: str) -> Optional[tuple]:
+        """Конец прогона: сбросить состояние хода, вернуть сводку его правок.
+
+        Агент мог создать скилл → TUI-кэш скиллов (/skill picker/inline,
+        строки скиллов палитры) инвалидируется и тихо прогревается заново в
+        фоне. Следующий прогон снимет свою границу журнала правок заново.
+        Сводка правок — тихий правый сегмент строки-итога; compact ходом не
+        считается, правок в нём нет."""
+        self._skills_cache = None
+        self._warm_skills_cache()
+        self._edits_baseline_taken = False
+        if kind == "compact":
+            return None
+        edits = self._finished_turn_summary()
+        if self._thinking is not None:
+            self._thinking.set_turn_summary(edits)
+        return edits
 
     def _finished_turn_summary(self) -> Optional[tuple]:
         """(файлов, +, −) правок завершившегося хода; None — показывать нечего.
@@ -5040,30 +5105,21 @@ class TraceScreen(Screen):
         # _prepare_for_new_run; ловит любой путь, где prepare не вызвали).
         if (not self._was_running) and is_running and _kind != "compact":
             self._stamp_tui_running()
-        # Спадающий фронт: агент мог создать скилл в прогоне → инвалидируем
-        # TUI-кэш скиллов (/skill picker/inline, строки скиллов палитры) и
-        # тихо прогреваем заново в фоне. Набор по клавишам диск не трогает.
-        _turn_edits = None
-        if self._was_running and not is_running:
-            self._skills_cache = None
-            self._warm_skills_cache()
-            # Прогон кончился — следующий снимет свою границу хода заново.
-            self._edits_baseline_taken = False
-            # Сводка правок хода — тихий правый сегмент строки-итога (compact
-            # ходом не считается: правок в нём нет по определению).
-            if _kind != "compact":
-                _turn_edits = self._finished_turn_summary()
-                if self._thinking is not None:
-                    self._thinking.set_turn_summary(_turn_edits)
-        # Спадающий фронт прогона True→False → зафиксировать терминальный статус
-        # в meta.tui.status (TUI-owned), чтобы бейдж пережил переоткрытие сессии.
+        # Ход уложился между тиками: бегущим его не застал ни один тик, но
+        # мета ещё «running» — конец хода тот же, что у спадающего фронта.
         _finished_before_poll = (
             runner is not None
+            and _kind != "compact"
             and getattr(runner, "_last_target", None)
             == (self._active_task_id, self.app._system)
             and self._store is not None
             and (self._tick_meta().get("tui") or {}).get("status") == "running"
         )
+        _turn_edits = None
+        if (self._was_running or _finished_before_poll) and not is_running:
+            _turn_edits = self._close_turn_edits(_kind)
+        # Спадающий фронт прогона True→False → зафиксировать терминальный статус
+        # в meta.tui.status (TUI-owned), чтобы бейдж пережил переоткрытие сессии.
         if (
             (self._was_running or _finished_before_poll)
             and not is_running
@@ -5127,6 +5183,12 @@ class TraceScreen(Screen):
                     },
                 },
             )
+            # Ход уложился между тиками: индикатор не создавался — строка-
+            # итог из только что записанной меты, как при переоткрытии.
+            # Тик, заставший прогон, индикатор создал; если его нет, его
+            # убрали намеренно (отмена-«undo») — не воскрешаем.
+            if self._thinking is None and not self._was_running:
+                self._restore_terminal_indicator()
             self.app.last_stop_requested = False
             self._update_terminal_title()
             # Ход закончился предложенным планом — баннер одобрения.

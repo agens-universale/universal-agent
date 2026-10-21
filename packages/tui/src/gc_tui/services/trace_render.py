@@ -18,6 +18,7 @@ from gc_core.constants.tool_display import (
 from gc_core.utils.path_truncate import truncate_path
 
 from gc_tui.models import TraceEvent
+from gc_tui.palette import INK
 from gc_tui.services.duration_format import format_round_int
 from gc_tui.services.skill_view import skill_input_name
 from gc_tui.services.trace_retention import (
@@ -28,6 +29,7 @@ from gc_tui.services.trace_retention import (
 )
 
 if TYPE_CHECKING:
+    from gc_core.tools.turn.turn_close import TurnClose
     from rich.text import Text
 
     from gc_tui.services.trace_mapper import RenderContext
@@ -64,6 +66,10 @@ LINE_INTERMEDIATE_CLASS = "line-intermediate"
 # Вложенная реплика субагента: глиф `●` серым (CSS по классу).
 NESTED_PROSE_CLASS = f"{LINE_INTERMEDIATE_CLASS} nested-prose"
 LINE_USER_CLASS = "line-user"
+LINE_SUMMARY_CLASS = "line-summary"
+LINE_NOTE_CLASS = "line-note"
+# Метка записи конца хода жирная и прямая — и в курсивной строке итога.
+_RECORD_LABEL_STYLE = "bold not italic"
 
 # Следствия вопроса ask_human — строкой `└` внутри его рамки (спека P3 §3).
 QUESTION_UNANSWERED = "без ответа"
@@ -199,6 +205,23 @@ def compaction_rule(
     return text
 
 
+def _segments(text: str, lead: Optional[Text]) -> list:
+    """Сегменты текста; с `lead` первым всегда идёт проза — строка под него."""
+    from gc_tui.services.markdown_render import Block, segment_answer
+
+    segments = segment_answer(text)
+    if lead is not None and (not segments or segments[0].kind != "prose"):
+        segments.insert(0, Block(kind="prose"))
+    return segments
+
+
+def _prose_text(text: str, ink: str, lead: Optional[Text]) -> Text:
+    from gc_tui.services.markdown_render import render_prose
+
+    content = render_prose(text, ink=ink)
+    return content if lead is None else lead + content
+
+
 def build_compaction_marker_event(
     no: int, segment_index: int, comp: dict
 ) -> TraceEvent:
@@ -253,21 +276,25 @@ def build_block_widgets(
     *,
     prose_bullet: bool,
     event_no: int,
+    bullet: str = PROSE_BULLET,
     kind_class_base: str = "line-agent",
+    ink: str = INK,
+    lead: Optional[Text] = None,
 ) -> list:
-    """Markdown → виджеты трейса. `prose_bullet` — префикс `● ` на прозе
-    (трейс/превью); False — без него (баннер ask_human). `kind_class_base` —
-    класс прозовых строк (intermediate_reply → line-intermediate, глиф
-    серым). Код и таблицы — BlockPanel. focusable=True только у первого
-    виджета события."""
-    from gc_tui.services.markdown_render import render_prose, segment_answer
+    """Markdown → виджеты трейса. `prose_bullet` — префикс `bullet` на прозе
+    (трейс/превью, по умолчанию `● `); False — без него (баннер ask_human).
+    `kind_class_base` — класс прозовых строк (intermediate_reply →
+    line-intermediate, глиф серым). Код и таблицы — BlockPanel.
+    focusable=True только у первого виджета события.
+    `ink` — стиль простого текста прозы (см. render_prose); `lead` — начало
+    первой строки (метка записи)."""
     from gc_tui.widgets.block_panel import BlockPanel
     from gc_tui.widgets.trace_row import TraceRow
 
     widgets: list = []
     focus_set = False
     first_prose_seen = False
-    for seg in segment_answer(text):
+    for seg in _segments(text, lead):
         if seg.kind == "code-block":
             widgets.append(
                 BlockPanel.for_code(
@@ -298,13 +325,16 @@ def build_block_widgets(
             if not first_prose_seen
             else f"{kind_class_base} line-agent-cont"
         )
-        marker = PROSE_BULLET if not first_prose_seen else "  "
+        marker = bullet if not first_prose_seen else "  "
         prefix = marker if prose_bullet else ""
+        # Метка — только в первой строке (она проза, см. _segments).
+        content = _prose_text(seg.content, ink, lead)
+        lead = None
         first_prose_seen = True
         widgets.append(
             TraceRow(
                 prefix=prefix,
-                content=render_prose(seg.content),
+                content=content,
                 kind_class=kind_class,
                 event_no=event_no,
                 focusable=not focus_set,
@@ -374,12 +404,18 @@ def build_intermediate_widgets(summary: str, *, event_no: int) -> list:
     )
 
 
-def note_text(comment: str) -> Text:
-    """Контент строки заметки submit_solution: ярлык «заметка: » прямой, текст
-    ремарки — курсивом (цвет/отступ берутся из CSS `.line-note`)."""
+def _record_label(label: str) -> Text:
     from rich.text import Text
 
-    t = Text("заметка: ")
+    return Text.assemble((f"{label}:", _RECORD_LABEL_STYLE), " ")
+
+
+def note_text(comment: str) -> Text:
+    """Контент строки заметки turn_finish: метка жирная и прямая, текст
+    ремарки — курсивом (цвет/отступ берутся из CSS `.line-note`)."""
+    from gc_core.tools.turn.turn_close import LABEL_NOTE
+
+    t = _record_label(LABEL_NOTE)
     t.append(comment, style="italic")
     return t
 
@@ -464,6 +500,74 @@ def build_call_row(
     )
 
 
+def build_summary_widgets(note: str, *, event_no: int) -> list:
+    """Запись «* итог: …» после ответа модели: тот же Markdown-пайплайн, что
+    у ответа (списки, блоки кода), метка жирная; цвет и курсив текста — от
+    CSS `.line-summary`, не от разметки."""
+    from gc_core.tools.turn.turn_close import LABEL_SUMMARY
+
+    return build_block_widgets(
+        note,
+        prose_bullet=True,
+        event_no=event_no,
+        bullet="* ",
+        kind_class_base=LINE_SUMMARY_CLASS,
+        ink="",
+        lead=_record_label(LABEL_SUMMARY),
+    )
+
+
+def _summary_comment_row(comment: str, event_no: int):
+    """Оговорка итога — отдельная строка-продолжение записи, без пустой
+    строки сверху: после списка, кода и таблицы она не сливается с блоком."""
+    from gc_tui.services.markdown_render import render_prose
+    from gc_tui.widgets.trace_row import TraceRow
+
+    return TraceRow(
+        prefix="  ",
+        content=render_prose(comment, ink=""),
+        kind_class=f"{LINE_SUMMARY_CLASS} line-agent-cont",
+        event_no=event_no,
+        focusable=False,
+    )
+
+
+def finish_close_of(ev) -> TurnClose:
+    """Конец хода по событию turn_finish (sidecar-ключи маппера)."""
+    from gc_core.tools.turn.submit_solution import TurnFinishView
+    from gc_core.tools.turn.turn_close import finish_close
+
+    payload = ev.full_payload if isinstance(ev.full_payload, dict) else {}
+    view = TurnFinishView(ev.summary, payload.get("_submit_comment", ""))
+    return finish_close(view, payload.get("_submit_reply", ""))
+
+
+def build_finish_widgets(close: TurnClose, *, event_no: int) -> list:
+    """Виджеты конца хода: отчёт ответом (если он не ушёл в итог), запись
+    «итог» или строка «заметка»."""
+    from gc_core.tools.turn.turn_close import LABEL_NOTE, LABEL_SUMMARY
+
+    from gc_tui.widgets.trace_row import TraceRow
+
+    if close.label == LABEL_SUMMARY:
+        widgets = build_summary_widgets(close.note, event_no=event_no)
+        if close.comment != "":
+            widgets.append(_summary_comment_row(close.comment, event_no))
+        return widgets
+    widgets = build_agent_widgets(close.body, event_no=event_no)
+    if close.label == LABEL_NOTE:
+        widgets.append(
+            TraceRow(
+                prefix="* ",
+                content=note_text(close.comment),
+                kind_class=LINE_NOTE_CLASS,
+                event_no=event_no,
+                focusable=False,
+            )
+        )
+    return widgets
+
+
 def raw_output(ev) -> Optional[str]:
     """Поле `output` из full_payload result-event как raw string."""
     if isinstance(ev.full_payload, dict):
@@ -517,23 +621,13 @@ def _dispatch_readonly(
             for w in build_intermediate_widgets(ev.summary, event_no=ev.no):
                 mount_target.mount(w)
             return
-        for w in build_agent_widgets(ev.summary, event_no=ev.no):
-            mount_target.mount(w)
-        comment = (
-            ev.full_payload.get("_submit_comment")
-            if isinstance(ev.full_payload, dict)
-            else None
+        widgets = (
+            build_finish_widgets(finish_close_of(ev), event_no=ev.no)
+            if ev.tool_name == "submit_solution"
+            else build_agent_widgets(ev.summary, event_no=ev.no)
         )
-        if comment:
-            mount_target.mount(
-                TraceRow(
-                    prefix="* ",
-                    content=note_text(comment),
-                    kind_class="line-note",
-                    event_no=ev.no,
-                    focusable=False,
-                )
-            )
+        for w in widgets:
+            mount_target.mount(w)
     elif ev.kind == "call":
         row = build_call_row(
             call_id=ev.call_id or f"_anon_{ev.no}",
