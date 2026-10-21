@@ -393,18 +393,6 @@ class AsyncAgent:
             return
         self._executor.stop_run()
 
-    async def astop(self) -> None:
-        """Стоп и ожидание, пока текущая работа снята.
-
-        Потолок ожидания — ошибка, не успешный стоп.
-        """
-        self.stop()
-        if self._durable is not None:
-            return
-        gate = getattr(self._executor, "user_stop", None)
-        if gate is not None:
-            await gate.await_settled()
-
     async def aclose(self) -> None:
         """Отпустить сетевой пул. Идемпотентно.
 

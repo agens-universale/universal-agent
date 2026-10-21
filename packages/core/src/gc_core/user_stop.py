@@ -366,14 +366,21 @@ def current_tool_call() -> tuple[str, str]:
 
 
 async def await_agent_stop(agent: Any) -> None:
-    """Стоп агента и ожидание, пока текущая работа снята."""
-    stop = getattr(agent, "astop", None)
-    if stop is not None:
-        await stop()
-        return
+    """Стоп агента и ожидание, пока текущая работа снята.
+
+    У агента одна форма — ``stop``: она возвращается сразу. Ждать снятия
+    можно только отсюда. Durable-ход своим ``stop`` и ограничивается.
+    Потолок ожидания — ошибка, не успешный стоп.
+    """
     plain = getattr(agent, "stop", None)
-    if plain is not None:
-        plain()
+    if plain is None:
+        return
+    plain()
+    if getattr(agent, "_durable", None) is not None:
+        return
+    gate = getattr(getattr(agent, "_executor", None), "user_stop", None)
+    if gate is not None:
+        await gate.await_settled()
 
 
 async def await_cancelled(task: asyncio.Task) -> None:

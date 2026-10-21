@@ -735,149 +735,6 @@ async def test_timeout_still_kills_when_nobody_stopped():
     assert result.stopped_by_user is False
 
 
-async def test_server_stop_returns_when_the_command_is_dead():
-    from gc_server.rest_api.agent_execution_registry import (
-        ActiveRun,
-        AgentRunRegistry,
-    )
-
-    log = _Log()
-    gate = _stop(log)
-    dead = asyncio.Event()
-
-    class _Executor:
-        user_stop = gate
-
-        def stop_run(self) -> None:
-            gate.request(log)
-
-    registry = AgentRunRegistry()
-    registry._runs["sys:task"] = ActiveRun(
-        key="sys:task",
-        system="sys",
-        task_id="task",
-        executor=_Executor(),
-        thread=None,
-        started_at=time.time(),
-        finished_at=None,
-        thread_id=None,
-        last_activity_at=time.time(),
-    )
-
-    async def _work():
-        with bind_user_stop(gate):
-            result = await LocalFsBackend().aexec("sleep 30", timeout=30)
-            dead.set()
-            return result
-
-    task = asyncio.create_task(_work())
-    await asyncio.sleep(0.3)
-    yielded = False
-
-    async def _other() -> None:
-        nonlocal yielded
-        yielded = True
-
-    other = asyncio.create_task(_other())
-    assert await registry.stop(system="sys", task_id="task") is True
-    assert yielded is True
-    await other
-    result = await task
-    assert dead.is_set()
-    assert result.stopped_by_user is True
-    assert log.events("user_stop_killed")
-
-
-def test_tui_stop_returns_before_the_worker_settles():
-    """Esc не ждёт снятие: кадр уходит, команда умирает на потоке воркера."""
-    from gc_tui.services.agent_runner import AgentRunner
-
-    log = _Log()
-    loop = asyncio.new_event_loop()
-    gate = UserStop()
-    release_done = threading.Event()
-
-    class _Executor:
-        user_stop = gate
-
-        def stop_run(self) -> None:
-            gate.request(log)
-
-    async def _arm() -> None:
-        gate.prepare_run(asyncio.get_running_loop(), log)
-        finish = asyncio.Event()
-
-        async def _release() -> None:
-            await asyncio.sleep(0.3)
-            release_done.set()
-            finish.set()
-
-        with bind_user_stop(gate):
-            async with gate.arm(kind="exec", release=_release):
-                await finish.wait()
-
-    def _run() -> None:
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(_arm())
-
-    thread = threading.Thread(target=_run, daemon=True)
-    thread.start()
-    for _ in range(50):
-        if gate._stack:
-            break
-        time.sleep(0.02)
-    assert gate._stack
-    runner = AgentRunner(_Executor())
-    started = time.monotonic()
-    runner.stop()
-    assert time.monotonic() - started < 0.1
-    assert not release_done.is_set()
-    thread.join(5)
-    assert not thread.is_alive()
-    assert release_done.is_set()
-    assert log.events("user_stop_killed")
-    loop.close()
-
-
-def test_cli_sigint_stops_the_run_and_ask_human_stays_a_refusal():
-    from gc_cli.run_stop import install_run_sigint, restore_run_sigint
-    from gc_core.utils.sigint_waits import intercept_sigint
-
-    calls = {"stop": 0}
-    held = threading.Lock()
-
-    class _Executor:
-        def stop_run(self) -> None:
-            with held:
-                calls["stop"] += 1
-
-    loop = asyncio.new_event_loop()
-
-    async def _body() -> None:
-        previous = install_run_sigint(_Executor())
-        try:
-            refused = {"n": 0}
-            with intercept_sigint(lambda: refused.__setitem__("n", 1)):
-                signal.getsignal(signal.SIGINT)(signal.SIGINT, None)
-            assert calls["stop"] == 0
-            assert refused["n"] == 1
-            held.acquire()
-            signal.getsignal(signal.SIGINT)(signal.SIGINT, None)
-            assert calls["stop"] == 0
-            held.release()
-            await asyncio.sleep(0)
-            assert calls["stop"] == 1
-            with pytest.raises(KeyboardInterrupt):
-                signal.getsignal(signal.SIGINT)(signal.SIGINT, None)
-        finally:
-            restore_run_sigint(previous)
-
-    try:
-        loop.run_until_complete(_body())
-    finally:
-        loop.close()
-
-
 async def test_release_error_is_not_a_kill_and_settles_when_the_wait_exits():
     """Сбой release не пишет killed и не открывает _settled, пока ожидание живо."""
     log = _Log()
@@ -924,8 +781,8 @@ async def test_release_error_is_not_a_kill_and_settles_when_the_wait_exits():
     assert gate._inflight.exception() is None
 
 
-async def test_chat_and_acp_stop_wait_until_settled():
-    from gc_acp.facade import _await_live_stop
+async def test_await_agent_stop_waits_until_settled():
+    """Ожидание снятия живёт в ``await_agent_stop``, не во второй форме агента."""
     from gc_core.user_stop import await_agent_stop
 
     log = _Log()
@@ -938,10 +795,6 @@ async def test_chat_and_acp_stop_wait_until_settled():
 
         def stop(self) -> None:
             gate.request(log)
-
-        async def astop(self) -> None:
-            self.stop()
-            await gate.await_settled()
 
     async def _arm() -> None:
         async def _release() -> None:
@@ -956,64 +809,6 @@ async def test_chat_and_acp_stop_wait_until_settled():
     await await_agent_stop(_Agent())
     assert released.is_set()
     await task
-
-    gate2 = _stop()
-    held = asyncio.Event()
-
-    class _Live:
-        agent = SimpleNamespace(_executor=SimpleNamespace(user_stop=gate2))
-
-    async def _hold() -> None:
-        async def _release() -> None:
-            held.set()
-
-        with bind_user_stop(gate2):
-            async with gate2.arm(kind="exec", release=_release):
-                await held.wait()
-
-    held_task = asyncio.create_task(_hold())
-    await asyncio.sleep(0.05)
-
-    async def _cancel() -> None:
-        gate2.request(log)
-        await _await_live_stop(_Live())
-
-    await _cancel()
-    assert held.is_set()
-    await held_task
-
-
-async def test_registry_stop_timeout_is_not_success(monkeypatch):
-    """Потолок ожидания не выглядит как снятый прогон."""
-    from gc_server.rest_api.agent_execution_registry import (
-        ActiveRun,
-        AgentRunRegistry,
-    )
-
-    monkeypatch.setattr("gc_core.user_stop._SETTLE_SEC", 0.05)
-    gate = UserStop()
-    gate._settled.clear()
-
-    class _Executor:
-        user_stop = gate
-
-        def stop_run(self) -> None:
-            return None
-
-    registry = AgentRunRegistry()
-    registry._runs["sys:task"] = ActiveRun(
-        key="sys:task",
-        system="sys",
-        task_id="task",
-        executor=_Executor(),
-        thread=None,
-        started_at=time.time(),
-        finished_at=None,
-        thread_id=None,
-        last_activity_at=time.time(),
-    )
-    with pytest.raises(TimeoutError):
-        await registry.stop(system="sys", task_id="task")
 
 
 def test_run_logger_accepts_the_stop_event():
