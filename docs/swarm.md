@@ -286,7 +286,7 @@ failed, cancelled}`, `started_at`, `finished_at`, `error` (для `failed`),
 
 ### `GET /v1/tasks/{system}/{task_id}/messages`
 
-История страницами (`after`, `limit`): с `swarm.storage` — тред задачи из
+История страницами (`cursor`, `limit`): с `swarm.storage` — тред задачи из
 хранилища, иначе `messages.jsonl` песочницы (канал E —
 `sandbox/.gc/threads/<id>/`, с фоллбэком в `swarm_threads_dir/<id>/`; `seq` —
 номер строки).

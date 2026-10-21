@@ -29,6 +29,10 @@ class ThreadBusy(OwnershipError):
         self.owner = owner
 
 
+class InvalidCursor(ThreadStoreError, ValueError):
+    """Курсор списка тредов не выдан этим хранилищем или испорчен."""
+
+
 class OperationMismatch(ThreadStoreError):
     """Тот же ``op_id`` пришёл с другим содержимым."""
 

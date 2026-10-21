@@ -46,6 +46,7 @@ from gc_core.threads.rules import (
     check_side_writer,
     check_writer,
     granted_lease,
+    list_cursor_of,
 )
 from gc_core.threads.store import ThreadStore
 
@@ -410,10 +411,7 @@ class SqlThreadStore(ThreadStore):
         page = records[: query.limit]
         cursor = None
         if len(records) > query.limit:
-            last = page[-1]
-            cursor = (
-                f"{last.info.updated_at}|{last.key.system}|{last.key.thread}"
-            )
+            cursor = list_cursor_of(page[-1])
         return Page[ThreadRecord](items=page, next_cursor=cursor)
 
     async def read_stream(

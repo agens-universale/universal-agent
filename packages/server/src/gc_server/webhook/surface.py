@@ -31,6 +31,7 @@ from gc_core.threads.errors import OwnershipError
 from gc_core.threads.facade import Threads
 from gc_core.threads.instance import instance_id
 from gc_core.threads.models import ThreadKey, ThreadQuery, ThreadRecord
+from gc_core.threads.rules import list_cursor_of
 from gc_core.trace_id import normalize_trace_id
 from gc_core.utils.generate_message_id import (
     generate_msg_id_sha256 as generate_message_id_func,
@@ -47,6 +48,11 @@ from gc_server.webhook.callbacks import (
     CallbackSender,
     allowed_callback,
     make_event,
+)
+from gc_server.webhook.history_page import (
+    HistoryPage,
+    Position,
+    ahistory_page,
 )
 from gc_server.webhook.registry import ActiveRun, AgentRunRegistry
 from gc_server.webhook.request import ensure_task_id, normalize_system
@@ -417,28 +423,33 @@ class WebhookSurface:
     async def alist(
         self, *, system: str | None, limit: int, cursor: str | None
     ) -> tuple[list[Dict[str, Any]], str | None]:
-        page = await self.threads().store.list_threads(
-            ThreadQuery(system=system, limit=limit, cursor=cursor)
-        )
-        tasks = [
-            _task_entry(record)
-            for record in page.items
-            if record.key.system not in RESERVED_SYSTEMS
-            and not _foreign(record)
-        ]
-        return tasks, page.next_cursor
+        """Задачи страницей в ``limit``: треды других поверхностей
+        отсеиваются, список дочитывается, пока страница не полна."""
+        store = self.threads().store
+        tasks: list[Dict[str, Any]] = []
+        while True:
+            page = await store.list_threads(
+                ThreadQuery(system=system, limit=limit, cursor=cursor)
+            )
+            taken = [r for r in page.items if _is_task(r)]
+            taken = taken[: limit - len(tasks)]
+            tasks += [_task_entry(record) for record in taken]
+            if len(tasks) == limit:
+                last = taken[-1]
+                more = last is not page.items[-1] or page.next_cursor
+                return tasks, list_cursor_of(last) if more else None
+            if page.next_cursor is None:
+                return tasks, None
+            cursor = page.next_cursor
 
     async def amessages(
-        self, key: ThreadKey, *, after: int, limit: int
-    ) -> list[Dict[str, Any]] | None:
+        self, key: ThreadKey, *, position: Position | None, limit: int
+    ) -> HistoryPage | None:
         threads = self.threads()
         record = await threads.get(key)
         if record is None or _foreign(record):
             return None
-        entries = await threads.store.read_stream(
-            key, "messages", after_seq=after, limit=limit
-        )
-        return [{"seq": e.seq, "ts": e.ts, "message": e.data} for e in entries]
+        return await ahistory_page(threads.store, record, position, limit)
 
     async def _take_start(self, system: str, task_id: str) -> bool:
         """Строить ли прогон этому запросу. Нет — тред уже ведут: свой
@@ -616,6 +627,11 @@ def _task_entry(record: ThreadRecord) -> dict:
         "status": status.get("status"),
         "updated_at": record.info.updated_at or record.info.created_at,
     }
+
+
+def _is_task(record: ThreadRecord) -> bool:
+    """Тред — задача вебхука (не интерактивная сессия, не swarm)."""
+    return record.key.system not in RESERVED_SYSTEMS and not _foreign(record)
 
 
 def _foreign(record: ThreadRecord | None) -> bool:

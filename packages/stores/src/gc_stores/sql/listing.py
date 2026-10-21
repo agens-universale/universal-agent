@@ -10,15 +10,15 @@ from __future__ import annotations
 from typing import Any
 
 from gc_core.threads.models import ThreadQuery
-from gc_core.threads.rules import instant
+from gc_core.threads.rules import instant, parse_list_cursor
 
 from gc_stores.sql.queries import SqlQueries
 
 
 def _cursor(q: SqlQueries, p, cursor: str) -> tuple[str, list[Any]]:
     d, c = q.d, q.c
-    at, system, thread = cursor.split("|", 2)
-    moment = d.time_in(instant(at))
+    at, system, thread = parse_list_cursor(cursor)
+    moment = d.time_in(at)
     sys_c, thr_c = f"{c('system')}{d.collate}", f"{c('thread_id')}{d.collate}"
     clause = (
         f"({c('updated_at')} < {p()} OR ({c('updated_at')} = {p()} AND "
