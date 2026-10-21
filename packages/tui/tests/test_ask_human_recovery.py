@@ -582,6 +582,28 @@ async def test_reconcile_keeps_active_ask_human_banner(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_reconcile_without_question_row_falls_back_to_line(tmp_path):
+    """Строки вопроса в ленте нет (баннер ребёнка) — «прервано» не теряется:
+    отдельной строкой, как до следствий в рамке."""
+    pytest.importorskip("textual")
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
+    async with app.run_test() as pilot:
+        scr = app.screen
+        _mount_zombie_banner(scr)
+        scr._ask_human_question_row.remove()
+        scr._ask_human_question_row = None
+        await pilot.pause()
+        scr._reconcile_ask_human_after_render(allow_remnant=True)
+        await pilot.pause()
+        from gc_tui.widgets.trace_row import TraceRow
+
+        texts = [str(w._content) for w in scr.query(TraceRow)]
+        assert "прервано — продолжите сообщением или Esc" in texts
+
+
+@pytest.mark.asyncio
 async def test_reconcile_unmounts_superseded_ask_human_banner(tmp_path):
     """Перекрытый ask_human (после вопроса есть событие = продолжение диалога) →
     reconcile снимает баннер (наш skip-output из Task 1 = kind=result)."""

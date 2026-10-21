@@ -15,7 +15,7 @@ Layout: Horizontal(prefix-Static, content-Static) — wrap длинного об
 - waiting  — call уже нарисован, execute ещё не начался: · dim, без elapsed;
 - running  — сейчас исполняется: ▸ + elapsed (+ опциональный live_status);
   на человеко-ожидании (pause) — ‖ без дыхания, elapsed заморожен;
-- done     — есть result: ✓/✗;
+- done     — есть result: ✓/✗; стоп или лимит (`halted`) — ■ серым;
 - interrupted — стоп/обрыв до output: · + «прервано».
 """
 
@@ -134,6 +134,7 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         self._event_no = event_no
         self._result: Optional[str] = None
         self._is_error: bool = False
+        self._halted: bool = False  # стоп/лимит: ■ и серое `└`, не ✗
         self._interrupted: bool = (
             False  # терминальное «прервано» (стоп/обрыв run)
         )
@@ -265,9 +266,14 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         self._live_status = text
         self._update()
 
-    def set_result(self, *, summary: str, error: bool) -> None:
+    def set_result(
+        self, *, summary: str, error: bool, halted: bool = False
+    ) -> None:
+        """Итог вызова. `halted` — стоп пользователя или лимит: не сбой,
+        глиф ■ и строка `└` серым (K4); иначе ошибка — ✗ и `└` цветом ERR."""
         self._result = summary
         self._is_error = error
+        self._halted = halted
         self._waiting = False
         self._live_status = None
         self._sync_pulse()
@@ -335,6 +341,8 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
             if self._paused_at is not None:
                 return _PAUSE_GLYPH, _RUN
             return "▸", _PULSE_SHADES[self._pulse_frame % len(_PULSE_SHADES)]
+        if self._halted:
+            return "■", _DIM
         if self._is_error:
             return "✗", _ERR
         return "✓", _OK
@@ -361,15 +369,22 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
             text.append(f"+{add}", style=_OK)
             text.append(" ")
             text.append(f"−{removed}", style=_ERR)
-        if self._result and not self._is_error:
+        if self._result and not self._ends_with_line:
             text.append(f" · {self._result}", style=_DIM)
         return text
 
+    @property
+    def _ends_with_line(self) -> bool:
+        """Итог строкой `└` под вызовом, не хвостом: ошибка, стоп, лимит."""
+        return self._is_error or self._halted
+
     def _render_consequence(self) -> Text:
-        """Строки `└` под вызовом: текст ошибки (`ERR`), затем пометки."""
+        """Строки `└` под вызовом: ошибка (`ERR`) или стоп/лимит (`DIM`),
+        затем пометки."""
         bodies = list(self._consequences)
-        if self._is_error and self._result:
-            bodies.insert(0, Text(self._result, style=_ERR))
+        if self._ends_with_line and self._result:
+            style = _DIM if self._halted else _ERR
+            bodies.insert(0, Text(self._result, style=style))
         return Text("\n").join(
             consequence_text(self._level, body) for body in bodies
         )

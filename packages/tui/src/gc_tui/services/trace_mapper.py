@@ -723,6 +723,29 @@ def _truncate_word_boundary(text: str, limit: int) -> str:
     return cut.rstrip() + "…"
 
 
+# Стоп пользователя и лимиты — не сбой тула (K4: стоп `■`, ошибка `✗`):
+# короткий статус вместо длинного error.message, строка вызова — «halted».
+_HALT_SUMMARIES = {
+    "cancelled_by_user": "отменено",
+    "not_started_due_to_user_stop": "не запущено (стоп)",
+    "step_limit": "лимит шагов",
+    "token_limit": "лимит токенов",
+    "tool_call_limit": "лимит вызовов",
+}
+
+
+def halt_summary(output: Any) -> Optional[str]:
+    """Сводка стопа/лимита из output тула; None — это не стоп и не лимит."""
+    if not isinstance(output, str):
+        return None
+    from gc_tui.services.tool_preview import unwrap_tool_output_dict
+
+    data = unwrap_tool_output_dict(output)
+    if not isinstance(data, dict):
+        return None
+    return _HALT_SUMMARIES.get(data.get("status"))
+
+
 def _summarize_output(output: Any, *, error: bool) -> str:
     if not isinstance(output, str):
         return ""
@@ -737,18 +760,9 @@ def _summarize_output(output: Any, *, error: bool) -> str:
     if not isinstance(data, dict):
         return str(data)[:80]
 
-    # User-stop / step-limit: короткие статусы вместо длинного error.message.
-    status = data.get("status")
-    if status == "cancelled_by_user":
-        return "отменено"
-    if status == "not_started_due_to_user_stop":
-        return "не запущено (стоп)"
-    if status == "step_limit":
-        return "лимит шагов"
-    if status == "token_limit":
-        return "лимит токенов"
-    if status == "tool_call_limit":
-        return "лимит вызовов"
+    halted = _HALT_SUMMARIES.get(data.get("status"))
+    if halted:
+        return halted
 
     if error:
         err = data.get("error") or data.get("message") or ""
@@ -857,6 +871,7 @@ def _map_function_event(
             message_id=mid,
             call_id=call_id,
             tool_name=name,
+            halted=halt_summary(output) is not None,
         )
 
     return None

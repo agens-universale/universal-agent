@@ -393,7 +393,11 @@ def _dispatch_readonly(
     elif ev.kind in ("result", "error"):
         row = calls.get(ev.call_id) if ev.call_id else None
         if row is not None:
-            row.set_result(summary=ev.summary, error=(ev.kind == "error"))
+            row.set_result(
+                summary=ev.summary,
+                error=(ev.kind == "error"),
+                halted=ev.halted,
+            )
         else:
             prefix = "   " if ev.kind == "result" else "   [!] "
             cls = "line-ok" if ev.kind == "result" else "line-error"
@@ -668,12 +672,15 @@ def merge_nested_readonly(
         tool_call_id="",
         ok=True,
         error_brief=None,
+        halted=False,
         **_kw,
     ):
         row = nested_rows.get(tool_call_id)
         if row is not None:
             row.set_result(
-                summary="" if ok else (error_brief or "error"), error=not ok
+                summary="" if ok else (error_brief or "error"),
+                error=not ok,
+                halted=halted,
             )
 
     def _prose(*, parent_call_id, prose, **_kw):

@@ -3204,6 +3204,7 @@ class TraceScreen(Screen):
                 row.set_result(
                     summary=ev.summary,
                     error=(ev.kind == "error"),
+                    halted=ev.halted,
                 )
                 self._mount_inline_diff(ev, row)
                 # Nested под subagent_* оставляем в живой сессии (иерархия под ✓/✗).
@@ -3441,6 +3442,7 @@ class TraceScreen(Screen):
         tool_call_id: str = "",
         ok: bool = True,
         error_brief: str | None = None,
+        halted: bool = False,
         **_kw,
     ) -> None:
         row = (
@@ -3449,7 +3451,7 @@ class TraceScreen(Screen):
         if row is None:
             return
         summary = "" if ok else (error_brief or "error")
-        row.set_result(summary=summary, error=not ok)
+        row.set_result(summary=summary, error=not ok, halted=halted)
         self._mount_nested_inline_diff(parent_call_id, tool_call_id, row)
 
     def _mount_nested_inline_diff(
@@ -4382,15 +4384,22 @@ class TraceScreen(Screen):
             return  # живой агент действительно ждёт ответа
         question = self._ask_human_question_row
         self._unmount_ask_human_banner()
-        if allow_remnant and question is not None:
+        if not allow_remnant:
+            return
+        from gc_tui.services.trace_render import (
+            QUESTION_INTERRUPTED,
+            note_question,
+        )
+
+        if question is not None:
             # Следствие — строкой `└` в рамке вопроса «? …» (её монтирует
             # _on_ask_human_event), не отдельной строкой ленты.
-            from gc_tui.services.trace_render import (
-                QUESTION_INTERRUPTED,
-                note_question,
-            )
-
             note_question(question, QUESTION_INTERRUPTED)
+            return
+        # Строки вопроса в ленте нет (баннер ребёнка) — отдельной строкой.
+        self._mount_trace_row(
+            prefix="", content=QUESTION_INTERRUPTED, kind_class="line-meta"
+        )
 
     def _mount_user_reply(
         self,

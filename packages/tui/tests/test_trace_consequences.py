@@ -62,6 +62,9 @@ def _result(data: dict) -> str:
     [
         ({"total_lines": 188}, "188 строк"),
         ({"total_lines": 1}, "1 строка"),
+        ({"total_lines": 11}, "11 строк"),
+        ({"total_lines": 22}, "22 строки"),
+        ({"total_lines": 25}, "25 строк"),
         ({"lines": 2}, "2 строки"),
         ({"matches": list(range(14))}, "14 совпадений"),
         ({"matches": 1}, "1 совпадение"),
@@ -71,6 +74,9 @@ def _result(data: dict) -> str:
         ({"entries": ["a", "b"]}, "2 записи"),
         ({"entries": ["a"], "count": 5}, "5 записей"),
         ({"count": 12}, "12 записей"),
+        ({"count": 1}, "1 запись"),
+        ({"count": 21}, "21 запись"),
+        ({"count": 11}, "11 записей"),
         ({"bytes": 2}, "2 байта"),
         ({"bytes": 5}, "5 байт"),
         ({"exit": 2}, "код выхода 2"),
@@ -117,6 +123,94 @@ def test_nested_error_line_two_deeper():
     row = ToolCallRow(call_id="c1", label="Edit", target="x", level=1)
     row.set_result(summary="нет файла", error=True)
     assert _consequence(row) == "    └ нет файла"
+
+
+@pytest.mark.parametrize("summary", ["отменено", "лимит шагов"])
+def test_halted_row_is_stop_not_failure(summary):
+    """Стоп и лимит — не ошибка (K4): глиф `■` серым, строка `└` серым."""
+    row = ToolCallRow(call_id="c1", label="Read", target="x")
+    row.set_result(summary=summary, error=True, halted=True)
+    prefix = row._render_prefix()
+    assert "■" in prefix.plain and "✗" not in prefix.plain
+    assert _styles_of(prefix, "■") == [DIM]
+    assert row._render_content().plain == "Read  x"
+    line = row._render_consequence()
+    assert line.plain == f"  └ {summary}"
+    assert _styles_of(line, summary) == [DIM]
+
+
+def test_real_error_keeps_cross_and_err_line():
+    row = ToolCallRow(call_id="c1", label="Read", target="x")
+    row.set_result(summary="нет файла", error=True)
+    prefix = row._render_prefix()
+    assert _styles_of(prefix, "✗") == [ERR]
+    assert _styles_of(row._render_consequence(), "нет файла") == [ERR]
+
+
+def _output_event(data: dict) -> TraceEvent:
+    msg = {
+        "type": "function_call_output",
+        "name": "fs_read_file",
+        "call_id": "c1",
+        "output": json.dumps(data),
+    }
+    return map_message(msg, no=2, ts="")
+
+
+@pytest.mark.parametrize(
+    "status",
+    [
+        "cancelled_by_user",
+        "not_started_due_to_user_stop",
+        "step_limit",
+        "token_limit",
+        "tool_call_limit",
+    ],
+)
+def test_mapper_marks_stop_and_limits_halted(status):
+    ev = _output_event({"ok": False, "status": status, "error": "x"})
+    assert ev.halted is True
+
+
+def test_mapper_real_error_not_halted():
+    ev = _output_event({"ok": False, "error": "нет файла"})
+    assert ev.kind == "error" and ev.halted is False
+
+
+def test_preview_halted_result_is_stop_row():
+    target, calls = _Target(), {}
+    _dispatch_readonly(
+        target,
+        _ev(
+            "call",
+            call_id="c1",
+            wire_name="fs_read_file",
+            tool_name="fs_read_file",
+            args_summary="x",
+        ),
+        calls,
+    )
+    ev = _output_event({"ok": False, "status": "cancelled_by_user"})
+    _dispatch_readonly(target, ev, calls)
+    (row,) = target.children
+    assert "■" in row._render_prefix().plain
+    assert _styles_of(row._render_consequence(), "отменено") == [DIM]
+
+
+def test_preview_nested_halted_is_stop_row():
+    target, calls = _Target(), {}
+    parent = ToolCallRow(call_id="p1", label="Agent", target="")
+    target.mount(parent)
+    calls["p1"] = parent
+    out = json.dumps({"ok": False, "status": "step_limit", "error": "x"})
+    records = [
+        _sidecar(1, "call", {"call_id": "n1", "name": "fs_read_file"}),
+        _sidecar(2, "error", {"call_id": "n1", "output": out}),
+    ]
+    merge_nested_readonly(target, records, calls)
+    nested = target.children[1]
+    assert "■" in nested._render_prefix().plain
+    assert _consequence(nested) == "    └ лимит шагов"
 
 
 def test_add_consequence_appends_line_under_row():
