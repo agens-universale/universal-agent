@@ -925,11 +925,13 @@ class AgentExecutor:
             # молча погасил бы следующий запрос человека.
             self._state = None
             self._accounting_closed = False
+        settings = settings_of(self._ctx)
+        # Раньше стопа: неверный persist не должен падать на отсутствии
+        # ``user_stop`` и не вооружает снятие хода, который не начнётся.
+        _require_supported_persist_mode(settings, self._ctx)
         self.user_stop.prepare_run(
             asyncio.get_running_loop(), getattr(self._ctx, "logger", None)
         )
-        settings = settings_of(self._ctx)
-        _require_supported_persist_mode(settings, self._ctx)
         logger = getattr(self._ctx, "logger", None)
         effective_verbose = (
             verbose if verbose is not None else settings.agent.verbose
