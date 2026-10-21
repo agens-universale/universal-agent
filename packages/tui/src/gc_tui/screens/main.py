@@ -71,12 +71,20 @@ from gc_tui.palette import DEEP_DIM as _DEEP_DIM
 from gc_tui.palette import DIM as _DIM
 from gc_tui.palette import ERR as _ERR_RED
 from gc_tui.palette import INK as _INK
+from gc_tui.palette import OK as _OK
+from gc_tui.palette import WARN as _WARN
 from gc_tui.screens.tool_call_detail import ToolCallDetailScreen
 from gc_tui.services import image_hints, image_paste, os_ops
 from gc_tui.services.clipboard_ops import copy_out
 from gc_tui.services.context_meter import render_context_meter
-from gc_tui.services.export import export_thread
+from gc_tui.services.export import agent_answers, export_thread
 from gc_tui.services.footer_slot import (
+    COPY_DONE_LAST,
+    COPY_DONE_NTH,
+    COPY_REFUSAL_BAD_N,
+    COPY_REFUSAL_EMPTY,
+    COPY_REFUSAL_FAILED,
+    COPY_REFUSAL_TOO_BIG,
     HINT_TEXT,
     IMAGE_OPEN_TIP,
     IMAGE_PASTE_BUSY_HINT,
@@ -687,6 +695,9 @@ class TraceScreen(Screen):
         self._footer_mode_hint: Optional[str] = None
         self._mode_hint_after_voice: Optional[str] = None
         self._footer_refusal_active: bool = False
+        # Цвет активного отклика слота: "warn" — отказ, "ok" — успех, None —
+        # обычная подсказка.
+        self._footer_hint_tone: Optional[str] = None
         self._refusal_run_id = None  # прогон, ШЕДШИЙ при постановке отказа
         self._refusal_input_text = ""  # текст поля ввода при постановке отказа
         # Ключ последней сборки футера (`_footer_inputs`); None — не собран.
@@ -1532,8 +1543,18 @@ class TraceScreen(Screen):
     def _footer_slot_line(self, badge: str) -> Text:
         """Строка 2 (слот): подсказка/отказ/совет, иначе бейдж уведомлений."""
         if self._footer_hint_active and self._footer_mode_hint is None:
-            return self._footer_slot_with(Text(self._footer_hint_text or ""))
+            return self._footer_slot_with(self._footer_hint_body())
         return self._footer_badge_line(badge)
+
+    def _footer_hint_body(self) -> Text:
+        """Текст подсказки слота; у отклика команды — цвет: отказ целиком
+        WARN, успех — глиф ✓ цветом OK."""
+        body = Text(self._footer_hint_text or "")
+        if self._footer_hint_tone == "warn":
+            body.stylize(_WARN)
+        elif self._footer_hint_tone == "ok":
+            body.stylize(_OK, 0, 1)
+        return body
 
     def _footer_badge_line(self, badge: str) -> Text:
         """Слот с бейджем уведомлений — его ширину резервирует лесенка."""
@@ -1618,6 +1639,7 @@ class TraceScreen(Screen):
             text_key(voice),
             self._footer_hint_active,
             self._footer_hint_text,
+            self._footer_hint_tone,
             self._footer_mode_hint,
         )
 
@@ -1713,6 +1735,13 @@ class TraceScreen(Screen):
         except Exception:
             self._refusal_input_text = ""
 
+    def _show_footer_outcome(self, text: str, *, ok: bool) -> None:
+        """Итог команды в слоте футера по канону отказа (5 с, гасится
+        следующим действием), с цветом: отказ — WARN, успех — ✓ цветом OK."""
+        self._show_footer_refusal(text)
+        self._footer_hint_tone = "ok" if ok else "warn"
+        self._refresh_footer()
+
     def _show_footer_tip(self, text: str) -> None:
         """Совет в слоте футера (подсказки картинок) — по канону отказа: 5 с,
         следующее действие человека гасит его раньше."""
@@ -1737,6 +1766,7 @@ class TraceScreen(Screen):
         # ПОСЛЕ отказа, гасился бы первой печатью — не по своему канону
         # (`_show_footer_refusal` ставит флаг заново, после этого вызова).
         self._footer_refusal_active = False
+        self._footer_hint_tone = None
         self._footer_hint_active = True
         self._footer_hint_text = text
         self._footer_mode_hint = None
@@ -1777,6 +1807,7 @@ class TraceScreen(Screen):
         self._esc_confirm_kind = None
         self._footer_hint_active = False
         self._footer_hint_text = None
+        self._footer_hint_tone = None
         self._footer_mode_hint = None
         self._footer_refusal_active = False
         self._refusal_run_id = None
@@ -8462,6 +8493,9 @@ class TraceScreen(Screen):
         if name == "export":
             self._cmd_export(arg)
             return
+        if name == "copy":
+            self._cmd_copy(arg)
+            return
         if name == "status":
             self._cmd_status(arg)
             return
@@ -8785,6 +8819,34 @@ class TraceScreen(Screen):
             content=str(path),
             kind_class="line-meta",
         )
+
+    def _cmd_copy(self, arg: str) -> None:
+        """/copy [N]: N-й с конца ответ агента — в буфер обмена; итог — в
+        слоте футера."""
+        answers = []
+        if self._store is not None and self._active_task_id:
+            answers = agent_answers(
+                self._store.read_segments(self._active_task_id)
+            )
+        text = (arg or "").strip() or "1"
+        if not text.isdecimal() or int(text) < 1:
+            self._show_footer_outcome(COPY_REFUSAL_BAD_N, ok=False)
+            return
+        n, total = int(text), len(answers)
+        if not total:
+            self._show_footer_outcome(COPY_REFUSAL_EMPTY, ok=False)
+        elif n > total:
+            self._show_footer_outcome(
+                COPY_REFUSAL_TOO_BIG.format(n=n, total=total), ok=False
+            )
+        elif not copy_out(self.app, answers[-n], blocking=True):
+            self._show_footer_outcome(COPY_REFUSAL_FAILED, ok=False)
+        elif n == 1:
+            self._show_footer_outcome(COPY_DONE_LAST, ok=True)
+        else:
+            self._show_footer_outcome(
+                COPY_DONE_NTH.format(n=n, total=total), ok=True
+            )
 
     def _export_log_txt(self, tid: str, stamp: str) -> None:
         log_path = getattr(self.app, "_session_log_path", None)

@@ -37,3 +37,21 @@ def test_toggle_info_line_is_one_line():
 
 def test_min_cols():
     assert MAIN_FOOTER_MIN_COLS == 64
+
+
+def test_copy_texts():
+    from gc_tui.services.footer_slot import (
+        COPY_DONE_LAST,
+        COPY_DONE_NTH,
+        COPY_REFUSAL_BAD_N,
+        COPY_REFUSAL_EMPTY,
+        COPY_REFUSAL_TOO_BIG,
+    )
+
+    assert COPY_DONE_LAST == "✓ скопирован последний ответ"
+    assert COPY_DONE_NTH.format(n=2, total=3) == "✓ скопирован ответ 2 из 3"
+    assert COPY_REFUSAL_TOO_BIG.format(n=5, total=3) == (
+        "/copy 5: ответов агента в сессии 3"
+    )
+    assert COPY_REFUSAL_BAD_N in TRUNCATABLE
+    assert COPY_REFUSAL_EMPTY.startswith("/copy:")

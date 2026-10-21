@@ -54,6 +54,15 @@ QUEUE_ADMITTED_HINT = "сообщение уже у агента — измен�
 RETENTION_DETAIL_HINT = "детали вне окна retention; /export или архив"
 NESTED_NO_DETAIL = "нет args/output для этого nested-тула"
 
+# /copy: отказы (WARN) и успех (✓ цветом OK); `{n}` — запрошенный номер,
+# `{total}` — число ответов агента в сессии.
+COPY_REFUSAL_EMPTY = "/copy: в этой сессии ещё нет ответов агента"
+COPY_REFUSAL_TOO_BIG = "/copy {n}: ответов агента в сессии {total}"
+COPY_REFUSAL_BAD_N = "/copy N — N-й ответ с конца, например /copy 2"
+COPY_REFUSAL_FAILED = "/copy: не удалось записать в буфер обмена"
+COPY_DONE_LAST = "✓ скопирован последний ответ"
+COPY_DONE_NTH = "✓ скопирован ответ {n} из {total}"
+
 # Тексты, которые по спеке могут обрезаться многоточием (отказы с
 # подстановкой и длинные пояснения); остальные обязаны влезать в
 # `MAIN_FOOTER_MIN_COLS - 20`.
@@ -62,6 +71,7 @@ TRUNCATABLE = frozenset(
         *IMAGE_PASTE_REFUSALS.values(),
         IMAGES_WITH_COMMAND_REFUSAL,
         RETENTION_DETAIL_HINT,
+        COPY_REFUSAL_BAD_N,
     }
 )
 

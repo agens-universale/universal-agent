@@ -175,6 +175,12 @@ def build_default_registry() -> CommandRegistry:
                 ("log-json", "JSONL-файл треда (вся сессия)"),
             ),
         ),
+        Command(
+            "copy",
+            (),
+            "[N]",
+            "Скопировать последний ответ агента или N-й с конца (/copy N)",
+        ),
         Command("compact", ("сжать",), "", "Сжать контекст сессии сейчас"),
         Command("init", (), "", "Анализ проекта и генерация AGENTS.md"),
         Command("skills", (), "", "Обзор навыков"),

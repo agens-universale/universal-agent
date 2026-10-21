@@ -12,6 +12,8 @@ from gc_core.message_policy.user_message_policy import (
     user_content_to_text,
 )
 
+from gc_tui.services.trace_mapper import collect_render_context, map_message
+
 _THINK_RE = re.compile(r"<think>(.*?)</think>", re.DOTALL | re.IGNORECASE)
 _TECH_INNER_RE = re.compile(
     r"<technical\s+type=\"[a-z_]+\">(.*?)</technical>",
@@ -231,6 +233,43 @@ def _render_txt(segments: list[dict], header: dict) -> str:
     if n == 0 and not any(s.get("compacted_by") for s in segments):
         out.append("(пусто)")
     return "\n".join(out).rstrip() + "\n"
+
+
+# --- ответы агента --------------------------------------------------------
+
+
+def _segment_answers(seg: dict) -> list[str]:
+    payloads = [
+        r["payload"]
+        for r in seg["messages"]
+        if isinstance(r.get("payload"), dict)
+    ]
+    context = collect_render_context(payloads)
+    events = (
+        map_message(p, no=no, ts="", context=context)
+        for no, p in enumerate(payloads)
+    )
+    return [
+        ev.summary
+        for ev in events
+        if ev is not None
+        and ev.kind == "agent"
+        and ev.tool_name != "intermediate_reply"
+    ]
+
+
+def agent_answers(segments: list[dict]) -> list[str]:
+    """Ответы агента треда по порядку (по сегментам сжатия): проза, отчёт
+    финала и план — то же определение «ответа», что у ленты. Реплики,
+    вывод тулов и промежуточные ответы не входят; подряд идущий повтор
+    (отчёт, равный только что показанной прозе) лента не печатает — здесь
+    он тоже один."""
+    answers: list[str] = []
+    for seg in segments:
+        for text in _segment_answers(seg):
+            if not answers or answers[-1].strip() != text.strip():
+                answers.append(text)
+    return answers
 
 
 # --- public API -----------------------------------------------------------
