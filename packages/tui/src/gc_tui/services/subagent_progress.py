@@ -6,12 +6,15 @@ Runtime кладёт события в QueueSubagentProgressSink (worker-пот�
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from typing import Any, Callable, Optional, Sequence
 
 from gc_core.attachments.model import attachments_of
-from gc_core.constants.tool_display import tool_display
+from gc_core.constants.tool_display import DisplayCategory, McpToolInfo
 from gc_core.constants.tool_names import SESSION_TODO_TOOL_NAME
 from gc_core.execution.progress import SubagentProgressEvent
+
+from gc_tui.services.trace_render import tool_caption
 
 
 def reconcile_batch_phases(rows: Sequence[Any]) -> None:
@@ -186,12 +189,20 @@ class SubagentProgressConsumer:
 
 
 def format_parent_live_status(
-    *, step: int, max_steps: int, last_tool: Optional[str]
+    *,
+    step: int,
+    max_steps: int,
+    last_tool: Optional[str],
+    mcp_tools: Optional[Mapping[str, McpToolInfo]] = None,
+    mcp_servers: Iterable[str] = (),
 ) -> str:
     """Хвост корневой строки субагента: `step 4/100 · last=Read`.
 
-    `last` — подпись тула из ядра, не wire-имя (спека P3 §2.1)."""
+    `last` — имя тула, как в строке вызова (спека P3 §2.1): подпись ядра,
+    MCP — `сервер · тул`, неизвестный — wire-имя; скрытый — без `last`."""
     parts = [f"step {step}/{max_steps}" if max_steps else f"step {step}"]
     if last_tool:
-        parts.append(f"last={tool_display(last_tool).label}")
+        category, name = tool_caption(last_tool, mcp_tools, mcp_servers)
+        if category is not DisplayCategory.HIDDEN:
+            parts.append(f"last={name}")
     return " · ".join(parts)

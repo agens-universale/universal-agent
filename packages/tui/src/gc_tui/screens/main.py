@@ -3548,11 +3548,14 @@ class TraceScreen(Screen):
         row = self._nested_parent_row(parent_call_id)
         if row is None:
             return
+        mcp_tools, mcp_servers = self._mcp_tool_info()
         row.set_live_status(
             format_parent_live_status(
                 step=step,
                 max_steps=max_steps,
                 last_tool=last_tool,
+                mcp_tools=mcp_tools,
+                mcp_servers=mcp_servers,
             )
         )
 

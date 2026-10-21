@@ -121,6 +121,46 @@ def test_subagent_live_status_last_is_label():
     )
 
 
+def test_subagent_live_status_hides_hidden_tool():
+    from gc_tui.services.subagent_progress import format_parent_live_status
+
+    assert (
+        format_parent_live_status(
+            step=4, max_steps=100, last_tool="session_todo"
+        )
+        == "step 4/100"
+    )
+
+
+def test_subagent_live_status_unknown_tool_by_wire_name():
+    from gc_tui.services.subagent_progress import format_parent_live_status
+
+    assert (
+        format_parent_live_status(step=2, max_steps=0, last_tool="my_tool")
+        == "step 2 · last=my_tool"
+    )
+
+
+def test_subagent_live_status_mcp_is_server_and_tool():
+    from gc_tui.services.subagent_progress import format_parent_live_status
+
+    assert (
+        format_parent_live_status(
+            step=1,
+            max_steps=5,
+            last_tool="mcp_jira_create_issue",
+            mcp_tools=_JIRA,
+        )
+        == "step 1/5 · last=jira · Создать задачу"
+    )
+    assert format_parent_live_status(
+        step=1,
+        max_steps=5,
+        last_tool="mcp_jira_create_issue",
+        mcp_servers=("jira",),
+    ).endswith("last=jira · create_issue")
+
+
 def test_open_request_by_call_id():
     from gc_tui.messages import OpenToolCallDetailRequest
     from gc_tui.services.trace_render import build_call_row

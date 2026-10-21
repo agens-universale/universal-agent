@@ -383,25 +383,39 @@ def note_text(comment: str) -> Text:
     return t
 
 
+def tool_caption(
+    wire_name: str,
+    mcp_tools: Mapping[str, McpToolInfo] | None = None,
+    mcp_servers: Iterable[str] = (),
+) -> tuple[DisplayCategory, str]:
+    """Категория и имя тула для ленты по отображению ядра (спека P3 §2.1).
+
+    MCP — `сервер · тул`; тул без подписи (неизвестный или скрытый
+    политикой) — сырое wire-имя; остальные — подпись ядра."""
+    shown = tool_display(
+        wire_name, mcp_tools=mcp_tools, mcp_servers=mcp_servers
+    )
+    if shown.category is DisplayCategory.MCP:
+        return shown.category, f"{shown.label} · {shown.detail}"
+    if shown.category in (DisplayCategory.CALLED, DisplayCategory.HIDDEN):
+        return shown.category, wire_name
+    return shown.category, shown.label
+
+
 def _call_caption(
     wire_name: str,
     args_summary: str,
     mcp_tools: Mapping[str, McpToolInfo] | None,
     mcp_servers: Iterable[str],
 ) -> tuple[str, str]:
-    """(подпись, объект) строки вызова по отображению ядра (спека P3 §2.1).
-
-    MCP — `сервер · тул`; тул без подписи (неизвестный или скрытый политикой,
-    но всё же дошедший до ленты) — `Called` и сырое имя в объекте."""
-    shown = tool_display(
-        wire_name, mcp_tools=mcp_tools, mcp_servers=mcp_servers
-    )
-    if shown.category is DisplayCategory.MCP:
-        return f"{shown.label} · {shown.detail}", args_summary
-    if shown.category in (DisplayCategory.CALLED, DisplayCategory.HIDDEN):
-        target = " ".join(p for p in (wire_name, args_summary) if p)
+    """(подпись, объект) строки вызова: тул без подписи (неизвестный или
+    скрытый, но всё же дошедший до ленты) — `Called` и сырое имя в
+    объекте."""
+    category, name = tool_caption(wire_name, mcp_tools, mcp_servers)
+    if category in (DisplayCategory.CALLED, DisplayCategory.HIDDEN):
+        target = " ".join(p for p in (name, args_summary) if p)
         return DisplayCategory.CALLED.value, target
-    return shown.label, args_summary
+    return name, args_summary
 
 
 def build_call_row(
