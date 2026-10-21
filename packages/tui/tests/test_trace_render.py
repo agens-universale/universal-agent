@@ -712,3 +712,63 @@ def test_readonly_error_msg_without_call_row_still_shown():
     )
     _dispatch_readonly(_Target(), ev, {})
     assert len(mounted) == 1
+
+
+# --- строки без владельца (спека P3 §10, ответ 5) ---------------------------
+
+
+@pytest.mark.parametrize(
+    ("severity", "cls"), [("error", "line-error"), ("warn", "line-warn")]
+)
+def test_standalone_row_bang_in_bullet_column(severity, cls):
+    """Строка без владельца: `!` в колонке `●`, цвет — классом важности,
+    квадратных скобок нет."""
+    pytest.importorskip("textual")
+    from gc_tui.services.trace_render import build_standalone_row
+
+    row = build_standalone_row("сломалось", severity=severity, event_no=3)
+    assert row._prefix == "! "
+    assert row._content == "сломалось"
+    assert row.has_class(cls)
+    assert row._event_no == 3
+
+
+def test_note_consequence_is_bang_text_in_warn():
+    from gc_tui.palette import WARN
+    from gc_tui.services.trace_render import note_consequence
+
+    body = note_consequence("не просмотрено")
+    assert body.plain == "! не просмотрено"
+    assert {str(s.style) for s in body.spans} == {WARN}
+
+
+def _readonly_orphan(kind: str):
+    pytest.importorskip("textual")
+    from gc_tui.models import TraceEvent
+    from gc_tui.services.trace_render import _dispatch_readonly
+
+    mounted = []
+
+    class _Target:
+        def mount(self, w, **kw):
+            mounted.append(w)
+
+    ev = TraceEvent(
+        no=4,
+        event_ts_utc_iso="",
+        kind=kind,
+        title="",
+        summary="ENOENT",
+        full_payload={},
+        call_id="unknown",
+    )
+    _dispatch_readonly(_Target(), ev, {})
+    return mounted
+
+
+@pytest.mark.parametrize("kind", ["error_msg", "error"])
+def test_readonly_orphan_error_is_standalone_bang_err(kind):
+    """Превью: error_msg без вызова и ошибка без строки вызова — `! …` ERR."""
+    (row,) = _readonly_orphan(kind)
+    assert (row._prefix, row._content) == ("! ", "ENOENT")
+    assert row.has_class("line-error")

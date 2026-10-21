@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Iterable, Mapping
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Literal, Optional
 
 from gc_core.constants.tool_display import (
     DisplayCategory,
@@ -31,6 +31,7 @@ if TYPE_CHECKING:
 
     from gc_tui.services.trace_mapper import RenderContext
     from gc_tui.widgets.tool_call_row import ToolCallRow
+    from gc_tui.widgets.trace_row import TraceRow
 
 # Парсер `[tag] rest` для default meta-кейса (трейс и read-only превью).
 TAG_RE = re.compile(r"^\[(?P<tag>[^\]]+)\]\s*(?P<rest>.*)$")
@@ -76,6 +77,40 @@ def consequence_text(level: int, body: Text) -> Text:
     line.append("└ ", style=DIM)
     line.append_text(body)
     return line
+
+
+# Строка без владельца (спека P3 §10, ответ 5): глиф `!` в колонке `●`,
+# цвет — классом важности; `✗` остаётся только статусом вызова.
+STANDALONE_PREFIX = "! "
+
+
+def build_standalone_row(
+    text: str,
+    *,
+    severity: Literal["error", "warn"],
+    event_no: int = 0,
+) -> TraceRow:
+    """Строка ленты без владельца: `! текст`, `ERR` или `WARN` классом."""
+    from gc_tui.widgets.trace_row import TraceRow
+
+    return TraceRow(
+        prefix=STANDALONE_PREFIX,
+        content=text,
+        kind_class=f"line-{severity}",
+        event_no=event_no,
+    )
+
+
+def note_consequence(text: str) -> Text:
+    """Тело следствия-пометки под владельцем: `! текст` цветом `WARN`
+    (строку `└` дорисует владелец — `add_consequence`)."""
+    from rich.text import Text
+
+    from gc_tui.palette import WARN
+
+    body = Text()
+    body.append(STANDALONE_PREFIX + text, style=WARN)
+    return body
 
 
 def build_compaction_label(num: int, comp: dict) -> str:
@@ -407,14 +442,18 @@ def _dispatch_readonly(
                 error=(ev.kind == "error"),
                 halted=ev.halted,
             )
+        elif ev.kind == "error":
+            mount_target.mount(
+                build_standalone_row(
+                    ev.summary, severity="error", event_no=ev.no
+                )
+            )
         else:
-            prefix = "   " if ev.kind == "result" else "   [!] "
-            cls = "line-ok" if ev.kind == "result" else "line-error"
             mount_target.mount(
                 TraceRow(
-                    prefix=prefix,
+                    prefix="   ",
                     content=ev.summary,
-                    kind_class=cls,
+                    kind_class="line-ok",
                     event_no=ev.no,
                 )
             )
@@ -427,7 +466,7 @@ def _dispatch_readonly(
         )
     elif ev.kind == "error_msg":
         # Паритет с живым путём (TraceScreen._render_error_msg): ошибка с известным
-        # call_id финализирует свою строку-вызов ✗ и не дублируется [!]-строкой.
+        # call_id финализирует свою строку-вызов ✗ и не дублируется строкой `!`.
         # Иначе строка навсегда осталась бы «выполняется»: схемные ошибки приходят
         # техническим error_message с call_id, а не function_call_output.
         err_row = calls.get(ev.call_id) if ev.call_id else None
@@ -436,11 +475,8 @@ def _dispatch_readonly(
             calls.pop(ev.call_id, None)
         else:
             mount_target.mount(
-                TraceRow(
-                    prefix="[!] ",
-                    content=ev.summary,
-                    kind_class="line-error",
-                    event_no=ev.no,
+                build_standalone_row(
+                    ev.summary, severity="error", event_no=ev.no
                 )
             )
     elif ev.kind == "ask_human":

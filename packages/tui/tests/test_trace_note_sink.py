@@ -1,5 +1,5 @@
 """Пометка «изображение не просмотрено»: очередь пометок, проводка on_trace_note,
-серая строка [изображение] на тике опроса (дизайн картинок §10, визуальный контракт §4)."""
+строка `└ !` под владельцем на тике опроса (спека P3 §10, ответ 4)."""
 
 import json
 import threading
@@ -101,19 +101,7 @@ def test_executor_build_wires_on_trace_note_to_the_app_sink(
     assert app._trace_note_sink.drain("t1") == [note]
 
 
-@pytest.mark.asyncio
-async def test_poll_tick_mounts_the_gray_line_below_the_reply_and_only_live(
-    tmp_path,
-):
-    pytest.importorskip("textual")
-    from gc_core.vision.notes import NOTE_MAIN_BLIND
-    from gc_tui.app import TuiApp
-    from gc_tui.widgets.trace_row import TraceRow
-    from gc_tui.widgets.user_reply import UserReplyContainer
-
-    threads = tmp_path / "threads"
-    threads.mkdir()
-    tid = "a" * 32
+def _write_thread(threads, tid: str) -> None:
     (threads / f"data_cli_{tid}.jsonl").write_text(
         json.dumps(
             {
@@ -130,30 +118,161 @@ async def test_poll_tick_mounts_the_gray_line_below_the_reply_and_only_live(
     (threads / f"meta_cli_{tid}.json").write_text(
         json.dumps({"thread_id": tid, "tui": {}}), encoding="utf-8"
     )
-    note = NOTE_MAIN_BLIND.format(alias="glm")
-    async with TuiApp(
+
+
+def _call_event(no: int, call_id: str, tool_name: str):
+    from gc_tui.models import TraceEvent
+
+    return TraceEvent(
+        no=no,
+        event_ts_utc_iso="",
+        kind="call",
+        title=tool_name,
+        summary=f"{tool_name}()",
+        full_payload={},
+        call_id=call_id,
+        tool_name=tool_name,
+    )
+
+
+def _standalone(scr):
+    from gc_tui.widgets.trace_row import TraceRow
+
+    return [
+        (r._content, r.has_class("line-warn"))
+        for r in scr.query(TraceRow)
+        if r._prefix == "! "
+    ]
+
+
+_TID = "a" * 32
+
+
+async def _drained(pilot, *notes: TraceNote) -> None:
+    for note in notes:
+        pilot.app._trace_note_sink.push(_TID, note)
+    await pilot.pause(0.7)  # тик опроса — 250 мс
+
+
+def _app(tmp_path):
+    from gc_tui.app import TuiApp
+
+    threads = tmp_path / "threads"
+    threads.mkdir()
+    _write_thread(threads, _TID)
+    return TuiApp(
         threads_dir=str(threads), system="cli", settings=tui_settings({})
-    ).run_test() as pilot:
+    )
+
+
+@pytest.mark.asyncio
+async def test_reply_note_sits_under_the_reply_with_images_and_only_live(
+    tmp_path,
+):
+    """Пометка ответа — строкой `└ ! …` (`WARN`) под репликой с картинкой, не
+    под последней репликой; отдельной строки нет; чужой тред не рисуется,
+    при открытии сессии заново пометки нет."""
+    pytest.importorskip("textual")
+    from image_helpers import make_attachment
+
+    from gc_core.vision.notes import NOTE_MAIN_BLIND
+    from gc_tui.palette import WARN
+    from gc_tui.widgets.user_reply import UserReplyContainer
+
+    note = NOTE_MAIN_BLIND.format(alias="glm")
+    async with _app(tmp_path).run_test() as pilot:
         scr = pilot.app.screen
-        scr.attach_active_task(tid)
+        scr.attach_active_task(_TID)
         await pilot.pause()
-        pilot.app._trace_note_sink.push("b" * 32, _note("из другой сессии"))
-        pilot.app._trace_note_sink.push(tid, TraceNote(note, "reply"))
-        await pilot.pause(0.7)  # тик опроса — 250 мс
-        rows = [
-            w for w in scr.query(TraceRow) if w._prefix == "[изображение] "
-        ]
-        assert [(r._content, r.has_class("line-meta")) for r in rows] == [
-            (note, True)
-        ]
-        trace = list(scr.query_one("#trace").children)
-        assert trace.index(rows[0]) > trace.index(
-            scr.query_one(UserReplyContainer)
+        with_image = UserReplyContainer(
+            "вот", images=(make_attachment("f" * 64, 1),)
         )
-        assert pilot.app._trace_note_sink.drain(tid) == []
-        # Открыли сессию заново — пометки нет: она только живая.
-        scr.attach_active_task(tid, is_resume=True)
+        scr._trace_mount(with_image)
+        scr._trace_mount(UserReplyContainer("и ещё"))
+        pilot.app._trace_note_sink.push("b" * 32, _note("из другой сессии"))
+        await _drained(pilot, TraceNote(note, "reply"))
+        replies = list(scr.query(UserReplyContainer))
+        # «глянь» из треда, «вот» с картинкой, «и ещё» — последняя.
+        assert [r._consequence_text().plain for r in replies] == [
+            "",
+            f"  └ ! {note}",
+            "",
+        ]
+        assert WARN in {
+            str(s.style) for s in with_image._consequence_text().spans
+        }
+        assert _standalone(scr) == []
+        scr.attach_active_task(_TID, is_resume=True)
         await pilot.pause()
-        assert [
-            w for w in scr.query(TraceRow) if w._prefix == "[изображение] "
-        ] == []
+        assert all(
+            not r._consequence_text().plain
+            for r in scr.query(UserReplyContainer)
+        )
+
+
+@pytest.mark.asyncio
+async def test_reply_note_without_images_goes_under_the_latest_reply(
+    tmp_path,
+):
+    pytest.importorskip("textual")
+    from gc_tui.widgets.user_reply import UserReplyContainer
+
+    async with _app(tmp_path).run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(_TID)
+        await pilot.pause()
+        scr._trace_mount(UserReplyContainer("последняя"))
+        await _drained(pilot, _note("не просмотрено"))
+        last = list(scr.query(UserReplyContainer))[-1]
+        assert last._consequence_text().plain == "  └ ! не просмотрено"
+
+
+@pytest.mark.asyncio
+async def test_call_note_sits_under_its_call_row_top_level_and_nested(
+    tmp_path,
+):
+    """Пометка вызова — `└ ! …` под строкой этого вызова: верхнего уровня,
+    вложенного (`fs_view_image` субагента) и строки запуска субагента
+    (отказ модели субагента вне его тулов)."""
+    pytest.importorskip("textual")
+    from gc_tui.widgets.tool_call_row import ToolCallRow
+
+    async with _app(tmp_path).run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(_TID)
+        await pilot.pause()
+        scr._render_event(_call_event(10, "top", "fs_view_image"))
+        scr._render_event(_call_event(11, "sa", "subagent_run"))
+        scr._mount_nested_tool(
+            parent_call_id="sa",
+            tool_name="fs_view_image",
+            tool_call_id="kid",
+            args_summary="",
+        )
+        await pilot.pause()
+        await _drained(
+            pilot,
+            TraceNote("сверху", "call", "top"),
+            TraceNote("внутри", "call", "kid"),
+            TraceNote("субагент", "call", "sa"),
+        )
+        rows = {r.call_id: r for r in scr.query(ToolCallRow)}
+        assert rows["top"]._render_consequence().plain == "  └ ! сверху"
+        assert rows["kid"]._render_consequence().plain == "    └ ! внутри"
+        assert rows["sa"]._render_consequence().plain == "  └ ! субагент"
+        assert _standalone(scr) == []
+
+
+@pytest.mark.asyncio
+async def test_note_without_owner_on_screen_is_a_standalone_warn_line(
+    tmp_path,
+):
+    """Владельца нет на экране — строка `! …` `WARN` в колонке `●`."""
+    pytest.importorskip("textual")
+
+    async with _app(tmp_path).run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(_TID)
+        await pilot.pause()
+        await _drained(pilot, TraceNote("потерялась", "call", "нет-такого"))
+        assert _standalone(scr) == [("потерялась", True)]

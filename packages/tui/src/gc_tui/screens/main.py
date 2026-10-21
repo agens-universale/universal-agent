@@ -15,7 +15,7 @@ from collections import namedtuple
 from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING, Awaitable, Callable, Optional
+from typing import TYPE_CHECKING, Awaitable, Callable, Literal, Optional
 
 if TYPE_CHECKING:
     from gc_tui.widgets.user_reply import UserReplyContainer
@@ -328,8 +328,6 @@ _PLAN_CMD_ENTERED = (
 _PLAN_CMD_NO_PLAN = "плана пока нет — опишите задачу, и агент предложит план"
 _PLAN_CMD_NO_PLAN_BUSY = "плана пока нет"
 _PLAN_CLEAR_HINT = "/plan clear — убрать план из сессии"
-# Серая строка «изображение не просмотрено» (дизайн картинок §10).
-_IMAGE_NOTE_PREFIX = "[изображение] "
 # Вставка изображения (спека §12, визуальный контракт §2). «Вставка…» держится до
 # результата: погасшая поверх неё подсказка и её собственный таймер возвращают её же
 # (`_clear_footer_hint`), снимает её конец вставки; саму вставку ограничивает
@@ -3202,12 +3200,13 @@ class TraceScreen(Screen):
                 self._reconcile_active_tool_phases()
                 return
             # Fallback (call_id unknown or no matching row) — append separate line
-            prefix = "   " if ev.kind == "result" else "   [!] "
-            cls = "line-ok" if ev.kind == "result" else "line-error"
+            if ev.kind == "error":
+                self._mount_standalone(ev.summary, "error", event_no=ev.no)
+                return
             self._mount_trace_row(
-                prefix=prefix,
+                prefix="   ",
                 content=ev.summary,
-                kind_class=cls,
+                kind_class="line-ok",
                 event_no=ev.no,
             )
             return
@@ -3284,7 +3283,8 @@ class TraceScreen(Screen):
 
     def _render_error_msg(self, ev) -> None:
         """error_msg с известным call_id финализирует соответствующую строку-вызов
-        (✗ inline, таймер стоп) и подавляет дублирующую [!]-строку. Иначе — [!] как есть."""
+        (✗ inline, таймер стоп) и подавляет дублирующую строку. Иначе — строка
+        `!` без владельца."""
         row = self._active_calls.get(ev.call_id) if ev.call_id else None
         if row is not None:
             row.set_result(summary=ev.summary, error=True)
@@ -3292,12 +3292,7 @@ class TraceScreen(Screen):
             self._active_calls.pop(ev.call_id, None)
             self._reconcile_active_tool_phases()
             return
-        self._mount_trace_row(
-            prefix="[!] ",
-            content=ev.summary,
-            kind_class="line-error",
-            event_no=ev.no,
-        )
+        self._mount_standalone(ev.summary, "error", event_no=ev.no)
 
     def _reconcile_active_tool_phases(self) -> None:
         """В незавершённом batch: первая строка active (▸), остальные waiting (·)."""
@@ -4431,21 +4426,52 @@ class TraceScreen(Screen):
         return widget
 
     def _drain_trace_notes(self) -> None:
-        """Серые строки `[изображение] …` из очереди пометок (дизайн картинок §10).
+        """Пометки ленты из очереди — строкой `└ ! …` под владельцем
+        (спека P3 §10, ответ 4); владельца нет на экране — строка `!` `WARN`.
 
         Ядро кормит очередь из рабочего потока через on_trace_note; строка
         монтируется здесь, на UI-потоке. Только вживую и только своего треда: в тред
         пометка не пишется, при открытии сессии заново не рисуется, пометка хода
         другой сессии сюда не попадает."""
+        from gc_tui.services.trace_render import note_consequence
+
         sink = getattr(self.app, "_trace_note_sink", None)
         if sink is None:
             return
         for note in sink.drain(self._active_task_id):
-            self._mount_trace_row(
-                prefix=_IMAGE_NOTE_PREFIX,
-                content=note.text,
-                kind_class="line-meta",
-            )
+            owner = self._trace_note_owner(note)
+            if owner is None:
+                self._mount_standalone(note.text, "warn")
+            else:
+                owner.add_consequence(note_consequence(note.text))
+
+    def _trace_note_owner(self, note):
+        """Владелец пометки в ленте: строка вызова `call_id` (верхняя или
+        вложенная) или реплика — последняя с картинками, иначе последняя."""
+        from gc_tui.widgets.tool_call_row import ToolCallRow
+        from gc_tui.widgets.user_reply import UserReplyContainer
+
+        trace = self.query_one(_SEL_TRACE, VerticalScroll)
+        if note.owner == "call":
+            rows = trace.query(ToolCallRow)
+            return next((r for r in rows if r.call_id == note.call_id), None)
+        replies = list(trace.query(UserReplyContainer))
+        with_images = [r for r in replies if r.has_images]
+        return (with_images or replies or [None])[-1]
+
+    def _mount_standalone(
+        self,
+        text: str,
+        severity: Literal["error", "warn"],
+        *,
+        event_no: int = 0,
+    ) -> None:
+        """Строка без владельца: `!` в колонке `●` (спека P3 §10, ответ 5)."""
+        from gc_tui.services.trace_render import build_standalone_row
+
+        self._trace_mount(
+            build_standalone_row(text, severity=severity, event_no=event_no)
+        )
 
     _PENDING_CAP = 20
 
@@ -4761,11 +4787,7 @@ class TraceScreen(Screen):
         self._pump_reasoning_stream_source()
         err = getattr(self.app, "last_runner_error", None)
         if err and not self._error_shown:
-            self._mount_trace_row(
-                prefix="[!] ",
-                content=f"runtime: {err}",
-                kind_class="line-error",
-            )
+            self._mount_standalone(f"runtime: {err}", "error")
             self._error_shown = True
             self._mark_pending_failed()
         # Инвариант: running tool-строки живут, только пока задача жива (live

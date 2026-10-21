@@ -1,6 +1,6 @@
 # tests/tui/test_main_error_msg_finalizes.py
 # Юнит на ветку рендера: подменяем _active_calls фейковой строкой и проверяем,
-# что error_msg с известным call_id финализирует её, а отдельная [!]-строка не плодится.
+# что error_msg с известным call_id финализирует её, а строка `!` не плодится.
 from gc_tui.models import TraceEvent
 from gc_tui.screens.main import TraceScreen
 
@@ -30,10 +30,10 @@ def test_error_msg_with_call_id_finalizes_row():
     row = _FakeRow()
     screen._active_calls = {"call_7": row}
     mounted = []
-    screen._mount_trace_row = lambda **kw: mounted.append(kw)
+    screen._trace_mount = lambda w, **kw: mounted.append(w)
     screen._render_error_msg(_ev("call_7"))
     assert row.finalized == ("Wrong arguments for `x`", True)
-    assert mounted == []  # [!]-строка подавлена
+    assert mounted == []  # строка `!` подавлена
     assert "call_7" not in screen._active_calls
 
 
@@ -41,7 +41,9 @@ def test_error_msg_without_match_falls_back():
     screen = TraceScreen.__new__(TraceScreen)
     screen._active_calls = {}
     mounted = []
-    screen._mount_trace_row = lambda **kw: mounted.append(kw)
+    screen._trace_mount = lambda w, **kw: mounted.append(w)
     screen._render_error_msg(_ev(None))
-    assert len(mounted) == 1  # fallback [!]-строка
-    assert mounted[0]["prefix"] == "[!] "
+    # Ошибка без владельца — `!` в колонке `●`, ERR, без квадратных скобок.
+    (row,) = mounted
+    assert (row._prefix, row._content) == ("! ", "Wrong arguments for `x`")
+    assert row.has_class("line-error")

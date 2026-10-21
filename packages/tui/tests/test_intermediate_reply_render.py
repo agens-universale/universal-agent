@@ -1,5 +1,5 @@
 """Рендер intermediate_reply (серый ● — спека P3 §10, п. 4) и error_msg
-([!] красный) в трейсе."""
+(`!` красным, без владельца) в трейсе."""
 
 from gc_testkit.tui_support import tui_settings
 import pytest
@@ -145,4 +145,33 @@ async def test_error_msg_renders_red_bang(tmp_path):
         screen._render_event(ev)
         await pilot.pause()
         rows = [w for w in screen.query(TraceRow) if w.has_class("line-error")]
-        assert len(rows) == 1
+        assert [r._prefix for r in rows] == ["! "]
+
+
+@pytest.mark.asyncio
+async def test_error_result_without_call_row_is_standalone_bang(tmp_path):
+    """Ошибка результата, чьей строки вызова нет, — `! …` ERR, без скобок."""
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.trace_row import TraceRow
+
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
+    )
+    async with app.run_test() as pilot:
+        screen = pilot.app.screen
+        ev = TraceEvent(
+            no=2,
+            event_ts_utc_iso="t",
+            kind="error",
+            title="",
+            summary="ENOENT",
+            full_payload={},
+            call_id="нет-такого",
+        )
+        screen._render_event(ev)
+        await pilot.pause()
+        rows = [w for w in screen.query(TraceRow) if w.has_class("line-error")]
+        assert [(r._prefix, r._content) for r in rows] == [("! ", "ENOENT")]

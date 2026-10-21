@@ -346,6 +346,10 @@ class UserReplyContainer(_ImageLinksMixin, ClickModelMixin, Widget):
     def state(self) -> _State:
         return self._state
 
+    @property
+    def has_images(self) -> bool:
+        return bool(self._images)
+
     def set_state(self, new_state: _State) -> None:
         """Переключить состояние реплики: меняется только цвет маркера."""
         self._state = new_state

@@ -244,6 +244,7 @@ ToolCallRow { margin-top: 1; }
 .answered-question { border: round $frame-archive; color: $dim; padding: 0 1; margin: 1 0; width: 1fr; }
 .answered-question.hidden { display: none; }
 .line-error     { color: $err; }
+.line-warn      { color: $warn; }   /* строка `!` без владельца — предупреждение */
 .line-code      { color: $code; }      /* inline-код/путь */
 .line-bold      { color: $accent; text-style: bold; }
 .line-heading-1 { color: $accent; text-style: bold; }
