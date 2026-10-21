@@ -1,6 +1,7 @@
 """Безопасность поверхностей: старая секция с токеном не теряется молча,
 вебхук не видит треды других поверхностей и интерактивных сессий."""
 
+import json
 import pytest
 from fastapi.testclient import TestClient
 from gc_core.config import load_settings
@@ -149,3 +150,51 @@ def test_browser_cannot_start_a_task(tmp_path, surface_kind):
         headers={"host": "evil.example"},
     )
     assert rebound.status_code == 400
+
+
+def test_cancel_without_body_needs_authorization(tmp_path):
+    """``POST …/cancel`` без тела: клиенту (curl, SDK) не нужно слать
+    пустой JSON. Пропускается с ``Authorization`` — браузер не пришлёт его
+    со сторонней страницы без preflight; без него — 415, как раньше."""
+    surface = make_webhook(tmp_path, config={"server": {"auth_token": "t0k"}})
+    client = TestClient(surface.app(), base_url="http://127.0.0.1:8000")
+    path = "/v1/tasks/cli/t1/cancel"
+    authorized = client.post(path, headers={"authorization": "Bearer t0k"})
+    assert authorized.status_code != 415
+    assert client.post(path).status_code == 415
+    typed = client.post(
+        path,
+        content=b"x",
+        headers={"authorization": "Bearer t0k", "content-type": "text/plain"},
+    )
+    assert typed.status_code == 415
+
+
+@pytest.mark.parametrize("chunked", [False, True])
+def test_request_body_over_the_limit_is_413(tmp_path, chunked):
+    """Тело больше ``server.max_body_bytes`` — 413 до разбора: и с
+    ``Content-Length``, и потоком без длины."""
+    surface = make_webhook(tmp_path, config={"server": {"max_body_bytes": 64}})
+    client = TestClient(surface.app(), base_url="http://127.0.0.1:8000")
+    body = json.dumps({"task_id": "t", "message": "x" * 200}).encode()
+    content = iter([body[:50], body[50:]]) if chunked else body
+    resp = client.post(
+        "/v1/tasks",
+        content=content,
+        headers={"content-type": "application/json"},
+    )
+    assert resp.status_code == 413
+    small = client.post("/v1/tasks/cli/t1/cancel", json={})
+    assert small.status_code != 413
+
+
+def test_body_limit_defaults_to_ten_mib():
+    from gc_server.config import ServerConfig
+
+    config = ServerConfig.model_validate({})
+    assert config.surface("webhook").max_body_bytes == 10 * 1024 * 1024
+    own = ServerConfig.model_validate(
+        {"server": {"max_body_bytes": 100}, "chat": {"max_body_bytes": 5}}
+    )
+    assert own.surface("webhook").max_body_bytes == 100
+    assert own.surface("chat").max_body_bytes == 5

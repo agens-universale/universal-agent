@@ -24,7 +24,10 @@ def create_app(facade: ResponsesFacade) -> FastAPI:
     app = FastAPI()
     app.state.responses_facade = facade
     install_http_guard(
-        app, cors_origins=facade.cors_origins, bind_host=facade.bind_host
+        app,
+        cors_origins=facade.cors_origins,
+        bind_host=facade.bind_host,
+        max_body_bytes=facade.max_body_bytes,
     )
     app.add_api_route("/v1/models", models, methods=["GET"])
     mount(app)

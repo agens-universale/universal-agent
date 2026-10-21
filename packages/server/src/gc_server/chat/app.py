@@ -25,6 +25,7 @@ def create_app(
         app,
         cors_origins=responses.cors_origins,
         bind_host=responses.bind_host,
+        max_body_bytes=responses.max_body_bytes,
     )
     mount_page(app)
     app.add_api_route("/v1/models", models, methods=["GET"])

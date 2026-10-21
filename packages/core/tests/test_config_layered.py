@@ -533,6 +533,22 @@ def test_project_profile_does_not_choose_storage(
     assert loaded.settings.storage.is_files()
 
 
+def test_project_config_does_not_choose_project_id(
+    global_config_file, isolated_cwd
+):
+    """Имя проекта — ключ памяти проекта в хранилище агента: чужой
+    репозиторий с ``project_id`` чужого проекта читал бы и переписывал его
+    память. Задаёт его владелец машины, не репозиторий."""
+    from gc_core.config import load_settings
+
+    _write_project_config(isolated_cwd, "agent:\n  project_id: victim\n")
+
+    loaded = load_settings(str(global_config_file))
+
+    assert loaded.settings.agent.project_id is None
+    assert any("project_id" in notice for notice in loaded.runtime.notices)
+
+
 @pytest.mark.usefixtures("isolated_cwd")
 def test_user_profile_extends_readonly_commands(global_config_file):
     """Профиль рядом со своим config.yml — выбор пользователя: действует."""

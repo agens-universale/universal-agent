@@ -30,7 +30,7 @@ from gc_server.chat.completions.prompt_assets import (
 from gc_server.chat.completions.turn import TurnRun, _safe_aclose
 from gc_server.chat.cwd import cwd_for_new
 from gc_server.chat.tool_flow import ToolFlow
-from gc_server.config import LOOPBACK, ChatConfig
+from gc_server.config import DEFAULT_MAX_BODY_BYTES, LOOPBACK, ChatConfig
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +57,7 @@ class CompletionsFacade:
         self.auth_token = section.auth_token or ""
         self.cors_origins = _cors_origins(section.cors_origins)
         self.bind_host = section.host or LOOPBACK
+        self.max_body_bytes = section.max_body_bytes or DEFAULT_MAX_BODY_BYTES
         self._launch_root = section.launch_root
         self.model_id = str(settings.settings.agent.model or "")
         self._create_lock = asyncio.Lock()
