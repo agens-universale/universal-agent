@@ -18,7 +18,10 @@ from gc_core.utils.backend_errors import (
     http_status_code,
     is_image_rejection_error,
 )
-from gc_core.utils.http_auth import authorization_attempts
+from gc_core.utils.http_auth import (
+    remember_accepted_authorization,
+    server_authorization_attempts,
+)
 from gc_core.utils.llm_chat_client import (
     ChatCompletionText,
     PreparedChatCompletion,
@@ -40,7 +43,6 @@ class ProbeResult:
     status: ProbeStatus
     reason: str
     retry_after_sec: float = 0.0
-    authorization_alternative: bool = False
 
 
 @dataclass(frozen=True)
@@ -137,17 +139,15 @@ def _record_result(ctx, result, attempts, started, finish_reason=None):
 def _authorization_forms(
     prepared: PreparedChatCompletion,
 ) -> tuple[str | None, list]:
-    """Заголовок авторизации запроса и его формы для повтора после 401."""
+    """Заголовок авторизации и его формы: выученная транспортом — первой."""
     auth_key = next(
         (key for key in prepared.headers if key.lower() == "authorization"),
         None,
     )
-    auth_forms = (
-        authorization_attempts(prepared.headers.get(auth_key))
-        if auth_key
-        else []
+    raw = prepared.headers.get(auth_key) if auth_key else None
+    return auth_key, server_authorization_attempts(
+        prepared.url, prepared.resolved.model, raw
     )
-    return auth_key, auth_forms
 
 
 def _alternative_auth_applies(exc: Exception, auth_forms: list) -> bool:
@@ -159,22 +159,28 @@ def _alternative_auth_applies(exc: Exception, auth_forms: list) -> bool:
     )
 
 
-def _with_alternative_auth(
-    prepared: PreparedChatCompletion, auth_key: str | None, auth_forms: list
+def _with_auth(
+    prepared: PreparedChatCompletion, auth_key: str | None, form: str
 ) -> PreparedChatCompletion:
-    """Тот же запрос со второй формой авторизации."""
+    """Тот же запрос с заданной формой авторизации."""
     headers = dict(prepared.headers)
-    headers[auth_key] = auth_forms[1]
+    headers[auth_key] = form
     return replace(prepared, headers=MappingProxyType(headers))
 
 
-def _mark_alternative_auth(
-    result: ProbeResult, authorization_alternative: bool
-) -> ProbeResult:
-    """Подтверждение, полученное со второй формой авторизации, помечается."""
-    if result.status is ProbeStatus.CONFIRMED and authorization_alternative:
-        return replace(result, authorization_alternative=True)
-    return result
+def _remember_auth(
+    configured: PreparedChatCompletion,
+    sent: PreparedChatCompletion,
+    auth_key: str | None,
+) -> None:
+    """Форма, с которой проба прошла, — в общую память транспорта."""
+    if auth_key is not None:
+        remember_accepted_authorization(
+            configured.url,
+            configured.resolved.model,
+            configured.headers[auth_key],
+            sent.headers[auth_key],
+        )
 
 
 async def aprobe_route(
@@ -182,7 +188,10 @@ async def aprobe_route(
 ) -> ProbeResult:
     started = time.perf_counter()
     previous = None
+    configured = prepared
     auth_key, auth_forms = _authorization_forms(prepared)
+    if auth_forms:
+        prepared = _with_auth(prepared, auth_key, auth_forms[0])
     authorization_alternative = False
     requests = 0
     for attempt in range(2):
@@ -218,17 +227,14 @@ async def aprobe_route(
                 if not authorization_alternative and _alternative_auth_applies(
                     exc, auth_forms
                 ):
-                    prepared = _with_alternative_auth(
-                        prepared, auth_key, auth_forms
-                    )
+                    prepared = _with_auth(prepared, auth_key, auth_forms[1])
                     authorization_alternative = True
                     continue  # Повтор того же задания; распознавание ещё не состоялось.
                 return _record_result(
                     ctx, _classify_error(exc), requests, started
                 )
-        result = _mark_alternative_auth(
-            classify_answer(challenge.code, outcome), authorization_alternative
-        )
+        _remember_auth(configured, prepared, auth_key)
+        result = classify_answer(challenge.code, outcome)
         if result.status is not ProbeStatus.UNCONFIRMED:
             return _record_result(
                 ctx, result, requests, started, outcome.finish_reason

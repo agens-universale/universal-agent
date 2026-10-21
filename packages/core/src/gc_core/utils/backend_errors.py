@@ -175,6 +175,17 @@ def has_payload(msg) -> bool:
     return nonempty_reasoning_text(msg) is not None
 
 
+def has_embedded_error(response: object) -> bool:
+    """Тело HTTP-200 несёт ошибку провайдера: ``choices[0].error`` или
+    top-level ``error`` (формы ``EmbeddedChoiceError``) — запрос не прошёл."""
+    if not isinstance(response, dict):
+        return False
+    choices = response.get("choices")
+    if isinstance(choices, list) and choices and isinstance(choices[0], dict):
+        return isinstance(choices[0].get("error"), dict)
+    return isinstance(response.get("error"), dict)
+
+
 def is_empty_completion(dct: dict) -> bool:
     """True, если ответ бэкенда генуинно пуст: нет content, нет tool_calls, нет
     reasoning_content, нет finish_reason, нет error (ни top-level, ни choice-level).

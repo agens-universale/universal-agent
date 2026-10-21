@@ -422,9 +422,6 @@ async def _asend_chat_completion_text(
             ctx, state, resolved=resolved, headers=headers
         )
         await before_send(prepared)
-        from gc_core.vision.service import confirmed_route_headers
-
-        headers = confirmed_route_headers(prepared)
     url = (
         resolved.url
         if resolved is not None

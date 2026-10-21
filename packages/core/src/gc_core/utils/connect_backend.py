@@ -30,6 +30,7 @@ from gc_core.trace_id import (
 from gc_core.usage.context import record_usage
 from gc_core.utils.aretry import retry_with_backoff_async
 from gc_core.utils.backend_errors import (
+    has_embedded_error,
     http_status_code,
     is_empty_completion,
     is_http_status_error,
@@ -616,9 +617,10 @@ async def _arequest_authorized(
 ):
     """Одна альтернатива Authorization после реального HTTP 401.
 
-    Форму, с которой запрос прошёл успешно, следующие запросы к той же модели
-    на тот же URL со значением, заданным в той же форме, шлют первой.
-    Однократный клиент шлёт заданную форму как есть."""
+    Форму, с которой запрос прошёл успешно (2xx без вложенной ошибки
+    провайдера), следующие запросы к той же модели на тот же URL со
+    значением, заданным в той же форме, шлют первой. Однократный клиент
+    шлёт заданную форму как есть."""
     auth_key = next(
         (key for key in headers if key.lower() == "authorization"), None
     )
@@ -637,7 +639,8 @@ async def _arequest_authorized(
             if exc.response.status_code != 401 or index + 1 == len(attempts):
                 raise
             continue
-        remember_accepted_authorization(url, model, raw, authorization)
+        if not has_embedded_error(response):
+            remember_accepted_authorization(url, model, raw, authorization)
         return response
 
 

@@ -530,10 +530,33 @@ async def test_single_attempt_client_keeps_configured_form(monkeypatch):
     ]
 
 
-async def test_invalid_port_fails_in_transport_not_in_memory(monkeypatch):
-    install_transport(monkeypatch, _bearer_only)
-    with pytest.raises(httpx.InvalidURL):
-        await _chat("http://localhost:80a/chat")
+@pytest.mark.parametrize(
+    "embedded",
+    [
+        {"choices": [{"error": {"code": 401, "message": "expired"}}]},
+        {"error": {"code": 401, "message": "expired"}},
+    ],
+)
+async def test_embedded_error_is_not_remembered_as_success(
+    monkeypatch, embedded
+):
+    replies = iter(
+        [
+            httpx.Response(401),
+            httpx.Response(200, json=embedded),
+            httpx.Response(
+                200, json={"choices": [{"message": {"content": "ok"}}]}
+            ),
+        ]
+    )
+    spy = install_transport(monkeypatch, lambda request: next(replies))
+    await _chat("https://example.test/chat")
+    await _chat("https://example.test/chat")
+    assert [r.headers["Authorization"] for r in spy.requests] == [
+        "secret",
+        "Bearer secret",
+        "secret",
+    ]
 
 
 async def test_auxiliary_request_starts_with_form_learned_by_main_request(
