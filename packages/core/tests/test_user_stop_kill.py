@@ -231,6 +231,156 @@ async def test_remote_shell_command_does_not_sit_out_its_timeout():
     assert "sleep" not in str(killed[0])
 
 
+def _stop_paths(commands: list[str]) -> list[str]:
+    import re
+
+    found: list[str] = []
+    for command in commands:
+        found.extend(re.findall(r"/tmp/gc-user-stop-[0-9a-f]+", command))
+    return found
+
+
+async def test_stop_file_is_reused_for_the_backend():
+    from types import SimpleNamespace
+
+    def _backend():
+        backend = RemoteShellBackend(
+            ["env"],
+            cwd=None,
+            env={},
+            exec_init=None,
+            exec_output_capture_max_chars=1000,
+            walk_output_max_chars=1000,
+        )
+        seen: list[str] = []
+        original = backend._run
+
+        async def _spy(shell_command, **kwargs):
+            seen.append(shell_command)
+            return await original(shell_command, **kwargs)
+
+        async def _probe(*_args, **_kwargs):
+            return SimpleNamespace(
+                stdout="timeout\nwritable\n",
+                stderr="",
+                return_code=0,
+                timed_out=False,
+            )
+
+        backend._run = _spy
+        backend._afs_exec = _probe
+        backend._seen = seen
+        return backend
+
+    gate = _stop()
+    first = _backend()
+    second = _backend()
+    with bind_user_stop(gate):
+        await first.aexec("echo one", timeout=5)
+        await first.aexec("echo two", timeout=5)
+        await second.aexec("echo three", timeout=5)
+    reused = _stop_paths(first._seen)
+    assert len(reused) == 2
+    assert reused[0] == reused[1]
+    other = _stop_paths(second._seen)
+    assert len(other) == 1
+    assert other[0] != reused[0]
+
+
+async def test_readonly_tmp_is_not_spliced_into_commands():
+    from types import SimpleNamespace
+
+    backend = RemoteShellBackend(
+        ["env"],
+        cwd=None,
+        env={},
+        exec_init=None,
+        exec_output_capture_max_chars=1000,
+        walk_output_max_chars=1000,
+    )
+    seen: list[str] = []
+    original = backend._run
+
+    async def _spy(shell_command, **kwargs):
+        seen.append(shell_command)
+        return await original(shell_command, **kwargs)
+
+    calls = {"n": 0}
+
+    async def _probe(*_args, **_kwargs):
+        calls["n"] += 1
+        return SimpleNamespace(
+            stdout="nowrite\ntimeout\n",
+            stderr="",
+            return_code=0,
+            timed_out=False,
+        )
+
+    backend._run = _spy
+    backend._afs_exec = _probe
+    gate = _stop()
+    with bind_user_stop(gate):
+        assert await backend._awatchdog() == "timeout"
+        await backend.aexec("echo one", timeout=5)
+        await backend.aexec("echo two", timeout=5)
+    assert calls["n"] == 1
+    assert seen
+    assert all("gc-user-stop" not in command for command in seen)
+
+
+async def test_readonly_tmp_stop_is_unkillable_and_stderr_stays_clean():
+    from types import SimpleNamespace
+
+    backend = RemoteShellBackend(
+        ["env"],
+        cwd=None,
+        env={},
+        exec_init=None,
+        exec_output_capture_max_chars=1000,
+        walk_output_max_chars=1000,
+    )
+
+    async def _probe(*_args, **_kwargs):
+        return SimpleNamespace(
+            stdout="nowrite\ntimeout\n",
+            stderr="",
+            return_code=0,
+            timed_out=False,
+        )
+
+    backend._afs_exec = _probe
+    log = _Log()
+    result, elapsed = await _stopped_exec(backend, "echo HI; sleep 30", log)
+    assert elapsed < 8
+    assert result.stopped_by_user is True
+    assert "HI" in result.stdout
+    assert "cannot create" not in (result.stderr or "")
+    assert len(log.events("user_stop_unkillable")) == 1
+    assert log.events("user_stop_killed") == []
+
+
+async def test_missing_pid_file_is_not_logged_as_killed(monkeypatch):
+    backend = RemoteShellBackend(
+        ["env"],
+        cwd=None,
+        env={},
+        exec_init=None,
+        exec_output_capture_max_chars=1000,
+        walk_output_max_chars=1000,
+    )
+    monkeypatch.setattr(
+        "gc_core.backends.remote_shell.remote_kill_command",
+        lambda _path: "exit 1",
+    )
+    log = _Log()
+    result, elapsed = await _stopped_exec(backend, "echo HI; sleep 30", log)
+    assert elapsed < 8
+    assert result.stopped_by_user is True
+    assert "HI" in result.stdout
+    assert len(log.events("user_stop_unkillable")) == 1
+    assert log.events("user_stop_killed") == []
+
+
 async def test_remote_without_watchdog_aborts_and_logs_unkillable(monkeypatch):
     log = _Log()
     backend = RemoteShellBackend(

@@ -733,13 +733,14 @@ async def _await_process_exit(proc, timeout: Optional[float]):
     return proc.returncode
 
 
-async def _release_stopped_process(
-    proc, stop_release: Optional[Callable]
-) -> None:
-    """Снять команду: свой release бэкенда либо локальный TERM/KILL."""
+async def _release_stopped_process(proc, stop_release: Optional[Callable]):
+    """Снять команду: свой release бэкенда либо локальный TERM/KILL.
+
+    Возврат release проходит наверх: ``STOP_WAIT_ONLY`` значит, что сигнал
+    до команды не дошёл.
+    """
     if stop_release is not None:
-        await stop_release(proc)
-        return
+        return await stop_release(proc)
     await _astop_process(proc)
 
 
@@ -776,8 +777,8 @@ async def _await_exec_or_user_stop(
         )
     else:
 
-        async def _release() -> None:
-            await _release_stopped_process(proc, stop_release)
+        async def _release():
+            return await _release_stopped_process(proc, stop_release)
 
         try:
             async with stop.arm(

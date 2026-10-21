@@ -35,7 +35,7 @@ from gc_core.backends.runtime_probe import (
     RuntimeUnavailable,
 )
 from gc_core.backends.walk_util import FlatWalkMixin
-from gc_core.user_stop import current_user_stop
+from gc_core.user_stop import STOP_WAIT_ONLY, current_user_stop
 
 #: Потолок на одну файловую операцию (stat, upload, download): зависший
 #: транспорт — пауза контейнера, мёртвый хост — иначе вешал бы цикл агента.
@@ -52,9 +52,29 @@ _WATCHDOG_PROBE = (
     "elif command -v gtimeout >/dev/null 2>&1; then echo gtimeout; "
     "elif command -v setsid >/dev/null 2>&1; then echo setsid; "
     "elif command -v perl >/dev/null 2>&1; then echo perl; "
-    "else echo none; fi"
+    "else echo none; fi; "
+    'if { echo x > "/tmp/gc-user-stop-probe-$$"; } 2>/dev/null; then '
+    'rm -f "/tmp/gc-user-stop-probe-$$"; echo writable; '
+    "else echo nowrite; fi"
 )
 _WATCHDOG_TOOLS = ("timeout", "gtimeout", "setsid", "perl")
+
+
+def _watchdog_probe_lines(stdout: str) -> tuple[Optional[str], Optional[bool]]:
+    """Имя сторожа и можно ли писать ``/tmp``. Нет строки — значение не задано."""
+    tool: Optional[str] = None
+    writable: Optional[bool] = None
+    for line in stdout.splitlines():
+        item = line.strip()
+        if item in _WATCHDOG_TOOLS:
+            tool = item
+        elif item == "writable":
+            writable = True
+        elif item == "nowrite":
+            writable = False
+    return tool, writable
+
+
 #: perl есть на macOS из коробки: setpgrp делает его лидером группы, alarm
 #: по истечении шлёт KILL всей группе — то же, что GNU timeout.
 _PERL_WATCHDOG = (
@@ -135,15 +155,18 @@ def _stop_only_wrap(body: str, stop_file: Optional[str]) -> str:
 
 
 def remote_kill_command(stop_file: str) -> str:
-    """Снять сторож: и сам pid (GNU timeout ловит TERM), и его группу."""
+    """Снять сторож: и сам pid (GNU timeout ловит TERM), и его группу.
+
+    Пустой файл — ненулевой код: pid не прочитан, успехом это не считается.
+    """
     path = shlex.quote(stop_file)
     return (
         f"pg=$(cat {path} 2>/dev/null); "
-        'if [ -n "$pg" ]; then '
+        'if [ -z "$pg" ]; then exit 1; fi; '
         'kill -TERM "$pg" 2>/dev/null; kill -TERM -- -"$pg" 2>/dev/null; '
         "sleep 0.5; "
         'kill -KILL "$pg" 2>/dev/null; kill -KILL -- -"$pg" 2>/dev/null; '
-        "fi; true"
+        "true"
     )
 
 
@@ -207,16 +230,21 @@ class RemoteShellBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
         if self.joins_argv:
             remote = [shlex.join(remote)]
 
-        async def _release(proc) -> None:
+        async def _release(proc):
             if stop_file:
-                await self._akill_remote(proc, stop_file)
-                return
+                return await self._akill_remote(proc, stop_file)
             from gc_core.backends.local import _astop_process
 
             await _astop_process(proc)
 
         can_kill = bool(stop_file) and bool(
             getattr(self, "_last_watchdog", None)
+        )
+        # /tmp не пишется: файл pid не создаём, локальный клиент всё равно
+        # обрываем, в лог — что снять команду на той стороне нельзя.
+        tmp_blocked = (
+            current_user_stop() is not None
+            and getattr(self, "_tmp_writable", None) is False
         )
         return await _arun_bounded_process(
             [*self.argv_prefix, *remote],
@@ -228,7 +256,7 @@ class RemoteShellBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
             capture_max_chars=capture_max_chars,
             backend_name=type(self).__name__,
             stop_release=_release if stop_file else None,
-            stop_unkillable=bool(stop_file) and not can_kill,
+            stop_unkillable=tmp_blocked or (bool(stop_file) and not can_kill),
         )
 
     def _capture_cap(self, capture_max_chars: Optional[int]) -> int:
@@ -340,13 +368,10 @@ class RemoteShellBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
         tool: Optional[str] = None
         try:
             res = await self._afs_exec(_WATCHDOG_PROBE)
-            answer = (res.stdout or "").strip().splitlines()
-            if (
-                res.return_code == 0
-                and answer
-                and answer[-1] in _WATCHDOG_TOOLS
-            ):
-                tool = answer[-1]
+            if res.return_code == 0:
+                tool, writable = _watchdog_probe_lines(res.stdout or "")
+                if writable is not None:
+                    self._tmp_writable = writable
         except RuntimeUnavailable:
             raise
         except Exception:
@@ -376,19 +401,36 @@ class RemoteShellBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
         self._last_watchdog = tool
         return watchdog_wrap(body, timeout, tool, stop_file=stop_file)
 
+    async def _stop_file_for_run(self) -> Optional[str]:
+        """Путь pid-файла. Проба /tmp — до решения, вставлять ли ``echo``."""
+        if current_user_stop() is not None:
+            await self._awatchdog()
+        return self._stop_file()
+
     def _stop_file(self) -> Optional[str]:
+        """Один путь на бэкенд: следующая команда перезаписывает тот же файл."""
         if current_user_stop() is None:
             return None
-        return f"/tmp/gc-user-stop-{uuid.uuid4().hex}"
+        if getattr(self, "_tmp_writable", None) is False:
+            return None
+        path = getattr(self, "_stop_path", None)
+        if path is None:
+            path = f"/tmp/gc-user-stop-{uuid.uuid4().hex}"
+            self._stop_path = path
+        return path
 
-    async def _akill_remote(self, proc, stop_file: str) -> None:
-        """Второй канал дёргает сторож. Потом гасим локальное ожидание."""
+    async def _akill_remote(self, proc, stop_file: str):
+        """Второй канал дёргает сторож. Потом гасим локальное ожидание.
+
+        Pid не прочитан — ``STOP_WAIT_ONLY``: локальный клиент уже оборван,
+        команда на той стороне могла остаться.
+        """
         from gc_core.backends.local import _astop_process
 
         remote = ["sh", "-c", remote_kill_command(stop_file)]
         if self.joins_argv:
             remote = [shlex.join(remote)]
-        await _arun_bounded_process(
+        result = await _arun_bounded_process(
             [*self.argv_prefix, *remote],
             shell=False,
             cwd=None,
@@ -400,6 +442,8 @@ class RemoteShellBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
             arm_stop=False,
         )
         await _astop_process(proc)
+        if result.return_code != 0:
+            return STOP_WAIT_ONLY
 
     async def aexec(
         self,
@@ -411,7 +455,7 @@ class RemoteShellBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
         capture_max_chars=None,
     ):
         body = self._shell(command, cwd=cwd, env=env, exec_init=self.exec_init)
-        stop_file = self._stop_file()
+        stop_file = await self._stop_file_for_run()
         return await self._run(
             await self._aguarded(body, timeout, stop_file=stop_file),
             timeout=timeout,
@@ -429,7 +473,7 @@ class RemoteShellBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
         capture_max_chars=None,
     ):
         body = self._shell(command, cwd=cwd, env=env)
-        stop_file = self._stop_file()
+        stop_file = await self._stop_file_for_run()
         return await self._run(
             await self._aguarded(body, timeout, stop_file=stop_file),
             timeout=timeout,
@@ -460,7 +504,7 @@ class RemoteShellBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
     ):
         # Код — на stdin, не heredoc: нет коллизии с маркером и лимита длины аргумента.
         body = self._shell("python3 -", cwd=cwd, env=env)
-        stop_file = self._stop_file()
+        stop_file = await self._stop_file_for_run()
         return await self._run(
             await self._aguarded(body, timeout, stop_file=stop_file),
             stdin_text=code,

@@ -358,6 +358,34 @@ def test_env_names_must_be_identifiers():
     assert env == {"GOOD_NAME": "v"} and err is None
 
 
+def test_kill_script_fails_when_the_pid_file_is_missing(tmp_path):
+    import subprocess
+
+    from gc_core.backends.remote_shell import remote_kill_command
+
+    script = remote_kill_command(str(tmp_path / "absent"))
+    completed = subprocess.run(
+        ["sh", "-c", script], capture_output=True, text=True
+    )
+    assert completed.returncode != 0
+
+
+def test_kill_script_with_a_pid_keeps_the_grace_and_exits_zero(tmp_path):
+    import subprocess
+
+    from gc_core.backends.remote_shell import remote_kill_command
+
+    path = tmp_path / "pid"
+    path.write_text("99999999\n")
+    script = remote_kill_command(str(path))
+    assert "sleep 0.5" in script
+    assert "kill -TERM" in script and "kill -KILL" in script
+    completed = subprocess.run(
+        ["sh", "-c", script], capture_output=True, text=True
+    )
+    assert completed.returncode == 0
+
+
 def test_watchdog_wrap_variants():
     import shlex
 
@@ -406,6 +434,32 @@ async def test_timed_out_command_does_not_outlive_the_timeout():
     await asyncio.sleep(3.5)  # сторож срабатывает на timeout + 2 с
     with pytest.raises(ProcessLookupError):
         os.kill(pid, 0)
+
+
+async def test_watchdog_probe_keeps_the_tool_when_the_tmp_line_follows():
+    from types import SimpleNamespace
+
+    from gc_core.backends.remote_shell import RemoteShellBackend
+
+    be = RemoteShellBackend(
+        ["env"],
+        cwd=None,
+        env={},
+        exec_init=None,
+        exec_output_capture_max_chars=1000,
+        walk_output_max_chars=1000,
+    )
+
+    async def _probe(*_args, **_kwargs):
+        return SimpleNamespace(
+            stdout="timeout\nnowrite\n",
+            stderr="",
+            return_code=0,
+            timed_out=False,
+        )
+
+    be._afs_exec = _probe
+    assert await be._awatchdog() == "timeout"
 
 
 async def test_watchdog_probe_is_cached_and_reported():
