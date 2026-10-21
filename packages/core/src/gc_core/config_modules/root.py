@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -48,6 +49,7 @@ from gc_core.config_modules.model_registry import (
 )
 from gc_core.config_modules.os_backend import OsBackendConfig
 from gc_core.config_modules.paths import PathsConfig
+from gc_core.config_modules.plugins import PluginsConfig
 from gc_core.config_modules.pricing import PricingConfig
 from gc_core.config_modules.project_memory import (
     ProjectMemoryConfig,
@@ -116,6 +118,10 @@ class AppConfig(BaseModel):
         json_schema_extra=gc_meta(expert=True),
     )
     intent_scope: IntentScopeConfig = Field(default_factory=IntentScopeConfig)
+    plugins: PluginsConfig = Field(
+        default_factory=PluginsConfig,
+        json_schema_extra=gc_meta(expert=True),
+    )
     working_memory: WorkingMemoryConfig = Field(
         default_factory=WorkingMemoryConfig,
         json_schema_extra=gc_meta(expert=True),
@@ -395,7 +401,22 @@ def resolve_paths(cfg: AppConfig, config_dir: str) -> AppConfig:
     write_guard.extra_paths = [
         to_abs(path) or path for path in write_guard.extra_paths
     ]
+    _merge_plugin_mcp_servers(cfg)
     return cfg.result()
+
+
+def _merge_plugin_mcp_servers(cfg: Any) -> None:
+    """Серверы из ``.mcp.json`` плагинов; свои серверы пользователя важнее."""
+    from gc_core.plugins.runtime import configured_paths, plugin_mcp_servers
+
+    paths = configured_paths(cfg.plugins)
+    if not paths:
+        return
+    from gc_core.config_modules.mcp import McpServerConfig
+
+    for name, spec in plugin_mcp_servers(paths).items():
+        if name not in cfg.mcp.servers:
+            cfg.mcp.servers[name] = McpServerConfig(**spec)
 
 
 def _clamp_summary_trigger(value: int) -> int:

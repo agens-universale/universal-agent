@@ -52,3 +52,7 @@ _.aensure_ready
 # Абстрактный метод harbor.agents.base.BaseAgent.setup: зовёт Harbor перед запуском агента.
 # integrations/harbor/adapters/gc_cli_external.py.
 _.setup
+
+# Сброс кэша прочитанных плагинов: публичная точка для перезагрузки плагинов и
+# для тестов (packages/core/tests/plugins). В коде агента его никто не зовёт.
+reset_plugin_cache

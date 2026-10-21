@@ -720,6 +720,11 @@ UNREPRESENTABLE = {
 #: и «покрывать нечем» — разные вещи, и отличать их должен читатель, а не
 #: тот, кто однажды пересчитает покрытие и решит, что про них забыли.
 NOT_IN_MATRIX = {
+    # --- плагины (песочница): по умолчанию пустой список, путь исполнения ядра
+    # не меняется; поведение покрыто packages/core/tests/plugins/test_plugins.py.
+    "plugins.paths": "песочница плагинов; пустой список по умолчанию, покрытие в plugins/test_plugins.py",
+    "plugins.sources": "git-источники плагинов; пустой список по умолчанию, покрытие в plugins/test_plugins.py",
+    "plugins.hook_timeout_sec": "таймаут внешних хуков плагинов, не путь исполнения ядра; покрытие в plugins/test_plugins.py",
     # Локально допустимо только step (как develop); turn — только в durable-
     # исполнителе и отклоняется локальным прогоном. Покрыто
     # test_thread_store_persist_turn.py и native test_native_workflow_live.py.

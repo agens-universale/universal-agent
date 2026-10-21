@@ -90,6 +90,21 @@ from gc_core.message_policy.user_stop import (
     not_started_due_to_user_stop_output,
 )
 from gc_core.model_router import AliasCircuitOpenError
+from gc_core.plugins.runtime import (
+    apost_tool_call as aplugin_post_tool_call,
+)
+from gc_core.plugins.runtime import (
+    apre_tool_call as aplugin_pre_tool_call,
+)
+from gc_core.plugins.runtime import (
+    asession_start_messages as aplugin_session_start_messages,
+)
+from gc_core.plugins.runtime import (
+    astop_decision as aplugin_stop_decision,
+)
+from gc_core.plugins.runtime import (
+    auser_prompt_messages as aplugin_user_prompt_messages,
+)
 from gc_core.request_backend_policy import (
     arequest_chat_completions_with_policy,
 )
@@ -1475,6 +1490,11 @@ async def _ainvoke_tool(
     tool_call_id,
 ):
     operations = port(ctx, "operations")
+    # Плагины: PreToolUse может запретить вызов или поменять аргументы.
+    pre = await aplugin_pre_tool_call(ctx, state, tool_name, tool_arguments)
+    if pre.blocked_output is not None:
+        return pre.blocked_output, False
+    tool_arguments = pre.arguments
     output = await aapply_tool(
         tool_name=tool_name,
         arguments=tool_arguments,
@@ -1488,6 +1508,7 @@ async def _ainvoke_tool(
             else {}
         ),
     )
+    await aplugin_post_tool_call(ctx, state, tool_name, tool_arguments, output)
     return output, False
 
 
@@ -2237,6 +2258,9 @@ class _AgentLoop:
         ):
             await self._apre_backend_compaction(messages, mode)
             messages = await self._aapply_tool_usage_notice(messages)
+            messages = await self._aapply_plugin_session_start(messages)
+            if mode == "user_ask":
+                messages = await self._aapply_plugin_user_prompt(messages)
         return messages, mode, _NO_RETURN
 
     async def _apre_backend_compaction(self, messages, mode) -> None:
@@ -2284,6 +2308,43 @@ class _AgentLoop:
             self.run_logger.warning(
                 "Memory messages hook warning: %s",
                 mem_exc,
+                exc_info=True,
+            )
+        return messages
+
+    async def _aapply_plugin_session_start(self, messages) -> List[Dict]:
+        """Плагины: контекст SessionStart один раз на старте сессии."""
+        return await self._aadd_plugin_messages(
+            messages, aplugin_session_start_messages(self.state, self.ctx)
+        )
+
+    async def _aapply_plugin_user_prompt(self, messages) -> List[Dict]:
+        """Плагины: контекст UserPromptSubmit к сообщению пользователя."""
+        return await self._aadd_plugin_messages(
+            messages,
+            aplugin_user_prompt_messages(self.state, self.ctx, messages),
+        )
+
+    async def _aadd_plugin_messages(self, messages, pending) -> List[Dict]:
+        state = self.state
+        try:
+            plugin_messages = await pending
+            if not plugin_messages:
+                return messages
+            messages = list(messages) + plugin_messages
+            to_append = filter_messages_not_in_state(
+                list(getattr(state, "messages", []) or []),
+                list(plugin_messages),
+            )
+            if to_append:
+                state.messages += to_append
+            await self._apersist_notice_messages(plugin_messages)
+        except ExecutionFailure:
+            raise
+        except Exception as plugin_exc:
+            self.run_logger.warning(
+                "Plugin session start warning: %s",
+                plugin_exc,
                 exc_info=True,
             )
         return messages
@@ -2487,7 +2548,10 @@ class _AgentLoop:
         return decision
 
     async def _aclose_turn(self, result) -> _Outcome:
-        """Конец хода: компакция turn-end и подхват pending-сообщения новым ходом."""
+        """Конец хода: хуки Stop, компакция turn-end, подхват pending-сообщения."""
+        stop_messages = await self._aplugin_stop(result)
+        if stop_messages:
+            return _Outcome(stop_messages, completed_step=True)
         if self.turn_end_compaction_hook is not None:
             await _acall_blocking_hook(self.turn_end_compaction_hook)
         # Сообщение, пришедшее во время (блокирующей) компакции, не
@@ -2498,6 +2562,21 @@ class _AgentLoop:
         if new_turn_messages is not None:
             return _Outcome(new_turn_messages, restart=True)
         return _Outcome(result=result)
+
+    async def _aplugin_stop(self, result) -> List[Dict]:
+        try:
+            return await aplugin_stop_decision(
+                self.state,
+                self.ctx,
+                result if isinstance(result, str) else None,
+            )
+        except ExecutionFailure:
+            raise
+        except Exception as plugin_exc:
+            self.run_logger.warning(
+                "Plugin stop hook warning: %s", plugin_exc, exc_info=True
+            )
+            return []
 
     def _after_tool_batch(self, messages) -> _Outcome:
         state = self.state

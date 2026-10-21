@@ -12,6 +12,7 @@ Background и CLI-клиент для работы с агентом GigaCode: �
 - Два режима бэкенда: `chat_completions` и `v1/responses` (deprecated).
 - MCP: 6 транспортов, готовые рецепты в дистрибутиве `gc-mcp` (`packages/mcp/src/recommended_mcp/`).
 - Скиллы и пакеты скиллов (встроенные паки `supercoder` / `codebase` / `articles`).
+- Плагины (экспериментально): каталоги в формате Claude Code со skills, командами, субагентами, хуками и MCP; установка `gc-plugin install` — [docs/plugins-playground.md](docs/plugins-playground.md).
 - Слои инструкций `AGENTS.md` (L0 shipped → L1 `~/.gc/AGENTS.md` → L2 `.gc/AGENTS.md` → L3 `AGENTS.md` в корне проекта) — задать агенту проектный/глобальный контекст; `--init` генерирует `AGENTS.md` по структуре репо.
 - Профили и уровни моделей (`light`/`default`/`max`): реестр `models`/`slots`/`assign` в конфиге, переключаемые YAML-профили, CLI `--profile`/`--level`, палитра `/level`/`/profiles`.
 - Защита файловой системы: `write_guard` ограничивает запись в `launch_root`, `security.protected_paths` включена по умолчанию.
@@ -65,8 +66,8 @@ gc-mcp install duckduckgo_search   # один MCP + авто-подключен�
 [docs/packaging.md](docs/packaging.md).
 
 > Каждый дистрибутив кладёт в PATH только свои команды: `gc-cli` → `gc-cli`,
-> `gc-tui` → `gc-ua` и `gc-voice`, `gc-server` → `gc-serve`, `gc-mcp` → `gc-mcp` и
-> `gc-mcp-install`, `gc-acp` → `gc-acp`, `gc-chat` → `gc-chat`; полный `gc-ua` —
+> `gc-tui` → `gc-ua` и `gc-voice`, `gc-server` → `gc-serve`, `gc-mcp` → `gc-mcp`,
+> `gc-mcp-install` и `gc-plugin`, `gc-acp` → `gc-acp`, `gc-chat` → `gc-chat`; полный `gc-ua` —
 > все перечисленные. `uv tool` не экспортирует команды зависимостей, поэтому у
 > узкого профиля стоит `--with-executables-from gc-mcp` — менеджер MCP при этом
 > приезжает из того же коммита. Смена профиля — переустановка, нужен `--force`.

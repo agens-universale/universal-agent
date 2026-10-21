@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Feature — плагины (экспериментально)
+
+- Плагин — каталог в раскладке Claude Code: `.claude-plugin/plugin.json`, `skills/`, `commands/`, `agents/`, `hooks/hooks.json`, `.mcp.json`. Готовые плагины оттуда подключаются без переделки. Без настройки поведение агента не меняется: списки плагинов пусты.
+- Подключение: `plugins.paths` (каталоги), `plugins.sources` (git: `owner/repo`, `ref`, `subdir`; клон в кэш один раз) и команда `gc-plugin install | list | enable | disable | update | uninstall` (постоянное хранилище, как у OpenHands; установленные плагины работают без правки конфига).
+- Skills плагина видны агенту как `<плагин>:<skill>`; команды плагина — как skills `<плагин>:<команда>` и напрямую `/плагин:команда аргументы` (в TUI через `/skill`); субагенты из `agents/` становятся кастомными субагентами `subagent_<плагин>_<имя>` (имена инструментов Claude Code переводятся в имена агента); серверы из `.mcp.json` попадают в `mcp.servers`.
+- Хуки (внешние команды, JSON на stdin): `SessionStart`, `UserPromptSubmit`, `PreToolUse` (запретить вызов или поменять аргументы), `PostToolUse`, `PostToolUseFailure`, `Stop`. Хуки вызываются до встроенной защиты и не могут её обойти; сбой или таймаут хука не останавливает агента. В durable-режиме (Temporal) хуки отключены.
+- Новая секция конфига `plugins` (`paths`, `sources`, `hook_timeout_sec`); команда `gc-plugin` объявлена в дистрибутиве `gc-mcp`. Описание: `docs/plugins-playground.md`.
+- Не проверялось в TUI, ACP и `gc-server`; инструкции `!`команда`` внутри команд плагина не выполняются.
+
 ### Feature — limit trace summary (LIMIT_TRACE_SUMMARY_SPEC)
 
 - When the main agent or a subagent hits a limit (`step_limit` / `tool_call_limit` / `token_limit`), the trace is now summarized by a single auxiliary LLM call and returned as a JSON envelope `{ok:false, status, message, raw_trace_summary}` instead of a flat string.

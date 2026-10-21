@@ -26,6 +26,7 @@ all = []
 
 [project.scripts]
 gc-cli = "gc_cli.cli:main"
+gc-plugin = "gc_core.plugins.cli:main"
 gc-ua = "gc_tui:main"
 gc-serve = "gc_server.server:serve"
 gc-mcp = "recommended_mcp.runtime.cli:main"
