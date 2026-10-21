@@ -28,13 +28,6 @@ def format_duration(seconds: float) -> str:
     return " ".join(f"{n}{unit}" for n, unit in _duration_parts(seconds))
 
 
-def format_trace_duration(seconds: float) -> str:
-    """Длительность в строке ленты — канон ленты с пробелом перед единицей:
-    "4 с", "1 м 5 с", "1 ч 2 м" (спека P3 §2.1). Разряды — как у
-    `format_duration`; индикатор и футер пока пишут слитно."""
-    return " ".join(f"{n} {unit}" for n, unit in _duration_parts(seconds))
-
-
 def format_compact_int(n: int) -> str:
     """Компактное целое: 999 → "999", 1000 → "1.0k", 12345 → "12.3k"."""
     if n >= 1000:

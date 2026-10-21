@@ -92,7 +92,7 @@ gc-ua --permission-mode plan  # режим разрешений сессии (с
   прервано, `●` янтарный с дыханием — идёт, `•` серый — ещё не начат.
 
   ```
-   ● Read  config.py · 40 строк
+   ● Read  config.py · 40строк
 
    ● Edit  config.py +1 −1                                        ❐
      11  RETRIES = 3

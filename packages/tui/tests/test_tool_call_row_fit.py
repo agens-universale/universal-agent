@@ -68,7 +68,7 @@ async def test_running_long_command_keeps_timer_on_one_line(width, level):
         row = pilot.app.query_one(ToolCallRow)
         line = _first_line(row)
         assert line.startswith("Run  cd /Users/")
-        assert line.endswith(" · 0 с")
+        assert line.endswith(" · 0с")
         assert "…" in line
         assert _line_height(row) == 1
         assert row.size.height == 1
@@ -142,7 +142,7 @@ async def test_resize_refits_target():
         await pilot.pause()
         narrow = _first_line(row)
         assert len(narrow) < len(wide)
-        assert narrow.endswith(" · 0 с")
+        assert narrow.endswith(" · 0с")
         assert _line_height(row) == 1
 
 
@@ -199,7 +199,7 @@ async def test_running_tail_not_under_scrollbar(tmp_path, width, elapsed):
     ширина под объект считается от content-колонки, полоса в неё не входит."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
-    from gc_tui.services.duration_format import format_trace_duration
+    from gc_tui.services.duration_format import format_duration
     from textual.containers import VerticalScroll
 
     app = TuiApp(threads_dir=str(tmp_path))
@@ -222,4 +222,4 @@ async def test_running_tail_not_under_scrollbar(tmp_path, width, elapsed):
         assert content.right <= visible.right
         strip = pilot.app.screen._compositor.render_strips()[content.y]
         on_screen = strip.text[visible.x : visible.right].rstrip()
-        assert on_screen.endswith(f"… · {format_trace_duration(elapsed)}")
+        assert on_screen.endswith(f"… · {format_duration(elapsed)}")

@@ -268,6 +268,9 @@ def _run(command: str) -> str:
         f'cd "{ROOT}" && ',
         f"cd '{ROOT}' && ",
         f"  cd  {ROOT}  &&  ",
+        f"cd {ROOT}\n",
+        f"cd {ROOT}\r\n",
+        f"cd {ROOT}  \n  ",
     ],
 )
 def test_cd_into_the_project_root_is_dropped(prefix):

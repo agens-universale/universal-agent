@@ -5,7 +5,6 @@ from gc_tui.services.duration_format import (
     format_compact_int,
     format_duration,
     format_round_int,
-    format_trace_duration,
 )
 
 
@@ -27,15 +26,6 @@ from gc_tui.services.duration_format import (
 )
 def test_format_duration(seconds, expected):
     assert format_duration(seconds) == expected
-
-
-@pytest.mark.parametrize(
-    "seconds,expected",
-    [(4, "4 с"), (65, "1 м 5 с"), (3725, "1 ч 2 м"), (-1, "0 с")],
-)
-def test_format_trace_duration_spaces_before_unit(seconds, expected):
-    """Канон ленты (спека P3 §2.1): ` · 4 с` — пробел перед единицей."""
-    assert format_trace_duration(seconds) == expected
 
 
 @pytest.mark.parametrize(

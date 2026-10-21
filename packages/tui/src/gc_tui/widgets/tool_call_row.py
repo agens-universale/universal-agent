@@ -45,7 +45,7 @@ from gc_tui.palette import REFUSED as _REFUSED
 from gc_tui.palette import RUN_COLOR as _RUN
 from gc_tui.palette import SKILL as _SKILL
 from gc_tui.palette import TOOL_NAME as _TOOL_NAME
-from gc_tui.services.duration_format import format_trace_duration
+from gc_tui.services.duration_format import format_duration
 from gc_tui.services.trace_glyphs import (
     CALL_GLYPH,
     CALL_UNDONE_GLYPH,
@@ -66,9 +66,10 @@ from gc_tui.widgets.static_content import update_if_changed
 # паузы в базовом амбере, без дыхания; elapsed заморожен. Не ⏸: тот числится
 # эмодзи, и часть терминалов (Windows Terminal) рисует его в две клетки.
 _PAUSE_GLYPH = "‖"
-# Полупериод мигания ● в кадрах 0.1с-тика: 5 кадров = 0.5с, как у привычного
-# мигания курсора терминала (~500 мс) — заметно, но не дёргает взгляд.
-_BLINK_HALF_PERIOD_TICKS = 5
+# Ритм мигания ● в кадрах 0.1с-тика: 0.7с виден, 0.3с скрыт — кружок большую
+# часть времени на месте, мигание читается как «живой», а не «пропадающий».
+_BLINK_ON_TICKS = 7
+_BLINK_PERIOD_TICKS = 10
 
 #: Итог вызова: глиф, его цвет и цвет строки `└` итога. Стоп и лимит —
 #: не сбой (K4), отказ — не сбой, а решение политики или человека: цветом
@@ -379,7 +380,7 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
                 return CALL_WAITING_GLYPH, _DIM
             if self._paused_at is not None:
                 return _PAUSE_GLYPH, _RUN
-            on = self._pulse_frame // _BLINK_HALF_PERIOD_TICKS % 2 == 0
+            on = self._pulse_frame % _BLINK_PERIOD_TICKS < _BLINK_ON_TICKS
             # Мигает исчезая: в паузе — пустая клетка той же ширины.
             return (CALL_GLYPH if on else " "), _RUN
         glyph, style, _line_style = _OUTCOME_LOOK[self._outcome]
@@ -463,7 +464,7 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         if self._live_status:
             text.append(f" · {self._live_status}", style=_DIM)
         text.append(" · ", style=_DIM)
-        text.append(format_trace_duration(self._elapsed_s()), style=_RUN)
+        text.append(format_duration(self._elapsed_s()), style=_RUN)
 
     def on_click(self, event: events.Click) -> None:
         """Клик по ❐ копирует дифф правки и строку не выделяет.
