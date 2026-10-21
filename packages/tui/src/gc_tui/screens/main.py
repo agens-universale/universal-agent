@@ -35,6 +35,14 @@ from gc_core.message_policy.plan_messages import accepted_plan_messages
 from gc_core.plan_store import plan_awaits_decision, plan_is_accepted
 from gc_core.runtime_notices import collect_unread_runtime_notices
 from gc_core.security.permission_mode import Mode, mode_label
+from gc_core.tools.skills.skill_arg_resolver import (
+    Failed,
+    Resolved,
+    ResolveResult,
+    catalog_from_entries,
+    resolve_skill_exact,
+    suggest_skills,
+)
 from rich.cells import cell_len
 from rich.text import Text
 from textual import events
@@ -6266,14 +6274,19 @@ class TraceScreen(Screen):
         """Набранное — команда (`/…`, `!…`), а не текст агенту.
 
         Поле одно на ответ и команды. Пока висит вопрос агента, командой
-        считается только известная `/команда`; прочее с «/» (путь и т.п.) и с
-        «!» — ответ. Вне вопроса любое `/…` — команда (неизвестная получит
+        считается только известная `/команда` или `/имя` скилла из прогретого
+        кэша (холодный кэш — ответ); прочее с «/» (путь и т.п.) и с «!» —
+        ответ. Вне вопроса любое `/…` — команда (неизвестная получит
         «нет такой команды»), `!…` — shell.
         """
         asking = self.app.tui_state.ask_human_state is not None
         if text.startswith("/"):
             name = (text[1:].split(None, 1) or [""])[0]
-            return not asking or self._registry.lookup(name) is not None
+            return (
+                not asking
+                or self._registry.lookup(name) is not None
+                or isinstance(self._resolve_cached_skill(name), Resolved)
+            )
         return text.startswith("!") and not asking
 
     async def on_command_text_area_submitted(
@@ -6359,6 +6372,8 @@ class TraceScreen(Screen):
         # необязательный аргумент без меню (`/plan`) выполняется сразу
         # (`Command.runs_on_enter`).
         if self._palette is not None:
+            if self._insert_palette_skill(inp, event.value):
+                return
             cmd = self._palette.selected_command()
             if cmd is not None and cmd.is_toggle:
                 spec = TOGGLES.get(cmd.name)
@@ -7348,6 +7363,74 @@ class TraceScreen(Screen):
         except Exception:
             pass
 
+    def _resolve_cached_skill(self, name: str) -> ResolveResult | None:
+        """Точный разбор имени скилла (полный id, пак, короткое имя) по
+        прогретому кэшу, без нечёткого поиска; холодный кэш — None."""
+        if self._skills_cache is None:
+            return None
+        catalog = catalog_from_entries(self._skills_cache)
+        return resolve_skill_exact(name, catalog)
+
+    def _insert_palette_skill(self, inp: TextArea, typed: str) -> bool:
+        """Enter на строке скилла палитры: вставить `/имя ` — текст
+        дописывают и отправляют следующим Enter (спека P5 §3.2)."""
+        skill = self._palette.selected_skill()
+        if skill is None or " " in typed.strip():
+            return False
+        inp.text = f"/{self._skill_input_name(skill)} "
+        inp.move_cursor(inp.document.end)
+        self._close_palette()
+        inp.focus()
+        return True
+
+    def _skill_input_name(self, skill: dict) -> str:
+        """Имя для `/имя` в поле: короткое, если оно однозначно ведёт к
+        этому скиллу, иначе полный id."""
+        sid = str(skill.get("id", ""))
+        short = sid.rpartition(":")[2]
+        res = self._resolve_cached_skill(short)
+        if isinstance(res, Resolved) and res.canonical_id == sid:
+            return short
+        return sid
+
+    async def _cmd_skill(self, arg: str) -> None:
+        """`/skill <имя> [текст]`: имя — полный id или короткое (точный
+        разбор); с текстом — немедленная пара, без — pending/running путь."""
+        if self._skills_cache is None:
+            self._skills_cache = await self._load_skills_safe()
+        first, _, rest = arg.partition(" ")
+        res = self._resolve_cached_skill(first)
+        if isinstance(res, Resolved):
+            await self._cmd_use_skill(res.canonical_id, prompt=rest.strip())
+        elif isinstance(res, Failed) and res.reason == "ambiguous":
+            self._render_skill_ambiguous(first, res.suggestions)
+        else:
+            # первый токен не скилл → весь arg = id (может содержать
+            # пробелы/слэши), промпта нет → штатный pending/running путь
+            await self._cmd_use_skill(arg.strip(), prompt="")
+
+    async def _dispatch_skill_by_name(self, name: str, arg: str) -> None:
+        """`/имя текст` без такой команды ≡ `/skill имя текст` — только при
+        точном совпадении по прогретому кэшу. Опечатка скилл не запускает:
+        «неизвестная команда» с кандидатами — команда, затем скиллы.
+        Холодный кэш — «неизвестная команда» (без ожидания прогрева)."""
+        res = self._resolve_cached_skill(name)
+        if isinstance(res, Resolved):
+            await self._cmd_use_skill(res.canonical_id, prompt=arg)
+        elif isinstance(res, Failed) and res.reason == "ambiguous":
+            self._render_skill_ambiguous(name, res.suggestions)
+        else:
+            self._render_command_error(name, self._command_candidates(name))
+
+    def _command_candidates(self, name: str) -> list[str]:
+        """«Вы имели в виду»: ближайшая команда, затем нечёткие скиллы."""
+        found = closest_command(name, self._registry)
+        out = [found] if found else []
+        if self._skills_cache:
+            catalog = catalog_from_entries(self._skills_cache)
+            out += [s for s in suggest_skills(name, catalog, 3) if s != found]
+        return out
+
     async def _cmd_use_skill(self, skill_id: str, *, prompt: str = "") -> None:
         if not skill_id:
             self._mount_trace_row(
@@ -7734,9 +7817,7 @@ class TraceScreen(Screen):
         arg = parts[1].strip() if len(parts) > 1 else ""
         cmd = self._registry.lookup(name)
         if cmd is None:
-            self._render_command_error(
-                name, closest_command(name, self._registry)
-            )
+            await self._dispatch_skill_by_name(name, arg)
             return
         # Нормализуем alias → canonical, чтобы диспетчер видел только канон.
         name = cmd.name
@@ -7750,19 +7831,7 @@ class TraceScreen(Screen):
             self._cmd_new()
             return
         if name == "skill":
-            if self._skills_cache is None:
-                self._skills_cache = await self._load_skills_safe()
-            first, _, rest = arg.partition(" ")
-            rest = rest.strip()
-            if rest and any(
-                str(s.get("id")) == first for s in self._skills_cache
-            ):
-                # /skill <валидный_id> <промпт> → немедленная пара
-                await self._cmd_use_skill(first, prompt=rest)
-            else:
-                # первый токен не валидный id → весь arg = id (может содержать
-                # пробелы/слэши), промпта нет → штатный pending/running путь
-                await self._cmd_use_skill(arg.strip(), prompt="")
+            await self._cmd_skill(arg)
             return
         if name == "help":
             self.app.action_help()
@@ -8324,16 +8393,29 @@ class TraceScreen(Screen):
             message_id=msg_id,
         )
 
-    def _render_command_error(self, name: str, suggestion: str | None) -> None:
+    def _render_command_error(
+        self,
+        name: str,
+        suggestions: list[str],
+        *,
+        title: str = "неизвестная команда",
+    ) -> None:
         """Команда-ошибка по единому правилу (§3.3). Одна строка одним Static;
-        подсказка closest-match — deep-dim в той же строке."""
+        кандидаты «вы имели в виду» — deep-dim в той же строке."""
         from rich.text import Text
 
         line = Text()
-        line.append(f"[!] неизвестная команда: /{name}", style=_ERR_RED)
-        if suggestion:
-            line.append(f" (вы имели в виду /{suggestion}?)", style=_DEEP_DIM)
+        line.append(f"[!] {title}: /{name}", style=_ERR_RED)
+        if suggestions:
+            names = ", ".join(f"/{s}" for s in suggestions)
+            line.append(f" (вы имели в виду {names}?)", style=_DEEP_DIM)
         self._trace_mount(Static(line, classes="line-error", markup=False))
+
+    def _render_skill_ambiguous(self, name: str, ids: list[str]) -> None:
+        """Короткое имя у нескольких скиллов — не запуск, подсказать id."""
+        self._render_command_error(
+            name, ids, title="несколько скиллов с именем"
+        )
 
     def _mount_trace_row(
         self,

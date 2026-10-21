@@ -46,3 +46,119 @@ async def test_unknown_command_no_close_match():
         text = "\n".join(str(s.render()) for s in trace.query("Static"))
         assert "[!]" in text
         assert "вы имели в виду" not in text
+
+
+_SKILLS = [
+    {"id": "supercoder:brainstorming", "pack_id": "supercoder"},
+    {"id": "p:status"},
+    {"id": "a:review"},
+    {"id": "b:review"},
+]
+
+
+def _trace_text(pilot) -> str:
+    trace = pilot.app.query_one("#trace")
+    return "\n".join(str(s.render()) for s in trace.query("Static"))
+
+
+async def _submit(pilot, text: str) -> None:
+    pilot.app.screen._skills_cache = list(_SKILLS)
+    inp = pilot.app.query_one("#cmdinput")
+    inp.text = text
+    await pilot.pause()
+    await pilot.press("enter")
+    await pilot.pause(0.1)
+
+
+@pytest.mark.asyncio
+async def test_command_wins_over_same_named_skill():
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+
+    async with TuiApp().run_test() as pilot:
+        pilot.app.screen._skills_cache = list(_SKILLS)
+        await pilot.app.screen._handle_command("status")
+        await pilot.pause(0.1)
+        assert pilot.app.tui_state.pending_skill_id is None
+        assert "неизвестная команда" not in _trace_text(pilot)
+
+
+@pytest.mark.asyncio
+async def test_command_typo_suggests_command_and_runs_no_skill():
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+
+    async with TuiApp().run_test() as pilot:
+        await _submit(pilot, "/statuz")
+        text = _trace_text(pilot)
+        assert "неизвестная команда: /statuz" in text
+        assert "вы имели в виду /status" in text
+        assert pilot.app.tui_state.pending_skill_id is None
+
+
+@pytest.mark.asyncio
+async def test_skill_typo_suggests_skill_and_runs_nothing():
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+
+    async with TuiApp().run_test() as pilot:
+        await _submit(pilot, "/brainstormin идея")
+        text = _trace_text(pilot)
+        assert "неизвестная команда: /brainstormin" in text
+        assert "/brainstorming" in text
+        assert pilot.app.tui_state.pending_skill_id is None
+        assert not _running(pilot.app)
+
+
+@pytest.mark.asyncio
+async def test_ambiguous_short_skill_name_lists_full_ids():
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+
+    async with TuiApp().run_test() as pilot:
+        await _submit(pilot, "/review код")
+        text = _trace_text(pilot)
+        assert "/a:review" in text and "/b:review" in text
+        assert pilot.app.tui_state.pending_skill_id is None
+        assert not _running(pilot.app)
+
+
+@pytest.mark.asyncio
+async def test_slash_skill_name_without_text_pends_skill():
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+
+    async with TuiApp().run_test() as pilot:
+        pilot.app.screen._skills_cache = list(_SKILLS)
+        await pilot.app.screen._handle_command("brainstorming")
+        await pilot.pause(0.1)
+        assert (
+            pilot.app.tui_state.pending_skill_id == "supercoder:brainstorming"
+        )
+
+
+@pytest.mark.asyncio
+async def test_ask_human_slash_skill_is_command_only_with_warm_cache():
+    """Вопрос агента: `/имя` скилла — команда при прогретом кэше; холодный
+    кэш (None) — ответ агенту, как раньше."""
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+    from gc_tui.state import AskHumanState
+
+    async with TuiApp().run_test() as pilot:
+        scr = pilot.app.screen
+        pilot.app.tui_state.ask_human_state = AskHumanState(
+            call_id="c1", question="Q?"
+        )
+        assert scr._skills_cache is None
+        assert not scr._is_command_input("/brainstorming x")
+        scr._skills_cache = list(_SKILLS)
+        assert scr._is_command_input("/brainstorming x")
+        assert not scr._is_command_input("/brainstormin x")
+        assert not scr._is_command_input("/review x")
+        assert scr._is_command_input("/status")
+
+
+def _running(app) -> bool:
+    runner = app.active_runner
+    return runner is not None and runner.is_running()

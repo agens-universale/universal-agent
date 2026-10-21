@@ -26,6 +26,8 @@ from gc_tui.toggles import _HINT_KEYS_TOGGLE, TOGGLES, _fit_hint, padded_track
 
 _HINT_NO_ARGS = "↑↓ выбрать · Enter выполнить · Esc закрыть"
 _HINT_WITH_ARGS = "↑↓ выбрать · Enter ввести аргумент · Esc закрыть"
+# Enter на строке скилла вставляет `/имя ` — текст дописывают (спека P5 §3.2).
+_HINT_SKILL = "↑↓ выбрать · Enter ввести запрос · Esc закрыть"
 _SKILL_ROWS_MAX = 5
 
 
@@ -265,18 +267,23 @@ class CommandPalette(VerticalScroll):
                 if idx == self._selected:
                     selected_row = row
                 children.append(row)
-        sel = self.selected_command()
-        hint_text = (
-            self._toggle_hint(sel)
-            if sel is not None and sel.is_toggle
-            else _hint_for(sel)
-        )
         children.append(
             Static(
-                hint_text, classes="palette-hint palette-keys", markup=False
+                self._selected_hint(),
+                classes="palette-hint palette-keys",
+                markup=False,
             )
         )
         return Vertical(*children, classes="palette-footer"), selected_row
+
+    def _selected_hint(self) -> str:
+        """Подсказка клавиш для выбранной строки: тоггл, скилл, команда."""
+        sel = self.selected_command()
+        if sel is not None and sel.is_toggle:
+            return self._toggle_hint(sel)
+        if self.selected_skill() is not None:
+            return _HINT_SKILL
+        return _hint_for(sel)
 
     def _content_width(self) -> int:
         """Ширина контента `.palette` (за вычетом рамки), известная ДО первого

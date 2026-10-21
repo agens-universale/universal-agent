@@ -723,3 +723,59 @@ async def test_palette_shows_skills_from_warmed_screen_cache(
         await pilot.pause(0.1)
         rows = pilot.app.query(".palette-skill-row")
         assert ["/brainstorming" in str(r.render()) for r in rows] == [True]
+
+
+def test_skill_row_hint_promises_insert_not_run():
+    """Enter на строке скилла вставляет `/имя ` — подсказка не обещает
+    «выполнить»."""
+    pytest.importorskip("textual")
+    from gc_tui.widgets.command_palette import _HINT_SKILL
+
+    palette = _skill_palette("brai", [_BRAIN])
+    assert palette.selected_skill() == _BRAIN
+    assert palette._selected_hint() == _HINT_SKILL
+    assert "выполнить" not in _HINT_SKILL
+
+
+async def _enter_on_skill_row(tmp_path, skills, typed):
+    from gc_tui.app import TuiApp
+
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
+    )
+    async with app.run_test() as pilot:
+        scr = app.screen
+        scr._skills_cache = list(skills)
+        inp = pilot.app.query_one("#cmdinput")
+        inp.text = typed
+        await pilot.pause(0.1)
+        assert scr._palette.selected_skill() == skills[0]
+        await pilot.press("enter")
+        await pilot.pause(0.1)
+        assert scr._palette is None
+        assert app.tui_state.pending_skill_id is None
+        assert not _running(app)
+        return inp.text, inp.cursor_location
+
+
+@pytest.mark.asyncio
+async def test_enter_on_skill_row_inserts_short_name(tmp_path):
+    pytest.importorskip("textual")
+    text, cursor = await _enter_on_skill_row(tmp_path, [_BRAIN], "/brai")
+    assert text == "/brainstorming "
+    assert cursor == (0, len(text))
+
+
+@pytest.mark.asyncio
+async def test_enter_on_ambiguous_skill_row_inserts_full_id(tmp_path):
+    pytest.importorskip("textual")
+    skills = [{"id": "a:brainy"}, {"id": "b:brainy"}]
+    text, _ = await _enter_on_skill_row(tmp_path, skills, "/brai")
+    assert text == "/a:brainy "
+
+
+def _running(app) -> bool:
+    runner = app.active_runner
+    return runner is not None and runner.is_running()
