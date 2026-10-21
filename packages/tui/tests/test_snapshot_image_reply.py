@@ -35,7 +35,7 @@ def _app(tmp_path, monkeypatch, *, scenario: str, tid: str, message: str):
 
 
 def test_image_reply_snapshot(snap_compare, tmp_path, monkeypatch):
-    from gc_core.vision.notes import NOTE_MAIN_BLIND
+    from gc_core.vision.notes import NOTE_MAIN_BLIND, TraceNote
 
     tid = "img_snap"
     app = _app(
@@ -50,7 +50,7 @@ def test_image_reply_snapshot(snap_compare, tmp_path, monkeypatch):
         await pilot.pause()
         pilot.app.screen.attach_active_task(tid)
         pilot.app._trace_note_sink.push(
-            tid, NOTE_MAIN_BLIND.format(alias="glm")
+            tid, TraceNote(NOTE_MAIN_BLIND.format(alias="glm"), "reply")
         )
         await pilot.pause(0.6)  # тик опроса (250 мс) снимает очередь пометок
 

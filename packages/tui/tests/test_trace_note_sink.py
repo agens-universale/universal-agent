@@ -7,19 +7,25 @@ from types import SimpleNamespace
 
 import pytest
 
+from gc_core.vision.notes import TraceNote
 from gc_testkit import as_coro
 from gc_tui.services.trace_note_sink import TraceNoteSink
 from gc_testkit.tui_support import tui_settings
+
+
+def _note(text: str) -> TraceNote:
+    return TraceNote(text, "reply")
 
 
 def test_drain_returns_the_thread_notes_in_order_and_drops_the_rest():
     """Пометка только живая и только своей ленты: пометки чужого треда (ход, начатый до
     смены сессии) при снятии выбрасываются — ни сейчас, ни после возврата их нет."""
     sink = TraceNoteSink()
-    sink.push("A", "первая")
-    sink.push("B", "чужая")
-    sink.push("A", "вторая")
-    assert sink.drain("A") == ["первая", "вторая"]
+    first, foreign, second = _note("первая"), _note("чужая"), _note("вторая")
+    sink.push("A", first)
+    sink.push("B", foreign)
+    sink.push("A", second)
+    assert sink.drain("A") == [first, second]
     assert sink.drain("B") == []
     assert sink.drain("A") == []
 
@@ -28,7 +34,9 @@ def test_push_from_many_threads_loses_nothing():
     sink = TraceNoteSink()
     workers = [
         threading.Thread(
-            target=lambda i=i: [sink.push("A", f"{i}-{k}") for k in range(100)]
+            target=lambda i=i: [
+                sink.push("A", _note(f"{i}-{k}")) for k in range(100)
+            ]
         )
         for i in range(8)
     ]
@@ -36,7 +44,7 @@ def test_push_from_many_threads_loses_nothing():
         w.start()
     for w in workers:
         w.join()
-    assert sorted(sink.drain("A")) == sorted(
+    assert sorted(n.text for n in sink.drain("A")) == sorted(
         f"{i}-{k}" for i in range(8) for k in range(100)
     )
 
@@ -47,10 +55,11 @@ def test_the_hook_tags_a_note_with_the_thread_of_its_run():
     sink = TraceNoteSink()
     ctx = SimpleNamespace(system_id="cli", thread_id="A")
     hook = sink.hook_for(ctx)
-    hook("в A")
+    hook(_note("в A"))
     ctx.thread_id = "B"
-    hook("в B")
-    assert sink.drain("B") == ["в B"]
+    in_b = TraceNote("в B", "call", "c1")
+    hook(in_b)
+    assert sink.drain("B") == [in_b]
 
 
 def test_executor_build_wires_on_trace_note_to_the_app_sink(
@@ -87,8 +96,9 @@ def test_executor_build_wires_on_trace_note_to_the_app_sink(
         threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
     )
     app._build_real_executor()
-    ctx.on_trace_note("не просмотрено")
-    assert app._trace_note_sink.drain("t1") == ["не просмотрено"]
+    note = TraceNote("не просмотрено", "reply")
+    ctx.on_trace_note(note)
+    assert app._trace_note_sink.drain("t1") == [note]
 
 
 @pytest.mark.asyncio
@@ -127,8 +137,8 @@ async def test_poll_tick_mounts_the_gray_line_below_the_reply_and_only_live(
         scr = pilot.app.screen
         scr.attach_active_task(tid)
         await pilot.pause()
-        pilot.app._trace_note_sink.push("b" * 32, "из другой сессии")
-        pilot.app._trace_note_sink.push(tid, note)
+        pilot.app._trace_note_sink.push("b" * 32, _note("из другой сессии"))
+        pilot.app._trace_note_sink.push(tid, TraceNote(note, "reply"))
         await pilot.pause(0.7)  # тик опроса — 250 мс
         rows = [
             w for w in scr.query(TraceRow) if w._prefix == "[изображение] "

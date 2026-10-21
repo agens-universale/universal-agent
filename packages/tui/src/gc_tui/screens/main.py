@@ -4440,9 +4440,11 @@ class TraceScreen(Screen):
         sink = getattr(self.app, "_trace_note_sink", None)
         if sink is None:
             return
-        for text in sink.drain(self._active_task_id):
+        for note in sink.drain(self._active_task_id):
             self._mount_trace_row(
-                prefix=_IMAGE_NOTE_PREFIX, content=text, kind_class="line-meta"
+                prefix=_IMAGE_NOTE_PREFIX,
+                content=note.text,
+                kind_class="line-meta",
             )
 
     _PENDING_CAP = 20
