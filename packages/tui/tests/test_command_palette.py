@@ -909,3 +909,50 @@ def test_settings_description_is_short():
     assert (
         cmd.description == "Подключение, модели, профили, MCP, голос, режимы"
     )
+
+
+def _main_app(tmp_path):
+    from gc_tui.app import TuiApp
+
+    return TuiApp(
+        threads_dir=str(tmp_path / "t"),
+        system="cli",
+        settings=tui_settings(
+            {"agent.model": "M", "backend.api_mode": "chat_completions"}
+        ),
+    )
+
+
+def _row_text(app, row) -> str:
+    """Текст строки палитры так, как он реально нарисован на экране."""
+    region = row.content_region
+    strip = app.screen._compositor.render_strips()[region.y]
+    line = "".join(seg.text for seg in strip)
+    return line[region.x : region.right]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("width", [90, 100, 120])
+async def test_full_palette_with_scrollbar_keeps_hotkeys_whole(
+    tmp_path, width
+):
+    pytest.importorskip("textual")
+    async with _main_app(tmp_path).run_test(size=(width, 24)) as pilot:
+        await pilot.pause(0.3)
+        scr = pilot.app.screen
+        scr._open_palette(prefix="")
+        await pilot.pause(0.5)
+        pal = scr._palette
+        assert pal.show_vertical_scrollbar  # список длиннее окна
+        rows = list(pal.query(".palette-row").exclude(".palette-toggle-row"))
+        with_hotkey = [
+            (row, cmd)
+            for row, cmd in zip(rows, pal._visible_rows())
+            if cmd.hotkey
+        ]
+        assert len(with_hotkey) >= 4
+        for row, cmd in with_hotkey:
+            pal.scroll_to(y=row.virtual_region.y, animate=False)
+            await pilot.pause(0.05)
+            assert row.region.height == 1
+            assert _row_text(pilot.app, row).rstrip().endswith(cmd.hotkey)

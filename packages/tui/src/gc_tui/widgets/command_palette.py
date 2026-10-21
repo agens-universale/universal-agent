@@ -299,14 +299,15 @@ class CommandPalette(VerticalScroll):
         return _hint_for(sel)
 
     def _content_width(self) -> int:
-        """Ширина контента `.palette` (за вычетом рамки), известная ДО первого
-        layout-прохода: `self.size` у ещё не смонтированного/не уложенного
-        виджета — Size(0, 0) (Textual резолвит его только после arrange),
-        поэтому усечение по `self.size.width` на первом `compose()` молчит
-        (avail=0 → guard пропускает усечение) и toggle-строка рендерится
-        нетронутой длины — переносится на 2 строки в реальном рендере, а
-        `desired_height`/`_footer_reserved_height()` считали 1 строку на
-        тоггл → подвал недосчитан, палитра/футер уезжают за экран (регрессия).
+        """Ширина контента `.palette` (за вычетом рамки и колонки полосы
+        прокрутки), известная ДО первого layout-прохода: `self.size` у ещё
+        не смонтированного/не уложенного виджета — Size(0, 0) (Textual
+        резолвит его только после arrange), поэтому усечение по
+        `self.size.width` на первом `compose()` молчит (avail=0 → guard
+        пропускает усечение) и toggle-строка рендерится нетронутой длины —
+        переносится на 2 строки в реальном рендере, а `desired_height`/
+        `_footer_reserved_height()` считали 1 строку на тоггл → подвал
+        недосчитан, палитра/футер уезжают за экран (регрессия).
         `.palette` всегда занимает всю ширину `#root` (= ширина экрана,
         см. `_mount_input_overlay`), поэтому ширина известна заранее из
         `self.app.size`, а не из собственного ещё не уложенного `self.size`.
@@ -317,7 +318,10 @@ class CommandPalette(VerticalScroll):
             app_width = self.app.size.width
         except NoActiveAppError:
             return 0
-        return app_width - 2  # -2 — рамка .palette (round border)
+        # -2 — рамка .palette (round border); минус колонка вертикальной
+        # полосы прокрутки — всегда, есть полоса или нет: появится она после
+        # раскладки, и строка, посчитанная без неё, срезалась бы на хвосте.
+        return app_width - 2 - self.styles.scrollbar_size_vertical
 
     def _toggle_hint(self, cmd: Command) -> str:
         """Hint выделенной toggle-строки (спека §6): значение + его смысл из
@@ -334,10 +338,7 @@ class CommandPalette(VerticalScroll):
         «значение — …  ·  клавиши»: цикла без позиций нет, обёртка была бы
         бессмысленной (канон §12.1 — текст пустого состояния дословно)."""
         spec = TOGGLES[cmd.name]
-        if self._toggle_state is not None:
-            current = self._toggle_state(cmd.name)
-        else:
-            current = spec.names[0] if spec.names else ""
+        current = self._current(cmd.name)
         width = self._content_width() - 4 if self._content_width() else 0
         if (
             spec.hint_provider is not None
@@ -495,6 +496,32 @@ class CommandPalette(VerticalScroll):
         )
         return 3 if extra is not None else 0
 
+    def _current(self, name: str) -> str:
+        """Применённое значение тоггла `name` (без инъекции — первое)."""
+        if self._toggle_state is not None:
+            return self._toggle_state(name)
+        names = TOGGLES[name].names
+        return names[0] if names else ""
+
+    def _value_text(self, name: str) -> str:
+        """Подпись значения в строке: пустое — словами спеки («без
+        профиля»), не прочерк."""
+        return self._current(name) or TOGGLES[name].empty_value_text
+
+    def _toggle_block_w(
+        self, toggles: list[Command], track_w: int, label_w: int
+    ) -> int:
+        """Ширина правого блока тоггл-строк от общей колонки `col`: трек +
+        2 + подпись, у trackless (/profiles) — само значение. Общая для всех
+        строк — значение /profiles начинается там же, где треки."""
+        widths = [
+            track_w + 2 + label_w
+            if TOGGLES[c.name].show_track
+            else len(self._value_text(c.name))
+            for c in toggles
+        ]
+        return max(widths)
+
     def _toggle_columns(self) -> tuple[int, int, int, int]:
         """(col, base_w, extra_w, label_w) — общая раскладка тоггл-подвала
         (спека 2026-07-18 §4, выравнивание — ревизия 5 §6). `col` — колонка,
@@ -511,15 +538,30 @@ class CommandPalette(VerticalScroll):
         видимых тогглов (не только текущей строки) — иначе усечение узкого
         терминала в `_format_toggle_row` считает РАЗНЫЙ head_w на разных
         строках и слайдеры съезжают по колонкам между ними (находка ревью
-        Task 2)."""
+        Task 2). Окно уже раскладки — `col` сдвигается влево (описание
+        усекается), правый блок (`_toggle_block_w`) не режется никогда."""
         toggles = self._visible_toggle_rows()
         name_w = self._name_col_w()
         col = max(len(self._row_head(c, name_w)) for c in toggles) + 3
         base_w = max(self._my_base_w(c.name) for c in toggles)
         extra_w = max(self._my_extra_w(c.name) for c in toggles)
         label_w = max(
-            (len(n) for c in toggles for n in TOGGLES[c.name].names), default=0
+            (
+                len(n)
+                for c in toggles
+                if TOGGLES[c.name].show_track
+                for n in (
+                    *(v.value for v in self._values_for(c.name)),
+                    self._current(c.name),
+                )
+            ),
+            default=0,
         )
+        block_w = self._toggle_block_w(toggles, base_w + extra_w, label_w)
+        if self._content_width():
+            # имя-колонка + хотя бы 1 символ описания + зазор 3
+            floor = 1 + name_w + 1 + 3
+            col = max(floor, min(col, self._line_width() - block_w))
         return col, base_w, extra_w, label_w
 
     def _format_toggle_row(self, cmd: Command) -> Text:
@@ -538,57 +580,22 @@ class CommandPalette(VerticalScroll):
         никакого другого акцента); трек/подпись в тех же общих колонках, что
         и у всех тоггл-строк."""
         spec = TOGGLES[cmd.name]
-        if self._toggle_state is not None:
-            current = self._toggle_state(cmd.name)
-        else:
-            current = spec.names[0] if spec.names else ""
-
-        name_w = self._name_col_w()
-        col, base_w, extra_w, label_w = self._toggle_columns()
+        current = self._current(cmd.name)
+        col, base_w, extra_w, _ = self._toggle_columns()
         is_child = self._owning_preset(cmd.name) is not None
-        head = self._row_head(cmd, name_w)
+        head = self._row_head(cmd)
+        if len(head) > col - 3:  # окно уже раскладки — режется описание
+            head = head[: col - 4] + "…"
 
         if not spec.show_track:
             # Trackless (спека §12.1, /profiles): без шкалы — сразу значение-имя
-            # на месте начала общей колонки трека (`col`), без слайдера/резерва
-            # (произвольное число профилей — шкала не имеет смысла). Пустое
-            # значение — словами спеки («без профиля»), не прочерк.
-            value_text = current or spec.empty_value_text
-            avail = self._content_width() - 2 if self._content_width() else 0
-            need = col + len(value_text)
-            if avail and need > avail:
-                prefix_floor = 1 + name_w + 1
-                head_w = max(prefix_floor, avail - len(value_text) - 3)
-                if len(head) > head_w:
-                    head = head[: head_w - 1] + "…"
-                col = head_w + 3
+            # в общей колонке трека (`col`), без слайдера/резерва
+            # (произвольное число профилей — шкала не имеет смысла).
             text = Text(head.ljust(col))
-            text.append(value_text)
+            text.append(self._value_text(cmd.name))
             if is_child:
                 text.stylize(_pal.SUB_INK)
             return text
-
-        track_w = base_w + extra_w
-
-        # Узкий терминал (§4): слайдер+подпись не жертвуются — усекаем описание.
-        # head_w/col считаем от ОБЩИХ track_w/label_w и общего prefix_floor
-        # (не от этой строки) — тогда усечённый col тоже общий для всех
-        # тоггл-строк подвала (раньше label_w брался из spec.names ТЕКУЩЕЙ
-        # команды, и head_w/col получались per-row — треки съезжали по
-        # колонкам между строками, находка ревью Task 2). Имя-колонка теперь
-        # общая по обеим зонам (`_name_col_w`), поэтому отступ до описания
-        # (" " + имя.ljust(name_w)) одинаков для всех тоггл-строк — floor
-        # константен, не считается per-row.
-        avail = self._content_width() - 2 if self._content_width() else 0
-        need = col + track_w + 2 + label_w
-        if avail and need > avail:
-            prefix_floor = (
-                1 + name_w + 1
-            )  # имя-колонка + хотя бы 1 символ описания
-            head_w = max(prefix_floor, avail - (track_w + 2 + label_w) - 3)
-            if len(head) > head_w:
-                head = head[: head_w - 1] + "…"
-            col = head_w + 3
 
         text = Text(head.ljust(col))
         if is_child:

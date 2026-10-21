@@ -777,7 +777,13 @@ def test_child_rows_always_dim_flat_and_track_aligned_with_parent():
     from gc_tui.widgets.command_palette import CommandPalette
 
     reg = build_default_registry()
-    state = {"rigor": "high", "gate": "on", "answers": "deny"}
+    state = {
+        "level": "default",
+        "profiles": "",
+        "rigor": "high",
+        "gate": "on",
+        "answers": "deny",
+    }
 
     def _extra(name):
         return False if TOGGLES[name].preset_keys else None
@@ -1477,3 +1483,66 @@ def test_toggle_hint_texts_do_not_promise_enter_cycles():
         text = Path(module.__file__).read_text(encoding="utf-8")
         assert "←/→/Enter" not in text
         assert "Enter — переключить" not in text
+
+
+def _main_app(tmp_path):
+    from gc_tui.app import TuiApp
+
+    return TuiApp(
+        threads_dir=str(tmp_path / "t"),
+        system="cli",
+        settings=tui_settings(
+            {"agent.model": "M", "backend.api_mode": "chat_completions"}
+        ),
+    )
+
+
+def _row_text(app, row) -> str:
+    """Текст строки палитры так, как он реально нарисован на экране."""
+    region = row.content_region
+    strip = app.screen._compositor.render_strips()[region.y]
+    line = "".join(seg.text for seg in strip)
+    return line[region.x : region.right]
+
+
+async def _open_full_palette(pilot):
+    await pilot.pause(0.3)
+    scr = pilot.app.screen
+    scr._open_palette(prefix="")
+    await pilot.pause(0.5)
+    pal = scr._palette
+    assert pal.show_vertical_scrollbar  # список длиннее окна
+    return pal
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("width", [90, 100, 120])
+async def test_full_palette_with_scrollbar_keeps_toggle_values_whole(
+    tmp_path, width
+):
+    pytest.importorskip("textual")
+    async with _main_app(tmp_path).run_test(size=(width, 24)) as pilot:
+        pal = await _open_full_palette(pilot)
+        rows = list(pal.query(".palette-toggle-row"))
+        toggles = pal._visible_toggle_rows()
+        assert len(rows) == len(toggles) >= 2
+        for row, cmd in zip(rows, toggles):
+            assert row.region.height == 1
+            value = toggle_state(pilot.app, cmd.name) or "без профиля"
+            assert _row_text(pilot.app, row).rstrip().endswith(value)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("width", [90, 100, 120])
+async def test_profiles_value_starts_at_level_track(tmp_path, width):
+    pytest.importorskip("textual")
+    async with _main_app(tmp_path).run_test(size=(width, 24)) as pilot:
+        pal = await _open_full_palette(pilot)
+        rows = {
+            r.render().plain.split()[0]: _row_text(pilot.app, r)
+            for r in pal.query(".palette-toggle-row")
+        }
+        level = rows["/level"]
+        first_circle = min(i for i, ch in enumerate(level) if ch in "○●")
+        value = toggle_state(pilot.app, "profiles") or "без профиля"
+        assert rows["/profiles"].index(value) == first_circle
