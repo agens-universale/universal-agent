@@ -307,3 +307,68 @@ async def test_unknown_skill_with_text_mid_run_queues_text_without_it(
             "скилл nope не найден — отправлено без него"
         ]
         assert _meta_skills(scr) == []
+
+
+# --- реестр скиллов не читает диск в потоке интерфейса -----------------------
+
+
+class _BlockingRegistry:
+    """Реестр, который, как настоящий, обходит диск синхронно внутри
+    async-метода: на цикле интерфейса он держал бы ввод."""
+
+    async def load_skill_detail(self, skill_id):
+        import time
+
+        time.sleep(0.05)
+        if skill_id != "pack:x":
+            raise KeyError(skill_id)
+        return {"instructions": "BODY"}
+
+
+def _sent(runner) -> list[str]:
+    return [m["content"] for m in runner.added] + [
+        s["query"] for s in runner.starts
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("running", [True, False])
+@pytest.mark.parametrize(
+    "command, body_sent",
+    [
+        ("skill nope", False),
+        ("skill nope почини", False),
+        ("skill x", True),
+        ("skill x почини", True),
+    ],
+)
+async def test_skill_command_never_scans_registry_on_ui_loop(
+    tmp_path, monkeypatch, running, command, body_sent
+):
+    """Без заглушки «скилл загружаем»: есть ли скилл — по прогретому кэшу,
+    тело доставки — реестром вне цикла интерфейса."""
+    pytest.importorskip("textual")
+    import threading
+
+    from gc_core.tools.skills import registry as sreg
+
+    built_on_loop: list[bool] = []
+
+    def _registry(cfg):
+        main = threading.current_thread() is threading.main_thread()
+        built_on_loop.append(main)
+        return _BlockingRegistry()
+
+    monkeypatch.setattr(sreg, "get_skills_registry", _registry)
+    async with _app(tmp_path).run_test() as pilot:
+        scr, runner = await _unknown_skill_session(
+            pilot, tmp_path, running=running
+        )
+        scr._skills_cache = [{"id": "pack:x"}]
+        await scr._handle_command(command)
+        await pilot.pause()
+        sent = _sent(runner)
+    assert True not in built_on_loop
+    assert any("BODY" in s for s in sent) == (body_sent and bool(sent))
+    if "почини" in command:
+        assert any("почини" in s for s in sent)

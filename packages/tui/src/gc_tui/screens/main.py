@@ -6955,19 +6955,16 @@ class TraceScreen(Screen):
         prefix: list[str] = []
         patch: dict = {}
         if pending_skill:
-            from gc_core.tools.skills.registry import get_skills_registry
-            from gc_core.tools.skills.skill_delivery import (
-                build_skill_delivery,
-                skill_is_available,
-            )
+            from gc_tui.services.skills_scan import skill_delivery_off_loop
 
-            reg = get_skills_registry(self.app.base_settings())
-            prefix.append(await build_skill_delivery(pending_skill, reg))
-            patch["skills"] = [pending_skill]
-            self._pending_skill_marker = (
-                pending_skill,
-                await skill_is_available(pending_skill, reg),
+            delivery, loaded = await skill_delivery_off_loop(
+                self.app.base_settings(), pending_skill
             )
+            # Не загружен — сообщение уходит без него (спека P3 §2.3).
+            if loaded:
+                prefix.append(delivery)
+                patch["skills"] = [pending_skill]
+            self._pending_skill_marker = (pending_skill, loaded)
         return ("\n".join(prefix + [text]) if prefix else text), patch
 
     def _skill_display_args(
@@ -7562,8 +7559,8 @@ class TraceScreen(Screen):
             self._render_skill_ambiguous(first, res.suggestions)
         else:
             # Первый токен — не скилл каталога (id скиллов без пробелов):
-            # загружаемость решает реестр; нет — текст уходит без скилла.
-            await self._cmd_use_skill(first, prompt=rest.strip())
+            # текст уходит без скилла, без текста — только ошибка.
+            await self._skill_missing(first, rest.strip())
 
     async def _dispatch_skill_by_name(self, name: str, arg: str) -> None:
         """`/имя текст` без такой команды ≡ `/skill имя текст` — только при
@@ -7613,9 +7610,6 @@ class TraceScreen(Screen):
                 kind_class="line-error",
             )
             return
-        if not await self._skill_available(skill_id):
-            await self._skill_missing(skill_id, prompt)
-            return
         if prompt:
             await self._deliver_skill_with_prompt(skill_id, prompt)
             return
@@ -7634,14 +7628,6 @@ class TraceScreen(Screen):
             content=f"скилл {name} применится к следующему сообщению",
             kind_class="line-meta",
         )
-
-    async def _skill_available(self, skill_id: str) -> bool:
-        """Скилл реально загрузим (реестр, не кэш палитры)."""
-        from gc_core.tools.skills.registry import get_skills_registry
-        from gc_core.tools.skills.skill_delivery import skill_is_available
-
-        reg = get_skills_registry(self.app.base_settings())
-        return await skill_is_available(skill_id, reg)
 
     async def _skill_missing(self, skill_id: str, prompt: str) -> None:
         """Скилла нет (спека P3 §2.3): с текстом — текст уходит обычной
@@ -7663,14 +7649,19 @@ class TraceScreen(Screen):
 
     async def _queue_skill_only(self, skill_id: str) -> None:
         """Mid-run `/skill X` без текста — реплика из одного имени скилла
-        в очереди (спека P3 §10 ответ 3)."""
-        from gc_core.tools.skills.registry import get_skills_registry
-        from gc_core.tools.skills.skill_delivery import build_skill_delivery
+        в очереди (спека P3 §10 ответ 3). Не загрузился — как ненайденный:
+        агенту ничего."""
+        from gc_tui.services.skills_scan import skill_delivery_off_loop
 
-        reg = get_skills_registry(self.app.base_settings())
+        delivery, loaded = await skill_delivery_off_loop(
+            self.app.base_settings(), skill_id
+        )
+        if not loaded:
+            await self._skill_missing(skill_id, "")
+            return
         msg = {
             "role": "user",
-            "content": await build_skill_delivery(skill_id, reg),
+            "content": delivery,
             "id": "m_" + uuid.uuid4().hex,
             "display_content": "",
             "skill_loaded": skill_id,

@@ -118,6 +118,7 @@ async def test_skill_without_prompt_stays_pending(tmp_path):
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
+        scr._skills_cache = [{"id": "coder"}]  # есть ли скилл — по кэшу
         await scr._handle_command("skill coder")
         await pilot.pause(0.1)
         assert app.tui_state.pending_skill_id == "coder"
