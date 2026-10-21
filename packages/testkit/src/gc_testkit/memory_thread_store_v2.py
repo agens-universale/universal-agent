@@ -43,6 +43,7 @@ from gc_core.threads.models import (
     check_stream_name,
 )
 from gc_core.threads.rules import (
+    check_deletable,
     check_side_writer,
     check_writer,
     granted_lease,
@@ -50,6 +51,7 @@ from gc_core.threads.rules import (
     page_of,
     patched_frontend,
     same_lease,
+    side_is_activity,
 )
 from gc_core.threads.store import ThreadStore
 
@@ -341,6 +343,8 @@ class MemoryThreadStore(ThreadStore):
             )
         for stream, items in change.append:
             self._append(thread, stream, items)
+        if side_is_activity(change):
+            thread.updated_at = max(self._now(), thread.updated_at)
         self._alias(key, change.add_aliases)
         receipt = self._receipt(key, thread, change.op_id)
         return self._remember(key, change, receipt)
@@ -362,9 +366,11 @@ class MemoryThreadStore(ThreadStore):
             thread.lease = None
 
     async def delete(self, key: ThreadKey, *, op_id: str) -> None:
-        thread = self._threads.pop(key, None)
+        thread = self._threads.get(key)
         if thread is None:
             return
+        check_deletable(thread.lease)
+        del self._threads[key]
         self._tombstones[key] = (thread.generation + 1, thread.epoch)
         self._aliases = {a: k for a, k in self._aliases.items() if k != key}
         self._blobs = {b: d for b, d in self._blobs.items() if b[0] != key}

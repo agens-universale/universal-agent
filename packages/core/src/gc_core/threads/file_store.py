@@ -15,7 +15,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import copy
 import hashlib
@@ -68,6 +67,7 @@ from gc_core.threads.models import (
     check_stream_name,
 )
 from gc_core.threads.rules import (
+    check_deletable,
     check_side_writer,
     check_writer,
     granted_lease,
@@ -75,6 +75,7 @@ from gc_core.threads.rules import (
     page_of,
     patched_frontend,
     same_lease,
+    side_is_activity,
 )
 from gc_core.threads.store import ThreadStore
 
@@ -783,12 +784,13 @@ class FileThreadStore(ThreadStore):
             return self._record(key, v2)
 
     async def list_threads(self, query: ThreadQuery) -> Page[ThreadRecord]:
-        # Обход каталога (glob, stat, имена тредов) — в потоке: каталог
-        # сервера — тысячи файлов. Треды, чьи файлы не менялись с
-        # ``updated_after``, отсеиваются по mtime до чтения meta.
+        # Треды, чьи файлы не менялись с ``updated_after``, отсеиваются по
+        # mtime до чтения meta: обход восстановления — stat, а не разбор
+        # каждого треда каталога. Обход — на месте, не в потоке: фасад над
+        # файловым хранилищем зовут и синхронно (``run_sync`` в TUI).
         since = _mtime_floor(query.updated_after)
         records = []
-        for key in await asyncio.to_thread(self._known_keys, since):
+        for key in self._known_keys(since):
             try:
                 record = self._listed(key)
             except (OSError, ValueError):
@@ -914,8 +916,10 @@ class FileThreadStore(ThreadStore):
         self._add_aliases(changes, key, v2, change.add_aliases)
         for stream, items in change.append:
             self._append_stream(changes, key, v2, stream, items)
+        activity = side_is_activity(change)
         if (
-            change.set_runtime is not None
+            activity
+            or change.set_runtime is not None
             or change.set_frontend is not None
             or change.patch_frontend is not None
         ):
@@ -931,7 +935,8 @@ class FileThreadStore(ThreadStore):
                 merged = patched_frontend(parts.frontend.get(name), patch)
                 parts = parts.with_(frontend={**parts.frontend, name: merged})
             meta = meta_from_parts(parts, base=meta)
-            self._write_meta(changes, key, meta, v2, touch=False)
+            # Сообщение во входящий поток — активность треда (updated_at).
+            self._write_meta(changes, key, meta, v2, touch=activity)
         receipt = Receipt(
             op_id=change.op_id,
             revision=v2["revision"],
@@ -1005,6 +1010,7 @@ class FileThreadStore(ThreadStore):
             # Тред, который ведёт durable-исполнитель, не удаляет никто
             # другой (уборщик по TTL, фронтенд) — как в develop.
             _check_durable_owner(control, None)
+            check_deletable(self._lease(v2))
             changes = file_tx.Changes(Path(self._dir))
             for path in self._thread_files(key, v2):
                 changes.put(path, None)

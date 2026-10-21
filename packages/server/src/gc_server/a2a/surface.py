@@ -130,7 +130,7 @@ class A2aSurface:
         return GcAgentExecutor(
             settings=self.settings,
             agent_factory=self.runtime.agent_factory(self.settings),
-            threads=self.runtime.threads(),
+            threads=self.runtime.threads("a2a"),
             launch_root=self.section.launch_root,
             auth_connector=build_auth_connector(self.settings),
             tools_cache=ToolsCache(os_backend=backend),
@@ -175,7 +175,7 @@ class A2aSurface:
         )
         from gc_server.chat.http_guard import install_http_guard
 
-        threads = self.runtime.threads()
+        threads = self.runtime.threads("a2a")
         card = self.card()
         push: dict = {}
         if self.section.push_allowed_hosts:

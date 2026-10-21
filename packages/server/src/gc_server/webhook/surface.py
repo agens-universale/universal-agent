@@ -27,6 +27,7 @@ from gc_core.config_modules.auth import build_auth_connector
 from gc_core.execution.environment import utc_now
 from gc_core.run_context import acreate_run_context
 from gc_core.thread_store import validate_thread_id
+from gc_core.threads.errors import OwnershipError
 from gc_core.threads.facade import Threads
 from gc_core.threads.instance import instance_id
 from gc_core.threads.models import ThreadKey, ThreadQuery, ThreadRecord
@@ -47,7 +48,6 @@ from gc_server.webhook.callbacks import (
     allowed_callback,
     make_event,
 )
-from gc_server.webhook.janitor import start_threads_cleanup
 from gc_server.webhook.registry import ActiveRun, AgentRunRegistry
 from gc_server.webhook.request import ensure_task_id, normalize_system
 
@@ -162,25 +162,16 @@ class WebhookSurface:
         cleanup = self.config.threads_cleanup
         if not cleanup.enabled:
             return
-        if "thread_store" in self.runtime.store_kwargs():
-            # Треды в базе: чистка — через фасад и только треды вебхука.
-            logger.info(
-                "чистка тредов включена (хранилище storage.threads): ttl %g "
-                "дн., интервал %d с",
-                cleanup.ttl_days,
-                cleanup.interval_seconds,
-            )
-            self._pruner = asyncio.create_task(self._aprune_loop())
-            return
-        from gc_core.thread_store import resolve_threads_dir
-
-        start_threads_cleanup(
-            enabled=True,
-            interval_seconds=cleanup.interval_seconds,
-            ttl_days=cleanup.ttl_days,
-            threads_dir=resolve_threads_dir(self.settings),
-            logger=logger,
+        # Чистка — через фасад и только задачи вебхука: на файлах каталог
+        # тредов по умолчанию общий с gc-cli и TUI.
+        store = self.threads().store
+        logger.info(
+            "чистка тредов включена (%s): ttl %g дн., интервал %d с",
+            getattr(store, "threads_dir", "") or "хранилище storage.threads",
+            cleanup.ttl_days,
+            cleanup.interval_seconds,
         )
+        self._pruner = asyncio.create_task(self._aprune_loop())
 
     async def astop(self) -> None:
         # Снятые прогоны пишут статус cancelled — дождаться их до закрытия
@@ -198,18 +189,26 @@ class WebhookSurface:
         await asyncio.gather(*background, return_exceptions=True)
 
     async def aprune_once(self, *, older_than: timedelta) -> int:
-        """Удалить треды вебхука, не менявшиеся дольше ``older_than``;
-        треды других поверхностей и интерактивных сессий не трогаются."""
+        """Удалить задачи вебхука (тред со статусом вебхука), не менявшиеся
+        дольше ``older_than``; треды других поверхностей, интерактивных
+        сессий и тред под бессрочной арендой (durable-исполнитель) не
+        трогаются."""
         cutoff = (utc_now() - older_than).isoformat()
         threads = self.threads()
         stale = [
             record.key
             async for record in threads.iter_threads(updated_before=cutoff)
             if record.key.system not in RESERVED_SYSTEMS
+            and task_status.FRONTEND in record.frontend
         ]
+        removed = 0
         for key in stale:
-            await threads.delete(key)
-        return len(stale)
+            try:
+                await threads.delete(key)
+            except OwnershipError:
+                continue
+            removed += 1
+        return removed
 
     async def _aprune_loop(self) -> None:
         cleanup = self.config.threads_cleanup
@@ -261,8 +260,8 @@ class WebhookSurface:
         return settings_of(self.settings).thread_store.inbox_poll_seconds
 
     def threads(self) -> Threads:
-        """Треды сервера — через фасад."""
-        return self.runtime.threads()
+        """Треды вебхука — через фасад, там же, куда пишет его ход."""
+        return self.runtime.threads("webhook")
 
     # --- ручки ------------------------------------------------------------
 
@@ -381,13 +380,24 @@ class WebhookSurface:
         """Забыть квитанции старше окна идемпотентности."""
         return await self.threads().prune(older_than)
 
-    async def _areceipts_loop(self) -> None:
+    async def amaintain_once(self) -> None:
+        """Обслуживание хранилища тредов: квитанции старше окна
+        идемпотентности (и надгробия) и — у хранилища, которое умеет
+        (Redis, S3), — сироты прерванных записей (``sweep``)."""
         window = timedelta(hours=self.config.idempotency_ttl_hours)
+        await self.aprune_receipts(older_than=window)
+        sweep = getattr(self.threads().store, "sweep", None)
+        if callable(sweep):
+            await sweep()
+
+    async def _areceipts_loop(self) -> None:
         while True:
             try:
-                await self.aprune_receipts(older_than=window)
+                await self.amaintain_once()
             except Exception:
-                logger.warning("чистка квитанций не удалась", exc_info=True)
+                logger.warning(
+                    "обслуживание хранилища тредов не удалось", exc_info=True
+                )
             await asyncio.sleep(_RECEIPTS_PRUNE_SECONDS)
 
     async def acancel(self, key: ThreadKey) -> Dict[str, Any] | None:

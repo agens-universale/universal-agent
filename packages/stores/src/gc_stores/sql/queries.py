@@ -30,7 +30,13 @@ RECEIPT_COLUMNS = (
     "receipt",
     "created_at",
 )
-TOMBSTONE_COLUMNS = ("system", "thread_id", "generation", "lease_epoch")
+TOMBSTONE_COLUMNS = (
+    "system",
+    "thread_id",
+    "generation",
+    "lease_epoch",
+    "deleted_at",
+)
 ALIAS_COLUMNS = ("alias", "system", "thread_id")
 #: Таблицы с данными треда — удаляются вместе с ним.
 THREAD_TABLES = (
@@ -192,6 +198,11 @@ class SqlQueries:
         )
         self.save_tombstone = d.upsert(
             self.tombstones, TOMBSTONE_COLUMNS, ("system", "thread_id")
+        )
+        p = d.params()
+        self.prune_tombstones = (
+            f"DELETE FROM {self.tombstones} WHERE {c('deleted_at')} IS NULL "
+            f"OR {c('deleted_at')} < {p()}"
         )
         self.delete_thread_rows = tuple(
             f"DELETE FROM {d.table(name)} WHERE {self.by_thread(d.params())}"

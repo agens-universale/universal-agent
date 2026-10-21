@@ -2,6 +2,7 @@
 (сессия агента поверх него); файлы треда живут в базе."""
 
 import os
+from datetime import timedelta
 
 import pytest
 from gc_core.threads.models import LeaseRequest, ThreadKey
@@ -35,7 +36,7 @@ async def test_session_over_sqlite_works(tmp_path):
 async def test_thread_files_live_in_the_database(tmp_path):
     """Картинки ядра (``thread-file://``) — в базе треда, удаляются с ним."""
     store = SQLiteThreadStore(tmp_path / "t.db")
-    await store.claim(KEY, LeaseRequest(owner="a"))
+    await store.claim(KEY, LeaseRequest(owner="a", ttl=timedelta(minutes=1)))
     store.write_thread_file("cli", "lite", "images/a.png", b"\x89PNG")
     assert store.read_thread_file("cli", "lite", "images/a.png") == b"\x89PNG"
     assert store.read_thread_file("cli", "lite", "images/none.png") is None
@@ -58,7 +59,7 @@ async def test_database_is_private_to_its_owner(tmp_path):
     """В базе история и квитанции агента: файл и журналы — только владельцу."""
     path = tmp_path / "t.db"
     store = SQLiteThreadStore(path)
-    await store.claim(KEY, LeaseRequest(owner="a"))
+    await store.claim(KEY, LeaseRequest(owner="a", ttl=timedelta(minutes=1)))
     # Журналы WAL живут, пока открыто соединение.
     conn = store._connect()
     try:
@@ -82,3 +83,15 @@ async def test_read_stream_limit_zero_reads_nothing(tmp_path):
     )
     assert await store.read_stream(KEY, "subagent_events", limit=0) == []
     assert len(await store.read_stream(KEY, "subagent_events")) == 1
+
+
+async def test_prune_drops_old_tombstones(tmp_path):
+    from gc_testkit.thread_store_conformance_v2 import (
+        FakeClock,
+        acheck_prune_drops_old_tombstones,
+    )
+
+    clock = FakeClock()
+    await acheck_prune_drops_old_tombstones(
+        SQLiteThreadStore(tmp_path / "t.db", clock=clock), clock
+    )

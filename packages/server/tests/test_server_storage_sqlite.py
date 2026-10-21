@@ -121,14 +121,26 @@ async def test_cleanup_on_a_database_prunes_only_webhook_threads(tmp_path):
     from gc_core.threads.facade import Threads
     from gc_server.webhook.surface import WebhookSurface
 
+    from gc_server.webhook import status as task_status
+
     loaded = _settings(tmp_path)
     stores = await aopen_process_stores(loaded)
     threads = Threads(stores.threads)
-    for system in ("generic", "responses", "cli"):
+    for system, thread in (
+        ("generic", "old"),
+        ("generic", "own"),
+        ("responses", "old"),
+        ("cli", "old"),
+    ):
         await threads.append_messages(
-            ThreadKey(system=system, thread="old"),
-            [{"role": "user", "content": "x", "id": f"m-{system}"}],
+            ThreadKey(system=system, thread=thread),
+            [{"role": "user", "content": "x", "id": f"m-{system}-{thread}"}],
         )
+    # Задача вебхука — со статусом вебхука; ``generic/own`` — тред той же
+    # системы, но не задача (например, gc-cli --system generic).
+    await task_status.aset_status(
+        threads, ThreadKey(system="generic", thread="old"), status="completed"
+    )
     runtime = ServerRuntime(
         base=loaded,
         config=ServerConfig.model_validate(
@@ -140,7 +152,89 @@ async def test_cleanup_on_a_database_prunes_only_webhook_threads(tmp_path):
     try:
         removed = await surface.aprune_once(older_than=timedelta(seconds=-1))
         left = {r.key.system async for r in threads.iter_threads()}
+        own = await threads.get(ThreadKey(system="generic", thread="own"))
     finally:
         await stores.aclose()
     assert removed == 1
-    assert left == {"responses", "cli"}
+    assert left == {"generic", "responses", "cli"}
+    assert own is not None
+
+
+async def test_cleanup_on_files_prunes_only_webhook_threads(tmp_path):
+    """Каталог тредов сервера по умолчанию общий с gc-cli и TUI: уборщик на
+    файлах идёт тем же фасадом, что и на базе, и трогает только задачи
+    вебхука — сессии пользователя в том же каталоге остаются."""
+    import asyncio
+
+    from gc_core.threads.facade import Threads
+    from gc_core.threads.file_store import FileThreadStore
+    from gc_server.webhook import status as task_status
+    from gc_server.webhook.surface import WebhookSurface
+
+    threads_dir = tmp_path / "threads"
+    threads = Threads(FileThreadStore(threads_dir))
+    task = ThreadKey(system="generic", thread="old")
+    session = ThreadKey(system="cli", thread="old")
+    for key in (task, session):
+        await threads.append_messages(
+            key, [{"role": "user", "content": "x", "id": f"m-{key.system}"}]
+        )
+    await task_status.aset_status(threads, task, status="completed")
+    await asyncio.sleep(1.1)  # старше срока (ttl ≈ 0,9 с)
+    runtime = ServerRuntime(
+        base=make_settings({"paths.threads_data_path": str(threads_dir)}),
+        config=ServerConfig.model_validate(
+            {
+                "webhook": {
+                    "recovery": {"enabled": False},
+                    "threads_cleanup": {
+                        "enabled": True,
+                        "ttl_days": 0.00001,
+                        "interval_seconds": 3600,
+                    },
+                }
+            }
+        ),
+    )
+    surface = WebhookSurface(runtime)
+    await surface.astart()
+    try:
+        for _ in range(200):
+            if await threads.get(task) is None:
+                break
+            await asyncio.sleep(0.02)
+    finally:
+        await surface.astop()
+    assert await threads.get(task) is None
+    assert await threads.get(session) is not None
+
+
+async def test_maintenance_sweeps_orphans_of_a_kv_store(tmp_path):
+    """Обслуживание вебхука (раз в час) — квитанции и уборка сирот
+    прерванных записей у хранилища, которое её умеет (Redis, S3)."""
+    from datetime import timedelta
+
+    from gc_core.stores import Stores
+    from gc_server.webhook.surface import WebhookSurface
+    from gc_testkit.memory_thread_store_v2 import MemoryThreadStore
+
+    swept: list = []
+
+    class Sweeping(MemoryThreadStore):
+        async def sweep(self, older_than=timedelta(hours=1)):
+            swept.append(older_than)
+            return 0
+
+    loaded = make_settings(
+        {
+            "paths.threads_data_path": str(tmp_path),
+            "storage": {"threads": {"type": "redis", "url": "redis://x"}},
+        }
+    )
+    runtime = ServerRuntime(
+        base=loaded,
+        config=ServerConfig(),
+        stores=Stores(threads=Sweeping(), agent=object()),
+    )
+    await WebhookSurface(runtime).amaintain_once()
+    assert len(swept) == 1

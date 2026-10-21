@@ -223,7 +223,7 @@ class SwarmSurface:
         if self._in_store and self._active(sid):
             # Тред задачи в общей базе: сообщение — во входящий поток, его
             # заберёт ход gc-cli в песочнице (опросом ядра).
-            receipt = await self.runtime.threads().submit(
+            receipt = await self.runtime.threads("swarm").submit(
                 key, message, op_id=op_id, source="swarm"
             )
             return {
@@ -248,7 +248,7 @@ class SwarmSurface:
             if self.monitor is not None:
                 self.monitor.register_active(sid)
         if self._in_store:
-            await self.runtime.threads().update_frontend(
+            await self.runtime.threads("swarm").update_frontend(
                 key, "swarm", {"swarm_id": sid}
             )
         return {"status": "started", "message_seq": None}
@@ -350,7 +350,7 @@ class SwarmSurface:
     ) -> list[Dict[str, Any]]:
         # Только тред задачи swarm: тот же (system, task_id) у вебхука —
         # чужая задача.
-        threads = self.runtime.threads()
+        threads = self.runtime.threads("swarm")
         record = await threads.get(key)
         if record is None or "swarm" not in record.frontend:
             return []
@@ -364,7 +364,7 @@ class SwarmSurface:
         вебхука: песочница читала бы и дописывала чужую историю."""
         if not self._in_store:
             return
-        record = await self.runtime.threads().get(key)
+        record = await self.runtime.threads("swarm").get(key)
         if record is not None and "swarm" not in record.frontend:
             raise http_error(
                 409,
@@ -376,7 +376,7 @@ class SwarmSurface:
     async def _pending(self, key: ThreadKey) -> int:
         if not self._in_store:
             return 0
-        record = await self.runtime.threads().get(key)
+        record = await self.runtime.threads("swarm").get(key)
         if record is None:
             return 0
         return max(0, record.max_seq.get("inbox", 0) - record.state.inbox_seq)
