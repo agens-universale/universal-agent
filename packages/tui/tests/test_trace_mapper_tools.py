@@ -228,7 +228,10 @@ def test_function_call_output_command_moderation_block_is_error_not_agent():
         ts="t",
     )
     assert ev.kind == "error"
-    assert "unsafe_command_blocked" in ev.summary
+    assert (
+        ev.summary
+        == "Judge is unavailable; fail-closed policy blocks execution."
+    )
 
 
 def test_function_call_output_read_guard_block_is_error():
@@ -258,7 +261,69 @@ def test_function_call_output_read_guard_block_is_error():
         ts="t",
     )
     assert ev.kind == "error"
-    assert "read_guard_violation" in ev.summary
+    assert ev.summary == "path is within denied root: /etc"
+
+
+def _error_summary(error: dict) -> str:
+    out = json.dumps({"tool": "fs_write_file", "ok": False, "error": error})
+    ev = map_message(
+        {
+            "type": "function_call_output",
+            "name": "fs_write_file",
+            "call_id": "fc_r",
+            "output": out,
+        },
+        no=3,
+        ts="t",
+    )
+    assert ev.kind == "error"
+    return ev.summary
+
+
+def test_error_summary_prefers_human_reason_over_model_instruction():
+    """Строка отказа адресована человеку: `reason` — причина; инструкция модели
+    («Do NOT retry…») лежит в `guidance` или в `message` и в ленту не идёт."""
+    assert (
+        _error_summary(
+            {
+                "type": "write_denied_by_mode",
+                "reason": "Write not permitted in the current permission mode.",
+                "guidance": "Do NOT retry the same call.",
+            }
+        )
+        == "Write not permitted in the current permission mode."
+    )
+    assert (
+        _error_summary(
+            {
+                "type": "x",
+                "reason": "User forbade git commands in this session.",
+                "message": "This action does not match. Do NOT retry the same call.",
+            }
+        )
+        == "User forbade git commands in this session."
+    )
+
+
+def test_error_summary_falls_back_to_message_then_type():
+    """Обычная ошибка тула причины не несёт — её описание и есть message."""
+    assert (
+        _error_summary(
+            {"type": "not_found", "message": "File not found: a.txt"}
+        )
+        == "File not found: a.txt"
+    )
+    assert (
+        _error_summary(
+            {
+                "type": "not_found",
+                "reason": "",
+                "message": "File not found: a.txt",
+            }
+        )
+        == "File not found: a.txt"
+    )
+    assert _error_summary({"type": "weird_failure"}) == "weird_failure"
 
 
 # --- Task 2.2: ask_human / submit_solution special cases ---

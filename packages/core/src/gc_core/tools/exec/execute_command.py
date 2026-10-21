@@ -359,7 +359,7 @@ Important Usage Rules:
 
     @enforce_command_guard(payload_arg="command", tool_name=EXEC_COMMAND_NAME)
     @moderate_command_execution(
-        payload_arg="command", tool_name=EXEC_COMMAND_NAME
+        payload_arg="command", tool_name=EXEC_COMMAND_NAME, shell_payload=True
     )
     async def acall(
         self,

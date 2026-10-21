@@ -22,6 +22,10 @@ from gc_core.thread_store_file import FileThreadStore
 class DurableFileThreadStore(FileThreadStore):
     """Файловый тред с durable-контрактом ``read_snapshot``/``commit_operation``."""
 
+    #: Файла плана у журнального стора нет: его файлы ходят транзакциями
+    #: журнала, а экспорт для человека в них не участвует.
+    save_plan_file = None
+
     def _call(self, helper, *args, **kwargs):
         from gc_core.thread_store_journal import dispatch_file_helper
 

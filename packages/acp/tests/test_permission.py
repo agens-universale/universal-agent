@@ -2,13 +2,20 @@
 
 import asyncio
 import json
+from types import SimpleNamespace
 
 import pytest
 from gc_acp.ask_human import empty_ask_human
 from gc_acp.confirm import permission_message
+from gc_acp.main import apply_acp_runtime_defaults
 from gc_core.execution.human import HumanRequest
-from gc_core.security.confirm_port import request_confirm
+from gc_core.security.call_scope import call_scope
+from gc_core.security.confirm_port import CONFIRM_TIMED_OUT, request_confirm
+from gc_core.security.dual_wrapper import _drive_async
+from gc_core.security.mode_stage import ModeAction, resolve_by_mode
+from gc_core.security.permission_mode import ASK
 from gc_core.security.permission_store import PermissionStore
+from gc_testkit.settings import make_settings
 from test_facade import (
     _append_call,
     _by_id,
@@ -646,6 +653,24 @@ async def test_session_cancel_unblocks_confirm(tmp_path):
     await facade.shutdown()
 
 
+async def test_question_that_never_reached_the_client_is_not_a_refusal(
+    tmp_path,
+):
+    """Вопрос не ушёл клиенту (ход уже отменён): человек его не видел и не
+    отказывал — исход «не ответил вовремя», а не «отказал»."""
+    facade, _writer, _agent, session_id, _store = await _ready(tmp_path)
+    facade._sessions[session_id].cancel_requested = True
+    request = HumanRequest(
+        kind="confirm",
+        title="Проверка команды",
+        question="Разрешить запуск?",
+        fields=[["Команда", "ls"]],
+        decision_key="command:ls",
+    )
+    assert await facade._confirm(session_id, request) == CONFIRM_TIMED_OUT
+    await facade.shutdown()
+
+
 async def test_cancel_request_on_permission_id_unblocks(tmp_path):
     facade, writer, agent, _session_id, store = await _ready(tmp_path)
     key = "command:ls"
@@ -909,4 +934,59 @@ async def test_parent_confirm_after_nested_crash_uses_parent_call(
     await task
     agent.release.set()
     await facade._sessions[session_id].prompt_task
+    await facade.shutdown()
+
+
+async def _ask_by_mode(ctx, key="command:ls"):
+    """Вопрос режима через стадию — как его задаёт защита в manual/edit."""
+    action = ModeAction(
+        context=SimpleNamespace(ctx=ctx, logger=None),
+        tool_name="exec_command",
+        category="exec",
+        decision_key=key,
+        question=(
+            "Проверка команды",
+            "Разрешить запуск?",
+            [("Команда", "ls")],
+        ),
+        error_fields={"command": "ls"},
+        deny_type="mode_denied",
+        deny_reason="denied",
+    )
+    with call_scope(state=None, call_id="c1", tool_name="exec_command"):
+        _, outcome = await _drive_async(resolve_by_mode(ASK, action))
+    return outcome
+
+
+async def test_reject_in_the_ide_is_declined_by_the_user(tmp_path):
+    """Канал ACP объявил человека: «отклонить» в IDE — «отклонено
+    пользователем», а не «спросить некого» (спека §7.1)."""
+    facade, writer, agent, _session_id, _store = await _ready(tmp_path)
+    ctx = agent.executor._ctx
+    ctx.settings = apply_acp_runtime_defaults(make_settings())
+
+    async def reply():
+        msg = await _wait_permission(writer)
+        await facade.handle_line(
+            _response(msg["id"], _selected("reject_once"))
+        )
+
+    task = asyncio.create_task(reply())
+    allowed, error = await _ask_by_mode(ctx)
+    await task
+    assert allowed is False
+    assert error["type"] == "declined_by_user"
+    await facade.shutdown()
+
+
+async def test_no_answer_in_the_ide_is_not_answered_in_time(tmp_path):
+    """Таймаут диалога в IDE — «не ответил вовремя»."""
+    facade, _writer, agent, _session_id, _store = await _ready(
+        tmp_path, **{"acp.confirm_timeout_sec": 0.05}
+    )
+    ctx = agent.executor._ctx
+    ctx.settings = apply_acp_runtime_defaults(make_settings())
+    allowed, error = await _ask_by_mode(ctx)
+    assert allowed is False
+    assert error["type"] == "confirmation_timed_out"
     await facade.shutdown()

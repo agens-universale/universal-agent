@@ -119,6 +119,8 @@ def test_main_no_auto_wizard(monkeypatch, tmp_path, capsys):
             {
                 "init_config": False,
                 "init": False,
+                "thread_id": None,
+                "new": False,
                 "config": None,
                 "write_guard": None,
                 "no_write_guard": False,
@@ -174,6 +176,8 @@ def test_unconfigured_with_structured_format_exits_1(
             {
                 "init_config": False,
                 "init": False,
+                "thread_id": None,
+                "new": False,
                 "config": None,
                 "write_guard": None,
                 "no_write_guard": False,

@@ -63,6 +63,76 @@ def reject_blank_paths(values: list[str]) -> list[str]:
     return values
 
 
+def reject_broad_readonly_entry(index: int, raw: str) -> None:
+    """Запись `readonly_commands`, открывающая слишком много, — ошибка схемы.
+
+    Отвергаются: однословная команда с подкомандами (`git` — это и
+    `git push`); интерпретатор или оболочка первым словом в любой записи
+    (с ним исполняется любой код: `python`, `bash -c`); запускатель другой
+    команды (`sudo`, `xargs`, `npx`); пара, у которой второе слово — флаг
+    (`git -c`: пара совпала бы с любой подкомандой) или подкоманда,
+    исполняющая произвольный код (`uv run`, `npm exec`); запись из трёх слов
+    и больше (признаются только слово или пара). Имя сравнивается без пути,
+    `.exe`, регистра и хвоста версии. Списки неполны: запись остаётся
+    выбором пользователя."""
+    words = raw.split()
+    if not words:
+        return
+    reason = _broad_entry_reason(words)
+    if reason:
+        raise ValueError(f"элемент [{index}] «{raw}» — {reason}")
+
+
+def _broad_entry_reason(words: list[str]) -> str:
+    # Lazy: модуль режимов читает настройки (gc_core.settings →
+    # config_modules) — импорт на уровне модуля замкнул бы цикл.
+    from gc_core.security.permission_mode import (
+        RUNNER_SUBCOMMANDS,
+        interpreter_named,
+        launcher_named,
+        pair_head_named,
+    )
+
+    name = words[0]
+    if len(words) == 1 and pair_head_named(name):
+        return (
+            "команда с подкомандами: однословная запись разрешила бы любую "
+            "из них; укажите подкоманду, например «git log» или «npm ls»"
+        )
+    # Интерпретатор первым словом — и в паре («bash -c», «python -m»):
+    # решение владельца при сборке плана.
+    if interpreter_named(name):
+        return (
+            "интерпретатор не может быть безобидной командой: с ним "
+            "исполняется любой код; уберите элемент"
+        )
+    if launcher_named(name):
+        return (
+            "запускает другую команду: с ним исполняется любая; уберите "
+            "элемент"
+        )
+    if len(words) >= 3:
+        return (
+            "три слова и больше; укажите команду или пару «команда подкоманда»"
+        )
+    if len(words) == 2:
+        return _pair_reason(words[1], RUNNER_SUBCOMMANDS)
+    return ""
+
+
+def _pair_reason(second: str, runners: frozenset[str]) -> str:
+    # Пара сравнивается по первым двум словам команды: флаг вторым словом
+    # (`git -c`, `git -C`) открыл бы любую подкоманду после него.
+    if second.startswith("-"):
+        return "второе слово флаг, а не подкоманда; укажите подкоманду"
+    if second.lower() in runners:
+        return (
+            "подкоманда исполняет произвольный код; укажите подкоманду, "
+            "которая только читает"
+        )
+    return ""
+
+
 def validate_binary_read_policy(raw_mode: Any) -> str:
     mode = str(raw_mode if raw_mode is not None else "ask").strip().lower()
     if mode not in ALLOWED_BINARY_READ_MODES:
@@ -241,6 +311,44 @@ class ProtectedPathsConfig(BaseModel):
         return reject_blank_paths(value)
 
 
+class PermissionsConfig(BaseModel):
+    """Режим разрешений: единый рычаг автономии агента.
+
+    default_mode — с какого режима стартует сессия; выбор в сессии (Shift+Tab)
+    и флаг запуска ``--permission-mode`` сильнее. readonly_commands дополняет
+    встроенный список команд, исполняемых без подтверждения в любом режиме:
+    командой (`tree`) или парой «команда подкоманда» (`git log`). Из слоёв
+    папки проекта он не берётся (`layers._without_user_only_key`).
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    default_mode: str = "edit"
+    readonly_commands: list[str] = Field(default_factory=list)
+
+    @field_validator("default_mode")
+    @classmethod
+    def validate_default_mode(cls, value: str) -> str:
+        # Lazy: резолвер режимов сам читает настройки (gc_core.settings →
+        # config_modules) — импорт на уровне модуля замкнул бы цикл.
+        from gc_core.security.permission_mode import AVAILABLE_MODES
+
+        mode = str(value or "").strip().lower()
+        allowed = {item.value for item in AVAILABLE_MODES}
+        if mode not in allowed:
+            raise ValueError(
+                "security.permissions.default_mode должен быть одним из: "
+                + ", ".join(sorted(allowed))
+            )
+        return mode
+
+    @field_validator("readonly_commands")
+    @classmethod
+    def validate_readonly_commands(cls, value: list[str]) -> list[str]:
+        for index, raw in enumerate(value):
+            reject_broad_readonly_entry(index, str(raw))
+        return value
+
+
 class SecurityConfig(BaseModel):
     """
     Независимые слои безопасности. Все on/ask по дефолту (secure-by-default).
@@ -252,6 +360,7 @@ class SecurityConfig(BaseModel):
           url_policy:         {enabled, allowed_schemes, url_blacklist}
           download:           {download_dir, max_bytes}
           protected_paths:    {enabled, extra}
+          permissions:        {default_mode, readonly_commands}
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -267,3 +376,4 @@ class SecurityConfig(BaseModel):
     protected_paths: ProtectedPathsConfig = Field(
         default_factory=ProtectedPathsConfig
     )
+    permissions: PermissionsConfig = Field(default_factory=PermissionsConfig)

@@ -16,6 +16,9 @@ BG = "#0E1119"
 INK = "#ebe9e6"
 BRIGHT = "#eef2f6"
 DIM = "#8b949e"
+# Второстепенные ключи (дети пресета: /gate, /answers) — середина между INK и
+# DIM по каждому каналу: тише основных ключей, но явно светлее подсказок.
+SUB_INK = "#bbbec2"
 MUTED = "#6e7681"
 DEEP_DIM = "#7a8290"
 
@@ -111,6 +114,7 @@ def css_variables() -> dict[str, str]:
         "ink": INK,
         "bright": BRIGHT,
         "dim": DIM,
+        "sub-ink": SUB_INK,
         "muted": MUTED,
         "deep-dim": DEEP_DIM,
         "accent": ACCENT,

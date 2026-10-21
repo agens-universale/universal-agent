@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from gc_core.security.permission_mode import AVAILABLE_MODES, mode_label
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
@@ -40,6 +41,10 @@ _QUICKSTART_HELP: tuple[tuple[str, str], ...] = (
         "Список диалогов. Выберите диалог через ↑ / ↓ и продолжите сессию (Enter)",
     ),
     ("/new или Ctrl+N", "Начать новый диалог"),
+    (
+        "Shift+Tab",
+        "Режим разрешений - edit: агент редактирует файлы, опасные команды через подтверждение; manual: спрашивает перед записью, командой и сетевым запросом; plan: ничего не меняет и предлагает план; auto: действует сам, спорные действия проверяет судья",
+    ),
     ("F3", "Правки агента — обзор, принятие, откат"),
     ("/view <path>", "Постраничный просмотр файла"),
     ("! git status", "Локальный shell - исполнение консольных команд"),
@@ -70,6 +75,12 @@ _EXTRA_HOTKEYS: tuple[tuple[str, str], ...] = (
     ("Enter", "Отправить сообщение"),
     ("Esc", "Назад / отмена / выход — зависит от контекста"),
     ("Ctrl+J", "Перенос строки"),
+    (
+        "Shift+Tab",
+        "Режим разрешений: "
+        + " → ".join(mode_label(mode.value) for mode in AVAILABLE_MODES)
+        + " (виден в футере слева)",
+    ),
     ("Ctrl+T", "Голосовой ввод — надиктовать сообщение"),
     ("Ctrl+A", "Выделить всё в поле ввода"),
     (

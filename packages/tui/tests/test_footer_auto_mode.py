@@ -268,3 +268,32 @@ async def test_footer_head_auto_colors_mode_dot_arrow_and_word(tmp_path):
         )
         assert _span_style(running, "●") == f"bold {AUTO_LEVEL_VALUE.color}"
         assert _span_style(running, " → ") == DIM
+
+
+@pytest.mark.asyncio
+async def test_pending_transition_keeps_the_narrowest_rung_without_level_block(
+    tmp_path, monkeypatch
+):
+    """Пока ждёт переход, имя модели не снимается — но самая узкая ступень
+    auto (без блока уровня «→ ●») остаётся: иначе на совсем узком окне правая
+    колонка не влезала и поджимала левую (глиф режима, стоп-клавишу)."""
+    app = _app(tmp_path, CFG)
+    _set_running(
+        app, _running_runner(app.display_router(), current_level="light")
+    )
+    async with app.run_test(size=(120, 24)):
+        scr = app.screen
+        snapshot = _FooterHeadSnapshot(
+            None,
+            True,
+            "#123456",
+            "gatewayhub/acme-lab/acme-big-coder-4.5",
+            True,
+            ("#654321", "big"),
+        )
+        monkeypatch.setattr(scr, "_footer_head_snapshot", lambda: snapshot)
+        monkeypatch.setattr(scr, "_footer_right_available_width", lambda: 3)
+
+        plain = scr._compose_footer_right().plain
+
+        assert "→ ●" not in plain

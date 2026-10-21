@@ -32,10 +32,11 @@ def _slider_width(n_values: int) -> int:
 
 
 def _hint_for(cmd: Command | None) -> str:
-    """Хинт обычной (не toggle) строки: есть схема args → Enter подставит команду
-    в поле, иначе — базовый hint. Toggle-строки получают свой hint через
+    """Хинт обычной (не toggle) строки: Enter подставит команду в поле — у
+    команды есть что ввести или выбрать (`Command.runs_on_enter`), иначе —
+    базовый hint. Toggle-строки получают свой hint через
     `CommandPalette._toggle_hint` (значение + подсказка из TOGGLES, спека §6)."""
-    if cmd is not None and cmd.args:
+    if cmd is not None and not cmd.runs_on_enter:
         return _HINT_WITH_ARGS
     return _HINT_NO_ARGS
 
@@ -452,7 +453,7 @@ class CommandPalette(VerticalScroll):
             text = Text(head.ljust(col))
             text.append(value_text)
             if is_child:
-                text.stylize(_pal.DIM)
+                text.stylize(_pal.SUB_INK)
             return text
 
         track_w = base_w + extra_w
@@ -479,7 +480,7 @@ class CommandPalette(VerticalScroll):
 
         text = Text(head.ljust(col))
         if is_child:
-            text.stylize(_pal.DIM, 0, len(head))
+            text.stylize(_pal.SUB_INK, 0, len(head))
         extra = (
             self._toggle_extra(cmd.name)
             if self._toggle_extra is not None
@@ -500,7 +501,7 @@ class CommandPalette(VerticalScroll):
         value_start = len(text)
         text.append(current)
         if is_child:
-            text.stylize(_pal.DIM, value_start, len(text))
+            text.stylize(_pal.SUB_INK, value_start, len(text))
         return text
 
     def _visible_rows(self) -> list[Command]:

@@ -33,6 +33,28 @@ class SharedStateData:
     # Субагент ведёт свой — см. ``State.session_todo``: shared у них общий, и
     # replace-семантика затирала бы план родителя.
     session_todo: List[Dict[str, str]] = field(default_factory=list)
+    # Режим разрешений, выбранный в сессии (Shift+Tab, флаг запуска). None —
+    # выбора не было, действует `security.permissions.default_mode`. Субагент
+    # наследует режим родителя: shared у них общий.
+    permission_mode: Optional[str] = None
+    # План режима plan: {text, status, approved_mode, updated_at}
+    # (`gc_core.plan_store`). None — плана нет.
+    plan: Optional[Dict[str, Any]] = None
+    # Какой режим объявлен КОРНЕВОМУ агенту ("plan" | "auto" | None): здесь
+    # отметка сохраняется в мете треда между прогонами. Читать и писать —
+    # через `State.mode_announced`; у субагента отметка своя, в его State.
+    mode_announced: Optional[str] = None
+    # Человек убрал план (`/plan clear`): следующий прогон один раз сообщит об
+    # этом модели — в истории и в сводке план ещё виден.
+    plan_removed_notice: bool = False
+    # Предохранитель судьи действий (auto) — как у эталона: 3 отказа
+    # подряд или 20 за сессию ставят паузу; на паузе спорное действие решает
+    # человек, а спросить некого — отказ без судьи. Счёт и пауза общие для
+    # сессии и её субагентов (shared у них один) и снимаются только «да»
+    # человека (`gc_core.security.action_judge_step`).
+    judge_denials_in_a_row: int = 0
+    judge_denials_total: int = 0
+    judge_paused: bool = False
 
 
 STATE_FIELDS = ROUTING_FIELDS + (
@@ -68,6 +90,9 @@ STATE_FIELDS = ROUTING_FIELDS + (
     "messages",
     "mode",
     "parent_state_id",
+    "plan_proposed",
+    "judge_failures_in_a_row",
+    "judge_stop_reason",
     "previous_response_id",
     "prepared_metadata",
     "project_memory_content_hash",
@@ -79,6 +104,7 @@ STATE_FIELDS = ROUTING_FIELDS + (
     "state_id",
     "steps",
     "stop_requested",
+    "subagent_mode_announced",
     "subagent_todo",
     "system_prompt_id",
     "terminal_outcome",
@@ -138,6 +164,27 @@ class ExecutionState:
             self.subagent_todo = items
         else:
             self.shared.session_todo = items
+
+    @property
+    def mode_announced(self) -> Optional[str]:
+        """Какой режим ЭТОМУ агенту уже объявлен ("plan" | "auto" | None).
+
+        Режим общий живой, а сообщение о нём каждый агент получает в свою
+        историю — отметка своя у каждого. Корень хранит её в ``shared``: там
+        она переживает прогоны в мете треда. Субагент делит ``shared`` с
+        родителем, поэтому держит свою в собственном поле: его объявление не
+        должно «съесть» объявление корня.
+        """
+        if self.parent_state_id is not None:
+            return self.subagent_mode_announced
+        return self.shared.mode_announced
+
+    @mode_announced.setter
+    def mode_announced(self, value: Optional[str]) -> None:
+        if self.parent_state_id is not None:
+            self.subagent_mode_announced = value
+        else:
+            self.shared.mode_announced = value
 
     def set_resp_headers_metadata(self, headers):
         x_target = headers.get("x-target")

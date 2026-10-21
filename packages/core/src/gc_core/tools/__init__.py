@@ -15,6 +15,8 @@ from gc_core.execution.contracts import (
 )
 from gc_core.execution.reducers import apply_state_delta, tool_state_view
 from gc_core.execution.tool_schema import apply_openai_strict_parameters
+from gc_core.security.call_scope import call_scope, current_call
+from gc_core.security.permission_mode import OFFERED_IN_MODE_KEY
 from gc_core.settings import LoadedSettings, runtime_of, settings_of
 from gc_core.tools.arguments_validation import (
     WrongFunctionArgumentsException,
@@ -334,8 +336,13 @@ def _finish_tools_data(
                 inject_tool_fields=inject_tool_fields,
             )
 
-    tools_spec = [v["spec"] for v in tools_data.values()]
-    tools_description = [v["description"] for v in tools_data.values()]
+    # Тулы одного режима в общий список не входят: их добавляет на запросе
+    # `permission_mode.tools_for_mode`.
+    offered = [
+        v for v in tools_data.values() if not v.get(OFFERED_IN_MODE_KEY)
+    ]
+    tools_spec = [v["spec"] for v in offered]
+    tools_description = [v["description"] for v in offered]
 
     return tools_data, tools_spec, tools_description, mcp_status
 
@@ -359,6 +366,11 @@ class _SubagentTool:
         self._arguments = arguments
         self._run_agent_func = run_agent_func
         self._parent_call_id = parent_call_id
+
+    @property
+    def launch_arguments(self):
+        """Аргументы запуска — для привязки вызова (их видит судья действий)."""
+        return self._arguments
 
     async def acall(self) -> str:
         return await self._runner.arun(
@@ -498,7 +510,16 @@ def _prepare_tool_call(
             kwargs,
             arguments,
         )
-        return format_unknown_tool_output(tool_name, tools_data_.keys())
+        # Тул одного режима в общий список не входит и модели вне своего
+        # режима не предлагается — значит, и в подсказках ему не место.
+        return format_unknown_tool_output(
+            tool_name,
+            [
+                name
+                for name, entry in tools_data_.items()
+                if not entry.get(OFFERED_IN_MODE_KEY)
+            ],
+        )
 
     # Определяем, ожидает ли инструмент пустую схему (нет параметров)
     spec = tools_data_[tool_name].get("spec", {}) or {}
@@ -659,6 +680,12 @@ async def _aapply_tool_text(
     if isinstance(prepared, str):
         return prepared
     tool, args, dropped = prepared
+    scope = current_call()
+    if scope is not None:
+        # То, что реально исполнится: после разбора, без отброшенных полей.
+        # У запуска субагента подготовка отдаёт пустые аргументы тула —
+        # настоящие (задание) лежат в самом вызове.
+        scope.arguments = getattr(tool, "launch_arguments", args)
     acall = getattr(tool, "acall", None)
     if not callable(acall):
         # Жёстко, а не тихим уходом в поток: тул без `acall` — это ошибка
@@ -672,37 +699,55 @@ async def _aapply_tool_text(
             invoke_native_tool,
             uses_leaf_effect,
         )
+        from gc_core.security.dual_wrapper import arun_guard_flow
+        from gc_core.security.permission_gate import permission_gate_flow
 
-        if callable(port(ctx, "tool_effect")) and uses_leaf_effect(tool):
-            with bind_tool_call(tool_name, str(kwargs.get("call_id") or "")):
-                res = await _acall_under_stop(
-                    tool_name,
-                    str(kwargs.get("call_id") or ""),
-                    lambda: invoke_native_tool(
-                        tool,
+        async def _invoke() -> Any:
+            call_id = str(kwargs.get("call_id") or "")
+            if callable(port(ctx, "tool_effect")) and uses_leaf_effect(tool):
+                with bind_tool_call(tool_name, call_id):
+                    return await _acall_under_stop(
                         tool_name,
-                        args,
-                        ctx=ctx,
-                        state=kwargs.get("state"),
-                        call_id=kwargs.get("call_id"),
-                        operation_id=kwargs.get("tool_operation_id")
-                        or str(kwargs.get("call_id") or "tool"),
-                    ),
-                    None,
-                )
-        else:
+                        call_id,
+                        lambda: invoke_native_tool(
+                            tool,
+                            tool_name,
+                            args,
+                            ctx=ctx,
+                            state=kwargs.get("state"),
+                            call_id=kwargs.get("call_id"),
+                            operation_id=kwargs.get("tool_operation_id")
+                            or str(kwargs.get("call_id") or "tool"),
+                        ),
+                        None,
+                    )
             from gc_core.tools.connect_mcp.api import media_sink_scope
 
             with media_sink_scope(ctx):
-                with bind_tool_call(
-                    tool_name, str(kwargs.get("call_id") or "")
-                ):
-                    res = await _acall_under_stop(
+                with bind_tool_call(tool_name, call_id):
+                    return await _acall_under_stop(
                         tool_name,
-                        str(kwargs.get("call_id") or ""),
+                        call_id,
                         acall,
                         args,
                     )
+
+        # Гейт режима разрешений — только для ИЗВЕСТНЫХ имён (неизвестное уже
+        # ушло выше со списком доступных тулов: отказ режима на выдуманном
+        # имени был бы тупиком) и после веток субагентов. Категории со своей
+        # защитой гейт пропускает — их решает защита самого тула.
+        # Снятие хода — внутри вызова: гейт сначала решает, можно ли звать тул.
+        entries = tools_data_ if tools_data_ is not None else ctx.tools_data
+        res = await arun_guard_flow(
+            permission_gate_flow(
+                tool_name,
+                entries.get(tool_name),
+                ctx,
+                args,
+                state=kwargs.get("state"),
+            ),
+            _invoke,
+        )
     except ExecutionFailure:
         raise
     except UserStopInterrupt as exc:
@@ -763,6 +808,23 @@ async def aapply_tool_result(
     only tools whose external effects and required state they can represent.
     """
     state = kwargs.get("state")
+    # Привязка — до подмены среза: защитам нужно настоящее состояние прогона.
+    with call_scope(
+        state=state, call_id=kwargs.get("call_id"), tool_name=tool_name
+    ):
+        return await _aapply_tool_result_scoped(
+            tool_name, arguments, tools_data_, ctx, state, kwargs
+        )
+
+
+async def _aapply_tool_result_scoped(
+    tool_name: str,
+    arguments: str | Dict[str, Any],
+    tools_data_: Optional[Dict[str, Dict[str, Any]]],
+    ctx: Optional[Any],
+    state: Any,
+    kwargs: Dict[str, Any],
+) -> ToolResult:
     before = None
     view = None
     if state is not None and _owns_session_state(tool_name, tools_data_, ctx):

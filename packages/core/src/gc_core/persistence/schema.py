@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 from gc_core.intent_log.serialize import deserialize_list
+from gc_core.plan_store import normalize_plan_block
 
 STATE_SCHEMA_VERSION = "v2"
 
@@ -107,6 +108,16 @@ def normalize_session_todo(raw: Any) -> list[dict[str, str]]:
     return out
 
 
+def normalize_permission_mode(raw: Any) -> str | None:
+    """Режим сессии для меты: непустая строка либо None («выбора не было»).
+
+    Значение не сверяется со списком собранных режимов: мету может прочитать
+    сборка с другим набором, а что включать, решает резолвер (`coerce_mode`).
+    """
+    text = str(raw).strip() if isinstance(raw, str) else ""
+    return text or None
+
+
 def serialize_shared_block(shared: Any) -> dict[str, Any]:
     # JSON key ``working_memory`` — legacy persist name; same dict as ``session_memory`` tool.
     working_memory = normalize_working_memory(
@@ -121,7 +132,7 @@ def serialize_shared_block(shared: Any) -> dict[str, Any]:
     rules: dict[str, Any] = (
         dict(confirm_rules) if isinstance(confirm_rules, Mapping) else {}
     )
-    return {
+    block: dict[str, Any] = {
         "working_memory": working_memory,
         "notes_md": notes_md,
         "fetch_url_cache": cache,
@@ -130,3 +141,25 @@ def serialize_shared_block(shared: Any) -> dict[str, Any]:
             getattr(shared, "session_todo", None)
         ),
     }
+    # Режим пишется, только когда он выбран: «выбора не было» — это отсутствие
+    # ключа, а не null. Мета сессии без выбора остаётся байт-в-байт прежней.
+    permission_mode = normalize_permission_mode(
+        getattr(shared, "permission_mode", None)
+    )
+    if permission_mode is not None:
+        block["permission_mode"] = permission_mode
+    # То же правило для плана: ключи появляются только вместе с планом.
+    plan = normalize_plan_block(getattr(shared, "plan", None))
+    if plan is not None:
+        block["plan"] = plan
+    if getattr(shared, "mode_announced", None):
+        block["mode_announced"] = shared.mode_announced
+    if getattr(shared, "plan_removed_notice", False):
+        block["plan_removed_notice"] = True
+    # Предохранитель судьи: ключи только когда отказы были.
+    for name in ("judge_denials_in_a_row", "judge_denials_total"):
+        if getattr(shared, name, 0):
+            block[name] = getattr(shared, name)
+    if getattr(shared, "judge_paused", False):
+        block["judge_paused"] = True
+    return block

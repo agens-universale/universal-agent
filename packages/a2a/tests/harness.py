@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 import httpx
 from gc_a2a.facade import A2aFacade
 from gc_a2a.http_api import create_app
+from gc_a2a.main import apply_a2a_runtime_defaults
 from gc_testkit.settings import make_settings
 
 
@@ -102,15 +103,25 @@ class HungStreamAgent(AnswerAgent):
 
 
 class ConfirmAgent(AnswerAgent):
-    """Ход упирается в подтверждение безопасности, как write/command guard."""
+    """Ход упирается в подтверждение безопасности, как write/command guard.
+
+    Настройки контекста — те, что ``gc_a2a.main`` отдаёт фасаду: с
+    объявлением канала A2A.
+    """
 
     def __init__(self) -> None:
         super().__init__()
         self.allowed: bool | None = None
-        self.executor._ctx.settings = make_settings()
+        self.error: dict | None = None
+        self.executor._ctx.settings = apply_a2a_runtime_defaults(
+            make_settings()
+        )
 
     async def stream(self, prompt, thread_id=None, system=None):
-        from gc_core.security.confirm_port import request_confirm
+        from gc_core.security.confirm_port import (
+            request_confirm,
+            unconfirmed_error,
+        )
 
         self.calls.append(
             {"prompt": prompt, "thread_id": thread_id, "system": system}
@@ -121,6 +132,7 @@ class ConfirmAgent(AnswerAgent):
             fields=[("path", "/tmp/x")],
             ctx=self.executor._ctx,
         )
+        self.error = unconfirmed_error(self.executor._ctx, path="/tmp/x")
         self.last_answer = "да" if self.allowed else "нет"
         if False:
             yield ("answer", "")

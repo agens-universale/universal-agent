@@ -1087,10 +1087,13 @@ def _left_rows_requested(scr, total: int, right_plain: str) -> int:
 
     need = max(cell_len(line) for line in right_plain.split("\n"))
     width = total - need - _FOOTER_CHROME
-    if width <= 0:
+    # Платные ступени меряют левую с пилюлей режима в один глиф, и уже этого
+    # пола правая отнять не может.
+    commands = scr._footer_left_commands(narrow=True)
+    if width < max(1, cell_len(commands)):
         return 99
     return footer_left_rows(
-        scr._footer_left_commands(),
+        commands,
         format_notices_badge(scr._collect_footer_notices()),
         width=width,
     )
@@ -1187,7 +1190,7 @@ async def test_footer_moves_prices_down_where_profile_used_to_be_dropped(
         # столько, сколько ей нужно на ДВА ряда (одного ряда уже не хватает).
         left_two = min(
             w
-            for w in range(20, cell_len(commands) + 1)
+            for w in range(1, cell_len(commands) + 1)
             if _rows(commands, w) <= 2
         )
         total = need + _FOOTER_CHROME + left_two
@@ -1297,9 +1300,10 @@ async def test_footer_keeps_full_profile_when_left_goes_two_rows(
 async def test_footer_shrinks_profile_on_the_two_row_pass(
     tmp_path, monkeypatch
 ):
-    """Ступень 4: имя ужимается 14 → 5 — но ТОЛЬКО во втором проходе, когда
-    левая уже в двух рядах. Ширина здесь мала даже для потолка при двухрядной
-    левой — имя ужимается, но не снимается."""
+    """Имя профиля ужимается 14 → 5 — но ТОЛЬКО в платном проходе, когда
+    бесплатные ходы кончились и пилюля режима слева уже сжата до глифа. Ширина
+    здесь на одну колонку меньше, чем нужно потолку имени рядом с полом левой, —
+    имя ужимается, но не снимается."""
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
     from gc_tui.app import TuiApp
@@ -1323,21 +1327,18 @@ async def test_footer_shrinks_profile_on_the_two_row_pass(
                 snapshot=snapshot,
             ).plain
         )
-        commands = scr._footer_left_commands()
-        left_two = min(
-            w
-            for w in range(20, cell_len(commands) + 1)
-            if _rows(commands, w) <= 2
-        )
-        # На одну колонку уже, чем нужно потолку при двухрядной левой.
-        total = ceiling_need + _FOOTER_CHROME + left_two - 1
+        # Пол левой: пилюля режима в один глиф (за ней в покое ничего нет).
+        floor = cell_len(scr._footer_left_commands(narrow=True))
+        # На одну колонку уже, чем нужно потолку имени рядом с полом левой.
+        total = ceiling_need + _FOOTER_CHROME + floor - 1
 
         await pilot.resize_terminal(total, 30)
         plain = scr._compose_footer_right().plain
 
         assert plain.startswith(_LONG_NAME[:12] + "…")  # 13 колонок вместо 14
         assert "→" in plain
-        assert _left_rows_beside(scr, total, plain) == 2
+        # левой досталось ровно столько, сколько занимает глиф режима
+        assert total - cell_len(plain) - _FOOTER_CHROME == floor
 
 
 @pytest.mark.asyncio
@@ -1377,7 +1378,7 @@ async def test_footer_ladder_order_holds_across_terminal_widths(
         seen_profile_dropped = False
         seen_transition_dropped = False
         prev_profile_cols = None
-        for total in range(115, 59, -1):
+        for total in range(115, 29, -1):
             await pilot.resize_terminal(total, 30)
             plain = scr._compose_footer_right().plain
             has_profile = plain.startswith(_LONG_NAME[:_PROFILE_MIN_VISIBLE])
@@ -1883,3 +1884,45 @@ async def test_footer_two_line_auto_drops_profile_before_fact_and_fact_last(
         monkeypatch.setattr(scr, "_footer_right_available_width", lambda: 4)
         plain = scr._compose_footer_right().plain
         assert plain.split("\n")[0] == "●"
+
+
+@pytest.mark.asyncio
+async def test_name_kept_for_a_pending_transition_is_squeezed_not_widened(
+    tmp_path, monkeypatch
+):
+    """Пока ждёт переход, имя модели не снимается. На ступенях «снять имя» оно
+    остаётся ужатым до минимума — иначе последний вариант узкого окна был бы
+    шире ужатых ступеней с полным длинным ID."""
+    pytest.importorskip("textual")
+    monkeypatch.chdir(tmp_path)
+    from gc_core.model_router import ModelRouter
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.main import _MODEL_NAME_MIN_COLS
+
+    long_id = "gatewayhub/acme-lab/acme-big-coder-4.5"
+    app = TuiApp(
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "m"}),
+    )
+    app._config_path = str(tmp_path / "config.yml")
+    async with app.run_test(size=(100, 30)) as pilot:
+        scr = pilot.app.screen
+        snapshot = {
+            "models": {long_id: {}, "opus-4.8": {}},
+            "slots": {"light": long_id, "max": "opus-4.8"},
+        }
+        executor_router = ModelRouter(
+            make_settings(snapshot), level_provider=lambda: "light"
+        )
+        live_router = ModelRouter(
+            make_settings(snapshot), level_provider=lambda: "max"
+        )
+        app.active_runner = _call_runner("light", executor_router)
+        monkeypatch.setattr(app, "display_router", lambda: live_router)
+        monkeypatch.setattr(scr, "_footer_right_available_width", lambda: 4)
+
+        plain = scr._compose_footer_right().plain
+        assert long_id not in plain
+        model = plain.split("● ", 1)[1].split(" ", 1)[0]
+        assert "…" in model
+        assert len(model) <= _MODEL_NAME_MIN_COLS

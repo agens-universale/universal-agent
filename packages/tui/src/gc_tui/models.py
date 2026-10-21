@@ -29,6 +29,20 @@ class TaskCursor:
     position_token: Any
     ordering_key: Optional[Union[int, str]]
     storage_epoch: Optional[str]
+    archives: int = 0
+    wait_ticks: int = 0
+
+
+@dataclass
+class CompactionStep:
+    """Шаг сжатия как данные: что дорисовать в трейс вместо перестройки."""
+
+    archive_tail: list[dict]
+    segment_index: int
+    compacted_by: dict
+    # id окна retention после шага: архив и новый живой файл.
+    window_ids: frozenset[str]
+    live_records: list[dict]
 
 
 @dataclass
@@ -39,6 +53,7 @@ class TailResult:
     next_cursor: TaskCursor
     stream_reset: bool = False
     reason: Optional[str] = None
+    compaction: Optional[CompactionStep] = None
 
 
 @dataclass

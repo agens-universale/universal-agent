@@ -123,6 +123,7 @@ def test_important_set_has_the_exact_composition_and_excludes_exec():
         "session_compact",
         "turn_finish",
         "turn_ask_human",
+        "turn_propose_plan",
     }
     assert FILE_WRITE_TOOL_NAMES <= IMPORTANT_TOOL_NAMES
     assert IMPORTANT_TOOL_NAMES & EXEC_TOOL_NAMES == set()
