@@ -30,7 +30,7 @@ from gc_core.trace_id import (
 from gc_core.usage.context import record_usage
 from gc_core.utils.aretry import retry_with_backoff_async
 from gc_core.utils.backend_errors import (
-    has_embedded_error,
+    embedded_choice_error,
     http_status_code,
     is_empty_completion,
     is_http_status_error,
@@ -569,7 +569,6 @@ async def arequest_backend_chat_completions(
     on_delta: Optional[OnDelta] = None,
     timeout: float = DEFAULT_REQUEST_TIMEOUT_SEC,
     config_proxy: Optional[str] = None,
-    allow_auth_retry: bool = True,
 ):
     """Запрос с ограниченным подбором raw/Bearer только после HTTP 401."""
     return await _arequest_authorized(
@@ -587,7 +586,6 @@ async def arequest_backend_chat_completions(
         headers,
         url=url,
         model=data.get("model"),
-        allow_auth_retry=allow_auth_retry,
         use_retry=use_retry,
         logger=logger,
     )
@@ -611,22 +609,21 @@ async def _arequest_authorized(
     *,
     url: str,
     model: Optional[str],
-    allow_auth_retry: bool = True,
     use_retry: bool = True,
     logger=None,
 ):
-    """Одна альтернатива Authorization после реального HTTP 401.
+    """Одна альтернатива Authorization после HTTP 401 — настоящего или
+    завёрнутого прокси в HTTP-200.
 
     Форму, с которой запрос прошёл успешно (2xx без вложенной ошибки
     провайдера), следующие запросы к той же модели на тот же URL со
-    значением, заданным в той же форме, шлют первой. Однократный клиент
-    шлёт заданную форму как есть."""
+    значением, заданным в той же форме, шлют первой."""
     auth_key = next(
         (key for key in headers if key.lower() == "authorization"), None
     )
     raw = headers.get(auth_key) if auth_key else None
     candidates = server_authorization_attempts(url, model, raw)
-    attempts = candidates if allow_auth_retry and candidates else [None]
+    attempts = candidates or [None]
     for index, authorization in enumerate(attempts):
         try:
             response = await _arequest_with_backoff(
@@ -639,8 +636,11 @@ async def _arequest_authorized(
             if exc.response.status_code != 401 or index + 1 == len(attempts):
                 raise
             continue
-        if not has_embedded_error(response):
+        error = embedded_choice_error(response)
+        if error is None:
             remember_accepted_authorization(url, model, raw, authorization)
+        elif error.status_code == 401 and index + 1 < len(attempts):
+            continue  # Прокси завернул 401 в HTTP-200 — тот же отказ формы.
         return response
 
 

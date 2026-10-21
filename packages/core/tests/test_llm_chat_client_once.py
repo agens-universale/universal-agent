@@ -84,7 +84,11 @@ async def test_once_client_has_one_actual_attempt(monkeypatch, failure):
             max_tokens=512,
             request_label="vision_probe",
         )
-    assert len(spy.requests) == 1
+    # 401 до модели не доходит: транспорт пробует вторую форму токена, и
+    # только её; прочие сбои — ровно одна попытка.
+    assert [r.headers["Authorization"] for r in spy.requests] == (
+        ["Bearer secret", "secret"] if failure == "401" else ["Bearer secret"]
+    )
 
 
 async def test_snapshot_budget_finish_reason_and_usage(monkeypatch):

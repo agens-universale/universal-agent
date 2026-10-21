@@ -5,11 +5,10 @@ import io
 import logging
 import secrets
 import time
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from enum import StrEnum
-from types import MappingProxyType
 
 import httpx
 
@@ -17,10 +16,6 @@ from gc_core.utils.backend_errors import (
     EmbeddedChoiceError,
     http_status_code,
     is_image_rejection_error,
-)
-from gc_core.utils.http_auth import (
-    remember_accepted_authorization,
-    server_authorization_attempts,
 )
 from gc_core.utils.llm_chat_client import (
     ChatCompletionText,
@@ -136,64 +131,12 @@ def _record_result(ctx, result, attempts, started, finish_reason=None):
     return result
 
 
-def _authorization_forms(
-    prepared: PreparedChatCompletion,
-) -> tuple[str | None, list]:
-    """Заголовок авторизации и его формы: выученная транспортом — первой."""
-    auth_key = next(
-        (key for key in prepared.headers if key.lower() == "authorization"),
-        None,
-    )
-    raw = prepared.headers.get(auth_key) if auth_key else None
-    return auth_key, server_authorization_attempts(
-        prepared.url, prepared.resolved.model, raw
-    )
-
-
-def _alternative_auth_applies(exc: Exception, auth_forms: list) -> bool:
-    """401 при двух формах авторизации — стоит повторить со второй."""
-    return (
-        isinstance(exc, httpx.HTTPStatusError)
-        and exc.response.status_code == 401
-        and len(auth_forms) == 2
-    )
-
-
-def _with_auth(
-    prepared: PreparedChatCompletion, auth_key: str | None, form: str
-) -> PreparedChatCompletion:
-    """Тот же запрос с заданной формой авторизации."""
-    headers = dict(prepared.headers)
-    headers[auth_key] = form
-    return replace(prepared, headers=MappingProxyType(headers))
-
-
-def _remember_auth(
-    configured: PreparedChatCompletion,
-    sent: PreparedChatCompletion,
-    auth_key: str | None,
-) -> None:
-    """Форма, с которой проба прошла, — в общую память транспорта."""
-    if auth_key is not None:
-        remember_accepted_authorization(
-            configured.url,
-            configured.resolved.model,
-            configured.headers[auth_key],
-            sent.headers[auth_key],
-        )
-
-
 async def aprobe_route(
     ctx, state, prepared: PreparedChatCompletion
 ) -> ProbeResult:
     started = time.perf_counter()
     previous = None
-    configured = prepared
-    auth_key, auth_forms = _authorization_forms(prepared)
-    if auth_forms:
-        prepared = _with_auth(prepared, auth_key, auth_forms[0])
-    authorization_alternative = False
-    requests = 0
+    attempts = 0
     for attempt in range(2):
         challenge = make_challenge(retry=bool(attempt), previous_code=previous)
         url = (
@@ -211,35 +154,24 @@ async def aprobe_route(
                 ],
             }
         ]
-        while True:
-            requests += 1
-            try:
-                outcome = await arequest_chat_completion_once(
-                    ctx,
-                    state,
-                    prepared=prepared,
-                    messages=messages,
-                    max_tokens=512,
-                    request_label="vision_probe",
-                )
-                break
-            except (httpx.HTTPError, EmbeddedChoiceError, ValueError) as exc:
-                if not authorization_alternative and _alternative_auth_applies(
-                    exc, auth_forms
-                ):
-                    prepared = _with_auth(prepared, auth_key, auth_forms[1])
-                    authorization_alternative = True
-                    continue  # Повтор того же задания; распознавание ещё не состоялось.
-                return _record_result(
-                    ctx, _classify_error(exc), requests, started
-                )
-        _remember_auth(configured, prepared, auth_key)
+        attempts += 1
+        try:
+            outcome = await arequest_chat_completion_once(
+                ctx,
+                state,
+                prepared=prepared,
+                messages=messages,
+                max_tokens=512,
+                request_label="vision_probe",
+            )
+        except (httpx.HTTPError, EmbeddedChoiceError, ValueError) as exc:
+            return _record_result(ctx, _classify_error(exc), attempts, started)
         result = classify_answer(challenge.code, outcome)
         if result.status is not ProbeStatus.UNCONFIRMED:
             return _record_result(
-                ctx, result, requests, started, outcome.finish_reason
+                ctx, result, attempts, started, outcome.finish_reason
             )
         previous = challenge.code
     return _record_result(
-        ctx, result, requests, started, outcome.finish_reason
+        ctx, result, attempts, started, outcome.finish_reason
     )

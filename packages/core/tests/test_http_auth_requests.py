@@ -472,6 +472,61 @@ async def test_form_is_remembered_only_after_success(monkeypatch):
     ] * 2
 
 
+@pytest.mark.parametrize(
+    "embedded",
+    [
+        {"choices": [{"error": {"code": 401, "message": "bad form"}}]},
+        {"error": {"code": 401, "message": "bad form"}},
+    ],
+)
+async def test_embedded_401_switches_form_like_real_401(monkeypatch, embedded):
+    def handler(request):
+        if request.headers["Authorization"] != "Bearer secret":
+            return httpx.Response(200, json=embedded)
+        return httpx.Response(
+            200, json={"choices": [{"message": {"content": "ok"}}]}
+        )
+
+    spy = install_transport(monkeypatch, handler)
+    result = await _chat("https://example.test/chat")
+    await _chat("https://example.test/chat")
+    assert result["choices"][0]["message"]["content"] == "ok"
+    assert [r.headers["Authorization"] for r in spy.requests] == [
+        "secret",
+        "Bearer secret",
+        "Bearer secret",
+    ]
+
+
+async def test_error_finish_with_empty_choice_is_not_remembered(
+    monkeypatch,
+):
+    replies = iter(
+        [
+            httpx.Response(401),
+            httpx.Response(
+                200,
+                json={
+                    "choices": [
+                        {"message": {"content": ""}, "finish_reason": "error"}
+                    ]
+                },
+            ),
+            httpx.Response(
+                200, json={"choices": [{"message": {"content": "ok"}}]}
+            ),
+        ]
+    )
+    spy = install_transport(monkeypatch, lambda request: next(replies))
+    await _chat("https://example.test/chat")
+    await _chat("https://example.test/chat")
+    assert [r.headers["Authorization"] for r in spy.requests] == [
+        "secret",
+        "Bearer secret",
+        "secret",
+    ]
+
+
 async def test_rejected_alternative_does_not_lock_out_configured_form(
     monkeypatch,
 ):
@@ -514,18 +569,6 @@ async def test_remembered_form_switches_back_after_its_rejection(
         "Bearer secret",
         "Bearer secret",
         "secret",
-        "secret",
-    ]
-
-
-async def test_single_attempt_client_keeps_configured_form(monkeypatch):
-    spy = install_transport(monkeypatch, _bearer_only)
-    await _chat("https://example.test/chat")
-    with pytest.raises(httpx.HTTPStatusError):
-        await _chat("https://example.test/chat", allow_auth_retry=False)
-    assert [r.headers["Authorization"] for r in spy.requests] == [
-        "secret",
-        "Bearer secret",
         "secret",
     ]
 
