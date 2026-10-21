@@ -175,6 +175,72 @@ def has_payload(msg) -> bool:
     return nonempty_reasoning_text(msg) is not None
 
 
+def embedded_choice_error(
+    response: object, *, salvage_reasoning: bool = False
+) -> EmbeddedChoiceError | None:
+    """Ошибка, зашитая провайдером внутрь HTTP-200, или None.
+
+    Формы: choices[0].error = {code, message, metadata} (стиль OpenRouter,
+    напр. 504 "Upstream idle timeout"), top-level {"error": {...}} без
+    choices, или finish_reason="error" с пустым выбором. finish_reason="error"
+    С видимым content/tool_calls ошибкой не считается: его принимает
+    permissive-путь normalize_finish_reason (с warning).
+
+    ``salvage_reasoning`` — только агентский цикл: reasoning-only при
+    finish_reason="error" не ошибка (salvage в ``<think>``). Служебная воронка
+    читает только content; обрывок мысли там — пустая строка без исключения,
+    поэтому reasoning payload'ом не считается."""
+    if not isinstance(response, dict):
+        return None
+    choices = response.get("choices")
+    if isinstance(choices, list) and choices and isinstance(choices[0], dict):
+        return _first_choice_error(
+            choices[0], salvage_reasoning=salvage_reasoning
+        )
+    # Нет валидного choices — проверяем top-level error (вторая типовая форма).
+    top_err = response.get("error")
+    return _error_from_dict(top_err) if isinstance(top_err, dict) else None
+
+
+def _error_from_dict(err: dict) -> EmbeddedChoiceError:
+    code = err.get("code")
+    try:
+        status = int(code) if code is not None else None
+    except (TypeError, ValueError):
+        status = None
+    return EmbeddedChoiceError(
+        f"provider returned embedded choice error: code={code!r} "
+        f"message={err.get('message')!r}",
+        status_code=status,
+        metadata=err.get("metadata"),
+        raw_code=code,
+    )
+
+
+def _first_choice_error(
+    ch0: dict, *, salvage_reasoning: bool
+) -> EmbeddedChoiceError | None:
+    """Ошибка внутри ``choices[0]``: поле ``error`` или
+    ``finish_reason="error"`` без payload."""
+    err = ch0.get("error")
+    if isinstance(err, dict):
+        return _error_from_dict(err)
+    fr = ch0.get("finish_reason")
+    if not (isinstance(fr, str) and fr.lower() == "error"):
+        return None
+    msg = ch0.get("message") or {}
+    usable = (
+        has_payload(msg)
+        if salvage_reasoning
+        else bool(msg.get("content") or msg.get("tool_calls"))
+    )
+    if usable:
+        return None
+    return EmbeddedChoiceError(
+        "provider returned finish_reason='error' with empty choice"
+    )
+
+
 def is_empty_completion(dct: dict) -> bool:
     """True, если ответ бэкенда генуинно пуст: нет content, нет tool_calls, нет
     reasoning_content, нет finish_reason, нет error (ни top-level, ни choice-level).

@@ -552,7 +552,8 @@ class ModelEntry(BaseModel):
     @property
     def authorization_header(self) -> str | None:
         """Token записи как настроен: None → наследование, "" → явно без
-        авторизации; форму (с ``Bearer`` или без) выбирает проба подключения."""
+        авторизации. Если сервер ответил 401 и принял другую форму (с
+        ``Bearer`` или без), транспорт до конца процесса начинает с неё."""
         return model_authorization_header(secret_value(self.token))
 
 
