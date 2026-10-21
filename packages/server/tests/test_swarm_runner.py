@@ -1155,3 +1155,73 @@ def test_start_swarm_hides_the_server_storage_environment(
         payload={},
     )
     assert "SRV_PG_DSN" not in mock_popen.call_args.kwargs["env"]
+
+
+def _finished_task(cfg, *, sandbox_exists=True):
+    """Задача, песочница которой вышла: meta ``completed`` и completion.json."""
+    sid = "swarm_g_t"
+    sandbox = os.path.join(cfg["sandbox_root_dir"], sid)
+    if sandbox_exists:
+        os.makedirs(sandbox)
+    storage.save_swarm_meta(
+        cfg["threads_dir"],
+        sid,
+        base_meta={"system": "g", "task_id": "t"},
+        swarm_meta_patch={
+            "id": sid,
+            "status": "completed",
+            "exit_code": 0,
+            "finished_at": "2026-10-22T00:00:00+00:00",
+            "error_type": "",
+            "sandbox_path": sandbox,
+            "pid": 1,
+        },
+    )
+    completion = os.path.join(cfg["threads_dir"], sid, "completion.json")
+    with open(completion, "w", encoding="utf-8") as f:
+        json.dump({"exit_code": 0}, f)
+    return sid, sandbox, completion
+
+
+def test_continue_swarm_runs_an_inbox_turn_in_the_same_sandbox(
+    base_swarm_cfg, mock_popen
+):
+    sid, sandbox, completion = _finished_task(base_swarm_cfg)
+    access = runner.ThreadAccess(socket_dir="/tmp/gct-x", token="t" * 64)
+    pid = runner.continue_swarm_process(
+        base_swarm_cfg, system="g", task_id="t", thread=access
+    )
+    assert pid == 12345
+    env = mock_popen.call_args.kwargs["env"]
+    assert env["SWARM_INBOX_TURN"] == "1"
+    assert env["GC_THREAD_TOKEN"] == "t" * 64
+    assert env["SWARM_SANDBOX_PATH"] == sandbox
+    # Прошлый отчёт обёртки финализировал бы продолжение сразу.
+    assert not os.path.exists(completion)
+    sm = storage.load_swarm_meta(base_swarm_cfg["threads_dir"], sid)[
+        "swarm_meta"
+    ]
+    assert (sm["status"], sm["pid"], sm["continuations"]) == (
+        "running",
+        12345,
+        1,
+    )
+    assert sm["finished_at"] is None
+    assert sm["exit_code"] is None
+
+
+def test_failed_continuation_fails_the_task_and_keeps_its_record(
+    base_swarm_cfg, mock_popen
+):
+    sid, _sandbox, _completion = _finished_task(base_swarm_cfg)
+    mock_popen.side_effect = OSError("нет обёртки")
+    access = runner.ThreadAccess(socket_dir="/tmp/gct-x", token="t" * 64)
+    with pytest.raises(OSError):
+        runner.continue_swarm_process(
+            base_swarm_cfg, system="g", task_id="t", thread=access
+        )
+    sm = storage.load_swarm_meta(base_swarm_cfg["threads_dir"], sid)[
+        "swarm_meta"
+    ]
+    assert sm["status"] == "failed"
+    assert "нет обёртки" in sm["error_message"]

@@ -311,6 +311,73 @@ def _apply_thread_env(
         env["GC_THREAD_TOKEN"] = thread.token
 
 
+def _wrapper_env(
+    swarm_cfg: Dict[str, Any],
+    *,
+    swarm_id: str,
+    system: str,
+    task_id: str,
+    sandbox_dir: str,
+    task_text: str,
+    trace_id: Optional[str],
+    thread: Optional[ThreadAccess],
+) -> Dict[str, str]:
+    """Окружение обёртки песочницы: контекст задачи, лимиты, пути
+    монтирования и доступ к треду."""
+    threads_dir: str = swarm_cfg["threads_dir"]
+    sandbox_root_dir: str = swarm_cfg["sandbox_root_dir"]
+    limits: Dict[str, Any] = swarm_cfg["limits"]
+    cli_command: str = swarm_cfg["cli_command"]
+    sandbox_tool: str = swarm_cfg["sandbox_tool"]
+    agentmd_path: str = swarm_cfg.get("agentmd_path", "")
+    skills_dir: str = swarm_cfg.get("skills_dir", "")
+
+    # Шаг 1.11 (AR-6, AR-7): bind-mount'ы для venv + Node + extra paths.
+    cli_venv_root: str = swarm_cfg.get("cli_venv_root", "") or ""
+    agent_dep_dir: str = swarm_cfg.get("agent_dep_dir", "") or ""
+    extra_mounts: list = swarm_cfg.get("extra_mounts", []) or []
+    # В env передаём как newline-separated строку — wrapper читает построчно.
+    extra_mounts_env = "\n".join(
+        str(p) for p in extra_mounts if str(p).strip()
+    )
+
+    # Передаём базовый контекст через переменные окружения.
+    env = os.environ.copy()
+    env.update(
+        {
+            "SWARM_ID": swarm_id,
+            "SWARM_SYSTEM": system,
+            "SWARM_TASK_ID": task_id,
+            "SWARM_THREADS_DIR": threads_dir,
+            "SWARM_SANDBOX_DIR": sandbox_root_dir,
+            "SWARM_SANDBOX_PATH": sandbox_dir,
+            "SWARM_CLI_COMMAND": cli_command,
+            "SWARM_SANDBOX_TOOL": sandbox_tool,
+            "SWARM_LIMIT_MEMORY_MB": str(limits.get("memory_mb", "")),
+            "SWARM_LIMIT_DISK_MB": str(limits.get("disk_mb", "")),
+            "SWARM_LIMIT_CPU_PERCENT": str(limits.get("cpu_percent", "")),
+            "SWARM_LIMIT_TIMEOUT_SECONDS": str(
+                limits.get("timeout_seconds", "")
+            ),
+            # Текст задачи для gc-cli -q: ``query`` (API /v1), иначе
+            # JSON всего запроса.
+            "SWARM_PAYLOAD_JSON": task_text,
+            # Внешний трейс. Пусто = не задан: обёртка тогда не добавляет флаг,
+            # и ран в песочнице ведёт себя как раньше (ничего не меняется).
+            "SWARM_TRACE_ID": str(trace_id or ""),
+            # Пути до swarm-специфичных инструкций и директории со скиллами.
+            "SWARM_AGENTMD_PATH": agentmd_path,
+            "SWARM_SKILLS_DIR": skills_dir,
+            # Bind-mount пути для wrapper.sh (AR-6, AR-7).
+            "SWARM_CLI_VENV_ROOT": cli_venv_root,
+            "SWARM_AGENT_DEP_DIR": agent_dep_dir,
+            "SWARM_EXTRA_MOUNTS": extra_mounts_env,
+        }
+    )
+    _apply_thread_env(env, swarm_cfg, thread)
+    return env
+
+
 def _try_materialize_runtime_config(
     swarm_cfg: Dict[str, Any],
     sandbox_dir: str,
@@ -431,59 +498,20 @@ def start_swarm_process(
             "sandbox_status": "active",
         }
 
-        cli_command: str = swarm_cfg["cli_command"]
-        sandbox_tool: str = swarm_cfg["sandbox_tool"]
-        agentmd_path: str = swarm_cfg.get("agentmd_path", "")
-        skills_dir: str = swarm_cfg.get("skills_dir", "")
-
-        # Шаг 1.11 (AR-6, AR-7): bind-mount'ы для venv + Node + extra paths.
-        cli_venv_root: str = swarm_cfg.get("cli_venv_root", "") or ""
-        agent_dep_dir: str = swarm_cfg.get("agent_dep_dir", "") or ""
-        extra_mounts: list = swarm_cfg.get("extra_mounts", []) or []
-        # В env передаём как newline-separated строку — wrapper читает построчно.
-        extra_mounts_env = "\n".join(
-            str(p) for p in extra_mounts if str(p).strip()
+        env = _wrapper_env(
+            swarm_cfg,
+            swarm_id=swarm_id,
+            system=system,
+            task_id=task_id,
+            sandbox_dir=sandbox_dir,
+            task_text=(
+                query
+                if query is not None
+                else json.dumps(payload, ensure_ascii=False)
+            ),
+            trace_id=trace_id,
+            thread=thread,
         )
-
-        # Передаём базовый контекст через переменные окружения.
-        env = os.environ.copy()
-        env.update(
-            {
-                "SWARM_ID": swarm_id,
-                "SWARM_SYSTEM": system,
-                "SWARM_TASK_ID": task_id,
-                "SWARM_THREADS_DIR": threads_dir,
-                "SWARM_SANDBOX_DIR": sandbox_root_dir,
-                "SWARM_SANDBOX_PATH": sandbox_dir,
-                "SWARM_CLI_COMMAND": cli_command,
-                "SWARM_SANDBOX_TOOL": sandbox_tool,
-                "SWARM_LIMIT_MEMORY_MB": str(limits.get("memory_mb", "")),
-                "SWARM_LIMIT_DISK_MB": str(limits.get("disk_mb", "")),
-                "SWARM_LIMIT_CPU_PERCENT": str(limits.get("cpu_percent", "")),
-                "SWARM_LIMIT_TIMEOUT_SECONDS": str(
-                    limits.get("timeout_seconds", "")
-                ),
-                # Полный payload запроса можем передать в окружение как JSON-строку.
-                # Текст задачи для gc-cli -q: ``query`` (API /v1), иначе
-                # JSON всего запроса.
-                "SWARM_PAYLOAD_JSON": (
-                    query
-                    if query is not None
-                    else json.dumps(payload, ensure_ascii=False)
-                ),
-                # Внешний трейс. Пусто = не задан: обёртка тогда не добавляет флаг,
-                # и ран в песочнице ведёт себя как раньше (ничего не меняется).
-                "SWARM_TRACE_ID": str(trace_id or ""),
-                # Пути до swarm-специфичных инструкций и директории со скиллами.
-                "SWARM_AGENTMD_PATH": agentmd_path,
-                "SWARM_SKILLS_DIR": skills_dir,
-                # Bind-mount пути для wrapper.sh (AR-6, AR-7).
-                "SWARM_CLI_VENV_ROOT": cli_venv_root,
-                "SWARM_AGENT_DEP_DIR": agent_dep_dir,
-                "SWARM_EXTRA_MOUNTS": extra_mounts_env,
-            }
-        )
-        _apply_thread_env(env, swarm_cfg, thread)
 
         # wrapper_path проверен в начале функции; остальные ошибки запуска
         # прокидываем выше — за собой убирает finally ниже.
@@ -545,4 +573,86 @@ def start_swarm_process(
     return swarm_id, int(proc.pid)
 
 
-__all__ = ["REMOTE_THREADS", "ThreadAccess", "start_swarm_process"]
+def continue_swarm_process(
+    swarm_cfg: Dict[str, Any],
+    *,
+    system: str,
+    task_id: str,
+    thread: ThreadAccess,
+) -> int:
+    """Продолжение задачи в её песочнице: песочница вышла, а во входящем
+    потоке треда остались сообщения. Новый ``gc-cli --inbox`` в том же
+    каталоге доставляет их; meta снова ``running``. Возвращает PID.
+
+    Прошлый ``completion.json`` убирается до запуска: иначе финализация
+    закрыла бы продолжение по старому отчёту. Запуск не удался — задача
+    ``failed`` (запись остаётся: это не новая задача, а её продолжение).
+    """
+    swarm_id = _make_swarm_id(system, task_id)
+    threads_dir: str = swarm_cfg["threads_dir"]
+    meta = storage.load_swarm_meta(threads_dir, swarm_id)
+    previous = meta.get("swarm_meta") or {}
+    sandbox_dir = str(previous.get("sandbox_path") or "")
+    base_meta = {"system": system, "task_id": task_id}
+    completion = os.path.join(threads_dir, swarm_id, "completion.json")
+    if os.path.exists(completion):
+        os.remove(completion)
+    env = _wrapper_env(
+        swarm_cfg,
+        swarm_id=swarm_id,
+        system=system,
+        task_id=task_id,
+        sandbox_dir=sandbox_dir,
+        task_text="",
+        trace_id=None,
+        thread=thread,
+    )
+    env["SWARM_INBOX_TURN"] = "1"
+    try:
+        proc = subprocess.Popen(
+            [swarm_cfg["wrapper_path"]],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            env=env,
+            text=True,
+            start_new_session=True,
+        )
+    except Exception as exc:
+        storage.save_swarm_meta(
+            threads_dir,
+            swarm_id,
+            base_meta=base_meta,
+            swarm_meta_patch={
+                "status": "failed",
+                "finished_at": _utc_now_iso(),
+                "error_type": "continuation_failed",
+                "error_message": f"продолжение не запустилось: {exc!r}",
+            },
+        )
+        raise
+    timeout_seconds = int(swarm_cfg["limits"].get("timeout_seconds", 1800))
+    storage.save_swarm_meta(
+        threads_dir,
+        swarm_id,
+        base_meta=base_meta,
+        swarm_meta_patch={
+            "status": "running",
+            "pid": proc.pid,
+            "deadline_at": _compute_deadline_iso(timeout_seconds),
+            "continuations": int(previous.get("continuations") or 0) + 1,
+            "finished_at": None,
+            "exit_code": None,
+            "error_type": None,
+            "error_message": None,
+            "sandbox_status": "active",
+        },
+    )
+    return int(proc.pid)
+
+
+__all__ = [
+    "REMOTE_THREADS",
+    "ThreadAccess",
+    "continue_swarm_process",
+    "start_swarm_process",
+]

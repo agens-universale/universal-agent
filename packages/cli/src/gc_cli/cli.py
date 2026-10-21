@@ -271,7 +271,7 @@ async def _aprepare_cli_images(
 
 
 def _cli_user_parts(
-    query: str,
+    query: str | None,
     images: list[Attachment],
     *,
     first_n: int,
@@ -283,7 +283,10 @@ def _cli_user_parts(
     Картинки — вложения к сообщению `-q`: его текст начинается с плашек
     `[Изображение #N]`. При `-T` обёртка ложится поверх плашек и текста — это всё
     ещё сообщение `-q`. Указание `-s` — отдельное техническое сообщение без вложений.
+    Без `-q` (`--inbox`) сообщений нет: ход из входящего потока треда.
     """
+    if query is None:
+        return [], None
     text = query
     if images:
         chips = " ".join(chip_text(first_n + i) for i in range(len(images)))

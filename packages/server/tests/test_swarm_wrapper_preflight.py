@@ -269,3 +269,11 @@ def test_without_sandbox_the_cli_gets_the_host_socket(tmp_path):
     )
     assert proc.returncode == 0, proc.stderr
     assert seen.read_text() == str(sockets / "thread.sock")
+
+
+def test_inbox_turn_runs_without_a_query(tmp_path):
+    """Продолжение задачи: ход из входящего потока треда, без -q."""
+    argv = _argv(tmp_path, SWARM_THREAD_IN_STORE="1", SWARM_INBOX_TURN="1")
+    assert "--inbox" in argv
+    assert "-q" not in argv
+    assert argv[argv.index("-t") + 1] == "t1"

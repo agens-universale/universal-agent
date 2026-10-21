@@ -15,6 +15,8 @@
 #     SWARM_AGENT_DEP_DIR — путь к Node.js + npm-кэш для npx MCP (read-only).
 #     SWARM_EXTRA_MOUNTS  — multi-line (newline-separated) список путей для
 #                           дополнительных read-only bind-mount'ов.
+#     SWARM_INBOX_TURN=1  — продолжение задачи: ход из входящего потока треда
+#                           (--inbox вместо -q).
 #     SWARM_THREAD_IN_STORE=1 и SWARM_THREAD_SOCKET_DIR — тред задачи в
 #                           хранилище сервера: каталог сокета прокси треда
 #                           монтируется в /run/gc-thread, путь сокета — в
@@ -228,8 +230,14 @@ CLI_CMD=(
   "${CLI_BIN}"
   --config "/work/.gc/config.yml"
   --external-request
-  -q "${SWARM_PAYLOAD_JSON:-}"
 )
+# Продолжение задачи (SWARM_INBOX_TURN=1): песочница вышла, а в треде
+# остались недоставленные сообщения — ход из входящего потока, без -q.
+if [[ "${SWARM_INBOX_TURN:-}" == "1" ]]; then
+  CLI_CMD+=(--inbox)
+else
+  CLI_CMD+=(-q "${SWARM_PAYLOAD_JSON:-}")
+fi
 
 # Внешний trace_id (SWARM_TRACE_ID). Флаг добавляем ТОЛЬКО при непустом
 # значении: пустой --trace-id "" ничего бы не дал, а лишний аргумент в командной

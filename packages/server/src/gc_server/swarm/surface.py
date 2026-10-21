@@ -313,14 +313,69 @@ class SwarmSurface:
         while True:
             await asyncio.sleep(_PROXY_POLL_S)
             try:
-                await self._aclose_finished_proxies()
+                await self._afollow_finished_tasks()
             except Exception:
                 logger.exception("swarm: не закрылись прокси тредов")
 
-    async def _aclose_finished_proxies(self) -> None:
-        """Песочница задачи закончилась — прокси её треда закрывается."""
-        await self._aclose_proxies(
-            [sid for sid in self._proxies if not self._active(sid)]
+    async def _afollow_finished_tasks(self) -> None:
+        """Песочница задачи вышла. Во входящем потоке треда осталось
+        недоставленное — продолжение в той же песочнице (если задача
+        завершилась штатно) или ``failed`` (песочницы уже нет). Иначе
+        прокси треда закрывается."""
+        for sid in [sid for sid in self._proxies if not self._active(sid)]:
+            if not await self._acontinue(sid):
+                await self._aclose_proxies([sid])
+
+    async def _acontinue(self, sid: str) -> bool:
+        """``True`` — задача продолжается (или ждёт свободного слота):
+        прокси треда остаётся."""
+        proxy = self._proxies[sid]
+        meta = swarm_storage.load_swarm_meta(self.threads_dir, sid)
+        if _status_of(meta) != "completed" or not await self._pending(
+            proxy.key
+        ):
+            return False
+        if not os.path.isdir(str(_swarm_meta(meta).get("sandbox_path", ""))):
+            self._fail_undelivered(sid, meta)
+            return False
+        limit = int(self.swarm.get("max_concurrent", 10))
+        if self.monitor is not None and self.monitor.get_active_count() >= (
+            limit
+        ):
+            return True  # слот освободится — следующий обход
+        with self._start_lock:
+            if self._active(sid):
+                return True
+            try:
+                swarm_runner.continue_swarm_process(
+                    self.swarm,
+                    system=proxy.key.system,
+                    task_id=proxy.key.thread,
+                    thread=swarm_runner.ThreadAccess(
+                        proxy.directory, proxy.token
+                    ),
+                )
+            except Exception:
+                logger.exception("swarm %s: продолжение не запустилось", sid)
+                return False
+        if self.monitor is not None:
+            self.monitor.register_active(sid)
+        return True
+
+    def _fail_undelivered(self, sid: str, meta: Dict[str, Any]) -> None:
+        swarm_storage.save_swarm_meta(
+            self.threads_dir,
+            sid,
+            base_meta={
+                "system": meta.get("system"),
+                "task_id": meta.get("task_id"),
+            },
+            swarm_meta_patch={
+                "status": "failed",
+                "finished_at": swarm_storage._utc_now_iso(),
+                "error_type": "undelivered",
+                "error_message": "сообщения не доставлены: песочница закрыта",
+            },
         )
 
     async def _aclose_proxies(self, sids: list[str]) -> None:
