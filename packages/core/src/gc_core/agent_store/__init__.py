@@ -8,6 +8,7 @@
 from gc_core.agent_store.errors import MemoryConflict
 from gc_core.agent_store.file_store import FileAgentStore
 from gc_core.agent_store.models import (
+    REQUIRED_PROMPTS,
     ProjectKey,
     ProjectMemory,
     Prompt,
@@ -30,6 +31,7 @@ from gc_core.agent_store.reading import (
 from gc_core.agent_store.store import AgentStore
 
 __all__ = [
+    "REQUIRED_PROMPTS",
     "AgentStore",
     "FileAgentStore",
     "MemoryConflict",

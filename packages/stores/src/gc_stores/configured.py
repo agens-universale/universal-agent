@@ -63,6 +63,8 @@ async def aopen_configured(settings: Any) -> Stores:
         raise _driver_error(exc) from None
     try:
         await _check_schema(stores, ensure=storage.ensure_schema)
+        if agent_kind in _PARAMS:
+            await _require_prompts(stores.agent)
     except ImportError as exc:
         await stores.aclose()
         raise _driver_error(exc) from None
@@ -70,6 +72,24 @@ async def aopen_configured(settings: Any) -> Stores:
         await stores.aclose()
         raise
     return stores
+
+
+async def _require_prompts(store: Any) -> None:
+    """Промпты ядра в хранилище агента в базе: нет — отказ открытия, а не
+    падение хода посреди работы."""
+    from gc_core.agent_store import REQUIRED_PROMPTS
+
+    missing = [
+        prompt.value
+        for prompt in REQUIRED_PROMPTS
+        if await store.read("prompt", prompt) is None
+    ]
+    if missing:
+        raise StorageConfigError(
+            f"storage.agent: в хранилище агента нет промптов "
+            f"{', '.join(missing)} — выполните gc-stores sync --with-defaults "
+            "--config <config.yml>"
+        )
 
 
 def open_part(settings: Any, part: str, *, agent_id: str | None = None) -> Any:
@@ -104,6 +124,7 @@ async def aopen_agent(settings: Any, agent_id: str) -> Any:
         await _check_one(
             store, ensure=settings_of(settings).storage.ensure_schema
         )
+        await _require_prompts(store)
     except BaseException:
         await store.close()
         raise

@@ -50,6 +50,13 @@ class Prompt(StrEnum):
     INIT_AGENTS_MD = "init_agents_md"
 
 
+#: Промпты, без которых ход падает посреди работы (сжатие, finish gate,
+#: судьи). Специнструкции необязательны: их задаёт роль запуска.
+REQUIRED_PROMPTS = tuple(
+    p for p in Prompt if p is not Prompt.SPECIAL_INSTRUCTIONS
+)
+
+
 @dataclass(frozen=True)
 class ResourceInfo:
     """Запись каталога ресурсов: имя внутри каталога и вид."""
