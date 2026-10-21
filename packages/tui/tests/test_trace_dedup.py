@@ -139,7 +139,10 @@ async def test_summary_replaces_second_answer_block(tmp_path):
         await pilot.pause()
 
         assert _rows(scr, "line-agent") == ["Пока! 👋"]
-        assert _rows(scr, "line-summary") == ["итог: Попрощался.\nБез тулов."]
+        assert _rows(scr, "line-summary") == [
+            "итог: Попрощался.",
+            "Без тулов.",
+        ]
         assert _rows(scr, "line-note") == []
 
 

@@ -759,7 +759,7 @@ def test_summary_widgets_keep_code_block():
 
 def test_dispatch_readonly_finish_after_reply_is_summary():
     """Превью: отчёт после текста того же ответа — запись «итог», не
-    второй ответ; comment — второй строкой той же записи."""
+    второй ответ; comment — отдельной строкой записи."""
     pytest.importorskip("textual")
     import json
 
@@ -793,9 +793,10 @@ def test_dispatch_readonly_finish_after_reply_is_summary():
     _dispatch_readonly(_Target(), ev, {})
 
     assert [w._content.plain for w in mounted] == [
-        "итог: Попрощался.\nБез тулов."
+        "итог: Попрощался.",
+        "Без тулов.",
     ]
-    assert mounted[0].has_class("line-summary")
+    assert all(w.has_class("line-summary") for w in mounted)
 
 
 @pytest.mark.asyncio
@@ -845,3 +846,51 @@ def test_summary_bold_and_heading_have_no_accent_colour():
     (agent,) = build_agent_widgets(text, event_no=1)
     agent_styles = {str(sp.style) for sp in agent._content.spans}
     assert f"{ACCENT} bold" in agent_styles
+
+
+def _summary_rows(note: str, comment: str) -> list:
+    pytest.importorskip("textual")
+    from gc_core.tools.turn.turn_close import LABEL_SUMMARY, TurnClose
+    from gc_tui.services.trace_render import build_finish_widgets
+
+    close = TurnClose(
+        reply="Текст.",
+        body="",
+        label=LABEL_SUMMARY,
+        note=note,
+        comment=comment,
+    )
+    return build_finish_widgets(close, event_no=1)
+
+
+def test_finish_comment_after_list_is_own_row():
+    ws = _summary_rows("Сделал:\n\n- один\n- два", "Не проверял.")
+
+    assert [type(w).__name__ for w in ws] == ["TraceRow", "TraceRow"]
+    assert "два" in ws[0]._content.plain
+    assert "Не проверял." not in ws[0]._content.plain
+    assert ws[1]._content.plain == "Не проверял."
+    assert ws[1].has_class("line-summary")
+
+
+def test_finish_comment_after_code_block_is_own_row():
+    from gc_tui.widgets.block_panel import BlockPanel
+
+    ws = _summary_rows("Сделал:\n\n```python\nx = 1\n```", "Не проверял.")
+
+    assert [type(w).__name__ for w in ws] == [
+        "TraceRow",
+        "BlockPanel",
+        "TraceRow",
+    ]
+    assert isinstance(ws[1], BlockPanel)
+    assert ws[2]._content.plain == "Не проверял."
+
+
+def test_finish_comment_after_table_is_own_row():
+    ws = _summary_rows("Сделал:\n\n| a | b |\n|---|---|\n| 1 | 2 |", "Нет.")
+
+    assert [type(w).__name__ for w in ws][-1] == "TraceRow"
+    assert ws[-1]._content.plain == "Нет."
+    assert len(ws) == 3
+    assert type(ws[1]).__name__ != "TraceRow"

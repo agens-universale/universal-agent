@@ -244,3 +244,12 @@ def test_final_content_after_reset_keeps_closing_reply(tmp_path):
     assert content == (
         "<think>\nдо\n</think>\nПока!\n\n* **итог:**\n\n  Прочитал README."
     )
+
+
+def test_report_equal_to_bounced_prose_stays_in_answer(tmp_path):
+    client, agent = _finish_app(tmp_path)
+    agent.chunks = [("answer", "Сделал."), ("reset", "")]
+    agent.executor.last_closing_reply = ""
+    agent.last = _finish_args("Сделал.")
+    content = _ask(client)
+    assert content == "<think>\nСделал.\n</think>\nСделал."

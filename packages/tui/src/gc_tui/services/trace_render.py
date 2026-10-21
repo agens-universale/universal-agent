@@ -259,6 +259,21 @@ def build_summary_widgets(note: str, *, event_no: int) -> list:
     )
 
 
+def _summary_comment_row(comment: str, event_no: int):
+    """Оговорка итога — отдельная строка-продолжение записи, без пустой
+    строки сверху: после списка, кода и таблицы она не сливается с блоком."""
+    from gc_tui.services.markdown_render import render_prose
+    from gc_tui.widgets.trace_row import TraceRow
+
+    return TraceRow(
+        prefix="  ",
+        content=render_prose(comment, ink=""),
+        kind_class=f"{LINE_SUMMARY_CLASS} line-agent-cont",
+        event_no=event_no,
+        focusable=False,
+    )
+
+
 def finish_close_of(ev) -> TurnClose:
     """Конец хода по событию turn_finish (sidecar-ключи маппера)."""
     from gc_core.tools.turn.submit_solution import TurnFinishView
@@ -277,11 +292,10 @@ def build_finish_widgets(close: TurnClose, *, event_no: int) -> list:
     from gc_tui.widgets.trace_row import TraceRow
 
     if close.label == LABEL_SUMMARY:
-        # Оговорка — второй строкой той же записи, без пустой строки.
-        text = "\n".join(
-            part for part in (close.note, close.comment) if part != ""
-        )
-        return build_summary_widgets(text, event_no=event_no)
+        widgets = build_summary_widgets(close.note, event_no=event_no)
+        if close.comment != "":
+            widgets.append(_summary_comment_row(close.comment, event_no))
+        return widgets
     widgets = build_agent_widgets(close.body, event_no=event_no)
     if close.label == LABEL_NOTE:
         widgets.append(
