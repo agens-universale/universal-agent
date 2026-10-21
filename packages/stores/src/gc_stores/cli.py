@@ -1,13 +1,15 @@
 """Утилита ``gc-stores``: обслуживание хранилищ на базах.
 
 ``gc-stores migrate --store postgres --dsn …`` — применить миграции схемы;
-``--check`` — только сверить версию (код выхода 1 — не совпадает).
+``--check`` — только сверить версию (код выхода 1 — не совпадает). С
+``--config`` — схема каждой части ``storage`` в базе (треды и агент; одна
+база на обе — один раз).
 
 ``gc-stores sync <каталог> --store … --agent-id coder [--project …]`` —
 разложить каталог агента (промпты, AGENTS.md, субагенты, скиллы) в
 хранилище агента; ``--with-defaults`` — и умолчания пакета gc-core
-(после обновления gc-ua — заново), ``--prune`` — убрать лишнее,
-``--dry-run`` — только отчёт.
+(после обновления gc-ua — заново; без каталога — только они),
+``--prune`` — убрать лишнее, ``--dry-run`` — только отчёт.
 """
 
 from __future__ import annotations
@@ -23,9 +25,10 @@ from gc_stores.connect import (
     UsageError,
     add_connection_args,
     open_agent_store,
+    open_schema_parts,
     open_thread_store,
 )
-from gc_stores.sync import SyncReport, sync_directory
+from gc_stores.sync import SyncReport, copy_defaults, sync_directory
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -45,7 +48,12 @@ def _parser() -> argparse.ArgumentParser:
     sync = commands.add_parser(
         "sync", help="разложить каталог агента в хранилище агента"
     )
-    sync.add_argument("directory", type=Path, help="каталог агента")
+    sync.add_argument(
+        "directory",
+        type=Path,
+        nargs="?",
+        help="каталог агента (без него — только --with-defaults)",
+    )
     add_connection_args(sync)
     sync.add_argument("--agent-id", help="имя агента в хранилище")
     sync.add_argument("--project", help="id проекта: L2, L3, скиллы project")
@@ -64,17 +72,32 @@ def _parser() -> argparse.ArgumentParser:
 
 
 async def _migrate(args: argparse.Namespace) -> int:
-    store = open_thread_store(args)
+    """Схема базы; с ``--config`` — каждой части ``storage`` в базе (база
+    агента отдельная — и её)."""
+    if not args.config:
+        return await _migrate_one("", open_thread_store(args), args.check)
+    code = 0
+    for part, store in open_schema_parts(args):
+        code = max(code, await _migrate_one(f"{part}: ", store, args.check))
+    return code
+
+
+async def _migrate_one(label: str, store, check: bool) -> int:
     try:
-        if args.check:
+        if check:
             try:
                 await store.check_schema()
             except migrations.SchemaMismatch as exc:
-                print(f"gc-stores: {exc}", file=sys.stderr)
+                print(f"gc-stores: {label}{exc}", file=sys.stderr)
                 return 1
         else:
             await store.ensure_schema()
-        print(f"версия схемы: {await store.schema_version()}")
+        version = getattr(store, "schema_version", None)
+        print(
+            f"{label}версия схемы: {await version()}"
+            if version is not None
+            else f"{label}схема в порядке"
+        )
         return 0
     finally:
         await store.close()
@@ -93,15 +116,21 @@ def _print_report(report: SyncReport, *, dry_run: bool) -> None:
 
 
 async def _sync(args: argparse.Namespace) -> int:
+    if args.directory is None and not args.with_defaults:
+        raise UsageError("нужен каталог агента или --with-defaults")
     store = open_agent_store(args)
     try:
-        report = await sync_directory(
-            store,
-            args.directory,
-            project=args.project,
-            with_defaults=args.with_defaults,
-            prune=args.prune,
-            dry_run=args.dry_run,
+        report = (
+            await copy_defaults(store, dry_run=args.dry_run)
+            if args.directory is None
+            else await sync_directory(
+                store,
+                args.directory,
+                project=args.project,
+                with_defaults=args.with_defaults,
+                prune=args.prune,
+                dry_run=args.dry_run,
+            )
         )
     except ValueError as exc:
         print(f"gc-stores: {exc}", file=sys.stderr)

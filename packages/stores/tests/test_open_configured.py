@@ -242,9 +242,102 @@ def test_cli_needs_store_or_config(capsys):
     assert "--store" in capsys.readouterr().err
 
 
-def test_cli_migrate_refuses_file_threads(tmp_path, capsys):
+def test_cli_migrate_refuses_files_only_storage(tmp_path, capsys):
     from gc_stores.cli import main
 
     config = _config_yml(tmp_path, {})
     assert main(["migrate", "--config", config]) == 1
     assert "files" in capsys.readouterr().err
+
+
+def test_cli_migrate_covers_a_separate_agent_database(tmp_path, capsys):
+    """База агента отдельная — migrate --config накатывает обе; потом
+    --check сверяет обе."""
+    from gc_stores.cli import main
+
+    config = _config_yml(
+        tmp_path,
+        {
+            "threads": {"type": "sqlite", "path": str(tmp_path / "t.db")},
+            "agent": {
+                "type": "sqlite",
+                "path": str(tmp_path / "a.db"),
+                "agent_id": "coder",
+            },
+        },
+    )
+    assert main(["migrate", "--config", config]) == 0
+    out = capsys.readouterr().out
+    assert "threads" in out and "agent" in out
+    assert main(["migrate", "--check", "--config", config]) == 0
+
+
+def test_cli_migrate_covers_a_separate_agent_schema_on_postgres(
+    tmp_path, capsys, postgres_dsn, schemas
+):
+    """Postgres сам схему не накатывает: --check до migrate отказывает по
+    отдельной схеме агента, после — сверяет обе."""
+    from gc_stores.cli import main
+
+    threads, agent = schemas.name(), schemas.name()
+    config = _config_yml(
+        tmp_path,
+        {
+            "threads": {
+                "type": "postgres",
+                "dsn": postgres_dsn,
+                "schema": threads,
+            },
+            "agent": {
+                "type": "postgres",
+                "dsn": postgres_dsn,
+                "schema": agent,
+                "agent_id": "coder",
+            },
+        },
+    )
+    assert main(["migrate", "--check", "--config", config]) == 1
+    capsys.readouterr()
+    assert main(["migrate", "--config", config]) == 0
+    out = capsys.readouterr().out
+    assert "threads:" in out and "agent:" in out
+    assert main(["migrate", "--check", "--config", config]) == 0
+
+
+def test_cli_migrate_agent_part_alone(tmp_path, capsys):
+    """Треды на файлах, агент в базе — накатывается база агента."""
+    from gc_stores.cli import main
+
+    config = _config_yml(
+        tmp_path,
+        {
+            "agent": {
+                "type": "sqlite",
+                "path": str(tmp_path / "a.db"),
+                "agent_id": "coder",
+            },
+        },
+    )
+    assert main(["migrate", "--config", config]) == 0
+    assert "agent" in capsys.readouterr().out
+    assert main(["migrate", "--check", "--config", config]) == 0
+
+
+def test_cli_sync_defaults_need_no_directory(tmp_path, capsys):
+    """``gc-stores sync --with-defaults --config …`` — команда из подсказок
+    старта: только умолчания пакета, каталог не нужен."""
+    from gc_stores.cli import main
+
+    config = _config_yml(
+        tmp_path,
+        {
+            "agent": {
+                "type": "sqlite",
+                "path": str(tmp_path / "a.db"),
+                "agent_id": "coder",
+            },
+        },
+    )
+    assert main(["sync", "--with-defaults", "--config", config]) == 0
+    assert "prompt:summary" in capsys.readouterr().out
+    assert main(["sync", "--config", config]) == 2

@@ -42,7 +42,11 @@ await stores.aclose()
 Схема при этом сверяется сразу (`ensure_schema: true` — накатывается), а
 неизвестный параметр, нет `agent_id` или драйвера — `StorageConfigError` с
 подсказкой. Утилита берёт подключение из того же файла:
-`gc-stores migrate --config config.yml`, `gc-stores sync ./my-agent --config config.yml`.
+`gc-stores migrate --config config.yml` (схема обеих частей `storage`; одна
+база на обе — один раз, отдельная база агента — тоже),
+`gc-stores sync ./my-agent --config config.yml`,
+`gc-stores sync --with-defaults --config config.yml` (только умолчания пакета,
+без каталога).
 
 ## Подключить
 
