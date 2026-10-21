@@ -236,7 +236,10 @@ class WebhookSurface:
         # страницы в браузере пользователя), на loopback-бинде Host — только
         # loopback-имя (DNS rebinding).
         install_http_guard(
-            app, cors_origins=[], bind_host=str(self.section.host)
+            app,
+            cors_origins=[],
+            bind_host=str(self.section.host),
+            max_body_bytes=self.section.max_body_bytes,
         )
         app.add_api_route("/healthcheck", healthcheck, methods=["GET"])
         return app

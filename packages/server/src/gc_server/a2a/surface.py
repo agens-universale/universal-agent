@@ -213,7 +213,10 @@ class A2aSurface:
             rest_routes=create_rest_routes(handler),
         )
         install_http_guard(
-            app, cors_origins=[], bind_host=str(self.section.host)
+            app,
+            cors_origins=[],
+            bind_host=str(self.section.host),
+            max_body_bytes=self.section.max_body_bytes,
         )
         install_bearer(app, self.section.auth_token, public_paths=(CARD_PATH,))
         return app

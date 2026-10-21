@@ -67,6 +67,7 @@ SIGKILL; хранилища закрываются последними.
 server:
   host: "0.0.0.0"         # по умолчанию для всех поверхностей
   auth_token: null        # общий токен; у поверхности может быть свой
+  max_body_bytes: 10485760  # предел тела запроса (больше — 413); у поверхности может быть свой
   apis: [webhook]         # что поднимает gc-serve без аргументов
   log_level: "info"
   logging: {console_trace: false, save_logs: false}   # правки logging.* агента
@@ -88,9 +89,10 @@ a2a: {port: 8091, public_url: null, name: "GigaCode", push_allowed_hosts: []}
 swarm: {port: 8092, max_concurrent: 10}
 ```
 
-У каждой поверхности есть `host`, `port`, `auth_token`, `agent_overrides` и
-(кроме swarm) `agent_md_path` — роль агента этой поверхности. Пустые `host` и
-`auth_token` наследуются из `server`.
+У каждой поверхности есть `host`, `port`, `auth_token`, `max_body_bytes`,
+`agent_overrides` и (кроме swarm) `agent_md_path` — роль агента этой
+поверхности. Пустые `host`, `auth_token` и `max_body_bytes` наследуются из
+`server`.
 
 **Настройки агента поверхности** собираются так: `config.yml` (профиль, env,
 флаги) → `server.logging` → роль поверхности (`agent_md_path`) → общий
@@ -102,7 +104,10 @@ swarm: {port: 8092, max_concurrent: 10}
 прогона уровнем `warning`, агент работает уровнем `default`.
 
 **Токен.** Непустой `auth_token` — каждый запрос с
-`Authorization: Bearer <token>`, иначе `403`. Пустой — без проверки, на старте
+`Authorization: Bearer <token>`, иначе `403`. POST принимается только с
+`Content-Type: application/json` (защита от запросов со сторонних страниц в
+браузере); POST без тела (`…/cancel`) — и без типа, если в нём есть
+`Authorization`. Пустой — без проверки, на старте
 строка в stderr. `a2a` на адресе не loopback без токена не стартует.
 
 ### Переезд ключей

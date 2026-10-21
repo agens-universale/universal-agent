@@ -72,15 +72,20 @@ class ServerConfigError(ValueError):
     """config_server.yml не годится: текст называет ключ и что сделать."""
 
 
+#: Предел тела запроса по умолчанию: больше — 413 до разбора.
+DEFAULT_MAX_BODY_BYTES = 10 * 1024 * 1024
+
+
 class SurfaceConfig(BaseModel):
-    """Общие ключи поверхности; ``host`` и ``auth_token`` — по умолчанию из
-    секции ``server``."""
+    """Общие ключи поверхности; ``host``, ``auth_token`` и
+    ``max_body_bytes`` — по умолчанию из секции ``server``."""
 
     model_config = _STRICT
 
     host: str | None = None
     port: int = Field(default=0, ge=0, le=65535)
     auth_token: str | None = None
+    max_body_bytes: int | None = Field(default=None, ge=1)
     agent_overrides: dict[str, Any] = Field(default_factory=dict)
     agent_md_path: str | None = None
 
@@ -279,6 +284,8 @@ class ServerSection(BaseModel):
 
     host: str = "127.0.0.1"
     auth_token: str | None = None
+    #: Предел тела запроса на всех поверхностях (своя секция — свой).
+    max_body_bytes: int = Field(default=DEFAULT_MAX_BODY_BYTES, ge=1)
     apis: list[SurfaceName] = Field(default_factory=lambda: ["webhook"])
     log_level: str = "info"
     #: Правки ``logging.*`` агента.
@@ -298,7 +305,8 @@ class ServerConfig(BaseModel):
     config_path: str = ""
 
     def surface(self, name: str) -> SurfaceConfig:
-        """Секция поверхности с унаследованными ``host`` и ``auth_token``."""
+        """Секция поверхности с унаследованными ``host``, ``auth_token`` и
+        ``max_body_bytes``."""
         section: SurfaceConfig = getattr(self, _known(name))
         return section.model_copy(
             update={
@@ -307,6 +315,9 @@ class ServerConfig(BaseModel):
                     section.auth_token
                     if section.auth_token is not None
                     else self.server.auth_token
+                ),
+                "max_body_bytes": (
+                    section.max_body_bytes or self.server.max_body_bytes
                 ),
             }
         )

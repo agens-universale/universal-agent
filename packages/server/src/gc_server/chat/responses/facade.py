@@ -34,7 +34,7 @@ from gc_server.chat.responses.prompt_assets import (
 from gc_server.chat.responses.stream_map import StreamMap
 from gc_server.chat.responses.turn import TurnRun
 from gc_server.chat.tool_flow import ToolFlow
-from gc_server.config import LOOPBACK, ChatConfig
+from gc_server.config import DEFAULT_MAX_BODY_BYTES, LOOPBACK, ChatConfig
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +71,7 @@ class ResponsesFacade:
         self.auth_token = section.auth_token or ""
         self.cors_origins = _cors_origins(section.cors_origins)
         self.bind_host = section.host or LOOPBACK
+        self.max_body_bytes = section.max_body_bytes or DEFAULT_MAX_BODY_BYTES
         self._launch_root = section.launch_root
         self.model_id = str(settings.settings.agent.model or "")
         self._agents: OrderedDict[str, Any] = OrderedDict()
