@@ -36,6 +36,27 @@ def _db_settings(tmp_path, **extra):
     )
 
 
+async def _seed_prompts(tmp_path, *agent_ids):
+    """Промпты ядра — без ролей: роли каждый тест кладёт сам."""
+    from gc_core.agent_store import REQUIRED_PROMPTS, FileAgentStore
+    from gc_stores import sqlite
+
+    bundled = FileAgentStore()
+    for agent_id in agent_ids or ("srv",):
+        store = sqlite.SQLiteAgentStore(
+            str(tmp_path / "a.db"), agent_id=agent_id
+        )
+        try:
+            for prompt in REQUIRED_PROMPTS:
+                await store.put_resource(
+                    "prompt",
+                    prompt.value,
+                    await bundled.read("prompt", prompt),
+                )
+        finally:
+            await store.close()
+
+
 def _config(**sections):
     return ServerConfig.model_validate(sections)
 
@@ -77,6 +98,7 @@ def test_completions_facade_takes_its_special_instructions_variant(tmp_path):
 
 async def _runtime(tmp_path, cfg, names=("webhook", "chat", "a2a")):
     base = _db_settings(tmp_path)
+    await _seed_prompts(tmp_path, "srv", "a2a-bot")
     stores = await aopen_process_stores(base)
     runtime = ServerRuntime(base=base, config=cfg, stores=stores)
     runtime.surface_agents = await aopen_surface_agents(base, cfg, list(names))
@@ -194,6 +216,7 @@ async def test_webhook_turn_uses_the_role_from_the_store(
             "logging.console_trace": False,
         },
     )
+    await _seed_prompts(tmp_path)
     stores = await aopen_process_stores(base)
     await copy_defaults(stores.agent)
     await stores.agent.put_resource(

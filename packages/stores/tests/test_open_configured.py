@@ -31,8 +31,39 @@ async def test_files_by_default(tmp_path):
         await stores.aclose()
 
 
+async def _seed_prompts(db: str, agent_id: str = "coder") -> None:
+    """Промпты пакета — в хранилище агента (как gc-stores sync
+    --with-defaults)."""
+    from gc_stores import sqlite
+    from gc_stores.sync import copy_defaults
+
+    store = sqlite.SQLiteAgentStore(db, agent_id=agent_id)
+    try:
+        await copy_defaults(store)
+    finally:
+        await store.close()
+
+
+async def test_agent_store_without_prompts_is_refused(tmp_path):
+    """Без промптов ход упал бы посреди работы (сжатие, finish gate) —
+    отказ уже при открытии, с подсказкой."""
+    db = str(tmp_path / "agent.db")
+    storage = {
+        "agent": {"type": "sqlite", "path": db, "agent_id": "coder"},
+        "ensure_schema": True,
+    }
+    with pytest.raises(StorageConfigError) as err:
+        await aopen_configured(_settings(tmp_path, storage))
+    assert "gc-stores sync --with-defaults" in str(err.value)
+    assert "finish_gate" in str(err.value)
+    await _seed_prompts(db)
+    stores = await aopen_configured(_settings(tmp_path, storage))
+    await stores.aclose()
+
+
 async def test_same_database_shares_one_connection(tmp_path):
     db = str(tmp_path / "agent.db")
+    await _seed_prompts(db)
     stores = await aopen_configured(
         _settings(
             tmp_path,
@@ -149,9 +180,17 @@ async def test_unmigrated_postgres_is_refused_or_migrated(
     with pytest.raises(StorageConfigError) as err:
         await aopen_configured(_settings(tmp_path, storage))
     assert "gc-stores migrate" in str(err.value)
-    stores = await aopen_configured(
-        _settings(tmp_path, {**storage, "ensure_schema": True})
-    )
+    from gc_stores.configured import open_part
+    from gc_stores.sync import copy_defaults
+
+    migrated = _settings(tmp_path, {**storage, "ensure_schema": True})
+    agent = open_part(migrated, "agent")
+    try:
+        await agent.ensure_schema()
+        await copy_defaults(agent)
+    finally:
+        await agent.close()
+    stores = await aopen_configured(migrated)
     try:
         await stores.agent.read("prompt", "system")
     finally:
