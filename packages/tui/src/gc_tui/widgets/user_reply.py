@@ -369,6 +369,13 @@ class UserReplyContainer(_ImageLinksMixin, ClickModelMixin, Widget):
         return self._state
 
     @property
+    def plain_text(self) -> str:
+        """Текст реплики без оформления; скилл — `/имя` первым словом."""
+        if self._skill is None:
+            return self._text
+        return f"/{self._skill} {self._text}".rstrip()
+
+    @property
     def has_images(self) -> bool:
         return bool(self._images)
 

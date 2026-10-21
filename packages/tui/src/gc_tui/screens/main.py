@@ -59,7 +59,12 @@ from textual.widgets import Static, TextArea
 
 from gc_tui import branding
 from gc_tui.commands import build_default_registry, closest_command
-from gc_tui.messages import CopyBlockRequest, OpenImageRequest
+from gc_tui.messages import (
+    CopyBlockRequest,
+    OpenImageRequest,
+    ScrollToEnd,
+    ScrollToReply,
+)
 from gc_tui.models import CompactionStep, ResultOutcome, TaskCursor
 from gc_tui.palette import ACCENT as _ACCENT
 from gc_tui.palette import DEEP_DIM as _DEEP_DIM
@@ -154,6 +159,7 @@ from gc_tui.services.trace_retention import (
     retention_window_start_index,
     subagent_parent_ids_from_events,
 )
+from gc_tui.services.trace_scroll import reply_above
 from gc_tui.services.usage_meter import (
     compose_adaptive_footer_right,
     usage_segments,
@@ -186,6 +192,12 @@ from gc_tui.widgets.thinking_indicator import (
     is_terminal_indicator_state,
 )
 from gc_tui.widgets.tool_call_row import ToolCallRow
+from gc_tui.widgets.trace_overlays import (
+    PILL_CLICK,
+    PILL_ENTER,
+    ScrollEndPill,
+    StickyReply,
+)
 from gc_tui.widgets.trace_row import (
     CompactionBody,
     CompactionRule,
@@ -599,6 +611,9 @@ class TraceScreen(Screen):
             True  # автоскролл-намерение «липнуть к низу» трейса
         )
         self._last_auto_y = 0  # куда мы в прошлый раз программно прижали трейс
+        # Кэш верхних строк реплик для липкой реплики (_reply_tops).
+        self._reply_tops_key: Optional[tuple] = None
+        self._reply_tops_cache: list = []
         # Freeze UI на время app-select (§3.2 F1): time.monotonic() первого тика,
         # где увидели Screen._selecting; None когда не selecting.
         self._select_freeze_since: Optional[float] = None
@@ -745,6 +760,8 @@ class TraceScreen(Screen):
                     id="footer-right",
                     markup=False,
                 )
+        yield StickyReply(id="trace-sticky-reply")
+        yield ScrollEndPill(id="trace-end-pill", classes="trace-action")
 
     def _compose_header_segments(self) -> tuple[str, str]:
         """Return (left_text, right_text) for header.
@@ -780,6 +797,7 @@ class TraceScreen(Screen):
         # старта, человек получал колонку статусов в пару символов шириной — слова
         # рвались по буквам («подк / люче / ны»), а совсем узко она схлопывалась в ноль.
         self._apply_brand_layout(self._brand_fits_beside(event.size.width))
+        self.call_after_refresh(self._refresh_trace_overlays)
 
     def on_click(self, event: events.Click) -> None:
         """Клик в ЛЮБОЙ части трейса → фокус на #trace, чтобы колесо/стрелки/PgUp-
@@ -2068,6 +2086,7 @@ class TraceScreen(Screen):
             self._on_trace_scrolled,
             init=False,
         )
+        self.watch(self, "focused", self._on_focus_moved_overlays, init=False)
         self._check_clipboard_tip()
 
     def _reset_render_state(self) -> None:
@@ -2757,7 +2776,61 @@ class TraceScreen(Screen):
         self._refresh_trace_overlays()
 
     def _refresh_trace_overlays(self) -> None:
-        """Крючок для плашки «в конец» (Task 5)."""
+        """Накладки над лентой (спека P3 §2.6): «не внизу» — липкая реплика
+        (ближайшая выше края) и плашка «в конец»; внизу — обе скрыты.
+        Зовётся на каждый шаг прокрутки: реплики ищутся по кэшу верхних
+        строк (`_reply_tops`), без обхода ленты."""
+        try:
+            trace = self.query_one(_SEL_TRACE, VerticalScroll)
+            sticky = self.query_one("#trace-sticky-reply", StickyReply)
+            pill = self.query_one("#trace-end-pill", ScrollEndPill)
+        except NoMatches:
+            return
+        box = trace.content_region
+        if self._stick_bottom:
+            sticky.show(None, box)
+            pill.show(None, box)
+            return
+        tops = self._reply_tops(trace)
+        sticky.show(reply_above(tops, round(trace.scroll_y)), box)
+        pill.show(self._end_pill_label(), box)
+
+    def _reply_tops(self, trace: VerticalScroll) -> list:
+        """Пары `(virtual_region.y, реплика)` верхнего уровня ленты. Кэш
+        живёт, пока не меняются число детей и размер содержимого ленты —
+        монтирование, удаление и перераскладка его сбрасывают."""
+        from gc_tui.widgets.user_reply import UserReplyContainer
+
+        key = (len(trace.children), trace.virtual_size)
+        if key != self._reply_tops_key:
+            self._reply_tops_key = key
+            self._reply_tops_cache = [
+                (child.virtual_region.y, child)
+                for child in trace.children
+                if isinstance(child, UserReplyContainer)
+            ]
+        return self._reply_tops_cache
+
+    def _end_pill_label(self) -> str:
+        """`· клик или Enter` — только когда курсор в пустом поле ввода."""
+        try:
+            inp = self.query_one(_SEL_CMDINPUT, CommandTextArea)
+        except NoMatches:
+            return PILL_CLICK
+        focused = self.focused is inp
+        return PILL_ENTER if focused and inp.is_blank() else PILL_CLICK
+
+    def _on_focus_moved_overlays(self, _focused: Optional[Widget]) -> None:
+        self._refresh_trace_overlays()
+
+    def on_scroll_to_reply(self, message: ScrollToReply) -> None:
+        """Клик по липкой реплике — она наверху видимой области."""
+        trace = self.query_one(_SEL_TRACE, VerticalScroll)
+        trace.scroll_to_widget(message.reply, animate=False, top=True)
+
+    def on_scroll_to_end(self, _message: ScrollToEnd) -> None:
+        """Клик по плашке «в конец» — тот же путь, что Enter в пустом поле."""
+        self._scroll_to_bottom()
 
     def _scroll_to_bottom(self) -> None:
         """Одно действие «к низу» для Enter в пустом поле и клика по плашке."""
@@ -4917,6 +4990,8 @@ class TraceScreen(Screen):
             self._update_stick_state()
             if self._stick_bottom:
                 self._scroll_trace_end()
+            # Сетка накладок сдвигается и без прокрутки (хром, смена треда).
+            self._refresh_trace_overlays()
         # Отложенное удаление осиротевших реплик (cancel-with-undo), когда idle.
         self._run_orphan_cleanups()
         # Индикатор загрузки MCP — на старте (до появления активной задачи) тоже.
@@ -6025,6 +6100,8 @@ class TraceScreen(Screen):
     async def on_text_area_changed(self, event: TextArea.Changed) -> None:
         if event.text_area.id != "cmdinput":
             return
+        # Подпись плашки «в конец» и её место (поле могло вырасти).
+        self.call_after_refresh(self._refresh_trace_overlays)
         # Печать в input после 1-го Esc сбрасывает pending hint — клавиша уже
         # «не Esc», подтверждать нечего. Screen.on_key для печатных не вызывается
         # (TextArea их потребляет), поэтому ловим здесь. Содержательный отказ —
