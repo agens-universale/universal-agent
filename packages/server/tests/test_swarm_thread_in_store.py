@@ -161,7 +161,7 @@ def test_proxy_closes_when_the_task_ends(surface):
             base_meta={"system": "g", "task_id": "t1"},
             swarm_meta_patch={"status": "completed"},
         )
-        client.portal.call(surface._aclose_finished_proxies)
+        client.portal.call(surface._afollow_finished_tasks)
         assert not os.path.exists(access.socket_dir)
 
 
@@ -299,3 +299,95 @@ def test_swarm_does_not_take_over_a_webhook_thread(surface):
     assert surface.started == []
     record = run_sync(surface.store.get_thread(KEY))
     assert "swarm" not in record.frontend
+
+
+def _sandbox_exited(surface, status="completed", *, sandbox_exists=True):
+    sandbox = os.path.join(surface.sandbox_root_dir, "swarm_g_t1")
+    if sandbox_exists:
+        os.makedirs(sandbox, exist_ok=True)
+    storage.save_swarm_meta(
+        surface.threads_dir,
+        "swarm_g_t1",
+        base_meta={"system": "g", "task_id": "t1"},
+        swarm_meta_patch={"status": status, "sandbox_path": sandbox},
+    )
+
+
+def _queued_message(client):
+    client.post("/v1/tasks", json={"system": "g", "task_id": "t1"})
+    resp = client.post(
+        "/v1/tasks", json={"system": "g", "task_id": "t1", "text": "и тесты"}
+    )
+    assert resp.json()["status"] == "queued"
+
+
+def _no_continuation(*_a, **_kw):
+    raise AssertionError("продолжения быть не должно")
+
+
+def test_undelivered_message_continues_the_task_in_its_sandbox(
+    surface, monkeypatch
+):
+    """Сообщение принято как queued, а песочница успела выйти: сервер
+    поднимает ход из входящего потока в той же песочнице, тем же прокси."""
+    continued = []
+
+    def fake_continue(swarm_cfg, *, system, task_id, thread):
+        continued.append((system, task_id, thread))
+        storage.save_swarm_meta(
+            swarm_cfg["threads_dir"],
+            "swarm_g_t1",
+            base_meta={"system": system, "task_id": task_id},
+            swarm_meta_patch={"status": "running", "pid": 99999},
+        )
+        return 99999
+
+    monkeypatch.setattr(
+        "gc_server.swarm.runner.continue_swarm_process", fake_continue
+    )
+    with TestClient(surface.app(), base_url=LOOPBACK_URL) as client:
+        _queued_message(client)
+        (access,) = surface.started
+        _sandbox_exited(surface)
+        client.portal.call(surface._afollow_finished_tasks)
+        assert continued == [("g", "t1", access)]
+        assert os.path.exists(os.path.join(access.socket_dir, "thread.sock"))
+        assert client.get("/v1/tasks/g/t1").json()["status"] == "running"
+
+
+def test_undelivered_message_fails_the_task_when_the_sandbox_is_gone(
+    surface, monkeypatch
+):
+    monkeypatch.setattr(
+        "gc_server.swarm.runner.continue_swarm_process", _no_continuation
+    )
+    with TestClient(surface.app(), base_url=LOOPBACK_URL) as client:
+        _queued_message(client)
+        (access,) = surface.started
+        _sandbox_exited(surface, sandbox_exists=False)
+        client.portal.call(surface._afollow_finished_tasks)
+        body = client.get("/v1/tasks/g/t1").json()
+    assert body["status"] == "failed"
+    assert "сообщения не доставлены: песочница закрыта" in body["error"]
+    assert body["pending_messages"] == 1
+    assert not os.path.exists(access.socket_dir)
+
+
+@pytest.mark.parametrize("status", ["cancelled", "failed", "timeout"])
+def test_task_that_did_not_complete_is_not_continued(
+    surface, monkeypatch, status
+):
+    """Отменённую или упавшую задачу продолжение не поднимает: недоставленное
+    видно в ``pending_messages``."""
+    monkeypatch.setattr(
+        "gc_server.swarm.runner.continue_swarm_process", _no_continuation
+    )
+    with TestClient(surface.app(), base_url=LOOPBACK_URL) as client:
+        _queued_message(client)
+        (access,) = surface.started
+        _sandbox_exited(surface, status)
+        client.portal.call(surface._afollow_finished_tasks)
+        body = client.get("/v1/tasks/g/t1").json()
+    assert body["pending_messages"] == 1
+    assert body["swarm"]["status"] == status
+    assert not os.path.exists(access.socket_dir)

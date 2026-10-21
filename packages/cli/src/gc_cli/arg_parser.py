@@ -253,6 +253,15 @@ parser.add_argument(
 )
 
 parser.add_argument(
+    "--inbox",
+    action="store_true",
+    help=(
+        "Служебный (swarm): ход из входящего потока треда -t без своего "
+        "запроса — доставить сообщения, оставшиеся после выхода песочницы"
+    ),
+)
+
+parser.add_argument(
     "--external-request",
     action="store_true",
     dest="external_request",
@@ -379,11 +388,20 @@ _STANDALONE_ACTIONS = (
     "check_update",
     "update",
     "approve_plan",
+    "inbox",
     "query",
 )
 
 #: Несовместимые пары флагов и текст ошибки; порядок — порядок проверки.
+_INBOX_INPUT = "--inbox и {} нельзя вместе: вход хода — входящий поток треда."
+
 _CONFLICTS = (
+    ("inbox", "query", _INBOX_INPUT.format("-q/--query")),
+    ("inbox", "new", _INBOX_INPUT.format("-n/--new")),
+    ("inbox", "approve_plan", _INBOX_INPUT.format("--approve-plan")),
+    ("inbox", "images", _INBOX_INPUT.format("--image")),
+    ("inbox", "skill", _INBOX_INPUT.format("-s/--skill")),
+    ("inbox", "wrap_technical", _INBOX_INPUT.format("-T/--technical")),
     (
         "init_config",
         "query",
@@ -466,6 +484,7 @@ def _check_combinations(parsed_args: argparse.Namespace) -> None:
             "(или --init-config для конфига, --sync-config для обновления конфига, "
             "--reset-config для сброса конфига, --init для AGENTS.md, "
             "--approve-plan для исполнения предложенного плана, "
+            "--inbox для хода из входящего потока треда, "
             "--check-update/--update для обновления агента)."
         )
     for first, second, message in _CONFLICTS:
@@ -478,6 +497,10 @@ def _check_combinations(parsed_args: argparse.Namespace) -> None:
     if parsed_args.approve_plan and not parsed_args.thread_id:
         parser.error(
             "--approve-plan можно использовать только вместе с -t/--thread-id."
+        )
+    if parsed_args.inbox and not parsed_args.thread_id:
+        parser.error(
+            "--inbox можно использовать только вместе с -t/--thread-id."
         )
 
 
