@@ -13,6 +13,7 @@ import os
 from typing import Any, Literal
 
 import yaml
+from gc_core.agent_store.roles import ROLE_PATTERN
 from gc_core.bundled_assets import bundled_root, repo_root
 from gc_core.config import apply_cli_overrides
 from gc_core.config_modules.env_interpolation import (
@@ -93,6 +94,11 @@ class SurfaceConfig(BaseModel):
     max_body_bytes: int | None = Field(default=None, ge=1)
     agent_overrides: dict[str, Any] = Field(default_factory=dict)
     agent_md_path: str | None = None
+    #: Роль поверхности в хранилище агента в базе (L0@<роль>,
+    #: special_instructions@<роль>); по умолчанию — имя поверхности.
+    role: str | None = Field(default=None, pattern=ROLE_PATTERN)
+    #: Свой агент поверхности в базе; по умолчанию — storage.agent.agent_id.
+    agent_id: str | None = Field(default=None, min_length=1)
 
     @field_validator("host")
     @classmethod
@@ -344,7 +350,9 @@ class ServerConfig(BaseModel):
         правки агента — общие, затем свои."""
         raw = self.swarm.model_dump(exclude={"host", "port", "auth_token"})
         own = raw.pop("agent_overrides", {}) or {}
-        raw.pop("agent_md_path", None)
+        # Роль, свой агент и путь роли — у агента сервера, не песочницы.
+        for key in ("agent_md_path", "role", "agent_id"):
+            raw.pop(key, None)
         return {
             "swarm": {**raw, "enabled": True},
             "agent_overrides": {
@@ -482,7 +490,10 @@ def surface_settings(
     ``agent_overrides`` → ``agent_overrides`` поверхности."""
     section = getattr(cfg, _known(name))
     updates = {**_logging_updates(cfg.server.logging)}
-    if name != "swarm" and section.agent_md_path:
+    if name != "swarm" and _agent_in_store(base):
+        # Роль — ресурс агента в базе (L0@<роль>), а не путь.
+        updates["agent.role"] = section.role or name
+    elif name != "swarm" and section.agent_md_path:
         updates["paths.agent_md_path"] = _resolve_role(
             section.agent_md_path, cfg, f"{name}.agent_md_path"
         )
@@ -491,6 +502,13 @@ def surface_settings(
     return _apply_overrides(
         loaded, section.agent_overrides, f"{name}.agent_overrides"
     )
+
+
+def _agent_in_store(base: LoadedSettings) -> bool:
+    from gc_core.config_modules.storage import FILES
+    from gc_core.settings import settings_of
+
+    return settings_of(base).storage.part("agent")[0] != FILES
 
 
 def _apply_overrides(

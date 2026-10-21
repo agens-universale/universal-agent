@@ -90,6 +90,26 @@ def open_part(settings: Any, part: str, *, agent_id: str | None = None) -> Any:
     return _open_agent(settings, kind, params, agent_id or configured_id)
 
 
+async def aopen_agent(settings: Any, agent_id: str) -> Any:
+    """Хранилище агента ``agent_id`` по части ``agent`` — своим
+    подключением (свой агент поверхности сервера); схема сверяется, как у
+    ``aopen_configured``. Закрывает вызывающий (``close()``)."""
+    from gc_core.settings import settings_of
+
+    try:
+        store = open_part(settings, "agent", agent_id=agent_id)
+    except ImportError as exc:
+        raise _driver_error(exc) from None
+    try:
+        await _check_one(
+            store, ensure=settings_of(settings).storage.ensure_schema
+        )
+    except BaseException:
+        await store.close()
+        raise
+    return store
+
+
 def _open(settings, threads, agent, agent_id) -> Stores:
     (t_kind, t_params), (a_kind, a_params) = threads, agent
     if t_kind == a_kind and t_kind in _PARAMS and t_params == a_params:
@@ -212,25 +232,29 @@ def _factory(path: str) -> Callable[[dict[str, Any]], Any]:
 async def _check_schema(stores: Stores, *, ensure: bool) -> None:
     """Схема каждой базы (одна на две части — один раз): ``ensure`` —
     накатить недостающее, иначе сверить."""
-    from gc_stores.migrations import SchemaMismatch
-
     seen: list[object] = []
     for store in (stores.threads, stores.agent):
         if any(store is s for s in seen):
             continue
         seen.append(store)
-        method = getattr(
-            store, "ensure_schema" if ensure else "check_schema", None
-        )
-        if method is None:
-            continue
-        try:
-            await method()
-        except SchemaMismatch as exc:
-            raise StorageConfigError(
-                f"{exc} — выполните gc-stores migrate --config <config.yml> "
-                "или задайте storage.ensure_schema: true"
-            ) from None
+        await _check_one(store, ensure=ensure)
+
+
+async def _check_one(store: Any, *, ensure: bool) -> None:
+    from gc_stores.migrations import SchemaMismatch
+
+    method = getattr(
+        store, "ensure_schema" if ensure else "check_schema", None
+    )
+    if method is None:
+        return
+    try:
+        await method()
+    except SchemaMismatch as exc:
+        raise StorageConfigError(
+            f"{exc} — выполните gc-stores migrate --config <config.yml> "
+            "или задайте storage.ensure_schema: true"
+        ) from None
 
 
 def _driver_error(exc: ImportError) -> StorageConfigError:
@@ -246,4 +270,9 @@ def _driver_error(exc: ImportError) -> StorageConfigError:
     )
 
 
-__all__ = ["StorageConfigError", "aopen_configured", "open_part"]
+__all__ = [
+    "StorageConfigError",
+    "aopen_agent",
+    "aopen_configured",
+    "open_part",
+]

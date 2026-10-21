@@ -12,6 +12,7 @@ from gc_core.settings import LoadedSettings
 from gc_core.thread_store import validate_thread_id
 from gc_core.threads.facade import Threads
 
+from gc_server.agent_roles import COMPLETIONS
 from gc_server.chat.agent_config import prepare_agent_settings
 from gc_server.chat.completions.ask_human import bind_ask_human
 from gc_server.chat.completions.content import ContentMap
@@ -84,6 +85,7 @@ class CompletionsFacade:
                 self._settings,
                 cwd=cwd,
                 instructions_path=completions_special_instructions_path(),
+                variant=COMPLETIONS,
             )
             return await self._agent_factory(
                 settings,
