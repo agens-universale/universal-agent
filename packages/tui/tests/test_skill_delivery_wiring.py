@@ -2,6 +2,17 @@ from gc_testkit.tui_support import tui_settings
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _skills_available(monkeypatch):
+    """Скиллы тестов загружаемы; иное — явным monkeypatch в тесте."""
+    from gc_core.tools.skills import skill_delivery as sd
+
+    async def _available(skill_id, reg):
+        return True
+
+    monkeypatch.setattr(sd, "skill_is_available", _available)
+
+
 def _as_coro(fn):
     """Обернуть синхронный двойник в корутину."""
 
@@ -238,7 +249,7 @@ async def test_skill_only_reply_to_subagent_is_not_drawn(
     tmp_path, monkeypatch
 ):
     """`/skill X` без текста субагенту: загруженный — без реплики
-    родителя; ненайденный — реплика с ошибкой (в тред она не идёт)."""
+    родителя; ненайденный — агенту не уходит, реплики нет."""
     pytest.importorskip("textual")
     from gc_tui.widgets.user_reply import UserReplyContainer
 
@@ -256,9 +267,6 @@ async def test_skill_only_reply_to_subagent_is_not_drawn(
         )
         await scr._cmd_use_skill("nope")
         await pilot.pause()
-        (reply,) = scr.query(UserReplyContainer)
-        assert reply._skill_error is True
-        assert [m["content"] for m in app.active_runner.added] == [
-            "DLV",
-            "DLV",
-        ]
+        # Ненайденный без текста — агенту ничего, реплики нет.
+        assert list(scr.query(UserReplyContainer)) == []
+        assert [m["content"] for m in app.active_runner.added] == ["DLV"]

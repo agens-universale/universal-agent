@@ -183,3 +183,127 @@ def test_no_skill_marker_rows_in_sources():
         )
     ]
     assert hits == []
+
+
+# --- неизвестный скилл: агенту не уходит ничего лишнего ---------------------
+
+_TID = "s" * 32
+
+
+class _Runner:
+    """Раннер-двойник: идёт ли ход, что ушло в очередь, что стартовало."""
+
+    def __init__(self, running: bool):
+        self.running = running
+        self.added: list[dict] = []
+        self.starts: list[dict] = []
+
+    def is_running(self) -> bool:
+        return self.running
+
+    def is_child_input_active(self) -> bool:
+        return False
+
+    def add_message(self, message: dict) -> None:
+        self.added.append(message)
+
+    def start(self, **kw) -> bool:
+        self.starts.append(kw)
+        return True
+
+
+def _activate(app, scr, threads) -> None:
+    import json
+
+    from gc_tui.services.stores.file_store import FileTaskStore
+
+    threads.mkdir(exist_ok=True)
+    (threads / f"data_cli_{_TID}.jsonl").write_text("", encoding="utf-8")
+    meta = {"thread_id": _TID, "messages_count": 0, "tui": {}}
+    (threads / f"meta_cli_{_TID}.json").write_text(
+        json.dumps(meta), encoding="utf-8"
+    )
+    scr._active_task_id = _TID
+    app.tui_state.active_task_id = _TID
+    scr._store = FileTaskStore(threads_dir=str(threads), system="cli")
+
+
+def _meta_skills(scr) -> list:
+    return (scr._store.get_task_meta(_TID).get("tui") or {}).get("skills", [])
+
+
+async def _unknown_skill_session(pilot, tmp_path, *, running: bool):
+    scr = pilot.app.screen
+    _activate(pilot.app, scr, tmp_path / "threads")
+    scr._skills_cache = [{"id": "other"}]
+    runner = _Runner(running)
+    pilot.app.active_runner = runner
+    return scr, runner
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("running", [True, False])
+async def test_unknown_skill_without_text_sends_nothing(
+    tmp_path, monkeypatch, running
+):
+    pytest.importorskip("textual")
+    _patch_delivery(monkeypatch, available=False)
+    async with _app(tmp_path).run_test() as pilot:
+        scr, runner = await _unknown_skill_session(
+            pilot, tmp_path, running=running
+        )
+        await scr._handle_command("skill nope")
+        await pilot.pause()
+        assert runner.added == [] and runner.starts == []
+        assert pilot.app.tui_state.pending_skill_id is None
+        assert _replies(scr) == []
+        assert "[!] скилл не найден: /nope" in _trace_texts(scr)
+        assert _meta_skills(scr) == []
+
+
+@pytest.mark.asyncio
+async def test_unknown_skill_with_text_idle_sends_text_without_it(
+    tmp_path, monkeypatch
+):
+    pytest.importorskip("textual")
+    _patch_delivery(monkeypatch, available=False)
+    async with _app(tmp_path).run_test() as pilot:
+        scr, runner = await _unknown_skill_session(
+            pilot, tmp_path, running=False
+        )
+        await scr._handle_command("skill nope почини тест")
+        await pilot.pause()
+        (start,) = runner.starts
+        assert start["query"] == "почини тест"
+        assert start["skill_loaded"] is None
+        (reply,) = _replies(scr)
+        assert reply.state == "pending"
+        assert _line(reply) == "› /nope почини тест"
+        assert [c.plain for c in reply._consequences] == [
+            "скилл nope не найден — отправлено без него"
+        ]
+        assert _meta_skills(scr) == []
+
+
+@pytest.mark.asyncio
+async def test_unknown_skill_with_text_mid_run_queues_text_without_it(
+    tmp_path, monkeypatch
+):
+    pytest.importorskip("textual")
+    _patch_delivery(monkeypatch, available=False)
+    async with _app(tmp_path).run_test() as pilot:
+        scr, runner = await _unknown_skill_session(
+            pilot, tmp_path, running=True
+        )
+        await scr._handle_command("skill nope почини тест")
+        await pilot.pause()
+        (message,) = runner.added
+        assert message["content"] == "почини тест"
+        assert "skill_loaded" not in message
+        (reply,) = _replies(scr)
+        assert reply.state == "queued"
+        assert _line(reply) == "› /nope почини тест"
+        assert [c.plain for c in reply._consequences] == [
+            "скилл nope не найден — отправлено без него"
+        ]
+        assert _meta_skills(scr) == []

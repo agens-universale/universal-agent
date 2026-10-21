@@ -20,12 +20,11 @@ async def test_use_skill_no_active_task_stages(tmp_path):
     )
     async with app.run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")
-        # zzz_no_such даёт empty filter result → submit идёт по типизированному тексту.
-        inp.text = "/skill zzz_no_such"
+        inp.text = "/skill skill-creator"
         await pilot.press("enter")
         await pilot.pause(0.1)
 
-        assert app.tui_state.pending_skill_id == "zzz_no_such"
+        assert app.tui_state.pending_skill_id == "skill-creator"
 
 
 @pytest.mark.asyncio
@@ -150,18 +149,17 @@ async def test_use_skill_idle_task_stages_pending_no_error(tmp_path):
         )
 
         inp = pilot.app.query_one("#cmdinput")
-        # zzz_no_such даёт empty filter result → submit идёт по типизированному тексту.
-        inp.text = "/skill zzz_no_such"
+        inp.text = "/skill skill-creator"
         await pilot.press("enter")
         await pilot.pause(0.2)
 
-        assert app.tui_state.pending_skill_id == "zzz_no_such"
+        assert app.tui_state.pending_skill_id == "skill-creator"
         meta = json.loads(
             (Path(tmp_path) / f"meta_cli_{tid}.json").read_text(
                 encoding="utf-8"
             )
         )
-        assert "zzz_no_such" in meta.get("tui", {}).get("skills", [])
+        assert "skill-creator" in meta.get("tui", {}).get("skills", [])
         texts = [
             str(s.render()) for s in pilot.app.screen.query("#trace Static")
         ]

@@ -2771,33 +2771,34 @@ class TraceScreen(Screen):
         trace = self.query_one(_SEL_TRACE, VerticalScroll)
         if force_scroll:
             self._stick_bottom = True  # отправка своего сообщения = re-engage
-        first = None if is_queued(widget) else self._first_queued(trace)
-        if first is None:
-            trace.mount(widget)
+        queue = [] if is_queued(widget) else self._queued_tail(trace)
+        if queue:
+            trace.mount(widget, before=queue[0])
         else:
-            trace.mount(widget, before=first)
+            trace.mount(widget)
         if scroll and self._stick_bottom:
             self._scroll_trace_end()
 
     @staticmethod
-    def _first_queued(trace):
-        """Первая реплика очереди в ленте или None."""
+    def _queued_tail(trace) -> list:
+        """Реплики очереди по порядку. Очередь — всегда сплошной хвост
+        ленты (`_trace_mount`), поэтому обход с конца, а не всей ленты."""
         from gc_tui.widgets.user_reply import is_queued
 
-        return next((w for w in trace.children if is_queued(w)), None)
+        tail = []
+        for widget in reversed(trace.children):
+            if not is_queued(widget):
+                break
+            tail.append(widget)
+        return tail[::-1]
 
     def _refresh_queue_hint(self) -> None:
         """Подсказка очереди — только под последней ожидающей репликой
-        (спека P3 §10)."""
-        from gc_tui.widgets.user_reply import UserReplyContainer, is_queued
-
-        trace = self.query_one(_SEL_TRACE, VerticalScroll)
-        replies = [
-            w for w in trace.children if isinstance(w, UserReplyContainer)
-        ]
-        last = next((w for w in reversed(replies) if is_queued(w)), None)
-        for reply in replies:
-            reply.set_queue_hint(reply is last)
+        (спека P3 §10). Вне очереди подсказку гасит сама реплика
+        (`set_state`)."""
+        tail = self._queued_tail(self.query_one(_SEL_TRACE, VerticalScroll))
+        for reply in tail:
+            reply.set_queue_hint(reply is tail[-1])
 
     def _on_user_text_submitted(
         self, text: str, images: tuple[Attachment, ...] = ()
@@ -7560,9 +7561,9 @@ class TraceScreen(Screen):
         elif isinstance(res, Failed) and res.reason == "ambiguous":
             self._render_skill_ambiguous(first, res.suggestions)
         else:
-            # первый токен не скилл → весь arg = id (может содержать
-            # пробелы/слэши), промпта нет → штатный pending/running путь
-            await self._cmd_use_skill(arg.strip(), prompt="")
+            # Первый токен — не скилл каталога (id скиллов без пробелов):
+            # загружаемость решает реестр; нет — текст уходит без скилла.
+            await self._cmd_use_skill(first, prompt=rest.strip())
 
     async def _dispatch_skill_by_name(self, name: str, arg: str) -> None:
         """`/имя текст` без такой команды ≡ `/skill имя текст` — только при
@@ -7612,30 +7613,16 @@ class TraceScreen(Screen):
                 kind_class="line-error",
             )
             return
+        if not await self._skill_available(skill_id):
+            await self._skill_missing(skill_id, prompt)
+            return
         if prompt:
             await self._deliver_skill_with_prompt(skill_id, prompt)
             return
         runner = self.app.active_runner
         if runner is not None and runner.is_running():
             # Идёт run → подкидываем как сообщение и фиксируем в meta.
-            from gc_core.tools.skills.registry import get_skills_registry
-            from gc_core.tools.skills.skill_delivery import (
-                build_skill_delivery,
-                skill_is_available,
-            )
-
-            reg = get_skills_registry(self.app.base_settings())
-            loaded = await skill_is_available(skill_id, reg)
-            msg = {
-                "role": "user",
-                "content": await build_skill_delivery(skill_id, reg),
-                "id": "m_" + uuid.uuid4().hex,
-                "display_content": "",
-            }
-            if loaded:
-                msg["skill_loaded"] = skill_id
-            self._record_skill_meta(skill_id)
-            self._send_skill_only(skill_id, msg, loaded)
+            await self._queue_skill_only(skill_id)
             return
         # Run не идёт (нет задачи / завершена / открыта через /sessions) — отложенно
         # к следующему сообщению.
@@ -7648,15 +7635,47 @@ class TraceScreen(Screen):
             kind_class="line-meta",
         )
 
-    def _send_skill_only(self, skill_id: str, msg: dict, loaded: bool) -> None:
-        """Mid-run `/skill X` без текста — реплика из одного имени скилла
-        (спека P3 §10 ответ 3). Загруженный встаёт в очередь, как реплика
-        с текстом; ненайденный в тред репликой не попадает — без очереди
-        и сверки, с ошибкой под ней."""
-        if not loaded:
-            self.app.active_runner.add_message(msg)
-            self._mount_user_reply("", skill=skill_id, skill_error=True)
+    async def _skill_available(self, skill_id: str) -> bool:
+        """Скилл реально загрузим (реестр, не кэш палитры)."""
+        from gc_core.tools.skills.registry import get_skills_registry
+        from gc_core.tools.skills.skill_delivery import skill_is_available
+
+        reg = get_skills_registry(self.app.base_settings())
+        return await skill_is_available(skill_id, reg)
+
+    async def _skill_missing(self, skill_id: str, prompt: str) -> None:
+        """Скилла нет (спека P3 §2.3): с текстом — текст уходит обычной
+        репликой, под ней `└ скилл … не найден — отправлено без него`;
+        без текста — агенту ничего, только ошибка команды."""
+        if prompt:
+            await self._deliver_skill_with_prompt(
+                skill_id, prompt, loaded=False
+            )
             return
+        self._render_command_error(
+            self._skill_input_name({"id": skill_id}),
+            [
+                self._skill_input_name({"id": sid})
+                for sid in self._fuzzy_skill_ids(skill_id)
+            ],
+            title="скилл не найден",
+        )
+
+    async def _queue_skill_only(self, skill_id: str) -> None:
+        """Mid-run `/skill X` без текста — реплика из одного имени скилла
+        в очереди (спека P3 §10 ответ 3)."""
+        from gc_core.tools.skills.registry import get_skills_registry
+        from gc_core.tools.skills.skill_delivery import build_skill_delivery
+
+        reg = get_skills_registry(self.app.base_settings())
+        msg = {
+            "role": "user",
+            "content": await build_skill_delivery(skill_id, reg),
+            "id": "m_" + uuid.uuid4().hex,
+            "display_content": "",
+            "skill_loaded": skill_id,
+        }
+        self._record_skill_meta(skill_id)
         name = self._skill_input_name({"id": skill_id})
         self._queue_user_message(
             msg,
@@ -7715,15 +7734,21 @@ class TraceScreen(Screen):
         self._refresh_queue_hint()
 
     async def _deliver_skill_with_prompt(
-        self, skill_id: str, prompt: str
+        self, skill_id: str, prompt: str, *, loaded: bool = True
     ) -> None:
         """Inline /skill <id> <prompt>: префикс «Используй skill …» встраивается в
         реплику тем же _consume_pending_prefix, что и pending-путь — единая форма
         доставки. Technical-обёртка не используется: системный промпт трактует
         technical-блоки как контекст, не команды, и слабые модели вправе их
-        игнорировать. Дисплей: реплика с именем скилла и чистым промптом."""
-        self.app.tui_state.pending_skill_id = skill_id
-        full_query, _ = await self._consume_pending_prefix(prompt)
+        игнорировать. Дисплей: реплика с именем скилла и чистым промптом.
+
+        ``loaded=False`` — скилла нет: промпт уходит без него, реплика
+        несёт ошибку скилла, в meta скилл не пишется."""
+        if loaded:
+            self.app.tui_state.pending_skill_id = skill_id
+            full_query, _ = await self._consume_pending_prefix(prompt)
+        else:
+            full_query, self._pending_skill_marker = prompt, (skill_id, False)
         _, skill_loaded = self._skill_display_args(prompt)
         msg_id = "m_" + uuid.uuid4().hex
         self._last_user_message_id = msg_id
@@ -7746,7 +7771,7 @@ class TraceScreen(Screen):
                 restore_text=f"/{name} {prompt}",
             )
             self._on_user_text_submitted(prompt)
-            self._record_skill_meta(skill_id)
+            self._record_skill_meta(skill_loaded)
             return
 
         if self.app.tui_state.active_task_id is None:
@@ -7769,7 +7794,7 @@ class TraceScreen(Screen):
             self.attach_active_task(tid)
             # _track_pending и _mount_user_reply — ПОСЛЕ attach_active_task,
             # иначе _reset_render_state вычистит только что добавленный widget.
-            self._record_skill_meta(skill_id)
+            self._record_skill_meta(skill_loaded)
             client_id = self._track_pending(
                 display_text=prompt, wire_content=full_query
             )
@@ -7796,12 +7821,13 @@ class TraceScreen(Screen):
             display_query=prompt,
             skill_loaded=skill_loaded,
         )
-        self._record_skill_meta(skill_id)
+        self._record_skill_meta(skill_loaded)
 
-    def _record_skill_meta(self, skill_id: str) -> None:
-        """Зафиксировать skill_id в meta.tui.skills активной задачи."""
+    def _record_skill_meta(self, skill_id: str | None) -> None:
+        """Зафиксировать skill_id в meta.tui.skills активной задачи;
+        ``None`` — скилл не загружен, писать нечего."""
         tid = self.app.tui_state.active_task_id
-        if tid is not None and self._store is not None:
+        if skill_id and tid is not None and self._store is not None:
             current = (self._store.get_task_meta(tid).get("tui") or {}).get(
                 "skills", []
             )

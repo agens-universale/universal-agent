@@ -10,6 +10,18 @@ from gc_testkit.tui_support import tui_settings
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _coder_available(monkeypatch):
+    """Скиллов тестов нет в реальном реестре — считаем их загружаемыми;
+    иное — явным monkeypatch в тесте."""
+    from gc_core.tools.skills import skill_delivery as sd
+
+    async def _available(skill_id, reg):
+        return True
+
+    monkeypatch.setattr(sd, "skill_is_available", _available)
+
+
 @pytest.mark.asyncio
 async def test_skill_inline_prompt_prefixes_single_message(tmp_path):
     pytest.importorskip("textual")
@@ -112,11 +124,18 @@ async def test_skill_without_prompt_stays_pending(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_unknown_skill_first_token_not_inline(tmp_path):
-    """/skill <неизвестный> <текст>: первый токен не валидный id → НЕ inline-пара,
-    весь arg трактуется как id (pending), inline-доставка не срабатывает."""
+async def test_unknown_skill_first_token_not_inline(tmp_path, monkeypatch):
+    """/skill <неизвестный> <текст>: первый токен — не скилл (id скиллов без
+    пробелов) → текст уходит без скилла, весь arg скиллом не становится."""
     pytest.importorskip("textual")
+    from gc_core.tools.skills import skill_delivery as sd
     from gc_tui.app import TuiApp
+
+    async def _missing(skill_id, reg):
+        return False
+
+    monkeypatch.setattr(sd, "skill_is_available", _missing)
+    from gc_tui.widgets.user_reply import UserReplyContainer
 
     app = TuiApp(
         threads_dir=str(tmp_path),
@@ -128,8 +147,10 @@ async def test_unknown_skill_first_token_not_inline(tmp_path):
         scr._skills_cache = [{"id": "coder"}]  # 'foo' НЕ валиден
         await scr._handle_command("skill foo bar")
         await pilot.pause(0.1)
-        # не inline: pending_skill_id выставлен в весь arg
-        assert app.tui_state.pending_skill_id == "foo bar"
+        assert app.tui_state.pending_skill_id is None
+        (reply,) = scr.query(UserReplyContainer)
+        assert reply._text == "bar"
+        assert reply._skill_error is True
 
 
 @pytest.mark.asyncio
