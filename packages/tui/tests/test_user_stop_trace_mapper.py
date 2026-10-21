@@ -38,3 +38,20 @@ def test_not_started_due_to_user_stop_looks_like_error():
     )
     assert _looks_like_error(out) is True
     assert result_stop(out) == ("halted", "не запущено (стоп)")
+
+
+def test_guard_cancelled_by_user_is_a_stop_not_an_error():
+    """Стоп во время проверки стражем — тело отказа с ``type`` без
+    ``status``: это остановка пользователем (`■`), а не ошибка."""
+    out = json.dumps(
+        {
+            "ok": False,
+            "error": {
+                "type": "cancelled_by_user",
+                "path": "/work/x.txt",
+                "reason": "Tool was interrupted by user stop.",
+                "retryable": True,
+            },
+        }
+    )
+    assert result_stop(out) == ("halted", "отменено")

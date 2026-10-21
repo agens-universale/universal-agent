@@ -757,10 +757,16 @@ def result_stop(output: Any) -> Optional[tuple[ResultOutcome, str]]:
     data = unwrap_tool_output_dict(output)
     if not isinstance(data, dict):
         return None
-    halted = _HALT_SUMMARIES.get(data.get("status"))
+    error = data.get("error")
+    # Стоп во время проверки стражем — тело отказа с ``type`` вместо
+    # ``status`` (``cancelled_by_user_error``): тоже остановка пользователем.
+    kind = error.get("type") if isinstance(error, dict) else None
+    halted = _HALT_SUMMARIES.get(data.get("status")) or _HALT_SUMMARIES.get(
+        kind
+    )
     if halted:
         return "halted", halted
-    refused = refusal_text(data.get("error"))
+    refused = refusal_text(error)
     if refused:
         return "refused", refused
     return None
