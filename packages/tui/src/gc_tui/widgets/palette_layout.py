@@ -17,6 +17,13 @@ def skill_short(skill: dict) -> str:
     return str(skill.get("id", "")).rpartition(":")[2]
 
 
+def skill_name_key(skill: dict) -> tuple[str, str]:
+    """Ключ алфавитного порядка скиллов: короткое имя без регистра, при
+    равенстве — полный id. Порядок реестра (слои) в оверлее не виден и
+    выглядел бы случайным."""
+    return skill_short(skill).lower(), str(skill.get("id", ""))
+
+
 def fit_text(text: str, width: int) -> str:
     """Текст не шире `width` клеток; длиннее — с многоточием в конце."""
     if len(text) <= width:

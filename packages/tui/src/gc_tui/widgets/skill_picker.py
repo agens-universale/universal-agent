@@ -8,8 +8,8 @@
 id до `:`): светло-серая невыбираемая шапка, под ней с отступом короткие
 имена цветом скилла. Имя скилла без пакета стоит на месте шапки, описания
 всех строк — серым в одной колонке (геометрия — `palette_layout`, как у
-палитры). Выбор и вставка — по скиллам, шапки стрелки проходят мимо;
-вставляется по-прежнему полный id. Шапка над выбранным первым скиллом
+палитры). Порядок — по алфавиту (`_grouped`). Выбор и вставка — по
+скиллам, шапки стрелки проходят мимо; вставляется по-прежнему полный id. Шапка над выбранным первым скиллом
 группы докручивается в видимую область вместе с ним.
 """
 
@@ -27,6 +27,7 @@ from gc_tui.widgets.palette_layout import (
     fit_text,
     name_col_w,
     overlay_content_width,
+    skill_name_key,
     skill_short,
 )
 from gc_tui.widgets.palette_rows import PaletteRowsMixin
@@ -42,12 +43,13 @@ def _pack_of(skill: dict) -> str:
 
 
 def _grouped(skills: list[dict]) -> list[tuple[str, list[dict]]]:
-    """Группы (пакет, скиллы): без пакета (пакет "") — первой, затем
-    пакеты в порядке первого появления."""
-    groups: dict[str, list[dict]] = {"": []}
-    for skill in skills:
+    """Группы (пакет, скиллы) — единственное место порядка пикера: без
+    пакета (пакет "") — первой, затем пакеты по алфавиту; скиллы внутри
+    группы — по короткому имени (`skill_name_key`), всё без регистра."""
+    groups: dict[str, list[dict]] = {}
+    for skill in sorted(skills, key=skill_name_key):
         groups.setdefault(_pack_of(skill), []).append(skill)
-    return [(pack, group) for pack, group in groups.items() if group]
+    return sorted(groups.items(), key=lambda g: (g[0] != "", g[0].lower()))
 
 
 class SkillPicker(PaletteRowsMixin, VerticalScroll):

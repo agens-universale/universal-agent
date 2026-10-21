@@ -1023,3 +1023,22 @@ async def test_full_palette_with_scrollbar_keeps_hotkeys_whole(
             await pilot.pause(0.05)
             assert row.region.height == 1
             assert _row_text(pilot.app, row).rstrip().endswith(cmd.hotkey)
+
+
+def test_skill_rows_alphabetical_by_short_name():
+    """Порядок строк скиллов — по короткому имени без регистра, не по
+    слоям реестра (пакет в строке палитры не виден)."""
+    pytest.importorskip("textual")
+    skills = [
+        {"id": "zeta:bz-b"},
+        {"id": "bz-c"},
+        {"id": "alpha:bz-a"},
+        {"id": "bz-d"},
+    ]
+    palette = _skill_palette("bz", skills)
+    assert [s["id"] for s in palette._visible_skill_rows()] == [
+        "alpha:bz-a",
+        "zeta:bz-b",
+        "bz-c",
+        "bz-d",
+    ]

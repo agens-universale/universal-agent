@@ -2,12 +2,12 @@
 
 import pytest
 
-_SKILLS = [  # порядок показа: без пакета первыми, затем пакеты
+_SKILLS = [  # порядок показа: без пакета, затем пакеты, всё по алфавиту
     {"id": "skill-creator"},
-    {"id": "supercoder:planner"},
+    {"id": "codebase:using-codebase"},
     {"id": "supercoder:coder"},
     {"id": "supercoder:critic"},
-    {"id": "codebase:using-codebase"},
+    {"id": "supercoder:planner"},
 ]
 
 
@@ -26,9 +26,9 @@ def test_substring_filter_matches_id():
     p = SkillPicker(_SKILLS, initial_filter="super")
     ids = [s["id"] for s in p._visible_rows()]
     assert ids == [
-        "supercoder:planner",
         "supercoder:coder",
         "supercoder:critic",
+        "supercoder:planner",
     ]
 
 
@@ -58,7 +58,7 @@ def test_move_selection_wraps_around():
     p = SkillPicker(_SKILLS, initial_filter="")
     assert p.selected_skill()["id"] == "skill-creator"
     p.move_selection(1)
-    assert p.selected_skill()["id"] == "supercoder:planner"
+    assert p.selected_skill()["id"] == "codebase:using-codebase"
     p.move_selection(-2)
     # wrap: 1 -> -1 -> last index (len(_SKILLS) - 1)
     assert p.selected_skill()["id"] == _SKILLS[-1]["id"]
@@ -214,3 +214,34 @@ def test_desired_height_counts_pack_headers():
 
     p = SkillPicker(_PACKED)
     assert p.desired_height == len(_PACKED) + 2 + 2 + 2
+
+
+_MIXED_LAYERS = [  # порядок реестра: системный слой, затем пользовательский
+    {"id": "topic-research", "source": "system"},
+    {"id": "zeta:beta", "source": "system"},
+    {"id": "Complex-task", "source": "system"},
+    {"id": "alpha:zed", "source": "system"},
+    {"id": "alias-game", "source": "user"},
+    {"id": "alpha:Able", "source": "user"},
+    {"id": "zeta:alpha", "source": "user"},
+]
+
+
+def test_order_is_alphabetical_not_registry_layers():
+    pytest.importorskip("textual")
+    from gc_tui.widgets.skill_picker import SkillPicker
+
+    p = SkillPicker(_MIXED_LAYERS)
+    assert [s["id"] for s in p._visible_rows()] == [
+        "alias-game",
+        "Complex-task",
+        "topic-research",
+        "alpha:Able",
+        "alpha:zed",
+        "zeta:alpha",
+        "zeta:beta",
+    ]
+    heads = [
+        _plain(w).strip() for w in _rows(p) if w.has_class("palette-pack-head")
+    ]
+    assert heads == ["alpha", "zeta"]

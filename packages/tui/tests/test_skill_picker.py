@@ -88,8 +88,8 @@ async def test_tab_after_arrows_inserts_full_id_of_flat_skill(
         inp = pilot.app.query_one("#cmdinput")
         inp.text = "/skill "
         await pilot.pause(0.1)
-        # skill-creator (без пакета) первым, затем planner, coder, …
-        await pilot.press("down", "down", "down")
+        # skill-creator (без пакета) первым, затем пакеты по алфавиту
+        await pilot.press("down")
         await pilot.press("tab")
         await pilot.pause(0.1)
         assert inp.text == "/skill codebase:using-codebase"
@@ -175,7 +175,7 @@ async def test_tab_completes_id_into_input_and_closes_picker(
         await pilot.press("tab")
         await pilot.pause(0.1)
 
-        assert inp.text == "/skill supercoder:planner"
+        assert inp.text == "/skill supercoder:coder"  # первый по алфавиту
         assert len(pilot.app.query(SkillPicker)) == 0
 
 

@@ -32,6 +32,7 @@ from gc_tui.widgets.palette_layout import (
     fit_text,
     name_col_w,
     overlay_content_width,
+    skill_name_key,
     skill_short,
 )
 
@@ -610,16 +611,18 @@ class CommandPalette(VerticalScroll):
 
     def _matched_skills(self) -> list[dict]:
         """Все скиллы под фильтр (голый `/` — ни одного); скилл, чьё короткое
-        имя занято командой или алиасом, не показывается."""
+        имя занято командой или алиасом, не показывается. Порядок — по
+        короткому имени (`skill_name_key`), как в пикере /skill."""
         f = self._filter.lower()
         if not f or self._skills is None:
             return []
-        return [
+        matched = [
             s
             for s in self._skills()
             if _skill_matches(s, f)
             and self._registry.lookup(skill_short(s)) is None
         ]
+        return sorted(matched, key=skill_name_key)
 
     def _list_rows_cap(self) -> int:
         """Сколько строк списка палитра показывает без прокрутки: потолок
