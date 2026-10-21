@@ -164,7 +164,7 @@ def test_error_row_has_no_tail_and_error_line_below():
     row = ToolCallRow(call_id="c1", label="Edit", target="x")
     row.set_result(summary="search не найден в файле", outcome="error")
     assert row._render_content().plain == "Edit  x"
-    assert "✕" in row._render_prefix().plain
+    assert "●" in row._render_prefix().plain
     line = _lines(row)
     assert line.plain == "  └ search не найден в файле"
     assert _styles_of(line, "search не найден") == [ERR]
@@ -179,23 +179,23 @@ def test_nested_error_line_two_deeper():
 
 @pytest.mark.parametrize("summary", ["отменено", "лимит шагов"])
 def test_halted_row_is_stop_not_failure(summary):
-    """Стоп и лимит — не ошибка (K4): глиф `■` серым, строка `└` серым."""
+    """Стоп и лимит — не ошибка (K4): глиф `○` серым, строка `└` серым."""
     row = ToolCallRow(call_id="c1", label="Read", target="x")
     row.set_result(summary=summary, outcome="halted")
     prefix = row._render_prefix()
-    assert "■" in prefix.plain and "✕" not in prefix.plain
-    assert _styles_of(prefix, "■") == [DIM]
+    assert "●" not in prefix.plain
+    assert _styles_of(prefix, "○") == [DIM]
     assert row._render_content().plain == "Read  x"
     line = _lines(row)
     assert line.plain == f"  └ {summary}"
     assert _styles_of(line, summary) == [DIM]
 
 
-def test_real_error_keeps_cross_and_err_line():
+def test_real_error_is_red_circle_and_err_line():
     row = ToolCallRow(call_id="c1", label="Read", target="x")
     row.set_result(summary="нет файла", outcome="error")
     prefix = row._render_prefix()
-    assert _styles_of(prefix, "✕") == [ERR]
+    assert _styles_of(prefix, "●") == [ERR]
     assert _styles_of(_lines(row), "нет файла") == [ERR]
 
 
@@ -245,7 +245,7 @@ def test_preview_halted_result_is_stop_row():
     ev = _output_event({"ok": False, "status": "cancelled_by_user"})
     _dispatch_readonly(target, ev, calls)
     (row,) = target.children
-    assert "■" in row._render_prefix().plain
+    assert "○" in row._render_prefix().plain
     assert _styles_of(_lines(row), "отменено") == [DIM]
 
 
@@ -261,7 +261,7 @@ def test_preview_nested_halted_is_stop_row():
     ]
     merge_nested_readonly(target, records, calls)
     nested = target.children[1]
-    assert "■" in nested._render_prefix().plain
+    assert "○" in nested._render_prefix().plain
     assert _consequence(nested) == "    └ лимит шагов"
 
 

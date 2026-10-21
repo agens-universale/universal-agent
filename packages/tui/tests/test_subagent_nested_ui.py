@@ -34,10 +34,10 @@ async def test_batch_calls_first_active_rest_waiting():
         await pilot.pause()
         scr._reconcile_active_tool_phases()
         await pilot.pause()
-        assert "▸" in str(a._render_prefix())
-        assert "·" in str(b._render_prefix())
+        assert "●" in str(a._render_prefix())
+        assert "•" in str(b._render_prefix())
         assert "прервано" not in str(b._render_content())
-        assert "·" in str(c._render_prefix())
+        assert "•" in str(c._render_prefix())
 
 
 @pytest.mark.asyncio
@@ -95,7 +95,7 @@ async def test_drain_mounts_nested_under_parent():
 
 @pytest.mark.asyncio
 async def test_nested_stays_after_parent_result():
-    """После finish + result parent nested остаётся под ✓ (живая сессия)."""
+    """После finish + result parent nested остаётся под ● (живая сессия)."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
     from gc_tui.models import TraceEvent
@@ -180,4 +180,4 @@ async def test_nested_stays_after_parent_result():
         assert nested in scr._nested_widgets_by_parent.get("parent_1", [])
         assert "parent_1" not in scr._active_calls
         assert parent._result is not None
-        assert "✓" in str(parent._render_prefix())
+        assert "●" in str(parent._render_prefix())

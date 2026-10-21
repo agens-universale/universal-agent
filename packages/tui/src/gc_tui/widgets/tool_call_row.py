@@ -6,7 +6,7 @@ Layout: Horizontal(prefix-Static, content-Static) — wrap длинного об
 слот следствий `└` (ConsequenceSlot.trace-consequence) на +2 от глифа: текст
 ошибки и пометки вызова (спека P3 §3); пустой — скрыт.
 
-Статус-глиф живёт в prefix-Static (▸/‖/✓/✕/·), content-Static несёт
+Статус-глиф живёт в prefix-Static (●/○/•/‖), content-Static несёт
 `Подпись  объект` и хвост ` · сводка` успеха; у ошибки хвоста нет.
 Первая строка всегда в одну строку: подпись, хвост и ❐ не режутся, объект
 сокращается `…` под ширину content-колонки (`fit_call_target`; пересчёт —
@@ -15,12 +15,13 @@ Layout: Horizontal(prefix-Static, content-Static) — wrap длинного об
 строки справа — кнопка ❐ копирования её диффа (спека P3 §10).
 
 Фазы:
-- waiting  — call уже нарисован, execute ещё не начался: · dim, без elapsed;
-- running  — сейчас исполняется: ▸ + elapsed (+ опциональный live_status);
+- waiting  — call уже нарисован, execute ещё не начался: • dim, без elapsed;
+- running  — сейчас исполняется: ● (дыхание амбером) + elapsed
+  (+ опциональный live_status);
   на человеко-ожидании (pause) — ‖ без дыхания, elapsed заморожен;
-- done     — есть result: ✓/✕; стоп или лимит (`halted`) — ■ серым,
-  отказ (`refused`) — ○ цветом WARN, строка `└` серым;
-- interrupted — стоп/обрыв до output: · + «прервано».
+- done     — есть result: ● зелёным / красным; стоп или лимит (`halted`) —
+  ○ серым, отказ (`refused`) — ○ цветом REFUSED, строка `└` серым;
+- interrupted — стоп/обрыв до output: ○ серым + «прервано».
 """
 
 from __future__ import annotations
@@ -41,11 +42,15 @@ from gc_tui.palette import DIM as _DIM
 from gc_tui.palette import ERR as _ERR
 from gc_tui.palette import OK as _OK
 from gc_tui.palette import PULSE_SHADES as _PULSE_SHADES
+from gc_tui.palette import REFUSED as _REFUSED
 from gc_tui.palette import RUN_COLOR as _RUN
 from gc_tui.palette import TOOL_NAME as _TOOL_NAME
-from gc_tui.palette import WARN as _WARN
 from gc_tui.services.duration_format import format_trace_duration
-from gc_tui.services.trace_glyphs import ERROR_GLYPH, REFUSED_GLYPH
+from gc_tui.services.trace_glyphs import (
+    CALL_GLYPH,
+    CALL_UNDONE_GLYPH,
+    CALL_WAITING_GLYPH,
+)
 from gc_tui.services.trace_render import fit_call_target, level_prefix
 from gc_tui.widgets.block_panel import (
     CopyFeedbackMixin,
@@ -66,10 +71,10 @@ _PAUSE_GLYPH = "‖"
 #: не сбой (K4), отказ — не сбой, а решение политики или человека: цветом
 #: только глиф, строка серая.
 _OUTCOME_LOOK: dict[str, tuple[str, str, str]] = {
-    "ok": ("✓", _OK, _OK),
-    "error": (ERROR_GLYPH, _ERR, _ERR),
-    "halted": ("■", _DIM, _DIM),
-    "refused": (REFUSED_GLYPH, _WARN, _DIM),
+    "ok": (CALL_GLYPH, _OK, _OK),
+    "error": (CALL_GLYPH, _ERR, _ERR),
+    "halted": (CALL_UNDONE_GLYPH, _DIM, _DIM),
+    "refused": (CALL_UNDONE_GLYPH, _REFUSED, _DIM),
 }
 
 
@@ -89,7 +94,7 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
     DOM:
         ToolCallRow
             Horizontal
-                Static(classes="trace-prefix")  — статус-глиф ▸/✓/✕/·
+                Static(classes="trace-prefix")  — статус-глиф ●/○/•
                 Static(classes="trace-content line-tool")  — подпись,
                     объект, хвост
                 _CopyButton(classes="block-copy trace-action")  — ❐, видна
@@ -183,7 +188,7 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         self._restore_timer = None  # откат ✓ → ❐ (CopyFeedbackMixin)
         self._pulse_frame: int = 0
         self._pulse_timer = (
-            None  # собственный 0.1с-тик дыхания ▸ (_sync_pulse)
+            None  # собственный 0.1с-тик дыхания ● (_sync_pulse)
         )
         # line-tool на самом widget'е — color: $dim каскадится в prefix-Static.
         self.add_class("line-tool")
@@ -228,7 +233,7 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         )
 
     def _sync_pulse(self) -> None:
-        """Таймер дыхания ▸ есть только у запущенной running-строки.
+        """Таймер дыхания ● есть только у запущенной running-строки.
 
         Waiting, результат, прерывание, пауза на человеко-ожидании или
         виджет ещё не запущен (рендер истории) — без таймера. Идемпотентно.
@@ -241,7 +246,7 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
             self._pulse_timer = None
 
     def _pulse_tick(self) -> None:
-        """Кадр дыхания ▸. Waiting / done / interrupted — не тикаем."""
+        """Кадр дыхания ●. Waiting / done / interrupted — не тикаем."""
         # F4: freeze UI на время app-select — не тикаем анимацию (Screen._selecting).
         try:
             if getattr(self.screen, "_selecting", False):
@@ -252,7 +257,7 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
             return
         self._pulse_frame += 1
         if self._prefix_static is not None:
-            # Меняется только цвет ▸ (ширина глифа постоянна) — без layout.
+            # Меняется только цвет ● (ширина глифа постоянна) — без layout.
             self._prefix_static.update(self._render_prefix(), layout=False)
 
     def _update(self) -> None:
@@ -276,7 +281,7 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         self._update()
 
     def set_active(self) -> None:
-        """Снять waiting → running (▸ + elapsed). После result/interrupt — no-op."""
+        """Снять waiting → running (● + elapsed). После result/interrupt — no-op."""
         if self._result is not None or self._interrupted:
             return
         if not self._waiting:
@@ -362,11 +367,14 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
 
     def _status_glyph(self) -> tuple[str, str]:
         if self._result is None:
-            if self._interrupted or self._waiting:
-                return "·", _DIM
+            if self._interrupted:
+                return CALL_UNDONE_GLYPH, _DIM
+            if self._waiting:
+                return CALL_WAITING_GLYPH, _DIM
             if self._paused_at is not None:
                 return _PAUSE_GLYPH, _RUN
-            return "▸", _PULSE_SHADES[self._pulse_frame % len(_PULSE_SHADES)]
+            pulse = _PULSE_SHADES[self._pulse_frame % len(_PULSE_SHADES)]
+            return CALL_GLYPH, pulse
         glyph, style, _line_style = _OUTCOME_LOOK[self._outcome]
         return glyph, style
 

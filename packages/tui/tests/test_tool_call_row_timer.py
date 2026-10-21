@@ -110,7 +110,7 @@ async def test_pause_shows_pause_glyph_and_resume_restores():
         await pilot.pause()
         prefix = row._prefix_static.content
         assert "‖" in prefix.plain
-        assert "▸" not in prefix.plain
+        assert "●" not in prefix.plain
         at = prefix.plain.index("‖")
         glyph_styles = [
             str(sp.style) for sp in prefix.spans if sp.start <= at < sp.end
@@ -118,7 +118,7 @@ async def test_pause_shows_pause_glyph_and_resume_restores():
         assert glyph_styles == [RUN_COLOR]
         row.resume()
         await pilot.pause()
-        assert "▸" in row._prefix_static.content.plain
+        assert "●" in row._prefix_static.content.plain
 
 
 @pytest.mark.asyncio

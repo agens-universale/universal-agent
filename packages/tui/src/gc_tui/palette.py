@@ -121,6 +121,11 @@ DIFF_GUTTER = MUTED  # колонка номеров строк — сущест
 DIFF_ADD_GUTTER = OK
 DIFF_DEL_GUTTER = ERR
 
+# Отказ вызова в ленте (глиф `○`): приглушённый оранжевый — заметен, но не
+# спорит с ошибкой и предупреждением. В теме auto — от фона (_derived).
+_REFUSED_SHARE = 0.55
+REFUSED = _mix(BG, WARN, _REFUSED_SHARE)
+
 
 # Рампы анимаций (ping-pong, пик — токен палитры); значения те же, что были
 # литералами в виджетах. В теме auto их пересчитывает apply_background.
@@ -163,7 +168,7 @@ VALIDATING_SHADES = [
     "#747e8b",
     "#69727f",
 ]
-# Пульс running-глифа ▸: амбер, пик RUN_COLOR.
+# Пульс running-глифа ●: амбер, пик RUN_COLOR.
 PULSE_SHADES = [
     "#8a6a3a",
     "#977448",
@@ -211,6 +216,7 @@ _FIXED = {
         "BG",
         "BAND_BG",
         "BLOCK_BG",
+        "REFUSED",
         *_DIFF,
         *_TINTED,
         *_RAMP_PEAKS,
@@ -253,6 +259,7 @@ def _derived(bg: str) -> dict[str, object]:
         "BG": bg,
         "BAND_BG": _mix(bg, INK, 0.075),
         "BLOCK_BG": _mix(bg, INK, 0.042),
+        "REFUSED": _mix(bg, WARN, _REFUSED_SHARE),
         **{name: _shift(_FIXED[name], bg) for name in _DIFF},
         **tinted,
         **ramps,
@@ -331,6 +338,7 @@ def css_variables() -> dict[str, str]:
         "olive": OLIVE,
         "err": ERR,
         "warn": WARN,
+        "refused": REFUSED,
         "info": INFO,
         "brand": BRAND,
         "band-bg": BAND_BG,

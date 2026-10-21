@@ -115,7 +115,7 @@ async def test_tool_call_row_has_two_column_layout():
         prefix = row.query_one(".trace-prefix")
         content = row.query_one(".trace-content")
         assert "|-" not in str(prefix.render())  # лесенки больше нет
-        assert "▸" in str(prefix.render())  # статус-глиф running в prefix
+        assert "●" in str(prefix.render())  # статус-глиф running в prefix
         assert "read_file" in str(content.render())
         assert "|- " not in str(
             content.render()
@@ -151,7 +151,7 @@ async def test_long_tool_args_wrap_inside_content_column():
         # prefix — статус-глиф в колонке `●` (уровень 0 — без отступа, без
         # «лесенки»), не зависит от длины content
         assert "|-" not in str(prefix.render())
-        assert str(prefix.render()) == "▸ "
+        assert str(prefix.render()) == "● "
         # content содержит все длинные args (wrap'нутые, но в одном Static)
         rendered_content = str(content.render())
         assert "execute_command" in rendered_content

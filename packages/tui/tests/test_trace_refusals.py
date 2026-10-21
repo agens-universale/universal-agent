@@ -1,10 +1,11 @@
 """Отказ вызова в ленте — не ошибка (спека P3 §10, смоук P3a).
 
-Отказ политики, режима, судьи или человека: цветом `WARN` только глиф
-`○`, строка `└` серым (`DIM`) и начинается с того, кто отказал. Ошибка —
-`✕` и `ERR`, стоп и лимит — `■` серым; несостоявшаяся проверка судьи —
-не отказ, а остановка `■`. Каждый путь одинаково: вживую, превью,
-вложенный вызов из записи субагента."""
+Язык глифов ленты — круги. Отказ политики, режима, судьи или человека:
+глиф `○` приглушённым оранжевым (`REFUSED`), строка `└` серым (`DIM`) и
+начинается с того, кто отказал. Успех — `●` `OK`, ошибка — `●` и `ERR`,
+стоп и лимит — `○` серым; несостоявшаяся проверка судьи — не отказ, а
+остановка `○`. Каждый путь одинаково: вживую, превью, вложенный вызов
+из записи субагента."""
 
 from __future__ import annotations
 
@@ -23,7 +24,7 @@ from gc_core.message_policy.permission_denials import (
 )
 from gc_core.security.action_judge_step import CHECK_FAILED_TYPE
 from gc_tui.models import TraceEvent
-from gc_tui.palette import DIM, ERR, WARN
+from gc_tui.palette import DIM, ERR, OK, REFUSED
 from gc_tui.services.trace_mapper import map_message
 from gc_tui.services.trace_render import (
     _dispatch_readonly,
@@ -155,8 +156,8 @@ def _output_event(error: dict) -> TraceEvent:
 
 def _assert_refused_row(row: ToolCallRow, text: str, indent: str) -> None:
     prefix = row._render_prefix()
-    assert _styles_of(prefix, "○") == [WARN]
-    assert "✕" not in prefix.plain
+    assert _styles_of(prefix, "○") == [REFUSED]
+    assert "●" not in prefix.plain
     line = _lines(row)
     assert line.plain == f"{indent}└ {text}"
     assert _styles_of(line, text) == [DIM]
@@ -228,19 +229,25 @@ def test_refused_row_is_warn_glyph_and_dim_line():
     _assert_refused_row(row, "вы отклонили", "  ")
 
 
-def test_error_row_is_heavy_cross_and_err_line():
+def test_ok_row_is_green_circle():
+    row = ToolCallRow(call_id="c1", label="Read", target="x")
+    row.set_result(summary="188 строк", outcome="ok")
+    assert _styles_of(row._render_prefix(), "●") == [OK]
+
+
+def test_error_row_is_red_circle_and_err_line():
     row = ToolCallRow(call_id="c1", label="Read", target="x")
     row.set_result(summary="нет файла", outcome="error")
     prefix = row._render_prefix()
-    assert _styles_of(prefix, "✕") == [ERR]
-    assert "✗" not in prefix.plain
+    assert _styles_of(prefix, "●") == [ERR]
+    assert "✕" not in prefix.plain
     assert _styles_of(_lines(row), "нет файла") == [ERR]
 
 
-def test_halted_row_unchanged():
+def test_halted_row_is_grey_hollow_circle():
     row = ToolCallRow(call_id="c1", label="Read", target="x")
     row.set_result(summary="отменено", outcome="halted")
-    assert _styles_of(row._render_prefix(), "■") == [DIM]
+    assert _styles_of(row._render_prefix(), "○") == [DIM]
     assert _styles_of(_lines(row), "отменено") == [DIM]
 
 
@@ -305,14 +312,14 @@ def test_preview_nested_refusal_row():
     _assert_refused_row(target.children[1], "вы отклонили", "    ")
 
 
-def test_preview_nested_error_is_heavy_cross():
+def test_preview_nested_error_is_red_circle():
     target, calls = _Target(), {}
     parent = ToolCallRow(call_id="p1", label="Agent", target="")
     target.mount(parent)
     calls["p1"] = parent
     error = {"type": "not_found", "message": "нет файла"}
     merge_nested_readonly(target, _nested_records(error), calls)
-    assert _styles_of(target.children[1]._render_prefix(), "✕") == [ERR]
+    assert _styles_of(target.children[1]._render_prefix(), "●") == [ERR]
 
 
 # --- вживую ------------------------------------------------------------------

@@ -120,10 +120,10 @@ _EXPECTED = [
     ("UserReplyContainer", ""),
     ("TraceRow", "● "),
     ("TodoBlock", ""),
-    ("ToolCallRow", "✓ "),
-    ("ToolCallRow", "✓ "),
+    ("ToolCallRow", "● "),
+    ("ToolCallRow", "● "),
     ("TraceRow", "  ● "),
-    ("ToolCallRow", "  ✓ "),
+    ("ToolCallRow", "  ● "),
     ("NestedUserReply", "  › "),
     ("TodoBlock", "  "),
     ("TraceRow", "● "),
@@ -203,7 +203,7 @@ def test_tool_call_row_prefix_is_level_plus_glyph(level):
         call_id="c", label="fs_read_file", target="", level=level
     )
     row.set_result(summary="", outcome="ok")
-    assert row._render_prefix().plain == level_prefix(level) + "✓ "
+    assert row._render_prefix().plain == level_prefix(level) + "● "
     assert row.has_class("nested-tool") == (level > 0)
 
 

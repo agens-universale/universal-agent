@@ -739,8 +739,9 @@ def _truncate_word_boundary(text: str, limit: int) -> str:
 #: `test_image_feed`); совпадение держит `test_trace_refusals`.
 CHECK_FAILED_TYPE = "action_check_failed"
 
-# Стоп пользователя и лимиты — не сбой тула (K4: стоп `■`, ошибка `✕`):
-# короткий статус вместо длинного error.message, строка вызова — «halted».
+# Стоп пользователя и лимиты — не сбой тула (K4: стоп серый `○`, ошибка
+# красный `●`): короткий статус вместо длинного error.message, строка
+# вызова — «halted».
 # Несостоявшаяся проверка судьи — не отказ: действие не оценено.
 _HALT_SUMMARIES = {
     CHECK_FAILED_TYPE: "проверка не прошла — агент может повторить",

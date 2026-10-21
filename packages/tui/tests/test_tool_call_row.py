@@ -35,7 +35,7 @@ async def test_tool_call_row_initial_state():
         prefix = str(row.query_one(".trace-prefix").render())
         assert "read_file" in content
         assert "src/x.py" in content
-        assert "▸" in prefix  # running-глиф ведёт строку (prefix)
+        assert "●" in prefix  # running-глиф ведёт строку (prefix)
         assert "running" not in content  # слово убрано
 
 
@@ -59,9 +59,9 @@ async def test_tool_call_row_mutate_to_ok():
         await pilot.pause()
         content = str(row.query_one(".trace-content").render())
         prefix = str(row.query_one(".trace-prefix").render())
-        assert "✓" in prefix
+        assert "●" in prefix
         assert "312 строк" in content
-        assert "▸" not in prefix and "running" not in content
+        assert "running" not in content
 
 
 @pytest.mark.asyncio
@@ -85,7 +85,7 @@ async def test_tool_call_row_mutate_to_error():
         content = str(row.query_one(".trace-content").render())
         prefix = str(row.query_one(".trace-prefix").render())
         line = _shown_lines(row)
-        assert "✕" in prefix
+        assert "●" in prefix
         assert "ENOENT" not in content  # у ошибки хвоста нет
         assert line == "  └ ENOENT: нет файла"  # строкой под вызовом
 
@@ -176,14 +176,14 @@ async def test_tool_call_row_ok_with_empty_summary_omits_arrow():
         await pilot.pause()
         content = str(row.query_one(".trace-content").render())
         prefix = str(row.query_one(".trace-prefix").render())
-        assert "✓" in prefix
+        assert "●" in prefix
         assert " · " not in content  # хвоста нет при пустом summary
         assert "skills_load" in content
 
 
 @pytest.mark.asyncio
 async def test_tool_call_row_ok_state_uses_styled_text():
-    """OK: prefix содержит зелёный span с глифом ✓; content — dim args."""
+    """OK: prefix содержит зелёный span с глифом ●; content — dim args."""
     pytest.importorskip("textual")
     from gc_tui.widgets.tool_call_row import ToolCallRow
     from rich.text import Text
@@ -207,7 +207,7 @@ async def test_tool_call_row_ok_state_uses_styled_text():
             for s in prefix.spans
             if str(s.style).lower() == ok_color.lower()
         ]
-        assert any("✓" in seg for seg in green), f"spans={prefix.spans}"
+        assert any("●" in seg for seg in green), f"spans={prefix.spans}"
 
 
 @pytest.mark.asyncio
@@ -268,9 +268,8 @@ async def test_tool_call_row_set_result_twice_overwrites():
         prefix = str(row.query_one(".trace-prefix").render())
         line = _shown_lines(row)
         assert "updated" in line
-        assert "✕" in prefix
+        assert "●" in prefix
         assert "initial" not in content
-        assert "✓" not in prefix
 
 
 @pytest.mark.asyncio
@@ -454,7 +453,7 @@ def test_pause_resume_idempotent(monkeypatch):
 
 
 def test_running_glyph_pulses_color():
-    """▸ статичен по форме, но цвет глифа в prefix меняется между кадрами пульса."""
+    """● статичен по форме, но цвет глифа в prefix меняется между кадрами пульса."""
     from gc_tui.widgets.tool_call_row import ToolCallRow
 
     row = ToolCallRow(call_id="c1", label="t", target="")
@@ -462,12 +461,12 @@ def test_running_glyph_pulses_color():
     p0 = row._render_prefix()
     row._pulse_frame = 3
     p3 = row._render_prefix()
-    assert "▸" in p0.plain and "▸" in p3.plain
+    assert "●" in p0.plain and "●" in p3.plain
     assert [str(s.style) for s in p0.spans] != [str(s.style) for s in p3.spans]
 
 
 def test_pulse_cycle_length_is_ten():
-    """Цикл пульса ▸ = 10 кадров на 0.1с-тике (плавное дыхание ≈1.0с, 10fps):
+    """Цикл пульса ● = 10 кадров на 0.1с-тике (плавное дыхание ≈1.0с, 10fps):
     frame10 возвращается к frame0, frame5 (пик) внутри цикла отличается."""
     from gc_tui.widgets.tool_call_row import ToolCallRow
 
@@ -477,7 +476,7 @@ def test_pulse_cycle_length_is_ten():
         row._pulse_frame = frame
         p = row._render_prefix()
         return next(
-            str(s.style) for s in p.spans if "▸" in p.plain[s.start : s.end]
+            str(s.style) for s in p.spans if "●" in p.plain[s.start : s.end]
         )
 
     c0 = glyph_color(0)
@@ -521,7 +520,7 @@ def test_completed_ok_row_has_no_elapsed():
 
     row = ToolCallRow(call_id="c3", label="subagent_planner", target="x")
     row.set_result(summary="ok", outcome="ok")
-    assert "✓" in str(row._render_prefix())
+    assert "●" in str(row._render_prefix())
     assert "running" not in str(row._render_content())
 
 
@@ -530,7 +529,7 @@ def test_completed_error_row_has_no_elapsed():
 
     row = ToolCallRow(call_id="c4", label="subagent_planner", target="x")
     row.set_result(summary="boom", outcome="error")
-    assert "✕" in str(row._render_prefix())
+    assert "●" in str(row._render_prefix())
     assert "running" not in str(row._render_content())
 
 
@@ -540,7 +539,7 @@ def test_refresh_running_elapsed_noop_after_completion():
     row = ToolCallRow(call_id="c5", label="subagent_planner", target="x")
     row.set_result(summary="ok", outcome="ok")
     row.refresh_running_elapsed()  # не возвращает в running
-    assert "✓" in str(row._render_prefix())
+    assert "●" in str(row._render_prefix())
 
 
 @pytest.mark.asyncio
@@ -580,7 +579,7 @@ def test_mark_interrupted_renders_dim_terminal_state():
 
     row = ToolCallRow(call_id="c6", label="subagent_critic", target="t")
     row.mark_interrupted()
-    assert "·" in str(row._render_prefix())
+    assert "○" in str(row._render_prefix())
     content = str(row._render_content())
     assert "прервано" in content
     assert "running" not in content
@@ -592,7 +591,7 @@ def test_mark_interrupted_noop_after_result_and_idempotent():
     row = ToolCallRow(call_id="c7", label="read_file", target="p")
     row.set_result(summary="312 строк", outcome="ok")
     row.mark_interrupted()  # после результата — no-op
-    assert "✓" in str(row._render_prefix())
+    assert "●" in str(row._render_prefix())
     row2 = ToolCallRow(call_id="c8", label="read_file", target="p")
     row2.mark_interrupted()
     row2.mark_interrupted()  # повторный вызов — no-op

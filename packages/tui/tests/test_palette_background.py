@@ -28,6 +28,7 @@ _FIXED_CSS = {
     "olive": "#8FA05A",
     "err": "#C75C54",
     "warn": "#f0883e",
+    "refused": "#8a522d",
     "info": "#58a6ff",
     "brand": "#9A6DD7",
     "band-bg": "#1f2128",
@@ -124,6 +125,13 @@ def test_apply_background_recomputes_surfaces():
     assert DIFF_ADD_BG == "#385551"  # #253f37 + (#212733 − #0E1119)
     assert PULSE_SHADES != sync_guards._PREVIOUS_RAMPS["PULSE_SHADES"]
     assert palette.css_variables()["band-bg"] == BAND_BG
+
+
+def test_refused_is_muted_warn_on_terminal_background():
+    """Отказ в ленте — приглушённый оранжевый: примесь WARN к фону."""
+    palette.apply_background((0x21, 0x27, 0x33))
+    assert palette.REFUSED == palette._mix("#212733", palette.WARN, 0.55)
+    assert palette.css_variables()["refused"] == palette.REFUSED
 
 
 def test_bg_derived_exact_at_fixed_background():

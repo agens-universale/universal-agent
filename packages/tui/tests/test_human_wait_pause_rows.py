@@ -34,7 +34,7 @@ async def test_human_wait_pauses_nested_rows(tmp_path):
 
         scr._apply_human_wait(False)
         assert nested._pulse_timer is not None
-        assert "▸" in nested._prefix_static.content.plain
+        assert "●" in nested._prefix_static.content.plain
         assert root._pulse_timer is not None
 
 
