@@ -40,11 +40,14 @@ class _Overlay(Widget):
 
     def _scroll_by(self, event: events.MouseEvent, step: int) -> None:
         # Как колесо над самой лентой: шаг — чувствительность приложения.
+        # Сразу, без отсрочки: иначе `scroll_target_y` до обновления
+        # прежний, и пачка тиков колеса сливается в один шаг.
         event.stop()
         target = self._scroll_target
         target.scroll_to(
             y=target.scroll_target_y + step * self.app.scroll_sensitivity_y,
             animate=False,
+            immediate=True,
         )
 
     def on_mouse_scroll_up(self, event: events.MouseScrollUp) -> None:

@@ -363,3 +363,42 @@ async def test_click_on_detached_reply_is_ignored(tmp_path):
         scr.on_scroll_to_reply(ScrollToReply(first))
         await pilot.pause()
         assert _trace(scr).scroll_offset.y == 30
+
+
+@pytest.mark.asyncio
+async def test_wheel_burst_over_overlay_keeps_every_step(tmp_path):
+    """Три тика колеса подряд, без обновления экрана между ними, — три
+    шага ленты, а не один."""
+    from textual import events
+
+    _write_task(tmp_path, "o16")
+    async with _app(tmp_path).run_test(size=(100, 30)) as pilot:
+        scr = await _tall(pilot, "o16")
+        _, pill = _overlays(scr)
+        trace = _trace(scr)
+        await _scroll(pilot, scr, 10)
+        x, y = pill.region.offset
+        for _ in range(3):
+            pill.on_mouse_scroll_down(
+                events.MouseScrollDown(
+                    pill, 0, 0, 0, 0, 0, False, False, False, x, y
+                )
+            )
+        await pilot.pause()
+        step = pilot.app.scroll_sensitivity_y
+        assert trace.scroll_offset.y == 10 + round(3 * step)
+
+
+@pytest.mark.asyncio
+async def test_replies_cache_sees_remove_and_mount_in_one_tick(tmp_path):
+    """Реплику сняли и в том же такте смонтировали другую строку — число
+    детей прежнее, но состав реплик другой."""
+    _write_task(tmp_path, "o17")
+    async with _app(tmp_path).run_test(size=(100, 30)) as pilot:
+        scr = await _tall(pilot, "o17")
+        first, second = _replies(scr)
+        trace = _trace(scr)
+        assert scr._trace_replies(trace) == [first, second]
+        await second.remove()
+        _agent(scr, "a3", 3)
+        assert scr._trace_replies(trace) == [first]

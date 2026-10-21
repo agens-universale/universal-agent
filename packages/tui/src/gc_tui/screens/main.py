@@ -615,7 +615,7 @@ class TraceScreen(Screen):
         )
         self._last_auto_y = 0  # куда мы в прошлый раз программно прижали трейс
         # Кэш реплик ленты для липкой реплики (_trace_replies).
-        self._trace_replies_key: Optional[int] = None
+        self._trace_replies_key: Optional[tuple] = None
         self._trace_replies_cache: list = []
         # Freeze UI на время app-select (§3.2 F1): time.monotonic() первого тика,
         # где увидели Screen._selecting; None когда не selecting.
@@ -2884,11 +2884,14 @@ class TraceScreen(Screen):
 
     def _trace_replies(self, trace: VerticalScroll) -> list:
         """Реплики верхнего уровня ленты по порядку. Кэшируется только
-        состав (ключ — число детей); верх каждой читается живым при
-        поиске, поэтому сдвиг реплик кэш не портит."""
+        состав; верх каждой читается живым при поиске, поэтому сдвиг
+        реплик кэш не портит. Ключ — число детей и первый с последним:
+        точный ключ (все дети) стоил бы столько же, сколько пересборка;
+        этот ловит и снятие с монтированием в конец за один такт."""
         from gc_tui.widgets.user_reply import UserReplyContainer
 
-        key = len(trace.children)
+        children = trace.children
+        key = (len(children), children[0], children[-1]) if children else ()
         if key != self._trace_replies_key:
             self._trace_replies_key = key
             self._trace_replies_cache = [
