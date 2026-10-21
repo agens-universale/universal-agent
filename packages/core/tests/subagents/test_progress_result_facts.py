@@ -37,11 +37,36 @@ def test_mode_denial_keeps_scalar_error_fields():
     }
 
 
-def test_long_error_field_is_truncated():
-    out = {"ok": False, "error": {"reason": "слово " * 100}}
+def test_long_error_field_is_not_truncated():
+    """Факты — как есть: строку `└` из них и из вывода строит одна функция
+    потребителя, обрезка ядра развела бы живой вид и возврат в сессию."""
+    reason = "слово " * 100 + "\nвторая строка"
+    out = {"ok": False, "error": {"type": "action_blocked", "reason": reason}}
     _status, error = result_facts(out)
-    assert len(error["reason"]) <= 121
-    assert error["reason"].endswith("…")
+    assert error == {"type": "action_blocked", "reason": reason}
+
+
+def test_only_whitelisted_error_keys_are_carried():
+    out = {
+        "ok": False,
+        "error": {
+            "type": "permission_denied_by_mode",
+            "reason": "r",
+            "mode": "plan",
+            "message": "m",
+            "path": "/p",
+            "category": "mcp",
+            "guidance": "длинная подсказка модели",
+        },
+    }
+    _status, error = result_facts(out)
+    assert error == {
+        "type": "permission_denied_by_mode",
+        "reason": "r",
+        "mode": "plan",
+        "message": "m",
+        "path": "/p",
+    }
 
 
 def test_success_and_unparsable_give_nothing():

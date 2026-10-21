@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from gc_core.execution.progress import (
     QueueSubagentProgressSink,
     SubagentProgressEvent,
+    parse_tool_result_status,
+    result_facts,
+    tool_args_summary,
 )
+from gc_tui.palette import DIM, ERR, OK, REFUSED
 from gc_tui.widgets.tool_call_row import ToolCallRow
 
 
@@ -188,15 +194,6 @@ async def test_nested_stays_after_parent_result():
 # Один вывод тула (или одна промежуточная реплика) даёт и событие прогресса
 # ядра, и запись sidecar. Живой путь, возврат в сессию (plan/apply на экране)
 # и превью (`merge_nested_readonly`) рисуют одно и то же.
-
-import json  # noqa: E402
-
-from gc_core.execution.progress import (  # noqa: E402
-    parse_tool_result_status,
-    result_facts,
-    tool_args_summary,
-)
-from gc_tui.palette import DIM, ERR, OK, REFUSED  # noqa: E402
 
 _ARGS = json.dumps({"path": "a.txt", "content": "x"})
 

@@ -417,6 +417,11 @@ def parse_tool_result_status(
     return ok, brief
 
 
+#: Поля ``error``, из которых потребитель строит исход вызова: тип,
+#: причина, режим, сообщение, путь. Значения — как есть, без обрезки.
+_RESULT_ERROR_KEYS = ("type", "reason", "mode", "message", "path")
+
+
 def result_facts(
     output: Any,
 ) -> tuple[Optional[str], Optional[Dict[str, str]]]:
@@ -429,11 +434,11 @@ def result_facts(
         return None, None
     status = data.get("status")
     status = status if isinstance(status, str) and status else None
-    err = data.get("error")
+    err = data.get("error") if isinstance(data.get("error"), dict) else {}
     fields = {
-        key: _truncate_error_brief(value)
-        for key, value in (err.items() if isinstance(err, dict) else ())
-        if isinstance(key, str) and isinstance(value, str) and value.strip()
+        key: value
+        for key in _RESULT_ERROR_KEYS
+        if isinstance(value := err.get(key), str) and value.strip()
     }
     return status, fields or None
 

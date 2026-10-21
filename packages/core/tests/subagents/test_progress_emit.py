@@ -379,7 +379,8 @@ class TestToolEndResultFacts:
         )
         assert end.result_error["type"] == "write_denied_by_mode"
         assert end.result_error["mode"] == "plan"
-        assert len(end.result_error["reason"]) <= 121
+        # Факты без обрезки: живой вид равен возврату в сессию.
+        assert end.result_error["reason"] == "r" * 300
 
     def test_success_has_no_facts(self, monkeypatch):
         end = self._run(monkeypatch, json.dumps({"ok": True}))

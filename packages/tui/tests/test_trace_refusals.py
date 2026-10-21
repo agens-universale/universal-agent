@@ -226,6 +226,7 @@ _STOPS = [
     json.dumps({"ok": False, "status": "cancelled_by_user"}),
     json.dumps({"ok": False, "error": {"type": CHECK_FAILED_TYPE}}),
     _output({"type": "not_found", "message": "нет файла"}),
+    _output({"type": "action_blocked", "reason": "очень " * 30 + "\nконец"}),
 ] + [_output(error) for error, _text in _REFUSALS + _GUARD_AFTER_QUESTION]
 
 
