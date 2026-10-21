@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Mapping, MutableMapping
+from typing import Any, Dict, Mapping
 
 RUNTIME_FLAG_NAMES = frozenset(
     {"summarizing", "finalizing", "finish_gate_checking"}
@@ -25,27 +25,3 @@ def runtime_section(meta: Mapping[str, Any] | None) -> Dict[str, Any]:
         return {}
     rt = meta.get("runtime") or {}
     return dict(rt) if isinstance(rt, dict) else {}
-
-
-def merge_runtime_into_meta(
-    meta: MutableMapping[str, Any], patch: Mapping[str, Any]
-) -> None:
-    """Слить patch в ``meta['runtime']`` in-place."""
-    runtime = dict(meta.get("runtime") or {})
-    runtime.update(dict(patch))
-    meta["runtime"] = runtime
-
-
-def clear_run_flags(
-    meta: MutableMapping[str, Any], *, stale_summarizing: bool = False
-) -> None:
-    """Apply the startup reset policy to freshly read metadata."""
-    runtime = dict(meta.get("runtime") or {})
-    if stale_summarizing or runtime.get("summarizing"):
-        runtime.pop("summarizing", None)
-    runtime.pop("finalizing", None)
-    runtime.pop("finish_gate_checking", None)
-    if runtime:
-        meta["runtime"] = runtime
-    else:
-        meta.pop("runtime", None)

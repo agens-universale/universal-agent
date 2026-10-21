@@ -7,7 +7,10 @@ from gc_core.attachments.store import ImageStore
 from gc_core.security.media_roots import media_roots
 from gc_core.states import State
 from gc_testkit import as_coro
-from gc_testkit.memory_thread_store import MemoryThreadStore
+from gc_testkit.memory_thread_store_v2 import (
+    MemoryThreadStore,
+    MemoryThreadStoreWithFiles,
+)
 from gc_testkit.settings import make_settings
 
 
@@ -80,11 +83,7 @@ async def test_embedder_thread_store_does_not_move_images_off_the_guarded_root(
         }
     )
 
-    class _NoFiles(MemoryThreadStore):
-        write_thread_file = None
-        read_thread_file = None
-
-    ctx = await rc.acreate_run_context(cfg, thread_store=_NoFiles())
+    ctx = await rc.acreate_run_context(cfg, thread_store=MemoryThreadStore())
     assert Path(ctx.image_store.root) == media_roots(cfg)[0]
 
 
@@ -105,7 +104,7 @@ async def test_embedder_store_with_thread_files_keeps_images_inside(
             "logging.save_logs": False,
         }
     )
-    store = MemoryThreadStore()
+    store = MemoryThreadStoreWithFiles()
     ctx = await rc.acreate_run_context(cfg, thread_store=store)
     assert isinstance(ctx.image_store, StoreImageStore)
     png = (
@@ -120,8 +119,9 @@ async def test_embedder_store_with_thread_files_keeps_images_inside(
     assert is_thread_file_uri(att.path)
     assert ctx.image_store.read_for_send(att) == image.data
     assert not (tmp_path / "threads").exists()
-    store.reset("sys", "t1")
-    assert ctx.image_store.read_for_send(att) is None
+    # Байты — только в хранилище: другое хранилище по той же ссылке пусто.
+    elsewhere = StoreImageStore(MemoryThreadStoreWithFiles())
+    assert elsewhere.read_for_send(att) is None
 
 
 def test_store_with_thread_files_commits_an_attachment_staged_on_disk(
@@ -142,7 +142,7 @@ def test_store_with_thread_files_commits_an_attachment_staged_on_disk(
     staged = ImageStore(str(tmp_path / "images")).stage(
         normalize_image(png), origin="user", label="x", source="s"
     )
-    image_store = StoreImageStore(MemoryThreadStore())
+    image_store = StoreImageStore(MemoryThreadStoreWithFiles())
     assert image_store.read_for_send(staged) is not None
     committed = image_store.commit(staged, "sdk", "t1")
     assert is_thread_file_uri(committed.path)

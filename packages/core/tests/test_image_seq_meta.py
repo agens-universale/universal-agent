@@ -13,19 +13,15 @@ from gc_core.attachments.model import (
 )
 from gc_core.attachments.numbering import IMAGE_SEQ_KEY, read_image_seq
 from gc_core.thread_store import ThreadSession, load_thread_meta
+from gc_core.threads.file_store import FileThreadStore
 
 
-def _session(tmp_path):
-    return ThreadSession(
-        threads_dir=str(tmp_path),
+async def _session(tmp_path):
+    return await ThreadSession.afrom_config(
+        settings=None,
         system_id="cli",
         thread_id="t1",
-        history_messages=[],
-        known_message_keys=set(),
-        persisted_messages_count=0,
-        meta={},
-        previous_response_id=None,
-        backend_api_mode="chat_completions",
+        store=FileThreadStore(tmp_path),
     )
 
 
@@ -64,14 +60,14 @@ def _runtime(tmp_path) -> dict:
 async def test_persist_raises_image_seq_to_the_largest_number_in_the_batch(
     tmp_path,
 ):
-    ts = _session(tmp_path)
+    ts = await _session(tmp_path)
     await ts.apersist_batch([_user("m1", 3, 5)], previous_response_id=None)
 
     assert read_image_seq(load_thread_meta(str(tmp_path), "cli", "t1")) == 5
 
 
 async def test_image_seq_never_goes_down(tmp_path):
-    ts = _session(tmp_path)
+    ts = await _session(tmp_path)
     await ts.apersist_batch([_user("m1", 5)], previous_response_id=None)
     await ts.apersist_batch([_user("m2", 2)], previous_response_id=None)
 
@@ -79,7 +75,7 @@ async def test_image_seq_never_goes_down(tmp_path):
 
 
 async def test_tool_images_do_not_move_the_counter(tmp_path):
-    ts = _session(tmp_path)
+    ts = await _session(tmp_path)
     await ts.apersist_batch(
         [
             {
@@ -96,7 +92,7 @@ async def test_tool_images_do_not_move_the_counter(tmp_path):
 
 
 async def test_thread_without_images_gets_no_counter(tmp_path):
-    ts = _session(tmp_path)
+    ts = await _session(tmp_path)
     await ts.apersist_batch(
         [{"role": "user", "content": "текст", "id": "m1"}],
         previous_response_id=None,
@@ -106,7 +102,7 @@ async def test_thread_without_images_gets_no_counter(tmp_path):
 
 
 async def test_compaction_does_not_lower_image_seq(tmp_path):
-    ts = _session(tmp_path)
+    ts = await _session(tmp_path)
     await ts.apersist_batch([_user("m1", 4)], previous_response_id=None)
 
     await ts.aarchive_and_compact_summary_payload(

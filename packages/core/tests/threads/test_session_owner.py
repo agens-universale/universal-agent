@@ -14,7 +14,7 @@ from gc_core.threads.facade import Threads
 from gc_core.threads.file_store import FileThreadStore
 from gc_core.threads.instance import instance_id, session_owner
 from gc_core.threads.models import ThreadKey
-from gc_core.threads.session_port import SessionPort, attach_session_port
+from gc_core.threads.session_writer import SessionWriter
 from gc_testkit.settings import make_settings
 
 KEY = ThreadKey(system="cli", thread="t1")
@@ -46,38 +46,42 @@ async def test_each_session_owns_its_lease(tmp_path):
     store = FileThreadStore(tmp_path)
     first = await _session(tmp_path, store)
     second = await _session(tmp_path, store)
-    assert first.port is not second.port
-    await first.port.aclaim(KEY.system, KEY.thread)
+    assert first.writer.owner != second.writer.owner
+    await first.writer.aclaim()
     with pytest.raises(ThreadBusy) as busy:
-        await second.port.aclaim(KEY.system, KEY.thread)
-    assert busy.value.owner == first.port.owner
+        await second.writer.aclaim()
+    assert busy.value.owner == first.writer.owner
     assert isinstance(busy.value, OwnershipError)
 
 
 async def test_released_lease_lets_the_next_session_in(tmp_path):
     store = FileThreadStore(tmp_path)
     first = await _session(tmp_path, store)
-    await first.port.aclaim(KEY.system, KEY.thread)
-    await first.port.arelease_lease(KEY.system, KEY.thread)
+    await first.writer.aclaim()
+    await first.arelease_lease()
     second = await _session(tmp_path, store)
-    await second.port.aclaim(KEY.system, KEY.thread)
+    await second.writer.aclaim()
 
 
-async def test_attached_port_is_kept(tmp_path):
-    """Temporal прикрепляет к хранилищу свой порт (бессрочная аренда
-    workflow) — сессия пишет через него, а не через свой."""
+async def test_store_lease_policy_is_used(tmp_path):
+    """Temporal задаёт политику аренды хранилищем (бессрочная аренда
+    workflow) — сессия пишет по ней, а не своей сессией."""
     store = FileThreadStore(tmp_path)
-    durable = SessionPort(store, owner="workflow-1", ttl=None)
-    attach_session_port(store, durable)
+    store.session_lease_policy = lambda: ("workflow-1", None, None)
     session = await _session(tmp_path, store)
-    assert session.port is durable
+    assert session.writer.owner == "workflow-1"
+    assert session.writer.ttl is None
+
+
+def _runner(store):
+    return SessionWriter(store, KEY, owner="runner")
 
 
 async def test_facade_write_releases_the_lease(tmp_path):
     store = FileThreadStore(tmp_path)
     await Threads(store).append_messages(KEY, [_msg(1)])
     # Сразу после записи тред свободен: ход другой сессии его берёт.
-    await SessionPort(store, owner="next").aclaim(KEY.system, KEY.thread)
+    await SessionWriter(store, KEY, owner="next").aclaim()
 
 
 async def test_facade_discard_releases_the_lease(tmp_path):
@@ -85,12 +89,12 @@ async def test_facade_discard_releases_the_lease(tmp_path):
     threads = Threads(store)
     await threads.append_messages(KEY, [_msg(1), _msg(2)])
     assert await threads.discard_message(KEY, "m1")
-    await SessionPort(store, owner="next").aclaim(KEY.system, KEY.thread)
+    await SessionWriter(store, KEY, owner="next").aclaim()
 
 
 async def test_facade_write_into_a_busy_thread_is_thread_busy(tmp_path):
     store = FileThreadStore(tmp_path)
-    await SessionPort(store, owner="runner").aclaim(KEY.system, KEY.thread)
+    await _runner(store).aclaim()
     with pytest.raises(ThreadBusy):
         await Threads(store).append_messages(KEY, [_msg(1)])
 
@@ -99,8 +103,8 @@ async def test_busy_owner_names_a_live_foreign_lease(tmp_path):
     store = FileThreadStore(tmp_path)
     threads = Threads(store)
     assert await threads.busy_owner(KEY) is None
-    runner = SessionPort(store, owner="runner")
-    await runner.aclaim(KEY.system, KEY.thread)
+    runner = _runner(store)
+    await runner.aclaim()
     assert await threads.busy_owner(KEY) == "runner"
-    await runner.arelease_lease(KEY.system, KEY.thread)
+    await runner.arelease()
     assert await threads.busy_owner(KEY) is None

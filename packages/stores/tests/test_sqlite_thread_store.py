@@ -1,13 +1,13 @@
-"""``SQLiteThreadStore`` проходит конформанс контракта v2, порт сессии
-поверх него — старый асинхронный набор; файлы треда живут в базе."""
+"""``SQLiteThreadStore`` проходит конформанс контракта v2 и набор пути хода
+(сессия агента поверх него); файлы треда живут в базе."""
 
 import os
 
 import pytest
 from gc_core.threads.models import LeaseRequest, ThreadKey
-from gc_core.threads.session_port import SessionPort
 from gc_stores.sqlite import SQLiteThreadStore
-from gc_testkit.thread_store_conformance import assert_conforms_async
+from gc_testkit.session_checks import CHECKS as SESSION_CHECKS
+from gc_testkit.session_checks import aassert_session_works
 from gc_testkit.thread_store_conformance_v2 import CHECKS, assert_conforms
 
 KEY = ThreadKey(system="cli", thread="lite")
@@ -22,13 +22,14 @@ def test_sqlite_store_conforms(tmp_path):
     assert assert_conforms(make) == [check.__name__ for check in CHECKS]
 
 
-def test_session_port_over_sqlite_keeps_old_contract(tmp_path):
+async def test_session_over_sqlite_works(tmp_path):
     made = iter(range(1000))
 
-    def factory():
-        return SessionPort(SQLiteThreadStore(tmp_path / f"p{next(made)}.db"))
+    def make():
+        return SQLiteThreadStore(tmp_path / f"p{next(made)}.db")
 
-    assert len(assert_conforms_async(factory)) == 18
+    passed = await aassert_session_works(make)
+    assert passed == [check.__name__ for check in SESSION_CHECKS]
 
 
 async def test_thread_files_live_in_the_database(tmp_path):

@@ -33,7 +33,6 @@ _active = contextvars.ContextVar("thread_file_transaction", default=False)
 _held = contextvars.ContextVar("thread_file_lock", default=())
 _locks: dict[str, threading.RLock] = {}
 _locks_guard = threading.Lock()
-_READERS = {"load_thread_messages", "load_thread_meta", "read_subagent_trace"}
 # Служебный каталог журнала, файл счётчиков треда и суффикс квитанций.
 _STORE_DIR = ".store"
 _CONTROL_FILE = "control.json"
@@ -328,29 +327,6 @@ def _bind_identity(directory, base, identity):
                 "Canonical metadata belongs to another logical thread"
             )
     _write(marker, _json(identity))
-
-
-@contextlib.contextmanager
-def local_write_scope(directory, system_id, thread_id, *, forbid_owned=True):
-    """Запись мимо журнала (локальный ``FileThreadStore``, мета TUI).
-
-    Тред, у которого есть служебный каталог журнала, пишется под той же
-    файловой блокировкой: иначе запись между снимком журнала и его коммитом
-    оставляет ``pending.json``, и тред мёртв для воркера и views. Владелец
-    перепроверяется под блокировкой. Тред без журнала — как раньше, без
-    блокировки и без ``.store/``.
-    """
-    base = _control_path(directory, system_id, thread_id)
-    if not base.exists():
-        yield
-        return
-    with thread_read_scope(directory, system_id, thread_id):
-        if forbid_owned and durable_owner_id(directory, system_id, thread_id):
-            raise OwnershipError(
-                "Thread is owned by a durable executor (Temporal); "
-                "local writes are forbidden"
-            )
-        yield
 
 
 @contextlib.contextmanager

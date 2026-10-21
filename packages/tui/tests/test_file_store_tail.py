@@ -6,7 +6,8 @@ import json
 from pathlib import Path
 
 from gc_core.threads.file_store import FileThreadStore
-from gc_core.threads.session_port import SessionPort
+from gc_core.threads.models import ThreadKey
+from gc_testkit.thread_writes import acompact
 from gc_tui.services.stores.file_store import FileTaskStore
 
 
@@ -79,8 +80,10 @@ def test_tail_events_stream_reset_after_compaction(tmp_path):
 
     summary = {"id": "s", "role": "user", "content": "сводка"}
     asyncio.run(
-        SessionPort(FileThreadStore(tmp_path)).aarchive_and_replace(
-            "cli", "t1", [summary]
+        acompact(
+            FileThreadStore(tmp_path),
+            ThreadKey(system="cli", thread="t1"),
+            [summary],
         )
     )
 

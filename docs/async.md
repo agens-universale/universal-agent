@@ -144,22 +144,15 @@ answer = await AgentExecutor(ctx).arun(
 Синхронных двойников у ОПЕРАЦИЙ ЯДРА нет: то, что раньше стояло без
 приставки, снято вместе с порталом.
 
-Имена без приставки остались в трёх местах, и все — не двойники:
+Имена без приставки остались в двух местах, и оба — не двойники:
 
 * **контракты хранилищ v2** — `ThreadStore` (`get_thread`, `commit`,
   `append_side`, `claim`…) и `AgentStore` (`read`, `list`, `read_memory`,
   `write_memory`). Методы асинхронные, но без `a`: это публичная поверхность
   для авторов хранилищ, и она читается как обычная асинхронная библиотека
-  (как `asyncpg` или `redis.asyncio`). Ядро зовёт их через фасады
-  (`Threads`, `SessionPort`, `aread_text`…) — у тех приставка есть;
-* **прежний контракт `ThreadStoreBase`** — одиннадцать методов хранилища
-  (`load_messages`, `append_messages`, `save_meta` и остальные). Это ПУБЛИЧНАЯ
-  поверхность для встраивающего с синхронным хранилищем; ядро её не зовёт — оно
-  ходит через `a`-формы и адаптер `thread_store_async`. Убрать её значило бы
-  отменить обещание «своё хранилище можно синхронное», ради которого контракт и
-  задуман (см. `docs/sdk/thread-store-contract.md`). Рядом стоит `AsyncThreadStoreBase` для
-  встраивающего с `redis.asyncio` или `asyncpg` — это ВТОРОЙ контракт, а не
-  двойник первого.
+  (как `asyncpg` или `redis.asyncio`). Ядро зовёт их через сессию и фасады
+  (`ThreadSession`, `Threads`, `aread_text`…) — у тех приставка есть.
+  Прежний синхронный контракт `ThreadStoreBase` удалён.
 
   Методы `ThreadSession` (`from_config`, `persist_batch`,
   `archive_and_compact_summary_payload`) в этом списке раньше стояли по ошибке:
@@ -487,8 +480,7 @@ agent = await AsyncAgent.create(cfg, thread_store=MyDbStore())
 `append_side`, `claim`… с арендой, ревизией и квитанциями. Готовые —
 `FileThreadStore` (по умолчанию: ровно прежние файлы), `SQLiteThreadStore`,
 `PostgresThreadStore` (`gc-stores`). Хранилище прежнего контракта
-(`ThreadStoreBase`, синхронное или асинхронное) ядро по-прежнему принимает
-через адаптер.
+(`ThreadStoreBase`) ядро больше не принимает: проводка отвергает его сразу.
 
 Контракт, правила и конформанс-набор — **[sdk/thread-store-contract.md](sdk/thread-store-contract.md)**;
 руководство — [sdk/thread-store.md](sdk/thread-store.md).
@@ -502,14 +494,8 @@ agent = await AsyncAgent.create(cfg, thread_store=MyDbStore())
 
 Контракт v2 асинхронный целиком — клиенту базы (`asyncpg`, `redis.asyncio`)
 ничего заворачивать не нужно, ядро ждёт хранилище нативно; медленное
-хранилище цикл агента не морозит (`test_acceptance_sdk_thread_store_v2.py`,
+хранилище цикл агента не морозит (`test_acceptance_sdk_thread_store.py`,
 RTT 5 мс на вызов).
-
-Прежний контракт `ThreadStoreBase` бывает синхронным, и тогда адаптер зовёт
-его **инлайн**: синхронное сетевое хранилище блокирует цикл на каждом
-обращении (худший разрыв ≈ 16 × RTT + 20 мс), адаптер предупреждает
-`thread_store_blocking_loop`. Таблица замеров и правила прежнего контракта —
-в [sdk/thread-store-contract.md](sdk/thread-store-contract.md#прежний-контракт-threadstorebase).
 
 ## Приёмка
 

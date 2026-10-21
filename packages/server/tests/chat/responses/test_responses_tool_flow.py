@@ -2,11 +2,12 @@
 
 import json
 
-from gc_server.chat.tool_flow import ToolFlow
+from gc_core.thread_store import append_subagent_record
 from gc_core.threads.facade import Threads
 from gc_core.threads.models import ThreadKey
-from gc_core.threads.session_port import SessionPort
+from gc_server.chat.tool_flow import ToolFlow
 from gc_testkit.memory_thread_store_v2 import MemoryThreadStore
+from gc_testkit.thread_writes import acompact
 
 KEY = ThreadKey(system="responses", thread="t")
 
@@ -24,17 +25,14 @@ async def _write(threads, payloads: list[dict]) -> None:
 async def _compact_history(threads, messages):
     """Сжатие истории ходом агента: его сессия пишет и в конце хода отпускает
     тред (иначе следующая запись получила бы ThreadBusy)."""
-    port = SessionPort(threads.store)
-    await port.aarchive_and_replace(KEY.system, KEY.thread, messages)
-    await port.arelease_lease(KEY.system, KEY.thread)
+    await acompact(threads.store, KEY, messages)
 
 
 async def _sidecar(threads, records: list[dict]) -> None:
-    port = SessionPort(threads.store)
     for record in records:
-        await port.aappend_subagent_trace(
-            KEY.system,
-            KEY.thread,
+        await append_subagent_record(
+            threads.store,
+            KEY,
             parent_call_id=record["parent_call_id"],
             child_run_id=record.get("child_run_id", "child"),
             kind=record["kind"],

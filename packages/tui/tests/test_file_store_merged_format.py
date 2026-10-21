@@ -7,25 +7,23 @@
 from __future__ import annotations
 
 from gc_core.thread_store import ThreadSession, save_thread_meta
+from gc_core.threads.file_store import FileThreadStore
 from gc_tui.services.stores.file_store import FileTaskStore
 
 _SYSTEM = "cli"
 _TID = "roundtrip01"
 
 
-def _make_session(threads_dir: str) -> ThreadSession:
-    """Создать ThreadSession с минимальным конфигом."""
-    return ThreadSession(
-        threads_dir=threads_dir,
+async def _make_session(threads_dir: str) -> ThreadSession:
+    """Сессия ядра над файловым тредом, режим API — responses."""
+    session = await ThreadSession.afrom_config(
+        settings=None,
         system_id=_SYSTEM,
         thread_id=_TID,
-        history_messages=[],
-        known_message_keys=set(),
-        persisted_messages_count=0,
-        meta={},
-        previous_response_id=None,
-        backend_api_mode="responses",
+        store=FileThreadStore(threads_dir),
     )
+    session.backend_api_mode = "responses"
+    return session
 
 
 # ---------------------------------------------------------------------------
@@ -36,7 +34,7 @@ def _make_session(threads_dir: str) -> ThreadSession:
 async def test_file_store_list_tasks_reads_core_meta(tmp_path):
     """list_tasks() понимает тред, записанный сессией ядра."""
     threads_dir = str(tmp_path)
-    session = _make_session(threads_dir)
+    session = await _make_session(threads_dir)
     await session.apersist_batch(
         [{"role": "user", "content": f"m{n}"} for n in range(3)],
         previous_response_id=None,
@@ -97,7 +95,7 @@ def test_file_store_list_tasks_reads_token_usage(tmp_path):
 async def test_file_store_read_all_events_reads_core_data(tmp_path):
     """read_all_events() правильно читает записи ядра: envelope type/seq/payload."""
     threads_dir = str(tmp_path)
-    session = _make_session(threads_dir)
+    session = await _make_session(threads_dir)
 
     msgs = [
         {"role": "user", "content": "привет"},
@@ -137,7 +135,7 @@ async def test_file_store_epoch_changes_with_compaction(tmp_path):
     """Сжатие истории ядром меняет storage_epoch, а хвост отдаёт его шагом
     сжатия: экран дописывает трейс, а не начинает показ заново."""
     threads_dir = str(tmp_path)
-    session = _make_session(threads_dir)
+    session = await _make_session(threads_dir)
 
     msgs = [{"role": "user", "content": "start"}]
     await session.apersist_batch(msgs, previous_response_id=None)
@@ -171,7 +169,7 @@ async def test_file_store_epoch_changes_with_compaction(tmp_path):
 async def test_file_store_read_segments_with_core_compaction(tmp_path):
     """read_segments читает сегменты после реальной компакции через archive_and_compact."""
     threads_dir = str(tmp_path)
-    session = _make_session(threads_dir)
+    session = await _make_session(threads_dir)
 
     # Шаг 1: записываем 2 сообщения, затем компактим
     msgs1 = [
@@ -212,7 +210,7 @@ async def test_file_store_read_segments_with_core_compaction(tmp_path):
 async def test_file_store_delete_task_removes_all_files(tmp_path):
     """delete_task удаляет data + meta + pre_summary архивы."""
     threads_dir = str(tmp_path)
-    session = _make_session(threads_dir)
+    session = await _make_session(threads_dir)
 
     msgs = [{"role": "user", "content": "x"}]
     await session.apersist_batch(msgs, previous_response_id=None)

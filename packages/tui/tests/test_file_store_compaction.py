@@ -1,7 +1,7 @@
 """tail_events опознаёт сжатие и отдаёт его шагом (спека 3.1).
 
 Сжатие пишется, как его пишет ядро: одной записью хранилища
-(``SessionPort.aarchive_and_replace``) — история в архив, вместо неё сводка;
+(``Compaction`` в ``commit``) — история в архив, вместо неё сводка;
 сохранённые сообщения дописываются следом обычной записью. Промежуточных
 состояний (архив есть, сводки ещё нет) читатель не видит, поэтому и ждать
 их тикам не нужно.
@@ -18,7 +18,7 @@ from gc_core.message_policy.user_message_policy import (
 from gc_core.threads.facade import Threads, run_sync
 from gc_core.threads.file_store import FileThreadStore
 from gc_core.threads.models import ThreadKey
-from gc_core.threads.session_port import SessionPort
+from gc_testkit.thread_writes import acompact
 from gc_tui.models import TaskCursor
 from gc_tui.services.stores.file_store import FileTaskStore
 
@@ -59,24 +59,10 @@ class _Thread:
         """Сжатие ядра: история в архив, вместо неё ``messages`` (по
         умолчанию — одна сводка ``sum_<name>``)."""
         messages = list(messages) or [_summary(f"sum_{name}")]
-        self._as_owner(
-            lambda port: port.aarchive_and_replace(_SYS, _TID, messages)
-        )
+        run_sync(acompact(self.store, _KEY, messages))
 
     def replace_without_archive(self, *messages: dict) -> None:
-        self._as_owner(
-            lambda port: port.areplace_messages(_SYS, _TID, list(messages))
-        )
-
-    def _as_owner(self, write) -> None:
-        """Запись хода: под арендой треда, которую ход потом отпускает."""
-
-        async def run() -> None:
-            port = SessionPort(self.store)
-            await write(port)
-            await port.arelease_lease(_SYS, _TID)
-
-        run_sync(run())
+        run_sync(acompact(self.store, _KEY, list(messages), archive=False))
 
     def delete(self) -> None:
         run_sync(self.threads.delete(_KEY))
@@ -271,9 +257,7 @@ def test_attach_during_compaction_reads_consistent_cursor(
     async def _compact_first(self, key, streams, cursor):
         if not calls:
             calls.append(key)
-            port = SessionPort(thread.store)
-            await port.aarchive_and_replace(_SYS, _TID, [_summary("sum_S")])
-            await port.arelease_lease(_SYS, _TID)
+            await acompact(thread.store, _KEY, [_summary("sum_S")])
         return await tail(self, key, streams, cursor)
 
     monkeypatch.setattr(Threads, "tail", _compact_first)

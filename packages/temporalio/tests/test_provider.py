@@ -479,16 +479,15 @@ async def test_store_without_thread_files_disables_view_image(
 ):
     """Хранилище без файлов треда и без каталога тредов: снимки
     ``fs_view_image`` легли бы на диск воркера — инструмент выключен."""
-    from gc_testkit.memory_thread_store import MemoryThreadStore
-
-    class _NoFiles(MemoryThreadStore):
-        write_thread_file = None
-        read_thread_file = None
+    from gc_testkit.memory_thread_store_v2 import (
+        MemoryThreadStore,
+        MemoryThreadStoreWithFiles,
+    )
 
     monkeypatch.chdir(tmp_path)
     for store, disabled in (
-        (_NoFiles(), True),
-        (MemoryThreadStore(), False),
+        (MemoryThreadStore(), True),
+        (MemoryThreadStoreWithFiles(), False),
         (FileThreadStore(str(tmp_path / "threads")), False),
     ):
         provider, _ = make_provider(tmp_path, store=store)

@@ -540,10 +540,9 @@ async def test_cancelled_compaction_leaves_the_thread_readable(
     assert isinstance(session.history_messages, list)
 
     # Протухший флаг снимается на старте следующего прогона.
-    from gc_core.run_summary_coordinator import areset_stale_summarizing_flag
+    from gc_core.run_summary_coordinator import areset_run_flags
 
-    await areset_stale_summarizing_flag(session)
-    runtime = session.meta.get("runtime") or {}
-    assert not runtime.get("summarizing"), (
+    await areset_run_flags(session)
+    assert "summarizing" not in session.runtime.flags, (
         "флаг summarizing остался взведённым после отменённой компакции — TUI будет вечно показывать «сжимаю контекст»"
     )

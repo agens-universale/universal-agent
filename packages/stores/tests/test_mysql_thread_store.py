@@ -15,6 +15,8 @@ from gc_core.threads.models import (
 from gc_stores import migrations
 from gc_stores.mysql import MySQLThreadStore
 from gc_testkit.thread_store_conformance_v2 import CHECKS, assert_conforms
+from gc_testkit.session_checks import CHECKS as SESSION_CHECKS
+from gc_testkit.session_checks import aassert_session_works
 
 LATEST = migrations.latest(migrations.load("gc_stores.mysql"))
 
@@ -24,6 +26,14 @@ def test_mysql_store_conforms(mysql_databases):
         return MySQLThreadStore(mysql_databases.create(), clock=clock)
 
     assert assert_conforms(make) == [check.__name__ for check in CHECKS]
+
+
+async def test_session_over_mysql_works(mysql_databases):
+    def make():
+        return MySQLThreadStore(mysql_databases.create())
+
+    passed = await aassert_session_works(make)
+    assert passed == [check.__name__ for check in SESSION_CHECKS]
 
 
 async def test_long_thread_id_is_a_clear_error(mysql_store):

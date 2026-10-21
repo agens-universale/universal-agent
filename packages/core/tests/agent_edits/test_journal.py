@@ -6,7 +6,9 @@ from gc_core.agent_edits.snapshots import (
     SnapshotStore,
     snapshots_root,
 )
-from gc_core.thread_store import edits_journal_path, reset_thread_files
+from gc_core.thread_store import edits_journal_path
+from gc_core.threads.file_store import FileThreadStore
+from gc_core.threads.models import ThreadKey
 
 
 def make_rec(path="a.py", turn="t1", **kw):
@@ -139,32 +141,40 @@ def test_purge_thread_snapshots_removes_only_that_thread(tmp_path):
     assert alien.session_baseline("a.py") == b"old"
 
 
-def test_reset_thread_files_leaves_snapshots_alone(tmp_path):
-    """Сброс ХРАНИЛИЩА снимков не трогает: тем же `reset` ходит запасной путь
-    компакции, и снос баз там молча стёр бы право отката. Снимки убирает
-    только пользовательский сброс (`purge_thread_snapshots`)."""
-    threads_dir, _root, journal, ours, _alien = _seed_two_threads(tmp_path)
+def _delete_thread(threads_dir) -> None:
+    import asyncio
 
-    reset_thread_files(
-        str(threads_dir), system_id="cli", thread_id="demo-thread"
+    key = ThreadKey(system="cli", thread="demo-thread")
+    asyncio.run(FileThreadStore(threads_dir).delete(key, op_id="delete"))
+
+
+def test_thread_delete_leaves_snapshots_alone(tmp_path):
+    """Удаление треда ХРАНИЛИЩЕМ снимки не трогает: снос баз молча стёр бы
+    право отката. Снимки убирает только пользовательский сброс
+    (`purge_thread_snapshots`)."""
+    threads_dir, _root, journal, ours, _alien = _seed_two_threads(tmp_path)
+    (threads_dir / "data_cli_demo-thread.jsonl").write_text(
+        "", encoding="utf-8"
     )
+
+    _delete_thread(threads_dir)
 
     assert not journal.exists()
     assert ours.session_baseline("a.py") == b"old"
 
 
-def test_reset_thread_files_removes_edits_journal(tmp_path):
+def test_thread_delete_removes_edits_journal(tmp_path):
     threads_dir = tmp_path / "threads"
     threads_dir.mkdir()
+    (threads_dir / "data_cli_demo-thread.jsonl").write_text(
+        "", encoding="utf-8"
+    )
     journal_path = edits_journal_path(str(threads_dir), "cli", "demo-thread")
     EditsJournal(journal_path).append(make_rec())
     assert journal_path.exists()
 
-    deleted = reset_thread_files(
-        str(threads_dir), system_id="cli", thread_id="demo-thread"
-    )
+    _delete_thread(threads_dir)
 
-    assert str(journal_path) in deleted
     assert not journal_path.exists()
 
 

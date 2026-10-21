@@ -189,11 +189,14 @@ def worker_kwargs(config, native, threads, *, queue=None):
 
 
 async def thread_messages(store, system, thread):
-    """История треда глазами сессии (порт хранилища): у записей без ``id``
-    он синтезирован — как при чтении старым файловым хранилищем."""
-    from gc_core.thread_store_async import athread_store
+    """История треда глазами сессии: у записей без ``id`` он синтезирован —
+    как при чтении старым файловым хранилищем."""
+    from gc_core.threads.history import HISTORY, messages_and_keys
+    from gc_core.threads.models import ThreadKey
 
-    return await athread_store(store).aload_messages(system, thread)
+    key = ThreadKey(system=system, thread=thread)
+    entries = await store.read_stream(key, HISTORY)
+    return messages_and_keys(store, key, entries)[0]
 
 
 async def thread_meta(store, system, thread):
@@ -217,29 +220,39 @@ async def thread_owner(store, system, thread):
 async def seed_messages(store, system, thread, messages):
     """Засеять историю треда (как будто её вёл локальный режим) и отпустить
     аренду: сессия Temporal возьмёт тред без захвата."""
+    from gc_core.threads.facade import Threads
     from gc_core.threads.models import ThreadKey
-    from gc_core.threads.session_port import SessionPort
 
-    port = SessionPort(store, owner="seed")
-    await port.aappend_messages(system, thread, list(messages))
     key = ThreadKey(system=system, thread=thread)
-    record = await store.get_thread(key)
-    if record is not None and record.lease is not None:
-        await store.release(key, record.lease)
+    await Threads(store, owner="seed").append_messages(key, list(messages))
 
 
 async def seed_meta(store, system, thread, meta):
     """Засеять meta треда (режим, план — до первого хода) и отпустить
     аренду: сессия Temporal возьмёт тред без захвата."""
-    from gc_core.threads.session_port import SessionPort
+    from gc_core.threads.meta_map import parts_from_meta
+    from gc_core.threads.models import ThreadKey
+    from gc_core.threads.session_writer import SessionWriter
 
-    port = SessionPort(store, owner="seed")
-    await port.asave_meta(system, thread, meta)
-    await port.arelease_lease(system, thread)
+    parts = parts_from_meta(meta)
+    key = ThreadKey(system=system, thread=thread)
+    writer = SessionWriter(store, key, owner="seed")
+    await writer.aclaim()
+    await writer.acommit(
+        set_state=parts.state,
+        set_usage=parts.usage,
+        set_info=parts.info,
+        set_runtime=parts.runtime,
+        set_extra=parts.extra,
+    )
+    await writer.arelease()
 
 
 async def thread_trace(store, system, thread):
-    """Трасса субагентов треда в прежней форме записей (порт сессии)."""
-    from gc_core.thread_store_async import athread_store
+    """Трасса субагентов треда в прежней форме записей."""
+    from gc_core.threads.facade import Threads
+    from gc_core.threads.models import ThreadKey
 
-    return await athread_store(store).aread_subagent_trace(system, thread)
+    key = ThreadKey(system=system, thread=thread)
+    entries = await Threads(store).subagent_events(key)
+    return [{"ts": e.ts, "seq": e.seq, **e.data} for e in entries]

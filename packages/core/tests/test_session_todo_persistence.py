@@ -2,7 +2,11 @@ from gc_core.persistence.schema import (
     normalize_session_todo,
     serialize_shared_block,
 )
-from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
+from gc_testkit.session_meta import (
+    merge_shared_into_meta,
+    merge_state_into_meta,
+    shared_from_meta,
+)
 from gc_core.states import SharedStateData
 from gc_testkit import run_coro
 from gc_testkit.settings import fake_ctx
@@ -44,16 +48,16 @@ def test_serialize_shared_block_includes_session_todo():
 
 def test_shared_from_meta_round_trip():
     shared = SharedStateData(session_todo=list(ITEMS))
-    meta = ThreadMetaMapper.merge_shared_into_meta({}, shared)
-    restored = ThreadMetaMapper.shared_from_meta(meta)
+    meta = merge_shared_into_meta({}, shared)
+    restored = shared_from_meta(meta)
     assert restored is not None
     assert restored.session_todo == ITEMS
 
 
 def test_shared_from_meta_without_session_todo_is_empty_list():
     shared = SharedStateData(working_memory={"state": "note"})
-    meta = ThreadMetaMapper.merge_shared_into_meta({}, shared)
-    restored = ThreadMetaMapper.shared_from_meta(meta)
+    meta = merge_shared_into_meta({}, shared)
+    restored = shared_from_meta(meta)
     assert restored is not None
     assert restored.session_todo == []
 
@@ -66,7 +70,11 @@ def test_session_todo_survives_compaction_via_post_run_heal():
 
     Известный pre-existing разрыв (обрыв рана до heal) — см. память
     compaction-drops-shared-fields; тут пиннится именно нормальный путь."""
-    from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
+    from gc_testkit.session_meta import (
+        merge_shared_into_meta,
+        merge_state_into_meta,
+        shared_from_meta,
+    )
     from gc_core.states import SharedStateData, State
 
     state = State(
@@ -87,7 +95,7 @@ def test_session_todo_survives_compaction_via_post_run_heal():
         "shared": {"working_memory": {"state": "прогресс"}, "notes_md": ""}
     }
 
-    healed = ThreadMetaMapper.merge_state_into_meta(truncated_meta, state)
+    healed = merge_state_into_meta(truncated_meta, state)
 
     assert healed["shared"]["session_todo"] == ITEMS
 

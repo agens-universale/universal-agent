@@ -8,7 +8,7 @@ from gc_core.intent_log import (
 )
 from gc_core.intent_log.serialize import LEGACY_LOAD_TS
 from gc_core.persistence.schema import STATE_SCHEMA_VERSION
-from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
+from gc_testkit.session_meta import merge_state_into_meta, shared_from_meta
 from gc_core.states import State
 from gc_core.thread_store import load_thread_meta, save_thread_meta
 
@@ -54,7 +54,7 @@ def test_merge_state_into_meta_writes_structured_intent_and_seq():
     state.current_user_intent = [_open_record()]
     state.user_turn_seq = 3
 
-    meta = ThreadMetaMapper.merge_state_into_meta({}, state)
+    meta = merge_state_into_meta({}, state)
 
     assert meta["state_schema_version"] == STATE_SCHEMA_VERSION
     assert meta["user_turn_seq"] == 3
@@ -112,7 +112,7 @@ def test_legacy_string_intent_meta_rewrites_on_persist():
     state = _make_state()
     state.init_user_intent_log(["closed line"])
     state.infer_user_turn_seq_if_missing()
-    meta = ThreadMetaMapper.merge_state_into_meta({}, state)
+    meta = merge_state_into_meta({}, state)
     assert meta["user_intent_log"][0]["action"] == ACTION_USER_ASK
     assert isinstance(meta["user_intent_log"][0]["content"], str)
     assert meta["user_turn_seq"] == 1
@@ -123,12 +123,12 @@ def test_meta_has_persisted_agent_state_recognizes_structured_intent():
         "state_schema_version": STATE_SCHEMA_VERSION,
         "user_intent_log": serialize_for_meta([_closed_record()]),
     }
-    shared = ThreadMetaMapper.shared_from_meta(meta)
+    shared = shared_from_meta(meta)
     assert shared is None
 
     state = _make_state()
     state.init_user_intent_log(meta["user_intent_log"])
-    merged = ThreadMetaMapper.merge_state_into_meta(meta, state)
+    merged = merge_state_into_meta(meta, state)
     assert merged["user_intent_log"][0]["content"] == "closed turn"
 
 
@@ -139,7 +139,7 @@ def test_thread_meta_file_roundtrip_intent_wm_seq(tmp_path):
     state.current_user_intent = [_open_record(turn=2)]
     state.user_turn_seq = 1
 
-    meta = ThreadMetaMapper.merge_state_into_meta(
+    meta = merge_state_into_meta(
         {"created_at": FIXED_TS},
         state,
     )
@@ -150,7 +150,7 @@ def test_thread_meta_file_roundtrip_intent_wm_seq(tmp_path):
     restored.init_user_intent_log(loaded["user_intent_log"])
     restored.init_current_user_intent(loaded["current_user_intent"])
     restored.init_user_turn_seq(loaded["user_turn_seq"])
-    shared = ThreadMetaMapper.shared_from_meta(loaded)
+    shared = shared_from_meta(loaded)
     assert shared is not None
     restored.shared = shared
 

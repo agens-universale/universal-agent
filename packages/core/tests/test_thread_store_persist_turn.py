@@ -117,9 +117,9 @@ async def test_compaction_flushes_deferred_steps_first():
     await session.aarchive_and_compact_summary_payload(
         {"summary_message_content": "compressed", "dialog_steps_offset": 1}
     )
-    # Несохранённый шаг — сначала; затем история заменяется сводкой и
-    # отдельной записью — состояние после сжатия (как локально на v2).
-    assert store.commits == ["persist", "compact", "meta"]
+    # Несохранённый шаг — сначала; затем одной записью история заменяется
+    # сводкой вместе с состоянием после сжатия.
+    assert store.commits == ["persist", "compact"]
     record = await store.get_thread(KEY)
     archived = await store.read_archive(KEY, record.archives[0].id)
     assert [e.data["content"] for e in archived] == ["step 0"]

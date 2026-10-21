@@ -134,14 +134,17 @@ async def test_thread_run_elsewhere_is_a_clear_refusal(
     """Тред ведёт другой процесс (окно gc-ua, другой gc-cli): отказ «тред
     занят» и код 1, а не трейсбек."""
     from gc_core.threads.file_store import FileThreadStore
-    from gc_core.threads.session_port import SessionPort
+    from gc_core.threads.models import ThreadKey
+    from gc_core.threads.session_writer import SessionWriter
 
     scripted_model.install(monkeypatch)
     config = _config(tmp_path, {})
-    other = SessionPort(
-        FileThreadStore(str(tmp_path / "threads")), owner="tui/1/abcd1234"
+    other = SessionWriter(
+        FileThreadStore(str(tmp_path / "threads")),
+        ThreadKey(system="cli", thread="t1"),
+        owner="tui/1/abcd1234",
     )
-    await other.aclaim("cli", "t1")
+    await other.aclaim()
     assert await run_cli(config, "-t", "t1") == 1
     err = capsys.readouterr().err
     assert "занят" in err and "tui/1/abcd1234" in err

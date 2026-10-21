@@ -3,12 +3,12 @@
 import json
 import os
 
+from gc_acp.tool_flow import ToolFlow, report_from_record
+from gc_core.thread_store import append_subagent_record
 from gc_core.threads.facade import Threads
 from gc_core.threads.models import ThreadKey
-from gc_core.threads.session_port import SessionPort
 from gc_testkit.memory_thread_store_v2 import MemoryThreadStore
-
-from gc_acp.tool_flow import ToolFlow, report_from_record
+from gc_testkit.thread_writes import acompact
 
 KEY = ThreadKey(system="acp", thread="s")
 
@@ -43,15 +43,13 @@ async def _write(threads, *messages):
 async def _compact_history(threads, messages):
     """Сжатие истории ходом агента: его сессия пишет и в конце хода отпускает
     тред (иначе следующая запись получила бы ThreadBusy)."""
-    port = SessionPort(threads.store)
-    await port.aarchive_and_replace(KEY.system, KEY.thread, messages)
-    await port.arelease_lease(KEY.system, KEY.thread)
+    await acompact(threads.store, KEY, messages)
 
 
 async def _subagent(threads, kind, payload):
-    await SessionPort(threads.store).aappend_subagent_trace(
-        KEY.system,
-        KEY.thread,
+    await append_subagent_record(
+        threads.store,
+        KEY,
         parent_call_id="sub",
         child_run_id="child",
         kind=kind,

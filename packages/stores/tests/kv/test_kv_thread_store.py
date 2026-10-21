@@ -17,6 +17,8 @@ from gc_core.threads.models import (
 from gc_stores.kv.memory import KvFault, MemoryKV
 from gc_stores.kv.thread_store import KvThreadStore
 from gc_testkit.thread_store_conformance_v2 import CHECKS, assert_conforms
+from gc_testkit.session_checks import CHECKS as SESSION_CHECKS
+from gc_testkit.session_checks import aassert_session_works
 
 KEY = ThreadKey(system="cli", thread="t")
 TTL = timedelta(minutes=5)
@@ -27,6 +29,11 @@ def test_kv_store_conforms():
         return KvThreadStore(MemoryKV(), clock=clock)
 
     assert assert_conforms(make) == [check.__name__ for check in CHECKS]
+
+
+async def test_session_over_kv_works():
+    passed = await aassert_session_works(lambda: KvThreadStore(MemoryKV()))
+    assert passed == [check.__name__ for check in SESSION_CHECKS]
 
 
 def _crash_at(operation: str, marker: str):

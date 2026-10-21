@@ -33,6 +33,12 @@ CoreStream = Literal[
     "messages", "subagent_events", "edits", "inbox", "control"
 ]
 CORE_STREAMS: frozenset[str] = frozenset(get_args(CoreStream))
+#: Входящий поток треда: сообщения в идущий или следующий ход с любого
+#: процесса (``Threads.submit``).
+INBOX = "inbox"
+#: Управляющий поток треда: отмена хода с любого процесса
+#: (``Threads.request_cancel``).
+CONTROL = "control"
 RunFlag = Literal["summarizing", "finalizing", "finish_gate_checking"]
 TurnState = Literal["idle", "running", "interrupted"]
 

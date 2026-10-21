@@ -15,6 +15,8 @@ from gc_testkit.agent_store_conformance import (
     seed_store,
 )
 from gc_testkit.thread_store_conformance_v2 import CHECKS, assert_conforms
+from gc_testkit.session_checks import CHECKS as SESSION_CHECKS
+from gc_testkit.session_checks import aassert_session_works
 
 KEY = ThreadKey(system="s", thread="t")
 
@@ -36,6 +38,16 @@ def test_s3_thread_store_conforms(s3_config, s3_prefixes):
         )
 
     assert assert_conforms(make) == [check.__name__ for check in CHECKS]
+
+
+async def test_session_over_s3_works(s3_config, s3_prefixes):
+    def make():
+        return S3ThreadStore(
+            s3_config["bucket"], **_options(s3_config, s3_prefixes.new())
+        )
+
+    passed = await aassert_session_works(make)
+    assert passed == [check.__name__ for check in SESSION_CHECKS]
 
 
 async def test_s3_agent_store_conforms(s3_config, s3_prefixes):

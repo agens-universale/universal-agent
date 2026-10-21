@@ -17,9 +17,12 @@ from datetime import timedelta
 from typing import Any
 
 from gc_core.plan_store import normalize_plan_block
+from gc_core.threads.history import messages_and_keys
 from gc_core.threads.instance import session_owner
 from gc_core.threads.meta_map import meta_from_record
 from gc_core.threads.models import (
+    CONTROL,
+    INBOX,
     JsonObject,
     Receipt,
     SideChange,
@@ -28,7 +31,7 @@ from gc_core.threads.models import (
     ThreadQuery,
     ThreadRecord,
 )
-from gc_core.threads.session_port import CONTROL, INBOX, SessionPort
+from gc_core.threads.session_writer import SessionWriter
 from gc_core.threads.store import ThreadStore
 
 _HISTORY = "messages"
@@ -67,7 +70,17 @@ class Threads:
 
     def __init__(self, store: ThreadStore, *, owner: str | None = None):
         self.store = store
-        self._port = SessionPort(store, owner=owner or session_owner())
+        self._owner = owner or session_owner()
+
+    async def _owned(self, key: ThreadKey, work):
+        """Запись под своей арендой: взять тред, ``work(writer)``, отпустить.
+        Тред, занятый ходом другого владельца, — ``ThreadBusy``."""
+        writer = SessionWriter(self.store, key, owner=self._owner)
+        await writer.aclaim()
+        try:
+            return await work(writer)
+        finally:
+            await writer.arelease()
 
     @classmethod
     def from_settings(cls, settings: Any) -> Threads:
@@ -274,12 +287,22 @@ class Threads:
     async def append_messages(self, key: ThreadKey, messages) -> int:
         """Дописать сообщения в историю (аренда и повторы — как у сессии);
         уже сохранённые не повторяются. Возвращает, сколько записано."""
-        try:
-            return await self._port.aappend_messages(
-                key.system, key.thread, list(messages)
-            )
-        finally:
-            await self._port.arelease_lease(key.system, key.thread)
+        from gc_core.execution.message_keys import make_message_key
+
+        async def work(writer: SessionWriter) -> int:
+            entries = await self.store.read_stream(key, _HISTORY)
+            _saved, known = messages_and_keys(self.store, key, entries)
+            fresh, seen = [], set(known)
+            for message in messages:
+                message_key = make_message_key(message)
+                if message_key not in seen:
+                    fresh.append(message)
+                    seen.add(message_key)
+            if fresh:
+                await writer.acommit(append_messages=fresh)
+            return len(fresh)
+
+        return await self._owned(key, work)
 
     async def discard_message(
         self,
@@ -291,12 +314,15 @@ class Threads:
         """Удалить сообщение. ``recount(история) -> {"live_…": …}`` —
         пересчитать объём живой истории в ``runtime`` (остальное в нём —
         как было)."""
-        try:
-            removed = await self._port.adiscard_message(
-                key.system, key.thread, message_id
-            )
-        finally:
-            await self._port.arelease_lease(key.system, key.thread)
+
+        async def work(writer: SessionWriter) -> bool:
+            entries = await self.store.read_stream(key, _HISTORY)
+            if not any(e.data.get("id") == message_id for e in entries):
+                return False
+            await writer.acommit(discard_message_ids=[message_id])
+            return True
+
+        removed = await self._owned(key, work)
         record = await self.store.get_thread(key) if removed else None
         if record is not None and recount is not None:
             messages = [entry.data for entry in await self.history(key)]
@@ -318,18 +344,30 @@ class Threads:
         один раз сообщит ей, что плана больше нет; файл плана для человека
         (возможность файлового хранилища) удаляется.
         """
-        meta = await self._port.aload_meta(key.system, key.thread)
-        shared = dict(meta.get("shared") or {})
-        if not normalize_plan_block(shared.get("plan")):
-            return False
-        shared.pop("plan", None)
-        shared["plan_removed_notice"] = True
-        try:
-            await self._port.asave_meta(
-                key.system, key.thread, {**meta, "shared": shared}
+
+        async def has_plan() -> bool:
+            record = await self.store.get_thread(key)
+            return record is not None and bool(
+                normalize_plan_block(record.state.plan)
             )
-        finally:
-            await self._port.arelease_lease(key.system, key.thread)
+
+        # Плана нет — ответ без аренды (тред может вести чужой ход).
+        if not await has_plan():
+            return False
+
+        async def work(writer: SessionWriter) -> bool:
+            record = await self.store.get_thread(key)
+            if record is None or not normalize_plan_block(record.state.plan):
+                return False
+            state = record.state.model_copy(
+                update={"plan": None, "plan_removed_notice": True}
+            )
+            state.__pydantic_fields_set__.discard("plan")
+            await writer.acommit(set_state=state)
+            return True
+
+        if not await self._owned(key, work):
+            return False
         drop = getattr(self.store, "delete_plan_file", None)
         if callable(drop):
             await drop(key)

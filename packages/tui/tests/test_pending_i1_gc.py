@@ -45,34 +45,28 @@ def test_wire_match_falls_back_to_meta_wire_content():
 
 
 async def test_set_tui_finalizing_does_not_resurrect_cleared_pending(tmp_path):
-    """TUI снял pending с диска → set_tui_* их не возвращает (I1)."""
+    """TUI снял pending с диска → флаг хода их не возвращает (I1): сессия
+    пишет только живой статус, секцию TUI не трогает."""
     from gc_core.run_summary_coordinator import aset_tui_finalizing
-    from gc_core.thread_store import (
-        ThreadSession,
-        save_thread_meta,
-        update_tui_meta,
-    )
+    from gc_core.thread_store import ThreadSession
+    from gc_core.threads.facade import Threads
+    from gc_core.threads.file_store import FileThreadStore
+    from gc_core.threads.models import ThreadKey
 
     tid = "t1"
-    ts = ThreadSession(
-        threads_dir=str(tmp_path),
+    key = ThreadKey(system="cli", thread=tid)
+    threads = Threads(FileThreadStore(tmp_path))
+    stale = {"client_id": "stale", "content": "x", "status": "pending"}
+    await threads.update_frontend(
+        key, "tui", {"pending_user_messages": [stale]}
+    )
+    ts = await ThreadSession.afrom_config(
+        settings=None,
         system_id="cli",
         thread_id=tid,
-        history_messages=[],
-        known_message_keys=set(),
-        persisted_messages_count=0,
-        meta={
-            "tui": {
-                "pending_user_messages": [
-                    {"client_id": "stale", "content": "x", "status": "pending"}
-                ]
-            }
-        },
-        previous_response_id=None,
-        backend_api_mode="chat_completions",
+        store=FileThreadStore(tmp_path),
     )
-    save_thread_meta(str(tmp_path), "cli", tid, ts.meta)
-    update_tui_meta(str(tmp_path), "cli", tid, {"pending_user_messages": []})
+    await threads.update_frontend(key, "tui", {"pending_user_messages": []})
 
     await aset_tui_finalizing(ts, True)
 
@@ -81,39 +75,6 @@ async def test_set_tui_finalizing_does_not_resurrect_cleared_pending(tmp_path):
     )
     assert (meta.get("runtime") or {}).get("finalizing") is True
     assert (meta.get("tui") or {}).get("pending_user_messages") == []
-
-
-def test_patch_runtime_flag_preserves_disk_tui(tmp_path):
-    """Канон I1: runtime flag не воскрешает tui.pending."""
-    from gc_core.thread_store import (
-        patch_runtime_flag,
-        save_thread_meta,
-        update_tui_meta,
-    )
-
-    tid = "t2"
-    session_meta = {
-        "tui": {"pending_user_messages": [{"client_id": "stale"}]},
-    }
-    save_thread_meta(str(tmp_path), "cli", tid, session_meta)
-    update_tui_meta(str(tmp_path), "cli", tid, {"pending_user_messages": []})
-
-    patch_runtime_flag(
-        str(tmp_path),
-        "cli",
-        tid,
-        "summarizing",
-        active=True,
-        session_meta=session_meta,
-    )
-
-    meta = json.loads(
-        (tmp_path / f"meta_cli_{tid}.json").read_text(encoding="utf-8")
-    )
-    assert (meta.get("runtime") or {}).get("summarizing") is True
-    assert (meta.get("tui") or {}).get("pending_user_messages") == []
-    assert (session_meta.get("runtime") or {}).get("summarizing") is True
-    assert session_meta.get("tui", {}).get("pending_user_messages") == []
 
 
 @pytest.mark.asyncio

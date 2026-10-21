@@ -25,10 +25,11 @@ from gc_core.message_policy.user_message_policy import (
     TECHNICAL_TYPE_DIALOG_SUMMARY,
     wrap_technical_user_content,
 )
+from gc_core.thread_store import append_subagent_record
 from gc_core.threads.facade import Threads, run_sync
 from gc_core.threads.file_store import FileThreadStore
 from gc_core.threads.models import ThreadKey
-from gc_core.threads.session_port import SessionPort
+from gc_testkit.thread_writes import acompact
 from gc_testkit.tui_support import tui_settings
 from gc_tui.app import TuiApp
 from gc_tui.screens.main import TraceScreen
@@ -130,9 +131,7 @@ class _Thread:
         summary = _summary(f"sum_{suffix}", f"сводка {suffix}")
 
         def compact() -> None:
-            self._as_owner(
-                lambda port: port.aarchive_and_replace(_SYS, _TID, [summary])
-            )
+            run_sync(acompact(self.store, _KEY, [summary]))
 
         def keep() -> None:
             if preserved:
@@ -142,25 +141,13 @@ class _Thread:
 
     def reset(self) -> None:
         """История заменена без архива."""
-        self._as_owner(lambda port: port.areplace_messages(_SYS, _TID, []))
+        run_sync(acompact(self.store, _KEY, [], archive=False))
 
     def delete(self) -> None:
         run_sync(self.threads.delete(_KEY))
 
     def subagent_record(self, **record) -> None:
-        self._as_owner(
-            lambda port: port.aappend_subagent_trace(_SYS, _TID, **record)
-        )
-
-    def _as_owner(self, write) -> None:
-        """Запись хода: под арендой треда, которую ход потом отпускает."""
-
-        async def run() -> None:
-            port = SessionPort(self.store)
-            await write(port)
-            await port.arelease_lease(_SYS, _TID)
-
-        run_sync(run())
+        run_sync(append_subagent_record(self.store, _KEY, **record))
 
 
 def _compact_ticking(thread: _Thread, scr, suffix: str, *preserved) -> None:

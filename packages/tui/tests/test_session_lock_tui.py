@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 import pytest
-from gc_core.thread_store import append_new_thread_messages
+from gc_testkit.develop_writer import append_new_thread_messages
 from gc_tui.services.session_lock import BUSY_MESSAGE, lock_path, try_acquire
 
 

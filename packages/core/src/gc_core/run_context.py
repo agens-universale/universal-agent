@@ -416,9 +416,9 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
         agent_store=agent_store,
     )
     if thread_store is not None:
-        from gc_core.thread_store_async import athread_store
+        from gc_core.threads.store import require_thread_store
 
-        athread_store(thread_store)
+        require_thread_store(thread_store)
     # Хранилище агента — там же и по той же причине: до дискавери.
     if agent_store is not None:
         check_agent_store(agent_store)
@@ -699,9 +699,9 @@ def _finish_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING
     # object»: сообщение верное, но указывает не туда, и половина обращений
     # при этом вообще не падала, а теряла запись без ошибки и без лога.
     if thread_store is not None:
-        from gc_core.thread_store_async import athread_store
+        from gc_core.threads.store import require_thread_store
 
-        athread_store(thread_store)
+        require_thread_store(thread_store)
 
     tools_data, tools_spec, tools_description, mcp_status = tools
     effective_run_id = prep.run_id

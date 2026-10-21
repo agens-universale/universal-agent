@@ -8,7 +8,6 @@ from gc_core.persistence.schema import (
     STATE_SCHEMA_VERSION,
     serialize_shared_block,
 )
-from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
 from gc_core.plan_store import (
     PLAN_STATUS_LABELS,
     PLAN_STATUSES,
@@ -16,10 +15,11 @@ from gc_core.plan_store import (
     normalize_plan_block,
     now_stamp,
 )
+from gc_testkit.session_meta import shared_from_meta
 
 
 def _restore(block):
-    return ThreadMetaMapper.shared_from_meta(
+    return shared_from_meta(
         {"state_schema_version": STATE_SCHEMA_VERSION, "shared": block}
     )
 
@@ -87,13 +87,16 @@ def test_labels_and_accessors_for_frontends():
 
 
 async def _seed(store, shared):
-    from gc_core.threads.session_port import SessionPort
+    from gc_core.persistence.session_state import session_with_shared
+    from gc_core.threads.models import SessionState, ThreadKey
+    from gc_core.threads.session_writer import SessionWriter
 
-    port = SessionPort(store)
-    await port.asave_meta(
-        "cli", "t1", {"shared": serialize_shared_block(shared)}
+    writer = SessionWriter(
+        store, ThreadKey(system="cli", thread="t1"), owner="seed"
     )
-    await port.arelease_lease("cli", "t1")
+    await writer.aclaim()
+    await writer.acommit(set_state=session_with_shared(SessionState(), shared))
+    await writer.arelease()
 
 
 async def test_clearing_the_plan_in_session_meta(tmp_path):

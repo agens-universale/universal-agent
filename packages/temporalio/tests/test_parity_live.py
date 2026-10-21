@@ -24,7 +24,7 @@ from gc_core.agent_executor import AgentExecutor
 from gc_core.execution.contracts import ToolResult
 from gc_core.run_context import acreate_run_context
 from gc_core.settings import LoadedSettings, RuntimeEnv
-from gc_core.thread_store_file import FileThreadStore
+from gc_core.threads.file_store import FileThreadStore
 from gc_core.utils.logging_module import release_run_logger
 from gc_core_temporalio.contracts import ActivityCall, RunRequest, UserMessage
 from gc_core_temporalio.provider import WorkerConfig
@@ -416,14 +416,10 @@ def normalize(trace, workspace):
 
 
 async def snapshot(answer, requests, store, workspace):
-    """Тред и ответы прогона; локальная сторона — старое файловое хранилище
-    (синхронное), Temporal — хранилище v2 воркера."""
-    if callable(getattr(store, "load_messages", None)):
-        messages = store.load_messages("test", "parity")
-        meta = store.load_meta("test", "parity")
-    else:
-        messages = await thread_messages(store, "test", "parity")
-        meta = await thread_meta(store, "test", "parity")
+    """Тред и ответы прогона: локальная сторона и Temporal читаются одним
+    путём — хранилище тредов v2."""
+    messages = await thread_messages(store, "test", "parity")
+    meta = await thread_meta(store, "test", "parity")
     return normalize(
         {
             "answer": answer,

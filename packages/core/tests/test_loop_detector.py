@@ -1134,7 +1134,7 @@ def test_app_config_wires_loop_detector():
 
 
 def test_thread_meta_does_not_persist_loop_window():
-    from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
+    from gc_testkit.session_meta import merge_state_into_meta, shared_from_meta
     from gc_core.states import State
 
     constructor = {
@@ -1150,12 +1150,10 @@ def test_thread_meta_does_not_persist_loop_window():
     state = State(**constructor)
     state.loop_detector_window = ["fp"]
     state.loop_detector_pending = [{"tool": "x", "args": {}}]
-    payload = ThreadMetaMapper.merge_state_into_meta({}, state)
+    payload = merge_state_into_meta({}, state)
     assert "loop_detector_window" not in payload
     assert "loop_detector_pending" not in payload
-    restored = State(
-        **constructor, shared=ThreadMetaMapper.shared_from_meta(payload)
-    )
+    restored = State(**constructor, shared=shared_from_meta(payload))
     assert restored.loop_detector_window == []
     assert restored.loop_detector_pending == []
 

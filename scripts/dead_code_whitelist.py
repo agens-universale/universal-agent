@@ -92,3 +92,8 @@ _.request_cancel
 _.get_info
 _.get_info_for_dispatch
 _.delete_info
+
+# Щуп файла истории формата develop — его зовут только тесты совместимости;
+# уезжает в gc_testkit следующим коммитом (массовая правка импортов тестов
+# отдельно). packages/core/src/gc_core/thread_store.py.
+load_thread_messages

@@ -1,8 +1,7 @@
-"""meta.runtime helpers (ownership constants + merge)."""
+"""meta.runtime helpers (ownership constants)."""
 
 from gc_core.persistence.meta_ownership import (
     RUNTIME_FLAG_NAMES,
-    merge_runtime_into_meta,
     resolve_runtime_flag_name,
     runtime_section,
 )
@@ -23,13 +22,6 @@ def test_resolve_runtime_flag_rejects_unknown():
     except ValueError:
         return
     raise AssertionError("expected ValueError")
-
-
-def test_merge_runtime_into_meta():
-    meta: dict = {"tui": {"status": "ok"}}
-    merge_runtime_into_meta(meta, {"live_msg_count": 2})
-    assert meta["runtime"]["live_msg_count"] == 2
-    assert meta["tui"]["status"] == "ok"
 
 
 def test_runtime_section():

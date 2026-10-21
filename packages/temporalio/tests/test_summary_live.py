@@ -12,7 +12,7 @@ import pytest
 from gc_core.agent_executor import AgentExecutor
 from gc_core.settings import LoadedSettings, RuntimeEnv
 from gc_core.run_context import acreate_run_context
-from gc_core.thread_store_file import FileThreadStore
+from gc_core.threads.file_store import FileThreadStore
 from gc_core.utils.logging_module import release_run_logger
 from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
 from gc_core_temporalio.contracts import RunRequest
@@ -133,10 +133,7 @@ async def seed_history(store, name):
                 },
             ]
         )
-    if callable(getattr(store, "append_messages", None)):
-        store.append_messages("test", "parity", messages)  # старое файловое
-    else:
-        await seed_messages(store, "test", "parity", messages)
+    await seed_messages(store, "test", "parity", messages)
 
 
 def merged_parts(traces):

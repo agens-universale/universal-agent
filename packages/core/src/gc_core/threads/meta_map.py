@@ -71,6 +71,14 @@ _SHARED_KEYS = frozenset(
     path[1] for _, path in _STATE_KEYS if path[0] == "shared"
 )
 
+
+def shared_fields() -> dict[str, str]:
+    """Ключ блока ``shared`` develop → поле ``SessionState``."""
+    return {
+        path[1]: field for field, path in _STATE_KEYS if path[0] == "shared"
+    }
+
+
 _INFO_KEYS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("created_at", ("created_at",)),
     ("updated_at", ("updated_at",)),
@@ -201,7 +209,7 @@ def _runtime(meta: JsonObject, rejected: dict) -> RuntimeStatus:
         rejected[(_RUNTIME_KEY,)] = raw
         return RuntimeStatus()
     if not raw:
-        # Пустая секция develop (update_runtime_meta её оставляет): поле
+        # Пустая секция develop (её оставляла прежняя запись runtime): поле
         # ``flags`` помечается заданным — так запись знает, что секция есть.
         return RuntimeStatus.model_construct(_fields_set={"flags"})
     values: JsonObject = {}

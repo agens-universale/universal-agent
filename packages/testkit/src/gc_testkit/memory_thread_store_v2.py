@@ -395,3 +395,23 @@ class MemoryThreadStore(ThreadStore):
         for receipt in stale:
             del self._receipts[receipt]
         return len(stale)
+
+
+class MemoryThreadStoreWithFiles(MemoryThreadStore):
+    """Хранилище в памяти с файлами треда (``gc_core.thread_files``) — как
+    SQLite из gc-stores: картинки и медиа MCP лежат рядом с blob'ами треда и
+    уходят вместе с ним при ``delete``."""
+
+    def write_thread_file(
+        self, system_id: str, thread_id: str, name: str, data: bytes
+    ) -> None:
+        from gc_core.thread_files import check_name
+
+        key = ThreadKey(system=system_id, thread=thread_id)
+        self._blobs[(key, check_name(name))] = bytes(data)
+
+    def read_thread_file(
+        self, system_id: str, thread_id: str, name: str
+    ) -> bytes | None:
+        key = ThreadKey(system=system_id, thread=thread_id)
+        return self._blobs.get((key, name))
