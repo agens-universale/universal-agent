@@ -265,12 +265,20 @@ class Threads:
     async def request_cancel(
         self, key: ThreadKey, *, op_id: str | None = None
     ) -> Receipt:
-        """Отменить идущий ход треда с любого процесса: запись в поток
-        ``control``. Ход увидит её опросом и остановится на следующем шаге;
-        следующих ходов она не касается."""
+        """Отменить ход треда с любого процесса: запись в поток ``control``
+        с границей — последним номером входящего потока на момент отмены.
+        Ход, доставляющий сообщения до границы, останавливается, когда бы ни
+        стартовал (идущий — опросом на следующем шаге, собирающийся — в
+        начале); ход по более поздним сообщениям её не касается."""
         from gc_core.execution.environment import utc_now
 
-        entry = {"type": "cancel", "at": utc_now().isoformat()}
+        record = await self.store.get_thread(key)
+        upto = record.max_seq.get(INBOX, 0) if record is not None else 0
+        entry = {
+            "type": "cancel",
+            "at": utc_now().isoformat(),
+            "upto_inbox_seq": upto,
+        }
         return await self.store.append_side(
             key,
             SideChange(

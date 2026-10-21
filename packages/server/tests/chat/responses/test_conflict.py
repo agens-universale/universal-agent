@@ -347,3 +347,28 @@ async def test_dialog_run_by_another_instance_is_409(tmp_path):
     assert caught.value.status == 409
     assert len(agent.calls) == 1
     await other.arelease()
+
+
+async def test_cancel_of_a_turn_run_by_another_instance(tmp_path):
+    """Ход ведёт другой инстанс (у этого живого хода нет): отмена — запись
+    в поток ``control`` треда диалога, тот ход увидит её опросом."""
+    from gc_server.chat.responses.index_store import thread_key
+
+    agent = FakeAgent(asyncio.Event())
+    facade = _facade(tmp_path, agent)
+    handle = await facade.open({"model": "m", "input": "долго"})
+    await agent.started.wait()
+    other = ResponsesFacade(
+        settings=make_settings(**{"agent.model": "m"}),
+        agent_factory=facade._agent_factory,
+        index=ResponseIndex.for_threads_dir(str(tmp_path / "threads")),
+    )
+    answer = await other.cancel(handle.response_id)
+    assert answer["status"] == "in_progress"
+    thread_id = agent.calls[0]["thread_id"]
+    control = await other._index.threads.store.read_stream(
+        thread_key(thread_id), "control"
+    )
+    assert [e.data["type"] for e in control] == ["cancel"]
+    agent.release.set()
+    await _finished(handle)
