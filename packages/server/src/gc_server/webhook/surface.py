@@ -14,6 +14,7 @@ import functools
 import logging
 import time
 import uuid
+from collections.abc import Awaitable, Callable
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any, Dict
 
@@ -442,12 +443,22 @@ class WebhookSurface:
             return False
         return self.registry.reserve(system=system, task_id=task_id)
 
-    async def astart_recovered(self, system: str, task_id: str) -> bool:
+    async def astart_recovered(
+        self,
+        system: str,
+        task_id: str,
+        *,
+        prepare: Callable[[], Awaitable[bool]] | None = None,
+    ) -> bool:
         """Продолжить бесхозную задачу (восстановление после падения):
-        ``False`` — её уже ведёт или строит этот процесс, или сборка упала."""
+        ``False`` — её уже ведёт или строит этот процесс, сборка упала или
+        ``prepare`` отказался. ``prepare`` идёт под бронью этого процесса:
+        записи о прерванном ходе не попадут в задачу, которую он же ведёт."""
         if not self.registry.reserve(system=system, task_id=task_id):
             return False
         try:
+            if prepare is not None and not await prepare():
+                return False
             await self._start_run(system, task_id, None)
         except Exception:
             logger.warning(
@@ -534,12 +545,20 @@ class WebhookSurface:
         мог уже взять следующий прогон (на любом инстансе)."""
         if run.ending == "handed_off" and run.result is None:
             return  # тред так и не взяли — статус ведёт взявший
+        if run.ending == "interrupted":
+            return  # остановка сервера: задачу продолжит восстановление
         key = ThreadKey(system=run.system, thread=run.task_id)
         threads = self.threads()
-        current = task_status.status_of(await threads.get(key))
+        record = await threads.get(key)
+        current = task_status.status_of(record)
         if current is None or current.get("run_id") != run.notes["run_id"]:
             return
         final = _final_fields(run)
+        final["recovery_attempts"] = 0
+        if final["status"] == "failed" and record is not None:
+            # Задача сдалась: входящие до этой границы восстановление не
+            # поднимает (иначе упавший ход повторялся бы по кругу).
+            final["inbox_upto"] = record.max_seq.get("inbox", 0)
         await task_status.aset_status(threads, key, **final)
         self.notify(key, {**current, **final})
 

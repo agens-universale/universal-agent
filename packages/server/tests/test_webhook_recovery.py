@@ -251,3 +251,166 @@ async def test_interruption_is_reported_by_callback(monkeypatch, tmp_path):
     finally:
         await stores.aclose()
     assert [e["type"] for e in got] == ["task.interrupted", "task.completed"]
+
+
+async def _failed_with_pending(store, key=KEY, *, upto):
+    """Ход упал до доставки: во входящем — сообщение, статус финальный."""
+    threads = Threads(store)
+    await threads.submit(key, {"id": "u1", "role": "user", "content": "x"})
+    await task_status.aset_status(
+        threads, key, status="failed", run_id="dead:1", inbox_upto=upto
+    )
+
+
+async def test_failed_task_with_old_undelivered_is_not_retaken(
+    monkeypatch, tmp_path
+):
+    """Находка ревью №4: упавшая задача со старым недоставленным
+    сообщением не поднимается восстановлением по кругу; новое сообщение
+    после финального статуса — поднимает."""
+    seen = _install(monkeypatch)
+    stores = await aopen_process_stores(_settings(tmp_path))
+    surface = await _surface(tmp_path, stores)
+    try:
+        await _failed_with_pending(stores.threads, upto=1)
+        assert await arecover_once(surface, now=utc_now()) == []
+        await Threads(stores.threads).submit(
+            KEY, {"id": "u2", "role": "user", "content": "новое"}
+        )
+        taken = await arecover_once(surface, now=utc_now())
+        await _settled(surface)
+    finally:
+        await stores.aclose()
+    assert taken == [KEY]
+    assert len(seen) == 1
+
+
+async def test_failed_run_records_its_inbox_boundary(monkeypatch, tmp_path):
+    """Прогон упал — статус помнит, до какого входящего задача сдалась."""
+    from gc_server.webhook.registry import ActiveRun
+
+    stores = await aopen_process_stores(_settings(tmp_path))
+    surface = await _surface(tmp_path, stores)
+    try:
+        threads = Threads(stores.threads)
+        await threads.submit(KEY, {"id": "u1", "role": "user", "content": "x"})
+        await task_status.aset_status(
+            threads, KEY, status="running", run_id="r1"
+        )
+        run = ActiveRun(
+            key="k",
+            system=KEY.system,
+            task_id=KEY.thread,
+            executor=None,
+            started_at=0.0,
+            notes={"run_id": "r1"},
+        )
+        run.ending, run.error = "failed", RuntimeError("модель недоступна")
+        await surface._amark_finished(run)
+        status = task_status.status_of(await stores.threads.get_thread(KEY))
+    finally:
+        await stores.aclose()
+    assert status["status"] == "failed" and status["inbox_upto"] == 1
+
+
+async def test_crash_loop_ends_with_recovery_exhausted(monkeypatch, tmp_path):
+    """Процесс падает посреди хода раз за разом: после трёх попыток
+    восстановления подряд задача — failed с причиной, без нового хода."""
+    seen = _install(monkeypatch)
+    stores = await aopen_process_stores(_settings(tmp_path))
+    surface = await _surface(tmp_path, stores)
+    try:
+        await _crashed_run(stores.threads)
+        await task_status.aset_status(
+            Threads(stores.threads), KEY, recovery_attempts=3
+        )
+        taken = await arecover_once(surface, now=utc_now())
+        record = await stores.threads.get_thread(KEY)
+    finally:
+        await stores.aclose()
+    status = task_status.status_of(record)
+    assert taken == [] and seen == []
+    assert status["status"] == "failed"
+    assert status["error"] == "recovery_exhausted"
+
+
+async def test_recovery_counts_its_attempts(monkeypatch, tmp_path):
+    _install(monkeypatch)
+    stores = await aopen_process_stores(_settings(tmp_path))
+    surface = await _surface(tmp_path, stores)
+    attempts: list = []
+    real = task_status.aset_status
+
+    async def spy(threads, key, **fields):
+        if "recovery_attempts" in fields:
+            attempts.append(fields["recovery_attempts"])
+        await real(threads, key, **fields)
+
+    monkeypatch.setattr(task_status, "aset_status", spy)
+    try:
+        await _crashed_run(stores.threads)
+        await arecover_once(surface, now=utc_now())
+        await _settled(surface)
+        record = await stores.threads.get_thread(KEY)
+    finally:
+        await stores.aclose()
+    assert attempts[0] == 1  # попытка учтена до хода
+    assert task_status.status_of(record)["recovery_attempts"] == 0
+
+
+async def test_own_live_task_gets_no_interruption(monkeypatch, tmp_path):
+    """Находка ревью №7: задачу ведёт (строит) этот же процесс — обход не
+    пишет в неё «ход прерван» и не меняет статус."""
+    seen = _install(monkeypatch)
+    stores = await aopen_process_stores(_settings(tmp_path))
+    surface = await _surface(tmp_path, stores)
+    try:
+        await _crashed_run(stores.threads)
+        assert surface.registry.reserve(system=KEY.system, task_id=KEY.thread)
+        taken = await arecover_once(surface, now=utc_now())
+        record = await stores.threads.get_thread(KEY)
+        inbox = await stores.threads.read_stream(KEY, "inbox")
+    finally:
+        await stores.aclose()
+    assert taken == [] and seen == []
+    assert inbox == []
+    assert task_status.status_of(record)["status"] == "running"
+
+
+async def test_server_stop_interrupts_instead_of_cancelling(
+    monkeypatch, tmp_path
+):
+    """Остановка сервера — прерывание: статус остаётся running, отметка хода
+    стоит, колбэка нет; после рестарта задачу продолжает восстановление."""
+    from gc_core.utils import connect_backend
+
+    entered = asyncio.Event()
+
+    async def hang(request: httpx.Request) -> httpx.Response:
+        entered.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(
+        connect_backend,
+        "get_async_client",
+        lambda **_kw: httpx.AsyncClient(transport=httpx.MockTransport(hang)),
+    )
+    stores = await aopen_process_stores(_settings(tmp_path))
+    surface = await _surface(tmp_path, stores)
+    events: list = []
+    surface.notify = lambda key, status: events.append(status["status"])
+    try:
+        await surface.asubmit(
+            KEY,
+            {"id": "u1", "role": "user", "content": "долгая"},
+            op_id=None,
+            trace_id=None,
+        )
+        await asyncio.wait_for(entered.wait(), 10)
+        await surface.astop()
+        record = await stores.threads.get_thread(KEY)
+    finally:
+        await stores.aclose()
+    assert task_status.status_of(record)["status"] == "running"
+    assert record.runtime.turn == "running"
+    assert events == []
