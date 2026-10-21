@@ -368,7 +368,131 @@ async def test_skill_command_never_scans_registry_on_ui_loop(
         await scr._handle_command(command)
         await pilot.pause()
         sent = _sent(runner)
+    # Уходит текст; `/skill x` без текста — только во время хода (при
+    # простое он ждёт следующего сообщения).
+    with_text = "почини" in command
     assert True not in built_on_loop
+    assert len(sent) == int(with_text or (running and body_sent))
     assert any("BODY" in s for s in sent) == (body_sent and bool(sent))
-    if "почини" in command:
-        assert any("почини" in s for s in sent)
+    assert any("почини" in s for s in sent) == with_text
+
+
+# --- отправки по одному: порядок = порядок набора ---------------------------
+
+
+class _SlowRegistry:
+    """Реестр, отвечающий медленно: отправка ждёт тело доставки вне цикла."""
+
+    async def load_skill_detail(self, skill_id):
+        import time
+
+        time.sleep(0.3)
+        return {"instructions": "BODY"}
+
+
+class _StartingRunner(_Runner):
+    """После `start` ход идёт — следующие сообщения уходят в очередь."""
+
+    def start(self, **kw) -> bool:
+        self.running = True
+        return super().start(**kw)
+
+
+def _slow_registry(monkeypatch) -> None:
+    from gc_core.tools.skills import registry as sreg
+
+    monkeypatch.setattr(
+        sreg, "get_skills_registry", lambda cfg: _SlowRegistry()
+    )
+
+
+async def _submit_back_to_back(pilot, *texts: str) -> None:
+    """Enter подряд: сообщения Submitted ставятся в очередь поля ввода,
+    как при быстром наборе, — без ожидания обработки первого."""
+    from gc_tui.widgets.command_input import CommandTextArea
+
+    inp = pilot.app.screen.query_one("#cmdinput", CommandTextArea)
+    for text in texts:
+        inp.post_message(CommandTextArea.Submitted(text))
+
+
+async def _until(pilot, cond) -> None:
+    for _ in range(100):
+        if cond():
+            return
+        await pilot.pause(0.05)
+    raise AssertionError("не дождались")
+
+
+@pytest.mark.asyncio
+async def test_fast_enter_with_pending_skill_starts_once_in_order(
+    tmp_path, monkeypatch
+):
+    pytest.importorskip("textual")
+    _slow_registry(monkeypatch)
+    async with _app(tmp_path).run_test() as pilot:
+        scr = pilot.app.screen
+        _activate(pilot.app, scr, tmp_path / "threads")
+        scr._skills_cache = [{"id": "pack:x"}]
+        runner = _StartingRunner(running=False)
+        pilot.app.active_runner = runner
+        pilot.app.tui_state.pending_skill_id = "pack:x"
+        await _submit_back_to_back(pilot, "первое", "второе")
+        await _until(pilot, lambda: runner.starts and runner.added)
+        await pilot.pause(0.4)
+        (start,) = runner.starts
+        assert start["query"].endswith("первое") and "BODY" in start["query"]
+        assert [m["content"] for m in runner.added] == ["второе"]
+        assert [r._text for r in _replies(scr)] == ["первое", "второе"]
+        assert [r.state for r in _replies(scr)] == ["pending", "queued"]
+
+
+@pytest.mark.asyncio
+async def test_fast_enter_skill_with_text_then_plain_keeps_order(
+    tmp_path, monkeypatch
+):
+    pytest.importorskip("textual")
+    _slow_registry(monkeypatch)
+    async with _app(tmp_path).run_test() as pilot:
+        scr = pilot.app.screen
+        _activate(pilot.app, scr, tmp_path / "threads")
+        scr._skills_cache = [{"id": "pack:x"}]
+        runner = _Runner(running=True)
+        pilot.app.active_runner = runner
+        await _submit_back_to_back(pilot, "/skill x почини", "потом это")
+        await _until(pilot, lambda: len(runner.added) == 2)
+        first, second = runner.added
+        assert "BODY" in first["content"] and "почини" in first["content"]
+        assert second["content"] == "потом это"
+        assert [r._text for r in _replies(scr)] == ["почини", "потом это"]
+
+
+@pytest.mark.asyncio
+async def test_run_ends_while_skill_loads_stages_it_for_next_message(
+    tmp_path, monkeypatch
+):
+    """Ход кончился, пока тело скилла читалось вне цикла: `/skill x` не
+    уходит в очередь остановленного раннера, а ждёт следующего сообщения."""
+    pytest.importorskip("textual")
+    from gc_core.tools.skills import registry as sreg
+
+    runner = _Runner(running=True)
+
+    class _EndingRegistry:
+        async def load_skill_detail(self, skill_id):
+            runner.running = False
+            return {"instructions": "BODY"}
+
+    monkeypatch.setattr(
+        sreg, "get_skills_registry", lambda cfg: _EndingRegistry()
+    )
+    async with _app(tmp_path).run_test() as pilot:
+        scr = pilot.app.screen
+        _activate(pilot.app, scr, tmp_path / "threads")
+        scr._skills_cache = [{"id": "pack:x"}]
+        pilot.app.active_runner = runner
+        await scr._handle_command("skill x")
+        await pilot.pause()
+        assert runner.added == []
+        assert pilot.app.tui_state.pending_skill_id == "pack:x"
+        assert _replies(scr) == []

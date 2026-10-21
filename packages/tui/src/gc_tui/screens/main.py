@@ -7618,8 +7618,11 @@ class TraceScreen(Screen):
             # Идёт run → подкидываем как сообщение и фиксируем в meta.
             await self._queue_skill_only(skill_id)
             return
-        # Run не идёт (нет задачи / завершена / открыта через /sessions) — отложенно
-        # к следующему сообщению.
+        self._stage_skill(skill_id)
+
+    def _stage_skill(self, skill_id: str) -> None:
+        """Run не идёт (нет задачи / завершена / открыта через /sessions) —
+        скилл отложенно к следующему сообщению."""
         self.app.tui_state.pending_skill_id = skill_id
         self._record_skill_meta(skill_id)
         name = self._skill_input_name({"id": skill_id})
@@ -7658,6 +7661,11 @@ class TraceScreen(Screen):
         )
         if not loaded:
             await self._skill_missing(skill_id, "")
+            return
+        runner = self.app.active_runner
+        if runner is None or not runner.is_running():
+            # Ход кончился, пока тело читалось вне цикла.
+            self._stage_skill(skill_id)
             return
         msg = {
             "role": "user",
