@@ -247,12 +247,14 @@ def test_zebra_stripe_is_lighter_than_the_background():
     было не поймать глазом."""
     from gc_testkit.paths import TUI_PKG
 
+    from gc_tui.palette import BG, ZEBRA_BG
+
     css = (TUI_PKG / "styles.tcss").read_text(encoding="utf-8")
     line = next(l for l in css.splitlines() if ".help-row-alt" in l)
-    stripe = line.split("background:")[1].strip().rstrip(";} ")
-    bg = "#0E1119"
+    assert "$zebra-bg" in line
+    stripe = ZEBRA_BG
     to_rgb = lambda h: tuple(int(h[i : i + 2], 16) for i in (1, 3, 5))
-    delta = sum(abs(a - b) for a, b in zip(to_rgb(stripe), to_rgb(bg)))
+    delta = sum(abs(a - b) for a, b in zip(to_rgb(stripe), to_rgb(BG)))
     assert delta >= 45, f"{stripe} слишком близок к фону ({delta})"
 
 
