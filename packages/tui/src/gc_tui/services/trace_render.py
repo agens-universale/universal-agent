@@ -15,6 +15,7 @@ from gc_core.constants.tool_display import (
     McpToolInfo,
     tool_display,
 )
+from gc_core.utils.path_truncate import truncate_path
 
 from gc_tui.models import TraceEvent
 from gc_tui.services.duration_format import format_round_int
@@ -418,6 +419,18 @@ def _call_caption(
     return name, args_summary
 
 
+def fit_call_target(target: str, cols: int, *, path: bool) -> str:
+    """Объект строки вызова в `cols` символов: путь — серединой в `…`
+    (`truncate_path`), остальное (команда, запрос) — с конца в `…`."""
+    if len(target) <= cols:
+        return target
+    if cols <= 0:
+        return ""
+    if path:
+        return truncate_path(target, cols)
+    return target[: cols - 1].rstrip() + "…"
+
+
 def build_call_row(
     *,
     call_id: str,
@@ -435,10 +448,14 @@ def build_call_row(
     label, target = _call_caption(
         wire_name, args_summary, mcp_tools, mcp_servers
     )
+    shown = tool_display(
+        wire_name, mcp_tools=mcp_tools, mcp_servers=mcp_servers
+    )
     return ToolCallRow(
         call_id=call_id,
         label=label,
         target=target,
+        path_target=shown.primary_arg == "path",
         wire_name=wire_name,
         event_no=event_no,
         waiting=waiting,

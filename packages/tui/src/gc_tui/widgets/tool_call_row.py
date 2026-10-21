@@ -8,6 +8,9 @@ Layout: Horizontal(prefix-Static, content-Static) — wrap длинного об
 
 Статус-глиф живёт в prefix-Static (▸/‖/✓/✕/·), content-Static несёт
 `Подпись  объект` и хвост ` · сводка` успеха; у ошибки хвоста нет.
+Первая строка всегда в одну строку: подпись, хвост и ❐ не режутся, объект
+сокращается `…` под ширину content-колонки (`fit_call_target`; пересчёт —
+при смене ширины или содержимого, не на тике дыхания).
 У строки правки (`set_edit_counts`) после объекта — счётчики `+N −M`, а в конце
 строки справа — кнопка ❐ копирования её диффа (спека P3 §10).
 
@@ -43,7 +46,7 @@ from gc_tui.palette import TOOL_NAME as _TOOL_NAME
 from gc_tui.palette import WARN as _WARN
 from gc_tui.services.duration_format import format_trace_duration
 from gc_tui.services.trace_glyphs import ERROR_GLYPH, REFUSED_GLYPH
-from gc_tui.services.trace_render import level_prefix
+from gc_tui.services.trace_render import fit_call_target, level_prefix
 from gc_tui.widgets.block_panel import (
     CopyFeedbackMixin,
     _copy_request,
@@ -138,6 +141,7 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         event_no: int = 0,
         waiting: bool = False,
         level: int = 0,
+        path_target: bool = False,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -146,6 +150,11 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         # в строку не попадает, хранится для отладки и тестов.
         self._label = label
         self._target = target
+        # Объект — путь: сокращается серединой, иначе с конца.
+        self._path_target = path_target
+        # Последнее сокращение объекта: (ширина, текст) — без пересчёта на
+        # тиках таймера, пока ширина под объект та же.
+        self._fitted: tuple[int, str] = (-1, target)
         self.wire_name = wire_name
         self._event_no = event_no
         self._result: Optional[str] = None
@@ -204,6 +213,11 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
 
     def on_mount(self) -> None:
         self._sync_pulse()
+
+    def on_resize(self, _event: events.Resize) -> None:
+        """Новая ширина — объект первой строки сокращается заново."""
+        if self._content_static is not None:
+            update_if_changed(self._content_static, self._render_content())
 
     @property
     def _is_live(self) -> bool:
@@ -363,10 +377,33 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         return text
 
     def _render_content(self) -> Text:
+        tail = self._render_tail()
         text = Text()
         text.append(self._label, style=_TOOL_NAME)
-        if self._target:
-            text.append(f"  {self._target}", style=_DIM)
+        target = self._fit_target(text.cell_len + tail.cell_len + 2)
+        if target:
+            text.append(f"  {target}", style=_DIM)
+        text.append_text(tail)
+        return text
+
+    def _fit_target(self, used: int) -> str:
+        """Объект под остаток ширины content-колонки после подписи, двух
+        пробелов и хвоста; колонка ещё без ширины — объект целиком."""
+        width = self._content_static.size.width if self._content_static else 0
+        if width <= 0:
+            return self._target
+        cols = width - used
+        if self._fitted[0] != cols:
+            fitted = fit_call_target(
+                self._target, cols, path=self._path_target
+            )
+            self._fitted = (cols, fitted)
+        return self._fitted[1]
+
+    def _render_tail(self) -> Text:
+        """Хвост первой строки после объекта: таймер / прервано, счётчики
+        правки, сводка успеха."""
+        text = Text()
         if self._result is None:
             self._append_pending_tail(text)
             return text
