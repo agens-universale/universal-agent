@@ -1,33 +1,13 @@
 """Адаптивное отображение пути в TUI — чистая презентация.
 
-`display_path` + `fit_path` (путь картинки под репликой): от папки проекта, через
-`~` или полностью; в одну строку — серединой в `…`, а не влезает и так — одно имя.
+`fit_path` (путь картинки под репликой; сам путь для показа — ядро,
+`display_path`): в одну строку — серединой в `…`, не влезает и так — одно
+имя.
 Ширина — в символах: у путей с CJK строка может выйти длиннее."""
 
 from __future__ import annotations
 
-import os
-
 from gc_core.utils.path_truncate import path_sep, truncate_path
-
-
-def _inside(path: str, base: str) -> bool:
-    try:
-        return os.path.commonpath([path, base]) == os.path.normpath(base)
-    except ValueError:  # разные диски Windows
-        return False
-
-
-def display_path(path: str, root: str, home: str) -> str:
-    """Путь для показа: внутри `root` — от него, иначе внутри `home` — через `~`,
-    иначе полностью. Не абсолютный (одно имя из старой сессии) — как есть."""
-    if not os.path.isabs(path):
-        return path
-    if _inside(path, root):
-        return os.path.relpath(path, root)
-    if _inside(path, home):
-        return os.path.join("~", os.path.relpath(path, home))
-    return path
 
 
 def fit_path(path: str, max_cols: int) -> str:

@@ -370,3 +370,25 @@ def test_sidecar_after_rewrite_still_reports_the_new_call(tmp_path):
     _sidecar(sidecar, [_nested_call("sub", "after", "exec_command", "{}")])
     reports = flow.poll()
     assert [item["call_id"] for item in reports] == ["sub/after"]
+
+
+def test_title_path_is_relative_to_the_turn_cwd(tmp_path):
+    """Пути в подписи — от корня проекта, как в ленте TUI (спека P3 §10)."""
+    from gc_chat.responses.tool_flow import ToolFlow as Flow
+
+    thread = tmp_path / "data_responses_t.jsonl"
+    thread.write_text("", encoding="utf-8")
+    flow = Flow(str(thread), root="/work/app")
+    call = {
+        "type": "function_call",
+        "name": "fs_read_file",
+        "call_id": "c1",
+        "arguments": json.dumps({"path": "/work/app/src/a.py"}),
+    }
+    _write(thread, [call])
+    sidecar = tmp_path / "data_subagents_responses_t.jsonl"
+    with open(sidecar, "a", encoding="utf-8") as handle:
+        record = {"parent_call_id": "c1", "kind": "call", "payload": call}
+        handle.write(json.dumps(record) + "\n")
+    titles = [report["title"] for report in flow.poll()]
+    assert titles == ["fs_read_file(src/a.py)", "fs_read_file(src/a.py)"]

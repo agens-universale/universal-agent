@@ -6,6 +6,7 @@ import os
 from typing import Literal, NamedTuple, Optional
 
 from gc_core.attachments.model import CLIPBOARD_SOURCE, Attachment
+from gc_core.utils.path_display import display_path
 from rich.cells import cell_len
 from rich.style import Style
 from rich.text import Text
@@ -19,7 +20,7 @@ from gc_tui.palette import DIM as _DIM
 from gc_tui.palette import ERR as _ERR_RED
 from gc_tui.palette import SKILL as _SKILL
 from gc_tui.services.image_chips import chip_of, chip_spans
-from gc_tui.services.path_display import display_path, fit_path
+from gc_tui.services.path_display import fit_path
 from gc_tui.services.trace_glyphs import ERROR_GLYPH
 from gc_tui.services.trace_render import (
     LINE_USER_CLASS,

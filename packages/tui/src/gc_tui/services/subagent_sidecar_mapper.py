@@ -63,8 +63,12 @@ def _seq_key(record: Dict[str, Any]) -> int:
 
 def plan_sidecar_nested_actions(
     records: Sequence[Dict[str, Any]],
+    *,
+    root: Optional[str] = None,
 ) -> List[SidecarNestedAction]:
-    """Group by parent_call_id, order by seq; skip finished/HITL-like noise."""
+    """Group by parent_call_id, order by seq; skip finished/HITL-like noise.
+
+    ``root`` — корень проекта: пути в подписях вызовов от него."""
     from gc_core.constants.tool_names import SESSION_TODO_TOOL_NAME
     from gc_core.execution.progress import todo_items_from_arguments
 
@@ -118,6 +122,7 @@ def plan_sidecar_nested_actions(
                         args_summary=tool_args_summary(
                             str(name) if name else None,
                             payload.get("arguments"),
+                            root=root,
                         ),
                     )
                 )
@@ -300,7 +305,7 @@ def resolve_nested_tool_detail(
 
 
 def trace_events_from_nested_detail(
-    call_id: str, detail: Dict[str, Any]
+    call_id: str, detail: Dict[str, Any], *, root: Optional[str] = None
 ) -> Tuple[TraceEvent, Optional[TraceEvent]]:
     """Синтетические TraceEvent для ToolCallDetailScreen."""
     call_payload = detail.get("call")
@@ -308,7 +313,7 @@ def trace_events_from_nested_detail(
         raise ValueError("detail.call required")
     name = str(call_payload.get("name") or "")
     args_summary = tool_args_summary(
-        name or None, call_payload.get("arguments")
+        name or None, call_payload.get("arguments"), root=root
     )
     call_ev = TraceEvent(
         no=0,

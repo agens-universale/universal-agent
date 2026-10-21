@@ -199,7 +199,7 @@ class ResponsesFacade:
         run = TurnRun(
             agent=agent,
             mapper=mapper,
-            flow=ToolFlow(self._index.thread_path(thread_id)),
+            flow=ToolFlow(self._index.thread_path(thread_id), root=cwd),
             index=self._index,
             record=record,
             prompt=incoming.text,

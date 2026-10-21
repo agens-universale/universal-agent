@@ -71,7 +71,7 @@ class CompletionsFacade:
             await _safe_aclose(agent)
             _forget_quietly(self._threads_dir, thread_id)
             raise
-        return self._begin(incoming, thread_id, agent)
+        return self._begin(incoming, thread_id, cwd, agent)
 
     async def _agent_for(self, thread_id: str, cwd: str) -> Any:
         del thread_id
@@ -89,12 +89,14 @@ class CompletionsFacade:
             )
 
     def _begin(
-        self, incoming: IncomingTurn, thread_id: str, agent: Any
+        self, incoming: IncomingTurn, thread_id: str, cwd: str, agent: Any
     ) -> TurnRun:
         run = TurnRun(
             agent=agent,
             content=ContentMap(),
-            flow=ToolFlow(thread_data_path(self._threads_dir, thread_id)),
+            flow=ToolFlow(
+                thread_data_path(self._threads_dir, thread_id), root=cwd
+            ),
             prompt=incoming.prompt,
             thread_id=thread_id,
             threads_dir=self._threads_dir,

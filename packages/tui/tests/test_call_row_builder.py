@@ -393,3 +393,104 @@ async def test_meta_mcp_snapshot_read_once_until_meta_changes(
         tools, _servers = scr._mcp_tool_info()
         assert len(reads) == 2
         assert tools["mcp_jira_create_issue"]["title"] == "Новая задача"
+
+
+# ---- пути от корня проекта (спека P3 §10, решение владельца) ----
+
+_ROOT = "/work/project"
+
+
+def _read_call(call_id: str, path: str) -> dict:
+    return {
+        "type": "function_call",
+        "id": f"fc_{call_id}",
+        "name": "fs_read_file",
+        "call_id": call_id,
+        "arguments": json.dumps({"path": path}),
+    }
+
+
+def test_mapper_shows_path_from_the_project_root():
+    from gc_tui.services.trace_mapper import (
+        collect_render_context,
+        map_message,
+    )
+
+    call = _read_call("c1", f"{_ROOT}/README.md")
+    context = collect_render_context([call], root=_ROOT)
+    ev = map_message(call, no=1, ts="", context=context)
+    assert ev.args_summary == "README.md"
+
+
+def test_nested_sidecar_actions_show_path_from_the_project_root():
+    from gc_tui.services.subagent_sidecar_mapper import (
+        plan_sidecar_nested_actions,
+    )
+
+    record = {
+        "parent_call_id": "p1",
+        "seq": 1,
+        "kind": "call",
+        "payload": _read_call("n1", f"{_ROOT}/README.md"),
+    }
+    actions = plan_sidecar_nested_actions([record], root=_ROOT)
+    assert actions[0].args_summary == "README.md"
+
+
+def test_nested_detail_shows_path_from_the_project_root():
+    from gc_tui.services.subagent_sidecar_mapper import (
+        trace_events_from_nested_detail,
+    )
+
+    detail = {"call": _read_call("n1", f"{_ROOT}/README.md")}
+    call_ev, _ = trace_events_from_nested_detail("n1", detail, root=_ROOT)
+    assert call_ev.args_summary == "README.md"
+
+
+@pytest.mark.asyncio
+async def test_live_call_shows_path_from_the_session_cwd(
+    tmp_path, monkeypatch
+):
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+
+    monkeypatch.chdir(tmp_path)
+    async with TuiApp().run_test() as pilot:
+        scr = pilot.app.screen
+        call = _read_call("c1", str(tmp_path / "README.md"))
+        scr._render_records([{"ts": "", "payload": call}])
+        await pilot.pause()
+        assert _content(scr._active_calls["c1"]).startswith("Read  README.md")
+
+
+@pytest.mark.asyncio
+async def test_preview_shows_path_from_the_project_root(tmp_path):
+    pytest.importorskip("textual")
+    from gc_testkit.tui_support import tui_settings
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.preview import PreviewScreen
+    from gc_tui.widgets.tool_call_row import ToolCallRow
+
+    segments = [
+        {
+            "index": 0,
+            "messages": [
+                {"ts": "", "payload": _read_call("c1", f"{_ROOT}/README.md")}
+            ],
+            "compacted_by": None,
+        }
+    ]
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
+    )
+    async with app.run_test() as pilot:
+        screen = PreviewScreen(
+            segments=segments,
+            project_path=_ROOT,
+        )
+        await pilot.app.push_screen(screen)
+        await pilot.pause()
+        texts = [_content(r) for r in screen.query(ToolCallRow)]
+        assert texts[0].startswith("Read  README.md")

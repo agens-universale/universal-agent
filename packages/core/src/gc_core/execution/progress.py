@@ -7,6 +7,7 @@ stay unchanged. Events are never persisted to thread jsonl.
 from __future__ import annotations
 
 import json
+import os
 import threading
 from collections import deque
 from dataclasses import dataclass
@@ -24,6 +25,7 @@ from typing import (
 
 from gc_core.constants.tool_display import (
     LEGACY_TOOL_NAMES,
+    TOOL_DISPLAY,
     DisplayCategory,
     tool_display,
 )
@@ -36,6 +38,7 @@ from gc_core.constants.tool_names import (
     SKILLS_READ_ASSET_NAME,
     SKILLS_READ_REFERENCE_NAME,
 )
+from gc_core.utils.path_display import display_path
 from gc_core.utils.path_truncate import truncate_path
 
 ProgressKind = Literal[
@@ -209,11 +212,14 @@ def tool_args_summary(
     arguments: Any,
     *,
     limit: int = _ARGS_SUMMARY_MAX,
+    root: Optional[str] = None,
 ) -> str:
     """Однострочная сводка аргументов вызова тула (спека P1a §2.5).
 
     Главный аргумент — по таблице отображения ядра; его нет — до трёх пар
-    ``key=preview``. Длина сводки не превышает ``limit``."""
+    ``key=preview``. Длина сводки не превышает ``limit``. ``root`` — корень
+    проекта: путь тула ядра показывается от него (``display_path``); без
+    корня — как записан."""
     data: Any = arguments
     if isinstance(arguments, str):
         try:
@@ -228,10 +234,21 @@ def tool_args_summary(
         # битые аргументы — генерик-превью, «чек-лист очищен» не врём
     if not isinstance(data, dict) or not data:
         return ""
+    if root is not None and name in TOOL_DISPLAY:
+        data = _rooted_path(data, root)
     primary = _primary_summary(name, data, limit) if name else None
     if primary:
         return _clip(primary, limit)
     return _pairs_summary(data, limit)
+
+
+def _rooted_path(data: Dict[str, Any], root: str) -> Dict[str, Any]:
+    """Аргумент ``path`` тула ядра — для показа: от корня, через ``~``."""
+    path = data.get("path")
+    if not isinstance(path, str) or not path.strip():
+        return data
+    home = os.path.expanduser("~")
+    return {**data, "path": display_path(path, root, home)}
 
 
 def _clip(text: str, limit: int) -> str:

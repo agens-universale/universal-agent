@@ -47,19 +47,29 @@ _CARD_LIMIT = 5000
 
 
 def report_from_record(
-    message: dict, seen: set[str], finished: set[str] | None = None
+    message: dict,
+    seen: set[str],
+    finished: set[str] | None = None,
+    *,
+    root: str | None = None,
 ) -> dict | None:
-    """Один function_call или его результат. Чужое и служебное — None."""
+    """Один function_call или его результат. Чужое и служебное — None.
+
+    ``root`` — cwd сессии: пути в подписи вызова от него."""
     kind = message.get("type")
     if kind == _CALL:
-        return _call_report(message, seen)
+        return _call_report(message, seen, root)
     if kind == _CALL_OUTPUT:
         return _output_report(message, seen, finished)
     return None
 
 
 def report_from_sidecar(
-    record: dict, seen: set[str], finished: set[str] | None = None
+    record: dict,
+    seen: set[str],
+    finished: set[str] | None = None,
+    *,
+    root: str | None = None,
 ) -> dict | None:
     """Запись sidecar → та же карточка, что у тула родителя.
 
@@ -72,7 +82,7 @@ def report_from_sidecar(
         return None
     message = _scoped_payload(payload, record.get("parent_call_id"))
     if kind == _SIDECAR_CALL:
-        return _call_report(message, seen)
+        return _call_report(message, seen, root)
     if kind not in _SIDECAR_DONE:
         return None
     update = _output_report(message, seen, finished)
@@ -86,14 +96,22 @@ class ToolFlow:
 
     ``sidecar_path`` — файл вызовов субагента. Оба хвоста за один poll
     сливаются по ``ts``, чтобы тул внутри субагента встал между стартом
-    субагента и его результатом, а не после.
+    субагента и его результатом, а не после. ``root`` — cwd сессии: пути в
+    подписях вызовов от него.
     """
 
-    def __init__(self, path: str, *, sidecar_path: str | None = None) -> None:
+    def __init__(
+        self,
+        path: str,
+        *,
+        sidecar_path: str | None = None,
+        root: str | None = None,
+    ) -> None:
         self._parent = _Tail(path)
         self._sidecar = _Tail(sidecar_path or "")
         self._seen: set[str] = set()
         self._finished: set[str] = set()
+        self._root = root
 
     def poll(self) -> list[dict]:
         batch = _stamped(self._parent.read_lines(), "parent")
@@ -103,7 +121,9 @@ class ToolFlow:
         batch.sort()
         updates: list[dict] = []
         for _stamp, _order, kind, raw in batch:
-            update = _decode(kind, raw, self._seen, self._finished)
+            update = _decode(
+                kind, raw, self._seen, self._finished, root=self._root
+            )
             if update is not None:
                 updates.append(update)
         return updates
@@ -158,7 +178,9 @@ def _read_from(tail: _Tail) -> list[bytes]:
     return lines
 
 
-def _call_report(message: dict, seen: set[str]) -> dict | None:
+def _call_report(
+    message: dict, seen: set[str], root: str | None = None
+) -> dict | None:
     name = message.get("name")
     call_id = _call_id(message)
     if not isinstance(name, str) or name == "" or name in _HIDDEN:
@@ -170,7 +192,7 @@ def _call_report(message: dict, seen: set[str]) -> dict | None:
     report: dict[str, Any] = {
         "sessionUpdate": "tool_call",
         "toolCallId": call_id,
-        "title": _title(name, arguments),
+        "title": _title(name, arguments, root),
         "status": _IN_PROGRESS,
         "name": name,
     }
@@ -294,8 +316,8 @@ def _preview_text(output: Any) -> str | None:
     return text[:_CARD_LIMIT]
 
 
-def _title(name: str, arguments: Any) -> str:
-    preview = tool_args_summary(name, arguments)
+def _title(name: str, arguments: Any, root: str | None) -> str:
+    preview = tool_args_summary(name, arguments, root=root)
     if preview == "":
         return name
     return f"{name}({preview})"
@@ -395,17 +417,22 @@ def _stamp(raw: bytes) -> str:
 
 
 def _decode(
-    kind: str, raw: bytes, seen: set[str], finished: set[str]
+    kind: str,
+    raw: bytes,
+    seen: set[str],
+    finished: set[str],
+    *,
+    root: str | None = None,
 ) -> dict | None:
     record = _json_object(raw)
     if record is None:
         return None
     if kind == "sidecar":
-        return report_from_sidecar(record, seen, finished)
+        return report_from_sidecar(record, seen, finished, root=root)
     message = _message(record)
     if message is None:
         return None
-    return report_from_record(message, seen, finished)
+    return report_from_record(message, seen, finished, root=root)
 
 
 def _json_object(raw: bytes) -> dict | None:

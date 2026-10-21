@@ -393,10 +393,11 @@ _FooterFrame = namedtuple(
 )
 
 
-def _records_context(records: list[dict]) -> RenderContext:
+def _records_context(records: list[dict], root: str) -> RenderContext:
     """Контекст рендера порции записей треда (по их payload)."""
     return collect_render_context(
-        rec.get("payload") for rec in records if isinstance(rec, dict)
+        (rec.get("payload") for rec in records if isinstance(rec, dict)),
+        root=root,
     )
 
 
@@ -2368,7 +2369,8 @@ class TraceScreen(Screen):
         лежит в следующем файле с тем же id, рисуется первое вхождение.
         Payload остаётся full, пока этот id есть в окне segments[-2:]."""
         context = _records_context(
-            [rec for seg in segments for rec in seg["messages"]]
+            [rec for seg in segments for rec in seg["messages"]],
+            self._current_cwd(),
         )
         window_start = retention_window_start_index(len(segments))
         window_ids = message_ids_in_retention_window(segments)
@@ -2402,7 +2404,7 @@ class TraceScreen(Screen):
         context: RenderContext | None = None,
     ) -> None:
         if context is None:
-            context = _records_context(records)
+            context = _records_context(records, self._current_cwd())
         for rec in records:
             self._render_record(rec, live=live, context=context)
 
@@ -3341,7 +3343,9 @@ class TraceScreen(Screen):
         )
         if not records:
             return
-        actions = plan_sidecar_nested_actions(records)
+        actions = plan_sidecar_nested_actions(
+            records, root=self._current_cwd()
+        )
         apply_sidecar_nested_actions(
             actions,
             mount_nested_tool=self._mount_nested_tool,
@@ -5211,7 +5215,9 @@ class TraceScreen(Screen):
         """Хвост архива, маркер, новый живой файл — живым путём, одним
         контекстом рендера (вызов в хвосте сводится с выводом в живом)."""
         start = len(self._task_events)
-        context = _records_context([*step.archive_tail, *step.live_records])
+        context = _records_context(
+            [*step.archive_tail, *step.live_records], self._current_cwd()
+        )
         self._render_records(step.archive_tail, live=True, context=context)
         self._mount_compaction_marker(step)
         self._segment_starts.append(len(self._task_events))
@@ -8230,7 +8236,9 @@ class TraceScreen(Screen):
         detail = resolve_nested_tool_detail(call_id, sidecar_records=records)
         if not detail or not isinstance(detail.get("call"), dict):
             return None, None
-        return trace_events_from_nested_detail(call_id, detail)
+        return trace_events_from_nested_detail(
+            call_id, detail, root=self._current_cwd()
+        )
 
     async def _fetch_skills(self) -> list[dict]:
         """Список скиллов из core-реестра (обход диска — вне цикла

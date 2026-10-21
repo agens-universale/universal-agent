@@ -48,12 +48,16 @@ def _state(*, steps=3, max_steps=50):
     )
 
 
+_ROOT = "/work/project"
+
+
 def _child_ctx(sink: QueueSubagentProgressSink):
     return fake_ctx(
         run_id="child_run_9",
         parent_call_id="parent_fc_1",
         subagent_progress_sink=sink,
         logger=None,
+        workspace=SimpleNamespace(root=_ROOT),
     )
 
 
@@ -128,6 +132,23 @@ class TestEmitToolStartEnd:
         assert end.tool_name == "fs_read_file"
         assert end.tool_call_id == "c1"
         assert end.elapsed_ms >= 0
+
+    def test_tool_start_path_is_relative_to_the_workspace_root(
+        self, monkeypatch
+    ):
+        pr = _patch_process(monkeypatch)
+        sink = QueueSubagentProgressSink()
+        args = json.dumps({"path": f"{_ROOT}/README.md"})
+        run_coro(
+            pr.aprocess_tool_calls(
+                messages=[_fc("fs_read_file", "c1", args)],
+                state=_state(),
+                ctx=_child_ctx(sink),
+                run_agent_func=None,
+            )
+        )
+        start = sink.drain()[0]
+        assert start.args_summary == "README.md"
 
     def test_parent_with_sink_does_not_emit(self, monkeypatch):
         pr = _patch_process(monkeypatch)

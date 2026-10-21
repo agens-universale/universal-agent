@@ -799,3 +799,26 @@ def test_report_without_call_id_is_skipped():
         is None
     )
     assert seen == set()
+
+
+def test_title_path_is_relative_to_the_session_cwd(tmp_path):
+    """Пути в подписи — от корня проекта, как в ленте TUI (спека P3 §10)."""
+    thread = tmp_path / "data_acp_s.jsonl"
+    sidecar = tmp_path / "data_subagents_acp_s.jsonl"
+    thread.write_text("", encoding="utf-8")
+    flow = ToolFlow(str(thread), sidecar_path=str(sidecar), root="/work/app")
+    call = {
+        "type": "function_call",
+        "name": "fs_read_file",
+        "call_id": "c1",
+        "arguments": '{"path": "/work/app/src/a.py"}',
+    }
+    thread.write_text(_line(call) + "\n", encoding="utf-8")
+    nested = {**call, "call_id": "n1"}
+    sidecar.write_text(
+        json.dumps({"parent_call_id": "c1", "kind": "call", "payload": nested})
+        + "\n",
+        encoding="utf-8",
+    )
+    titles = [update["title"] for update in flow.poll()]
+    assert titles == ["fs_read_file(src/a.py)", "fs_read_file(src/a.py)"]

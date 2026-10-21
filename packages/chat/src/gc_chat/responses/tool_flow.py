@@ -40,14 +40,18 @@ _HIDDEN = frozenset(
     }
 )
 
-_LineParser = Callable[[bytes, set[str]], dict | None]
+_LineParser = Callable[[bytes, set[str], str | None], dict | None]
 
 
-def report_from_record(message: dict, seen: set[str]) -> dict | None:
-    """Один function_call или его результат. Чужое и служебное — None."""
+def report_from_record(
+    message: dict, seen: set[str], *, root: str | None = None
+) -> dict | None:
+    """Один function_call или его результат. Чужое и служебное — None.
+
+    ``root`` — cwd хода: пути в подписи вызова от него."""
     kind = message.get("type")
     if kind == _CALL:
-        return _call_report(message, seen)
+        return _call_report(message, seen, root=root)
     if kind == _CALL_OUTPUT:
         return _output_report(message, seen)
     return None
@@ -66,20 +70,23 @@ class ToolFlow:
     """Хвост jsonl с момента создания. Повторный poll дочитывает только новое.
 
     Рядом с тредом читается sidecar субагента: вложенный тул — отдельная
-    карточка, ``call_id`` склеен с ``parent_call_id``.
+    карточка, ``call_id`` склеен с ``parent_call_id``. ``root`` — cwd хода:
+    пути в подписях вызовов от него.
     """
 
-    def __init__(self, path: str) -> None:
+    def __init__(self, path: str, *, root: str | None = None) -> None:
         self._thread = _Tail(path)
         self._sidecar = _Tail(_sidecar_path(path))
         self._seen: set[str] = set()
+        self._root = root
 
     def poll(self) -> list[dict]:
-        reports = _poll_tail(self._thread, self._seen, _from_thread_line)
-        reports.extend(
-            _poll_tail(self._sidecar, self._seen, _from_sidecar_line)
-        )
+        reports = self._poll(self._thread, _from_thread_line)
+        reports.extend(self._poll(self._sidecar, _from_sidecar_line))
         return reports
+
+    def _poll(self, tail: _Tail, parse: _LineParser) -> list[dict]:
+        return _poll_tail(tail, self._seen, parse, self._root)
 
 
 def _sidecar_path(thread_path: str) -> str:
@@ -106,7 +113,11 @@ def _card_id(call_id: str, parent: str | None) -> str:
 
 
 def _call_report(
-    message: dict, seen: set[str], *, parent: str | None = None
+    message: dict,
+    seen: set[str],
+    *,
+    parent: str | None = None,
+    root: str | None = None,
 ) -> dict | None:
     name = message.get("name")
     call_id = _call_id(message)
@@ -122,7 +133,7 @@ def _call_report(
         "op": "open",
         "call_id": card_id,
         "name": name,
-        "title": _title(name, message.get("arguments")),
+        "title": _title(name, message.get("arguments"), root),
     }
     if parent is not None:
         report["parent_call_id"] = parent
@@ -150,8 +161,8 @@ def _output_report(
     return {"op": "close", "call_id": card_id, "status": status}
 
 
-def _title(name: str, arguments: Any) -> str:
-    preview = tool_args_summary(name, arguments)
+def _title(name: str, arguments: Any, root: str | None) -> str:
+    preview = tool_args_summary(name, arguments, root=root)
     if preview == "":
         return name
     return f"{name}({preview})"
@@ -191,30 +202,36 @@ def _read_new(tail: _Tail) -> bytes:
     return chunk
 
 
-def _poll_tail(tail: _Tail, seen: set[str], parse: _LineParser) -> list[dict]:
+def _poll_tail(
+    tail: _Tail, seen: set[str], parse: _LineParser, root: str | None
+) -> list[dict]:
     tail.pending += _read_new(tail)
     updates: list[dict] = []
     blob = tail.pending
     while b"\n" in blob:
         raw, blob = blob.split(b"\n", 1)
-        update = parse(raw, seen)
+        update = parse(raw, seen, root)
         if update is not None:
             updates.append(update)
     tail.pending = blob
     return updates
 
 
-def _from_thread_line(raw: bytes, seen: set[str]) -> dict | None:
+def _from_thread_line(
+    raw: bytes, seen: set[str], root: str | None
+) -> dict | None:
     record = _json_object(raw)
     if record is None:
         return None
     message = _message(record)
     if message is None:
         return None
-    return report_from_record(message, seen)
+    return report_from_record(message, seen, root=root)
 
 
-def _from_sidecar_line(raw: bytes, seen: set[str]) -> dict | None:
+def _from_sidecar_line(
+    raw: bytes, seen: set[str], root: str | None
+) -> dict | None:
     record = _json_object(raw)
     if record is None:
         return None
@@ -226,7 +243,7 @@ def _from_sidecar_line(raw: bytes, seen: set[str]) -> dict | None:
         return None
     kind = record.get("kind")
     if kind == _SIDECAR_CALL:
-        return _call_report(payload, seen, parent=parent)
+        return _call_report(payload, seen, parent=parent, root=root)
     if kind == _SIDECAR_RESULT:
         return _output_report(payload, seen, parent=parent)
     if kind == _SIDECAR_ERROR:

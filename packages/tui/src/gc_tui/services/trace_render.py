@@ -659,6 +659,7 @@ def render_segments_readonly(
     *,
     mcp_tools: Mapping[str, McpToolInfo] | None = None,
     mcp_servers: Iterable[str] = (),
+    root: str | None = None,
 ) -> dict:
     """Read-only превью из сегментов: полная история (все сегменты сырьём) +
     нумерованные маркеры сжатий #K между ними. Паритет рендера с основным
@@ -671,10 +672,13 @@ def render_segments_readonly(
     calls: dict = {}
     questions: dict = {}
     context = collect_render_context(
-        rec.get("payload")
-        for seg in segments
-        for rec in seg.get("messages", [])
-        if isinstance(rec, dict)
+        (
+            rec.get("payload")
+            for seg in segments
+            for rec in seg.get("messages", [])
+            if isinstance(rec, dict)
+        ),
+        root=root,
     )
     # Дедуп по id: preserved-копия (user и пара call/output) лежит в следующем
     # файле с тем же id. Рисуем первое вхождение. Payload full, пока id есть
@@ -723,6 +727,7 @@ def merge_nested_readonly(
     allowed_parent_ids: set[str] | None = None,
     mcp_tools: Mapping[str, McpToolInfo] | None = None,
     mcp_servers: Iterable[str] = (),
+    root: str | None = None,
 ) -> None:
     """Read-only домонтирование вложенного трейса субагентов из sidecar-records
     (превью). Паритет с MainScreen._merge_sidecar_nested: те же plan/apply,
@@ -820,7 +825,7 @@ def merge_nested_readonly(
         )
 
     apply_sidecar_nested_actions(
-        plan_sidecar_nested_actions(records),
+        plan_sidecar_nested_actions(records, root=root),
         mount_nested_tool=_tool,
         finish_nested_tool=_finish,
         mount_nested_prose=_prose,

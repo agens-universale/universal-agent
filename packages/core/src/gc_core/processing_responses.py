@@ -76,6 +76,7 @@ from gc_core.execution.output_wrapping import (
 )
 from gc_core.execution.ports import port
 from gc_core.execution.progress import (
+    child_progress_enabled,
     emit_progress,
     extract_intermediate_prose,
     parse_tool_result_status,
@@ -1974,6 +1975,34 @@ def _not_started_outputs(
     return outputs
 
 
+def _emit_tool_start(
+    ctx: Any,
+    state: State,
+    tool_name: str,
+    tool_arguments: str,
+    call_id_str: Optional[str],
+) -> None:
+    """Live-прогресс субагента «тул пошёл»; путь в сводке — от корня рана."""
+    if not child_progress_enabled(ctx):
+        return
+    todo_items = (
+        todo_items_from_arguments(tool_arguments)
+        if tool_name == SESSION_TODO_TOOL_NAME
+        else None
+    )
+    emit_progress(
+        ctx,
+        state,
+        "tool_start",
+        tool_name=tool_name,
+        tool_call_id=call_id_str,
+        args_summary=tool_args_summary(
+            tool_name, tool_arguments, root=ctx.workspace.root
+        ),
+        todo_items=todo_items,
+    )
+
+
 async def _aexecute_tool_call(
     m: Dict,
     tool_name: str,
@@ -2001,20 +2030,7 @@ async def _aexecute_tool_call(
     )
     emit_tool_row = persist_tool_trace
     if emit_tool_row:
-        _todo_items = (
-            todo_items_from_arguments(tool_arguments)
-            if tool_name == SESSION_TODO_TOOL_NAME
-            else None
-        )
-        emit_progress(
-            ctx,
-            state,
-            "tool_start",
-            tool_name=tool_name,
-            tool_call_id=call_id_str,
-            args_summary=tool_args_summary(tool_name, tool_arguments),
-            todo_items=_todo_items,
-        )
+        _emit_tool_start(ctx, state, tool_name, tool_arguments, call_id_str)
     if persist_tool_trace:
         await apersist_subagent_trace(ctx, kind="call", payload=dict(m))
     was_invalid = False

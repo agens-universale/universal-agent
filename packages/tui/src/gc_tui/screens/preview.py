@@ -81,18 +81,20 @@ class PreviewScreen(Screen[bool]):
         trace = self.query_one("#trace", VerticalScroll)
         segments = self._segments
         records = self._subagent_records
-        mcp = {
+        opts = {
             "mcp_tools": mcp_tools_from_snapshot(self._mcp_snapshot),
             "mcp_servers": mcp_servers_of(self._mcp_snapshot),
+            # корень из шапки превью: пути в подписях вызовов — от него
+            "root": self._project_path or None,
         }
-        calls = render_segments_readonly(trace, segments, **mcp)
+        calls = render_segments_readonly(trace, segments, **opts)
         if records:
             merge_nested_readonly(
                 trace,
                 records,
                 calls,
                 allowed_parent_ids=subagent_parent_ids_in_window(segments),
-                **mcp,
+                **opts,
             )
         # Сырьё сегментов и sidecar после монтажа не держим: в виджетах уже
         # короткий трейс, тяжёлые tool output / nested вне окна не нужны.

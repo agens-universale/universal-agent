@@ -177,19 +177,24 @@ class RenderContext:
     collect_skipped_call_ids): их `function_call` не рендерим (парный skip-output
     подавляется отдельно по маркеру `skipped: true`).
     ``image_index`` — пользовательские картинки батча по подписи (см.
-    collect_image_index): ответ на turn_ask_human берёт из него свои картинки."""
+    collect_image_index): ответ на turn_ask_human берёт из него свои картинки.
+    ``root`` — корень проекта сессии: пути в подписях вызовов от него."""
 
     skipped_call_ids: frozenset = frozenset()
     image_index: Mapping[str, Attachment] = field(default_factory=dict)
+    root: Optional[str] = None
 
 
-def collect_render_context(messages: Iterable) -> RenderContext:
+def collect_render_context(
+    messages: Iterable, *, root: Optional[str] = None
+) -> RenderContext:
     """Pre-pass по payload'ам батча — один на всех вызывающих (лента, превью, сегменты
     сжатого треда)."""
     payloads = list(messages)
     return RenderContext(
         skipped_call_ids=frozenset(collect_skipped_call_ids(payloads)),
         image_index=collect_image_index(payloads),
+        root=root,
     )
 
 
@@ -590,7 +595,9 @@ def map_message(
 
     # function_call / function_call_output — Task 2.6
     if typ in ("function_call", "function_call_output"):
-        return _map_function_event(msg, no=no, ts=ts, mid=mid)
+        return _map_function_event(
+            msg, no=no, ts=ts, mid=mid, root=context.root
+        )
 
     return None
 
@@ -841,7 +848,12 @@ def _result_bits(data: dict) -> list[str]:
 
 
 def _map_function_event(
-    msg: dict, *, no: int, ts: str, mid: Optional[str]
+    msg: dict,
+    *,
+    no: int,
+    ts: str,
+    mid: Optional[str],
+    root: Optional[str] = None,
 ) -> Optional[TraceEvent]:
     typ = msg.get("type")
     wire_name = msg.get("name") if isinstance(msg.get("name"), str) else None
@@ -851,7 +863,9 @@ def _map_function_event(
     )
 
     if typ == "function_call":
-        args_summary = tool_args_summary(wire_name, msg.get("arguments"))
+        args_summary = tool_args_summary(
+            wire_name, msg.get("arguments"), root=root
+        )
         return TraceEvent(
             no=no,
             event_ts_utc_iso=ts,

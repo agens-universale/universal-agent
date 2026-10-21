@@ -389,7 +389,7 @@ class AcpFacade:
             await self._fail(request_id)
             return
         try:
-            await self._replay(record.session_id)
+            await self._replay(record.session_id, live.cwd)
         except Exception:
             logger.exception("session/load")
             await self._fail(request_id)
@@ -542,7 +542,7 @@ class AcpFacade:
         self._sessions[record.session_id] = live
         return live
 
-    async def _replay(self, session_id: str) -> None:
+    async def _replay(self, session_id: str, cwd: str) -> None:
         thread = await ThreadSession.afrom_config(
             settings=self._settings,
             system_id=ACP_SYSTEM,
@@ -551,6 +551,7 @@ class AcpFacade:
         for update in history_updates(
             thread.get_full_history_messages(),
             subagent_records=self._index.subagent_records(session_id),
+            root=cwd,
         ):
             await self._notify(session_id, update)
 
@@ -752,6 +753,7 @@ class AcpFacade:
         flow = ToolFlow(
             self._index.thread_path(live.session_id),
             sidecar_path=self._index.subagent_path(live.session_id),
+            root=live.cwd,
         )
         live.tool_flow = flow
         stop = asyncio.Event()

@@ -469,7 +469,10 @@ async def test_prompt_reports_a_tool_call_between_prose(tmp_path):
     agent.answer = "готово"
 
     def write_call():
-        _append_call(path, "fs_read_file", "call-1", {"path": "src/a.py"})
+        # путь абсолютный — в подписи он от cwd сессии (спека P3 §10)
+        _append_call(
+            path, "fs_read_file", "call-1", {"path": "/work/app/src/a.py"}
+        )
         _append_call(path, "turn_finish", "fin", {})
         _append_output(path, "call-1", {"ok": True, "total_lines": 3})
 
