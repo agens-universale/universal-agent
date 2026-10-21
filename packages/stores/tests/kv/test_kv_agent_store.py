@@ -85,3 +85,45 @@ async def test_project_resources_are_per_project_and_listed():
         )
     await store.delete_resource("prompt", "system")
     assert await store.read("prompt", "system") is None
+
+
+async def test_resource_left_without_manifest_entry_is_picked_up(
+    monkeypatch,
+):
+    """Процесс упал между записью ресурса и манифеста: ресурс всё равно в
+    списке — как ресурс человека, и умолчания пакета его не перетирают."""
+    import hashlib
+
+    from gc_stores.sync import copy_defaults
+
+    kv = MemoryKV()
+    crashed = KvAgentStore(kv, agent_id="a", backend="memory")
+
+    async def died(*_args, **_kwargs):
+        raise RuntimeError("процесс упал")
+
+    monkeypatch.setattr(crashed, "_update_manifest", died)
+    with pytest.raises(RuntimeError):
+        await crashed.put_resource("prompt", "summary", b"own")
+    store = KvAgentStore(kv, agent_id="a", backend="memory")
+    listed = {(r.kind, r.name): r for r in await store.list_resources()}
+    picked = listed[("prompt", "summary")]
+    assert picked.source is None
+    assert picked.version == hashlib.sha256(b"own").hexdigest()
+    await copy_defaults(store)
+    assert await store.read("prompt", "summary") == b"own"
+
+
+async def test_manifest_entry_without_resource_is_dropped():
+    kv = MemoryKV()
+    store = KvAgentStore(kv, agent_id="a", backend="memory")
+    await store.put_resource("prompt", "summary", b"x")
+    await store.put_resource("skill", "project/s/SKILL.md", b"s", project="p")
+    # Ресурс удалён, а запись манифеста осталась (упали посередине).
+    await kv.delete(store._resource("_", "prompt", "summary"))
+    assert [r.name for r in await store.list_resources()] == []
+    listed = await store.list_resources(project="p")
+    assert [r.name for r in listed] == ["project/s/SKILL.md"]
+    manifest, _version = await store._manifest()
+    assert list(manifest) == [next(iter(manifest))]
+    assert "summary" not in next(iter(manifest))

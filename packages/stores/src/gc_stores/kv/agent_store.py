@@ -3,8 +3,10 @@
 Ресурс — сырые байты по ключу ``res/<агент>/<проект или _>/<вид>/<путь>``
 (агент и проект — hex, путь — как есть: каталоги скиллов выводятся
 списком по префиксу). Версии и метки источников ресурсов агента — в его
-манифесте ``res/<агент>/manifest``: его правит запись ресурсов (условной
-записью, повтор при гонке). Память проекта — ``mem/<агент>/<проект>``,
+манифесте ``res/<агент>/manifest``: запись ресурса — сам ресурс, затем
+условная запись манифеста (повтор при гонке). Упавшая посередине запись
+чинится списком ресурсов: ресурс без записи в манифесте попадает в него
+как ресурс человека, запись без ресурса уходит. Память проекта — ``mem/<агент>/<проект>``,
 запись с проверкой версии — условной записью ключа.
 """
 
@@ -223,18 +225,74 @@ class KvAgentStore(AgentStore):
         return json.loads(found.data), found.version
 
     async def _update_manifest(self, entry: str, value: dict | None) -> None:
+        await self._patch_manifest({entry: value})
+
+    async def _patch_manifest(
+        self,
+        patch: dict[str, dict | None],
+        *,
+        only_if_absent: bool = False,
+    ) -> None:
+        """Правки манифеста одной условной записью (повтор при гонке):
+        ``None`` — убрать запись. ``only_if_absent`` — не трогать записи,
+        которые успел сделать другой писатель (самопочинка)."""
         for _ in range(_ATTEMPTS):
             manifest, version = await self._manifest()
-            if value is None:
-                manifest.pop(entry, None)
-            else:
-                manifest[entry] = value
+            for entry, value in patch.items():
+                if only_if_absent and (entry in manifest) == (
+                    value is not None
+                ):
+                    continue
+                if value is None:
+                    manifest.pop(entry, None)
+                else:
+                    manifest[entry] = value
             data = json.dumps(manifest, ensure_ascii=False).encode("utf-8")
             if await self._kv.put(
                 self._agent + "manifest", data, if_version=version
             ):
                 return
         raise RuntimeError("манифест ресурсов агента правят наперегонки")
+
+    async def _stored(self, scope: str) -> dict[str, str]:
+        """Записи манифеста по ресурсам, что лежат в KV: запись → ключ."""
+        head = f"{self._agent}{scope}/"
+        found: dict[str, str] = {}
+        start = ""
+        while True:
+            batch = await self._kv.scan(head, start_after=start, limit=1000)
+            for key in batch:
+                kind, _sep, path = key[len(head) :].partition("/")
+                found[f"{scope}|{kind}|{path}"] = key
+            if len(batch) < 1000:
+                return found
+            start = batch[-1]
+
+    async def _heal(
+        self, manifest: dict[str, Any], scopes: set[str]
+    ) -> dict[str, Any]:
+        """Манифест по ресурсам ``scopes``: ресурс без записи — запись
+        человека (без метки источника), запись без ресурса — прочь."""
+        stored: dict[str, str] = {}
+        for scope in scopes:
+            stored.update(await self._stored(scope))
+        patch: dict[str, dict | None] = {}
+        for entry, key in stored.items():
+            if entry not in manifest:
+                found = await self._kv.get(key)
+                if found is not None:
+                    patch[entry] = {
+                        "version": hashlib.sha256(found.data).hexdigest(),
+                        "source": None,
+                    }
+        for entry in manifest:
+            if entry.split("|", 1)[0] in scopes and entry not in stored:
+                patch[entry] = None
+        if not patch:
+            return manifest
+        await self._patch_manifest(patch, only_if_absent=True)
+        healed, _version = await self._manifest()
+        return healed
 
     async def put_resource(
         self,
@@ -267,8 +325,9 @@ class KvAgentStore(AgentStore):
         self, *, project: str | None = None
     ) -> list[StoredResource]:
         await self._ready()
-        manifest, _version = await self._manifest()
         wanted = {_AGENT_LEVEL, _scope(project)}
+        manifest, _version = await self._manifest()
+        manifest = await self._heal(manifest, wanted)
         found = []
         for entry, value in sorted(manifest.items()):
             scope, kind, path = entry.split("|", 2)
