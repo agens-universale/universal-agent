@@ -84,3 +84,58 @@ async def test_failure_after_switch_stays_with_failed_thread(tmp_path):
         await pilot.pause()
         text = scr._thinking._render_text().plain
         assert text == f"✕ Ошибка\n  └ {_REASON}"
+
+
+def _app(tmp_path):
+    from gc_tui.app import TuiApp
+
+    return TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
+    )
+
+
+def _write_pair(tmp_path):
+    _write(
+        tmp_path,
+        _A,
+        {
+            "status": "completed",
+            "last_indicator": {"kind": "done", "elapsed": 5},
+        },
+    )
+    _write(tmp_path, _B, {"status": "running"})
+
+
+@pytest.mark.asyncio
+async def test_running_other_thread_shows_no_activity_here(tmp_path):
+    pytest.importorskip("textual")
+    _write_pair(tmp_path)
+    async with _app(tmp_path).run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(_B, is_resume=True)
+        runner = _Runner((_B, "cli"))
+        pilot.app.active_runner = runner
+        scr._poll_active()
+        assert scr._thinking._render_text().plain.startswith("✦") is False
+        scr.attach_active_task(_A, is_resume=True)
+        scr._poll_active()
+        await pilot.pause()
+        plain = scr._thinking._render_text().plain
+        assert plain.startswith("✓ Выполнил")
+        assert _meta(tmp_path, _A)["status"] == "completed"
+        # возврат к B: его прогон идёт — индикатор активности на месте
+        scr.attach_active_task(_B, is_resume=True)
+        scr._poll_active()
+        await pilot.pause()
+        assert not scr._thinking._render_text().plain.startswith("✓")
+        assert _meta(tmp_path, _B)["status"] == "running"
+        # B кончился, пока человек на A: исход в meta B, A не тронут
+        scr.attach_active_task(_A, is_resume=True)
+        runner._running = False
+        scr._poll_active()
+        await pilot.pause()
+        assert _meta(tmp_path, _B)["status"] == "completed"
+        assert _meta(tmp_path, _A)["last_indicator"]["elapsed"] == 5
+        assert scr._thinking._render_text().plain.startswith("✓ Выполнил")

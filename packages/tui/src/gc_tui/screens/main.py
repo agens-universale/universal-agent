@@ -2673,7 +2673,11 @@ class TraceScreen(Screen):
         ):
             return
         runner = getattr(self.app, "active_runner", None)
-        if runner is not None and runner.is_running():
+        if (
+            runner is not None
+            and runner.is_running()
+            and self._runner_is_for_active_thread()
+        ):
             return
         tui = self._store.get_task_meta(self._active_task_id).get("tui") or {}
         last = tui.get("last_indicator")
@@ -5243,23 +5247,21 @@ class TraceScreen(Screen):
             row.pause() if human_wait else row.resume()
             row.refresh_running_elapsed()
 
-    def _active_run_error(self) -> str | None:
-        """Ошибка раннера — только если прогон был в открытом треде:
-        `last_runner_error` общий на приложение, чужая не рисуется."""
-        err = getattr(self.app, "last_runner_error", None)
+    def _runner_is_for_active_thread(self) -> bool:
+        """Раннер работал (работает) в открытом треде. Раннер и его
+        `last_runner_error` общие на приложение: решения о том, что рисовать
+        в открытом треде, берутся только от своего прогона."""
         runner = getattr(self.app, "active_runner", None)
         target = getattr(runner, "_last_target", None)
-        if (
-            err
-            and target
-            and target
-            != (
-                self._active_task_id,
-                self.app._system,
-            )
-        ):
-            return None
-        return err
+        return not target or target == (
+            self._active_task_id,
+            self.app._system,
+        )
+
+    def _active_run_error(self) -> str | None:
+        """Ошибка раннера открытого треда; чужая не рисуется."""
+        err = getattr(self.app, "last_runner_error", None)
+        return err if self._runner_is_for_active_thread() else None
 
     def _finished_run_task_id(self, runner) -> str | None:
         """Тред, чей прогон закончился: цель раннера, иначе активный."""
@@ -5523,7 +5525,7 @@ class TraceScreen(Screen):
 
         _indicator_mode = select_indicator_mode(
             err=err,
-            is_running=is_running,
+            is_running=is_running and self._runner_is_for_active_thread(),
             ask_human=ask_human_active,
             confirm=self._confirm_active,
         )
