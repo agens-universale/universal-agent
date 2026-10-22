@@ -38,6 +38,11 @@ class PluginsConfig(BaseModel):
     paths: list[str] = Field(
         default_factory=list, json_schema_extra=gc_meta(expert=True)
     )
+    # Подключать ли плагины, установленные ``gc-plugin install``. Бенчи
+    # выключают: результат прогона не должен зависеть от машины разработчика.
+    use_installed: bool = Field(
+        default=True, json_schema_extra=gc_meta(expert=True)
+    )
     hook_timeout_sec: int = Field(
         default=DEFAULT_PLUGIN_HOOK_TIMEOUT_SEC,
         json_schema_extra=gc_meta(expert=True),

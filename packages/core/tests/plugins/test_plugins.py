@@ -820,3 +820,11 @@ async def test_user_prompt_expands_plugin_command(tmp_path, monkeypatch):
         state, ctx, [{"role": "user", "content": "привет"}]
     )
     assert plain == []
+
+
+def test_use_installed_false_keeps_explicit_paths(monkeypatch):
+    monkeypatch.setattr(installed, "enabled_paths", lambda: ["/inst/a"])
+    off = SimpleNamespace(paths=["/p"], sources=[], use_installed=False)
+    on = SimpleNamespace(paths=["/p"], sources=[], use_installed=True)
+    assert runtime.configured_paths(off) == ["/p"]
+    assert runtime.configured_paths(on) == ["/p", "/inst/a"]

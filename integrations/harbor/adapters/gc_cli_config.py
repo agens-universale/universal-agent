@@ -47,7 +47,12 @@ BENCH_RUNTIME: Dict[str, Any] = {"os_backend": "harbor"}
 
 def schema_defaults(config_dir: str) -> AppConfig:
     """Settings of an empty YAML — every field at its default, paths resolved."""
-    return resolve_paths(AppConfig(), config_dir)
+    # use_installed=False: resolve_paths подмешивает MCP-серверы установленных
+    # плагинов, а бенч не должен зависеть от плагинов на машине разработчика.
+    return resolve_paths(
+        AppConfig.model_validate({"plugins": {"use_installed": False}}),
+        config_dir,
+    )
 
 
 def bench_defaults(prompts_dir: Path, skills_dir: Path) -> Dict[str, Any]:
@@ -60,6 +65,7 @@ def bench_defaults(prompts_dir: Path, skills_dir: Path) -> Dict[str, Any]:
     """
     return {
         "backend.api_mode": "chat_completions",
+        "plugins.use_installed": False,
         # Text benches keep their tool set; vision experiments opt in explicitly.
         "backend.vision": False,
         "paths.chat_completions_system_prompt_path": str(

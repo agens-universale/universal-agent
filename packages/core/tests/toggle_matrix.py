@@ -724,6 +724,7 @@ NOT_IN_MATRIX = {
     # не меняется; поведение покрыто packages/core/tests/plugins/test_plugins.py.
     "plugins.paths": "песочница плагинов; пустой список по умолчанию, покрытие в plugins/test_plugins.py",
     "plugins.sources": "git-источники плагинов; пустой список по умолчанию, покрытие в plugins/test_plugins.py",
+    "plugins.use_installed": "выбор источника плагинов (установленные или нет), не путь исполнения ядра; покрытие в plugins/test_plugins.py",
     "plugins.hook_timeout_sec": "таймаут внешних хуков плагинов, не путь исполнения ядра; покрытие в plugins/test_plugins.py",
     # Локально допустимо только step (как develop); turn — только в durable-
     # исполнителе и отклоняется локальным прогоном. Покрыто

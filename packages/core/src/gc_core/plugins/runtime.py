@@ -73,12 +73,13 @@ def configured_paths(cfg: Any) -> list[str]:
         from gc_core.plugins.sources import resolve_sources
 
         paths += resolve_sources(sources)
-    try:
-        from gc_core.plugins.installed import enabled_paths
+    if getattr(cfg, "use_installed", True):
+        try:
+            from gc_core.plugins.installed import enabled_paths
 
-        paths += [p for p in enabled_paths() if p not in paths]
-    except Exception:  # хранилище не должно ронять агента
-        logger.warning("installed plugins unavailable", exc_info=True)
+            paths += [p for p in enabled_paths() if p not in paths]
+        except Exception:  # хранилище не должно ронять агента
+            logger.warning("installed plugins unavailable", exc_info=True)
     return paths
 
 
