@@ -391,11 +391,10 @@ async def test_cancel_with_undo_skipped_when_events_present():
         pilot.app.active_runner = _FakeRunner()
         scr._on_user_text_submitted("запрос")
         scr._events_since_last_user_send = 2  # агент уже что-то выдал
+        # Без паузы до стопа: тик без треда убрал бы индикатор «думаю».
         scr._show_thinking_indicator(state="thinking")
-        await pilot.pause()
-
         scr._cmd_stop()
-        await pilot.pause()
+        await pilot.pause(0.5)
         # Индикатор остаётся в терминальном состоянии cancelled.
         ind = scr._thinking
         assert ind is not None
@@ -423,11 +422,10 @@ async def test_cancel_with_undo_skipped_when_input_not_empty():
         scr._on_user_text_submitted("первый запрос")
         scr._events_since_last_user_send = 0
         scr.query_one("#cmdinput").text = "новая печать"
+        # Без паузы до стопа: тик без треда убрал бы индикатор «думаю».
         scr._show_thinking_indicator(state="thinking")
-        await pilot.pause()
-
         scr._cmd_stop()
-        await pilot.pause()
+        await pilot.pause(0.5)
         # Индикатор остаётся в терминальном состоянии cancelled.
         ind = scr._thinking
         assert ind is not None
