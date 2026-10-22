@@ -84,6 +84,11 @@ from gc_core.execution.progress import (
     todo_items_from_arguments,
     tool_args_summary,
 )
+from gc_core.execution.turn_clock import (
+    TurnClock,
+    bind_turn_clock,
+    turn_clock_sources,
+)
 from gc_core.intent_guard.guard import FinishGateGuard
 from gc_core.intent_guard.text_answer_judge import ashould_return_text_answer
 from gc_core.intent_guard.turn_finish_emit import (
@@ -823,7 +828,15 @@ def begin_turn_main_trace(state: State, ctx: Any) -> None:
     При активном auto стартовый резолв предохранитель не проверяет — живость за
     точкой решения (`aroute_before_call`), и отказ, если мертвы все три уровня,
     приходит на первом вызове. Субагентские `begin_turn` идут мимо — их class-1
-    ведёт `SubagentRunner`, а обёртку зовут только main-трейс call-site'ы."""
+    ведёт `SubagentRunner`, а обёртку зовут только main-трейс call-site'ы.
+
+    Первым делом — часы хода, только у главного трейса (тот же признак, что
+    в `turn_boundary.begin_turn`): ребёнок подхватывает очередь этим же
+    вызовом на своём `ctx` с часами родителя и перепривязать их не должен.
+    Падение `begin_turn` часы не отменяет — ход начат."""
+    if not getattr(state, "parent_state_id", None):
+        mono, wall = turn_clock_sources(ctx)
+        bind_turn_clock(ctx, TurnClock.start(mono=mono, wall=wall))
     try:
         begin_turn(state, ctx)
     except AliasCircuitOpenError as exc:

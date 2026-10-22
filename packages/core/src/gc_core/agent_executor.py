@@ -26,6 +26,7 @@ from gc_core.config_modules.stored_outputs import (
 from gc_core.execution.contracts import ExecutionFailure
 from gc_core.execution.message_keys import withdraw_from_queue
 from gc_core.execution.ports import port
+from gc_core.execution.turn_clock import current_turn_clock
 from gc_core.execution_workspace import launch_root_from_config
 from gc_core.intent_log.user_turn import (
     append_user_ask_deduped,
@@ -1592,6 +1593,22 @@ class AgentExecutor:
                 self._state.stop_requested = True
             else:
                 self._stop_pending = True
+        # Момент стопа — конец хода: поток, доработавший после него, часы
+        # уже не двигает.
+        clock = current_turn_clock(self._ctx)
+        if clock is not None:
+            clock.close()
+
+    def turn_effective_start(self) -> float | None:
+        """Старт текущего хода, сдвинутый на ожидания человека (монотоника
+        рантайма) — для живого счёта фронтенда; часов нет — ``None``."""
+        clock = current_turn_clock(self._ctx)
+        return clock.effective_start() if clock is not None else None
+
+    def turn_elapsed(self) -> float | None:
+        """Длительность текущего хода без ожидания человека."""
+        clock = current_turn_clock(self._ctx)
+        return clock.elapsed() if clock is not None else None
 
     async def acompact_thread(
         self, thread_id: str, system: str | None = None

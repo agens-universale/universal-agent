@@ -31,6 +31,11 @@ from gc_core.config_modules.stored_outputs import (
 from gc_core.constants.tool_names import SESSION_MEMORY_TOOL_NAME
 from gc_core.execution.contracts import ExecutionFailure
 from gc_core.execution.progress import emit_progress
+from gc_core.execution.turn_clock import (
+    bind_turn_clock,
+    clear_turn_clock,
+    current_turn_clock,
+)
 from gc_core.execution_workspace import ExecutionWorkspace
 from gc_core.intent_log.user_turn import (
     append_user_asks_from_messages,
@@ -1631,6 +1636,13 @@ class SubagentRunner:
             bind_turn_identity(child_ctx, parent_turn_id)
         else:
             clear_turn_identity(child_ctx)
+        # Часы хода — тем же путём: ожидания человека у ребёнка вычитаются
+        # из хода родителя; ребёнок часов не открывает и не закрывает.
+        parent_clock = current_turn_clock(self._ctx)
+        if parent_clock is not None:
+            bind_turn_clock(child_ctx, parent_clock)
+        else:
+            clear_turn_clock(child_ctx)
         # HITL: баннер TUI и порт confirm родителя (ACP: session/request_permission).
         # Без порта ребёнок при is_tui=False молча отвечает deny_once.
         child_ctx.tui_confirm = getattr(self._ctx, "tui_confirm", None)

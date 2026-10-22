@@ -115,6 +115,8 @@ CORE_CONTEXT_ATTRIBUTES = {
     "tools_data": BOUND + " (метаданные воркера)",
     "tui_confirm": FRONTEND + ": подтверждение — human_request",
     "turn_id": DATA,
+    "turn_clock": DATA
+    + ": часы хода на operations.monotonic и utc_now, без ввода-вывода",
     "workspace": DATA,
 }
 
