@@ -20,6 +20,7 @@ from gc_core.message_policy.user_message_policy import (
     is_dialog_summary_user_message_text,
     user_content_to_text,
 )
+from gc_core.persistence.turn_outcome import is_turn_outcome_record
 from gc_core.thread_store import (
     delete_thread,
     discard_message_by_id,
@@ -281,18 +282,22 @@ class FileTaskStore:
 
     @staticmethod
     def _compacted_by(seg: list[dict], leading: dict) -> dict:
-        """Сводка сжатия сегмента seg; leading — dialog_summary следующего файла."""
+        """Сводка сжатия сегмента seg; leading — dialog_summary следующего файла.
+
+        Счёт и объём — только по сообщениям: запись итога хода сообщением
+        не является."""
         payload = leading.get("payload") or {}
         synthesis = _clean_summary(
             user_content_to_text(payload.get("content"))
         )
+        messages = [r for r in seg if not is_turn_outcome_record(r)]
         # Мера триггера ядра: аргументы вызовов и вывод тулов тоже объём.
         chars_before = calc_history_chars_for_trigger(
-            [r.get("payload") or {} for r in seg]
+            [r.get("payload") or {} for r in messages]
         )
         return {
             "ts": leading.get("ts", ""),
-            "messages_in_segment": len(seg),
+            "messages_in_segment": len(messages),
             "synthesis": synthesis,
             "chars_before": chars_before,
             "chars_after": len(synthesis),

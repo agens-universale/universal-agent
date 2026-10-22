@@ -12,6 +12,7 @@ from gc_core.message_policy.user_message_policy import (
     resolve_technical_user_content_type,
     user_content_to_text,
 )
+from gc_core.persistence.turn_outcome import is_turn_outcome_record
 
 from gc_tui.services.answer_flow import AnswerFlow
 from gc_tui.services.trace_mapper import collect_render_context, map_message
@@ -35,7 +36,13 @@ def _env_ts(rec: dict) -> str:
 def _build_header(
     segments: list[dict], *, meta: dict, thread_id: str, system: str
 ) -> dict:
-    all_recs = [r for seg in segments for r in seg["messages"]]
+    # Экспорт — сообщения треда: запись итога хода в счёт не идёт.
+    all_recs = [
+        r
+        for seg in segments
+        for r in seg["messages"]
+        if not is_turn_outcome_record(r)
+    ]
     n_sum = sum(1 for seg in segments if seg.get("compacted_by"))
     return {
         "thread_id": thread_id,

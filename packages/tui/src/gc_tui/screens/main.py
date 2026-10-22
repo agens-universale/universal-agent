@@ -34,6 +34,7 @@ from gc_core.config_modules.images import read_images_config
 from gc_core.intent_log.record import ACTION_USER_ASK
 from gc_core.intent_log.serialize import deserialize_list
 from gc_core.message_policy.plan_messages import accepted_plan_messages
+from gc_core.persistence.turn_outcome import is_turn_outcome_record
 from gc_core.plan_store import plan_awaits_decision, plan_is_accepted
 from gc_core.runtime_notices import collect_unread_runtime_notices
 from gc_core.security.permission_mode import Mode, mode_label
@@ -2686,6 +2687,8 @@ class TraceScreen(Screen):
         context: RenderContext | None = None,
         in_window: bool = True,
     ) -> None:
+        if is_turn_outcome_record(rec):
+            return  # итог хода — не сообщение ленты
         payload = rec.get("payload")
         if not isinstance(payload, dict):
             return

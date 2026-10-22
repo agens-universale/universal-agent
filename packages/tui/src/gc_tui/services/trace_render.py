@@ -15,6 +15,7 @@ from gc_core.constants.tool_display import (
     McpToolInfo,
     tool_display,
 )
+from gc_core.persistence.turn_outcome import is_turn_outcome_record
 from gc_core.utils.path_truncate import truncate_path
 
 from gc_tui.models import ResultOutcome, TraceEvent
@@ -809,6 +810,8 @@ def _render_record_readonly(
     как _render_event на основном экране."""
     from gc_tui.services.trace_mapper import map_message
 
+    if is_turn_outcome_record(rec):
+        return no  # итог хода — не сообщение ленты
     payload = rec.get("payload")
     if not isinstance(payload, dict):
         return no
