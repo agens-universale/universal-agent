@@ -211,6 +211,15 @@ def test_live_count_follows_started_at_setter():
     assert "(5с)" in ind._render_text().plain
 
 
+def test_indicator_state_is_public():
+    from gc_tui.widgets.thinking_indicator import ThinkingIndicator
+
+    ind = ThinkingIndicator(state="stopping")
+    assert ind.state == "stopping"
+    ind.set_state("cancelled")
+    assert ind.state == "cancelled"
+
+
 def test_no_count_until_turn_clock_exists():
     """Часов хода ещё нет — счёта нет (а не счёт от отправки, который
     потом откатился бы к нулю)."""

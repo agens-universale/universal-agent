@@ -5806,14 +5806,14 @@ class TraceScreen(Screen):
         if self._stopping_alive():
             ind.show("stopping")
             return
-        if ind._state == "stopping" and not frozen:
+        if ind.state == "stopping" and not frozen:
             # Поток стопа вышел: его запись уже в файле — до решения.
             self._poll_trace_tail()
         outcome = self._latest_turn_outcome()
         if outcome is not None:
             self._show_turn_outcome(*kind_of(outcome), outcome)
             return
-        if is_terminal_indicator_state(ind._state):
+        if is_terminal_indicator_state(ind.state):
             return
         status = None
         if self._store is not None and self._active_task_id is not None:

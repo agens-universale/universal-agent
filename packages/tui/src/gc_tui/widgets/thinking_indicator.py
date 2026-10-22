@@ -278,6 +278,11 @@ class ThinkingIndicator(Static):
         self._sync_error_class()
 
     @property
+    def state(self) -> str:
+        """Текущее состояние строки (живое, мигание стопа или итог)."""
+        return self._state
+
+    @property
     def has_error_line(self) -> bool:
         """Под строкой-итогом есть строка причины ошибки (вторая строка)."""
         return self._state == _STATE_FAILED and bool(self._error)
