@@ -5091,14 +5091,17 @@ class TraceScreen(Screen):
         self.app.last_terminal_outcome = None
         self.app.last_stop_requested = False
 
-    def _stamp_tui_running(self) -> None:
+    def _stamp_tui_running(self, task_id: str | None = None) -> None:
         """meta.tui.status=running + сброс last_indicator (новый ход, не итог
-        прошлого) + отметка журнала правок для сводки этого хода."""
+        прошлого) + отметка журнала правок для сводки этого хода.
+
+        `task_id` — тред прогона; не задан — открытый (старт из него)."""
         self._capture_edits_baseline()
-        if self._store is None or self._active_task_id is None:
+        tid = task_id or self._active_task_id
+        if self._store is None or tid is None:
             return
         self._write_tui_meta(
-            self._active_task_id,
+            tid,
             {"status": "running", "last_indicator": None, "last_error": None},
         )
 
@@ -5333,8 +5336,8 @@ class TraceScreen(Screen):
         err = getattr(self.app, "last_runner_error", None)
         return err if self._runner_is_for_active_thread() else None
 
-    def _finished_run_task_id(self, runner) -> str | None:
-        """Тред, чей прогон закончился: цель раннера, иначе активный."""
+    def _run_task_id(self, runner) -> str | None:
+        """Тред прогона раннера: его цель, иначе активный."""
         return self.app.run_thread_id(runner) or self._active_task_id
 
     def _adopt_thread_breaker(self, task_meta: dict) -> None:
@@ -5353,7 +5356,7 @@ class TraceScreen(Screen):
         Тред прогона считается один раз: к тику окончания человек мог уйти
         на другую сессию. Тогда экран (индикатор, сводка, баннер плана,
         подсказка поля) не трогается — он принадлежит открытому треду."""
-        run_tid = self._finished_run_task_id(runner)
+        run_tid = self._run_task_id(runner)
         on_screen = run_tid == self._active_task_id
         edits = self._close_turn_edits(kind, run_tid, on_screen=on_screen)
         if self._store is None or run_tid is None or kind == "compact":
@@ -5499,8 +5502,9 @@ class TraceScreen(Screen):
         )
         # Восходящий фронт: прогон стартовал → running (страховочная сетка к
         # _prepare_for_new_run; ловит любой путь, где prepare не вызвали).
+        # Тред — прогона: к первому тику человек мог уйти в другую сессию.
         if (not self._was_running) and is_running and _kind != "compact":
-            self._stamp_tui_running()
+            self._stamp_tui_running(self._run_task_id(runner))
         # Ход уложился между тиками: бегущим его не застал ни один тик, но
         # мета ещё «running» — конец хода тот же, что у спадающего фронта.
         _finished_before_poll = (

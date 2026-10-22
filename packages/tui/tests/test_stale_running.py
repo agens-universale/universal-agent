@@ -73,3 +73,18 @@ async def test_new_from_idle_session_keeps_its_outcome(tmp_path):
         scr._cmd_new()
         await pilot.pause()
         assert _status(_store(tmp_path), TID_A) == "completed"
+
+
+@pytest.mark.asyncio
+async def test_rising_edge_stamps_run_thread_not_open_one(tmp_path):
+    """Переход в B до первого тика: «running» — треду прогона A, не B."""
+    app = _app(tmp_path)
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(TID_A)
+        scr._prepare_for_new_run()
+        app.active_runner = _Runner(TID_A)
+        scr.attach_active_task(TID_B, is_resume=True)
+        scr._poll_active()
+        assert _status(scr, TID_B) is None
+        assert _status(scr, TID_A) == "running"
