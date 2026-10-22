@@ -342,8 +342,9 @@ UserReplyContainer.-queue-hint > .queue-hint { display: block; }
 /* Строка итога хода (P1b, S10): уровень 0, глиф в колонке ●, пустая
    строка сверху, тусклая. Свежая (-latest) — со сводкой правок и причиной. */
 TurnLine { color: $deep-dim; padding: 0 1 0 0; margin-top: 1; height: auto; }
-/* Строка за баром (S10 §3.4): скрыта, пока стоит бар индикатора. */
-TurnLine.-held { display: none; }
+/* Итог за баром (S10 §3.4): строка хода и маркер /compact скрыты, пока
+   стоит бар индикатора. */
+TurnLine.-held, CompactionRule.-held { display: none; }
 
 /* StreamBlock — эфемерный in-progress поток текущего шага (chat_completions) */
 /* левый padding 0 — выравнивание с индикатором и колонкой буллетов трейса. */

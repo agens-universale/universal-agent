@@ -232,7 +232,11 @@ from gc_tui.widgets.trace_row import (
     CompactionRule,
     TraceRow,
 )
-from gc_tui.widgets.turn_line import TURN_LINE_LATEST, TurnLine
+from gc_tui.widgets.turn_line import (
+    TURN_LINE_HELD,
+    TURN_LINE_LATEST,
+    TurnLine,
+)
 
 # Константы вместо повторяющихся литералов (Sonar S1192).
 _PREFIX_EXPORTED = "[exported] "
@@ -554,8 +558,9 @@ class TraceScreen(Screen):
         # event_no → тело сводки (скрыто; раскрывается кликом/Enter метки).
         self._summary_body_widgets: dict[int, CompactionBody] = {}
         self._summary_marker_widgets: dict[int, CompactionRule] = {}
-        # Итог, смонтированный при стоящем баре: ждёт его ухода (S10 §3.4).
-        self._held_widgets: list[TurnLine] = []
+        # Итог, смонтированный при стоящем баре, ждёт его ухода (S10 §3.4):
+        # здесь — как раскрыть каждый.
+        self._held_reveals: list[Callable[[], None]] = []
         # Phase 5: ask_human banner state
         self._ask_human_banner = None  # type: Optional[AskHumanBanner]
         self._ask_human_call_id: Optional[str] = None
@@ -2183,7 +2188,7 @@ class TraceScreen(Screen):
         self._response_tail = []
         self._summary_body_widgets.clear()
         self._summary_marker_widgets.clear()
-        self._held_widgets.clear()
+        self._held_reveals.clear()
         self._pending_user_widgets.clear()  # spec 2026-05-26
         self._held_client_ids.clear()
         self._pending_wire_cache.clear()
@@ -2711,7 +2716,7 @@ class TraceScreen(Screen):
             # Запись дочитана раньше спадающего фронта: встань строка сейчас,
             # бар ушёл бы отдельно — прыжок на 2 строки (S10 §3.4).
             line.hold()
-            self._held_widgets.append(line)
+            self._held_reveals.append(line.reveal)
         self._trace_mount(line, above_sent=True)
 
     def _sent_reply_below(self) -> bool:
@@ -6079,11 +6084,25 @@ class TraceScreen(Screen):
             apply_payload_retention(ev, seg_in_window=False)
 
     def _mount_compaction_marker(self, step: CompactionStep) -> None:
+        no = self._next_no
         self._append_and_render(
             build_compaction_marker_event(
-                self._next_no, step.segment_index, step.compacted_by
+                no, step.segment_index, step.compacted_by
             )
         )
+        marker = self._summary_marker_widgets.get(no)
+        runner = getattr(self.app, "active_runner", None)
+        if (
+            marker is not None
+            and getattr(runner, "_thread_kind", "run") == "compact"
+            and self._bar_wanted()
+        ):
+            # Маркер `/compact` встаёт вместе с уходом бара «сжимаю
+            # контекст…»; сжатие посреди хода бар не снимает (S10 §3.4).
+            marker.add_class(TURN_LINE_HELD)
+            self._held_reveals.append(
+                partial(marker.remove_class, TURN_LINE_HELD)
+            )
 
     def _drop_answered_ask_human_banner(self, start: int) -> None:
         """Снять баннер ask_human, если среди событий шага (с индекса start)
@@ -8827,6 +8846,10 @@ class TraceScreen(Screen):
             return
         was = bar.has_class(_BAR_TURN)
         wanted = self._bar_wanted()
+        if not wanted and self._ui_frozen_for_select():
+            # Выделение (F2): снятие бара и раскрытие — только вместе,
+            # после него; догоняет тик опроса (S10 §4.14).
+            return
         bar.set_class(wanted, _BAR_TURN)
         # Бар уходит — придержанное встаёт на его место той же
         # перерисовкой: бар −2, строка +2, низ на месте (S10 §3.4).
@@ -8837,9 +8860,9 @@ class TraceScreen(Screen):
 
     def _reveal_held(self) -> bool:
         """Раскрыть придержанное за баром; True — было что раскрыть."""
-        held, self._held_widgets = self._held_widgets, []
-        for widget in held:
-            widget.reveal()
+        held, self._held_reveals = self._held_reveals, []
+        for reveal in held:
+            reveal()
         return bool(held)
 
     def _handle_bang_shell(self, text: str) -> None:

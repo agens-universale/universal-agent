@@ -1176,3 +1176,118 @@ async def test_line_held_while_bar_up(tmp_path):
         assert line.is_fresh
         await pilot.pause()
         assert line.display
+
+
+class _CompactRunner(_FakeRunner):
+    """Идёт `/compact`: прогон сжатия открытого треда."""
+
+    _thread_kind = "compact"
+
+
+def _held(widget) -> bool:
+    return widget.has_class("-held")
+
+
+@pytest.mark.asyncio
+async def test_compact_marker_held_until_bar_leaves(tmp_path):
+    """`/compact` после хода: маркер сжатия встаёт под свежей строкой и
+    ждёт за баром «сжимаю контекст…»; бар уходит — маркер раскрыт в том
+    же вызове, строка всё время свежая и видна."""
+    from gc_tui.widgets.trace_row import CompactionRule
+
+    _prepare_one_turn(tmp_path)
+    async with _app(tmp_path).run_test() as pilot:
+        scr = await _open(pilot)
+        line = _fresh_line(scr)
+        runner = _CompactRunner()
+        pilot.app.active_runner = runner
+        scr._run_pending = True  # принятый /compact
+        scr._sync_indicator_bar()
+        _compact_files(tmp_path)
+        scr._poll_trace_tail()
+        (rule,) = scr.query_one("#trace").query(CompactionRule)
+        assert _held(rule)
+        assert not _held(line)
+        assert line.is_fresh
+
+        runner._running = False
+        scr._settle_ended_run()
+        assert not scr.query_one("#indicator-bar").has_class("-turn")
+        assert not _held(rule)
+        assert line.is_fresh
+
+
+@pytest.mark.asyncio
+async def test_autocompaction_marker_mid_run_not_held(tmp_path):
+    """Сжатие посреди хода (прогон хода, не `/compact`): маркер не ждёт
+    бара — бар после него остаётся."""
+    from gc_tui.widgets.trace_row import CompactionRule
+
+    _prepare_one_turn(tmp_path)
+    async with _app(tmp_path).run_test() as pilot:
+        scr = await _open(pilot)
+        pilot.app.active_runner = _FakeRunner()
+        scr._prepare_for_new_run()
+        _compact_files(tmp_path)
+        scr._poll_trace_tail()
+        (rule,) = scr.query_one("#trace").query(CompactionRule)
+        assert not _held(rule)
+
+
+@pytest.mark.asyncio
+async def test_rebuild_with_live_runner_holds_last_line(tmp_path):
+    """Перерисовка (`stream_reset`) при живом раннере: строки ходов — на
+    местах записей; последняя ждёт за баром, прошлые — осевшие и видны."""
+    _write_thread(tmp_path)
+    thread = _Thread(tmp_path)
+    thread.turn(1)
+    thread.turn(2)
+    async with _app(tmp_path).run_test() as pilot:
+        scr = await _open(pilot)
+        runner = _FakeRunner()
+        pilot.app.active_runner = runner
+        scr._prepare_for_new_run()
+        scr._rebuild_from_store()
+        await pilot.pause()  # старые виджеты ленты сняты
+        first, last = _turn_lines(scr)
+        assert not _held(first)
+        assert not first.is_fresh
+        assert _held(last)
+
+        runner._running = False
+        scr._settle_ended_run()
+        assert not _held(last)
+
+
+@pytest.mark.asyncio
+async def test_bar_removal_deferred_under_select_freeze(tmp_path):
+    """Ход кончился во время выделения (F2): бар и придержанная строка
+    не меняются, мета пишется сразу; выделение снято — бар уходит и
+    строка встаёт в одном тике."""
+    _write_thread(tmp_path)
+    async with _app(tmp_path).run_test() as pilot:
+        scr = await _open(pilot)
+        runner = _FakeRunner()
+        pilot.app.active_runner = runner
+        scr._prepare_for_new_run()
+        thread = _Thread(tmp_path)
+        thread.messages(_reply("u1"), _answer("a1"))
+        thread.record(1, "u1")
+        scr._poll_trace_tail()
+        (line,) = _turn_lines(scr)
+        bar = scr.query_one("#indicator-bar")
+
+        frozen = [True]
+        scr._ui_frozen_for_select = lambda: frozen[0]
+        runner._running = False
+        scr._poll_tick()
+        assert bar.has_class("-turn")
+        assert _held(line)
+        tui = scr._store.get_task_meta(TID)["tui"]
+        assert tui["status"] == "completed"
+
+        frozen[0] = False
+        scr._poll_tick()
+        assert not bar.has_class("-turn")
+        assert not _held(line)
+        assert line.is_fresh
