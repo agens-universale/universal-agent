@@ -549,3 +549,35 @@ def test_runner_remembers_when_its_run_started():
     assert before <= runner.run_started_at <= time.monotonic()
     runner.stop()
     runner.wait(timeout=1.0)
+
+
+def test_stop_releases_run_waiting_for_human_answer():
+    """Ход ждёт ответа человека в `ask_human`: `stop()` будит ожидание, и
+    поток хода кончается — переход и выход его не ждут вечно."""
+    import threading
+
+    from gc_tui.services.agent_runner import AgentRunner
+
+    asked = threading.Event()
+
+    class _Fake:
+        def __init__(self):
+            self._ctx = type("Ctx", (), {"ask_human": None})()
+
+        async def arun(self, messages, *, thread_id, **kw):
+            asked.set()
+            await self._ctx.ask_human("?")
+
+        def stop_run(self):
+            pass
+
+        def add_message(self, m):
+            pass
+
+    runner = AgentRunner(executor_factory=lambda: _Fake())
+    runner.start(query="hi", thread_id="t1")
+    assert asked.wait(timeout=2.0)
+    assert runner.is_running()
+    runner.stop()
+    runner.wait(timeout=2.0)
+    assert not runner.is_running()

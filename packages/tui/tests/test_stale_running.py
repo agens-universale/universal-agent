@@ -255,6 +255,9 @@ async def test_elapsed_live_equals_meta_after_ask_human_answer(tmp_path):
         scr._reset_thinking_timer()
         scr._thinking_started_at = time.monotonic() - 5
         scr._show_thinking_indicator(state="thinking")
+        # Свой счёт индикатора нарочно другой: верное N даёт только
+        # значение, посчитанное концом хода (`freeze_elapsed`).
+        scr._thinking._started_at = time.monotonic() - 9
         runner._running = False
         scr._poll_active()
         await pilot.pause()
