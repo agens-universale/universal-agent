@@ -246,6 +246,8 @@ async def test_a_failed_build_leaves_neither_logger_nor_server(
     страховки: она накрывала только прогрев корня.
     """
     if where == "discovery":
+        # Контекст собирает базовый реестр (`abuild_tools_data`) и декорирует
+        # его сам (автовыбор §5.2 п.4) — дискавери MCP идёт в этой сборке.
         real = run_context.abuild_tools_data
 
         async def _discover_then_fail(*args, **kwargs):

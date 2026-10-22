@@ -6,6 +6,7 @@ import json
 from types import SimpleNamespace
 
 from gc_acp.facade import AcpFacade
+from gc_core.message_policy.plan_messages import accepted_plan_messages
 from gc_core.thread_store import append_new_thread_messages
 from gc_testkit.settings import make_settings
 
@@ -35,12 +36,50 @@ class GatedWriter(MemoryWriter):
         await super().send(payload)
 
 
+class FakeExecutor:
+    """Исполнитель под FakeAgent: режим — тем же API, что у AgentExecutor.
+
+    ``shared`` — живое состояние прогона (сквозные тесты): смена режима
+    пишет туда, как ``AgentExecutor.set_permission_mode`` посреди хода.
+    """
+
+    def __init__(self):
+        self._ctx = SimpleNamespace()
+        self.last_terminal_outcome = None
+        self.last_closing_reply = ""
+        self.mode = None
+        self.modes = []
+        self.shared = None
+        self.plan = None
+        self.reworked = []
+        self.accepted = []
+
+    def set_permission_mode(self, mode):
+        self.modes.append(mode)
+        self.mode = mode
+        if self.shared is not None:
+            self.shared.permission_mode = mode
+
+    def permission_mode(self):
+        return self.mode
+
+    def plan_snapshot(self, thread_id):
+        return self.plan
+
+    def arm_plan_rework(self, thread_id):
+        self.reworked.append(thread_id)
+
+    def prepare_accepted_plan(self, mode, thread_id, *, extra_text=""):
+        """Двойник AgentExecutor.prepare_accepted_plan: режим ставит ядро,
+        сообщения продолжения — общая функция политики (как у ядра)."""
+        self.accepted.append((mode, thread_id, extra_text))
+        self.set_permission_mode(mode)
+        return accepted_plan_messages(mode, extra_text=extra_text)
+
+
 class FakeAgent:
     def __init__(self):
-        self.executor = SimpleNamespace(
-            _ctx=SimpleNamespace(),
-            last_terminal_outcome=None,
-        )
+        self.executor = FakeExecutor()
         self.last_answer = None
         self.calls = []
         self.started = asyncio.Event()
@@ -57,9 +96,13 @@ class FakeAgent:
         self.outcome = None
         self.error = None
         self.cancel_raises = False
+        self.next_runs = []
 
     async def stream(self, prompt, **kwargs):
         self.calls.append((prompt, dict(kwargs)))
+        if len(self.calls) > 1 and self.next_runs:
+            # Следующий прогон той же сессии (продолжение после одобрения).
+            self.deltas, self.answer, self.outcome = self.next_runs.pop(0)
         self.started.set()
         for item in self.lead:
             yield item
@@ -89,7 +132,7 @@ class FakeAgent:
         self.closed = True
 
 
-def _open(tmp_path, factory=None):
+def _open(tmp_path, factory=None, settings_extra=None):
     agents = []
 
     async def default_factory(config, **kwargs):
@@ -100,10 +143,11 @@ def _open(tmp_path, factory=None):
         return agent
 
     writer = MemoryWriter()
+    cfg = {"paths.threads_data_path": str(tmp_path), "os_backend": "local"}
+    if settings_extra:
+        cfg.update(settings_extra)
     facade = AcpFacade(
-        settings=make_settings(
-            {"paths.threads_data_path": str(tmp_path), "os_backend": "local"}
-        ),
+        settings=make_settings(cfg),
         writer=writer,
         agent_factory=factory or default_factory,
     )
@@ -212,7 +256,7 @@ async def test_initialize_shape_and_blocks_session_until_then(tmp_path):
     assert result["agentCapabilities"]["promptCapabilities"] == {
         "image": False,
         "audio": False,
-        "embeddedContext": False,
+        "embeddedContext": True,
     }
     assert result["agentCapabilities"]["mcpCapabilities"] == {
         "http": False,
@@ -256,7 +300,21 @@ async def test_prompt_streams_and_second_turn_keeps_the_thread(tmp_path):
     await agent.started.wait()
     await facade._sessions[session_id].prompt_task
     kinds = [item["sessionUpdate"] for item in _updates(writer)]
-    assert kinds == ["agent_thought_chunk", "agent_message_chunk"]
+    assert kinds == [
+        "session_info_update",
+        "agent_thought_chunk",
+        "agent_thought_chunk",
+        "agent_message_chunk",
+    ]
+    thoughts = [
+        item["content"]["text"]
+        for item in _updates(writer)
+        if item["sessionUpdate"] == "agent_thought_chunk"
+    ]
+    assert thoughts == [
+        f"Модель: {facade._settings.settings.agent.model}\n",
+        "hmm",
+    ]
     assert _by_id(writer, 3)["result"] == {"stopReason": "end_turn"}
     assert agent.calls[0][0] == "see\nreadme (file:///tmp/readme)"
     assert agent.calls[0][1]["thread_id"] == session_id
@@ -282,16 +340,22 @@ async def test_prompt_streams_and_second_turn_keeps_the_thread(tmp_path):
     assert len(agents) == 1
     assert agent.calls[1][1]["thread_id"] == session_id
     assert _by_id(writer, 4)["result"]["stopReason"] == "end_turn"
+    thoughts = [
+        item["content"]["text"]
+        for item in _updates(writer)
+        if item["sessionUpdate"] == "agent_thought_chunk"
+    ]
+    assert thoughts[-1] == f"Модель: {facade._settings.settings.agent.model}\n"
     await facade.shutdown()
 
 
-def _finish_answer():
+def _finish_answer(report="В README одна фраза.", comment="файл короткий"):
     return json.dumps(
         {
             "solution_type": "direct_answer",
             "task": "прочитать README",
-            "task_report": "В README одна фраза.",
-            "comment": "файл короткий",
+            "task_report": report,
+            "comment": comment,
             "handoff": '{"artifacts":["README.md"]}',
             "message": "Finish gate: accept.",
             "finish_gate": {"action": "accept"},
@@ -324,8 +388,45 @@ async def test_prompt_renders_finish_arguments_as_the_report(tmp_path):
         for item in _updates(writer)
         if item["sessionUpdate"] == "agent_message_chunk"
     ]
-    assert texts == ["В README одна фраза.\n\n* заметка: файл короткий"]
+    assert texts == [
+        "В README одна фраза.\n\n* **заметка:**\n\n  файл короткий"
+    ]
     assert all("Finish gate" not in text for text in texts)
+    await facade.shutdown()
+
+
+async def test_prompt_shows_a_proposed_plan_as_text(tmp_path):
+    """Ход кончился планом: в ленте — текст плана, не сырой JSON итога."""
+    facade, writer, agents = _open(tmp_path)
+    await _init(facade)
+    await _new(facade, "/work/app")
+    session_id = _by_id(writer, 2)["result"]["sessionId"]
+    agent = agents[0]
+    plan = "# План\n1. Добавить тест\n2. Починить"
+    agent.deltas = []
+    agent.answer = json.dumps(
+        {"plan": plan, "status": "proposed"}, ensure_ascii=False
+    )
+    agent.outcome = "plan_proposed"
+    await facade.handle_line(
+        _line(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "спланируй"}],
+            },
+            3,
+        )
+    )
+    await facade._sessions[session_id].prompt_task
+    texts = [
+        item["content"]["text"]
+        for item in _updates(writer)
+        if item["sessionUpdate"] == "agent_message_chunk"
+    ]
+    assert texts == [plan]
+    assert all(item["sessionUpdate"] != "plan" for item in _updates(writer))
+    assert _by_id(writer, 3)["result"] == {"stopReason": "end_turn"}
     await facade.shutdown()
 
 
@@ -335,7 +436,8 @@ async def test_prompt_does_not_repeat_a_streamed_report(tmp_path):
     await _new(facade, "/work/app")
     session_id = _by_id(writer, 2)["result"]["sessionId"]
     agent = agents[0]
-    agent.deltas = [("answer", "В README одна фраза.")]
+    agent.deltas = [("reset", ""), ("answer", "В README одна фраза.")]
+    agent.executor.last_closing_reply = "В README одна фраза."
     agent.answer = _finish_answer()
     await facade.handle_line(
         _line(
@@ -353,7 +455,169 @@ async def test_prompt_does_not_repeat_a_streamed_report(tmp_path):
         for item in _updates(writer)
         if item["sessionUpdate"] == "agent_message_chunk"
     ]
-    assert texts == ["В README одна фраза."]
+    assert texts == [
+        "В README одна фраза.",
+        "\n\n* **заметка:**\n\n  файл короткий",
+    ]
+    await facade.shutdown()
+
+
+async def _prompt_texts(facade, writer, session_id):
+    await facade.handle_line(
+        _line(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "a"}],
+            },
+            3,
+        )
+    )
+    await facade._sessions[session_id].prompt_task
+    return [
+        item["content"]["text"]
+        for item in _updates(writer)
+        if item["sessionUpdate"] == "agent_message_chunk"
+    ]
+
+
+async def test_turn_with_streamed_reply_sends_only_record(tmp_path):
+    facade, writer, agents = _open(tmp_path)
+    await _init(facade)
+    await _new(facade, "/work/app")
+    session_id = _by_id(writer, 2)["result"]["sessionId"]
+    agent = agents[0]
+    agent.deltas = [("reset", ""), ("answer", "Пока!")]
+    agent.executor.last_closing_reply = "Пока!"
+    agent.answer = _finish_answer("Пользователь сказал «пока».", "")
+    texts = await _prompt_texts(facade, writer, session_id)
+    assert texts == [
+        "Пока!",
+        "\n\n* **итог:**\n\n  Пользователь сказал «пока».",
+    ]
+    await facade.shutdown()
+
+
+async def test_list_report_and_comment_live_match_history(tmp_path):
+    """Вживую запись та же, что при повторе истории."""
+    facade, writer, agents = _open(tmp_path)
+    await _init(facade)
+    await _new(facade, "/work/app")
+    session_id = _by_id(writer, 2)["result"]["sessionId"]
+    agent = agents[0]
+    agent.deltas = [("reset", ""), ("answer", "Готово.")]
+    agent.executor.last_closing_reply = "Готово."
+    agent.answer = _finish_answer("- a\n- b", "Риск.")
+    texts = await _prompt_texts(facade, writer, session_id)
+    assert texts == [
+        "Готово.",
+        "\n\n* **итог:**\n\n  - a\n  - b\n\n  Риск.",
+    ]
+    await facade.shutdown()
+
+
+async def test_reply_after_tools_is_a_separate_paragraph(tmp_path):
+    """Клиент показывает прозу хода одним блоком: новый ответ модели
+    после тулов не прилипает к прошлому, запись — через одну пустую
+    строку."""
+    facade, writer, agents = _open(tmp_path)
+    await _init(facade)
+    await _new(facade, "/work/app")
+    session_id = _by_id(writer, 2)["result"]["sessionId"]
+    agent = agents[0]
+    agent.deltas = [
+        ("reset", ""),
+        ("answer", "Сейчас посмотрю README."),
+        ("reset", ""),
+        ("answer", "Проект — песочница."),
+    ]
+    agent.executor.last_closing_reply = "Проект — песочница."
+    agent.answer = _finish_answer("Проект — песочница.", "проверил")
+    texts = await _prompt_texts(facade, writer, session_id)
+    assert texts == [
+        "Сейчас посмотрю README.",
+        "\n\nПроект — песочница.",
+        "\n\n* **заметка:**\n\n  проверил",
+    ]
+    await facade.shutdown()
+
+
+async def test_turn_with_muted_reply_sends_reply_and_record(tmp_path):
+    """AUTO заглушил поток ответа: answer-дельт нет, ответ идёт целиком."""
+    facade, writer, agents = _open(tmp_path)
+    await _init(facade)
+    await _new(facade, "/work/app")
+    session_id = _by_id(writer, 2)["result"]["sessionId"]
+    agent = agents[0]
+    agent.deltas = [("reset", "")]
+    agent.executor.last_closing_reply = "Пока!"
+    agent.answer = _finish_answer("Пользователь сказал «пока».", "")
+    texts = await _prompt_texts(facade, writer, session_id)
+    assert texts == ["Пока!\n\n* **итог:**\n\n  Пользователь сказал «пока»."]
+    await facade.shutdown()
+
+
+async def test_report_equal_to_bounced_reply_is_not_repeated(tmp_path):
+    """Ответ без тула, bounce, затем только turn_finish с тем же текстом:
+    ответ показан один раз."""
+    facade, writer, agents = _open(tmp_path)
+    await _init(facade)
+    await _new(facade, "/work/app")
+    session_id = _by_id(writer, 2)["result"]["sessionId"]
+    agent = agents[0]
+    agent.deltas = [("reset", ""), ("answer", "Сделал."), ("reset", "")]
+    agent.executor.last_closing_reply = ""
+    agent.answer = _finish_answer("Сделал.", "")
+    texts = await _prompt_texts(facade, writer, session_id)
+    assert texts == ["Сделал."]
+    await facade.shutdown()
+
+
+async def test_bounced_reply_with_comment_sends_only_the_note(tmp_path):
+    facade, writer, agents = _open(tmp_path)
+    await _init(facade)
+    await _new(facade, "/work/app")
+    session_id = _by_id(writer, 2)["result"]["sessionId"]
+    agent = agents[0]
+    agent.deltas = [("reset", ""), ("answer", "Сделал."), ("reset", "")]
+    agent.executor.last_closing_reply = ""
+    agent.answer = _finish_answer("Сделал.", "проверил")
+    texts = await _prompt_texts(facade, writer, session_id)
+    assert texts == ["Сделал.", "\n\n* **заметка:**\n\n  проверил"]
+    await facade.shutdown()
+
+
+async def test_cancelled_turn_sends_no_record(tmp_path):
+    facade, writer, agents = _open(tmp_path)
+    await _init(facade)
+    await _new(facade, "/work/app")
+    session_id = _by_id(writer, 2)["result"]["sessionId"]
+    agent = agents[0]
+    agent.hold = True
+    agent.executor.last_closing_reply = "Пока!"
+    agent.answer = _finish_answer("Пользователь сказал «пока».", "")
+    await facade.handle_line(
+        _line(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "a"}],
+            },
+            3,
+        )
+    )
+    await agent.started.wait()
+    await facade.handle_line(
+        _line("session/cancel", {"sessionId": session_id}, notify=True)
+    )
+    await facade._sessions[session_id].prompt_task
+    texts = [
+        item["content"]["text"]
+        for item in _updates(writer)
+        if item["sessionUpdate"] == "agent_message_chunk"
+    ]
+    assert texts == []
+    assert _by_id(writer, 3)["result"] == {"stopReason": "cancelled"}
     await facade.shutdown()
 
 
@@ -394,14 +658,20 @@ async def test_prompt_reports_a_tool_call_between_prose(tmp_path):
         for item in _updates(writer)
     ]
     assert flow == [
+        ("session_info_update", None, None),
+        ("agent_thought_chunk", None, None),
         ("agent_message_chunk", None, None),
         ("tool_call", "call-1", "in_progress"),
         ("tool_call_update", "call-1", "completed"),
         ("agent_message_chunk", None, None),
         ("agent_message_chunk", None, None),
     ]
-    titles = [item.get("title") for item in _updates(writer)]
-    assert titles[1] == "fs_read_file(path='src/a.py')"
+    tool = next(
+        item
+        for item in _updates(writer)
+        if item.get("sessionUpdate") == "tool_call"
+    )
+    assert tool["title"] == "fs_read_file(path='src/a.py')"
     assert _by_id(writer, 3)["result"] == {"stopReason": "end_turn"}
     await facade.shutdown()
 
@@ -488,6 +758,8 @@ async def test_prompt_reports_tools_inside_a_subagent(tmp_path):
         for item in _updates(writer)
     ]
     assert flow == [
+        ("session_info_update", None, None),
+        ("agent_thought_chunk", None, None),
         ("agent_message_chunk", None, None),
         ("tool_call", "sub", "in_progress"),
         ("tool_call", "sub:c1", "in_progress"),
@@ -585,7 +857,9 @@ async def test_cancel_request_and_exception_from_the_turn(tmp_path):
         )
     )
     await agents[0].started.wait()
-    await facade.handle_line(_line("$/cancel_request", {"id": 9}, notify=True))
+    await facade.handle_line(
+        _line("$/cancel_request", {"requestId": 9}, notify=True)
+    )
     await facade._sessions[session_id].prompt_task
     assert _by_id(writer, 9)["result"]["stopReason"] == "cancelled"
     await facade.shutdown()
@@ -684,6 +958,68 @@ async def test_image_does_not_start_a_turn(tmp_path):
         )
     )
     assert _by_id(writer, 3)["error"]["code"] == -32602
+    assert _by_id(writer, 3)["error"]["message"] == "image not supported"
+    assert agents[0].calls == []
+    await facade.shutdown()
+
+
+async def test_embedded_resource_is_one_user_message(tmp_path):
+    facade, writer, agents = _open(tmp_path)
+    await _init(facade)
+    await _new(facade, "/work")
+    session_id = _by_id(writer, 2)["result"]["sessionId"]
+    await facade.handle_line(
+        _line(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [
+                    {"type": "text", "text": "see"},
+                    {
+                        "type": "resource",
+                        "resource": {
+                            "uri": "file:///tmp/a.py",
+                            "text": "x = 1",
+                        },
+                    },
+                ],
+            },
+            3,
+        )
+    )
+    await facade._sessions[session_id].prompt_task
+    assert agents[0].calls[0][0] == "see\nfile:///tmp/a.py\nx = 1"
+    assert _by_id(writer, 3)["result"] == {"stopReason": "end_turn"}
+    await facade.shutdown()
+
+
+async def test_blob_resource_does_not_start_a_turn(tmp_path):
+    facade, writer, agents = _open(tmp_path)
+    await _init(facade)
+    await _new(facade, "/work")
+    session_id = _by_id(writer, 2)["result"]["sessionId"]
+    await facade.handle_line(
+        _line(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [
+                    {
+                        "type": "resource",
+                        "resource": {
+                            "uri": "file:///tmp/a.png",
+                            "blob": "aaaa",
+                        },
+                    }
+                ],
+            },
+            3,
+        )
+    )
+    assert _by_id(writer, 3)["error"]["code"] == -32602
+    assert (
+        _by_id(writer, 3)["error"]["message"] == "embedded blob not supported"
+    )
     assert agents[0].calls == []
     await facade.shutdown()
 
@@ -811,7 +1147,7 @@ async def test_list_resume_load_after_restart(tmp_path):
             5,
         )
     )
-    assert _by_id(writer2, 5)["result"] == {}
+    assert set(_by_id(writer2, 5)["result"]) <= {"configOptions", "modes"}
     assert len(agents2) == 1
     await restored.handle_line(
         _line(
@@ -822,6 +1158,7 @@ async def test_list_resume_load_after_restart(tmp_path):
     )
     assert len(agents2) == 1
 
+    before_load = len(writer2.sent)
     await restored.handle_line(
         _line(
             "session/load",
@@ -829,13 +1166,21 @@ async def test_list_resume_load_after_restart(tmp_path):
             7,
         )
     )
-    updates = _updates(writer2)
+    updates = [
+        item["params"]["update"]
+        for item in writer2.sent[before_load:]
+        if item.get("method") == "session/update"
+    ]
     assert [item["sessionUpdate"] for item in updates] == [
         "user_message_chunk",
         "agent_message_chunk",
+        "plan",
+        "session_info_update",
     ]
     assert updates[0]["content"]["text"] == "привет"
-    assert _by_id(writer2, 7)["result"] == {}
+    assert updates[2] == {"sessionUpdate": "plan", "entries": []}
+    assert updates[3]["title"] == "привет"
+    assert set(_by_id(writer2, 7)["result"]) <= {"configOptions", "modes"}
     # Проигрыш кончился до ответа load.
     load_at = next(
         index

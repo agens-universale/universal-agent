@@ -8,6 +8,7 @@ from gc_testkit.settings import fake_ctx
 
 def _state():
     s = type("S", (), {})()
+    s.mode_announced = None
     s.messages = []
     s.steps = 0
     s.max_steps = 100
@@ -15,6 +16,8 @@ def _state():
     s.user_intent_log = []
     s.flush_current_user_intent = lambda: None
     s.last_finish_reason = None
+    s.tick_signals = set()
+    s.mark_turn_start = lambda: None
     return s
 
 

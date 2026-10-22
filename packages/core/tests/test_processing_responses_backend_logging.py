@@ -134,6 +134,7 @@ def test_chat_completions_logs_raw_backend_payload_on_conversion_error(
                     [{"role": "user", "content": "hello", "id": "m_1"}],
                     state,
                     ctx,
+                    resolved=None,
                 )
             )
             assert False, "Expected KeyError('choices')"

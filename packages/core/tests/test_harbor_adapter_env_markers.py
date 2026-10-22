@@ -36,6 +36,7 @@ def _build(tmp_path, overrides):
         model="test-model",
         prompts_dir=tmp_path / "prompts",
         skills_dir=tmp_path / "skills",
+        logs_dir=tmp_path / "logs",
         config_dir=str(tmp_path),
         overrides=overrides,
     ).settings

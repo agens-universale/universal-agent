@@ -19,7 +19,7 @@ _PRICING = {
 
 def _meta(i, o):
     a = UsageAccount()
-    a.add(CATEGORY_MAIN, i, o)
+    a.add(CATEGORY_MAIN, i, o, model="m")
     return a.to_meta()
 
 

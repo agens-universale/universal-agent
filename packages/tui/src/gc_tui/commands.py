@@ -37,6 +37,21 @@ class Command:
     arg_options_provider: Optional[Callable[[Any], tuple]] = None
     arg_hint_provider: Optional[Callable[[Any, Optional[str]], str]] = None
 
+    @property
+    def runs_on_enter(self) -> bool:
+        """Enter по строке палитры выполняет команду сразу: аргумента нет либо
+        он необязателен (``[…]``) и меню вариантов у него нет — значение
+        набирается руками (``/plan clear``). Иначе Enter подставляет команду
+        в поле: следом откроется меню или ввод аргумента."""
+        if not self.args:
+            return True
+        has_menu = (
+            bool(self.arg_options)
+            or self.arg_options_provider is not None
+            or self.arg_file
+        )
+        return self.args.startswith("[") and not has_menu
+
 
 class CommandRegistry:
     def __init__(self) -> None:
@@ -109,6 +124,16 @@ def build_default_registry() -> CommandRegistry:
             hotkey="F4 · Ctrl+O",
         ),
         Command("new", (), "", "Новая сессия в этом окне", hotkey="Ctrl+N"),
+        Command(
+            "plan",
+            (),
+            "[clear]",
+            "Вернуться к плану сессии; clear — убрать план",
+            # Без arg_options намеренно: меню аргументов открывается с
+            # выделенным первым вариантом, и Enter после `/plan` выполнял
+            # `clear` — разрушительное действие вместо ожидаемого показа
+            # плана (живая приёмка). `clear` набирается руками.
+        ),
         Command(
             "config",
             (),

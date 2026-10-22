@@ -228,7 +228,10 @@ def test_function_call_output_command_moderation_block_is_error_not_agent():
         ts="t",
     )
     assert ev.kind == "error"
-    assert "unsafe_command_blocked" in ev.summary
+    assert (
+        ev.summary
+        == "Judge is unavailable; fail-closed policy blocks execution."
+    )
 
 
 def test_function_call_output_read_guard_block_is_error():
@@ -258,7 +261,69 @@ def test_function_call_output_read_guard_block_is_error():
         ts="t",
     )
     assert ev.kind == "error"
-    assert "read_guard_violation" in ev.summary
+    assert ev.summary == "path is within denied root: /etc"
+
+
+def _error_summary(error: dict) -> str:
+    out = json.dumps({"tool": "fs_write_file", "ok": False, "error": error})
+    ev = map_message(
+        {
+            "type": "function_call_output",
+            "name": "fs_write_file",
+            "call_id": "fc_r",
+            "output": out,
+        },
+        no=3,
+        ts="t",
+    )
+    assert ev.kind == "error"
+    return ev.summary
+
+
+def test_error_summary_prefers_human_reason_over_model_instruction():
+    """Строка отказа адресована человеку: `reason` — причина; инструкция модели
+    («Do NOT retry…») лежит в `guidance` или в `message` и в ленту не идёт."""
+    assert (
+        _error_summary(
+            {
+                "type": "write_denied_by_mode",
+                "reason": "Write not permitted in the current permission mode.",
+                "guidance": "Do NOT retry the same call.",
+            }
+        )
+        == "Write not permitted in the current permission mode."
+    )
+    assert (
+        _error_summary(
+            {
+                "type": "x",
+                "reason": "User forbade git commands in this session.",
+                "message": "This action does not match. Do NOT retry the same call.",
+            }
+        )
+        == "User forbade git commands in this session."
+    )
+
+
+def test_error_summary_falls_back_to_message_then_type():
+    """Обычная ошибка тула причины не несёт — её описание и есть message."""
+    assert (
+        _error_summary(
+            {"type": "not_found", "message": "File not found: a.txt"}
+        )
+        == "File not found: a.txt"
+    )
+    assert (
+        _error_summary(
+            {
+                "type": "not_found",
+                "reason": "",
+                "message": "File not found: a.txt",
+            }
+        )
+        == "File not found: a.txt"
+    )
+    assert _error_summary({"type": "weird_failure"}) == "weird_failure"
 
 
 # --- Task 2.2: ask_human / submit_solution special cases ---
@@ -729,3 +794,30 @@ def test_search_and_replace_summary_uses_the_schema_argument_names():
     assert "search=<13 chars>" in ev.summary
     assert "replace=<16 chars>" in ev.summary
     assert "<0 chars>" not in ev.summary
+
+
+def test_finish_event_carries_reply_of_same_response():
+    from gc_tui.services.trace_mapper import collect_render_context
+
+    reply = {
+        "type": "message",
+        "role": "assistant",
+        "content": [{"type": "output_text", "text": "Пока! 👋"}],
+    }
+    finish = {
+        "type": "function_call",
+        "name": "turn_finish",
+        "call_id": "f1",
+        "arguments": json.dumps(
+            {
+                "solution_type": "answer_question",
+                "task_report": "Попрощался с пользователем.",
+            }
+        ),
+    }
+    context = collect_render_context([reply, finish])
+
+    ev = map_message(finish, no=2, ts="t", context=context)
+
+    assert context.closing_replies == {"f1": "Пока! 👋"}
+    assert ev.full_payload["_submit_reply"] == "Пока! 👋"

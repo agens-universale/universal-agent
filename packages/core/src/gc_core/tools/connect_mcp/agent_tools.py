@@ -13,6 +13,7 @@ from gc_core.execution.tool_schema import (
     is_open_object,
 )
 from gc_core.loop_detector.constants import GENERIC_PROFILE, LOOP_WARN_KEY
+from gc_core.security.permission_mode import CAT_MCP
 from gc_core.settings import settings_of
 from gc_core.tools.connect_mcp.api import (
     acall_mcp_tool,  # transport injection compatibility
@@ -655,6 +656,9 @@ def _assemble_mcp_tools_data(
         tool_data: Dict[str, Any] = {
             "tool_fabric": make_fabric(full_name),
             "execution_kind": "mcp",
+            # Режим разрешений: зона и сервер — по ним строится ключ решения.
+            "category": CAT_MCP,
+            "mcp_server": server_key,
             "spec": normalized_spec,
             "description": normalized_spec.get("description", ""),
         }

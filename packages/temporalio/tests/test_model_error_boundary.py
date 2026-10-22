@@ -130,3 +130,17 @@ def test_responses_cache_miss_body_survives_without_provider_data():
     assert is_previous_response_cache_miss(restored)
     assert "secret" not in json.dumps(asdict(failure))
     assert "private.test" not in json.dumps(asdict(failure))
+
+
+def test_the_honest_main_error_keeps_its_type_across_the_activity_boundary():
+    """Замена модели в AUTO (спека PR140 Р3) распознаёт честную ошибку по типу:
+    базовое имя RuntimeError на границе activity этот тип теряло."""
+    from gc_core.execution.contracts import MainModelUnavailable
+
+    failure = encode_model_failure(
+        MainModelUnavailable("Модель 'mid' недоступна")
+    )
+    restored = restore_model_failure(failure)
+    assert isinstance(restored, MainModelUnavailable)
+    assert isinstance(restored, RuntimeError)
+    assert "mid" in str(restored)

@@ -2,8 +2,8 @@
 
 `apersist_subagent_trace` пишет трассу в `ctx.thread_store`, а без него — в
 `FileThreadStore(threads_dir)`. Дочерний контекст собирается руками, и поле
-туда не копировалось, хотя `ask_human`, `tui_confirm` и `permission_store`
-копируются. Для встраивающего, отдавшего свой стор
+туда не копировалось, хотя `ask_human`, `tui_confirm`, `confirm_request`
+и `permission_store` копируются. Для встраивающего, отдавшего свой стор
 (`AsyncAgent.create(cfg, thread_store=…)`), это значит одно из двух: трасса
 субагента терялась или ложилась на диск хоста мимо его хранилища.
 
@@ -20,10 +20,11 @@ from gc_core.tools.subagents import runner as runner_module
 
 #: Поля, которые дочерний контекст обязан взять у родителя. Список не
 #: декоративный: каждое сюда попало после отдельной поломки — порт ответа
-#: человека, баннер подтверждения, хранилище решений, теперь хранилище тредов.
+#: человека, баннер и порт confirm, хранилище решений, теперь хранилище тредов.
 INHERITED = (
     "ask_human",
     "tui_confirm",
+    "confirm_request",
     "permission_store",
     "thread_store",
     "image_store",

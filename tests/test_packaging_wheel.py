@@ -49,6 +49,7 @@ MANIFESTS = {
     "gc_core_temporalio": "packages/temporalio",
     "gc_acp": "packages/acp",
     "gc_chat": "packages/chat",
+    "gc_a2a": "packages/a2a",
 }
 
 
@@ -339,6 +340,7 @@ OWN_COMMANDS = {
     },
     "gc_acp": {"gc-acp"},
     "gc_chat": {"gc-chat"},
+    "gc_a2a": {"gc-a2a"},
 }
 
 
@@ -430,6 +432,7 @@ def test_meta_pulls_every_profile():
         f"gc-mcp=={ver}",
         f"gc-acp=={ver}",
         f"gc-chat=={ver}",
+        f"gc-a2a=={ver}",
     }
     assert root["project"]["optional-dependencies"]["temporal"] == [
         f"gc-core-temporalio=={ver}"
@@ -461,6 +464,7 @@ def test_versions_are_pinned_together():
         "packages/mcp",
         "packages/acp",
         "packages/chat",
+        "packages/a2a",
     ):
         leaf = tomllib.loads(
             (REPO / sub / "pyproject.toml").read_text(encoding="utf-8")
@@ -473,6 +477,7 @@ def test_versions_are_pinned_together():
         "packages/mcp",
         "packages/acp",
         "packages/chat",
+        "packages/a2a",
     ):
         leaf = tomllib.loads(
             (REPO / sub / "pyproject.toml").read_text(encoding="utf-8")

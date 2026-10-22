@@ -154,6 +154,21 @@ def format_summary_block(summary_text: str) -> str:
     return f"<summary>\n{s}\n</summary>"
 
 
+def render_plan_block(plan: Mapping[str, Any] | None) -> str:
+    """План сессии для тела сводки: дословно, со статусом. Без этого план
+    (в том числе черновик в доработке) терялся бы при сжатии истории."""
+    if not isinstance(plan, Mapping):
+        return ""
+    text = str(plan.get("text") or "").rstrip("\n")
+    if not text.strip():
+        return ""
+    attrs = (
+        f'status="{plan.get("status") or ""}" '
+        f'updated_at="{plan.get("updated_at") or ""}"'
+    )
+    return f"<current_plan {attrs}>\n{text}\n</current_plan>"
+
+
 def build_dialog_summary_content(
     summary_text: str,
     last_dialog_steps: str,
@@ -162,6 +177,8 @@ def build_dialog_summary_content(
     user_intent_log_preview: Mapping[str, Any] | None = None,
     current_user_intent_jsonl: str = "",
     images_block: str = "",
+    plan_block: str = "",
+    mode_block: str = "",
 ) -> str:
     """Собирает итоговое тело сообщения-резюме треда для подстановки в историю чата.
 
@@ -186,6 +203,18 @@ def build_dialog_summary_content(
         if log_section:
             lines.append("")
             lines.append(log_section)
+
+    plan_section = str(plan_block or "").strip()
+    if plan_section:
+        lines.append("")
+        lines.append(plan_section)
+
+    # Правила действующего режима разрешений: сообщение о входе в режим
+    # сжатие уносит, а режим продолжает действовать.
+    mode_section = str(mode_block or "").strip()
+    if mode_section:
+        lines.append("")
+        lines.append(mode_section)
 
     current_section = render_current_user_intent_block(
         current_user_intent_jsonl

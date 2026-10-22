@@ -41,6 +41,8 @@ def _cost_display(report: CostReport, *, compact: bool) -> Optional[str]:
 
     ``compact`` — формат футера, без пробела перед валютой («0.5₽», не «0.5 ₽»).
     """
+    if report.unknown_only:
+        return "?"
     if not report.has_cost:
         return None
     has_provider = any(
@@ -76,6 +78,8 @@ def format_nonzero_cost(
     if account.is_empty():
         return None
     report: CostReport = compute_cost(account, pricing, model, endpoint_url)
+    if report.unknown_only:
+        return "?"
     if not any(amount > 0 for amount in report.by_currency.values()):
         return None
     return _cost_display(report, compact=False)

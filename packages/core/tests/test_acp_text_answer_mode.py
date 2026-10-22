@@ -2,6 +2,7 @@
 
 import pytest
 from gc_core.config_modules.acp import AcpConfig
+from pydantic import ValidationError
 
 
 def test_acp_config_defaults():
@@ -9,6 +10,7 @@ def test_acp_config_defaults():
     assert cfg.text_answer_mode == "allow"
     assert cfg.finish_gate_mode == "off"
     assert cfg.todo_reminder_steps == 0
+    assert cfg.confirm_timeout_sec == 600
 
 
 def test_acp_config_accepts_overrides():
@@ -16,17 +18,21 @@ def test_acp_config_accepts_overrides():
         text_answer_mode="deny",
         finish_gate_mode="smart",
         todo_reminder_steps=5,
+        confirm_timeout_sec=30,
     )
     assert cfg.text_answer_mode == "deny"
     assert cfg.finish_gate_mode == "smart"
     assert cfg.todo_reminder_steps == 5
+    assert cfg.confirm_timeout_sec == 30
 
 
 def test_acp_config_rejects_unknown_modes():
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         AcpConfig(text_answer_mode="bogus")
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         AcpConfig(finish_gate_mode="bogus")
+    with pytest.raises(ValidationError):
+        AcpConfig(confirm_timeout_sec=-1)
 
 
 def test_load_settings_exposes_acp_keys(tmp_path):
@@ -55,3 +61,4 @@ def test_load_settings_default_acp_keys(tmp_path):
     assert acp.text_answer_mode == "allow"
     assert acp.finish_gate_mode == "off"
     assert acp.todo_reminder_steps == 0
+    assert acp.confirm_timeout_sec == 600

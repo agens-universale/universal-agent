@@ -263,7 +263,15 @@ class TestC3ProcessingResponses:
         )
 
         # Замокаем _request_backend_canonical, чтобы не делать реальных запросов.
-        async def _abackend_stub(messages, state, ctx):
+        async def _abackend_stub(
+            messages,
+            state,
+            ctx,
+            *,
+            resolved=None,
+            set_previous_response_id=True,
+            mute_answer=False,
+        ):
             return [{"role": "assistant", "content": "ok"}], "rid", {}
 
         monkeypatch.setattr(pr, "_arequest_backend_canonical", _abackend_stub)

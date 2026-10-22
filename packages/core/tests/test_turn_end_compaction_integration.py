@@ -424,6 +424,7 @@ def test_turn_end_working_memory_in_summary_message(monkeypatch):
             last_dialog_steps="step tail",
             memory_append_deltas={"knowledge": "note from patch"},
             summarized_messages_count=2,
+            can_propose_plan=True,
         )
 
     monkeypatch.setattr(rsc, "arun_summary_compaction", compact)

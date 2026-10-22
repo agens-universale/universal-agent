@@ -107,7 +107,10 @@ def test_append_user_asks_preserves_initial_across_step_batches():
 
 
 def test_init_subagent_open_turn_without_policy_filter():
-    assignment = 'Assignment:\n{"task": "fix foo"}\n\n<current_context>scope hint</current_context>'
+    assignment = (
+        "<current_context>scope hint</current_context>\n\n"
+        'Assignment:\n{"task": "fix foo"}'
+    )
     state = _make_state()
     init_subagent_open_turn(state, assignment)
 

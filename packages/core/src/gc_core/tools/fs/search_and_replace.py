@@ -456,7 +456,7 @@ Update version string:
             replaced=0,
             match_count=0,
             line_numbers=[],
-            message=error["message"],
+            message=error.get("message") or error.get("reason"),
             suggestions=[],
             suggestions_total=0,
             error=error,

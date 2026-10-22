@@ -19,10 +19,13 @@ from gc_core.execution.contracts import ExecutionFailure
 from gc_core.execution.message_keys import (
     filter_messages_not_in_state as filter_messages_not_in_state,
 )
+from gc_core.execution.ports import port
+from gc_core.message_format.serialization import calc_history_chars_for_trigger
 from gc_core.summarize.compaction import (
     arun_summary_compaction,
     exceeded_summary_triggers,
     history_exceeds_summary_trigger,
+    without_system_messages,
 )
 from gc_core.summarize.config import ResolvedSummaryLimits
 from gc_core.summarize.summary_logging import (
@@ -30,6 +33,7 @@ from gc_core.summarize.summary_logging import (
     aappend_summary_trace_record,
     log_compaction_failed,
     log_pre_run_max_rounds,
+    log_pre_run_no_progress,
     log_token_trigger_no_prompt_tokens,
 )
 
@@ -181,6 +185,8 @@ class RunSummaryCoordinator:
         pre_backend_trigger_reason: str,
         logger: Any | None = None,
         limits_provider: Callable[[], ResolvedSummaryLimits] | None = None,
+        deferred_startup_compaction: bool = False,
+        startup_progress_guard: bool = True,
     ) -> None:
         self._ctx = ctx
         self._state = state
@@ -190,6 +196,8 @@ class RunSummaryCoordinator:
         self._summary_trigger_tokens = summary_trigger_tokens
         self._turn_end_trigger_tokens = turn_end_trigger_tokens
         self._limits_provider = limits_provider
+        self._startup_compaction_pending = deferred_startup_compaction
+        self._startup_progress_guard = startup_progress_guard
         self._is_cli_mode = is_cli_mode
         self._pre_backend_trigger_reason = pre_backend_trigger_reason
         self._logger = logger
@@ -370,82 +378,173 @@ class RunSummaryCoordinator:
         current_messages: list[dict],
         mode: str,
     ) -> None:
-        """Компакция прямо перед вызовом backend'а (основная реализация).
+        """Сжатие после выбора модели; первый вызов догоняет стартовую историю."""
+        startup = self._startup_compaction_pending
+        self._startup_compaction_pending = False
+        reason = "pre_run" if startup else self._pre_backend_trigger_reason
+        rounds = _PRE_RUN_SUMMARY_MAX_ROUNDS if startup else 1
+        guard_progress = startup and self._startup_progress_guard
+        for done in range(1, rounds + 1):
+            before_chars = (
+                self._history_chars(self._state.messages)
+                if guard_progress
+                else 0
+            )
+            compacted = await self._acompact_backend_batch(
+                current_messages, mode, reason
+            )
+            if (
+                not compacted
+                or not startup
+                or self._summary_trigger_chars <= 0
+            ):
+                return
+            if guard_progress and self._startup_stalled(
+                current_messages, before_chars
+            ):
+                self._log_startup_stop(done)
+                return
+        if self._startup_trigger_exceeded():
+            log_pre_run_max_rounds(
+                self._logger,
+                thread_id=getattr(self._thread_session, "thread_id", None),
+                max_rounds=_PRE_RUN_SUMMARY_MAX_ROUNDS,
+            )
 
-        Уезжает в ``arun_agent`` аргументом ``pre_backend_compaction_hook``:
-        корутинную функцию цикл ждёт нативно, без потока из пула.
-        """
-        state = self._state
-        if state.backend_api_mode != "chat_completions":
-            return
-        self._refresh_limits()
-        if (
-            self._summary_trigger_chars <= 0
-            and self._summary_trigger_tokens <= 0
-        ):
-            return
-        if self._summary_trigger_tokens > 0:
-            self._warn_if_token_trigger_blind()
-        hits = exceeded_summary_triggers(
-            state=state,
-            summary_trigger_chars=self._summary_trigger_chars,
-            summary_trigger_tokens=self._summary_trigger_tokens,
+    def _startup_stalled(
+        self, current_messages: list[dict], before_chars: int
+    ) -> bool:
+        """Нет прогресса: текущий батч сам выше порога или история не сократилась."""
+        return (
+            self._history_chars(current_messages) > self._summary_trigger_chars
+            or self._history_chars(self._state.messages) >= before_chars
+        )
+
+    def _log_startup_stop(self, rounds: int) -> None:
+        """Ранняя остановка стартового сжатия — в лог, если порог всё ещё превышен."""
+        if self._startup_trigger_exceeded():
+            log_pre_run_no_progress(
+                self._logger,
+                thread_id=getattr(self._thread_session, "thread_id", None),
+                rounds=rounds,
+            )
+
+    def _startup_trigger_exceeded(self) -> bool:
+        return bool(
+            exceeded_summary_triggers(
+                state=self._state,
+                summary_trigger_chars=self._summary_trigger_chars,
+                summary_trigger_tokens=self._summary_trigger_tokens,
+                tags=self._projection_tags(),
+                strip_think=True,
+            )
+        )
+
+    def _history_chars(self, messages: list[dict]) -> int:
+        return calc_history_chars_for_trigger(
+            without_system_messages(messages),
             tags=self._projection_tags(),
             strip_think=True,
         )
+
+    async def _acompact_backend_batch(
+        self, current_messages: list[dict], mode: str, trigger_reason: str
+    ) -> bool:
+        """Сжать полный контекст, сохранив текущий батч для отправки модели."""
+        state = self._state
+        hits = self._backend_batch_trigger_hits()
         if not hits:
-            return
+            return False
         exceeded_chars, exceeded_tokens = _hit_pair(hits)
 
         state_tail = getattr(state, "messages", None)
         if not isinstance(state_tail, list):
-            return
-
-        keys_before_commit: frozenset[str] | None = None
-        ts = self._thread_session
-        if ts is not None:
-            snap = getattr(ts, "known_keys_snapshot_before_last_batch", None)
-            if isinstance(snap, frozenset):
-                keys_before_commit = snap
+            return False
 
         preserved_batch = build_preserved_batch(
             current_messages=list(current_messages),
             mode=str(mode),
             state_messages=list(state_tail),
-            message_keys_already_persisted=keys_before_commit,
+            message_keys_already_persisted=self._keys_persisted_before_last_batch(),
         )
         suffix_exact = list(current_messages)
         if not _messages_tail_matches(state_tail, suffix_exact):
-            return
+            return False
 
-        # Суммаризуем полный ``state.messages`` (включая preserved_batch); суффикс не снимаем
-        # до вызова. После компакции снова добавляем preserved_batch (сводка + сырой хвост).
-        async with _asummarizing_flag(self._thread_session):
-            await arun_summary_compaction(
-                ctx=self._ctx,
-                state=state,
-                trigger_reason=self._pre_backend_trigger_reason,
-                is_cli_mode=self._is_cli_mode,
-                on_summary_applied=self.on_summary_applied,
-                trigger_threshold_chars=self._summary_trigger_chars,
-                exceeded_chars=exceeded_chars,
-                exceeded_tokens=exceeded_tokens,
-                kept_messages=preserved_batch,
-            )
-        msgs = getattr(state, "messages", None)
-        if isinstance(msgs, list):
-            msgs.extend(preserved_batch)
+        # State заменяется до callback: текущий батч должен вернуться даже
+        # при сбое трассы, снятия флага или отмене после применения сводки.
+        completed = False
+        try:
+            async with _asummarizing_flag(self._thread_session):
+                await arun_summary_compaction(
+                    ctx=self._ctx,
+                    state=state,
+                    trigger_reason=trigger_reason,
+                    is_cli_mode=self._is_cli_mode,
+                    on_summary_applied=self.on_summary_applied,
+                    trigger_threshold_chars=self._summary_trigger_chars,
+                    exceeded_chars=exceeded_chars,
+                    exceeded_tokens=exceeded_tokens,
+                    kept_messages=preserved_batch,
+                )
+            completed = True
+        finally:
+            msgs = getattr(state, "messages", None)
+            if completed or self._restore_after_failed_compaction(
+                msgs, state_tail
+            ):
+                if isinstance(msgs, list):
+                    msgs.extend(
+                        filter_messages_not_in_state(msgs, preserved_batch)
+                    )
+                if self._thread_session is not None and preserved_batch:
+                    await self._thread_session.apersist_batch(
+                        preserved_batch,
+                        previous_response_id=state.previous_response_id,
+                    )
+                current_messages[:] = preserved_batch
+                self._collect_garbage()
+        return True
 
-        if self._thread_session is not None and preserved_batch:
-            await self._thread_session.apersist_batch(
-                preserved_batch,
-                previous_response_id=state.previous_response_id,
-            )
+    def _backend_batch_trigger_hits(self) -> Any:
+        """Сработавшие триггеры сжатия перед вызовом бэкенда; пусто — сжимать
+        не нужно (не `chat_completions` или триггеры выключены)."""
+        if self._state.backend_api_mode != "chat_completions":
+            return None
+        self._refresh_limits()
+        if (
+            self._summary_trigger_chars <= 0
+            and self._summary_trigger_tokens <= 0
+        ):
+            return None
+        if self._summary_trigger_tokens > 0:
+            self._warn_if_token_trigger_blind()
+        return exceeded_summary_triggers(
+            state=self._state,
+            summary_trigger_chars=self._summary_trigger_chars,
+            summary_trigger_tokens=self._summary_trigger_tokens,
+            tags=self._projection_tags(),
+            strip_think=True,
+        )
 
-        # После суммаризации + extend следующий шаг обрабатывает только preserved_batch.
-        current_messages[:] = preserved_batch
-        # C1: старый хвост current_messages отцеплен — собираем циклический мусор.
-        self._collect_garbage()
+    def _keys_persisted_before_last_batch(self) -> frozenset[str] | None:
+        snap = getattr(
+            self._thread_session, "known_keys_snapshot_before_last_batch", None
+        )
+        return snap if isinstance(snap, frozenset) else None
+
+    def _restore_after_failed_compaction(
+        self, msgs: Any, state_tail: list
+    ) -> bool:
+        """Возвращать ли батч после сбоя сжатия. История не заменена — нет:
+        батч в ней остался; заменена — решает патч исполнения (durable-истории
+        до патча возврата не делали)."""
+        if not isinstance(msgs, list) or msgs is state_tail:
+            return False
+        execution_patch = port(self._ctx, "execution_patch")
+        return execution_patch is None or execution_patch(
+            "summary-batch-preservation-v1"
+        )
 
     async def aturn_end_compact_if_needed(self) -> None:
         """Compaction после accept ``turn_finish`` (turn-end trigger).

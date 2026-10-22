@@ -15,6 +15,11 @@ from gc_acp.stop_reason import stop_reason
         ("step_limit", False, "max_turn_requests"),
         ("tool_call_limit", False, "max_turn_requests"),
         ("tool_errors", False, "end_turn"),
+        # Исходы режимов разрешений: план предложен и ждёт решения; судья
+        # действий недоступен — ход остановлен. Оба — обычный конец хода.
+        ("plan_proposed", False, "end_turn"),
+        ("judge_unavailable", False, "end_turn"),
+        ("plan_proposed", True, "cancelled"),
         ("anything_else", False, "end_turn"),
     ],
 )

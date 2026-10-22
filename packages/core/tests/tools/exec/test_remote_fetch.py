@@ -221,3 +221,26 @@ async def test_carrier_script_runs_on_real_python(http_server, tmp_path):
     assert resp.status_code == 200
     assert "привет" in resp.text
     assert str(resp.url).endswith("/b")
+
+
+async def test_backend_hops_stop_at_another_host_when_asked():
+    backend = ScriptedBackend(
+        [
+            _carrier_result(
+                302, [["Location", "https://y/page"]], b"", "https://x/a"
+            )
+        ]
+    )
+    with pytest.raises(RedirectBlocked) as caught:
+        await afetch_via_backend(
+            backend,
+            "https://x/a",
+            {},
+            5,
+            None,
+            allowed_schemes=["https"],
+            url_blacklist=[],
+            same_host_only=True,
+        )
+    assert caught.value.decision.error_type == "redirect_to_other_host"
+    assert len(backend.calls) == 1

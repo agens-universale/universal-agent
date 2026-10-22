@@ -51,6 +51,15 @@ class RuntimeEnv:
     #: зависит запись журнала правок, ``agent_edits.record``); None — ядро как
     #: библиотека.
     run_mode: Optional[str] = None
+    #: Канал объявляет, есть ли за ним человек, который ответит на вопрос
+    #: подтверждения: True — есть (ACP), False — нет (сервер, A2A, воркер
+    #: Temporal без ``human_input``); None — не объявлено, ядро проверяет
+    #: само (TUI, порт ``human_request``, терминал ``gc-cli``).
+    human_channel: Optional[bool] = None
+    #: Слова пользователя в этом канале — запрос внешней системы (вебхук
+    #: сервера, пир A2A), а не воля человека: судья действий видит их
+    #: отдельным видом записи. Субагент наследует признак с рантаймом.
+    external_user_words: bool = False
 
     def with_values(self, **values: Any) -> RuntimeEnv:
         return replace(self, **values)

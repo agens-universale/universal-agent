@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Iterable, Mapping, Optional
 
 from gc_core.attachments.model import ORIGIN_USER, Attachment, attachments_of
+from gc_core.constants.tool_names import PROPOSE_PLAN_TOOL_NAME
 from gc_core.vision.errors import (
     ERR_NO_IMAGE_STORE,
     ERR_NO_VISION_MODEL,
@@ -56,6 +57,9 @@ _SUMMARIZED_PREFIX_RE = re.compile(
 # Новый формат summary (master): <summary> содержит вложенные секционные теги
 # (<task_and_context>…) — разворачиваем их в текст, иначе сырой XML утекает в плашку.
 _SUMMARY_SECTION_RE = re.compile(r"<([a-z][a-z0-9_]*)>(.*?)</\1>", re.DOTALL)
+
+#: Имя тула плана в том виде, в каком его видит маппер (без пространства имён).
+PROPOSE_PLAN_ID = tool_id(PROPOSE_PLAN_TOOL_NAME)
 
 
 def _clean_summary(inner_raw: str) -> str:
@@ -171,20 +175,56 @@ class RenderContext:
     collect_skipped_call_ids): их `function_call` не рендерим (парный skip-output
     подавляется отдельно по маркеру `skipped: true`).
     ``image_index`` — пользовательские картинки батча по подписи (см.
-    collect_image_index): ответ на turn_ask_human берёт из него свои картинки."""
+    collect_image_index): ответ на turn_ask_human берёт из него свои картинки.
+    ``closing_replies`` — call_id закрывающего вызова → текст модели того же
+    ответа (turn_close.closing_replies): по нему отчёт становится итогом."""
 
     skipped_call_ids: frozenset = frozenset()
     image_index: Mapping[str, Attachment] = field(default_factory=dict)
+    closing_replies: Mapping[str, str] = field(default_factory=dict)
 
 
 def collect_render_context(messages: Iterable) -> RenderContext:
     """Pre-pass по payload'ам батча — один на всех вызывающих (лента, превью, сегменты
     сжатого треда)."""
+    # Ленивый импорт: пакет тулов тянет всё ядро, лента грузится без него.
+    from gc_core.tools.turn.turn_close import closing_replies
+
     payloads = list(messages)
     return RenderContext(
         skipped_call_ids=frozenset(collect_skipped_call_ids(payloads)),
         image_index=collect_image_index(payloads),
+        closing_replies=closing_replies(payloads),
     )
+
+
+def with_closing_replies(
+    context: RenderContext, payloads: list
+) -> RenderContext:
+    """Контекст, дополненный текстом ответов из ``payloads``: найденный
+    текст встаёт только на место пустого."""
+    # Ленивый импорт: пакет тулов тянет всё ядро, лента грузится без него.
+    from gc_core.tools.turn.turn_close import closing_replies
+
+    known = context.closing_replies
+    merged = dict(known)
+    for call_id, text in closing_replies(payloads).items():
+        if not known.get(call_id):
+            merged[call_id] = text
+    return replace(context, closing_replies=merged)
+
+
+def response_tail(payloads: list) -> list:
+    """Записи ещё не законченного ответа модели — после последнего
+    результата тула или реплики пользователя. Живой опрос несёт их в
+    следующий тик: текст ответа и его вызов могут прийти разными пачками."""
+    # Ленивый импорт: пакет тулов тянет всё ядро, лента грузится без него.
+    from gc_core.tools.turn.turn_close import starts_new_response
+
+    for i in range(len(payloads) - 1, -1, -1):
+        if starts_new_response(payloads[i]):
+            return payloads[i + 1 :]
+    return list(payloads)
 
 
 # Лимит текста технической врезки (Ж1 батча 4) — см. комментарий у среза ниже.
@@ -369,7 +409,8 @@ def map_message(
         return None
 
     # SUBMIT_SOLUTION call — task_report как kind=agent;
-    # comment кладём sidecar-ключом в копию payload, чтобы не мутировать оригинал.
+    # comment и текст модели того же ответа кладём sidecar-ключами в копию
+    # payload, чтобы не мутировать оригинал.
     if typ == "function_call" and name == "submit_solution":
         args = coerce_args(msg.get("arguments"))
         report = args.get("task_report") or ""
@@ -378,6 +419,9 @@ def map_message(
             payload: dict = dict(msg)
             if isinstance(comment, str) and comment.strip():
                 payload["_submit_comment"] = comment.strip()
+            reply = context.closing_replies.get(call_id or "", "")
+            if reply:
+                payload["_submit_reply"] = reply
             return TraceEvent(
                 no=no,
                 event_ts_utc_iso=ts,
@@ -409,6 +453,40 @@ def map_message(
                 tool_name="intermediate_reply",
             )
         return None
+
+    # TURN_PROPOSE_PLAN call — план как проза агента (markdown): смысл
+    # одобрения несёт баннер, а не строка вызова.
+    if typ == "function_call" and name == PROPOSE_PLAN_ID:
+        plan_text = coerce_args(msg.get("arguments")).get("plan") or ""
+        if isinstance(plan_text, str) and plan_text.strip():
+            return TraceEvent(
+                no=no,
+                event_ts_utc_iso=ts,
+                kind="agent",
+                title="",
+                summary=plan_text.strip(),
+                full_payload=msg,
+                message_id=mid,
+                call_id=call_id,
+                tool_name=name,
+            )
+        return None
+
+    # TURN_PROPOSE_PLAN output — успешный глушим (машинный статус не нужен);
+    # отказ (вне plan, слишком длинный) остаётся виден обычной строкой.
+    if typ == "function_call_output":
+        _pp_out = msg.get("output")
+        if isinstance(_pp_out, str):
+            try:
+                _pp_data = json.loads(_pp_out)
+            except json.JSONDecodeError:
+                _pp_data = None
+            if (
+                isinstance(_pp_data, dict)
+                and tool_id(_pp_data.get("tool")) == PROPOSE_PLAN_ID
+                and _pp_data.get("ok") is True
+            ):
+                return None
 
     # SESSION_TODO call — чек-лист inline (kind=todo); успешный output глушим ниже.
     # Битые аргументы (items is None) — НЕ чек-лист: проваливаемся в generic
@@ -720,7 +798,7 @@ def _arg_summary(name: str, args: dict) -> str:
         a = args.get("action")
         return f"action={a!r}"
 
-    # default: name + 1-3 short scalars
+    # default: name + 1-3 short scalars.
     pairs = []
     for k, v in list(args.items())[:3]:
         shown = (
@@ -832,13 +910,17 @@ def _summarize_output(output: Any, *, error: bool) -> str:
 
     if error:
         err = data.get("error") or data.get("message") or ""
-        # error может быть dict {type, message, ...} — извлекаем message/type.
+        # error может быть dict {type, reason, message, ...}. `reason` — причина
+        # для человека: у отказов защит и режима рядом с ней лежит инструкция
+        # модели (`guidance` либо хвост `message`), ей в ленте не место. Обычная
+        # ошибка тула причины не несёт — её описание и есть message.
         if isinstance(err, dict):
             vision_row = _vision_error_row(err)
             if vision_row:
                 return vision_row
             err = (
-                err.get("message")
+                err.get("reason")
+                or err.get("message")
                 or err.get("type")
                 or json.dumps(err, ensure_ascii=False)
             )

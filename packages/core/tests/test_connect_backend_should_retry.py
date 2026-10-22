@@ -33,3 +33,14 @@ def test_client_errors_are_not_retried():
         assert (
             _default_should_retry_backend_exception(_http_error(code)) is False
         )
+
+
+def test_stream_auth_rejection_is_not_retried():
+    from gc_core.utils.stream_assembler import BackendStreamError
+
+    assert (
+        _default_should_retry_backend_exception(
+            BackendStreamError("Backend stream error", status_code=401)
+        )
+        is False
+    )

@@ -6,7 +6,11 @@ import asyncio
 import logging
 from typing import Any
 
-from gc_core.tools.turn.submit_solution import SubmitSolution
+from gc_core.tools.turn.turn_close import (
+    close_view,
+    closing_reply_of,
+    without_repeated_body,
+)
 
 from gc_chat.responses.index_store import ResponseIndex, ResponseRecord
 from gc_chat.responses.sse import encode_sse, is_terminal
@@ -167,12 +171,19 @@ class TurnRun:
         async with self._emit_lock:
             events = self._tool_events()
             if failed is None and not self.cancel_requested:
-                answer = SubmitSolution.present_result(
-                    getattr(self.agent, "last_answer", None),
-                    shown=self._mapper.shown_answer,
-                )
-                events.extend(self._mapper.flush_unseen(answer))
+                events.extend(self._closing_events())
             _put(self._queue, events)
+
+    def _closing_events(self) -> list[dict]:
+        answer = getattr(self.agent, "last_answer", None)
+        close = close_view(answer, closing_reply_of(self.agent))
+        if close is None:
+            return self._mapper.flush_unseen(answer)
+        shown = bool(self._mapper.shown_answer)
+        close = without_repeated_body(close, self._mapper.last_message_text)
+        return self._mapper.append_answer(
+            close.render(markdown=True, after_shown_reply=shown)
+        )
 
     async def _seal(self, failed: BaseException | None) -> None:
         async with self._seal_lock:

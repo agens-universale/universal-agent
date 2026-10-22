@@ -75,6 +75,12 @@ def test_level_flag_parsed_and_merged_into_overrides(monkeypatch):
     assert ap.extra_config_overrides.get("level") == "light"
 
 
+def test_level_flag_parsed_and_merged_into_overrides_auto(monkeypatch):
+    ap = _parse(["gc-cli", "-q", "hi", "--level", "auto"], monkeypatch)
+    assert ap.run_args.level == "auto"
+    assert ap.extra_config_overrides.get("level") == "auto"
+
+
 def test_level_flag_absent_does_not_add_override(monkeypatch):
     ap = _parse(["gc-cli", "-q", "hi"], monkeypatch)
     assert ap.run_args.level is None

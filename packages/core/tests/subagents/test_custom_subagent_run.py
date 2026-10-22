@@ -70,6 +70,26 @@ class TestChildConfig:
         # Глубина всегда 1.
         assert child.settings.agent.use_local_subagents is False
 
+    async def test_child_inherits_the_channel_declarations(self, tmp_path):
+        """Субагент работает в том же канале: «человека нет» и «слова
+        внешние» доходят до его рантайма и с собственной областью тулов."""
+        agents = _agent_file(tmp_path, tools=("fs_read_file", *REQUIRED))
+        loaded = make_settings(_config(tmp_path, agents)).with_runtime(
+            human_channel=False, external_user_words=True
+        )
+        ctx = await acreate_run_context(loaded)
+        runner = SubagentRunner(
+            ctx, SimpleNamespace(default_model="test-model")
+        )
+        runner._active_tool_name = "subagent_alpha"
+        child = runner._build_child_config()
+        assert child.runtime.human_channel is False
+        assert child.runtime.external_user_words is True
+        assert child.runtime.subagent_tools_allow == (
+            "fs_read_file",
+            *REQUIRED,
+        )
+
     async def test_absent_tools_key_means_all_allowed(self, tmp_path):
         agents = _agent_file(tmp_path)
         _ctx, runner = await _runner(tmp_path, _config(tmp_path, agents))

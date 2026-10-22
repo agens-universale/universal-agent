@@ -15,6 +15,7 @@ from gc_core.execution.tool_schema import (
     OPTIONAL_OMIT_HINT,
     apply_openai_strict_object,
     apply_openai_strict_parameters,
+    apply_openai_strict_schema_tree,
     augment_optional_property_descriptions,
     normalize_optional_empty_as_omit,
     parameters_schema_for_local_validation,
@@ -219,6 +220,62 @@ def test_strict_api_schema_keeps_full_required():
     validation = parameters_schema_for_local_validation(params)
     assert set(params["required"]) == set(params["properties"].keys())
     assert set(validation["required"]) < set(params["required"])
+
+
+def test_strict_schema_tree_include_nested_edit_optional_fields():
+    params = copy.deepcopy(ApplyFileEdits.tool_description()["parameters"])
+    apply_openai_strict_schema_tree(params)
+    edits = params["properties"]["edits"]["items"]
+    assert edits["required"] == [
+        "search",
+        "replace",
+        "expected_matches",
+        "occurrence",
+    ]
+    assert edits["additionalProperties"] is False
+    local = parameters_schema_for_local_validation(params)
+    assert local["properties"]["edits"]["items"]["required"] == [
+        "search",
+        "replace",
+    ]
+    assert edits["required"] == [
+        "search",
+        "replace",
+        "expected_matches",
+        "occurrence",
+    ]
+
+
+@pytest.mark.parametrize(
+    "container",
+    ["properties", "items", "anyOf", "oneOf", "allOf", "$defs", "definitions"],
+)
+def test_strict_schema_tree_cover_nested_schema_containers(container):
+    node = {
+        "type": "object",
+        "properties": {"path": {"type": "string"}, "note": {"type": "string"}},
+        "required": ["path"],
+        "additionalProperties": True,
+    }
+    if container in {"properties", "$defs", "definitions"}:
+        params = {container: {"nested": node}}
+    elif container == "items":
+        params = {"type": "array", "items": node}
+    else:
+        params = {container: [node]}
+    apply_openai_strict_schema_tree(params)
+    assert node["required"] == ["path", "note"]
+    assert node["additionalProperties"] is False
+    assert node["x-optional-keys"] == ["note"]
+    apply_openai_strict_schema_tree(params)
+    assert node["x-optional-keys"] == ["note"]
+    local = parameters_schema_for_local_validation(params)
+    if container in {"properties", "$defs", "definitions"}:
+        assert local[container]["nested"]["required"] == ["path"]
+    elif container == "items":
+        assert local["items"]["required"] == ["path"]
+    else:
+        assert local[container][0]["required"] == ["path"]
 
 
 def test_augment_optional_description_non_strict():

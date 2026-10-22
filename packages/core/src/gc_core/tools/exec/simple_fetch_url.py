@@ -11,6 +11,7 @@ import httpx
 
 from gc_core.loop_detector.constants import READ_PROFILE, loop_warn_on_repeat
 from gc_core.security.path_policy import resolve_tool_context
+from gc_core.security.permission_mode import follows_cross_host_redirects
 from gc_core.security.url_policy import enforce_url_policy
 from gc_core.tools.exec.fetch_url_base import FetchUrlBase, http_error_failure
 from gc_core.tools.exec.redirect_policy import (
@@ -209,6 +210,8 @@ class SimpleFetchUrl(FetchUrlBase):
             _policy.url_allowed_schemes or ["http", "https"]
         )
         _url_blacklist = list(_policy.url_blacklist or [])
+        # Переход на другой хост — по режиму сессии; решает слой безопасности.
+        _same_host_only = not follows_cross_host_redirects(_policy.ctx)
         # Потолок ОБЩИЙ: три тула не должны расходиться в том, сколько
         # переходов считается петлёй.
         _max_redirects = DEFAULT_MAX_REDIRECTS
@@ -236,6 +239,7 @@ class SimpleFetchUrl(FetchUrlBase):
                         normalized_proxy,
                         allowed_schemes=_allowed_schemes,
                         url_blacklist=_url_blacklist,
+                        same_host_only=_same_host_only,
                         max_redirects=_max_redirects,
                     )
                     response.raise_for_status()
@@ -248,6 +252,7 @@ class SimpleFetchUrl(FetchUrlBase):
                     effective_timeout,
                     allowed_schemes=_allowed_schemes,
                     url_blacklist=_url_blacklist,
+                    same_host_only=_same_host_only,
                     max_redirects=_max_redirects,
                 )
                 response.raise_for_status()

@@ -76,6 +76,25 @@ def test_object_without_method():
     assert incoming is not None
     assert incoming.has_id is True
     assert incoming.method is None
+    assert incoming.has_result is False
+    assert incoming.has_error is False
+
+
+def test_response_keeps_result_and_error():
+    ok = parse_line(
+        '{"jsonrpc":"2.0","id":4,"result":{"outcome":{"outcome":"cancelled"}}}'
+    )
+    assert ok is not None
+    assert ok.method is None
+    assert ok.has_id is True
+    assert ok.has_result is True
+    assert ok.result == {"outcome": {"outcome": "cancelled"}}
+    err = parse_line(
+        '{"jsonrpc":"2.0","id":5,"error":{"code":-32601,"message":"Method not found"}}'
+    )
+    assert err is not None
+    assert err.has_error is True
+    assert err.error == {"code": -32601, "message": "Method not found"}
 
 
 async def test_stdout_writer_is_one_line(capsys):

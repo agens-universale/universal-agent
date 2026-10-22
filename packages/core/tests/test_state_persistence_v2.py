@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -128,3 +129,39 @@ def test_get_thread_memory_registers_only_working_memory():
         working_memory={"state": "ok"},
     )
     assert get_thread_memory_registers_from_shared(shared) == {"state": "ok"}
+
+
+def test_execution_snapshot_retains_routing_progress_through_json():
+    from gc_core.auto_routing.policy import Decision
+
+    state = _make_state()
+    state.current_level = "light"
+    state.steps_in_turn = 17
+    state.steps_on_current_level = 4
+    state.turn_safe_level = "default"
+    state.tick_signals = {"loop"}
+    decision = Decision("light", "hold", ("loop",), False)
+    state._tick_decision = ("auto", True, decision, "light")
+    restored = State.from_execution_snapshot(
+        json.loads(json.dumps(state.to_execution_snapshot()))
+    )
+    assert restored.current_level == "light"
+    assert restored.steps_in_turn == 17
+    assert restored.steps_on_current_level == 4
+    assert restored.turn_safe_level == "default"
+    assert restored.tick_signals == {"loop"}
+    assert restored._tick_decision == ("auto", True, decision, "light")
+
+
+def test_execution_snapshot_before_routing_fields_restores_defaults():
+    from gc_core.auto_routing.state_ops import ROUTING_FIELDS
+
+    state = _make_state()
+    payload = state.to_execution_snapshot()
+    for name in (*ROUTING_FIELDS, "turn_messages_start"):
+        payload["data"].pop(name, None)
+    restored = State.from_execution_snapshot(payload)
+    assert restored.current_level is None and restored.tick_signals == set()
+    assert restored.turn_messages_start is None
+    restored.mark_turn_start()
+    assert restored.turn_messages_start == len(restored.messages)

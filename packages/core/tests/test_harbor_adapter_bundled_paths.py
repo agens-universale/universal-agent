@@ -79,6 +79,12 @@ def test_adapter_points_dependency_paths_to_existing_files(monkeypatch):
         .endswith("prompts/chat_completions_intent_guard_prompt.md")
     )
     assert os.path.isfile(paths.chat_completions_intent_guard_prompt_path)
+    assert paths.chat_completions_routing_pair_judge_prompt_path.endswith(
+        "prompts/chat_completions_routing_pair_judge_prompt.md"
+    )
+    assert os.path.isfile(
+        paths.chat_completions_routing_pair_judge_prompt_path
+    )
 
 
 def test_security_guards_pinned_off_for_benches(monkeypatch):

@@ -47,7 +47,7 @@ def test_write_guard_decline_caches_run_and_instructs(monkeypatch, tmp_path):
 
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
 
-    ctx, calls = _tui_ctx("deny")
+    ctx, calls = _tui_ctx("deny_remember")
     launch_root = tmp_path / "project"
     launch_root.mkdir()
     # Outside the launch_root
@@ -91,8 +91,10 @@ def test_write_guard_decline_caches_run_and_instructs(monkeypatch, tmp_path):
         "tui_confirm must NOT be called again (run-cache hit)"
     )
 
-    # Instructive message check
-    err_msg = captured["err"]["message"]
+    # Instructive message check. Повторный вызов отвечает уже не вопросом, а
+    # запомненным запретом человека: его конверт несёт инструкцию модели
+    # отдельным полем `guidance` (как отказы модерации команд).
+    err_msg = captured["err"].get("message") or captured["err"]["guidance"]
     assert "Do NOT retry" in err_msg, (
         f"Expected 'Do NOT retry' in: {err_msg!r}"
     )
@@ -113,7 +115,7 @@ def test_url_policy_decline_caches_and_instructs(monkeypatch, tmp_path):
 
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
 
-    ctx, calls = _tui_ctx("deny")
+    ctx, calls = _tui_ctx("deny_remember")
     _configure(
         ctx,
         {
@@ -151,18 +153,14 @@ def test_url_policy_decline_caches_and_instructs(monkeypatch, tmp_path):
     assert json.loads(res2)["ok"] is False
     assert calls["n"] == 1, "Second call must use cache, no re-prompt"
 
-    # The captured error message from url decline
+    # Повторный вызов отвечает гард из запомненного ответа: тип — гарда,
+    # инструкция модели — в `guidance`. Исход вопроса здесь не проверяем:
+    # вызов идёт вне привязки вызова (её даёт диспетчер тулов), — это делают
+    # тесты `…_names_its_outcome` ниже.
     err = captured.get("err", {})
-    # error type must reflect user cancellation
     assert err.get("type") == "url_blocked_by_policy_cancelled_by_user"
-    # Instructive message check
-    err_msg = err.get("message", "")
-    assert "Do NOT retry" in err_msg, (
-        f"Expected 'Do NOT retry' in: {err_msg!r}"
-    )
-    assert "ask the user" in err_msg, (
-        f"Expected 'ask the user' in: {err_msg!r}"
-    )
+    msg = err.get("guidance", "")
+    assert "Do NOT retry" in msg, f"Expected 'Do NOT retry' in: {msg!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -177,7 +175,7 @@ def test_read_guard_decline_caches_and_instructs(monkeypatch, tmp_path):
 
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
 
-    ctx, calls = _tui_ctx("deny")
+    ctx, calls = _tui_ctx("deny_remember")
     launch_root = tmp_path / "project"
     launch_root.mkdir()
     outside = str(tmp_path / "secret.txt")
@@ -217,10 +215,11 @@ def test_read_guard_decline_caches_and_instructs(monkeypatch, tmp_path):
     assert json.loads(res2)["ok"] is False
     assert calls["n"] == 1, "Second call must use cache, no re-prompt"
 
+    # Повторный вызов отвечает запомненным запретом человека (он сильнее
+    # режима и проверяется первым): свой тип, инструкция модели — в `guidance`.
     err = captured.get("err", {})
-    assert err.get("type") == "read_guard_cancelled_by_user"
-    # Instructive message
-    msg = err.get("message", "")
+    assert err.get("type") == "denied_by_user_for_session"
+    msg = err.get("guidance", "")
     assert "Do NOT retry" in msg, f"Expected 'Do NOT retry' in: {msg!r}"
     assert "ask the user" in msg, f"Expected 'ask the user' in: {msg!r}"
 
@@ -239,7 +238,7 @@ def test_command_moderation_decline_caches_and_instructs(
 
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
 
-    ctx, calls = _tui_ctx("deny")
+    ctx, calls = _tui_ctx("deny_remember")
     _configure(
         ctx,
         {
@@ -290,8 +289,10 @@ def test_command_moderation_decline_caches_and_instructs(
     # Запрет на обход едет отдельным полем guidance (make_block_error), а reason
     # остаётся причиной отказа: раньше одна и та же формулировка лежала в одном
     # словаре дважды — и в reason, и в guidance.
+    # Повторный вызов отвечает запомненным запретом человека, а не повтором
+    # решения модерации: запрет сильнее режима и проверяется первым.
     err = captured.get("err", {})
-    assert err.get("reason") == "User declined the command."
+    assert err.get("reason") == "Denied by the user for this session."
     guidance = err.get("guidance", "")
     assert "Do NOT retry" in guidance, (
         f"Expected 'Do NOT retry' in guidance: {guidance!r}"
@@ -317,7 +318,7 @@ def test_command_guard_decline_caches(monkeypatch, tmp_path):
     agents_md = tmp_path / "AGENTS.md"
     agents_md.write_text("instructions")
 
-    ctx, calls = _tui_ctx("deny")
+    ctx, calls = _tui_ctx("deny_remember")
     _configure(
         ctx,
         {
@@ -354,3 +355,142 @@ def test_command_guard_decline_caches(monkeypatch, tmp_path):
     assert calls["n"] == n_after_first, (
         "Second call must use cache, no re-prompt"
     )
+
+
+# ---------------------------------------------------------------------------
+# отказ после вопроса гарда — исход ответа, как у вопросов режима
+# ---------------------------------------------------------------------------
+
+
+def _answered(call):
+    """Вызов внутри привязки вызова, как в диспетчере тулов: исход вопроса
+    (`confirm_outcome`) кладётся туда."""
+    from gc_core.security.call_scope import call_scope
+
+    with call_scope(state=None, call_id="c1", tool_name="t"):
+        return call()
+
+
+def test_read_guard_no_for_the_session_names_its_outcome(
+    monkeypatch, tmp_path
+):
+    from gc_core.config_modules import env_vars
+    from gc_core.security.read_guard import enforce_read_guard
+
+    monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
+    ctx, _calls = _tui_ctx("deny_remember")
+    launch_root = tmp_path / "project"
+    launch_root.mkdir()
+    _configure(
+        ctx,
+        {
+            "launch_root": str(launch_root),
+            "security.read_guard": {
+                "enabled": True,
+                "mode": "ask",
+                "allowed_read_roots": [str(launch_root)],
+            },
+        },
+    )
+    captured = {}
+
+    class _Tool:
+        _ctx = ctx
+
+        @enforce_read_guard(path_arg="path")
+        def read(self, path):
+            return json.dumps({"ok": True})
+
+        def _read_guard_blocked_result(self, err, *a, **kw):
+            captured["err"] = err
+            return json.dumps({"ok": False, "error": err})
+
+    _answered(lambda: _Tool().read(path=str(tmp_path / "secret.txt")))
+
+    err = captured["err"]
+    assert err["type"] == "read_guard_cancelled_by_user"
+    assert err["reason"] == "Denied by the user for this session."
+    assert "message" not in err
+
+
+def test_url_policy_no_for_the_session_names_its_outcome(
+    monkeypatch, tmp_path
+):
+    from gc_core.config_modules import env_vars
+    from gc_core.security.url_policy import enforce_url_policy
+
+    monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
+    ctx, _calls = _tui_ctx("deny_remember")
+    _configure(
+        ctx,
+        {
+            "launch_root": str(tmp_path),
+            "security.url_policy": {
+                "enabled": True,
+                "mode": "ask",
+                "allowed_schemes": ["https"],
+                "url_blacklist": ["example.com"],
+            },
+        },
+    )
+    captured = {}
+
+    class _Tool:
+        _ctx = ctx
+
+        @enforce_url_policy(url_arg="url")
+        def fetch(self, url):
+            return json.dumps({"ok": True})
+
+        def _url_policy_blocked_result(self, err, *a, **kw):
+            captured["err"] = err
+            return json.dumps({"ok": False, "error": err})
+
+    _answered(lambda: _Tool().fetch(url="https://example.com/page"))
+
+    err = captured["err"]
+    assert err["type"] == "url_blocked_by_policy_cancelled_by_user"
+    assert err["reason"] == "Denied by the user for this session."
+    assert "message" not in err
+
+
+def test_no_to_the_command_question_without_a_judge_is_the_users_refusal(
+    monkeypatch, tmp_path
+):
+    """deny, судья недоступен: человек ответил «нет» — это его отказ, а не
+    «судья недоступен, блокирую»."""
+    from gc_core.config_modules import env_vars
+    from gc_core.security.command_moderation import moderate_command_execution
+
+    monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
+    ctx, calls = _tui_ctx("deny_once")
+    _configure(
+        ctx,
+        {
+            "launch_root": str(tmp_path),
+            "security.command_moderation": {"enabled": True, "mode": "deny"},
+        },
+    )
+    captured = {}
+
+    class _Tool:
+        _ctx = ctx
+
+        @moderate_command_execution(
+            payload_arg="command",
+            tool_name="execute_command",
+            judge_client_extractor=lambda self, *a, **kw: None,
+        )
+        def run(self, command):
+            return json.dumps({"ok": True})
+
+        def _command_moderation_blocked_result(self, err, *a, **kw):
+            captured["err"] = err
+            return json.dumps({"ok": False, "error": err})
+
+    _answered(lambda: _Tool().run(command="rm -rf /tmp/test"))
+
+    assert calls["n"] == 1
+    err = captured["err"]
+    assert err["type"] == "unsafe_command_cancelled_by_user"
+    assert err["reason"] == "Declined by the user."

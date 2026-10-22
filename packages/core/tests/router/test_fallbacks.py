@@ -290,6 +290,118 @@ def test_no_binding_no_degradation_attempt_when_already_active(monkeypatch):
     assert calls["n"] == 1  # ни одной лишней (идентичной) попытки
 
 
+def _judge_text(ctx):
+    return run_coro(
+        llm_chat_client.arequest_chat_completion_text(
+            ctx=ctx,
+            state=_service_state(),
+            messages=[{"role": "user", "content": "hi"}],
+            max_tokens=10,
+            consumer="command_judge",
+            isolated_timeout_sec=60,
+        )
+    )
+
+
+def test_isolated_call_failure_leaves_the_main_model_alive(monkeypatch):
+    """Судья без привязки идёт моделью основного хода. Его 5xx — забота самого
+    судьи: алиас основного не попадает в предохранитель, следующий ход
+    резолвится как обычно; повторов клиента нет, таймаут — свой."""
+    router = _router(
+        {"models": {"glm-local": {}}, "slots": {"default": "glm-local"}},
+        level="default",
+    )
+    ctx = _service_ctx(router)
+    seen = []
+
+    def _fake_policy(*, payload_factory, initial_max_tokens, **kwargs):
+        seen.append(kwargs)
+        raise _http_error(500)
+
+    monkeypatch.setattr(
+        llm_chat_client,
+        "arequest_chat_completions_with_policy",
+        as_coro(_fake_policy),
+    )
+
+    with pytest.raises(httpx.HTTPStatusError):
+        _judge_text(ctx)
+
+    assert router.breaker.is_open("glm-local") is False
+    assert router.resolve("main").alias == "glm-local"
+    assert len(seen) == 1
+    assert seen[0]["use_retry"] is False
+    assert seen[0]["adaptive_retry"] is False
+    assert seen[0]["timeout"] == 60
+
+
+def test_isolated_call_does_not_degrade_on_a_fresh_failure(monkeypatch):
+    """Привязанный судья упал: ни отметки в предохранителе, ни второго
+    запроса активной моделью — повторяет шаг судьи, а не клиент."""
+    router = _router(
+        {
+            "models": {"flash": {}, "glm-local": {}},
+            "slots": {"default": "glm-local"},
+            "assign": {"command_judge": "flash"},
+        },
+        level="default",
+    )
+    ctx = _service_ctx(router)
+    calls = {"n": 0}
+
+    def _fake_policy(*, payload_factory, initial_max_tokens, **kwargs):
+        calls["n"] += 1
+        raise _http_error(500)
+
+    monkeypatch.setattr(
+        llm_chat_client,
+        "arequest_chat_completions_with_policy",
+        as_coro(_fake_policy),
+    )
+
+    with pytest.raises(httpx.HTTPStatusError):
+        _judge_text(ctx)
+
+    assert calls["n"] == 1
+    assert router.breaker.is_open("flash") is False
+    assert router.breaker.is_open("glm-local") is False
+
+
+def test_isolated_call_still_degrades_when_the_alias_is_already_open(
+    monkeypatch,
+):
+    """Деградация на активную модель при уже открытом предохранителе — как
+    раньше: мёртвый алиас не спрашивается, отвечает активная."""
+    router = _router(
+        {
+            "models": {"flash": {}, "glm-local": {}},
+            "slots": {"default": "glm-local"},
+            "assign": {"command_judge": "flash"},
+        },
+        level="default",
+    )
+    router.breaker.trip("flash", "down earlier")
+    ctx = _service_ctx(router)
+    calls = {"n": 0}
+
+    def _fake_policy(*, payload_factory, initial_max_tokens, **kwargs):
+        calls["n"] += 1
+        payload = payload_factory(initial_max_tokens)
+        return {
+            "choices": [{"message": {"content": "active answer"}}]
+        }, payload
+
+    monkeypatch.setattr(
+        llm_chat_client,
+        "arequest_chat_completions_with_policy",
+        as_coro(_fake_policy),
+    )
+
+    assert _judge_text(ctx) == "active answer"
+    assert calls["n"] == 1
+    assert router.breaker.is_open("glm-local") is False
+
+
 # ---------------------------------------------------------------------------
 # finish_gate — двойной отказ → его fail-open семантика; command_judge fail-closed
 # ---------------------------------------------------------------------------
@@ -426,13 +538,28 @@ def test_main_trace_trips_breaker_and_raises_honest_error_with_hint(
         is_tui=False,
     )
 
-    def _once(messages, state, ctx, *, set_previous_response_id=True):
+    def _once(
+        messages,
+        state,
+        ctx,
+        *,
+        resolved=None,
+        set_previous_response_id=True,
+        mute_answer=False,
+    ):
         raise _http_error(500)
 
     monkeypatch.setattr(pr, "_arequest_backend_canonical_once", _once)
 
     with pytest.raises(RuntimeError) as excinfo:
-        run_coro(pr._arequest_backend_canonical([], object(), ctx))
+        run_coro(
+            pr._arequest_backend_canonical(
+                [],
+                object(),
+                ctx,
+                resolved=router.resolve("main", check_breaker=False),
+            )
+        )
 
     message = str(excinfo.value)
     assert "/level" in message
@@ -542,6 +669,10 @@ def test_subagent_ctx_build_both_open_returns_honest_tool_error(tmp_path):
 
 
 def test_main_trace_open_alias_fails_instantly_without_transport(monkeypatch):
+    """Один резолв на вызов: предпроверка открытого алиаса живёт в
+    `resolve_main_for_call` (точка решения), не в `_request_backend_canonical`
+    — она отказывает ДО того, как воронка вообще узнаёт про `resolved`,
+    транспорт не вызывается вовсе."""
     from gc_core import processing_responses as pr
 
     router = _router(
@@ -558,14 +689,22 @@ def test_main_trace_open_alias_fails_instantly_without_transport(monkeypatch):
     )
     calls = {"n": 0}
 
-    def _once(messages, state, ctx, *, set_previous_response_id=True):
+    def _once(
+        messages,
+        state,
+        ctx,
+        *,
+        resolved=None,
+        set_previous_response_id=True,
+        mute_answer=False,
+    ):
         calls["n"] += 1
         return (["msg"], "rid", {})
 
     monkeypatch.setattr(pr, "_arequest_backend_canonical_once", _once)
 
     with pytest.raises(RuntimeError):
-        run_coro(pr._arequest_backend_canonical([], object(), ctx))
+        pr.resolve_main_for_call(object(), ctx)
 
     assert calls["n"] == 0
 
@@ -584,13 +723,28 @@ def test_main_trace_legacy_breaker_not_tracked_error_unchanged(monkeypatch):
         is_tui=False,
     )
 
-    def _once(messages, state, ctx, *, set_previous_response_id=True):
+    def _once(
+        messages,
+        state,
+        ctx,
+        *,
+        resolved=None,
+        set_previous_response_id=True,
+        mute_answer=False,
+    ):
         raise _http_error(500)
 
     monkeypatch.setattr(pr, "_arequest_backend_canonical_once", _once)
 
     with pytest.raises(httpx.HTTPStatusError):
-        run_coro(pr._arequest_backend_canonical([], object(), ctx))
+        run_coro(
+            pr._arequest_backend_canonical(
+                [],
+                object(),
+                ctx,
+                resolved=router.resolve("main", check_breaker=False),
+            )
+        )
 
     assert router.breaker.snapshot() == {}
 
@@ -612,13 +766,28 @@ def test_main_trace_context_overflow_not_treated_as_unavailable(monkeypatch):
         is_tui=False,
     )
 
-    def _once(messages, state, ctx, *, set_previous_response_id=True):
+    def _once(
+        messages,
+        state,
+        ctx,
+        *,
+        resolved=None,
+        set_previous_response_id=True,
+        mute_answer=False,
+    ):
         raise ValueError("maximum context length exceeded")
 
     monkeypatch.setattr(pr, "_arequest_backend_canonical_once", _once)
 
     with pytest.raises(ValueError, match="maximum context length"):
-        run_coro(pr._arequest_backend_canonical([], object(), ctx))
+        run_coro(
+            pr._arequest_backend_canonical(
+                [],
+                object(),
+                ctx,
+                resolved=router.resolve("main", check_breaker=False),
+            )
+        )
 
     assert router.breaker.snapshot() == {}
 
@@ -717,8 +886,10 @@ async def test_subagent_first_call_failure_restarts_on_active_model(tmp_path):
     assert parent_router.breaker.is_open("deepseek-max") is True
 
 
+@pytest.mark.parametrize("independent", [True, False])
 async def test_subagent_non_first_call_failure_degrades_without_restart(
     tmp_path,
+    independent,
 ):
     from gc_core.tools.subagents.runner import SubagentRunner
 
@@ -730,6 +901,7 @@ async def test_subagent_non_first_call_failure_degrades_without_restart(
     cfg = _subagent_cfg(tmp_path, raw)
     parent_router = _router(raw, level="default")
     parent_ctx = _subagent_ctx(cfg, parent_router)
+    parent_ctx.subagent_independent_auto = independent
     orch = _subagent_orchestrator_state()
     runner = SubagentRunner(parent_ctx, orch, cfg)
 
@@ -746,8 +918,18 @@ async def test_subagent_non_first_call_failure_degrades_without_restart(
                 seeded_trace_message
             ]
             raise _http_error(500)
-        # Деградация: трейс сохранён (та же child_state.messages передана как batch).
-        assert seeded_trace_message in messages
+        # История сохраняется в State; новая версия не выдаёт её за новый batch.
+        assert seeded_trace_message in child_state.messages
+        if independent:
+            from gc_core.message_policy.user_message_policy import (
+                extract_real_user_message_text,
+            )
+
+            assert len(messages) == 1
+            assert extract_real_user_message_text(messages[0]) == ""
+            assert seeded_trace_message not in messages
+        else:
+            assert seeded_trace_message in messages
         return "ok"
 
     result = await runner.arun(
@@ -874,16 +1056,25 @@ async def test_unpinned_subagent_failure_trips_breaker_and_propagates_to_main(
     assert payload2["ok"] is False
     assert calls["n"] == 0
 
-    # main следующего хода — мгновенный честный класс 2, без обращения в транспорт.
+    # main следующего вызова — мгновенный честный класс 2 из resolve_main_for_call
+    # (точка решения), без обращения в транспорт.
     once_calls = {"n": 0}
 
-    def _once(messages, state, ctx, *, set_previous_response_id=True):
+    def _once(
+        messages,
+        state,
+        ctx,
+        *,
+        resolved=None,
+        set_previous_response_id=True,
+        mute_answer=False,
+    ):
         once_calls["n"] += 1
         return (["msg"], "rid", {})
 
     monkeypatch.setattr(pr, "_arequest_backend_canonical_once", _once)
     with pytest.raises(RuntimeError):
-        await pr._arequest_backend_canonical([], object(), parent_ctx)
+        pr.resolve_main_for_call(object(), parent_ctx)
     assert once_calls["n"] == 0
 
 

@@ -26,6 +26,8 @@ async def test_bad_store_fails_before_mcp_discovery(monkeypatch, tmp_path):
             "дискавери не должна начаться на негодном хранилище"
         )
 
+    # Контекст собирает базовый реестр (`abuild_tools_data`) и декорирует его
+    # сам (автовыбор §5.2 п.4) — дискавери MCP идёт в этой сборке.
     monkeypatch.setattr(
         run_context, "abuild_tools_data", _tools_should_not_run
     )

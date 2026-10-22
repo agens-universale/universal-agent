@@ -45,6 +45,7 @@ class LocalOperations:
                     state,
                     self.ctx,
                     set_previous_response_id=request.set_previous_response_id,
+                    mute_answer=request.mute_answer,
                 )
                 # State.set_resp_headers_metadata consumes only x-target. Raw
                 # transport headers (cookies, credentials) must not cross the
@@ -63,6 +64,7 @@ class LocalOperations:
                     consumer=request.consumer,
                     request_label=request.request_label,
                     payload_overrides=request.payload_overrides,
+                    isolated_timeout_sec=request.isolated_timeout_sec,
                 )
                 result.text = outcome.text
                 result.finish_reason = outcome.finish_reason

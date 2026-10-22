@@ -39,12 +39,12 @@ def is_protected_from_tracking(
     *,
     protected_extra: Sequence[str] | None = None,
 ) -> bool:
-    """Agent-facing protected: operational / instructions — не трекаем."""
+    """Agent-facing protected: operational / instructions / vcs — не трекаем."""
     ps = protected_paths(
         cwd=str(launch_root), extra=list(protected_extra or ())
     )
     cls = classify_path(path, ps)
-    return cls in ("operational", "instructions")
+    return cls in ("operational", "instructions", "vcs")
 
 
 def canonical_path_key(

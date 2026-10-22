@@ -3,6 +3,8 @@
 from dataclasses import dataclass, field
 from typing import Any
 
+from gc_core.auto_routing.request_equivalence import PreparedRequestEquivalence
+from gc_core.execution.contracts import ExecutionFailure
 from gc_core.tools.subagents.runner_preparation import PreparedChildState
 from gc_core.tools.subagents.runner_transfer import SubagentTransferState
 
@@ -32,6 +34,7 @@ class ChildRequest:
 class PreparedChild:
     context: PreparedContext
     state: PreparedChildState
+    request_equivalence: PreparedRequestEquivalence | None = None
 
 
 @dataclass(frozen=True)
@@ -47,3 +50,10 @@ class ChildResult:
     checkpoint: ChildCheckpoint
     #: Сообщения, пришедшие ребёнку после конца его цикла: их получает родитель.
     undelivered: list[dict] = field(default_factory=list)
+
+
+def child_independent_auto(context: dict[str, Any]) -> bool:
+    value = context.get("independent_auto", False)
+    if type(value) is not bool:
+        raise ExecutionFailure("Invalid child routing contract version")
+    return value

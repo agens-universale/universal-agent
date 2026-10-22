@@ -47,7 +47,7 @@ _ASSIGN_SCALAR_FIELDS = (
     "summary",
     "intent_scope",
     "memory_compaction",
-    "auto_judge",
+    "routing_judge",
     "vision",
 )
 

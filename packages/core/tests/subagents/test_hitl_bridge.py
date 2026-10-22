@@ -12,9 +12,12 @@ from gc_core.execution.progress import (
     child_progress_enabled,
 )
 from gc_testkit.helpers.tool_ctx import CallableTool
+from gc_testkit.settings import make_settings
 
 
 def _child_ctx(sink, *, tool_name="subagent_worker"):
+    # Настройки нужны: `confirm_available` первым читает объявление канала
+    # из рантайма контекста.
     return SimpleNamespace(
         run_id="child_1",
         parent_call_id="parent_fc",
@@ -22,6 +25,7 @@ def _child_ctx(sink, *, tool_name="subagent_worker"):
         subagent_tool_name=tool_name,
         is_tui=True,
         logger=None,
+        settings=make_settings().settings,
     )
 
 
@@ -59,7 +63,7 @@ class TestChildCtxCopiesTuiConfirm:
                 "auxiliary_llm": {"max_tokens": 128, "completion_kwargs": {}},
             },
         }
-        confirm = MagicMock(return_value="once")
+        confirm = MagicMock(return_value="allow_once")
         from gc_testkit.helpers.tool_ctx import local_ctx
 
         parent = local_ctx(cfg)
@@ -73,21 +77,29 @@ class TestChildCtxCopiesTuiConfirm:
         parent.tools_description = []
         parent.is_tui = True
         parent.tui_confirm = confirm
+        confirm_port = MagicMock(return_value="allow_once")
+        parent.confirm_request = confirm_port
         parent.permission_store = object()
         # Порт «спросить человека»: без него дочерний `turn_ask_human` читал
         # `input()` в потоке пула, а подмена stdin в TUI потоко-локальна —
         # поток делил настоящую консоль с Textual, и ход висел навсегда.
         ask_port = MagicMock(return_value="синий")
         parent.ask_human = ask_port
+        # Отказ подтверждения родителя (A2A ставит deny_once). Без копии
+        # guard ребёнка при tty уходит в input() процесса.
+        confirm_port = MagicMock(return_value="deny_once")
+        parent.confirm_request = confirm_port
         runner = SubagentRunner(parent, state, cfg)
         runner._parent_call_id = "call_x"
         child = await runner._build_child_ctx(tool_name="subagent_worker")
         assert child.tui_confirm is confirm
+        assert child.confirm_request is confirm_port
         assert child.subagent_tool_name == "subagent_worker"
         assert (
             getattr(child, "permission_store", None) is parent.permission_store
         )
         assert getattr(child, "ask_human", None) is ask_port
+        assert getattr(child, "confirm_request", None) is confirm_port
 
 
 class TestAskHumanEmit:
@@ -141,7 +153,7 @@ class TestConfirmEmit:
         def tui_confirm(*, title, question, fields, via=None):
             seen["via"] = via
             seen["question"] = question
-            return "once"
+            return "allow_once"
 
         ctx = _child_ctx(sink)
         ctx.tui_confirm = tui_confirm

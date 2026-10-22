@@ -266,7 +266,7 @@ def test_filtered_gate_row_is_dimmed_child_flat():
     ребёнка, найденного фильтром при невидимом родителе (спец-случай
     ревизии 6 «одиночный = обычная строка» отменён — серый сигнал ребёнка
     действует ВЕЗДЕ). Набранный фильтр «gate», под который родитель /rigor
-    не подходит (не попадает в базу), не мешает `/gate` рисоваться DIM —
+    не подходит (не попадает в базу), не мешает `/gate` рисоваться цветом второстепенного ключа (SUB_INK) —
     принадлежность пресету («owning preset», `_owning_preset`) — чистые
     данные, видимость родителя её больше не гейтит."""
     pytest.importorskip("textual")
@@ -289,8 +289,8 @@ def test_filtered_gate_row_is_dimmed_child_flat():
         " /gate"
     ) and not gate_row.plain.startswith("  /gate")  # flat
     assert any(
-        p.DIM.lower() in str(s.style).lower() for s in gate_row.spans
-    )  # но серый (ревизия 7)
+        p.SUB_INK.lower() in str(s.style).lower() for s in gate_row.spans
+    )  # но цветом второстепенного ключа
 
     pal.set_filter(
         ""
@@ -307,7 +307,8 @@ def test_filtered_gate_row_is_dimmed_child_flat():
         " /gate"
     ) and not gate_row_expanded.plain.startswith("  /gate")
     assert any(
-        p.DIM.lower() in str(s.style).lower() for s in gate_row_expanded.spans
+        p.SUB_INK.lower() in str(s.style).lower()
+        for s in gate_row_expanded.spans
     )
 
 

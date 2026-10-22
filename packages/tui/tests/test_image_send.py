@@ -275,6 +275,46 @@ async def test_ask_human_reply_with_images_goes_as_human_answer(tmp_path):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("typed", ["/Users/me/shot", "!важно"])
+async def test_question_answer_with_slash_or_bang_keeps_its_images(
+    tmp_path, typed
+):
+    """Пока висит вопрос, текст с «/» (не команда) или «!» — ответ агенту,
+    и картинки едут с ним: отказ «картинки с командой» — только командам."""
+    threads = tmp_path / "threads"
+    tid = "c" * 32
+    _thread(threads, tid)
+    async with _app(threads).run_test() as pilot:
+        scr = pilot.app.screen
+        _activate(pilot.app, scr, threads, tid)
+        runner = _AskingRunner()
+        pilot.app.active_runner = runner
+        scr._on_ask_human_event(
+            TraceEvent(
+                no=1,
+                event_ts_utc_iso="2026-09-24T10:00:00+00:00",
+                kind="ask_human",
+                title="ask_human",
+                summary="Где ошибка?",
+                full_payload={},
+                message_id="ah_1",
+                call_id="call_1",
+                tool_name="ask_human",
+            ),
+            live=True,
+        )
+        await pilot.pause()
+        att = make_attachment_file(4, tmp_path)
+        text = f"{typed} {chip_text(4)}"
+        await scr.on_command_text_area_submitted(
+            CommandTextArea.Submitted(value=text, attachments=(att,))
+        )
+        await pilot.pause()
+        [answer] = runner.submitted
+        assert (answer.text, answer.attachments) == (text, (att,))
+
+
+@pytest.mark.asyncio
 async def test_send_resets_image_chips(tmp_path):
     async with _app(tmp_path / "threads").run_test() as pilot:
         scr = pilot.app.screen

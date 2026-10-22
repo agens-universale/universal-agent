@@ -10,6 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 from gc_core.settings import (
+    RuntimeEnv,
     default_settings,
     is_explicit,
     override_settings,
@@ -216,3 +217,18 @@ def test_section_override_marks_only_its_leaves_in_provenance():
     assert loaded.provenance.source("agent.max_steps").layer == "cli"
     assert loaded.provenance.source("agent.model").layer != "cli"
     assert cli_forces_legacy_model(loaded) is False
+
+
+def test_channel_declarations_are_runtime_fields():
+    """Канал объявляет о себе рантаймом: по умолчанию «не объявлено» (ядро
+    проверяет человека само) и слова пользователя свои."""
+    runtime = RuntimeEnv()
+    assert runtime.human_channel is None
+    assert runtime.external_user_words is False
+    declared = (
+        make_settings()
+        .with_runtime(human_channel=False, external_user_words=True)
+        .runtime
+    )
+    assert declared.human_channel is False
+    assert declared.external_user_words is True

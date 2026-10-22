@@ -112,6 +112,8 @@ _RUNTIME_PUBLIC = frozenset(
         "subagent_tools_stop",
         "os_backend",
         "run_mode",
+        "human_channel",
+        "external_user_words",
     }
 )
 _RUNTIME_WORKER_ONLY = frozenset(

@@ -42,6 +42,15 @@ def test_intent_guard_prompt_under_bundled_root():
     assert Path(DEFAULT_INTENT_GUARD_PROMPT_PATH).is_file()
 
 
+def test_routing_pair_judge_prompt_under_bundled_root():
+    from gc_core.auto_routing.pair_judge import DEFAULT_PROMPT_PATH
+
+    assert Path(DEFAULT_PROMPT_PATH) == _bp(
+        "prompts", "chat_completions_routing_pair_judge_prompt.md"
+    )
+    assert Path(DEFAULT_PROMPT_PATH).is_file()
+
+
 def test_command_judge_prompts_under_bundled_root(
     foreign_prompt_workspace, tmp_path
 ):

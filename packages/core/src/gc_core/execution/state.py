@@ -6,6 +6,8 @@ from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional
 
+from gc_core.auto_routing.policy import Decision
+from gc_core.auto_routing.state_ops import ROUTING_FIELDS, ensure_fields
 from gc_core.execution.output_store import ToolCallOutputsStore
 from gc_core.intent_log import deserialize_list, flush
 from gc_core.intent_log.serialize import serialize_for_meta
@@ -31,9 +33,32 @@ class SharedStateData:
     # Субагент ведёт свой — см. ``State.session_todo``: shared у них общий, и
     # replace-семантика затирала бы план родителя.
     session_todo: List[Dict[str, str]] = field(default_factory=list)
+    # Режим разрешений, выбранный в сессии (Shift+Tab, флаг запуска). None —
+    # выбора не было, действует `security.permissions.default_mode`. Субагент
+    # наследует режим родителя: shared у них общий.
+    permission_mode: Optional[str] = None
+    # План режима plan: {text, status, approved_mode, updated_at}
+    # (`gc_core.plan_store`). None — плана нет.
+    plan: Optional[Dict[str, Any]] = None
+    # Какой режим объявлен КОРНЕВОМУ агенту ("plan" | "auto" | None): здесь
+    # отметка сохраняется в мете треда между прогонами. Читать и писать —
+    # через `State.mode_announced`; у субагента отметка своя, в его State.
+    mode_announced: Optional[str] = None
+    # Человек убрал план (`/plan clear`): следующий прогон один раз сообщит об
+    # этом модели — в истории и в сводке план ещё виден.
+    plan_removed_notice: bool = False
+    # Предохранитель судьи действий (auto) — как у эталона: 3 отказа
+    # подряд или 20 за сессию ставят паузу; на паузе спорное действие решает
+    # человек, а спросить некого — отказ без судьи. Счёт и пауза общие для
+    # сессии и её субагентов (shared у них один) и снимаются только «да»
+    # человека (`gc_core.security.action_judge_step`).
+    judge_denials_in_a_row: int = 0
+    judge_denials_total: int = 0
+    judge_paused: bool = False
 
 
-STATE_FIELDS = (
+STATE_FIELDS = ROUTING_FIELDS + (
+    "turn_messages_start",
     "agent_md_path",
     "agentsmd_override",
     "backend_api_mode",
@@ -65,6 +90,9 @@ STATE_FIELDS = (
     "messages",
     "mode",
     "parent_state_id",
+    "plan_proposed",
+    "judge_failures_in_a_row",
+    "judge_stop_reason",
     "previous_response_id",
     "prepared_metadata",
     "project_memory_content_hash",
@@ -76,6 +104,7 @@ STATE_FIELDS = (
     "state_id",
     "steps",
     "stop_requested",
+    "subagent_mode_announced",
     "subagent_todo",
     "system_prompt_id",
     "terminal_outcome",
@@ -106,6 +135,7 @@ STATE_FIELDS = (
 #: Транзиентные кэши зрения: считаются на каждый запрос (спека изображений
 #: §9) и в снимок не идут — после восстановления берут эти умолчания.
 TRANSIENT_STATE_DEFAULTS = {
+    "closing_reply": str,
     "vision_audience": lambda: None,
     "vision_live_ids": frozenset,
     "vision_request_limit": lambda: None,
@@ -136,6 +166,27 @@ class ExecutionState:
         else:
             self.shared.session_todo = items
 
+    @property
+    def mode_announced(self) -> Optional[str]:
+        """Какой режим ЭТОМУ агенту уже объявлен ("plan" | "auto" | None).
+
+        Режим общий живой, а сообщение о нём каждый агент получает в свою
+        историю — отметка своя у каждого. Корень хранит её в ``shared``: там
+        она переживает прогоны в мете треда. Субагент делит ``shared`` с
+        родителем, поэтому держит свою в собственном поле: его объявление не
+        должно «съесть» объявление корня.
+        """
+        if self.parent_state_id is not None:
+            return self.subagent_mode_announced
+        return self.shared.mode_announced
+
+    @mode_announced.setter
+    def mode_announced(self, value: Optional[str]) -> None:
+        if self.parent_state_id is not None:
+            self.subagent_mode_announced = value
+        else:
+            self.shared.mode_announced = value
+
     def set_resp_headers_metadata(self, headers):
         x_target = headers.get("x-target")
         if x_target and self.x_target is None:
@@ -143,6 +194,10 @@ class ExecutionState:
 
     def add_message(self, message):
         self.messages.append(message)
+
+    def mark_turn_start(self) -> None:
+        if self.turn_messages_start is None:
+            self.turn_messages_start = len(self.messages)
 
     def set_previous_response_id(self, previous_response_id):
         self.previous_response_id = previous_response_id
@@ -220,6 +275,15 @@ class ExecutionState:
             for name in STATE_FIELDS
             if hasattr(self, name)
         }
+        for name in ("tick_signals",):
+            if name in data:
+                data[name] = sorted(data[name])
+        memo = data.get("_tick_decision")
+        if memo is not None:
+            decision = asdict(memo[2]) if memo[2] is not None else None
+            if decision is not None:
+                decision["heuristics"] = list(decision["heuristics"])
+            data["_tick_decision"] = [memo[0], memo[1], decision, memo[3]]
         data["shared"] = asdict(self.shared)
         data["tool_call_outputs_store"] = (
             self.tool_call_outputs_store.to_dict()
@@ -245,6 +309,18 @@ class ExecutionState:
                 f"Unexpected execution fields: {sorted(unexpected)}"
             )
         state = cls.__new__(cls)
+        ensure_fields(data)
+        for name in ("tick_signals",):
+            data[name] = set(data[name])
+        memo = data.get("_tick_decision")
+        if memo is not None:
+            decision = memo[2]
+            if decision is not None:
+                decision = Decision(
+                    **{**decision, "heuristics": tuple(decision["heuristics"])}
+                )
+            data["_tick_decision"] = (memo[0], memo[1], decision, memo[3])
+        data.setdefault("turn_messages_start", None)
         state.__dict__ = data
         state.shared = SharedStateData(**data["shared"])
         state.tool_call_outputs_store = ToolCallOutputsStore.from_dict(

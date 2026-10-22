@@ -4,11 +4,12 @@ Layout: Horizontal(prefix-Static, content-Static) — wrap длинных args/r
 происходит внутри content-колонки = hanging indent (continuation выравнивается
 под началом имени тула, col 5 относительно левого края строки).
 
-Статус-глиф живёт в prefix-Static (▸/✓/✗/·), content-Static несёт имя/args/хвост.
+Статус-глиф живёт в prefix-Static (▸/‖/✓/✗/·), content-Static несёт имя/args/хвост.
 
 Фазы:
 - waiting  — call уже нарисован, execute ещё не начался: · dim, без elapsed;
 - running  — сейчас исполняется: ▸ + elapsed (+ опциональный live_status);
+  на человеко-ожидании (pause) — ‖ без дыхания, elapsed заморожен;
 - done     — есть result: ✓/✗;
 - interrupted — стоп/обрыв до output: · + «прервано».
 """
@@ -32,9 +33,14 @@ from gc_tui.palette import RUN_COLOR as _RUN
 from gc_tui.palette import TOOL_NAME as _TOOL_NAME
 from gc_tui.services.duration_format import format_duration
 from gc_tui.widgets.click_model import ClickModelMixin
+from gc_tui.widgets.static_content import update_if_changed
 
+# Running-строка на человеко-ожидании (confirm / ask_human): статичный глиф
+# паузы в базовом амбере, без дыхания; elapsed заморожен. Не ⏸: тот числится
+# эмодзи, и часть терминалов (Windows Terminal) рисует его в две клетки.
+_PAUSE_GLYPH = "‖"
 # Пульс яркости running-глифа ▸: амбер тускло→ярко→тускло (ping-pong, пик —
-# RUN_COLOR). Двигается на собственном 0.1с-тике строки (см. on_mount) → плавное
+# RUN_COLOR). Двигается на собственном 0.1с-тике строки (см. _sync_pulse) → плавное
 # дыхание 10fps; 10 кадров → цикл ≈1.0с.
 _PULSE_SHADES = [
     "#8a6a3a",
@@ -114,7 +120,9 @@ class ToolCallRow(ClickModelMixin, Widget):
         self._content_static: Optional[Static] = None
         self._prefix_static: Optional[Static] = None
         self._pulse_frame: int = 0
-        self._pulse_timer = None  # собственный 0.1с-тик дыхания ▸ (on_mount)
+        self._pulse_timer = (
+            None  # собственный 0.1с-тик дыхания ▸ (_sync_pulse)
+        )
         # line-tool на самом widget'е — color: $dim каскадится в prefix-Static.
         self.add_class("line-tool")
         if self._nested:
@@ -139,7 +147,27 @@ class ToolCallRow(ClickModelMixin, Widget):
             yield self._content_static
 
     def on_mount(self) -> None:
-        self._pulse_timer = self.set_interval(0.1, self._pulse_tick)
+        self._sync_pulse()
+
+    @property
+    def _is_live(self) -> bool:
+        """Running-строка: не waiting, без результата, не прервана."""
+        return not (
+            self._waiting or self._result is not None or self._interrupted
+        )
+
+    def _sync_pulse(self) -> None:
+        """Таймер дыхания ▸ есть только у запущенной running-строки.
+
+        Waiting, результат, прерывание, пауза на человеко-ожидании или
+        виджет ещё не запущен (рендер истории) — без таймера. Идемпотентно.
+        """
+        if self._is_live and self._paused_at is None and self.is_running:
+            if self._pulse_timer is None:
+                self._pulse_timer = self.set_interval(0.1, self._pulse_tick)
+        elif self._pulse_timer is not None:
+            self._pulse_timer.stop()
+            self._pulse_timer = None
 
     def _pulse_tick(self) -> None:
         """Кадр дыхания ▸. Waiting / done / interrupted — не тикаем."""
@@ -149,17 +177,18 @@ class ToolCallRow(ClickModelMixin, Widget):
                 return
         except Exception:
             pass
-        if self._waiting or self._result is not None or self._interrupted:
+        if not self._is_live:
             return
         self._pulse_frame += 1
         if self._prefix_static is not None:
-            self._prefix_static.update(self._render_prefix())
+            # Меняется только цвет ▸ (ширина глифа постоянна) — без layout.
+            self._prefix_static.update(self._render_prefix(), layout=False)
 
     def _update(self) -> None:
         if self._prefix_static is not None:
-            self._prefix_static.update(self._render_prefix())
+            update_if_changed(self._prefix_static, self._render_prefix())
         if self._content_static is not None:
-            self._content_static.update(self._render_content())
+            update_if_changed(self._content_static, self._render_content())
 
     def set_waiting(self) -> None:
         """Перевести в waiting (·, без elapsed). После result/interrupt — no-op."""
@@ -169,6 +198,7 @@ class ToolCallRow(ClickModelMixin, Widget):
             return
         self._waiting = True
         self._live_status = None
+        self._sync_pulse()
         self._update()
 
     def set_active(self) -> None:
@@ -181,11 +211,12 @@ class ToolCallRow(ClickModelMixin, Widget):
         self._start_monotonic = time.monotonic()
         self._paused_at = None
         self._paused_total = 0.0
+        self._sync_pulse()
         self._update()
 
     def set_live_status(self, text: Optional[str]) -> None:
         """Хвост running-строки (step/last). None — только `· Ns`."""
-        if self._result is not None or self._interrupted or self._waiting:
+        if not self._is_live:
             return
         self._live_status = text
         self._update()
@@ -195,6 +226,7 @@ class ToolCallRow(ClickModelMixin, Widget):
         self._is_error = error
         self._waiting = False
         self._live_status = None
+        self._sync_pulse()
         self._update()
 
     def mark_interrupted(self) -> None:
@@ -204,28 +236,28 @@ class ToolCallRow(ClickModelMixin, Widget):
         self._interrupted = True
         self._waiting = False
         self._live_status = None
+        self._sync_pulse()
         self._update()
 
     def refresh_running_elapsed(self) -> None:
         """Тик elapsed (~0.25с). Waiting / done / interrupted — no-op."""
-        if self._waiting or self._result is not None or self._interrupted:
+        if not self._is_live:
             return
         self._update()
 
     def pause(self) -> None:
         """Заморозить elapsed на человеко-ожидании. Waiting/done — no-op."""
-        if (
-            self._paused_at is None
-            and self._result is None
-            and not self._interrupted
-            and not self._waiting
-        ):
+        if self._paused_at is None and self._is_live:
             self._paused_at = time.monotonic()
+            self._update()
+        self._sync_pulse()
 
     def resume(self) -> None:
         if self._paused_at is not None:
             self._paused_total += time.monotonic() - self._paused_at
             self._paused_at = None
+            self._update()
+        self._sync_pulse()
 
     def _elapsed_s(self) -> int:
         now = (
@@ -239,6 +271,8 @@ class ToolCallRow(ClickModelMixin, Widget):
         if self._result is None:
             if self._interrupted or self._waiting:
                 return "·", _DIM
+            if self._paused_at is not None:
+                return _PAUSE_GLYPH, _RUN
             return "▸", _PULSE_SHADES[self._pulse_frame % len(_PULSE_SHADES)]
         if self._is_error:
             return "✗", _ERR

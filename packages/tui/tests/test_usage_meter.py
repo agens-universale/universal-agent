@@ -54,7 +54,7 @@ _MODEL = "deepseek/deepseek-v4"
 
 def _meta(input_tokens: int, output_tokens: int) -> dict:
     acc = UsageAccount()
-    acc.add(CATEGORY_MAIN, input_tokens, output_tokens)
+    acc.add(CATEGORY_MAIN, input_tokens, output_tokens, model=_MODEL)
     return acc.to_meta()
 
 
@@ -132,7 +132,7 @@ def test_footer_shows_provider_currency_and_tilde_on_mixed():
         billed=True,
         currency="$",
     )
-    acc.add(CATEGORY_MAIN, 500_000, 50_000)
+    acc.add(CATEGORY_MAIN, 500_000, 50_000, model=_MODEL)
     text = render_usage_meter(acc.to_meta(), acc.to_meta(), _PRICING_RUB, "m")
     assert "10.5$+60.0₽~" in text.plain
 
@@ -150,7 +150,7 @@ def test_footer_shows_every_currency_never_hides_money():
         billed=True,
         currency="$",
     )
-    acc.add(CATEGORY_MAIN, 500_000, 50_000)
+    acc.add(CATEGORY_MAIN, 500_000, 50_000, model=_MODEL)
     text = render_usage_meter(
         acc.to_meta(), acc.to_meta(), _PRICING_RUB, "m"
     ).plain
@@ -180,8 +180,7 @@ def test_footer_marks_unpriced_with_question():
 def test_footer_marks_two_currencies_and_unpriced_together():
     # Худший случай: провайдера меняли посреди треда (две валюты факта), а тарифа
     # нет — значит часть трат осталась без цены вовсе. Знаки «+» и «?» вместе.
-    # Тильды здесь быть не может: тариф резолвится на весь отчёт, поэтому «часть
-    # посчитана по тарифу» и «тарифа нет» — взаимоисключающие состояния.
+    # Тильды здесь нет: в этом сценарии тариф не задан ни для одной модели.
     acc = UsageAccount()
     acc.add(
         CATEGORY_MAIN,
@@ -226,7 +225,7 @@ def test_sessions_shows_all_currencies():
         billed=True,
         currency="$",
     )
-    acc.add(CATEGORY_MAIN, 500_000, 50_000)
+    acc.add(CATEGORY_MAIN, 500_000, 50_000, model=_MODEL)
     # Карточка сессии шире футера — обе валюты помещаются полностью.
     assert (
         format_nonzero_cost(acc.to_meta(), _PRICING_RUB, "m")
@@ -248,9 +247,9 @@ def test_footer_segments_keep_their_own_currencies():
         billed=True,
         currency="$",
     )
-    session.add(CATEGORY_MAIN, 500_000, 50_000)
+    session.add(CATEGORY_MAIN, 500_000, 50_000, model=_MODEL)
     request = UsageAccount()
-    request.add(CATEGORY_MAIN, 500_000, 50_000)
+    request.add(CATEGORY_MAIN, 500_000, 50_000, model=_MODEL)
     text = render_usage_meter(
         session.to_meta(), request.to_meta(), _PRICING_RUB, "m"
     ).plain
@@ -261,7 +260,7 @@ def test_footer_segments_keep_their_own_currencies():
 def test_same_currency_mix_marks_tilde_only():
     acc = UsageAccount()
     acc.add(CATEGORY_MAIN, 1_000_000, 100_000, 0, cost=10.45, billed=True)
-    acc.add(CATEGORY_MAIN, 500_000, 50_000)
+    acc.add(CATEGORY_MAIN, 500_000, 50_000, model=_MODEL)
     pricing_usd = {
         "enabled": True,
         "currency": "$",
@@ -280,7 +279,7 @@ def test_footer_currency_order_follows_token_share():
     # Порядок валют детерминирован: первой идёт валюта категории с наибольшими
     # токенами. Иначе футер прыгал бы между перерисовками.
     acc = UsageAccount()
-    acc.add(CATEGORY_MAIN, 5_000_000, 200_000)  # тариф ₽
+    acc.add(CATEGORY_MAIN, 5_000_000, 200_000, model=_MODEL)  # тариф ₽
     acc.add(
         CATEGORY_FINISH_GATE,
         3_000,
@@ -299,7 +298,7 @@ def test_footer_currency_order_follows_token_share():
 def test_tilde_only_when_both_sides_present():
     # Чисто тарифный отчёт: тильды нет.
     acc = UsageAccount()
-    acc.add(CATEGORY_MAIN, 1_000_000, 100_000)
+    acc.add(CATEGORY_MAIN, 1_000_000, 100_000, model=_MODEL)
     assert (
         "~"
         not in render_usage_meter(
@@ -317,7 +316,7 @@ def test_tilde_present_on_real_mix():
     # выродиться в «тильды не бывает никогда».
     acc = UsageAccount()
     acc.add(CATEGORY_MAIN, 1_000_000, 100_000, 0, cost=10.45, billed=True)
-    acc.add(CATEGORY_MAIN, 500_000, 50_000)
+    acc.add(CATEGORY_MAIN, 500_000, 50_000, model=_MODEL)
     text = render_usage_meter(
         acc.to_meta(), acc.to_meta(), _PRICING_RUB, "m"
     ).plain
@@ -342,7 +341,7 @@ def test_footer_shows_rubles_on_ru_endpoint():
         billed=True,
         currency="₽",
     )
-    acc.add(CATEGORY_MAIN, 500_000, 50_000)
+    acc.add(CATEGORY_MAIN, 500_000, 50_000, model=_MODEL)
     text = render_usage_meter(
         acc.to_meta(), acc.to_meta(), _PRICING_RUB, _MODEL, _RU_URL
     ).plain
@@ -386,3 +385,48 @@ def test_legacy_and_fresh_sums_merge_into_one_part():
     ).plain
     assert "3.00₽" in text
     assert "+" not in text
+
+
+def test_footer_prices_legacy_tokens_at_current_model_rate():
+    account = UsageAccount()
+    account.add(CATEGORY_MAIN, 1000, 0, cost=0.5, billed=True, currency="$")
+    account.add(CATEGORY_MAIN, 1000, 0)
+    text = render_usage_meter(account.to_meta(), None, _PRICING_RUB, _MODEL)
+    assert text.plain == "сессия 2.0k/0.50$+0.10₽~"
+
+
+_PRICING_OTHER_MODEL = {
+    "enabled": True,
+    "currency": "₽",
+    "per_tokens": 1_000_000,
+    "models": {"other/model": {"input": 100, "output": 200}},
+}
+
+
+def test_footer_shows_unknown_cost_instead_of_hiding_it():
+    """Ставки заданы, но у этой модели цены нет — трата неизвестна, а не ноль
+    (спека PR140 Р5)."""
+    text = render_usage_meter(
+        _meta(1000, 100), None, _PRICING_OTHER_MODEL, _MODEL
+    )
+    assert text.plain.endswith("/?")
+
+
+def test_sessions_show_unknown_cost_instead_of_hiding_it():
+    assert (
+        format_nonzero_cost(_meta(1000, 100), _PRICING_OTHER_MODEL, _MODEL)
+        == "?"
+    )
+
+
+def test_no_rates_at_all_keeps_the_cost_hidden():
+    """Шаблон: pricing включён, ставок нет — стартовое уведомление обещает, что
+    стоимость скрыта; «?» у каждой сессии был бы шумом."""
+    text = render_usage_meter(
+        _meta(1000, 100), None, _PRICING_NO_RATES, _MODEL
+    )
+    assert "/" not in text.plain
+    assert (
+        format_nonzero_cost(_meta(1000, 100), _PRICING_NO_RATES, _MODEL)
+        is None
+    )

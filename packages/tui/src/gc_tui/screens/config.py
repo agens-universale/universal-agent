@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from gc_core.security.permission_mode import mode_label
 from gc_core.settings import runtime_of, settings_of
 from rich.text import Text
 from textual import events
@@ -101,16 +102,33 @@ def _effective_model_name(config) -> str:
     быть внутренне согласованной. Резолв не удался (реестр нерезолвим, алиаса нет) —
     честный фоллбэк на плоский ключ, шапка не место для отказа.
 
-    Имя записи (алиас) главнее провайдерского id — язык слотов и привязок (§4)."""
+    Имя записи (алиас) главнее провайдерского id — язык слотов и привязок (§4).
+
+    `level: auto` (спека auto-routing §5.1) переводится через `effective_level`
+    ДО `ModelRouter` — сырой литерал `auto` иначе роняет `_resolve_level`
+    (`ValueError`), и шапка показала бы фоллбэк вместо модели default-слота.
+    Доступность фичи — через `gc_tui.toggles.auto_available_cfg` (единая точка
+    TUI, спека §3), не пересчитывается своим композитом `auto_available` +
+    `cli_forces_legacy_model`; core-аналог с той же логикой — только на
+    core-функциях (`gc_core.onboarding.effective_model`, слой не позволяет
+    ему знать про `gc_tui`)."""
+    from gc_core.auto_routing.levels import effective_level
+    from gc_core.config import cli_forces_legacy_model
     from gc_core.model_router import ModelRouter
     from gc_core.onboarding import MODEL_SENTINEL
+
+    from gc_tui.toggles import auto_available_cfg
 
     settings = settings_of(config)
     name = settings.agent.model
     try:
+        available = auto_available_cfg(config)
         resolved = ModelRouter(
             config,
-            level_provider=lambda: settings.level or "default",
+            level_provider=lambda: effective_level(
+                settings.level, None, available
+            ),
+            force_legacy=cli_forces_legacy_model(config),
         ).resolve("main", check_breaker=False)
         name = resolved.alias or resolved.model
     except Exception:
@@ -119,9 +137,13 @@ def _effective_model_name(config) -> str:
 
 
 def _profile_header_text(config, profile_source: str | None) -> Text:
-    """Спека §12.3a: «профиль: work (проектный) · уровень: default · модель: glm-local»."""
+    """Спека §12.3a: «профиль: work (проектный) · уровень: default · модель: glm-local».
+    Уровень — действующий, тем же правилом, что у палитры `/level`: `auto`, только
+    когда автовыбор доступен, иначе уровень, которым идёт работа."""
+    from gc_tui.toggles import resolve_level_state
+
     profile = runtime_of(config).active_profile or None
-    level = settings_of(config).level or "default"
+    level = resolve_level_state(config)
     model = _effective_model_name(config)
     t = Text()
     t.append("профиль: ", style=DIM)
@@ -138,6 +160,26 @@ def _profile_header_text(config, profile_source: str | None) -> Text:
     return t
 
 
+#: Откуда взят действующий режим разрешений — словами для человека.
+_MODE_SOURCE_LABELS = {
+    "session": "выбран в этой сессии",
+    "config": "из конфига",
+    "default": "по умолчанию",
+}
+
+
+def _permission_mode_text(mode: str, source: str | None) -> Text:
+    """«режим разрешений: manual mode (выбран в этой сессии)» — в стиле шапки
+    профиля. В отличие от снимка ниже, режим меняется на лету (Shift+Tab)."""
+    t = Text()
+    t.append("режим разрешений: ", style=DIM)
+    t.append(mode_label(mode), style=MUTED)
+    label = _MODE_SOURCE_LABELS.get(source or "")
+    if label:
+        t.append(f" ({label})", style=DIM)
+    return t
+
+
 class ConfigScreen(Screen):
     def __init__(
         self,
@@ -147,6 +189,8 @@ class ConfigScreen(Screen):
         project_local: str | None = None,
         profile_source: str | None = None,
         profile_path: str | None = None,
+        permission_mode: str | None = None,
+        permission_mode_source: str | None = None,
     ) -> None:
         super().__init__()
         # Снимок базы окна (`LoadedSettings`) на момент открытия экрана.
@@ -155,6 +199,8 @@ class ConfigScreen(Screen):
         self._project_local = project_local
         self._profile_source = profile_source
         self._profile_path = profile_path
+        self._permission_mode = permission_mode
+        self._permission_mode_source = permission_mode_source
         self._filter = ""
         self._yaml_w: Static | None = None
 
@@ -186,6 +232,14 @@ class ConfigScreen(Screen):
                 )
             with VerticalScroll(id="trace", classes="quiet-focus"):
                 yield Static(self._profile_header(), classes="config-caption")
+                if self._permission_mode is not None:
+                    yield Static(
+                        _permission_mode_text(
+                            self._permission_mode, self._permission_mode_source
+                        ),
+                        id="config-permission-mode",
+                        classes="config-caption",
+                    )
                 yield Static(
                     _SNAPSHOT_HINT, classes="config-caption", markup=False
                 )

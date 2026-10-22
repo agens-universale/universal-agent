@@ -198,6 +198,7 @@ def test_memory_deltas_applied_to_working_memory_not_inside_summary(
         memory_append_deltas=result["memory_append_deltas"],
         memory_replace_deltas=result["memory_replace_deltas"],
         summarized_messages_count=len(history),
+        can_propose_plan=True,
     )
     assert "<add_to_memory>" not in content
     inner = content.split("<summary>")[1].split("</summary>")[0]
@@ -268,6 +269,7 @@ def test_memory_patch_replace_overwrites_stale_state_register(monkeypatch):
         memory_append_deltas=result["memory_append_deltas"],
         memory_replace_deltas=result["memory_replace_deltas"],
         summarized_messages_count=len(history),
+        can_propose_plan=True,
     )
 
     wm_state = state.shared.working_memory["state"]
@@ -739,6 +741,7 @@ def test_summarize_merges_existing_user_intent_log(monkeypatch):
             "memory_replace_deltas", WorkingMemoryDeltas()
         ),
         summarized_messages_count=len(history),
+        can_propose_plan=True,
     )
     assert "<original_user_messages>" not in built
 

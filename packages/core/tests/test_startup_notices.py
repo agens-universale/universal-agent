@@ -172,3 +172,49 @@ def test_cli_render_lines():
     ns = [Notice("warning", "x", "проблема A"), Notice("info", "y", "инфо B")]
     out = render_notices_for_cli(ns)
     assert "⚠ проблема A" in out and "ℹ инфо B" in out
+
+
+_REGISTRY_TWO = {
+    "models": {
+        "fast": {"model": "vendor/fast"},
+        "big": {"model": "vendor/big"},
+    },
+    "slots": {"light": "fast", "max": "big"},
+}
+
+
+def test_pricing_no_notice_when_every_registry_model_has_a_rate():
+    cfg = make_settings(
+        {
+            **_REGISTRY_TWO,
+            "pricing": {
+                "enabled": True,
+                "models": {
+                    "vendor/fast": {"input": 1, "output": 2},
+                    "vendor/big": {"input": 3, "output": 4},
+                },
+            },
+        }
+    )
+    codes = _codes(collect_startup_notices(cfg, _BUILTIN, None, is_tui=False))
+    assert (
+        "pricing_no_rates" not in codes
+        and "pricing_partial_rates" not in codes
+    )
+
+
+def test_pricing_partial_notice_names_the_models_without_a_rate():
+    cfg = make_settings(
+        {
+            **_REGISTRY_TWO,
+            "pricing": {
+                "enabled": True,
+                "models": {"vendor/fast": {"input": 1, "output": 2}},
+            },
+        }
+    )
+    notices = collect_startup_notices(cfg, _BUILTIN, None, is_tui=False)
+    partial = [n for n in notices if n.code == "pricing_partial_rates"]
+    assert len(partial) == 1 and "vendor/big" in partial[0].message
+    assert "vendor/fast" not in partial[0].message
+    assert "pricing_no_rates" not in _codes(notices)

@@ -14,6 +14,7 @@ from pydantic import (
 
 from gc_core.bundled_assets import bundled_root
 from gc_core.config_modules import env_vars
+from gc_core.config_modules.a2a import A2aConfig
 from gc_core.config_modules.acp import AcpConfig
 from gc_core.config_modules.agent import (
     DEFAULT_FINISH_GATE_MAX_ITERATIONS,
@@ -151,6 +152,10 @@ class AppConfig(BaseModel):
     acp: AcpConfig = Field(default_factory=AcpConfig)
     chat_api: ChatApiConfig = Field(
         default_factory=ChatApiConfig,
+        json_schema_extra=gc_meta(expert=True, worker_only=True),
+    )
+    a2a: A2aConfig = Field(
+        default_factory=A2aConfig,
         json_schema_extra=gc_meta(expert=True, worker_only=True),
     )
     voice: VoiceConfig = Field(
@@ -361,6 +366,11 @@ def resolve_paths(cfg: AppConfig, config_dir: str) -> AppConfig:
     cfg.paths.chat_completions_intent_guard_prompt_path = to_abs(
         cfg.paths.chat_completions_intent_guard_prompt_path
     ) or _prompt_default(config_dir, "chat_completions_intent_guard_prompt.md")
+    cfg.paths.chat_completions_routing_pair_judge_prompt_path = to_abs(
+        cfg.paths.chat_completions_routing_pair_judge_prompt_path
+    ) or _prompt_default(
+        config_dir, "chat_completions_routing_pair_judge_prompt.md"
+    )
     cfg.paths.chat_completions_custom_subagent_system_prompt_path = to_abs(
         cfg.paths.chat_completions_custom_subagent_system_prompt_path
     ) or _prompt_default(

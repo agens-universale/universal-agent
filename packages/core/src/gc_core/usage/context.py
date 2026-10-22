@@ -73,11 +73,14 @@ def _currency_for(endpoint_url: str | None) -> str | None:
     return provider_currency_for_url(endpoint_url) if endpoint_url else None
 
 
-def record_usage(raw_usage: Any, endpoint_url: str | None = None) -> None:
+def record_usage(
+    raw_usage: Any, endpoint_url: str | None = None, model: str | None = None
+) -> None:
     """Записать usage из ответа модели в активный контекст.
 
     Зовётся из ``connect_backend`` сразу после получения ответа: ``endpoint_url`` —
-    адрес именно этого вызова, по нему фиксируется валюта цены. Никогда не кидает.
+    адрес именно этого вызова, по нему фиксируется валюта цены; ``model`` — модель
+    из тела запроса, по ней ведётся разбивка расхода по моделям. Никогда не кидает.
     """
     ctx = _usage_ctx.get()
     if ctx is None:
@@ -91,7 +94,7 @@ def record_usage(raw_usage: Any, endpoint_url: str | None = None) -> None:
         return
     parsed = normalize_usage(raw_usage)
     if parsed is None:
-        ctx.account.add_missing(ctx.category)
+        ctx.account.add_missing(ctx.category, model=model)
     else:
         ctx.account.add(
             ctx.category,
@@ -101,6 +104,7 @@ def record_usage(raw_usage: Any, endpoint_url: str | None = None) -> None:
             cost=parsed.cost,
             billed=parsed.billed,
             currency=_currency_for(endpoint_url),
+            model=model,
         )
 
 

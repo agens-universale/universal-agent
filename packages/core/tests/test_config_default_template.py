@@ -11,12 +11,13 @@ A2 — полнота шаблона: каждый листовой путь с�
 from pathlib import Path
 
 import yaml
-from gc_core.config import _default_config_path
+from gc_core.config import _default_config_path, load_settings
 from gc_core.config_modules.field_meta import meta_for
 from gc_core.config_modules.model_sections_validation import (
     validate_model_sections,
 )
 from gc_core.config_modules.root import AppConfig
+from gc_core.startup_notices import collect_startup_notices
 from gc_core.model_router import ModelRouter
 from gc_testkit.paths import REPO
 
@@ -113,16 +114,10 @@ DEMO_CONFIG_PATH = REPO / "demo_config.yml"
 
 
 def test_default_template_with_live_profile_anchor_stays_legacy():
-    """§14 «Стражи»: шаблон с живым якорем `profile: ""` остаётся ЛЕГАСИ.
+    """Пустой реестр шаблона сохраняет вызов базовой модели.
 
-    Второй рубеж, а не единственный: ожившую в шаблоне секцию моделей ловят и
-    A1, и A2 выше (`models`, `slots`, `assign` помечены `expert` в схеме,
-    и появление их в шаблоне даёт `stale` — проверено раскомментированием).
-    Ценность здесь в другом: те двое падают на бухгалтерии ключей и говорят
-    «whitelist разошёлся с шаблоном», а требование §14 — про ПОВЕДЕНИЕ. Этот
-    формулирует его прямо и спрашивает Router: пакетная поставка обязана
-    резолвиться плоскими ключами, как до профилей, иначе уровни включились бы
-    всем, кто ещё ничего не настраивал.
+    Привязки потребителей уже заданы, но без реестра они не включают уровни
+    пользователю, который ещё не настроил models и slots.
     """
     raw = _template_raw()
     assert raw["profile"] == ""
@@ -134,6 +129,27 @@ def test_default_template_with_live_profile_anchor_stays_legacy():
     )
     assert router.registry_empty() is True
     assert router.resolve("main").source == "легаси"
+
+
+def test_shipped_templates_carry_no_live_assign():
+    """Уровни служебных потребителей без привязки живут в коде (`unbound_level`,
+    спека PR140 Р1): шаблоны их не навязывают, поэтому и предупреждения
+    «привязки без реестра» у поставляемых файлов нет."""
+    for path in (Path(_default_config_path()), DEMO_CONFIG_PATH):
+        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        assert "assign" not in raw, f"{path.name}: активный assign вернулся"
+        loaded = load_settings(str(path))
+        notices = collect_startup_notices(
+            loaded,
+            set(),
+            None,
+            is_tui=False,
+            compat_notices=loaded.runtime.notices,
+        )
+        assert not any(
+            "привязки без реестра моделей не действуют" in n.message
+            for n in notices
+        )
 
 
 def test_demo_config_validates_against_schema():
@@ -184,32 +200,35 @@ def test_demo_config_carries_commented_model_sections_example():
     `test_demo_config_validates_against_schema` рядом этого не ловит: комментарии
     для `yaml.safe_load` невидимы, и он одинаково зелен, если блок удалить и если
     его раскомментировать. Здесь проверяется ровно то, чего он не видит:
-    пример на месте, живым он НЕ становится (иначе demo перестал бы показывать
-    легаси-умолчание), а все три секции — из тех, что демонстрирует §13.
+    пример `models`/`slots` на месте, живым он НЕ становится (иначе demo перестал
+    бы показывать легаси-умолчание); `assign` — только закомментированный пример:
+    уровни без привязки задаёт код.
     """
     text = DEMO_CONFIG_PATH.read_text(encoding="utf-8")
     lines = text.splitlines()
-    for anchor in ("# models:", "# slots:", "# assign:"):
+    for anchor in ("# models:", "# slots:"):
         assert any(line.startswith(anchor) for line in lines), (
             f"demo_config.yml потерял закомментированный якорь {anchor!r} — "
             "§13 требует пример секций моделей как обычных конфиг-секций"
         )
     raw = yaml.safe_load(text) or {}
-    for section in ("models", "slots", "assign"):
+    for section in ("models", "slots"):
         assert section not in raw, (
             f"секция {section} в demo_config.yml ожила — пример обязан оставаться "
             "закомментированным (§13: демо показывает и легаси-умолчание тоже)"
         )
+    assert "assign" not in raw, "demo_config.yml снова навязывает привязки"
 
 
 def test_demo_config_commented_example_is_valid_when_uncommented():
     """Пример существует, чтобы его раскомментировали, — значит он обязан
     грузиться. Проверяется тем же путём, что и правка руками: блок снимается с
     комментария, кладётся поверх остального demo_config и идёт через обе фазы
-    (схема + ссылочная целостность на merged), а не только через `safe_load`."""
+    (схема + ссылочная целостность на merged), а не только через `safe_load`.
+    """
     text = DEMO_CONFIG_PATH.read_text(encoding="utf-8")
     example = yaml.safe_load(_uncomment_block(text, "# models:")) or {}
-    assert set(example) == {"models", "slots", "assign"}, (
+    assert set(example) == {"models", "slots"}, (
         f"из блока-примера вынулись не те секции: {sorted(example)}"
     )
     merged = (yaml.safe_load(text) or {}) | example
@@ -368,3 +387,26 @@ def test_demo_config_covers_the_same_keys_as_the_template():
         f"{name}: эти ключи уже добавлены — удали их из DEMO_KNOWN_GAPS:\n"
         + "\n".join(sorted(closed))
     )
+
+
+def test_shipped_templates_carry_only_product_auto_routing_keys():
+    defaults = AppConfig().agent
+    for raw in (
+        _template_raw(),
+        yaml.safe_load(DEMO_CONFIG_PATH.read_text(encoding="utf-8")),
+    ):
+        agent = raw["agent"]
+        assert agent["auto_routing"] is defaults.auto_routing
+        assert (
+            agent["auto_routing_safe_level"]
+            == defaults.auto_routing_safe_level
+        )
+        assert (
+            agent["auto_routing_two_level"]
+            == defaults.auto_routing_two_level.model_dump()
+        )
+        assert {key for key in agent if key.startswith("auto_routing")} == {
+            "auto_routing",
+            "auto_routing_safe_level",
+            "auto_routing_two_level",
+        }

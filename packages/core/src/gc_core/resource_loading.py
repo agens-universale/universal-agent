@@ -15,6 +15,7 @@ def load_prompt_resource(request: PromptResourceRequest, *, ctx) -> str:
         "intent_final": _intent_final,
         "project_memory": _project_memory,
         "finish_gate": _finish_gate,
+        "routing_pair_judge": _routing_pair_judge,
     }
     try:
         reader = readers[request.kind]
@@ -88,3 +89,12 @@ def _finish_gate(request, ctx):
     )
 
     return _load_guard_prompt(request.path, store=agent_store_of(ctx))
+
+
+def _routing_pair_judge(request, ctx):
+    from gc_core.auto_routing.judge_runner import _load_judge_prompt
+    from gc_core.auto_routing.pair_judge import prompt_path
+
+    return _load_judge_prompt(
+        request.path or prompt_path(ctx), store=agent_store_of(ctx)
+    )

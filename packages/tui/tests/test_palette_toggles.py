@@ -7,18 +7,19 @@ import pytest
 
 
 def test_cycle_value_wraps_around():
-    """Чистая функция цикла: ±1 по кортежу values, по кругу, без записи."""
-    from gc_tui.toggles import cycle_value
+    """Цикл ±1 по names тоггла, по кругу, без записи."""
+    from gc_tui.toggles import TOGGLES, cycle_in
 
-    assert cycle_value("gate", "on", 1) == "off"  # (idx2+1)%3 -> off
-    assert (
-        cycle_value("gate", "off", 1) == "smart"
-    )  # было "on" -> теперь "smart"
-    assert cycle_value("gate", "smart", 1) == "on"
-    assert cycle_value("answers", "judge", 1) == "deny"
-    assert cycle_value("answers", "allow", 1) == "judge"
-    assert cycle_value("answers", "deny", 1) == "allow"
-    assert cycle_value("answers", "deny", -1) == "judge"
+    def cycle(name, current, direction):
+        return cycle_in(TOGGLES[name].names, current, direction)
+
+    assert cycle("gate", "on", 1) == "off"  # (idx2+1)%3 -> off
+    assert cycle("gate", "off", 1) == "smart"  # было "on" -> теперь "smart"
+    assert cycle("gate", "smart", 1) == "on"
+    assert cycle("answers", "judge", 1) == "deny"
+    assert cycle("answers", "allow", 1) == "judge"
+    assert cycle("answers", "deny", 1) == "allow"
+    assert cycle("answers", "deny", -1) == "judge"
 
 
 def test_palette_renders_toggle_state(monkeypatch):
@@ -836,14 +837,17 @@ def test_child_rows_always_dim_flat_and_track_aligned_with_parent():
         == answers_plain.rindex("deny")
     )
 
-    # Имя+описание ребёнка — стилем DIM (весь head, включая слеш).
+    # Имя+описание ребёнка — стилем SUB_INK (весь head, включая слеш):
+    # на ступень светлее подсказок (DIM), но тише основных ключей (INK).
     dim_spans_gate = [
-        s for s in gate_row.spans if p.DIM.lower() in str(s.style).lower()
+        s for s in gate_row.spans if p.SUB_INK.lower() in str(s.style).lower()
     ]
     assert dim_spans_gate and dim_spans_gate[0].start == 0
     assert dim_spans_gate[0].end >= len(" /gate")
     dim_spans_answers = [
-        s for s in answers_row.spans if p.DIM.lower() in str(s.style).lower()
+        s
+        for s in answers_row.spans
+        if p.SUB_INK.lower() in str(s.style).lower()
     ]
     assert dim_spans_answers and dim_spans_answers[0].start == 0
 
@@ -852,20 +856,20 @@ def test_child_rows_always_dim_flat_and_track_aligned_with_parent():
     # не задет).
     gate_value_start = gate_plain.rindex("on")
     assert any(
-        p.DIM.lower() in str(s.style).lower()
+        p.SUB_INK.lower() in str(s.style).lower()
         and s.start <= gate_value_start < s.end
         for s in gate_row.spans
     )
     answers_value_start = answers_plain.rindex("deny")
     assert any(
-        p.DIM.lower() in str(s.style).lower()
+        p.SUB_INK.lower() in str(s.style).lower()
         and s.start <= answers_value_start < s.end
         for s in answers_row.spans
     )
 
     # Родитель /rigor НЕ дымится DIM-ом (обычный toggle-стиль строки).
     assert not any(
-        p.DIM.lower() in str(s.style).lower() for s in rigor_row.spans
+        p.SUB_INK.lower() in str(s.style).lower() for s in rigor_row.spans
     )
 
 
@@ -1229,7 +1233,9 @@ def test_five_value_toggle_works_generically(monkeypatch):
 
     txt = pal._format_toggle_row(reg.lookup("fake")).plain
     assert "○ ○ ● ○ ○" in txt and txt.rstrip().endswith("v2")
-    assert tg.cycle_value("fake", "v4", 1) == "v0"  # цикл по кругу
+    assert (
+        tg.cycle_in(tg.TOGGLES["fake"].names, "v4", 1) == "v0"
+    )  # цикл по кругу
     hint = pal._toggle_hint(reg.lookup("fake"))
     assert hint.startswith("v2 — подсказка 2")
 

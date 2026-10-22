@@ -1,6 +1,7 @@
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from uuid import uuid4
 
+from gc_core.auto_routing.state_ops import reset as _reset_routing
 from gc_core.execution.output_store import (
     ToolCallOutputsStore,
 )
@@ -117,6 +118,14 @@ class State(ExecutionState):
             )
         self.call_metadata = self.set_call_metadata()
         self.messages = []
+        # Индекс первого сообщения ТЕКУЩЕГО хода в ``messages``; None — ход ещё
+        # ничего в историю не положил. Ставит ``mark_turn_start`` (там, где
+        # первый батч хода входит в историю), снимает граница хода
+        # (``turn_boundary.begin_turn``). По нему режут историю читатели,
+        # которым нужен только текущий ход (карточка судьи уровня).
+        self.turn_messages_start: Optional[int] = None
+        # Поле прежних снимков; уровень текущего запроса хранится в _call_level.
+        self.turn_level: Optional[str] = None
         # Optional sink for messages dropped by context compaction.
         # Core does not retain them; harbor/other hosts may archive for trajectory.
         self.on_messages_evicted: Optional[Any] = None
@@ -143,14 +152,21 @@ class State(ExecutionState):
         self.turn_tool_calls: int = (
             0  # вызовов инструментов за текущий ход (smart-гейт, спека §3)
         )
-        # Уровень моделей, зафиксированный на текущий ход (`turn_boundary.begin_turn`).
-        # None — ход ещё не начинали; транспорт тогда резолвит живой уровень. Объявлено
-        # здесь, а не заводится на лету: читатели берут поле через getattr, и без
-        # объявления «не начинали» было бы неотличимо от «поля нет».
-        self.turn_level: Optional[str] = None
         self.terminal_outcome: Optional[str] = (
-            None  # None | "step_limit" | "tool_errors"
+            None  # None | "step_limit" | "tool_errors" | "plan_proposed" | "judge_unavailable"
         )
+        # Успешный turn_propose_plan в текущем батче: по этому флагу цикл
+        # агента закрывает ход. Транзиентный, в мету не пишется.
+        self.plan_proposed: bool = False
+        # Текст ответа модели, закрывшего ход: пишется на каждом батче с
+        # вызовами тулов, после хода остаётся от закрывшего. Транзиентный.
+        self.closing_reply: str = ""
+        # Судья действий режима auto: сбои проверки подряд у ЭТОГО агента (у
+        # субагента свои) и причина, по которой прогон надо остановить. В мету
+        # треда не пишутся: состояние новое на каждый прогон. Отказы судьи
+        # считаются на сессию — в `SharedStateData`.
+        self.judge_failures_in_a_row: int = 0
+        self.judge_stop_reason: Optional[str] = None
         self.last_unknown_tool_name: Optional[str] = None
         self.unknown_tool_repeat_count: int = 0
         self.last_batch_unknown_tool_count: int = 0
@@ -188,6 +204,9 @@ class State(ExecutionState):
         self.run_start_usage_meta: Optional[dict] = None
         # Чек-лист субагента: собственный, эфемерный (см. property session_todo).
         self.subagent_todo: List[Dict[str, str]] = []
+        # Объявленный режим субагента (см. property mode_announced): у корня
+        # отметка в shared, у ребёнка — своя, эфемерная.
+        self.subagent_mode_announced: Optional[str] = None
         # Картинки тулов текущего батча (спека §7.1): словари `Attachment`, уходят
         # одним техническим сообщением после батча. Сериализуемы и попадают в
         # снимок, как `session_compact_applied`.
@@ -206,6 +225,8 @@ class State(ExecutionState):
         self.vision_probe_turn: str | None = None
         self.vision_routes: dict = {}
         self.vision_probe_notices: set = set()
+        # Поля автороутинга (спека §4): пишутся в execution snapshot (durable-продолжение хода) и сбрасываются новым ходом пользователя (`state_ops.reset`).
+        _reset_routing(self)
 
     @classmethod
     def from_prepared(cls, prepared: PreparedState, **kwargs) -> "State":

@@ -731,6 +731,15 @@ NOT_IN_MATRIX = {
     # test_thread_store_persist_turn.py и native test_native_workflow_live.py.
     "thread_store.persist": "local допускает только step; turn проверяется в test_thread_store_persist_turn и native live",
     "agent.model_steering": "текст подготовленных инструкций; текущий reader и local/port parity покрыты test_run_prompt_preparation",
+    # --- режим разрешений ----------------------------------------------------
+    #
+    # Режим меняет не путь исполнения, а исход решения «звать ли тул» внутри
+    # защит: manual без человека вырождается в отказ, и случай матрицы сравнил
+    # бы два отказа. Покрытие: security/test_permission_mode.py (таблицы и
+    # слои), security/test_guard_profiles.py и test_permission_gate.py (исходы
+    # в защитах и гейте), test_permissions_config.py (схема и флаг запуска).
+    "security.permissions.default_mode": "исход решения, не путь исполнения; покрытие в security/test_permission_mode и test_guard_profiles",
+    "security.permissions.readonly_commands": "дополнение списка только-чтения; покрытие в security/test_readonly_commands и test_guard_profiles",
     # --- os_backend: выбор физического бэкенда (docker/ssh/exec/sandbox) ------
     #
     # Ключи выбирают, ГДЕ исполняется I/O, а не путь async/sync внутри ядра:
@@ -796,7 +805,6 @@ NOT_IN_MATRIX = {
     # Реестр моделей и профили (PR #80). Переключают ВЫБОР модели, а харнесс
     # маршрутизирует сценарий ровно по `agent.model` — подмена увела бы вызов на
     # несуществующего двойника, и упал бы сам харнесс, а не проверка.
-    "assign.auto_judge": "выбор модели: харнесс маршрутизирует по agent.model",
     "assign.command_judge": "выбор модели: харнесс маршрутизирует по agent.model",
     "assign.finish_gate": "выбор модели: харнесс маршрутизирует по agent.model",
     "assign.intent_scope": "выбор модели: харнесс маршрутизирует по agent.model",
@@ -888,6 +896,7 @@ NOT_IN_MATRIX = {
     "acp.text_answer_mode": "только ACP",
     "acp.finish_gate_mode": "только ACP",
     "acp.todo_reminder_steps": "только ACP",
+    "acp.confirm_timeout_sec": "только ACP: ожидание session/request_permission",
     "tui.finish_gate_mode": "только TUI",
     "chat_api.host": "только процесс gc-chat",
     "chat_api.port": "только процесс gc-chat",
@@ -897,6 +906,16 @@ NOT_IN_MATRIX = {
     "chat_api.text_answer_mode": "только процесс gc-chat",
     "chat_api.finish_gate_mode": "только процесс gc-chat",
     "chat_api.todo_reminder_steps": "только процесс gc-chat",
+    "a2a.host": "только процесс gc-a2a",
+    "a2a.port": "только процесс gc-a2a",
+    "a2a.public_url": "только процесс gc-a2a",
+    "a2a.auth_token": "только процесс gc-a2a",
+    "a2a.launch_root": "только процесс gc-a2a",
+    "a2a.name": "только процесс gc-a2a",
+    "a2a.description": "только процесс gc-a2a",
+    "a2a.text_answer_mode": "только процесс gc-a2a",
+    "a2a.finish_gate_mode": "только процесс gc-a2a",
+    "a2a.todo_reminder_steps": "только процесс gc-a2a",
     "todo.reminder_steps": (
         "напоминание чеклиста; матрица гоняет CLI и этот лист не "
         "переключает. Канал Responses пишет его в runtime"
@@ -950,6 +969,17 @@ NOT_IN_MATRIX = {
     "agent_edits.record.tui": "запись журнала правок в TUI; покрыто agent_edits/test_ctx",
     "agent_edits.record.cli": "запись журнала правок в gc-cli; там же",
     "agent_edits.record.server": "запись журнала правок на сервере; там же",
+    # --- автовыбор уровня модели (level: auto) --------------------------------
+    #
+    # Всё это выбирает модель вызова, а матрица ходит в одну модель: автовыбор в
+    # ней не наблюдаем. Покрыт своими тестами — packages/core/tests/auto_routing.
+    "agent.auto_routing": "выбор модели: харнесс маршрутизирует по agent.model",
+    "agent.auto_routing_safe_level": "выбор модели: харнесс маршрутизирует по agent.model",
+    "agent.auto_routing_two_level.weak_steps": "выбор модели: харнесс маршрутизирует по agent.model",
+    "agent.auto_routing_two_level.strong_steps": "выбор модели: харнесс маршрутизирует по agent.model",
+    "agent.auto_routing_two_level.pair_threshold": "выбор модели: харнесс маршрутизирует по agent.model",
+    "assign.routing_judge": "выбор модели: харнесс маршрутизирует по agent.model",
+    "paths.chat_completions_routing_pair_judge_prompt_path": "промпт судьи пары: зовётся только при safe_level: auto",
     # --- единственный случай матрицы задавал значение, невыразимое схемой ----
     #
     # См. UNREPRESENTABLE: эталон develop снят правкой плоского словаря в обход

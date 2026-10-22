@@ -276,6 +276,8 @@ def test_the_root_is_asked_before_mcp_discovery():
     """
     node = _acreate_run_context_node()
     prime_at = _calls_named(node, "aprime_backend_cwd")
+    # Дискавери идёт в сборке базового реестра (`abuild_tools_data`):
+    # декорирует его сам контекст (автовыбор §5.2 п.4).
     discovery_at = _calls_named(node, "abuild_tools_data")
 
     assert prime_at, "сборка больше не спрашивает корень — проверка устарела"

@@ -9,6 +9,9 @@ from dataclasses import asdict
 from types import SimpleNamespace
 
 from gc_core.agent_store import agent_store_of
+from gc_core.auto_routing.request_equivalence import (
+    prepare_request_equivalence,
+)
 from gc_core.constants.tool_names import EXEC_FETCH_URL_NAME
 from gc_core.context_preparation import PreparedRunContext
 from gc_core.execution.contracts import (
@@ -209,6 +212,19 @@ def is_transient_provider_failure(failure) -> bool:
     return status >= 500 or status in _TRANSIENT_STATUSES
 
 
+def retried_by_temporal(call, request, failure) -> bool:
+    """Повторит ли сбой модели Temporal (политика ``activities.model``):
+    транзиентный сбой провайдера в запросе основного агента. Запрос
+    субагента остаётся данными — его fallback на модель родителя решает
+    workflow; вызов со своим бюджетом повторов (судья действий) — тоже:
+    повторяет и считает сбои он сам."""
+    return (
+        call.child_context is None
+        and request.isolated_timeout_sec is None
+        and is_transient_provider_failure(failure)
+    )
+
+
 class AgentActivities:
     """Dependency injection uses real RunContexts and the selected ThreadStore.
 
@@ -333,8 +349,16 @@ class AgentActivities:
         check = getattr(self.context_provider, "check_settings", None)
         if check is not None:
             check(call.profile, call.data.get("settings_fingerprint"))
+        require_equivalence = call.data.get(
+            "require_request_equivalence", False
+        )
+        if type(require_equivalence) is not bool:
+            raise ExecutionFailure("Invalid root routing contract requirement")
         store = self.stores[call.data["store_id"]]
         public = self.public_config(ctx)
+        prepared_context = PreparedRunContext.from_context(
+            ctx, settings=public.settings, runtime=public.runtime
+        )
         prompts_request = PromptPreparationRequest.from_config(
             ctx, verbose=bool(settings_of(ctx).agent.verbose)
         )
@@ -346,9 +370,12 @@ class AgentActivities:
         )
         return PreparedContext(
             human_input=getattr(self.context_provider, "human_input", True),
-            context=PreparedRunContext.from_context(
-                ctx, settings=public.settings, runtime=public.runtime
-            ),
+            context=prepared_context,
+            request_equivalence=prepare_request_equivalence(
+                ctx, context_id=prepared_context.run_id
+            )
+            if require_equivalence
+            else None,
             subagent_definitions=resolve_subagent_definitions(ctx),
             tool_metadata={
                 name: {
@@ -466,13 +493,9 @@ class AgentActivities:
         except ModelOperationError as exc:
             result = exc.result
             result.failure = encode_model_failure(exc.cause)
-            if call.child_context is None and is_transient_provider_failure(
-                result.failure
-            ):
+            if retried_by_temporal(call, request, result.failure):
                 # Обрыв, недоступность, 5xx, 429: повторит Temporal по политике
-                # activities.model — ход ждёт провайдера, а не падает. Запрос
-                # субагента остаётся данными: его fallback на модель родителя
-                # решается в workflow.
+                # activities.model — ход ждёт провайдера, а не падает.
                 raise ApplicationError(
                     result.failure.message,
                     result.failure.error_type,

@@ -1,6 +1,7 @@
 """Каталог набора на sys.path — локальные helpers.* резолвятся без корня репо.
 
-И сброс пометок «модель не видит изображений» между тестами (см. фикстуру)."""
+И сброс пометок «модель не видит изображений» между тестами (см. фикстуру),
+и сброс принятых серверами форм Authorization."""
 
 from __future__ import annotations
 
@@ -33,3 +34,14 @@ def _reset_image_rejects_between_tests():
     yield
     clear_image_rejects()
     registry._PROBES = registry.VisionProbeRegistry()
+
+
+@pytest.fixture(autouse=True)
+def _reset_accepted_authorization_forms():
+    """Принятая сервером форма Authorization живёт на процесс: без сброса
+    тест начинал бы с формы, выученной другим тестом на том же адресе."""
+    from gc_core.utils import http_auth
+
+    http_auth._ACCEPTED_FORMS.clear()
+    yield
+    http_auth._ACCEPTED_FORMS.clear()

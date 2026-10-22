@@ -449,6 +449,9 @@ def address_host(url: str) -> str:
 # --- нижняя половина секции: слоты (уровень → алиас) и привязки потребителей ---
 _SLOT_UNSET = "не задан"
 _ASSIGN_ACTIVE = "активная"
+# Привязки нет, но потребитель работает фиксированным уровнем
+# (`fixed_unbound_level`): слова пустого слота — «не задана → default».
+_ASSIGN_UNSET = "не задана"
 # Значение, которого в файле цели нет, а в основном конфиге есть (§7-8): смысл
 # несёт СЛОВО, а не приглушённый цвет (замер ревью развёл DIM и DEEP_DIM на
 # неразличимые 1.26 контраста). Это же слово — подпись первой строки пикера: канон
@@ -465,20 +468,18 @@ _SLOT_DEAD_HINT = "уровень не резолвится: задайте хо
 # (`utils/llm_chat_client.py`): тот заведён для notice деградации и остаётся его
 # собственностью — здесь только UI-добавка (контракт п.2 волны B).
 #
-# `auto_judge` — потребитель волны C: строка в реестре есть, но никто его ещё не
-# зовёт, а без привязки он пойдёт уровнем default, не активным (`ModelRouter.
-# resolve`). Описание «появится с авто-выбором» — в голове строки грамматикой
-# «имя · описание» (построчной подсказки у секции больше нет — строка объясняет
-# себя сама).
-#
 # `*` — не «те, кого нет в списке»: в списке перечислены ВСЕ канонические имена, и
 # поимённо чужое имя вписать нельзя (валидатор фазы 2 отвергает ключ). Реальный
 # смысл ровно два: единственный способ привязать кастомных субагентов из
 # `.md`-файлов и общая привязка «всем сразу, кому своя не задана»
 # (`ModelRouter._lookup_binding`: точное имя → `*`).
 _UI_CONSUMER_LABEL = {
-    "auto_judge": "судья auto_judge · появится с авто-выбором",
     "*": "* · кастомные и будущие субагенты",
+}
+# Роль служебного потребителя к подписи из транспортного словаря — только на
+# экране: в уведомлениях о деградации подпись остаётся короткой.
+_CONSUMER_ROLE = {
+    "command_judge": "команды в edit, действия в режиме auto",
 }
 # Роль субагента рядом с его именем — грамматика «имя · описание» канона
 # `_mode_row_text`: имя ключа в файле человеку нужно (он его там и увидит),
@@ -512,12 +513,14 @@ def assign_consumers() -> list:
 
 
 def consumer_labels() -> dict:
-    """Подпись каждой строки привязок: 6 готовых берутся ИЗ транспортного словаря
+    """Подпись каждой строки привязок: 7 готовых берутся ИЗ транспортного словаря
     (копия разошлась бы с ним на первой же правке), остальные — свои."""
     from gc_core.utils.llm_chat_client import CONSUMER_RU_LABEL
 
     labels = dict(CONSUMER_RU_LABEL)
     labels.update(_UI_CONSUMER_LABEL)
+    for consumer, role in _CONSUMER_ROLE.items():
+        labels[consumer] = f"{labels[consumer]} · {role}"
     for name in SUBAGENT_NAMES:
         # `.get`, а не индекс: новый субагент в коде появляется строкой сам — пусть
         # витрина деградирует до общей подписи, а не роняет секцию `KeyError`.
@@ -1441,10 +1444,23 @@ class ModelsSectionEditor(Vertical):
 
     def _assign_unset_label(self, consumer: str) -> str:
         """Значение строки привязки без своего ключа: привязка основного конфига —
-        словом «основной → light» (§8), иначе прежняя «активная» (потребитель идёт
-        за активным уровнем, фиксировать нечего)."""
+        словом «основной → light» (§8); потребитель с фиксированным уровнем без
+        привязки — «не задана → default», как пустой слот; иначе «активная»
+        (идёт за активным уровнем, фиксировать нечего)."""
         inherited = self._base_assign_value(consumer)
-        return inherited_value(inherited) if inherited else _ASSIGN_ACTIVE
+        if inherited:
+            return inherited_value(inherited)
+        level = self._fixed_unbound_level(consumer)
+        return f"{_ASSIGN_UNSET} → {level}" if level else _ASSIGN_ACTIVE
+
+    def _fixed_unbound_level(self, consumer: str) -> str | None:
+        """Фиксированный уровень потребителя без привязки при ЭФФЕКТИВНЫХ слотах
+        экрана — правило роутера (`fixed_unbound_level`), не своё: уровень
+        действует, только когда его слот задан."""
+        from gc_core.model_router import fixed_unbound_level
+
+        slots = {lvl: self._effective_slot_value(lvl) for lvl in LEVELS}
+        return fixed_unbound_level(consumer, slots)
 
     def _slot_row_text(self, level: str, selected: bool) -> Text:
         return self._binding_row_text(
@@ -2896,6 +2912,18 @@ class ModelsSectionEditor(Vertical):
             t.append_text(self._picker_fallback_desc(level))
         return t
 
+    def _assign_unset_entry(self, consumer: str) -> tuple[str, Text]:
+        """Подпись и описание пункта «без привязки»: фиксированный уровень —
+        «не задана · действует default → модель», иначе «активная»."""
+        level = self._fixed_unbound_level(consumer)
+        if level is None:
+            return _ASSIGN_ACTIVE, self._picker_active_desc()
+        t = Text("действует ", style=DEEP_DIM)
+        t.append(level, style=value_style(level))
+        t.append(" ")
+        t.append_text(self._picker_level_desc(level))
+        return _ASSIGN_UNSET, t
+
     def _picker_active_desc(self) -> Text:
         t = Text(_ACTIVE_DESC_LEAD, style=DEEP_DIM)
         t.append(self._active_level, style=value_style(self._active_level))
@@ -2949,8 +2977,7 @@ class ModelsSectionEditor(Vertical):
             [
                 self._picker_unset_row(
                     self._base_assign_value(consumer),
-                    _ASSIGN_ACTIVE,
-                    self._picker_active_desc(),
+                    *self._assign_unset_entry(consumer),
                 )
             ]
             + [

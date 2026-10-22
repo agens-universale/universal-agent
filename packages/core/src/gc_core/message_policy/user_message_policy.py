@@ -39,11 +39,18 @@ _TECHNICAL_USER_MARKERS = (
 )
 
 
+#: Оформление перед маркером (пробелы, значок, выделение markdown) началом
+#: текста не считается: так начинались ошибки валидации до обёртки
+#: ``<technical>`` («❌ **Tool Argument Validation Failed**»).
+_LEADING_DECORATION_RE = re.compile(r"^[^\w<\[]+")
+
+
 def is_technical_user_message_text(text: str) -> bool:
-    normalized = str(text or "").strip().lower()
-    if not normalized:
-        return False
-    return any(marker in normalized for marker in _TECHNICAL_USER_MARKERS)
+    """Служебное ли сообщение: нормализованный текст НАЧИНАЕТСЯ с маркера.
+    Маркер в середине — слова человека (вставленная ошибка, цитата
+    служебного текста), а не служебное сообщение."""
+    normalized = _LEADING_DECORATION_RE.sub("", str(text or "").lower())
+    return normalized.startswith(_TECHNICAL_USER_MARKERS)
 
 
 def wrap_technical_user_content(
@@ -58,6 +65,17 @@ def wrap_technical_user_content(
     if match:
         return raw
     return f'<technical type="{technical_type}">{raw}</technical>'
+
+
+def build_model_fallback_resume_message(state_id: str) -> dict[str, str]:
+    return {
+        "role": "user",
+        "content": wrap_technical_user_content(
+            "Continue the existing task from the recorded history and tool results. "
+            "The failed model request was replaced; do not repeat completed tool calls."
+        ),
+        "id": f"m_model_fallback_{state_id}",
+    }
 
 
 def wrap_skill_resolution_technical_instruction(skill_name: str) -> str:

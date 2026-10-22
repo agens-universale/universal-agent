@@ -3,6 +3,7 @@
 from gc_tui.services.markdown_render import (
     Block,
     build_markdown_table,
+    render_prose,
     segment_answer,
     table_block_to_markdown,
 )
@@ -204,3 +205,96 @@ def test_unclosed_fence_runs_to_the_end():
 def test_empty_fenced_block_yields_no_segment():
     segs = segment_answer("до\n```\n\n```\nпосле")
     assert [s.kind for s in segs] == ["prose", "prose"]
+
+
+def test_fence_indented_inside_a_list_item_is_a_code_block():
+    """Модель сдвигает блок кода под текст пункта списка; сырые кавычки в
+    ленте — это он же, не распознанный (живая приёмка режима plan)."""
+    from gc_tui.services.markdown_render import segment_answer
+
+    text = (
+        "1. Добавить импорт\n"
+        "   В начало файла:\n"
+        "   ```python\n"
+        "   from datetime import datetime\n"
+        "       x = 1\n"
+        "   ```\n"
+        "2. Дальше\n"
+    )
+    blocks = segment_answer(text)
+    assert [b.kind for b in blocks] == ["prose", "code-block", "prose"]
+    code = blocks[1]
+    assert code.lang == "python"
+    # отступ ограды снят, собственный отступ кода сохранён
+    assert code.content == "from datetime import datetime\n    x = 1"
+
+
+def test_deeply_indented_backticks_inside_a_block_do_not_close_it():
+    """Закрывающая ограда — не глубже открывающей плюс три пробела
+    (CommonMark). Иначе пример markdown с отступом внутри кода закрывал
+    блок раньше времени, а настоящая ограда открывала новый до конца ответа."""
+    from gc_tui.services.markdown_render import segment_answer
+
+    text = "\n".join(
+        [
+            "```python",
+            "def f():",
+            '    """Пример:',
+            "        ```",
+            "        x",
+            "        ```",
+            '    """',
+            "```",
+            "после блока",
+        ]
+    )
+    kinds = [b.kind for b in segment_answer(text)]
+    assert kinds == ["code-block", "prose"]
+
+
+def test_four_space_backticks_inside_a_docstring_do_not_close_the_block():
+    """CommonMark: закрывающая ограда — не глубже открывающей плюс три пробела.
+    Пример markdown с отступом 4 внутри функции блок не рвёт."""
+    from gc_tui.services.markdown_render import segment_answer
+
+    text = '```python\ndef f():\n    """Example:\n    ```\n    x = 1\n    ```\n    """\n    return 1\n```\nafter'
+    assert [b.kind for b in segment_answer(text)] == ["code-block", "prose"]
+
+
+def test_indented_fence_at_top_level_stays_prose_as_in_develop():
+    """Отступной блок верхнего уровня с примером ограды — не ограждённый
+    код: сдвинутые кавычки — ограда только внутри пункта списка (§10.5)."""
+    text = "Пример:\n\n    ```bash\n    pip install\n    ```\n\nдальше"
+    assert segment_answer(text) == [Block("prose", text)]
+
+
+def test_slightly_indented_backticks_do_not_close_a_top_level_block():
+    """Ограду верхнего уровня закрывает только ограда без отступа, как в
+    develop: строка кода «  ```» — содержимое."""
+    text = "```python\nx = '''\n  ```\n'''\n```\nпосле"
+    segs = segment_answer(text)
+    assert [s.kind for s in segs] == ["code-block", "prose"]
+    assert segs[0].content == "x = '''\n  ```\n'''"
+
+
+def test_indented_fence_after_a_blank_line_in_a_list_is_code():
+    """Пустая строка внутри пункта список не закрывает."""
+    text = "- шаг\n\n  ```sh\n  ls\n  ```\nконец"
+    segs = segment_answer(text)
+    assert [s.kind for s in segs] == ["prose", "code-block", "prose"]
+    assert segs[1].content == "ls"
+    assert segs[1].lang == "sh"
+
+
+def test_prose_render_keeps_a_fence_inside_a_list_item_raw():
+    """Проза стрима ведёт тот же контекст списка, что сегменты финала:
+    строка кода внутри ограды пункта — как есть, не маркер «•»."""
+    plain = render_prose("- шаг\n  ```sh\n  - x\n  ```").plain
+    assert "  - x" in plain
+    assert "• x" not in plain
+
+
+def test_prose_render_keeps_a_top_level_indented_fence_as_prose():
+    """На верхнем уровне сдвинутые кавычки ограду не открывают и в прозе."""
+    plain = render_prose("Пример:\n\n    ```\n- пункт").plain
+    assert "• пункт" in plain

@@ -397,6 +397,21 @@ def log_pre_run_max_rounds(
     )
 
 
+def log_pre_run_no_progress(
+    logger: Any | None,
+    *,
+    thread_id: Any,
+    rounds: int,
+) -> None:
+    if logger is None:
+        return
+    logger.warning(
+        "summary_pre_run_no_progress thread_id=%s rounds=%s",
+        thread_id,
+        rounds,
+    )
+
+
 def log_token_trigger_no_prompt_tokens(
     logger: Any | None,
     *,

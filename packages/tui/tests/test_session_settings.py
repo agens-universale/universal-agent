@@ -50,18 +50,38 @@ def test_effective_value_reads_the_effective_default_not_raw_value():
 
 
 def test_every_toggle_key_is_session_overridable():
-    """Гвоздь расширяемости: тоггл, чей ключ забыли внести в белый список, молча
-    не применялся бы — сессионный слой игнорирует неизвестный ключ, исключения нет,
-    строка продолжает рендерить старое значение (переключатель выглядит залипшим)."""
+    """Гвоздь расширяемости: тоггл палитры, чей ключ забыли внести в белый
+    список, молча не применялся бы — сессионный слой игнорирует неизвестный
+    ключ, исключения нет, строка продолжает рендерить старое значение
+    (переключатель выглядит залипшим). Требование — к тогглам, у которых есть
+    команда палитры: только они крутят сессию; тоггл одних Настроек правит
+    файл."""
+    from gc_tui.commands import build_default_registry
     from gc_tui.toggles import TOGGLES
+
+    registry = build_default_registry()
+
+    def in_palette(name):
+        cmd = registry.lookup(name)
+        return cmd is not None and cmd.is_toggle
 
     # Пресет-тогглы (/rigor) не пишут напрямую — dotted="" (спека §6, Task 4);
     # проверка адресует только single-key тогглы.
     assert [
         s.dotted
-        for s in TOGGLES.values()
-        if s.dotted and s.dotted not in SESSION_KEYS
+        for name, s in TOGGLES.items()
+        if in_palette(name) and s.dotted and s.dotted not in SESSION_KEYS
     ] == []
+
+
+def test_default_permission_mode_is_a_settings_only_toggle():
+    """Режим текущей сессии переключает Shift+Tab, а не сессионный оверрайд
+    конфига: у строки режима разрешений по умолчанию команды палитры нет."""
+    from gc_tui.commands import build_default_registry
+    from gc_tui.toggles import TOGGLES
+
+    assert "mode" in TOGGLES
+    assert build_default_registry().lookup("mode") is None
 
 
 def test_new_session_key_works_without_code_changes(monkeypatch):

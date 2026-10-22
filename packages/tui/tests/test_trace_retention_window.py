@@ -11,6 +11,7 @@ import json
 import pytest
 from gc_tui.services.trace_retention import (
     RETENTION_DETAIL_HINT,
+    events_leaving_window,
     filter_sidecar_to_parents,
     message_ids_in_retention_window,
     parent_outside_retention,
@@ -693,3 +694,28 @@ async def test_edit_block_survives_retention_outside_window(tmp_path):
         _assert_tool_light(_event(scr, "call_edit_old", "call"))
         blocks = [b for b in scr.query(DiffBlock) if b._record is record]
         assert len(blocks) == 1, "блок правки вне окна retention пропал"
+
+
+class _Ev:
+    def __init__(self, message_id):
+        self.message_id = message_id
+
+
+def _evs(*ids):
+    return [_Ev(i) for i in ids]
+
+
+def test_events_leaving_window_picks_third_from_end():
+    evs = _evs("a", "b", "c", "d", "e", "f")
+    out = events_leaving_window(evs, [0, 3, 5], {"b"})
+    assert out == [evs[0], evs[2]]
+
+
+def test_events_leaving_window_none_when_two_segments():
+    assert events_leaving_window(_evs("a", "b", "c"), [0, 2], set()) == []
+
+
+def test_events_leaving_window_four_segments_takes_all_outside():
+    evs = _evs("a", "b", "c", "d", "e")
+    assert events_leaving_window(evs, [0, 1, 3, 4], {"a"}) == evs[1:3]
+    assert events_leaving_window(evs, [0, 1, 3, 4], set()) == evs[:3]

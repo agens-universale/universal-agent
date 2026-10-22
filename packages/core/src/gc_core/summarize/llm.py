@@ -50,6 +50,7 @@ async def arequest_auxiliary_completion_text(
     payload_overrides: Optional[Dict[str, Any]] = None,
     logger: Any | None = None,
     log_prompt: bool = True,
+    isolated_timeout_sec: float | None = None,
 ) -> str:
     """Aux LLM: log dirty response, return ``for_model``-projected text.
 
@@ -60,6 +61,9 @@ async def arequest_auxiliary_completion_text(
     ``<think>`` на aux всегда вырезается. Persist ``reasoning_content`` —
     только канон ``state.messages``, не судья / finish-gate / summary.
     Extra-теги из ``strip_tags_projection.tags`` по-прежнему применяются.
+
+    ``isolated_timeout_sec`` — вызов со своим бюджетом повторов (судья
+    действий): см. ``arequest_chat_completion_outcome``.
     """
     raw = await arequest_chat_completion_text(
         ctx=ctx,
@@ -69,6 +73,7 @@ async def arequest_auxiliary_completion_text(
         request_label=request_label,
         consumer=consumer,
         payload_overrides=payload_overrides,
+        isolated_timeout_sec=isolated_timeout_sec,
     )
     if log_prompt:
         active_logger = (

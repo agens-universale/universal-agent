@@ -95,7 +95,13 @@ async def test_skill_continuation_start_gets_display_and_skill(
     from gc_core.tools.skills import skill_delivery as sd
     from gc_tui.app import TuiApp
 
-    monkeypatch.setattr(sreg, "get_skills_registry", lambda cfg: object())
+    class _Registry:
+        # Конец хода сбрасывает кэш скиллов: второй /skill перечитывает
+        # реестр, и скилл в нём должен быть.
+        async def list_skills(self, *, include_all=False):
+            return [{"id": "qa-x"}]
+
+    monkeypatch.setattr(sreg, "get_skills_registry", lambda cfg: _Registry())
     monkeypatch.setattr(
         sd,
         "build_skill_delivery",

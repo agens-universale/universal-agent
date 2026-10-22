@@ -26,6 +26,7 @@ MODEL_STATE_FIELDS = (
     "call_metadata",
     "previous_response_id",
     "turn_level",
+    "_call_level",
     "last_main_prompt_tokens",
     "last_main_prompt_message_count",
     "last_finish_reason",

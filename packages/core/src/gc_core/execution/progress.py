@@ -259,7 +259,9 @@ def parse_tool_result_status(
 def _error_brief_from_payload(data: Dict[str, Any]) -> Optional[str]:
     err = data.get("error")
     if isinstance(err, dict):
-        msg = err.get("message") or err.get("code") or ""
+        # reason раньше message — как в ленте TUI (trace_mapper): причина
+        # человеку, а не инструкция модели.
+        msg = err.get("reason") or err.get("message") or err.get("code") or ""
         return _truncate_error_brief(str(msg)) if msg else None
     if isinstance(err, str) and err.strip():
         return _truncate_error_brief(err)

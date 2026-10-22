@@ -30,7 +30,9 @@ from gc_core.trace_id import (
 from gc_core.usage.context import record_usage
 from gc_core.utils.aretry import retry_with_backoff_async
 from gc_core.utils.backend_errors import (
+    embedded_choice_error,
     http_status_code,
+    is_auth_error,
     is_empty_completion,
     is_http_status_error,
     is_http_transport_error,
@@ -41,7 +43,10 @@ from gc_core.utils.data_urls import mask_data_urls
 from gc_core.utils.format_messages import (
     format_message_chat_completions_to_send_backend,
 )
-from gc_core.utils.http_auth import authorization_attempts
+from gc_core.utils.http_auth import (
+    remember_accepted_authorization,
+    server_authorization_attempts,
+)
 from gc_core.utils.http_proxy import resolve_proxies
 from gc_core.utils.prompt_cache import apply_prompt_cache, prompt_cache_enabled
 from gc_core.utils.schema_markers import schema_without_internal_markers
@@ -214,9 +219,10 @@ def _default_should_retry_backend_exception(exc: Exception) -> bool:
 
     Картиночная ошибка запроса (модель не принимает картинки или не столько) не
     ретраится ни в какой форме: тот же запрос её не лечит, а OpenRouter отвечает на
-    картинку 404-м, SSE-ошибкой — vLLM в стриме.
+    картинку 404-м, SSE-ошибкой — vLLM в стриме. Отказ авторизации (401, в том
+    числе событием стрима) тоже: его лечит другая форма токена или перевыпуск.
     """
-    if is_image_request_error(exc):
+    if is_image_request_error(exc) or is_auth_error(exc):
         return False
     if is_http_status_error(exc):
         status_code = http_status_code(exc)
@@ -394,6 +400,8 @@ async def arequest_backend_responses(
             config_proxy=config_proxy,
         ),
         headers,
+        url=url,
+        model=data.get("model"),
         use_retry=use_retry,
         logger=logger,
     )
@@ -480,7 +488,7 @@ async def _arequest_backend_responses_once(
 
     response_obj = result["response"]
     if isinstance(response_obj, dict):
-        record_usage(response_obj.get("usage"), url)
+        record_usage(response_obj.get("usage"), url, data.get("model"))
     _log_backend_response(logger, "responses", response_obj)
     return response_obj, r_headers
 
@@ -547,7 +555,7 @@ async def _astream_chat_completions(
                 status_code=None,
             )
         if isinstance(assembled, dict):
-            record_usage(assembled.get("usage"), url)
+            record_usage(assembled.get("usage"), url, data.get("model"))
         _log_backend_response(logger, "chat_completions", assembled)
         return assembled
 
@@ -563,7 +571,6 @@ async def arequest_backend_chat_completions(
     on_delta: Optional[OnDelta] = None,
     timeout: float = DEFAULT_REQUEST_TIMEOUT_SEC,
     config_proxy: Optional[str] = None,
-    allow_auth_retry: bool = True,
 ):
     """Запрос с ограниченным подбором raw/Bearer только после HTTP 401."""
     return await _arequest_authorized(
@@ -579,7 +586,8 @@ async def arequest_backend_chat_completions(
             config_proxy=config_proxy,
         ),
         headers,
-        allow_auth_retry=allow_auth_retry,
+        url=url,
+        model=data.get("model"),
         use_retry=use_retry,
         logger=logger,
     )
@@ -601,32 +609,48 @@ async def _arequest_authorized(
     request,
     headers: Dict,
     *,
-    allow_auth_retry: bool = True,
+    url: str,
+    model: Optional[str],
     use_retry: bool = True,
     logger=None,
 ):
-    """Одна альтернатива Authorization после реального HTTP 401."""
+    """Одна альтернатива Authorization после HTTP 401 — настоящего или
+    завёрнутого прокси в HTTP-200 (в теле ответа или событием стрима).
+
+    Форму, с которой запрос прошёл успешно (2xx без вложенной ошибки
+    провайдера), следующие запросы к той же модели на тот же URL со
+    значением, заданным в той же форме, шлют первой."""
     auth_key = next(
         (key for key in headers if key.lower() == "authorization"), None
     )
-    candidates = (
-        authorization_attempts(headers.get(auth_key)) if auth_key else []
-    )
-    attempts = candidates if allow_auth_retry and candidates else [None]
+    raw = headers.get(auth_key) if auth_key else None
+    candidates = server_authorization_attempts(url, model, raw)
+    attempts = candidates or [None]
     for index, authorization in enumerate(attempts):
-        call_headers = dict(headers)
-        if auth_key and authorization is not None:
-            call_headers[auth_key] = authorization
         try:
-            return await _arequest_with_backoff(
+            response = await _arequest_with_backoff(
                 request,
-                headers=call_headers,
+                headers=_with_authorization(headers, auth_key, authorization),
                 use_retry=use_retry,
                 logger=logger,
             )
-        except httpx.HTTPStatusError as exc:
-            if exc.response.status_code != 401 or index + 1 == len(attempts):
+        except (httpx.HTTPStatusError, BackendStreamError) as exc:
+            if not is_auth_error(exc) or index + 1 == len(attempts):
                 raise
+            continue
+        error = embedded_choice_error(response)
+        if error is None:
+            remember_accepted_authorization(url, model, raw, authorization)
+        elif error.status_code == 401 and index + 1 < len(attempts):
+            continue  # Прокси завернул 401 в HTTP-200 — тот же отказ формы.
+        return response
+
+
+def _with_authorization(headers: Dict, auth_key, authorization) -> Dict:
+    call_headers = dict(headers)
+    if authorization is not None:
+        call_headers[auth_key] = authorization
+    return call_headers
 
 
 async def _arequest_backend_chat_completions_once(
@@ -681,7 +705,7 @@ async def _arequest_backend_chat_completions_once(
 
     payload = r.json()
     if isinstance(payload, dict):
-        record_usage(payload.get("usage"), url)
+        record_usage(payload.get("usage"), url, data.get("model"))
     _log_backend_response(logger, "chat_completions", payload)
     return payload
 
@@ -1207,6 +1231,65 @@ def create_call_data_completions(
         data = apply_prompt_cache(data)
 
     return data
+
+
+def same_main_request(
+    settings: Any, first: ResolvedModel, second: ResolvedModel
+) -> bool:
+    """Same effective main request, independent of registry and accounting identity.
+
+    No token acquisition or network I/O. Authentication source is compared;
+    per-attempt request/session/trace headers are not part of model identity.
+    """
+    cfg = settings_of(settings)
+
+    def signature(resolved):
+        headers = {}
+        if resolved.authorization:
+            headers["Authorization"] = resolved.authorization
+        _apply_chat_completion_headers(
+            headers,
+            cfg.backend.chat_completion_headers,
+            resolved,
+            resolved.authorization,
+        )
+        headers = {name.lower(): value for name, value in headers.items()}
+        inherited_auth = (
+            resolved.authorization is None and "authorization" not in headers
+        )
+        payload = create_call_data_completions(
+            [{"role": "user", "content": "request identity"}],
+            tools=[],
+            settings=cfg,
+            resolved=resolved,
+        )
+        network = tuple(
+            _config_value(resolved, cfg.backend, name)
+            for name in (
+                "use_ssl",
+                "cert_path",
+                "key_path",
+                "use_retry",
+                "request_timeout_sec",
+                "proxy",
+                "retry_embedded_choice_errors",
+                "chat_completions_min_response_tokens",
+            )
+        )
+        vision_allowed = (
+            _config_value(resolved, cfg.backend, "vision") is not False
+        )
+        return (
+            resolved.url,
+            inherited_auth,
+            headers,
+            payload,
+            _tool_schema_flags(resolved, cfg.backend, honor_alias=True),
+            network,
+            vision_allowed,
+        )
+
+    return signature(first) == signature(second)
 
 
 if __name__ == "__main__":

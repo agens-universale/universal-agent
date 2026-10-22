@@ -467,3 +467,25 @@ async def test_long_description_row_stays_one_line(tmp_path):
                 "строка палитры не должна переноситься"
             )
         assert pal.region.height == pal.desired_height
+
+
+def test_enter_runs_a_command_whose_argument_is_optional_without_a_menu():
+    """Общее правило: аргумента нет либо он необязателен и меню вариантов у
+    него нет — Enter выполняет; иначе подставляет команду в поле."""
+    pytest.importorskip("textual")
+    from gc_tui.commands import build_default_registry
+    from gc_tui.widgets.command_palette import (
+        _HINT_NO_ARGS,
+        _HINT_WITH_ARGS,
+        _hint_for,
+    )
+
+    reg = build_default_registry()
+    for name in ("plan", "new", "help"):
+        command = reg.lookup(name)
+        assert command.runs_on_enter is True
+        assert _hint_for(command) == _HINT_NO_ARGS
+    for name in ("export", "view", "skill"):
+        command = reg.lookup(name)
+        assert command.runs_on_enter is False
+        assert _hint_for(command) == _HINT_WITH_ARGS

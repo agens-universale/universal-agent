@@ -167,6 +167,8 @@ class SummaryTriggersTest(unittest.IsolatedAsyncioTestCase):
             ctx = await self._make_ctx(
                 tmp_dir, backend_api_mode="chat_completions"
             )
+            # Старые истории Temporal сохраняют раннюю стартовую компакцию.
+            ctx.execution_patch = lambda _patch: False
             call_order: list[str] = []
             truth = deque([True, False, True])
 
@@ -234,6 +236,8 @@ class SummaryTriggersTest(unittest.IsolatedAsyncioTestCase):
             ctx = await self._make_ctx(
                 tmp_dir, backend_api_mode="chat_completions"
             )
+            # Старые истории Temporal сохраняют раннюю стартовую компакцию.
+            ctx.execution_patch = lambda _patch: False
             calls: list[str] = []
             truth = deque([True, False, True])
 

@@ -303,7 +303,7 @@ def test_perimeter_does_not_allow_foreign_staging_through_the_media_root(
             or None,
         )
 
-    ctx, asked = _tui_ctx(config, "deny")
+    ctx, asked = _tui_ctx(config, "deny_remember")
     assert json.loads(_ReadTool(ctx).read(path=own))["ok"] is True
     assert json.loads(_ReadTool(ctx).read(path=foreign))["ok"] is False
     assert asked == []  # чужой карман режет пол, до вопроса периметра
@@ -339,7 +339,7 @@ def test_symlink_into_a_foreign_pocket_is_classified_by_its_own_path(
         cwd=str(proj), media=media_roots(make_settings(config))
     )
     assert classify_path(link / f"{SHA16}.png", ps) == "none"
-    ctx, asked = _tui_ctx(config, "deny")
+    ctx, asked = _tui_ctx(config, "deny_remember")
     assert (
         json.loads(_ReadTool(ctx).read(path=str(link / f"{SHA16}.png")))["ok"]
         is False
@@ -370,7 +370,7 @@ def test_a_planted_temp_root_symlink_opens_nothing(tmp_path, monkeypatch):
         "launch_root": str(proj),
         "security.read_guard": {"enabled": True, "mode": "ask"},
     }
-    ctx, asked = _tui_ctx(config, "deny")
+    ctx, asked = _tui_ctx(config, "deny_remember")
     assert (
         json.loads(_ReadTool(ctx).read(path=str(planted / "id_rsa")))["ok"]
         is False
@@ -418,7 +418,7 @@ def test_media_read_is_inside_the_perimeter(layout):
         **layout.config,
         "security.read_guard": {"enabled": True, "mode": "ask"},
     }
-    ctx, asked = _tui_ctx(config, "deny")
+    ctx, asked = _tui_ctx(config, "deny_remember")
     assert (
         json.loads(_ReadTool(ctx).read(path=str(layout.image)))["ok"] is True
     )
@@ -475,7 +475,7 @@ def test_custom_threads_dir_from_config_is_media(tmp_path, monkeypatch):
         "security.read_guard": {"enabled": True, "mode": "ask"},
         "security.write_guard": {"enabled": False},
     }
-    ctx, asked = _tui_ctx(config, "deny")
+    ctx, asked = _tui_ctx(config, "deny_remember")
     assert json.loads(_ReadTool(ctx).read(path=str(image)))["ok"] is True
     assert asked == []
     result = json.loads(_WriteTool(ctx).write(path=str(image), content="x"))
@@ -526,14 +526,14 @@ def test_scan_decisions_for_media(layout):
 
 
 def test_command_on_media_runs_when_confirmed(layout):
-    ctx, asked = _tui_ctx(layout.config, "once")
+    ctx, asked = _tui_ctx(layout.config, "allow_once")
     result = json.loads(_ExecTool(ctx).run(command=f"cp {layout.image} docs/"))
     assert result["ok"] is True
     assert len(asked) == 1
 
 
 def test_command_on_media_declined_is_blocked(layout):
-    ctx, asked = _tui_ctx(layout.config, "deny")
+    ctx, asked = _tui_ctx(layout.config, "deny_remember")
     result = json.loads(_ExecTool(ctx).run(command=f"rm {layout.image}"))
     assert result["ok"] is False
     assert result["error"]["type"] == "protected_path_denied"

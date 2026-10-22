@@ -57,7 +57,7 @@ async def test_right_column_leaves_room_for_notices_suffix():
         ]
         await pilot.pause()
         need = _need(scr)
-        left = cell_len(scr._footer_left_text())
+        left = cell_len(scr._footer_left_text().plain)
         assert need + left + _CHROME <= 120, (
             f"правая часть {need} + левая {left} > ширины окна 120: правая часть налезет на счётчик уведомлений"
         )
@@ -80,7 +80,7 @@ async def test_right_column_without_notices_is_unchanged():
         app.collect_footer_notices = list
         await pilot.pause()
         need = _need(scr)
-        assert need + cell_len(scr._footer_left_text()) + _CHROME <= 120
+        assert need + cell_len(scr._footer_left_text().plain) + _CHROME <= 120
         assert _left_rows(scr, 120, need) == 1
 
 
@@ -198,9 +198,77 @@ async def test_stop_key_keeps_its_room_on_narrow_window(
         _with_prices(app, scr, running=True)
         await pilot.pause()
 
-        assert scr._footer_left_commands() == _FOOTER_RUNNING_LEFT
+        assert scr._footer_tail_commands() == _FOOTER_RUNNING_LEFT
+        # пол левой — режим хотя бы глифом и стоп-клавиша за ним
+        floor = scr._footer_left_commands(narrow=True)
+        assert floor.endswith(_FOOTER_RUNNING_LEFT)
         left_width = scr._footer_total_width() - _need(scr) - _CHROME
-        assert left_width >= cell_len(_FOOTER_RUNNING_LEFT), (
+        assert left_width >= cell_len(floor), (
             f"ширина {width}: левой осталось {left_width} колонок, "
-            f"а «{_FOOTER_RUNNING_LEFT}» требует {cell_len(_FOOTER_RUNNING_LEFT)}"
+            f"а «{floor}» требует {cell_len(floor)}"
         )
+
+
+def test_model_name_is_cut_in_the_middle():
+    """Начало — провайдер, конец — версия: по ним модель и узнают."""
+    pytest.importorskip("textual")
+    from gc_tui.screens.main import _truncate_middle
+
+    name = "gatewayhub/acme-lab/acme-big-coder-4.5"
+    assert _truncate_middle(name, 22) == "gatewayhub/…-coder-4.5"
+    assert _truncate_middle(name, len(name)) == name
+    assert _truncate_middle(name, 10) == "gatew…-4.5"
+
+
+#: Нейтральный длинный ID (38 знаков, как у реальных ID шлюзов).
+_LONG_MODEL = "gatewayhub/acme-lab/acme-big-coder-4.5"
+_METER = "ctx 42%"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("width", "name_kept"), [(65, True), (50, True), (40, False)]
+)
+async def test_long_model_id_yields_before_the_stop_key(
+    tmp_path, monkeypatch, width, name_kept
+):
+    """Длинный ID модели в узком окне: «Ctrl+C/stop» цел, имя сначала
+    ужато по середине, на самом узком снято целиком; плашка контекста
+    остаётся всегда (спека §10.4, спека автовыбора §7.1)."""
+    pytest.importorskip("textual")
+    monkeypatch.chdir(tmp_path)
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.main import _FOOTER_RUNNING_LEFT
+    from rich.text import Text
+
+    app = TuiApp(
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": _LONG_MODEL}),
+    )
+    app._config_path = str(tmp_path / "config.yml")
+    async with app.run_test(size=(width, 30)) as pilot:
+        scr = pilot.app.screen
+        app.tui_state.active_task_id = "t1"
+        scr._active_task_id = "t1"
+        app.active_runner = _RunningRunner(None, running=True)
+        monkeypatch.setattr(scr, "_context_meter", lambda: Text(_METER))
+        await pilot.pause()
+
+        floor = scr._footer_left_commands(narrow=True)
+        assert floor.endswith(_FOOTER_RUNNING_LEFT)
+        left_width = scr._footer_total_width() - _need(scr) - _CHROME
+        assert left_width >= cell_len(floor), (
+            f"ширина {width}: левой {left_width}, «{floor}» требует "
+            f"{cell_len(floor)}"
+        )
+        top = scr._compose_footer_right().plain.split("\n")[0]
+        assert top.endswith(f" · {_METER}")
+        if not name_kept:
+            assert top == f"● · {_METER}"
+            return
+        model = top.split("● ", 1)[1].split(" · ", 1)[0]
+        head, cut, tail = model.partition("…")
+        assert cut == "…", f"имя не ужато: {top!r}"
+        assert head and tail
+        assert _LONG_MODEL.startswith(head) and _LONG_MODEL.endswith(tail)
+        assert cell_len(model) >= 10

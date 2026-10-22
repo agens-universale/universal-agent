@@ -410,3 +410,333 @@ def test_function_call_output_keeps_technical_tail_after_compaction(
 
     assert current == [call, out, notice]
     assert state.messages == [sys_m, summary, call, out, notice]
+
+
+@pytest.mark.parametrize("rounds", [2, 20])
+async def test_deferred_startup_preserves_current_batch_across_rounds(
+    monkeypatch, ctx_stub, rounds
+):
+    old = {"role": "user", "content": "old history", "id": "old"}
+    current = [{"role": "user", "content": "new task", "id": "new"}]
+    state = _minimal_state(messages=[old, *current])
+    calls = []
+
+    async def compact(**kwargs):
+        calls.append(kwargs["trigger_reason"])
+        assert kwargs["kept_messages"] == current
+        state.messages = [{"role": "user", "content": "summary", "id": "sum"}]
+
+    monkeypatch.setattr(rsc, "arun_summary_compaction", compact)
+    monkeypatch.setattr(
+        rsc, "exceeded_summary_triggers", lambda **_kw: len(calls) < rounds
+    )
+    coord = RunSummaryCoordinator(
+        ctx=ctx_stub,
+        state=state,
+        thread_session=None,
+        summary_trigger_chars=10,
+        is_cli_mode=False,
+        pre_backend_trigger_reason="pre_backend",
+        deferred_startup_compaction=True,
+        startup_progress_guard=False,
+    )
+    await coord.apre_backend_compaction_hook(current, "user_ask")
+    assert calls == ["pre_run"] * rounds
+    assert state.messages[-1] == current[-1]
+    monkeypatch.setattr(rsc, "exceeded_summary_triggers", lambda **_kw: True)
+    await coord.apre_backend_compaction_hook(current, "user_ask")
+    assert calls == ["pre_run"] * rounds + ["pre_backend"]
+
+
+async def test_deferred_startup_keeps_the_existing_round_limit(
+    monkeypatch, ctx_stub
+):
+    current = [{"role": "user", "content": "new task", "id": "new"}]
+    state = _minimal_state(messages=list(current))
+    calls = []
+
+    async def compact(**kwargs):
+        calls.append(kwargs["trigger_reason"])
+        state.messages = []
+
+    monkeypatch.setattr(rsc, "arun_summary_compaction", compact)
+    monkeypatch.setattr(rsc, "exceeded_summary_triggers", lambda **_kw: True)
+    limit_logs = []
+    monkeypatch.setattr(
+        rsc, "log_pre_run_max_rounds", lambda *_a, **kw: limit_logs.append(kw)
+    )
+    coord = RunSummaryCoordinator(
+        ctx=ctx_stub,
+        state=state,
+        thread_session=None,
+        summary_trigger_chars=10,
+        is_cli_mode=False,
+        pre_backend_trigger_reason="pre_backend",
+        deferred_startup_compaction=True,
+        startup_progress_guard=False,
+    )
+    await coord.apre_backend_compaction_hook(current, "user_ask")
+    assert len(calls) == 20
+    assert limit_logs[0]["max_rounds"] == 20
+    assert current == [{"role": "user", "content": "new task", "id": "new"}]
+
+
+@pytest.mark.parametrize("failure", ["trace", "cancel", "flag_cleanup"])
+async def test_startup_batch_survives_failure_after_history_replacement(
+    monkeypatch, ctx_stub, failure
+):
+    import asyncio
+    from gc_core.attachments.model import Attachment
+
+    image = Attachment(
+        id="image",
+        kind="image",
+        mime="image/png",
+        width=32,
+        height=32,
+        size=100,
+        path="/tmp/task.png",
+        origin="user",
+        label="Изображение #1",
+        source="/tmp/task.png",
+        orig_width=32,
+        orig_height=32,
+    )
+    task = {
+        "role": "user",
+        "content": "new task",
+        "id": "new",
+        "attachments": [image.to_dict()],
+    }
+    current = [task]
+    state = _minimal_state(
+        messages=[
+            {"role": "user", "content": "old history", "id": "old"},
+            task,
+        ]
+    )
+    thread = _thread_session_mock()
+    saved = []
+
+    async def persist(messages, **_kwargs):
+        saved.extend(messages)
+
+    thread.apersist_batch.side_effect = persist
+    error = asyncio.CancelledError if failure == "cancel" else RuntimeError
+
+    async def compact(**kwargs):
+        # Сводка применена к State и сохранена; следующий побочный эффект падает.
+        summary = {"role": "user", "content": "summary", "id": "sum"}
+        state.messages = [summary]
+        saved[:] = [summary]
+        if failure != "flag_cleanup":
+            raise error("after summary replacement")
+
+    async def flag(_thread, _name, active):
+        if not active and failure == "flag_cleanup":
+            raise error("flag cleanup")
+
+    monkeypatch.setattr(rsc, "arun_summary_compaction", compact)
+    monkeypatch.setattr(rsc, "_aset_runtime_flag", flag)
+    monkeypatch.setattr(rsc, "exceeded_summary_triggers", lambda **_kw: True)
+    coord = RunSummaryCoordinator(
+        ctx=ctx_stub,
+        state=state,
+        thread_session=thread,
+        summary_trigger_chars=10,
+        is_cli_mode=False,
+        pre_backend_trigger_reason="pre_backend",
+        deferred_startup_compaction=True,
+    )
+    with pytest.raises(error):
+        await coord.apre_backend_compaction_hook(current, "user_ask")
+    assert state.messages == [
+        {"role": "user", "content": "summary", "id": "sum"},
+        task,
+    ]
+    assert saved == state.messages
+    assert current == [task]
+
+
+async def test_batch_is_not_duplicated_when_compaction_fails_before_replacement(
+    monkeypatch, ctx_stub
+):
+    current = [{"role": "user", "content": "new task", "id": "new"}]
+    state = _minimal_state(messages=list(current))
+    thread = _thread_session_mock()
+
+    async def compact(**_kwargs):
+        raise RuntimeError("before replacement")
+
+    monkeypatch.setattr(rsc, "arun_summary_compaction", compact)
+    monkeypatch.setattr(rsc, "exceeded_summary_triggers", lambda **_kw: True)
+    coord = RunSummaryCoordinator(
+        ctx=ctx_stub,
+        state=state,
+        thread_session=thread,
+        summary_trigger_chars=10,
+        is_cli_mode=False,
+        pre_backend_trigger_reason="pre_backend",
+        deferred_startup_compaction=True,
+    )
+    with pytest.raises(RuntimeError):
+        await coord.apre_backend_compaction_hook(current, "user_ask")
+    assert state.messages == current
+    thread.apersist_batch.assert_not_awaited()
+
+
+@pytest.mark.parametrize("cancel", [False, True])
+async def test_trace_failure_after_archive_keeps_task_in_real_thread(
+    tmp_path, monkeypatch, ctx_stub, cancel
+):
+    import asyncio
+    from gc_core.thread_store import ThreadSession, make_message_key
+    from gc_core.thread_store_file import FileThreadStore
+
+    task = {
+        "role": "user",
+        "content": "new task",
+        "id": "new",
+        "attachments": [
+            {
+                "id": "image",
+                "kind": "image",
+                "mime": "image/png",
+                "width": 32,
+                "height": 32,
+                "size": 100,
+                "path": "/tmp/task.png",
+                "origin": "user",
+                "label": "Изображение #1",
+                "source": "/tmp/task.png",
+                "orig_width": 32,
+                "orig_height": 32,
+            }
+        ],
+    }
+    history = [{"role": "user", "content": "old history", "id": "old"}, task]
+    store = FileThreadStore(tmp_path / "threads")
+    store.append_messages("test", "thread", history)
+    thread = ThreadSession(
+        threads_dir=str(tmp_path / "threads"),
+        system_id="test",
+        store=store,
+        thread_id="thread",
+        history_messages=list(history),
+        known_message_keys={make_message_key(m) for m in history},
+        persisted_messages_count=2,
+        meta={},
+        previous_response_id=None,
+        backend_api_mode="chat_completions",
+    )
+    state = _minimal_state(messages=history)
+    current = [task]
+    trace_entered = asyncio.Event()
+
+    async def trace(*_args, **_kwargs):
+        trace_entered.set()
+        if cancel:
+            await asyncio.Event().wait()
+        raise RuntimeError("trace failed after archive")
+
+    async def compact(**kwargs):
+        state.messages = [{"role": "user", "content": "summary", "id": "sum"}]
+        await kwargs["on_summary_applied"](
+            {
+                "trigger_reason": "pre_run",
+                "summary_payload": {"summary_message_content": "summary"},
+            }
+        )
+
+    monkeypatch.setattr(rsc, "arun_summary_compaction", compact)
+    monkeypatch.setattr(rsc, "aappend_summary_trace_record", trace)
+    monkeypatch.setattr(rsc, "exceeded_summary_triggers", lambda **_kw: True)
+    coord = RunSummaryCoordinator(
+        ctx=ctx_stub,
+        state=state,
+        thread_session=thread,
+        summary_trigger_chars=10,
+        is_cli_mode=False,
+        pre_backend_trigger_reason="pre_backend",
+        deferred_startup_compaction=True,
+    )
+    running = asyncio.create_task(
+        coord.apre_backend_compaction_hook(current, "user_ask")
+    )
+    if cancel:
+        await asyncio.wait_for(trace_entered.wait(), 5)
+        running.cancel()
+    with pytest.raises(asyncio.CancelledError if cancel else RuntimeError):
+        await running
+    persisted = store.load_messages("test", "thread")
+    assert persisted[-1] == task
+    assert state.messages[-1] == task
+    assert len(persisted) == 2
+    assert (
+        not store.load_meta("test", "thread")
+        .get("runtime", {})
+        .get("summarizing", False)
+    )
+
+
+async def test_old_execution_patch_retains_failure_command_order(
+    monkeypatch, ctx_stub
+):
+    current = [{"role": "user", "content": "new task", "id": "new"}]
+    state = _minimal_state(messages=list(current))
+    thread = _thread_session_mock()
+    patches = []
+    ctx_stub.execution_patch = lambda name: patches.append(name) or False
+
+    async def compact(**_kwargs):
+        state.messages = [{"role": "user", "content": "summary", "id": "sum"}]
+        raise RuntimeError("old history")
+
+    monkeypatch.setattr(rsc, "arun_summary_compaction", compact)
+    monkeypatch.setattr(rsc, "exceeded_summary_triggers", lambda **_kw: True)
+    coord = RunSummaryCoordinator(
+        ctx=ctx_stub,
+        state=state,
+        thread_session=thread,
+        summary_trigger_chars=10,
+        is_cli_mode=False,
+        pre_backend_trigger_reason="pre_backend",
+    )
+    with pytest.raises(RuntimeError):
+        await coord.apre_backend_compaction_hook(current, "user_ask")
+    assert patches == ["summary-batch-preservation-v1"]
+    thread.apersist_batch.assert_not_awaited()
+
+
+async def test_startup_no_progress_stop_is_logged(monkeypatch, ctx_stub):
+    current = [{"role": "user", "content": "new task", "id": "new"}]
+    state = _minimal_state(
+        messages=[
+            {"role": "user", "content": "old history", "id": "old"},
+            *current,
+        ]
+    )
+    calls = []
+
+    async def compact(**kwargs):
+        calls.append(kwargs["trigger_reason"])
+
+    monkeypatch.setattr(rsc, "arun_summary_compaction", compact)
+    monkeypatch.setattr(rsc, "exceeded_summary_triggers", lambda **_kw: True)
+    stops = []
+    monkeypatch.setattr(
+        rsc, "log_pre_run_no_progress", lambda *_a, **kw: stops.append(kw)
+    )
+    coord = RunSummaryCoordinator(
+        ctx=ctx_stub,
+        state=state,
+        thread_session=None,
+        summary_trigger_chars=10,
+        is_cli_mode=False,
+        pre_backend_trigger_reason="pre_backend",
+        deferred_startup_compaction=True,
+        startup_progress_guard=True,
+    )
+    await coord.apre_backend_compaction_hook(current, "user_ask")
+    assert len(calls) == 1
+    assert stops == [{"thread_id": None, "rounds": 1}]

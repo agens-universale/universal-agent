@@ -102,3 +102,52 @@ def test_real_parent_preparation_flag_roundtrips_for_child(skip):
     state.skip_initial_user_ask_step_when_history = skip
     restored = State.from_execution_snapshot(state.to_execution_snapshot())
     assert restored.skip_initial_user_ask_step_when_history is skip
+
+
+def test_parallel_children_judge_denials_add_up_instead_of_conflicting():
+    """Два параллельных субагента в auto копят отказы судьи в общем счёте
+    сессии одновременно. Счётчики складываются, как счёт вызовов, а не
+    роняют прогон родителя конфликтом."""
+    state, ctx = fixture()
+    baseline = capture_subagent_transfer(state, ctx)
+    # первый ребёнок уже вернул два отказа
+    state.shared.judge_denials_total = 2
+    state.shared.judge_denials_in_a_row = 2
+    child, childctx = fixture()
+    child.shared.judge_denials_total = 1
+    child.shared.judge_denials_in_a_row = 1
+    child.shared.judge_paused = True
+    apply_subagent_transfer(
+        state, ctx, baseline, capture_subagent_transfer(child, childctx)
+    )
+    assert state.shared.judge_denials_total == 3
+    assert state.shared.judge_denials_in_a_row == 3
+    assert state.shared.judge_paused is True
+
+
+def test_equal_parallel_denials_are_not_lost():
+    """Два ребёнка по одному отказу: 0→1 и 0→1 — это 2, а не 1."""
+    state, ctx = fixture()
+    baseline = capture_subagent_transfer(state, ctx)
+    state.shared.judge_denials_total = 1  # первый ребёнок уже вернул свой
+    child, childctx = fixture()
+    child.shared.judge_denials_total = 1
+    apply_subagent_transfer(
+        state, ctx, baseline, capture_subagent_transfer(child, childctx)
+    )
+    assert state.shared.judge_denials_total == 2
+
+
+def test_a_child_reset_wins_over_sibling_increments():
+    """Сброс серии у ребёнка (судья разрешил) не вычитается из чужих отказов:
+    счёт берётся у ребёнка — серия прервана."""
+    state, ctx = fixture()
+    state.shared.judge_denials_in_a_row = 2
+    baseline = capture_subagent_transfer(state, ctx)
+    state.shared.judge_denials_in_a_row = 3  # сосед отказал ещё раз
+    child, childctx = fixture()
+    child.shared.judge_denials_in_a_row = 0  # у этого ребёнка судья разрешил
+    apply_subagent_transfer(
+        state, ctx, baseline, capture_subagent_transfer(child, childctx)
+    )
+    assert state.shared.judge_denials_in_a_row == 0

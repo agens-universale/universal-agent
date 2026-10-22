@@ -272,8 +272,13 @@ def build_agent_settings_for_server(server_cfg: Dict[str, Any]):
     # Прежний `setdefault("limit_project_metadata", True)` ничего не менял:
     # плоский словарь всегда уже содержал ключ. Поведение сохранено.
     # Режим запуска для ядра: от него зависит запись журнала правок
-    # (`agent_edits.record.server`, по умолчанию выключена).
-    return loaded.with_runtime(run_mode=RUN_MODE_SERVER)
+    # (`agent_edits.record.server`, по умолчанию выключена). Канал: за
+    # вебхуком нет человека, его слова — запрос внешней системы.
+    return loaded.with_runtime(
+        run_mode=RUN_MODE_SERVER,
+        human_channel=False,
+        external_user_words=True,
+    )
 
 
 __all__ = [

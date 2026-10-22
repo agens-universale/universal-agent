@@ -202,6 +202,25 @@ class FileThreadStore(ThreadStoreBase):
             )
         )
 
+    def save_plan_file(
+        self, system_id: str, thread_id: str, plan: Dict[str, Any]
+    ) -> str | None:
+        """Экспорт плана сессии в файл для человека; путь либо None, если
+        плана нет. Возможность именно файлового стора: исполнитель ищет её по
+        имени и файловую систему сам не трогает."""
+        from gc_core.persistence.plan_file import (
+            render_plan_file,
+            write_plan_file,
+        )
+        from gc_core.thread_store import plan_file_path
+
+        text = render_plan_file(plan, thread_id)
+        if not text:
+            return None
+        path = plan_file_path(self._dir, system_id, thread_id)
+        write_plan_file(path, text)
+        return path
+
     def reset(self, system_id: str, thread_id: str) -> List[str]:
         return self._call(reset_thread_files, self._dir, system_id, thread_id)
 

@@ -6,7 +6,7 @@ import asyncio
 import logging
 from typing import Any
 
-from gc_core.tools.turn.submit_solution import SubmitSolution
+from gc_core.tools.turn.turn_close import close_view, closing_reply_of
 
 from gc_chat.completions.content import ContentMap
 from gc_chat.completions.errors import ApiError, error_payload
@@ -139,10 +139,10 @@ class TurnRun:
         async with self._emit_lock:
             self._put_tools()
             if failed is None and not self.cancel_requested:
-                answer = SubmitSolution.present_result(
-                    getattr(self.agent, "last_answer", None),
-                    shown="",
-                )
+                answer = getattr(self.agent, "last_answer", None)
+                close = close_view(answer, closing_reply_of(self.agent))
+                if close is not None:
+                    answer = close.render(markdown=True)
                 self._put(self._content.finish(answer))
 
     async def _seal(self, failed: BaseException | None) -> None:

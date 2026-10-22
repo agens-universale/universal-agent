@@ -204,6 +204,33 @@ def _compat_layer(
     return doc
 
 
+#: Ключ, который слои из папки проекта (её `.gc/config.yml` и профили) не
+#: задают. Список безобидных команд проходит без вопроса и в plan, и в manual:
+#: расширить его — выдать доверие, а выдаёт его пользователь, не репозиторий.
+#: Склейка списков «проект только расширяет» рассчитана на запреты; этот
+#: список разрешающий.
+_USER_ONLY_KEY = ("security", "permissions", "readonly_commands")
+
+
+def _without_user_only_key(
+    doc: Dict[str, Any], source: Any, notices: Optional[list[str]]
+) -> Dict[str, Any]:
+    """Документ слоя проекта без `_USER_ONLY_KEY`; о выброшенном — уведомление."""
+    security, permissions, key = _USER_ONLY_KEY
+    section = doc.get(security)
+    section = section.get(permissions) if isinstance(section, dict) else None
+    if not isinstance(section, dict) or key not in section:
+        return doc
+    doc = copy.deepcopy(doc)
+    del doc[security][permissions][key]
+    if notices is not None:
+        notices.append(
+            f"{source}: {'.'.join(_USER_ONLY_KEY)} в конфиге проекта не "
+            "действует — безобидные команды задаются в своём config.yml"
+        )
+    return doc
+
+
 def _overlay_layer(
     raw_config: Dict[str, Any],
     layer_path,
@@ -247,6 +274,8 @@ def _overlay_layer(
     layer_raw, facts = migrate_document(layer_raw, source=str(layer_path))
     if notices is not None:
         notices.extend(facts)
+    if layer == "project":
+        layer_raw = _without_user_only_key(layer_raw, layer_path, notices)
     if unresolved is None or len(unresolved) == start:
         validate_registry_pairs(
             layer_raw,
@@ -289,6 +318,8 @@ def _overlay_profile(
     # Загруженный с диска документ compat уже прошёл (`load_profile_document`),
     # кандидат из формы — нет; повторный проход идемпотентен.
     profile_raw = _compat_layer(profile_raw, ref.path, notices)
+    if ref.root_kind == "project":
+        profile_raw = _without_user_only_key(profile_raw, ref.path, notices)
     # Контент профиля мержится ПОВЕРХ base/managed/project (ось 2).
     return merge_config_layers(raw_config, profile_raw), ref, profile_raw
 
