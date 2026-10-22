@@ -231,3 +231,18 @@ async def test_stop_and_switch_clears_question_of_old_run(tmp_path):
         await pilot.pause()
         assert scr._active_task_id is None
         assert pilot.app.tui_state.ask_human_state is None
+
+
+@pytest.mark.asyncio
+async def test_stop_and_switch_clears_confirm_of_old_run(tmp_path):
+    """Ход ждал подтверждения: баннер прежней сессии в новую не едет."""
+    async with _app(tmp_path).run_test() as pilot:
+        scr, runner = await _run_in_a(pilot)
+        scr._confirm_active = True
+        await _pick_b(pilot, tmp_path)
+        await pilot.press("y")
+        await pilot.pause()
+        scr._poll_active()
+        await pilot.pause()
+        assert scr._active_task_id == _B
+        assert scr._confirm_active is False
