@@ -37,8 +37,9 @@ from gc_core.plugins.manifest import (
 
 logger = logging.getLogger(__name__)
 
-_SESSION_FLAG = "_gc_plugin_session_started"
-_STOP_COUNT = "_gc_plugin_stop_continuations"
+# Префикс id сообщения SessionStart (см. ``message_id_suffix`` ниже): по нему
+# находим уже выданный контекст в истории треда.
+SESSION_START_ID_PREFIX = "m_plugin_session_start"
 MAX_STOP_CONTINUATIONS = 3
 _SESSION_SOURCE = "startup"
 BLOCKED_ERROR = "blocked_by_plugin"
@@ -252,10 +253,16 @@ async def _run_event(
 async def asession_start_messages(
     state: Any, ctx: Any
 ) -> list[dict[str, Any]]:
-    """Сообщения, которые плагины кладут в начало сессии (один раз на state)."""
-    if getattr(state, _SESSION_FLAG, False) or not active_plugins(ctx):
+    """Сообщения, которые плагины кладут в начало сессии (один раз на тред).
+
+    «Уже было» определяем по истории: State создаётся на каждый ход заново,
+    а сообщения плагина сохраняются в тред. Субагентам хук не запускается.
+    """
+    if _is_subagent(state) or not active_plugins(ctx):
         return []
-    setattr(state, _SESSION_FLAG, True)
+    for message in getattr(state, "messages", None) or []:
+        if str(message.get("id", "")).startswith(SESSION_START_ID_PREFIX):
+            return []
     payload = {
         **_base_payload(ctx, state, EVENT_SESSION_START),
         "source": _SESSION_SOURCE,
@@ -275,6 +282,10 @@ async def asession_start_messages(
             "\n\n".join(texts), message_id_suffix="plugin_session_start"
         )
     ]
+
+
+def _is_subagent(state: Any) -> bool:
+    return getattr(state, "parent_state_id", None) is not None
 
 
 def _blocked_output(result: HookResult, tool_name: str) -> str:
@@ -402,7 +413,7 @@ async def auser_prompt_messages(
     ``decision: block`` превращается в сообщение с причиной для модели.
     Служебные (технические) сообщения хук не запускают.
     """
-    if not messages or not active_plugins(ctx):
+    if _is_subagent(state) or not messages or not active_plugins(ctx):
         return []
     last = messages[-1]
     if not isinstance(last, dict) or last.get("role") != "user":
@@ -437,17 +448,18 @@ async def auser_prompt_messages(
 
 
 async def astop_decision(
-    state: Any, ctx: Any, last_message: str | None
-) -> list[dict[str, Any]]:
+    state: Any, ctx: Any, last_message: str | None, used: int
+) -> tuple[list[dict[str, Any]], int]:
     """``Stop``: хук может не пустить ход к завершению.
 
-    Возвращает сообщения для продолжения хода (пусто, если завершать можно).
-    Число продолжений за один state ограничено ``MAX_STOP_CONTINUATIONS``,
-    чтобы плагин не зациклил агента; в хук уходит ``stop_hook_active``.
+    Возвращает ``(сообщения для продолжения, новый счётчик продолжений)``;
+    сообщения пусты, если завершать можно. Счётчик ведёт вызывающий цикл,
+    число продолжений ограничено ``MAX_STOP_CONTINUATIONS``, чтобы плагин не
+    зациклил агента; в хук уходит ``stop_hook_active``. Субагентам хук не
+    запускается.
     """
-    if not active_plugins(ctx):
-        return []
-    used = int(getattr(state, _STOP_COUNT, 0) or 0)
+    if _is_subagent(state) or not active_plugins(ctx):
+        return [], used
     payload = {
         **_base_payload(ctx, state, EVENT_STOP),
         "stop_hook_active": used > 0,
@@ -460,14 +472,11 @@ async def astop_decision(
                 f"[plugin {result.plugin}] {result.reason or 'continue'}"
             )
     if not reasons:
-        setattr(state, _STOP_COUNT, 0)
-        return []
+        return [], 0
     if used >= MAX_STOP_CONTINUATIONS:
         logger.warning("plugin Stop hooks exceeded %s continuations", used)
-        setattr(state, _STOP_COUNT, 0)
-        return []
-    setattr(state, _STOP_COUNT, used + 1)
-    return [_technical("\n\n".join(reasons), "plugin_stop")]
+        return [], 0
+    return [_technical("\n\n".join(reasons), "plugin_stop")], used + 1
 
 
 def plugin_mcp_servers(paths: list[str]) -> dict[str, dict[str, Any]]:

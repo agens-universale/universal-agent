@@ -1940,6 +1940,7 @@ class _AgentLoop:
     ) -> None:
         self.state = state
         self.ctx = ctx
+        self._plugin_stop_continuations = 0
         self.get_full_history_messages = get_full_history_messages
         self.persist_messages_callback = persist_messages_callback
         self.pre_backend_compaction_hook = pre_backend_compaction_hook
@@ -2565,11 +2566,16 @@ class _AgentLoop:
 
     async def _aplugin_stop(self, result) -> List[Dict]:
         try:
-            return await aplugin_stop_decision(
+            (
+                messages,
+                self._plugin_stop_continuations,
+            ) = await aplugin_stop_decision(
                 self.state,
                 self.ctx,
                 result if isinstance(result, str) else None,
+                self._plugin_stop_continuations,
             )
+            return messages
         except ExecutionFailure:
             raise
         except Exception as plugin_exc:

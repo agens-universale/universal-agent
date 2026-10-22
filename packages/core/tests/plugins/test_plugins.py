@@ -250,7 +250,7 @@ async def test_tool_hook_matches_claude_name(tmp_path, monkeypatch, matcher):
     assert decision.blocked_output is not None
 
 
-async def test_session_start_runs_once_and_is_skipped_when_durable(
+async def test_session_start_not_repeated_for_loaded_history(
     tmp_path, monkeypatch
 ):
     root = _make_plugin(
@@ -272,19 +272,56 @@ async def test_session_start_runs_once_and_is_skipped_when_durable(
         },
     )
     _config(monkeypatch, [str(root)])
-    ctx, state = SimpleNamespace(), SimpleNamespace(state_id="s1")
+    ctx = SimpleNamespace()
+    state = SimpleNamespace(state_id="s1", messages=[])
+    keys = set(vars(state))
 
     first = await runtime.asession_start_messages(state, ctx)
     assert len(first) == 1 and "HELLO" in first[0]["content"]
-    assert await runtime.asession_start_messages(state, ctx) == []
+    assert first[0]["id"].startswith(runtime.SESSION_START_ID_PREFIX)
+
+    # Новый State следующего хода: история подгружена из треда.
+    next_state = SimpleNamespace(state_id="s2", messages=first)
+    assert await runtime.asession_start_messages(next_state, ctx) == []
+    assert set(vars(state)) == keys
+    assert set(vars(next_state)) == {"state_id", "messages"}
 
     durable_ctx = SimpleNamespace(durable_execution=True)
     assert (
         await runtime.asession_start_messages(
-            SimpleNamespace(state_id="s2"), durable_ctx
+            SimpleNamespace(state_id="s3", messages=[]), durable_ctx
         )
         == []
     )
+
+
+async def test_session_start_and_stop_skipped_in_subagent(
+    tmp_path, monkeypatch
+):
+    root = _make_plugin(
+        tmp_path,
+        hooks={
+            "SessionStart": [
+                {
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": _cmd(
+                                'print(\'{"additionalContext": "HELLO"}\')'
+                            ),
+                        }
+                    ]
+                }
+            ],
+            "Stop": [{"hooks": [{"type": "command", "command": "exit 2"}]}],
+        },
+    )
+    _config(monkeypatch, [str(root)])
+    state = SimpleNamespace(state_id="s1", messages=[], parent_state_id="p")
+    assert (
+        await runtime.asession_start_messages(state, SimpleNamespace()) == []
+    )
+    assert await runtime.astop_decision(state, object(), "done", 0) == ([], 0)
 
 
 async def test_no_plugins_configured_is_a_noop(monkeypatch):
@@ -366,10 +403,18 @@ async def test_stop_hook_continues_with_cap(tmp_path, monkeypatch):
     )
     _config(monkeypatch, [str(root)])
     state = SimpleNamespace(state_id="s1")
+    used = 0
     for _ in range(runtime.MAX_STOP_CONTINUATIONS):
-        out = await runtime.astop_decision(state, object(), "done")
+        out, new_used = await runtime.astop_decision(
+            state, object(), "done", used
+        )
         assert len(out) == 1 and "not done" in json.dumps(out[0])
-    assert await runtime.astop_decision(state, object(), "done") == []
+        assert new_used == used + 1
+        used = new_used
+    assert await runtime.astop_decision(state, object(), "done", used) == (
+        [],
+        0,
+    )
 
 
 async def test_post_tool_failure_uses_failure_event(tmp_path, monkeypatch):
