@@ -263,6 +263,11 @@ def resolve_live_terminal_indicator_state(*, status, stop_requested):
     return indicator_state_of(word) if word else None
 
 
+def _outcome_error(outcome: TurnOutcome) -> str | None:
+    """Причина упавшего хода из записи итога (строка `└`)."""
+    return (outcome.error or {}).get("message")
+
+
 def select_indicator_mode(*, err, is_running, ask_human, confirm):
     """Режим строки-индикатора в _poll_active. Порядок важен.
 
@@ -668,6 +673,10 @@ class TraceScreen(Screen):
         # записи не имеет, строка — по статусу сессии.
         self._last_turn_outcome: Optional[TurnOutcome] = None
         self._outcome_superseded: bool = False
+        # Сводка правок закрытого хода открытого треда (`_close_turn_edits`):
+        # строка итога получает её, когда встанет, — запись стопа может
+        # дочитаться позже спадающего фронта.
+        self._closed_turn_summary: Optional[tuple] = None
         # Остановленный раннер, чей поток ещё дорабатывает (стоп
         # кооперативный): строка итога мигает «■» (решение 26).
         self._stopping_runner = None
@@ -2333,7 +2342,7 @@ class TraceScreen(Screen):
         sp = self._session_last_prompt()
         if is_resume:
             self._resumed_prompt = sp  # авторитетно из стора (переключение)
-            self._restore_terminal_indicator()  # строка-итог прошлого хода
+            self._restore_latest_turn_line()  # строка итога прошлого хода
             self._sync_plan_panel_with_session()
         elif sp is not None:
             self._resumed_prompt = sp  # auto-create: не затирать свежий send
@@ -2390,6 +2399,7 @@ class TraceScreen(Screen):
         до новой отправки."""
         self._stopping_runner = None
         self._last_user_message_id = None
+        self._closed_turn_summary = None
 
     def _mount_failed_from_meta(self, task_id: str) -> None:
         """После рестарта: смонтировать виджеты failed-реплик из
@@ -2630,8 +2640,7 @@ class TraceScreen(Screen):
             # Итог хода — не сообщение ленты: строка последнего хода, пока
             # после записи не началась реплика.
             outcome = parse_turn_outcome(rec)
-            undone = self._undone_reply_ids.get(self._active_task_id, ())
-            if outcome is None or outcome.opened_by in undone:
+            if outcome is None or self._is_undone_reply(outcome.opened_by):
                 return
             self._last_turn_outcome = outcome
             self._outcome_superseded = False
@@ -2670,22 +2679,44 @@ class TraceScreen(Screen):
         else:
             self._last_event_kind = ev.kind
 
+    def _is_undone_reply(self, msg_id: Optional[str]) -> bool:
+        """Реплика открытого треда снята откатом отправки."""
+        undone = self._undone_reply_ids.get(self._active_task_id, ())
+        return msg_id is not None and msg_id in undone
+
     def _mount_turn_line(self, outcome: TurnOutcome) -> None:
         """Строка хода — на месте его записи (через `_trace_mount`, значит
         над очередью и над отправленной, ещё не записанной репликой: запись
-        стопа дочитана после новой отправки). Новая — строка последнего хода: скрыта, пока её
-        показывает индикатор; прошлая оседает."""
+        стопа дочитана после новой отправки). Строка последнего хода свежая
+        (§3.2), если под ней нет отправленной незаписанной реплики, —
+        тогда следующий ход уже начался; прошлая оседает."""
+        fresh = not self._outcome_superseded and not self._sent_reply_below()
         self._settle_turn_line()
         line = build_turn_line(outcome)
-        line.add_class(TURN_LINE_LATEST)
+        # Причина записи хранится и у осевшей строки (освежить её снова).
+        line.freshen(None, _outcome_error(outcome))
+        if not fresh:
+            line.settle()
         self._trace_mount(line, above_sent=True)
+
+    def _sent_reply_below(self) -> bool:
+        """В хвосте ленты — отправленная реплика, ещё не записанная ядром."""
+        trace = self.query_one(_SEL_TRACE, VerticalScroll)
+        return any(
+            w.state == "pending" for w in self._queued_tail(trace, sent=True)
+        )
+
+    def _fresh_turn_line(self) -> Optional[TurnLine]:
+        """Свежая строка последнего хода в ленте; None — её нет."""
+        lines = list(self.query(TurnLine).filter(f".{TURN_LINE_LATEST}"))
+        return lines[-1] if lines else None
 
     def _settle_turn_line(self) -> bool:
         """Начался новый ход: строка прошлого оседает в ленте. True — было
         чему оседать."""
         lines = list(self.query(TurnLine).filter(f".{TURN_LINE_LATEST}"))
         for line in lines:
-            line.remove_class(TURN_LINE_LATEST)
+            line.settle()
         return bool(lines)
 
     def _turn_started_after_record(self, *, live: bool) -> None:
@@ -2743,14 +2774,15 @@ class TraceScreen(Screen):
         self.query_one(_SEL_INDICATOR_BAR, Vertical).mount(indicator)
         self._follow_turn_clock()
 
-    def _restore_terminal_indicator(self) -> None:
-        """На resume сессии: смонтировать строку-итог прошлого хода. Только если
-        прогона нет и индикатор ещё не смонтирован.
+    def _restore_latest_turn_line(self) -> None:
+        """На resume сессии: освежить строку итога прошлого хода. Только
+        если прогона нет и индикатор не смонтирован.
 
         Источник — запись итога последнего хода (исход, длительность, время,
-        причина ошибки), если после неё не началась реплика. Иначе — слово
-        статуса сессии (`_session_status_word`: «■ Прервано» при running без
-        живого хода) без времени; исход не записан — строки нет."""
+        причина ошибки), если после неё не началась реплика; сводка правок —
+        из меты того же хода. Иначе — слово статуса сессии
+        (`_session_status_word`: «■ Прервано» при running без живого хода)
+        строкой без времени в конце ленты; исход не записан — строки нет."""
         if (
             self._thinking is not None
             or self._store is None
@@ -2767,7 +2799,7 @@ class TraceScreen(Screen):
         if outcome is not None:
             word, plan = kind_of(outcome)
         else:
-            # Индикатор не из записи — строка последней записи в ленте.
+            # Строка последней записи в ленте — не итог последнего хода.
             self._settle_turn_line()
             word = word_of_status(self._session_status_word())
             plan = False
@@ -2795,35 +2827,37 @@ class TraceScreen(Screen):
         *,
         edits=None,
     ) -> None:
-        """Строка-итог последнего хода в индикаторе: из записи итога —
-        длительность, время конца и причина ошибки; без записи — только
-        слово. Индикатора нет — монтируется со сводкой правок `edits`."""
-        state = indicator_state_of(word)
-        ind = self._thinking
-        if ind is None:
-            ind = ThinkingIndicator(
-                state=state, turn_summary=self._restored_turn_summary(edits)
-            )
-            self._thinking = ind
-            self.query_one(_SEL_INDICATOR_BAR, Vertical).mount(ind)
-        ind.set_plan(plan)
-        ind.freeze_elapsed(outcome.duration_sec if outcome else None)
-        ind.set_ended_at(outcome.ended_at if outcome else None)
+        """Итог последнего хода — свежая строка в ленте, индикатор уходит.
+
+        Есть запись итога — освежается её строка: сводка правок `edits`
+        (не задана — сводка закрытого хода), причина ошибки из записи. Без
+        записи (§3.6) — строка без времени по слову `word` в конец ленты,
+        причина — живая ошибка раннера; одна на ход: повторный вызов
+        освежает её же."""
+        self._destroy_thinking_indicator()
+        summary = self._restored_turn_summary(
+            self._closed_turn_summary if edits is None else edits
+        )
+        line = self._fresh_turn_line()
         if outcome is not None:
-            # Без записи причина — живая ошибка раннера (`_poll_tick`).
-            ind.set_error((outcome.error or {}).get("message"))
-        ind.show(state)
-        self._sync_indicator_reserve()
+            if line is not None:
+                line.freshen(summary, _outcome_error(outcome))
+            return
+        error = self._active_run_error() if word == "failed" else None
+        if line is None or line.recorded:
+            if self._is_undone_reply(self._last_user_message_id):
+                return  # откатанная реплика строки хода не даёт (§3.8)
+            self._settle_turn_line()
+            line = build_turn_line(
+                word=word, plan=plan, opened_by=self._last_user_message_id
+            )
+            line.freshen(summary, error)
+            self._trace_mount(line, above_sent=True)
+            return
+        line.freshen(summary, error)
 
     def on_indicator_rows_changed(self, event: IndicatorRowsChanged) -> None:
         event.stop()
-        self._sync_indicator_reserve()
-
-    def _set_indicator_error(self, error: str | None) -> None:
-        """Причина упавшего хода под «✕ Ошибка»; бар растёт на её строку."""
-        if self._thinking is None:
-            return
-        self._thinking.set_error(error)
         self._sync_indicator_reserve()
 
     def _hide_thinking_indicator(self) -> None:
@@ -4265,17 +4299,17 @@ class TraceScreen(Screen):
         Агент мог создать скилл → TUI-кэш скиллов (/skill picker/inline,
         строки скиллов палитры) инвалидируется и тихо прогревается заново в
         фоне. Следующий прогон снимет свою границу журнала правок заново.
-        Сводка правок — тихий правый сегмент строки-итога; compact ходом не
+        Сводка правок — тихий правый сегмент строки итога; compact ходом не
         считается, правок в нём нет. Сводка — по журналу треда прогона
-        `task_id`; в индикатор — только если этот тред на экране."""
+        `task_id`; строке — только если этот тред на экране."""
         self._skills_cache = None
         self._warm_skills_cache()
         self._edits_baseline_taken = False
         if kind == "compact":
             return None
         edits = self._finished_turn_summary(task_id)
-        if on_screen and self._thinking is not None:
-            self._thinking.set_turn_summary(edits)
+        if on_screen:
+            self._closed_turn_summary = edits
         return edits
 
     def _finished_turn_summary(
@@ -5241,6 +5275,7 @@ class TraceScreen(Screen):
             # Начался новый ход: запись итога прошлого — уже не его строка,
             # она оседает в ленте до реплики нового.
             self._outcome_superseded = True
+            self._closed_turn_summary = None
             self._settle_turn_line()
 
     def _update_mcp_indicator(self) -> None:
@@ -5500,17 +5535,19 @@ class TraceScreen(Screen):
             word,
         )
         self._stamp_run_outcome(run_tid, word, edits)
-        # Строка-итог — когда поток хода вышел. Остановленный дорабатывает
+        # Строка итога — когда поток хода вышел. Остановленный дорабатывает
         # (мигающий «■»), новый прогон уже идёт — строку ведёт тик.
-        # Ход уложился между тиками — индикатора нет, монтируем. Тик,
-        # заставший прогон, индикатор создал; если его нет, его убрали
+        # Ход уложился между тиками — индикатора нет, ставим. Тик,
+        # заставший прогон, индикатор создал (или ошибка раннера уже
+        # поставила строку); если нет ни того, ни другого, их убрали
         # намеренно (отмена-«undo») — не воскрешаем.
         settled = runner is None or not runner.is_running()
-        if (
-            on_screen
-            and settled
-            and (self._thinking is not None or not self._was_running)
-        ):
+        shown = (
+            self._thinking is not None
+            or self._fresh_turn_line() is not None
+            or not self._was_running
+        )
+        if on_screen and settled and shown:
             self._show_turn_outcome(word, plan_proposed, outcome, edits=edits)
         self.app.last_stop_requested = False
         self._update_terminal_title()
@@ -5717,11 +5754,11 @@ class TraceScreen(Screen):
             confirm=self._confirm_active,
         )
         if _indicator_mode == "failed":
-            # Краш раннера → ✕ Ошибка сразу и персистентно: не ждём
-            # falling-edge/idle и не зависим от reaping воркера. _show создаёт
-            # индикатор, если его нет.
-            self._show_thinking_indicator(state="failed")
-            self._set_indicator_error(err)
+            # Краш раннера → «✕ Ошибка» строкой сразу: не ждём
+            # falling-edge/idle и не зависим от reaping воркера.
+            self._show_turn_outcome(
+                "failed", False, self._latest_turn_outcome()
+            )
             if not _frozen:
                 self._clear_stream_block()
         elif _indicator_mode == "active":
@@ -5870,9 +5907,7 @@ class TraceScreen(Screen):
         if state is None:
             self._destroy_thinking_indicator()
         else:
-            # show, не set_state: стоп мог прийти, пока строка была
-            # скрыта на человеко-ожидании.
-            ind.show(state)
+            self._show_turn_outcome(state, False, None)
 
     def _follow_turn_clock(self) -> None:
         """Живой счёт индикатора хода — от часов хода ядра: ожидание

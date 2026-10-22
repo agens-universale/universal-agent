@@ -277,6 +277,23 @@ async def test_turn_line_sits_in_agent_bullet_column(tmp_path):
         assert indicator.content_region.x == col
 
 
+@pytest.mark.asyncio
+async def test_turn_line_glyph_in_agent_bullet_column(tmp_path):
+    """Строка итога хода в ленте (S10): её глиф — в колонке `●` реплики
+    агента."""
+    from gc_tui.services.trace_render import build_turn_line
+
+    async with _app(tmp_path).run_test(size=(120, 40)) as pilot:
+        trace = await _live_trace(pilot)
+        line = build_turn_line(word="completed")
+        line.freshen((1, 2, 3), None)
+        pilot.app.screen._trace_mount(line)
+        await pilot.pause()
+        agent = next(w for w in trace.children if isinstance(w, TraceRow))
+        col = _glyph_x(agent.query_one(".trace-prefix"), "● ")
+        assert line.content_region.x == col
+
+
 def _styled(app_cls):
     """Хост превью с настоящими стилями приложения (как `tui_app_factory`)."""
     from gc_testkit.paths import TUI_PKG

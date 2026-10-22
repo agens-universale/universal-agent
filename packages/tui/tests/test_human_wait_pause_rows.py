@@ -55,10 +55,13 @@ async def test_human_wait_ticks_nested_elapsed(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_terminal_state_unhides_indicator(tmp_path):
+async def test_terminal_state_after_hidden_indicator_is_a_line(tmp_path):
+    """Стоп во время подтверждения (индикатор скрыт): итог — видимой
+    свежей строкой в ленте, скрытый индикатор уходит."""
     import json
 
     from gc_tui.widgets.thinking_indicator import ThinkingIndicator
+    from gc_tui.widgets.turn_line import TurnLine
 
     tid = "humanwait00000000000000000000001"
     meta = {
@@ -82,6 +85,8 @@ async def test_terminal_state_unhides_indicator(tmp_path):
         # Стоп во время подтверждения: индикатор скрыт, ожидание снято.
         scr._hide_thinking_indicator()
         scr._poll_active()
-        ind = pilot.app.screen.query_one(ThinkingIndicator)
-        assert ind._state == "done"
-        assert not ind.has_class("hidden")
+        await pilot.pause()
+        assert list(pilot.app.screen.query(ThinkingIndicator)) == []
+        (line,) = pilot.app.screen.query(TurnLine)
+        assert line.is_fresh and line.display
+        assert line.text.plain == "✓ Выполнил"

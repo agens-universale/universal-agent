@@ -1,6 +1,7 @@
 """Причина ошибки хода под `✕ Ошибка` (решение владельца 7, смоук P3a).
 
-Ход упал — под строкой индикатора строка `└ <класс>: <текст>` (`DIM`).
+Ход упал — под свежей строкой итога в ленте строка `└ <класс>: <текст>`
+(`DIM`, S10 §4.6).
 Причина хранится в записи итога хода (`outcome.error.message`, пишет
 ядро): видна вживую и после повторного открытия треда; в мету TUI её не
 копирует; новый ход её снимает."""
@@ -94,9 +95,16 @@ class _Runner:
         pass
 
 
-def _indicator_text(scr) -> str:
-    assert scr._thinking is not None
-    return scr._thinking._render_text().plain
+def _fresh_line(scr):
+    from gc_tui.widgets.turn_line import TurnLine
+
+    assert scr._thinking is None
+    (line,) = scr.query(TurnLine).filter(".-latest")
+    return line
+
+
+def _line_text(scr) -> str:
+    return _fresh_line(scr).render().plain
 
 
 @pytest.mark.asyncio
@@ -113,10 +121,10 @@ async def test_live_failure_shows_reason_without_meta_copy(tmp_path):
         pilot.app.last_runner_error = "ReadError: boom"
         scr._poll_active()
         await pilot.pause()
-        assert _indicator_text(scr) == "✕ Ошибка\n  └ ReadError: boom"
+        assert _line_text(scr) == "✕ Ошибка\n  └ ReadError: boom"
         tui = scr._store.get_task_meta(_TID)["tui"]
         assert "last_error" not in tui
-        # Причина — под индикатором, не отдельной строкой `!` в ленте.
+        # Причина — под строкой итога, не отдельной строкой `!` в ленте.
         rows = [r for r in scr.query(TraceRow) if r.has_class("line-error")]
         assert rows == []
 
@@ -129,7 +137,7 @@ async def test_reopen_restores_reason(tmp_path):
         scr = pilot.app.screen
         scr.attach_active_task(_TID, is_resume=True)
         await pilot.pause()
-        assert _indicator_text(scr) == "✕ Ошибка\n  └ ReadError: boom"
+        assert _line_text(scr) == "✕ Ошибка\n  └ ReadError: boom"
 
 
 @pytest.mark.asyncio
@@ -146,21 +154,20 @@ async def test_new_turn_clears_reason(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_new_turn_after_failure_shrinks_indicator_bar(tmp_path):
-    """Причина ушла с новым ходом — бар снова на строку ниже."""
+async def test_new_turn_after_failure_settles_reason_line(tmp_path):
+    """Причина ушла с новым ходом — строка ошибки осела в одну строку."""
     pytest.importorskip("textual")
-    from textual.containers import Vertical
-
-    _write_task(tmp_path)
+    _write_task(tmp_path, {"status": "failed"}, reason="ReadError: boom")
     async with _app(tmp_path).run_test() as pilot:
         scr = pilot.app.screen
-        scr.attach_active_task(_TID)
-        scr._show_thinking_indicator(state="failed")
-        scr._set_indicator_error("ReadError: boom")
-        bar = scr.query_one("#indicator-bar", Vertical)
-        assert bar.styles.height.value == 4
-        scr._show_thinking_indicator(state="thinking")
-        assert bar.styles.height.value == 3
+        scr.attach_active_task(_TID, is_resume=True)
+        await pilot.pause()
+        line = _fresh_line(scr)
+        assert line.region.height == 2
+        scr._prepare_for_new_run()
+        await pilot.pause()
+        assert not line.is_fresh
+        assert line.region.height == 1
 
 
 _LONG = "MainModelUnavailable: " + "модель недоступна " * 8  # ~150 симв.
@@ -205,17 +212,19 @@ async def _bar_height(scr):
 
 
 @pytest.mark.asyncio
-async def test_long_reason_grows_bar_live_and_after_reopen(tmp_path):
+async def test_long_reason_wraps_in_line_after_reopen(tmp_path):
+    """Длинная причина — до трёх строк `└` у свежей строки; растёт лента,
+    а не бар."""
     pytest.importorskip("textual")
     _write_task(tmp_path, {"status": "failed"}, reason=_LONG)
     async with _app(tmp_path).run_test(size=(80, 30)) as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(_TID, is_resume=True)
         await pilot.pause()
-        rows = scr._thinking.error_rows
-        assert rows >= 2
-        assert await _bar_height(scr) == 3 + rows
-        scr._show_thinking_indicator(state="thinking")
+        line = _fresh_line(scr)
+        rows = len(_rows(_line_text(scr)))
+        assert 2 <= rows <= 3
+        assert line.region.height == 1 + rows
         assert await _bar_height(scr) == 3
 
 
@@ -227,10 +236,10 @@ async def test_resize_follows_reason_rows(tmp_path):
         scr = pilot.app.screen
         scr.attach_active_task(_TID, is_resume=True)
         await pilot.pause()
-        assert scr._thinking.error_rows == 1
-        assert await _bar_height(scr) == 4
+        line = _fresh_line(scr)
+        assert line.region.height == 2
         await pilot.resize_terminal(70, 30)
         await pilot.pause()
-        rows = scr._thinking.error_rows
+        rows = len(_rows(_line_text(scr)))
         assert rows >= 2
-        assert await _bar_height(scr) == 3 + rows
+        assert line.region.height == 1 + rows

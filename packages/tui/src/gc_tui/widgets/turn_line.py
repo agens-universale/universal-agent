@@ -106,7 +106,9 @@ class TurnLine(Static):
         self, summary: tuple[int, int, int] | None, error: str | None
     ) -> None:
         """Строка последнего хода: сводка правок справа, причина под
-        «✕ Ошибка»."""
+        «✕ Ошибка». Повтор с теми же данными ничего не перерисовывает."""
+        if self.is_fresh and (summary, error) == (self._summary, self._error):
+            return
         self._summary = summary
         self._error = error
         self.add_class(TURN_LINE_LATEST)

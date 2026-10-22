@@ -1,9 +1,10 @@
 """Строка итога у каждого хода в ленте: оседание, очередь, откат, история.
 
 Строка хода монтируется там, где в потоке записей треда стоит запись
-`turn_outcome` (решение плана 7). Строка последнего хода скрыта
-(`-latest`), пока её показывает индикатор; с началом нового хода она
-оседает. Живая лента и переоткрытая дают один порядок и один текст.
+`turn_outcome` (решение плана 7). Строка последнего хода свежая
+(`-latest`): видна в ленте со сводкой и причиной до начала следующего
+хода, тогда она оседает (S10 §3.2). Живая лента и переоткрытая дают один
+порядок и один текст.
 """
 
 from __future__ import annotations
@@ -164,8 +165,7 @@ def _trace_lines(container) -> list[str]:
     out = []
     for w in container.children:
         if isinstance(w, TurnLine):
-            if not w.has_class(LATEST):
-                out.append(w.text.plain)
+            out.append(w.text.plain)
         elif isinstance(w, UserReplyContainer):
             out.append(f"› {w.plain_text}")
         elif isinstance(w, CompactionRule):
@@ -181,9 +181,17 @@ def _turn_lines(scr):
     return list(scr.query_one("#trace").query(TurnLine))
 
 
-def _indicator(scr) -> str:
-    assert scr._thinking is not None
-    return scr._thinking._render_text().plain
+def _record_openers(scr) -> list:
+    return [line.opened_by for line in _turn_lines(scr) if line.recorded]
+
+
+def _fresh_line(scr):
+    """Свежая строка последнего хода; индикатора итога нет."""
+    from gc_tui.widgets.turn_line import TurnLine
+
+    assert scr._thinking is None
+    (line,) = scr.query_one("#trace").query(TurnLine).filter(f".{LATEST}")
+    return line
 
 
 async def _open(pilot, tid=TID):
@@ -199,6 +207,15 @@ async def _reopen(pilot, tmp_path, tid=TID):
     scr.attach_active_task(OTHER, is_resume=True)
     scr.attach_active_task(tid, is_resume=True)
     await pilot.pause()
+    return scr
+
+
+async def _send_released(pilot, ex, text, n):
+    """Отправка хода `n`, который ждёт, пока экран покажет реплику: иначе
+    запись реплики может обогнать отправку."""
+    scr = await _send(pilot, text)
+    await wait_until(pilot, ex.held[n].is_set, f"ход {n} начался")
+    ex.release[n].set()
     return scr
 
 
@@ -272,15 +289,19 @@ class _TurnExecutor:
         return taken
 
 
+def _is_done(pilot, scr, n) -> bool:
+    lines = [line for line in _turn_lines(scr) if line.is_fresh]
+    return (
+        not pilot.app.active_runner.is_running()
+        and scr._thinking is None
+        and len(lines) == 1
+        and lines[0].text.plain == _done_line(n)
+    )
+
+
 async def _wait_done(pilot, scr, n):
     await wait_until(
-        pilot,
-        lambda: (
-            not pilot.app.active_runner.is_running()
-            and scr._thinking is not None
-            and _indicator(scr).startswith(_done_line(n))
-        ),
-        f"итог хода {n} в индикаторе",
+        pilot, lambda: _is_done(pilot, scr, n), f"итог хода {n} в ленте"
     )
 
 
@@ -325,11 +346,18 @@ async def test_previous_turn_settles_when_next_starts_and_matches_reopen(
             ex.release_all()
         await _wait_done(pilot, scr, 2)
         live = _trace_lines(scr.query_one("#trace"))
-        assert live == ["› первый", "●", _done_line(1), "› второй", "●"]
+        assert live == [
+            "› первый",
+            "●",
+            _done_line(1),
+            "› второй",
+            "●",
+            _done_line(2),
+        ]
 
         scr = await _reopen(pilot, tmp_path, scr._active_task_id)
         assert _trace_lines(scr.query_one("#trace")) == live
-        assert _indicator(scr).startswith(_done_line(2))
+        assert _fresh_line(scr).text.plain == _done_line(2)
 
 
 @pytest.mark.asyncio
@@ -359,6 +387,7 @@ async def test_queue_pickup_in_one_run_settles_line_above_next_reply(
             _done_line(1),
             "› второй",
             "●",
+            _done_line(2),
         ]
         first, second = _turn_lines(scr)
         assert not first.has_class(LATEST)
@@ -429,6 +458,7 @@ async def test_queued_reply_after_final_is_own_turn_with_own_line(tmp_path):
             _done_line(1),
             "› второй",
             "●",
+            _done_line(2),
         ]
         assert [line.has_class(LATEST) for line in _turn_lines(scr)] == [
             False,
@@ -437,6 +467,9 @@ async def test_queued_reply_after_final_is_own_turn_with_own_line(tmp_path):
 
 
 # --- откат по Esc -----------------------------------------------------------
+#
+# Строки по записям итога. Запасная строка, которую спадающий фронт
+# откатанного прогона ещё может поставить, — забота гарда отката (S10 §3.8).
 
 
 class _FakeRunner:
@@ -498,7 +531,7 @@ async def test_undo_with_record_before_discard_leaves_no_line(tmp_path):
         await pilot.pause()
 
         assert _outcome_openers(tmp_path) == ["u1"]
-        assert [line.opened_by for line in _turn_lines(scr)] == ["u1"]
+        assert _record_openers(scr) == ["u1"]
         assert not _turn_lines(scr)[0].has_class(LATEST)
 
 
@@ -519,7 +552,7 @@ async def test_undo_with_record_after_discard_backstop_removes_line(
         thread.record(2, "m_orphan", status="stopped", reason="user_stop")
         scr._poll_trace_tail()
         await pilot.pause()
-        assert [line.opened_by for line in _turn_lines(scr)] == ["u1"]
+        assert _record_openers(scr) == ["u1"]
         assert scr._last_turn_outcome.opened_by == "u1"
 
         runner._running = False
@@ -528,7 +561,7 @@ async def test_undo_with_record_after_discard_backstop_removes_line(
 
         assert not scr._pending_orphan_cleanups
         assert _outcome_openers(tmp_path) == ["u1"]
-        assert [line.opened_by for line in _turn_lines(scr)] == ["u1"]
+        assert _record_openers(scr) == ["u1"]
         assert scr._last_turn_outcome.opened_by == "u1"
         tail = scr._store.tail_events(TID, scr._cursor)
         assert tail.stream_reset is False
@@ -553,7 +586,7 @@ async def test_zz_late_stop_record_of_undone_reply_never_shows_a_line(
         for _ in range(3):
             scr._poll_tick()
             await pilot.pause()
-        assert [line.opened_by for line in _turn_lines(scr)] == ["u1"]
+        assert _record_openers(scr) == ["u1"]
 
 
 @pytest.mark.asyncio
@@ -575,13 +608,15 @@ async def test_late_stop_record_after_leaving_and_returning_shows_no_line(
         thread.record(2, "m_orphan", status="stopped", reason="user_stop")
         scr._poll_trace_tail()
         await pilot.pause()
-        assert [line.opened_by for line in _turn_lines(scr)] == ["u1"]
+        # Строки по записям; строка по статусу сессии после отката — до
+        # возврата меты откатом (S10 §3.8).
+        assert _record_openers(scr) == ["u1"]
 
         old._running = False
         scr._run_orphan_cleanups()
         await pilot.pause()
         assert TID not in scr._undone_reply_ids
-        assert [line.opened_by for line in _turn_lines(scr)] == ["u1"]
+        assert _record_openers(scr) == ["u1"]
 
 
 @pytest.mark.asyncio
@@ -603,7 +638,7 @@ async def test_undo_after_record_was_tailed_removes_mounted_line(tmp_path):
         await pilot.pause()
 
         assert _outcome_openers(tmp_path) == ["u1"]
-        assert [line.opened_by for line in _turn_lines(scr)] == ["u1"]
+        assert _record_openers(scr) == ["u1"]
         tail = scr._store.tail_events(TID, scr._cursor)
         assert tail.stream_reset is False
         scr._poll_trace_tail()
@@ -691,6 +726,7 @@ COMPACTED_TRACE = [
     "сжатие",
     "› вопрос u3",
     "●",
+    _done_line(3),
 ]
 
 
@@ -700,13 +736,13 @@ async def test_turn_end_compaction_keeps_archived_turn_lines(tmp_path):
     async with _app(tmp_path).run_test() as pilot:
         scr = await _open(pilot)
         assert _trace_lines(scr.query_one("#trace")) == COMPACTED_TRACE
-        assert _indicator(scr).startswith(_done_line(3))
+        assert _fresh_line(scr).text.plain == _done_line(3)
 
 
 @pytest.mark.asyncio
 async def test_last_archived_turn_is_indicator_until_next_turn(tmp_path):
     """Сжатие конца последнего хода: его запись — в архиве, за ней только
-    сводка — строка последнего хода остаётся индикатором."""
+    сводка — строка последнего хода остаётся свежей над маркером."""
     _write_meta(tmp_path, tui={"status": "completed"})
     _write_rows(
         tmp_path / f"data_cli_{TID}__pre_summary__20261022_113300.jsonl",
@@ -732,8 +768,8 @@ async def test_last_archived_turn_is_indicator_until_next_turn(tmp_path):
     async with _app(tmp_path).run_test() as pilot:
         scr = await _open(pilot)
         (line,) = _turn_lines(scr)
-        assert line.has_class(LATEST)
-        assert _indicator(scr).startswith(_done_line(1))
+        assert line is _fresh_line(scr)
+        assert line.text.plain == _done_line(1)
 
 
 @pytest.mark.asyncio
@@ -761,6 +797,7 @@ async def test_foreign_turn_has_line_and_turn_without_record_has_none(
             "●",
             "› вопрос u4",
             "●",
+            _done_line(4),
         ]
         assert [line.opened_by for line in _turn_lines(scr)] == [
             "u1",
@@ -772,7 +809,7 @@ async def test_foreign_turn_has_line_and_turn_without_record_has_none(
 @pytest.mark.asyncio
 async def test_failed_earlier_turn_is_one_row_without_reason(tmp_path):
     """Решение владельца 4: у прошлого упавшего хода — одна строка без
-    причины; причина — только у последнего (в индикаторе)."""
+    причины; причина — только у свежей строки последнего хода."""
     _write_thread(tmp_path, tui={"status": "completed"})
     thread = _Thread(tmp_path)
     thread.messages(_reply("u1"), _answer("a1"))
@@ -791,9 +828,9 @@ async def test_failed_earlier_turn_is_one_row_without_reason(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_interrupted_continuation_keeps_plan_line_visible(tmp_path):
-    """Континуация плана оборвана без записи («■ Прервано» в индикаторе):
-    строка хода с планом в ленте видна — индикатор её не показывает."""
+async def test_interrupted_line_at_trace_end_on_reopen(tmp_path):
+    """Континуация плана оборвана без записи: «■ Прервано» без времени —
+    свежая строка в конце ленты (§3.6), строка хода с планом осевшая."""
     _write_thread(tmp_path, tui={"status": "running"})
     thread = _Thread(tmp_path)
     thread.messages(_reply("u1"), _answer("a1"))
@@ -809,10 +846,15 @@ async def test_interrupted_continuation_keeps_plan_line_visible(tmp_path):
     )
     async with _app(tmp_path).run_test() as pilot:
         scr = await _open(pilot)
-        assert _indicator(scr) == "■ Прервано"
-        (line,) = _turn_lines(scr)
-        assert not line.has_class(LATEST)
-        assert line.text.plain == f"✓ План готов за 12с · {_hm(_ended(1))}"
+        plan_line, interrupted = _turn_lines(scr)
+        assert scr.query_one("#trace").children[-1] is interrupted
+        assert interrupted is _fresh_line(scr)
+        assert interrupted.text.plain == "■ Прервано"
+        assert interrupted.recorded is False
+        assert not plan_line.is_fresh
+        assert plan_line.text.plain == (
+            f"✓ План готов за 12с · {_hm(_ended(1))}"
+        )
 
 
 @pytest.mark.asyncio
@@ -870,3 +912,209 @@ async def test_fast_failed_run_reply_delivered_in_same_tick_is_shown_once(
         pending = (meta.get("tui") or {}).get("pending_user_messages", [])
         assert len(replies) == 1
         assert pending == []
+
+
+# --- S10: итог последнего хода живёт в ленте --------------------------------
+
+
+def _compact_files(tmp_path, suffix="20261022_113500"):
+    """Сжатие на диске, как у ядра: живой файл — в архив, новый — со
+    сводкой, мета с эпохой сжатия."""
+    from gc_core.thread_store import (
+        archive_and_replace_thread_files,
+        load_thread_meta,
+        save_thread_meta,
+    )
+
+    meta = load_thread_meta(str(tmp_path), "cli", TID)
+    archive_and_replace_thread_files(
+        str(tmp_path),
+        "cli",
+        TID,
+        [{"id": f"s{suffix}", "role": "user", "content": _summary_text("c")}],
+        archive_suffix=suffix,
+    )
+    save_thread_meta(
+        str(tmp_path),
+        "cli",
+        TID,
+        {**meta, "last_summary_archive_suffix": suffix},
+    )
+
+
+def _child_types(scr) -> list[str]:
+    return [type(w).__name__ for w in scr.query_one("#trace").children]
+
+
+@pytest.mark.asyncio
+async def test_latest_turn_line_visible_in_trace(tmp_path):
+    ex = _TurnExecutor(tmp_path)
+    app = _app(tmp_path)
+    app._executor_factory = lambda: ex
+    async with app.run_test() as pilot:
+        scr = await _send_released(pilot, ex, "первый", 1)
+        await _wait_done(pilot, scr, 1)
+        await pilot.pause()
+        line = _fresh_line(scr)
+        assert line.is_fresh
+        assert line.display
+        assert line.region.height == 1
+        assert scr._thinking is None
+
+
+@pytest.mark.asyncio
+async def test_compact_marker_lands_below_fresh_turn_line(tmp_path):
+    from gc_tui.widgets.trace_row import CompactionRule
+    from gc_tui.widgets.turn_line import TurnLine
+
+    _prepare_one_turn(tmp_path)
+    async with _app(tmp_path).run_test() as pilot:
+        scr = await _open(pilot)
+        _compact_files(tmp_path)
+        scr._poll_trace_tail()
+        await pilot.pause()
+        trace = scr.query_one("#trace")
+        kids = list(trace.children)
+        (line,) = [w for w in kids if isinstance(w, TurnLine)]
+        (rule,) = [w for w in kids if isinstance(w, CompactionRule)]
+        assert kids.index(line) < kids.index(rule)
+        assert line is _fresh_line(scr)
+
+
+@pytest.mark.asyncio
+async def test_bang_output_keeps_line_fresh(tmp_path):
+    _prepare_one_turn(tmp_path)
+    async with _app(tmp_path).run_test() as pilot:
+        scr = await _open(pilot)
+        line = _fresh_line(scr)
+        scr._handle_bang_shell("!")
+        await pilot.pause()
+        trace = scr.query_one("#trace")
+        assert trace.children[-1] is not line
+        assert list(trace.children).index(line) < len(trace.children) - 1
+        assert line.is_fresh
+
+
+@pytest.mark.asyncio
+async def test_next_turn_settles_line(tmp_path):
+    from gc_tui.widgets.user_reply import UserReplyContainer
+
+    ex = _TurnExecutor(tmp_path, holds=(1, 2))
+    app = _app(tmp_path)
+    app._executor_factory = lambda: ex
+    async with app.run_test() as pilot:
+        try:
+            scr = await _send_released(pilot, ex, "первый", 1)
+            await _wait_done(pilot, scr, 1)
+            (line,) = _turn_lines(scr)
+            scr = await _send(pilot, "второй")
+            await wait_until(pilot, ex.held[2].is_set, "второй ход идёт")
+            await pilot.pause()
+            assert not line.is_fresh
+            line.render()
+            assert line.summary_span is None
+            assert line.region.height == 1
+            kids = list(scr.query_one("#trace").children)
+            (reply,) = [
+                w
+                for w in kids
+                if isinstance(w, UserReplyContainer)
+                and w.plain_text == "второй"
+            ]
+            assert kids.index(line) < kids.index(reply)
+        finally:
+            ex.release_all()
+        await _wait_done(pilot, scr, 2)
+
+
+@pytest.mark.asyncio
+async def test_queued_reply_keeps_line_fresh(tmp_path):
+    """Запись хода дочитана, под ней реплика в очереди: строка свежая и
+    стоит над очередью (§4.3)."""
+    _write_thread(tmp_path)
+    thread = _Thread(tmp_path)
+    thread.messages(_reply("u1"))
+    async with _app(tmp_path).run_test() as pilot:
+        scr = await _open(pilot)
+        queued = scr._mount_user_reply("в очередь", state="queued")
+        await pilot.pause()
+        thread.messages(_answer("a1"))
+        thread.record(1, "u1")
+        scr._poll_trace_tail()
+        await pilot.pause()
+        line = _turn_lines(scr)[-1]
+        assert line.is_fresh
+        kids = list(scr.query_one("#trace").children)
+        assert kids.index(line) < kids.index(queued)
+
+
+@pytest.mark.asyncio
+async def test_pending_reply_below_makes_record_line_settled(tmp_path):
+    """Запись стопа дочитана после новой отправки: строка встаёт над
+    отправленной репликой уже осевшей — следующий ход начался."""
+    _write_thread(tmp_path, tui={"status": "running"})
+    thread = _Thread(tmp_path)
+    thread.turn(1)
+    thread.messages(_reply("u2"))
+    async with _app(tmp_path).run_test() as pilot:
+        scr = await _open(pilot)
+        cid = scr._track_pending(display_text="ещё", wire_content="ещё")
+        sent = scr._mount_user_reply("ещё", state="pending", client_id=cid)
+        await pilot.pause()
+        thread.record(2, "u2", status="stopped", reason="user_stop")
+        scr._poll_trace_tail()
+        await pilot.pause()
+        line = _turn_lines(scr)[-1]
+        assert line.opened_by == "u2"
+        assert not line.is_fresh
+        kids = list(scr.query_one("#trace").children)
+        assert kids.index(line) < kids.index(sent)
+
+
+@pytest.mark.asyncio
+async def test_new_record_resets_superseded(tmp_path):
+    """Реплика после записи — ход идёт (статуса нет: строки по статусу
+    тоже); новая запись снова даёт свежую строку."""
+    _write_thread(tmp_path)
+    thread = _Thread(tmp_path)
+    thread.turn(1)
+    thread.messages(_reply("u2"))
+    async with _app(tmp_path).run_test() as pilot:
+        scr = await _open(pilot)
+        assert scr._outcome_superseded is True
+        thread.messages(_answer("a2"))
+        thread.record(2, "u2")
+        scr._poll_trace_tail()
+        await pilot.pause()
+        assert scr._outcome_superseded is False
+        first, second = _turn_lines(scr)
+        assert not first.is_fresh
+        assert second.is_fresh
+
+
+@pytest.mark.asyncio
+async def test_live_and_reopen_turn_line_order_equal(tmp_path):
+    """Ход, сжатие, ход: типы детей ленты вживую — как после
+    переоткрытия."""
+    ex = _TurnExecutor(tmp_path, holds=(1, 2))
+    app = _app(tmp_path)
+    app._executor_factory = lambda: ex
+    async with app.run_test() as pilot:
+        scr = await _send_released(pilot, ex, "первый", 1)
+        await _wait_done(pilot, scr, 1)
+        global TID
+        tid, TID = TID, scr._active_task_id
+        try:
+            _compact_files(tmp_path)
+        finally:
+            TID = tid
+        ex.thread.seq = 1
+        scr._poll_trace_tail()
+        await pilot.pause()
+        scr = await _send_released(pilot, ex, "второй", 2)
+        await _wait_done(pilot, scr, 2)
+        live = _child_types(scr)
+        assert live.count("TurnLine") == 2
+        assert "CompactionRule" in live
+        scr = await _reopen(pilot, tmp_path, scr._active_task_id)
+        assert _child_types(scr) == live

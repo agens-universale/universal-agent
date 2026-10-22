@@ -2,7 +2,7 @@ import pytest
 
 
 @pytest.mark.asyncio
-async def test_indicator_persists_done_after_completed(tmp_path, monkeypatch):
+async def test_done_line_stays_after_completed(tmp_path, monkeypatch):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
@@ -16,9 +16,12 @@ async def test_indicator_persists_done_after_completed(tmp_path, monkeypatch):
         scr._show_thinking_indicator(state="thinking")
         await pilot.pause()
         scr._store.update_tui_meta("t-1", {"status": "completed"})
-        # эмуляция idle-тика poll: not running → ветка done-persist
+        # эмуляция idle-тика poll: not running → итог строкой в ленте
         scr._poll_active()
         await pilot.pause()
-        ind = scr._thinking
-        assert ind is not None, "индикатор не должен уничтожаться на completed"
-        assert ind._state == "done"
+        from gc_tui.widgets.turn_line import TurnLine
+
+        assert scr._thinking is None
+        (line,) = scr.query(TurnLine)
+        assert line.is_fresh
+        assert line.text.plain == "✓ Выполнил"

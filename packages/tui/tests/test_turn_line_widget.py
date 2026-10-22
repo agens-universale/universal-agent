@@ -18,9 +18,6 @@ class LineApp(App):
     """Одна строка итога на экране со стилями и палитрой TUI."""
 
     CSS_PATH = str(module_dir("tui") / "styles.tcss")
-    # Пока стиль ленты прячет свежую строку (её рисует индикатор), здесь
-    # она видна: виджет проверяется сам по себе.
-    CSS = "TurnLine.-latest { display: block; }"
 
     def __init__(self, line) -> None:
         super().__init__()

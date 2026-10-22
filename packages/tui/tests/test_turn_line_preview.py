@@ -1,8 +1,8 @@
 """Строка хода одним билдером: превью `/sessions` и read-only рендер.
 
-`build_turn_line` — один билдер для главного экрана и превью; в превью
-индикатора нет, поэтому строка последнего хода тоже видна. Текст строк
-превью совпадает с переоткрытой лентой того же треда.
+`build_turn_line` — один билдер для главного экрана и превью. Строка
+последнего хода видна и там, и там (S10): головы и места строк превью
+совпадают с переоткрытой лентой того же треда.
 """
 
 from __future__ import annotations
@@ -106,8 +106,8 @@ def _pin_now(monkeypatch):
 async def test_preview_shows_every_turn_line_like_the_trace(
     tmp_path, _pin_now
 ):
-    """Превью `/sessions` — те же строки и порядок, что лента; последняя
-    тоже видна (индикатора в превью нет)."""
+    """Превью `/sessions` — те же строки и порядок, что лента, до
+    последней строки треда включительно."""
     from textual.app import App
 
     from gc_tui.app import TuiApp
@@ -130,7 +130,7 @@ async def test_preview_shows_every_turn_line_like_the_trace(
     async with _A().run_test() as pilot:
         await pilot.pause()
         preview = _trace_lines(pilot.app.screen.query_one("#trace"))
-    assert preview == [*COMPACTED_TRACE, _done_line(3)]
+    assert preview == COMPACTED_TRACE
 
     app = TuiApp(
         threads_dir=str(tmp_path),
@@ -142,4 +142,4 @@ async def test_preview_shows_every_turn_line_like_the_trace(
         scr.attach_active_task(TID, is_resume=True)
         await pilot.pause()
         trace = _trace_lines(scr.query_one("#trace"))
-    assert preview == [*trace, _done_line(3)]
+    assert preview == trace

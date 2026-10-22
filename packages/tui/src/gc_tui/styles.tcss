@@ -335,11 +335,9 @@ UserReplyContainer.-queue-hint > .queue-hint { display: block; }
    (.trace-prefix padding:0); правый отступ 1 сохраняем. */
 .thinking-indicator { color: $deep-dim; padding: 0 1 0 0; margin-top: 1; height: 1; }
 .thinking-indicator.hidden { display: none; }
-/* Осевшая строка итога хода (P1b): уровень 0, глиф в колонке ●, пустая
-   строка сверху, тусклая — как строка итога индикатора. Строка последнего
-   хода в ленте скрыта (-latest), пока её показывает индикатор. */
+/* Строка итога хода (P1b, S10): уровень 0, глиф в колонке ●, пустая
+   строка сверху, тусклая. Свежая (-latest) — со сводкой правок и причиной. */
 TurnLine { color: $deep-dim; padding: 0 1 0 0; margin-top: 1; height: auto; }
-TurnLine.-latest { display: none; }
 /* Строка за баром (S10 §3.4): скрыта, пока стоит бар индикатора. */
 TurnLine.-held { display: none; }
 

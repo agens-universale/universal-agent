@@ -2,7 +2,8 @@
 
 Исход, время конца, длительность и причина ошибки последнего хода — только
 из записи `turn_outcome` в файле треда (решение плана 5): вживую и после
-переоткрытия одна строка. Живой счёт индикатора — от часов хода ядра
+переоткрытия одна свежая строка в ленте (S10), индикатора итога нет.
+Живой счёт индикатора — от часов хода ядра
 (`runner.turn_effective_start()`): ожидание человека в него не входит, и
 ответ на вопрос агента счёт не обнуляет. Нет записи — прежнее правило по
 статусу сессии, без времени.
@@ -110,7 +111,26 @@ def _app(tmp_path):
     )
 
 
+def _fresh_line(scr):
+    from gc_tui.widgets.turn_line import TurnLine
+
+    lines = list(scr.query(TurnLine).filter(".-latest"))
+    return lines[-1] if lines else None
+
+
+def _line_shown(scr) -> bool:
+    """Итог хода стоит свежей строкой в ленте, индикатор ушёл."""
+    return scr._thinking is None and _fresh_line(scr) is not None
+
+
 def _text(scr) -> str:
+    """Свежая строка последнего хода: голова, сводка, причина."""
+    assert _line_shown(scr)
+    return _fresh_line(scr).render().plain
+
+
+def _live(scr) -> str:
+    """Живой индикатор работы."""
     assert scr._thinking is not None
     return scr._thinking._render_text().plain
 
@@ -251,7 +271,7 @@ async def test_done_turn_line_from_record_live_and_reopen(tmp_path):
         head = f"✓ Выполнил за 12с · {_hm(ENDED)}"
         await wait_until(
             pilot,
-            lambda: scr._thinking is not None and _text(scr).startswith(head),
+            lambda: _line_shown(scr) and _text(scr).startswith(head),
             "строка итога из записи",
         )
         tui = scr._store.get_task_meta(tid)["tui"]
@@ -271,9 +291,13 @@ async def test_stop_blinks_then_cancelled_at_stop_moment(tmp_path):
         stubs.append(StubExecutor(threads_dir=str(tmp_path), step_delay=0.3))
         return stubs[-1]
 
+    _write_thread(tmp_path)
     app = _app(tmp_path)
     app._executor_factory = factory
     async with app.run_test() as pilot:
+        # Тред открыт до отправки: реплика сверяется с отправленной (у
+        # автосоздания треда заглушка пишет реплику раньше сверки).
+        pilot.app.screen.attach_active_task(TID, is_resume=True)
         scr = await _send(pilot)
         tid = scr._active_task_id
         await wait_until(
@@ -284,7 +308,7 @@ async def test_stop_blinks_then_cancelled_at_stop_moment(tmp_path):
         old = pilot.app.active_runner
         scr._cmd_stop()
         assert scr._thinking._state == "stopping"
-        assert _text(scr) in ("■", " ")
+        assert _live(scr) in ("■", " ")
         await wait_until(
             pilot, lambda: not old.is_running(), "поток хода вышел"
         )
@@ -292,7 +316,7 @@ async def test_stop_blinks_then_cancelled_at_stop_moment(tmp_path):
             pilot,
             lambda: (
                 bool(_outcomes(tmp_path, tid))
-                and scr._thinking._state == "cancelled"
+                and _line_shown(scr)
                 and "·" in _text(scr)
             ),
             "ровный итог стопа со временем",
@@ -425,7 +449,13 @@ async def test_answer_keeps_turn_clock_and_duration_without_wait(tmp_path):
         runner.running = False
         scr._poll_active()
         await pilot.pause()
-        assert _text(scr).startswith(f"✓ Выполнил за 12с · {_hm(ENDED)}")
+        # Ответ на вопрос в файл не лёг (вопрос сыгран заглушкой заранее):
+        # реплика ответа ждёт сверки, строка встаёт осевшей — проверяется
+        # её голова.
+        from gc_tui.widgets.turn_line import TurnLine
+
+        line = list(scr.query(TurnLine))[-1]
+        assert line.text.plain == f"✓ Выполнил за 12с · {_hm(ENDED)}"
 
 
 @pytest.mark.asyncio
@@ -444,7 +474,7 @@ async def test_live_count_waits_for_core_clock(tmp_path):
         pilot.app.active_runner = runner
         scr._poll_active()
         assert scr._thinking._started_at is None
-        assert "с)" not in _text(scr)
+        assert "с)" not in _live(scr)
         runner.clock, _now = _fake_clock()
         scr._poll_active()
         assert scr._thinking._started_at == 100.0

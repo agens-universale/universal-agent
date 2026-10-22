@@ -215,9 +215,18 @@ async def test_sessions_own_run_of_other_thread_stays_running(tmp_path):
         assert "прервано" not in text
 
 
+def _outcome_text(scr) -> str:
+    """Свежая строка итога последнего хода в ленте; индикатора нет."""
+    from gc_tui.widgets.turn_line import TurnLine
+
+    assert scr._thinking is None
+    (line,) = scr.query(TurnLine).filter(".-latest")
+    return line.render().plain
+
+
 @pytest.mark.asyncio
 async def test_reopen_stale_running_shows_interrupted(tmp_path):
-    """Переоткрытие после рестарта: строка-итог «■ Прервано», статус —
+    """Переоткрытие после рестарта: строка итога «■ Прервано», статус —
     «interrupted»; мету чтение не переписывает."""
     app = _app(tmp_path)
     _stamp_running(tmp_path, TID_A)
@@ -226,8 +235,7 @@ async def test_reopen_stale_running_shows_interrupted(tmp_path):
         scr.attach_active_task(TID_A, is_resume=True)
         await pilot.pause()
         assert scr._session_status_word() == "interrupted"
-        assert scr._thinking is not None
-        assert scr._thinking._render_text().plain.startswith("■ Прервано")
+        assert _outcome_text(scr) == "■ Прервано"
         assert _status(scr, TID_A) == "running"
 
 
@@ -283,14 +291,14 @@ async def test_elapsed_live_equals_reopen_from_turn_record(tmp_path):
         runner._running = False
         scr._poll_active()
         await pilot.pause()
-        live = scr._thinking._render_text().plain
+        live = _outcome_text(scr)
         meta = scr._store.get_task_meta(TID_A)["tui"]["last_indicator"]
         assert live.startswith("✓ Выполнил за 5с")
         assert "elapsed" not in meta
         scr.attach_active_task(TID_B, is_resume=True)
         scr.attach_active_task(TID_A, is_resume=True)
         await pilot.pause()
-        assert scr._thinking._render_text().plain == live
+        assert _outcome_text(scr) == live
 
 
 @pytest.mark.asyncio

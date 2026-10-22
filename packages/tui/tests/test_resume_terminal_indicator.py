@@ -1,3 +1,22 @@
+"""Переоткрытие сессии: строка итога прошлого хода — свежей строкой в
+ленте (S10 §4.7), индикатор не монтируется."""
+
+import pytest
+
+
+def _lines(scr) -> list[str]:
+    from gc_tui.widgets.turn_line import TurnLine
+
+    return [line.render().plain for line in scr.query(TurnLine)]
+
+
+def _fresh(scr):
+    from gc_tui.widgets.turn_line import TurnLine
+
+    (line,) = scr.query(TurnLine).filter(".-latest")
+    return line
+
+
 import pytest
 
 
@@ -21,8 +40,9 @@ def _store_with_tui_status(status):
 
 @pytest.mark.asyncio
 async def test_resume_old_session_falls_back_to_status(tmp_path):
-    """Сессия без last_indicator (создана до фичи) — строка-итог из meta.tui.status;
-    elapsed неизвестен → «✓ Выполнил» без «за N»."""
+    """Сессия без last_indicator (создана до фичи) — строка итога из
+    meta.tui.status в конце ленты; elapsed неизвестен → «✓ Выполнил» без
+    «за N»."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
@@ -35,10 +55,11 @@ async def test_resume_old_session_falls_back_to_status(tmp_path):
         scr.app.active_runner = None
         scr._thinking = None
 
-        scr._restore_terminal_indicator()
+        scr._restore_latest_turn_line()
         await pilot.pause()
-        assert scr._thinking is not None
-        assert scr._thinking._render_text().plain == "✓ Выполнил"
+        assert scr._thinking is None
+        assert _lines(scr) == ["✓ Выполнил"]
+        assert _fresh(scr).recorded is False
 
 
 @pytest.mark.asyncio
@@ -55,10 +76,10 @@ async def test_resume_old_session_stopped_falls_back(tmp_path):
         scr.app.active_runner = None
         scr._thinking = None
 
-        scr._restore_terminal_indicator()
+        scr._restore_latest_turn_line()
         await pilot.pause()
-        assert scr._thinking is not None
-        assert scr._thinking._render_text().plain == "■ Отменено"
+        assert scr._thinking is None
+        assert _lines(scr) == ["■ Отменено"]
 
 
 @pytest.mark.asyncio
@@ -81,9 +102,16 @@ async def test_resume_unrecorded_outcome_no_line(tmp_path):
         scr.app.active_runner = None
         scr._thinking = None
 
-        scr._restore_terminal_indicator()
+        scr._restore_latest_turn_line()
         await pilot.pause()
         assert scr._thinking is None
+        assert _lines(scr) == []
+
+
+def _mount_record(scr, outcome):
+    """Запись итога дочитана рендером: строка на её месте в ленте."""
+    scr._last_turn_outcome = outcome
+    scr._mount_turn_line(outcome)
 
 
 def _outcome(status, reason=None):
@@ -115,14 +143,14 @@ async def test_resume_completed_shows_done_with_elapsed(tmp_path):
         scr._store = _store_with_last_indicator(
             {"kind": "stopped_steps", "elapsed": 99}
         )
-        scr._last_turn_outcome = _outcome("done")
+        _mount_record(scr, _outcome("done"))
         scr.app.active_runner = None
         scr._thinking = None
 
-        scr._restore_terminal_indicator()
+        scr._restore_latest_turn_line()
         await pilot.pause()
-        assert scr._thinking is not None
-        assert scr._thinking._render_text().plain == "✓ Выполнил за 12с"
+        assert scr._thinking is None
+        assert _lines(scr) == ["✓ Выполнил за 12с"]
 
 
 @pytest.mark.asyncio
@@ -137,13 +165,14 @@ async def test_resume_stopped_shows_cancelled(tmp_path):
         scr = pilot.app.screen
         scr._active_task_id = "t1"
         scr._store = _store_with_last_indicator(None)
-        scr._last_turn_outcome = _outcome("stopped", USER_STOP)
+        _mount_record(scr, _outcome("stopped", USER_STOP))
         scr.app.active_runner = None
         scr._thinking = None
 
-        scr._restore_terminal_indicator()
+        scr._restore_latest_turn_line()
         await pilot.pause()
-        assert scr._thinking._render_text().plain == "■ Отменено"
+        assert scr._thinking is None
+        assert _lines(scr) == ["■ Отменено"]
 
 
 @pytest.mark.asyncio
@@ -166,9 +195,36 @@ async def test_resume_old_last_indicator_without_status_draws_nothing(
         scr.app.active_runner = None
         scr._thinking = None
 
-        scr._restore_terminal_indicator()
+        scr._restore_latest_turn_line()
         await pilot.pause()
         assert scr._thinking is None
+        assert _lines(scr) == []
+
+
+@pytest.mark.asyncio
+async def test_resume_fresh_line_shows_summary_from_meta(tmp_path):
+    """Сводка правок последнего хода — из `last_indicator.edits` того же
+    хода, справа у свежей строки."""
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.thinking_indicator import ThinkingIndicator
+
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads")
+    ).run_test() as pilot:
+        scr = pilot.app.screen
+        scr._active_task_id = "t1"
+        scr._store = _store_with_last_indicator({"edits": [2, 5, 6]})
+        _mount_record(scr, _outcome("done"))
+        scr.app.active_runner = None
+        scr._thinking = None
+
+        scr._restore_latest_turn_line()
+        await pilot.pause()
+        line = _fresh(scr)
+        assert line.summary == (2, 5, 6)
+        assert line.render().plain.endswith("изменено 2 файла · +5 −6")
+        assert list(scr.query(ThinkingIndicator)) == []
 
 
 @pytest.mark.asyncio
@@ -190,8 +246,9 @@ async def test_restore_noop_when_running(tmp_path):
         scr.app.active_runner = _R()
         scr._thinking = None
 
-        scr._restore_terminal_indicator()
+        scr._restore_latest_turn_line()
         await pilot.pause()
         assert scr._thinking is None, (
             "при живом прогоне не восстанавливаем итог"
         )
+        assert _lines(scr) == []

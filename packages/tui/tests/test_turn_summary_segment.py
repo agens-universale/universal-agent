@@ -1,9 +1,11 @@
-"""Тихая сводка правок хода в строке-итоге индикатора (вместо CTA-блока).
+"""Тихая сводка правок хода в строке итога (вместо CTA-блока).
 
 Три слоя:
-* чистые хелперы виджета (`format_turn_summary` / `compose_status_line`);
-* проводка спадающего фронта в TraceScreen (сводка + отсутствие CTA в ленте);
-* восстановление строки-итога на resume (цифры только из meta того же хода).
+* чистые хелперы сервиса итогов (`format_turn_summary` /
+  `compose_status_line`);
+* проводка спадающего фронта в TraceScreen (сводка у свежей строки итога в
+  ленте, S10; отсутствие CTA в ленте);
+* восстановление строки итога на resume (цифры только из meta того же хода).
 """
 
 import json
@@ -19,7 +21,7 @@ from gc_core.thread_store import (
     edits_journal_path,
 )
 from gc_testkit.paths import module_dir
-from gc_testkit.tui_support import tui_settings
+from gc_testkit.tui_support import tui_settings, wait_until
 from gc_tui.services.trace_render import build_turn_line
 from gc_tui.services.turn_outcome import (
     compose_status_line,
@@ -322,6 +324,19 @@ def test_every_terminal_state_shows_the_edits_summary(state, head):
 # --- проводка спадающего фронта --------------------------------------------
 
 
+def _fresh(scr):
+    """Свежая строка итога последнего хода; индикатор ушёл."""
+    from gc_tui.widgets.turn_line import TurnLine
+
+    assert scr._thinking is None
+    (line,) = scr.query(TurnLine).filter(".-latest")
+    return line
+
+
+def _outcome_text(scr) -> str:
+    return _fresh(scr).render().plain
+
+
 async def _falling_edge(pilot, scr, tid):
     """Ход завершился: индикатор жив, runner уже idle, был running на прошлом тике."""
     scr.attach_active_task(tid)
@@ -369,10 +384,7 @@ async def test_turn_with_edits_shows_summary_from_journal(tmp_path):
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         await _falling_edge(pilot, scr, tid)
-        assert scr._thinking is not None
-        assert scr._thinking._render_text().plain.endswith(
-            "изменено 2 файла · +3 −1"
-        )
+        assert _outcome_text(scr).endswith("изменено 2 файла · +3 −1")
 
 
 @pytest.mark.asyncio
@@ -415,9 +427,7 @@ async def test_turn_summary_shows_net_delta_not_sum_of_records(tmp_path):
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         await _falling_edge(pilot, scr, tid)
-        assert scr._thinking._render_text().plain.endswith(
-            "изменено 1 файл · +133 −22"
-        )
+        assert _outcome_text(scr).endswith("изменено 1 файл · +133 −22")
 
 
 @pytest.mark.asyncio
@@ -439,7 +449,7 @@ async def test_turn_without_edits_has_no_segment(tmp_path):
         scr.attach_active_task(tid)
         scr._stamp_tui_running()  # старт нового хода → отметка журнала
         await _falling_edge(pilot, scr, tid)
-        assert "изменено" not in scr._thinking._render_text().plain
+        assert "изменено" not in _outcome_text(scr)
 
 
 @pytest.mark.asyncio
@@ -473,7 +483,7 @@ async def test_second_stamp_does_not_move_the_turn_boundary(tmp_path):
         scr._stamp_tui_running()  # страховочная сетка, уже после правки
         await _falling_edge(pilot, scr, tid)
 
-        assert "изменено" in scr._thinking._render_text().plain
+        assert "изменено" in _outcome_text(scr)
 
 
 @pytest.mark.asyncio
@@ -491,7 +501,7 @@ async def test_empty_journal_has_no_segment(tmp_path):
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         await _falling_edge(pilot, scr, tid)
-        assert "изменено" not in scr._thinking._render_text().plain
+        assert "изменено" not in _outcome_text(scr)
 
 
 @pytest.mark.asyncio
@@ -515,7 +525,7 @@ async def test_config_switch_off_hides_segment(tmp_path):
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         await _falling_edge(pilot, scr, tid)
-        assert "изменено" not in scr._thinking._render_text().plain
+        assert "изменено" not in _outcome_text(scr)
 
 
 @pytest.mark.asyncio
@@ -551,15 +561,24 @@ async def test_no_cta_block_in_trace_after_turn_with_edits(tmp_path):
 
 
 async def _turn_with_edits(pilot, tmp_path, tid):
-    """Завершённый ход с правками: индикатор показывает сегмент сводки."""
+    """Завершённый ход с правками: свежая строка показывает сегмент
+    сводки."""
     scr = pilot.app.screen
     await _falling_edge(pilot, scr, tid)
     # Потолок ленты считается от хрома прошлой раскладки: досчитать до
     # жестов, иначе тик опроса сдвинет строку под указателем.
     scr._sync_trace_max_height()
     await pilot.pause()
-    ind = scr._thinking
-    assert ind is not None and ind._summary_span is not None
+    ind = _fresh(scr)
+    assert ind._summary_span is not None
+
+    def _on_top() -> bool:
+        region = ind.region
+        return pilot.app.screen.get_widget_at(region.x, region.y)[0] is ind
+
+    # Строка в ленте: жесты — когда раскладка улеглась и строку не
+    # накрывает бар.
+    await wait_until(pilot, _on_top, "строка итога под указателем")
     return scr, ind
 
 
@@ -580,6 +599,7 @@ def _post_gesture(pilot, widget, down_dx, up_dx=None, *, button=1):
     if up_dx is None:
         up_dx = down_dx
     y = widget.region.y
+
     for cls, dx in ((MouseDown, down_dx), (MouseUp, up_dx)):
         x = widget.region.x + dx
         pilot.app.post_message(
@@ -610,6 +630,14 @@ def _diff_screens(pilot):
     from gc_tui.screens.diff import DiffScreen
 
     return [s for s in pilot.app.screen_stack if isinstance(s, DiffScreen)]
+
+
+async def _wait_diff_screen(pilot):
+    """Запрос всплывает из строки ленты через контейнеры до экрана —
+    несколько тактов."""
+    await wait_until(
+        pilot, lambda: len(_diff_screens(pilot)) == 1, "экран изменений"
+    )
 
 
 async def _app_with_turn_edits(tmp_path, tid):
@@ -656,6 +684,7 @@ async def test_click_inside_summary_span_opens_screen_in_turn_source(tmp_path):
         # успевает выставить _pressed_in_summary — под нагрузкой клик молчит.
         # Тот же путь, что у test_single_click_still_opens_the_screen_through_the_queue.
         await _gesture(pilot, ind, start + 1)
+        await _wait_diff_screen(pilot)
 
         assert isinstance(pilot.app.screen, DiffScreen)
         assert pilot.app.screen.source == SOURCE_TURN
@@ -761,6 +790,7 @@ async def test_double_click_on_summary_opens_exactly_one_screen(tmp_path):
         _post_gesture(pilot, ind, start + 1)  # тот же пиксель → chain 2
         await pilot.pause()
         await pilot.pause()
+        await _wait_diff_screen(pilot)
 
         assert len(requests) == 1  # второй клик молчит
         assert len(_diff_screens(pilot)) == 1
@@ -814,6 +844,7 @@ async def test_single_click_still_opens_the_screen_through_the_queue(tmp_path):
         start, _end = ind._summary_span
 
         await _gesture(pilot, ind, start + 1)
+        await _wait_diff_screen(pilot)
 
         assert len(_diff_screens(pilot)) == 1
         assert pilot.app.screen.source == SOURCE_TURN
@@ -832,7 +863,7 @@ async def test_stale_request_does_not_stack_over_the_open_screen(tmp_path):
         scr, ind = await _turn_with_edits(pilot, tmp_path, tid)
         start, _end = ind._summary_span
         await _gesture(pilot, ind, start + 1)
-        assert len(_diff_screens(pilot)) == 1
+        await _wait_diff_screen(pilot)
         depth = len(pilot.app.screen_stack)
 
         scr.post_message(OpenEditsScreenRequest(SOURCE_TURN))  # запоздавший
@@ -861,7 +892,7 @@ async def test_click_on_indicator_without_summary_is_inert(tmp_path):
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         await _falling_edge(pilot, scr, tid)
-        ind = scr._thinking
+        ind = _fresh(scr)
         assert ind._summary_span is None
 
         await pilot.click(ind, offset=(2, 0))
@@ -892,9 +923,9 @@ async def test_resume_shows_summary_saved_with_indicator(tmp_path):
         )
         pilot.app.active_runner = None
         scr._destroy_thinking_indicator()
-        scr._restore_terminal_indicator()
+        scr._restore_latest_turn_line()
         await pilot.pause()
-        plain = scr._thinking._render_text().plain
+        plain = _outcome_text(scr)
         assert plain.startswith("✓ Выполнил за 12с")
         assert plain.endswith("изменено 2 файла · +5 −6")
 
@@ -924,9 +955,9 @@ async def test_resume_without_saved_summary_shows_no_stale_numbers(tmp_path):
         )
         pilot.app.active_runner = None
         scr._destroy_thinking_indicator()
-        scr._restore_terminal_indicator()
+        scr._restore_latest_turn_line()
         await pilot.pause()
-        assert scr._thinking._render_text().plain == "✓ Выполнил за 12с"
+        assert _outcome_text(scr) == "✓ Выполнил за 12с"
 
 
 def test_finished_turn_summary_survives_a_busy_snapshot_index():
