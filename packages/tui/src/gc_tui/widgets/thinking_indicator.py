@@ -370,6 +370,13 @@ class ThinkingIndicator(Static):
         if self.is_mounted:
             self.refresh()
 
+    def freeze_elapsed(self, seconds: int) -> None:
+        """Длительность хода посчитана снаружи (конец хода): строка-итог
+        «Выполнил за N» берёт её, а не свой счёт — одно N с метой."""
+        self._frozen_elapsed = seconds
+        if self.is_mounted:
+            self.refresh()
+
     def hide(self) -> None:
         """Скрыть строку (агент ждёт ответа человека); анимация стоит."""
         self.add_class("hidden")

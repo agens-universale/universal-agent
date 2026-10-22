@@ -230,3 +230,41 @@ async def test_reopen_stale_running_shows_interrupted(tmp_path):
         assert scr._thinking is not None
         assert scr._thinking._render_text().plain.startswith("■ Прервано")
         assert _status(scr, TID_A) == "running"
+
+
+# --- длительность хода: одно значение для ленты и меты ----------------------
+
+
+@pytest.mark.asyncio
+async def test_elapsed_live_equals_meta_after_ask_human_answer(tmp_path):
+    """Ход ждал ответа человека: после ответа счёт индикатора — от ответа.
+    «Выполнил за N» вживую и после переоткрытия — одно и то же N."""
+    import time
+
+    app = _app(tmp_path)
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(TID_A, is_resume=True)
+        scr._prepare_for_new_run()
+        scr._reset_thinking_timer()
+        runner = _Runner(TID_A)
+        runner.run_started_at = time.monotonic() - 42
+        app.active_runner = runner
+        scr._poll_active()
+        # ответ на вопрос агента: таймер хода — заново (как в _submit)
+        scr._reset_thinking_timer()
+        scr._thinking_started_at = time.monotonic() - 5
+        scr._show_thinking_indicator(state="thinking")
+        runner._running = False
+        scr._poll_active()
+        await pilot.pause()
+        live = scr._thinking._render_text().plain
+        meta = scr._store.get_task_meta(TID_A)["tui"]["last_indicator"]
+        assert live.startswith("✓ Выполнил за 5с")
+        assert meta["elapsed"] == 5
+        scr.attach_active_task(TID_B, is_resume=True)
+        scr.attach_active_task(TID_A, is_resume=True)
+        await pilot.pause()
+        assert scr._thinking._render_text().plain.startswith(
+            "✓ Выполнил за 5с"
+        )

@@ -2438,7 +2438,8 @@ class TraceScreen(Screen):
             return
         if runner is not None and runner.is_running():
             self.app.last_stop_requested = True
-        self._stamp_run_outcome(runner, tid, None)
+        elapsed = self._turn_elapsed(runner, on_screen=False)
+        self._stamp_run_outcome(runner, tid, None, elapsed)
 
     def _mount_failed_from_meta(self, task_id: str) -> None:
         """После рестарта: смонтировать виджеты failed-реплик из
@@ -5411,7 +5412,14 @@ class TraceScreen(Screen):
         edits = self._close_turn_edits(kind, run_tid, on_screen=on_screen)
         if self._store is None or run_tid is None or kind == "compact":
             return
-        plan_proposed = self._stamp_run_outcome(runner, run_tid, edits)
+        # Длительность — одна на ленту и мету: на экране — от точки отсчёта
+        # индикатора (отправка, ответ на вопрос агента), иначе от старта.
+        elapsed = self._turn_elapsed(runner, on_screen=on_screen)
+        if on_screen and self._thinking is not None and elapsed is not None:
+            self._thinking.freeze_elapsed(elapsed)
+        plan_proposed = self._stamp_run_outcome(
+            runner, run_tid, edits, elapsed
+        )
         # Ход уложился между тиками: индикатор не создавался — строка-
         # итог из только что записанной меты, как при переоткрытии.
         # Тик, заставший прогон, индикатор создал; если его нет, его
@@ -5439,10 +5447,21 @@ class TraceScreen(Screen):
             self._sync_plan_panel_with_session()
             self._sync_input_placeholder()
 
-    def _stamp_run_outcome(self, runner, run_tid: str, edits) -> bool:
+    def _turn_elapsed(self, runner, *, on_screen: bool) -> int | None:
+        """Секунды хода: на экране — от отсчёта индикатора, иначе — от
+        старта прогона в раннере; начала нет — None."""
+        started = self._thinking_started_at if on_screen else None
+        if started is None:
+            started = getattr(runner, "run_started_at", None)
+        return None if started is None else int(time.monotonic() - started)
+
+    def _stamp_run_outcome(
+        self, runner, run_tid: str, edits, elapsed: int | None
+    ) -> bool:
         """Записать исход прогона в meta.tui треда `run_tid` (TUI-owned),
         чтобы бейдж пережил переоткрытие сессии. True — ход кончился
-        предложенным планом."""
+        предложенным планом. `elapsed` — длительность хода, в мету идёт
+        только у выполненного."""
         outcome = resolve_terminal_outcome(
             runner_error=getattr(self.app, "last_runner_error", None),
             stop_requested=getattr(self.app, "last_stop_requested", False),
@@ -5455,13 +5474,6 @@ class TraceScreen(Screen):
         ):
             outcome = "stopped"
         completed = outcome == "completed"
-        # Начало хранит раннер: поле экрана смена сессии сбрасывает.
-        started = getattr(runner, "run_started_at", None)
-        elapsed = (
-            int(time.monotonic() - started)
-            if completed and started is not None
-            else None
-        )
         plan_proposed = completed and (
             getattr(self.app, "last_terminal_outcome", None) == "plan_proposed"
         )
@@ -5476,7 +5488,7 @@ class TraceScreen(Screen):
                 ),
                 "last_indicator": {
                     "kind": _RUN_INDICATOR_KIND[outcome],
-                    "elapsed": elapsed,
+                    "elapsed": elapsed if completed else None,
                     "edits": list(edits) if edits else None,
                     # ход кончился планом: строка-итог — «План готов»
                     "plan": plan_proposed or None,
