@@ -224,14 +224,19 @@ def _base_payload(ctx: Any, state: Any, event: str) -> dict[str, Any]:
 async def _run_event(
     ctx: Any,
     event: str,
-    value: str | None,
+    value: str | tuple[str, ...] | None,
     payload: dict[str, Any],
 ) -> list[HookResult]:
     cfg = _plugins_config(ctx)
     timeout = cfg.hook_timeout_sec if cfg is not None else 30
     results: list[HookResult] = []
     for plugin in active_plugins(ctx):
-        for hook in plugin.hooks_for(event, value):
+        hooks: list[Any] = []
+        for v in value if isinstance(value, tuple) else (value,):
+            hooks.extend(
+                h for h in plugin.hooks_for(event, v) if h not in hooks
+            )
+        for hook in hooks:
             results.append(
                 await run_hook(
                     plugin,
@@ -285,6 +290,16 @@ def _blocked_output(result: HookResult, tool_name: str) -> str:
     )
 
 
+def _claude_tool_name(tool_name: str) -> str:
+    """Имя инструмента в Claude Code (``Bash``) или своё, если алиаса нет."""
+    from gc_core.plugins.agents import TOOL_ALIASES
+
+    for claude_name, name in TOOL_ALIASES.items():
+        if name == tool_name:
+            return claude_name
+    return tool_name
+
+
 def _tool_input(arguments: str) -> dict[str, Any]:
     try:
         data = json.loads(arguments) if arguments else {}
@@ -301,12 +316,15 @@ async def apre_tool_call(
         return PreToolDecision(arguments=arguments)
     payload = {
         **_base_payload(ctx, state, EVENT_PRE_TOOL_USE),
-        "tool_name": tool_name,
+        "tool_name": _claude_tool_name(tool_name),
         "tool_input": _tool_input(arguments),
     }
     current = arguments
     for result in await _run_event(
-        ctx, EVENT_PRE_TOOL_USE, tool_name, payload
+        ctx,
+        EVENT_PRE_TOOL_USE,
+        (tool_name, _claude_tool_name(tool_name)),
+        payload,
     ):
         if result.blocked:
             return PreToolDecision(
@@ -343,11 +361,13 @@ async def apost_tool_call(
     )
     payload = {
         **_base_payload(ctx, state, event),
-        "tool_name": tool_name,
+        "tool_name": _claude_tool_name(tool_name),
         "tool_input": _tool_input(arguments),
         "tool_response": output if isinstance(output, str) else str(output),
     }
-    await _run_event(ctx, event, tool_name, payload)
+    await _run_event(
+        ctx, event, (tool_name, _claude_tool_name(tool_name)), payload
+    )
 
 
 def _technical(text: str, suffix: str) -> dict[str, Any]:

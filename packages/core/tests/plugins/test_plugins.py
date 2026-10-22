@@ -222,6 +222,34 @@ async def test_pre_tool_call_blocks_and_rewrites(tmp_path, monkeypatch):
     assert json.loads(other.arguments) == {"path": "a"}
 
 
+@pytest.mark.parametrize("matcher", ["Bash", "exec_command"])
+async def test_tool_hook_matches_claude_name(tmp_path, monkeypatch, matcher):
+    root = _make_plugin(
+        tmp_path,
+        hooks={
+            "PreToolUse": [
+                {
+                    "matcher": matcher,
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": _cmd(
+                                "import sys; sys.stderr.write('no'); sys.exit(2)"
+                            ),
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+    _config(monkeypatch, [str(root)])
+    ctx, state = SimpleNamespace(), SimpleNamespace(state_id="s1")
+    decision = await runtime.apre_tool_call(
+        ctx, state, "exec_command", json.dumps({"command": "ls"})
+    )
+    assert decision.blocked_output is not None
+
+
 async def test_session_start_runs_once_and_is_skipped_when_durable(
     tmp_path, monkeypatch
 ):

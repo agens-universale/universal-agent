@@ -31,7 +31,7 @@ from gc_core.plugins.manifest import Plugin, PluginAgent
 _log = logging.getLogger(__name__)
 
 # Инструменты Claude Code в инструменты агента.
-CLAUDE_TOOL_MAP: dict[str, str] = {
+TOOL_ALIASES: dict[str, str] = {
     "Read": "fs_read_file",
     "Write": "fs_write_file",
     "Edit": "fs_apply_file_edits",
@@ -67,7 +67,7 @@ def map_tools(names: Iterable[str]) -> tuple[tuple[str, ...], list[str]]:
     mapped: list[str] = []
     dropped: list[str] = []
     for raw in names:
-        target = CLAUDE_TOOL_MAP.get(raw)
+        target = TOOL_ALIASES.get(raw)
         if target is None and _SNAKE.match(raw):
             target = raw  # уже имя агента (fs_read_file и т.п.)
         if target is None:
