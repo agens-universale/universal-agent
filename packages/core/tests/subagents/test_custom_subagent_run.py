@@ -11,7 +11,6 @@ REQUIRED = (
     "turn_finish",
     "session_read_stored_tool_output",
     "session_memory",
-    "session_todo",
 )
 
 
@@ -154,3 +153,92 @@ async def test_child_tools_are_actually_narrowed(tmp_path):
     child_ctx = await runner._build_child_ctx("subagent_alpha")
     names = {s.get("name") for s in child_ctx.tools_spec}
     assert names == {"fs_read_file", *REQUIRED}
+
+
+@pytest.mark.asyncio
+async def test_todo_is_not_granted_when_not_listed(tmp_path):
+    # session_todo не в служебном ядре: без него в `tools` тула у ребёнка нет.
+    agents = _agent_file(tmp_path, tools=("fs_read_file",))
+    _ctx, runner = await _runner(tmp_path, _config(tmp_path, agents))
+    child_ctx = await runner._build_child_ctx("subagent_alpha")
+    names = {s.get("name") for s in child_ctx.tools_spec}
+    assert "session_todo" not in names
+    assert "session_memory" in names
+
+
+@pytest.mark.asyncio
+async def test_personal_stop_takes_todo_but_not_memory(tmp_path):
+    agents = _agent_file(
+        tmp_path, stop_tools=("session_todo", "session_memory")
+    )
+    _ctx, runner = await _runner(tmp_path, _config(tmp_path, agents))
+    child_ctx = await runner._build_child_ctx("subagent_alpha")
+    names = {s.get("name") for s in child_ctx.tools_spec}
+    assert "session_todo" not in names
+    assert "session_memory" in names
+
+
+def _todo_notices_over_steps(child_ctx, *, steps, session_todo):
+    """Прогон канала подсказок перед запросом к модели на ``steps`` шагах
+    ребёнка без вызова session_todo; возвращает тексты todo-подсказок."""
+    from gc_core.message_policy.tool_usage_notice.apply import (
+        apply_tool_usage_notice_before_llm,
+    )
+
+    state = SimpleNamespace(
+        shared=None,
+        session_todo=session_todo,
+        tools=list(child_ctx.tools_spec),
+    )
+    sent: list[str] = []
+    for step in range(steps):
+        step_messages = [
+            {"role": "assistant", "content": f"шаг {step}", "id": f"a{step}"}
+        ]
+        out = apply_tool_usage_notice_before_llm(
+            [],
+            state,
+            child_ctx,
+            {},
+            step_messages=step_messages,
+        )
+        sent.extend(
+            str(m.get("content", ""))
+            for m in out
+            if "session_todo" in str(m.get("content", ""))
+        )
+    return sent
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "session_todo",
+    [[], [{"content": "шаг", "status": "in_progress"}]],
+    ids=["nudge", "reminder"],
+)
+async def test_child_without_todo_gets_no_todo_reminder(
+    tmp_path, session_todo
+):
+    """Ребёнок без session_todo несколько шагов подряд не получает ни мягкой
+    подсказки завести чек-лист, ни напоминания обновить его; с тулом —
+    получает (контроль чувствительности)."""
+    cfg = _config(tmp_path, "", **{"todo.reminder_steps": 2})
+    without = _agent_file(tmp_path, stop_tools=("session_todo",))
+    _ctx, runner = await _runner(
+        tmp_path, {**cfg, "agent.subagents_dir": without}
+    )
+    child_ctx = await runner._build_child_ctx("subagent_alpha")
+    assert not _todo_notices_over_steps(
+        child_ctx, steps=6, session_todo=list(session_todo)
+    )
+
+    with_todo = _agent_file(tmp_path, name="subagent_beta")
+    _ctx, runner = await _runner(
+        tmp_path,
+        {**cfg, "agent.subagents_dir": with_todo},
+        tool_name="subagent_beta",
+    )
+    child_ctx = await runner._build_child_ctx("subagent_beta")
+    assert _todo_notices_over_steps(
+        child_ctx, steps=6, session_todo=list(session_todo)
+    )
