@@ -12,6 +12,7 @@ import json
 
 import pytest
 from gc_core.aio import AsyncAgent
+from gc_core.threads.file_store import FileThreadStore
 from gc_core.threads.models import ThreadKey
 from gc_testkit.memory_thread_store_v2 import MemoryThreadStore
 from parity_harness import (
@@ -36,6 +37,15 @@ FINISH = assistant_tool_call(
     },
     call_id="fin1",
 )
+
+
+@pytest.fixture(params=["memory", "file"])
+def store(request, tmp_path):
+    """Вопрос переживает рестарт в любом хранилище: в памяти модели лежат
+    как есть, файловое раскладывает состояние по ключам meta develop."""
+    if request.param == "memory":
+        return MemoryThreadStore()
+    return FileThreadStore(str(tmp_path / "threads"))
 
 
 @pytest.fixture(autouse=True)
@@ -65,11 +75,10 @@ def _outputs(payload: dict) -> list[dict]:
 
 
 async def test_question_ends_the_turn_and_waits_in_the_session(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, store
 ):
     cfg = parity_config(tmp_path, monkeypatch)
     backend = install(monkeypatch, ScriptedBackend([ASK]))
-    store = MemoryThreadStore()
     async with await _agent(cfg, store) as agent:
         await agent.run("выбери вариант", thread_id=KEY.thread)
         assert agent.executor.last_terminal_outcome == "input_required"
@@ -94,11 +103,10 @@ async def test_question_ends_the_turn_and_waits_in_the_session(
 
 
 async def test_answer_continues_the_turn_after_a_restart(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, store
 ):
     cfg = parity_config(tmp_path, monkeypatch)
     install(monkeypatch, ScriptedBackend([ASK]))
-    store = MemoryThreadStore()
     async with await _agent(cfg, store) as agent:
         await agent.run("выбери вариант", thread_id=KEY.thread)
     # Другой процесс (рестарт): ответ ложится выводом того же вызова.
@@ -118,11 +126,10 @@ async def test_answer_continues_the_turn_after_a_restart(
 
 
 async def test_new_message_without_an_answer_closes_the_question(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, store
 ):
     cfg = parity_config(tmp_path, monkeypatch)
     install(monkeypatch, ScriptedBackend([ASK]))
-    store = MemoryThreadStore()
     async with await _agent(cfg, store) as agent:
         await agent.run("выбери вариант", thread_id=KEY.thread)
         backend = install(
@@ -163,7 +170,7 @@ async def test_subagent_does_not_suspend_the_parent_turn():
 
 
 async def test_answer_is_not_replayed_into_the_tail_turn(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, store
 ):
     """Хвост хода с ответом (``send`` на излёте) доигрывается своим ходом
     без ответа: вопроса уже нет, повтор ответа уронил бы весь ``run``."""
@@ -172,7 +179,6 @@ async def test_answer_is_not_replayed_into_the_tail_turn(
     ae = importlib.import_module("gc_core.agent_executor")
     cfg = parity_config(tmp_path, monkeypatch)
     install(monkeypatch, ScriptedBackend([ASK]))
-    store = MemoryThreadStore()
     async with await _agent(cfg, store) as agent:
         await agent.run("выбери вариант", thread_id=KEY.thread)
         tail_finish = assistant_tool_call(

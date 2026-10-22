@@ -36,6 +36,8 @@ from gc_core.threads.models import (
 _ABSENT = object()
 
 #: Поле SessionState → путь ключа develop. Порядок — как пишет develop.
+#: Новое поле модели — строкой в конец: поле без строки файловое хранилище
+#: не пишет (ловит ``check_every_state_field_roundtrip`` конформанса).
 _STATE_KEYS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("previous_response_id", ("previous_response_id",)),
     ("working_memory", ("shared", "working_memory")),
@@ -64,6 +66,7 @@ _STATE_KEYS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("judge_denials_in_a_row", ("shared", "judge_denials_in_a_row")),
     ("judge_denials_total", ("shared", "judge_denials_total")),
     ("judge_paused", ("shared", "judge_paused")),
+    ("pending_question", ("pending_question",)),
 )
 #: Ключи ``shared``, у которых есть поле модели; прочие (поле ядра новее
 #: модели) возвращаются на место как есть — см. ``_state``.
