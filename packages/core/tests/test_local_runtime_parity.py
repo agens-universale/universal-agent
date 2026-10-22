@@ -454,11 +454,14 @@ async def run_scenario(
         data_path, meta_path = _thread_paths(
             resolve_threads_dir(cfg), "cli", "parity"
         )
-        records = [
+        # Эталон снят по сообщениям треда; записи без payload (итог хода)
+        # в сравнение не входят.
+        rows = [
             json.loads(line)
             for line in Path(data_path).read_text().splitlines()
             if line.strip()
         ]
+        records = [row for row in rows if row.get("type") == "message"]
         assert records, "Сравнение пустых тредов не проверяет поведение"
         meta = json.loads(Path(meta_path).read_text())
         if post_run_outcome is not None:
