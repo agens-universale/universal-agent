@@ -1,4 +1,4 @@
-"""``gc-plugin``: установка и управление плагинами (как у OpenHands)."""
+"""``gc-plugin``: установка и управление плагинами."""
 
 from __future__ import annotations
 

@@ -230,7 +230,7 @@ python -m gc_core.plugins.sources update
 
 ## Установка в постоянное хранилище (`gc-plugin`)
 
-Как у OpenHands: плагин ставится один раз и дальше работает без правки конфига.
+Плагин ставится один раз и дальше работает без правки конфига.
 
 ```bash
 gc-plugin install obra/superpowers            # owner/repo, URL или локальный путь

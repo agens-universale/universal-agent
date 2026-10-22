@@ -17,7 +17,7 @@ DEFAULT_PLUGIN_HOOK_TIMEOUT_SEC = 30
 
 
 class PluginSource(BaseModel):
-    """Плагин из git-репозитория (как source у OpenHands)."""
+    """Плагин из git-репозитория."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
