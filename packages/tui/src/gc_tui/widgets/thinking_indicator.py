@@ -27,6 +27,7 @@ compressing; иначе по `_last_event_kind`: "_finalized" sentinel → valid
 from __future__ import annotations
 
 import random
+import textwrap
 import time
 
 from rich.text import Text
@@ -35,7 +36,7 @@ from textual.timer import Timer
 from textual.widgets import Static
 
 from gc_tui import textual_compat
-from gc_tui.messages import OpenEditsScreenRequest
+from gc_tui.messages import IndicatorRowsChanged, OpenEditsScreenRequest
 
 # `_HOVER` — ровно тот `$accent`, которым база красит наведение на служебные
 # элементы ленты (`.trace-action:hover` в styles.tcss).
@@ -154,6 +155,8 @@ _SUMMARY_GAP = 2
 # Ширина, когда измерить нельзя (виджет вне DOM): та же страховка, что у
 # адаптивного футера.
 _FALLBACK_WIDTH = 80
+#: Причина ошибки переносится не больше чем на столько строк.
+ERROR_MAX_ROWS = 3
 
 
 def format_turn_summary(files: int, add: int, del_: int) -> str | None:
@@ -294,8 +297,39 @@ class ThinkingIndicator(Static):
         if self.is_mounted:
             self.refresh(layout=True)
 
+    def _error_texts(self) -> list[str]:
+        """Причина по строкам колонки текста (под `└ `): до трёх строк,
+        дальше — обрезка `…` в последней."""
+        from gc_tui.services.trace_render import consequence_lead
+
+        col = max(1, self._status_width() - consequence_lead(0).cell_len)
+        rows = textwrap.wrap(
+            self._error or "",
+            col,
+            break_long_words=True,
+            break_on_hyphens=False,
+        ) or [""]
+        if len(rows) <= ERROR_MAX_ROWS:
+            return rows
+        last = rows[ERROR_MAX_ROWS - 1]
+        return rows[: ERROR_MAX_ROWS - 1] + [last[: col - 1].rstrip() + "…"]
+
+    @property
+    def error_rows(self) -> int:
+        """Сколько строк занимает причина (0 — её нет)."""
+        return len(self._error_texts()) if self.has_error_line else 0
+
     def _sync_error_class(self) -> None:
         self.set_class(self.has_error_line, "with-error")
+        self.styles.height = 1 + self.error_rows
+
+    def on_resize(self, event: events.Resize) -> None:
+        """Ширина изменилась — причина переносится иначе: высота и резерв
+        бара следуют за числом строк."""
+        before = self.styles.height
+        self._sync_error_class()
+        if self.has_error_line and self.styles.height != before:
+            self.post_message(IndicatorRowsChanged())
 
     def set_done_label(self, label: str) -> None:
         """Подпись успешного исхода хода: «Выполнил» либо «План готов»."""
@@ -394,14 +428,20 @@ class ThinkingIndicator(Static):
         return glyph, color
 
     def _error_line(self) -> Text:
-        """`└ <класс>: <текст>` — следствие уровня 0, `DIM`, в одну строку
-        (обрезка `…` под ширину)."""
+        """`└ <класс>: <текст>` — следствие уровня 0, `DIM`; перенос до
+        трёх строк, продолжение — под колонкой текста, не под `└`."""
         from gc_tui.palette import DIM
         from gc_tui.services.trace_render import consequence_lead
 
-        line = consequence_lead(0)
-        line.append(self._error or "", style=DIM)
-        line.truncate(self._status_width(), overflow="ellipsis")
+        lead = consequence_lead(0)
+        indent = " " * lead.cell_len
+        line = Text()
+        for i, row in enumerate(self._error_texts()):
+            if i:
+                line.append("\n" + indent)
+            else:
+                line.append_text(lead)
+            line.append(row, style=DIM)
         return line
 
     def _processing_shade(self) -> str:

@@ -61,6 +61,7 @@ from gc_tui import branding, textual_compat
 from gc_tui.commands import build_default_registry, closest_command
 from gc_tui.messages import (
     CopyBlockRequest,
+    IndicatorRowsChanged,
     OpenImageRequest,
     ScrollToEnd,
     ScrollToReply,
@@ -2705,6 +2706,10 @@ class TraceScreen(Screen):
         )
         self._thinking = ind
         self.query_one(_SEL_INDICATOR_BAR, Vertical).mount(ind)
+        self._sync_indicator_reserve()
+
+    def on_indicator_rows_changed(self, event: IndicatorRowsChanged) -> None:
+        event.stop()
         self._sync_indicator_reserve()
 
     def _set_indicator_error(self, error: str | None) -> None:
@@ -8362,7 +8367,7 @@ class TraceScreen(Screen):
             and ind.has_error_line
             and not ind.has_class("hidden")
         ):
-            height += 1
+            height += ind.error_rows
         bar.styles.height = height
 
     def _handle_bang_shell(self, text: str) -> None:

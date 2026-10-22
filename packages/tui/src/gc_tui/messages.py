@@ -30,6 +30,11 @@ class SummaryToggleRequest(Message):
         self.event_no = event_no
 
 
+class IndicatorRowsChanged(Message):
+    """Число строк причины ошибки в индикаторе изменилось (ресайз) —
+    экран пересчитывает резерв бара."""
+
+
 class OpenEditsScreenRequest(Message):
     """Клик по сводке правок в строке-итоге → экран изменений в её источнике.
 

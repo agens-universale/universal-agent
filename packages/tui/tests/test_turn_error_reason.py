@@ -38,7 +38,7 @@ def test_long_reason_is_cut():
         describe_turn_error,
     )
 
-    reason = describe_turn_error(_ReadError("слово " * 100))
+    reason = describe_turn_error(_ReadError("слово " * 200))
     assert len(reason) <= TURN_ERROR_LIMIT
     assert reason.endswith("…")
 
@@ -189,3 +189,90 @@ async def test_new_turn_after_failure_shrinks_indicator_bar(tmp_path):
         assert bar.styles.height.value == 4
         scr._show_thinking_indicator(state="thinking")
         assert bar.styles.height.value == 3
+
+
+_LONG = "MainModelUnavailable: " + "модель недоступна " * 8  # ~150 симв.
+
+
+def _rows(text: str) -> list[str]:
+    return text.split("\n")[1:]
+
+
+def test_long_reason_wraps_under_text_column():
+    from gc_tui.widgets.thinking_indicator import ThinkingIndicator
+
+    ind = ThinkingIndicator(state="failed", error=_LONG)
+    rows = _rows(ind._render_text().plain)
+    assert 2 <= len(rows) <= 3
+    assert rows[0].startswith("  └ ")
+    assert all(r.startswith("    ") and r[4] != " " for r in rows[1:])
+    assert not rows[-1].endswith("…")
+    assert ind.error_rows == len(rows)
+
+
+def test_reason_beyond_three_rows_is_cut():
+    from gc_tui.widgets.thinking_indicator import ThinkingIndicator
+
+    ind = ThinkingIndicator(state="failed", error="слово " * 80)
+    rows = _rows(ind._render_text().plain)
+    assert len(rows) == 3
+    assert rows[-1].endswith("…")
+
+
+def test_short_reason_is_one_row():
+    from gc_tui.widgets.thinking_indicator import ThinkingIndicator
+
+    ind = ThinkingIndicator(state="failed", error="ReadError: boom")
+    assert ind.error_rows == 1
+
+
+async def _bar_height(scr):
+    from textual.containers import Vertical
+
+    return scr.query_one("#indicator-bar", Vertical).styles.height.value
+
+
+@pytest.mark.asyncio
+async def test_long_reason_grows_bar_live_and_after_reopen(tmp_path):
+    pytest.importorskip("textual")
+    _write_task(
+        tmp_path,
+        {
+            "status": "failed",
+            "last_indicator": {"kind": "failed", "elapsed": None},
+            "last_error": _LONG,
+        },
+    )
+    async with _app(tmp_path).run_test(size=(80, 30)) as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(_TID, is_resume=True)
+        await pilot.pause()
+        rows = scr._thinking.error_rows
+        assert rows >= 2
+        assert await _bar_height(scr) == 3 + rows
+        scr._show_thinking_indicator(state="thinking")
+        assert await _bar_height(scr) == 3
+
+
+@pytest.mark.asyncio
+async def test_resize_follows_reason_rows(tmp_path):
+    pytest.importorskip("textual")
+    _write_task(
+        tmp_path,
+        {
+            "status": "failed",
+            "last_indicator": {"kind": "failed", "elapsed": None},
+            "last_error": _LONG,
+        },
+    )
+    async with _app(tmp_path).run_test(size=(200, 30)) as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(_TID, is_resume=True)
+        await pilot.pause()
+        assert scr._thinking.error_rows == 1
+        assert await _bar_height(scr) == 4
+        await pilot.resize_terminal(70, 30)
+        await pilot.pause()
+        rows = scr._thinking.error_rows
+        assert rows >= 2
+        assert await _bar_height(scr) == 3 + rows
