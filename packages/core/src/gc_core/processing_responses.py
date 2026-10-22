@@ -1941,6 +1941,7 @@ class _AgentLoop:
         self.state = state
         self.ctx = ctx
         self._plugin_stop_continuations = 0
+        self._plugin_session_started = False
         self.get_full_history_messages = get_full_history_messages
         self.persist_messages_callback = persist_messages_callback
         self.pre_backend_compaction_hook = pre_backend_compaction_hook
@@ -2315,9 +2316,17 @@ class _AgentLoop:
 
     async def _aapply_plugin_session_start(self, messages) -> List[Dict]:
         """Плагины: контекст SessionStart один раз на старте сессии."""
-        return await self._aadd_plugin_messages(
-            messages, aplugin_session_start_messages(self.state, self.ctx)
-        )
+
+        async def _pending() -> List[Dict]:
+            (
+                pending,
+                self._plugin_session_started,
+            ) = await aplugin_session_start_messages(
+                self.state, self.ctx, self._plugin_session_started
+            )
+            return pending
+
+        return await self._aadd_plugin_messages(messages, _pending())
 
     async def _aapply_plugin_user_prompt(self, messages) -> List[Dict]:
         """Плагины: контекст UserPromptSubmit к сообщению пользователя."""

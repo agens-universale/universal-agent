@@ -99,7 +99,10 @@ def load_plugins(paths: list[str]) -> tuple[Plugin, ...]:
 
 def reset_plugin_cache() -> None:
     """Сбросить кэш прочитанных плагинов (для тестов и перезагрузки)."""
+    from gc_core.plugins import sources
+
     _cache.clear()
+    sources._warned.clear()
 
 
 def active_plugins(ctx: Any) -> tuple[Plugin, ...]:
@@ -253,18 +256,23 @@ async def _run_event(
 
 
 async def asession_start_messages(
-    state: Any, ctx: Any
-) -> list[dict[str, Any]]:
-    """Сообщения, которые плагины кладут в начало сессии (один раз на тред).
+    state: Any, ctx: Any, started: bool = False
+) -> tuple[list[dict[str, Any]], bool]:
+    """Сообщения, которые плагины кладут в начало сессии, и флаг «запускали».
 
-    «Уже было» определяем по истории: State создаётся на каждый ход заново,
-    а сообщения плагина сохраняются в тред. Субагентам хук не запускается.
+    Между ходами «уже было» определяем по истории: State создаётся на каждый
+    ход заново, а сообщения плагина сохраняются в тред. Внутри хода
+    (``started`` держит цикл) хук без вывода не перезапускается на каждом шаге:
+    итого раз на тред, если хук вернул контекст, иначе раз на ход.
+    Субагентам хук не запускается.
     """
-    if _is_subagent(state) or not active_plugins(ctx):
-        return []
+    if started or _is_subagent(state) or not active_plugins(ctx):
+        return [], True
     for message in getattr(state, "messages", None) or []:
-        if str(message.get("id", "")).startswith(SESSION_START_ID_PREFIX):
-            return []
+        if isinstance(message, dict) and str(message.get("id", "")).startswith(
+            SESSION_START_ID_PREFIX
+        ):
+            return [], True
     payload = {
         **_base_payload(ctx, state, EVENT_SESSION_START),
         "source": _SESSION_SOURCE,
@@ -274,7 +282,7 @@ async def asession_start_messages(
     )
     texts = [r.additional_context for r in results if r.additional_context]
     if not texts:
-        return []
+        return [], True
     from gc_core.message_policy.tool_usage_notice.policy import (
         wrap_thread_memory_technical_user_message,
     )
@@ -283,7 +291,7 @@ async def asession_start_messages(
         wrap_thread_memory_technical_user_message(
             "\n\n".join(texts), message_id_suffix="plugin_session_start"
         )
-    ]
+    ], True
 
 
 def _is_subagent(state: Any) -> bool:
@@ -303,14 +311,22 @@ def _blocked_output(result: HookResult, tool_name: str) -> str:
     )
 
 
-def _claude_tool_name(tool_name: str) -> str:
-    """Имя инструмента в Claude Code (``Bash``) или своё, если алиаса нет."""
+def _claude_tool_names(tool_name: str) -> tuple[str, ...]:
+    """Все имена инструмента в Claude Code (``Edit``, ``MultiEdit``) или своё."""
     from gc_core.plugins.agents import TOOL_ALIASES
 
-    for claude_name, name in TOOL_ALIASES.items():
-        if name == tool_name:
-            return claude_name
-    return tool_name
+    names = tuple(c for c, n in TOOL_ALIASES.items() if n == tool_name)
+    return names or (tool_name,)
+
+
+def _claude_tool_name(tool_name: str) -> str:
+    """Первое имя в Claude Code (``Bash``) — его видит хук в ``tool_name``."""
+    return _claude_tool_names(tool_name)[0]
+
+
+def _match_names(tool_name: str) -> tuple[str, ...]:
+    """Имена для matcher: имя агента и все алиасы Claude Code."""
+    return (tool_name, *_claude_tool_names(tool_name))
 
 
 def _tool_input(arguments: str) -> dict[str, Any]:
@@ -336,7 +352,7 @@ async def apre_tool_call(
     for result in await _run_event(
         ctx,
         EVENT_PRE_TOOL_USE,
-        (tool_name, _claude_tool_name(tool_name)),
+        _match_names(tool_name),
         payload,
     ):
         if result.blocked:
@@ -378,9 +394,7 @@ async def apost_tool_call(
         "tool_input": _tool_input(arguments),
         "tool_response": output if isinstance(output, str) else str(output),
     }
-    await _run_event(
-        ctx, event, (tool_name, _claude_tool_name(tool_name)), payload
-    )
+    await _run_event(ctx, event, _match_names(tool_name), payload)
 
 
 def _technical(text: str, suffix: str) -> dict[str, Any]:

@@ -224,6 +224,7 @@ async def test_pre_tool_call_blocks_and_rewrites(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("matcher", ["Bash", "exec_command"])
 async def test_tool_hook_matches_claude_name(tmp_path, monkeypatch, matcher):
+    stdin_log = tmp_path / "stdin.json"
     root = _make_plugin(
         tmp_path,
         hooks={
@@ -234,7 +235,9 @@ async def test_tool_hook_matches_claude_name(tmp_path, monkeypatch, matcher):
                         {
                             "type": "command",
                             "command": _cmd(
-                                "import sys; sys.stderr.write('no'); sys.exit(2)"
+                                "import sys;"
+                                f"open({str(stdin_log)!r}, 'w').write(sys.stdin.read());"
+                                "sys.stderr.write('no'); sys.exit(2)"
                             ),
                         }
                     ],
@@ -248,6 +251,111 @@ async def test_tool_hook_matches_claude_name(tmp_path, monkeypatch, matcher):
         ctx, state, "exec_command", json.dumps({"command": "ls"})
     )
     assert decision.blocked_output is not None
+    assert json.loads(stdin_log.read_text())["tool_name"] == "Bash"
+
+
+async def test_pre_tool_matcher_uses_every_claude_alias(tmp_path, monkeypatch):
+    root = _make_plugin(
+        tmp_path,
+        hooks={
+            "PreToolUse": [
+                {
+                    "matcher": "MultiEdit",
+                    "hooks": [{"type": "command", "command": "exit 2"}],
+                }
+            ]
+        },
+    )
+    _config(monkeypatch, [str(root)])
+    decision = await runtime.apre_tool_call(
+        SimpleNamespace(),
+        SimpleNamespace(state_id="s1"),
+        "fs_apply_file_edits",
+        "{}",
+    )
+    assert decision.blocked_output is not None
+
+
+async def test_post_tool_hook_matches_claude_name(tmp_path, monkeypatch):
+    log = tmp_path / "post.log"
+    root = _make_plugin(
+        tmp_path,
+        hooks={
+            "PostToolUse": [
+                {
+                    "matcher": "Bash",
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": _cmd(
+                                "import json,sys;d=json.load(sys.stdin);"
+                                f"open({str(log)!r},'w').write(d['tool_name'])"
+                            ),
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+    _config(monkeypatch, [str(root)])
+    await runtime.apost_tool_call(
+        SimpleNamespace(),
+        SimpleNamespace(state_id="s1"),
+        "exec_command",
+        "{}",
+        '{"ok": true}',
+    )
+    assert log.read_text() == "Bash"
+
+
+async def test_session_start_without_output_runs_once_per_loop(
+    tmp_path, monkeypatch
+):
+    counter = tmp_path / "count.txt"
+    root = _make_plugin(
+        tmp_path,
+        hooks={
+            "SessionStart": [
+                {
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": _cmd(
+                                f"open({str(counter)!r}, 'a').write('x\\n')"
+                            ),
+                        }
+                    ]
+                }
+            ]
+        },
+    )
+    _config(monkeypatch, [str(root)])
+    ctx = SimpleNamespace()
+    state = SimpleNamespace(state_id="s1", messages=[])
+    started = False
+    for _ in range(3):
+        messages, started = await runtime.asession_start_messages(
+            state, ctx, started
+        )
+        assert messages == []
+    assert counter.read_text().split() == ["x"]
+
+
+async def test_session_start_ignores_non_dict_messages(tmp_path, monkeypatch):
+    _config(monkeypatch, [str(_make_plugin(tmp_path, hooks={}))])
+    state = SimpleNamespace(state_id="s1", messages=["raw", None])
+    assert await runtime.asession_start_messages(state, SimpleNamespace()) == (
+        [],
+        True,
+    )
+
+
+def test_reset_plugin_cache_clears_source_warnings():
+    from gc_core.plugins import sources
+
+    sources._warned.add(("a", "b", "c"))
+    runtime.reset_plugin_cache()
+    assert not sources._warned
 
 
 async def test_session_start_not_repeated_for_loaded_history(
@@ -276,23 +384,20 @@ async def test_session_start_not_repeated_for_loaded_history(
     state = SimpleNamespace(state_id="s1", messages=[])
     keys = set(vars(state))
 
-    first = await runtime.asession_start_messages(state, ctx)
+    first, _ = await runtime.asession_start_messages(state, ctx)
     assert len(first) == 1 and "HELLO" in first[0]["content"]
     assert first[0]["id"].startswith(runtime.SESSION_START_ID_PREFIX)
 
     # Новый State следующего хода: история подгружена из треда.
     next_state = SimpleNamespace(state_id="s2", messages=first)
-    assert await runtime.asession_start_messages(next_state, ctx) == []
+    assert await runtime.asession_start_messages(next_state, ctx) == ([], True)
     assert set(vars(state)) == keys
     assert set(vars(next_state)) == {"state_id", "messages"}
 
     durable_ctx = SimpleNamespace(durable_execution=True)
-    assert (
-        await runtime.asession_start_messages(
-            SimpleNamespace(state_id="s3", messages=[]), durable_ctx
-        )
-        == []
-    )
+    assert await runtime.asession_start_messages(
+        SimpleNamespace(state_id="s3", messages=[]), durable_ctx
+    ) == ([], True)
 
 
 async def test_session_start_and_stop_skipped_in_subagent(
@@ -318,8 +423,9 @@ async def test_session_start_and_stop_skipped_in_subagent(
     )
     _config(monkeypatch, [str(root)])
     state = SimpleNamespace(state_id="s1", messages=[], parent_state_id="p")
-    assert (
-        await runtime.asession_start_messages(state, SimpleNamespace()) == []
+    assert await runtime.asession_start_messages(state, SimpleNamespace()) == (
+        [],
+        True,
     )
     assert await runtime.astop_decision(state, object(), "done", 0) == ([], 0)
 
@@ -329,7 +435,7 @@ async def test_no_plugins_configured_is_a_noop(monkeypatch):
     ctx, state = SimpleNamespace(), SimpleNamespace(state_id="s1")
     decision = await runtime.apre_tool_call(ctx, state, "t", "{}")
     assert decision.arguments == "{}" and decision.blocked_output is None
-    assert await runtime.asession_start_messages(state, ctx) == []
+    assert await runtime.asession_start_messages(state, ctx) == ([], True)
     assert runtime.plugin_skill_roots(None) == []
 
 
