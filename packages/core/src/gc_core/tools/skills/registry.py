@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 import yaml
@@ -10,6 +11,7 @@ import yaml
 from gc_core.backends.local import LocalFsBackend
 from gc_core.backends.protocol import FsBackend
 from gc_core.bundled_assets import bundled_root
+from gc_core.plugins.manifest import is_agent_plugins_root
 from gc_core.settings import settings_of
 
 SKILL_MD = "SKILL.md"
@@ -259,6 +261,11 @@ def _skill_listed(
     )
 
 
+def _inside(path: Path, root: Path) -> bool:
+    """Путь после раскрытия ссылок остаётся внутри ``root``."""
+    return path.resolve().is_relative_to(root.resolve())
+
+
 def _command_skill(plugin_name: str, command: Any) -> Skill:
     """Команда плагина как skill ``<плагин>:<команда>``.
 
@@ -431,8 +438,17 @@ class SkillsRegistry:
     ) -> None:
         if not root or not await self._backend.is_dir(root):
             return
+        plugin_root = Path(root).parent
+        contain = is_agent_plugins_root(plugin_root)
         for entry, is_dir in await self._backend.listdir(root):
             if not is_dir:
+                continue
+            if contain and not _inside(Path(root) / entry, plugin_root):
+                logger.warning(
+                    "plugin %s: skill %s resolves outside the plugin, skipped",
+                    plugin_name,
+                    entry,
+                )
                 continue
             skill = await self._load_skill_dir(
                 self._backend.join(root, entry),

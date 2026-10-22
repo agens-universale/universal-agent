@@ -8,10 +8,15 @@ from types import SimpleNamespace
 
 from gc_core.plugins import installed, runtime
 from gc_core.plugins.hook_runner import run_hook
-from gc_core.plugins.manifest import HookCommand, load_plugin
+from gc_core.plugins.manifest import (
+    HookCommand,
+    load_plugin,
+    validate_ap_manifest,
+)
 from gc_core.tools.skills.registry import SkillsRegistry
 
 PY = sys.executable
+AP_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"
 
 
 @pytest.fixture(autouse=True)
@@ -679,7 +684,8 @@ def test_agent_plugins_layout_mcp_json(tmp_path):
     root = tmp_path / "ap"
     root.mkdir()
     (root / "plugin.json").write_text(
-        json.dumps({"name": "ap", "version": "1"}), encoding="utf-8"
+        json.dumps({"$schema": AP_SCHEMA, "name": "ap", "version": "1"}),
+        encoding="utf-8",
     )
     (root / "mcp.json").write_text(
         json.dumps({"mcpServers": {"s": {"command": "echo"}}}),
@@ -1077,3 +1083,80 @@ def test_use_installed_false_keeps_explicit_paths(monkeypatch):
     on = SimpleNamespace(paths=["/p"], sources=[], use_installed=True)
     assert runtime.configured_paths(off) == ["/p"]
     assert runtime.configured_paths(on) == ["/p", "/inst/a"]
+
+
+def _ap_root(tmp_path, manifest, name="ap"):
+    root = tmp_path / name
+    (root / "skills" / "a").mkdir(parents=True)
+    (root / "skills" / "a" / "SKILL.md").write_text(
+        "---\nname: a\ndescription: d\n---\nbody\n", encoding="utf-8"
+    )
+    (root / "plugin.json").write_text(json.dumps(manifest), encoding="utf-8")
+    return root
+
+
+def test_ap_manifest_valid(tmp_path):
+    data = {
+        "$schema": AP_SCHEMA,
+        "name": "agent-plugins-example",
+        "version": "1.0.0",
+    }
+    assert validate_ap_manifest(data) == []
+    assert load_plugin(_ap_root(tmp_path, data)).format == "agent-plugins"
+
+
+def test_ap_manifest_missing_schema_rejected(tmp_path):
+    root = _ap_root(tmp_path, {"name": "x"})
+    assert load_plugin(root) is None
+    with pytest.raises(ValueError, match=r"\$schema"):
+        installed.install(str(root))
+
+
+def test_ap_manifest_bad_name_rejected():
+    assert validate_ap_manifest({"$schema": AP_SCHEMA, "name": "Bad--Name"})
+
+
+def test_ap_unknown_field_reported(tmp_path, caplog):
+    root = _ap_root(tmp_path, {"$schema": AP_SCHEMA, "name": "x", "hooks": {}})
+    with caplog.at_level("WARNING"):
+        plugin = load_plugin(root)
+    assert plugin is not None
+    assert "hooks" in caplog.text
+
+
+async def test_ap_skill_symlink_outside_root_skipped(tmp_path):
+    root = _ap_root(tmp_path, {"$schema": AP_SCHEMA, "name": "x"})
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "SKILL.md").write_text(
+        "---\nname: evil\ndescription: d\n---\nbody\n", encoding="utf-8"
+    )
+    (root / "skills" / "evil").symlink_to(outside, target_is_directory=True)
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    reg = SkillsRegistry(
+        system_root=str(empty),
+        user_root=str(empty),
+        project_root=str(empty),
+        plugin_roots=[("x", str(root / "skills"))],
+    )
+    ids = {
+        s["id"] if isinstance(s, dict) else s.id
+        for s in await reg.list_skills()
+    }
+    assert "x:a" in ids
+    assert "x:evil" not in ids
+
+
+def test_cc_plugin_unaffected_by_ap_rules(tmp_path):
+    plugin = load_plugin(_make_plugin(tmp_path))
+    assert plugin.format == "claude-code"
+
+
+def test_both_manifests_prefer_claude_code(tmp_path):
+    root = _make_plugin(tmp_path, name="cc")
+    (root / "plugin.json").write_text(
+        json.dumps({"$schema": AP_SCHEMA, "name": "other"}), encoding="utf-8"
+    )
+    plugin = load_plugin(root)
+    assert (plugin.format, plugin.name) == ("claude-code", "cc")

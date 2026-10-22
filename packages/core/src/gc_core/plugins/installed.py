@@ -18,7 +18,7 @@ import tempfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from gc_core.plugins.manifest import load_plugin
+from gc_core.plugins.manifest import ap_manifest_errors, load_plugin
 from gc_core.plugins.sources import _clone, normalize_url
 
 logger = logging.getLogger(__name__)
@@ -113,6 +113,9 @@ def install(
         tmp = Path(tmp_name)
         fetched, commit, norm = _fetch(source, ref, tmp)
         plugin_dir = fetched / subdir if subdir else fetched
+        errors = ap_manifest_errors(plugin_dir)
+        if errors:
+            raise ValueError(f"{source}: " + "; ".join(errors))
         plugin = load_plugin(plugin_dir)
         if plugin is None:
             raise ValueError(f"{source}: каталог плагина не найден")

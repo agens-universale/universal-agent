@@ -31,7 +31,42 @@ SUPPORTED_EVENTS = frozenset(
     }
 )
 
-_MANIFEST_CANDIDATES = (".claude-plugin/plugin.json", "plugin.json")
+PLUGIN_FORMAT_CLAUDE = "claude-code"
+PLUGIN_FORMAT_AP = "agent-plugins"
+_CLAUDE_MANIFEST = ".claude-plugin/plugin.json"
+_AP_MANIFEST = "plugin.json"
+
+# Правила Agent Plugins v1.0.0 (спецификация §5 и plugin.schema.json);
+# во время работы схема не запрашивается.
+_AP_SCHEMA_ID = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"
+_AP_SCHEMA_KEY = "$schema"
+_AP_REQUIRED = (_AP_SCHEMA_KEY, "name")
+_AP_NAME_PATTERN = re.compile(
+    r"^(?!.*(?:--|\.\.))[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$"
+)
+_AP_NAME_MAX = 64
+_AP_FIELDS = frozenset(
+    {
+        _AP_SCHEMA_KEY,
+        "name",
+        "version",
+        "description",
+        "author",
+        "homepage",
+        "repository",
+        "license",
+        "keywords",
+        "extensions",
+    }
+)
+_AP_STRING_FIELDS = (
+    "version",
+    "description",
+    "homepage",
+    "repository",
+    "license",
+)
+_AP_AUTHOR_FIELDS = frozenset({"name", "email", "url"})
 # Claude Code кладёт серверы в ``.mcp.json``, Agent Plugins — в ``mcp.json``.
 _MCP_CANDIDATES = (".mcp.json", "mcp.json")
 _HOOKS_FILE = "hooks/hooks.json"
@@ -109,6 +144,7 @@ class Plugin:
     mcp_servers: dict[str, dict[str, Any]] = field(default_factory=dict)
     commands: tuple[PluginCommand, ...] = ()
     agents: tuple[PluginAgent, ...] = ()
+    format: str = PLUGIN_FORMAT_CLAUDE
 
     def hooks_for(self, event: str, value: str | None) -> list[HookCommand]:
         out: list[HookCommand] = []
@@ -125,6 +161,73 @@ def _read_json(path: Path) -> dict[str, Any] | None:
         logger.warning("plugin file %s unreadable: %s", path, exc)
         return None
     return data if isinstance(data, dict) else None
+
+
+def is_agent_plugins_root(root: Path) -> bool:
+    """Только корневой ``plugin.json`` без ``.claude-plugin/plugin.json``."""
+    return (root / _AP_MANIFEST).is_file() and not (
+        root / _CLAUDE_MANIFEST
+    ).is_file()
+
+
+def _ap_name_error(name: Any) -> str | None:
+    ok = (
+        isinstance(name, str)
+        and 0 < len(name) <= _AP_NAME_MAX
+        and _AP_NAME_PATTERN.match(name)
+    )
+    return None if ok else f"недопустимое имя плагина: {name!r}"
+
+
+def _ap_type_errors(data: dict[str, Any]) -> list[str]:
+    errors = [
+        f"{k} должно быть строкой"
+        for k in _AP_STRING_FIELDS
+        if k in data and not isinstance(data[k], str)
+    ]
+    keywords = data.get("keywords", [])
+    if not (
+        isinstance(keywords, list)
+        and all(isinstance(k, str) for k in keywords)
+    ):
+        errors.append("keywords должно быть списком строк")
+    author = data.get("author", {})
+    if not (
+        isinstance(author, dict)
+        and set(author) <= _AP_AUTHOR_FIELDS
+        and all(isinstance(v, str) for v in author.values())
+    ):
+        errors.append("author: допустимы только строки name, email, url")
+    return errors
+
+
+def validate_ap_manifest(data: dict[str, Any]) -> list[str]:
+    """Ошибки манифеста Agent Plugins 1.0.0; пустой список значит «верен».
+
+    Неизвестные верхнеуровневые поля сюда не входят: они не фатальны
+    (``load_plugin`` пишет о них предупреждение и игнорирует).
+    """
+    errors = [
+        f"нет обязательного поля {k}" for k in _AP_REQUIRED if k not in data
+    ]
+    if _AP_SCHEMA_KEY in data and data[_AP_SCHEMA_KEY] != _AP_SCHEMA_ID:
+        errors.append(f"{_AP_SCHEMA_KEY} должен быть {_AP_SCHEMA_ID}")
+    if "name" in data:
+        name_error = _ap_name_error(data["name"])
+        if name_error:
+            errors.append(name_error)
+    return errors + _ap_type_errors(data)
+
+
+def ap_manifest_errors(path: str | Path) -> list[str]:
+    """Ошибки корневого ``plugin.json`` каталога Agent Plugins; иначе ``[]``."""
+    root = Path(path).expanduser().resolve()
+    if not is_agent_plugins_root(root):
+        return []
+    data = _read_json(root / _AP_MANIFEST)
+    if data is None:
+        return ["plugin.json не читается или не объект"]
+    return validate_ap_manifest(data)
 
 
 def _hook_command(item: Any) -> HookCommand | None:
@@ -362,11 +465,24 @@ def load_plugin(path: str | Path) -> Plugin | None:
         logger.warning("plugin path %s is not a directory", root)
         return None
     manifest: dict[str, Any] = {}
-    for rel in _MANIFEST_CANDIDATES:
-        candidate = root / rel
-        if candidate.is_file():
-            manifest = _read_json(candidate) or {}
-            break
+    fmt = PLUGIN_FORMAT_CLAUDE
+    if is_agent_plugins_root(root):
+        fmt = PLUGIN_FORMAT_AP
+        errors = ap_manifest_errors(root)
+        if errors:
+            logger.warning(
+                "plugin %s: manifest is invalid, skipped: %s",
+                root,
+                "; ".join(errors),
+            )
+            return None
+        manifest = _read_json(root / _AP_MANIFEST) or {}
+        for key in sorted(set(manifest) - _AP_FIELDS):
+            logger.warning(
+                "plugin %s: unknown manifest field %r ignored", root, key
+            )
+    elif (root / _CLAUDE_MANIFEST).is_file():
+        manifest = _read_json(root / _CLAUDE_MANIFEST) or {}
     skills_dir = root / "skills"
     hooks_path = root / _HOOKS_FILE
     hooks = (
@@ -389,4 +505,5 @@ def load_plugin(path: str | Path) -> Plugin | None:
         mcp_servers=mcp_servers,
         commands=_load_commands(root),
         agents=_load_agents(root),
+        format=fmt,
     )
