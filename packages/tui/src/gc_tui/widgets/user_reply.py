@@ -18,7 +18,9 @@ from textual.widget import Widget
 from gc_tui.palette import ACCENT as _ACCENT
 from gc_tui.palette import DIM as _DIM
 from gc_tui.palette import ERR as _ERR_RED
-from gc_tui.palette import MUTED as _MUTED
+from gc_tui.palette import QUIET_REPLY_INK as _QUIET_INK
+from gc_tui.palette import QUIET_REPLY_MARK as _QUIET_MARK
+from gc_tui.palette import QUIET_REPLY_SKILL as _QUIET_SKILL
 from gc_tui.palette import SKILL as _SKILL
 from gc_tui.services.image_chips import chip_of, chip_spans
 from gc_tui.services.path_display import fit_path
@@ -269,7 +271,7 @@ class _ImageLinksMixin:
 _State = Literal["normal", "pending", "queued", "failed"]
 
 #: Цвет маркера `› ` по состоянию; не названное — ACCENT.
-_MARKER_COLOR = {"failed": _ERR_RED, "queued": _MUTED}
+_MARKER_COLOR = {"failed": _ERR_RED, "queued": _QUIET_MARK}
 
 
 class _ReplyBand(_WrappedReply, Widget):
@@ -422,19 +424,34 @@ class UserReplyContainer(_ImageLinksMixin, ClickModelMixin, Widget):
         if self._skill is None:
             return lines
         first = lines[0]
-        body = self._skill_head().append_text(first.body)
+        head = self._skill_head(quiet=self._state == "queued")
+        body = head.append_text(first.body)
         return [first._replace(body=body), *lines[1:]]
 
-    def _skill_head(self) -> Text:
-        """`/имя ` перед текстом первой строки; без текста — только имя."""
+    def _skill_head(self, *, quiet: bool) -> Text:
+        """`/имя ` перед текстом первой строки; без текста — только имя.
+        `quiet` — приглушённое имя (тихая реплика)."""
         head = Text()
+        color = _QUIET_SKILL if quiet else _SKILL
         head.append(
             "/" + self._skill,
-            style="" if self._skill_error else Style(color=_SKILL),
+            style="" if self._skill_error else Style(color=color),
         )
         if self._text:
             head.append(" ")
         return head
+
+    def quiet_line(self) -> Text:
+        """Реплика одной строкой «тихим» видом: `›` + `/имя` + текст. Тот же
+        вид, что у реплики в очереди (подложка `QUEUE_BG`, текст
+        `QUIET_REPLY_INK`); липкая реплика над лентой рисует его же."""
+        line = Text(USER_PREFIX, style=Style(color=_QUIET_MARK), no_wrap=True)
+        if self._skill is not None:
+            line.append_text(self._skill_head(quiet=True))
+        line.append(
+            " ".join(self._text.split()), style=Style(color=_QUIET_INK)
+        )
+        return line
 
     def _repaint_images(self) -> None:
         self._band.refresh()

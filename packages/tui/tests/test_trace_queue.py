@@ -168,6 +168,37 @@ def test_queued_marker_muted():
     assert reply.has_class("-queued")
 
 
+def _skill_color(reply):
+    return _color_at(reply._band.render(), 3)
+
+
+def test_queued_skill_name_is_dimmed():
+    reply = UserReplyContainer("текст", state="queued", skill="coder")
+    assert _skill_color(reply) == {RichColor.parse(palette.QUIET_REPLY_SKILL)}
+    assert palette.QUIET_REPLY_SKILL != palette.SKILL
+
+
+def test_skill_name_returns_to_skill_colour_on_state_change():
+    for state in ("normal", "pending", "failed"):
+        reply = UserReplyContainer("текст", state="queued", skill="coder")
+        reply.set_state(state)
+        assert _skill_color(reply) == {RichColor.parse(palette.SKILL)}
+
+
+def test_skill_error_name_unchanged_when_queued():
+    reply = UserReplyContainer(
+        "текст", state="queued", skill="coder", skill_error=True
+    )
+    assert _skill_color(reply) == set()
+
+
+def test_skill_queued_token_derived_from_queue_bg():
+    assert palette.QUIET_REPLY_SKILL == palette._mix(
+        palette.QUEUE_BG, palette.SKILL, 0.65
+    )
+    assert _between(palette.QUEUE_BG, palette.QUIET_REPLY_SKILL, palette.SKILL)
+
+
 def test_queued_to_normal_drops_class_and_hint():
     reply = UserReplyContainer("x", state="queued")
     reply.set_queue_hint(True)

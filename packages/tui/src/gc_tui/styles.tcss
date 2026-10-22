@@ -214,8 +214,8 @@ StickyReply, ScrollEndPill {
     height: 1;
     display: none;
 }
-StickyReply { background: $sticky-reply-bg; }
-StickyReply:hover { background: $user-band-bg; }
+StickyReply { background: $queue-bg; }
+StickyReply:hover { background: $quiet-reply-hover-bg; }
 ScrollEndPill { background: $focus-bg; color: $ink; }
 ScrollEndPill:hover { background: $pill-hover-bg; }
 
@@ -304,12 +304,12 @@ UserReplyContainer {
     height: auto;
     width: 1fr;
 }
-/* Реплика в очереди (P3 §2.4): тише подложка и текст; подсказка — под
+/* Реплика в очереди (P3 §2.4; «тихая реплика», как у StickyReply): тише подложка и текст; подсказка — под
    подложкой на фоне ленты, в колонке текста после `› `. Правило очереди —
    до правила фокуса: фокус его перекрывает. */
 UserReplyContainer.-queued > .user-band {
     background: $queue-bg;
-    color: $dim;
+    color: $quiet-reply-ink;
 }
 UserReplyContainer:focus > .user-band { background: $focus-bg; }
 .queue-hint { display: none; height: auto; padding-left: 2; color: $muted; }

@@ -15,7 +15,7 @@ from gc_tui.palette import (
     FOCUS_BG,
     INK,
     MUTED,
-    STICKY_REPLY_BG,
+    QUEUE_BG,
     USER_BAND_BG,
 )
 
@@ -186,8 +186,35 @@ async def test_sticky_colours(tmp_path):
         assert marker.text.strip() == "›"
         assert marker.style.color.name.lower() == MUTED.lower()
         assert text.style.color.name.lower() == DIM.lower()
-        assert text.style.bgcolor.name.lower() == STICKY_REPLY_BG.lower()
-        assert STICKY_REPLY_BG.lower() != USER_BAND_BG.lower()
+        assert text.style.bgcolor.name.lower() == QUEUE_BG.lower()
+        assert QUEUE_BG.lower() != USER_BAND_BG.lower()
+
+
+@pytest.mark.asyncio
+async def test_sticky_skill_name_muted_skill_colour(tmp_path):
+    from textual.containers import VerticalScroll
+
+    from gc_tui.palette import QUIET_REPLY_SKILL
+    from gc_tui.widgets.user_reply import UserReplyContainer
+
+    _write_task(tmp_path, "o5s")
+    async with _app(tmp_path).run_test(size=(100, 30)) as pilot:
+        scr = await _tall(pilot, "o5s")
+        scr.query_one("#trace", VerticalScroll).mount(
+            UserReplyContainer("почини тест", skill="coder"), before=0
+        )
+        await pilot.pause()
+        sticky, _ = _overlays(scr)
+        reply = next(
+            r for r in _replies(scr) if r.plain_text.startswith("/coder")
+        )
+        await _scroll(pilot, scr, reply.virtual_region.y + 1)
+        assert sticky.reply is reply
+        segments = [s for s in sticky.render_line(0) if s.text.strip()]
+        label = next(s for s in segments if "/coder" in s.text)
+        assert label.style.color.name.lower() == QUIET_REPLY_SKILL.lower()
+        rest = next(s for s in segments if "почини" in s.text)
+        assert rest.style.color.name.lower() == DIM.lower()
 
 
 @pytest.mark.asyncio
@@ -200,9 +227,7 @@ async def test_sticky_hover_lightens_background(tmp_path):
         sticky, _ = _overlays(scr)
         first, _ = _replies(scr)
         await _scroll(pilot, scr, first.virtual_region.y + 1)
-        assert (
-            sticky.rich_style.bgcolor.name.lower() == STICKY_REPLY_BG.lower()
-        )
+        assert sticky.rich_style.bgcolor.name.lower() == QUEUE_BG.lower()
         await pilot.hover(sticky)
         await pilot.pause()
         assert sticky.rich_style.bgcolor.name.lower() == USER_BAND_BG.lower()
@@ -637,3 +662,40 @@ async def test_pill_label_stable_on_app_blur(tmp_path):
         pilot.app.app_focus = True
         await pilot.pause()
         assert pill.label == PILL_ENTER
+
+
+@pytest.mark.asyncio
+async def test_quiet_reply_look_is_shared(tmp_path):
+    """Реплика в очереди и липкая реплика — один «тихий» вид: подложка,
+    текст, маркер и имя скилла совпадают и не разъезжаются."""
+    from rich.console import Console
+    from textual.color import Color
+
+    from gc_tui import palette
+    from gc_tui.widgets.user_reply import UserReplyContainer
+
+    _write_task(tmp_path, "o30")
+    async with _app(tmp_path).run_test(size=(100, 30)) as pilot:
+        scr = await _tall(pilot, "o30")
+        queued = UserReplyContainer("почини тест", state="queued", skill="c")
+        _trace(scr).mount(queued, before=0)
+        await pilot.pause()
+        sticky, _ = _overlays(scr)
+        await _scroll(pilot, scr, queued.virtual_region.y + 1)
+        assert sticky.reply is queued
+        band = queued.query_one(".user-band")
+        assert band.styles.background == sticky.styles.background
+        assert sticky.styles.background == Color.parse(palette.QUEUE_BG)
+        assert band.styles.color == Color.parse(palette.QUIET_REPLY_INK)
+        queued_text = queued._band.render()
+        sticky_text = sticky.render()
+
+        console = Console()
+
+        def colour(text, at):
+            return text.get_style_at_offset(console, at).color.name.lower()
+
+        assert colour(queued_text, 0) == colour(sticky_text, 0)
+        assert colour(queued_text, 0) == palette.QUIET_REPLY_MARK.lower()
+        assert colour(queued_text, 3) == colour(sticky_text, 3)
+        assert colour(queued_text, 3) == palette.QUIET_REPLY_SKILL.lower()

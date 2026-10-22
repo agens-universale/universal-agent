@@ -10,7 +10,6 @@ from __future__ import annotations
 from typing import Optional
 
 from rich.cells import cell_len
-from rich.style import Style
 from rich.text import Text
 from textual import events
 from textual.geometry import Region
@@ -18,8 +17,6 @@ from textual.widget import Widget
 from textual.widgets import Static
 
 from gc_tui.messages import ScrollToEnd, ScrollToReply
-from gc_tui.palette import DIM, MUTED
-from gc_tui.services.trace_render import USER_PREFIX
 
 #: Подпись плашки: курсор не в поле или в поле есть текст.
 PILL_CLICK = "↓ в конец · клик"
@@ -114,9 +111,9 @@ class StickyReply(_Overlay):
         self._place(box.x, box.y, box.width)
 
     def render(self) -> Text:
-        text = " ".join(getattr(self.reply, "plain_text", "").split())
-        line = Text(USER_PREFIX, style=Style(color=MUTED), no_wrap=True)
-        line.append(text, style=Style(color=DIM))
+        if self.reply is None:
+            return Text()
+        line = self.reply.quiet_line()
         line.truncate(self.size.width, overflow="ellipsis")
         return line
 
