@@ -804,3 +804,41 @@ async def test_next_day_redraw_says_yesterday(tmp_path, monkeypatch):
         assert _turn_lines(scr)[0].text.plain == (
             f"✓ Выполнил за 12с · вчера {_hm(_ended(1))}"
         )
+
+
+@pytest.mark.asyncio
+async def test_fast_failed_run_reply_delivered_in_same_tick_is_shown_once(
+    tmp_path,
+):
+    """Ход упал между тиками, реплика уже в файле. Один тик видит и
+    ошибку раннера, и запись реплики: реплика на экране одна, в мете нет
+    «failed»-остатка."""
+    from gc_tui.widgets.user_reply import UserReplyContainer
+
+    _prepare_one_turn(tmp_path)
+    async with _app(tmp_path).run_test() as pilot:
+        scr = await _open(pilot)
+        pilot.app.tui_state.active_task_id = TID
+        runner = _FakeRunner()
+        runner._running = False
+        pilot.app.active_runner = runner
+        cid = scr._track_pending(display_text="вопрос", wire_content="вопрос")
+        scr._mount_user_reply("вопрос", state="pending", client_id=cid)
+        await pilot.pause()
+        thread = _Thread(tmp_path)
+        thread.seq = 2
+        thread.messages(_reply("m2", "вопрос"))
+        pilot.app.last_runner_error = "MainModelUnavailable: 404"
+        scr._poll_tick()
+        await pilot.pause()
+        scr._poll_tick()
+        await pilot.pause()
+        replies = [
+            w
+            for w in scr.query(UserReplyContainer)
+            if w.plain_text == "вопрос"
+        ]
+        meta = json.loads((tmp_path / f"meta_cli_{TID}.json").read_text())
+        pending = (meta.get("tui") or {}).get("pending_user_messages", [])
+        assert len(replies) == 1
+        assert pending == []

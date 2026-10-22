@@ -5580,6 +5580,12 @@ class TraceScreen(Screen):
             if self._active_task_id is None:
                 self._mount_standalone(f"runtime: {err}", "error")
             self._error_shown = True
+            # Сначала дочитать хвост: реплика упавшего хода могла лечь в файл
+            # до ошибки и сверится со своей отправкой; иначе пометка «не
+            # отправлено» сняла бы её с ожидания, и запись смонтировалась
+            # бы второй репликой.
+            if not _frozen:
+                self._poll_trace_tail()
             self._mark_pending_failed()
         # Инвариант: running tool-строки живут, только пока задача жива (live
         # runner / ask_human). Любой НЕ-live статус — стоп, обрыв runner'а, resume
