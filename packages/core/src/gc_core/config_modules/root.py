@@ -425,9 +425,17 @@ def _merge_plugin_mcp_servers(cfg: Any) -> None:
             try:
                 cfg.mcp.servers[name] = McpServerConfig(**spec)
             except ValidationError as exc:
-                # Битый сервер плагина не должен ронять весь конфиг.
+                # Битый сервер плагина не должен ронять весь конфиг; значения полей
+                # в лог не пишем (там могут быть токены).
                 logging.getLogger(__name__).warning(
-                    "plugin mcp server %r skipped: %s", name, exc
+                    "plugin mcp server %r skipped: %s",
+                    name,
+                    "; ".join(
+                        f"{'.'.join(map(str, e['loc']))}: {e['msg']}"
+                        for e in exc.errors(
+                            include_input=False, include_url=False
+                        )
+                    ),
                 )
 
 

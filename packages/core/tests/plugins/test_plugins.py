@@ -498,6 +498,22 @@ def test_bad_plugin_mcp_server_is_skipped(tmp_path):
     assert set(out.mcp.servers) == {"p_good"}
 
 
+def test_bad_plugin_mcp_server_warning_has_no_secret_values(tmp_path, caplog):
+    from gc_core.config_modules.root import AppConfig, resolve_paths
+
+    root = _make_plugin(tmp_path, name="p")
+    (root / ".mcp.json").write_text(
+        json.dumps({"bad": {"command": "echo", "args": "SECRET123"}}),
+        encoding="utf-8",
+    )
+    runtime.reset_plugin_cache()
+    cfg = AppConfig.model_validate({"plugins": {"paths": [str(root)]}})
+    with caplog.at_level("WARNING"):
+        resolve_paths(cfg, str(tmp_path))
+    assert "p_bad" in caplog.text
+    assert "SECRET123" not in caplog.text
+
+
 def test_agent_plugins_layout_mcp_json(tmp_path):
     root = tmp_path / "ap"
     root.mkdir()
