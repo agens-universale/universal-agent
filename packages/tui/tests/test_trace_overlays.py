@@ -12,7 +12,7 @@ from gc_testkit.tui_support import tui_settings
 from gc_tui.palette import (
     ACCENT,
     DIM,
-    FOCUS_BG,
+    HIGHLIGHT_BG,
     INK,
     MUTED,
     QUEUE_BG,
@@ -298,10 +298,8 @@ async def test_sticky_skill_full_id_in_reply_colour(tmp_path):
 
 @pytest.mark.asyncio
 async def test_sticky_hover_lightens_background(tmp_path):
-    """Ховер липкой реплики — `OVERLAY_HOVER_BG` на всю строку (не
+    """Ховер липкой реплики — `HIGHLIGHT_BG` на всю строку (не
     `USER_BAND_BG`), цвет текста прежний."""
-    from gc_tui import palette
-
     _write_task(tmp_path, "o5h")
     async with _app(tmp_path).run_test(size=(100, 30)) as pilot:
         scr = await _tall(pilot, "o5h")
@@ -311,7 +309,7 @@ async def test_sticky_hover_lightens_background(tmp_path):
         assert sticky.rich_style.bgcolor.name.lower() == QUEUE_BG.lower()
         await pilot.hover(sticky)
         await pilot.pause()
-        hover_bg = palette.OVERLAY_HOVER_BG.lower()
+        hover_bg = HIGHLIGHT_BG.lower()
         assert sticky.rich_style.bgcolor.name.lower() == hover_bg
         assert hover_bg != USER_BAND_BG.lower()
         segments = [s for s in sticky.render_line(0) if s.text.strip()]
@@ -385,34 +383,20 @@ async def test_overlays_take_no_trace_height(tmp_path):
 @pytest.mark.asyncio
 async def test_pill_hover_lightens_background(tmp_path):
     """Ховер плашки — светлее фон, цвет текста прежний (исключение из
-    `.trace-action:hover`, решение владельца)."""
-    from gc_tui import palette
-
+    `.trace-action:hover`, решение владельца). Покой — `USER_BAND_BG`,
+    ховер — `HIGHLIGHT_BG`."""
     _write_task(tmp_path, "o10")
     async with _app(tmp_path).run_test(size=(100, 30)) as pilot:
         scr = await _tall(pilot, "o10")
         _, pill = _overlays(scr)
         await _scroll(pilot, scr, 10)
         assert pill.rich_style.color.name.lower() == INK.lower()
-        assert pill.rich_style.bgcolor.name.lower() == FOCUS_BG.lower()
+        rest_bg = USER_BAND_BG.lower()
+        assert pill.rich_style.bgcolor.name.lower() == rest_bg
         await pilot.hover(pill)
         await pilot.pause()
         assert pill.rich_style.color.name.lower() == INK.lower()
-        hover_bg = palette.OVERLAY_HOVER_BG.lower()
-        assert pill.rich_style.bgcolor.name.lower() == hover_bg
-        assert hover_bg != FOCUS_BG.lower()
-
-
-def test_pill_hover_bg_is_lighter_and_derived():
-    from gc_tui import palette
-
-    def lum(c):
-        return sum(palette._rgb(c))
-
-    assert lum(palette.OVERLAY_HOVER_BG) > lum(palette.FOCUS_BG)
-    assert (
-        palette.css_variables()["overlay-hover-bg"] == palette.OVERLAY_HOVER_BG
-    )
+        assert pill.rich_style.bgcolor.name.lower() == HIGHLIGHT_BG.lower()
 
 
 @pytest.mark.asyncio

@@ -33,14 +33,13 @@ _FIXED_CSS = {
     "brand": "#9A6DD7",
     "band-bg": "#1f2128",
     "block-bg": "#171a22",
-    "focus-bg": "#363b47",
     "screen-selection-background": "#1e416c",
     "card-select-bg": "#2e323d",
     "frame-archive": "#4b525d",
     "note-ink": "#a5adb8",
-    "user-band-bg": "#282c36",
-    "queue-bg": "#1c2029",
-    "overlay-hover-bg": "#4c505a",
+    "user-band-bg": "#363b47",
+    "queue-bg": "#242832",
+    "highlight-bg": "#4c505a",
     "quiet-reply-ink": "#8b949e",
     "quiet-reply-mark": "#6e7681",
     "overlay-bg": "#161A23",
@@ -61,7 +60,6 @@ _RAMPS = (
     "VALIDATING_SHADES",
 )
 _TINTED = (
-    "FOCUS_BG",
     "CARD_SELECT_BG",
     "USER_BAND_BG",
     "OVERLAY_BG",
@@ -181,6 +179,29 @@ def test_guards_hold_on_terminal_background(bg, guard):
     palette.apply_background(_rgb(bg))
     module, name = guard
     getattr(module, name)()
+
+
+def _lum(color: str) -> float:
+    return palette._luminance(_rgb(color))
+
+
+def test_user_band_is_former_focus_colour():
+    assert palette.USER_BAND_BG == "#363b47"
+    assert palette.HIGHLIGHT_BG == palette._mix(
+        palette.USER_BAND_BG, palette.INK, 0.12
+    )
+
+
+@pytest.mark.parametrize("bg", [None, *_TERMINAL_BGS])
+def test_quiet_band_below_band_below_highlight(bg):
+    if bg is not None:
+        palette.apply_background(_rgb(bg))
+    queue, band = palette.QUEUE_BG, palette.USER_BAND_BG
+    highlight = palette.HIGHLIGHT_BG
+    assert _lum(queue) < _lum(band) < _lum(highlight)
+    assert queue == palette._mix(palette.BG, band, 0.55)
+    assert highlight == palette._mix(band, palette.INK, 0.12)
+    assert palette.css_variables()["highlight-bg"] == highlight
 
 
 def test_contrast_is_wcag_ratio():

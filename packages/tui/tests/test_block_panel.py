@@ -395,11 +395,12 @@ async def test_partial_drag_on_wrapped_line_yields_dragged_part_only():
 
 
 @pytest.mark.asyncio
-async def test_focused_panel_background_is_focus_bg_not_band_bg(
+async def test_focused_panel_background_is_highlight_not_band_bg(
     tui_app_factory,
 ):
-    """Т-C (спека §6.11): фон сфокусированной панели — $focus-bg, не фон покоя
-    (иначе тихое удаление `BlockPanel:focus` из styles.tcss тест не заметит).
+    """Т-C (спека §6.11): фон сфокусированной панели — $highlight-bg, не фон
+    покоя (иначе тихое удаление `BlockPanel:focus` из styles.tcss тест не
+    заметит).
 
     Фон покоя — $block-bg: блоки ленты переехали на свой токен, тише полосы
     баннеров ($band-bg)."""
@@ -415,7 +416,7 @@ async def test_focused_panel_background_is_focus_bg_not_band_bg(
         assert panel.styles.background.hex == palette.BLOCK_BG.upper()
         panel.focus()
         await pilot.pause()
-        assert panel.styles.background.hex == palette.FOCUS_BG.upper()
+        assert panel.styles.background.hex == palette.HIGHLIGHT_BG.upper()
 
 
 @pytest.mark.asyncio

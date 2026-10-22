@@ -142,7 +142,7 @@ TraceScreen #trace { height: auto; }
    background не рефлоунит контент, в отличие от prefix/border). */
 ToolCallRow:focus, TraceRow:focus, UserReplyContainer:focus,
 BlockPanel:focus, TodoBlock:focus {
-    background: $focus-bg;
+    background: $highlight-bg;
 }
 /* DiffBlock здесь НЕТ: он не фокусируется вовсе (can_focus=False) — событие
    трейса это вызов инструмента, дифф лишь его часть, и Tab идёт по событиям. */
@@ -215,9 +215,9 @@ StickyReply, ScrollEndPill {
     display: none;
 }
 StickyReply { background: $queue-bg; }
-StickyReply:hover { background: $overlay-hover-bg; }
-ScrollEndPill { background: $focus-bg; color: $ink; }
-ScrollEndPill:hover { background: $overlay-hover-bg; }
+StickyReply:hover { background: $highlight-bg; }
+ScrollEndPill { background: $user-band-bg; color: $ink; }
+ScrollEndPill:hover { background: $highlight-bg; }
 
 /* spec 2026-05-27 / tool-output-detail */
 .detail-section-header {
@@ -299,7 +299,7 @@ UserReplyContainer {
     width: 1fr;
 }
 .user-band {
-    background: $user-band-bg;   /* чуть светлее $band-bg — реплика контрастнее в трейсе; темнее $focus-bg (фокус различим) */
+    background: $user-band-bg;   /* светлее $band-bg — реплика контрастнее в трейсе; темнее $highlight-bg (фокус различим) */
     padding: 0 1 0 0;
     height: auto;
     width: 1fr;
@@ -311,7 +311,7 @@ UserReplyContainer.-queued > .user-band {
     background: $queue-bg;
     color: $quiet-reply-ink;
 }
-UserReplyContainer:focus > .user-band { background: $focus-bg; }
+UserReplyContainer:focus > .user-band { background: $highlight-bg; }
 .queue-hint { display: none; height: auto; padding-left: 2; color: $muted; }
 UserReplyContainer.-queue-hint > .queue-hint { display: block; }
 
@@ -348,9 +348,9 @@ UserReplyContainer.-queue-hint > .queue-hint { display: block; }
    длинного описания на вторую строку делал фактическую высоту больше заявленной —
    main.py отдавал трейсу лишнее место, нижняя рамка и футер уезжали за экран. */
 .palette-row   { color: $ink; padding: 0 1; text-wrap: nowrap; text-overflow: ellipsis; }
-/* $focus-bg, не $band-bg: фон оверлея (#161A23) почти совпадает с $band-bg —
-   выделение было слепым; focus-bg = подсветка фокуса в трейсе, заметно светлее. */
-.palette-row.selected { background: $focus-bg; color: $bright; }
+/* $user-band-bg, не $band-bg: фон оверлея (#161A23) почти совпадает с $band-bg —
+   выделение было слепым; user-band-bg заметно светлее. */
+.palette-row.selected { background: $user-band-bg; color: $bright; }
 /* Строки скиллов (P5 §3.1): имя голубым и на выделении; хвост «пак · описание»
    серым — стилем текста строки. «… ещё N» — невыбираемая серая строка.
    Шапка пакета в пикере /skill — невыбираемая строка, чуть светлее. */
@@ -455,14 +455,14 @@ DiffScreen #footer, DiffFileViewer #footer { margin: 1 0 0 0; }
 
 /* Строка экрана изменений (/diff). Свой класс, а не .list-row: у того правила
    .selected нет вовсе, и выбор был бы виден только глифом. Фон выбранной — тот
-   же $focus-bg, что у палитры, трейса и .set-row (§16).
+   же $user-band-bg, что у палитры и .set-row (§16).
    nowrap/ellipsis — как у карточек #sessions-list и #skills-list: строку решают
    именно эти правила (Static рендерится через Content, и overflow самого
    rich.Text не доезжает), а перенос сломал бы и сетку колонок, и шаг страницы.
    Подсветки при наведении нет — как у всех списков базы. */
 .diff-row          { color: $ink; padding: 0 1;
                      text-wrap: nowrap; text-overflow: ellipsis; }
-.diff-row.selected { background: $focus-bg; color: $bright; }
+.diff-row.selected { background: $user-band-bg; color: $bright; }
 
 /* Строка группы «принято» (§4.2 волны 4) — воздух над ней отделяет её от
    активных строк списка, как в согласованном на дизайн-гейде макете; строки
@@ -596,7 +596,7 @@ TextArea.ask-human-mode { border: solid $run-color; }
 .mcp-summary { padding: 0 1; }
 .mcp-confirm { background: $band-bg; border-left: outer $warn; padding: 0 1; }
 .mcp-row { width: 1fr; text-wrap: nowrap; text-overflow: ellipsis; }   /* описание обрезается … */
-.mcp-row-managed.selected, .mcp-action-row.selected { background: $focus-bg; }   /* контраст как у палитры/трейса */
+.mcp-row-managed.selected, .mcp-action-row.selected { background: $user-band-bg; }   /* контраст как у палитры */
 
 /* ConfigScreen — fieldset-панели (spec 2026-06-10) */
 .config-caption { color: $dim; padding: 0 1; margin: 0 0 1 0; }
@@ -669,7 +669,7 @@ TextArea.ask-human-mode { border: solid $run-color; }
 .onb-option { height: auto; padding: 0 1; width: 1fr; }
 /* Выбор — только фон, БЕЗ border-left: полоса сдвигала контент на 1 колонку,
    отчего кружки ●/○ в /settings-секциях съезжали друг относительно друга. */
-.onb-option.selected { background: $focus-bg; }   /* контраст как у палитры/трейса */
+.onb-option.selected { background: $user-band-bg; }   /* контраст как у палитры */
 .onb-mcp-row { text-wrap: nowrap; text-overflow: ellipsis; }
 .set-spaced { margin-bottom: 1; }   /* воздух между строками-опциями в /settings-секциях */
 /* Вариант БЕЗ второй строки описания в списке, где у соседа она есть: воздух добирает
@@ -698,11 +698,11 @@ TextArea.ask-human-mode { border: solid $run-color; }
 /* Строка меню — горизонтальная раскладка: текст слева (1fr) + глиф статуса
    у правого края. Так глиф не «едет» при выборе и не липнет к значению. */
 .set-menurow { height: auto; layout: horizontal; padding: 0 1; margin-bottom: 1; }
-.set-menurow.selected { background: $focus-bg; }   /* контраст как у палитры/трейса */
+.set-menurow.selected { background: $user-band-bg; }   /* контраст как у палитры */
 .set-rowtext { width: 1fr; height: auto; text-wrap: nowrap; text-overflow: ellipsis; }
 .set-glyph { width: 3; height: auto; text-align: right; }
 .set-row { height: auto; padding: 0 1; }
-.set-row.selected { background: $focus-bg; }   /* контраст как у палитры/трейса */
+.set-row.selected { background: $user-band-bg; }   /* контраст как у палитры */
 /* Разделитель групп секции «Режимы работы» (ревизия 7) — тот же приём, что .palette-group-sep. */
 /* Плотность B: строки блока впритык, воздух несут ГРАНИЦЫ — разделитель/подпись
    блока отбивается сверху от чужого блока и стоит вплотную к своим строкам. */

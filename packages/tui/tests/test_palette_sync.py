@@ -85,7 +85,8 @@ def test_selection_distinguishable_from_focus():
     поверх фокуса. Порог 40 держит нынешнюю разницу; уронить его правкой цвета
     молча теперь нельзя."""
     assert (
-        _distance(palette.SCREEN_SELECTION_BACKGROUND, palette.FOCUS_BG) >= 40
+        _distance(palette.SCREEN_SELECTION_BACKGROUND, palette.HIGHLIGHT_BG)
+        >= 40
     )
 
 

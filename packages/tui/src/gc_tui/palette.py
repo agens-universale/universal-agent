@@ -47,7 +47,6 @@ BAND_BG = "#1f2128"
 # должен читаться карточкой, но не «выпирать» из почти чёрного трейса.
 # Дистанция до BG: 15.6 против 27.7 у BAND_BG (метрика _distance тестов палитры).
 BLOCK_BG = "#171a22"
-FOCUS_BG = "#363b47"  # подсветка строки трассы в фокусе (только CSS :focus) — светлее user-band
 
 # Выделение текста мышью. Тот же синий, которым Textual выделяет текст в
 # TextArea (экран /buffer): #368AE9 с прозрачностью 40% поверх фона даёт
@@ -58,10 +57,14 @@ FOCUS_BG = "#363b47"  # подсветка строки трассы в фоку
 # (см. services/code_render) подобрана так, чтобы читаемым осталось всё.
 # Границы закреплены тестами в packages/tui/tests/test_palette_sync.py.
 SCREEN_SELECTION_BACKGROUND = "#1e416c"
-CARD_SELECT_BG = "#2e323d"  # выбранная карточка (/sessions, /skills, /mcp) — мягче focus-bg, светлее band-bg
+# Выбранная карточка (/sessions, /skills, /mcp): мягче USER_BAND_BG,
+# светлее BAND_BG.
+CARD_SELECT_BG = "#2e323d"
 FRAME_ARCHIVE = "#4b525d"  # серая рамка «архив/история» (отвеченный вопрос)
 NOTE_INK = "#a5adb8"  # ремарка: чуть светлее DIM
-USER_BAND_BG = "#282c36"  # подложка реплики: светлее BAND_BG, темнее FOCUS_BG
+# Подложка реплики; она же фон выбранной строки списков (палитра, /diff,
+# настройки, онбординг, /mcp). Светлее BAND_BG, темнее HIGHLIGHT_BG.
+USER_BAND_BG = "#363b47"
 OVERLAY_BG = "#161A23"  # фон оверлеев (палитра, сессии, предпросмотр)
 ZEBRA_BG = "#232836"  # чётная строка зебры (справка)
 SKILL = "#afd7ff"  # имя скилла
@@ -133,16 +136,17 @@ QUEUE_BG = _mix(BG, USER_BAND_BG, _QUEUE_SHARE)
 
 # «Тихая реплика»: один вид у реплики в очереди и у липкой реплики над
 # лентой. Подложка — QUEUE_BG; текст — DIM; маркер — MUTED; имя скилла —
-# цветом текста (отдельного токена нет); ховер липкой — OVERLAY_HOVER_BG.
+# цветом текста (отдельного токена нет); ховер липкой — HIGHLIGHT_BG.
 # В теме auto — от пересчитанного QUEUE_BG (_derived).
 QUIET_REPLY_INK = DIM
 QUIET_REPLY_MARK = MUTED
 
-# Ховер накладок ленты (липкая реплика и плашка «в конец») — один фон, светлее
-# FOCUS_BG; текст не меняется (исключение из ховера `$accent`). В теме auto —
-# от пересчитанного FOCUS_BG.
-_OVERLAY_HOVER_SHARE = 0.12
-OVERLAY_HOVER_BG = _mix(FOCUS_BG, INK, _OVERLAY_HOVER_SHARE)
+# Подсветка: фокус и выделение строки ленты, ховер накладок (липкая реплика
+# и плашка «в конец») — один фон, светлее USER_BAND_BG; текст не меняется
+# (у накладок — исключение из ховера `$accent`). В теме auto — от
+# пересчитанного USER_BAND_BG.
+_HIGHLIGHT_SHARE = 0.12
+HIGHLIGHT_BG = _mix(USER_BAND_BG, INK, _HIGHLIGHT_SHARE)
 
 
 # Рампы анимаций (ping-pong, пик — токен палитры); значения те же, что были
@@ -192,12 +196,12 @@ VALIDATING_SHADES = [
 # Всё выше — тема fixed (литералы, снапшоты неизменны). apply_background
 # подменяет фон и зависящие от него токены; reset возвращает литералы.
 
-# Тон синеватых поверхностей (фокус, карточки, оверлеи, трек метра). Один
-# параметр: "#ffffff" даёт нейтральные поверхности той же светлоты. Подобран
-# так, что при фоне fixed каждая поверхность расходится с литералом <= 2.
+# Тон синеватых поверхностей (подложка реплики, карточки, оверлеи, трек
+# метра). Один параметр: "#ffffff" даёт нейтральные поверхности той же
+# светлоты. Подобран так, что при фоне fixed каждая поверхность расходится
+# с литералом <= 2.
 SURFACE_TINT = "#78829b"
 _TINTED = (
-    "FOCUS_BG",
     "CARD_SELECT_BG",
     "USER_BAND_BG",
     "OVERLAY_BG",
@@ -222,7 +226,7 @@ _FIXED = {
         "BLOCK_BG",
         "REFUSED",
         "QUEUE_BG",
-        "OVERLAY_HOVER_BG",
+        "HIGHLIGHT_BG",
         *_DIFF,
         *_TINTED,
         *_RAMP_PEAKS,
@@ -269,9 +273,7 @@ def _derived(bg: str) -> dict[str, object]:
         **{name: _shift(_FIXED[name], bg) for name in _DIFF},
         **tinted,
         "QUEUE_BG": _mix(bg, tinted["USER_BAND_BG"], _QUEUE_SHARE),
-        "OVERLAY_HOVER_BG": _mix(
-            tinted["FOCUS_BG"], INK, _OVERLAY_HOVER_SHARE
-        ),
+        "HIGHLIGHT_BG": _mix(tinted["USER_BAND_BG"], INK, _HIGHLIGHT_SHARE),
         **ramps,
     }
 
@@ -353,14 +355,13 @@ def css_variables() -> dict[str, str]:
         "brand": BRAND,
         "band-bg": BAND_BG,
         "block-bg": BLOCK_BG,
-        "focus-bg": FOCUS_BG,
         "screen-selection-background": SCREEN_SELECTION_BACKGROUND,
         "card-select-bg": CARD_SELECT_BG,
         "frame-archive": FRAME_ARCHIVE,
         "note-ink": NOTE_INK,
         "user-band-bg": USER_BAND_BG,
         "queue-bg": QUEUE_BG,
-        "overlay-hover-bg": OVERLAY_HOVER_BG,
+        "highlight-bg": HIGHLIGHT_BG,
         "overlay-bg": OVERLAY_BG,
         "zebra-bg": ZEBRA_BG,
         "skill": SKILL,

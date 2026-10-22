@@ -12,7 +12,14 @@ from textual.color import Color
 
 from gc_core.attachments.model import chip_text
 from gc_testkit.tui_support import tui_settings
-from gc_tui.palette import ACCENT, BG, DIM, ERR, FOCUS_BG, USER_BAND_BG
+from gc_tui.palette import (
+    ACCENT,
+    BG,
+    DIM,
+    ERR,
+    HIGHLIGHT_BG,
+    USER_BAND_BG,
+)
 from gc_tui.widgets.consequence_line import ConsequenceLine
 from gc_tui.widgets.trace_row import TraceRow
 from gc_tui.widgets.user_reply import UserReplyContainer
@@ -168,7 +175,7 @@ async def test_focus_paints_the_band(tmp_path):
         await _mount(pilot, reply)
         reply.focus()
         await pilot.pause()
-        assert _band(reply).styles.background == Color.parse(FOCUS_BG)
+        assert _band(reply).styles.background == Color.parse(HIGHLIGHT_BG)
 
 
 @pytest.mark.asyncio
