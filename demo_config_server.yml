@@ -35,6 +35,10 @@ agent_overrides:
   agent.max_steps: 100
 
 webhook:
+  # Документация API (/docs, /redoc, /openapi.json) — только по ключу.
+  #docs: true
+  # Выключенные ручки: группы или пути (docs/server.md, «Документация API»).
+  #disabled_routes: []
   port: 8000
   # system по умолчанию, если во входном JSON его нет. Занятые другими
   # поверхностями и интерактивными сессиями (a2a, responses, completions,
@@ -101,6 +105,10 @@ webhook:
       # - exec_calculator
 
 chat:
+  # Документация API (/docs, /redoc, /openapi.json) — только по ключу.
+  #docs: true
+  # Выключенные ручки: группы или пути (docs/server.md, «Документация API»).
+  #disabled_routes: []
   # Responses и Chat Completions на одном адресе; страница чата — на «/».
   port: 8090
   # Пустой список — CORS выключен. Непустой — только эти origin, методы GET,
@@ -141,6 +149,10 @@ a2a:
   todo_reminder_steps: 0
 
 swarm:
+  # Документация API (/docs, /redoc, /openapi.json) — только по ключу.
+  #docs: true
+  # Выключенные ручки: группы или пути (docs/server.md, «Документация API»).
+  #disabled_routes: []
   # Задача исполняется gc-cli в песочнице bubblewrap (только Linux). Ручки —
   # как у вебхука, на своём порту.
   port: 8092

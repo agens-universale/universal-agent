@@ -95,6 +95,27 @@ swarm: {port: 8092, max_concurrent: 10}
 агента в базе (ниже). Пустые `host`, `auth_token` и `max_body_bytes`
 наследуются из `server`.
 
+**Документация API и выключенные ручки** (вебхук, chat, swarm; у A2A
+описание — карточка агента):
+
+```yaml
+chat:
+  docs: true                      # /docs, /redoc, /openapi.json
+  disabled_routes: [files, "/"]   # группы ручек или пути
+```
+
+- `docs` — по умолчанию `false`: документации нет (`404`). Включённая
+  открывается без токена (видна только форма API), вызовы из Swagger — с
+  токеном: при заданном `auth_token` схема объявляет Bearer, кнопка
+  Authorize. Описание — заголовок поверхности, группы ручек, сводки, тела
+  запросов с примерами, параметры и ответы.
+- `disabled_routes` — такие ручки не обслуживаются (`404`) и в документацию
+  не попадают. Запись — имя группы, путь (`"/v1/dialogs*"`, шаблон как в
+  shell) или метод с путём (`"DELETE /v1/dialogs/{thread_id}/artifacts"`).
+  Группы: вебхук и swarm — `tasks`, `history`, `service`; chat — `page`,
+  `models`, `responses`, `completions`, `dialogs`, `files`. Запись, которой
+  нет ни группы, ни ручки, — отказ старта с подсказкой.
+
 **Настройки агента поверхности** собираются так: `config.yml` (профиль, env,
 флаги) → `server.logging` → роль поверхности (`agent_md_path`) → общий
 `agent_overrides` → `agent_overrides` поверхности. Ключ правки — путь настройки

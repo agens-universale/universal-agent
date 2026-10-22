@@ -202,11 +202,14 @@ class SwarmSurface:
     # --- приложение -------------------------------------------------------
 
     def app(self) -> FastAPI:
+        from gc_server.api_docs import apply_api_docs, docs_paths
         from gc_server.chat.http_guard import install_http_guard
         from gc_server.webhook.api_v1 import build_v1_routes
 
         app = FastAPI()
-        install_bearer(app, self.section.auth_token)
+        install_bearer(
+            app, self.section.auth_token, public_paths=docs_paths(self.section)
+        )
         build_v1_routes(app, self)
         # POST — только JSON (браузер не шлёт такой без preflight: CSRF со
         # страницы в браузере пользователя), на loopback-бинде Host — только
@@ -223,6 +226,7 @@ class SwarmSurface:
             methods=["GET"],
         )
         app.add_api_route("/healthcheck", healthcheck, methods=["GET"])
+        apply_api_docs(app, "swarm", self.section)
         return app
 
     @property
