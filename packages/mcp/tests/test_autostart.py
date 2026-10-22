@@ -466,7 +466,15 @@ def test_daemon_not_ready_warning_reaches_the_notices_channel(
     assert "science" in notices[0].highlights
     out = capsys.readouterr()
     assert "[wait] science: http://127.0.0.1:9/mcp" in out.out
-    assert "daemon not accepting connections" in out.err
+    # По-русски, как соседние уведомления и причины в `/mcp`.
+    from recommended_mcp.autostart import _DEFAULT_READY_TIMEOUT_SEC
+
+    text = (
+        "science: демон не принимает соединения на http://127.0.0.1:9/mcp "
+        f"за {_DEFAULT_READY_TIMEOUT_SEC:.0f} с"
+    )
+    assert notices[0].message == text
+    assert f"[warn] {text}" in out.err
 
 
 def test_no_frontend_flag_is_hardcoded_in_the_shared_module():
