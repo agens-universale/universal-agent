@@ -507,8 +507,8 @@ async def test_undo_with_record_after_discard_backstop_removes_line(
     tmp_path,
 ):
     """Поток старого прогона пишет запись уже после немедленного отката:
-    тик дочитывает её (строка смонтирована), backstop снимает и запись,
-    и строку."""
+    тик дочитывает её, но строки снятой реплики нет; backstop снимает
+    запись из файла."""
     _prepare_one_turn(tmp_path)
     async with _app(tmp_path).run_test() as pilot:
         scr, thread, runner = await _undo_setup(pilot, tmp_path)
@@ -519,10 +519,8 @@ async def test_undo_with_record_after_discard_backstop_removes_line(
         thread.record(2, "m_orphan", status="stopped", reason="user_stop")
         scr._poll_trace_tail()
         await pilot.pause()
-        assert [line.opened_by for line in _turn_lines(scr)] == [
-            "u1",
-            "m_orphan",
-        ]
+        assert [line.opened_by for line in _turn_lines(scr)] == ["u1"]
+        assert scr._last_turn_outcome.opened_by == "u1"
 
         runner._running = False
         scr._run_orphan_cleanups()
@@ -531,9 +529,31 @@ async def test_undo_with_record_after_discard_backstop_removes_line(
         assert not scr._pending_orphan_cleanups
         assert _outcome_openers(tmp_path) == ["u1"]
         assert [line.opened_by for line in _turn_lines(scr)] == ["u1"]
-        assert scr._last_turn_outcome is None
+        assert scr._last_turn_outcome.opened_by == "u1"
         tail = scr._store.tail_events(TID, scr._cursor)
         assert tail.stream_reset is False
+
+
+@pytest.mark.asyncio
+async def test_zz_late_stop_record_of_undone_reply_never_shows_a_line(
+    tmp_path,
+):
+    """Откат отправки, поток старого прогона висит в HTTP-повторах и пишет
+    запись стопа позже, когда уже идёт новый ход того же треда. Строки
+    «■ Отменено» для снятой реплики на экране быть не должно."""
+    _prepare_one_turn(tmp_path)
+    async with _app(tmp_path).run_test() as pilot:
+        scr, thread, old = await _undo_setup(pilot, tmp_path)
+        scr._cancel_with_undo()
+        await pilot.pause()
+        new = _FakeRunner()  # повторная отправка: новый ход того же треда
+        pilot.app.active_runner = new
+        thread.record(2, "m_orphan", status="stopped", reason="user_stop")
+        old._running = False  # старый поток дописал итог и вышел
+        for _ in range(3):
+            scr._poll_tick()
+            await pilot.pause()
+        assert [line.opened_by for line in _turn_lines(scr)] == ["u1"]
 
 
 @pytest.mark.asyncio

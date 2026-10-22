@@ -647,6 +647,12 @@ class TraceScreen(Screen):
         # Заявки на отложенное удаление осиротевших реплик: список
         # (runner, task_id, message_id). Исполняются в poll, когда тред idle.
         self._pending_orphan_cleanups: list[tuple] = []
+        # Реплики открытого треда, снятые откатом отправки: запись итога их
+        # хода остановленный поток может дописать позже (висит в повторах
+        # HTTP) — экран её не показывает, чистка лишь снимает её из файла.
+        # Живёт до смены треда: перестройка ленты (stream_reset) читает файл
+        # заново, а запись в нём может ещё лежать.
+        self._undone_reply_ids: set[str] = set()
         # Флаг состояния runner на предыдущем тике — для детекта спадающего фронта.
         self._was_running: bool = False
         # Прогон, чей исход ещё не записан: раннер, которого тик застал
@@ -2384,6 +2390,7 @@ class TraceScreen(Screen):
         до новой отправки."""
         self._stopping_runner = None
         self._last_user_message_id = None
+        self._undone_reply_ids.clear()
 
     def _mount_failed_from_meta(self, task_id: str) -> None:
         """После рестарта: смонтировать виджеты failed-реплик из
@@ -2623,10 +2630,12 @@ class TraceScreen(Screen):
         if is_turn_outcome_record(rec):
             # Итог хода — не сообщение ленты: строка последнего хода, пока
             # после записи не началась реплика.
-            self._last_turn_outcome = parse_turn_outcome(rec)
+            outcome = parse_turn_outcome(rec)
+            if outcome is None or outcome.opened_by in self._undone_reply_ids:
+                return
+            self._last_turn_outcome = outcome
             self._outcome_superseded = False
-            if self._last_turn_outcome is not None:
-                self._mount_turn_line(self._last_turn_outcome)
+            self._mount_turn_line(outcome)
             return
         payload = rec.get("payload")
         if not isinstance(payload, dict):
@@ -8121,6 +8130,8 @@ class TraceScreen(Screen):
         msg_id = self._last_user_message_id
         if tid is not None and msg_id and self._store is not None:
             self._pending_orphan_cleanups.append((old_runner, tid, msg_id))
+        if msg_id:
+            self._undone_reply_ids.add(msg_id)
 
         # Удалить последний UserReplyContainer
         # В поле возвращается снимаемая реплика, её `plain_text` (скилл
