@@ -7982,8 +7982,10 @@ class TraceScreen(Screen):
         """Кооперативный stop + mark + обнуление active_runner.
 
         Следующий self.app.get_runner() создаст свежий — clean restart для
-        нового user-запроса. Старый runner может ещё досидеть HTTP в фоне;
-        благодаря discard_writes_after_stop его output в thread_store не уйдёт.
+        нового user-запроса. Старый runner может ещё досидеть шаг в фоне,
+        отвязанный от окна (`detach_run_sinks`): его ответ в тред не уйдёт
+        (discard_writes_after_stop), служебные записи — только в его тред,
+        стрим, прогресс и предохранитель окна — уже не его.
         """
         runner = self.app.active_runner
         withdrawn = []
