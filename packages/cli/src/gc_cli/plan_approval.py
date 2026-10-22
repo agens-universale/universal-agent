@@ -55,14 +55,15 @@ NO_PROPOSED_PLAN = (
 )
 
 
-async def athread_has_proposed_plan(threads: Threads, thread_id: str) -> bool:
+async def athread_has_proposed_plan(
+    threads: Threads, thread_id: str, *, system: str = "cli"
+) -> bool:
     """В сохранённой сессии план предложен и ждёт решения.
 
     `--approve-plan` идёт новым процессом: живого состояния прошлого
-    прогона нет, план читается из состояния треда (система `cli` — та же,
-    что ставит исполнитель по умолчанию).
+    прогона нет, план читается из состояния треда `(system, thread_id)`.
     """
-    record = await threads.get(ThreadKey(system="cli", thread=thread_id))
+    record = await threads.get(ThreadKey(system=system, thread=thread_id))
     plan = normalize_plan_block(record.state.plan) if record else None
     return plan is not None and plan["status"] == PLAN_STATUS_PROPOSED
 
@@ -82,6 +83,7 @@ async def arun_plan_approval(
     thread_id: Optional[str],
     verbose: bool,
     account_run: bool = True,
+    system: str = "cli",
 ) -> Any:
     """Спросить человека о предложенном плане; вернуть ответ последнего прогона.
 
@@ -96,12 +98,16 @@ async def arun_plan_approval(
     """
     if not _approval_available(executor, thread_id):
         return response
+    # Своя система треда (`--system`) — в каждый прогон; `cli` — умолчание
+    # исполнителя, его не передаём.
+    thread_system = {} if system == "cli" else {"system": system}
     run = partial(
         _arun_in_mode,
         executor,
         thread_id=thread_id,
         verbose=verbose,
         account_run=account_run,
+        thread_system=thread_system,
     )
     while True:
         plan = executor.plan_snapshot(thread_id)
@@ -117,6 +123,7 @@ async def arun_plan_approval(
                 thread_id,
                 verbose=verbose,
                 account_run=account_run,
+                **thread_system,
             )
         if answer != _REWORK:
             return response
@@ -156,6 +163,7 @@ async def _arun_in_mode(
     thread_id: Optional[str],
     verbose: bool,
     account_run: bool,
+    thread_system: dict[str, str],
 ) -> Any:
     """Продолжение после ответа человека в выбранном режиме."""
     if not account_run:
@@ -169,4 +177,5 @@ async def _arun_in_mode(
         thread_id=thread_id,
         verbose=verbose,
         account_run=account_run,
+        **thread_system,
     )

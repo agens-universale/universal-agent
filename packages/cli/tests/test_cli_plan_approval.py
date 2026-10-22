@@ -24,6 +24,7 @@ class _Executor:
         self.modes, self.transitions, self.rework, self.runs = [], [], [], []
         self.accepted = []
         self.events = []
+        self.systems = []
 
     def plan_snapshot(self, thread_id):
         return {"text": "1. шаг", "status": self.status} if thread_id else None
@@ -39,6 +40,7 @@ class _Executor:
         self.rework.append(thread_id)
 
     async def arun(self, messages, **kwargs):
+        self.systems.append(kwargs.get("system"))
         self.runs.append(messages)
         self.events.append(("run", kwargs.get("account_run", True)))
         return f"ответ {len(self.runs)}"
@@ -56,6 +58,7 @@ class _Executor:
         account_run=True,
         system=None,
     ):
+        self.systems.append(system)
         self.accepted.append((mode, thread_id, extra_text, account_run))
         self.events.append(("accepted", account_run))
         self.status = "approved"
@@ -185,3 +188,16 @@ def test_plan_answer_is_printed_as_plan_text_not_json(capsys):
         SimpleNamespace(logger=MagicMock()),
     )
     assert capsys.readouterr().out.strip() == "1. шаг"
+
+
+def test_approval_keeps_the_system_of_the_thread(answers):
+    """Сессия другой системы (``--system``): доработка и исполнение плана
+    идут по тому же треду, а не по треду ``cli`` с тем же id."""
+    answers.extend(["4", "добавь тесты", "1"])
+    ex = _Executor()
+    run_coro(
+        plan_approval.arun_plan_approval(
+            ex, _PLAN, thread_id="t1", verbose=False, system="g"
+        )
+    )
+    assert ex.systems == ["g", "g"]

@@ -51,11 +51,11 @@ def test_flag_refuses_options_it_would_ignore(extra):
         _parse("-t", "s1", "--approve-plan", "edit", *extra)
 
 
-async def _save_plan(threads_dir, status):
+async def _save_plan(threads_dir, status, system="cli"):
     plan = {**new_plan_block("1. шаг"), "status": status}
     writer = SessionWriter(
         FileThreadStore(threads_dir),
-        ThreadKey(system="cli", thread="s1"),
+        ThreadKey(system=system, thread="s1"),
         owner="seed",
     )
     record = await writer.aclaim()
@@ -120,3 +120,16 @@ def test_flag_runs_the_approval_sequence_instead_of_the_query(mode):
             {"extra_text": "кратко", "verbose": False, "account_run": True},
         )
     ]
+
+
+async def test_plan_is_read_from_the_thread_of_the_given_system(tmp_path):
+    """``--approve-plan --system g`` одобряет план треда ``(g, -t)``."""
+    threads = Threads(FileThreadStore(str(tmp_path)))
+    await _save_plan(str(tmp_path), "proposed", system="g")
+    assert await athread_has_proposed_plan(threads, "s1", system="g") is True
+    assert await athread_has_proposed_plan(threads, "s1") is False
+    settings = make_settings({"paths.threads_data_path": str(tmp_path)})
+    assert (
+        await cli._aapprove_plan_exit(settings, "edit", "s1", system="g")
+        is None
+    )

@@ -173,18 +173,27 @@ class ImageArgError(ValueError):
     """Отказ `--image`: текст готов для stderr."""
 
 
+def _run_system() -> str:
+    """Система треда запуска: `--system` (песочница swarm ведёт тред задачи),
+    по умолчанию `cli` — та же, что ставит исполнитель (`AgentExecutor.arun`)."""
+    return getattr(arg_parser.run_args, "system", None) or "cli"
+
+
 async def _afirst_image_number(
-    threads: Threads, thread_id: str | None, start_new_thread: bool
+    threads: Threads,
+    thread_id: str | None,
+    start_new_thread: bool,
+    *,
+    system: str = "cli",
 ) -> int:
     """Номер первой картинки запроса — сквозной по треду (спека §4).
 
-    С `-t` — следующий за `runtime.image_seq` треда; без `-t` и с `-n` — 1: тред
-    либо не пишется, либо начинается заново. Система `cli` — та же, что ставит
-    исполнитель по умолчанию (`AgentExecutor.arun`).
+    С `-t` — следующий за `runtime.image_seq` треда `(system, -t)`; без `-t`
+    и с `-n` — 1: тред либо не пишется, либо начинается заново.
     """
     if not thread_id or start_new_thread:
         return 1
-    record = await threads.get(ThreadKey(system="cli", thread=thread_id))
+    record = await threads.get(ThreadKey(system=system, thread=thread_id))
     image_seq = record.runtime.image_seq if record is not None else None
     return (image_seq or 0) + 1
 
@@ -254,7 +263,10 @@ async def _aprepare_cli_images(
     if not image_paths:
         return _CliImages(store, [], 1)
     first_n = await _afirst_image_number(
-        cli_threads(settings, stores), thread_id, start_new_thread
+        cli_threads(settings, stores),
+        thread_id,
+        start_new_thread,
+        system=_run_system(),
     )
     try:
         images = await _astage_cli_images(
@@ -885,12 +897,14 @@ async def _aapprove_plan_exit(
     approve_mode: str | None,
     thread_id: str | None,
     stores: Stores | None = None,
+    *,
+    system: str = "cli",
 ) -> int | None:
     """`--approve-plan` без предложенного плана в сессии — ошибка, код 1."""
     if not approve_mode:
         return None
     if thread_id and await athread_has_proposed_plan(
-        cli_threads(settings, stores), thread_id
+        cli_threads(settings, stores), thread_id, system=system
     ):
         return None
     print(NO_PROPOSED_PLAN.format(thread_id=thread_id), file=sys.stderr)
@@ -917,7 +931,9 @@ async def _alaunch_exit(
     )
     if setup_exit is not None:
         return setup_exit
-    return await _aapprove_plan_exit(loaded, approve_mode, thread_id, stores)
+    return await _aapprove_plan_exit(
+        loaded, approve_mode, thread_id, stores, system=_run_system()
+    )
 
 
 async def _arun_requested_turn(
@@ -937,7 +953,7 @@ async def _arun_requested_turn(
     вопроса) либо обычный запрос `-q`."""
     # Свой system треда — только у песочницы swarm (--system); обычный
     # запуск зовёт исполнитель как раньше (system по умолчанию — cli).
-    system = getattr(arg_parser.run_args, "system", None) or "cli"
+    system = _run_system()
     thread_system = {} if system == "cli" else {"system": system}
     if approve_mode:
         return await executor.aexecute_accepted_plan(
@@ -1143,6 +1159,7 @@ async def _arun_loaded(
             thread_id=thread_id,
             verbose=verbose,
             account_run=not close_accounting_after,
+            system=_run_system(),
         )
         structured_exit = await _emit_structured_if_requested(
             format_text=format_text,
