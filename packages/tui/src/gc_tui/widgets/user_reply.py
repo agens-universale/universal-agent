@@ -20,8 +20,6 @@ from gc_tui.palette import DIM as _DIM
 from gc_tui.palette import ERR as _ERR_RED
 from gc_tui.palette import QUIET_REPLY_INK as _QUIET_INK
 from gc_tui.palette import QUIET_REPLY_MARK as _QUIET_MARK
-from gc_tui.palette import QUIET_REPLY_SKILL as _QUIET_SKILL
-from gc_tui.palette import SKILL as _SKILL
 from gc_tui.services.image_chips import chip_of, chip_spans
 from gc_tui.services.path_display import fit_path
 from gc_tui.services.trace_render import (
@@ -304,9 +302,10 @@ class UserReplyContainer(_ImageLinksMixin, ClickModelMixin, Widget):
     ``message_id`` / ``client_id`` — что снять из очереди; в поле ввода
     возвращается `plain_text`.
 
-    ``skill`` — запускаемое имя скилла (`skill_input_name`): первым словом
-    после маркера, `/имя` цветом `SKILL`; ``skill_error`` — скилл не найден:
-    имя цветом текста и следствие `└ ✕ скилл … не найден …` (спека P3 §2.3).
+    ``skill`` — полный id скилла с пакетом (`supercoder:brainstorming`;
+    без пакета — просто имя): первым словом после маркера, `/id` цветом
+    текста реплики (решение 19); ``skill_error`` — скилл не найден: имя
+    как набрано и следствие `└ ✕ скилл … не найден …` (спека P3 §2.3).
     """
 
     DEFAULT_CSS = """
@@ -424,19 +423,14 @@ class UserReplyContainer(_ImageLinksMixin, ClickModelMixin, Widget):
         if self._skill is None:
             return lines
         first = lines[0]
-        head = self._skill_head(quiet=self._state == "queued")
+        head = self._skill_head()
         body = head.append_text(first.body)
         return [first._replace(body=body), *lines[1:]]
 
-    def _skill_head(self, *, quiet: bool) -> Text:
-        """`/имя ` перед текстом первой строки; без текста — только имя.
-        `quiet` — приглушённое имя (тихая реплика)."""
-        head = Text()
-        color = _QUIET_SKILL if quiet else _SKILL
-        head.append(
-            "/" + self._skill,
-            style="" if self._skill_error else Style(color=color),
-        )
+    def _skill_head(self) -> Text:
+        """`/id ` перед текстом первой строки; без текста — только id.
+        Цвет — цвет текста реплики (стиля нет)."""
+        head = Text("/" + self._skill)
         if self._text:
             head.append(" ")
         return head
@@ -446,11 +440,10 @@ class UserReplyContainer(_ImageLinksMixin, ClickModelMixin, Widget):
         вид, что у реплики в очереди (подложка `QUEUE_BG`, текст
         `QUIET_REPLY_INK`); липкая реплика над лентой рисует его же."""
         line = Text(USER_PREFIX, style=Style(color=_QUIET_MARK), no_wrap=True)
+        body = " ".join(self._text.split())
         if self._skill is not None:
-            line.append_text(self._skill_head(quiet=True))
-        line.append(
-            " ".join(self._text.split()), style=Style(color=_QUIET_INK)
-        )
+            body = f"/{self._skill} {body}".rstrip()
+        line.append(body, style=Style(color=_QUIET_INK))
         return line
 
     def _repaint_images(self) -> None:

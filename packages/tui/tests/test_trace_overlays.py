@@ -191,30 +191,28 @@ async def test_sticky_colours(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_sticky_skill_name_muted_skill_colour(tmp_path):
+async def test_sticky_skill_full_id_in_reply_colour(tmp_path):
     from textual.containers import VerticalScroll
 
-    from gc_tui.palette import QUIET_REPLY_SKILL
     from gc_tui.widgets.user_reply import UserReplyContainer
 
     _write_task(tmp_path, "o5s")
     async with _app(tmp_path).run_test(size=(100, 30)) as pilot:
         scr = await _tall(pilot, "o5s")
         scr.query_one("#trace", VerticalScroll).mount(
-            UserReplyContainer("почини тест", skill="coder"), before=0
+            UserReplyContainer("почини тест", skill="p:coder"), before=0
         )
         await pilot.pause()
         sticky, _ = _overlays(scr)
         reply = next(
-            r for r in _replies(scr) if r.plain_text.startswith("/coder")
+            r for r in _replies(scr) if r.plain_text.startswith("/p:coder")
         )
         await _scroll(pilot, scr, reply.virtual_region.y + 1)
         assert sticky.reply is reply
         segments = [s for s in sticky.render_line(0) if s.text.strip()]
-        label = next(s for s in segments if "/coder" in s.text)
-        assert label.style.color.name.lower() == QUIET_REPLY_SKILL.lower()
-        rest = next(s for s in segments if "почини" in s.text)
-        assert rest.style.color.name.lower() == DIM.lower()
+        label = next(s for s in segments if "/p:coder" in s.text)
+        assert label.style.color.name.lower() == DIM.lower()
+        assert "/p:coder почини тест" in label.text
 
 
 @pytest.mark.asyncio
@@ -731,5 +729,4 @@ async def test_quiet_reply_look_is_shared(tmp_path):
 
         assert colour(queued_text, 0) == colour(sticky_text, 0)
         assert colour(queued_text, 0) == palette.QUIET_REPLY_MARK.lower()
-        assert colour(queued_text, 3) == colour(sticky_text, 3)
-        assert colour(queued_text, 3) == palette.QUIET_REPLY_SKILL.lower()
+        assert colour(sticky_text, 3) == palette.QUIET_REPLY_INK.lower()

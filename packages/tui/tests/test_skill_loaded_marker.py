@@ -99,10 +99,11 @@ async def test_slash_skill_name_is_one_reply_with_skill_name(
         )
         await pilot.pause()
         replies = _replies(scr)
-        assert [_line(r) for r in replies] == ["› /brainstorming придумай"]
-        span = replies[0]._reply_lines(80)[0].body.spans[0]
-        assert (span.start, span.end) == (0, len("/brainstorming"))
-        assert span.style == Style(color=SKILL)
+        assert [_line(r) for r in replies] == [
+            "› /supercoder:brainstorming придумай"
+        ]
+        assert replies[0]._reply_lines(80)[0].body.spans == []
+        assert replies[0].plain_text == "/supercoder:brainstorming придумай"
         assert replies[0]._consequences == []
         assert "загружен" not in _trace_texts(scr)
 
@@ -140,8 +141,8 @@ async def test_mid_run_skill_only_is_one_reply(tmp_path, monkeypatch):
         await scr._handle_command("skill x")
         await pilot.pause()
         assert [_line(r) for r in _replies(scr)] == [
-            "› /x начни",
-            "› /x",
+            "› /pack:x начни",
+            "› /pack:x",
         ]
         # Опрос записей треда: обе реплики сверяются, дублей нет.
         scr._render_records(
@@ -152,7 +153,10 @@ async def test_mid_run_skill_only_is_one_reply(tmp_path, monkeypatch):
             live=True,
         )
         await pilot.pause()
-        assert [_line(r) for r in _replies(scr)] == ["› /x начни", "› /x"]
+        assert [_line(r) for r in _replies(scr)] == [
+            "› /pack:x начни",
+            "› /pack:x",
+        ]
         assert scr._pending_user_widgets == {}
 
 

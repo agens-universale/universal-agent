@@ -172,31 +172,35 @@ def _skill_color(reply):
     return _color_at(reply._band.render(), 3)
 
 
-def test_queued_skill_name_is_dimmed():
-    reply = UserReplyContainer("текст", state="queued", skill="coder")
-    assert _skill_color(reply) == {RichColor.parse(palette.QUIET_REPLY_SKILL)}
-    assert palette.QUIET_REPLY_SKILL != palette.SKILL
-
-
-def test_skill_name_returns_to_skill_colour_on_state_change():
-    for state in ("normal", "pending", "failed"):
-        reply = UserReplyContainer("текст", state="queued", skill="coder")
-        reply.set_state(state)
-        assert _skill_color(reply) == {RichColor.parse(palette.SKILL)}
-
-
-def test_skill_error_name_unchanged_when_queued():
+def test_queued_reply_shows_full_skill_id_in_reply_colour():
     reply = UserReplyContainer(
-        "текст", state="queued", skill="coder", skill_error=True
+        "текст", state="queued", skill="supercoder:brainstorming"
     )
+    line = reply.quiet_line()
+    assert line.plain == "› /supercoder:brainstorming текст"
+    assert _color_at(line, 3) == {RichColor.parse(palette.QUIET_REPLY_INK)}
+    assert reply._band.render().plain == ("› /supercoder:brainstorming текст")
     assert _skill_color(reply) == set()
 
 
-def test_skill_queued_token_derived_from_queue_bg():
-    assert palette.QUIET_REPLY_SKILL == palette._mix(
-        palette.QUEUE_BG, palette.SKILL, 0.65
+def test_normal_reply_skill_has_no_colour_of_its_own():
+    for state in ("normal", "pending", "failed"):
+        reply = UserReplyContainer("текст", state=state, skill="p:coder")
+        assert _skill_color(reply) == set()
+
+
+def test_skill_without_pack_shows_name():
+    reply = UserReplyContainer("текст", skill="computer-use")
+    assert reply._band.render().plain == "› /computer-use текст"
+
+
+def test_skill_error_name_as_typed_in_plain_colour():
+    reply = UserReplyContainer(
+        "текст", state="queued", skill="coder", skill_error=True
     )
-    assert _between(palette.QUEUE_BG, palette.QUIET_REPLY_SKILL, palette.SKILL)
+    assert reply.quiet_line().plain == "› /coder текст"
+    assert _skill_color(reply) == set()
+    assert reply._consequences[0].plain.startswith("скилл coder не найден")
 
 
 def test_queued_to_normal_drops_class_and_hint():

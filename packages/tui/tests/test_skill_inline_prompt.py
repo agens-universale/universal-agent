@@ -276,3 +276,16 @@ async def test_skill_command_short_name_without_prompt_pends_full_id(
         await pilot.app.screen._handle_command("skill brainstorming")
         await pilot.pause(0.1)
         assert app.tui_state.pending_skill_id == "supercoder:brainstorming"
+
+
+@pytest.mark.asyncio
+async def test_reply_plain_text_round_trips_with_full_id(tmp_path):
+    """↑ / Стоп возвращают `/supercoder:brainstorming текст`; повторная
+    отправка этой строки разбирается так же, как короткое имя."""
+    pytest.importorskip("textual")
+    by_short = await _wire_of(tmp_path / "a", "brainstorming придумай")
+    by_full = await _wire_of(
+        tmp_path / "b", "supercoder:brainstorming придумай"
+    )
+    assert by_full == by_short
+    assert by_full[0].startswith("Use skill `supercoder:brainstorming`.")

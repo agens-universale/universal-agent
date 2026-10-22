@@ -4833,7 +4833,7 @@ class TraceScreen(Screen):
             event_no=event_no,
             state=state,
             images=images,
-            skill=self._skill_input_name({"id": skill}) if skill else None,
+            skill=skill or None,
             skill_error=skill_error,
             message_id=message_id,
             client_id=client_id,

@@ -20,7 +20,6 @@ from gc_core.utils.path_truncate import truncate_path
 from gc_tui.models import ResultOutcome, TraceEvent
 from gc_tui.palette import INK
 from gc_tui.services.duration_format import format_round_int
-from gc_tui.services.skill_view import skill_input_name
 from gc_tui.services.trace_retention import (
     apply_payload_retention,
     filter_sidecar_to_parents,
@@ -678,8 +677,7 @@ def _dispatch_readonly(
                 ev.summary,
                 event_no=ev.no,
                 images=ev.attachments,
-                # Каталога у превью нет — короткое имя (спека P3 §2.3).
-                skill=skill_input_name(ev.skill) if ev.skill else None,
+                skill=ev.skill or None,
             )
         )
     elif ev.kind == "agent":

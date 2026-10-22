@@ -133,13 +133,11 @@ QUEUE_BG = _mix(BG, USER_BAND_BG, _QUEUE_SHARE)
 
 # «Тихая реплика»: один вид у реплики в очереди и у липкой реплики над
 # лентой. Подложка — QUEUE_BG; текст — DIM; маркер — MUTED; имя скилла —
-# SKILL, приглушённый до тишины DIM на QUEUE_BG (контраст ≈5.3); ховер
-# липкой — подложка обычной реплики. В теме auto — от пересчитанных
+# цветом текста (отдельного токена нет); ховер липкой — подложка обычной
+# реплики. В теме auto — от пересчитанных
 # QUEUE_BG и USER_BAND_BG (_derived).
 QUIET_REPLY_INK = DIM
 QUIET_REPLY_MARK = MUTED
-_QUIET_SKILL_SHARE = 0.65
-QUIET_REPLY_SKILL = _mix(QUEUE_BG, SKILL, _QUIET_SKILL_SHARE)
 QUIET_REPLY_HOVER_BG = USER_BAND_BG
 
 # Ховер плашки «в конец»: фон светлее FOCUS_BG, текст не меняется (исключение
@@ -225,7 +223,6 @@ _FIXED = {
         "BLOCK_BG",
         "REFUSED",
         "QUEUE_BG",
-        "QUIET_REPLY_SKILL",
         "QUIET_REPLY_HOVER_BG",
         "PILL_HOVER_BG",
         *_DIFF,
@@ -274,11 +271,6 @@ def _derived(bg: str) -> dict[str, object]:
         **{name: _shift(_FIXED[name], bg) for name in _DIFF},
         **tinted,
         "QUEUE_BG": _mix(bg, tinted["USER_BAND_BG"], _QUEUE_SHARE),
-        "QUIET_REPLY_SKILL": _mix(
-            _mix(bg, tinted["USER_BAND_BG"], _QUEUE_SHARE),
-            SKILL,
-            _QUIET_SKILL_SHARE,
-        ),
         "QUIET_REPLY_HOVER_BG": tinted["USER_BAND_BG"],
         "PILL_HOVER_BG": _mix(tinted["FOCUS_BG"], INK, _PILL_HOVER_SHARE),
         **ramps,
@@ -375,7 +367,6 @@ def css_variables() -> dict[str, str]:
         "skill": SKILL,
         "quiet-reply-ink": QUIET_REPLY_INK,
         "quiet-reply-mark": QUIET_REPLY_MARK,
-        "quiet-reply-skill": QUIET_REPLY_SKILL,
         "quiet-reply-hover-bg": QUIET_REPLY_HOVER_BG,
         "diff-add-bg": DIFF_ADD_BG,
         "diff-del-bg": DIFF_DEL_BG,

@@ -43,7 +43,6 @@ _FIXED_CSS = {
     "pill-hover-bg": "#4c505a",
     "quiet-reply-ink": "#8b949e",
     "quiet-reply-mark": "#6e7681",
-    "quiet-reply-skill": "#7c97b4",
     "quiet-reply-hover-bg": "#282c36",
     "overlay-bg": "#161A23",
     "zebra-bg": "#232836",

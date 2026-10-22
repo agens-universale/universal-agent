@@ -2,13 +2,10 @@
 
 Паритет с MainScreen._render_record: `skill_loaded` записи едет в событии
 (`TraceEvent.skill`) и рисуется первым словом реплики; отдельной строки
-`[skill]` нет. Каталога скиллов у превью нет — имя короткое.
+`[skill]` нет. Каталога скиллов у превью нет — имя полное.
 """
 
 import pytest
-from rich.style import Style
-
-from gc_tui.palette import SKILL
 
 
 def _rec(payload, ts="2026-06-01T12:00:00Z"):
@@ -68,10 +65,8 @@ async def test_skill_plus_prompt_is_one_reply_with_skill_name():
         ]
     )
     assert len(replies) == 1
-    assert _first_line(replies[0]) == "› /qa-x давай"
-    span = replies[0]._reply_lines(80)[0].body.spans[0]
-    assert (span.start, span.end) == (0, len("/qa-x"))
-    assert span.style == Style(color=SKILL)
+    assert _first_line(replies[0]) == "› /pack:qa-x давай"
+    assert replies[0]._reply_lines(80)[0].body.spans == []
     assert not any("[skill]" in r or "загружен" in r for r in rows)
 
 

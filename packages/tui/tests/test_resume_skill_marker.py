@@ -1,7 +1,6 @@
 """Резюм треда: скилл — именем в реплике (спека P3 §2.3, §10 п. 5).
 
-Имя — запускаемый вид, как в палитре: короткое, если ведёт ровно к этому
-скиллу и не занято командой, иначе полный id; холодный кэш — короткое.
+Имя — полный id с пакетом (решение 19), от кэша каталога не зависит.
 Строки `[skill]` нет ни на резюме, ни вживую.
 """
 
@@ -47,7 +46,7 @@ def _app(tmp_path):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("live", [False, True])
-async def test_skill_reply_uses_short_name(tmp_path, live):
+async def test_skill_reply_uses_full_id(tmp_path, live):
     pytest.importorskip("textual")
     async with _app(tmp_path).run_test() as pilot:
         scr = pilot.app.screen
@@ -55,12 +54,12 @@ async def test_skill_reply_uses_short_name(tmp_path, live):
         rec = _user_rec_with_skill("supercoder:brainstorming", "придумай")
         scr._render_records([rec], live=live)
         await pilot.pause()
-        assert _replies(scr) == ["› /brainstorming придумай"]
+        assert _replies(scr) == ["› /supercoder:brainstorming придумай"]
         assert not _trace_has(scr, "загружен")
 
 
 @pytest.mark.asyncio
-async def test_ambiguous_short_name_shows_full_id(tmp_path):
+async def test_ambiguous_name_shows_full_id(tmp_path):
     pytest.importorskip("textual")
     async with _app(tmp_path).run_test() as pilot:
         scr = pilot.app.screen
@@ -71,14 +70,14 @@ async def test_ambiguous_short_name_shows_full_id(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_cold_cache_shows_short_name(tmp_path):
+async def test_cold_cache_shows_full_id(tmp_path):
     pytest.importorskip("textual")
     async with _app(tmp_path).run_test() as pilot:
         scr = pilot.app.screen
         scr._skills_cache = None
         scr._render_records([_user_rec_with_skill("a:dup", "x")])
         await pilot.pause()
-        assert _replies(scr) == ["› /dup x"]
+        assert _replies(scr) == ["› /a:dup x"]
 
 
 @pytest.mark.asyncio
