@@ -642,12 +642,28 @@ def build_finish_widgets(close: TurnClose, *, event_no: int) -> list:
 
 
 def build_turn_line(
-    outcome: TurnOutcome, *, now: datetime | None = None
+    outcome: TurnOutcome | None = None,
+    *,
+    word: str | None = None,
+    plan: bool = False,
+    opened_by: str | None = None,
+    now: datetime | None = None,
 ) -> TurnLine:
-    """Строка итога хода из записи — одна для ленты и превью: голова
-    `turn_head` без сводки правок и причины (они — у индикатора)."""
+    """Строка итога хода — одна для ленты и превью: голова `turn_head`
+    без сводки правок и причины.
+
+    Источник ровно один: запись итога (`outcome`) или исход без записи
+    (`word` и `plan`: запасной исход раннера, статус сессии) — у такой
+    головы нет ни длительности, ни времени конца."""
     from gc_tui.widgets.turn_line import TurnLine
 
+    if (outcome is None) == (word is None):
+        raise ValueError("нужна запись итога или слово исхода, ровно одно")
+    if outcome is None:
+        head = turn_head(
+            word, plan=plan, duration_sec=None, ended_at=None, now=now
+        )
+        return TurnLine(head, opened_by=opened_by)
     word, plan = kind_of(outcome)
     head = turn_head(
         word,

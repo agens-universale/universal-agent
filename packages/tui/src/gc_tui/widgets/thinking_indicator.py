@@ -38,19 +38,20 @@ from textual.widgets import Static
 from gc_tui import textual_compat
 from gc_tui.messages import IndicatorRowsChanged, OpenEditsScreenRequest
 
-# `_HOVER` — ровно тот `$accent`, которым база красит наведение на служебные
-# элементы ленты (`.trace-action:hover` в styles.tcss).
-# `_ACCENT` здесь занят янтарным цветом РАБОТЫ (RUN_COLOR) — это другой смысл.
-from gc_tui.palette import ACCENT as _HOVER
+# `_ACCENT` здесь — янтарный цвет РАБОТЫ (RUN_COLOR), не `$accent` наведения.
 from gc_tui.palette import DEEP_DIM as _DIM
 from gc_tui.palette import GLOW_SHADES
 from gc_tui.palette import PROCESSING_SHADES as _PROCESSING_SHADES
 from gc_tui.palette import RUN_COLOR as _ACCENT
 from gc_tui.palette import VALIDATING_SHADES as _VALIDATING_SHADES
 from gc_tui.services.duration_format import format_compact_int, format_duration
-from gc_tui.services.plural import files_word
 from gc_tui.services.trace_glyphs import blink_on
-from gc_tui.services.turn_outcome import OUTCOMES, turn_head
+from gc_tui.services.turn_outcome import (
+    OUTCOMES,
+    compose_status_line,
+    format_turn_summary,
+    turn_head,
+)
 
 THINKING_PHRASES = [
     "думаю",
@@ -158,58 +159,12 @@ def is_terminal_indicator_state(state: str) -> bool:
     return state in TERMINAL_INDICATOR_STATES
 
 
-# Минимальный зазор между строкой-итогом и правым сегментом сводки правок.
-_SUMMARY_GAP = 2
 # Ширина, когда измерить нельзя (виджет вне DOM): та же страховка, что у
 # адаптивного футера.
 _FALLBACK_WIDTH = 80
 #: Причина ошибки переносится не больше чем на столько строк.
 ERROR_MAX_ROWS = 3
 _STOP_GLYPH = OUTCOMES["cancelled"].glyph
-
-
-def format_turn_summary(files: int, add: int, del_: int) -> str | None:
-    """«изменено 3 файла · +120 −15»; ход без правок → None.
-
-    Знаки счётчиков — те же, что в строке вызова с правкой (`+N −M`,
-    U+2212)."""
-    if files <= 0:
-        return None
-    return f"изменено {files} {files_word(files)} · +{add} −{del_}"
-
-
-def compose_status_line(
-    head: Text,
-    summary: str | None,
-    available_width: int,
-    *,
-    hover: bool = False,
-) -> tuple[Text, tuple[int, int] | None]:
-    """`(строка, x-диапазон сегмента)`; `None` — сегмента в строке нет.
-
-    Сегмент не влезает по ширине — скрываем целиком: строка индикатора ровно
-    в одну клетку высотой, а обрезанное «изменено 3 фай…» врало бы о числах.
-
-    Диапазон отдаётся вместе с текстом, потому что он известен только здесь:
-    сегмент кликабелен (открывает экран изменений в источнике «Ход»), а по
-    цельному `Text` координаты его первой клетки не восстановить.
-
-    `hover` — курсор стоит на сегменте: текст берёт АКЦЕНТ. Это единственный
-    язык наведения, который база знает: `.trace-action:hover` красит
-    `$accent`, других hover-правил в проекте нет. Сегмент — такой же
-    кликабельный элемент, и отвечать руке он обязан тем же цветом.
-    """
-    if not summary:
-        return head, None
-    segment = Text(summary, style=_HOVER if hover else _DIM)
-    gap = available_width - head.cell_len - segment.cell_len
-    if gap < _SUMMARY_GAP:
-        return head, None
-    out = Text()
-    out.append_text(head)
-    out.append(" " * gap)
-    out.append_text(segment)
-    return out, (head.cell_len + gap, out.cell_len)
 
 
 class ThinkingIndicator(Static):

@@ -14,7 +14,9 @@ from datetime import datetime
 from gc_core.persistence.turn_outcome import TurnOutcome
 from rich.text import Text
 
+from gc_tui.palette import ACCENT, DEEP_DIM
 from gc_tui.services.duration_format import format_duration
+from gc_tui.services.plural import files_word
 from gc_tui.services.relative_time import format_turn_clock
 from gc_tui.services.trace_glyphs import ERROR_GLYPH
 
@@ -172,3 +174,51 @@ def turn_head(
         head += f" за {format_duration(duration_sec)}"
     clock = format_turn_clock(ended_at, now=now)
     return Text(f"{head} · {clock}" if clock else head)
+
+
+# Минимальный зазор между головой строки итога и правым сегментом сводки.
+_SUMMARY_GAP = 2
+
+
+def format_turn_summary(files: int, add: int, del_: int) -> str | None:
+    """«изменено 3 файла · +120 −15»; ход без правок → None.
+
+    Знаки счётчиков — те же, что в строке вызова с правкой (`+N −M`,
+    U+2212)."""
+    if files <= 0:
+        return None
+    return f"изменено {files} {files_word(files)} · +{add} −{del_}"
+
+
+def compose_status_line(
+    head: Text,
+    summary: str | None,
+    available_width: int,
+    *,
+    hover: bool = False,
+) -> tuple[Text, tuple[int, int] | None]:
+    """`(строка, x-диапазон сегмента)`; `None` — сегмента в строке нет.
+
+    Сегмент не влезает по ширине — скрываем целиком: строка индикатора ровно
+    в одну клетку высотой, а обрезанное «изменено 3 фай…» врало бы о числах.
+
+    Диапазон отдаётся вместе с текстом, потому что он известен только здесь:
+    сегмент кликабелен (открывает экран изменений в источнике «Ход»), а по
+    цельному `Text` координаты его первой клетки не восстановить.
+
+    `hover` — курсор стоит на сегменте: текст берёт АКЦЕНТ. Это единственный
+    язык наведения, который база знает: `.trace-action:hover` красит
+    `$accent`, других hover-правил в проекте нет. Сегмент — такой же
+    кликабельный элемент, и отвечать руке он обязан тем же цветом.
+    """
+    if not summary:
+        return head, None
+    segment = Text(summary, style=ACCENT if hover else DEEP_DIM)
+    gap = available_width - head.cell_len - segment.cell_len
+    if gap < _SUMMARY_GAP:
+        return head, None
+    out = Text()
+    out.append_text(head)
+    out.append(" " * gap)
+    out.append_text(segment)
+    return out, (head.cell_len + gap, out.cell_len)

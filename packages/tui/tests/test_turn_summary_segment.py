@@ -20,11 +20,12 @@ from gc_core.thread_store import (
 )
 from gc_testkit.paths import module_dir
 from gc_testkit.tui_support import tui_settings
-from gc_tui.widgets.thinking_indicator import (
-    ThinkingIndicator,
+from gc_tui.services.trace_render import build_turn_line
+from gc_tui.services.turn_outcome import (
     compose_status_line,
     format_turn_summary,
 )
+from gc_tui.widgets.thinking_indicator import ThinkingIndicator
 from rich.text import Text
 
 
@@ -177,6 +178,33 @@ def test_span_is_none_without_summary():
     head = Text("✓ Выполнил за 12с")
     _out, span = compose_status_line(head, None, 200)
     assert span is None
+
+
+# --- строка итога без записи: исход раннера или статуса сессии -------------
+
+
+def test_turn_line_without_record_has_head_without_time():
+    line = build_turn_line(word="interrupted")
+    assert line.text.plain == "■ Прервано"
+
+
+def test_turn_line_needs_record_or_word():
+    with pytest.raises(ValueError):
+        build_turn_line()
+
+
+def test_turn_line_takes_record_or_word_not_both():
+    outcome = TurnOutcome(
+        status="done",
+        reason=None,
+        opened_by="u1",
+        started_at="2026-10-22T11:32:00Z",
+        ended_at="2026-10-22T11:32:12Z",
+        duration_sec=12.0,
+        error=None,
+    )
+    with pytest.raises(ValueError):
+        build_turn_line(outcome, word="completed")
 
 
 def test_hover_paints_the_segment_with_the_accent_of_block_buttons():
