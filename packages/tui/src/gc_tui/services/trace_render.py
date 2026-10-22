@@ -133,22 +133,21 @@ def build_orphan_result_row(
     """Итог вызова, к которому нет строки вызова (ушла в сжатие, call_id
     неизвестен). Ошибка — строка `!` (`ERR`); отказ и стоп — не сбой: глиф
     `○` цветом исхода (отказ — `REFUSED`, стоп — `DIM`) и серый текст
-    «кто: почему», как у строки вызова (спека P3 §10). Один билдер для
-    живой ленты и превью."""
+    «кто: почему» — таблица исходов строки вызова (`_OUTCOME_LOOK`, спека
+    P3 §10). Один билдер для живой ленты и превью."""
     from rich.text import Text
 
-    from gc_tui.palette import DIM, REFUSED
-    from gc_tui.services.trace_glyphs import CALL_UNDONE_GLYPH
+    from gc_tui.widgets.tool_call_row import _OUTCOME_LOOK
     from gc_tui.widgets.trace_row import TraceRow
 
     if outcome not in ("refused", "halted"):
         return build_standalone_row(
             summary, severity="error", event_no=event_no
         )
-    glyph_style = REFUSED if outcome == "refused" else DIM
+    glyph, glyph_style, text_style = _OUTCOME_LOOK[outcome]
     return TraceRow(
-        prefix=Text().append(f"{CALL_UNDONE_GLYPH} ", style=glyph_style),
-        content=Text().append(summary, style=DIM),
+        prefix=Text().append(f"{glyph} ", style=glyph_style),
+        content=Text().append(summary, style=text_style),
         kind_class="line-standalone",
         event_no=event_no,
     )
