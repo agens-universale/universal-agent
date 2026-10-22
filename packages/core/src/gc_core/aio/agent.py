@@ -259,6 +259,8 @@ class AsyncAgent:
                 texts, fields = undelivered_as_arun_args(tail)
                 # Тот же тред, но не с чистого листа: `start_new_thread`
                 # первого хода стёр бы то, что этот ход должен продолжить.
+                # Ответ на вопрос — только первому ходу: вопроса уже нет.
+                kwargs.pop("answer", None)
                 result = await self._executor.arun(
                     texts, **{**kwargs, **fields, "start_new_thread": False}
                 )
