@@ -433,7 +433,7 @@ def _last_sse_event(lines: List[str]) -> Optional[Dict]:
 
 
 def _bad_response(
-    text: str, response: httpx.Response, *, api_mode: str, run_logger
+    body: bytes, response: httpx.Response, *, api_mode: str, run_logger
 ) -> BackendBadResponseError:
     """Исключение о неразборном теле и запись о нём в лог. Начало тела —
     только в лог: пользователю оно не нужно, а диагносту без него не
@@ -441,9 +441,11 @@ def _bad_response(
     exc = BackendBadResponseError(
         status_code=response.status_code,
         content_type=response.headers.get("content-type", ""),
-        length=len(text.encode("utf-8")),
+        length=len(body),
         api_mode=api_mode,
     )
+    head = body[: _BAD_BODY_LOG_CHARS * 4].decode("utf-8", errors="replace")
+    head = head[:_BAD_BODY_LOG_CHARS]
     (run_logger or logger).error(
         "Backend %s bad response status=%s content_type=%r length=%s "
         "body_head=%r",
@@ -451,21 +453,21 @@ def _bad_response(
         exc.status_code,
         exc.content_type,
         exc.length,
-        text[:_BAD_BODY_LOG_CHARS],
+        head,
         extra={
             "event": "backend_bad_response",
             "api_mode": api_mode,
             "status_code": exc.status_code,
             "content_type": exc.content_type,
             "length": exc.length,
-            "body_head": text[:_BAD_BODY_LOG_CHARS],
+            "body_head": head,
         },
     )
     return exc
 
 
 def _decode_backend_body(
-    text: str,
+    body: bytes,
     response: httpx.Response,
     *,
     api_mode: str,
@@ -479,17 +481,24 @@ def _decode_backend_body(
     пустое или не-JSON — ``BackendBadResponseError`` вместо голого
     ``JSONDecodeError``. Ошибка провайдера внутри SSE (``BackendStreamError``)
     летит как есть: по её коду работают ретраи и смена формы авторизации.
+
+    Тело — байты, и декодируется оно как UTF-8 независимо от charset в
+    заголовке, как у стрима (`_aiter_utf8_lines`) и как делал `r.json()`:
+    прокси, объявивший ``charset=iso-8859-1`` (дефолт сервлетов), иначе
+    молча портил бы кириллицу в ответе модели.
     """
+    text = body.decode("utf-8", errors="replace")
     if _looks_like_sse(text):
         payload = assemble_sse(text.splitlines())
     else:
         try:
-            payload = json.loads(text)
+            # json.loads от байтов — ровно `r.json()`: UTF-8/16/32 по BOM.
+            payload = json.loads(body)
         except ValueError:
             payload = None
     if payload is None:
         raise _bad_response(
-            text, response, api_mode=api_mode, run_logger=logger
+            body, response, api_mode=api_mode, run_logger=logger
         )
     return payload
 
@@ -585,8 +594,10 @@ async def _arequest_backend_responses_once(
             if line.strip():
                 chunks.append(line)
 
+    # Строки уже декодированы как UTF-8; длина в ошибке — по непустым
+    # строкам (сырые байты стрима здесь не копятся).
     result = _decode_backend_body(
-        "\n".join(chunks),
+        "\n".join(chunks).encode("utf-8"),
         r,
         api_mode="responses",
         logger=logger,
@@ -847,7 +858,7 @@ async def _arequest_backend_chat_completions_once(
         raise
 
     payload = _decode_backend_body(
-        r.text,
+        r.content,
         r,
         api_mode="chat_completions",
         logger=logger,

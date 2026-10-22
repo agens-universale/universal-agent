@@ -141,6 +141,39 @@ def test_plain_json_body_is_unchanged(monkeypatch, sleeps):
     assert _chat()["choices"][0]["message"]["content"] == "blk"
 
 
+def test_json_body_is_utf8_whatever_charset_is_declared(monkeypatch, sleeps):
+    """Тело модели — всегда UTF-8, как и у стрима: объявленный прокси
+    ``charset=iso-8859-1`` (дефолт сервлетов) не должен портить кириллицу."""
+    body = json.dumps(
+        {"choices": [{"message": {"content": "привет"}}]}, ensure_ascii=False
+    ).encode("utf-8")
+    install_transport(
+        monkeypatch,
+        lambda request: httpx.Response(
+            200,
+            content=body,
+            headers={"content-type": "application/json; charset=iso-8859-1"},
+        ),
+    )
+
+    assert _chat()["choices"][0]["message"]["content"] == "привет"
+
+
+def test_bad_response_length_is_byte_count(monkeypatch, sleeps):
+    body = "<p>привет</p>".encode("utf-8")
+    install_transport(
+        monkeypatch,
+        lambda request: httpx.Response(
+            200, content=body, headers={"content-type": "text/html"}
+        ),
+    )
+
+    with pytest.raises(BackendBadResponseError) as info:
+        _chat()
+
+    assert info.value.length == len(body)
+
+
 _COMPLETED = {
     "type": "response.completed",
     "response": {"id": "r1", "output": []},
@@ -155,6 +188,7 @@ def test_responses_empty_body_is_bad_response(monkeypatch, sleeps):
 
     assert info.value.status_code == 200
     assert len(spy.requests) == 2
+    assert len(sleeps) == 1
     assert all(delay < 10 for delay in sleeps), sleeps
 
 
