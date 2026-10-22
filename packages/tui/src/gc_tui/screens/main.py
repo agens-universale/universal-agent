@@ -6867,7 +6867,7 @@ class TraceScreen(Screen):
         # Идёт вставка изображения: Enter не отправляет — сообщение ушло бы без
         # картинки; текст остаётся в поле (контракт §2).
         if self._image_paste_busy:
-            self._show_footer_hint(IMAGE_PASTE_WAIT_HINT)
+            self._show_footer_refusal(IMAGE_PASTE_WAIT_HINT)
             return
 
         # Картинки с командой не отправляются (визуальный контракт картинок §2):
@@ -7178,7 +7178,7 @@ class TraceScreen(Screen):
                 # проскочат).
                 self._image_paste_queue.append((path, on_miss, files_only))
             else:
-                self._show_footer_hint(IMAGE_PASTE_WAIT_HINT)
+                self._show_footer_refusal(IMAGE_PASTE_WAIT_HINT)
             return
         self._image_paste_busy = True
         self._show_footer_hint(
