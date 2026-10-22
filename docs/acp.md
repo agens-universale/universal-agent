@@ -219,6 +219,9 @@ docs/tui.md, «Конец хода». Клиент показывает проз
 трейсе рассуждения. В файл треда строка не пишется и при `session/load` не
 проигрывается. Служебные technical / сводки компакции в ленту как
 `user_message_chunk` не попадают. `notice` / `compaction_*` пока не шлём.
+Запись итога хода (`turn_outcome`, см. docs/sdk/thread-store-contract.md)
+клиенту не уходит ни вживую, ни при `session/load`: строки итога хода, как
+в TUI, в ACP нет — конец хода клиент видит по `stopReason`.
 
 `session/new`, `session/load` и `session/resume` отдают опции `configOptions`: модель
 (`id: "model"`) и следом режим (`id: "mode"`, см. выше). Модель — алиасы уровней `default`, `light`, `max`
