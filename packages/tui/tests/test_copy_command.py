@@ -151,6 +151,9 @@ class _Store:
     def get_task_meta(self, task_id, system=None):
         return {}
 
+    def update_tui_meta(self, task_id, patch, system=None):
+        pass
+
 
 async def _run_copy(tmp_path, monkeypatch, arg, segments):
     from gc_tui.app import TuiApp
@@ -514,3 +517,45 @@ async def test_copy_native_fails_fallback_osc52_is_success(
             pilot, lambda: footer_rows(scr)[1] != "", "отклик в слоте"
         )
         assert footer_rows(scr)[1] == "✓ скопирован последний ответ"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("switch", ["other_thread", "new_session"])
+async def test_copy_outcome_dropped_after_session_switch(
+    tmp_path, monkeypatch, switch
+):
+    """Поздний итог /copy старой сессии в слот новой не пишется."""
+    import threading
+
+    from gc_tui.app import TuiApp
+    from gc_tui.services import clipboard_ops
+
+    gate, written = threading.Event(), threading.Event()
+
+    def write(text):
+        gate.wait(5)
+        written.set()
+        return True
+
+    monkeypatch.setattr(clipboard_ops, "write_clipboard", write)
+    (tmp_path / "data_cli_other.jsonl").write_text("", encoding="utf-8")
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
+    )
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr._store = _Store([_segment(_thread())])
+        scr._active_task_id = "TID"
+        await scr._handle_command("copy")
+        await pilot.pause()
+        if switch == "other_thread":
+            scr.attach_active_task("other", is_resume=True)
+        else:
+            scr._switch_to_empty_state()
+        await pilot.pause()
+        gate.set()
+        await wait_until(pilot, written.is_set, "запись в буфер")
+        await pilot.pause(0.3)
+        assert footer_rows(scr)[1] == ""

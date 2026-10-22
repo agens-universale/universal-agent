@@ -2269,6 +2269,8 @@ class TraceScreen(Screen):
             return False
         if prev and prev != task_id:
             self._session_lock_release(prev)
+        if prev != task_id:
+            self._copy_seq += 1  # итог /copy прошлой сессии сюда не пишется
         self._active_task_id = task_id
         self.app.tui_state.active_task_id = task_id
         self._session_lock_hb_mono = 0.0
@@ -8247,6 +8249,7 @@ class TraceScreen(Screen):
         # иначе poll видит протухшую ошибку и репейнтит «✕ Ошибка» поверх пустой сессии.
         self._session_lock_release()
         self._prepare_for_new_run()
+        self._copy_seq += 1  # итог /copy прошлой сессии сюда не пишется
         self._active_task_id = None
         self.app.tui_state.active_task_id = None
         self._session_lock_hb_mono = 0.0
