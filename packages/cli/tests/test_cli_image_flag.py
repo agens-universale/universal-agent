@@ -482,3 +482,15 @@ async def test_images_with_structured_output_ride_the_turn_and_the_pocket_is_cle
     assert closed == [True]
     assert rec.staged_existed == [True]
     assert not os.path.exists(att.path)
+
+
+async def test_first_number_reads_the_thread_of_the_given_system(tmp_path):
+    """Песочница swarm ведёт тред задачи (``--system``): номер картинки —
+    по счётчику этого треда, а не треда ``cli`` с тем же id."""
+    threads_dir = str(tmp_path / "threads")
+    save_thread_meta(threads_dir, "g", "t1", {"runtime": {"image_seq": 7}})
+    threads = Threads(FileThreadStore(threads_dir))
+    assert (
+        await cli._afirst_image_number(threads, "t1", False, system="g") == 8
+    )
+    assert await cli._afirst_image_number(threads, "t1", False) == 1

@@ -35,7 +35,7 @@ from gc_core.message_policy.plan_messages import accepted_plan_messages
 from gc_core.plan_store import plan_awaits_decision, plan_is_accepted
 from gc_core.runtime_notices import collect_unread_runtime_notices
 from gc_core.security.permission_mode import Mode, mode_label
-from gc_core.threads.errors import OwnershipError
+from gc_core.threads.errors import OwnershipError, ThreadBusy
 from gc_core.threads.models import ThreadRecord
 from rich.cells import cell_len
 from rich.text import Text
@@ -430,6 +430,12 @@ def _truncate_middle(name: str, max_cols: int) -> str:
     head = _fit_cells(name, budget - budget // 2)
     tail = _fit_cells(name[::-1], budget // 2)[::-1]
     return f"{head}…{tail}"
+
+
+#: Техническая реплика не записана: тред ведёт другой процесс.
+THREAD_BUSY_REPLY = (
+    "Сообщение агенту не записано: сессию сейчас ведёт другой процесс."
+)
 
 
 class TraceScreen(Screen):
@@ -6969,9 +6975,14 @@ class TraceScreen(Screen):
             return
         # Счётчик сообщений ведёт хранилище; объём живой истории пересчитает
         # следующий шаг сессии (как и при записи из ядра).
-        FileTaskStore(threads_dir=threads_dir, system=system).append_messages(
-            tid, [msg]
-        )
+        try:
+            FileTaskStore(
+                threads_dir=threads_dir, system=system
+            ).append_messages(tid, [msg])
+        except ThreadBusy:
+            # Тред ведёт другой процесс (gc-cli, сервер): дописать мимо его
+            # хода нельзя — реплика не записана, TUI живёт дальше.
+            self.notify(THREAD_BUSY_REPLY, severity="warning")
 
     def _cmd_new(self) -> None:
         self._resumed_prompt = None  # новая сессия — без resume-промпта
