@@ -253,16 +253,10 @@ _DIALOG_CONTINUATION_KINDS = frozenset(
 )
 
 
-def resolve_live_terminal_indicator_state(
-    *, outcome: TurnOutcome | None, status, stop_requested
-):
-    """Состояние строки-итога в idle-фазе живого прогона.
-
-    Источник — запись итога последнего хода (`outcome`), если она есть.
-    Нет — статус сессии из meta (`tui.status`) с guard прямого stop в
-    обход _cmd_stop; лимитного исхода статус не различает."""
-    if outcome is not None:
-        return indicator_state_of(kind_of(outcome)[0])
+def resolve_live_terminal_indicator_state(*, status, stop_requested):
+    """Состояние строки-итога в idle-фазе живого прогона: статус сессии
+    из meta (`tui.status`) с guard прямого stop в обход _cmd_stop;
+    лимитного исхода статус не различает."""
     word = word_of_status(status)
     if word == "completed" and stop_requested:
         word = "cancelled"
@@ -5895,7 +5889,6 @@ class TraceScreen(Screen):
         if self._store is not None and self._active_task_id is not None:
             status = (self._tick_meta().get("tui") or {}).get("status")
         state = resolve_live_terminal_indicator_state(
-            outcome=None,
             status=status,
             stop_requested=getattr(runner, "_stop_requested", False),
         )
