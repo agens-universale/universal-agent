@@ -95,9 +95,13 @@ def _report_daemon_ready(name: str, server_cfg: Any) -> None:
     if wait_daemon_url_ready(str(url)):
         print(f"[ready] {name}: {url}")
     else:
-        print(
-            f"[warn] {name}: daemon not accepting connections at {url} "
-            f"after {_DEFAULT_READY_TIMEOUT_SEC:.0f}s"
+        # Через `_warn`, а не print в stdout: под alternate screen TUI строка
+        # терялась, и в `/notices` оставалось только «нет соединения с …».
+        _warn(
+            f"{name}: daemon not accepting connections at {url} "
+            f"after {_DEFAULT_READY_TIMEOUT_SEC:.0f}s",
+            code="mcp_daemon_not_ready",
+            highlights=(name,),
         )
 
 

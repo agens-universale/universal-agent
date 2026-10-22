@@ -432,6 +432,43 @@ def test_autostart_warning_reaches_the_notices_channel(tmp_path, monkeypatch):
     assert "science" in notice.highlights
 
 
+def test_daemon_not_ready_warning_reaches_the_notices_channel(
+    monkeypatch, capsys
+):
+    """Неготовый демон — предупреждение в `/notices`, а не голый print.
+
+    Раньше «daemon not accepting connections» печаталось в stdout и под
+    alternate screen TUI терялось: в `/notices` человек видел только
+    следствие — «нет соединения с http://127.0.0.1:…». `[wait]` при этом
+    остаётся в stdout как есть.
+    """
+    from types import SimpleNamespace
+
+    from gc_core import runtime_notices
+    from recommended_mcp.autostart import _report_daemon_ready
+
+    monkeypatch.setattr(runtime_notices, "_notices", [], raising=False)
+    monkeypatch.setattr(
+        "recommended_mcp.autostart.wait_daemon_url_ready",
+        lambda *_a, **_k: False,
+    )
+
+    _report_daemon_ready(
+        "science", SimpleNamespace(url="http://127.0.0.1:9/mcp")
+    )
+
+    notices = [
+        n for n in runtime_notices._notices if n.code == "mcp_daemon_not_ready"
+    ]
+    assert len(notices) == 1, [n.code for n in runtime_notices._notices]
+    assert notices[0].level == "warning"
+    assert "http://127.0.0.1:9/mcp" in notices[0].message
+    assert "science" in notices[0].highlights
+    out = capsys.readouterr()
+    assert "[wait] science: http://127.0.0.1:9/mcp" in out.out
+    assert "daemon not accepting connections" in out.err
+
+
 def test_no_frontend_flag_is_hardcoded_in_the_shared_module():
     """Сторож против возврата: имя флага одного фронтенда в общем коде.
 
