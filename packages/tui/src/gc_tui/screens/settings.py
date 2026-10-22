@@ -83,6 +83,10 @@ _PROBE_SECTIONS = {
 }  # server-probe: ручная проверка, глиф из config-probe
 # Явная прокрутка тела секции — обещание `FOOTER_SCROLL`.
 _SCROLL_KEYS = ("ctrl+up", "ctrl+down")
+# Клавиши удаления объекта под курсором: Del (fn+⌫ на Mac) и ⌫ — MacBook
+# присылает именно `backspace`. Только там, где в фокусе нет поля ввода: в поле
+# ⌫ стирает текст (гейты по фокусу остаются у каждой точки).
+_DELETE_KEYS = ("delete", "backspace")
 # Секции, пишущие в базовый config.yml: гейт пакетного шаблона общий, а вот
 # save-машина — только у редакторных. «Модели» пишут немедленно по действию
 # (решение 2 волны B), но в пакетный шаблон писать по-прежнему нельзя.
@@ -110,7 +114,7 @@ _FOOTERS = {
     # строке резервной модели и в каждой из её под-форм.
     # «Обновить версию», а не просто «обновить»: Ctrl+U ставит пакет заново (меняет
     # систему), а Alt+↓ только перечитывает — одним словом на двоих они неразличимы (§5.4).
-    _MCP: "↑/↓ · Enter — установить · Space — вкл/выкл · Ctrl+U — обновить версию · Del — удалить · Esc",
+    _MCP: "↑/↓ · Enter — установить · Space — вкл/выкл · Ctrl+U — обновить версию · Del/⌫ — удалить · Esc",
     _MODES: "↑/↓ — выбор · ←/→/Enter — переключить · PgUp/PgDn — секции · Esc — меню",
     _UPDATE: "↑/↓ · Enter — выполнить · Esc — меню",
     # Раскладка — решение юзера В1 (`docs/specs/2026-08-10-profiles-b-plan.md`),
@@ -123,7 +127,7 @@ _FOOTERS = {
     # 64 колонках (бюджет `_FOOTER_MIN_COLS`).
     _PROFILES: (
         "↑/↓ · Enter — открыть · Space — активировать · n — создать · "
-        "r — переименовать · Del — удалить"
+        "r — переименовать · Del/⌫ — удалить"
     ),
 }
 _FOOTER_READONLY = "PgUp/PgDn — секции  ·  Esc — меню"
@@ -176,12 +180,12 @@ _TAB_TO_VARIANTS = "Tab — вверх к выбору"
 # на 64 колонках (сторож test_all_footers_fit_the_two_line_budget), а два состояния
 # ОДНОЙ строки обязаны звать одни клавиши одними словами.
 _VOICE_FOOTER_LOCAL = (
-    f"↑/↓ · {_TAB_TO_FIELDS} · Enter — включить · Del — удалить · Esc"
+    f"↑/↓ · {_TAB_TO_FIELDS} · Enter — включить · Del/⌫ — удалить · Esc"
 )
 # Тот же футер, когда движок отстал от версии сборки: клавиша обещается ТОЛЬКО тогда
 # (канон секции — не звать клавишу, которая здесь ничего не делает). Глагол и клавиша —
 # как у MCP («Ctrl+U — обновить версию»), там этот сценарий уже живёт.
-_VOICE_FOOTER_LOCAL_UPDATE = f"↑/↓ · {_TAB_TO_FIELDS} · Enter — включить · Ctrl+U — обновить версию · Del — удалить · Esc"
+_VOICE_FOOTER_LOCAL_UPDATE = f"↑/↓ · {_TAB_TO_FIELDS} · Enter — включить · Ctrl+U — обновить версию · Del/⌫ — удалить · Esc"
 # Тот же футер, когда удалять нечего: сервиса нет, и Del молчит (`_voice_request_remove`).
 # Полей у такой строки тоже нет — переходить некуда, и Tab здесь не обещан (§6.1).
 _VOICE_FOOTER_LOCAL_FRESH = "↑/↓ · Enter — установить · Esc — меню"
@@ -2309,7 +2313,7 @@ class SettingsScreen(Screen):
             ed.enter()
             self._refresh_footer()
             return True
-        if event.key == "delete" and not isinstance(
+        if event.key in _DELETE_KEYS and not isinstance(
             self.focused, (Input, TextArea)
         ):
             event.stop()
@@ -7370,7 +7374,7 @@ class SettingsScreen(Screen):
                 event.stop()
                 self._move_voice(-1 if event.key == "up" else 1)
                 return
-            if event.key == "delete" and not self._voice_focus_in_editor():
+            if event.key in _DELETE_KEYS and not self._voice_focus_in_editor():
                 event.stop()  # в полях Del правит текст — не перехватываем
                 self._voice_request_remove()
                 return
@@ -7493,7 +7497,7 @@ class SettingsScreen(Screen):
                 if row["kind"] == "profile":
                     self._begin_profile_name_prompt("rename", row["name"])
                 return
-            if event.key == "delete":
+            if event.key in _DELETE_KEYS:
                 event.stop()
                 if row["kind"] == "profile":
                     self._request_delete_profile(row["name"])
@@ -7520,7 +7524,7 @@ class SettingsScreen(Screen):
                             hint
                         )  # у заголовка, 3с (было _notice — постоянный низ)
                     return
-                if event.key == "delete" and not isinstance(
+                if event.key in _DELETE_KEYS and not isinstance(
                     self.focused, Input
                 ):
                     # Единая клавиша удаления объекта под курсором (§5.3), тот же гейт

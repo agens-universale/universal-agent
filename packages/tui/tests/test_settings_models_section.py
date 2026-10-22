@@ -611,15 +611,40 @@ async def test_hub_glyph_stays_quiet_about_a_foreign_config_error(tmp_path):
         assert scr._menu_glyph(1) == ("—", DEEP_DIM)
 
 
+async def test_backspace_in_the_entry_form_erases_text_not_the_entry(
+    tmp_path,
+):
+    """⌫ в поле формы записи стирает символ и не открывает confirm удаления."""
+    from gc_tui.editors.model_entry_form import ModelEntryForm
+
+    async with _section(tmp_path, _REGISTRY) as (pilot, scr, cfg_file):
+        before = cfg_file.read_bytes()
+        await pilot.press("alt+n")
+        await pilot.pause()
+        form = scr.query(ModelEntryForm).last()
+        alias = form.query_one("#mef-alias", Input)
+        alias.focus()
+        alias.value = "abc"
+        await pilot.pause()
+        alias.cursor_position = 3  # после фокуса: выделение уже снято
+        await pilot.press("backspace")
+        await pilot.pause()
+        assert alias.value == "ab"
+        assert not _editor(scr).awaiting_confirm
+        assert not list(scr.query(".models-confirm"))
+        assert cfg_file.read_bytes() == before
+
+
 # --- удаление -----------------------------------------------------------------
 
 
-async def test_delete_asks_first_and_warns_about_references(tmp_path):
+@pytest.mark.parametrize("key", ["delete", "backspace"])
+async def test_delete_asks_first_and_warns_about_references(tmp_path, key):
     """Del — confirm-баннер; ссылки из слотов/привязок названы В нём (отчёт
     `RemovalReport`), а файл до подтверждения не тронут."""
     async with _section(tmp_path, _REGISTRY) as (pilot, scr, cfg_file):
         before = cfg_file.read_bytes()
-        await pilot.press("delete")
+        await pilot.press(key)
         await pilot.pause()
         text = _texts(scr)
         assert "slots.default" in text
@@ -1332,12 +1357,14 @@ async def test_footer_is_positional_over_the_section_rows(tmp_path):
     """Enter значит разное на строке записи и на строке резервной модели — футер
     обязан называть то, что работает здесь и сейчас."""
     async with _section(tmp_path, _REGISTRY) as (pilot, scr, _cfg_file):
-        assert "Del — удалить" in scr._footer_text()
+        assert "Del/⌫ — удалить" in scr._footer_text()
         ed = _editor(scr)
         _goto(ed, "reserve")
         await pilot.pause()
         footer = scr._footer_text()
-        assert "Del — удалить" not in footer  # резервную запись удалять нечем
+        assert (
+            "Del/⌫ — удалить" not in footer
+        )  # резервную запись удалять нечем
         assert "Enter — изменить" in footer
 
 
@@ -2096,7 +2123,7 @@ async def test_footer_is_positional_on_slot_and_assign_rows(tmp_path):
         await pilot.pause()
         footer = scr._footer_text()
         assert "Enter — выбрать модель" in footer
-        assert "Del — удалить" not in footer
+        assert "Del/⌫ — удалить" not in footer
         _goto(ed, "assign", consumer="summary")
         await pilot.pause()
         assert "Enter — выбрать уровень или модель" in scr._footer_text()
