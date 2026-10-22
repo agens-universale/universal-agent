@@ -3053,7 +3053,9 @@ class TraceScreen(Screen):
             pill = self.query_one("#trace-end-pill", ScrollEndPill)
         except NoMatches:
             return
-        box = trace.content_region
+        # Коробка накладок — ширина подложки реплики в ленте: без колонки
+        # скроллбара (решение 27). Плашка центруется по ней же.
+        box = trace.scrollable_content_region
         if self._stick_bottom:
             self._reset_new_replies()
             sticky.show(None, box)

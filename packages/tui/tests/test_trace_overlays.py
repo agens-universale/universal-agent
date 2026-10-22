@@ -134,8 +134,8 @@ async def test_pill_label_follows_input(tmp_path):
 
 def _assert_pill_clear_of_indicator(scr, pill):
     """Плашка видна на экране и не задевает ни строку индикатора, ни
-    строки причины под ним."""
-    box = _trace(scr).content_region
+    строки причины под ним. Центр — по ширине подложки реплики."""
+    box = _trace(scr).scrollable_content_region
     region = pill.region
     assert pill.display is True
     assert region.height == 1
@@ -242,7 +242,8 @@ async def test_sticky_shows_nearest_reply_above_top(tmp_path):
         await _scroll(pilot, scr, second.virtual_region.y + 2)
         assert sticky.display is True
         assert sticky.reply is second
-        box = _trace(scr).content_region
+        # Решение 27: ширина подложки реплики — без колонки скроллбара.
+        box = _trace(scr).scrollable_content_region
         assert sticky.region == box._replace(height=1)
         line = _line(sticky)
         assert line.startswith("› подними таймаут клиента")
@@ -872,3 +873,20 @@ async def test_quiet_reply_look_is_shared(tmp_path):
         assert colour(sticky_text, 0) == mark.lower()
         assert colour(sticky_text, 3) == ink.lower()  # имя скилла
         assert colour(sticky_text, len(expected) - 1) == ink.lower()
+
+
+@pytest.mark.asyncio
+async def test_sticky_matches_reply_band_with_scrollbar(tmp_path):
+    """Решение 27: липкая реплика — той же ширины и с того же x, что
+    подложка реплики в ленте; на колонку скроллбара не заходит."""
+    _write_task(tmp_path, "o27")
+    async with _app(tmp_path).run_test(size=(100, 30)) as pilot:
+        scr = await _tall(pilot, "o27")
+        sticky, _ = _overlays(scr)
+        _, second = _replies(scr)
+        await _scroll(pilot, scr, second.virtual_region.y + 1)
+        assert _trace(scr).show_vertical_scrollbar
+        band = second.children[0].region
+        assert sticky.display is True
+        assert sticky.region.x == band.x
+        assert sticky.region.right == band.right
