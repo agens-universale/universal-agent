@@ -191,3 +191,73 @@ async def test_symlinked_log_is_not_followed(tmp_path, monkeypatch):
         assert path is None
 
     assert victim.read_text(encoding="utf-8") == "keep\n"
+
+
+def test_second_spawn_does_not_leave_nul_runs_in_the_log(tmp_path):
+    """Два живых процесса с одним логом: второй спавн обрезает файл.
+
+    Без ``O_APPEND`` первый продолжал писать со своего старого смещения —
+    в файле появлялась дыра из NUL, и «последняя строка» была мусором.
+    С ``O_APPEND`` каждая запись идёт в текущий конец файла.
+    """
+    log_path = tmp_path / "server.stderr.log"
+    first = transport._open_private_log(log_path)
+    second = None
+    try:
+        first.write(b"x" * 200 + b"\n")
+        first.flush()
+        second = transport._open_private_log(log_path)
+        second.write(b"second\n")
+        second.flush()
+        first.write(b"first\n")
+        first.flush()
+    finally:
+        first.close()
+        if second is not None:
+            second.close()
+
+    data = log_path.read_bytes()
+    assert b"\x00" not in data, data
+    assert data == b"second\nfirst\n"
+
+
+def test_nul_run_before_the_last_line_gives_a_clean_reason(tmp_path):
+    """NUL-ы в логе (старый лог, чужой писатель) до причины не доходят."""
+    log_path = tmp_path / "server.stderr.log"
+    log_path.write_bytes(
+        b"\x00" * 64 + b"ModuleNotFoundError: boom\n" + b"\x00" * 16 + b"\n"
+    )
+
+    error = transport._exit_error_from_log(1, log_path)
+
+    assert error is not None
+    assert error.last_line == "ModuleNotFoundError: boom"
+    assert "\x00" not in str(error)
+
+
+def test_reason_line_is_capped_for_a_one_line_row(tmp_path):
+    """Строка причины ~120 знаков — как прочие причины строки ``/mcp``.
+
+    Путь лога в причине остаётся целиком: по нему читают подробности.
+    """
+    log_path = tmp_path / "server.stderr.log"
+    log_path.write_text("E" * 500 + "\n", encoding="utf-8")
+
+    error = transport._exit_error_from_log(1, log_path)
+
+    assert error is not None
+    assert error.last_line == "E" * 120
+    assert str(error).endswith(f"(лог: {log_path})")
+
+
+def test_secret_is_redacted_before_the_cap(tmp_path):
+    """Обрезка после маскировки: обрезанный токен паттерн бы не узнал."""
+    log_path = tmp_path / "server.stderr.log"
+    log_path.write_text(
+        "x" * 100 + f" Authorization: Bearer {_SECRET}\n", encoding="utf-8"
+    )
+
+    line = transport._last_stderr_line(log_path)
+
+    assert len(line) <= 120
+    assert _SECRET[:6] not in line, line
