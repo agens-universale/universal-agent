@@ -1,8 +1,9 @@
 """Плагины из git: клонирование в кэш агента по ``plugins.sources``.
 
 Каждый источник (url + ref) живёт в своём каталоге
-``<gc_cache>/plugins/<имя>-<хеш>``. Клон делается один раз; дальше берётся кэш,
-сеть не нужна. Ref закрепляет версию: тег или хеш коммита не меняются сами.
+``<gc_cache>/plugins/<имя>-<хеш>``. Клон делается один раз, при загрузке
+настроек или командой ``gc-plugin``; в цикле агента сеть не используется,
+берётся только готовый кэш. Ref закрепляет версию: тег или хеш коммита не меняются сами.
 Для ветки (или без ref) обновление явное: ``python -m gc_core.plugins.sources
 update`` или удаление каталога кэша. Сбой клона не останавливает агента
 (в лог идёт предупреждение, плагин пропускается).
@@ -79,13 +80,20 @@ def _clone(url: str, ref: str | None, target: Path) -> None:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def resolve_source(source: Any, *, update: bool = False) -> Path | None:
-    """Каталог плагина для одного источника; ``None``, если взять не удалось."""
+def resolve_source(
+    source: Any, *, update: bool = False, fetch: bool = True
+) -> Path | None:
+    """Каталог плагина для одного источника; ``None``, если взять не удалось.
+
+    ``fetch=False``: без клона на диске вернуть ``None`` (промах не кэшируется,
+    чтобы последующий ``fetch=True`` мог клонировать)."""
     url = normalize_url(source.git)
     key = (url, source.ref or "", source.subdir or "")
     if not update and key in _resolved:
         return _resolved[key]
     target = cache_dir(url, source.ref)
+    if not fetch and not update and not (target / ".git").is_dir():
+        return None
     try:
         if update or not (target / ".git").is_dir():
             _clone(url, source.ref, target)
@@ -103,10 +111,10 @@ def resolve_source(source: Any, *, update: bool = False) -> Path | None:
     return result
 
 
-def resolve_sources(sources: list[Any]) -> list[str]:
+def resolve_sources(sources: list[Any], *, fetch: bool = True) -> list[str]:
     out: list[str] = []
     for source in sources:
-        path = resolve_source(source)
+        path = resolve_source(source, fetch=fetch)
         if path is not None:
             out.append(str(path))
     return out

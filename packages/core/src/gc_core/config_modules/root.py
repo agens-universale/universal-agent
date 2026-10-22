@@ -415,7 +415,7 @@ def _merge_plugin_mcp_servers(cfg: Any) -> None:
     """Серверы из ``.mcp.json`` плагинов; свои серверы пользователя важнее."""
     from gc_core.plugins.runtime import configured_paths, plugin_mcp_servers
 
-    paths = configured_paths(cfg.plugins)
+    paths = configured_paths(cfg.plugins, fetch=True)
     if not paths:
         return
     from gc_core.config_modules.mcp import McpServerConfig

@@ -64,15 +64,16 @@ def _plugins_config(ctx: Any) -> Any | None:
         return None
 
 
-def configured_paths(cfg: Any) -> list[str]:
+def configured_paths(cfg: Any, *, fetch: bool = False) -> list[str]:
     """Каталоги плагинов: ``paths`` и ``sources`` из конфига плюс установленные
-    командой ``gc-plugin install`` (включённые)."""
+    командой ``gc-plugin install`` (включённые). Git-источники клонируются
+    только при ``fetch=True`` (загрузка настроек), иначе берётся кэш."""
     paths = list(cfg.paths) if cfg is not None else []
     sources = list(getattr(cfg, "sources", ()) or ())
     if sources:
         from gc_core.plugins.sources import resolve_sources
 
-        paths += resolve_sources(sources)
+        paths += resolve_sources(sources, fetch=fetch)
     if getattr(cfg, "use_installed", True):
         try:
             from gc_core.plugins.installed import enabled_paths
