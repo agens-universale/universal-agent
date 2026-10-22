@@ -13,6 +13,7 @@ from gc_core.attachments.model import (
     wh_text,
 )
 from gc_core.attachments.texts import (
+    STUB_NOBODY,
     STUB_OUT_OF_CONTEXT,
     SUMMARY_IMAGES_CLOSE,
     SUMMARY_IMAGES_OPEN,
@@ -229,3 +230,23 @@ def test_compaction_leaves_images_of_the_kept_batch_out_of_the_block():
 
     assert _line(old) in content
     assert _line(fresh) not in content
+
+
+def test_block_does_not_send_to_view_tool_the_agent_lacks():
+    """Без ``fs_view_image`` в наборе рана записка не советует его вызвать —
+    как и проекция (``STUB_NOBODY``); набор неизвестен — прежняя записка."""
+    att = _attachment(1)
+    messages = [_with("m1", "[Изображение #1]", att)]
+
+    assert _line(att) in render_summary_images_block(
+        messages, available_tools=None
+    )
+    assert _line(att) in render_summary_images_block(
+        messages, available_tools={"fs_view_image"}
+    )
+    lacking = render_summary_images_block(messages, available_tools=set())
+    assert "fs_view_image" not in lacking
+    assert (
+        STUB_NOBODY.format(label=att.label, wh=wh_text(att), path=att.path)
+        in lacking
+    )
