@@ -269,7 +269,7 @@ class _ImageLinksMixin:
 _State = Literal["normal", "pending", "queued", "failed"]
 
 #: Цвет маркера `› ` по состоянию; не названное — ACCENT.
-_MARKER_COLOR = {"failed": _ERR_RED, "queued": _QUIET_MARK}
+_MARKER_COLOR = {"failed": _ERR_RED}
 
 
 class _ReplyBand(_WrappedReply, Widget):
@@ -415,36 +415,55 @@ class UserReplyContainer(_ImageLinksMixin, ClickModelMixin, Widget):
         self._band.refresh(layout=True)
 
     def _reply_lines(self, width: int) -> list[_ReplyLine]:
-        color = _MARKER_COLOR.get(self._state, _ACCENT)
-        lead = Text(USER_PREFIX, style=Style(color=color))
+        quiet = self._state == "queued"
+        if quiet:
+            lead = self._quiet_lead()
+        else:
+            color = _MARKER_COLOR.get(self._state, _ACCENT)
+            lead = Text(USER_PREFIX, style=Style(color=color))
         lines = _build_lines(
             self._text, self._images, self._hover_image_id, lead, width
         )
-        if self._skill is None:
-            return lines
         first = lines[0]
-        head = self._skill_head()
-        body = head.append_text(first.body)
+        if quiet:
+            body = self._quiet_body(first.body)
+        elif self._skill is not None:
+            body = self._skill_head().append_text(first.body)
+        else:
+            return lines
         return [first._replace(body=body), *lines[1:]]
 
     def _skill_head(self) -> Text:
         """`/id ` перед текстом первой строки; без текста — только id.
-        Цвет — цвет текста реплики (стиля нет)."""
+        Цвет — цвет текста реплики (стиля нет). Без скилла — пусто."""
+        if self._skill is None:
+            return Text()
         head = Text("/" + self._skill)
         if self._text:
             head.append(" ")
         return head
 
+    @staticmethod
+    def _quiet_lead() -> Text:
+        """Маркер `› ` «тихой» реплики (решение 17)."""
+        return Text(USER_PREFIX, style=Style(color=_QUIET_MARK))
+
+    def _quiet_body(self, first: Text) -> Text:
+        """Первая строка «тихой» реплики: `/имя ` + текст цветом
+        `QUIET_REPLY_INK`; плашки картинок сохраняют свои стили поверх."""
+        body = self._skill_head().append_text(first)
+        body.stylize_before(Style(color=_QUIET_INK))
+        return body
+
     def quiet_line(self) -> Text:
-        """Реплика одной строкой «тихим» видом: `›` + `/имя` + текст. Тот же
-        вид, что у реплики в очереди (подложка `QUEUE_BG`, текст
-        `QUIET_REPLY_INK`); липкая реплика над лентой рисует его же."""
-        line = Text(USER_PREFIX, style=Style(color=_QUIET_MARK), no_wrap=True)
-        body = " ".join(self._text.split())
-        if self._skill is not None:
-            body = f"/{self._skill} {body}".rstrip()
-        line.append(body, style=Style(color=_QUIET_INK))
-        return line
+        """Реплика одной строкой «тихим» видом: `›` + `/имя` + текст. Её
+        первая строка в очереди собирается теми же `_quiet_lead` и
+        `_quiet_body`; липкая реплика над лентой рисует эту строку."""
+        line = self._quiet_lead()
+        line.no_wrap = True
+        return line.append_text(
+            self._quiet_body(Text(" ".join(self._text.split())))
+        )
 
     def _repaint_images(self) -> None:
         self._band.refresh()

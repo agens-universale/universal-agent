@@ -830,7 +830,7 @@ async def test_pill_label_stable_on_app_blur(tmp_path):
 @pytest.mark.asyncio
 async def test_quiet_reply_look_is_shared(tmp_path):
     """Реплика в очереди и липкая реплика — один «тихий» вид: подложка,
-    текст, маркер и имя скилла совпадают и не разъезжаются."""
+    текст, маркер, цвет текста и имя скилла совпадают посимвольно."""
     from rich.console import Console
     from textual.color import Color
 
@@ -840,7 +840,9 @@ async def test_quiet_reply_look_is_shared(tmp_path):
     _write_task(tmp_path, "o30")
     async with _app(tmp_path).run_test(size=(100, 30)) as pilot:
         scr = await _tall(pilot, "o30")
-        queued = UserReplyContainer("почини тест", state="queued", skill="c")
+        queued = UserReplyContainer(
+            "почини тест", state="queued", skill="supercoder:brainstorming"
+        )
         _trace(scr).mount(queued, before=0)
         await pilot.pause()
         sticky, _ = _overlays(scr)
@@ -849,15 +851,24 @@ async def test_quiet_reply_look_is_shared(tmp_path):
         band = queued.query_one(".user-band")
         assert band.styles.background == sticky.styles.background
         assert sticky.styles.background == Color.parse(palette.QUEUE_BG)
-        assert band.styles.color == Color.parse(palette.QUIET_REPLY_INK)
         queued_text = queued._band.render()
         sticky_text = sticky.render()
+        expected = "› /supercoder:brainstorming почини тест"
+        assert queued_text.plain == expected
+        assert sticky_text.plain == expected
 
         console = Console()
 
         def colour(text, at):
-            return text.get_style_at_offset(console, at).color.name.lower()
+            color = text.get_style_at_offset(console, at).color
+            return color.name.lower() if color else None
 
-        assert colour(queued_text, 0) == colour(sticky_text, 0)
-        assert colour(queued_text, 0) == palette.QUIET_REPLY_MARK.lower()
-        assert colour(sticky_text, 3) == palette.QUIET_REPLY_INK.lower()
+        looks = [
+            (colour(queued_text, at), colour(sticky_text, at))
+            for at in range(len(expected))
+        ]
+        assert all(q == st for q, st in looks)
+        mark, ink = palette.QUIET_REPLY_MARK, palette.QUIET_REPLY_INK
+        assert colour(sticky_text, 0) == mark.lower()
+        assert colour(sticky_text, 3) == ink.lower()  # имя скилла
+        assert colour(sticky_text, len(expected) - 1) == ink.lower()

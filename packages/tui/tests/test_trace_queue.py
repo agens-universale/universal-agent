@@ -180,7 +180,8 @@ def test_queued_reply_shows_full_skill_id_in_reply_colour():
     assert line.plain == "› /supercoder:brainstorming текст"
     assert _color_at(line, 3) == {RichColor.parse(palette.QUIET_REPLY_INK)}
     assert reply._band.render().plain == ("› /supercoder:brainstorming текст")
-    assert _skill_color(reply) == set()
+    # имя скилла — цветом текста тихой реплики, как и весь её текст
+    assert _skill_color(reply) == {RichColor.parse(palette.QUIET_REPLY_INK)}
 
 
 def test_normal_reply_skill_has_no_colour_of_its_own():
@@ -199,7 +200,7 @@ def test_skill_error_name_as_typed_in_plain_colour():
         "текст", state="queued", skill="coder", skill_error=True
     )
     assert reply.quiet_line().plain == "› /coder текст"
-    assert _skill_color(reply) == set()
+    assert _skill_color(reply) == {RichColor.parse(palette.QUIET_REPLY_INK)}
     assert reply._consequences[0].plain.startswith("скилл coder не найден")
 
 
