@@ -45,6 +45,9 @@ class ChildInputScope:
         self._q_lock = threading.Lock() if thread_safe else nullcontext()
         self._pending: List[Dict[str, Any]] = []
         self._on_enqueue: Optional[Callable[[Dict[str, Any]], None]] = None
+        # Очередь родителя после закрытия скоупа (см. `close`): None — скоуп
+        # ещё принимает реплики сам.
+        self._closed_sink: Optional[Callable[[Dict[str, Any]], None]] = None
 
     def set_on_enqueue(
         self, callback: Optional[Callable[[Dict[str, Any]], None]]
@@ -55,6 +58,13 @@ class ChildInputScope:
         # Лок нужен здесь и только здесь: очередь наполняет ЧУЖОЙ поток (TUI,
         # обработчик запроса сервера), а разбирает её loop прогона.
         with self._q_lock:
+            sink = self._closed_sink
+            if sink is not None:
+                # Ребёнок уже закончил, а поток взял скоуп до закрытия:
+                # реплика — родителю, под тем же локом, что и остаток, —
+                # вслед за ним, а не впереди.
+                sink(message)
+                return
             self._pending.append(message)
         cb = self._on_enqueue
         if cb is not None:
@@ -70,6 +80,19 @@ class ChildInputScope:
             self._pending.clear()
             return out
 
+    def close(self, sink: Callable[[Dict[str, Any]], None]) -> None:
+        """Закрыть очередь: остаток и всё, что придёт позже, — в ``sink``.
+
+        Остаток — реплики, пришедшие после последнего забора ребёнком: без
+        этого они пропадали вместе со скоупом. Отдаём под локом очереди, чтобы
+        реплика, пришедшая одновременно с закрытием, не обогнала остаток.
+        """
+        with self._q_lock:
+            self._closed_sink = sink
+            leftover, self._pending = self._pending, []
+            for message in leftover:
+                sink(message)
+
 
 @contextmanager
 def activate_child_input(
@@ -83,6 +106,14 @@ def activate_child_input(
     try:
         yield scope
     finally:
+        # Сначала закрываем очередь, потом снимаем регистрацию: в обратном
+        # порядке реплика, пришедшая между шагами, ушла бы родителю напрямую
+        # и обогнала остаток очереди. Пути к очереди родителя нет (контекст
+        # без исполнителя, ребёнок Temporal) — остаток забирает владелец
+        # скоупа сам, как раньше.
+        sink = getattr(ctx, "parent_input_sink", None)
+        if sink is not None:
+            scope.close(sink)
         # Снимаем только СВОЮ регистрацию: если поверх успел встать другой
         # скоуп, затирать его нельзя — иначе его сообщения уйдут родителю.
         if getattr(ctx, "child_input_scope", None) is scope:

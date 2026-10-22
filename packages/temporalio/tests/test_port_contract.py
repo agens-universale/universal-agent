@@ -79,6 +79,9 @@ CORE_CONTEXT_ATTRIBUTES = {
     "operations": BOUND,
     "os_backend": BOUND + " (ExternalResources: прямой доступ — отказ)",
     "parent_call_id": DATA,
+    "parent_input_sink": DATA
+    + ": очередь родителя в памяти (AgentExecutor); у ребёнка Temporal её"
+    + " нет — остаток скоупа уходит родителю как undelivered",
     "permission_store": DATA,
     "project_gc_dir": DATA,
     "project_memory_io": BOUND,
