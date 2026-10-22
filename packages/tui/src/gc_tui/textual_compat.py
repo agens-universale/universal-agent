@@ -17,7 +17,6 @@ import logging
 
 import textual
 from textual import selection
-from textual._auto_scroll import get_auto_scroll_regions
 from textual.geometry import Offset
 from textual.screen import Screen
 from textual.widget import Widget
@@ -146,6 +145,9 @@ def auto_scroll_below(
         or container.scroll_y >= container.max_scroll_y
     ):
         return False
+    # Приватный модуль — после стража версии: на иной его может не быть.
+    from textual._auto_scroll import get_auto_scroll_regions
+
     lines = screen.app.SELECT_AUTO_SCROLL_LINES
     _up, down = get_auto_scroll_regions(
         container.content_region, auto_scroll_lines=lines

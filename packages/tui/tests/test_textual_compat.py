@@ -110,6 +110,24 @@ def test_other_version_not_patched(monkeypatch, caplog):
     assert "пересмотреть" in caplog.text
 
 
+def test_other_version_without_private_module_imports(monkeypatch):
+    """На чужой версии Textual приватного модуля может не быть: импорт
+    приложения не падает, патч не ставится."""
+    import importlib
+    import sys
+
+    import gc_tui
+
+    for name in ("textual_compat", "app"):
+        monkeypatch.setattr(gc_tui, name, getattr(gc_tui, name))
+        monkeypatch.delitem(sys.modules, f"gc_tui.{name}")
+    monkeypatch.setitem(sys.modules, "textual._auto_scroll", None)
+    monkeypatch.setattr(textual, "__version__", "9.0.0")
+    importlib.import_module("gc_tui.app")
+    fresh = importlib.import_module("gc_tui.textual_compat")
+    assert fresh.apply_textual_patches() is False
+
+
 class _BelowScreenApp(_Lines):
     """Стенд repro2.py с протяжкой ниже ленты, как у TraceScreen."""
 
