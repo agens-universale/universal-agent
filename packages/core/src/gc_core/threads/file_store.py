@@ -1227,7 +1227,14 @@ class FileThreadStore(ThreadStore):
         return BlobRef(key=key, name=name, mime=mime, location=str(path))
 
     async def get_blob(self, ref: BlobRef) -> bytes:
-        path = Path(self._dir) / layout.IMAGES_DIR / ref.name
+        # Только вложение этого треда в каталоге вложений: путь в имени
+        # (абсолютный, ``..``) или чужой префикс — нет такого вложения, а не
+        # файл с диска (имя приходит и от песочницы через прокси треда).
+        name = ref.name
+        prefix = f"{ref.key.system}_{ref.key.thread}_"
+        if Path(name).name != name or not name.startswith(prefix):
+            raise FileNotFoundError(ref.location)
+        path = Path(self._dir) / layout.IMAGES_DIR / name
         if not path.exists():
             raise FileNotFoundError(ref.location)
         return path.read_bytes()

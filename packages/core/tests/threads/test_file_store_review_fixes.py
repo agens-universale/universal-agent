@@ -5,6 +5,7 @@ import asyncio
 import json
 from datetime import timedelta
 
+import pytest
 from gc_core.threads import file_store as file_store_module
 from gc_core.threads.file_store import FileThreadStore
 from gc_core.threads.models import (
@@ -288,3 +289,46 @@ async def test_extra_cannot_override_mapped_meta_keys(tmp_path):
     after = await store.get_thread(key)
     assert after.frontend["swarm"] == {"swarm_id": "s1"}
     assert after.extra.get("own_key") == 1
+
+
+async def test_blob_name_cannot_leave_the_images_of_the_thread(tmp_path):
+    """``get_blob`` читает только вложения своего треда: путь в имени и
+    чужой префикс — ``FileNotFoundError``, а не файл с диска."""
+    from gc_core.threads.file_store import FileThreadStore
+    from gc_core.threads.models import BlobRef, ThreadKey
+
+    secret = tmp_path / "secret.txt"
+    secret.write_text("HOSTPW")
+    store = FileThreadStore(str(tmp_path / "threads"))
+    key = ThreadKey(system="generic", thread="t1")
+    other = ThreadKey(system="generic", thread="t2")
+    own = await store.put_blob(key, b"img", mime="image/png")
+    foreign = await store.put_blob(other, b"other", mime="image/png")
+    assert await store.get_blob(own) == b"img"
+    for name in (str(secret), "../../secret.txt", foreign.name):
+        ref = BlobRef(key=key, name=name, mime="text/plain", location="")
+        with pytest.raises(FileNotFoundError):
+            await store.get_blob(ref)
+
+
+def test_exotic_list_cursors_are_invalid_not_store_errors():
+    """Ревью, раунд 2 (M1): курсор с моментом вне диапазона (после перевода
+    в UTC), до 1970 года, с NUL или негодным именем — ``InvalidCursor``
+    (400), а не ошибка базы или валидации (500) и не «первая страница»."""
+    from gc_core.threads.errors import InvalidCursor
+    from gc_core.threads.rules import parse_list_cursor
+
+    for cursor in (
+        "0001-01-01T00:00:00+14:00|s|t",
+        "1969-12-31T23:59:59+00:00|s|t",
+        "2026-10-22T00:00:00+00:00|s\x00|t",
+        "2026-10-22T00:00:00+00:00|s|t\x00",
+    ):
+        with pytest.raises(InvalidCursor):
+            parse_list_cursor(cursor)
+    moment, system, thread = parse_list_cursor("2026-10-22T03:00:00+03:00|s|t")
+    assert (moment.isoformat(), system, thread) == (
+        "2026-10-22T00:00:00+00:00",
+        "s",
+        "t",
+    )
