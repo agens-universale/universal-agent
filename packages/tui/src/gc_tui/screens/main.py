@@ -2323,9 +2323,7 @@ class TraceScreen(Screen):
         # берём его значения; их нет (старый тред) — сессия возвращается к умолчанию.
         task_meta = self._store.get_task_meta(task_id)
         saved = read_from_meta(task_meta)
-        # Предохранитель моделей (спека §8) — тоже владение треда: restore ЦЕЛИКОМ
-        # заменяет breaker окна под новый тред (старое состояние не должно течь).
-        self.app.load_circuit_breaker(read_breaker_from_meta(task_meta))
+        self._adopt_thread_breaker(task_meta)
         # Пересобираем executor только при РЕАЛЬНОЙ смене набора: attach идёт и на
         # каждом автосозданном треде, и на возврате к тому же — прогретый раннер
         # (с уже пройденным MCP-дискавери) выбрасывать зря нельзя.
@@ -5333,10 +5331,17 @@ class TraceScreen(Screen):
 
     def _finished_run_task_id(self, runner) -> str | None:
         """Тред, чей прогон закончился: цель раннера, иначе активный."""
-        target = getattr(runner, "_last_target", None)
-        if target and target[1] == self.app._system:
-            return target[0]
-        return self._active_task_id
+        return self.app.run_thread_id(runner) or self._active_task_id
+
+    def _adopt_thread_breaker(self, task_meta: dict) -> None:
+        """Предохранитель моделей — владение треда (спека §8): restore
+        ЦЕЛИКОМ заменяет breaker окна под открытый тред. Пока идёт ход,
+        предохранитель принадлежит его треду — им пользуется исполнитель;
+        открытый получит свой в конце хода (`_on_run_finished`)."""
+        runner = getattr(self.app, "active_runner", None)
+        if runner is not None and runner.is_running():
+            return
+        self.app.load_circuit_breaker(read_breaker_from_meta(task_meta))
 
     def _on_run_finished(self, runner, kind: str) -> None:
         """Спадающий фронт прогона: исход — в мету треда прогона.
@@ -5359,6 +5364,11 @@ class TraceScreen(Screen):
         self.app.last_stop_requested = False
         self._update_terminal_title()
         if not on_screen:
+            # Ход чужого треда кончился: предохранитель — открытому.
+            open_tid = self._active_task_id
+            self._adopt_thread_breaker(
+                self._store.get_task_meta(open_tid) if open_tid else {}
+            )
             return
         # Ход закончился предложенным планом — баннер одобрения.
         if plan_proposed:

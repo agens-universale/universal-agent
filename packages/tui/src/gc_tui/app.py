@@ -1458,23 +1458,40 @@ class TuiApp(App):
             self.effective_settings()
         )
 
-    def persist_circuit_breaker(self) -> None:
+    def persist_circuit_breaker(
+        self,
+        task_id: Optional[str] = None,
+        snapshot: Optional[dict] = None,
+    ) -> None:
         """Снимок предохранителя моделей (спека §8) в meta треда — переживает
-        пересборки executor внутри сессии (владелец состояния — сессия-тред)."""
-        task_id = getattr(self.tui_state, "active_task_id", None)
+        пересборки executor внутри сессии (владелец состояния — сессия-тред).
+        По умолчанию — открытый тред и текущее состояние предохранителя."""
+        task_id = task_id or getattr(self.tui_state, "active_task_id", None)
         if not task_id or not self._threads_dir:
             return
         from gc_tui.services.stores.file_store import FileTaskStore
         from gc_tui.session_settings import to_breaker_meta_patch
 
+        if snapshot is None:
+            snapshot = self._circuit_breaker.snapshot()
         store = FileTaskStore(
             threads_dir=self._threads_dir, system=self._system
         )
-        store.update_tui_meta(
-            task_id, to_breaker_meta_patch(self._circuit_breaker.snapshot())
-        )
+        store.update_tui_meta(task_id, to_breaker_meta_patch(snapshot))
 
-    def _persist_breaker_after_worker(self) -> None:
+    def run_thread_id(self, runner) -> Optional[str]:
+        """Тред прогона раннера; None — работа не прогон (сжатие, прогрев)
+        или цели нет: тогда она принадлежит открытому треду."""
+        target = getattr(runner, "_last_target", None)
+        if (
+            getattr(runner, "_thread_kind", "run") == "run"
+            and target
+            and target[1] == self._system
+        ):
+            return target[0]
+        return None
+
+    def _persist_breaker_after_worker(self, runner) -> None:
         """`persist_circuit_breaker`, вызванный ИЗ worker-потока раннера.
 
         Мост на UI-поток обязателен: persist — полный read-modify-write meta.json
@@ -1483,13 +1500,22 @@ class TuiApp(App):
         перезаписи от разных потоков теряют одну правку, а прерванная запись
         оставляет обрезанный файл, который потом читается как пустой.
 
+        Тред и снимок берутся здесь, на воркере: снимок принадлежит треду
+        прогона, а не открытому. Иначе трип хода сессии B, пока открыта A,
+        лёг бы в meta A, а запись, дошедшая до UI-потока после смены сессии,
+        унесла бы туда уже загруженное состояние новой.
+
         RuntimeError из `call_from_thread` — приложение не запущено (тесты,
         headless) или мы уже на UI-потоке: гонки в этом случае нет, пишем
         напрямую, потому что потерять трип хуже."""
+        task_id = self.run_thread_id(runner)
+        snapshot = self._circuit_breaker.snapshot()
         try:
-            self.call_from_thread(self.persist_circuit_breaker)
+            self.call_from_thread(
+                self.persist_circuit_breaker, task_id, snapshot
+            )
         except RuntimeError:
-            self.persist_circuit_breaker()
+            self.persist_circuit_breaker(task_id, snapshot)
 
     def load_circuit_breaker(self, snapshot: dict) -> None:
         """Восстановить предохранитель из meta треда при attach (спека §8):
@@ -1700,8 +1726,8 @@ class TuiApp(App):
         # Ctrl+C. Проверка владельца отсекает UI-поля ЧУЖОГО раннера — предохранитель
         # к ним не относится.
         def _on_runner_error(exc: BaseException) -> None:
-            self._persist_breaker_after_worker()
             runner = runner_ref[0] if runner_ref else None
+            self._persist_breaker_after_worker(runner)
             if runner is None or runner is not self.active_runner:
                 return
             if getattr(runner, "_marked_stopped", False):
@@ -1711,8 +1737,8 @@ class TuiApp(App):
             self.last_runner_error = describe_turn_error(exc)
 
         def _on_runner_complete(outcome: Optional[str]) -> None:
-            self._persist_breaker_after_worker()
             runner = runner_ref[0] if runner_ref else None
+            self._persist_breaker_after_worker(runner)
             if runner is None or runner is not self.active_runner:
                 return
             self.last_terminal_outcome = outcome
