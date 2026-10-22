@@ -1782,7 +1782,7 @@ class TuiApp(App):
                 return
             if getattr(runner, "_marked_stopped", False):
                 return
-            from gc_tui.services.turn_error import describe_turn_error
+            from gc_core.turn_error import describe_turn_error
 
             self.last_runner_error = describe_turn_error(exc)
 

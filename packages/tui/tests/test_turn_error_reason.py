@@ -15,47 +15,6 @@ from gc_tui.palette import DIM
 _TID = "lerr0000000000000000000000000001a"
 
 
-class _ReadError(Exception):
-    pass
-
-
-def test_reason_is_class_and_first_line():
-    from gc_tui.services.turn_error import describe_turn_error
-
-    exc = _ReadError("connection reset by peer\ntraceback tail")
-    assert describe_turn_error(exc) == "_ReadError: connection reset by peer"
-
-
-def test_reason_without_message_is_class():
-    from gc_tui.services.turn_error import describe_turn_error
-
-    assert describe_turn_error(_ReadError()) == "_ReadError"
-
-
-def test_long_reason_is_cut():
-    from gc_tui.services.turn_error import (
-        TURN_ERROR_LIMIT,
-        describe_turn_error,
-    )
-
-    reason = describe_turn_error(_ReadError("слово " * 200))
-    assert len(reason) <= TURN_ERROR_LIMIT
-    assert reason.endswith("…")
-
-
-def test_reason_masks_secrets():
-    """Ключ в первой строке (адрес с ключом, заголовок) маскируется общим
-    редактором секретов ядра — и в meta, и на экране."""
-    from gc_core.security.log_redaction import MASK
-    from gc_tui.services.turn_error import describe_turn_error
-
-    key = "sk-" + "a1B2c3D4e5F6g7H8i9J0"
-    exc = _ReadError(f"401 for https://api.example/v1?key={key}")
-    reason = describe_turn_error(exc)
-    assert key not in reason
-    assert reason == f"_ReadError: 401 for https://api.example/v1?key={MASK}"
-
-
 def _styles_of(text, fragment: str) -> list[str]:
     return [
         str(s.style)
