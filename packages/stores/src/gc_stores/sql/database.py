@@ -46,6 +46,9 @@ class Database(ABC):
     его зовут оба хранилища общего подключения (``open_stores``).
     """
 
+    #: Предел вложения треда в байтах (``None`` — без предела базы).
+    max_blob_bytes: int | None = None
+
     @abstractmethod
     def transaction(self) -> AbstractAsyncContextManager[Conn]:
         """Транзакция записи: READ COMMITTED (Postgres, MySQL) или

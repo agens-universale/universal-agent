@@ -18,12 +18,17 @@ from gc_stores.sql.database import Database, LoopBound
 #: Сообщение с выводом тула бывает в мегабайты: клиент по умолчанию режет
 #: пакет на 16 МБ, сервер — по своему ``max_allowed_packet``.
 _PACKET = 64 * 1024 * 1024
+#: Вложение — одна строка результата: asyncmy не дочитывает строку больше
+#: одного пакета протокола (2**24 - 1 байт) и сбивает соединение. Запас —
+#: на заголовок строки.
+MAX_BLOB_BYTES = 16 * 1024 * 1024 - 64 * 1024
 _POOL_DEFAULTS = {"minsize": 1, "maxsize": 10}
 #: Дедлок (1213) и ожидание блокировки (1205): транзакцию можно повторить.
 _RETRYABLE = frozenset({1205, 1213})
-#: Коды клиента MySQL «нет соединения»: не подключиться (2002, 2003),
-#: сервер ушёл (2006), соединение потеряно (2013, 2055).
-_UNAVAILABLE = frozenset({2002, 2003, 2006, 2013, 2055})
+#: Коды MySQL «база временно недоступна»: не подключиться (2002, 2003),
+#: сервер ушёл (2006), соединение потеряно (2013, 2055), сервер
+#: останавливается (1053), соединений не хватает (1040).
+_UNAVAILABLE = frozenset({1040, 1053, 2002, 2003, 2006, 2013, 2055})
 
 
 def driver() -> Any:
@@ -86,6 +91,8 @@ class MySQLDatabase(Database):
     """База MySQL: ровно один из ``dsn`` и ``pool`` (пул asyncmy с
     ``autocommit=True`` и UTC — его закрывает владелец)."""
 
+    max_blob_bytes = MAX_BLOB_BYTES
+
     def __init__(
         self,
         dsn: str | None = None,
@@ -130,8 +137,15 @@ class MySQLDatabase(Database):
     async def _cursor(self) -> AsyncIterator[Any]:
         pool = await self.pool()
         dict_cursor = driver().cursors.DictCursor
-        async with pool.acquire() as conn, conn.cursor(dict_cursor) as cur:
-            yield cur
+        async with pool.acquire() as conn:
+            try:
+                async with conn.cursor(dict_cursor) as cur:
+                    yield cur
+            except driver().errors.InternalError:
+                # Драйвер сбился с протокола (номер пакета): закрытое
+                # соединение пул не вернёт — следующий запрос не упадёт.
+                conn.close()
+                raise
 
     @asynccontextmanager
     async def transaction(self) -> AsyncIterator[_Conn]:

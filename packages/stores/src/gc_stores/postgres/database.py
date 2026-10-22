@@ -146,8 +146,10 @@ class PostgresDatabase(Database):
         return type(exc).__name__ in _RETRYABLE
 
     def unavailable(self, exc: BaseException) -> bool:
-        """Сеть до базы (``OSError``: отказ, DNS, таймаут) или соединение,
-        которое драйвер счёл потерянным."""
+        """Сеть до базы (``OSError``: отказ, DNS, таймаут), соединение,
+        которое драйвер счёл потерянным, или база, которая перезапускается
+        или переключается (57P01–57P03) и которой не хватает соединений
+        (53300): через секунды она снова отвечает — запись повторяется."""
         if isinstance(exc, (OSError, TimeoutError)):
             return True
         try:
@@ -155,5 +157,13 @@ class PostgresDatabase(Database):
         except ImportError:  # драйвера нет — это не обрыв соединения
             return False
         return isinstance(
-            exc, (errors.PostgresConnectionError, errors.InterfaceError)
+            exc,
+            (
+                errors.PostgresConnectionError,
+                errors.InterfaceError,
+                errors.AdminShutdownError,
+                errors.CrashShutdownError,
+                errors.CannotConnectNowError,
+                errors.TooManyConnectionsError,
+            ),
         )

@@ -45,6 +45,11 @@ def _normalized(text: str) -> str:
     return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
+#: Источник ресурса, найденного без записи манифеста: чей он — неизвестно.
+#: Не ``None`` (ресурс человека): его умолчания пакета не обновили бы никогда.
+HEALED_SOURCE = "unknown"
+
+
 class KvAgentStore(AgentStore):
     """Ресурсы и память агента ``agent_id`` в KV ``kv``; ``backend`` —
     имя хранилища для текстов отказа (``redis``, ``s3``)."""
@@ -271,8 +276,10 @@ class KvAgentStore(AgentStore):
     async def _heal(
         self, manifest: dict[str, Any], scopes: set[str]
     ) -> dict[str, Any]:
-        """Манифест по ресурсам ``scopes``: ресурс без записи — запись
-        человека (без метки источника), запись без ресурса — прочь."""
+        """Манифест по ресурсам ``scopes``: ресурс без записи — источник
+        неизвестен (``HEALED_SOURCE``: упасть между ресурсом и манифестом мог
+        и ``sync --with-defaults`` — умолчания пакета такой ресурс обновят),
+        запись без ресурса — прочь."""
         stored: dict[str, str] = {}
         for scope in scopes:
             stored.update(await self._stored(scope))
@@ -283,7 +290,7 @@ class KvAgentStore(AgentStore):
                 if found is not None:
                     patch[entry] = {
                         "version": hashlib.sha256(found.data).hexdigest(),
-                        "source": None,
+                        "source": HEALED_SOURCE,
                     }
         for entry in manifest:
             if entry.split("|", 1)[0] in scopes and entry not in stored:
