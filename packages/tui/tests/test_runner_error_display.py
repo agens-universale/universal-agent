@@ -18,12 +18,12 @@ from gc_testkit.tui_support import tui_settings
 from gc_tui.services.agent_runner import AgentRunner, run_error_text
 
 
-def _bad_response() -> BackendBadResponseError:
+def _bad_response(api_mode="chat_completions") -> BackendBadResponseError:
     return BackendBadResponseError(
         status_code=200,
         content_type="text/plain",
         length=0,
-        api_mode="chat_completions",
+        api_mode=api_mode,
     )
 
 
@@ -31,6 +31,19 @@ def test_bad_response_text_is_human():
     assert run_error_text(_bad_response()) == (
         "Сервер модели вернул пустой или не-JSON ответ (HTTP 200, 0 байт) — "
         "возможно, прокси не поддерживает stream:false; повторите запрос"
+    )
+
+
+def test_bad_response_hint_in_responses_mode_is_about_the_stream():
+    """В режиме responses запрос всегда стримовый: совет про stream:false
+    там ложный — подсказка о потоке, который прокси оборвал или испортил."""
+    text = run_error_text(_bad_response("responses"))
+
+    assert "stream:false" not in text
+    assert text == (
+        "Сервер модели вернул пустой или не-JSON ответ (HTTP 200, 0 байт) — "
+        "возможно, прокси оборвал или испортил поток ответа; "
+        "повторите запрос"
     )
 
 

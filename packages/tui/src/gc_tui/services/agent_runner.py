@@ -40,10 +40,16 @@ def run_error_text(exc: BaseException) -> str:
     «'choices'» не опознать.
     """
     if isinstance(exc, BackendBadResponseError):
+        # В режиме responses запрос всегда стримовый — совет про
+        # stream:false там ложный; виноват поток, который прокси испортил.
+        if exc.api_mode == "responses":
+            hint = "прокси оборвал или испортил поток ответа"
+        else:
+            hint = "прокси не поддерживает stream:false"
         return (
             "Сервер модели вернул пустой или не-JSON ответ "
-            f"(HTTP {exc.status_code}, {exc.length} байт) — возможно, прокси "
-            "не поддерживает stream:false; повторите запрос"
+            f"(HTTP {exc.status_code}, {exc.length} байт) — возможно, "
+            f"{hint}; повторите запрос"
         )
     text = str(exc)
     name = exc.__class__.__name__
