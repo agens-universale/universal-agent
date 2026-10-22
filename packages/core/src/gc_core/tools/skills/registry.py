@@ -822,6 +822,7 @@ def get_skills_registry(
     settings: Any = None,
     *,
     backend: FsBackend | None = None,
+    project_root: Optional[str] = None,
 ) -> SkillsRegistry:
     """
     Фабрика реестра скиллов.
@@ -837,7 +838,8 @@ def get_skills_registry(
       SKILL.md), и паки (подпапка с pack.yaml). Корень, сам являющийся паком,
       не распознаётся — указывайте родительскую директорию.
     - Иначе — three-layer режим: System (<repo>/skills/) + User (gc_paths()["data"]/skills)
-      + Project (<cwd>/.gc/skills/), приоритет project > user > system.
+      + Project (``project_root``, по умолчанию <cwd>/.gc/skills/), приоритет
+      project > user > system.
     """
     skills_root: Optional[str] = None
     disable_skills = disabled_skills_from_config(settings)
@@ -852,7 +854,11 @@ def get_skills_registry(
             disable_skills=disable_skills,
             backend=backend,
         )
-    return SkillsRegistry(disable_skills=disable_skills, backend=backend)
+    return SkillsRegistry(
+        disable_skills=disable_skills,
+        backend=backend,
+        project_root=project_root,
+    )
 
 
 __all__ = [

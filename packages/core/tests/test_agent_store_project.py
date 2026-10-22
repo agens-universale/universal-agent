@@ -130,3 +130,30 @@ async def test_run_project_follows_the_turn_directory(tmp_path, monkeypatch):
     ctx = await acreate_run_context(cfg)
     assert Path(ctx.project_gc_dir) == turn / ".gc"
     assert project_key_of(ctx).root == str(turn)
+
+
+async def test_project_skills_follow_the_project_of_the_run(
+    tmp_path, monkeypatch
+):
+    """Ревью, раунд 2 (R9): ход chat/a2a в каталоге клиента видит скиллы
+    этого проекта, а не каталога, из которого запущен процесс."""
+    from gc_core.agent_store import FileAgentStore, ProjectKey
+    from gc_testkit.settings import make_settings
+
+    def skill(root, name):
+        path = root / ".gc" / "skills" / name / "SKILL.md"
+        path.parent.mkdir(parents=True)
+        path.write_text(f"---\nname: {name}\ndescription: d\n---\nтело\n")
+
+    process_dir, client_project = tmp_path / "srv", tmp_path / "client"
+    skill(process_dir, "server-only")
+    skill(client_project, "client-skill")
+    monkeypatch.chdir(process_dir)
+    registry = FileAgentStore().skills_registry(
+        make_settings({}),
+        backend=None,
+        project=ProjectKey(id="client", root=str(client_project)),
+    )
+    names = {s["name"] for s in await registry.list_skills()}
+    assert "client-skill" in names
+    assert "server-only" not in names

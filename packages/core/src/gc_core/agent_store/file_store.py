@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from pathlib import Path
@@ -47,11 +48,17 @@ def memory_path(project: ProjectKey) -> Path:
 
 def _memory_lock(project: ProjectKey):
     """Замок памяти проекта между процессами (TUI и gc-cli в одном
-    репозитории): сверка версии и запись — под ним. Файл замка — рядом с
-    бэкапом, в каталоге состояния, а не в ``.gc`` репозитория."""
+    репозитории): сверка версии и запись — под ним. Ключ — файл памяти, а не
+    ``project_id``: процессы с разным id на одном репозитории пишут один
+    файл. Файл замка — в каталоге состояния, а не в ``.gc`` репозитория."""
+    import hashlib
+
+    from gc_core.config_modules.env_vars import gc_paths
     from gc_core.utils.file_lock import file_lock
 
-    return file_lock(memory_backup_path(project))
+    target = str(memory_path(project).resolve())
+    digest = hashlib.sha256(target.encode("utf-8")).hexdigest()[:24]
+    return file_lock(Path(gc_paths()["state"]) / "memory-locks" / digest)
 
 
 def memory_backup_path(project: ProjectKey) -> Path:
@@ -153,12 +160,7 @@ class FileAgentStore(AgentStore):
             return _memory_on_disk(memory_path(project))
 
     async def restore_memory(self, project: ProjectKey) -> None:
-        from gc_core.project_memory import storage
-
-        with storage._lock, _memory_lock(project):
-            storage.restore_from_backup(
-                memory_path(project), memory_backup_path(project)
-            )
+        await asyncio.to_thread(_restore_memory_locked, project)
 
     async def write_memory(
         self,
@@ -167,21 +169,11 @@ class FileAgentStore(AgentStore):
         *,
         expected_version: str | None,
     ) -> ProjectMemory:
-        from gc_core.project_memory import storage
-
-        path = memory_path(project)
-        with storage._lock, _memory_lock(project):
-            # Нечитаемую память (чужая кодировка) полная запись заменяет — как
-            # и раньше: её версии нет.
-            try:
-                current = _memory_on_disk(path)
-            except (OSError, UnicodeDecodeError):
-                current = None
-            version = current.version if current is not None else None
-            if version != expected_version:
-                raise MemoryConflict(current)
-            storage._atomic_write(path, text)
-            storage.mirror_backup(memory_backup_path(project), text)
+        # Ожидание замка (до секунд, пока пишет другой процесс) — в потоке:
+        # на loop стояли бы все поверхности сервера.
+        await asyncio.to_thread(
+            _write_memory_locked, project, text, expected_version
+        )
         # Версия — та, что вернёт следующее чтение: файл читается с
         # приведением переводов строк (\r\n и \r → \n), иначе следующая
         # запись по этой версии упрётся в ложный конфликт.
@@ -197,12 +189,16 @@ class FileAgentStore(AgentStore):
         backend: Any,
         project: ProjectKey | None = None,
     ) -> SkillsRegistry:
-        # Корень слоя project у файлового реестра — <cwd>/.gc/skills, а
-        # проект рана строится из того же cwd: project не нужен.
-        del project
+        # Слой project — скиллы проекта рана (<root>/.gc/skills): ход chat
+        # или a2a идёт в каталоге клиента, а не в cwd процесса.
         from gc_core.tools.skills.registry import get_skills_registry
 
-        return get_skills_registry(settings, backend=backend)
+        root = project.root if project is not None else None
+        return get_skills_registry(
+            settings,
+            backend=backend,
+            project_root=str(Path(root) / ".gc" / "skills") if root else None,
+        )
 
     async def aprovision_skills(
         self,
@@ -246,6 +242,36 @@ def _candidate(path: str, kind: str, name: str) -> bytes | None:
         )
         return None
     return data if data.strip() else None
+
+
+def _write_memory_locked(
+    project: ProjectKey, text: str, expected_version: str | None
+) -> None:
+    """Сверка версии и запись памяти — под замком файла памяти."""
+    from gc_core.project_memory import storage
+
+    path = memory_path(project)
+    with storage._lock, _memory_lock(project):
+        # Нечитаемую память (чужая кодировка) полная запись заменяет — как и
+        # раньше: её версии нет.
+        try:
+            current = _memory_on_disk(path)
+        except (OSError, UnicodeDecodeError):
+            current = None
+        version = current.version if current is not None else None
+        if version != expected_version:
+            raise MemoryConflict(current)
+        storage._atomic_write(path, text)
+        storage.mirror_backup(memory_backup_path(project), text)
+
+
+def _restore_memory_locked(project: ProjectKey) -> None:
+    from gc_core.project_memory import storage
+
+    with storage._lock, _memory_lock(project):
+        storage.restore_from_backup(
+            memory_path(project), memory_backup_path(project)
+        )
 
 
 def _memory_on_disk(path: Path) -> ProjectMemory | None:
