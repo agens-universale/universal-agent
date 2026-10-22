@@ -7,6 +7,7 @@ import asyncio
 import contextlib
 import hashlib
 import json
+import os
 import queue
 import re
 import subprocess
@@ -525,8 +526,7 @@ def _stderr_log(
     """
     path = _stderr_log_path(server_cfg)
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        handle = path.open("wb")
+        handle = _open_private_log(path)
     except OSError:
         yield subprocess.DEVNULL, None
         return
@@ -536,8 +536,35 @@ def _stderr_log(
         handle.close()
 
 
+def _open_private_log(path: Path) -> Any:
+    """Открыть лог на запись с нуля — только для владельца.
+
+    В stderr серверы печатают ошибки авторизации вместе с токенами, поэтому
+    файл 0600, а каталог создаётся 0700 (чужой существующий не трогаем).
+    ``O_NOFOLLOW`` — не писать по подложенному симлинку; на Windows его нет,
+    и права там почти не значат, но открытие работает так же. Лог, оставшийся
+    с более широкими правами, ``fchmod`` сужает: ``O_CREAT`` их не меняет.
+    """
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    flags = (
+        os.O_WRONLY
+        | os.O_CREAT
+        | os.O_TRUNC
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_BINARY", 0)
+    )
+    fd = os.open(path, flags, 0o600)
+    try:
+        if hasattr(os, "fchmod"):
+            os.fchmod(fd, 0o600)
+        return os.fdopen(fd, "wb")
+    except BaseException:
+        os.close(fd)
+        raise
+
+
 def _last_stderr_line(path: Path) -> str:
-    """Последняя непустая строка лога; пусто — причины нет."""
+    """Последняя непустая строка лога, секреты замаскированы; пусто — нет."""
     try:
         with open(path, "rb") as fh:
             fh.seek(0, 2)
@@ -548,7 +575,12 @@ def _last_stderr_line(path: Path) -> str:
     for raw in reversed(tail.splitlines()):
         line = raw.strip()
         if line:
-            return line[:_STDERR_LINE_MAX]
+            # Строка уходит в UI (``reason`` на экране ``/mcp``) — секреты
+            # маскируем общим редактором логов, и до обрезки: обрезанный
+            # токен паттерн уже не узнал бы.
+            from gc_core.security.log_redaction import Redactor
+
+            return Redactor().redact(line)[:_STDERR_LINE_MAX]
     return ""
 
 

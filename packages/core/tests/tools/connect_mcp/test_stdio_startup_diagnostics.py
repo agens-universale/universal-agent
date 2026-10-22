@@ -9,6 +9,8 @@
 Каталог состояния — изолированный ``GC_HOME`` набора (плагин gc_testkit).
 """
 
+import stat
+import subprocess
 import sys
 
 import pytest
@@ -121,3 +123,71 @@ async def test_chatty_stderr_does_not_block_a_persistent_server(
     assert [t["name"] for t in tools] == ["ping"]
     log_text = transport._stderr_log_path(cfg).read_text(encoding="utf-8")
     assert len(log_text) > 1024 * 1024
+
+
+_SECRET = "sk-abc123def456ghi789jkl012"
+_LEAKY_SCRIPT = (
+    "import sys; sys.stderr.write("
+    f"'auth failed: Authorization: Bearer {_SECRET}\\n'); sys.exit(1)"
+)
+
+
+async def test_secret_in_stderr_is_redacted_in_the_reason():
+    """Строка причины видна на экране ``/mcp`` — секрет из stderr маскируется.
+
+    Серверы печатают в stderr ошибки авторизации вместе с токеном; лог —
+    файл владельца, а ``reason`` уходит в UI и в ``print`` дискавери.
+    """
+    _tools, status = await _adiscover_one(
+        "leaky", _cfg(_LEAKY_SCRIPT), timeout=10
+    )
+
+    reason = status["reason"]
+    assert "сервер завершился при старте" in reason, reason
+    assert "auth failed" in reason, reason
+    assert _SECRET not in reason, reason
+    assert "***REDACTED***" in reason, reason
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX-права файла")
+async def test_stderr_log_is_private_to_the_owner(tmp_path, monkeypatch):
+    """Лог stderr может держать секреты — только владельцу: 0600, каталог 0700."""
+    log_path = tmp_path / "mcp" / "server.stderr.log"
+    monkeypatch.setattr(transport, "_stderr_log_path", lambda _cfg: log_path)
+
+    with transport._stderr_log(_cfg("pass")) as (_stderr, path):
+        assert path == log_path
+
+    assert stat.S_IMODE(log_path.stat().st_mode) == 0o600
+    assert stat.S_IMODE(log_path.parent.stat().st_mode) == 0o700
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX-права файла")
+async def test_stale_world_readable_log_is_tightened(tmp_path, monkeypatch):
+    """Лог, оставшийся с правами 0644, при новом старте становится 0600."""
+    log_path = tmp_path / "server.stderr.log"
+    log_path.write_text("old\n", encoding="utf-8")
+    log_path.chmod(0o644)
+    monkeypatch.setattr(transport, "_stderr_log_path", lambda _cfg: log_path)
+
+    with transport._stderr_log(_cfg("pass")):
+        pass
+
+    assert stat.S_IMODE(log_path.stat().st_mode) == 0o600
+    assert log_path.read_text(encoding="utf-8") == ""
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="симлинки POSIX")
+async def test_symlinked_log_is_not_followed(tmp_path, monkeypatch):
+    """На месте лога симлинк — не пишем по нему, а уходим в ``DEVNULL``."""
+    victim = tmp_path / "victim.txt"
+    victim.write_text("keep\n", encoding="utf-8")
+    log_path = tmp_path / "server.stderr.log"
+    log_path.symlink_to(victim)
+    monkeypatch.setattr(transport, "_stderr_log_path", lambda _cfg: log_path)
+
+    with transport._stderr_log(_cfg("pass")) as (stderr, path):
+        assert stderr == subprocess.DEVNULL
+        assert path is None
+
+    assert victim.read_text(encoding="utf-8") == "keep\n"
