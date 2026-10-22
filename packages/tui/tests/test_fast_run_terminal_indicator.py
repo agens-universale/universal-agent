@@ -167,14 +167,14 @@ async def test_fast_run_drops_skills_cache(tmp_path):
 async def test_fast_run_finish_keeps_done_state(tmp_path):
     """Конец хода и turn_finish в одном тике: строка-итог не мигает
     «завершаю…»."""
-    from gc_core.thread_store import append_new_thread_messages
+    from gc_core.threads.facade import Threads
+    from gc_core.threads.file_store import FileThreadStore
+    from gc_core.threads.models import ThreadKey
 
     async with _app(tmp_path).run_test() as pilot:
         scr, runner = await _send(pilot, seen_running=False)
-        append_new_thread_messages(
-            str(tmp_path),
-            "cli",
-            TID,
+        await Threads(FileThreadStore(str(tmp_path))).append_messages(
+            ThreadKey(system="cli", thread=TID),
             [
                 {"id": "u1", "role": "user", "content": "q"},
                 {
@@ -197,8 +197,6 @@ async def test_fast_run_finish_keeps_done_state(tmp_path):
                     "output": "ok",
                 },
             ],
-            set(),
-            start_seq=0,
         )
         # Состояние сразу после тика: следующий тик таймера экрана вернул
         # бы «done» и скрыл мигание.
