@@ -139,17 +139,6 @@ _LIMIT_OUTCOMES = frozenset(
 )
 
 
-def _uncancel_current_task() -> None:
-    """Снять отмену с текущей задачи, чтобы следующий ``await`` дошёл до
-    записи; вызывающий затем бросает ``CancelledError`` заново. Счётчик не
-    восстанавливается: иначе задача останется снятой даже после того, как
-    вызывающий эту ошибку поймает."""
-    task = asyncio.current_task()
-    if task is not None:
-        while task.cancelling():
-            task.uncancel()
-
-
 async def _aappend_trace_id_to_meta(
     thread_session: Any, trace_id: str, logger: Any | None = None
 ) -> None:
@@ -1101,9 +1090,14 @@ class AgentExecutor:
 
         В снятой задаче следующий ``await`` сразу получает ``CancelledError``,
         и запись не начинается. Снимаем отмену и пишем. ``arun`` затем бросает
-        ``CancelledError`` заново — вызывающий её видит.
+        ``CancelledError`` заново — вызывающий её видит. Счётчик не
+        восстанавливаем: иначе задача останется снятой даже после того,
+        как вызывающий эту ошибку поймает.
         """
-        _uncancel_current_task()
+        task = asyncio.current_task()
+        if task is not None:
+            while task.cancelling():
+                task.uncancel()
         await self.aclose_run_accounting()
 
     async def _ateardown_run(self, owner_reset: Any) -> BaseException | None:
@@ -1413,9 +1407,10 @@ class AgentExecutor:
             state_ops.leave(state)
             state.turn_level = None
             try:
-                # Ход, уже записанный из цикла, — no-op.
-                if isinstance(run_error, asyncio.CancelledError):
-                    _uncancel_current_task()
+                # Ход, уже записанный из цикла, — no-op. Под отменой
+                # счётчик задачи не трогаем: отмена уже доставлена, запись
+                # доходит, а `asyncio.timeout` и TaskGroup вызывающего
+                # опираются на `cancelling()`.
                 await self._arecord_turn_outcome(None, error=run_error)
             finally:
                 teardown_cancel = await self._ateardown_run(_owner_reset)
@@ -1647,8 +1642,8 @@ class AgentExecutor:
         ``finally`` прогона (остальные выходы). Признак ``recorded`` ставится
         до записи: повтор ничего не пишет, даже если первая запись упала.
         Ход, не положивший в историю ни одного сообщения (стоп в сетапе),
-        записи не получает: его на диске нет. Сбой записи — предупреждение
-        в журнал прогона, ход он не роняет."""
+        записи не получает: его на диске нет. Сбой сборки или записи —
+        предупреждение в журнал прогона, ход он не роняет."""
         clock = current_turn_clock(self._ctx)
         state = self.get_state()
         session = self._thread_session
@@ -1659,16 +1654,16 @@ class AgentExecutor:
         if session is None or state.turn_messages_start is None:
             return
         status, why = self._classify_turn_end(reason, error)
-        outcome = TurnOutcome(
-            status=status,
-            reason=why,
-            opened_by=opening_reply_id(state),
-            started_at=clock.started_at,
-            ended_at=clock.ended_at,
-            duration_sec=round(clock.elapsed(), 1),
-            error=_error_fact(error) if status == "error" else None,
-        )
         try:
+            outcome = TurnOutcome(
+                status=status,
+                reason=why,
+                opened_by=opening_reply_id(state),
+                started_at=clock.started_at,
+                ended_at=clock.ended_at,
+                duration_sec=round(clock.elapsed(), 1),
+                error=_error_fact(error) if status == "error" else None,
+            )
             await session.aappend_turn_outcome(
                 outcome, discarded=is_persist_discarded(state)
             )

@@ -144,7 +144,7 @@ class _Run:
         self.ex = AgentExecutor(self.ctx)
         return self
 
-    async def _backend(self, messages, state, ctx, *, resolved, **kwargs):
+    async def _backend(self, _messages, state, _ctx, **_kwargs):
         self.requests.append(list(state.messages))
         step = self.script.pop(0)
         if callable(step):
@@ -256,7 +256,7 @@ async def test_record_lands_before_turn_end_compaction(run, monkeypatch):
     в файле и уносит в архив вместе с ходом."""
     seen: list = []
 
-    async def _compact(coordinator):
+    async def _compact(_coordinator):
         seen.append(len(run.records()))
 
     monkeypatch.setattr(
@@ -479,7 +479,7 @@ async def test_limit_outcome_is_stopped_with_reason(run, limit):
     """Лимит прогона (``state.terminal_outcome``) закрывает ход в
     ``finally`` — из цикла хук не зовётся."""
 
-    async def _loop(messages, state, ctx, **_kw):
+    async def _loop(messages, state, _ctx, **_kw):
         state.mark_turn_start()
         state.messages += [m for m in messages if isinstance(m, dict)]
         state.terminal_outcome = limit
@@ -544,6 +544,9 @@ async def test_task_cancel_writes_user_stop(run):
     with pytest.raises(asyncio.CancelledError):
         await task
 
+    # Запись под отменой не снимает её с задачи: `asyncio.timeout` и
+    # TaskGroup вызывающего опираются на счётчик.
+    assert task.cancelling() > 0
     outcomes = _only_outcomes(run)
     assert [(o.status, o.reason) for o in outcomes] == [("stopped", USER_STOP)]
 
@@ -580,6 +583,19 @@ async def test_record_write_failure_does_not_fail_run(run, monkeypatch):
         raise OSError("disk full")
 
     monkeypatch.setattr(ThreadSession, "aappend_turn_outcome", _broken)
+    run.script = [[_finish()]]
+    await run.arun()
+
+    assert run.records() == []
+
+
+async def test_record_build_failure_does_not_fail_run(run, monkeypatch):
+    """Сбой сборки записи (кривой факт) — тоже только предупреждение."""
+
+    def _broken(*_a, **_kw):
+        raise ValueError("bad outcome")
+
+    monkeypatch.setattr(ae, "TurnOutcome", _broken)
     run.script = [[_finish()]]
     await run.arun()
 
