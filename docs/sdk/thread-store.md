@@ -16,7 +16,7 @@ AGENTS.md, скиллы и субагенты — общее для всех т�
 
 | Хранилище | Где | Когда |
 |---|---|---|
-| `FileThreadStore` | `gc_core.thread_store_file` | по умолчанию в SDK, CLI, TUI, сервере: файлы `data_*.jsonl` и `meta_*.json` в `paths.threads_data_path` |
+| `FileThreadStore` | `gc_core.thread_store_file` | по умолчанию в SDK, CLI, TUI, сервере: файлы `data_*.jsonl` (строка — запись `message` или итог хода `turn_outcome`) и `meta_*.json` в `paths.threads_data_path` |
 | `MemoryThreadStore` | `gc_testkit.memory_thread_store` | тесты; образец своего хранилища |
 | `DurableFileThreadStore` | `gc_core.thread_store_file_durable` | Temporal: те же файлы плюс служебный каталог `.store/` |
 | `SQLiteThreadStore` | `gc_core_temporalio.storage.sqlite` | Temporal: один файл базы |
@@ -146,6 +146,12 @@ def test_my_durable_store():
   контекста заменяет её сводкой.
 - **Замена истории одной операцией** — `replace_messages`: компакция без пары
   `reset` + `append_messages`, трасса субагентов не трогается.
+- **Итог хода** — `append_turn_outcome(system_id, thread_id, outcome, *,
+  seq)`: строка `{"type": "turn_outcome", "thread_id", "system", "seq",
+  "ts", "outcome"}` в `data_*.jsonl` за последним сообщением хода, `seq` —
+  его номер. Есть только у `FileThreadStore`; durable-хранилище её гасит.
+  Откат реплики снимает запись её хода. Подробно — в
+  [контракте](thread-store-contract.md).
 
 ## Где что лежит
 

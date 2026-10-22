@@ -306,6 +306,23 @@ class SyncThreadStoreAdapter:
 
         return _areplace
 
+    @property
+    def aappend_turn_outcome(self):
+        """Запись итога хода — если хранилище её умеет (и не гасит ``None``).
+
+        Свойство, как ``areplace_messages``: ``ThreadSession`` решает по
+        ``getattr(port, "aappend_turn_outcome", None)``, писать ли запись.
+        """
+        if not callable(getattr(self._store, "append_turn_outcome", None)):
+            return None
+
+        async def _aappend(system_id, thread_id, outcome, *, seq):
+            self._call(
+                "append_turn_outcome", system_id, thread_id, outcome, seq=seq
+            )
+
+        return _aappend
+
     async def aload_messages(
         self, system_id: str, thread_id: str
     ) -> List[Dict[str, Any]]:

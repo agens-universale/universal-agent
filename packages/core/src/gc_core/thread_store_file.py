@@ -20,9 +20,11 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Sequence, Set
 
+from gc_core.persistence.turn_outcome import TurnOutcome
 from gc_core.thread_store import (
     append_new_thread_messages,
     append_subagent_trace_record,
+    append_turn_outcome_record,
     archive_and_replace_thread_files,
     discard_message_by_id,
     ensure_threads_dir,
@@ -46,6 +48,7 @@ _WRITE_HELPERS = frozenset(
     {
         "append_new_thread_messages",
         "append_subagent_trace_record",
+        "append_turn_outcome_record",
         "archive_and_replace_thread_files",
         "discard_message_by_id",
         "patch_runtime_flag",
@@ -304,6 +307,28 @@ class FileThreadStore(ThreadStoreBase):
             system_id,
             thread_id,
             messages,
+        )
+
+    def append_turn_outcome(
+        self,
+        system_id: str,
+        thread_id: str,
+        outcome: TurnOutcome,
+        *,
+        seq: int,
+    ) -> None:
+        """Дописать запись итога хода (необязательная возможность).
+
+        Не входит в контракт: сессия ищет её по имени и без неё записи не
+        пишет. ``seq`` — номер последнего сообщения хода.
+        """
+        self._call(
+            append_turn_outcome_record,
+            self._dir,
+            system_id,
+            thread_id,
+            outcome,
+            seq=seq,
         )
 
 

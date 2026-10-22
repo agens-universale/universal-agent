@@ -40,6 +40,11 @@ from gc_core.persistence.thread_meta_mapper import (
     ThreadMetaMapper,
     read_optional_nonneg_int,
 )
+from gc_core.persistence.turn_outcome import (
+    TURN_OUTCOME_TYPE,
+    TurnOutcome,
+    is_turn_outcome_record,
+)
 from gc_core.plan_store import normalize_plan_block
 from gc_core.settings import settings_of
 from gc_core.thread_paths import (
@@ -682,12 +687,23 @@ def _is_message_record_with_id(rec: Any, message_id: str) -> bool:
     return isinstance(payload, dict) and payload.get("id") == message_id
 
 
+def _is_outcome_opened_by(rec: Any, message_id: str) -> bool:
+    if not isinstance(rec, dict) or not is_turn_outcome_record(rec):
+        return False
+    outcome = rec.get("outcome")
+    return isinstance(outcome, dict) and outcome.get("opened_by") == message_id
+
+
 def _lines_without_message(
     data_path: str, message_id: str
-) -> Tuple[List[str], int]:
-    """Строки data_*.jsonl без message-записей с данным id и число удалённых."""
+) -> Tuple[List[str], int, int]:
+    """Строки data_*.jsonl без реплики ``message_id`` и итога её хода.
+
+    Возвращает строки, число снятых сообщений и число снятых записей итога.
+    """
     kept: List[str] = []
     removed = 0
+    removed_outcomes = 0
     with open(data_path, encoding="utf-8") as f:
         for line in f:
             if not line.strip():
@@ -699,8 +715,11 @@ def _lines_without_message(
             if _is_message_record_with_id(rec, message_id):
                 removed += 1
                 continue
+            if _is_outcome_opened_by(rec, message_id):
+                removed_outcomes += 1
+                continue
             kept.append(line.rstrip("\n"))
-    return kept, removed
+    return kept, removed, removed_outcomes
 
 
 def discard_message_by_id(
@@ -715,9 +734,13 @@ def discard_message_by_id(
     """Удалить message-запись с указанным ``payload.id`` из data_*.jsonl.
 
     Для отката осиротевшей user-реплики (быстрая отмена до вывода агента).
+    Вместе с репликой снимается запись итога её хода (``opened_by`` = её
+    id) — в любом порядке: если реплика уже снята, а запись легла после
+    отката, повторный вызов снимает одну запись.
     Вызывать только когда на тред нет активного run'а (нет конкурентной
     дозаписи) — перезапись атомарна (tmp + os.replace). Декрементит
-    ``messages_count`` в meta. Возвращает True, если что-то удалено.
+    ``messages_count`` в meta на число снятых сообщений. Возвращает True,
+    если что-то удалено.
     """
     if not message_id:
         return False
@@ -726,9 +749,11 @@ def discard_message_by_id(
     if not os.path.exists(data_path):
         return False
 
-    kept, removed = _lines_without_message(data_path, message_id)
+    kept, removed, removed_outcomes = _lines_without_message(
+        data_path, message_id
+    )
 
-    if removed == 0:
+    if removed == 0 and removed_outcomes == 0:
         return False
 
     tmp_path = f"{data_path}.tmp"
@@ -806,6 +831,33 @@ def append_new_thread_messages(
     # которому они нужны, переехал в `ThreadSession._persist_batch_meta` — там
     # он и получает их из конфигурации проекции.
     return wrote
+
+
+def append_turn_outcome_record(
+    threads_dir: str,
+    system_id: str,
+    thread_id: str,
+    outcome: TurnOutcome,
+    *,
+    seq: int,
+) -> None:
+    """Дописать запись итога хода в живой ``data_*.jsonl``.
+
+    ``seq`` — номер последнего сообщения хода: запись нового номера не
+    занимает, счётчики сообщений не двигаются.
+    """
+    ensure_threads_dir(threads_dir)
+    data_path, _ = _thread_paths(threads_dir, system_id, thread_id)
+    record = {
+        "type": TURN_OUTCOME_TYPE,
+        "thread_id": thread_id,
+        "system": sanitize_system_id(system_id),
+        "seq": seq,
+        "ts": _utc_now_iso(),
+        "outcome": outcome.to_payload(),
+    }
+    with open(data_path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
 def archive_and_replace_thread_files(
@@ -1310,6 +1362,37 @@ class ThreadSession:
             del self._deferred_messages[: len(batch)]
         if self._deferred_mark == mark:
             self._deferred_pending = False
+
+    async def aappend_turn_outcome(
+        self, outcome: TurnOutcome, *, discarded: bool
+    ) -> bool:
+        """Записать итог хода за последним сообщением хода.
+
+        Необязательная возможность хранилища (``aappend_turn_outcome``
+        порта); durable-хранилищу нельзя — запись мимо журнала ломает его
+        восстановление. ``discarded`` — записи хода отброшены стопом:
+        отложенные шаги не сливаются, запись встаёт за уже записанным.
+        Пустой тред записи не получает. ``seq`` — номер последнего
+        сообщения, счётчик сессии не двигается. Возвращает, записано ли.
+        """
+        from gc_core.thread_store_durable import durable_store_capability
+
+        appender = getattr(self.port, "aappend_turn_outcome", None)
+        if not callable(appender):
+            return False
+        if durable_store_capability(self.port) is not None:
+            return False
+        if not discarded:
+            await self.aflush_deferred()
+        if self.persisted_messages_count == 0:
+            return False
+        await appender(
+            self.system_id,
+            self.thread_id,
+            outcome,
+            seq=self.persisted_messages_count,
+        )
+        return True
 
     async def _apersist_now(
         self,

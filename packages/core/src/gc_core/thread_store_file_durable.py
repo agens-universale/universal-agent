@@ -26,6 +26,11 @@ class DurableFileThreadStore(FileThreadStore):
     #: журнала, а экспорт для человека в них не участвует.
     save_plan_file = None
 
+    #: Записи итога хода нет: мимо журнала нельзя — ``_recover_append``
+    #: сверяет хвост файла с журналом побайтно, а своей операции журнала у
+    #: записи нет.
+    append_turn_outcome = None
+
     def _call(self, helper, *args, **kwargs):
         from gc_core.thread_store_journal import dispatch_file_helper
 
