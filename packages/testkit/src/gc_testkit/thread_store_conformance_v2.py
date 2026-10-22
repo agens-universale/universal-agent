@@ -25,7 +25,8 @@ import asyncio
 import inspect
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from types import UnionType
+from typing import Any, Union, get_args, get_origin
 
 from gc_core.threads.errors import (
     OperationMismatch,
@@ -47,6 +48,7 @@ from gc_core.threads.models import (
     Usage,
 )
 from gc_core.threads.store import ThreadStore
+from pydantic import BaseModel
 
 KEY = ThreadKey(system="cli", thread="conformance")
 MINUTE = timedelta(seconds=60)
@@ -350,6 +352,60 @@ async def check_state_usage_info_roundtrip(store, _clock: FakeClock) -> None:
     _expect(record.info.title == "T", "карточка сохраняется")
     _expect(record.info.workspace == "/w", "workspace сохраняется")
     _expect(record.runtime == runtime, "RuntimeStatus с лишним ключом")
+
+
+def _sample(annotation: Any, field: str) -> Any:
+    """Значение поля, отличное от умолчания, — по аннотации типа."""
+    args = [a for a in get_args(annotation) if a is not type(None)]
+    origin = get_origin(annotation)
+    if origin in (Union, UnionType):
+        return _sample(args[0], field)
+    if annotation is bool:
+        return True
+    if annotation is int:
+        return 7
+    if annotation is str:
+        return f"{field}-значение"
+    if annotation is Any:
+        return {"field": field}
+    if origin is dict:
+        return {"k": _sample(args[1], field)}
+    if origin is list:
+        return [_sample(args[0], field)]
+    raise ConformanceError(
+        f"нет образца для поля {field} ({annotation}): допишите _sample"
+    )
+
+
+def _every_field_set(model: type[BaseModel]) -> BaseModel:
+    """Модель, где каждое поле задано и отлично от умолчания: новое поле
+    попадает в проверку само."""
+    values = {
+        name: _sample(info.annotation, name)
+        for name, info in model.model_fields.items()
+    }
+    built = model(**values)
+    for name, info in model.model_fields.items():
+        if getattr(built, name) == info.get_default(call_default_factory=True):
+            raise ConformanceError(f"образец поля {name} равен умолчанию")
+    return built
+
+
+async def check_every_state_field_roundtrip(store, _clock: FakeClock) -> None:
+    """Каждое поле ``SessionState`` переживает запись и чтение: хранилище
+    с раскладкой по своим ключам (файловое — ключи meta develop) не теряет
+    поле, которого нет в его раскладке."""
+    lease = await _claim(store)
+    state = _every_field_set(SessionState)
+    await store.commit(KEY, _change("op", 0, lease, set_state=state))
+    stored = (await store.get_thread(KEY)).state
+    lost = sorted(
+        name
+        for name in SessionState.model_fields
+        if name not in stored.model_fields_set
+        or getattr(stored, name) != getattr(state, name)
+    )
+    _expect(not lost, f"поля SessionState не пережили запись: {lost}")
 
 
 async def check_commit_sets_runtime(store, _clock: FakeClock) -> None:
@@ -1210,6 +1266,7 @@ CHECKS: tuple[Callable[..., Awaitable[None]], ...] = (
     check_release,
     check_untimed_lease,
     check_state_usage_info_roundtrip,
+    check_every_state_field_roundtrip,
     check_commit_sets_runtime,
     check_extra_roundtrip,
     check_explicit_fields_survive,
