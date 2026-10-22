@@ -1,3 +1,4 @@
+import contextlib
 import glob
 import hashlib
 import json
@@ -53,12 +54,17 @@ from gc_core.thread_paths import (
     validate_thread_id,
 )
 from gc_core.utils.aio_compat import await_callback
-from gc_core.utils.atomic_io import atomic_replace
+from gc_core.utils.atomic_io import atomic_replace, write_text_atomic
 from gc_core.utils.generate_message_id import (
     generate_msg_id_sha256 as generate_message_id_func,
 )
 
 _META_SCHEMA_VERSION = 2
+
+# Замок меты на тред внутри процесса: TUI и исполнитель пишут мету одного
+# треда из разных потоков, read-merge-write без замка теряет чужие ключи.
+_META_LOCKS: Dict[str, threading.RLock] = {}
+_META_LOCKS_GUARD = threading.Lock()
 
 # Process-local счётчик последнего выданного seq sidecar (SPEC 2026-07-30-sidecar-append-o1-seq).
 # Ключ — нормализованный путь jsonl. Cold init на первый append для path; далее O(1).
@@ -522,9 +528,36 @@ def load_thread_meta(
     return data
 
 
+@contextlib.contextmanager
+def meta_write_lock(threads_dir: str, system_id: str, thread_id: str):
+    """Замок записи меты треда в процессе — вокруг read-merge-write.
+
+    Повторный вход тем же потоком разрешён: ``save_thread_meta`` берёт его
+    сам, а ``update_*`` держат его вокруг чтения и записи.
+    """
+    _, meta_path = _thread_paths(
+        threads_dir, sanitize_system_id(system_id), thread_id
+    )
+    key = os.path.abspath(meta_path)
+    with _META_LOCKS_GUARD:
+        lock = _META_LOCKS.setdefault(key, threading.RLock())
+    with lock:
+        yield
+
+
 def save_thread_meta(
-    threads_dir: str, system_id: str, thread_id: str, meta: Dict[str, Any]
+    threads_dir: str,
+    system_id: str,
+    thread_id: str,
+    meta: Dict[str, Any],
+    *,
+    touch: bool = True,
 ) -> None:
+    """Записать мету треда атомарно; единственный писатель файла меты.
+
+    ``touch=False`` — запись фронтенда (``meta.tui``): время изменения
+    треда в списке сессий не сдвигается.
+    """
     sys_norm = sanitize_system_id(system_id)
     _, meta_path = _thread_paths(threads_dir, sys_norm, thread_id)
     ensure_threads_dir(threads_dir)
@@ -533,29 +566,35 @@ def save_thread_meta(
     to_save["thread_id"] = validate_thread_id(thread_id)
     to_save["system"] = sys_norm
     to_save["schema_version"] = _META_SCHEMA_VERSION
-    to_save["updated_at"] = _utc_now_iso()
-    if not to_save.get("created_at"):
-        to_save["created_at"] = to_save["updated_at"]
+    if touch:
+        to_save["updated_at"] = _utc_now_iso()
+        if not to_save.get("created_at"):
+            to_save["created_at"] = to_save["updated_at"]
 
-    tmp_path = f"{meta_path}.tmp"
-    with open(tmp_path, "w", encoding="utf-8") as f:
-        json.dump(to_save, f, ensure_ascii=False, indent=2)
-    atomic_replace(tmp_path, meta_path)
+    text = json.dumps(to_save, ensure_ascii=False, indent=2)
+    with meta_write_lock(threads_dir, sys_norm, thread_id):
+        write_text_atomic(meta_path, text)
 
 
 def update_tui_meta(
-    threads_dir: str, system_id: str, thread_id: str, patch: Dict[str, Any]
+    threads_dir: str,
+    system_id: str,
+    thread_id: str,
+    patch: Dict[str, Any],
+    *,
+    touch: bool = True,
 ) -> None:
     """Слить patch в meta.tui (read-merge-write). Только TUI-owned ключи."""
     sys_norm = sanitize_system_id(system_id)
-    meta = load_thread_meta(threads_dir, sys_norm, thread_id) or {
-        "thread_id": thread_id,
-        "system_id": sys_norm,
-    }
-    tui_meta = dict(meta.get("tui") or {})
-    tui_meta.update(patch)
-    meta["tui"] = tui_meta
-    save_thread_meta(threads_dir, sys_norm, thread_id, meta)
+    with meta_write_lock(threads_dir, sys_norm, thread_id):
+        meta = load_thread_meta(threads_dir, sys_norm, thread_id) or {
+            "thread_id": thread_id,
+            "system_id": sys_norm,
+        }
+        tui_meta = dict(meta.get("tui") or {})
+        tui_meta.update(patch)
+        meta["tui"] = tui_meta
+        save_thread_meta(threads_dir, sys_norm, thread_id, meta, touch=touch)
 
 
 def clear_plan_meta(threads_dir: str, system_id: str, thread_id: str) -> bool:
@@ -564,19 +603,20 @@ def clear_plan_meta(threads_dir: str, system_id: str, thread_id: str) -> bool:
     Единственная запись фронтенда в ``shared`` — осознанное исключение из
     правила «shared пишет исполнитель»: команда приходит, когда прогона нет, и
     исполнитель её исполнить не может. Вызывающий обязан убедиться, что
-    исполнитель не занят: у ``save_thread_meta`` лока нет, два писателя одного
-    треда недопустимы. Вместе с планом взводится признак для модели — следующий
+    исполнитель не занят: план — состояние исполнителя, замок меты защищает
+    лишь файл, а не решение. Вместе с планом взводится признак для модели — следующий
     прогон один раз сообщит ей, что плана больше нет.
     """
     sys_norm = sanitize_system_id(system_id)
-    meta = load_thread_meta(threads_dir, sys_norm, thread_id)
-    shared = dict(meta.get("shared") or {})
-    if not normalize_plan_block(shared.get("plan")):
-        return False
-    shared.pop("plan", None)
-    shared["plan_removed_notice"] = True
-    meta["shared"] = shared
-    save_thread_meta(threads_dir, sys_norm, thread_id, meta)
+    with meta_write_lock(threads_dir, sys_norm, thread_id):
+        meta = load_thread_meta(threads_dir, sys_norm, thread_id)
+        shared = dict(meta.get("shared") or {})
+        if not normalize_plan_block(shared.get("plan")):
+            return False
+        shared.pop("plan", None)
+        shared["plan_removed_notice"] = True
+        meta["shared"] = shared
+        save_thread_meta(threads_dir, sys_norm, thread_id, meta)
     # Файл плана для человека снятый план не переживает: иначе он выглядит
     # действующим планом сессии.
     try:
@@ -593,9 +633,10 @@ def update_runtime_meta(
     from gc_core.persistence.meta_ownership import merge_runtime_into_meta
 
     sys_norm = sanitize_system_id(system_id)
-    meta = load_thread_meta(threads_dir, sys_norm, thread_id) or {}
-    merge_runtime_into_meta(meta, patch)
-    save_thread_meta(threads_dir, sys_norm, thread_id, meta)
+    with meta_write_lock(threads_dir, sys_norm, thread_id):
+        meta = load_thread_meta(threads_dir, sys_norm, thread_id) or {}
+        merge_runtime_into_meta(meta, patch)
+        save_thread_meta(threads_dir, sys_norm, thread_id, meta)
 
 
 def patch_runtime_flag(
@@ -613,30 +654,31 @@ def patch_runtime_flag(
     """
     sys_norm = sanitize_system_id(system_id)
     name = resolve_runtime_flag_name(flag)
-    disk = load_thread_meta(threads_dir, sys_norm, thread_id) or {}
-    runtime = dict(disk.get("runtime") or {})
-    if active:
-        runtime[name] = True
-    else:
-        runtime.pop(name, None)
-    if runtime:
-        disk["runtime"] = runtime
-    else:
-        disk.pop("runtime", None)
-
-    if session_meta is not None:
-        if runtime:
-            session_meta["runtime"] = dict(runtime)
+    with meta_write_lock(threads_dir, sys_norm, thread_id):
+        disk = load_thread_meta(threads_dir, sys_norm, thread_id) or {}
+        runtime = dict(disk.get("runtime") or {})
+        if active:
+            runtime[name] = True
         else:
-            session_meta.pop("runtime", None)
-        disk_tui = disk.get("tui")
-        if isinstance(disk_tui, dict):
-            session_meta["tui"] = dict(disk_tui)
-        elif "tui" in session_meta:
-            session_meta.pop("tui", None)
-            disk.pop("tui", None)
+            runtime.pop(name, None)
+        if runtime:
+            disk["runtime"] = runtime
+        else:
+            disk.pop("runtime", None)
 
-    save_thread_meta(threads_dir, sys_norm, thread_id, disk)
+        if session_meta is not None:
+            if runtime:
+                session_meta["runtime"] = dict(runtime)
+            else:
+                session_meta.pop("runtime", None)
+            disk_tui = disk.get("tui")
+            if isinstance(disk_tui, dict):
+                session_meta["tui"] = dict(disk_tui)
+            elif "tui" in session_meta:
+                session_meta.pop("tui", None)
+                disk.pop("tui", None)
+
+        save_thread_meta(threads_dir, sys_norm, thread_id, disk)
 
 
 def reset_run_flags(
@@ -650,25 +692,26 @@ def reset_run_flags(
     """Atomically clear startup flags against current disk meta, preserving TUI."""
     from gc_core.persistence.meta_ownership import clear_run_flags
 
-    disk = load_thread_meta(threads_dir, system_id, thread_id) or {}
-    runtime = (session_meta or {}).get("runtime")
-    runtime = runtime if isinstance(runtime, dict) else {}
-    clear_run_flags(
-        disk,
-        stale_summarizing=stale_summarizing
-        or bool(runtime.get("summarizing")),
-    )
-    if session_meta is not None:
-        if disk.get("runtime"):
-            session_meta["runtime"] = dict(disk["runtime"])
-        else:
-            session_meta.pop("runtime", None)
-        if isinstance(disk.get("tui"), dict):
-            session_meta["tui"] = dict(disk["tui"])
-        elif "tui" in session_meta:
-            session_meta.pop("tui", None)
-            disk.pop("tui", None)
-    save_thread_meta(threads_dir, system_id, thread_id, disk)
+    with meta_write_lock(threads_dir, system_id, thread_id):
+        disk = load_thread_meta(threads_dir, system_id, thread_id) or {}
+        runtime = (session_meta or {}).get("runtime")
+        runtime = runtime if isinstance(runtime, dict) else {}
+        clear_run_flags(
+            disk,
+            stale_summarizing=stale_summarizing
+            or bool(runtime.get("summarizing")),
+        )
+        if session_meta is not None:
+            if disk.get("runtime"):
+                session_meta["runtime"] = dict(disk["runtime"])
+            else:
+                session_meta.pop("runtime", None)
+            if isinstance(disk.get("tui"), dict):
+                session_meta["tui"] = dict(disk["tui"])
+            elif "tui" in session_meta:
+                session_meta.pop("tui", None)
+                disk.pop("tui", None)
+        save_thread_meta(threads_dir, system_id, thread_id, disk)
 
 
 def _carry_meta_string(
@@ -738,7 +781,7 @@ def discard_message_by_id(
     id) — в любом порядке: если реплика уже снята, а запись легла после
     отката, повторный вызов снимает одну запись.
     Вызывать только когда на тред нет активного run'а (нет конкурентной
-    дозаписи) — перезапись атомарна (tmp + os.replace). Декрементит
+    дозаписи) — перезапись атомарна (свой tmp + os.replace). Декрементит
     ``messages_count`` в meta на число снятых сообщений. Возвращает True,
     если что-то удалено.
     """
@@ -756,27 +799,22 @@ def discard_message_by_id(
     if removed == 0 and removed_outcomes == 0:
         return False
 
-    tmp_path = f"{data_path}.tmp"
-    with open(tmp_path, "w", encoding="utf-8") as f:
-        for row in kept:
-            f.write(row + "\n")
-    atomic_replace(tmp_path, data_path)
+    write_text_atomic(data_path, "".join(row + "\n" for row in kept))
 
-    meta = load_thread_meta(threads_dir, sys_norm, thread_id) or {}
-    try:
-        meta["messages_count"] = max(
-            0, int(meta.get("messages_count", 0)) - removed
-        )
-    except (TypeError, ValueError):
-        pass
     live_msgs, _, _ = load_thread_messages(threads_dir, sys_norm, thread_id)
-    merge_tui_into_meta(
-        meta,
-        live_volume_from_messages(
-            live_msgs, tags=tags, strip_think=strip_think
-        ),
+    live_volume = live_volume_from_messages(
+        live_msgs, tags=tags, strip_think=strip_think
     )
-    save_thread_meta(threads_dir, sys_norm, thread_id, meta)
+    with meta_write_lock(threads_dir, sys_norm, thread_id):
+        meta = load_thread_meta(threads_dir, sys_norm, thread_id) or {}
+        try:
+            meta["messages_count"] = max(
+                0, int(meta.get("messages_count", 0)) - removed
+            )
+        except (TypeError, ValueError):
+            pass
+        merge_tui_into_meta(meta, live_volume)
+        save_thread_meta(threads_dir, sys_norm, thread_id, meta)
     return True
 
 

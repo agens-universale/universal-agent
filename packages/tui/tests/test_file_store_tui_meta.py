@@ -60,3 +60,48 @@ def test_update_tui_meta_merges_existing(tmp_path):
     )
     assert meta["tui"]["skills"] == ["a", "b"]
     assert meta["tui"]["cwd"] == "/old"
+
+
+def test_update_tui_meta_races_executor_without_broken_or_lost_meta(
+    tmp_path,
+):
+    """Мета TUI и исполнителя одного треда пишутся параллельно: исполнитель
+    не читает обрезанный файл, ключи исполнителя не теряются."""
+    import threading
+
+    from gc_core.thread_store import load_thread_meta, update_runtime_meta
+
+    d, tid = str(tmp_path), "t3"
+    store = FileTaskStore(threads_dir=d, system="cli")
+    store.update_tui_meta(tid, {"status": "running"})
+    errors = []
+    stop = threading.Event()
+
+    def tui_writer():
+        i = 0
+        while not stop.is_set():
+            store.update_tui_meta(tid, {"copy_buffer": "x" * 2000 + str(i)})
+            i += 1
+
+    def executor():
+        i = 0
+        while not stop.is_set():
+            try:
+                update_runtime_meta(d, "cli", tid, {"live_msg_count": i})
+                load_thread_meta(d, "cli", tid)
+            except Exception as exc:
+                errors.append(type(exc).__name__)
+            i += 1
+
+    threads = [threading.Thread(target=f) for f in (tui_writer, executor)]
+    for t in threads:
+        t.start()
+    stop.wait(1.0)
+    stop.set()
+    for t in threads:
+        t.join()
+    meta = load_thread_meta(d, "cli", tid)
+
+    assert sorted(set(errors)) == []
+    assert "live_msg_count" in meta["runtime"]
+    assert meta["tui"]["status"] == "running"

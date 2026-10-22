@@ -137,29 +137,21 @@ class FileTaskStore:
     def update_tui_meta(
         self, task_id: str, patch: dict, system: Optional[str] = None
     ) -> None:
-        """Объединяет patch с meta.tui sub-dict и сохраняет (TUI-owned)."""
+        """Объединяет patch с meta.tui sub-dict и сохраняет (TUI-owned).
+
+        Запись — общим писателем меты ядра (атомарно, под замком треда):
+        исполнитель пишет ту же мету параллельно. Время изменения треда
+        запись фронтенда не сдвигает."""
+        from gc_core.thread_store import update_tui_meta
         from gc_core.thread_store_journal import local_write_scope
 
         sys_ = system or self._system
-        meta_path = self._meta_path(task_id, sys_)
         # Мета TUI пишется и при durable-владельце (как update_tui журнала),
         # но под его блокировкой: иначе гонка с коммитом журнала.
         with local_write_scope(
             str(self._dir), sys_, task_id, forbid_owned=False
         ):
-            meta = self.get_task_meta(task_id, system=sys_)
-            if not meta:
-                meta = {"thread_id": task_id, "system_id": sys_}
-            tui_meta = dict(meta.get("tui") or {})
-            tui_meta.update(patch)
-            meta["tui"] = tui_meta
-            # Fresh project dir: TUI may write meta before the executor's first
-            # write (TraceScreen._track_pending on the very first send), so the
-            # threads dir need not exist yet. Own our write — create the dir.
-            meta_path.parent.mkdir(parents=True, exist_ok=True)
-            meta_path.write_text(
-                json.dumps(meta, ensure_ascii=False), encoding="utf-8"
-            )
+            update_tui_meta(str(self._dir), sys_, task_id, patch, touch=False)
 
     def clear_plan(self, task_id: str, system: Optional[str] = None) -> bool:
         """Убрать план из сессии (`/plan clear`); True — план был. Решение и
