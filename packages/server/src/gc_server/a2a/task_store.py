@@ -47,6 +47,16 @@ WAITING = "waiting"
 QUEUE = "q:"
 #: Отменённая задача: ``x:<taskId>`` → ``true`` (в очередь не встанет).
 CANCELED = "x:"
+#: Задача с итогом: ``f:<taskId>`` → ``true`` (снимок итога не откатить).
+FINAL = "f:"
+FINAL_STATES = frozenset(
+    {
+        pb.TASK_STATE_COMPLETED,
+        pb.TASK_STATE_FAILED,
+        pb.TASK_STATE_CANCELED,
+        pb.TASK_STATE_REJECTED,
+    }
+)
 
 
 def task_alias(task_id: str) -> str:
@@ -84,6 +94,13 @@ class ThreadTaskStore(TaskStore):
     async def save(self, task: pb.Task, context: ServerCallContext) -> None:
         del context
         key = dialog_key(task.context_id)
+        final = task.status.state in FINAL_STATES
+        if not final and dialog_state(await self._threads.get(key)).get(
+            FINAL + task.id
+        ):
+            # Запоздалый снимок (ход владельца после отмены с другого
+            # инстанса): итог задачи окончателен.
+            return
         receipt = await self._threads.store.append_side(
             key,
             SideChange(
@@ -97,6 +114,8 @@ class ThreadTaskStore(TaskStore):
         patch: dict[str, Any] = {
             TASK_PREFIX + task.id: receipt.max_seq.get(TASKS_STREAM)
         }
+        if final:
+            patch[FINAL + task.id] = True
         if task.status.state == pb.TASK_STATE_CANCELED:
             patch.update(await self._arelease(key, task.id))
         await self._threads.update_frontend(key, FRONTEND, patch)
