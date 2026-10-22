@@ -332,6 +332,7 @@ UserReplyContainer.-queue-hint > .queue-hint { display: block; }
    (.trace-prefix padding:0); правый отступ 1 сохраняем. */
 .thinking-indicator { color: $deep-dim; padding: 0 1 0 0; margin-top: 1; height: 1; }
 .thinking-indicator.hidden { display: none; }
+.thinking-indicator.with-error { height: 2; }  /* `└ причина` под «✕ Ошибка» */
 
 /* StreamBlock — эфемерный in-progress поток текущего шага (chat_completions) */
 /* левый padding 0 — выравнивание с индикатором и колонкой буллетов трейса. */

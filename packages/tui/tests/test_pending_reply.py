@@ -302,7 +302,8 @@ async def test_failed_run_marks_pending_widget_and_meta(tmp_path):
 
 @pytest.mark.asyncio
 async def test_error_shown_resets_between_runs(tmp_path):
-    """Две ошибки подряд → две error-line в trace (флаг сбрасывается)."""
+    """Две ошибки подряд → у каждой своя причина под «✕ Ошибка» (флаг
+    сбрасывается): `└ <класс>: <текст>`."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
@@ -331,20 +332,20 @@ async def test_error_shown_resets_between_runs(tmp_path):
     app._executor_factory = lambda: _Fake()
     async with app.run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")
+        scr = pilot.app.screen
         inp.text = "первая"
         await pilot.press("enter")
         await pilot.pause(0.5)
+        first = scr._thinking._render_text().plain
 
         inp.text = "вторая"
         await pilot.press("enter")
         await pilot.pause(0.5)
 
-        trace_texts = [
-            str(s.render()) for s in pilot.app.screen.query("#trace Static")
-        ]
-        flat = "\n".join(trace_texts)
-        assert "fail #1" in flat
-        assert "fail #2" in flat
+        assert first.endswith("└ RuntimeError: fail #1")
+        assert scr._thinking._render_text().plain.endswith(
+            "└ RuntimeError: fail #2"
+        )
 
 
 @pytest.mark.asyncio

@@ -1706,7 +1706,9 @@ class TuiApp(App):
                 return
             if getattr(runner, "_marked_stopped", False):
                 return
-            self.last_runner_error = str(exc) or exc.__class__.__name__
+            from gc_tui.services.turn_error import describe_turn_error
+
+            self.last_runner_error = describe_turn_error(exc)
 
         def _on_runner_complete(outcome: Optional[str]) -> None:
             self._persist_breaker_after_worker()

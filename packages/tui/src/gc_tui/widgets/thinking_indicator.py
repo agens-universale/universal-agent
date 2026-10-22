@@ -247,8 +247,11 @@ class ThinkingIndicator(Static):
         frozen_elapsed: int | None = None,
         turn_summary: tuple[int, int, int] | None = None,
         done_label: str = DONE_LABEL,
+        error: str | None = None,
     ) -> None:
         self._clock = clock
+        # Причина упавшего хода: строка `└` под «✕ Ошибка».
+        self._error = error
         self._done_label = done_label
         self._sink = sink
         self._reasoning_tag = reasoning_tag
@@ -275,6 +278,24 @@ class ThinkingIndicator(Static):
         super().__init__(
             self._render_text(), classes="thinking-indicator", markup=False
         )
+        self._sync_error_class()
+
+    @property
+    def has_error_line(self) -> bool:
+        """Под строкой-итогом есть строка причины ошибки (вторая строка)."""
+        return self._state == _STATE_FAILED and bool(self._error)
+
+    def set_error(self, error: str | None) -> None:
+        """Причина упавшего хода — строка `└` под «✕ Ошибка»."""
+        if error == self._error:
+            return
+        self._error = error
+        self._sync_error_class()
+        if self.is_mounted:
+            self.refresh(layout=True)
+
+    def _sync_error_class(self) -> None:
+        self.set_class(self.has_error_line, "with-error")
 
     def set_done_label(self, label: str) -> None:
         """Подпись успешного исхода хода: «Выполнил» либо «План готов»."""
@@ -308,6 +329,7 @@ class ThinkingIndicator(Static):
         if self._state == state:
             return
         self._state = state
+        self._sync_error_class()
         if state == _STATE_DONE and self._frozen_elapsed is None:
             self._frozen_elapsed = int(self._clock() - self._started_at)
         self._sync_anim()
@@ -371,6 +393,17 @@ class ThinkingIndicator(Static):
         color = GLOW_SHADES[self._frame % len(GLOW_SHADES)]
         return glyph, color
 
+    def _error_line(self) -> Text:
+        """`└ <класс>: <текст>` — следствие уровня 0, `DIM`, в одну строку
+        (обрезка `…` под ширину)."""
+        from gc_tui.palette import DIM
+        from gc_tui.services.trace_render import consequence_lead
+
+        line = consequence_lead(0)
+        line.append(self._error or "", style=DIM)
+        line.truncate(self._status_width(), overflow="ellipsis")
+        return line
+
     def _processing_shade(self) -> str:
         """Цвет «дыхания» точки • «сверяюсь…»: тёмно-серая рампа, кадр = тик."""
         return _PROCESSING_SHADES[self._frame % len(_PROCESSING_SHADES)]
@@ -404,7 +437,7 @@ class ThinkingIndicator(Static):
         паддинге шкалы разъехались бы.
         """
         span = self._summary_span
-        if span is None:
+        if span is None or event.screen_y != self.content_region.y:
             return False
         x = event.screen_x - self.content_region.x
         return span[0] <= x < span[1]
@@ -511,6 +544,9 @@ class ThinkingIndicator(Static):
                 self._status_width(),
                 hover=self._summary_hover,
             )
+            if self.has_error_line:
+                line.append("\n")
+                line.append_text(self._error_line())
             return line
         if self._state == _STATE_VALIDATING:
             text.append("✦", style=self._validating_shade())

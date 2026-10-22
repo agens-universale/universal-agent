@@ -2686,14 +2686,24 @@ class TraceScreen(Screen):
             if kind is None:
                 return
             elapsed = None
+        error = tui.get("last_error")
         ind = ThinkingIndicator(
             state=kind,
             frozen_elapsed=elapsed if isinstance(elapsed, int) else None,
             turn_summary=self._restored_turn_summary(edits),
             done_label=done_label,
+            error=error if isinstance(error, str) else None,
         )
         self._thinking = ind
         self.query_one(_SEL_INDICATOR_BAR, Vertical).mount(ind)
+        self._sync_indicator_reserve()
+
+    def _set_indicator_error(self, error: str | None) -> None:
+        """Причина упавшего хода под «✕ Ошибка»; бар растёт на её строку."""
+        if self._thinking is None:
+            return
+        self._thinking.set_error(error)
+        self._sync_indicator_reserve()
 
     def _hide_thinking_indicator(self) -> None:
         """Скрыть индикатор (CSS `.hidden`), не удаляя; анимация на паузе."""
@@ -2707,6 +2717,7 @@ class TraceScreen(Screen):
             return
         self._thinking.remove()
         self._thinking = None
+        self._sync_indicator_reserve()
 
     def _refresh_stream_content(self) -> None:
         """Освежить контент уже смонтированного стрим-виджета из снапшота sink.
@@ -4990,7 +5001,7 @@ class TraceScreen(Screen):
             return
         self._write_tui_meta(
             self._active_task_id,
-            {"status": "running", "last_indicator": None},
+            {"status": "running", "last_indicator": None, "last_error": None},
         )
 
     def _update_mcp_indicator(self) -> None:
@@ -5215,7 +5226,10 @@ class TraceScreen(Screen):
         self._pump_reasoning_stream_source()
         err = getattr(self.app, "last_runner_error", None)
         if err and not self._error_shown:
-            self._mount_standalone(f"runtime: {err}", "error")
+            # Причина — строкой `└` под «✕ Ошибка» (индикатор). Без треда
+            # индикатора нет — тогда строкой без владельца.
+            if self._active_task_id is None:
+                self._mount_standalone(f"runtime: {err}", "error")
             self._error_shown = True
             self._mark_pending_failed()
         # Инвариант: running tool-строки живут, только пока задача жива (live
@@ -5325,6 +5339,11 @@ class TraceScreen(Screen):
                 self._active_task_id,
                 {
                     "status": _STATUS[outcome],
+                    "last_error": (
+                        getattr(self.app, "last_runner_error", None)
+                        if outcome == "failed"
+                        else None
+                    ),
                     "last_indicator": {
                         "kind": _KIND[outcome],
                         "elapsed": _elapsed,
@@ -5439,6 +5458,7 @@ class TraceScreen(Screen):
             # falling-edge/idle и не зависим от reaping воркера. _show создаёт
             # индикатор, если его нет.
             self._show_thinking_indicator(state="failed")
+            self._set_indicator_error(err)
             if not _frozen:
                 self._clear_stream_block()
         elif _indicator_mode == "active":
@@ -8286,12 +8306,16 @@ class TraceScreen(Screen):
     def _sync_indicator_reserve(self) -> None:
         """Высота #indicator-bar: 3 при активной задаче (отступ-строка снизу под
         индикатором), 2 на пустом старте (без задачи) — чтобы чистый экран не нёс
-        лишнюю строку. В пределах состояния высота фиксирована → нет «прыжка»."""
+        лишнюю строку. В пределах состояния высота фиксирована → нет «прыжка».
+        Строка причины под «✕ Ошибка» — ещё одна строка бара."""
         try:
             bar = self.query_one(_SEL_INDICATOR_BAR, Vertical)
         except Exception:
             return
-        bar.styles.height = 3 if self._active_task_id is not None else 2
+        height = 3 if self._active_task_id is not None else 2
+        if self._thinking is not None and self._thinking.has_error_line:
+            height += 1
+        bar.styles.height = height
 
     def _handle_bang_shell(self, text: str) -> None:
         """`!command` → локальный shell в cwd TUI; результат только в трейсе."""
