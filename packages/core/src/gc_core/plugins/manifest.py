@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import logging
 import os
@@ -9,6 +10,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import yaml
 
@@ -317,7 +319,10 @@ def _with_env(value: Any) -> Any:
 
 
 _MCP_KEYS = ("command", "args", "env", "cwd", "url", "headers")
-_MCP_TRANSPORTS = {"stdio", "http", "sse"}
+_MCP_TRANSPORTS = {"stdio", "http", "sse", "stream_http"}
+# ``http`` у нас — устаревший клиент на requests, а ``stream_http`` — клиент
+# streamable HTTP из SDK, поэтому одноимённый тип плагина идёт туда.
+_MCP_TYPE_ALIASES = {"streamable-http": "stream_http"}
 
 
 def _mcp_entry(
@@ -327,6 +332,7 @@ def _mcp_entry(
     transport = str(
         spec.get("type") or ("stdio" if spec.get("command") else "http")
     ).lower()
+    transport = _MCP_TYPE_ALIASES.get(transport, transport)
     if transport not in _MCP_TRANSPORTS:
         logger.info(
             "plugin mcp server %r: transport %r skipped", name, transport
@@ -458,6 +464,207 @@ def _load_agents(root: Path) -> tuple[PluginAgent, ...]:
     return tuple(out)
 
 
+# Agent Plugins v1.0.0, раздел MCP: ``mcp.json`` в корне плагина.
+_AP_MCP_FILE = "mcp.json"
+_AP_MCP_SCHEMA_ID = "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json"
+_AP_RESERVED_ENV = ("PLUGIN_ROOT", "PLUGIN_DATA")
+_AP_PLACEHOLDER = re.compile(r"\$\{(PLUGIN_ROOT|PLUGIN_DATA)\}")
+_AP_MCP_VARIANTS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
+    # type -> (обязательные поля, все допустимые поля)
+    "stdio": (
+        frozenset({"type", "command"}),
+        frozenset({"type", "command", "args", "env", "cwd"}),
+    ),
+    "streamable-http": (
+        frozenset({"type", "url"}),
+        frozenset({"type", "url", "headers"}),
+    ),
+    "sse": (
+        frozenset({"type", "url"}),
+        frozenset({"type", "url", "headers"}),
+    ),
+}
+
+
+def _ap_expand(value: str, root: Path, data: Path) -> str:
+    """Один проход без рекурсии: ``${PLUGIN_ROOT}`` / ``${PLUGIN_DATA}``."""
+    paths = {"PLUGIN_ROOT": str(root), "PLUGIN_DATA": str(data)}
+    return _AP_PLACEHOLDER.sub(lambda m: paths[m.group(1)], value)
+
+
+def _ap_inside(path: Path, base: Path) -> bool:
+    return Path(os.path.normpath(path)).is_relative_to(base)
+
+
+def _ap_str_list(value: Any) -> bool:
+    return isinstance(value, list) and all(isinstance(v, str) for v in value)
+
+
+def _ap_str_map(value: Any) -> bool:
+    return isinstance(value, dict) and all(
+        isinstance(k, str) and isinstance(v, str) for k, v in value.items()
+    )
+
+
+def _ap_url_error(spec: dict[str, Any]) -> str | None:
+    url = spec["url"]
+    if not isinstance(url, str):
+        return "url is not a string"
+    try:
+        parts = urlsplit(url)
+        host = parts.hostname
+    except ValueError:
+        return "url is malformed"
+    if parts.scheme not in ("http", "https") or not host:
+        return "url is not an absolute http(s) URL"
+    if parts.username is not None or parts.password is not None:
+        return "url has user information"
+    if parts.fragment:
+        return "url has a fragment"
+    if parts.scheme == "http":
+        try:
+            loopback = ipaddress.ip_address(host).is_loopback
+        except ValueError:
+            loopback = host.lower() == "localhost"
+        if not loopback:
+            return "non-loopback url must use https"
+    headers = spec.get("headers", {})
+    if not _ap_str_map(headers):
+        return "headers must be a string map"
+    names = [k.lower() for k in headers]
+    if len(names) != len(set(names)):
+        return "duplicate header names"
+    return None
+
+
+def _ap_command(command: Any, root: Path) -> tuple[str | None, str | None]:
+    if not isinstance(command, str) or not command:
+        return None, "command is not a non-empty string"
+    if command.startswith("./"):
+        resolved = root / command
+        if not _ap_inside(resolved, root):
+            return None, "command escapes the plugin root"
+        return str(resolved), None
+    if "/" in command or "\\" in command or any(c.isspace() for c in command):
+        return None, "command must be one token: a bare name or ./path"
+    return command, None
+
+
+def _ap_cwd(
+    cwd: Any, root: Path, data: Path
+) -> tuple[Path | None, str | None]:
+    if cwd is None:
+        return root, None
+    if not isinstance(cwd, str):
+        return None, "cwd is not a string"
+    if cwd.startswith("./"):
+        path, base = root / cwd, root
+    else:
+        head = re.match(r"\$\{(PLUGIN_ROOT|PLUGIN_DATA)\}(?:/|$)", cwd)
+        if head is None:
+            return None, "cwd must be ./relative or start with ${PLUGIN_*}"
+        path = Path(_ap_expand(cwd, root, data))
+        base = root if head.group(1) == "PLUGIN_ROOT" else data
+    if not _ap_inside(path, base):
+        return None, "cwd escapes its base directory"
+    return path, None
+
+
+def _ap_stdio_entry(
+    spec: dict[str, Any], root: Path, plugin_name: str
+) -> tuple[dict[str, Any] | None, str | None]:
+    from gc_core.plugins.installed import plugin_data_dir
+
+    data = plugin_data_dir(plugin_name)
+    args, env = spec.get("args", []), spec.get("env", {})
+    if not _ap_str_list(args) or not _ap_str_map(env):
+        return None, "args/env have wrong types"
+    if any(k in env for k in _AP_RESERVED_ENV):
+        return None, "env defines a reserved name (PLUGIN_ROOT/PLUGIN_DATA)"
+    command, reason = _ap_command(spec["command"], root)
+    cwd, cwd_reason = _ap_cwd(spec.get("cwd"), root, data)
+    if command is None or cwd is None:
+        return None, reason or cwd_reason
+    return {
+        "transport": "stdio",
+        "command": command,
+        "args": [_ap_expand(a, root, data) for a in args],
+        "env": {
+            **{k: _ap_expand(v, root, data) for k, v in env.items()},
+            "PLUGIN_ROOT": str(root),
+            "PLUGIN_DATA": str(data),
+        },
+        "cwd": str(cwd),
+    }, None
+
+
+def _ap_server_entry(
+    spec: Any, root: Path, plugin_name: str
+) -> tuple[dict[str, Any] | None, str | None]:
+    variant = _AP_MCP_VARIANTS.get(
+        spec.get("type") if isinstance(spec, dict) else None
+    )
+    if variant is None:
+        return None, "unknown type"
+    if not variant[0] <= set(spec) <= variant[1]:
+        return None, "fields do not fit the server variant"
+    if spec["type"] == "stdio":
+        return _ap_stdio_entry(spec, root, plugin_name)
+    reason = _ap_url_error(spec)
+    if reason is not None:
+        return None, reason
+    entry: dict[str, Any] = {
+        "transport": _MCP_TYPE_ALIASES.get(spec["type"], spec["type"]),
+        "url": spec["url"],
+    }
+    if "headers" in spec:
+        entry["headers"] = dict(spec["headers"])
+    return entry, None
+
+
+def _parse_ap_mcp_servers(
+    raw: Any, root: Path, plugin_name: str
+) -> dict[str, dict[str, Any]]:
+    """``mcp.json`` по Agent Plugins v1.0.0: ``$schema`` и ``mcpServers``, у
+    сервера ровно один вариант (stdio / streamable-http / sse). Раскрываются
+    только ``${PLUGIN_ROOT}`` и ``${PLUGIN_DATA}`` в ``args``, ``env``,
+    ``cwd``; остальное, включая ``${VAR}``, остаётся буквальным. Невалидная
+    запись пропускается с предупреждением (имя и причина, без значений).
+    """
+    if (
+        not isinstance(raw, dict)
+        or set(raw) != {_AP_SCHEMA_KEY, "mcpServers"}
+        or raw[_AP_SCHEMA_KEY] != _AP_MCP_SCHEMA_ID
+        or not isinstance(raw["mcpServers"], dict)
+    ):
+        logger.warning("plugin %s: mcp.json is invalid, MCP disabled", root)
+        return {}
+    out: dict[str, dict[str, Any]] = {}
+    for name, spec in raw["mcpServers"].items():
+        entry, reason = _ap_server_entry(spec, root, plugin_name)
+        if entry is None:
+            logger.warning("plugin mcp server %r skipped: %s", name, reason)
+            continue
+        out[str(name)] = entry
+    return out
+
+
+def _load_mcp_servers(
+    root: Path, fmt: str, name: str
+) -> dict[str, dict[str, Any]]:
+    """Серверы MCP плагина: ``mcp.json`` для Agent Plugins, ``.mcp.json`` /
+    ``mcp.json`` для Claude Code."""
+    if fmt == PLUGIN_FORMAT_AP:
+        path = root / _AP_MCP_FILE
+        if not path.is_file():
+            return {}
+        return _parse_ap_mcp_servers(_read_json(path), root, name)
+    path = next(
+        (root / rel for rel in _MCP_CANDIDATES if (root / rel).is_file()), None
+    )
+    return _parse_mcp_servers(_read_json(path), root) if path else {}
+
+
 def load_plugin(path: str | Path) -> Plugin | None:
     """Прочитать каталог плагина. ``None``, если это не плагин."""
     root = Path(path).expanduser().resolve()
@@ -490,12 +697,7 @@ def load_plugin(path: str | Path) -> Plugin | None:
     )
     name = str(manifest.get("name") or root.name)
     version = str(manifest.get("version") or "0")
-    mcp_path = next(
-        (root / rel for rel in _MCP_CANDIDATES if (root / rel).is_file()), None
-    )
-    mcp_servers = (
-        _parse_mcp_servers(_read_json(mcp_path), root) if mcp_path else {}
-    )
+    mcp_servers = _load_mcp_servers(root, fmt, name)
     return Plugin(
         name=name,
         version=version,

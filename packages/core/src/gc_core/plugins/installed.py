@@ -43,6 +43,20 @@ def installed_dir() -> Path:
     return Path(env_vars.gc_paths()["data"]) / "plugins" / "installed"
 
 
+def plugin_data_dir(name: str) -> Path:
+    """Постоянный каталог данных плагина (``${PLUGIN_DATA}``); создаётся при первом обращении."""
+    from gc_core.config_modules import env_vars
+
+    path = (
+        Path(env_vars.gc_paths()["data"])
+        / "plugins"
+        / "data"
+        / _safe_name(name)
+    )
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def _meta_path(root: Path) -> Path:
     return root / _META
 

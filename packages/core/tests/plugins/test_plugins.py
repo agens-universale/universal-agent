@@ -17,6 +17,7 @@ from gc_core.tools.skills.registry import SkillsRegistry
 
 PY = sys.executable
 AP_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"
+AP_MCP_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json"
 
 
 @pytest.fixture(autouse=True)
@@ -688,7 +689,12 @@ def test_agent_plugins_layout_mcp_json(tmp_path):
         encoding="utf-8",
     )
     (root / "mcp.json").write_text(
-        json.dumps({"mcpServers": {"s": {"command": "echo"}}}),
+        json.dumps(
+            {
+                "$schema": AP_MCP_SCHEMA,
+                "mcpServers": {"s": {"type": "stdio", "command": "echo"}},
+            }
+        ),
         encoding="utf-8",
     )
     assert "s" in load_plugin(root).mcp_servers
@@ -1161,3 +1167,124 @@ def test_both_manifests_prefer_claude_code(tmp_path):
     plugin = load_plugin(root)
     assert (plugin.format, plugin.name) == ("claude-code", "cc")
     assert plugin.skills_dir is not None
+
+
+def _ap_plugin(tmp_path, servers, name="apmcp", schema=AP_MCP_SCHEMA):
+    root = tmp_path / name
+    root.mkdir()
+    (root / "plugin.json").write_text(
+        json.dumps({"$schema": AP_SCHEMA, "name": name, "version": "1"}),
+        encoding="utf-8",
+    )
+    doc = {"mcpServers": servers}
+    if schema:
+        doc["$schema"] = schema
+    (root / "mcp.json").write_text(json.dumps(doc), encoding="utf-8")
+    return root
+
+
+def test_ap_mcp_streamable_http(tmp_path):
+    from gc_core.config_modules.root import AppConfig, resolve_paths
+
+    root = _ap_plugin(
+        tmp_path,
+        {"api": {"type": "streamable-http", "url": "https://e.x/mcp"}},
+    )
+    runtime.reset_plugin_cache()
+    cfg = AppConfig.model_validate({"plugins": {"paths": [str(root)]}})
+    servers = resolve_paths(cfg, str(tmp_path)).mcp.servers
+    assert servers["apmcp_api"].transport == "stream_http"
+
+
+def test_claude_code_mcp_streamable_http_maps_to_stream_http(tmp_path):
+    root = _make_plugin(tmp_path)
+    (root / ".mcp.json").write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "r": {"type": "streamable-http", "url": "https://e.x/m"}
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert load_plugin(root).mcp_servers["r"]["transport"] == "stream_http"
+
+
+def test_ap_mcp_plugin_root_and_data(tmp_path):
+    root = _ap_plugin(
+        tmp_path,
+        {
+            "s": {
+                "type": "stdio",
+                "command": "node",
+                "args": ["${PLUGIN_ROOT}/srv.js"],
+                "env": {"D": "${PLUGIN_DATA}"},
+            }
+        },
+    )
+    entry = load_plugin(root).mcp_servers["s"]
+    data = installed.plugin_data_dir("apmcp")
+    assert entry["args"] == [f"{root.resolve()}/srv.js"]
+    assert entry["env"]["D"] == str(data)
+    assert entry["env"]["PLUGIN_ROOT"] == str(root.resolve())
+    assert entry["env"]["PLUGIN_DATA"] == str(data)
+    assert data.is_dir()
+
+
+def test_ap_mcp_does_not_expand_env(tmp_path, monkeypatch):
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    root = _ap_plugin(
+        tmp_path,
+        {
+            "s": {"type": "stdio", "command": "node", "args": ["${HOME}"]},
+            "h": {
+                "type": "streamable-http",
+                "url": "https://e.x/mcp",
+                "headers": {"A": "${GITHUB_TOKEN}"},
+            },
+        },
+    )
+    servers = load_plugin(root).mcp_servers
+    assert servers["s"]["args"] == ["${HOME}"]
+    assert servers["h"]["headers"] == {"A": "${GITHUB_TOKEN}"}
+
+
+def test_ap_mcp_rejects_reserved_env_and_plain_http(tmp_path):
+    root = _ap_plugin(
+        tmp_path,
+        {
+            "env": {
+                "type": "stdio",
+                "command": "node",
+                "env": {"PLUGIN_ROOT": "x"},
+            },
+            "plain": {
+                "type": "streamable-http",
+                "url": "http://example.com/mcp",
+            },
+            "loop": {
+                "type": "streamable-http",
+                "url": "http://127.0.0.1:9/mcp",
+            },
+            "mixed": {
+                "type": "stdio",
+                "command": "node",
+                "url": "https://e.x",
+            },
+            "notype": {"command": "node"},
+        },
+    )
+    assert set(load_plugin(root).mcp_servers) == {"loop"}
+
+
+def test_ap_mcp_requires_schema_and_ignores_dot_mcp_json(tmp_path):
+    root = _ap_plugin(
+        tmp_path,
+        {"s": {"type": "stdio", "command": "node"}},
+        schema=None,
+    )
+    (root / ".mcp.json").write_text(
+        json.dumps({"mcpServers": {"x": {"command": "y"}}}), encoding="utf-8"
+    )
+    assert load_plugin(root).mcp_servers == {}
