@@ -5,6 +5,7 @@
 (``gc_stores.remote``) — обычный ``ThreadStore``, отказы контракта приходят
 своим типом."""
 
+import asyncio
 from datetime import timedelta
 
 import pytest
@@ -21,6 +22,12 @@ from gc_stores.remote import open as open_remote
 from gc_stores.remote.server import ThreadProxy
 from gc_testkit import session_checks
 from gc_testkit.memory_thread_store_v2 import MemoryThreadStore
+
+# Прокси — unix-сокет (swarm только для Linux); на Windows их в asyncio нет.
+pytestmark = pytest.mark.skipif(
+    not hasattr(asyncio, "start_unix_server"),
+    reason="прокси треда — unix-сокет, на этой платформе его нет",
+)
 
 KEY = ThreadKey(system="generic", thread="task1")
 
@@ -260,8 +267,6 @@ async def test_sandbox_cannot_strip_server_marks_through_the_proxy(tmp_path):
 async def test_proxy_serves_a_bounded_number_of_connections(monkeypatch):
     """Чужие соединения не съедают память сервера: прокси держит не больше
     ``MAX_CONNECTIONS`` разом и не ждёт молчащий запрос вечно."""
-    import asyncio
-
     from gc_stores.remote import server as proxy_server
 
     monkeypatch.setattr(proxy_server, "READ_TIMEOUT_SECONDS", 0.3)
@@ -309,8 +314,6 @@ async def test_sandbox_cannot_take_a_lease_for_years():
 async def test_connections_over_the_cap_are_closed_at_once():
     """Соединения сверх ``MAX_OPEN`` не ждут слота с открытым сокетом —
     сервер закрывает их сразу."""
-    import asyncio
-
     from gc_stores.remote import server as proxy_server
 
     proxy, _client = await _pair()
@@ -341,8 +344,6 @@ async def test_client_that_never_reads_the_reply_does_not_hold_a_slot(
 ):
     """Ответ, который клиент не читает, не держит слот вечно: отдача — с
     таймаутом."""
-    import asyncio
-
     from gc_stores.remote import protocol
     from gc_stores.remote import server as proxy_server
 
