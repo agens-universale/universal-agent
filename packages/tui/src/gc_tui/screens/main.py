@@ -2392,9 +2392,29 @@ class TraceScreen(Screen):
     def on_unmount(self) -> None:
         """App exit / снятие экрана — отпустить lock удерживаемого tid и закрыть сеанс
         поиска файлов (его поток не должен висеть без экрана)."""
+        self._stamp_quit_outcome()
         self._session_lock_release()
         if self._file_search is not None:
             self._file_search.close()
+
+    def _stamp_quit_outcome(self) -> None:
+        """Выход посреди хода: ход умирает с процессом, исход — в его тред.
+
+        Только мета: экран уже снимается, ленту не трогаем. Ход ещё бежит —
+        «stopped»; успел кончиться до тика — его собственный исход."""
+        if not (self._was_running or self._run_pending) or not self._store:
+            return
+        runner = self._watched_runner or getattr(
+            self.app, "active_runner", None
+        )
+        if getattr(runner, "_thread_kind", "run") != "run":
+            return
+        tid = self._run_task_id(runner)
+        if tid is None:
+            return
+        if runner is not None and runner.is_running():
+            self.app.last_stop_requested = True
+        self._stamp_run_outcome(runner, tid, None)
 
     def _mount_failed_from_meta(self, task_id: str) -> None:
         """После рестарта: смонтировать виджеты failed-реплик из

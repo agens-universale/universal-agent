@@ -143,3 +143,16 @@ async def test_instant_failure_after_switch_lands_in_run_thread(tmp_path):
         scr.attach_active_task(TID_B, is_resume=True)
         scr._poll_active()
         assert _status(scr, TID_A) == "failed"
+
+
+@pytest.mark.asyncio
+async def test_quit_mid_run_writes_stopped(tmp_path):
+    """Выход из приложения посреди хода — исход «stopped» в тред хода."""
+    app = _app(tmp_path)
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(TID_A)
+        scr._prepare_for_new_run()
+        app.active_runner = _Runner(TID_A)
+        scr._poll_active()
+    assert _status(_store(tmp_path), TID_A) == "stopped"
