@@ -134,3 +134,80 @@ def test_withdraw_races_admission_without_loss_or_duplicate():
         f"m{i}" for i in range(rounds)
     )
     assert not set(admitted) & set(withdrawn)
+
+
+class _SpyLock:
+    """Замок исполнителя, который знает, держат ли его сейчас."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self.held = False
+
+    def __enter__(self) -> "_SpyLock":
+        self._lock.acquire()
+        self.held = True
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.held = False
+        self._lock.release()
+
+
+class _GuardedQueue(list):
+    """Очередь, которая записывает, под замком ли её читают и правят."""
+
+    def __init__(self, lock: _SpyLock, items=()) -> None:
+        super().__init__(items)
+        self._spy = lock
+        self.touches: list[bool] = []
+
+    def _touch(self) -> None:
+        self.touches.append(self._spy.held)
+
+    def __iter__(self):
+        self._touch()
+        return super().__iter__()
+
+    def __getitem__(self, key):
+        self._touch()
+        return super().__getitem__(key)
+
+    def __setitem__(self, key, value) -> None:
+        self._touch()
+        super().__setitem__(key, value)
+
+    def clear(self) -> None:
+        self._touch()
+        super().clear()
+
+    def append(self, item) -> None:
+        self._touch()
+        super().append(item)
+
+
+def _spied_executor() -> tuple[AgentExecutor, _SpyLock]:
+    spy = _SpyLock()
+    ex = AgentExecutor(
+        fake_ctx(mcp_cleanup=_no_cleanup, lock_factory=lambda: spy)
+    )
+    ex._pending_messages = _GuardedQueue(spy)
+    ex._undelivered_messages = _GuardedQueue(spy)
+    return ex, spy
+
+
+def test_withdraw_and_admission_touch_queue_only_under_lock():
+    """Снятие и впуск читают и правят очередь только под замком
+    исполнителя: между проверкой «есть ли» и правкой впуск не вклинится."""
+    ex, _spy = _spied_executor()
+    ex.add_message(_msg("a"))
+    ex.add_message(_msg("b"))
+    ex._undelivered_messages.append(_msg("c"))
+    ex._undelivered_messages.touches.clear()
+
+    assert ex.withdraw_message("c") is True
+    assert ex.withdraw_message("a") is True
+    assert _ids(ex._take_pending_messages()) == ["b"]
+
+    touches = ex._pending_messages.touches + ex._undelivered_messages.touches
+    assert touches
+    assert all(touches)
