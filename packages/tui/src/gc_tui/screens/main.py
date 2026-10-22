@@ -725,9 +725,8 @@ class TraceScreen(Screen):
         self._watched_runner = None
         self._run_pending: bool = False
         # Остановленный раннер, чей поток ещё дорабатывает (стоп
-        # кооперативный), и переход, ждущий его конца (решение 25).
+        # кооперативный): строка итога мигает «■» (решение 26).
         self._stopping_runner = None
-        self._pending_switch: tuple[str | None] | None = None
         self._was_summarizing: bool = (
             False  # для baseline last_compact_msg_count
         )
@@ -2336,6 +2335,7 @@ class TraceScreen(Screen):
             self._session_lock_release(prev)
         if prev != task_id:
             self._copy_seq += 1  # итог /copy прошлой сессии сюда не пишется
+            self._leave_thread_view()
         self._active_task_id = task_id
         self.app.tui_state.active_task_id = task_id
         self._session_lock_hb_mono = 0.0
@@ -2440,6 +2440,12 @@ class TraceScreen(Screen):
             self.app.last_stop_requested = True
         elapsed = self._turn_elapsed(runner, on_screen=False)
         self._stamp_run_outcome(runner, tid, None, elapsed)
+
+    def _leave_thread_view(self) -> None:
+        """Смена открытого треда: то, что экран держал о ходе прежнего,
+        новому не принадлежит. Остановленный ход дорабатывает отвязанным —
+        его мигающий «■» остаётся в прежней сессии."""
+        self._stopping_runner = None
 
     def _mount_failed_from_meta(self, task_id: str) -> None:
         """После рестарта: смонтировать виджеты failed-реплик из
@@ -5565,7 +5571,6 @@ class TraceScreen(Screen):
         # Спадающий фронт — первым: новый ход того же раннера не прячет
         # конец прошлого.
         self._settle_ended_run()
-        self._continue_pending_switch()
         # Восходящий фронт: прогон стартовал → running (страховочная сетка к
         # _prepare_for_new_run; ловит любой путь, где prepare не вызвали).
         # Тред — прогона: к первому тику человек мог уйти в другую сессию.
@@ -7812,8 +7817,8 @@ class TraceScreen(Screen):
         тред, None — новая пустая сессия.
 
         Идёт ход — вопрос «остановить и перейти»; остаться — ничего не
-        меняется. Остановленный ход ещё дорабатывает — переход ждёт его
-        конца: целевой тред не открывается, пока ход прежнего жив."""
+        меняется. Ход не идёт — переход сразу; кончившийся, но не
+        закрытый тиком ход сначала закрывается (исход — в его тред)."""
         if target is not None and target == self._active_task_id:
             self._open_thread(target)
             return
@@ -7834,36 +7839,20 @@ class TraceScreen(Screen):
                 _on_result,
             )
             return
-        self._pending_switch = (target,)
-        self._continue_pending_switch()
+        self._settle_ended_run()
+        self._open_thread(target)
 
     def _stop_run_then_switch(self, target: str | None) -> None:
-        """Обычный стоп (очередь — назад в поле), вопросы хода сняты;
-        переход — когда ход кончится."""
+        """Обычный стоп (очередь — назад в поле), вопросы хода сняты, исход
+        «stopped» — в тред хода сразу; затем переход. Поток хода
+        дорабатывает в фоне, отвязанный от окна, как после обычного стопа:
+        всё, что он ещё пишет, идёт в его тред."""
         if self._confirm_active:
             self._hide_confirm_banner()
         if self.app.tui_state.ask_human_state is not None:
             self._unmount_ask_human_banner()
         self._stop_and_replace_runner()
-        self._show_stop_state()
-        self._pending_switch = (target,)
-        self._continue_pending_switch()
-
-    def _continue_pending_switch(self) -> None:
-        """Ждущий переход — как только остановленный ход кончился: исход
-        хода — в его тред, затем снова через вход (за время ожидания мог
-        начаться новый ход — тогда снова вопрос)."""
-        if self._pending_switch is None:
-            return
-        if self._stopping_alive():
-            return
-        (target,) = self._pending_switch
-        self._pending_switch = None
         self._settle_ended_run()
-        runner = getattr(self.app, "active_runner", None)
-        if runner is not None and runner.is_running():
-            self.request_thread_switch(target)
-            return
         self._open_thread(target)
 
     def _open_thread(self, target: str | None) -> None:
@@ -7995,6 +7984,12 @@ class TraceScreen(Screen):
             if runner.is_running():
                 self.app.last_stop_requested = True
                 self._stopping_runner = runner
+                # Предохранитель хода — в его тред сейчас: поток доработает
+                # отвязанным, и общий объект к тому времени может держать
+                # уже другой тред.
+                self.app.persist_circuit_breaker(
+                    self.app.run_thread_id(runner)
+                )
             runner.stop()
             runner._marked_stopped = True
             # Поток может ещё досиживать HTTP — тогда логгер отдаст он сам.
@@ -8002,6 +7997,7 @@ class TraceScreen(Screen):
             if callable(release):
                 release()
         self.app.active_runner = None
+        self.app.detach_run_sinks()
         self._return_queue_to_input(withdrawn)
 
     def _stop_for_ask_human(self) -> None:
@@ -8561,6 +8557,7 @@ class TraceScreen(Screen):
         self._session_lock_release()
         self._reset_run_flags()
         self._copy_seq += 1  # итог /copy прошлой сессии сюда не пишется
+        self._leave_thread_view()
         self._active_task_id = None
         self.app.tui_state.active_task_id = None
         self._session_lock_hb_mono = 0.0

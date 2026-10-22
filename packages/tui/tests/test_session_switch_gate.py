@@ -153,38 +153,77 @@ async def test_run_asks_and_stay_changes_nothing(tmp_path, path):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("path", ["new", "sessions"])
-async def test_stop_waits_for_run_end_then_switches(tmp_path, path):
+async def test_stop_switches_at_once_while_old_worker_lingers(tmp_path, path):
+    """Стоп кооперативный: поток прежнего хода ещё жив, а переход — сразу.
+    Исход «stopped» уже в A; второй переход — обычный, без вопроса."""
     async with _app(tmp_path).run_test() as pilot:
         scr, runner = await _run_in_a(pilot, slow=True)
-        opened = []
-        attach = scr.attach_active_task
-        empty = scr._switch_to_empty_state
-
-        def _spy_attach(tid, **kw):
-            opened.append((tid, runner.is_running()))
-            return attach(tid, **kw)
-
-        def _spy_empty():
-            opened.append((None, runner.is_running()))
-            return empty()
-
-        scr.attach_active_task = _spy_attach
-        scr._switch_to_empty_state = _spy_empty
         await _switch(pilot, tmp_path, path)
         await pilot.press("y")
         await pilot.pause()
         assert runner.stops == 1
-        # Ход ещё жив (стоп кооперативный): сессия не сменилась.
-        scr._poll_active()
-        await pilot.pause()
-        assert scr._active_task_id == _A
-        assert opened == []
-        runner.running = False  # ход дошёл до конца
-        scr._poll_active()
-        await pilot.pause()
+        assert runner.is_running()  # поток дорабатывает в фоне
         assert scr._active_task_id == _TARGET[path]
-        assert opened == [(_TARGET[path], False)]
         assert _status(tmp_path, _A) == "stopped"
+        scr._poll_active()
+        await pilot.pause()
+        assert _dialog(pilot) is None
+        scr.request_thread_switch(_A)
+        await pilot.pause()
+        assert _dialog(pilot) is None
+        assert scr._active_task_id == _A
+
+
+@pytest.mark.asyncio
+async def test_plain_stop_then_new_switches_at_once(tmp_path):
+    """После обычного стопа поток хода ещё жив — /new не ждёт его."""
+    async with _app(tmp_path).run_test() as pilot:
+        scr, runner = await _run_in_a(pilot, slow=True)
+        scr._events_since_last_user_send = 1  # не откат
+        scr._cmd_stop()
+        await pilot.pause()
+        assert runner.is_running()
+        _new(scr)
+        await pilot.pause()
+        assert _dialog(pilot) is None
+        assert scr._active_task_id is None
+
+
+@pytest.mark.asyncio
+async def test_late_events_of_stopped_run_stay_out_of_new_thread(tmp_path):
+    """Поздние события остановленного хода: ни новый тред, ни его мета их
+    не видят — поток прошлого хода отвязан от окна."""
+    from gc_core.execution.progress import QueueSubagentProgressSink
+    from gc_tui.services.stream_pump import StreamPump
+
+    async with _app(tmp_path).run_test() as pilot:
+        app = pilot.app
+        scr, runner = await _run_in_a(pilot, slow=True)
+        # как после сборки исполнителя хода A
+        pump = StreamPump(app._stream_sink, signal=lambda: None, throttle_s=0)
+        app._stream_pump = pump
+        app._subagent_progress_sink = QueueSubagentProgressSink()
+        app.load_circuit_breaker({"m-a": "tripped"})
+        await _pick_b(pilot, tmp_path)
+        await pilot.press("y")
+        await pilot.pause()
+        assert scr._active_task_id == _B
+        app.load_circuit_breaker({"m-b": "tripped"})  # предохранитель B
+        # поток A дорабатывает: дельты стрима, прогресс, итог предохранителя
+        pump.on_delta("answer", "поздний текст A")
+        assert not app._stream_sink.has_content()
+        assert app._subagent_progress_sink is None
+        app._persist_breaker_after_worker(runner)
+        a_tui = json.loads(
+            (tmp_path / f"meta_cli_{_A}.json").read_text(encoding="utf-8")
+        )["tui"]
+        assert a_tui["circuit_breaker"] == {"m-a": "tripped"}
+        assert _status(tmp_path, _B) is None
+        # новый ход в B — вопрос сам не всплывает
+        app.active_runner = _Runner(_B)
+        scr._poll_active()
+        await pilot.pause()
+        assert _dialog(pilot) is None
 
 
 @pytest.mark.asyncio
@@ -246,3 +285,26 @@ async def test_stop_and_switch_clears_confirm_of_old_run(tmp_path):
         await pilot.pause()
         assert scr._active_task_id == _B
         assert scr._confirm_active is False
+
+
+@pytest.mark.asyncio
+async def test_new_thread_line_does_not_blink_for_old_stop(tmp_path):
+    """Мигающий «■» — строка останавливаемого хода своей сессии; в
+    открытой после перехода сессии итог её собственный."""
+    app = _app(tmp_path)
+    path = tmp_path / f"meta_cli_{_B}.json"
+    meta = json.loads(path.read_text(encoding="utf-8"))
+    meta["tui"] = {
+        "status": "completed",
+        "last_indicator": {"kind": "done", "elapsed": 3},
+    }
+    path.write_text(json.dumps(meta), encoding="utf-8")
+    async with app.run_test() as pilot:
+        scr, runner = await _run_in_a(pilot, slow=True)
+        await _pick_b(pilot, tmp_path)
+        await pilot.press("y")
+        await pilot.pause()
+        scr._poll_active()
+        await pilot.pause()
+        assert scr._active_task_id == _B
+        assert scr._thinking._render_text().plain == "✓ Выполнил за 3с"

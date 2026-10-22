@@ -1526,6 +1526,13 @@ class TuiApp(App):
         headless) или мы уже на UI-потоке: гонки в этом случае нет, пишем
         напрямую, потому что потерять трип хуже."""
         task_id = self.run_thread_id(runner)
+        # Отвязанный (остановленный) прогон, чей тред уже не открыт: его
+        # предохранитель записан при стопе, а общий объект теперь держит
+        # состояние открытого треда — писать его в тред прогона нельзя.
+        if runner is not self.active_runner and task_id != getattr(
+            self.tui_state, "active_task_id", None
+        ):
+            return
         snapshot = self._circuit_breaker.snapshot()
         try:
             self.call_from_thread(
@@ -1533,6 +1540,16 @@ class TuiApp(App):
             )
         except RuntimeError:
             self.persist_circuit_breaker(task_id, snapshot)
+
+    def detach_run_sinks(self) -> None:
+        """Остановленный прогон дорабатывает в фоне, отвязанный от окна: его
+        стрим и прогресс субагентов окну больше не принадлежат. Следующая
+        сборка исполнителя заводит свои."""
+        pump = getattr(self, "_stream_pump", None)
+        if pump is not None:
+            pump.close()
+        self._stream_pump = None
+        self._subagent_progress_sink = None
 
     def load_circuit_breaker(self, snapshot: dict) -> None:
         """Восстановить предохранитель из meta треда при attach (спека §8):
