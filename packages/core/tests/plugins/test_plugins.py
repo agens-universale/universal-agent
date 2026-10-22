@@ -1769,3 +1769,27 @@ def test_ap_plugin_ignores_hooks_commands_and_agents(tmp_path, caplog):
     assert plugin.agents == ()
     assert plugin.commands == ()
     assert "hooks/hooks.json" in caplog.text and "agents" in caplog.text
+
+
+def test_force_reinstall_copy_failure_keeps_old_install(tmp_path, monkeypatch):
+    import shutil
+
+    from gc_core.plugins import installed
+
+    src = _make_plugin(tmp_path, with_skill=True, name="keep-demo")
+    installed.install(str(src))
+    dest = installed.installed_dir() / "keep-demo"
+    real_copytree = shutil.copytree
+
+    def broken(source, target, *args, **kwargs):
+        if str(target).startswith(str(dest)):
+            raise OSError("disk full")
+        return real_copytree(source, target, *args, **kwargs)
+
+    monkeypatch.setattr(installed.shutil, "copytree", broken)
+    with pytest.raises(OSError):
+        installed.install(str(src), force=True)
+
+    assert (dest / "skills" / "demo-skill" / "SKILL.md").is_file()
+    assert not (dest.parent / "keep-demo.new").exists()
+    assert [p.name for p in installed.list_installed()] == ["keep-demo"]

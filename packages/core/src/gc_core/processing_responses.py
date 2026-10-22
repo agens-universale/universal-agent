@@ -2708,10 +2708,12 @@ class _AgentLoop:
             if self._stopped_before_call():
                 return None
             await self._apre_backend_compaction(messages, mode)
-            messages = await self._aapply_tool_usage_notice(messages)
-            messages = await self._aapply_plugin_session_start(messages)
+            # UserPromptSubmit — до служебных добавок (подсказка, SessionStart):
+            # хук смотрит на последнее сообщение, это должен быть запрос.
             if mode == "user_ask":
                 messages = await self._aapply_plugin_user_prompt(messages)
+            messages = await self._aapply_tool_usage_notice(messages)
+            messages = await self._aapply_plugin_session_start(messages)
             if self._stopped_before_call():
                 return None
         return await self._aannounce_mode(messages)

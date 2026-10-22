@@ -207,10 +207,7 @@ class PreparedInstall:
         name = _safe_name(plugin.name)
         dest = self._root / name
         meta = _read_meta(self._root)
-        shutil.rmtree(dest, ignore_errors=True)
-        shutil.copytree(
-            self._plugin_dir, dest, ignore=shutil.ignore_patterns(".git")
-        )
+        _replace_dir(self._plugin_dir, dest)
         info = InstalledPlugin(
             name=name,
             version=plugin.version,
@@ -223,6 +220,26 @@ class PreparedInstall:
         meta[name] = asdict(info)
         _write_meta(self._root, meta)
         return info
+
+
+def _replace_dir(src: Path, dest: Path) -> None:
+    """Заменить ``dest`` копией ``src``: копия рядом, затем переименование.
+
+    Сбой копирования оставляет прежнюю установку нетронутой.
+    """
+    staged = dest.with_name(dest.name + ".new")
+    old = dest.with_name(dest.name + ".old")
+    shutil.rmtree(staged, ignore_errors=True)
+    try:
+        shutil.copytree(src, staged, ignore=shutil.ignore_patterns(".git"))
+    except BaseException:
+        shutil.rmtree(staged, ignore_errors=True)
+        raise
+    shutil.rmtree(old, ignore_errors=True)
+    if dest.exists():
+        dest.rename(old)
+    staged.rename(dest)
+    shutil.rmtree(old, ignore_errors=True)
 
 
 def _exec_surface(plugin: Plugin) -> set[tuple]:
