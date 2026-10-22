@@ -281,3 +281,102 @@ async def test_proxy_serves_a_bounded_number_of_connections(monkeypatch):
             writer.close()
     finally:
         await proxy.aclose()
+
+
+async def test_sandbox_cannot_take_a_lease_for_years():
+    """Аренда на годы — та же бессрочная: тред задачи заняла бы песочница
+    навсегда."""
+    from gc_stores.remote import server as proxy_server
+
+    proxy, client = await _pair()
+    try:
+        with pytest.raises(PermissionError):
+            await client.claim(
+                KEY,
+                LeaseRequest(
+                    owner="sandbox",
+                    ttl=proxy_server.MAX_LEASE_TTL + timedelta(seconds=1),
+                ),
+            )
+        lease = await client.claim(
+            KEY, LeaseRequest(owner="sandbox", ttl=proxy_server.MAX_LEASE_TTL)
+        )
+        assert lease.lease is not None
+    finally:
+        await proxy.aclose()
+
+
+async def test_connections_over_the_cap_are_closed_at_once():
+    """Соединения сверх ``MAX_OPEN`` не ждут слота с открытым сокетом —
+    сервер закрывает их сразу."""
+    import asyncio
+
+    from gc_stores.remote import server as proxy_server
+
+    proxy, _client = await _pair()
+    extra = 5
+    opened = []
+    try:
+        for _ in range(proxy_server.MAX_OPEN + extra):
+            opened.append(
+                await asyncio.open_unix_connection(proxy.socket_path)
+            )
+        await asyncio.sleep(0.2)
+        closed = 0
+        for reader, _writer in opened:
+            try:
+                if await asyncio.wait_for(reader.read(), 0.05) == b"":
+                    closed += 1
+            except TimeoutError:
+                pass
+        assert closed >= extra
+    finally:
+        for _reader, writer in opened:
+            writer.close()
+        await proxy.aclose()
+
+
+async def test_client_that_never_reads_the_reply_does_not_hold_a_slot(
+    monkeypatch,
+):
+    """Ответ, который клиент не читает, не держит слот вечно: отдача — с
+    таймаутом."""
+    import asyncio
+
+    from gc_stores.remote import protocol
+    from gc_stores.remote import server as proxy_server
+
+    monkeypatch.setattr(proxy_server, "READ_TIMEOUT_SECONDS", 0.3)
+    backing = MemoryThreadStore()
+    proxy, client = await _pair(backing)
+    stuck = []
+    try:
+        await client.claim(
+            KEY, LeaseRequest(owner="sandbox", ttl=timedelta(minutes=1))
+        )
+        ref = await backing.put_blob(
+            KEY, b"\0" * (4 * 1024 * 1024), mime="application/octet-stream"
+        )
+        request = protocol.encode(
+            {
+                "token": proxy.token,
+                "op": "get_blob",
+                "key": protocol.wire(KEY),
+                "args": {"ref": protocol.wire(ref)},
+            }
+        )
+        for _ in range(proxy_server.MAX_CONNECTIONS):
+            reader, writer = await asyncio.open_unix_connection(
+                proxy.socket_path
+            )
+            writer.write(request)
+            await writer.drain()
+            stuck.append(writer)
+        record = await asyncio.wait_for(
+            client.get_thread(KEY), proxy_server.READ_TIMEOUT_SECONDS + 5
+        )
+        assert record is not None
+    finally:
+        for writer in stuck:
+            writer.close()
+        await proxy.aclose()

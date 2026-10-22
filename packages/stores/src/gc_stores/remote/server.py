@@ -17,6 +17,7 @@ import secrets
 import shutil
 import tempfile
 from collections.abc import Awaitable, Callable
+from datetime import timedelta
 from typing import Any
 
 from gc_core.threads.errors import StoreUnavailable, ThreadStoreError
@@ -38,7 +39,13 @@ SOCKET_NAME = "thread.sock"
 #: Соединений разом: песочница — недоверенный клиент, её запросы держат
 #: кадр в памяти сервера.
 MAX_CONNECTIONS = 4
-#: Сколько ждать строку запроса: молчащее соединение не держит слот.
+#: Открытых соединений разом, с ждущими слота: сверх — закрываются сразу,
+#: сокеты процесса сервера песочница не исчерпает.
+MAX_OPEN = 16
+#: Самая долгая аренда хода: ход берёт 60 с и продлевает её на половине.
+MAX_LEASE_TTL = timedelta(minutes=15)
+#: Сколько ждать строку запроса и отдачу ответа: молчащее или не
+#: читающее соединение не держит слот.
 READ_TIMEOUT_SECONDS = 30.0
 #: Секции фронтенда, которые пишет ход (сессия ядра); остальные — сервера.
 _SANDBOX_FRONTENDS = frozenset({"tui"})
@@ -62,6 +69,7 @@ class ThreadProxy:
         self.socket_path = os.path.join(self.directory, SOCKET_NAME)
         self._server: asyncio.AbstractServer | None = None
         self._slots = asyncio.Semaphore(MAX_CONNECTIONS)
+        self._open = 0
 
     @classmethod
     async def astart(cls, store: ThreadStore, key: ThreadKey) -> ThreadProxy:
@@ -81,18 +89,24 @@ class ThreadProxy:
     async def _handle(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ) -> None:
+        self._open += 1
         try:
-            async with self._slots:
-                line = await asyncio.wait_for(
-                    reader.readline(), READ_TIMEOUT_SECONDS
-                )
-                reply = await self._reply(line)
-                writer.write(protocol.encode(reply))
-                await writer.drain()
+            if self._open <= MAX_OPEN:
+                async with self._slots:
+                    await self._serve(reader, writer)
         except (OSError, ValueError, asyncio.LimitOverrunError):
             pass  # клиент ушёл, молчит (TimeoutError — OSError) или прислал не кадр
         finally:
+            self._open -= 1
             writer.close()
+
+    async def _serve(
+        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    ) -> None:
+        line = await asyncio.wait_for(reader.readline(), READ_TIMEOUT_SECONDS)
+        reply = await self._reply(line)
+        writer.write(protocol.encode(reply))
+        await asyncio.wait_for(writer.drain(), READ_TIMEOUT_SECONDS)
 
     async def _reply(self, line: bytes) -> dict[str, Any]:
         try:
@@ -197,8 +211,10 @@ async def _append_side(proxy: ThreadProxy, key: ThreadKey, args: dict) -> Any:
 
 async def _claim(proxy: ThreadProxy, key: ThreadKey, args: dict) -> Any:
     request = LeaseRequest.model_validate(args["request"])
-    if request.ttl is None:
-        raise PermissionError("бессрочная аренда — только у сервера")
+    if request.ttl is None or request.ttl > MAX_LEASE_TTL:
+        raise PermissionError(
+            f"аренда без срока или дольше {MAX_LEASE_TTL} — только у сервера"
+        )
     record = await proxy.store.claim(key, request)
     return wire(record)
 
