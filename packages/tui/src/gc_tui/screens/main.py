@@ -2444,8 +2444,12 @@ class TraceScreen(Screen):
     def _leave_thread_view(self) -> None:
         """Смена открытого треда: то, что экран держал о ходе прежнего,
         новому не принадлежит. Остановленный ход дорабатывает отвязанным —
-        его мигающий «■» остаётся в прежней сессии."""
+        его мигающий «■» остаётся в прежней сессии. Откат по Esc — последней
+        отправки этого вида: в открытой сессии её не было, откатывать нечего
+        до новой отправки."""
         self._stopping_runner = None
+        self._last_user_message_id = None
+        self._events_since_last_user_send = 1
 
     def _mount_failed_from_meta(self, task_id: str) -> None:
         """После рестарта: смонтировать виджеты failed-реплик из

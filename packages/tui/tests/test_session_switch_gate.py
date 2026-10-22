@@ -308,3 +308,20 @@ async def test_new_thread_line_does_not_blink_for_old_stop(tmp_path):
         await pilot.pause()
         assert scr._active_task_id == _B
         assert scr._thinking._render_text().plain == "✓ Выполнил за 3с"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["new", "sessions"])
+async def test_switch_forgets_undo_of_previous_send(tmp_path, path):
+    """Откат по Esc — последней отправки этого вида; после перехода её нет:
+    ход новой сессии, начатый без отправки (утверждение плана), не снимает
+    её реплику."""
+    async with _app(tmp_path).run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(_A, is_resume=True)
+        scr._last_user_message_id = "m_a"
+        scr._events_since_last_user_send = 0  # отправка только что в A
+        await _switch(pilot, tmp_path, path)
+        assert scr._active_task_id == _TARGET[path]
+        assert scr._last_user_message_id is None
+        assert scr._can_cancel_with_undo() is False
