@@ -31,7 +31,7 @@ from gc_core.threads.errors import OwnershipError
 from gc_core.threads.facade import Threads
 from gc_core.threads.instance import instance_id
 from gc_core.threads.models import ThreadKey, ThreadQuery, ThreadRecord
-from gc_core.threads.rules import list_cursor_of
+from gc_core.threads.rules import lease_expired, list_cursor_of
 from gc_core.trace_id import normalize_trace_id
 from gc_core.utils.generate_message_id import (
     generate_msg_id_sha256 as generate_message_id_func,
@@ -197,15 +197,17 @@ class WebhookSurface:
     async def aprune_once(self, *, older_than: timedelta) -> int:
         """Удалить задачи вебхука (тред со статусом вебхука), не менявшиеся
         дольше ``older_than``; треды других поверхностей, интерактивных
-        сессий и тред под бессрочной арендой (durable-исполнитель) не
-        трогаются."""
-        cutoff = (utc_now() - older_than).isoformat()
+        сессий и тред под живой арендой (идущий ход: продление аренды
+        ``updated_at`` не двигает; durable-исполнитель) не трогаются."""
+        now = utc_now()
+        cutoff = (now - older_than).isoformat()
         threads = self.threads()
         stale = [
             record.key
             async for record in threads.iter_threads(updated_before=cutoff)
             if record.key.system not in RESERVED_SYSTEMS
             and task_status.FRONTEND in record.frontend
+            and (record.lease is None or lease_expired(record.lease, now))
         ]
         removed = 0
         for key in stale:
@@ -412,13 +414,17 @@ class WebhookSurface:
         from gc_server.webhook.api_v1 import FINAL
 
         status = await self.astatus(key)
-        if status is None:
-            return None
-        if status["status"] in FINAL:
-            return {"status": status["status"]}
+        settled = status is None or status["status"] in FINAL
+        if settled and not await self._aundelivered(key):
+            return None if status is None else {"status": status["status"]}
         self.registry.stop(system=key.system, task_id=key.thread)
         threads = self.threads()
         await threads.request_cancel(key)
+        if settled:
+            # Ход по недоставленному ещё строится — на этом или другом
+            # инстансе, статуса его прогона в хранилище нет: отмену он
+            # (или восстановление) увидит по границе входящих.
+            return {"status": "cancelling"}
         if not await self._ahas_owner(key):
             # Ход вести некому (инстанс упал посреди хода): отмена — сразу
             # итог, иначе восстановление подняло бы задачу и довело её.
@@ -438,13 +444,19 @@ class WebhookSurface:
                 return {"status": "cancelled"}
         return {"status": "cancelling"}
 
+    async def _aundelivered(self, key: ThreadKey) -> int:
+        """Сообщений во входящем потоке задачи, ещё не доставленных ходу."""
+        record = await self.threads().get(key)
+        return 0 if record is None or _foreign(record) else _pending(record)
+
     async def _ahas_owner(self, key: ThreadKey) -> bool:
         """Ход задачи ведёт или строит кто-то: этот процесс или живая
         аренда другого."""
-        if self.registry.is_running(
-            system=key.system, task_id=key.thread
-        ) or self.registry.building_since(
-            system=key.system, task_id=key.thread
+        task = {"system": key.system, "task_id": key.thread}
+        if (
+            self.registry.is_running(**task)
+            or self.registry.is_finishing(**task)
+            or self.registry.building_since(**task)
         ):
             return True
         return await self.threads().busy_owner(key) is not None
@@ -595,19 +607,23 @@ class WebhookSurface:
         мог уже взять следующий прогон (на любом инстансе)."""
         if run.ending == "handed_off" and run.result is None:
             return  # тред так и не взяли — статус ведёт взявший
-        if run.ending == "interrupted":
-            return  # остановка сервера: задачу продолжит восстановление
         key = ThreadKey(system=run.system, thread=run.task_id)
         threads = self.threads()
         record = await threads.get(key)
         current = task_status.status_of(record)
         if current is None or current.get("run_id") != run.notes["run_id"]:
             return
+        if run.ending == "interrupted":
+            # Остановка сервера: задачу продолжит восстановление, а эта
+            # попытка — не сбой хода (деплои не исчерпают попытки).
+            await task_status.aset_status(threads, key, stopped_by="shutdown")
+            return
         final = _final_fields(run)
         final["recovery_attempts"] = 0
-        if final["status"] == "failed" and record is not None:
-            # Задача сдалась: входящие до этой границы восстановление не
-            # поднимает (иначе упавший ход повторялся бы по кругу).
+        if final["status"] in ("failed", "cancelled") and record is not None:
+            # Задача сдалась или отменена: входящие до этой границы
+            # восстановление не поднимает (иначе упавший ход повторялся бы
+            # по кругу, а отменённый собирался бы ради снятого сообщения).
             final["inbox_upto"] = record.max_seq.get("inbox", 0)
         await task_status.aset_status(threads, key, **final)
         self.notify(key, {**current, **final})

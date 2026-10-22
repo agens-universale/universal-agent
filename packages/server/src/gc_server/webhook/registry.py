@@ -76,6 +76,9 @@ class AgentRunRegistry:
         self._runs: dict[str, ActiveRun] = {}
         #: Ключ → когда взята бронь: контекст задачи строится этим процессом.
         self._reservations: dict[str, float] = {}
+        #: Прогоны, снятые из реестра, чей итог ещё пишется: ход окончен,
+        #: аренда отпущена, но задача ещё не брошенная.
+        self._finishing: dict[str, ActiveRun] = {}
 
     def building_since(self, *, system: str, task_id: str) -> float | None:
         """С каких пор этот процесс строит контекст задачи (или ``None``)."""
@@ -85,6 +88,12 @@ class AgentRunRegistry:
 
     def is_running(self, *, system: str, task_id: str) -> bool:
         return self.run_of(system=system, task_id=task_id) is not None
+
+    def is_finishing(self, *, system: str, task_id: str) -> bool:
+        """Свой прогон задачи кончился, но его итог ещё пишется."""
+        key = _make_registry_key(system, task_id)
+        with self._lock:
+            return key in self._finishing
 
     def run_of(self, *, system: str, task_id: str) -> ActiveRun | None:
         key = _make_registry_key(system, task_id)
@@ -152,7 +161,12 @@ class AgentRunRegistry:
         finally:
             with self._lock:
                 self._runs.pop(run.key, None)
-            await self._afinish(run, on_finish)
+                self._finishing[run.key] = run
+            try:
+                await self._afinish(run, on_finish)
+            finally:
+                with self._lock:
+                    self._finishing.pop(run.key, None)
             # Логгер прогона `logging` держит до конца процесса: без этого
             # каждый запрос оставлял по логгеру с открытым файлом.
             from gc_core.utils.logging_module import release_run_logger
@@ -173,6 +187,7 @@ class AgentRunRegistry:
             run.ending = "cancelled" if _stopped(run.executor) else "completed"
             with self._lock:
                 self._runs.pop(run.key, None)
+                self._finishing[run.key] = run
             if run.ending == "cancelled":
                 return  # остановленный прогон хвост не доигрывает
             if not await run.executor.ainbox_left():
@@ -180,6 +195,7 @@ class AgentRunRegistry:
             with self._lock:
                 if run.key in self._runs or run.key in self._reservations:
                     return  # следующий прогон этого процесса уже стартует
+                self._finishing.pop(run.key, None)
                 self._runs[run.key] = run
 
     @staticmethod
@@ -194,20 +210,25 @@ class AgentRunRegistry:
             )
 
     def live_tasks(self) -> list[asyncio.Task]:
+        """Задачи своих прогонов — и идущих, и дописывающих итог (их
+        дожидаются до закрытия хранилища)."""
         with self._lock:
-            return [run.task for run in self._runs.values() if run.task]
+            runs = [*self._runs.values(), *self._finishing.values()]
+        return [run.task for run in runs if run.task]
 
     def cancel_all(self) -> list[asyncio.Task]:
         """Прервать идущие прогоны (остановка сервера): статус не меняется,
         отметка хода остаётся — задачу продолжит восстановление.
         Возвращает снятые задачи — их дожидаются до закрытия хранилища."""
         with self._lock:
-            for run in self._runs.values():
+            running = list(self._runs.values())
+            for run in running:
                 run.shutdown = True
-        tasks = self.live_tasks()
-        for task in tasks:
-            task.cancel()
-        return tasks
+        for run in running:
+            if run.task:
+                run.task.cancel()
+        # Итог, который уже пишется, не прерывается — его дожидаются.
+        return self.live_tasks()
 
     def stop(self, *, system: str, task_id: str) -> bool:
         key = _make_registry_key(system, task_id)

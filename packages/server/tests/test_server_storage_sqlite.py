@@ -238,3 +238,34 @@ async def test_maintenance_sweeps_orphans_of_a_kv_store(tmp_path):
     )
     await WebhookSurface(runtime).amaintain_once()
     assert len(swept) == 1
+
+
+async def test_cleanup_skips_a_task_under_a_live_lease(tmp_path):
+    """Ревью, раунд 2 (R15): продление аренды не двигает ``updated_at`` —
+    задача с долгим шагом выглядит старой, но её ход жив: уборщик её не
+    удаляет посреди хода."""
+    from datetime import timedelta
+
+    from gc_core.threads.facade import Threads
+    from gc_core.threads.models import LeaseRequest
+    from gc_server.webhook import status as task_status
+    from gc_server.webhook.surface import WebhookSurface
+
+    loaded = _settings(tmp_path)
+    stores = await aopen_process_stores(loaded)
+    threads = Threads(stores.threads)
+    key = ThreadKey(system="generic", thread="busy")
+    await task_status.aset_status(threads, key, status="running")
+    await stores.threads.claim(
+        key, LeaseRequest(owner="turn", ttl=timedelta(minutes=5))
+    )
+    surface = WebhookSurface(
+        ServerRuntime(base=loaded, config=ServerConfig(), stores=stores)
+    )
+    try:
+        removed = await surface.aprune_once(older_than=timedelta(seconds=-1))
+        alive = await threads.get(key)
+    finally:
+        await stores.aclose()
+    assert removed == 0
+    assert alive is not None
