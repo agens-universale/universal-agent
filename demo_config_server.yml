@@ -129,6 +129,8 @@ chat:
   # снимает сам: вопрос и прогресс — проза ответа.
 
 a2a:
+  # Документация API (/docs, /redoc, /openapi.json) — только по ключу.
+  #docs: true
   # Агент как пир A2A: карточка /.well-known/agent-card.json, JSON-RPC /rpc.
   port: 8091
   # Адрес не loopback без auth_token — отказ старта.
