@@ -298,8 +298,10 @@ async def test_sticky_skill_full_id_in_reply_colour(tmp_path):
 
 @pytest.mark.asyncio
 async def test_sticky_hover_lightens_background(tmp_path):
-    """Ховер липкой реплики — подложка `USER_BAND_BG` на всю строку,
-    цвет текста прежний."""
+    """Ховер липкой реплики — `OVERLAY_HOVER_BG` на всю строку (не
+    `USER_BAND_BG`), цвет текста прежний."""
+    from gc_tui import palette
+
     _write_task(tmp_path, "o5h")
     async with _app(tmp_path).run_test(size=(100, 30)) as pilot:
         scr = await _tall(pilot, "o5h")
@@ -309,10 +311,12 @@ async def test_sticky_hover_lightens_background(tmp_path):
         assert sticky.rich_style.bgcolor.name.lower() == QUEUE_BG.lower()
         await pilot.hover(sticky)
         await pilot.pause()
-        assert sticky.rich_style.bgcolor.name.lower() == USER_BAND_BG.lower()
+        hover_bg = palette.OVERLAY_HOVER_BG.lower()
+        assert sticky.rich_style.bgcolor.name.lower() == hover_bg
+        assert hover_bg != USER_BAND_BG.lower()
         segments = [s for s in sticky.render_line(0) if s.text.strip()]
         assert segments[1].style.color.name.lower() == DIM.lower()
-        assert segments[1].style.bgcolor.name.lower() == USER_BAND_BG.lower()
+        assert segments[1].style.bgcolor.name.lower() == hover_bg
 
 
 @pytest.mark.asyncio
@@ -394,7 +398,7 @@ async def test_pill_hover_lightens_background(tmp_path):
         await pilot.hover(pill)
         await pilot.pause()
         assert pill.rich_style.color.name.lower() == INK.lower()
-        hover_bg = palette.PILL_HOVER_BG.lower()
+        hover_bg = palette.OVERLAY_HOVER_BG.lower()
         assert pill.rich_style.bgcolor.name.lower() == hover_bg
         assert hover_bg != FOCUS_BG.lower()
 
@@ -405,8 +409,10 @@ def test_pill_hover_bg_is_lighter_and_derived():
     def lum(c):
         return sum(palette._rgb(c))
 
-    assert lum(palette.PILL_HOVER_BG) > lum(palette.FOCUS_BG)
-    assert palette.css_variables()["pill-hover-bg"] == palette.PILL_HOVER_BG
+    assert lum(palette.OVERLAY_HOVER_BG) > lum(palette.FOCUS_BG)
+    assert (
+        palette.css_variables()["overlay-hover-bg"] == palette.OVERLAY_HOVER_BG
+    )
 
 
 @pytest.mark.asyncio

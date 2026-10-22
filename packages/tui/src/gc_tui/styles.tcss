@@ -215,9 +215,9 @@ StickyReply, ScrollEndPill {
     display: none;
 }
 StickyReply { background: $queue-bg; }
-StickyReply:hover { background: $quiet-reply-hover-bg; }
+StickyReply:hover { background: $overlay-hover-bg; }
 ScrollEndPill { background: $focus-bg; color: $ink; }
-ScrollEndPill:hover { background: $pill-hover-bg; }
+ScrollEndPill:hover { background: $overlay-hover-bg; }
 
 /* spec 2026-05-27 / tool-output-detail */
 .detail-section-header {

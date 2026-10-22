@@ -133,17 +133,16 @@ QUEUE_BG = _mix(BG, USER_BAND_BG, _QUEUE_SHARE)
 
 # «Тихая реплика»: один вид у реплики в очереди и у липкой реплики над
 # лентой. Подложка — QUEUE_BG; текст — DIM; маркер — MUTED; имя скилла —
-# цветом текста (отдельного токена нет); ховер липкой — подложка обычной
-# реплики. В теме auto — от пересчитанных
-# QUEUE_BG и USER_BAND_BG (_derived).
+# цветом текста (отдельного токена нет); ховер липкой — OVERLAY_HOVER_BG.
+# В теме auto — от пересчитанного QUEUE_BG (_derived).
 QUIET_REPLY_INK = DIM
 QUIET_REPLY_MARK = MUTED
-QUIET_REPLY_HOVER_BG = USER_BAND_BG
 
-# Ховер плашки «в конец»: фон светлее FOCUS_BG, текст не меняется (исключение
-# из ховера `$accent`). В теме auto — от пересчитанного FOCUS_BG.
-_PILL_HOVER_SHARE = 0.12
-PILL_HOVER_BG = _mix(FOCUS_BG, INK, _PILL_HOVER_SHARE)
+# Ховер накладок ленты (липкая реплика и плашка «в конец») — один фон, светлее
+# FOCUS_BG; текст не меняется (исключение из ховера `$accent`). В теме auto —
+# от пересчитанного FOCUS_BG.
+_OVERLAY_HOVER_SHARE = 0.12
+OVERLAY_HOVER_BG = _mix(FOCUS_BG, INK, _OVERLAY_HOVER_SHARE)
 
 
 # Рампы анимаций (ping-pong, пик — токен палитры); значения те же, что были
@@ -223,8 +222,7 @@ _FIXED = {
         "BLOCK_BG",
         "REFUSED",
         "QUEUE_BG",
-        "QUIET_REPLY_HOVER_BG",
-        "PILL_HOVER_BG",
+        "OVERLAY_HOVER_BG",
         *_DIFF,
         *_TINTED,
         *_RAMP_PEAKS,
@@ -271,8 +269,9 @@ def _derived(bg: str) -> dict[str, object]:
         **{name: _shift(_FIXED[name], bg) for name in _DIFF},
         **tinted,
         "QUEUE_BG": _mix(bg, tinted["USER_BAND_BG"], _QUEUE_SHARE),
-        "QUIET_REPLY_HOVER_BG": tinted["USER_BAND_BG"],
-        "PILL_HOVER_BG": _mix(tinted["FOCUS_BG"], INK, _PILL_HOVER_SHARE),
+        "OVERLAY_HOVER_BG": _mix(
+            tinted["FOCUS_BG"], INK, _OVERLAY_HOVER_SHARE
+        ),
         **ramps,
     }
 
@@ -361,13 +360,12 @@ def css_variables() -> dict[str, str]:
         "note-ink": NOTE_INK,
         "user-band-bg": USER_BAND_BG,
         "queue-bg": QUEUE_BG,
-        "pill-hover-bg": PILL_HOVER_BG,
+        "overlay-hover-bg": OVERLAY_HOVER_BG,
         "overlay-bg": OVERLAY_BG,
         "zebra-bg": ZEBRA_BG,
         "skill": SKILL,
         "quiet-reply-ink": QUIET_REPLY_INK,
         "quiet-reply-mark": QUIET_REPLY_MARK,
-        "quiet-reply-hover-bg": QUIET_REPLY_HOVER_BG,
         "diff-add-bg": DIFF_ADD_BG,
         "diff-del-bg": DIFF_DEL_BG,
         "diff-add-hl": DIFF_ADD_HL,
