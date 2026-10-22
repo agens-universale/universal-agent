@@ -32,6 +32,7 @@ from gc_tui.services.session_lock import BUSY_MESSAGE, is_held_by_other
 from gc_tui.services.session_title import display_name, task_subtitle
 from gc_tui.services.skill_view import truncate_path_left
 from gc_tui.services.stores.file_store import FileTaskStore
+from gc_tui.services.turn_outcome import outcome_of
 from gc_tui.services.usage_meter import format_nonzero_cost
 
 # Константы вместо повторяющихся литералов (Sonar S1192).
@@ -54,9 +55,22 @@ _STATUS_COLOR = {
     "running": RUN_COLOR,
     "asking": RUN_COLOR,
     "stopped": DIM,
+    "cancelled": DIM,
     "completed": OK,
     "failed": ERR,
+    "unknown_failed": ERR,
 }
+
+
+def _status_badge(status: str) -> Text:
+    """`✓ выполнено` словарём итогов хода; незнакомое слово — как есть, DIM."""
+    outcome = outcome_of(status)
+    if outcome is None or outcome.list_label is None:
+        return Text(status, style=DIM)
+    return Text(
+        f"{outcome.glyph} {outcome.list_label}",
+        style=_STATUS_COLOR.get(status, DIM),
+    )
 
 
 def _short_id(thread_id: str) -> str:
@@ -280,11 +294,9 @@ class SessionsScreen(Screen):
             t.append(" · ", style=MUTED)
             t.append(cost, style=DIM)
         status = self._task_display_status(task)
-        if (
-            status
-        ):  # None — исход не записан → бейдж не показываем (без пустых «[]»)
+        if status:  # None — исход не записан → статус не показываем
             t.append(" · ", style=MUTED)
-            t.append(f"[{status}]", style=_STATUS_COLOR.get(status, DEEP_DIM))
+            t.append_text(_status_badge(status))
         if self._session_is_busy(task.thread_id):
             t.append(" · ", style=MUTED)
             t.append("🔒 занято", style=ERR)

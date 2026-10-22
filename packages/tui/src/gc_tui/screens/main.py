@@ -171,6 +171,7 @@ from gc_tui.services.trace_retention import (
     subagent_parent_ids_from_events,
 )
 from gc_tui.services.trace_scroll import reply_above
+from gc_tui.services.turn_outcome import DONE_LABEL, DONE_LABEL_PLAN
 from gc_tui.services.usage_meter import (
     compose_adaptive_footer_right,
     usage_segments,
@@ -196,8 +197,6 @@ from gc_tui.widgets.command_palette import CommandPalette
 from gc_tui.widgets.plan_panel import PlanPanel
 from gc_tui.widgets.static_content import text_key, update_if_changed
 from gc_tui.widgets.thinking_indicator import (
-    DONE_LABEL,
-    DONE_LABEL_PLAN,
     TERMINAL_INDICATOR_STATES,
     ThinkingIndicator,
     is_terminal_indicator_state,

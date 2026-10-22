@@ -49,7 +49,10 @@ from gc_tui.palette import RUN_COLOR as _ACCENT
 from gc_tui.palette import VALIDATING_SHADES as _VALIDATING_SHADES
 from gc_tui.services.duration_format import format_compact_int, format_duration
 from gc_tui.services.plural import files_word
-from gc_tui.services.trace_glyphs import ERROR_GLYPH
+from gc_tui.services.turn_outcome import (
+    DONE_LABEL,
+    OUTCOMES,
+)
 
 THINKING_PHRASES = [
     "думаю",
@@ -157,6 +160,7 @@ _SUMMARY_GAP = 2
 _FALLBACK_WIDTH = 80
 #: Причина ошибки переносится не больше чем на столько строк.
 ERROR_MAX_ROWS = 3
+_DONE = OUTCOMES["completed"]
 
 
 def format_turn_summary(files: int, add: int, del_: int) -> str | None:
@@ -203,27 +207,18 @@ def compose_status_line(
     return out, (head.cell_len + gap, out.cell_len)
 
 
-#: Подпись успешного исхода хода. Ход, кончившийся предложенным планом,
-#: работой не является: «Выполнил» под планом читалось бы как «сделано».
-DONE_LABEL = "Выполнил"
-DONE_LABEL_PLAN = "План готов"
-
 # Исходы хода, кроме «Выполнил» (у него своя голова — время хода): глиф и слова.
 _TERMINAL_ENDINGS = {
-    _STATE_CANCELLED: ("■", "Отменено"),
-    _STATE_FAILED: (ERROR_GLYPH, "Ошибка"),
-    _STATE_STOPPED_STEPS: ("⏹", "Остановлено: превышен лимит шагов"),
-    _STATE_STOPPED_ERRORS: ("⏹", "Остановлено: превышен лимит ошибок"),
-    _STATE_STOPPED_TOKENS: ("⏹", "Остановлено: превышен лимит токенов"),
-    _STATE_STOPPED_TOOL_CALLS: (
-        "⏹",
-        "Остановлено: превышен лимит вызовов инструментов",
-    ),
-    _STATE_STOPPED_JUDGE: (
-        "⏹",
-        "Остановлено: проверка действий недоступна — повторите позже "
-        "или смените режим",
-    ),
+    state: (OUTCOMES[state].glyph, OUTCOMES[state].sentence)
+    for state in (
+        _STATE_CANCELLED,
+        _STATE_FAILED,
+        _STATE_STOPPED_STEPS,
+        _STATE_STOPPED_ERRORS,
+        _STATE_STOPPED_TOKENS,
+        _STATE_STOPPED_TOOL_CALLS,
+        _STATE_STOPPED_JUDGE,
+    )
 }
 
 
@@ -549,7 +544,7 @@ class ThinkingIndicator(Static):
         # с ним — иначе клик попал бы в пустоту на месте старых цифр.
         self._summary_span = None
         if self._state == _STATE_DONE:
-            text.append("✓", style=_DIM)
+            text.append(_DONE.glyph, style=_DIM)
             text.append(" ")
             # Живой done всегда замораживает elapsed в set_state → «Выполнил за N».
             # frozen_elapsed=None — восстановление старой сессии без сохранённого

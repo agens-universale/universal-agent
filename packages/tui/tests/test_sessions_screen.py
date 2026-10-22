@@ -98,8 +98,8 @@ async def test_active_running_session_shows_running_not_completed(tmp_path):
         )
         await pilot.pause()
         text = _rows_text(pilot)
-        assert "[running]" in text
-        assert "[completed]" not in text
+        assert "● идёт" in text
+        assert "выполнено" not in text
 
 
 @pytest.mark.asyncio
