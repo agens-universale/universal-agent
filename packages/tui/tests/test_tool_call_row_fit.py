@@ -1,8 +1,9 @@
-"""Строка вызова всегда в одну строку: режется только объект.
+"""Строка вызова всегда в одну строку.
 
-Подпись, хвост (таймер, сводка итога, счётчики правки) и ❐ не режутся и не
-переносятся; объект между подписью и хвостом сокращается `…` под ширину
-строки — команда с конца, путь серединой (`truncate_path`)."""
+Подпись, таймер, счётчики правки и ❐ не режутся и не переносятся; объект
+между подписью и хвостом сокращается `…` под ширину строки — команда с
+конца, путь серединой (`truncate_path`). Длинный свободный текст хвоста
+(сводка итога, живой статус) режется `…`, когда объект дошёл до минимума."""
 
 from __future__ import annotations
 
@@ -225,3 +226,51 @@ async def test_running_tail_not_under_scrollbar(tmp_path, width, elapsed):
         assert line.rstrip().endswith(f"… · {format_duration(elapsed)}")
         # Полная строка не прижата к полосе: справа есть хотя бы одна клетка.
         assert line.endswith(" ")
+
+
+_LONG_TAIL = "совпадений в файлах проекта " * 6
+
+
+def _shown_target(line: str, label: str) -> str:
+    return line[len(label) + 2 :].split(" · ", 1)[0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("width", (40, 60, 80))
+async def test_long_result_tail_is_cut_not_wrapped(width):
+    """Длинный хвост итога не переносит строку и не съедает объект: объект
+    режется первым, но не короче своего минимума; хвост — с `…`."""
+    pytest.importorskip("textual")
+    from gc_tui.services.trace_render import CALL_TARGET_MIN_COLS
+    from gc_tui.widgets.tool_call_row import ToolCallRow
+
+    async with _app(lambda t: t.mount(_row("exec_command", _CMD))).run_test(
+        size=(width, 20)
+    ) as pilot:
+        row = pilot.app.query_one(ToolCallRow)
+        row.set_result(summary=_LONG_TAIL, outcome="ok")
+        await pilot.pause()
+        line = _first_line(row)
+        assert _line_height(row) == 1
+        assert line.endswith("…")
+        assert " · совпадений" in line
+        assert len(_shown_target(line, "Run")) >= CALL_TARGET_MIN_COLS
+
+
+@pytest.mark.asyncio
+async def test_long_live_status_keeps_timer():
+    """Живой статус длинный — режется он, таймер хвоста цел."""
+    pytest.importorskip("textual")
+    from gc_tui.services.trace_render import CALL_TARGET_MIN_COLS
+    from gc_tui.widgets.tool_call_row import ToolCallRow
+
+    async with _app(lambda t: t.mount(_row("exec_command", _CMD))).run_test(
+        size=(60, 20)
+    ) as pilot:
+        row = pilot.app.query_one(ToolCallRow)
+        row.set_live_status(_LONG_TAIL)
+        await pilot.pause()
+        line = _first_line(row)
+        assert _line_height(row) == 1
+        assert line.endswith("… · 0с")
+        assert len(_shown_target(line, "Run")) >= CALL_TARGET_MIN_COLS

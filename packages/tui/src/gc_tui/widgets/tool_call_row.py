@@ -8,9 +8,11 @@ Layout: Horizontal(prefix-Static, content-Static) — wrap длинного об
 
 Статус-глиф живёт в prefix-Static (●/○/•/‖), content-Static несёт
 `Подпись  объект` и хвост ` · сводка` успеха; у ошибки хвоста нет.
-Первая строка всегда в одну строку: подпись, хвост и ❐ не режутся, объект
+Первая строка всегда в одну строку: подпись и ❐ не режутся, объект
 сокращается `…` под ширину content-колонки (`fit_call_target`; пересчёт —
-при смене ширины или содержимого, не на тике дыхания).
+при смене ширины или содержимого, не на тике дыхания). Длинный хвост
+(сводка, живой статус) режется `…`, когда объект дошёл до своего минимума
+(`CALL_TARGET_MIN_COLS`); таймер и счётчики правки не режутся.
 У строки правки (`set_edit_counts`) после объекта — счётчики `+N −M`, а в конце
 строки справа — кнопка ❐ копирования её диффа (спека P3 §10).
 
@@ -52,7 +54,11 @@ from gc_tui.services.trace_glyphs import (
     CALL_UNDONE_GLYPH,
     CALL_WAITING_GLYPH,
 )
-from gc_tui.services.trace_render import fit_call_target, level_prefix
+from gc_tui.services.trace_render import (
+    CALL_TARGET_MIN_COLS,
+    fit_call_target,
+    level_prefix,
+)
 from gc_tui.widgets.block_panel import (
     CopyFeedbackMixin,
     _copy_request,
@@ -83,6 +89,17 @@ _OUTCOME_LOOK: dict[str, tuple[str, str, str]] = {
     "halted": (CALL_UNDONE_GLYPH, _DIM, _DIM),
     "refused": (CALL_UNDONE_GLYPH, _REFUSED, _DIM),
 }
+
+
+def _fit_note(note: str, room: Optional[int], used: int) -> str:
+    """Свободный текст хвоста ``note`` в ``room`` клеток за вычетом уже
+    занятых ``used``: с `…` с конца; места нет — пусто."""
+    if room is None or used + len(note) <= room:
+        return note
+    cols = room - used
+    if cols < len(" · x…"):
+        return ""
+    return note[: cols - 1].rstrip() + "…"
 
 
 class _CopyButton(NoSelectStatic):
@@ -398,9 +415,9 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         return text
 
     def _render_content(self) -> Text:
-        tail = self._render_tail()
         text = Text()
         text.append(self._label, style=_TOOL_NAME)
+        tail = self._render_tail(self._tail_room(text.cell_len))
         target = self._fit_target(
             text.cell_len + tail.cell_len + 2 + _RIGHT_GUTTER
         )
@@ -412,10 +429,24 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         text.append_text(tail)
         return text
 
+    def _content_width(self) -> int:
+        return self._content_static.size.width if self._content_static else 0
+
+    def _tail_room(self, label_cols: int) -> Optional[int]:
+        """Сколько клеток хвосту, когда объект сжат до своего минимума
+        (`CALL_TARGET_MIN_COLS`); колонка ещё без ширины — без предела."""
+        width = self._content_width()
+        if width <= 0:
+            return None
+        room = width - label_cols - _RIGHT_GUTTER
+        if self._target:
+            room -= 2 + min(len(self._target), CALL_TARGET_MIN_COLS)
+        return room
+
     def _fit_target(self, used: int) -> str:
         """Объект под остаток ширины content-колонки после подписи, двух
         пробелов и хвоста; колонка ещё без ширины — объект целиком."""
-        width = self._content_static.size.width if self._content_static else 0
+        width = self._content_width()
         if width <= 0:
             return self._target
         cols = width - used
@@ -426,12 +457,13 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
             self._fitted = (cols, fitted)
         return self._fitted[1]
 
-    def _render_tail(self) -> Text:
+    def _render_tail(self, room: Optional[int] = None) -> Text:
         """Хвост первой строки после объекта: таймер / прервано, счётчики
-        правки, сводка успеха."""
+        правки, сводка успеха. Свободный текст хвоста (сводка, живой статус)
+        режется `…` под ``room`` клеток; таймер и счётчики — нет."""
         text = Text()
         if self._result is None:
-            self._append_pending_tail(text)
+            self._append_pending_tail(text, room)
             return text
         if self._edit_counts is not None:
             add, removed = self._edit_counts
@@ -440,7 +472,8 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
             text.append(" ")
             text.append(f"−{removed}", style=_ERR)
         if self._result and not self._ends_with_line:
-            text.append(f" · {self._result}", style=_DIM)
+            note = _fit_note(f" · {self._result}", room, text.cell_len)
+            text.append(note, style=_DIM)
         return text
 
     @property
@@ -457,7 +490,9 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
             bodies.insert(0, Text(self._result, style=style))
         return bodies
 
-    def _append_pending_tail(self, text: Text) -> None:
+    def _append_pending_tail(
+        self, text: Text, room: Optional[int] = None
+    ) -> None:
         """Хвост строки без результата: прервано / elapsed (+ step/last).
 
         Waiting — без хвоста: только подпись и объект."""
@@ -466,10 +501,14 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
             return
         if self._waiting:
             return
+        elapsed = format_duration(self._elapsed_s())
         if self._live_status:
-            text.append(f" · {self._live_status}", style=_DIM)
+            note = _fit_note(
+                f" · {self._live_status}", room, len(" · ") + len(elapsed)
+            )
+            text.append(note, style=_DIM)
         text.append(" · ", style=_DIM)
-        text.append(format_duration(self._elapsed_s()), style=_RUN)
+        text.append(elapsed, style=_RUN)
 
     def on_click(self, event: events.Click) -> None:
         """Клик по ❐ копирует дифф правки и строку не выделяет.
