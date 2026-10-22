@@ -35,8 +35,7 @@ from gc_core.threads.facade import Threads
 from gc_core.threads.instance import instance_id
 from gc_core.threads.models import ThreadKey, ThreadRecord
 from gc_core.threads.rules import lease_expired
-from gc_core.tools.turn.propose_plan import ProposePlan
-from gc_core.tools.turn.submit_solution import SubmitSolution
+from gc_core.tools.turn.turn_close import close_view, closing_reply_of
 from google.protobuf.json_format import MessageToDict
 
 from gc_server.a2a.agent_config import prepare_agent_settings
@@ -82,15 +81,18 @@ STALE_AFTER = timedelta(seconds=60)
 
 def answer_text(agent: Any) -> str:
     last = getattr(agent, "last_answer", None)
-    # Ход, закрытый планом: пиру — текст плана. Одобрения в A2A нет:
-    # согласие пира — не согласие пользователя.
-    plan = ProposePlan.present_result(last)
-    if plan is not None:
-        return plan
-    raw = SubmitSolution.present_result(last)
-    if raw is None:
+    reply = closing_reply_of(agent)
+    # Ход, закрытый планом или turn_finish: пиру — текст плана или итог.
+    # Одобрения в A2A нет: согласие пира — не согласие пользователя.
+    close = close_view(last, reply)
+    if close is not None:
+        return close.render(markdown=False)
+    # Проза и прочие значения остаются как есть.
+    if last is None:
         return ""
-    return raw if isinstance(raw, str) else str(raw)
+    if isinstance(last, str):
+        return last
+    return str(last)
 
 
 def stop_outcome(agent: Any) -> str | None:

@@ -50,6 +50,7 @@ class FakeExecutor:
     def __init__(self):
         self._ctx = SimpleNamespace()
         self.last_terminal_outcome = None
+        self.last_closing_reply = ""
         self.mode = None
         self.modes = []
         self.shared = None
@@ -363,13 +364,13 @@ async def test_prompt_streams_and_second_turn_keeps_the_thread(tmp_path):
     await facade.shutdown()
 
 
-def _finish_answer():
+def _finish_answer(report="В README одна фраза.", comment="файл короткий"):
     return json.dumps(
         {
             "solution_type": "direct_answer",
             "task": "прочитать README",
-            "task_report": "В README одна фраза.",
-            "comment": "файл короткий",
+            "task_report": report,
+            "comment": comment,
             "handoff": '{"artifacts":["README.md"]}',
             "message": "Finish gate: accept.",
             "finish_gate": {"action": "accept"},
@@ -402,7 +403,9 @@ async def test_prompt_renders_finish_arguments_as_the_report(tmp_path):
         for item in _updates(writer)
         if item["sessionUpdate"] == "agent_message_chunk"
     ]
-    assert texts == ["В README одна фраза.\n\n* заметка: файл короткий"]
+    assert texts == [
+        "В README одна фраза.\n\n* **заметка:**\n\n  файл короткий"
+    ]
     assert all("Finish gate" not in text for text in texts)
     await facade.shutdown()
 
@@ -448,7 +451,8 @@ async def test_prompt_does_not_repeat_a_streamed_report(tmp_path):
     await _new(facade, "/work/app")
     session_id = _by_id(writer, 2)["result"]["sessionId"]
     agent = agents[0]
-    agent.deltas = [("answer", "В README одна фраза.")]
+    agent.deltas = [("reset", ""), ("answer", "В README одна фраза.")]
+    agent.executor.last_closing_reply = "В README одна фраза."
     agent.answer = _finish_answer()
     await facade.handle_line(
         _line(
@@ -466,7 +470,169 @@ async def test_prompt_does_not_repeat_a_streamed_report(tmp_path):
         for item in _updates(writer)
         if item["sessionUpdate"] == "agent_message_chunk"
     ]
-    assert texts == ["В README одна фраза."]
+    assert texts == [
+        "В README одна фраза.",
+        "\n\n* **заметка:**\n\n  файл короткий",
+    ]
+    await facade.shutdown()
+
+
+async def _prompt_texts(facade, writer, session_id):
+    await facade.handle_line(
+        _line(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "a"}],
+            },
+            3,
+        )
+    )
+    await facade._sessions[session_id].prompt_task
+    return [
+        item["content"]["text"]
+        for item in _updates(writer)
+        if item["sessionUpdate"] == "agent_message_chunk"
+    ]
+
+
+async def test_turn_with_streamed_reply_sends_only_record(tmp_path):
+    facade, writer, agents = _open(tmp_path)
+    await _init(facade)
+    await _new(facade, "/work/app")
+    session_id = _by_id(writer, 2)["result"]["sessionId"]
+    agent = agents[0]
+    agent.deltas = [("reset", ""), ("answer", "Пока!")]
+    agent.executor.last_closing_reply = "Пока!"
+    agent.answer = _finish_answer("Пользователь сказал «пока».", "")
+    texts = await _prompt_texts(facade, writer, session_id)
+    assert texts == [
+        "Пока!",
+        "\n\n* **итог:**\n\n  Пользователь сказал «пока».",
+    ]
+    await facade.shutdown()
+
+
+async def test_list_report_and_comment_live_match_history(tmp_path):
+    """Вживую запись та же, что при повторе истории."""
+    facade, writer, agents = _open(tmp_path)
+    await _init(facade)
+    await _new(facade, "/work/app")
+    session_id = _by_id(writer, 2)["result"]["sessionId"]
+    agent = agents[0]
+    agent.deltas = [("reset", ""), ("answer", "Готово.")]
+    agent.executor.last_closing_reply = "Готово."
+    agent.answer = _finish_answer("- a\n- b", "Риск.")
+    texts = await _prompt_texts(facade, writer, session_id)
+    assert texts == [
+        "Готово.",
+        "\n\n* **итог:**\n\n  - a\n  - b\n\n  Риск.",
+    ]
+    await facade.shutdown()
+
+
+async def test_reply_after_tools_is_a_separate_paragraph(tmp_path):
+    """Клиент показывает прозу хода одним блоком: новый ответ модели
+    после тулов не прилипает к прошлому, запись — через одну пустую
+    строку."""
+    facade, writer, agents = _open(tmp_path)
+    await _init(facade)
+    await _new(facade, "/work/app")
+    session_id = _by_id(writer, 2)["result"]["sessionId"]
+    agent = agents[0]
+    agent.deltas = [
+        ("reset", ""),
+        ("answer", "Сейчас посмотрю README."),
+        ("reset", ""),
+        ("answer", "Проект — песочница."),
+    ]
+    agent.executor.last_closing_reply = "Проект — песочница."
+    agent.answer = _finish_answer("Проект — песочница.", "проверил")
+    texts = await _prompt_texts(facade, writer, session_id)
+    assert texts == [
+        "Сейчас посмотрю README.",
+        "\n\nПроект — песочница.",
+        "\n\n* **заметка:**\n\n  проверил",
+    ]
+    await facade.shutdown()
+
+
+async def test_turn_with_muted_reply_sends_reply_and_record(tmp_path):
+    """AUTO заглушил поток ответа: answer-дельт нет, ответ идёт целиком."""
+    facade, writer, agents = _open(tmp_path)
+    await _init(facade)
+    await _new(facade, "/work/app")
+    session_id = _by_id(writer, 2)["result"]["sessionId"]
+    agent = agents[0]
+    agent.deltas = [("reset", "")]
+    agent.executor.last_closing_reply = "Пока!"
+    agent.answer = _finish_answer("Пользователь сказал «пока».", "")
+    texts = await _prompt_texts(facade, writer, session_id)
+    assert texts == ["Пока!\n\n* **итог:**\n\n  Пользователь сказал «пока»."]
+    await facade.shutdown()
+
+
+async def test_report_equal_to_bounced_reply_is_not_repeated(tmp_path):
+    """Ответ без тула, bounce, затем только turn_finish с тем же текстом:
+    ответ показан один раз."""
+    facade, writer, agents = _open(tmp_path)
+    await _init(facade)
+    await _new(facade, "/work/app")
+    session_id = _by_id(writer, 2)["result"]["sessionId"]
+    agent = agents[0]
+    agent.deltas = [("reset", ""), ("answer", "Сделал."), ("reset", "")]
+    agent.executor.last_closing_reply = ""
+    agent.answer = _finish_answer("Сделал.", "")
+    texts = await _prompt_texts(facade, writer, session_id)
+    assert texts == ["Сделал."]
+    await facade.shutdown()
+
+
+async def test_bounced_reply_with_comment_sends_only_the_note(tmp_path):
+    facade, writer, agents = _open(tmp_path)
+    await _init(facade)
+    await _new(facade, "/work/app")
+    session_id = _by_id(writer, 2)["result"]["sessionId"]
+    agent = agents[0]
+    agent.deltas = [("reset", ""), ("answer", "Сделал."), ("reset", "")]
+    agent.executor.last_closing_reply = ""
+    agent.answer = _finish_answer("Сделал.", "проверил")
+    texts = await _prompt_texts(facade, writer, session_id)
+    assert texts == ["Сделал.", "\n\n* **заметка:**\n\n  проверил"]
+    await facade.shutdown()
+
+
+async def test_cancelled_turn_sends_no_record(tmp_path):
+    facade, writer, agents = _open(tmp_path)
+    await _init(facade)
+    await _new(facade, "/work/app")
+    session_id = _by_id(writer, 2)["result"]["sessionId"]
+    agent = agents[0]
+    agent.hold = True
+    agent.executor.last_closing_reply = "Пока!"
+    agent.answer = _finish_answer("Пользователь сказал «пока».", "")
+    await facade.handle_line(
+        _line(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "a"}],
+            },
+            3,
+        )
+    )
+    await agent.started.wait()
+    await facade.handle_line(
+        _line("session/cancel", {"sessionId": session_id}, notify=True)
+    )
+    await facade._sessions[session_id].prompt_task
+    texts = [
+        item["content"]["text"]
+        for item in _updates(writer)
+        if item["sessionUpdate"] == "agent_message_chunk"
+    ]
+    assert texts == []
+    assert _by_id(writer, 3)["result"] == {"stopReason": "cancelled"}
     await facade.shutdown()
 
 
