@@ -217,6 +217,28 @@ def brief_args_summary(
     return text if len(text) <= limit else text[:limit].rstrip() + "…"
 
 
+def tool_card_title(name: str, arguments: Any) -> str:
+    """Заголовок карточки тула: ``name(сводка аргументов)`` или голое имя.
+
+    Общий для карточек ACP и server — копии в двух фронтендах расходились бы.
+    """
+    preview = brief_args_summary(arguments, tool_name=name)
+    if preview == "":
+        return name
+    return f"{name}({preview})"
+
+
+def tool_call_id(message: dict) -> Optional[str]:
+    """Id вызова тула из записи истории: ``call_id``, иначе ``id``, иначе None."""
+    call_id = message.get("call_id")
+    if isinstance(call_id, str) and call_id != "":
+        return call_id
+    fallback = message.get("id")
+    if isinstance(fallback, str) and fallback != "":
+        return fallback
+    return None
+
+
 def _arg_pair_preview(key: str, value: Any) -> str:
     if isinstance(value, str):
         preview = " ".join(value.split())
@@ -342,4 +364,6 @@ __all__ = [
     "extract_intermediate_prose",
     "parse_tool_result_status",
     "resolve_progress_sink",
+    "tool_call_id",
+    "tool_card_title",
 ]

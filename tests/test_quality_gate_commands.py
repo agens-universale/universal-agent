@@ -239,3 +239,19 @@ def test_complexity_scope_without_snapshot(
     if not excluded:
         assert "deep" in output
     assert not (repository / "complexipy-snapshot.json").exists()
+
+
+def test_duplicate_code_scope_matches_prod_scope():
+    """Дубли ищутся по всему прод-коду: та же область, что у мёртвого кода.
+
+    Пакет ``acp`` в список pylint не попал — и дубль ``tool_flow`` между ACP и
+    server жил незамеченным, хотя прочие проверки acp видели.
+    """
+    config = yaml.safe_load((REPO / ".pre-commit-config.yaml").read_text())
+    hook = next(
+        h for h in config["repos"][0]["hooks"] if h["id"] == "duplicate-code"
+    )
+    # Пути — всё, что после флагов pylint.
+    words = shlex.split(hook["entry"])
+    paths = words[words.index("--score=n") + 1 :]
+    assert sorted(paths) == sorted(load_script("dead_code_check").PROD_PATHS)

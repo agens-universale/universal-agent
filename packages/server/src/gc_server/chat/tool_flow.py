@@ -9,8 +9,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from gc_core.constants.tool_names import (
     ASK_HUMAN_TOOL_NAME,
     FINISH_TOOL_NAME,
@@ -18,8 +16,9 @@ from gc_core.constants.tool_names import (
     SESSION_THINK_TOOL_NAME,
 )
 from gc_core.execution.progress import (
-    brief_args_summary,
     parse_tool_result_status,
+    tool_call_id,
+    tool_card_title,
 )
 from gc_core.threads.facade import Cursor, Threads
 from gc_core.threads.models import ThreadKey
@@ -101,7 +100,7 @@ def _call_report(
     message: dict, seen: set[str], *, parent: str | None = None
 ) -> dict | None:
     name = message.get("name")
-    call_id = _call_id(message)
+    call_id = tool_call_id(message)
     if not isinstance(name, str) or name == "" or name in _HIDDEN:
         return None
     if call_id is None:
@@ -114,7 +113,7 @@ def _call_report(
         "op": "open",
         "call_id": card_id,
         "name": name,
-        "title": _title(name, message.get("arguments")),
+        "title": tool_card_title(name, message.get("arguments")),
     }
     if parent is not None:
         report["parent_call_id"] = parent
@@ -128,7 +127,7 @@ def _output_report(
     parent: str | None = None,
     failed: bool = False,
 ) -> dict | None:
-    call_id = _call_id(message)
+    call_id = tool_call_id(message)
     if call_id is None:
         return None
     card_id = _card_id(call_id, parent)
@@ -140,23 +139,6 @@ def _output_report(
         ok, _brief = parse_tool_result_status(message.get("output"))
         status = _FAILED if ok is False else _COMPLETED
     return {"op": "close", "call_id": card_id, "status": status}
-
-
-def _title(name: str, arguments: Any) -> str:
-    preview = brief_args_summary(arguments, tool_name=name)
-    if preview == "":
-        return name
-    return f"{name}({preview})"
-
-
-def _call_id(message: dict) -> str | None:
-    call_id = message.get("call_id")
-    if isinstance(call_id, str) and call_id != "":
-        return call_id
-    fallback = message.get("id")
-    if isinstance(fallback, str) and fallback != "":
-        return fallback
-    return None
 
 
 def _from_sidecar(record: dict, seen: set[str]) -> dict | None:

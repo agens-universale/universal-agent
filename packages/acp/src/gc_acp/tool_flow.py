@@ -22,8 +22,9 @@ from gc_core.constants.tool_names import (
     TURN_FINALIZING_TOOLS,
 )
 from gc_core.execution.progress import (
-    brief_args_summary,
     parse_tool_result_status,
+    tool_call_id,
+    tool_card_title,
 )
 from gc_core.threads.facade import Cursor, Threads
 from gc_core.threads.models import StreamEntry, ThreadKey
@@ -170,7 +171,7 @@ def _open_call_ids(
 
 def _call_report(message: dict, seen: set[str]) -> dict | None:
     name = message.get("name")
-    call_id = _call_id(message)
+    call_id = tool_call_id(message)
     if not isinstance(name, str) or name == "" or name in _HIDDEN:
         return None
     if call_id is None or call_id in seen:
@@ -180,7 +181,7 @@ def _call_report(message: dict, seen: set[str]) -> dict | None:
     report: dict[str, Any] = {
         "sessionUpdate": "tool_call",
         "toolCallId": call_id,
-        "title": _title(name, arguments),
+        "title": tool_card_title(name, arguments),
         "status": _IN_PROGRESS,
         "name": name,
     }
@@ -197,7 +198,7 @@ def _call_report(message: dict, seen: set[str]) -> dict | None:
 def _output_report(
     message: dict, seen: set[str], finished: set[str] | None = None
 ) -> dict | None:
-    call_id = _call_id(message)
+    call_id = tool_call_id(message)
     if call_id is None or call_id not in seen:
         return None
     if finished is not None and call_id in finished:
@@ -302,23 +303,6 @@ def _preview_text(output: Any) -> str | None:
     if text == "":
         return None
     return text[:_CARD_LIMIT]
-
-
-def _title(name: str, arguments: Any) -> str:
-    preview = brief_args_summary(arguments, tool_name=name)
-    if preview == "":
-        return name
-    return f"{name}({preview})"
-
-
-def _call_id(message: dict) -> str | None:
-    call_id = message.get("call_id")
-    if isinstance(call_id, str) and call_id != "":
-        return call_id
-    fallback = message.get("id")
-    if isinstance(fallback, str) and fallback != "":
-        return fallback
-    return None
 
 
 def _decode(
