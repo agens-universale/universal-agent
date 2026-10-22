@@ -250,7 +250,8 @@ async def test_copy_clipboard_failure_is_reported(tmp_path, monkeypatch):
     from gc_tui.services import clipboard_ops
 
     monkeypatch.setattr(clipboard_ops, "write_clipboard", lambda t: False)
-    # ни нативной записи, ни OSC 52 (не Linux и не SSH)
+    # ни нативной записи, ни OSC 52: запасной путь не ушёл
+    monkeypatch.setattr(clipboard_ops, "_send_osc52", lambda a, t: False)
     monkeypatch.setattr(clipboard_ops, "is_ssh_session", lambda: False)
     monkeypatch.setattr(
         clipboard_ops, "sys", SimpleNamespace(platform="darwin")
@@ -465,6 +466,39 @@ async def test_copy_native_fails_but_osc52_sent_is_success(
 
     monkeypatch.setattr(clipboard_ops, "write_clipboard", lambda t: False)
     monkeypatch.setattr(clipboard_ops, "is_ssh_session", lambda: True)
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
+    )
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        store = _Store([_segment(_thread())])
+        monkeypatch.setattr(scr, "_store", store, raising=False)
+        monkeypatch.setattr(scr, "_active_task_id", "TID", raising=False)
+        await scr._handle_command("copy")
+        await wait_until(
+            pilot, lambda: footer_rows(scr)[1] != "", "отклик в слоте"
+        )
+        assert footer_rows(scr)[1] == "✓ скопирован последний ответ"
+
+
+@pytest.mark.asyncio
+async def test_copy_native_fails_fallback_osc52_is_success(
+    tmp_path, monkeypatch
+):
+    """Mac: нативная запись упала, ушёл запасной OSC 52 — `✓`
+    (решение владельца 11)."""
+    from types import SimpleNamespace
+
+    from gc_tui.app import TuiApp
+    from gc_tui.services import clipboard_ops
+
+    monkeypatch.setattr(clipboard_ops, "write_clipboard", lambda t: False)
+    monkeypatch.setattr(clipboard_ops, "is_ssh_session", lambda: False)
+    monkeypatch.setattr(
+        clipboard_ops, "sys", SimpleNamespace(platform="darwin")
+    )
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
