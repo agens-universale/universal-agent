@@ -4906,9 +4906,7 @@ def _auth_probe_returning(*results):
     """Заглушка маршрута chat/completions: по одному ответу на вызов, потом последний."""
     seen = []
 
-    def probe(
-        endpoint, auth, verify, model, *, config_proxy=None, post_ex=None
-    ):
+    def probe(endpoint, auth, verify, model, *, config_proxy=None, **kw):
         seen.append(auth)
         return results[min(len(seen) - 1, len(results) - 1)]
 
@@ -5017,7 +5015,7 @@ async def test_hub_says_nothing_about_a_token_it_could_not_check():
     from gc_tui.services.settings_probe import ProbeResult
 
     def failing_auth(
-        endpoint, auth, verify, model, *, config_proxy=None, post_ex=None
+        endpoint, auth, verify, model, *, config_proxy=None, **kw
     ):
         return ProbeResult(
             "unknown", None, None, 5, "нет соединения (timeout)", offline=True

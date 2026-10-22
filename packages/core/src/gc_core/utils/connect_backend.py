@@ -940,6 +940,32 @@ def build_call_headers(
     return call_headers
 
 
+def connection_probe_headers(
+    settings: Any, resolved: Optional[ResolvedModel] = None
+) -> Dict[str, str]:
+    """Дополнительные заголовки агента для пробы соединения (/settings).
+
+    Та же сборка, что у :func:`build_call_headers`: ``x_cl_id`` и оверлей
+    ``backend.chat_completion_headers`` (per-model приоритетнее общих, только в
+    chat_completions). Без них шлюз, требующий свой заголовок, отвечал пробе
+    401 — «токен отклонён» при рабочем агенте. Authorization не входит: форму
+    токена перебирает сама проба (вместе с канарейкой). Свойства вызова в
+    сессии (``x-session-id``, ``x_rq_id``, ``x-target``, trace) пробе взять
+    неоткуда, и к серверу она ходит не от имени сессии."""
+    settings = settings_of(settings)
+    headers: Dict[str, str] = {"x_cl_id": str(settings.agent.x_cl_id)}
+    backend_mode = str(settings.backend.api_mode).strip().lower()
+    if backend_mode == "chat_completions":
+        _apply_chat_completion_headers(
+            headers, settings.backend.chat_completion_headers, resolved, None
+        )
+    return {
+        key: value
+        for key, value in headers.items()
+        if key.lower() != "authorization"
+    }
+
+
 def _responses_input_without_message_call_id(messages):
     """call_id на role-based message-элементах (напр. technical-feedback user) —
     только для TUI/persist; в responses input не отправляем. На function_call/

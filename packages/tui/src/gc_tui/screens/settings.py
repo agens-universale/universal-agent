@@ -1660,6 +1660,42 @@ class SettingsScreen(Screen):
             model = ""
         return endpoint, auth, use_ssl, model, proxy
 
+    def _main_resolved(self):
+        """Комплект основной модели (`main`), как его резолвит `ModelRouter`
+        агента сейчас (уровень — действующий, `_acting_level`), — или None.
+
+        Витринный резолв: открытый предохранитель не мешает. Не удался
+        (полусырой конфиг) — None: проба тогда идёт по одной форме."""
+        from gc_core.auto_routing.levels import effective_level
+        from gc_core.config import cli_forces_legacy_model
+        from gc_core.model_router import ModelRouter
+
+        from gc_tui.toggles import auto_available_cfg
+
+        config = self._settings
+        try:
+            available = auto_available_cfg(config)
+            return ModelRouter(
+                config,
+                level_provider=lambda: effective_level(
+                    self._acting_level(), None, available
+                ),
+                force_legacy=cli_forces_legacy_model(config),
+            ).resolve("main", check_breaker=False)
+        except Exception:
+            return None
+
+    def _connection_probe_target(self, form, *, form_edited: bool):
+        """Цель пробы «Подключения»: форма (`ProbeTarget`) плюс то, чем
+        реально пойдёт агент, — см. `settings_probe.connection_probe_target`."""
+        from gc_tui.services.settings_probe import (
+            agent_route,
+            connection_probe_target,
+        )
+
+        route = agent_route(self._settings, self._main_resolved())
+        return connection_probe_target(route, form, form_edited=form_edited)
+
     def _presets_of(self, config=None) -> list:
         """Пресеты адреса подключения того же стека, что `_probe_args_from_config`:
         настроек (своих или открытого профиля) либо подключения по документам —
@@ -1681,10 +1717,18 @@ class SettingsScreen(Screen):
         )
 
     def _start_config_probe(self) -> None:
+        from gc_tui.services.settings_probe import ProbeTarget
+
         endpoint, auth, verify, model, proxy = self._probe_args_from_config()
         if not endpoint:
             self._probe_config = None
             return
+        # Хаб судит действующий конфиг тем же маршрутом, что агент, — иначе
+        # глиф и строка секции разошлись бы вердиктом.
+        target = self._connection_probe_target(
+            ProbeTarget(endpoint, auth, verify, model, proxy),
+            form_edited=False,
+        )
         self._config_gen += 1
         gen = self._config_gen
         self._probe_in_flight = True
@@ -1698,11 +1742,12 @@ class SettingsScreen(Screen):
 
             try:
                 result = self._probe_fn(
-                    endpoint,
-                    auth,
-                    verify,
-                    model,
-                    config_proxy=proxy,
+                    target.endpoint,
+                    target.auth,
+                    target.verify,
+                    target.model,
+                    config_proxy=target.proxy,
+                    extra_headers=target.headers,
                 )
             except Exception as exc:
                 result = ProbeResult(
@@ -1723,11 +1768,12 @@ class SettingsScreen(Screen):
                 # судит секция, иначе хаб и секция разойдутся вердиктом.
                 try:
                     auth_result = probe_connection(
-                        endpoint,
-                        auth,
-                        verify,
-                        model,
-                        config_proxy=proxy,
+                        target.endpoint,
+                        target.auth,
+                        target.verify,
+                        target.model,
+                        config_proxy=target.proxy,
+                        extra_headers=target.headers,
                         probe_fn=self._auth_probe_fn,
                     )
                 except Exception:
@@ -1795,8 +1841,10 @@ class SettingsScreen(Screen):
         `manual` — проверку запустил человек (`Ctrl+Space`, `Enter`): её строки —
         ответ на клавишу и подводятся в кадр. Автопроверка кадр не двигает (см.
         `_set_probe_line`)."""
+        from gc_tui.services.settings_probe import ProbeTarget
+
         show = self._show_probe_line if manual else self._set_probe_line
-        endpoint_cfg, auth_cfg, verify, model, proxy_cfg = (
+        endpoint_cfg, auth_cfg, verify, _model, proxy_cfg = (
             self._probe_args_from_config()
         )
         url, auth_idx, token_raw, proxy_draft = (
@@ -1821,6 +1869,12 @@ class SettingsScreen(Screen):
             token = auth_cfg  # поле пусто → действующий токен
         # draft proxy: поле → иначе config; пустое поле = «не задано» → env через резолвер
         proxy = proxy_draft if proxy_draft else proxy_cfg
+        # Введённое в форме приоритетно; нетронутая форма при основной записи
+        # со своим подключением проверяет подключение записи — им и ходит агент.
+        target = self._connection_probe_target(
+            ProbeTarget(endpoint, token, verify, "", proxy),
+            form_edited=self._connection_editor().is_dirty(),
+        )
         # Снимок ПОЛЕЙ (не резолва) — по нему автопроба ухода с поля отличает
         # «значения изменились» от ходьбы по форме; пишем здесь, а не на местах
         # вызова, чтобы автопроба входа в секцию и ручные пробы тоже считались.
@@ -1839,13 +1893,18 @@ class SettingsScreen(Screen):
 
             try:
                 result = probe_connection(
-                    endpoint,
-                    token,
-                    verify,
-                    model,
-                    config_proxy=proxy,
+                    target.endpoint,
+                    target.auth,
+                    target.verify,
+                    target.model,
+                    config_proxy=target.proxy,
+                    extra_headers=target.headers,
                     probe_fn=self._auth_probe_fn,
                 )
+                if target.entry_own:
+                    # Принят токен записи, а не поля: его форма в поле общего
+                    # токена не переносится (`apply_accepted_auth`).
+                    result = replace(result, accepted_auth=None)
             except Exception as exc:
                 result = ProbeResult(
                     "unknown",

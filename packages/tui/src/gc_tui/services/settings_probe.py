@@ -15,7 +15,8 @@ Express/гейтвея) — путь не найден, токен не вини
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
+from functools import partial
 from typing import Optional
 
 from gc_core import model_picker
@@ -88,6 +89,134 @@ class ProbeResult:
     accepted_auth: Optional[str] = None
 
 
+@dataclass(frozen=True)
+class ProbeTarget:
+    """Куда и с чем идёт проба «Подключения»: аргументы `probe_connection`."""
+
+    endpoint: str
+    auth: Optional[str]
+    verify: bool | str
+    model: str
+    proxy: Optional[str]
+    # Дополнительные заголовки агента (`connection_probe_headers`).
+    headers: dict = field(default_factory=dict)
+    # True — проверяется своё подключение основной записи реестра, а не поля
+    # формы: принятую форму этого токена в поле общего токена не переносим.
+    entry_own: bool = False
+
+
+@dataclass(frozen=True)
+class AgentRoute:
+    """Чем основная модель агента пойдёт к серверу: резолв `ModelRouter`
+    («main») и заголовки, как их собирает `build_call_headers`."""
+
+    model: str  # id модели основной записи; "" — модели нет вовсе
+    headers: dict  # заголовки основной модели (per-model приоритетнее)
+    shared_headers: dict  # заголовки общего backend — без записи
+    # Своё подключение основной записи — или None: пара «адрес + токен»
+    # наследуется из общего backend, который и правит форма «Подключения».
+    own: Optional[ProbeTarget] = None
+
+
+def agent_route(settings, resolved) -> AgentRoute:
+    """Маршрут агента по резолву основной модели (`resolved` — None, если
+    резолв не удался: проба тогда идёт без модели, с одними общими
+    заголовками)."""
+    from gc_core.onboarding import MODEL_SENTINEL
+    from gc_core.utils.connect_backend import connection_probe_headers
+
+    model = resolved.model if resolved is not None else ""
+    if model == MODEL_SENTINEL:  # плейсхолдер шаблона — не имя модели
+        model = ""
+    headers = connection_probe_headers(settings, resolved)
+    return AgentRoute(
+        model=model or "",
+        headers=headers,
+        shared_headers=connection_probe_headers(settings),
+        own=_own_connection(settings, resolved, model or "", headers),
+    )
+
+
+def _per_model_auth(resolved) -> tuple[bool, Optional[str]]:
+    """(задан ли Authorization в per-model заголовках, его значение).
+
+    Агент накладывает per-model заголовки ПОСЛЕ токена записи, и их
+    Authorization побеждает; пустое значение агент пропускает."""
+    from gc_core.utils.connect_backend import backend_override_value
+
+    headers = backend_override_value(resolved, "chat_completion_headers")
+    if not isinstance(headers, dict):
+        return False, None
+    for key, value in headers.items():
+        if isinstance(key, str) and key.strip().lower() == "authorization":
+            return True, (str(value).strip() if value is not None else None)
+    return False, None
+
+
+def _own_connection(
+    settings, resolved, model: str, headers: dict
+) -> Optional[ProbeTarget]:
+    """Своё подключение основной записи реестра — или None, если пара у неё
+    общая.
+
+    Правило пары (§2/§3) не пускает в конфиг половину подключения, поэтому
+    «свой токен» и «свой адрес» — одно условие; судим по токену: адрес в
+    `ResolvedModel` уже слит с общим. В responses-режиме от записи действует
+    только id модели (§4), своё подключение там мертво."""
+    from gc_core.onboarding import configured_endpoint
+    from gc_core.settings import settings_of
+    from gc_core.utils.connect_backend import (
+        NO_BACKEND_OVERRIDE,
+        backend_override_value,
+    )
+
+    backend = settings_of(settings).backend
+    mode = str(backend.api_mode).strip().lower()
+    if resolved is None or resolved.alias is None:
+        return None
+    if mode != "chat_completions":
+        return None
+    has_header_auth, header_auth = _per_model_auth(resolved)
+    if resolved.authorization is None and not has_header_auth:
+        return None
+    verify = backend_override_value(resolved, "use_ssl")
+    proxy = backend_override_value(resolved, "proxy")
+    return ProbeTarget(
+        endpoint=configured_endpoint(resolved.url),
+        auth=header_auth or resolved.authorization or None,
+        verify=backend.use_ssl if verify is NO_BACKEND_OVERRIDE else verify,
+        model=model,
+        proxy=(backend.proxy if proxy is NO_BACKEND_OVERRIDE else proxy)
+        or None,
+        headers=headers,
+        entry_own=True,
+    )
+
+
+def connection_probe_target(
+    agent: AgentRoute, form: ProbeTarget, *, form_edited: bool
+) -> ProbeTarget:
+    """Что проверяет проба «Подключения»: `form` — значения формы (или
+    конфига, если проба идёт без формы), `form_edited` — человек их правил.
+
+    Форма правит общий backend. Основная модель его наследует — проверяем
+    значения формы (введённое приоритетно) с моделью и заголовками агента.
+    Основная модель — запись со СВОИМ подключением: нетронутая форма проверяет
+    то, чем реально пойдёт агент (подключение записи), иначе общий токен,
+    которым агент не ходит, давал бы «токен отклонён» при рабочем агенте.
+    Тронутая форма проверяет введённое; модель и заголовки записи прикладываем,
+    только если адрес тот же, — на чужой адрес модель записи не ходит, и
+    вердикт там только о токене (заглушка)."""
+    own = agent.own
+    if own is None:
+        return replace(form, model=agent.model, headers=agent.headers)
+    if not form_edited:
+        return own
+    if form.endpoint == own.endpoint:
+        return replace(form, model=agent.model, headers=agent.headers)
+    return replace(form, model="", headers=agent.shared_headers)
+
+
 def probe(
     endpoint: str,
     auth: Optional[str],
@@ -95,6 +224,7 @@ def probe(
     model: str,
     *,
     config_proxy: Optional[str] = None,
+    extra_headers: Optional[dict] = None,
     fetch_ex=None,
     post_ex=None,
 ) -> ProbeResult:
@@ -104,6 +234,7 @@ def probe(
             auth,
             verify=verify,
             config_proxy=config_proxy,
+            extra_headers=extra_headers,
         )
     else:
         out = fetch_ex(endpoint, auth, verify=verify)
@@ -138,6 +269,7 @@ def probe(
                 probe_model,
                 verify=verify,
                 config_proxy=config_proxy,
+                extra_headers=extra_headers,
             )
         else:
             status, net_err, lat, payload = post_ex(
@@ -252,6 +384,7 @@ def probe_auth(
     model: str,
     *,
     config_proxy: Optional[str] = None,
+    extra_headers: Optional[dict] = None,
     post_ex=None,
 ) -> ProbeResult:
     """Вердикт об авторизации СТРОГО по chat/completions.
@@ -273,6 +406,7 @@ def probe_auth(
             probe_model,
             verify=verify,
             config_proxy=config_proxy,
+            extra_headers=extra_headers,
         )
     else:
         status, net_err, lat, payload = post_ex(
@@ -391,6 +525,7 @@ def probe_connection(
     model: str,
     *,
     config_proxy: Optional[str] = None,
+    extra_headers: Optional[dict] = None,
     probe_fn=None,
 ) -> ProbeResult:
     """Полный вердикт «сервер + токен» для строки «Подключение».
@@ -403,8 +538,15 @@ def probe_connection(
     Принятая форма заголовка возвращается вызывающему для рабочего запроса.
 
     Живёт здесь, а не в экранах: пробу зовут и /settings, и мастер, а скопированный
-    differential-танец разъехался бы при первой правке одной из копий."""
+    differential-танец разъехался бы при первой правке одной из копий.
+
+    `extra_headers` — дополнительные заголовки агента (`AgentRoute.headers`),
+    одни и те же во всех заходах: контроль, токен и канарейка различаются
+    только Authorization. Не заданы — пробе они и не передаются: форма записи
+    модели и мастер зовут её без них."""
     run = probe_fn or probe_auth
+    if extra_headers is not None:
+        run = partial(run, extra_headers=extra_headers)
     attempts = authorization_attempts(token)
     has_token = bool(attempts)
     control = run(endpoint, None, verify, model, config_proxy=config_proxy)
