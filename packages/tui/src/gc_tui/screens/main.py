@@ -7843,7 +7843,12 @@ class TraceScreen(Screen):
                 if confirmed:
                     self._stop_run_then_switch(target)
 
-            self.app.push_screen(
+            # Вопрос — из очереди этого экрана: ответ Textual доставляет тому,
+            # кто вопрос открыл, а вход зовут и с других экранов (список
+            # сессий закрывает себя до вопроса — ответ ушёл бы в закрытый
+            # экран и пропал).
+            self.call_later(
+                self.app.push_screen,
                 ConfirmScreen(
                     title=RUN_SWITCH_TITLE,
                     message=RUN_SWITCH_MESSAGE,
