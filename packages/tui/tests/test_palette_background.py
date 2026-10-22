@@ -39,7 +39,7 @@ _FIXED_CSS = {
     "note-ink": "#a5adb8",
     "user-band-bg": "#363b47",
     "list-select-bg": "#363b47",
-    "queue-bg": "#20242e",
+    "queue-bg": "#222630",
     "highlight-bg": "#4c505a",
     "quiet-reply-ink": "#8b949e",
     "quiet-reply-mark": "#6e7681",
