@@ -394,8 +394,9 @@ async def test_rename_to_the_same_name_is_a_quiet_cancel(
     assert (tmp_path / "base" / "profiles" / "home.yml").is_file()
 
 
+@pytest.mark.parametrize("key", ["delete", "backspace"])
 async def test_rename_and_delete_are_noop_on_service_rows(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, key
 ):
     """`r`/`Del` работают по объекту под курсором: на «— без профиля» объекта нет —
     клавиши молчат (ввод имени не поднимается).
@@ -418,7 +419,7 @@ async def test_rename_and_delete_are_noop_on_service_rows(
             await pilot.press("r")
             await pilot.pause()
             assert not scr.query("#set-profile-name")
-            await pilot.press("delete")
+            await pilot.press(key)
             await pilot.pause()
             assert not scr.query(".set-confirm")
     assert (tmp_path / "base" / "profiles" / "home.yml").is_file()
