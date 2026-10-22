@@ -40,10 +40,15 @@ from google.protobuf.json_format import MessageToDict
 
 from gc_server.a2a.agent_config import prepare_agent_settings
 from gc_server.a2a.task_store import (
+    CANCELED,
     FRONTEND,
+    QUEUE,
+    RUNNING,
     SYSTEM,
+    WAITING,
     ThreadTaskStore,
     dialog_key,
+    dialog_state,
     task_index,
 )
 
@@ -67,14 +72,6 @@ _STOPS = frozenset(
 )
 #: Ключи состояния фронтенда ``a2a`` треда диалога.
 _CWD_KEY = "cwd"
-#: Задача, чей ход идёт: ``{task, instance, at}``.
-_RUNNING = "running"
-#: Задача, ждущая ответа на вопрос (держит очередь диалога).
-_WAITING = "waiting"
-#: Очередь диалога: ``q:<taskId>`` → ``{at, seen, instance}``.
-_QUEUE = "q:"
-#: Отменённая в очереди задача: ``x:<taskId>`` → ``true``.
-_CANCELED = "x:"
 #: Как часто ждущая в очереди задача проверяет диалог (и отмечается живой).
 QUEUE_POLL_SECONDS = 2.0
 #: Сколько молчит ожидание или ход умершего инстанса, прежде чем
@@ -121,16 +118,15 @@ def _stale(stamp: Any) -> bool:
     return utc_now() - moment > STALE_AFTER
 
 
-def _dialog_state(record: ThreadRecord | None) -> dict[str, Any]:
-    return dict((record.frontend.get(FRONTEND) or {}) if record else {})
-
-
 def _queue(state: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
-    """Очередь диалога по времени приёма: ``(taskId, запись)``."""
+    """Очередь диалога по времени приёма: ``(taskId, запись)``; отменённые
+    задачи очередь не держат."""
     entries = [
-        (name[len(_QUEUE) :], value)
+        (name[len(QUEUE) :], value)
         for name, value in state.items()
-        if name.startswith(_QUEUE) and isinstance(value, dict)
+        if name.startswith(QUEUE)
+        and isinstance(value, dict)
+        and not state.get(CANCELED + name[len(QUEUE) :])
     ]
     return sorted(entries, key=lambda item: (str(item[1].get("at")), item[0]))
 
@@ -158,6 +154,9 @@ class Turn:
         self._prompt = prompt
         self._answer = answer
         self.cancel_requested = False
+        #: Ход остановлен вместе с сервером: задача не отменена — её
+        #: прервёт восстановление другого инстанса.
+        self.interrupted = False
         self.failed: BaseException | None = None
         self.done = asyncio.Event()
         self._task: asyncio.Task | None = None
@@ -186,7 +185,12 @@ class Turn:
     async def _forward(self) -> None:
         extra = {} if self._answer is None else {"answer": self._answer}
         stream = self.agent.stream(
-            self._prompt, thread_id=self.context_id, system=SYSTEM, **extra
+            self._prompt,
+            thread_id=self.context_id,
+            system=SYSTEM,
+            # Отмена этой задачи с другого инстанса называет её.
+            cancel_target=self.task_id,
+            **extra,
         )
         try:
             async for _kind, _text in stream:
@@ -223,8 +227,8 @@ class GcAgentExecutor(AgentExecutor):
         self._tools_cache = tools_cache
         self._os_backend = os_backend
         self._turns: dict[str, Turn] = {}
-        #: Задачи этого инстанса, ждущие очереди диалога.
-        self._waiting: set[str] = set()
+        #: Задачи этого инстанса, ждущие очереди диалога: запись очереди.
+        self._waiting: dict[str, dict[str, Any]] = {}
         self._agents: OrderedDict[str, Any] = OrderedDict()
         self._create_lock = asyncio.Lock()
 
@@ -239,11 +243,25 @@ class GcAgentExecutor(AgentExecutor):
             await self._aanswer(task, context.get_user_input(), updater)
             return
         updater = TaskUpdater(event_queue, context.task_id, context.context_id)
-        if task is None:
-            await event_queue.enqueue_event(
-                new_task_from_user_message(context.message)
-            )
-        await self._abegin(context, updater)
+        try:
+            cwd = await self._cwd_for(context)
+        except _CwdError:
+            cwd = None
+        else:
+            # Место в очереди — до ответа пиру: задача, о приёме которой
+            # он узнал, в очереди диалога раньше следующей.
+            await self._aenqueue(context.context_id, context.task_id, cwd)
+        try:
+            if task is None:
+                await event_queue.enqueue_event(
+                    new_task_from_user_message(context.message)
+                )
+            if cwd is None:
+                await updater.failed(_agent_message(updater, CWD_TEXT))
+            else:
+                await self._abegin(context, updater, cwd)
+        finally:
+            self._waiting.pop(context.task_id, None)
 
     async def cancel(self, context: RequestContext, event_queue: Any) -> None:
         task = context.current_task
@@ -254,47 +272,30 @@ class GcAgentExecutor(AgentExecutor):
         turn = self._turns.get(context.task_id)
         if turn is not None:
             await turn.cancel()
-        else:
-            await self._acancel_elsewhere(context_id, context.task_id)
+            # Запрос задачи (с ``_report``) SDK при отмене снимает: место в
+            # диалоге освобождаем сами — очередь идёт сразу.
+            await self._afree(context_id, context.task_id)
+        # Ожидание ответа, место в очереди и ход на другом инстансе снимает
+        # снимок ``CANCELED`` (``ThreadTaskStore.save``) — так же, как
+        # отмену, которую SDK пишет мимо исполнителя.
         await updater.cancel()
-
-    async def _acancel_elsewhere(self, context_id: str, task_id: str) -> None:
-        """Задача ждёт ответа — диалог свободен (вопрос закроет следующий
-        ход); в очереди — снимается с неё; ход на другом инстансе — отмена
-        через поток control треда."""
-        key = dialog_key(context_id)
-        state = _dialog_state(await self._threads.get(key))
-        if state.get(_WAITING) == task_id:
-            await self._threads.update_frontend(
-                key, FRONTEND, {_WAITING: None}
-            )
-        elif _QUEUE + task_id in state:
-            await self._threads.update_frontend(
-                key,
-                FRONTEND,
-                {_QUEUE + task_id: None, _CANCELED + task_id: True},
-            )
-        else:
-            await self._threads.request_cancel(key)
 
     async def shutdown(self) -> None:
         # Остановка сервера — прерывание: задачи остаются как есть, их
         # подберёт восстановление другого инстанса.
         for turn in list(self._turns.values()):
+            turn.interrupted = True
             await turn.cancel()
         for agent in list(self._agents.values()):
             await _safe_aclose(agent)
         self._agents.clear()
 
-    async def _abegin(self, context: RequestContext, updater: TaskUpdater):
-        try:
-            cwd = await self._cwd_for(context)
-        except _CwdError:
-            await updater.failed(_agent_message(updater, CWD_TEXT))
-            return
+    async def _abegin(
+        self, context: RequestContext, updater: TaskUpdater, cwd: str
+    ):
         task_id, context_id = context.task_id, context.context_id
-        if not await self._aawait_turn(context_id, task_id, cwd):
-            return  # отменена в очереди: итог — cancel()
+        if not await self._aawait_turn(context_id, task_id):
+            return  # отменена в очереди: итог записан отменой
         try:
             agent = await self._agent_for(context_id, cwd)
         except Exception:
@@ -313,12 +314,12 @@ class GcAgentExecutor(AgentExecutor):
         инстансе (тред и вопрос — в хранилище)."""
         task_id, context_id = task.id, task.context_id
         key = dialog_key(context_id)
-        state = _dialog_state(await self._threads.get(key))
-        if state.get(_WAITING) != task_id:
+        state = dialog_state(await self._threads.get(key))
+        if state.get(WAITING) != task_id:
             await updater.failed(_agent_message(updater, NOT_WAITING_TEXT))
             return
         await self._threads.update_frontend(
-            key, FRONTEND, {_WAITING: None, _RUNNING: self._claim(task_id)}
+            key, FRONTEND, {WAITING: None, RUNNING: self._claim(task_id)}
         )
         try:
             agent = await self._agent_for(context_id, state.get(_CWD_KEY))
@@ -333,33 +334,42 @@ class GcAgentExecutor(AgentExecutor):
         turn.start()
         await self._report(turn, updater)
 
-    async def _aawait_turn(self, context_id: str, task_id: str, cwd: str):
-        """Встать в очередь диалога и дождаться своей очереди: диалог
-        свободен (нет хода, никто не ждёт ответа) и задача первая. ``False``
-        — задачу отменили в очереди."""
-        key = dialog_key(context_id)
+    async def _aenqueue(self, context_id: str, task_id: str, cwd: str):
+        """Встать в очередь диалога (порядок — по времени приёма)."""
         entry = {"at": _now(), "instance": instance_id()}
+        self._waiting[task_id] = entry
         await self._threads.update_frontend(
-            key,
+            dialog_key(context_id),
             FRONTEND,
-            {_CWD_KEY: cwd, _QUEUE + task_id: {**entry, "seen": _now()}},
+            {_CWD_KEY: cwd, QUEUE + task_id: {**entry, "seen": _now()}},
         )
-        self._waiting.add(task_id)
+
+    async def _aawait_turn(self, context_id: str, task_id: str) -> bool:
+        """Дождаться своей очереди: диалог свободен (нет хода, никто не
+        ждёт ответа) и задача первая. ``False`` — задачу отменили в
+        очереди."""
+        key = dialog_key(context_id)
+        entry = self._waiting[task_id]
         try:
             while True:
                 record = await self._threads.get(key)
-                state = _dialog_state(record)
-                if state.get(_CANCELED + task_id):
+                state = dialog_state(record)
+                if state.get(CANCELED + task_id):
+                    if QUEUE + task_id in state:
+                        # Отметка «жив» могла вернуть снятую запись.
+                        await self._threads.update_frontend(
+                            key, FRONTEND, {QUEUE + task_id: None}
+                        )
                     return False
                 if self._dialog_free(record, state) and _queue(state)[:1] == [
-                    (task_id, state[_QUEUE + task_id])
+                    (task_id, state[QUEUE + task_id])
                 ]:
                     await self._threads.update_frontend(
                         key,
                         FRONTEND,
                         {
-                            _QUEUE + task_id: None,
-                            _RUNNING: self._claim(task_id),
+                            QUEUE + task_id: None,
+                            RUNNING: self._claim(task_id),
                         },
                     )
                     return True
@@ -367,10 +377,10 @@ class GcAgentExecutor(AgentExecutor):
                 await self._threads.update_frontend(
                     key,
                     FRONTEND,
-                    {_QUEUE + task_id: {**entry, "seen": _now()}},
+                    {QUEUE + task_id: {**entry, "seen": _now()}},
                 )
         finally:
-            self._waiting.discard(task_id)
+            self._waiting.pop(task_id, None)
 
     @staticmethod
     def _claim(task_id: str) -> dict[str, Any]:
@@ -383,19 +393,22 @@ class GcAgentExecutor(AgentExecutor):
         """Диалог свободен: хода нет (ни отметки, ни живой аренды) и никто
         не ждёт ответа на вопрос."""
         return (
-            not state.get(_RUNNING)
-            and not state.get(_WAITING)
+            not state.get(RUNNING)
+            and not state.get(WAITING)
             and not _lease_live(record)
         )
+
+    async def _afinished(self, task_id: str) -> bool:
+        """Задачу закрыли мимо хода (отмена с другого инстанса)."""
+        task = await self._tasks.latest(task_id)
+        return task is not None and task.status.state in _FINAL_STATES
 
     async def _afree(self, context_id: str, task_id: str) -> None:
         """Снять отметку хода задачи (своей) — диалог свободен."""
         key = dialog_key(context_id)
-        running = _dialog_state(await self._threads.get(key)).get(_RUNNING)
+        running = dialog_state(await self._threads.get(key)).get(RUNNING)
         if isinstance(running, dict) and running.get("task") == task_id:
-            await self._threads.update_frontend(
-                key, FRONTEND, {_RUNNING: None}
-            )
+            await self._threads.update_frontend(key, FRONTEND, {RUNNING: None})
 
     async def _report(self, turn: Turn, updater: TaskUpdater) -> None:
         """Исход хода: вопрос — ``INPUT_REQUIRED`` (тред свободен, задача
@@ -403,13 +416,16 @@ class GcAgentExecutor(AgentExecutor):
         await turn.done.wait()
         self._turns.pop(turn.task_id, None)
         key = dialog_key(turn.context_id)
-        if turn.cancel_requested:
+        if turn.interrupted:
+            return  # отметка хода остаётся: задачу прервёт восстановление
+        if turn.cancel_requested or await self._afinished(turn.task_id):
+            # Итог уже записан: cancel() или отмена мимо исполнителя.
             await self._afree(turn.context_id, turn.task_id)
-            return  # итог — cancel() (или остановка сервера)
+            return
         question = getattr(turn.agent, "pending_question", None)
         if turn.failed is None and question:
             await self._threads.update_frontend(
-                key, FRONTEND, {_RUNNING: None, _WAITING: turn.task_id}
+                key, FRONTEND, {RUNNING: None, WAITING: turn.task_id}
             )
             await updater.requires_input(
                 _agent_message(updater, str(question.get("question") or ""))
@@ -436,10 +452,10 @@ class GcAgentExecutor(AgentExecutor):
         return failed
 
     async def _arecover_dialog(self, record: ThreadRecord) -> int:
-        state = _dialog_state(record)
+        state = dialog_state(record)
         dead: list[str] = []
         patch: dict[str, Any] = {}
-        running = state.get(_RUNNING)
+        running = state.get(RUNNING)
         if (
             isinstance(running, dict)
             and running.get("task") not in self._turns
@@ -447,11 +463,11 @@ class GcAgentExecutor(AgentExecutor):
             and _stale(running.get("at"))
         ):
             dead.append(str(running.get("task")))
-            patch[_RUNNING] = None
+            patch[RUNNING] = None
         for task_id, entry in _queue(state):
             if task_id not in self._waiting and _stale(entry.get("seen")):
                 dead.append(task_id)
-                patch[_QUEUE + task_id] = None
+                patch[QUEUE + task_id] = None
         if not dead:
             return 0
         await self._threads.update_frontend(record.key, FRONTEND, patch)
@@ -510,7 +526,7 @@ class GcAgentExecutor(AgentExecutor):
 
     async def _dialog_cwd(self, context_id: str) -> str | None:
         """Корень диалога — из прошлых задач контекста (на любом инстансе)."""
-        cwd = _dialog_state(
+        cwd = dialog_state(
             await self._threads.get(dialog_key(context_id))
         ).get(_CWD_KEY)
         return cwd if isinstance(cwd, str) and cwd else None
