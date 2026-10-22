@@ -900,7 +900,7 @@ def test_finished_turn_summary_survives_a_busy_snapshot_index():
 
     screen = SimpleNamespace(
         _turn_summary_in_status=lambda: True,
-        _edits_lookup_for_thread=lambda: _BusyLookup(),
+        _edits_lookup_for_thread=lambda _tid=None: _BusyLookup(),
         _edits_baseline_turn_id="t1",
     )
 

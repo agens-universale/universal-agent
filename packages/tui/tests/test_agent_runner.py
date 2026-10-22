@@ -537,3 +537,15 @@ def test_confirm_stop_unblocks_blocked_confirm():
     t.join(timeout=2.0)
     assert not t.is_alive(), "confirm-поток не разблокировался за 2 с"
     assert result_holder == ["deny_once"]
+
+
+def test_runner_remembers_when_its_run_started():
+    """Начало прогона хранится в раннере: длительность хода считается от
+    него, а не от поля экрана, которое смена сессии сбрасывает."""
+    fake = _FakeExecutor()
+    runner = AgentRunner(executor=fake)
+    before = time.monotonic()
+    runner.start(query="x", thread_id="t1")
+    assert before <= runner.run_started_at <= time.monotonic()
+    runner.stop()
+    runner.wait(timeout=1.0)

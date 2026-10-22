@@ -152,6 +152,9 @@ class AgentRunner:
         #: Тред и система последнего прогона: в них доигрывается сообщение,
         #: опоздавшее к закрытию.
         self._last_target: Optional[tuple[str, str]] = None
+        #: Монотоника старта последнего прогона: от неё — длительность хода
+        #: в его итоге, даже если к концу на экране уже другая сессия.
+        self.run_started_at: Optional[float] = None
         self._stop_requested = False
         # TUI _stop_and_replace_runner: runner снят с active_runner, но поток ещё
         # может досидеть HTTP/ретраи. Его on_error не должен залипать ✗ Ошибка
@@ -507,6 +510,7 @@ class AgentRunner:
         self._thread_kind = "run"
         self._accepting = True
         self._last_target = (thread_id, system)
+        self.run_started_at = time.monotonic()
         t = threading.Thread(
             target=self._run_worker,
             args=(batch, thread_id, start_new_thread, system),
