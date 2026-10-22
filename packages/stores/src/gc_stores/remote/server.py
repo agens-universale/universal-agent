@@ -35,6 +35,13 @@ from gc_stores.remote import protocol
 from gc_stores.remote.protocol import wire
 
 SOCKET_NAME = "thread.sock"
+#: Соединений разом: песочница — недоверенный клиент, её запросы держат
+#: кадр в памяти сервера.
+MAX_CONNECTIONS = 4
+#: Сколько ждать строку запроса: молчащее соединение не держит слот.
+READ_TIMEOUT_SECONDS = 30.0
+#: Секции фронтенда, которые пишет ход (сессия ядра); остальные — сервера.
+_SANDBOX_FRONTENDS = frozenset({"tui"})
 #: Короткий корень каталога сокета: путь unix-сокета ограничен ~104 байтами.
 _SHORT_ROOT = "/tmp"
 
@@ -54,6 +61,7 @@ class ThreadProxy:
         )
         self.socket_path = os.path.join(self.directory, SOCKET_NAME)
         self._server: asyncio.AbstractServer | None = None
+        self._slots = asyncio.Semaphore(MAX_CONNECTIONS)
 
     @classmethod
     async def astart(cls, store: ThreadStore, key: ThreadKey) -> ThreadProxy:
@@ -74,12 +82,15 @@ class ThreadProxy:
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ) -> None:
         try:
-            line = await reader.readline()
-            reply = await self._reply(line)
-            writer.write(protocol.encode(reply))
-            await writer.drain()
+            async with self._slots:
+                line = await asyncio.wait_for(
+                    reader.readline(), READ_TIMEOUT_SECONDS
+                )
+                reply = await self._reply(line)
+                writer.write(protocol.encode(reply))
+                await writer.drain()
         except (OSError, ValueError, asyncio.LimitOverrunError):
-            pass  # клиент ушёл или прислал не кадр — ответить некому
+            pass  # клиент ушёл, молчит (TimeoutError — OSError) или прислал не кадр
         finally:
             writer.close()
 
@@ -130,6 +141,19 @@ def _forbidden(message: str) -> dict[str, Any]:
     return _error(protocol.FORBIDDEN, message)
 
 
+def _own_sections_only(change: SideChange) -> None:
+    """Песочница пишет только то, что пишет ход: свою секцию фронтенда и
+    потоки ядра. Секции и потоки сервера (метка задачи swarm, статус
+    вебхука, задачи A2A) — его: снятая метка отдала бы тред восстановлению
+    вебхука, и ход пошёл бы на хосте мимо песочницы."""
+    for section in (change.set_frontend, change.patch_frontend):
+        if section is not None and section[0] not in _SANDBOX_FRONTENDS:
+            raise PermissionError(f"секция фронтенда {section[0]!r} — сервера")
+    for stream, _entries in change.append:
+        if "." in stream and stream.split(".", 1)[0] not in _SANDBOX_FRONTENDS:
+            raise PermissionError(f"поток {stream!r} — сервера")
+
+
 def _no_aliases(change: ThreadChange | SideChange) -> None:
     """Алиасы — общее пространство имён сервера (ответы chat и др.)."""
     if getattr(change, "add_aliases", None):
@@ -166,12 +190,15 @@ async def _commit(proxy: ThreadProxy, key: ThreadKey, args: dict) -> Any:
 async def _append_side(proxy: ThreadProxy, key: ThreadKey, args: dict) -> Any:
     change = SideChange.model_validate(args["change"])
     _no_aliases(change)
+    _own_sections_only(change)
     receipt = await proxy.store.append_side(key, change)
     return wire(receipt)
 
 
 async def _claim(proxy: ThreadProxy, key: ThreadKey, args: dict) -> Any:
     request = LeaseRequest.model_validate(args["request"])
+    if request.ttl is None:
+        raise PermissionError("бессрочная аренда — только у сервера")
     record = await proxy.store.claim(key, request)
     return wire(record)
 

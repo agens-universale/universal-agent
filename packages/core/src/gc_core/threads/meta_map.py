@@ -346,7 +346,11 @@ def meta_from_parts(parts: MetaParts, *, base: JsonObject) -> JsonObject:
         meta[_USAGE_KEY] = parts.usage.model_dump(mode="json")
     _write_frontend(meta, parts)
     for key, value in extra.items():
-        meta[key] = value
+        # Ключи, которые ведут модели (секции фронтендов, tui, статус),
+        # ``extra`` не перекрывает: иначе запись ``set_extra`` затирала бы
+        # чужие секции (метку задачи swarm, статус вебхука).
+        if key not in _MAPPED_TOP:
+            meta[key] = value
     return _ordered_like(meta, base)
 
 
