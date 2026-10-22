@@ -9,7 +9,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 
+from gc_core.persistence.turn_outcome import USER_STOP, TurnOutcome
+from rich.text import Text
+
+from gc_tui.services.duration_format import format_duration
+from gc_tui.services.relative_time import format_turn_clock
 from gc_tui.services.trace_glyphs import ERROR_GLYPH
 
 #: Подпись успешного исхода хода. Ход, кончившийся предложенным планом,
@@ -79,3 +85,59 @@ def outcome_of(word: str | None) -> Outcome | None:
     if not word:
         return None
     return OUTCOMES.get(_ALIASES.get(word, word))
+
+
+#: Причина остановки лимитом (`State.terminal_outcome` и поле `reason`
+#: записи итога) → слово словаря.
+_LIMIT_WORDS = {
+    "step_limit": "stopped_steps",
+    "tool_errors": "stopped_errors",
+    "token_limit": "stopped_tokens",
+    "tool_call_limit": "stopped_tool_calls",
+    "judge_unavailable": "stopped_judge",
+}
+
+_PLAN_REASON = "plan_proposed"
+
+
+def outcome_word(*, failed: bool, stopped: bool, reason: str | None) -> str:
+    """Слово исхода по флагам прогона. Порядок важен:
+    ошибка → стоп → лимитные исходы → completed (по умолчанию)."""
+    if failed:
+        return "failed"
+    if stopped:
+        return "stopped"
+    return _LIMIT_WORDS.get(reason, "completed")
+
+
+def kind_of(outcome: TurnOutcome) -> tuple[str, bool]:
+    """Слово `OUTCOMES` и флаг «ход кончился планом» по записи итога."""
+    word = outcome_word(
+        failed=outcome.status == "error",
+        stopped=outcome.status == "stopped" and outcome.reason == USER_STOP,
+        reason=outcome.reason,
+    )
+    plan = outcome.status == "done" and outcome.reason == _PLAN_REASON
+    return _ALIASES.get(word, word), plan
+
+
+def turn_head(
+    word: str,
+    *,
+    plan: bool,
+    duration_sec: float | None,
+    ended_at: str | None,
+    now: datetime | None = None,
+) -> Text:
+    """Голова строки итога: глиф + фраза; «за <длительность>» только у
+    выполненного хода, время конца — у любого, если оно известно."""
+    outcome = outcome_of(word)
+    if outcome is None:
+        return Text("")
+    done = outcome is OUTCOMES["completed"]
+    sentence = DONE_LABEL_PLAN if done and plan else outcome.sentence
+    head = f"{outcome.glyph} {sentence}"
+    if done and duration_sec is not None:
+        head += f" за {format_duration(duration_sec)}"
+    clock = format_turn_clock(ended_at, now=now)
+    return Text(f"{head} · {clock}" if clock else head)

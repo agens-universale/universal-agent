@@ -49,3 +49,46 @@ def test_older_year_date():
 def test_garbage_returns_input():
     assert format_relative_local("not-a-date", now=NOW) == "not-a-date"
     assert format_relative_local("", now=NOW) == ""
+
+
+def _clock(ended_at, now):
+    from gc_tui.services.relative_time import format_turn_clock
+
+    return format_turn_clock(ended_at, now=now)
+
+
+def _iso(local):
+    return local.astimezone(UTC).isoformat()
+
+
+def test_turn_clock_today():
+    now = datetime(2026, 10, 22, 20, 0).astimezone()
+    ended = datetime(2026, 10, 22, 14, 32).astimezone()
+    assert _clock(_iso(ended), now) == "14:32"
+
+
+def test_turn_clock_yesterday_across_midnight():
+    now = datetime(2026, 10, 22, 0, 10).astimezone()
+    ended = datetime(2026, 10, 21, 18, 42).astimezone()
+    assert _clock(_iso(ended), now) == "вчера 18:42"
+
+
+def test_turn_clock_this_year():
+    now = datetime(2026, 10, 22, 12, 0).astimezone()
+    ended = datetime(2026, 10, 19, 18, 42).astimezone()
+    assert _clock(_iso(ended), now) == "19 окт 18:42"
+
+
+def test_turn_clock_other_year_on_new_year():
+    now = datetime(2026, 1, 1, 12, 0).astimezone()
+    ended = datetime(2025, 12, 31, 18, 42).astimezone()
+    assert _clock(_iso(ended), now) == "вчера 18:42"
+    now = datetime(2026, 1, 5, 12, 0).astimezone()
+    assert _clock(_iso(ended), now) == "31 дек 2025 18:42"
+
+
+def test_turn_clock_bad_input_is_empty():
+    now = datetime(2026, 10, 22, 12, 0).astimezone()
+    assert _clock("не время", now) == ""
+    assert _clock("", now) == ""
+    assert _clock(None, now) == ""

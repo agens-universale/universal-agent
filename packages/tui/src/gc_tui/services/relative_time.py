@@ -20,6 +20,26 @@ _MONTHS_GEN = [
     "декабря",
 ]
 
+_MONTHS_SHORT = [
+    "янв",
+    "фев",
+    "мар",
+    "апр",
+    "мая",
+    "июн",
+    "июл",
+    "авг",
+    "сен",
+    "окт",
+    "ноя",
+    "дек",
+]
+
+
+def _now_local() -> datetime:
+    """Единственная точка «сейчас» для часов хода (подмена в тестах)."""
+    return datetime.now().astimezone()
+
 
 def parse_iso_utc(value) -> Optional[datetime]:
     """ISO-таймстемп → aware datetime (нормализуя 'Z'); None при пустом/битом."""
@@ -71,3 +91,25 @@ def format_relative_local(
     if dt.year == now.year:
         return f"{md}, {hm}"
     return f"{md} {dt.year}"
+
+
+def format_turn_clock(
+    ended_at: Optional[str], *, now: Optional[datetime] = None
+) -> str:
+    """Локальное время конца хода: «14:32», «вчера 18:42», «17 окт 18:42»,
+    «17 окт 2025 18:42». Пустое или кривое — пустая строка."""
+    dt = parse_iso_utc(ended_at)
+    if dt is None:
+        return ""
+    dt = dt.astimezone()
+    now = (now or _now_local()).astimezone()
+    hm = dt.strftime("%H:%M")
+    days = (now.date() - dt.date()).days
+    if days == 0:
+        return hm
+    if days == 1:
+        return f"вчера {hm}"
+    md = f"{dt.day} {_MONTHS_SHORT[dt.month - 1]}"
+    if dt.year == now.year:
+        return f"{md} {hm}"
+    return f"{md} {dt.year} {hm}"
