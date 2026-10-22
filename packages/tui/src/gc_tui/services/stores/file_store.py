@@ -17,10 +17,15 @@ from gc_core.message_format.serialization import (
     calc_history_chars_for_trigger,
 )
 from gc_core.message_policy.user_message_policy import (
+    extract_real_user_message_text,
     is_dialog_summary_user_message_text,
     user_content_to_text,
 )
-from gc_core.persistence.turn_outcome import is_turn_outcome_record
+from gc_core.persistence.turn_outcome import (
+    TurnOutcome,
+    is_turn_outcome_record,
+    parse_turn_outcome,
+)
 from gc_core.thread_store import (
     delete_thread,
     discard_message_by_id,
@@ -34,6 +39,7 @@ from gc_tui.models import (
     TaskSummary,
 )
 from gc_tui.services.trace_mapper import _clean_summary
+from gc_tui.services.turn_outcome import kind_of, meta_status_of
 
 _ARCHIVE_MARK = "__pre_summary__"
 # Сколько тиков подряд ждать завершения шагов сжатия ядра: 8 тиков опроса
@@ -44,6 +50,37 @@ _COMPACTION_WAIT_TICKS = 8
 # новая мета), каждое изменение рушит не больше одной попытки — четвёртая
 # согласована. Следующее сжатие требует вызова модели и в чтение не попадёт.
 _SNAPSHOT_ATTEMPTS = 4
+# Сколько байт с конца data_*.jsonl читать в поисках записи итога
+# последнего хода для списка сессий. Запись итога — последняя запись
+# хода; дальше в файле может быть лишь сжатие или начало нового хода.
+_OUTCOME_TAIL_BYTES = 64 * 1024
+# Статусы меты, которые держит живой (или убитый посреди хода) ход: у
+# него записи итога нет, решает мета.
+_LIVE_STATUSES = frozenset({"running", "asking"})
+
+
+def _last_turn_outcome(data_path: Path) -> Optional[TurnOutcome]:
+    """Итог последнего хода по хвосту файла треда; None — после последней
+    записи итога начался ход без записи, записи нет или она не в хвосте."""
+    try:
+        with data_path.open("rb") as f:
+            f.seek(0, 2)
+            f.seek(max(0, f.tell() - _OUTCOME_TAIL_BYTES))
+            lines = f.read().decode("utf-8", errors="replace").splitlines()
+    except OSError:
+        return None
+    for line in reversed(lines):
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(rec, dict):
+            continue
+        if is_turn_outcome_record(rec):
+            return parse_turn_outcome(rec)
+        if extract_real_user_message_text(rec.get("payload")):
+            return None
+    return None
 
 
 class FileTaskStore:
@@ -73,12 +110,7 @@ class FileTaskStore:
             except (OSError, json.JSONDecodeError):
                 continue
             tid = meta.get("thread_id") or meta_path.stem[len(prefix) :]
-            # Исход сессии: TUI-владелец пишет в meta.tui.status (completed/stopped/
-            # failed); верхний meta.status — для CLI/server-потоков. Нет ни того, ни
-            # другого → None (исход не записан; список не выдумывает «stopped»).
-            status = (meta.get("tui") or {}).get("status") or meta.get(
-                "status"
-            )
+            status = self._list_status(tid, meta)
             updated = meta.get("updated_at", "")
             msgs = int(meta.get("messages_count", 0))
             tui_meta = meta.get("tui") or {}
@@ -103,6 +135,20 @@ class FileTaskStore:
             )
         items.sort(key=lambda s: s.updated_at, reverse=True)
         return items[offset : offset + limit]
+
+    def _list_status(self, task_id: str, meta: dict) -> Optional[str]:
+        """Исход сессии для списка. Источник — запись итога последнего
+        хода (её пишет ядро в любом фронтенде); мета — для живого хода
+        и тредов без записей: TUI-владелец пишет в meta.tui.status
+        (completed/stopped/failed), верхний meta.status — CLI/server.
+        Нет ничего → None (список не выдумывает «stopped»)."""
+        status = (meta.get("tui") or {}).get("status") or meta.get("status")
+        if status in _LIVE_STATUSES:
+            return status
+        outcome = _last_turn_outcome(self._data_path(task_id, self._system))
+        if outcome is None:
+            return status
+        return meta_status_of(kind_of(outcome)[0])
 
     # ---- per-task -----------------------------------------------------
 
