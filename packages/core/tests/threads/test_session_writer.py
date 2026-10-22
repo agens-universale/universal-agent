@@ -279,3 +279,57 @@ async def test_exhausted_retries_are_logged_as_error(caplog):
         await w.acommit(set_state=SessionState())
     errors = [r for r in caplog.records if r.levelno >= logging.ERROR]
     assert len(errors) == 1 and "thread commit" in errors[0].getMessage()
+
+
+async def test_renewal_after_a_foreign_turn_is_busy():
+    """Ревью, раунд 2 (R1): своя аренда истекла, B взял тред, записал ход и
+    отпустил. Продление A получает новую эпоху — ревизию B оно не
+    принимает: запись A затёрла бы ход B."""
+    clock = FakeClock()
+    store = MemoryThreadStore(clock=clock)
+    a = _writer(store, "A", clock)
+    await a.aclaim()
+    await a.acommit(set_state=SessionState(inbox_seq=1))
+    clock.advance(TTL * 2)
+    b = _writer(store, "B", clock)
+    await b.aclaim()
+    await b.acommit(set_state=SessionState(inbox_seq=5, notes="B"))
+    await b.arelease()
+    with pytest.raises(ThreadBusy):
+        await a.acommit(set_state=SessionState(inbox_seq=1, notes="A"))
+    record = await store.get_thread(KEY)
+    assert (record.state.inbox_seq, record.state.notes) == (5, "B")
+    assert record.lease is None, "A держит тред, от которого отказался"
+
+
+async def test_renewal_after_a_quiet_lapse_keeps_writing():
+    """Простой без чужих записей: аренда истекла, но тред никто не трогал —
+    продление проходит, ход пишет дальше."""
+    clock = FakeClock()
+    store = MemoryThreadStore(clock=clock)
+    a = _writer(store, "A", clock)
+    await a.aclaim()
+    await a.acommit(set_state=SessionState(inbox_seq=1))
+    clock.advance(TTL * 2)
+    await a.acommit(set_state=SessionState(inbox_seq=2))
+    assert (await store.get_thread(KEY)).state.inbox_seq == 2
+
+
+async def test_side_write_after_a_foreign_turn_is_busy():
+    """Запись сбоку по истёкшей аренде после чужого хода — тоже отказ, а не
+    перезапись runtime хода B."""
+    from gc_core.threads.models import RuntimeStatus
+
+    clock = FakeClock()
+    store = MemoryThreadStore(clock=clock)
+    a = _writer(store, "A", clock)
+    await a.aclaim()
+    clock.advance(TTL * 2)
+    b = _writer(store, "B", clock)
+    await b.aclaim()
+    await b.aside(set_runtime=RuntimeStatus(turn="idle"))
+    await b.acommit(set_state=SessionState(notes="B"))
+    await b.arelease()
+    with pytest.raises(ThreadBusy):
+        await a.aside(set_runtime=RuntimeStatus(turn="running"))
+    assert (await store.get_thread(KEY)).runtime.turn == "idle"
