@@ -509,3 +509,31 @@ async def test_rebuild_then_admit_mounts_reply_once(tmp_path):
         trace = scr.query_one("#trace")
         replies = [(r._text, r.state) for r in trace.query(UserReplyContainer)]
         assert replies == [("первое", "normal"), ("второе", "queued")]
+
+
+class _CompactRunner(_BusyRunner):
+    """`/compact`: сообщение ложится в очередь исполнителя и после конца
+    прогона ждёт там следующего."""
+
+    def withdraw_message(self, msg_id: str) -> bool:
+        self.withdrawn.append(msg_id)
+        held = [m for m in self.added if m["id"] == msg_id]
+        self.added = [m for m in self.added if m["id"] != msg_id]
+        return bool(held)
+
+
+@pytest.mark.asyncio
+async def test_send_during_compact_no_duplicate(tmp_path):
+    async with _app(tmp_path / "threads").run_test() as pilot:
+        scr = pilot.app.screen
+        _activate(pilot.app, scr, tmp_path / "threads")
+        runner = _CompactRunner()
+        pilot.app.active_runner = runner
+        await _send(pilot, "после сжатия")
+        runner.running = False
+        scr._poll_active()
+        await pilot.pause()
+        assert _inp(pilot).text == "после сжатия"
+        assert runner.added == []
+        trace = scr.query_one("#trace")
+        assert list(trace.query(UserReplyContainer)) == []

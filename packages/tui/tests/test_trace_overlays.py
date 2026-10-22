@@ -402,3 +402,49 @@ async def test_replies_cache_sees_remove_and_mount_in_one_tick(tmp_path):
         await second.remove()
         _agent(scr, "a3", 3)
         assert scr._trace_replies(trace) == [first]
+
+
+async def _tall_with_queue(pilot, tid):
+    """Лента `_tall` и две реплики в очереди у низа."""
+    scr = await _tall(pilot, tid)
+    for i, text in enumerate(("в очереди 1", "в очереди 2")):
+        scr._mount_user_reply(text, state="queued", client_id=f"c{i}")
+    await pilot.pause(0.2)
+    return scr
+
+
+@pytest.mark.asyncio
+async def test_sticky_and_pill_with_queue_below(tmp_path):
+    """Очередь у низа — не «выше края»: липкая реплика — ближайшая выше
+    видимой области, плашка «в конец» на месте."""
+    _write_task(tmp_path, "o20")
+    async with _app(tmp_path).run_test(size=(100, 30)) as pilot:
+        scr = await _tall_with_queue(pilot, "o20")
+        sticky, pill = _overlays(scr)
+        _, second, *queued = _replies(scr)
+        assert [r.state for r in queued] == ["queued", "queued"]
+        await _scroll(pilot, scr, second.virtual_region.y + 2)
+        assert sticky.reply is second
+        assert pill.display is True
+
+
+@pytest.mark.asyncio
+async def test_selection_survives_queued_reply_mount(tmp_path):
+    """Реплика встаёт в очередь посреди выделения мышью: выделенный
+    текст ленты тот же."""
+    _write_task(tmp_path, "o21")
+    async with _app(tmp_path).run_test(size=(100, 30)) as pilot:
+        scr = await _tall(pilot, "o21")
+        await _scroll(pilot, scr, 10)
+        box = _trace(scr).content_region
+        await pilot.mouse_down(offset=(box.x + 2, box.y + 2))
+        await pilot.hover(offset=(box.x + 10, box.y + 6))
+        await pilot.pause()
+        before = scr.get_selected_text()
+        assert before
+        scr._mount_user_reply("в очереди", state="queued", client_id="c1")
+        await pilot.pause(0.2)
+        assert scr.get_selected_text() == before
+        await pilot.mouse_up(offset=(box.x + 10, box.y + 6))
+        await pilot.pause()
+        assert _replies(scr)[-1].state == "queued"
