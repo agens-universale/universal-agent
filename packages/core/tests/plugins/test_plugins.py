@@ -1511,7 +1511,7 @@ def test_claude_code_mcp_http_means_streamable_http(tmp_path):
     servers = load_plugin(root).mcp_servers
     assert servers["r"]["transport"] == "stream_http"
     assert servers["r2"]["transport"] == "stream_http"
-    assert servers["r3"]["transport"] == "sse"
+    assert servers["r3"]["transport"] == "stream_sse"
 
 
 def test_ap_mcp_rejects_bad_cwd_and_command(tmp_path):
@@ -1552,7 +1552,7 @@ def test_ap_mcp_sse_accepted_and_duplicate_headers_rejected(tmp_path):
     )
     servers = load_plugin(root).mcp_servers
     assert set(servers) == {"legacy"}
-    assert servers["legacy"]["transport"] == "sse"
+    assert servers["legacy"]["transport"] == "stream_sse"
 
 
 def test_ap_mcp_data_dir_created_only_for_valid_stdio(tmp_path):
@@ -1570,3 +1570,202 @@ def test_ap_mcp_invalid_file_warning_has_reason(tmp_path, caplog):
     with caplog.at_level("WARNING"):
         load_plugin(root)
     assert "missing or wrong $schema" in caplog.text
+
+
+# --- финальное ревью: сводка, update, каталог данных, symlink, AP -----------
+
+
+def _env_mcp_plugin(tmp_path, name="envp"):
+    root = _make_plugin(tmp_path, with_skill=True, name=name)
+    (root / ".mcp.json").write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "srv": {
+                        "command": "${CLAUDE_PLUGIN_ROOT}/bin/srv",
+                        "args": ["--token", "${PROBE_TOK}"],
+                    },
+                    "web": {"url": "https://x.example/mcp?key=${PROBE_TOK}"},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    return root
+
+
+@pytest.mark.parametrize("yes", [True, False])
+def test_install_summary_shows_unexpanded_spec(
+    tmp_path, monkeypatch, capsys, yes
+):
+    from gc_core.plugins import cli
+
+    monkeypatch.setenv("PROBE_TOK", "SECRET123")
+    src = _env_mcp_plugin(tmp_path)
+    _tty(monkeypatch, ["n"])
+    argv = ["install", "--yes", str(src)] if yes else ["install", str(src)]
+    cli.main(argv)
+    out = capsys.readouterr()
+    text = out.out + out.err
+    assert "SECRET123" not in text
+    assert (
+        "mcp srv: ${CLAUDE_PLUGIN_ROOT}/bin/srv --token ${PROBE_TOK}" in text
+    )
+    assert "mcp web: https://x.example/mcp?key=${PROBE_TOK}" in text
+    assert str(installed.installed_dir()) not in text
+
+
+def test_update_identical_source_with_plugin_root_does_not_ask(
+    tmp_path, monkeypatch
+):
+    from gc_core.plugins import cli
+
+    monkeypatch.setenv("PROBE_TOK", "one")
+    src = _env_mcp_plugin(tmp_path)
+    assert cli.main(["install", "--yes", str(src)]) == 0
+    monkeypatch.setenv("PROBE_TOK", "two")
+    with installed.prepare(str(src)) as prepared:
+        assert prepared.differs_from("envp") is False
+    asked = _tty(monkeypatch, ["y"])
+    assert cli.main(["update", "envp"]) == 0
+    assert asked == []
+
+
+def test_plugin_data_dir_not_created_at_load_and_mkdir_failure_fail_open(
+    tmp_path, monkeypatch
+):
+    from pathlib import Path
+
+    from gc_core.config_modules.root import AppConfig, resolve_paths
+
+    root = _ap_plugin(
+        tmp_path, {"s": {"type": "stdio", "command": "node"}}, name="dataro"
+    )
+    data = installed.plugin_data_path("dataro")
+    shutil.rmtree(data, ignore_errors=True)
+    assert "s" in load_plugin(root).mcp_servers
+    with installed.prepare(str(root)):
+        pass
+    assert not data.exists()
+
+    def boom(self, *a, **kw):
+        raise OSError(30, "Read-only file system")
+
+    runtime.reset_plugin_cache()
+    cfg = AppConfig.model_validate({"plugins": {"paths": [str(root)]}})
+    monkeypatch.setattr(Path, "mkdir", boom)
+    servers = resolve_paths(cfg, str(tmp_path)).mcp.servers
+    monkeypatch.undo()
+    assert "dataro_s" not in servers
+    runtime.reset_plugin_cache()
+    cfg = AppConfig.model_validate({"plugins": {"paths": [str(root)]}})
+    assert "dataro_s" in resolve_paths(cfg, str(tmp_path)).mcp.servers
+    assert data.is_dir()
+
+
+def test_ap_mcp_symlink_escapes_are_skipped(tmp_path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "x").write_text("#!/bin/sh\n", encoding="utf-8")
+    root = _ap_plugin(
+        tmp_path,
+        {
+            "cmd": {"type": "stdio", "command": "./bin/x"},
+            "cwd": {"type": "stdio", "command": "node", "cwd": "./w"},
+            "ok": {"type": "stdio", "command": "./bin/ok"},
+        },
+        name="links",
+    )
+    (root / "bin").mkdir()
+    (root / "bin" / "x").symlink_to(outside / "x")
+    (root / "bin" / "ok").write_text("#!/bin/sh\n", encoding="utf-8")
+    (root / "w").symlink_to(outside, target_is_directory=True)
+    assert set(load_plugin(root).mcp_servers) == {"ok"}
+
+
+def test_install_already_installed_fails_before_asking(
+    tmp_path, monkeypatch, capsys
+):
+    from gc_core.plugins import cli
+
+    src = _mcp_plugin(tmp_path)
+    assert cli.main(["install", "--yes", str(src)]) == 0
+    capsys.readouterr()
+    asked = _tty(monkeypatch, ["y"])
+    assert cli.main(["install", str(src)]) == 1
+    assert asked == []
+    assert "уже установлен" in capsys.readouterr().err
+
+
+def test_install_prompt_eof_means_no(tmp_path, monkeypatch, capsys):
+    from gc_core.plugins import cli
+
+    src = _mcp_plugin(tmp_path)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+
+    def eof(prompt=""):
+        raise EOFError
+
+    monkeypatch.setattr("builtins.input", eof)
+    assert cli.main(["install", str(src)]) == 1
+    assert "установка отменена" in capsys.readouterr().err
+    assert installed.list_installed() == []
+
+
+def test_summary_lists_skipped_mcp_servers_without_values(
+    tmp_path, monkeypatch
+):
+    monkeypatch.delenv("NOPE_VAR", raising=False)
+    root = _make_plugin(tmp_path, with_skill=True, name="skips")
+    (root / ".mcp.json").write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "noenv": {"command": "x", "args": ["${NOPE_VAR}"]},
+                    "ws": {"type": "ws", "url": "wss://e.x/secretpath"},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    ap = _ap_plugin(
+        tmp_path,
+        {"bad": {"type": "stdio", "command": "bin/x"}},
+        name="apskip",
+    )
+    (ap / "skills" / "a").mkdir(parents=True)
+    (ap / "skills" / "a" / "SKILL.md").write_text("x", encoding="utf-8")
+    with installed.prepare(str(root)) as prepared:
+        lines = "\n".join(prepared.summary())
+    assert "mcp noenv: пропущен" in lines and "NOPE_VAR" in lines
+    assert "mcp ws: пропущен" in lines and "secretpath" not in lines
+    with installed.prepare(str(ap)) as prepared:
+        assert "mcp bad: пропущен" in "\n".join(prepared.summary())
+    bad_file = _ap_plugin(tmp_path, {}, name="apbadfile", schema=None)
+    (bad_file / "skills" / "a").mkdir(parents=True)
+    (bad_file / "skills" / "a" / "SKILL.md").write_text("x", encoding="utf-8")
+    with installed.prepare(str(bad_file)) as prepared:
+        assert "mcp.json" in "\n".join(prepared.summary())
+
+
+def test_ap_only_invalid_mcp_json_is_a_clear_error(tmp_path):
+    root = _ap_plugin(tmp_path, {}, name="onlymcp", schema=None)
+    with pytest.raises(ValueError, match=r"mcp\.json.*\$schema"):
+        installed.install(str(root))
+
+
+def test_ap_plugin_ignores_hooks_commands_and_agents(tmp_path, caplog):
+    root = _ap_root(tmp_path, {"$schema": AP_SCHEMA, "name": "strict"})
+    (root / "hooks").mkdir()
+    (root / "hooks" / "hooks.json").write_text(
+        json.dumps({"hooks": {"Stop": [{"hooks": [{"command": "echo x"}]}]}}),
+        encoding="utf-8",
+    )
+    _add_md(root, "agents/x.md", REVIEWER)
+    _add_md(root, "commands/c.md", REVIEW)
+    with caplog.at_level(logging.INFO):
+        plugin = load_plugin(root)
+    assert plugin.hooks == {}
+    assert plugin.agents == ()
+    assert plugin.commands == ()
+    assert "hooks/hooks.json" in caplog.text and "agents" in caplog.text

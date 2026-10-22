@@ -69,7 +69,8 @@ _AP_STRING_FIELDS = (
     "license",
 )
 _AP_AUTHOR_FIELDS = frozenset({"name", "email", "url"})
-# Claude Code кладёт серверы в ``.mcp.json``, Agent Plugins — в ``mcp.json``.
+# Серверы MCP плагина Claude Code: ``.mcp.json``, иначе ``mcp.json``
+# (у Agent Plugins только ``mcp.json``, см. ``_AP_MCP_FILE``).
 _MCP_CANDIDATES = (".mcp.json", "mcp.json")
 _HOOKS_FILE = "hooks/hooks.json"
 
@@ -144,6 +145,11 @@ class Plugin:
     hooks: dict[str, tuple[HookMatcher, ...]] = field(default_factory=dict)
     # Серверы из ``.mcp.json`` плагина: имя -> поля McpServerConfig.
     mcp_servers: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # Те же серверы до подстановки путей и ``${VAR}`` (transport, command,
+    # args, url как в файле): для сводки установки и сравнения при update.
+    mcp_servers_raw: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # Пропущенные серверы и битый mcp.json: имя и причина, без значений.
+    mcp_problems: tuple[str, ...] = ()
     commands: tuple[PluginCommand, ...] = ()
     agents: tuple[PluginAgent, ...] = ()
     format: str = PLUGIN_FORMAT_CLAUDE
@@ -319,26 +325,42 @@ def _with_env(value: Any) -> Any:
 
 
 _MCP_KEYS = ("command", "args", "env", "cwd", "url", "headers")
-_MCP_TRANSPORTS = {"stdio", "http", "sse", "stream_http"}
+_MCP_TRANSPORTS = {"stdio", "stream_sse", "stream_http"}
 # Наш ``http`` (на httpx) — разовый POST без рукопожатия streamable HTTP, а
 # ``stream_http`` — клиент из SDK. В ``.mcp.json`` ``http`` означает streamable
-# HTTP, поэтому оба типа плагина идут в ``stream_http``.
-_MCP_TYPE_ALIASES = {"streamable-http": "stream_http", "http": "stream_http"}
+# HTTP, поэтому оба типа плагина идут в ``stream_http``; ``sse`` — в клиент
+# SDK ``stream_sse``.
+_MCP_TYPE_ALIASES = {
+    "streamable-http": "stream_http",
+    "http": "stream_http",
+    "sse": "stream_sse",
+}
+_MCP_SHOWN_KEYS = ("command", "args", "url")
+
+# Разобранные серверы плагина: для запуска, для показа, пропущенные.
+McpParse = tuple[
+    dict[str, dict[str, Any]], dict[str, dict[str, Any]], list[str]
+]
 
 
-def _mcp_entry(
-    name: Any, spec: dict[str, Any], root: Path
-) -> dict[str, Any] | None:
-    """Поля ``McpServerConfig`` из записи ``.mcp.json``; ``None``, если транспорт чужой."""
+def _mcp_shown(transport: str, spec: dict[str, Any]) -> dict[str, Any]:
+    """Запись как в файле, без подстановок: что показать и с чем сравнить."""
+    return {
+        "transport": transport,
+        **{k: spec[k] for k in _MCP_SHOWN_KEYS if k in spec},
+    }
+
+
+def _mcp_transport(spec: dict[str, Any]) -> str:
     transport = str(
         spec.get("type") or ("stdio" if spec.get("command") else "stream_http")
     ).lower()
-    transport = _MCP_TYPE_ALIASES.get(transport, transport)
-    if transport not in _MCP_TRANSPORTS:
-        logger.info(
-            "plugin mcp server %r: transport %r skipped", name, transport
-        )
-        return None
+    return _MCP_TYPE_ALIASES.get(transport, transport)
+
+
+def _mcp_entry(spec: dict[str, Any], root: Path) -> dict[str, Any]:
+    """Поля ``McpServerConfig`` из записи ``.mcp.json`` с известным транспортом."""
+    transport = _mcp_transport(spec)
     entry: dict[str, Any] = {"transport": transport}
     entry.update({k: spec[k] for k in _MCP_KEYS if k in spec})
     if transport == "stdio" and not entry.get("cwd"):
@@ -346,33 +368,39 @@ def _mcp_entry(
     return entry
 
 
-def _parse_mcp_servers(raw: Any, root: Path) -> dict[str, dict[str, Any]]:
+def _skip(problems: list[str], name: Any, reason: str) -> None:
+    logger.warning("plugin mcp server %r skipped: %s", name, reason)
+    problems.append(f"mcp {name}: пропущен ({reason})")
+
+
+def _parse_mcp_servers(raw: Any, root: Path) -> McpParse:
     """``.mcp.json`` как у Claude Code: ``{"mcpServers": {имя: {...}}}`` или
     сразу ``{имя: {...}}``. ``${CLAUDE_PLUGIN_ROOT}`` подставляется путём
     плагина, ``${VAR}`` / ``${VAR:-def}`` берутся из окружения (сервер с
-    незаданной ``${VAR}`` пропускается). Имя сервера становится ``<плагин>_<имя>``, чтобы плагины не
-    затирали друг друга и серверы пользователя.
+    незаданной ``${VAR}`` пропускается). Имя сервера становится
+    ``<плагин>_<имя>``, чтобы плагины не затирали друг друга и серверы
+    пользователя.
     """
     section = raw.get("mcpServers", raw) if isinstance(raw, dict) else None
-    if not isinstance(section, dict):
-        return {}
     out: dict[str, dict[str, Any]] = {}
-    for name, spec in section.items():
+    shown: dict[str, dict[str, Any]] = {}
+    problems: list[str] = []
+    for name, spec in (section if isinstance(section, dict) else {}).items():
         if not isinstance(spec, dict):
+            _skip(problems, name, "entry is not an object")
+            continue
+        transport = _mcp_transport(spec)
+        if transport not in _MCP_TRANSPORTS:
+            _skip(problems, name, f"transport {transport!r} is not supported")
             continue
         try:
-            spec = _with_env(_with_plugin_root(spec, root))
+            expanded = _with_env(_with_plugin_root(spec, root))
         except KeyError as exc:
-            logger.warning(
-                "plugin mcp server %r skipped: env var %s is not set",
-                name,
-                exc.args[0],
-            )
+            _skip(problems, name, f"env var {exc.args[0]} is not set")
             continue
-        entry = _mcp_entry(name, spec, root)
-        if entry is not None:
-            out[str(name)] = entry
-    return out
+        out[str(name)] = _mcp_entry(expanded, root)
+        shown[str(name)] = _mcp_shown(transport, spec)
+    return out, shown, problems
 
 
 def _split_markdown(text: str) -> tuple[dict[str, Any], str]:
@@ -494,7 +522,8 @@ def _ap_expand(value: str, root: Path, data: Path) -> str:
 
 
 def _ap_inside(path: Path, base: Path) -> bool:
-    return Path(os.path.normpath(path)).is_relative_to(base)
+    """Внутри ``base`` и после разрешения symlink-ов."""
+    return path.resolve().is_relative_to(base.resolve())
 
 
 def _ap_str_list(value: Any) -> bool:
@@ -574,8 +603,10 @@ def _ap_cwd(
 def _ap_stdio_entry(
     spec: dict[str, Any], root: Path, plugin_name: str
 ) -> tuple[dict[str, Any] | None, str | None]:
-    from gc_core.plugins.installed import plugin_data_dir, plugin_data_path
+    from gc_core.plugins.installed import plugin_data_path
 
+    # Каталог данных создаёт ``runtime.plugin_mcp_servers`` при загрузке
+    # настроек, не здесь: чтение плагина (prepare, /plugins) ничего не пишет.
     data = plugin_data_path(plugin_name)
     args, env = spec.get("args", []), spec.get("env", {})
     if not _ap_str_list(args) or not _ap_str_map(env):
@@ -586,7 +617,6 @@ def _ap_stdio_entry(
     cwd, cwd_reason = _ap_cwd(spec.get("cwd"), root, data)
     if command is None or cwd is None:
         return None, reason or cwd_reason
-    plugin_data_dir(plugin_name)
     return {
         "transport": "stdio",
         "command": command,
@@ -636,9 +666,7 @@ def _ap_mcp_top_error(raw: Any) -> str | None:
     return None
 
 
-def _parse_ap_mcp_servers(
-    raw: Any, root: Path, plugin_name: str
-) -> dict[str, dict[str, Any]]:
+def _parse_ap_mcp_servers(raw: Any, root: Path, plugin_name: str) -> McpParse:
     """``mcp.json`` по Agent Plugins v1.0.0: ``$schema`` и ``mcpServers``, у
     сервера ровно один вариант (stdio / streamable-http / sse). Раскрываются
     только ``${PLUGIN_ROOT}`` и ``${PLUGIN_DATA}`` в ``args``, ``env``,
@@ -652,31 +680,59 @@ def _parse_ap_mcp_servers(
             root,
             top_error,
         )
-        return {}
+        return {}, {}, [f"mcp.json не принят ({top_error})"]
     out: dict[str, dict[str, Any]] = {}
+    shown: dict[str, dict[str, Any]] = {}
+    problems: list[str] = []
     for name, spec in raw["mcpServers"].items():
         entry, reason = _ap_server_entry(spec, root, plugin_name)
         if entry is None:
-            logger.warning("plugin mcp server %r skipped: %s", name, reason)
+            _skip(problems, name, str(reason))
             continue
         out[str(name)] = entry
-    return out
+        shown[str(name)] = _mcp_shown(entry["transport"], spec)
+    return out, shown, problems
 
 
-def _load_mcp_servers(
-    root: Path, fmt: str, name: str
-) -> dict[str, dict[str, Any]]:
+def _load_mcp_servers(root: Path, fmt: str, name: str) -> McpParse:
     """Серверы MCP плагина: ``mcp.json`` для Agent Plugins, ``.mcp.json`` /
     ``mcp.json`` для Claude Code."""
     if fmt == PLUGIN_FORMAT_AP:
         path = root / _AP_MCP_FILE
         if not path.is_file():
-            return {}
+            return {}, {}, []
         return _parse_ap_mcp_servers(_read_json(path), root, name)
     path = next(
         (root / rel for rel in _MCP_CANDIDATES if (root / rel).is_file()), None
     )
-    return _parse_mcp_servers(_read_json(path), root) if path else {}
+    return _parse_mcp_servers(_read_json(path), root) if path else ({}, {}, [])
+
+
+_AP_IGNORED = (_HOOKS_FILE, "commands", "agents")
+
+
+def _cc_components(
+    root: Path, fmt: str
+) -> tuple[
+    dict[str, tuple[HookMatcher, ...]],
+    tuple[PluginCommand, ...],
+    tuple[PluginAgent, ...],
+]:
+    """Хуки, команды и агенты; у Agent Plugins их нет (только skills и MCP)."""
+    if fmt == PLUGIN_FORMAT_AP:
+        ignored = [rel for rel in _AP_IGNORED if (root / rel).exists()]
+        if ignored:
+            logger.info(
+                "plugin %s: Agent Plugins format, ignored: %s",
+                root,
+                ", ".join(ignored),
+            )
+        return {}, (), ()
+    hooks_path = root / _HOOKS_FILE
+    hooks = (
+        _parse_hooks(_read_json(hooks_path)) if hooks_path.is_file() else {}
+    )
+    return hooks, _load_commands(root), _load_agents(root)
 
 
 def load_plugin(path: str | Path) -> Plugin | None:
@@ -705,13 +761,10 @@ def load_plugin(path: str | Path) -> Plugin | None:
     elif (root / _CLAUDE_MANIFEST).is_file():
         manifest = _read_json(root / _CLAUDE_MANIFEST) or {}
     skills_dir = root / "skills"
-    hooks_path = root / _HOOKS_FILE
-    hooks = (
-        _parse_hooks(_read_json(hooks_path)) if hooks_path.is_file() else {}
-    )
+    hooks, commands, agents = _cc_components(root, fmt)
     name = str(manifest.get("name") or root.name)
     version = str(manifest.get("version") or "0")
-    mcp_servers = _load_mcp_servers(root, fmt, name)
+    mcp_servers, mcp_shown, mcp_problems = _load_mcp_servers(root, fmt, name)
     return Plugin(
         name=name,
         version=version,
@@ -719,7 +772,9 @@ def load_plugin(path: str | Path) -> Plugin | None:
         skills_dir=skills_dir if skills_dir.is_dir() else None,
         hooks=hooks,
         mcp_servers=mcp_servers,
-        commands=_load_commands(root),
-        agents=_load_agents(root),
+        mcp_servers_raw=mcp_shown,
+        mcp_problems=tuple(mcp_problems),
+        commands=commands,
+        agents=agents,
         format=fmt,
     )

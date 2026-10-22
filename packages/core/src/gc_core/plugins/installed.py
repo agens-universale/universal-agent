@@ -57,7 +57,10 @@ def plugin_data_path(name: str) -> Path:
 
 
 def plugin_data_dir(name: str) -> Path:
-    """Постоянный каталог данных плагина (``${PLUGIN_DATA}``); создаётся при первом обращении."""
+    """Постоянный каталог данных плагина (``${PLUGIN_DATA}``); создаётся здесь.
+
+    ``OSError`` (например, только для чтения) обрабатывает вызывающий.
+    """
     path = plugin_data_path(name)
     path.mkdir(parents=True, exist_ok=True)
     return path
@@ -145,7 +148,13 @@ class PreparedInstall:
         self._root = root
 
     def summary(self) -> list[str]:
-        """Строки для подтверждения; значения ``env`` и ``headers`` не попадают."""
+        """Строки для подтверждения: записи как в файлах плагина.
+
+        ``${VAR}`` и ``${CLAUDE_PLUGIN_ROOT}`` / ``${PLUGIN_ROOT}`` показаны
+        буквально (раскрытые значения могут быть секретами и уйти в лог CI);
+        значения ``env`` и ``headers`` не попадают. Пропущенные серверы MCP
+        идут отдельными строками с причиной.
+        """
         plugin = self.plugin
         lines = [
             f"{event} [{m.matcher or '*'}]: {h.command}"
@@ -153,7 +162,7 @@ class PreparedInstall:
             for m in matchers
             for h in m.hooks
         ]
-        for name, srv in plugin.mcp_servers.items():
+        for name, srv in plugin.mcp_servers_raw.items():
             if srv.get("url"):
                 lines.append(f"mcp {name}: {srv['url']}")
             else:
@@ -164,6 +173,7 @@ class PreparedInstall:
                     ]
                 )
                 lines.append(f"mcp {name}: {cmd}")
+        lines.extend(plugin.mcp_problems)
         skills = 0
         if plugin.skills_dir:
             skills = sum(
@@ -182,16 +192,21 @@ class PreparedInstall:
         old = load_plugin(self._root / _safe_name(name))
         return old is None or _exec_surface(old) != _exec_surface(self.plugin)
 
-    def commit(self, force: bool = False) -> InstalledPlugin:
-        """Скопировать в хранилище и записать метаданные."""
-        plugin = self.plugin
-        name = _safe_name(plugin.name)
-        dest = self._root / name
-        meta = _read_meta(self._root)
-        if dest.exists() and not force:
+    def ensure_free(self, force: bool = False) -> None:
+        """``ValueError``, если плагин с этим именем уже установлен (без ``force``)."""
+        name = _safe_name(self.plugin.name)
+        if (self._root / name).exists() and not force:
             raise ValueError(
                 f"плагин {name} уже установлен (--force, чтобы заменить)"
             )
+
+    def commit(self, force: bool = False) -> InstalledPlugin:
+        """Скопировать в хранилище и записать метаданные."""
+        plugin = self.plugin
+        self.ensure_free(force)
+        name = _safe_name(plugin.name)
+        dest = self._root / name
+        meta = _read_meta(self._root)
         shutil.rmtree(dest, ignore_errors=True)
         shutil.copytree(
             self._plugin_dir, dest, ignore=shutil.ignore_patterns(".git")
@@ -211,7 +226,8 @@ class PreparedInstall:
 
 
 def _exec_surface(plugin: Plugin) -> set[tuple]:
-    """Всё, что плагин запускает: хуки и MCP (без env/headers)."""
+    """Всё, что плагин запускает: хуки и MCP как в файлах (без подстановок,
+    env и headers), чтобы путь копии и окружение не считались изменением."""
     hooks = {
         ("hook", event, m.matcher, h.command)
         for event, matchers in plugin.hooks.items()
@@ -227,7 +243,7 @@ def _exec_surface(plugin: Plugin) -> set[tuple]:
             tuple(srv.get("args") or ()),
             srv.get("url"),
         )
-        for name, srv in plugin.mcp_servers.items()
+        for name, srv in plugin.mcp_servers_raw.items()
     }
     return hooks | mcp
 
@@ -259,6 +275,11 @@ def prepare(
             or plugin.commands
             or plugin.agents
         ):
+            if plugin.mcp_problems:
+                raise ValueError(
+                    f"{source}: MCP не загружен: "
+                    + "; ".join(plugin.mcp_problems)
+                )
             raise ValueError(
                 f"{source}: нет ни skills/, commands/, agents/, "
                 "ни hooks/hooks.json, ни .mcp.json/mcp.json"

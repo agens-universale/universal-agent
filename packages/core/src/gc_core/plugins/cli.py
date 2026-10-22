@@ -61,7 +61,12 @@ def _confirm(prepared: installed.PreparedInstall, yes: bool) -> bool:
         return True
     if not sys.stdin.isatty():
         raise ValueError("нет TTY: подтвердите установку флагом --yes")
-    return input("Установить? [y/N] ").strip().lower() in (
+    try:
+        answer = input("Установить? [y/N] ")
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return False
+    return answer.strip().lower() in (
         "y",
         "yes",
         "д",
@@ -76,6 +81,7 @@ def main(argv: list[str] | None = None) -> int:
             with installed.prepare(
                 args.source, ref=args.ref, subdir=args.subdir
             ) as prepared:
+                prepared.ensure_free(args.force)
                 if not _confirm(prepared, args.yes):
                     print("установка отменена", file=sys.stderr)
                     return 1

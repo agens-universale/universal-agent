@@ -516,5 +516,28 @@ def plugin_mcp_servers(paths: list[str]) -> dict[str, dict[str, Any]]:
     out: dict[str, dict[str, Any]] = {}
     for plugin in load_plugins(list(paths)):
         for name, spec in plugin.mcp_servers.items():
-            out[f"{safe(plugin.name)}_{safe(name)}"] = spec
+            if _data_dir_ready(plugin, name, spec):
+                out[f"{safe(plugin.name)}_{safe(name)}"] = spec
     return out
+
+
+def _data_dir_ready(plugin: Plugin, name: str, spec: dict[str, Any]) -> bool:
+    """Создать ``${PLUGIN_DATA}`` для stdio-сервера Agent Plugins.
+
+    Создаётся здесь, при загрузке настроек, а не при чтении плагина. Каталог
+    недоступен (только для чтения и т. п.) — сервер пропускается.
+    """
+    if plugin.format != PLUGIN_FORMAT_AP or spec["transport"] != "stdio":
+        return True
+    from gc_core.plugins.installed import plugin_data_dir
+
+    try:
+        plugin_data_dir(plugin.name)
+    except OSError as exc:
+        logger.warning(
+            "plugin mcp server %r skipped: data dir unavailable (%s)",
+            name,
+            exc.strerror or type(exc).__name__,
+        )
+        return False
+    return True
