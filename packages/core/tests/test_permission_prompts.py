@@ -23,3 +23,10 @@ def test_prompt_leaves_write_permissions_to_the_runtime(name):
     assert "A block is a policy decision, not a tool failure" in text
     assert "Write only under allowed paths" not in text
     assert "Obey `projectDir`" not in text
+
+
+@pytest.mark.parametrize("name", _PROMPTS)
+def test_prompt_does_not_read_as_a_sandbox(name):
+    text = (ASSETS / "prompts" / name).read_text(encoding="utf-8")
+    assert "workspace boundaries" not in text
+    assert "runtime-enforced permissions" in text
