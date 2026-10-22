@@ -5153,10 +5153,16 @@ class TraceScreen(Screen):
         if runner is current and runner is not None and runner.is_running():
             return
         kind = getattr(runner, "_thread_kind", "run") if runner else "run"
-        self._on_run_finished(runner, kind)
-        self._was_running = False
-        self._run_pending = False
-        self._watched_runner = None
+        try:
+            self._on_run_finished(runner, kind)
+        except Exception:
+            # Сбой записи исхода не повторяем на каждом тике: ход закрыт,
+            # причина — в лог.
+            _log.exception("run_settle_failed kind=%s", kind)
+        finally:
+            self._was_running = False
+            self._run_pending = False
+            self._watched_runner = None
 
     def _reset_run_flags(self) -> None:
         """Сбросить error- и stop-флаги прошлого прогона (app-уровня)."""

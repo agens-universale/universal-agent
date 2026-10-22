@@ -268,3 +268,27 @@ async def test_elapsed_live_equals_meta_after_ask_human_answer(tmp_path):
         assert scr._thinking._render_text().plain.startswith(
             "✓ Выполнил за 5с"
         )
+
+
+@pytest.mark.asyncio
+async def test_settle_failure_is_logged_once_not_retried(tmp_path, caplog):
+    """Сбой записи исхода не повторяется на каждом тике: флаги закрытия
+    снимаются, причина — в лог."""
+    app = _app(tmp_path)
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(TID_A)
+        scr._prepare_for_new_run()
+        app.active_runner = _Runner(TID_A, running=False)
+        calls = []
+
+        def _boom(runner, kind):
+            calls.append(kind)
+            raise RuntimeError("boom")
+
+        scr._on_run_finished = _boom
+        scr._poll_active()
+        scr._poll_active()
+        assert calls == ["run"]
+        assert scr._run_pending is False
+        assert "boom" in caplog.text
