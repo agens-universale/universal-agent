@@ -539,6 +539,9 @@ class TraceScreen(Screen):
         self._answer_flow = AnswerFlow()
         # Новые реплики агента с ухода от низа — счётчик плашки «в конец».
         self._new_replies = 0
+        # Из них — посчитанные попытки turn_finish, которые ещё может убрать
+        # свёртка: убранная попытка из счётчика вычитается.
+        self._new_attempt_replies = 0
         self._pill_enter = False  # хвост подписи плашки: «или Enter»
         self._copy_seq = 0  # номер последнего /copy: старые итоги глохнут
         self._live_turn_tool_calls: int = (
@@ -2169,7 +2172,7 @@ class TraceScreen(Screen):
         self._rendered_ids.clear()
         self._segment_starts.clear()
         self._answer_flow.new_turn()
-        self._new_replies = 0
+        self._reset_new_replies()
         self._next_no = 1
         self._stick_bottom = (
             True  # новый/переключённый трейс → показываем низ (latest)
@@ -2577,8 +2580,9 @@ class TraceScreen(Screen):
         widgets = build_finish_widgets(close, event_no=ev.no)
         for w in widgets:
             self._trace_mount(w, scroll=False)
-        if close.body.strip() or close.note:
+        counted = bool(close.body.strip() or close.note) and (
             self._count_new_reply(following)
+        )
         if following:
             self._scroll_trace_end()
         if not ev.call_id:
@@ -2586,6 +2590,7 @@ class TraceScreen(Screen):
         self._submit_solution_call_ids.add(ev.call_id)
         self._drop_finish_attempts()
         self._submit_solution_widgets.append(widgets)
+        self._new_attempt_replies = int(counted)
         # Финальный ответ виден — переключаем индикатор в режим
         # «✓ завершаю…» немедленно (без 250мс лага на следующий тик
         # _poll_active). Sticky-маркер sentinel выставляется в
@@ -2601,11 +2606,16 @@ class TraceScreen(Screen):
 
         Отклонённые intent_guard'ом попытки убираем молча (как regenerate
         в чатах): внутренняя кухня качества юзеру не показывается, обе
-        попытки сохранены в jsonl треда."""
+        попытки сохранены в jsonl треда. Убранная попытка уходит и из
+        счётчика плашки: он равен видимым новым ответам."""
         for prev_widgets in self._submit_solution_widgets:
             for w in prev_widgets:
                 w.remove()
         self._submit_solution_widgets.clear()
+        if self._new_attempt_replies:
+            self._new_replies -= self._new_attempt_replies
+            self._new_attempt_replies = 0
+            self._refresh_trace_overlays()
 
     def _render_record(
         self,
@@ -2987,7 +2997,7 @@ class TraceScreen(Screen):
             return
         box = trace.content_region
         if self._stick_bottom:
-            self._new_replies = 0
+            self._reset_new_replies()
             sticky.show(None, box)
             pill.show(None, box)
             return
@@ -3020,12 +3030,18 @@ class TraceScreen(Screen):
             ]
         return self._trace_replies_cache
 
-    def _count_new_reply(self, following: bool) -> None:
-        """Реплика агента смонтирована: не у низа — она новая для плашки."""
+    def _count_new_reply(self, following: bool) -> bool:
+        """Реплика агента смонтирована: не у низа — она новая для плашки.
+        True — посчитана."""
         if following:
-            return
+            return False
         self._new_replies += 1
         self._refresh_trace_overlays()
+        return True
+
+    def _reset_new_replies(self) -> None:
+        self._new_replies = 0
+        self._new_attempt_replies = 0
 
     def _end_pill_label(self) -> str:
         """`· клик или Enter` — только когда курсор в пустом поле ввода.
@@ -3445,6 +3461,7 @@ class TraceScreen(Screen):
             # Previous submit_solutions are now considered completed answers,
             # not retry candidates for collapse.
             self._submit_solution_widgets.clear()
+            self._new_attempt_replies = 0
             # Дедуп A1 действует внутри хода: проза прошлого хода не
             # глушит такой же ответ этого.
             self._answer_flow.new_turn()

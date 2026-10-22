@@ -643,6 +643,57 @@ async def test_bridge_echo_not_mounted_not_counted(tmp_path):
         assert scr._new_replies == 1
 
 
+def _finish(scr, mid, report):
+    scr._render_record(
+        {
+            "payload": {
+                "id": mid,
+                "type": "function_call",
+                "call_id": f"call-{mid}",
+                "name": "turn_finish",
+                "arguments": json.dumps({"task_report": report}),
+            }
+        },
+        live=True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_pill_counts_only_visible_finish_attempt(tmp_path):
+    """Отклонённые попытки turn_finish лента убирает: счётчик плашки
+    равен числу видимых новых ответов — попытка, попытка, итог → 1."""
+    _write_task(tmp_path, "o25")
+    async with _app(tmp_path).run_test(size=(100, 30)) as pilot:
+        scr = await _tall(pilot, "o25")
+        _, pill = _overlays(scr)
+        _trace(scr).focus()
+        await _scroll(pilot, scr, 10)
+        _finish(scr, "f1", "первая попытка")
+        _finish(scr, "f2", "вторая попытка")
+        _finish(scr, "f3", "итог")
+        await pilot.pause()
+        assert scr._new_replies == 1
+        assert pill.label == "↓ 1 новое сообщение · клик"
+
+
+@pytest.mark.asyncio
+async def test_pill_attempt_repeated_by_prose_counts_once(tmp_path):
+    """Проза повторила отчёт попытки: попытка уходит, ответ остаётся —
+    одно новое сообщение."""
+    _write_task(tmp_path, "o26")
+    async with _app(tmp_path).run_test(size=(100, 30)) as pilot:
+        scr = await _tall(pilot, "o26")
+        _trace(scr).focus()
+        await _scroll(pilot, scr, 10)
+        _finish(scr, "f1", "отчёт")
+        scr._render_record(
+            {"payload": {"id": "p1", "role": "assistant", "content": "отчёт"}},
+            live=True,
+        )
+        await pilot.pause()
+        assert scr._new_replies == 1
+
+
 @pytest.mark.asyncio
 async def test_pill_counter_resets_at_bottom(tmp_path):
     _write_task(tmp_path, "o21")
