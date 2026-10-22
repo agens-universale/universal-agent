@@ -37,6 +37,16 @@ FRONTEND = "a2a"
 TASKS_STREAM = "a2a.tasks"
 _PUSH = "a2a_push"
 TASK_PREFIX = "task:"
+#: Ключи очереди диалога в состоянии фронтенда ``a2a`` (ведёт её
+#: ``executor``; отмену, записанную мимо исполнителя, учитывает ``save``).
+#: Задача, чей ход идёт: ``{task, instance, at}``.
+RUNNING = "running"
+#: Задача, ждущая ответа на вопрос (держит очередь диалога).
+WAITING = "waiting"
+#: Очередь диалога: ``q:<taskId>`` → ``{at, seen, instance}``.
+QUEUE = "q:"
+#: Отменённая задача: ``x:<taskId>`` → ``true`` (в очередь не встанет).
+CANCELED = "x:"
 
 
 def task_alias(task_id: str) -> str:
@@ -51,12 +61,16 @@ def _op(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex}"
 
 
+def dialog_state(record: ThreadRecord | None) -> dict[str, Any]:
+    """Состояние фронтенда ``a2a`` треда диалога (копия)."""
+    return dict((record.frontend.get(FRONTEND) or {}) if record else {})
+
+
 def task_index(record: ThreadRecord | None) -> dict[str, Any]:
     """Индекс задач диалога: ``task_id`` → ``seq`` последнего снимка."""
-    state = (record.frontend.get(FRONTEND) or {}) if record else {}
     return {
         name[len(TASK_PREFIX) :]: value
-        for name, value in state.items()
+        for name, value in dialog_state(record).items()
         if name.startswith(TASK_PREFIX) and value is not None
     }
 
@@ -80,16 +94,39 @@ class ThreadTaskStore(TaskStore):
         )
         # Индекс — отдельной записью: номер снимка известен после записи.
         # Упади процесс между ними — индекс укажет прежний снимок задачи.
-        await self._threads.update_frontend(
-            key,
-            FRONTEND,
-            {TASK_PREFIX + task.id: receipt.max_seq.get(TASKS_STREAM)},
-        )
+        patch: dict[str, Any] = {
+            TASK_PREFIX + task.id: receipt.max_seq.get(TASKS_STREAM)
+        }
+        if task.status.state == pb.TASK_STATE_CANCELED:
+            patch.update(await self._arelease(key, task.id))
+        await self._threads.update_frontend(key, FRONTEND, patch)
+
+    async def _arelease(self, key: ThreadKey, task_id: str) -> dict[str, Any]:
+        """Отменённая задача уходит из очереди диалога. SDK пишет отмену
+        и сам, мимо исполнителя (задача не на этом инстансе, рестарт):
+        ждущая ответа задача освобождает диалог, ожидающая очереди — с неё
+        снимается, а идущий где-то ход получает отмену через поток
+        ``control`` треда."""
+        state = dialog_state(await self._threads.get(key))
+        patch: dict[str, Any] = {
+            QUEUE + task_id: None,
+            CANCELED + task_id: True,
+        }
+        if state.get(WAITING) == task_id:
+            patch[WAITING] = None
+        running = state.get(RUNNING)
+        if isinstance(running, dict) and running.get("task") == task_id:
+            await self._threads.request_cancel(key, target=task_id)
+        return patch
 
     async def get(
         self, task_id: str, context: ServerCallContext
     ) -> pb.Task | None:
         del context
+        return await self.latest(task_id)
+
+    async def latest(self, task_id: str) -> pb.Task | None:
+        """Последний снимок задачи."""
         key = await self._threads.resolve(task_alias(task_id))
         if key is None:
             return None

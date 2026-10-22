@@ -47,7 +47,9 @@ class FakeAgent:
         self.pending_question = None
         self._step = 0
 
-    async def stream(self, prompt, thread_id=None, system=None, answer=None):
+    async def stream(
+        self, prompt, thread_id=None, system=None, answer=None, **_kw
+    ):
         self.calls.append((prompt, thread_id, system))
         if answer is not None:
             self.answers.append(answer)
@@ -552,3 +554,136 @@ async def test_turn_root_is_the_resolved_path(tmp_path, stores):
     assert agent.settings.runtime.launch_root == os.path.realpath(
         root / "proj"
     )
+
+
+async def test_cancel_on_another_instance_frees_a_waiting_dialog(
+    tmp_path, stores
+):
+    """Отмена задачи, ждущей ответа, через другой инстанс (SDK пишет
+    ``CANCELED`` сам, мимо исполнителя): диалог свободен, очередь идёт."""
+    asker = FakeAgent(("ask", "какой цвет?"))
+    first = _surface(tmp_path, stores, [asker])
+    second = _surface(tmp_path, stores, [])
+    asked = await _send(_client(first), _message("покрась"))
+    queued = await _send(
+        _client(first),
+        _message("и ещё", context_id=asked.context_id),
+        return_immediately=True,
+    )
+    canceled = await _client(second).cancel_task(
+        pb.CancelTaskRequest(id=asked.id)
+    )
+    assert canceled.status.state == pb.TASK_STATE_CANCELED
+    await _until(_client(first), queued.id, pb.TASK_STATE_COMPLETED)
+
+
+async def test_cancel_after_restart_frees_a_waiting_dialog(tmp_path, stores):
+    """Вопрос пережил рестарт, задачу отменили на новом процессе: новая
+    задача диалога идёт, а не висит в очереди вечно."""
+    first = _surface(tmp_path, stores, [FakeAgent(("ask", "какой цвет?"))])
+    asked = await _send(_client(first), _message("покрась"))
+    await first.astop()
+    restarted = _surface(tmp_path, stores, [FakeAgent()])
+    client = _client(restarted)
+    canceled = await client.cancel_task(pb.CancelTaskRequest(id=asked.id))
+    assert canceled.status.state == pb.TASK_STATE_CANCELED
+    later = await _send(
+        client,
+        _message("новое", context_id=asked.context_id),
+        return_immediately=True,
+    )
+    await _until(client, later.id, pb.TASK_STATE_COMPLETED)
+
+
+async def test_cancel_on_another_instance_drops_a_queued_task(
+    tmp_path, stores
+):
+    hold = asyncio.Event()
+    agent = FakeAgent(("hold", hold))
+    first = _surface(tmp_path, stores, [agent])
+    second = _surface(tmp_path, stores, [])
+    running = await _send(
+        _client(first), _message("долго"), return_immediately=True
+    )
+    queued = await _send(
+        _client(first),
+        _message("ещё", context_id=running.context_id),
+        return_immediately=True,
+    )
+    canceled = await _client(second).cancel_task(
+        pb.CancelTaskRequest(id=queued.id)
+    )
+    assert canceled.status.state == pb.TASK_STATE_CANCELED
+    hold.set()
+    await _until(_client(first), running.id, pb.TASK_STATE_COMPLETED)
+    await asyncio.sleep(0.2)
+    assert [call[0] for call in agent.calls] == ["долго"]
+    after = await _client(first).get_task(pb.GetTaskRequest(id=queued.id))
+    assert after.status.state == pb.TASK_STATE_CANCELED
+
+
+async def test_canceling_a_running_task_frees_the_dialog_at_once(
+    tmp_path, stores
+):
+    """Отменённый ход не держит очередь до восстановления."""
+    agent = FakeAgent(("hold", asyncio.Event()))
+    surface = _surface(tmp_path, stores, [agent])
+    client = _client(surface)
+    running = await _send(client, _message("долго"), return_immediately=True)
+    await _until(client, running.id, pb.TASK_STATE_WORKING)
+    queued = await _send(
+        client,
+        _message("ещё", context_id=running.context_id),
+        return_immediately=True,
+    )
+    await client.cancel_task(pb.CancelTaskRequest(id=running.id))
+    await _until(client, queued.id, pb.TASK_STATE_COMPLETED)
+
+
+async def test_server_stop_leaves_the_task_to_recovery(
+    tmp_path, stores, monkeypatch
+):
+    """Остановка сервера — прерывание, не отмена: отметка хода остаётся, и
+    восстановление другого инстанса прерывает задачу (FAILED)."""
+    from datetime import timedelta
+
+    monkeypatch.setattr(a2a_executor, "STALE_AFTER", timedelta(0))
+    dying = _surface(tmp_path, stores, [FakeAgent(("hold", asyncio.Event()))])
+    task = await _send(
+        _client(dying), _message("долго"), return_immediately=True
+    )
+    await _until(_client(dying), task.id, pb.TASK_STATE_WORKING)
+    await dying.astop()
+    # Фон остановленного инстанса (``_report``) успевает доработать.
+    await asyncio.sleep(0.2)
+    survivor = _surface(tmp_path, stores, [])
+    assert await survivor.executor.arecover_once() == 1
+    failed = await _client(survivor).get_task(pb.GetTaskRequest(id=task.id))
+    assert failed.status.state == pb.TASK_STATE_FAILED
+
+
+async def test_queue_keeps_the_order_the_peer_saw(
+    tmp_path, stores, monkeypatch
+):
+    """Задача, о приёме которой пир уже узнал (``SUBMITTED``), в очереди
+    диалога раньше следующей: место в очереди — до ответа пиру."""
+    agent = FakeAgent()
+    surface = _surface(tmp_path, stores, [agent])
+    real = surface.executor._cwd_for
+    slow = [True]
+
+    async def cwd_for(context):
+        if slow and slow.pop():
+            await asyncio.sleep(0.2)
+        return await real(context)
+
+    monkeypatch.setattr(surface.executor, "_cwd_for", cwd_for)
+    client = _client(surface)
+    first = await _send(client, _message("первое"), return_immediately=True)
+    second = await _send(
+        client,
+        _message("второе", context_id=first.context_id),
+        return_immediately=True,
+    )
+    await _until(client, second.id, pb.TASK_STATE_COMPLETED)
+    assert [call[0] for call in agent.calls] == ["первое", "второе"]
