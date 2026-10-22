@@ -112,9 +112,11 @@ async def _acontinue(
     status = task_status.status_of(record) or {}
     attempts = status.get("recovery_attempts")
     attempts = attempts if type(attempts) is int else 0
+    # Ход сняла остановка сервера, а не сбой: попыткой это не считается.
+    stopped = status.get("stopped_by") == "shutdown"
 
     async def prepare() -> bool:
-        if attempts >= MAX_RECOVERY_ATTEMPTS:
+        if attempts >= MAX_RECOVERY_ATTEMPTS and not stopped:
             await _agive_up(surface, threads, record)
             return False
         if record.runtime.turn == "running":
@@ -122,7 +124,10 @@ async def _acontinue(
             if status.get("status") == "running":
                 surface.notify(key, {**status, "status": "interrupted"})
         await task_status.aset_status(
-            threads, key, recovery_attempts=attempts + 1
+            threads,
+            key,
+            recovery_attempts=attempts if stopped else attempts + 1,
+            stopped_by=None,
         )
         return True
 

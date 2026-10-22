@@ -435,3 +435,181 @@ async def test_cancel_of_a_crashed_task_finishes_it(monkeypatch, tmp_path):
     assert seen == []
     assert status["status"] == "cancelled"
     assert record.runtime.turn is None
+
+
+async def _cancel_during_build_elsewhere(monkeypatch, tmp_path, *, done):
+    """Инстанс A строит ход задачи (сборка контекста держится), отмена
+    приходит на инстанс B. ``done`` — у задачи уже есть завершённый прогон."""
+    from gc_server.webhook import surface as surface_module
+
+    seen = _install(monkeypatch)
+    stores = await aopen_process_stores(_settings(tmp_path))
+    a = await _surface(tmp_path, stores)
+    b = await _surface(tmp_path, stores)
+    try:
+        if done:
+            await a.asubmit(KEY, {"text": "первое"}, op_id=None, trace_id=None)
+            await _settled(a)
+            assert (await a.astatus(KEY))["status"] == "completed"
+            seen.clear()
+        entered, gate = asyncio.Event(), asyncio.Event()
+        real = surface_module.acreate_run_context
+
+        async def slow_build(*args, **kwargs):
+            entered.set()
+            await gate.wait()
+            return await real(*args, **kwargs)
+
+        monkeypatch.setattr(surface_module, "acreate_run_context", slow_build)
+        submit = asyncio.create_task(
+            a.asubmit(KEY, {"text": "второе"}, op_id=None, trace_id=None)
+        )
+        await asyncio.wait_for(entered.wait(), 5)
+        reply = await b.acancel(KEY)
+        gate.set()
+        await submit
+        await _settled(a, b)
+        status = await b.astatus(KEY)
+    finally:
+        await stores.aclose()
+    return reply, status, seen
+
+
+async def test_cancel_on_another_instance_during_build_of_a_new_task(
+    monkeypatch, tmp_path
+):
+    """Ревью, раунд 2 (R4): статуса нового прогона в хранилище ещё нет — но
+    сообщение ждёт во входящем потоке: отмена записывается, ход её видит."""
+    reply, status, seen = await _cancel_during_build_elsewhere(
+        monkeypatch, tmp_path, done=False
+    )
+    assert reply == {"status": "cancelling"}
+    assert status["status"] == "cancelled"
+    assert seen == [], "отменённый ход дошёл до модели"
+
+
+async def test_cancel_on_another_instance_during_build_after_a_finished_run(
+    monkeypatch, tmp_path
+):
+    """Статус в хранилище — прошлого прогона (completed), новое сообщение ещё
+    не доставлено: отмена касается его хода, а не отвечает старым итогом."""
+    reply, status, seen = await _cancel_during_build_elsewhere(
+        monkeypatch, tmp_path, done=True
+    )
+    assert reply == {"status": "cancelling"}
+    assert status["status"] == "cancelled"
+    assert seen == []
+
+
+async def test_server_stops_do_not_exhaust_recovery(monkeypatch, tmp_path):
+    """Ревью, раунд 2 (R5): четыре штатные остановки посреди одной долгой
+    задачи (деплои) — не сбои хода: восстановление каждый раз продолжает
+    её, а не сдаётся с ``recovery_exhausted``."""
+    from gc_core.utils import connect_backend
+
+    entered = asyncio.Event()
+    hanging = [True]
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if hanging[0]:
+            entered.set()
+            await asyncio.Event().wait()
+        return httpx.Response(200, json=scripted_model.FINISH)
+
+    monkeypatch.setattr(
+        connect_backend,
+        "get_async_client",
+        lambda **_kw: httpx.AsyncClient(
+            transport=httpx.MockTransport(handler)
+        ),
+    )
+    stores = await aopen_process_stores(_settings(tmp_path))
+    try:
+        surface = await _surface(tmp_path, stores)
+        await surface.asubmit(
+            KEY,
+            {"id": "u1", "role": "user", "content": "долгая"},
+            op_id=None,
+            trace_id=None,
+        )
+        for _ in range(4):
+            await asyncio.wait_for(entered.wait(), 10)
+            entered.clear()
+            await surface.astop()
+            surface = await _surface(tmp_path, stores)
+            assert await arecover_once(surface, now=utc_now()) == [KEY]
+        await asyncio.wait_for(entered.wait(), 10)
+        hanging[0] = False
+        await surface.astop()
+        surface = await _surface(tmp_path, stores)
+        await arecover_once(surface, now=utc_now())
+        await _settled(surface)
+        status = await surface.astatus(KEY)
+    finally:
+        await stores.aclose()
+    assert status["status"] == "completed", status
+
+
+async def test_cancel_while_the_run_writes_its_result(monkeypatch, tmp_path):
+    """Ревью, раунд 2 (R13): прогон снят из реестра, но итог ещё пишется —
+    отмена в этом окне не закрывает задачу «брошенной»: итог один, колбэк
+    один."""
+    _install(monkeypatch)
+    stores = await aopen_process_stores(_settings(tmp_path))
+    surface = await _surface(tmp_path, stores)
+    events: list = []
+    surface.notify = lambda key, status: events.append(status["status"])
+    entered, gate = asyncio.Event(), asyncio.Event()
+    real = surface._amark_finished
+
+    async def slow_finish(run):
+        entered.set()
+        await gate.wait()
+        await real(run)
+
+    surface._amark_finished = slow_finish
+    try:
+        await surface.asubmit(KEY, {"text": "x"}, op_id=None, trace_id=None)
+        await asyncio.wait_for(entered.wait(), 10)
+        reply = await surface.acancel(KEY)
+        gate.set()
+        await _settled(surface)
+        status = await surface.astatus(KEY)
+    finally:
+        await stores.aclose()
+    assert reply == {"status": "cancelling"}
+    assert status["status"] == "completed"
+    assert events == ["completed"]
+
+
+async def test_cancelled_run_records_its_inbox_boundary(monkeypatch, tmp_path):
+    """Ревью, раунд 2 (R14): отменённый прогон, как и упавший, помнит
+    границу входящих — восстановление не собирает ход ради сообщения,
+    которое отмена уже сняла (и второго колбэка ``cancelled`` нет)."""
+    from gc_server.webhook.registry import ActiveRun
+
+    seen = _install(monkeypatch)
+    stores = await aopen_process_stores(_settings(tmp_path))
+    surface = await _surface(tmp_path, stores)
+    try:
+        threads = Threads(stores.threads)
+        await threads.submit(KEY, {"id": "u1", "role": "user", "content": "x"})
+        await task_status.aset_status(
+            threads, KEY, status="running", run_id="r1"
+        )
+        run = ActiveRun(
+            key="k",
+            system=KEY.system,
+            task_id=KEY.thread,
+            executor=None,
+            started_at=0.0,
+            notes={"run_id": "r1"},
+        )
+        run.ending = "cancelled"
+        await surface._amark_finished(run)
+        status = task_status.status_of(await stores.threads.get_thread(KEY))
+        taken = await arecover_once(surface, now=utc_now())
+    finally:
+        await stores.aclose()
+    assert status["status"] == "cancelled" and status["inbox_upto"] == 1
+    assert taken == [] and seen == []
