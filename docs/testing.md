@@ -75,7 +75,9 @@ cd packages/core && uv run --project ../.. pytest -q
   прогона, ставятся забытые хуки pre-commit (`gc_testkit.git_hooks`): если в
   клоне их нет, выполняется `python -m pre_commit install` текущим
   интерпретатором — одна строка в выводе. Пропуск: задан `CI`,
-  `GC_SKIP_HOOKS_INSTALL=1`, корень набора — не корень git-клона, нет
+  `GC_SKIP_HOOKS_INSTALL=1`, корень набора — не корень git-клона, это
+  связанный `git worktree` (каталог хуков общий, а хук запомнил бы `.venv`
+  этого worktree), задан `core.hooksPath` (pre-commit туда не ставится), нет
   `pre_commit`, хуки уже стоят. Прогон ставит `GC_SKIP_HOOKS_INSTALL=1` и
   себе в окружение — вложенные pytest во временных репозиториях тестов хуков
   не получают. Закреплено `tests/test_testkit_hooks_install.py`.

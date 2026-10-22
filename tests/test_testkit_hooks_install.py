@@ -196,18 +196,75 @@ def test_without_pre_commit_module_nothing_happens(tmp_path):
 
 def test_install_failure_is_one_warning_not_a_failure(tmp_path):
     root = _working_copy(tmp_path)
-    # pre-commit отказывается ставиться при заданном core.hooksPath.
-    _git(root, "config", "core.hooksPath", "custom-hooks")
+    # Каталог хуков занят файлом: pre-commit поставить хук не сможет.
+    _write(_hooks_dir(root), "не каталог\n")
 
     res = _run(root)
 
     assert res.returncode == 0, _output(res)
-    assert _installed(root) == []
     warnings = [
         line for line in res.stderr.splitlines() if "pre-commit" in line
     ]
     assert len(warnings) == 1, res.stderr
     assert warnings[0].startswith("[warn] gc_testkit:")
+    # Предупреждение повторится на каждом прогоне — пусть сразу говорит,
+    # как его выключить.
+    assert "GC_SKIP_HOOKS_INSTALL=1" in warnings[0]
+
+
+@pytest.mark.parametrize("scope", ["repo", "global"])
+def test_core_hooks_path_is_skipped_silently(tmp_path, scope):
+    """При core.hooksPath pre-commit ставиться отказывается — и не пробуем.
+
+    Иначе каждый прогон печатал бы одно и то же предупреждение вечно.
+    """
+    root = _working_copy(tmp_path)
+    env = {}
+    if scope == "repo":
+        _git(root, "config", "core.hooksPath", "custom-hooks")
+    else:
+        gitconfig = tmp_path / "gitconfig"
+        _write(gitconfig, "[core]\n\thooksPath = custom-hooks\n")
+        env["GIT_CONFIG_GLOBAL"] = str(gitconfig)
+
+    res = _run(root, env=env)
+
+    assert res.returncode == 0, _output(res)
+    assert not (root / "custom-hooks").exists()
+    assert not (root / ".git" / "hooks").exists()
+    assert "pre-commit" not in res.stderr
+
+
+def test_linked_worktree_does_not_install(tmp_path):
+    """Из связанного worktree не ставим: каталог хуков общий для всех.
+
+    Хук запомнил бы интерпретатор ``.venv`` этого worktree — удалили
+    worktree, и хуки сломаны у всех клонов, а «уже стоят» их не починит.
+    """
+    root = _working_copy(tmp_path)
+    _git(root, "add", "-A")
+    _git(
+        root,
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@t",
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-q",
+        "-m",
+        "init",
+    )
+    linked = tmp_path / "linked"
+    _git(root, "worktree", "add", "-q", str(linked))
+
+    res = _run(linked)
+
+    assert res.returncode == 0, _output(res)
+    assert _installed(linked) == []
+    assert _installed(root) == []
+    assert "pre-commit" not in res.stderr
 
 
 def test_foreign_suite_is_never_touched(tmp_path):

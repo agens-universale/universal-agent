@@ -7,6 +7,10 @@
 
 Ничего не делаем, если задан ``CI``, задан ``GC_SKIP_HOOKS_INSTALL=1``, это
 не git-клон, нет конфига, не импортируется ``pre_commit`` или хуки уже стоят.
+Молча пропускаем и клон с ``core.hooksPath`` (pre-commit туда ставиться
+отказывается — предупреждение повторялось бы на каждом прогоне), и связанный
+worktree: каталог хуков общий, а хук запомнил бы интерпретатор ``.venv``
+этого worktree — удалят worktree, и хуки сломаются у всех клонов.
 Ставит сам ``pre_commit`` текущим интерпретатором — типы хуков он берёт из
 ``default_install_hook_types`` конфига. Отказ установки прогон не роняет.
 """
@@ -29,15 +33,11 @@ _CONFIG = ".pre-commit-config.yaml"
 _TIMEOUT_S = 30
 
 
-def _hooks_dir(root: Path) -> Path | None:
-    """Каталог хуков клона (работает и в worktree), иначе None.
-
-    None — и когда ``root`` не корень клона: копия нашего дерева внутри
-    чужого репозитория не повод ставить хуки этому репозиторию.
-    """
+def _git_lines(root: Path, *args: str) -> list[str] | None:
+    """Строки вывода ``git <args>`` в ``root``; None при любой неудаче."""
     try:
         res = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel", "--git-path", "hooks"],
+            ["git", *args],
             cwd=root,
             capture_output=True,
             text=True,
@@ -45,12 +45,36 @@ def _hooks_dir(root: Path) -> Path | None:
         )
     except (OSError, subprocess.SubprocessError):
         return None
-    lines = res.stdout.splitlines()
-    if res.returncode != 0 or len(lines) != 2:
+    return res.stdout.splitlines() if res.returncode == 0 else None
+
+
+def _hooks_dir(root: Path) -> Path | None:
+    """Каталог хуков основного клона, иначе None.
+
+    None — когда ``root`` не корень клона (копия нашего дерева внутри
+    чужого репозитория не повод ставить хуки этому репозиторию), когда
+    это связанный worktree (``--git-dir`` не равен ``--git-common-dir``)
+    и когда задан ``core.hooksPath`` — где угодно, хоть глобально.
+    """
+    lines = _git_lines(
+        root,
+        "rev-parse",
+        "--show-toplevel",
+        "--git-path",
+        "hooks",
+        "--git-dir",
+        "--git-common-dir",
+    )
+    if lines is None or len(lines) != 4:
         return None
-    if Path(lines[0]).resolve() != root.resolve():
+    top, hooks, git_dir, common_dir = lines
+    if Path(top).resolve() != root.resolve():
         return None
-    return root / lines[1]
+    if (root / git_dir).resolve() != (root / common_dir).resolve():
+        return None
+    if _git_lines(root, "config", "--get", "core.hooksPath"):
+        return None
+    return root / hooks
 
 
 def _hook_types(config: Path) -> list[str]:
@@ -113,6 +137,7 @@ def ensure_hooks_installed(root: Path) -> None:
             return
         reason = (res.stderr or res.stdout).strip().replace("\n", " ")
     print(
-        f"[warn] gc_testkit: хуки pre-commit не поставлены: {reason}",
+        f"[warn] gc_testkit: хуки pre-commit не поставлены: {reason} "
+        f"(отказ: {SKIP_ENV}=1).",
         file=sys.stderr,
     )
