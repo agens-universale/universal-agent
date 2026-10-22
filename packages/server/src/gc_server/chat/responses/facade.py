@@ -112,7 +112,7 @@ class ResponsesFacade:
                 # Ход ведёт другой инстанс: отмена — в поток ``control``
                 # треда диалога, тот ход увидит её опросом.
                 await self._index.threads.request_cancel(
-                    thread_key(record.thread_id)
+                    thread_key(record.thread_id), target=response_id
                 )
             return record.response if record is not None else {}
         await live.request_stop()

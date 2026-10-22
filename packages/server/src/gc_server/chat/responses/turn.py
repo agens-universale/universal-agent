@@ -113,7 +113,11 @@ class TurnRun(TurnLifecycle):
         if self.cancel_requested:
             return
         async for kind, text in self.agent.stream(
-            self._prompt, thread_id=self.thread_id, system=SYSTEM
+            self._prompt,
+            thread_id=self.thread_id,
+            system=SYSTEM,
+            # Отмена этого ответа с другого инстанса называет его.
+            cancel_target=self.response_id,
         ):
             async with self._emit_lock:
                 _put(self._queue, self._mapper.feed(kind, text))

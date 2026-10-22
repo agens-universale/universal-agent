@@ -313,6 +313,15 @@ async def _arefuse_reset_of_a_busy_thread(store: Any, key: Any) -> None:
         )
 
 
+def _aimed_at(control: list, target: str | None) -> bool:
+    """Среди записей ``control`` есть отмена, нацеленная на ``target``."""
+    return target is not None and any(
+        entry.data.get("type") == "cancel"
+        and entry.data.get("target") == target
+        for entry in control
+    )
+
+
 def _cancel_boundary(control: list, *, first: int) -> int | None:
     """Граница отмены, касающейся хода, который доставляет входящие с номера
     ``first``: наибольший ``upto_inbox_seq`` отмен не раньше ``first``.
@@ -471,6 +480,8 @@ class _RunRequest:
     account_run: bool
     #: Ответ на вопрос, на котором тред приостановлен (``ask_human_suspends``).
     answer: str | None = None
+    #: Цель хода для отмены с другого процесса (``request_cancel(target=)``).
+    cancel_target: str | None = None
 
 
 def _pending_question(thread_session: Any) -> dict | None:
@@ -522,6 +533,8 @@ class AgentExecutor:
         #: Последний ``seq`` управляющего потока на старте хода: отмены до
         #: него к этому ходу не относятся.
         self._control_seen = 0
+        #: Цель хода для отмены с другого процесса (``request_cancel(target=)``).
+        self._cancel_target: Optional[str] = None
         self._state: State | None = None
         # Сессия последнего arun. Её мету пишет aclose_run_accounting, один раз.
         self._thread_session: Any = None
@@ -1353,6 +1366,7 @@ class AgentExecutor:
         attachments: list[list[Attachment] | None] | None = None,
         account_run: bool = True,
         answer: str | None = None,
+        cancel_target: str | None = None,
     ) -> Any:
         """Прогон агента, не блокирующий вызывающий loop.
 
@@ -1376,6 +1390,10 @@ class AgentExecutor:
         дальше. Тред ждёт ответа, а ход начат без него — вопрос закрывается
         «без ответа». Ответ, когда вопроса нет, — ``ValueError``.
 
+        ``cancel_target`` — цель хода для отмены с другого процесса (ответ
+        chat, задача A2A): отмена с этой целью (``Threads.request_cancel``)
+        останавливает ход, когда бы ни легла — и пока он собирается.
+
         ``account_run=False`` — не закрывать учёт внутри. Вызывающий ещё
         добавит шаги после цикла и сам вызовет ``aclose_run_accounting``.
         Отмена закрытия MCP после уже завершённого цикла учёт всё равно
@@ -1395,6 +1413,7 @@ class AgentExecutor:
             attachments=attachments,
             account_run=account_run,
             answer=answer,
+            cancel_target=cancel_target,
         )
         # Рукопожатие: тред отпущен, а во входящий поток успело лечь
         # сообщение после последнего забора — ещё ход тем же исполнителем.
@@ -1427,8 +1446,10 @@ class AgentExecutor:
         attachments: list[list[Attachment] | None] | None = None,
         account_run: bool = True,
         answer: str | None = None,
+        cancel_target: str | None = None,
     ) -> Any:
         """Один ход ``arun``: тред, подготовка, цикл, учёт."""
+        self._cancel_target = cancel_target
         with self._lock:
             # State прошлого хода снимаем ПЕРВЫМ делом. Пока он жил до конца
             # объекта, `stop_run` в сетапе этого хода (чтение треда, сборка
@@ -1473,6 +1494,7 @@ class AgentExecutor:
             attachments=attachments,
             account_run=account_run,
             answer=answer,
+            cancel_target=cancel_target,
         )
         try:
             return await self._arun_on_thread(opened, request)
@@ -1781,16 +1803,25 @@ class AgentExecutor:
         entries = await read(after=delivered)
         control = await thread_session.aread_control(after=0)
         self._control_seen = control[-1].seq if control else 0
-        cut = _cancel_boundary(control, first=delivered + 1)
-        if cut is not None:
-            # Отмена пришла, пока ход собирался: сообщения до её границы
-            # сняты (в историю не идут), ход останавливается до первого
-            # запроса к модели; отметку доставки унесёт запись остановки.
-            state.inbox_seq = cut
-            self._inbox_seen = cut
+        if _aimed_at(control, self._cancel_target):
+            # Отменили именно этот ход (ответ chat, задача A2A), пока он
+            # собирался: до запроса к модели он не доходит.
             state.stop_requested = True
             self.stop_run()
             return []
+        cut = _cancel_boundary(control, first=delivered + 1)
+        if cut is not None:
+            # Отмена пришла, пока ход собирался: сообщения до её границы
+            # сняты (в историю не идут); пришедшие после неё — новая работа
+            # этого хода. Без них ход останавливается до первого запроса к
+            # модели; отметку доставки унесёт запись остановки.
+            state.inbox_seq = cut
+            self._inbox_seen = cut
+            entries = [entry for entry in entries if entry.seq > cut]
+            if not entries:
+                state.stop_requested = True
+                self.stop_run()
+                return []
         if entries:
             state.inbox_seq = entries[-1].seq
         self._inbox_seen = int(state.inbox_seq or 0)
@@ -1826,7 +1857,11 @@ class AgentExecutor:
         if not entries:
             return
         self._control_seen = entries[-1].seq
-        if any(entry.data.get("type") == "cancel" for entry in entries):
+        if any(
+            entry.data.get("type") == "cancel"
+            and entry.data.get("target") in (None, self._cancel_target)
+            for entry in entries
+        ):
             self.stop_run()
 
     def _enqueue_inbox(self, entries: list) -> None:
