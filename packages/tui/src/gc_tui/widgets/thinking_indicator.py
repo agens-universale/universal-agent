@@ -34,6 +34,7 @@ from textual import events
 from textual.timer import Timer
 from textual.widgets import Static
 
+from gc_tui import textual_compat
 from gc_tui.messages import OpenEditsScreenRequest
 
 # `_HOVER` — ровно тот `$accent`, которым база красит наведение на служебные
@@ -353,7 +354,7 @@ class ThinkingIndicator(Static):
     def _tick(self) -> None:
         # F4: freeze UI на время app-select — не дёргаем анимацию (Screen._selecting).
         try:
-            if getattr(self.screen, "_selecting", False):
+            if textual_compat.is_selecting(self.screen):
                 return
         except Exception:
             pass

@@ -37,6 +37,7 @@ from textual.message import Message
 from textual.widget import Widget
 from textual.widgets import Static
 
+from gc_tui import textual_compat
 from gc_tui.models import ResultOutcome
 from gc_tui.palette import DIM as _DIM
 from gc_tui.palette import ERR as _ERR
@@ -258,7 +259,7 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         """Кадр мигания ●. Waiting / done / interrupted — не тикаем."""
         # F4: freeze UI на время app-select — не тикаем анимацию (Screen._selecting).
         try:
-            if getattr(self.screen, "_selecting", False):
+            if textual_compat.is_selecting(self.screen):
                 return
         except Exception:
             pass

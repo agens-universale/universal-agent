@@ -157,3 +157,22 @@ def auto_scroll_below(
         return False
     screen._start_auto_scroll(container, +1, speed)
     return True
+
+
+def check_auto_scroll(
+    screen: Screen,
+    container: Widget | None,
+    select_widget: Widget,
+    mouse_coordinate: tuple[float, float],
+    delta_y: float,
+) -> None:
+    """Хук `Screen._check_auto_scroll`: автопрокрутка выделения Textual,
+    конец выделения — в `container` (`keep_select_end_in`), протяжка ниже
+    него (`auto_scroll_below`). Чисто горизонтальное движение протяжку
+    не запускает — правило Textual."""
+    Screen._check_auto_scroll(screen, select_widget, mouse_coordinate, delta_y)
+    if container is None:
+        return
+    keep_select_end_in(screen, container, mouse_coordinate)
+    if abs(delta_y) >= 1:
+        auto_scroll_below(screen, container, mouse_coordinate[1])

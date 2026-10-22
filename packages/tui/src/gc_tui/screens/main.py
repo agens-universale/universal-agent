@@ -5115,14 +5115,14 @@ class TraceScreen(Screen):
     ) -> None:
         """Автопрокрутка выделения Textual плюс протяжка ниже ленты (спека
         P3 §2.7): над накладками, полем ввода и футером лента едет вниз,
-        конец выделения остаётся в ленте."""
-        super()._check_auto_scroll(select_widget, mouse_coordinate, delta_y)
-        try:
-            trace = self.query_one(_SEL_TRACE, VerticalScroll)
-        except NoMatches:
-            return
-        textual_compat.keep_select_end_in(self, trace, mouse_coordinate)
-        textual_compat.auto_scroll_below(self, trace, mouse_coordinate[1])
+        конец выделения остаётся в ленте (`textual_compat`)."""
+        textual_compat.check_auto_scroll(
+            self,
+            self.query_one_optional(_SEL_TRACE),
+            select_widget,
+            mouse_coordinate,
+            delta_y,
+        )
 
     def on_mouse_move(self, _event: events.MouseMove) -> None:
         """F5: движение мыши при выделении — активность, сторож ждёт."""

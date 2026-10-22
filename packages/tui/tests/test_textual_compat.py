@@ -27,6 +27,27 @@ from gc_tui.textual_compat import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _pilot_mouse_deltas(monkeypatch):
+    """Пилот шлёт движения мыши без сдвига, терминал — со сдвигом от
+    прошлой точки: без него не отличить вертикальное движение от
+    горизонтального (`check_auto_scroll`)."""
+    from textual import pilot
+
+    original = pilot._get_mouse_message_arguments
+    last: list = []
+
+    def with_deltas(*args, **kwargs):
+        out = original(*args, **kwargs)
+        if last:
+            out["delta_x"] = out["x"] - last[0][0]
+            out["delta_y"] = out["y"] - last[0][1]
+        last[:] = [(out["x"], out["y"])]
+        return out
+
+    monkeypatch.setattr(pilot, "_get_mouse_message_arguments", with_deltas)
+
+
 def test_textual_version_guard():
     assert textual.__version__ == PATCHED_TEXTUAL, (
         "Textual обновлён — пересмотреть textual_compat (патч знака "
@@ -133,15 +154,36 @@ class _BelowScreenApp(_Lines):
 
     def on_mount(self) -> None:
         screen = self.screen
-        parent_check = screen._check_auto_scroll
 
         def check(select_widget, mouse_coordinate, delta_y):
-            parent_check(select_widget, mouse_coordinate, delta_y)
-            trace = self.query_one("#t")
-            keep_select_end_in(screen, trace, mouse_coordinate)
-            auto_scroll_below(screen, trace, mouse_coordinate[1])
+            textual_compat.check_auto_scroll(
+                screen,
+                self.query_one("#t"),
+                select_widget,
+                mouse_coordinate,
+                delta_y,
+            )
 
         screen._check_auto_scroll = check
+
+
+@pytest.mark.asyncio
+async def test_horizontal_move_below_does_not_start_scroll():
+    """Чисто горизонтальное движение не запускает протяжку (как у
+    Textual); вертикальное — запускает."""
+    app = _BelowScreenApp()
+    async with app.run_test(size=(40, 30)) as pilot:
+        screen = app.screen
+        trace = app.query_one("#t")
+        footer = app.query_one("#f")
+        await pilot.mouse_down("#t", offset=(0, 2))
+        await pilot.hover("#t", offset=(5, 10))
+        await pilot.pause()
+        below = (5, footer.region.y + 1)
+        textual_compat.check_auto_scroll(screen, trace, footer, below, 0)
+        assert textual_compat.auto_scroll_running(screen) is False
+        textual_compat.check_auto_scroll(screen, trace, footer, below, 1)
+        assert textual_compat.auto_scroll_running(screen) is True
 
 
 @pytest.mark.asyncio
