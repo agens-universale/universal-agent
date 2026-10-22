@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from gc_core.plugins import installed as _store
 from gc_core.plugins.installed import list_installed
+from gc_core.plugins.manifest import load_plugin
 from gc_core.plugins.runtime import configured_paths, load_plugins
 from rich.text import Text
 from textual import events
@@ -22,6 +25,7 @@ _FOOTER = "[Enter] раскрыть  [↑↓] плагины  [Esc] back"
 _HINT = "Управление: gc-plugin install | enable | disable | uninstall"
 _EMPTY = "Плагинов нет. Установка: gc-plugin install <owner/repo>"
 _AGENTS_NOTE = "агенты плагина выключены: agent.use_local_subagents"
+_LOAD_FAILED = "не загружен (см. лог)"
 
 
 def _skill_ids(plugin) -> list[str]:
@@ -51,12 +55,53 @@ def _version(version: str) -> str:
     return "—" if version in ("", "0") else version
 
 
+def _bare_card(name, version, source, *, enabled, error="") -> dict:
+    """Карточка без состава: выключенный или не загрузившийся плагин."""
+    return {
+        "name": name,
+        "version": _version(version),
+        "format": "",
+        "source": source,
+        "enabled": enabled,
+        "skills": [],
+        "commands": [],
+        "agents": [],
+        "hooks": [],
+        "mcp_servers": [],
+        "agents_off": False,
+        "error": error,
+    }
+
+
+def _failed_cards(paths, plugins, installed) -> list[dict]:
+    """Включённые каталоги, которые ``load_plugin`` не прочитал."""
+    loaded = {p.root for p in plugins}
+    cards: list[dict] = []
+    for path in paths:
+        root = Path(path).expanduser().resolve()
+        if root in loaded or load_plugin(root) is not None:
+            continue
+        item = installed.get(root.name) if _is_installed_path(root) else None
+        cards.append(
+            _bare_card(
+                root.name,
+                item.version if item else "",
+                _source(item) if item else "config",
+                enabled=True,
+                error=_LOAD_FAILED,
+            )
+        )
+    return cards
+
+
 def plugin_cards(settings) -> list[dict]:
-    """Данные карточек: загруженные плагины плюс выключенные установленные."""
+    """Данные карточек: загруженные, не загрузившиеся и выключенные плагины."""
     installed = {p.name: p for p in list_installed()}
     subagents = bool(settings.settings.agent.use_local_subagents)
+    paths = configured_paths(settings.settings.plugins)
+    plugins = load_plugins(paths)
     cards: list[dict] = []
-    for plugin in load_plugins(configured_paths(settings.settings.plugins)):
+    for plugin in plugins:
         item = installed.get(plugin.name)
         from_store = item is not None and _is_installed_path(plugin.root)
         cards.append(
@@ -76,25 +121,17 @@ def plugin_cards(settings) -> list[dict]:
                 ],
                 "mcp_servers": list(plugin.mcp_servers),
                 "agents_off": bool(plugin.agents) and not subagents,
+                "error": "",
             }
         )
+    cards += _failed_cards(paths, plugins, installed)
     loaded = {c["name"] for c in cards}
     for item in installed.values():
         if item.name not in loaded and not item.enabled:
             cards.append(
-                {
-                    "name": item.name,
-                    "version": _version(item.version),
-                    "format": "",
-                    "source": _source(item),
-                    "enabled": False,
-                    "skills": [],
-                    "commands": [],
-                    "agents": [],
-                    "hooks": [],
-                    "mcp_servers": [],
-                    "agents_off": False,
-                }
+                _bare_card(
+                    item.name, item.version, _source(item), enabled=False
+                )
             )
     return cards
 
@@ -107,13 +144,15 @@ class PluginCard(ServerCard):
 
     def _renderable(self) -> Text:
         info = self._info
-        on = info["enabled"]
+        on = info["enabled"] and not info["error"]
         t = Text()
         t.append("▾ " if self._expanded else "▸ ", style=_DEEP_DIM)
         t.append("✓ " if on else "✗ ", style=_OK if on else _ERR)
         t.append(info["name"])
         meta = [info["version"], info["format"], info["source"]]
         t.append("    " + " · ".join(m for m in meta if m), style=_DIM)
+        if info["error"]:
+            t.append(f"    {info['error']}", style=_ERR)
         if self._expanded:
             for label, key in (
                 ("skills", "skills"),

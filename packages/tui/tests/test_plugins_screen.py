@@ -2,10 +2,9 @@
 
 from pathlib import Path
 
-from gc_testkit.tui_support import as_settings, tui_settings
 import pytest
-
 from gc_core.plugins.manifest import HookCommand, HookMatcher
+from gc_testkit.tui_support import as_settings, tui_settings
 
 
 def _card(name, enabled=True, **kw):
@@ -21,6 +20,7 @@ def _card(name, enabled=True, **kw):
         "hooks": ["PreToolUse Bash"],
         "mcp_servers": ["srv"],
         "agents_off": True,
+        "error": "",
     }
     if not enabled:
         base.update(
@@ -134,3 +134,30 @@ def test_plugin_cards_merges_loaded_and_disabled(tmp_path, monkeypatch):
     assert cards["cfg"]["source"] == "config"
     assert cards["off"]["enabled"] is False
     assert cards["off"]["skills"] == []
+
+
+def test_plugin_cards_shows_plugins_that_failed_to_load(tmp_path, monkeypatch):
+    from gc_core.plugins import installed
+    from gc_tui.screens import plugins as mod
+
+    inst = tmp_path / "inst"
+    (inst / "b").mkdir(parents=True)
+    broken = tmp_path / "broken"
+    broken.mkdir()
+    monkeypatch.setattr(installed, "installed_dir", lambda: inst)
+    monkeypatch.setattr(
+        mod, "configured_paths", lambda cfg: [str(broken), str(inst / "b")]
+    )
+    monkeypatch.setattr(mod, "load_plugins", lambda paths: ())
+    monkeypatch.setattr(mod, "load_plugin", lambda path: None)
+    monkeypatch.setattr(
+        mod,
+        "list_installed",
+        lambda: [installed.InstalledPlugin("b", "1", "o/b")],
+    )
+    cards = {c["name"]: c for c in mod.plugin_cards(as_settings({}))}
+    assert cards["broken"]["source"] == "config"
+    assert cards["b"]["source"] == "o/b"
+    for name in ("broken", "b"):
+        text = mod.PluginCard(cards[name])._renderable().plain
+        assert "✗" in text and "не загружен (см. лог)" in text
