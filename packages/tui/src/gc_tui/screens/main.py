@@ -7987,7 +7987,9 @@ class TraceScreen(Screen):
         skill = self._palette.selected_skill()
         if skill is None or " " in typed.strip():
             return False
-        inp.text = f"/{self._skill_input_name(skill)} "
+        inp.text = (
+            f"/{skill.get('input_name') or self._skill_input_name(skill)} "
+        )
         inp.move_cursor(inp.document.end)
         self._close_palette()
         inp.focus()
