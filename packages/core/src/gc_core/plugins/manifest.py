@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -188,6 +189,30 @@ def _with_plugin_root(value: Any, root: Path) -> Any:
     return value
 
 
+_ENV_REF = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")
+
+
+def _with_env(value: Any) -> Any:
+    """Раскрыть ``${VAR}`` и ``${VAR:-по_умолчанию}`` из окружения во всей записи.
+
+    Незаданная переменная без значения по умолчанию даёт ``KeyError`` с её именем.
+    """
+    if isinstance(value, str):
+
+        def sub(m: re.Match[str]) -> str:
+            found = os.environ.get(m.group(1), m.group(2))
+            if found is None:
+                raise KeyError(m.group(1))
+            return found
+
+        return _ENV_REF.sub(sub, value)
+    if isinstance(value, list):
+        return [_with_env(v) for v in value]
+    if isinstance(value, dict):
+        return {k: _with_env(v) for k, v in value.items()}
+    return value
+
+
 _MCP_KEYS = ("command", "args", "env", "cwd", "url", "headers")
 _MCP_TRANSPORTS = {"stdio", "http", "sse"}
 
@@ -214,7 +239,8 @@ def _mcp_entry(
 def _parse_mcp_servers(raw: Any, root: Path) -> dict[str, dict[str, Any]]:
     """``.mcp.json`` как у Claude Code: ``{"mcpServers": {имя: {...}}}`` или
     сразу ``{имя: {...}}``. ``${CLAUDE_PLUGIN_ROOT}`` подставляется путём
-    плагина. Имя сервера становится ``<плагин>_<имя>``, чтобы плагины не
+    плагина, ``${VAR}`` / ``${VAR:-def}`` берутся из окружения (сервер с
+    незаданной ``${VAR}`` пропускается). Имя сервера становится ``<плагин>_<имя>``, чтобы плагины не
     затирали друг друга и серверы пользователя.
     """
     section = raw.get("mcpServers", raw) if isinstance(raw, dict) else None
@@ -224,7 +250,16 @@ def _parse_mcp_servers(raw: Any, root: Path) -> dict[str, dict[str, Any]]:
     for name, spec in section.items():
         if not isinstance(spec, dict):
             continue
-        entry = _mcp_entry(name, _with_plugin_root(spec, root), root)
+        try:
+            spec = _with_env(_with_plugin_root(spec, root))
+        except KeyError as exc:
+            logger.warning(
+                "plugin mcp server %r skipped: env var %s is not set",
+                name,
+                exc.args[0],
+            )
+            continue
+        entry = _mcp_entry(name, spec, root)
         if entry is not None:
             out[str(name)] = entry
     return out

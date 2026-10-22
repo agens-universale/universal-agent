@@ -585,6 +585,61 @@ def test_plugin_mcp_json_is_loaded_and_merged_into_config(tmp_path):
     assert servers["my_plugin_remote"].url == "https://e.x/mcp"
 
 
+def test_plugin_mcp_env_vars_are_expanded(tmp_path, monkeypatch):
+    from gc_core.config_modules.root import AppConfig, resolve_paths
+
+    monkeypatch.setenv("GC_T_TOKEN", "abc")
+    monkeypatch.delenv("GC_T_PATH", raising=False)
+    root = _make_plugin(tmp_path, name="p")
+    (root / ".mcp.json").write_text(
+        json.dumps(
+            {
+                "gh": {
+                    "type": "http",
+                    "url": "https://x/${GC_T_PATH:-mcp}",
+                    "headers": {"Authorization": "Bearer ${GC_T_TOKEN}"},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    runtime.reset_plugin_cache()
+    cfg = AppConfig.model_validate({"plugins": {"paths": [str(root)]}})
+    out = resolve_paths(cfg, str(tmp_path))
+    server = out.mcp.servers["p_gh"]
+    assert server.headers == {"Authorization": "Bearer abc"}
+    assert server.url == "https://x/mcp"
+
+
+def test_plugin_mcp_missing_env_var_skips_server(
+    tmp_path, monkeypatch, caplog
+):
+    from gc_core.config_modules.root import AppConfig, resolve_paths
+
+    monkeypatch.delenv("GC_T_MISSING", raising=False)
+    root = _make_plugin(tmp_path, name="p")
+    (root / ".mcp.json").write_text(
+        json.dumps(
+            {
+                "bad": {
+                    "type": "http",
+                    "url": "https://x/mcp",
+                    "headers": {"Authorization": "Bearer ${GC_T_MISSING}"},
+                },
+                "ok": {"command": "echo"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    runtime.reset_plugin_cache()
+    cfg = AppConfig.model_validate({"plugins": {"paths": [str(root)]}})
+    with caplog.at_level("WARNING"):
+        out = resolve_paths(cfg, str(tmp_path))
+    assert set(out.mcp.servers) == {"p_ok"}
+    assert "GC_T_MISSING" in caplog.text
+    assert "'bad'" in caplog.text
+
+
 def test_bad_plugin_mcp_server_is_skipped(tmp_path):
     from gc_core.config_modules.root import AppConfig, resolve_paths
 
