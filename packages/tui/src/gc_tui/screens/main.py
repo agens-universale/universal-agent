@@ -5276,9 +5276,15 @@ class TraceScreen(Screen):
             and runner is not None
             and runner.is_running()
             and not self._run_replaced(runner)
+            # Ошибка раннера — конец прогона, даже пока его поток жив:
+            # строка «✕» встаёт в этом тике (S10 §3.7).
+            and not self._active_run_error()
         ):
             return
         kind = getattr(runner, "_thread_kind", "run") if runner else "run"
+        seq = self._watched_run_seq
+        if seq is None:
+            seq = getattr(runner, "run_seq", None)
         try:
             self._on_run_finished(runner, kind)
         except Exception:
@@ -5286,6 +5292,9 @@ class TraceScreen(Screen):
             # причина — в лог.
             _log.exception("run_settle_failed kind=%s", kind)
         finally:
+            # Прогон зафиксирован: его пару фронты больше не видят.
+            if runner is not None:
+                self._settled_run = (runner, seq)
             self._was_running = False
             self._run_pending = False
             self._watched_runner = None
@@ -5582,19 +5591,7 @@ class TraceScreen(Screen):
             word,
         )
         self._stamp_run_outcome(run_tid, word, edits)
-        # Строка итога — когда поток хода вышел. Остановленный дорабатывает
-        # (мигающий «■»), новый прогон уже идёт — строку ведёт тик.
-        # Ход уложился между тиками — индикатора нет, ставим. Тик,
-        # заставший прогон, индикатор создал (или ошибка раннера уже
-        # поставила строку); если нет ни того, ни другого, их убрали
-        # намеренно (отмена-«undo») — не воскрешаем.
-        settled = runner is None or not runner.is_running()
-        shown = (
-            self._thinking is not None
-            or self._fresh_turn_line() is not None
-            or not self._was_running
-        )
-        if on_screen and settled and shown:
+        if on_screen and self._outcome_line_due(runner, word):
             self._show_turn_outcome(word, plan_proposed, outcome, edits=edits)
         self.app.last_stop_requested = False
         self._update_terminal_title()
@@ -5614,6 +5611,24 @@ class TraceScreen(Screen):
             # статус плана мог смениться за ход (доработка, утверждение)
             self._sync_plan_panel_with_session()
             self._sync_input_placeholder()
+
+    def _outcome_line_due(self, runner, word: str) -> bool:
+        """Строка итога — когда поток хода вышел. Остановленный дорабатывает
+        (мигающий «■»), новый прогон уже идёт — строку ведёт тик. Строка
+        ошибки — всегда, даже пока поток раннера жив (S10 §3.7).
+
+        Ход уложился между тиками — индикатора нет, ставим. Тик, заставший
+        прогон, индикатор создал (или строка уже стоит); если нет ни того,
+        ни другого, их убрали намеренно (отмена-«undo») — не воскрешаем."""
+        if word == "failed":
+            return True
+        if runner is not None and runner.is_running():
+            return False
+        return (
+            self._thinking is not None
+            or self._fresh_turn_line() is not None
+            or not self._was_running
+        )
 
     def _runner_outcome(self, runner) -> tuple[str, bool]:
         """Исход прогона без записи итога: по ошибке раннера, стопу и
@@ -5713,13 +5728,16 @@ class TraceScreen(Screen):
         # Восходящий фронт: прогон стартовал → running (страховочная сетка к
         # _prepare_for_new_run; ловит любой путь, где prepare не вызвали).
         # Тред — прогона: к первому тику человек мог уйти в другую сессию.
-        if (not self._was_running) and is_running and _kind != "compact":
+        # Зафиксированный прогон (ошибка при живом потоке) — уже не работа:
+        # ни восходящего фронта, ни слежения (S10 §3.7).
+        live = is_running and not self._run_settled(runner)
+        if (not self._was_running) and live and _kind != "compact":
             self._stamp_tui_running(self._run_task_id(runner))
-        if is_running:
+        if live:
             self._watched_runner = runner
             self._watched_run_seq = getattr(runner, "run_seq", None)
             self._follow_turn_clock()
-        self._was_running = is_running
+        self._was_running = live
         if not _frozen:
             # Бар — по прогону открытого треда; догон после выделения (F2).
             self._sync_indicator_bar()
@@ -5804,11 +5822,8 @@ class TraceScreen(Screen):
             confirm=self._confirm_active,
         )
         if _indicator_mode == "failed":
-            # Краш раннера → «✕ Ошибка» строкой сразу: не ждём
-            # falling-edge/idle и не зависим от reaping воркера.
-            self._show_turn_outcome(
-                "failed", False, self._latest_turn_outcome()
-            )
+            # Краш раннера: строку «✕ Ошибка» уже поставил спадающий фронт
+            # этого тика (S10 §3.7), в баре ничего не рисуется.
             if not _frozen:
                 self._clear_stream_block()
         elif _indicator_mode == "active":
@@ -8834,7 +8849,13 @@ class TraceScreen(Screen):
             return False
         if not self._runner_is_for_active_thread():
             return False
-        return (runner, getattr(runner, "run_seq", None)) != self._settled_run
+        return not self._run_settled(runner)
+
+    def _run_settled(self, runner) -> bool:
+        """Прогон раннера уже зафиксирован (`_settle_ended_run`): пара
+        «раннер и `run_seq`» — у раннеров свой счёт с нуля."""
+        pair = (runner, getattr(runner, "run_seq", None))
+        return runner is not None and pair == self._settled_run
 
     def _sync_indicator_bar(self) -> None:
         """Поставить или снять бар по `_bar_wanted()`; в том же вызове —
@@ -9634,6 +9655,9 @@ class TraceScreen(Screen):
         # Сброс якоря таймера: «сжимаю контекст…» должен считать с 0, а не от
         # момента прошлого хода (как и на обычном send).
         self._reset_thinking_timer()
+        # Ошибка прошлого прогона — не ошибка сжатия: иначе она закрыла бы
+        # его на первом тике (S10 §3.7).
+        self._reset_run_flags()
         if runner.compact_now(tid, self.app._system):
             # Сжатие — работа: бар «сжимаю контекст…» (S10, решение В3).
             self._run_pending = True

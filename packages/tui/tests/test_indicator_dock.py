@@ -184,14 +184,17 @@ async def test_bar_rule_on_attach(tmp_path):
 
 @pytest.mark.asyncio
 async def test_bar_on_auto_created_thread(tmp_path):
-    """Автосоздание треда под отправку: бар стоит с репликой."""
-    _write_task(tmp_path, "auto1")
+    """Автосоздание треда под отправку: тред открыт до старта хода, бар
+    стоит с репликой и при живом прогоне нового треда."""
     async with _app(tmp_path).run_test() as pilot:
         scr = pilot.app.screen
+        tid = scr._begin_auto_created_task()
+        assert scr._active_task_id == tid
+        pilot.app.active_runner = _Run(tid)
         scr._prepare_for_new_run()
-        scr.attach_active_task("auto1")
         await pilot.pause()
         assert _bar(pilot).display is True
+        pilot.app.active_runner = None
 
 
 @pytest.mark.asyncio
@@ -442,3 +445,62 @@ async def test_bar_through_scripted_turn(tmp_path):
         assert frames[edge][2] == frames[edge - 1][2]
         assert frames[edge][3] is True
         assert all(not f[0] for f in frames[edge:])
+
+
+# --- S10 §3.7: ошибка до конца раннера — прогон фиксируется парой -----------
+
+
+@pytest.mark.asyncio
+async def test_error_rising_edge_ignored_for_settled_run(tmp_path):
+    """Ошибка при живом потоке раннера — спадающий фронт в том же тике:
+    строка «✕» видна, бара нет, мета не `running`. Следующие тики бар не
+    возвращают и строку не оседают; поток позже выходит — исход прогона
+    записан один раз."""
+    from gc_tui.widgets.turn_line import TurnLine
+
+    tid = "err0000000000000000000000000001a"
+    _write_task(tmp_path, tid)
+    async with _app(tmp_path).run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(tid, is_resume=True)
+        run = _Run(tid)
+        pilot.app.active_runner = run
+        scr._prepare_for_new_run()
+        scr._poll_tick()  # тик застал прогон
+        finished, statuses = [], []
+        on_finished, write_meta = scr._on_run_finished, scr._write_tui_meta
+
+        def counted_finish(runner, kind):
+            finished.append(runner)
+            on_finished(runner, kind)
+
+        def counted_write(task_id, patch):
+            if "status" in patch:
+                statuses.append(patch["status"])
+            write_meta(task_id, patch)
+
+        scr._on_run_finished = counted_finish
+        scr._write_tui_meta = counted_write
+        pilot.app.last_runner_error = "ReadTimeout: сервер не ответил"
+        scr._poll_tick()
+        await pilot.pause()
+        (line,) = scr.query(TurnLine)
+        assert line.word == "failed"
+        assert line.is_fresh
+        assert line.display
+        assert not _bar(pilot).has_class("-turn")
+        assert statuses == ["failed"]
+
+        for _ in range(3):
+            scr._poll_tick()
+        assert not _bar(pilot).has_class("-turn")
+        assert line.is_fresh
+        assert statuses == ["failed"]
+
+        run.running = False  # поток раннера с ошибкой вышел
+        scr._poll_tick()
+        scr._poll_tick()
+        assert finished == [run]
+        assert statuses == ["failed"]
+        tui = scr._store.get_task_meta(tid)["tui"]
+        assert tui["status"] == "failed"

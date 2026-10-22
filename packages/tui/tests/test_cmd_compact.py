@@ -261,3 +261,44 @@ async def test_compact_refused_by_runner_raises_no_bar(tmp_path):
         scr._cmd_compact()
         assert scr._run_pending is False
         assert not _bar_up(scr)
+
+
+@pytest.mark.asyncio
+async def test_compact_after_settled_run_gets_bar(tmp_path):
+    """`/compact` сразу после зафиксированного прогона того же раннера:
+    тик видит сжатие идущей работой — бар стоит и после первого тика."""
+    import threading
+
+    from gc_tui.app import TuiApp
+    from gc_tui.services.agent_runner import AgentRunner
+
+    release = threading.Event()
+
+    class _Ex:
+        async def acompact_thread(self, tid, system=None):
+            release.wait(5)
+            return True
+
+    tid = "cmp00000000000000000000000000009a"
+    _write_task(tmp_path, tid, n_messages=3, last_compact=1)
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings(_chat_cfg()),
+    )
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(tid)
+        runner = AgentRunner(executor=_Ex())
+        runner._last_target = (tid, "cli")
+        pilot.app.active_runner = runner
+        scr._settled_run = (runner, runner.run_seq)  # прошлый прогон закрыт
+        try:
+            scr._cmd_compact()
+            scr._poll_tick()
+            assert scr._watched_runner is runner
+            assert scr._bar_wanted()
+            assert _bar_up(scr)
+        finally:
+            release.set()
+            runner._thread.join()

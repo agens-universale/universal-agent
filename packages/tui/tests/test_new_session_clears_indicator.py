@@ -17,8 +17,10 @@ async def test_new_session_clears_error_indicator(tmp_path):
         scr = pilot.app.screen
         scr.attach_active_task("t-err")
         await pilot.pause()
-        # эмуляция упавшего рана: глобальный error-флаг → poll ставит
-        # строку «✕ Ошибка» в ленте (S10), индикатора и бара нет
+        # эмуляция упавшего рана: ход запущен отсюда, глобальный
+        # error-флаг → спадающий фронт ставит строку «✕ Ошибка» в ленте
+        # (S10 §3.7), индикатора и бара нет
+        scr._run_pending = True
         pilot.app.last_runner_error = "runtime: boom"
         scr._poll_active()
         await pilot.pause()
