@@ -31,6 +31,8 @@ SUPPORTED_EVENTS = frozenset(
 )
 
 _MANIFEST_CANDIDATES = (".claude-plugin/plugin.json", "plugin.json")
+# Claude Code кладёт серверы в ``.mcp.json``, Agent Plugins — в ``mcp.json``.
+_MCP_CANDIDATES = (".mcp.json", "mcp.json")
 _HOOKS_FILE = "hooks/hooks.json"
 
 
@@ -337,11 +339,11 @@ def load_plugin(path: str | Path) -> Plugin | None:
     )
     name = str(manifest.get("name") or root.name)
     version = str(manifest.get("version") or "0")
-    mcp_path = root / ".mcp.json"
+    mcp_path = next(
+        (root / rel for rel in _MCP_CANDIDATES if (root / rel).is_file()), None
+    )
     mcp_servers = (
-        _parse_mcp_servers(_read_json(mcp_path), root)
-        if mcp_path.is_file()
-        else {}
+        _parse_mcp_servers(_read_json(mcp_path), root) if mcp_path else {}
     )
     return Plugin(
         name=name,

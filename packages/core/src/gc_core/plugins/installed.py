@@ -125,7 +125,7 @@ def install(
         ):
             raise ValueError(
                 f"{source}: нет ни skills/, commands/, agents/, "
-                "ни hooks/hooks.json, ни .mcp.json"
+                "ни hooks/hooks.json, ни .mcp.json/mcp.json"
             )
         name = _safe_name(plugin.name)
         dest = root / name

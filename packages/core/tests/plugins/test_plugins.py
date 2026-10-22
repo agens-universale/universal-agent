@@ -479,6 +479,39 @@ def test_plugin_mcp_json_is_loaded_and_merged_into_config(tmp_path):
     assert servers["my_plugin_remote"].url == "https://e.x/mcp"
 
 
+def test_bad_plugin_mcp_server_is_skipped(tmp_path):
+    from gc_core.config_modules.root import AppConfig, resolve_paths
+
+    root = _make_plugin(tmp_path, name="p")
+    (root / ".mcp.json").write_text(
+        json.dumps(
+            {
+                "bad": {"command": "echo", "args": "--x"},
+                "good": {"command": "echo"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    runtime.reset_plugin_cache()
+    cfg = AppConfig.model_validate({"plugins": {"paths": [str(root)]}})
+    out = resolve_paths(cfg, str(tmp_path))
+    assert set(out.mcp.servers) == {"p_good"}
+
+
+def test_agent_plugins_layout_mcp_json(tmp_path):
+    root = tmp_path / "ap"
+    root.mkdir()
+    (root / "plugin.json").write_text(
+        json.dumps({"name": "ap", "version": "1"}), encoding="utf-8"
+    )
+    (root / "mcp.json").write_text(
+        json.dumps({"mcpServers": {"s": {"command": "echo"}}}),
+        encoding="utf-8",
+    )
+    assert "s" in load_plugin(root).mcp_servers
+    installed.install(str(root))
+
+
 def _git_repo(tmp_path):
     import subprocess
 

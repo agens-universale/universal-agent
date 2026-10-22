@@ -4,7 +4,13 @@ import logging
 import os
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+)
 
 from gc_core.bundled_assets import bundled_root
 from gc_core.config_modules import env_vars
@@ -416,7 +422,13 @@ def _merge_plugin_mcp_servers(cfg: Any) -> None:
 
     for name, spec in plugin_mcp_servers(paths).items():
         if name not in cfg.mcp.servers:
-            cfg.mcp.servers[name] = McpServerConfig(**spec)
+            try:
+                cfg.mcp.servers[name] = McpServerConfig(**spec)
+            except ValidationError as exc:
+                # Битый сервер плагина не должен ронять весь конфиг.
+                logging.getLogger(__name__).warning(
+                    "plugin mcp server %r skipped: %s", name, exc
+                )
 
 
 def _clamp_summary_trigger(value: int) -> int:
