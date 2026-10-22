@@ -465,9 +465,9 @@ class SessionsScreen(Screen):
 
         scr = self.app.screen
         if isinstance(scr, TraceScreen):
+            # Через вход смены треда: идёт ход — «остановить и перейти».
             # acquire(B) → release(A) → attach внутри attach_active_task
-            if not scr.attach_active_task(thread_id, is_resume=True):
-                return
+            scr.request_thread_switch(thread_id)
         else:
             self.app.tui_state.active_task_id = thread_id
 

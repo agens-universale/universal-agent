@@ -119,6 +119,11 @@ from gc_tui.services.session_lock import (
     release,
     try_acquire,
 )
+from gc_tui.services.session_switch import (
+    RUN_SWITCH_HINT,
+    RUN_SWITCH_MESSAGE,
+    RUN_SWITCH_TITLE,
+)
 from gc_tui.services.session_title import (
     LAST_ACTUAL_MIN,
     display_name,
@@ -720,6 +725,10 @@ class TraceScreen(Screen):
         # застать). Раннер держим сами: стоп и пересборка снимают его с app.
         self._watched_runner = None
         self._run_pending: bool = False
+        # Остановленный раннер, чей поток ещё дорабатывает (стоп
+        # кооперативный), и переход, ждущий его конца (решение 25).
+        self._stopping_runner = None
+        self._pending_switch: tuple[str | None] | None = None
         self._was_summarizing: bool = (
             False  # для baseline last_compact_msg_count
         )
@@ -5571,6 +5580,7 @@ class TraceScreen(Screen):
         # Спадающий фронт — первым: новый ход того же раннера не прячет
         # конец прошлого.
         self._settle_ended_run()
+        self._continue_pending_switch()
         # Восходящий фронт: прогон стартовал → running (страховочная сетка к
         # _prepare_for_new_run; ловит любой путь, где prepare не вызвали).
         # Тред — прогона: к первому тику человек мог уйти в другую сессию.
@@ -7820,34 +7830,84 @@ class TraceScreen(Screen):
             save_thread_meta(threads_dir, system, tid, meta)
 
     def _cmd_new(self) -> None:
+        self.request_thread_switch(None)
+
+    def request_thread_switch(self, target: str | None) -> None:
+        """Единственный вход смены открытого треда (решение 25): `target` —
+        тред, None — новая пустая сессия.
+
+        Идёт ход — вопрос «остановить и перейти»; остаться — ничего не
+        меняется. Остановленный ход ещё дорабатывает — переход ждёт его
+        конца: целевой тред не открывается, пока ход прежнего жив."""
+        if target is not None and target == self._active_task_id:
+            self._open_thread(target)
+            return
+        runner = getattr(self.app, "active_runner", None)
+        if runner is not None and runner.is_running():
+            from gc_tui.screens.confirm import ConfirmScreen
+
+            def _on_result(confirmed: bool) -> None:
+                if confirmed:
+                    self._stop_run_then_switch(target)
+
+            self.app.push_screen(
+                ConfirmScreen(
+                    title=RUN_SWITCH_TITLE,
+                    message=RUN_SWITCH_MESSAGE,
+                    hint=RUN_SWITCH_HINT,
+                ),
+                _on_result,
+            )
+            return
+        self._pending_switch = (target,)
+        self._continue_pending_switch()
+
+    def _stop_run_then_switch(self, target: str | None) -> None:
+        """Обычный стоп (очередь — назад в поле), вопросы хода сняты;
+        переход — когда ход кончится."""
+        if self._thinking is not None:
+            self._thinking.set_state("cancelled")
+        if self._confirm_active:
+            self._hide_confirm_banner()
+        if self.app.tui_state.ask_human_state is not None:
+            self._unmount_ask_human_banner()
+        self._stop_and_replace_runner()
+        self._pending_switch = (target,)
+        self._continue_pending_switch()
+
+    def _continue_pending_switch(self) -> None:
+        """Ждущий переход — как только остановленный ход кончился: исход
+        хода — в его тред, затем снова через вход (за время ожидания мог
+        начаться новый ход — тогда снова вопрос)."""
+        if self._pending_switch is None:
+            return
+        stopping = self._stopping_runner
+        if stopping is not None and stopping.is_running():
+            return
+        self._stopping_runner = None
+        (target,) = self._pending_switch
+        self._pending_switch = None
+        self._settle_ended_run()
+        runner = getattr(self.app, "active_runner", None)
+        if runner is not None and runner.is_running():
+            self.request_thread_switch(target)
+            return
+        self._open_thread(target)
+
+    def _open_thread(self, target: str | None) -> None:
+        """Сменить открытый тред; ход не идёт (проверил вход)."""
+        if target is not None:
+            self.attach_active_task(target, is_resume=True)
+            return
         self._resumed_prompt = None  # новая сессия — без resume-промпта
         self._last_terminal_title = format_terminal_title()
         set_terminal_title(self._last_terminal_title)
-        runner = getattr(self.app, "active_runner", None)
-        is_running = runner is not None and runner.is_running()
-        if not is_running:
-            # В прежнем run executor мог оставить in-memory usage-метрики
-            # (футер берёт их через runner.usage_snapshot()).
-            # Для новой сессии нужен clean executor — иначе футер показывает
-            # токены/стоимость прошлой сессии.
-            self._stop_and_replace_runner()
-            self._switch_to_empty_state()
-            return
-        from gc_tui.screens.confirm import ConfirmScreen
-
-        def _on_result(confirmed: bool) -> None:
-            if confirmed:
-                self._stop_and_replace_runner()
-                self._switch_to_empty_state()
-
-        self.app.push_screen(
-            ConfirmScreen(
-                title="Новая задача",
-                message="Активная задача в процессе.\nОстановить и начать новую?",
-                hint="[Y] да, прервать   [N] нет, продолжить",
-            ),
-            _on_result,
-        )
+        # В прежнем run executor мог оставить in-memory usage-метрики
+        # (футер берёт их через runner.usage_snapshot()). Для новой сессии
+        # нужен clean executor — иначе футер показывает токены/стоимость
+        # прошлой сессии.
+        self._stop_and_replace_runner()
+        self._switch_to_empty_state()
 
     def _request_exit(self) -> None:
         """Модалка подтверждения выхода (Esc/Ctrl+C вхолостую)."""
@@ -7956,6 +8016,7 @@ class TraceScreen(Screen):
             # спадающий фронт в _poll_active уже не увидит этот runner.
             if runner.is_running():
                 self.app.last_stop_requested = True
+                self._stopping_runner = runner
             runner.stop()
             runner._marked_stopped = True
             # Поток может ещё досиживать HTTP — тогда логгер отдаст он сам.
