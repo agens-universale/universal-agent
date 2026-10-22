@@ -82,9 +82,14 @@ class AsyncAgent:
         on_stream_delta: Any = None,
         durable: Any = None,
         stores: Stores | None = None,
+        ask_human_suspends: bool = False,
         **context_kwargs: Any,
     ) -> AsyncAgent:
         """Собрать агента, не блокируя loop.
+
+        ``ask_human_suspends`` — канал без живого человека (A2A): вопрос
+        модели (``turn_ask_human``) не ждёт ответа, а завершает ход
+        (``pending_question``); ответ — следующим ``run([], answer=…)``.
 
         ``stores`` — связка хранилищ (``gc_core.stores.Stores``): треды и
         ресурсы агента одним объектом; вместе с ``thread_store=`` или
@@ -179,6 +184,7 @@ class AsyncAgent:
         except BaseException:
             await release_clients()
             raise
+        ctx.ask_human_suspends = ask_human_suspends
         return cls(AgentExecutor(ctx), subscribers)
 
     @property
@@ -375,6 +381,14 @@ class AsyncAgent:
                 # Ждём ход даже если потребитель бросил итератор на полпути:
                 # иначе прогон осиротеет, а его исключение всплывёт «ниоткуда».
                 self._last_answer = await task
+
+    @property
+    def pending_question(self) -> dict | None:
+        """Вопрос, на котором приостановлен последний ход
+        (``ask_human_suspends``): ``{call_id, question}`` или ``None``."""
+        if self._executor is None:
+            return None
+        return self._executor.last_pending_question
 
     @property
     def last_answer(self) -> Any:

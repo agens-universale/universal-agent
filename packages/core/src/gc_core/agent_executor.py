@@ -469,6 +469,36 @@ class _RunRequest:
     skills_loaded: list[str | None] | None
     attachments: list[list[Attachment] | None] | None
     account_run: bool
+    #: Ответ на вопрос, на котором тред приостановлен (``ask_human_suspends``).
+    answer: str | None = None
+
+
+def _pending_question(thread_session: Any) -> dict | None:
+    """Вопрос, на котором приостановлен тред (``SessionState``)."""
+    session = getattr(thread_session, "state", None)
+    pending = getattr(session, "pending_question", None)
+    return pending if isinstance(pending, dict) and pending else None
+
+
+def _question_output(thread_session: Any, answer: str | None) -> dict | None:
+    """Вывод вызова приостановившего вопроса для батча хода: ответ или
+    «закрыт без ответа» (ход начался без ответа). Вопроса нет — ``None``;
+    ответ без вопроса — ``ValueError``."""
+    pending = _pending_question(thread_session)
+    if pending is None:
+        if answer is not None:
+            raise ValueError("answer: в треде нет вопроса, ждущего ответа")
+        return None
+    from gc_core.tools.turn.ask_human import AskHuman
+
+    return {
+        "id": generate_message_id_func("fco"),
+        "type": "function_call_output",
+        "call_id": pending.get("call_id"),
+        "output": AskHuman.answer_output(
+            question=str(pending.get("question") or ""), answer=answer
+        ),
+    }
 
 
 class AgentExecutor:
@@ -513,6 +543,9 @@ class AgentExecutor:
         # он реально отправит сообщение.
         self._plan_rework_thread: Optional[str] = None
         self.last_terminal_outcome: Optional[str] = None
+        #: Вопрос, на котором приостановлен последний ход (``{call_id,
+        #: question}``), или ``None``.
+        self.last_pending_question: Optional[dict] = None
 
     def take_undelivered_messages(self) -> list[dict]:
         """Забрать всё, что отдано прогону, но до агента не дошло, — в порядке прихода.
@@ -648,9 +681,13 @@ class AgentExecutor:
             )
         previous_response_id = None
         if backend_api_mode == "chat_completions":
+            pending = _pending_question(thread_session)
             thread_session.history_messages = repair_tool_call_pairing(
                 thread_session.history_messages,
                 keep_latest_unanswered=False,
+                keep_call_ids=frozenset(
+                    [str(pending.get("call_id"))] if pending else []
+                ),
             )
         if backend_api_mode == "responses":
             previous_response_id = thread_session.previous_response_id
@@ -1315,6 +1352,7 @@ class AgentExecutor:
         skills_loaded: list[str | None] | None = None,
         attachments: list[list[Attachment] | None] | None = None,
         account_run: bool = True,
+        answer: str | None = None,
     ) -> Any:
         """Прогон агента, не блокирующий вызывающий loop.
 
@@ -1332,6 +1370,11 @@ class AgentExecutor:
         Форма ОДНА. Синхронного ``run`` нет: из синхронного кода агента
         ведут своим ``asyncio.run`` в рабочем потоке — так делают TUI и
         harbor-адаптер.
+
+        ``answer`` — ответ на вопрос, на котором тред приостановлен
+        (``ask_human_suspends``): ложится выводом того вызова, ход идёт
+        дальше. Тред ждёт ответа, а ход начат без него — вопрос закрывается
+        «без ответа». Ответ, когда вопроса нет, — ``ValueError``.
 
         ``account_run=False`` — не закрывать учёт внутри. Вызывающий ещё
         добавит шаги после цикла и сам вызовет ``aclose_run_accounting``.
@@ -1351,6 +1394,7 @@ class AgentExecutor:
             skills_loaded=skills_loaded,
             attachments=attachments,
             account_run=account_run,
+            answer=answer,
         )
         # Рукопожатие: тред отпущен, а во входящий поток успело лечь
         # сообщение после последнего забора — ещё ход тем же исполнителем.
@@ -1382,6 +1426,7 @@ class AgentExecutor:
         skills_loaded: list[str | None] | None = None,
         attachments: list[list[Attachment] | None] | None = None,
         account_run: bool = True,
+        answer: str | None = None,
     ) -> Any:
         """Один ход ``arun``: тред, подготовка, цикл, учёт."""
         with self._lock:
@@ -1427,6 +1472,7 @@ class AgentExecutor:
             skills_loaded=skills_loaded,
             attachments=attachments,
             account_run=account_run,
+            answer=answer,
         )
         try:
             return await self._arun_on_thread(opened, request)
@@ -1545,7 +1591,13 @@ class AgentExecutor:
             )
 
         inbox_tail = await self._aread_inbox_tail(thread_session, state)
-        if not messages and not inbox_tail and not state.stop_requested:
+        question_output = _question_output(thread_session, request.answer)
+        if (
+            not messages
+            and not inbox_tail
+            and question_output is None
+            and not state.stop_requested
+        ):
             raise InboxDrained(
                 "Список пользовательских сообщений не должен быть пустым."
             )
@@ -1580,6 +1632,10 @@ class AgentExecutor:
                 },
             )
 
+        # Вывод вопроса, на котором тред приостановлен, — первым: он отвечает
+        # на последний вызов истории.
+        if question_output is not None:
+            new_user_messages.insert(0, question_output)
         messages, persist_messages_callback, get_full_history_messages = (
             self._persistence_for_run(
                 thread_session=thread_session,
@@ -1648,6 +1704,9 @@ class AgentExecutor:
             loop_finished = True
             self.last_terminal_outcome = getattr(
                 state, "terminal_outcome", None
+            )
+            self.last_pending_question = getattr(
+                state, "pending_question", None
             )
         finally:
             await _stop_lease_keeper(poller)

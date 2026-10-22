@@ -162,6 +162,9 @@ class State(ExecutionState):
         # Успешный turn_propose_plan в текущем батче: по этому флагу цикл
         # агента закрывает ход. Транзиентный, в мету не пишется.
         self.plan_proposed: bool = False
+        # Вопрос модели, на котором ход приостановлен (ask_human_suspends):
+        # {call_id, question}. Пишется в SessionState.pending_question.
+        self.pending_question: Optional[dict] = None
         # Судья действий режима auto: сбои проверки подряд у ЭТОГО агента (у
         # субагента свои) и причина, по которой прогон надо остановить. В мету
         # треда не пишутся: состояние новое на каждый прогон. Отказы судьи

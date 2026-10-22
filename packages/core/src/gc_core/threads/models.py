@@ -131,6 +131,10 @@ class SessionState(_Model):
     mode_announced: str | None = None
     #: План убран человеком: следующий прогон один раз сообщит модели.
     plan_removed_notice: bool = False
+    #: Вопрос модели, ждущий ответа (``ask_human_suspends``): ``{call_id,
+    #: question}``. Ход закончен, вызов ``turn_ask_human`` в истории без
+    #: ответа; следующий ход кладёт ответ его выводом.
+    pending_question: JsonObject | None = None
     #: Предохранитель судьи действий: отказы подряд, за сессию, пауза.
     judge_denials_in_a_row: int = 0
     judge_denials_total: int = 0
