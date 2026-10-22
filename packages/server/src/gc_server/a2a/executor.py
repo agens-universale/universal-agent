@@ -351,7 +351,7 @@ class GcAgentExecutor(AgentExecutor):
                 state = _dialog_state(record)
                 if state.get(_CANCELED + task_id):
                     return False
-                if self._free(record, state) and _queue(state)[:1] == [
+                if self._dialog_free(record, state) and _queue(state)[:1] == [
                     (task_id, state[_QUEUE + task_id])
                 ]:
                     await self._threads.update_frontend(
@@ -377,7 +377,9 @@ class GcAgentExecutor(AgentExecutor):
         return {"task": task_id, "instance": instance_id(), "at": _now()}
 
     @staticmethod
-    def _free(record: ThreadRecord | None, state: dict[str, Any]) -> bool:
+    def _dialog_free(
+        record: ThreadRecord | None, state: dict[str, Any]
+    ) -> bool:
         """Диалог свободен: хода нет (ни отметки, ни живой аренды) и никто
         не ждёт ответа на вопрос."""
         return (
