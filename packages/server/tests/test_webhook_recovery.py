@@ -414,3 +414,24 @@ async def test_server_stop_interrupts_instead_of_cancelling(
     assert task_status.status_of(record)["status"] == "running"
     assert record.runtime.turn == "running"
     assert events == []
+
+
+async def test_cancel_of_a_crashed_task_finishes_it(monkeypatch, tmp_path):
+    """Инстанс упал посреди хода, задачу отменили: отмена — сразу итог
+    ``cancelled`` (вести ход некому), восстановление её не поднимает."""
+    seen = _install(monkeypatch)
+    stores = await aopen_process_stores(_settings(tmp_path))
+    surface = await _surface(tmp_path, stores)
+    try:
+        await _crashed_run(stores.threads)
+        assert await surface.acancel(KEY) == {"status": "cancelled"}
+        taken = await arecover_once(surface, now=utc_now())
+        await _settled(surface)
+        record = await stores.threads.get_thread(KEY)
+        status = await surface.astatus(KEY)
+    finally:
+        await stores.aclose()
+    assert taken == []
+    assert seen == []
+    assert status["status"] == "cancelled"
+    assert record.runtime.turn is None

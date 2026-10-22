@@ -417,8 +417,37 @@ class WebhookSurface:
         if status["status"] in FINAL:
             return {"status": status["status"]}
         self.registry.stop(system=key.system, task_id=key.thread)
-        await self.threads().request_cancel(key)
+        threads = self.threads()
+        await threads.request_cancel(key)
+        if not await self._ahas_owner(key):
+            # Ход вести некому (инстанс упал посреди хода): отмена — сразу
+            # итог, иначе восстановление подняло бы задачу и довело её.
+            from gc_server.webhook.recovery import afinish_abandoned
+
+            record = await threads.get(key)
+            if record is not None:
+                await afinish_abandoned(
+                    self,
+                    threads,
+                    record,
+                    status="cancelled",
+                    op="cancel-abandoned",
+                    finished_at=time.time(),
+                    recovery_attempts=0,
+                )
+                return {"status": "cancelled"}
         return {"status": "cancelling"}
+
+    async def _ahas_owner(self, key: ThreadKey) -> bool:
+        """Ход задачи ведёт или строит кто-то: этот процесс или живая
+        аренда другого."""
+        if self.registry.is_running(
+            system=key.system, task_id=key.thread
+        ) or self.registry.building_since(
+            system=key.system, task_id=key.thread
+        ):
+            return True
+        return await self.threads().busy_owner(key) is not None
 
     async def alist(
         self, *, system: str | None, limit: int, cursor: str | None
