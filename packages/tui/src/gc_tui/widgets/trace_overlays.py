@@ -25,6 +25,27 @@ from gc_tui.services.trace_render import USER_PREFIX
 PILL_CLICK = "↓ в конец · клик"
 #: Подпись плашки: курсор в пустом поле — Enter тоже ведёт к низу.
 PILL_ENTER = "↓ в конец · клик или Enter"
+_TAIL_CLICK = "клик"
+_TAIL_ENTER = "клик или Enter"
+
+
+def new_messages_word(n: int) -> str:
+    """`новое сообщение` / `новых сообщения` / `новых сообщений` по числу."""
+    if n % 10 == 1 and n % 100 != 11:
+        return "новое сообщение"
+    if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14:
+        return "новых сообщения"
+    return "новых сообщений"
+
+
+def pill_label(new_replies: int, *, enter: bool) -> str:
+    """Подпись плашки: счётчик новых реплик агента (если есть) и хвост
+    `· клик` / `· клик или Enter` (`enter` — курсор в пустом поле)."""
+    tail = _TAIL_ENTER if enter else _TAIL_CLICK
+    if new_replies <= 0:
+        return f"↓ в конец · {tail}"
+    word = new_messages_word(new_replies)
+    return f"↓ {new_replies} {word} · {tail}"
 
 
 class _Overlay(Widget):

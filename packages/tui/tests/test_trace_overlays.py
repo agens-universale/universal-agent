@@ -463,3 +463,111 @@ async def test_selection_survives_queued_reply_mount(tmp_path):
         await pilot.mouse_up(offset=(box.x + 10, box.y + 6))
         await pilot.pause()
         assert _replies(scr)[-1].state == "queued"
+
+
+@pytest.mark.parametrize(
+    ("n", "word"),
+    [
+        (1, "новое сообщение"),
+        (2, "новых сообщения"),
+        (4, "новых сообщения"),
+        (5, "новых сообщений"),
+        (11, "новых сообщений"),
+        (12, "новых сообщений"),
+        (14, "новых сообщений"),
+        (20, "новых сообщений"),
+        (21, "новое сообщение"),
+        (22, "новых сообщения"),
+        (111, "новых сообщений"),
+    ],
+)
+def test_new_messages_plural(n, word):
+    from gc_tui.widgets.trace_overlays import pill_label
+
+    assert pill_label(n, enter=False) == f"↓ {n} {word} · клик"
+    assert pill_label(n, enter=True) == f"↓ {n} {word} · клик или Enter"
+
+
+def test_pill_label_without_new():
+    from gc_tui.widgets.trace_overlays import (
+        PILL_CLICK,
+        PILL_ENTER,
+        pill_label,
+    )
+
+    assert pill_label(0, enter=False) == PILL_CLICK
+    assert pill_label(0, enter=True) == PILL_ENTER
+
+
+@pytest.mark.asyncio
+async def test_pill_counts_new_agent_replies(tmp_path):
+    _write_task(tmp_path, "o20")
+    async with _app(tmp_path).run_test(size=(100, 30)) as pilot:
+        scr = await _tall(pilot, "o20")
+        _, pill = _overlays(scr)
+        _trace(scr).focus()
+        await _scroll(pilot, scr, 10)
+        assert pill.label == "↓ в конец · клик"
+        _agent(scr, "n1", 3)
+        _agent(scr, "n2", 3)
+        await pilot.pause()
+        assert pill.label == "↓ 2 новых сообщения · клик"
+        scr._render_record(
+            {
+                "payload": {
+                    "id": "c1",
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "x1",
+                            "type": "function",
+                            "function": {
+                                "name": "fs_read",
+                                "arguments": "{}",
+                            },
+                        }
+                    ],
+                }
+            },
+            live=True,
+        )
+        await pilot.pause()
+        assert pill.label == "↓ 2 новых сообщения · клик"
+        _agent(scr, "n3", 3)
+        await pilot.pause()
+        assert pill.label == "↓ 3 новых сообщения · клик"
+
+
+@pytest.mark.asyncio
+async def test_pill_counter_resets_at_bottom(tmp_path):
+    _write_task(tmp_path, "o21")
+    async with _app(tmp_path).run_test(size=(100, 30)) as pilot:
+        scr = await _tall(pilot, "o21")
+        _, pill = _overlays(scr)
+        _trace(scr).focus()
+        await _scroll(pilot, scr, 10)
+        _agent(scr, "n1", 3)
+        await pilot.pause()
+        assert pill.label == "↓ 1 новое сообщение · клик"
+        scr._scroll_to_bottom()
+        await pilot.pause()
+        await pilot.pause()
+        assert scr._stick_bottom is True
+        await _scroll(pilot, scr, 10)
+        assert pill.label == "↓ в конец · клик"
+
+
+@pytest.mark.asyncio
+async def test_pill_counter_resets_on_task_switch(tmp_path):
+    _write_task(tmp_path, "o22")
+    _write_task(tmp_path, "o23")
+    async with _app(tmp_path).run_test(size=(100, 30)) as pilot:
+        scr = await _tall(pilot, "o22")
+        await _scroll(pilot, scr, 10)
+        _agent(scr, "n1", 3)
+        await pilot.pause()
+        assert scr._new_replies == 1
+        scr.attach_active_task("o23")
+        await pilot.pause(0.3)
+        assert scr._new_replies == 0

@@ -203,10 +203,9 @@ from gc_tui.widgets.thinking_indicator import (
 )
 from gc_tui.widgets.tool_call_row import ToolCallRow
 from gc_tui.widgets.trace_overlays import (
-    PILL_CLICK,
-    PILL_ENTER,
     ScrollEndPill,
     StickyReply,
+    pill_label,
 )
 from gc_tui.widgets.trace_row import (
     CompactionBody,
@@ -515,6 +514,8 @@ class TraceScreen(Screen):
         # A1: правило показа ответов (дедуп, попытки turn_finish) — то же,
         # что у /copy.
         self._answer_flow = AnswerFlow()
+        # Новые реплики агента с ухода от низа — счётчик плашки «в конец».
+        self._new_replies = 0
         self._copy_seq = 0  # номер последнего /copy: старые итоги глохнут
         self._live_turn_tool_calls: int = (
             0  # живые call-события текущего хода (эвристика имени)
@@ -2146,6 +2147,7 @@ class TraceScreen(Screen):
         self._rendered_ids.clear()
         self._segment_starts.clear()
         self._answer_flow.new_turn()
+        self._new_replies = 0
         self._next_no = 1
         self._stick_bottom = (
             True  # новый/переключённый трейс → показываем низ (latest)
@@ -2550,6 +2552,8 @@ class TraceScreen(Screen):
         widgets = build_finish_widgets(close, event_no=ev.no)
         for w in widgets:
             self._trace_mount(w, scroll=False)
+        if close.body.strip() or close.note:
+            self._count_new_reply(following)
         if following:
             self._scroll_trace_end()
         if not ev.call_id:
@@ -2950,6 +2954,7 @@ class TraceScreen(Screen):
             return
         box = trace.content_region
         if self._stick_bottom:
+            self._new_replies = 0
             sticky.show(None, box)
             pill.show(None, box)
             return
@@ -2982,14 +2987,21 @@ class TraceScreen(Screen):
             ]
         return self._trace_replies_cache
 
+    def _count_new_reply(self, following: bool) -> None:
+        """Реплика агента смонтирована: не у низа — она новая для плашки."""
+        if following:
+            return
+        self._new_replies += 1
+        self._refresh_trace_overlays()
+
     def _end_pill_label(self) -> str:
         """`· клик или Enter` — только когда курсор в пустом поле ввода."""
         try:
             inp = self.query_one(_SEL_CMDINPUT, CommandTextArea)
         except NoMatches:
-            return PILL_CLICK
+            return pill_label(self._new_replies, enter=False)
         focused = self.focused is inp
-        return PILL_ENTER if focused and inp.is_blank() else PILL_CLICK
+        return pill_label(self._new_replies, enter=focused and inp.is_blank())
 
     def _on_focus_moved_overlays(self, _focused: Optional[Widget]) -> None:
         self._refresh_trace_overlays()
@@ -3471,6 +3483,7 @@ class TraceScreen(Screen):
                     ev.summary, event_no=ev.no
                 ):
                     self._trace_mount(w, scroll=False)
+                self._count_new_reply(following)
                 if following:
                     self._scroll_trace_end()
                 return
@@ -3499,6 +3512,7 @@ class TraceScreen(Screen):
             else:
                 for w in mounted_widgets:
                     self._trace_mount(w, scroll=False)
+            self._count_new_reply(following)
             if following:
                 self._scroll_trace_end()
             return
