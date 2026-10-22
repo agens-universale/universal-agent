@@ -448,21 +448,22 @@ class UserReplyContainer(_ImageLinksMixin, ClickModelMixin, Widget):
         """Маркер `› ` «тихой» реплики (решение 17)."""
         return Text(USER_PREFIX, style=Style(color=_QUIET_MARK))
 
-    def _quiet_body(self, first: Text) -> Text:
-        """Первая строка «тихой» реплики: `/имя ` + текст цветом
-        `QUIET_REPLY_INK`; плашки картинок сохраняют свои стили поверх."""
+    def _quiet_body(self, first: Text, ink: str = _QUIET_INK) -> Text:
+        """Первая строка «тихой» реплики: `/имя ` + текст цветом `ink`
+        (по умолчанию `QUIET_REPLY_INK`); плашки картинок сохраняют свои
+        стили поверх."""
         body = self._skill_head().append_text(first)
-        body.stylize_before(Style(color=_QUIET_INK))
+        body.stylize_before(Style(color=ink))
         return body
 
-    def quiet_line(self) -> Text:
-        """Реплика одной строкой «тихим» видом: `›` + `/имя` + текст. Её
-        первая строка в очереди собирается теми же `_quiet_lead` и
+    def quiet_line(self, ink: str = _QUIET_INK) -> Text:
+        """Реплика одной строкой «тихим» видом: `›` + `/имя` + текст цветом
+        `ink`. Её первая строка в очереди собирается теми же `_quiet_lead` и
         `_quiet_body`; липкая реплика над лентой рисует эту строку."""
         line = self._quiet_lead()
         line.no_wrap = True
         return line.append_text(
-            self._quiet_body(Text(" ".join(self._text.split())))
+            self._quiet_body(Text(" ".join(self._text.split())), ink)
         )
 
     def _repaint_images(self) -> None:

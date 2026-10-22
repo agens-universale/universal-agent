@@ -18,6 +18,7 @@ from textual.widget import Widget
 from textual.widgets import Static
 
 from gc_tui.messages import ScrollToEnd, ScrollToReply
+from gc_tui.palette import STICKY_REPLY_INK
 
 #: Подпись плашки: курсор не в поле или в поле есть текст.
 PILL_CLICK = "↓ в конец · клик"
@@ -114,7 +115,7 @@ class StickyReply(_Overlay):
     def render(self) -> Text:
         if self.reply is None:
             return Text()
-        line = self.reply.quiet_line()
+        line = self.reply.quiet_line(ink=STICKY_REPLY_INK)
         line.truncate(self.size.width, overflow="ellipsis")
         return line
 

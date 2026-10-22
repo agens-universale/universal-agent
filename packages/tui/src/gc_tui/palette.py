@@ -143,6 +143,9 @@ QUEUE_BG = _mix(BG, USER_BAND_BG, _QUEUE_SHARE)
 # В теме auto — от пересчитанного QUEUE_BG (_derived).
 QUIET_REPLY_INK = DIM
 QUIET_REPLY_MARK = MUTED
+# Текст липкой реплики бледнее, чем у реплики в очереди (решение 32):
+# подложка и маркер общие, ink — свой.
+STICKY_REPLY_INK = DEEP_DIM
 
 # Подсветка: фокус и выделение строки ленты, ховер накладок (липкая реплика
 # и плашка «в конец») — один фон, светлее USER_BAND_BG; текст не меняется

@@ -11,11 +11,11 @@ from gc_testkit.tui_support import tui_settings
 
 from gc_tui.palette import (
     ACCENT,
-    DIM,
     HIGHLIGHT_BG,
     INK,
     MUTED,
     QUEUE_BG,
+    STICKY_REPLY_INK,
     USER_BAND_BG,
 )
 
@@ -266,7 +266,7 @@ async def test_sticky_colours(tmp_path):
         marker, text = segments[0], segments[1]
         assert marker.text.strip() == "›"
         assert marker.style.color.name.lower() == MUTED.lower()
-        assert text.style.color.name.lower() == DIM.lower()
+        assert text.style.color.name.lower() == STICKY_REPLY_INK.lower()
         assert text.style.bgcolor.name.lower() == QUEUE_BG.lower()
         assert QUEUE_BG.lower() != USER_BAND_BG.lower()
 
@@ -292,7 +292,7 @@ async def test_sticky_skill_full_id_in_reply_colour(tmp_path):
         assert sticky.reply is reply
         segments = [s for s in sticky.render_line(0) if s.text.strip()]
         label = next(s for s in segments if "/p:coder" in s.text)
-        assert label.style.color.name.lower() == DIM.lower()
+        assert label.style.color.name.lower() == STICKY_REPLY_INK.lower()
         assert "/p:coder почини тест" in label.text
 
 
@@ -313,7 +313,7 @@ async def test_sticky_hover_lightens_background(tmp_path):
         assert sticky.rich_style.bgcolor.name.lower() == hover_bg
         assert hover_bg != USER_BAND_BG.lower()
         segments = [s for s in sticky.render_line(0) if s.text.strip()]
-        assert segments[1].style.color.name.lower() == DIM.lower()
+        assert segments[1].style.color.name.lower() == STICKY_REPLY_INK.lower()
         assert segments[1].style.bgcolor.name.lower() == hover_bg
 
 
@@ -854,15 +854,21 @@ async def test_quiet_reply_look_is_shared(tmp_path):
             color = text.get_style_at_offset(console, at).color
             return color.name.lower() if color else None
 
-        looks = [
-            (colour(queued_text, at), colour(sticky_text, at))
-            for at in range(len(expected))
-        ]
-        assert all(q == st for q, st in looks)
-        mark, ink = palette.QUIET_REPLY_MARK, palette.QUIET_REPLY_INK
-        assert colour(sticky_text, 0) == mark.lower()
-        assert colour(sticky_text, 3) == ink.lower()  # имя скилла
-        assert colour(sticky_text, len(expected) - 1) == ink.lower()
+        mark = palette.QUIET_REPLY_MARK
+        queued_ink = palette.QUIET_REPLY_INK
+        sticky_ink = palette.STICKY_REPLY_INK
+        last = len(expected) - 1
+        # общий построитель: маркер одинаков, текст и имя скилла —
+        # у очереди QUIET_REPLY_INK, у липкой STICKY_REPLY_INK
+        assert colour(queued_text, 0) == colour(sticky_text, 0) == mark.lower()
+        assert colour(queued_text, 3) == queued_ink.lower()
+        assert colour(queued_text, last) == queued_ink.lower()
+        assert colour(sticky_text, 3) == sticky_ink.lower()  # имя скилла
+        assert colour(sticky_text, last) == sticky_ink.lower()
+        bg = Color.parse(palette.QUEUE_BG).rgb
+        assert palette.contrast(
+            Color.parse(sticky_ink).rgb, bg
+        ) < palette.contrast(Color.parse(queued_ink).rgb, bg)
 
 
 @pytest.mark.asyncio
